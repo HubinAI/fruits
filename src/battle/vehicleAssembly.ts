@@ -181,7 +181,7 @@ export function createVehicle(
 
     const joint = createRevoluteJoint(
       body,
-      m.hardpoint.localPosition,
+      hpWorld,
       wheel,
       { x: 0, y: 0 },
     );

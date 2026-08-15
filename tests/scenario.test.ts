@@ -5,23 +5,11 @@ import { PhysWorld, createBox, Category } from '../src/physics/adapter';
 import { BattleOrchestrator } from '../src/battle/battleOrchestrator';
 import { createVehicle } from '../src/battle/vehicleAssembly';
 import { getPreset } from '../src/lab/presets';
+import { getScenario } from '../src/lab/scenarios';
 import type { BuildSnapshot } from '../src/core/types';
 
 const registry = createRegistry();
 const DT = 1000 / 60;
-
-function wheeledBuild(id: string, rearRadius: number, frontRadius: number): BuildSnapshot {
-  return {
-    id,
-    bodyDefId: 'boxBody',
-    quality: 1,
-    movements: [
-      { hardpointId: 'rear', defId: 'wheelStd', overrides: { radius: rearRadius } },
-      { hardpointId: 'front', defId: 'wheelStd', overrides: { radius: frontRadius } },
-    ],
-    functionals: [{ hardpointId: 'front', defId: 'ramHead' }],
-  };
-}
 
 /** 运行一次对撞，返回两车位移与最大角速度 */
 function runCollision(
@@ -63,13 +51,21 @@ describe('Scenario 确定性基础检查', () => {
     expect(r2.dxA).toBeGreaterThan(r2.dxB * 1.2);
   });
 
-  it('Scenario B：不同接触高度的碰撞产生明显 Z 轴角速度', () => {
-    const offset = runCollision(
-      wheeledBuild('oA', 10, 10),
-      wheeledBuild('oB', 30, 30),
-    );
-    // 偏心碰撞产生可感知的旋转（角速度，阈值对应 ~103°/s 的明显旋转）
-    expect(offset.maxAngVel).toBeGreaterThan(0.03);
+  it('Scenario B：偏心碰撞（高车身撞低车身上部）产生明显 Z 轴角速度', () => {
+    // 直接用 Lab 真实 Scenario（12 vs 26 轮径，B 车身高撞 A 车身上部）
+    const sc = getScenario('B')!;
+    const orch = new BattleOrchestrator(sc.buildA, sc.buildB, registry, sc.config);
+    let maxAngVel = 0;
+    for (let i = 0; i < 400; i++) {
+      orch.step(DT);
+      maxAngVel = Math.max(
+        maxAngVel,
+        Math.abs(orch.vehicleA.body.angularVelocity),
+        Math.abs(orch.vehicleB.body.angularVelocity),
+      );
+    }
+    // 偏心碰撞产生可感知的旋转（实测 ~0.027 rad/step ≈ 93°/s，阈值取 > ~68°/s 留余量）
+    expect(maxAngVel).toBeGreaterThan(0.02);
   });
 
   it('Scenario C：轮径 override 生效，前后轮底部高度差产生倾角（几何）', () => {
