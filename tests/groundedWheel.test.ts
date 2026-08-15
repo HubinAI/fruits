@@ -11,8 +11,8 @@ describe('Grounded Wheel 驱动', () => {
   it('双轮接地后，接地轮被驱动（角速度朝前进方向）', () => {
     const orch = new BattleOrchestrator(light, light, registry, {
       autoDrive: true,
-      spawnA: { x: 600, y: 640, angle: 0 },
-      spawnB: { x: 1400, y: 640, angle: Math.PI },
+      spawnA: { x: 600, y: 640, facing: 1 },
+      spawnB: { x: 1400, y: 640, facing: -1 },
     });
     for (let i = 0; i < 120; i++) orch.step(DT);
 
@@ -27,8 +27,9 @@ describe('Grounded Wheel 驱动', () => {
   it('全轮腾空时不产生凭空牵引（角速度保持 ~0）', () => {
     const orch = new BattleOrchestrator(light, light, registry, {
       autoDrive: true,
-      spawnA: { x: 600, y: 200, angle: 0 },
-      spawnB: { x: 1400, y: 640, angle: Math.PI },
+      settleToGround: false,
+      spawnA: { x: 600, y: 200, facing: 1 },
+      spawnB: { x: 1400, y: 640, facing: -1 },
     });
     // 前几帧 A 车仍在空中
     for (let i = 0; i < 5; i++) orch.step(DT);

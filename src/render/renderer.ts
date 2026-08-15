@@ -15,6 +15,12 @@ interface ScreenTransform {
   offsetY: number;
 }
 
+/**
+ * 镜头缩放（Camera / View framing，与 Physics 尺度分离）。
+ * 放大画面让车辆 / 碰撞 / 姿态成为主体；不改变物理世界与 Gravity 等 Foundation 尺度。
+ */
+const VIEW_ZOOM = 1.8;
+
 interface FloatingText {
   x: number;
   y: number;
@@ -44,7 +50,7 @@ export class Renderer {
       Math.min(
         this.canvas.width / arenaW,
         this.canvas.height / arenaH,
-      );
+      ) * VIEW_ZOOM;
     this.transform = {
       scale,
       offsetX: (this.canvas.width - arenaW * scale) / 2,

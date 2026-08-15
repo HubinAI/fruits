@@ -28,14 +28,14 @@ describe('Mass / COM 聚合', () => {
       resolveSnapshot(getPreset('frontHeavy')!.build(), registry),
       'A',
       { x: 0, y: 0 },
-      0,
+      1,
     );
     const rv = createVehicle(
       world,
       resolveSnapshot(getPreset('rearHeavy')!.build(), registry),
       'B',
       { x: 0, y: 0 },
-      0,
+      1,
     );
     // frontHeavy：ramHead(+60, 30) + testMass(+40, 60)，质量集中前部 → COM x > 0
     // rearHeavy：ramHead(+60, 30) + testMass(-60, 60)，后部有质量 → COM x 更小
@@ -49,14 +49,14 @@ describe('Mass / COM 聚合', () => {
       resolveSnapshot(getPreset('frontHeavy')!.build(), registry),
       'A',
       { x: 0, y: 0 },
-      0,
+      1,
     );
     const rear = createVehicle(
       new PhysWorld(),
       resolveSnapshot(getPreset('rearHeavy')!.build(), registry),
       'B',
       { x: 0, y: 0 },
-      0,
+      1,
     );
     expect(front.totalMass).toBe(rear.totalMass);
     expect(front.com.x).not.toBeCloseTo(rear.com.x, 1);

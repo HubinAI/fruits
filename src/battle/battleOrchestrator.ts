@@ -14,7 +14,7 @@
 import type { BuildSnapshot, ContentRegistry, TeamId } from '../core/types';
 import { resolveSnapshot } from '../core/buildSnapshot';
 import { PhysWorld } from '../physics/adapter';
-import { createVehicle, updateVehiclePhysics, type Vehicle } from './vehicleAssembly';
+import { createVehicle, updateVehiclePhysics, settleVehicleToRestPose, type Vehicle } from './vehicleAssembly';
 import { driveVehicle } from './movement';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG, type ImpactConfig } from './contactRouter';
 import { DamageResolver } from './damageResolver';
@@ -26,9 +26,14 @@ export interface BattleConfig {
   arena?: Partial<ArenaConfig>;
   /** 双方是否自动朝对方驱动（正式战斗为 true，部分 Lab 场景为 false） */
   autoDrive?: boolean;
-  /** 车辆初始位置与朝向（未提供时用对称默认） */
-  spawnA?: { x: number; y: number; angle?: number };
-  spawnB?: { x: number; y: number; angle?: number };
+  /**
+   * 出生后是否把整车下沉到「最低点接触地面」（无下落弹跳）。
+   * 消除「从空中落下→弹跳→混沌分叉」的 Reset 非确定性。空中出生场景（D-air）设 false。
+   */
+  settleToGround?: boolean;
+  /** 车辆初始位置与朝向（facing：1 朝右 / -1 朝左，镜像而非旋转） */
+  spawnA?: { x: number; y: number; facing?: 1 | -1 };
+  spawnB?: { x: number; y: number; facing?: 1 | -1 };
 }
 
 export interface BattleResult {
@@ -63,11 +68,20 @@ export class BattleOrchestrator {
     const resolvedA = resolveSnapshot(buildA, registry);
     const resolvedB = resolveSnapshot(buildB, registry);
 
-    const spawnA = config.spawnA ?? { x: 400, y: 640, angle: 0 };
-    const spawnB = config.spawnB ?? { x: 1200, y: 640, angle: Math.PI };
+    // 先建 Arena（需要 groundY 做落地沉降）
+    this.arena = new ArenaRuntime(this.world, config.arena);
 
-    this.vehicleA = createVehicle(this.world, resolvedA, 'A', spawnA, spawnA.angle ?? 0);
-    this.vehicleB = createVehicle(this.world, resolvedB, 'B', spawnB, spawnB.angle ?? Math.PI);
+    const spawnA = config.spawnA ?? { x: 400, y: 640, facing: 1 };
+    const spawnB = config.spawnB ?? { x: 1200, y: 640, facing: -1 };
+
+    this.vehicleA = createVehicle(this.world, resolvedA, 'A', { x: spawnA.x, y: spawnA.y }, spawnA.facing ?? 1);
+    this.vehicleB = createVehicle(this.world, resolvedB, 'B', { x: spawnB.x, y: spawnB.y }, spawnB.facing ?? -1);
+
+    // 落地沉降：默认按轮径差摆正静止姿态再贴地，消除初始下落导致的 Reset 非确定性。
+    if (config.settleToGround !== false) {
+      settleVehicleToRestPose(this.vehicleA, this.arena.config.groundY);
+      settleVehicleToRestPose(this.vehicleB, this.arena.config.groundY);
+    }
 
     this.damageResolver = new DamageResolver(this.bus);
     this.router = new ContactRouter(
@@ -75,8 +89,6 @@ export class BattleOrchestrator {
       this.damageResolver,
       { ...DEFAULT_IMPACT_CONFIG, ...config.impact },
     );
-
-    this.arena = new ArenaRuntime(this.world, config.arena);
 
     this.world.setCollisionHandlers({
       onStart: (ev) => this.router.handleContact(ev),
@@ -104,10 +116,10 @@ export class BattleOrchestrator {
     const steps = this.world.step(realDtMs, timeScale);
     this.time += realDtMs * timeScale;
 
-    // 车辆驱动（自动战斗：A 向右、B 向左）
+    // 车辆驱动（自动战斗：A 朝 +X、B 朝 -X，即各自 facing 方向）
     if (this.config.autoDrive !== false) {
-      driveVehicle(this.vehicleA, 1000 / 60, 1);
-      driveVehicle(this.vehicleB, 1000 / 60, -1);
+      driveVehicle(this.vehicleA, 1000 / 60, this.vehicleA.facing);
+      driveVehicle(this.vehicleB, 1000 / 60, this.vehicleB.facing);
     }
 
     // 每物理步聚合物理量

@@ -15,7 +15,7 @@ describe('Collision Owner 过滤', () => {
       resolveSnapshot(getPreset('lightVehicle')!.build(), registry),
       'A',
       { x: 0, y: 0 },
-      0,
+      1,
     );
     const allBodies = [v.body, ...v.wheels.map((w) => w.body), ...v.parts.map((p) => p.body)];
     const groups = new Set(allBodies.map((b) => b.collisionFilter.group));
@@ -32,14 +32,14 @@ describe('Collision Owner 过滤', () => {
       resolveSnapshot(getPreset('lightVehicle')!.build(), registry),
       'A',
       { x: 0, y: 0 },
-      0,
+      1,
     );
     const vb = createVehicle(
       world,
       resolveSnapshot(getPreset('lightVehicle')!.build(), registry),
       'B',
       { x: 10, y: 0 },
-      0,
+      1,
     );
     expect(va.body.collisionFilter.group).not.toBe(vb.body.collisionFilter.group);
     expect(va.body.collisionFilter.category).toBe(Category.VEHICLE_A);
@@ -53,14 +53,14 @@ describe('Collision Owner 过滤', () => {
       resolveSnapshot(getPreset('lightVehicle')!.build(), registry),
       'A',
       { x: 0, y: 0 },
-      0,
+      1,
     );
     const vb = createVehicle(
       world,
       resolveSnapshot(getPreset('lightVehicle')!.build(), registry),
       'B',
       { x: 10, y: 0 },
-      0,
+      1,
     );
     expect((va.body.collisionFilter.mask ?? 0) & Category.VEHICLE_A).toBe(0);
     expect((vb.body.collisionFilter.mask ?? 0) & Category.VEHICLE_B).toBe(0);

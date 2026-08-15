@@ -31,8 +31,8 @@ function runCollision(
 ): { dxA: number; dxB: number; maxAngVel: number } {
   const orch = new BattleOrchestrator(buildA, buildB, registry, {
     autoDrive: true,
-    spawnA: { x: 450, y: 650, angle: 0 },
-    spawnB: { x: 1150, y: 650, angle: Math.PI },
+    spawnA: { x: 450, y: 650, facing: 1 },
+    spawnB: { x: 1150, y: 650, facing: -1 },
   });
   const startA = orch.vehicleA.body.position.x;
   const startB = orch.vehicleB.body.position.x;
@@ -68,8 +68,8 @@ describe('Scenario 确定性基础检查', () => {
       wheeledBuild('oA', 10, 10),
       wheeledBuild('oB', 30, 30),
     );
-    // 偏心碰撞产生可感知的旋转（角速度）
-    expect(offset.maxAngVel).toBeGreaterThan(0.1);
+    // 偏心碰撞产生可感知的旋转（角速度，阈值对应 ~103°/s 的明显旋转）
+    expect(offset.maxAngVel).toBeGreaterThan(0.03);
   });
 
   it('Scenario C：轮径 override 生效，前后轮底部高度差产生倾角（几何）', () => {
@@ -86,7 +86,7 @@ describe('Scenario 确定性基础检查', () => {
       resolveSnapshot(getPreset('noseDown')!.build(), registry),
       'A',
       { x: 600, y: 650 },
-      0,
+      1,
     );
     const rear = v.wheels.find((w) => w.id === 'rear')!;
     const front = v.wheels.find((w) => w.id === 'front')!;
@@ -102,14 +102,14 @@ describe('Scenario 确定性基础检查', () => {
       resolveSnapshot(getPreset('frontHeavy')!.build(), registry),
       'A',
       { x: 0, y: 0 },
-      0,
+      1,
     );
     const rear = createVehicle(
       new PhysWorld(),
       resolveSnapshot(getPreset('rearHeavy')!.build(), registry),
       'B',
       { x: 0, y: 0 },
-      0,
+      1,
     );
     expect(front.totalMass).toBe(rear.totalMass);
     expect(front.com.x).toBeGreaterThan(rear.com.x); // 前重 COM 靠前

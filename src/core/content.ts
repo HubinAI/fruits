@@ -1,8 +1,11 @@
 /**
- * Content Registry：首版测试内容。
+ * Content Registry：Foundation 测试内容。
  *
  * 注意：这些是「验证 Foundation 成立的最小内容件」，
  * 不是正式水果 / Weapon / Gadget Content（第一阶段禁止批量实现）。
+ *
+ * 01B 调整：建立 3 种有碰撞意图的测试 Body（低前鼻 wedge / 厚实箱体 / 高身 compact），
+ * 让 Body 成为整车主要碰撞 / 视觉主体，不再全是「规则长方形 + 对称标准轮」的工程观感。
  */
 import type {
   BodyDef,
@@ -11,24 +14,79 @@ import type {
   WheelDef,
 } from './types';
 
-/** 基础车身：矩形车身，2 个 Movement Hardpoint + 3 个 Functional Hardpoint */
-const boxBody: BodyDef = {
-  id: 'boxBody',
-  name: '箱式车身',
+/**
+ * 楔形车身（低前鼻）：前端低鼻用于从下方顶入对手，前高后低。
+ * 简单凸四边形 Collider，视觉与 Collider 关键轮廓一致。
+ */
+const wedgeBody: BodyDef = {
+  id: 'wedgeBody',
+  name: '楔形车身',
   colliders: [
-    { shape: 'box', width: 120, height: 40, offset: { x: 0, y: 0 } },
+    {
+      shape: 'polygon',
+      vertices: [
+        { x: -70, y: -25 },
+        { x: -70, y: 25 },
+        { x: 50, y: 25 },
+        { x: 78, y: -8 },
+      ],
+      offset: { x: 0, y: 0 },
+    },
   ],
   baseMass: 50,
   hp: 1000,
   energyCapacity: 100,
   movementHardpoints: [
-    { id: 'rear', localPosition: { x: -40, y: 20 }, localRotation: 0 },
-    { id: 'front', localPosition: { x: 40, y: 20 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -52, y: 25 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 44, y: 25 }, localRotation: 0 },
   ],
   functionalHardpoints: [
-    { id: 'front', localPosition: { x: 60, y: 0 }, localRotation: 0 },
-    { id: 'frontMass', localPosition: { x: 40, y: -10 }, localRotation: 0 },
-    { id: 'rear', localPosition: { x: -60, y: 0 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 66, y: -6 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: -18, y: -25 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -58, y: 0 }, localRotation: 0 },
+  ],
+};
+
+/** 厚实箱体：对称长方体，是「平衡 Body」基准（用于轮径姿态演示）。 */
+const boxBody: BodyDef = {
+  id: 'boxBody',
+  name: '箱式车身',
+  colliders: [
+    { shape: 'box', width: 150, height: 55, offset: { x: 0, y: 0 } },
+  ],
+  baseMass: 50,
+  hp: 1000,
+  energyCapacity: 100,
+  movementHardpoints: [
+    { id: 'rear', localPosition: { x: -55, y: 27 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 55, y: 27 }, localRotation: 0 },
+  ],
+  functionalHardpoints: [
+    { id: 'front', localPosition: { x: 75, y: 0 }, localRotation: 0 },
+    { id: 'frontMass', localPosition: { x: 45, y: -10 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: 0, y: -27 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -75, y: 0 }, localRotation: 0 },
+  ],
+};
+
+/** 高身 compact：比宽更高的车体，重心偏高，碰撞姿态变化更明显。 */
+const tallBody: BodyDef = {
+  id: 'tallBody',
+  name: '高身车身',
+  colliders: [
+    { shape: 'box', width: 110, height: 80, offset: { x: 0, y: 0 } },
+  ],
+  baseMass: 55,
+  hp: 1100,
+  energyCapacity: 100,
+  movementHardpoints: [
+    { id: 'rear', localPosition: { x: -38, y: 40 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 38, y: 40 }, localRotation: 0 },
+  ],
+  functionalHardpoints: [
+    { id: 'front', localPosition: { x: 55, y: -10 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: 0, y: -40 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -55, y: -10 }, localRotation: 0 },
   ],
 };
 
@@ -83,7 +141,9 @@ const testMass: FunctionalPartDef = {
 export function createRegistry(): ContentRegistry {
   return {
     bodies: new Map([
+      [wedgeBody.id, wedgeBody],
       [boxBody.id, boxBody],
+      [tallBody.id, tallBody],
       [heavyBox.id, heavyBox],
     ]),
     movements: new Map([[wheelStd.id, wheelStd]]),

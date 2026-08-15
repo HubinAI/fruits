@@ -63,8 +63,8 @@ export const SCENARIOS: ScenarioDef[] = [
     buildB: presetBuild('heavyVehicle'),
     config: {
       autoDrive: true,
-      spawnA: { x: 450, y: 650, angle: 0 },
-      spawnB: { x: 1150, y: 650, angle: Math.PI },
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
     },
   },
   {
@@ -75,8 +75,8 @@ export const SCENARIOS: ScenarioDef[] = [
     buildB: wheeledBuild('highB', 26, 26),
     config: {
       autoDrive: true,
-      spawnA: { x: 500, y: 650, angle: 0 },
-      spawnB: { x: 1100, y: 640, angle: Math.PI },
+      spawnA: { x: 500, y: 650, facing: 1 },
+      spawnB: { x: 1100, y: 640, facing: -1 },
     },
   },
   {
@@ -87,8 +87,8 @@ export const SCENARIOS: ScenarioDef[] = [
     buildB: presetBuild('noseUp'),
     config: {
       autoDrive: false,
-      spawnA: { x: 500, y: 650, angle: 0 },
-      spawnB: { x: 1100, y: 650, angle: 0 },
+      spawnA: { x: 500, y: 650, facing: 1 },
+      spawnB: { x: 1100, y: 650, facing: 1 },
     },
   },
   {
@@ -99,8 +99,8 @@ export const SCENARIOS: ScenarioDef[] = [
     buildB: presetBuild('lightVehicle'),
     config: {
       autoDrive: true,
-      spawnA: { x: 600, y: 650, angle: 0 },
-      spawnB: { x: 1400, y: 650, angle: Math.PI },
+      spawnA: { x: 600, y: 650, facing: 1 },
+      spawnB: { x: 1400, y: 650, facing: -1 },
     },
   },
   {
@@ -111,8 +111,8 @@ export const SCENARIOS: ScenarioDef[] = [
     buildB: presetBuild('lightVehicle'),
     config: {
       autoDrive: true,
-      spawnA: { x: 600, y: 650, angle: 0 },
-      spawnB: { x: 1400, y: 650, angle: Math.PI },
+      spawnA: { x: 600, y: 650, facing: 1 },
+      spawnB: { x: 1400, y: 650, facing: -1 },
     },
   },
   {
@@ -123,8 +123,9 @@ export const SCENARIOS: ScenarioDef[] = [
     buildB: presetBuild('lightVehicle'),
     config: {
       autoDrive: true,
-      spawnA: { x: 600, y: 300, angle: 0 },
-      spawnB: { x: 1400, y: 650, angle: Math.PI },
+      settleToGround: false,
+      spawnA: { x: 600, y: 300, facing: 1 },
+      spawnB: { x: 1400, y: 650, facing: -1 },
     },
   },
   {
@@ -135,8 +136,8 @@ export const SCENARIOS: ScenarioDef[] = [
     buildB: presetBuild('rearHeavy'),
     config: {
       autoDrive: true,
-      spawnA: { x: 450, y: 650, angle: 0 },
-      spawnB: { x: 1150, y: 650, angle: Math.PI },
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
     },
   },
 ];

@@ -189,7 +189,9 @@ function buildPanel(
   };
 
   mk('Body', [
-    { v: 'boxBody', t: '箱式车身 (轻)' },
+    { v: 'wedgeBody', t: '楔形车身（低前鼻）' },
+    { v: 'boxBody', t: '箱式车身（厚实）' },
+    { v: 'tallBody', t: '高身车身（compact）' },
     { v: 'heavyBox', t: '重型车身' },
   ], () => e.body, (v) => (e.body = v));
 

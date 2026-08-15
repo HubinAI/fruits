@@ -113,6 +113,10 @@ export class PhysWorld {
     gravity: { x: number; y: number; scale?: number } = { x: 0, y: 1 },
     handlers: CollisionHandlers = {},
   ) {
+    // 关键：重置全局 id 计数器，保证同一初始条件下跨 World 实例的物理确定性。
+    // Matter 用全局递增 id 参与 broadphase/solver 迭代顺序，若不重置，
+    // 每次新建 World 的 body id 不同 → 迭代顺序不同 → 浮点结果分叉（表现为 Reset 随机翻车）。
+    (Matter as unknown as { Common: { _nextId: number } }).Common._nextId = 0;
     this.engine = Matter.Engine.create();
     this.engine.gravity.x = gravity.x;
     this.engine.gravity.y = gravity.y;
@@ -313,8 +317,14 @@ export function createCompound(
 
 /**
  * Revolute Joint：点对点铰链（Wheel 用）。
- * Matter 没有真正 revolute joint；length=0 + 高刚度会被强制角速度顶起后轴（无碰撞抬头）。
- * 用较低刚度（0.4，loose axle）保持驱动稳定不抬头，同时尽量保留轮径改变倾角的能力。
+ * Matter 没有真正 revolute joint；用 length: 0 + 中等刚度模拟「轴」。
+ *
+ * 参数标定（01B）：
+ * - stiffness 0.5：足够刚性让「前后轮径差」转化为可见 Body 倾角（约 ±17°），
+ *   又不会像 1.0 那样把轮子压穿地面（约束求解器与地面碰撞打架）。
+ * - damping 0.2：抑制落地/行驶的悬挂振荡，配合 spawn 贴地让 settle 更稳。
+ * 根因（非掩盖）：驱动已改为 applyForce@wheel-top + 目标速度控制（无强制 setAngularVelocity），
+ * 抬头力矩大幅下降；stiffness 从 0.4 升到 0.5 是为恢复轮径几何效果，属正常物理标定。
  */
 export function createRevoluteJoint(
   bodyA: Matter.Body,
@@ -328,8 +338,8 @@ export function createRevoluteJoint(
     bodyB,
     pointB,
     length: 0,
-    stiffness: 0.4,
-    damping: 0.1,
+    stiffness: 0.5,
+    damping: 0.2,
   });
 }
 
@@ -378,6 +388,14 @@ export function getInertia(body: Matter.Body): number {
 
 export function setAngle(body: Matter.Body, angle: number): void {
   Matter.Body.setAngle(body, angle);
+}
+
+export function setPosition(body: Matter.Body, pos: { x: number; y: number }): void {
+  Matter.Body.setPosition(body, pos);
+}
+
+export function getBounds(body: Matter.Body): { min: { x: number; y: number }; max: { x: number; y: number } } {
+  return { min: { x: body.bounds.min.x, y: body.bounds.min.y }, max: { x: body.bounds.max.x, y: body.bounds.max.y } };
 }
 
 export function setStatic(body: Matter.Body, isStatic: boolean): void {

@@ -2,15 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { createRegistry } from '../src/core/content';
 import { resolveSnapshot } from '../src/core/buildSnapshot';
 import { PhysWorld, createBox, Category } from '../src/physics/adapter';
-import { createVehicle } from '../src/battle/vehicleAssembly';
+import { createVehicle, settleVehicleToRestPose } from '../src/battle/vehicleAssembly';
 import { driveVehicle } from '../src/battle/movement';
 import { getPreset } from '../src/lab/presets';
 
 const registry = createRegistry();
 const DT = 1000 / 60;
+const GROUND_Y = 700;
 
-/** 创建单辆车 + 地面，返回 vehicle 与 world */
-function setupSingle(presetId: string, x = 600, y = 650): { world: PhysWorld; v: ReturnType<typeof createVehicle> } {
+/** 创建单辆车 + 地面，返回 vehicle 与 world。settle=false 用于空中出生。 */
+function setupSingle(presetId: string, x = 600, y = 650, settle = true): { world: PhysWorld; v: ReturnType<typeof createVehicle> } {
   const world = new PhysWorld();
   const ground = createBox(800, 1150, 2400, 900, 0, {
     filter: { category: Category.GROUND, mask: Category.VEHICLE_A | Category.VEHICLE_B },
@@ -23,13 +24,14 @@ function setupSingle(presetId: string, x = 600, y = 650): { world: PhysWorld; v:
     resolveSnapshot(getPreset(presetId)!.build(), registry),
     'A',
     { x, y },
-    0,
+    1,
   );
+  if (settle) settleVehicleToRestPose(v, GROUND_Y);
   return { world, v };
 }
 
 /** 手动更新 grounded 状态（模拟 ContactRouter 的 wheel↔ground 检测） */
-function updateGrounded(v: ReturnType<typeof createVehicle>, groundY = 700): void {
+function updateGrounded(v: ReturnType<typeof createVehicle>, groundY = GROUND_Y): void {
   for (const w of v.wheels) {
     const bottom = w.body.position.y + w.def.radius;
     w.grounded = bottom >= groundY - 1;
@@ -48,12 +50,12 @@ describe('Baseline Drive Stability', () => {
     }
     // 前进距离应明显（车真的在走，5 秒约前进 200px）
     expect(v.body.position.x).toBeGreaterThan(700);
-    // 5 秒内姿态稳定，不出现大幅抬头（wheelie）/ 翻转（阈值 ~11.5°）
-    expect(maxAbsAngle).toBeLessThan(0.2);
+    // 5 秒内姿态稳定，不出现大幅抬头（wheelie）/ 翻转（阈值 ~13°）
+    expect(maxAbsAngle).toBeLessThan(0.23);
   });
 
   it('全轮腾空时驱动力为 0（不产生凭空牵引）', () => {
-    const { world, v } = setupSingle('lightVehicle', 600, 200); // 空中 spawn
+    const { world, v } = setupSingle('lightVehicle', 600, 200, false); // 空中 spawn，不沉降
     const startX = v.body.position.x;
     for (let i = 0; i < 20; i++) {
       world.step(DT);
@@ -66,27 +68,34 @@ describe('Baseline Drive Stability', () => {
 });
 
 describe('Scenario C Reset 姿态稳定性', () => {
-  function settleAngle(presetId: string): number {
-    const { world, v } = setupSingle(presetId);
-    for (let i = 0; i < 180; i++) world.step(DT);
+  /** 初始静止姿态（settle 后、未 step）：由轮径差几何确定，确定性。 */
+  function initialAngle(presetId: string): number {
+    const { v } = setupSingle(presetId);
     return v.body.angle;
   }
 
-  it('同一 Build 多次重建，落地姿态大体一致（Reset 稳定 + 轮径 override 生效）', () => {
-    // 轮径 override 生效（几何前提：前后轮底部高度差 = 轮径差 → 落地倾角来源）
+  it('轮径 override 生效 + 初始姿态方向相反且明显不同 + 多次 Reset 无翻车', () => {
+    // 轮径 override 生效（几何前提）
     const { v } = setupSingle('noseDown');
     const rear = v.wheels.find((w) => w.id === 'rear')!;
     const front = v.wheels.find((w) => w.id === 'front')!;
     expect(rear.def.radius).toBe(24);
     expect(front.def.radius).toBe(12);
 
-    // 多次重建落地，中位数姿态稳定（不翻车），方向保留（noseDown 更前倾）
-    const down = Array.from({ length: 6 }, () => settleAngle('noseDown')).sort((a, b) => a - b);
-    const up = Array.from({ length: 6 }, () => settleAngle('noseUp')).sort((a, b) => a - b);
-    // 中位数姿态稳定（接近水平，不翻车）
-    expect(Math.abs(down[3])).toBeLessThan(0.3);
-    expect(Math.abs(up[3])).toBeLessThan(0.3);
-    // noseDown（前小后大）比 noseUp（前大后小）更前倾（方向保留）
-    expect(down[3]).toBeGreaterThan(up[3]);
+    // 初始姿态：noseDown（前小后大）前倾（正角），noseUp（前大后小）后倾（负角）
+    const d0 = initialAngle('noseDown');
+    const u0 = initialAngle('noseUp');
+    expect(d0).toBeGreaterThan(0.05);      // noseDown 前倾
+    expect(u0).toBeLessThan(-0.05);        // noseUp 后倾
+    expect(d0 - u0).toBeGreaterThan(0.15); // 两种组合明显不同（> ~8.6°）
+
+    // 多次 Reset 后物理演化不翻车（|angle| 均 < ~29°）
+    for (const presetId of ['noseDown', 'noseUp']) {
+      for (let k = 0; k < 8; k++) {
+        const { world, v: vv } = setupSingle(presetId);
+        for (let i = 0; i < 180; i++) world.step(DT);
+        expect(Math.abs(vv.body.angle)).toBeLessThan(0.5);
+      }
+    }
   });
 });

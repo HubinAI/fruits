@@ -87,7 +87,11 @@ const rearHeavy: Preset = {
   }),
 };
 
-/** 前倾：前小后大 */
+/**
+ * 前倾：前小后大。
+ * 刻意不装 ramHead（前重 30 会抵消轮径倾角、造成不对称），
+ * 用平衡 Body 纯粹演示「轮径差 → Body 姿态」。
+ */
 const noseDown: Preset = {
   id: 'noseDown',
   name: '前倾（前小后大）',
@@ -96,11 +100,11 @@ const noseDown: Preset = {
     bodyDefId: 'boxBody',
     quality: 1,
     movements: wheels(24, 12),
-    functionals: ram(),
+    functionals: [],
   }),
 };
 
-/** 后倾：前大后小 */
+/** 后倾：前大后小。同 noseDown，平衡 Body，无 ramHead。 */
 const noseUp: Preset = {
   id: 'noseUp',
   name: '后倾（前大后小）',
@@ -109,7 +113,7 @@ const noseUp: Preset = {
     bodyDefId: 'boxBody',
     quality: 1,
     movements: wheels(12, 24),
-    functionals: ram(),
+    functionals: [],
   }),
 };
 
