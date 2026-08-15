@@ -2,3 +2,11 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# 本地调试临时脚本
+tmp/
+
+# 环境变量 / 密钥（禁止上传）
+.env
+.env.*
+!.env.example
