@@ -311,7 +311,11 @@ export function createCompound(
 
 /* ---------------- Joint 工厂 ---------------- */
 
-/** Revolute Joint：点对点铰链（Wheel 用）。stiffness 用 Matter 默认 0.7 保持稳定，避免落地翻车。 */
+/**
+ * Revolute Joint：点对点铰链（Wheel 用）。
+ * Matter 没有真正 revolute joint；length=0 + 高刚度会被强制角速度顶起后轴（无碰撞抬头）。
+ * 用较低刚度（0.4，loose axle）保持驱动稳定不抬头，同时尽量保留轮径改变倾角的能力。
+ */
 export function createRevoluteJoint(
   bodyA: Matter.Body,
   pointA: { x: number; y: number },
@@ -324,7 +328,7 @@ export function createRevoluteJoint(
     bodyB,
     pointB,
     length: 0,
-    stiffness: 0.7,
+    stiffness: 0.4,
     damping: 0.1,
   });
 }
@@ -394,6 +398,19 @@ export function setVelocity(body: Matter.Body, vx: number, vy: number): void {
 
 export function applyForce(body: Matter.Body, fx: number, fy: number): void {
   Matter.Body.applyForce(body, body.position, { x: fx, y: fy });
+}
+
+/**
+ * 在指定世界坐标点施加力（用于把牵引力施加在接地接触点，而非 COM）。
+ * 力作用在地面高度时，绕任何地面支撑点的力臂为 0，不产生凭空抬头/低头力矩。
+ */
+export function applyForceAt(
+  body: Matter.Body,
+  point: { x: number; y: number },
+  fx: number,
+  fy: number,
+): void {
+  Matter.Body.applyForce(body, point, { x: fx, y: fy });
 }
 
 /** 设置 body 上挂载的元数据（Owner 等） */

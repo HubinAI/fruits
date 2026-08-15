@@ -19,8 +19,8 @@ describe('Grounded Wheel 驱动', () => {
     const grounded = orch.vehicleA.wheels.filter((w) => w.grounded);
     expect(grounded.length).toBeGreaterThan(0);
     for (const w of grounded) {
-      // A 车朝 +X 前进，轮子顺时针（正角速度）
-      expect(w.body.angularVelocity).toBeGreaterThan(0.5);
+      // A 车朝 +X 前进，轮子顺时针（正角速度），由顶部牵引力矩自然产生滚动
+      expect(w.body.angularVelocity).toBeGreaterThan(0.05);
     }
   });
 
