@@ -150,12 +150,18 @@ export class PlanckWorld {
     yPx: number,
     radiusPx: number,
     massKg: number,
+    options?: { friction?: number },
   ): BodyHandle {
     assertFinite(xPx, yPx, radiusPx, massKg);
     assertPositive(radiusPx, massKg);
+    const friction = options?.friction ?? 0;
+    assertFinite(friction);
+    if (friction < 0) {
+      throw new Error(`PlanckWorld: friction 必须 >= 0，收到 ${friction}`);
+    }
     const r = pxToM(radiusPx);
     const density = massKg / (Math.PI * r * r);
-    return this.createBody(planck.Circle(r), density, pxToM(xPx), pxToM(yPx));
+    return this.createBody(planck.Circle(r), density, pxToM(xPx), pxToM(yPx), friction);
   }
 
   /** 静态矩形地面（碰撞静止；同 handle 管理，可被查询但不参与动态求解） */
@@ -215,13 +221,14 @@ export class PlanckWorld {
     density: number,
     xM: number,
     yM: number,
+    friction = 0,
   ): BodyHandle {
     const native = this.world.createBody({
       type: 'dynamic',
       position: planck.Vec2(xM, yM),
     });
     // 不预设任何碰撞过滤：碰撞分组留给后续 Meta/Category 队列
-    native.createFixture(shape, { density, friction: 0 });
+    native.createFixture(shape, { density, friction });
     const handle = createBodyHandle();
     this.bodies.set(handle, native);
     this.bodyByNative.set(native, handle);
