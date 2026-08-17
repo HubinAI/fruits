@@ -192,12 +192,19 @@ export class ContactRouter {
     if (!part) return;
     if (part.def.category !== 'weapon') return;
 
-    // 只有行为能造成直接伤害的武器才处理
-    const baseDamage = (part.def.behaviorParams?.baseDamage as number) ?? 0;
+    // 只有行为能造成直接伤害的武器才处理（ram 用 baseDamage，hammer 用 damage）
+    const params = part.def.behaviorParams as Record<string, unknown> | undefined;
+    const baseDamage = ((params?.damage as number) ?? (params?.baseDamage as number) ?? 0);
     if (baseDamage <= 0) return;
 
-    // 武器伤害要求真实有效接触（相对速度达标，避免贴合时持续扣血）
-    if (ev.relativeVelocity < 2) return;
+    // 有效接触判定（避免贴合时持续扣血）：
+    // - hammer（挥击武器）：以 swinging 状态判断「挥击中」（Matter 软约束快速衰减角速度，不能可靠用 av 阈值）；
+    // - 其他接触武器（ram）：相对速度达标才算有效撞击。
+    if (part.def.behavior === 'hammer') {
+      if (part.swinging <= 0) return; // 未在挥击
+    } else if (ev.relativeVelocity < 2) {
+      return;
+    }
 
     this.damageResolver.applyDamage(defender, {
       source: attacker.team,

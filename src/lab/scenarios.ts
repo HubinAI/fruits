@@ -140,6 +140,42 @@ export const SCENARIOS: ScenarioDef[] = [
       spawnB: { x: 1150, y: 650, facing: -1 },
     },
   },
+  {
+    id: 'H1',
+    name: 'Hammer Hit',
+    description: '锤车正面命中近距离目标：真实挥击轨迹 + Direct Damage。',
+    buildA: presetBuild('hammerVehicle'),
+    buildB: presetBuild('heavyVehicle'),
+    config: {
+      autoDrive: false,
+      spawnA: { x: 500, y: 650, facing: 1 },
+      spawnB: { x: 690, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'H2',
+    name: 'Hammer Off-center',
+    description: '锤车偏心打在长 Body 上：中心 vs 偏心旋转结果肉眼不同。',
+    buildA: presetBuild('hammerVehicle'),
+    buildB: presetBuild('lightVehicle'),
+    config: {
+      autoDrive: false,
+      spawnA: { x: 480, y: 650, facing: 1 },
+      spawnB: { x: 700, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'H3',
+    name: 'Hammer Whiff',
+    description: '距离不对：锤真实挥空，不造成 Damage。',
+    buildA: presetBuild('hammerVehicle'),
+    buildB: presetBuild('heavyVehicle'),
+    config: {
+      autoDrive: false,
+      spawnA: { x: 500, y: 650, facing: 1 },
+      spawnB: { x: 800, y: 650, facing: -1 },
+    },
+  },
 ];
 
 export function getScenario(id: string): ScenarioDef | undefined {

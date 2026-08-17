@@ -19,6 +19,7 @@ import type {
   FunctionalHardpointDef,
   TeamId,
   WheelDef,
+  HammerParams,
 } from '../core/types';
 import {
   Category,
@@ -52,6 +53,8 @@ export interface PartRuntime {
   hardpoint: FunctionalHardpointDef;
   body: Body;
   joint: Constraint;
+  /** 挥击武器（hammer）挥击状态：>0 表示挥击中（剩余步数） */
+  swinging: number;
 }
 
 export interface Vehicle {
@@ -69,6 +72,8 @@ export interface Vehicle {
   totalMass: number;
   com: { x: number; y: number };
   inertia: number;
+  /** Weapon 冷却状态：partId（hardpoint id）→ 剩余冷却 ms */
+  weaponCooldowns: Map<string, number>;
 }
 
 /**
@@ -199,6 +204,62 @@ export function createVehicle(
 
   // 3. Functional Part（Fixed Mount，Weld）。facing=-1 时镜像硬点与碰撞轮廓。
   const parts: PartRuntime[] = resolved.functionals.map((f) => {
+    // Hammer：compound 臂（杆 + 锤头）+ Revolute Joint（绕 hardpoint 挥击）
+    if (f.def.behavior === 'hammer') {
+      const params = f.def.behaviorParams as unknown as HammerParams;
+      const hpLocal = {
+        x: facing * f.hardpoint.localPosition.x,
+        y: f.hardpoint.localPosition.y,
+      };
+      const hpWorldPos = { x: initialPos.x + hpLocal.x, y: initialPos.y + hpLocal.y };
+
+      // arm compound：锤头 circle 在本地 (0,0)，杆 box 从锤头向下延伸到 (0, armLength)
+      const armMeta = {
+        kind: 'vehicle' as const,
+        vehicleId: resolved.snapshot.id,
+        partId: `part:${f.install.hardpointId}`,
+        team,
+      };
+      const arm = createCompound(
+        hpWorldPos.x,
+        hpWorldPos.y,
+        [
+          { shape: 'circle', radius: params.headRadius, offset: { x: 0, y: 0 } },
+          { shape: 'box', width: 8, height: params.armLength, offset: { x: 0, y: params.armLength / 2 } },
+        ],
+        params.headMass + params.armMass,
+        { filter: { category: cat, mask, group }, friction: 0.4, restitution: 0.05, meta: armMeta },
+      );
+      setMeta(arm, armMeta);
+      world.add(arm);
+
+      // 挂点 = 杆末端 = arm 最底部 vertex（最大 y）；anchorOffset = 挂点相对 arm COM 的偏移
+      let maxY = -Infinity;
+      for (const p of arm.parts) for (const v of p.vertices) if (v.y > maxY) maxY = v.y;
+      const anchorOffset = { x: 0, y: maxY - arm.position.y };
+
+      // 关键：让「挂点」对齐 hardpoint（而非 COM）。createCompound 让 COM 对齐传入位置，
+      // 若不修正，锤头到 hardpoint 只有 ~10px（COM 偏移），挥击半径远小于臂长。
+      setPosition(arm, { x: hpWorldPos.x, y: hpWorldPos.y - anchorOffset.y });
+
+      // Revolute Joint：pointA = hardpoint（body 本地），pointB = 挂点（arm 本地）
+      // stiffness 用 createRevoluteJoint 默认 0.5：实测 0.5~0.7 稳定（dist=臂长、head 速度 ~3px/step），
+      // 0.9 以上会数值爆炸（arm 被甩飞，dist 涨到 ~200）。
+      // damping 降到 0.05：默认 0.2 会在一帧内把挥击角速度 0.35 吃掉（0.35→0.11→0.01），arm 挥不动。
+      const joint = createRevoluteJoint(body, hpLocal, arm, anchorOffset);
+      joint.damping = 0.05;
+      world.addConstraint(joint);
+
+      return {
+        id: f.install.hardpointId,
+        def: f.def,
+        hardpoint: f.hardpoint,
+        body: arm,
+        joint,
+        swinging: 0,
+      };
+    }
+
     const collider = facing === -1 ? mirrorCollider(f.def.collider) : f.def.collider;
     const hpWorld = {
       x: facing * f.hardpoint.localPosition.x,
@@ -257,6 +318,7 @@ export function createVehicle(
       hardpoint: f.hardpoint,
       body: partBody,
       joint,
+      swinging: 0,
     };
   });
 
@@ -273,6 +335,11 @@ export function createVehicle(
     totalMass: resolved.totalMass,
     com: { x: initialPos.x, y: initialPos.y },
     inertia: 0,
+    weaponCooldowns: new Map(
+      parts
+        .filter((p) => p.def.behavior === 'hammer')
+        .map((p) => [p.id, ((p.def.behaviorParams as { cooldown?: number } | undefined)?.cooldown ?? 0)]),
+    ),
   };
 
   updateVehiclePhysics(vehicle);

@@ -137,6 +137,31 @@ const testMass: FunctionalPartDef = {
   behavior: 'none',
 };
 
+/**
+ * Heavy Hammer（重锤）：Swing Weapon，第一个 Revolute Joint 武器。
+ * 锤头真实 Mass 绕 Hardpoint 挥击，命中走正式 Contact → Damage Resolver。
+ * 无自动瞄准、无连击、无 AOE；允许挥空。
+ * collider 字段在此仅作占位（hammer 实际用 compound「杆 + 锤头」装配，见 vehicleAssembly）。
+ */
+const hammer: FunctionalPartDef = {
+  id: 'hammer',
+  name: '重锤',
+  category: 'weapon',
+  mass: 0, // 实际质量由 headMass + armMass 决定（compound 装配）
+  energy: 25,
+  collider: { shape: 'circle', radius: 15, offset: { x: 0, y: 0 } },
+  behavior: 'hammer',
+  behaviorParams: {
+    cooldown: 1800,
+    armLength: 55,
+    headRadius: 15,
+    headMass: 30,
+    armMass: 5,
+    swingSpeed: 2.0,
+    damage: 70,
+  } satisfies import('./types').HammerParams,
+};
+
 /** 构建 Content Registry */
 export function createRegistry(): ContentRegistry {
   return {
@@ -149,6 +174,7 @@ export function createRegistry(): ContentRegistry {
     movements: new Map([[wheelStd.id, wheelStd]]),
     functionals: new Map([
       [ramHead.id, ramHead],
+      [hammer.id, hammer],
       [testMass.id, testMass],
     ]),
   };

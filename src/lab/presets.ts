@@ -129,3 +129,20 @@ export const PRESETS: Preset[] = [
 export function getPreset(id: string): Preset | undefined {
   return PRESETS.find((p) => p.id === id);
 }
+
+/* ---------- Hammer 相关 Preset（Queue 03） ---------- */
+
+/** 锤车：正常车身 + 重锤（front） */
+const hammerVehicle: Preset = {
+  id: 'hammerVehicle',
+  name: '锤车',
+  build: () => ({
+    id: 'hammerVehicle',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: wheels(),
+    functionals: [{ hardpointId: 'front', defId: 'hammer' }],
+  }),
+};
+
+PRESETS.push(hammerVehicle);

@@ -16,6 +16,7 @@ import { resolveSnapshot } from '../core/buildSnapshot';
 import { PhysWorld } from '../physics/adapter';
 import { createVehicle, updateVehiclePhysics, settleVehicleToRestPose, type Vehicle } from './vehicleAssembly';
 import { driveVehicle } from './movement';
+import { updateHammerSwing } from './weaponHammer';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG, type ImpactConfig } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
@@ -109,18 +110,23 @@ export class BattleOrchestrator {
     return this.time;
   }
 
-  /** 推进一帧：固定物理步进 + 驱动 + 阶段 + 死亡检测 */
+  /** 推进一帧：固定物理步进 + 驱动 + 挥击 + 阶段 + 死亡检测 */
   step(realDtMs: number, timeScale = 1): void {
     if (this._result) return;
 
     const steps = this.world.step(realDtMs, timeScale);
-    this.time += realDtMs * timeScale;
+    const dtMs = realDtMs * timeScale;
+    this.time += dtMs;
 
     // 车辆驱动（自动战斗：A 朝 +X、B 朝 -X，即各自 facing 方向）
     if (this.config.autoDrive !== false) {
       driveVehicle(this.vehicleA, 1000 / 60, this.vehicleA.facing);
       driveVehicle(this.vehicleB, 1000 / 60, this.vehicleB.facing);
     }
+
+    // Hammer 挥击（冷却到点施加角速度）
+    updateHammerSwing(this.vehicleA, dtMs);
+    updateHammerSwing(this.vehicleB, dtMs);
 
     // 每物理步聚合物理量
     for (let i = 0; i < steps; i++) {
@@ -130,7 +136,7 @@ export class BattleOrchestrator {
     updateVehiclePhysics(this.vehicleA);
     updateVehiclePhysics(this.vehicleB);
 
-    this.arena.update(realDtMs * timeScale);
+    this.arena.update(dtMs);
 
     this.detectEnd();
   }

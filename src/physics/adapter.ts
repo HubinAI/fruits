@@ -120,9 +120,12 @@ export class PhysWorld {
     this.engine = Matter.Engine.create();
     this.engine.gravity.x = gravity.x;
     this.engine.gravity.y = gravity.y;
-    // 默认 Matter gravity.scale=0.001 过小，轮子摩擦牵引力不足以推动车身；
-    // 提升到 0.01 使 Ground Contact 的摩擦前进力足以真实驱动整车。
-    this.engine.gravity.scale = gravity.scale ?? 0.01;
+    // Gravity 标定（Queue 02 校正，Queue 03 同步）：
+    // Matter 用 Verlet 积分 `velocity += (force/mass) * deltaTime²`（deltaTime²=277.8），
+    // gravity.scale 会被放大 277.8 倍成为实际加速度（px/step²）。
+    // 0.01 会让 Projectile / Hammer head 快速下坠（~2.78px/step²），弹道/挥击轨迹失真。
+    // 降到 0.0001：车仍正常接地驱动，抛射体与旋转臂获得合理轨迹。
+    this.engine.gravity.scale = gravity.scale ?? 0.0001;
     this.handlers = handlers;
 
     Matter.Events.on(this.engine, 'collisionStart', (e) =>
@@ -310,6 +313,14 @@ export function createCompound(
   // Matter.Body.create 对 compound 会按 parts 的 COM 重算 position，
   // 覆盖传入的 position；因此必须显式 setPosition。
   Matter.Body.setPosition(body, { x, y });
+  // 关键：Matter 的 compound sub-part 不继承 parent 的 plugin。
+  // 碰撞事件里 pair.bodyA/bodyB 是 sub-part（plugin 为空），导致 Contact Router 读不到 Owner meta。
+  // 因此把 opts.meta 同步到所有 sub-parts（parent 由 setMeta 另行设置）。
+  if (opts?.meta) {
+    for (const part of body.parts) {
+      (part as unknown as { plugin: Record<string, unknown> }).plugin = opts.meta;
+    }
+  }
   return body;
 }
 

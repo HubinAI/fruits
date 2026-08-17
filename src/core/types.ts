@@ -167,3 +167,25 @@ export interface OwnerTag {
   partId?: string;
   team?: TeamId;
 }
+
+/**
+ * Heavy Hammer（挥击武器）行为参数。
+ * Hammer 用 Revolute Joint 挂 Hardpoint，锤头真实 Mass 绕轴挥击，
+ * Damage 与物理 Impulse 独立。
+ */
+export interface HammerParams {
+  /** 冷却（ms） */
+  cooldown: number;
+  /** 臂长：锤头中心到挂点（hardpoint）的距离 */
+  armLength: number;
+  /** 锤头半径（Collider） */
+  headRadius: number;
+  /** 锤头质量 */
+  headMass: number;
+  /** 杆质量（次要，影响反作用与惯性） */
+  armMass: number;
+  /** 挥击角速度（rad/step，开火时施加到臂） */
+  swingSpeed: number;
+  /** 单次 Direct Damage */
+  damage: number;
+}
