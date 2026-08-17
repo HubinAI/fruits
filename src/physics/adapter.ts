@@ -158,14 +158,35 @@ export class PhysWorld {
     for (const pair of e.pairs) {
       const normal = pair.collision.normal ?? { x: 0, y: 1 };
       const support = pair.collision.supports?.[0] ?? { x: 0, y: 0 };
-      const relVel = pair.bodyA.velocity.x - pair.bodyB.velocity.x;
-      const relVelY = pair.bodyA.velocity.y - pair.bodyB.velocity.y;
+      // 接触点速度必须用父刚体（collision.parentA / parentB）而非 sub-part：
+      // pair.bodyA/bodyB 是 compound 的 sub-part，其 velocity 字段恒为 stale 0
+      // （碰撞求解器只改 positionPrev、不回写 sub-part velocity，见 F-01 根因），
+      // 直接读 sub-part 会让 relativeVelocity 恒接近 0（F-02D 实测三场景均为 0）。
+      // 旋转接触还必须计入 ω×r：vPoint = vCOM + ω×r，r = contactPoint − COM
+      // （F-02D 实测：ω=0.373 时仅用 COM 报 0.81，含旋转的接触点公式报 26.39，差 32 倍）。
+      const contactPoint = { x: support.x, y: support.y };
+      const rA = {
+        x: contactPoint.x - pair.collision.parentA.position.x,
+        y: contactPoint.y - pair.collision.parentA.position.y,
+      };
+      const rB = {
+        x: contactPoint.x - pair.collision.parentB.position.x,
+        y: contactPoint.y - pair.collision.parentB.position.y,
+      };
+      const vPointA = {
+        x: pair.collision.parentA.velocity.x - pair.collision.parentA.angularVelocity * rA.y,
+        y: pair.collision.parentA.velocity.y + pair.collision.parentA.angularVelocity * rA.x,
+      };
+      const vPointB = {
+        x: pair.collision.parentB.velocity.x - pair.collision.parentB.angularVelocity * rB.y,
+        y: pair.collision.parentB.velocity.y + pair.collision.parentB.angularVelocity * rB.x,
+      };
       // 沿法线（A→B）的相对速度：正值 = 相互靠近
-      const relativeVelocity = -(relVel * normal.x + relVelY * normal.y);
+      const relativeVelocity = -((vPointA.x - vPointB.x) * normal.x + (vPointA.y - vPointB.y) * normal.y);
       cb({
-        bodyA: pair.bodyA,
+        bodyA: pair.bodyA, // 保持原 sub-part：Meta / Owner / Part 路由语义不变
         bodyB: pair.bodyB,
-        contactPoint: { x: support.x, y: support.y },
+        contactPoint,
         normal: { x: normal.x, y: normal.y },
         relativeVelocity,
         phase,
