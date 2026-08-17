@@ -13,7 +13,7 @@
  */
 import type { BuildSnapshot, ContentRegistry, TeamId } from '../core/types';
 import { resolveSnapshot } from '../core/buildSnapshot';
-import { PhysWorld } from '../physics/adapter';
+import { PhysWorld, FIXED_DT } from '../physics/adapter';
 import { createVehicle, updateVehiclePhysics, settleVehicleToRestPose, type Vehicle } from './vehicleAssembly';
 import { driveVehicle } from './movement';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG, type ImpactConfig } from './contactRouter';
@@ -109,28 +109,34 @@ export class BattleOrchestrator {
     return this.time;
   }
 
-  /** 推进一帧：固定物理步进 + 驱动 + 阶段 + 死亡检测 */
+  /**
+   * 推进一帧：固定物理步进 + 驱动 + 阶段 + 死亡检测。
+   *
+   * 关键（Canonical Foundation）：
+   * - Drive 及未来 Behavior 必须在每个 FIXED_DT 的 Engine.update 之前执行（通过 onBeforeStep），
+   *   使驱动力在每个物理步内被引擎消费，保证 30FPS / 60FPS / 轻微卡帧下结果帧率无关。
+   * - 战斗时间按「实际执行的 Fixed Steps」推进（steps * FIXED_DT），不按渲染帧 realDtMs 直接累计，
+   *   避免渲染帧抖动导致战斗计时漂移。
+   */
   step(realDtMs: number, timeScale = 1): void {
     if (this._result) return;
 
-    const steps = this.world.step(realDtMs, timeScale);
-    this.time += realDtMs * timeScale;
+    const steps = this.world.step(realDtMs, timeScale, () => {
+      // 车辆驱动（自动战斗：A 朝 +X、B 朝 -X，即各自 facing 方向）
+      if (this.config.autoDrive !== false) {
+        driveVehicle(this.vehicleA, FIXED_DT, this.vehicleA.facing);
+        driveVehicle(this.vehicleB, FIXED_DT, this.vehicleB.facing);
+      }
+      // 未来 Behavior（Weapon / Gadget 状态机）在此插入：每个物理步之前执行。
+    });
 
-    // 车辆驱动（自动战斗：A 朝 +X、B 朝 -X，即各自 facing 方向）
-    if (this.config.autoDrive !== false) {
-      driveVehicle(this.vehicleA, 1000 / 60, this.vehicleA.facing);
-      driveVehicle(this.vehicleB, 1000 / 60, this.vehicleB.facing);
-    }
+    this.time += steps * FIXED_DT;
 
-    // 每物理步聚合物理量
-    for (let i = 0; i < steps; i++) {
-      updateVehiclePhysics(this.vehicleA);
-      updateVehiclePhysics(this.vehicleB);
-    }
+    // 每帧聚合一次物理量（COM / Mass / Inertia），供 Renderer 与 Lab 消费
     updateVehiclePhysics(this.vehicleA);
     updateVehiclePhysics(this.vehicleB);
 
-    this.arena.update(realDtMs * timeScale);
+    this.arena.update(steps * FIXED_DT);
 
     this.detectEnd();
   }

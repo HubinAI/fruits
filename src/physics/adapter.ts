@@ -120,9 +120,14 @@ export class PhysWorld {
     this.engine = Matter.Engine.create();
     this.engine.gravity.x = gravity.x;
     this.engine.gravity.y = gravity.y;
-    // 默认 Matter gravity.scale=0.001 过小，轮子摩擦牵引力不足以推动车身；
-    // 提升到 0.01 使 Ground Contact 的摩擦前进力足以真实驱动整车。
-    this.engine.gravity.scale = gravity.scale ?? 0.01;
+    // Gravity 标定（Canonical Foundation，对齐 Queue 02/03 已收敛值）：
+    // Matter 用 Verlet 积分 `velocity += (force/mass) * deltaTime²`，deltaTime = FIXED_DT = 1000/60，
+    // 因此 gravity.scale 会被放大 FIXED_DT² ≈ 277.8 倍成为实际加速度（px/step²）。
+    // 0.01 → 每步 2.78px 加速度，抛射体约 5 步即坠地，弹道/挥击轨迹完全失真；
+    // 更严重的是：Matter 的碰撞求解器只改 positionPrev、不回写 body.velocity，
+    // 静止/匀速车 body.velocity.y 会因重力项单调累积到终速 ~278（实测 600 步后 vy≈284）。
+    // 0.0001 → 每步 0.0278px，车仍正常接地驱动，抛射体获得合理平射弹道，vy 收敛到 <5。
+    this.engine.gravity.scale = gravity.scale ?? 0.0001;
     this.handlers = handlers;
 
     Matter.Events.on(this.engine, 'collisionStart', (e) =>
@@ -185,11 +190,15 @@ export class PhysWorld {
    * 固定步进推进。
    * @param realDtMs 真实帧间隔（ms）
    * @param timeScale 时间缩放（1 / 0.5 / 0.25）
+   * @param onBeforeStep 每个 FIXED_DT 物理步「Engine.update 之前」执行的回调。
+   *   用于把 Drive / Behavior 施加到 body.force（引擎在本次 update 内消费），
+   *   保证 30FPS / 60FPS / 轻微卡帧下每个物理步的驱动力一致（帧率无关）。
    */
-  step(realDtMs: number, timeScale = 1): number {
+  step(realDtMs: number, timeScale = 1, onBeforeStep?: () => void): number {
     this.acc += realDtMs * timeScale;
     let steps = 0;
     while (this.acc >= FIXED_DT) {
+      onBeforeStep?.();
       Matter.Engine.update(this.engine, FIXED_DT);
       this.acc -= FIXED_DT;
       steps++;
@@ -431,9 +440,21 @@ export function applyForceAt(
   Matter.Body.applyForce(body, point, { x: fx, y: fy });
 }
 
-/** 设置 body 上挂载的元数据（Owner 等） */
+/**
+ * 设置 body 上挂载的元数据（Owner 等）。
+ * 关键：Matter 的 compound sub-part 不继承 parent 的 plugin；且碰撞事件里
+ * pair.bodyA/bodyB 是 sub-part（不是 parent），Contact Router 通过 getMeta 读到的正是 sub-part。
+ * 因此必须把 meta 同步到所有 sub-parts，否则「车身被撞 / 撞到车身」这类 compound 接触
+ * 会读不到 Owner，导致 Impact / Direct Weapon Damage 全部失效。
+ * 单 body（wheel / part / ground 等）的 parts === [self]，同步是幂等的。
+ */
 export function setMeta(body: Matter.Body, meta: Record<string, unknown>): void {
   (body as unknown as { plugin: Record<string, unknown> }).plugin = meta;
+  for (const part of body.parts) {
+    if (part !== body) {
+      (part as unknown as { plugin: Record<string, unknown> }).plugin = meta;
+    }
+  }
 }
 
 export function getMeta(body: Matter.Body): Record<string, unknown> {
