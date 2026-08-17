@@ -1,15 +1,16 @@
 /**
- * Planck 最小适配内核（Queue F-02M-A3）—— 不向上层泄漏 Planck 类型的
- * 最小 World / Body / Revolute API。仅验证位置、速度、质量、固定步进和铰链。
+ * Planck 最小适配内核（Queue F-02M-A3 / A4 / A5）——
+ * 不向上层泄漏 Planck 类型的最小 World / Body / Revolute API；
+ * 支持可配置重力、静态地面、最小 contact 事件桥接。
  *
  * 约束：
  * - `import * as planck from 'planck'` 只允许存在于本文件。
- * - 对外只导出 BodyHandle / JointHandle / PlanckWorld；Handle 为不透明对象，
- *   不得导出、返回或暴露 planck.Body/Joint/World。
- * - 每个 PlanckWorld 用私有 Map 管理 handle→native；传入其他 world 的 handle 抛错。
- * - World 固定零重力。
+ * - 对外只导出 BodyHandle / JointHandle / ContactBridgeEvent / PlanckWorld；
+ *   Handle 为不透明对象，不得导出、返回或暴露 planck.Body/Joint/World。
+ * - 每个 PlanckWorld 用私有 Map 管理 handle↔native；传入其他 world 的 handle 抛错。
  * - 全部换算只调用 units.ts；不翻转 Y 轴。
- * - 不实现重力、碰撞事件、Meta、force、torque、impulse（留待后续队列）。
+ * - 不实现 gameplay Meta、damage、relativeVelocity 伤害判定、collision category
+ *   复杂规则、force、torque、impulse（留待后续队列）。
  * - 不提供任何 native escape hatch。
  * - 非有限数、非正尺寸/半径/质量立即抛错。
  */
@@ -38,6 +39,17 @@ export interface JointHandle {
   readonly [JOINT_HANDLE_KEY]: void;
 }
 
+/**
+ * 最小接触事件（A5）：只携带 begin/end 与双方不透明 handle。
+ * bodyA/bodyB 已按内部创建序号规范化排序——同一对物体的 begin/end
+ * 事件顺序一致，与碰撞检测中的 fixture 顺序无关。
+ */
+export interface ContactBridgeEvent {
+  phase: 'begin' | 'end';
+  bodyA: BodyHandle;
+  bodyB: BodyHandle;
+}
+
 function createBodyHandle(): BodyHandle {
   return Object.freeze({ [BODY_HANDLE_KEY]: undefined }) as BodyHandle;
 }
@@ -62,14 +74,57 @@ function assertPositive(...values: number[]): void {
   }
 }
 
-/** 零重力 Planck 世界（游戏层单位） */
+/**
+ * Planck 世界（游戏层单位；默认零重力，可配置重力）。
+ *
+ * 重力参数使用 Planck 坐标（m/s²，y 向上：负 y = 下落）。
+ * 若未来需要「游戏层语义」的重力（+y 向下），须在动力标定队列中
+ * 定义加速度换算（units.ts 暂不新增）。
+ */
 export class PlanckWorld {
   private readonly world: planck.World;
   private readonly bodies = new Map<BodyHandle, planck.Body>();
   private readonly joints = new Map<JointHandle, planck.Joint>();
+  private readonly bodyByNative = new Map<planck.Body, BodyHandle>();
+  private readonly bodySeq = new Map<BodyHandle, number>();
+  private nextSeq = 1;
+  private contactListener: ((e: ContactBridgeEvent) => void) | null = null;
 
-  constructor() {
-    this.world = new planck.World({ gravity: planck.Vec2(0, 0) });
+  constructor(gravityMps2: { x: number; y: number } = { x: 0, y: 0 }) {
+    assertFinite(gravityMps2.x, gravityMps2.y);
+    this.world = new planck.World({ gravity: planck.Vec2(gravityMps2.x, gravityMps2.y) });
+
+    // 最小 contact 桥接：不暴露 native contact/fixture/body
+    this.world.on('begin-contact', (contact) => {
+      this.emitContact('begin', contact);
+    });
+    this.world.on('end-contact', (contact) => {
+      this.emitContact('end', contact);
+    });
+  }
+
+  /**
+   * 设置接触事件监听（A5）。同一对物体的 begin/end 通过内部序号规范化
+   * bodyA/bodyB 顺序，与碰撞检测的 fixture 顺序无关。
+   */
+  setContactListener(cb: ((e: ContactBridgeEvent) => void) | null): void {
+    this.contactListener = cb;
+  }
+
+  private emitContact(phase: 'begin' | 'end', contact: planck.Contact): void {
+    if (!this.contactListener) return;
+    const nativeA = contact.getFixtureA().getBody();
+    const nativeB = contact.getFixtureB().getBody();
+    const ha = this.bodyByNative.get(nativeA);
+    const hb = this.bodyByNative.get(nativeB);
+    if (!ha || !hb) return;
+    const [a, b] = this.seqOf(ha) <= this.seqOf(hb) ? [ha, hb] : [hb, ha];
+    this.contactListener({ phase, bodyA: a, bodyB: b });
+  }
+
+  private seqOf(h: BodyHandle): number {
+    const s = this.bodySeq.get(h);
+    return s ?? 0;
   }
 
   // ---------- 创建 ----------
@@ -101,6 +156,29 @@ export class PlanckWorld {
     const r = pxToM(radiusPx);
     const density = massKg / (Math.PI * r * r);
     return this.createBody(planck.Circle(r), density, pxToM(xPx), pxToM(yPx));
+  }
+
+  /** 静态矩形地面（碰撞静止；同 handle 管理，可被查询但不参与动态求解） */
+  createStaticGround(
+    xPx: number,
+    yPx: number,
+    widthPx: number,
+    heightPx: number,
+  ): BodyHandle {
+    assertFinite(xPx, yPx, widthPx, heightPx);
+    assertPositive(widthPx, heightPx);
+    const hw = pxToM(widthPx / 2);
+    const hh = pxToM(heightPx / 2);
+    const native = this.world.createBody({
+      type: 'static',
+      position: planck.Vec2(pxToM(xPx), pxToM(yPx)),
+    });
+    native.createFixture(planck.Box(hw, hh), { friction: 1 });
+    const handle = createBodyHandle();
+    this.bodies.set(handle, native);
+    this.bodyByNative.set(native, handle);
+    this.bodySeq.set(handle, this.nextSeq++);
+    return handle;
   }
 
   createRevoluteJoint(
@@ -146,6 +224,8 @@ export class PlanckWorld {
     native.createFixture(shape, { density, friction: 0 });
     const handle = createBodyHandle();
     this.bodies.set(handle, native);
+    this.bodyByNative.set(native, handle);
+    this.bodySeq.set(handle, this.nextSeq++);
     return handle;
   }
 
