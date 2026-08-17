@@ -77,9 +77,9 @@ function assertPositive(...values: number[]): void {
 /**
  * Planck 世界（游戏层单位；默认零重力，可配置重力）。
  *
- * 重力参数使用 Planck 坐标（m/s²，y 向上：负 y = 下落）。
- * 若未来需要「游戏层语义」的重力（+y 向下），须在动力标定队列中
- * 定义加速度换算（units.ts 暂不新增）。
+ * 重力参数沿用项目坐标语义（m/s²，Y 向下、不翻转）：
+ * gravityMps2.y > 0 表示向下重力。
+ * （Planck 本身不强制屏幕方向，本适配层沿用项目 Y-down 约定。）
  */
 export class PlanckWorld {
   private readonly world: planck.World;
