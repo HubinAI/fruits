@@ -23,6 +23,10 @@ function ram(): BuildSnapshot['functionals'] {
   return [{ hardpointId: 'front', defId: 'ramHead' }];
 }
 
+function cannonAt(hardpointId = 'front', defId = 'cannon'): BuildSnapshot['functionals'] {
+  return [{ hardpointId, defId }];
+}
+
 export interface Preset {
   id: string;
   name: string;
@@ -129,3 +133,60 @@ export const PRESETS: Preset[] = [
 export function getPreset(id: string): Preset | undefined {
   return PRESETS.find((p) => p.id === id);
 }
+
+/* ---------- Cannon 相关 Preset（Queue 02） ---------- */
+
+/** 标准炮车：正常车身 + 标准炮（front） */
+const cannonStandard: Preset = {
+  id: 'cannonStandard',
+  name: '标准炮车',
+  build: () => ({
+    id: 'cannonStandard',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: wheels(),
+    functionals: cannonAt(),
+  }),
+};
+
+/** 重后坐炮车：正常车身 + 高后坐炮（front） */
+const cannonHeavyRecoil: Preset = {
+  id: 'cannonHeavyRecoil',
+  name: '重后坐炮车',
+  build: () => ({
+    id: 'cannonHeavyRecoil',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: wheels(),
+    functionals: cannonAt('front', 'cannonHeavy'),
+  }),
+};
+
+/** 前倾炮车：前小后大 + 标准炮（验证弹道朝下） */
+const cannonNoseDown: Preset = {
+  id: 'cannonNoseDown',
+  name: '前倾炮车',
+  build: () => ({
+    id: 'cannonNoseDown',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: wheels(24, 12),
+    functionals: cannonAt(),
+  }),
+};
+
+/** 后倾炮车：前大后小 + 标准炮（验证弹道朝上） */
+const cannonNoseUp: Preset = {
+  id: 'cannonNoseUp',
+  name: '后倾炮车',
+  build: () => ({
+    id: 'cannonNoseUp',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: wheels(12, 24),
+    functionals: cannonAt(),
+  }),
+};
+
+// Cannon preset 追加到 PRESETS（供 Lab Preset 快捷装载）
+PRESETS.push(cannonStandard, cannonHeavyRecoil, cannonNoseDown, cannonNoseUp);

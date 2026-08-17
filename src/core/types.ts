@@ -167,3 +167,24 @@ export interface OwnerTag {
   partId?: string;
   team?: TeamId;
 }
+
+/**
+ * 普通炮（Cannon）行为参数。
+ * Damage 与 Recoil 分离配置；Recoil 通过正式 Physics 力进入 Runtime。
+ */
+export interface CannonParams {
+  /** 冷却（ms） */
+  cooldown: number;
+  /** 炮弹初速度（px/step，世界单位） */
+  projectileSpeed: number;
+  /** 单发 Direct Damage */
+  damage: number;
+  /** 后坐力（开火时施加到发射者的力，与 Damage 无关） */
+  recoilForce: number;
+  /** 炮弹半径（Collider） */
+  projectileRadius: number;
+  /** 炮弹质量 */
+  projectileMass: number;
+  /** 炮弹寿命（ms，配合 bounds 销毁兜底） */
+  projectileLifetime: number;
+}

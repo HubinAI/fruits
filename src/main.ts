@@ -280,6 +280,7 @@ const refreshB = buildPanel(panelB, 'B 车 Build', editB);
     ['lastImpact', '最近 Impact'],
     ['lastDamage', '最近 Damage'],
     ['collider', 'Collider'],
+    ['muzzleDirection', '炮口方向'],
   ];
   for (const [key, label] of flagDefs) {
     const lab2 = document.createElement('label');

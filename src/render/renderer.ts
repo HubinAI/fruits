@@ -132,6 +132,11 @@ export class Renderer {
     this.drawVehicle(orchestrator.vehicleA, '#4aa3ff');
     this.drawVehicle(orchestrator.vehicleB, '#ff7a4a');
 
+    // Projectiles
+    for (const p of orchestrator.projectiles) {
+      this.drawProjectile(p.body);
+    }
+
     // Debug overlay
     if (debugDraw) debugDraw(ctx, t);
 
@@ -188,6 +193,19 @@ export class Renderer {
     ctx.beginPath();
     ctx.moveTo(this.sx(pos.x), this.sy(pos.y));
     ctx.lineTo(this.sx(pos.x + Math.cos(a) * r), this.sy(pos.y + Math.sin(a) * r));
+    ctx.stroke();
+  }
+
+  private drawProjectile(body: Body): void {
+    const ctx = this.ctx;
+    const r = body.circleRadius ?? 6;
+    const pos = getPosition(body);
+    ctx.fillStyle = '#ffe08a';
+    ctx.strokeStyle = '#8a6a20';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(this.sx(pos.x), this.sy(pos.y), this.ss(r), 0, Math.PI * 2);
+    ctx.fill();
     ctx.stroke();
   }
 

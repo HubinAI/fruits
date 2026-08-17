@@ -13,9 +13,11 @@
  */
 import type { BuildSnapshot, ContentRegistry, TeamId } from '../core/types';
 import { resolveSnapshot } from '../core/buildSnapshot';
-import { PhysWorld } from '../physics/adapter';
+import { PhysWorld, getMeta, getPosition, type ContactEvent } from '../physics/adapter';
 import { createVehicle, updateVehiclePhysics, settleVehicleToRestPose, type Vehicle } from './vehicleAssembly';
 import { driveVehicle } from './movement';
+import { updateCannonFire } from './weaponFire';
+import { destroyProjectile, type Projectile } from './projectile';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG, type ImpactConfig } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
@@ -52,6 +54,8 @@ export class BattleOrchestrator {
   readonly damageResolver: DamageResolver;
   readonly bus = new CombatEventBus();
   readonly config: BattleConfig;
+  /** 活跃的 Projectile 实体 */
+  readonly projectiles: Projectile[] = [];
 
   private _result: BattleResult | null = null;
   private time = 0;
@@ -91,7 +95,10 @@ export class BattleOrchestrator {
     );
 
     this.world.setCollisionHandlers({
-      onStart: (ev) => this.router.handleContact(ev),
+      onStart: (ev) => {
+        this.router.handleContact(ev);
+        this.handleProjectileContact(ev);
+      },
       onActive: (ev) => this.router.handleContact(ev),
       onEnd: (ev) => this.router.handleContact(ev),
     });
@@ -109,17 +116,23 @@ export class BattleOrchestrator {
     return this.time;
   }
 
-  /** 推进一帧：固定物理步进 + 驱动 + 阶段 + 死亡检测 */
+  /** 推进一帧：固定物理步进 + 驱动 + 开火 + Projectile 生命周期 + 阶段 + 死亡检测 */
   step(realDtMs: number, timeScale = 1): void {
     if (this._result) return;
 
     const steps = this.world.step(realDtMs, timeScale);
-    this.time += realDtMs * timeScale;
+    const dtMs = realDtMs * timeScale;
+    this.time += dtMs;
 
     // 车辆驱动（自动战斗：A 朝 +X、B 朝 -X，即各自 facing 方向）
     if (this.config.autoDrive !== false) {
       driveVehicle(this.vehicleA, 1000 / 60, this.vehicleA.facing);
       driveVehicle(this.vehicleB, 1000 / 60, this.vehicleB.facing);
+    }
+
+    // 开火（Cannon）：冷却到点生成 Projectile + 施加 Recoil
+    for (const v of [this.vehicleA, this.vehicleB]) {
+      this.projectiles.push(...updateCannonFire(this.world, v, dtMs, this.time));
     }
 
     // 每物理步聚合物理量
@@ -130,9 +143,73 @@ export class BattleOrchestrator {
     updateVehiclePhysics(this.vehicleA);
     updateVehiclePhysics(this.vehicleB);
 
-    this.arena.update(realDtMs * timeScale);
+    // Projectile 越界 / 寿命销毁
+    this.updateProjectiles();
+
+    this.arena.update(dtMs);
 
     this.detectEnd();
+  }
+
+  /**
+   * Projectile 碰撞处理：命中敌方 vehicle → Direct Damage + 销毁；撞 Wall / Ground → 销毁。
+   * collision filter 已保证 projectile 只与敌车 / Arena / Ground 碰撞（不会命中自己）。
+   */
+  private handleProjectileContact(ev: ContactEvent): void {
+    const mA = getMeta(ev.bodyA);
+    const mB = getMeta(ev.bodyB);
+    const projBody = mA.kind === 'projectile' ? ev.bodyA : mB.kind === 'projectile' ? ev.bodyB : null;
+    if (!projBody) return;
+
+    const otherMeta = projBody === ev.bodyA ? mB : mA;
+
+    const proj = this.projectiles.find((p) => p.body === projBody);
+    if (!proj) return;
+
+    // 命中敌方 vehicle → Direct Weapon Damage
+    if (otherMeta.kind === 'vehicle') {
+      const targetTeam = otherMeta.team as TeamId;
+      if (targetTeam !== proj.team) {
+        const target = targetTeam === 'A' ? this.vehicleA : this.vehicleB;
+        this.damageResolver.applyDamage(target, {
+          source: proj.team,
+          target: targetTeam,
+          damageSource: 'weapon',
+          behavior: 'cannon',
+          contactPoint: ev.contactPoint,
+          contactNormal: ev.normal,
+          relativeVelocity: ev.relativeVelocity,
+          damage: proj.damage,
+        }, this.time);
+      }
+      this.removeProjectile(proj);
+      return;
+    }
+
+    // 撞 Wall / Ground → 销毁（不反弹）
+    if (otherMeta.kind === 'arena' || otherMeta.kind === 'ground') {
+      this.removeProjectile(proj);
+    }
+  }
+
+  /** 越界（顶部 bounds）或寿命超时销毁 */
+  private updateProjectiles(): void {
+    const toDestroy: Projectile[] = [];
+    for (const p of this.projectiles) {
+      const pos = getPosition(p.body);
+      if (this.arena.isOutOfProjectileBounds(pos)) {
+        toDestroy.push(p);
+      } else if (this.time - p.bornAtMs >= p.lifetimeMs) {
+        toDestroy.push(p);
+      }
+    }
+    for (const p of toDestroy) this.removeProjectile(p);
+  }
+
+  private removeProjectile(p: Projectile): void {
+    destroyProjectile(this.world, p);
+    const i = this.projectiles.indexOf(p);
+    if (i >= 0) this.projectiles.splice(i, 1);
   }
 
   /** HP 死亡检测 → Result */

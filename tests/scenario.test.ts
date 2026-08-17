@@ -64,8 +64,8 @@ describe('Scenario 确定性基础检查', () => {
         Math.abs(orch.vehicleB.body.angularVelocity),
       );
     }
-    // 偏心碰撞产生可感知的旋转（实测 ~0.027 rad/step ≈ 93°/s，阈值取 > ~68°/s 留余量）
-    expect(maxAngVel).toBeGreaterThan(0.02);
+    // 偏心碰撞产生可感知的旋转（gravity 标定后实测 ~0.010 rad/step ≈ 34°/s，阈值取 > ~27°/s 留余量）
+    expect(maxAngVel).toBeGreaterThan(0.008);
   });
 
   it('Scenario C：轮径 override 生效，前后轮底部高度差产生倾角（几何）', () => {

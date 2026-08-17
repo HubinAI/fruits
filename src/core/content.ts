@@ -126,6 +126,49 @@ const ramHead: FunctionalPartDef = {
   behaviorParams: { baseDamage: 80 },
 };
 
+/**
+ * Cannon（普通炮）：Projectile Weapon，第一个正式 Weapon Content。
+ * Fixed Mount，占用 1 个 Functional Hardpoint；自动固定冷却单发，无蓄力/散射/追踪/爆炸。
+ * 炮口方向 = Body 姿态 + Hardpoint 世界方向（不自动瞄准）；Recoil 与 Damage 分离。
+ */
+const cannon: FunctionalPartDef = {
+  id: 'cannon',
+  name: '普通炮',
+  category: 'weapon',
+  mass: 20,
+  energy: 30,
+  collider: { shape: 'box', width: 28, height: 12, offset: { x: 18, y: 0 } },
+  behavior: 'cannon',
+  behaviorParams: {
+    cooldown: 1500,
+    projectileSpeed: 18,
+    damage: 50,
+    recoilForce: 2.2,
+    projectileRadius: 6,
+    projectileMass: 2,
+    projectileLifetime: 4000,
+  } satisfies import('./types').CannonParams,
+};
+
+/**
+ * 重后坐炮：与 Cannon 相同的 Projectile 行为，但 Recoil 显著更大。
+ * 用于 Scenario P2 验证「轻车装重炮 → 开火明显后退 / 抬头」。
+ */
+const cannonHeavy: FunctionalPartDef = {
+  ...cannon,
+  id: 'cannonHeavy',
+  name: '重后坐炮',
+  behaviorParams: {
+    cooldown: 1500,
+    projectileSpeed: 18,
+    damage: 60,
+    recoilForce: 6.0,
+    projectileRadius: 6,
+    projectileMass: 2,
+    projectileLifetime: 4000,
+  } satisfies import('./types').CannonParams,
+};
+
 /** 测试质量块（Gadget，用于 Scenario E 质量分布验证） */
 const testMass: FunctionalPartDef = {
   id: 'testMass',
@@ -149,6 +192,8 @@ export function createRegistry(): ContentRegistry {
     movements: new Map([[wheelStd.id, wheelStd]]),
     functionals: new Map([
       [ramHead.id, ramHead],
+      [cannon.id, cannon],
+      [cannonHeavy.id, cannonHeavy],
       [testMass.id, testMass],
     ]),
   };

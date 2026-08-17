@@ -6,6 +6,7 @@
  */
 import type { BattleOrchestrator } from '../battle/battleOrchestrator';
 import type { Vehicle } from '../battle/vehicleAssembly';
+import { muzzleTransform } from '../battle/weaponFire';
 import { getPosition, getVelocity, getAngularVelocity } from '../physics/adapter';
 
 /** Debug 显示开关 */
@@ -24,6 +25,8 @@ export interface DebugFlags {
   inertia: boolean;
   lastImpact: boolean;
   lastDamage: boolean;
+  /** 炮口方向线（Projectile Weapon） */
+  muzzleDirection: boolean;
 }
 
 export const DEFAULT_DEBUG_FLAGS: DebugFlags = {
@@ -41,6 +44,7 @@ export const DEFAULT_DEBUG_FLAGS: DebugFlags = {
   inertia: true,
   lastImpact: true,
   lastDamage: true,
+  muzzleDirection: true,
 };
 
 /** Debug Override：研发临时夸张差异验证方向，与正式 Config 隔离 */
@@ -166,6 +170,26 @@ export function drawDebug(
 
   drawVehicle(orchestrator.vehicleA, '#4aa3ff');
   drawVehicle(orchestrator.vehicleB, '#ff7a4a');
+
+  // 炮口方向线（Projectile Weapon）
+  if (flags.muzzleDirection) {
+    for (const v of [orchestrator.vehicleA, orchestrator.vehicleB]) {
+      for (const part of v.parts) {
+        if (part.def.behavior !== 'cannon') continue;
+        const { pos, dir } = muzzleTransform(v, part);
+        ctx.strokeStyle = '#ffe08a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sx(pos.x, t), sy(pos.y, t));
+        ctx.lineTo(sx(pos.x + dir.x * 44, t), sy(pos.y + dir.y * 44, t));
+        ctx.stroke();
+        ctx.fillStyle = '#ffe08a';
+        ctx.beginPath();
+        ctx.arc(sx(pos.x, t), sy(pos.y, t), 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
 
   // Collider 描边
   if (flags.collider) {

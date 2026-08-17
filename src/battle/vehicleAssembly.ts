@@ -69,6 +69,8 @@ export interface Vehicle {
   totalMass: number;
   com: { x: number; y: number };
   inertia: number;
+  /** Weapon 冷却状态：partId（hardpoint id）→ 剩余冷却 ms */
+  weaponCooldowns: Map<string, number>;
 }
 
 /**
@@ -273,6 +275,11 @@ export function createVehicle(
     totalMass: resolved.totalMass,
     com: { x: initialPos.x, y: initialPos.y },
     inertia: 0,
+    weaponCooldowns: new Map(
+      parts
+        .filter((p) => p.def.behavior === 'cannon')
+        .map((p) => [p.id, ((p.def.behaviorParams as { cooldown?: number } | undefined)?.cooldown ?? 0)]),
+    ),
   };
 
   updateVehiclePhysics(vehicle);

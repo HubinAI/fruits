@@ -120,9 +120,14 @@ export class PhysWorld {
     this.engine = Matter.Engine.create();
     this.engine.gravity.x = gravity.x;
     this.engine.gravity.y = gravity.y;
-    // 默认 Matter gravity.scale=0.001 过小，轮子摩擦牵引力不足以推动车身；
-    // 提升到 0.01 使 Ground Contact 的摩擦前进力足以真实驱动整车。
-    this.engine.gravity.scale = gravity.scale ?? 0.01;
+    // Gravity 标定（Queue 02 校正）：
+    // Matter 用 Verlet 积分 `velocity += (force/mass) * deltaTime²`（deltaTime²=277.8），
+    // 因此 gravity.scale 会放大 277.8 倍成为实际加速度（px/step²）。
+    // 01A 曾调到 0.01 以支持 setAngularVelocity 摩擦驱动；01B 改为 applyForce 水平驱动后已不依赖重力。
+    // 0.01 会让 Projectile 每步下坠 2.78px、约 5 步即撞地，弹道完全失真。
+    // 降到 0.0001：车仍能正常接地 + 驱动（实测前进距离几乎不变、姿态更稳），
+    // 同时 Projectile 获得合理的平射弹道（约 18px/step 速度下飞 800px 仅下坠 ~27px）。
+    this.engine.gravity.scale = gravity.scale ?? 0.0001;
     this.handlers = handlers;
 
     Matter.Events.on(this.engine, 'collisionStart', (e) =>

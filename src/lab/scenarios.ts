@@ -140,6 +140,42 @@ export const SCENARIOS: ScenarioDef[] = [
       spawnB: { x: 1150, y: 650, facing: -1 },
     },
   },
+  {
+    id: 'P1',
+    name: 'Standard Cannon Hit',
+    description: '标准炮车自动开火，炮弹真实飞出，命中重目标掉血 / 打空。',
+    buildA: presetBuild('cannonStandard'),
+    buildB: presetBuild('heavyVehicle'),
+    config: {
+      autoDrive: true,
+      spawnA: { x: 400, y: 650, facing: 1 },
+      spawnB: { x: 1200, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'P2',
+    name: 'Light Chassis Heavy Recoil',
+    description: '重后坐炮车开火后明显后退 / 抬头（真实反作用力）。',
+    buildA: presetBuild('cannonHeavyRecoil'),
+    buildB: presetBuild('heavyVehicle'),
+    config: {
+      autoDrive: true,
+      spawnA: { x: 400, y: 650, facing: 1 },
+      spawnB: { x: 1200, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'P3',
+    name: 'Body Angle Affects Fire Direction',
+    description: '前倾（炮口朝下）vs 后倾（炮口朝上），同一炮弹道方向明显不同。',
+    buildA: presetBuild('cannonNoseDown'),
+    buildB: presetBuild('cannonNoseUp'),
+    config: {
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: 1 },
+    },
+  },
 ];
 
 export function getScenario(id: string): ScenarioDef | undefined {
