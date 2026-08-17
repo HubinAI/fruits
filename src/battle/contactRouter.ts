@@ -50,6 +50,15 @@ export const DEFAULT_IMPACT_CONFIG: ImpactConfig = {
   maxDamage: 120,
 };
 
+/**
+ * Weapon 有效接触阈值（F-02W-D 诊断标定，2026-08-17）：
+ * 正式 Runtime 中正常 Ram 攻击的首次接触速度为 1.114～1.795（对轻/重目标），
+ * 低速擦碰对照为 0.099。旧值 2 高于正常攻击上限导致 baseDamage=80 完全无法触发。
+ * 标定 0.5：对正常攻击下限（1.114）保留 55% 余量，对低速对照（0.099）保留 5 倍余量，
+ * 位于诊断候选区间 [0.119, 0.891] 内。
+ */
+export const WEAPON_CONTACT_THRESHOLD = 0.5;
+
 export class ContactRouter {
   readonly debug: ContactDebugState = {
     lastContact: null,
@@ -342,8 +351,10 @@ export class ContactRouter {
     const baseDamage = (part.def.behaviorParams?.baseDamage as number) ?? 0;
     if (baseDamage <= 0) return;
 
-    // 武器伤害要求真实有效接触（相对速度达标，避免贴合时持续扣血）
-    if (ev.relativeVelocity < 2) return;
+    // 武器伤害要求真实有效接触（相对速度达标，避免贴合时持续扣血）。
+    // 阈值来自 WEAPON_CONTACT_THRESHOLD（F-02W-D 标定 0.5）：正常攻击 1.114~1.795、
+    // 低速擦碰 0.099，0.5 可稳定区分两者。
+    if (ev.relativeVelocity < WEAPON_CONTACT_THRESHOLD) return;
 
     this.damageResolver.applyDamage(defender, {
       source: attacker.team,
