@@ -19,6 +19,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "matter-js": "^0.20.0"
+    "matter-js": "^0.20.0",
+    "planck": "1.4.2"
   }
 }
