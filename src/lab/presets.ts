@@ -129,3 +129,46 @@ export const PRESETS: Preset[] = [
 export function getPreset(id: string): Preset | undefined {
   return PRESETS.find((p) => p.id === id);
 }
+
+/* ---------- Push Rod 相关 Preset（Queue 04） ---------- */
+
+/** 推杆车：正常车身 + 推杆（front，标准高度） */
+const pushRodVehicle: Preset = {
+  id: 'pushRodVehicle',
+  name: '推杆车',
+  build: () => ({
+    id: 'pushRodVehicle',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: wheels(),
+    functionals: [{ hardpointId: 'front', defId: 'pushRod' }],
+  }),
+};
+
+/** 推杆车（低位安装）：推杆装车底附近，推目标下部 → 更易产生旋转 */
+const pushRodLow: Preset = {
+  id: 'pushRodLow',
+  name: '推杆车（低位）',
+  build: () => ({
+    id: 'pushRodLow',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: wheels(),
+    functionals: [{ hardpointId: 'frontLow', defId: 'pushRod' }],
+  }),
+};
+
+/** 推杆车（高位安装）：推杆装车顶附近，推目标上部 → 更易产生反向旋转 */
+const pushRodHigh: Preset = {
+  id: 'pushRodHigh',
+  name: '推杆车（高位）',
+  build: () => ({
+    id: 'pushRodHigh',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: wheels(),
+    functionals: [{ hardpointId: 'frontHigh', defId: 'pushRod' }],
+  }),
+};
+
+PRESETS.push(pushRodVehicle, pushRodLow, pushRodHigh);

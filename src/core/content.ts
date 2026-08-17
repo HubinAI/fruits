@@ -11,6 +11,7 @@ import type {
   BodyDef,
   ContentRegistry,
   FunctionalPartDef,
+  PushRodParams,
   WheelDef,
 } from './types';
 
@@ -63,6 +64,8 @@ const boxBody: BodyDef = {
   ],
   functionalHardpoints: [
     { id: 'front', localPosition: { x: 75, y: 0 }, localRotation: 0 },
+    { id: 'frontLow', localPosition: { x: 75, y: 25 }, localRotation: 0 },
+    { id: 'frontHigh', localPosition: { x: 75, y: -25 }, localRotation: 0 },
     { id: 'frontMass', localPosition: { x: 45, y: -10 }, localRotation: 0 },
     { id: 'top', localPosition: { x: 0, y: -27 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -75, y: 0 }, localRotation: 0 },
@@ -137,6 +140,33 @@ const testMass: FunctionalPartDef = {
   behavior: 'none',
 };
 
+/**
+ * Push Rod（推杆）：Linear Gadget。
+ * Direct Damage = 0，只通过真实 Contact 改变距离 / 位置 / 姿态。
+ * rod 沿 Hardpoint 世界方向机械伸出 → 短暂保持 → 收回。
+ * collider 字段在此仅作占位（rod 实际用单 box 装配，见 vehicleAssembly）。
+ */
+const pushRod: FunctionalPartDef = {
+  id: 'pushRod',
+  name: '推杆',
+  category: 'gadget',
+  mass: 0, // 实际质量由 rodMass 决定（单 box 装配）
+  energy: 15,
+  collider: { shape: 'box', width: 40, height: 12, offset: { x: 20, y: 0 } },
+  behavior: 'pushRod',
+  behaviorParams: {
+    cooldown: 2000,
+    extensionDistance: 60,
+    extensionSpeed: 2,
+    holdMs: 800,
+    retractSpeed: 2,
+    rodLength: 40,
+    rodThickness: 12,
+    rodMass: 8,
+    pushForce: 0.05,
+  } satisfies PushRodParams,
+};
+
 /** 构建 Content Registry */
 export function createRegistry(): ContentRegistry {
   return {
@@ -149,6 +179,7 @@ export function createRegistry(): ContentRegistry {
     movements: new Map([[wheelStd.id, wheelStd]]),
     functionals: new Map([
       [ramHead.id, ramHead],
+      [pushRod.id, pushRod],
       [testMass.id, testMass],
     ]),
   };

@@ -19,6 +19,7 @@ import type {
   FunctionalHardpointDef,
   TeamId,
   WheelDef,
+  PushRodParams,
 } from '../core/types';
 import {
   Category,
@@ -51,7 +52,14 @@ export interface PartRuntime {
   def: FunctionalPartDef;
   hardpoint: FunctionalHardpointDef;
   body: Body;
-  joint: Constraint;
+  /** Weld/Revolute Joint；Push Rod 无约束（运动学控制），为 null */
+  joint: Constraint | null;
+  /** Push Rod 状态机（Gadget） */
+  pushPhase?: 'idle' | 'extending' | 'holding' | 'retracting';
+  /** 当前伸出量（px） */
+  pushExtension?: number;
+  /** 阶段计时（ms）：idle=冷却剩余，holding=保持剩余 */
+  pushTimer?: number;
 }
 
 export interface Vehicle {
@@ -199,6 +207,47 @@ export function createVehicle(
 
   // 3. Functional Part（Fixed Mount，Weld）。facing=-1 时镜像硬点与碰撞轮廓。
   const parts: PartRuntime[] = resolved.functionals.map((f) => {
+    // Push Rod（Linear Gadget）：单 box 杆，无 Joint，由 weaponPushRod 运动学控制伸出/收回。
+    // 真实参与碰撞（category=vehicle、mask 含敌车），推动敌人靠 Matter 碰撞求解器接触反作用。
+    if (f.def.behavior === 'pushRod') {
+      const params = f.def.behaviorParams as unknown as PushRodParams;
+      const hpLocal = {
+        x: facing * f.hardpoint.localPosition.x,
+        y: f.hardpoint.localPosition.y,
+      };
+      const hpWorld = { x: initialPos.x + hpLocal.x, y: initialPos.y + hpLocal.y };
+      // 收回状态：杆后端贴 hardpoint，杆中心在 hardpoint + facing * rodLength/2
+      const rodCenterX = hpWorld.x + facing * (params.rodLength / 2);
+      // rod 是纯运动学刚体（weaponPushRod 每步 setPosition 控制位置），mask=0 不参与碰撞，
+      // 避免「收回时尖端嵌进目标 → 碰撞位置修正 vs setPosition 冲突」产生 velocity 震荡。
+      // 推动敌人靠 touchingOpponent 手动接触检测 + 显式冲量（真实力），不靠 rod 的 Collider 硬推。
+      const rod = createBox(
+        rodCenterX,
+        hpWorld.y,
+        params.rodLength,
+        params.rodThickness,
+        params.rodMass,
+        { filter: { category: cat, mask: 0, group }, friction: 0.4, restitution: 0.05 },
+      );
+      setMeta(rod, {
+        kind: 'vehicle',
+        vehicleId: resolved.snapshot.id,
+        partId: `part:${f.install.hardpointId}`,
+        team,
+      });
+      world.add(rod);
+      return {
+        id: f.install.hardpointId,
+        def: f.def,
+        hardpoint: f.hardpoint,
+        body: rod,
+        joint: null,
+        pushPhase: 'idle',
+        pushExtension: 0,
+        pushTimer: params.cooldown,
+      };
+    }
+
     const collider = facing === -1 ? mirrorCollider(f.def.collider) : f.def.collider;
     const hpWorld = {
       x: facing * f.hardpoint.localPosition.x,

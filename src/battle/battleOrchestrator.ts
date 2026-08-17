@@ -16,6 +16,7 @@ import { resolveSnapshot } from '../core/buildSnapshot';
 import { PhysWorld } from '../physics/adapter';
 import { createVehicle, updateVehiclePhysics, settleVehicleToRestPose, type Vehicle } from './vehicleAssembly';
 import { driveVehicle } from './movement';
+import { updatePushRod } from './weaponPushRod';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG, type ImpactConfig } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
@@ -114,13 +115,18 @@ export class BattleOrchestrator {
     if (this._result) return;
 
     const steps = this.world.step(realDtMs, timeScale);
-    this.time += realDtMs * timeScale;
+    const dtMs = realDtMs * timeScale;
+    this.time += dtMs;
 
     // 车辆驱动（自动战斗：A 朝 +X、B 朝 -X，即各自 facing 方向）
     if (this.config.autoDrive !== false) {
       driveVehicle(this.vehicleA, 1000 / 60, this.vehicleA.facing);
       driveVehicle(this.vehicleB, 1000 / 60, this.vehicleB.facing);
     }
+
+    // Push Rod 状态机 + 伸出 / 推动（每辆车对对方）
+    updatePushRod(this.vehicleA, this.vehicleB, dtMs);
+    updatePushRod(this.vehicleB, this.vehicleA, dtMs);
 
     // 每物理步聚合物理量
     for (let i = 0; i < steps; i++) {

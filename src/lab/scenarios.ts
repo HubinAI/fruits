@@ -140,6 +140,42 @@ export const SCENARIOS: ScenarioDef[] = [
       spawnB: { x: 1150, y: 650, facing: -1 },
     },
   },
+  {
+    id: 'P1',
+    name: 'Push Rod · 轻推轻',
+    description: '推杆车推轻目标：真实伸出 + 接触推动，Direct Damage = 0，轻车被明显推开。',
+    buildA: presetBuild('pushRodVehicle'),
+    buildB: presetBuild('lightVehicle'),
+    config: {
+      autoDrive: false,
+      spawnA: { x: 400, y: 650, facing: 1 },
+      spawnB: { x: 620, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'P2',
+    name: 'Push Rod · 轻推重',
+    description: '推杆车推重目标：同一推力，重车位移明显小于轻车（F = m·a）。',
+    buildA: presetBuild('pushRodVehicle'),
+    buildB: presetBuild('heavyVehicle'),
+    config: {
+      autoDrive: false,
+      spawnA: { x: 400, y: 650, facing: 1 },
+      spawnB: { x: 620, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'P3',
+    name: 'Push Rod · 低位 vs 高位',
+    description: '低位安装推目标下部 vs 高位安装推目标上部：作用点不同，平移 / 旋转结果不同。',
+    buildA: presetBuild('pushRodLow'),
+    buildB: presetBuild('pushRodHigh'),
+    config: {
+      autoDrive: false,
+      spawnA: { x: 400, y: 650, facing: 1 },
+      spawnB: { x: 600, y: 650, facing: -1 },
+    },
+  },
 ];
 
 export function getScenario(id: string): ScenarioDef | undefined {

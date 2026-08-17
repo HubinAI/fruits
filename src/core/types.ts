@@ -167,3 +167,30 @@ export interface OwnerTag {
   partId?: string;
   team?: TeamId;
 }
+
+/**
+ * Push Rod（线性推杆 Gadget）行为参数。
+ * Push Rod 是 Gadget：Direct Damage = 0，只通过真实 Contact 改变距离/位置/姿态。
+ * rod 沿 Hardpoint 世界方向机械伸出（Linear / Prismatic），推动靠 Matter 碰撞求解器
+ * 的接触反作用 + 伸出阶段的有限推力（体现轻/重车位移差异）。
+ */
+export interface PushRodParams {
+  /** 冷却（ms） */
+  cooldown: number;
+  /** 伸出距离（px，rod 尖端相对收回位置的前伸量） */
+  extensionDistance: number;
+  /** 伸出速度（px/物理步） */
+  extensionSpeed: number;
+  /** 伸出后的保持时间（ms） */
+  holdMs: number;
+  /** 收回速度（px/物理步） */
+  retractSpeed: number;
+  /** 杆长（px） */
+  rodLength: number;
+  /** 杆厚（px，Collider 高度） */
+  rodThickness: number;
+  /** 杆质量（真实参与质量分布与碰撞动量） */
+  rodMass: number;
+  /** 伸出阶段的有效推力（沿伸出方向，施加到接触点，体现轻/重车位移差异） */
+  pushForce: number;
+}
