@@ -44,8 +44,17 @@ export interface ContactDebugState {
   lastDamage: { damage: number; target: string } | null;
 }
 
+/**
+ * Impact 有效接触阈值（F-02I-D/D2/A1R 诊断标定，2026-08-17）：
+ * 正式 Runtime 中正常车体碰撞首次 batch 最大 relVel = 1.574～2.205。
+ * 有效 body-only 低速对照（整车平移、表面间距 4px）最大 relVel = 0.458；
+ * 另有带 Ram 的低速对照 relVel = 0.099。旧阈值 6 远高于正常碰撞区间。
+ * 标定 0.75：比正常下限低约 52%，比有效 body-only 低速上限高约 64%。
+ */
+export const IMPACT_CONTACT_THRESHOLD = 0.75;
+
 export const DEFAULT_IMPACT_CONFIG: ImpactConfig = {
-  threshold: 6,
+  threshold: IMPACT_CONTACT_THRESHOLD,
   damagePerSpeed: 0.5,
   maxDamage: 120,
 };
