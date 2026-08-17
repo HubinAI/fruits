@@ -167,3 +167,22 @@ export interface OwnerTag {
   partId?: string;
   team?: TeamId;
 }
+
+/**
+ * Lift Roller（举升滚轮 Gadget）行为参数。
+ * Lift Roller = Spin + Force / Posture，Direct Damage = 0。
+ * 滚轮（钝性 circle Collider）通过 Revolute Joint 挂 Hardpoint，持续真实旋转，
+ * 有效接触时通过轮面切向速度 + 摩擦产生真实抬升 / 姿态变化（不调用 Flip / Launch）。
+ */
+export interface LiftRollerParams {
+  /** 滚轮半径（px，Collider） */
+  radius: number;
+  /** 滚轮质量（真实参与碰撞动量与反作用） */
+  mass: number;
+  /** 持续转速（rad/物理步，正 = 顺时针屏幕，负 = 逆时针 = 抬升方向） */
+  rpm: number;
+  /** 轮面摩擦（真实接触传递切向速度） */
+  friction: number;
+  /** 旋转方向（1 = 顺时针，-1 = 逆时针抬升） */
+  spinDirection: 1 | -1;
+}

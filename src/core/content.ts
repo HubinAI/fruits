@@ -63,6 +63,8 @@ const boxBody: BodyDef = {
   ],
   functionalHardpoints: [
     { id: 'front', localPosition: { x: 75, y: 0 }, localRotation: 0 },
+    { id: 'frontLow', localPosition: { x: 75, y: 15 }, localRotation: 0 },
+    { id: 'frontHigh', localPosition: { x: 75, y: -18 }, localRotation: 0 },
     { id: 'frontMass', localPosition: { x: 45, y: -10 }, localRotation: 0 },
     { id: 'top', localPosition: { x: 0, y: -27 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -75, y: 0 }, localRotation: 0 },
@@ -137,6 +139,29 @@ const testMass: FunctionalPartDef = {
   behavior: 'none',
 };
 
+/**
+ * Lift Roller（举升滚轮）：Spin + Force / Posture Gadget。
+ * Direct Damage = 0，只通过持续真实旋转 + 轮面摩擦接触产生抬升 / 姿态变化。
+ * 钝性滚轮（circle Collider），非圆锯外观，避免玩家误认为切割伤害。
+ * collider 字段在此仅作占位（滚轮实际用 circle + Revolute Joint 装配，见 vehicleAssembly）。
+ */
+const liftRoller: FunctionalPartDef = {
+  id: 'liftRoller',
+  name: '举升滚轮',
+  category: 'gadget',
+  mass: 0, // 实际质量由 LiftRollerParams.mass 决定（circle 装配）
+  energy: 15,
+  collider: { shape: 'circle', radius: 20, offset: { x: 20, y: 0 } },
+  behavior: 'liftRoller',
+  behaviorParams: {
+    radius: 20,
+    mass: 20,
+    rpm: 0.5,
+    friction: 0.9,
+    spinDirection: -1, // 逆时针（屏幕），滚轮右侧朝上 = 抬升方向
+  } satisfies import('./types').LiftRollerParams,
+};
+
 /** 构建 Content Registry */
 export function createRegistry(): ContentRegistry {
   return {
@@ -149,6 +174,7 @@ export function createRegistry(): ContentRegistry {
     movements: new Map([[wheelStd.id, wheelStd]]),
     functionals: new Map([
       [ramHead.id, ramHead],
+      [liftRoller.id, liftRoller],
       [testMass.id, testMass],
     ]),
   };

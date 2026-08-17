@@ -129,3 +129,33 @@ export const PRESETS: Preset[] = [
 export function getPreset(id: string): Preset | undefined {
   return PRESETS.find((p) => p.id === id);
 }
+
+/* ---------- Lift Roller 相关 Preset（Queue 05） ---------- */
+
+/** 举升滚轮车（低位）：滚轮装车底附近，从下方接触目标产生抬升 */
+const liftRollerLow: Preset = {
+  id: 'liftRollerLow',
+  name: '举升滚轮车（低位）',
+  build: () => ({
+    id: 'liftRollerLow',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: wheels(),
+    functionals: [{ hardpointId: 'frontLow', defId: 'liftRoller' }],
+  }),
+};
+
+/** 举升滚轮车（标准位）：滚轮装车中心高度 */
+const liftRollerMid: Preset = {
+  id: 'liftRollerMid',
+  name: '举升滚轮车（标准位）',
+  build: () => ({
+    id: 'liftRollerMid',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: wheels(),
+    functionals: [{ hardpointId: 'front', defId: 'liftRoller' }],
+  }),
+};
+
+PRESETS.push(liftRollerLow, liftRollerMid);

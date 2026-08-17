@@ -19,6 +19,7 @@ import type {
   FunctionalHardpointDef,
   TeamId,
   WheelDef,
+  LiftRollerParams,
 } from '../core/types';
 import {
   Category,
@@ -199,6 +200,42 @@ export function createVehicle(
 
   // 3. Functional Part（Fixed Mount，Weld）。facing=-1 时镜像硬点与碰撞轮廓。
   const parts: PartRuntime[] = resolved.functionals.map((f) => {
+    // Lift Roller（Spin Gadget）：钝性 circle 滚轮 + Revolute Joint，持续旋转。
+    // Direct Damage = 0（category=gadget），只通过轮面摩擦接触产生抬升 / 姿态变化。
+    if (f.def.behavior === 'liftRoller') {
+      const params = f.def.behaviorParams as unknown as LiftRollerParams;
+      const hpLocal = {
+        x: facing * f.hardpoint.localPosition.x,
+        y: f.hardpoint.localPosition.y,
+      };
+      const hpWorld = { x: initialPos.x + hpLocal.x, y: initialPos.y + hpLocal.y };
+      // 滚轮中心在 hardpoint 处（半径决定伸出量），镜像时 X 翻转
+      const roller = createCircle(
+        hpWorld.x,
+        hpWorld.y,
+        params.radius,
+        params.mass,
+        { filter: { category: cat, mask, group }, friction: params.friction, frictionStatic: params.friction, restitution: 0.05 },
+      );
+      setMeta(roller, {
+        kind: 'vehicle',
+        vehicleId: resolved.snapshot.id,
+        partId: `part:${f.install.hardpointId}`,
+        team,
+      });
+      world.add(roller);
+      const joint = createRevoluteJoint(body, hpLocal, roller, { x: 0, y: 0 });
+      joint.damping = 0.05;
+      world.addConstraint(joint);
+      return {
+        id: f.install.hardpointId,
+        def: f.def,
+        hardpoint: f.hardpoint,
+        body: roller,
+        joint,
+      };
+    }
+
     const collider = facing === -1 ? mirrorCollider(f.def.collider) : f.def.collider;
     const hpWorld = {
       x: facing * f.hardpoint.localPosition.x,

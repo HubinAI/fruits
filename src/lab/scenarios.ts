@@ -140,6 +140,42 @@ export const SCENARIOS: ScenarioDef[] = [
       spawnB: { x: 1150, y: 650, facing: -1 },
     },
   },
+  {
+    id: 'L1',
+    name: 'Lift Roller · 低位接触',
+    description: '低位举升滚轮接触普通目标：持续旋转 + 轮面摩擦产生真实抬升，Direct Damage = 0。',
+    buildA: presetBuild('liftRollerLow'),
+    buildB: presetBuild('lightVehicle'),
+    config: {
+      autoDrive: false,
+      spawnA: { x: 400, y: 650, facing: 1 },
+      spawnB: { x: 550, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'L2',
+    name: 'Lift Roller · 轻 vs 重',
+    description: '同一滚轮推轻目标 vs 重目标：轻目标被抬升 / 推离更明显（反作用力质量差异）。',
+    buildA: presetBuild('liftRollerLow'),
+    buildB: presetBuild('heavyVehicle'),
+    config: {
+      autoDrive: false,
+      spawnA: { x: 400, y: 650, facing: 1 },
+      spawnB: { x: 550, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'L3',
+    name: 'Lift Roller · Wheel 离地',
+    description: '目标被抬升后 Wheel 离地 → Ground Contact 丢失 → 失去驱动 → 自然落地。',
+    buildA: presetBuild('liftRollerLow'),
+    buildB: presetBuild('lightVehicle'),
+    config: {
+      autoDrive: false,
+      spawnA: { x: 400, y: 650, facing: 1 },
+      spawnB: { x: 540, y: 650, facing: -1 },
+    },
+  },
 ];
 
 export function getScenario(id: string): ScenarioDef | undefined {

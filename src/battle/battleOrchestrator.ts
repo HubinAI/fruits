@@ -16,6 +16,7 @@ import { resolveSnapshot } from '../core/buildSnapshot';
 import { PhysWorld } from '../physics/adapter';
 import { createVehicle, updateVehiclePhysics, settleVehicleToRestPose, type Vehicle } from './vehicleAssembly';
 import { driveVehicle } from './movement';
+import { updateLiftRoller } from './weaponLiftRoller';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG, type ImpactConfig } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
@@ -121,6 +122,10 @@ export class BattleOrchestrator {
       driveVehicle(this.vehicleA, 1000 / 60, this.vehicleA.facing);
       driveVehicle(this.vehicleB, 1000 / 60, this.vehicleB.facing);
     }
+
+    // Lift Roller 持续旋转（真实接触产生抬升 / 姿态变化）
+    updateLiftRoller(this.vehicleA);
+    updateLiftRoller(this.vehicleB);
 
     // 每物理步聚合物理量
     for (let i = 0; i < steps; i++) {
