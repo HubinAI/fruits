@@ -57,6 +57,14 @@ export interface ContactEvent {
   /** 沿法线的相对速度（正值 = 相互靠近） */
   relativeVelocity: number;
   phase: 'start' | 'active' | 'end';
+  /**
+   * 碰撞批次边界（同一物理步内一次事件派发的所有 pair 共享同一批次）：
+   * - timestamp：本次事件（collisionStart/Active/End）的引擎时间戳，同批一致；
+   * - index：本 pair 在当批中的下标（0..size-1，保持 Matter 原始 pair 顺序）；
+   * - size：当批 pair 总数。
+   * 供上层做「同一物理步内多 pair 去重 / 合并」的边界判定（本层不做去重）。
+   */
+  batch?: { timestamp: number; index: number; size: number };
 }
 
 /** 归一化后的碰撞回调 */
@@ -155,7 +163,8 @@ export class PhysWorld {
           : this.handlers.onEnd;
     if (!cb) return;
 
-    for (const pair of e.pairs) {
+    for (let i = 0; i < e.pairs.length; i++) {
+      const pair = e.pairs[i];
       const normal = pair.collision.normal ?? { x: 0, y: 1 };
       const support = pair.collision.supports?.[0] ?? { x: 0, y: 0 };
       // 接触点速度必须用父刚体（collision.parentA / parentB）而非 sub-part：
@@ -190,6 +199,11 @@ export class PhysWorld {
         normal: { x: normal.x, y: normal.y },
         relativeVelocity,
         phase,
+        batch: {
+          timestamp: e.timestamp,
+          index: i,
+          size: e.pairs.length,
+        },
       });
     }
   }
