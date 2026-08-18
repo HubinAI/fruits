@@ -15,9 +15,10 @@
  * - 非有限数、非正尺寸/半径/质量立即抛错。
  */
 import * as planck from 'planck';
-import type { OwnerTag } from '../core/types';
+import type { OwnerTag, ColliderDef } from '../core/types';
 import {
   SECONDS_PER_STEP,
+  PX_PER_M,
   pxToM,
   mToPx,
   pxPerStepToMps,
@@ -79,6 +80,18 @@ export interface PlanckCollisionFilter {
   groupIndex?: number;
 }
 
+/**
+ * 统一动态 Body 材质/过滤选项（B7A1）：Box / Circle / Polygon 共用。
+ * - friction: >= 0（默认 0）
+ * - restitution: 0..1（默认 0）
+ * - collisionFilter: 可选（默认全碰撞）
+ */
+export interface PlanckBodyOptions {
+  friction?: number;
+  restitution?: number;
+  collisionFilter?: PlanckCollisionFilter;
+}
+
 function createBodyHandle(): BodyHandle {
   return Object.freeze({ [BODY_HANDLE_KEY]: undefined }) as BodyHandle;
 }
@@ -89,9 +102,9 @@ function createJointHandle(): JointHandle {
 
 /** 合并 fixture def 与碰撞过滤（B2）：仅当传入 filter 时附加 category/mask/group 字段 */
 function filterFixtureDef(
-  base: { density?: number; friction?: number },
+  base: { density?: number; friction?: number; restitution?: number },
   filter?: PlanckCollisionFilter,
-): { density?: number; friction?: number; filterCategoryBits?: number; filterMaskBits?: number; filterGroupIndex?: number } {
+): { density?: number; friction?: number; restitution?: number; filterCategoryBits?: number; filterMaskBits?: number; filterGroupIndex?: number } {
   if (!filter) return base;
   return {
     ...base,
@@ -99,6 +112,100 @@ function filterFixtureDef(
     filterMaskBits: filter.maskBits,
     filterGroupIndex: filter.groupIndex ?? 0,
   };
+}
+
+/** 多边形有向面积（shoelace，单位与顶点一致） */
+function polygonAreaM2(verts: { x: number; y: number }[]): number {
+  let s = 0;
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i]!;
+    const b = verts[(i + 1) % verts.length]!;
+    s += a.x * b.y - b.x * a.y;
+  }
+  return s / 2;
+}
+
+/**
+ * 多边形顶点校验 + CCW 规范化（B7A1）：
+ * - 非有限 → 抛错；顶点数 <3 或 >8 → 抛错；
+ * - 零面积（含自交归零）→ 抛错；相邻共线/重复边 → 抛错；
+ * - 凹多边形 → 抛错；
+ * - 支持顺/逆时针：逆时针（CCW）保持，顺时针（CW）反转；
+ * - 统一 px→m 换算，返回 planck.Vec2[]。
+ */
+function normalizePolygonVertices(verticesPx: { x: number; y: number }[]): planck.Vec2[] {
+  const n = verticesPx.length;
+  for (const v of verticesPx) assertFinite(v.x, v.y);
+  if (n < 3 || n > 8) {
+    throw new Error(`PlanckWorld: 多边形顶点数必须为 3..8，收到 ${n}`);
+  }
+  // 凸性 + 方向（相邻叉积同号）
+  const cross = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }): number =>
+    (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+  let sign = 0;
+  for (let i = 0; i < n; i++) {
+    const c = cross(verticesPx[i]!, verticesPx[(i + 1) % n]!, verticesPx[(i + 2) % n]!);
+    if (Math.abs(c) < 1e-9) {
+      throw new Error(`PlanckWorld: 多边形存在重复边/共线顶点（索引 ${i}），拒绝`);
+    }
+    if (sign === 0) sign = Math.sign(c);
+    else if (Math.sign(c) !== sign) {
+      throw new Error('PlanckWorld: 凹多边形不被支持，拒绝');
+    }
+  }
+  const area = polygonAreaM2(verticesPx);
+  if (Math.abs(area) < 1e-9) {
+    throw new Error('PlanckWorld: 多边形面积为零，拒绝');
+  }
+  // CCW 规范化：CCW（area>0）保持，CW（area<0）反转
+  const ordered = area > 0 ? [...verticesPx] : [...verticesPx].reverse();
+  return ordered.map((v) => planck.Vec2(pxToM(v.x), pxToM(v.y)));
+}
+
+/**
+ * ColliderDef → Planck shape（B7A2，body 本地坐标）：
+ * - box → 4 角点（按 angle 旋转 + offset 平移，统一走 polygon 支持旋转）；
+ * - circle → CircleShape(offset 本地位置, radius)；
+ * - polygon → 顶点按 angle 旋转 + offset 平移；
+ * - 顶点在 px 空间变换后经 normalizePolygonVertices 校验/CCW 规范化/px→m。
+ */
+function colliderToShape(c: ColliderDef): planck.Shape {
+  const off = c.offset ?? { x: 0, y: 0 };
+  const ang = c.angle ?? 0;
+  if (c.shape === 'circle') {
+    const r = c.radius ?? 0;
+    if (!(r > 0)) throw new Error('PlanckWorld: circle collider radius 必须为正');
+    return planck.CircleShape(planck.Vec2(pxToM(off.x), pxToM(off.y)), pxToM(r));
+  }
+  let pts: { x: number; y: number }[];
+  if (c.shape === 'box') {
+    const w = c.width ?? 0;
+    const h = c.height ?? 0;
+    if (!(w > 0 && h > 0)) throw new Error('PlanckWorld: box collider width/height 必须为正');
+    pts = [
+      { x: -w / 2, y: -h / 2 },
+      { x: w / 2, y: -h / 2 },
+      { x: w / 2, y: h / 2 },
+      { x: -w / 2, y: h / 2 },
+    ];
+  } else {
+    pts = c.vertices ?? [];
+  }
+  // 先按 collider angle 旋转，再加 offset（px 空间）
+  const cos = Math.cos(ang);
+  const sin = Math.sin(ang);
+  const rotated = pts.map((v) => ({
+    x: v.x * cos - v.y * sin + off.x,
+    y: v.x * sin + v.y * cos + off.y,
+  }));
+  return planck.PolygonShape(normalizePolygonVertices(rotated));
+}
+
+/** Collider 面积（px²；offset/angle 不影响面积） */
+function colliderAreaPx2(c: ColliderDef): number {
+  if (c.shape === 'box') return (c.width ?? 0) * (c.height ?? 0);
+  if (c.shape === 'circle') return Math.PI * ((c.radius ?? 0) ** 2);
+  return Math.abs(polygonAreaM2(c.vertices ?? []));
 }
 
 function assertFinite(...values: number[]): void {
@@ -290,11 +397,11 @@ export class PlanckWorld {
     widthPx: number,
     heightPx: number,
     massKg: number,
-    options?: { collisionFilter?: PlanckCollisionFilter },
+    options?: PlanckBodyOptions,
   ): BodyHandle {
     assertFinite(xPx, yPx, widthPx, heightPx, massKg);
     assertPositive(widthPx, heightPx, massKg);
-    if (options?.collisionFilter) assertCollisionFilter(options.collisionFilter);
+    this.assertBodyOptions(options);
     const hw = pxToM(widthPx / 2);
     const hh = pxToM(heightPx / 2);
     // density = mass / shapeArea（shapeArea = width_m * height_m）
@@ -304,8 +411,9 @@ export class PlanckWorld {
       density,
       pxToM(xPx),
       pxToM(yPx),
-      0,
+      options?.friction ?? 0,
       options?.collisionFilter,
+      options?.restitution ?? 0,
     );
   }
 
@@ -314,16 +422,11 @@ export class PlanckWorld {
     yPx: number,
     radiusPx: number,
     massKg: number,
-    options?: { friction?: number; collisionFilter?: PlanckCollisionFilter },
+    options?: PlanckBodyOptions,
   ): BodyHandle {
     assertFinite(xPx, yPx, radiusPx, massKg);
     assertPositive(radiusPx, massKg);
-    if (options?.collisionFilter) assertCollisionFilter(options.collisionFilter);
-    const friction = options?.friction ?? 0;
-    assertFinite(friction);
-    if (friction < 0) {
-      throw new Error(`PlanckWorld: friction 必须 >= 0，收到 ${friction}`);
-    }
+    this.assertBodyOptions(options);
     const r = pxToM(radiusPx);
     const density = massKg / (Math.PI * r * r);
     return this.createBody(
@@ -331,9 +434,110 @@ export class PlanckWorld {
       density,
       pxToM(xPx),
       pxToM(yPx),
-      friction,
+      options?.friction ?? 0,
       options?.collisionFilter,
+      options?.restitution ?? 0,
     );
+  }
+
+  /**
+   * 动态多边形（B7A1）：
+   * - 顶点为相对 body 原点的本地 px，统一经 units.ts 换算；
+   * - 支持顺/逆时针（进入 Planck 前规范化为 CCW）；
+   * - 拒绝：非有限、顶点数 <3 或 >8、零面积、重复边（相邻共线）、凹多边形；
+   * - friction>=0、restitution∈[0,1]；density 按 mass/面积 使总质量等于传入 mass。
+   */
+  createDynamicPolygon(
+    xPx: number,
+    yPx: number,
+    verticesPx: { x: number; y: number }[],
+    massKg: number,
+    options?: PlanckBodyOptions,
+  ): BodyHandle {
+    assertFinite(xPx, yPx, massKg);
+    assertPositive(massKg);
+    this.assertBodyOptions(options);
+    const vertsM = normalizePolygonVertices(verticesPx); // 校验 + CCW 规范化 + px→m
+    const areaM2 = Math.abs(polygonAreaM2(vertsM));
+    const density = massKg / areaM2;
+    return this.createBody(
+      planck.PolygonShape(vertsM),
+      density,
+      pxToM(xPx),
+      pxToM(yPx),
+      options?.friction ?? 0,
+      options?.collisionFilter,
+      options?.restitution ?? 0,
+    );
+  }
+
+  /** Body 材质/过滤校验（B7A1）：friction>=0、restitution∈[0,1]、filter 走 assertCollisionFilter */
+  private assertBodyOptions(options?: PlanckBodyOptions): void {
+    if (!options) return;
+    if (options.friction !== undefined) {
+      assertFinite(options.friction);
+      if (options.friction < 0) {
+        throw new Error(`PlanckWorld: friction 必须 >= 0，收到 ${options.friction}`);
+      }
+    }
+    if (options.restitution !== undefined) {
+      assertFinite(options.restitution);
+      if (options.restitution < 0 || options.restitution > 1) {
+        throw new Error(`PlanckWorld: restitution 必须在 0..1，收到 ${options.restitution}`);
+      }
+    }
+    if (options.collisionFilter) assertCollisionFilter(options.collisionFilter);
+  }
+
+  /**
+   * 动态复合体（B7A2）：多个 ColliderDef 真实进入一个 native dynamic body 的多个 fixtures。
+   * - Box/Circle/Polygon、offset、angle 全部真实进入（box 旋转走 polygon）；
+   * - Polygon 顶点先按 angle 旋转再加 offset；禁止拆成多个 body / Weld；
+   * - 所有 fixtures 使用同一过滤/material 配置；
+   * - 按全部形状面积设置统一 density，使总质量严格等于 massKg；
+   * - 对外仍是一个不透明 BodyHandle。
+   */
+  createDynamicCompound(
+    xPx: number,
+    yPx: number,
+    colliders: ColliderDef[],
+    massKg: number,
+    options?: PlanckBodyOptions,
+  ): BodyHandle {
+    assertFinite(xPx, yPx, massKg);
+    assertPositive(massKg);
+    this.assertBodyOptions(options);
+    if (colliders.length === 0) {
+      throw new Error('PlanckWorld: compound 至少需要一个 collider');
+    }
+    let totalAreaPx2 = 0;
+    const shapes: planck.Shape[] = [];
+    for (const c of colliders) {
+      totalAreaPx2 += colliderAreaPx2(c);
+      shapes.push(colliderToShape(c));
+    }
+    if (!(totalAreaPx2 > 0)) {
+      throw new Error('PlanckWorld: compound 总面积必须为正');
+    }
+    // 统一 density：总质量 / 总面积（m²）
+    const density = massKg / (totalAreaPx2 / (PX_PER_M * PX_PER_M));
+    const native = this.world.createBody({
+      type: 'dynamic',
+      position: planck.Vec2(pxToM(xPx), pxToM(yPx)),
+    });
+    const base = {
+      density,
+      friction: options?.friction ?? 0,
+      restitution: options?.restitution ?? 0,
+    };
+    for (const s of shapes) {
+      native.createFixture(s, filterFixtureDef(base, options?.collisionFilter));
+    }
+    const handle = createBodyHandle();
+    this.bodies.set(handle, native);
+    this.bodyByNative.set(native, handle);
+    this.bodySeq.set(handle, this.nextSeq++);
+    return handle;
   }
 
   /** 静态矩形地面（碰撞静止；同 handle 管理，可被查询但不参与动态求解） */
@@ -462,13 +666,14 @@ export class PlanckWorld {
     yM: number,
     friction = 0,
     collisionFilter?: PlanckCollisionFilter,
+    restitution = 0,
   ): BodyHandle {
     const native = this.world.createBody({
       type: 'dynamic',
       position: planck.Vec2(xM, yM),
     });
     // 未传 collisionFilter 时不预设任何碰撞过滤（默认全碰撞，Planck 行为）
-    native.createFixture(shape, filterFixtureDef({ density, friction }, collisionFilter));
+    native.createFixture(shape, filterFixtureDef({ density, friction, restitution }, collisionFilter));
     const handle = createBodyHandle();
     this.bodies.set(handle, native);
     this.bodyByNative.set(native, handle);
@@ -553,6 +758,12 @@ export class PlanckWorld {
 
   getMass(body: BodyHandle): number {
     return this.bodyOf(body).getMass();
+  }
+
+  /** 真实世界 COM（B7A2）：复合体按各 fixture 面积/密度计算的重心，px 坐标 */
+  getCenterOfMass(body: BodyHandle): { x: number; y: number } {
+    const c = this.bodyOf(body).getWorldCenter();
+    return { x: mToPx(c.x), y: mToPx(c.y) };
   }
 
   /**
