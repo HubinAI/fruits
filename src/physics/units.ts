@@ -7,11 +7,12 @@
  * 3. 游戏层角速度继续使用 rad/fixed-step（每物理步弧度）。
  * 4. Planck 内部使用 m、m/s、rad/s（MKS 体系）。
  * 5. 项目继续采用 Y 轴向下，不在换算层翻转符号（正负号原样透传）。
- * 6. 本文件不定义 force、torque、impulse 的换算；这些必须
- *    在后续「动力标定」队列中单独确定，禁止猜测。
+ * 6. 扭矩换算：仅「圆盘惯量 0.5·m·r² + τ=I·α」这一条路径已由
+ *    Queue F-02M-B10D1（Planck 双向驱动动力标定）实测验证，可安全使用；
+ *    通用 force / impulse 换算仍未标定，禁止猜测。
  *
  * 上层代码不直接感知 Planck 单位：所有换算只在物理适配层（PlanckWorld
- * 及其配套）内发生。任何需要 force/torque/impulse 换算的地方，
+ * 及其配套）内发生。任何未经验证的 force/torque/impulse 换算，
  * 在动力标定完成前不得落地。
  */
 
@@ -52,4 +53,33 @@ export function radPerStepToRadPerSec(w: number): number {
 /** rad/s → rad/fixed-step（Planck 角速度 → 游戏层角速度） */
 export function radPerSecToRadPerStep(w: number): number {
   return w / PHYSICS_HZ;
+}
+
+/**
+ * RPM → rad/fixed-step（电机标称转速 → 游戏层角速度）。
+ * 公式：rpm × 2π / 60 / PHYSICS_HZ；正负号与 0 原样透传，不隐藏任何倍率。
+ */
+export function rpmToRadPerStep(rpm: number): number {
+  return (rpm * 2 * Math.PI) / 60 / PHYSICS_HZ;
+}
+
+/** rad/fixed-step → RPM（上式的精确逆换算；正负号与 0 原样透传） */
+export function radPerStepToRpm(radPerStep: number): number {
+  return (radPerStep * 60 * PHYSICS_HZ) / (2 * Math.PI);
+}
+
+/**
+ * 实心圆盘绕中心轴的转动惯量（kg·m²）。
+ * 公式：0.5 × massKg × pxToM(radiusPx)²；输入为游戏层半径（px）。
+ */
+export function solidDiskInertiaKgM2(massKg: number, radiusPx: number): number {
+  return 0.5 * massKg * pxToM(radiusPx) ** 2;
+}
+
+/** 角加速度 → 扭矩（N·m）：τ = I × α（B10D1 已验证路径） */
+export function angularAccelerationToTorqueNm(
+  alphaRadPerSec2: number,
+  inertiaKgM2: number,
+): number {
+  return inertiaKgM2 * alphaRadPerSec2;
 }

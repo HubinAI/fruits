@@ -17,6 +17,10 @@ import {
   mpsToPxPerStep,
   radPerStepToRadPerSec,
   radPerSecToRadPerStep,
+  rpmToRadPerStep,
+  radPerStepToRpm,
+  solidDiskInertiaKgM2,
+  angularAccelerationToTorqueNm,
 } from '../src/physics/units';
 
 describe('F-02M-A2 · 常量', () => {
@@ -75,5 +79,32 @@ describe('F-02M-A2 · 往返误差（正/负/0）', () => {
     expect(pxToM(-50)).toBeLessThan(0);
     expect(pxPerStepToMps(-1)).toBeLessThan(0);
     expect(radPerStepToRadPerSec(-2)).toBeLessThan(0);
+  });
+});
+
+describe('F-02M-B10A1 · 轮驱动力单位契约', () => {
+  it('300 RPM = 0.5235987756 rad/step', () => {
+    expect(rpmToRadPerStep(300)).toBeCloseTo(0.5235987756, 10);
+  });
+
+  it('RPM ↔ rad/step 对正数、负数、0 往返误差 < 1e-12', () => {
+    for (const rpm of [300, 100, -300, -100, 0, 1.5, -1.5]) {
+      const round = radPerStepToRpm(rpmToRadPerStep(rpm));
+      expect(Math.abs(round - rpm)).toBeLessThan(1e-12);
+    }
+    // 逆方向往返（rad/step → rpm → rad/step）
+    for (const w of [0.5235987756, -0.075, 0, 0.075]) {
+      const round = rpmToRadPerStep(radPerStepToRpm(w));
+      expect(Math.abs(round - w)).toBeLessThan(1e-12);
+    }
+  });
+
+  it('mass=10kg、radius=20px 的实心圆盘惯量为 0.2 kg·m²', () => {
+    // 0.5 × 10 × (20/100)² = 5 × 0.04 = 0.2
+    expect(solidDiskInertiaKgM2(10, 20)).toBeCloseTo(0.2, 12);
+  });
+
+  it('α=100 rad/s²、I=0.2 kg·m² → τ=20 N·m', () => {
+    expect(angularAccelerationToTorqueNm(100, 0.2)).toBeCloseTo(20, 12);
   });
 });
