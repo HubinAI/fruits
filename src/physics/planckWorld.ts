@@ -51,12 +51,39 @@ export interface ContactBridgeEvent {
   bodyB: BodyHandle;
 }
 
+/**
+ * 碰撞过滤配置（B2）：映射 Planck fixture 的 category/mask/group。
+ * - categoryBits: 1..0xffff（整数）
+ * - maskBits: 0..0xffff（整数）
+ * - groupIndex: 可选，-32768..32767（整数）；相同非零 groupIndex 时
+ *   正 = 强制碰撞、负 = 永不碰撞（此时 mask 被忽略，Planck 语义）。
+ */
+export interface PlanckCollisionFilter {
+  categoryBits: number;
+  maskBits: number;
+  groupIndex?: number;
+}
+
 function createBodyHandle(): BodyHandle {
   return Object.freeze({ [BODY_HANDLE_KEY]: undefined }) as BodyHandle;
 }
 
 function createJointHandle(): JointHandle {
   return Object.freeze({ [JOINT_HANDLE_KEY]: undefined }) as JointHandle;
+}
+
+/** 合并 fixture def 与碰撞过滤（B2）：仅当传入 filter 时附加 category/mask/group 字段 */
+function filterFixtureDef(
+  base: { density?: number; friction?: number },
+  filter?: PlanckCollisionFilter,
+): { density?: number; friction?: number; filterCategoryBits?: number; filterMaskBits?: number; filterGroupIndex?: number } {
+  if (!filter) return base;
+  return {
+    ...base,
+    filterCategoryBits: filter.categoryBits,
+    filterMaskBits: filter.maskBits,
+    filterGroupIndex: filter.groupIndex ?? 0,
+  };
 }
 
 function assertFinite(...values: number[]): void {
@@ -72,6 +99,23 @@ function assertPositive(...values: number[]): void {
     if (!(v > 0)) {
       throw new Error(`PlanckWorld: 尺寸/半径/质量必须为正，收到 ${v}`);
     }
+  }
+}
+
+/** 碰撞过滤校验（B2）：category 1..0xffff、mask 0..0xffff、group -32768..32767，均须整数 */
+function assertCollisionFilter(f: PlanckCollisionFilter): void {
+  assertFinite(f.categoryBits, f.maskBits);
+  if (!Number.isInteger(f.categoryBits) || f.categoryBits < 1 || f.categoryBits > 0xffff) {
+    throw new Error(`PlanckWorld: categoryBits 必须是 1..0xffff 的整数，收到 ${f.categoryBits}`);
+  }
+  if (!Number.isInteger(f.maskBits) || f.maskBits < 0 || f.maskBits > 0xffff) {
+    throw new Error(`PlanckWorld: maskBits 必须是 0..0xffff 的整数，收到 ${f.maskBits}`);
+  }
+  if (
+    f.groupIndex !== undefined &&
+    (!Number.isInteger(f.groupIndex) || f.groupIndex < -32768 || f.groupIndex > 32767)
+  ) {
+    throw new Error(`PlanckWorld: groupIndex 必须是 -32768..32767 的整数，收到 ${f.groupIndex}`);
   }
 }
 
@@ -140,14 +184,23 @@ export class PlanckWorld {
     widthPx: number,
     heightPx: number,
     massKg: number,
+    options?: { collisionFilter?: PlanckCollisionFilter },
   ): BodyHandle {
     assertFinite(xPx, yPx, widthPx, heightPx, massKg);
     assertPositive(widthPx, heightPx, massKg);
+    if (options?.collisionFilter) assertCollisionFilter(options.collisionFilter);
     const hw = pxToM(widthPx / 2);
     const hh = pxToM(heightPx / 2);
     // density = mass / shapeArea（shapeArea = width_m * height_m）
     const density = massKg / (pxToM(widthPx) * pxToM(heightPx));
-    return this.createBody(planck.Box(hw, hh), density, pxToM(xPx), pxToM(yPx));
+    return this.createBody(
+      planck.Box(hw, hh),
+      density,
+      pxToM(xPx),
+      pxToM(yPx),
+      0,
+      options?.collisionFilter,
+    );
   }
 
   createDynamicCircle(
@@ -155,10 +208,11 @@ export class PlanckWorld {
     yPx: number,
     radiusPx: number,
     massKg: number,
-    options?: { friction?: number },
+    options?: { friction?: number; collisionFilter?: PlanckCollisionFilter },
   ): BodyHandle {
     assertFinite(xPx, yPx, radiusPx, massKg);
     assertPositive(radiusPx, massKg);
+    if (options?.collisionFilter) assertCollisionFilter(options.collisionFilter);
     const friction = options?.friction ?? 0;
     assertFinite(friction);
     if (friction < 0) {
@@ -166,7 +220,14 @@ export class PlanckWorld {
     }
     const r = pxToM(radiusPx);
     const density = massKg / (Math.PI * r * r);
-    return this.createBody(planck.Circle(r), density, pxToM(xPx), pxToM(yPx), friction);
+    return this.createBody(
+      planck.Circle(r),
+      density,
+      pxToM(xPx),
+      pxToM(yPx),
+      friction,
+      options?.collisionFilter,
+    );
   }
 
   /** 静态矩形地面（碰撞静止；同 handle 管理，可被查询但不参与动态求解） */
@@ -175,16 +236,21 @@ export class PlanckWorld {
     yPx: number,
     widthPx: number,
     heightPx: number,
+    options?: { collisionFilter?: PlanckCollisionFilter },
   ): BodyHandle {
     assertFinite(xPx, yPx, widthPx, heightPx);
     assertPositive(widthPx, heightPx);
+    if (options?.collisionFilter) assertCollisionFilter(options.collisionFilter);
     const hw = pxToM(widthPx / 2);
     const hh = pxToM(heightPx / 2);
     const native = this.world.createBody({
       type: 'static',
       position: planck.Vec2(pxToM(xPx), pxToM(yPx)),
     });
-    native.createFixture(planck.Box(hw, hh), { friction: 1 });
+    native.createFixture(
+      planck.Box(hw, hh),
+      filterFixtureDef({ friction: 1 }, options?.collisionFilter),
+    );
     const handle = createBodyHandle();
     this.bodies.set(handle, native);
     this.bodyByNative.set(native, handle);
@@ -256,13 +322,14 @@ export class PlanckWorld {
     xM: number,
     yM: number,
     friction = 0,
+    collisionFilter?: PlanckCollisionFilter,
   ): BodyHandle {
     const native = this.world.createBody({
       type: 'dynamic',
       position: planck.Vec2(xM, yM),
     });
-    // 不预设任何碰撞过滤：碰撞分组留给后续 Meta/Category 队列
-    native.createFixture(shape, { density, friction });
+    // 未传 collisionFilter 时不预设任何碰撞过滤（默认全碰撞，Planck 行为）
+    native.createFixture(shape, filterFixtureDef({ density, friction }, collisionFilter));
     const handle = createBodyHandle();
     this.bodies.set(handle, native);
     this.bodyByNative.set(native, handle);
