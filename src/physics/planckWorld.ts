@@ -163,6 +163,34 @@ function normalizePolygonVertices(verticesPx: { x: number; y: number }[]): planc
 }
 
 /**
+ * Collider 输入统一校验（B7R）：在计算面积 / 创建 shape 之前执行，
+ * 杜绝 NaN/Infinity 进入 density 或 Planck。
+ * - Box：width/height/offset/angle 必须有限，尺寸必须为正；
+ * - Circle：radius/offset/angle 必须有限，radius 必须为正；
+ * - Polygon：offset/angle 必须有限（顶点继续走 normalizePolygonVertices 严格校验）。
+ */
+function validateCollider(c: ColliderDef): void {
+  const off = c.offset ?? { x: 0, y: 0 };
+  assertFinite(off.x, off.y);
+  assertFinite(c.angle ?? 0);
+  if (c.shape === 'box') {
+    const w = c.width ?? 0;
+    const h = c.height ?? 0;
+    assertFinite(w, h);
+    if (!(w > 0 && h > 0)) {
+      throw new Error(`PlanckWorld: box collider width/height 必须为正，收到 ${w}/${h}`);
+    }
+  } else if (c.shape === 'circle') {
+    const r = c.radius ?? 0;
+    assertFinite(r);
+    if (!(r > 0)) {
+      throw new Error(`PlanckWorld: circle collider radius 必须为正，收到 ${r}`);
+    }
+  }
+  // polygon：顶点校验由 normalizePolygonVertices 承担（offset/angle 已在此校验）
+}
+
+/**
  * ColliderDef → Planck shape（B7A2，body 本地坐标）：
  * - box → 4 角点（按 angle 旋转 + offset 平移，统一走 polygon 支持旋转）；
  * - circle → CircleShape(offset 本地位置, radius)；
@@ -513,6 +541,7 @@ export class PlanckWorld {
     let totalAreaPx2 = 0;
     const shapes: planck.Shape[] = [];
     for (const c of colliders) {
+      validateCollider(c); // B7R：统一边界校验（面积/shape 创建前）
       totalAreaPx2 += colliderAreaPx2(c);
       shapes.push(colliderToShape(c));
     }

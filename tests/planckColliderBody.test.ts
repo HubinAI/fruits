@@ -9,7 +9,7 @@
  * 5. 非法 material：friction<0、restitution<0、restitution>1 抛错。
  */
 import { describe, it, expect } from 'vitest';
-import { PlanckWorld, type BodyHandle } from '../src/physics/planckWorld';
+import { PlanckWorld, type BodyHandle, type ContactBridgeEvent } from '../src/physics/planckWorld';
 
 /** 项目现有 wedgeBody 轮廓（content.ts，相对原点本地 px） */
 const WEDGE = [
@@ -142,5 +142,108 @@ describe('F-02M-B7A1 · Planck Polygon Body', () => {
     expect(world.getOwnerTag(body)).toEqual({ kind: 'vehicle', vehicleId: 'compound-test', team: 'A' });
     expect(world.getMass(body)).toBeCloseTo(100, 6); // tag 后仍单一 handle
     console.log('[B7A2-1] OwnerTag 单一 handle 往返 OK');
+  });
+
+  it('Compound 多 fixture 真实接触：所有 begin 返回同一 BodyHandle/同一 OwnerTag', () => {
+    const world = new PlanckWorld({ x: 0, y: 10 });
+    world.createStaticGround(0, 700, 4000, 80);
+    const body = world.createDynamicCompound(
+      0,
+      400,
+      [
+        { shape: 'box', width: 40, height: 40, offset: { x: 0, y: 0 } },
+        { shape: 'circle', radius: 10, offset: { x: 25, y: 0 } },
+        {
+          shape: 'polygon',
+          vertices: [
+            { x: -10, y: -10 },
+            { x: 10, y: -10 },
+            { x: 10, y: 10 },
+            { x: -10, y: 10 },
+          ],
+          offset: { x: -25, y: 0 },
+        },
+      ],
+      50,
+    );
+    const tag = { kind: 'vehicle', vehicleId: 'compound-c', team: 'A' } as const;
+    world.setOwnerTag(body, tag);
+
+    const begins: ContactBridgeEvent[] = [];
+    world.setContactListener((e) => {
+      if (e.phase === 'begin') begins.push(e);
+    });
+    for (let i = 0; i < 300; i++) world.stepFixed(1);
+
+    // 至少一个 begin 涉及 compound（真实碰撞发生，不伪造）
+    const related = begins.filter((e) => e.bodyA === body || e.bodyB === body);
+    expect(related.length).toBeGreaterThan(0);
+    // 所有 fixture 接触对外均返回同一个 Compound BodyHandle，可读取同一 OwnerTag
+    for (const e of related) {
+      const h = e.bodyA === body ? e.bodyA : e.bodyB;
+      expect(h).toBe(body);
+      expect(world.getOwnerTag(h)).toEqual(tag);
+    }
+    console.log(`[B7R-1] compound 相关 begin=${related.length} 全部同一 handle/同一 OwnerTag`);
+  });
+
+  it('Circle/Box/Polygon 的 NaN/Infinity 输入全部拒绝（compound 内）', () => {
+    const world = new PlanckWorld();
+    const off0 = { x: 0, y: 0 };
+    // circle：radius / offset / angle 非有限
+    expect(() =>
+      world.createDynamicCompound(0, 0, [{ shape: 'circle', radius: NaN, offset: off0 }], 5),
+    ).toThrow();
+    expect(() =>
+      world.createDynamicCompound(0, 0, [{ shape: 'circle', radius: Infinity, offset: off0 }], 5),
+    ).toThrow();
+    expect(() =>
+      world.createDynamicCompound(0, 0, [{ shape: 'circle', radius: 10, offset: { x: NaN, y: 0 } }], 5),
+    ).toThrow();
+    expect(() =>
+      world.createDynamicCompound(0, 0, [{ shape: 'circle', radius: 10, offset: off0, angle: Infinity }], 5),
+    ).toThrow();
+    // box：尺寸非正 / offset / angle 非有限
+    expect(() =>
+      world.createDynamicCompound(0, 0, [{ shape: 'box', width: 0, height: 10, offset: off0 }], 5),
+    ).toThrow();
+    expect(() =>
+      world.createDynamicCompound(0, 0, [{ shape: 'box', width: 10, height: 10, offset: { x: Infinity, y: 0 } }], 5),
+    ).toThrow();
+    expect(() =>
+      world.createDynamicCompound(0, 0, [{ shape: 'box', width: 10, height: 10, offset: off0, angle: NaN }], 5),
+    ).toThrow();
+    // polygon：offset / angle 非有限
+    expect(() =>
+      world.createDynamicCompound(
+        0,
+        0,
+        [
+          {
+            shape: 'polygon',
+            vertices: [
+              { x: -10, y: -10 },
+              { x: 10, y: -10 },
+              { x: 10, y: 10 },
+              { x: -10, y: 10 },
+            ],
+            offset: { x: 0, y: NaN },
+          },
+        ],
+        5,
+      ),
+    ).toThrow();
+    // 合法 compound 仍正常（边界校验不破坏合法输入）
+    const ok = world.createDynamicCompound(
+      0,
+      0,
+      [
+        { shape: 'box', width: 20, height: 20, offset: off0 },
+        { shape: 'circle', radius: 8, offset: { x: 15, y: 0 }, angle: 0.1 },
+      ],
+      10,
+    );
+    expect(world.getMass(ok)).toBeCloseTo(10, 6);
+    console.log('[B7R-2] 8 类非法 collider 输入全部拒绝；合法 compound 正常');
   });
 });
