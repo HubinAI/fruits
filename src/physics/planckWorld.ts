@@ -569,6 +569,67 @@ export class PlanckWorld {
     return handle;
   }
 
+  /**
+   * 静态矩形（B12A）：真实 Planck static body——不受重力/力影响，位置恒定。
+   * 与动态 body 共用 px↔m 换算、参数校验、材质与 collisionFilter；
+   * opaque handle 注册、跨 World 防护与现有 body 映射规则完全一致。
+   * density 传 0：static body 不参与质量计算，fixture 密度无质量影响。
+   */
+  createStaticBox(
+    xPx: number,
+    yPx: number,
+    widthPx: number,
+    heightPx: number,
+    options?: PlanckBodyOptions,
+  ): BodyHandle {
+    assertFinite(xPx, yPx, widthPx, heightPx);
+    assertPositive(widthPx, heightPx);
+    this.assertBodyOptions(options);
+    const hw = pxToM(widthPx / 2);
+    const hh = pxToM(heightPx / 2);
+    return this.createBody(
+      planck.Box(hw, hh),
+      0,
+      pxToM(xPx),
+      pxToM(yPx),
+      options?.friction ?? 0,
+      options?.collisionFilter,
+      options?.restitution ?? 0,
+      'static',
+    );
+  }
+
+  /**
+   * 运动学矩形（B12A）：真实 Planck kinematic body——不受重力/力影响，
+   * 可通过现有 setLinearVelocity 以恒定速度驱动（碰撞时推动 dynamic body）。
+   * 与动态 body 共用 px↔m 换算、参数校验、材质与 collisionFilter；
+   * opaque handle 注册、跨 World 防护与现有 body 映射规则完全一致。
+   * density 传 0：kinematic body 质量无限语义，fixture 密度无质量影响。
+   */
+  createKinematicBox(
+    xPx: number,
+    yPx: number,
+    widthPx: number,
+    heightPx: number,
+    options?: PlanckBodyOptions,
+  ): BodyHandle {
+    assertFinite(xPx, yPx, widthPx, heightPx);
+    assertPositive(widthPx, heightPx);
+    this.assertBodyOptions(options);
+    const hw = pxToM(widthPx / 2);
+    const hh = pxToM(heightPx / 2);
+    return this.createBody(
+      planck.Box(hw, hh),
+      0,
+      pxToM(xPx),
+      pxToM(yPx),
+      options?.friction ?? 0,
+      options?.collisionFilter,
+      options?.restitution ?? 0,
+      'kinematic',
+    );
+  }
+
   /** 静态矩形地面（碰撞静止；同 handle 管理，可被查询但不参与动态求解） */
   createStaticGround(
     xPx: number,
@@ -577,24 +638,11 @@ export class PlanckWorld {
     heightPx: number,
     options?: { collisionFilter?: PlanckCollisionFilter },
   ): BodyHandle {
-    assertFinite(xPx, yPx, widthPx, heightPx);
-    assertPositive(widthPx, heightPx);
-    if (options?.collisionFilter) assertCollisionFilter(options.collisionFilter);
-    const hw = pxToM(widthPx / 2);
-    const hh = pxToM(heightPx / 2);
-    const native = this.world.createBody({
-      type: 'static',
-      position: planck.Vec2(pxToM(xPx), pxToM(yPx)),
+    // 委托 createStaticBox（B12A）：保持原 friction=1、过滤及所有既有行为不变
+    return this.createStaticBox(xPx, yPx, widthPx, heightPx, {
+      friction: 1,
+      collisionFilter: options?.collisionFilter,
     });
-    native.createFixture(
-      planck.Box(hw, hh),
-      filterFixtureDef({ friction: 1 }, options?.collisionFilter),
-    );
-    const handle = createBodyHandle();
-    this.bodies.set(handle, native);
-    this.bodyByNative.set(native, handle);
-    this.bodySeq.set(handle, this.nextSeq++);
-    return handle;
   }
 
   createRevoluteJoint(
@@ -696,9 +744,10 @@ export class PlanckWorld {
     friction = 0,
     collisionFilter?: PlanckCollisionFilter,
     restitution = 0,
+    bodyType: 'static' | 'kinematic' | 'dynamic' = 'dynamic',
   ): BodyHandle {
     const native = this.world.createBody({
-      type: 'dynamic',
+      type: bodyType,
       position: planck.Vec2(xM, yM),
     });
     // 未传 collisionFilter 时不预设任何碰撞过滤（默认全碰撞，Planck 行为）

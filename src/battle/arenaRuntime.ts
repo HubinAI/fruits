@@ -7,45 +7,15 @@ import type { Body } from 'matter-js';
 import type { BattlePhase } from '../core/types';
 import { Category, PhysWorld, createBox, setMeta, setStatic, setVelocity } from '../physics/adapter';
 import { ArenaPhaseClock } from './arenaPhase';
+import { DEFAULT_ARENA_CONFIG, type ArenaConfig } from './arenaConfig';
 
-export interface ArenaConfig {
-  /** 墙内宽度 */
-  width: number;
-  /** 墙内高度 */
-  height: number;
-  /** 地面顶部 y（车辆落点参考） */
-  groundY: number;
-  wallThickness: number;
-  /** 阶段时长（ms） */
-  phases: {
-    activeMs: number;
-    warningMs: number;
-    closingMs: number;
-  };
-  /** Closing 刺墙推进速度（px/s）。骨架阶段默认较慢，不精调节奏。 */
-  closingSpeed: number;
-  /** Projectile Bounds（顶部越界销毁） */
-  projectileTopY: number;
-}
+/** 引擎中立 Arena 配置（B12B：自 arenaConfig.ts 重新导出，保持既有调用方兼容） */
+export type { ArenaConfig } from './arenaConfig';
 
 export interface ClosingWall {
   body: Body;
   side: 'left' | 'right';
 }
-
-const DEFAULT_ARENA: ArenaConfig = {
-  width: 1600,
-  height: 900,
-  groundY: 700,
-  wallThickness: 60,
-  phases: {
-    activeMs: 10_000,
-    warningMs: 3_000,
-    closingMs: 5_000,
-  },
-  closingSpeed: 40,
-  projectileTopY: -50,
-};
 
 export class ArenaRuntime {
   readonly config: ArenaConfig;
@@ -58,7 +28,7 @@ export class ArenaRuntime {
   private readonly phaseClock: ArenaPhaseClock;
 
   constructor(world: PhysWorld, config: Partial<ArenaConfig> = {}) {
-    this.config = { ...DEFAULT_ARENA, ...config };
+    this.config = { ...DEFAULT_ARENA_CONFIG, ...config };
     this.phaseClock = new ArenaPhaseClock({
       activeMs: this.config.phases.activeMs,
       warningMs: this.config.phases.warningMs,

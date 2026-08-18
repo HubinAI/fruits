@@ -175,3 +175,68 @@ describe('F-02M-A3 · 5. stepFixed 非法步数抛错', () => {
     world.stepFixed();
   });
 });
+
+describe('F-02M-B12A · Static Box', () => {
+  it('有重力世界推进 120 步后位置保持不变、速度恒 0', () => {
+    const world = new PlanckWorld({ x: 0, y: 10 });
+    const s = world.createStaticBox(100, 600, 200, 20);
+    const p0 = world.getPosition(s);
+    expect(p0.x).toBeCloseTo(100, 9);
+    expect(p0.y).toBeCloseTo(600, 9);
+    for (let i = 0; i < 120; i++) world.stepFixed(1);
+    const p1 = world.getPosition(s);
+    console.log(`[B12A-static] p0=(${p0.x},${p0.y}) p1=(${p1.x},${p1.y})`);
+    expect(p1.x).toBeCloseTo(p0.x, 9);
+    expect(p1.y).toBeCloseTo(p0.y, 9);
+    const v = world.getLinearVelocity(s);
+    expect(v.x).toBeCloseTo(0, 9);
+    expect(v.y).toBeCloseTo(0, 9);
+  });
+});
+
+describe('F-02M-B12A · Kinematic Box', () => {
+  it('有重力世界以 0.5px/step 水平运动 120 步：x≈+60、y 不漂移、速度仍≈0.5', () => {
+    const world = new PlanckWorld({ x: 0, y: 10 });
+    const k = world.createKinematicBox(0, 0, 50, 30);
+    world.setLinearVelocity(k, 0.5, 0);
+    const p0 = world.getPosition(k);
+    expect(p0.x).toBeCloseTo(0, 9);
+    expect(p0.y).toBeCloseTo(0, 9);
+    for (let i = 0; i < 120; i++) world.stepFixed(1);
+    const p1 = world.getPosition(k);
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    const v = world.getLinearVelocity(k);
+    console.log(
+      `[B12A-kin] dx=${dx.toFixed(6)} dy=${dy.toFixed(6)} vx=${v.x.toFixed(6)} vy=${v.y.toFixed(6)}`,
+    );
+    expect(Math.abs(dx - 60)).toBeLessThan(0.01);
+    expect(Math.abs(dy)).toBeLessThan(1e-9);
+    expect(Math.abs(v.x - 0.5)).toBeLessThan(1e-9);
+    expect(Math.abs(v.y)).toBeLessThan(1e-9);
+  });
+});
+
+describe('F-02M-B12A · 非法输入抛错', () => {
+  it('静态/运动学矩形：非法尺寸/材质/过滤继续抛错', () => {
+    const world = new PlanckWorld();
+    // 非法尺寸（非有限/非正）
+    expect(() => world.createStaticBox(NaN, 0, 10, 10)).toThrow();
+    expect(() => world.createStaticBox(0, 0, -10, 10)).toThrow();
+    expect(() => world.createStaticBox(0, 0, 10, 0)).toThrow();
+    expect(() => world.createKinematicBox(0, 0, 10, Infinity)).toThrow();
+    expect(() => world.createKinematicBox(0, 0, -5, 10)).toThrow();
+    // 非法材质
+    expect(() => world.createStaticBox(0, 0, 10, 10, { friction: -1 })).toThrow();
+    expect(() => world.createStaticBox(0, 0, 10, 10, { restitution: 1.5 })).toThrow();
+    expect(() => world.createKinematicBox(0, 0, 10, 10, { friction: -2 })).toThrow();
+    expect(() => world.createKinematicBox(0, 0, 10, 10, { restitution: -0.1 })).toThrow();
+    // 非法过滤
+    expect(() =>
+      world.createStaticBox(0, 0, 10, 10, { collisionFilter: { categoryBits: 0, maskBits: 0xffff } }),
+    ).toThrow();
+    expect(() =>
+      world.createKinematicBox(0, 0, 10, 10, { collisionFilter: { categoryBits: 0x10000, maskBits: 0xffff } }),
+    ).toThrow();
+  });
+});
