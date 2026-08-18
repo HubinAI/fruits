@@ -99,13 +99,12 @@ describe('F-02M-B8A · Planck Vehicle Chassis 装配（body-only wedge）', () =
     const comA = world.getCenterOfMass(a.body);
     const comB = world.getCenterOfMass(b.body);
 
-    // x 镜像：初始位置关于 y 轴对称摆放 → B.COM.x = -A.COM.x
-    expect(comB.x).toBeCloseTo(-comA.x, 3);
-    // y：wedge 非上下对称，镜像后局部 y 质心必然改变（实测 A 局部 +0.53 → B 局部 +7.97），
-    // 用它证明顶点确实被镜像（若未镜像则 y 应与 A 相同）
-    const localAy = comA.y - 200;
-    const localBy = comB.y - 200;
-    expect(Math.abs(localBy - localAy)).toBeGreaterThan(1);
+    // 局部质心（相对各自初始位置：A=(100,200)、B=(-100,200)）
+    const localA = { x: comA.x - 100, y: comA.y - 200 };
+    const localB = { x: comB.x - -100, y: comB.y - 200 };
+    // 镜像正确性（关于 y 轴）：X 取反、Y 严格保持（y 质心在反射下不变）
+    expect(localB.x).toBeCloseTo(-localA.x, 3);
+    expect(localB.y).toBeCloseTo(localA.y, 3);
     // B 前鼻指向左 → 局部 COM.x > 0（镜像后重心偏 +x，全局 > -100）
     expect(comB.x).toBeGreaterThan(-100);
 

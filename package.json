@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "《最强水果》Phase 01 — Physics Foundation / Battle Runtime / Physics Lab",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -20,6 +23,6 @@
   },
   "dependencies": {
     "matter-js": "^0.20.0",
-    "planck": "1.4.2"
+    "planck": "1.4.3"
   }
 }
