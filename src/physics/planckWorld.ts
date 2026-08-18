@@ -51,6 +51,9 @@ export interface JointHandle {
  * - relativeVelocity：(vPointA − vPointB)·normal，经 mpsToPxPerStep 换算，
  *   正值 = 相互靠近；不取绝对值、不强制截零。
  * - begin 快照按 Contact 私有缓存，end 复用同一快照（避免分离时 manifold 失效）。
+ *
+ * 批次（B4A）：仅批次监听（setBatchedContactListener）派发的事件携带 batch；
+ * 即时监听（setContactListener）的事件 batch 恒为 undefined（绝不被延迟）。
  */
 export interface ContactBridgeEvent {
   phase: 'begin' | 'end';
@@ -59,6 +62,8 @@ export interface ContactBridgeEvent {
   contactPoint: { x: number; y: number };
   normal: { x: number; y: number };
   relativeVelocity: number;
+  /** 批次边界（仅批次监听）：同物理步同 phase 共享 timestamp/size，index 连续 0..size-1 */
+  batch?: { timestamp: number; index: number; size: number };
 }
 
 /**
@@ -155,6 +160,12 @@ export class PlanckWorld {
   private readonly bodySeq = new Map<BodyHandle, number>();
   private nextSeq = 1;
   private contactListener: ((e: ContactBridgeEvent) => void) | null = null;
+  /** 批次监听（B4A）：每个原生 world.step 完成后统一派发；与即时监听可并存 */
+  private batchedListener: ((e: ContactBridgeEvent) => void) | null = null;
+  /** 本物理步缓存的事件（B4A）：下一步开始前必须清空并派发，stepFixed(n) 不得跨步合并 */
+  private readonly batchedEvents: ContactBridgeEvent[] = [];
+  /** 单调物理步计数（B4A）：timestamp = physicsStep × SECONDS_PER_STEP × 1000（禁 Date.now） */
+  private physicsStep = 0;
   /** begin 快照按 Contact 私有缓存（B3）：end 使用对应 begin 快照并清理 */
   private readonly contactSnapshots = new Map<planck.Contact, ContactSnapshot>();
 
@@ -174,13 +185,25 @@ export class PlanckWorld {
   /**
    * 设置接触事件监听（A5）。同一对物体的 begin/end 通过内部序号规范化
    * bodyA/bodyB 顺序，与碰撞检测的 fixture 顺序无关。
+   * 即时监听：事件在每个原生接触回调内同步派发，batch 恒为 undefined。
    */
   setContactListener(cb: ((e: ContactBridgeEvent) => void) | null): void {
     this.contactListener = cb;
   }
 
+  /**
+   * 批次监听（B4A）：事件在每个原生 world.step 完成后统一派发。
+   * - 同一物理步、同一 phase 的事件共享 timestamp/size，index 按回调顺序连续 0..size-1；
+   * - begin/end 分别计数；timestamp = physicsStep × SECONDS_PER_STEP × 1000（单调，禁 Date.now）；
+   * - 可单独使用；与即时监听并存时不重复、不改变运动学快照。
+   */
+  setBatchedContactListener(cb: ((e: ContactBridgeEvent) => void) | null): void {
+    this.batchedListener = cb;
+    if (!cb) this.batchedEvents.length = 0;
+  }
+
   private emitContact(phase: 'begin' | 'end', contact: planck.Contact): void {
-    if (!this.contactListener) return;
+    if (!this.contactListener && !this.batchedListener) return;
     const nativeA = contact.getFixtureA().getBody();
     const nativeB = contact.getFixtureB().getBody();
     const ha = this.bodyByNative.get(nativeA);
@@ -194,7 +217,10 @@ export class PlanckWorld {
     if (phase === 'begin') {
       const snap = this.buildContactSnapshot(contact, nativeA, nativeB, swap);
       this.contactSnapshots.set(contact, snap);
-      this.contactListener({ phase, bodyA: a, bodyB: b, ...snap });
+      const ev: ContactBridgeEvent = { phase, bodyA: a, bodyB: b, ...snap };
+      // 即时监听立即派发（无 batch）；批次监听缓存（batch 在步末 flush 时填写）
+      this.contactListener?.(ev);
+      if (this.batchedListener) this.batchedEvents.push(ev);
     } else {
       const snap = this.contactSnapshots.get(contact);
       if (!snap) {
@@ -203,7 +229,9 @@ export class PlanckWorld {
         return;
       }
       this.contactSnapshots.delete(contact);
-      this.contactListener({ phase, bodyA: a, bodyB: b, ...snap });
+      const ev: ContactBridgeEvent = { phase, bodyA: a, bodyB: b, ...snap };
+      this.contactListener?.(ev);
+      if (this.batchedListener) this.batchedEvents.push(ev);
     }
   }
 
@@ -427,7 +455,27 @@ export class PlanckWorld {
     for (let i = 0; i < steps; i++) {
       // 单参数调用：使用 planck@1.4.2 锁定版本的默认 solver iterations（8/3）
       this.world.step(SECONDS_PER_STEP);
+      // 每原生物理步完成后独立派发批次（B4A）：stepFixed(n) 不得跨步合并
+      this.flushBatched();
     }
+  }
+
+  /** 每物理步末派发批次事件（B4A）；timestamp 单调物理步时间，begin/end 分别计数 */
+  private flushBatched(): void {
+    const ts = this.physicsStep * SECONDS_PER_STEP * 1000;
+    this.physicsStep++;
+    if (!this.batchedListener || this.batchedEvents.length === 0) return;
+    const beginCount = this.batchedEvents.filter((e) => e.phase === 'begin').length;
+    const endCount = this.batchedEvents.filter((e) => e.phase === 'end').length;
+    let bi = 0;
+    let ei = 0;
+    for (const ev of this.batchedEvents) {
+      const isBegin = ev.phase === 'begin';
+      const index = isBegin ? bi++ : ei++;
+      const size = isBegin ? beginCount : endCount;
+      this.batchedListener({ ...ev, batch: { timestamp: ts, index, size } });
+    }
+    this.batchedEvents.length = 0;
   }
 
   // ---------- 读取 / 写入（游戏层单位） ----------
