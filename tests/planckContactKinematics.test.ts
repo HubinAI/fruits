@@ -84,21 +84,56 @@ describe('F-02M-B3 · Planck Contact Kinematics', () => {
     expect(Math.abs(be.relativeVelocity - 1.0)).toBeLessThan(0.15);
   });
 
-  it('旋转接触：point relVel 明显大于 COM-only 投影（ω×r 已计入）', () => {
-    const { events, world, a, b } = collide(false, -0.5);
-    const begin = events.find((e) => e.phase === 'begin');
-    expect(begin).toBeDefined();
-    const be = begin!;
-    // 测试侧用公开 API 复算 COM-only 投影（事件后读取，供对比）
-    const comA = world.getLinearVelocity(a);
-    const comB = world.getLinearVelocity(b);
-    const comOnly = (comA.x - comB.x) * be.normal.x + (comA.y - comB.y) * be.normal.y;
+  it('旋转接触：begin 同刻 COM-only 与 relVel 差值 > 1（ω×r 已计入）', () => {
+    const world = new PlanckWorld(); // 零重力
+    let captured:
+      | { relVel: number; comOnly: number; spin: number; allFinite: boolean }
+      | undefined;
+    world.setContactListener((e) => {
+      if (e.phase !== 'begin' || captured) return;
+      // begin 同刻采样：按事件 bodyA/bodyB 与 normal 读取双方 COM 线速度与角速度
+      const vA = world.getLinearVelocity(e.bodyA);
+      const vB = world.getLinearVelocity(e.bodyB);
+      const wA = world.getAngularVelocity(e.bodyA);
+      const wB = world.getAngularVelocity(e.bodyB);
+      const comOnly = (vA.x - vB.x) * e.normal.x + (vA.y - vB.y) * e.normal.y;
+      captured = {
+        relVel: e.relativeVelocity,
+        comOnly,
+        spin: Math.max(Math.abs(wA), Math.abs(wB)),
+        allFinite: [
+          vA.x,
+          vA.y,
+          vB.x,
+          vB.y,
+          wA,
+          wB,
+          e.relativeVelocity,
+          e.normal.x,
+          e.normal.y,
+          e.contactPoint.x,
+          e.contactPoint.y,
+        ].every(Number.isFinite),
+      };
+    });
+
+    const a = world.createDynamicBox(-40, 0, 40, 40, 5);
+    const b = world.createDynamicBox(40, 0, 40, 40, 5);
+    world.setLinearVelocity(a, 0.5, 0);
+    world.setAngularVelocity(a, -0.5); // 旋转接触：接触点有 ω×r 贡献
+    for (let i = 0; i < 240; i++) world.stepFixed(1);
+
+    expect(captured).toBeDefined();
+    const c = captured!;
     console.log(
-      `[B3-3] relVel=${be.relativeVelocity.toFixed(4)} comOnly=${comOnly.toFixed(4)} ` +
-        `diff=${Math.abs(be.relativeVelocity - comOnly).toFixed(4)} ωA=${world.getAngularVelocity(a).toFixed(4)}`,
+      `[B3-3] relVel=${c.relVel.toFixed(4)} comOnly(同刻)=${c.comOnly.toFixed(4)} ` +
+        `diff=${Math.abs(c.relVel - c.comOnly).toFixed(4)} maxSpin=${c.spin.toFixed(4)} allFinite=${c.allFinite}`,
     );
-    expect(Number.isFinite(be.relativeVelocity)).toBe(true);
-    // ω×r 贡献明显（旋转接触点离 COM 有切向臂）
-    expect(Math.abs(be.relativeVelocity - comOnly)).toBeGreaterThan(1);
+    // 所有数值有限
+    expect(c.allFinite).toBe(true);
+    // 至少一方角速度非零（旋转确实发生）
+    expect(c.spin).toBeGreaterThan(0);
+    // 差值 > 1：事件 relVel 含 ω×r，严格区别于 COM-only 投影
+    expect(Math.abs(c.relVel - c.comOnly)).toBeGreaterThan(1);
   });
 });
