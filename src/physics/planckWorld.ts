@@ -840,6 +840,80 @@ export class PlanckWorld {
     return { x: mToPx(pos.x), y: mToPx(pos.y) };
   }
 
+  /**
+   * 直接设置 body 位置（B16A）：
+   * - 游戏层 px 坐标，经 units.ts 换算；
+   * - 校验有限数 + 本 World handle（bodyOf）；
+   * - 只改变位置，不改变角度、线速度、角速度，不注入伪速度。
+   */
+  setPosition(body: BodyHandle, xPx: number, yPx: number): void {
+    assertFinite(xPx, yPx);
+    const native = this.bodyOf(body);
+    native.setPosition(planck.Vec2(pxToM(xPx), pxToM(yPx)));
+  }
+
+  /**
+   * 全部 fixtures 合并后的真实世界几何 AABB（B16A），单位 px。
+   * - 用当前 body transform 实时计算（computeAABB），禁止依赖尚未同步的旧 broadphase AABB；
+   * - **几何边界语义（B16A-R1）**：polygon/box 排除 Planck collision skin（m_radius = 2×linearSlop）；
+   *   circle 半径属于真实几何，不额外扣除；
+   * - 覆盖 box / circle / polygon / compound / offset / body rotation；
+   * - 无 fixture 的 body 抛错；不暴露 Planck native 类型 / escape hatch。
+   */
+  getBounds(body: BodyHandle): { minX: number; minY: number; maxX: number; maxY: number } {
+    return this.computeWorldAABB(body, true);
+  }
+
+  /**
+   * 全部 fixtures 合并后的真实世界碰撞 AABB（B16A-R1），单位 px。
+   * - 直接合并各 fixture computeAABB 的原始结果，**包含 Planck polygon/box collision skin**；
+   *   circle 不虚构额外 skin（其 AABB 即真实半径）；
+   * - 用当前 transform 实时计算，不读取旧 broadphase AABB；
+   * - 校验本 World handle；不暴露 Planck native 类型 / escape hatch。
+   */
+  getCollisionBounds(body: BodyHandle): { minX: number; minY: number; maxX: number; maxY: number } {
+    return this.computeWorldAABB(body, false);
+  }
+
+  /** 共享 AABB 计算：subtractPolygonSkin=true 时对 PolygonShape 补偿 skin（几何边界），false 时保留（碰撞边界） */
+  private computeWorldAABB(
+    body: BodyHandle,
+    subtractPolygonSkin: boolean,
+  ): { minX: number; minY: number; maxX: number; maxY: number } {
+    const native = this.bodyOf(body);
+    const xf = native.getTransform();
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let f = native.getFixtureList(); f !== null; f = f.getNext()) {
+      const shape = f.getShape();
+      const aabb = new planck.AABB();
+      shape.computeAABB(aabb, xf, 0);
+      let lx = aabb.lowerBound.x;
+      let ly = aabb.lowerBound.y;
+      let ux = aabb.upperBound.x;
+      let uy = aabb.upperBound.y;
+      // 几何边界：PolygonShape 的 computeAABB 含 polygon skin（m_radius = 2×linearSlop ≈ 0.01m），
+      // 补偿回精确几何边界（circle 无 skin，不补偿）。
+      if (subtractPolygonSkin && shape instanceof planck.PolygonShape) {
+        const r = shape.getRadius();
+        lx += r;
+        ly += r;
+        ux -= r;
+        uy -= r;
+      }
+      minX = Math.min(minX, mToPx(lx));
+      minY = Math.min(minY, mToPx(ly));
+      maxX = Math.max(maxX, mToPx(ux));
+      maxY = Math.max(maxY, mToPx(uy));
+    }
+    if (!Number.isFinite(minX)) {
+      throw new Error('PlanckWorld: body 无任何 fixture，无法计算边界');
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
   getLinearVelocity(body: BodyHandle): { x: number; y: number } {
     const v = this.bodyOf(body).getLinearVelocity();
     return { x: mpsToPxPerStep(v.x), y: mpsToPxPerStep(v.y) };
