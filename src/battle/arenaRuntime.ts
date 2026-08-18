@@ -6,6 +6,7 @@
 import type { Body } from 'matter-js';
 import type { BattlePhase } from '../core/types';
 import { Category, PhysWorld, createBox, setMeta, setStatic, setVelocity } from '../physics/adapter';
+import { ArenaPhaseClock } from './arenaPhase';
 
 export interface ArenaConfig {
   /** 墙内宽度 */
@@ -53,11 +54,16 @@ export class ArenaRuntime {
   readonly rightWall: Body;
   readonly closingWalls: ClosingWall[] = [];
 
-  private _phase: BattlePhase = 'Active';
-  private phaseElapsed = 0;
+  /** 共享阶段时钟（B11A）；phase 与 setPhase 委托给它 */
+  private readonly phaseClock: ArenaPhaseClock;
 
   constructor(world: PhysWorld, config: Partial<ArenaConfig> = {}) {
     this.config = { ...DEFAULT_ARENA, ...config };
+    this.phaseClock = new ArenaPhaseClock({
+      activeMs: this.config.phases.activeMs,
+      warningMs: this.config.phases.warningMs,
+      closingMs: this.config.phases.closingMs,
+    });
 
     const t = this.config.wallThickness;
     const cx = this.config.width / 2;
@@ -118,39 +124,36 @@ export class ArenaRuntime {
   }
 
   get phase(): BattlePhase {
-    return this._phase;
+    return this.phaseClock.phase;
   }
 
-  /** 每步推进阶段计时与 Closing 推进 */
+  /**
+   * 每步推进阶段计时与 Closing 推进。
+   * 严格保持旧执行顺序：
+   * - Active→Warning：普通墙状态不变；
+   * - Warning→Closing：只激活两侧 Closing Wall，本步不推进；
+   * - 原本已处于 Closing 的步骤才设置左右相反速度；
+   * - Closing→End 的该步仍执行最后一次推进；End 后不再更新。
+   */
   update(dtMs: number): void {
-    if (this._phase === 'End') return;
-    this.phaseElapsed += dtMs;
-    const p = this.config.phases;
+    if (this.phaseClock.phase === 'End') return;
+    const upd = this.phaseClock.update(dtMs);
 
-    if (this._phase === 'Active' && this.phaseElapsed >= p.activeMs) {
-      this._phase = 'Warning';
-      this.phaseElapsed = 0;
-    } else if (this._phase === 'Warning' && this.phaseElapsed >= p.warningMs) {
-      this._phase = 'Closing';
-      this.phaseElapsed = 0;
-      // 激活 Closing 刺墙
+    if (upd.changed && upd.previous === 'Warning' && upd.current === 'Closing') {
+      // Warning→Closing：激活 Closing 刺墙（本步不推进）
       for (const cw of this.closingWalls) setStatic(cw.body, false);
-    } else if (this._phase === 'Closing') {
-      // Closing 刺墙向中间推进
+    } else if (upd.previous === 'Closing') {
+      // 原本已处于 Closing（含 Closing→End 当步）：左右相向推进
       for (const cw of this.closingWalls) {
         const dir = cw.side === 'left' ? 1 : -1;
         setVelocity(cw.body, dir * this.config.closingSpeed, 0);
       }
-      if (this.phaseElapsed >= p.closingMs) {
-        this._phase = 'End';
-      }
     }
   }
 
-  /** 强制设置阶段（Lab 调试用） */
+  /** 强制设置阶段（Lab 调试用）：只切阶段并清零计时，不擅自激活墙体、无物理副作用 */
   setPhase(phase: BattlePhase): void {
-    this._phase = phase;
-    this.phaseElapsed = 0;
+    this.phaseClock.setPhase(phase);
   }
 
   /** Projectile Bounds 判断：越过顶部则销毁 */
