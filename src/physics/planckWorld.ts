@@ -394,6 +394,39 @@ export class PlanckWorld {
   }
 
   /**
+   * Weld 刚性连接（B6A）：
+   * - 创建时自动保存两刚体当前相对角度（referenceAngle），不强制归零；
+   * - 锚点统一经 units.ts 换算；
+   * - createJoint 返回 null 必须明确抛错；opaque handle，无 as any / native escape hatch。
+   */
+  createWeldJoint(
+    bodyA: BodyHandle,
+    localAnchorAPx: { x: number; y: number },
+    bodyB: BodyHandle,
+    localAnchorBPx: { x: number; y: number },
+  ): JointHandle {
+    assertFinite(localAnchorAPx.x, localAnchorAPx.y, localAnchorBPx.x, localAnchorBPx.y);
+    const a = this.bodyOf(bodyA);
+    const b = this.bodyOf(bodyB);
+    // 保存当前相对角度（不归零）：weld 保持初始相对姿态
+    const referenceAngle = b.getAngle() - a.getAngle();
+    const weld = planck.WeldJoint({
+      bodyA: a,
+      bodyB: b,
+      localAnchorA: planck.Vec2(pxToM(localAnchorAPx.x), pxToM(localAnchorAPx.y)),
+      localAnchorB: planck.Vec2(pxToM(localAnchorBPx.x), pxToM(localAnchorBPx.y)),
+      referenceAngle,
+    });
+    const created = this.world.createJoint(weld);
+    if (created === null) {
+      throw new Error('PlanckWorld: WeldJoint 创建失败（createJoint 返回 null）');
+    }
+    const handle = createJointHandle();
+    this.joints.set(handle, created);
+    return handle;
+  }
+
+  /**
    * Revolute motor 开关（A8）。
    * - speedRadPerStep 用现有换算转 rad/s；
    * - maxTorqueNm 为 Planck 原生 N·m，原值传入（不猜游戏层 torque 换算）；
@@ -499,6 +532,14 @@ export class PlanckWorld {
 
   getAngle(body: BodyHandle): number {
     return this.bodyOf(body).getAngle();
+  }
+
+  /**
+   * 直接设置 body 角度（B6A）：仅校验有限数；保留当前位置，不清零速度。
+   */
+  setAngle(body: BodyHandle, angleRad: number): void {
+    assertFinite(angleRad);
+    this.bodyOf(body).setAngle(angleRad);
   }
 
   getAngularVelocity(body: BodyHandle): number {
