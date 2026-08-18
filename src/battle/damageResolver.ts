@@ -6,14 +6,14 @@
  */
 import type { TeamId, Vec2 } from '../core/types';
 import type { CombatEvent, DamageRequest, CombatEventBus } from './combatEvents';
-import type { Vehicle } from './vehicleAssembly';
+import type { CombatVehicleState } from './combatVehicle';
 
 export class DamageResolver {
   constructor(private bus: CombatEventBus) {}
 
-  /** 对某个 Vehicle 扣血，返回生成的 CombatEvent */
+  /** 对某个战斗车辆（引擎中立契约）扣血，返回生成的 CombatEvent */
   applyDamage(
-    target: Vehicle,
+    target: CombatVehicleState,
     req: DamageRequest,
     timestamp: number,
   ): CombatEvent {

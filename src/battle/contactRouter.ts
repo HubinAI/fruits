@@ -10,7 +10,7 @@
 import type { ContactEvent } from '../physics/adapter';
 import { getMeta } from '../physics/adapter';
 import type { PlanckWorld, ContactBridgeEvent } from '../physics/planckWorld';
-import type { Vehicle, WheelRuntime, PartRuntime } from './vehicleAssembly';
+import type { CombatPartState, CombatVehicleState, CombatWheelState } from './combatVehicle';
 import type { DamageResolver } from './damageResolver';
 
 /** Impact 配置 */
@@ -102,21 +102,27 @@ export class ContactRouter {
   } | null = null;
 
   constructor(
-    private vehicles: Vehicle[],
+    private vehicles: CombatVehicleState[],
     private damageResolver: DamageResolver,
     private impactConfig: ImpactConfig = DEFAULT_IMPACT_CONFIG,
   ) {}
 
-  /** 按 team 唯一查找 Vehicle（一个 battle 内每个 team 至多一辆车） */
-  private findVehicleByTeam(team: string): Vehicle | undefined {
+  /** 按 team 唯一查找战斗车辆（一个 battle 内每个 team 至多一辆车） */
+  private findVehicleByTeam(team: string): CombatVehicleState | undefined {
     return this.vehicles.find((v) => v.team === team);
   }
 
-  private findWheel(v: Vehicle, partId: string): WheelRuntime | undefined {
+  private findWheel(
+    v: CombatVehicleState,
+    partId: string,
+  ): CombatWheelState | undefined {
     return v.wheels.find((w) => `wheel:${w.id}` === partId);
   }
 
-  private findPart(v: Vehicle, partId: string): PartRuntime | undefined {
+  private findPart(
+    v: CombatVehicleState,
+    partId: string,
+  ): CombatPartState | undefined {
     return v.parts.find((p) => `part:${p.id}` === partId);
   }
 
@@ -268,11 +274,15 @@ export class ContactRouter {
     // --- Weapon 合并（attacker team + partId + defender team，两个方向） ---
     const weaponByKey = new Map<
       string,
-      BatchEntry & { attacker: Vehicle; defender: Vehicle; attackerPartId: string }
+      BatchEntry & {
+        attacker: CombatVehicleState;
+        defender: CombatVehicleState;
+        attackerPartId: string;
+      }
     >();
     const addWeapon = (
-      attacker: Vehicle,
-      defender: Vehicle,
+      attacker: CombatVehicleState,
+      defender: CombatVehicleState,
       attackerPartId: string,
       en: BatchEntry,
     ): void => {
@@ -301,7 +311,11 @@ export class ContactRouter {
    * Impact 结算（阈值 / damagePerSpeed / maxDamage 保持正式值不变）。
    * 只有 relativeVelocity 达阈值的批次事件会走到这里（processBatch 已选最大者）。
    */
-  private applyImpact(va: Vehicle, vb: Vehicle, ev: RouterContactEvent): void {
+  private applyImpact(
+    va: CombatVehicleState,
+    vb: CombatVehicleState,
+    ev: RouterContactEvent,
+  ): void {
     if (ev.relativeVelocity >= this.impactConfig.threshold) {
       const speedOver = ev.relativeVelocity - this.impactConfig.threshold;
       const damage = Math.min(
@@ -402,8 +416,8 @@ export class ContactRouter {
 
   private handleWeaponContact(
     ev: RouterContactEvent,
-    attacker: Vehicle,
-    defender: Vehicle,
+    attacker: CombatVehicleState,
+    defender: CombatVehicleState,
     attackerPartId: string,
     _defenderPartId: string,
     _side: string,
