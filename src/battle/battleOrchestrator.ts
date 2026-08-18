@@ -11,37 +11,19 @@
  *
  * 同一套 Runtime 被正式 Battle 与 Physics Lab 共同调用（禁止第二套实现）。
  */
-import type { BuildSnapshot, ContentRegistry, TeamId } from '../core/types';
+import type { BuildSnapshot, ContentRegistry } from '../core/types';
 import { resolveSnapshot } from '../core/buildSnapshot';
 import { PhysWorld, FIXED_DT } from '../physics/adapter';
 import { createVehicle, updateVehiclePhysics, settleVehicleToRestPose, type Vehicle } from './vehicleAssembly';
 import { driveVehicle } from './movement';
-import { ContactRouter, DEFAULT_IMPACT_CONFIG, type ImpactConfig } from './contactRouter';
+import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
-import { ArenaRuntime, type ArenaConfig } from './arenaRuntime';
+import { ArenaRuntime } from './arenaRuntime';
+import { resolveBattleResult, type BattleConfig, type BattleResult } from './battleContract';
 
-export interface BattleConfig {
-  impact?: Partial<ImpactConfig>;
-  arena?: Partial<ArenaConfig>;
-  /** 双方是否自动朝对方驱动（正式战斗为 true，部分 Lab 场景为 false） */
-  autoDrive?: boolean;
-  /**
-   * 出生后是否把整车下沉到「最低点接触地面」（无下落弹跳）。
-   * 消除「从空中落下→弹跳→混沌分叉」的 Reset 非确定性。空中出生场景（D-air）设 false。
-   */
-  settleToGround?: boolean;
-  /** 车辆初始位置与朝向（facing：1 朝右 / -1 朝左，镜像而非旋转） */
-  spawnA?: { x: number; y: number; facing?: 1 | -1 };
-  spawnB?: { x: number; y: number; facing?: 1 | -1 };
-}
-
-export interface BattleResult {
-  winner: TeamId | 'draw' | null;
-  hpA: number;
-  hpB: number;
-  phase: string;
-}
+/** 引擎中立 Battle 合同（B14B：自 battleContract.ts 重新导出，保持既有导入路径兼容） */
+export type { BattleConfig, BattleResult } from './battleContract';
 
 export class BattleOrchestrator {
   readonly world: PhysWorld;
@@ -141,28 +123,9 @@ export class BattleOrchestrator {
     this.detectEnd();
   }
 
-  /** HP 死亡检测 → Result */
+  /** HP 死亡检测 → Result（B14B：委托引擎中立 resolveBattleResult，判定语义不变） */
   private detectEnd(): void {
-    const aDead = this.vehicleA.hp <= 0;
-    const bDead = this.vehicleB.hp <= 0;
-
-    if (this.arena.phase === 'End') {
-      this._result = {
-        winner: this.vehicleA.hp > this.vehicleB.hp ? 'A' : this.vehicleB.hp > this.vehicleA.hp ? 'B' : 'draw',
-        hpA: this.vehicleA.hp,
-        hpB: this.vehicleB.hp,
-        phase: 'End',
-      };
-      return;
-    }
-
-    if (aDead && bDead) {
-      this._result = { winner: 'draw', hpA: 0, hpB: 0, phase: 'End' };
-    } else if (aDead) {
-      this._result = { winner: 'B', hpA: 0, hpB: this.vehicleB.hp, phase: 'End' };
-    } else if (bDead) {
-      this._result = { winner: 'A', hpA: this.vehicleA.hp, hpB: 0, phase: 'End' };
-    }
+    this._result = resolveBattleResult(this.arena.phase, this.vehicleA.hp, this.vehicleB.hp);
   }
 
   /** 订阅 Combat Event（Renderer 消费） */
