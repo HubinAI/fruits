@@ -41,14 +41,24 @@ export interface JointHandle {
 }
 
 /**
- * 最小接触事件（A5）：只携带 begin/end 与双方不透明 handle。
+ * 接触事件（A5+B3）：携带 begin/end 与双方不透明 handle + 接触运动学快照。
  * bodyA/bodyB 已按内部创建序号规范化排序——同一对物体的 begin/end
  * 事件顺序一致，与碰撞检测中的 fixture 顺序无关。
+ *
+ * 运动学（B3）：
+ * - contactPoint：世界接触点（px）；
+ * - normal：单位向量，从最终规范化 bodyA 指向 bodyB；
+ * - relativeVelocity：(vPointA − vPointB)·normal，经 mpsToPxPerStep 换算，
+ *   正值 = 相互靠近；不取绝对值、不强制截零。
+ * - begin 快照按 Contact 私有缓存，end 复用同一快照（避免分离时 manifold 失效）。
  */
 export interface ContactBridgeEvent {
   phase: 'begin' | 'end';
   bodyA: BodyHandle;
   bodyB: BodyHandle;
+  contactPoint: { x: number; y: number };
+  normal: { x: number; y: number };
+  relativeVelocity: number;
 }
 
 /**
@@ -119,6 +129,13 @@ function assertCollisionFilter(f: PlanckCollisionFilter): void {
   }
 }
 
+/** begin 接触运动学快照（B3）：end 复用 begin 快照并清理 */
+interface ContactSnapshot {
+  contactPoint: { x: number; y: number };
+  normal: { x: number; y: number };
+  relativeVelocity: number;
+}
+
 /**
  * Planck 世界（游戏层单位；默认零重力，可配置重力）。
  *
@@ -138,6 +155,8 @@ export class PlanckWorld {
   private readonly bodySeq = new Map<BodyHandle, number>();
   private nextSeq = 1;
   private contactListener: ((e: ContactBridgeEvent) => void) | null = null;
+  /** begin 快照按 Contact 私有缓存（B3）：end 使用对应 begin 快照并清理 */
+  private readonly contactSnapshots = new Map<planck.Contact, ContactSnapshot>();
 
   constructor(gravityMps2: { x: number; y: number } = { x: 0, y: 0 }) {
     assertFinite(gravityMps2.x, gravityMps2.y);
@@ -167,8 +186,67 @@ export class PlanckWorld {
     const ha = this.bodyByNative.get(nativeA);
     const hb = this.bodyByNative.get(nativeB);
     if (!ha || !hb) return;
-    const [a, b] = this.seqOf(ha) <= this.seqOf(hb) ? [ha, hb] : [hb, ha];
-    this.contactListener({ phase, bodyA: a, bodyB: b });
+    // 按创建序号规范化；若交换，法线反转（指向最终 bodyA→bodyB）、点速度对换
+    const swap = this.seqOf(ha) > this.seqOf(hb);
+    const a = swap ? hb : ha;
+    const b = swap ? ha : hb;
+
+    if (phase === 'begin') {
+      const snap = this.buildContactSnapshot(contact, nativeA, nativeB, swap);
+      this.contactSnapshots.set(contact, snap);
+      this.contactListener({ phase, bodyA: a, bodyB: b, ...snap });
+    } else {
+      const snap = this.contactSnapshots.get(contact);
+      if (!snap) {
+        // 分离时 manifold 已失效，必须复用 begin 快照；无快照则不伪造，跳过并报告
+        console.error('PlanckWorld: end-contact 无对应 begin 快照（Contact 生命周期异常），跳过该事件');
+        return;
+      }
+      this.contactSnapshots.delete(contact);
+      this.contactListener({ phase, bodyA: a, bodyB: b, ...snap });
+    }
+  }
+
+  /**
+   * 构建 begin 接触运动学快照（B3）：
+   * - 用原生 getWorldManifold 取首个真实世界接触点与法线（normal 从 fixtureA 指向 fixtureB）；
+   * - handle 规范化若交换，则反转法线、对换点速度；
+   * - 点速度必须用 getLinearVelocityFromWorldPoint（含 ω×r），禁止只读 COM 速度；
+   * - relVel = (vPointA − vPointB)·normal（不取绝对值、不截零），经 mpsToPxPerStep 换算。
+   */
+  private buildContactSnapshot(
+    contact: planck.Contact,
+    nativeA: planck.Body,
+    nativeB: planck.Body,
+    swap: boolean,
+  ): ContactSnapshot {
+    const wm = contact.getWorldManifold(null);
+    if (!wm || wm.pointCount === 0 || wm.points.length === 0) {
+      // 无真实 manifold point：不得伪造数据，立即停止报告
+      throw new Error('PlanckWorld: begin-contact 无真实 world manifold point，拒绝伪造数据');
+    }
+    let nx = wm.normal.x;
+    let ny = wm.normal.y;
+    if (swap) {
+      nx = -nx;
+      ny = -ny;
+    }
+    const nl = Math.hypot(nx, ny) || 1;
+    const normal = { x: nx / nl, y: ny / nl };
+    const wp = wm.points[0];
+
+    // 规范化后：最终 bodyA/bodyB 对应的 native（swap 时对换）
+    const fnA = swap ? nativeB : nativeA;
+    const fnB = swap ? nativeA : nativeB;
+    const pva = fnA.getLinearVelocityFromWorldPoint(planck.Vec2(wp.x, wp.y));
+    const pvb = fnB.getLinearVelocityFromWorldPoint(planck.Vec2(wp.x, wp.y));
+    const relMs = (pva.x - pvb.x) * normal.x + (pva.y - pvb.y) * normal.y;
+
+    return {
+      contactPoint: { x: mToPx(wp.x), y: mToPx(wp.y) },
+      normal,
+      relativeVelocity: mpsToPxPerStep(relMs),
+    };
   }
 
   private seqOf(h: BodyHandle): number {
