@@ -15,6 +15,7 @@
  * - 非有限数、非正尺寸/半径/质量立即抛错。
  */
 import * as planck from 'planck';
+import type { OwnerTag } from '../core/types';
 import {
   SECONDS_PER_STEP,
   pxToM,
@@ -87,6 +88,8 @@ export class PlanckWorld {
   private readonly joints = new Map<JointHandle, planck.Joint>();
   /** 保持真实 RevoluteJoint 类型引用（用于 motor 等 Revolute 特有 API，无 as any） */
   private readonly revoluteJoints = new Map<JointHandle, planck.RevoluteJoint>();
+  /** Owner Meta：按 handle 私有保存（B1）；输入/返回均防御复制，外部修改不污染内部 */
+  private readonly ownerTags = new Map<BodyHandle, OwnerTag>();
   private readonly bodyByNative = new Map<planck.Body, BodyHandle>();
   private readonly bodySeq = new Map<BodyHandle, number>();
   private nextSeq = 1;
@@ -316,6 +319,23 @@ export class PlanckWorld {
 
   getMass(body: BodyHandle): number {
     return this.bodyOf(body).getMass();
+  }
+
+  /**
+   * Owner Meta 存取（B1）：
+   * - 按 handle 私有保存（ownerTags Map）；输入与返回值均防御复制（字段全为原始 string 的浅拷贝）；
+   * - 未设置返回 null；跨 World / 无效 handle 抛错（走 bodyOf 校验）；
+   * - 保持 handle opaque，不暴露 Planck 类型，无 as any / native escape hatch。
+   */
+  setOwnerTag(body: BodyHandle, tag: OwnerTag): void {
+    this.bodyOf(body); // 跨 World / 无效 handle 立即抛错
+    this.ownerTags.set(body, { ...tag });
+  }
+
+  getOwnerTag(body: BodyHandle): OwnerTag | null {
+    this.bodyOf(body); // 跨 World / 无效 handle 立即抛错
+    const tag = this.ownerTags.get(body);
+    return tag ? { ...tag } : null;
   }
 
   /** 铰链世界锚点误差（px） */
