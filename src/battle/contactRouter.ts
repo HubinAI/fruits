@@ -9,6 +9,7 @@
  */
 import type { ContactEvent } from '../physics/adapter';
 import { getMeta } from '../physics/adapter';
+import type { PlanckWorld, ContactBridgeEvent } from '../physics/planckWorld';
 import type { Vehicle, WheelRuntime, PartRuntime } from './vehicleAssembly';
 import type { DamageResolver } from './damageResolver';
 
@@ -22,9 +23,22 @@ export interface ImpactConfig {
   maxDamage: number;
 }
 
+/**
+ * 引擎无关的接触事件（B5A）：不包含 Matter/Planck body，
+ * 由 Matter 入口（handleContact）与 Planck 入口（handlePlanckContact）
+ * 各自转换后共用同一套路由逻辑。
+ */
+export interface RouterContactEvent {
+  contactPoint: { x: number; y: number };
+  normal: { x: number; y: number };
+  relativeVelocity: number;
+  phase: 'start' | 'active' | 'end';
+  batch?: { timestamp: number; index: number; size: number };
+}
+
 /** 同一物理步（batch）内的一条 start 事件快照（含 meta，供合并后统一结算） */
 interface BatchEntry {
-  ev: ContactEvent;
+  ev: RouterContactEvent;
   mA: Record<string, unknown>;
   mB: Record<string, unknown>;
 }
@@ -106,11 +120,54 @@ export class ContactRouter {
     return v.parts.find((p) => `part:${p.id}` === partId);
   }
 
-  /** 处理一次接触事件 */
+  /** 处理一次 Matter 接触事件（Matter 入口，行为保持不变） */
   handleContact(ev: ContactEvent): void {
     const mA = getMeta(ev.bodyA);
     const mB = getMeta(ev.bodyB);
+    this.route(
+      {
+        contactPoint: ev.contactPoint,
+        normal: ev.normal,
+        relativeVelocity: ev.relativeVelocity,
+        phase: ev.phase,
+        batch: ev.batch,
+      },
+      mA,
+      mB,
+    );
+  }
 
+  /**
+   * 处理一次 Planck 接触事件（B5A）：
+   * - 用 world.getOwnerTag(event.bodyA/bodyB) 读取 Owner（kind/vehicleId/partId/team）；
+   * - begin → start、end → end；contactPoint/normal/relativeVelocity/batch 原值传递；
+   * - 任一方无 Owner → 安全忽略 Gameplay 路由（不伪造 Owner）；
+   * - 与 Matter 入口共用 Grounded / 批次去重 / Impact / Weapon 全部逻辑。
+   * 接入时只使用 setBatchedContactListener（禁止即时+批次双投递造成重复伤害）。
+   */
+  handlePlanckContact(world: PlanckWorld, ev: ContactBridgeEvent): void {
+    const tagA = world.getOwnerTag(ev.bodyA);
+    const tagB = world.getOwnerTag(ev.bodyB);
+    if (!tagA || !tagB) return; // 无 Owner：安全忽略，不伪造
+    this.route(
+      {
+        contactPoint: ev.contactPoint,
+        normal: ev.normal,
+        relativeVelocity: ev.relativeVelocity,
+        phase: ev.phase === 'begin' ? 'start' : 'end',
+        batch: ev.batch,
+      },
+      { kind: tagA.kind, vehicleId: tagA.vehicleId, partId: tagA.partId, team: tagA.team },
+      { kind: tagB.kind, vehicleId: tagB.vehicleId, partId: tagB.partId, team: tagB.team },
+    );
+  }
+
+  /** 引擎无关共享路由（B5A）：Matter/Planck 两入口共用 */
+  private route(
+    ev: RouterContactEvent,
+    mA: Record<string, unknown>,
+    mB: Record<string, unknown>,
+  ): void {
     this.debug.lastContact = {
       point: ev.contactPoint,
       normal: ev.normal,
@@ -138,7 +195,7 @@ export class ContactRouter {
    * - 仅当 index===size-1 且 entries.length===size 时调用 processBatch，随后清空。
    */
   private collectBatch(
-    ev: ContactEvent,
+    ev: RouterContactEvent,
     mA: Record<string, unknown>,
     mB: Record<string, unknown>,
   ): void {
@@ -244,7 +301,7 @@ export class ContactRouter {
    * Impact 结算（阈值 / damagePerSpeed / maxDamage 保持正式值不变）。
    * 只有 relativeVelocity 达阈值的批次事件会走到这里（processBatch 已选最大者）。
    */
-  private applyImpact(va: Vehicle, vb: Vehicle, ev: ContactEvent): void {
+  private applyImpact(va: Vehicle, vb: Vehicle, ev: RouterContactEvent): void {
     if (ev.relativeVelocity >= this.impactConfig.threshold) {
       const speedOver = ev.relativeVelocity - this.impactConfig.threshold;
       const damage = Math.min(
@@ -283,7 +340,7 @@ export class ContactRouter {
 
   /** wheel ↔ ground：维护 grounded 状态 */
   private handleGrounded(
-    ev: ContactEvent,
+    ev: RouterContactEvent,
     mA: Record<string, unknown>,
     mB: Record<string, unknown>,
   ): void {
@@ -314,7 +371,7 @@ export class ContactRouter {
 
   /** vehicle ↔ vehicle：Impact + Direct Weapon Damage */
   private handleVehicleContact(
-    ev: ContactEvent,
+    ev: RouterContactEvent,
     mA: Record<string, unknown>,
     mB: Record<string, unknown>,
   ): void {
@@ -344,7 +401,7 @@ export class ContactRouter {
   }
 
   private handleWeaponContact(
-    ev: ContactEvent,
+    ev: RouterContactEvent,
     attacker: Vehicle,
     defender: Vehicle,
     attackerPartId: string,
