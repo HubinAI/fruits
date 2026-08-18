@@ -85,6 +85,8 @@ export class PlanckWorld {
   private readonly world: planck.World;
   private readonly bodies = new Map<BodyHandle, planck.Body>();
   private readonly joints = new Map<JointHandle, planck.Joint>();
+  /** 保持真实 RevoluteJoint 类型引用（用于 motor 等 Revolute 特有 API，无 as any） */
+  private readonly revoluteJoints = new Map<JointHandle, planck.RevoluteJoint>();
   private readonly bodyByNative = new Map<planck.Body, BodyHandle>();
   private readonly bodySeq = new Map<BodyHandle, number>();
   private nextSeq = 1;
@@ -199,21 +201,50 @@ export class PlanckWorld {
     // 显式收窄：createJoint 在 planck@1.4.2 类型中可返回 null。
     // RevoluteJoint 使用 1 参数构造（def 携带 bodyA/bodyB 与 local anchors，
     // 匹配 planck@1.4.2 类型重载：1 参数 def 或 4 参数带世界 anchor）。
-    const created = this.world.createJoint(
-      planck.RevoluteJoint({
-        bodyA: a,
-        bodyB: b,
-        localAnchorA: planck.Vec2(pxToM(localAnchorAPx.x), pxToM(localAnchorAPx.y)),
-        localAnchorB: planck.Vec2(pxToM(localAnchorBPx.x), pxToM(localAnchorBPx.y)),
-      }),
-    );
+    // 单独保留 RevoluteJoint 类型引用（revoluteJoints），供 setRevoluteMotor 使用。
+    const revolute = planck.RevoluteJoint({
+      bodyA: a,
+      bodyB: b,
+      localAnchorA: planck.Vec2(pxToM(localAnchorAPx.x), pxToM(localAnchorAPx.y)),
+      localAnchorB: planck.Vec2(pxToM(localAnchorBPx.x), pxToM(localAnchorBPx.y)),
+    });
+    const created = this.world.createJoint(revolute);
     if (created === null) {
       throw new Error('PlanckWorld: RevoluteJoint 创建失败（createJoint 返回 null）');
     }
-    const native = created;
     const handle = createJointHandle();
-    this.joints.set(handle, native);
+    this.joints.set(handle, created);
+    this.revoluteJoints.set(handle, revolute);
     return handle;
+  }
+
+  /**
+   * Revolute motor 开关（A8）。
+   * - speedRadPerStep 用现有换算转 rad/s；
+   * - maxTorqueNm 为 Planck 原生 N·m，原值传入（不猜游戏层 torque 换算）；
+   * - speed/torque 必须有限、torque >= 0、enabled 必须为 boolean；
+   * - 内部保持真实 RevoluteJoint 类型，无 as any / escape hatch / 不暴露 Planck 类型。
+   */
+  setRevoluteMotor(
+    joint: JointHandle,
+    cfg: { enabled: boolean; speedRadPerStep: number; maxTorqueNm: number },
+  ): void {
+    assertFinite(cfg.speedRadPerStep, cfg.maxTorqueNm);
+    if (cfg.maxTorqueNm < 0) {
+      throw new Error(`PlanckWorld: maxTorqueNm 必须 >= 0，收到 ${cfg.maxTorqueNm}`);
+    }
+    if (typeof cfg.enabled !== 'boolean') {
+      throw new Error(`PlanckWorld: enabled 必须为 boolean，收到 ${String(cfg.enabled)}`);
+    }
+    const j = this.revoluteJoints.get(joint);
+    if (!j) {
+      throw new Error(
+        'PlanckWorld: JointHandle 不是 RevoluteJoint 或不属于当前 world（跨 World 使用不被允许）',
+      );
+    }
+    j.enableMotor(cfg.enabled);
+    j.setMotorSpeed(radPerStepToRadPerSec(cfg.speedRadPerStep));
+    j.setMaxMotorTorque(cfg.maxTorqueNm);
   }
 
   private createBody(
