@@ -18,6 +18,7 @@ import * as planck from 'planck';
 import type { OwnerTag, ColliderDef } from '../core/types';
 import {
   SECONDS_PER_STEP,
+  PHYSICS_HZ,
   PX_PER_M,
   pxToM,
   mToPx,
@@ -26,6 +27,15 @@ import {
   radPerStepToRadPerSec,
   radPerSecToRadPerStep,
 } from './units';
+
+/** 固定物理步长（ms）：1000/PHYSICS_HZ，与 Matter PhysWorld.FIXED_DT 数值一致 */
+const FIXED_STEP_MS = 1000 / PHYSICS_HZ;
+
+/**
+ * 固定步比较容差（ms）：FIXED_STEP_MS × 1e-9，与 Matter FIXED_DT_EPS 同语义。
+ * 消除分帧浮点残差导致的「边界帧少一步」（[34,33,33]×10 = 1000ms 应为 60 步）。
+ */
+const FIXED_STEP_EPS = FIXED_STEP_MS * 1e-9;
 
 /** 模块内部、不导出的 opaque 键（类型级不透明，外部无法构造/读取） */
 const BODY_HANDLE_KEY: unique symbol = Symbol('PlanckBodyHandle');
@@ -301,6 +311,8 @@ export class PlanckWorld {
   private readonly batchedEvents: ContactBridgeEvent[] = [];
   /** 单调物理步计数（B4A）：timestamp = physicsStep × SECONDS_PER_STEP × 1000（禁 Date.now） */
   private physicsStep = 0;
+  /** 固定步毫秒累加器（B15A）：保留不足一帧的余量，跨 step 调用累计 */
+  private fixedStepAccMs = 0;
   /** begin 快照按 Contact 私有缓存（B3）：end 使用对应 begin 快照并清理 */
   private readonly contactSnapshots = new Map<planck.Contact, ContactSnapshot>();
 
@@ -760,6 +772,33 @@ export class PlanckWorld {
   }
 
   // ---------- 步进 ----------
+
+  /**
+   * 固定步进推进（B15A）：行为严格对齐 Matter PhysWorld.step。
+   * - 累加 realDtMs × timeScale（ms）；
+   * - 每满一个固定步（FIXED_STEP_MS = 1000/PHYSICS_HZ）先调用一次 onBeforeStep，
+   *   再推进一个 Planck 物理步（world.step(SECONDS_PER_STEP) + flushBatched）；
+   * - 保留不足一帧的余量（fixedStepAccMs），跨调用累计；
+   * - 长帧 catch-up 上限与 PhysWorld.step 完全一致（steps > 8 即 break）；
+   * - 返回本次实际推进步数。
+   */
+  step(realDtMs: number, timeScale = 1, onBeforeStep?: () => void): number {
+    this.fixedStepAccMs += realDtMs * timeScale;
+    let steps = 0;
+    // 容差语义（B15A-R1）：累加值 + FIXED_STEP_EPS 达到固定步即推进，
+    // 消除浮点残差导致的边界帧少步；容差 = FIXED_STEP_MS × 1e-9，不产生额外物理步。
+    while (this.fixedStepAccMs + FIXED_STEP_EPS >= FIXED_STEP_MS) {
+      onBeforeStep?.();
+      this.world.step(SECONDS_PER_STEP);
+      this.flushBatched();
+      this.fixedStepAccMs -= FIXED_STEP_MS;
+      steps++;
+      if (steps > 8) break; // 防 spiral-of-death（与 PhysWorld.step 一致）
+    }
+    // 扣除固定步后，仅将容差范围内的微小负余量归零（正余量/大幅负值保持原样）
+    if (this.fixedStepAccMs < 0 && this.fixedStepAccMs >= -FIXED_STEP_EPS) this.fixedStepAccMs = 0;
+    return steps;
+  }
 
   /** 固定步进：每步 world.step(SECONDS_PER_STEP)；steps 必须为 >=1 的整数 */
   stepFixed(steps = 1): void {

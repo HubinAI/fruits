@@ -17,6 +17,13 @@ export type { Body, Constraint, Engine, Composite, Collision, Pair } from 'matte
 /** 固定物理步长（ms）。60Hz。 */
 export const FIXED_DT = 1000 / 60;
 
+/**
+ * 固定步比较容差（ms）：FIXED_DT × 1e-9。
+ * 消除分帧浮点残差导致的「边界帧少一步」（如 [34,33,33]×10 = 1000ms 应为 60 步，
+ * 浮点向下舍入会得到 59）。仅影响容差范围内的边界判定，不产生额外物理步。
+ */
+export const FIXED_DT_EPS = FIXED_DT * 1e-9;
+
 /** 碰撞类别（bitmask） */
 export const Category = {
   GROUND: 0x0001,
@@ -232,13 +239,17 @@ export class PhysWorld {
   step(realDtMs: number, timeScale = 1, onBeforeStep?: () => void): number {
     this.acc += realDtMs * timeScale;
     let steps = 0;
-    while (this.acc >= FIXED_DT) {
+    // 容差语义（B15A-R1）：累加值 + FIXED_DT_EPS 达到固定步即推进，
+    // 消除浮点残差导致的边界帧少步；容差 = FIXED_DT × 1e-9，不产生额外物理步。
+    while (this.acc + FIXED_DT_EPS >= FIXED_DT) {
       onBeforeStep?.();
       Matter.Engine.update(this.engine, FIXED_DT);
       this.acc -= FIXED_DT;
       steps++;
       if (steps > 8) break; // 防 spiral-of-death
     }
+    // 扣除固定步后，仅将容差范围内的微小负余量归零（正余量/大幅负值保持原样）
+    if (this.acc < 0 && this.acc >= -FIXED_DT_EPS) this.acc = 0;
     return steps;
   }
 }
