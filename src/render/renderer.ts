@@ -333,6 +333,19 @@ export class Renderer {
       ctx.strokeStyle = '#0d0f14';
       ctx.lineWidth = 1.5;
       ctx.stroke();
+      // Q05-V1：圆形 Functional Part（如 Lift Roller）旋转可感知——
+      // 沿真实 RenderCircle.angle 画一条径向方向线（radius × 0.8）：
+      // 完全使用 snapshot 的真实物理角度，不新增 gameplay 状态、不伪造旋转。
+      const dir = c.radius * 0.8;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(this.sx(c.center.x), this.sy(c.center.y));
+      ctx.lineTo(
+        this.sx(c.center.x + Math.cos(c.angle) * dir),
+        this.sy(c.center.y + Math.sin(c.angle) * dir),
+      );
+      ctx.stroke();
       return;
     }
     for (const poly of shape.polygons) {
