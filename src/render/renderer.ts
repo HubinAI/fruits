@@ -1,13 +1,15 @@
 /**
- * Renderer：只消费 Runtime 结果（Physics Transform / Part State / Combat Event）。
+ * Renderer：只消费引擎中立 Render Snapshot（BattleRenderSnapshot）。
  * 表现 Sprite / FX / Hit 反馈 / Damage 数字。
- * 禁止 Renderer 决定 Gameplay。
+ * 禁止 Renderer 决定 Gameplay；不依赖任何具体物理引擎（Matter / Planck / adapter）。
  */
-import type { Body } from 'matter-js';
-import type { BattleOrchestrator } from '../battle/battleOrchestrator';
-import type { Vehicle } from '../battle/vehicleAssembly';
 import type { CombatEvent } from '../battle/combatEvents';
-import { getPosition, getAngle } from '../physics/adapter';
+import type {
+  BattleOrchestratorApi,
+  RenderVehicle,
+  RenderShape,
+  RenderCircle,
+} from '../battle/battleContract';
 
 interface ScreenTransform {
   scale: number;
@@ -34,7 +36,8 @@ export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private transform: ScreenTransform = { scale: 1, offsetX: 0, offsetY: 0 };
   private fx: FloatingText[] = [];
-  private hitFlashes: Array<{ body: Body; bornAt: number; ttl: number }> = [];
+  /** 命中闪白：保存 target team + 时间，绘制时取当前 Snapshot 对应车辆形状（不再保存 Matter Body） */
+  private hitFlashes: Array<{ team: string; bornAt: number; ttl: number }> = [];
 
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d');
@@ -68,8 +71,8 @@ export class Renderer {
     return v * this.transform.scale;
   }
 
-  /** 订阅 Combat Event → 生成 FX */
-  bind(orchestrator: BattleOrchestrator): void {
+  /** 订阅 Combat Event → 生成 FX（仅保存 team，绘制时取当前 Snapshot） */
+  bind(orchestrator: BattleOrchestratorApi): void {
     orchestrator.onCombatEvent((ev: CombatEvent) => {
       if (ev.damage > 0) {
         this.fx.push({
@@ -81,16 +84,15 @@ export class Renderer {
           ttl: 900,
         });
       }
-      // 命中闪白：找到 target 车辆 body
-      const targetBody =
-        orchestrator.vehicleA.team === ev.target
-          ? orchestrator.vehicleA.body
-          : orchestrator.vehicleB.body;
-      this.hitFlashes.push({ body: targetBody, bornAt: performance.now(), ttl: 120 });
+      // 命中闪白：保存 target team，绘制时取当前 Snapshot 对应车辆形状
+      this.hitFlashes.push({ team: ev.target, bornAt: performance.now(), ttl: 120 });
     });
   }
 
-  render(orchestrator: BattleOrchestrator, debugDraw?: (ctx: CanvasRenderingContext2D, t: ScreenTransform) => void): void {
+  render(
+    orchestrator: BattleOrchestratorApi,
+    debugDraw?: (ctx: CanvasRenderingContext2D, t: ScreenTransform) => void,
+  ): void {
     const ctx = this.ctx;
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -100,37 +102,38 @@ export class Renderer {
     ctx.fillStyle = '#14181f';
     ctx.fillRect(0, 0, this.canvas.clientWidth, this.canvas.clientHeight);
 
-    const arena = orchestrator.arena;
+    const snap = orchestrator.getRenderSnapshot();
+    const arena = snap.arena;
     const t = this.transform;
 
     // Ground
     ctx.fillStyle = '#2a2f38';
     ctx.fillRect(
       t.offsetX,
-      this.sy(arena.config.groundY),
-      this.ss(arena.config.width),
-      this.canvas.height - this.sy(arena.config.groundY),
+      this.sy(arena.groundY),
+      this.ss(arena.width),
+      this.canvas.height - this.sy(arena.groundY),
     );
     ctx.strokeStyle = '#4a5260';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(t.offsetX, this.sy(arena.config.groundY));
-    ctx.lineTo(this.ss(arena.config.width) + t.offsetX, this.sy(arena.config.groundY));
+    ctx.moveTo(t.offsetX, this.sy(arena.groundY));
+    ctx.lineTo(this.ss(arena.width) + t.offsetX, this.sy(arena.groundY));
     ctx.stroke();
 
-    // Walls
-    for (const wall of [arena.leftWall, arena.rightWall]) {
-      this.drawBody(wall, '#3a4150');
+    // Walls（normal）
+    for (const wall of arena.normalWalls) {
+      this.drawShape(wall, '#3a4150');
     }
 
     // Closing walls（Hazard）
     for (const cw of arena.closingWalls) {
-      this.drawBody(cw.body, '#7a2f2f');
+      this.drawShape(cw, '#7a2f2f');
     }
 
     // Vehicles
-    this.drawVehicle(orchestrator.vehicleA, '#4aa3ff');
-    this.drawVehicle(orchestrator.vehicleB, '#ff7a4a');
+    this.drawVehicle(snap.vehicleA, '#4aa3ff');
+    this.drawVehicle(snap.vehicleB, '#ff7a4a');
 
     // Debug overlay
     if (debugDraw) debugDraw(ctx, t);
@@ -153,28 +156,29 @@ export class Renderer {
       const age = (now - h.bornAt) / h.ttl;
       ctx.globalAlpha = (1 - age) * 0.7;
       ctx.fillStyle = '#ffffff';
-      this.drawBody(h.body, '#ffffff');
+      const v = h.team === snap.vehicleA.team ? snap.vehicleA : snap.vehicleB;
+      this.drawShape(v.body, '#ffffff');
       ctx.globalAlpha = 1;
     }
   }
 
-  private drawVehicle(v: Vehicle, color: string): void {
+  private drawVehicle(v: RenderVehicle, color: string): void {
     // 车身
-    this.drawBody(v.body, color);
+    this.drawShape(v.body, color);
     // 车轮
     for (const w of v.wheels) {
-      this.drawWheel(w.body, v.body ? '#888c96' : '#888c96');
+      this.drawWheel(w, '#888c96');
     }
     // 功能部件
     for (const p of v.parts) {
-      this.drawBody(p.body, p.def.category === 'weapon' ? '#d8d2c0' : '#9aa4b5');
+      this.drawShape(p.shape, p.category === 'weapon' ? '#d8d2c0' : '#9aa4b5');
     }
   }
 
-  private drawWheel(body: Body, color: string): void {
+  private drawWheel(circle: RenderCircle, color: string): void {
     const ctx = this.ctx;
-    const r = body.circleRadius ?? 10;
-    const pos = getPosition(body);
+    const r = circle.radius;
+    const pos = circle.center;
     ctx.fillStyle = '#22262e';
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
@@ -183,7 +187,7 @@ export class Renderer {
     ctx.fill();
     ctx.stroke();
     // 轮辐（显示旋转）
-    const a = getAngle(body);
+    const a = circle.angle;
     ctx.strokeStyle = color;
     ctx.beginPath();
     ctx.moveTo(this.sx(pos.x), this.sy(pos.y));
@@ -191,11 +195,27 @@ export class Renderer {
     ctx.stroke();
   }
 
-  private drawBody(body: Body, color: string): void {
+  /**
+   * 引擎中立形状绘制：discriminated union（polygons / circle），不依赖 Matter Body。
+   * circle 真实绘制圆弧（不近似为多边形）；polygons 逐多边形描边（沿用 Matter 视觉语义）。
+   */
+  private drawShape(shape: RenderShape, color: string): void {
     const ctx = this.ctx;
-    const parts = body.parts.length > 0 ? body.parts : [body];
-    for (const part of parts) {
-      const verts = part.vertices;
+    if (shape.kind === 'circle') {
+      const c = shape.circle;
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(this.sx(c.center.x), this.sy(c.center.y), this.ss(c.radius), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#0d0f14';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      return;
+    }
+    for (const poly of shape.polygons) {
+      const verts = poly.points;
       if (verts.length === 0) continue;
       ctx.beginPath();
       ctx.moveTo(this.sx(verts[0].x), this.sy(verts[0].y));

@@ -13,14 +13,23 @@
  */
 import type { BuildSnapshot, ContentRegistry } from '../core/types';
 import { resolveSnapshot } from '../core/buildSnapshot';
-import { PhysWorld, FIXED_DT } from '../physics/adapter';
+import { PhysWorld, FIXED_DT, getPosition, getAngle } from '../physics/adapter';
 import { createVehicle, updateVehiclePhysics, settleVehicleToRestPose, type Vehicle } from './vehicleAssembly';
 import { driveVehicle } from './movement';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
 import { ArenaRuntime } from './arenaRuntime';
-import { resolveBattleResult, type BattleConfig, type BattleResult } from './battleContract';
+import {
+  resolveBattleResult,
+  type BattleConfig,
+  type BattleResult,
+  type BattleRenderSnapshot,
+  type RenderPolygon,
+  type RenderCircle,
+  type RenderVehicle,
+} from './battleContract';
+import type { Body } from 'matter-js';
 
 /** 引擎中立 Battle 合同（B14B：自 battleContract.ts 重新导出，保持既有导入路径兼容） */
 export type { BattleConfig, BattleResult } from './battleContract';
@@ -131,6 +140,51 @@ export class BattleOrchestrator {
   /** 订阅 Combat Event（Renderer 消费） */
   onCombatEvent(fn: (ev: CombatEvent) => void): () => void {
     return this.bus.subscribe(fn);
+  }
+
+  /**
+   * 引擎中立 Render Snapshot（B17B-A1）。
+   * 纯读取：不 step、不改 Body、不动 HP/phase/contact/arena，无物理或 Gameplay 副作用。
+   * 几何来源与当前 Renderer（renderer.ts）实际读取一一对应：
+   * - chassis / functional parts / 墙体：body.parts[].vertices（真实世界多边形，非 AABB）；
+   * - wheels：getPosition(body) / body.circleRadius / getAngle(body)。
+   */
+  getRenderSnapshot(): BattleRenderSnapshot {
+    const toPolygons = (body: Body): RenderPolygon[] => {
+      const parts = body.parts.length > 0 ? body.parts : [body];
+      return parts.map((part) => ({
+        points: part.vertices.map((v) => ({ x: v.x, y: v.y })),
+      }));
+    };
+    const toCircle = (body: Body): RenderCircle => {
+      const c = getPosition(body);
+      return { center: { x: c.x, y: c.y }, radius: body.circleRadius ?? 10, angle: getAngle(body) };
+    };
+    const toVehicle = (v: Vehicle): RenderVehicle => ({
+      team: v.team,
+      body: { kind: 'polygons', polygons: toPolygons(v.body) },
+      wheels: v.wheels.map((w) => toCircle(w.body)),
+      parts: v.parts.map((p) => ({
+        shape: { kind: 'polygons', polygons: toPolygons(p.body) },
+        category: p.def.category,
+      })),
+    });
+    return {
+      arena: {
+        width: this.arena.config.width,
+        groundY: this.arena.config.groundY,
+        normalWalls: [
+          { kind: 'polygons', polygons: toPolygons(this.arena.leftWall) },
+          { kind: 'polygons', polygons: toPolygons(this.arena.rightWall) },
+        ],
+        closingWalls: this.arena.closingWalls.map((cw) => ({
+          kind: 'polygons',
+          polygons: toPolygons(cw.body),
+        })),
+      },
+      vehicleA: toVehicle(this.vehicleA),
+      vehicleB: toVehicle(this.vehicleB),
+    };
   }
 
   /** 销毁（释放物理世界，供 Lab Reset / Clear 重建） */

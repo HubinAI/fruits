@@ -14,7 +14,7 @@
  * 不控制：开炮 / 挥锤 / Gadget 动作 / 车辆职业 AI / Weapon / Projectile / UI。
  * 同一套 Runtime 被正式 Battle 与 Physics Lab 共同调用（禁止第二套实现）。
  */
-import type { BuildSnapshot, ContentRegistry } from '../core/types';
+import type { BuildSnapshot, ContentRegistry, ColliderDef } from '../core/types';
 import { resolveSnapshot } from '../core/buildSnapshot';
 import { PlanckWorld } from '../physics/planckWorld';
 import { PHYSICS_HZ } from '../physics/units';
@@ -28,7 +28,18 @@ import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
 import { PlanckArenaRuntime } from './planckArenaRuntime';
-import { resolveBattleResult, type BattleConfig, type BattleResult } from './battleContract';
+import {
+  resolveBattleResult,
+  type BattleConfig,
+  type BattleResult,
+  type BattleRenderSnapshot,
+  type RenderVehicle,
+  type RenderShape,
+  type RenderCircle,
+  type RenderFunctionalPart,
+  type RenderArena,
+  type RenderVec2,
+} from './battleContract';
 
 /** 引擎中立 Battle 合同（B14B：自 battleContract.ts 重新导出，保持既有导入路径兼容） */
 export type { BattleConfig, BattleResult } from './battleContract';
@@ -42,6 +53,127 @@ const FIXED_DT_MS = 1000 / PHYSICS_HZ;
  * 由车轮真实 grip 提供牵引（不施加 force/impulse）。
  */
 const AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP = 1.5;
+
+/**
+ * 引擎中立 Render Snapshot 几何辅助（Queue F-02M-B17B-A2）：
+ * 仅用 PlanckWorld 公开读取接口（getPosition / getAngle）+ resolved/def/config
+ * 实算真实世界几何，不读取任何 native fixture、不引入 native escape hatch、
+ * 不修改任何物理状态。
+ */
+
+/** 本地向量旋转（px；与 planckVehicleAssembly.rotateLocal 同语义） */
+function rotateLocal(p: { x: number; y: number }, angle: number): { x: number; y: number } {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return { x: p.x * cos - p.y * sin, y: p.x * sin + p.y * cos };
+}
+
+/** facing=-1 镜像 collider（与 planckVehicleAssembly.mirrorCollider 同逻辑；快照只读，不改物理状态） */
+function mirrorCollider(c: ColliderDef): ColliderDef {
+  const m: ColliderDef = { ...c, offset: { x: -c.offset.x, y: c.offset.y } };
+  if (c.angle !== undefined) m.angle = -c.angle;
+  if (c.shape === 'polygon' && c.vertices) {
+    m.vertices = [...c.vertices].reverse().map((v) => ({ x: -v.x, y: v.y }));
+  }
+  return m;
+}
+
+/** ColliderDef → 世界坐标多边形顶点（box/polygon 直接转；circle 生成 28 边形兜底，
+ *  当前内容 chassis/part 均为 box/polygon，无近似损失） */
+function worldPointsOfCollider(
+  c: ColliderDef,
+  facing: 1 | -1,
+  bodyPos: { x: number; y: number },
+  bodyAngle: number,
+): RenderVec2[] {
+  const eff = facing === -1 ? mirrorCollider(c) : c;
+  const ca = bodyAngle + (eff.angle ?? 0);
+  const off = eff.offset ?? { x: 0, y: 0 };
+  const offW = rotateLocal(off, bodyAngle);
+  const cx = bodyPos.x + offW.x;
+  const cy = bodyPos.y + offW.y;
+  let local: { x: number; y: number }[];
+  if (eff.shape === 'box') {
+    const w = eff.width ?? 0;
+    const h = eff.height ?? 0;
+    local = [
+      { x: -w / 2, y: -h / 2 },
+      { x: w / 2, y: -h / 2 },
+      { x: w / 2, y: h / 2 },
+      { x: -w / 2, y: h / 2 },
+    ];
+  } else if (eff.shape === 'polygon') {
+    local = eff.vertices ?? [];
+  } else {
+    // circle：28 边形近似（仅兜底；当前内容 chassis/part 均为 box/polygon）
+    const r = eff.radius ?? 0;
+    const n = 28;
+    local = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      local.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+    }
+  }
+  return local.map((v) => {
+    const r = rotateLocal(v, ca);
+    return { x: cx + r.x, y: cy + r.y };
+  });
+}
+
+/** ColliderDef → 引擎中立 RenderShape（circle 保留为真实圆；box/polygon 为多边形） */
+function worldShapeOfCollider(
+  c: ColliderDef,
+  facing: 1 | -1,
+  bodyPos: { x: number; y: number },
+  bodyAngle: number,
+): RenderShape {
+  const eff = facing === -1 ? mirrorCollider(c) : c;
+  const ca = bodyAngle + (eff.angle ?? 0);
+  const off = eff.offset ?? { x: 0, y: 0 };
+  const offW = rotateLocal(off, bodyAngle);
+  const cx = bodyPos.x + offW.x;
+  const cy = bodyPos.y + offW.y;
+  if (eff.shape === 'circle') {
+    return { kind: 'circle', circle: { center: { x: cx, y: cy }, radius: eff.radius ?? 0, angle: ca } };
+  }
+  let local: { x: number; y: number }[];
+  if (eff.shape === 'box') {
+    const w = eff.width ?? 0;
+    const h = eff.height ?? 0;
+    local = [
+      { x: -w / 2, y: -h / 2 },
+      { x: w / 2, y: -h / 2 },
+      { x: w / 2, y: h / 2 },
+      { x: -w / 2, y: h / 2 },
+    ];
+  } else {
+    local = eff.vertices ?? [];
+  }
+  const points = local.map((v) => {
+    const r = rotateLocal(v, ca);
+    return { x: cx + r.x, y: cy + r.y };
+  });
+  return { kind: 'polygons', polygons: [{ points }] };
+}
+
+/** 轴对齐/旋转矩形 → 世界坐标 4 角点（静态/运动学墙体 angle=0 时为精确几何，非 AABB 近似） */
+function boxWorldPoints(
+  center: { x: number; y: number },
+  angle: number,
+  hw: number,
+  hh: number,
+): RenderVec2[] {
+  const corners = [
+    { x: -hw, y: -hh },
+    { x: hw, y: -hh },
+    { x: hw, y: hh },
+    { x: -hw, y: hh },
+  ];
+  return corners.map((v) => {
+    const r = rotateLocal(v, angle);
+    return { x: center.x + r.x, y: center.y + r.y };
+  });
+}
 
 export class PlanckBattleOrchestrator {
   readonly world: PlanckWorld;
@@ -167,6 +299,77 @@ export class PlanckBattleOrchestrator {
   /** 订阅 Combat Event（Renderer 消费） */
   onCombatEvent(fn: (ev: CombatEvent) => void): () => void {
     return this.bus.subscribe(fn);
+  }
+
+  /**
+   * 引擎中立 Render Snapshot（Queue F-02M-B17B-A2）：
+   * 用 PlanckWorld 公开读取接口（getPosition / getAngle）+ resolved/def/config
+   * 实算真实世界几何，供正式 Renderer 消费，不依赖 Matter Body/Vehicle/adapter。
+   * 纯读取：不 step、不改 Body、不动 HP/phase/contact/arena，无物理或 Gameplay 副作用。
+   */
+  getRenderSnapshot(): BattleRenderSnapshot {
+    return {
+      arena: this.buildArenaSnapshot(),
+      vehicleA: this.buildVehicleSnapshot(this.vehicleA),
+      vehicleB: this.buildVehicleSnapshot(this.vehicleB),
+    };
+  }
+
+  private buildVehicleSnapshot(vehicle: PlanckVehicle): RenderVehicle {
+    const bPos = this.world.getPosition(vehicle.body);
+    const bAng = this.world.getAngle(vehicle.body);
+    const body: RenderShape = {
+      kind: 'polygons',
+      polygons: vehicle.resolved.body.colliders.map((c) => ({
+        points: worldPointsOfCollider(c, vehicle.facing, bPos, bAng),
+      })),
+    };
+    const wheels: RenderCircle[] = vehicle.wheels.map((w) => ({
+      center: this.world.getPosition(w.body),
+      radius: w.def.radius,
+      angle: this.world.getAngle(w.body),
+    }));
+    const parts: RenderFunctionalPart[] = vehicle.parts.map((p) => ({
+      shape: worldShapeOfCollider(
+        p.def.collider,
+        vehicle.facing,
+        this.world.getPosition(p.body),
+        this.world.getAngle(p.body),
+      ),
+      category: p.def.category,
+    }));
+    return { team: vehicle.team, body, wheels, parts };
+  }
+
+  private buildArenaSnapshot(): RenderArena {
+    const cfg = this.arena.config;
+    const normalWalls: RenderShape[] = [this.arena.leftWall, this.arena.rightWall].map((w) => ({
+      kind: 'polygons',
+      polygons: [
+        {
+          points: boxWorldPoints(
+            this.world.getPosition(w),
+            this.world.getAngle(w),
+            cfg.wallThickness / 2,
+            cfg.height / 2,
+          ),
+        },
+      ],
+    }));
+    const closingWalls: RenderShape[] = this.arena.closingWalls.map((cw) => ({
+      kind: 'polygons',
+      polygons: [
+        {
+          points: boxWorldPoints(
+            this.world.getPosition(cw.body),
+            this.world.getAngle(cw.body),
+            cfg.wallThickness / 2,
+            cfg.height / 4,
+          ),
+        },
+      ],
+    }));
+    return { width: cfg.width, groundY: cfg.groundY, normalWalls, closingWalls };
   }
 
   /** 销毁（释放物理世界，供 Lab Reset / Clear 重建） */

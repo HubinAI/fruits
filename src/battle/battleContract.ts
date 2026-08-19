@@ -10,6 +10,7 @@
 import type { ArenaConfig } from './arenaConfig';
 import type { ImpactConfig } from './contactRouter';
 import type { BattlePhase, TeamId } from '../core/types';
+import type { CombatEvent } from './combatEvents';
 
 /** Battle 配置（字段与 battleOrchestrator.BattleConfig 完全一致） */
 export interface BattleConfig {
@@ -25,6 +26,12 @@ export interface BattleConfig {
   /** 车辆初始位置与朝向（facing：1 朝右 / -1 朝左，镜像而非旋转） */
   spawnA?: { x: number; y: number; facing?: 1 | -1 };
   spawnB?: { x: number; y: number; facing?: 1 | -1 };
+  /**
+   * 物理引擎选择（仅声明，本队列不主动改写 config）。
+   * 缺省未设置时，后续正式入口 / Runtime selector 一律走 Matter（与现状一致）。
+   * 'planck' 为正在接入的引擎中立 Runtime。
+   */
+  engine?: 'matter' | 'planck';
 }
 
 /** Battle 结果（字段与 battleOrchestrator.BattleResult 完全一致） */
@@ -33,6 +40,83 @@ export interface BattleResult {
   hpA: number;
   hpB: number;
   phase: string;
+}
+
+/**
+ * 引擎中立渲染数据合同（Queue F-02M-B17B-A1）。
+ *
+ * 硬约束：本组类型禁止出现 Matter.Body / Vehicle / Planck BodyHandle / adapter
+ * 或任何具体引擎类型；只描述「世界坐标几何 + 配色需要的 category」。
+ * 几何必须来自 Runtime 的真实世界多边形 / 圆，不得用 AABB 近似替代。
+ */
+
+/** 世界坐标二维点 */
+export interface RenderVec2 {
+  x: number;
+  y: number;
+}
+
+/** 世界坐标多边形：顶点为世界坐标序列（闭合，Renderer 原样描边） */
+export interface RenderPolygon {
+  points: RenderVec2[];
+}
+
+/** 世界坐标圆（轮子）：圆心 / 半径 / 当前旋转角 */
+export interface RenderCircle {
+  center: RenderVec2;
+  radius: number;
+  angle: number;
+}
+
+/** 引擎中立可绘制形状（discriminated union，无 any / cast） */
+export type RenderShape =
+  | { kind: 'polygons'; polygons: RenderPolygon[] }
+  | { kind: 'circle'; circle: RenderCircle };
+
+/** 功能部件：仅保留 Renderer 配色需要的 category */
+export interface RenderFunctionalPart {
+  shape: RenderShape;
+  category: string;
+}
+
+/** 车辆渲染数据 */
+export interface RenderVehicle {
+  team: string;
+  /** 车身主体（chassis） */
+  body: RenderShape;
+  wheels: RenderCircle[];
+  parts: RenderFunctionalPart[];
+}
+
+/** 竞技场墙体渲染数据 */
+export interface RenderArena {
+  width: number;
+  groundY: number;
+  normalWalls: RenderShape[];
+  closingWalls: RenderShape[];
+}
+
+/** 引擎中立 Render Snapshot：正式 Renderer 只消费此结构 */
+export interface BattleRenderSnapshot {
+  arena: RenderArena;
+  vehicleA: RenderVehicle;
+  vehicleB: RenderVehicle;
+}
+
+/**
+ * 引擎中立 Battle Orchestrator 公共面（Queue F-02M-B17B-A1）。
+ * 后续正式入口与 Renderer 只依赖此接口，不依赖具体引擎 Orchestrator 类。
+ * 渲染所需的世界几何统一经 getRenderSnapshot() 取得，不再直接读 arena/vehicleA/vehicleB。
+ */
+export interface BattleOrchestratorApi {
+  config: BattleConfig;
+  result: BattleResult | null;
+  phase: string;
+  timeMs: number;
+  step(realDtMs: number, timeScale?: number): void;
+  onCombatEvent(cb: (ev: CombatEvent) => void): void;
+  dispose(): void;
+  getRenderSnapshot(): BattleRenderSnapshot;
 }
 
 /**
