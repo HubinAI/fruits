@@ -108,6 +108,48 @@ function hammerLightBuild(): BuildSnapshot {
   };
 }
 
+/** Push Rod 车（Q04-C2）：boxBody + wheelStd×2 + front pushRod（Prismatic 伸缩杆） */
+function pushRodCarBuild(): BuildSnapshot {
+  return {
+    id: 'pushRodCar',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'pushRod' }],
+  };
+}
+
+/** 轻型 Push Rod 车（Q04-C2 Reaction）：wedgeBody（窄体、惯量小 → 反作用更明显）+ front pushRod */
+function pushRodLightBuild(): BuildSnapshot {
+  return {
+    id: 'pushRodLight',
+    bodyDefId: 'wedgeBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'pushRod' }],
+  };
+}
+
+/** 重型目标车（Q04-C2 Push-Heavy / Reaction）：heavyBox + wheelStd×2，无攻击件 */
+function heavyTargetBuild(): BuildSnapshot {
+  return {
+    id: 'heavyTarget',
+    bodyDefId: 'heavyBox',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [],
+  };
+}
+
 /** 倾角 Cannon 车（Q02-C4）：前小后大轮径 → 车头下倾 ~7°，同一 front cannon */
 function tiltedCannonBuild(): BuildSnapshot {
   return {
@@ -324,6 +366,56 @@ export const SCENARIOS: ScenarioDef[] = [
       autoDrive: false,
       spawnA: { x: 500, y: 650, facing: 1 },
       spawnB: { x: 1500, y: 650, facing: -1 },
+    },
+    camera: { fit: 'primary-fire', recoilExtent: 180, forwardExtent: 520 },
+  },
+  {
+    id: 'Push-Light',
+    name: 'Push Rod Light',
+    description:
+      '推杆（Planck）：A 装 Prismatic 推杆，Extend → Hold → Retract 循环；B 普通轻车位于' +
+      '杆伸出路径，真实接触被明显推开。Gadget 无 weapon damage；通用 Impact 可自然存在。',
+    buildA: pushRodCarBuild(),
+    buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: false,
+      // A pivot ≈ 450+75=525，杆初始覆盖 525..605；B 左缘 = 700-75=625 > 605 无出生重叠；
+      // 杆 extend 90 → 前端 695 > 625 → 顶推 B（Q04-C1 已验证轻目标位移 >30px）
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 700, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Push-Heavy',
+    name: 'Push Rod Heavy',
+    description:
+      '与 Push-Light 完全相同（A 车 / 初始距离 / Push 参数），仅 B 换 heavyBody：' +
+      '同一套 maxForce / speed 下 Heavy 位移明显小于 Light（真实质量反应，无按质量补偿）。',
+    buildA: pushRodCarBuild(),
+    buildB: heavyTargetBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 700, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Push-Reaction',
+    name: 'Push Rod Reaction',
+    description:
+      'A 用较轻 chassis（wedgeBody），B 重目标（heavyBox）：推杆伸出接触后，' +
+      'A 自身也被真实 joint motor + collision 反作用影响（无 Scenario 补偿）。',
+    buildA: pushRodLightBuild(),
+    buildB: heavyTargetBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 700, y: 650, facing: -1 },
     },
     camera: { fit: 'primary-fire', recoilExtent: 180, forwardExtent: 520 },
   },
