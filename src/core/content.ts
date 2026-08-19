@@ -205,6 +205,23 @@ const pushRod: FunctionalPartDef = {
   behavior: 'pushRod',
 };
 
+/**
+ * Lift Roller（顶升滚轮，Q05-F1）：Revolute 连续旋转 Gadget。
+ * - Continuous Revolute Motor（由后续 Behavior 驱动），靠真实接触把敌车顶起 / 改变姿态；
+ * - Direct Damage = 0（Gadget 天然绕过 ContactRouter weapon 路径；baseDamage 不设置）；
+ * - 单 circle collider：pivot = circle center = part body 原点（挂点），radius 首版明显；
+ * - 不设 Revolute limit（保持可连续旋转）。
+ */
+const liftRoller: FunctionalPartDef = {
+  id: 'liftRoller',
+  name: '顶升滚轮',
+  category: 'gadget',
+  mass: 25,
+  energy: 25,
+  collider: { shape: 'circle', radius: 24, offset: { x: 0, y: 0 } },
+  behavior: 'liftRoller',
+};
+
 /** 构建 Content Registry */
 export function createRegistry(): ContentRegistry {
   return {
@@ -221,6 +238,7 @@ export function createRegistry(): ContentRegistry {
       [testMass.id, testMass],
       [hammer.id, hammer],
       [pushRod.id, pushRod],
+      [liftRoller.id, liftRoller],
     ]),
   };
 }
