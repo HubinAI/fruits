@@ -326,14 +326,25 @@ export function createPlanckVehicle(
       partId: `part:${f.install.hardpointId}`,
       team,
     });
-    // Weld：chassis 本地硬点 ↔ part 本地原点。part body 原点即硬点世界位置，
+    // 连接：chassis 本地硬点 ↔ part 本地原点。part body 原点即硬点世界位置，
     // 创建瞬间两锚点精确重合，不得让求解器把错误装配拉回。
-    const joint = world.createWeldJoint(
-      body,
-      hpWorld,
-      partBody,
-      { x: 0, y: 0 },
-    );
+    // Q03-F2：Hammer 为 Revolute 摆动件（pivot = 功能挂点，可绕其自由旋转，
+    // 质量远端集中形成真实摆锤；motor/limit 由后续 HammerBehavior 驱动）；
+    // 其余 Functional Part（ram / cannon / gadget）保持 Weld 刚性连接。
+    const joint =
+      f.def.behavior === 'hammer'
+        ? world.createRevoluteJoint(
+            body,
+            hpWorld,
+            partBody,
+            { x: 0, y: 0 },
+          )
+        : world.createWeldJoint(
+            body,
+            hpWorld,
+            partBody,
+            { x: 0, y: 0 },
+          );
     return {
       id: f.install.hardpointId,
       def: f.def,

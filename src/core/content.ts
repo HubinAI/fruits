@@ -138,6 +138,27 @@ const testMass: FunctionalPartDef = {
 };
 
 /**
+ * Hammer（锤，Q03-F2）：Revolute 摆动武器。
+ * - 首版用长矩形 collider：part body 原点 = pivot（功能挂点），collider 中心经
+ *   offset.x=40 前移 → 质量中心明显远离 pivot（createDynamicCompound 质量分布跟随
+ *   形状位置，真实摆锤，无需 compound schema）；
+ * - baseDamage：头部真实接触走 ContactRouter weapon 直击路径（复用 ram 语义）；
+ * - 本队列不实现挥击状态机（motor / limit / Wind-up-Swing-Recover 由后续
+ *   HammerBehavior 驱动，本定义只提供摆锤的物理装配输入）。
+ */
+const hammer: FunctionalPartDef = {
+  id: 'hammer',
+  name: '锤',
+  category: 'weapon',
+  mass: 40, // 明显质量（ram 30 / cannon 20 之上）
+  energy: 25,
+  // 长矩形 60×14：形状覆盖 x∈[10,70]（相对 pivot），质心在 x=40，离 pivot 40px
+  collider: { shape: 'box', width: 60, height: 14, offset: { x: 40, y: 0 } },
+  behavior: 'hammer',
+  behaviorParams: { baseDamage: 90 },
+};
+
+/**
  * Cannon（炮，Q02-C2）：Fixed Mount 武器，只定义内容，不实现发射行为（Q02-C1）。
  * - 有真实 collider / mass / energy；
  * - 不设置 baseDamage：炮身接触不能直接造成 Weapon Damage，
@@ -181,6 +202,7 @@ export function createRegistry(): ContentRegistry {
       [ramHead.id, ramHead],
       [cannon.id, cannon],
       [testMass.id, testMass],
+      [hammer.id, hammer],
     ]),
   };
 }
