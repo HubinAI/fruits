@@ -151,6 +151,76 @@ describe('F-02M-B17B-T · PhysicsLab 双引擎入口 selector + lifecycle', () =
     expect(lab.orchestrator).toBeNull();
   });
 
+  it('7. loadCustom 显式 { autoDrive:true, engine:"planck" } → PlanckBattleOrchestrator', () => {
+    const lab = makeLab();
+    lab.loadCustom(makeBuild('A'), makeBuild('B'), {
+      autoDrive: true,
+      engine: 'planck',
+    });
+    expect(lab.orchestrator).not.toBeNull();
+    expect(lab.orchestrator instanceof PlanckBattleOrchestrator).toBe(true);
+    expect(lab.orchestrator instanceof BattleOrchestrator).toBe(false);
+    lab.clear();
+    expect(lab.orchestrator).toBeNull();
+  });
+
+  it('8. custom Reset → 新 orchestrator，Build 与 config（engine/spawn）相同（Planck）', () => {
+    const lab = makeLab();
+    const buildA = makeBuild('customA');
+    const buildB = makeBuild('customB');
+    const cfg = {
+      autoDrive: true,
+      engine: 'planck' as const,
+      spawnA: { x: 400, y: 640, facing: 1 as const },
+      spawnB: { x: 1400, y: 640, facing: -1 as const },
+    };
+    lab.loadCustom(buildA, buildB, cfg);
+    const o1 = lab.orchestrator as PlanckBattleOrchestrator;
+    expect(o1.vehicleA.id).toBe('customA'); // build 保留
+    expect(o1.vehicleB.id).toBe('customB');
+    expect(o1.world.getPosition(o1.vehicleA.body).x).toBeCloseTo(400, 0); // spawn 生效
+
+    // 跑几帧后再 Reset
+    for (let i = 0; i < 30; i++) lab.step(16.6667);
+    lab.reset();
+
+    const o2 = lab.orchestrator as PlanckBattleOrchestrator;
+    expect(o2).not.toBe(o1); // 新 orchestrator 实例
+    expect(o2 instanceof PlanckBattleOrchestrator).toBe(true); // config.engine 保留
+    expect(o2.vehicleA.id).toBe('customA'); // 同一 Build 重建
+    expect(o2.vehicleB.id).toBe('customB');
+    expect(o2.world.getPosition(o2.vehicleA.body).x).toBeCloseTo(400, 0); // 同一 spawn
+    lab.clear();
+    expect(lab.orchestrator).toBeNull();
+  });
+
+  it('9. Scenario Reset 原语义不变：planck scenario → Reset → 新 Planck orchestrator', () => {
+    const lab = makeLab();
+    lab.loadScenario(makeScenario('planck'));
+    const o1 = lab.orchestrator;
+    expect(o1 instanceof PlanckBattleOrchestrator).toBe(true);
+    for (let i = 0; i < 30; i++) lab.step(16.6667);
+    lab.reset();
+    expect(lab.orchestrator).not.toBeNull();
+    expect(lab.orchestrator).not.toBe(o1); // 重新创建
+    expect(lab.orchestrator instanceof PlanckBattleOrchestrator).toBe(true);
+    lab.clear();
+  });
+
+  it('10. custom Matter Reset：loadCustom() 缺省 → Matter，Reset 后仍 Matter 新实例', () => {
+    const lab = makeLab();
+    lab.loadCustom(makeBuild('A'), makeBuild('B')); // 缺省 config（Matter）
+    const o1 = lab.orchestrator;
+    expect(o1 instanceof BattleOrchestrator).toBe(true);
+    lab.step(16.6667);
+    lab.reset();
+    expect(lab.orchestrator).not.toBeNull();
+    expect(lab.orchestrator).not.toBe(o1); // 新实例
+    expect(lab.orchestrator instanceof BattleOrchestrator).toBe(true);
+    expect(lab.orchestrator instanceof PlanckBattleOrchestrator).toBe(false);
+    lab.clear();
+  });
+
   it('5. Matter lifecycle smoke：load/bind/step/render/clear 不抛错（含全量 Debug overlay）', () => {
     const lab = makeLab();
     lab.loadScenario(makeScenario('matter'));

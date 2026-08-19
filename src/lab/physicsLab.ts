@@ -63,17 +63,36 @@ export class PhysicsLab {
 
   private currentScenario: ScenarioDef | null = null;
 
+  /** 最近一次 custom battle 的输入（供 Reset 重建；与 currentScenario 互斥） */
+  private currentCustom: {
+    buildA: BuildSnapshot;
+    buildB: BuildSnapshot;
+    config: BattleConfig;
+  } | null = null;
+
   constructor(private renderer: Renderer) {}
 
   loadScenario(sc: ScenarioDef): void {
     this.currentScenario = sc;
+    this.currentCustom = null;
     this.orchestrator = this.createBattle(sc.buildA, sc.buildB, sc.config);
   }
 
-  /** 从自定义 Build 创建战斗（供 Build 编辑器用） */
-  loadCustom(buildA: BuildSnapshot, buildB: BuildSnapshot): void {
+  /**
+   * 从自定义 Build 创建战斗（供 Build 编辑器用）。
+   * config 缺省 = { autoDrive: true }（无 engine → 维持既有 Matter 兼容语义）。
+   * 显式传 { autoDrive: true, engine: 'planck' } → 创建 PlanckBattleOrchestrator。
+   * 保存 buildA/buildB/config，Reset 时按同一输入重建同场战斗。
+   */
+  loadCustom(
+    buildA: BuildSnapshot,
+    buildB: BuildSnapshot,
+    config?: BattleConfig,
+  ): void {
     this.currentScenario = null;
-    this.orchestrator = this.createBattle(buildA, buildB, { autoDrive: true });
+    const cfg = config ?? { autoDrive: true };
+    this.currentCustom = { buildA, buildB, config: cfg };
+    this.orchestrator = this.createBattle(buildA, buildB, cfg);
   }
 
   private createBattle(
@@ -114,6 +133,9 @@ export class PhysicsLab {
   reset(): void {
     if (this.currentScenario) {
       this.loadScenario(this.currentScenario);
+    } else if (this.currentCustom) {
+      const c = this.currentCustom;
+      this.loadCustom(c.buildA, c.buildB, c.config);
     }
   }
 
@@ -121,5 +143,6 @@ export class PhysicsLab {
     this.orchestrator?.dispose();
     this.orchestrator = null;
     this.currentScenario = null;
+    this.currentCustom = null;
   }
 }
