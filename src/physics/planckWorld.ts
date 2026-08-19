@@ -791,6 +791,54 @@ export class PlanckWorld {
     j.setMaxMotorTorque(cfg.maxTorqueNm);
   }
 
+  /**
+   * 读取 Revolute joint 当前相对角（Q03-F1，Hammer 挥击相位基础）：
+   * - 返回 Planck 原生 joint angle（rad：bodyB 相对 bodyA 的角度，已扣除 referenceAngle）；
+   * - 与 getAngle/setAngle 同一 rad 单位体系，无需换算；
+   * - 非 Revolute / 跨 world / 失效 handle 明确报错（与 setRevoluteMotor 同语义，
+   *   不静默 no-op、不暴露 native Planck）。
+   */
+  getRevoluteAngle(joint: JointHandle): number {
+    const j = this.revoluteJoints.get(joint);
+    if (!j) {
+      throw new Error(
+        'PlanckWorld: JointHandle 不是 RevoluteJoint 或不属于当前 world（跨 World 使用不被允许）',
+      );
+    }
+    return j.getJointAngle();
+  }
+
+  /**
+   * Revolute joint angle limit（Q03-F1，Hammer 固定挥击弧基础）：
+   * - 直接映射 Planck 原生 setLimits + enableLimit（rad 单位直通，无经验换算）；
+   * - enabled 必须为 boolean；lower/upper 必须有限且 lower <= upper；
+   * - 不改变 motor 语义：limit 与 motor 独立生效（motor 撞 limit 会被原生挡下）；
+   * - 非 Revolute / 跨 world / 失效 handle 明确报错。
+   */
+  setRevoluteLimit(
+    joint: JointHandle,
+    cfg: { enabled: boolean; lowerRad: number; upperRad: number },
+  ): void {
+    if (typeof cfg.enabled !== 'boolean') {
+      throw new Error(`PlanckWorld: enabled 必须为 boolean，收到 ${String(cfg.enabled)}`);
+    }
+    assertFinite(cfg.lowerRad, cfg.upperRad);
+    if (cfg.lowerRad > cfg.upperRad) {
+      throw new Error(
+        `PlanckWorld: lowerRad 必须 <= upperRad，收到 ${cfg.lowerRad} > ${cfg.upperRad}`,
+      );
+    }
+    const j = this.revoluteJoints.get(joint);
+    if (!j) {
+      throw new Error(
+        'PlanckWorld: JointHandle 不是 RevoluteJoint 或不属于当前 world（跨 World 使用不被允许）',
+      );
+    }
+    // 先写 limit 值再 enable（原生语义：enableLimit(true) 立即应用当前 limit）
+    j.setLimits(cfg.lowerRad, cfg.upperRad);
+    j.enableLimit(cfg.enabled);
+  }
+
   private createBody(
     shape: planck.Shape,
     density: number,
