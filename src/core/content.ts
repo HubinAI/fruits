@@ -145,6 +145,9 @@ const testMass: FunctionalPartDef = {
  * - behaviorParams 仅含六个参数（首版取明显、易验证数值，不做精细平衡）：
  *   cooldownMs / muzzleSpeed / projectileDamage / projectileRadius /
  *   projectileMass / recoilImpulse。
+ * - Q02-EXP-R1：可感知性放大（录屏验收，非平衡）——
+ *   projectileRadius 6→10（弹体更可见）、muzzleSpeed 12→8（飞行过程可观察）、
+ *   recoilImpulse 12→30（后座位移/姿态更明显）；cooldown / damage / mass 不变。
  */
 const cannon: FunctionalPartDef = {
   id: 'cannon',
@@ -156,11 +159,11 @@ const cannon: FunctionalPartDef = {
   behavior: 'cannon',
   behaviorParams: {
     cooldownMs: 1000,
-    muzzleSpeed: 12,
+    muzzleSpeed: 8,
     projectileDamage: 80,
-    projectileRadius: 6,
+    projectileRadius: 10,
     projectileMass: 1,
-    recoilImpulse: 12,
+    recoilImpulse: 30,
   },
 };
 

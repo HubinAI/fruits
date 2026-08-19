@@ -38,11 +38,11 @@ describe('Q02-C2 Cannon Content Definition', () => {
     const c = cannon as FunctionalPartDef;
     expect(c.behaviorParams).toEqual({
       cooldownMs: 1000,
-      muzzleSpeed: 12,
+      muzzleSpeed: 8, // Q02-EXP-R1：12→8（飞行过程可观察）
       projectileDamage: 80,
-      projectileRadius: 6,
+      projectileRadius: 10, // Q02-EXP-R1：6→10（弹体更可见）
       projectileMass: 1,
-      recoilImpulse: 12,
+      recoilImpulse: 30, // Q02-EXP-R1：12→30（后座更明显）
     });
     // 无多余参数（除六参数外无其它 key）
     expect(Object.keys(c.behaviorParams ?? {}).sort()).toEqual([

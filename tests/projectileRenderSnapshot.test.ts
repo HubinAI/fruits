@@ -79,11 +79,11 @@ describe('Q02-C3A Projectile Render Snapshot', () => {
 
     // team 取 projectile OwnerTag
     expect(pr.team).toBe('A');
-    // radius 取真实碰撞几何（circle 的几何 AABB 半宽 = 半径 6）
-    expect(pr.radius).toBeCloseTo(6, 3);
-    // center 取真实 body 世界位置：一步真实飞行 = 炮口 + 12px（水平），重力 ~0.28px 下落
+    // radius 取真实碰撞几何（circle 的几何 AABB 半宽 = 半径 10，Q02-EXP-R1：6→10）
+    expect(pr.radius).toBeCloseTo(10, 3);
+    // center 取真实 body 世界位置：一步真实飞行 = 炮口 + 8px（muzzleSpeed 8，Q02-EXP-R1：12→8），重力 ~0.28px 下落
     const muzzle = expectedMuzzle(orch);
-    expect(Math.abs(pr.center.x - (muzzle.x + 12))).toBeLessThan(1);
+    expect(Math.abs(pr.center.x - (muzzle.x + 8))).toBeLessThan(1);
     expect(Math.abs(pr.center.y - (muzzle.y + 0.3))).toBeLessThan(1);
   });
 

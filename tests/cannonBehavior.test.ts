@@ -104,18 +104,18 @@ describe('Q02-C1A Cannon Behavior（单元）', () => {
     // mass / spawn 参数（radius / bullet / velocity）
     expect(world.getMass(p1)).toBeCloseTo(1, 6);
     expect(r1.spawn).not.toBeNull();
-    expect(r1.spawn!.radius).toBe(6);
+    expect(r1.spawn!.radius).toBe(10); // Q02-EXP-R1：6→10
     expect(r1.spawn!.bullet).toBe(true);
-    // 初速度 = 射手速度（静置 ≈0）+ 炮口方向(+X) × muzzleSpeed(12)
+    // 初速度 = 射手速度（静置 ≈0）+ 炮口方向(+X) × muzzleSpeed(8)（Q02-EXP-R1：12→8）
     const vel = world.getLinearVelocity(p1);
-    expect(vel.x).toBeCloseTo(12, 3);
+    expect(vel.x).toBeCloseTo(8, 3);
     expect(vel.y).toBeCloseTo(0, 3);
     // 炮口外缘：projectile 在 part 前方
     expect(world.getPosition(p1).x).toBeGreaterThan(world.getPosition(part.body).x);
 
-    // Recoil：part 立即获得反向速度 = -recoilImpulse/mass = -12/20 = -0.6（真实 J/m，非 setLinearVelocity）
+    // Recoil：part 立即获得反向速度 = -recoilImpulse/mass = -30/20 = -1.5（Q02-EXP-R1：12→30；真实 J/m，非 setLinearVelocity）
     const partVel = world.getLinearVelocity(part.body);
-    expect(partVel.x).toBeCloseTo(-0.6, 3);
+    expect(partVel.x).toBeCloseTo(-1.5, 3);
     expect(partVel.y).toBeCloseTo(0, 3);
 
     // 冷却中：后续 59 步（调用 2..60）不发射
@@ -172,9 +172,9 @@ describe('Q02-C1A Orchestrator 正式插入口（端到端）', () => {
     const orch = new PlanckBattleOrchestrator(cannonBuild(), enemy, registry, {
       autoDrive: false,
       spawnA: { x: 400, y: 640, facing: 1 },
-      // wedge 车头(78) + cannon 炮管(硬点 66 + 炮管 40 → 右缘 506) 需与 B 左缘留足间隙：
-      // B=boxBody 半宽 75 → 左缘 565 > 506 ✓（59px 弹道，~5 步命中）
-      spawnB: { x: 640, y: 640, facing: -1 },
+      // Q02-EXP-R1：muzzleSpeed 8 + recoilImpulse 30 下，A 每发后坐会把车推离目标，
+      // spawnB 过远时后 2 发会打空（真实物理）。实测 spawnB=580 → 4 发全中（step 1/61/121/181）。
+      spawnB: { x: 580, y: 640, facing: -1 },
     });
     const weaponEvents: CombatEvent[] = [];
     orch.onCombatEvent((e) => {
@@ -188,16 +188,16 @@ describe('Q02-C1A Orchestrator 正式插入口（端到端）', () => {
       if (weaponEvents.length > hitSteps.length) hitSteps.push(i);
     }
 
-    // 200 步 ÷ 60 步冷却 = 4 发（step 1/61/121/181），弹道 ~5 步 → 命中于 ~6/66/126/186
+    // 200 步 ÷ 60 步冷却 = 4 发（step 1/61/121/181），弹道 ~8-10 步 → 命中于 ~10/71/132/192 附近
     expect(hitSteps.length).toBe(4);
     for (const ev of weaponEvents) {
       expect(ev.damage).toBe(80);
     }
-    // 首发近乎立即（step 1 发射，弹道 ~5 步）
-    expect(hitSteps[0]!).toBeLessThan(10);
-    // 冷却周期 ≈ 60 固定步 = 1000ms（±10 步容差，含 recoil 后座位移影响）
+    // 首发近乎立即（step 1 发射，弹道 ~8 步；Q02-EXP-R1 muzzleSpeed 8 后放宽容差）
+    expect(hitSteps[0]!).toBeLessThan(15);
+    // 冷却周期 ≈ 60 固定步 = 1000ms（±12 步容差，含 recoil 后座位移影响）
     for (let i = 1; i < hitSteps.length; i++) {
-      expect(Math.abs(hitSteps[i]! - hitSteps[i - 1]! - 60)).toBeLessThan(10);
+      expect(Math.abs(hitSteps[i]! - hitSteps[i - 1]! - 60)).toBeLessThan(12);
     }
     // 敌方 hp 精确扣 4×80
     expect(orch.vehicleB.hp).toBe(680);

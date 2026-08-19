@@ -205,8 +205,11 @@ export const SCENARIOS: ScenarioDef[] = [
     config: {
       engine: 'planck',
       autoDrive: false,
+      // Q02-EXP-R1：拉开初始距离（spawnB 700→750）——A 炮口右缘 ~566，B 左缘 ~675，
+      // 弹道 ~90-110px，muzzleSpeed=8 → 首发 ~13 步（≈0.22s）飞行后才命中，
+      // 正常速度下有明显可观察飞行过程；再远则重力使慢弹在命中前落地（实测 780+ 打空）。
       spawnA: { x: 450, y: 650, facing: 1 },
-      spawnB: { x: 700, y: 650, facing: -1 },
+      spawnB: { x: 750, y: 650, facing: -1 },
     },
     camera: { fit: 'vehicles' },
   },
