@@ -112,6 +112,105 @@ function mirrorCollider(c: ColliderDef): ColliderDef {
   return m;
 }
 
+/** 本地向量旋转（px；顺时针为正，与项目 Y-down 一致） */
+function rotateLocal(p: { x: number; y: number }, angle: number): { x: number; y: number } {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return { x: p.x * cos - p.y * sin, y: p.x * sin + p.y * cos };
+}
+
+/**
+ * Planck 整车无冲量贴地静置（B16B）：
+ * - 复用 Matter 已验证的轮径差姿态公式 theta = facing × atan2(rearR − frontR, wheelbase)；
+ * - 旋转 chassis 后按 theta 旋转镜像 hardpoint 重新摆放所有 wheels / parts
+ *   （Revolute/Weld 锚点精确重合，禁止让求解器把错误装配拉回）；
+ * - parts angle = theta + facing × localRotation（保持 Weld referenceAngle，无内部应力）；
+ * - 合并 chassis + wheels + parts 的 getCollisionBounds，与 ground 碰撞边界 minY 对齐
+ *   （整车统一平移，使碰撞 maxY 精确等于 ground minY）；
+ * - 平移后清零所有车辆 body 线速度/角速度，保持已计算姿态；
+ * - 更新 vehicle.com 为当前真实质量加权 COM（totalMass 不变）；不修改 wheel.grounded。
+ */
+export function settlePlanckVehicleToRestPose(
+  world: PlanckWorld,
+  vehicle: PlanckVehicle,
+  groundBody: BodyHandle,
+): void {
+  // 轮径差姿态（与 Matter settleVehicleToRestPose 同公式）
+  const rear = vehicle.wheels.find((w) => w.id === 'rear');
+  const front = vehicle.wheels.find((w) => w.id === 'front');
+  if (rear && front) {
+    const wheelbase = Math.abs(
+      front.hardpoint.localPosition.x - rear.hardpoint.localPosition.x,
+    );
+    const theta =
+      vehicle.facing * Math.atan2(rear.def.radius - front.def.radius, wheelbase);
+    world.setAngle(vehicle.body, theta);
+    const chassisPos = world.getPosition(vehicle.body);
+
+    // wheels：按 theta 旋转镜像硬点重新定位（Revolute 锚点 = wheel 圆心，保持精确重合）
+    for (const w of vehicle.wheels) {
+      const hp = rotateLocal(
+        { x: vehicle.facing * w.hardpoint.localPosition.x, y: w.hardpoint.localPosition.y },
+        theta,
+      );
+      world.setPosition(w.body, chassisPos.x + hp.x, chassisPos.y + hp.y);
+    }
+    // parts：position 跟随旋转后硬点；angle = theta + facing×localRotation（Weld 相对角不变）
+    for (const p of vehicle.parts) {
+      const hp = rotateLocal(
+        { x: vehicle.facing * p.hardpoint.localPosition.x, y: p.hardpoint.localPosition.y },
+        theta,
+      );
+      world.setPosition(p.body, chassisPos.x + hp.x, chassisPos.y + hp.y);
+      world.setAngle(p.body, theta + vehicle.facing * (p.hardpoint.localRotation ?? 0));
+    }
+  }
+
+  // 合并整车碰撞边界
+  let minY = Infinity;
+  let maxY = -Infinity;
+  const merge = (bb: { minX: number; minY: number; maxX: number; maxY: number }): void => {
+    minY = Math.min(minY, bb.minY);
+    maxY = Math.max(maxY, bb.maxY);
+  };
+  merge(world.getCollisionBounds(vehicle.body));
+  for (const w of vehicle.wheels) merge(world.getCollisionBounds(w.body));
+  for (const p of vehicle.parts) merge(world.getCollisionBounds(p.body));
+
+  // 整车统一平移：碰撞 maxY 精确等于 ground 碰撞 minY（仅 y 平移，x 不变）
+  const deltaY = world.getCollisionBounds(groundBody).minY - maxY;
+  const shiftY = (body: BodyHandle): void => {
+    const pos = world.getPosition(body);
+    world.setPosition(body, pos.x, pos.y + deltaY);
+  };
+  shiftY(vehicle.body);
+  for (const w of vehicle.wheels) shiftY(w.body);
+  for (const p of vehicle.parts) shiftY(p.body);
+
+  // 平移后清零所有车辆 body 线/角速度（保持姿态）
+  const zeroVel = (body: BodyHandle): void => {
+    world.setLinearVelocity(body, 0, 0);
+    world.setAngularVelocity(body, 0);
+  };
+  zeroVel(vehicle.body);
+  for (const w of vehicle.wheels) zeroVel(w.body);
+  for (const p of vehicle.parts) zeroVel(p.body);
+
+  // 更新 vehicle.com：当前真实质量加权 COM（totalMass 不变）
+  let mx = 0;
+  let my = 0;
+  const acc = (body: BodyHandle): void => {
+    const m = world.getMass(body);
+    const c = world.getCenterOfMass(body);
+    mx += c.x * m;
+    my += c.y * m;
+  };
+  acc(vehicle.body);
+  for (const w of vehicle.wheels) acc(w.body);
+  for (const p of vehicle.parts) acc(p.body);
+  vehicle.com = { x: mx / vehicle.totalMass, y: my / vehicle.totalMass };
+}
+
 /**
  * 创建 Planck 车辆 chassis（body compound + OwnerTag）。
  * 同车所有 body 使用相同负数 group（A=-1 / B=-2），保证「默认关闭同车普通
