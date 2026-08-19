@@ -28,7 +28,6 @@ import { drivePlanckVehicle } from './planckMovement';
 import { CannonBehavior } from './cannonBehavior';
 import { HammerBehavior } from './hammerBehavior';
 import { PushRodBehavior } from './pushRodBehavior';
-import { LiftRollerBehavior } from './liftRollerBehavior';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
@@ -235,13 +234,6 @@ export class PlanckBattleOrchestrator {
     behavior: PushRodBehavior;
   }> = [];
 
-  /** Lift Roller Behavior 实例（每 liftRoller part 一个，Q05-C1；同一 onBeforeStep 插入口） */
-  private readonly liftRollers: Array<{
-    vehicle: PlanckVehicle;
-    part: PlanckPartRuntime;
-    behavior: LiftRollerBehavior;
-  }> = [];
-
   private _result: BattleResult | null = null;
   private time = 0;
 
@@ -313,15 +305,6 @@ export class PlanckBattleOrchestrator {
       }
     }
 
-    // Lift Roller Behavior（Q05-C1）：为每辆车上每个 liftRoller part 建 continuous motor
-    for (const vehicle of [this.vehicleA, this.vehicleB]) {
-      for (const part of vehicle.parts) {
-        if (part.def.behavior === 'liftRoller') {
-          this.liftRollers.push({ vehicle, part, behavior: new LiftRollerBehavior(part) });
-        }
-      }
-    }
-
     this.damageResolver = new DamageResolver(this.bus);
     this.router = new ContactRouter(
       [this.vehicleA, this.vehicleB],
@@ -385,9 +368,6 @@ export class PlanckBattleOrchestrator {
       }
       for (const p of this.pushRods) {
         p.behavior.stepFixed(this.world, p.vehicle, p.part);
-      }
-      for (const l of this.liftRollers) {
-        l.behavior.stepFixed(this.world, l.vehicle, l.part);
       }
     });
 

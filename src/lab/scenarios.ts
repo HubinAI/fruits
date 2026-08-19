@@ -178,34 +178,6 @@ function plainCarBuild(): BuildSnapshot {
   };
 }
 
-/** Lift Roller 车（Q05-C2）：boxBody + wheelStd×2 + front liftRoller（continuous Revolute roller） */
-function liftRollerCarBuild(): BuildSnapshot {
-  return {
-    id: 'liftRollerCar',
-    bodyDefId: 'boxBody',
-    quality: 1,
-    movements: [
-      { hardpointId: 'rear', defId: 'wheelStd' },
-      { hardpointId: 'front', defId: 'wheelStd' },
-    ],
-    functionals: [{ hardpointId: 'front', defId: 'liftRoller' }],
-  };
-}
-
-/** 重型 Lift Roller 平台（Q05-C2 Lift-Grounded）：heavyBox 更重 → 顶 B 时 A 反推小、平台稳定 */
-function liftRollerHeavyBuild(): BuildSnapshot {
-  return {
-    id: 'liftRollerHeavy',
-    bodyDefId: 'heavyBox',
-    quality: 1,
-    movements: [
-      { hardpointId: 'rear', defId: 'wheelStd' },
-      { hardpointId: 'front', defId: 'wheelStd' },
-    ],
-    functionals: [{ hardpointId: 'front', defId: 'liftRoller' }],
-  };
-}
-
 export const SCENARIOS: ScenarioDef[] = [
   {
     id: 'A',
@@ -446,58 +418,6 @@ export const SCENARIOS: ScenarioDef[] = [
       spawnB: { x: 700, y: 650, facing: -1 },
     },
     camera: { fit: 'primary-fire', recoilExtent: 180, forwardExtent: 520 },
-  },
-  {
-    id: 'Lift-Light',
-    name: 'Lift Roller Light',
-    description:
-      '顶升滚轮（Planck）：A 装 continuous Revolute roller（径向线可见旋转），真实接触轻车 B 明显抬高前轮 / 改变车身姿态；' +
-      'Gadget 0 weapon damage，无 Scenario 补偿。',
-    buildA: liftRollerCarBuild(),
-    buildB: plainCarBuild(),
-    config: {
-      engine: 'planck',
-      autoDrive: false,
-      // Q05-C1 实测：spawnB 560 时 roller（pivot≈525、上沿≈677）顶到 B 前轮上部
-      // → B 被顶起/姿态改变最明显（yShift 14.6 / angShift 0.318）
-      spawnA: { x: 450, y: 650, facing: 1 },
-      spawnB: { x: 560, y: 650, facing: -1 },
-    },
-    camera: { fit: 'vehicles' },
-  },
-  {
-    id: 'Lift-Posture',
-    name: 'Lift Roller Posture',
-    description:
-      '接触位置 → 姿态（Planck）：roller 顶 B 前轮 / 前部，B 车身俯仰明显改变（不要求抛起整车）；' +
-      '重点验证「自然接触位置 → 真实姿态结果」，无隐藏力 / 补偿。',
-    buildA: liftRollerCarBuild(),
-    buildB: plainCarBuild(),
-    config: {
-      engine: 'planck',
-      autoDrive: false,
-      // 实测扫描 520-560：bx=550 俯仰最明显（angShift 0.334 / yShift 15.4）；
-      // roller 顶 B 前轮上部 → B 车身俯仰为主要可观察结果（不要求抛起整车）
-      spawnA: { x: 450, y: 650, facing: 1 },
-      spawnB: { x: 550, y: 650, facing: -1 },
-    },
-    camera: { fit: 'vehicles' },
-  },
-  {
-    id: 'Lift-Grounded',
-    name: 'Lift Roller Grounded',
-    description:
-      '离地失驱（Planck）：A 用重型平台（heavyBox，顶 B 时反推小、平台稳定）；B 正常驱动轮接触 roller 后' +
-      '至少一个驱动轮真实离地（grounded true→false），落回地面恢复（false→true）；drive motor 随 grounded 自然门控。',
-    buildA: liftRollerHeavyBuild(),
-    buildB: plainCarBuild(),
-    config: {
-      engine: 'planck',
-      autoDrive: false,
-      spawnA: { x: 450, y: 650, facing: 1 },
-      spawnB: { x: 560, y: 650, facing: -1 },
-    },
-    camera: { fit: 'vehicles' },
   },
 ];
 

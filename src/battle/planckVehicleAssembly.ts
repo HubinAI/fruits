@@ -328,14 +328,13 @@ export function createPlanckVehicle(
     });
     // 连接：chassis 本地硬点 ↔ part 本地原点。part body 原点即硬点世界位置，
     // 创建瞬间两锚点精确重合，不得让求解器把错误装配拉回。
-    // Q03-F2 / Q05-F1：Hammer 与 Lift Roller 为 Revolute 件——Hammer 是摆动摆锤
-    // （pivot=挂点、质量远端集中、motor/limit 由 HammerBehavior 驱动）；Lift Roller 是
-    // Continuous 旋转滚轮（pivot=circle center=挂点，不设 limit，motor 由后续 Behavior 驱动）。
-    // Q04-F2：Push Rod 为 Prismatic 伸缩件——axis 取 chassis 本地 ±X（facing 前方，
-    // 跟随 chassis 姿态的本地轴，非固定世界 X；motor/limit 由后续 PushRodBehavior 驱动）。
+    // Q03-F2：Hammer 为 Revolute 件——摆动摆锤（pivot=挂点、质量远端集中、
+    // motor/limit 由 HammerBehavior 驱动）。Q04-F2：Push Rod 为 Prismatic 伸缩件——
+    // axis 取 chassis 本地 ±X（facing 前方，跟随 chassis 姿态的本地轴，非固定世界 X；
+    // motor/limit 由后续 PushRodBehavior 驱动）。
     // 其余 Functional Part（ram / cannon / gadget）保持 Weld 刚性连接。
     const joint =
-      f.def.behavior === 'hammer' || f.def.behavior === 'liftRoller'
+      f.def.behavior === 'hammer'
         ? world.createRevoluteJoint(
             body,
             hpWorld,
