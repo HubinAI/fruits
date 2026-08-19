@@ -4,7 +4,17 @@
  */
 import type { BuildSnapshot } from '../core/types';
 import type { BattleConfig } from '../battle/battleOrchestrator';
+import type { CameraFit } from '../render/renderer';
 import { getPreset } from './presets';
+
+/** 场景取景提示（Q02-CAM-R1/R2，仅显示层）：镜头在 load/Reset/resize 时按此构图一次并固定 */
+export interface ScenarioCamera {
+  fit: CameraFit;
+  /** primary-fire：前方固定射击空间（世界 px，朝 +X） */
+  forwardExtent?: number;
+  /** primary-fire：身后 recoil 反冲空间（世界 px） */
+  recoilExtent?: number;
+}
 
 export interface ScenarioDef {
   id: string;
@@ -13,6 +23,8 @@ export interface ScenarioDef {
   buildA: BuildSnapshot;
   buildB: BuildSnapshot;
   config: BattleConfig;
+  /** 可选取景提示；缺省 = vehicles（A+B） */
+  camera?: ScenarioCamera;
 }
 
 function presetBuild(id: string): BuildSnapshot {
@@ -196,6 +208,7 @@ export const SCENARIOS: ScenarioDef[] = [
       spawnA: { x: 450, y: 650, facing: 1 },
       spawnB: { x: 700, y: 650, facing: -1 },
     },
+    camera: { fit: 'vehicles' },
   },
   {
     id: 'Cannon-Recoil',
@@ -211,6 +224,7 @@ export const SCENARIOS: ScenarioDef[] = [
       spawnA: { x: 500, y: 650, facing: 1 },
       spawnB: { x: 1500, y: 650, facing: -1 },
     },
+    camera: { fit: 'primary-fire', recoilExtent: 180, forwardExtent: 520 },
   },
   {
     id: 'Cannon-Angle',
@@ -226,6 +240,8 @@ export const SCENARIOS: ScenarioDef[] = [
       spawnA: { x: 500, y: 650, facing: 1 },
       spawnB: { x: 1200, y: 650, facing: -1 },
     },
+    // 与 Cannon-Recoil 共用同一套 primary-fire 固定镜头：A 偏左中部 + 身后 recoil 空间 + 前方射击空间
+    camera: { fit: 'primary-fire', recoilExtent: 180, forwardExtent: 520 },
   },
 ];
 

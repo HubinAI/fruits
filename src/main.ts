@@ -4,9 +4,11 @@
  */
 import { Renderer } from './render/renderer';
 import { PhysicsLab } from './lab/physicsLab';
-import { SCENARIOS } from './lab/scenarios';
+import { SCENARIOS, type ScenarioCamera } from './lab/scenarios';
 import { PRESETS } from './lab/presets';
 import { TIME_SCALES } from './render/debugOverlay';
+import { BattleOrchestrator } from './battle/battleOrchestrator';
+import { PlanckBattleOrchestrator } from './battle/planckBattleOrchestrator';
 import type { BuildSnapshot } from './core/types';
 
 const app = document.getElementById('app')!;
@@ -69,6 +71,35 @@ canvasWrap.appendChild(debugPanel);
 const renderer = new Renderer(canvas);
 const lab = new PhysicsLab(renderer);
 
+/* ---------- 稳定取景（Q02-CAM-R1）：只在 load / Reset / resize 时构图一次 ---------- */
+let currentCamera: ScenarioCamera | null = null;
+
+/** 取当前 orchestrator 的 arena 尺寸（运行时 config，Planck/Matter 共用） */
+function arenaDims(): { w: number; h: number } {
+  const o = lab.orchestrator;
+  if (o instanceof PlanckBattleOrchestrator) {
+    return { w: o.arena.config.width, h: o.arena.config.height };
+  }
+  if (o instanceof BattleOrchestrator) {
+    return { w: o.arena.config.width, h: o.arena.config.height };
+  }
+  return { w: 1600, h: 900 };
+}
+
+/** 按当前场景取景模式构图一次并固定（运行期间不再重算，无呼吸缩放/无跟随） */
+function reframeCamera(): void {
+  const orch = lab.orchestrator;
+  if (!orch) return;
+  renderer.reframe(
+    orch.getRenderSnapshot(),
+    currentCamera?.fit ?? 'vehicles',
+    {
+      forwardExtent: currentCamera?.forwardExtent,
+      recoilExtent: currentCamera?.recoilExtent,
+    },
+  );
+}
+
 /* ---------- Build 编辑状态 ---------- */
 interface EditState {
   body: string;
@@ -100,6 +131,8 @@ function buildFromEdit(side: 'A' | 'B', e: EditState): BuildSnapshot {
 
 function loadCustom(): void {
   lab.loadCustom(buildFromEdit('A', editA), buildFromEdit('B', editB));
+  currentCamera = null; // 自定义 Build：取景 A+B
+  reframeCamera();
 }
 
 /* ---------- 工具栏 ---------- */
@@ -121,7 +154,11 @@ SCENARIOS.forEach((s) => {
 });
 scenarioSelect.onchange = () => {
   const sc = SCENARIOS.find((s) => s.id === scenarioSelect.value);
-  if (sc) lab.loadScenario(sc);
+  if (sc) {
+    lab.loadScenario(sc);
+    currentCamera = sc.camera ?? null;
+    reframeCamera();
+  }
 };
 toolbar.appendChild(scenarioSelect);
 
@@ -135,8 +172,12 @@ addButton(toolbar, 'Reset', () => {
   btnPause.textContent = 'Pause';
   btnPause.classList.remove('active');
   lab.reset();
+  reframeCamera(); // Reset 后可重新构图
 });
-addButton(toolbar, 'Clear', () => lab.clear());
+addButton(toolbar, 'Clear', () => {
+  lab.clear();
+  currentCamera = null;
+});
 
 // 时间缩放
 toolbar.appendChild(document.createTextNode('速度 '));
@@ -318,6 +359,7 @@ const refreshB = buildPanel(panelB, 'B 车 Build', editB);
       if (!Number.isNaN(v)) {
         (lab.overrides as Record<string, number>)[key] = v;
         lab.reset();
+        reframeCamera(); // Override 触发 reset：重新构图一次
       }
     };
     lab2.appendChild(inp);
@@ -327,10 +369,12 @@ const refreshB = buildPanel(panelB, 'B 车 Build', editB);
 
 /* ---------- 初始加载 + 动画循环 ---------- */
 lab.loadScenario(SCENARIOS[0]);
+currentCamera = SCENARIOS[0].camera ?? null;
 
 function doResize(): void {
-  const arena = lab.orchestrator?.arena;
-  renderer.resize(arena?.config.width ?? 1600, arena?.config.height ?? 900);
+  const d = arenaDims();
+  renderer.resize(d.w, d.h);
+  reframeCamera(); // viewport resize：重新构图一次
 }
 window.addEventListener('resize', doResize);
 doResize();
