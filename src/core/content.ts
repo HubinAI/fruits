@@ -188,6 +188,23 @@ const cannon: FunctionalPartDef = {
   },
 };
 
+/**
+ * Push Rod（推杆，Q04-F2）：Prismatic 伸缩 Gadget。
+ * - 只通过真实接触改变敌我距离/姿态，Direct Damage = 0（Gadget 天然绕过
+ *   ContactRouter weapon 路径；baseDamage 不设置）；
+ * - 单长矩形 collider 从挂点向车辆前方延伸（offset.x=40、宽 80 → 覆盖 pivot..pivot+80）；
+ * - 本队列不做伸缩状态机（Extend→Hold→Retract 由后续 PushRodBehavior 用 motor+limit 驱动）。
+ */
+const pushRod: FunctionalPartDef = {
+  id: 'pushRod',
+  name: '推杆',
+  category: 'gadget',
+  mass: 15,
+  energy: 20,
+  collider: { shape: 'box', width: 80, height: 12, offset: { x: 40, y: 0 } },
+  behavior: 'pushRod',
+};
+
 /** 构建 Content Registry */
 export function createRegistry(): ContentRegistry {
   return {
@@ -203,6 +220,7 @@ export function createRegistry(): ContentRegistry {
       [cannon.id, cannon],
       [testMass.id, testMass],
       [hammer.id, hammer],
+      [pushRod.id, pushRod],
     ]),
   };
 }

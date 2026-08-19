@@ -329,7 +329,9 @@ export function createPlanckVehicle(
     // 连接：chassis 本地硬点 ↔ part 本地原点。part body 原点即硬点世界位置，
     // 创建瞬间两锚点精确重合，不得让求解器把错误装配拉回。
     // Q03-F2：Hammer 为 Revolute 摆动件（pivot = 功能挂点，可绕其自由旋转，
-    // 质量远端集中形成真实摆锤；motor/limit 由后续 HammerBehavior 驱动）；
+    // 质量远端集中形成真实摆锤；motor/limit 由后续 HammerBehavior 驱动）。
+    // Q04-F2：Push Rod 为 Prismatic 伸缩件——axis 取 chassis 本地 ±X（facing 前方，
+    // 跟随 chassis 姿态的本地轴，非固定世界 X；motor/limit 由后续 PushRodBehavior 驱动）。
     // 其余 Functional Part（ram / cannon / gadget）保持 Weld 刚性连接。
     const joint =
       f.def.behavior === 'hammer'
@@ -339,12 +341,20 @@ export function createPlanckVehicle(
             partBody,
             { x: 0, y: 0 },
           )
-        : world.createWeldJoint(
-            body,
-            hpWorld,
-            partBody,
-            { x: 0, y: 0 },
-          );
+        : f.def.behavior === 'pushRod'
+          ? world.createPrismaticJoint(
+              body,
+              hpWorld,
+              partBody,
+              { x: 0, y: 0 },
+              { x: facing, y: 0 },
+            )
+          : world.createWeldJoint(
+              body,
+              hpWorld,
+              partBody,
+              { x: 0, y: 0 },
+            );
     return {
       id: f.install.hardpointId,
       def: f.def,
