@@ -10,6 +10,15 @@ import { TIME_SCALES } from './render/debugOverlay';
 import { BattleOrchestrator } from './battle/battleOrchestrator';
 import { PlanckBattleOrchestrator } from './battle/planckBattleOrchestrator';
 import type { BuildSnapshot } from './core/types';
+import { registry } from './core/content';
+import {
+  buildSnapshotFromDraft,
+  editableSlots,
+  migrateDraftBody,
+  EMPTY_SLOT,
+  type BuildDraft,
+} from './lab/buildEditorModel';
+import { computeEnergy, validateSnapshot } from './core/buildValidator';
 
 const app = document.getElementById('app')!;
 
@@ -100,39 +109,131 @@ function reframeCamera(): void {
   );
 }
 
-/* ---------- Build 编辑状态 ---------- */
-interface EditState {
-  body: string;
-  front: number;
-  rear: number;
-  extra: 'none' | 'frontMass' | 'rear';
+/* ---------- Build 编辑状态（Q06-U1：Draft 模型，编辑只改 Draft 不自动开战） ---------- */
+
+const BODY_OPTIONS: Array<{ v: string; t: string }> = [
+  { v: 'wedgeBody', t: '楔形车身（低前鼻）' },
+  { v: 'boxBody', t: '箱式车身（厚实）' },
+  { v: 'tallBody', t: '高身车身（compact）' },
+  { v: 'heavyBox', t: '重型车身' },
+];
+
+const WHEEL_OPTIONS: Array<{ v: string; t: string }> = [
+  { v: '12', t: '12（小）' },
+  { v: '20', t: '20（标准）' },
+  { v: '26', t: '26（大）' },
+];
+
+/** 正式可编辑部件（ramHead/testMass 非本轮已通过内容，不暴露） */
+const PART_OPTIONS: Array<{ v: string; t: string }> = [
+  { v: EMPTY_SLOT, t: '空' },
+  { v: 'cannon', t: 'Cannon（炮）' },
+  { v: 'hammer', t: 'Hammer（锤）' },
+  { v: 'pushRod', t: 'Push Rod（推杆）' },
+];
+
+function initialDraft(bodyDefId: string): BuildDraft {
+  return { bodyDefId, rearRadius: 20, frontRadius: 20, functionalSelections: {} };
 }
 
-const editA: EditState = { body: 'boxBody', front: 20, rear: 20, extra: 'none' };
-const editB: EditState = { body: 'heavyBox', front: 20, rear: 20, extra: 'none' };
+const draftA = initialDraft('boxBody');
+const draftB = initialDraft('heavyBox');
 
-function buildFromEdit(side: 'A' | 'B', e: EditState): BuildSnapshot {
-  const id = side === 'A' ? 'customA' : 'customB';
-  const extraPart =
-    e.extra === 'none'
-      ? []
-      : [{ hardpointId: e.extra, defId: 'testMass' }];
-  return {
-    id,
-    bodyDefId: e.body,
-    quality: 1,
-    movements: [
-      { hardpointId: 'rear', defId: 'wheelStd', overrides: { radius: e.rear } },
-      { hardpointId: 'front', defId: 'wheelStd', overrides: { radius: e.front } },
-    ],
-    functionals: [{ hardpointId: 'front', defId: 'ramHead' }, ...extraPart],
+function currentSnapshot(side: 'A' | 'B'): BuildSnapshot {
+  return buildSnapshotFromDraft(
+    side === 'A' ? draftA : draftB,
+    registry,
+    side === 'A' ? 'customA' : 'customB',
+  );
+}
+
+/** 渲染一侧 Build 面板（Body / 轮径 / 真实 Functional 槽位 / Energy / 校验错误） */
+function renderPanel(
+  panel: HTMLElement,
+  title: string,
+  d: BuildDraft,
+  onChanged: () => void,
+): void {
+  panel.replaceChildren();
+
+  const h = document.createElement('h3');
+  h.textContent = title;
+  panel.appendChild(h);
+
+  const body = registry.bodies.get(d.bodyDefId);
+  const snapshot = currentSnapshot(d === draftA ? 'A' : 'B');
+
+  const mkSelect = (
+    label: string,
+    options: Array<{ v: string; t: string }>,
+    value: string,
+    onChange: (v: string) => void,
+  ): void => {
+    const lab2 = document.createElement('label');
+    lab2.textContent = label;
+    const sel = document.createElement('select');
+    options.forEach((o) => {
+      const opt = document.createElement('option');
+      opt.value = o.v;
+      opt.textContent = o.t;
+      sel.appendChild(opt);
+    });
+    sel.value = value;
+    sel.onchange = () => {
+      onChange(sel.value);
+      onChanged();
+    };
+    lab2.appendChild(sel);
+    panel.appendChild(lab2);
   };
+
+  mkSelect('Body', BODY_OPTIONS, d.bodyDefId, (v) => {
+    const migrated = migrateDraftBody(d, v, registry);
+    d.bodyDefId = migrated.bodyDefId;
+    d.functionalSelections = migrated.functionalSelections;
+  });
+  mkSelect('后轮半径', WHEEL_OPTIONS, String(d.rearRadius), (v) => {
+    d.rearRadius = Number(v);
+  });
+  mkSelect('前轮半径', WHEEL_OPTIONS, String(d.frontRadius), (v) => {
+    d.frontRadius = Number(v);
+  });
+
+  // Functional 槽位：按当前 Body 真实 hardpoints 动态生成（不区分 Weapon/Gadget 槽）
+  if (body) {
+    for (const hpId of editableSlots(body)) {
+      const cur = d.functionalSelections[hpId] ?? EMPTY_SLOT;
+      mkSelect(`槽 ${hpId}`, PART_OPTIONS, cur, (v) => {
+        d.functionalSelections[hpId] = v;
+      });
+    }
+  }
+
+  // Energy：used / capacity（复用 computeEnergy，不复制计算逻辑）
+  const energyRes = computeEnergy(snapshot, registry);
+  const used = energyRes.error ? Number.NaN : energyRes.energy;
+  const capacity = body?.energyCapacity ?? 0;
+  const overload = Number.isFinite(used) && used > capacity;
+  const eRow = document.createElement('label');
+  eRow.textContent = `Energy：${Number.isFinite(used) ? used : '?'} / ${capacity}`;
+  eRow.style.color = overload ? '#ff6b5e' : '#9aa4b5';
+  panel.appendChild(eRow);
+
+  // 校验错误：显示最主要一条
+  const validation = validateSnapshot(snapshot, registry);
+  if (!validation.valid && validation.errors.length > 0) {
+    const err = document.createElement('div');
+    err.textContent = '⚠ ' + validation.errors[0];
+    err.style.cssText = 'color:#ff6b5e;font-size:11px;margin-top:6px;';
+    panel.appendChild(err);
+  }
 }
 
-function loadCustom(): void {
-  lab.loadCustom(buildFromEdit('A', editA), buildFromEdit('B', editB));
-  currentCamera = null; // 自定义 Build：取景 A+B
-  reframeCamera();
+/** 全量刷新：A/B 面板 + 开始战斗按钮可用性 */
+function refresh(): void {
+  renderPanel(panelA, 'A 车 Build', draftA, refresh);
+  renderPanel(panelB, 'B 车 Build', draftB, refresh);
+  refreshStartButton();
 }
 
 /* ---------- 工具栏 ---------- */
@@ -161,6 +262,25 @@ scenarioSelect.onchange = () => {
   }
 };
 toolbar.appendChild(scenarioSelect);
+
+/* 「开始战斗」：显式进入 custom battle（Planck）。A/B 均 valid 才可启动。 */
+const btnStart = addButton(toolbar, '开始战斗', () => {
+  const sa = currentSnapshot('A');
+  const sb = currentSnapshot('B');
+  const va = validateSnapshot(sa, registry);
+  const vb = validateSnapshot(sb, registry);
+  if (!va.valid || !vb.valid) return; // 任一非法：不启动
+  lab.loadCustom(sa, sb, { autoDrive: true, engine: 'planck' });
+  currentCamera = null; // 自定义 Build：取景 A+B
+  reframeCamera();
+});
+
+/** 只有 A/B Build 都 valid 时「开始战斗」可用 */
+function refreshStartButton(): void {
+  const va = validateSnapshot(currentSnapshot('A'), registry);
+  const vb = validateSnapshot(currentSnapshot('B'), registry);
+  btnStart.disabled = !(va.valid && vb.valid);
+}
 
 const btnPause = addButton(toolbar, 'Pause', () => {
   lab.paused = !lab.paused;
@@ -192,75 +312,8 @@ TIME_SCALES.forEach((ts) => {
 });
 tsButtons[0].classList.add('active');
 
-/* ---------- Build 编辑面板 ---------- */
-function buildPanel(
-  panel: HTMLElement,
-  title: string,
-  e: EditState,
-): () => void {
-  const h = document.createElement('h3');
-  h.textContent = title;
-  panel.appendChild(h);
-
-  const fields: Array<{ sel: HTMLSelectElement; get: () => string }> = [];
-
-  const mk = (
-    label: string,
-    options: Array<{ v: string; t: string }>,
-    get: () => string,
-    set: (v: string) => void,
-  ) => {
-    const lab2 = document.createElement('label');
-    lab2.textContent = label;
-    const sel = document.createElement('select');
-    options.forEach((o) => {
-      const opt = document.createElement('option');
-      opt.value = o.v;
-      opt.textContent = o.t;
-      sel.appendChild(opt);
-    });
-    sel.value = get();
-    sel.onchange = () => {
-      set(sel.value);
-      loadCustom();
-    };
-    lab2.appendChild(sel);
-    panel.appendChild(lab2);
-    fields.push({ sel, get });
-  };
-
-  mk('Body', [
-    { v: 'wedgeBody', t: '楔形车身（低前鼻）' },
-    { v: 'boxBody', t: '箱式车身（厚实）' },
-    { v: 'tallBody', t: '高身车身（compact）' },
-    { v: 'heavyBox', t: '重型车身' },
-  ], () => e.body, (v) => (e.body = v));
-
-  mk('后轮半径', [
-    { v: '12', t: '12（小）' },
-    { v: '20', t: '20（标准）' },
-    { v: '26', t: '26（大）' },
-  ], () => String(e.rear), (v) => (e.rear = Number(v)));
-
-  mk('前轮半径', [
-    { v: '12', t: '12（小）' },
-    { v: '20', t: '20（标准）' },
-    { v: '26', t: '26（大）' },
-  ], () => String(e.front), (v) => (e.front = Number(v)));
-
-  mk('额外部件', [
-    { v: 'none', t: '无' },
-    { v: 'frontMass', t: '前部质量块' },
-    { v: 'rear', t: '后部质量块' },
-  ], () => e.extra, (v) => (e.extra = v as EditState['extra']));
-
-  return () => {
-    fields.forEach((f) => (f.sel.value = f.get()));
-  };
-}
-
-const refreshA = buildPanel(panelA, 'A 车 Build', editA);
-const refreshB = buildPanel(panelB, 'B 车 Build', editB);
+/* ---------- Build 编辑面板（Q06-U1：Draft 模型动态渲染） ---------- */
+refresh();
 
 /* ---------- Preset 快捷 ---------- */
 {
@@ -283,18 +336,22 @@ const refreshB = buildPanel(panelB, 'B 车 Build', editB);
     b.style.cssText =
       'display:block;width:100%;margin:4px 0;padding:5px;background:#242b38;color:#e8e8f0;border:1px solid #38414f;border-radius:5px;cursor:pointer;';
     b.onclick = () => {
-      const target = targetSide === 'A' ? editA : editB;
+      const target = targetSide === 'A' ? draftA : draftB;
       const build = p.build();
-      target.body = build.bodyDefId;
+      // Preset 只装载 Body / 轮径；ramHead/testMass 非正式内容 → 功能槽全部重置为 none
+      target.bodyDefId = build.bodyDefId;
       const f = build.movements.find((m) => m.hardpointId === 'front');
       const r = build.movements.find((m) => m.hardpointId === 'rear');
-      target.front = f?.overrides?.radius ?? 20;
-      target.rear = r?.overrides?.radius ?? 20;
-      const extra = build.functionals.find((x) => x.defId === 'testMass');
-      target.extra = extra ? (extra.hardpointId as EditState['extra']) : 'none';
-      refreshA();
-      refreshB();
-      loadCustom();
+      target.frontRadius = f?.overrides?.radius ?? 20;
+      target.rearRadius = r?.overrides?.radius ?? 20;
+      const body = registry.bodies.get(target.bodyDefId);
+      target.functionalSelections = {};
+      if (body) {
+        for (const hp of body.functionalHardpoints) {
+          target.functionalSelections[hp.id] = EMPTY_SLOT;
+        }
+      }
+      refresh();
     };
     presetBox.appendChild(b);
   });
