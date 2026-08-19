@@ -11,6 +11,7 @@ import type {
   RenderShape,
   RenderCircle,
   RenderProjectile,
+  RenderConnector,
 } from '../battle/battleContract';
 
 /** Projectile 颜色（Q02-C3B）：A/B 可明显区分（与车身蓝/橙区分，更亮） */
@@ -197,7 +198,35 @@ export class Renderer {
     // 功能部件
     for (const p of v.parts) {
       this.drawShape(p.shape, p.category === 'weapon' ? '#d8d2c0' : '#9aa4b5');
+      // Q04-R1B：真实 Joint 连接件（Push Rod 伸缩轴）——画在移动 collider 后方，
+      // 连接车身锚点 from → 部件原点 to；仅消费 snapshot 真实世界坐标，无假动画。
+      if (p.connector) this.drawConnector(p.connector, '#9aa4b5');
     }
+  }
+
+  /**
+   * 真实 Joint 连接轴绘制（Q04-R1B）：from→to 的窄矩形（width 为垂直宽度）。
+   * - from/to 完全来自 Snapshot 真实世界坐标；长度 = |to − from|（Push Rod 越伸出
+   *   越长，Retract 自然缩短）；from≈to 时长度为 0，跳过（无异常长连接）；
+   * - 复用 drawShape 的多边形渲染（fill+stroke），风格与部件一致，无拖尾/发光。
+   */
+  private drawConnector(c: RenderConnector, color: string): void {
+    const dx = c.to.x - c.from.x;
+    const dy = c.to.y - c.from.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 0.01) return; // from≈to（translation≈0）：不画退化轴
+    const ux = dx / len;
+    const uy = dy / len;
+    const vx = -uy;
+    const vy = ux;
+    const hw = c.width / 2;
+    const points = [
+      { x: c.from.x + vx * hw, y: c.from.y + vy * hw },
+      { x: c.from.x - vx * hw, y: c.from.y - vy * hw },
+      { x: c.to.x - vx * hw, y: c.to.y - vy * hw },
+      { x: c.to.x + vx * hw, y: c.to.y + vy * hw },
+    ];
+    this.drawShape({ kind: 'polygons', polygons: [{ points }] }, color);
   }
 
   /**

@@ -77,6 +77,23 @@ export type RenderShape =
 export interface RenderFunctionalPart {
   shape: RenderShape;
   category: string;
+  /**
+   * 真实 Joint 连接几何（Q04-R1B）：世界坐标锚点对 + 轴宽，用于把
+   * 「车身 ↔ 移动部件」之间的伸缩轴/套杆画出来（如 Push Rod 的 Prismatic
+   * 连接）。optional：无独立移动 Joint 的部件（Cannon / Hammer / Roller /
+   * Ram 等 Weld/Revolute 件）不提供，Renderer 绘制不变。
+   * from = 车身侧锚点（chassis hardpoint 当前世界位置）；
+   * to = 移动部件侧锚点（part 原点当前世界位置）；完全来自真实世界坐标，
+   * 禁止假动画 / 补间。
+   */
+  connector?: RenderConnector;
+}
+
+/** 真实 Joint 连接件（引擎中立）：from→to 的窄轴，width 为垂直宽度（px） */
+export interface RenderConnector {
+  from: RenderVec2;
+  to: RenderVec2;
+  width: number;
 }
 
 /** 车辆渲染数据 */

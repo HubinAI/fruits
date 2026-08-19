@@ -181,6 +181,29 @@ function boxWorldPoints(
   });
 }
 
+/** Push Rod 连接轴宽度（px）：窄套杆视觉，仅渲染用，不参与物理（Q04-R1B） */
+const PUSH_ROD_CONNECTOR_WIDTH = 6;
+
+/**
+ * Push Rod 连接件车身侧锚点（Q04-R1B）：chassis hardpoint 的当前世界位置。
+ * - hpWorld = facing 镜像后的本地硬点（与装配 planckVehicleAssembly 同公式）；
+ * - 随 chassis 当前姿态旋转（bodyAngle），与车身 collider 同步移动/旋转；
+ * - 完全真实：translation=0 时该点 ≈ part 原点（joint 锚点重合），无异常长连接。
+ */
+function pushRodAnchorWorld(
+  bPos: { x: number; y: number },
+  bAng: number,
+  facing: 1 | -1,
+  part: PlanckPartRuntime,
+): RenderVec2 {
+  const hpWorld = {
+    x: facing * part.hardpoint.localPosition.x,
+    y: part.hardpoint.localPosition.y,
+  };
+  const w = rotateLocal(hpWorld, bAng);
+  return { x: bPos.x + w.x, y: bPos.y + w.y };
+}
+
 export class PlanckBattleOrchestrator {
   readonly world: PlanckWorld;
   readonly arena: PlanckArenaRuntime;
@@ -466,6 +489,18 @@ export class PlanckBattleOrchestrator {
         this.world.getAngle(p.body),
       ),
       category: p.def.category,
+      // Q04-R1B：仅 Push Rod 提供真实 Joint 连接几何——from = chassis hardpoint
+      // 当前世界位置（镜像 facing 后本地硬点随 chassis 姿态旋转），to = Prismatic
+      // part 原点当前世界位置。translation=0 时 from≈to（无长连接）；伸出越多轴越长，
+      // Retract 自然缩短。其他部件不提供 connector（无特判，Renderer 行为不变）。
+      connector:
+        p.def.behavior === 'pushRod'
+          ? {
+              from: pushRodAnchorWorld(bPos, bAng, vehicle.facing, p),
+              to: this.world.getPosition(p.body),
+              width: PUSH_ROD_CONNECTOR_WIDTH,
+            }
+          : undefined,
     }));
     return { team: vehicle.team, body, wheels, parts };
   }
