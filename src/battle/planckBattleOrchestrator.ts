@@ -26,6 +26,7 @@ import {
 } from './planckVehicleAssembly';
 import { drivePlanckVehicle } from './planckMovement';
 import { CannonBehavior } from './cannonBehavior';
+import { HammerBehavior } from './hammerBehavior';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
@@ -195,6 +196,13 @@ export class PlanckBattleOrchestrator {
     behavior: CannonBehavior;
   }> = [];
 
+  /** Hammer Behavior 实例（每 hammer part 一个，Q03-C1；同一 onBeforeStep 插入口） */
+  private readonly hammers: Array<{
+    vehicle: PlanckVehicle;
+    part: PlanckPartRuntime;
+    behavior: HammerBehavior;
+  }> = [];
+
   private _result: BattleResult | null = null;
   private time = 0;
 
@@ -244,6 +252,15 @@ export class PlanckBattleOrchestrator {
       for (const part of vehicle.parts) {
         if (part.def.behavior === 'cannon') {
           this.cannons.push({ vehicle, part, behavior: new CannonBehavior(part) });
+        }
+      }
+    }
+
+    // Hammer Behavior（Q03-C1）：为每辆车上每个 hammer part 建独立摆锤状态机
+    for (const vehicle of [this.vehicleA, this.vehicleB]) {
+      for (const part of vehicle.parts) {
+        if (part.def.behavior === 'hammer') {
+          this.hammers.push({ vehicle, part, behavior: new HammerBehavior(part) });
         }
       }
     }
@@ -300,10 +317,14 @@ export class PlanckBattleOrchestrator {
           targetSpeedPxPerStep: AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
         });
       }
-      // 正式 Behavior 插入口（Q02-C1A）：Cannon 固定冷却真实发射 + recoil。
-      // 不新增第二套 step/render 生命周期——只在此 onBeforeStep 内调用。
+      // 正式 Behavior 插入口（Q02-C1A / Q03-C1）：Cannon 固定冷却真实发射 + recoil；
+      // Hammer 摆锤循环（motor + limit）。不新增第二套 step/render 生命周期——
+      // 只在此 onBeforeStep 内调用。
       for (const c of this.cannons) {
         c.behavior.stepFixed(this.world, c.vehicle, c.part);
+      }
+      for (const h of this.hammers) {
+        h.behavior.stepFixed(this.world, h.vehicle, h.part);
       }
     });
 
