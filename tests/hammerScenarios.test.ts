@@ -1,5 +1,5 @@
 /**
- * Queue Q03-C2｜Hammer Visual Scenarios targeted test
+ * Queue Q03-C2 / Q03-C2R1｜Hammer Visual Scenarios targeted test
  *
  * 覆盖 Q03-C2 验收：
  * 1. 3 个 Hammer 场景（Hammer-Hit / Hammer-Miss / Hammer-Reaction）均能通过
@@ -9,6 +9,12 @@
  * 3. Hammer-Hit：真实接触才掉 weapon damage（baseDamage=90）；
  * 4. Hammer-Miss：目标在弧外 → 正常挥击但真实打空（0 weapon damage）；
  * 5. Hammer-Reaction：B 远置无接触，仍能测到 chassis 的真实反作用运动差异。
+ *
+ * Q03-C2R1（真实 Revolute Limit 接入后固定弧回归）：
+ * - 三场景运行全程 joint angle 始终保持在 [lowerRad-tol, upperRad+tol] 内
+ *   （物理 limit 约束，非状态机阈值）；
+ * - Hammer-Hit 首次伤害发生在 Swing 阶段（非出生接触）；
+ * - Miss / Reaction 语义不变。
  */
 import { describe, it, expect } from 'vitest';
 import { getScenario } from '../src/lab/scenarios';
@@ -59,12 +65,18 @@ describe('Q03-C2 Hammer Visual Scenarios', () => {
         if (a > maxA) maxA = a;
       }
       const { lowerRad, upperRad } = HAMMER_DEFAULT_PARAMS;
+      // 到达两端（状态循环成立）
       expect(minA).toBeLessThanOrEqual(lowerRad + 0.08);
       expect(maxA).toBeGreaterThanOrEqual(upperRad - 0.08);
+      // Q03-C2R1：真实 Revolute Limit 接入后，angle 全程保持在固定弧内——
+      // tolerance 取 C1R1 高压力实测穿透上限（~0.103 rad）含余量
+      const tolerance = 0.15;
+      expect(minA).toBeGreaterThanOrEqual(lowerRad - tolerance);
+      expect(maxA).toBeLessThanOrEqual(upperRad + tolerance);
     }
   });
 
-  it('Hammer-Hit：目标在挥击弧内 → 真实接触结算 weapon damage（90）', () => {
+  it('Hammer-Hit：真实 Swing 接触产生 weapon damage（90，非出生接触）', () => {
     const lab = new PhysicsLab(rendererStub);
     lab.loadScenario(getScenario('Hammer-Hit')!);
     const o = requirePlanck(lab);
@@ -72,12 +84,19 @@ describe('Q03-C2 Hammer Visual Scenarios', () => {
     o.onCombatEvent((e) => {
       if (e.damageSource === 'weapon') weaponEvents.push(e);
     });
-    for (let i = 0; i < 360; i++) lab.step(16.6667);
+    let firstHitStep = -1;
+    for (let i = 1; i <= 360; i++) {
+      lab.step(16.6667);
+      if (firstHitStep < 0 && weaponEvents.length > 0) firstHitStep = i;
+    }
     expect(weaponEvents.length).toBeGreaterThanOrEqual(1);
     for (const ev of weaponEvents) {
       expect(ev.damage).toBe(90); // hammer baseDamage
     }
     expect(o.vehicleB.hp).toBeLessThan(1000);
+    // Q03-C2R1：首次伤害发生在 Swing 阶段而非出生接触——
+    // windup 18 + 停顿 20 ≈ 38 步后才进入首个 Swing；<30 步的伤害只可能是初始重叠。
+    expect(firstHitStep).toBeGreaterThanOrEqual(30);
   });
 
   it('Hammer-Miss：目标在挥击弧外 → 正常循环但真实打空（0 weapon damage）', () => {
