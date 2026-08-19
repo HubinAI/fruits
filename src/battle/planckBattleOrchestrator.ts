@@ -27,6 +27,7 @@ import {
 import { drivePlanckVehicle } from './planckMovement';
 import { CannonBehavior } from './cannonBehavior';
 import { HammerBehavior } from './hammerBehavior';
+import { PushRodBehavior } from './pushRodBehavior';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
@@ -203,6 +204,13 @@ export class PlanckBattleOrchestrator {
     behavior: HammerBehavior;
   }> = [];
 
+  /** Push Rod Behavior 实例（每 pushRod part 一个，Q04-C1；同一 onBeforeStep 插入口） */
+  private readonly pushRods: Array<{
+    vehicle: PlanckVehicle;
+    part: PlanckPartRuntime;
+    behavior: PushRodBehavior;
+  }> = [];
+
   private _result: BattleResult | null = null;
   private time = 0;
 
@@ -265,6 +273,15 @@ export class PlanckBattleOrchestrator {
       }
     }
 
+    // Push Rod Behavior（Q04-C1）：为每辆车上每个 pushRod part 建独立伸缩状态机
+    for (const vehicle of [this.vehicleA, this.vehicleB]) {
+      for (const part of vehicle.parts) {
+        if (part.def.behavior === 'pushRod') {
+          this.pushRods.push({ vehicle, part, behavior: new PushRodBehavior(part) });
+        }
+      }
+    }
+
     this.damageResolver = new DamageResolver(this.bus);
     this.router = new ContactRouter(
       [this.vehicleA, this.vehicleB],
@@ -317,14 +334,17 @@ export class PlanckBattleOrchestrator {
           targetSpeedPxPerStep: AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
         });
       }
-      // 正式 Behavior 插入口（Q02-C1A / Q03-C1）：Cannon 固定冷却真实发射 + recoil；
-      // Hammer 摆锤循环（motor + limit）。不新增第二套 step/render 生命周期——
-      // 只在此 onBeforeStep 内调用。
+      // 正式 Behavior 插入口（Q02-C1A / Q03-C1 / Q04-C1）：Cannon 固定冷却真实发射 + recoil；
+      // Hammer 摆锤循环；Push Rod 伸缩循环（均 motor + limit）。不新增第二套 step/render
+      // 生命周期——只在此 onBeforeStep 内调用。
       for (const c of this.cannons) {
         c.behavior.stepFixed(this.world, c.vehicle, c.part);
       }
       for (const h of this.hammers) {
         h.behavior.stepFixed(this.world, h.vehicle, h.part);
+      }
+      for (const p of this.pushRods) {
+        p.behavior.stepFixed(this.world, p.vehicle, p.part);
       }
     });
 
