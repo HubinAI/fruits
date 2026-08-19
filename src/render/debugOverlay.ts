@@ -26,21 +26,24 @@ export interface DebugFlags {
   lastDamage: boolean;
 }
 
+// Q02-LAB-DEBUG-UX：Debug 显示默认全部关闭——正常进入 / 刷新 Lab 后不再自动勾选，
+// 录屏验收（1x + Debug 关）无需逐项手动取消；需要时在面板手动勾选或一键关闭。
+// 各项功能本身不变；Override（数值隔离）不受影响。
 export const DEFAULT_DEBUG_FLAGS: DebugFlags = {
   collider: false,
-  com: true,
-  movementHardpoint: true,
-  functionalHardpoint: true,
-  groundedWheel: true,
+  com: false,
+  movementHardpoint: false,
+  functionalHardpoint: false,
+  groundedWheel: false,
   linearVelocity: false,
   angularVelocity: false,
   contactPoint: false,
   contactNormal: false,
   impulse: false,
-  totalMass: true,
-  inertia: true,
-  lastImpact: true,
-  lastDamage: true,
+  totalMass: false,
+  inertia: false,
+  lastImpact: false,
+  lastDamage: false,
 };
 
 /** Debug Override：研发临时夸张差异验证方向，与正式 Config 隔离 */

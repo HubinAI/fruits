@@ -322,6 +322,7 @@ const refreshB = buildPanel(panelB, 'B 车 Build', editB);
     ['lastDamage', '最近 Damage'],
     ['collider', 'Collider'],
   ];
+  const checkboxes = new Map<keyof typeof lab.debugFlags, HTMLInputElement>();
   for (const [key, label] of flagDefs) {
     const lab2 = document.createElement('label');
     const cb = document.createElement('input');
@@ -333,7 +334,24 @@ const refreshB = buildPanel(panelB, 'B 车 Build', editB);
     lab2.appendChild(cb);
     lab2.appendChild(document.createTextNode(' ' + label));
     debugPanel.appendChild(lab2);
+    checkboxes.set(key, cb);
   }
+
+  // 「全部关闭」（Q02-LAB-DEBUG-UX）：一次取消所有 Debug 显示项，立即更新画面。
+  // 只清 Debug 显示，不修改物理 / Scenario / Override；不提供“全部开启”。
+  const btnAllOff = document.createElement('button');
+  btnAllOff.textContent = '全部关闭';
+  btnAllOff.style.cssText =
+    'display:block;width:100%;margin:6px 0 2px;padding:4px 8px;' +
+    'background:#3a2a2a;color:#ffb4a0;border:1px solid #5a3a3a;' +
+    'border-radius:4px;cursor:pointer;font-size:12px;';
+  btnAllOff.onclick = () => {
+    for (const [key, cb] of checkboxes) {
+      lab.debugFlags[key] = false;
+      cb.checked = false;
+    }
+  };
+  debugPanel.appendChild(btnAllOff);
 
   const oh = document.createElement('h4');
   oh.textContent = 'Override（隔离）';
