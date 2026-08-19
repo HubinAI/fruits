@@ -80,6 +80,34 @@ function cannonCarBuild(): BuildSnapshot {
   };
 }
 
+/** Hammer 车（Q03-C2）：boxBody + wheelStd×2 + front hammer（真实 Revolute 摆锤） */
+function hammerCarBuild(): BuildSnapshot {
+  return {
+    id: 'hammerCar',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'hammer' }],
+  };
+}
+
+/** 轻型 Hammer 车（Q03-C2 Reaction）：wedgeBody（窄体、转动惯量小 → 挥锤反作用更明显） */
+function hammerLightBuild(): BuildSnapshot {
+  return {
+    id: 'hammerLight',
+    bodyDefId: 'wedgeBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'hammer' }],
+  };
+}
+
 /** 倾角 Cannon 车（Q02-C4）：前小后大轮径 → 车头下倾 ~7°，同一 front cannon */
 function tiltedCannonBuild(): BuildSnapshot {
   return {
@@ -244,6 +272,59 @@ export const SCENARIOS: ScenarioDef[] = [
       spawnB: { x: 1200, y: 650, facing: -1 },
     },
     // 与 Cannon-Recoil 共用同一套 primary-fire 固定镜头：A 偏左中部 + 身后 recoil 空间 + 前方射击空间
+    camera: { fit: 'primary-fire', recoilExtent: 180, forwardExtent: 520 },
+  },
+  {
+    id: 'Hammer-Hit',
+    name: 'Hammer Hit',
+    description:
+      '锤（Planck）：A 装真实 Revolute 摆锤，固定弧 Wind-up → Swing → Recover 循环挥击；' +
+      'B 无攻击件目标车位于挥击弧内，锤头真实接触结算 baseDamage。无自动追踪 / 补偿。',
+    buildA: hammerCarBuild(),
+    buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: false,
+      // A pivot ≈ 450+75=525，锤头初始水平伸至 ~595。spawnB 600 → B 左缘 = 525
+      // 与 A 车身右缘相切（chassis 无重叠）；锤头初始伸入 B 区域是固定弧挥击武器的
+      // 自然几何：windup 先抬起 → swing 落下命中（实测首次伤害 ~106 步 = swing 阶段，
+      // 非出生接触；B 被 A 车身支撑稳定不滚走）。更远的 spawnB（620+）会把带轮 B
+      // 推滚出挥击弧导致打空。
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 600, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Hammer-Miss',
+    name: 'Hammer Miss',
+    description:
+      '锤（Planck）：B 明确放在挥击弧之外（锤头最远 ~595 < B 左缘 825）；' +
+      'Hammer 按固定弧正常循环挥击但真实打空——不通过改挥击角追踪敌人。',
+    buildA: hammerCarBuild(),
+    buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 900, y: 650, facing: -1 },
+    },
+    camera: { fit: 'primary-fire', recoilExtent: 180, forwardExtent: 520 },
+  },
+  {
+    id: 'Hammer-Reaction',
+    name: 'Hammer Reaction',
+    description:
+      '锤（Planck）：轻型 A（wedgeBody）装 hammer，B 放远前几秒无接触；' +
+      '单独观察 motor 驱动挥锤时自身车体姿态 / 位置的真实反作用（无 Scenario 补偿力）。',
+    buildA: hammerLightBuild(),
+    buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 500, y: 650, facing: 1 },
+      spawnB: { x: 1500, y: 650, facing: -1 },
+    },
     camera: { fit: 'primary-fire', recoilExtent: 180, forwardExtent: 520 },
   },
 ];
