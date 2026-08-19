@@ -1,8 +1,10 @@
 /**
- * Hammer Behavior（Q03-C1）：最小自动摆锤循环 Wind-up → Swing → Recover。
+ * Hammer Behavior（Q03-C1 / Q03-C1R1）：最小自动摆锤循环 Wind-up → Swing → Recover。
  *
- * - 运动完全来自 Revolute motor + limit（getRevoluteAngle 读相位 / setRevoluteLimit 固定弧 /
- *   setRevoluteMotor 驱动），禁止 setAngle / teleport / fixed knockback / 直接扣血；
+ * - 运动完全来自 Revolute motor + limit（getRevoluteAngle 读相位 / setRevoluteLimit 固定
+ *   真实物理弧 / setRevoluteMotor 驱动），禁止 setAngle / teleport / fixed knockback / 直接扣血；
+ * - Q03-C1R1：lowerRad / upperRad 在首次运行时真实写入 joint limit（物理边界由 Planck
+ *   limit 保证，高 motor speed 也无法越界）；状态机只负责相位切换，limit 不替代状态机；
  * - 固定弧 / 固定周期 / 不追踪敌人：敌人在弧内可命中、弧外真实打空；
  * - 伤害完全复用 ContactRouter baseDamage weapon 路径（锤头 = weapon part 直击）；
  * - 挥击反作用：motor 扭矩反作用经 Revolute 传给 chassis（牛顿第三定律，无额外代码）。
@@ -75,6 +77,8 @@ export class HammerBehavior {
   private readonly params: HammerParams;
   private _phase: HammerPhase = 'windup';
   private pauseRemaining = 0;
+  /** Q03-C1R1：Revolute limit 是否已应用到 joint（首次 stepFixed 时接入真实物理弧） */
+  private limitApplied = false;
 
   constructor(part: PlanckPartRuntime) {
     this.params = readHammerParams(part);
@@ -94,6 +98,18 @@ export class HammerBehavior {
     _vehicle: PlanckVehicle,
     part: PlanckPartRuntime,
   ): HammerPhase {
+    // Q03-C1R1：首次运行时把 lower/upper 设为真实 Revolute Joint limit——
+    // 物理弧边界由 Planck limit 原生保证（motor 撞限位被硬约束挡下，
+    // 高 speed 也无法越过）；状态机只负责 Wind-up/Swing/Recover 相位切换，
+    // limit 不替代状态机，也不允许 setAngle / teleport 越界。
+    if (!this.limitApplied) {
+      world.setRevoluteLimit(part.joint, {
+        enabled: true,
+        lowerRad: this.params.lowerRad,
+        upperRad: this.params.upperRad,
+      });
+      this.limitApplied = true;
+    }
     const {
       lowerRad,
       upperRad,

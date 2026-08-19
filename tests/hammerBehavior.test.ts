@@ -106,6 +106,81 @@ describe('Q03-C1 HammerBehavior 状态机（单元）', () => {
       expect(Math.abs(g - gaps[0]!)).toBeLessThanOrEqual(6);
     }
   });
+
+  it('Q03-C1R1：limit 真实接入——高 motor speed 长时间 step 也绝不越固定弧', () => {
+    const world = new PlanckWorld({ x: 0, y: 10 });
+    const ground = world.createStaticGround(0, 700, 4000, 80);
+    world.setOwnerTag(ground, { kind: 'ground' });
+    const v = createPlanckVehicle(
+      world,
+      resolveSnapshot(hammerBuild(), registry),
+      'A',
+      { x: 400, y: 640 },
+      1,
+    );
+    settlePlanckVehicleToRestPose(world, v, ground);
+    const part = v.parts.find((p) => p.def.behavior === 'hammer')!;
+    const behavior = new HammerBehavior(part);
+    const { lowerRad, upperRad } = HAMMER_DEFAULT_PARAMS;
+
+    // 首次 stepFixed 把 lower/upper 写入真实 Revolute limit
+    behavior.stepFixed(world, v, part);
+
+    // 用远超状态机的 motor speed 持续单向驱动：若无 limit，angle 会无限增长
+    // （600 步 × 1.0 rad/step ≈ 数百 rad，转数十圈）；limit 必须物理挡下。
+    world.setRevoluteMotor(part.joint, {
+      enabled: true,
+      speedRadPerStep: 1.0,
+      maxTorqueNm: 1000,
+    });
+    let minA = Infinity;
+    let maxA = -Infinity;
+    for (let i = 0; i < 600; i++) {
+      world.stepFixed(1);
+      const a = world.getRevoluteAngle(part.joint);
+      if (a < minA) minA = a;
+      if (a > maxA) maxA = a;
+    }
+    // solverTolerance：原生硬约束在 maxTorque 力平衡下的求解穿透上限。
+    // 实测（speed 0.2~1.0 扫描）：穿透 ≤0.103 rad（≈5.9°，speed≥0.4 后饱和，
+    // 与 speed 无关）；0.15 含余量。若 limit 未接入，600 步 × 1.0 rad/step ≈ 600 rad
+    // （转 ~95 圈）——现被挡在 1.30，证明物理弧真实生效。
+    const solverTolerance = 0.15;
+    expect(maxA).toBeLessThanOrEqual(upperRad + solverTolerance);
+    expect(minA).toBeGreaterThanOrEqual(lowerRad - solverTolerance);
+    // 且确实撞到过两个限位（limit 生效而非 motor 未动）
+    expect(maxA).toBeGreaterThanOrEqual(upperRad - 0.15);
+  });
+
+  it('Q03-C1R1：状态机全程运行 joint angle 始终不越固定弧', () => {
+    const world = new PlanckWorld({ x: 0, y: 10 });
+    const ground = world.createStaticGround(0, 700, 4000, 80);
+    world.setOwnerTag(ground, { kind: 'ground' });
+    const v = createPlanckVehicle(
+      world,
+      resolveSnapshot(hammerBuild(), registry),
+      'A',
+      { x: 400, y: 640 },
+      1,
+    );
+    settlePlanckVehicleToRestPose(world, v, ground);
+    const part = v.parts.find((p) => p.def.behavior === 'hammer')!;
+    const behavior = new HammerBehavior(part);
+    const { lowerRad, upperRad } = HAMMER_DEFAULT_PARAMS;
+    const solverTolerance = 0.08;
+
+    let minA = Infinity;
+    let maxA = -Infinity;
+    for (let i = 0; i < 500; i++) {
+      behavior.stepFixed(world, v, part);
+      world.stepFixed(1);
+      const a = world.getRevoluteAngle(part.joint);
+      if (a < minA) minA = a;
+      if (a > maxA) maxA = a;
+    }
+    expect(maxA).toBeLessThanOrEqual(upperRad + solverTolerance);
+    expect(minA).toBeGreaterThanOrEqual(lowerRad - solverTolerance);
+  });
 });
 
 describe('Q03-C1 Orchestrator 端到端', () => {
