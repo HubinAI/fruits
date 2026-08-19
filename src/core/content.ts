@@ -137,6 +137,33 @@ const testMass: FunctionalPartDef = {
   behavior: 'none',
 };
 
+/**
+ * Cannon（炮，Q02-C2）：Fixed Mount 武器，只定义内容，不实现发射行为（Q02-C1）。
+ * - 有真实 collider / mass / energy；
+ * - 不设置 baseDamage：炮身接触不能直接造成 Weapon Damage，
+ *   伤害只能来自 projectile 命中（behaviorParams.projectileDamage）；
+ * - behaviorParams 仅含六个参数（首版取明显、易验证数值，不做精细平衡）：
+ *   cooldownMs / muzzleSpeed / projectileDamage / projectileRadius /
+ *   projectileMass / recoilImpulse。
+ */
+const cannon: FunctionalPartDef = {
+  id: 'cannon',
+  name: '炮',
+  category: 'weapon',
+  mass: 20,
+  energy: 30,
+  collider: { shape: 'box', width: 40, height: 20, offset: { x: 20, y: 0 } },
+  behavior: 'cannon',
+  behaviorParams: {
+    cooldownMs: 1000,
+    muzzleSpeed: 12,
+    projectileDamage: 80,
+    projectileRadius: 6,
+    projectileMass: 1,
+    recoilImpulse: 12,
+  },
+};
+
 /** 构建 Content Registry */
 export function createRegistry(): ContentRegistry {
   return {
@@ -149,6 +176,7 @@ export function createRegistry(): ContentRegistry {
     movements: new Map([[wheelStd.id, wheelStd]]),
     functionals: new Map([
       [ramHead.id, ramHead],
+      [cannon.id, cannon],
       [testMass.id, testMass],
     ]),
   };

@@ -9,7 +9,12 @@ import type {
   RenderVehicle,
   RenderShape,
   RenderCircle,
+  RenderProjectile,
 } from '../battle/battleContract';
+
+/** Projectile 颜色（Q02-C3B）：A/B 可明显区分（与车身蓝/橙区分，更亮） */
+export const PROJECTILE_COLOR_A = '#7de8ff';
+export const PROJECTILE_COLOR_B = '#ffd05a';
 
 interface ScreenTransform {
   scale: number;
@@ -135,6 +140,10 @@ export class Renderer {
     this.drawVehicle(snap.vehicleA, '#4aa3ff');
     this.drawVehicle(snap.vehicleB, '#ff7a4a');
 
+    // Projectiles（Q02-C3B）：只消费 Snapshot；车辆之后、FX 之前，避免被车体完全遮住。
+    // projectiles 缺省 undefined → 空绘制，Matter 画面不变。
+    this.drawProjectiles(snap.projectiles ?? []);
+
     // Debug overlay
     if (debugDraw) debugDraw(ctx, t);
 
@@ -172,6 +181,23 @@ export class Renderer {
     // 功能部件
     for (const p of v.parts) {
       this.drawShape(p.shape, p.category === 'weapon' ? '#d8d2c0' : '#9aa4b5');
+    }
+  }
+
+  /**
+   * Projectile 绘制（Q02-C3B）：按真实 center/radius 画 circle，A/B 用可区分颜色。
+   * 只消费 BattleRenderSnapshot.projectiles（引擎中立），不读任何引擎/BodyHandle。
+   */
+  private drawProjectiles(projectiles: readonly RenderProjectile[]): void {
+    const ctx = this.ctx;
+    for (const p of projectiles) {
+      ctx.fillStyle = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
+      ctx.beginPath();
+      ctx.arc(this.sx(p.center.x), this.sy(p.center.y), this.ss(p.radius), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#0d0f14';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
   }
 

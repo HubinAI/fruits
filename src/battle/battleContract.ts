@@ -101,6 +101,18 @@ export interface BattleRenderSnapshot {
   arena: RenderArena;
   vehicleA: RenderVehicle;
   vehicleB: RenderVehicle;
+  /**
+   * 存活 projectile（Q02-C3A）：仅世界坐标 circle + team，引擎中立；
+   * optional——Matter Snapshot 不提供，Planck Runtime 提供。
+   */
+  projectiles?: RenderProjectile[];
+}
+
+/** 存活 projectile 渲染数据（Q02-C3A）：不出现 BodyHandle / Planck / Matter 类型 */
+export interface RenderProjectile {
+  center: RenderVec2;
+  radius: number;
+  team: TeamId;
 }
 
 /**

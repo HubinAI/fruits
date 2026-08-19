@@ -95,11 +95,14 @@ export interface PlanckCollisionFilter {
  * - friction: >= 0（默认 0）
  * - restitution: 0..1（默认 0）
  * - collisionFilter: 可选（默认全碰撞）
+ * - bullet: 可选，仅对动态 body 生效（Q02-F1），直接映射 Planck 原生
+ *   body.setBullet(true) 的 TOI 连续碰撞（CCD）；默认 false，不改变既有行为。
  */
 export interface PlanckBodyOptions {
   friction?: number;
   restitution?: number;
   collisionFilter?: PlanckCollisionFilter;
+  bullet?: boolean;
 }
 
 function createBodyHandle(): BodyHandle {
@@ -454,6 +457,8 @@ export class PlanckWorld {
       options?.friction ?? 0,
       options?.collisionFilter,
       options?.restitution ?? 0,
+      'dynamic',
+      options?.bullet ?? false,
     );
   }
 
@@ -477,6 +482,8 @@ export class PlanckWorld {
       options?.friction ?? 0,
       options?.collisionFilter,
       options?.restitution ?? 0,
+      'dynamic',
+      options?.bullet ?? false,
     );
   }
 
@@ -508,10 +515,12 @@ export class PlanckWorld {
       options?.friction ?? 0,
       options?.collisionFilter,
       options?.restitution ?? 0,
+      'dynamic',
+      options?.bullet ?? false,
     );
   }
 
-  /** Body 材质/过滤校验（B7A1）：friction>=0、restitution∈[0,1]、filter 走 assertCollisionFilter */
+  /** Body 材质/过滤校验（B7A1）：friction>=0、restitution∈[0,1]、filter 走 assertCollisionFilter；bullet 必须为 boolean */
   private assertBodyOptions(options?: PlanckBodyOptions): void {
     if (!options) return;
     if (options.friction !== undefined) {
@@ -527,6 +536,9 @@ export class PlanckWorld {
       }
     }
     if (options.collisionFilter) assertCollisionFilter(options.collisionFilter);
+    if (options.bullet !== undefined && typeof options.bullet !== 'boolean') {
+      throw new Error(`PlanckWorld: bullet 必须为 boolean，收到 ${String(options.bullet)}`);
+    }
   }
 
   /**
@@ -574,6 +586,7 @@ export class PlanckWorld {
     for (const s of shapes) {
       native.createFixture(s, filterFixtureDef(base, options?.collisionFilter));
     }
+    if (options?.bullet) native.setBullet(true); // Q02-F1：CCD/bullet 直接映射原生
     const handle = createBodyHandle();
     this.bodies.set(handle, native);
     this.bodyByNative.set(native, handle);
@@ -655,6 +668,36 @@ export class PlanckWorld {
       friction: 1,
       collisionFilter: options?.collisionFilter,
     });
+  }
+
+  /**
+   * 安全销毁 body（Q02-F1，通用物理底层，非 Cannon 专属）：
+   * - 真实从 native Planck World 销毁（world.destroyBody），不是软删除/隐藏；
+   * - BodyHandle 立即失效：销毁后所有读取/写入经 bodyOf() 明确抛错（与跨 World 语义一致），不静默 no-op；
+   * - OwnerTag 等该 body 关联状态同步清理；
+   * - 与该 body 相连的 joint（Revolute/Weld 等）由 native 自动销毁，其 wrapper handle 同步失效；
+   * - 物理步进行中（World locked）禁止销毁——明确抛错，绝不静默；
+   *   批次接触监听（setBatchedContactListener）在 world.step 之后派发（World 已解锁），
+   *   在其中销毁是安全的；即时监听（setContactListener）在 world.step 内触发，禁止销毁；
+   * - 销毁后该 body 不再产生任何后续 contact。
+   */
+  destroyBody(body: BodyHandle): void {
+    const native = this.bodyOf(body); // 跨 World / 已失效 → 明确抛错
+    if (this.world.isLocked()) {
+      throw new Error('PlanckWorld: 不允许在物理步/接触回调内销毁 body（World locked）');
+    }
+    // 与该 body 相连的 joint：native 销毁 body 时自动销毁 joint，wrapper 必须同步失效
+    for (const [jh, j] of this.joints) {
+      if (j.getBodyA() === native || j.getBodyB() === native) {
+        this.joints.delete(jh);
+        this.revoluteJoints.delete(jh);
+      }
+    }
+    this.bodies.delete(body);
+    this.bodyByNative.delete(native);
+    this.bodySeq.delete(body);
+    this.ownerTags.delete(body);
+    this.world.destroyBody(native);
   }
 
   createRevoluteJoint(
@@ -757,6 +800,7 @@ export class PlanckWorld {
     collisionFilter?: PlanckCollisionFilter,
     restitution = 0,
     bodyType: 'static' | 'kinematic' | 'dynamic' = 'dynamic',
+    bullet = false,
   ): BodyHandle {
     const native = this.world.createBody({
       type: bodyType,
@@ -764,6 +808,7 @@ export class PlanckWorld {
     });
     // 未传 collisionFilter 时不预设任何碰撞过滤（默认全碰撞，Planck 行为）
     native.createFixture(shape, filterFixtureDef({ density, friction, restitution }, collisionFilter));
+    if (bullet) native.setBullet(true); // Q02-F1：CCD/bullet 直接映射原生（仅动态 body 传入 true）
     const handle = createBodyHandle();
     this.bodies.set(handle, native);
     this.bodyByNative.set(native, handle);
@@ -923,6 +968,33 @@ export class PlanckWorld {
     assertFinite(vx, vy);
     this.bodyOf(body).setLinearVelocity(
       planck.Vec2(pxPerStepToMps(vx), pxPerStepToMps(vy)),
+    );
+  }
+
+  /**
+   * 真实线性冲量（Q02-F1，通用物理底层，非 Cannon 专属）：
+   * - 游戏层单位：mass × px/fixed-step（J = m·Δv，Δv 为每物理步速度增量）；
+   * - 内部按 units.ts 现有换算（pxPerStepToMps，线性）转 kg·m/s；
+   *   禁止引入任何经验倍率 / recoilScale；
+   * - worldPoint 为世界坐标 px；缺省作用于真实 COM（getWorldCenter）；
+   * - 指定偏离 COM 的 worldPoint 时由 Planck 自然产生角速度（τ = r × J）；
+   * - 走原生 applyLinearImpulse（默认 wake），禁止用 setLinearVelocity 模拟；
+   * - 跨 World / 已失效 handle 经 bodyOf() 明确抛错。
+   */
+  applyLinearImpulse(
+    body: BodyHandle,
+    impulse: { x: number; y: number },
+    worldPoint?: { x: number; y: number },
+  ): void {
+    assertFinite(impulse.x, impulse.y);
+    if (worldPoint) assertFinite(worldPoint.x, worldPoint.y);
+    const native = this.bodyOf(body); // 跨 World / 已失效 → 明确抛错
+    const point = worldPoint
+      ? planck.Vec2(pxToM(worldPoint.x), pxToM(worldPoint.y))
+      : native.getWorldCenter();
+    native.applyLinearImpulse(
+      planck.Vec2(pxPerStepToMps(impulse.x), pxPerStepToMps(impulse.y)),
+      point,
     );
   }
 

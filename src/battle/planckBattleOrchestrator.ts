@@ -21,9 +21,11 @@ import { PHYSICS_HZ } from '../physics/units';
 import {
   createPlanckVehicle,
   settlePlanckVehicleToRestPose,
+  type PlanckPartRuntime,
   type PlanckVehicle,
 } from './planckVehicleAssembly';
 import { drivePlanckVehicle } from './planckMovement';
+import { CannonBehavior } from './cannonBehavior';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type CombatEvent } from './combatEvents';
@@ -39,6 +41,7 @@ import {
   type RenderFunctionalPart,
   type RenderArena,
   type RenderVec2,
+  type RenderProjectile,
 } from './battleContract';
 
 /** 引擎中立 Battle 合同（B14B：自 battleContract.ts 重新导出，保持既有导入路径兼容） */
@@ -185,6 +188,13 @@ export class PlanckBattleOrchestrator {
   readonly bus = new CombatEventBus();
   readonly config: BattleConfig;
 
+  /** Cannon Behavior 实例（每 cannon part 一个，Q02-C1A；不新增生命周期） */
+  private readonly cannons: Array<{
+    vehicle: PlanckVehicle;
+    part: PlanckPartRuntime;
+    behavior: CannonBehavior;
+  }> = [];
+
   private _result: BattleResult | null = null;
   private time = 0;
 
@@ -227,6 +237,15 @@ export class PlanckBattleOrchestrator {
     if (config.settleToGround !== false) {
       settlePlanckVehicleToRestPose(this.world, this.vehicleA, this.arena.ground);
       settlePlanckVehicleToRestPose(this.world, this.vehicleB, this.arena.ground);
+    }
+
+    // Cannon Behavior（Q02-C1A）：为每辆车上每个 cannon part 建独立冷却实例
+    for (const vehicle of [this.vehicleA, this.vehicleB]) {
+      for (const part of vehicle.parts) {
+        if (part.def.behavior === 'cannon') {
+          this.cannons.push({ vehicle, part, behavior: new CannonBehavior(part) });
+        }
+      }
     }
 
     this.damageResolver = new DamageResolver(this.bus);
@@ -281,8 +300,31 @@ export class PlanckBattleOrchestrator {
           targetSpeedPxPerStep: AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
         });
       }
-      // 未来 Behavior（Weapon / Gadget 状态机）在此插入：每个物理步之前执行。
+      // 正式 Behavior 插入口（Q02-C1A）：Cannon 固定冷却真实发射 + recoil。
+      // 不新增第二套 step/render 生命周期——只在此 onBeforeStep 内调用。
+      for (const c of this.cannons) {
+        c.behavior.stepFixed(this.world, c.vehicle, c.part);
+      }
     });
+
+    // Q02-C1B：Projectile Lifecycle——每个物理步结束后（world.step 已返回，World 未锁定）：
+    // 1) 只 drain 一次 ContactRouter 的 projectile facts，交给各 CannonBehavior 消费
+    //    （hostile vehicle / arena / ground / hazard 的真实 begin → 安全销毁，伤害只发生一次）；
+    const facts = this.router.drainProjectileContactFacts();
+    if (facts.length > 0) {
+      for (const c of this.cannons) {
+        c.behavior.consumeProjectileFacts(this.world, facts);
+      }
+    }
+    // 2) 存活 projectile 越界检查（arena.isOutOfProjectileBounds）：越界 → 销毁；
+    //    未接触且未越界 → 保持存活继续真实飞行。
+    for (const c of this.cannons) {
+      for (const p of c.behavior.aliveProjectiles) {
+        if (this.arena.isOutOfProjectileBounds(this.world.getPosition(p))) {
+          c.behavior.destroyProjectile(this.world, p);
+        }
+      }
+    }
 
     this.time += steps * FIXED_DT_MS;
 
@@ -312,7 +354,33 @@ export class PlanckBattleOrchestrator {
       arena: this.buildArenaSnapshot(),
       vehicleA: this.buildVehicleSnapshot(this.vehicleA),
       vehicleB: this.buildVehicleSnapshot(this.vehicleB),
+      projectiles: this.buildProjectilesSnapshot(),
     };
+  }
+
+  /**
+   * 存活 projectile 渲染快照（Q02-C3A）：
+   * - 聚合所有 CannonBehavior 的 aliveProjectiles（已销毁的不在其中，自动不进入快照）；
+   * - center 取真实 body 世界位置；
+   * - radius 取真实碰撞几何（circle 的几何 AABB 半宽 = 半径，getBounds 对 circle 不扣 skin）；
+   * - team 取 projectile OwnerTag；无归属（不应发生）则跳过；
+   * - 仅输出世界坐标 circle + team，不出现任何引擎类型。
+   */
+  private buildProjectilesSnapshot(): RenderProjectile[] {
+    const out: RenderProjectile[] = [];
+    for (const c of this.cannons) {
+      for (const p of c.behavior.aliveProjectiles) {
+        const tag = this.world.getOwnerTag(p);
+        if (!tag || !tag.team) continue; // 已销毁 / 无归属：不进入快照
+        const bounds = this.world.getBounds(p);
+        out.push({
+          center: this.world.getPosition(p),
+          radius: (bounds.maxX - bounds.minX) / 2,
+          team: tag.team,
+        });
+      }
+    }
+    return out;
   }
 
   private buildVehicleSnapshot(vehicle: PlanckVehicle): RenderVehicle {

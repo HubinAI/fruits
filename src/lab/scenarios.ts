@@ -54,6 +54,48 @@ function singleWheelBuild(): BuildSnapshot {
   };
 }
 
+/** Cannon 车（Q02-C4）：boxBody + wheelStd×2 + front cannon（无自动瞄准/弹道修正） */
+function cannonCarBuild(): BuildSnapshot {
+  return {
+    id: 'cannonCar',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'cannon' }],
+  };
+}
+
+/** 倾角 Cannon 车（Q02-C4）：前小后大轮径 → 车头下倾 ~7°，同一 front cannon */
+function tiltedCannonBuild(): BuildSnapshot {
+  return {
+    id: 'cannonTilt',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd', overrides: { radius: 26 } },
+      { hardpointId: 'front', defId: 'wheelStd', overrides: { radius: 12 } },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'cannon' }],
+  };
+}
+
+/** 无攻击件目标车（Q02-C4）：正常双轮车体，无 Weapon / Gadget */
+function plainCarBuild(): BuildSnapshot {
+  return {
+    id: 'plainCar',
+    bodyDefId: 'boxBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [],
+  };
+}
+
 export const SCENARIOS: ScenarioDef[] = [
   {
     id: 'A',
@@ -138,6 +180,51 @@ export const SCENARIOS: ScenarioDef[] = [
       autoDrive: true,
       spawnA: { x: 450, y: 650, facing: 1 },
       spawnB: { x: 1150, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'Cannon-Hit',
+    name: 'Cannon Hit',
+    description:
+      '普通炮（Planck）：A 双轮轻车 + front cannon，固定冷却真实发射；炮弹真实命中 B 结算 projectileDamage。' +
+      'B 为无攻击件目标车。无自动瞄准 / 弹道修正，出生无重叠。',
+    buildA: cannonCarBuild(),
+    buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 700, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'Cannon-Recoil',
+    name: 'Cannon Recoil',
+    description:
+      '普通炮后座（Planck）：B 放远不参与前几秒交互；A 连续开炮，recoilImpulse 经 Weld 传给整车，' +
+      '观察真实位移 / 姿态变化（真实地面 / 轮子 / 车身，无隐藏力）。',
+    buildA: cannonCarBuild(),
+    buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 500, y: 650, facing: 1 },
+      spawnB: { x: 1500, y: 650, facing: -1 },
+    },
+  },
+  {
+    id: 'Cannon-Angle',
+    name: 'Cannon Angle',
+    description:
+      '普通炮倾角（Planck）：前小后大轮径制造明显车身倾角，同一 front cannon；' +
+      '炮弹沿当前真实车身 / 炮管世界方向射出，不做任何 Scenario 弹道补偿。',
+    buildA: tiltedCannonBuild(),
+    buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 500, y: 650, facing: 1 },
+      spawnB: { x: 1200, y: 650, facing: -1 },
     },
   },
 ];

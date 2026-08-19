@@ -10,6 +10,7 @@
 import type { ContactEvent } from '../physics/adapter';
 import { getMeta } from '../physics/adapter';
 import type { PlanckWorld, ContactBridgeEvent } from '../physics/planckWorld';
+import type { OwnerTag, TeamId } from '../core/types';
 import type { CombatPartState, CombatVehicleState, CombatWheelState } from './combatVehicle';
 import type { DamageResolver } from './damageResolver';
 
@@ -34,6 +35,13 @@ export interface RouterContactEvent {
   relativeVelocity: number;
   phase: 'start' | 'active' | 'end';
   batch?: { timestamp: number; index: number; size: number };
+  /**
+   * 引擎中立 opaque body 标识（Q02-F2R1）：Planck 路径透传 BodyHandle 引用，
+   * 用于 projectile 实例级去重（同一实例同一 batch 多 contact pair 只结算一次，
+   * 不同实例即使 team/partId/target 相同也各自结算）。Matter 路径无此字段。
+   */
+  bodyA?: unknown;
+  bodyB?: unknown;
 }
 
 /** 同一物理步（batch）内的一条 start 事件快照（含 meta，供合并后统一结算） */
@@ -56,6 +64,28 @@ export interface ContactDebugState {
     relativeVelocity: number;
   } | null;
   lastDamage: { damage: number; target: string } | null;
+}
+
+/**
+ * Projectile 接触事实（Q02-F2）：
+ * - 仅记录真实 start/begin 接触；
+ * - projectileBody：引擎中立 opaque 标识（Planck BodyHandle），用于区分 projectile 实例
+ *   （后续 Behavior 可用引用比较定位并决定是否销毁；本模块不销毁实体）；
+ * - 另一方 Owner（hostile vehicle / arena / ground / hazard）原样记录，供 Behavior 消费；
+ * - drain/consume 语义：读取后清空，不重复。
+ */
+export interface ProjectileContactFact {
+  projectileBody: unknown;
+  /** 来源 weapon part 的 OwnerTag.partId（'part:...'），用于反查来源武器 */
+  projectilePartId: string;
+  projectileTeam: string;
+  otherKind: string;
+  otherTeam?: string;
+  otherVehicleId?: string;
+  otherPartId?: string;
+  contactPoint: { x: number; y: number };
+  contactNormal: { x: number; y: number };
+  relativeVelocity: number;
 }
 
 /**
@@ -100,6 +130,9 @@ export class ContactRouter {
     size: number;
     entries: BatchEntry[];
   } | null = null;
+
+  /** Projectile 接触事实缓冲（Q02-F2）：仅记录真实 begin，drain 读取后清空 */
+  private projectileFacts: ProjectileContactFact[] = [];
 
   constructor(
     private vehicles: CombatVehicleState[],
@@ -155,6 +188,10 @@ export class ContactRouter {
     const tagA = world.getOwnerTag(ev.bodyA);
     const tagB = world.getOwnerTag(ev.bodyB);
     if (!tagA || !tagB) return; // 无 Owner：安全忽略，不伪造
+    // Projectile 接触事实（仅 begin；区分 projectile body 与另一方 Owner）
+    if (ev.phase === 'begin') {
+      this.recordProjectileFact(ev, tagA, tagB);
+    }
     this.route(
       {
         contactPoint: ev.contactPoint,
@@ -162,6 +199,8 @@ export class ContactRouter {
         relativeVelocity: ev.relativeVelocity,
         phase: ev.phase === 'begin' ? 'start' : 'end',
         batch: ev.batch,
+        bodyA: ev.bodyA,
+        bodyB: ev.bodyB,
       },
       { kind: tagA.kind, vehicleId: tagA.vehicleId, partId: tagA.partId, team: tagA.team },
       { kind: tagB.kind, vehicleId: tagB.vehicleId, partId: tagB.partId, team: tagB.team },
@@ -191,6 +230,9 @@ export class ContactRouter {
       return;
     }
     this.handleVehicleContact(ev, mA, mB);
+    // Projectile ↔ vehicle 的 Direct Weapon Damage（非 batch 单事件路径；
+    // projectile 不参与 Impact——Impact 仅存在于 vehicle ↔ vehicle）
+    this.applyProjectileDamage(ev, mA, mB);
   }
 
   /**
@@ -247,6 +289,33 @@ export class ContactRouter {
    * 阈值 / 伤害公式 / Impact 与 Weapon 可同时成立 的规则全部保留。
    */
   private processBatch(entries: BatchEntry[]): void {
+    // --- Projectile（projectile ↔ hostile vehicle，Q02-F2 / F2R1） ---
+    // 先于 vehicle 路径处理：projectile-only 批次不得被下方 hostile 空过滤提前跳过。
+    // 去重单位 = projectile 实例 + defender（Q02-F2R1）：
+    // - 同一实例同一 batch 因多 contact pair 接触同一目标 → 只结算一次；
+    // - 两个不同实例（即使 team/partId/target 完全相同）→ 各自结算一次；
+    // 实例 key 用 ev.bodyA/bodyB 的 opaque 引用（Planck BodyHandle，引用相等）；
+    // 无 opaque 引用时（Matter 路径，当前无 projectile meta）退化为旧 team|partId 语义。
+    const projByInstance = new Map<unknown, Map<string, BatchEntry>>();
+    for (const en of entries) {
+      const meta = this.projectileHitMeta(en.ev, en.mA, en.mB);
+      if (!meta) continue;
+      let byDefender = projByInstance.get(meta.projBody);
+      if (!byDefender) {
+        byDefender = new Map<string, BatchEntry>();
+        projByInstance.set(meta.projBody, byDefender);
+      }
+      const cur = byDefender.get(meta.defTeam);
+      if (!cur || en.ev.relativeVelocity > cur.ev.relativeVelocity) {
+        byDefender.set(meta.defTeam, en);
+      }
+    }
+    for (const byDefender of projByInstance.values()) {
+      for (const en of byDefender.values()) {
+        this.applyProjectileDamage(en.ev, en.mA, en.mB);
+      }
+    }
+
     const hostile = entries.filter(
       ({ mA, mB }) =>
         mA.kind === 'vehicle' &&
@@ -449,6 +518,115 @@ export class ContactRouter {
     }, 0);
     this.debug.lastDamage = {
       damage: baseDamage,
+      target: defender.id,
+    };
+  }
+
+  // ---------- Projectile（Q02-F2） ----------
+
+  /**
+   * 消费 projectile 接触事实：读取后清空（drain 语义，不重复）。
+   * 本模块只提供接触事实，不做任何实体销毁（destroyBody 由 Behavior 层负责）。
+   */
+  drainProjectileContactFacts(): ProjectileContactFact[] {
+    const facts = this.projectileFacts;
+    this.projectileFacts = [];
+    return facts;
+  }
+
+  /** 记录 projectile 接触事实（仅 begin）：区分 projectile body 与另一方 Owner */
+  private recordProjectileFact(ev: ContactBridgeEvent, tagA: OwnerTag, tagB: OwnerTag): void {
+    const proj =
+      tagA.kind === 'projectile'
+        ? { tag: tagA, body: ev.bodyA }
+        : tagB.kind === 'projectile'
+          ? { tag: tagB, body: ev.bodyB }
+          : null;
+    if (!proj) return;
+    const other = proj.body === ev.bodyA ? tagB : tagA;
+    this.projectileFacts.push({
+      projectileBody: proj.body,
+      projectilePartId: proj.tag.partId ?? '',
+      projectileTeam: proj.tag.team ?? '',
+      otherKind: other.kind,
+      otherTeam: other.team,
+      otherVehicleId: other.vehicleId,
+      otherPartId: other.partId,
+      contactPoint: ev.contactPoint,
+      contactNormal: ev.normal,
+      relativeVelocity: ev.relativeVelocity,
+    });
+  }
+
+  /**
+   * 判定 projectile ↔ hostile vehicle 命中元数据（Q02-F2 / F2R1）：
+   * - 恰一方是 projectile、另一方是 vehicle 且阵营不同；
+   * - projectile 必须有来源 weapon part（partId 形如 'part:...'）；
+   * - 同队 / 任一方缺失 → null（无伤害；但接触事实仍由 recordProjectileFact 记录）；
+   * - projBody：projectile 实例的 opaque 引用（Planck BodyHandle，来自 ev.bodyA/bodyB），
+   *   用于实例级去重；Matter 路径无引用时为 undefined。
+   */
+  private projectileHitMeta(
+    ev: RouterContactEvent,
+    mA: Record<string, unknown>,
+    mB: Record<string, unknown>,
+  ): { projTeam: TeamId; projPartId: string; defTeam: TeamId; projBody: unknown } | null {
+    const pa = mA.kind === 'projectile';
+    const pb = mB.kind === 'projectile';
+    if (pa === pb) return null; // 都不是（vehicle↔vehicle）或都是 projectile → 不结算
+    const proj = pa ? mA : mB;
+    const other = pa ? mB : mA;
+    if (other.kind !== 'vehicle') return null; // arena / ground / hazard 只记录事实，不产生伤害
+    const projTeam = proj.team;
+    const otherTeam = other.team;
+    if (projTeam !== 'A' && projTeam !== 'B') return null;
+    if (otherTeam !== 'A' && otherTeam !== 'B') return null;
+    if (projTeam === otherTeam) return null; // 同队无伤害
+    const projPartId = String(proj.partId ?? '');
+    if (!projPartId.startsWith('part:')) return null;
+    return { projTeam, projPartId, defTeam: otherTeam, projBody: pa ? ev.bodyA : ev.bodyB };
+  }
+
+  /**
+   * projectile → hostile vehicle 的 Direct Weapon Damage：
+   * - 来源武器 = projectile OwnerTag.team + partId 反查的 weapon part；
+   * - 伤害取 behaviorParams.projectileDamage；
+   * - 复用 WEAPON_CONTACT_THRESHOLD（真实有效接触才结算）；
+   * - 走现有 DamageResolver，damageSource='weapon'；不参与 Impact；
+   * - 同一 batch 去重由 processBatch 的 projByKey 合并保证。
+   */
+  private applyProjectileDamage(
+    ev: RouterContactEvent,
+    mA: Record<string, unknown>,
+    mB: Record<string, unknown>,
+  ): void {
+    if (ev.phase !== 'start') return;
+    const meta = this.projectileHitMeta(ev, mA, mB);
+    if (!meta) return;
+    const attacker = this.findVehicleByTeam(meta.projTeam);
+    if (!attacker) return;
+    const part = this.findPart(attacker, meta.projPartId);
+    if (!part) return;
+    if (part.def.category !== 'weapon') return; // 来源必须为 weapon part
+    const damage = (part.def.behaviorParams?.projectileDamage as number) ?? 0;
+    if (!(damage > 0)) return;
+    if (ev.relativeVelocity < WEAPON_CONTACT_THRESHOLD) return; // 真实有效接触
+    const defender = this.findVehicleByTeam(meta.defTeam);
+    if (!defender) return;
+
+    this.damageResolver.applyDamage(defender, {
+      source: meta.projTeam,
+      target: meta.defTeam,
+      damageSource: 'weapon',
+      partId: part.def.id,
+      behavior: part.def.behavior,
+      contactPoint: ev.contactPoint,
+      contactNormal: ev.normal,
+      relativeVelocity: ev.relativeVelocity,
+      damage,
+    }, 0);
+    this.debug.lastDamage = {
+      damage,
       target: defender.id,
     };
   }
