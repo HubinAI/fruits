@@ -27,8 +27,11 @@ export const PUSH_ROD_DEFAULT_PARAMS = {
   holdSteps: 20,
   /** 伸缩速度（px/step） */
   speedPxPerStep: 2,
-  /** 推杆最大力（Planck N，原值） */
-  maxForceN: 500,
+  /** 推杆最大力（Planck N）。Q04-R1A：500→30 明显回收推力——原值下 motor 处于
+   *  速度控制饱和区（目标速度 2px/step 所需力远小于 150N），500~150N 对位移几乎无影响；
+   *  降到 30N 才进入力瓶颈区：Light 首次推击位移 ~100→56px、总位移 ~324→241px，
+   *  Light/Heavy 位移比 1.59→1.84，Reaction 反推 -377→-241（仍明显但不再“爆开”）。 */
+  maxForceN: 30,
 } as const;
 
 interface PushRodParams {

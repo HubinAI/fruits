@@ -41,6 +41,8 @@ function runScenario(
   hp: number;
   maxT: number;
   minT: number;
+  bFinalX: number;
+  aFinalX: number;
 } {
   const lab = new PhysicsLab(rendererStub);
   lab.loadScenario(getScenario(id)!);
@@ -69,6 +71,8 @@ function runScenario(
     hp: o.vehicleB.hp,
     maxT,
     minT,
+    bFinalX: b1,
+    aFinalX: a1,
   };
 }
 
@@ -105,11 +109,15 @@ describe('Q04-C2 Push Rod Visual Scenarios', () => {
     }
   });
 
-  it('Push-Light：轻目标被真实接触明显推离，无 weapon damage', () => {
+  it('Push-Light：轻目标被真实接触明显推离，无 weapon damage，且不飞出安全画面（Q04-R1A 回收后）', () => {
     const r = runScenario('Push-Light');
     expect(r.weaponCount).toBe(0); // Gadget 不产生 weapon damage
     expect(r.hp).toBeGreaterThan(990); // 无直接扣血（自然 Impact 允许）
-    expect(r.bShift).toBeGreaterThan(30); // Light 被明显推远
+    // Q04-R1A：maxForceN 30 明显回收推力——B 仍被明显推离但停在安全区
+    expect(r.bShift).toBeGreaterThan(150); // 明显移动（原 >30，回收后 ~241）
+    expect(r.bShift).toBeLessThan(400); // 但不再“爆开”（原 500N 下 ~324）
+    expect(r.bFinalX).toBeLessThan(1400); // 不飞出安全画面（arena 墙内 1600，B 半宽 75）
+    expect(r.aFinalX).toBeGreaterThan(75); // A 有反作用但自身不滑出画面（左墙内）
     // Extend/Hold/Retract 清楚：translation 到达远端且回零
     expect(r.maxT).toBeGreaterThan(PUSH_ROD_DEFAULT_PARAMS.extendPx - 5);
     expect(r.minT).toBeLessThan(5);
@@ -118,17 +126,21 @@ describe('Q04-C2 Push Rod Visual Scenarios', () => {
   it('Push-Heavy：与 Light 完全相同的 A/距离/参数，仅 B 换 heavyBody → Heavy 位移明显更小', () => {
     const light = runScenario('Push-Light');
     const heavy = runScenario('Push-Heavy');
-    expect(heavy.bShift).toBeGreaterThan(0); // Heavy 也被推一点（真实接触）
+    expect(heavy.bShift).toBeGreaterThan(40); // Heavy 也被推一点（真实接触，回收后 ~131）
     // Heavy 位移明显小于 Light（同一套 maxForce/speed，无按质量补偿）
     expect(light.bShift).toBeGreaterThan(heavy.bShift);
     expect(light.bShift - heavy.bShift).toBeGreaterThan(15);
+    // Q04-R1A：Light 位移至少约为 Heavy 的 1.5 倍（质量差异成为主要结果，实测 ~1.84）
+    expect(light.bShift / heavy.bShift).toBeGreaterThanOrEqual(1.5);
   });
 
   it('Push-Reaction：较轻 A 推重目标，A 自身被真实 joint+collision 反作用影响', () => {
     const r = runScenario('Push-Reaction');
     // A 较轻（wedgeBody ~50 vs B heavyBox ~150）→ 推 B 时 A 被反推明显
-    expect(r.aShift).toBeLessThan(-1); // A 向后退（反作用）
+    // Q04-R1A：回收后仍明显可见（实测 ~-241），但不再瞬间飞离
+    expect(r.aShift).toBeLessThan(-50); // A 明显后退（反作用）
+    expect(r.aFinalX).toBeGreaterThan(75); // A 不滑出画面
     expect(r.weaponCount).toBe(0);
-    expect(r.bShift).toBeGreaterThan(0); // B 确实被推
+    expect(r.bShift).toBeGreaterThan(40); // B 确实被推（实测 ~123）
   });
 });
