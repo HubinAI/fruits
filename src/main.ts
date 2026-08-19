@@ -9,6 +9,7 @@ import { PRESETS } from './lab/presets';
 import { TIME_SCALES } from './render/debugOverlay';
 import { BattleOrchestrator } from './battle/battleOrchestrator';
 import { PlanckBattleOrchestrator } from './battle/planckBattleOrchestrator';
+import type { BattleOrchestratorApi } from './battle/battleContract';
 import type { BuildSnapshot } from './core/types';
 import { registry } from './core/content';
 import {
@@ -233,7 +234,7 @@ function renderPanel(
 function refresh(): void {
   renderPanel(panelA, 'A 车 Build', draftA, refresh);
   renderPanel(panelB, 'B 车 Build', draftB, refresh);
-  refreshStartButton();
+  updateStartButton();
 }
 
 /* ---------- 工具栏 ---------- */
@@ -257,14 +258,27 @@ scenarioSelect.onchange = () => {
   const sc = SCENARIOS.find((s) => s.id === scenarioSelect.value);
   if (sc) {
     lab.loadScenario(sc);
+    activeBattleKind = 'scenario';
+    lastShownResult = null;
     currentCamera = sc.camera ?? null;
     reframeCamera();
+    updateStartButton();
   }
 };
 toolbar.appendChild(scenarioSelect);
 
-/* 「开始战斗」：显式进入 custom battle（Planck）。A/B 均 valid 才可启动。 */
-const btnStart = addButton(toolbar, '开始战斗', () => {
+/* ---------- 战斗 Loop 状态（Q06-B1：Result → 修改 → 再战） ---------- */
+
+/** 当前战斗种类：custom 战斗的按钮状态机与结果展示；场景模式不接管 */
+let activeBattleKind: 'scenario' | 'custom' | null = null;
+
+/** 结果展示条（toolbar） */
+const resultLabel = document.createElement('span');
+resultLabel.style.cssText = 'color:#ffd35a;font-size:13px;margin-left:10px;';
+toolbar.appendChild(resultLabel);
+
+/** 启动 / 再战 custom battle：重新 validate 当前 Draft，Planck loadCustom */
+function startOrRematch(): void {
   const sa = currentSnapshot('A');
   const sb = currentSnapshot('B');
   const va = validateSnapshot(sa, registry);
@@ -273,14 +287,53 @@ const btnStart = addButton(toolbar, '开始战斗', () => {
   lab.loadCustom(sa, sb, { autoDrive: true, engine: 'planck' });
   currentCamera = null; // 自定义 Build：取景 A+B
   reframeCamera();
-});
-
-/** 只有 A/B Build 都 valid 时「开始战斗」可用 */
-function refreshStartButton(): void {
-  const va = validateSnapshot(currentSnapshot('A'), registry);
-  const vb = validateSnapshot(currentSnapshot('B'), registry);
-  btnStart.disabled = !(va.valid && vb.valid);
+  activeBattleKind = 'custom';
+  updateStartButton(); // 立即进入「战斗中…」
 }
+
+const btnStart = addButton(toolbar, '开始战斗', startOrRematch);
+
+/** 按钮状态机 + 结果展示（Draft 只影响下一局；当前战斗结果来自 orchestrator.result） */
+function updateStartButton(): void {
+  const o = lab.orchestrator;
+  const r = o?.result ?? null;
+  const valid =
+    validateSnapshot(currentSnapshot('A'), registry).valid &&
+    validateSnapshot(currentSnapshot('B'), registry).valid;
+
+  if (r && r.phase === 'End') {
+    const w =
+      r.winner === 'A' ? 'A 胜' : r.winner === 'B' ? 'B 胜' : r.winner === 'draw' ? '平局' : '—';
+    resultLabel.textContent = `结果：${w}（hpA ${r.hpA} / hpB ${r.hpB}）`;
+    if (activeBattleKind === 'custom') {
+      btnStart.textContent = '应用配置再战';
+      btnStart.disabled = !valid; // 点击时会重新 validate
+    } else {
+      btnStart.textContent = '开始战斗';
+      btnStart.disabled = !valid;
+    }
+    return;
+  }
+
+  // 未结束：custom 战斗中 → 锁定；否则可配置后开战
+  resultLabel.textContent = '';
+  if (activeBattleKind === 'custom' && o && r === null) {
+    btnStart.textContent = '战斗中…';
+    btnStart.disabled = true;
+  } else {
+    btnStart.textContent = '开始战斗';
+    btnStart.disabled = !valid;
+  }
+}
+
+/** 每帧轮询：orchestrator.result 变化时刷新结果展示与按钮 */
+function pollBattleResult(): void {
+  const r = lab.orchestrator?.result ?? null;
+  if (r === lastShownResult) return;
+  lastShownResult = r;
+  updateStartButton();
+}
+let lastShownResult: BattleOrchestratorApi['result'] = null;
 
 const btnPause = addButton(toolbar, 'Pause', () => {
   lab.paused = !lab.paused;
@@ -292,11 +345,17 @@ addButton(toolbar, 'Reset', () => {
   btnPause.textContent = 'Pause';
   btnPause.classList.remove('active');
   lab.reset();
+  lastShownResult = null;
   reframeCamera(); // Reset 后可重新构图
+  updateStartButton(); // custom Reset 后回到「战斗中…」（Q06-F1 重建同场战斗）
 });
 addButton(toolbar, 'Clear', () => {
   lab.clear();
+  activeBattleKind = null;
+  lastShownResult = null;
+  resultLabel.textContent = '';
   currentCamera = null;
+  updateStartButton();
 });
 
 // 时间缩放
@@ -444,7 +503,9 @@ refresh();
 
 /* ---------- 初始加载 + 动画循环 ---------- */
 lab.loadScenario(SCENARIOS[0]);
+activeBattleKind = 'scenario';
 currentCamera = SCENARIOS[0].camera ?? null;
+updateStartButton();
 
 function doResize(): void {
   const d = arenaDims();
@@ -460,6 +521,7 @@ function loop(now: number): void {
   last = now;
   lab.step(dt);
   lab.render();
+  pollBattleResult(); // result 变化 → 胜负展示 + 「应用配置再战」
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
