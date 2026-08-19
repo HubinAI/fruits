@@ -302,6 +302,8 @@ export class PlanckWorld {
   private readonly joints = new Map<JointHandle, planck.Joint>();
   /** 保持真实 RevoluteJoint 类型引用（用于 motor 等 Revolute 特有 API，无 as any） */
   private readonly revoluteJoints = new Map<JointHandle, planck.RevoluteJoint>();
+  /** 保持真实 PrismaticJoint 类型引用（Q04-F1，用于 motor/limit/translation，无 as any） */
+  private readonly prismaticJoints = new Map<JointHandle, planck.PrismaticJoint>();
   /** Owner Meta：按 handle 私有保存（B1）；输入/返回均防御复制，外部修改不污染内部 */
   private readonly ownerTags = new Map<BodyHandle, OwnerTag>();
   private readonly bodyByNative = new Map<planck.Body, BodyHandle>();
@@ -836,6 +838,127 @@ export class PlanckWorld {
     }
     // 先写 limit 值再 enable（原生语义：enableLimit(true) 立即应用当前 limit）
     j.setLimits(cfg.lowerRad, cfg.upperRad);
+    j.enableLimit(cfg.enabled);
+  }
+
+  /**
+   * Prismatic（Linear）Joint 创建（Q04-F1，Push Rod 基础）：
+   * - bodyA/bodyB 本地锚点（px）；localAxisA 为 bodyA 本地坐标轴（单位任意，内部规范化）；
+   * - anchor/axis 必须 finite，axis 非零；opaque JointHandle，不暴露 native Planck；
+   * - Prismatic 约束 1 个平移自由度（沿 axis）+ 锁定相对旋转（Push Rod 伸缩杆语义）。
+   */
+  createPrismaticJoint(
+    bodyA: BodyHandle,
+    localAnchorAPx: { x: number; y: number },
+    bodyB: BodyHandle,
+    localAnchorBPx: { x: number; y: number },
+    localAxisA: { x: number; y: number },
+  ): JointHandle {
+    assertFinite(
+      localAnchorAPx.x,
+      localAnchorAPx.y,
+      localAnchorBPx.x,
+      localAnchorBPx.y,
+      localAxisA.x,
+      localAxisA.y,
+    );
+    const axisLen = Math.hypot(localAxisA.x, localAxisA.y);
+    if (axisLen < 1e-9) {
+      throw new Error('PlanckWorld: localAxisA 必须非零');
+    }
+    // 内部规范化：方向由调用方语义决定（正方向 = axis 指向），不猜测
+    const nx = localAxisA.x / axisLen;
+    const ny = localAxisA.y / axisLen;
+    const a = this.bodyOf(bodyA);
+    const b = this.bodyOf(bodyB);
+    const prismatic = planck.PrismaticJoint({
+      bodyA: a,
+      bodyB: b,
+      localAnchorA: planck.Vec2(pxToM(localAnchorAPx.x), pxToM(localAnchorAPx.y)),
+      localAnchorB: planck.Vec2(pxToM(localAnchorBPx.x), pxToM(localAnchorBPx.y)),
+      localAxisA: planck.Vec2(nx, ny),
+    });
+    const created = this.world.createJoint(prismatic);
+    if (created === null) {
+      throw new Error('PlanckWorld: PrismaticJoint 创建失败（createJoint 返回 null）');
+    }
+    const handle = createJointHandle();
+    this.joints.set(handle, created);
+    this.prismaticJoints.set(handle, prismatic);
+    return handle;
+  }
+
+  /**
+   * 读取 Prismatic joint 当前平移量（Q04-F1）：
+   * - 原生 m → 游戏 px（mToPx）；
+   * - 正方向与创建时传入的 localAxisA 一致；
+   * - 非 Prismatic / 跨 world / 失效 handle 明确报错。
+   */
+  getPrismaticTranslation(joint: JointHandle): number {
+    const j = this.prismaticJoints.get(joint);
+    if (!j) {
+      throw new Error(
+        'PlanckWorld: JointHandle 不是 PrismaticJoint 或不属于当前 world（跨 World 使用不被允许）',
+      );
+    }
+    return mToPx(j.getJointTranslation());
+  }
+
+  /**
+   * Prismatic motor（Q04-F1）：
+   * - speedPxPerStep 经 pxPerStepToMps 换算（与 setLinearVelocity 同语义）；
+   * - maxForceN 为 Planck 原生 N，原值传入（不猜游戏层换算）；
+   * - speed/force 必须有限、force >= 0、enabled 必须为 boolean；
+   * - 非 Prismatic / 跨 world 明确报错。
+   */
+  setPrismaticMotor(
+    joint: JointHandle,
+    cfg: { enabled: boolean; speedPxPerStep: number; maxForceN: number },
+  ): void {
+    assertFinite(cfg.speedPxPerStep, cfg.maxForceN);
+    if (cfg.maxForceN < 0) {
+      throw new Error(`PlanckWorld: maxForceN 必须 >= 0，收到 ${cfg.maxForceN}`);
+    }
+    if (typeof cfg.enabled !== 'boolean') {
+      throw new Error(`PlanckWorld: enabled 必须为 boolean，收到 ${String(cfg.enabled)}`);
+    }
+    const j = this.prismaticJoints.get(joint);
+    if (!j) {
+      throw new Error(
+        'PlanckWorld: JointHandle 不是 PrismaticJoint 或不属于当前 world（跨 World 使用不被允许）',
+      );
+    }
+    j.enableMotor(cfg.enabled);
+    j.setMotorSpeed(pxPerStepToMps(cfg.speedPxPerStep));
+    j.setMaxMotorForce(cfg.maxForceN);
+  }
+
+  /**
+   * Prismatic joint translation limit（Q04-F1，伸缩边界）：
+   * - lowerPx/upperPx 经 pxToM 换算；
+   * - enabled 必须为 boolean；lower/upper 必须有限且 lower <= upper；
+   * - 先写 limit 值再 enable（原生语义）；motor 撞 limit 会被原生挡下。
+   */
+  setPrismaticLimit(
+    joint: JointHandle,
+    cfg: { enabled: boolean; lowerPx: number; upperPx: number },
+  ): void {
+    if (typeof cfg.enabled !== 'boolean') {
+      throw new Error(`PlanckWorld: enabled 必须为 boolean，收到 ${String(cfg.enabled)}`);
+    }
+    assertFinite(cfg.lowerPx, cfg.upperPx);
+    if (cfg.lowerPx > cfg.upperPx) {
+      throw new Error(
+        `PlanckWorld: lowerPx 必须 <= upperPx，收到 ${cfg.lowerPx} > ${cfg.upperPx}`,
+      );
+    }
+    const j = this.prismaticJoints.get(joint);
+    if (!j) {
+      throw new Error(
+        'PlanckWorld: JointHandle 不是 PrismaticJoint 或不属于当前 world（跨 World 使用不被允许）',
+      );
+    }
+    j.setLimits(pxToM(cfg.lowerPx), pxToM(cfg.upperPx));
     j.enableLimit(cfg.enabled);
   }
 
