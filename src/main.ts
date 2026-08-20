@@ -385,14 +385,14 @@ function arenaDims(): { w: number; h: number } {
 function reframeCamera(): void {
   const orch = lab.orchestrator;
   if (!orch) return;
-  // W1-P0-CLOSE-FIX：Custom 正式 Battle（装配测试模式、非 Preview）→ 固定战场构图
-  // （覆盖 Arena 有效战斗区域，车辆被 Closing 推向边缘/中央的全过程始终可见）；
-  // Editing Preview：近距放大 fit（W2-UX-R2）；机制场景维持原 fit 语义。
+  // Q08-A：Custom 正式 Battle（装配测试模式、非 Preview）→ battle fit 按当前 Arena
+  // phase 构图（Active 近景 / Warning 中景 / Closing+End 全景安全构图，见 renderer）；
+  // Editing Preview：近距放大 fit（Q06-UX-R2-FIX）；机制场景维持原 fit 语义。
   const fit: CameraFit =
     uiMode === 'build'
       ? lab.previewMode
         ? 'preview' // 装配 Preview：明显放大，优先看清 Body 与 Functional 部件
-        : 'battle' // 正式战斗：固定战场构图（W1-P0-CLOSE-FIX）
+        : 'battle' // 正式战斗：按 phase 构图（Q08-A）
       : (currentCamera?.fit ?? 'vehicles');
   renderer.reframe(
     orch.getRenderSnapshot(),
@@ -400,6 +400,8 @@ function reframeCamera(): void {
     {
       forwardExtent: currentCamera?.forwardExtent,
       recoilExtent: currentCamera?.recoilExtent,
+      // Q08-A：battle fit 需要 phase（Active→近景 / Warning→中景 / Closing+End→全景）
+      phase: fit === 'battle' ? orch.phase : undefined,
     },
   );
 }
@@ -1118,6 +1120,9 @@ function pollArenaPhase(nowMs: number): void {
   if (o.phase !== lastPhase) {
     lastPhase = o.phase;
     phaseStartTimeMs = o.timeMs;
+    // Q08-A：phase 切换（Active→Warning→Closing/End）→ 稳定切换一次构图
+    // （battle fit 按 phase：近景→中景→全景；非每帧重算、无呼吸/无跟随）。
+    reframeCamera();
   }
   const phase = o.phase;
   const inWarning = phase === 'Warning' && o.result?.phase !== 'End';

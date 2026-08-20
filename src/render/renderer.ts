@@ -47,6 +47,13 @@ const MAX_CONTENT_SCALE = 5;
  * safe viewport 造成左右裁切）。scale 恒不超过完整内容 fit 上限，A/B 完整入画是硬约束。
  */
 const PREVIEW_MARGIN_WORLD = 18;
+/**
+ * Q08-A：正式 Battle 正常阶段（Active）近景构图——A+B 完整入画 + 每侧固定运动空间。
+ * 车辆明显大于旧 full-arena 超远景（0.78 vs 0.54 scale，约 1.4 倍）；
+ * 不要求 Closing wall 全程入画（正常阶段根本没有墙）。Warning 用更大 extent 适度拉远。
+ */
+const BATTLE_ACTIVE_EXTENT = 100;
+const BATTLE_WARNING_EXTENT = 240;
 /** 构图安全区：左右 UI 阴影区不计入可用画布（CSS px，每侧内缩量） */
 const SAFE_INSET_X = 56;
 const SAFE_INSET_Y = 28;
@@ -503,13 +510,19 @@ export class Renderer {
    *   边距更小、且 Preview 使用专属近距 spawn（见 physicsLab.loadCustomPreview），
    *   内容 bounds 自然收窄 → 车辆明显比 vehicles 构图更大；不做 fit 后强放大
    *   （旧 PREVIEW_ZOOM×1.9 会把 A/B 推出 safe viewport）；只用于 Editing，不影响正式 Battle。
+   * - fit 'battle'（Q08-A）：正式战斗按 phase 构图——
+   *   Active：A+B 完整入画 + 每侧 BATTLE_ACTIVE_EXTENT 运动空间（不含 Closing wall），
+   *   车辆明显大于旧 full-arena 超远景；Warning：BATTLE_WARNING_EXTENT 适度拉远，
+   *   仍清楚看到车辆；Closing / End：完整战场安全构图（0..width + Closing wall 全程入画，
+   *   W1-P0-CLOSE-FIX 原语义）。仅在 Battle start / phase 切换 / resize 时构图一次，
+   *   运行期间绝不 follow、不动态 zoom、不随 projectile 扩镜头。
    *
    * 内容退化时回退到现有 transform（resize 设置的 arena 框）。
    */
   reframe(
     snap: BattleRenderSnapshot,
     fit: CameraFit = 'vehicles',
-    opts: { forwardExtent?: number; recoilExtent?: number } = {},
+    opts: { forwardExtent?: number; recoilExtent?: number; phase?: string } = {},
   ): void {
     const forwardExtent = opts.forwardExtent ?? 520;
     const recoilExtent = opts.recoilExtent ?? 180;
@@ -540,12 +553,31 @@ export class Renderer {
     // ground anchor：保证地面线在 y 范围内
     acc(snap.arena.groundY, snap.arena.groundY);
     if (fit === 'battle') {
-      // W1-P0-CLOSE-FIX：正式战斗固定战场——覆盖 Arena 有效战斗区域
-      // （x ∈ [0, width]；y 顶 = Closing 墙顶，底 = 地面），车辆被 Closing 推向
-      // 边缘/中央的全过程始终入画；墙体外很远的无效空间不纳入。
-      acc(0, snap.arena.groundY);
-      acc(snap.arena.width, snap.arena.groundY);
-      for (const cw of snap.arena.closingWalls) includeShape(cw);
+      // Q08-A：正式战斗按 phase 构图（Active/Warning 近中景；Closing/End 全景安全构图）。
+      // 仅 Battle start / phase 切换 / resize 时调用一次，运行期间不重算（无呼吸/无跟随）。
+      const phase = opts.phase ?? '';
+      if (phase === 'Active' || phase === '') {
+        // 正常阶段：A+B 完整入画 + 每侧固定运动空间（相向推进仍不出框）；
+        // 不含 Closing wall——正常阶段没有墙，vehicle 明显更大、上方无效空间显著减少。
+        includeVehicle(snap.vehicleA);
+        includeVehicle(snap.vehicleB);
+        minX -= BATTLE_ACTIVE_EXTENT;
+        maxX += BATTLE_ACTIVE_EXTENT;
+      } else if (phase === 'Warning') {
+        // Warning：适度拉远（更大 extent），仍清楚看到两车与交战动作。
+        includeVehicle(snap.vehicleA);
+        includeVehicle(snap.vehicleB);
+        minX -= BATTLE_WARNING_EXTENT;
+        maxX += BATTLE_WARNING_EXTENT;
+      } else {
+        // Closing / End：完整战场安全构图——覆盖 Arena 有效战斗区域（x ∈ [0, width]；
+        // y 顶 = Closing 墙顶，底 = 地面），车辆被 Closing 推向边缘/中央的全过程始终
+        // 入画；墙体外很远的无效空间不纳入（W1-P0-CLOSE-FIX 原语义）。End 保持此构图，
+        // 不二次 zoom。
+        acc(0, snap.arena.groundY);
+        acc(snap.arena.width, snap.arena.groundY);
+        for (const cw of snap.arena.closingWalls) includeShape(cw);
+      }
     } else if (fit === 'primary-fire') {
       includeVehicle(snap.vehicleA);
       // 身后明确 recoil 空间 + 前方固定射击空间（A 朝 +X 发射方向）

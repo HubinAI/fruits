@@ -257,3 +257,158 @@ describe('W2-FX-2 阶段视觉（Renderer smoke）', () => {
     expect(previewScale).toBeGreaterThan(vehiclesScale);
   });
 });
+
+/* ---------- Q08-A：Battle Camera 正常观看构图（可视结果验证，非 scale 数字） ---------- */
+
+/** 正式战斗 snapshot：A（watermelon-like，中心 385）/ B（banana-like，中心 1160），groundY 700，
+ *  含双轮 + 多 functional parts（pushRod/cannon/hammer）+ 左右两堵 Closing wall。 */
+function makeBattleSnapshot(): BattleRenderSnapshot {
+  const wallL = [
+    { x: 250, y: 500 }, { x: 290, y: 500 }, { x: 290, y: 700 }, { x: 250, y: 700 },
+  ];
+  const wallR = [
+    { x: 1310, y: 500 }, { x: 1350, y: 500 }, { x: 1350, y: 700 }, { x: 1310, y: 700 },
+  ];
+  return {
+    arena: {
+      width: 1600,
+      groundY: 700,
+      normalWalls: [],
+      closingWalls: [
+        { kind: 'polygons', polygons: [{ points: wallL }] },
+        { kind: 'polygons', polygons: [{ points: wallR }] },
+      ],
+    },
+    vehicleA: {
+      team: 'A',
+      body: {
+        kind: 'polygons',
+        polygons: [{ points: [{ x: 300, y: 650 }, { x: 470, y: 650 }, { x: 470, y: 700 }, { x: 300, y: 700 }] }],
+      },
+      wheels: [
+        { center: { x: 327, y: 680 }, radius: 20, angle: 0 },
+        { center: { x: 443, y: 680 }, radius: 20, angle: 0 },
+      ],
+      parts: [
+        { shape: { kind: 'polygons', polygons: [{ points: [{ x: 430, y: 660 }, { x: 510, y: 660 }, { x: 510, y: 690 }, { x: 430, y: 690 }] }] }, category: 'weapon' },
+        { shape: { kind: 'polygons', polygons: [{ points: [{ x: 395, y: 660 }, { x: 435, y: 660 }, { x: 435, y: 680 }, { x: 395, y: 680 }] }] }, category: 'weapon' },
+        { shape: { kind: 'polygons', polygons: [{ points: [{ x: 350, y: 630 }, { x: 420, y: 630 }, { x: 420, y: 644 }, { x: 350, y: 644 }] }] }, category: 'weapon' },
+      ],
+    },
+    vehicleB: {
+      team: 'B',
+      body: {
+        kind: 'polygons',
+        polygons: [{ points: [{ x: 1100, y: 656 }, { x: 1220, y: 656 }, { x: 1220, y: 700 }, { x: 1100, y: 700 }] }],
+      },
+      wheels: [
+        { center: { x: 1098, y: 680 }, radius: 20, angle: 0 },
+        { center: { x: 1222, y: 680 }, radius: 20, angle: 0 },
+      ],
+      parts: [
+        { shape: { kind: 'polygons', polygons: [{ points: [{ x: 1090, y: 660 }, { x: 1170, y: 660 }, { x: 1170, y: 690 }, { x: 1090, y: 690 }] }] }, category: 'weapon' },
+      ],
+    },
+  };
+}
+
+describe('Q08-A Battle Camera 正常观看构图', () => {
+  function makeRenderer(): Renderer {
+    const ctx = new CtxStub();
+    const renderer = new Renderer(makeCanvas(ctx));
+    (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
+    renderer.resize(1600, 1000);
+    return renderer;
+  }
+  const SAFE_X = 56, SAFE_Y = 28, CW = 1000, CH = 500;
+
+  function inSafe(
+    renderer: Renderer,
+    w: { minX: number; minY: number; maxX: number; maxY: number },
+    label: string,
+  ): void {
+    const s = renderer.worldRectToScreen(w.minX, w.minY, w.maxX, w.maxY);
+    expect(s.minX, `${label} 左缘入画`).toBeGreaterThanOrEqual(SAFE_X - 1e-6);
+    expect(s.minY, `${label} 上缘入画`).toBeGreaterThanOrEqual(SAFE_Y - 1e-6);
+    expect(s.maxX, `${label} 右缘入画`).toBeLessThanOrEqual(CW - SAFE_X + 1e-6);
+    expect(s.maxY, `${label} 下缘入画`).toBeLessThanOrEqual(CH - SAFE_Y + 1e-6);
+  }
+
+  function screenHeight(renderer: Renderer, w: { minX: number; minY: number; maxX: number; maxY: number }): number {
+    const s = renderer.worldRectToScreen(w.minX, w.minY, w.maxX, w.maxY);
+    return s.maxY - s.minY;
+  }
+
+  it('1. Active：A/B body + wheel + functional parts 完整入画，车辆明显大于 full-arena（Closing）构图', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    renderer.reframe(snap, 'battle', { phase: 'Active' });
+    const activeScale = renderer.transformScale;
+    // A：body + 双轮 + 三件 functional parts 全部完整入画
+    inSafe(renderer, { minX: 300, minY: 650, maxX: 470, maxY: 700 }, 'A body');
+    inSafe(renderer, { minX: 307, minY: 660, maxX: 347, maxY: 700 }, 'A wheel rear');
+    inSafe(renderer, { minX: 423, minY: 660, maxX: 463, maxY: 700 }, 'A wheel front');
+    inSafe(renderer, { minX: 430, minY: 660, maxX: 510, maxY: 690 }, 'A part pushRod');
+    inSafe(renderer, { minX: 395, minY: 660, maxX: 435, maxY: 680 }, 'A part cannon');
+    inSafe(renderer, { minX: 350, minY: 630, maxX: 420, maxY: 644 }, 'A part hammer');
+    // B：body + 双轮 + part
+    inSafe(renderer, { minX: 1100, minY: 656, maxX: 1220, maxY: 700 }, 'B body');
+    inSafe(renderer, { minX: 1078, minY: 660, maxX: 1118, maxY: 700 }, 'B wheel rear');
+    inSafe(renderer, { minX: 1202, minY: 660, maxX: 1242, maxY: 700 }, 'B wheel front');
+    inSafe(renderer, { minX: 1090, minY: 660, maxX: 1170, maxY: 690 }, 'B part');
+    // 车辆明显大于 full-arena（Closing 全景）构图
+    renderer.reframe(snap, 'battle', { phase: 'Closing' });
+    const closingScale = renderer.transformScale;
+    expect(activeScale).toBeGreaterThan(closingScale);
+    // 屏幕尺寸对比（Active 下同一 A body 屏幕更高 → 上方无效空间显著减少）
+    const aHClosing = screenHeight(renderer, { minX: 300, minY: 650, maxX: 470, maxY: 700 });
+    renderer.reframe(snap, 'battle', { phase: 'Active' });
+    const aHActive = screenHeight(renderer, { minX: 300, minY: 650, maxX: 470, maxY: 700 });
+    expect(aHActive).toBeGreaterThan(aHClosing);
+  });
+
+  it('2. Warning：适度拉远（介于 Active 与全景之间）且 A/B 仍完整入画', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    renderer.reframe(snap, 'battle', { phase: 'Active' });
+    const activeScale = renderer.transformScale;
+    renderer.reframe(snap, 'battle', { phase: 'Warning' });
+    const warningScale = renderer.transformScale;
+    renderer.reframe(snap, 'battle', { phase: 'Closing' });
+    const closingScale = renderer.transformScale;
+    expect(warningScale).toBeLessThan(activeScale); // 开始拉远
+    expect(warningScale).toBeGreaterThan(closingScale); // 但未到全景那么远
+    renderer.reframe(snap, 'battle', { phase: 'Warning' });
+    inSafe(renderer, { minX: 300, minY: 650, maxX: 470, maxY: 700 }, 'A body');
+    inSafe(renderer, { minX: 1100, minY: 656, maxX: 1220, maxY: 700 }, 'B body');
+  });
+
+  it('3. Closing：两侧有效 Closing wall + A/B 完整入画（收束全程安全）', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    renderer.reframe(snap, 'battle', { phase: 'Closing' });
+    inSafe(renderer, { minX: 250, minY: 500, maxX: 290, maxY: 700 }, 'Closing wall L');
+    inSafe(renderer, { minX: 1310, minY: 500, maxX: 1350, maxY: 700 }, 'Closing wall R');
+    inSafe(renderer, { minX: 300, minY: 650, maxX: 470, maxY: 700 }, 'A body');
+    inSafe(renderer, { minX: 1100, minY: 656, maxX: 1220, maxY: 700 }, 'B body');
+  });
+
+  it('4. Projectile 不参与 camera bounds（含/不含 projectile 构图结果完全一致）', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    const withProj: BattleRenderSnapshot = {
+      ...snap,
+      projectiles: [{ team: 'A', center: { x: 900, y: 600 }, radius: 10 }],
+    };
+    renderer.reframe(snap, 'battle', { phase: 'Active' });
+    const scale1 = renderer.transformScale;
+    const r1 = renderer.worldRectToScreen(300, 650, 470, 700);
+    renderer.reframe(withProj, 'battle', { phase: 'Active' });
+    expect(renderer.transformScale).toBe(scale1);
+    const r2 = renderer.worldRectToScreen(300, 650, 470, 700);
+    expect(r2.minX).toBe(r1.minX);
+    expect(r2.minY).toBe(r1.minY);
+    expect(r2.maxX).toBe(r1.maxX);
+    expect(r2.maxY).toBe(r1.maxY);
+  });
+});
