@@ -830,4 +830,23 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(validateSnapshot(snap(draft('watermelonBody', { front: 'spear' }), 'q11r1E'), registry).valid).toBe(true);
     expect(validateSnapshot(snap(draft('watermelonBody', { top: 'laser' }), 'q11r1F'), registry).valid).toBe(true);
   });
+
+  it('Q11-A-CLOSE. 楔铲退出正式 Build：registry/Scenario 保留为 archived prototype，可加载', () => {
+    // 1) registry 保留 wedgeShovel 定义（archived prototype，不删除）
+    const ws = registry.functionals.get('wedgeShovel');
+    expect(ws).toBeDefined();
+    expect(ws!.category).toBe('gadget');
+    expect(ws!.collider.shape).toBe('polygon'); // 底层 polygon/collision 能力保留
+    // 2) Q11 专用 Scenario 仍可加载（隔离验证用，不崩）
+    const sc = SCENARIOS.find((s) => s.id === 'Q11');
+    expect(sc).toBeDefined();
+    const lab = new PhysicsLab(rendererStub);
+    expect(() => lab.loadScenario(sc!)).not.toThrow();
+    expect(lab.orchestrator instanceof PlanckBattleOrchestrator).toBe(true);
+    // 3) 其它正式部件不受影响（刺/镭射仍在 registry 且可装配）
+    expect(registry.functionals.get('spear')?.category).toBe('weapon');
+    expect(registry.functionals.get('laser')?.category).toBe('weapon');
+    expect(validateSnapshot(snap(draft('watermelonBody', { front: 'spear' }), 'close1'), registry).valid).toBe(true);
+    expect(validateSnapshot(snap(draft('watermelonBody', { top: 'laser' }), 'close2'), registry).valid).toBe(true);
+  });
 });

@@ -314,7 +314,11 @@ const pushRod: FunctionalPartDef = {
  * - 无 baseDamage → 不走 ContactRouter weapon 直击，无 Direct Weapon Damage；
  * - 不加隐藏向上力 / 不 setPosition / 不 setVelocity / 无固定翻转角；
  * - 接触位置不合适时只滑过 / 顶住，不自动翻车；自车同样承担碰撞反作用。
- * - 暂不加入玩家 Build 选项（PART_OPTIONS），仅供专用测试场景使用。
+ *
+ * 【ARCHIVED PROTOTYPE（Q11-A-CLOSE）】连续多轮真人验收失败：对方前轮 /
+ * 前置部件会优先阻挡楔面，「钻底盘 → 明显抬升」核心体验不能稳定成立。
+ * 已从玩家 Build PART_OPTIONS 移除；本定义 / Q11 专用 Scenario / 测试代码
+ * 全部保留供参考。底层 polygon / collision 能力未删。
  */
 const wedgeShovel: FunctionalPartDef = {
   id: 'wedgeShovel',

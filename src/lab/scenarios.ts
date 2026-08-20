@@ -491,12 +491,12 @@ export const SCENARIOS: ScenarioDef[] = [
   },
   {
     id: 'Q11',
-    name: 'Wedge Shovel (Gadget)',
+    name: 'Wedge Shovel (Gadget) [ARCHIVED]',
     description:
-      '楔铲（Q11-A-R2）：A 西瓜车身 + 前方楔铲（短陡 25° 楔形 polygon，Gadget，' +
-      '无 Direct Damage / 无主动动画）vs B 香蕉车身（标准轮、无功能件，隔离验证）。' +
-      '正面接触 → B 前轮沿楔面向上爬、车身明显抬头；接触位置不合适时只滑过或顶住，' +
-      '不自动翻车；A 自身承担真实反作用。',
+      '楔铲（Q11-A-CLOSE ARCHIVED）：A 西瓜车身 + 前方楔铲（短陡 25° 楔形 ' +
+      'polygon，Gadget，无 Direct Damage / 无主动动画）vs B 香蕉车身（标准轮、' +
+      '无功能件）。已退出玩家 Build（连续真人验收失败：对方前轮/前置部件优先 ' +
+      '阻挡楔面）；保留本场景仅用于参考 archived prototype 的真实物理行为。',
     buildA: wedgeShovelBuild(),
     buildB: bananaTargetBuild(),
     config: {
