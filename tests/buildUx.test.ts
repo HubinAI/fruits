@@ -28,7 +28,7 @@ import {
   EMPTY_SLOT,
   type BuildDraft,
 } from '../src/lab/buildEditorModel';
-import { validateSnapshot } from '../src/core/buildValidator';
+import { validateSnapshot, computeEnergy } from '../src/core/buildValidator';
 import { Renderer } from '../src/render/renderer';
 import { SCENARIOS } from '../src/lab/scenarios';
 import type { BattleRenderSnapshot, RenderShape } from '../src/battle/battleContract';
@@ -635,5 +635,49 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     // 真实 recoil impulse 60 / chassis mass ≈150 → Δv ≈ -0.4；autoDrive 抵消后
     // 实测仍骤降 ~0.32（> Cannon 30 的 ~0.2）。强后坐可感知。
     expect(Math.min(...vxAfter)).toBeLessThan(avgBefore - 0.25);
+  });
+
+  it('Q11-R1. 三新部件真实装配链路：defId 正确 / Preview 真实部件 / Energy / Validator', () => {
+    // 1) 定义契约：楔铲=gadget(15) / 刺=weapon(25) / 镭射=weapon(45)
+    expect(registry.functionals.get('wedgeShovel')?.category).toBe('gadget');
+    expect(registry.functionals.get('wedgeShovel')?.energy).toBe(15);
+    expect(registry.functionals.get('spear')?.category).toBe('weapon');
+    expect(registry.functionals.get('spear')?.energy).toBe(25);
+    expect(registry.functionals.get('laser')?.category).toBe('weapon');
+    expect(registry.functionals.get('laser')?.energy).toBe(45);
+
+    // 2) 三个新部件分别装到 watermelonBody front/top 挂点 → 真实 Planck Preview
+    //    立即显示真实部件（orchestrator.parts 含对应 defId，非假 Preview）
+    const cases: Array<[string, string, string]> = [
+      ['wedgeShovel', 'front', 'gadget'],
+      ['spear', 'front', 'weapon'],
+      ['laser', 'top', 'weapon'],
+    ];
+    for (const [defId, hp, _cat] of cases) {
+      const lab = new PhysicsLab(rendererStub);
+      const d = draft('watermelonBody', { [hp]: defId });
+      const a = snap(d, 'q11r1A');
+      const b = snap(draft('bananaBody', { front: 'cannon' }), 'q11r1B');
+      expect(() => lab.loadCustomPreview(a, b)).not.toThrow();
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      const ids = o.vehicleA.parts.map((p) => p.def.id);
+      expect(ids).toContain(defId); // Preview 显示真实部件
+      // Energy 正确
+      const e = computeEnergy(a, registry);
+      expect(e.error).toBeUndefined();
+      expect(e.energy).toBe(registry.functionals.get(defId)!.energy);
+    }
+
+    // 3) Validator：只装楔铲（gadget 无 weapon）→ 阻断；楔铲+炮 → 通过
+    const onlyShovel = snap(draft('watermelonBody', { front: 'wedgeShovel' }), 'q11r1C');
+    expect(validateSnapshot(onlyShovel, registry).valid).toBe(false); // 至少 1 件 Weapon
+    const shovelPlusCannon = snap(
+      draft('watermelonBody', { front: 'wedgeShovel', top: 'cannon' }),
+      'q11r1D',
+    );
+    expect(validateSnapshot(shovelPlusCannon, registry).valid).toBe(true);
+    // 刺 / 镭射 本身是 weapon → 单独即可 Start
+    expect(validateSnapshot(snap(draft('watermelonBody', { front: 'spear' }), 'q11r1E'), registry).valid).toBe(true);
+    expect(validateSnapshot(snap(draft('watermelonBody', { top: 'laser' }), 'q11r1F'), registry).valid).toBe(true);
   });
 });

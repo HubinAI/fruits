@@ -478,13 +478,18 @@ const WHEEL_OPTIONS: Array<{ v: string; t: string }> = [
   { v: '26', t: '26 大' },
 ];
 
-/** 正式可编辑部件（ramHead/testMass 非本轮已通过内容，不暴露）。
- *  Q10-B：玩家侧统一中文名（炮/锤/推杆）；内部 defId 不变。 */
+/** 正式可编辑部件（ramHead/testMass 非正式内容，不暴露）。
+ *  Q10-B：玩家侧统一中文名（炮/锤/推杆）；内部 defId 不变。
+ *  Q11-R1：正式接入 Q11 三部件（楔铲/刺/镭射）——与炮/锤/推杆同一套
+ *  挂点选择、Energy、Validator、Preview 流程（无专属槽）。 */
 const PART_OPTIONS: Array<{ v: string; t: string }> = [
   { v: EMPTY_SLOT, t: '空' },
   { v: 'cannon', t: '炮' },
   { v: 'hammer', t: '锤' },
   { v: 'pushRod', t: '推杆' },
+  { v: 'wedgeShovel', t: '楔铲' },
+  { v: 'spear', t: '刺' },
+  { v: 'laser', t: '镭射' },
 ];
 
 /** W2-SIL-1 视觉样板 Draft：双车并排展示 5 个首批正式 Content 轮廓
