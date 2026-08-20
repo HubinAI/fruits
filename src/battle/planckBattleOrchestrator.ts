@@ -37,6 +37,7 @@ import {
   type BattleConfig,
   type BattleResult,
   type BattleRenderSnapshot,
+  type BattleStatusSnapshot,
   type RenderVehicle,
   type RenderShape,
   type RenderCircle,
@@ -324,6 +325,15 @@ export class PlanckBattleOrchestrator {
 
   get phase(): string {
     return this._result?.phase ?? this.arena.phase;
+  }
+
+  /** 双方实时战斗状态（Q06-HUD-F1）：hp/maxHp 直读真实 vehicle；phase 复用正式 phase */
+  getBattleStatusSnapshot(): BattleStatusSnapshot {
+    return {
+      sideA: { team: 'A', hp: this.vehicleA.hp, maxHp: this.vehicleA.maxHp },
+      sideB: { team: 'B', hp: this.vehicleB.hp, maxHp: this.vehicleB.maxHp },
+      phase: this.phase,
+    };
   }
 
   get timeMs(): number {

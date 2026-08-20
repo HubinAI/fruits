@@ -43,6 +43,27 @@ export interface BattleResult {
 }
 
 /**
+ * 单侧实时战斗状态（Q06-HUD-F1）：HUD 持续显示的引擎中立最小合同。
+ * hp / maxHp 必须直接读取当前真实 Runtime vehicle（禁止在 UI 重算一套公式）；
+ * maxHp = Build/Resolved 初始 HP（body.hp），不随战斗变化。
+ */
+export interface BattleSideStatus {
+  team: TeamId;
+  /** 当前真实 HP（随 weapon/impact damage 实时下降） */
+  hp: number;
+  /** 初始最大 HP（当前真实 Build/Resolved 初始值） */
+  maxHp: number;
+}
+
+/** 双方实时战斗状态快照（引擎中立，Matter/Planck 同一合同） */
+export interface BattleStatusSnapshot {
+  sideA: BattleSideStatus;
+  sideB: BattleSideStatus;
+  /** 当前正式 Battle phase（Active/Warning/Closing/End；复用现有 phase，非 Debug 数据） */
+  phase: string;
+}
+
+/**
  * 引擎中立渲染数据合同（Queue F-02M-B17B-A1）。
  *
  * 硬约束：本组类型禁止出现 Matter.Body / Vehicle / Planck BodyHandle / adapter
@@ -146,6 +167,11 @@ export interface BattleOrchestratorApi {
   onCombatEvent(cb: (ev: CombatEvent) => void): void;
   dispose(): void;
   getRenderSnapshot(): BattleRenderSnapshot;
+  /**
+   * 双方实时战斗状态快照（Q06-HUD-F1）：hp/maxHp 直读真实 vehicle，
+   * phase 复用正式 Battle phase；纯读取，无物理/Gameplay 副作用。
+   */
+  getBattleStatusSnapshot(): BattleStatusSnapshot;
 }
 
 /**
