@@ -118,6 +118,23 @@ style.textContent = `
   .opponent-summary { font-size: 12px; color: #9aa4b5; padding: 4px 0 2px; line-height: 1.6; }
   .opponent-summary .os-name { color: #ffd35a; font-weight: 600; }
   .opponent-summary .os-parts { margin-top: 2px; font-size: 11px; color: #7c8799; }
+  /* Q07-B：Functional 挂点卡片（看挂点 → 点挂点 → 选部件；无 Apply） */
+  .part-slots { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .part-slot-card { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; cursor: pointer; font-size: 12px; text-align: left; }
+  .part-slot-card:hover { background: #2e3747; }
+  .part-slot-card.active { border-color: #4a7fe0; background: #2a3a5c; box-shadow: 0 0 0 1px #3b6fd4 inset; }
+  .part-slot-card:disabled { opacity: 0.45; cursor: not-allowed; }
+  .part-slot-card:disabled:hover { background: #242b38; }
+  .part-slot-card .ps-label { color: #9aa4b5; }
+  .part-slot-card .ps-value { color: #ffd35a; font-weight: 600; }
+  .part-slot-card .ps-value.empty { color: #7c8799; font-weight: 400; }
+  .part-picker { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; padding: 6px; background: #1b2130; border: 1px solid #2a3140; border-radius: 6px; }
+  .part-picker .pp-title { width: 100%; font-size: 11px; color: #9aa4b5; margin-bottom: 2px; }
+  .part-picker button { padding: 5px 9px; background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 5px; cursor: pointer; font-size: 12px; }
+  .part-picker button:hover { background: #2e3747; }
+  .part-picker button.active { background: #3b6fd4; border-color: #5a8df0; color: #fff; }
+  .part-picker button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .part-picker button:disabled:hover { background: #242b38; }
 `;
 document.head.appendChild(style);
 
@@ -525,14 +542,62 @@ function renderPanel(
     d.frontRadius = Number(v);
   });
 
-  // Functional 槽位：按当前 Body 真实 hardpoints 动态生成（不区分 Weapon/Gadget 槽）
+  // Q07-B：Functional 挂点卡片化——按当前 Body 真实 hardpoints 生成挂点卡片，
+  // 卡片直接显示当前安装内容；点击卡片选中（明确选中态）并展开部件选择区。
+  // 点选项立即更新 Draft → Energy → Validator → 真实 Planck Preview（无 Apply）。
   if (body) {
+    const isA = d === draftA;
+    const selSlot = isA ? selectedSlotA : selectedSlotB;
+    const slotList = document.createElement('div');
+    slotList.className = 'part-slots';
     for (const hpId of editableSlots(body)) {
       const cur = d.functionalSelections[hpId] ?? EMPTY_SLOT;
-      // 主标签为位置语义；内部 id 作次级文字
-      mkSelect(`${slotLabel(hpId)}（${hpId}）`, PART_OPTIONS, cur, (v) => {
-        d.functionalSelections[hpId] = v;
-      });
+      const curName =
+        cur === EMPTY_SLOT ? '空' : registry.functionals.get(cur)?.name ?? cur;
+      const card = document.createElement('button');
+      card.className = 'part-slot-card' + (selSlot === hpId ? ' active' : '');
+      card.disabled = buildControlsLocked;
+      const lab2 = document.createElement('span');
+      lab2.className = 'ps-label';
+      lab2.textContent = slotLabel(hpId);
+      const val = document.createElement('span');
+      val.className = 'ps-value' + (cur === EMPTY_SLOT ? ' empty' : '');
+      val.textContent = `[${curName}]`;
+      card.appendChild(lab2);
+      card.appendChild(val);
+      card.onclick = () => {
+        if (buildControlsLocked) return;
+        // 点击挂点：切换选中（再点一次取消）；只重渲染面板，不重建 Preview
+        if (isA) selectedSlotA = selectedSlotA === hpId ? null : hpId;
+        else selectedSlotB = selectedSlotB === hpId ? null : hpId;
+        renderPanelsOnly();
+      };
+      slotList.appendChild(card);
+    }
+    form.appendChild(slotList);
+
+    // 部件选择区：当前选中挂点展开（选项即点即改；当前装备高亮）
+    if (selSlot && editableSlots(body).includes(selSlot)) {
+      const cur = d.functionalSelections[selSlot] ?? EMPTY_SLOT;
+      const picker = document.createElement('div');
+      picker.className = 'part-picker';
+      const title = document.createElement('div');
+      title.className = 'pp-title';
+      title.textContent = `正在改「${slotLabel(selSlot)}」`;
+      picker.appendChild(title);
+      for (const opt of PART_OPTIONS) {
+        const b = document.createElement('button');
+        b.textContent = opt.t;
+        b.className = cur === opt.v ? 'active' : '';
+        b.disabled = buildControlsLocked;
+        b.onclick = () => {
+          if (buildControlsLocked) return;
+          d.functionalSelections[selSlot] = opt.v; // 立即生效（无 Apply）
+          refreshFromEdit(); // Draft → Energy → Validator → 真实 Planck Preview
+        };
+        picker.appendChild(b);
+      }
+      form.appendChild(picker);
     }
   }
 
@@ -578,6 +643,10 @@ function renderPanel(
 /** W2-UX-R2：B 测试对手编辑是否展开（默认折叠，降低首屏信息量；能力不删除） */
 let bEditorOpen = false;
 
+/** Q07-B：A/B 各自当前选中的 Functional 挂点（null = 未选中；per-panel，互不干扰） */
+let selectedSlotA: string | null = null;
+let selectedSlotB: string | null = null;
+
 /** 中央显示当前 Draft 的真实 Planck 装配预览（不推进战斗） */
 function showPreview(): void {
   const sa = currentSnapshot('A');
@@ -587,14 +656,19 @@ function showPreview(): void {
   reframeCamera();
 }
 
-/** 编辑后刷新：面板 + （非战斗时）实时 Preview + 按钮/阻断原因 */
-function refreshFromEdit(): void {
+/** Q07-B：只重渲染 A/B 面板（挂点选中态 / 部件选择区显隐），不重建 Preview（Draft 未变） */
+function renderPanelsOnly(): void {
   renderPanel(panelA, '我的车辆 A', draftA, refreshFromEdit);
   // Q07-A：B 明确叫「当前对手」——默认只显示概要 + 「编辑对手」入口，不展开完整表单
   renderPanel(panelB, '当前对手 B', draftB, refreshFromEdit, {
     collapsed: !bEditorOpen,
     expandLabel: '编辑对手',
   });
+}
+
+/** 编辑后刷新：面板 + （非战斗时）实时 Preview + 按钮/阻断原因 */
+function refreshFromEdit(): void {
+  renderPanelsOnly();
   if (battleState !== 'fighting') {
     showPreview();
   }
