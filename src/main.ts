@@ -138,6 +138,15 @@ style.textContent = `
   .part-picker button.active { background: #3b6fd4; border-color: #5a8df0; color: #fff; }
   .part-picker button:disabled { opacity: 0.45; cursor: not-allowed; }
   .part-picker button:disabled:hover { background: #242b38; }
+  /* Q09-A：Body / 前后轮去表单化——选项卡片（看选项 → 点一下 → Preview 立即变化） */
+  .opt-group { margin-top: 10px; }
+  .opt-group .og-label { font-size: 12px; color: #9aa4b5; margin-bottom: 4px; }
+  .opt-cards { display: flex; flex-wrap: wrap; gap: 4px; }
+  .opt-card { flex: 1 1 40%; min-width: 70px; padding: 7px 6px; background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; cursor: pointer; font-size: 12px; text-align: center; line-height: 1.35; }
+  .opt-card:hover { background: #2e3747; }
+  .opt-card.active { border-color: #4a7fe0; background: #2a3a5c; box-shadow: 0 0 0 1px #3b6fd4 inset; color: #fff; }
+  .opt-card:disabled { opacity: 0.45; cursor: not-allowed; }
+  .opt-card:disabled:hover { background: #242b38; }
   /* Q07-C/Q08-B：Start 后短暂「READY / 开战」状态转换（Presentation 延迟，不改 Physics/结果） */
   .ready-overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 8; background: rgba(6,8,12,0.35); pointer-events: none; }
   .ready-card { text-align: center; }
@@ -488,13 +497,12 @@ function currentSnapshot(side: 'A' | 'B'): BuildSnapshot {
   );
 }
 
-/** 渲染一侧 Build 面板（Body / 轮径 / 真实 Functional 槽位 / Energy / 校验错误）。
- *  W2-UX-R2：opts.collapsed=true 时表单折叠（B 测试对手默认收起，仅保留展开入口） */
+/** 渲染一侧 Build 面板（Body / 轮径卡片 / 真实 Functional 挂点卡片 / Energy / 校验错误）。
+ *  W2-UX-R2：opts.collapsed=true 时表单折叠（B 当前对手默认收起，仅保留「编辑对手」入口） */
 function renderPanel(
   panel: HTMLElement,
   title: string,
   d: BuildDraft,
-  onChanged: () => void,
   opts: { collapsed?: boolean; expandLabel?: string } = {},
 ): void {
   panel.replaceChildren();
@@ -523,40 +531,48 @@ function renderPanel(
   const body = registry.bodies.get(d.bodyDefId);
   const snapshot = currentSnapshot(d === draftA ? 'A' : 'B');
 
-  const mkSelect = (
+  // Q09-A：Body / 前后轮去表单化——选项卡片（看选项 → 点一下 → Preview 立即变化，无 Apply）。
+  // 点击立即更新 Draft → refreshFromEdit（Energy / Validator / 真实 Planck Preview）。
+  const mkOptGroup = (
     label: string,
     options: Array<{ v: string; t: string }>,
-    value: string,
-    onChange: (v: string) => void,
+    isActive: (v: string) => boolean,
+    onPick: (v: string) => void,
   ): void => {
-    const lab2 = document.createElement('label');
-    lab2.textContent = label;
-    const sel = document.createElement('select');
-    options.forEach((o) => {
-      const opt = document.createElement('option');
-      opt.value = o.v;
-      opt.textContent = o.t;
-      sel.appendChild(opt);
-    });
-    sel.value = value;
-    sel.disabled = buildControlsLocked;
-    sel.onchange = () => {
-      onChange(sel.value);
-      onChanged();
-    };
-    lab2.appendChild(sel);
-    form.appendChild(lab2);
+    const group = document.createElement('div');
+    group.className = 'opt-group';
+    const gLabel = document.createElement('div');
+    gLabel.className = 'og-label';
+    gLabel.textContent = label;
+    group.appendChild(gLabel);
+    const cards = document.createElement('div');
+    cards.className = 'opt-cards';
+    for (const opt of options) {
+      const b = document.createElement('button');
+      b.className = 'opt-card' + (isActive(opt.v) ? ' active' : '');
+      b.textContent = opt.t;
+      b.disabled = buildControlsLocked;
+      b.onclick = () => {
+        if (buildControlsLocked) return;
+        onPick(opt.v);
+        refreshFromEdit(); // Draft → Energy → Validator → 真实 Planck Preview（无 Apply）
+      };
+      cards.appendChild(b);
+    }
+    group.appendChild(cards);
+    form.appendChild(group);
   };
 
-  mkSelect('车身', BODY_OPTIONS, d.bodyDefId, (v) => {
+  // Body：复用 migrateDraftBody 真实 hardpoint 迁移（同 ID 保留 / 不存在删除 / 新挂点空）
+  mkOptGroup('车身', BODY_OPTIONS, (v) => d.bodyDefId === v, (v) => {
     const migrated = migrateDraftBody(d, v, registry);
     d.bodyDefId = migrated.bodyDefId;
     d.functionalSelections = migrated.functionalSelections;
   });
-  mkSelect('后轮', WHEEL_OPTIONS, String(d.rearRadius), (v) => {
+  mkOptGroup('后轮', WHEEL_OPTIONS, (v) => String(d.rearRadius) === v, (v) => {
     d.rearRadius = Number(v);
   });
-  mkSelect('前轮', WHEEL_OPTIONS, String(d.frontRadius), (v) => {
+  mkOptGroup('前轮', WHEEL_OPTIONS, (v) => String(d.frontRadius) === v, (v) => {
     d.frontRadius = Number(v);
   });
 
@@ -676,9 +692,9 @@ function showPreview(): void {
 
 /** Q07-B：只重渲染 A/B 面板（挂点选中态 / 部件选择区显隐），不重建 Preview（Draft 未变） */
 function renderPanelsOnly(): void {
-  renderPanel(panelA, '我的车辆 A', draftA, refreshFromEdit);
+  renderPanel(panelA, '我的车辆 A', draftA);
   // Q07-A：B 明确叫「当前对手」——默认只显示概要 + 「编辑对手」入口，不展开完整表单
-  renderPanel(panelB, '当前对手 B', draftB, refreshFromEdit, {
+  renderPanel(panelB, '当前对手 B', draftB, {
     collapsed: !bEditorOpen,
     expandLabel: '编辑对手',
   });

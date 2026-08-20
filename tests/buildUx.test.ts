@@ -22,6 +22,7 @@ import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator
 import { createRegistry } from '../src/core/content';
 import {
   buildSnapshotFromDraft,
+  migrateDraftBody,
   slotLabel,
   SLOT_LABELS,
   EMPTY_SLOT,
@@ -295,5 +296,32 @@ describe('Q06-UX-R2-FIX 装配 Preview 完整入画', () => {
     expect(bo.world.getPosition(bo.vehicleA.body).x).toBeCloseTo(400, 6);
     expect(bo.world.getPosition(bo.vehicleB.body).x).toBeCloseTo(1200, 6);
     expect(lab.previewMode).toBe(false);
+  });
+});
+
+/* ---------- Q09-A：Body / Wheel 去表单化（卡片选择语义） ---------- */
+describe('Q09-A Body/Wheel 卡片选择语义', () => {
+  it('任意 Body 卡片点击（migrateDraftBody）后：真实挂点一致 / 无虚假槽 / Validator 不崩', () => {
+    const bodies = ['wedgeBody', 'boxBody', 'tallBody', 'heavyBox', 'watermelonBody', 'bananaBody'];
+    for (const target of bodies) {
+      // 模拟卡片点击：从默认 W2-SIL（watermelon）切到目标 Body
+      const d = silDraft('watermelonBody');
+      const migrated = migrateDraftBody(d, target, registry);
+      d.bodyDefId = migrated.bodyDefId;
+      d.functionalSelections = migrated.functionalSelections;
+      const body = registry.bodies.get(target)!;
+      const hpIds = body.functionalHardpoints.map((hp) => hp.id);
+      // 每个真实挂点都有选择（新挂点空；同 ID 保留）
+      for (const hp of hpIds) {
+        expect(d.functionalSelections, `${target} 挂点 ${hp} 存在`).toHaveProperty(hp);
+      }
+      // 无虚假槽位（不产生不存在的 hardpoint）
+      for (const key of Object.keys(d.functionalSelections)) {
+        expect(hpIds, `${target} 无虚假槽 ${key}`).toContain(key);
+      }
+      // 迁移后可产出 snapshot 且 Validator 不崩（Start/Validator 无回归）
+      const s = buildSnapshotFromDraft(d, registry, 'A');
+      expect(() => validateSnapshot(s, registry)).not.toThrow();
+    }
   });
 });
