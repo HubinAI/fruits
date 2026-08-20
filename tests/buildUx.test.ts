@@ -9,6 +9,12 @@
  * 5. 槽位自然名称（前端/前部/顶部/后端，内部 id 保留）；
  * 6. 修改部件（cannon→hammer）后 preview 立即重建（中央 A 外形变化）；
  * 7. 非法 Build 也创建 preview（裸车显示，仅禁止开始战斗）。
+ *
+ * Q06-UX-R2-FIX（补充）：装配 Preview 完整入画——默认 W2-SIL 双车
+ * （watermelon/banana + pushRod/cannon/hammer + 双轮）在近距专属 spawn 下
+ * 经真实 Planck Orchestrator + renderer 'preview' reframe，最终 screen bounds
+ * 全部落在 safe viewport 内（body/wheels/parts 无一裁切）；正式 Battle spawn
+ * 保持默认 400/1200 不变。
  */
 import { describe, it, expect } from 'vitest';
 import { PhysicsLab } from '../src/lab/physicsLab';
@@ -22,7 +28,8 @@ import {
   type BuildDraft,
 } from '../src/lab/buildEditorModel';
 import { validateSnapshot } from '../src/core/buildValidator';
-import type { Renderer } from '../src/render/renderer';
+import { Renderer } from '../src/render/renderer';
+import type { BattleRenderSnapshot, RenderShape } from '../src/battle/battleContract';
 
 const registry = createRegistry();
 const rendererStub = { bind: () => {} } as unknown as Renderer;
@@ -147,5 +154,146 @@ describe('Q06-UX-R1 Build 交互', () => {
     expect(o instanceof PlanckBattleOrchestrator).toBe(true);
     expect(o.vehicleA.parts).toHaveLength(0); // 裸车（无功能部件）
     expect(o.vehicleA.wheels).toHaveLength(2);
+  });
+});
+
+/* ---------- Q06-UX-R2-FIX：装配 Preview 完整入画（真实 Planck Runtime + renderer reframe） ---------- */
+
+/** W2-SIL 默认装配 Draft（与 main.ts silDraft 一致）：front=pushRod / frontMass=cannon / top=hammer */
+function silDraft(bodyDefId: string): BuildDraft {
+  const body = registry.bodies.get(bodyDefId)!;
+  const selections: Record<string, string> = {};
+  for (const hp of body.functionalHardpoints) {
+    if (hp.id === 'front') selections[hp.id] = 'pushRod';
+    else if (hp.id === 'frontMass') selections[hp.id] = 'cannon';
+    else if (hp.id === 'top') selections[hp.id] = 'hammer';
+    else selections[hp.id] = EMPTY_SLOT;
+  }
+  return { bodyDefId, rearRadius: 20, frontRadius: 20, functionalSelections: selections };
+}
+
+/** 形状世界包围盒（与 renderer.reframe includeShape 同语义） */
+function shapeWorldBounds(shape: RenderShape): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  if (shape.kind === 'polygons') {
+    for (const poly of shape.polygons) for (const p of poly.points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+  } else {
+    const c = shape.circle;
+    minX = c.center.x - c.radius;
+    maxX = c.center.x + c.radius;
+    minY = c.center.y - c.radius;
+    maxY = c.center.y + c.radius;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/** 与 renderer.ts SAFE_INSET_X/Y 保持一致 */
+const SAFE_INSET_X = 56;
+const SAFE_INSET_Y = 28;
+
+function makeCtxStubCanvas() {
+  const ctx = {} as CanvasRenderingContext2D;
+  return {
+    width: 0,
+    height: 0,
+    clientWidth: 1000,
+    clientHeight: 500,
+    getContext: () => ctx,
+  } as unknown as HTMLCanvasElement;
+}
+
+function expectInSafeViewport(
+  renderer: Renderer,
+  w: { minX: number; minY: number; maxX: number; maxY: number },
+  label: string,
+): void {
+  const s = renderer.worldRectToScreen(w.minX, w.minY, w.maxX, w.maxY);
+  expect(s.minX, `${label} 左缘入画`).toBeGreaterThanOrEqual(SAFE_INSET_X - 1e-6);
+  expect(s.minY, `${label} 上缘入画`).toBeGreaterThanOrEqual(SAFE_INSET_Y - 1e-6);
+  expect(s.maxX, `${label} 右缘入画`).toBeLessThanOrEqual(1000 - SAFE_INSET_X + 1e-6);
+  expect(s.maxY, `${label} 下缘入画`).toBeLessThanOrEqual(500 - SAFE_INSET_Y + 1e-6);
+}
+
+/** 遍历车辆所有可视部分（body + wheels + parts），逐一断言完整入画 */
+function expectVehicleFullyInView(renderer: Renderer, v: BattleRenderSnapshot['vehicleA'], label: string): void {
+  expectInSafeViewport(renderer, shapeWorldBounds(v.body), `${label} body`);
+  for (let i = 0; i < v.wheels.length; i++) {
+    const w = v.wheels[i];
+    expectInSafeViewport(
+      renderer,
+      { minX: w.center.x - w.radius, minY: w.center.y - w.radius, maxX: w.center.x + w.radius, maxY: w.center.y + w.radius },
+      `${label} wheel${i}`,
+    );
+  }
+  for (let i = 0; i < v.parts.length; i++) {
+    expectInSafeViewport(renderer, shapeWorldBounds(v.parts[i].shape), `${label} part${i}`);
+  }
+}
+
+describe('Q06-UX-R2-FIX 装配 Preview 完整入画', () => {
+  it('1. 默认 W2-SIL 双车：专属近距 spawn 生效 + A/B body/wheels/parts 全部完整入画', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustomPreview(
+      snap(silDraft('watermelonBody'), 'customA'),
+      snap(silDraft('bananaBody'), 'customB'),
+    );
+    const po = lab.orchestrator as PlanckBattleOrchestrator;
+    // 专属近距 spawn 生效（620/980，比正式 400/1200 明显靠近）
+    expect(po.world.getPosition(po.vehicleA.body).x).toBeCloseTo(620, 6);
+    expect(po.world.getPosition(po.vehicleB.body).x).toBeCloseTo(980, 6);
+    // preview 不推进
+    expect(lab.previewMode).toBe(true);
+    expect(po.config.autoDrive).toBe(false);
+
+    const renderer = new Renderer(makeCtxStubCanvas());
+    const shot = po.getRenderSnapshot();
+    renderer.reframe(shot, 'preview');
+    const previewScale = renderer.transformScale;
+    expectVehicleFullyInView(renderer, shot.vehicleA, 'A');
+    expectVehicleFullyInView(renderer, shot.vehicleB, 'B');
+
+    // 对照：vehicles fit（正式场景构图语义）应明显小于 preview（近距 spawn + 小边距）
+    renderer.reframe(shot, 'vehicles');
+    expect(previewScale).toBeGreaterThan(renderer.transformScale);
+  });
+
+  it('2. 变化 Build（A front pushRod→cannon）重建后重新 reframe 仍完整入画', () => {
+    const lab = new PhysicsLab(rendererStub);
+    const dA = silDraft('watermelonBody');
+    const dB = silDraft('bananaBody');
+    lab.loadCustomPreview(snap(dA, 'customA'), snap(dB, 'customB'));
+    // 编辑 A：front 挂点 pushRod → cannon（每次选择后 Preview 立即重建）
+    dA.functionalSelections = {
+      front: 'cannon',
+      frontMass: 'cannon',
+      top: 'hammer',
+      rear: EMPTY_SLOT,
+    };
+    lab.loadCustomPreview(snap(dA, 'customA'), snap(dB, 'customB'));
+    const po = lab.orchestrator as PlanckBattleOrchestrator;
+    const renderer = new Renderer(makeCtxStubCanvas());
+    renderer.reframe(po.getRenderSnapshot(), 'preview');
+    expectVehicleFullyInView(renderer, po.getRenderSnapshot().vehicleA, 'A');
+    expectVehicleFullyInView(renderer, po.getRenderSnapshot().vehicleB, 'B');
+  });
+
+  it('3. 正式 Battle spawn 不受 Preview 影响（loadCustom planck 默认仍 400/1200）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    // 显式 planck（引擎中立路径），但不传 spawn → 走 Orchestrator 默认 400/1200
+    lab.loadCustom(
+      snap(silDraft('watermelonBody'), 'customA'),
+      snap(silDraft('bananaBody'), 'customB'),
+      { engine: 'planck' },
+    );
+    const bo = lab.orchestrator as PlanckBattleOrchestrator;
+    // 正式路径默认 spawn 未被 Preview 近距 spawn 影响（400/1200 不变）
+    expect(bo.world.getPosition(bo.vehicleA.body).x).toBeCloseTo(400, 6);
+    expect(bo.world.getPosition(bo.vehicleB.body).x).toBeCloseTo(1200, 6);
+    expect(lab.previewMode).toBe(false);
   });
 });

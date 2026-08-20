@@ -40,16 +40,20 @@ const CONTENT_MARGIN_WORLD = 64;
 const CONTENT_ZOOM = 1.05;
 const MIN_CONTENT_SCALE = 0.4;
 const MAX_CONTENT_SCALE = 5;
-/** W2-UX-R2：装配 Preview 近距构图（明显放大，优先看清 Body 与 Functional 部件） */
+/**
+ * Q06-UX-R2-FIX：装配 Preview 构图（明显放大，优先看清 Body 与 Functional 部件）。
+ * 放大完全来自「近距 spawn（physicsLab loadCustomPreview 专属 spawnA/spawnB）收窄
+ * A+B bounds + 更小的世界边距」——不再 fit 后乘额外 zoom（旧 ×1.9 会把内容推出
+ * safe viewport 造成左右裁切）。scale 恒不超过完整内容 fit 上限，A/B 完整入画是硬约束。
+ */
 const PREVIEW_MARGIN_WORLD = 18;
-const PREVIEW_ZOOM = 1.9;
 /** 构图安全区：左右 UI 阴影区不计入可用画布（CSS px，每侧内缩量） */
 const SAFE_INSET_X = 56;
 const SAFE_INSET_Y = 28;
 
 /**
  * 取景模式：
- * - vehicles：含 A+B 完整入画（编辑 Preview 构图）；
+ * - vehicles：含 A+B 完整入画（机制场景默认构图）；
  * - primary-fire：A 偏左中部 + 身后 recoil 空间 + 前方固定射击空间（Cannon-Recoil / Cannon-Angle 共用）；
  * - battle：正式战斗固定战场——覆盖 Arena 有效战斗区域（x: 0..width；y: Closing 墙顶..地面+margin），
  *   保证车辆被 Closing 推向边缘/中央的全过程始终可见（W1-P0-CLOSE-FIX；Start/Reset 构图一次，
@@ -139,6 +143,25 @@ export class Renderer {
   /** 当前镜头缩放（只读；测试 / 调试断言构图差异用） */
   get transformScale(): number {
     return this.transform.scale;
+  }
+
+  /**
+   * Q06-UX-R2-FIX：世界坐标轴对齐矩形 → 屏幕坐标轴对齐矩形（只读）。
+   * 供测试断言「最终 screen bounds 完整入画」（不依赖 scale 数字猜测）；
+   * 不参与绘制、不改变任何 framing 语义。
+   */
+  worldRectToScreen(
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+  ): { minX: number; minY: number; maxX: number; maxY: number } {
+    return {
+      minX: this.sx(minX),
+      minY: this.sy(minY),
+      maxX: this.sx(maxX),
+      maxY: this.sy(maxY),
+    };
   }
 
   /**
@@ -476,8 +499,10 @@ export class Renderer {
    * - fit 'primary-fire'：只取 A（远处 B 不缩小画面）；A 初始位于可视区域偏左中部，
    *   身后保留 recoilExtent（默认 180 世界 px）反冲空间，前方保留 forwardExtent
    *   （默认 520 世界 px）固定射击空间——Cannon-Recoil / Cannon-Angle 共用此套；
-   * - fit 'preview'（W2-UX-R2）：装配 Preview 近距放大——A+B 进画面但边距更小、
-   *   zoom 更大，优先看清 Body 与 Functional 部件；只用于 Editing，不影响正式 Battle。
+   * - fit 'preview'（W2-UX-R2 / Q06-UX-R2-FIX）：装配 Preview 近距构图——A+B 完整入画，
+   *   边距更小、且 Preview 使用专属近距 spawn（见 physicsLab.loadCustomPreview），
+   *   内容 bounds 自然收窄 → 车辆明显比 vehicles 构图更大；不做 fit 后强放大
+   *   （旧 PREVIEW_ZOOM×1.9 会把 A/B 推出 safe viewport）；只用于 Editing，不影响正式 Battle。
    *
    * 内容退化时回退到现有 transform（resize 设置的 arena 框）。
    */
@@ -527,7 +552,8 @@ export class Renderer {
       minX -= recoilExtent;
       maxX += forwardExtent;
     } else if (fit === 'preview') {
-      // W2-UX-R2：装配 Preview 近距放大（A+B；小边距 + 大 zoom 由下方分支处理）
+      // Q06-UX-R2-FIX：装配 Preview = A+B 完整入画（近距 spawn 收窄 bounds 已含在
+      // snapshot 里）；放大只靠下方小边距分支，绝不 fit 后 ×1.9。
       includeVehicle(snap.vehicleA);
       includeVehicle(snap.vehicleB);
     } else {
@@ -547,8 +573,12 @@ export class Renderer {
     // R2：可用画布 = 中央实际战斗可视区域（扣除左右 UI 阴影区）
     const safeW = Math.max(2, cw - SAFE_INSET_X * 2);
     const safeH = Math.max(2, ch - SAFE_INSET_Y * 2);
-    let scale =
-      Math.min(safeW / bw, safeH / bh) * (isPreview ? PREVIEW_ZOOM : CONTENT_ZOOM);
+    // Q06-UX-R2-FIX：Preview 直接取「完整内容 fit 上限」（不再 ×CONTENT_ZOOM）——
+    // 任何 >1 的乘数都会使含 margin 的内容超出 safeW×safeH 被左右裁切（×1.9 旧 bug
+    // 与 ×1.05 同理）。Preview 的明显放大只来自近距 spawn 收窄 bounds + 更小 margin，
+    // A/B 完整入画是硬约束；vehicles / primary-fire / battle 保持原 ×CONTENT_ZOOM 语义。
+    const fitLimit = Math.min(safeW / bw, safeH / bh);
+    let scale = isPreview ? fitLimit : fitLimit * CONTENT_ZOOM;
     if (scale < MIN_CONTENT_SCALE) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
     // 内容居中于安全区中心（offset 含安全区内缩量）

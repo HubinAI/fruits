@@ -231,7 +231,7 @@ describe('W2-FX-2 阶段视觉（Renderer smoke）', () => {
     expect(ctx.calls.includes('fill')).toBe(true);
   });
 
-  it('6e. W2-UX-R2：装配 Preview 近距放大（preview fit scale > vehicles fit scale）', () => {
+  it('6e. Q06-UX-R2-FIX：preview fit 完整入画（screen bounds 落在 safe viewport，不再 ×1.9 裁切）', () => {
     const ctx = new CtxStub();
     const renderer = new Renderer(makeCanvas(ctx));
     (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
@@ -240,9 +240,20 @@ describe('W2-FX-2 阶段视觉（Renderer smoke）', () => {
     const snap = orch.getRenderSnapshot();
     renderer.reframe(snap, 'vehicles');
     const vehiclesScale = renderer.transformScale;
-    renderer.reframe(snap, 'preview'); // W2-UX-R2：近距放大
+    renderer.reframe(snap, 'preview');
     const previewScale = renderer.transformScale;
+    // 主要验收：A/B body 完整落在 safe viewport（左右各 56、上下各 28 内缩，与 renderer 一致）
+    const cw = 1000, ch = 500;
+    const a = renderer.worldRectToScreen(100, 600, 200, 650);
+    const b = renderer.worldRectToScreen(900, 600, 1000, 650);
+    for (const [label, r] of [['A', a], ['B', b]] as const) {
+      expect(r.minX, `${label} 左缘入画`).toBeGreaterThanOrEqual(56 - 1e-6);
+      expect(r.minY, `${label} 上缘入画`).toBeGreaterThanOrEqual(28 - 1e-6);
+      expect(r.maxX, `${label} 右缘入画`).toBeLessThanOrEqual(cw - 56 + 1e-6);
+      expect(r.maxY, `${label} 下缘入画`).toBeLessThanOrEqual(ch - 28 + 1e-6);
+    }
+    // 次要参考：小边距（18 < 64）下 preview 略大于 vehicles（不再作为主要验收，
+    // 完整入画优先；preview 的明显放大由近距 spawn + 小边距共同提供）
     expect(previewScale).toBeGreaterThan(vehiclesScale);
-    expect(previewScale).toBeGreaterThan(1); // 明显放大（小边距 + PREVIEW_ZOOM 1.9）
   });
 });

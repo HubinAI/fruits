@@ -115,11 +115,21 @@ export class PhysicsLab {
    * - engine:'planck' + autoDrive:false；step() 不推进（不驱动、Behavior 不运行），
    *   只用于显示当前 Draft 的真实 Planck 组装结果（同一 getRenderSnapshot / Renderer）；
    * - 即使 Build 非法（如无 Weapon）也创建（显示裸车 Preview），合法校验由 UI/Validator 负责；
+   * - Q06-UX-R2-FIX：使用专属近距 spawnA/spawnB（620/980，比正式 Battle 默认 400/1200
+   *   明显靠近）——配合 renderer 'preview' fit 的小边距构图，A+B 完整入画且车辆自然放大；
+   *   正式 Battle 默认 spawn 不受影响；
    * - 保存输入，Reset 时按同一输入重建（仍为 preview）。
    */
   loadCustomPreview(buildA: BuildSnapshot, buildB: BuildSnapshot): void {
     this.currentScenario = null;
-    const cfg: BattleConfig = { autoDrive: false, engine: 'planck' };
+    const cfg: BattleConfig = {
+      autoDrive: false,
+      engine: 'planck',
+      // Q06-UX-R2-FIX：Preview 专属近距出生位（两车比正式 400/1200 明显靠近，
+      // 让完整 A+B 在不裁切前提下自然放大；y=640 沿用正式地面语义）。
+      spawnA: { x: 620, y: 640, facing: 1 },
+      spawnB: { x: 980, y: 640, facing: -1 },
+    };
     this.currentCustom = { buildA, buildB, config: cfg };
     this.isPreviewMode = true;
     this.orchestrator = this.createBattle(buildA, buildB, cfg);
