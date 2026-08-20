@@ -905,4 +905,66 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids[0]).toBe(EMPTY_SLOT);
   });
+
+  it('Q12-A. 冲撞头：短粗前置 / 复用 ramHead Runtime / 正面命中伤害 / 擦空失败 / 装配可用', () => {
+    // 1) 定义契约：weapon / baseDamage 80 / 短粗 box（与刺 96×6 长细一眼不同）
+    const rh = registry.functionals.get('ramHead')!;
+    const sp = registry.functionals.get('spear')!;
+    expect(rh.category).toBe('weapon');
+    expect(rh.behavior).toBe('ram'); // 复用既有 ram 直击链路，非新伤害系统
+    expect((rh.behaviorParams as Record<string, number>).baseDamage).toBe(80);
+    const rc = rh.collider as { shape: string; width: number; height: number };
+    const sc = sp.collider as { shape: string; vertices: { x: number; y: number }[] };
+    expect(rc.shape).toBe('box');
+    // 短粗：宽 44 < 刺长 96（明显更短）；高 26 > 刺高 6（明显更粗）
+    const spearLen = Math.max(...sc.vertices.map((v) => v.x)) - Math.min(...sc.vertices.map((v) => v.x));
+    const spearH = Math.max(...sc.vertices.map((v) => v.y)) - Math.min(...sc.vertices.map((v) => v.y));
+    expect(rc.width).toBeLessThan(spearLen * 0.6);
+    expect(rc.height).toBeGreaterThan(spearH * 3);
+    // 2) 装配链路：PART_OPTIONS 含冲撞头；Preview 真实部件；Energy 20；Validator（weapon 可 Start）
+    expect(PART_OPTIONS.map((o) => o.v)).toContain('ramHead');
+    expect(PART_OPTIONS.find((o) => o.v === 'ramHead')?.t).toBe('冲撞头');
+    const lab = new PhysicsLab(rendererStub);
+    const d = draft('watermelonBody', { front: 'ramHead' });
+    const a = snap(d, 'q12aA');
+    const b = snap(draft('bananaBody', {}), 'q12aB');
+    expect(() => lab.loadCustomPreview(a, b)).not.toThrow();
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    expect(o.vehicleA.parts.map((p) => p.def.id)).toContain('ramHead'); // Preview 真实部件
+    const e = computeEnergy(a, registry);
+    expect(e.error).toBeUndefined();
+    expect(e.energy).toBe(20);
+    expect(validateSnapshot(a, registry).valid).toBe(true); // weapon → 单独即可 Start
+    // 3) 正面真实碰撞 → B weapon damage ≈80（真实 Contact 直击）
+    const lab2 = new PhysicsLab(rendererStub);
+    lab2.loadScenario(SCENARIOS.find((s) => s.id === 'Q12')!);
+    const o2 = lab2.orchestrator as PlanckBattleOrchestrator;
+    let dmg = 0;
+    o2.onCombatEvent((ev) => {
+      if (ev.type === 'damage') dmg += ev.damage;
+    });
+    for (let i = 0; i < 900; i++) {
+      lab2.step(16.6667);
+      if (o2.result?.phase === 'End') break;
+    }
+    expect(dmg).toBeGreaterThanOrEqual(75); // baseDamage 80 真实触发
+    // 4) 擦空/高度错开允许失败：B 在 A 后方（背向而驰）→ 无伤害
+    const lab3 = new PhysicsLab(rendererStub);
+    lab3.loadCustom(SCENARIOS.find((s) => s.id === 'Q12')!.buildA, SCENARIOS.find((s) => s.id === 'Q12')!.buildB, {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 250, y: 650, facing: -1 },
+    });
+    const o3 = lab3.orchestrator as PlanckBattleOrchestrator;
+    let dmg3 = 0;
+    o3.onCombatEvent((ev) => {
+      if (ev.type === 'damage') dmg3 += ev.damage;
+    });
+    for (let i = 0; i < 600; i++) {
+      lab3.step(16.6667);
+      if (o3.result?.phase === 'End') break;
+    }
+    expect(dmg3).toBe(0); // 没正面撞到 → 自然失败，无隐藏击退/自动伤害
+  });
 });

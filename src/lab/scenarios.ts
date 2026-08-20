@@ -192,6 +192,20 @@ function bananaTargetBuild(): BuildSnapshot {
   };
 }
 
+/** Q12-A：冲撞头车——西瓜车身 + 前方冲撞头（复用既有 ramHead Runtime） */
+function ramHeadCarBuild(): BuildSnapshot {
+  return {
+    id: 'ramHeadCar',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'ramHead' }],
+  };
+}
+
 /** Q11-A：楔铲车——西瓜车身 + 前方楔铲（Gadget，无 Direct Damage，无主动动画） */
 function wedgeShovelBuild(): BuildSnapshot {
   return {
@@ -534,6 +548,24 @@ export const SCENARIOS: ScenarioDef[] = [
       + '明显后坐；projectile 真实 hit / miss / destroy。',
     buildA: laserBuild(),
     buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Q12',
+    name: 'Ram Head (Contact Weapon)',
+    description:
+      '冲撞头（Q12-A）：A 西瓜车身 + 前方冲撞头（短粗前置 box 44×26，固定'
+      + 'Contact Weapon，复用既有 ramHead Runtime）vs B 香蕉车身（标准轮、无功能件，'
+      + '隔离验证）。正面真实撞到才产生 Weapon Damage（baseDamage 80）；擦空/高度'
+      + '错开自然失败；无隐藏击退/自动瞄准。与刺（96×6 长细）视觉与距离定位明显不同。',
+    buildA: ramHeadCarBuild(),
+    buildB: bananaTargetBuild(),
     config: {
       engine: 'planck',
       autoDrive: true,

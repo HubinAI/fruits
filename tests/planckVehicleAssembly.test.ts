@@ -353,12 +353,13 @@ describe('F-02M-B8C · Planck Fixed Functional Parts 装配', () => {
     expect(posB.x).toBeCloseTo(-75, 3);
     expect(posB.y).toBeCloseTo(300, 3);
 
-    // collider offset 保留：shape 中心 = 硬点 + offset(10,0) → A: 85 / B: -85（镜像）
+    // collider offset 保留：shape 中心 = 硬点 + offset(22,0) → A: 97 / B: -97（镜像）
+    // Q12-A：ramHead 短粗前置 offset 10 → 22（宽 20×30 → 44×26）
     // 通过 COM 验证：ram collider 中心即 part COM（单 collider、angle 0）
     const comA = world.getCenterOfMass(ramA.body);
     const comB = world.getCenterOfMass(ramB.body);
-    expect(comA.x).toBeCloseTo(85, 3);
-    expect(comB.x).toBeCloseTo(-85, 3);
+    expect(comA.x).toBeCloseTo(97, 3);
+    expect(comB.x).toBeCloseTo(-97, 3);
     expect(comA.y).toBeCloseTo(300, 3);
 
     // OwnerTag

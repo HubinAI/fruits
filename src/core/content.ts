@@ -182,16 +182,19 @@ const wheelStd: WheelDef = {
 };
 
 /**
- * Ram Head（撞角）：Fixed Mount 武器。
+ * Ram Head（Q12-A 正式名：冲撞头）：短粗前置冲撞武器。
  * 用于证明「Weapon Damage 只能来自真实攻击轨迹 / Collider 的真实有效接触」。
+ * Q12-A：collider 由 box 20×30（短高）改为 box 44×26 offset {22,0}（短粗前置：
+ * 从挂点向前伸出 44px，高 26px）——与刺（96×6 长细）一眼不同；正面真实撞到
+ * 才产生 Weapon Damage，擦空/高度错开自然失败；无隐藏击退/自动瞄准。
  */
 const ramHead: FunctionalPartDef = {
   id: 'ramHead',
-  name: '撞角',
+  name: '冲撞头',
   category: 'weapon',
   mass: 30,
   energy: 20,
-  collider: { shape: 'box', width: 20, height: 30, offset: { x: 10, y: 0 } },
+  collider: { shape: 'box', width: 44, height: 26, offset: { x: 22, y: 0 } },
   behavior: 'ram',
   behaviorParams: { baseDamage: 80 },
 };

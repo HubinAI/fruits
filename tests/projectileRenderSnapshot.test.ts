@@ -40,8 +40,10 @@ function makeOrch(): PlanckBattleOrchestrator {
     {
       autoDrive: false,
       spawnA: { x: 400, y: 640, facing: 1 },
-      // wedge 车头(78) + 炮管(硬点 66 + 40 → 右缘 506) < B 左缘 565：59px 弹道 ~5 步命中
-      spawnB: { x: 640, y: 640, facing: -1 },
+      // Q12-A：lightVehicle（B）装 ramHead——collider 变短粗（44×26 offset 22）后
+      // B 左缘前突 44px（640-75-44=521）。spawnB 640→700 保证弹出生与 B 不重叠：
+      // A 炮口 506 → B ramHead 左缘 581（700-75-44），~75px 弹道 ~9 步命中。
+      spawnB: { x: 700, y: 640, facing: -1 },
     },
   );
 }

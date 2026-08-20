@@ -24,4 +24,6 @@ export const PART_OPTIONS: PartOption[] = [
   { v: 'pushRod', t: '推杆' },
   { v: 'spear', t: '刺' },
   { v: 'laser', t: '镭射' },
+  // Q12-A：复用既有 ramHead Runtime（真实 Contact Weapon 直击），玩家侧名「冲撞头」
+  { v: 'ramHead', t: '冲撞头' },
 ];
