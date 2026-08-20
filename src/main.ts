@@ -33,6 +33,9 @@ import { BattleOrchestrator } from './battle/battleOrchestrator';
 import { PlanckBattleOrchestrator } from './battle/planckBattleOrchestrator';
 import type { BattleOrchestratorApi } from './battle/battleContract';
 import type { BuildSnapshot } from './core/types';
+
+// F-DEV-1：Runtime 版本信息（vite 虚拟模块注入，git 读取非手写常量；类型见 virtual-runtime-info.d.ts）
+import runtimeInfo from 'virtual:runtime-info';
 import { registry } from './core/content';
 import {
   buildSnapshotFromDraft,
@@ -45,6 +48,18 @@ import {
 import { computeEnergy, validateSnapshot } from './core/buildValidator';
 
 const app = document.getElementById('app')!;
+
+// F-DEV-1：Runtime Badge——仅开发环境显示 branch + short SHA。
+// 一眼确认「我当前看到的是哪个代码版本」（正式玩家 UI 不显示）。
+if (import.meta.env.DEV) {
+  const badge = document.createElement('div');
+  badge.style.cssText =
+    'position:fixed;right:8px;bottom:8px;z-index:9999;font:11px/1.4 monospace;' +
+    'color:#8fa3c8;background:rgba(15,20,30,0.72);border:1px solid #2a3140;' +
+    'border-radius:6px;padding:4px 8px;pointer-events:none;';
+  badge.textContent = `${runtimeInfo.branch} @ ${runtimeInfo.sha.slice(0, 7)}`;
+  document.body.appendChild(badge);
+}
 
 /* ---------- 样式 ---------- */
 const style = document.createElement('style');
@@ -485,22 +500,8 @@ const WHEEL_OPTIONS: Array<{ v: string; t: string }> = [
   { v: '26', t: '26 大' },
 ];
 
-/** 正式可编辑部件（ramHead/testMass 非正式内容，不暴露）。
- *  Q10-B：玩家侧统一中文名（炮/锤/推杆）；内部 defId 不变。
- *  Q11-R1：正式接入 Q11 部件——与炮/锤/推杆同一套挂点选择、Energy、
- *  Validator、Preview 流程（无专属槽）。
- *  Q11-A-CLOSE：固定被动楔铲连续多轮真人验收失败（对方前轮/前置部件
- *  优先阻挡楔面，「钻底盘→明显抬升」核心体验不稳定成立）→ 退出正式
- *  Build。registry / Q11 专用 Scenario / 测试代码保留为 archived
- *  prototype（content.ts wedgeShovel 与 polygon/collision 能力未删）。 */
-const PART_OPTIONS: Array<{ v: string; t: string }> = [
-  { v: EMPTY_SLOT, t: '空' },
-  { v: 'cannon', t: '炮' },
-  { v: 'hammer', t: '锤' },
-  { v: 'pushRod', t: '推杆' },
-  { v: 'spear', t: '刺' },
-  { v: 'laser', t: '镭射' },
-];
+// F-DEV-1：PART_OPTIONS 移入独立模块（src/core/partOptions.ts，UI 与测试共用同一数据源）
+import { PART_OPTIONS } from './core/partOptions';
 
 /** W2-SIL-1 视觉样板 Draft：双车并排展示 5 个首批正式 Content 轮廓
  *  - front=pushRod（基座在 chassis 侧、推板在前，Prismatic 伸缩自然）

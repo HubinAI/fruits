@@ -23,5 +23,6 @@
 
     "types": ["vite/client"]
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  // F-DEV-1：vite.config.ts 属构建配置（node API），不纳入 src/tests 的 tsc 检查范围
+  "include": ["src", "tests"]
 }

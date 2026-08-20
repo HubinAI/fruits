@@ -21,6 +21,7 @@ import { PhysicsLab } from '../src/lab/physicsLab';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import { createRegistry } from '../src/core/content';
 import { SfxAudioService } from '../src/presentation/audioService';
+import { PART_OPTIONS } from '../src/core/partOptions';
 import {
   buildSnapshotFromDraft,
   migrateDraftBody,
@@ -890,5 +891,18 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
       sfx.startLaserCharge(0.5);
       sfx.stopLaserCharge();
     }).not.toThrow(); // muted 同样安全
+  });
+
+  it('F-DEV-1. 玩家部件选项 smoke：不含 wedgeShovel（已退出正式 Build），含 spear/laser', () => {
+    const ids = PART_OPTIONS.map((o) => o.v);
+    expect(ids).not.toContain('wedgeShovel'); // Q11-A-CLOSE：装配页不得再出现楔铲
+    expect(ids).toContain('spear'); // 刺正常
+    expect(ids).toContain('laser'); // 镭射正常
+    expect(ids).toContain('cannon');
+    expect(ids).toContain('hammer');
+    expect(ids).toContain('pushRod');
+    // 唯一性 + 空槽在首位
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids[0]).toBe(EMPTY_SLOT);
   });
 });
