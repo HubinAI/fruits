@@ -10,6 +10,8 @@
  */
 import { Renderer, type CameraFit } from './render/renderer';
 import { VisualRegistry } from './render/visualRegistry';
+import { SfxAudioService } from './presentation/audioService';
+import { BattlePresentationController } from './presentation/battlePresentationController';
 // W2-SIL-1：5 个首批正式 Content 视觉占位（程序化轮廓 PNG；正式美术可替换）
 // Vite asset import 返回构建后 URL（dev/prod 均有效；vite/client 提供 *.png 声明）。
 import bodyWatermelonUrl from '../assets/visuals/body_watermelon.png';
@@ -232,7 +234,29 @@ resultActions.appendChild(btnRematch);
 // 后续 Content 队列经 register + 图片加载注入正式 sprite，Preview/Fighting 共用同一 runtime）
 const visualRegistry = new VisualRegistry();
 const renderer = new Renderer(canvas, visualRegistry);
-const lab = new PhysicsLab(renderer);
+
+// W2-FX-1：BattleEvent → Presentation 统一消费层（正式表现唯一入口）。
+// - 表现 hook 全部接到 Renderer 的「只画」方法 + 统一 AudioService；
+// - Presentation 不决定伤害；FX/SFX 缺资源安全 skip；
+// - Preview（loadCustomPreview）不消费战斗 FX（PhysicsLab 只在正式战斗 bind）。
+const sfx = new SfxAudioService();
+const presentation = new BattlePresentationController({
+  onMuzzleFlash: (ev) => renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y),
+  onFireSound: () => sfx.play('fire'),
+  onHitFlash: (ev) => renderer.spawnHitFlash(ev.target),
+  onHitSpark: (ev) => renderer.spawnSpark(ev.contactPoint.x, ev.contactPoint.y),
+  onDamageSound: () => sfx.play('hit'),
+  onDamageNumber: (ev) =>
+    renderer.spawnDamageNumber(
+      ev.contactPoint.x,
+      ev.contactPoint.y,
+      `-${Math.round(ev.damage)}`,
+      ev.damageSource === 'weapon' ? '#ff5a4e' : '#ffb84e',
+    ),
+  onDeathFx: (ev) => renderer.spawnDeathFx(ev.team),
+  onDeathSound: () => sfx.play('death'),
+});
+const lab = new PhysicsLab(renderer, presentation);
 
 /** W2-SIL-1：注册 + 加载首批正式 Content 视觉占位（缺资源/未加载 → Renderer 灰盒 fallback） */
 const SILHOUETTE_ASSETS: Array<[string, string]> = [

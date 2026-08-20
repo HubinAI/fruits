@@ -62,12 +62,38 @@ interface FloatingText {
   ttl: number;
 }
 
+/** 命中火花（W2-FX-1）：接触点短暂小圆 */
+interface Spark {
+  x: number;
+  y: number;
+  bornAt: number;
+  ttl: number;
+}
+
+/** 炮口闪光（W2-FX-1）：开火点短暂亮圆 */
+interface MuzzleFlash {
+  x: number;
+  y: number;
+  bornAt: number;
+  ttl: number;
+}
+
+/** 死亡 FX（W2-FX-1）：按 team 记录，绘制时取当前 Snapshot 车辆位置（与 hitFlashes 同模式） */
+interface DeathFx {
+  team: string;
+  bornAt: number;
+  ttl: number;
+}
+
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private transform: ScreenTransform = { scale: 1, offsetX: 0, offsetY: 0 };
   private fx: FloatingText[] = [];
   /** 命中闪白：保存 target team + 时间，绘制时取当前 Snapshot 对应车辆形状（不再保存 Matter Body） */
   private hitFlashes: Array<{ team: string; bornAt: number; ttl: number }> = [];
+  private sparks: Spark[] = [];
+  private muzzleFlashes: MuzzleFlash[] = [];
+  private deathFxs: DeathFx[] = [];
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -105,23 +131,34 @@ export class Renderer {
     return v * this.transform.scale;
   }
 
-  /** 订阅 Battle Event → 生成 FX（仅保存 team，绘制时取当前 Snapshot）；只消费 Damage 事件 */
-  bind(orchestrator: BattleOrchestratorApi): void {
-    orchestrator.onCombatEvent((ev) => {
-      if (ev.type !== 'damage') return; // weaponFire / death 由 VFX/SFX 层消费，本模块只做伤害表现
-      if (ev.damage > 0) {
-        this.fx.push({
-          x: ev.contactPoint.x,
-          y: ev.contactPoint.y,
-          text: `-${Math.round(ev.damage)}`,
-          color: ev.damageSource === 'weapon' ? '#ff5a4e' : '#ffb84e',
-          bornAt: performance.now(),
-          ttl: 900,
-        });
-      }
-      // 命中闪白：保存 target team，绘制时取当前 Snapshot 对应车辆形状
-      this.hitFlashes.push({ team: ev.target, bornAt: performance.now(), ttl: 120 });
-    });
+  /**
+   * W2-FX-1：表现入口统一由 BattlePresentationController 调用，本模块只负责「画」。
+   * 以下方法均为纯表现（不决定 Gameplay / 不触发伤害）。
+   */
+
+  /** 伤害数字（统一入口：所有伤害数字都经此加入同一数字池，复用现有绘制） */
+  spawnDamageNumber(x: number, y: number, text: string, color: string): void {
+    this.fx.push({ x, y, text, color, bornAt: performance.now(), ttl: 900 });
+  }
+
+  /** 命中闪白：目标车辆形状短暂闪白（绘制时取当前 Snapshot） */
+  spawnHitFlash(team: string): void {
+    this.hitFlashes.push({ team, bornAt: performance.now(), ttl: 120 });
+  }
+
+  /** 命中火花：接触点短暂小圆 */
+  spawnSpark(x: number, y: number): void {
+    this.sparks.push({ x, y, bornAt: performance.now(), ttl: 220 });
+  }
+
+  /** 炮口闪光：开火点短暂亮圆（真实 muzzle worldPosition） */
+  spawnMuzzleFlash(x: number, y: number): void {
+    this.muzzleFlashes.push({ x, y, bornAt: performance.now(), ttl: 90 });
+  }
+
+  /** 死亡 FX：目标车辆位置短暂扩散环（绘制时取当前 Snapshot） */
+  spawnDeathFx(team: string): void {
+    this.deathFxs.push({ team, bornAt: performance.now(), ttl: 500 });
   }
 
   render(
@@ -199,6 +236,69 @@ export class Renderer {
       this.drawShape(v.body, '#ffffff');
       ctx.globalAlpha = 1;
     }
+
+    // W2-FX-1：命中火花（接触点短暂小圆）
+    this.sparks = this.sparks.filter((s) => now - s.bornAt < s.ttl);
+    for (const s of this.sparks) {
+      const age = (now - s.bornAt) / s.ttl;
+      ctx.globalAlpha = 1 - age;
+      ctx.fillStyle = '#ffd35a';
+      ctx.beginPath();
+      ctx.arc(this.sx(s.x), this.sy(s.y), this.ss(3 + age * 2), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // W2-FX-1：炮口闪光（开火点短暂亮圆）
+    this.muzzleFlashes = this.muzzleFlashes.filter((m) => now - m.bornAt < m.ttl);
+    for (const m of this.muzzleFlashes) {
+      const age = (now - m.bornAt) / m.ttl;
+      ctx.globalAlpha = 1 - age;
+      ctx.fillStyle = '#ffe9a8';
+      ctx.beginPath();
+      ctx.arc(this.sx(m.x), this.sy(m.y), this.ss(6 + age * 10), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // W2-FX-1：死亡 FX（目标车辆位置扩散环）
+    this.deathFxs = this.deathFxs.filter((d) => now - d.bornAt < d.ttl);
+    for (const d of this.deathFxs) {
+      const age = (now - d.bornAt) / d.ttl;
+      ctx.globalAlpha = (1 - age) * 0.9;
+      ctx.strokeStyle = '#ff6b5e';
+      ctx.lineWidth = this.ss(4);
+      const v = d.team === snap.vehicleA.team ? snap.vehicleA : snap.vehicleB;
+      const center = this.vehicleCenter(v);
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, this.ss(10 + age * 42), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** 车辆世界包围盒中心（供死亡 FX 定位；snapshot 为引擎中立形状） */
+  private vehicleCenter(v: RenderVehicle): { x: number; y: number } {
+    if (v.body.kind === 'circle') {
+      return { x: this.sx(v.body.circle.center.x), y: this.sy(v.body.circle.center.y) };
+    }
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of v.body.polygons) {
+      for (const pt of p.points) {
+        minX = Math.min(minX, pt.x);
+        minY = Math.min(minY, pt.y);
+        maxX = Math.max(maxX, pt.x);
+        maxY = Math.max(maxY, pt.y);
+      }
+    }
+    if (!Number.isFinite(minX)) return { x: 0, y: 0 };
+    return {
+      x: this.sx((minX + maxX) / 2),
+      y: this.sy((minY + maxY) / 2),
+    };
   }
 
   private drawVehicle(v: RenderVehicle, color: string): void {

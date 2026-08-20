@@ -285,7 +285,7 @@ export interface BattleOrchestratorApi {
   phase: string;
   timeMs: number;
   step(realDtMs: number, timeScale?: number): void;
-  onCombatEvent(cb: (ev: BattleEvent) => void): void;
+  onCombatEvent(cb: (ev: BattleEvent) => void): () => void;
   dispose(): void;
   getRenderSnapshot(): BattleRenderSnapshot;
   /**

@@ -10,6 +10,7 @@ import { PlanckBattleOrchestrator } from '../battle/planckBattleOrchestrator';
 import type { Renderer } from '../render/renderer';
 import { drawDebug } from '../render/debugOverlay';
 import { DEFAULT_DEBUG_FLAGS, DEFAULT_OVERRIDES, type DebugFlags, type DebugOverrides } from '../render/debugOverlay';
+import type { BattlePresentationController, BattleEventSource } from '../presentation/battlePresentationController';
 import type { ScenarioDef } from './scenarios';
 import type { WheelDef } from '../core/types';
 
@@ -73,7 +74,11 @@ export class PhysicsLab {
   /** 当前是否为「装配预览」（loadCustomPreview：只显示组装，不推进战斗） */
   private isPreviewMode = false;
 
-  constructor(private renderer: Renderer) {}
+  constructor(
+    private renderer: Renderer,
+    /** W2-FX-1：BattleEvent → Presentation 统一消费层（可选）。Preview 不消费；正式战斗才 bind */
+    private presentation?: BattlePresentationController,
+  ) {}
 
   /** 当前是否为只读预览模式（供 UI 状态机判断 Editing / Fighting） */
   get previewMode(): boolean {
@@ -134,7 +139,16 @@ export class PhysicsLab {
       config.engine === 'planck'
         ? new PlanckBattleOrchestrator(a, b, registry, c)
         : new BattleOrchestrator(a, b, registry, c);
-    this.renderer.bind(orch);
+    // W2-FX-1：装配预览不消费 Battle Event（Preview 不自动播放战斗 FX）；
+    // 正式战斗（custom / scenario / rematch / reset battle）才 bind 到统一 Presentation 层。
+    if (this.isPreviewMode) {
+      this.presentation?.stop();
+    } else {
+      const source: BattleEventSource = {
+        onEvent: (cb) => orch.onCombatEvent(cb),
+      };
+      this.presentation?.bind(source);
+    }
     return orch;
   }
 
@@ -171,6 +185,7 @@ export class PhysicsLab {
   }
 
   clear(): void {
+    this.presentation?.stop(); // W2-FX-1：清场后不再消费 Battle Event
     this.orchestrator?.dispose();
     this.orchestrator = null;
     this.currentScenario = null;

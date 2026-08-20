@@ -124,14 +124,10 @@ describe('Q02-C3B Renderer Projectile', () => {
         { center: { x: 700, y: 600 }, radius: 6, team: 'B' },
       ]),
     );
-    // 产生一个 FX（伤害数字）以验证「FX 之前」的绘制顺序
-    renderer.bind(orch);
-    orch.emit({
-      type: 'damage',
-      source: 'A', target: 'B', damageSource: 'weapon',
-      contactPoint: { x: 500, y: 600 }, contactNormal: { x: 1, y: 0 },
-      relativeVelocity: 10, damage: 80, hpBefore: 1000, hpAfter: 920, timestamp: 0,
-    });
+    // 产生一个 FX（伤害数字）以验证「FX 之前」的绘制顺序。
+    // W2-FX-1：事件→表现由 BattlePresentationController 统一分发，Renderer 只画；
+    // 这里直接调用表现入口（等价于 controller.onDamageNumber → spawnDamageNumber）。
+    renderer.spawnDamageNumber(500, 600, '-80', '#ff5a4e');
 
     renderer.resize(1600, 1000);
     renderer.render(orch);
