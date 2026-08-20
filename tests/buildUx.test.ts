@@ -21,6 +21,7 @@ import { PhysicsLab } from '../src/lab/physicsLab';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import { createRegistry } from '../src/core/content';
 import { SfxAudioService } from '../src/presentation/audioService';
+import { BattlePresentationController } from '../src/presentation/battlePresentationController';
 import { PART_OPTIONS } from '../src/core/partOptions';
 import {
   buildSnapshotFromDraft,
@@ -891,6 +892,115 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
       sfx.startLaserCharge(0.5);
       sfx.stopLaserCharge();
     }).not.toThrow(); // muted 同样安全
+  });
+
+  /** Q11-C-R3-FINAL：复制 main.ts 的 presentation 接线（laser → 巨炮束 + 白青闪；Cannon → 默认闪） */
+  function wireLaserPresentation(renderer: Renderer) {
+    return new BattlePresentationController({
+      onMuzzleFlash: (ev) => {
+        if (ev.behavior === 'laser') {
+          renderer.spawnLaserBeam(ev.worldPosition.x, ev.worldPosition.y, ev.worldDirection.x, ev.worldDirection.y);
+          renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y, '#eafdff', 14);
+        } else {
+          renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y);
+        }
+      },
+      onWeaponCharge: (ev) => renderer.spawnCharge(ev.partId, ev.worldPosition.x, ev.worldPosition.y, ev.progress),
+      onWeaponChargeEnd: (ev) => renderer.clearCharge(ev.partId),
+    });
+  }
+
+  it('Q11-C-R3-FINAL. 事件→hook→renderer：Q11-C 正常速度开火后「巨大激光炮」束出现且几何达标', () => {
+    (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
+    const renderer = new Renderer(makeCtxStubCanvas());
+    const controller = wireLaserPresentation(renderer);
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q11-C')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    controller.bind({ onEvent: (cb) => o.onCombatEvent(cb) }); // 接真实事件源
+    let fired = false;
+    for (let i = 0; i < 500; i++) {
+      lab.step(16.6667);
+      if (renderer.activeLaserBeams.length > 0) {
+        fired = true;
+        break;
+      }
+      if (o.result?.phase === 'End') break;
+    }
+    expect(fired).toBe(true);
+    const beams = renderer.activeLaserBeams;
+    expect(beams.length).toBeGreaterThan(0);
+    const b = beams[0]!;
+    // 验收 1：巨炮（长 450~600 / 核心 12~18 / glow 30~45）
+    expect(b.length).toBeGreaterThanOrEqual(450);
+    expect(b.length).toBeLessThanOrEqual(600);
+    expect(b.coreWidth).toBeGreaterThanOrEqual(12);
+    expect(b.coreWidth).toBeLessThanOrEqual(18);
+    expect(b.glowWidth).toBeGreaterThanOrEqual(30);
+    expect(b.glowWidth).toBeLessThanOrEqual(45);
+    // 沿真实 fire 方向（A facing +X → dirX>0）
+    expect(b.dirX).toBeGreaterThan(0.9);
+    controller.stop();
+  });
+
+  it('Q11-C-R3-FINAL. 开火后自车实际顿退（位置反向位移，非仅 vx 数字变化）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(laserSnapshot('A'), plainSnapshot('B'), { autoDrive: true, engine: 'planck' });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let firedStep = -1;
+    let step = 0;
+    const xs: number[] = [];
+    const vxs: number[] = [];
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'laser' && firedStep < 0) firedStep = step;
+    });
+    for (let i = 0; i < 600; i++) {
+      vxs.push(o.world.getLinearVelocity(o.vehicleA.body).x);
+      lab.step(16.6667);
+      xs.push(o.world.getPosition(o.vehicleA.body).x);
+      step++;
+      if (firedStep >= 0 && step - firedStep >= 10) break;
+    }
+    expect(firedStep).toBeGreaterThanOrEqual(0);
+    const tail = xs.slice(firedStep);
+    // 真人可见反向运动：前 ~8 帧内至少一次 chassis 实际后退（facing+1 → x 减小）
+    let maxBack = 0;
+    for (let k = 1; k < 8 && k < tail.length; k++) {
+      maxBack = Math.max(maxBack, tail[k - 1]! - tail[k]!);
+    }
+    expect(maxBack).toBeGreaterThan(1.0); // 明显反向位移（px/帧），非仅 vx 数字
+    // vx 真正转负（真实 impulse，无屏幕震动伪装）
+    expect(Math.min(...vxs.slice(firedStep, firedStep + 8))).toBeLessThan(0);
+  });
+
+  it('Q11-C-R3-FINAL. Cannon 完全不受影响：Cannon 开火不生成镭射巨炮束', () => {
+    (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
+    const renderer = new Renderer(makeCtxStubCanvas());
+    const controller = wireLaserPresentation(renderer);
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(
+      buildSnapshotFromDraft(
+        { bodyDefId: 'watermelonBody', rearRadius: 20, frontRadius: 20, functionalSelections: { front: 'cannon', frontMass: 'cannon', top: EMPTY_SLOT, rear: EMPTY_SLOT } },
+        registry,
+        'A',
+      ),
+      plainSnapshot('B'),
+      { autoDrive: true, engine: 'planck' },
+    );
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    controller.bind({ onEvent: (cb) => o.onCombatEvent(cb) });
+    let cannonFired = false;
+    for (let i = 0; i < 500; i++) {
+      lab.step(16.6667);
+      if ((o.getRenderSnapshot().projectiles ?? []).some((p) => p.team === 'A' && !p.visual)) {
+        cannonFired = true;
+        break;
+      }
+      if (o.result?.phase === 'End') break;
+    }
+    expect(cannonFired).toBe(true);
+    expect(renderer.activeLaserBeams.length).toBe(0); // 巨炮束仅 laser 触发
+    controller.stop();
   });
 
   it('F-DEV-1. 玩家部件选项 smoke：不含 wedgeShovel（已退出正式 Build），含 spear/laser', () => {

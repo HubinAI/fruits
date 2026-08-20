@@ -493,9 +493,14 @@ const laser: FunctionalPartDef = {
     projectileMass: 1,
     // Q11-C-R1：60 → 240（Cannon 30 的 8×）——实测 60 时 chassis Δv 仅
     // 0.33px/step（≈20px/s）且 autoDrive 150ms 内拉回，正常速度肉眼不可
-    // 感知；240 使开火瞬间 Δv ≈1.3px/step（≈79px/s 明显后顿），仍是
-    // 「初版差异故意做大、后续真人验收再回收」的定位。
-    recoilImpulse: 240,
+    // 感知。
+    // Q11-C-R3-FINAL：240 实测开火瞬间 Δv≈1.38px/step 但车 NEVER 反向位移
+    // （autoDrive 当帧即拉回 vx，只剩数字变化，不满足「明显反向运动」）。
+    // 调大到 560 → Δv≈3.2px/step（≈193px/s），开火后前 ~2 帧 vx 转负、车
+    // 实际顿退 3~5px 再被 drive 拉回，正常速度肉眼可见后震。仍是 Laser 自身
+    // recoil 参数（不改全局物理 / 不改对手），属「初版差异故意做大、后续
+    // 真人验收再回收」定位。
+    recoilImpulse: 560,
   },
 };
 

@@ -161,13 +161,14 @@ export class SfxAudioService implements SfxService {
     if (!ctx || this.muted) return;
     try {
       const t0 = ctx.currentTime;
-      // 高频爆鸣（sawtooth 1200→2400）
+      // 高频爆鸣（sawtooth 1200→2400）——明显区别于 Cannon 的 square 短 beep
       const o1 = ctx.createOscillator();
       o1.type = 'sawtooth';
       o1.frequency.setValueAtTime(1200, t0);
       o1.frequency.exponentialRampToValueAtTime(2400, t0 + 0.12);
       const g1 = ctx.createGain();
-      g1.gain.setValueAtTime(0.16, t0);
+      // Q11-C-R3-FINAL：降增益避免与低频冲击叠加削波（峰值 ~0.29 < 1.0）
+      g1.gain.setValueAtTime(0.13, t0);
       g1.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.12);
       o1.connect(g1);
       g1.connect(ctx.destination);
@@ -179,7 +180,7 @@ export class SfxAudioService implements SfxService {
       o2.frequency.setValueAtTime(120, t0);
       o2.frequency.exponentialRampToValueAtTime(40, t0 + 0.25);
       const g2 = ctx.createGain();
-      g2.gain.setValueAtTime(0.22, t0);
+      g2.gain.setValueAtTime(0.16, t0);
       g2.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.25);
       o2.connect(g2);
       g2.connect(ctx.destination);

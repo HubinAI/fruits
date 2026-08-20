@@ -97,12 +97,14 @@ interface Spark {
   color: string;
 }
 
-/** 炮口闪光（W2-FX-1）：开火点短暂亮圆 */
+/** 炮口闪光（W2-FX-1）：开火点短暂亮圆；color/radius 可选（laser 用白青大闪） */
 interface MuzzleFlash {
   x: number;
   y: number;
   bornAt: number;
   ttl: number;
+  color: string;
+  radius: number;
 }
 
 /** 死亡 FX（W2-FX-1）：按 team 记录，绘制时取当前 Snapshot 车辆位置（与 hitFlashes 同模式） */
@@ -111,6 +113,25 @@ interface DeathFx {
   bornAt: number;
   ttl: number;
 }
+
+/** Q11-C-R3-FINAL：镭射「巨炮」能量束 VFX——发射后沿真实 fire 方向固定驻留、
+ *  不跟随高速弹（弹速太快会瞬间出屏只留一闪）。纯表现，不参与碰撞/伤害。 */
+interface LaserBeam {
+  x: number; // 炮口世界位置
+  y: number;
+  dirX: number; // 真实飞行方向（单位向量）
+  dirY: number;
+  length: number; // 世界 px（约 2.5~3+ 车身长度）
+  coreWidth: number; // 高亮核心宽（世界 px）
+  glowWidth: number; // 外层 glow 总宽（世界 px）
+  bornAt: number;
+  ttl: number; // ms（≈100~150ms 残留后快速衰减）
+}
+/** 镭射巨炮束尺度（世界 px）：长 450~600 / 核心 12~18 / glow 30~45 */
+const LASER_BEAM_LENGTH = 520;
+const LASER_BEAM_CORE = 15;
+const LASER_BEAM_GLOW = 38;
+const LASER_BEAM_TTL = 130; // ms：30fps 下 ≈ 3.9 帧，可读 3~4 帧
 
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
@@ -123,6 +144,8 @@ export class Renderer {
   /** Q11-C：蓄能光点（laser charge 表现；key=partId，upsert 更新 progress） */
   private charges: Array<{ key: string; x: number; y: number; progress: number; lastAt: number }> = [];
   private deathFxs: DeathFx[] = [];
+  /** Q11-C-R3-FINAL：镭射巨炮束 VFX 数组（发射后驻留 ~130ms 衰减，纯表现） */
+  private laserBeams: LaserBeam[] = [];
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -212,9 +235,33 @@ export class Renderer {
     this.sparks.push({ x, y, color, bornAt: performance.now(), ttl: 220 });
   }
 
-  /** 炮口闪光：开火点短暂亮圆（真实 muzzle worldPosition） */
-  spawnMuzzleFlash(x: number, y: number): void {
-    this.muzzleFlashes.push({ x, y, bornAt: performance.now(), ttl: 90 });
+  /** 炮口闪光：开火点短暂亮圆（真实 muzzle worldPosition）。
+   *  color/radius 可选——Cannon 用默认橙黄小闪；laser 用白青大闪（Q11-C-R3-FINAL）。 */
+  spawnMuzzleFlash(x: number, y: number, color = '#ffe9a8', radius = 6): void {
+    this.muzzleFlashes.push({ x, y, bornAt: performance.now(), ttl: 90, color, radius });
+  }
+
+  /** Q11-C-R3-FINAL：镭射巨炮束——发射瞬间沿真实 fire 方向固定驻留（不跟弹）。
+   *  纯表现：真实 Collider / 伤害范围绝不扩大；不参与碰撞/伤害。 */
+  spawnLaserBeam(x: number, y: number, dirX: number, dirY: number): void {
+    const len = Math.max(1e-6, Math.hypot(dirX, dirY));
+    this.laserBeams.push({
+      x,
+      y,
+      dirX: dirX / len,
+      dirY: dirY / len,
+      length: LASER_BEAM_LENGTH,
+      coreWidth: LASER_BEAM_CORE,
+      glowWidth: LASER_BEAM_GLOW,
+      bornAt: performance.now(),
+      ttl: LASER_BEAM_TTL,
+    });
+  }
+
+  /** Q11-C-R3-FINAL：当前存活的镭射巨炮束（供测试断言几何 / 存活）；过期自动过滤。 */
+  get activeLaserBeams(): readonly LaserBeam[] {
+    const now = performance.now();
+    return this.laserBeams.filter((b) => now - b.bornAt < b.ttl);
   }
 
   /** Q11-C：蓄能光点——laser 蓄能期间每固定步 upsert（同 partId 更新 progress）。
@@ -320,6 +367,9 @@ export class Renderer {
     // projectiles 缺省 undefined → 空绘制，Matter 画面不变。
     this.drawProjectiles(snap.projectiles ?? []);
 
+    // Q11-C-R3-FINAL：镭射巨炮束 VFX（发射后沿 fire 方向驻留 ~130ms 衰减；纯表现）
+    this.drawLaserBeams();
+
     // Debug overlay
     if (debugDraw) debugDraw(ctx, t);
 
@@ -362,19 +412,20 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
 
-    // W2-FX-1：炮口闪光（开火点短暂亮圆）
+    // W2-FX-1：炮口闪光（开火点短暂亮圆；laser 用白青大闪）
     this.muzzleFlashes = this.muzzleFlashes.filter((m) => now - m.bornAt < m.ttl);
     for (const m of this.muzzleFlashes) {
       const age = (now - m.bornAt) / m.ttl;
       ctx.globalAlpha = 1 - age;
-      ctx.fillStyle = '#ffe9a8';
+      ctx.fillStyle = m.color;
       ctx.beginPath();
-      ctx.arc(this.sx(m.x), this.sy(m.y), this.ss(6 + age * 10), 0, Math.PI * 2);
+      ctx.arc(this.sx(m.x), this.sy(m.y), this.ss(m.radius + age * m.radius * 1.6), 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
 
-    // Q11-C：蓄能光点（laser charge）——progress 0→1 半径/亮度递增（肉眼可见「大招要来了」）
+    // Q11-C-R3-FINAL：蓄能光点（laser charge）——0~70% 聚能；70~100% 外圈明显
+    // 扩大 + 脉冲频率加速 + 亮度提升（肉眼可见「大招即将爆发」）。
     this.charges = this.charges.filter((c) => now - c.lastAt < 500);
     for (const c of this.charges) {
       const p = Math.max(0, Math.min(1, c.progress));
@@ -386,12 +437,15 @@ export class Renderer {
       ctx.arc(this.sx(c.x), this.sy(c.y), r, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
-      // 外圈提示（progress 越大越亮）
-      ctx.globalAlpha = alpha * 0.4;
-      ctx.strokeStyle = '#ffd35a';
-      ctx.lineWidth = this.ss(2);
+      // 末段升级：stage ∈ [0,1]（p>0.7 才启动）；外圈额外扩大 + 脉冲加速
+      const stage = p > 0.7 ? (p - 0.7) / 0.3 : 0;
+      const pulse = stage > 0 ? 1 + 0.28 * Math.sin(now / (42 - stage * 30)) : 1; // 越近 fire 脉冲越快
+      const outerExtra = 5 + stage * 22; // 外圈随末段明显扩大
+      ctx.globalAlpha = (alpha * 0.4) * (0.7 + stage * 0.5); // 亮度随末段提升
+      ctx.strokeStyle = p > 0.7 ? '#fff2b8' : '#ffd35a';
+      ctx.lineWidth = this.ss(2 + stage * 2.5);
       ctx.beginPath();
-      ctx.arc(this.sx(c.x), this.sy(c.y), r + this.ss(5), 0, Math.PI * 2);
+      ctx.arc(this.sx(c.x), this.sy(c.y), (r + this.ss(outerExtra)) * pulse, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -530,50 +584,21 @@ export class Renderer {
     const ctx = this.ctx;
     for (const p of projectiles) {
       if (p.visual === 'laser') {
-        // Q11-C-R2：长条高速能量束——沿真实飞行方向 velocity，长约 150 世界 px
-        // （白青高亮核心 + glow + 短尾迹）。真实 Collider 半径 p.radius 未扩大；
-        // hit/miss/CCD 仍走真实 Projectile 链路。
-        const vx = p.velocity?.x ?? 1;
-        const vy = p.velocity?.y ?? 0;
-        const len = Math.max(1, Math.hypot(vx, vy));
-        const ux = vx / len;
-        const uy = vy / len;
-        const BEAM_WORLD = 150; // 束长（世界 px，随镜头缩放）
-        const half = BEAM_WORLD / 2;
-        // 束头（前方）与束尾（后方）：尾随方向反向延伸出短尾迹
-        const hx = this.sx(p.center.x + ux * half);
-        const hy = this.sy(p.center.y + uy * half);
-        const tx = this.sx(p.center.x - ux * (half + 40)); // 尾迹再长 40px
-        const ty = this.sy(p.center.y - uy * (half + 40));
-        const cxs = this.sx(p.center.x);
-        const cys = this.sy(p.center.y);
-        // glow（最外层，半透明）
-        ctx.globalAlpha = 0.3;
-        ctx.strokeStyle = '#7fd8ff';
-        ctx.lineWidth = this.ss(16);
-        ctx.lineCap = 'round';
+        // Q11-C-R3-FINAL：镭射弹（真实伤害载体）只画一个小亮头 + 微 glow，
+        // 「巨大激光炮」的视觉由发射后驻留的 laserBeam VFX 承担（不跟随高速弹、
+        // 不假长束）。真实 Collider 半径 p.radius 未扩大；hit/miss/CCD 不变。
+        const cx = this.sx(p.center.x);
+        const cy = this.sy(p.center.y);
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = '#7fd8ff';
         ctx.beginPath();
-        ctx.moveTo(tx, ty);
-        ctx.lineTo(hx, hy);
-        ctx.stroke();
-        // 主体（白青亮核心）
+        ctx.arc(cx, cy, this.ss(p.radius + 6), 0, Math.PI * 2);
+        ctx.fill();
         ctx.globalAlpha = 1;
-        ctx.strokeStyle = '#e9fdff';
-        ctx.lineWidth = this.ss(7);
+        ctx.fillStyle = '#eafdff';
         ctx.beginPath();
-        ctx.moveTo(cxs, cys);
-        ctx.lineTo(hx, hy);
-        ctx.stroke();
-        // 短尾迹（核心尾部渐隐段）
-        ctx.globalAlpha = 0.55;
-        ctx.strokeStyle = '#bff4ff';
-        ctx.lineWidth = this.ss(4);
-        ctx.beginPath();
-        ctx.moveTo(tx, ty);
-        ctx.lineTo(cxs, cys);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        ctx.lineCap = 'butt';
+        ctx.arc(cx, cy, this.ss(p.radius), 0, Math.PI * 2);
+        ctx.fill();
         continue;
       }
       ctx.fillStyle = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
@@ -583,6 +608,53 @@ export class Renderer {
       ctx.strokeStyle = '#0d0f14';
       ctx.lineWidth = 1.5;
       ctx.stroke();
+    }
+  }
+
+  /**
+   * Q11-C-R3-FINAL：镭射巨炮束 VFX——发射后沿真实 fire 方向固定驻留 ~130ms
+   * 再快速衰减（让 30fps 正常录像能看清「巨炮释放」）。纯表现：不参与碰撞/
+   * 伤害；真实 Collider / 命中范围绝不扩大。
+   */
+  private drawLaserBeams(): void {
+    const ctx = this.ctx;
+    const now = performance.now();
+    this.laserBeams = this.laserBeams.filter((b) => now - b.bornAt < b.ttl);
+    for (const b of this.laserBeams) {
+      const age = (now - b.bornAt) / b.ttl; // 0→1
+      const decay = 1 - age * age; // 前段饱满、末段快速衰减
+      // 束起点略退后（从炮口内一点射出），终点沿方向延伸 length
+      const sx0 = this.sx(b.x - b.dirX * 18);
+      const sy0 = this.sy(b.y - b.dirY * 18);
+      const sx1 = this.sx(b.x + b.dirX * b.length);
+      const sy1 = this.sy(b.y + b.dirY * b.length);
+      ctx.lineCap = 'round';
+      // glow（最外层，半透明，衰减）
+      ctx.globalAlpha = 0.32 * decay;
+      ctx.strokeStyle = '#5fc8ff';
+      ctx.lineWidth = this.ss(b.glowWidth);
+      ctx.beginPath();
+      ctx.moveTo(sx0, sy0);
+      ctx.lineTo(sx1, sy1);
+      ctx.stroke();
+      // 中亮层
+      ctx.globalAlpha = 0.7 * decay;
+      ctx.strokeStyle = '#a9eeff';
+      ctx.lineWidth = this.ss(b.coreWidth * 1.4);
+      ctx.beginPath();
+      ctx.moveTo(sx0, sy0);
+      ctx.lineTo(sx1, sy1);
+      ctx.stroke();
+      // 高亮核心
+      ctx.globalAlpha = decay;
+      ctx.strokeStyle = '#eafdff';
+      ctx.lineWidth = this.ss(b.coreWidth);
+      ctx.beginPath();
+      ctx.moveTo(sx0, sy0);
+      ctx.lineTo(sx1, sy1);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.lineCap = 'butt';
     }
   }
 

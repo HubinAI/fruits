@@ -359,8 +359,26 @@ const sfx = new SfxAudioService();
 const deathPause = new DeathPauseScheduler();
 let prevTimeScale = 1;
 const presentation = new BattlePresentationController({
-  onMuzzleFlash: (ev) => renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y),
-  onFireSound: () => sfx.play('fire'),
+  // Q11-C-R3-FINAL：laser 开火 → 发射沿真实 fire 方向的「巨炮」能量束 VFX +
+  // 明显炮口白青强闪；Cannon 仍用默认橙黄小闪。
+  onMuzzleFlash: (ev) => {
+    if (ev.behavior === 'laser') {
+      renderer.spawnLaserBeam(
+        ev.worldPosition.x,
+        ev.worldPosition.y,
+        ev.worldDirection.x,
+        ev.worldDirection.y,
+      );
+      renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y, '#eafdff', 14);
+    } else {
+      renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y);
+    }
+  },
+  // Q11-C-R3-FINAL：laser 不再播 Cannon 的 'fire' 音（避免与自身爆鸣混叠、保证
+  // 明显区别 Cannon）；laser 的 fire 音由 onWeaponChargeEnd → stopLaserCharge 承担。
+  onFireSound: (ev) => {
+    if (ev.behavior !== 'laser') sfx.play('fire');
+  },
   // Q11-C：蓄能光点（laser）——partId 为 key，发射完成清除
   // Q11-C-R2：蓄能音效升调/增强（progress 驱动）
   onWeaponCharge: (ev) => {
