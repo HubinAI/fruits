@@ -133,7 +133,7 @@ style.textContent = `
   .part-slot-card .ps-value.empty { color: #7c8799; font-weight: 400; }
   .part-picker { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; padding: 6px; background: #1b2130; border: 1px solid #2a3140; border-radius: 6px; }
   .part-picker .pp-title { width: 100%; font-size: 11px; color: #9aa4b5; margin-bottom: 2px; }
-  /* Q09-B：选项两行——名称 + Weapon/Gadget + Energy（不写长描述，不加属性系统） */
+  /* Q09-B：选项两行——名称 + 武器/辅助类别 + Energy（不写长描述，不加属性系统） */
   .part-picker button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 10px; background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 5px; cursor: pointer; }
   .part-picker button:hover { background: #2e3747; }
   .part-picker button.active { background: #3b6fd4; border-color: #5a8df0; color: #fff; }
@@ -159,6 +159,8 @@ style.textContent = `
   .opt-card.active { border-color: #4a7fe0; background: #2a3a5c; box-shadow: 0 0 0 1px #3b6fd4 inset; color: #fff; }
   .opt-card:disabled { opacity: 0.45; cursor: not-allowed; }
   .opt-card:disabled:hover { background: #242b38; }
+  /* Q10-B：轮径三档等权同一行（12 小 / 20 标准 / 26 大，一眼可扫完） */
+  .opt-cards.wheel .opt-card { flex: 1 1 0; min-width: 0; }
   /* Q07-C/Q08-B：Start 后短暂「READY / 开战」状态转换（Presentation 延迟，不改 Physics/结果） */
   .ready-overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 8; background: rgba(6,8,12,0.35); pointer-events: none; }
   .ready-card { text-align: center; }
@@ -465,18 +467,20 @@ const BODY_OPTIONS: Array<{ v: string; t: string }> = [
   { v: 'bananaBody', t: '香蕉车身（长条弧形）' },
 ];
 
+// Q10-B：玩家侧轮径命名（小/标准/大认知保留；三张等权卡片同一行展示）
 const WHEEL_OPTIONS: Array<{ v: string; t: string }> = [
-  { v: '12', t: '12（小）' },
-  { v: '20', t: '20（标准）' },
-  { v: '26', t: '26（大）' },
+  { v: '12', t: '12 小' },
+  { v: '20', t: '20 标准' },
+  { v: '26', t: '26 大' },
 ];
 
-/** 正式可编辑部件（ramHead/testMass 非本轮已通过内容，不暴露） */
+/** 正式可编辑部件（ramHead/testMass 非本轮已通过内容，不暴露）。
+ *  Q10-B：玩家侧统一中文名（炮/锤/推杆）；内部 defId 不变。 */
 const PART_OPTIONS: Array<{ v: string; t: string }> = [
   { v: EMPTY_SLOT, t: '空' },
-  { v: 'cannon', t: 'Cannon（炮）' },
-  { v: 'hammer', t: 'Hammer（锤）' },
-  { v: 'pushRod', t: 'Push Rod（推杆）' },
+  { v: 'cannon', t: '炮' },
+  { v: 'hammer', t: '锤' },
+  { v: 'pushRod', t: '推杆' },
 ];
 
 /** W2-SIL-1 视觉样板 Draft：双车并排展示 5 个首批正式 Content 轮廓
@@ -557,7 +561,8 @@ function renderPanel(
     gLabel.textContent = label;
     group.appendChild(gLabel);
     const cards = document.createElement('div');
-    cards.className = 'opt-cards';
+    // Q10-B：3 档及以下（轮径）同一行等权卡片；更多（Body）保持两列
+    cards.className = 'opt-cards' + (options.length <= 3 ? ' wheel' : '');
     for (const opt of options) {
       const b = document.createElement('button');
       b.className = 'opt-card' + (isActive(opt.v) ? ' active' : '');
@@ -634,7 +639,7 @@ function renderPanel(
         const b = document.createElement('button');
         b.className = cur === opt.v ? 'active' : '';
         b.disabled = buildControlsLocked;
-        // Q09-B：名称 + Weapon/Gadget + Energy（当前装备仍 .active 高亮）
+        // Q09-B：名称 + 武器/辅助类别 + Energy（当前装备仍 .active 高亮）
         const nameEl = document.createElement('div');
         nameEl.className = 'pp-name';
         nameEl.textContent = opt.t;
@@ -645,7 +650,8 @@ function renderPanel(
         } else {
           const def = registry.functionals.get(opt.v);
           if (def) {
-            const cat = def.category === 'weapon' ? 'Weapon' : def.category === 'gadget' ? 'Gadget' : def.category;
+            // Q10-B：玩家侧类别命名——武器 / 辅助（内部 category defId 不变）
+            const cat = def.category === 'weapon' ? '武器' : def.category === 'gadget' ? '辅助' : def.category;
             metaEl.textContent = `${cat} · ${def.energy} 能量`;
           } else {
             metaEl.textContent = '—';

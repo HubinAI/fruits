@@ -360,3 +360,19 @@ describe('Q10-A 正式/测试内容分离', () => {
     }
   });
 });
+
+/* ---------- Q10-B：玩家侧命名（炮/锤/推杆；武器/辅助；defId 不变） ---------- */
+describe('Q10-B 玩家侧命名', () => {
+  it('部件显示名为中文（炮/锤/推杆），内部 defId 保持英文不变', () => {
+    expect(registry.functionals.get('cannon')!.name).toBe('炮');
+    expect(registry.functionals.get('hammer')!.name).toBe('锤');
+    expect(registry.functionals.get('pushRod')!.name).toBe('推杆');
+    // 内部 ID 不变（挂点选择/快照/迁移全部走 defId）
+    expect(registry.functionals.get('cannon')!.id).toBe('cannon');
+    expect(registry.functionals.get('hammer')!.id).toBe('hammer');
+    expect(registry.functionals.get('pushRod')!.id).toBe('pushRod');
+    // 类别（UI 映射为 武器/辅助）数据源不变
+    expect(registry.functionals.get('cannon')!.category).toBe('weapon');
+    expect(registry.functionals.get('pushRod')!.category).toBe('gadget');
+  });
+});
