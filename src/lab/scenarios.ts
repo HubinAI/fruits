@@ -192,6 +192,34 @@ function wedgeShovelBuild(): BuildSnapshot {
   };
 }
 
+/** Q11-B：刺车——西瓜车身 + 顶部刺（细长固定 Weapon，高处水平前伸） */
+function spearBuild(): BuildSnapshot {
+  return {
+    id: 'spearCar',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'top', defId: 'spear' }],
+  };
+}
+
+/** Q11-B：高目标车——tallBody（高身，刺尖高度可对上） */
+function tallTargetBuild(): BuildSnapshot {
+  return {
+    id: 'tallTarget',
+    bodyDefId: 'tallBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [],
+  };
+}
+
 export const SCENARIOS: ScenarioDef[] = [
   {
     id: 'A',
@@ -442,6 +470,23 @@ export const SCENARIOS: ScenarioDef[] = [
       '抬起或掀翻 B；接触位置不合适时只滑过或顶住，不自动翻车；A 自身承担真实反作用。',
     buildA: wedgeShovelBuild(),
     buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Q11-B',
+    name: 'Spear (Weapon)',
+    description:
+      '固定刺（Q11-B）：A 西瓜车身 + 顶部刺（细长固定 Weapon，高处水平前伸，无摆动/无追踪）。' +
+      'B 高身车（tallBody）高度对上 → 刺尖真实接触（Weapon Contact 正式链路）命中；' +
+      '对手矮 / 姿态低时刺尖从上方自然擦空（Miss）。伤害与碰撞位置一致，擦空就是 Miss。',
+    buildA: spearBuild(),
+    buildB: tallTargetBuild(),
     config: {
       engine: 'planck',
       autoDrive: true,

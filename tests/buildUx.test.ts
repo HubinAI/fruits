@@ -419,3 +419,84 @@ describe('Q11-A 楔铲 Gadget', () => {
     expect(maxAPitch * 57.3).toBeGreaterThan(20);
   });
 });
+
+/* ---------- Q11-B：固定刺 Weapon（细长前伸 / 高度决定命中 / 擦空即 Miss） ---------- */
+describe('Q11-B 固定刺 Weapon', () => {
+  function spearSnapshot(bodyDefId: string, side: 'A' | 'B'): ReturnType<typeof buildSnapshotFromDraft> {
+    return buildSnapshotFromDraft(
+      {
+        bodyDefId,
+        rearRadius: 20,
+        frontRadius: 20,
+        functionalSelections: {
+          front: EMPTY_SLOT,
+          frontMass: EMPTY_SLOT,
+          top: 'spear',
+          rear: EMPTY_SLOT,
+        },
+      },
+      registry,
+      side,
+    );
+  }
+
+  it('1. spear 定义：weapon / 细长 polygon（前端刺尖）/ baseDamage / 无追踪行为', () => {
+    const def = registry.functionals.get('spear');
+    expect(def).toBeDefined();
+    expect(def!.category).toBe('weapon');
+    expect(def!.collider.shape).toBe('polygon');
+    const vs = def!.collider.vertices!;
+    // 前端刺尖最远（x 最大），细长（y 范围小）
+    const maxX = Math.max(...vs.map((v) => v.x));
+    const ySpan = Math.max(...vs.map((v) => v.y)) - Math.min(...vs.map((v) => v.y));
+    expect(maxX).toBeGreaterThan(60); // 前向长距离
+    expect(ySpan).toBeLessThan(20); // 细长（窄命中区）
+    expect((def!.behaviorParams as Record<string, unknown>).baseDamage).toBeGreaterThan(0);
+    expect(def!.behavior).toBe('ram'); // 固定接触（ramHead 同链路，无追踪）
+  });
+
+  it('2. 高度对上（tallBody 高车）→ 刺尖真实接触命中（weapon damage > 0）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q11-B')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let weaponDmgOnB = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon' && ev.target === 'B') {
+        weaponDmgOnB += ev.damage;
+      }
+    });
+    for (let i = 0; i < 1200; i++) {
+      lab.step(16.6667);
+      if (o.result?.phase === 'End') break;
+    }
+    expect(weaponDmgOnB).toBeGreaterThan(0); // 真实碰到才伤害
+  });
+
+  it('3. 高度错开（boxBody + 12 小轮矮车）→ 刺从上方自然擦空（weapon damage = 0, Miss）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    // A 刺车（20 轮）+ B 矮车（boxBody + 12 小轮）——刺尖高度高于 B 顶部 → 擦空
+    const bLow = buildSnapshotFromDraft(
+      {
+        bodyDefId: 'boxBody',
+        rearRadius: 12,
+        frontRadius: 12,
+        functionalSelections: { front: EMPTY_SLOT, frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      },
+      registry,
+      'B',
+    );
+    lab.loadCustom(spearSnapshot('watermelonBody', 'A'), bLow, { autoDrive: true, engine: 'planck' });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let weaponDmgOnB = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon' && ev.target === 'B') {
+        weaponDmgOnB += ev.damage;
+      }
+    });
+    for (let i = 0; i < 1200; i++) {
+      lab.step(16.6667);
+      if (o.result?.phase === 'End') break;
+    }
+    expect(weaponDmgOnB).toBe(0); // 擦空就是 Miss
+  });
+});

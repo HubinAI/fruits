@@ -340,6 +340,38 @@ const wedgeShovel: FunctionalPartDef = {
   behavior: 'none',
 };
 
+/**
+ * Q11-B：刺（Weapon）——前向细长固定武器，无摆动 / 无追踪 / 无主动动画。
+ * - 挂在顶部 hardpoint（高处水平前伸）：高度与姿态决定能否命中——
+ *   对手高 / 前倾时刺尖真实接触（现有 Weapon Contact 正式链路），
+ *   对手矮 / 低姿态时从上方自然擦空（Miss）。
+ * - 伤害只走现有链路：category 'weapon' + behaviorParams.baseDamage +
+ *   真实有效接触（relativeVelocity ≥ WEAPON_CONTACT_THRESHOLD）；
+ *   真实碰到才伤害，擦空就是 Miss。无自动瞄准、无隐藏攻击范围、
+ *   无击退补偿。
+ * - 暂不加入玩家 Build 选项（PART_OPTIONS），仅供专用测试场景使用。
+ */
+const spear: FunctionalPartDef = {
+  id: 'spear',
+  name: '刺',
+  category: 'weapon',
+  mass: 12, // 细长，质量轻
+  energy: 25,
+  // 细长前伸 + 前端刺尖：本地 x∈[-6,90]（长 96）、y∈[-3,3]（高 6，细）。
+  // 顶点相对 offset（part 原点 = 挂点）；offset (0,0) → 刺从挂点水平前伸。
+  collider: {
+    shape: 'polygon',
+    vertices: [
+      { x: 90, y: 0 }, // 前端刺尖（最远点，命中判定集中在尖）
+      { x: -6, y: -3 }, // 后端上
+      { x: -6, y: 3 }, // 后端下
+    ],
+    offset: { x: 0, y: 0 },
+  },
+  behavior: 'ram', // 固定接触武器（与 ramHead 同链路；无 behavior runtime）
+  behaviorParams: { baseDamage: 60 },
+};
+
 /** 构建 Content Registry */
 export function createRegistry(): ContentRegistry {
   return {
@@ -357,6 +389,7 @@ export function createRegistry(): ContentRegistry {
       [cannon.id, cannon],
       [testMass.id, testMass],
       [wedgeShovel.id, wedgeShovel],
+      [spear.id, spear],
       [hammer.id, hammer],
       [pushRod.id, pushRod],
     ]),
