@@ -146,9 +146,14 @@ export class BattleOrchestrator {
     this.detectEnd();
   }
 
-  /** HP 死亡检测 → Result（B14B：委托引擎中立 resolveBattleResult，判定语义不变） */
+  /** HP 死亡检测 → Result（B14B：委托引擎中立 resolveBattleResult，判定语义不变；W1-END-1：seed 兜底无平局） */
   private detectEnd(): void {
-    this._result = resolveBattleResult(this.arena.phase, this.vehicleA.hp, this.vehicleB.hp);
+    this._result = resolveBattleResult(
+      this.arena.phase,
+      this.vehicleA.hp,
+      this.vehicleB.hp,
+      this.config.randomSeed ?? 0,
+    );
   }
 
   /** 订阅 Battle Event（Renderer / VFX / SFX 消费；按 type 判别） */

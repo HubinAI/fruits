@@ -15,6 +15,7 @@ import type { BuildSnapshot, BattlePhase } from '../src/core/types';
 import { createRegistry } from '../src/core/content';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import type { BattleResult } from '../src/battle/battleContract';
+import { deterministicTieBreak } from '../src/battle/battleContract';
 import type { ContactBridgeEvent } from '../src/physics/planckWorld';
 import { isDamageEvent, type BattleEvent } from '../src/battle/combatEvents';
 import { PHYSICS_HZ } from '../src/physics/units';
@@ -492,10 +493,13 @@ describe('F-02M-B17A-A1 · Planck Battle Orchestrator 最小驱动闭环', () =>
     }
     expect(log[firstEnd].result).not.toBeNull();
 
-    // 双方 HP 未变化 → winner=draw；result.phase=End，hpA/hpB 保留原值
+    // W1-END-1：双方 HP 未变化（同 HP）→ deterministicTieBreak(seed 缺省 0) 兜底，
+    // 必为 A 或 B（正式战斗无平局）；result.phase=End、endReason=arenaEnd，hpA/hpB 保留原值
     const r = log[firstEnd].result as BattleResult;
-    expect(r.winner).toBe('draw');
+    expect(['A', 'B']).toContain(r.winner);
+    expect(r.winner).toBe(deterministicTieBreak(0));
     expect(r.phase).toBe('End');
+    expect(r.endReason).toBe('arenaEnd');
     expect(o.vehicleA.hp).toBe(1000);
     expect(o.vehicleB.hp).toBe(1000);
     expect(r.hpA).toBe(1000);

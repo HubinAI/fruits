@@ -15,7 +15,7 @@ import {
   EMPTY_SLOT,
   type BuildDraft,
 } from '../src/lab/buildEditorModel';
-import { resolveBattleResult } from '../src/battle/battleContract';
+import { resolveBattleResult, deterministicTieBreak } from '../src/battle/battleContract';
 import { PhysicsLab } from '../src/lab/physicsLab';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import type { Renderer } from '../src/render/renderer';
@@ -112,15 +112,18 @@ describe('Q06-B1 Build Loop', () => {
     expect(o2.world.getPosition(o2.vehicleA.body).x).toBeCloseTo(x1, 3); // 位置重置到 spawn
   });
 
-  it('5. result 数据源：resolveBattleResult 三态（A胜/B胜/平局 + hp）供 UI 展示', () => {
-    // UI 展示 = result.winner → A胜/B胜/平局 + hpA/hpB（BattleResult 规则未修改）
-    const bWins = resolveBattleResult('End', 0, 500);
-    expect(bWins).toEqual({ winner: 'B', hpA: 0, hpB: 500, phase: 'End' });
-    const aWins = resolveBattleResult('End', 700, 0);
-    expect(aWins).toEqual({ winner: 'A', hpA: 700, hpB: 0, phase: 'End' });
-    const draw = resolveBattleResult('End', 0, 0);
-    expect(draw).toEqual({ winner: 'draw', hpA: 0, hpB: 0, phase: 'End' });
-    const ongoing = resolveBattleResult('Active', 1000, 1000);
+  it('5. result 数据源：A胜/B胜 + seed 兜底无平局 + hp（W1-END-1）供 UI 展示', () => {
+    // UI 展示 = result.winner → A胜/B胜 + hpA/hpB + endReason（BattleResult 规则：无平局）
+    const bWins = resolveBattleResult('End', 0, 500, 0);
+    expect(bWins).toEqual({ winner: 'B', hpA: 0, hpB: 500, phase: 'End', endReason: 'arenaEnd' });
+    const aWins = resolveBattleResult('End', 700, 0, 0);
+    expect(aWins).toEqual({ winner: 'A', hpA: 700, hpB: 0, phase: 'End', endReason: 'arenaEnd' });
+    // 双死（非 End 同帧）：deterministic seed 兜底，必为 A 或 B，绝无平局
+    const bothDead = resolveBattleResult('Active', 0, 0, 7)!;
+    expect(bothDead.winner).toBe(deterministicTieBreak(7));
+    expect(['A', 'B']).toContain(bothDead.winner);
+    expect(bothDead.endReason).toBe('hp');
+    const ongoing = resolveBattleResult('Active', 1000, 1000, 0);
     expect(ongoing).toBeNull(); // 战斗进行中 → 无结果（UI 显示「战斗中…」）
   });
 });

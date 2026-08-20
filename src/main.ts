@@ -179,12 +179,11 @@ function updateHud(): void {
   hudB.barFill.style.width = `${Math.max(0, Math.min(1, s.sideB.hp / Math.max(s.sideB.maxHp, 1))) * 100}%`;
 }
 
-/** 显示结算卡：胜/负/平局 + 双方整数剩余 HP（只反映 Runtime result） */
-function showResultModal(r: { winner: string | null; hpA: number; hpB: number }): void {
+/** 显示结算卡：胜/负 + 双方整数剩余 HP（W1-END-1：正式战斗无平局，只反映 Runtime result） */
+function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): void {
   const isWin = r.winner === 'A';
-  const isLose = r.winner === 'B';
-  resultTitle.textContent = isWin ? '【胜利】' : isLose ? '【失败】' : '【平局】';
-  resultTitle.style.color = isWin ? '#59c97a' : isLose ? '#ff6b5e' : '#ffd35a';
+  resultTitle.textContent = isWin ? '【胜利】' : '【失败】';
+  resultTitle.style.color = isWin ? '#59c97a' : '#ff6b5e';
   resultHpA.textContent = `我方剩余 HP：${Math.round(r.hpA)}`;
   resultHpB.textContent = `对手剩余 HP：${Math.round(r.hpB)}`;
   resultModal.style.display = 'flex';

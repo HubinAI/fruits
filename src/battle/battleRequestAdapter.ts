@@ -16,7 +16,7 @@ import type {
 import { PlanckBattleOrchestrator } from './planckBattleOrchestrator';
 import type { ContentRegistry } from '../core/types';
 
-/** BattleRequest → Planck Battle 实例（确定性：同 request 同初始状态） */
+/** BattleRequest → Planck Battle 实例（确定性：同 request 同初始状态；W1-END-1：注入 randomSeed 保证双死/同 HP 兜底同赢家） */
 export function createPlanckBattle(
   request: BattleRequest,
   registry: ContentRegistry,
@@ -25,7 +25,9 @@ export function createPlanckBattle(
     request.buildA,
     request.buildB,
     registry,
-    request.config,
+    // 把请求级 seed 注入 config：orchestrator detectEnd 用 config.randomSeed ?? 0
+    // 做确定性 tie-break，确保同 request 重跑结果一致（无平局）。
+    { ...request.config, randomSeed: request.randomSeed },
   );
 }
 

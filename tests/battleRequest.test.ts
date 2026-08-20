@@ -167,8 +167,8 @@ describe('W1-ASYNC-1 Async Battle Contract', () => {
     expect(lab.orchestrator instanceof PlanckBattleOrchestrator).toBe(true);
     expect(lab.previewMode).toBe(true);
 
-    // resolveBattleResult 旧路径：无 metadata 字段也能正常产生结果（向后兼容）
-    const old = resolveBattleResult('End', 100, 0);
-    expect(old).toEqual({ winner: 'A', hpA: 100, hpB: 0, phase: 'End' });
+    // resolveBattleResult（W1-END-1）：正式无平局 + endReason；无 metadata 字段也能正常产生结果
+    const old = resolveBattleResult('End', 100, 0, 0);
+    expect(old).toEqual({ winner: 'A', hpA: 100, hpB: 0, phase: 'End', endReason: 'arenaEnd' });
   });
 });

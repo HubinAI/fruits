@@ -32,14 +32,25 @@ export interface BattleConfig {
    * 'planck' 为正在接入的引擎中立 Runtime。
    */
   engine?: 'matter' | 'planck';
+  /**
+   * 确定性随机种子（uint32，W1-END-1）。正式战斗无平局：双死 / Arena End 同 HP 时
+   * 用 deterministicTieBreak(seed) 兜底。缺省 0（确定性）；禁止 Math.random。
+   */
+  randomSeed?: number;
 }
+
+/** Battle 结束原因（W1-END-1）：正式战斗不允许平局，结果必须区分胜负来源 */
+export type EndReason = 'hp' | 'arenaEnd';
 
 /** Battle 结果（字段与 battleOrchestrator.BattleResult 完全一致） */
 export interface BattleResult {
-  winner: TeamId | 'draw' | null;
+  /** 正式类型：任何 Battle 最终必须得到 A 或 B（W1-END-1，不再有 draw/null） */
+  winner: TeamId;
   hpA: number;
   hpB: number;
   phase: string;
+  /** 结束原因：'hp'（战斗中死亡判定）/ 'arenaEnd'（Arena 进入 End 判定） */
+  endReason: EndReason;
   /**
    * W1-ASYNC-1：异步战斗基础 metadata（可选；旧路径 / resolveBattleResult 不产生）。
    * 本队列只允许「携带」，不改正式胜负规则。
@@ -276,37 +287,48 @@ export interface BattleOrchestratorApi {
 }
 
 /**
- * 严格复现 Matter BattleOrchestrator.detectEnd() 的判定：
+ * 严格复现 Matter BattleOrchestrator.detectEnd() 的判定（W1-END-1：正式无平局）：
  * - 非 End 且双方 HP>0 → null（战斗继续）；
- * - phase=End → 按剩余 HP 比较 A/B/draw（原值，不归零）；
- * - 非 End 下双方同时死亡 → draw（HP 均 0）；
+ * - phase=End → 按剩余 HP 比较：HP 高的一方胜（endReason='arenaEnd'）；
+ *   HP 完全相同 → deterministicTieBreak(randomSeed)（同 seed 永远同赢家，无平局）；
+ * - 非 End 下双方同时死亡 → deterministicTieBreak(randomSeed) 兜底（endReason='hp'，
+ *   HP 均 0）；
  * - 非 End 下 A 死亡 → B 胜（hpA=0，hpB 原值）；B 死亡 → A 胜（hpA 原值，hpB=0）；
  * - 结果 phase 固定为 'End'。
+ * 普通 HP 胜负不读取 seed（同 seed 与不同 seed 结果一致）；只有双死 / 同 HP 才用 seed。
  * 不修改输入 HP、不新增 clamp、校验、超时或其他规则。
  */
 export function resolveBattleResult(
   phase: BattlePhase,
   hpA: number,
   hpB: number,
+  randomSeed: number,
 ): BattleResult | null {
   if (phase === 'End') {
     return {
-      winner: hpA > hpB ? 'A' : hpB > hpA ? 'B' : 'draw',
+      winner: hpA > hpB ? 'A' : hpB > hpA ? 'B' : deterministicTieBreak(randomSeed),
       hpA,
       hpB,
       phase: 'End',
+      endReason: 'arenaEnd',
     };
   }
   const aDead = hpA <= 0;
   const bDead = hpB <= 0;
   if (aDead && bDead) {
-    return { winner: 'draw', hpA: 0, hpB: 0, phase: 'End' };
+    return {
+      winner: deterministicTieBreak(randomSeed),
+      hpA: 0,
+      hpB: 0,
+      phase: 'End',
+      endReason: 'hp',
+    };
   }
   if (aDead) {
-    return { winner: 'B', hpA: 0, hpB, phase: 'End' };
+    return { winner: 'B', hpA: 0, hpB, phase: 'End', endReason: 'hp' };
   }
   if (bDead) {
-    return { winner: 'A', hpA, hpB: 0, phase: 'End' };
+    return { winner: 'A', hpA, hpB: 0, phase: 'End', endReason: 'hp' };
   }
   return null;
 }
