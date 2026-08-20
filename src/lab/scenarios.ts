@@ -178,6 +178,20 @@ function plainCarBuild(): BuildSnapshot {
   };
 }
 
+/** Q11-A-R2：楔铲目标车——香蕉车身 + 标准轮，不装其它 Functional（隔离验证） */
+function bananaTargetBuild(): BuildSnapshot {
+  return {
+    id: 'bananaTarget',
+    bodyDefId: 'bananaBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [],
+  };
+}
+
 /** Q11-A：楔铲车——西瓜车身 + 前方楔铲（Gadget，无 Direct Damage，无主动动画） */
 function wedgeShovelBuild(): BuildSnapshot {
   return {
@@ -479,11 +493,12 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'Q11',
     name: 'Wedge Shovel (Gadget)',
     description:
-      '楔铲（Q11-A）：A 西瓜车身 + 前方楔铲（低矮楔形 polygon，Gadget，无 Direct ' +
-      'Damage / 无主动动画）。正面钻入 B 底部 → 真实碰撞几何 / 质量 / 速度 / 力矩 ' +
-      '抬起或掀翻 B；接触位置不合适时只滑过或顶住，不自动翻车；A 自身承担真实反作用。',
+      '楔铲（Q11-A-R2）：A 西瓜车身 + 前方楔铲（短陡 25° 楔形 polygon，Gadget，' +
+      '无 Direct Damage / 无主动动画）vs B 香蕉车身（标准轮、无功能件，隔离验证）。' +
+      '正面接触 → B 前轮沿楔面向上爬、车身明显抬头；接触位置不合适时只滑过或顶住，' +
+      '不自动翻车；A 自身承担真实反作用。',
     buildA: wedgeShovelBuild(),
-    buildB: plainCarBuild(),
+    buildB: bananaTargetBuild(),
     config: {
       engine: 'planck',
       autoDrive: true,

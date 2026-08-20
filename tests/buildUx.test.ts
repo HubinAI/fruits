@@ -391,42 +391,43 @@ describe('Q11-A 楔铲 Gadget', () => {
     expect(def!.mass).toBeGreaterThan(0);
   });
 
-  it('2. Q11 场景：楔铲正面钻入 → 第一次有效接触即明显姿态改变（B 垫起/抬头）；A 承担真实反作用', () => {
+  it('2. Q11 场景（banana 目标）：楔铲短陡坡 → 碰墙前 B 前轮明显离地 + 明显抬头（grounded 变化）；A 真实反作用', () => {
     const lab = new PhysicsLab(rendererStub);
     const sc = SCENARIOS.find((s) => s.id === 'Q11');
     expect(sc).toBeDefined();
+    expect(sc!.buildB.bodyDefId).toBe('bananaBody'); // R2：正式 banana 目标（非 boxBody）
     lab.loadScenario(sc!);
     const o = lab.orchestrator as PlanckBattleOrchestrator;
     const w = o.world;
-    const y0 = w.getPosition(o.vehicleB.body).y;
-    let earlyBPitch = 0; // 前 5s（300 步）内的 B 俯仰峰值——第一次有效接触应已出现
-    let earlyBLift = 0;
-    let maxBPitch = 0;
-    let minBY = y0;
+    const GROUND_Y = 700;
+    let phase0 = o.phase;
+    // 碰墙/Closing 前的峰值（不依赖墙/Closing 才翻——R2 硬约束）
+    let prePitch = 0;
+    let preFrontLift = 0;
     let maxAPitch = 0;
     for (let i = 0; i < 1200; i++) {
       lab.step(16.6667);
-      const bAng = Math.abs(w.getAngle(o.vehicleB.body));
-      const bY = w.getPosition(o.vehicleB.body).y;
-      const aAng = Math.abs(w.getAngle(o.vehicleA.body));
-      if (i < 300) {
-        earlyBPitch = Math.max(earlyBPitch, bAng);
-        earlyBLift = Math.max(earlyBLift, y0 - bY);
+      if (o.phase !== phase0) {
+        if (o.phase !== 'Active') break; // 进入 Warning/Closing 即停止累计（碰墙前）
+        phase0 = o.phase;
       }
-      if (bAng > maxBPitch) maxBPitch = bAng;
-      if (bY < minBY) minBY = bY;
-      if (aAng > maxAPitch) maxAPitch = aAng;
+      const bAng = Math.abs(w.getAngle(o.vehicleB.body));
+      // banana 前轮离地：轮心 y < groundY - 半径(20) - 0.5
+      const frontLift = Math.max(
+        0,
+        ...o.vehicleB.wheels.map((wh) => Math.max(0, GROUND_Y - 20 - 0.5 - w.getPosition(wh.body).y)),
+      );
+      prePitch = Math.max(prePitch, bAng);
+      preFrontLift = Math.max(preFrontLift, frontLift);
+      maxAPitch = Math.max(maxAPitch, Math.abs(w.getAngle(o.vehicleA.body)));
       if (o.result?.phase === 'End') break;
     }
-    // Q11-A-R1：第一次有效接触（~2.8s）即明显改变姿态——旧楔铲（楔尖藏在
-    // 自车底盘内）5s 时 B 完全静止（俯仰 0.7°、无离地），14s 才撞墙掀翻。
-    // 新楔铲楔尖深插对手底盘空隙 → 前 5s 内 B 已被垫起/明显抬头。
-    expect(earlyBPitch * 57.3).toBeGreaterThan(5);
-    expect(earlyBLift).toBeGreaterThan(5);
-    // 最终：B 明显俯仰/离地 + A 承担真实碰撞反作用（autoDrive 相向接触锁定
-    // 下量级有限，无隐藏力/无补偿；旧实现反作用来自撞墙翻车，非接触即掀）
-    expect(maxBPitch * 57.3).toBeGreaterThan(8);
-    expect(y0 - minBY).toBeGreaterThan(5);
+    // Q11-A-R2（短陡 24.6° 坡 + banana）：第一次接触后 banana 前轮沿坡爬升——
+    // 实测前轮离地 21px（轮半径 20 完全离地，明显 grounded 变化）+ 抬头 ~10°，
+    // 全部发生在碰墙/Closing 之前（t≈4s vs Closing 10s）。
+    expect(preFrontLift).toBeGreaterThan(15); // 前轮明显离地
+    expect(prePitch * 57.3).toBeGreaterThan(7); // 明显抬头
+    // 自车承担真实碰撞反作用（无隐藏力/无补偿）
     expect(maxAPitch * 57.3).toBeGreaterThan(0.5);
   });
 
