@@ -70,11 +70,20 @@ export class PhysicsLab {
     config: BattleConfig;
   } | null = null;
 
+  /** 当前是否为「装配预览」（loadCustomPreview：只显示组装，不推进战斗） */
+  private isPreviewMode = false;
+
   constructor(private renderer: Renderer) {}
+
+  /** 当前是否为只读预览模式（供 UI 状态机判断 Editing / Fighting） */
+  get previewMode(): boolean {
+    return this.isPreviewMode;
+  }
 
   loadScenario(sc: ScenarioDef): void {
     this.currentScenario = sc;
     this.currentCustom = null;
+    this.isPreviewMode = false;
     this.orchestrator = this.createBattle(sc.buildA, sc.buildB, sc.config);
   }
 
@@ -92,6 +101,22 @@ export class PhysicsLab {
     this.currentScenario = null;
     const cfg = config ?? { autoDrive: true };
     this.currentCustom = { buildA, buildB, config: cfg };
+    this.isPreviewMode = false;
+    this.orchestrator = this.createBattle(buildA, buildB, cfg);
+  }
+
+  /**
+   * 从自定义 Build 创建「装配预览」（Q06-UX-R1）：
+   * - engine:'planck' + autoDrive:false；step() 不推进（不驱动、Behavior 不运行），
+   *   只用于显示当前 Draft 的真实 Planck 组装结果（同一 getRenderSnapshot / Renderer）；
+   * - 即使 Build 非法（如无 Weapon）也创建（显示裸车 Preview），合法校验由 UI/Validator 负责；
+   * - 保存输入，Reset 时按同一输入重建（仍为 preview）。
+   */
+  loadCustomPreview(buildA: BuildSnapshot, buildB: BuildSnapshot): void {
+    this.currentScenario = null;
+    const cfg: BattleConfig = { autoDrive: false, engine: 'planck' };
+    this.currentCustom = { buildA, buildB, config: cfg };
+    this.isPreviewMode = true;
     this.orchestrator = this.createBattle(buildA, buildB, cfg);
   }
 
@@ -115,6 +140,7 @@ export class PhysicsLab {
 
   step(realDtMs: number): void {
     if (!this.orchestrator || this.paused) return;
+    if (this.isPreviewMode) return; // 装配预览：不推进战斗（只显示组装结果）
     this.orchestrator.step(realDtMs, this.timeScale);
   }
 
@@ -135,7 +161,12 @@ export class PhysicsLab {
       this.loadScenario(this.currentScenario);
     } else if (this.currentCustom) {
       const c = this.currentCustom;
-      this.loadCustom(c.buildA, c.buildB, c.config);
+      // preview 输入（autoDrive:false + planck）重建为 preview；其余重建为 battle
+      if (c.config.autoDrive === false && c.config.engine === 'planck') {
+        this.loadCustomPreview(c.buildA, c.buildB);
+      } else {
+        this.loadCustom(c.buildA, c.buildB, c.config);
+      }
     }
   }
 
@@ -144,5 +175,6 @@ export class PhysicsLab {
     this.orchestrator = null;
     this.currentScenario = null;
     this.currentCustom = null;
+    this.isPreviewMode = false;
   }
 }

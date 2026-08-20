@@ -23,6 +23,22 @@ export type EditableFunctionalDefId = (typeof EDITABLE_FUNCTIONAL_DEF_IDS)[numbe
 /** 空槽哨兵：不进入 BuildSnapshot */
 export const EMPTY_SLOT = 'none';
 
+/**
+ * Functional 槽位自然名称（Q06-UX-R1）：玩家主标签必须是位置语义，
+ * 内部 hardpoint id 仅作次级文字（如「前端 (front)」）。
+ */
+export const SLOT_LABELS: Record<string, string> = {
+  front: '前端',
+  frontMass: '前部',
+  top: '顶部',
+  rear: '后端',
+};
+
+/** 槽位展示主标签（未知 id 回退为原 id） */
+export function slotLabel(hardpointId: string): string {
+  return SLOT_LABELS[hardpointId] ?? hardpointId;
+}
+
 /** Build Draft：编辑器的可序列化中间状态 */
 export interface BuildDraft {
   bodyDefId: string;
