@@ -248,7 +248,14 @@ describe('W1-INTEG · canonical Battle Integration（BattleRequest → Planck Ru
   });
 
   it('5. Contact：contactOnce 原语义不变（weapon 直伤事件发生；contactTick 由 contactTick.test 精确覆盖）', () => {
-    const req = makeBattleRequest(123, 'w1-integ-contact');
+    // 用默认 Arena phases（10s/3s/5s）：autoDrive 相向 1.5px/step 需 ~267 步对撞 + cannon
+    // 持续发射 → weapon 接触命中真实发生（短 phase 场景下对撞不足，依赖旧 closingSpeed
+    // 强制挤压，W1-P0-CLOSE-FIX 后 speed=3 不再覆盖该时序）
+    const base = makeBattleRequest(123, 'w1-integ-contact');
+    const req: BattleRequest = {
+      ...base,
+      config: { ...base.config, arena: undefined },
+    };
     const { events } = runToEnd(req);
     // contactOnce：weapon 接触一次结算（baseDamage 语义；Hammer 等零变化由各 behavior 测试覆盖）
     const weaponHits = events.filter(

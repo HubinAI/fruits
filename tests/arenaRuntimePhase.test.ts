@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { Body } from 'matter-js';
 import { PhysWorld } from '../src/physics/adapter';
 import { ArenaRuntime } from '../src/battle/arenaRuntime';
+import { DEFAULT_ARENA_CONFIG } from '../src/battle/arenaConfig';
 
 function makeArena(): { world: PhysWorld; arena: ArenaRuntime } {
   const world = new PhysWorld({ x: 0, y: 0, scale: 0 });
@@ -60,8 +61,8 @@ describe('F-02M-B11B · ArenaRuntime 共享阶段时钟接入', () => {
     arena.update(1);
     const left = arena.closingWalls.find((w) => w.side === 'left')!;
     const right = arena.closingWalls.find((w) => w.side === 'right')!;
-    expect(Body.getVelocity(left.body).x).toBeCloseTo(40, 5);
-    expect(Body.getVelocity(right.body).x).toBeCloseTo(-40, 5);
+    expect(Body.getVelocity(left.body).x).toBeCloseTo(DEFAULT_ARENA_CONFIG.closingSpeed, 5);
+    expect(Body.getVelocity(right.body).x).toBeCloseTo(-DEFAULT_ARENA_CONFIG.closingSpeed, 5);
   });
 
   it('Closing→End 该步仍执行最后一次推进；End 后不再更新', () => {
@@ -73,12 +74,12 @@ describe('F-02M-B11B · ArenaRuntime 共享阶段时钟接入', () => {
     // Closing→End 当步：仍设置速度 + 转 End
     arena.update(1);
     expect(arena.phase).toBe('End');
-    expect(Body.getVelocity(left.body).x).toBeCloseTo(40, 5); // 最后一次推进已执行
+    expect(Body.getVelocity(left.body).x).toBeCloseTo(DEFAULT_ARENA_CONFIG.closingSpeed, 5); // 最后一次推进已执行
 
     // End 后：update 不再改变（墙速度保持，不再推进）
     arena.update(1_000);
     expect(arena.phase).toBe('End');
-    expect(Body.getVelocity(left.body).x).toBeCloseTo(40, 5);
+    expect(Body.getVelocity(left.body).x).toBeCloseTo(DEFAULT_ARENA_CONFIG.closingSpeed, 5);
   });
 
   it('setPhase 只切阶段、清零计时，不擅自激活墙体', () => {

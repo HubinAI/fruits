@@ -4,7 +4,7 @@
  * 覆盖：
  * 1. 默认构造：ground / 普通墙 / Closing Wall 的几何、OwnerTag、初始速度；
  * 2. 真实重力下 vehicle-category 动态体落在 ground 上不穿透；
- * 3. 完整阶段边界；进入 Closing 当步速度 0，下一步墙体各移动约 40px 且方向相反；
+ * 3. 完整阶段边界；进入 Closing 当步速度 0，下一步墙体各移动约 closingSpeed px 且方向相反；
  * 4. Closing→End、End 稳定、setPhase 及 Projectile Bounds；
  * 5. 无 NaN/Infinity。
  */
@@ -136,14 +136,14 @@ describe('F-02M-B13A · 3. 阶段边界与 Closing 推进', () => {
     const v0 = world.getLinearVelocity(cl.body);
     expect(v0.x).toBeCloseTo(0, 9);
 
-    // 下一次 update（仍 Closing）：left +40 / right -40
+    // 下一次 update（仍 Closing）：left +closingSpeed / right -closingSpeed
     arena.update(1);
     const vl = world.getLinearVelocity(cl.body);
     const vr = world.getLinearVelocity(cr.body);
     expect(vl.x).toBeCloseTo(DEFAULT_ARENA_CONFIG.closingSpeed, 9);
     expect(vr.x).toBeCloseTo(-DEFAULT_ARENA_CONFIG.closingSpeed, 9);
 
-    // 推进 10 步：left +400 / right -400（kinematic 精确位移）
+    // 推进 10 步：left +closingSpeed*10 / right -closingSpeed*10（kinematic 精确位移）
     const pcl0 = world.getPosition(cl.body).x;
     const pcr0 = world.getPosition(cr.body).x;
     world.stepFixed(10);
@@ -152,8 +152,8 @@ describe('F-02M-B13A · 3. 阶段边界与 Closing 推进', () => {
     console.log(
       `[B13A-close] left dx=${(pcl1 - pcl0).toFixed(6)} right dx=${(pcr1 - pcr0).toFixed(6)}`,
     );
-    expect(Math.abs(pcl1 - pcl0 - 400)).toBeLessThan(0.01);
-    expect(Math.abs(pcr1 - pcr0 + 400)).toBeLessThan(0.01);
+    expect(Math.abs(pcl1 - pcl0 - DEFAULT_ARENA_CONFIG.closingSpeed * 10)).toBeLessThan(0.01);
+    expect(Math.abs(pcr1 - pcr0 + DEFAULT_ARENA_CONFIG.closingSpeed * 10)).toBeLessThan(0.01);
 
     assertFiniteAll(v0.x, vl.x, vr.x, pcl0, pcr0, pcl1, pcr1);
   });
@@ -170,21 +170,21 @@ describe('F-02M-B13A · 4. Closing→End、End 稳定、setPhase、Projectile Bo
     arena.update(10_000);
     arena.update(3_000);
     arena.update(1);
-    expect(world.getLinearVelocity(cl.body).x).toBeCloseTo(40, 9);
-    expect(world.getLinearVelocity(cr.body).x).toBeCloseTo(-40, 9);
+    expect(world.getLinearVelocity(cl.body).x).toBeCloseTo(DEFAULT_ARENA_CONFIG.closingSpeed, 9);
+    expect(world.getLinearVelocity(cr.body).x).toBeCloseTo(-DEFAULT_ARENA_CONFIG.closingSpeed, 9);
 
     // Closing→End 当步（1+4999=5000 达到边界）：保留最后一次推进
     arena.update(4_999);
     expect(arena.phase).toBe('End');
-    expect(world.getLinearVelocity(cl.body).x).toBeCloseTo(40, 9);
-    expect(world.getLinearVelocity(cr.body).x).toBeCloseTo(-40, 9);
+    expect(world.getLinearVelocity(cl.body).x).toBeCloseTo(DEFAULT_ARENA_CONFIG.closingSpeed, 9);
+    expect(world.getLinearVelocity(cr.body).x).toBeCloseTo(-DEFAULT_ARENA_CONFIG.closingSpeed, 9);
 
     // End 后不再改速度
     arena.update(100);
     arena.update(100);
     expect(arena.phase).toBe('End');
-    expect(world.getLinearVelocity(cl.body).x).toBeCloseTo(40, 9);
-    expect(world.getLinearVelocity(cr.body).x).toBeCloseTo(-40, 9);
+    expect(world.getLinearVelocity(cl.body).x).toBeCloseTo(DEFAULT_ARENA_CONFIG.closingSpeed, 9);
+    expect(world.getLinearVelocity(cr.body).x).toBeCloseTo(-DEFAULT_ARENA_CONFIG.closingSpeed, 9);
   });
 
   it('setPhase 只切阶段清零计时、不驱动墙体；Projectile Bounds 判定', () => {
@@ -200,7 +200,7 @@ describe('F-02M-B13A · 4. Closing→End、End 稳定、setPhase、Projectile Bo
     // 下一次 update 才驱动（elapsed=1 < 5000，仍 Closing）
     arena.update(1);
     expect(arena.phase).toBe('Closing');
-    expect(world.getLinearVelocity(cl.body).x).toBeCloseTo(40, 9);
+    expect(world.getLinearVelocity(cl.body).x).toBeCloseTo(DEFAULT_ARENA_CONFIG.closingSpeed, 9);
 
     // 5000ms 边界到达 End（1+4999）
     arena.update(4_999);

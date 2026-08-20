@@ -8,7 +8,7 @@
  * - 首屏默认合法配置（A/B 各 front Cannon），Start 立即可点；
  * - 非法配置时 Start 明显禁用且旁边直接显示阻断原因（A：… / B：…）。
  */
-import { Renderer } from './render/renderer';
+import { Renderer, type CameraFit } from './render/renderer';
 import { PhysicsLab } from './lab/physicsLab';
 import { SCENARIOS, type ScenarioCamera } from './lab/scenarios';
 import { PRESETS } from './lab/presets';
@@ -242,9 +242,14 @@ function arenaDims(): { w: number; h: number } {
 function reframeCamera(): void {
   const orch = lab.orchestrator;
   if (!orch) return;
+  // W1-P0-CLOSE-FIX：Custom 正式 Battle（装配测试模式、非 Preview）→ 固定战场构图
+  // （覆盖 Arena 有效战斗区域，车辆被 Closing 推向边缘/中央的全过程始终可见）；
+  // Editing Preview / 机制场景维持原 fit 语义。
+  const fit: CameraFit =
+    uiMode === 'build' && !lab.previewMode ? 'battle' : (currentCamera?.fit ?? 'vehicles');
   renderer.reframe(
     orch.getRenderSnapshot(),
-    currentCamera?.fit ?? 'vehicles',
+    fit,
     {
       forwardExtent: currentCamera?.forwardExtent,
       recoilExtent: currentCamera?.recoilExtent,

@@ -41,8 +41,15 @@ const MAX_CONTENT_SCALE = 5;
 const SAFE_INSET_X = 56;
 const SAFE_INSET_Y = 28;
 
-/** 取景模式：vehicles=含 A+B 完整入画；primary-fire=A 偏左中部 + 身后 recoil 空间 + 前方固定射击空间（Cannon-Recoil / Cannon-Angle 共用） */
-export type CameraFit = 'vehicles' | 'primary-fire';
+/**
+ * 取景模式：
+ * - vehicles：含 A+B 完整入画（编辑 Preview 构图）；
+ * - primary-fire：A 偏左中部 + 身后 recoil 空间 + 前方固定射击空间（Cannon-Recoil / Cannon-Angle 共用）；
+ * - battle：正式战斗固定战场——覆盖 Arena 有效战斗区域（x: 0..width；y: Closing 墙顶..地面+margin），
+ *   保证车辆被 Closing 推向边缘/中央的全过程始终可见（W1-P0-CLOSE-FIX；Start/Reset 构图一次，
+ *   运行期间绝不 follow、不动态 zoom、不随 projectile 扩镜头）。
+ */
+export type CameraFit = 'vehicles' | 'primary-fire' | 'battle';
 
 interface FloatingText {
   x: number;
@@ -315,7 +322,14 @@ export class Renderer {
     };
     // ground anchor：保证地面线在 y 范围内
     acc(snap.arena.groundY, snap.arena.groundY);
-    if (fit === 'primary-fire') {
+    if (fit === 'battle') {
+      // W1-P0-CLOSE-FIX：正式战斗固定战场——覆盖 Arena 有效战斗区域
+      // （x ∈ [0, width]；y 顶 = Closing 墙顶，底 = 地面），车辆被 Closing 推向
+      // 边缘/中央的全过程始终入画；墙体外很远的无效空间不纳入。
+      acc(0, snap.arena.groundY);
+      acc(snap.arena.width, snap.arena.groundY);
+      for (const cw of snap.arena.closingWalls) includeShape(cw);
+    } else if (fit === 'primary-fire') {
       includeVehicle(snap.vehicleA);
       // 身后明确 recoil 空间 + 前方固定射击空间（A 朝 +X 发射方向）
       minX -= recoilExtent;
