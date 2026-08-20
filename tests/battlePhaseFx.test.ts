@@ -637,3 +637,17 @@ describe('Q08-C 受击反馈去遮挡', () => {
     expect(ctx.calls.filter((c) => c === 'stroke').length).toBeGreaterThan(0);
   });
 });
+
+/* ---------- Q08-CAM-A1：Canvas backing 尺寸与 client size × DPR 同步契约 ---------- */
+describe('Q08-CAM-A1 Canvas backing 同步', () => {
+  it('renderer.resize 以 clientWidth/Height × DPR 重设 canvas backing（布局切换后调用即一致）', () => {
+    const canvas = makeCanvas(new CtxStub()); // clientWidth 1000 / clientHeight 500
+    const renderer = new Renderer(canvas);
+    (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 2 };
+    renderer.resize(1600, 1000);
+    // 根因契约：backing 必须 = clientSize × DPR；若布局切换（面板显隐）后不调
+    // resize/doResize，backing 停留在旧 clientSize → 与 CSS 尺寸不匹配 → 构图裁切。
+    expect(canvas.width).toBe(1000 * 2);
+    expect(canvas.height).toBe(500 * 2);
+  });
+});

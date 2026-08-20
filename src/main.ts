@@ -282,6 +282,8 @@ function adjustConfig(): void {
   panelB.style.display = '';
   startBar.style.display = '';
   toolsToggle.style.display = ''; // Q07-C：回装配恢复开发工具入口
+  // Q08-CAM-A1：面板恢复 → canvas CSS 变窄，先同步 backing 再显示 Preview
+  doResize();
   showPreview();
   updateStartButton();
 }
@@ -776,7 +778,11 @@ function startOrRematch(): void {
   toolsHost.style.display = 'none';
   resultModal.style.display = 'none';
   currentCamera = null;
-  reframeCamera();
+  // Q08-CAM-A1：面板隐藏 → canvas CSS clientWidth 已变宽，但 backing
+  // (canvas.width/height) 未同步——必须先 doResize()（内部 renderer.resize 按
+  // clientWidth×DPR 同步 backing + reframeCamera）再构图，否则 Battle 刚进入
+  // 即按新 clientWidth 取景、绘制在旧 backing 上 → 右侧被裁。
+  doResize();
   updateHud();
   updateStartButton();
 }
@@ -825,6 +831,9 @@ btnStart.onclick = () => {
   startHint.style.display = 'none';
   toolsToggle.style.display = 'none';
   toolsHost.style.display = 'none';
+  // Q08-CAM-A1：面板隐藏 → canvas CSS 变宽，先同步 backing，README 背景
+  // （两车 Preview）按新尺寸正常显示，不横向拉伸。
+  doResize();
   readyOverlay.style.display = 'flex'; // READY / 开战！（0.6s；背景 = 保留的中央 Preview）
   window.setTimeout(() => {
     readyOverlay.style.display = 'none';
@@ -911,6 +920,8 @@ function setMode(m: UiMode): void {
   debugPanel.style.display = showBuild ? 'none' : '';
   resultModal.style.display = 'none'; // 模式切换关闭结算卡
   hudEl.style.display = 'none';
+  // Q08-CAM-A1：模式切换改面板显隐 → canvas CSS 尺寸变化，先同步 backing 再构图
+  doResize();
   if (showBuild && battleState !== 'fighting') {
     showPreview(); // 切回装配测试：恢复 Draft Preview（不把 Scenario 车辆伪装成 Preview）
   }
@@ -930,7 +941,6 @@ addButton(toolsHost, 'Reset', () => {
   btnPause.classList.remove('active');
   lab.reset();
   lastShownResult = null;
-  reframeCamera();
   resultModal.style.display = 'none';
   // preview 重建 → Editing（中央恢复装配预览）；battle 重建 → Fighting
   if (uiMode === 'build') {
@@ -941,6 +951,10 @@ addButton(toolsHost, 'Reset', () => {
       panelB.style.display = '';
       startBar.style.display = '';
       toolsToggle.style.display = ''; // Q07-C：回装配恢复开发工具入口
+      // Q08-CAM-A1：面板恢复 → CSS 变窄，先同步 backing 再构图
+      doResize();
+    } else {
+      reframeCamera(); // Fighting：布局未变（面板已隐藏）
     }
     updateHud();
     updateStartButton();
@@ -959,6 +973,7 @@ addButton(toolsHost, 'Clear', () => {
     panelB.style.display = '';
     startBar.style.display = '';
     toolsToggle.style.display = ''; // Q07-C：回装配恢复开发工具入口
+    doResize(); // Q08-CAM-A1：面板恢复 → CSS 变窄，先同步 backing
     showPreview(); // Clear 后恢复装配预览
     updateStartButton();
   }
