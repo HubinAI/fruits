@@ -407,7 +407,11 @@ const laser: FunctionalPartDef = {
     projectileDamage: 160, // Cannon 80 ×2
     projectileRadius: 12,
     projectileMass: 1,
-    recoilImpulse: 60, // Cannon 30 ×2
+    // Q11-C-R1：60 → 240（Cannon 30 的 8×）——实测 60 时 chassis Δv 仅
+    // 0.33px/step（≈20px/s）且 autoDrive 150ms 内拉回，正常速度肉眼不可
+    // 感知；240 使开火瞬间 Δv ≈1.3px/step（≈79px/s 明显后顿），仍是
+    // 「初版差异故意做大、后续真人验收再回收」的定位。
+    recoilImpulse: 240,
   },
 };
 

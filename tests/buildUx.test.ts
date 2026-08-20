@@ -553,6 +553,31 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
       side,
     );
   }
+  /** Q11-C-R1：Cannon 车开火后 snapshot（断言 Cannon 弹不带 visual 标记） */
+  function makeCannonFireSnap() {
+    const lab2 = new PhysicsLab(rendererStub);
+    lab2.loadCustom(
+      buildSnapshotFromDraft(
+        { bodyDefId: 'watermelonBody', rearRadius: 20, frontRadius: 20, functionalSelections: { front: 'cannon', frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT } },
+        registry,
+        'A',
+      ),
+      plainSnapshot('B'),
+      { autoDrive: true, engine: 'planck' },
+    );
+    const o2 = lab2.orchestrator as PlanckBattleOrchestrator;
+    let fired2 = false;
+    o2.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'cannon') fired2 = true;
+    });
+    for (let i = 0; i < 500 && !fired2; i++) lab2.step(16.6667);
+    for (let i = 0; i < 30; i++) {
+      lab2.step(16.6667);
+      const s = o2.getRenderSnapshot();
+      if ((s.projectiles ?? []).length > 0) return s;
+    }
+    return o2.getRenderSnapshot();
+  }
   function plainSnapshot(side: 'A' | 'B') {
     return buildSnapshotFromDraft(
       {
@@ -566,7 +591,7 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     );
   }
 
-  it('1. laser 定义：weapon / charge 1500ms / speed·damage·recoil ≈ Cannon 2×', () => {
+  it('1. laser 定义：weapon / charge 1500ms / speed·damage 2× / recoil 8×（R1 肉眼可见后坐）', () => {
     const laser = registry.functionals.get('laser')!;
     const cannon = registry.functionals.get('cannon')!;
     expect(laser.category).toBe('weapon');
@@ -576,7 +601,9 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(lp.chargeMs).toBe(1500);
     expect(lp.muzzleSpeed).toBeCloseTo(cp.muzzleSpeed * 2, 6);
     expect(lp.projectileDamage).toBeCloseTo(cp.projectileDamage * 2, 6);
-    expect(lp.recoilImpulse).toBeCloseTo(cp.recoilImpulse * 2, 6);
+    // Q11-C-R1：recoil 60（2×）实测 chassis Δv 仅 0.33px/step 且 150ms 被
+    // autoDrive 拉回，肉眼不可感知 → 240（8×，Δv ≈1.3px/step）
+    expect(lp.recoilImpulse).toBeGreaterThan(cp.recoilImpulse * 4);
   });
 
   it('2. 蓄能 ~1.5s 肉眼可见（weaponCharge progress 0→1）：首个 charge 到 fire 时间差 ≈ chargeMs', () => {
@@ -651,7 +678,7 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(weaponDmgOnB).toBe(0); // 固定方向打空 = Miss
   });
 
-  it('5. 开火瞬间自车明显后坐（chassis vx 骤降：recoil 60 > Cannon 30 的效果）', () => {
+  it('5. 开火瞬间自车明显后坐（chassis vx 骤降：recoil 240，Δv ≈1.3px/step 肉眼可见）', () => {
     const lab = new PhysicsLab(rendererStub);
     lab.loadCustom(laserSnapshot('A'), plainSnapshot('B'), { autoDrive: true, engine: 'planck' });
     const o = lab.orchestrator as PlanckBattleOrchestrator;
@@ -670,9 +697,35 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     }
     expect(fired).toBe(true);
     const avgBefore = vxBefore.slice(-10).reduce((a, b) => a + b, 0) / 10;
-    // 真实 recoil impulse 60 / chassis mass ≈150 → Δv ≈ -0.4；autoDrive 抵消后
-    // 实测仍骤降 ~0.32（> Cannon 30 的 ~0.2）。强后坐可感知。
-    expect(Math.min(...vxAfter)).toBeLessThan(avgBefore - 0.25);
+    // Q11-C-R1：recoil 240 / chassis mass ≈150 → Δv ≈1.3px/step（≈79px/s）；
+    // 旧 60 实测仅骤降 0.32（≈20px/s）肉眼不可感知。
+    expect(Math.min(...vxAfter)).toBeLessThan(avgBefore - 0.8);
+  });
+
+  it('6. 镭射弹带 visual 标记（渲染区分）；Cannon 弹不带——碰撞/伤害链不变', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q11-C')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let fired = false;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'laser') fired = true;
+    });
+    let seenLaser = false;
+    for (let i = 0; i < 500 && !fired; i++) lab.step(16.6667);
+    for (let i = 0; i < 60 && !seenLaser; i++) {
+      lab.step(16.6667);
+      const snap = o.getRenderSnapshot();
+      for (const p of snap.projectiles ?? []) {
+        if (p.visual === 'laser') seenLaser = true;
+      }
+    }
+    expect(fired).toBe(true);
+    expect(seenLaser).toBe(true); // 镭射弹带 visual 标记 → 渲染层一眼可区分
+    // 碰撞/伤害链不变：Cannon 弹不产生 visual 标记（Q02-C3B 原语义）
+    const cannonSnap = makeCannonFireSnap();
+    for (const p of cannonSnap.projectiles ?? []) {
+      expect(p.visual).toBeUndefined();
+    }
   });
 
   it('Q11-R1. 三新部件真实装配链路：defId 正确 / Preview 真实部件 / Energy / Validator', () => {

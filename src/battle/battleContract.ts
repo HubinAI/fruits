@@ -272,6 +272,11 @@ export interface RenderProjectile {
   center: RenderVec2;
   radius: number;
   team: TeamId;
+  /**
+   * Q11-C-R1：纯渲染视觉标记（只影响绘制，不参与碰撞/伤害）。
+   * 'laser' = 镭射弹（更亮/更大/光晕，一眼区别于 Cannon 弹）。
+   */
+  visual?: 'laser';
 }
 
 /**

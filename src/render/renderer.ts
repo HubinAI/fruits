@@ -528,6 +528,28 @@ export class Renderer {
   private drawProjectiles(projectiles: readonly RenderProjectile[]): void {
     const ctx = this.ctx;
     for (const p of projectiles) {
+      if (p.visual === 'laser') {
+        // Q11-C-R1：镭射弹——亮白青 + 外发光光晕 + 绘制半径 ×1.6。
+        // 仅视觉放大（ss(p.radius*1.6)），真实碰撞半径 p.radius 未改；
+        // hit/miss 仍走真实 Projectile / CCD 链路。
+        const r = this.ss(p.radius * 1.6);
+        const sx = this.sx(p.center.x);
+        const sy = this.sy(p.center.y);
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = '#bff4ff';
+        ctx.beginPath();
+        ctx.arc(sx, sy, r * 1.9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#e9fdff';
+        ctx.beginPath();
+        ctx.arc(sx, sy, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#9be9ff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        continue;
+      }
       ctx.fillStyle = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
       ctx.beginPath();
       ctx.arc(this.sx(p.center.x), this.sy(p.center.y), this.ss(p.radius), 0, Math.PI * 2);

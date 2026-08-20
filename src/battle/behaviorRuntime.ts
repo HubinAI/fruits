@@ -191,6 +191,8 @@ class LaserRuntime implements PartBehaviorRuntime {
         center: world.getPosition(p),
         radius: (bounds.maxX - bounds.minX) / 2,
         team: tag.team,
+        // Q11-C-R1：镭射弹视觉标记（纯渲染区分，不参与碰撞/伤害链）
+        visual: 'laser',
       });
     }
     return out;
