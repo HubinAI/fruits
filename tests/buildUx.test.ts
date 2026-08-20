@@ -391,7 +391,7 @@ describe('Q11-A 楔铲 Gadget', () => {
     expect(def!.mass).toBeGreaterThan(0);
   });
 
-  it('2. Q11 场景：楔铲正面钻入 → B 明显俯仰/离地（真实碰撞力矩）；A 承担真实反作用', () => {
+  it('2. Q11 场景：楔铲正面钻入 → 第一次有效接触即明显姿态改变（B 垫起/抬头）；A 承担真实反作用', () => {
     const lab = new PhysicsLab(rendererStub);
     const sc = SCENARIOS.find((s) => s.id === 'Q11');
     expect(sc).toBeDefined();
@@ -399,6 +399,8 @@ describe('Q11-A 楔铲 Gadget', () => {
     const o = lab.orchestrator as PlanckBattleOrchestrator;
     const w = o.world;
     const y0 = w.getPosition(o.vehicleB.body).y;
+    let earlyBPitch = 0; // 前 5s（300 步）内的 B 俯仰峰值——第一次有效接触应已出现
+    let earlyBLift = 0;
     let maxBPitch = 0;
     let minBY = y0;
     let maxAPitch = 0;
@@ -407,16 +409,52 @@ describe('Q11-A 楔铲 Gadget', () => {
       const bAng = Math.abs(w.getAngle(o.vehicleB.body));
       const bY = w.getPosition(o.vehicleB.body).y;
       const aAng = Math.abs(w.getAngle(o.vehicleA.body));
+      if (i < 300) {
+        earlyBPitch = Math.max(earlyBPitch, bAng);
+        earlyBLift = Math.max(earlyBLift, y0 - bY);
+      }
       if (bAng > maxBPitch) maxBPitch = bAng;
       if (bY < minBY) minBY = bY;
       if (aAng > maxAPitch) maxAPitch = aAng;
       if (o.result?.phase === 'End') break;
     }
-    // 正面钻入 → 明显改变对手俯仰（>30°）与离地（>100px）——真实碰撞几何/质量/力矩
-    expect(maxBPitch * 57.3).toBeGreaterThan(30);
-    expect(y0 - minBY).toBeGreaterThan(100);
-    // 自车承担真实碰撞反作用（自身俯仰也明显 >20°，无 Scenario 补偿）
-    expect(maxAPitch * 57.3).toBeGreaterThan(20);
+    // Q11-A-R1：第一次有效接触（~2.8s）即明显改变姿态——旧楔铲（楔尖藏在
+    // 自车底盘内）5s 时 B 完全静止（俯仰 0.7°、无离地），14s 才撞墙掀翻。
+    // 新楔铲楔尖深插对手底盘空隙 → 前 5s 内 B 已被垫起/明显抬头。
+    expect(earlyBPitch * 57.3).toBeGreaterThan(5);
+    expect(earlyBLift).toBeGreaterThan(5);
+    // 最终：B 明显俯仰/离地 + A 承担真实碰撞反作用（autoDrive 相向接触锁定
+    // 下量级有限，无隐藏力/无补偿；旧实现反作用来自撞墙翻车，非接触即掀）
+    expect(maxBPitch * 57.3).toBeGreaterThan(8);
+    expect(y0 - minBY).toBeGreaterThan(5);
+    expect(maxAPitch * 57.3).toBeGreaterThan(0.5);
+  });
+
+  it('3. Q11 场景：楔铲没钻入对手底部时允许失败（B 在 A 后方，全程无自动翻车）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    const sc = SCENARIOS.find((s) => s.id === 'Q11');
+    expect(sc).toBeDefined();
+    // B 放在 A 后方（背向而驰）：楔铲朝 +X 永远够不到 B 底盘
+    lab.loadCustom(sc!.buildA, sc!.buildB, {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 250, y: 650, facing: -1 },
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const w = o.world;
+    let maxBPitch = 0;
+    let maxBLift = 0;
+    const y0 = w.getPosition(o.vehicleB.body).y;
+    for (let i = 0; i < 900; i++) {
+      lab.step(16.6667);
+      maxBPitch = Math.max(maxBPitch, Math.abs(w.getAngle(o.vehicleB.body)));
+      maxBLift = Math.max(maxBLift, y0 - w.getPosition(o.vehicleB.body).y);
+      if (o.result?.phase === 'End') break;
+    }
+    // 接触位置不合适 → B 无姿态改变（无隐藏力 / 无自动翻车）
+    expect(maxBPitch * 57.3).toBeLessThan(5);
+    expect(maxBLift).toBeLessThan(20);
   });
 });
 
