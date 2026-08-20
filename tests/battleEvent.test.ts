@@ -8,12 +8,20 @@
  * 4. 类型谓词正确判别（Renderer 消费侧不允许自行猜 death/fire——必须按 type 判别）。
  */
 import { describe, it, expect } from 'vitest';
-import { CombatEventBus, isDamageEvent, isDeathEvent, isWeaponFireEvent } from '../src/battle/combatEvents';
+import {
+  CombatEventBus,
+  isDamageEvent,
+  isDeathEvent,
+  isWeaponFireEvent,
+  type BattleEvent,
+  type DamageEvent,
+  type DeathEvent,
+  type WeaponFireEvent,
+} from '../src/battle/combatEvents';
 import { DamageResolver } from '../src/battle/damageResolver';
 import { CannonBehavior } from '../src/battle/cannonBehavior';
 import type { CombatVehicleState, CombatPartState, CombatWheelState } from '../src/battle/combatVehicle';
 import { createRegistry } from '../src/core/content';
-import type { FunctionalPartDef } from '../src/core/types';
 import { resolveSnapshot } from '../src/core/buildSnapshot';
 import { PlanckWorld } from '../src/physics/planckWorld';
 import {
@@ -29,6 +37,7 @@ function vehicleState(team: 'A' | 'B', hp: number): CombatVehicleState {
     id: team,
     team,
     hp,
+    maxHp: hp,
     wheels: [] as readonly CombatWheelState[],
     parts: [] as readonly CombatPartState[],
   };
@@ -60,8 +69,8 @@ describe('W1-EV-1 Battle Event 结构', () => {
 
     expect(received.length).toBe(1); // 未死亡：只发 damage
     const ev = received[0];
-    expect(isDamageEvent(ev as never)).toBe(true);
-    const d = ev as Extract<typeof ev, { type: 'damage' }>;
+    expect(isDamageEvent(ev as BattleEvent)).toBe(true);
+    const d = ev as DamageEvent;
     expect(d.type).toBe('damage');
     expect(d.source).toBe('A');
     expect(d.target).toBe('B');
@@ -162,9 +171,9 @@ describe('W1-EV-1 Battle Event 结构', () => {
   });
 
   it('4. 类型谓词正确判别（消费侧按 type 区分，不自行猜）', () => {
-    const damage = { type: 'damage' as const, source: 'A', target: 'B', damageSource: 'weapon' as const, partId: 'p', contactPoint: { x: 0, y: 0 }, contactNormal: { x: 1, y: 0 }, relativeVelocity: 1, damage: 10, hpBefore: 100, hpAfter: 90, timestamp: 0 };
-    const fire = { type: 'weaponFire' as const, team: 'A' as const, partId: 'part:front', behavior: 'cannon', worldPosition: { x: 1, y: 2 }, worldDirection: { x: 1, y: 0 }, timestamp: 0 };
-    const death = { type: 'death' as const, team: 'B' as const, sourceTeam: 'A' as const, damageSource: 'weapon' as const, timestamp: 0 };
+    const damage: DamageEvent = { type: 'damage', source: 'A', target: 'B', damageSource: 'weapon', partId: 'p', contactPoint: { x: 0, y: 0 }, contactNormal: { x: 1, y: 0 }, relativeVelocity: 1, damage: 10, hpBefore: 100, hpAfter: 90, timestamp: 0 };
+    const fire: WeaponFireEvent = { type: 'weaponFire', team: 'A', partId: 'part:front', behavior: 'cannon', worldPosition: { x: 1, y: 2 }, worldDirection: { x: 1, y: 0 }, timestamp: 0 };
+    const death: DeathEvent = { type: 'death', team: 'B', sourceTeam: 'A', damageSource: 'weapon', timestamp: 0 };
     expect(isDamageEvent(damage)).toBe(true);
     expect(isDamageEvent(fire)).toBe(false);
     expect(isDamageEvent(death)).toBe(false);
