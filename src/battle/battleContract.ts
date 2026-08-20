@@ -10,7 +10,7 @@
 import type { ArenaConfig } from './arenaConfig';
 import type { ImpactConfig } from './contactRouter';
 import type { BattlePhase, TeamId, BuildSnapshot } from '../core/types';
-import type { CombatEvent } from './combatEvents';
+import type { BattleEvent } from './combatEvents';
 
 /** Battle 配置（字段与 battleOrchestrator.BattleConfig 完全一致） */
 export interface BattleConfig {
@@ -213,7 +213,7 @@ export interface BattleOrchestratorApi {
   phase: string;
   timeMs: number;
   step(realDtMs: number, timeScale?: number): void;
-  onCombatEvent(cb: (ev: CombatEvent) => void): void;
+  onCombatEvent(cb: (ev: BattleEvent) => void): void;
   dispose(): void;
   getRenderSnapshot(): BattleRenderSnapshot;
   /**

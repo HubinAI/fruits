@@ -3,7 +3,6 @@
  * 表现 Sprite / FX / Hit 反馈 / Damage 数字。
  * 禁止 Renderer 决定 Gameplay；不依赖任何具体物理引擎（Matter / Planck / adapter）。
  */
-import type { CombatEvent } from '../battle/combatEvents';
 import type {
   BattleOrchestratorApi,
   BattleRenderSnapshot,
@@ -93,9 +92,10 @@ export class Renderer {
     return v * this.transform.scale;
   }
 
-  /** 订阅 Combat Event → 生成 FX（仅保存 team，绘制时取当前 Snapshot） */
+  /** 订阅 Battle Event → 生成 FX（仅保存 team，绘制时取当前 Snapshot）；只消费 Damage 事件 */
   bind(orchestrator: BattleOrchestratorApi): void {
-    orchestrator.onCombatEvent((ev: CombatEvent) => {
+    orchestrator.onCombatEvent((ev) => {
+      if (ev.type !== 'damage') return; // weaponFire / death 由 VFX/SFX 层消费，本模块只做伤害表现
       if (ev.damage > 0) {
         this.fx.push({
           x: ev.contactPoint.x,

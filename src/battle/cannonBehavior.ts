@@ -27,6 +27,7 @@ import {
   type PlanckVehicle,
 } from './planckVehicleAssembly';
 import type { ProjectileContactFact } from './contactRouter';
+import type { WeaponFireEvent } from './combatEvents';
 
 /** 固定物理步长（ms）：与 PlanckWorld.FIXED_STEP_MS 数值一致 */
 const FIXED_DT_MS = 1000 / PHYSICS_HZ;
@@ -92,9 +93,18 @@ export class CannonBehavior {
   private cooldownStepsRemaining = 0;
   /** 本实例创建且仍存活的 projectile 实例（Q02-C1B：命中/越界后移除） */
   private readonly projectiles = new Set<BodyHandle>();
+  /**
+   * W1-EV-1：真正创建 projectile 后的开火回调（timestamp 由 Orchestrator 补，
+   * 因为本模块无战斗时间概念）。Hammer/Push 不设置此回调（不凑假 fire）。
+   */
+  private readonly onFire?: (ev: Omit<WeaponFireEvent, 'timestamp'>) => void;
 
-  constructor(part: PlanckPartRuntime) {
+  constructor(
+    part: PlanckPartRuntime,
+    onFire?: (ev: Omit<WeaponFireEvent, 'timestamp'>) => void,
+  ) {
     this.params = readCannonParams(part);
+    this.onFire = onFire;
   }
 
   /** 剩余冷却固定步数（只读，供测试/调试） */
@@ -229,6 +239,16 @@ export class CannonBehavior {
     world.setLinearVelocity(proj, velocity.x, velocity.y);
     // 本实例追踪（Q02-C1B：后续命中/越界销毁、销毁后移除）
     this.projectiles.add(proj);
+
+    // W1-EV-1：真正创建 projectile 成功 → 开火事件（VFX/SFX 消费；Hammer/Push 不触发）
+    this.onFire?.({
+      type: 'weaponFire',
+      team: vehicle.team,
+      partId: `part:${part.id}`,
+      behavior: 'cannon',
+      worldPosition: { x: muzzlePoint.x, y: muzzlePoint.y },
+      worldDirection: { x: muzzleDir.x, y: muzzleDir.y },
+    });
 
     // Recoil：方向严格相反，作用于真实炮口世界点（Q02-F1 applyLinearImpulse），
     // 由 Weld 自然传给整车；禁止 setLinearVelocity / 固定 knockback。

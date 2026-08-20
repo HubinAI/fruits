@@ -17,7 +17,7 @@ import { PlanckWorld } from '../src/physics/planckWorld';
 import { createPlanckVehicle, settlePlanckVehicleToRestPose } from '../src/battle/planckVehicleAssembly';
 import { PushRodBehavior, PUSH_ROD_DEFAULT_PARAMS } from '../src/battle/pushRodBehavior';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
-import type { CombatEvent } from '../src/battle/combatEvents';
+import { isDamageEvent, type DamageEvent } from '../src/battle/combatEvents';
 
 const registry = createRegistry();
 
@@ -77,9 +77,9 @@ function runPush(bodyDefId: string, steps = 480): {
     spawnA: { x: 450, y: 640, facing: 1 },
     spawnB: { x: 700, y: 640, facing: -1 },
   });
-  const weaponEvents: CombatEvent[] = [];
+  const weaponEvents: DamageEvent[] = [];
   orch.onCombatEvent((e) => {
-    if (e.damageSource === 'weapon') weaponEvents.push(e);
+    if (isDamageEvent(e) && e.damageSource === 'weapon') weaponEvents.push(e);
   });
   const b0 = orch.world.getPosition(orch.vehicleB.body).x;
   const a0 = orch.world.getPosition(orch.vehicleA.body).x;

@@ -15,7 +15,7 @@ import type {
   BattleOrchestratorApi,
   BattleRenderSnapshot,
 } from '../src/battle/battleContract';
-import type { CombatEvent } from '../src/battle/combatEvents';
+import type { BattleEvent } from '../src/battle/combatEvents';
 
 /** 记录所有 ctx 调用的最小 stub */
 class CtxStub {
@@ -86,8 +86,8 @@ function makeSnapshot(projectiles: BattleRenderSnapshot['projectiles']): BattleR
   };
 }
 
-function makeFakeOrch(snapshot: BattleRenderSnapshot): BattleOrchestratorApi & { emit: (e: CombatEvent) => void } {
-  let cb: ((e: CombatEvent) => void) | null = null;
+function makeFakeOrch(snapshot: BattleRenderSnapshot): BattleOrchestratorApi & { emit: (e: BattleEvent) => void } {
+  let cb: ((e: BattleEvent) => void) | null = null;
   return {
     config: {},
     result: null,
@@ -102,7 +102,12 @@ function makeFakeOrch(snapshot: BattleRenderSnapshot): BattleOrchestratorApi & {
     },
     dispose: () => {},
     getRenderSnapshot: () => snapshot,
-    emit: (e) => {
+    getBattleStatusSnapshot: () => ({
+      sideA: { team: 'A', hp: 1000, maxHp: 1000 },
+      sideB: { team: 'B', hp: 1000, maxHp: 1000 },
+      phase: 'Active',
+    }),
+    emit: (e: BattleEvent) => {
       cb?.(e);
     },
   };
@@ -122,6 +127,7 @@ describe('Q02-C3B Renderer Projectile', () => {
     // 产生一个 FX（伤害数字）以验证「FX 之前」的绘制顺序
     renderer.bind(orch);
     orch.emit({
+      type: 'damage',
       source: 'A', target: 'B', damageSource: 'weapon',
       contactPoint: { x: 500, y: 600 }, contactNormal: { x: 1, y: 0 },
       relativeVelocity: 10, damage: 80, hpBefore: 1000, hpAfter: 920, timestamp: 0,

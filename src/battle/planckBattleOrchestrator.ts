@@ -30,7 +30,7 @@ import { HammerBehavior } from './hammerBehavior';
 import { PushRodBehavior } from './pushRodBehavior';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
 import { DamageResolver } from './damageResolver';
-import { CombatEventBus, type CombatEvent } from './combatEvents';
+import { CombatEventBus, type BattleEvent } from './combatEvents';
 import { PlanckArenaRuntime } from './planckArenaRuntime';
 import {
   resolveBattleResult,
@@ -279,11 +279,18 @@ export class PlanckBattleOrchestrator {
       settlePlanckVehicleToRestPose(this.world, this.vehicleB, this.arena.ground);
     }
 
-    // Cannon Behavior（Q02-C1A）：为每辆车上每个 cannon part 建独立冷却实例
+    // Cannon Behavior（Q02-C1A）：为每辆车上每个 cannon part 建独立冷却实例。
+    // W1-EV-1：onFire 回调把「真正创建 projectile」的开火事件补 timestamp 后 emit。
     for (const vehicle of [this.vehicleA, this.vehicleB]) {
       for (const part of vehicle.parts) {
         if (part.def.behavior === 'cannon') {
-          this.cannons.push({ vehicle, part, behavior: new CannonBehavior(part) });
+          this.cannons.push({
+            vehicle,
+            part,
+            behavior: new CannonBehavior(part, (e) => {
+              this.bus.emit({ ...e, timestamp: this.time });
+            }),
+          });
         }
       }
     }
@@ -412,8 +419,8 @@ export class PlanckBattleOrchestrator {
     this._result = resolveBattleResult(this.arena.phase, this.vehicleA.hp, this.vehicleB.hp);
   }
 
-  /** 订阅 Combat Event（Renderer 消费） */
-  onCombatEvent(fn: (ev: CombatEvent) => void): () => void {
+  /** 订阅 Battle Event（Renderer / VFX / SFX 消费；按 type 判别） */
+  onCombatEvent(fn: (ev: BattleEvent) => void): () => void {
     return this.bus.subscribe(fn);
   }
 

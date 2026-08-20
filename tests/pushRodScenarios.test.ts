@@ -15,7 +15,7 @@ import { getScenario } from '../src/lab/scenarios';
 import { PhysicsLab } from '../src/lab/physicsLab';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import type { Renderer } from '../src/render/renderer';
-import type { CombatEvent } from '../src/battle/combatEvents';
+import { isDamageEvent, type DamageEvent } from '../src/battle/combatEvents';
 import { PUSH_ROD_DEFAULT_PARAMS } from '../src/battle/pushRodBehavior';
 
 const rendererStub = { bind: () => {} } as unknown as Renderer;
@@ -47,9 +47,9 @@ function runScenario(
   const lab = new PhysicsLab(rendererStub);
   lab.loadScenario(getScenario(id)!);
   const o = requirePlanck(lab);
-  const weaponEvents: CombatEvent[] = [];
+  const weaponEvents: DamageEvent[] = [];
   o.onCombatEvent((e) => {
-    if (e.damageSource === 'weapon') weaponEvents.push(e);
+    if (isDamageEvent(e) && e.damageSource === 'weapon') weaponEvents.push(e);
   });
   const part = o.vehicleA.parts.find((p) => p.def.behavior === 'pushRod')!;
   const b0 = o.world.getPosition(o.vehicleB.body).x;

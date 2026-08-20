@@ -89,6 +89,11 @@ function makeFakeOrch(snapshot: BattleRenderSnapshot): BattleOrchestratorApi {
     onCombatEvent: () => () => {},
     dispose: () => {},
     getRenderSnapshot: () => snapshot,
+    getBattleStatusSnapshot: () => ({
+      sideA: { team: 'A', hp: 1000, maxHp: 1000 },
+      sideB: { team: 'B', hp: 1000, maxHp: 1000 },
+      phase: 'Active',
+    }),
   };
 }
 

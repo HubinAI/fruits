@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { ContactRouter } from '../src/battle/contactRouter';
 import { DamageResolver } from '../src/battle/damageResolver';
-import { CombatEventBus, type CombatEvent } from '../src/battle/combatEvents';
+import { CombatEventBus, isDamageEvent, type BattleEvent, type DamageEvent } from '../src/battle/combatEvents';
 import type { CombatVehicleState } from '../src/battle/combatVehicle';
 import type { FunctionalPartDef } from '../src/core/types';
 import { PlanckWorld, type BodyHandle } from '../src/physics/planckWorld';
@@ -44,7 +44,7 @@ function makeState(team: 'A' | 'B'): CombatVehicleState {
 }
 
 function makeHarness(a: CombatVehicleState, b: CombatVehicleState) {
-  const events: CombatEvent[] = [];
+  const events: BattleEvent[] = [];
   const bus = new CombatEventBus();
   bus.subscribe((e) => events.push(e));
   const router = new ContactRouter([a, b], new DamageResolver(bus));
@@ -86,20 +86,21 @@ describe('Q02-F2 ContactRouter Projectile Route', () => {
     let hit = false;
     for (let i = 0; i < 400 && !hit; i++) {
       world.stepFixed(1);
-      hit = events.some((ev) => ev.damageSource === 'weapon');
+      hit = events.some((ev) => isDamageEvent(ev) && ev.damageSource === 'weapon');
     }
     expect(hit).toBe(true);
 
     // 只扣一次 projectileDamage=60（无重复、非 Impact 半伤）
     const weaponHits = events.filter(
-      (ev) => ev.damageSource === 'weapon' && ev.partId === 'cannon-1',
+      (ev): ev is DamageEvent =>
+        isDamageEvent(ev) && ev.damageSource === 'weapon' && ev.partId === 'cannon-1',
     );
     expect(weaponHits.length).toBe(1);
     expect(weaponHits[0]!.damage).toBe(60);
     expect(weaponHits[0]!.behavior).toBe('cannon');
     expect(b.hp).toBe(940);
     // projectile 不参与 vehicle Impact Damage
-    expect(events.some((ev) => ev.damageSource === 'impact')).toBe(false);
+    expect(events.some((ev) => isDamageEvent(ev) && ev.damageSource === 'impact')).toBe(false);
     expect(router.debug.lastImpact).toBeNull();
   });
 
@@ -209,7 +210,7 @@ describe('Q02-F2 ContactRouter Projectile Route', () => {
     let hit = false;
     for (let i = 0; i < 200 && !hit; i++) {
       world.stepFixed(1);
-      hit = events.some((ev) => ev.damageSource === 'weapon');
+      hit = events.some((ev) => isDamageEvent(ev) && ev.damageSource === 'weapon');
     }
     expect(hit).toBe(true);
 
@@ -217,7 +218,7 @@ describe('Q02-F2 ContactRouter Projectile Route', () => {
     expect([...projBeginBatches.values()].some((n) => n >= 2)).toBe(true);
     // 实例级去重：两个不同 projectile（即使 team/partId/target 相同）各自结算一次
     const weaponHits = events.filter(
-      (ev) => ev.damageSource === 'weapon' && ev.partId === 'cannon-1',
+      (ev) => isDamageEvent(ev) && ev.damageSource === 'weapon' && ev.partId === 'cannon-1',
     );
     expect(weaponHits.length).toBe(2);
     expect(b.hp).toBe(880); // 1000 - 60×2
@@ -268,7 +269,7 @@ describe('Q02-F2 ContactRouter Projectile Route', () => {
     let hit = false;
     for (let i = 0; i < 200 && !hit; i++) {
       world.stepFixed(1);
-      hit = events.some((ev) => ev.damageSource === 'weapon');
+      hit = events.some((ev) => isDamageEvent(ev) && ev.damageSource === 'weapon');
     }
     expect(hit).toBe(true);
 
@@ -276,7 +277,7 @@ describe('Q02-F2 ContactRouter Projectile Route', () => {
     expect([...projBeginBatches.values()].some((n) => n >= 2)).toBe(true);
     // 实例级去重：同一实例只结算一次
     const weaponHits = events.filter(
-      (ev) => ev.damageSource === 'weapon' && ev.partId === 'cannon-1',
+      (ev) => isDamageEvent(ev) && ev.damageSource === 'weapon' && ev.partId === 'cannon-1',
     );
     expect(weaponHits.length).toBe(1);
     expect(b.hp).toBe(940);

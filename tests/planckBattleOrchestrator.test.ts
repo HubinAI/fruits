@@ -16,7 +16,7 @@ import { createRegistry } from '../src/core/content';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import type { BattleResult } from '../src/battle/battleContract';
 import type { ContactBridgeEvent } from '../src/physics/planckWorld';
-import type { CombatEvent } from '../src/battle/combatEvents';
+import { isDamageEvent, type BattleEvent } from '../src/battle/combatEvents';
 import { PHYSICS_HZ } from '../src/physics/units';
 
 const registry = createRegistry();
@@ -123,10 +123,10 @@ interface HostileBatchReport {
  */
 function installSpy(o: PlanckBattleOrchestrator): {
   rawEvents: ContactBridgeEvent[];
-  damageEvents: CombatEvent[];
+  damageEvents: BattleEvent[];
 } {
   const rawEvents: ContactBridgeEvent[] = [];
-  const damageEvents: CombatEvent[] = [];
+  const damageEvents: BattleEvent[] = [];
   o.onCombatEvent((ev) => damageEvents.push(ev));
   const forward = (ev: ContactBridgeEvent): void =>
     o.router.handlePlanckContact(o.world, ev);
@@ -320,8 +320,8 @@ describe('F-02M-B17A-A1 · Planck Battle Orchestrator 最小驱动闭环', () =>
     expect(batch).not.toBeNull();
     const b = batch as HostileBatchReport;
 
-    const weaponEvents = spy.damageEvents.filter((e) => e.damageSource === 'weapon');
-    const impactEvents = spy.damageEvents.filter((e) => e.damageSource === 'impact');
+    const weaponEvents = spy.damageEvents.filter((e): e is import('../src/battle/combatEvents').DamageEvent => isDamageEvent(e) && e.damageSource === 'weapon');
+    const impactEvents = spy.damageEvents.filter((e): e is import('../src/battle/combatEvents').DamageEvent => isDamageEvent(e) && e.damageSource === 'impact');
 
     // 实测数据回传（A2D 必须回传项）
     console.log(`[A2D-W1] firstHostileBatch ts=${b.timestamp} size=${b.size}`);
@@ -382,8 +382,8 @@ describe('F-02M-B17A-A1 · Planck Battle Orchestrator 最小驱动闭环', () =>
     expect(batch).not.toBeNull();
     const b = batch as HostileBatchReport;
 
-    const impactEvents = spy.damageEvents.filter((e) => e.damageSource === 'impact');
-    const weaponEvents = spy.damageEvents.filter((e) => e.damageSource === 'weapon');
+    const impactEvents = spy.damageEvents.filter((e): e is import('../src/battle/combatEvents').DamageEvent => isDamageEvent(e) && e.damageSource === 'impact');
+    const weaponEvents = spy.damageEvents.filter((e): e is import('../src/battle/combatEvents').DamageEvent => isDamageEvent(e) && e.damageSource === 'weapon');
 
     // 现有公式：total = min(120, max(0, (R - 0.75) * 0.5))；每方 = total/2
     const expectedTotal = Math.min(120, Math.max(0, (b.hostileMax - 0.75) * 0.5));
@@ -537,7 +537,7 @@ describe('F-02M-B17A-A1 · Planck Battle Orchestrator 最小驱动闭环', () =>
 
     let damageCount = 0;
     o.onCombatEvent((ev) => {
-      if (ev.damageSource) damageCount++; // 仅统计伤害事件
+      if (isDamageEvent(ev)) damageCount++; // 仅统计伤害事件
     });
 
     // 通过一次正常 orchestrator.step() 触发结算

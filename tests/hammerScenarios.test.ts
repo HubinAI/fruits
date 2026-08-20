@@ -21,7 +21,7 @@ import { getScenario } from '../src/lab/scenarios';
 import { PhysicsLab } from '../src/lab/physicsLab';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import type { Renderer } from '../src/render/renderer';
-import type { CombatEvent } from '../src/battle/combatEvents';
+import { isDamageEvent, type DamageEvent } from '../src/battle/combatEvents';
 import { HAMMER_DEFAULT_PARAMS } from '../src/battle/hammerBehavior';
 
 const rendererStub = { bind: () => {} } as unknown as Renderer;
@@ -80,9 +80,9 @@ describe('Q03-C2 Hammer Visual Scenarios', () => {
     const lab = new PhysicsLab(rendererStub);
     lab.loadScenario(getScenario('Hammer-Hit')!);
     const o = requirePlanck(lab);
-    const weaponEvents: CombatEvent[] = [];
+    const weaponEvents: DamageEvent[] = [];
     o.onCombatEvent((e) => {
-      if (e.damageSource === 'weapon') weaponEvents.push(e);
+      if (isDamageEvent(e) && e.damageSource === 'weapon') weaponEvents.push(e);
     });
     let firstHitStep = -1;
     for (let i = 1; i <= 360; i++) {
@@ -103,9 +103,9 @@ describe('Q03-C2 Hammer Visual Scenarios', () => {
     const lab = new PhysicsLab(rendererStub);
     lab.loadScenario(getScenario('Hammer-Miss')!);
     const o = requirePlanck(lab);
-    const weaponEvents: CombatEvent[] = [];
+    const weaponEvents: DamageEvent[] = [];
     o.onCombatEvent((e) => {
-      if (e.damageSource === 'weapon') weaponEvents.push(e);
+      if (isDamageEvent(e) && e.damageSource === 'weapon') weaponEvents.push(e);
     });
     for (let i = 0; i < 360; i++) lab.step(16.6667);
     expect(weaponEvents.length).toBe(0);
@@ -116,9 +116,9 @@ describe('Q03-C2 Hammer Visual Scenarios', () => {
     const lab = new PhysicsLab(rendererStub);
     lab.loadScenario(getScenario('Hammer-Reaction')!);
     const o = requirePlanck(lab);
-    const weaponEvents: CombatEvent[] = [];
+    const weaponEvents: DamageEvent[] = [];
     o.onCombatEvent((e) => {
-      if (e.damageSource === 'weapon') weaponEvents.push(e);
+      if (isDamageEvent(e) && e.damageSource === 'weapon') weaponEvents.push(e);
     });
 
     // 前 60 步（windup 阶段）无敌人接触 → B 保持 1000

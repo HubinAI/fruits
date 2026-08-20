@@ -18,7 +18,7 @@ import { createVehicle, updateVehiclePhysics, settleVehicleToRestPose, type Vehi
 import { driveVehicle } from './movement';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
 import { DamageResolver } from './damageResolver';
-import { CombatEventBus, type CombatEvent } from './combatEvents';
+import { CombatEventBus, type BattleEvent } from './combatEvents';
 import { ArenaRuntime } from './arenaRuntime';
 import {
   resolveBattleResult,
@@ -147,8 +147,8 @@ export class BattleOrchestrator {
     this._result = resolveBattleResult(this.arena.phase, this.vehicleA.hp, this.vehicleB.hp);
   }
 
-  /** 订阅 Combat Event（Renderer 消费） */
-  onCombatEvent(fn: (ev: CombatEvent) => void): () => void {
+  /** 订阅 Battle Event（Renderer / VFX / SFX 消费；按 type 判别） */
+  onCombatEvent(fn: (ev: BattleEvent) => void): () => void {
     return this.bus.subscribe(fn);
   }
 

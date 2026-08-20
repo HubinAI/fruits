@@ -20,8 +20,8 @@ import {
 } from '../src/battle/planckVehicleAssembly';
 import { CannonBehavior } from '../src/battle/cannonBehavior';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
-import type { CombatEvent } from '../src/battle/combatEvents';
-import { CombatEventBus } from '../src/battle/combatEvents';
+import { CombatEventBus, isDamageEvent, type BattleEvent, type DamageEvent } from '../src/battle/combatEvents';
+
 import { ContactRouter } from '../src/battle/contactRouter';
 import { DamageResolver } from '../src/battle/damageResolver';
 import { PlanckArenaRuntime } from '../src/battle/planckArenaRuntime';
@@ -74,7 +74,7 @@ function cannonPart(v: PlanckVehicle) {
 /** 手动接线（与 Orchestrator 相同语义）：真实 ContactRouter 消费 Planck 接触事件 */
 function makeHitHarness(world: PlanckWorld, vehicles: PlanckVehicle[]) {
   const bus = new CombatEventBus();
-  const events: CombatEvent[] = [];
+  const events: BattleEvent[] = [];
   bus.subscribe((e) => events.push(e));
   const router = new ContactRouter(vehicles, new DamageResolver(bus));
   world.setBatchedContactListener((ev) => router.handlePlanckContact(world, ev));
@@ -176,9 +176,9 @@ describe('Q02-C1A Orchestrator 正式插入口（端到端）', () => {
       // spawnB 过远时后 2 发会打空（真实物理）。实测 spawnB=580 → 4 发全中（step 1/61/121/181）。
       spawnB: { x: 580, y: 640, facing: -1 },
     });
-    const weaponEvents: CombatEvent[] = [];
+    const weaponEvents: DamageEvent[] = [];
     orch.onCombatEvent((e) => {
-      if (e.damageSource === 'weapon') weaponEvents.push(e);
+      if (isDamageEvent(e) && e.damageSource === 'weapon') weaponEvents.push(e);
     });
 
     // 记录每次 weapon 伤害出现的 step 序号（batched 监听在 step() 内同步交付）
@@ -224,11 +224,11 @@ describe('Q02-C1B Projectile Lifecycle', () => {
       world.stepFixed(1);
       const facts = router.drainProjectileContactFacts();
       behavior.consumeProjectileFacts(world, facts);
-      hit = events.some((e) => e.damageSource === 'weapon');
+      hit = events.some((e) => isDamageEvent(e) && e.damageSource === 'weapon');
     }
     expect(hit).toBe(true);
     // 伤害只发生一次（命中即销毁 → 不会下滑触轮产生第二次）
-    expect(events.filter((e) => e.damageSource === 'weapon').length).toBe(1);
+    expect(events.filter((e) => isDamageEvent(e) && e.damageSource === 'weapon').length).toBe(1);
     expect(vb.hp).toBe(920);
     // projectile 已销毁并从追踪集合移除；handle 失效（非 stale 半死状态）
     expect(behavior.aliveProjectiles.length).toBe(0);

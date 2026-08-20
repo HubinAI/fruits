@@ -19,7 +19,7 @@ import {
 } from '../src/battle/planckVehicleAssembly';
 import { HammerBehavior, HAMMER_DEFAULT_PARAMS } from '../src/battle/hammerBehavior';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
-import type { CombatEvent } from '../src/battle/combatEvents';
+import { isDamageEvent, type DamageEvent } from '../src/battle/combatEvents';
 
 const registry = createRegistry();
 
@@ -192,9 +192,9 @@ describe('Q03-C1 Orchestrator 端到端', () => {
       spawnA: { x: 450, y: 640, facing: 1 },
       spawnB: { x: 560, y: 640, facing: -1 },
     });
-    const weaponEvents: CombatEvent[] = [];
+    const weaponEvents: DamageEvent[] = [];
     orch.onCombatEvent((e) => {
-      if (e.damageSource === 'weapon') weaponEvents.push(e);
+      if (isDamageEvent(e) && e.damageSource === 'weapon') weaponEvents.push(e);
     });
     for (let i = 0; i < 300; i++) orch.step(16.6667);
     expect(weaponEvents.length).toBeGreaterThanOrEqual(1);
@@ -209,9 +209,9 @@ describe('Q03-C1 Orchestrator 端到端', () => {
       // B 放远（pivot+70 之外）：锤头 swing 扫不到 → 打空
       spawnB: { x: 900, y: 640, facing: -1 },
     });
-    const weaponEvents: CombatEvent[] = [];
+    const weaponEvents: DamageEvent[] = [];
     orch.onCombatEvent((e) => {
-      if (e.damageSource === 'weapon') weaponEvents.push(e);
+      if (isDamageEvent(e) && e.damageSource === 'weapon') weaponEvents.push(e);
     });
     for (let i = 0; i < 300; i++) orch.step(16.6667);
     expect(weaponEvents.length).toBe(0);

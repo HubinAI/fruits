@@ -14,6 +14,7 @@ import type { BuildSnapshot } from '../src/core/types';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import { BattleOrchestrator } from '../src/battle/battleOrchestrator';
 import { getPreset } from '../src/lab/presets';
+import { isDamageEvent } from '../src/battle/combatEvents';
 
 const registry = createRegistry();
 
@@ -91,7 +92,7 @@ describe('Q02-C3A Projectile Render Snapshot', () => {
     const orch = makeOrch();
     let weaponCount = 0;
     orch.onCombatEvent((e) => {
-      if (e.damageSource === 'weapon') weaponCount++;
+      if (isDamageEvent(e) && e.damageSource === 'weapon') weaponCount++;
     });
 
     // 步进到首次 weapon 命中：该步弹体已销毁 → Snapshot 无 projectile

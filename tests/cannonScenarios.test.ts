@@ -14,7 +14,7 @@ import { getScenario } from '../src/lab/scenarios';
 import { PhysicsLab } from '../src/lab/physicsLab';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import type { Renderer } from '../src/render/renderer';
-import type { CombatEvent } from '../src/battle/combatEvents';
+import { isDamageEvent, type DamageEvent } from '../src/battle/combatEvents';
 import type { PlanckVehicle } from '../src/battle/planckVehicleAssembly';
 import type { BodyHandle } from '../src/physics/planckWorld';
 
@@ -99,9 +99,9 @@ describe('Q02-C4 Cannon Visual Scenarios', () => {
     const lab = new PhysicsLab(rendererStub);
     lab.loadScenario(getScenario('Cannon-Hit')!);
     const o = requirePlanck(lab);
-    const weaponEvents: CombatEvent[] = [];
+    const weaponEvents: DamageEvent[] = [];
     o.onCombatEvent((e) => {
-      if (e.damageSource === 'weapon') weaponEvents.push(e);
+      if (isDamageEvent(e) && e.damageSource === 'weapon') weaponEvents.push(e);
     });
     for (let i = 0; i < 120; i++) lab.step(16.6667);
     // 120 步内 2 发（step 1/61）均真实命中 B（命中即销毁，每发恰一次伤害）
@@ -114,9 +114,9 @@ describe('Q02-C4 Cannon Visual Scenarios', () => {
     const lab = new PhysicsLab(rendererStub);
     lab.loadScenario(getScenario('Cannon-Recoil')!);
     const o = requirePlanck(lab);
-    const weaponEvents: CombatEvent[] = [];
+    const weaponEvents: DamageEvent[] = [];
     o.onCombatEvent((e) => {
-      if (e.damageSource === 'weapon') weaponEvents.push(e);
+      if (isDamageEvent(e) && e.damageSource === 'weapon') weaponEvents.push(e);
     });
     const x0 = o.world.getPosition(o.vehicleA.body).x;
     // 第一帧开炮后整车立即获得 -X 速度（真实 recoil 经 Weld 传整车）
