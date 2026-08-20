@@ -367,6 +367,9 @@ export class PlanckBattleOrchestrator {
 
     this.arena.update(steps * FIXED_DT_MS);
 
+    // W1-HIT-1：contactTick 持续接触按固定物理时间结算（本步时间基准）
+    this.router.advanceContactTicks(this.time);
+
     this.detectEnd();
   }
 

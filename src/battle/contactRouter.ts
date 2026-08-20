@@ -24,6 +24,71 @@ export interface ImpactConfig {
   maxDamage: number;
 }
 
+/* ---------- W1-HIT-1：通用 Contact Hit Policy ---------- */
+
+/**
+ * 武器接触命中策略（W1-HIT-1）：
+ * - contactOnce：接触 start 结算一次（baseDamage，现状语义；Hammer 等零变化）；
+ * - contactTick：接触持续期间按固定物理时间 interval 结算 damage（圆锯/钻头/持续切割）。
+ * 放置于 weapon part 的 behaviorParams.hitPolicy；缺省 = contactOnce。
+ */
+export type ContactHitPolicy =
+  | { mode: 'contactOnce' }
+  | {
+      mode: 'contactTick';
+      /** 两次 tick 的最小物理时间间隔（ms） */
+      intervalMs: number;
+      /** 每次 tick 结算的伤害 */
+      damage: number;
+      /** 可选：接触登记的最低相对速度（缺省 = WEAPON_CONTACT_THRESHOLD） */
+      minRelativeVelocity?: number;
+    };
+
+/** 一个 contactTick 活跃接触（去重单位 = attacker team + part instance + target team） */
+interface ActiveTickContact {
+  attackerTeam: TeamId;
+  attackerPartId: string; // 'part:<hardpoint>'
+  defenderTeam: TeamId;
+  part: CombatPartState;
+  defender: CombatVehicleState;
+  policy: Extract<ContactHitPolicy, { mode: 'contactTick' }>;
+  /** 接触开始物理时间（首次 advance 时记录，避免首步立即 tick） */
+  startedAtMs: number | null;
+  lastTickMs: number;
+  contactPoint: { x: number; y: number };
+  contactNormal: { x: number; y: number };
+  relativeVelocity: number;
+}
+
+/**
+ * 从 behaviorParams 读取 hitPolicy（W1-HIT-1）：
+ * - 缺省 / 非法（interval<=0 或 damage<=0）→ contactOnce（保持 baseDamage 语义）。
+ */
+export function readHitPolicy(
+  behaviorParams: Record<string, unknown> | undefined,
+): ContactHitPolicy {
+  const p = behaviorParams?.hitPolicy;
+  if (p && typeof p === 'object') {
+    const cand = p as { mode?: unknown; intervalMs?: unknown; damage?: unknown; minRelativeVelocity?: unknown };
+    if (cand.mode === 'contactTick') {
+      const intervalMs =
+        typeof cand.intervalMs === 'number' && Number.isFinite(cand.intervalMs)
+          ? cand.intervalMs
+          : 0;
+      const damage =
+        typeof cand.damage === 'number' && Number.isFinite(cand.damage) ? cand.damage : 0;
+      const minRel =
+        typeof cand.minRelativeVelocity === 'number' && Number.isFinite(cand.minRelativeVelocity)
+          ? cand.minRelativeVelocity
+          : undefined;
+      if (intervalMs > 0 && damage > 0) {
+        return { mode: 'contactTick', intervalMs, damage, minRelativeVelocity: minRel };
+      }
+    }
+  }
+  return { mode: 'contactOnce' };
+}
+
 /**
  * 引擎无关的接触事件（B5A）：不包含 Matter/Planck body，
  * 由 Matter 入口（handleContact）与 Planck 入口（handlePlanckContact）
@@ -133,6 +198,10 @@ export class ContactRouter {
 
   /** Projectile 接触事实缓冲（Q02-F2）：仅记录真实 begin，drain 读取后清空 */
   private projectileFacts: ProjectileContactFact[] = [];
+
+  /* ---------- W1-HIT-1：contactTick 活跃接触状态 ---------- */
+
+  private readonly activeTicks = new Map<string, ActiveTickContact>();
 
   constructor(
     private vehicles: CombatVehicleState[],
@@ -471,6 +540,13 @@ export class ContactRouter {
     const partIdA = String(mA.partId ?? '');
     const partIdB = String(mB.partId ?? '');
 
+    // W1-HIT-1：接触结束 → 停止 contactTick（之后不再有 tick 伤害）
+    if (ev.phase === 'end') {
+      this.removeActiveTick(teamA, partIdA, teamB);
+      this.removeActiveTick(teamB, partIdB, teamA);
+      return;
+    }
+
     // 只有 collisionStart 产生伤害（重复触发保护：持续贴合不重复扣血；
     // 分离后再次接触会重新触发 collisionStart）
     if (ev.phase !== 'start') return;
@@ -496,6 +572,13 @@ export class ContactRouter {
     if (!part) return;
     if (part.def.category !== 'weapon') return;
 
+    // W1-HIT-1：命中策略分派——contactTick 登记持续接触；contactOnce 保持 baseDamage 一次
+    const policy = readHitPolicy(part.def.behaviorParams);
+    if (policy.mode === 'contactTick') {
+      this.registerActiveTick(ev, attacker, defender, attackerPartId, part, policy);
+      return;
+    }
+
     // 只有行为能造成直接伤害的武器才处理
     const baseDamage = (part.def.behaviorParams?.baseDamage as number) ?? 0;
     if (baseDamage <= 0) return;
@@ -520,6 +603,80 @@ export class ContactRouter {
       damage: baseDamage,
       target: defender.id,
     };
+  }
+
+  // ---------- W1-HIT-1：contactTick 生命周期 ----------
+
+  /**
+   * 登记一个 contactTick 活跃接触（去重 key = attacker team + part instance + target team）。
+   * - 同一 key 已存在 → 跳过（同一物理步多 contact pair 不重复登记）；
+   * - minRelativeVelocity（缺省 = WEAPON_CONTACT_THRESHOLD）不达标 → 不登记；
+   * - 登记本身不立即伤害：首 tick 从接触开始计时 intervalMs 后由 advanceContactTicks 结算。
+   */
+  private registerActiveTick(
+    ev: RouterContactEvent,
+    attacker: CombatVehicleState,
+    defender: CombatVehicleState,
+    attackerPartId: string,
+    part: CombatPartState,
+    policy: Extract<ContactHitPolicy, { mode: 'contactTick' }>,
+  ): void {
+    const key = `${attacker.team}|${attackerPartId}|${defender.team}`;
+    if (this.activeTicks.has(key)) return; // 多 pair / 多 sub-part 去重
+    const minRel = policy.minRelativeVelocity ?? WEAPON_CONTACT_THRESHOLD;
+    if (ev.relativeVelocity < minRel) return;
+    this.activeTicks.set(key, {
+      attackerTeam: attacker.team as TeamId,
+      attackerPartId,
+      defenderTeam: defender.team as TeamId,
+      part,
+      defender,
+      policy,
+      startedAtMs: null,
+      lastTickMs: 0,
+      contactPoint: ev.contactPoint,
+      contactNormal: ev.normal,
+      relativeVelocity: ev.relativeVelocity,
+    });
+  }
+
+  private removeActiveTick(team: string, partId: string, defenderTeam: string): void {
+    if (!partId.startsWith('part:')) return;
+    this.activeTicks.delete(`${team}|${partId}|${defenderTeam}`);
+  }
+
+  /**
+   * 推进 contactTick（Orchestrator 每个固定物理步后调用，传战斗物理时间 ms）：
+   * - 首次调用记录接触开始时间（不 tick）；
+   * - 此后按固定物理时间 interval 结算 damage（无 setInterval / 墙钟 / 每渲染帧伤害）；
+   * - 接触 end 已移除的 entry 不再结算。
+   */
+  advanceContactTicks(nowMs: number): void {
+    for (const c of this.activeTicks.values()) {
+      if (c.startedAtMs === null) {
+        c.startedAtMs = nowMs;
+        c.lastTickMs = nowMs;
+        continue;
+      }
+      while (nowMs - c.lastTickMs >= c.policy.intervalMs) {
+        this.damageResolver.applyDamage(c.defender, {
+          source: c.attackerTeam,
+          target: c.defenderTeam,
+          damageSource: 'weapon',
+          partId: c.part.def.id,
+          behavior: c.part.def.behavior,
+          contactPoint: c.contactPoint,
+          contactNormal: c.contactNormal,
+          relativeVelocity: c.relativeVelocity,
+          damage: c.policy.damage,
+        }, 0);
+        this.debug.lastDamage = {
+          damage: c.policy.damage,
+          target: c.defender.id,
+        };
+        c.lastTickMs += c.policy.intervalMs;
+      }
+    }
   }
 
   // ---------- Projectile（Q02-F2） ----------
