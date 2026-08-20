@@ -81,12 +81,18 @@ export class BattleOrchestrator {
       [this.vehicleA, this.vehicleB],
       this.damageResolver,
       { ...DEFAULT_IMPACT_CONFIG, ...config.impact },
+      // W1-END-2：closing 刺墙 hazard tick 参数（来自 arena config；规则冻结、数值不冻结）
+      {
+        tickMs: this.arena.config.hazardTickMs,
+        damagePerTick: this.arena.config.hazardDamagePerTick,
+      },
     );
 
+    // W1-END-2：传入当前 arena phase，hazard 接触仅在 Closing 登记 tick
     this.world.setCollisionHandlers({
-      onStart: (ev) => this.router.handleContact(ev),
-      onActive: (ev) => this.router.handleContact(ev),
-      onEnd: (ev) => this.router.handleContact(ev),
+      onStart: (ev) => this.router.handleContact(ev, this.arena.phase),
+      onActive: (ev) => this.router.handleContact(ev, this.arena.phase),
+      onEnd: (ev) => this.router.handleContact(ev, this.arena.phase),
     });
   }
 
@@ -140,8 +146,9 @@ export class BattleOrchestrator {
 
     this.arena.update(steps * FIXED_DT);
 
-    // W1-HIT-1：contactTick 持续接触按固定物理时间结算（本步开始时间基准）
-    this.router.advanceContactTicks(this.time);
+    // W1-HIT-1 / W1-END-2：contactTick 持续接触按固定物理时间结算（本步时间基准；
+    // hazard tick 仅 arena Closing 阶段生效）
+    this.router.advanceContactTicks(this.time, this.arena.phase);
 
     this.detectEnd();
   }

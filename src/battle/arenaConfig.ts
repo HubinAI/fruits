@@ -21,6 +21,15 @@ export interface ArenaConfig {
   };
   /** Closing 刺墙推进速度，当前游戏层实际单位 px/step（每物理步像素数）。骨架阶段默认较慢，不精调节奏。 */
   closingSpeed: number;
+  /**
+   * Closing 刺墙 hazard 伤害（W1-END-2）：车辆与 hazard 持续接触时按固定物理时间
+   * tick 结算 Hazard Damage（damageSource:'hazard'，走 DamageResolver / contact tick
+   * Foundation）。Active/Warning 刺墙不参与战斗（0 伤害）。本队列冻结规则，不冻结
+   * 最终平衡数值（默认值为骨架占位）。
+   */
+  hazardTickMs: number;
+  /** 每次 hazard tick 结算的伤害 */
+  hazardDamagePerTick: number;
   /** Projectile Bounds（顶部越界销毁） */
   projectileTopY: number;
 }
@@ -36,5 +45,8 @@ export const DEFAULT_ARENA_CONFIG: ArenaConfig = {
     closingMs: 5_000,
   },
   closingSpeed: 40,
+  // W1-END-2：Closing 持续接触 tick 参数（骨架占位值，规则冻结、数值不冻结）
+  hazardTickMs: 500,
+  hazardDamagePerTick: 40,
   projectileTopY: -50,
 };

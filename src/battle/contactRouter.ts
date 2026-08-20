@@ -10,7 +10,7 @@
 import type { ContactEvent } from '../physics/adapter';
 import { getMeta } from '../physics/adapter';
 import type { PlanckWorld, ContactBridgeEvent } from '../physics/planckWorld';
-import type { OwnerTag, TeamId } from '../core/types';
+import type { OwnerTag, TeamId, BattlePhase } from '../core/types';
 import type { CombatPartState, CombatVehicleState, CombatWheelState } from './combatVehicle';
 import type { DamageResolver } from './damageResolver';
 
@@ -44,20 +44,41 @@ export type ContactHitPolicy =
       minRelativeVelocity?: number;
     };
 
-/** 一个 contactTick 活跃接触（去重单位 = attacker team + part instance + target team） */
-interface ActiveTickContact {
+/** 一个 contactTick 活跃接触（去重单位 = attacker team + part instance + target team；hazard = 单队） */
+interface ActiveWeaponTick {
+  kind: 'weapon';
   attackerTeam: TeamId;
   attackerPartId: string; // 'part:<hardpoint>'
   defenderTeam: TeamId;
   part: CombatPartState;
-  defender: CombatVehicleState;
   policy: Extract<ContactHitPolicy, { mode: 'contactTick' }>;
+}
+
+/** 一个 hazard contactTick 活跃接触（W1-END-2）：closing 刺墙压住某队车辆（无 attacker part） */
+interface ActiveHazardTick {
+  kind: 'hazard';
+  /** 被压车辆 team（damage 事件 source/target 均为此队，damageSource:'hazard'） */
+  team: TeamId;
+}
+
+interface ActiveTickBase {
+  defender: CombatVehicleState;
   /** 接触开始物理时间（首次 advance 时记录，避免首步立即 tick） */
   startedAtMs: number | null;
   lastTickMs: number;
+  intervalMs: number;
+  damage: number;
   contactPoint: { x: number; y: number };
   contactNormal: { x: number; y: number };
   relativeVelocity: number;
+}
+
+type ActiveTickContact = ActiveTickBase & (ActiveWeaponTick | ActiveHazardTick);
+
+/** Hazard tick 配置（W1-END-2；来自 ArenaConfig，orchestrator 注入） */
+export interface HazardTickConfig {
+  tickMs: number;
+  damagePerTick: number;
 }
 
 /**
@@ -207,6 +228,8 @@ export class ContactRouter {
     private vehicles: CombatVehicleState[],
     private damageResolver: DamageResolver,
     private impactConfig: ImpactConfig = DEFAULT_IMPACT_CONFIG,
+    /** W1-END-2：Closing 刺墙 hazard tick 参数（缺省 0 → hazard 不产生伤害） */
+    private hazardConfig: HazardTickConfig = { tickMs: 0, damagePerTick: 0 },
   ) {}
 
   /** 按 team 唯一查找战斗车辆（一个 battle 内每个 team 至多一辆车） */
@@ -228,8 +251,8 @@ export class ContactRouter {
     return v.parts.find((p) => `part:${p.id}` === partId);
   }
 
-  /** 处理一次 Matter 接触事件（Matter 入口，行为保持不变） */
-  handleContact(ev: ContactEvent): void {
+  /** 处理一次 Matter 接触事件（Matter 入口，行为保持不变；arenaPhase 供 W1-END-2 hazard 门控） */
+  handleContact(ev: ContactEvent, arenaPhase: BattlePhase = 'Active'): void {
     const mA = getMeta(ev.bodyA);
     const mB = getMeta(ev.bodyB);
     this.route(
@@ -242,6 +265,7 @@ export class ContactRouter {
       },
       mA,
       mB,
+      arenaPhase,
     );
   }
 
@@ -253,7 +277,11 @@ export class ContactRouter {
    * - 与 Matter 入口共用 Grounded / 批次去重 / Impact / Weapon 全部逻辑。
    * 接入时只使用 setBatchedContactListener（禁止即时+批次双投递造成重复伤害）。
    */
-  handlePlanckContact(world: PlanckWorld, ev: ContactBridgeEvent): void {
+  handlePlanckContact(
+    world: PlanckWorld,
+    ev: ContactBridgeEvent,
+    arenaPhase: BattlePhase = 'Active',
+  ): void {
     const tagA = world.getOwnerTag(ev.bodyA);
     const tagB = world.getOwnerTag(ev.bodyB);
     if (!tagA || !tagB) return; // 无 Owner：安全忽略，不伪造
@@ -273,6 +301,7 @@ export class ContactRouter {
       },
       { kind: tagA.kind, vehicleId: tagA.vehicleId, partId: tagA.partId, team: tagA.team },
       { kind: tagB.kind, vehicleId: tagB.vehicleId, partId: tagB.partId, team: tagB.team },
+      arenaPhase,
     );
   }
 
@@ -281,6 +310,7 @@ export class ContactRouter {
     ev: RouterContactEvent,
     mA: Record<string, unknown>,
     mB: Record<string, unknown>,
+    arenaPhase: BattlePhase,
   ): void {
     this.debug.lastContact = {
       point: ev.contactPoint,
@@ -290,6 +320,11 @@ export class ContactRouter {
 
     // Grounded 始终立即执行（wheel ↔ ground 状态与伤害结算无关）
     this.handleGrounded(ev, mA, mB);
+
+    // W1-END-2：hazard（closing 刺墙）↔ vehicle——先于 batch 收集处理。
+    // 去重由 activeTicks 的 `hazard|<team>` key 保证（双侧墙同一步多 pair 不重复），
+    // 无需 batch 合并；batch 收集路径只处理 vehicle↔vehicle 与 projectile。
+    this.handleHazardContact(ev, mA, mB, arenaPhase);
 
     // 带 batch 的 start：同一物理步的多个 collisionStart pair 先收集、
     // 批次末尾统一合并结算（Impact / 同一武器对同一敌车只结算一次）。
@@ -626,12 +661,62 @@ export class ContactRouter {
     const minRel = policy.minRelativeVelocity ?? WEAPON_CONTACT_THRESHOLD;
     if (ev.relativeVelocity < minRel) return;
     this.activeTicks.set(key, {
+      kind: 'weapon',
       attackerTeam: attacker.team as TeamId,
       attackerPartId,
       defenderTeam: defender.team as TeamId,
       part,
-      defender,
       policy,
+      defender,
+      intervalMs: policy.intervalMs,
+      damage: policy.damage,
+      startedAtMs: null,
+      lastTickMs: 0,
+      contactPoint: ev.contactPoint,
+      contactNormal: ev.normal,
+      relativeVelocity: ev.relativeVelocity,
+    });
+  }
+
+  /**
+   * W1-END-2：closing 刺墙（hazard）↔ vehicle 接触处理。
+   * - Active / Warning：刺墙不参与战斗（不登记、0 伤害，仅 Warning 阶段物理已激活但无伤害）；
+   * - Closing：start 登记 hazard contactTick（去重 key = `hazard|<team>`，双侧墙多 pair 去重）；
+   * - end：移除该队 hazard tick（离开刺墙立即停止）。
+   */
+  private handleHazardContact(
+    ev: RouterContactEvent,
+    mA: Record<string, unknown>,
+    mB: Record<string, unknown>,
+    arenaPhase: BattlePhase,
+  ): void {
+    const hz = mA.kind === 'hazard' ? mA : mB.kind === 'hazard' ? mB : null;
+    if (!hz) return;
+    const vh = mA.kind === 'vehicle' ? mA : mB.kind === 'vehicle' ? mB : null;
+    if (!vh) return; // hazard ↔ hazard / hazard ↔ arena / hazard ↔ ground 等不产生车辆伤害
+    const team = String(vh.team ?? '');
+    if (team !== 'A' && team !== 'B') return;
+
+    const key = `hazard|${team}`;
+    if (ev.phase === 'end') {
+      this.activeTicks.delete(key);
+      return;
+    }
+    if (ev.phase !== 'start') return;
+    if (arenaPhase !== 'Closing') return; // Active/Warning：0 伤害
+    if (this.activeTicks.has(key)) return; // 同一物理步多 pair / 双侧墙去重
+
+    const defender = this.findVehicleByTeam(team);
+    if (!defender) return;
+    const cfg = this.hazardConfig;
+    if (!(cfg.tickMs > 0 && cfg.damagePerTick > 0)) return; // 未配置 → 无伤害
+
+    this.activeTicks.set(key, {
+      kind: 'hazard',
+      team: team as TeamId,
+      defender,
+      intervalMs: cfg.tickMs,
+      damage: cfg.damagePerTick,
       startedAtMs: null,
       lastTickMs: 0,
       contactPoint: ev.contactPoint,
@@ -649,32 +734,51 @@ export class ContactRouter {
    * 推进 contactTick（Orchestrator 每个固定物理步后调用，传战斗物理时间 ms）：
    * - 首次调用记录接触开始时间（不 tick）；
    * - 此后按固定物理时间 interval 结算 damage（无 setInterval / 墙钟 / 每渲染帧伤害）；
-   * - 接触 end 已移除的 entry 不再结算。
+   * - 接触 end 已移除的 entry 不再结算；
+   * - W1-END-2：hazard entry 仅当 arenaPhase === 'Closing' 时结算；非 Closing
+   *   （Active/Warning 未登记、End 后）立即移除停止。
    */
-  advanceContactTicks(nowMs: number): void {
-    for (const c of this.activeTicks.values()) {
+  advanceContactTicks(nowMs: number, arenaPhase?: BattlePhase): void {
+    for (const [key, c] of this.activeTicks) {
+      if (c.kind === 'hazard' && arenaPhase !== 'Closing') {
+        this.activeTicks.delete(key); // 离开 Closing（End 等）→ 立即停止 hazard tick
+        continue;
+      }
       if (c.startedAtMs === null) {
         c.startedAtMs = nowMs;
         c.lastTickMs = nowMs;
         continue;
       }
-      while (nowMs - c.lastTickMs >= c.policy.intervalMs) {
-        this.damageResolver.applyDamage(c.defender, {
-          source: c.attackerTeam,
-          target: c.defenderTeam,
-          damageSource: 'weapon',
-          partId: c.part.def.id,
-          behavior: c.part.def.behavior,
-          contactPoint: c.contactPoint,
-          contactNormal: c.contactNormal,
-          relativeVelocity: c.relativeVelocity,
-          damage: c.policy.damage,
-        }, 0);
+      while (nowMs - c.lastTickMs >= c.intervalMs) {
+        if (c.kind === 'weapon') {
+          this.damageResolver.applyDamage(c.defender, {
+            source: c.attackerTeam,
+            target: c.defenderTeam,
+            damageSource: 'weapon',
+            partId: c.part.def.id,
+            behavior: c.part.def.behavior,
+            contactPoint: c.contactPoint,
+            contactNormal: c.contactNormal,
+            relativeVelocity: c.relativeVelocity,
+            damage: c.damage,
+          }, 0);
+        } else {
+          // hazard：closing 刺墙持续接触（damageSource:'hazard'；source/target 均为被压车辆）
+          this.damageResolver.applyDamage(c.defender, {
+            source: c.team,
+            target: c.team,
+            damageSource: 'hazard',
+            contactPoint: c.contactPoint,
+            contactNormal: c.contactNormal,
+            relativeVelocity: c.relativeVelocity,
+            damage: c.damage,
+          }, 0);
+        }
         this.debug.lastDamage = {
-          damage: c.policy.damage,
+          damage: c.damage,
           target: c.defender.id,
         };
-        c.lastTickMs += c.policy.intervalMs;
+        c.lastTickMs += c.intervalMs;
       }
     }
   }
