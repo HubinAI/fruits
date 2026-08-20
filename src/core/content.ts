@@ -317,6 +317,10 @@ const pushRod: FunctionalPartDef = {
  * Q12-B：举升臂（Gadget）——front Revolute 连接，主动向上翻起对手。
  * - 低位待机 → 主动向上翻（60°~80°）→ 回落（LifterBehavior 状态机，
  *   复用 Hammer 的 Revolute / motor / limit 能力，物理弧由 Planck limit 保证）；
+ * - Q12-B-R1（向上修正）：本世界 Y-down（y 越小越靠屏幕上方），Planck joint angle
+ *   增大 = 顺时针 = 臂尖向屏幕下方（地面）扫。故举升方向必须随 facing 翻转，
+ *   令两朝向的臂尖 worldY 都明显减小（向上扬起而非扫地）。方向由
+ *   LifterBehavior 按 vehicle.facing 推导（liftSign = −facing），不是调 torque 掩盖；
  * - category gadget + 不设 baseDamage → 天然绕过 ContactRouter weapon 路径，
  *   Direct Weapon Damage = 0（抬升完全来自真实碰撞几何/质量/力矩）；
  * - 第一版动作故意明显：起手清楚、机械运动完整；错过弧内时机自然失败；
@@ -335,9 +339,11 @@ const lifter: FunctionalPartDef = {
   collider: { shape: 'box', width: 100, height: 14, offset: { x: 50, y: 0 } },
   behavior: 'lifter',
   behaviorParams: {
-    // 上翻 70°（1.22 rad，目标 60°~80° 区间）；低位 = 0 rad（水平）
-    liftSpeedRadPerStep: 0.015, // 70° ≈ 81 步 ≈ 1.35s（清楚起手）
-    lowerSpeedRadPerStep: 0.01, // 回落稍慢（完整机械运动）
+    // 上翻幅度 70°（1.22 rad，目标 60°~80° 区间）；低位 = 0 rad（近水平）。
+    // 实际翻动符号由 LifterBehavior 按 facing 推导（liftSign = −facing），
+    // 保证两朝向臂尖都向屏幕上方（worldY 减小）扬起。
+    liftSpeedRadPerStep: 0.045, // 70° ≈ 27 步 ≈ 0.45s（清楚起手，比原 1.35s 明显更快）
+    lowerSpeedRadPerStep: 0.025, // 回落稍慢 ~0.8s（完整机械运动）
     upperRad: 1.22,
     lowerRad: 0,
     holdSteps: 20, // 翻到位停顿 ~0.33s

@@ -1009,7 +1009,7 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     for (let i = 0; i < 1200; i++) {
       lab2.step(16.6667);
       const ang = w.getRevoluteAngle(lifterPart2.joint);
-      if (i < 900) earlyMaxAngle = Math.max(earlyMaxAngle, ang);
+      if (i < 900) earlyMaxAngle = Math.max(earlyMaxAngle, Math.abs(ang));
       const frontLift = Math.max(
         0,
         ...o2.vehicleB.wheels.map((wh) => Math.max(0, GROUND_Y - 20 - 0.5 - w.getPosition(wh.body).y)),
@@ -1018,11 +1018,81 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
       maxAPitch = Math.max(maxAPitch, Math.abs(w.getAngle(o2.vehicleA.body)));
       if (o2.result?.phase === 'End') break;
     }
-    expect(earlyMaxAngle * 57.3).toBeGreaterThan(55); // 正常翻动达到 70°（60~80° 目标）
-    expect(earlyMaxAngle * 57.3).toBeLessThan(85);
+    expect(Math.abs(earlyMaxAngle) * 57.3).toBeGreaterThan(55); // 正常翻动达到 70°（60~80° 目标）
+    expect(Math.abs(earlyMaxAngle) * 57.3).toBeLessThan(85);
     expect(maxBLift).toBeGreaterThan(15); // banana 被真实碰撞明显抬起
     expect(sources.has('weapon')).toBe(false); // 无 Direct Weapon Damage（impact/hazard 是真实物理）
     expect(maxAPitch * 57.3).toBeGreaterThan(0.5); // 自车真实反作用
+  });
+
+  it('Q12-B-R1. 举升臂向上修正：双 facing 臂尖 worldY 减小（向屏幕上方）/ 绝不扫向地面', () => {
+    // 沿真实 Runtime 记录 lifter 远端 tip 的 worldY（禁止用角度绝对值代替方向验证）。
+    // 本世界 Y-down：worldY 越小越靠屏幕上方。tip 本地 x = facing·100（far end），
+    // tip.worldY = pivot.worldY + facing·100·sin(partAngle)。
+    const computeTipY = (o: PlanckBattleOrchestrator, facing: 1 | -1): number => {
+      const w = o.world;
+      const part = o.vehicleA.parts.find((p) => p.def.id === 'lifter')!;
+      const pivot = w.getPosition(part.body);
+      const ang = w.getAngle(part.body);
+      return pivot.y + facing * 100 * Math.sin(ang);
+    };
+    const lifterCar = {
+      id: 'lifterCar',
+      bodyDefId: 'watermelonBody',
+      quality: 1,
+      movements: [
+        { hardpointId: 'rear', defId: 'wheelStd' },
+        { hardpointId: 'front', defId: 'wheelStd' },
+      ],
+      functionals: [{ hardpointId: 'front', defId: 'lifter' }],
+    };
+    const banana = {
+      id: 'bananaBody',
+      bodyDefId: 'bananaBody',
+      quality: 1,
+      movements: [
+        { hardpointId: 'rear', defId: 'wheelStd' },
+        { hardpointId: 'front', defId: 'wheelStd' },
+      ],
+      functionals: [],
+    };
+    for (const facing of [1, -1] as const) {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadCustom(lifterCar, banana, {
+        engine: 'planck',
+        autoDrive: true,
+        spawnA: { x: 450, y: 650, facing },
+        spawnB: { x: 1150, y: 650, facing: -1 },
+      });
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      const w = o.world;
+      const lifterPart = o.vehicleA.parts.find((p) => p.def.id === 'lifter')!;
+      // 先跑过 rest 待机，记录水平低位 tipY
+      for (let i = 0; i < 25; i++) lab.step(16.6667);
+      const restTipY = computeTipY(o, facing);
+      let peakUpTipY = restTipY;
+      // 臂相对 chassis 的 joint angle 极值：结构上限保证臂绝不朝「下」扫向地面。
+      // facing=+1：limit [−upperRad, 0]，应恒 ≤~0；facing=−1：limit [0, +upperRad]，应恒 ≥~0。
+      let maxJoint = -Infinity;
+      let minJoint = Infinity;
+      for (let i = 0; i < 300; i++) {
+        lab.step(16.6667);
+        const t = computeTipY(o, facing);
+        peakUpTipY = Math.min(peakUpTipY, t);
+        const ja = w.getRevoluteAngle(lifterPart.joint);
+        maxJoint = Math.max(maxJoint, ja);
+        minJoint = Math.min(minJoint, ja);
+        if (o.result?.phase === 'End') break;
+      }
+      const upReach = restTipY - peakUpTipY; // >0 = 向屏幕上方（worldY 减小）
+      // 验收 1&2：臂尖明显向上扬起（世界 tipY 减小）；臂相对 chassis 绝不朝下扫（结构保证）
+      expect(upReach).toBeGreaterThan(60); // ≈70° 弧上移 ~95px，明显向上
+      if (facing === 1) {
+        expect(maxJoint).toBeLessThanOrEqual(0.06); // 绝不朝 +（向地面）扫
+      } else {
+        expect(minJoint).toBeGreaterThanOrEqual(-0.06); // 绝不朝 −（向地面）扫
+      }
+    }
   });
 
   it('Q12-C. 冲锤：Prismatic 伸收循环 / 锤头 Contact 造成 Weapon Damage / 撞空 Miss / 推杆仍 Gadget', () => {

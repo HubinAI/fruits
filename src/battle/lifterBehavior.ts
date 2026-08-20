@@ -1,10 +1,23 @@
 /**
  * Q12-B：举升臂（Gadget）——front Revolute 主动上翻状态机。
  *
+ * 坐标语义（关键）：本游戏世界为 Y-down（世界 y 越小越靠屏幕上方，
+ * content.ts 注释「y≈662 在 680 上方 ~18px」即此）。Planck Revolute 的 joint
+ * angle 在 Y-down 下「角度增大 = 顺时针 = 臂尖向屏幕下方（世界 y 增大）扫」。
+ *
+ * 因此举升方向必须随 facing 翻转，保证两个朝向都满足：
+ *   lift 时臂尖 worldY 明显减小（向屏幕上方扬起）。
+ * 推导：臂尖本地水平方向 = facing·(+x)（facing=-1 时 collider 镜像，臂尖在 -x）。
+ *   tip.worldY − pivot.worldY = (facing·100)·sin(partAngle)。
+ *   要让 tip 上移（worldY 减小），需令 partAngle 的符号使该项为负：
+ *     facing=+1 → 需 partAngle 为负 → joint angle 朝 −upperRad；
+ *     facing=-1 → 需 partAngle 为正 → joint angle 朝 +upperRad。
+ *   即 liftSign = −facing，liftTarget = liftSign·upperRad。
+ *
  * - 复用 Hammer 的 Revolute / motor / limit 能力（world.setRevoluteLimit /
  *   setRevoluteMotor / getRevoluteAngle）；运动完全来自 motor + limit，
  *   物理弧边界由 Planck limit 原生保证，不 setAngle / teleport；
- * - 状态机：rest（低位待机）→ lift（主动向上翻）→ hold（翻到位停顿）→
+ * - 状态机：rest（低位近水平待机）→ lift（主动向上翻）→ hold（翻到位停顿）→
  *   lower（回落）→ rest，周期循环——第一版动作故意明显（~70° 弧、清楚起手、
  *   完整机械运动）；
  * - 举升力 = motor 扭矩经 Revolute 传给臂体 → 臂与对手真实碰撞顶起；
@@ -17,13 +30,13 @@
 export type LifterPhase = 'rest' | 'lift' | 'hold' | 'lower';
 
 export interface LifterParams {
-  /** 上翻角速度（rad/step）：明显、可见的起手 */
+  /** 上翻角速度（rad/step）：明显、可见的起手（完整上翻 ~0.4~0.6s） */
   liftSpeedRadPerStep: number;
-  /** 回落角速度（rad/step）：完整机械运动 */
+  /** 回落角速度（rad/step）：完整机械运动（回落稍慢） */
   lowerSpeedRadPerStep: number;
-  /** 上翻限位（rad，目标 60°~80° 即 1.05~1.40） */
+  /** 上翻幅度（rad，目标 60°~80° 即 1.05~1.40）；实际翻动符号由 facing 决定 */
   upperRad: number;
-  /** 低位限位（rad，待机 ≈ 0 = 水平前置） */
+  /** 低位（待机）角度（rad）：≈0 = 水平前置；上翻幅度 = upperRad − lowerRad */
   lowerRad: number;
   /** 翻到位停顿步数（hold） */
   holdSteps: number;
@@ -72,23 +85,29 @@ export class LifterBehavior {
 
   /**
    * 每个固定物理步调用一次（Orchestrator onBeforeStep 内）。
-   * - 首次运行时把 lower/upper 设为真实 Revolute Joint limit；
-   * - 状态机驱动 motor：rest 停低位 → lift 向上翻 → hold 停顿 → lower 回落。
+   * - 首次运行时把 limit 设为 [min(rest,target), max(rest,target)]，
+   *   使臂体只能从水平低位翻向「上方」（target），绝不会朝地面（另一侧）扫；
+   * - 状态机驱动 motor：rest 停低位 → lift 向上翻 → hold 停顿 → lower 回落；
+   * - lift/lower 的 motor 速度符号由 liftSign = −facing 决定，保证两朝向都上扬。
    */
   stepFixed(
     world: PlanckWorld,
-    _vehicle: PlanckVehicle,
+    vehicle: PlanckVehicle,
     part: PlanckPartRuntime,
   ): LifterPhase {
+    // 举升方向随 facing 翻转：facing=+1 → 朝 −upperRad；facing=-1 → 朝 +upperRad。
+    // 目的：两个朝向都让臂尖 worldY 减小（向屏幕上方扬起，而非扫向地面）。
+    const liftSign = -vehicle.facing;
+    const restAngle = this.params.lowerRad; // 0 = 水平低位
+    const liftTarget = restAngle + liftSign * (this.params.upperRad - this.params.lowerRad);
     if (this.phaseSteps === 0) {
       world.setRevoluteLimit(part.joint, {
         enabled: true,
-        lowerRad: this.params.lowerRad,
-        upperRad: this.params.upperRad,
+        lowerRad: Math.min(restAngle, liftTarget),
+        upperRad: Math.max(restAngle, liftTarget),
       });
     }
-    const { lowerRad, upperRad, liftSpeedRadPerStep, lowerSpeedRadPerStep, maxTorqueNm } =
-      this.params;
+    const { liftSpeedRadPerStep, lowerSpeedRadPerStep, maxTorqueNm } = this.params;
     const angle = world.getRevoluteAngle(part.joint);
     const motor = (enabled: boolean, speedRadPerStep: number): void => {
       world.setRevoluteMotor(part.joint, { enabled, speedRadPerStep, maxTorqueNm });
@@ -97,7 +116,7 @@ export class LifterBehavior {
     this.phaseSteps++;
     switch (this._phase) {
       case 'rest':
-        // 低位待机（motor off，臂水平前置）
+        // 低位近水平待机（motor off，limit 保持在 restAngle）
         motor(false, 0);
         if (this.phaseSteps >= this.params.restSteps) {
           this._phase = 'lift';
@@ -105,15 +124,15 @@ export class LifterBehavior {
         }
         break;
       case 'lift':
-        // 主动向上翻（明显速度 → upper 限位）
-        motor(true, liftSpeedRadPerStep);
-        if (angle >= upperRad - ANGLE_EPS) {
+        // 主动向上翻（motor 朝 liftTarget，符号随 facing）：臂尖 worldY 减小
+        motor(true, liftSign * liftSpeedRadPerStep);
+        if (Math.abs(angle - liftTarget) <= ANGLE_EPS) {
           this._phase = 'hold';
           this.phaseSteps = 0;
         }
         break;
       case 'hold':
-        // 翻到位停顿（motor off，limit 保持）
+        // 翻到位停顿（motor off，limit 保持在 liftTarget）
         motor(false, 0);
         if (this.phaseSteps >= this.params.holdSteps) {
           this._phase = 'lower';
@@ -121,9 +140,9 @@ export class LifterBehavior {
         }
         break;
       case 'lower':
-        // 回落（较慢回低位；到位 → 回 rest 待机）
-        motor(true, -lowerSpeedRadPerStep);
-        if (angle <= lowerRad + ANGLE_EPS) {
+        // 回落（motor 朝 restAngle，符号随 facing）；到位 → 回 rest 待机
+        motor(true, -liftSign * lowerSpeedRadPerStep);
+        if (Math.abs(angle - restAngle) <= ANGLE_EPS) {
           this._phase = 'rest';
           this.phaseSteps = 0;
         }
