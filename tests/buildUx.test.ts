@@ -729,6 +729,64 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     }
   });
 
+  it('7. Q11-C-F2：镭射弹无重力直线飞行（gravityScale=0）；Cannon 仍抛物线', () => {
+    // 镭射：水平炮口下 projectile center.y 飞行中不变（无可见抛物线）
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q11-C')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let fired = false;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'laser') fired = true;
+    });
+    let laserY: number[] = [];
+    let laserX: number[] = [];
+    for (let i = 0; i < 500 && !fired; i++) lab.step(16.6667);
+    for (let i = 0; i < 40; i++) {
+      lab.step(16.6667);
+      const ps = (o.getRenderSnapshot().projectiles ?? []).filter((p) => p.visual === 'laser');
+      if (ps.length > 0) {
+        laserY.push(ps[0].center.y);
+        laserX.push(ps[0].center.x);
+      }
+    }
+    expect(fired).toBe(true);
+    expect(laserY.length).toBeGreaterThan(10); // 飞行采样足够（弹速 16px/step，命中前 ~13 步）
+    const yRange = Math.max(...laserY) - Math.min(...laserY);
+    const xRange = Math.max(...laserX) - Math.min(...laserX);
+    expect(xRange).toBeGreaterThan(100); // 确实在飞行
+    expect(yRange).toBeLessThan(1); // 无重力：y 恒定（直线飞行）
+
+    // Cannon：仍继承世界重力 → 抛物线（y 明显下降）
+    const lab2 = new PhysicsLab(rendererStub);
+    lab2.loadCustom(
+      buildSnapshotFromDraft(
+        { bodyDefId: 'watermelonBody', rearRadius: 20, frontRadius: 20, functionalSelections: { front: 'cannon', frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT } },
+        registry,
+        'A',
+      ),
+      plainSnapshot('B'),
+      { autoDrive: true, engine: 'planck' },
+    );
+    const o2 = lab2.orchestrator as PlanckBattleOrchestrator;
+    let fired2 = false;
+    o2.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'cannon') fired2 = true;
+    });
+    let cannonY: number[] = [];
+    for (let i = 0; i < 500 && !fired2; i++) lab2.step(16.6667);
+    for (let i = 0; i < 30; i++) {
+      lab2.step(16.6667);
+      const ps = o2.getRenderSnapshot().projectiles ?? [];
+      if (ps.length > 0) cannonY.push(ps[0].center.y);
+    }
+    expect(fired2).toBe(true);
+    expect(cannonY.length).toBeGreaterThan(5);
+    // Cannon 弹 y 单调下降（重力作用）→ 与镭射形成对比
+    const firstY = cannonY[0];
+    const lastY = cannonY[cannonY.length - 1];
+    expect(lastY - firstY).toBeGreaterThan(2);
+  });
+
   it('Q11-R1. 三新部件真实装配链路：defId 正确 / Preview 真实部件 / Energy / Validator', () => {
     // 1) 定义契约：楔铲=gadget(15) / 刺=weapon(25) / 镭射=weapon(45)
     expect(registry.functionals.get('wedgeShovel')?.category).toBe('gadget');

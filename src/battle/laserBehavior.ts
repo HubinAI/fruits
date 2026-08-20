@@ -229,12 +229,14 @@ export class LaserBehavior {
     };
 
     // 复用真实 Projectile / CCD 链路（dynamic circle + bullet=true 原生 CCD）
+    // Q11-C-F2：gravityScale 0 → 能量弹无重力，水平炮口下直线飞行（无可见抛物线）。
+    // 不特殊修改世界重力 / 不每帧强制修改 y；Cannon 与现有物理体保持原样。
     const proj = world.createDynamicCircle(
       muzzlePoint.x,
       muzzlePoint.y,
       p.projectileRadius,
       p.projectileMass,
-      { bullet: true, collisionFilter: filter },
+      { bullet: true, collisionFilter: filter, gravityScale: 0 },
     );
     world.setOwnerTag(proj, {
       kind: 'projectile',

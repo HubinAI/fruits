@@ -97,12 +97,16 @@ export interface PlanckCollisionFilter {
  * - collisionFilter: 可选（默认全碰撞）
  * - bullet: 可选，仅对动态 body 生效（Q02-F1），直接映射 Planck 原生
  *   body.setBullet(true) 的 TOI 连续碰撞（CCD）；默认 false，不改变既有行为。
+ * - gravityScale: 可选（Q11-C-F2），直接映射 Planck 原生
+ *   body.setGravityScale(n)——动态 Body 独立重力系数；默认 1 不改变任何
+ *   现有物理体；允许 0（无重力，能量类 projectile 直线飞行）。
  */
 export interface PlanckBodyOptions {
   friction?: number;
   restitution?: number;
   collisionFilter?: PlanckCollisionFilter;
   bullet?: boolean;
+  gravityScale?: number;
 }
 
 function createBodyHandle(): BodyHandle {
@@ -461,6 +465,7 @@ export class PlanckWorld {
       options?.restitution ?? 0,
       'dynamic',
       options?.bullet ?? false,
+      options?.gravityScale ?? 1,
     );
   }
 
@@ -486,6 +491,7 @@ export class PlanckWorld {
       options?.restitution ?? 0,
       'dynamic',
       options?.bullet ?? false,
+      options?.gravityScale ?? 1,
     );
   }
 
@@ -519,6 +525,7 @@ export class PlanckWorld {
       options?.restitution ?? 0,
       'dynamic',
       options?.bullet ?? false,
+      options?.gravityScale ?? 1,
     );
   }
 
@@ -540,6 +547,12 @@ export class PlanckWorld {
     if (options.collisionFilter) assertCollisionFilter(options.collisionFilter);
     if (options.bullet !== undefined && typeof options.bullet !== 'boolean') {
       throw new Error(`PlanckWorld: bullet 必须为 boolean，收到 ${String(options.bullet)}`);
+    }
+    if (options.gravityScale !== undefined) {
+      assertFinite(options.gravityScale);
+      if (options.gravityScale < 0) {
+        throw new Error(`PlanckWorld: gravityScale 必须 >= 0（允许 0 = 无重力），收到 ${options.gravityScale}`);
+      }
     }
   }
 
@@ -589,6 +602,7 @@ export class PlanckWorld {
       native.createFixture(s, filterFixtureDef(base, options?.collisionFilter));
     }
     if (options?.bullet) native.setBullet(true); // Q02-F1：CCD/bullet 直接映射原生
+    if (options?.gravityScale !== undefined) native.setGravityScale(options.gravityScale); // Q11-C-F2：compound 独立重力系数（不传保持原生默认 1）
     const handle = createBodyHandle();
     this.bodies.set(handle, native);
     this.bodyByNative.set(native, handle);
@@ -972,6 +986,7 @@ export class PlanckWorld {
     restitution = 0,
     bodyType: 'static' | 'kinematic' | 'dynamic' = 'dynamic',
     bullet = false,
+    gravityScale = 1,
   ): BodyHandle {
     const native = this.world.createBody({
       type: bodyType,
@@ -980,6 +995,7 @@ export class PlanckWorld {
     // 未传 collisionFilter 时不预设任何碰撞过滤（默认全碰撞，Planck 行为）
     native.createFixture(shape, filterFixtureDef({ density, friction, restitution }, collisionFilter));
     if (bullet) native.setBullet(true); // Q02-F1：CCD/bullet 直接映射原生（仅动态 body 传入 true）
+    native.setGravityScale(gravityScale); // Q11-C-F2：独立重力系数（默认 1 不变）
     const handle = createBodyHandle();
     this.bodies.set(handle, native);
     this.bodyByNative.set(native, handle);
