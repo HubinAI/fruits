@@ -5,7 +5,8 @@
  * world.setCollisionHandlers 仅包裹记录，start/active/end 完整转发）：
  * 1. Ram Light vs Body-only Heavy（autoDrive=true）：
  *    - 真实 ramHead→body collisionStart 发生、relVel > 0.5；
- *    - defender HP 只减少一次 80；Impact threshold=6 保持不触发。
+ *    - Weapon 直伤只结算一次 80；Impact（正式阈值 0.75）与 Weapon 可同时成立，
+ *      正常攻击 relVel~1.1 触发微量 Impact（双方各半）；
  * 2. 低速擦碰对照（±0.25，autoDrive=false）：
  *    - 真实 ramHead→body collisionStart 发生、relVel < 0.5；
  *    - defender HP 保持不变。
@@ -105,7 +106,7 @@ function runScenario(
 }
 
 describe('F-02W-A · 场景1：Ram Light vs Body-only Heavy（自动驱动）', () => {
-  it('relVel>0.5 触发 Weapon：defender 只减 80，Impact(6) 不触发', () => {
+  it('relVel>0.5 触发 Weapon：weapon 只减 80，Impact(0.75) 微量可同时成立', () => {
     const r = runScenario(lightSnapshot, bodyOnlyHeavy, { autoDrive: true });
 
     console.log(
@@ -118,12 +119,16 @@ describe('F-02W-A · 场景1：Ram Light vs Body-only Heavy（自动驱动）', 
     expect(r.partIdA).toBe('part:front');
     expect(r.partIdB).toBe('body');
     expect(r.relVel).toBeGreaterThan(WEAPON_CONTACT_THRESHOLD);
-    // Weapon 触发：defender HP 只减少一次 80
-    expect(r.hpB).toBeCloseTo(1000 - 80, 5);
-    expect(r.hpA).toBeCloseTo(1000, 5);
+    // Weapon 触发：defender 只扣一次 baseDamage 80（weapon 直伤路径）
     expect(r.lastDamage?.damage).toBe(80);
-    // Impact threshold=6 保持不触发（relVel ~1.1 < 6）
-    expect(r.lastImpact).toBeNull();
+    // Impact 与 Weapon 可同时成立（正式阈值 IMPACT_CONTACT_THRESHOLD=0.75，非旧值 6）：
+    // 正常攻击 relVel~1.1 > 0.75 → 微量 Impact，双方各半；
+    // 用正式公式 min(120, (relVel-0.75)*0.5) 精确推导预期，避免写死阈值。
+    expect(r.lastImpact).not.toBeNull();
+    const expectImpact = Math.min(120, Math.max(0, (r.relVel - 0.75) * 0.5));
+    expect(r.lastImpact!.damage).toBeCloseTo(expectImpact, 5);
+    expect(r.hpB).toBeCloseTo(1000 - 80 - expectImpact / 2, 5);
+    expect(r.hpA).toBeCloseTo(1000 - expectImpact / 2, 5);
   });
 });
 

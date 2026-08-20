@@ -118,7 +118,7 @@ describe('F-02M-B3 · Planck Contact Kinematics', () => {
     });
 
     const a = world.createDynamicBox(-40, 0, 40, 40, 5);
-    const b = world.createDynamicBox(40, 0, 40, 40, 5);
+    world.createDynamicBox(40, 0, 40, 40, 5); // b（对称体，无需引用）
     world.setLinearVelocity(a, 0.5, 0);
     world.setAngularVelocity(a, -0.5); // 旋转接触：接触点有 ω×r 贡献
     for (let i = 0; i < 240; i++) world.stepFixed(1);

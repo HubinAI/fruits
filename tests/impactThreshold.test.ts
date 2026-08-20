@@ -43,7 +43,12 @@ function collectFirstHostileBatch(
   orch: BattleOrchestrator,
   maxSteps: number,
 ): BatchSample | null {
-  let capture: { timestamp: number; size: number; entries: { partIdA: string; partIdB: string; relVel: number }[] } | null = null;
+  // capture 恒为非 null 容器（timestamp=-1 表示未开始）：避免闭包赋值导致 TS 窄化到 never
+  const capture: { timestamp: number; size: number; entries: { partIdA: string; partIdB: string; relVel: number }[] } = {
+    timestamp: -1,
+    size: 0,
+    entries: [],
+  };
   let captureDone = false;
   let hitStep = -1;
   let hpABefore = orch.vehicleA.hp;
@@ -57,8 +62,9 @@ function collectFirstHostileBatch(
       const mB = getMeta(ev.bodyB);
       const hostile =
         mA.kind === 'vehicle' && mB.kind === 'vehicle' && mA.team !== mB.team;
-      if (!capture) {
-        capture = { timestamp: ev.batch.timestamp, size: ev.batch.size, entries: [] };
+      if (capture.timestamp === -1) {
+        capture.timestamp = ev.batch.timestamp;
+        capture.size = ev.batch.size;
       }
       if (hostile) {
         capture.entries.push({
@@ -69,7 +75,10 @@ function collectFirstHostileBatch(
       }
       if (ev.batch.index === ev.batch.size - 1) {
         if (capture.entries.length > 0) captureDone = true;
-        else capture = null;
+        else {
+          capture.timestamp = -1;
+          capture.entries.length = 0;
+        }
       }
     },
     onActive: (ev: ContactEvent) => orch.router.handleContact(ev),
@@ -82,7 +91,8 @@ function collectFirstHostileBatch(
     orch.step(FIXED_DT);
     if (captureDone) hitStep = i;
   }
-  if (!capture) return null;
+  // captureDone 为 false 且无敌对 entries → 未采集到有效 batch（返回 null）
+  if (!captureDone && capture.entries.length === 0) return null;
 
   return {
     hitStep,

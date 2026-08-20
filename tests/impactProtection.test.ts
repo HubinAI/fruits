@@ -23,10 +23,12 @@ function contactEv(orch: BattleOrchestrator, phase: ContactEvent['phase'], relV:
 }
 
 describe('Impact 重复触发保护', () => {
-  it('低速持续挤压不掉血', () => {
+  it('低速持续挤压不掉血（relVel < 正式阈值 0.75）', () => {
     const orch = makeOrch();
     const hp0 = orch.vehicleB.hp;
-    orch.router.handleContact(contactEv(orch, 'start', 1)); // 低于 threshold=6
+    // 阈值已从旧值 6 标定为 IMPACT_CONTACT_THRESHOLD=0.75（F-02I，2026-08-17）：
+    // relV=0.5 < 0.75 → 低速挤压不产生任何 Impact Damage
+    orch.router.handleContact(contactEv(orch, 'start', 0.5));
     expect(orch.vehicleB.hp).toBe(hp0);
   });
 
