@@ -135,6 +135,11 @@ style.textContent = `
   .part-picker button.active { background: #3b6fd4; border-color: #5a8df0; color: #fff; }
   .part-picker button:disabled { opacity: 0.45; cursor: not-allowed; }
   .part-picker button:disabled:hover { background: #242b38; }
+  /* Q07-C：Start 后短暂「READY / 开战」状态转换（Presentation 延迟，不改 Physics/结果） */
+  .ready-overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 8; background: rgba(6,8,12,0.55); pointer-events: none; }
+  .ready-card { text-align: center; }
+  .ready-card .rd-sub { font-size: 15px; letter-spacing: 8px; color: #9aa4b5; margin-bottom: 8px; }
+  .ready-card .rd-main { font-size: 46px; font-weight: 800; letter-spacing: 12px; color: #ffd35a; text-shadow: 0 0 22px rgba(255,211,90,0.55); }
 `;
 document.head.appendChild(style);
 
@@ -264,7 +269,7 @@ function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): vo
   resultModal.style.display = 'flex';
 }
 
-/** Ended 后玩家选择：调整配置 → 回 Editing + Preview */
+/** Ended 后玩家选择：调整配置 → 回 Editing + Preview（保持当前 Build 与对手，不重置） */
 function adjustConfig(): void {
   resultModal.style.display = 'none';
   hudEl.style.display = 'none';
@@ -273,6 +278,7 @@ function adjustConfig(): void {
   panelA.style.display = '';
   panelB.style.display = '';
   startBar.style.display = '';
+  toolsToggle.style.display = ''; // Q07-C：回装配恢复开发工具入口
   showPreview();
   updateStartButton();
 }
@@ -750,11 +756,14 @@ function startOrRematch(): void {
   lab.loadCustom(sa, sb, { autoDrive: true, engine: 'planck' });
   battleState = 'fighting';
   setBuildControlsLocked(true);
-  // Fighting 专注模式：Build 面板收起，Canvas 自动扩展 + 顶部固定 HUD
+  // Q07-C：Fighting 彻底进入「战斗观看状态」——装配编辑 / 对手编辑 / Energy-Validator /
+  // 开发工具入口全部隐藏；只保留战场 + A/B HP + 阶段提示。
   panelA.style.display = 'none';
   panelB.style.display = 'none';
   startBar.style.display = 'none';
   startHint.style.display = 'none';
+  toolsToggle.style.display = 'none';
+  toolsHost.style.display = 'none';
   resultModal.style.display = 'none';
   currentCamera = null;
   reframeCamera();
@@ -770,9 +779,47 @@ canvasWrap.appendChild(startBar);
 const btnStart = document.createElement('button');
 btnStart.className = 'btn-start-cta';
 btnStart.textContent = '开始战斗';
-btnStart.onclick = startOrRematch;
 startBar.appendChild(btnStart);
 startBar.appendChild(startHint);
+
+/* ---------- Q07-C：Start 后短暂状态转换（READY / 开战 0.8s；Presentation 延迟，
+ * 不改 Physics 时间与正式 Battle 结果——build/engine/seed 均不变，只是晚 0.8s 创建实例） ---------- */
+const readyOverlay = document.createElement('div');
+readyOverlay.className = 'ready-overlay';
+canvasWrap.appendChild(readyOverlay);
+const readyCard = document.createElement('div');
+readyCard.className = 'ready-card';
+const readySub = document.createElement('div');
+readySub.className = 'rd-sub';
+readySub.textContent = 'READY';
+const readyMain = document.createElement('div');
+readyMain.className = 'rd-main';
+readyMain.textContent = '开战！';
+readyCard.appendChild(readySub);
+readyCard.appendChild(readyMain);
+readyOverlay.appendChild(readyCard);
+
+let startTransitioning = false;
+btnStart.onclick = () => {
+  if (startTransitioning) return;
+  if (battleState !== 'editing' || !buildsValid()) return;
+  // 「我刚刚完成配置」→「现在开始看战斗」的明确切换：
+  // 先短暂锁定（防 0.8s 内改配置造成竞态），READY/开战 overlay 0.8s 后正式开战。
+  startTransitioning = true;
+  btnStart.disabled = true;
+  setBuildControlsLocked(true);
+  readyOverlay.style.display = 'flex';
+  window.setTimeout(() => {
+    readyOverlay.style.display = 'none';
+    startTransitioning = false;
+    startOrRematch();
+    if (battleState !== 'fighting') {
+      // 理论上不可达（已锁定且校验通过），防御：解锁回编辑
+      setBuildControlsLocked(false);
+      updateStartButton();
+    }
+  }, 800);
+};
 
 /* ---------- Q07-A：开发工具折叠区（机制场景 / Pause / Reset / Clear / 速度 / Preset 全部收进二级） ---------- */
 const toolsToggle = addButton(toolbar, '开发工具 ▸', () => {
@@ -872,6 +919,7 @@ addButton(toolsHost, 'Reset', () => {
       panelA.style.display = '';
       panelB.style.display = '';
       startBar.style.display = '';
+      toolsToggle.style.display = ''; // Q07-C：回装配恢复开发工具入口
     }
     updateHud();
     updateStartButton();
@@ -889,6 +937,7 @@ addButton(toolsHost, 'Clear', () => {
     panelA.style.display = '';
     panelB.style.display = '';
     startBar.style.display = '';
+    toolsToggle.style.display = ''; // Q07-C：回装配恢复开发工具入口
     showPreview(); // Clear 后恢复装配预览
     updateStartButton();
   }
