@@ -522,10 +522,29 @@ describe('Q08-A-FIX Battle Camera 出框根因', () => {
     snap.vehicleB.bodyVisual = { ...snap.vehicleB.bodyVisual!, position: { x: 1350, y: 678 } };
     snap.vehicleB.parts[0].visual = { ...snap.vehicleB.parts[0].visual!, position: { x: 1320, y: 675 } };
     renderer.reframe(snap, 'battle', { phase: 'Active' });
-    // corridor 固定 [130,1470]：A visual 左缘 250−90=160 ≥ 130；B visual 右缘 1350+100=1450 ≤ 1470
+    // corridor 固定 [130,1540]（Q08-CAM-D1：右界锚定 arena 右缘 1600−60）：
+    // A visual 左缘 250−90=160 ≥ 130；B visual 右缘 1350+100=1450 ≤ 1540
     inSafe(renderer, visualAABB(snap.vehicleA.bodyVisual!), 'A bodyVisual');
     inSafe(renderer, visualAABB(snap.vehicleB.bodyVisual!), 'B bodyVisual');
     inSafe(renderer, visualAABB(snap.vehicleB.parts[0].visual!), 'B partVisual');
+  });
+
+  it('2b. Q08-CAM-D1：A 顶推 B 交战团右移到实测可达位置（B visual 右缘 1534，Runtime 实测）Active 下仍完整', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    // 变体诊断实测：Active 阶段 B 被 A 顶推，B visual 右缘可达 1534.7（> 旧 corridor 1470 → 出框）
+    snap.vehicleA.bodyVisual = { ...snap.vehicleA.bodyVisual!, position: { x: 1120, y: 675 } };
+    snap.vehicleB.bodyVisual = { ...snap.vehicleB.bodyVisual!, position: { x: 1434, y: 678 } }; // 右缘 1534
+    snap.vehicleB.parts[0].visual = { ...snap.vehicleB.parts[0].visual!, position: { x: 1400, y: 675 } };
+    renderer.reframe(snap, 'battle', { phase: 'Active' });
+    // 修复后 corridor 右界 1540（+margin 64 吸收）→ 完整入画
+    inSafe(renderer, visualAABB(snap.vehicleB.bodyVisual!), 'B bodyVisual(实测右移位置)');
+    inSafe(renderer, visualAABB(snap.vehicleA.bodyVisual!), 'A bodyVisual');
+    // 仍比 Closing 全景构图大（不回退超远景）
+    renderer.reframe(snap, 'battle', { phase: 'Closing' });
+    const closingScale = renderer.transformScale;
+    renderer.reframe(snap, 'battle', { phase: 'Active' });
+    expect(renderer.transformScale).toBeGreaterThan(closingScale);
   });
 
   it('3. Warning：corridor 外扩后两车 Visual 仍完整可见', () => {

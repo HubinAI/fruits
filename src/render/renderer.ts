@@ -48,21 +48,23 @@ const MAX_CONTENT_SCALE = 5;
  */
 const PREVIEW_MARGIN_WORLD = 18;
 /**
- * Q08-A-FIX：正式 Battle 固定战斗走廊（corridor）——不绑定开局瞬间车辆位置。
- * 横向基于正式 spawn 语义（arena.width×0.25 / ×0.75，与默认 spawn 400/1200 对齐）
- * 外扩「位移预算 160 + 最大视觉半宽 110」（banana body visual 半宽 100 + 余量）：
- * 碰撞 / Push / 后坐产生的合理位移内，真实 Visual 始终完整入画。
+ * Q08-A-FIX / Q08-CAM-D1：正式 Battle 固定战斗走廊（corridor）——不绑定开局瞬间车辆位置。
+ * 横向左界基于正式 spawn（arena.width×0.25）外扩「位移预算 160 + 最大视觉半宽 110」；
+ * 横向右界直接锚定 arena 右缘（width − 墙厚）——真实物理中 A（质量 120+）持续驱动
+ * +X 顶推 B（质量 45）会使 A/B 交战团整体右移（录像与 Runtime 实测一致），
+ * 最终可达 arena 右墙内侧；对称 spawn 预算无法覆盖该真实可达范围（旧 1470 < 实测 1534
+ * 出框，Q08-CAM-D1 诊断 firstOOB t=11767ms Active B visual 右缘 1534.7）。
  * 纵向只覆盖车辆活动高度（地面以上 190）+ 地面——不含 Closing 墙顶，
- * 上方无巨大无效空间，车辆保持足够大。Warning 在 corridor 基础上再外扩
- * WARNING_SPREAD=100 逐步准备 Closing；Closing/End 用完整收束安全构图。
+ * 上方无巨大无效空间，车辆保持足够大。Warning 左侧再外扩 WARNING_SPREAD=100
+ * 逐步准备 Closing；Closing/End 用完整收束安全构图。
  */
 const CORRIDOR_SPAWN_A_RATIO = 0.25;
-const CORRIDOR_SPAWN_B_RATIO = 0.75;
 const CORRIDOR_MOVE_BUDGET = 160; // 每侧可承受的碰撞/后坐位移预算
 const CORRIDOR_VISUAL_HALF = 110; // 最大真实视觉半宽（banana body visual 100 + 余量）
 const CORRIDOR_ACTIVE_EXTENT = CORRIDOR_MOVE_BUDGET + CORRIDOR_VISUAL_HALF; // 270
 const CORRIDOR_WARNING_SPREAD = 100; // Warning 相对 Active 的额外外扩（逐步准备 Closing）
 const CORRIDOR_HEIGHT = 190; // 纵向：车辆活动高度（地面以上预算，不含 Closing 墙顶）
+const CORRIDOR_EDGE_PAD = 60; // Q08-CAM-D1：corridor 右界锚定 arena 右缘（对齐墙厚 60）
 /** 构图安全区：左右 UI 阴影区不计入可用画布（CSS px，每侧内缩量） */
 const SAFE_INSET_X = 56;
 const SAFE_INSET_Y = 28;
@@ -530,15 +532,15 @@ export class Renderer {
    *   边距更小、且 Preview 使用专属近距 spawn（见 physicsLab.loadCustomPreview），
    *   内容 bounds 自然收窄 → 车辆明显比 vehicles 构图更大；不做 fit 后强放大
    *   （旧 PREVIEW_ZOOM×1.9 会把 A/B 推出 safe viewport）；只用于 Editing，不影响正式 Battle。
-   * - fit 'battle'（Q08-A / Q08-A-FIX）：正式战斗按 phase 构图——
-   *   Active：固定战斗走廊（corridor）——基于正式 spawn（width×0.25/×0.75）±
-   *   CORRIDOR_ACTIVE_EXTENT，纵向只含车辆活动高度 + 地面，不绑定开局瞬时位置，
-   *   碰撞/Push/后坐的合理位移内真实 Visual 完整入画且车辆足够大；
-   *   Warning：corridor 外扩 WARNING_SPREAD 逐步准备 Closing；Closing / End：
-   *   完整战场安全构图（0..width + Closing wall 全程入画，W1-P0-CLOSE-FIX 原语义）。
-   *   battle 一律取 fitLimit（不 ×CONTENT_ZOOM），完整入画是硬约束；
-   *   仅 Battle start / phase 切换 / resize 时构图一次，运行期间绝不 follow、
-   *   不动态 zoom、不随 projectile 扩镜头。
+   * - fit 'battle'（Q08-A / Q08-A-FIX / Q08-CAM-D1）：正式战斗按 phase 构图——
+   *   Active：固定战斗走廊（corridor）——左界 = 正式 spawn（width×0.25）− 位移预算，
+   *   右界 = arena 右缘 − 墙厚（A 顶推 B 的交战团最终可达 arena 右墙内侧），
+   *   纵向只含车辆活动高度 + 地面；不绑定开局瞬时位置，真实可达范围内
+   *    Visual 完整入画且车辆足够大；Warning：左界外扩 WARNING_SPREAD 逐步准备
+   *   Closing；Closing / End：完整战场安全构图（0..width + Closing wall 全程入画，
+   *   W1-P0-CLOSE-FIX 原语义）。battle 一律取 fitLimit（不 ×CONTENT_ZOOM），
+   *   完整入画是硬约束；仅 Battle start / phase 切换 / resize 时构图一次，
+   *   运行期间绝不 follow、不动态 zoom、不随 projectile 扩镜头。
    *
    * 内容退化时回退到现有 transform（resize 设置的 arena 框）。
    */
@@ -604,26 +606,23 @@ export class Renderer {
       // 仅 Battle start / phase 切换 / resize 时调用一次，运行期间不重算（无呼吸/无跟随）。
       const phase = opts.phase ?? '';
       if (phase === 'Active' || phase === '') {
-        // Active：固定 corridor = 正式 spawn（width×0.25 / ×0.75）±
-        // CORRIDOR_ACTIVE_EXTENT（位移预算 160 + 最大视觉半宽 110）。
-        // 纵向仅车辆活动高度（groundY−CORRIDOR_HEIGHT）+ 地面——不含 Closing 墙顶，
-        // 上方无巨大无效空间，车辆保持足够大；碰撞/Push/后坐不会轻易推出画面。
+        // Active：固定 corridor = 左界 spawn 预算（width×0.25 − ACTIVE_EXTENT）、
+        // 右界锚定 arena 右缘（width − CORRIDOR_EDGE_PAD）——A 顶推 B 的交战团
+        // 最终可达 arena 右墙内侧（Q08-CAM-D1 实测 B visual 右缘 1534），
+        // 对称 spawn 预算无法覆盖；纵向仅车辆活动高度 + 地面。
         const cL = snap.arena.width * CORRIDOR_SPAWN_A_RATIO - CORRIDOR_ACTIVE_EXTENT;
-        const cR = snap.arena.width * CORRIDOR_SPAWN_B_RATIO + CORRIDOR_ACTIVE_EXTENT;
+        const cR = snap.arena.width - CORRIDOR_EDGE_PAD;
         acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
         acc(cL, snap.arena.groundY);
         acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
         acc(cR, snap.arena.groundY);
       } else if (phase === 'Warning') {
-        // Warning：corridor 外扩（逐步准备 Closing），仍清楚看到两车与交战动作。
+        // Warning：左界再外扩（逐步准备 Closing）；右界已锚定 arena 边界。
         const cL =
           snap.arena.width * CORRIDOR_SPAWN_A_RATIO -
           CORRIDOR_ACTIVE_EXTENT -
           CORRIDOR_WARNING_SPREAD;
-        const cR =
-          snap.arena.width * CORRIDOR_SPAWN_B_RATIO +
-          CORRIDOR_ACTIVE_EXTENT +
-          CORRIDOR_WARNING_SPREAD;
+        const cR = snap.arena.width - CORRIDOR_EDGE_PAD;
         acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
         acc(cL, snap.arena.groundY);
         acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
