@@ -92,8 +92,7 @@ style.textContent = `
   .result-actions button { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px; }
   .result-actions button:hover { background: #2e3747; }
   .result-actions button.primary { background: #3b6fd4; border-color: #4a7fe0; }
-  /* W2-UX-R2：测试工具折叠区（Pause/Reset/Clear/速度/装载/Preset 收进二级） */
-  .tool-tools-toggle { font-size: 12px; opacity: 0.85; }
+  /* Q07-A：开发工具折叠区（机制场景 / Pause/Reset/Clear / 速度 / Preset 收进二级） */
   .tool-tools-host { display: none; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 12px; background: #1b2130; border-bottom: 1px solid #2a3140; }
   .tool-tools-host .tool-tools-label { font-size: 12px; color: #9aa4b5; margin-right: 4px; }
   .tool-tools-host button, .tool-tools-host select { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; padding: 5px 9px; cursor: pointer; font-size: 12px; }
@@ -106,6 +105,19 @@ style.textContent = `
   .panel-collapse h3 { margin: 10px 0 6px; }
   .panel-collapse button { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; padding: 4px 9px; cursor: pointer; font-size: 12px; }
   .panel-collapse button:disabled { opacity: 0.45; cursor: not-allowed; }
+  /* Q07-A：开发工具入口弱化（不再是与 Start 同级的主操作） */
+  .dev-toggle { font-size: 12px; opacity: 0.72; margin-left: auto; }
+  .dev-toggle:hover { opacity: 1; }
+  /* Q07-A：Start 唯一主 CTA——画布底部固定大按钮，合法高亮可点 / 非法禁用 + 就近原因 */
+  .start-bar { position: absolute; left: 0; right: 0; bottom: 14px; display: flex; justify-content: center; align-items: center; gap: 14px; z-index: 6; pointer-events: none; }
+  .start-bar .btn-start-cta { pointer-events: auto; font-size: 17px; font-weight: 700; letter-spacing: 3px; padding: 12px 48px; background: #3b6fd4; border: 1px solid #5a8df0; color: #fff; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 16px rgba(59,111,212,0.4); }
+  .start-bar .btn-start-cta:hover { background: #4a7fe0; }
+  .start-bar .btn-start-cta:disabled { background: #262e3d; border-color: #38414f; color: #7c8799; box-shadow: none; cursor: not-allowed; }
+  .start-bar .start-hint { pointer-events: auto; color: #ff6b5e; font-size: 13px; max-width: 280px; line-height: 1.5; }
+  /* Q07-A：对手概要（B 默认折叠时显示；不展开完整表单） */
+  .opponent-summary { font-size: 12px; color: #9aa4b5; padding: 4px 0 2px; line-height: 1.6; }
+  .opponent-summary .os-name { color: #ffd35a; font-weight: 600; }
+  .opponent-summary .os-parts { margin-top: 2px; font-size: 11px; color: #7c8799; }
 `;
 document.head.appendChild(style);
 
@@ -243,7 +255,7 @@ function adjustConfig(): void {
   setBuildControlsLocked(false);
   panelA.style.display = '';
   panelB.style.display = '';
-  btnStart.style.display = '';
+  startBar.style.display = '';
   showPreview();
   updateStartButton();
 }
@@ -533,6 +545,34 @@ function renderPanel(
   eRow.textContent = `能量：${Number.isFinite(used) ? used : '?'} / ${capacity}`;
   eRow.style.color = overload ? '#ff6b5e' : '#9aa4b5';
   form.appendChild(eRow);
+
+  // Q07-A：对手概要（collapsed 时显示——Body 名 / 部件 / 能量，不展开完整表单）
+  if (opts.collapsed) {
+    const summary = document.createElement('div');
+    summary.className = 'opponent-summary';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'os-name';
+    nameSpan.textContent = `${body?.name ?? d.bodyDefId}`;
+    summary.appendChild(nameSpan);
+    const eTxt = Number.isFinite(used) ? String(used) : '?';
+    summary.appendChild(document.createTextNode(` · 能量 ${eTxt}/${capacity}`));
+    if (body) {
+      const partNames = editableSlots(body)
+        .map((hpId) => {
+          const v = d.functionalSelections[hpId];
+          if (!v || v === EMPTY_SLOT) return null;
+          return registry.functionals.get(v)?.name ?? v;
+        })
+        .filter((x): x is string => x !== null);
+      if (partNames.length) {
+        const partsRow = document.createElement('div');
+        partsRow.className = 'os-parts';
+        partsRow.textContent = partNames.join(' / ');
+        summary.appendChild(partsRow);
+      }
+    }
+    panel.appendChild(summary);
+  }
 }
 
 /** W2-UX-R2：B 测试对手编辑是否展开（默认折叠，降低首屏信息量；能力不删除） */
@@ -549,9 +589,9 @@ function showPreview(): void {
 
 /** 编辑后刷新：面板 + （非战斗时）实时 Preview + 按钮/阻断原因 */
 function refreshFromEdit(): void {
-  renderPanel(panelA, 'A 车 Build', draftA, refreshFromEdit);
-  // W2-UX-R2：B 是「测试对手」——默认折叠，仅保留「编辑对手」展开入口
-  renderPanel(panelB, 'B · 测试对手', draftB, refreshFromEdit, {
+  renderPanel(panelA, '我的车辆 A', draftA, refreshFromEdit);
+  // Q07-A：B 明确叫「当前对手」——默认只显示概要 + 「编辑对手」入口，不展开完整表单
+  renderPanel(panelB, '当前对手 B', draftB, refreshFromEdit, {
     collapsed: !bEditorOpen,
     expandLabel: '编辑对手',
   });
@@ -595,12 +635,14 @@ function setBuildControlsLocked(locked: boolean): void {
   sideToggle.disabled = locked;
 }
 
-/* ---------- 工具栏：模式切换 / 场景选择 / 战斗按钮 / 结果与阻断提示 ---------- */
+/* ---------- 工具栏（Q07-A：不再有模式双主按钮；Start 是唯一主 CTA，位于画布底部） ---------- */
 
-const modeBuildBtn = addButton(toolbar, '装配测试', () => setMode('build'));
-const modeScenarioBtn = addButton(toolbar, '机制场景', () => setMode('scenario'));
+// Q07-A：机制场景不再是同级主按钮——场景选择收进「开发工具」折叠区（toolsHost 内）；
+// scenario 模式下才显示低优先级「返回装配」。
+const backToBuildBtn = addButton(toolbar, '返回装配', () => setMode('build'));
+backToBuildBtn.style.display = 'none';
 
-// 场景选择（仅机制场景模式显示）
+// 场景选择（开发工具折叠区内显示；选中即进入机制场景模式）
 const scenarioSelect = document.createElement('select');
 SCENARIOS.forEach((s) => {
   const opt = document.createElement('option');
@@ -611,6 +653,7 @@ SCENARIOS.forEach((s) => {
 scenarioSelect.onchange = () => {
   const sc = SCENARIOS.find((s) => s.id === scenarioSelect.value);
   if (sc) {
+    setMode('scenario'); // Q07-A：从开发工具选中场景 → 直接进入机制场景模式
     lab.loadScenario(sc);
     lastShownResult = null;
     currentCamera = sc.camera ?? null;
@@ -618,12 +661,10 @@ scenarioSelect.onchange = () => {
     updateHud(); // 场景模式隐藏战斗 HUD
   }
 };
-toolbar.appendChild(scenarioSelect);
 
-// Start 阻断原因（Start 附近直接显示，不要求去左右面板找红字）
+// Start 阻断原因（Q07-A：挂到画布底部 start-bar，与 Start 主 CTA 就近显示）
 const startHint = document.createElement('span');
-startHint.style.cssText = 'color:#ff6b5e;font-size:12px;margin-left:8px;';
-toolbar.appendChild(startHint);
+startHint.className = 'start-hint';
 
 /** 开战 / 原配置再战：重新 validate 当前 Draft → Planck loadCustom → Fighting 专注模式 */
 function startOrRematch(): void {
@@ -638,7 +679,7 @@ function startOrRematch(): void {
   // Fighting 专注模式：Build 面板收起，Canvas 自动扩展 + 顶部固定 HUD
   panelA.style.display = 'none';
   panelB.style.display = 'none';
-  btnStart.style.display = 'none';
+  startBar.style.display = 'none';
   startHint.style.display = 'none';
   resultModal.style.display = 'none';
   currentCamera = null;
@@ -647,18 +688,30 @@ function startOrRematch(): void {
   updateStartButton();
 }
 
-const btnStart = addButton(toolbar, '开始战斗', startOrRematch);
+/* ---------- Q07-A：Start 唯一主 CTA（画布底部固定，合法高亮 / 非法禁用 + 就近原因） ---------- */
+const startBar = document.createElement('div');
+startBar.className = 'start-bar';
+canvasWrap.appendChild(startBar);
 
-/* ---------- W2-UX-R2：测试工具折叠区（Pause/Reset/Clear/速度/装载/Preset 不占一级） ---------- */
-const toolsToggle = addButton(toolbar, '测试工具 ▸', () => {
+const btnStart = document.createElement('button');
+btnStart.className = 'btn-start-cta';
+btnStart.textContent = '开始战斗';
+btnStart.onclick = startOrRematch;
+startBar.appendChild(btnStart);
+startBar.appendChild(startHint);
+
+/* ---------- Q07-A：开发工具折叠区（机制场景 / Pause / Reset / Clear / 速度 / Preset 全部收进二级） ---------- */
+const toolsToggle = addButton(toolbar, '开发工具 ▸', () => {
   toolsOpen = !toolsOpen;
   toolsHost.style.display = toolsOpen ? '' : 'none';
-  toolsToggle.textContent = toolsOpen ? '测试工具 ▾' : '测试工具 ▸';
+  toolsToggle.textContent = toolsOpen ? '开发工具 ▾' : '开发工具 ▸';
   toolsToggle.classList.toggle('active', toolsOpen);
 });
-toolsToggle.classList.add('tool-tools-toggle');
+toolsToggle.classList.add('dev-toggle');
 const toolsHost = document.createElement('div');
 toolsHost.className = 'tool-tools-host';
+// Q07-A：机制场景入口收进开发工具（不再是同级主模式按钮）
+toolsHost.appendChild(scenarioSelect);
 const toolsLabel = document.createElement('span');
 toolsLabel.className = 'tool-tools-label';
 toolsLabel.textContent = '调试：';
@@ -679,13 +732,13 @@ function updateStartButton(): void {
     startHint.style.display = reason ? '' : 'none';
   }
 
-  // 按钮：editing 显示「开始战斗」；fighting/ended 隐藏（战斗流程由结算卡接管）
+  // 主 CTA（Q07-A：start-bar 整体）：editing 显示「开始战斗」；fighting/ended 隐藏
   if (battleState === 'fighting' || battleState === 'ended') {
-    btnStart.style.display = 'none';
+    startBar.style.display = 'none';
   } else {
-    btnStart.style.display = '';
+    startBar.style.display = '';
     btnStart.textContent = '开始战斗';
-    btnStart.disabled = !valid;
+    btnStart.disabled = !valid; // 非法：禁用 + startHint 就近显示原因
   }
 }
 
@@ -702,17 +755,17 @@ function pollBattleResult(): void {
   updateStartButton();
 }
 
-/** 顶层模式切换：装配测试 / 机制场景（控件严格互斥） */
+/** 顶层模式切换（Q07-A）：装配（默认主页面）↔ 机制场景（开发工具入口）。
+ *  不再有双主按钮——scenario 由开发工具内场景选择进入，backToBuildBtn 返回装配。 */
 function setMode(m: UiMode): void {
   uiMode = m;
-  modeBuildBtn.classList.toggle('active', m === 'build');
-  modeScenarioBtn.classList.toggle('active', m === 'scenario');
+  backToBuildBtn.style.display = m === 'scenario' ? '' : 'none';
   const showBuild = m === 'build';
   panelA.style.display = showBuild ? '' : 'none';
   panelB.style.display = showBuild ? '' : 'none';
-  btnStart.style.display = showBuild && battleState === 'editing' ? '' : 'none';
+  startBar.style.display = showBuild && battleState === 'editing' ? '' : 'none';
   startHint.style.display = showBuild && battleState === 'editing' ? '' : 'none';
-  scenarioSelect.style.display = showBuild ? 'none' : '';
+  // Q07-A：scenarioSelect 位于开发工具折叠区内，显示与否由 toolsHost 控制，不再单独切换
   debugPanel.style.display = showBuild ? 'none' : '';
   resultModal.style.display = 'none'; // 模式切换关闭结算卡
   hudEl.style.display = 'none';
@@ -744,7 +797,7 @@ addButton(toolsHost, 'Reset', () => {
     if (lab.previewMode) {
       panelA.style.display = '';
       panelB.style.display = '';
-      btnStart.style.display = '';
+      startBar.style.display = '';
     }
     updateHud();
     updateStartButton();
@@ -761,7 +814,7 @@ addButton(toolsHost, 'Clear', () => {
     setBuildControlsLocked(false);
     panelA.style.display = '';
     panelB.style.display = '';
-    btnStart.style.display = '';
+    startBar.style.display = '';
     showPreview(); // Clear 后恢复装配预览
     updateStartButton();
   }
