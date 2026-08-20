@@ -40,6 +40,9 @@ const CONTENT_MARGIN_WORLD = 64;
 const CONTENT_ZOOM = 1.05;
 const MIN_CONTENT_SCALE = 0.4;
 const MAX_CONTENT_SCALE = 5;
+/** W2-UX-R2：装配 Preview 近距构图（明显放大，优先看清 Body 与 Functional 部件） */
+const PREVIEW_MARGIN_WORLD = 18;
+const PREVIEW_ZOOM = 1.9;
 /** 构图安全区：左右 UI 阴影区不计入可用画布（CSS px，每侧内缩量） */
 const SAFE_INSET_X = 56;
 const SAFE_INSET_Y = 28;
@@ -52,7 +55,7 @@ const SAFE_INSET_Y = 28;
  *   保证车辆被 Closing 推向边缘/中央的全过程始终可见（W1-P0-CLOSE-FIX；Start/Reset 构图一次，
  *   运行期间绝不 follow、不动态 zoom、不随 projectile 扩镜头）。
  */
-export type CameraFit = 'vehicles' | 'primary-fire' | 'battle';
+export type CameraFit = 'vehicles' | 'primary-fire' | 'battle' | 'preview';
 
 interface FloatingText {
   x: number;
@@ -131,6 +134,11 @@ export class Renderer {
   }
   private ss(v: number): number {
     return v * this.transform.scale;
+  }
+
+  /** 当前镜头缩放（只读；测试 / 调试断言构图差异用） */
+  get transformScale(): number {
+    return this.transform.scale;
   }
 
   /**
@@ -467,7 +475,9 @@ export class Renderer {
    * - fit 'vehicles'：A+B 完整进中央可视区域（默认）；
    * - fit 'primary-fire'：只取 A（远处 B 不缩小画面）；A 初始位于可视区域偏左中部，
    *   身后保留 recoilExtent（默认 180 世界 px）反冲空间，前方保留 forwardExtent
-   *   （默认 520 世界 px）固定射击空间——Cannon-Recoil / Cannon-Angle 共用此套。
+   *   （默认 520 世界 px）固定射击空间——Cannon-Recoil / Cannon-Angle 共用此套；
+   * - fit 'preview'（W2-UX-R2）：装配 Preview 近距放大——A+B 进画面但边距更小、
+   *   zoom 更大，优先看清 Body 与 Functional 部件；只用于 Editing，不影响正式 Battle。
    *
    * 内容退化时回退到现有 transform（resize 设置的 arena 框）。
    */
@@ -516,13 +526,18 @@ export class Renderer {
       // 身后明确 recoil 空间 + 前方固定射击空间（A 朝 +X 发射方向）
       minX -= recoilExtent;
       maxX += forwardExtent;
+    } else if (fit === 'preview') {
+      // W2-UX-R2：装配 Preview 近距放大（A+B；小边距 + 大 zoom 由下方分支处理）
+      includeVehicle(snap.vehicleA);
+      includeVehicle(snap.vehicleB);
     } else {
       includeVehicle(snap.vehicleA);
       includeVehicle(snap.vehicleB);
     }
     // Projectile 永不参与 camera bounds
     if (!isFinite(minX) || !isFinite(minY) || maxX - minX < 1 || maxY - minY < 1) return;
-    const m = CONTENT_MARGIN_WORLD;
+    const isPreview = fit === 'preview';
+    const m = isPreview ? PREVIEW_MARGIN_WORLD : CONTENT_MARGIN_WORLD;
     minX -= m; maxX += m; minY -= m; maxY += m;
     // 地面表面留出可见区域
     if (maxY < snap.arena.groundY + 40) maxY = snap.arena.groundY + 40;
@@ -532,7 +547,8 @@ export class Renderer {
     // R2：可用画布 = 中央实际战斗可视区域（扣除左右 UI 阴影区）
     const safeW = Math.max(2, cw - SAFE_INSET_X * 2);
     const safeH = Math.max(2, ch - SAFE_INSET_Y * 2);
-    let scale = Math.min(safeW / bw, safeH / bh) * CONTENT_ZOOM;
+    let scale =
+      Math.min(safeW / bw, safeH / bh) * (isPreview ? PREVIEW_ZOOM : CONTENT_ZOOM);
     if (scale < MIN_CONTENT_SCALE) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
     // 内容居中于安全区中心（offset 含安全区内缩量）

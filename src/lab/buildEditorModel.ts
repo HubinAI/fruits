@@ -28,10 +28,10 @@ export const EMPTY_SLOT = 'none';
  * 内部 hardpoint id 仅作次级文字（如「前端 (front)」）。
  */
 export const SLOT_LABELS: Record<string, string> = {
-  front: '前端',
-  frontMass: '前部',
-  top: '顶部',
-  rear: '后端',
+  front: '前端挂点',
+  frontMass: '前上挂点',
+  top: '顶部挂点',
+  rear: '后部挂点',
 };
 
 /** 槽位展示主标签（未知 id 回退为原 id） */

@@ -97,17 +97,18 @@ describe('Q06-UX-R1 Build 交互', () => {
     expect(r.errors[0]).toContain('Weapon'); // UI 在 Start 旁直接显示「A：至少需要 1 件 Weapon」
   });
 
-  it('5. 槽位自然名称：前端/前部/顶部/后端（内部 id 保留）', () => {
+  it('5. 槽位自然名称：前端挂点/前上挂点/顶部挂点/后部挂点（内部 id 保留）', () => {
+    // W2-UX-R2：主标签用「挂点」位置语义（front/frontMass 不再作主视觉文字）
     expect(SLOT_LABELS).toEqual({
-      front: '前端',
-      frontMass: '前部',
-      top: '顶部',
-      rear: '后端',
+      front: '前端挂点',
+      frontMass: '前上挂点',
+      top: '顶部挂点',
+      rear: '后部挂点',
     });
-    expect(slotLabel('front')).toBe('前端');
-    expect(slotLabel('frontMass')).toBe('前部');
-    expect(slotLabel('top')).toBe('顶部');
-    expect(slotLabel('rear')).toBe('后端');
+    expect(slotLabel('front')).toBe('前端挂点');
+    expect(slotLabel('frontMass')).toBe('前上挂点');
+    expect(slotLabel('top')).toBe('顶部挂点');
+    expect(slotLabel('rear')).toBe('后部挂点');
     expect(slotLabel('unknown')).toBe('unknown'); // 未知回退原 id
   });
 

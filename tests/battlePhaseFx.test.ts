@@ -230,4 +230,19 @@ describe('W2-FX-2 阶段视觉（Renderer smoke）', () => {
     // B 车辆仍在淡出窗口 → 正常绘制（vehicleDeathAlpha 非 null）
     expect(ctx.calls.includes('fill')).toBe(true);
   });
+
+  it('6e. W2-UX-R2：装配 Preview 近距放大（preview fit scale > vehicles fit scale）', () => {
+    const ctx = new CtxStub();
+    const renderer = new Renderer(makeCanvas(ctx));
+    (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
+    renderer.resize(1600, 1000);
+    const orch = makeFakeOrch('Active');
+    const snap = orch.getRenderSnapshot();
+    renderer.reframe(snap, 'vehicles');
+    const vehiclesScale = renderer.transformScale;
+    renderer.reframe(snap, 'preview'); // W2-UX-R2：近距放大
+    const previewScale = renderer.transformScale;
+    expect(previewScale).toBeGreaterThan(vehiclesScale);
+    expect(previewScale).toBeGreaterThan(1); // 明显放大（小边距 + PREVIEW_ZOOM 1.9）
+  });
 });

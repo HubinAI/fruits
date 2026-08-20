@@ -92,6 +92,20 @@ style.textContent = `
   .result-actions button { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px; }
   .result-actions button:hover { background: #2e3747; }
   .result-actions button.primary { background: #3b6fd4; border-color: #4a7fe0; }
+  /* W2-UX-R2：测试工具折叠区（Pause/Reset/Clear/速度/装载/Preset 收进二级） */
+  .tool-tools-toggle { font-size: 12px; opacity: 0.85; }
+  .tool-tools-host { display: none; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 12px; background: #1b2130; border-bottom: 1px solid #2a3140; }
+  .tool-tools-host .tool-tools-label { font-size: 12px; color: #9aa4b5; margin-right: 4px; }
+  .tool-tools-host button, .tool-tools-host select { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; padding: 5px 9px; cursor: pointer; font-size: 12px; }
+  .tool-tools-host button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .tool-tools-host .preset-box { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; flex-wrap: wrap; }
+  .tool-tools-host .preset-box h3 { display: inline; font-size: 12px; color: #ffd35a; margin: 0 4px 0 0; }
+  .tool-tools-host .preset-box button { padding: 3px 7px; }
+  /* W2-UX-R2：B 测试对手折叠（默认收起，降低首屏信息量） */
+  .panel-collapse { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .panel-collapse h3 { margin: 10px 0 6px; }
+  .panel-collapse button { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; padding: 4px 9px; cursor: pointer; font-size: 12px; }
+  .panel-collapse button:disabled { opacity: 0.45; cursor: not-allowed; }
 `;
 document.head.appendChild(style);
 
@@ -203,6 +217,8 @@ function updateHud(): void {
     return;
   }
   hudEl.style.display = 'flex';
+  // W2-UX-R2：Ended 不再显示「战斗中」（改「战斗结束」，避免与结算卡矛盾）
+  hudPhase.textContent = s.phase === 'End' ? '战斗结束' : '战斗中';
   hudA.hpText.textContent = `${Math.round(s.sideA.hp)} / ${Math.round(s.sideA.maxHp)}`;
   hudB.hpText.textContent = `${Math.round(s.sideB.hp)} / ${Math.round(s.sideB.maxHp)}`;
   hudA.barFill.style.width = `${Math.max(0, Math.min(1, s.sideA.hp / Math.max(s.sideA.maxHp, 1))) * 100}%`;
@@ -336,9 +352,13 @@ function reframeCamera(): void {
   if (!orch) return;
   // W1-P0-CLOSE-FIX：Custom 正式 Battle（装配测试模式、非 Preview）→ 固定战场构图
   // （覆盖 Arena 有效战斗区域，车辆被 Closing 推向边缘/中央的全过程始终可见）；
-  // Editing Preview / 机制场景维持原 fit 语义。
+  // Editing Preview：近距放大 fit（W2-UX-R2）；机制场景维持原 fit 语义。
   const fit: CameraFit =
-    uiMode === 'build' && !lab.previewMode ? 'battle' : (currentCamera?.fit ?? 'vehicles');
+    uiMode === 'build'
+      ? lab.previewMode
+        ? 'preview' // 装配 Preview：明显放大，优先看清 Body 与 Functional 部件
+        : 'battle' // 正式战斗：固定战场构图（W1-P0-CLOSE-FIX）
+      : (currentCamera?.fit ?? 'vehicles');
   renderer.reframe(
     orch.getRenderSnapshot(),
     fit,
@@ -421,18 +441,37 @@ function currentSnapshot(side: 'A' | 'B'): BuildSnapshot {
   );
 }
 
-/** 渲染一侧 Build 面板（Body / 轮径 / 真实 Functional 槽位 / Energy / 校验错误） */
+/** 渲染一侧 Build 面板（Body / 轮径 / 真实 Functional 槽位 / Energy / 校验错误）。
+ *  W2-UX-R2：opts.collapsed=true 时表单折叠（B 测试对手默认收起，仅保留展开入口） */
 function renderPanel(
   panel: HTMLElement,
   title: string,
   d: BuildDraft,
   onChanged: () => void,
+  opts: { collapsed?: boolean; expandLabel?: string } = {},
 ): void {
   panel.replaceChildren();
 
+  const header = document.createElement('div');
+  header.className = 'panel-collapse';
   const h = document.createElement('h3');
   h.textContent = title;
-  panel.appendChild(h);
+  header.appendChild(h);
+  if (opts.collapsed !== undefined) {
+    const toggle = document.createElement('button');
+    toggle.textContent = opts.collapsed ? `${opts.expandLabel ?? '展开'} ▸` : '收起 ▾';
+    toggle.disabled = buildControlsLocked;
+    toggle.onclick = () => {
+      bEditorOpen = !bEditorOpen;
+      refreshFromEdit();
+    };
+    header.appendChild(toggle);
+  }
+  panel.appendChild(header);
+
+  const form = document.createElement('div');
+  form.style.display = opts.collapsed ? 'none' : '';
+  panel.appendChild(form);
 
   const body = registry.bodies.get(d.bodyDefId);
   const snapshot = currentSnapshot(d === draftA ? 'A' : 'B');
@@ -459,7 +498,7 @@ function renderPanel(
       onChanged();
     };
     lab2.appendChild(sel);
-    panel.appendChild(lab2);
+    form.appendChild(lab2);
   };
 
   mkSelect('车身', BODY_OPTIONS, d.bodyDefId, (v) => {
@@ -493,8 +532,11 @@ function renderPanel(
   const eRow = document.createElement('label');
   eRow.textContent = `能量：${Number.isFinite(used) ? used : '?'} / ${capacity}`;
   eRow.style.color = overload ? '#ff6b5e' : '#9aa4b5';
-  panel.appendChild(eRow);
+  form.appendChild(eRow);
 }
+
+/** W2-UX-R2：B 测试对手编辑是否展开（默认折叠，降低首屏信息量；能力不删除） */
+let bEditorOpen = false;
 
 /** 中央显示当前 Draft 的真实 Planck 装配预览（不推进战斗） */
 function showPreview(): void {
@@ -508,7 +550,11 @@ function showPreview(): void {
 /** 编辑后刷新：面板 + （非战斗时）实时 Preview + 按钮/阻断原因 */
 function refreshFromEdit(): void {
   renderPanel(panelA, 'A 车 Build', draftA, refreshFromEdit);
-  renderPanel(panelB, 'B 车 Build', draftB, refreshFromEdit);
+  // W2-UX-R2：B 是「测试对手」——默认折叠，仅保留「编辑对手」展开入口
+  renderPanel(panelB, 'B · 测试对手', draftB, refreshFromEdit, {
+    collapsed: !bEditorOpen,
+    expandLabel: '编辑对手',
+  });
   if (battleState !== 'fighting') {
     showPreview();
   }
@@ -540,6 +586,10 @@ function setBuildControlsLocked(locked: boolean): void {
   }
   for (const sel of panelB.querySelectorAll('select')) {
     (sel as HTMLSelectElement).disabled = locked;
+  }
+  // W2-UX-R2：B 折叠 toggle 同锁（Fighting/Ended 不可展开）
+  for (const b of panelB.querySelectorAll('.panel-collapse button')) {
+    (b as HTMLButtonElement).disabled = locked;
   }
   for (const b of presetButtons) b.disabled = locked;
   sideToggle.disabled = locked;
@@ -599,6 +649,23 @@ function startOrRematch(): void {
 
 const btnStart = addButton(toolbar, '开始战斗', startOrRematch);
 
+/* ---------- W2-UX-R2：测试工具折叠区（Pause/Reset/Clear/速度/装载/Preset 不占一级） ---------- */
+const toolsToggle = addButton(toolbar, '测试工具 ▸', () => {
+  toolsOpen = !toolsOpen;
+  toolsHost.style.display = toolsOpen ? '' : 'none';
+  toolsToggle.textContent = toolsOpen ? '测试工具 ▾' : '测试工具 ▸';
+  toolsToggle.classList.toggle('active', toolsOpen);
+});
+toolsToggle.classList.add('tool-tools-toggle');
+const toolsHost = document.createElement('div');
+toolsHost.className = 'tool-tools-host';
+const toolsLabel = document.createElement('span');
+toolsLabel.className = 'tool-tools-label';
+toolsLabel.textContent = '调试：';
+toolsHost.appendChild(toolsLabel);
+main.insertBefore(toolsHost, canvasWrap); // 放在工具栏下方、画面之上
+let toolsOpen = false;
+
 /** 按钮状态机 + Start 阻断原因（结果由中央结算卡展示，不再用 toolbar 小字） */
 function updateStartButton(): void {
   const valid = buildsValid();
@@ -655,14 +722,14 @@ function setMode(m: UiMode): void {
   updateStartButton();
 }
 
-/* ---------- 其余工具栏（Pause / Reset / Clear / 时间缩放） ---------- */
+/* ---------- 其余工具栏（Pause / Reset / Clear / 时间缩放）——收进「测试工具」折叠区 ---------- */
 
-const btnPause = addButton(toolbar, 'Pause', () => {
+const btnPause = addButton(toolsHost, 'Pause', () => {
   lab.paused = !lab.paused;
   btnPause.textContent = lab.paused ? 'Resume' : 'Pause';
   btnPause.classList.toggle('active', lab.paused);
 });
-addButton(toolbar, 'Reset', () => {
+addButton(toolsHost, 'Reset', () => {
   lab.paused = false;
   btnPause.textContent = 'Pause';
   btnPause.classList.remove('active');
@@ -683,7 +750,7 @@ addButton(toolbar, 'Reset', () => {
     updateStartButton();
   }
 });
-addButton(toolbar, 'Clear', () => {
+addButton(toolsHost, 'Clear', () => {
   lab.clear();
   lastShownResult = null;
   currentCamera = null;
@@ -700,11 +767,11 @@ addButton(toolbar, 'Clear', () => {
   }
 });
 
-// 时间缩放
-toolbar.appendChild(document.createTextNode('速度 '));
+// 时间缩放（测试工具折叠区内）
+toolsHost.appendChild(document.createTextNode('速度 '));
 const tsButtons: HTMLButtonElement[] = [];
 TIME_SCALES.forEach((ts) => {
-  const b = addButton(toolbar, `${ts}x`, () => {
+  const b = addButton(toolsHost, `${ts}x`, () => {
     lab.timeScale = ts;
     tsButtons.forEach((x) => x.classList.remove('active'));
     b.classList.add('active');
@@ -713,18 +780,19 @@ TIME_SCALES.forEach((ts) => {
 });
 tsButtons[0].classList.add('active');
 
-/* ---------- Preset 快捷（仅装配测试模式显示；只装载 Body/轮径，功能槽重置 none） ---------- */
+/* ---------- Preset 快捷（测试工具折叠区内；只装载 Body/轮径，功能槽重置 none） ---------- */
 let sideToggle!: HTMLButtonElement;
 const presetButtons: HTMLButtonElement[] = [];
 {
   let targetSide: 'A' | 'B' = 'A';
   const presetBox = document.createElement('div');
+  presetBox.className = 'preset-box';
   const ph = document.createElement('h3');
   ph.textContent = 'Preset 快捷（装到 A）';
   presetBox.appendChild(ph);
-  panelA.appendChild(presetBox);
+  toolsHost.appendChild(presetBox);
 
-  sideToggle = addButton(toolbar, '装载 → A', () => {
+  sideToggle = addButton(toolsHost, '装载 → A', () => {
     targetSide = targetSide === 'A' ? 'B' : 'A';
     sideToggle.textContent = `装载 → ${targetSide}`;
     ph.textContent = 'Preset 快捷（装到 ' + targetSide + '）';
