@@ -10,6 +10,13 @@
  */
 import { Renderer, type CameraFit } from './render/renderer';
 import { VisualRegistry } from './render/visualRegistry';
+// W2-SIL-1：5 个首批正式 Content 视觉占位（程序化轮廓 PNG；正式美术可替换）
+// Vite asset import 返回构建后 URL（dev/prod 均有效；vite/client 提供 *.png 声明）。
+import bodyWatermelonUrl from '../assets/visuals/body_watermelon.png';
+import bodyBananaUrl from '../assets/visuals/body_banana.png';
+import partCannonUrl from '../assets/visuals/part_cannon.png';
+import partHammerUrl from '../assets/visuals/part_hammer.png';
+import partPushRodUrl from '../assets/visuals/part_pushRod.png';
 import { PhysicsLab } from './lab/physicsLab';
 import { SCENARIOS, type ScenarioCamera } from './lab/scenarios';
 import { PRESETS } from './lab/presets';
@@ -227,6 +234,24 @@ const visualRegistry = new VisualRegistry();
 const renderer = new Renderer(canvas, visualRegistry);
 const lab = new PhysicsLab(renderer);
 
+/** W2-SIL-1：注册 + 加载首批正式 Content 视觉占位（缺资源/未加载 → Renderer 灰盒 fallback） */
+const SILHOUETTE_ASSETS: Array<[string, string]> = [
+  ['body_watermelon', bodyWatermelonUrl],
+  ['body_banana', bodyBananaUrl],
+  ['part_cannon', partCannonUrl],
+  ['part_hammer', partHammerUrl],
+  ['part_pushRod', partPushRodUrl],
+];
+for (const [visualId, url] of SILHOUETTE_ASSETS) {
+  visualRegistry.register(visualId, url);
+  const img = new Image();
+  img.onload = () => visualRegistry.setImage(visualId, img);
+  img.onerror = () => {
+    // 加载失败：保持 registry 无 image → Renderer 灰盒 fallback（不白屏/不抛错）
+  };
+  img.src = url;
+}
+
 /* ---------- 稳定取景（Q02-CAM-R1）：只在 load / Reset / resize 时构图一次 ---------- */
 let currentCamera: ScenarioCamera | null = null;
 
@@ -286,6 +311,8 @@ const BODY_OPTIONS: Array<{ v: string; t: string }> = [
   { v: 'boxBody', t: '箱式车身（厚实）' },
   { v: 'tallBody', t: '高身车身（compact）' },
   { v: 'heavyBox', t: '重型车身' },
+  { v: 'watermelonBody', t: '西瓜车身（宽厚低矮）' },
+  { v: 'bananaBody', t: '香蕉车身（长条弧形）' },
 ];
 
 const WHEEL_OPTIONS: Array<{ v: string; t: string }> = [
@@ -302,18 +329,26 @@ const PART_OPTIONS: Array<{ v: string; t: string }> = [
   { v: 'pushRod', t: 'Push Rod（推杆）' },
 ];
 
-/** 默认合法可玩配置（Q06-UX-R1 首屏要求：进入即两车完整 Preview + Start 可点） */
-function initialDraft(bodyDefId: string, frontPart: string): BuildDraft {
-  return {
-    bodyDefId,
-    rearRadius: 20,
-    frontRadius: 20,
-    functionalSelections: { front: frontPart },
-  };
+/** W2-SIL-1 视觉样板 Draft：双车并排展示 5 个首批正式 Content 轮廓
+ *  - front=pushRod（基座在 chassis 侧、推板在前，Prismatic 伸缩自然）
+ *  - frontMass=cannon（炮管与真实 muzzle 对齐，barrel +X）
+ *  - top=hammer（pivot 与 Revolute 一致，锤头远端）
+ *  - rear=空
+ *  energy=20+30+25=75；watermelon capacity 110 ✓、banana 90 ✓；≥1 Weapon ✓ */
+function silDraft(bodyDefId: string): BuildDraft {
+  const body = registry.bodies.get(bodyDefId)!;
+  const selections: Record<string, string> = {};
+  for (const hp of body.functionalHardpoints) {
+    if (hp.id === 'front') selections[hp.id] = 'pushRod';
+    else if (hp.id === 'frontMass') selections[hp.id] = 'cannon';
+    else if (hp.id === 'top') selections[hp.id] = 'hammer';
+    else selections[hp.id] = EMPTY_SLOT;
+  }
+  return { bodyDefId, rearRadius: 20, frontRadius: 20, functionalSelections: selections };
 }
 
-const draftA = initialDraft('boxBody', 'cannon');
-const draftB = initialDraft('heavyBox', 'cannon');
+const draftA = silDraft('watermelonBody');
+const draftB = silDraft('bananaBody');
 
 function currentSnapshot(side: 'A' | 'B'): BuildSnapshot {
   return buildSnapshotFromDraft(

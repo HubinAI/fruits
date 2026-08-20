@@ -90,10 +90,11 @@ function makeOrch(reg: ReturnType<typeof makeRegistryWithVisuals>, side: 'A' | '
 
 describe('W1-VIS-1 Visual ≠ Collider', () => {
   it('1. 无 VisualDef 时 Snapshot 不变（visual 字段 undefined + Collider Shape fallback 原样）', () => {
-    const reg = createRegistry(); // 原始 registry：全部无 visual
+    const reg = createRegistry(); // 原始 registry：body/wheel 全部无 visual；ramHead 无 visual
+    // W2-SIL-1 后 cannon/hammer/pushRod 都有 VisualDef；本用例断言旧 Content fallback，用 ramHead
     const orch = new PlanckBattleOrchestrator(
-      build('boxBody', 'wheelStd', 'cannon'),
-      build('boxBody', 'wheelStd', 'cannon'),
+      build('boxBody', 'wheelStd', 'ramHead'),
+      build('boxBody', 'wheelStd', 'ramHead'),
       reg,
       { autoDrive: false, engine: 'planck' },
     );

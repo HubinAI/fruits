@@ -269,8 +269,15 @@ describe('W1-INTEG · canonical Battle Integration（BattleRequest → Planck Ru
   });
 
   it('6. Render：无 VisualDef 的旧 Content 视觉 fallback 与当前一致', () => {
+    // W2-SIL-1 后 cannon/hammer/pushRod 都有 VisualDef；本用例断言「无 visual 的旧 Content
+    // （boxBody + wheelStd + ramHead）仍走 Collider Shape fallback」不变。
     const req = makeBattleRequest(7, 'w1-integ-render');
-    const { orch } = runToEnd(req);
+    const reqRam: BattleRequest = {
+      ...req,
+      buildA: { ...req.buildA, functionals: [{ hardpointId: 'front', defId: 'ramHead' }] },
+      buildB: { ...req.buildB, functionals: [{ hardpointId: 'front', defId: 'ramHead' }] },
+    };
+    const { orch } = runToEnd(reqRam);
     const snap = orch.getRenderSnapshot();
     // 旧 Content 无 VisualDef → Collider Shape fallback（polygons），visual 全 undefined
     expect(snap.vehicleA.body.kind).toBe('polygons');

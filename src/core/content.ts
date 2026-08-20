@@ -98,6 +98,76 @@ const heavyBox: BodyDef = {
   baseMass: 150,
 };
 
+/**
+ * 西瓜车身（W2-SIL-1 正式 Content 视觉样板）：宽厚、低矮、明显重量感。
+ * - Collider：单宽扁 box（170×50），物理稳定；质量 baseMass 120（明显重于 boxBody 50）；
+ * - Visual：body_watermelon sprite（圆润西瓜轮廓 + 深绿条纹），视觉与 Collider 解耦，
+ *   不再使用普通矩形视觉；anchor(0,0) 以 body 真实原点为中心，mirrorWithFacing 使
+ *   facing=-1 时整体镜像。
+ */
+const watermelonBody: BodyDef = {
+  id: 'watermelonBody',
+  name: '西瓜车身',
+  colliders: [{ shape: 'box', width: 170, height: 50, offset: { x: 0, y: 0 } }],
+  baseMass: 120,
+  hp: 1100,
+  energyCapacity: 110,
+  movementHardpoints: [
+    { id: 'rear', localPosition: { x: -58, y: 25 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 58, y: 25 }, localRotation: 0 },
+  ],
+  functionalHardpoints: [
+    { id: 'front', localPosition: { x: 78, y: 0 }, localRotation: 0 },
+    { id: 'frontMass', localPosition: { x: 45, y: -8 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: 0, y: -25 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -78, y: 0 }, localRotation: 0 },
+  ],
+  visual: {
+    visualId: 'body_watermelon',
+    size: { width: 180, height: 60 },
+    anchor: { x: 0, y: 0 },
+    rotation: 0,
+    layer: 1,
+    mirrorWithFacing: true,
+  },
+};
+
+/**
+ * 香蕉车身（W2-SIL-1 正式 Content 视觉样板）：长条/弧形视觉，前后高度关系明显。
+ * - Collider：两段 box（前段略低、后段略高）近似弧形，简单非矩形组合，物理稳定；
+ * - 质量 baseMass 45（轻），hp/energy 略低于西瓜（90），与西瓜一眼可区分；
+ * - Visual：body_banana sprite（黄色弧形香蕉轮廓，后段明显更高），anchor(0,0) 居中。
+ */
+const bananaBody: BodyDef = {
+  id: 'bananaBody',
+  name: '香蕉车身',
+  colliders: [
+    { shape: 'box', width: 120, height: 40, offset: { x: 35, y: 4 } },
+    { shape: 'box', width: 120, height: 44, offset: { x: -35, y: -4 } },
+  ],
+  baseMass: 45,
+  hp: 900,
+  energyCapacity: 90,
+  movementHardpoints: [
+    { id: 'rear', localPosition: { x: -62, y: 24 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 62, y: 24 }, localRotation: 0 },
+  ],
+  functionalHardpoints: [
+    { id: 'front', localPosition: { x: 82, y: -2 }, localRotation: 0 },
+    { id: 'frontMass', localPosition: { x: 48, y: -6 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: 0, y: -24 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -82, y: -2 }, localRotation: 0 },
+  ],
+  visual: {
+    visualId: 'body_banana',
+    size: { width: 200, height: 56 },
+    anchor: { x: 0, y: 0 },
+    rotation: 0,
+    layer: 1,
+    mirrorWithFacing: true,
+  },
+};
+
 /** 标准轮子 */
 const wheelStd: WheelDef = {
   kind: 'wheel',
@@ -156,6 +226,16 @@ const hammer: FunctionalPartDef = {
   collider: { shape: 'box', width: 60, height: 14, offset: { x: 40, y: 0 } },
   behavior: 'hammer',
   behaviorParams: { baseDamage: 90 },
+  // W2-SIL-1：细长柄 + 大锤头；pivot 必须与真实 Revolute 一致——sprite 覆盖本地
+  // x∈[-3,71]（anchor 34、半宽 37），本地 x=0（= Revolute pivot）处为柄根，锤头在远端。
+  visual: {
+    visualId: 'part_hammer',
+    size: { width: 74, height: 20 },
+    anchor: { x: 34, y: 0 },
+    rotation: 0,
+    layer: 10,
+    mirrorWithFacing: true,
+  },
 };
 
 /**
@@ -186,6 +266,16 @@ const cannon: FunctionalPartDef = {
     projectileMass: 1,
     recoilImpulse: 30,
   },
+  // W2-SIL-1：炮座 + 炮管 + 炮口；sprite 覆盖本地 x∈[-8,40]（anchor 16、半宽 24），
+  // 炮口（图片右端）与真实 muzzle 对齐——muzzle 本地 x = offset 20 + halfW 20 = 40 ✓。
+  visual: {
+    visualId: 'part_cannon',
+    size: { width: 48, height: 22 },
+    anchor: { x: 16, y: 0 },
+    rotation: 0,
+    layer: 10,
+    mirrorWithFacing: true,
+  },
 };
 
 /**
@@ -203,6 +293,17 @@ const pushRod: FunctionalPartDef = {
   energy: 20,
   collider: { shape: 'box', width: 80, height: 12, offset: { x: 40, y: 0 } },
   behavior: 'pushRod',
+  // W2-SIL-1：车身侧基座 + 细连接杆 + 前端宽推板；sprite 覆盖本地 x∈[-6,92]
+  // （anchor 43、半宽 49）——基座贴近 chassis 锚点（t=0 时本地 0 ≈ 挂点）、推板位于
+  // collider 前端（本地 80）附近，Prismatic 伸出时整件随 part 平移，视觉自然伸缩。
+  visual: {
+    visualId: 'part_pushRod',
+    size: { width: 98, height: 18 },
+    anchor: { x: 43, y: 0 },
+    rotation: 0,
+    layer: 10,
+    mirrorWithFacing: true,
+  },
 };
 
 /** 构建 Content Registry */
@@ -213,6 +314,8 @@ export function createRegistry(): ContentRegistry {
       [boxBody.id, boxBody],
       [tallBody.id, tallBody],
       [heavyBox.id, heavyBox],
+      [watermelonBody.id, watermelonBody],
+      [bananaBody.id, bananaBody],
     ]),
     movements: new Map([[wheelStd.id, wheelStd]]),
     functionals: new Map([
