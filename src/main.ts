@@ -457,11 +457,10 @@ function addButton(parent: HTMLElement, text: string, onClick: () => void): HTML
 
 /* ---------- Build 编辑状态（Draft 模型；编辑 → 实时 Preview） ---------- */
 
+// Q10-A：正常装配（玩家）只展示当前正式内容——西瓜 / 香蕉。
+// wedgeBody / boxBody / tallBody / heavyBox 不删除、不在此处暴露，
+// 仍完整保留在 registry 供 Scenario / Preset / 开发测试链使用。
 const BODY_OPTIONS: Array<{ v: string; t: string }> = [
-  { v: 'wedgeBody', t: '楔形车身（低前鼻）' },
-  { v: 'boxBody', t: '箱式车身（厚实）' },
-  { v: 'tallBody', t: '高身车身（compact）' },
-  { v: 'heavyBox', t: '重型车身' },
   { v: 'watermelonBody', t: '西瓜车身（宽厚低矮）' },
   { v: 'bananaBody', t: '香蕉车身（长条弧形）' },
 ];

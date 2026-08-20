@@ -342,3 +342,21 @@ describe('Q09-B 部件信息可读性', () => {
     expect(registry.functionals.has('')).toBe(false);
   });
 });
+
+/* ---------- Q10-A：正式装配内容与测试内容分离 ---------- */
+describe('Q10-A 正式/测试内容分离', () => {
+  it('测试 Body（wedge/box/tall/heavy）仍完整保留在 registry，不删 Content 定义', () => {
+    for (const id of ['wedgeBody', 'boxBody', 'tallBody', 'heavyBox']) {
+      expect(registry.bodies.has(id), `${id} 保留`).toBe(true);
+    }
+    // 正式内容同在
+    expect(registry.bodies.has('watermelonBody')).toBe(true);
+    expect(registry.bodies.has('bananaBody')).toBe(true);
+    // 测试 Body 的迁移/快照链路仍可用（开发测试链不受装配页收敛影响）
+    for (const id of ['wedgeBody', 'boxBody', 'tallBody', 'heavyBox']) {
+      const d = silDraft(id); // 仍可构造测试 Draft
+      const s = buildSnapshotFromDraft(d, registry, 'A');
+      expect(() => validateSnapshot(s, registry)).not.toThrow();
+    }
+  });
+});
