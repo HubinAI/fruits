@@ -48,12 +48,21 @@ const MAX_CONTENT_SCALE = 5;
  */
 const PREVIEW_MARGIN_WORLD = 18;
 /**
- * Q08-A：正式 Battle 正常阶段（Active）近景构图——A+B 完整入画 + 每侧固定运动空间。
- * 车辆明显大于旧 full-arena 超远景（0.78 vs 0.54 scale，约 1.4 倍）；
- * 不要求 Closing wall 全程入画（正常阶段根本没有墙）。Warning 用更大 extent 适度拉远。
+ * Q08-A-FIX：正式 Battle 固定战斗走廊（corridor）——不绑定开局瞬间车辆位置。
+ * 横向基于正式 spawn 语义（arena.width×0.25 / ×0.75，与默认 spawn 400/1200 对齐）
+ * 外扩「位移预算 160 + 最大视觉半宽 110」（banana body visual 半宽 100 + 余量）：
+ * 碰撞 / Push / 后坐产生的合理位移内，真实 Visual 始终完整入画。
+ * 纵向只覆盖车辆活动高度（地面以上 190）+ 地面——不含 Closing 墙顶，
+ * 上方无巨大无效空间，车辆保持足够大。Warning 在 corridor 基础上再外扩
+ * WARNING_SPREAD=100 逐步准备 Closing；Closing/End 用完整收束安全构图。
  */
-const BATTLE_ACTIVE_EXTENT = 100;
-const BATTLE_WARNING_EXTENT = 240;
+const CORRIDOR_SPAWN_A_RATIO = 0.25;
+const CORRIDOR_SPAWN_B_RATIO = 0.75;
+const CORRIDOR_MOVE_BUDGET = 160; // 每侧可承受的碰撞/后坐位移预算
+const CORRIDOR_VISUAL_HALF = 110; // 最大真实视觉半宽（banana body visual 100 + 余量）
+const CORRIDOR_ACTIVE_EXTENT = CORRIDOR_MOVE_BUDGET + CORRIDOR_VISUAL_HALF; // 270
+const CORRIDOR_WARNING_SPREAD = 100; // Warning 相对 Active 的额外外扩（逐步准备 Closing）
+const CORRIDOR_HEIGHT = 190; // 纵向：车辆活动高度（地面以上预算，不含 Closing 墙顶）
 /** 构图安全区：左右 UI 阴影区不计入可用画布（CSS px，每侧内缩量） */
 const SAFE_INSET_X = 56;
 const SAFE_INSET_Y = 28;
@@ -510,12 +519,15 @@ export class Renderer {
    *   边距更小、且 Preview 使用专属近距 spawn（见 physicsLab.loadCustomPreview），
    *   内容 bounds 自然收窄 → 车辆明显比 vehicles 构图更大；不做 fit 后强放大
    *   （旧 PREVIEW_ZOOM×1.9 会把 A/B 推出 safe viewport）；只用于 Editing，不影响正式 Battle。
-   * - fit 'battle'（Q08-A）：正式战斗按 phase 构图——
-   *   Active：A+B 完整入画 + 每侧 BATTLE_ACTIVE_EXTENT 运动空间（不含 Closing wall），
-   *   车辆明显大于旧 full-arena 超远景；Warning：BATTLE_WARNING_EXTENT 适度拉远，
-   *   仍清楚看到车辆；Closing / End：完整战场安全构图（0..width + Closing wall 全程入画，
-   *   W1-P0-CLOSE-FIX 原语义）。仅在 Battle start / phase 切换 / resize 时构图一次，
-   *   运行期间绝不 follow、不动态 zoom、不随 projectile 扩镜头。
+   * - fit 'battle'（Q08-A / Q08-A-FIX）：正式战斗按 phase 构图——
+   *   Active：固定战斗走廊（corridor）——基于正式 spawn（width×0.25/×0.75）±
+   *   CORRIDOR_ACTIVE_EXTENT，纵向只含车辆活动高度 + 地面，不绑定开局瞬时位置，
+   *   碰撞/Push/后坐的合理位移内真实 Visual 完整入画且车辆足够大；
+   *   Warning：corridor 外扩 WARNING_SPREAD 逐步准备 Closing；Closing / End：
+   *   完整战场安全构图（0..width + Closing wall 全程入画，W1-P0-CLOSE-FIX 原语义）。
+   *   battle 一律取 fitLimit（不 ×CONTENT_ZOOM），完整入画是硬约束；
+   *   仅 Battle start / phase 切换 / resize 时构图一次，运行期间绝不 follow、
+   *   不动态 zoom、不随 projectile 扩镜头。
    *
    * 内容退化时回退到现有 transform（resize 设置的 arena 框）。
    */
@@ -542,33 +554,69 @@ export class Renderer {
         acc(c.center.x + c.radius, c.center.y + c.radius);
       }
     };
+    // Q08-A-FIX：真实 Visual AABB（position 为中心 + size + rotation；mirror 不改变
+    // AABB 尺寸语义）。「完整入画」的标准 = 玩家真正看到的 Visual 完整入画，
+    // 不是仅 Collider 完整（banana sprite 明显大于 collider 的旧 bug 靠此根治）。
+    const includeVisual = (v: RenderVisual): void => {
+      const hw = v.size.width / 2;
+      const hh = v.size.height / 2;
+      const cos = Math.cos(v.rotation);
+      const sin = Math.sin(v.rotation);
+      for (const c of [
+        { x: -hw, y: -hh }, { x: hw, y: -hh }, { x: hw, y: hh }, { x: -hw, y: hh },
+      ]) {
+        acc(c.x * cos - c.y * sin + v.position.x, c.x * sin + c.y * cos + v.position.y);
+      }
+    };
     const includeVehicle = (v: RenderVehicle): void => {
       includeShape(v.body);
+      if (v.bodyVisual) includeVisual(v.bodyVisual);
       for (const w of v.wheels) {
         acc(w.center.x - w.radius, w.center.y - w.radius);
         acc(w.center.x + w.radius, w.center.y + w.radius);
       }
-      for (const p of v.parts) includeShape(p.shape);
+      if (v.wheelVisuals) {
+        for (const wv of v.wheelVisuals) {
+          if (wv) includeVisual(wv);
+        }
+      }
+      for (const p of v.parts) {
+        includeShape(p.shape);
+        if (p.visual) includeVisual(p.visual);
+      }
     };
     // ground anchor：保证地面线在 y 范围内
     acc(snap.arena.groundY, snap.arena.groundY);
     if (fit === 'battle') {
-      // Q08-A：正式战斗按 phase 构图（Active/Warning 近中景；Closing/End 全景安全构图）。
+      // Q08-A-FIX：正式战斗按 phase 构图——Active/Warning 固定战斗走廊（corridor，
+      // 不绑定开局瞬间车辆位置）；Closing/End 完整收束安全构图。
       // 仅 Battle start / phase 切换 / resize 时调用一次，运行期间不重算（无呼吸/无跟随）。
       const phase = opts.phase ?? '';
       if (phase === 'Active' || phase === '') {
-        // 正常阶段：A+B 完整入画 + 每侧固定运动空间（相向推进仍不出框）；
-        // 不含 Closing wall——正常阶段没有墙，vehicle 明显更大、上方无效空间显著减少。
-        includeVehicle(snap.vehicleA);
-        includeVehicle(snap.vehicleB);
-        minX -= BATTLE_ACTIVE_EXTENT;
-        maxX += BATTLE_ACTIVE_EXTENT;
+        // Active：固定 corridor = 正式 spawn（width×0.25 / ×0.75）±
+        // CORRIDOR_ACTIVE_EXTENT（位移预算 160 + 最大视觉半宽 110）。
+        // 纵向仅车辆活动高度（groundY−CORRIDOR_HEIGHT）+ 地面——不含 Closing 墙顶，
+        // 上方无巨大无效空间，车辆保持足够大；碰撞/Push/后坐不会轻易推出画面。
+        const cL = snap.arena.width * CORRIDOR_SPAWN_A_RATIO - CORRIDOR_ACTIVE_EXTENT;
+        const cR = snap.arena.width * CORRIDOR_SPAWN_B_RATIO + CORRIDOR_ACTIVE_EXTENT;
+        acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
+        acc(cL, snap.arena.groundY);
+        acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
+        acc(cR, snap.arena.groundY);
       } else if (phase === 'Warning') {
-        // Warning：适度拉远（更大 extent），仍清楚看到两车与交战动作。
-        includeVehicle(snap.vehicleA);
-        includeVehicle(snap.vehicleB);
-        minX -= BATTLE_WARNING_EXTENT;
-        maxX += BATTLE_WARNING_EXTENT;
+        // Warning：corridor 外扩（逐步准备 Closing），仍清楚看到两车与交战动作。
+        const cL =
+          snap.arena.width * CORRIDOR_SPAWN_A_RATIO -
+          CORRIDOR_ACTIVE_EXTENT -
+          CORRIDOR_WARNING_SPREAD;
+        const cR =
+          snap.arena.width * CORRIDOR_SPAWN_B_RATIO +
+          CORRIDOR_ACTIVE_EXTENT +
+          CORRIDOR_WARNING_SPREAD;
+        acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
+        acc(cL, snap.arena.groundY);
+        acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
+        acc(cR, snap.arena.groundY);
       } else {
         // Closing / End：完整战场安全构图——覆盖 Arena 有效战斗区域（x ∈ [0, width]；
         // y 顶 = Closing 墙顶，底 = 地面），车辆被 Closing 推向边缘/中央的全过程始终
@@ -605,12 +653,14 @@ export class Renderer {
     // R2：可用画布 = 中央实际战斗可视区域（扣除左右 UI 阴影区）
     const safeW = Math.max(2, cw - SAFE_INSET_X * 2);
     const safeH = Math.max(2, ch - SAFE_INSET_Y * 2);
-    // Q06-UX-R2-FIX：Preview 直接取「完整内容 fit 上限」（不再 ×CONTENT_ZOOM）——
-    // 任何 >1 的乘数都会使含 margin 的内容超出 safeW×safeH 被左右裁切（×1.9 旧 bug
-    // 与 ×1.05 同理）。Preview 的明显放大只来自近距 spawn 收窄 bounds + 更小 margin，
-    // A/B 完整入画是硬约束；vehicles / primary-fire / battle 保持原 ×CONTENT_ZOOM 语义。
+    // Q06-UX-R2-FIX / Q08-A-FIX：声明「完整入画」的 fit（preview / battle）直接取
+    // fitLimit——任何 >1 的乘数（旧 ×1.9、×1.05）都会使含 margin 的内容超出
+    // safeW×safeH 被左右裁切，破坏完整入画硬约束。preview 的明显放大来自近距 spawn
+    // 收窄 bounds + 更小 margin；battle 的车辆变大来自更合理的 corridor bounds；
+    // vehicles / primary-fire / scenario 保持历史 ×CONTENT_ZOOM 语义。
     const fitLimit = Math.min(safeW / bw, safeH / bh);
-    let scale = isPreview ? fitLimit : fitLimit * CONTENT_ZOOM;
+    const enforceFitLimit = isPreview || fit === 'battle';
+    let scale = enforceFitLimit ? fitLimit : fitLimit * CONTENT_ZOOM;
     if (scale < MIN_CONTENT_SCALE) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
     // 内容居中于安全区中心（offset 含安全区内缩量）

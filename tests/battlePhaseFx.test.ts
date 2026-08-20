@@ -261,7 +261,10 @@ describe('W2-FX-2 阶段视觉（Renderer smoke）', () => {
 /* ---------- Q08-A：Battle Camera 正常观看构图（可视结果验证，非 scale 数字） ---------- */
 
 /** 正式战斗 snapshot：A（watermelon-like，中心 385）/ B（banana-like，中心 1160），groundY 700，
- *  含双轮 + 多 functional parts（pushRod/cannon/hammer）+ 左右两堵 Closing wall。 */
+ *  含双轮 + 多 functional parts（pushRod/cannon/hammer）+ 左右两堵 Closing wall。
+ *  Q08-A-FIX：带真实 Visual（bodyVisual/wheelVisuals/part.visual）——banana bodyVisual
+ *  200 宽（半宽 100）明确大于其 collider（两段合并半宽 95），用于抓「Collider 在框内
+ *  但 Sprite 出框」的旧 bug。 */
 function makeBattleSnapshot(): BattleRenderSnapshot {
   const wallL = [
     { x: 250, y: 500 }, { x: 290, y: 500 }, { x: 290, y: 700 }, { x: 250, y: 700 },
@@ -285,9 +288,20 @@ function makeBattleSnapshot(): BattleRenderSnapshot {
         kind: 'polygons',
         polygons: [{ points: [{ x: 300, y: 650 }, { x: 470, y: 650 }, { x: 470, y: 700 }, { x: 300, y: 700 }] }],
       },
+      bodyVisual: {
+        visualId: 'body_watermelon',
+        position: { x: 385, y: 675 },
+        rotation: 0,
+        size: { width: 180, height: 60 },
+        layer: 1,
+      },
       wheels: [
         { center: { x: 327, y: 680 }, radius: 20, angle: 0 },
         { center: { x: 443, y: 680 }, radius: 20, angle: 0 },
+      ],
+      wheelVisuals: [
+        { visualId: 'wheel', position: { x: 327, y: 680 }, rotation: 0, size: { width: 40, height: 40 }, layer: 2 },
+        { visualId: 'wheel', position: { x: 443, y: 680 }, rotation: 0, size: { width: 40, height: 40 }, layer: 2 },
       ],
       parts: [
         { shape: { kind: 'polygons', polygons: [{ points: [{ x: 430, y: 660 }, { x: 510, y: 660 }, { x: 510, y: 690 }, { x: 430, y: 690 }] }] }, category: 'weapon' },
@@ -301,12 +315,35 @@ function makeBattleSnapshot(): BattleRenderSnapshot {
         kind: 'polygons',
         polygons: [{ points: [{ x: 1100, y: 656 }, { x: 1220, y: 656 }, { x: 1220, y: 700 }, { x: 1100, y: 700 }] }],
       },
+      // Q08-A-FIX：banana bodyVisual 200 宽（半宽 100）> collider 半宽 95 ——
+      // 只含 Collider 的旧 framing 会漏掉 sprite 边缘。
+      bodyVisual: {
+        visualId: 'body_banana',
+        position: { x: 1160, y: 678 },
+        rotation: 0,
+        size: { width: 200, height: 56 },
+        layer: 1,
+      },
       wheels: [
         { center: { x: 1098, y: 680 }, radius: 20, angle: 0 },
         { center: { x: 1222, y: 680 }, radius: 20, angle: 0 },
       ],
+      wheelVisuals: [
+        { visualId: 'wheel', position: { x: 1098, y: 680 }, rotation: 0, size: { width: 40, height: 40 }, layer: 2 },
+        { visualId: 'wheel', position: { x: 1222, y: 680 }, rotation: 0, size: { width: 40, height: 40 }, layer: 2 },
+      ],
       parts: [
-        { shape: { kind: 'polygons', polygons: [{ points: [{ x: 1090, y: 660 }, { x: 1170, y: 660 }, { x: 1170, y: 690 }, { x: 1090, y: 690 }] }] }, category: 'weapon' },
+        {
+          shape: { kind: 'polygons', polygons: [{ points: [{ x: 1090, y: 660 }, { x: 1170, y: 660 }, { x: 1170, y: 690 }, { x: 1090, y: 690 }] }] },
+          category: 'weapon',
+          visual: {
+            visualId: 'part_pushRod',
+            position: { x: 1130, y: 675 },
+            rotation: 0,
+            size: { width: 98, height: 18 },
+            layer: 10,
+          },
+        },
       ],
     },
   };
@@ -410,5 +447,147 @@ describe('Q08-A Battle Camera 正常观看构图', () => {
     expect(r2.minY).toBe(r1.minY);
     expect(r2.maxX).toBe(r1.maxX);
     expect(r2.maxY).toBe(r1.maxY);
+  });
+});
+
+/* ---------- Q08-A-FIX：Battle Camera 出框根因修复（Visual 完整入画 + 固定 corridor） ---------- */
+
+/** 视觉 AABB（position 为中心 + size + rotation；mirror 不影响）——与 renderer includeVisual 同语义 */
+function visualAABB(v: { position: { x: number; y: number }; rotation: number; size: { width: number; height: number } }): {
+  minX: number; minY: number; maxX: number; maxY: number;
+} {
+  const hw = v.size.width / 2, hh = v.size.height / 2;
+  const cos = Math.cos(v.rotation), sin = Math.sin(v.rotation);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const c of [
+    { x: -hw, y: -hh }, { x: hw, y: -hh }, { x: hw, y: hh }, { x: -hw, y: hh },
+  ]) {
+    const rx = c.x * cos - c.y * sin + v.position.x;
+    const ry = c.x * sin + c.y * cos + v.position.y;
+    if (rx < minX) minX = rx;
+    if (rx > maxX) maxX = rx;
+    if (ry < minY) minY = ry;
+    if (ry > maxY) maxY = ry;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+describe('Q08-A-FIX Battle Camera 出框根因', () => {
+  function makeRenderer(): Renderer {
+    const ctx = new CtxStub();
+    const renderer = new Renderer(makeCanvas(ctx));
+    (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
+    renderer.resize(1600, 1000);
+    return renderer;
+  }
+  const SAFE_X = 56, SAFE_Y = 28, CW = 1000, CH = 500;
+
+  function inSafe(
+    renderer: Renderer,
+    w: { minX: number; minY: number; maxX: number; maxY: number },
+    label: string,
+  ): void {
+    const s = renderer.worldRectToScreen(w.minX, w.minY, w.maxX, w.maxY);
+    expect(s.minX, `${label} 左缘入画`).toBeGreaterThanOrEqual(SAFE_X - 1e-6);
+    expect(s.minY, `${label} 上缘入画`).toBeGreaterThanOrEqual(SAFE_Y - 1e-6);
+    expect(s.maxX, `${label} 右缘入画`).toBeLessThanOrEqual(CW - SAFE_X + 1e-6);
+    expect(s.maxY, `${label} 下缘入画`).toBeLessThanOrEqual(CH - SAFE_Y + 1e-6);
+  }
+
+  function expectVehicleVisualsInView(renderer: Renderer, v: BattleRenderSnapshot['vehicleA'], label: string): void {
+    if (v.bodyVisual) inSafe(renderer, visualAABB(v.bodyVisual), `${label} bodyVisual`);
+    for (let i = 0; i < (v.wheelVisuals?.length ?? 0); i++) {
+      const wv = v.wheelVisuals![i];
+      if (wv) inSafe(renderer, visualAABB(wv), `${label} wheelVisual${i}`);
+    }
+    for (let i = 0; i < v.parts.length; i++) {
+      const pv = v.parts[i].visual;
+      if (pv) inSafe(renderer, visualAABB(pv), `${label} partVisual${i}`);
+    }
+  }
+
+  it('1. Active：默认 watermelon/banana 双方全部 Visual 完整入画（corridor，非瞬时 fit）', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    renderer.reframe(snap, 'battle', { phase: 'Active' });
+    expectVehicleVisualsInView(renderer, snap.vehicleA, 'A');
+    expectVehicleVisualsInView(renderer, snap.vehicleB, 'B');
+  });
+
+  it('2. Active corridor：A/B 分别向左右额外偏移后 Visual 仍完整（碰撞/后坐/Push 位移容忍）', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    // 真实可发生位移：A 左移 150（中心 250）、B 右移 150（中心 1350）
+    snap.vehicleA.bodyVisual = { ...snap.vehicleA.bodyVisual!, position: { x: 250, y: 675 } };
+    snap.vehicleB.bodyVisual = { ...snap.vehicleB.bodyVisual!, position: { x: 1350, y: 678 } };
+    snap.vehicleB.parts[0].visual = { ...snap.vehicleB.parts[0].visual!, position: { x: 1320, y: 675 } };
+    renderer.reframe(snap, 'battle', { phase: 'Active' });
+    // corridor 固定 [130,1470]：A visual 左缘 250−90=160 ≥ 130；B visual 右缘 1350+100=1450 ≤ 1470
+    inSafe(renderer, visualAABB(snap.vehicleA.bodyVisual!), 'A bodyVisual');
+    inSafe(renderer, visualAABB(snap.vehicleB.bodyVisual!), 'B bodyVisual');
+    inSafe(renderer, visualAABB(snap.vehicleB.parts[0].visual!), 'B partVisual');
+  });
+
+  it('3. Warning：corridor 外扩后两车 Visual 仍完整可见', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    renderer.reframe(snap, 'battle', { phase: 'Warning' });
+    expectVehicleVisualsInView(renderer, snap.vehicleA, 'A');
+    expectVehicleVisualsInView(renderer, snap.vehicleB, 'B');
+    // Warning 拉远（介于 Active 与全景之间）——稳定切换，无突然跳变
+    renderer.reframe(snap, 'battle', { phase: 'Active' });
+    const activeScale = renderer.transformScale;
+    renderer.reframe(snap, 'battle', { phase: 'Warning' });
+    const warningScale = renderer.transformScale;
+    renderer.reframe(snap, 'battle', { phase: 'Closing' });
+    const closingScale = renderer.transformScale;
+    expect(warningScale).toBeLessThan(activeScale);
+    expect(warningScale).toBeGreaterThan(closingScale);
+  });
+
+  it('4. Closing：两车 Visual + 有效 Closing wall 完整入画（收束全程安全）', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    renderer.reframe(snap, 'battle', { phase: 'Closing' });
+    expectVehicleVisualsInView(renderer, snap.vehicleA, 'A');
+    expectVehicleVisualsInView(renderer, snap.vehicleB, 'B');
+    inSafe(renderer, { minX: 250, minY: 500, maxX: 290, maxY: 700 }, 'Closing wall L');
+    inSafe(renderer, { minX: 1310, minY: 500, maxX: 1350, maxY: 700 }, 'Closing wall R');
+  });
+
+  it('5. banana visual 明确大于 collider：只含 Collider 的旧 framing 会让 Sprite 出框（本实现必须抓住）', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    // 构造 visual 240 宽（半宽 120）> collider 半宽 95：旧实现（不含 visual）下
+    // B collider 完整入画但 Sprite 右缘出框（sx≈983 > 944）；新实现 bounds 含 visual → 完整。
+    snap.vehicleB.bodyVisual = {
+      ...snap.vehicleB.bodyVisual!,
+      size: { width: 240, height: 60 },
+      position: { x: 1160, y: 678 },
+    };
+    renderer.reframe(snap, 'preview');
+    // 断言真实 Visual 完整（preview fit 也用 fitLimit，完整入画是硬约束）
+    inSafe(renderer, visualAABB(snap.vehicleB.bodyVisual!), 'B bodyVisual(sprite>collider)');
+    // 对照：collider 一定完整（Visual 包含后其内缩范围自然完整）
+    inSafe(renderer, { minX: 1100, minY: 656, maxX: 1220, maxY: 700 }, 'B collider');
+  });
+
+  it('6. Projectile 位置变化不影响 camera（不同位置两次构图结果一致）', () => {
+    const renderer = makeRenderer();
+    const snap = makeBattleSnapshot();
+    const projFar: BattleRenderSnapshot = { ...snap, projectiles: [{ team: 'A', center: { x: 2000, y: 50 }, radius: 30 }] };
+    const projNear: BattleRenderSnapshot = { ...snap, projectiles: [{ team: 'B', center: { x: 800, y: 660 }, radius: 10 }] };
+    renderer.reframe(projFar, 'battle', { phase: 'Active' });
+    const scale1 = renderer.transformScale;
+    const a1 = renderer.worldRectToScreen(300, 650, 470, 700);
+    const b1 = renderer.worldRectToScreen(1100, 656, 1220, 700);
+    renderer.reframe(projNear, 'battle', { phase: 'Active' });
+    expect(renderer.transformScale).toBe(scale1);
+    const a2 = renderer.worldRectToScreen(300, 650, 470, 700);
+    const b2 = renderer.worldRectToScreen(1100, 656, 1220, 700);
+    expect(a2.minX).toBe(a1.minX);
+    expect(a2.maxX).toBe(a1.maxX);
+    expect(b2.minY).toBe(b1.minY);
+    expect(b2.maxY).toBe(b1.maxY);
   });
 });
