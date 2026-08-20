@@ -524,30 +524,56 @@ export class Renderer {
   /**
    * Projectile 绘制（Q02-C3B）：按真实 center/radius 画 circle，A/B 用可区分颜色。
    * 只消费 BattleRenderSnapshot.projectiles（引擎中立），不读任何引擎/BodyHandle。
+   * Q11-C-R2：镭射弹改画沿真实飞行方向的长条高速能量束（视觉放大，碰撞半径不变）。
    */
   private drawProjectiles(projectiles: readonly RenderProjectile[]): void {
     const ctx = this.ctx;
     for (const p of projectiles) {
       if (p.visual === 'laser') {
-        // Q11-C-R1：镭射弹——亮白青 + 外发光光晕 + 绘制半径 ×1.6。
-        // 仅视觉放大（ss(p.radius*1.6)），真实碰撞半径 p.radius 未改；
-        // hit/miss 仍走真实 Projectile / CCD 链路。
-        const r = this.ss(p.radius * 1.6);
-        const sx = this.sx(p.center.x);
-        const sy = this.sy(p.center.y);
-        ctx.globalAlpha = 0.35;
-        ctx.fillStyle = '#bff4ff';
+        // Q11-C-R2：长条高速能量束——沿真实飞行方向 velocity，长约 150 世界 px
+        // （白青高亮核心 + glow + 短尾迹）。真实 Collider 半径 p.radius 未扩大；
+        // hit/miss/CCD 仍走真实 Projectile 链路。
+        const vx = p.velocity?.x ?? 1;
+        const vy = p.velocity?.y ?? 0;
+        const len = Math.max(1, Math.hypot(vx, vy));
+        const ux = vx / len;
+        const uy = vy / len;
+        const BEAM_WORLD = 150; // 束长（世界 px，随镜头缩放）
+        const half = BEAM_WORLD / 2;
+        // 束头（前方）与束尾（后方）：尾随方向反向延伸出短尾迹
+        const hx = this.sx(p.center.x + ux * half);
+        const hy = this.sy(p.center.y + uy * half);
+        const tx = this.sx(p.center.x - ux * (half + 40)); // 尾迹再长 40px
+        const ty = this.sy(p.center.y - uy * (half + 40));
+        const cxs = this.sx(p.center.x);
+        const cys = this.sy(p.center.y);
+        // glow（最外层，半透明）
+        ctx.globalAlpha = 0.3;
+        ctx.strokeStyle = '#7fd8ff';
+        ctx.lineWidth = this.ss(16);
+        ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.arc(sx, sy, r * 1.9, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#e9fdff';
-        ctx.beginPath();
-        ctx.arc(sx, sy, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#9be9ff';
-        ctx.lineWidth = 2;
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(hx, hy);
         ctx.stroke();
+        // 主体（白青亮核心）
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = '#e9fdff';
+        ctx.lineWidth = this.ss(7);
+        ctx.beginPath();
+        ctx.moveTo(cxs, cys);
+        ctx.lineTo(hx, hy);
+        ctx.stroke();
+        // 短尾迹（核心尾部渐隐段）
+        ctx.globalAlpha = 0.55;
+        ctx.strokeStyle = '#bff4ff';
+        ctx.lineWidth = this.ss(4);
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(cxs, cys);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.lineCap = 'butt';
         continue;
       }
       ctx.fillStyle = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;

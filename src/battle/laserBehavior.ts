@@ -256,9 +256,11 @@ export class LaserBehavior {
       worldDirection: { x: muzzleDir.x, y: muzzleDir.y },
     });
 
-    // 强后坐（约 Cannon 2×）：applyLinearImpulse 于真实炮口点，方向严格相反
+    // Q11-C-R2：强后坐直接作用于整车 chassis（vehicle.body，非 weld 子体）——
+    // 方向与 muzzleDir 严格相反，作用点为真实 muzzlePoint（产生力矩）。
+    // 正常速度必须看到整车瞬间后顿（不靠屏幕震动伪装）。
     world.applyLinearImpulse(
-      part.body,
+      vehicle.body,
       { x: -muzzleDir.x * p.recoilImpulse, y: -muzzleDir.y * p.recoilImpulse },
       muzzlePoint,
     );

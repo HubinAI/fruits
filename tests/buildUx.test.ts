@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest';
 import { PhysicsLab } from '../src/lab/physicsLab';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import { createRegistry } from '../src/core/content';
+import { SfxAudioService } from '../src/presentation/audioService';
 import {
   buildSnapshotFromDraft,
   migrateDraftBody,
@@ -592,7 +593,7 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     );
   }
 
-  it('1. laser 定义：weapon / charge 1500ms / speed·damage 2× / recoil 8×（R1 肉眼可见后坐）', () => {
+  it('1. laser 定义：weapon / charge 1500ms / speed 56（R2 高速能量束）/ damage 2× / recoil 8×', () => {
     const laser = registry.functionals.get('laser')!;
     const cannon = registry.functionals.get('cannon')!;
     expect(laser.category).toBe('weapon');
@@ -600,7 +601,9 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     const lp = laser.behaviorParams as Record<string, number>;
     const cp = cannon.behaviorParams as Record<string, number>;
     expect(lp.chargeMs).toBe(1500);
-    expect(lp.muzzleSpeed).toBeCloseTo(cp.muzzleSpeed * 2, 6);
+    // Q11-C-R2：muzzleSpeed 56（Cannon 8 的 7×，R2 方案 48~64）
+    expect(lp.muzzleSpeed).toBeGreaterThanOrEqual(48);
+    expect(lp.muzzleSpeed).toBeLessThanOrEqual(64);
     expect(lp.projectileDamage).toBeCloseTo(cp.projectileDamage * 2, 6);
     // Q11-C-R1：recoil 60（2×）实测 chassis Δv 仅 0.33px/step 且 150ms 被
     // autoDrive 拉回，肉眼不可感知 → 240（8×，Δv ≈1.3px/step）
@@ -750,7 +753,8 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
       }
     }
     expect(fired).toBe(true);
-    expect(laserY.length).toBeGreaterThan(10); // 飞行采样足够（弹速 16px/step，命中前 ~13 步）
+    // Q11-C-R2：muzzleSpeed 56 → 命中前仅 ~3 步飞行（弹速极快，能量束一闪而过）
+    expect(laserY.length).toBeGreaterThan(2);
     const yRange = Math.max(...laserY) - Math.min(...laserY);
     const xRange = Math.max(...laserX) - Math.min(...laserX);
     expect(xRange).toBeGreaterThan(100); // 确实在飞行
@@ -848,5 +852,43 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(registry.functionals.get('laser')?.category).toBe('weapon');
     expect(validateSnapshot(snap(draft('watermelonBody', { front: 'spear' }), 'close1'), registry).valid).toBe(true);
     expect(validateSnapshot(snap(draft('watermelonBody', { top: 'laser' }), 'close2'), registry).valid).toBe(true);
+  });
+
+  it('Q11-C-R2. 能量束：镭射弹 snapshot 带真实飞行方向 velocity（渲染层）；音效闭环静默降级', () => {
+    // 1) 镭射弹 velocity 字段（能量束沿真实飞行方向绘制）
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q11-C')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let fired = false;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'laser') fired = true;
+    });
+    for (let i = 0; i < 500 && !fired; i++) lab.step(16.6667);
+    let sawVel = false;
+    for (let i = 0; i < 10; i++) {
+      lab.step(16.6667);
+      for (const p of o.getRenderSnapshot().projectiles ?? []) {
+        if (p.visual === 'laser' && p.velocity && Math.hypot(p.velocity.x, p.velocity.y) > 10) {
+          sawVel = true; // 真实飞行方向（速度 >> 0，能量束有明确朝向）
+        }
+      }
+    }
+    expect(fired).toBe(true);
+    expect(sawVel).toBe(true);
+    // 2) 音效闭环在无 AudioContext 环境（node 测试）静默降级：不抛错
+    const sfx = new SfxAudioService();
+    expect(() => {
+      sfx.resume();
+      sfx.startLaserCharge(0);
+      sfx.startLaserCharge(1); // 升调/增强
+      sfx.stopLaserCharge(); // fire：结束 charge + 爆鸣/冲击
+      sfx.play('fire');
+    }).not.toThrow();
+    expect(sfx.isMuted()).toBe(false);
+    sfx.setMuted(true);
+    expect(() => {
+      sfx.startLaserCharge(0.5);
+      sfx.stopLaserCharge();
+    }).not.toThrow(); // muted 同样安全
   });
 });

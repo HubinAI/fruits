@@ -274,9 +274,14 @@ export interface RenderProjectile {
   team: TeamId;
   /**
    * Q11-C-R1：纯渲染视觉标记（只影响绘制，不参与碰撞/伤害）。
-   * 'laser' = 镭射弹（更亮/更大/光晕，一眼区别于 Cannon 弹）。
+   * 'laser' = 镭射弹（能量束表现，一眼区别于 Cannon 弹）。
    */
   visual?: 'laser';
+  /**
+   * Q11-C-R2：真实飞行方向（世界 px/step，读自引擎速度，只读渲染标记）。
+   * 供 Renderer 沿真实飞行方向绘制长条能量束；不参与碰撞/伤害。
+   */
+  velocity?: { x: number; y: number };
 }
 
 /**

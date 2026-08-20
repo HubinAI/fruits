@@ -404,7 +404,9 @@ const laser: FunctionalPartDef = {
   behaviorParams: {
     chargeMs: 1500,
     cooldownMs: 1800,
-    muzzleSpeed: 16, // Cannon 8 ×2
+    // Q11-C-R2：16 → 56（Cannon 8 的 7×；R2 方案要求 48~64 高速能量束）。
+    // 保留 F2 gravityScale=0（水平直线飞行，无抛物线）；真实 hit/miss/CCD 不变。
+    muzzleSpeed: 56,
     projectileDamage: 160, // Cannon 80 ×2
     projectileRadius: 12,
     projectileMass: 1,

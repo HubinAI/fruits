@@ -347,9 +347,16 @@ const presentation = new BattlePresentationController({
   onMuzzleFlash: (ev) => renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y),
   onFireSound: () => sfx.play('fire'),
   // Q11-C：蓄能光点（laser）——partId 为 key，发射完成清除
-  onWeaponCharge: (ev) =>
-    renderer.spawnCharge(ev.partId, ev.worldPosition.x, ev.worldPosition.y, ev.progress),
-  onWeaponChargeEnd: (ev) => renderer.clearCharge(ev.partId),
+  // Q11-C-R2：蓄能音效升调/增强（progress 驱动）
+  onWeaponCharge: (ev) => {
+    renderer.spawnCharge(ev.partId, ev.worldPosition.x, ev.worldPosition.y, ev.progress);
+    sfx.startLaserCharge(ev.progress);
+  },
+  // Q11-C-R2：fire 立即结束 charge 声 + 高频爆鸣 + 低频冲击
+  onWeaponChargeEnd: (ev) => {
+    renderer.clearCharge(ev.partId);
+    sfx.stopLaserCharge();
+  },
   onHitFlash: (ev) => renderer.spawnHitFlash(ev.target),
   onHitSpark: (ev) =>
     renderer.spawnSpark(
@@ -898,6 +905,8 @@ let startTransitioning = false;
 btnStart.onclick = () => {
   if (startTransitioning) return;
   if (battleState !== 'editing' || !buildsValid()) return;
+  // Q11-C-R2：用户 Start 交互 → 恢复 AudioContext（浏览器自动播放策略）
+  sfx.resume();
   // Q08-B：点击 Start 瞬间「配置结束」——立刻退出编辑视觉：
   // 隐藏 A/B 装配面板、开发工具、Start；Build 从此刻冻结（不再可操作），
   // 中央两车 Preview 成为 READY 背景，而不是在编辑器上弹一句开战。

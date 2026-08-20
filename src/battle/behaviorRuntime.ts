@@ -187,12 +187,14 @@ class LaserRuntime implements PartBehaviorRuntime {
       const tag = world.getOwnerTag(p);
       if (!tag || !tag.team) continue;
       const bounds = world.getBounds(p);
+      const v = world.getLinearVelocity(p);
       out.push({
         center: world.getPosition(p),
         radius: (bounds.maxX - bounds.minX) / 2,
         team: tag.team,
-        // Q11-C-R1：镭射弹视觉标记（纯渲染区分，不参与碰撞/伤害链）
+        // Q11-C-R1/R2：镭射弹视觉标记 + 真实飞行方向（渲染能量束，不参与碰撞/伤害链）
         visual: 'laser',
+        velocity: { x: v.x, y: v.y },
       });
     }
     return out;
