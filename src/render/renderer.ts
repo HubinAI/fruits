@@ -11,7 +11,9 @@ import type {
   RenderCircle,
   RenderProjectile,
   RenderConnector,
+  RenderVisual,
 } from '../battle/battleContract';
+import { VisualRegistry } from './visualRegistry';
 
 /** Projectile 颜色（Q02-C3B）：A/B 可明显区分（与车身蓝/橙区分，更亮） */
 export const PROJECTILE_COLOR_A = '#7de8ff';
@@ -67,7 +69,11 @@ export class Renderer {
   /** 命中闪白：保存 target team + 时间，绘制时取当前 Snapshot 对应车辆形状（不再保存 Matter Body） */
   private hitFlashes: Array<{ team: string; bornAt: number; ttl: number }> = [];
 
-  constructor(private canvas: HTMLCanvasElement) {
+  constructor(
+    private canvas: HTMLCanvasElement,
+    /** W2-VIS-1：Sprite Visual Registry（缺省空注册表 → 全 Collider 灰盒 fallback，行为与旧版一致） */
+    private readonly visualRegistry: VisualRegistry = new VisualRegistry(),
+  ) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D not supported');
     this.ctx = ctx;
@@ -196,19 +202,63 @@ export class Renderer {
   }
 
   private drawVehicle(v: RenderVehicle, color: string): void {
-    // 车身
-    this.drawShape(v.body, color);
-    // 车轮
-    for (const w of v.wheels) {
-      this.drawWheel(w, '#888c96');
+    // 车身（W2-VIS-1）：有 visual 且资源就绪 → sprite（跟随 chassis 世界 transform）；
+    // 否则 Collider graybox fallback（缺资源不白屏/不报错）。
+    if (v.bodyVisual && this.drawVisual(v.bodyVisual)) {
+      // sprite 已绘制
+    } else {
+      this.drawShape(v.body, color);
     }
-    // 功能部件
-    for (const p of v.parts) {
-      this.drawShape(p.shape, p.category === 'weapon' ? '#d8d2c0' : '#9aa4b5');
+    // 车轮：wheelVisuals 与 wheels 一一对应（movement 层）
+    const wheelVisuals = v.wheelVisuals ?? [];
+    for (let i = 0; i < v.wheels.length; i++) {
+      const w = v.wheels[i]!;
+      const wv = wheelVisuals[i];
+      if (wv && this.drawVisual(wv)) {
+        // sprite（跟随 wheel 真实 center/angle）
+      } else {
+        this.drawWheel(w, '#888c96');
+      }
+    }
+    // 功能部件：组内按 visual.layer 升序（稳定排序，同 layer 保持 snapshot 顺序）；
+    // 有 visual 且资源就绪 → sprite（如 Hammer 跟随真实 Revolute part transform），
+    // 否则 Collider graybox。
+    const parts = [...v.parts].sort(
+      (a, b) => (a.visual?.layer ?? 0) - (b.visual?.layer ?? 0),
+    );
+    for (const p of parts) {
+      if (p.visual && this.drawVisual(p.visual)) {
+        // sprite
+      } else {
+        this.drawShape(p.shape, p.category === 'weapon' ? '#d8d2c0' : '#9aa4b5');
+      }
       // Q04-R1B：真实 Joint 连接件（Push Rod 伸缩轴）——画在移动 collider 后方，
       // 连接车身锚点 from → 部件原点 to；仅消费 snapshot 真实世界坐标，无假动画。
       if (p.connector) this.drawConnector(p.connector, '#9aa4b5');
     }
+  }
+
+  /**
+   * W2-VIS-1：Sprite 绘制（引擎中立 RenderVisual → 图片）。
+   * - 以 position 为中心（anchor 已烘焙进 position）；size 为世界 px（镜头缩放）；
+   * - 变换 = translate(position) · scale(-1,1)[mirror] · rotate(rotation)——
+   *   先旋转再水平镜像，facing=-1 的镜像图随世界姿态正确旋转；
+   * - 资源缺失/未加载 → 返回 false（调用方回退 Collider graybox）。
+   */
+  private drawVisual(v: RenderVisual): boolean {
+    const img = this.visualRegistry.getImage(v.visualId);
+    if (!img || img.width <= 0 || img.height <= 0) return false;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(this.sx(v.position.x), this.sy(v.position.y));
+    if (v.mirror) ctx.scale(-1, 1); // facing=-1 水平镜像（图片本身左右翻转）
+    ctx.rotate(v.rotation);
+    const w = this.ss(v.size.width);
+    const h = this.ss(v.size.height);
+    // VisualImageLike 是最小结构接口；运行时为可绘制源（HTMLImageElement 等）→ 窄断言
+    ctx.drawImage(img as unknown as CanvasImageSource, -w / 2, -h / 2, w, h);
+    ctx.restore();
+    return true;
   }
 
   /**

@@ -9,6 +9,7 @@
  * - 非法配置时 Start 明显禁用且旁边直接显示阻断原因（A：… / B：…）。
  */
 import { Renderer, type CameraFit } from './render/renderer';
+import { VisualRegistry } from './render/visualRegistry';
 import { PhysicsLab } from './lab/physicsLab';
 import { SCENARIOS, type ScenarioCamera } from './lab/scenarios';
 import { PRESETS } from './lab/presets';
@@ -220,7 +221,10 @@ btnRematch.textContent = '原配置再战';
 btnRematch.onclick = rematch;
 resultActions.appendChild(btnRematch);
 
-const renderer = new Renderer(canvas);
+// W2-VIS-1：Sprite Visual Registry（首版无正式 Content 资源 → 全部 Collider graybox；
+// 后续 Content 队列经 register + 图片加载注入正式 sprite，Preview/Fighting 共用同一 runtime）
+const visualRegistry = new VisualRegistry();
+const renderer = new Renderer(canvas, visualRegistry);
 const lab = new PhysicsLab(renderer);
 
 /* ---------- 稳定取景（Q02-CAM-R1）：只在 load / Reset / resize 时构图一次 ---------- */

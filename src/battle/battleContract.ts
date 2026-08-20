@@ -170,12 +170,20 @@ export interface RenderVisual {
   size: { width: number; height: number };
   /** 排序层级（透传 VisualDef.layer；后续 Renderer 排序用） */
   layer: number;
+  /**
+   * W2-VIS-1：sprite 水平翻转标记（mirrorWithFacing 且 facing=-1）。
+   * anchor/rotation 的镜像已烘焙进 position/rotation；图片本身的左右镜像无法从
+   * rotation 符号表达（2D canvas rotate 非镜像），故由 Renderer 用 scale(-1,1) 实现。
+   * 旧 snapshot 无此字段（undefined）→ 不翻转（向后兼容）。
+   */
+  mirror?: boolean;
 }
 
 /**
  * W1-VIS-1：VisualDef → 引擎中立 RenderVisual 世界 transform（双引擎共享纯函数）。
  * - anchor 基于真实物理原点（part/body 原点），随 physAngle 旋转；
- * - mirrorWithFacing 且 facing=-1 时镜像 anchor.x 与 rotation 符号；
+ * - mirrorWithFacing 且 facing=-1 时镜像 anchor.x 与 rotation 符号，并输出 mirror
+ *   标记（W2-VIS-1：Renderer sprite 用 scale(-1,1) 做真正的水平镜像）；
  * - 视觉 rotation 叠加在真实 body/part rotation 上。
  */
 export function visualWorldTransform(
@@ -198,6 +206,7 @@ export function visualWorldTransform(
     rotation: physAngle + (mirror ? -visual.rotation : visual.rotation),
     size: { ...visual.size },
     layer: visual.layer,
+    mirror,
   };
 }
 
