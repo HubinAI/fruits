@@ -190,9 +190,17 @@ export class Renderer {
     this.fx.push({ x, y, text, color, bornAt: performance.now(), ttl: 900 });
   }
 
-  /** 命中闪白：目标车辆形状短暂闪白（绘制时取当前 Snapshot） */
+  /** 命中闪白：目标车辆形状短暂描边反馈（绘制时取当前 Snapshot）
+   *  Q08-C：同一 team 同时最多一个表现状态——新命中刷新（重置 bornAt），
+   *  不 push 多层叠加（纯表现层，不影响真实命中次数/伤害）。 */
   spawnHitFlash(team: string): void {
-    this.hitFlashes.push({ team, bornAt: performance.now(), ttl: 120 });
+    const now = performance.now();
+    const existing = this.hitFlashes.find((h) => h.team === team);
+    if (existing) {
+      existing.bornAt = now;
+    } else {
+      this.hitFlashes.push({ team, bornAt: now, ttl: 120 });
+    }
   }
 
   /** 命中火花：接触点短暂小圆（W2-FX-2 按 damageSource 区分颜色，缺省黄） */
@@ -306,13 +314,16 @@ export class Renderer {
 
     this.hitFlashes = this.hitFlashes.filter((h) => now - h.bornAt < h.ttl);
     for (const h of this.hitFlashes) {
-      // W2-FX-2：已死亡（淡出中/已消失）车辆不叠加闪白
+      // W2-FX-2：已死亡（淡出中/已消失）车辆不叠加受击反馈
       if (vehicleDeathAlpha(this.deathFxs, h.team, now) === null) continue;
       const age = (now - h.bornAt) / h.ttl;
-      ctx.globalAlpha = (1 - age) * 0.7;
-      ctx.fillStyle = '#ffffff';
       const v = h.team === snap.vehicleA.team ? snap.vehicleA : snap.vehicleB;
-      this.drawShape(v.body, '#ffffff');
+      // Q08-C：不再整块白色填充（大面积白块会遮掉 sprite 视觉身份）——
+      // 改短暂白描边轮廓（body + parts），保留受击可感知且不遮挡
+      // 「谁在打谁、车辆是什么」；spark/damage number 仍照常表现。
+      ctx.globalAlpha = (1 - age) * 0.85;
+      this.strokeShape(v.body, '#ffffff');
+      for (const p of v.parts) this.strokeShape(p.shape, '#ffffff');
       ctx.globalAlpha = 1;
     }
 

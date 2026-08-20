@@ -330,11 +330,15 @@ const presentation = new BattlePresentationController({
     ),
   onDamageSound: () => sfx.play('hit'),
   onDamageNumber: (ev) => {
+    // Q08-C：damage<=0 不显示无意义「-0」——Gameplay/DamageResolver 仍照常结算，
+    // 只去掉无意义 Presentation 数字。
+    const dmg = Math.round(ev.damage);
+    if (dmg <= 0) return;
     const c = damageFeedbackColors(ev.damageSource);
     renderer.spawnDamageNumber(
       ev.contactPoint.x,
       ev.contactPoint.y,
-      `-${Math.round(ev.damage)}`,
+      `-${dmg}`,
       c.number,
     );
   },

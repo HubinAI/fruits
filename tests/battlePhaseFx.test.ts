@@ -591,3 +591,30 @@ describe('Q08-A-FIX Battle Camera 出框根因', () => {
     expect(b2.maxY).toBe(b1.maxY);
   });
 });
+
+/* ---------- Q08-C：Combat Feedback 去遮挡（白描边而非白块填充 + 同 team 去重） ---------- */
+describe('Q08-C 受击反馈去遮挡', () => {
+  it('连续同 team 命中不叠加整块白 fill，受击反馈走白描边轮廓（保留可感知不遮身份）', () => {
+    const ctx = new CtxStub();
+    const renderer = new Renderer(makeCanvas(ctx));
+    (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
+    renderer.resize(1600, 1000);
+    const orch = makeFakeOrch('Active');
+    // 1 次命中 → render
+    renderer.spawnHitFlash('A');
+    renderer.render(orch);
+    const fillAfter1 = ctx.calls.filter((c) => c === 'fill').length;
+    // 同一 team 再连击 2 次（去重刷新，不 push 叠加）→ 清空计数后 render
+    ctx.calls.length = 0;
+    renderer.spawnHitFlash('A');
+    renderer.spawnHitFlash('A');
+    renderer.render(orch);
+    const fillAfter3 = ctx.calls.filter((c) => c === 'fill').length;
+    // Q08-C 核心：连续命中不叠加——两次 render 的 fill 计数一致（旧实现整块白 fill
+    // 会 3→5 递增）；且 fillStyle 未被覆盖成 #ffffff 白块色。
+    expect(fillAfter3).toBe(fillAfter1);
+    expect(ctx.fillStyle).not.toBe('#ffffff');
+    // 受击反馈仍可感知：白描边轮廓（stroke 调用存在，来自 hitFlash strokeShape）
+    expect(ctx.calls.filter((c) => c === 'stroke').length).toBeGreaterThan(0);
+  });
+});
