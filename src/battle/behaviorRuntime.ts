@@ -21,6 +21,7 @@ import type { RenderProjectile } from './battleContract';
 import { CannonBehavior } from './cannonBehavior';
 import { HammerBehavior } from './hammerBehavior';
 import { PushRodBehavior } from './pushRodBehavior';
+import { LaserBehavior } from './laserBehavior';
 
 /** Behavior factory 输入（由 Orchestrator 在构造时提供） */
 export interface BehaviorContext {
@@ -139,6 +140,63 @@ class PushRodRuntime implements PartBehaviorRuntime {
   }
 }
 
+/* ---------- Laser（Q11-C）：蓄能镭射（长前摇 → 高威胁射击 → 强后坐；真实 Projectile 链路） ---------- */
+
+class LaserRuntime implements PartBehaviorRuntime {
+  readonly vehicle: PlanckVehicle;
+  readonly part: PlanckPartRuntime;
+  private readonly behavior: LaserBehavior;
+  private timeMs = 0;
+
+  constructor(ctx: BehaviorContext) {
+    this.vehicle = ctx.vehicle;
+    this.part = ctx.part;
+    this.behavior = new LaserBehavior(
+      ctx.part,
+      (e) => ctx.emit({ ...e, timestamp: this.timeMs }),
+      (e) => ctx.emit({ ...e, timestamp: this.timeMs }),
+    );
+  }
+
+  beforePhysicsStep(world: PlanckWorld, timeMs: number): void {
+    this.timeMs = timeMs;
+    this.behavior.stepFixed(world, this.vehicle, this.part);
+  }
+
+  afterPhysicsStep(
+    world: PlanckWorld,
+    projectileFacts: readonly ProjectileContactFact[],
+  ): void {
+    this.behavior.consumeProjectileFacts(world, projectileFacts);
+  }
+
+  destroyOutOfBoundsProjectiles(
+    world: PlanckWorld,
+    isOutOfBounds: (pos: { x: number; y: number }) => boolean,
+  ): void {
+    for (const p of this.behavior.aliveProjectiles) {
+      if (isOutOfBounds(world.getPosition(p))) {
+        this.behavior.destroyProjectile(world, p);
+      }
+    }
+  }
+
+  getRenderProjectiles(world: PlanckWorld): RenderProjectile[] {
+    const out: RenderProjectile[] = [];
+    for (const p of this.behavior.aliveProjectiles) {
+      const tag = world.getOwnerTag(p);
+      if (!tag || !tag.team) continue;
+      const bounds = world.getBounds(p);
+      out.push({
+        center: world.getPosition(p),
+        radius: (bounds.maxX - bounds.minX) / 2,
+        team: tag.team,
+      });
+    }
+    return out;
+  }
+}
+
 /** 已迁移的三类正式 Behavior factory（新增 Behavior 在 behaviorRegistry.ts 注册） */
 export function createCannonRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
   return new CannonRuntime(ctx);
@@ -148,6 +206,9 @@ export function createHammerRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
 }
 export function createPushRodRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
   return new PushRodRuntime(ctx);
+}
+export function createLaserRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
+  return new LaserRuntime(ctx);
 }
 
 export type { BodyHandle };

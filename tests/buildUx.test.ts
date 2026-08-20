@@ -500,3 +500,140 @@ describe('Q11-B 固定刺 Weapon', () => {
     expect(weaponDmgOnB).toBe(0); // 擦空就是 Miss
   });
 });
+
+/* ---------- Q11-C：蓄能镭射 Weapon（长前摇 / 高威胁 / 强后坐；真实 Projectile 链路） ---------- */
+describe('Q11-C 蓄能镭射 Weapon', () => {
+  function laserSnapshot(side: 'A' | 'B') {
+    return buildSnapshotFromDraft(
+      {
+        bodyDefId: 'watermelonBody',
+        rearRadius: 20,
+        frontRadius: 20,
+        functionalSelections: { front: 'laser', frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      },
+      registry,
+      side,
+    );
+  }
+  function plainSnapshot(side: 'A' | 'B') {
+    return buildSnapshotFromDraft(
+      {
+        bodyDefId: 'boxBody',
+        rearRadius: 20,
+        frontRadius: 20,
+        functionalSelections: { front: EMPTY_SLOT, frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      },
+      registry,
+      side,
+    );
+  }
+
+  it('1. laser 定义：weapon / charge 1500ms / speed·damage·recoil ≈ Cannon 2×', () => {
+    const laser = registry.functionals.get('laser')!;
+    const cannon = registry.functionals.get('cannon')!;
+    expect(laser.category).toBe('weapon');
+    expect(laser.behavior).toBe('laser');
+    const lp = laser.behaviorParams as Record<string, number>;
+    const cp = cannon.behaviorParams as Record<string, number>;
+    expect(lp.chargeMs).toBe(1500);
+    expect(lp.muzzleSpeed).toBeCloseTo(cp.muzzleSpeed * 2, 6);
+    expect(lp.projectileDamage).toBeCloseTo(cp.projectileDamage * 2, 6);
+    expect(lp.recoilImpulse).toBeCloseTo(cp.recoilImpulse * 2, 6);
+  });
+
+  it('2. 蓄能 ~1.5s 肉眼可见（weaponCharge progress 0→1）：首个 charge 到 fire 时间差 ≈ chargeMs', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(laserSnapshot('A'), plainSnapshot('B'), { autoDrive: true, engine: 'planck' });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let chargeStart: number | null = null;
+    let fireAt: number | null = null;
+    let lastProgress = -1;
+    let chargeCount = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponCharge') {
+        if (chargeStart === null) chargeStart = ev.timestamp;
+        lastProgress = ev.progress;
+        chargeCount++;
+      }
+      if (ev.type === 'weaponFire' && ev.behavior === 'laser') {
+        if (fireAt === null) fireAt = ev.timestamp;
+      }
+    });
+    for (let i = 0; i < 500; i++) {
+      lab.step(16.6667);
+      if (fireAt !== null && lastProgress >= 0.99) break;
+    }
+    expect(chargeStart).not.toBeNull();
+    expect(fireAt).not.toBeNull();
+    expect(chargeCount).toBeGreaterThan(20); // 蓄能过程持续多帧（肉眼可见）
+    expect(fireAt! - chargeStart!).toBeGreaterThan(1200);
+    expect(fireAt! - chargeStart!).toBeLessThan(1800);
+    expect(lastProgress).toBeGreaterThan(0.95); // 末帧 progress ≈ 0.989（发射步不再发 charge）
+  });
+
+  it('3. 正面命中：projectile 真实 hit（B weapon damage ≈ 160，Cannon 2×）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q11-C')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let fired = false;
+    let weaponDmgOnB = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'laser') fired = true;
+      if (ev.type === 'damage' && ev.damageSource === 'weapon' && ev.target === 'B') {
+        weaponDmgOnB += ev.damage;
+      }
+    });
+    for (let i = 0; i < 1200; i++) {
+      lab.step(16.6667);
+      if (o.result?.phase === 'End') break;
+    }
+    expect(fired).toBe(true);
+    expect(weaponDmgOnB).toBeGreaterThanOrEqual(150); // 一次真实接触 ≈160
+  });
+
+  it('4. 朝向不对 → 真实打空（B 在 A 后方，镭射朝 +X 飞行，weapon damage = 0, Miss）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(laserSnapshot('A'), plainSnapshot('B'), {
+      autoDrive: true,
+      engine: 'planck',
+      spawnA: { x: 600, y: 650, facing: 1 },
+      spawnB: { x: 300, y: 650, facing: -1 },
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let weaponDmgOnB = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon' && ev.target === 'B') {
+        weaponDmgOnB += ev.damage;
+      }
+    });
+    for (let i = 0; i < 1200; i++) {
+      lab.step(16.6667);
+      if (o.result?.phase === 'End') break;
+    }
+    expect(weaponDmgOnB).toBe(0); // 固定方向打空 = Miss
+  });
+
+  it('5. 开火瞬间自车明显后坐（chassis vx 骤降：recoil 60 > Cannon 30 的效果）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(laserSnapshot('A'), plainSnapshot('B'), { autoDrive: true, engine: 'planck' });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let fired = false;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'laser') fired = true;
+    });
+    const vxBefore: number[] = [];
+    const vxAfter: number[] = [];
+    for (let i = 0; i < 600; i++) {
+      const vx = o.world.getLinearVelocity(o.vehicleA.body).x;
+      if (!fired) vxBefore.push(vx);
+      else vxAfter.push(vx);
+      lab.step(16.6667);
+      if (fired && vxAfter.length >= 20) break;
+    }
+    expect(fired).toBe(true);
+    const avgBefore = vxBefore.slice(-10).reduce((a, b) => a + b, 0) / 10;
+    // 真实 recoil impulse 60 / chassis mass ≈150 → Δv ≈ -0.4；autoDrive 抵消后
+    // 实测仍骤降 ~0.32（> Cannon 30 的 ~0.2）。强后坐可感知。
+    expect(Math.min(...vxAfter)).toBeLessThan(avgBefore - 0.25);
+  });
+});

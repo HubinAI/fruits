@@ -11,10 +11,12 @@
 import {
   isDamageEvent,
   isDeathEvent,
+  isWeaponChargeEvent,
   isWeaponFireEvent,
   type BattleEvent,
   type DamageEvent,
   type DeathEvent,
+  type WeaponChargeEvent,
   type WeaponFireEvent,
 } from '../battle/combatEvents';
 
@@ -41,6 +43,10 @@ export interface BattlePresentationHooks {
   onDeathFx?: (ev: DeathEvent) => void;
   /** death → 死亡音效 */
   onDeathSound?: (ev: DeathEvent) => void;
+  /** Q11-C：weaponCharge → 蓄能光点（progress 0→1 每固定步 upsert；肉眼可见大招前摇） */
+  onWeaponCharge?: (ev: WeaponChargeEvent) => void;
+  /** Q11-C：weaponFire（laser）→ 清除该部件蓄能光点（发射完成） */
+  onWeaponChargeEnd?: (ev: WeaponFireEvent) => void;
 }
 
 export class BattlePresentationController {
@@ -72,6 +78,13 @@ export class BattlePresentationController {
     if (isWeaponFireEvent(ev)) {
       this.hooks.onMuzzleFlash?.(ev);
       this.hooks.onFireSound?.(ev);
+      // Q11-C：laser 发射完成 → 清除该部件蓄能光点
+      if (ev.behavior === 'laser') this.hooks.onWeaponChargeEnd?.(ev);
+      return;
+    }
+    if (isWeaponChargeEvent(ev)) {
+      // Q11-C：蓄能表现（纯视觉，不参与伤害判定）
+      this.hooks.onWeaponCharge?.(ev);
       return;
     }
     if (isDamageEvent(ev)) {

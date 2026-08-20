@@ -54,11 +54,12 @@ function makeRuntime(behaviorId: string): {
 }
 
 describe('W1-BH-1 Behavior Registry', () => {
-  it('1. 注册表含 cannon/hammer/pushRod；未知 behavior → undefined', () => {
-    expect(registeredBehaviorIds().sort()).toEqual(['cannon', 'hammer', 'pushRod']);
+  it('1. 注册表含 cannon/hammer/pushRod/laser；未知 behavior → undefined', () => {
+    expect(registeredBehaviorIds().sort()).toEqual(['cannon', 'hammer', 'laser', 'pushRod']);
     expect(getBehaviorFactory('cannon')).toBeDefined();
     expect(getBehaviorFactory('hammer')).toBeDefined();
     expect(getBehaviorFactory('pushRod')).toBeDefined();
+    expect(getBehaviorFactory('laser')).toBeDefined(); // Q11-C 蓄能镭射
     expect(getBehaviorFactory('ram')).toBeUndefined(); // 未注册（Weld-only）
     expect(getBehaviorFactory('noSuch')).toBeUndefined();
   });

@@ -346,6 +346,10 @@ let prevTimeScale = 1;
 const presentation = new BattlePresentationController({
   onMuzzleFlash: (ev) => renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y),
   onFireSound: () => sfx.play('fire'),
+  // Q11-C：蓄能光点（laser）——partId 为 key，发射完成清除
+  onWeaponCharge: (ev) =>
+    renderer.spawnCharge(ev.partId, ev.worldPosition.x, ev.worldPosition.y, ev.progress),
+  onWeaponChargeEnd: (ev) => renderer.clearCharge(ev.partId),
   onHitFlash: (ev) => renderer.spawnHitFlash(ev.target),
   onHitSpark: (ev) =>
     renderer.spawnSpark(

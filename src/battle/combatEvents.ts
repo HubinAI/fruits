@@ -50,6 +50,22 @@ export interface WeaponFireEvent {
   timestamp: number;
 }
 
+/**
+ * Q11-C：蓄能事件——镭射（laser）蓄能期间每固定步发一次（progress 0→1）。
+ * 纯表现（VFX/SFX 消费）；不参与伤害 / 命中判定（伤害只走 projectile 真实接触）。
+ */
+export interface WeaponChargeEvent {
+  type: 'weaponCharge';
+  team: TeamId;
+  partId: string;
+  behavior: string;
+  /** 蓄能光点世界位置（炮口方向起点 = part 当前位置） */
+  worldPosition: Vec2;
+  /** 0→1（chargeMs 内线性推进） */
+  progress: number;
+  timestamp: number;
+}
+
 /** 死亡事件：HP 首次从 >0 → <=0 时只发一次 */
 export interface DeathEvent {
   type: 'death';
@@ -60,7 +76,7 @@ export interface DeathEvent {
 }
 
 /** 正式 Battle Event 联合（Renderer / VFX / SFX 按 type 判别消费） */
-export type BattleEvent = DamageEvent | WeaponFireEvent | DeathEvent;
+export type BattleEvent = DamageEvent | WeaponFireEvent | WeaponChargeEvent | DeathEvent;
 
 /** 类型谓词：BattleEvent → DamageEvent（consumer 判别用） */
 export function isDamageEvent(ev: BattleEvent): ev is DamageEvent {
@@ -70,6 +86,11 @@ export function isDamageEvent(ev: BattleEvent): ev is DamageEvent {
 /** 类型谓词：BattleEvent → WeaponFireEvent */
 export function isWeaponFireEvent(ev: BattleEvent): ev is WeaponFireEvent {
   return ev.type === 'weaponFire';
+}
+
+/** Q11-C：蓄能事件谓词（laser 蓄能表现消费） */
+export function isWeaponChargeEvent(ev: BattleEvent): ev is WeaponChargeEvent {
+  return ev.type === 'weaponCharge';
 }
 
 /** 类型谓词：BattleEvent → DeathEvent */

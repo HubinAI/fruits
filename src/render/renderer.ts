@@ -120,6 +120,8 @@ export class Renderer {
   private hitFlashes: Array<{ team: string; bornAt: number; ttl: number }> = [];
   private sparks: Spark[] = [];
   private muzzleFlashes: MuzzleFlash[] = [];
+  /** Q11-C：蓄能光点（laser charge 表现；key=partId，upsert 更新 progress） */
+  private charges: Array<{ key: string; x: number; y: number; progress: number; lastAt: number }> = [];
   private deathFxs: DeathFx[] = [];
 
   constructor(
@@ -213,6 +215,25 @@ export class Renderer {
   /** 炮口闪光：开火点短暂亮圆（真实 muzzle worldPosition） */
   spawnMuzzleFlash(x: number, y: number): void {
     this.muzzleFlashes.push({ x, y, bornAt: performance.now(), ttl: 90 });
+  }
+
+  /** Q11-C：蓄能光点——laser 蓄能期间每固定步 upsert（同 partId 更新 progress）。
+   *  纯表现（肉眼可见「大招要来了」）；不参与伤害/命中判定。 */
+  spawnCharge(key: string, x: number, y: number, progress: number): void {
+    const existing = this.charges.find((c) => c.key === key);
+    if (existing) {
+      existing.x = x;
+      existing.y = y;
+      existing.progress = progress;
+      existing.lastAt = performance.now();
+    } else {
+      this.charges.push({ key, x, y, progress, lastAt: performance.now() });
+    }
+  }
+
+  /** Q11-C：蓄能结束（发射）→ 清除该部件光点 */
+  clearCharge(key: string): void {
+    this.charges = this.charges.filter((c) => c.key !== key);
   }
 
   /** 死亡 FX：目标车辆位置短暂扩散环（绘制时取当前 Snapshot） */
@@ -350,6 +371,28 @@ export class Renderer {
       ctx.beginPath();
       ctx.arc(this.sx(m.x), this.sy(m.y), this.ss(6 + age * 10), 0, Math.PI * 2);
       ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // Q11-C：蓄能光点（laser charge）——progress 0→1 半径/亮度递增（肉眼可见「大招要来了」）
+    this.charges = this.charges.filter((c) => now - c.lastAt < 500);
+    for (const c of this.charges) {
+      const p = Math.max(0, Math.min(1, c.progress));
+      const alpha = 0.35 + p * 0.6;
+      const r = this.ss(7 + p * 14);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p > 0.85 ? '#fff2b8' : p > 0.5 ? '#ffd35a' : '#6fa8ff';
+      ctx.beginPath();
+      ctx.arc(this.sx(c.x), this.sy(c.y), r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      // 外圈提示（progress 越大越亮）
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.strokeStyle = '#ffd35a';
+      ctx.lineWidth = this.ss(2);
+      ctx.beginPath();
+      ctx.arc(this.sx(c.x), this.sy(c.y), r + this.ss(5), 0, Math.PI * 2);
+      ctx.stroke();
       ctx.globalAlpha = 1;
     }
 

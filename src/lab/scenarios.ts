@@ -220,6 +220,20 @@ function tallTargetBuild(): BuildSnapshot {
   };
 }
 
+/** Q11-C：镭射车——西瓜车身 + 前方镭射（蓄能远程 Weapon，长前摇高威胁） */
+function laserBuild(): BuildSnapshot {
+  return {
+    id: 'laserCar',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'laser' }],
+  };
+}
+
 export const SCENARIOS: ScenarioDef[] = [
   {
     id: 'A',
@@ -487,6 +501,24 @@ export const SCENARIOS: ScenarioDef[] = [
       '对手矮 / 姿态低时刺尖从上方自然擦空（Miss）。伤害与碰撞位置一致，擦空就是 Miss。',
     buildA: spearBuild(),
     buildB: tallTargetBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Q11-C',
+    name: 'Laser (Charge Weapon)',
+    description:
+      '蓄能镭射（Q11-C）：A 西瓜车身 + 前方镭射——固定方向蓄能 ~1.5s（蓄能过程'
+      + '肉眼可见，weaponCharge 事件），发射复用真实 Projectile / CCD 链路'
+      + '（speed/damage/recoil 约 Cannon 2×）。朝向不对可真实打空；开火瞬间自车'
+      + '明显后坐；projectile 真实 hit / miss / destroy。',
+    buildA: laserBuild(),
+    buildB: plainCarBuild(),
     config: {
       engine: 'planck',
       autoDrive: true,

@@ -372,6 +372,36 @@ const spear: FunctionalPartDef = {
   behaviorParams: { baseDamage: 60 },
 };
 
+/**
+ * Q11-C：镭射（Weapon）——蓄能远程武器，与普通炮明显不同的体验：
+ * 长前摇（蓄能 ~1.5s）→ 高威胁射击 → 强后坐力。
+ * - 固定朝真实车身/挂点方向蓄能（不跟踪目标 / 不自动瞄准 / 不隐藏锁定）；
+ * - 发射完全复用现有真实 Projectile / CCD 链路（dynamic circle + bullet=true，
+ *   OwnerTag + ContactRouter 结算），不创建第二套 Projectile 系统；
+ * - 初版差异故意做大（后续真人验收再回收）：muzzleSpeed / projectileDamage /
+ *   recoilImpulse 约 Cannon 2×；
+ * - 蓄能过程通过 weaponCharge 事件表现（肉眼可见），不参与伤害判定。
+ * - 暂不加入玩家 Build 选项（PART_OPTIONS），仅供专用测试场景使用。
+ */
+const laser: FunctionalPartDef = {
+  id: 'laser',
+  name: '镭射',
+  category: 'weapon',
+  mass: 20,
+  energy: 45,
+  collider: { shape: 'box', width: 40, height: 20, offset: { x: 20, y: 0 } },
+  behavior: 'laser',
+  behaviorParams: {
+    chargeMs: 1500,
+    cooldownMs: 1800,
+    muzzleSpeed: 16, // Cannon 8 ×2
+    projectileDamage: 160, // Cannon 80 ×2
+    projectileRadius: 12,
+    projectileMass: 1,
+    recoilImpulse: 60, // Cannon 30 ×2
+  },
+};
+
 /** 构建 Content Registry */
 export function createRegistry(): ContentRegistry {
   return {
@@ -390,6 +420,7 @@ export function createRegistry(): ContentRegistry {
       [testMass.id, testMass],
       [wedgeShovel.id, wedgeShovel],
       [spear.id, spear],
+      [laser.id, laser],
       [hammer.id, hammer],
       [pushRod.id, pushRod],
     ]),
