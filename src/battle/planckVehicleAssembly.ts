@@ -332,9 +332,11 @@ export function createPlanckVehicle(
     // motor/limit 由 HammerBehavior 驱动）。Q04-F2：Push Rod 为 Prismatic 伸缩件——
     // axis 取 chassis 本地 ±X（facing 前方，跟随 chassis 姿态的本地轴，非固定世界 X；
     // motor/limit 由后续 PushRodBehavior 驱动）。
+    // Q12-B：Lifter（举升臂）为 Revolute 件——低位待机 → 主动上翻 → 回落
+    // （motor/limit 由 LifterBehavior 驱动）。
     // 其余 Functional Part（ram / cannon / gadget）保持 Weld 刚性连接。
     const joint =
-      f.def.behavior === 'hammer'
+      f.def.behavior === 'hammer' || f.def.behavior === 'lifter'
         ? world.createRevoluteJoint(
             body,
             hpWorld,

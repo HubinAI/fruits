@@ -967,4 +967,59 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     }
     expect(dmg3).toBe(0); // 没正面撞到 → 自然失败，无隐藏击退/自动伤害
   });
+
+  it('Q12-B. 举升臂：Revolute 翻动弧 60~80° / banana 真实碰撞抬起 / 无 Direct Weapon Damage / A 反作用', () => {
+    // 1) 定义契约：gadget / 无 baseDamage / behavior lifter / Revolute 装配
+    const lifter = registry.functionals.get('lifter')!;
+    expect(lifter.category).toBe('gadget');
+    expect(lifter.behavior).toBe('lifter');
+    expect((lifter.behaviorParams as Record<string, unknown> | undefined)?.baseDamage).toBeUndefined();
+    const lp = lifter.behaviorParams as Record<string, number>;
+    expect(lp.upperRad).toBeGreaterThanOrEqual(1.05); // 60°
+    expect(lp.upperRad).toBeLessThanOrEqual(1.4); // 80°
+    // 2) 装配链路：Preview 真实部件 + Energy 15；gadget 单独不满足「至少 1 件 Weapon」
+    const lab = new PhysicsLab(rendererStub);
+    const d = draft('watermelonBody', { front: 'lifter' });
+    const a = snap(d, 'q12bA');
+    const b = snap(draft('bananaBody', {}), 'q12bB');
+    expect(() => lab.loadCustomPreview(a, b)).not.toThrow();
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const lifterPart = o.vehicleA.parts.find((p) => p.def.id === 'lifter')!;
+    expect(lifterPart).toBeDefined();
+    expect(lifterPart.joint).toBeDefined(); // Revolute joint（非 Weld）
+    expect(computeEnergy(a, registry).energy).toBe(15);
+    expect(validateSnapshot(a, registry).valid).toBe(false); // gadget 单独无 weapon
+    expect(validateSnapshot(snap(draft('watermelonBody', { front: 'lifter', top: 'cannon' }), 'q12bC'), registry).valid).toBe(true);
+    // 3) 场景：翻动弧 + banana 抬起 + 无 weapon damage + A 反作用
+    const lab2 = new PhysicsLab(rendererStub);
+    lab2.loadScenario(SCENARIOS.find((s) => s.id === 'Q12-B')!);
+    const o2 = lab2.orchestrator as PlanckBattleOrchestrator;
+    const w = o2.world;
+    const lifterPart2 = o2.vehicleA.parts.find((p) => p.def.id === 'lifter')!;
+    const GROUND_Y = 700;
+    let sources = new Set<string>();
+    o2.onCombatEvent((ev) => {
+      if (ev.type === 'damage') sources.add(String(ev.damageSource));
+    });
+    let earlyMaxAngle = 0; // 前 900 步（15s，A 翻车前）的正常翻动峰值
+    let maxBLift = 0;
+    let maxAPitch = 0;
+    for (let i = 0; i < 1200; i++) {
+      lab2.step(16.6667);
+      const ang = w.getRevoluteAngle(lifterPart2.joint);
+      if (i < 900) earlyMaxAngle = Math.max(earlyMaxAngle, ang);
+      const frontLift = Math.max(
+        0,
+        ...o2.vehicleB.wheels.map((wh) => Math.max(0, GROUND_Y - 20 - 0.5 - w.getPosition(wh.body).y)),
+      );
+      maxBLift = Math.max(maxBLift, frontLift);
+      maxAPitch = Math.max(maxAPitch, Math.abs(w.getAngle(o2.vehicleA.body)));
+      if (o2.result?.phase === 'End') break;
+    }
+    expect(earlyMaxAngle * 57.3).toBeGreaterThan(55); // 正常翻动达到 70°（60~80° 目标）
+    expect(earlyMaxAngle * 57.3).toBeLessThan(85);
+    expect(maxBLift).toBeGreaterThan(15); // banana 被真实碰撞明显抬起
+    expect(sources.has('weapon')).toBe(false); // 无 Direct Weapon Damage（impact/hazard 是真实物理）
+    expect(maxAPitch * 57.3).toBeGreaterThan(0.5); // 自车真实反作用
+  });
 });

@@ -26,4 +26,6 @@ export const PART_OPTIONS: PartOption[] = [
   { v: 'laser', t: '镭射' },
   // Q12-A：复用既有 ramHead Runtime（真实 Contact Weapon 直击），玩家侧名「冲撞头」
   { v: 'ramHead', t: '冲撞头' },
+  // Q12-B：主动举升臂 Gadget（front Revolute 上翻，无 Direct Damage）
+  { v: 'lifter', t: '举升臂' },
 ];

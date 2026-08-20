@@ -206,6 +206,20 @@ function ramHeadCarBuild(): BuildSnapshot {
   };
 }
 
+/** Q12-B：举升臂车——西瓜车身 + 前方举升臂（front Revolute 上翻 Gadget） */
+function lifterCarBuild(): BuildSnapshot {
+  return {
+    id: 'lifterCar',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'lifter' }],
+  };
+}
+
 /** Q11-A：楔铲车——西瓜车身 + 前方楔铲（Gadget，无 Direct Damage，无主动动画） */
 function wedgeShovelBuild(): BuildSnapshot {
   return {
@@ -565,6 +579,24 @@ export const SCENARIOS: ScenarioDef[] = [
       + '隔离验证）。正面真实撞到才产生 Weapon Damage（baseDamage 80）；擦空/高度'
       + '错开自然失败；无隐藏击退/自动瞄准。与刺（96×6 长细）视觉与距离定位明显不同。',
     buildA: ramHeadCarBuild(),
+    buildB: bananaTargetBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Q12-B',
+    name: 'Lifter Arm (Gadget)',
+    description:
+      '举升臂（Q12-B）：A 西瓜车身 + 前方举升臂（front Revolute，低位待机 → '
+      + '主动向上翻 ~70° → 回落，复用 Hammer 的 Revolute / motor / limit，无 Direct '
+      + 'Weapon Damage）vs B 香蕉车身（标准轮、无功能件，隔离验证）。臂在翻动弧内 '
+      + '时对手由真实碰撞被明显抬起；错过弧内时机自然失败；自车承担真实反作用。',
+    buildA: lifterCarBuild(),
     buildB: bananaTargetBuild(),
     config: {
       engine: 'planck',

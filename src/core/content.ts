@@ -310,6 +310,39 @@ const pushRod: FunctionalPartDef = {
 };
 
 /**
+ * Q12-B：举升臂（Gadget）——front Revolute 连接，主动向上翻起对手。
+ * - 低位待机 → 主动向上翻（60°~80°）→ 回落（LifterBehavior 状态机，
+ *   复用 Hammer 的 Revolute / motor / limit 能力，物理弧由 Planck limit 保证）；
+ * - category gadget + 不设 baseDamage → 天然绕过 ContactRouter weapon 路径，
+ *   Direct Weapon Damage = 0（抬升完全来自真实碰撞几何/质量/力矩）；
+ * - 第一版动作故意明显：起手清楚、机械运动完整；错过弧内时机自然失败；
+ * - 不 setAngle 对手 / 不加隐藏向上 impulse / 无自动翻车判定。
+ */
+const lifter: FunctionalPartDef = {
+  id: 'lifter',
+  name: '举升臂',
+  category: 'gadget',
+  mass: 30, // 明显质量：翻动反作用自车也承担
+  energy: 15,
+  // 长条臂：本地 x∈[0,100]（相对 pivot，向前伸出 100px），高 14；
+  // offset.y 0 → 低位待机时臂体在 pivot 高度（世界 y≈662，侵入对手底盘
+  // 下缘 680 上方 ~18px）——对手前进即被臂体真实碰撞顶起（臂在车身内）；
+  // 臂主动上翻 70° 时臂体更深侵入并托住对手 → 明显抬起。
+  collider: { shape: 'box', width: 100, height: 14, offset: { x: 50, y: 0 } },
+  behavior: 'lifter',
+  behaviorParams: {
+    // 上翻 70°（1.22 rad，目标 60°~80° 区间）；低位 = 0 rad（水平）
+    liftSpeedRadPerStep: 0.015, // 70° ≈ 81 步 ≈ 1.35s（清楚起手）
+    lowerSpeedRadPerStep: 0.01, // 回落稍慢（完整机械运动）
+    upperRad: 1.22,
+    lowerRad: 0,
+    holdSteps: 20, // 翻到位停顿 ~0.33s
+    restSteps: 20, // 低位待机 ~0.33s（周期循环：待机→翻→停顿→回落）
+    maxTorqueNm: 400, // 足够顶起 banana（45kg）并让反作用在 chassis 上肉眼可见
+  },
+};
+
+/**
  * Q11-A：楔铲（Gadget）——低矮楔形 Collider（polygon），固定安装在前方，
  * 随整车移动，无主动动画 / 无 behavior（behavior:'none'）。
  * 翻起效果完全来自真实碰撞几何、质量、速度与力矩（钻入对手底部 → 沿坡面
@@ -442,6 +475,7 @@ export function createRegistry(): ContentRegistry {
       [laser.id, laser],
       [hammer.id, hammer],
       [pushRod.id, pushRod],
+      [lifter.id, lifter],
     ]),
   };
 }

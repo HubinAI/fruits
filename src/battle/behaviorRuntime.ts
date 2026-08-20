@@ -22,6 +22,7 @@ import { CannonBehavior } from './cannonBehavior';
 import { HammerBehavior } from './hammerBehavior';
 import { PushRodBehavior } from './pushRodBehavior';
 import { LaserBehavior } from './laserBehavior';
+import { LifterBehavior } from './lifterBehavior';
 
 /** Behavior factory 输入（由 Orchestrator 在构造时提供） */
 export interface BehaviorContext {
@@ -213,6 +214,28 @@ export function createPushRodRuntime(ctx: BehaviorContext): PartBehaviorRuntime 
 }
 export function createLaserRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
   return new LaserRuntime(ctx);
+}
+
+/* ---------- Lifter（Q12-B）：举升臂 Revolute 状态机（无 projectile / 无 Direct Damage） ---------- */
+
+class LifterRuntime implements PartBehaviorRuntime {
+  readonly vehicle: PlanckVehicle;
+  readonly part: PlanckPartRuntime;
+  private readonly behavior: LifterBehavior;
+
+  constructor(ctx: BehaviorContext) {
+    this.vehicle = ctx.vehicle;
+    this.part = ctx.part;
+    this.behavior = new LifterBehavior(ctx.part);
+  }
+
+  beforePhysicsStep(world: PlanckWorld, _timeMs: number): void {
+    this.behavior.stepFixed(world, this.vehicle, this.part);
+  }
+}
+
+export function createLifterRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
+  return new LifterRuntime(ctx);
 }
 
 export type { BodyHandle };
