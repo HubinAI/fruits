@@ -33,6 +33,7 @@ import { CombatEventBus, type BattleEvent } from './combatEvents';
 import { PlanckArenaRuntime } from './planckArenaRuntime';
 import {
   resolveBattleResult,
+  visualWorldTransform,
   type BattleConfig,
   type BattleResult,
   type BattleRenderSnapshot,
@@ -418,33 +419,55 @@ export class PlanckBattleOrchestrator {
         points: worldPointsOfCollider(c, vehicle.facing, bPos, bAng),
       })),
     };
+    // W1-VIS-1：有 VisualDef → 输出引擎中立 RenderVisual（Collider 完全不变，仅附加）
+    const bodyVisual = vehicle.resolved.body.visual
+      ? visualWorldTransform(vehicle.resolved.body.visual, vehicle.facing, bPos, bAng)
+      : undefined;
     const wheels: RenderCircle[] = vehicle.wheels.map((w) => ({
       center: this.world.getPosition(w.body),
       radius: w.def.radius,
       angle: this.world.getAngle(w.body),
     }));
-    const parts: RenderFunctionalPart[] = vehicle.parts.map((p) => ({
-      shape: worldShapeOfCollider(
-        p.def.collider,
-        vehicle.facing,
-        this.world.getPosition(p.body),
-        this.world.getAngle(p.body),
-      ),
-      category: p.def.category,
-      // Q04-R1B：仅 Push Rod 提供真实 Joint 连接几何——from = chassis hardpoint
-      // 当前世界位置（镜像 facing 后本地硬点随 chassis 姿态旋转），to = Prismatic
-      // part 原点当前世界位置。translation=0 时 from≈to（无长连接）；伸出越多轴越长，
-      // Retract 自然缩短。其他部件不提供 connector（无特判，Renderer 行为不变）。
-      connector:
-        p.def.behavior === 'pushRod'
-          ? {
-              from: pushRodAnchorWorld(bPos, bAng, vehicle.facing, p),
-              to: this.world.getPosition(p.body),
-              width: PUSH_ROD_CONNECTOR_WIDTH,
-            }
+    const wheelVisuals = vehicle.wheels.map((w) =>
+      w.def.visual
+        ? visualWorldTransform(
+            w.def.visual,
+            vehicle.facing,
+            this.world.getPosition(w.body),
+            this.world.getAngle(w.body),
+          )
+        : undefined,
+    );
+    const parts: RenderFunctionalPart[] = vehicle.parts.map((p) => {
+      const partPos = this.world.getPosition(p.body);
+      const partAng = this.world.getAngle(p.body);
+      return {
+        shape: worldShapeOfCollider(
+          p.def.collider,
+          vehicle.facing,
+          partPos,
+          partAng,
+        ),
+        category: p.def.category,
+        // W1-VIS-1：有 VisualDef → 输出 Visual（换炮管/锤头外形不改 Physics Collider）
+        visual: p.def.visual
+          ? visualWorldTransform(p.def.visual, vehicle.facing, partPos, partAng)
           : undefined,
-    }));
-    return { team: vehicle.team, body, wheels, parts };
+        // Q04-R1B：仅 Push Rod 提供真实 Joint 连接几何——from = chassis hardpoint
+        // 当前世界位置（镜像 facing 后本地硬点随 chassis 姿态旋转），to = Prismatic
+        // part 原点当前世界位置。translation=0 时 from≈to（无长连接）；伸出越多轴越长，
+        // Retract 自然缩短。其他部件不提供 connector（无特判，Renderer 行为不变）。
+        connector:
+          p.def.behavior === 'pushRod'
+            ? {
+                from: pushRodAnchorWorld(bPos, bAng, vehicle.facing, p),
+                to: partPos,
+                width: PUSH_ROD_CONNECTOR_WIDTH,
+              }
+            : undefined,
+      };
+    });
+    return { team: vehicle.team, body, bodyVisual, wheels, wheelVisuals, parts };
   }
 
   private buildArenaSnapshot(): RenderArena {

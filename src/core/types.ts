@@ -51,6 +51,27 @@ export interface FunctionalHardpointDef {
 }
 
 /**
+ * Visual Definition（W1-VIS-1）：正式视觉合同，与 Physics Collider 解耦。
+ * - 只描述「视觉外观 + 相对物理原点的 transform」，不参与物理（质量/碰撞/mask 全部来自 Collider）；
+ * - 无 VisualDef 时 Renderer 继续用 Collider Shape fallback（当前灰盒视觉完全兼容）；
+ * - 本阶段不加载 png/sprite atlas，只建立合同与 transform；visualId 供后续资源队列消费。
+ */
+export interface VisualDef {
+  /** 视觉资源 id（后续 sprite/atlas 队列消费；本阶段仅透传） */
+  visualId: string;
+  /** 视觉矩形尺寸（px） */
+  size: { width: number; height: number };
+  /** 相对物理原点（part/body 真实原点）的锚点偏移（px） */
+  anchor: { x: number; y: number };
+  /** 相对视觉旋转（rad）；叠加在真实 body/part 世界 rotation 上 */
+  rotation: number;
+  /** 排序层级（后续 Renderer 排序用；数值大在上层） */
+  layer: number;
+  /** 是否随 facing 镜像（镜像 anchor.x 与 rotation 符号） */
+  mirrorWithFacing: boolean;
+}
+
+/**
  * Body Definition。
  * Body 只描述被动碰撞轮廓 + 质量 + 质量分布 + 挂点。
  * 禁止拥有：BodyContactDamage / 职业 Buff / 主动技能 / 隐藏翻倒抗性 / 隐藏 Weapon 兼容属性。
@@ -67,6 +88,8 @@ export interface BodyDef {
   /** 至少 2 个 Movement Hardpoint */
   movementHardpoints: MovementHardpointDef[];
   functionalHardpoints: FunctionalHardpointDef[];
+  /** W1-VIS-1：可选视觉定义（无则 Renderer 用 Collider Shape fallback） */
+  visual?: VisualDef;
 }
 
 /**
@@ -86,6 +109,8 @@ export interface WheelDef {
   maxRPM: number;
   /** 抓地力（Grip → 映射为 friction） */
   grip: number;
+  /** W1-VIS-1：可选视觉定义（无则 Renderer 用 Collider/Circle fallback） */
+  visual?: VisualDef;
 }
 
 export type MovementDef = WheelDef;
@@ -107,6 +132,8 @@ export interface FunctionalPartDef {
   behavior: string;
   /** Behavior 配置参数（可选） */
   behaviorParams?: Record<string, unknown>;
+  /** W1-VIS-1：可选视觉定义（无则 Renderer 用 Collider Shape fallback） */
+  visual?: VisualDef;
 }
 
 /** 安装情况：某 Hardpoint 上安装的 Movement */

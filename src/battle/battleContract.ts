@@ -9,7 +9,7 @@
  */
 import type { ArenaConfig } from './arenaConfig';
 import type { ImpactConfig } from './contactRouter';
-import type { BattlePhase, TeamId, BuildSnapshot } from '../core/types';
+import type { BattlePhase, TeamId, BuildSnapshot, VisualDef } from '../core/types';
 import type { BattleEvent } from './combatEvents';
 
 /** Battle 配置（字段与 battleOrchestrator.BattleConfig 完全一致） */
@@ -143,11 +143,57 @@ export type RenderShape =
   | { kind: 'polygons'; polygons: RenderPolygon[] }
   | { kind: 'circle'; circle: RenderCircle };
 
+/**
+ * 引擎中立 Visual 项（W1-VIS-1）：Visual ≠ Collider 合同的渲染输出。
+ * - 只包含世界 transform + visualId + 尺寸/层级（引擎中立，无任何引擎类型）；
+ * - visualId 供后续 sprite/atlas 队列消费；本阶段不加载图片；
+ * - 位置/旋转基于真实物理原点 + VisualDef.anchor/rotation（facing 镜像已正确应用）。
+ */
+export interface RenderVisual {
+  visualId: string;
+  /** 世界位置（px；= 物理原点 + 旋转后的 anchor 偏移） */
+  position: RenderVec2;
+  /** 世界旋转（rad；= 真实 body/part rotation + VisualDef.rotation（facing 已镜像）） */
+  rotation: number;
+  /** 视觉矩形尺寸（px，透传 VisualDef.size） */
+  size: { width: number; height: number };
+  /** 排序层级（透传 VisualDef.layer；后续 Renderer 排序用） */
+  layer: number;
+}
+
+/**
+ * W1-VIS-1：VisualDef → 引擎中立 RenderVisual 世界 transform（双引擎共享纯函数）。
+ * - anchor 基于真实物理原点（part/body 原点），随 physAngle 旋转；
+ * - mirrorWithFacing 且 facing=-1 时镜像 anchor.x 与 rotation 符号；
+ * - 视觉 rotation 叠加在真实 body/part rotation 上。
+ */
+export function visualWorldTransform(
+  visual: VisualDef,
+  facing: 1 | -1,
+  physPos: RenderVec2,
+  physAngle: number,
+): RenderVisual {
+  const mirror = facing === -1 && visual.mirrorWithFacing;
+  const ax = mirror ? -visual.anchor.x : visual.anchor.x;
+  const ay = visual.anchor.y;
+  const cos = Math.cos(physAngle);
+  const sin = Math.sin(physAngle);
+  return {
+    visualId: visual.visualId,
+    position: {
+      x: physPos.x + ax * cos - ay * sin,
+      y: physPos.y + ax * sin + ay * cos,
+    },
+    rotation: physAngle + (mirror ? -visual.rotation : visual.rotation),
+    size: { ...visual.size },
+    layer: visual.layer,
+  };
+}
+
 /** 功能部件：仅保留 Renderer 配色需要的 category */
 export interface RenderFunctionalPart {
   shape: RenderShape;
-  category: string;
-  /**
+  category: string;  /**
    * 真实 Joint 连接几何（Q04-R1B）：世界坐标锚点对 + 轴宽，用于把
    * 「车身 ↔ 移动部件」之间的伸缩轴/套杆画出来（如 Push Rod 的 Prismatic
    * 连接）。optional：无独立移动 Joint 的部件（Cannon / Hammer / Roller /
@@ -157,6 +203,8 @@ export interface RenderFunctionalPart {
    * 禁止假动画 / 补间。
    */
   connector?: RenderConnector;
+  /** W1-VIS-1：有 VisualDef 时输出引擎中立 Visual；无则 undefined（Renderer 用 shape fallback） */
+  visual?: RenderVisual;
 }
 
 /** 真实 Joint 连接件（引擎中立）：from→to 的窄轴，width 为垂直宽度（px） */
@@ -169,9 +217,13 @@ export interface RenderConnector {
 /** 车辆渲染数据 */
 export interface RenderVehicle {
   team: string;
-  /** 车身主体（chassis） */
+  /** 车身主体（chassis；无 VisualDef 时 Renderer 用此 shape fallback） */
   body: RenderShape;
+  /** W1-VIS-1：Body 的 VisualDef 世界 transform（可选） */
+  bodyVisual?: RenderVisual;
   wheels: RenderCircle[];
+  /** W1-VIS-1：与 wheels 对齐的 wheel VisualDef 世界 transform（无视觉的轮为 undefined） */
+  wheelVisuals?: Array<RenderVisual | undefined>;
   parts: RenderFunctionalPart[];
 }
 

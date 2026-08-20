@@ -22,6 +22,7 @@ import { CombatEventBus, type BattleEvent } from './combatEvents';
 import { ArenaRuntime } from './arenaRuntime';
 import {
   resolveBattleResult,
+  visualWorldTransform,
   type BattleConfig,
   type BattleResult,
   type BattleRenderSnapshot,
@@ -170,15 +171,35 @@ export class BattleOrchestrator {
       const c = getPosition(body);
       return { center: { x: c.x, y: c.y }, radius: body.circleRadius ?? 10, angle: getAngle(body) };
     };
-    const toVehicle = (v: Vehicle): RenderVehicle => ({
-      team: v.team,
-      body: { kind: 'polygons', polygons: toPolygons(v.body) },
-      wheels: v.wheels.map((w) => toCircle(w.body)),
-      parts: v.parts.map((p) => ({
-        shape: { kind: 'polygons', polygons: toPolygons(p.body) },
-        category: p.def.category,
-      })),
-    });
+    const toVehicle = (v: Vehicle): RenderVehicle => {
+      const bPos = getPosition(v.body);
+      const bAng = getAngle(v.body);
+      return {
+        team: v.team,
+        body: { kind: 'polygons', polygons: toPolygons(v.body) },
+        // W1-VIS-1：有 VisualDef → 引擎中立 RenderVisual（Collider 不变，仅附加）
+        bodyVisual: v.resolved.body.visual
+          ? visualWorldTransform(v.resolved.body.visual, v.facing, bPos, bAng)
+          : undefined,
+        wheels: v.wheels.map((w) => toCircle(w.body)),
+        wheelVisuals: v.wheels.map((w) =>
+          w.def.visual
+            ? visualWorldTransform(w.def.visual, v.facing, getPosition(w.body), getAngle(w.body))
+            : undefined,
+        ),
+        parts: v.parts.map((p) => {
+          const partPos = getPosition(p.body);
+          const partAng = getAngle(p.body);
+          return {
+            shape: { kind: 'polygons', polygons: toPolygons(p.body) },
+            category: p.def.category,
+            visual: p.def.visual
+              ? visualWorldTransform(p.def.visual, v.facing, partPos, partAng)
+              : undefined,
+          };
+        }),
+      };
+    };
     return {
       arena: {
         width: this.arena.config.width,
