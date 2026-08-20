@@ -187,6 +187,10 @@ const wheelStd: WheelDef = {
  * Q12-A：collider 由 box 20×30（短高）改为 box 44×26 offset {22,0}（短粗前置：
  * 从挂点向前伸出 44px，高 26px）——与刺（96×6 长细）一眼不同；正面真实撞到
  * 才产生 Weapon Damage，擦空/高度错开自然失败；无隐藏击退/自动瞄准。
+ *
+ * Q12-A-HOLD（prototype/hold）：已退出玩家装配页 PART_OPTIONS（见 partOptions.ts）。
+ * 本 def 与 registry 条目保留，供 Q12-A Scenario / 直构 / 测试与未来重做冲撞类内容；
+ * 底层 ram Contact 能力不修改。
  */
 const ramHead: FunctionalPartDef = {
   id: 'ramHead',

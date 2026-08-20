@@ -24,8 +24,10 @@ export const PART_OPTIONS: PartOption[] = [
   { v: 'pushRod', t: '推杆' },
   { v: 'spear', t: '刺' },
   { v: 'laser', t: '镭射' },
-  // Q12-A：复用既有 ramHead Runtime（真实 Contact Weapon 直击），玩家侧名「冲撞头」
-  { v: 'ramHead', t: '冲撞头' },
+  // Q12-A-HOLD（prototype/hold）：冲撞头（ramHead）暂退正式 Build。
+  //   技术成立，但真人录像无独立动作/明显物理结果，与普通车头碰撞差异太弱；
+  //   故从玩家装配页移除。registry / Q12-A Scenario / Contact Runtime / 测试保留，
+  //   标记 prototype/hold，不修改其底层 ram Contact 能力，方便以后重做冲撞类内容。
   // Q12-B：主动举升臂 Gadget（front Revolute 上翻，无 Direct Damage）
   { v: 'lifter', t: '举升臂' },
   // Q12-C：伸缩冲锤 Weapon（Prismatic 伸出撞击，真实 Contact 伤害）

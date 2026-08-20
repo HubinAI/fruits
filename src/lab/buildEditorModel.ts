@@ -6,7 +6,8 @@
  * - 槽位来自当前 BodyDef.functionalHardpoints（真实硬点，不虚构）；
  * - Body 切换时保留同名槽选择、丢弃不存在的旧槽、新槽默认 none；
  * - buildSnapshotFromDraft 只生成非 none 项，不自动塞 ramHead，不创造不存在的 hardpoint；
- * - 首版只暴露 none / cannon / hammer / pushRod（ramHead / testMass 不是本轮已通过内容，不暴露）。
+ * - 玩家可选部件来自 PART_OPTIONS（ramHead 已在 Q12-A-HOLD 退出装配页，prototype/hold；
+ *   registry / Scenario / 测试保留，底层 ram Contact 能力不修改）。
  *
  * 纯模型：不依赖 DOM / PhysicsLab / Validator / Energy 平衡（均为后续独立队列）。
  */
@@ -84,7 +85,7 @@ export function migrateDraftBody(
  * Draft → BuildSnapshot：
  * - movements 固定生成 rear/front 两个 wheelStd（带 radius overrides）；
  * - functionals 只生成非 none 项，且硬点必须真实存在于当前 Body（不创造不存在槽位）；
- * - 不自动塞 ramHead / 其他部件。
+ * - 不自动塞 ramHead / 其他部件（ramHead 选择由 PART_OPTIONS 控制，Q12-A-HOLD 已移除）。
  */
 export function buildSnapshotFromDraft(
   draft: BuildDraft,

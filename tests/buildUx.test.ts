@@ -901,12 +901,13 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(ids).toContain('cannon');
     expect(ids).toContain('hammer');
     expect(ids).toContain('pushRod');
+    expect(ids).not.toContain('ramHead'); // Q12-A-HOLD：冲撞头已暂退正式装配页
     // 唯一性 + 空槽在首位
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids[0]).toBe(EMPTY_SLOT);
   });
 
-  it('Q12-A. 冲撞头：短粗前置 / 复用 ramHead Runtime / 正面命中伤害 / 擦空失败 / 装配可用', () => {
+  it('Q12-A-HOLD. 冲撞头（prototype/hold）：registry 保留 / 不在 PART_OPTIONS / 复用 ramHead Runtime / 正面命中 / 擦空失败', () => {
     // 1) 定义契约：weapon / baseDamage 80 / 短粗 box（与刺 96×6 长细一眼不同）
     const rh = registry.functionals.get('ramHead')!;
     const sp = registry.functionals.get('spear')!;
@@ -921,9 +922,10 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     const spearH = Math.max(...sc.vertices.map((v) => v.y)) - Math.min(...sc.vertices.map((v) => v.y));
     expect(rc.width).toBeLessThan(spearLen * 0.6);
     expect(rc.height).toBeGreaterThan(spearH * 3);
-    // 2) 装配链路：PART_OPTIONS 含冲撞头；Preview 真实部件；Energy 20；Validator（weapon 可 Start）
-    expect(PART_OPTIONS.map((o) => o.v)).toContain('ramHead');
-    expect(PART_OPTIONS.find((o) => o.v === 'ramHead')?.t).toBe('冲撞头');
+    // 2) hold 状态：ramHead 已退出玩家 PART_OPTIONS（不在装配页），但仍在 registry
+    //    （供 Q12-A Scenario / 直构 / 测试与未来重做冲撞类内容，底层 ram Contact 不修改）
+    expect(PART_OPTIONS.map((o) => o.v)).not.toContain('ramHead'); // Q12-A-HOLD：装配页不再出现
+    expect(registry.functionals.has('ramHead')).toBe(true); // registry 保留 prototype/hold
     const lab = new PhysicsLab(rendererStub);
     const d = draft('watermelonBody', { front: 'ramHead' });
     const a = snap(d, 'q12aA');

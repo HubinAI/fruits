@@ -584,9 +584,11 @@ export const SCENARIOS: ScenarioDef[] = [
     },
     camera: { fit: 'vehicles' },
   },
+  // Q12-A-HOLD（prototype/hold）：冲撞头已暂退正式 Build（PART_OPTIONS 已移除），
+  // 本 Scenario 保留为隔离验证 ramHead Runtime / 重做冲撞类内容的入口，仍可加载。
   {
     id: 'Q12',
-    name: 'Ram Head (Contact Weapon)',
+    name: 'Ram Head (prototype/hold)',
     description:
       '冲撞头（Q12-A）：A 西瓜车身 + 前方冲撞头（短粗前置 box 44×26，固定'
       + 'Contact Weapon，复用既有 ramHead Runtime）vs B 香蕉车身（标准轮、无功能件，'
