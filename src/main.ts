@@ -53,6 +53,21 @@ style.textContent = `
   .lab-debug label { display: block; color: #c8d0e0; margin: 3px 0; }
   .lab-debug input[type=number] { width: 64px; background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 4px; padding: 2px 4px; }
   .lab-debug h4 { color: #ffd35a; margin: 6px 0 4px; }
+  .battle-hud { position: absolute; top: 0; left: 0; right: 0; display: none; justify-content: space-between; align-items: center; padding: 10px 18px; z-index: 5; pointer-events: none; }
+  .hud-side { display: flex; align-items: center; gap: 8px; }
+  .hud-team { font-size: 15px; font-weight: 700; }
+  .hud-bar-wrap { width: 170px; height: 10px; background: #232b38; border: 1px solid #38414f; border-radius: 5px; overflow: hidden; }
+  .hud-bar-fill { height: 100%; width: 100%; }
+  .hud-hp { font-size: 13px; color: #e8e8f0; font-variant-numeric: tabular-nums; }
+  .hud-phase { font-size: 14px; color: #ffd35a; letter-spacing: 2px; }
+  .result-modal { position: absolute; inset: 0; background: rgba(6,8,12,0.55); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .result-card { background: #1c2330; border: 1px solid #38414f; border-radius: 12px; padding: 26px 44px; text-align: center; min-width: 300px; }
+  .result-title { margin: 0 0 14px; font-size: 30px; letter-spacing: 4px; }
+  .result-hp { margin: 6px 0; font-size: 15px; color: #c8d0e0; }
+  .result-actions { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
+  .result-actions button { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px; }
+  .result-actions button:hover { background: #2e3747; }
+  .result-actions button.primary { background: #3b6fd4; border-color: #4a7fe0; }
 `;
 document.head.appendChild(style);
 
@@ -87,6 +102,124 @@ main.appendChild(panelB);
 const debugPanel = document.createElement('div');
 debugPanel.className = 'lab-debug';
 canvasWrap.appendChild(debugPanel);
+
+/* ---------- 战斗 HUD（Q06-HUD-U1：Fighting 顶部固定 A/B HP，不随车辆运动带走） ---------- */
+const hudEl = document.createElement('div');
+hudEl.className = 'battle-hud';
+canvasWrap.appendChild(hudEl);
+
+function makeHudSide(teamLabel: string, color: string): {
+  root: HTMLElement;
+  hpText: HTMLElement;
+  barFill: HTMLElement;
+} {
+  const root = document.createElement('div');
+  root.className = 'hud-side';
+  const team = document.createElement('span');
+  team.className = 'hud-team';
+  team.textContent = teamLabel;
+  team.style.color = color;
+  const barWrap = document.createElement('div');
+  barWrap.className = 'hud-bar-wrap';
+  const barFill = document.createElement('div');
+  barFill.className = 'hud-bar-fill';
+  barFill.style.background = color;
+  barWrap.appendChild(barFill);
+  const hpText = document.createElement('span');
+  hpText.className = 'hud-hp';
+  root.appendChild(team);
+  root.appendChild(barWrap);
+  root.appendChild(hpText);
+  hudEl.appendChild(root);
+  return { root, hpText, barFill };
+}
+const hudA = makeHudSide('A', '#3b6fd4');
+const hudB = makeHudSide('B', '#e08a2e');
+const hudPhase = document.createElement('span');
+hudPhase.className = 'hud-phase';
+hudPhase.textContent = '战斗中';
+hudEl.appendChild(hudPhase);
+
+/* ---------- 结算 Modal（Q06-HUD-U1：Ended 中央第一视觉焦点） ---------- */
+const resultModal = document.createElement('div');
+resultModal.className = 'result-modal';
+canvasWrap.appendChild(resultModal);
+
+const resultCard = document.createElement('div');
+resultCard.className = 'result-card';
+resultModal.appendChild(resultCard);
+
+const resultTitle = document.createElement('h2');
+resultTitle.className = 'result-title';
+resultCard.appendChild(resultTitle);
+
+const resultHpA = document.createElement('div');
+resultHpA.className = 'result-hp';
+resultCard.appendChild(resultHpA);
+const resultHpB = document.createElement('div');
+resultHpB.className = 'result-hp';
+resultCard.appendChild(resultHpB);
+
+const resultActions = document.createElement('div');
+resultActions.className = 'result-actions';
+resultCard.appendChild(resultActions);
+
+/** 每帧刷新 HUD：直读 getBattleStatusSnapshot()；整数 HP + clamp 比例条 */
+function updateHud(): void {
+  const o = lab.orchestrator;
+  const s = o?.getBattleStatusSnapshot?.() ?? null;
+  if ((battleState !== 'fighting' && battleState !== 'ended') || !s) {
+    hudEl.style.display = 'none';
+    return;
+  }
+  hudEl.style.display = 'flex';
+  hudA.hpText.textContent = `${Math.round(s.sideA.hp)} / ${Math.round(s.sideA.maxHp)}`;
+  hudB.hpText.textContent = `${Math.round(s.sideB.hp)} / ${Math.round(s.sideB.maxHp)}`;
+  hudA.barFill.style.width = `${Math.max(0, Math.min(1, s.sideA.hp / Math.max(s.sideA.maxHp, 1))) * 100}%`;
+  hudB.barFill.style.width = `${Math.max(0, Math.min(1, s.sideB.hp / Math.max(s.sideB.maxHp, 1))) * 100}%`;
+}
+
+/** 显示结算卡：胜/负/平局 + 双方整数剩余 HP（只反映 Runtime result） */
+function showResultModal(r: { winner: string | null; hpA: number; hpB: number }): void {
+  const isWin = r.winner === 'A';
+  const isLose = r.winner === 'B';
+  resultTitle.textContent = isWin ? '【胜利】' : isLose ? '【失败】' : '【平局】';
+  resultTitle.style.color = isWin ? '#59c97a' : isLose ? '#ff6b5e' : '#ffd35a';
+  resultHpA.textContent = `我方剩余 HP：${Math.round(r.hpA)}`;
+  resultHpB.textContent = `对手剩余 HP：${Math.round(r.hpB)}`;
+  resultModal.style.display = 'flex';
+}
+
+/** Ended 后玩家选择：调整配置 → 回 Editing + Preview */
+function adjustConfig(): void {
+  resultModal.style.display = 'none';
+  hudEl.style.display = 'none';
+  battleState = 'editing';
+  setBuildControlsLocked(false);
+  panelA.style.display = '';
+  panelB.style.display = '';
+  btnStart.style.display = '';
+  showPreview();
+  updateStartButton();
+}
+
+/** Ended 后玩家选择：原配置再战 → 直接重建正式 Planck battle（不进入编辑） */
+function rematch(): void {
+  resultModal.style.display = 'none';
+  startOrRematch(); // 当前 Build 不变；内部重建 battle → Fighting + HUD 回满
+}
+
+/* 结算卡按钮：调整配置（主）/ 原配置再战（次） */
+const btnAdjust = document.createElement('button');
+btnAdjust.className = 'primary';
+btnAdjust.textContent = '调整配置';
+btnAdjust.onclick = adjustConfig;
+resultActions.appendChild(btnAdjust);
+
+const btnRematch = document.createElement('button');
+btnRematch.textContent = '原配置再战';
+btnRematch.onclick = rematch;
+resultActions.appendChild(btnRematch);
 
 const renderer = new Renderer(canvas);
 const lab = new PhysicsLab(renderer);
@@ -129,7 +262,6 @@ let uiMode: UiMode = 'build'; // 默认【装配测试】
 let battleState: BattleState = 'editing';
 let buildControlsLocked = false; // Fighting 时锁定 A/B 全部 Build 控件
 let lastShownResult: BattleOrchestratorApi['result'] = null;
-let lastResultText = ''; // 最近一次战斗结果（直到下次开战才清除）
 
 function addButton(parent: HTMLElement, text: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement('button');
@@ -325,24 +457,19 @@ scenarioSelect.onchange = () => {
   if (sc) {
     lab.loadScenario(sc);
     lastShownResult = null;
-    lastResultText = '';
     currentCamera = sc.camera ?? null;
     reframeCamera();
+    updateHud(); // 场景模式隐藏战斗 HUD
   }
 };
 toolbar.appendChild(scenarioSelect);
-
-// 结果展示条（toolbar；hp 取整）
-const resultLabel = document.createElement('span');
-resultLabel.style.cssText = 'color:#ffd35a;font-size:13px;margin-left:10px;';
-toolbar.appendChild(resultLabel);
 
 // Start 阻断原因（Start 附近直接显示，不要求去左右面板找红字）
 const startHint = document.createElement('span');
 startHint.style.cssText = 'color:#ff6b5e;font-size:12px;margin-left:8px;';
 toolbar.appendChild(startHint);
 
-/** 开战 / 应用配置再战：重新 validate 当前 Draft → Planck loadCustom */
+/** 开战 / 原配置再战：重新 validate 当前 Draft → Planck loadCustom → Fighting 专注模式 */
 function startOrRematch(): void {
   const sa = currentSnapshot('A');
   const sb = currentSnapshot('B');
@@ -350,32 +477,28 @@ function startOrRematch(): void {
     return; // 任一非法：不启动
   }
   lab.loadCustom(sa, sb, { autoDrive: true, engine: 'planck' });
+  battleState = 'fighting';
+  setBuildControlsLocked(true);
+  // Fighting 专注模式：Build 面板收起，Canvas 自动扩展 + 顶部固定 HUD
+  panelA.style.display = 'none';
+  panelB.style.display = 'none';
+  btnStart.style.display = 'none';
+  startHint.style.display = 'none';
+  resultModal.style.display = 'none';
   currentCamera = null;
   reframeCamera();
-  battleState = 'fighting';
-  lastResultText = '';
-  setBuildControlsLocked(true);
+  updateHud();
   updateStartButton();
 }
 
 const btnStart = addButton(toolbar, '开始战斗', startOrRematch);
 
-/** 按钮状态机 + 结果 / 阻断原因展示 */
+/** 按钮状态机 + Start 阻断原因（结果由中央结算卡展示，不再用 toolbar 小字） */
 function updateStartButton(): void {
-  const o = lab.orchestrator;
-  const r = o?.result ?? null;
   const valid = buildsValid();
 
-  // 最近一次战斗结果（End 时保存；直到下次开战才清除）
-  if (r && r.phase === 'End') {
-    const w =
-      r.winner === 'A' ? 'A 胜' : r.winner === 'B' ? 'B 胜' : r.winner === 'draw' ? '平局' : '—';
-    lastResultText = `结果：${w}（hpA ${Math.round(r.hpA)} / hpB ${Math.round(r.hpB)}）`;
-  }
-  resultLabel.textContent = lastResultText;
-
-  // Start 阻断原因（非战斗态才提示）
-  if (battleState === 'fighting') {
+  // Start 阻断原因（仅编辑态提示）
+  if (battleState === 'fighting' || battleState === 'ended') {
     startHint.textContent = '';
   } else {
     const reason = valid ? null : blockReason();
@@ -383,27 +506,25 @@ function updateStartButton(): void {
     startHint.style.display = reason ? '' : 'none';
   }
 
-  // 按钮文字 / 可用性
-  if (battleState === 'fighting') {
-    btnStart.textContent = '战斗中…';
-    btnStart.disabled = true;
-  } else if (battleState === 'ended') {
-    btnStart.textContent = '应用配置再战';
-    btnStart.disabled = !valid;
+  // 按钮：editing 显示「开始战斗」；fighting/ended 隐藏（战斗流程由结算卡接管）
+  if (battleState === 'fighting' || battleState === 'ended') {
+    btnStart.style.display = 'none';
   } else {
+    btnStart.style.display = '';
     btnStart.textContent = '开始战斗';
     btnStart.disabled = !valid;
   }
 }
 
-/** 每帧轮询：result 变化 → Ended 迁移（结果展示 + 控件重开） */
+/** 每帧轮询：result 变化 → Ended（显示中央结算卡；Build 控件保持锁定，先选「调整配置」） */
 function pollBattleResult(): void {
   const r = lab.orchestrator?.result ?? null;
   if (r === lastShownResult) return;
   lastShownResult = r;
   if (uiMode === 'build' && battleState === 'fighting' && r && r.phase === 'End') {
     battleState = 'ended';
-    setBuildControlsLocked(false);
+    showResultModal(r); // 结算卡成为第一视觉焦点
+    updateHud();
   }
   updateStartButton();
 }
@@ -416,10 +537,12 @@ function setMode(m: UiMode): void {
   const showBuild = m === 'build';
   panelA.style.display = showBuild ? '' : 'none';
   panelB.style.display = showBuild ? '' : 'none';
-  btnStart.style.display = showBuild ? '' : 'none';
-  startHint.style.display = showBuild ? '' : 'none';
+  btnStart.style.display = showBuild && battleState === 'editing' ? '' : 'none';
+  startHint.style.display = showBuild && battleState === 'editing' ? '' : 'none';
   scenarioSelect.style.display = showBuild ? 'none' : '';
   debugPanel.style.display = showBuild ? 'none' : '';
+  resultModal.style.display = 'none'; // 模式切换关闭结算卡
+  hudEl.style.display = 'none';
   if (showBuild && battleState !== 'fighting') {
     showPreview(); // 切回装配测试：恢复 Draft Preview（不把 Scenario 车辆伪装成 Preview）
   }
@@ -440,22 +563,32 @@ addButton(toolbar, 'Reset', () => {
   lab.reset();
   lastShownResult = null;
   reframeCamera();
+  resultModal.style.display = 'none';
   // preview 重建 → Editing（中央恢复装配预览）；battle 重建 → Fighting
   if (uiMode === 'build') {
     battleState = lab.previewMode ? 'editing' : 'fighting';
     setBuildControlsLocked(!lab.previewMode);
+    if (lab.previewMode) {
+      panelA.style.display = '';
+      panelB.style.display = '';
+      btnStart.style.display = '';
+    }
+    updateHud();
     updateStartButton();
   }
 });
 addButton(toolbar, 'Clear', () => {
   lab.clear();
   lastShownResult = null;
-  lastResultText = '';
-  resultLabel.textContent = '';
   currentCamera = null;
+  resultModal.style.display = 'none';
+  hudEl.style.display = 'none';
   if (uiMode === 'build') {
     battleState = 'editing';
     setBuildControlsLocked(false);
+    panelA.style.display = '';
+    panelB.style.display = '';
+    btnStart.style.display = '';
     showPreview(); // Clear 后恢复装配预览
     updateStartButton();
   }
@@ -621,6 +754,7 @@ function loop(now: number): void {
   lab.step(dt);
   lab.render();
   pollBattleResult(); // result 变化 → Ended 迁移 + 结果展示
+  updateHud(); // 每帧读取 getBattleStatusSnapshot() → 顶部 A/B HP 实时
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
