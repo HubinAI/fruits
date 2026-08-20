@@ -343,7 +343,7 @@ export function createPlanckVehicle(
             partBody,
             { x: 0, y: 0 },
           )
-        : f.def.behavior === 'pushRod'
+        : f.def.behavior === 'pushRod' || f.def.behavior === 'rammer'
           ? world.createPrismaticJoint(
               body,
               hpWorld,

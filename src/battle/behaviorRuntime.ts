@@ -23,6 +23,7 @@ import { HammerBehavior } from './hammerBehavior';
 import { PushRodBehavior } from './pushRodBehavior';
 import { LaserBehavior } from './laserBehavior';
 import { LifterBehavior } from './lifterBehavior';
+import { RammerBehavior } from './rammerBehavior';
 
 /** Behavior factory 输入（由 Orchestrator 在构造时提供） */
 export interface BehaviorContext {
@@ -236,6 +237,28 @@ class LifterRuntime implements PartBehaviorRuntime {
 
 export function createLifterRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
   return new LifterRuntime(ctx);
+}
+
+/* ---------- Rammer（Q12-C）：冲锤 Prismatic 撞击状态机（真实 Contact Weapon） ---------- */
+
+class RammerRuntime implements PartBehaviorRuntime {
+  readonly vehicle: PlanckVehicle;
+  readonly part: PlanckPartRuntime;
+  private readonly behavior: RammerBehavior;
+
+  constructor(ctx: BehaviorContext) {
+    this.vehicle = ctx.vehicle;
+    this.part = ctx.part;
+    this.behavior = new RammerBehavior(ctx.part);
+  }
+
+  beforePhysicsStep(world: PlanckWorld, _timeMs: number): void {
+    this.behavior.stepFixed(world, this.vehicle, this.part);
+  }
+}
+
+export function createRammerRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
+  return new RammerRuntime(ctx);
 }
 
 export type { BodyHandle };

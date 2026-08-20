@@ -343,6 +343,38 @@ const lifter: FunctionalPartDef = {
 };
 
 /**
+ * Q12-C：冲锤（Weapon）——复用 Push Rod 的 Prismatic motor + limit，
+ * 明显前伸 → 回收循环，伸出去真实撞击并造成伤害。
+ * - 与推杆规则不同：推杆 = 辅助位移（Gadget，无 Direct Damage）；
+ *   冲锤 = Weapon（baseDamage 70，只有锤头真实 Contact 时走现有
+ *   ContactRouter weapon 直击，不允许直接 HP bypass）；
+ * - 初版伸出速度/行程明显高于当前推杆（speed 8 vs 2 px/step、行程
+ *   160 vs 90 px），前摇（回收位停顿）→ 快速伸出 → 接触伤害 → 回收清楚；
+ * - 不复制 Push Rod Foundation（共享同一 setPrismatic* API，独立状态机）；
+ *   无固定击退 / 无自动距离判断 / 无自动瞄准。
+ */
+const rammer: FunctionalPartDef = {
+  id: 'rammer',
+  name: '冲锤',
+  category: 'weapon',
+  mass: 25, // 明显质量：伸出反作用自车也承担
+  energy: 25,
+  // 短粗锤头：本地 x∈[0,30]（相对 pivot，向前伸出 30px），高 22。
+  // Prismatic 沿 axis（facing 前方）伸出 160px → 锤头覆盖 pivot..pivot+190。
+  collider: { shape: 'box', width: 30, height: 22, offset: { x: 15, y: 0 } },
+  behavior: 'rammer',
+  behaviorParams: {
+    extendPx: 160, // 行程明显高于推杆 90
+    strikeSpeedPxPerStep: 8, // 快速伸出（推杆 2 的 4×）
+    retractSpeedPxPerStep: 3, // 回收清楚（较慢，完整动作）
+    restSteps: 40, // 前摇：回收位停顿 ~0.67s
+    holdSteps: 8, // 伸出到位短停顿
+    maxForceN: 500, // 有力伸出撞击 + 回收（推开被顶住的对手；推杆 30 的 ~17×）
+    baseDamage: 70,
+  },
+};
+
+/**
  * Q11-A：楔铲（Gadget）——低矮楔形 Collider（polygon），固定安装在前方，
  * 随整车移动，无主动动画 / 无 behavior（behavior:'none'）。
  * 翻起效果完全来自真实碰撞几何、质量、速度与力矩（钻入对手底部 → 沿坡面
@@ -476,6 +508,7 @@ export function createRegistry(): ContentRegistry {
       [hammer.id, hammer],
       [pushRod.id, pushRod],
       [lifter.id, lifter],
+      [rammer.id, rammer],
     ]),
   };
 }

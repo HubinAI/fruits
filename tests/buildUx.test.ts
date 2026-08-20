@@ -1022,4 +1022,66 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(sources.has('weapon')).toBe(false); // 无 Direct Weapon Damage（impact/hazard 是真实物理）
     expect(maxAPitch * 57.3).toBeGreaterThan(0.5); // 自车真实反作用
   });
+
+  it('Q12-C. 冲锤：Prismatic 伸收循环 / 锤头 Contact 造成 Weapon Damage / 撞空 Miss / 推杆仍 Gadget', () => {
+    // 1) 定义契约：weapon / baseDamage / behavior rammer / Prismatic 装配
+    const rammer = registry.functionals.get('rammer')!;
+    expect(rammer.category).toBe('weapon');
+    expect(rammer.behavior).toBe('rammer');
+    expect((rammer.behaviorParams as Record<string, number>).baseDamage).toBeGreaterThan(0);
+    const rp = rammer.behaviorParams as Record<string, number>;
+    // 初版速度/行程明显高于推杆（推杆走默认：speed 2、extendPx 90）
+    expect(rp.strikeSpeedPxPerStep).toBeGreaterThan(2 * 3); // 8 vs 2
+    expect(rp.extendPx).toBeGreaterThan(90 * 1.5); // 160 vs 90
+    // 2) 装配链路：Preview 真实部件 + Energy 25 + Validator（weapon 单独可 Start）
+    const lab = new PhysicsLab(rendererStub);
+    const a = snap(draft('watermelonBody', { front: 'rammer' }), 'q12cA');
+    const b = snap(draft('bananaBody', {}), 'q12cB');
+    expect(() => lab.loadCustomPreview(a, b)).not.toThrow();
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const rammerPart = o.vehicleA.parts.find((p) => p.def.id === 'rammer')!;
+    expect(rammerPart.joint).toBeDefined(); // Prismatic joint（非 Weld）
+    expect(computeEnergy(a, registry).energy).toBe(25);
+    expect(validateSnapshot(a, registry).valid).toBe(true); // weapon → 单独可 Start
+    // 3) 场景：伸收循环（行程 ≈160 + 回收）+ 锤头 Contact 造成 weapon damage
+    const lab2 = new PhysicsLab(rendererStub);
+    lab2.loadScenario(SCENARIOS.find((s) => s.id === 'Q12-C')!);
+    const o2 = lab2.orchestrator as PlanckBattleOrchestrator;
+    const w = o2.world;
+    const rammerPart2 = o2.vehicleA.parts.find((p) => p.def.id === 'rammer')!;
+    let weaponDmg = 0;
+    o2.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon') weaponDmg += ev.damage;
+    });
+    let maxT = 0;
+    let minT = Infinity;
+    for (let i = 0; i < 900; i++) {
+      lab2.step(16.6667);
+      const t = w.getPrismaticTranslation(rammerPart2.joint);
+      maxT = Math.max(maxT, t);
+      minT = Math.min(minT, t);
+      if (o2.result?.phase === 'End') break;
+    }
+    expect(maxT).toBeGreaterThan(140); // 伸出到 ~160（行程到位）
+    expect(minT).toBeLessThan(10); // 回收回低位
+    expect(weaponDmg).toBeGreaterThanOrEqual(60); // 锤头真实 Contact → Weapon Damage（baseDamage 70）
+    // 4) 撞空 = Miss：B 在 A 后方（背向而驰）→ 无 weapon damage
+    const lab3 = new PhysicsLab(rendererStub);
+    lab3.loadCustom(SCENARIOS.find((s) => s.id === 'Q12-C')!.buildA, SCENARIOS.find((s) => s.id === 'Q12-C')!.buildB, {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 250, y: 650, facing: -1 },
+    });
+    const o3 = lab3.orchestrator as PlanckBattleOrchestrator;
+    let missWeaponDmg = 0;
+    o3.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon') missWeaponDmg += ev.damage;
+    });
+    for (let i = 0; i < 600; i++) {
+      lab3.step(16.6667);
+      if (o3.result?.phase === 'End') break;
+    }
+    expect(missWeaponDmg).toBe(0); // 没撞到 = Miss，无 weapon damage
+  });
 });

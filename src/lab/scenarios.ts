@@ -220,6 +220,20 @@ function lifterCarBuild(): BuildSnapshot {
   };
 }
 
+/** Q12-C：冲锤车——西瓜车身 + 前方冲锤（Prismatic 伸出撞击 Weapon） */
+function rammerCarBuild(): BuildSnapshot {
+  return {
+    id: 'rammerCar',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'rammer' }],
+  };
+}
+
 /** Q11-A：楔铲车——西瓜车身 + 前方楔铲（Gadget，无 Direct Damage，无主动动画） */
 function wedgeShovelBuild(): BuildSnapshot {
   return {
@@ -597,6 +611,24 @@ export const SCENARIOS: ScenarioDef[] = [
       + 'Weapon Damage）vs B 香蕉车身（标准轮、无功能件，隔离验证）。臂在翻动弧内 '
       + '时对手由真实碰撞被明显抬起；错过弧内时机自然失败；自车承担真实反作用。',
     buildA: lifterCarBuild(),
+    buildB: bananaTargetBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Q12-C',
+    name: 'Rammer (Prismatic Strike Weapon)',
+    description:
+      '冲锤（Q12-C）：A 西瓜车身 + 前方冲锤（Prismatic 前摇 → 快速伸出 → '
+      + '接触伤害 → 回收，复用 Push Rod 的 motor + limit，仅锤头真实 Contact '
+      + '走 Weapon Damage）vs B 香蕉车身（标准轮、无功能件，隔离验证）。'
+      + '伸出撞击真实命中才有伤害；没撞到就是 Miss；无固定击退/自动瞄准。',
+    buildA: rammerCarBuild(),
     buildB: bananaTargetBuild(),
     config: {
       engine: 'planck',

@@ -12,17 +12,19 @@ import {
   createPushRodRuntime,
   createLaserRuntime,
   createLifterRuntime,
+  createRammerRuntime,
 } from './behaviorRuntime';
 
 export type BehaviorFactory = (ctx: BehaviorContext) => PartBehaviorRuntime;
 
-/** 正式已注册 Behavior（Cannon / Hammer / Push Rod / Laser / Lifter-Q12-B） */
+/** 正式已注册 Behavior（Cannon / Hammer / Push Rod / Laser / Lifter / Rammer-Q12-C） */
 const FACTORIES: Record<string, BehaviorFactory> = {
   cannon: createCannonRuntime,
   hammer: createHammerRuntime,
   pushRod: createPushRodRuntime,
   laser: createLaserRuntime,
   lifter: createLifterRuntime,
+  rammer: createRammerRuntime,
 };
 
 /** 按 behavior id 取 factory（未注册 → undefined，Orchestrator 跳过该 part） */

@@ -28,4 +28,6 @@ export const PART_OPTIONS: PartOption[] = [
   { v: 'ramHead', t: '冲撞头' },
   // Q12-B：主动举升臂 Gadget（front Revolute 上翻，无 Direct Damage）
   { v: 'lifter', t: '举升臂' },
+  // Q12-C：伸缩冲锤 Weapon（Prismatic 伸出撞击，真实 Contact 伤害）
+  { v: 'rammer', t: '冲锤' },
 ];

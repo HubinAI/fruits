@@ -54,13 +54,14 @@ function makeRuntime(behaviorId: string): {
 }
 
 describe('W1-BH-1 Behavior Registry', () => {
-  it('1. 注册表含 cannon/hammer/pushRod/laser/lifter；未知 behavior → undefined', () => {
-    expect(registeredBehaviorIds().sort()).toEqual(['cannon', 'hammer', 'laser', 'lifter', 'pushRod']);
+  it('1. 注册表含 cannon/hammer/pushRod/laser/lifter/rammer；未知 behavior → undefined', () => {
+    expect(registeredBehaviorIds().sort()).toEqual(['cannon', 'hammer', 'laser', 'lifter', 'pushRod', 'rammer']);
     expect(getBehaviorFactory('cannon')).toBeDefined();
     expect(getBehaviorFactory('hammer')).toBeDefined();
     expect(getBehaviorFactory('pushRod')).toBeDefined();
     expect(getBehaviorFactory('laser')).toBeDefined(); // Q11-C 蓄能镭射
     expect(getBehaviorFactory('lifter')).toBeDefined(); // Q12-B 举升臂
+    expect(getBehaviorFactory('rammer')).toBeDefined(); // Q12-C 冲锤
     expect(getBehaviorFactory('ram')).toBeUndefined(); // 未注册（Weld-only）
     expect(getBehaviorFactory('noSuch')).toBeUndefined();
   });
