@@ -306,6 +306,40 @@ const pushRod: FunctionalPartDef = {
   },
 };
 
+/**
+ * Q11-A：楔铲（Gadget）——低矮楔形 Collider（polygon），固定安装在前方，
+ * 随整车移动，无主动动画 / 无 behavior（behavior:'none'）。
+ * 翻起效果完全来自真实碰撞几何、质量、速度与力矩（钻入对手底部 → 沿坡面
+ * 真实反作用抬起 / 掀翻）。
+ * - 无 baseDamage → 不走 ContactRouter weapon 直击，无 Direct Weapon Damage；
+ * - 不加隐藏向上力 / 不 setPosition / 不 setVelocity / 无固定翻转角；
+ * - 接触位置不合适时只滑过 / 顶住，不自动翻车；自车同样承担碰撞反作用。
+ * - 暂不加入玩家 Build 选项（PART_OPTIONS），仅供专用测试场景使用。
+ */
+const wedgeShovel: FunctionalPartDef = {
+  id: 'wedgeShovel',
+  name: '楔铲',
+  category: 'gadget',
+  mass: 25, // 明显质量：钻入反作用自车也承担
+  energy: 15,
+  // 低矮楔形 polygon：本地顶点相对 offset（part 原点 = 功能挂点）。
+  // facing 1（朝 +X）：前端（+X）低尖贴近地面，后端（−X）高——
+  // 从地面到车底形成斜坡，正面钻入对手底部时把对手沿坡面抬起。
+  // 本地 x∈[-26, 38]（长 64）、y∈[-18, 2]（高 20，低矮）；offset 把楔形
+  // 放到挂点前方且贴近地面（offset.y 大 = 向下）。
+  collider: {
+    shape: 'polygon',
+    vertices: [
+      { x: 38, y: -2 }, // 前端楔尖（低，贴近地面）
+      { x: -26, y: -18 }, // 后端坡顶（高）
+      { x: -26, y: 2 }, // 后端底面
+      { x: 38, y: 2 }, // 前端底面
+    ],
+    offset: { x: 24, y: 22 },
+  },
+  behavior: 'none',
+};
+
 /** 构建 Content Registry */
 export function createRegistry(): ContentRegistry {
   return {
@@ -322,6 +356,7 @@ export function createRegistry(): ContentRegistry {
       [ramHead.id, ramHead],
       [cannon.id, cannon],
       [testMass.id, testMass],
+      [wedgeShovel.id, wedgeShovel],
       [hammer.id, hammer],
       [pushRod.id, pushRod],
     ]),

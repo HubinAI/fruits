@@ -30,6 +30,7 @@ import {
 } from '../src/lab/buildEditorModel';
 import { validateSnapshot } from '../src/core/buildValidator';
 import { Renderer } from '../src/render/renderer';
+import { SCENARIOS } from '../src/lab/scenarios';
 import type { BattleRenderSnapshot, RenderShape } from '../src/battle/battleContract';
 
 const registry = createRegistry();
@@ -374,5 +375,47 @@ describe('Q10-B 玩家侧命名', () => {
     // 类别（UI 映射为 武器/辅助）数据源不变
     expect(registry.functionals.get('cannon')!.category).toBe('weapon');
     expect(registry.functionals.get('pushRod')!.category).toBe('gadget');
+  });
+});
+
+/* ---------- Q11-A：楔铲 Gadget（低矮楔形 polygon，无 Direct Damage，真实碰撞掀翻） ---------- */
+describe('Q11-A 楔铲 Gadget', () => {
+  it('1. wedgeShovel 定义：gadget / polygon 楔形 / 无 baseDamage / 无 behavior', () => {
+    const def = registry.functionals.get('wedgeShovel');
+    expect(def).toBeDefined();
+    expect(def!.category).toBe('gadget');
+    expect(def!.collider.shape).toBe('polygon'); // 低矮楔形多边形
+    expect(def!.behavior).toBe('none'); // 无主动动画
+    expect((def!.behaviorParams as Record<string, unknown> | undefined)?.baseDamage).toBeUndefined(); // 无 Direct Weapon Damage
+    expect(def!.energy).toBeGreaterThan(0);
+    expect(def!.mass).toBeGreaterThan(0);
+  });
+
+  it('2. Q11 场景：楔铲正面钻入 → B 明显俯仰/离地（真实碰撞力矩）；A 承担真实反作用', () => {
+    const lab = new PhysicsLab(rendererStub);
+    const sc = SCENARIOS.find((s) => s.id === 'Q11');
+    expect(sc).toBeDefined();
+    lab.loadScenario(sc!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const w = o.world;
+    const y0 = w.getPosition(o.vehicleB.body).y;
+    let maxBPitch = 0;
+    let minBY = y0;
+    let maxAPitch = 0;
+    for (let i = 0; i < 1200; i++) {
+      lab.step(16.6667);
+      const bAng = Math.abs(w.getAngle(o.vehicleB.body));
+      const bY = w.getPosition(o.vehicleB.body).y;
+      const aAng = Math.abs(w.getAngle(o.vehicleA.body));
+      if (bAng > maxBPitch) maxBPitch = bAng;
+      if (bY < minBY) minBY = bY;
+      if (aAng > maxAPitch) maxAPitch = aAng;
+      if (o.result?.phase === 'End') break;
+    }
+    // 正面钻入 → 明显改变对手俯仰（>30°）与离地（>100px）——真实碰撞几何/质量/力矩
+    expect(maxBPitch * 57.3).toBeGreaterThan(30);
+    expect(y0 - minBY).toBeGreaterThan(100);
+    // 自车承担真实碰撞反作用（自身俯仰也明显 >20°，无 Scenario 补偿）
+    expect(maxAPitch * 57.3).toBeGreaterThan(20);
   });
 });
