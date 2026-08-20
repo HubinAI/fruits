@@ -84,14 +84,17 @@ style.textContent = `
   .lab-canvas-wrap.phase-warning::before { left: 0; background: linear-gradient(90deg, rgba(255,60,50,0.85), rgba(255,60,50,0)); }
   .lab-canvas-wrap.phase-warning::after { right: 0; background: linear-gradient(270deg, rgba(255,60,50,0.85), rgba(255,60,50,0)); }
   @keyframes phase-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
-  .result-modal { position: absolute; inset: 0; background: rgba(6,8,12,0.55); display: none; align-items: center; justify-content: center; z-index: 10; }
-  .result-card { background: #1c2330; border: 1px solid #38414f; border-radius: 12px; padding: 26px 44px; text-align: center; min-width: 300px; }
-  .result-title { margin: 0 0 14px; font-size: 30px; letter-spacing: 4px; }
-  .result-hp { margin: 6px 0; font-size: 15px; color: #c8d0e0; }
-  .result-actions { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
-  .result-actions button { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 14px; }
+  /* Q08-B：Result 明确结束层——背景进一步压暗，胜负为第一视觉信息，HP 降为次级 */
+  .result-modal { position: absolute; inset: 0; background: rgba(4,6,10,0.78); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .result-card { background: #1c2330; border: 1px solid #38414f; border-radius: 14px; padding: 34px 58px; text-align: center; min-width: 420px; }
+  .result-title { margin: 0 0 20px; font-size: 44px; letter-spacing: 8px; }
+  .result-hp { margin: 5px 0; font-size: 14px; color: #8a93a5; }
+  .result-actions { display: flex; gap: 12px; justify-content: center; margin-top: 22px; }
+  .result-actions button { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 8px; padding: 10px 22px; cursor: pointer; font-size: 14px; }
   .result-actions button:hover { background: #2e3747; }
-  .result-actions button.primary { background: #3b6fd4; border-color: #4a7fe0; }
+  .result-actions button.primary { background: #3b6fd4; border-color: #5a8df0; color: #fff; font-size: 16px; font-weight: 700; padding: 12px 34px; box-shadow: 0 4px 14px rgba(59,111,212,0.35); }
+  .result-actions button.primary:hover { background: #4a7fe0; }
+  .result-actions button.secondary { opacity: 0.85; }
   /* Q07-A：开发工具折叠区（机制场景 / Pause/Reset/Clear / 速度 / Preset 收进二级） */
   .tool-tools-host { display: none; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 12px; background: #1b2130; border-bottom: 1px solid #2a3140; }
   .tool-tools-host .tool-tools-label { font-size: 12px; color: #9aa4b5; margin-right: 4px; }
@@ -135,8 +138,8 @@ style.textContent = `
   .part-picker button.active { background: #3b6fd4; border-color: #5a8df0; color: #fff; }
   .part-picker button:disabled { opacity: 0.45; cursor: not-allowed; }
   .part-picker button:disabled:hover { background: #242b38; }
-  /* Q07-C：Start 后短暂「READY / 开战」状态转换（Presentation 延迟，不改 Physics/结果） */
-  .ready-overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 8; background: rgba(6,8,12,0.55); pointer-events: none; }
+  /* Q07-C/Q08-B：Start 后短暂「READY / 开战」状态转换（Presentation 延迟，不改 Physics/结果） */
+  .ready-overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 8; background: rgba(6,8,12,0.35); pointer-events: none; }
   .ready-card { text-align: center; }
   .ready-card .rd-sub { font-size: 15px; letter-spacing: 8px; color: #9aa4b5; margin-bottom: 8px; }
   .ready-card .rd-main { font-size: 46px; font-weight: 800; letter-spacing: 12px; color: #ffd35a; text-shadow: 0 0 22px rgba(255,211,90,0.55); }
@@ -297,6 +300,7 @@ btnAdjust.onclick = adjustConfig;
 resultActions.appendChild(btnAdjust);
 
 const btnRematch = document.createElement('button');
+btnRematch.className = 'secondary'; // Q08-B：次 CTA（弱化，不与调整配置同级）
 btnRematch.textContent = '原配置再战';
 btnRematch.onclick = rematch;
 resultActions.appendChild(btnRematch);
@@ -805,22 +809,33 @@ let startTransitioning = false;
 btnStart.onclick = () => {
   if (startTransitioning) return;
   if (battleState !== 'editing' || !buildsValid()) return;
-  // 「我刚刚完成配置」→「现在开始看战斗」的明确切换：
-  // 先短暂锁定（防 0.8s 内改配置造成竞态），READY/开战 overlay 0.8s 后正式开战。
+  // Q08-B：点击 Start 瞬间「配置结束」——立刻退出编辑视觉：
+  // 隐藏 A/B 装配面板、开发工具、Start；Build 从此刻冻结（不再可操作），
+  // 中央两车 Preview 成为 READY 背景，而不是在编辑器上弹一句开战。
   startTransitioning = true;
   btnStart.disabled = true;
-  setBuildControlsLocked(true);
-  readyOverlay.style.display = 'flex';
+  setBuildControlsLocked(true); // Build 从点击那一刻冻结（Runtime 输入语义不变）
+  panelA.style.display = 'none';
+  panelB.style.display = 'none';
+  startBar.style.display = 'none';
+  startHint.style.display = 'none';
+  toolsToggle.style.display = 'none';
+  toolsHost.style.display = 'none';
+  readyOverlay.style.display = 'flex'; // READY / 开战！（0.6s；背景 = 保留的中央 Preview）
   window.setTimeout(() => {
     readyOverlay.style.display = 'none';
     startTransitioning = false;
     startOrRematch();
     if (battleState !== 'fighting') {
-      // 理论上不可达（已锁定且校验通过），防御：解锁回编辑
+      // 理论上不可达（已锁定且校验通过），防御：完整恢复编辑视觉
       setBuildControlsLocked(false);
+      panelA.style.display = '';
+      panelB.style.display = '';
+      startBar.style.display = '';
+      toolsToggle.style.display = '';
       updateStartButton();
     }
-  }, 800);
+  }, 600);
 };
 
 /* ---------- Q07-A：开发工具折叠区（机制场景 / Pause / Reset / Clear / 速度 / Preset 全部收进二级） ---------- */
