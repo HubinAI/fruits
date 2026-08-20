@@ -25,9 +25,8 @@ import {
   type PlanckVehicle,
 } from './planckVehicleAssembly';
 import { drivePlanckVehicle } from './planckMovement';
-import { CannonBehavior } from './cannonBehavior';
-import { HammerBehavior } from './hammerBehavior';
-import { PushRodBehavior } from './pushRodBehavior';
+import type { PartBehaviorRuntime } from './behaviorRuntime';
+import { getBehaviorFactory } from './behaviorRegistry';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
 import { DamageResolver } from './damageResolver';
 import { CombatEventBus, type BattleEvent } from './combatEvents';
@@ -214,26 +213,8 @@ export class PlanckBattleOrchestrator {
   readonly bus = new CombatEventBus();
   readonly config: BattleConfig;
 
-  /** Cannon Behavior 实例（每 cannon part 一个，Q02-C1A；不新增生命周期） */
-  private readonly cannons: Array<{
-    vehicle: PlanckVehicle;
-    part: PlanckPartRuntime;
-    behavior: CannonBehavior;
-  }> = [];
-
-  /** Hammer Behavior 实例（每 hammer part 一个，Q03-C1；同一 onBeforeStep 插入口） */
-  private readonly hammers: Array<{
-    vehicle: PlanckVehicle;
-    part: PlanckPartRuntime;
-    behavior: HammerBehavior;
-  }> = [];
-
-  /** Push Rod Behavior 实例（每 pushRod part 一个，Q04-C1；同一 onBeforeStep 插入口） */
-  private readonly pushRods: Array<{
-    vehicle: PlanckVehicle;
-    part: PlanckPartRuntime;
-    behavior: PushRodBehavior;
-  }> = [];
+  /** 统一 Behavior Runtime 列表（W1-BH-1）：由 BehaviorRegistry 按 part.def.behavior 创建 */
+  private readonly behaviors: PartBehaviorRuntime[] = [];
 
   private _result: BattleResult | null = null;
   private time = 0;
@@ -279,37 +260,19 @@ export class PlanckBattleOrchestrator {
       settlePlanckVehicleToRestPose(this.world, this.vehicleB, this.arena.ground);
     }
 
-    // Cannon Behavior（Q02-C1A）：为每辆车上每个 cannon part 建独立冷却实例。
-    // W1-EV-1：onFire 回调把「真正创建 projectile」的开火事件补 timestamp 后 emit。
+    // Behavior Runtime（W1-BH-1）：统一遍历两车 parts，由 BehaviorRegistry 创建 runtime。
+    // 新增 Weapon/Gadget 只注册 factory，不再修改本生命周期。
     for (const vehicle of [this.vehicleA, this.vehicleB]) {
       for (const part of vehicle.parts) {
-        if (part.def.behavior === 'cannon') {
-          this.cannons.push({
+        const factory = getBehaviorFactory(part.def.behavior);
+        if (!factory) continue; // 未注册 behavior（如 ram/weld-only 部件）→ 无 runtime
+        this.behaviors.push(
+          factory({
             vehicle,
             part,
-            behavior: new CannonBehavior(part, (e) => {
-              this.bus.emit({ ...e, timestamp: this.time });
-            }),
-          });
-        }
-      }
-    }
-
-    // Hammer Behavior（Q03-C1）：为每辆车上每个 hammer part 建独立摆锤状态机
-    for (const vehicle of [this.vehicleA, this.vehicleB]) {
-      for (const part of vehicle.parts) {
-        if (part.def.behavior === 'hammer') {
-          this.hammers.push({ vehicle, part, behavior: new HammerBehavior(part) });
-        }
-      }
-    }
-
-    // Push Rod Behavior（Q04-C1）：为每辆车上每个 pushRod part 建独立伸缩状态机
-    for (const vehicle of [this.vehicleA, this.vehicleB]) {
-      for (const part of vehicle.parts) {
-        if (part.def.behavior === 'pushRod') {
-          this.pushRods.push({ vehicle, part, behavior: new PushRodBehavior(part) });
-        }
+            emit: (ev) => this.bus.emit(ev),
+          }),
+        );
       }
     }
 
@@ -374,37 +337,29 @@ export class PlanckBattleOrchestrator {
           targetSpeedPxPerStep: AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
         });
       }
-      // 正式 Behavior 插入口（Q02-C1A / Q03-C1 / Q04-C1）：Cannon 固定冷却真实发射 + recoil；
-      // Hammer 摆锤循环；Push Rod 伸缩循环（均 motor + limit）。不新增第二套 step/render
+      // 正式 Behavior 插入口（W1-BH-1）：统一 beforePhysicsStep 驱动（Cannon 发射/冷却、
+      // Hammer 摆锤循环、Push Rod 伸缩循环；均 motor + limit）。不新增第二套 step/render
       // 生命周期——只在此 onBeforeStep 内调用。
-      for (const c of this.cannons) {
-        c.behavior.stepFixed(this.world, c.vehicle, c.part);
-      }
-      for (const h of this.hammers) {
-        h.behavior.stepFixed(this.world, h.vehicle, h.part);
-      }
-      for (const p of this.pushRods) {
-        p.behavior.stepFixed(this.world, p.vehicle, p.part);
+      for (const b of this.behaviors) {
+        b.beforePhysicsStep(this.world, this.time);
       }
     });
 
     // Q02-C1B：Projectile Lifecycle——每个物理步结束后（world.step 已返回，World 未锁定）：
-    // 1) 只 drain 一次 ContactRouter 的 projectile facts，交给各 CannonBehavior 消费
+    // 1) 只 drain 一次 ContactRouter 的 projectile facts，交给各 Behavior Runtime 消费
     //    （hostile vehicle / arena / ground / hazard 的真实 begin → 安全销毁，伤害只发生一次）；
     const facts = this.router.drainProjectileContactFacts();
     if (facts.length > 0) {
-      for (const c of this.cannons) {
-        c.behavior.consumeProjectileFacts(this.world, facts);
+      for (const b of this.behaviors) {
+        b.afterPhysicsStep?.(this.world, facts);
       }
     }
     // 2) 存活 projectile 越界检查（arena.isOutOfProjectileBounds）：越界 → 销毁；
     //    未接触且未越界 → 保持存活继续真实飞行。
-    for (const c of this.cannons) {
-      for (const p of c.behavior.aliveProjectiles) {
-        if (this.arena.isOutOfProjectileBounds(this.world.getPosition(p))) {
-          c.behavior.destroyProjectile(this.world, p);
-        }
-      }
+    for (const b of this.behaviors) {
+      b.destroyOutOfBoundsProjectiles?.(this.world, (pos) =>
+        this.arena.isOutOfProjectileBounds(pos),
+      );
     }
 
     this.time += steps * FIXED_DT_MS;
@@ -440,26 +395,16 @@ export class PlanckBattleOrchestrator {
   }
 
   /**
-   * 存活 projectile 渲染快照（Q02-C3A）：
-   * - 聚合所有 CannonBehavior 的 aliveProjectiles（已销毁的不在其中，自动不进入快照）；
-   * - center 取真实 body 世界位置；
-   * - radius 取真实碰撞几何（circle 的几何 AABB 半宽 = 半径，getBounds 对 circle 不扣 skin）；
+   * 存活 projectile 渲染快照（Q02-C3A，W1-BH-1 迁移到统一 runtime 贡献）：
+   * - 聚合所有 Behavior Runtime 的 getRenderProjectiles（已销毁的不在其中，自动不进入快照）；
+   * - center 取真实 body 世界位置；radius 取真实碰撞几何（circle 的几何 AABB 半宽）；
    * - team 取 projectile OwnerTag；无归属（不应发生）则跳过；
    * - 仅输出世界坐标 circle + team，不出现任何引擎类型。
    */
   private buildProjectilesSnapshot(): RenderProjectile[] {
     const out: RenderProjectile[] = [];
-    for (const c of this.cannons) {
-      for (const p of c.behavior.aliveProjectiles) {
-        const tag = this.world.getOwnerTag(p);
-        if (!tag || !tag.team) continue; // 已销毁 / 无归属：不进入快照
-        const bounds = this.world.getBounds(p);
-        out.push({
-          center: this.world.getPosition(p),
-          radius: (bounds.maxX - bounds.minX) / 2,
-          team: tag.team,
-        });
-      }
+    for (const b of this.behaviors) {
+      out.push(...(b.getRenderProjectiles?.(this.world) ?? []));
     }
     return out;
   }

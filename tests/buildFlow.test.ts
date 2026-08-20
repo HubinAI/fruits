@@ -145,15 +145,16 @@ describe('Q06-U1 Build flow', () => {
     const o = lab.orchestrator as PlanckBattleOrchestrator;
     expect(o instanceof PlanckBattleOrchestrator).toBe(true);
 
-    // Behavior 接线（Q06-U1 验收：Cannon/Hammer/Push 均真实工作）
+    // Behavior 接线（Q06-U1 / W1-BH-1 验收：Cannon/Hammer/Push 均真实工作，
+    // 统一由 behaviors[] 注册表驱动）
     const priv = o as unknown as {
-      cannons: unknown[];
-      hammers: unknown[];
-      pushRods: unknown[];
+      behaviors: Array<{ part: { def: { behavior: string } } }>;
     };
-    expect(priv.cannons.length).toBe(2); // A front + B front
-    expect(priv.hammers.length).toBe(1); // A frontMass
-    expect(priv.pushRods.length).toBe(1); // A top
+    const countByBehavior = (id: string): number =>
+      priv.behaviors.filter((b) => b.part.def.behavior === id).length;
+    expect(countByBehavior('cannon')).toBe(2); // A front + B front
+    expect(countByBehavior('hammer')).toBe(1); // A frontMass
+    expect(countByBehavior('pushRod')).toBe(1); // A top
 
     // 60 步真实运行不抛错（Behavior 在 onBeforeStep 驱动；Cannon/Hammer/Push 状态机正常推进）
     for (let i = 0; i < 60; i++) lab.step(16.6667);
