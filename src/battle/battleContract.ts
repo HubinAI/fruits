@@ -9,7 +9,7 @@
  */
 import type { ArenaConfig } from './arenaConfig';
 import type { ImpactConfig } from './contactRouter';
-import type { BattlePhase, TeamId } from '../core/types';
+import type { BattlePhase, TeamId, BuildSnapshot } from '../core/types';
 import type { CombatEvent } from './combatEvents';
 
 /** Battle 配置（字段与 battleOrchestrator.BattleConfig 完全一致） */
@@ -40,6 +40,55 @@ export interface BattleResult {
   hpA: number;
   hpB: number;
   phase: string;
+  /**
+   * W1-ASYNC-1：异步战斗基础 metadata（可选；旧路径 / resolveBattleResult 不产生）。
+   * 本队列只允许「携带」，不改正式胜负规则。
+   */
+  battleId?: string;
+  rulesVersion?: string;
+  contentVersion?: string;
+  durationMs?: number;
+}
+
+/**
+ * 异步战斗请求合同（W1-ASYNC-1）：稳定、可版本化、可复现的正式开战输入。
+ * - randomSeed：确定性随机种子（uint32）；Runtime 一律使用确定性 PRNG，
+ *   禁止 Math.random / crypto 随机源；
+ * - rulesVersion / contentVersion：胜负规则与内容版本的稳定标识（重放/对账用）。
+ */
+export interface BattleRequest {
+  battleId: string;
+  buildA: BuildSnapshot;
+  buildB: BuildSnapshot;
+  config: BattleConfig;
+  /** 确定性随机种子（uint32 number） */
+  randomSeed: number;
+  rulesVersion: string;
+  contentVersion: string;
+}
+
+/**
+ * 确定性 32-bit PRNG（mulberry32，W1-ASYNC-1）。
+ * 禁止 Math.random / crypto.random：同 seed 永远产生同一序列。
+ * seed 按 uint32 归一（>>> 0）。
+ */
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * 确定性 tie-break（W1-ASYNC-1）：输入 randomSeed，稳定返回 'A' 或 'B'。
+ * 同 seed 永远同结果；不同 seed 可产生 A/B 两种结果。未来「正式战斗无平局」
+ * 的兜底判定使用本 helper，不使用运行时随机。
+ */
+export function deterministicTieBreak(seed: number): 'A' | 'B' {
+  return mulberry32(seed)() < 0.5 ? 'A' : 'B';
 }
 
 /**
