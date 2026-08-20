@@ -325,3 +325,20 @@ describe('Q09-A Body/Wheel 卡片选择语义', () => {
     }
   });
 });
+
+/* ---------- Q09-B：部件选择信息可读性（数据源：名称 + Weapon/Gadget + Energy） ---------- */
+describe('Q09-B 部件信息可读性', () => {
+  it('Cannon/Hammer 为 Weapon、Push Rod 为 Gadget，Energy 数值与 UI 读取一致', () => {
+    const cannon = registry.functionals.get('cannon')!;
+    expect(cannon.category).toBe('weapon');
+    expect(cannon.energy).toBe(30);
+    const hammer = registry.functionals.get('hammer')!;
+    expect(hammer.category).toBe('weapon');
+    expect(hammer.energy).toBe(25);
+    const pushRod = registry.functionals.get('pushRod')!;
+    expect(pushRod.category).toBe('gadget');
+    expect(pushRod.energy).toBe(20);
+    // 空选项无部件数据（UI 显示「空 · 0 能量」）
+    expect(registry.functionals.has('')).toBe(false);
+  });
+});

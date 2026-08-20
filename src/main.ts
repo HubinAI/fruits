@@ -133,11 +133,23 @@ style.textContent = `
   .part-slot-card .ps-value.empty { color: #7c8799; font-weight: 400; }
   .part-picker { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; padding: 6px; background: #1b2130; border: 1px solid #2a3140; border-radius: 6px; }
   .part-picker .pp-title { width: 100%; font-size: 11px; color: #9aa4b5; margin-bottom: 2px; }
-  .part-picker button { padding: 5px 9px; background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 5px; cursor: pointer; font-size: 12px; }
+  /* Q09-B：选项两行——名称 + Weapon/Gadget + Energy（不写长描述，不加属性系统） */
+  .part-picker button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 10px; background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 5px; cursor: pointer; }
   .part-picker button:hover { background: #2e3747; }
   .part-picker button.active { background: #3b6fd4; border-color: #5a8df0; color: #fff; }
   .part-picker button:disabled { opacity: 0.45; cursor: not-allowed; }
   .part-picker button:disabled:hover { background: #242b38; }
+  .part-picker .pp-name { font-size: 12px; line-height: 1.3; }
+  .part-picker .pp-meta { font-size: 10px; color: #7c8799; line-height: 1.3; }
+  .part-picker button.active .pp-meta { color: #d4dcff; }
+  /* Q09-B：Energy used / capacity 条形表现（超载沿用 Validator 逻辑，仅表现层红色） */
+  .energy-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .energy-row .energy-label { font-size: 12px; color: #9aa4b5; }
+  .energy-row .energy-bar { flex: 1; height: 8px; background: #232b38; border: 1px solid #38414f; border-radius: 4px; overflow: hidden; }
+  .energy-row .energy-fill { height: 100%; background: #3b6fd4; }
+  .energy-row .energy-fill.overload { background: #ff5a4e; }
+  .energy-row .energy-text { font-size: 12px; color: #c8d0e0; font-variant-numeric: tabular-nums; }
+  .energy-row .energy-text.overload { color: #ff6b5e; font-weight: 700; }
   /* Q09-A：Body / 前后轮去表单化——选项卡片（看选项 → 点一下 → Preview 立即变化） */
   .opt-group { margin-top: 10px; }
   .opt-group .og-label { font-size: 12px; color: #9aa4b5; margin-bottom: 4px; }
@@ -621,9 +633,27 @@ function renderPanel(
       picker.appendChild(title);
       for (const opt of PART_OPTIONS) {
         const b = document.createElement('button');
-        b.textContent = opt.t;
         b.className = cur === opt.v ? 'active' : '';
         b.disabled = buildControlsLocked;
+        // Q09-B：名称 + Weapon/Gadget + Energy（当前装备仍 .active 高亮）
+        const nameEl = document.createElement('div');
+        nameEl.className = 'pp-name';
+        nameEl.textContent = opt.t;
+        const metaEl = document.createElement('div');
+        metaEl.className = 'pp-meta';
+        if (opt.v === EMPTY_SLOT) {
+          metaEl.textContent = '空 · 0 能量';
+        } else {
+          const def = registry.functionals.get(opt.v);
+          if (def) {
+            const cat = def.category === 'weapon' ? 'Weapon' : def.category === 'gadget' ? 'Gadget' : def.category;
+            metaEl.textContent = `${cat} · ${def.energy} 能量`;
+          } else {
+            metaEl.textContent = '—';
+          }
+        }
+        b.appendChild(nameEl);
+        b.appendChild(metaEl);
         b.onclick = () => {
           if (buildControlsLocked) return;
           d.functionalSelections[selSlot] = opt.v; // 立即生效（无 Apply）
@@ -635,14 +665,30 @@ function renderPanel(
     }
   }
 
-  // Energy：used / capacity（复用 computeEnergy，不复制计算逻辑）
+  // Q09-B：Energy 明显表现——used / capacity 条形 + 数字（超载沿用现有
+  // Validator/ computeEnergy 逻辑，仅表现层红色，不新增规则）
   const energyRes = computeEnergy(snapshot, registry);
   const used = energyRes.error ? Number.NaN : energyRes.energy;
   const capacity = body?.energyCapacity ?? 0;
   const overload = Number.isFinite(used) && used > capacity;
-  const eRow = document.createElement('label');
-  eRow.textContent = `能量：${Number.isFinite(used) ? used : '?'} / ${capacity}`;
-  eRow.style.color = overload ? '#ff6b5e' : '#9aa4b5';
+  const eRow = document.createElement('div');
+  eRow.className = 'energy-row';
+  const eLabel = document.createElement('span');
+  eLabel.className = 'energy-label';
+  eLabel.textContent = '能量';
+  const eBar = document.createElement('div');
+  eBar.className = 'energy-bar';
+  const pct = Number.isFinite(used) ? Math.min(100, (used / Math.max(capacity, 1)) * 100) : 0;
+  const eFill = document.createElement('div');
+  eFill.className = 'energy-fill' + (overload ? ' overload' : '');
+  eFill.style.width = `${pct}%`;
+  eBar.appendChild(eFill);
+  const eTxt = document.createElement('span');
+  eTxt.className = 'energy-text' + (overload ? ' overload' : '');
+  eTxt.textContent = Number.isFinite(used) ? `${used} / ${capacity}` : '? / ?';
+  eRow.appendChild(eLabel);
+  eRow.appendChild(eBar);
+  eRow.appendChild(eTxt);
   form.appendChild(eRow);
 
   // Q07-A：对手概要（collapsed 时显示——Body 名 / 部件 / 能量，不展开完整表单）
