@@ -361,7 +361,10 @@ const lifter: FunctionalPartDef = {
  * - 初版伸出速度/行程明显高于当前推杆（speed 8 vs 2 px/step、行程
  *   160 vs 90 px），前摇（回收位停顿）→ 快速伸出 → 接触伤害 → 回收清楚；
  * - 不复制 Push Rod Foundation（共享同一 setPrismatic* API，独立状态机）；
- *   无固定击退 / 无自动距离判断 / 无自动瞄准。
+ *   无固定击退 / 无自动距离判断 / 无自动瞄准；
+ * - 视觉连接轴 Q12-C-R1：复用 Push Rod 的同一真实 Prismatic Joint connector
+ *   （snapshot.from=chassis hardpoint 世界位置、to=part 原点世界位置、轴长=真实
+ *   translation），车身 ↔ 伸缩轴 ↔ 短粗锤头 全程连续，无漂浮方块 / 无假动画。
  */
 const rammer: FunctionalPartDef = {
   id: 'rammer',
@@ -375,11 +378,11 @@ const rammer: FunctionalPartDef = {
   behavior: 'rammer',
   behaviorParams: {
     extendPx: 160, // 行程明显高于推杆 90
-    strikeSpeedPxPerStep: 8, // 快速伸出（推杆 2 的 4×）
+    strikeSpeedPxPerStep: 20, // Q12-C-R1：快速打出——实测 160px ≈ 12 步 ≈ 0.20s（目标 0.18~0.25s）；比推杆 2 的 10×
     retractSpeedPxPerStep: 3, // 回收清楚（较慢，完整动作）
-    restSteps: 40, // 前摇：回收位停顿 ~0.67s
-    holdSteps: 8, // 伸出到位短停顿
-    maxForceN: 500, // 有力伸出撞击 + 回收（推开被顶住的对手；推杆 30 的 ~17×）
+    restSteps: 24, // Q12-C-R1：回收位短暂停顿（~0.4s，比原 0.67s 更利落）→ 快速打出 → 回收
+    holdSteps: 8, // 伸出到位短停顿（命中瞬间清楚）
+    maxForceN: 1200, // Q12-C-R1：提高到 500→1200（~2.4×）才突破 motor 力瓶颈达到 0.20s 快打；推开被顶住的对手（推杆 30 的 40×）
     baseDamage: 70,
   },
 };

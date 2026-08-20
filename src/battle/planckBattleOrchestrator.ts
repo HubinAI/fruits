@@ -181,16 +181,17 @@ function boxWorldPoints(
   });
 }
 
-/** Push Rod 连接轴宽度（px）：窄套杆视觉，仅渲染用，不参与物理（Q04-R1B） */
-const PUSH_ROD_CONNECTOR_WIDTH = 6;
+/** Prismatic 连接轴宽度（px）：窄套杆/活塞杆视觉，仅渲染用，不参与物理（Q04-R1B / Q12-C-R1）。Push Rod 与 Rammer 共用同一真实 Joint 连接几何。 */
+const PRISMATIC_CONNECTOR_WIDTH = 6;
 
 /**
- * Push Rod 连接件车身侧锚点（Q04-R1B）：chassis hardpoint 的当前世界位置。
+ * Prismatic 连接件车身侧锚点（Q04-R1B / Q12-C-R1）：chassis hardpoint 的当前世界位置。
  * - hpWorld = facing 镜像后的本地硬点（与装配 planckVehicleAssembly 同公式）；
  * - 随 chassis 当前姿态旋转（bodyAngle），与车身 collider 同步移动/旋转；
  * - 完全真实：translation=0 时该点 ≈ part 原点（joint 锚点重合），无异常长连接。
+ * 供 Push Rod 与 Rammer 复用（二者皆 Prismatic joint，同一套真实连接几何；不复制第二套 Connector）。
  */
-function pushRodAnchorWorld(
+function prismaticAnchorWorld(
   bPos: { x: number; y: number },
   bAng: number,
   facing: 1 | -1,
@@ -468,16 +469,16 @@ export class PlanckBattleOrchestrator {
         visual: p.def.visual
           ? visualWorldTransform(p.def.visual, vehicle.facing, partPos, partAng)
           : undefined,
-        // Q04-R1B：仅 Push Rod 提供真实 Joint 连接几何——from = chassis hardpoint
-        // 当前世界位置（镜像 facing 后本地硬点随 chassis 姿态旋转），to = Prismatic
-        // part 原点当前世界位置。translation=0 时 from≈to（无长连接）；伸出越多轴越长，
-        // Retract 自然缩短。其他部件不提供 connector（无特判，Renderer 行为不变）。
+        // Q04-R1B / Q12-C-R1：Push Rod 与 Rammer 共用真实 Prismatic Joint 连接几何——
+        // from = chassis hardpoint 当前世界位置（镜像 facing 后本地硬点随 chassis 姿态旋转），
+        // to = Prismatic part 原点当前世界位置。轴长 = |to−from| = translation（真实物理伸缩，
+        // 伸出越多轴越长，Retract 自然缩短；禁止假动画）。二者共用同一函数/常量，不复制第二套 Connector。
         connector:
-          p.def.behavior === 'pushRod'
+          p.def.behavior === 'pushRod' || p.def.behavior === 'rammer'
             ? {
-                from: pushRodAnchorWorld(bPos, bAng, vehicle.facing, p),
+                from: prismaticAnchorWorld(bPos, bAng, vehicle.facing, p),
                 to: partPos,
-                width: PUSH_ROD_CONNECTOR_WIDTH,
+                width: PRISMATIC_CONNECTOR_WIDTH,
               }
             : undefined,
       };

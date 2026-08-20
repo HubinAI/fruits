@@ -1156,4 +1156,69 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     }
     expect(missWeaponDmg).toBe(0); // 没撞到 = Miss，无 weapon damage
   });
+
+  it('Q12-C-R1. 冲锤真实机械连接：复用 Prismatic 连接轴 / 轴随真实行程连续 / 快速打出 0.18~0.25s / Miss 仍完整伸出回收', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q12-C')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const w = o.world;
+    const part = o.vehicleA.parts.find((p) => p.def.id === 'rammer')!;
+    const rammerIdx = o.vehicleA.parts.indexOf(part);
+    const extendPx = (part.def.behaviorParams as Record<string, number>).extendPx;
+    const connLen = (idx: number): number => {
+      const c = o.getRenderSnapshot().vehicleA.parts[idx].connector;
+      return c ? Math.hypot(c.to.x - c.from.x, c.to.y - c.from.y) : -1;
+    };
+    // 1) 回收位（translation≈0）：连接轴≈0 —— 车身↔轴↔锤头全程连续，无悬空方块 / 无异常长连接
+    let restLen = -1;
+    let midLen = -1, midT = -1;
+    let fullLen = -1, fullT = -1;
+    let strikeStart = -1, fullStep = -1;
+    for (let i = 0; i < 900; i++) {
+      lab.step(16.6667);
+      const t = w.getPrismaticTranslation(part.joint);
+      if (i === 5) restLen = connLen(rammerIdx); // 早期回收位采样
+      if (strikeStart < 0 && t > 2) strikeStart = i; // 离开 home 开始打出
+      if (strikeStart >= 0 && fullStep < 0 && t >= 0.9 * extendPx) fullStep = i;
+      if (midLen < 0 && t > 60 && t < 100) { midLen = connLen(rammerIdx); midT = t; }
+      if (fullLen < 0 && t >= 0.9 * extendPx) { fullLen = connLen(rammerIdx); fullT = t; break; }
+      if (o.result?.phase === 'End') break;
+    }
+    // 验收 1&2：静止时轴≈0（机械连接连续，无漂浮方块）；轴长随真实 translation 连续（=真实 Prismatic，非假动画）
+    expect(restLen).toBeLessThan(20);
+    expect(midT).toBeGreaterThan(0);
+    expect(Math.abs(midLen - midT)).toBeLessThan(15);
+    expect(Math.abs(fullLen - fullT)).toBeLessThan(15);
+    // 3) 冲击节奏：从开始 strike 到接近满行程 0.18~0.25s
+    expect(strikeStart).toBeGreaterThan(0);
+    const strikeSteps = fullStep - strikeStart;
+    const strikeSec = (strikeSteps * 16.6667) / 1000;
+    expect(strikeSec).toBeGreaterThanOrEqual(0.18);
+    expect(strikeSec).toBeLessThanOrEqual(0.25);
+    // 4) Miss：B 在 A 后方（背向而驰）→ 仍完整伸出并自然回收，无 weapon damage
+    const lab3 = new PhysicsLab(rendererStub);
+    lab3.loadCustom(SCENARIOS.find((s) => s.id === 'Q12-C')!.buildA, SCENARIOS.find((s) => s.id === 'Q12-C')!.buildB, {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 250, y: 650, facing: -1 },
+    });
+    const o3 = lab3.orchestrator as PlanckBattleOrchestrator;
+    let missWeaponDmg = 0;
+    let maxMissT = 0;
+    let minMissT = Infinity;
+    o3.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon') missWeaponDmg += ev.damage;
+    });
+    for (let i = 0; i < 600; i++) {
+      lab3.step(16.6667);
+      const t = o3.world.getPrismaticTranslation(o3.vehicleA.parts.find((p) => p.def.id === 'rammer')!.joint);
+      maxMissT = Math.max(maxMissT, t);
+      minMissT = Math.min(minMissT, t);
+      if (o3.result?.phase === 'End') break;
+    }
+    expect(maxMissT).toBeGreaterThan(140); // Miss 仍完整伸出
+    expect(minMissT).toBeLessThan(10); // 并自然回收
+    expect(missWeaponDmg).toBe(0); // 没撞到 = Miss，无 weapon damage
+  });
 });
