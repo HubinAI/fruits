@@ -14,6 +14,7 @@ import type {
   RenderVisual,
 } from '../battle/battleContract';
 import { VisualRegistry } from './visualRegistry';
+import { vehicleDeathAlpha } from '../presentation/battlePhaseFx';
 
 /** Projectile 颜色（Q02-C3B）：A/B 可明显区分（与车身蓝/橙区分，更亮） */
 export const PROJECTILE_COLOR_A = '#7de8ff';
@@ -62,12 +63,13 @@ interface FloatingText {
   ttl: number;
 }
 
-/** 命中火花（W2-FX-1）：接触点短暂小圆 */
+/** 命中火花（W2-FX-1/2）：接触点短暂小圆（W2-FX-2 支持按伤害来源着色） */
 interface Spark {
   x: number;
   y: number;
   bornAt: number;
   ttl: number;
+  color: string;
 }
 
 /** 炮口闪光（W2-FX-1）：开火点短暂亮圆 */
@@ -146,9 +148,9 @@ export class Renderer {
     this.hitFlashes.push({ team, bornAt: performance.now(), ttl: 120 });
   }
 
-  /** 命中火花：接触点短暂小圆 */
-  spawnSpark(x: number, y: number): void {
-    this.sparks.push({ x, y, bornAt: performance.now(), ttl: 220 });
+  /** 命中火花：接触点短暂小圆（W2-FX-2 按 damageSource 区分颜色，缺省黄） */
+  spawnSpark(x: number, y: number, color = '#ffd35a'): void {
+    this.sparks.push({ x, y, color, bornAt: performance.now(), ttl: 220 });
   }
 
   /** 炮口闪光：开火点短暂亮圆（真实 muzzle worldPosition） */
@@ -177,6 +179,8 @@ export class Renderer {
     const snap = orchestrator.getRenderSnapshot();
     const arena = snap.arena;
     const t = this.transform;
+    // W2-FX-2：表现时间基准（阶段闪烁 / 死亡淡出 / FX 共用）
+    const now = performance.now();
 
     // Ground
     ctx.fillStyle = '#2a2f38';
@@ -198,14 +202,41 @@ export class Renderer {
       this.drawShape(wall, '#3a4150');
     }
 
-    // Closing walls（Hazard）
+    // Closing walls（Hazard；W2-FX-2 阶段视觉：Warning 预高亮闪烁、Closing 正式刺墙锯齿）
+    const arenaPhase = orchestrator.phase;
     for (const cw of arena.closingWalls) {
       this.drawShape(cw, '#7a2f2f');
+      if (arenaPhase === 'Warning') {
+        // 预高亮：橙红描边 + 闪烁（不画刺，刺墙尚未「进入」）
+        const blink = 0.45 + 0.35 * Math.sin(now * 0.012);
+        ctx.globalAlpha = blink;
+        this.strokeShape(cw, '#e8a33c');
+        ctx.globalAlpha = 1;
+      } else if (arenaPhase === 'Closing') {
+        // 正式进入：亮红填充 + 朝 arena 内部的锯齿尖刺 + 脉动描边
+        const pulse = 0.85 + 0.15 * Math.sin(now * 0.01);
+        this.drawShape(cw, '#c0403a');
+        this.drawSpikes(cw, '#c0403a', now);
+        ctx.globalAlpha = pulse;
+        this.strokeShape(cw, '#ff8a70');
+        ctx.globalAlpha = 1;
+      }
     }
 
-    // Vehicles
-    this.drawVehicle(snap.vehicleA, '#4aa3ff');
-    this.drawVehicle(snap.vehicleB, '#ff7a4a');
+    // Vehicles（W2-FX-2 死亡表现：淡出 alpha → 消失后跳过绘制；未死亡正常绘制）
+    // 手动管理 globalAlpha（不复用 ctx.save/restore，保持与既有 canvas stub 兼容）
+    const aAlpha = vehicleDeathAlpha(this.deathFxs, snap.vehicleA.team, now);
+    const bAlpha = vehicleDeathAlpha(this.deathFxs, snap.vehicleB.team, now);
+    if (aAlpha !== null) {
+      ctx.globalAlpha = aAlpha;
+      this.drawVehicle(snap.vehicleA, '#4aa3ff');
+      ctx.globalAlpha = 1;
+    }
+    if (bAlpha !== null) {
+      ctx.globalAlpha = bAlpha;
+      this.drawVehicle(snap.vehicleB, '#ff7a4a');
+      ctx.globalAlpha = 1;
+    }
 
     // Projectiles（Q02-C3B）：只消费 Snapshot；车辆之后、FX 之前，避免被车体完全遮住。
     // projectiles 缺省 undefined → 空绘制，Matter 画面不变。
@@ -214,8 +245,7 @@ export class Renderer {
     // Debug overlay
     if (debugDraw) debugDraw(ctx, t);
 
-    // FX
-    const now = performance.now();
+    // FX（now 已在 render 顶部声明）
     this.fx = this.fx.filter((f) => now - f.bornAt < f.ttl);
     for (const f of this.fx) {
       const age = (now - f.bornAt) / f.ttl;
@@ -229,6 +259,8 @@ export class Renderer {
 
     this.hitFlashes = this.hitFlashes.filter((h) => now - h.bornAt < h.ttl);
     for (const h of this.hitFlashes) {
+      // W2-FX-2：已死亡（淡出中/已消失）车辆不叠加闪白
+      if (vehicleDeathAlpha(this.deathFxs, h.team, now) === null) continue;
       const age = (now - h.bornAt) / h.ttl;
       ctx.globalAlpha = (1 - age) * 0.7;
       ctx.fillStyle = '#ffffff';
@@ -237,12 +269,12 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
 
-    // W2-FX-1：命中火花（接触点短暂小圆）
+    // W2-FX-1/2：命中火花（接触点短暂小圆；hazard 用红色刺伤色）
     this.sparks = this.sparks.filter((s) => now - s.bornAt < s.ttl);
     for (const s of this.sparks) {
       const age = (now - s.bornAt) / s.ttl;
       ctx.globalAlpha = 1 - age;
-      ctx.fillStyle = '#ffd35a';
+      ctx.fillStyle = s.color;
       ctx.beginPath();
       ctx.arc(this.sx(s.x), this.sy(s.y), this.ss(3 + age * 2), 0, Math.PI * 2);
       ctx.fill();
@@ -558,5 +590,64 @@ export class Renderer {
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+  }
+
+  /** W2-FX-2：只描边不填充（刺墙高亮 / 脉动描边；仅 polygons） */
+  private strokeShape(shape: RenderShape, color: string): void {
+    const ctx = this.ctx;
+    if (shape.kind !== 'polygons') return;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = this.ss(3);
+    for (const poly of shape.polygons) {
+      const verts = poly.points;
+      if (verts.length === 0) continue;
+      ctx.beginPath();
+      ctx.moveTo(this.sx(verts[0].x), this.sy(verts[0].y));
+      for (let i = 1; i < verts.length; i++) {
+        ctx.lineTo(this.sx(verts[i].x), this.sy(verts[i].y));
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+
+  /**
+   * W2-FX-2：Closing 正式刺墙视觉——沿墙面朝 arena 内部画锯齿尖刺。
+   * 方向由墙面与 arena 中心相对位置决定（左墙向右刺、右墙向左刺）；
+   * 完全基于 snapshot 真实墙几何（AABB），不新增 gameplay 状态。
+   */
+  private drawSpikes(shape: RenderShape, color: string, _now: number): void {
+    const ctx = this.ctx;
+    if (shape.kind !== 'polygons') return;
+    const points = shape.polygons[0]?.points;
+    if (!points || points.length === 0) return;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of points) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    }
+    if (!Number.isFinite(minX)) return;
+    // 刺墙朝向 arena 内部：墙中心相对屏幕中心（本 wall 所在 arena 中心 800）
+    const dir = (minX + maxX) / 2 < 800 ? 1 : -1;
+    const baseX = dir > 0 ? maxX : minX; // 墙面（arena 内侧边缘）
+    const spikeLen = 16; // 尖刺伸出长度（世界 px）
+    const spacing = 26; // 尖刺纵向间距
+    const tipX = baseX + dir * spikeLen;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.85;
+    for (let y = minY + 10; y < maxY - 8; y += spacing) {
+      ctx.beginPath();
+      ctx.moveTo(this.sx(baseX), this.sy(y));
+      ctx.lineTo(this.sx(tipX), this.sy(y + spacing / 2));
+      ctx.lineTo(this.sx(baseX), this.sy(y + spacing));
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
 }

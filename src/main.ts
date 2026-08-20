@@ -12,6 +12,12 @@ import { Renderer, type CameraFit } from './render/renderer';
 import { VisualRegistry } from './render/visualRegistry';
 import { SfxAudioService } from './presentation/audioService';
 import { BattlePresentationController } from './presentation/battlePresentationController';
+import {
+  DeathPauseScheduler,
+  damageFeedbackColors,
+  phaseRemainingMs,
+  warningCountdown,
+} from './presentation/battlePhaseFx';
 // W2-SIL-1：5 个首批正式 Content 视觉占位（程序化轮廓 PNG；正式美术可替换）
 // Vite asset import 返回构建后 URL（dev/prod 均有效；vite/client 提供 *.png 声明）。
 import bodyWatermelonUrl from '../assets/visuals/body_watermelon.png';
@@ -70,6 +76,14 @@ style.textContent = `
   .hud-bar-fill { height: 100%; width: 100%; }
   .hud-hp { font-size: 13px; color: #e8e8f0; font-variant-numeric: tabular-nums; }
   .hud-phase { font-size: 14px; color: #ffd35a; letter-spacing: 2px; }
+  /* W2-FX-2：Warning 阶段倒计时（中央，3→2→1） */
+  .phase-countdown { position: absolute; left: 50%; top: 54px; transform: translateX(-50%); font-size: 44px; font-weight: 800; color: #ff6b5e; text-shadow: 0 0 14px rgba(255,90,80,0.8); display: none; pointer-events: none; }
+  /* W2-FX-2：场边红色脉冲（Warning 阶段） */
+  .lab-canvas-wrap.phase-warning::before,
+  .lab-canvas-wrap.phase-warning::after { content: ''; position: absolute; top: 0; bottom: 0; width: 10px; z-index: 4; pointer-events: none; animation: phase-pulse 0.9s ease-in-out infinite; }
+  .lab-canvas-wrap.phase-warning::before { left: 0; background: linear-gradient(90deg, rgba(255,60,50,0.85), rgba(255,60,50,0)); }
+  .lab-canvas-wrap.phase-warning::after { right: 0; background: linear-gradient(270deg, rgba(255,60,50,0.85), rgba(255,60,50,0)); }
+  @keyframes phase-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
   .result-modal { position: absolute; inset: 0; background: rgba(6,8,12,0.55); display: none; align-items: center; justify-content: center; z-index: 10; }
   .result-card { background: #1c2330; border: 1px solid #38414f; border-radius: 12px; padding: 26px 44px; text-align: center; min-width: 300px; }
   .result-title { margin: 0 0 14px; font-size: 30px; letter-spacing: 4px; }
@@ -149,6 +163,12 @@ const hudPhase = document.createElement('span');
 hudPhase.className = 'hud-phase';
 hudPhase.textContent = '战斗中';
 hudEl.appendChild(hudPhase);
+
+/* ---------- W2-FX-2：Warning 阶段倒计时（3 → 2 → 1；Closing 开始后消失） ---------- */
+const phaseCountdown = document.createElement('span');
+phaseCountdown.className = 'phase-countdown';
+phaseCountdown.textContent = '';
+hudEl.appendChild(phaseCountdown);
 
 /* ---------- 结算 Modal（Q06-HUD-U1：Ended 中央第一视觉焦点） ---------- */
 const resultModal = document.createElement('div');
@@ -240,20 +260,39 @@ const renderer = new Renderer(canvas, visualRegistry);
 // - Presentation 不决定伤害；FX/SFX 缺资源安全 skip；
 // - Preview（loadCustomPreview）不消费战斗 FX（PhysicsLab 只在正式战斗 bind）。
 const sfx = new SfxAudioService();
+// W2-FX-2：Death 表现层定格调度（80~120ms）+ 阶段轮询状态
+const deathPause = new DeathPauseScheduler();
+let prevTimeScale = 1;
 const presentation = new BattlePresentationController({
   onMuzzleFlash: (ev) => renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y),
   onFireSound: () => sfx.play('fire'),
   onHitFlash: (ev) => renderer.spawnHitFlash(ev.target),
-  onHitSpark: (ev) => renderer.spawnSpark(ev.contactPoint.x, ev.contactPoint.y),
+  onHitSpark: (ev) =>
+    renderer.spawnSpark(
+      ev.contactPoint.x,
+      ev.contactPoint.y,
+      damageFeedbackColors(ev.damageSource).spark,
+    ),
   onDamageSound: () => sfx.play('hit'),
-  onDamageNumber: (ev) =>
+  onDamageNumber: (ev) => {
+    const c = damageFeedbackColors(ev.damageSource);
     renderer.spawnDamageNumber(
       ev.contactPoint.x,
       ev.contactPoint.y,
       `-${Math.round(ev.damage)}`,
-      ev.damageSource === 'weapon' ? '#ff5a4e' : '#ffb84e',
-    ),
-  onDeathFx: (ev) => renderer.spawnDeathFx(ev.team),
+      c.number,
+    );
+  },
+  onDeathFx: (ev) => {
+    renderer.spawnDeathFx(ev.team);
+    // W2-FX-2：死亡表现层定格 80~120ms（timeScale=0 冻结战斗推进，禁止修改
+    // Gameplay/Physics 时间语义——恢复原 timeScale，不写死进任何规则）
+    if (!lab.paused) {
+      if (!deathPause.active) prevTimeScale = lab.timeScale;
+      deathPause.trigger(100);
+      if (lab.timeScale !== 0) lab.timeScale = 0;
+    }
+  },
   onDeathSound: () => sfx.play('death'),
 });
 const lab = new PhysicsLab(renderer, presentation);
@@ -814,12 +853,55 @@ function doResize(): void {
 window.addEventListener('resize', doResize);
 doResize();
 
+/* ---------- W2-FX-2：阶段表现轮询（Warning 倒计时 + 场边红脉冲 + 刺墙预高亮/Closing 进入） ---------- */
+let lastPhase: string | null = null;
+let phaseStartTimeMs = 0;
+let lastPhaseOrch: unknown = null;
+function pollArenaPhase(nowMs: number): void {
+  const o = lab.orchestrator;
+  // 战斗实例变化（load / reset / preview 重建）→ 阶段状态重置
+  if (o !== lastPhaseOrch) {
+    lastPhaseOrch = o;
+    lastPhase = null;
+    phaseStartTimeMs = 0;
+  }
+  // Preview / 无战斗：不显示阶段表现
+  if (!o || lab.previewMode) {
+    phaseCountdown.style.display = 'none';
+    canvasWrap.classList.remove('phase-warning');
+    return;
+  }
+  if (o.phase !== lastPhase) {
+    lastPhase = o.phase;
+    phaseStartTimeMs = o.timeMs;
+  }
+  const phase = o.phase;
+  const inWarning = phase === 'Warning' && o.result?.phase !== 'End';
+  canvasWrap.classList.toggle('phase-warning', inWarning);
+  if (inWarning) {
+    const warningMs = o.config.arena?.phases?.warningMs ?? 3000;
+    const remaining = phaseRemainingMs(phase, warningMs, o.timeMs - phaseStartTimeMs);
+    phaseCountdown.textContent = warningCountdown(remaining);
+    phaseCountdown.style.display = '';
+  } else {
+    // Closing / Active / End：倒计时消失（Closing 开始后刺墙正式进入，由 Renderer 表现）
+    phaseCountdown.style.display = 'none';
+  }
+  // Death 定格恢复：表现层 80~120ms 冻结结束 → 恢复原 timeScale（不改 Gameplay/Physics 语义）
+  if (deathPause.active && deathPause.shouldResume()) {
+    lab.timeScale = prevTimeScale;
+    deathPause.clear();
+  }
+  void nowMs;
+}
+
 let last = performance.now();
 function loop(now: number): void {
   const dt = Math.min(50, now - last);
   last = now;
   lab.step(dt);
   lab.render();
+  pollArenaPhase(now); // 阶段倒计时 / 场边红脉冲 / Death 定格恢复
   pollBattleResult(); // result 变化 → Ended 迁移 + 结果展示
   updateHud(); // 每帧读取 getBattleStatusSnapshot() → 顶部 A/B HP 实时
   requestAnimationFrame(loop);
