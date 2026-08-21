@@ -15,8 +15,10 @@ import type {
   RenderConnector,
   RenderVisual,
 } from '../battle/battleContract';
+import type { DamageEvent } from '../battle/combatEvents';
 import { VisualRegistry } from './visualRegistry';
-import { vehicleDeathAlpha } from '../presentation/battlePhaseFx';
+import { vehicleDeathAlpha, damageFeedbackColors } from '../presentation/battlePhaseFx';
+import { DamageNumberAggregator } from '../presentation/damageNumberAggregator';
 
 /** Projectile 颜色（Q02-C3B）：A/B 可明显区分（与车身蓝/橙区分，更亮） */
 export const PROJECTILE_COLOR_A = '#7de8ff';
@@ -89,6 +91,17 @@ interface FloatingText {
   bornAt: number;
   ttl: number;
 }
+
+/**
+ * F-PRESENT-1：高频伤害数字聚合窗口（ms）。
+ * 同一来源（target+source+partId|behavior|damageSource）在窗口内的连续真实伤害
+ * 合并为一个浮动数字；窗口以该组首次命中时间为起点，不无限延长。
+ * 200~220ms 区间：喷火器(~33ms 间隔)每组含数次、机枪(100ms 间隔)每组含 2~3 发、
+ * 持续攻击同时可见数字控制在 ~3~4 组，彻底消除数字云。
+ */
+const DAMAGE_AGGREGATE_WINDOW_MS = 210;
+/** 伤害数字浮动停留时长（ms）；与旧版一致，不改动 */
+const DAMAGE_NUMBER_TTL_MS = 900;
 
 /** 命中火花（W2-FX-1/2）：接触点短暂小圆（W2-FX-2 支持按伤害来源着色） */
 interface Spark {
@@ -177,6 +190,11 @@ export class Renderer {
   /** Q14-A-R1：机枪方向性枪口火舌 VFX 数组（发射后驻留 ~60ms 衰减，纯表现） */
   private muzzleTongues: MuzzleTongue[] = [];
 
+  /** F-PRESENT-1：高频伤害数字聚合器（纯 Presentation；决定「合并 / 新建数字」） */
+  private damageAggregator = new DamageNumberAggregator(DAMAGE_AGGREGATE_WINDOW_MS);
+  /** F-PRESENT-1：分组键 → 当前组浮动数字引用（组内命中原地更新 text/position，不新建） */
+  private damageGroupFx = new Map<string, FloatingText>();
+
   constructor(
     private canvas: HTMLCanvasElement,
     /** W2-VIS-1：Sprite Visual Registry（缺省空注册表 → 全 Collider 灰盒 fallback，行为与旧版一致） */
@@ -242,9 +260,68 @@ export class Renderer {
    * 以下方法均为纯表现（不决定 Gameplay / 不触发伤害）。
    */
 
-  /** 伤害数字（统一入口：所有伤害数字都经此加入同一数字池，复用现有绘制） */
+  /** 伤害数字（基础原语：直接加入一个浮动数字，不参与聚合；供测试与直接调用） */
   spawnDamageNumber(x: number, y: number, text: string, color: string): void {
-    this.fx.push({ x, y, text, color, bornAt: performance.now(), ttl: 900 });
+    this.fx.push({ x, y, text, color, bornAt: performance.now(), ttl: DAMAGE_NUMBER_TTL_MS });
+  }
+
+  /**
+   * F-PRESENT-1：高频伤害数字聚合入口（仅表现层）。
+   *
+   * 由 BattlePresentationController.onDamageNumber 调用（每个真实 damage event 各一次，
+   * 调用次数与 Gameplay 完全无关）。内部按 (target,source,partId|behavior|damageSource)
+   * 在固定窗口内合并为单个浮动数字：
+   * - 同组命中 → 累计真实伤害 + 跟随最新 contactPoint（原地更新，不新建浮动数字）；
+   * - 首击 / 窗口到期 → 立即新建浮动数字（单发 Cannon/Hammer/Laser 零延迟、不吞数字）；
+   * - Gameplay / Damage Resolver / HP 完全不变；聚合仅重组「显示」，真实 damage 总量守恒。
+   *
+   * Q08-C：damage<=0 仍不显示无意义「-0」（Renderer 复用同一数字池）。
+   */
+  spawnDamageNumberFromEvent(ev: DamageEvent): void {
+    const dmg = Math.round(ev.damage);
+    if (dmg <= 0) return;
+    const color = damageFeedbackColors(ev.damageSource).number;
+    const now = performance.now();
+    const view = this.damageAggregator.feed(ev, now);
+    if (view.isNewGroup) {
+      // 新组：立即新建浮动数字（不延迟 → 单发武器即时显示）
+      const fx: FloatingText = {
+        x: view.x,
+        y: view.y,
+        text: `-${view.accumulatedDamage}`,
+        color,
+        bornAt: now,
+        ttl: DAMAGE_NUMBER_TTL_MS,
+      };
+      this.fx.push(fx);
+      this.damageGroupFx.set(view.groupKey, fx);
+      return;
+    }
+    // 合并进当前组：累计真实伤害 + 跟随最新 contactPoint（原地更新，不新建）
+    const fx = this.damageGroupFx.get(view.groupKey);
+    if (fx) {
+      fx.text = `-${view.accumulatedDamage}`;
+      fx.x = view.x;
+      fx.y = view.y;
+    } else {
+      // 防御：聚合器判定为合并但本地无浮动数字引用（理论上不会）→ 退回新建
+      const fxNew: FloatingText = {
+        x: view.x,
+        y: view.y,
+        text: `-${view.accumulatedDamage}`,
+        color,
+        bornAt: now,
+        ttl: DAMAGE_NUMBER_TTL_MS,
+      };
+      this.fx.push(fxNew);
+      this.damageGroupFx.set(view.groupKey, fxNew);
+    }
+  }
+
+  /** F-PRESENT-1：当前存活的聚合伤害数字（供测试断言合并 / 组数与累计；过期自动过滤） */
+  get activeDamageNumbers(): readonly FloatingText[] {
+    const now = performance.now();
+    return this.fx.filter((f) => now - f.bornAt < f.ttl);
   }
 
   /** 命中闪白：目标车辆形状短暂描边反馈（绘制时取当前 Snapshot）

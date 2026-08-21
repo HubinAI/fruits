@@ -428,17 +428,10 @@ const presentation = new BattlePresentationController({
     ),
   onDamageSound: () => sfx.play('hit'),
   onDamageNumber: (ev) => {
-    // Q08-C：damage<=0 不显示无意义「-0」——Gameplay/DamageResolver 仍照常结算，
-    // 只去掉无意义 Presentation 数字。
-    const dmg = Math.round(ev.damage);
-    if (dmg <= 0) return;
-    const c = damageFeedbackColors(ev.damageSource);
-    renderer.spawnDamageNumber(
-      ev.contactPoint.x,
-      ev.contactPoint.y,
-      `-${dmg}`,
-      c.number,
-    );
+    // F-PRESENT-1：聚合入口在 Renderer 内（按来源+窗口合并为少量可读数字；
+    // dmg<=0 过滤 / 配色也在 Renderer 内完成）。Gameplay/DamageResolver 仍逐次结算，
+    // onDamageNumber 仍每个真实 damage event 各调用一次（调用次数与聚合无关）。
+    renderer.spawnDamageNumberFromEvent(ev);
   },
   onDeathFx: (ev) => {
     renderer.spawnDeathFx(ev.team);
