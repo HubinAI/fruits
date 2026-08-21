@@ -480,6 +480,45 @@ const shotgun: FunctionalPartDef = {
 };
 
 /**
+ * Q14-A：机枪（Weapon）——连发机枪，与普通炮（单发稳定弹道）/ 霰弹（一次扇形爆发）
+ *   形成完全不同的「持续压制」选择。
+ * - 固定 burst 节奏（首版可复现、无随机）：一次 burst 7 发（6~8），发间隔 100ms
+ *   （90~120），burst 总持续 600ms（0.6~0.8s），burst 后冷却 1100ms（1.0~1.3s），循环；
+ * - 每发都是真实 projectile：复用 spawnWeaponProjectile（与 Cannon / Shotgun / Laser
+ *   同一条 Projectile / CCD / Owner Filter / ContactRouter 链，不创建第二套系统）；
+ * - 全部沿真实炮口方向（part 世界姿态 × facing），禁止随机散布 / 不自动瞄准 /
+ *   不做 hitscan / 不 raycast；gravityScale=0 → 水平直线高速短弹迹（连续压制弹线）；
+ * - 每发独立小型枪口闪光 + 单发真实 recoil 直接作用于本车 chassis（单发小、连续
+ *   burst 后整车轻微累计后顿；禁止屏幕震动表现后坐）；
+ * - 每发真实碰到才伤害（projectileDamage 20，ContactRouter 结算），Miss 就是 Miss；
+ * - 不修改 Cannon / Shotgun / Laser：三者保持原样，仅新增本 Weapon 复用同一系统。
+ */
+const machineGun: FunctionalPartDef = {
+  id: 'machineGun',
+  name: '机枪',
+  category: 'weapon',
+  mass: 20, // 明显质量：连续后坐反作用自车也承担（与炮同档）
+  energy: 30,
+  // 细长枪管：本地 x∈[0,40]（相对 pivot，向前伸出 40px），高 16；
+  // offset.x=20 → 炮口（collider 前端）世界位置 = pivot + facing*40 ✓。
+  collider: { shape: 'box', width: 40, height: 16, offset: { x: 20, y: 0 } },
+  behavior: 'machineGun',
+  behaviorParams: {
+    // 固定 burst 节奏：7 发 × 100ms 间隔 = 600ms burst；冷却 1100ms 后下一轮。
+    burstRounds: 7,
+    roundIntervalMs: 100,
+    cooldownMs: 1100,
+    // 高速水平弹迹（连续压制）：muzzleSpeed 12 高于 Cannon 8（一眼高速连发）；
+    // gravityScale=0（行为层固定）→ 直线弹线，不做距离判定消失伤害。
+    muzzleSpeed: 12,
+    projectileDamage: 20, // 每发小伤（7 发全中 ≈ 140，持续压制而非单发高威胁）
+    projectileRadius: 5, // 小弹体（小于 Cannon 10 / 霰弹 7），不扩大真实命中范围
+    projectileMass: 1,
+    recoilImpulse: 6, // 单发小（Cannon 30 / 5）；连续 7 发累计 ≈ 42 → 轻微后顿
+  },
+};
+
+/**
  * Q13-C / Q13-C-R1：推进器（Gadget）——玩家直接看到「车尾点火 → 大喷焰 → 整车突然窜出去」。
  * 它改变的是距离和碰撞时机，不直接造成 Weapon Damage。
  * - 固定周期（Q13-C-R1 缩短为更强爆发）：短前摇 windupMs（约 0.25s）→ 爆发推进
@@ -662,6 +701,7 @@ export function createRegistry(): ContentRegistry {
       [saw.id, saw],
       [shotgun.id, shotgun],
       [thruster.id, thruster],
+      [machineGun.id, machineGun],
     ]),
   };
 }

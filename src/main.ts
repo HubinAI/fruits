@@ -384,6 +384,10 @@ const presentation = new BattlePresentationController({
         ev.worldDirection.x,
         ev.worldDirection.y,
       );
+    } else if (ev.behavior === 'machineGun') {
+      // Q14-A：机枪每发独立小型枪口闪光（更小更短，连发时呈快速小闪点，
+      // 与炮/镭射的明显爆闪一眼区分；纯表现，不参与伤害）。
+      renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y, '#ffe9a8', 4);
     } else {
       renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y);
     }

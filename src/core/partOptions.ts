@@ -43,4 +43,7 @@ export const PART_OPTIONS: PartOption[] = [
   // Q13-C：推进器 Gadget（front Weld 短粗喷口，固定周期喷火推进；沿 chassis facing 施力、
   //   真实安装位置短喷焰，停推即消失；不改轮子、不造成伤害）
   { v: 'thruster', t: '推进器' },
+  // Q14-A：机枪 Weapon（固定 burst 节奏 7 发 × 100ms 间隔 → 600ms 连射 → 冷却 1.1s；
+  //   每发真实 projectile 沿真实炮口方向高速水平短弹迹 + 小型枪口闪光 + 单发小后坐）
+  { v: 'machineGun', t: '机枪' },
 ];

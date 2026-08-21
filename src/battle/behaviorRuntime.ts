@@ -27,6 +27,7 @@ import { RammerBehavior } from './rammerBehavior';
 import { SawBehavior } from './sawBehavior';
 import { ShotgunBehavior } from './shotgunBehavior';
 import { ThrusterBehavior } from './thrusterBehavior';
+import { MachineGunBehavior } from './machineGunBehavior';
 
 /** Behavior factory 输入（由 Orchestrator 在构造时提供） */
 export interface BehaviorContext {
@@ -378,6 +379,70 @@ class ThrusterRuntime implements PartBehaviorRuntime {
 
 export function createThrusterRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
   return new ThrusterRuntime(ctx);
+}
+
+/* ---------- MachineGun（Q14-A）：连发机枪（固定 burst 节奏，每发真实 projectile + 小闪光 + 单发后坐） ---------- */
+
+class MachineGunRuntime implements PartBehaviorRuntime {
+  readonly vehicle: PlanckVehicle;
+  readonly part: PlanckPartRuntime;
+  private readonly behavior: MachineGunBehavior;
+  private timeMs = 0;
+
+  constructor(ctx: BehaviorContext) {
+    this.vehicle = ctx.vehicle;
+    this.part = ctx.part;
+    this.behavior = new MachineGunBehavior(ctx.part, (e) => {
+      ctx.emit({ ...e, timestamp: this.timeMs });
+    });
+  }
+
+  beforePhysicsStep(world: PlanckWorld, timeMs: number): void {
+    this.timeMs = timeMs;
+    this.behavior.stepFixed(world, this.vehicle, this.part);
+  }
+
+  afterPhysicsStep(
+    world: PlanckWorld,
+    projectileFacts: readonly ProjectileContactFact[],
+  ): void {
+    this.behavior.consumeProjectileFacts(world, projectileFacts);
+  }
+
+  destroyOutOfBoundsProjectiles(
+    world: PlanckWorld,
+    isOutOfBounds: (pos: { x: number; y: number }) => boolean,
+  ): void {
+    for (const p of this.behavior.aliveProjectiles) {
+      if (isOutOfBounds(world.getPosition(p))) {
+        this.behavior.destroyProjectile(world, p);
+      }
+    }
+  }
+
+  getRenderProjectiles(world: PlanckWorld): RenderProjectile[] {
+    const out: RenderProjectile[] = [];
+    for (const p of this.behavior.aliveProjectiles) {
+      const tag = world.getOwnerTag(p);
+      if (!tag || !tag.team) continue; // 已销毁 / 无归属：不进入快照
+      const bounds = world.getBounds(p);
+      const v = world.getLinearVelocity(p);
+      out.push({
+        center: world.getPosition(p),
+        radius: (bounds.maxX - bounds.minX) / 2,
+        team: tag.team,
+        // Q14-A：机枪弹画成沿真实飞行方向的高速短弹迹（复用 tracer 渲染，
+        // 与霰弹同一视觉标记；不扩大真实命中范围）。
+        visual: 'tracer',
+        velocity: { x: v.x, y: v.y },
+      });
+    }
+    return out;
+  }
+}
+
+export function createMachineGunRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
+  return new MachineGunRuntime(ctx);
 }
 
 export type { BodyHandle };

@@ -277,6 +277,20 @@ function thrusterCarBuild(): BuildSnapshot {
   };
 }
 
+/** Q14-A：机枪车——西瓜车身 + 前方机枪（front Weld 细长枪管，固定 burst 连发） */
+function machineGunCarBuild(): BuildSnapshot {
+  return {
+    id: 'machineGunCar',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'machineGun' }],
+  };
+}
+
 /** Q11-A：楔铲车——西瓜车身 + 前方楔铲（Gadget，无 Direct Damage，无主动动画） */
 function wedgeShovelBuild(): BuildSnapshot {
   return {
@@ -741,6 +755,27 @@ export const SCENARIOS: ScenarioDef[] = [
       autoDrive: false, // 隔离推力效果：关闭自动驱动，单独看「喷火→突然加速」
       spawnA: { x: 450, y: 650, facing: 1 },
       spawnB: { x: 1150, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Q14-A',
+    name: 'MachineGun (Burst Weapon)',
+    description:
+      '机枪（Q14-A）：A 西瓜车身 + 前方机枪（front Weld 细长枪管，固定 burst 连发）。固定节奏：' +
+      ' 一次 burst 7 发（发间隔 100ms，burst 总持续 600ms）→ 冷却 1100ms，循环。每发都是真实' +
+      ' projectile，全部沿真实炮口方向（part 世界姿态 × facing）高速水平直线（gravityScale=0）' +
+      ' 射出——枪口连续小型闪光 + 7 发高速短弹迹连成一条连续压制弹线（复用正式 Projectile / CCD /' +
+      ' Owner Filter / ContactRouter 链，不创建第二套系统）；每发真实碰到才伤害（Miss 就是 Miss），' +
+      ' 每发单次小后坐直接作用于本车 chassis，连续 burst 后整车轻微累计后顿。无随机散布 / 不自动' +
+      ' 瞄准 / 不做 hitscan / 不 raycast / 不改 Cannon / Shotgun / Laser。',
+    buildA: machineGunCarBuild(),
+    buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 900, y: 650, facing: -1 }, // 中等距离：正常速度 1 秒内看清连续扫射 + 多弹命中
     },
     camera: { fit: 'vehicles' },
   },
