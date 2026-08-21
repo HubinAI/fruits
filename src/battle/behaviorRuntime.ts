@@ -492,14 +492,17 @@ class FlamethrowerRuntime implements PartBehaviorRuntime {
       if (!tag || !tag.team) continue; // 已销毁 / 无归属：不进入快照
       const bounds = world.getBounds(p);
       const v = world.getLinearVelocity(p);
+      const meta = this.behavior.getParticleMeta(p);
       out.push({
         center: world.getPosition(p),
         radius: (bounds.maxX - bounds.minX) / 2,
         team: tag.team,
-        // Q14-B：火焰颗粒画成「黄白火芯 + 橙红短尾」火流（复用 flame 渲染，
-        // 不画小圆弹；不扩大真实命中范围）。
+        // Q14-B-R2-FINAL：火焰颗粒不再单独绘制大叶/大亮圆头；Renderer 改用 muzzle+fireDir
+        // 由「同武器存活火焰 projectile 群」构建一整股连续 Fire Jet（真实 muzzle 纯计算复用）。
         visual: 'flame',
         velocity: { x: v.x, y: v.y },
+        muzzle: meta ? { x: meta.muzzle.x, y: meta.muzzle.y } : undefined,
+        fireDir: meta ? { x: meta.fireDir.x, y: meta.fireDir.y } : undefined,
       });
     }
     return out;

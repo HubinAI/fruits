@@ -19,10 +19,18 @@ import type { DamageEvent } from '../battle/combatEvents';
 import { VisualRegistry } from './visualRegistry';
 import { vehicleDeathAlpha, damageFeedbackColors } from '../presentation/battlePhaseFx';
 import { DamageNumberAggregator } from '../presentation/damageNumberAggregator';
+import { buildFireJet } from '../presentation/fireJetBuilder';
 
 /** Projectile 颜色（Q02-C3B）：A/B 可明显区分（与车身蓝/橙区分，更亮） */
 export const PROJECTILE_COLOR_A = '#7de8ff';
 export const PROJECTILE_COLOR_B = '#ffd05a';
+
+/**
+ * Q14-A-R2-FINAL：机枪弹迹世界长度（world px）。
+ * muzzleSpeed=12 × roundInterval 6 步 ≈ 72px 间隔；取 22px → 相邻弹迹保留约 50px 明显黑间隔，
+ * 不再首尾相接成连续白线（像 Laser）。固定单一值，不做参数扫描。真实 Collider 半径未变。
+ */
+export const MACHINE_GUN_TRACER_WORLD_LENGTH = 22;
 
 interface ScreenTransform {
   scale: number;
@@ -825,6 +833,8 @@ export class Renderer {
    */
   private drawProjectiles(projectiles: readonly RenderProjectile[]): void {
     const ctx = this.ctx;
+    // Q14-B-R2-FINAL：火焰颗粒先收集，循环后统一构建一整股连续 Fire Jet（不逐颗画大叶）
+    const flames: RenderProjectile[] = [];
     for (const p of projectiles) {
       if (p.visual === 'laser') {
         // Q11-C-R3-FINAL：镭射弹（真实伤害载体）只画一个小亮头 + 微 glow，
@@ -880,15 +890,17 @@ export class Renderer {
         continue;
       }
       if (p.visual === 'machineGunTracer') {
-        // Q14-A-R1：机枪弹——细、亮、暖白高速弹链（独立于霰弹 tracer 的身份）。
-        // 长约 70px、核心 2~3px、淡 team 色外沿；只读真实 center+velocity，不扩大 Collider。
+        // Q14-A-R2-FINAL：机枪弹——细、亮、暖白高速短弹迹（独立于霰弹 tracer 的身份）。
+        // 长度降到 ~22px（相邻约 72px 间隔 → 保留明显黑间隔，不再首尾接成连续光束）。
+        // 弹头亮核视觉半径 ~2px（去掉原「按完整 Collider 半径画白球」的珍珠链感）；
+        // 真实 Collider 半径未变。
         const cx = this.sx(p.center.x);
         const cy = this.sy(p.center.y);
         const v = p.velocity ?? { x: 1, y: 0 };
         const len = Math.max(1e-6, Math.hypot(v.x, v.y));
         const ux = v.x / len;
         const uy = v.y / len;
-        const CHAIN = this.ss(70); // 65~75 world px
+        const CHAIN = this.ss(MACHINE_GUN_TRACER_WORLD_LENGTH);
         const tx = cx - ux * CHAIN;
         const ty = cy - uy * CHAIN;
         const col = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
@@ -910,59 +922,19 @@ export class Renderer {
         ctx.lineTo(cx, cy);
         ctx.stroke();
         ctx.lineCap = 'butt';
-        // 弹头亮核（真实 Collider 半径，不扩大命中范围）
+        // 弹头亮核（视觉半径 ~2px；真实 Collider 半径未变、不扩大命中范围）
         ctx.fillStyle = '#fff6d8';
         ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(1, this.ss(p.radius)), 0, Math.PI * 2);
+        ctx.arc(cx, cy, Math.max(1.5, this.ss(2)), 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 1;
         continue;
       }
       if (p.visual === 'flame') {
-        // Q14-B-R1：喷火器火焰颗粒——沿真实 velocity 画「填充火焰叶」：
-        // 外层橙红（长 35~45 / 宽 14~18，后端收尖）+ 内层黄橙（长 24~30 / 宽 8~12）
-        // + 弹头黄白高亮。颗粒间隔 ~20px，相邻叶明显重叠 → 正常速度连成一股连续火流
-        // （不再是一根根细红线）。纯表现：命中范围不变，projectile 超时视觉同步消失。
-        const cx = this.sx(p.center.x);
-        const cy = this.sy(p.center.y);
-        const v = p.velocity ?? { x: 1, y: 0 };
-        const len = Math.max(1e-6, Math.hypot(v.x, v.y));
-        const ux = v.x / len;
-        const uy = v.y / len;
-        // 垂直方向（火焰叶向两侧鼓出）
-        const px = -uy;
-        const py = ux;
-        // 叶形辅助：head（弹头）→ mid（最宽处，距头 30%）→ rear（收尖，尾在速度反方向）
-        const leaf = (L: number, W: number, color: string, alpha: number): void => {
-          const rearX = cx - ux * this.ss(L);
-          const rearY = cy - uy * this.ss(L);
-          const midX = cx - ux * this.ss(L * 0.3);
-          const midY = cy - uy * this.ss(L * 0.3);
-          const w = this.ss(W);
-          ctx.globalAlpha = alpha;
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.quadraticCurveTo(midX + px * w, midY + py * w, rearX, rearY);
-          ctx.quadraticCurveTo(midX - px * w, midY - py * w, cx, cy);
-          ctx.closePath();
-          ctx.fill();
-        };
-        // 外层橙红（大叶，后端收尖）
-        leaf(40, 8, '#ff5a1e', 0.55);
-        // 内层黄橙（小叶，更亮）
-        leaf(27, 5, '#ffb24a', 0.85);
-        // 弹头黄白高亮核心（小范围）
-        ctx.globalAlpha = 0.95;
-        ctx.fillStyle = '#fff0b0';
-        ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(1.5, this.ss(p.radius * 1.4)), 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#ffd35a';
-        ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(1, this.ss(p.radius * 0.8)), 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
+        // Q14-B-R2-FINAL：喷火器火焰颗粒不再单独绘制大叶 / 大亮圆头（否则真人录像会数出
+        // 「三排橙色飞镖」）。改为收集后统一由「同武器存活火焰 projectile 群」构建一整股
+        // 连续 Fire Jet（见下方 drawFlameJet）。真实 projectile 的位置/生命周期/碰撞/伤害不变。
+        flames.push(p);
         continue;
       }
       ctx.fillStyle = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
@@ -973,6 +945,64 @@ export class Renderer {
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+    // Q14-B-R2-FINAL：统一绘制火焰 Fire Jet（按 muzzle 分组，每个武器一股连续火流）
+    if (flames.length > 0) {
+      const groups = new Map<string, RenderProjectile[]>();
+      for (const f of flames) {
+        const m = f.muzzle;
+        if (!m) continue; // 缺 muzzle 的火焰颗粒：无根部，跳过（生产环境必有 muzzle）
+        const key = `${m.x.toFixed(1)}|${m.y.toFixed(1)}`;
+        const arr = groups.get(key);
+        if (arr) arr.push(f);
+        else groups.set(key, [f]);
+      }
+      for (const group of groups.values()) {
+        this.drawFlameJet(group);
+      }
+    }
+  }
+
+  /**
+   * Q14-B-R2-FINAL：喷火器 Fire Jet（一整股连续火流，纯表现）。
+   *
+   * 由「同武器存活火焰 projectile 群」决定外形：根部 = 真实 muzzle、主轴 = 武器真实前向，
+   * 长度 = 群中最远前向距离 + 小余量、半宽 = 群中最大 |side| + 火焰余量。
+   * 三层连续火焰叶（外层暗红/橙红低 alpha、中层高亮橙黄、根部短黄白热芯），
+   * nozzle 窄 → mid 稍宽 → tip 收尖；复用 drawFlameShape 几何。
+   * 启停完全由真实 alive projectile 决定（颗粒全灭 → buildFireJet 返回 null → 不绘制）。
+   */
+  private drawFlameJet(group: readonly RenderProjectile[]): void {
+    const jet = buildFireJet(
+      group.map((f) => ({
+        center: f.center,
+        muzzle: f.muzzle!,
+        fireDir: f.fireDir!,
+      })),
+    );
+    if (!jet) return;
+    const rootX = this.sx(jet.muzzleX);
+    const rootY = this.sy(jet.muzzleY);
+    const dx = jet.dirX;
+    const dy = jet.dirY;
+    const px = jet.perpX;
+    const py = jet.perpY;
+    const len = this.ss(jet.length);
+    const halfW = this.ss(jet.halfWidth);
+    // 外层：暗红 / 橙红低 alpha 火焰体（整股最宽轮廓）
+    this.drawFlameShape({
+      rootX, rootY, dx, dy, px, py,
+      len, rootHW: halfW * 0.7, midHW: halfW, color: '#c21f0a', alpha: 0.35,
+    });
+    // 中层：高亮橙黄主体（略短、略窄，形成火流核心）
+    this.drawFlameShape({
+      rootX, rootY, dx, dy, px, py,
+      len: len * 0.96, rootHW: halfW * 0.45, midHW: halfW * 0.72, color: '#ff7a1a', alpha: 0.82,
+    });
+    // 根部短黄白热芯（喷口附近高温区；仅根部 ~35% 长度）
+    this.drawFlameShape({
+      rootX, rootY, dx, dy, px, py,
+      len: len * 0.35, rootHW: halfW * 0.22, midHW: halfW * 0.34, color: '#fff0b0', alpha: 0.9,
+    });
   }
 
   /**

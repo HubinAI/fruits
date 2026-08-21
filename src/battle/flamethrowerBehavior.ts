@@ -116,6 +116,15 @@ export class FlamethrowerBehavior {
   /** 本实例创建且仍存活的火焰颗粒：handle -> 出生步 */
   private readonly particles = new Map<BodyHandle, number>();
   /**
+   * Q14-B-R2-FINAL：每颗火焰颗粒的渲染元数据（真实 muzzle + 真实前向 fireDir），
+   * 供 Renderer 构建「一整股连续 Fire Jet」。复用 weaponProjectile 真实炮口纯计算，
+   * 与 particles 同步增删，不引入第二套公式。
+   */
+  private readonly particleMeta = new Map<
+    BodyHandle,
+    { muzzle: { x: number; y: number }; fireDir: { x: number; y: number } }
+  >();
+  /**
    * 真正创建火焰颗粒后的开火回调（timestamp 由 Orchestrator 补）。
    * 每颗粒一次 → 喷口持续小型闪光（喷口/火流/真实 projectile 同步）。
    */
@@ -152,6 +161,17 @@ export class FlamethrowerBehavior {
     return [...this.particles.keys()];
   }
 
+  /**
+   * Q14-B-R2-FINAL：获取某颗存活火焰颗粒的渲染元数据（真实 muzzle + 真实前向）。
+   * 供 Runtime 透出到 RenderProjectile，用于 Renderer 构建连续 Fire Jet。
+   * 非存活颗粒返回 undefined。
+   */
+  getParticleMeta(
+    handle: BodyHandle,
+  ): { muzzle: { x: number; y: number }; fireDir: { x: number; y: number } } | undefined {
+    return this.particleMeta.get(handle);
+  }
+
   /** 火焰颗粒寿命（固定步数；供测试/调试） */
   get flameLifetimeSteps(): number {
     return this.lifetimeSteps;
@@ -169,6 +189,7 @@ export class FlamethrowerBehavior {
         world.destroyBody(body);
         destroyed.add(body);
         this.particles.delete(body);
+        this.particleMeta.delete(body);
       }
     }
   }
@@ -180,6 +201,7 @@ export class FlamethrowerBehavior {
     }
     world.destroyBody(handle);
     this.particles.delete(handle);
+    this.particleMeta.delete(handle);
   }
 
   /**
@@ -251,6 +273,11 @@ export class FlamethrowerBehavior {
       gravityScale: 0,
     });
     this.particles.set(proj, this.elapsedSteps);
+    this.particleMeta.set(proj, {
+      muzzle: { x: muzzlePoint.x, y: muzzlePoint.y },
+      // 真实前向（spread 之前）= 武器前向，作为 Fire Jet 主轴（稳定不抖）
+      fireDir: { x: baseDir.x, y: baseDir.y },
+    });
 
     // 每颗粒独立喷口小型闪光（VFX 消费；喷口/火流/真实 projectile 同步；纯表现）
     this.onFire?.({
@@ -269,6 +296,7 @@ export class FlamethrowerBehavior {
       if (this.elapsedSteps - bornStep >= this.lifetimeSteps) {
         world.destroyBody(handle);
         this.particles.delete(handle);
+        this.particleMeta.delete(handle);
       }
     }
   }

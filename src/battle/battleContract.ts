@@ -305,6 +305,13 @@ export interface RenderProjectile {
    * 供 Renderer 沿真实飞行方向绘制长条能量束；不参与碰撞/伤害。
    */
   velocity?: { x: number; y: number };
+  /**
+   * Q14-B-R2-FINAL：喷火器 Fire Jet 根部（真实 muzzle world point）+ 真实前向（spread 之前）。
+   * 仅 flame 视觉使用，由 Runtime 透出（复用 weaponProjectile 真实炮口纯计算），
+   * Renderer 不再为火焰复制一套 muzzle 公式。不参与碰撞/伤害。
+   */
+  muzzle?: RenderVec2;
+  fireDir?: { x: number; y: number };
 }
 
 /**
