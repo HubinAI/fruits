@@ -21,6 +21,7 @@ import { PHYSICS_HZ } from '../physics/units';
 import {
   createPlanckVehicle,
   settlePlanckVehicleToRestPose,
+  rotatePlanckVehicle,
   type PlanckPartRuntime,
   type PlanckVehicle,
 } from './planckVehicleAssembly';
@@ -263,6 +264,10 @@ export class PlanckBattleOrchestrator {
       settlePlanckVehicleToRestPose(this.world, this.vehicleA, this.arena.ground);
       settlePlanckVehicleToRestPose(this.world, this.vehicleB, this.arena.ground);
     }
+
+    // 初始 chassis 倾角（Q13-C-R2 倾斜验收；正常战斗不传 → 不旋转）。
+    if (config.spawnA?.angle != null) rotatePlanckVehicle(this.world, this.vehicleA, config.spawnA.angle);
+    if (config.spawnB?.angle != null) rotatePlanckVehicle(this.world, this.vehicleB, config.spawnB.angle);
 
     // Behavior Runtime（W1-BH-1）：统一遍历两车 parts，由 BehaviorRegistry 创建 runtime。
     // 新增 Weapon/Gadget 只注册 factory，不再修改本生命周期。

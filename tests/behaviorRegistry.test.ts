@@ -88,7 +88,7 @@ describe('W1-BH-1 Behavior Registry', () => {
     expect(shots.every((s) => s.radius > 0)).toBe(true);
   });
 
-  it('2c. thruster runtime：固定周期 windup→thrust→cooldown；thrust 期喷焰出现且 chassis 受真实冲量（方向由安装位置推导）', () => {
+  it('2c. thruster runtime：固定周期 windup→thrust→cooldown；thrust 期喷焰出现且 chassis 受真实冲量（方向=车辆真实前向）', () => {
     const { runtime, world } = makeRuntime('thruster');
     const vx = (): number => world.getLinearVelocity(runtime.vehicle.body).x;
     // 前摇（共 14 步，windupMs≈250 在「第 15 步」切换到 thrust）：喷焰应空、chassis 无推力
@@ -102,13 +102,13 @@ describe('W1-BH-1 Behavior Registry', () => {
     expect(flame.team).toBe('A');
     expect(flame.length).toBeGreaterThan(0);
     expect(flame.width).toBeGreaterThan(0);
-    // makeRuntime 将 thruster 装在 front → 喷焰沿 outward 指向车头外（dirX>0）
-    expect(flame.dirX).toBeGreaterThan(0);
-    // thrust 期 chassis 受真实冲量：front 安装 → 推力方向朝 -X（车被向后推，方向由安装位置推导）
+    // Q13-C-R2：方向=车辆真实前向（facing=+1 → 推进 +X），喷焰=-前向 → dirX<0（车尾反方向）
+    expect(flame.dirX).toBeLessThan(0);
+    // thrust 期 chassis 受真实冲量：沿 +X（车头方向=推进方向，安装位置不再反转方向）
     for (let i = 0; i < 5; i++) runtime.beforePhysicsStep(world, (15 + i) * 16.6667);
     const vAfterThrust = vx();
-    expect(vAfterThrust).toBeLessThan(vEndWindup); // 真实冲量推进（非 setVelocity）
-    expect(vAfterThrust).toBeLessThan(0); // front 安装 → 向 -X 推
+    expect(vAfterThrust).toBeGreaterThan(vEndWindup); // 真实冲量推进（非 setVelocity）
+    expect(vAfterThrust).toBeGreaterThan(0); // facing=+1 → 向 +X 推（车头方向）
     // 进入冷却：喷焰立即消失
     for (let i = 0; i < 40; i++) runtime.beforePhysicsStep(world, (20 + i) * 16.6667);
     expect(runtime.getRenderFlames!(world).length).toBe(0); // 冷却期无喷焰

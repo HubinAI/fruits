@@ -727,12 +727,13 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'Q13-C',
     name: 'Thruster (Gadget Boost)',
     description:
-      '推进器（Q13-C / Q13-C-R1）：A 西瓜车身 + 后方推进器（rear Weld Gadget）。固定周期：短前摇' +
-      ' 0.25s → 强爆发推进 0.3s → 冷却 1.5s，循环。推力方向从真实安装位置推导（车尾→向外喷、' +
-      ' 车向前冲；若改装 front 则自然反转）；冲量只施加自己 chassis、作用点=真实安装点' +
-      '（applyLinearImpulse，不 setVelocity / 不 teleport / 不给对手力 / 不造成 Direct' +
-      ' Weapon Damage）。推进期在真实安装位置画明显大喷焰（≈105×35），停推即消失。本场景' +
-      ' autoDrive=false 以单独呈现「车尾点火→大喷焰→整车突然窜出去」。',
+      '推进器（Q13-C / Q13-C-R1 / Q13-C-R2）：A 西瓜车身 + 后方推进器（rear Weld Gadget）。固定周期：' +
+      ' 短前摇 0.25s → 强爆发推进 0.3s → 冷却 1.5s，循环。推进方向=车辆真实前向（车头方向=推进' +
+      ' 方向；喷焰与推进方向严格相反；Q13-C-R2 删除「安装位置决定前进方向」规则，安装位置只影响' +
+      ' 冲量作用点/力矩）；冲量只施加自己 chassis、作用点=真实安装点（applyLinearImpulse，不' +
+      ' setVelocity / 不 teleport / 不给对手力 / 不造成 Direct Weapon Damage）。推进期在真实安装' +
+      ' 位置画明显大喷焰（≈105×35），停推即消失。本场景 autoDrive=false 以单独呈现「车尾点火→大' +
+      ' 喷焰→整车突然窜出去」。',
     buildA: thrusterCarBuild(),
     buildB: plainCarBuild(),
     config: {

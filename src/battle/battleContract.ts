@@ -23,9 +23,9 @@ export interface BattleConfig {
    * 消除「从空中落下→弹跳→混沌分叉」的 Reset 非确定性。空中出生场景（D-air）设 false。
    */
   settleToGround?: boolean;
-  /** 车辆初始位置与朝向（facing：1 朝右 / -1 朝左，镜像而非旋转） */
-  spawnA?: { x: number; y: number; facing?: 1 | -1 };
-  spawnB?: { x: number; y: number; facing?: 1 | -1 };
+  /** 车辆初始位置与朝向（facing：1 朝右 / -1 朝左，镜像而非旋转；angle：初始 chassis 倾角 rad，用于倾斜验收） */
+  spawnA?: { x: number; y: number; facing?: 1 | -1; angle?: number };
+  spawnB?: { x: number; y: number; facing?: 1 | -1; angle?: number };
   /**
    * 物理引擎选择（仅声明，本队列不主动改写 config）。
    * 缺省未设置时，后续正式入口 / Runtime selector 一律走 Matter（与现状一致）。

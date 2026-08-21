@@ -1939,7 +1939,7 @@ describe('Q13-C 推进器 Gadget', () => {
     );
   }
 
-  it('1. thruster 定义：gadget / box collider / behavior thruster / 固定周期 windup 0.2~0.3s→thrust≈0.3s→cooldown≈1.5s / 从安装位置推导推力方向 / 无 baseDamage', () => {
+  it('1. thruster 定义：gadget / box collider / behavior thruster / 固定周期 windup 0.2~0.3s→thrust≈0.3s→cooldown≈1.5s / 推进方向=车辆真实前向（车头=推进）/ 无 baseDamage', () => {
     const def = registry.functionals.get('thruster')!;
     expect(def.category).toBe('gadget'); // Gadget：改变距离/姿态，不直接伤害
     expect(def.behavior).toBe('thruster');
@@ -2254,7 +2254,7 @@ describe('Q13-C 推进器 Gadget', () => {
       expect(vCool - vThrust).toBeLessThan(0.4); // 冷却段无偷偷加推力
     });
 
-    it('4. 前置安装时推力方向自然反转：car 被向后推（vx<0）、喷焰朝车头外（dirX>0），不穿过车身', () => {
+    it('4. 前置安装不再反转推进方向（Q13-C-R2）：front 装 thruster、A facing=+1 → 车仍向车头方向冲（vx>0）、喷焰朝车尾反方向（dirX<0）', () => {
       const lab = new PhysicsLab(rendererStub);
       lab.loadCustom(frontThrusterSnapshot('A'), plainSnapshot('B'), {
         engine: 'planck',
@@ -2264,7 +2264,7 @@ describe('Q13-C 推进器 Gadget', () => {
       });
       const o = lab.orchestrator as PlanckBattleOrchestrator;
       let sawFlame = false;
-      let minVx = Infinity;
+      let maxVx = -Infinity;
       let dirOk = true;
       // 步进到推力段并采样
       let guard = 0;
@@ -2274,16 +2274,16 @@ describe('Q13-C 推进器 Gadget', () => {
       }
       for (let i = 0; i < 18; i++) {
         lab.step(16.6667);
-        minVx = Math.min(minVx, o.world.getLinearVelocity(o.vehicleA.body).x);
+        maxVx = Math.max(maxVx, o.world.getLinearVelocity(o.vehicleA.body).x);
         const flames = o.getRenderSnapshot().flames ?? [];
         if (flames.length > 0) {
           sawFlame = true;
-          if (flames[0]!.dirX <= 0) dirOk = false; // 前置 → 喷焰朝车头外（+x）
+          if (flames[0]!.dirX >= 0) dirOk = false; // 喷焰朝车尾反方向（dirX<0）
         }
       }
       expect(sawFlame).toBe(true);
       expect(dirOk).toBe(true);
-      expect(minVx).toBeLessThan(-0.5); // 车被明显向后推（方向反转，非喷火穿车）
+      expect(maxVx).toBeGreaterThan(0.5); // 车向车头方向冲（不再被反转向后推）
     });
 
     it('5. 仅自己 chassis 加速、不给对手力：B chassis 不受推进器直接推力', () => {
@@ -2309,6 +2309,110 @@ describe('Q13-C 推进器 Gadget', () => {
       }
       for (let i = 0; i < 40; i++) lab.step(16.6667);
       expect(Math.abs(vxB())).toBeLessThan(0.2); // 对手 chassis 不受推进器直接推力（碰撞位移不在此窗口内）
+    });
+  });
+
+  /* ---------- Q13-C-R2：推进器前进方向修正（删除「安装位置决定前进方向」；车头=推进，喷焰=反方向） ---------- */
+  describe('Q13-C-R2 推进器前进方向修正', () => {
+    function rot(p: { x: number; y: number }, a: number): { x: number; y: number } {
+      const c = Math.cos(a);
+      const s = Math.sin(a);
+      return { x: p.x * c - p.y * s, y: p.x * s + p.y * c };
+    }
+
+    it('1. Q13-C：A facing=+1 → thrustDir.x>0 且 exhaustDir.x<0（车头=推进，喷焰朝车尾反方向）', () => {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-C')!);
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      let guard = 0;
+      while ((o.getRenderSnapshot().flames ?? []).length === 0 && guard < 60) {
+        lab.step(16.6667);
+        guard++;
+      }
+      const flame = (o.getRenderSnapshot().flames ?? [])[0]!;
+      const exhaust = { x: flame.dirX, y: flame.dirY };
+      const thrust = { x: -exhaust.x, y: -exhaust.y };
+      expect(thrust.x).toBeGreaterThan(0);
+      expect(exhaust.x).toBeLessThan(0);
+    });
+
+    it('2. 镜像 facing=-1 → thrustDir.x<0 且 exhaustDir.x>0', () => {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadCustom(thrusterSnapshot('A'), plainSnapshot('B'), {
+        engine: 'planck',
+        autoDrive: false,
+        spawnA: { x: 450, y: 650, facing: -1 },
+        spawnB: { x: 1150, y: 650, facing: 1 },
+      });
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      let guard = 0;
+      while ((o.getRenderSnapshot().flames ?? []).length === 0 && guard < 60) {
+        lab.step(16.6667);
+        guard++;
+      }
+      const flame = (o.getRenderSnapshot().flames ?? [])[0]!;
+      const exhaust = { x: flame.dirX, y: flame.dirY };
+      const thrust = { x: -exhaust.x, y: -exhaust.y };
+      expect(thrust.x).toBeLessThan(0);
+      expect(exhaust.x).toBeGreaterThan(0);
+    });
+
+    it('3. 第一次点火后 A 与 B 水平距离明显缩短（不扩大）', () => {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-C')!);
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      const xA0 = o.world.getPosition(o.vehicleA.body).x;
+      const xB0 = o.world.getPosition(o.vehicleB.body).x;
+      const d0 = Math.abs(xB0 - xA0);
+      // 步进过首轮 windup+thrust（约 14+18=32 步），B 为 plain 无驱动、几乎不动
+      for (let i = 0; i < 32; i++) lab.step(16.6667);
+      const xA1 = o.world.getPosition(o.vehicleA.body).x;
+      const xB1 = o.world.getPosition(o.vehicleB.body).x;
+      const d1 = Math.abs(xB1 - xA1);
+      expect(d1).toBeLessThan(d0 - 10); // 距离明显缩短（A 向 B 冲）
+    });
+
+    it('4. 正常速度：第一次点火当步 A 向敌人冲（vx>0）且喷焰朝车尾反方向（dirX<0）', () => {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadCustom(thrusterSnapshot('A'), plainSnapshot('B'), {
+        engine: 'planck',
+        autoDrive: false,
+        spawnA: { x: 450, y: 650, facing: 1 },
+        spawnB: { x: 1150, y: 650, facing: -1 },
+      });
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      for (let i = 0; i < 14; i++) lab.step(16.6667); // windup
+      lab.step(16.6667); // 进入 thrust 当步
+      const vel = o.world.getLinearVelocity(o.vehicleA.body).x;
+      const flame = (o.getRenderSnapshot().flames ?? [])[0];
+      expect(vel).toBeGreaterThan(0.1); // 向敌人（右）冲
+      expect(flame).toBeDefined();
+      expect(flame!.dirX).toBeLessThan(0); // 喷焰朝车尾反方向（左/后）
+    });
+
+    it('5. 车辆倾斜时推进方向随 chassis 真实角度旋转（不使用固定 world X）', () => {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadCustom(thrusterSnapshot('A'), plainSnapshot('B'), {
+        engine: 'planck',
+        autoDrive: false,
+        settleToGround: false, // 空中出生以保留倾角
+        spawnA: { x: 450, y: 300, facing: 1, angle: 0.5 },
+        spawnB: { x: 1150, y: 650, facing: -1 },
+      });
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      let guard = 0;
+      while ((o.getRenderSnapshot().flames ?? []).length === 0 && guard < 60) {
+        lab.step(16.6667);
+        guard++;
+      }
+      const flame = (o.getRenderSnapshot().flames ?? [])[0]!;
+      const a = o.world.getAngle(o.vehicleA.body);
+      const fwd = rot({ x: o.vehicleA.facing, y: 0 }, a); // chassisForward
+      const expExhaust = { x: -fwd.x, y: -fwd.y };
+      // 喷焰方向 ≈ -chassisForward（随真实倾角旋转）
+      expect(Math.hypot(flame.dirX - expExhaust.x, flame.dirY - expExhaust.y)).toBeLessThan(1e-3);
+      // 且 dirY 明显非零 → 不是固定 world X 向量（证明随 chassis 角度旋转）
+      expect(Math.abs(flame.dirY)).toBeGreaterThan(0.1);
     });
   });
 });

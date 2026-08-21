@@ -1,15 +1,15 @@
 /**
- * Thruster Behavior（Q13-C / Q13-C-R1）：推进器 Gadget——玩家直接看到
+ * Thruster Behavior（Q13-C / Q13-C-R1 / Q13-C-R2）：推进器 Gadget——玩家直接看到
  * 「车尾点火 → 大喷焰 → 整车突然窜出去」。
  * 它改变的是距离和碰撞时机，不直接造成 Weapon Damage。
  *
- * 语义（与项目基线一致，Q13-C-R1 修正推力方向推导）：
+ * 语义（与项目基线一致，Q13-C-R2 修正推进方向 = 车辆真实前向）：
  * - 固定周期（Q13-C-R1 缩短为更强爆发）：短前摇 windupMs（约 0.2~0.3s）→ 爆发推进
  *   thrustMs（约 0.3s）→ 冷却 cooldownMs（约 1.5s），循环；
- * - 推力方向从真实安装位置推导（不再无条件用 vehicle.facing）：
- *   exhaustDir = chassis 中心 → thruster 安装点（part 世界坐标）的 outward 方向；
- *   thrustDir = -exhaustDir。装在后部 → 向后喷火、车向前冲；装在前部 → 向前喷火、车向后推；
- *   位置本身决定物理结果，不增加专属槽 / 隐藏资格；
+ * - 推进方向固定为车辆真实前向（Q13-C-R2：删除「安装位置决定前进方向」规则）：
+ *   车头方向 = 推进方向；chassisForward = rotateLocal({ x: vehicle.facing, y: 0 }, chassisAngle)；
+ *   thrustDir = chassisForward；exhaustDir = -thrustDir（喷焰与推进方向严格相反）。
+ *   安装位置（part 世界坐标）只决定冲量施加点（真实力矩 / 姿态反作用），不反转推进方向；
  * - 冲量只施加到自己 chassis（vehicle.body），作用点 = 真实安装点世界位置（产生自然姿态
  *   反作用）；用 applyLinearImpulse（每固定步一个冲量 = 连续推力），禁止 setVelocity /
  *   teleport / 给对手施加力；
@@ -30,11 +30,11 @@ const FIXED_DT_MS = 1000 / PHYSICS_HZ;
 export interface ThrusterParams {
   /** 前摇（ms）：预警但不施力（Q13-C-R1：缩短到约 0.2~0.3s） */
   windupMs: number;
-  /** 爆发推进（ms）：每固定步沿「安装位置推导的推力方向」施加一次冲量（Q13-C-R1：约 0.3s 强爆发） */
+  /** 爆发推进（ms）：每固定步沿「车辆真实前向 chassisForward」施加一次冲量（Q13-C-R2：约 0.3s 强爆发） */
   thrustMs: number;
   /** 冷却（ms）：不施力、不偷偷加速 */
   cooldownMs: number;
-  /** 每固定步沿 chassis facing 施加的冲量（游戏单位：mass × px/step） */
+  /** 每固定步沿 chassis 真实前向施加的冲量（游戏单位：mass × px/step） */
   thrustImpulse: number;
   /** 喷焰颜色（暖橙喷火） */
   flameColor: string;
@@ -147,32 +147,20 @@ export class ThrusterBehavior {
   }
 
   /**
-   * 从真实安装位置推导推力方向（Q13-C-R1）：
-   * - exhaustDir = chassis 中心 → thruster 安装点（part 世界坐标）的 outward 方向；
-   * - thrustDir = -exhaustDir。装在后部 → 向后喷火、车向前冲；装在前部 → 向前喷火、车向后推。
-   * 不再无条件使用 vehicle.facing，位置本身决定物理结果（不增加专属槽 / 隐藏资格）。
-   * 冲量只施加到自己 chassis（vehicle.body），作用点 = 真实安装点世界位置（产生自然姿态
-   * 反作用）；W1-BH：applyLinearImpulse，不 setVelocity / 不 teleport / 不对手施加力。
+   * 推进方向固定为车辆真实前向（Q13-C-R2：删除「安装位置决定前进方向」规则）：
+   * - chassisForward = rotateLocal({ x: vehicle.facing, y: 0 }, chassisAngle)；
+   * - thrustDir = chassisForward；exhaustDir = -thrustDir（喷焰与推进方向严格相反）。
+   * 安装位置（part 世界坐标）只决定冲量施加点（真实力矩 / 姿态反作用），不反转推进方向；
+   * W1-BH：applyLinearImpulse 只施加到自己 chassis（vehicle.body），不 setVelocity /
+   * 不 teleport / 不对手施加力。
    */
   private computeDirs(
     world: PlanckWorld,
     vehicle: PlanckVehicle,
-    part: PlanckPartRuntime,
   ): { exhaust: { x: number; y: number }; thrust: { x: number; y: number } } {
-    const c = world.getPosition(vehicle.body);
-    const m = world.getPosition(part.body);
-    let ex = m.x - c.x;
-    let ey = m.y - c.y;
-    const len = Math.hypot(ex, ey);
-    if (len < 1e-6) {
-      // 退路：安装点≈中心（不应发生），用 chassis facing 前向量作 exhaust
-      const a = world.getAngle(vehicle.body);
-      const f = rotateLocal({ x: vehicle.facing, y: 0 }, a);
-      return { exhaust: { x: f.x, y: f.y }, thrust: { x: -f.x, y: -f.y } };
-    }
-    ex /= len;
-    ey /= len;
-    return { exhaust: { x: ex, y: ey }, thrust: { x: -ex, y: -ey } };
+    const a = world.getAngle(vehicle.body);
+    const f = rotateLocal({ x: vehicle.facing, y: 0 }, a);
+    return { thrust: { x: f.x, y: f.y }, exhaust: { x: -f.x, y: -f.y } };
   }
 
   private applyThrust(
@@ -180,8 +168,8 @@ export class ThrusterBehavior {
     vehicle: PlanckVehicle,
     part: PlanckPartRuntime,
   ): void {
-    const { thrust } = this.computeDirs(world, vehicle, part);
-    const mount = world.getPosition(part.body);
+    const { thrust } = this.computeDirs(world, vehicle);
+    const mount = world.getPosition(part.body); // 冲量作用点=真实安装点（自然姿态/力矩反作用）
     world.applyLinearImpulse(
       vehicle.body,
       { x: thrust.x * this.params.thrustImpulse, y: thrust.y * this.params.thrustImpulse },
@@ -190,8 +178,9 @@ export class ThrusterBehavior {
   }
 
   /**
-   * 渲染喷焰：仅 thrust 相位返回描述（真实 part 世界坐标 = 安装位置，喷焰沿 outward 方向
-   * 喷出）；非 thrust 相位返回 null → 渲染层立即不画（停推即消失）。
+   * 渲染喷焰：仅 thrust 相位返回描述（根部 = 真实安装位置 part 世界坐标）；喷焰方向与推进
+   * 方向严格相反（exhaustDir = -chassisForward），非 thrust 相位返回 null → 渲染层立即不画
+   * （停推即消失）。
    */
   getFlame(
     world: PlanckWorld,
@@ -200,10 +189,10 @@ export class ThrusterBehavior {
   ): RenderFlame | null {
     if (this.phase !== 'thrust') return null;
     const partPos = world.getPosition(part.body);
-    const { exhaust } = this.computeDirs(world, vehicle, part);
+    const { exhaust } = this.computeDirs(world, vehicle);
     return {
-      // 喷焰根部 = 真实安装位置（part 挂点世界坐标）；喷焰沿 outward（exhaust）方向喷出 →
-      // 装在后部朝车尾外喷、装在前部朝车头外喷，绝不会穿过车身。
+      // 喷焰根部 = 真实安装位置（part 挂点世界坐标）；方向 = exhaustDir = -chassisForward
+      // （车头方向=推进方向 → 喷焰朝车尾反方向喷出；rear 安装即车尾向外，绝不穿车）。
       x: partPos.x,
       y: partPos.y,
       dirX: exhaust.x,

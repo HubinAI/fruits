@@ -401,3 +401,28 @@ export function createPlanckVehicle(
     com,
   };
 }
+
+/**
+ * 将整车（chassis + 轮 + 部件）刚性旋转 angleRad（绕 chassis 当前世界中心）。
+ * 所有 body 同步旋转 → 相对位置/角度保持不变，Weld/Revolute/Prismatic 关节约束不被破坏；
+ * 用于「初始 chassis 倾角」验收（Q13-C-R2 倾斜推进方向），正常战斗不调用（angle 缺省）。
+ */
+export function rotatePlanckVehicle(
+  world: PlanckWorld,
+  vehicle: PlanckVehicle,
+  angleRad: number,
+): void {
+  const pivot = world.getPosition(vehicle.body);
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  const apply = (b: BodyHandle): void => {
+    const p = world.getPosition(b);
+    const dx = p.x - pivot.x;
+    const dy = p.y - pivot.y;
+    world.setPosition(b, pivot.x + (dx * cos - dy * sin), pivot.y + (dx * sin + dy * cos));
+    world.setAngle(b, world.getAngle(b) + angleRad);
+  };
+  apply(vehicle.body);
+  vehicle.wheels.forEach((w) => apply(w.body));
+  vehicle.parts.forEach((p) => apply(p.body));
+}
