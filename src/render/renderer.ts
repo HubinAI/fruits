@@ -765,6 +765,41 @@ export class Renderer {
         ctx.fill();
         continue;
       }
+      if (p.visual === 'flame') {
+        // Q14-B：喷火器火焰颗粒——沿真实飞行方向画「黄白火芯 + 橙红短尾」，
+        // 不画成小圆弹；多颗粒（间隔 ~20px）连续叠成一股短距离火流。
+        const cx = this.sx(p.center.x);
+        const cy = this.sy(p.center.y);
+        const v = p.velocity ?? { x: 1, y: 0 };
+        const len = Math.max(1e-6, Math.hypot(v.x, v.y));
+        const ux = v.x / len;
+        const uy = v.y / len;
+        // 橙红短尾（沿真实速度方向，尾在弹头后方；多颗粒尾尾相连 → 火流）
+        const tailLen = this.ss(26);
+        const tx = cx - ux * tailLen;
+        const ty = cy - uy * tailLen;
+        ctx.globalAlpha = 0.4;
+        ctx.strokeStyle = '#ff5a1e';
+        ctx.lineWidth = Math.max(2, this.ss(5));
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(cx, cy);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+        // 黄白火芯（亮头）
+        ctx.globalAlpha = 0.95;
+        ctx.fillStyle = '#fff0b0';
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.max(1.5, this.ss(p.radius * 1.2)), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffd35a';
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.max(1, this.ss(p.radius * 0.7)), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        continue;
+      }
       ctx.fillStyle = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
       ctx.beginPath();
       ctx.arc(this.sx(p.center.x), this.sy(p.center.y), this.ss(p.radius), 0, Math.PI * 2);

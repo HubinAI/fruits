@@ -519,6 +519,48 @@ const machineGun: FunctionalPartDef = {
 };
 
 /**
+ * Q14-B：喷火器（Weapon）——「持续近战火流」，与机枪（远程连发弹迹）完全不同的选择。
+ * - 伤害载体复用真实 Projectile 链：连续生成小型**短命** projectile（gravityScale=0，
+ *   水平直飞），生命周期由 FlamethrowerBehavior 自己管理（记录出生步，超时真实
+ *   destroyBody）；不做 cone raycast / 不做隐藏距离判定扣血；
+ * - 射程第一版 ≈1.1 个西瓜车身长（≈192px）：正常可读速度（muzzleSpeed 10）+ 很短
+ *   生命周期（flameLifetimeMs 320 ≈ 20 步）自然限定，不是低速慢飘；
+ * - 持续喷射 sprayMs 1000ms（0.8~1.2s）→ 短冷却 cooldownMs 600ms → 再喷；喷口（每
+ *   颗粒小型闪光）、火流（flame 弹迹）、真实 projectile 同步；
+ * - 确定性轻微上下分叉：spreadAnglesDeg [-6/0/+6]° 循环（可复现，禁止随机）；
+ * - 视觉：Flame projectile 沿真实 velocity 画「黄白火芯 + 橙红短尾」，多颗粒连续叠成
+ *   一股火流（不画成小圆弹）；每颗粒真实碰到才伤害（projectileDamage 8）、超时即消散
+ *   ——距离不足时火流自然消失，停火后画面无残留火焰；
+ * - 不修改 Shotgun / MachineGun：两者保持原样，仅新增本 Weapon 复用同一系统。
+ */
+const flamethrower: FunctionalPartDef = {
+  id: 'flamethrower',
+  name: '喷火器',
+  category: 'weapon',
+  mass: 22, // 明显质量：持续喷射反作用自车也承担
+  energy: 30,
+  // 短粗喷口：本地 x∈[0,30]（相对 pivot，向前伸出 30px），高 18；
+  // offset.x=15 → 喷口（collider 前端）世界位置 = pivot + facing*30 ✓。
+  collider: { shape: 'box', width: 30, height: 18, offset: { x: 15, y: 0 } },
+  behavior: 'flamethrower',
+  behaviorParams: {
+    // 持续喷射 1.0s → 短冷却 0.6s → 再喷（循环）
+    sprayMs: 1000,
+    cooldownMs: 600,
+    // 颗粒间隔 33ms（2 固定步）→ 喷射期 ~30 颗、在飞 ~10 颗 → 连续火流
+    projectileIntervalMs: 33,
+    // 单颗寿命 320ms（≈20 步）× muzzleSpeed 10 = 射程 ≈192px（≈1.1 个西瓜长）
+    flameLifetimeMs: 320,
+    muzzleSpeed: 10, // 正常可读速度（非慢珠）；短程来自短寿命而非低速
+    projectileDamage: 8, // 每颗粒小伤（贴近时多颗连续命中）
+    projectileRadius: 4, // 真实碰撞半径小（不扩大命中范围）
+    projectileMass: 1,
+    // 固定确定性分叉：-6°/0°/+6° 循环（上下轻微摆动的火流；禁止随机）
+    spreadAnglesDeg: [-6, 0, 6],
+  },
+};
+
+/**
  * Q13-C / Q13-C-R1：推进器（Gadget）——玩家直接看到「车尾点火 → 大喷焰 → 整车突然窜出去」。
  * 它改变的是距离和碰撞时机，不直接造成 Weapon Damage。
  * - 固定周期（Q13-C-R1 缩短为更强爆发）：短前摇 windupMs（约 0.25s）→ 爆发推进
@@ -702,6 +744,7 @@ export function createRegistry(): ContentRegistry {
       [shotgun.id, shotgun],
       [thruster.id, thruster],
       [machineGun.id, machineGun],
+      [flamethrower.id, flamethrower],
     ]),
   };
 }

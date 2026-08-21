@@ -55,7 +55,7 @@ function makeRuntime(behaviorId: string): {
 
 describe('W1-BH-1 Behavior Registry', () => {
   it('1. 注册表含 cannon/hammer/pushRod/laser/lifter/rammer/saw；未知 behavior → undefined', () => {
-    expect(registeredBehaviorIds().sort()).toEqual(['cannon', 'hammer', 'laser', 'lifter', 'machineGun', 'pushRod', 'rammer', 'saw', 'shotgun', 'thruster']);
+    expect(registeredBehaviorIds().sort()).toEqual(['cannon', 'flamethrower', 'hammer', 'laser', 'lifter', 'machineGun', 'pushRod', 'rammer', 'saw', 'shotgun', 'thruster']);
     expect(getBehaviorFactory('cannon')).toBeDefined();
     expect(getBehaviorFactory('hammer')).toBeDefined();
     expect(getBehaviorFactory('pushRod')).toBeDefined();
@@ -66,6 +66,7 @@ describe('W1-BH-1 Behavior Registry', () => {
     expect(getBehaviorFactory('shotgun')).toBeDefined(); // Q13-B 霰弹炮
     expect(getBehaviorFactory('thruster')).toBeDefined(); // Q13-C 推进器
     expect(getBehaviorFactory('machineGun')).toBeDefined(); // Q14-A 连发机枪
+    expect(getBehaviorFactory('flamethrower')).toBeDefined(); // Q14-B 喷火器
     expect(getBehaviorFactory('ram')).toBeUndefined(); // 未注册（Weld-only）
     expect(getBehaviorFactory('noSuch')).toBeUndefined();
   });

@@ -17,6 +17,7 @@ import {
   createShotgunRuntime,
   createThrusterRuntime,
   createMachineGunRuntime,
+  createFlamethrowerRuntime,
 } from './behaviorRuntime';
 
 export type BehaviorFactory = (ctx: BehaviorContext) => PartBehaviorRuntime;
@@ -33,6 +34,7 @@ const FACTORIES: Record<string, BehaviorFactory> = {
   shotgun: createShotgunRuntime, // Q13-B：霰弹炮齐射（5 发固定扇形真实 projectile / 一次爆闪 + 后坐）
   thruster: createThrusterRuntime, // Q13-C：推进器（固定周期 windup→thrust→cooldown；沿 chassis facing 施力 + 真实喷焰）
   machineGun: createMachineGunRuntime, // Q14-A：连发机枪（固定 burst 节奏，每发真实 projectile + 小闪光 + 单发后坐）
+  flamethrower: createFlamethrowerRuntime, // Q14-B：喷火器（持续短命火焰 projectile 流，生命周期自管理）
 };
 
 /** 按 behavior id 取 factory（未注册 → undefined，Orchestrator 跳过该 part） */

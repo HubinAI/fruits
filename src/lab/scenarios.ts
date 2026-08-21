@@ -291,6 +291,20 @@ function machineGunCarBuild(): BuildSnapshot {
   };
 }
 
+/** Q14-B：喷火器车——西瓜车身 + 前方喷火器（front Weld 短粗喷口，持续短命火焰 projectile 流） */
+function flamethrowerCarBuild(): BuildSnapshot {
+  return {
+    id: 'flamethrowerCar',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'flamethrower' }],
+  };
+}
+
 /** Q11-A：楔铲车——西瓜车身 + 前方楔铲（Gadget，无 Direct Damage，无主动动画） */
 function wedgeShovelBuild(): BuildSnapshot {
   return {
@@ -776,6 +790,28 @@ export const SCENARIOS: ScenarioDef[] = [
       autoDrive: true,
       spawnA: { x: 450, y: 650, facing: 1 },
       spawnB: { x: 900, y: 650, facing: -1 }, // 中等距离：正常速度 1 秒内看清连续扫射 + 多弹命中
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Q14-B',
+    name: 'Flamethrower (Close Flame)',
+    description:
+      '喷火器（Q14-B）：A 西瓜车身 + 前方喷火器（front Weld 短粗喷口）。持续喷射 1.0s →' +
+      ' 短冷却 0.6s → 再喷，循环：喷口点燃（每颗粒小型闪光）→ 一股短距离火流持续喷向前方。' +
+      ' 伤害载体复用真实 Projectile 链：连续生成小型短命火焰 projectile（gravityScale=0、' +
+      ' 生命周期由 behavior 自管理、超时真实 destroy）——射程 ≈1.1 个西瓜车身长（正常可读速度 +' +
+      ' 很短寿命，非低速慢飘），贴近敌人才有效；确定性 -6°/0°/+6° 循环分叉（无随机）；视觉为' +
+      ' 黄白火芯 + 橙红短尾连续叠成火流（不画小圆弹）。每颗粒真实碰到才伤害（Miss 就是 Miss）、' +
+      ' 距离不足时火流自然消散，停火后画面无残留火焰。不做 cone raycast / 不做隐藏距离扣血 /' +
+      ' 不建 Particle Foundation / 不改 Shotgun / MachineGun。',
+    buildA: flamethrowerCarBuild(),
+    buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 660, y: 650, facing: -1 }, // 近距离：火流射程内，一眼看到「持续喷火 + 贴近连续命中」
     },
     camera: { fit: 'vehicles' },
   },

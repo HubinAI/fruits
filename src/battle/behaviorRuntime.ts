@@ -28,6 +28,7 @@ import { SawBehavior } from './sawBehavior';
 import { ShotgunBehavior } from './shotgunBehavior';
 import { ThrusterBehavior } from './thrusterBehavior';
 import { MachineGunBehavior } from './machineGunBehavior';
+import { FlamethrowerBehavior } from './flamethrowerBehavior';
 
 /** Behavior factory 输入（由 Orchestrator 在构造时提供） */
 export interface BehaviorContext {
@@ -443,6 +444,70 @@ class MachineGunRuntime implements PartBehaviorRuntime {
 
 export function createMachineGunRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
   return new MachineGunRuntime(ctx);
+}
+
+/* ---------- Flamethrower（Q14-B）：喷火器（持续短命火焰 projectile 流，生命周期自管理） ---------- */
+
+class FlamethrowerRuntime implements PartBehaviorRuntime {
+  readonly vehicle: PlanckVehicle;
+  readonly part: PlanckPartRuntime;
+  private readonly behavior: FlamethrowerBehavior;
+  private timeMs = 0;
+
+  constructor(ctx: BehaviorContext) {
+    this.vehicle = ctx.vehicle;
+    this.part = ctx.part;
+    this.behavior = new FlamethrowerBehavior(ctx.part, (e) => {
+      ctx.emit({ ...e, timestamp: this.timeMs });
+    });
+  }
+
+  beforePhysicsStep(world: PlanckWorld, timeMs: number): void {
+    this.timeMs = timeMs;
+    this.behavior.stepFixed(world, this.vehicle, this.part);
+  }
+
+  afterPhysicsStep(
+    world: PlanckWorld,
+    projectileFacts: readonly ProjectileContactFact[],
+  ): void {
+    this.behavior.consumeProjectileFacts(world, projectileFacts);
+  }
+
+  destroyOutOfBoundsProjectiles(
+    world: PlanckWorld,
+    isOutOfBounds: (pos: { x: number; y: number }) => boolean,
+  ): void {
+    for (const p of this.behavior.aliveProjectiles) {
+      if (isOutOfBounds(world.getPosition(p))) {
+        this.behavior.destroyProjectile(world, p);
+      }
+    }
+  }
+
+  getRenderProjectiles(world: PlanckWorld): RenderProjectile[] {
+    const out: RenderProjectile[] = [];
+    for (const p of this.behavior.aliveProjectiles) {
+      const tag = world.getOwnerTag(p);
+      if (!tag || !tag.team) continue; // 已销毁 / 无归属：不进入快照
+      const bounds = world.getBounds(p);
+      const v = world.getLinearVelocity(p);
+      out.push({
+        center: world.getPosition(p),
+        radius: (bounds.maxX - bounds.minX) / 2,
+        team: tag.team,
+        // Q14-B：火焰颗粒画成「黄白火芯 + 橙红短尾」火流（复用 flame 渲染，
+        // 不画小圆弹；不扩大真实命中范围）。
+        visual: 'flame',
+        velocity: { x: v.x, y: v.y },
+      });
+    }
+    return out;
+  }
+}
+
+export function createFlamethrowerRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
+  return new FlamethrowerRuntime(ctx);
 }
 
 export type { BodyHandle };

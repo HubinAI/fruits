@@ -46,4 +46,7 @@ export const PART_OPTIONS: PartOption[] = [
   // Q14-A：机枪 Weapon（固定 burst 节奏 7 发 × 100ms 间隔 → 600ms 连射 → 冷却 1.1s；
   //   每发真实 projectile 沿真实炮口方向高速水平短弹迹 + 小型枪口闪光 + 单发小后坐）
   { v: 'machineGun', t: '机枪' },
+  // Q14-B：喷火器 Weapon（持续喷射 1.0s 短命火焰 projectile 流 → 短冷却 0.6s；
+  //   射程 ≈1.1 个西瓜长，贴近才有效；黄白火芯+橙红短尾连续叠成火流）
+  { v: 'flamethrower', t: '喷火器' },
 ];

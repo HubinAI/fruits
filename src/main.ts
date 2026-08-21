@@ -388,6 +388,10 @@ const presentation = new BattlePresentationController({
       // Q14-A：机枪每发独立小型枪口闪光（更小更短，连发时呈快速小闪点，
       // 与炮/镭射的明显爆闪一眼区分；纯表现，不参与伤害）。
       renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y, '#ffe9a8', 4);
+    } else if (ev.behavior === 'flamethrower') {
+      // Q14-B：喷火器每颗粒独立喷口小闪（橙黄，密集连闪 → 喷口持续点燃感；
+      // 火流主体由 flame 弹迹承担；纯表现，不参与伤害）。
+      renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y, '#ffb24a', 3);
     } else {
       renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y);
     }
@@ -395,7 +399,9 @@ const presentation = new BattlePresentationController({
   // Q11-C-R3-FINAL：laser 不再播 Cannon 的 'fire' 音（避免与自身爆鸣混叠、保证
   // 明显区别 Cannon）；laser 的 fire 音由 onWeaponChargeEnd → stopLaserCharge 承担。
   onFireSound: (ev) => {
-    if (ev.behavior !== 'laser') sfx.play('fire');
+    // Q14-B：喷火器每颗粒都触发 fire 事件（~30/s），不逐发播 'fire' 音（避免连续噪音）；
+    // 喷口/火流表现由渲染层承担。
+    if (ev.behavior !== 'laser' && ev.behavior !== 'flamethrower') sfx.play('fire');
   },
   // Q11-C：蓄能光点（laser）——partId 为 key，发射完成清除
   // Q11-C-R2：蓄能音效升调/增强（progress 驱动）
