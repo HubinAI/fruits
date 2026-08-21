@@ -785,10 +785,13 @@ export class Renderer {
       const dy = f.dirY / len;
       const px = -dy; // 垂直方向（喷焰半宽方向）
       const py = dx;
+      // Q13-C-R1：轻微长度抖动（确定性、非随机），让大喷焰有「活」的喷发感。
+      const flick = 1 + 0.05 * Math.sin(performance.now() / 35 + (f.x + f.y) * 0.03);
+      const flameLen = f.length * flick;
       const rx = this.sx(f.x);
       const ry = this.sy(f.y);
-      const tipX = this.sx(f.x + dx * f.length);
-      const tipY = this.sy(f.y + dy * f.length);
+      const tipX = this.sx(f.x + dx * flameLen);
+      const tipY = this.sy(f.y + dy * flameLen);
       const half = (ww: number): [number, number, number, number] => {
         const blx = this.sx(f.x + px * ww);
         const bly = this.sy(f.y + py * ww);

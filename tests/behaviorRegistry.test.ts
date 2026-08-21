@@ -88,27 +88,29 @@ describe('W1-BH-1 Behavior Registry', () => {
     expect(shots.every((s) => s.radius > 0)).toBe(true);
   });
 
-  it('2c. thruster runtime：固定周期 windup→thrust→cooldown；thrust 期喷焰出现且 chassis 受真实冲量', () => {
+  it('2c. thruster runtime：固定周期 windup→thrust→cooldown；thrust 期喷焰出现且 chassis 受真实冲量（方向由安装位置推导）', () => {
     const { runtime, world } = makeRuntime('thruster');
     const vx = (): number => world.getLinearVelocity(runtime.vehicle.body).x;
-    // 前摇（共 23 步，windupMs≈400 在「第 24 步」切换到 thrust）：喷焰应空、chassis 无推力
-    for (let i = 0; i < 23; i++) runtime.beforePhysicsStep(world, i * 16.6667);
+    // 前摇（共 14 步，windupMs≈250 在「第 15 步」切换到 thrust）：喷焰应空、chassis 无推力
+    for (let i = 0; i < 14; i++) runtime.beforePhysicsStep(world, i * 16.6667);
     expect(runtime.getRenderFlames!(world).length).toBe(0); // 前摇无喷焰
     const vEndWindup = vx();
-    // 进入 thrust（第 24 步切换并开始施力）
-    runtime.beforePhysicsStep(world, 23 * 16.6667);
+    // 进入 thrust（第 15 步切换并开始施力）
+    runtime.beforePhysicsStep(world, 14 * 16.6667);
     expect(runtime.getRenderFlames!(world).length).toBe(1); // 推进期喷焰出现
     const flame = runtime.getRenderFlames!(world)[0]!;
     expect(flame.team).toBe('A');
     expect(flame.length).toBeGreaterThan(0);
     expect(flame.width).toBeGreaterThan(0);
-    // thrust 期 chassis 受真实冲量 → 沿 +X（facing=1）vx 增大
-    for (let i = 0; i < 5; i++) runtime.beforePhysicsStep(world, (24 + i) * 16.6667);
+    // makeRuntime 将 thruster 装在 front → 喷焰沿 outward 指向车头外（dirX>0）
+    expect(flame.dirX).toBeGreaterThan(0);
+    // thrust 期 chassis 受真实冲量：front 安装 → 推力方向朝 -X（车被向后推，方向由安装位置推导）
+    for (let i = 0; i < 5; i++) runtime.beforePhysicsStep(world, (15 + i) * 16.6667);
     const vAfterThrust = vx();
-    expect(vAfterThrust).toBeGreaterThan(vEndWindup); // 真实冲量推进（非 setVelocity）
-    expect(vAfterThrust).toBeGreaterThan(0);
+    expect(vAfterThrust).toBeLessThan(vEndWindup); // 真实冲量推进（非 setVelocity）
+    expect(vAfterThrust).toBeLessThan(0); // front 安装 → 向 -X 推
     // 进入冷却：喷焰立即消失
-    for (let i = 0; i < 40; i++) runtime.beforePhysicsStep(world, (30 + i) * 16.6667);
+    for (let i = 0; i < 40; i++) runtime.beforePhysicsStep(world, (20 + i) * 16.6667);
     expect(runtime.getRenderFlames!(world).length).toBe(0); // 冷却期无喷焰
   });
 
