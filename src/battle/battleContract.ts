@@ -293,11 +293,13 @@ export interface RenderProjectile {
   /**
    * Q11-C-R1：纯渲染视觉标记（只影响绘制，不参与碰撞/伤害）。
    * 'laser' = 镭射弹（能量束表现，一眼区别于 Cannon 弹）；
-   * 'tracer' = 霰弹/机枪弹（沿真实飞行方向画短高速弹迹，一眼区别于普通圆点弹）；
+   * 'tracer' = 霰弹炮弹（沿真实飞行方向画短高速弹迹，一眼区别于普通圆点弹）；
+   * 'machineGunTracer' = 机枪弹（Q14-A-R1：细、亮、暖白高速弹链——独立于霰弹
+   *   tracer 的机枪专属视觉身份，不再复用粗青能量条；仍只读真实 center+velocity）；
    * 'flame' = 喷火器火焰颗粒（Q14-B：沿真实 velocity 画黄白火芯 + 橙红短尾，
    *   多颗粒连续叠成一股短距离火流，不画成小圆弹）。
    */
-  visual?: 'laser' | 'tracer' | 'flame';
+  visual?: 'laser' | 'tracer' | 'machineGunTracer' | 'flame';
   /**
    * Q11-C-R2：真实飞行方向（世界 px/step，读自引擎速度，只读渲染标记）。
    * 供 Renderer 沿真实飞行方向绘制长条能量束；不参与碰撞/伤害。

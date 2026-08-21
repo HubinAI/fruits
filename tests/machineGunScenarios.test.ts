@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { getScenario, SCENARIOS } from '../src/lab/scenarios';
 import { PhysicsLab } from '../src/lab/physicsLab';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
-import type { Renderer } from '../src/render/renderer';
+import { Renderer } from '../src/render/renderer';
 import {
   isDamageEvent,
   isWeaponFireEvent,
@@ -209,7 +209,7 @@ describe('Q14-A 连发机枪 Weapon', () => {
     expect(ps.length).toBeGreaterThanOrEqual(3); // 40 步时 ≥3 发同时飞行
     const xs = new Set<number>();
     for (const p of ps) {
-      expect(p.visual).toBe('tracer'); // 高速短弹迹视觉（复用 tracer 渲染）
+      expect(p.visual).toBe('machineGunTracer'); // Q14-A-R1：机枪独立弹链视觉（细亮暖白，非霰弹 tracer）
       const v = p.velocity ?? { x: 0, y: 0 };
       expect(v.x).toBeGreaterThan(9); // muzzleSpeed 12 主导
       expect(v.x).toBeLessThan(14);
@@ -330,5 +330,119 @@ describe('Q14-A 场景出生几何', () => {
     expect(vehicleRightEdge(o, o.vehicleA)).toBeLessThan(vehicleLeftEdge(o, o.vehicleB));
     // 场景注册在 SCENARIOS 列表（开发工具 Scenario 下拉框可直接选 Q14-A）
     expect(SCENARIOS.some((s) => s.id === 'Q14-A')).toBe(true);
+  });
+});
+
+/* ---------- Q14-A-R1：机枪视觉身份 + Scenario 隔离验收 ---------- */
+describe('Q14-A-R1 机枪视觉身份与隔离验收', () => {
+  it('1. 视觉身份分离：机枪 machineGunTracer；霰弹仍 tracer（霰弹表现完全不变）', () => {
+    // 机枪弹：独立视觉标记
+    const labMg = new PhysicsLab(rendererStub);
+    labMg.loadCustom(machineGunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck', autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 }, spawnB: { x: 2000, y: 650, facing: -1 },
+    });
+    const oMg = requirePlanck(labMg);
+    let fired = false;
+    oMg.onCombatEvent((e) => { if (isWeaponFireEvent(e) && e.behavior === 'machineGun') fired = true; });
+    for (let i = 0; i < 60 && !fired; i++) labMg.step(16.6667);
+    for (let i = 0; i < 3; i++) labMg.step(16.6667);
+    const mgPs = oMg.getRenderSnapshot().projectiles ?? [];
+    expect(mgPs.length).toBeGreaterThan(0);
+    for (const p of mgPs) expect(p.visual).toBe('machineGunTracer');
+
+    // 霰弹弹：仍是原 tracer（不被机枪改到）
+    const labSg = new PhysicsLab(rendererStub);
+    labSg.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck', autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 }, spawnB: { x: 2000, y: 650, facing: -1 },
+    });
+    const oSg = requirePlanck(labSg);
+    for (let i = 0; i < 6; i++) labSg.step(16.6667);
+    const sgPs = oSg.getRenderSnapshot().projectiles ?? [];
+    expect(sgPs.length).toBe(5);
+    for (const p of sgPs) expect(p.visual).toBe('tracer'); // 霰弹身份不变
+  });
+
+  it('2. 枪口火舌 VFX：方向性短火舌（单位方向归一化 + TTL 60ms）+ render 实际绘制', () => {
+    const ctx = new Proxy(
+      { calls: [] as string[], strokes: 0 },
+      {
+        get(t, prop) {
+          if (prop === 'calls' || prop === 'strokes') return (t as Record<string, unknown>)[prop as string];
+          if (prop === 'measureText') return () => ({ width: 10 });
+          if (prop === 'canvas') return undefined;
+          return () => {
+            (t.calls as string[]).push(String(prop));
+            if (prop === 'stroke') t.strokes++;
+          };
+        },
+        set() {
+          return true;
+        },
+      },
+    );
+    const canvas = { width: 0, height: 0, clientWidth: 1000, clientHeight: 500, getContext: () => ctx };
+    // 项目惯例：node 测试环境补 window（Renderer.resize 读 devicePixelRatio）
+    (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
+    const renderer = new Renderer(canvas as unknown as HTMLCanvasElement);
+    renderer.resize(1600, 900);
+
+    // 方向性火舌：真实 position + direction（单位化）
+    renderer.spawnMuzzleTongue(100, 200, 1, 0);
+    renderer.spawnMuzzleTongue(100, 200, 3, 4); // 非单位方向 → 归一化
+    const ts = renderer.activeMuzzleTongues;
+    expect(ts.length).toBe(2);
+    expect(ts[0]!.ttl).toBe(60); // 50~70ms 区间
+    expect(ts[0]!.dirX).toBe(1);
+    expect(ts[0]!.dirY).toBe(0);
+    expect(ts[1]!.dirX).toBeCloseTo(0.6);
+    expect(ts[1]!.dirY).toBeCloseTo(0.8);
+
+    // render 实际绘制（沿方向画火舌 → stroke 调用；不 throw）
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(getScenario('Q14-A')!);
+    const o = requirePlanck(lab);
+    expect(() => renderer.render(o)).not.toThrow();
+    expect(ctx.strokes).toBeGreaterThan(0);
+  });
+
+  it('3. Q14-A Scenario 隔离验收：B=banana、autoDrive=false、整 burst 无车体接触、子弹命中香蕉', () => {
+    const sc = getScenario('Q14-A')!;
+    expect(sc.config.autoDrive).toBe(false);
+    expect(sc.buildA.bodyDefId).toBe('watermelonBody');
+    expect(sc.buildB.bodyDefId).toBe('bananaBody'); // 正常玩家香蕉目标（非 boxBody/tallBody 代替）
+
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(sc);
+    const o = requirePlanck(lab);
+    const fires: Array<{ step: number }> = [];
+    const hits: DamageEvent[] = [];
+    let step = 0;
+    o.onCombatEvent((e) => {
+      if (isWeaponFireEvent(e) && e.behavior === 'machineGun') fires.push({ step });
+      if (isDamageEvent(e) && e.damageSource === 'weapon') hits.push(e);
+    });
+
+    // 一个完整 burst（7 发 × 100ms = 600ms ≈ 36 步）期间：每步两车无车体接触
+    let minGap = Infinity;
+    for (; step < 40; step++) {
+      lab.step(16.6667);
+      minGap = Math.min(
+        minGap,
+        vehicleLeftEdge(o, o.vehicleB) - vehicleRightEdge(o, o.vehicleA),
+      );
+    }
+    expect(minGap).toBeGreaterThan(0); // 从未车体接触
+    expect(fires.length).toBeGreaterThanOrEqual(7); // 整 burst 完整可见
+
+    // 子弹命中香蕉（真实 projectile 伤害，Miss 不成立；bananaBody 基础 HP=900）
+    for (; step < 100; step++) lab.step(16.6667);
+    expect(hits.length).toBeGreaterThanOrEqual(1);
+    for (const h of hits) {
+      expect(h.behavior).toBe('machineGun');
+      expect(h.damage).toBe(20);
+    }
+    expect(o.vehicleB.hp).toBe(900 - hits.length * 20);
   });
 });

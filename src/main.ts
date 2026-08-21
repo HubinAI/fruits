@@ -385,9 +385,14 @@ const presentation = new BattlePresentationController({
         ev.worldDirection.y,
       );
     } else if (ev.behavior === 'machineGun') {
-      // Q14-A：机枪每发独立小型枪口闪光（更小更短，连发时呈快速小闪点，
-      // 与炮/镭射的明显爆闪一眼区分；纯表现，不参与伤害）。
-      renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y, '#ffe9a8', 4);
+      // Q14-A-R1：机枪枪口火舌——沿真实 fire 方向短促窄火舌（15~25px、TTL ~60ms），
+      // 不再只是难以看到的小圆点；连发时呈枪口连续快速闪动（纯表现，不参与伤害）。
+      renderer.spawnMuzzleTongue(
+        ev.worldPosition.x,
+        ev.worldPosition.y,
+        ev.worldDirection.x,
+        ev.worldDirection.y,
+      );
     } else if (ev.behavior === 'flamethrower') {
       // Q14-B：喷火器每颗粒独立喷口小闪（橙黄，密集连闪 → 喷口持续点燃感；
       // 火流主体由 flame 弹迹承担；纯表现，不参与伤害）。

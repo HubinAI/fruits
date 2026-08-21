@@ -147,6 +147,18 @@ interface ShotgunFan {
 }
 const SHOTGUN_FAN_TTL = 100; // ms：30fps 下 ≈ 3 帧，可读 2~3 帧
 
+/** Q14-A-R1：机枪方向性枪口火舌——短促窄火舌沿真实 fire 方向展开（非难以看到的小圆点）。
+ *  纯表现，不参与碰撞/伤害；不建通用 VFX Foundation。 */
+interface MuzzleTongue {
+  x: number; // 枪口世界位置
+  y: number;
+  dirX: number; // 真实 fire 方向（单位向量）
+  dirY: number;
+  bornAt: number;
+  ttl: number; // ms
+}
+const MUZZLE_TONGUE_TTL = 60; // ms：50~70 区间（短促，连发时呈连续快闪火舌）
+
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private transform: ScreenTransform = { scale: 1, offsetX: 0, offsetY: 0 };
@@ -162,6 +174,8 @@ export class Renderer {
   private laserBeams: LaserBeam[] = [];
   /** Q13-B-R1：霰弹炮口扇形爆闪 VFX 数组（发射后驻留 ~100ms 衰减，纯表现） */
   private shotgunFans: ShotgunFan[] = [];
+  /** Q14-A-R1：机枪方向性枪口火舌 VFX 数组（发射后驻留 ~60ms 衰减，纯表现） */
+  private muzzleTongues: MuzzleTongue[] = [];
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -301,6 +315,26 @@ export class Renderer {
     return this.shotgunFans.filter((f) => now - f.bornAt < f.ttl);
   }
 
+  /** Q14-A-R1：机枪方向性枪口火舌——沿真实 fire 方向短促窄火舌（长 15~25px、TTL 50~70ms）。
+   *  纯表现：真实 Collider / 伤害范围绝不扩大；不参与碰撞/伤害；不建通用 VFX Foundation。 */
+  spawnMuzzleTongue(x: number, y: number, dirX: number, dirY: number): void {
+    const len = Math.max(1e-6, Math.hypot(dirX, dirY));
+    this.muzzleTongues.push({
+      x,
+      y,
+      dirX: dirX / len,
+      dirY: dirY / len,
+      bornAt: performance.now(),
+      ttl: MUZZLE_TONGUE_TTL,
+    });
+  }
+
+  /** Q14-A-R1：当前存活的机枪枪口火舌（供测试断言几何 / 存活）；过期自动过滤。 */
+  get activeMuzzleTongues(): readonly MuzzleTongue[] {
+    const now = performance.now();
+    return this.muzzleTongues.filter((t) => now - t.bornAt < t.ttl);
+  }
+
   /** Q11-C：蓄能光点——laser 蓄能期间每固定步 upsert（同 partId 更新 progress）。
    *  纯表现（肉眼可见「大招要来了」）；不参与伤害/命中判定。 */
   spawnCharge(key: string, x: number, y: number, progress: number): void {
@@ -420,6 +454,9 @@ export class Renderer {
 
     // Q13-B-R1：霰弹炮口扇形爆闪 VFX（发射后沿 fire 方向驻留 ~100ms 衰减；纯表现）
     this.drawShotgunFans();
+
+    // Q14-A-R1：机枪方向性枪口火舌 VFX（发射后沿 fire 方向驻留 ~60ms 衰减；纯表现）
+    this.drawMuzzleTongues();
 
     // Debug overlay
     if (debugDraw) debugDraw(ctx, t);
@@ -765,6 +802,45 @@ export class Renderer {
         ctx.fill();
         continue;
       }
+      if (p.visual === 'machineGunTracer') {
+        // Q14-A-R1：机枪弹——细、亮、暖白高速弹链（独立于霰弹 tracer 的身份）。
+        // 长约 70px、核心 2~3px、淡 team 色外沿；只读真实 center+velocity，不扩大 Collider。
+        const cx = this.sx(p.center.x);
+        const cy = this.sy(p.center.y);
+        const v = p.velocity ?? { x: 1, y: 0 };
+        const len = Math.max(1e-6, Math.hypot(v.x, v.y));
+        const ux = v.x / len;
+        const uy = v.y / len;
+        const CHAIN = this.ss(70); // 65~75 world px
+        const tx = cx - ux * CHAIN;
+        const ty = cy - uy * CHAIN;
+        const col = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
+        // 淡 team 色外沿（很淡，弹链身份提示）
+        ctx.globalAlpha = 0.18;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = Math.max(2.5, this.ss(4));
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(cx, cy);
+        ctx.stroke();
+        // 细亮暖白主体（核心 2~3px）
+        ctx.globalAlpha = 0.95;
+        ctx.strokeStyle = '#fff2c8';
+        ctx.lineWidth = Math.max(1.5, this.ss(2.5));
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(cx, cy);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+        // 弹头亮核（真实 Collider 半径，不扩大命中范围）
+        ctx.fillStyle = '#fff6d8';
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.max(1, this.ss(p.radius)), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        continue;
+      }
       if (p.visual === 'flame') {
         // Q14-B：喷火器火焰颗粒——沿真实飞行方向画「黄白火芯 + 橙红短尾」，
         // 不画成小圆弹；多颗粒（间隔 ~20px）连续叠成一股短距离火流。
@@ -1048,6 +1124,48 @@ export class Renderer {
       ctx.fillStyle = '#fff6d8';
       ctx.beginPath();
       ctx.arc(cx, cy, this.ss(6), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** Q14-A-R1：机枪方向性枪口火舌绘制——沿真实 fire 方向的短促窄火舌（15~25px，
+   *  TTL ~60ms），连发时呈枪口连续快速闪动；纯表现，不参与碰撞/伤害。 */
+  private drawMuzzleTongues(): void {
+    const ctx = this.ctx;
+    const now = performance.now();
+    this.muzzleTongues = this.muzzleTongues.filter((t) => now - t.bornAt < t.ttl);
+    for (const t of this.muzzleTongues) {
+      const age = (now - t.bornAt) / t.ttl; // 0→1
+      const decay = 1 - age;
+      const cx = this.sx(t.x);
+      const cy = this.sy(t.y);
+      const L = this.ss(20); // 火舌长 15~25px
+      const tx = cx + t.dirX * L;
+      const ty = cy + t.dirY * L;
+      // 外沿暖橙（窄火舌轮廓）
+      ctx.globalAlpha = 0.55 * decay;
+      ctx.strokeStyle = '#ff9a3c';
+      ctx.lineWidth = Math.max(2, this.ss(6));
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+      // 内芯暖白（细亮）
+      ctx.globalAlpha = 0.95 * decay;
+      ctx.strokeStyle = '#fff2c8';
+      ctx.lineWidth = Math.max(1.2, this.ss(2.5));
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+      // 喷口亮核
+      ctx.globalAlpha = decay;
+      ctx.fillStyle = '#fff6d8';
+      ctx.beginPath();
+      ctx.arc(cx, cy, this.ss(2.5), 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
     }

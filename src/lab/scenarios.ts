@@ -776,20 +776,26 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'Q14-A',
     name: 'MachineGun (Burst Weapon)',
     description:
-      '机枪（Q14-A）：A 西瓜车身 + 前方机枪（front Weld 细长枪管，固定 burst 连发）。固定节奏：' +
+      '机枪（Q14-A / Q14-A-R1）：A 西瓜车身 + 前方机枪（front Weld 细长枪管，固定 burst 连发）。固定节奏：' +
       ' 一次 burst 7 发（发间隔 100ms，burst 总持续 600ms）→ 冷却 1100ms，循环。每发都是真实' +
       ' projectile，全部沿真实炮口方向（part 世界姿态 × facing）高速水平直线（gravityScale=0）' +
-      ' 射出——枪口连续小型闪光 + 7 发高速短弹迹连成一条连续压制弹线（复用正式 Projectile / CCD /' +
-      ' Owner Filter / ContactRouter 链，不创建第二套系统）；每发真实碰到才伤害（Miss 就是 Miss），' +
-      ' 每发单次小后坐直接作用于本车 chassis，连续 burst 后整车轻微累计后顿。无随机散布 / 不自动' +
-      ' 瞄准 / 不做 hitscan / 不 raycast / 不改 Cannon / Shotgun / Laser。',
+      ' 射出——Q14-A-R1 视觉：枪口沿真实 fire 方向短促窄火舌连续快闪 + 每发细亮暖白高速弹链' +
+      ' （machineGunTracer，独立于霰弹 tracer 身份；复用正式 Projectile / CCD / Owner Filter /' +
+      ' ContactRouter 链，不创建第二套系统）。B 为正常玩家香蕉目标（bananaTargetBuild），' +
+      ' autoDrive=false 隔离验收：按真实 bounds 留距（A 右缘含枪管 568 / 香蕉左缘 ~680），一个完整' +
+      ' burst 全程可见、子弹直线命中香蕉、两车 burst 内不发生车体接触。每发真实碰到才伤害（Miss' +
+      ' 就是 Miss）、每发单次小后坐作用于本车 chassis。无随机散布 / 不自动瞄准 / 不做 hitscan /' +
+      ' 不 raycast / 不改 Cannon / Shotgun / Laser。',
     buildA: machineGunCarBuild(),
-    buildB: plainCarBuild(),
+    buildB: bananaTargetBuild(),
     config: {
       engine: 'planck',
-      autoDrive: true,
+      // Q14-A-R1：隔离验收——两车静止，完整 burst 不被车体贴脸碰撞遮住射击表现
+      autoDrive: false,
       spawnA: { x: 450, y: 650, facing: 1 },
-      spawnB: { x: 900, y: 650, facing: -1 }, // 中等距离：正常速度 1 秒内看清连续扫射 + 多弹命中
+      // Q14-A-R1：按真实 bounds 取距——A 右缘 568（含枪管）与香蕉左缘（x-95=680）留 ~112px：
+      // 整个 burst（7 发 × 100ms）完整可见、子弹直线命中香蕉、两车 burst 内不发生车体接触。
+      spawnB: { x: 775, y: 650, facing: -1 },
     },
     camera: { fit: 'vehicles' },
   },

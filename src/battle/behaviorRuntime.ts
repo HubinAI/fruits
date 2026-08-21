@@ -432,9 +432,9 @@ class MachineGunRuntime implements PartBehaviorRuntime {
         center: world.getPosition(p),
         radius: (bounds.maxX - bounds.minX) / 2,
         team: tag.team,
-        // Q14-A：机枪弹画成沿真实飞行方向的高速短弹迹（复用 tracer 渲染，
-        // 与霰弹同一视觉标记；不扩大真实命中范围）。
-        visual: 'tracer',
+        // Q14-A-R1：机枪弹用独立视觉标记 machineGunTracer（细亮暖白弹链），
+        // 不再直接复用霰弹的 tracer 视觉（两者身份分开）；仍只读真实 center+velocity。
+        visual: 'machineGunTracer',
         velocity: { x: v.x, y: v.y },
       });
     }
