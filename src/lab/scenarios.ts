@@ -705,19 +705,20 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'Q13-B',
     name: 'Shotgun (Scatter Weapon)',
     description:
-      '霰弹炮（Q13-B）：A 西瓜车身 + 前方霰弹炮（front Weld 短粗枪管，一次齐射 5 发' +
-      '固定扇形 -12/-6/0/+6/+12° 真实 projectile，复用正式 Projectile / CCD / Owner' +
-      ' Filter 链）。B 无攻击件目标车（boxBody）。近距离 5 发聚拢 → 多弹命中；远处' +
-      '自然散开（扇形角 + 重力）→ 部分/全部 Miss（无距离判定消失伤害）。发射瞬间' +
-      '一次明显炮口爆闪 + 真实后坐；每发独立走 ContactRouter 正式 projectileDamage。' +
-      '无随机散布 / 不自动瞄准 / 不做扇形 raycast / 不新建 Projectile 系统。',
+      '霰弹炮（Q13-B / Q13-B-R1）：A 西瓜车身 + 前方霰弹炮（front Weld 短粗枪管，一次' +
+      '齐射 5 发固定扇形 -12/-6/0/+6/+12° 真实 projectile，复用正式 Projectile / CCD /' +
+      ' Owner Filter 链）。B 无攻击件目标车（boxBody），近距离放置以便首发即可看清多弹' +
+      '命中。射程由「高速弹道 + 扇形散开」自然形成：近距离 5 发聚拢 → 多弹命中；远处' +
+      '因扇形角自然散开 → 部分/全部 Miss（无距离判定消失伤害）。发射瞬间一次明显扇形' +
+      '炮口爆闪 + 整车明显后坐；每发独立走 ContactRouter 正式 projectileDamage。无随机' +
+      '散布 / 不自动瞄准 / 不做扇形 raycast / 不新建 Projectile 系统。',
     buildA: shotgunCarBuild(),
     buildB: plainCarBuild(),
     config: {
       engine: 'planck',
       autoDrive: true,
       spawnA: { x: 450, y: 650, facing: 1 },
-      spawnB: { x: 1150, y: 650, facing: -1 },
+      spawnB: { x: 560, y: 650, facing: -1 }, // Q13-B-R1：近距离隔离验收（首发即可看清多弹命中）
     },
     camera: { fit: 'vehicles' },
   },

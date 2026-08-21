@@ -135,6 +135,18 @@ const LASER_BEAM_CORE = 15;
 const LASER_BEAM_GLOW = 38;
 const LASER_BEAM_TTL = 130; // ms：30fps 下 ≈ 3.9 帧，可读 3~4 帧
 
+/** Q13-B-R1：霰弹炮口「扇形」爆闪 VFX——有方向的短促扇形爆闪（非普通圆形 flash）。
+ *  纯表现，不参与碰撞/伤害。 */
+interface ShotgunFan {
+  x: number; // 炮口世界位置
+  y: number;
+  dirX: number; // 真实 fire 基准方向（单位向量）
+  dirY: number;
+  bornAt: number;
+  ttl: number; // ms
+}
+const SHOTGUN_FAN_TTL = 100; // ms：30fps 下 ≈ 3 帧，可读 2~3 帧
+
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private transform: ScreenTransform = { scale: 1, offsetX: 0, offsetY: 0 };
@@ -148,6 +160,8 @@ export class Renderer {
   private deathFxs: DeathFx[] = [];
   /** Q11-C-R3-FINAL：镭射巨炮束 VFX 数组（发射后驻留 ~130ms 衰减，纯表现） */
   private laserBeams: LaserBeam[] = [];
+  /** Q13-B-R1：霰弹炮口扇形爆闪 VFX 数组（发射后驻留 ~100ms 衰减，纯表现） */
+  private shotgunFans: ShotgunFan[] = [];
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -266,6 +280,27 @@ export class Renderer {
     return this.laserBeams.filter((b) => now - b.bornAt < b.ttl);
   }
 
+  /** Q13-B-R1：霰弹炮口扇形爆闪——发射瞬间沿真实 fire 方向画一束短促扇形亮闪
+   *  （非普通圆形 flash），让单次齐射一眼是「霰弹喷射」。纯表现：真实 Collider /
+   *  伤害范围绝不扩大；不参与碰撞/伤害。 */
+  spawnShotgunFan(x: number, y: number, dirX: number, dirY: number): void {
+    const len = Math.max(1e-6, Math.hypot(dirX, dirY));
+    this.shotgunFans.push({
+      x,
+      y,
+      dirX: dirX / len,
+      dirY: dirY / len,
+      bornAt: performance.now(),
+      ttl: SHOTGUN_FAN_TTL,
+    });
+  }
+
+  /** Q13-B-R1：当前存活的霰弹炮口扇形爆闪（供测试断言几何 / 存活）；过期自动过滤。 */
+  get activeShotgunFans(): readonly ShotgunFan[] {
+    const now = performance.now();
+    return this.shotgunFans.filter((f) => now - f.bornAt < f.ttl);
+  }
+
   /** Q11-C：蓄能光点——laser 蓄能期间每固定步 upsert（同 partId 更新 progress）。
    *  纯表现（肉眼可见「大招要来了」）；不参与伤害/命中判定。 */
   spawnCharge(key: string, x: number, y: number, progress: number): void {
@@ -379,6 +414,9 @@ export class Renderer {
 
     // Q11-C-R3-FINAL：镭射巨炮束 VFX（发射后沿 fire 方向驻留 ~130ms 衰减；纯表现）
     this.drawLaserBeams();
+
+    // Q13-B-R1：霰弹炮口扇形爆闪 VFX（发射后沿 fire 方向驻留 ~100ms 衰减；纯表现）
+    this.drawShotgunFans();
 
     // Debug overlay
     if (debugDraw) debugDraw(ctx, t);
@@ -689,6 +727,41 @@ export class Renderer {
         ctx.fill();
         continue;
       }
+      if (p.visual === 'tracer') {
+        // Q13-B-R1：霰弹炮弹（真实伤害载体）画成沿真实飞行方向的短高速弹迹（拖尾在
+        // 弹头后方，不扩大真实命中范围）；正常速度下一齐射 5 条轨迹清楚扇形分开。
+        const cx = this.sx(p.center.x);
+        const cy = this.sy(p.center.y);
+        const v = p.velocity ?? { x: 1, y: 0 };
+        const len = Math.max(1e-6, Math.hypot(v.x, v.y));
+        const ux = v.x / len;
+        const uy = v.y / len;
+        const TRACER = this.ss(42); // 沿真实飞行方向的短高速弹迹（世界 px，35~50）
+        const tx = cx - ux * TRACER;
+        const ty = cy - uy * TRACER;
+        const col = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
+        // 弹迹（亮条，尾→头）
+        ctx.globalAlpha = 0.85;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = Math.max(2, this.ss(p.radius * 1.4));
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(cx, cy);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+        // 弹头（真实 Collider 半径，不扩大命中范围）
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#fff6d8';
+        ctx.beginPath();
+        ctx.arc(cx, cy, this.ss(p.radius), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(cx, cy, this.ss(p.radius * 0.6), 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
       ctx.fillStyle = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
       ctx.beginPath();
       ctx.arc(this.sx(p.center.x), this.sy(p.center.y), this.ss(p.radius), 0, Math.PI * 2);
@@ -840,6 +913,52 @@ export class Renderer {
       ctx.stroke();
       ctx.globalAlpha = 1;
       ctx.lineCap = 'butt';
+    }
+  }
+
+  /**
+   * Q13-B-R1：霰弹炮口「扇形」爆闪 VFX——发射瞬间沿真实 fire 方向画一束短促扇形亮闪
+   * （非普通圆形 flash），让单次齐射一眼是「霰弹喷射」而非单发炮。纯表现：不参与
+   * 碰撞/伤害；真实 Collider / 命中范围绝不扩大。
+   */
+  private drawShotgunFans(): void {
+    const ctx = this.ctx;
+    const now = performance.now();
+    this.shotgunFans = this.shotgunFans.filter((f) => now - f.bornAt < f.ttl);
+    for (const f of this.shotgunFans) {
+      const age = (now - f.bornAt) / f.ttl; // 0→1
+      const decay = 1 - age * age;
+      const base = Math.atan2(f.dirY, f.dirX);
+      const spread = (14 * Math.PI) / 180; // 扇形半角 ±14°
+      const R = this.ss(34); // 爆闪半径（世界 px）
+      const cx = this.sx(f.x);
+      const cy = this.sy(f.y);
+      // 扇形填充（暖橙）
+      ctx.globalAlpha = 0.5 * decay;
+      ctx.fillStyle = '#ffcf6a';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, R, base - spread, base + spread);
+      ctx.closePath();
+      ctx.fill();
+      // 沿扇形方向几根亮射线（确定性，禁用随机；与 5 发弹道 -12/-6/0/+6/+12 呼应）
+      ctx.globalAlpha = 0.95 * decay;
+      ctx.strokeStyle = '#fff0c0';
+      ctx.lineWidth = Math.max(1.5, this.ss(2));
+      for (const d of [-12, -6, 0, 6, 12]) {
+        const a = base + (d * Math.PI) / 180;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(a) * R * 1.1, cy + Math.sin(a) * R * 1.1);
+        ctx.stroke();
+      }
+      // 炮口亮核
+      ctx.globalAlpha = decay;
+      ctx.fillStyle = '#fff6d8';
+      ctx.beginPath();
+      ctx.arc(cx, cy, this.ss(6), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
     }
   }
 

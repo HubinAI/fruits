@@ -1566,7 +1566,7 @@ describe('Q13-B 霰弹炮 Weapon', () => {
     );
   }
 
-  it('1. shotgun 定义：weapon / box collider / behavior shotgun / 固定扇形 5 发 -12..+12 / muzzleSpeed< cannon（不自动瞄准、无 raycast）', () => {
+  it('1. shotgun 定义：weapon / box collider / behavior shotgun / 固定扇形 5 发 -12..+12 / muzzleSpeed 高速(12~14) 高于 cannon（不自动瞄准、无 raycast）', () => {
     const def = registry.functionals.get('shotgun')!;
     expect(def.category).toBe('weapon');
     expect(def.behavior).toBe('shotgun');
@@ -1577,7 +1577,10 @@ describe('Q13-B 霰弹炮 Weapon', () => {
     expect(fan).toEqual([-12, -6, 0, 6, 12]); // 固定扇形、可复现、无随机
     expect(fan.length).toBe(5);
     const cp = registry.functionals.get('cannon')!.behaviorParams as Record<string, number>;
-    expect((bp.muzzleSpeed as number)).toBeLessThan(cp.muzzleSpeed); // 较低 muzzleSpeed → 射程偏近、自然散开
+    // Q13-B-R1：霰弹 = 高速喷射（muzzleSpeed 12~14），明显高于 Cannon 8（不再靠慢速+重力制造近程）
+    expect((bp.muzzleSpeed as number)).toBeGreaterThanOrEqual(12);
+    expect((bp.muzzleSpeed as number)).toBeLessThanOrEqual(14);
+    expect(cp.muzzleSpeed).toBe(8); // Cannon 不受影响（仍 8）
     expect((bp.projectileDamage as number)).toBeGreaterThan(0); // 每发走正式 projectileDamage
     expect((bp.baseDamage as number | undefined)).toBeUndefined(); // 无直扣 HP（走 projectile 链）
   });
@@ -1598,7 +1601,13 @@ describe('Q13-B 霰弹炮 Weapon', () => {
 
   it('3. 齐射真实 5 发扇形（可复现、无随机）：单发齐射产生 5 个真实 projectile，飞行中明显散开（扇角≈24°）', () => {
     const lab = new PhysicsLab(rendererStub);
-    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-B')!);
+    // Q13-B-R1：用远处 B（避免齐射命中即销毁）测量纯扇形散开；隔离于 Scenario 近距离设置
+    lab.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 2000, y: 650, facing: -1 }, // 远：弹体存活至测量帧
+    });
     const o = lab.orchestrator as PlanckBattleOrchestrator;
     let fired = false;
     let muzzle: { x: number; y: number } | null = null;
@@ -1620,7 +1629,13 @@ describe('Q13-B 霰弹炮 Weapon', () => {
     expect(spread).toBeLessThan(32);
     // 可复现：再跑一次仍是 5 发 + 同样扇角区间（无随机散布）
     const lab2 = new PhysicsLab(rendererStub);
-    lab2.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-B')!);
+    // Q13-B-R1：同 lab，远处 B 隔离测量纯扇形散开（可复现校验）
+    lab2.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 2000, y: 650, facing: -1 }, // 远：弹体存活至测量帧
+    });
     const o2 = lab2.orchestrator as PlanckBattleOrchestrator;
     let fired2 = false;
     let muzzle2: { x: number; y: number } | null = null;
@@ -1664,7 +1679,7 @@ describe('Q13-B 霰弹炮 Weapon', () => {
       engine: 'planck',
       autoDrive: false,
       spawnA: { x: 450, y: 650, facing: 1 },
-      spawnB: { x: 760, y: 650, facing: -1 }, // 远处：扇角散开 + 重力 → 边缘弹 Miss，中央弹仍中（部分 Miss）
+      spawnB: { x: 900, y: 650, facing: -1 }, // 远处：扇角散开（无慢速重力聚拢）→ 边缘弹 Miss，中央弹仍中（部分 Miss）
     });
     const o = lab.orchestrator as PlanckBattleOrchestrator;
     let weaponDmg = 0;
@@ -1767,6 +1782,131 @@ describe('Q13-B 霰弹炮 Weapon', () => {
     expect(ids).not.toContain('ramHead'); // Q12-A-HOLD
     expect(ids).not.toContain('wedgeShovel'); // Q11-A-CLOSE
     expect(ids[0]).toBe(EMPTY_SLOT);
+  });
+});
+
+/* ---------- Q13-B-R1：霰弹炮从「慢珠子」改成瞬间高速喷射 ---------- */
+describe('Q13-B-R1 霰弹炮瞬间喷射', () => {
+  /** A 霰弹炮车：watermelon + front shotgun（与 Q13-B 块同定义，本 describe 内复用） */
+  function shotgunSnapshot(side: 'A' | 'B') {
+    return buildSnapshotFromDraft(
+      {
+        bodyDefId: 'watermelonBody',
+        rearRadius: 20,
+        frontRadius: 20,
+        functionalSelections: { front: 'shotgun', frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      },
+      registry,
+      side,
+    );
+  }
+  /** B 无攻击件目标车（boxBody） */
+  function plainSnapshot(side: 'A' | 'B') {
+    return buildSnapshotFromDraft(
+      { bodyDefId: 'boxBody', rearRadius: 20, frontRadius: 20, functionalSelections: {} },
+      registry,
+      side,
+    );
+  }
+
+  it('1. 高速喷射：muzzleSpeed 12~14（高于 Cannon 8）；一次齐射仍 5 个真实 projectile；Cannon 不受影响', () => {
+    const def = registry.functionals.get('shotgun')!;
+    const bp = def.behaviorParams as Record<string, number>;
+    expect(bp.muzzleSpeed).toBeGreaterThanOrEqual(12);
+    expect(bp.muzzleSpeed).toBeLessThanOrEqual(14);
+    expect((registry.functionals.get('cannon')!.behaviorParams as Record<string, number>).muzzleSpeed).toBe(8); // 不改 Cannon
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck', autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 }, spawnB: { x: 2000, y: 650, facing: -1 },
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let fired = false;
+    o.onCombatEvent((ev) => { if (ev.type === 'weaponFire' && ev.behavior === 'shotgun') fired = true; });
+    for (let i = 0; i < 60 && !fired; i++) lab.step(16.6667);
+    expect(fired).toBe(true);
+    for (let i = 0; i < 3; i++) lab.step(16.6667);
+    const ps = o.getRenderSnapshot().projectiles ?? [];
+    expect(ps.length).toBe(5); // 5 个真实 projectile（保留正式 CCD/Owner/Damage 链）
+  });
+
+  it('2. 弹迹渲染：shotgun projectile 带 tracer 视觉标记 + 真实 velocity（沿飞行方向）；真实 Collider 半径不变（=7，不扩大命中范围）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck', autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 }, spawnB: { x: 2000, y: 650, facing: -1 },
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let fired = false;
+    o.onCombatEvent((ev) => { if (ev.type === 'weaponFire' && ev.behavior === 'shotgun') fired = true; });
+    for (let i = 0; i < 60 && !fired; i++) lab.step(16.6667);
+    for (let i = 0; i < 3; i++) lab.step(16.6667);
+    const ps = o.getRenderSnapshot().projectiles ?? [];
+    expect(ps.length).toBe(5);
+    for (const p of ps) {
+      expect(p.visual).toBe('tracer'); // 沿真实 velocity 的短高速弹迹（非普通圆点）
+      expect(p.radius).toBeCloseTo(7, 6); // 真实 Collider 半径不变（不扩大命中范围）
+      expect(p.velocity).toBeDefined();
+      const sp = Math.hypot(p.velocity!.x, p.velocity!.y);
+      expect(sp).toBeGreaterThan(8); // 真实高速（≈ muzzleSpeed 13 + 射手速度）
+      expect(sp).toBeLessThan(22);
+      expect(p.velocity!.x).toBeGreaterThan(0); // A facing +X → 弹迹朝前
+    }
+  });
+
+  it('3. 炮口扇形爆闪（有方向，非圆形 flash）：spawnShotgunFan 产生 1 个沿真实 fire 方向的扇形 VFX', () => {
+    (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
+    const renderer = new Renderer(makeCtxStubCanvas());
+    renderer.spawnShotgunFan(500, 400, 1, 0); // A facing +X → 朝右
+    const fans = renderer.activeShotgunFans;
+    expect(fans.length).toBe(1);
+    expect(fans[0]!.dirX).toBeGreaterThan(0.9); // 沿真实 fire 方向
+    expect(fans[0]!.dirY).toBeCloseTo(0, 6);
+  });
+
+  it('4. 近距离多发真实命中：B 贴近（560）→ 一次齐射 ≥2 弹命中（weapon damage ≥ 60）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck', autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 }, spawnB: { x: 560, y: 650, facing: -1 },
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let weaponDmg = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon' && ev.target === 'B') weaponDmg += ev.damage;
+    });
+    for (let i = 0; i < 79; i++) { lab.step(16.6667); if (o.result?.phase === 'End') break; }
+    expect(weaponDmg).toBeGreaterThanOrEqual(60); // ≥2 弹命中 → 近距离多弹真实命中
+  });
+
+  it('5. 后坐直接作用于 chassis 且明显：开火瞬间自车 chassis 实际后顿（vx 转负 + 可见反向位移）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck', autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 }, spawnB: { x: 1150, y: 650, facing: -1 },
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let firedStep = -1;
+    let step = 0;
+    const xs: number[] = [];
+    const vxs: number[] = [];
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'shotgun' && firedStep < 0) firedStep = step;
+    });
+    for (let i = 0; i < 60; i++) {
+      vxs.push(o.world.getLinearVelocity(o.vehicleA.body).x);
+      lab.step(16.6667);
+      xs.push(o.world.getPosition(o.vehicleA.body).x);
+      step++;
+      if (firedStep >= 0 && step - firedStep >= 10) break;
+    }
+    expect(firedStep).toBeGreaterThanOrEqual(0);
+    let maxBack = 0;
+    for (let k = 1; k < 8 && firedStep + k < xs.length; k++) {
+      maxBack = Math.max(maxBack, xs[firedStep + k - 1]! - xs[firedStep + k]!);
+    }
+    expect(maxBack).toBeGreaterThan(0.3); // 明显反向位移（px/帧），整车顿一下
+    expect(Math.min(...vxs.slice(firedStep, Math.min(firedStep + 8, vxs.length)))).toBeLessThan(0);
   });
 });
 

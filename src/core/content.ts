@@ -448,8 +448,9 @@ const saw: FunctionalPartDef = {
  *   与 Cannon 同一条引擎链路，不创建第二套 Projectile 系统）；每发独立 carry
  *   OwnerTag → 都走 ContactRouter 正式 projectileDamage 结算（同一 projectile
  *   仍只走正式伤害链）；
- * - 射程自然通过较低 muzzleSpeed 形成（不做距离判定后消失伤害）：近距离 5 发聚拢
- *   → 多弹命中；远处自然散开（扇形角 + 重力）→ 部分 / 全部 Miss；
+ * - 射程由「固定扇形 + 高速弹道」自然形成（不做距离判定后消失伤害）：近距离 5 发
+ *   聚拢 → 多弹命中；远处因扇形角自然散开 → 部分 / 全部 Miss（不再靠慢速+重力制造
+ *   「近程」，避免真人录像里像慢珠子）；
  * - 发射瞬间使用「一次」明显炮口爆闪 + 真实后坐（5 发齐射只发一次 weaponFire 事件、
  *   只 apply 一次 recoil，由 Weld 自然传给整车）；
  * - 不修改 Cannon / Laser：两者保持原样，仅新增本 Weapon 复用同一 Projectile 系统。
@@ -465,14 +466,14 @@ const shotgun: FunctionalPartDef = {
   collider: { shape: 'box', width: 46, height: 22, offset: { x: 23, y: 0 } },
   behavior: 'shotgun',
   behaviorParams: {
-    // 扁枪管近距离爆发：较低 muzzleSpeed（射程偏近、自然散开更明显）+ 固定扇形 5 发。
-    // 首版数值故意明显、易验证（不做精细平衡，后续真人验收再回收）。
+    // 扁枪管近距离爆发：高速齐射（瞬间喷射，非慢珠子）+ 固定扇形 5 发。
+    // 射程由扇形散开自然形成，不靠慢速+重力制造「近程」（避免真人录像像慢珠子）。
     cooldownMs: 1300, // 齐射武器冷却略长于普通炮（1000）
-    muzzleSpeed: 6, // 低于 Cannon 8 → 近距离爆发手感、远距离自然散开
+    muzzleSpeed: 13, // 大幅高于 Cannon 8 → 瞬间高速喷射（Q13-B-R1：12~14）
     projectileDamage: 30, // 每发伤害（5 发可多弹命中 → 近距离总伤可远超单发炮）
-    projectileRadius: 7, // 小于 Cannon 10（5 发同时飞，单发略小）
+    projectileRadius: 7, // 小于 Cannon 10（5 发同时飞，单发略小）；不扩大真实命中范围
     projectileMass: 1,
-    recoilImpulse: 45, // 一次齐射后坐（明显，但只 apply 一次，不按发数累加）
+    recoilImpulse: 160, // Q13-B-R1：直接作用于本车 chassis（vehicle.body）、明显过强 → 开火瞬间整车明显后顿
     // 固定扇形（度，相对炮口基准方向）：5 发 -12/-6/0/+6/+12，可复现、无随机。
     fanAnglesDeg: [-12, -6, 0, 6, 12],
   },

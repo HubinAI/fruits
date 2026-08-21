@@ -334,10 +334,15 @@ class ShotgunRuntime implements PartBehaviorRuntime {
       const tag = world.getOwnerTag(p);
       if (!tag || !tag.team) continue; // 已销毁 / 无归属：不进入快照
       const bounds = world.getBounds(p);
+      const v = world.getLinearVelocity(p);
       out.push({
         center: world.getPosition(p),
         radius: (bounds.maxX - bounds.minX) / 2,
         team: tag.team,
+        // Q13-B-R1：霰弹炮弹视觉标记 + 真实飞行方向（沿真实 velocity 画短高速弹迹，
+        // 不参与碰撞/伤害链，不扩大真实命中范围）。
+        visual: 'tracer',
+        velocity: { x: v.x, y: v.y },
       });
     }
     return out;

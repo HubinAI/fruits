@@ -13,8 +13,9 @@
  * - 射程自然通过较低 muzzleSpeed 形成（不做距离判定后消失伤害）：近距离 5 发聚拢
  *   → 多弹命中；远处自然散开 → 部分 / 全部 Miss（扇形角 + 重力同时作用）；
  * - 发射瞬间使用「一次」明显炮口爆闪 + 真实后坐：5 发齐射只发一次 weaponFire 事件
- *   （驱动一次 muzzle flash），recoil 只 apply 一次（沿基准炮口反方向作用于真实炮口
- *   世界点，由 Weld 自然传给整车；禁止 setLinearVelocity / 固定 knockback）。
+ *   （驱动一次 muzzle flash），recoil 只 apply 一次（沿基准炮口反方向直接作用于本车
+ *   chassis 真实炮口世界点，产生力矩 → 整车明显后顿；禁止 setLinearVelocity / 固定
+ *   knockback）。
  */
 import type { BodyHandle, PlanckWorld } from '../physics/planckWorld';
 import { PHYSICS_HZ } from '../physics/units';
@@ -206,10 +207,12 @@ export class ShotgunBehavior {
       worldDirection: { x: baseDir.x, y: baseDir.y },
     });
 
-    // Recoil：方向严格相反，作用于真实炮口世界点（Q02-F1 applyLinearImpulse），
-    // 由 Weld 自然传给整车；禁止 setLinearVelocity / 固定 knockback。
+    // Recoil：方向严格相反，作用于本车 chassis（vehicle.body）真实炮口世界点
+    // （Q02-F1 applyLinearImpulse，产生力矩 → 开火瞬间整车明显后顿）；
+    // 禁止 setLinearVelocity / 固定 knockback。Q13-B-R1：直接作用于 chassis（非 weld 子体），
+    // 第一版允许明显过强，必须看到整车顿一下。
     world.applyLinearImpulse(
-      part.body,
+      vehicle.body,
       { x: -baseDir.x * p.recoilImpulse, y: -baseDir.y * p.recoilImpulse },
       muzzlePoint,
     );
