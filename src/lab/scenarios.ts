@@ -803,21 +803,27 @@ export const SCENARIOS: ScenarioDef[] = [
     id: 'Q14-B',
     name: 'Flamethrower (Close Flame)',
     description:
-      '喷火器（Q14-B）：A 西瓜车身 + 前方喷火器（front Weld 短粗喷口）。持续喷射 1.0s →' +
+      '喷火器（Q14-B / Q14-B-R1）：A 西瓜车身 + 前方喷火器（front Weld 短粗喷口）。持续喷射 1.0s →' +
       ' 短冷却 0.6s → 再喷，循环：喷口点燃（每颗粒小型闪光）→ 一股短距离火流持续喷向前方。' +
       ' 伤害载体复用真实 Projectile 链：连续生成小型短命火焰 projectile（gravityScale=0、' +
       ' 生命周期由 behavior 自管理、超时真实 destroy）——射程 ≈1.1 个西瓜车身长（正常可读速度 +' +
-      ' 很短寿命，非低速慢飘），贴近敌人才有效；确定性 -6°/0°/+6° 循环分叉（无随机）；视觉为' +
-      ' 黄白火芯 + 橙红短尾连续叠成火流（不画小圆弹）。每颗粒真实碰到才伤害（Miss 就是 Miss）、' +
-      ' 距离不足时火流自然消散，停火后画面无残留火焰。不做 cone raycast / 不做隐藏距离扣血 /' +
-      ' 不建 Particle Foundation / 不改 Shotgun / MachineGun。',
+      ' 很短寿命，非低速慢飘），贴近敌人才有效；确定性 -6°/0°/+6° 循环分叉（无随机）。' +
+      ' Q14-B-R1 视觉：每颗火焰颗粒沿真实 velocity 画「填充火焰叶」（外层橙红 35~45px 后端收尖 +' +
+      ' 内层黄橙 24~30px + 弹头黄白高亮），相邻叶明显重叠 → 正常速度连成一股连续火流（不再是一根根' +
+      ' 细红线）；视觉可大于 collider 但命中范围不变、超时即同步消失。B 为正常玩家香蕉目标' +
+      ' （bananaTargetBuild），autoDrive=false 隔离验收：按真实 bounds 留距（A 右缘含喷口 558 / 香蕉' +
+      ' 左缘 ~625），火流可命中且一个完整 spray 期间两车不发生车体接触。不做 cone raycast / 不做隐藏' +
+      ' 距离扣血 / 不建 Particle Foundation / 不改 Shotgun / MachineGun。',
     buildA: flamethrowerCarBuild(),
-    buildB: plainCarBuild(),
+    buildB: bananaTargetBuild(),
     config: {
       engine: 'planck',
-      autoDrive: true,
+      // Q14-B-R1：隔离验收——两车静止，完整 spray 不被车体碰撞遮住火流
+      autoDrive: false,
       spawnA: { x: 450, y: 650, facing: 1 },
-      spawnB: { x: 660, y: 650, facing: -1 }, // 近距离：火流射程内，一眼看到「持续喷火 + 贴近连续命中」
+      // Q14-B-R1：按真实 bounds 留距——A 右缘 558（含喷口）与香蕉左缘（x-95=625）留 ~67px：
+      // 火流（射程 ≈192px）可命中香蕉，且一个完整喷射周期内两车不发生车体接触。
+      spawnB: { x: 720, y: 650, facing: -1 },
     },
     camera: { fit: 'vehicles' },
   },

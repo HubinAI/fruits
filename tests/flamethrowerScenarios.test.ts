@@ -271,6 +271,63 @@ describe('Q14-B 喷火器 Weapon', () => {
   });
 });
 
+/* ---------- Q14-B-R1：火流连续（填充火焰叶）+ Scenario 隔离验收 ---------- */
+describe('Q14-B-R1 火流连续与隔离验收', () => {
+  it('1. 火流连续：存活火焰颗粒按 x 排序相邻间距 ≤ 叶长 40px（相邻叶重叠 → 无断节）；末端自然消失', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(flamethrowerSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 2000, y: 650, facing: -1 }, // B 远：观察火流连续与消散
+    });
+    const o = requirePlanck(lab);
+    for (let i = 0; i < 50; i++) lab.step(16.6667); // 喷射中段
+    const ps = o.getRenderSnapshot().projectiles ?? [];
+    expect(ps.length).toBeGreaterThanOrEqual(3);
+    for (const p of ps) expect(p.visual).toBe('flame');
+    const xs = ps.map((p) => p.center.x).sort((a, b) => a - b);
+    for (let i = 1; i < xs.length; i++) {
+      // 相邻火焰叶间距 ≤ 外叶长 40px → 明显重叠 → 正常速度连成连续火流（无断节）
+      expect(xs[i]! - xs[i - 1]!).toBeLessThanOrEqual(40);
+    }
+    // 末端自然消失：冷却期（85 步）无残留火焰
+    for (let i = 50; i < 85; i++) lab.step(16.6667);
+    expect((o.getRenderSnapshot().projectiles ?? []).length).toBe(0);
+  });
+
+  it('2. Q14-B Scenario 隔离：B=banana、autoDrive=false、整 spray 无车体接触、火流命中香蕉', () => {
+    const sc = getScenario('Q14-B')!;
+    expect(sc.config.autoDrive).toBe(false);
+    expect(sc.buildA.bodyDefId).toBe('watermelonBody');
+    expect(sc.buildB.bodyDefId).toBe('bananaBody'); // 正常玩家香蕉目标（非 boxBody/tallBody 代替）
+
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(sc);
+    const o = requirePlanck(lab);
+    const hits: DamageEvent[] = [];
+    o.onCombatEvent((e) => {
+      if (isDamageEvent(e) && e.damageSource === 'weapon') hits.push(e);
+    });
+    // 一个完整 spray（60 步）+ 冷却余量到 100 步：每步两车无车体接触（不靠碰撞遮住火流）
+    let minGap = Infinity;
+    for (let i = 0; i < 100; i++) {
+      lab.step(16.6667);
+      minGap = Math.min(
+        minGap,
+        vehicleLeftEdge(o, o.vehicleB) - vehicleRightEdge(o, o.vehicleA),
+      );
+    }
+    expect(minGap).toBeGreaterThan(0); // 从未车体接触
+    expect(hits.length).toBeGreaterThanOrEqual(8); // 火流命中香蕉（真实 projectile 连续受击）
+    for (const h of hits) {
+      expect(h.behavior).toBe('flamethrower');
+      expect(h.damage).toBe(8);
+    }
+    expect(o.vehicleB.hp).toBe(900 - hits.length * 8); // bananaBody 基础 HP=900
+  });
+});
+
 /** 车辆整体右缘（chassis + parts 真实碰撞几何 maxX）——场景出生无重叠用 */
 function vehicleRightEdge(orch: PlanckBattleOrchestrator, v: PlanckVehicle): number {
   let maxX = -Infinity;

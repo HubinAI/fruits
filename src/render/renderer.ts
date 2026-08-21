@@ -842,36 +842,48 @@ export class Renderer {
         continue;
       }
       if (p.visual === 'flame') {
-        // Q14-B：喷火器火焰颗粒——沿真实飞行方向画「黄白火芯 + 橙红短尾」，
-        // 不画成小圆弹；多颗粒（间隔 ~20px）连续叠成一股短距离火流。
+        // Q14-B-R1：喷火器火焰颗粒——沿真实 velocity 画「填充火焰叶」：
+        // 外层橙红（长 35~45 / 宽 14~18，后端收尖）+ 内层黄橙（长 24~30 / 宽 8~12）
+        // + 弹头黄白高亮。颗粒间隔 ~20px，相邻叶明显重叠 → 正常速度连成一股连续火流
+        // （不再是一根根细红线）。纯表现：命中范围不变，projectile 超时视觉同步消失。
         const cx = this.sx(p.center.x);
         const cy = this.sy(p.center.y);
         const v = p.velocity ?? { x: 1, y: 0 };
         const len = Math.max(1e-6, Math.hypot(v.x, v.y));
         const ux = v.x / len;
         const uy = v.y / len;
-        // 橙红短尾（沿真实速度方向，尾在弹头后方；多颗粒尾尾相连 → 火流）
-        const tailLen = this.ss(26);
-        const tx = cx - ux * tailLen;
-        const ty = cy - uy * tailLen;
-        ctx.globalAlpha = 0.4;
-        ctx.strokeStyle = '#ff5a1e';
-        ctx.lineWidth = Math.max(2, this.ss(5));
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(tx, ty);
-        ctx.lineTo(cx, cy);
-        ctx.stroke();
-        ctx.lineCap = 'butt';
-        // 黄白火芯（亮头）
+        // 垂直方向（火焰叶向两侧鼓出）
+        const px = -uy;
+        const py = ux;
+        // 叶形辅助：head（弹头）→ mid（最宽处，距头 30%）→ rear（收尖，尾在速度反方向）
+        const leaf = (L: number, W: number, color: string, alpha: number): void => {
+          const rearX = cx - ux * this.ss(L);
+          const rearY = cy - uy * this.ss(L);
+          const midX = cx - ux * this.ss(L * 0.3);
+          const midY = cy - uy * this.ss(L * 0.3);
+          const w = this.ss(W);
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.quadraticCurveTo(midX + px * w, midY + py * w, rearX, rearY);
+          ctx.quadraticCurveTo(midX - px * w, midY - py * w, cx, cy);
+          ctx.closePath();
+          ctx.fill();
+        };
+        // 外层橙红（大叶，后端收尖）
+        leaf(40, 8, '#ff5a1e', 0.55);
+        // 内层黄橙（小叶，更亮）
+        leaf(27, 5, '#ffb24a', 0.85);
+        // 弹头黄白高亮核心（小范围）
         ctx.globalAlpha = 0.95;
         ctx.fillStyle = '#fff0b0';
         ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(1.5, this.ss(p.radius * 1.2)), 0, Math.PI * 2);
+        ctx.arc(cx, cy, Math.max(1.5, this.ss(p.radius * 1.4)), 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#ffd35a';
         ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(1, this.ss(p.radius * 0.7)), 0, Math.PI * 2);
+        ctx.arc(cx, cy, Math.max(1, this.ss(p.radius * 0.8)), 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 1;
         continue;
