@@ -394,6 +394,48 @@ const rammer: FunctionalPartDef = {
 };
 
 /**
+ * Q13-A：圆锯（Weapon）——front Revolute 高速旋转锯片（持续单方向切割）。
+ * - 真实圆形 Collider（radius 28、offset {0,0} → 圆心 = Revolute 枢轴，锯片原地
+ *   自转，不绕枢轴公转）；front hardpoint 锚定为枢轴，锯片随真实 part angle 旋转；
+ * - 持续单方向高速旋转由 SawBehavior 用 Revolute motor 驱动（无状态机 / 无 limit /
+ *   不 setAngle / 不 teleport）；第一版转速故意明显（spinSpeedRadPerStep 0.4 ≈
+ *   24 rad/s ≈ 3.8 rev/s），正常速度一眼可见锯片在转；
+ * - 伤害完全复用现有 Weapon Contact 的 contactTick hitPolicy（W1-HIT-1 已实现的
+ *   持续接触按固定物理时间结算，无需新建伤害系统）：真实有效接触（minRelativeVelocity
+ *   低于阈值不登记）→ 每 intervalMs 结算一次 damage（持续「切割」），接触结束即停止；
+ *   无固定击退 / 不直扣 HP / 不创建新的 Contact Damage 系统；
+ * - 不修改 Hammer / 镭射 / 冲锤；自车与对手仍受真实碰撞反作用（motor 反作用经
+ *   Revolute 传给 chassis，牛顿第三定律，无额外代码）。
+ */
+const saw: FunctionalPartDef = {
+  id: 'saw',
+  name: '圆锯',
+  category: 'weapon',
+  mass: 25, // 明显质量：旋转/接触反作用自车也承担
+  energy: 25,
+  // 真实圆形锯片：圆心 = Revolute 枢轴（part 原点 = 功能挂点）；offset {0,0} 保证
+  // 锯片原地自转（旋转中心 = 枢轴），不绕枢轴公转；半径 28（直径 56）清晰可见。
+  collider: { shape: 'circle', radius: 28, offset: { x: 0, y: 0 } },
+  behavior: 'saw',
+  behaviorParams: {
+    // 持续单方向高速旋转：motor 每固定步 setRevoluteMotor(enabled, +speed, maxTorqueNm)，
+    // 无状态机 / 无 limit。第一版转速故意明显（0.4 rad/step ≈ 24 rad/s ≈ 3.8 rev/s），
+    // 正常速度一眼可辨锯片在转（后续真人验收再回收）。
+    spinSpeedRadPerStep: 0.4,
+    maxTorqueNm: 400, // 足够顶住接触摩擦保持高速旋转，且反作用在 chassis 上肉眼可见
+    // 持续切割伤害：复用 W1-HIT-1 contactTick（现有 Weapon Contact 持续接触结算，
+    // 不新建伤害系统）。minRelativeVelocity 略低于 WEAPON_CONTACT_THRESHOLD(0.5)，
+    // 保证自动靠近（relVel≈1.5）稳定进入切割；间隔 100ms 结算 8 伤害（≈80/s）。
+    hitPolicy: {
+      mode: 'contactTick',
+      intervalMs: 100,
+      damage: 8,
+      minRelativeVelocity: 0.3,
+    },
+  },
+};
+
+/**
  * Q11-A：楔铲（Gadget）——低矮楔形 Collider（polygon），固定安装在前方，
  * 随整车移动，无主动动画 / 无 behavior（behavior:'none'）。
  * 翻起效果完全来自真实碰撞几何、质量、速度与力矩（钻入对手底部 → 沿坡面
@@ -533,6 +575,7 @@ export function createRegistry(): ContentRegistry {
       [pushRod.id, pushRod],
       [lifter.id, lifter],
       [rammer.id, rammer],
+      [saw.id, saw],
     ]),
   };
 }

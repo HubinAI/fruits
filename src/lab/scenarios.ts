@@ -234,6 +234,20 @@ function rammerCarBuild(): BuildSnapshot {
   };
 }
 
+/** Q13-A：圆锯车——西瓜车身 + 前方圆锯（front Revolute 持续高速旋转 Weapon） */
+function sawCarBuild(): BuildSnapshot {
+  return {
+    id: 'sawCar',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'saw' }],
+  };
+}
+
 /** Q11-A：楔铲车——西瓜车身 + 前方楔铲（Gadget，无 Direct Damage，无主动动画） */
 function wedgeShovelBuild(): BuildSnapshot {
   return {
@@ -631,6 +645,25 @@ export const SCENARIOS: ScenarioDef[] = [
       + '走 Weapon Damage）vs B 香蕉车身（标准轮、无功能件，隔离验证）。'
       + '伸出撞击真实命中才有伤害；没撞到就是 Miss；无固定击退/自动瞄准。',
     buildA: rammerCarBuild(),
+    buildB: bananaTargetBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Q13-A',
+    name: 'Saw (Circular Saw Weapon)',
+    description:
+      '圆锯（Q13-A）：A 西瓜车身 + 前方圆锯（front Revolute 持续单方向高速旋转，' +
+      '真实圆形 Collider；锯片随真实 part angle 旋转，正常速度一眼可见）。B 香蕉车身' +
+      '（标准轮、无功能件，隔离验证）。自动靠近时锯片真实圆边持续接触对手 → 走现有' +
+      ' Weapon Contact 的 contactTick 持续切割伤害（每 100ms 一跳）；没接触 → 无伤害；' +
+      '自车与对手均受真实碰撞反作用。无固定击退 / 不直扣 HP / 不新建伤害系统。',
+    buildA: sawCarBuild(),
     buildB: bananaTargetBuild(),
     config: {
       engine: 'planck',

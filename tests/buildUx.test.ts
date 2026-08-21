@@ -1350,3 +1350,141 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(missWeaponDmg).toBe(0); // 没撞到 = Miss，无 weapon damage
   });
 });
+
+/* ---------- Q13-A：高速圆锯 Weapon（front Revolute 持续高速旋转 / 真实圆形 Collider / contactTick 持续切割） ---------- */
+describe('Q13-A 高速圆锯 Weapon', () => {
+  function sawSnapshot(side: 'A' | 'B') {
+    return buildSnapshotFromDraft(
+      {
+        bodyDefId: 'watermelonBody',
+        rearRadius: 20,
+        frontRadius: 20,
+        functionalSelections: { front: 'saw', frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      },
+      registry,
+      side,
+    );
+  }
+
+  it('1. saw 定义：weapon / 圆形 Collider（radius>0, offset 0,0 圆心=枢轴）/ behavior saw / hitPolicy contactTick（非直扣 HP）', () => {
+    const def = registry.functionals.get('saw')!;
+    expect(def.category).toBe('weapon');
+    expect(def.behavior).toBe('saw'); // 专用 Revolute 旋转行为，非 ram/hammer
+    expect(def.collider.shape).toBe('circle');
+    const c = def.collider as { shape: string; radius: number; offset: { x: number; y: number } };
+    expect(c.radius).toBeGreaterThan(20); // 清晰可见圆盘（直径 56）
+    expect(c.offset.x).toBe(0); // 圆心 = 枢轴 → 原地自转（不绕枢轴公转）
+    expect(c.offset.y).toBe(0);
+    const bp = def.behaviorParams as Record<string, unknown>;
+    expect((bp.spinSpeedRadPerStep as number)).toBeGreaterThan(0.2); // 第一版转速故意明显
+    const hp = bp.hitPolicy as { mode: string; intervalMs: number; damage: number };
+    expect(hp.mode).toBe('contactTick'); // 复用现有持续接触伤害，不新建系统
+    expect(hp.intervalMs).toBeGreaterThan(0);
+    expect(hp.damage).toBeGreaterThan(0);
+    expect((bp.baseDamage as number | undefined)).toBeUndefined(); // 不直扣 HP（contactTick 负责）
+  });
+
+  it('2. 加入正常 Build：PART_OPTIONS 含 saw；Preview 真实部件 + Energy 25 + Validator 通过 + Revolute 装配', () => {
+    expect(PART_OPTIONS.map((o) => o.v)).toContain('saw'); // 正常 Build 装配页出现圆锯
+    const lab = new PhysicsLab(rendererStub);
+    const a = sawSnapshot('A');
+    const b = snap(draft('bananaBody', {}), 'q13aB');
+    expect(() => lab.loadCustomPreview(a, b)).not.toThrow();
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const sawPart = o.vehicleA.parts.find((p) => p.def.id === 'saw')!;
+    expect(sawPart).toBeDefined();
+    expect(sawPart.joint).toBeDefined(); // Revolute joint（非 Weld）——底层能力装配
+    expect(computeEnergy(a, registry).energy).toBe(25);
+    expect(validateSnapshot(a, registry).valid).toBe(true); // weapon → 单独可 Start
+  });
+
+  it('3. 持续单方向高速旋转：Revolute 角度随时间单调增加（正常速度肉眼可见）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(sawSnapshot('A'), snap(draft('bananaBody', {}), 'B'), { autoDrive: false, engine: 'planck' });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const sawPart = o.vehicleA.parts.find((p) => p.def.id === 'saw')!;
+    const w = o.world;
+    let prev = w.getRevoluteAngle(sawPart.joint);
+    let monotonic = 0;
+    const samples: number[] = [prev];
+    for (let i = 0; i < 120; i++) {
+      lab.step(16.6667);
+      const cur = w.getRevoluteAngle(sawPart.joint);
+      if (cur >= prev - 1e-6) monotonic++;
+      prev = cur;
+      samples.push(cur);
+    }
+    // 120 步（≈2s）角度持续单调增加（单方向高速旋转），增量明显（spinSpeedRadPerStep≈0.4）
+    expect(monotonic).toBeGreaterThanOrEqual(118); // 几乎全程单调
+    const total = samples[samples.length - 1]! - samples[0]!;
+    expect(total).toBeGreaterThan(40); // ≈48 rad over 120 步（0.4×120）
+  });
+
+  it('4. 接触对手 → 持续切割（weapon damage 持续累计 > 0）；没接触 → 无伤害', () => {
+    // 4a. 接触：Q13-A 场景（autoDrive 靠近）→ B weapon damage 持续累计
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-A')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let weaponDmg = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon') weaponDmg += ev.damage;
+    });
+    for (let i = 0; i < 1200; i++) {
+      lab.step(16.6667);
+      if (o.result?.phase === 'End') break;
+    }
+    expect(weaponDmg).toBeGreaterThan(0); // 持续切割产生伤害
+    // 4b. 没接触：B 在 A 后方（背向而驰）→ 无 weapon damage（切割不发生）
+    const lab2 = new PhysicsLab(rendererStub);
+    lab2.loadCustom(sawSnapshot('A'), snap(draft('bananaBody', {}), 'B'), {
+      engine: 'planck',
+      autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 250, y: 650, facing: -1 },
+    });
+    const o2 = lab2.orchestrator as PlanckBattleOrchestrator;
+    let missDmg = 0;
+    o2.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon') missDmg += ev.damage;
+    });
+    for (let i = 0; i < 600; i++) {
+      lab2.step(16.6667);
+      if (o2.result?.phase === 'End') break;
+    }
+    expect(missDmg).toBe(0); // 没接触 = 无切割伤害
+  });
+
+  it('5. 真实碰撞反作用：自车与对手均承受接触反应（无隐藏力 / 不直扣 HP）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-A')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const w = o.world;
+    let maxAPitch = 0;
+    const b0x = w.getPosition(o.vehicleB.body).x;
+    for (let i = 0; i < 900; i++) {
+      lab.step(16.6667);
+      maxAPitch = Math.max(maxAPitch, Math.abs(w.getAngle(o.vehicleA.body)));
+      if (o.result?.phase === 'End') break;
+    }
+    // 对手被真实接触推动（位置相对初始明显变化，非原地）
+    const bx = w.getPosition(o.vehicleB.body).x;
+    expect(Math.abs(bx - b0x)).toBeGreaterThan(5);
+    // 自车承受锯片旋转/接触反作用（真实扭矩经 Revolute 传 chassis，姿态有变化）
+    expect(maxAPitch * 57.3).toBeGreaterThan(0.5);
+  });
+
+  it('F-DEV-1+Q13-A. 圆锯进入玩家部件选项', () => {
+    const ids = PART_OPTIONS.map((o) => o.v);
+    expect(ids).toContain('saw'); // Q13-A：正常 Build 装配页出现圆锯
+    expect(ids).toContain('cannon');
+    expect(ids).toContain('hammer');
+    expect(ids).toContain('pushRod');
+    expect(ids).toContain('rammer');
+    expect(ids).toContain('spear');
+    expect(ids).toContain('laser');
+    expect(ids).not.toContain('lifter'); // Q12-B-CLOSE：举升臂已暂退正式装配页
+    expect(ids).not.toContain('ramHead'); // Q12-A-HOLD：冲撞头已暂退正式装配页
+    expect(ids).not.toContain('wedgeShovel'); // Q11-A-CLOSE：楔铲已退出正式 Build
+    expect(ids[0]).toBe(EMPTY_SLOT);
+  });
+});

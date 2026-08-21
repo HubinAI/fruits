@@ -213,7 +213,14 @@ export function visualWorldTransform(
 /** 功能部件：仅保留 Renderer 配色需要的 category */
 export interface RenderFunctionalPart {
   shape: RenderShape;
-  category: string;  /**
+  category: string;
+  /**
+   * Q13-A：部件 behavior 标识（如 'saw'），供 Renderer 画出行为专属视觉
+   * （如圆锯锯齿随真实 part angle 旋转）。可选：无 / 未识别 behavior 时
+   * Renderer 回退到通用 Collider 灰盒；不影响任何 Gameplay / 物理。
+   */
+  behavior?: string;
+  /**
    * 真实 Joint 连接几何（Q04-R1B）：世界坐标锚点对 + 轴宽，用于把
    * 「车身 ↔ 移动部件」之间的伸缩轴/套杆画出来（如 Push Rod 的 Prismatic
    * 连接）。optional：无独立移动 Joint 的部件（Cannon / Hammer / Roller /

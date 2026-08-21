@@ -24,6 +24,7 @@ import { PushRodBehavior } from './pushRodBehavior';
 import { LaserBehavior } from './laserBehavior';
 import { LifterBehavior } from './lifterBehavior';
 import { RammerBehavior } from './rammerBehavior';
+import { SawBehavior } from './sawBehavior';
 
 /** Behavior factory 输入（由 Orchestrator 在构造时提供） */
 export interface BehaviorContext {
@@ -259,6 +260,28 @@ class RammerRuntime implements PartBehaviorRuntime {
 
 export function createRammerRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
   return new RammerRuntime(ctx);
+}
+
+/* ---------- Saw（Q13-A）：圆锯持续单方向高速旋转（真实 Revolute motor，无 limit / 无状态机） ---------- */
+
+class SawRuntime implements PartBehaviorRuntime {
+  readonly vehicle: PlanckVehicle;
+  readonly part: PlanckPartRuntime;
+  private readonly behavior: SawBehavior;
+
+  constructor(ctx: BehaviorContext) {
+    this.vehicle = ctx.vehicle;
+    this.part = ctx.part;
+    this.behavior = new SawBehavior(ctx.part);
+  }
+
+  beforePhysicsStep(world: PlanckWorld, _timeMs: number): void {
+    this.behavior.stepFixed(world, this.vehicle, this.part);
+  }
+}
+
+export function createSawRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
+  return new SawRuntime(ctx);
 }
 
 export type { BodyHandle };

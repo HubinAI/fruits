@@ -334,9 +334,11 @@ export function createPlanckVehicle(
     // motor/limit 由后续 PushRodBehavior 驱动）。
     // Q12-B-CLOSE prototype/hold：Lifter（举升臂）仍为 Revolute 件——低位待机 → 主动上翻 → 回落
     // （motor/limit 由 LifterBehavior 驱动）；保留此 Revolute 路径供后续机制复用。
+    // Q13-A：Saw（圆锯）亦为 Revolute 件——持续单方向高速旋转（motor 由 SawBehavior 驱动，
+    // 无 limit / 无状态机），锯片圆心 = 枢轴、原地自转。
     // 其余 Functional Part（ram / cannon / gadget）保持 Weld 刚性连接。
     const joint =
-      f.def.behavior === 'hammer' || f.def.behavior === 'lifter'
+      f.def.behavior === 'hammer' || f.def.behavior === 'lifter' || f.def.behavior === 'saw'
         ? world.createRevoluteJoint(
             body,
             hpWorld,

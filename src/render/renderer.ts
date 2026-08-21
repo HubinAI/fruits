@@ -518,6 +518,10 @@ export class Renderer {
     for (const p of parts) {
       if (p.visual && this.drawVisual(p.visual)) {
         // sprite
+      } else if (p.shape.kind === 'circle' && p.behavior === 'saw') {
+        // Q13-A：圆锯专属视觉——锯齿随真实 part angle 旋转（一眼可见高速旋转），
+        // 不依赖 sprite；无 visual 时优先于通用灰盒。
+        this.drawSaw(p.shape.circle, p.category === 'weapon' ? '#d8d2c0' : '#9aa4b5');
       } else {
         this.drawShape(p.shape, p.category === 'weapon' ? '#d8d2c0' : '#9aa4b5');
       }
@@ -525,6 +529,63 @@ export class Renderer {
       // 连接车身锚点 from → 部件原点 to；仅消费 snapshot 真实世界坐标，无假动画。
       if (p.connector) this.drawConnector(p.connector, '#9aa4b5');
     }
+  }
+
+  /**
+   * Q13-A：圆锯视觉——真实圆形锯片（锯齿 + 圆盘 + 中心轮毂 + 径向标记线），
+   * 完全跟随 snapshot 的真实物理角度（RenderCircle.angle = 真实 part angle）旋转；
+   * 不新增 gameplay 状态、不伪造旋转。一圈 16 齿，齿尖半径略大于盘体，
+   * 半径标记线让高速旋转在正常速度下明显可辨。
+   */
+  private drawSaw(circle: RenderCircle, color: string): void {
+    const ctx = this.ctx;
+    const cx = this.sx(circle.center.x);
+    const cy = this.sy(circle.center.y);
+    const r = this.ss(circle.radius);
+    const a = circle.angle;
+    const teeth = 16;
+    const rInner = r * 0.86;
+    const rOuter = r * 1.12;
+    // 锯齿（三角齿，随 a 旋转）
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.92;
+    ctx.beginPath();
+    for (let i = 0; i < teeth; i++) {
+      const t0 = a + (i / teeth) * Math.PI * 2;
+      const t1 = a + ((i + 0.5) / teeth) * Math.PI * 2;
+      const t2 = a + ((i + 1) / teeth) * Math.PI * 2;
+      if (i === 0) {
+        ctx.moveTo(cx + Math.cos(t0) * rInner, cy + Math.sin(t0) * rInner);
+      } else {
+        ctx.lineTo(cx + Math.cos(t0) * rInner, cy + Math.sin(t0) * rInner);
+      }
+      ctx.lineTo(cx + Math.cos(t1) * rOuter, cy + Math.sin(t1) * rOuter);
+      ctx.lineTo(cx + Math.cos(t2) * rInner, cy + Math.sin(t2) * rInner);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    // 盘体描边
+    ctx.strokeStyle = '#0d0f14';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+    ctx.stroke();
+    // 中心轮毂
+    ctx.fillStyle = '#3a4150';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#0d0f14';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // 径向标记线（清楚显示旋转方向/速度）
+    ctx.strokeStyle = '#0d0f14';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a) * r * 0.8, cy + Math.sin(a) * r * 0.8);
+    ctx.stroke();
   }
 
   /**

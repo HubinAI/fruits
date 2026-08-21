@@ -34,4 +34,7 @@ export const PART_OPTIONS: PartOption[] = [
   //   标记 prototype/hold；底层 Revolute Gadget 能力不修改，供后续机制复用。
   // Q12-C：伸缩冲锤 Weapon（Prismatic 伸出撞击，真实 Contact 伤害）
   { v: 'rammer', t: '冲锤' },
+  // Q13-A：高速圆锯 Weapon（front Revolute 持续高速旋转，真实圆形 Collider，
+  //   接触走现有 Weapon Contact 的 contactTick 持续切割伤害）
+  { v: 'saw', t: '圆锯' },
 ];

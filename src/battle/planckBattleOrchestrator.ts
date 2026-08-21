@@ -465,6 +465,8 @@ export class PlanckBattleOrchestrator {
           partAng,
         ),
         category: p.def.category,
+        // Q13-A：透传 behavior 标识（如 'saw'），供 Renderer 画专属视觉（锯片旋转）
+        behavior: p.def.behavior,
         // W1-VIS-1：有 VisualDef → 输出 Visual（换炮管/锤头外形不改 Physics Collider）
         visual: p.def.visual
           ? visualWorldTransform(p.def.visual, vehicle.facing, partPos, partAng)
