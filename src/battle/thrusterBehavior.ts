@@ -178,18 +178,33 @@ export class ThrusterBehavior {
   }
 
   /**
-   * 渲染喷焰：仅 thrust 相位返回描述（根部 = 真实安装位置 part 世界坐标）；喷焰方向与推进
-   * 方向严格相反（exhaustDir = -chassisForward），非 thrust 相位返回 null → 渲染层立即不画
-   * （停推即消失）。
+   * 渲染喷焰数据（Q13-C-R3 表现重做：仅补充 phase / tMs，物理方向 / 冲量 / 节奏完全不变）：
+   * - windup：返回喷口小橙光 flame（phase='windup'，渲染层只画喷口小亮、不长焰）；
+   * - thrust：返回完整喷焰 flame（phase='thrust'，根部 = 真实安装位置 part 世界坐标，
+   *   方向 = exhaustDir = -chassisForward，与推进方向严格相反）；
+   * - cooldown：爆发后约 70ms 内仍返回收缩 flame（phase='cooldown'，渲染层快速收掉），
+   *   之后返回 null（停推即消失，不偷偷加推力表现）。
    */
   getFlame(
     world: PlanckWorld,
     vehicle: PlanckVehicle,
     part: PlanckPartRuntime,
   ): RenderFlame | null {
-    if (this.phase !== 'thrust') return null;
+    // cooldown：仅爆发后约 70ms 返回收缩 flame（纯表现），之后 null
+    if (this.phase === 'cooldown') {
+      const elapsedSteps = stepsFor(this.params.cooldownMs) - this.phaseStepsRemaining;
+      if (elapsedSteps * FIXED_DT_MS >= 70) return null;
+    }
     const partPos = world.getPosition(part.body);
     const { exhaust } = this.computeDirs(world, vehicle);
+    const phaseTotalMs =
+      this.phase === 'windup'
+        ? this.params.windupMs
+        : this.phase === 'thrust'
+          ? this.params.thrustMs
+          : 70; // cooldown 收缩用固定窗口
+    const elapsedSteps = stepsFor(phaseTotalMs) - this.phaseStepsRemaining;
+    const tMs = Math.max(0, elapsedSteps * FIXED_DT_MS);
     return {
       // 喷焰根部 = 真实安装位置（part 挂点世界坐标）；方向 = exhaustDir = -chassisForward
       // （车头方向=推进方向 → 喷焰朝车尾反方向喷出；rear 安装即车尾向外，绝不穿车）。
@@ -201,6 +216,8 @@ export class ThrusterBehavior {
       width: this.params.flameWidth,
       color: this.params.flameColor,
       team: vehicle.team,
+      phase: this.phase, // 'windup' | 'thrust' | 'cooldown'
+      tMs,
     };
   }
 }

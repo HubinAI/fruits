@@ -1989,37 +1989,34 @@ describe('Q13-C 推进器 Gadget', () => {
     expect(validateSnapshot(a, registry).valid).toBe(true); // 含 Weapon → 合法 Build
   });
 
-  it('3. 固定周期可复现（windup→thrust→cooldown）：喷焰仅推进期出现、停推即消失；两次一致', () => {
-    const trace = (): number[] => {
+  it('3. 固定周期可复现（windup→thrust→cooldown）：windup 显示喷口小橙光(phase=windup)、thrust 显示爆发焰(phase=thrust)、cooldown 快速收掉；两次一致', () => {
+    const trace = (): string[] => {
       const lab = new PhysicsLab(rendererStub);
       lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-C')!);
       const o = lab.orchestrator as PlanckBattleOrchestrator;
-      const flameSteps: number[] = [];
-      for (let i = 0; i < 200; i++) {
+      const phases: string[] = [];
+      for (let i = 0; i < 115; i++) {
         lab.step(16.6667);
-        flameSteps.push((o.getRenderSnapshot().flames ?? []).length);
+        const fl = o.getRenderSnapshot().flames ?? [];
+        phases.push(fl.length > 0 ? (fl[0]!.phase ?? 'thrust') : 'none');
       }
-      return flameSteps;
+      return phases;
     };
-    const f1 = trace();
-    const f2 = trace();
-    const first = (arr: number[]): number => arr.findIndex((n) => n > 0);
-    const first1 = first(f1);
-    const first2 = first(f2);
-    // windup 结束（首次喷焰）≈ ceil(250/16.667)=15 步，容忍 ±4（Q13-C-R1 缩短前摇）
-    expect(first1).toBeGreaterThanOrEqual(11);
-    expect(first1).toBeLessThanOrEqual(19);
-    expect(first2).toBe(first1); // 可复现：无随机偏移
-    const thrustLen = (arr: number[]): number => {
-      const s = first(arr);
-      let e = s;
-      while (e < arr.length && arr[e]! > 0) e++;
-      return e - s;
-    };
-    expect(thrustLen(f1)).toBeGreaterThanOrEqual(14); // 推进 ≈ 18 步（300ms，Q13-C-R1 缩短）
-    expect(thrustLen(f1)).toBeLessThanOrEqual(22);
-    // windup 段无喷焰（停推即消失）
-    expect(f1.slice(0, first1).every((n) => n === 0)).toBe(true);
+    const p1 = trace();
+    const p2 = trace();
+    const thrustOnset = (arr: string[]): number => arr.findIndex((s) => s === 'thrust');
+    const to1 = thrustOnset(p1);
+    const to2 = thrustOnset(p2);
+    // 进入 thrust ≈ 第 14~15 步（windupMs≈250），容忍 ±4（Q13-C-R1 缩短前摇）
+    expect(to1).toBeGreaterThanOrEqual(11);
+    expect(to1).toBeLessThanOrEqual(19);
+    expect(to2).toBe(to1); // 可复现：无随机偏移
+    // windup 段全部为 windup 相位（喷口小橙光、无长焰、无 thrust/cooldown 提前出现）
+    expect(p1.slice(0, to1).every((s) => s === 'windup')).toBe(true);
+    // thrust 持续时间 ≈ 18 步（300ms，Q13-C-R1 缩短）
+    const thrustCount = (arr: string[]): number => arr.filter((s) => s === 'thrust').length;
+    expect(thrustCount(p1)).toBeGreaterThanOrEqual(14);
+    expect(thrustCount(p1)).toBeLessThanOrEqual(22);
   });
 
   it('4. 仅自己 chassis 加速、推进前后速度/位移明显不同（不 setVelocity）：thrust 段 chassis 沿推力方向 vx 明显增大，windup 段≈0', () => {
@@ -2079,32 +2076,31 @@ describe('Q13-C 推进器 Gadget', () => {
     expect(samples[samples.length - 1]!).toBeLessThanOrEqual(samples[0]! + 0.3);
   });
 
-  it('6. 喷焰仅推进期、真实安装位置：thrust 段 flames 含 1 个且 team/color 正确；windup/cooldown 段为空', () => {
+  it('6. 喷焰三态正确（Q13-C-R3）：thrust=爆发焰、windup=喷口小橙光、cooldown=快速收掉；根部≈真实安装点、dirX<0（facing+1）', () => {
     const lab = new PhysicsLab(rendererStub);
     lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-C')!);
     const o = lab.orchestrator as PlanckBattleOrchestrator;
-    let sawThrustFlame = false;
-    let sawNonThrustFlame = false;
+    const part = o.vehicleA.parts.find((p) => p.def.id === 'thruster')!;
+    let sawWindup = false, sawThrust = false, sawCooldown = false, sawEmptyLate = false;
     for (let i = 0; i < 200; i++) {
       lab.step(16.6667);
       const flames = o.getRenderSnapshot().flames ?? [];
-      const part = o.vehicleA.parts.find((p) => p.def.id === 'thruster')!;
-      const partPos = o.world.getPosition(part.body);
-      if (flames.length > 0) {
-        sawThrustFlame = true;
-        const f = flames[0]!;
-        expect(flames.length).toBe(1);
-        expect(f.team).toBe('A');
-        expect(typeof f.color).toBe('string');
-        // 喷焰根部 ≈ 真实安装位置（part 世界坐标，容差 1px）
-        expect(Math.hypot(f.x - partPos.x, f.y - partPos.y)).toBeLessThan(1);
-        expect(f.dirX).toBeLessThan(0); // facing=+1 → 喷焰朝后（dirX<0）
-      } else {
-        sawNonThrustFlame = true; // 非推进期（windup/cooldown）无喷焰
-      }
+      if (flames.length === 0) { sawEmptyLate = true; continue; } // cooldown 后期收掉
+      const f = flames[0]!;
+      expect(flames.length).toBe(1);
+      expect(f.team).toBe('A');
+      expect(typeof f.color).toBe('string');
+      // 喷焰根部 ≈ 真实安装位置（part 世界坐标，容差 1px）
+      expect(Math.hypot(f.x - o.world.getPosition(part.body).x, f.y - o.world.getPosition(part.body).y)).toBeLessThan(1);
+      expect(f.dirX).toBeLessThan(0); // facing=+1 → 喷焰朝后（dirX<0）
+      if (f.phase === 'windup') sawWindup = true;
+      else if (f.phase === 'thrust') sawThrust = true;
+      else if (f.phase === 'cooldown') sawCooldown = true;
     }
-    expect(sawThrustFlame).toBe(true);
-    expect(sawNonThrustFlame).toBe(true);
+    expect(sawWindup).toBe(true);
+    expect(sawThrust).toBe(true);
+    expect(sawCooldown).toBe(true);
+    expect(sawEmptyLate).toBe(true); // cooldown 后期收掉为 null（无隐藏推力表现）
   });
 
   it('7. 碰撞仍走真实质量/姿态、不造成 Direct Weapon Damage：A 推进撞 B → B 真实位移、全程无 weapon damage', () => {
@@ -2219,9 +2215,11 @@ describe('Q13-C 推进器 Gadget', () => {
       });
       const o = lab.orchestrator as PlanckBattleOrchestrator;
       const vel = (): number => o.world.getLinearVelocity(o.vehicleA.body).x;
-      // 前摇（约 14 步，进入 thrust 之前）：无喷焰、vx≈0
+      // 前摇（约 14 步，进入 thrust 之前）：Q13-C-R3 前摇显示喷口小橙光（phase=windup），不长焰、vx≈0
       for (let i = 0; i < 14; i++) lab.step(16.6667);
-      expect((o.getRenderSnapshot().flames ?? []).length).toBe(0);
+      const wf = o.getRenderSnapshot().flames ?? [];
+      expect(wf.length).toBe(1);
+      expect(wf[0]!.phase).toBe('windup');
       expect(Math.abs(vel())).toBeLessThan(0.2);
       // 进入 thrust：当步即有喷焰且开始加速
       lab.step(16.6667);
@@ -2413,6 +2411,90 @@ describe('Q13-C 推进器 Gadget', () => {
       expect(Math.hypot(flame.dirX - expExhaust.x, flame.dirY - expExhaust.y)).toBeLessThan(1e-3);
       // 且 dirY 明显非零 → 不是固定 world X 向量（证明随 chassis 角度旋转）
       expect(Math.abs(flame.dirY)).toBeGreaterThan(0.1);
+    });
+  });
+
+  /* ---------- Q13-C-R3-PRESENT：喷焰表现重做（仅表现层；不改物理/方向/节奏） ---------- */
+  describe('Q13-C-R3-PRESENT 喷焰表现重做', () => {
+    it('1. windup 相位返回喷口小橙光 flame（phase=windup, tMs>=0, 不长焰）；thrust 相位 phase=thrust 且 tMs 随步增大', () => {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-C')!);
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      const fl = (): { length: number; phase?: string; tMs?: number }[] =>
+        (o.getRenderSnapshot().flames ?? []) as { length: number; phase?: string; tMs?: number }[];
+      lab.step(16.6667); // 进入 windup
+      const w = fl();
+      expect(w.length).toBe(1);
+      expect(w[0]!.phase).toBe('windup');
+      expect((w[0]!.tMs ?? -1)).toBeGreaterThanOrEqual(0);
+      // 步进到 thrust
+      for (let i = 0; i < 20; i++) lab.step(16.6667);
+      const th = fl();
+      expect(th.length).toBe(1);
+      expect(th[0]!.phase).toBe('thrust');
+      expect((th[0]!.tMs ?? 0)).toBeGreaterThan((w[0]!.tMs ?? 0));
+    });
+
+    it('2. thrust flame 携带 exhaust 方向（facing+1 → dirX<0, 喷焰朝车尾反方向）、team、真实 width(总宽,30~40不翻倍)、length(90~120)', () => {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-C')!);
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      for (let i = 0; i < 20; i++) lab.step(16.6667); // 到 thrust
+      const th = (o.getRenderSnapshot().flames ?? [])[0]!;
+      expect(th.phase).toBe('thrust');
+      expect(th.dirX).toBeLessThan(0); // exhaust = -chassisForward（车尾反方向）
+      expect(th.team).toBe('A');
+      expect(th.width).toBeGreaterThanOrEqual(30);
+      expect(th.width).toBeLessThanOrEqual(40); // 总宽（renderer 内部 half=width/2，不翻倍成 100px）
+      expect(th.length).toBeGreaterThanOrEqual(90);
+      expect(th.length).toBeLessThanOrEqual(120);
+    });
+
+    it('3. cooldown 相位快速收掉：爆发后约 70ms 内仍返回收缩 flame（phase=cooldown），之后为 null（无偷偷加推力表现）', () => {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-C')!);
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      const fl = (): { phase?: string }[] => (o.getRenderSnapshot().flames ?? []) as { phase?: string }[];
+      // 先步进到 thrust
+      let guard = 0;
+      while (guard < 80) {
+        const a = fl();
+        if (a.length > 0 && a[0]!.phase === 'thrust') break;
+        lab.step(16.6667);
+        guard++;
+      }
+      // 再步进越过 thrust（进入 cooldown）
+      guard = 0;
+      while (guard < 80) {
+        const a = fl();
+        if (a.length === 0 || a[0]!.phase !== 'thrust') break;
+        lab.step(16.6667);
+        guard++;
+      }
+      let sawCooldown = false;
+      for (let i = 0; i < 8; i++) {
+        lab.step(16.6667);
+        const a = fl();
+        if (a.length > 0 && a[0]!.phase === 'cooldown') sawCooldown = true;
+      }
+      expect(sawCooldown).toBe(true); // 70ms 内仍可见收缩焰
+      for (let i = 0; i < 60; i++) lab.step(16.6667); // 远超 70ms
+      expect(fl().length).toBe(0); // cooldown 后期无喷焰（无隐藏推力）
+    });
+
+    it('4. 一个周期三种相位齐全（windup/thrust/cooldown 都输出），复现性：渲染层据此做点火节奏', () => {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-C')!);
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      const phases = new Set<string>();
+      for (let i = 0; i < 60; i++) {
+        lab.step(16.6667);
+        const a = o.getRenderSnapshot().flames ?? [];
+        if (a.length > 0) phases.add(a[0]!.phase ?? 'thrust');
+      }
+      expect(phases.has('windup')).toBe(true);
+      expect(phases.has('thrust')).toBe(true);
+      expect(phases.has('cooldown')).toBe(true);
     });
   });
 });

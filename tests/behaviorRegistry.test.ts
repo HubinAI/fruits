@@ -91,9 +91,12 @@ describe('W1-BH-1 Behavior Registry', () => {
   it('2c. thruster runtime：固定周期 windup→thrust→cooldown；thrust 期喷焰出现且 chassis 受真实冲量（方向=车辆真实前向）', () => {
     const { runtime, world } = makeRuntime('thruster');
     const vx = (): number => world.getLinearVelocity(runtime.vehicle.body).x;
-    // 前摇（共 14 步，windupMs≈250 在「第 15 步」切换到 thrust）：喷焰应空、chassis 无推力
+    // 前摇（共 14 步，windupMs≈250 在「第 15 步」切换到 thrust）：前摇显示喷口小橙光
+    // （phase='windup'），不施力、不出现长焰
     for (let i = 0; i < 14; i++) runtime.beforePhysicsStep(world, i * 16.6667);
-    expect(runtime.getRenderFlames!(world).length).toBe(0); // 前摇无喷焰
+    const windupFlames = runtime.getRenderFlames!(world);
+    expect(windupFlames.length).toBe(1); // Q13-C-R3：前摇喷口小橙光
+    expect(windupFlames[0]!.phase).toBe('windup');
     const vEndWindup = vx();
     // 进入 thrust（第 15 步切换并开始施力）
     runtime.beforePhysicsStep(world, 14 * 16.6667);

@@ -385,6 +385,10 @@ export class Renderer {
       }
     }
 
+    // Q13-C-R3：喷焰主体（glow + 主焰 + 火芯）在车辆之前绘制，车身自然遮住与车体重叠
+    // 部分 → 火从车尾后方出来，不覆盖整辆西瓜。flames 缺省 undefined → 空绘制。
+    this.drawFlamePlumes(snap.flames ?? []);
+
     // Vehicles（W2-FX-2 死亡表现：淡出 alpha → 消失后跳过绘制；未死亡正常绘制）
     // 手动管理 globalAlpha（不复用 ctx.save/restore，保持与既有 canvas stub 兼容）
     const aAlpha = vehicleDeathAlpha(this.deathFxs, snap.vehicleA.team, now);
@@ -404,9 +408,8 @@ export class Renderer {
     // projectiles 缺省 undefined → 空绘制，Matter 画面不变。
     this.drawProjectiles(snap.projectiles ?? []);
 
-    // Q13-C：推进器喷焰（仅推进期存在，停推即空 → 立即消失）；真实安装位置 + 真实
-    // 车身朝向，纯表现。flames 缺省 undefined → 空绘制（无推进器时画面不变）。
-    this.drawFlames(snap.flames ?? []);
+    // Q13-C-R3：喷口亮核（前景，车辆之后绘制）：喷口小亮核/小橙光始终可见，强调喷口连接关系。
+    this.drawFlameNozzles(snap.flames ?? []);
 
     // Q13-A-R1：圆锯切割火花（仅 saw 有效 contactTick 接触期间存在，离开接触即空 →
     // 立即消失）；真实接触点 + 接触法线，纯表现。sparks 缺省 undefined → 空绘制。
@@ -773,61 +776,111 @@ export class Renderer {
   }
 
   /**
-   * Q13-C：推进器喷焰绘制（仅推进期；停推即空 → 立即消失）。
-   * 纯表现：根部 = 真实安装位置（part 挂点世界坐标），沿车身后方 dir 画短喷焰；
-   * 不参与碰撞/伤害/物理。明显双层 + 喷口亮核，正常速度一眼可见「喷火」。
+   * Q13-C-R3 喷焰表现重做：3 层 plume（外层 glow / 主橙焰 / 白黄火芯）+ 喷口小亮核，
+   * 在车辆之前绘制（车身自然遮住与车体重叠部分 → 火从车尾后方出来），不覆盖整辆西瓜。
+   * 纯表现：根部 = 真实安装位置（part 挂点世界坐标），沿 exhaust 方向；不参与碰撞/伤害/物理。
    */
-  private drawFlames(flames: readonly RenderFlame[]): void {
+  private drawFlameShape(opts: {
+    rootX: number; rootY: number; dx: number; dy: number; px: number; py: number;
+    len: number; rootHW: number; midHW: number; color: string; alpha: number;
+  }): void {
+    const { rootX, rootY, dx, dy, px, py, len, rootHW, midHW, color, alpha } = opts;
+    const ctx = this.ctx;
+    const midLen = len * 0.5;
+    const tipX = rootX + dx * len, tipY = rootY + dy * len;
+    const midX = rootX + dx * midLen, midY = rootY + dy * midLen;
+    // nozzle 窄 → mid 宽 → tip=0 的平滑火焰叶（非大三角/菱形）
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(rootX + px * rootHW, rootY + py * rootHW);
+    ctx.quadraticCurveTo(midX + px * midHW, midY + py * midHW, tipX, tipY);
+    ctx.quadraticCurveTo(midX - px * midHW, midY - py * midHW, rootX - px * rootHW, rootY - py * rootHW);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  /** 喷焰主体（glow + 主焰 + 火芯）：车辆之前绘制；windup 无长焰、cooldown 快速收掉 */
+  private drawFlamePlumes(flames: readonly RenderFlame[]): void {
+    const now = performance.now();
+    for (const f of flames) {
+      if (f.phase === 'windup') continue; // 前摇只画喷口小橙光（前景），不长焰
+      const len = Math.hypot(f.dirX, f.dirY) || 1;
+      const dx = f.dirX / len, dy = f.dirY / len;
+      const px = -dy, py = dx; // 垂直（喷焰横向）
+      const rootX = this.sx(f.x), rootY = this.sy(f.y);
+      // Q13-C-R3：flameWidth 理解为「总宽」→ 半宽 = width / 2；外层最大约 width×1.3/2
+      const halfW = this.ss(f.width) / 2;
+      // 点火节奏（最小状态机，无粒子系统）
+      let lenFactor = 1, midFactor = 1;
+      const t = f.tMs ?? 0;
+      if (f.phase === 'cooldown') {
+        const shrink = Math.max(0, 1 - t / 70); // 爆发后约 70ms 收掉
+        lenFactor = shrink; midFactor = shrink;
+      } else {
+        const RAMP = 80; // 爆发前约 80ms 冲开
+        if (t < RAMP) {
+          const k = t / RAMP;
+          const e = 1 - (1 - k) * (1 - k); // ease-out
+          lenFactor = 0.6 + 0.5 * e; // 60% → 110% 冲开
+          midFactor = 0.85 + 0.15 * e;
+        } else {
+          lenFactor = 1.0 + 0.06 * Math.sin(now * 0.05); // 稳定 ±6% 抖动
+          midFactor = 1.0 + 0.05 * Math.sin(now * 0.043 + 1.7); // 中段 ±5% 抖动
+        }
+      }
+      const baseLen = this.ss(f.length) * lenFactor;
+      const glowMidHW = halfW * 1.3 * midFactor; // 外层最大约 width×1.3/2
+      const mainMidHW = halfW * 1.15 * midFactor;
+      // C 外层红橙 glow（略长、略宽、低 alpha）
+      this.drawFlameShape({
+        rootX, rootY, dx, dy, px, py, len: baseLen * 1.05,
+        rootHW: halfW * 0.35, midHW: glowMidHW, color: '#ff5a1e',
+        alpha: f.phase === 'cooldown' ? 0.22 : 0.28,
+      });
+      // B 主橙焰（flameColor；nozzle 窄 → mid 宽 → tip=0）
+      this.drawFlameShape({
+        rootX, rootY, dx, dy, px, py, len: baseLen,
+        rootHW: halfW * 0.4, midHW: mainMidHW, color: f.color,
+        alpha: f.phase === 'cooldown' ? 0.5 : 0.85,
+      });
+      // A 白黄色火芯（约 36% 长、窄、高亮；非大白圆；与 B 不同步抖动）
+      const coreJ = 1 + 0.10 * Math.sin(now * 0.061 + 0.9);
+      this.drawFlameShape({
+        rootX, rootY, dx, dy, px, py, len: baseLen * 0.36 * coreJ,
+        rootHW: halfW * 0.3, midHW: mainMidHW * 0.4, color: '#fff0b0',
+        alpha: f.phase === 'cooldown' ? 0.7 : 0.95,
+      });
+    }
+  }
+
+  /** 喷口亮核（前景，车辆之后绘制）：windup 小橙光聚能 / thrust·cooldown 小白黄火芯 */
+  private drawFlameNozzles(flames: readonly RenderFlame[]): void {
+    const now = performance.now();
     const ctx = this.ctx;
     for (const f of flames) {
-      const len = Math.hypot(f.dirX, f.dirY) || 1;
-      const dx = f.dirX / len;
-      const dy = f.dirY / len;
-      const px = -dy; // 垂直方向（喷焰半宽方向）
-      const py = dx;
-      // Q13-C-R1：轻微长度抖动（确定性、非随机），让大喷焰有「活」的喷发感。
-      const flick = 1 + 0.05 * Math.sin(performance.now() / 35 + (f.x + f.y) * 0.03);
-      const flameLen = f.length * flick;
-      const rx = this.sx(f.x);
-      const ry = this.sy(f.y);
-      const tipX = this.sx(f.x + dx * flameLen);
-      const tipY = this.sy(f.y + dy * flameLen);
-      const half = (ww: number): [number, number, number, number] => {
-        const blx = this.sx(f.x + px * ww);
-        const bly = this.sy(f.y + py * ww);
-        const brx = this.sx(f.x - px * ww);
-        const bry = this.sy(f.y - py * ww);
-        return [blx, bly, brx, bry];
-      };
-      // 外层 glow（半透明、略宽）
-      const [gblx, gbly, gbrx, gbry] = half(f.width * 1.6);
-      ctx.globalAlpha = 0.3;
-      ctx.fillStyle = f.color;
-      ctx.beginPath();
-      ctx.moveTo(rx, ry);
-      ctx.lineTo(gblx, gbly);
-      ctx.lineTo(tipX, tipY);
-      ctx.lineTo(gbrx, gbry);
-      ctx.closePath();
-      ctx.fill();
-      // 内层亮焰（不透明、较窄）
-      const [iblx, ibly, ibrx, ibry] = half(f.width);
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = f.color;
-      ctx.beginPath();
-      ctx.moveTo(rx, ry);
-      ctx.lineTo(iblx, ibly);
-      ctx.lineTo(tipX, tipY);
-      ctx.lineTo(ibrx, ibry);
-      ctx.closePath();
-      ctx.fill();
-      // 喷口亮核（白橙，明显「点火」）
-      ctx.globalAlpha = 0.95;
-      ctx.fillStyle = '#fff3d0';
-      ctx.beginPath();
-      ctx.arc(rx, ry, this.ss(f.width * 0.55), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
+      const rootX = this.sx(f.x), rootY = this.sy(f.y);
+      if (f.phase === 'windup') {
+        // 喷口小橙光：约 0→6px 轻微脉冲，无长焰
+        const pulse = 0.5 + 0.5 * Math.sin(now * 0.02);
+        const r = this.ss(1.5) * (1 + pulse);
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = f.color;
+        ctx.beginPath();
+        ctx.arc(rootX, rootY, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      } else {
+        // 喷口小亮核：约 5~8px 小白黄（cooldown 随收缩淡出）
+        const shrink = f.phase === 'cooldown' ? Math.max(0, 1 - (f.tMs ?? 0) / 70) : 1;
+        ctx.globalAlpha = 0.95 * shrink;
+        ctx.fillStyle = '#fff3d0';
+        ctx.beginPath();
+        ctx.arc(rootX, rootY, this.ss(3.5) * shrink, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
     }
   }
 

@@ -324,6 +324,13 @@ export interface RenderFlame {
   color: string;
   /** 所属 team（仅配色/调试用） */
   team: TeamId;
+  /**
+   * 推进相位（Q13-C-R3 表现层：windup=前摇喷口小橙光、thrust=爆发喷射、cooldown=爆发后
+   * 约 70ms 快速收掉；cooldown 早期仍返回收缩 flame，之后为 null）。渲染层据此做点火节奏。
+   */
+  phase?: 'windup' | 'thrust' | 'cooldown';
+  /** 当前相位已进行时间（ms），供渲染层做点火节奏（爆发前 ~80ms 冲开、稳定抖动） */
+  tMs?: number;
 }
 
 /**
