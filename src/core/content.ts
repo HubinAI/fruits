@@ -513,7 +513,10 @@ const machineGun: FunctionalPartDef = {
     muzzleSpeed: 12,
     projectileDamage: 20, // 每发小伤（7 发全中 ≈ 140，持续压制而非单发高威胁）
     projectileRadius: 5, // 小弹体（小于 Cannon 10 / 霰弹 7），不扩大真实命中范围
-    projectileMass: 1,
+    // F-PROJ-HF1：小子弹自然动量降档——单颗质量沿用普通 projectile 档(1)时，
+    // 7 发高频累积把香蕉推走 ~25px/burst（实测）；降到 0.1 后 ≈2.5px/burst，
+    // 仅留轻微真实受击位移，不再像强力推杆。不改 speed/damage/fire rate/radius/CCD。
+    projectileMass: 0.1,
     recoilImpulse: 6, // 单发小（Cannon 30 / 5）；连续 7 发累计 ≈ 42 → 轻微后顿
   },
 };
@@ -554,7 +557,10 @@ const flamethrower: FunctionalPartDef = {
     muzzleSpeed: 10, // 正常可读速度（非慢珠）；短程来自短寿命而非低速
     projectileDamage: 8, // 每颗粒小伤（贴近时多颗连续命中）
     projectileRadius: 4, // 真实碰撞半径小（不扩大命中范围）
-    projectileMass: 1,
+    // F-PROJ-HF1：火焰颗粒自然动量降档——mass=1 时持续生成把香蕉推走 ~143px/spray
+    // （≈1.5 车身，实测，直接推出射程/画面）；降到 0.03 后 ≈4px/spray，香蕉稳定
+    // 停留在火流有效区。不改 spread/lifetime/damage/射程/视觉。真实 contact 命中不变。
+    projectileMass: 0.03,
     // 固定确定性分叉：-6°/0°/+6° 循环（上下轻微摆动的火流；禁止随机）
     spreadAnglesDeg: [-6, 0, 6],
   },
