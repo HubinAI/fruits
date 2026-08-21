@@ -314,6 +314,12 @@ const pushRod: FunctionalPartDef = {
 };
 
 /**
+ * Q12-B-CLOSE（prototype/hold）：举升臂退出正式 Build。
+ *   真人正常速度下对手仅轻微短暂抬头，「机械臂→明显举起对手」战斗作用不成立；
+ *   Revolute Runtime / 动作方向均正常，但体验目标不达 → 暂退。本 def 保留在
+ *   registry（供 Q12-B Scenario / 测试 / 未来重做举升类机制复用），不修改其
+ *   底层 Revolute Gadget 能力。禁止再调长度/角度/Torque/速度掩盖体验问题。
+ *
  * Q12-B：举升臂（Gadget）——front Revolute 连接，主动向上翻起对手。
  * - 低位待机 → 主动向上翻（60°~80°）→ 回落（LifterBehavior 状态机，
  *   复用 Hammer 的 Revolute / motor / limit 能力，物理弧由 Planck limit 保证）；

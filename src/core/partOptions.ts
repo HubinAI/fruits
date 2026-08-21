@@ -28,8 +28,10 @@ export const PART_OPTIONS: PartOption[] = [
   //   技术成立，但真人录像无独立动作/明显物理结果，与普通车头碰撞差异太弱；
   //   故从玩家装配页移除。registry / Q12-A Scenario / Contact Runtime / 测试保留，
   //   标记 prototype/hold，不修改其底层 ram Contact 能力，方便以后重做冲撞类内容。
-  // Q12-B：主动举升臂 Gadget（front Revolute 上翻，无 Direct Damage）
-  { v: 'lifter', t: '举升臂' },
+  // Q12-B-CLOSE（prototype/hold）：举升臂（lifter）退出正式 Build。
+  //   真人正常速度下对手仅轻微短暂抬头，「机械臂→明显举起对手」战斗作用不成立；
+  //   故从玩家装配页移除。registry / LifterBehavior / Q12-B Scenario / 测试保留，
+  //   标记 prototype/hold；底层 Revolute Gadget 能力不修改，供后续机制复用。
   // Q12-C：伸缩冲锤 Weapon（Prismatic 伸出撞击，真实 Contact 伤害）
   { v: 'rammer', t: '冲锤' },
 ];

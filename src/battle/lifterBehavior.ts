@@ -1,4 +1,8 @@
 /**
+ * Q12-B-CLOSE（prototype/hold）：本 Behavior 已退出正式 Build（见 Q12-B-CLOSE）。
+ *   仅保留源码与 registry 注册，供 Q12-B Scenario / 测试 / 后续复用 Revolute Gadget
+ *   能力。禁止再调长度/角度/Torque/速度掩盖体验问题。
+ *
  * Q12-B：举升臂（Gadget）——front Revolute 主动上翻状态机。
  *
  * 坐标语义（关键）：本游戏世界为 Y-down（世界 y 越小越靠屏幕上方，

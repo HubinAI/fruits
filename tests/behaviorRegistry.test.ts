@@ -60,7 +60,7 @@ describe('W1-BH-1 Behavior Registry', () => {
     expect(getBehaviorFactory('hammer')).toBeDefined();
     expect(getBehaviorFactory('pushRod')).toBeDefined();
     expect(getBehaviorFactory('laser')).toBeDefined(); // Q11-C 蓄能镭射
-    expect(getBehaviorFactory('lifter')).toBeDefined(); // Q12-B 举升臂
+    expect(getBehaviorFactory('lifter')).toBeDefined(); // Q12-B 举升臂（prototype/hold）
     expect(getBehaviorFactory('rammer')).toBeDefined(); // Q12-C 冲锤
     expect(getBehaviorFactory('ram')).toBeUndefined(); // 未注册（Weld-only）
     expect(getBehaviorFactory('noSuch')).toBeUndefined();

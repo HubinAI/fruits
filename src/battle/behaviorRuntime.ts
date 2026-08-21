@@ -217,7 +217,7 @@ export function createLaserRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
   return new LaserRuntime(ctx);
 }
 
-/* ---------- Lifter（Q12-B）：举升臂 Revolute 状态机（无 projectile / 无 Direct Damage） ---------- */
+/* ---------- Lifter（Q12-B-CLOSE prototype/hold）：举升臂 Revolute 状态机（无 projectile / 无 Direct Damage）；保留供复用，不在玩家装配页 ---------- */
 
 class LifterRuntime implements PartBehaviorRuntime {
   readonly vehicle: PlanckVehicle;

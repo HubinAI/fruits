@@ -17,13 +17,13 @@ import {
 
 export type BehaviorFactory = (ctx: BehaviorContext) => PartBehaviorRuntime;
 
-/** 正式已注册 Behavior（Cannon / Hammer / Push Rod / Laser / Lifter / Rammer-Q12-C） */
+/** 已注册 Behavior（Cannon / Hammer / Push Rod / Laser / Lifter[prototype/hold] / Rammer-Q12-C） */
 const FACTORIES: Record<string, BehaviorFactory> = {
   cannon: createCannonRuntime,
   hammer: createHammerRuntime,
   pushRod: createPushRodRuntime,
   laser: createLaserRuntime,
-  lifter: createLifterRuntime,
+  lifter: createLifterRuntime, // Q12-B-CLOSE prototype/hold：保留供 Scenario/测试/复用，不在玩家装配页
   rammer: createRammerRuntime,
 };
 

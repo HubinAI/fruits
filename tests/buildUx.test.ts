@@ -1012,9 +1012,27 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(ids).toContain('hammer');
     expect(ids).toContain('pushRod');
     expect(ids).not.toContain('ramHead'); // Q12-A-HOLD：冲撞头已暂退正式装配页
+    expect(ids).not.toContain('lifter'); // Q12-B-CLOSE：举升臂已暂退正式装配页
     // 唯一性 + 空槽在首位
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids[0]).toBe(EMPTY_SLOT);
+  });
+
+  it('Q12-B-CLOSE. 举升臂（prototype/hold）：不在 PART_OPTIONS / registry 保留 / Q12-B Scenario 仍可加载 / Revolute 仍装配', () => {
+    // 1) hold 状态：lifter 已退出玩家 PART_OPTIONS（不在装配页），但仍在 registry
+    //    （供 Q12-B Scenario / 直构 / 测试与未来重做举升类机制，底层 Revolute Gadget 不修改）
+    expect(PART_OPTIONS.map((o) => o.v)).not.toContain('lifter'); // Q12-B-CLOSE：装配页不再出现
+    expect(registry.functionals.has('lifter')).toBe(true); // registry 保留 prototype/hold
+    // 2) Q12-B Scenario 仍可加载并真实装配 Revolute 举升臂（底层能力未被删）
+    const sc = SCENARIOS.find((s) => s.id === 'Q12-B')!;
+    expect(sc).toBeDefined();
+    expect(sc.name).toContain('prototype/hold'); // Scenario 已标记 hold
+    const lab = new PhysicsLab(rendererStub);
+    expect(() => lab.loadScenario(sc)).not.toThrow();
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const lifterPart = o.vehicleA.parts.find((p) => p.def.id === 'lifter');
+    expect(lifterPart).toBeDefined(); // Q12-B A 车真实装配举升臂
+    expect(lifterPart!.joint).toBeDefined(); // Revolute joint（非 Weld）——底层能力保留
   });
 
   it('Q12-A-HOLD. 冲撞头（prototype/hold）：registry 保留 / 不在 PART_OPTIONS / 复用 ramHead Runtime / 正面命中 / 擦空失败', () => {
@@ -1080,7 +1098,7 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(dmg3).toBe(0); // 没正面撞到 → 自然失败，无隐藏击退/自动伤害
   });
 
-  it('Q12-B. 举升臂：Revolute 翻动弧 60~80° / banana 真实碰撞抬起 / 无 Direct Weapon Damage / A 反作用', () => {
+  it('Q12-B (prototype/hold). 举升臂：Revolute 翻动弧 60~80° / banana 真实碰撞抬起 / 无 Direct Weapon Damage / A 反作用', () => {
     // 1) 定义契约：gadget / 无 baseDamage / behavior lifter / Revolute 装配
     const lifter = registry.functionals.get('lifter')!;
     expect(lifter.category).toBe('gadget');
@@ -1135,7 +1153,7 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(maxAPitch * 57.3).toBeGreaterThan(0.5); // 自车真实反作用
   });
 
-  it('Q12-B-R1. 举升臂向上修正：双 facing 臂尖 worldY 减小（向屏幕上方）/ 绝不扫向地面', () => {
+  it('Q12-B-R1 (prototype/hold). 举升臂向上修正：双 facing 臂尖 worldY 减小（向屏幕上方）/ 绝不扫向地面', () => {
     // 沿真实 Runtime 记录 lifter 远端 tip 的 worldY（禁止用角度绝对值代替方向验证）。
     // 本世界 Y-down：worldY 越小越靠屏幕上方。tip 本地 x = facing·100（far end），
     // tip.worldY = pivot.worldY + facing·100·sin(partAngle)。

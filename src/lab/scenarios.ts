@@ -206,7 +206,7 @@ function ramHeadCarBuild(): BuildSnapshot {
   };
 }
 
-/** Q12-B：举升臂车——西瓜车身 + 前方举升臂（front Revolute 上翻 Gadget） */
+/** Q12-B-CLOSE（prototype/hold）：举升臂车——西瓜车身 + 前方举升臂（front Revolute 上翻 Gadget）；Scenario 保留供复用，不在玩家装配页 */
 function lifterCarBuild(): BuildSnapshot {
   return {
     id: 'lifterCar',
@@ -606,7 +606,7 @@ export const SCENARIOS: ScenarioDef[] = [
   },
   {
     id: 'Q12-B',
-    name: 'Lifter Arm (Gadget)',
+    name: 'Lifter Arm (prototype/hold)',
     description:
       '举升臂（Q12-B）：A 西瓜车身 + 前方举升臂（front Revolute，低位待机 → '
       + '主动向上翻 ~70° → 回落，复用 Hammer 的 Revolute / motor / limit，无 Direct '
