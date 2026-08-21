@@ -46,7 +46,7 @@ function makeRuntime(behaviorId: string): {
   world: PlanckWorld;
 } {
   const { world, vehicle, part } = makeVehicle(
-    behaviorId === 'cannon' ? 'cannon' : behaviorId === 'hammer' ? 'hammer' : behaviorId === 'pushRod' ? 'pushRod' : behaviorId === 'shotgun' ? 'shotgun' : 'saw',
+    behaviorId === 'cannon' ? 'cannon' : behaviorId === 'hammer' ? 'hammer' : behaviorId === 'pushRod' ? 'pushRod' : behaviorId === 'shotgun' ? 'shotgun' : behaviorId === 'thruster' ? 'thruster' : 'saw',
   );
   const factory = getBehaviorFactory(behaviorId)!;
   const runtime = factory({ vehicle, part, emit: () => {} });
@@ -55,7 +55,7 @@ function makeRuntime(behaviorId: string): {
 
 describe('W1-BH-1 Behavior Registry', () => {
   it('1. 注册表含 cannon/hammer/pushRod/laser/lifter/rammer/saw；未知 behavior → undefined', () => {
-    expect(registeredBehaviorIds().sort()).toEqual(['cannon', 'hammer', 'laser', 'lifter', 'pushRod', 'rammer', 'saw', 'shotgun']);
+    expect(registeredBehaviorIds().sort()).toEqual(['cannon', 'hammer', 'laser', 'lifter', 'pushRod', 'rammer', 'saw', 'shotgun', 'thruster']);
     expect(getBehaviorFactory('cannon')).toBeDefined();
     expect(getBehaviorFactory('hammer')).toBeDefined();
     expect(getBehaviorFactory('pushRod')).toBeDefined();
@@ -64,6 +64,7 @@ describe('W1-BH-1 Behavior Registry', () => {
     expect(getBehaviorFactory('rammer')).toBeDefined(); // Q12-C 冲锤
     expect(getBehaviorFactory('saw')).toBeDefined(); // Q13-A 圆锯
     expect(getBehaviorFactory('shotgun')).toBeDefined(); // Q13-B 霰弹炮
+    expect(getBehaviorFactory('thruster')).toBeDefined(); // Q13-C 推进器
     expect(getBehaviorFactory('ram')).toBeUndefined(); // 未注册（Weld-only）
     expect(getBehaviorFactory('noSuch')).toBeUndefined();
   });
@@ -85,6 +86,30 @@ describe('W1-BH-1 Behavior Registry', () => {
     expect(shots.length).toBe(5); // 一次齐射 = 5 发真实 projectile
     expect(shots.every((s) => s.team === 'A')).toBe(true);
     expect(shots.every((s) => s.radius > 0)).toBe(true);
+  });
+
+  it('2c. thruster runtime：固定周期 windup→thrust→cooldown；thrust 期喷焰出现且 chassis 受真实冲量', () => {
+    const { runtime, world } = makeRuntime('thruster');
+    const vx = (): number => world.getLinearVelocity(runtime.vehicle.body).x;
+    // 前摇（共 23 步，windupMs≈400 在「第 24 步」切换到 thrust）：喷焰应空、chassis 无推力
+    for (let i = 0; i < 23; i++) runtime.beforePhysicsStep(world, i * 16.6667);
+    expect(runtime.getRenderFlames!(world).length).toBe(0); // 前摇无喷焰
+    const vEndWindup = vx();
+    // 进入 thrust（第 24 步切换并开始施力）
+    runtime.beforePhysicsStep(world, 23 * 16.6667);
+    expect(runtime.getRenderFlames!(world).length).toBe(1); // 推进期喷焰出现
+    const flame = runtime.getRenderFlames!(world)[0]!;
+    expect(flame.team).toBe('A');
+    expect(flame.length).toBeGreaterThan(0);
+    expect(flame.width).toBeGreaterThan(0);
+    // thrust 期 chassis 受真实冲量 → 沿 +X（facing=1）vx 增大
+    for (let i = 0; i < 5; i++) runtime.beforePhysicsStep(world, (24 + i) * 16.6667);
+    const vAfterThrust = vx();
+    expect(vAfterThrust).toBeGreaterThan(vEndWindup); // 真实冲量推进（非 setVelocity）
+    expect(vAfterThrust).toBeGreaterThan(0);
+    // 进入冷却：喷焰立即消失
+    for (let i = 0; i < 40; i++) runtime.beforePhysicsStep(world, (30 + i) * 16.6667);
+    expect(runtime.getRenderFlames!(world).length).toBe(0); // 冷却期无喷焰
   });
 
   it('3. 生命周期差异：cannon 有 projectile 能力；hammer/pushRod 无', () => {

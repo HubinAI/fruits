@@ -272,6 +272,11 @@ export interface BattleRenderSnapshot {
    * optional——Matter Snapshot 不提供，Planck Runtime 提供。
    */
   projectiles?: RenderProjectile[];
+  /**
+   * 存活喷焰（Q13-C 推进器）：仅推进期存在，真实安装位置 + 喷出方向 + 短尺寸，
+   * 引擎中立；optional——仅推进器 Behavior 贡献，停推即空数组 → 立即消失。
+   */
+  flames?: RenderFlame[];
 }
 
 /** 存活 projectile 渲染数据（Q02-C3A）：不出现 BodyHandle / Planck / Matter 类型 */
@@ -289,6 +294,29 @@ export interface RenderProjectile {
    * 供 Renderer 沿真实飞行方向绘制长条能量束；不参与碰撞/伤害。
    */
   velocity?: { x: number; y: number };
+}
+
+/**
+ * 喷焰渲染数据（Q13-C 推进器）：仅推进期存在，停推即空 → 立即消失。
+ * - 真实安装位置（part 挂点世界坐标）为喷焰根部；
+ * - dir 为喷焰喷出方向（车身后方，单位向量），length/width 为短喷焰尺寸；
+ * - 纯表现：不参与碰撞 / 伤害 / 物理，不出现任何引擎类型。
+ */
+export interface RenderFlame {
+  /** 喷焰根部世界坐标（= 真实安装位置） */
+  x: number;
+  y: number;
+  /** 喷焰方向单位向量（世界坐标，沿车身后方） */
+  dirX: number;
+  dirY: number;
+  /** 喷焰长度（px，短） */
+  length: number;
+  /** 喷焰根部半宽（px） */
+  width: number;
+  /** 配色（暖橙喷火） */
+  color: string;
+  /** 所属 team（仅配色/调试用） */
+  team: TeamId;
 }
 
 /**

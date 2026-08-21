@@ -40,4 +40,7 @@ export const PART_OPTIONS: PartOption[] = [
   // Q13-B：霰弹炮 Weapon（front Weld 短粗枪管，一次齐射 5 发固定扇形真实 projectile；
   //   近距离多弹命中、远距离自然散开；一次明显炮口爆闪 + 真实后坐）
   { v: 'shotgun', t: '霰弹炮' },
+  // Q13-C：推进器 Gadget（front Weld 短粗喷口，固定周期喷火推进；沿 chassis facing 施力、
+  //   真实安装位置短喷焰，停推即消失；不改轮子、不造成伤害）
+  { v: 'thruster', t: '推进器' },
 ];

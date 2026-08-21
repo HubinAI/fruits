@@ -477,6 +477,43 @@ const shotgun: FunctionalPartDef = {
 };
 
 /**
+ * Q13-C：推进器（Gadget）——玩家直接看到「喷火 → 整辆车突然向前冲」。
+ * 它改变的是距离和碰撞时机，不直接造成 Weapon Damage。
+ * - 固定周期：短前摇 windupMs（约 0.4s）→ 爆发推进 thrustMs（约 0.5s）→ 冷却
+ *   cooldownMs（约 1.5s），循环；
+ * - 推力只施加到自己 chassis（vehicle.body），沿真实车身 facing 方向（chassis 当前
+ *   世界姿态前向量）；用 applyLinearImpulse（每固定步一个冲量 = 连续推力）；
+ *   禁止 setVelocity / teleport / 给对手施加力；
+ * - 推进期间 Renderer 在真实安装位置（part 挂点世界坐标）画明显短喷焰，停推即消失；
+ * - 不造成 Direct Weapon Damage（Gadget，category='gadget'，无 baseDamage）；
+ * - 不改正常轮子 Movement 参数（autoDrive / grip 完全不变）；不复制第二套物理系统。
+ */
+const thruster: FunctionalPartDef = {
+  id: 'thruster',
+  name: '推进器',
+  category: 'gadget',
+  mass: 15, // 明显质量：推进反作用自车也承担
+  energy: 20,
+  // 短粗喷口：本地 x∈[0,30]（相对 pivot 向前伸出 30px），高 24；
+  // offset.x=15 → 喷口盒中心在 pivot 前 15px（喷焰从 pivot/后端喷出，朝车身后方）。
+  collider: { shape: 'box', width: 30, height: 24, offset: { x: 15, y: 0 } },
+  behavior: 'thruster',
+  behaviorParams: {
+    // 固定周期（ms）：前摇 0.4s → 爆发 0.5s → 冷却 1.5s（循环）。
+    windupMs: 400,
+    thrustMs: 500,
+    cooldownMs: 1500,
+    // 每固定步沿 chassis facing 施加的冲量（mass × px/step）：单 burst 累计 Δv 明显可见、
+    // 又不过分（后续真人验收再回收）。
+    thrustImpulse: 8,
+    // 喷焰表现（纯渲染）：暖橙喷火、短喷焰。
+    flameColor: '#ffb24a',
+    flameLength: 26,
+    flameWidth: 16,
+  },
+};
+
+/**
  * Q11-A：楔铲（Gadget）——低矮楔形 Collider（polygon），固定安装在前方，
  * 随整车移动，无主动动画 / 无 behavior（behavior:'none'）。
  * 翻起效果完全来自真实碰撞几何、质量、速度与力矩（钻入对手底部 → 沿坡面
@@ -618,6 +655,7 @@ export function createRegistry(): ContentRegistry {
       [rammer.id, rammer],
       [saw.id, saw],
       [shotgun.id, shotgun],
+      [thruster.id, thruster],
     ]),
   };
 }

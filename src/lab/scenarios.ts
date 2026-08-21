@@ -262,6 +262,20 @@ function shotgunCarBuild(): BuildSnapshot {
   };
 }
 
+/** Q13-C：推进器车——西瓜车身 + 前方推进器（front Weld Gadget，固定周期喷火推进） */
+function thrusterCarBuild(): BuildSnapshot {
+  return {
+    id: 'thrusterCar',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'thruster' }],
+  };
+}
+
 /** Q11-A：楔铲车——西瓜车身 + 前方楔铲（Gadget，无 Direct Damage，无主动动画） */
 function wedgeShovelBuild(): BuildSnapshot {
   return {
@@ -702,6 +716,25 @@ export const SCENARIOS: ScenarioDef[] = [
     config: {
       engine: 'planck',
       autoDrive: true,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Q13-C',
+    name: 'Thruster (Gadget Boost)',
+    description:
+      '推进器（Q13-C）：A 西瓜车身 + 前方推进器（front Weld Gadget）。固定周期：短前摇 0.4s' +
+      ' → 爆发推进 0.5s → 冷却 1.5s，循环。推力只施加到自己 chassis、沿真实车身 facing' +
+      ' 方向（applyLinearImpulse，不 setVelocity / 不 teleport / 不给对手力 / 不造成 Direct' +
+      ' Weapon Damage）；推进期间在真实安装位置画明显短喷焰，停推即消失。改变距离与碰撞' +
+      ' 时机，不直接伤害。本场景 autoDrive=false 以单独呈现「喷火→突然向前冲」。',
+    buildA: thrusterCarBuild(),
+    buildB: plainCarBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: false, // 隔离推力效果：关闭自动驱动，单独看「喷火→突然加速」
       spawnA: { x: 450, y: 650, facing: 1 },
       spawnB: { x: 1150, y: 650, facing: -1 },
     },

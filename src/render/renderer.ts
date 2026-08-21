@@ -10,6 +10,7 @@ import type {
   RenderShape,
   RenderCircle,
   RenderProjectile,
+  RenderFlame,
   RenderConnector,
   RenderVisual,
 } from '../battle/battleContract';
@@ -367,6 +368,10 @@ export class Renderer {
     // projectiles 缺省 undefined → 空绘制，Matter 画面不变。
     this.drawProjectiles(snap.projectiles ?? []);
 
+    // Q13-C：推进器喷焰（仅推进期存在，停推即空 → 立即消失）；真实安装位置 + 真实
+    // 车身朝向，纯表现。flames 缺省 undefined → 空绘制（无推进器时画面不变）。
+    this.drawFlames(snap.flames ?? []);
+
     // Q11-C-R3-FINAL：镭射巨炮束 VFX（发射后沿 fire 方向驻留 ~130ms 衰减；纯表现）
     this.drawLaserBeams();
 
@@ -669,6 +674,62 @@ export class Renderer {
       ctx.strokeStyle = '#0d0f14';
       ctx.lineWidth = 1.5;
       ctx.stroke();
+    }
+  }
+
+  /**
+   * Q13-C：推进器喷焰绘制（仅推进期；停推即空 → 立即消失）。
+   * 纯表现：根部 = 真实安装位置（part 挂点世界坐标），沿车身后方 dir 画短喷焰；
+   * 不参与碰撞/伤害/物理。明显双层 + 喷口亮核，正常速度一眼可见「喷火」。
+   */
+  private drawFlames(flames: readonly RenderFlame[]): void {
+    const ctx = this.ctx;
+    for (const f of flames) {
+      const len = Math.hypot(f.dirX, f.dirY) || 1;
+      const dx = f.dirX / len;
+      const dy = f.dirY / len;
+      const px = -dy; // 垂直方向（喷焰半宽方向）
+      const py = dx;
+      const rx = this.sx(f.x);
+      const ry = this.sy(f.y);
+      const tipX = this.sx(f.x + dx * f.length);
+      const tipY = this.sy(f.y + dy * f.length);
+      const half = (ww: number): [number, number, number, number] => {
+        const blx = this.sx(f.x + px * ww);
+        const bly = this.sy(f.y + py * ww);
+        const brx = this.sx(f.x - px * ww);
+        const bry = this.sy(f.y - py * ww);
+        return [blx, bly, brx, bry];
+      };
+      // 外层 glow（半透明、略宽）
+      const [gblx, gbly, gbrx, gbry] = half(f.width * 1.6);
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = f.color;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(gblx, gbly);
+      ctx.lineTo(tipX, tipY);
+      ctx.lineTo(gbrx, gbry);
+      ctx.closePath();
+      ctx.fill();
+      // 内层亮焰（不透明、较窄）
+      const [iblx, ibly, ibrx, ibry] = half(f.width);
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = f.color;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(iblx, ibly);
+      ctx.lineTo(tipX, tipY);
+      ctx.lineTo(ibrx, ibry);
+      ctx.closePath();
+      ctx.fill();
+      // 喷口亮核（白橙，明显「点火」）
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = '#fff3d0';
+      ctx.beginPath();
+      ctx.arc(rx, ry, this.ss(f.width * 0.55), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
     }
   }
 

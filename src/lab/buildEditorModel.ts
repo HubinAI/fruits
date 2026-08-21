@@ -18,7 +18,7 @@ import type {
 } from '../core/types';
 
 /** 可编辑的正式 Functional 内容（本轮已通过体验验证的 Weapon/Gadget） */
-export const EDITABLE_FUNCTIONAL_DEF_IDS = ['cannon', 'hammer', 'pushRod', 'saw', 'shotgun'] as const;
+export const EDITABLE_FUNCTIONAL_DEF_IDS = ['cannon', 'hammer', 'pushRod', 'saw', 'shotgun', 'thruster'] as const;
 export type EditableFunctionalDefId = (typeof EDITABLE_FUNCTIONAL_DEF_IDS)[number];
 
 /** 空槽哨兵：不进入 BuildSnapshot */

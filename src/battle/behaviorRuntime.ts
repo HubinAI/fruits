@@ -17,7 +17,7 @@ import type { BodyHandle, PlanckWorld } from '../physics/planckWorld';
 import type { PlanckPartRuntime, PlanckVehicle } from './planckVehicleAssembly';
 import type { ProjectileContactFact } from './contactRouter';
 import type { BattleEvent } from './combatEvents';
-import type { RenderProjectile } from './battleContract';
+import type { RenderProjectile, RenderFlame } from './battleContract';
 import { CannonBehavior } from './cannonBehavior';
 import { HammerBehavior } from './hammerBehavior';
 import { PushRodBehavior } from './pushRodBehavior';
@@ -26,6 +26,7 @@ import { LifterBehavior } from './lifterBehavior';
 import { RammerBehavior } from './rammerBehavior';
 import { SawBehavior } from './sawBehavior';
 import { ShotgunBehavior } from './shotgunBehavior';
+import { ThrusterBehavior } from './thrusterBehavior';
 
 /** Behavior factory 输入（由 Orchestrator 在构造时提供） */
 export interface BehaviorContext {
@@ -50,6 +51,8 @@ export interface PartBehaviorRuntime {
   ): void;
   /** 渲染贡献：存活 projectile 快照（无则省略） */
   getRenderProjectiles?(world: PlanckWorld): RenderProjectile[];
+  /** 渲染贡献：存活喷焰快照（仅推进期；无则省略） */
+  getRenderFlames?(world: PlanckWorld): RenderFlame[];
 }
 
 /* ---------- Cannon（Q02-C1A）：发射 + 冷却 + projectile 生命周期 + 渲染 ---------- */
@@ -343,6 +346,33 @@ class ShotgunRuntime implements PartBehaviorRuntime {
 
 export function createShotgunRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
   return new ShotgunRuntime(ctx);
+}
+
+/* ---------- Thruster（Q13-C）：推进器 Gadget（固定周期 windup→thrust→cooldown；沿 chassis facing 施力 + 真实喷焰） ---------- */
+
+class ThrusterRuntime implements PartBehaviorRuntime {
+  readonly vehicle: PlanckVehicle;
+  readonly part: PlanckPartRuntime;
+  private readonly behavior: ThrusterBehavior;
+
+  constructor(ctx: BehaviorContext) {
+    this.vehicle = ctx.vehicle;
+    this.part = ctx.part;
+    this.behavior = new ThrusterBehavior(ctx.part);
+  }
+
+  beforePhysicsStep(world: PlanckWorld, _timeMs: number): void {
+    this.behavior.stepFixed(world, this.vehicle, this.part);
+  }
+
+  getRenderFlames(world: PlanckWorld): RenderFlame[] {
+    const f = this.behavior.getFlame(world, this.vehicle, this.part);
+    return f ? [f] : [];
+  }
+}
+
+export function createThrusterRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
+  return new ThrusterRuntime(ctx);
 }
 
 export type { BodyHandle };

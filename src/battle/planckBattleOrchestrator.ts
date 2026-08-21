@@ -45,6 +45,7 @@ import {
   type RenderArena,
   type RenderVec2,
   type RenderProjectile,
+  type RenderFlame,
 } from './battleContract';
 
 /** 引擎中立 Battle 合同（B14B：自 battleContract.ts 重新导出，保持既有导入路径兼容） */
@@ -408,6 +409,7 @@ export class PlanckBattleOrchestrator {
       vehicleA: this.buildVehicleSnapshot(this.vehicleA),
       vehicleB: this.buildVehicleSnapshot(this.vehicleB),
       projectiles: this.buildProjectilesSnapshot(),
+      flames: this.buildFlamesSnapshot(),
     };
   }
 
@@ -422,6 +424,19 @@ export class PlanckBattleOrchestrator {
     const out: RenderProjectile[] = [];
     for (const b of this.behaviors) {
       out.push(...(b.getRenderProjectiles?.(this.world) ?? []));
+    }
+    return out;
+  }
+
+  /**
+   * 存活喷焰渲染快照（Q13-C 推进器）：聚合所有 Behavior Runtime 的 getRenderFlames
+   * （非推进期返回空数组 → 不进入快照 → Renderer 立即不画）。纯渲染几何，
+   * 不出现任何引擎类型。
+   */
+  private buildFlamesSnapshot(): RenderFlame[] {
+    const out: RenderFlame[] = [];
+    for (const b of this.behaviors) {
+      out.push(...(b.getRenderFlames?.(this.world) ?? []));
     }
     return out;
   }

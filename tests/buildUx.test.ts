@@ -29,6 +29,7 @@ import {
   slotLabel,
   SLOT_LABELS,
   EMPTY_SLOT,
+  EDITABLE_FUNCTIONAL_DEF_IDS,
   type BuildDraft,
 } from '../src/lab/buildEditorModel';
 import { validateSnapshot, computeEnergy } from '../src/core/buildValidator';
@@ -1484,6 +1485,7 @@ describe('Q13-A 高速圆锯 Weapon', () => {
     expect(ids).toContain('spear');
     expect(ids).toContain('laser');
     expect(ids).toContain('shotgun'); // Q13-B：霰弹炮进入正常 Build
+    expect(ids).toContain('thruster'); // Q13-C：推进器进入正常 Build
     expect(ids).not.toContain('lifter'); // Q12-B-CLOSE：举升臂已暂退正式装配页
     expect(ids).not.toContain('ramHead'); // Q12-A-HOLD：冲撞头已暂退正式装配页
     expect(ids).not.toContain('wedgeShovel'); // Q11-A-CLOSE：楔铲已退出正式 Build
@@ -1716,9 +1718,257 @@ describe('Q13-B 霰弹炮 Weapon', () => {
     expect(ids).toContain('spear');
     expect(ids).toContain('laser');
     expect(ids).toContain('saw');
+    expect(ids).toContain('thruster'); // Q13-C：推进器进入正常 Build
     expect(ids).not.toContain('lifter'); // Q12-B-CLOSE
     expect(ids).not.toContain('ramHead'); // Q12-A-HOLD
     expect(ids).not.toContain('wedgeShovel'); // Q11-A-CLOSE
+    expect(ids[0]).toBe(EMPTY_SLOT);
+  });
+});
+
+/* ---------- Q13-C：推进器 Gadget（固定周期 windup→thrust→cooldown；沿 chassis facing 施力 + 真实喷焰；不改轮子/不造成伤害） ---------- */
+describe('Q13-C 推进器 Gadget', () => {
+  /** A 推进器车：watermelon + front thruster（Weld 短粗喷口，固定周期喷火推进） */
+  function thrusterSnapshot(side: 'A' | 'B') {
+    return buildSnapshotFromDraft(
+      {
+        bodyDefId: 'watermelonBody',
+        rearRadius: 20,
+        frontRadius: 20,
+        functionalSelections: { front: 'thruster', frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      },
+      registry,
+      side,
+    );
+  }
+  /** B 无攻击件目标车（boxBody，与 Q13-C Scenario 一致） */
+  function plainSnapshot(side: 'A' | 'B') {
+    return buildSnapshotFromDraft(
+      {
+        bodyDefId: 'boxBody',
+        rearRadius: 20,
+        frontRadius: 20,
+        functionalSelections: { front: EMPTY_SLOT, frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      },
+      registry,
+      side,
+    );
+  }
+
+  it('1. thruster 定义：gadget / box collider / behavior thruster / 固定周期 windup≈400→thrust≈500→cooldown≈1500 / 沿 chassis facing 施力 / 无 baseDamage', () => {
+    const def = registry.functionals.get('thruster')!;
+    expect(def.category).toBe('gadget'); // Gadget：改变距离/姿态，不直接伤害
+    expect(def.behavior).toBe('thruster');
+    const c = def.collider as { shape: string; width: number; height: number; offset: { x: number; y: number } };
+    expect(c.shape).toBe('box'); // 短粗喷口（非第二套物理系统）
+    const bp = def.behaviorParams as Record<string, unknown>;
+    expect((bp.windupMs as number)).toBeCloseTo(400, 0);
+    expect((bp.thrustMs as number)).toBeCloseTo(500, 0);
+    expect((bp.cooldownMs as number)).toBeCloseTo(1500, 0);
+    expect((bp.thrustImpulse as number)).toBeGreaterThan(0); // 每固定步沿 facing 施加的冲量
+    expect(typeof bp.flameColor).toBe('string');
+    expect((bp.flameLength as number)).toBeGreaterThan(0);
+    expect((bp.flameWidth as number)).toBeGreaterThan(0);
+    expect((bp.baseDamage as number | undefined)).toBeUndefined(); // Gadget：无 Direct Weapon Damage
+  });
+
+  it('2. 加入正常 Build：PART_OPTIONS 含 thruster；Preview 真实部件 + Weld 装配 + Energy 计入；与武器组成合法 Build', () => {
+    expect(PART_OPTIONS.map((o) => o.v)).toContain('thruster');
+    expect((EDITABLE_FUNCTIONAL_DEF_IDS as readonly string[])).toContain('thruster');
+    // 推进器是 Gadget（无 Direct Damage），单独不构成合法战斗 Build（规则要求至少 1 件 Weapon）；
+    // 与一件 Weapon（top=spear）组成合法 Build 验证 Preview / Weld / Energy / Validator。
+    const a = buildSnapshotFromDraft(
+      {
+        bodyDefId: 'watermelonBody',
+        rearRadius: 20,
+        frontRadius: 20,
+        functionalSelections: { front: 'thruster', frontMass: EMPTY_SLOT, top: 'spear', rear: EMPTY_SLOT },
+      },
+      registry,
+      'A',
+    );
+    const b = plainSnapshot('B');
+    const lab = new PhysicsLab(rendererStub);
+    expect(() => lab.loadCustomPreview(a, b)).not.toThrow();
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const thPart = o.vehicleA.parts.find((p) => p.def.id === 'thruster')!;
+    expect(thPart).toBeDefined();
+    expect(thPart.joint).toBeDefined(); // Weld joint（非 Revolute/Prismatic）
+    expect(computeEnergy(a, registry).energy).toBe(45); // 推进器 20 + 刺 25
+    expect(validateSnapshot(a, registry).valid).toBe(true); // 含 Weapon → 合法 Build
+  });
+
+  it('3. 固定周期可复现（windup→thrust→cooldown）：喷焰仅推进期出现、停推即消失；两次一致', () => {
+    const trace = (): number[] => {
+      const lab = new PhysicsLab(rendererStub);
+      lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-C')!);
+      const o = lab.orchestrator as PlanckBattleOrchestrator;
+      const flameSteps: number[] = [];
+      for (let i = 0; i < 200; i++) {
+        lab.step(16.6667);
+        flameSteps.push((o.getRenderSnapshot().flames ?? []).length);
+      }
+      return flameSteps;
+    };
+    const f1 = trace();
+    const f2 = trace();
+    const first = (arr: number[]): number => arr.findIndex((n) => n > 0);
+    const first1 = first(f1);
+    const first2 = first(f2);
+    // windup 结束（首次喷焰）≈ ceil(400/16.667)=24 步，容忍 ±4
+    expect(first1).toBeGreaterThanOrEqual(20);
+    expect(first1).toBeLessThanOrEqual(28);
+    expect(first2).toBe(first1); // 可复现：无随机偏移
+    const thrustLen = (arr: number[]): number => {
+      const s = first(arr);
+      let e = s;
+      while (e < arr.length && arr[e]! > 0) e++;
+      return e - s;
+    };
+    expect(thrustLen(f1)).toBeGreaterThanOrEqual(26); // 推进 ≈ 30 步（500ms），容忍
+    expect(thrustLen(f1)).toBeLessThanOrEqual(34);
+    // windup 段无喷焰（停推即消失）
+    expect(f1.slice(0, first1).every((n) => n === 0)).toBe(true);
+  });
+
+  it('4. 仅自己 chassis 加速、推进前后速度/位移明显不同（不 setVelocity）：thrust 段 chassis 沿 facing vx 明显增大，windup 段≈0', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(thrusterSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: false, // 隔离：无前进驱动力，推力效果清晰
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const vx = (): number => o.world.getLinearVelocity(o.vehicleA.body).x;
+    const x0 = o.world.getPosition(o.vehicleA.body).x;
+    // 前摇段（约 24 步）：无推力，vx≈0
+    for (let i = 0; i < 24; i++) lab.step(16.6667);
+    const vWindup = vx();
+    expect(Math.abs(vWindup)).toBeLessThan(0.2); // 前摇未偷偷加速 / 未瞬移
+    // 推进段（约 30 步）：沿 +X 明显加速
+    for (let i = 0; i < 30; i++) lab.step(16.6667);
+    const vThrust = vx();
+    expect(vThrust).toBeGreaterThan(0.8); // 明显「突然加速」（≈87px/s）
+    expect(vThrust).toBeGreaterThan(vWindup + 0.5); // 推进前后速度明显不同
+    const xThrust = o.world.getPosition(o.vehicleA.body).x;
+    expect(xThrust - x0).toBeGreaterThan(5); // 实际位移（非仅数字）
+  });
+
+  it('5. 不给对手力 / 冷却期不偷偷加速：B chassis 不受推力；cooldown 段 A vx 增量≈0（无隐藏施力）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(thrusterSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 }, // B 远，无碰撞干扰
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const vxA = (): number => o.world.getLinearVelocity(o.vehicleA.body).x;
+    const vxB = (): number => o.world.getLinearVelocity(o.vehicleB.body).x;
+    // 推进到进入 thrust 再越过 thrust 进入 cooldown
+    let guard = 0;
+    while ((o.getRenderSnapshot().flames ?? []).length === 0 && guard < 200) {
+      lab.step(16.6667);
+      guard++;
+    }
+    let guard2 = 0;
+    while ((o.getRenderSnapshot().flames ?? []).length > 0 && guard2 < 200) {
+      lab.step(16.6667);
+      guard2++;
+    }
+    expect(Math.abs(vxB())).toBeLessThan(0.2); // 对手 chassis 不受推进器推力
+    // 冷却段（thrust 结束后）采样 vx：推进器不再施力 → vx 持平（无隐藏加速）
+    const samples: number[] = [];
+    for (let i = 0; i < 40; i++) {
+      lab.step(16.6667);
+      samples.push(vxA());
+    }
+    expect(Math.abs(samples[samples.length - 1]! - samples[0]!)).toBeLessThan(0.3);
+  });
+
+  it('6. 喷焰仅推进期、真实安装位置：thrust 段 flames 含 1 个且 team/color 正确；windup/cooldown 段为空', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-C')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let sawThrustFlame = false;
+    let sawNonThrustFlame = false;
+    for (let i = 0; i < 200; i++) {
+      lab.step(16.6667);
+      const flames = o.getRenderSnapshot().flames ?? [];
+      const part = o.vehicleA.parts.find((p) => p.def.id === 'thruster')!;
+      const partPos = o.world.getPosition(part.body);
+      if (flames.length > 0) {
+        sawThrustFlame = true;
+        const f = flames[0]!;
+        expect(flames.length).toBe(1);
+        expect(f.team).toBe('A');
+        expect(typeof f.color).toBe('string');
+        // 喷焰根部 ≈ 真实安装位置（part 世界坐标，容差 1px）
+        expect(Math.hypot(f.x - partPos.x, f.y - partPos.y)).toBeLessThan(1);
+        expect(f.dirX).toBeLessThan(0); // facing=+1 → 喷焰朝后（dirX<0）
+      } else {
+        sawNonThrustFlame = true; // 非推进期（windup/cooldown）无喷焰
+      }
+    }
+    expect(sawThrustFlame).toBe(true);
+    expect(sawNonThrustFlame).toBe(true);
+  });
+
+  it('7. 碰撞仍走真实质量/姿态、不造成 Direct Weapon Damage：A 推进撞 B → B 真实位移、全程无 weapon damage', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(thrusterSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 520, y: 650, facing: -1 }, // 贴近：推进后直接撞上
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const xB0 = o.world.getPosition(o.vehicleB.body).x;
+    let weaponDmg = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.target === 'B' && ev.damageSource === 'weapon') weaponDmg += ev.damage;
+    });
+    for (let i = 0; i < 200; i++) {
+      lab.step(16.6667);
+      if (o.result?.phase === 'End') break;
+    }
+    const xB1 = o.world.getPosition(o.vehicleB.body).x;
+    expect(xB1 - xB0).toBeGreaterThan(1); // 撞击后 B 真实产生位移（碰撞物理生效）
+    expect(weaponDmg).toBe(0); // 推进器是 Gadget，不造成 Direct Weapon Damage
+  });
+
+  it('8. 不改正常轮子 Movement 参数：autoDrive=true 时 A 车仍由轮子正常驱动（终速由 drive 主导，未被推进器破坏）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(thrusterSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: true, // 轮子正常驱动
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 },
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let positiveSteps = 0;
+    for (let i = 0; i < 300; i++) {
+      lab.step(16.6667);
+      if (o.world.getLinearVelocity(o.vehicleA.body).x > 0) positiveSteps++;
+    }
+    expect(positiveSteps).toBeGreaterThan(250); // 绝大多数时间向前（轮子 drive 正常）
+  });
+
+  it('F-DEV-1+Q13-C. 推进器进入玩家部件选项', () => {
+    const ids = PART_OPTIONS.map((o) => o.v);
+    expect(ids).toContain('thruster');
+    expect(ids).toContain('cannon');
+    expect(ids).toContain('hammer');
+    expect(ids).toContain('pushRod');
+    expect(ids).toContain('rammer');
+    expect(ids).toContain('spear');
+    expect(ids).toContain('laser');
+    expect(ids).toContain('saw');
+    expect(ids).toContain('shotgun');
+    expect(ids).not.toContain('lifter');
+    expect(ids).not.toContain('ramHead');
+    expect(ids).not.toContain('wedgeShovel');
     expect(ids[0]).toBe(EMPTY_SLOT);
   });
 });
