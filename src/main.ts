@@ -111,9 +111,14 @@ style.textContent = `
   .result-actions button.primary:hover { background: #4a7fe0; }
   .result-actions button.secondary { opacity: 0.85; }
   /* Q07-A：开发工具折叠区（机制场景 / Pause/Reset/Clear / 速度 / Preset 收进二级） */
-  .tool-tools-host { display: none; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 12px; background: #1b2130; border-bottom: 1px solid #2a3140; }
+  /* Q13-C-R4：开发工具折叠区改为「工具栏下方全宽独立一行」（不再嵌进 .lab-main 横向 flex 被挤压）。
+     基础 display: flex（展开时由内联 '' 回退到此）；收起由内联 display:none 控制。
+     width:100% + flex-shrink:0 + box-sizing:border-box 保证任何桌面分辨率都全宽可见、且不压缩战场。 */
+  .tool-tools-host { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 12px; background: #1b2130; border-bottom: 1px solid #2a3140; width: 100%; flex-shrink: 0; box-sizing: border-box; }
   .tool-tools-host .tool-tools-label { font-size: 12px; color: #9aa4b5; margin-right: 4px; }
   .tool-tools-host button, .tool-tools-host select { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; padding: 5px 9px; cursor: pointer; font-size: 12px; }
+  /* Q13-C-R4：Scenario 下拉框明确可读宽度（260～320px）——展开后第一眼必须能看到场景选项 */
+  .tool-tools-host select { min-width: 280px; }
   .tool-tools-host button:disabled { opacity: 0.45; cursor: not-allowed; }
   .tool-tools-host .preset-box { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; flex-wrap: wrap; }
   .tool-tools-host .preset-box h3 { display: inline; font-size: 12px; color: #ffd35a; margin: 0 4px 0 0; }
@@ -983,8 +988,12 @@ const toolsLabel = document.createElement('span');
 toolsLabel.className = 'tool-tools-label';
 toolsLabel.textContent = '调试：';
 toolsHost.appendChild(toolsLabel);
-main.insertBefore(toolsHost, canvasWrap); // 放在工具栏下方、画面之上
+// Q13-C-R4：toolsHost 不再放进 .lab-main（横向 flex 会把它挤压成窄条、Scenario 不可见）。
+// 改为放进 .lab-root，作为 toolbar 与 main 之间的独立纵向一行（全宽，flex-shrink:0，不挤压战场）。
+root.insertBefore(toolsHost, main);
 let toolsOpen = false;
+// 基础 CSS 为 display:flex，这里显式收起，保证首屏默认隐藏（展开由内联 '' 回退到 flex）。
+toolsHost.style.display = 'none';
 
 /** 按钮状态机 + Start 阻断原因（结果由中央结算卡展示，不再用 toolbar 小字） */
 function updateStartButton(): void {
