@@ -1008,6 +1008,7 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     expect(ids).not.toContain('wedgeShovel'); // Q11-A-CLOSE：装配页不得再出现楔铲
     expect(ids).toContain('spear'); // 刺正常
     expect(ids).toContain('laser'); // 镭射正常
+    expect(ids).toContain('shotgun'); // 霰弹炮正常（Q13-B）
     expect(ids).toContain('cannon');
     expect(ids).toContain('hammer');
     expect(ids).toContain('pushRod');
@@ -1482,9 +1483,242 @@ describe('Q13-A 高速圆锯 Weapon', () => {
     expect(ids).toContain('rammer');
     expect(ids).toContain('spear');
     expect(ids).toContain('laser');
+    expect(ids).toContain('shotgun'); // Q13-B：霰弹炮进入正常 Build
     expect(ids).not.toContain('lifter'); // Q12-B-CLOSE：举升臂已暂退正式装配页
     expect(ids).not.toContain('ramHead'); // Q12-A-HOLD：冲撞头已暂退正式装配页
     expect(ids).not.toContain('wedgeShovel'); // Q11-A-CLOSE：楔铲已退出正式 Build
+    expect(ids[0]).toBe(EMPTY_SLOT);
+  });
+});
+
+/* ---------- Q13-B：霰弹炮 Weapon（一次齐射 5 发固定扇形真实 projectile / 一次爆闪 + 真实后坐；复用正式 Projectile 链） ---------- */
+describe('Q13-B 霰弹炮 Weapon', () => {
+  /** A 霰弹炮车：watermelon + front shotgun（Weld 短粗枪管，一次齐射 5 发固定扇形） */
+  function shotgunSnapshot(side: 'A' | 'B') {
+    return buildSnapshotFromDraft(
+      {
+        bodyDefId: 'watermelonBody',
+        rearRadius: 20,
+        frontRadius: 20,
+        functionalSelections: { front: 'shotgun', frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      },
+      registry,
+      side,
+    );
+  }
+  /** B 无攻击件目标车（boxBody，与 Q13-B Scenario 一致） */
+  function plainSnapshot(side: 'A' | 'B') {
+    return buildSnapshotFromDraft(
+      {
+        bodyDefId: 'boxBody',
+        rearRadius: 20,
+        frontRadius: 20,
+        functionalSelections: { front: EMPTY_SLOT, frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      },
+      registry,
+      side,
+    );
+  }
+
+  it('1. shotgun 定义：weapon / box collider / behavior shotgun / 固定扇形 5 发 -12..+12 / muzzleSpeed< cannon（不自动瞄准、无 raycast）', () => {
+    const def = registry.functionals.get('shotgun')!;
+    expect(def.category).toBe('weapon');
+    expect(def.behavior).toBe('shotgun');
+    const c = def.collider as { shape: string; width: number; height: number; offset: { x: number; y: number } };
+    expect(c.shape).toBe('box'); // 短粗枪管（非第二套 projectile 系统）
+    const bp = def.behaviorParams as Record<string, unknown>;
+    const fan = bp.fanAnglesDeg as number[];
+    expect(fan).toEqual([-12, -6, 0, 6, 12]); // 固定扇形、可复现、无随机
+    expect(fan.length).toBe(5);
+    const cp = registry.functionals.get('cannon')!.behaviorParams as Record<string, number>;
+    expect((bp.muzzleSpeed as number)).toBeLessThan(cp.muzzleSpeed); // 较低 muzzleSpeed → 射程偏近、自然散开
+    expect((bp.projectileDamage as number)).toBeGreaterThan(0); // 每发走正式 projectileDamage
+    expect((bp.baseDamage as number | undefined)).toBeUndefined(); // 无直扣 HP（走 projectile 链）
+  });
+
+  it('2. 加入正常 Build：PART_OPTIONS 含 shotgun；Preview 真实部件 + Energy 30 + Validator 通过 + Weld 装配', () => {
+    expect(PART_OPTIONS.map((o) => o.v)).toContain('shotgun'); // 正常 Build 装配页出现霰弹炮
+    const lab = new PhysicsLab(rendererStub);
+    const a = shotgunSnapshot('A');
+    const b = snap(draft('bananaBody', {}), 'q13bB');
+    expect(() => lab.loadCustomPreview(a, b)).not.toThrow();
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    const sgPart = o.vehicleA.parts.find((p) => p.def.id === 'shotgun')!;
+    expect(sgPart).toBeDefined();
+    expect(sgPart.joint).toBeDefined(); // Weld joint（非 Revolute/Prismatic）——底层装配能力保留
+    expect(computeEnergy(a, registry).energy).toBe(30);
+    expect(validateSnapshot(a, registry).valid).toBe(true); // weapon → 单独可 Start
+  });
+
+  it('3. 齐射真实 5 发扇形（可复现、无随机）：单发齐射产生 5 个真实 projectile，飞行中明显散开（扇角≈24°）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-B')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let fired = false;
+    let muzzle: { x: number; y: number } | null = null;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'shotgun') {
+        fired = true;
+        muzzle = ev.worldPosition; // 炮口世界点（与 projectile 生成同源）
+      }
+    });
+    for (let i = 0; i < 60 && !fired; i++) lab.step(16.6667);
+    expect(fired).toBe(true);
+    // 单发齐射后片刻（B 远未及，弹体存活），5 发应当全部在飞（向下扇弹约 step~12 才触地，故取 step5 测量）
+    for (let i = 0; i < 5; i++) lab.step(16.6667);
+    const ps = o.getRenderSnapshot().projectiles ?? [];
+    expect(ps.length).toBe(5); // 一次齐射 = 5 发（固定，无随机增减）
+    const angles = ps.map((p) => Math.atan2(p.center.y - muzzle!.y, p.center.x - muzzle!.x) * 57.3);
+    const spread = Math.max(...angles) - Math.min(...angles);
+    expect(spread).toBeGreaterThan(12); // 扇形明显展开（标称 24°，重力/车体微倾略减）
+    expect(spread).toBeLessThan(32);
+    // 可复现：再跑一次仍是 5 发 + 同样扇角区间（无随机散布）
+    const lab2 = new PhysicsLab(rendererStub);
+    lab2.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-B')!);
+    const o2 = lab2.orchestrator as PlanckBattleOrchestrator;
+    let fired2 = false;
+    let muzzle2: { x: number; y: number } | null = null;
+    o2.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'shotgun') { fired2 = true; muzzle2 = ev.worldPosition; }
+    });
+    for (let i = 0; i < 60 && !fired2; i++) lab2.step(16.6667);
+    for (let i = 0; i < 5; i++) lab2.step(16.6667);
+    const ps2 = o2.getRenderSnapshot().projectiles ?? [];
+    expect(ps2.length).toBe(5);
+    const a2 = ps2.map((p) => Math.atan2(p.center.y - muzzle2!.y, p.center.x - muzzle2!.x) * 57.3);
+    const spread2 = Math.max(...a2) - Math.min(...a2);
+    expect(spread2).toBeGreaterThan(16);
+    expect(spread2).toBeLessThan(28);
+  });
+
+  it('4. 近距离多弹命中（单发齐射）：B 贴近 → 一次齐射 ≥2 弹命中（weapon damage 远超单发 30）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: false, // 隔离扇形几何，不靠撞击
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 560, y: 650, facing: -1 }, // 贴近：炮口到 B 前脸仅 ~44px
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let weaponDmg = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon' && ev.target === 'B') weaponDmg += ev.damage;
+    });
+    // 仅统计首发齐射窗口（< 79 步，第二次齐射弹尚未飞抵 B）
+    for (let i = 0; i < 79; i++) {
+      lab.step(16.6667);
+      if (o.result?.phase === 'End') break;
+    }
+    expect(weaponDmg).toBeGreaterThanOrEqual(60); // ≥2 弹命中（单发仅 30）→ 近距离多弹命中
+  });
+
+  it('5. 远处自然散开、部分 Miss（单发齐射）：B 放远 → 同一齐射不能全中（weapon damage < 5×30）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 760, y: 650, facing: -1 }, // 远处：扇角散开 + 重力 → 边缘弹 Miss，中央弹仍中（部分 Miss）
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let weaponDmg = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon' && ev.target === 'B') weaponDmg += ev.damage;
+    });
+    // 单发齐射窗口：远处扇角散开 → 不可能 5 发全中（< 150）；射程自然由 muzzleSpeed 决定（无距离判定消失伤害）
+    for (let i = 0; i < 90; i++) {
+      lab.step(16.6667);
+      if (o.result?.phase === 'End') break;
+    }
+    expect(weaponDmg).toBeLessThan(150); // 同一齐射不能全中（部分 Miss）
+    expect(weaponDmg).toBeGreaterThan(0); // 中央弹仍命中（部分 Miss；非全部 Miss 也有可能）
+  });
+
+  it('6. 每发走正式伤害链（ContactRouter projectileDamage）：weapon damage 来源=weapon 且按弹数累积，无隐藏直扣', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: false,
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 560, y: 650, facing: -1 },
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let weaponDmg = 0;
+    let sawOther = false;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.target === 'B') {
+        if (ev.damageSource === 'weapon') weaponDmg += ev.damage;
+        else sawOther = true; // 不应有非 weapon 来源（无隐藏直扣 HP / 无第二套伤害系统）
+      }
+    });
+    for (let i = 0; i < 90; i++) {
+      lab.step(16.6667);
+      if (o.result?.phase === 'End') break;
+    }
+    expect(weaponDmg).toBeGreaterThan(0); // 真实走 ContactRouter 结算
+    expect(sawOther).toBe(false); // 无隐藏直扣 HP / 无第二套伤害系统
+  });
+
+  it('7. 一次明显炮口爆闪：单发齐射只触发 1 次 weaponFire 事件（非 5 次）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-B')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let fireCount = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'shotgun') fireCount++;
+    });
+    // 一个冷却窗口内（cooldownMs 1300 ≈ 78 步）应只有首发齐射的 1 次事件
+    for (let i = 0; i < 78; i++) lab.step(16.6667);
+    expect(fireCount).toBe(1); // 5 发齐射只发 1 次 weaponFire → 一次爆闪
+  });
+
+  it('8. 真实后坐：齐射瞬间自车 chassis 受真实反向冲量（vx 骤降 + 实际向后位移，非仅数字）', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadCustom(shotgunSnapshot('A'), plainSnapshot('B'), {
+      engine: 'planck',
+      autoDrive: false, // 隔离：无前进驱动力，后坐位移清晰可见
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 1150, y: 650, facing: -1 }, // B 远，无碰撞干扰
+    });
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    let firedStep = -1;
+    let step = 0;
+    const xs: number[] = [];
+    const vxs: number[] = [];
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'weaponFire' && ev.behavior === 'shotgun' && firedStep < 0) firedStep = step;
+    });
+    for (let i = 0; i < 60; i++) {
+      vxs.push(o.world.getLinearVelocity(o.vehicleA.body).x);
+      lab.step(16.6667);
+      xs.push(o.world.getPosition(o.vehicleA.body).x);
+      step++;
+      if (firedStep >= 0 && step - firedStep >= 10) break;
+    }
+    expect(firedStep).toBeGreaterThanOrEqual(0);
+    // 真人可见反向运动：前 ~8 帧内至少一次 chassis 实际后退（facing+1 → x 减小）
+    let maxBack = 0;
+    for (let k = 1; k < 8 && firedStep + k < xs.length; k++) {
+      maxBack = Math.max(maxBack, xs[firedStep + k - 1]! - xs[firedStep + k]!);
+    }
+    expect(maxBack).toBeGreaterThan(0.05); // 明显反向位移（px/帧），真实 impulse 非屏幕震动
+    // vx 真正转负（真实冲量，无伪装）
+    expect(Math.min(...vxs.slice(firedStep, Math.min(firedStep + 8, vxs.length)))).toBeLessThan(0);
+  });
+
+  it('F-DEV-1+Q13-B. 霰弹炮进入玩家部件选项', () => {
+    const ids = PART_OPTIONS.map((o) => o.v);
+    expect(ids).toContain('shotgun'); // Q13-B：正常 Build 装配页出现霰弹炮
+    expect(ids).toContain('cannon');
+    expect(ids).toContain('hammer');
+    expect(ids).toContain('pushRod');
+    expect(ids).toContain('rammer');
+    expect(ids).toContain('spear');
+    expect(ids).toContain('laser');
+    expect(ids).toContain('saw');
+    expect(ids).not.toContain('lifter'); // Q12-B-CLOSE
+    expect(ids).not.toContain('ramHead'); // Q12-A-HOLD
+    expect(ids).not.toContain('wedgeShovel'); // Q11-A-CLOSE
     expect(ids[0]).toBe(EMPTY_SLOT);
   });
 });

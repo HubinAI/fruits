@@ -37,4 +37,7 @@ export const PART_OPTIONS: PartOption[] = [
   // Q13-A：高速圆锯 Weapon（front Revolute 持续高速旋转，真实圆形 Collider，
   //   接触走现有 Weapon Contact 的 contactTick 持续切割伤害）
   { v: 'saw', t: '圆锯' },
+  // Q13-B：霰弹炮 Weapon（front Weld 短粗枪管，一次齐射 5 发固定扇形真实 projectile；
+  //   近距离多弹命中、远距离自然散开；一次明显炮口爆闪 + 真实后坐）
+  { v: 'shotgun', t: '霰弹炮' },
 ];

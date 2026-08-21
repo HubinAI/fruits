@@ -370,6 +370,9 @@ const presentation = new BattlePresentationController({
         ev.worldDirection.y,
       );
       renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y, '#eafdff', 14);
+    } else if (ev.behavior === 'shotgun') {
+      // Q13-B：霰弹炮齐射 → 一次明显更大更亮的暖橙爆闪（与 Cannon 默认小闪区分）
+      renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y, '#ffd35a', 16);
     } else {
       renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y);
     }

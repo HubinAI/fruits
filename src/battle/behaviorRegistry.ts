@@ -14,11 +14,12 @@ import {
   createLifterRuntime,
   createRammerRuntime,
   createSawRuntime,
+  createShotgunRuntime,
 } from './behaviorRuntime';
 
 export type BehaviorFactory = (ctx: BehaviorContext) => PartBehaviorRuntime;
 
-/** 已注册 Behavior（Cannon / Hammer / Push Rod / Laser / Lifter[prototype/hold] / Rammer-Q12-C / Saw-Q13-A） */
+/** 已注册 Behavior（Cannon / Hammer / Push Rod / Laser / Lifter[prototype/hold] / Rammer-Q12-C / Saw-Q13-A / Shotgun-Q13-B） */
 const FACTORIES: Record<string, BehaviorFactory> = {
   cannon: createCannonRuntime,
   hammer: createHammerRuntime,
@@ -27,6 +28,7 @@ const FACTORIES: Record<string, BehaviorFactory> = {
   lifter: createLifterRuntime, // Q12-B-CLOSE prototype/hold：保留供 Scenario/测试/复用，不在玩家装配页
   rammer: createRammerRuntime,
   saw: createSawRuntime, // Q13-A：圆锯持续单方向高速旋转（真实 Revolute motor）
+  shotgun: createShotgunRuntime, // Q13-B：霰弹炮齐射（5 发固定扇形真实 projectile / 一次爆闪 + 后坐）
 };
 
 /** 按 behavior id 取 factory（未注册 → undefined，Orchestrator 跳过该 part） */

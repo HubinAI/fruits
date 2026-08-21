@@ -25,6 +25,7 @@ import { LaserBehavior } from './laserBehavior';
 import { LifterBehavior } from './lifterBehavior';
 import { RammerBehavior } from './rammerBehavior';
 import { SawBehavior } from './sawBehavior';
+import { ShotgunBehavior } from './shotgunBehavior';
 
 /** Behavior factory 输入（由 Orchestrator 在构造时提供） */
 export interface BehaviorContext {
@@ -282,6 +283,66 @@ class SawRuntime implements PartBehaviorRuntime {
 
 export function createSawRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
   return new SawRuntime(ctx);
+}
+
+/* ---------- Shotgun（Q13-B）：霰弹炮齐射（5 发固定扇形真实 projectile / 一次爆闪 + 后坐） ---------- */
+
+class ShotgunRuntime implements PartBehaviorRuntime {
+  readonly vehicle: PlanckVehicle;
+  readonly part: PlanckPartRuntime;
+  private readonly behavior: ShotgunBehavior;
+
+  constructor(ctx: BehaviorContext) {
+    this.vehicle = ctx.vehicle;
+    this.part = ctx.part;
+    this.behavior = new ShotgunBehavior(ctx.part, (e) => {
+      ctx.emit({ ...e, timestamp: this.timeMs });
+    });
+  }
+
+  private timeMs = 0;
+
+  beforePhysicsStep(world: PlanckWorld, timeMs: number): void {
+    this.timeMs = timeMs;
+    this.behavior.stepFixed(world, this.vehicle, this.part);
+  }
+
+  afterPhysicsStep(
+    world: PlanckWorld,
+    projectileFacts: readonly ProjectileContactFact[],
+  ): void {
+    this.behavior.consumeProjectileFacts(world, projectileFacts);
+  }
+
+  destroyOutOfBoundsProjectiles(
+    world: PlanckWorld,
+    isOutOfBounds: (pos: { x: number; y: number }) => boolean,
+  ): void {
+    for (const p of this.behavior.aliveProjectiles) {
+      if (isOutOfBounds(world.getPosition(p))) {
+        this.behavior.destroyProjectile(world, p);
+      }
+    }
+  }
+
+  getRenderProjectiles(world: PlanckWorld): RenderProjectile[] {
+    const out: RenderProjectile[] = [];
+    for (const p of this.behavior.aliveProjectiles) {
+      const tag = world.getOwnerTag(p);
+      if (!tag || !tag.team) continue; // 已销毁 / 无归属：不进入快照
+      const bounds = world.getBounds(p);
+      out.push({
+        center: world.getPosition(p),
+        radius: (bounds.maxX - bounds.minX) / 2,
+        team: tag.team,
+      });
+    }
+    return out;
+  }
+}
+
+export function createShotgunRuntime(ctx: BehaviorContext): PartBehaviorRuntime {
+  return new ShotgunRuntime(ctx);
 }
 
 export type { BodyHandle };

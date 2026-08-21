@@ -436,6 +436,47 @@ const saw: FunctionalPartDef = {
 };
 
 /**
+ * Q13-B：霰弹炮（Weapon）——近距离扇形爆发，与普通炮（单发稳定弹道）形成完全不同的
+ *   远程选择。
+ * - 真实 box collider 短粗枪管（radius/offset 使炮口 = 枪管前端，5 发同炮口齐射）；
+ * - behavior 'shotgun'：每次开火同时生成 5 发真实 projectile，固定扇形方向
+ *   -12°/-6°/0°/+6°/+12°（相对炮口基准方向，风扇角度固定、首版必须可复现，
+ *   不做随机散布 / 不自动瞄准 / 不做扇形 raycast）；
+ * - 5 发全部复用现有真实 Projectile / CCD / Owner Filter 链（spawnWeaponProjectile，
+ *   与 Cannon 同一条引擎链路，不创建第二套 Projectile 系统）；每发独立 carry
+ *   OwnerTag → 都走 ContactRouter 正式 projectileDamage 结算（同一 projectile
+ *   仍只走正式伤害链）；
+ * - 射程自然通过较低 muzzleSpeed 形成（不做距离判定后消失伤害）：近距离 5 发聚拢
+ *   → 多弹命中；远处自然散开（扇形角 + 重力）→ 部分 / 全部 Miss；
+ * - 发射瞬间使用「一次」明显炮口爆闪 + 真实后坐（5 发齐射只发一次 weaponFire 事件、
+ *   只 apply 一次 recoil，由 Weld 自然传给整车）；
+ * - 不修改 Cannon / Laser：两者保持原样，仅新增本 Weapon 复用同一 Projectile 系统。
+ */
+const shotgun: FunctionalPartDef = {
+  id: 'shotgun',
+  name: '霰弹炮',
+  category: 'weapon',
+  mass: 25, // 明显质量：后坐反作用自车也承担
+  energy: 30,
+  // 短粗枪管：本地 x∈[0,46]（相对 pivot，向前伸出 46px），高 22；
+  // offset.x=23 → 炮口（图片右端）世界位置 = pivot + facing*(23 + 23) = pivot + facing*46 ✓。
+  collider: { shape: 'box', width: 46, height: 22, offset: { x: 23, y: 0 } },
+  behavior: 'shotgun',
+  behaviorParams: {
+    // 扁枪管近距离爆发：较低 muzzleSpeed（射程偏近、自然散开更明显）+ 固定扇形 5 发。
+    // 首版数值故意明显、易验证（不做精细平衡，后续真人验收再回收）。
+    cooldownMs: 1300, // 齐射武器冷却略长于普通炮（1000）
+    muzzleSpeed: 6, // 低于 Cannon 8 → 近距离爆发手感、远距离自然散开
+    projectileDamage: 30, // 每发伤害（5 发可多弹命中 → 近距离总伤可远超单发炮）
+    projectileRadius: 7, // 小于 Cannon 10（5 发同时飞，单发略小）
+    projectileMass: 1,
+    recoilImpulse: 45, // 一次齐射后坐（明显，但只 apply 一次，不按发数累加）
+    // 固定扇形（度，相对炮口基准方向）：5 发 -12/-6/0/+6/+12，可复现、无随机。
+    fanAnglesDeg: [-12, -6, 0, 6, 12],
+  },
+};
+
+/**
  * Q11-A：楔铲（Gadget）——低矮楔形 Collider（polygon），固定安装在前方，
  * 随整车移动，无主动动画 / 无 behavior（behavior:'none'）。
  * 翻起效果完全来自真实碰撞几何、质量、速度与力矩（钻入对手底部 → 沿坡面
@@ -576,6 +617,7 @@ export function createRegistry(): ContentRegistry {
       [lifter.id, lifter],
       [rammer.id, rammer],
       [saw.id, saw],
+      [shotgun.id, shotgun],
     ]),
   };
 }

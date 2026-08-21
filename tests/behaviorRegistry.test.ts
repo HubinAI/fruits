@@ -46,7 +46,7 @@ function makeRuntime(behaviorId: string): {
   world: PlanckWorld;
 } {
   const { world, vehicle, part } = makeVehicle(
-    behaviorId === 'cannon' ? 'cannon' : behaviorId === 'hammer' ? 'hammer' : behaviorId === 'pushRod' ? 'pushRod' : 'saw',
+    behaviorId === 'cannon' ? 'cannon' : behaviorId === 'hammer' ? 'hammer' : behaviorId === 'pushRod' ? 'pushRod' : behaviorId === 'shotgun' ? 'shotgun' : 'saw',
   );
   const factory = getBehaviorFactory(behaviorId)!;
   const runtime = factory({ vehicle, part, emit: () => {} });
@@ -55,7 +55,7 @@ function makeRuntime(behaviorId: string): {
 
 describe('W1-BH-1 Behavior Registry', () => {
   it('1. 注册表含 cannon/hammer/pushRod/laser/lifter/rammer/saw；未知 behavior → undefined', () => {
-    expect(registeredBehaviorIds().sort()).toEqual(['cannon', 'hammer', 'laser', 'lifter', 'pushRod', 'rammer', 'saw']);
+    expect(registeredBehaviorIds().sort()).toEqual(['cannon', 'hammer', 'laser', 'lifter', 'pushRod', 'rammer', 'saw', 'shotgun']);
     expect(getBehaviorFactory('cannon')).toBeDefined();
     expect(getBehaviorFactory('hammer')).toBeDefined();
     expect(getBehaviorFactory('pushRod')).toBeDefined();
@@ -63,6 +63,7 @@ describe('W1-BH-1 Behavior Registry', () => {
     expect(getBehaviorFactory('lifter')).toBeDefined(); // Q12-B 举升臂（prototype/hold）
     expect(getBehaviorFactory('rammer')).toBeDefined(); // Q12-C 冲锤
     expect(getBehaviorFactory('saw')).toBeDefined(); // Q13-A 圆锯
+    expect(getBehaviorFactory('shotgun')).toBeDefined(); // Q13-B 霰弹炮
     expect(getBehaviorFactory('ram')).toBeUndefined(); // 未注册（Weld-only）
     expect(getBehaviorFactory('noSuch')).toBeUndefined();
   });
@@ -75,6 +76,15 @@ describe('W1-BH-1 Behavior Registry', () => {
     expect(shots.length).toBe(1);
     expect(shots[0]!.team).toBe('A');
     expect(shots[0]!.radius).toBeGreaterThan(0);
+  });
+
+  it('2b. shotgun runtime：beforePhysicsStep 真正齐射 → 5 个 projectile（固定扇形，可复现）', () => {
+    const { runtime, world } = makeRuntime('shotgun');
+    runtime.beforePhysicsStep(world, 0);
+    const shots = runtime.getRenderProjectiles!(world);
+    expect(shots.length).toBe(5); // 一次齐射 = 5 发真实 projectile
+    expect(shots.every((s) => s.team === 'A')).toBe(true);
+    expect(shots.every((s) => s.radius > 0)).toBe(true);
   });
 
   it('3. 生命周期差异：cannon 有 projectile 能力；hammer/pushRod 无', () => {
