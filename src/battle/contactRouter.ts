@@ -13,6 +13,7 @@ import type { PlanckWorld, ContactBridgeEvent } from '../physics/planckWorld';
 import type { OwnerTag, TeamId, BattlePhase } from '../core/types';
 import type { CombatPartState, CombatVehicleState, CombatWheelState } from './combatVehicle';
 import type { DamageResolver } from './damageResolver';
+import type { RenderSpark } from './battleContract';
 
 /** Impact 配置 */
 export interface ImpactConfig {
@@ -781,6 +782,29 @@ export class ContactRouter {
         c.lastTickMs += c.intervalMs;
       }
     }
+  }
+
+  /**
+   * Q13-A-R1：切割火花渲染数据（引擎中立）。
+   * - 仅返回活跃「武器 contactTick」接触（当前 = 圆锯 saw 持续切割；contactOnce 武器/
+   *   hazard 不产生火花）——每个活跃接触贡献一个在真实 contactPoint 的火花；
+   * - 接触 end / 离开 → 活跃接触被移除 → 返回空数组（火花立即消失）；
+   * - 纯渲染几何，不含任何伤害/碰撞副作用（伤害仍只走 advanceContactTicks）。
+   */
+  getActiveSparks(): RenderSpark[] {
+    const out: RenderSpark[] = [];
+    for (const c of this.activeTicks.values()) {
+      if (c.kind !== 'weapon') continue; // 仅武器 contactTick（= 圆锯持续切割）产生火花
+      out.push({
+        x: c.contactPoint.x,
+        y: c.contactPoint.y,
+        nx: c.contactNormal.x,
+        ny: c.contactNormal.y,
+        intensity: c.relativeVelocity,
+        team: c.attackerTeam,
+      });
+    }
+    return out;
   }
 
   // ---------- Projectile（Q02-F2） ----------

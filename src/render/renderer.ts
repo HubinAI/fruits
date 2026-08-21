@@ -11,6 +11,7 @@ import type {
   RenderCircle,
   RenderProjectile,
   RenderFlame,
+  RenderSpark,
   RenderConnector,
   RenderVisual,
 } from '../battle/battleContract';
@@ -372,6 +373,10 @@ export class Renderer {
     // 车身朝向，纯表现。flames 缺省 undefined → 空绘制（无推进器时画面不变）。
     this.drawFlames(snap.flames ?? []);
 
+    // Q13-A-R1：圆锯切割火花（仅 saw 有效 contactTick 接触期间存在，离开接触即空 →
+    // 立即消失）；真实接触点 + 接触法线，纯表现。sparks 缺省 undefined → 空绘制。
+    this.drawSparks(snap.sparks ?? []);
+
     // Q11-C-R3-FINAL：镭射巨炮束 VFX（发射后沿 fire 方向驻留 ~130ms 衰减；纯表现）
     this.drawLaserBeams();
 
@@ -576,6 +581,20 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
     ctx.stroke();
+    // Q13-A-R1：3 个非对称辐条/开槽（120° 间隔深色窄楔形，随真实 a 旋转；与高对比
+    // 标记组合打破纯对称，使旋转肉眼可辨）
+    ctx.fillStyle = 'rgba(18,20,26,0.55)';
+    for (let k = 0; k < 3; k++) {
+      const sa = a + (k * 2 * Math.PI) / 3;
+      const inner = r * 0.24;
+      const outer = r * 0.82;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(sa) * inner, cy + Math.sin(sa) * inner);
+      ctx.lineTo(cx + Math.cos(sa - 0.2) * outer, cy + Math.sin(sa - 0.2) * outer);
+      ctx.lineTo(cx + Math.cos(sa + 0.2) * outer, cy + Math.sin(sa + 0.2) * outer);
+      ctx.closePath();
+      ctx.fill();
+    }
     // 中心轮毂
     ctx.fillStyle = '#3a4150';
     ctx.beginPath();
@@ -584,13 +603,16 @@ export class Renderer {
     ctx.strokeStyle = '#0d0f14';
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    // 径向标记线（清楚显示旋转方向/速度）
-    ctx.strokeStyle = '#0d0f14';
-    ctx.lineWidth = 2;
+    // Q13-A-R1：1 个高对比旋转标记（醒目红橙粗线，从圆心到齿尖，随真实 a 旋转；
+    // 单条 1-fold 标记打破 3 辐条/16 齿的对称，旋转方向一眼可辨）
+    ctx.strokeStyle = '#ff5a3c';
+    ctx.lineWidth = Math.max(2, r * 0.1);
+    ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.cos(a) * r * 0.8, cy + Math.sin(a) * r * 0.8);
+    ctx.lineTo(cx + Math.cos(a) * rOuter, cy + Math.sin(a) * rOuter);
     ctx.stroke();
+    ctx.lineCap = 'butt';
   }
 
   /**
@@ -730,6 +752,47 @@ export class Renderer {
       ctx.arc(rx, ry, this.ss(f.width * 0.55), 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
+    }
+  }
+
+  /**
+   * Q13-A-R1：切割火花（圆锯有效 contactTick 接触点）。每个真实接触点画一束短亮弧
+   * + 中心亮核 + 几根固定方向火花射线（确定性偏移，禁用随机）；离开接触即不再被
+   * 调用（snap.sparks 为空）→ 立即消失。纯表现：不参与碰撞/伤害。
+   */
+  private drawSparks(sparks: readonly RenderSpark[]): void {
+    if (sparks.length === 0) return;
+    const ctx = this.ctx;
+    for (const s of sparks) {
+      const x = this.sx(s.x);
+      const y = this.sy(s.y);
+      const ang = Math.atan2(s.ny, s.nx); // 接触法线方向（短亮弧沿切向铺开）
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(ang);
+      // 中心亮核（白橙）
+      ctx.fillStyle = 'rgba(255,242,180,0.95)';
+      ctx.beginPath();
+      ctx.arc(0, 0, this.ss(4), 0, Math.PI * 2);
+      ctx.fill();
+      // 短亮弧（切向，亮橙）
+      ctx.strokeStyle = 'rgba(255,200,90,0.9)';
+      ctx.lineWidth = Math.max(1.5, this.ss(2));
+      ctx.beginPath();
+      ctx.arc(0, 0, this.ss(8), -0.9, 0.9);
+      ctx.stroke();
+      // 几根火花射线（确定性角度偏移，禁用随机；亮橙黄）
+      ctx.strokeStyle = 'rgba(255,170,60,0.85)';
+      ctx.lineWidth = Math.max(1, this.ss(1.5));
+      for (let k = -2; k <= 2; k++) {
+        const sa = k * 0.35;
+        const len = this.ss(13);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(sa) * len, Math.sin(sa) * len);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
   }
 

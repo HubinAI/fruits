@@ -277,6 +277,12 @@ export interface BattleRenderSnapshot {
    * 引擎中立；optional——仅推进器 Behavior 贡献，停推即空数组 → 立即消失。
    */
   flames?: RenderFlame[];
+  /**
+   * 切割火花（Q13-A-R1 圆锯）：仅 saw 有效 contactTick 接触期间存在，真实接触点 +
+   * 接触法线 + 短尺寸亮弧/火花，引擎中立；optional——仅 ContactRouter 的活跃武器
+   * contactTick 贡献，离开接触即空数组 → 立即消失（纯表现，不参与碰撞/伤害）。
+   */
+  sparks?: RenderSpark[];
 }
 
 /** 存活 projectile 渲染数据（Q02-C3A）：不出现 BodyHandle / Planck / Matter 类型 */
@@ -316,6 +322,27 @@ export interface RenderFlame {
   /** 配色（暖橙喷火） */
   color: string;
   /** 所属 team（仅配色/调试用） */
+  team: TeamId;
+}
+
+/**
+ * 切割火花渲染数据（Q13-A-R1 圆锯）：仅 saw 有效 contactTick 接触期间存在，
+ * 停接触即空 → 立即消失。
+ * - 真实接触点（contactTick 派生活跃接触的世界坐标）为火花根部；
+ * - nx/ny 为接触法线单位向量（从 attacker 指向 defender），供短亮弧/火花定向；
+ * - intensity 为接触相对速度（px/step，只读渲染用，亮弧长度/亮度微调）；
+ * - 纯表现：不参与碰撞 / 伤害 / 物理，不出现任何引擎类型。
+ */
+export interface RenderSpark {
+  /** 火花根部世界坐标（= 真实接触点） */
+  x: number;
+  y: number;
+  /** 接触法线单位向量（世界坐标） */
+  nx: number;
+  ny: number;
+  /** 接触相对速度（px/step，仅渲染微调用） */
+  intensity: number;
+  /** 所属 attacker team（仅配色/调试用） */
   team: TeamId;
 }
 

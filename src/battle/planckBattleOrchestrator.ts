@@ -46,6 +46,7 @@ import {
   type RenderVec2,
   type RenderProjectile,
   type RenderFlame,
+  type RenderSpark,
 } from './battleContract';
 
 /** 引擎中立 Battle 合同（B14B：自 battleContract.ts 重新导出，保持既有导入路径兼容） */
@@ -410,6 +411,7 @@ export class PlanckBattleOrchestrator {
       vehicleB: this.buildVehicleSnapshot(this.vehicleB),
       projectiles: this.buildProjectilesSnapshot(),
       flames: this.buildFlamesSnapshot(),
+      sparks: this.buildSparksSnapshot(),
     };
   }
 
@@ -439,6 +441,15 @@ export class PlanckBattleOrchestrator {
       out.push(...(b.getRenderFlames?.(this.world) ?? []));
     }
     return out;
+  }
+
+  /**
+   * 切割火花渲染快照（Q13-A-R1 圆锯）：聚合 ContactRouter 的活跃武器 contactTick
+   * 接触点（仅在 saw 有效接触期间非空；离开接触即空数组 → 立即消失）。纯渲染几何，
+   * 不出现任何引擎类型。
+   */
+  private buildSparksSnapshot(): RenderSpark[] {
+    return this.router.getActiveSparks();
   }
 
   private buildVehicleSnapshot(vehicle: PlanckVehicle): RenderVehicle {

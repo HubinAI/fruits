@@ -231,4 +231,24 @@ describe('W1-HIT-1 Contact Hit Policy', () => {
     router.advanceContactTicks(3000);
     expect(orch.vehicleB.hp).toBe(hpB0 - 50); // sawB 多 1 tick（10）
   });
+
+  it('6. Q13-A-R1：saw 有效 contactTick → getActiveSparks 返回真实接触点火花；接触 end → 空', () => {
+    const orch = makeOrch(sawBuild('A', [{ hardpointId: 'front', defId: 'saw' }]), plainBuild('B'));
+    const router = makeRouter(orch);
+    const saw = weaponParts(orch.vehicleA)[0]!;
+    const bBody = findBodySubPart(orch.vehicleB);
+    // 接触开始（relVel 达标 → 登记 contactTick 活跃接触）
+    router.handleContact(makeStart(saw, bBody, 3.0));
+    router.advanceContactTicks(0);
+    const sparks = router.getActiveSparks();
+    expect(sparks.length).toBe(1); // 仅 saw 一个活跃 contactTick → 一个火花
+    const sp = sparks[0]!;
+    expect(sp.x).toBe(500); // 真实接触点（makeStart contactPoint）
+    expect(sp.y).toBe(400);
+    expect(sp.team).toBe('A'); // 火花归属锯片方（attacker team）
+    expect(Number.isFinite(sp.nx) && Number.isFinite(sp.ny)).toBe(true); // 接触法线有效
+    // 接触结束 → 火花立即消失（停推即空，纯表现）
+    router.handleContact(makeEnd(saw, bBody));
+    expect(router.getActiveSparks().length).toBe(0);
+  });
 });

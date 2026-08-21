@@ -398,8 +398,8 @@ const rammer: FunctionalPartDef = {
  * - 真实圆形 Collider（radius 28、offset {0,0} → 圆心 = Revolute 枢轴，锯片原地
  *   自转，不绕枢轴公转）；front hardpoint 锚定为枢轴，锯片随真实 part angle 旋转；
  * - 持续单方向高速旋转由 SawBehavior 用 Revolute motor 驱动（无状态机 / 无 limit /
- *   不 setAngle / 不 teleport）；第一版转速故意明显（spinSpeedRadPerStep 0.4 ≈
- *   24 rad/s ≈ 3.8 rev/s），正常速度一眼可见锯片在转；
+ *   不 setAngle / 不 teleport）；Q13-A-R1 转速 0.27 rad/step（≈16.2 rad/s ≈ 2.58 rev/s），
+ *   避开 30fps 频闪区、肉眼连续可辨旋转（配合非对称辐条+高对比旋转标记）；
  * - 伤害完全复用现有 Weapon Contact 的 contactTick hitPolicy（W1-HIT-1 已实现的
  *   持续接触按固定物理时间结算，无需新建伤害系统）：真实有效接触（minRelativeVelocity
  *   低于阈值不登记）→ 每 intervalMs 结算一次 damage（持续「切割」），接触结束即停止；
@@ -419,9 +419,11 @@ const saw: FunctionalPartDef = {
   behavior: 'saw',
   behaviorParams: {
     // 持续单方向高速旋转：motor 每固定步 setRevoluteMotor(enabled, +speed, maxTorqueNm)，
-    // 无状态机 / 无 limit。第一版转速故意明显（0.4 rad/step ≈ 24 rad/s ≈ 3.8 rev/s），
-    // 正常速度一眼可辨锯片在转（后续真人验收再回收）。
-    spinSpeedRadPerStep: 0.4,
+    // 无状态机 / 无 limit。Q13-A-R1：从 0.4 降到 0.27 rad/step（≈16.2 rad/s ≈ 2.58 rev/s），
+    // 避开 30fps 下「每帧跨约 2 齿（22.5°齿距）」的明显频闪区（0.4×2步≈45.8°/帧≈2.03 齿，
+    // 接近整数→看起来接近静止）；0.27×2步≈30.9°/帧，配合非对称辐条+高对比标记一眼可辨旋转
+    // （不追求转速数字越高越好，以正常 30fps 肉眼连续旋转为准）。
+    spinSpeedRadPerStep: 0.27,
     maxTorqueNm: 400, // 足够顶住接触摩擦保持高速旋转，且反作用在 chassis 上肉眼可见
     // 持续切割伤害：复用 W1-HIT-1 contactTick（现有 Weapon Contact 持续接触结算，
     // 不新建伤害系统）。minRelativeVelocity 略低于 WEAPON_CONTACT_THRESHOLD(0.5)，

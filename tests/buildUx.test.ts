@@ -1374,11 +1374,13 @@ describe('Q13-A 高速圆锯 Weapon', () => {
     expect(def.behavior).toBe('saw'); // 专用 Revolute 旋转行为，非 ram/hammer
     expect(def.collider.shape).toBe('circle');
     const c = def.collider as { shape: string; radius: number; offset: { x: number; y: number } };
-    expect(c.radius).toBeGreaterThan(20); // 清晰可见圆盘（直径 56）
+    expect(c.radius).toBe(28); // 清晰可见圆盘（直径 56）；Q13-A-R1 禁止扩大 Collider
     expect(c.offset.x).toBe(0); // 圆心 = 枢轴 → 原地自转（不绕枢轴公转）
     expect(c.offset.y).toBe(0);
     const bp = def.behaviorParams as Record<string, unknown>;
-    expect((bp.spinSpeedRadPerStep as number)).toBeGreaterThan(0.2); // 第一版转速故意明显
+    // Q13-A-R1：转速降到 0.25~0.30 避开 30fps 频闪区（不追求转速越高越好）
+    expect((bp.spinSpeedRadPerStep as number)).toBeGreaterThanOrEqual(0.25);
+    expect((bp.spinSpeedRadPerStep as number)).toBeLessThanOrEqual(0.3);
     const hp = bp.hitPolicy as { mode: string; intervalMs: number; damage: number };
     expect(hp.mode).toBe('contactTick'); // 复用现有持续接触伤害，不新建系统
     expect(hp.intervalMs).toBeGreaterThan(0);
@@ -1416,10 +1418,10 @@ describe('Q13-A 高速圆锯 Weapon', () => {
       prev = cur;
       samples.push(cur);
     }
-    // 120 步（≈2s）角度持续单调增加（单方向高速旋转），增量明显（spinSpeedRadPerStep≈0.4）
+    // 120 步（≈2s）角度持续单调增加（单方向旋转），增量明显（Q13-A-R1 转速 0.27）
     expect(monotonic).toBeGreaterThanOrEqual(118); // 几乎全程单调
     const total = samples[samples.length - 1]! - samples[0]!;
-    expect(total).toBeGreaterThan(40); // ≈48 rad over 120 步（0.4×120）
+    expect(total).toBeGreaterThan(25); // ≈32 rad over 120 步（0.27×120），肉眼连续旋转
   });
 
   it('4. 接触对手 → 持续切割（weapon damage 持续累计 > 0）；没接触 → 无伤害', () => {
@@ -1490,6 +1492,48 @@ describe('Q13-A 高速圆锯 Weapon', () => {
     expect(ids).not.toContain('ramHead'); // Q12-A-HOLD：冲撞头已暂退正式装配页
     expect(ids).not.toContain('wedgeShovel'); // Q11-A-CLOSE：楔铲已退出正式 Build
     expect(ids[0]).toBe(EMPTY_SLOT);
+  });
+});
+
+/* ---------- Q13-A-R1：圆锯旋转与切割感（转速避开频闪 + 非对称辐条/高对比标记 + 接触点切割火花） ---------- */
+describe('Q13-A-R1 圆锯旋转与切割感', () => {
+  it('1. 转速降到 0.25~0.30 且保留真实 Revolute/Collider/contactTick（不重做伤害）', () => {
+    const def = registry.functionals.get('saw')!;
+    const bp = def.behaviorParams as Record<string, unknown>;
+    expect((bp.spinSpeedRadPerStep as number)).toBeGreaterThanOrEqual(0.25);
+    expect((bp.spinSpeedRadPerStep as number)).toBeLessThanOrEqual(0.3); // 避开 30fps 频闪区
+    expect(def.category).toBe('weapon');
+    expect(def.collider.shape).toBe('circle');
+    expect((def.collider as { radius: number }).radius).toBe(28); // Collider 不扩大
+    expect((bp.hitPolicy as { mode: string }).mode).toBe('contactTick'); // 伤害仍走现有 contactTick
+  });
+
+  it('2. 切割火花：saw 有效接触期间 snapshot.sparks 非空（真实接触点）；接触前为空', () => {
+    const lab = new PhysicsLab(rendererStub);
+    lab.loadScenario(SCENARIOS.find((s) => s.id === 'Q13-A')!);
+    const o = lab.orchestrator as PlanckBattleOrchestrator;
+    // 接触前（尚未靠近）→ 无火花
+    expect(o.getRenderSnapshot().sparks?.length ?? 0).toBe(0);
+    let weaponDmg = 0;
+    o.onCombatEvent((ev) => {
+      if (ev.type === 'damage' && ev.damageSource === 'weapon') weaponDmg += ev.damage;
+    });
+    // 推进直到 saw 真正切到 B（weapon damage 累计 → 说明处于活跃 contactTick）
+    for (let i = 0; i < 1500 && weaponDmg <= 0; i++) lab.step(16.6667);
+    expect(weaponDmg).toBeGreaterThan(0); // 确实在持续切割
+    const sparks = o.getRenderSnapshot().sparks ?? [];
+    expect(sparks.length).toBeGreaterThanOrEqual(1); // 接触期间出现切割火花
+    const s = sparks[0]!;
+    expect(Number.isFinite(s.x) && Number.isFinite(s.y)).toBe(true); // 真实接触点
+    expect(s.team).toBe('A'); // 火花归属锯片方（attacker）
+  });
+
+  it('3. 不改 Hammer（回归：锤行为/Collider 未被动）', () => {
+    const hammer = registry.functionals.get('hammer')!;
+    expect(hammer.behavior).toBe('hammer'); // 不被锯逻辑影响
+    expect(hammer.collider.shape).toBe('box'); // Collider 形态不变
+    const hbp = hammer.behaviorParams as Record<string, unknown>;
+    expect((hbp.spinSpeedRadPerStep as number | undefined)).toBeUndefined(); // 锯的转速参数不污染锤
   });
 });
 
