@@ -53,6 +53,7 @@ import {
   buildMatchingSequence,
 } from './player/opponentPool';
 import { loadPlayerBuild, savePlayerBuild } from './core/buildPersistence';
+import { computePlayerShellVisibility } from './ui/playerShell';
 
 const app = document.getElementById('app')!;
 
@@ -1258,11 +1259,13 @@ function applyPlayerShell(): void {
     !devView && battleState !== 'fighting' ? TOOLS_DEV_VISIBLE : 'none';
   // 玩家 Shell 仅在「装配编辑态」可见；进入 Fighting / Ended 由战场 + Battle HUD + 结算卡接管。
   const inPlayer = !devView && battleState === 'editing';
-  playerTop.style.display = inPlayer ? '' : 'none';
-  garageDock.style.display = inPlayer && playerPhase === 'garage' ? '' : 'none';
-  matchBar.style.display = inPlayer && playerPhase === 'matchPreview' ? '' : 'none';
-  matchingVs.style.display = inPlayer && playerPhase === 'matching' ? '' : 'none';
-  matchInfo.style.display = inPlayer && playerPhase === 'matchPreview' ? 'flex' : 'none';
+  // Q15-UI-R2-RECOVER：可见性用明确 display（禁止 '' 回退 CSS 的 display:none，否则元素永远不可见）
+  const vis = computePlayerShellVisibility(uiMode, battleState, playerPhase);
+  playerTop.style.display = vis.playerTop;
+  garageDock.style.display = vis.garageDock;
+  matchingVs.style.display = vis.matchingVs;
+  matchInfo.style.display = vis.matchInfo;
+  matchBar.style.display = vis.matchBar;
   // 顶部文案
   if (playerPhase === 'garage') setPlayerTopTitle('我的战车');
   else if (playerPhase === 'matching') setPlayerTopTitle('正在寻找对手…');
