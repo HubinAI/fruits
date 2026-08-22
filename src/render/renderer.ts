@@ -89,7 +89,24 @@ const SAFE_INSET_Y = 28;
  *   保证车辆被 Closing 推向边缘/中央的全过程始终可见（W1-P0-CLOSE-FIX；Start/Reset 构图一次，
  *   运行期间绝不 follow、不动态 zoom、不随 projectile 扩镜头）。
  */
-export type CameraFit = 'vehicles' | 'primary-fire' | 'battle' | 'preview';
+export type CameraFit = 'vehicles' | 'primary-fire' | 'battle' | 'preview' | 'previewSolo' | 'previewFixed';
+
+/**
+ * Q15-UI-R2：玩家 Shell 固定预览取景（不呼吸缩放，不随 B 车身 bounds 重新 zoom）。
+ * - previewSolo：Garage 只渲染「我的车」——固定世界框，使单车约占安全可视宽 ~40%，
+ *   不因 2560/1920 宽屏把车无限放大、也不留大片黑区；
+ * - previewFixed：Matching / MatchPreview 同一固定框——A 左 B 右对称、同尺度，
+ *   候选换车时镜头完全不动（杜绝「巨大 A + 迷你 B」）。
+ * 框基于 loadCustomPreview 专属近距 spawn（A x=620 / B x=980，y=640）外扩固定余量。
+ */
+const SOLO_MIN_X = 400;
+const SOLO_MAX_X = 840;
+const SOLO_MIN_Y = 400;
+const SOLO_MAX_Y = 730;
+const MATCH_MIN_X = 440;
+const MATCH_MAX_X = 1150;
+const MATCH_MIN_Y = 400;
+const MATCH_MAX_Y = 730;
 
 interface FloatingText {
   x: number;
@@ -183,6 +200,23 @@ const MUZZLE_TONGUE_TTL = 60; // ms：50~70 区间（短促，连发时呈连续
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private transform: ScreenTransform = { scale: 1, offsetX: 0, offsetY: 0 };
+  /**
+   * Q15-UI-R2：玩家 Shell 预览候选车轻量表现——仅 Matching 候选换车时对 B 施加
+   * alpha/scale（A 不动）。纯渲染层，不影响 Physics / 不新增第二个 Renderer。
+   */
+  private previewFxB: { alpha: number; scale: number } | null = null;
+  /** Q15-UI-R2：仅 B（Matching 候选车）轻量 alpha/scale 表现；传 null 恢复正常绘制 */
+  setPreviewVehicleFx(fx: { alpha: number; scale: number } | null): void {
+    this.previewFxB = fx;
+  }
+  private shapeCentroid(shape: RenderShape): { x: number; y: number } {
+    if (shape.kind === 'circle') return { x: shape.circle.center.x, y: shape.circle.center.y };
+    let sx = 0, sy = 0, n = 0;
+    if (shape.kind === 'polygons') {
+      for (const poly of shape.polygons) for (const p of poly.points) { sx += p.x; sy += p.y; n++; }
+    }
+    return n ? { x: sx / n, y: sy / n } : { x: 0, y: 0 };
+  }
   private fx: FloatingText[] = [];
   /** 命中闪白：保存 target team + 时间，绘制时取当前 Snapshot 对应车辆形状（不再保存 Matter Body） */
   private hitFlashes: Array<{ team: string; bornAt: number; ttl: number }> = [];
@@ -520,9 +554,24 @@ export class Renderer {
     if (!snap.soloA) {
       const bAlpha = vehicleDeathAlpha(this.deathFxs, snap.vehicleB.team, now);
       if (bAlpha !== null) {
-        ctx.globalAlpha = bAlpha;
-        this.drawVehicle(snap.vehicleB, '#ff7a4a');
-        ctx.globalAlpha = 1;
+        const fx = this.previewFxB;
+        if (fx) {
+          // Q15-UI-R2：候选换车轻量表现——B 以自身 COM 为中心做 alpha(0.35→1)+scale(0.96→1)
+          const c = this.shapeCentroid(snap.vehicleB.body);
+          const cx = this.sx(c.x), cy = this.sy(c.y);
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.scale(fx.scale, fx.scale);
+          ctx.translate(-cx, -cy);
+          ctx.globalAlpha = bAlpha * fx.alpha;
+          this.drawVehicle(snap.vehicleB, '#ff7a4a');
+          ctx.restore();
+          ctx.globalAlpha = 1;
+        } else {
+          ctx.globalAlpha = bAlpha;
+          this.drawVehicle(snap.vehicleB, '#ff7a4a');
+          ctx.globalAlpha = 1;
+        }
       }
     }
 
@@ -1400,6 +1449,13 @@ export class Renderer {
         if (p.visual) includeVisual(p.visual);
       }
     };
+    // Q15-UI-R2：固定预览框（previewSolo / previewFixed）——bounds 直接定死，
+    // 不按车辆包围盒取景（候选换车 / 不同车身均不呼吸缩放）。
+    if (fit === 'previewSolo') {
+      minX = SOLO_MIN_X; maxX = SOLO_MAX_X; minY = SOLO_MIN_Y; maxY = SOLO_MAX_Y;
+    } else if (fit === 'previewFixed') {
+      minX = MATCH_MIN_X; maxX = MATCH_MAX_X; minY = MATCH_MIN_Y; maxY = MATCH_MAX_Y;
+    }
     // ground anchor：保证地面线在 y 范围内
     acc(snap.arena.groundY, snap.arena.groundY);
     if (fit === 'battle') {
@@ -1450,12 +1506,17 @@ export class Renderer {
       // Q15-UX-R1：solo-A 预览（Garage）只框 A，不为占位 B 留空位
       if (!snap.soloA) includeVehicle(snap.vehicleB);
     } else {
-      includeVehicle(snap.vehicleA);
-      if (!snap.soloA) includeVehicle(snap.vehicleB);
+      // Q15-UI-R2：预览默认（vehicles 兜底）含 A+B；previewSolo / previewFixed 的
+      // bounds 已在上文固定，不在此按车辆重算（杜绝候选换车时的呼吸缩放）。
+      if (fit === 'vehicles') {
+        includeVehicle(snap.vehicleA);
+        if (!snap.soloA) includeVehicle(snap.vehicleB);
+      }
     }
     // Projectile 永不参与 camera bounds
     if (!isFinite(minX) || !isFinite(minY) || maxX - minX < 1 || maxY - minY < 1) return;
     const isPreview = fit === 'preview';
+    const isFixed = fit === 'previewSolo' || fit === 'previewFixed';
     const m = isPreview ? PREVIEW_MARGIN_WORLD : CONTENT_MARGIN_WORLD;
     minX -= m; maxX += m; minY -= m; maxY += m;
     // 地面表面留出可见区域
@@ -1463,22 +1524,26 @@ export class Renderer {
     const bw = maxX - minX, bh = maxY - minY;
     const cw = this.canvas.clientWidth, ch = this.canvas.clientHeight;
     if (cw < 2 || ch < 2) return;
-    // R2：可用画布 = 中央实际战斗可视区域（扣除左右 UI 阴影区）
+    // R2：可用画布 = 中央实际战斗可视区域（扣除左右 UI 阴影区）；
+    // Q15-UI-R2：玩家 Shell 预览（previewSolo / previewFixed）额外内缩 top/bottom，
+    // 给顶部状态栏与底部装配 Dock 留位，车辆居中于中间可视带、不被遮挡。
+    const insetTop = isFixed ? 70 : SAFE_INSET_Y;
+    const insetBottom = isFixed ? 160 : SAFE_INSET_Y;
     const safeW = Math.max(2, cw - SAFE_INSET_X * 2);
-    const safeH = Math.max(2, ch - SAFE_INSET_Y * 2);
+    const safeH = Math.max(2, ch - insetTop - insetBottom);
     // Q06-UX-R2-FIX / Q08-A-FIX：声明「完整入画」的 fit（preview / battle）直接取
     // fitLimit——任何 >1 的乘数（旧 ×1.9、×1.05）都会使含 margin 的内容超出
     // safeW×safeH 被左右裁切，破坏完整入画硬约束。preview 的明显放大来自近距 spawn
     // 收窄 bounds + 更小 margin；battle 的车辆变大来自更合理的 corridor bounds；
     // vehicles / primary-fire / scenario 保持历史 ×CONTENT_ZOOM 语义。
     const fitLimit = Math.min(safeW / bw, safeH / bh);
-    const enforceFitLimit = isPreview || fit === 'battle';
+    const enforceFitLimit = isPreview || fit === 'battle' || isFixed;
     let scale = enforceFitLimit ? fitLimit : fitLimit * CONTENT_ZOOM;
     if (scale < MIN_CONTENT_SCALE) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
-    // 内容居中于安全区中心（offset 含安全区内缩量）
+    // 内容居中于安全区中心（offset 含安全区内缩量；玩家 Shell 预览用 top 内缩）
     const offsetX = SAFE_INSET_X + (safeW - bw * scale) / 2 - minX * scale;
-    const offsetY = SAFE_INSET_Y + (safeH - bh * scale) / 2 - minY * scale;
+    const offsetY = insetTop + (safeH - bh * scale) / 2 - minY * scale;
     this.transform = { scale, offsetX, offsetY };
   }
 
