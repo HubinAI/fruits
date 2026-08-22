@@ -46,8 +46,13 @@ import {
   type BuildDraft,
 } from './lab/buildEditorModel';
 import { computeEnergy, validateSnapshot } from './core/buildValidator';
+import { OPPONENT_POOL, cloneBuildDraft, nextOpponentIndex } from './player/opponentPool';
+import { loadPlayerBuild, savePlayerBuild } from './core/buildPersistence';
 
 const app = document.getElementById('app')!;
+
+// Q15：开发工具仅在 DEV 环境可见；PROD 对正常玩家隐藏（玩家流程不依赖开发工具）
+const TOOLS_DEV_VISIBLE: string = import.meta.env.DEV ? '' : 'none';
 
 // F-DEV-1：Runtime Badge——仅开发环境显示 branch + short SHA。
 // 一眼确认「我当前看到的是哪个代码版本」（正式玩家 UI 不显示）。
@@ -315,39 +320,48 @@ function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): vo
   resultModal.style.display = 'flex';
 }
 
-/** Ended 后玩家选择：调整配置 → 回 Editing + Preview（保持当前 Build 与对手，不重置） */
+/** Ended 后玩家选择：调整配置 → 回 Garage（保留玩家上一场 Build，不重置） */
 function adjustConfig(): void {
   resultModal.style.display = 'none';
   hudEl.style.display = 'none';
+  playerPhase = 'garage'; // 回到装配
   battleState = 'editing';
+  bEditorOpen = false;
   setBuildControlsLocked(false);
   panelA.style.display = '';
   panelB.style.display = '';
   startBar.style.display = '';
-  toolsToggle.style.display = ''; // Q07-C：回装配恢复开发工具入口
+  toolsToggle.style.display = TOOLS_DEV_VISIBLE; // PROD 隐藏开发工具，DEV 可见
   // Q08-CAM-A1：面板恢复 → canvas CSS 变窄，先同步 backing 再显示 Preview
   doResize();
   showPreview();
   updateStartButton();
 }
 
-/** Ended 后玩家选择：原配置再战 → 直接重建正式 Planck battle（不进入编辑） */
-function rematch(): void {
+/** Ended 后玩家选择：下一场 → 换一名对手 → MatchPreview（复核，不直接开战） */
+function nextMatch(): void {
   resultModal.style.display = 'none';
-  startOrRematch(); // 当前 Build 不变；内部重建 battle → Fighting + HUD 回满
+  hudEl.style.display = 'none';
+  matchedIndex = nextOpponentIndex(matchedIndex, OPPONENT_POOL.length);
+  draftB = cloneBuildDraft(OPPONENT_POOL[matchedIndex]);
+  playerPhase = 'matchPreview';
+  battleState = 'editing';
+  bEditorOpen = false;
+  setBuildControlsLocked(true); // 只读复核
+  refreshFromEdit(); // 渲染面板(锁定) + 预览(我方 VS 新对手) + 显示 matchBar
 }
 
-/* 结算卡按钮：调整配置（主）/ 原配置再战（次） */
+/* 结算卡按钮：下一场（主）/ 调整配置（次）—— Q15 玩家主循环闭环 */
 const btnAdjust = document.createElement('button');
-btnAdjust.className = 'primary';
+btnAdjust.className = 'secondary';
 btnAdjust.textContent = '调整配置';
 btnAdjust.onclick = adjustConfig;
 resultActions.appendChild(btnAdjust);
 
 const btnRematch = document.createElement('button');
-btnRematch.className = 'secondary'; // Q08-B：次 CTA（弱化，不与调整配置同级）
-btnRematch.textContent = '原配置再战';
-btnRematch.onclick = rematch;
+btnRematch.className = 'primary'; // Q15：下一场为主 CTA
+btnRematch.textContent = '下一场';
+btnRematch.onclick = nextMatch;
 resultActions.appendChild(btnRematch);
 
 // W2-VIS-1：Sprite Visual Registry（首版无正式 Content 资源 → 全部 Collider graybox；
@@ -512,6 +526,13 @@ type BattleState = 'editing' | 'fighting' | 'ended';
 
 let uiMode: UiMode = 'build'; // 默认【装配测试】
 let battleState: BattleState = 'editing';
+/**
+ * Q15：正常玩家主流程状态机（薄层，不重构 main.ts）。
+ * - 'garage'：装配我方车辆（A 可编辑；B=队列中的对手，只读预览）；
+ * - 'matchPreview'：已匹配对手 → 复核我方 VS 对手（A/B 全部只读）；
+ * Fighting / Ended 仍由 battleState 驱动。
+ */
+let playerPhase: 'garage' | 'matchPreview' = 'garage';
 let buildControlsLocked = false; // Fighting 时锁定 A/B 全部 Build 控件
 let lastShownResult: BattleOrchestratorApi['result'] = null;
 
@@ -561,8 +582,11 @@ function silDraft(bodyDefId: string): BuildDraft {
   return { bodyDefId, rearRadius: 20, frontRadius: 20, functionalSelections: selections };
 }
 
-const draftA = silDraft('watermelonBody');
-const draftB = silDraft('bananaBody');
+let matchedIndex = 0; // 当前匹配对手在 OPPONENT_POOL 中的索引
+// Q15：玩家 Build 从 localStorage 恢复；无存档 / 非法旧存档 → 默认合法 Build
+const draftA = loadPlayerBuild() ?? silDraft('watermelonBody');
+// Q15：对手来自固定对手池（玩家不可编辑，仅 DEV 可临时改）
+let draftB = cloneBuildDraft(OPPONENT_POOL[matchedIndex]);
 
 function currentSnapshot(side: 'A' | 'B'): BuildSnapshot {
   return buildSnapshotFromDraft(
@@ -590,7 +614,8 @@ function renderPanel(
   if (opts.collapsed !== undefined) {
     const toggle = document.createElement('button');
     toggle.textContent = opts.collapsed ? `${opts.expandLabel ?? '展开'} ▸` : '收起 ▾';
-    toggle.disabled = buildControlsLocked;
+    // Q15：玩家流程中对手(B)只读 —— PROD 下禁止展开/编辑；仅 DEV 可临时改对手做测试
+    toggle.disabled = buildControlsLocked || !import.meta.env.DEV;
     toggle.onclick = () => {
       bEditorOpen = !bEditorOpen;
       refreshFromEdit();
@@ -817,6 +842,8 @@ function refreshFromEdit(): void {
   if (battleState !== 'fighting') {
     showPreview();
   }
+  // Q15：玩家 Build 持久化（最小；仅保存 Build Draft，不碰经济系统）
+  savePlayerBuild(draftA);
   updateStartButton();
 }
 
@@ -900,6 +927,7 @@ function startOrRematch(): void {
   panelA.style.display = 'none';
   panelB.style.display = 'none';
   startBar.style.display = 'none';
+  matchBar.style.display = 'none';
   startHint.style.display = 'none';
   toolsToggle.style.display = 'none';
   toolsHost.style.display = 'none';
@@ -921,9 +949,25 @@ canvasWrap.appendChild(startBar);
 
 const btnStart = document.createElement('button');
 btnStart.className = 'btn-start-cta';
-btnStart.textContent = '开始战斗';
+btnStart.textContent = '寻找对手';
 startBar.appendChild(btnStart);
 startBar.appendChild(startHint);
+
+/* ---------- Q15：MatchPreview 复核条（调整配置 / 开始战斗） ---------- */
+const matchBar = document.createElement('div');
+matchBar.className = 'start-bar';
+canvasWrap.appendChild(matchBar);
+const btnMatchAdjust = document.createElement('button');
+btnMatchAdjust.className = 'btn-start-cta secondary';
+btnMatchAdjust.textContent = '调整配置';
+btnMatchAdjust.onclick = adjustConfig;
+matchBar.appendChild(btnMatchAdjust);
+const btnFight = document.createElement('button');
+btnFight.className = 'btn-start-cta';
+btnFight.textContent = '开始战斗';
+btnFight.onclick = startBattleWithReady;
+matchBar.appendChild(btnFight);
+matchBar.style.display = 'none';
 
 /* ---------- Q07-C：Start 后短暂状态转换（READY / 开战 0.8s；Presentation 延迟，
  * 不改 Physics 时间与正式 Battle 结果——build/engine/seed 均不变，只是晚 0.8s 创建实例） ---------- */
@@ -943,27 +987,35 @@ readyCard.appendChild(readyMain);
 readyOverlay.appendChild(readyCard);
 
 let startTransitioning = false;
-btnStart.onclick = () => {
+
+/** Garage → MatchPreview：锁定进入对手复核（不进战斗） */
+function goToMatchPreview(): void {
+  playerPhase = 'matchPreview';
+  bEditorOpen = false;
+  setBuildControlsLocked(true); // 只读复核
+  resultModal.style.display = 'none';
+  hudEl.style.display = 'none';
+  refreshFromEdit(); // 渲染面板(锁定) + 预览(我方 VS 对手) + 显示 matchBar
+}
+
+/** MatchPreview → Fighting：READY 过渡后真正开战（复用正式 Planck Runtime） */
+function startBattleWithReady(): void {
   if (startTransitioning) return;
-  if (battleState !== 'editing' || !buildsValid()) return;
+  if (battleState !== 'editing' || playerPhase !== 'matchPreview') return;
+  if (!buildsValid()) return;
   // Q11-C-R2：用户 Start 交互 → 恢复 AudioContext（浏览器自动播放策略）
   sfx.resume();
-  // Q08-B：点击 Start 瞬间「配置结束」——立刻退出编辑视觉：
-  // 隐藏 A/B 装配面板、开发工具、Start；Build 从此刻冻结（不再可操作），
-  // 中央两车 Preview 成为 READY 背景，而不是在编辑器上弹一句开战。
   startTransitioning = true;
-  btnStart.disabled = true;
-  setBuildControlsLocked(true); // Build 从点击那一刻冻结（Runtime 输入语义不变）
+  setBuildControlsLocked(true);
   panelA.style.display = 'none';
   panelB.style.display = 'none';
   startBar.style.display = 'none';
+  matchBar.style.display = 'none';
   startHint.style.display = 'none';
   toolsToggle.style.display = 'none';
   toolsHost.style.display = 'none';
-  // Q08-CAM-A1：面板隐藏 → canvas CSS 变宽，先同步 backing，README 背景
-  // （两车 Preview）按新尺寸正常显示，不横向拉伸。
   doResize();
-  readyOverlay.style.display = 'flex'; // READY / 开战！（0.6s；背景 = 保留的中央 Preview）
+  readyOverlay.style.display = 'flex';
   window.setTimeout(() => {
     readyOverlay.style.display = 'none';
     startTransitioning = false;
@@ -974,10 +1026,19 @@ btnStart.onclick = () => {
       panelA.style.display = '';
       panelB.style.display = '';
       startBar.style.display = '';
-      toolsToggle.style.display = '';
+      toolsToggle.style.display = TOOLS_DEV_VISIBLE;
       updateStartButton();
     }
   }, 600);
+}
+
+btnStart.onclick = () => {
+  if (startTransitioning) return;
+  if (battleState !== 'editing' || playerPhase !== 'garage') return;
+  if (!buildsValid()) return;
+  // Q15：Garage 主 CTA = 寻找对手 → MatchPreview 复核（不在此直接开战）
+  sfx.resume();
+  goToMatchPreview();
 };
 
 /* ---------- Q07-A：开发工具折叠区（机制场景 / Pause / Reset / Clear / 速度 / Preset 全部收进二级） ---------- */
@@ -988,6 +1049,8 @@ const toolsToggle = addButton(toolbar, '开发工具 ▸', () => {
   toolsToggle.classList.toggle('active', toolsOpen);
 });
 toolsToggle.classList.add('dev-toggle');
+// Q15：PROD 对正常玩家隐藏开发工具（玩家流程不依赖它）；DEV 仍可见可用
+toolsToggle.style.display = TOOLS_DEV_VISIBLE;
 const toolsHost = document.createElement('div');
 toolsHost.className = 'tool-tools-host';
 // Q07-A：机制场景入口收进开发工具（不再是同级主模式按钮）
@@ -1005,24 +1068,45 @@ toolsHost.style.display = 'none';
 
 /** 按钮状态机 + Start 阻断原因（结果由中央结算卡展示，不再用 toolbar 小字） */
 function updateStartButton(): void {
+  // Q15：机制场景模式下不显示玩家流程 CTA（开发工具自行控制）
+  if (uiMode === 'scenario') {
+    startHint.textContent = '';
+    startHint.style.display = 'none';
+    startBar.style.display = 'none';
+    matchBar.style.display = 'none';
+    return;
+  }
+
   const valid = buildsValid();
 
   // Start 阻断原因（仅编辑态提示）
   if (battleState === 'fighting' || battleState === 'ended') {
     startHint.textContent = '';
-  } else {
+    startHint.style.display = 'none';
+  } else if (playerPhase === 'garage') {
     const reason = valid ? null : blockReason();
     startHint.textContent = reason ?? '';
     startHint.style.display = reason ? '' : 'none';
+  } else {
+    // matchPreview：复核界面不显示阻断原因
+    startHint.textContent = '';
+    startHint.style.display = 'none';
   }
 
-  // 主 CTA（Q07-A：start-bar 整体）：editing 显示「开始战斗」；fighting/ended 隐藏
   if (battleState === 'fighting' || battleState === 'ended') {
+    // 战斗 / 结算：隐藏两类玩家 CTA
     startBar.style.display = 'none';
-  } else {
+    matchBar.style.display = 'none';
+  } else if (playerPhase === 'garage') {
+    // Garage：显示「寻找对手」主 CTA
     startBar.style.display = '';
-    btnStart.textContent = '开始战斗';
+    btnStart.textContent = '寻找对手';
     btnStart.disabled = !valid; // 非法：禁用 + startHint 就近显示原因
+    matchBar.style.display = 'none';
+  } else {
+    // MatchPreview：显示复核条（调整配置 / 开始战斗）
+    startBar.style.display = 'none';
+    matchBar.style.display = '';
   }
 }
 
@@ -1083,7 +1167,7 @@ addButton(toolsHost, 'Reset', () => {
       panelA.style.display = '';
       panelB.style.display = '';
       startBar.style.display = '';
-      toolsToggle.style.display = ''; // Q07-C：回装配恢复开发工具入口
+      toolsToggle.style.display = TOOLS_DEV_VISIBLE; // Q07-C：回装配恢复开发工具入口
       // Q08-CAM-A1：面板恢复 → CSS 变窄，先同步 backing 再构图
       doResize();
     } else {
@@ -1105,7 +1189,7 @@ addButton(toolsHost, 'Clear', () => {
     panelA.style.display = '';
     panelB.style.display = '';
     startBar.style.display = '';
-    toolsToggle.style.display = ''; // Q07-C：回装配恢复开发工具入口
+    toolsToggle.style.display = TOOLS_DEV_VISIBLE; // Q07-C：回装配恢复开发工具入口
     doResize(); // Q08-CAM-A1：面板恢复 → CSS 变窄，先同步 backing
     showPreview(); // Clear 后恢复装配预览
     updateStartButton();
