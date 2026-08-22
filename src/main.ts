@@ -1096,6 +1096,16 @@ function goToMatchPreview(): void {
   renderMatchInfo(); // 填充：我的战车 / 对手 Body + 主要部件
   refreshFromEdit(); // 渲染面板(隐藏) + 完整 A+B 预览(previewFixed 同构图) + 显示 matchBar
   setPlayerTopTitle('对手已找到');
+  // Q15-FLOW-R1-ATOMIC：匹配完成直接开战——正常流程不再出现「调整配置 / 开始战斗」复核条。
+  // （refreshFromEdit → applyPlayerShell 刚把 matchBar 设为 flex；同一同步任务内立即改 none，
+  //   浏览器不重绘中间态 → 复核条永不闪现。)
+  matchBar.style.display = 'none';
+  // 最终对手展示约 250ms 后自动进入现有 READY → Battle（复用 startBattleWithReady，不复制第二套逻辑）。
+  window.setTimeout(() => {
+    // guard：仅当仍处于 MatchPreview 编辑态才启动；旧 timer / 已切换状态（如 Result 后重进 Matching）直接 no-op。
+    if (playerPhase !== 'matchPreview' || battleState !== 'editing') return;
+    startBattleWithReady();
+  }, 250);
 }
 
 /** Q15-UX-R1：MatchPreview 信息层内容（只展示 Body 名 + 已安装主要部件，不展示伤害/数值/调试） */
