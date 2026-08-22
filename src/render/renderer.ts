@@ -511,16 +511,19 @@ export class Renderer {
     // Vehicles（W2-FX-2 死亡表现：淡出 alpha → 消失后跳过绘制；未死亡正常绘制）
     // 手动管理 globalAlpha（不复用 ctx.save/restore，保持与既有 canvas stub 兼容）
     const aAlpha = vehicleDeathAlpha(this.deathFxs, snap.vehicleA.team, now);
-    const bAlpha = vehicleDeathAlpha(this.deathFxs, snap.vehicleB.team, now);
     if (aAlpha !== null) {
       ctx.globalAlpha = aAlpha;
       this.drawVehicle(snap.vehicleA, '#4aa3ff');
       ctx.globalAlpha = 1;
     }
-    if (bAlpha !== null) {
-      ctx.globalAlpha = bAlpha;
-      this.drawVehicle(snap.vehicleB, '#ff7a4a');
-      ctx.globalAlpha = 1;
+    // Q15-UX-R1：solo-A 预览（Garage「我的车」）只绘制 A；占位 B 不绘制
+    if (!snap.soloA) {
+      const bAlpha = vehicleDeathAlpha(this.deathFxs, snap.vehicleB.team, now);
+      if (bAlpha !== null) {
+        ctx.globalAlpha = bAlpha;
+        this.drawVehicle(snap.vehicleB, '#ff7a4a');
+        ctx.globalAlpha = 1;
+      }
     }
 
     // Projectiles（Q02-C3B）：只消费 Snapshot；车辆之后、FX 之前，避免被车体完全遮住。
@@ -562,6 +565,8 @@ export class Renderer {
     for (const h of this.hitFlashes) {
       // W2-FX-2：已死亡（淡出中/已消失）车辆不叠加受击反馈
       if (vehicleDeathAlpha(this.deathFxs, h.team, now) === null) continue;
+      // Q15-UX-R1：solo-A 预览无对手受击反馈
+      if (snap.soloA && h.team !== snap.vehicleA.team) continue;
       const age = (now - h.bornAt) / h.ttl;
       const v = h.team === snap.vehicleA.team ? snap.vehicleA : snap.vehicleB;
       // Q08-C：不再整块白色填充（大面积白块会遮掉 sprite 视觉身份）——
@@ -626,6 +631,8 @@ export class Renderer {
     // W2-FX-1：死亡 FX（目标车辆位置扩散环）
     this.deathFxs = this.deathFxs.filter((d) => now - d.bornAt < d.ttl);
     for (const d of this.deathFxs) {
+      // Q15-UX-R1：solo-A 预览无对手死亡 FX
+      if (snap.soloA && d.team !== snap.vehicleA.team) continue;
       const age = (now - d.bornAt) / d.ttl;
       ctx.globalAlpha = (1 - age) * 0.9;
       ctx.strokeStyle = '#ff6b5e';
@@ -1440,10 +1447,11 @@ export class Renderer {
       // Q06-UX-R2-FIX：装配 Preview = A+B 完整入画（近距 spawn 收窄 bounds 已含在
       // snapshot 里）；放大只靠下方小边距分支，绝不 fit 后 ×1.9。
       includeVehicle(snap.vehicleA);
-      includeVehicle(snap.vehicleB);
+      // Q15-UX-R1：solo-A 预览（Garage）只框 A，不为占位 B 留空位
+      if (!snap.soloA) includeVehicle(snap.vehicleB);
     } else {
       includeVehicle(snap.vehicleA);
-      includeVehicle(snap.vehicleB);
+      if (!snap.soloA) includeVehicle(snap.vehicleB);
     }
     // Projectile 永不参与 camera bounds
     if (!isFinite(minX) || !isFinite(minY) || maxX - minX < 1 || maxY - minY < 1) return;

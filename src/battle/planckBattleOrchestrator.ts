@@ -213,6 +213,8 @@ export class PlanckBattleOrchestrator {
   readonly arena: PlanckArenaRuntime;
   readonly vehicleA: PlanckVehicle;
   readonly vehicleB: PlanckVehicle;
+  /** Q15-UX-R1｜solo-A 预览标记（Garage 只渲染 A；不影响任何物理/战斗语义） */
+  readonly soloA: boolean = false;
   readonly router: ContactRouter;
   readonly damageResolver: DamageResolver;
   readonly bus = new CombatEventBus();
@@ -229,7 +231,9 @@ export class PlanckBattleOrchestrator {
     buildB: BuildSnapshot,
     registry: ContentRegistry,
     config: BattleConfig = {},
+    soloA: boolean = false,
   ) {
+    this.soloA = soloA;
     this.config = config;
     // Canonical Planck 重力（m/s²）：与既有 Planck 测试/运行时一致（y=10），
     // 保证车辆真实贴地、轮子接地驱动（禁止 0 重力假悬浮）。
@@ -414,6 +418,7 @@ export class PlanckBattleOrchestrator {
       arena: this.buildArenaSnapshot(),
       vehicleA: this.buildVehicleSnapshot(this.vehicleA),
       vehicleB: this.buildVehicleSnapshot(this.vehicleB),
+      soloA: this.soloA,
       projectiles: this.buildProjectilesSnapshot(),
       flames: this.buildFlamesSnapshot(),
       sparks: this.buildSparksSnapshot(),

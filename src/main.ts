@@ -46,7 +46,12 @@ import {
   type BuildDraft,
 } from './lab/buildEditorModel';
 import { computeEnergy, validateSnapshot } from './core/buildValidator';
-import { OPPONENT_POOL, cloneBuildDraft, nextOpponentIndex } from './player/opponentPool';
+import {
+  OPPONENT_POOL,
+  cloneBuildDraft,
+  pickRandomOpponent,
+  buildMatchingSequence,
+} from './player/opponentPool';
 import { loadPlayerBuild, savePlayerBuild } from './core/buildPersistence';
 
 const app = document.getElementById('app')!;
@@ -191,6 +196,22 @@ style.textContent = `
   .ready-card { text-align: center; }
   .ready-card .rd-sub { font-size: 15px; letter-spacing: 8px; color: #9aa4b5; margin-bottom: 8px; }
   .ready-card .rd-main { font-size: 46px; font-weight: 800; letter-spacing: 12px; color: #ffd35a; text-shadow: 0 0 22px rgba(255,211,90,0.55); }
+  /* Q15-UX-R1：Matching 阶段 UI（系统正在抽对手；右侧候选车复用正式 Preview 渲染） */
+  .matching-ui { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 9; pointer-events: none; }
+  .matching-banner { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #ffd35a; text-shadow: 0 0 18px rgba(255,211,90,0.5); }
+  .matching-vs { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 54px; font-weight: 900; color: #e8e8f0; opacity: 0.12; animation: match-pulse 0.9s ease-in-out infinite; }
+  @keyframes match-pulse { 0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.10; } 50% { transform: translate(-50%, -50%) scale(1.15); opacity: 0.22; } }
+  .matching-candidate { position: absolute; right: 7%; top: 50%; transform: translateY(-50%); width: 240px; height: 210px; display: none; }
+  .matching-candidate canvas { width: 100%; height: 100%; }
+  .mc-in { animation: mc-fade 0.26s ease-out; }
+  @keyframes mc-fade { 0% { opacity: 0; transform: scale(0.86); } 100% { opacity: 1; transform: scale(1); } }
+  /* Q15-UX-R1：MatchPreview 信息层（我的战车 VS 对手；只展示 Body + 主要部件，不展示数值） */
+  .match-info { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; gap: 6%; z-index: 7; pointer-events: none; }
+  .match-info .mi-side { text-align: center; }
+  .match-info .mi-label { font-size: 16px; color: #9aa4b5; letter-spacing: 3px; }
+  .match-info .mi-vs { font-size: 56px; font-weight: 900; color: #ffd35a; text-shadow: 0 0 18px rgba(255,211,90,0.45); }
+  .match-info .mi-body { font-size: 20px; color: #ff9d5a; font-weight: 700; margin-top: 6px; }
+  .match-info .mi-parts { font-size: 12px; color: #9aa4b5; margin-top: 4px; }
 `;
 document.head.appendChild(style);
 
@@ -324,31 +345,30 @@ function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): vo
 function adjustConfig(): void {
   resultModal.style.display = 'none';
   hudEl.style.display = 'none';
+  // Q15-UX-R1：退出 Matching / MatchPreview 视觉层
+  matchingUI.style.display = 'none';
+  candidateBox.style.display = 'none';
+  matchInfo.style.display = 'none';
   playerPhase = 'garage'; // 回到装配
   battleState = 'editing';
   bEditorOpen = false;
+  selectedSlotA = null; // 进入 Garage：默认不展开部件全集
   setBuildControlsLocked(false);
   panelA.style.display = '';
-  panelB.style.display = '';
+  panelB.style.display = 'none';
   startBar.style.display = '';
   toolsToggle.style.display = TOOLS_DEV_VISIBLE; // PROD 隐藏开发工具，DEV 可见
   // Q08-CAM-A1：面板恢复 → canvas CSS 变窄，先同步 backing 再显示 Preview
   doResize();
-  showPreview();
+  refreshFromEdit(); // 按 phase(Garage) 渲染 A 编辑器 + solo-A 预览
   updateStartButton();
 }
 
-/** Ended 后玩家选择：下一场 → 换一名对手 → MatchPreview（复核，不直接开战） */
+/** Ended 后玩家选择：下一场 → 走同一套 Matching（随机新对手）→ MatchPreview */
 function nextMatch(): void {
   resultModal.style.display = 'none';
   hudEl.style.display = 'none';
-  matchedIndex = nextOpponentIndex(matchedIndex, OPPONENT_POOL.length);
-  draftB = cloneBuildDraft(OPPONENT_POOL[matchedIndex]);
-  playerPhase = 'matchPreview';
-  battleState = 'editing';
-  bEditorOpen = false;
-  setBuildControlsLocked(true); // 只读复核
-  refreshFromEdit(); // 渲染面板(锁定) + 预览(我方 VS 新对手) + 显示 matchBar
+  startMatching(); // 复用 Garage「寻找对手」同一状态链
 }
 
 /* 结算卡按钮：下一场（主）/ 调整配置（次）—— Q15 玩家主循环闭环 */
@@ -482,9 +502,8 @@ for (const [visualId, url] of SILHOUETTE_ASSETS) {
 /* ---------- 稳定取景（Q02-CAM-R1）：只在 load / Reset / resize 时构图一次 ---------- */
 let currentCamera: ScenarioCamera | null = null;
 
-/** 取当前 orchestrator 的 arena 尺寸（运行时 config，Planck/Matter 共用） */
-function arenaDims(): { w: number; h: number } {
-  const o = lab.orchestrator;
+/** 取指定 orchestrator 的 arena 尺寸（运行时 config，Planck/Matter 共用） */
+function arenaDimsOf(o: BattleOrchestratorApi | null): { w: number; h: number } {
   if (o instanceof PlanckBattleOrchestrator) {
     return { w: o.arena.config.width, h: o.arena.config.height };
   }
@@ -492,6 +511,11 @@ function arenaDims(): { w: number; h: number } {
     return { w: o.arena.config.width, h: o.arena.config.height };
   }
   return { w: 1600, h: 900 };
+}
+
+/** 取当前主 orchestrator 的 arena 尺寸（doResize 用） */
+function arenaDims(): { w: number; h: number } {
+  return arenaDimsOf(lab.orchestrator);
 }
 
 /** 按当前取景模式构图一次并固定（运行期间不再重算，无呼吸缩放/无跟随） */
@@ -532,7 +556,9 @@ let battleState: BattleState = 'editing';
  * - 'matchPreview'：已匹配对手 → 复核我方 VS 对手（A/B 全部只读）；
  * Fighting / Ended 仍由 battleState 驱动。
  */
-let playerPhase: 'garage' | 'matchPreview' = 'garage';
+let playerPhase: 'garage' | 'matching' | 'matchPreview' = 'garage';
+/** Matching 防重复触发：每次进入 Matching generation+1；旧 timer 校验 generation 失效即跳过 */
+let matchingGeneration = 0;
 let buildControlsLocked = false; // Fighting 时锁定 A/B 全部 Build 控件
 let lastShownResult: BattleOrchestratorApi['result'] = null;
 
@@ -747,6 +773,9 @@ function renderPanel(
         b.onclick = () => {
           if (buildControlsLocked) return;
           d.functionalSelections[selSlot] = opt.v; // 立即生效（无 Apply）
+          // Q15-UX-R1：选完一个部件立即收起 picker（selectedSlot 回到 null），降低信息过载
+          if (isA) selectedSlotA = null;
+          else selectedSlotB = null;
           refreshFromEdit(); // Draft → Energy → Validator → 真实 Planck Preview
         };
         picker.appendChild(b);
@@ -817,23 +846,37 @@ let bEditorOpen = false;
 let selectedSlotA: string | null = null;
 let selectedSlotB: string | null = null;
 
-/** 中央显示当前 Draft 的真实 Planck 装配预览（不推进战斗） */
+/** 中央显示当前 Draft 的真实 Planck 装配预览（不推进战斗）。
+ *  Q15-UX-R1：Garage 只渲染 A（solo-A 预览，B 不 spawn 可见 / 不伪装 / 不遮挡）；
+ *  MatchPreview 渲染完整 A+B（真实对阵，不启动 Physics 自动行驶）。 */
 function showPreview(): void {
+  if (playerPhase === 'matchPreview') {
+    const sa = currentSnapshot('A');
+    const sb = currentSnapshot('B');
+    lab.loadCustomPreview(sa, sb);
+    currentCamera = null;
+    reframeCamera();
+    return;
+  }
+  // Garage / Matching：只渲染我的车（solo-A）。B 占位（不绘制 / 不取景）。
   const sa = currentSnapshot('A');
-  const sb = currentSnapshot('B');
-  lab.loadCustomPreview(sa, sb);
-  currentCamera = null; // 自定义 Preview：取景 A+B
+  lab.loadCustomPreview(sa, sa, true);
+  currentCamera = null;
   reframeCamera();
 }
 
-/** Q07-B：只重渲染 A/B 面板（挂点选中态 / 部件选择区显隐），不重建 Preview（Draft 未变） */
+/** Q07-B：只重渲染 A/B 面板（挂点选中态 / 部件选择区显隐），不重建 Preview（Draft 未变）。
+ *  Q15-UX-R1：Garage 只渲染 A 编辑器（隐藏 B 面板，不提前存在「当前对手」）；
+ *  MatchPreview 彻底退出编辑器（左右面板均不渲染）。 */
 function renderPanelsOnly(): void {
-  renderPanel(panelA, '我的车辆 A', draftA);
-  // Q07-A：B 明确叫「当前对手」——默认只显示概要 + 「编辑对手」入口，不展开完整表单
-  renderPanel(panelB, '当前对手 B', draftB, {
-    collapsed: !bEditorOpen,
-    expandLabel: '编辑对手',
-  });
+  if (playerPhase === 'matchPreview') {
+    panelA.style.display = 'none';
+    panelB.style.display = 'none';
+    return;
+  }
+  // Garage：仅 A 编辑器；B 面板隐藏
+  panelB.style.display = 'none';
+  renderPanel(panelA, '我的车辆', draftA);
 }
 
 /** 编辑后刷新：面板 + （非战斗时）实时 Preview + 按钮/阻断原因 */
@@ -969,6 +1012,33 @@ btnFight.onclick = startBattleWithReady;
 matchBar.appendChild(btnFight);
 matchBar.style.display = 'none';
 
+/* ---------- Q15-UX-R1：Matching 阶段 UI（系统正在抽对手；右侧候选车复用正式 Preview 渲染） ---------- */
+const matchingUI = document.createElement('div');
+matchingUI.className = 'matching-ui';
+canvasWrap.appendChild(matchingUI);
+const matchingBanner = document.createElement('div');
+matchingBanner.className = 'matching-banner';
+matchingBanner.textContent = '寻找对手…';
+matchingUI.appendChild(matchingBanner);
+const matchingVs = document.createElement('div');
+matchingVs.className = 'matching-vs';
+matchingVs.textContent = 'VS';
+matchingUI.appendChild(matchingVs);
+const candidateBox = document.createElement('div');
+candidateBox.className = 'matching-candidate';
+matchingUI.appendChild(candidateBox);
+const candidateCanvas = document.createElement('canvas');
+candidateBox.appendChild(candidateCanvas);
+
+/* ---------- Q15-UX-R1：MatchPreview 信息层（我的战车 VS 对手；只展示 Body + 主要部件） ---------- */
+const matchInfo = document.createElement('div');
+matchInfo.className = 'match-info';
+canvasWrap.appendChild(matchInfo);
+
+// Q15-UX-R1：Matching 候选车独立 Preview（复用正式 Planck Preview 管线；solo-A 渲染真实候选车）
+const matchRenderer = new Renderer(candidateCanvas, visualRegistry);
+const matchLab = new PhysicsLab(matchRenderer, presentation);
+
 /* ---------- Q07-C：Start 后短暂状态转换（READY / 开战 0.8s；Presentation 延迟，
  * 不改 Physics 时间与正式 Battle 结果——build/engine/seed 均不变，只是晚 0.8s 创建实例） ---------- */
 const readyOverlay = document.createElement('div');
@@ -988,14 +1058,121 @@ readyOverlay.appendChild(readyCard);
 
 let startTransitioning = false;
 
-/** Garage → MatchPreview：锁定进入对手复核（不进战斗） */
+/** Garage → MatchPreview（由 startMatching 锁定对手后调用）：干净 VS 复核界面 */
 function goToMatchPreview(): void {
+  // Q15-UX-R1：退出 Matching 视觉层
+  matchingUI.style.display = 'none';
+  candidateBox.style.display = 'none';
   playerPhase = 'matchPreview';
   bEditorOpen = false;
   setBuildControlsLocked(true); // 只读复核
   resultModal.style.display = 'none';
   hudEl.style.display = 'none';
-  refreshFromEdit(); // 渲染面板(锁定) + 预览(我方 VS 对手) + 显示 matchBar
+  renderMatchInfo(); // 填充：我的战车 / 对手 Body + 主要部件
+  matchInfo.style.display = 'flex';
+  refreshFromEdit(); // 渲染面板(隐藏) + 完整 A+B 预览 + 显示 matchBar
+}
+
+/** Q15-UX-R1：MatchPreview 信息层内容（只展示 Body 名 + 已安装主要部件，不展示伤害/数值/调试） */
+function renderMatchInfo(): void {
+  const bodyB = registry.bodies.get(draftB.bodyDefId);
+  const partsB = bodyB
+    ? editableSlots(bodyB)
+        .map((hpId) => {
+          const v = draftB.functionalSelections[hpId];
+          if (!v || v === EMPTY_SLOT) return null;
+          return registry.functionals.get(v)?.name ?? v;
+        })
+        .filter((x): x is string => x !== null)
+    : [];
+  matchInfo.replaceChildren();
+  const left = document.createElement('div');
+  left.className = 'mi-side mi-left';
+  left.innerHTML = '<div class="mi-label">我的战车</div>';
+  const vs = document.createElement('div');
+  vs.className = 'mi-vs';
+  vs.textContent = 'VS';
+  const right = document.createElement('div');
+  right.className = 'mi-side mi-right';
+  right.innerHTML =
+    `<div class="mi-label">对手</div>` +
+    `<div class="mi-body">${bodyB?.name ?? draftB.bodyDefId}</div>` +
+    (partsB.length ? `<div class="mi-parts">${partsB.join(' / ')}</div>` : '');
+  matchInfo.appendChild(left);
+  matchInfo.appendChild(vs);
+  matchInfo.appendChild(right);
+}
+
+/** Q15-UX-R1：在候选区渲染一辆真实对手车（solo-A 预览；复用正式 Planck Preview 管线） */
+function showCandidate(idx: number): void {
+  const draft = OPPONENT_POOL[idx];
+  const snap = buildSnapshotFromDraft(draft, registry, 'customA');
+  matchLab.loadCustomPreview(snap, snap, true); // solo：只画候选车
+  const d = arenaDimsOf(matchLab.orchestrator);
+  matchRenderer.resize(d.w, d.h);
+  matchRenderer.reframe(matchLab.orchestrator!.getRenderSnapshot(), 'preview');
+  matchLab.render();
+  // 轻量淡入淡出 + 缩放（候选车明显变化）
+  candidateBox.classList.remove('mc-in');
+  void candidateBox.offsetWidth; // 重启动画
+  candidateBox.classList.add('mc-in');
+}
+
+/**
+ * Q15-UX-R1｜玩家主流程：找对手（Garage → Matching → MatchPreview）。
+ * - 锁定当前 Player Build，进入 Matching（编辑面板 / CTA 隐藏，主画布保持 A solo）；
+ * - 真随机选对手（pickRandomOpponent，pool>1 禁止连续同对手、首场无预设）；
+ * - Matching 约 1.1s：候选车（真实对手，来自 buildMatchingSequence）至少明显变化 3 次 → 定格真正对手；
+ * - generation 守卫：期间按钮不可再次触发；离开该阶段后旧 timer 不再修改 opponent；
+ * - 锁定后进入 MatchPreview（完整 A+B 复核，不进战斗）。
+ */
+function startMatching(): void {
+  if (playerPhase === 'matching') return; // 防重复触发
+  resultModal.style.display = 'none';
+  hudEl.style.display = 'none';
+  battleState = 'editing';
+  playerPhase = 'matching';
+  setBuildControlsLocked(true); // 锁定当前 Build
+  // 隐藏编辑面板 + 所有玩家 CTA（ Matching 期间不可操作）
+  panelA.style.display = 'none';
+  panelB.style.display = 'none';
+  startBar.style.display = 'none';
+  matchBar.style.display = 'none';
+  startHint.style.display = 'none';
+  toolsToggle.style.display = 'none';
+  matchInfo.style.display = 'none';
+  showPreview(); // Garage/Matching 分支 → solo-A（主画布保持我的车）
+
+  // 真随机选对手（首场 matchedIndex 仍可能为 0，pickRandomOpponent 不限制 last=-1 之外；
+  // 这里用当前 matchedIndex 作为 last，pool>1 禁止连续同对手）
+  const finalIdx = pickRandomOpponent(matchedIndex, OPPONENT_POOL.length);
+  matchedIndex = finalIdx;
+  draftB = cloneBuildDraft(OPPONENT_POOL[finalIdx]);
+  const seq = buildMatchingSequence(finalIdx, OPPONENT_POOL.length);
+
+  // 显示 Matching UI（主画布 A 在左侧；右侧候选区 + 中央 banner）
+  matchingUI.style.display = 'flex';
+  candidateBox.style.display = 'block';
+
+  const gen = ++matchingGeneration; // 本场 generation
+  // 节奏：快切 → 稍慢 → 最终锁定（约 1.1s 内 ≥3 次变化）
+  const steps: Array<{ at: number; idx: number }> = [
+    { at: 0, idx: seq[0] },
+    { at: 200, idx: seq[1] },
+    { at: 440, idx: seq[2] },
+    { at: 720, idx: seq[3] }, // 末位 = 实际锁定对手
+  ];
+  for (const s of steps) {
+    window.setTimeout(() => {
+      if (gen !== matchingGeneration) return; // 防重复触发 / 离开阶段后失效
+      showCandidate(s.idx);
+    }, s.at);
+  }
+  // 锁定 → MatchPreview（150~250ms 小停顿后定格）
+  window.setTimeout(() => {
+    if (gen !== matchingGeneration) return;
+    goToMatchPreview();
+  }, 720 + 260 + 140);
 }
 
 /** MatchPreview → Fighting：READY 过渡后真正开战（复用正式 Planck Runtime） */
@@ -1036,9 +1213,9 @@ btnStart.onclick = () => {
   if (startTransitioning) return;
   if (battleState !== 'editing' || playerPhase !== 'garage') return;
   if (!buildsValid()) return;
-  // Q15：Garage 主 CTA = 寻找对手 → MatchPreview 复核（不在此直接开战）
+  // Q15-UX-R1：Garage 主 CTA = 寻找对手 → Matching（真随机抽对手，可见过程）→ MatchPreview
   sfx.resume();
-  goToMatchPreview();
+  startMatching();
 };
 
 /* ---------- Q07-A：开发工具折叠区（机制场景 / Pause / Reset / Clear / 速度 / Preset 全部收进二级） ---------- */
@@ -1070,6 +1247,15 @@ toolsHost.style.display = 'none';
 function updateStartButton(): void {
   // Q15：机制场景模式下不显示玩家流程 CTA（开发工具自行控制）
   if (uiMode === 'scenario') {
+    startHint.textContent = '';
+    startHint.style.display = 'none';
+    startBar.style.display = 'none';
+    matchBar.style.display = 'none';
+    return;
+  }
+
+  // Q15-UX-R1：Matching 期间隐藏所有玩家 CTA（不可操作，等待锁定）
+  if (playerPhase === 'matching') {
     startHint.textContent = '';
     startHint.style.display = 'none';
     startBar.style.display = 'none';
@@ -1140,7 +1326,12 @@ function setMode(m: UiMode): void {
   // Q08-CAM-A1：模式切换改面板显隐 → canvas CSS 尺寸变化，先同步 backing 再构图
   doResize();
   if (showBuild && battleState !== 'fighting') {
-    showPreview(); // 切回装配测试：恢复 Draft Preview（不把 Scenario 车辆伪装成 Preview）
+    // Q15-UX-R1：切回装配 → Garage（solo-A），退出 Matching/MatchPreview 视觉层
+    matchingUI.style.display = 'none';
+    candidateBox.style.display = 'none';
+    matchInfo.style.display = 'none';
+    selectedSlotA = null;
+    refreshFromEdit(); // 按 phase(Garage) 渲染 A 编辑器 + solo-A 预览
   }
   updateStartButton();
 }
@@ -1164,12 +1355,13 @@ addButton(toolsHost, 'Reset', () => {
     battleState = lab.previewMode ? 'editing' : 'fighting';
     setBuildControlsLocked(!lab.previewMode);
     if (lab.previewMode) {
-      panelA.style.display = '';
-      panelB.style.display = '';
-      startBar.style.display = '';
-      toolsToggle.style.display = TOOLS_DEV_VISIBLE; // Q07-C：回装配恢复开发工具入口
-      // Q08-CAM-A1：面板恢复 → CSS 变窄，先同步 backing 再构图
+      // Q15-UX-R1：回装配恢复（按 phase 渲染面板 + 预览 + CTA；Garage 不显示 B 面板）
+      toolsToggle.style.display = TOOLS_DEV_VISIBLE;
+      matchingUI.style.display = 'none';
+      candidateBox.style.display = 'none';
+      matchInfo.style.display = 'none';
       doResize();
+      refreshFromEdit();
     } else {
       reframeCamera(); // Fighting：布局未变（面板已隐藏）
     }
@@ -1186,13 +1378,13 @@ addButton(toolsHost, 'Clear', () => {
   if (uiMode === 'build') {
     battleState = 'editing';
     setBuildControlsLocked(false);
-    panelA.style.display = '';
-    panelB.style.display = '';
-    startBar.style.display = '';
     toolsToggle.style.display = TOOLS_DEV_VISIBLE; // Q07-C：回装配恢复开发工具入口
+    matchingUI.style.display = 'none';
+    candidateBox.style.display = 'none';
+    matchInfo.style.display = 'none';
+    selectedSlotA = null;
     doResize(); // Q08-CAM-A1：面板恢复 → CSS 变窄，先同步 backing
-    showPreview(); // Clear 后恢复装配预览
-    updateStartButton();
+    refreshFromEdit(); // Clear 后恢复装配预览（Garage：solo-A + 仅 A 面板）
   }
 });
 

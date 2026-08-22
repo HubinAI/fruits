@@ -120,7 +120,7 @@ export class PhysicsLab {
    *   正式 Battle 默认 spawn 不受影响；
    * - 保存输入，Reset 时按同一输入重建（仍为 preview）。
    */
-  loadCustomPreview(buildA: BuildSnapshot, buildB: BuildSnapshot): void {
+  loadCustomPreview(buildA: BuildSnapshot, buildB: BuildSnapshot, soloA: boolean = false): void {
     this.currentScenario = null;
     const cfg: BattleConfig = {
       autoDrive: false,
@@ -132,13 +132,14 @@ export class PhysicsLab {
     };
     this.currentCustom = { buildA, buildB, config: cfg };
     this.isPreviewMode = true;
-    this.orchestrator = this.createBattle(buildA, buildB, cfg);
+    this.orchestrator = this.createBattle(buildA, buildB, cfg, soloA);
   }
 
   private createBattle(
     buildA: BuildSnapshot,
     buildB: BuildSnapshot,
     config: BattleConfig,
+    soloA: boolean = false,
   ): BattleOrchestratorApi {
     const a = applyOverridesToBuild(buildA, this.overrides);
     const b = applyOverridesToBuild(buildB, this.overrides);
@@ -147,7 +148,7 @@ export class PhysicsLab {
     // 其余（缺省 / 'matter' / loadCustom 未传 engine）一律 Matter，默认行为不变。
     const orch: BattleOrchestratorApi =
       config.engine === 'planck'
-        ? new PlanckBattleOrchestrator(a, b, registry, c)
+        ? new PlanckBattleOrchestrator(a, b, registry, c, soloA)
         : new BattleOrchestrator(a, b, registry, c);
     // W2-FX-1：装配预览不消费 Battle Event（Preview 不自动播放战斗 FX）；
     // 正式战斗（custom / scenario / rematch / reset battle）才 bind 到统一 Presentation 层。

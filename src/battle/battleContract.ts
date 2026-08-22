@@ -268,6 +268,12 @@ export interface BattleRenderSnapshot {
   vehicleA: RenderVehicle;
   vehicleB: RenderVehicle;
   /**
+   * Q15-UX-R1｜solo-A 预览标记（仅 Garage「我的车」预览使用）：
+   * true 时 Renderer 只绘制 vehicleA、相机 bounds 排除 vehicleB（Garage 无对手，
+   * 不渲染/不构图真实对手——不 spawn 假 B、不用 DOM 遮罩）。Matter Snapshot 不设置（undefined）。
+   */
+  soloA?: boolean;
+  /**
    * 存活 projectile（Q02-C3A）：仅世界坐标 circle + team，引擎中立；
    * optional——Matter Snapshot 不提供，Planck Runtime 提供。
    */

@@ -13,12 +13,16 @@ import {
   OPPONENT_POOL,
   cloneBuildDraft,
   nextOpponentIndex,
+  pickRandomOpponent,
+  buildMatchingSequence,
 } from '../src/player/opponentPool';
-import { PART_OPTIONS, EMPTY_SLOT } from '../src/core/partOptions';
+import { PART_OPTIONS } from '../src/core/partOptions';
+import { EMPTY_SLOT } from '../src/lab/buildEditorModel';
 import { loadPlayerBuild, savePlayerBuild } from '../src/core/buildPersistence';
 import { validateSnapshot, computeEnergy } from '../src/core/buildValidator';
 import { registry } from '../src/core/content';
 import type { BuildDraft } from '../src/lab/buildEditorModel';
+import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 
 const PART_OPTION_VALUES = new Set(PART_OPTIONS.map((p) => p.v));
 const HOLD_PARTS = new Set(['wedgeShovel', 'ramHead', 'lifter']); // 楔铲/冲撞头/举升臂（旋锤未实现，无 defId）
@@ -93,6 +97,65 @@ describe('Q15 对手循环', () => {
       i = nextOpponentIndex(i, OPPONENT_POOL.length);
     }
     expect(seen.size).toBe(3);
+  });
+});
+
+/** 确定性 rng：按给定序列返回（用于纯函数单测） */
+function fixedRng(values: number[]): () => number {
+  let i = 0;
+  return () => {
+    const v = values[Math.min(i, values.length - 1)];
+    i += 1;
+    return v;
+  };
+}
+
+describe('Q15-UX-R1 真随机匹配（纯函数）', () => {
+  it('pool=1 恒返回 0（无对手可随机）', () => {
+    expect(pickRandomOpponent(0, 1)).toBe(0);
+    expect(pickRandomOpponent(0, 1, fixedRng([0.9]))).toBe(0);
+  });
+
+  it('首场（last=-1）不受连续限制，按 rng 抽取', () => {
+    // 0.5*6=3 → 索引 3
+    expect(pickRandomOpponent(-1, 6, fixedRng([0.5]))).toBe(3);
+  });
+
+  it('pool>1 禁止连续两场选到同一对手（首抽命中 last 触发重抽）', () => {
+    // 第一次必然映射到 last(2) → 重抽 → 第二次映射到 3
+    const idx = pickRandomOpponent(2, 6, fixedRng([0.4, 0.5]));
+    expect(idx).toBe(3);
+    expect(idx).not.toBe(2);
+  });
+
+  it('pool>1 普通抽取结果与 rng 一致（与 last 无关）', () => {
+    // 0.16*6=0.96 → floor=0
+    expect(pickRandomOpponent(1, 6, fixedRng([0.16]))).toBe(0);
+  });
+
+  it('buildMatchingSequence 长度 4，末位=最终对手，前 3 互异且≠末位', () => {
+    const seq = buildMatchingSequence(2, 6, fixedRng([0.1, 0.3, 0.5, 0.7, 0.9]));
+    expect(seq).toHaveLength(4);
+    expect(seq[3]).toBe(2); // 末位 = 实际锁定对手（定格真正对手）
+    const head = seq.slice(0, 3);
+    expect(new Set(head).size).toBe(3); // 互异
+    for (const h of head) expect(h).not.toBe(2); // 均≠最终对手 → 定格前可见 ≥3 次变化
+  });
+
+  it('buildMatchingSequence pool=1 退化为单元素 [finalIdx]', () => {
+    expect(buildMatchingSequence(0, 1, fixedRng([0.5]))).toEqual([0]);
+  });
+
+  it('solo-A 预览标记贯穿 orchestrator → getRenderSnapshot', () => {
+    const orch = new PlanckBattleOrchestrator(
+      buildSnapshot(OPPONENT_POOL[0]),
+      buildSnapshot(OPPONENT_POOL[1]),
+      registry,
+      { engine: 'planck', autoDrive: false },
+      true,
+    );
+    expect(orch.soloA).toBe(true);
+    expect(orch.getRenderSnapshot().soloA).toBe(true);
   });
 });
 

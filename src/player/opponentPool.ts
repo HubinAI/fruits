@@ -62,8 +62,64 @@ export function cloneBuildDraft(d: BuildDraft): BuildDraft {
 /**
  * 下一场对手索引：固定顺序循环（保护 pool 长度，避免越界 / 负数）。
  * 每调用一次推进到「下一名」对手，确保与上一场不同（pool 长度 ≥ 2）。
+ * 保留为纯函数（测试 / 旧逻辑可复用）；Q15-UX-R1 起正式玩家流程改用 pickRandomOpponent（真随机）。
  */
 export function nextOpponentIndex(current: number, poolSize: number): number {
   if (poolSize <= 0) return 0;
   return (current + 1) % poolSize;
+}
+
+/**
+ * Q15-UX-R1｜真随机选对手（正式玩家匹配调用）。
+ * - pool > 1 时禁止连续两场选到同一个 index（避免出现与上场完全相同的对手）；
+ * - 第一次匹配 lastIndex = -1 → 不限制（首场「无预设当前对手」，纯随机抽取）；
+ * - rng 可注入（测试确定性）；正式调用用 Math.random。
+ */
+export function pickRandomOpponent(
+  lastIndex: number,
+  poolSize: number,
+  rng: () => number = Math.random,
+): number {
+  if (poolSize <= 0) return 0;
+  if (poolSize === 1) return 0;
+  let idx = Math.floor(rng() * poolSize) % poolSize;
+  let guard = 0;
+  while (idx === lastIndex && guard < 64) {
+    idx = Math.floor(rng() * poolSize) % poolSize;
+    guard++;
+  }
+  return idx;
+}
+
+/**
+ * Q15-UX-R1｜Matching 阶段候选车展示序列（纯函数，可测试）。
+ * - 前 3 个为互不相同且 ≠ finalIdx 的随机候选 → 保证「约 1 秒内至少明显变化 3 次」；
+ * - 末位固定为最终锁定对手 finalIdx（最后一个显示的车 = 实际进入 MatchPreview 的对手）；
+ * - 返回长度 4（4 次显示 = 3 次切换），节奏由调用方 timing 控制（快→稍慢→定格）；
+ * - pool 过小（≤3）退化：用确定性补位保证每个候选 ≠ finalIdx，避免定格前无可见变化。
+ */
+export function buildMatchingSequence(
+  finalIdx: number,
+  poolSize: number,
+  rng: () => number = Math.random,
+): number[] {
+  if (poolSize <= 1) return [finalIdx];
+  const intermediates: number[] = [];
+  const used = new Set<number>([finalIdx]);
+  let attempts = 0;
+  while (intermediates.length < 3 && attempts < 200) {
+    attempts++;
+    const r = Math.floor(rng() * poolSize) % poolSize;
+    if (!used.has(r)) {
+      used.add(r);
+      intermediates.push(r);
+    }
+  }
+  // 退化补位（池子太小取不到 3 个互异）：用确定性与 finalIdx 不同的索引填满
+  while (intermediates.length < 3) {
+    let r = (finalIdx + 1 + intermediates.length) % poolSize;
+    if (r === finalIdx) r = (r + 1) % poolSize;
+    intermediates.push(r);
+  }
+  return [...intermediates, finalIdx];
 }
