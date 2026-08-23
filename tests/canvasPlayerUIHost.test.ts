@@ -243,6 +243,19 @@ describe('F-WX-5 CanvasPlayerUIHost mountCanvas（平台中立，无 DOM 容器�
     const core = createWebCore();
     bindPlatformCore({
       ...core,
+      // F-WX-6.1：注入固定 dpr=1 的 viewport，隔离其它测试对 globalThis.window
+      // （devicePixelRatio）的污染——否则 mountCanvas 的 cssW/canvas.width/dpr 变化
+      // 导致 host 内部 scale 与 tapPhysical 的固定换算失配（跨文件 flaky）。
+      createViewport: () => ({
+        surface: () => ({
+          width: wxCanvas.width,
+          height: wxCanvas.height,
+          devicePixelRatio: 1,
+          now: () => 0,
+        }),
+        onResize: () => {},
+        safeInsets: () => ({ left: 0, right: 0, top: 0, bottom: 0 }),
+      }),
       input: {
         bindClick: () => {},
         bindPointer: (_t: EventTarget, h: (x: number, y: number) => void) => {

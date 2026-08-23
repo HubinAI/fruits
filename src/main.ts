@@ -70,8 +70,14 @@ const app = document.getElementById('app')!;
 // Q31｜Release Config：开发工具（Scenario / Runtime Debug Tools / 对手编辑）仅在非 PROD 可见
 const TOOLS_DEV_VISIBLE: string = DEV_TOOLS_VISIBLE ? '' : 'none';
 
-// F-DEV-1：Runtime Badge——仅开发 / 内部 RC 构建显示 branch + short SHA + 版本号。
-if (DEV_TOOLS_VISIBLE) {
+// F-WX-6.1：Pages Preview 构建标志（仅 vite.pages.config.ts define 注入；普通构建为 undefined）
+const isPagesPreview: boolean =
+  typeof __PAGES_PREVIEW__ !== 'undefined' && __PAGES_PREVIEW__ === true;
+
+// F-DEV-1：Runtime Badge——开发 / 内部 RC 构建显示 branch + short SHA + 版本号；
+// F-WX-6.1：Pages Preview（production 语义下 DEV_TOOLS_VISIBLE=false）同样显示 short SHA，
+// 用于确认「手机当前看到的页面 = 刚部署的 commit」（构建期注入，非手写常量）。
+if (DEV_TOOLS_VISIBLE || isPagesPreview) {
   const badge = document.createElement('div');
   badge.style.cssText =
     'position:fixed;right:8px;bottom:8px;z-index:9999;font:11px/1.4 monospace;' +
@@ -359,8 +365,10 @@ for (const [visualId, url] of SILHOUETTE_ASSETS) {
   img.src = url;
 }
 
-/* ---------- F-WX-3/4：玩家 UI 唯一 Host 边界（默认 WebDom；?canvasui=1 切换 Canvas） ---------- */
-const canvasUiMode = new URLSearchParams(location.search).has('canvasui');
+/* ---------- F-WX-3/4：玩家 UI 唯一 Host 边界（默认 WebDom；?canvasui=1 切换 Canvas） ----------
+ * F-WX-6.1：Pages Preview 构建默认启用 Canvas Player UI（手机横屏可体验版本），
+ * 无需手输 ?canvasui=1；普通 DEV Web 默认行为不变（isPagesPreview=false）。 */
+const canvasUiMode = isPagesPreview || new URLSearchParams(location.search).has('canvasui');
 const host: PlayerUIHost = canvasUiMode
   ? new CanvasPlayerUIHost(document.createElement('canvas'))
   : new WebDomPlayerUIHost();

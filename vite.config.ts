@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import { gitRuntimeInfo, runtimeInfoPlugin } from './build/runtimeInfoPlugin';
+import { gitRuntimeInfo, runtimeInfoPlugin } from './build/runtimeInfoPlugin.ts';
 
 /**
  * F-DEV-1：Runtime 版本可追溯（插件见 build/runtimeInfoPlugin.ts）。

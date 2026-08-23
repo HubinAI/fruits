@@ -1,0 +1,50 @@
+name: Pages Preview (Web Canvas Mobile)
+
+# F-WX-6.1｜固定 Web Mobile Preview（GitHub Pages）。
+# foundation-02-wechat 每次更新并成功构建后，自动部署 Canvas Player UI 预览页：
+# https://hubinai.github.io/fruits/（手机直接打开，无需同 Wi-Fi / Dev Server）。
+#
+# - push trigger：foundation-02-wechat 分支任何更新都触发（含本 workflow 自身变更）；
+# - workflow_dispatch：手动重跑（如切换 Pages Source 后补部署）；
+# - dist 只作为 artifact 上传，绝不手工 commit 到业务分支。
+
+on:
+  push:
+    branches: [foundation-02-wechat]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/configure-pages@v5
+      - name: Build Pages Preview
+        run: npm run build:pages
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

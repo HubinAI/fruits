@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-wechat/
+dist-pages/
 *.log
 .DS_Store
 

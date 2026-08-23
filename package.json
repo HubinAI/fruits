@@ -13,6 +13,7 @@
     "build": "vite build",
     "build:test": "vite build --mode test",
     "build:wechat": "vite build -c vite.wechat.config.ts",
+    "build:pages": "vite build -c vite.pages.config.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

@@ -15,7 +15,7 @@
 import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { runtimeInfoPlugin } from './build/runtimeInfoPlugin';
+import { runtimeInfoPlugin } from './build/runtimeInfoPlugin.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
