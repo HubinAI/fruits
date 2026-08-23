@@ -376,6 +376,7 @@ describe('Q15 Build 持久化', () => {
     };
     expect(validateSnapshot(buildSnapshot(def), registry).valid).toBe(true);
     savePlayerBuild(def);
-    expect(loadPlayerBuild()).toEqual(def);
+    // F-MOVE-1：loadPlayerBuild 会归一化 drive（旧存档无该字段 → forward），回读含 drive:'forward'
+    expect(loadPlayerBuild()).toEqual({ ...def, drive: 'forward' });
   });
 });

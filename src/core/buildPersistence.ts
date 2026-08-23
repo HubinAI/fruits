@@ -9,7 +9,7 @@
  * - 读写失败（隐私模式 / 配额 / SSR 无 localStorage）静默处理，不影响游戏。
  */
 import type { BuildDraft } from '../lab/buildEditorModel';
-import { EMPTY_SLOT, buildSnapshotFromDraft } from '../lab/buildEditorModel';
+import { EMPTY_SLOT, buildSnapshotFromDraft, resolveDriveMode } from '../lab/buildEditorModel';
 import { registry } from './content';
 import { validateSnapshot } from './buildValidator';
 
@@ -36,6 +36,8 @@ export function loadPlayerBuild(): BuildDraft | null {
   }
   if (!isBuildDraftShape(data)) return null;
   const draft = data as BuildDraft;
+  // F-MOVE-1：驱动模式归一（旧 localStorage 无 drive 字段 / 非法值 → 前进）
+  draft.drive = resolveDriveMode(draft.drive);
   // 必须构成合法 Build（未知部件 / 超载 / 无 Weapon → 旧存档非法）
   const snap = buildSnapshotFromDraft(draft, registry, 'customA');
   if (!validateSnapshot(snap, registry).valid) return null;

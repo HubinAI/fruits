@@ -43,7 +43,9 @@ import {
   migrateDraftBody,
   slotLabel,
   EMPTY_SLOT,
+  resolveDriveMode,
   type BuildDraft,
+  type DriveMode,
 } from './lab/buildEditorModel';
 import { computeEnergy, validateSnapshot } from './core/buildValidator';
 import {
@@ -246,6 +248,12 @@ style.textContent = `
   .match-info .mi-vs { font-size: 56px; font-weight: 900; color: #ffd35a; text-shadow: 0 0 18px rgba(255,211,90,0.45); }
   .match-info .mi-body { font-size: 20px; color: #ff9d5a; font-weight: 700; margin-top: 6px; }
   .match-info .mi-parts { font-size: 12px; color: #9aa4b5; margin-top: 4px; }
+  /* F-MOVE-1：锁定阶段对手真实 Drive 配置标记（极简可读 pill，仅表示驱动模式） */
+  .match-info .mi-drive {
+    display: inline-block; margin-top: 8px; padding: 2px 12px; border-radius: 12px;
+    font-size: 13px; font-weight: 600; letter-spacing: 1px;
+    border: 1px solid #3b6fd4; color: #cfe0ff; background: rgba(59,111,212,0.16);
+  }
 `;
 document.head.appendChild(style);
 
@@ -638,7 +646,7 @@ function silDraft(bodyDefId: string): BuildDraft {
     else if (hp.id === 'top') selections[hp.id] = 'hammer';
     else selections[hp.id] = EMPTY_SLOT;
   }
-  return { bodyDefId, rearRadius: 20, frontRadius: 20, functionalSelections: selections };
+  return { bodyDefId, rearRadius: 20, frontRadius: 20, functionalSelections: selections, drive: 'forward' };
 }
 
 let matchedIndex = 0; // 当前匹配对手在 OPPONENT_POOL 中的索引
@@ -999,7 +1007,13 @@ function startOrRematch(): void {
   if (!validateSnapshot(sa, registry).valid || !validateSnapshot(sb, registry).valid) {
     return; // 任一非法：不启动
   }
-  lab.loadCustom(sa, sb, { autoDrive: true, engine: 'planck' });
+  // F-MOVE-1：A(玩家) / B(对手) 各自按自己的驱动配置，复用已验证的 sideDrive / resolveDriveEnable 链。
+  // 前进 → sideDrive 该侧 = true（正常 motor）；停驻 → false（motor off、真实 Physics 保留）。
+  const sideDrive = {
+    a: resolveDriveMode(draftA.drive) === 'forward',
+    b: resolveDriveMode(draftB.drive) === 'forward',
+  };
+  lab.loadCustom(sa, sb, { autoDrive: true, engine: 'planck', sideDrive });
   battleState = 'fighting';
   setBuildControlsLocked(true);
   // Q15-UI-R2：进入 Fighting → 整个玩家 Shell（顶部状态 / Dock / MatchPreview 条 / MatchInfo）
@@ -1129,10 +1143,13 @@ function renderMatchInfo(): void {
   vs.textContent = 'VS';
   const right = document.createElement('div');
   right.className = 'mi-side mi-right';
+  // F-MOVE-1：锁定阶段在对手附近显示其真实 Drive 配置（仅表示驱动模式，不做职业/AI 标签）
+  const oppDriveText = resolveDriveMode(draftB.drive) === 'stationary' ? '停驻' : '前进';
   right.innerHTML =
     `<div class="mi-label">对手</div>` +
     `<div class="mi-body">${bodyB?.name ?? draftB.bodyDefId}</div>` +
-    (partsB.length ? `<div class="mi-parts">${partsB.join(' / ')}</div>` : '');
+    (partsB.length ? `<div class="mi-parts">${partsB.join(' / ')}</div>` : '') +
+    `<div class="mi-drive">驱动 · ${oppDriveText}</div>`;
   matchInfo.appendChild(left);
   matchInfo.appendChild(vs);
   matchInfo.appendChild(right);
@@ -1305,6 +1322,13 @@ function renderGarageDock(): void {
   const fw = WHEEL_OPTIONS.find((w) => String(draftA.frontRadius) === w.v);
   chipDefs.push({ key: 'rearWheel', label: '后轮', value: rw?.t ?? String(draftA.rearRadius), empty: false });
   chipDefs.push({ key: 'frontWheel', label: '前轮', value: fw?.t ?? String(draftA.frontRadius), empty: false });
+  // F-MOVE-1：驱动模式（前进 / 停驻）—— 与车身/轮子同为 Build 的明确配置
+  chipDefs.push({
+    key: 'drive',
+    label: '驱动',
+    value: resolveDriveMode(draftA.drive) === 'stationary' ? '停驻' : '前进',
+    empty: false,
+  });
   if (body) {
     for (const hpId of editableSlots(body)) {
       const cur = draftA.functionalSelections[hpId] ?? EMPTY_SLOT;
@@ -1342,7 +1366,8 @@ function renderGarageDock(): void {
       garageSelected === 'body' ? '车身'
         : garageSelected === 'rearWheel' ? '后轮'
           : garageSelected === 'frontWheel' ? '前轮'
-            : slotLabel(garageSelected);
+            : garageSelected === 'drive' ? '驱动'
+              : slotLabel(garageSelected);
     title.textContent = `正在改「${selLabel}」`;
     picker.appendChild(title);
     const opts: Array<{ v: string; t: string; meta: string }> = [];
@@ -1350,6 +1375,9 @@ function renderGarageDock(): void {
       for (const o of BODY_OPTIONS) opts.push({ v: o.v, t: o.t, meta: '' });
     } else if (garageSelected === 'rearWheel' || garageSelected === 'frontWheel') {
       for (const o of WHEEL_OPTIONS) opts.push({ v: o.v, t: o.t, meta: '' });
+    } else if (garageSelected === 'drive') {
+      opts.push({ v: 'forward', t: '前进', meta: '轮子正常驱动' });
+      opts.push({ v: 'stationary', t: '停驻', meta: '不主动移动·真实物理保留' });
     } else {
       for (const o of PART_OPTIONS) {
         const t = o.t;
@@ -1367,7 +1395,8 @@ function renderGarageDock(): void {
       garageSelected === 'body' ? draftA.bodyDefId
         : garageSelected === 'rearWheel' ? String(draftA.rearRadius)
           : garageSelected === 'frontWheel' ? String(draftA.frontRadius)
-            : (draftA.functionalSelections[garageSelected] ?? EMPTY_SLOT);
+            : garageSelected === 'drive' ? resolveDriveMode(draftA.drive)
+              : (draftA.functionalSelections[garageSelected] ?? EMPTY_SLOT);
     for (const o of opts) {
       const b = document.createElement('button');
       b.className = 'dock-opt' + (o.v === curVal ? ' active' : '');
@@ -1390,6 +1419,8 @@ function renderGarageDock(): void {
           draftA.rearRadius = Number(o.v);
         } else if (slotKey === 'frontWheel') {
           draftA.frontRadius = Number(o.v);
+        } else if (slotKey === 'drive') {
+          draftA.drive = o.v as DriveMode;
         } else {
           draftA.functionalSelections[slotKey] = o.v;
         }

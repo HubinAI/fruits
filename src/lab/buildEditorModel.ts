@@ -25,6 +25,23 @@ export type EditableFunctionalDefId = (typeof EDITABLE_FUNCTIONAL_DEF_IDS)[numbe
 export const EMPTY_SLOT = 'none';
 
 /**
+ * F-MOVE-1｜驱动模式（正式 Build 选择，玩家与对手共用的明确配置）：
+ * - 'forward'  = 当前正常 wheel motor 行为（自动朝对方驱动）；
+ * - 'stationary' = wheel motor 不主动输出，但所有真实 Physics 保留
+ *   （仍受碰撞、后坐力、重力等推动；非固定炮塔、不刹停、不锁位置、不 setVelocity）。
+ * 不为 true/false 布尔，避免与 BattleConfig.sideDrive 的「已驱动」布尔语义混淆。
+ */
+export type DriveMode = 'forward' | 'stationary';
+
+/**
+ * F-MOVE-1｜驱动模式归一（旧 localStorage / 非法值兼容）：
+ * 仅 'stationary' 视为停驻，其余（undefined / 'forward' / 非法串）一律按 'forward'。
+ */
+export function resolveDriveMode(d?: DriveMode): DriveMode {
+  return d === 'stationary' ? 'stationary' : 'forward';
+}
+
+/**
  * Functional 槽位自然名称（Q06-UX-R1）：玩家主标签必须是位置语义，
  * 内部 hardpoint id 仅作次级文字（如「前端 (front)」）。
  */
@@ -49,6 +66,11 @@ export interface BuildDraft {
   frontRadius: number;
   /** Functional 槽位选择：hardpointId → defId 或 'none'（空槽） */
   functionalSelections: Record<string, string>;
+  /**
+   * F-MOVE-1｜驱动模式（前进 / 停驻）。与车身/轮子同为 Build 的明确配置；
+   * 缺省 undefined = 前进（旧 localStorage 自动按前进处理）。
+   */
+  drive?: DriveMode;
 }
 
 /** 当前 Body 的可编辑 Functional 槽位（真实硬点 id，顺序同 BodyDef） */

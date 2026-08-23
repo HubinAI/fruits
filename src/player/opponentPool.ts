@@ -12,7 +12,7 @@
  *
  * 不做匹配算法 / 段位 / Elo —— 玩家「寻找对手」随机抽取（不连续重复同一 index）。
  */
-import type { BuildDraft } from '../lab/buildEditorModel';
+import type { BuildDraft, DriveMode } from '../lab/buildEditorModel';
 import { EMPTY_SLOT } from '../lab/buildEditorModel';
 
 /** 轮径组合（单位 px；WHEEL_OPTIONS 正式档位 12 小 / 20 标准 / 26 大） */
@@ -26,6 +26,7 @@ function opp(
   bodyDefId: string,
   wheels: OppWheels,
   selections: Partial<Record<string, string>>,
+  drive?: DriveMode,
 ): BuildDraft {
   return {
     bodyDefId,
@@ -38,6 +39,7 @@ function opp(
       rear: EMPTY_SLOT,
       ...selections,
     },
+    drive,
   };
 }
 
@@ -48,15 +50,15 @@ function opp(
  *       锤25 喷火30 / 推杆20 推进器20。
  */
 
-/* 1｜远程压制：炮 / 机枪 / 镭射 组合（4 套） */
+/* 1｜远程压制：炮 / 机枪 / 镭射 组合（4 套）— F-MOVE-1 全部「停驻」（站桩压制，约 4/24 停驻） */
 const RANGED_SUPPRESSION = [
-  opp('watermelonBody', { rear: 26, front: 12 }, { front: 'machineGun', frontMass: 'cannon' }), // 前小后大 60/110
-  opp('bananaBody', { rear: 20, front: 20 }, { front: 'laser', frontMass: 'cannon' }), // 双标准 75/90
-  opp('watermelonBody', { rear: 26, front: 26 }, { front: 'cannon', frontMass: 'machineGun' }), // 双大 60/110
-  opp('bananaBody', { rear: 12, front: 26 }, { front: 'machineGun', frontMass: 'laser' }), // 前大后小 75/90
+  opp('watermelonBody', { rear: 26, front: 12 }, { front: 'machineGun', frontMass: 'cannon' }, 'stationary'), // 前小后大 60/110
+  opp('bananaBody', { rear: 20, front: 20 }, { front: 'laser', frontMass: 'cannon' }, 'stationary'), // 双标准 75/90
+  opp('watermelonBody', { rear: 26, front: 26 }, { front: 'cannon', frontMass: 'machineGun' }, 'stationary'), // 双大 60/110
+  opp('bananaBody', { rear: 12, front: 26 }, { front: 'machineGun', frontMass: 'laser' }, 'stationary'), // 前大后小 75/90
 ];
 
-/* 2｜近距离爆发：霰弹 / 圆锯 / 刺 组合（4 套） */
+/* 2｜近距离爆发：霰弹 / 圆锯 / 刺 组合（4 套）— 全部前进 */
 const CLOSE_BURST = [
   opp('watermelonBody', { rear: 12, front: 12 }, { front: 'shotgun', top: 'saw' }), // 双小 55/110
   opp('bananaBody', { rear: 20, front: 20 }, { front: 'shotgun', frontMass: 'spear' }), // 双标准 55/90
@@ -64,7 +66,7 @@ const CLOSE_BURST = [
   opp('bananaBody', { rear: 12, front: 26 }, { front: 'spear', frontMass: 'shotgun' }), // 前大后小 55/90
 ];
 
-/* 3｜持续贴身：喷火 / 圆锯 / 锤 组合（4 套） */
+/* 3｜持续贴身：喷火 / 圆锯 / 锤 组合（4 套）— 全部前进 */
 const CONTINUOUS_CONTACT = [
   opp('watermelonBody', { rear: 12, front: 12 }, { front: 'flamethrower', top: 'hammer' }), // 双小 55/110
   opp('bananaBody', { rear: 20, front: 20 }, { front: 'flamethrower', frontMass: 'saw' }), // 双标准 55/90
@@ -72,7 +74,7 @@ const CONTINUOUS_CONTACT = [
   opp('bananaBody', { rear: 26, front: 12 }, { front: 'hammer', frontMass: 'flamethrower' }), // 前小后大 55/90
 ];
 
-/* 4｜冲锋接敌：推进器 + 近战武器（4 套） */
+/* 4｜冲锋接敌：推进器 + 近战武器（4 套）— 全部前进 */
 const CHARGE = [
   opp('watermelonBody', { rear: 12, front: 12 }, { front: 'rammer', rear: 'thruster' }), // 双小 45/110
   opp('bananaBody', { rear: 12, front: 26 }, { front: 'saw', rear: 'thruster' }), // 前大后小 45/90
@@ -80,15 +82,15 @@ const CHARGE = [
   opp('bananaBody', { rear: 26, front: 26 }, { front: 'hammer', rear: 'thruster' }), // 双大 45/90
 ];
 
-/* 5｜控距干扰：推杆 + 远程（4 套） */
+/* 5｜控距干扰：推杆 + 远程（4 套）— F-MOVE-1：2 套停驻 / 2 套前进（总体约 6/24 停驻） */
 const RANGE_CONTROL = [
-  opp('watermelonBody', { rear: 26, front: 12 }, { front: 'pushRod', frontMass: 'cannon' }), // 前小后大 50/110
-  opp('bananaBody', { rear: 20, front: 20 }, { front: 'pushRod', frontMass: 'machineGun' }), // 双标准 50/90
-  opp('watermelonBody', { rear: 26, front: 26 }, { front: 'pushRod', frontMass: 'shotgun' }), // 双大 50/110
-  opp('bananaBody', { rear: 12, front: 26 }, { front: 'pushRod', frontMass: 'laser' }), // 前大后小 65/90
+  opp('watermelonBody', { rear: 26, front: 12 }, { front: 'pushRod', frontMass: 'cannon' }, 'stationary'), // 前小后大 50/110 · 停驻
+  opp('bananaBody', { rear: 20, front: 20 }, { front: 'pushRod', frontMass: 'machineGun' }, 'stationary'), // 双标准 50/90 · 停驻
+  opp('watermelonBody', { rear: 26, front: 26 }, { front: 'pushRod', frontMass: 'shotgun' }), // 双大 50/110 · 前进
+  opp('bananaBody', { rear: 12, front: 26 }, { front: 'pushRod', frontMass: 'laser' }), // 前大后小 65/90 · 前进
 ];
 
-/* 6｜混合型：远程 + 近战 + Gadget（4 套） */
+/* 6｜混合型：远程 + 近战 + Gadget（4 套）— 默认前进 */
 const HYBRID = [
   opp('watermelonBody', { rear: 20, front: 20 }, { front: 'machineGun', frontMass: 'saw', rear: 'thruster' }), // 双标准 75/110
   opp('bananaBody', { rear: 26, front: 12 }, { front: 'cannon', top: 'hammer', rear: 'thruster' }), // 前小后大 75/90
@@ -113,6 +115,7 @@ export function cloneBuildDraft(d: BuildDraft): BuildDraft {
     rearRadius: d.rearRadius,
     frontRadius: d.frontRadius,
     functionalSelections: { ...d.functionalSelections },
+    drive: d.drive,
   };
 }
 
