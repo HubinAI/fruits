@@ -361,6 +361,34 @@ function laserBuild(): BuildSnapshot {
   };
 }
 
+/** Q17-MOVEMENT-PROBE：远程车——正常玩家西瓜车身 + 前方机枪（远程站桩侧） */
+function q17RangedBuild(): BuildSnapshot {
+  return {
+    id: 'q17Ranged',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'machineGun' }],
+  };
+}
+
+/** Q17-MOVEMENT-PROBE：近战冲锋车——正常玩家西瓜车身 + 前方圆锯（正常前进侧） */
+function q17MeleeBuild(): BuildSnapshot {
+  return {
+    id: 'q17Melee',
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    functionals: [{ hardpointId: 'front', defId: 'saw' }],
+  };
+}
+
 export const SCENARIOS: ScenarioDef[] = [
   {
     id: 'A',
@@ -824,6 +852,42 @@ export const SCENARIOS: ScenarioDef[] = [
       // Q14-B-R1：按真实 bounds 留距——A 右缘 558（含喷口）与香蕉左缘（x-95=625）留 ~67px：
       // 火流（射程 ≈192px）可命中香蕉，且一个完整喷射周期内两车不发生车体接触。
       spawnB: { x: 720, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  // Q17-MOVEMENT-PROBE｜站桩 vs 前进 的接敌方式验证（DEV 隔离；正式玩家 Build 未接入）。
+  // 唯一主要变量是 Movement/drive：A/B 同两套武器，Q17-A 只关 A 的 drive，Q17-B 双方正常前进。
+  {
+    id: 'Q17-A',
+    name: 'Stationary Ranged vs Charger (Probe)',
+    description:
+      '站桩探针（Q17-A）：A 远程机枪车「轮子存在但不驱动」（sideDrive.a=false → wheel motor 关闭，' +
+      '仍可被真实碰撞推动/翻转，非固定炮塔）；B 近战圆锯车正常前进冲锋。验证「远程车不主动前进」' +
+      '是否自然形成「一方原地射击 / 一方主动接近」的不同接敌过程（无自动拉距/倒车/锁位置/隐藏职业）。',
+    buildA: q17RangedBuild(),
+    buildB: q17MeleeBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: true,
+      sideDrive: { a: false, b: true }, // A 站桩 / B 正常驱动（复用 drivePlanckVehicle 既有 enabled 语义）
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 950, y: 650, facing: -1 },
+    },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: 'Q17-B',
+    name: 'Ranged vs Charger · 双方正常前进（对照）',
+    description:
+      '站桩探针对照（Q17-B）：与 Q17-A 完全相同的两套武器与出生位置，但双方都使用当前正常自动驱动' +
+      '（无 sideDrive → 跟随 autoDrive）。唯一主要变量 = Movement/drive，用于肉眼对照两种接敌过程。',
+    buildA: q17RangedBuild(),
+    buildB: q17MeleeBuild(),
+    config: {
+      engine: 'planck',
+      autoDrive: true, // 双方驱动（无 sideDrive）
+      spawnA: { x: 450, y: 650, facing: 1 },
+      spawnB: { x: 950, y: 650, facing: -1 },
     },
     camera: { fit: 'vehicles' },
   },

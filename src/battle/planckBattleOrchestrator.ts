@@ -34,6 +34,7 @@ import { CombatEventBus, type BattleEvent } from './combatEvents';
 import { PlanckArenaRuntime } from './planckArenaRuntime';
 import {
   resolveBattleResult,
+  resolveDriveEnable,
   visualWorldTransform,
   type BattleConfig,
   type BattleResult,
@@ -343,13 +344,18 @@ export class PlanckBattleOrchestrator {
     if (this._result) return;
 
     const steps = this.world.step(realDtMs, timeScale, () => {
-      // 车辆驱动（自动战斗：A 朝 +X、B 朝 -X）
-      if (this.config.autoDrive !== false) {
+      // 车辆驱动（自动战斗：A 朝 +X、B 朝 -X，各自 worldDirection）。
+      // Q17-MOVEMENT-PROBE：sideDrive 按侧覆盖 autoDrive（缺省 = 双方跟随 autoDrive，
+      // 与既有行为完全一致）；未驱动侧轮子 motor 保持关闭（站桩，真实物理可被推动/翻转）。
+      const drive = resolveDriveEnable(this.config.autoDrive, this.config.sideDrive);
+      if (drive.a) {
         drivePlanckVehicle(this.world, this.vehicleA, {
           enabled: true,
           worldDirection: 1,
           targetSpeedPxPerStep: AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
         });
+      }
+      if (drive.b) {
         drivePlanckVehicle(this.world, this.vehicleB, {
           enabled: true,
           worldDirection: -1,

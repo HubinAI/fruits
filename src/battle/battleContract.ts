@@ -19,6 +19,13 @@ export interface BattleConfig {
   /** 双方是否自动朝对方驱动（正式战斗为 true，部分 Lab 场景为 false） */
   autoDrive?: boolean;
   /**
+   * Q17-MOVEMENT-PROBE｜按侧驱动覆盖（可选；缺省 undefined = 双方都跟随 autoDrive，行为不变）。
+   * - { a: false } → A 轮子不驱动（站桩：motor 关闭、轮子仍在，真实物理可被推动/翻转）；
+   * - { b: false } → B 站桩；未指定侧 = 跟随 autoDrive。
+   * 复用 drivePlanckVehicle 既有 enabled:false 语义，不新增 Movement 系统 / AI / 锁位置 / setVelocity。
+   */
+  sideDrive?: { a?: boolean; b?: boolean };
+  /**
    * 出生后是否把整车下沉到「最低点接触地面」（无下落弹跳）。
    * 消除「从空中落下→弹跳→混沌分叉」的 Reset 非确定性。空中出生场景（D-air）设 false。
    */
@@ -39,9 +46,24 @@ export interface BattleConfig {
   randomSeed?: number;
 }
 
+/**
+ * Q17-MOVEMENT-PROBE｜解析每侧驱动开关（引擎中立纯函数，可单测）。
+ * - sideDrive 未指定侧 → 跟随全局 autoDrive（autoDrive 缺省 = true，与既有行为一致）；
+ * - { a: false } → A 轮子不驱动（站桩）；{ b: false } → B 站桩。
+ */
+export function resolveDriveEnable(
+  autoDrive: boolean | undefined,
+  sideDrive: { a?: boolean; b?: boolean } | undefined,
+): { a: boolean; b: boolean } {
+  const global = autoDrive !== false;
+  return {
+    a: sideDrive?.a ?? global,
+    b: sideDrive?.b ?? global,
+  };
+}
+
 /** Battle 结束原因（W1-END-1）：正式战斗不允许平局，结果必须区分胜负来源 */
 export type EndReason = 'hp' | 'arenaEnd';
-
 /** Battle 结果（字段与 battleOrchestrator.BattleResult 完全一致） */
 export interface BattleResult {
   /** 正式类型：任何 Battle 最终必须得到 A 或 B（W1-END-1，不再有 draw/null） */
