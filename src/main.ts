@@ -613,12 +613,14 @@ function addButton(parent: HTMLElement, text: string, onClick: () => void): HTML
 
 /* ---------- Build 编辑状态（Draft 模型；编辑 → 实时 Preview） ---------- */
 
-// Q10-A：正常装配（玩家）只展示当前正式内容——西瓜 / 香蕉。
+// Q10-A：正常装配（玩家）只展示当前正式内容——西瓜 / 香蕉 / 菠萝 / 椰子（Q18 新增 2 种）。
 // wedgeBody / boxBody / tallBody / heavyBox 不删除、不在此处暴露，
 // 仍完整保留在 registry 供 Scenario / Preset / 开发测试链使用。
 const BODY_OPTIONS: Array<{ v: string; t: string }> = [
   { v: 'watermelonBody', t: '西瓜车身（宽厚低矮）' },
   { v: 'bananaBody', t: '香蕉车身（长条弧形）' },
+  { v: 'pineappleBody', t: '菠萝车身（高窄·顶挂点高）' },
+  { v: 'coconutBody', t: '椰子车身（短沉·更抗推）' },
 ];
 
 // Q10-B：玩家侧轮径命名（小/标准/大认知保留；三张等权卡片同一行展示）

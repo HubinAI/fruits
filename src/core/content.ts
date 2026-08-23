@@ -168,6 +168,58 @@ const bananaBody: BodyDef = {
   },
 };
 
+/**
+ * 菠萝车身（Q18 正式 Content）：高、窄、顶部挂点明显更高。
+ * - Collider：单窄高 box（88×112），高 > 宽 → 高重心（COM 在车体中央，明显高于轮轴）；
+ * - 自然结果：顶部武器易越过低矮目标；高重心在驱动/碰撞下更易发生俯仰与翻倒（emergent，无特殊规则）；
+ * - Energy capacity = 100；标准 4 Functional hardpoints；不加特殊技能 / 隐藏稳定。
+ * - 视觉：不设 sprite（W2-VIS 占位），渲染回落 team-color Collider graybox，形状即身份。
+ */
+const pineappleBody: BodyDef = {
+  id: 'pineappleBody',
+  name: '菠萝车身',
+  colliders: [{ shape: 'box', width: 88, height: 112, offset: { x: 0, y: 0 } }],
+  baseMass: 60,
+  hp: 1000,
+  energyCapacity: 100,
+  movementHardpoints: [
+    { id: 'rear', localPosition: { x: -33, y: 56 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 33, y: 56 }, localRotation: 0 },
+  ],
+  functionalHardpoints: [
+    { id: 'front', localPosition: { x: 46, y: -6 }, localRotation: 0 },
+    { id: 'frontMass', localPosition: { x: 28, y: -14 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: 0, y: -56 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -46, y: -6 }, localRotation: 0 },
+  ],
+};
+
+/**
+ * 椰子车身（Q18 正式 Content）：短、紧凑、明显更沉。
+ * - Collider：单短宽 box（132×46），baseMass 160（明显重于西瓜 120）；
+ * - 自然结果：相同驱动力下启动/姿态变化更迟钝、更难被普通碰撞推开（emergent，无隐藏抗击退/稳定器）；
+ * - Energy capacity = 100；标准 4 Functional hardpoints；不加特殊技能 / 隐藏权限。
+ * - 视觉：不设 sprite（W2-VIS 占位），渲染回落 team-color Collider graybox，形状即身份。
+ */
+const coconutBody: BodyDef = {
+  id: 'coconutBody',
+  name: '椰子车身',
+  colliders: [{ shape: 'box', width: 132, height: 46, offset: { x: 0, y: 0 } }],
+  baseMass: 160,
+  hp: 1100,
+  energyCapacity: 100,
+  movementHardpoints: [
+    { id: 'rear', localPosition: { x: -52, y: 23 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 52, y: 23 }, localRotation: 0 },
+  ],
+  functionalHardpoints: [
+    { id: 'front', localPosition: { x: 66, y: 0 }, localRotation: 0 },
+    { id: 'frontMass', localPosition: { x: 40, y: -8 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: 0, y: -23 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -66, y: 0 }, localRotation: 0 },
+  ],
+};
+
 /** 标准轮子 */
 const wheelStd: WheelDef = {
   kind: 'wheel',
@@ -733,6 +785,8 @@ export function createRegistry(): ContentRegistry {
       [heavyBox.id, heavyBox],
       [watermelonBody.id, watermelonBody],
       [bananaBody.id, bananaBody],
+      [pineappleBody.id, pineappleBody],
+      [coconutBody.id, coconutBody],
     ]),
     movements: new Map([[wheelStd.id, wheelStd]]),
     functionals: new Map([
