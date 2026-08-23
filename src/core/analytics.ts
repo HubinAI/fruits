@@ -4,12 +4,14 @@
  * 设计约束（来自 Queue 验收）：
  * - 统一入口 `track(event, payload)`；业务层只依赖本模块的 `track` 与事件名，
  *   不直接依赖任何具体平台 SDK（第三方接管通过 `setPlatformAdapter` 后续插入）。
- * - DEV（import.meta.env.DEV 或测试强制）：console + 内存 sink，便于本地观察与测试。
+ * - DEV / TEST（ANALYTICS_DEV 或测试强制）：console + 内存 sink，便于本地观察与测试。
  * - PROD：默认 no-op（不联网、不上传、不采集完整存档、不含个人隐私）；
  *   后续如需平台上报，调用 `setPlatformAdapter(sink)` 接管即可。
  * - payload 保持最小、可解释：仅平铺原始标量/小对象，禁止函数与隐私字段。
  * - 不引入任何第三方 dependency。
  */
+
+import { ANALYTICS_DEV } from './env';
 
 /** 核心事件名（统一枚举） */
 export type AnalyticsEvent =
@@ -90,12 +92,8 @@ export function setAnalyticsMode(m: 'dev' | 'prod' | null): void {
 }
 export function isAnalyticsDev(): boolean {
   if (forcedMode) return forcedMode === 'dev';
-  try {
-    // Vite 注入：import.meta.env.DEV 在非生产构建为 true。
-    return (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV === true;
-  } catch {
-    return false;
-  }
+  // Q31：统一跟随 Release Config（dev / test = 开发态；prod = no-op）。
+  return ANALYTICS_DEV;
 }
 
 /** payload 最小化清洗：剔除函数（防引用泄露），其余平铺保留。 */

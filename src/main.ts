@@ -66,6 +66,7 @@ import {
 } from './player/opponentPool';
 import { loadPlayerBuild, savePlayerBuild } from './core/buildPersistence';
 import { track, battleEndGuard } from './core/analytics';
+import { DEV_TOOLS_VISIBLE, APP_VERSION } from './core/env';
 import {
   RewardedAdClaimer,
   tryInterstitialSafe,
@@ -77,18 +78,19 @@ import { computePlayerShellVisibility } from './ui/playerShell';
 
 const app = document.getElementById('app')!;
 
-// Q15：开发工具仅在 DEV 环境可见；PROD 对正常玩家隐藏（玩家流程不依赖开发工具）
-const TOOLS_DEV_VISIBLE: string = import.meta.env.DEV ? '' : 'none';
+// Q31｜Release Config：开发工具（Scenario / Runtime Debug Tools / 对手编辑）仅在非 PROD 可见；
+// PROD 对正常玩家隐藏（玩家流程不依赖开发工具）。dev / test 均可见（test = 内部 RC 构建）。
+const TOOLS_DEV_VISIBLE: string = DEV_TOOLS_VISIBLE ? '' : 'none';
 
-// F-DEV-1：Runtime Badge——仅开发环境显示 branch + short SHA。
+// F-DEV-1：Runtime Badge——仅开发 / 内部 RC 构建显示 branch + short SHA + 版本号。
 // 一眼确认「我当前看到的是哪个代码版本」（正式玩家 UI 不显示）。
-if (import.meta.env.DEV) {
+if (DEV_TOOLS_VISIBLE) {
   const badge = document.createElement('div');
   badge.style.cssText =
     'position:fixed;right:8px;bottom:8px;z-index:9999;font:11px/1.4 monospace;' +
     'color:#8fa3c8;background:rgba(15,20,30,0.72);border:1px solid #2a3140;' +
     'border-radius:6px;padding:4px 8px;pointer-events:none;';
-  badge.textContent = `${runtimeInfo.branch} @ ${runtimeInfo.sha.slice(0, 7)}`;
+  badge.textContent = `${runtimeInfo.branch} @ ${runtimeInfo.sha.slice(0, 7)} · ${APP_VERSION}`;
   document.body.appendChild(badge);
 }
 
@@ -332,9 +334,13 @@ const panelB = document.createElement('div');
 panelB.className = 'lab-panel right';
 main.appendChild(panelB);
 
-const debugPanel = document.createElement('div');
-debugPanel.className = 'lab-debug';
-canvasWrap.appendChild(debugPanel);
+// Q31：Runtime Debug Tools 仅在非 PROD 创建（PROD 对正常玩家完全隐藏）。
+let debugPanel: HTMLDivElement | null = null;
+if (DEV_TOOLS_VISIBLE) {
+  debugPanel = document.createElement('div');
+  debugPanel.className = 'lab-debug';
+  canvasWrap.appendChild(debugPanel);
+}
 
 /* ---------- 战斗 HUD（Q06-HUD-U1：Fighting 顶部固定 A/B HP，不随车辆运动带走） ---------- */
 const hudEl = document.createElement('div');
@@ -883,8 +889,8 @@ function renderPanel(
   if (opts.collapsed !== undefined) {
     const toggle = document.createElement('button');
     toggle.textContent = opts.collapsed ? `${opts.expandLabel ?? '展开'} ▸` : '收起 ▾';
-    // Q15：玩家流程中对手(B)只读 —— PROD 下禁止展开/编辑；仅 DEV 可临时改对手做测试
-    toggle.disabled = buildControlsLocked || !import.meta.env.DEV;
+    // Q15：玩家流程中对手(B)只读 —— PROD 下禁止展开/编辑；dev / test（RC）可临时改对手做验收
+    toggle.disabled = buildControlsLocked || !DEV_TOOLS_VISIBLE;
     toggle.onclick = () => {
       bEditorOpen = !bEditorOpen;
       refreshFromEdit();
@@ -1209,24 +1215,28 @@ const backToBuildBtn = addButton(toolbar, '返回装配', () => setMode('build')
 backToBuildBtn.style.display = 'none';
 
 // 场景选择（开发工具折叠区内显示；选中即进入机制场景模式）
-const scenarioSelect = document.createElement('select');
-SCENARIOS.forEach((s) => {
-  const opt = document.createElement('option');
-  opt.value = s.id;
-  opt.textContent = `${s.id} · ${s.name}`;
-  scenarioSelect.appendChild(opt);
-});
-scenarioSelect.onchange = () => {
-  const sc = SCENARIOS.find((s) => s.id === scenarioSelect.value);
-  if (sc) {
-    setMode('scenario'); // Q07-A：从开发工具选中场景 → 直接进入机制场景模式
-    lab.loadScenario(sc);
-    lastShownResult = null;
-    currentCamera = sc.camera ?? null;
-    reframeCamera();
-    updateHud(); // 场景模式隐藏战斗 HUD
-  }
-};
+// Q31：Scenario 仅在非 PROD 创建（PROD 对正常玩家完全隐藏）。
+let scenarioSelect: HTMLSelectElement | null = null;
+if (DEV_TOOLS_VISIBLE) {
+  scenarioSelect = document.createElement('select');
+  SCENARIOS.forEach((s) => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = `${s.id} · ${s.name}`;
+    scenarioSelect!.appendChild(opt);
+  });
+  scenarioSelect.onchange = () => {
+    const sc = SCENARIOS.find((s) => s.id === scenarioSelect!.value);
+    if (sc) {
+      setMode('scenario'); // Q07-A：从开发工具选中场景 → 直接进入机制场景模式
+      lab.loadScenario(sc);
+      lastShownResult = null;
+      currentCamera = sc.camera ?? null;
+      reframeCamera();
+      updateHud(); // 场景模式隐藏战斗 HUD
+    }
+  };
+}
 
 /** 开战 / 原配置再战：重新 validate 当前 Draft → Planck loadCustom → Fighting 专注模式 */
 function startOrRematch(): void {
@@ -1892,7 +1902,8 @@ toolsToggle.style.display = TOOLS_DEV_VISIBLE;
 const toolsHost = document.createElement('div');
 toolsHost.className = 'tool-tools-host';
 // Q07-A：机制场景入口收进开发工具（不再是同级主模式按钮）
-toolsHost.appendChild(scenarioSelect);
+// Q31：PROD 下 scenarioSelect 为 null（Scenario 已隐藏）→ 不挂载。
+if (scenarioSelect) toolsHost.appendChild(scenarioSelect);
 const toolsLabel = document.createElement('span');
 toolsLabel.className = 'tool-tools-label';
 toolsLabel.textContent = '调试：';
@@ -1935,7 +1946,8 @@ function setMode(m: UiMode): void {
   backToBuildBtn.style.display = m === 'scenario' ? '' : 'none';
   const showBuild = m === 'build';
   // Q07-A：scenarioSelect 位于开发工具折叠区内，显示与否由 toolsHost 控制，不再单独切换
-  debugPanel.style.display = showBuild ? 'none' : '';
+  // Q31：PROD 下 debugPanel 为 null（Runtime Debug Tools 已隐藏）→ 跳过。
+  if (debugPanel) debugPanel.style.display = showBuild ? 'none' : '';
   resultModal.style.display = 'none'; // 模式切换关闭结算卡
   hudEl.style.display = 'none';
   // Q08-CAM-A1：模式切换改面板显隐 → canvas CSS 尺寸变化，先同步 backing 再构图
@@ -2057,8 +2069,8 @@ const presetButtons: HTMLButtonElement[] = [];
   });
 }
 
-/* ---------- Debug 面板（仅机制场景模式显示） ---------- */
-{
+/* ---------- Debug 面板（仅机制场景模式显示；PROD 完全不构建） ---------- */
+if (DEV_TOOLS_VISIBLE && debugPanel) {
   const h4 = document.createElement('h4');
   h4.textContent = 'Debug 显示';
   debugPanel.appendChild(h4);
