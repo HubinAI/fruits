@@ -158,3 +158,35 @@ export function buildSnapshotFromDraft(
     functionals,
   };
 }
+
+/**
+ * Q26｜空存档首次启动的合法 Starter Build（与 main.ts 旧 silDraft 等价，提取为可测试纯函数）。
+ * 保证「玩家无需先修配置即可开战」：
+ * - 至少 1 个 Weapon（frontMass = cannon）；
+ * - Energy 合法（pushRod20 + cannon30 + hammer25 = 75 ≤ 任意 Body 容量）；
+ * - Drive 默认前进；
+ * - 其余 hardpoint 默认空槽（不强制装配）。
+ * 不引入特殊 Physics / 教程降属性；难度与普通 Build 一致。
+ */
+export function makeStarterDraft(
+  bodyDefId: string,
+  registry: ContentRegistry,
+): BuildDraft {
+  const body = registry.bodies.get(bodyDefId);
+  const selections: Record<string, string> = {};
+  if (body) {
+    for (const hp of body.functionalHardpoints) {
+      if (hp.id === 'front') selections[hp.id] = 'pushRod';
+      else if (hp.id === 'frontMass') selections[hp.id] = 'cannon';
+      else if (hp.id === 'top') selections[hp.id] = 'hammer';
+      else selections[hp.id] = EMPTY_SLOT;
+    }
+  }
+  return {
+    bodyDefId,
+    rearRadius: 20,
+    frontRadius: 20,
+    functionalSelections: selections,
+    drive: 'forward',
+  };
+}

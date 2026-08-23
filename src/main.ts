@@ -39,6 +39,7 @@ import runtimeInfo from 'virtual:runtime-info';
 import { registry } from './core/content';
 import {
   buildSnapshotFromDraft,
+  makeStarterDraft,
   editableSlots,
   migrateDraftBody,
   slotLabel,
@@ -47,6 +48,11 @@ import {
   type BuildDraft,
   type DriveMode,
 } from './lab/buildEditorModel';
+import {
+  resolveOnboardingStage,
+  completeOnboarding,
+  type OnboardingStage,
+} from './core/onboarding';
 import { computeEnergy, validateSnapshot } from './core/buildValidator';
 // Q22：星级统一倍率（用于 Garage 卡片展示 2★ 实际 Energy）
 import { starTierEnergy } from './core/buildSnapshot';
@@ -140,10 +146,14 @@ style.textContent = `
   /* Q23：车库顶部状态条（金币 / 段位） */
   .dock-stats { display: flex; gap: 14px; align-items: baseline; padding: 8px 12px; background: #161c28; border: 1px solid #2a3140; border-radius: 8px; font-size: 13px; color: #9aa4b5; }
   .dock-stats b { color: #ffd35a; font-size: 15px; }
+  /* Q26：首轮引导提示（仅全新账号首 Garage 显示；极简 banner，非遮罩、不阻断操作） */
+  .dock-onboard { padding: 8px 12px; background: #15233a; border: 1px solid #2f5fa0; border-radius: 8px; font-size: 13px; color: #bcd4ff; }
   /* Q23→Q24：结算卡经济/段位区 */
   .result-economy { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; background: #1c2230; border: 1px solid #38414f; border-radius: 8px; }
   .result-economy .re-label { font-size: 14px; font-weight: 700; color: #ffd35a; }
   .result-economy .re-cat { font-size: 12px; color: #9aa4b5; }
+  /* Q26：首轮引导提示（仅全新账号首场 Result 显示；极简、非遮罩） */
+  .result-onboard { margin: 6px auto 0; padding: 8px 14px; background: #15233a; border: 1px solid #2f5fa0; border-radius: 8px; font-size: 13px; color: #bcd4ff; }
   /* Q07-A：开发工具折叠区（机制场景 / Pause/Reset/Clear / 速度 / Preset 收进二级） */
   /* Q13-C-R4：开发工具折叠区改为「工具栏下方全宽独立一行」（不再嵌进 .lab-main 横向 flex 被挤压）。
      基础 display: flex（展开时由内联 '' 回退到此）；收起由内联 display:none 控制。
@@ -389,6 +399,12 @@ resultEconomy.className = 'result-economy';
 resultEconomy.style.display = 'none';
 resultCard.appendChild(resultEconomy);
 
+// Q26：首轮引导提示（仅全新账号首场 Result 显示，提示回车库调整；完成闭环后不再出现）
+const resultOnboard = document.createElement('div');
+resultOnboard.className = 'result-onboard';
+resultOnboard.style.display = 'none';
+resultCard.appendChild(resultOnboard);
+
 const resultActions = document.createElement('div');
 resultActions.className = 'result-actions';
 resultCard.appendChild(resultActions);
@@ -445,6 +461,13 @@ function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): vo
   } else {
     resultEconomy.style.display = 'none';
   }
+  // Q26：首轮引导——全新账号且本场获得新部件时，明确提示「回车库调整」（仅首场，完成闭环后隐藏）
+  if (onboardingStage === 'pending' && outcome) {
+    resultOnboard.textContent = '获得新部件，可以回车库调整';
+    resultOnboard.style.display = 'flex';
+  } else {
+    resultOnboard.style.display = 'none';
+  }
   resultModal.style.display = 'flex';
 }
 
@@ -478,7 +501,13 @@ function nextMatch(): void {
 const btnAdjust = document.createElement('button');
 btnAdjust.className = 'secondary';
 btnAdjust.textContent = '调整配置';
-btnAdjust.onclick = adjustConfig;
+// Q26：Result 的「调整配置」= 完成一次 Battle→Result→Garage 闭环 → 关闭首轮引导。
+// （MatchPreview 的「调整配置」仍直接 adjustConfig，不经过此闭环判定，避免未开战就结束引导。）
+btnAdjust.onclick = () => {
+  completeOnboarding();
+  onboardingStage = 'done';
+  adjustConfig();
+};
 resultActions.appendChild(btnAdjust);
 
 const btnRematch = document.createElement('button');
@@ -720,22 +749,12 @@ import {
   MERGE_COST_COIN,
 } from './core/playerProgress';
 
-/** W2-SIL-1 视觉样板 Draft：双车并排展示 5 个首批正式 Content 轮廓
- *  - front=pushRod（基座在 chassis 侧、推板在前，Prismatic 伸缩自然）
- *  - frontMass=cannon（炮管与真实 muzzle 对齐，barrel +X）
- *  - top=hammer（pivot 与 Revolute 一致，锤头远端）
- *  - rear=空
- *  energy=20+30+25=75；watermelon capacity 110 ✓、banana 90 ✓；≥1 Weapon ✓ */
+/** W2-SIL-1 视觉样板 Draft（已提取为 buildEditorModel.makeStarterDraft，可单测）：
+ *  - front=pushRod / frontMass=cannon / top=hammer / rear=空
+ *  - energy=20+30+25=75；watermelon capacity 110 ✓、banana 90 ✓；≥1 Weapon ✓；drive 默认前进
+ *  - 空存档首次启动即生成此合法 Build，玩家无需先修配置即可开战（Q26 要求 1） */
 function silDraft(bodyDefId: string): BuildDraft {
-  const body = registry.bodies.get(bodyDefId)!;
-  const selections: Record<string, string> = {};
-  for (const hp of body.functionalHardpoints) {
-    if (hp.id === 'front') selections[hp.id] = 'pushRod';
-    else if (hp.id === 'frontMass') selections[hp.id] = 'cannon';
-    else if (hp.id === 'top') selections[hp.id] = 'hammer';
-    else selections[hp.id] = EMPTY_SLOT;
-  }
-  return { bodyDefId, rearRadius: 20, frontRadius: 20, functionalSelections: selections, drive: 'forward' };
+  return makeStarterDraft(bodyDefId, registry);
 }
 
 let matchedIndex = 0; // 当前匹配对手在 OPPONENT_POOL 中的索引
@@ -747,6 +766,8 @@ ensureInventory(draftA);
 const rewardSettler = new BattleRewardSettler();
 // Q23→Q24：每场 Battle 进度结算器（金币 + 段位；同场只结算一次，与 rewardSettler 同模式）
 const progressSettler = new BattleProgressSettler();
+// Q26：首轮引导阶段（全新账号进入 pending，老存档直接 done；完成一次闭环后置 done 永久关闭）
+let onboardingStage: OnboardingStage = resolveOnboardingStage();
 // Q15：对手来自固定对手池（玩家不可编辑，仅 DEV 可临时改）
 let draftB = cloneBuildDraft(OPPONENT_POOL[matchedIndex]);
 
@@ -1450,6 +1471,14 @@ function renderGarageDock(): void {
     stats.className = 'dock-stats';
     stats.innerHTML = `金币 <b>${p.coin}</b> · ${TIER_LABEL[tier]} <b>${p.rating}</b>`;
     garageDock.appendChild(stats);
+  }
+  // Q26：首轮引导——全新账号仅在首 Garage 显示极简提示，指向唯一重要动作「寻找对手」；
+  // 不弹遮罩、不强制、不堆文字；完成闭环后 onboardingStage 变 done 即不再渲染。
+  if (onboardingStage === 'pending') {
+    const ob = document.createElement('div');
+    ob.className = 'dock-onboard';
+    ob.textContent = '这是你的第一辆战车，点「寻找对手」开始第一场战斗';
+    garageDock.appendChild(ob);
   }
   const body = registry.bodies.get(draftA.bodyDefId);
   const snapshot = currentSnapshot('A');

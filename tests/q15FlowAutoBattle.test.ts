@@ -48,7 +48,9 @@ describe('Q15-FLOW-R1-ATOMIC 匹配完成直接开战', () => {
     expect(next).toContain('startMatching()');
   });
 
-  it('Result「调整配置」仍回 Garage（adjustConfig 接线不变）', () => {
-    expect(MAIN).toContain('btnAdjust.onclick = adjustConfig;');
+  it('Result「调整配置」仍回 Garage（adjustConfig 接线不变；首轮引导在此结束）', () => {
+    // 接线仍指向 adjustConfig（回 Garage），仅在外层包了「完成首轮引导」；
+    // 不得退化为 btnAdjust.onclick = adjustConfig（那会跳过完成引导的判定）。
+    expect(MAIN).toMatch(/btnAdjust\.onclick\s*=\s*\(\)\s*=>\s*\{[\s\S]*?\badjustConfig\(\);/);
   });
 });
