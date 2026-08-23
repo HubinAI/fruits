@@ -220,3 +220,65 @@ describe('F-WX-2 Platform Core', () => {
     bindPlatformCore(createWebCore());
   });
 });
+
+describe('F-WX-6 PlatformViewport.safeInsets（Safe Area 最小扩展）', () => {
+  afterEach(() => {
+    bindPlatformCore(createWebCore());
+    delete (globalThis as any).wx;
+  });
+
+  it('WebViewport：无 DOM（Node/测试环境）→ safeInsets 全 0（安全降级）', () => {
+    const vp = new WebViewport({ width: 800, height: 600 } as any);
+    const ins = vp.safeInsets();
+    expect(ins).toEqual({ left: 0, right: 0, top: 0, bottom: 0 });
+  });
+
+  it('WechatViewport：无 wx → safeInsets 全 0（安全降级）', () => {
+    const vp = new WechatViewport({ width: 800, height: 600 } as any, 2);
+    expect(vp.safeInsets()).toEqual({ left: 0, right: 0, top: 0, bottom: 0 });
+  });
+
+  it('WechatViewport：横屏刘海/系统边缘 → 从 systemInfo.safeArea 计算 inset（逻辑 px）', () => {
+    (globalThis as any).wx = {
+      getSystemInfoSync: () => ({
+        windowWidth: 932,
+        windowHeight: 430,
+        // 横屏：刘海在左（left=44），右/顶/底无
+        safeArea: { left: 44, right: 888, top: 0, bottom: 430, width: 844, height: 430 },
+      }),
+    };
+    const vp = new WechatViewport({ width: 2796, height: 1290 } as any, 3);
+    expect(vp.safeInsets()).toEqual({ left: 44, right: 44, top: 0, bottom: 0 });
+  });
+
+  it('WechatViewport：safeArea 缺失 → 全 0（老基础库安全降级）', () => {
+    (globalThis as any).wx = { getSystemInfoSync: () => ({ windowWidth: 932, windowHeight: 430 }) };
+    const vp = new WechatViewport({ width: 932, height: 430 } as any, 1);
+    expect(vp.safeInsets()).toEqual({ left: 0, right: 0, top: 0, bottom: 0 });
+  });
+
+  it('Web 探针存在时读 CSS env（fake document 探针 → 可注入值）', () => {
+    // 模拟浏览器：探针 computed padding 返回 env 值（'12px'/'44px' 等）
+    const probeNode = {
+      style: {} as Record<string, string>,
+      remove: () => {},
+    };
+    const documentStub = {
+      createElement: () => probeNode,
+      body: { appendChild: () => {} },
+    };
+    const getComputedStyleStub = () => ({
+      paddingTop: '0px',
+      paddingRight: '0px',
+      paddingBottom: '12px',
+      paddingLeft: '44px',
+    });
+    const windowStub = { getComputedStyle: getComputedStyleStub };
+    (globalThis as any).document = documentStub;
+    (globalThis as any).window = windowStub;
+    const vp = new WebViewport({ width: 800, height: 600 } as any);
+    expect(vp.safeInsets()).toEqual({ left: 44, right: 0, top: 0, bottom: 12 });
+    delete (globalThis as any).document;
+    delete (globalThis as any).window;
+  });
+});

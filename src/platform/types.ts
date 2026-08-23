@@ -32,12 +32,26 @@ export interface PlatformLifecycle {
   onVisibilityChange(cb: (hidden: boolean) => void): void;
 }
 
-// —— Viewport（视口尺寸 + 变化订阅）——
+// —— Viewport（视口尺寸 + 变化订阅 + Safe Area）——
+/** 安全区内缩（CSS px / 微信逻辑 px；横屏注意 left/right = 刘海侧） */
+export interface SafeInsets {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
 export interface PlatformViewport {
   /** 当前视口 surface（宽/高/DPR/时间源），供 Renderer 注入 */
   surface(): CanvasSurface;
   /** 订阅视口尺寸变化（Web=window resize；微信=固定方向无变化 → no-op） */
   onResize(cb: () => void): void;
+  /**
+   * 当前安全区内缩（刘海 / 圆角 / 系统边缘）。
+   * F-WX-6：单位与 surface 宽度一致（Web=CSS px；微信=逻辑 px，与 canvas.width/pixelRatio 对应）。
+   * Web 默认 0，可读 CSS env(safe-area-inset-*) 时安全使用；微信从 systemInfo.safeArea 计算。
+   */
+  safeInsets(): SafeInsets;
 }
 
 // —— Input（UI 事件抽象；微信无 DOM UI → bindClick no-op，bindPointer 走 wx 触摸）——

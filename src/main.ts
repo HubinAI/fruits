@@ -274,6 +274,12 @@ style.textContent = `
     font-size: 13px; font-weight: 600; letter-spacing: 1px;
     border: 1px solid #3b6fd4; color: #cfe0ff; background: rgba(59,111,212,0.16);
   }
+  /* F-WX-6：窄屏（手机横屏）隐藏 DEV 侧栏/工具栏，玩家 Canvas UI 占满画布
+     （配合 npm run dev:mobile 手机浏览器预览；DEV 工具仅桌面宽度保留） */
+  @media (max-width: 1000px) {
+    .lab-toolbar { display: none !important; }
+    .lab-panel { display: none !important; }
+  }
 `;
 document.head.appendChild(style);
 

@@ -20,6 +20,7 @@ import { VisualRegistry } from './visualRegistry';
 import { vehicleDeathAlpha, damageFeedbackColors } from '../presentation/battlePhaseFx';
 import { DamageNumberAggregator } from '../presentation/damageNumberAggregator';
 import { buildFireJet } from '../presentation/fireJetBuilder';
+import { isCompactLandscape } from './viewportProfile';
 import type { CanvasSurface } from './canvasSurface';
 
 /** Projectile 颜色（Q02-C3B）：A/B 可明显区分（与车身蓝/橙区分，更亮） */
@@ -200,7 +201,8 @@ const MUZZLE_TONGUE_TTL = 60; // ms：50~70 区间（短促，连发时呈连续
 
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
-  private transform: ScreenTransform = { scale: 1, offsetX: 0, offsetY: 0 };
+  /** F-WX-6：相机变换公开（测试可验证取景；debugOverlay 已消费同值） */
+  transform: ScreenTransform = { scale: 1, offsetX: 0, offsetY: 0 };
   /**
    * Q15-UI-R2：玩家 Shell 预览候选车轻量表现——仅 Matching 候选换车时对 B 施加
    * alpha/scale（A 不动）。纯渲染层，不影响 Physics / 不新增第二个 Renderer。
@@ -1554,8 +1556,27 @@ export class Renderer {
     // R2：可用画布 = 中央实际战斗可视区域（扣除左右 UI 阴影区）；
     // Q15-UI-R2：玩家 Shell 预览（previewSolo / previewFixed）额外内缩 top/bottom，
     // 给顶部状态栏与底部装配 Dock 留位，车辆居中于中间可视带、不被遮挡。
-    const insetTop = isFixed ? 70 : SAFE_INSET_Y;
-    const insetBottom = isFixed ? 160 : SAFE_INSET_Y;
+    // F-WX-6：紧凑横屏（手机）加大 UI 安全区——顶部给 HUD（~56 逻辑 px）、
+    // 底部给 Garage Dock（preview ~220 逻辑 px）；Desktop（h≥600）语义完全不变。
+    // 注意：view-space 为物理 px（surface 或 canvas 像素），inset 值 ×viewDpr 换算回逻辑 px。
+    const isCompact = isCompactLandscape(
+      this.viewWidth / this.viewDpr,
+      this.viewHeight / this.viewDpr,
+    );
+    const insetTop = isFixed
+      ? isCompact
+        ? Math.round(52 * this.viewDpr)
+        : 70
+      : isCompact
+        ? Math.round(56 * this.viewDpr)
+        : SAFE_INSET_Y;
+    const insetBottom = isFixed
+      ? isCompact
+        ? Math.round(220 * this.viewDpr)
+        : 160
+      : isCompact
+        ? Math.round(40 * this.viewDpr)
+        : SAFE_INSET_Y;
     const safeW = Math.max(2, cw - SAFE_INSET_X * 2);
     const safeH = Math.max(2, ch - insetTop - insetBottom);
     // Q06-UX-R2-FIX / Q08-A-FIX：声明「完整入画」的 fit（preview / battle）直接取

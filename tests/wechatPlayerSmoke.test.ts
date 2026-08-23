@@ -88,10 +88,10 @@ function driveFrame(fake: ReturnType<typeof makeFakeWx>, now: number): void {
   if (cb) cb(now);
 }
 
-/** CanvasHost 逻辑坐标 → 微信物理像素坐标（与 ensureSize 同源换算） */
-function toPhysical(canvas: HTMLCanvasElement, lx: number, ly: number): { x: number; y: number } {
-  const w = Math.max(1, canvas.width);
-  const h = Math.max(1, canvas.height);
+/** CanvasHost 布局坐标 → 微信触摸输入坐标（逻辑 px；与 mountCanvas 的 cssW=canvas/dpr 同源） */
+function toPhysical(canvas: HTMLCanvasElement, dpr: number, lx: number, ly: number): { x: number; y: number } {
+  const w = Math.max(1, canvas.width / dpr);
+  const h = Math.max(1, canvas.height / dpr);
   const scale = Math.min(w / 1280, h / 720);
   const ox = (w - 1280 * scale) / 2;
   const oy = (h - 720 * scale) / 2;
@@ -126,7 +126,7 @@ describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
     const hitAreas = mod.uiHost.getHitAreasForTest();
     const cta = hitAreas.find((a) => a.id === 'cta-find');
     expect(cta).toBeDefined(); // Garage Dock CTA 已注册命中区
-    const p = toPhysical(fake.canvas, cta!.x + cta!.w / 2, cta!.y + cta!.h / 2);
+    const p = toPhysical(fake.canvas, 2, cta!.x + cta!.w / 2, cta!.y + cta!.h / 2); // fake wx pixelRatio=2
     fake.touch()!({ touches: [{ clientX: p.x, clientY: p.y }] });
     expect(runtime.playerPhase).toBe('matching'); // 触摸 → Action → Gameplay command 全链路
 
