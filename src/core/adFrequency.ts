@@ -8,6 +8,7 @@
  * - 不引入任何第三方 dependency；无 localStorage（隐私模式 / node 测试）安全降级为内存态。
  */
 import { readJsonWithVersion, stampVersion } from './saveVersion';
+import { platform } from '../platform';
 
 const FREQ_KEY = 'strongfruit.ads.freq.v1';
 
@@ -23,9 +24,8 @@ export interface AdFreqState {
 }
 
 function loadState(): AdFreqState {
-  if (typeof localStorage === 'undefined') return { battlesSinceLast: 0 };
   try {
-    const raw = localStorage.getItem(FREQ_KEY);
+    const raw = platform.storage.getItem(FREQ_KEY);
     if (!raw) return { battlesSinceLast: 0 };
     const parsed = readJsonWithVersion(raw);
     if (!parsed) return { battlesSinceLast: 0 };
@@ -38,9 +38,8 @@ function loadState(): AdFreqState {
 }
 
 function saveState(s: AdFreqState): void {
-  if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(FREQ_KEY, JSON.stringify(stampVersion(s)));
+    platform.storage.setItem(FREQ_KEY, JSON.stringify(stampVersion(s)));
   } catch {
     // 写入失败静默忽略
   }

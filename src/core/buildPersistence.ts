@@ -13,6 +13,7 @@ import { EMPTY_SLOT, buildSnapshotFromDraft, resolveDriveMode } from '../lab/bui
 import { registry } from './content';
 import { validateSnapshot } from './buildValidator';
 import { readJsonWithVersion, migrateLegacy, stampVersion, STAMP_KEY } from './saveVersion';
+import { platform } from '../platform';
 
 const STORAGE_KEY = 'strongfruit.playerBuild.v1';
 
@@ -21,10 +22,9 @@ const KNOWN_FUNCTIONALS = new Set(registry.functionals.keys());
 
 /** 读取并校验玩家 Build；无存档 / 解析失败 / 非法 → null */
 export function loadPlayerBuild(): BuildDraft | null {
-  if (typeof localStorage === 'undefined') return null;
   let raw: string | null = null;
   try {
-    raw = localStorage.getItem(STORAGE_KEY);
+    raw = platform.storage.getItem(STORAGE_KEY);
   } catch {
     return null;
   }
@@ -45,9 +45,8 @@ export function loadPlayerBuild(): BuildDraft | null {
 
 /** 写入玩家 Build（附带 saveVersion 信封；结构性序列化） */
 export function savePlayerBuild(d: BuildDraft): void {
-  if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stampVersion(d)));
+    platform.storage.setItem(STORAGE_KEY, JSON.stringify(stampVersion(d)));
   } catch {
     // 写入失败静默忽略（隐私模式 / 配额），不影响当前对局
   }

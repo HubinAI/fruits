@@ -18,6 +18,7 @@
  */
 import { PART_OPTIONS } from './partOptions';
 import { EMPTY_SLOT } from '../lab/buildEditorModel';
+import { platform } from '../platform';
 import type { BuildDraft } from '../lab/buildEditorModel';
 import { readJsonWithVersion, migrateLegacy, stampVersion } from './saveVersion';
 
@@ -71,9 +72,8 @@ function normalizeInventory(data: Record<string, unknown>): PartInventory {
 
 /** 读 v2 库存（含 v1→v2 迁移）；无存档 / 解析失败 / 非对象 → null */
 export function loadInventoryRaw(): PartInventory | null {
-  if (typeof localStorage === 'undefined') return null;
   try {
-    const raw2 = localStorage.getItem(STORAGE_KEY_V2);
+    const raw2 = platform.storage.getItem(STORAGE_KEY_V2);
     if (raw2) {
       const parsed = readJsonWithVersion(raw2);
       if (!parsed) return null; // v2 存在但损坏：仅该 key 失效，其它 key 不受影响
@@ -82,7 +82,7 @@ export function loadInventoryRaw(): PartInventory | null {
       return normalizeInventory(migrated as Record<string, unknown>);
     }
     // 迁移：旧 v1 owned-id 数组 → 每个 id 的 1★ = 1（统一迁移入口处理数组→映射）
-    const raw1 = localStorage.getItem(STORAGE_KEY_V1);
+    const raw1 = platform.storage.getItem(STORAGE_KEY_V1);
     if (raw1) {
       const arr = JSON.parse(raw1);
       if (Array.isArray(arr)) {
@@ -100,9 +100,8 @@ export function loadInventoryRaw(): PartInventory | null {
 
 /** 写入库存（附带 saveVersion 信封；隐私模式 / 配额失败静默忽略） */
 export function saveInventory(inv: PartInventory): void {
-  if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(stampVersion(inv)));
+    platform.storage.setItem(STORAGE_KEY_V2, JSON.stringify(stampVersion(inv)));
   } catch {
     // 写入失败静默忽略
   }

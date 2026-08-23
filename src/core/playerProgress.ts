@@ -16,6 +16,7 @@
  */
 import { tryMerge, type PartInventory } from './partInventory';
 import { readJsonWithVersion, migrateLegacy, stampVersion } from './saveVersion';
+import { platform } from '../platform';
 
 export type Tier = 'bronze' | 'silver' | 'gold' | 'diamond';
 
@@ -74,9 +75,8 @@ export function applyBattleResult(p: ProgressState, isWin: boolean): ProgressSta
 
 /** 写入进度（附带 saveVersion 信封；隐私模式 / 配额失败静默忽略） */
 export function saveProgress(p: ProgressState): void {
-  if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stampVersion(p)));
+    platform.storage.setItem(STORAGE_KEY, JSON.stringify(stampVersion(p)));
   } catch {
     // 写入失败静默忽略
   }
@@ -84,9 +84,8 @@ export function saveProgress(p: ProgressState): void {
 
 /** 读进度（无存档 / 解析失败 → null；旧格式经统一迁移 + 字段级安全校验） */
 export function loadProgressRaw(): ProgressState | null {
-  if (typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = platform.storage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = readJsonWithVersion(raw);
     if (!parsed) return null;

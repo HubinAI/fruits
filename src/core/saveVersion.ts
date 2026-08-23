@@ -15,6 +15,7 @@
  * - 不触碰 Weapon / Physics / 经济 / 段位规则（那些在各自模块）。
  */
 import type { PartInventory } from './partInventory';
+import { platform } from '../platform';
 
 /** 当前存档格式版本（单调递增；下次破坏性变更 +1 并在 migrateLegacy 增加 v(N-1)→vN 步骤） */
 export const CURRENT_SAVE_VERSION = 1;
@@ -107,10 +108,9 @@ function upgrade_v0_to_v1(kind: SaveKind, obj: unknown): unknown {
  * 无 localStorage（隐私模式 / node）静默忽略。
  */
 export function resetPlayerSave(): void {
-  if (typeof localStorage === 'undefined') return;
   for (const key of RESET_KEYS) {
     try {
-      localStorage.removeItem(key);
+      platform.storage.removeItem(key);
     } catch {
       // 忽略单项删除失败
     }

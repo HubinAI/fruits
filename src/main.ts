@@ -9,6 +9,7 @@
  * - 非法配置时 Start 明显禁用且旁边直接显示阻断原因（A：… / B：…）。
  */
 import { Renderer, type CameraFit } from './render/renderer';
+import { platform } from './platform';
 import { VisualRegistry } from './render/visualRegistry';
 import { SfxAudioService } from './presentation/audioService';
 import { BattlePresentationController } from './presentation/battlePresentationController';
@@ -494,7 +495,7 @@ function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): vo
   // Q28：battle_end / reward_gain / rank_change —— 关键去重：同一 result 对象只触发一次，
   // 防止 Result 弹窗因每帧 pollBattleResult 重复触发（与 battleEndGuard.clear() @开战 配合）。
   if (battleEndGuard.firstTime(r)) {
-    const duration = Math.max(0, (performance.now() - battleStartTimeMs) / 1000);
+    const duration = Math.max(0, (platform.lifecycle.now() - battleStartTimeMs) / 1000);
     const playerRating = prog ? prog.progress.rating : getProgress().rating;
     track('battle_end', {
       result: isWin ? 'win' : 'lose',
@@ -609,6 +610,8 @@ function syncRewardAdButton(): void {
 // 后续 Content 队列经 register + 图片加载注入正式 sprite，Preview/Fighting 共用同一 runtime）
 const visualRegistry = new VisualRegistry();
 const renderer = new Renderer(canvas, visualRegistry);
+// F-WX-2：Viewport Adapter（Web 用 window resize 订阅；surface 供 Renderer 可选注入）
+const viewport = platform.createViewport(canvas);
 
 // W2-FX-1：BattleEvent → Presentation 统一消费层（正式表现唯一入口）。
 // - 表现 hook 全部接到 Renderer 的「只画」方法 + 统一 AudioService；
@@ -1259,7 +1262,7 @@ function startOrRematch(): void {
   battleState = 'fighting';
   setBuildControlsLocked(true);
   // Q28：记录开战时刻 + 重置 battle_end/reward_gain 去重器（每场新的 result 对象）
-  battleStartTimeMs = performance.now();
+  battleStartTimeMs = platform.lifecycle.now();
   battleEndGuard.clear();
   track('battle_start', {
     opponentTier: OPPONENT_TIERS[matchedIndex],
@@ -1420,7 +1423,7 @@ function swapMatchCandidate(idx: number): void {
   const sa = currentSnapshot('A');
   const sb = currentSnapshot('B');
   lab.loadCustomPreview(sa, sb); // 不调用 reframeCamera：保留 previewFixed 固定相机
-  bFxStart = performance.now(); // 触发 B 轻量淡入缩放（A 不动）
+  bFxStart = platform.lifecycle.now(); // 触发 B 轻量淡入缩放（A 不动）
 }
 
 /** 每帧应用 Matching 候选 B 的淡入缩放（A 不动；离开 Matching 即清除） */
@@ -2163,7 +2166,7 @@ function doResize(): void {
   renderer.resize(d.w, d.h);
   reframeCamera(); // viewport resize：重新构图一次
 }
-window.addEventListener('resize', doResize);
+viewport.onResize(doResize);
 doResize();
 
 /* ---------- W2-FX-2：阶段表现轮询（Warning 倒计时 + 场边红脉冲 + 刺墙预高亮/Closing 进入） ---------- */
@@ -2211,7 +2214,7 @@ function pollArenaPhase(nowMs: number): void {
   void nowMs;
 }
 
-let last = performance.now();
+let last = platform.lifecycle.now();
 function loop(now: number): void {
   const dt = Math.min(50, now - last);
   last = now;
@@ -2221,6 +2224,6 @@ function loop(now: number): void {
   pollArenaPhase(now); // 阶段倒计时 / 场边红脉冲 / Death 定格恢复
   pollBattleResult(); // result 变化 → Ended 迁移 + 结果展示
   updateHud(); // 每帧读取 getBattleStatusSnapshot() → 顶部 A/B HP 实时
-  requestAnimationFrame(loop);
+  platform.lifecycle.requestAnimationFrame(loop);
 }
-requestAnimationFrame(loop);
+platform.lifecycle.requestAnimationFrame(loop);

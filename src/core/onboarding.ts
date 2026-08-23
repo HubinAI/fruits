@@ -11,6 +11,7 @@
  */
 import { loadPlayerBuild } from './buildPersistence';
 import { readJsonWithVersion, migrateLegacy, stampVersion } from './saveVersion';
+import { platform } from '../platform';
 
 export type OnboardingStage = 'pending' | 'done';
 
@@ -18,9 +19,8 @@ const STORAGE_KEY = 'strongfruit.onboarding.v1';
 
 /** 读引导状态：'pending' | 'done' | null（无标志）；旧格式经统一迁移 */
 export function loadOnboarding(): OnboardingStage | null {
-  if (typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = platform.storage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = readJsonWithVersion(raw);
     if (!parsed) return null;
@@ -35,9 +35,8 @@ export function loadOnboarding(): OnboardingStage | null {
 
 /** 写引导状态（附带 saveVersion 信封；隐私模式 / 配额失败静默忽略） */
 export function saveOnboarding(stage: OnboardingStage): void {
-  if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stampVersion({ stage })));
+    platform.storage.setItem(STORAGE_KEY, JSON.stringify(stampVersion({ stage })));
   } catch {
     // 写入失败静默忽略
   }
