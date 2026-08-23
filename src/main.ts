@@ -66,6 +66,13 @@ import {
 } from './player/opponentPool';
 import { loadPlayerBuild, savePlayerBuild } from './core/buildPersistence';
 import { track, battleEndGuard } from './core/analytics';
+import {
+  RewardedAdClaimer,
+  tryInterstitialSafe,
+  isRewardedAdAvailable,
+  REWARD_AD_COIN_BONUS,
+} from './core/ads';
+import { onBattleEnded, resetAdFrequency } from './core/adFrequency';
 import { computePlayerShellVisibility } from './ui/playerShell';
 
 const app = document.getElementById('app')!;
@@ -473,6 +480,11 @@ function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): vo
   } else {
     resultOnboard.style.display = 'none';
   }
+  // Q30：每场 Result 显示时重置 Rewarded 发奖锁与按钮态（同场只发一次；下一场重新可领）
+  rewardedClaimer.reset();
+  syncRewardAdButton();
+  // Q30：完整 Battle 结束 → 插屏频控计数 +1（在 battle_end 去重块内，每场只计一次）
+  onBattleEnded();
   // Q28：battle_end / reward_gain / rank_change —— 关键去重：同一 result 对象只触发一次，
   // 防止 Result 弹窗因每帧 pollBattleResult 重复触发（与 battleEndGuard.clear() @开战 配合）。
   if (battleEndGuard.firstTime(r)) {
@@ -524,11 +536,14 @@ function adjustConfig(): void {
   applyPlayerShell(); // Q21：重渲染 Dock——刚获得的部件已从锁定变为可装备
 }
 
-/** Ended 后玩家选择：下一场 → 走同一套 Matching（随机新对手）→ MatchPreview */
-function nextMatch(): void {
-  resultModal.style.display = 'none';
-  hudEl.style.display = 'none';
-  startMatching(); // 复用 Garage「寻找对手」同一状态链
+/** Ended 后玩家选择：下一场 → 走同一套 Matching（随机新对手）→ MatchPreview。
+ *  Q30：在「下一场」安全节点尝试 Interstitial；广告不可用/不合格/失败/无填充均不阻塞本流程。 */
+async function nextMatch(): Promise<void> {
+  await tryInterstitialSafe(() => {
+    resultModal.style.display = 'none';
+    hudEl.style.display = 'none';
+    startMatching(); // 复用 Garage「寻找对手」同一状态链
+  });
 }
 
 /* 结算卡按钮：下一场（主）/ 调整配置（次）—— Q15 玩家主循环闭环 */
@@ -549,6 +564,40 @@ btnRematch.className = 'primary'; // Q15：下一场为主 CTA
 btnRematch.textContent = '下一场';
 btnRematch.onclick = nextMatch;
 resultActions.appendChild(btnRematch);
+
+// Q30：Result 额外奖励（Rewarded 广告）——仅广告可用时显示；完整观看成功才发，关闭/失败不发。
+const btnRewardAd = document.createElement('button');
+btnRewardAd.className = 'secondary';
+btnRewardAd.textContent = `看广告领 ${REWARD_AD_COIN_BONUS} 金币`;
+btnRewardAd.onclick = async () => {
+  if (rewardAdClaimed) return; // 本场已领 → 直接拒绝
+  const out = await rewardedClaimer.claim();
+  if (out.granted) {
+    rewardAdClaimed = true;
+    btnRewardAd.textContent = `已领 +${REWARD_AD_COIN_BONUS}`;
+    btnRewardAd.disabled = true;
+    btnRewardAd.style.opacity = '0.6';
+    // 刷新当前金币展示（若经济区当前可见）
+    if (resultEconomy.style.display !== 'none') {
+      resultEconomy.innerHTML = resultEconomy.innerHTML.replace(
+        /当前金币 \d+/,
+        `当前金币 ${out.coinAfter ?? 0}`,
+      );
+    }
+  }
+  // 关闭 / 失败 / 无填充：不发奖，按钮保持可点（玩家可重试），绝不卡死
+};
+resultActions.appendChild(btnRewardAd);
+
+/** Q30：每场 Result 显示时同步 Rewarded 按钮可见性与可点态（无广告环境隐藏，游戏照常完整） */
+let rewardAdClaimed = false;
+function syncRewardAdButton(): void {
+  rewardAdClaimed = false;
+  btnRewardAd.disabled = false;
+  btnRewardAd.style.opacity = '';
+  btnRewardAd.textContent = `看广告领 ${REWARD_AD_COIN_BONUS} 金币`;
+  btnRewardAd.style.display = isRewardedAdAvailable() ? '' : 'none';
+}
 
 // W2-VIS-1：Sprite Visual Registry（首版无正式 Content 资源 → 全部 Collider graybox；
 // 后续 Content 队列经 register + 图片加载注入正式 sprite，Preview/Fighting 共用同一 runtime）
@@ -801,6 +850,8 @@ ensureInventory(draftA);
 const rewardSettler = new BattleRewardSettler();
 // Q23→Q24：每场 Battle 进度结算器（金币 + 段位；同场只结算一次，与 rewardSettler 同模式）
 const progressSettler = new BattleProgressSettler();
+// Q30：Rewarded 发奖器（以每场 result 引用为幂等键，同场只发一次额外奖励，关闭/失败不发）
+const rewardedClaimer = new RewardedAdClaimer();
 // Q26：首轮引导阶段（全新账号进入 pending，老存档直接 done；完成一次闭环后置 done 永久关闭）
 let onboardingStage: OnboardingStage = resolveOnboardingStage();
 // Q15：对手来自固定对手池（玩家不可编辑，仅 DEV 可临时改）
@@ -1550,6 +1601,7 @@ function renderGarageDock(): void {
     dev.onclick = () => {
       if (confirm('确认重置全部进度？此操作不可撤销，将恢复到新账号状态。')) {
         resetPlayerSave();
+        resetAdFrequency(); // Q30：频控一并恢复新账号态
         location.reload();
       }
     };

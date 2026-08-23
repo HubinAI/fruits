@@ -3,11 +3,14 @@
  *
  * - 持久化于 localStorage（与 partInventory 同模式：typeof localStorage 守卫 + 静默失败）；
  * - 不引入实例 UID、不新增 dependency；
- * - 不做商店 / 付费货币 / 多种资源 / 广告 / 动态价格 / 赛季 / 排行榜 / 晋级赛 / 隐藏分；
+ * - 不做商店 / 付费货币 / 多种资源 / 动态价格 / 赛季 / 排行榜 / 晋级赛 / 隐藏分；
  * - 结算为纯函数（可单测，不依赖 DOM）；运行时单例结算器以 result 引用为幂等键，同场只结算一次。
  *
- * 设计约束（来自 Queue 冻结项）：
- * - 金币只经 Battle 获得、只经 5合1 消耗；无其它来源/去处；
+ * 设计约束（来自 Queue 冻结项 + Q30 更新）：
+ * - 金币常规来源：Battle 获得（COIN_WIN/LOSE）、5合1 消耗（MERGE_COST_COIN）；
+ * - Q30 新增唯一额外来源：IAA 广告激励（`addCoins`，仅 Rewarded 完整观看后由 ads 层发放，非 Gameplay 数值）；
+ * - 段位只随胜负变化，最低 0；不细分小段；
+ * - 难度 / 抽取逻辑在 opponentPool（Q25），本模块不涉对手。
  * - 段位只随胜负变化，最低 0；不细分小段；
  * - 难度 / 抽取逻辑在 opponentPool（Q25），本模块不涉对手。
  */
@@ -144,6 +147,22 @@ export class BattleProgressSettler {
 /** 合成金币门槛校验（纯函数） */
 export function canAffordMerge(coin: number): boolean {
   return coin >= MERGE_COST_COIN;
+}
+
+/**
+ * Q30｜IAA 广告激励金币（唯一新增金币来源，独立于 Battle / 合成）。
+ * - 不修改段位；
+ * - 金币下限 0（防溢出为负）；
+ * - 不落盘之外的副作用（saveProgress 内部已静默失败保护）。
+ */
+export function addCoins(amount: number): ProgressState {
+  const before = getProgress();
+  const after: ProgressState = {
+    ...before,
+    coin: Math.max(0, before.coin + Math.floor(amount)),
+  };
+  saveProgress(after);
+  return after;
 }
 
 /** 合成 + 扣费结果（纯函数，可单测；不读写存储） */
