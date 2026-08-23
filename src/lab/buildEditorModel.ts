@@ -71,6 +71,12 @@ export interface BuildDraft {
    * 缺省 undefined = 前进（旧 localStorage 自动按前进处理）。
    */
   drive?: DriveMode;
+  /**
+   * Q22｜各 Functional 槽位的星级（V0.5 部件成长）。key = hardpointId；
+   * 值 = 1（基础）或 2（由 5×1★ 合成）。缺省 undefined = 全部 1★（旧 Build / 对手兼容）。
+   * 不引入实例 UID：星级只描述 Build 装配选择，库存副本数由 partInventory 单独记录。
+   */
+  functionalStars?: Record<string, number>;
 }
 
 /** 当前 Body 的可编辑 Functional 槽位（真实硬点 id，顺序同 BodyDef） */
@@ -135,7 +141,14 @@ export function buildSnapshotFromDraft(
   )
     .filter(([, defId]) => defId && defId !== EMPTY_SLOT)
     .filter(([hardpointId]) => validHardpoints.has(hardpointId))
-    .map(([hardpointId, defId]) => ({ hardpointId, defId }));
+    .map(([hardpointId, defId]) => ({
+      hardpointId,
+      defId,
+      // Q22：注入该槽位的星级。缺省/1★ 不写字段（保持旧 Build 兼容），倍率层在 resolveSnapshot 用 ?? 1 处理
+      ...(draft.functionalStars?.[hardpointId] && draft.functionalStars[hardpointId] > 1
+        ? { star: draft.functionalStars[hardpointId] }
+        : {}),
+    }));
 
   return {
     id,

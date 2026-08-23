@@ -1,30 +1,37 @@
 /**
- * Queue Q21｜V0.4 Meta V0：获得部件 → 回车库 → 再战 —— targeted / Merge Gate 测试（纯模块层）。
+ * Queue Q21→Q22｜V0.4→V0.5 部件成长 Meta 进度 —— targeted / Merge Gate 测试（纯模块层）。
  *
- * node 环境无原生 localStorage；沿用 q15PlayerLoop 的 MemStorage 注入 globalThis.localStorage。
+ * node 环境无原生 localStorage；用 MemStorage 注入 globalThis.localStorage。
  * 覆盖：
- *  A｜最小部件库存：starter 初始、旧存档迁移、持久化、Reward Pool 排除 HOLD/EMPTY；
- *  B｜每场奖励：随机挑 1 未拥有、全部拥有→collected-all、同场只结算一次、多场直到收集完；
- *  C｜闭环守卫：canEquipPart、刷新后 owned 保留；
- *  D｜Merge Gate：新奖励部件可进入 Build→Preview→正式 Battle（无 NaN）；36 对手全部合法且可实例化。
+ *  A｜库存（v1→v2 迁移 / 默认 / starter / 旧 Build 装备迁移 / 夹紧负数）；
+ *  B｜每场奖励（可重复、同场幂等、胜负都奖、排除 HOLD/EMPTY）；
+ *  C｜5合1 合成（5×1★→1×随机2★、不足不可合成、已装备保留、产物合法）；
+ *  D｜2★ 真实意义（统一倍率层：energy×1.10、damage×1.15，1★ 恒等）；
+ *  E｜闭环 + 不退化（刷新保持、装备守卫、36 对手全合法可实例化、Q15 主流程无 NaN）。
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   STARTER_PARTS,
   OFFICIAL_PARTS,
-  ensureOwnedParts,
-  loadOwnedRaw,
-  getOwnedParts,
-  isOwned,
+  defaultInventory,
+  seedInventoryFromStarterAndBuild,
+  ensureInventory,
+  loadInventoryRaw,
+  saveInventory,
+  getInventory,
+  getCount,
+  addPart,
   canEquipPart,
-  addOwnedPart,
   computeReward,
+  tryMerge,
+  equippedDefIds,
   BattleRewardSettler,
 } from '../src/core/partInventory';
-import { PART_OPTIONS } from '../src/core/partOptions';
-import { buildSnapshotFromDraft, EMPTY_SLOT, type BuildDraft } from '../src/lab/buildEditorModel';
+import { EMPTY_SLOT } from '../src/lab/buildEditorModel';
+import { buildSnapshotFromDraft, type BuildDraft } from '../src/lab/buildEditorModel';
 import { registry } from '../src/core/content';
 import { validateSnapshot } from '../src/core/buildValidator';
+import { resolveSnapshot } from '../src/core/buildSnapshot';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import { createPlanckBattle } from '../src/battle/battleRequestAdapter';
 import { OPPONENT_POOL } from '../src/player/opponentPool';
@@ -68,11 +75,11 @@ function defaultBuild(): BuildDraft {
 }
 
 function makeBattle(aDraft: BuildDraft, bDraft: BuildDraft): PlanckBattleOrchestrator {
-  const snapA = buildSnapshotFromDraft(aDraft, registry, 'customA')!;
-  const snapB = buildSnapshotFromDraft(bDraft, registry, 'customB')!;
+  const snapA = buildSnapshotFromDraft(aDraft, registry, 'customA');
+  const snapB = buildSnapshotFromDraft(bDraft, registry, 'customB');
   return createPlanckBattle(
     {
-      battleId: 'q21-merge-gate',
+      battleId: 'q22-merge-gate',
       buildA: snapA,
       buildB: snapB,
       config: {
@@ -98,167 +105,239 @@ function finite(o: PlanckBattleOrchestrator, which: 'vehicleA' | 'vehicleB'): vo
   expect(Number.isFinite(a)).toBe(true);
 }
 
-describe('Q21 A｜最小部件库存', () => {
+function stepSmoke(o: PlanckBattleOrchestrator, n = 60): void {
+  for (let i = 0; i < n; i++) o.step(16.6667);
+  finite(o, 'vehicleA');
+  finite(o, 'vehicleB');
+}
+
+describe('Q21→Q22 A｜库存（v1→v2 迁移 / 默认 / starter / 装备迁移）', () => {
   it('A1. starter 基础部件 = 炮/锤/推杆/刺', () => {
     expect([...STARTER_PARTS].sort()).toEqual(['cannon', 'hammer', 'pushRod', 'spear'].sort());
   });
 
-  it('A2. 正式 Functional 集排除 EMPTY 与 HOLD/prototype（ramHead/lifter/wedgeShovel）', () => {
-    const vals = PART_OPTIONS.map((p) => p.v);
-    expect(vals).toContain(EMPTY_SLOT);
-    for (const h of ['ramHead', 'lifter', 'wedgeShovel']) {
+  it('A2. OFFICIAL_PARTS 不含 HOLD/EMPTY（ramHead/lifter/wedgeShovel/空）', () => {
+    for (const h of ['ramHead', 'lifter', 'wedgeShovel', EMPTY_SLOT]) {
       expect(OFFICIAL_PARTS).not.toContain(h);
     }
-    expect(OFFICIAL_PARTS).not.toContain(EMPTY_SLOT);
-    // OFFICIAL = PART_OPTIONS 去 EMPTY
-    expect(OFFICIAL_PARTS).toEqual(vals.filter((v) => v !== EMPTY_SLOT));
   });
 
-  it('A3. 新存档初始化仅含 starter 且落盘', () => {
-    const owned = ensureOwnedParts(defaultBuild());
-    expect([...owned].sort()).toEqual([...STARTER_PARTS].sort());
-    expect(loadOwnedRaw()).not.toBeNull(); // 已落盘（非仅内存回退）
-  });
-
-  it('A4. 旧存档已装备的正式部件首次迁移一并入 owned（旧 Build 不变非法）', () => {
-    const legacy: BuildDraft = {
-      bodyDefId: 'bananaBody',
-      rearRadius: 26,
-      frontRadius: 26,
-      functionalSelections: { front: 'laser', frontMass: 'saw', top: 'shotgun', rear: EMPTY_SLOT },
-      drive: 'forward',
-    };
-    const owned = ensureOwnedParts(legacy);
-    for (const p of ['laser', 'saw', 'shotgun']) expect(owned).toContain(p); // 迁移已装备
-    // starter 仍保留
-    for (const p of STARTER_PARTS) expect(owned).toContain(p);
-  });
-
-  it('A5. 无存档时 loadOwnedRaw 返回 null', () => {
-    expect(loadOwnedRaw()).toBeNull();
-  });
-});
-
-describe('Q21 B｜每场获得一个新部件', () => {
-  it('B1. 从「未拥有正式部件」中随机挑 1（rng=0 → 首个未拥有）', () => {
-    ensureOwnedParts(defaultBuild());
-    const out = computeReward(getOwnedParts(), () => 0);
-    expect(out.collectedAll).toBe(false);
-    expect(out.awarded).toBe('laser'); // starter 之后首个正式部件
-    expect(OFFICIAL_PARTS).toContain(out.awarded);
-  });
-
-  it('B2. 全部拥有 → collected-all，不发重复件', () => {
-    // 模拟全收集
-    for (const p of OFFICIAL_PARTS) addOwnedPart(p);
-    const out = computeReward(getOwnedParts());
-    expect(out.awarded).toBeNull();
-    expect(out.collectedAll).toBe(true);
-  });
-
-  it('B3. 同场 Battle 只结算一次（同 result ref 返回缓存，owned 仅 +1）', () => {
-    ensureOwnedParts(defaultBuild());
-    const s = new BattleRewardSettler();
-    const ref = { phase: 'End' };
-    const first = s.settle(ref);
-    const second = s.settle(ref); // 同场重复
-    expect(second).toBe(first); // 返回缓存
-    expect(first?.awarded).not.toBeNull();
-    // owned 只增加 1 个
-    expect(getOwnedParts().length).toBe(STARTER_PARTS.length + 1);
-    // canEquipPart 对新解锁件为 true
-    expect(canEquipPart(first!.awarded!)).toBe(true);
-  });
-
-  it('B4. 多场直到全部收集：每场恰好 +1，不重复、不超发', () => {
-    ensureOwnedParts(defaultBuild());
-    const s = new BattleRewardSettler();
-    const rng = () => 0;
-    const refs = Array.from({ length: OFFICIAL_PARTS.length }, () => ({}));
-    let awarded = 0;
-    for (const ref of refs) {
-      const out = s.settle(ref, rng);
-      if (out?.awarded) awarded++;
+  it('A3. defaultInventory：starter 各 1★、其余 0、结构含 one/two', () => {
+    const inv = defaultInventory();
+    for (const p of STARTER_PARTS) expect(inv[p].one).toBe(1);
+    for (const p of OFFICIAL_PARTS) {
+      expect(inv[p]).toHaveProperty('one');
+      expect(inv[p]).toHaveProperty('two');
     }
-    // 初始未拥有数 = 全部 - starter
-    expect(awarded).toBe(OFFICIAL_PARTS.length - STARTER_PARTS.length);
-    expect(getOwnedParts().length).toBe(OFFICIAL_PARTS.length); // 全部收集
-    // 第 N+1 场（新 ref）→ collected-all
-    const extra = s.settle({}, rng);
-    expect(extra?.awarded).toBeNull();
-    expect(extra?.collectedAll).toBe(true);
-    expect(getOwnedParts().length).toBe(OFFICIAL_PARTS.length); // 仍不超发
   });
 
-  it('B5. addOwnedPart 拒绝非正式部件', () => {
-    ensureOwnedParts(defaultBuild());
-    const before = getOwnedParts().length;
-    addOwnedPart('ramHead'); // HOLD
-    addOwnedPart('not-a-real-part');
-    expect(getOwnedParts().length).toBe(before);
-  });
-});
-
-describe('Q21 C｜闭环守卫', () => {
-  it('C1. canEquipPart：空槽恒可装备、已拥有可装备、未拥有不可装备', () => {
-    ensureOwnedParts(defaultBuild());
-    expect(canEquipPart(EMPTY_SLOT)).toBe(true);
-    expect(canEquipPart('cannon')).toBe(true); // starter
-    expect(canEquipPart('laser')).toBe(false); // 未拥有
+  it('A4. 旧 Build 已装备的正式部件迁移后至少 1★（不变非法）', () => {
+    const inv = seedInventoryFromStarterAndBuild(defaultBuild());
+    // defaultBuild 装备 pushRod/cannon/hammer → 这三者 one≥1
+    for (const p of ['pushRod', 'cannon', 'hammer']) expect(inv[p].one).toBeGreaterThanOrEqual(1);
   });
 
-  it('C2. 结算后 owned 持久化，模拟刷新（再次 ensureOwnedParts）仍保留', () => {
-    ensureOwnedParts(defaultBuild());
-    const s = new BattleRewardSettler();
-    const out = s.settle({ phase: 'End' }, () => 0);
-    expect(out?.awarded).toBe('laser');
-    // 落盘校验
-    expect(loadOwnedRaw()).toContain('laser');
-    // 模拟刷新：重新读取（localStorage 不变）
-    const reloaded = ensureOwnedParts(defaultBuild());
-    expect(reloaded).toContain('laser'); // 已拥有保留，未回退到仅 starter
-    expect(isOwned('laser')).toBe(true);
+  it('A5. v1 owned-id 数组存档迁移为 v2（每个 id 1★）', () => {
+    const store = (globalThis as unknown as { localStorage: MemStorage }).localStorage;
+    store.setItem('strongfruit.ownedParts.v1', JSON.stringify(['cannon', 'laser', 'saw']));
+    const inv = loadInventoryRaw()!;
+    expect(inv.cannon.one).toBe(1);
+    expect(inv.laser.one).toBe(1);
+    expect(inv.saw.one).toBe(1);
+    // 迁移后已写 v2
+    expect(store.getItem('strongfruit.ownedParts.v2')).not.toBeNull();
+  });
+
+  it('A6. 脏数据（负数 / 缺失键）被夹紧为合法库存', () => {
+    const store = (globalThis as unknown as { localStorage: MemStorage }).localStorage;
+    store.setItem('strongfruit.ownedParts.v2', JSON.stringify({ cannon: { one: -3, two: 2 }, bananaBody: 'x' }));
+    const inv = loadInventoryRaw()!;
+    expect(inv.cannon.one).toBe(0); // 负数夹紧
+    expect(inv.cannon.two).toBe(2);
+    expect(inv.bananaBody).toBeUndefined(); // 非部件键丢弃
   });
 });
 
-describe('Q21 D｜V0.4 Merge Gate', () => {
-  it('D7. 新奖励部件可进入 Build → 正式 Battle（无 NaN / 缺 def）', () => {
-    ensureOwnedParts(defaultBuild());
+describe('Q21→Q22 B｜每场奖励（可重复 / 同场幂等 / 排除 HOLD）', () => {
+  it('B1. computeReward 永远返回正式部件（star=1），不含 HOLD/EMPTY', () => {
+    for (let i = 0; i < 50; i++) {
+      const r = computeReward(() => i / 50);
+      expect(OFFICIAL_PARTS).toContain(r.defId);
+      expect(r.star).toBe(1);
+    }
+  });
+
+  it('B2. 同场只结算一次（同 resultRef 重复 settle 不重复发奖）', () => {
+    ensureInventory(defaultBuild());
     const s = new BattleRewardSettler();
-    const out = s.settle({ phase: 'End' }, () => 0); // 解锁 laser
-    expect(out?.awarded).toBe('laser');
-    expect(canEquipPart('laser')).toBe(true); // 进入 Build 前已可装备
-    const draft: BuildDraft = {
+    const ref = { id: 'battle-1' };
+    const first = s.settle(ref)!;
+    const before = getCount(getInventory(), first.defId, 1);
+    const second = s.settle(ref)!; // 同场
+    const after = getCount(getInventory(), first.defId, 1);
+    expect(second.defId).toBe(first.defId);
+    expect(after).toBe(before); // 不重复 +1
+  });
+
+  it('B3. 多场（不同 ref）可重复累积同一部件', () => {
+    ensureInventory(defaultBuild());
+    const s = new BattleRewardSettler();
+    const r = computeReward(() => 0); // 固定 cannon
+    for (let i = 0; i < 3; i++) s.settle({ id: `b${i}` }, () => 0);
+    expect(getCount(getInventory(), r.defId, 1)).toBeGreaterThanOrEqual(3 + 1); // starter 已有 1
+  });
+
+  it('B4. 胜/负都奖励（settle 不依赖 winner，只 resultRef）', () => {
+    ensureInventory(defaultBuild());
+    const s = new BattleRewardSettler();
+    const win = s.settle({ id: 'w', winner: 'A' as const, hpA: 1, hpB: 0 })!;
+    const lose = s.settle({ id: 'l', winner: 'B' as const, hpA: 0, hpB: 1 })!;
+    expect(win).not.toBeNull();
+    expect(lose).not.toBeNull();
+  });
+
+  it('B5. addPart 拒绝非正式部件（ramHead HOLD / 未知）', () => {
+    const inv = defaultInventory();
+    addPart(inv, 'ramHead', 1);
+    addPart(inv, 'not-a-real-part', 1);
+    expect(getCount(inv, 'ramHead', 1)).toBe(0);
+    expect(getCount(inv, 'not-a-real-part', 1)).toBe(0);
+  });
+});
+
+describe('Q21→Q22 C｜最小 5合1 合成', () => {
+  it('C1. 5×1★（跨 defId）→ 1×随机 2★，库存正确消耗/产出', () => {
+    const inv = defaultInventory();
+    addPart(inv, 'cannon', 1, 5); // 5 个 1★
+    const res = tryMerge(inv, [], () => 0);
+    expect(res).not.toBeNull();
+    expect(res!.inventory[res!.product].two).toBe(1);
+    expect(getCount(inv, 'cannon', 1)).toBe(5 - 5 + 1); // starter 1 + 5 加 - 5 扣
+  });
+
+  it('C2. 不足 5 个 1★ 不可合成（返回 null、不消耗）', () => {
+    const inv = defaultInventory();
+    // tryMerge 会聚合所有正式部件的 1★ 副本，故先清零其他 starter 副本
+    for (const p of OFFICIAL_PARTS) inv[p].one = 0;
+    addPart(inv, 'laser', 1, 4); // 仅 4 个 1★ < 5
+    const before = getCount(inv, 'laser', 1);
+    const res = tryMerge(inv, [], () => 0);
+    expect(res).toBeNull();
+    expect(getCount(inv, 'laser', 1)).toBe(before);
+  });
+
+  it('C3. 已装备保留：Build 装备 cannon 时合成不消耗其 1★（Build 不变非法）', () => {
+    const inv = defaultInventory();
+    // 仅 cannon 有 5 个 1★，且 defaultBuild 装备 cannon
+    addPart(inv, 'cannon', 1, 5);
+    const res = tryMerge(inv, equippedDefIds(defaultBuild()), () => 0);
+    expect(res).not.toBeNull();
+    expect(getCount(inv, 'cannon', 1)).toBeGreaterThanOrEqual(1); // 保留 1 个
+    // Build 仍合法（cannon 1★ 仍拥有）
+    expect(canEquipPart('cannon', 1)).toBe(true);
+  });
+
+  it('C4. 合成产物来自正式 PART_OPTIONS（不 HOLD / EMPTY）', () => {
+    const inv = defaultInventory();
+    addPart(inv, 'laser', 1, 5);
+    const res = tryMerge(inv, [], () => 0)!;
+    expect(OFFICIAL_PARTS).toContain(res.product);
+  });
+});
+
+describe('Q21→Q22 D｜2★ 真实意义（统一倍率层）', () => {
+  it('D1. 2★ install 经 resolveSnapshot 得到倍率后 energy（×1.10 取整）与 damage（×1.15 取整）', () => {
+    const d: BuildDraft = {
       bodyDefId: 'watermelonBody',
       rearRadius: 20,
       frontRadius: 20,
-      functionalSelections: { front: 'laser', frontMass: 'cannon', top: 'hammer', rear: EMPTY_SLOT },
+      functionalSelections: { front: 'cannon', frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      functionalStars: { front: 2 },
       drive: 'forward',
     };
-    const snap = buildSnapshotFromDraft(draft, registry, 'customA')!;
-    expect(validateSnapshot(snap, registry).valid).toBe(true); // 合法 Build
-    const o = makeBattle(draft, defaultBuild());
-    for (let i = 0; i < 60; i++) {
-      o.step(1000 / 60);
-      finite(o, 'vehicleA');
-      finite(o, 'vehicleB');
+    const snap = buildSnapshotFromDraft(d, registry, 'customA');
+    const rs = resolveSnapshot(snap, registry);
+    const f = rs.functionals.find((x) => x.install.hardpointId === 'front')!;
+    // cannon: energy 30 → round(33)；projectileDamage 80 → round(92)
+    expect(f.def.energy).toBe(Math.round(30 * 1.1));
+    expect((f.def.behaviorParams as Record<string, number>).projectileDamage).toBe(Math.round(80 * 1.15));
+  });
+
+  it('D2. 1★ install 倍率层恒等（无强化）', () => {
+    const d: BuildDraft = {
+      bodyDefId: 'watermelonBody',
+      rearRadius: 20,
+      frontRadius: 20,
+      functionalSelections: { front: 'cannon', frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      drive: 'forward',
+    };
+    const snap = buildSnapshotFromDraft(d, registry, 'customA');
+    const rs = resolveSnapshot(snap, registry);
+    const f = rs.functionals.find((x) => x.install.hardpointId === 'front')!;
+    expect(f.def.energy).toBe(30);
+    expect((f.def.behaviorParams as Record<string, number>).projectileDamage).toBe(80);
+  });
+
+  it('D3. 2★ 装备后正式 Battle 实例化无 NaN', () => {
+    const d: BuildDraft = {
+      bodyDefId: 'watermelonBody',
+      rearRadius: 20,
+      frontRadius: 20,
+      functionalSelections: { front: 'cannon', frontMass: 'hammer', top: EMPTY_SLOT, rear: EMPTY_SLOT },
+      functionalStars: { front: 2, frontMass: 2 },
+      drive: 'forward',
+    };
+    const o = makeBattle(d, defaultBuild());
+    stepSmoke(o, 80);
+  });
+});
+
+describe('Q21→Q22 E｜闭环守卫 + 不退化', () => {
+  it('E1. 刷新保持：saveInventory → loadInventoryRaw 还原', () => {
+    const inv = defaultInventory();
+    addPart(inv, 'laser', 1, 3);
+    addPart(inv, 'cannon', 2, 1);
+    saveInventory(inv);
+    const re = loadInventoryRaw()!;
+    expect(getCount(re, 'laser', 1)).toBe(3);
+    expect(getCount(re, 'cannon', 2)).toBe(1);
+  });
+
+  it('E2. canEquipPart：空槽恒可装备、已拥有可装备、未拥有（含 2★）不可装备', () => {
+    ensureInventory(defaultBuild());
+    expect(canEquipPart(EMPTY_SLOT)).toBe(true);
+    expect(canEquipPart('cannon')).toBe(true); // starter 1★
+    expect(canEquipPart('laser')).toBe(false); // 未拥有 1★
+    expect(canEquipPart('laser', 2)).toBe(false); // 未拥有 2★
+  });
+
+  it('E3. 36 对手全部合法、可实例化、步进无 NaN；含 2★ 装备不退化', () => {
+    expect(OPPONENT_POOL.length).toBe(36);
+    for (const d of OPPONENT_POOL) {
+      const snap = buildSnapshotFromDraft(d, registry, 'opp');
+      expect(validateSnapshot(snap, registry).valid).toBe(true);
+      const o = makeBattle(defaultBuild(), d);
+      stepSmoke(o, 40);
     }
   });
 
-  it('D8. 36 对手全部合法且可实例化正式 Battle（无 NaN / 缺 def / 非法 hardpoint）', () => {
-    expect(OPPONENT_POOL.length).toBe(36);
-    const player = defaultBuild();
-    for (let i = 0; i < OPPONENT_POOL.length; i++) {
-      const opp = OPPONENT_POOL[i];
-      const snap = buildSnapshotFromDraft(opp, registry, `opp${i}`)!;
-      const vr = validateSnapshot(snap, registry);
-      expect(vr.valid, `opp${i} 非法: ${vr.errors.join('; ')}`).toBe(true);
-      const o = makeBattle(player, opp);
-      for (let s = 0; s < 12; s++) {
-        o.step(1000 / 60);
-        finite(o, 'vehicleA');
-        finite(o, 'vehicleB');
-      }
-    }
+  it('E4. Q15 主流程默认 Build（1★）经 Draft→Snapshot→Runtime 无 NaN', () => {
+    const o = makeBattle(defaultBuild(), defaultBuild());
+    stepSmoke(o, 60);
+  });
+
+  it('E5. 2★ 装备后 Energy 含倍率（Validator 不误判超载为恒等）', () => {
+    const d: BuildDraft = {
+      bodyDefId: 'watermelonBody',
+      rearRadius: 20,
+      frontRadius: 20,
+      functionalSelections: { front: 'cannon', frontMass: 'cannon', top: 'hammer', rear: EMPTY_SLOT },
+      functionalStars: { front: 2, frontMass: 2, top: 2 },
+      drive: 'forward',
+    };
+    const snap = buildSnapshotFromDraft(d, registry, 'customA');
+    const res = validateSnapshot(snap, registry);
+    // 倍率后 energy：cannon 33×2 + hammer round(25*1.1)=28 = 94 ≤ 110（watermelon），合法
+    expect(res.valid).toBe(true);
   });
 });

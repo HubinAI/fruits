@@ -14,6 +14,50 @@ import type {
   WheelDef,
 } from './types';
 
+/**
+ * Q22｜星级统一倍率层（V0.5 部件成长）。
+ * 仅做一次统一倍率，不在每个 Weapon 内单独打补丁：
+ * - 能量统一约 +10%（取整数）；
+ * - 伤害类数值（behaviorParams 中字段名含 'damage' 的数值）统一约 +15%（取整数）。
+ * 物理几何 / 攻击节奏 / 射程 / 特殊机制不变。
+ * 倍率后值在 buildSnapshotFromDraft 注入 install.star、resolveSnapshot 解析时应用，
+ * 使 Runtime 拿到的 def 已是强化后值，零改 Runtime / Contact / Weapon 代码。
+ */
+export const STAR_TIER_ENERGY_MULT = 1.1;
+export const STAR_TIER_DAMAGE_MULT = 1.15;
+
+/** 星级能量倍率（star<=1 恒等） */
+export function starTierEnergy(base: number, star: number | undefined): number {
+  if (!star || star <= 1) return base;
+  return Math.round(base * STAR_TIER_ENERGY_MULT);
+}
+
+/** 星级伤害倍率（star<=1 恒等） */
+export function starTierDamage(base: number, star: number | undefined): number {
+  if (!star || star <= 1) return base;
+  return Math.round(base * STAR_TIER_DAMAGE_MULT);
+}
+
+/** 字段名是否属「伤害类数值」（统一倍率目标） */
+function isDamageKey(k: string): boolean {
+  return /damage/i.test(k);
+}
+
+/** 应用星级倍率，返回倍率后的 def 副本（star<=1 直接返回原 def，零 clone 开销） */
+export function applyStarTier(def: FunctionalPartDef, star: number | undefined): FunctionalPartDef {
+  if (!star || star <= 1) return def;
+  const energy = starTierEnergy(def.energy, star);
+  let behaviorParams = def.behaviorParams;
+  if (behaviorParams) {
+    const next: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(behaviorParams)) {
+      next[k] = typeof v === 'number' && isDamageKey(k) ? starTierDamage(v, star) : v;
+    }
+    behaviorParams = next;
+  }
+  return { ...def, energy, behaviorParams };
+}
+
 /** 解析后的 Movement 安装（含展开定义） */
 export interface ResolvedMovement {
   install: MovementInstall;
@@ -88,7 +132,8 @@ export function resolveSnapshot(
     if (!def) {
       throw new Error(`ResolveSnapshot: unknown functional "${install.defId}"`);
     }
-    return { install, hardpoint, def };
+    // Q22：应用星级统一倍率（star<=1 恒等），Runtime 拿到强化后 def
+    return { install, hardpoint, def: applyStarTier(def, install.star ?? 1) };
   });
 
   const totalMass =

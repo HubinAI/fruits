@@ -17,7 +17,7 @@ import type {
   FunctionalInstall,
   ValidationResult,
 } from './types';
-import { energyAfterReplace } from './buildSnapshot';
+import { energyAfterReplace, starTierEnergy } from './buildSnapshot';
 
 function fail(message: string): ValidationResult {
   return { valid: false, errors: [message] };
@@ -36,7 +36,8 @@ export function computeEnergy(
   for (const install of snapshot.functionals) {
     const def = registry.functionals.get(install.defId);
     if (!def) return { energy, error: `未知功能部件 "${install.defId}"` };
-    energy += def.energy;
+    // Q22：能量含星级倍率（star<=1 恒等），否则 2★ 超载检测失效
+    energy += starTierEnergy(def.energy, install.star ?? 1);
   }
   return { energy };
 }
@@ -145,10 +146,18 @@ export function validateFunctionalInstall(
 
   const currentEnergy = computeEnergy(snapshot, registry).energy;
   const replacedEnergy = existing
-    ? (registry.functionals.get(existing.defId)?.energy ?? 0)
+    ? starTierEnergy(
+        registry.functionals.get(existing.defId)?.energy ?? 0,
+        existing.star ?? 1,
+      )
     : 0;
 
-  const nextEnergy = energyAfterReplace(currentEnergy, replacedEnergy, def.energy);
+  // Q22：安装部件的能量也含星级倍率
+  const nextEnergy = energyAfterReplace(
+    currentEnergy,
+    replacedEnergy,
+    starTierEnergy(def.energy, install.star ?? 1),
+  );
   if (nextEnergy > body.energyCapacity) {
     return fail(
       `能量超载：安装后 ${nextEnergy} > 容量 ${body.energyCapacity}`,

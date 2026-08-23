@@ -68,5 +68,13 @@ function isBuildDraftShape(d: unknown): d is BuildDraft {
     if (typeof v !== 'string') return false;
     if (v !== EMPTY_SLOT && !KNOWN_FUNCTIONALS.has(v)) return false;
   }
+  // Q22：functionalStars 可选（各槽星级 1/2）；缺省视为全 1★
+  if (o.functionalStars !== undefined) {
+    if (typeof o.functionalStars !== 'object' || o.functionalStars === null) return false;
+    const stars = o.functionalStars as Record<string, unknown>;
+    for (const v of Object.values(stars)) {
+      if (typeof v !== 'number' || (v !== 1 && v !== 2)) return false;
+    }
+  }
   return true;
 }

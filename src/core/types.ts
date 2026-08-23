@@ -148,6 +148,13 @@ export interface MovementInstall {
 export interface FunctionalInstall {
   hardpointId: string;
   defId: string;
+  /**
+   * Q22｜星级（V0.5 部件成长）。1 = 基础；2 = 由 5×1★ 合成的高星。
+   * 缺省 undefined = 1★（旧 Build / 对手 / 旧存档兼容）。
+   * 倍率层在 buildSnapshot.ts 的 applyStarTier 统一接入（damage ×1.15、energy ×1.10，取整），
+   * 不在每个 Weapon 内单独打补丁。
+   */
+  star?: number;
 }
 
 /**
