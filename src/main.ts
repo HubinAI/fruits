@@ -86,7 +86,9 @@ import {
 } from './core/ads';
 import { onBattleEnded, resetAdFrequency } from './core/adFrequency';
 // F-WX-3：玩家 UI 唯一 Host 边界（Web DOM 实现）与平台中立类型
+// F-WX-4：CanvasPlayerUIHost（同一 State/Action，?canvasui=1 独立切换测试）
 import { WebDomPlayerUIHost } from './ui/webDomPlayerUIHost';
+import { CanvasPlayerUIHost } from './ui/canvasPlayerUIHost';
 import {
   BODY_OPTIONS,
   WHEEL_OPTIONS,
@@ -99,6 +101,7 @@ import type {
   PlayerPhase,
   PlayerUIState,
   PlayerUIActions,
+  PlayerUIHost,
 } from './ui/playerUI';
 // Q22：V0.5 部件库存（数量化 + 星级 + 合成）
 import {
@@ -504,8 +507,12 @@ for (const [visualId, url] of SILHOUETTE_ASSETS) {
   img.src = url;
 }
 
-/* ---------- F-WX-3：玩家 UI 唯一 Host 边界（Web DOM 实现；挂到主画布容器） ---------- */
-const host = new WebDomPlayerUIHost();
+/* ---------- F-WX-3/4：玩家 UI 唯一 Host 边界（挂到主画布容器）。
+ * 默认 WebDomPlayerUIHost；?canvasui=1 独立切换 CanvasPlayerUIHost（同一 State/Action）。 */
+const canvasUiMode = new URLSearchParams(location.search).has('canvasui');
+const host: PlayerUIHost = canvasUiMode
+  ? new CanvasPlayerUIHost(document.createElement('canvas'))
+  : new WebDomPlayerUIHost();
 host.mount(canvasWrap);
 
 /* ---------- 稳定取景（Q02-CAM-R1）：只在 load / Reset / resize 时构图一次 ---------- */

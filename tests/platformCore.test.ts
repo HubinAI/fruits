@@ -157,6 +157,41 @@ describe('F-WX-2 Platform Core', () => {
     expect(() => wxInput.bindClick(el, () => {})).not.toThrow();
   });
 
+  it('PlatformInput：Web bindPointer 把 client 坐标换算为元素本地坐标', () => {
+    const web = new WebInput();
+    const listeners = new Map<string, (ev: unknown) => void>();
+    const el: any = {
+      addEventListener: (ev: string, fn: (ev: unknown) => void) => listeners.set(ev, fn),
+      getBoundingClientRect: () => ({ left: 10, top: 20 }),
+    };
+    let got: [number, number] | null = null;
+    web.bindPointer(el, (x, y) => {
+      got = [x, y];
+    });
+    // 模拟 pointerdown：clientX=110, clientY=220 → 本地 (100, 200)
+    listeners.get('pointerdown')!({ clientX: 110, clientY: 220 });
+    expect(got).toEqual([100, 200]);
+    // 模拟 touchstart：touches[0]
+    listeners.get('touchstart')!({ touches: [{ clientX: 55, clientY: 70 }] });
+    expect(got).toEqual([45, 50]);
+  });
+
+  it('PlatformInput：WeChat bindPointer 经 wx.onTouchStart 回传坐标', () => {
+    let onTouch: ((e: unknown) => void) | null = null;
+    (globalThis as Record<string, unknown>).wx = {
+      onTouchStart: (cb: (e: unknown) => void) => {
+        onTouch = cb;
+      },
+    };
+    const wxInput = new WechatInput();
+    let got: [number, number] | null = null;
+    wxInput.bindPointer({} as EventTarget, (x, y) => {
+      got = [x, y];
+    });
+    onTouch!({ touches: [{ clientX: 320, clientY: 240 }] });
+    expect(got).toEqual([320, 240]);
+  });
+
   it('createWebCore / createWechatCore 组装合法 PlatformCore', () => {
     const web = createWebCore();
     expect(typeof web.storage.getItem).toBe('function');

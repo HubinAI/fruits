@@ -40,10 +40,16 @@ export interface PlatformViewport {
   onResize(cb: () => void): void;
 }
 
-// —— Input（UI 事件抽象；微信无 DOM UI → no-op）——
+// —— Input（UI 事件抽象；微信无 DOM UI → bindClick no-op，bindPointer 走 wx 触摸）——
 export interface PlatformInput {
-  /** 绑定 UI 元素点击事件；微信侧安全忽略（待 Player UI 移植队列） */
+  /** 绑定 UI 元素点击事件；微信侧安全忽略（Player UI 未移植 DOM） */
   bindClick(el: EventTarget, handler: () => void): void;
+  /**
+   * Canvas 命中输入：绑定指针/触摸按下，回调元素本地坐标（CSS px，相对元素左上角）。
+   * Web=pointerdown/mousedown/touchstart + getBoundingClientRect；
+   * 微信=wx.onTouchStart（clientX/clientY）。F-WX-4 CanvasPlayerUIHost 唯一输入入口。
+   */
+  bindPointer(target: EventTarget, handler: (x: number, y: number) => void): void;
 }
 
 // —— 聚合 ——
