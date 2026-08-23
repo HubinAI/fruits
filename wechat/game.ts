@@ -1,31 +1,37 @@
 /**
- * F-WX-1｜微信小游戏 Battle Runtime 最小实机 Spike 入口（F-WX-2 接入 Platform Core，
- * F-WX-2.1 改为统一 Platform Binding）。
+ * F-WX-5｜微信小游戏正常玩家版本入口（Integration Gate）。
  *
- * 目标（与验收一一对应）：
- * - 完全不依赖正式 Garage / Result / DOM UI；只含 Platform boot + Canvas + Renderer
- *   + Planck Battle + 固定 Build（Queue F-WX-1 必改 1/2/3/4）；
- * - 不使用 document / HTMLElement / localStorage / DOM event（必改 2）；
- * - 复用现有正式 Registry / BuildSnapshot / PlanckBattleOrchestrator / Renderer，
- *   不复制第二套 Physics / Battle（必改 3）；
- * - 仅做很小的平台边界修复（CanvasSurface 注入），不重写 Renderer（必改 4）。
+ * 组合已验证的三大件：WeChat Platform Adapter + CanvasPlayerUIHost + 现有 Gameplay Runtime
+ * （PlayerGameRuntime，与 Web main.ts 共用同一份玩家流程，不复制 Gameplay）。
  *
- * F-WX-2.1：本文件第一行 import bootstrap-wechat —— 在业务模块求值前把共享 Platform Core
- * 绑定为 WechatCore；之后所有业务模块经 `platform`（src/platform 惰性 facade）读到的是
- * WechatStorage / WechatLifecycle，绝不落到 Web Core。本入口自身不再创建局部 core。
+ * 明确不加载：index.html / WebDomPlayerUIHost / Physics Lab（debugOverlay/Matter）/
+ * Scenario / Runtime Debug Tools——正式玩家版本只有 Canvas + Renderer + 战斗 Runtime + 玩家 UI。
  *
- * 注意：本沙箱无法启动微信开发者工具，故无法在此实机打开；本文件经 scoped tsc +
- * 微信构建（vite.wechat.config.ts → dist-wechat/game.js）+ bundle DOM-free 静态校验
- * 验证可导入与平台中立性。真实「Canvas 连续运行 ≥10s / 无依赖错误」需在微信开发者工具
- * 中执行（见根目录验收缺口说明）。
+ * 生命周期：
+ * - 首行 import bootstrap-wechat：在业务模块求值前绑定 WechatCore（storage/lifecycle/input/
+ *   viewport 全部微信实现；未绑定访问 fail-fast，无隐藏 Web fallback）；
+ * - 正常玩家闭环：新账号 → Garage（装配/合成/金币段位）→ Matching（随机对手）→ MatchPreview
+ *   （250ms 自动开战）→ Battle（HUD/阶段倒计时）→ Result（Reward/Economy/引导）→
+ *   调整配置（回 Garage）/ 下一场（再战）→ 循环；
+ * - 后台→前台：wx.onHide 暂停循环调度，onShow 恢复（runtime.resetClock 防 dt 爆发）；
+ * - 刷新/重进：存档走 WechatStorage（getStorageSync），runtime.init 自动恢复 Build/Inventory/进度；
+ * - 构建期版本：virtual:runtime-info 注入 build 时 SHA（非手写常量），启动日志 + 导出供平台层核对。
+ *
+ * 环境缺口（如实报告）：本沙箱无法启动微信开发者工具，实机「开发者工具真打开 / Canvas≥10s /
+ * 车辆·Projectile·Damage·Physics」以 headless smoke（tests/wechatPlayerSmoke.test.ts）+
+ * bundle 静态分析间接验证，未用普通 Web build 冒充。
  */
 import '../src/platform/bootstrap-wechat';
-import { registry } from '../src/core/content';
-import { makeStarterDraft, buildSnapshotFromDraft } from '../src/lab/buildEditorModel';
-import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
+import runtimeInfo from 'virtual:runtime-info';
+import { platform } from '../src/platform';
 import { Renderer } from '../src/render/renderer';
 import { VisualRegistry } from '../src/render/visualRegistry';
-import { platform } from '../src/platform';
+import { SfxAudioService } from '../src/presentation/audioService';
+import { createPlayerPresentation } from '../src/presentation/playerPresentation';
+import { CanvasPlayerUIHost } from '../src/ui/canvasPlayerUIHost';
+import { PlayerGameRuntime } from '../src/game/playerGameRuntime';
+import { WechatBattleHost } from '../src/game/wechatBattleHost';
+import { APP_VERSION } from '../src/core/env';
 
 const g = globalThis as any;
 const wx = g.wx as any;
@@ -38,47 +44,60 @@ if (!ctx) throw new Error('Canvas 2D not supported on WeChat');
 // —— 2) 视口 surface（经共享 Platform Viewport 抽象；bootstrap 已绑定 WechatCore） ——
 const surface = platform.createViewport(canvas).surface();
 
-// —— 3) 固定合法 Build A/B（复用正式 Starter + BuildSnapshot） ——
-const buildA = buildSnapshotFromDraft(makeStarterDraft('boxBody', registry), registry, 'wechatA');
-const buildB = buildSnapshotFromDraft(makeStarterDraft('wedgeBody', registry), registry, 'wechatB');
-
-// —— 4) 正式 Battle（复用 PlanckBattleOrchestrator，禁止第二套 Physics/Battle） ——
-const orchestrator = new PlanckBattleOrchestrator(buildA, buildB, registry, {
-  autoDrive: true,
-});
-
-// —— 5) Renderer（注入 surface，不感知平台） ——
+// —— 3) Renderer（注入 surface，不感知平台；无正式 Content 资源 → 灰盒 Collider 绘制） ——
 const visualRegistry = new VisualRegistry();
 const renderer = new Renderer(canvas as unknown as HTMLCanvasElement, visualRegistry, surface);
 
-// —— 6) 初始取景一次 ——
-const snap0 = orchestrator.getRenderSnapshot();
-renderer.resize(snap0.arena.width, orchestrator.arena.config.height);
-renderer.reframe(snap0, 'battle', { phase: orchestrator.phase });
+// —— 4) 表现层（共享接线；微信无 Web Audio → SfxAudioService 惰性 no-op；无 timeScale 定格） ——
+const sfx = new SfxAudioService();
+const presentation = createPlayerPresentation(renderer, sfx);
 
-// —— 7) 驱动循环（经共享 Platform Lifecycle：wx.requestAnimationFrame；缺失则 setTimeout 兜底） ——
-let lastPhase = orchestrator.phase;
+// —— 5) 微信精简战斗宿主（PlanckBattleOrchestrator + Renderer + Presentation；无 lab/debug） ——
+const battleHost = new WechatBattleHost(renderer, presentation);
+
+// —— 6) 玩家 UI：CanvasPlayerUIHost（同一 State/Action；平台中立挂载，无 DOM） ——
+const uiHost = new CanvasPlayerUIHost(canvas as unknown as HTMLCanvasElement);
+uiHost.mountCanvas();
+
+// —— 7) 玩家 Gameplay Runtime（与 Web 同一份流程；微信侧无 DEV 钩子） ——
+const runtime = new PlayerGameRuntime({
+  host: uiHost,
+  battle: battleHost,
+  sfx, // AudioContext 缺失 → play/resume 安全 no-op
+  // isResetDevVisible / onDevResetReload：微信恒 false / 无 reload（DEV ?resetdev 不可达）
+});
+runtime.init(); // 装载存档 + 绑定 actions + 初始预览/取景/渲染
+
+// —— 8) 构建期版本日志（virtual:runtime-info：build 时 git 注入，非手写） ——
+// eslint-disable-next-line no-console
+console.log(`[F-WX-5] ${runtimeInfo.branch} @ ${runtimeInfo.sha.slice(0, 7)} · ${APP_VERSION}`);
+
+// —— 9) 主循环（经共享 Platform Lifecycle；后台暂停 / 前台恢复） ——
 let running = true;
+let rafHandle: number | null = null;
 
-function frame(): void {
+function frame(now: number): void {
   if (!running) return;
-  // 固定步长推进（≈60Hz），禁止按真实帧累计（与正式 Foundation 一致）
-  orchestrator.step(16.6667);
-  const phase = orchestrator.phase;
-  if (phase !== lastPhase) {
-    lastPhase = phase;
-    renderer.reframe(orchestrator.getRenderSnapshot(), 'battle', { phase });
-  }
-  renderer.render(orchestrator);
-  if (orchestrator.result) {
-    // 战斗结束（约 18s：Active10 + Warning3 + Closing5）→ spike 验证可运行 ≥10s 达成
-    running = false;
-    return;
-  }
-  platform.lifecycle.requestAnimationFrame(frame);
+  runtime.tick(now); // 战斗步进 + Matching B FX + 渲染 + 阶段/结果轮询 + HUD 帧
+  if (running) rafHandle = platform.lifecycle.requestAnimationFrame(frame);
 }
 
-platform.lifecycle.requestAnimationFrame(frame);
+// 后台→前台：wx.onHide 暂停调度（微信会挂起 JS）；onShow 恢复 + 重置 dt 时钟防爆发
+platform.lifecycle.onVisibilityChange((hidden) => {
+  if (hidden) {
+    running = false;
+    if (rafHandle !== null) {
+      platform.lifecycle.cancelAnimationFrame(rafHandle);
+      rafHandle = null;
+    }
+  } else {
+    running = true;
+    runtime.resetClock();
+    rafHandle = platform.lifecycle.requestAnimationFrame(frame);
+  }
+});
 
-// 导出供外部调试（不影响运行；IIFE 下挂到全局返回对象）
-export { orchestrator, renderer };
+rafHandle = platform.lifecycle.requestAnimationFrame(frame);
+
+// 导出供调试 / headless smoke 断言（IIFE 下挂到全局返回对象）
+export { runtime, renderer, uiHost, runtimeInfo };

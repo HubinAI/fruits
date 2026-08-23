@@ -21,6 +21,12 @@ import {
 } from '../src/core/analytics';
 
 const MAIN = readFileSync(fileURLToPath(new URL('../src/main.ts', import.meta.url)), 'utf8');
+// F-WX-5：正常玩家流程（含全部 track 点位）已从 main.ts 抽到 PlayerGameRuntime，
+// source-level 守卫目标同步迁移到该文件（Web/微信共用同一份埋点序列）。
+const RUNTIME = readFileSync(
+  fileURLToPath(new URL('../src/game/playerGameRuntime.ts', import.meta.url)),
+  'utf8',
+);
 
 beforeEach(() => {
   setAnalyticsMode('dev'); // 默认 DEV：记录 + console
@@ -217,34 +223,36 @@ describe('F. 完整主循环事件序列（验收 1：source-level 守卫全部 
 
   for (const [ev, label] of REQUIRED_EVENTS) {
     it(`F. ${ev} — 点位存在（${label}）`, () => {
-      expect(MAIN).toContain(`track('${ev}'`);
+      expect(RUNTIME).toContain(`track('${ev}'`);
     });
   }
 
   it('F. garage_enter 在闭环与进入两处均触发', () => {
-    const count = (MAIN.match(/track\('garage_enter'\)/g) ?? []).length;
+    const count = (RUNTIME.match(/track\('garage_enter'\)/g) ?? []).length;
     expect(count).toBeGreaterThanOrEqual(2);
   });
 
   it('F. battle_end/reward_gain 经 battleEndGuard 去重（与开战 clear 配合）', () => {
-    expect(MAIN).toContain('battleEndGuard.firstTime(r)');
-    expect(MAIN).toContain('battleEndGuard.clear()');
+    expect(RUNTIME).toContain('battleEndGuard.firstTime(r)');
+    expect(RUNTIME).toContain('battleEndGuard.clear()');
   });
 
   it('F. build_change 经 emitBuildChange 统一出口，且带 slot/oldPart/newPart/drive/body', () => {
-    expect(MAIN).toContain("track('build_change', { slot, oldPart, newPart, drive, body })");
+    expect(RUNTIME).toContain("track('build_change', { slot, oldPart, newPart, drive, body })");
   });
 
   it('F. battle_end payload 含 result/duration/playerRating/opponentTier', () => {
-    expect(MAIN).toContain("result: isWin ? 'win' : 'lose'");
-    expect(MAIN).toContain('playerRating');
-    expect(MAIN).toContain('opponentTier: OPPONENT_TIERS[matchedIndex]');
+    expect(RUNTIME).toContain("result: isWin ? 'win' : 'lose'");
+    expect(RUNTIME).toContain('playerRating');
+    expect(RUNTIME).toContain('opponentTier: OPPONENT_TIERS[this.matchedIndex]');
   });
 
   it('F. 业务层不依赖具体平台 SDK（仅 import 本模块 track/battleEndGuard）', () => {
     // 不应出现第三方 analytics SDK 的 import（仅匹配 from '...' import 说明符）
     const thirdParty = /from\s+['"](amplitude|mixpanel|segment|posthog|google-analytics|@amplitude|@segment|@posthog)['"]/i;
-    expect(MAIN).not.toMatch(thirdParty);
-    expect(MAIN).toContain("import { track, battleEndGuard } from './core/analytics'");
+    expect(RUNTIME).not.toMatch(thirdParty);
+    expect(RUNTIME).toContain("import { track, battleEndGuard } from '../core/analytics'");
+    // main.ts 不再持有玩家流程埋点点位（防回退）
+    expect(MAIN).not.toContain("track('game_start'");
   });
 });

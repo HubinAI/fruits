@@ -120,6 +120,21 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     platform.input.bindPointer(this.canvas, (x, y) => this.handlePointer(x, y));
   }
 
+  /**
+   * F-WX-5｜平台中立挂载（微信：无 DOM 容器）。
+   * 不操作 style/appendChild；canvas 尺寸即物理像素（微信 createCanvas），
+   * 输入经 Platform Input Adapter（微信 = wx.onTouchStart）。
+   */
+  mountCanvas(): void {
+    const ctx = this.canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D not supported');
+    this.ctx = ctx;
+    this.cssW = Math.max(1, this.canvas.width || BASE_W);
+    this.cssH = Math.max(1, this.canvas.height || BASE_H);
+    this.dpr = 1; // 微信 canvas 已是物理像素，无需额外 dpr 缩放
+    platform.input.bindPointer(this.canvas, (x, y) => this.handlePointer(x, y));
+  }
+
   render(state: PlayerUIState): void {
     this.lastState = state;
     this.dirty = true;
@@ -199,13 +214,19 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const state = this.lastState;
     if (!state) return;
     if (state.uiMode === 'scenario') {
-      // DEV Lab 继续 DOM；Canvas 不绘制且不挡指针
-      this.canvas.style.pointerEvents = 'none';
-      this.canvas.style.visibility = 'hidden';
+      // DEV Lab 继续 DOM；Canvas 不绘制且不挡指针（微信玩家版无 scenario，永不进入）
+      const st = this.canvas.style;
+      if (st) {
+        st.pointerEvents = 'none';
+        st.visibility = 'hidden';
+      }
       return;
     }
-    this.canvas.style.pointerEvents = 'auto';
-    this.canvas.style.visibility = 'visible';
+    const st = this.canvas.style;
+    if (st) {
+      st.pointerEvents = 'auto';
+      st.visibility = 'visible';
+    }
 
     if (state.battleState === 'fighting' || state.battleState === 'ended') {
       if (this.lastFrame) this.drawHud(this.lastFrame);
@@ -228,9 +249,20 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   private ensureSize(): void {
-    const w = Math.max(1, this.parent.clientWidth || BASE_W);
-    const h = Math.max(1, this.parent.clientHeight || BASE_H);
-    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    let w: number;
+    let h: number;
+    let dpr: number;
+    if (this.parent) {
+      // Web：随容器尺寸 + window.devicePixelRatio
+      w = Math.max(1, this.parent.clientWidth || BASE_W);
+      h = Math.max(1, this.parent.clientHeight || BASE_H);
+      dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    } else {
+      // F-WX-5：平台中立挂载（微信）：canvas 即物理像素，无需 dpr 缩放
+      w = Math.max(1, this.canvas.width || BASE_W);
+      h = Math.max(1, this.canvas.height || BASE_H);
+      dpr = 1;
+    }
     if (w !== this.cssW || h !== this.cssH || dpr !== this.dpr) {
       this.cssW = w;
       this.cssH = h;

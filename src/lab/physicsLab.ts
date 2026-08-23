@@ -7,6 +7,7 @@ import { registry } from '../core/content';
 import type { BattleConfig, BattleOrchestratorApi } from '../battle/battleContract';
 import { BattleOrchestrator } from '../battle/battleOrchestrator';
 import { PlanckBattleOrchestrator } from '../battle/planckBattleOrchestrator';
+import { PREVIEW_BATTLE_CONFIG } from '../battle/previewConfig';
 import type { Renderer } from '../render/renderer';
 import { drawDebug } from '../render/debugOverlay';
 import { DEFAULT_DEBUG_FLAGS, DEFAULT_OVERRIDES, type DebugFlags, type DebugOverrides } from '../render/debugOverlay';
@@ -123,12 +124,7 @@ export class PhysicsLab {
   loadCustomPreview(buildA: BuildSnapshot, buildB: BuildSnapshot, soloA: boolean = false): void {
     this.currentScenario = null;
     const cfg: BattleConfig = {
-      autoDrive: false,
-      engine: 'planck',
-      // Q06-UX-R2-FIX：Preview 专属近距出生位（两车比正式 400/1200 明显靠近，
-      // 让完整 A+B 在不裁切前提下自然放大；y=640 沿用正式地面语义）。
-      spawnA: { x: 620, y: 640, facing: 1 },
-      spawnB: { x: 980, y: 640, facing: -1 },
+      ...PREVIEW_BATTLE_CONFIG, // F-WX-5：与微信宿主共享同一份预览配置（Q06-UX-R2-FIX 近距出生位）
     };
     this.currentCustom = { buildA, buildB, config: cfg };
     this.isPreviewMode = true;

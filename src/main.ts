@@ -1,20 +1,16 @@
 /**
  * 入口：Build 测试交互 UI（Q06-UX-R1 重构，P0）。
  *
- * F-WX-3：正常玩家 UI（Garage / Matching / Battle HUD / Result / Reward / Inventory
- * picker / Merge / Onboarding / Stats）已抽到唯一 PlayerUIHost 边界（Web 首阶段 =
- * WebDomPlayerUIHost，复用原 DOM 结构/样式，视觉不变）。本文件只负责：
- * - Gameplay flow（PhysicsLab / Battle / 相机 / 结算副作用 / 埋点 / 存档）；
- * - DEV Scenario / Physics Lab / Runtime Debug Tools（保留 Web-only，不进 Host）；
- * - Gameplay 状态变化 → 组装 PlayerUIState → host.render / host.renderBattleFrame；
- * - 玩家输入（PlayerUIActions）→ Gameplay command → 再 push 状态。
+ * F-WX-3：正常玩家 UI 已抽到唯一 PlayerUIHost 边界（WebDomPlayerUIHost / CanvasPlayerUIHost）。
+ * F-WX-5：正常玩家 Gameplay 流程（Garage / Matching / Battle / Result / Reward / 经济 /
+ * 引导 / 存档副作用 / 埋点 / 广告）已抽到平台中立 PlayerGameRuntime（src/game/playerGameRuntime.ts），
+ * Web 与微信双入口复用同一份逻辑。本文件只负责：
+ * - Web 平台接线：DOM 创建 / Renderer / Presentation / PhysicsLab（DEV 能力：Preview + 时间缩放）；
+ * - DEV Scenario / Physics Lab / Runtime Debug Tools（保留 Web-only，不进 PlayerUIHost）；
+ * - Web-only 表现钩子（场边红脉冲 / Death 定格 / DEV 面板重渲染 / Build 控件锁定 DOM）；
+ * - 主循环调度（platform.lifecycle.requestAnimationFrame → runtime.tick）。
  *
- * 单一清晰流程：配置 → 实时预览 → 开战 → 结果 → 调整 → 再战。
- * - 顶层模式互斥：【装配测试】（默认）/【机制场景】；两模式控件绝不同时出现；
- * - Editing：Build 控件可操作 + 中央实时 Preview（loadCustomPreview，planck 站桩）；
- *   Fighting：Build 控件全部锁定 + 中央正式 Planck Battle；Ended：显示结果 + 控件重开；
- * - 首屏默认合法配置（A/B 各 front Cannon），Start 立即可点；
- * - 非法配置时 Start 明显禁用且旁边直接显示阻断原因（A：… / B：…）。
+ * 单一清晰流程：配置 → 实时预览 → 开战 → 结果 → 调整 → 再战（流程状态机在 runtime）。
  */
 // F-WX-2.1：Web 启动 bootstrap 必须是第一个 import —— 在业务模块（含顶层读 storage 的
 // adFrequency）求值前绑定 WebCore，否则它们会读到未绑定/错误平台的 Storage。
@@ -23,15 +19,9 @@ import { Renderer, type CameraFit } from './render/renderer';
 import { platform } from './platform';
 import { VisualRegistry } from './render/visualRegistry';
 import { SfxAudioService } from './presentation/audioService';
-import { BattlePresentationController } from './presentation/battlePresentationController';
-import {
-  DeathPauseScheduler,
-  damageFeedbackColors,
-  phaseRemainingMs,
-  warningCountdown,
-} from './presentation/battlePhaseFx';
+import { createPlayerPresentation } from './presentation/playerPresentation';
+import { DeathPauseScheduler } from './presentation/battlePhaseFx';
 // W2-SIL-1：5 个首批正式 Content 视觉占位（程序化轮廓 PNG；正式美术可替换）
-// Vite asset import 返回构建后 URL（dev/prod 均有效；vite/client 提供 *.png 声明）。
 import bodyWatermelonUrl from '../assets/visuals/body_watermelon.png';
 import bodyBananaUrl from '../assets/visuals/body_banana.png';
 import partCannonUrl from '../assets/visuals/part_cannon.png';
@@ -44,49 +34,25 @@ import { TIME_SCALES } from './render/debugOverlay';
 import { BattleOrchestrator } from './battle/battleOrchestrator';
 import { PlanckBattleOrchestrator } from './battle/planckBattleOrchestrator';
 import type { BattleOrchestratorApi } from './battle/battleContract';
-import type { BuildSnapshot } from './core/types';
+// F-WX-5：玩家 Gameplay Runtime（Web/微信共用）+ 战斗宿主接口
+import { PlayerGameRuntime } from './game/playerGameRuntime';
+import type { PlayerBattleHost } from './game/playerGameRuntime';
 
-// F-DEV-1：Runtime 版本信息（vite 虚拟模块注入，git 读取非手写常量；类型见 virtual-runtime-info.d.ts）
+// F-DEV-1：Runtime 版本信息（vite 虚拟模块注入，git 读取非手写常量）
 import runtimeInfo from 'virtual:runtime-info';
 import { registry } from './core/content';
 import {
-  buildSnapshotFromDraft,
-  makeStarterDraft,
   editableSlots,
   migrateDraftBody,
   slotLabel,
   EMPTY_SLOT,
-  resolveDriveMode,
   type BuildDraft,
-  type DriveMode,
 } from './lab/buildEditorModel';
-import {
-  resolveOnboardingStage,
-  completeOnboarding,
-  type OnboardingStage,
-} from './core/onboarding';
-import { resetPlayerSave } from './core/saveVersion';
-import { computeEnergy, validateSnapshot } from './core/buildValidator';
+import { computeEnergy } from './core/buildValidator';
 // Q22：星级统一倍率（用于 Garage 卡片展示 2★ 实际 Energy）
 import { starTierEnergy } from './core/buildSnapshot';
-import {
-  OPPONENT_POOL,
-  cloneBuildDraft,
-  buildMatchingSequence,
-  pickOpponentForTier,
-  OPPONENT_TIERS,
-} from './player/opponentPool';
-import { loadPlayerBuild, savePlayerBuild } from './core/buildPersistence';
-import { track, battleEndGuard } from './core/analytics';
 import { DEV_TOOLS_VISIBLE, APP_VERSION } from './core/env';
-import {
-  RewardedAdClaimer,
-  tryInterstitialSafe,
-  isRewardedAdAvailable,
-} from './core/ads';
-import { onBattleEnded, resetAdFrequency } from './core/adFrequency';
-// F-WX-3：玩家 UI 唯一 Host 边界（Web DOM 实现）与平台中立类型
-// F-WX-4：CanvasPlayerUIHost（同一 State/Action，?canvasui=1 独立切换测试）
+// F-WX-3/4：玩家 UI Host（Web DOM 实现 / Canvas 实现；同一 State/Action）
 import { WebDomPlayerUIHost } from './ui/webDomPlayerUIHost';
 import { CanvasPlayerUIHost } from './ui/canvasPlayerUIHost';
 import {
@@ -95,43 +61,16 @@ import {
   encodePartVal,
   decodePartVal,
 } from './ui/playerUI';
-import type {
-  UiMode,
-  BattleState,
-  PlayerPhase,
-  PlayerUIState,
-  PlayerUIActions,
-  PlayerUIHost,
-} from './ui/playerUI';
-// Q22：V0.5 部件库存（数量化 + 星级 + 合成）
-import {
-  BattleRewardSettler,
-  ensureInventory,
-  canEquipPart,
-  getInventory,
-  getCount,
-  saveInventory,
-  equippedDefIds,
-  OFFICIAL_PARTS,
-} from './core/partInventory';
-// Q23→Q24：玩家进度（金币 + 段位）；结算纯函数 + 单例结算器（同场只结算一次）
-import {
-  BattleProgressSettler,
-  getProgress,
-  saveProgress,
-  mergeWithCost,
-  tierOf,
-  TIER_LABEL,
-} from './core/playerProgress';
+import type { UiMode, PlayerUIHost } from './ui/playerUI';
+// Q22：V0.5 部件库存（DEV 面板只读库存展示 + 装备校验）
+import { canEquipPart, getInventory, getCount, OFFICIAL_PARTS } from './core/partInventory';
 
 const app = document.getElementById('app')!;
 
-// Q31｜Release Config：开发工具（Scenario / Runtime Debug Tools / 对手编辑）仅在非 PROD 可见；
-// PROD 对正常玩家隐藏（玩家流程不依赖开发工具）。dev / test 均可见（test = 内部 RC 构建）。
+// Q31｜Release Config：开发工具（Scenario / Runtime Debug Tools / 对手编辑）仅在非 PROD 可见
 const TOOLS_DEV_VISIBLE: string = DEV_TOOLS_VISIBLE ? '' : 'none';
 
 // F-DEV-1：Runtime Badge——仅开发 / 内部 RC 构建显示 branch + short SHA + 版本号。
-// 一眼确认「我当前看到的是哪个代码版本」（正式玩家 UI 不显示）。
 if (DEV_TOOLS_VISIBLE) {
   const badge = document.createElement('div');
   badge.style.cssText =
@@ -217,13 +156,9 @@ style.textContent = `
   /* Q26：首轮引导提示（仅全新账号首场 Result 显示；极简、非遮罩） */
   .result-onboard { margin: 6px auto 0; padding: 8px 14px; background: #15233a; border: 1px solid #2f5fa0; border-radius: 8px; font-size: 13px; color: #bcd4ff; }
   /* Q07-A：开发工具折叠区（机制场景 / Pause/Reset/Clear / 速度 / Preset 收进二级） */
-  /* Q13-C-R4：开发工具折叠区改为「工具栏下方全宽独立一行」（不再嵌进 .lab-main 横向 flex 被挤压）。
-     基础 display: flex（展开时由内联 '' 回退到此）；收起由内联 display:none 控制。
-     width:100% + flex-shrink:0 + box-sizing:border-box 保证任何桌面分辨率都全宽可见、且不压缩战场。 */
   .tool-tools-host { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 12px; background: #1b2130; border-bottom: 1px solid #2a3140; width: 100%; flex-shrink: 0; box-sizing: border-box; }
   .tool-tools-host .tool-tools-label { font-size: 12px; color: #9aa4b5; margin-right: 4px; }
   .tool-tools-host button, .tool-tools-host select { background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; padding: 5px 9px; cursor: pointer; font-size: 12px; }
-  /* Q13-C-R4：Scenario 下拉框明确可读宽度（260～320px）——展开后第一眼必须能看到场景选项 */
   .tool-tools-host select { min-width: 280px; }
   .tool-tools-host button:disabled { opacity: 0.45; cursor: not-allowed; }
   .tool-tools-host .preset-box { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; flex-wrap: wrap; }
@@ -259,7 +194,6 @@ style.textContent = `
   .part-slot-card .ps-value.empty { color: #7c8799; font-weight: 400; }
   .part-picker { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; padding: 6px; background: #1b2130; border: 1px solid #2a3140; border-radius: 6px; }
   .part-picker .pp-title { width: 100%; font-size: 11px; color: #9aa4b5; margin-bottom: 2px; }
-  /* Q09-B：选项两行——名称 + 武器/辅助类别 + Energy（不写长描述，不加属性系统） */
   .part-picker button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 6px 10px; background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 5px; cursor: pointer; }
   .part-picker button:hover { background: #2e3747; }
   .part-picker button.active { background: #3b6fd4; border-color: #5a8df0; color: #fff; }
@@ -292,14 +226,11 @@ style.textContent = `
   .ready-card { text-align: center; }
   .ready-card .rd-sub { font-size: 15px; letter-spacing: 8px; color: #9aa4b5; margin-bottom: 8px; }
   .ready-card .rd-main { font-size: 46px; font-weight: 800; letter-spacing: 12px; color: #ffd35a; text-shadow: 0 0 22px rgba(255,211,90,0.55); }
-  /* Q15-UI-R2：玩家 Shell —— 三层结构（顶部状态 / 主舞台 / 底部操作），不再用左右长表单 */
-  /* 顶部状态区（~56px）：阶段标题，位于 UI 层顶部，绝不贴到车身上 */
+  /* Q15-UI-R2：玩家 Shell —— 三层结构（顶部状态 / 主舞台 / 底部操作） */
   .player-top { position: absolute; left: 0; right: 0; top: 0; height: 56px; display: none; align-items: center; justify-content: center; z-index: 6; pointer-events: none; font-size: 18px; letter-spacing: 4px; color: #cdd6e6; background: linear-gradient(180deg, rgba(8,10,14,0.82), rgba(8,10,14,0)); }
   .player-top .pt-title { font-weight: 700; text-shadow: 0 0 12px rgba(0,0,0,0.6); }
-  /* Garage 装配 Dock（底部操作区） */
   .garage-dock { position: absolute; left: 0; right: 0; bottom: 0; z-index: 6; display: none; flex-direction: column; gap: 8px; padding: 10px 14px 12px; background: rgba(15,19,27,0.93); border-top: 1px solid #2a3140; }
   .dock-row { display: flex; align-items: center; gap: 12px; }
-  /* 第一层：槽位 chip（横向可滚动，不压成极窄小字） */
   .dock-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
   .dock-chips::-webkit-scrollbar { height: 6px; }
   .dock-chips::-webkit-scrollbar-thumb { background: #38414f; border-radius: 3px; }
@@ -309,7 +240,6 @@ style.textContent = `
   .dock-chip .dc-label { color: #9aa4b5; }
   .dock-chip .dc-value { color: #ffd35a; font-weight: 600; font-size: 12px; }
   .dock-chip .dc-value.empty { color: #7c8799; font-weight: 400; }
-  /* 第二层：当前选中槽的横向选项 */
   .dock-picker { display: flex; flex-wrap: wrap; gap: 6px; }
   .dock-picker .dp-title { width: 100%; font-size: 11px; color: #9aa4b5; margin-bottom: 1px; }
   .dock-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 12px; background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px; cursor: pointer; font-size: 12px; }
@@ -317,11 +247,9 @@ style.textContent = `
   .dock-opt.active { background: #3b6fd4; border-color: #5a8df0; color: #fff; }
   .dock-opt .do-meta { font-size: 10px; color: #7c8799; }
   .dock-opt.active .do-meta { color: #d4dcff; }
-  /* Q21：未拥有部件锁定态（仍可见，不可装备） */
   .dock-opt.locked { opacity: 0.4; cursor: not-allowed; border-style: dashed; }
   .part-picker button.locked { opacity: 0.4; cursor: not-allowed; border-style: dashed; }
   .dock-opt.locked .do-meta { color: #c98b5e; }
-  /* 能量（合并进 Dock，不单独占长表单） */
   .dock-energy { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 160px; }
   .dock-energy .de-label { font-size: 12px; color: #9aa4b5; }
   .dock-energy .de-bar { flex: 1; height: 8px; background: #232b38; border: 1px solid #38414f; border-radius: 4px; overflow: hidden; max-width: 220px; }
@@ -329,23 +257,18 @@ style.textContent = `
   .dock-energy .de-fill.overload { background: #ff5a4e; }
   .dock-energy .de-text { font-size: 12px; color: #c8d0e0; font-variant-numeric: tabular-nums; }
   .dock-energy .de-text.overload { color: #ff6b5e; font-weight: 700; }
-  /* 寻找对手主 CTA（与 MatchPreview 按钮同一视觉体系 .btn-start-cta） */
   .dock-cta { flex: 0 0 auto; font-size: 17px; font-weight: 700; letter-spacing: 3px; padding: 14px 40px; background: #3b6fd4; border: 1px solid #5a8df0; color: #fff; border-radius: 10px; cursor: pointer; box-shadow: 0 4px 16px rgba(59,111,212,0.4); }
   .dock-cta:hover { background: #4a7fe0; }
   .dock-cta:disabled { background: #262e3d; border-color: #38414f; color: #7c8799; box-shadow: none; cursor: not-allowed; }
-  /* Garage 装配非法提示（原 start-hint 收敛进 Dock） */
   .dock-hint { font-size: 12px; color: #ff6b5e; }
-  /* Matching 中央 VS（轻量脉冲；文字在顶部状态区，不贴车身） */
   .matching-vs { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 54px; font-weight: 900; color: #e8e8f0; opacity: 0.12; animation: match-pulse 0.9s ease-in-out infinite; z-index: 6; pointer-events: none; display: none; }
   @keyframes match-pulse { 0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.10; } 50% { transform: translate(-50%, -50%) scale(1.15); opacity: 0.22; } }
-  /* Q15-UX-R1：MatchPreview 信息层（我的战车 VS 对手；只展示 Body + 主要部件，不展示数值） */
   .match-info { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; gap: 6%; z-index: 7; pointer-events: none; }
   .match-info .mi-side { text-align: center; }
   .match-info .mi-label { font-size: 16px; color: #9aa4b5; letter-spacing: 3px; }
   .match-info .mi-vs { font-size: 56px; font-weight: 900; color: #ffd35a; text-shadow: 0 0 18px rgba(255,211,90,0.45); }
   .match-info .mi-body { font-size: 20px; color: #ff9d5a; font-weight: 700; margin-top: 6px; }
   .match-info .mi-parts { font-size: 12px; color: #9aa4b5; margin-top: 4px; }
-  /* F-MOVE-1：锁定阶段对手真实 Drive 配置标记（极简可读 pill，仅表示驱动模式） */
   .match-info .mi-drive {
     display: inline-block; margin-top: 8px; padding: 2px 12px; border-radius: 12px;
     font-size: 13px; font-weight: 600; letter-spacing: 1px;
@@ -390,102 +313,25 @@ if (DEV_TOOLS_VISIBLE) {
   canvasWrap.appendChild(debugPanel);
 }
 
-// W2-VIS-1：Sprite Visual Registry（首版无正式 Content 资源 → 全部 Collider graybox；
-// 后续 Content 队列经 register + 图片加载注入正式 sprite，Preview/Fighting 共用同一 runtime）
 const visualRegistry = new VisualRegistry();
 const renderer = new Renderer(canvas, visualRegistry);
-// F-WX-2：Viewport Adapter（Web 用 window resize 订阅；surface 供 Renderer 可选注入）
+// F-WX-2：Viewport Adapter（Web 用 window resize 订阅）
 const viewport = platform.createViewport(canvas);
 
-// W2-FX-1：BattleEvent → Presentation 统一消费层（正式表现唯一入口）。
-// - 表现 hook 全部接到 Renderer 的「只画」方法 + 统一 AudioService；
-// - Presentation 不决定伤害；FX/SFX 缺资源安全 skip；
-// - Preview（loadCustomPreview）不消费战斗 FX（PhysicsLab 只在正式战斗 bind）。
+// W2-FX-1：BattleEvent → Presentation 统一消费层（正式表现唯一入口；Preview 不消费）
 const sfx = new SfxAudioService();
-// W2-FX-2：Death 表现层定格调度（80~120ms）+ 阶段轮询状态
+// W2-FX-2：Death 表现层定格调度（80~120ms）+ 阶段轮询状态（Web-only；微信玩家版无 timeScale）
 const deathPause = new DeathPauseScheduler();
 let prevTimeScale = 1;
-const presentation = new BattlePresentationController({
-  // Q11-C-R3-FINAL：laser 开火 → 发射沿真实 fire 方向的「巨炮」能量束 VFX +
-  // 明显炮口白青强闪；Cannon 仍用默认橙黄小闪。
-  onMuzzleFlash: (ev) => {
-    if (ev.behavior === 'laser') {
-      renderer.spawnLaserBeam(
-        ev.worldPosition.x,
-        ev.worldPosition.y,
-        ev.worldDirection.x,
-        ev.worldDirection.y,
-      );
-      renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y, '#eafdff', 14);
-    } else if (ev.behavior === 'shotgun') {
-      // Q13-B-R1：霰弹炮齐射 → 有方向的短促扇形炮口爆闪（非普通圆形 flash），
-      // 沿真实 fire 方向展开，一眼是「霰弹喷射」而非单发炮。
-      renderer.spawnShotgunFan(
-        ev.worldPosition.x,
-        ev.worldPosition.y,
-        ev.worldDirection.x,
-        ev.worldDirection.y,
-      );
-    } else if (ev.behavior === 'machineGun') {
-      // Q14-A-R1：机枪枪口火舌——沿真实 fire 方向短促窄火舌（15~25px、TTL ~60ms），
-      // 不再只是难以看到的小圆点；连发时呈枪口连续快速闪动（纯表现，不参与伤害）。
-      renderer.spawnMuzzleTongue(
-        ev.worldPosition.x,
-        ev.worldPosition.y,
-        ev.worldDirection.x,
-        ev.worldDirection.y,
-      );
-    } else if (ev.behavior === 'flamethrower') {
-      // Q14-B：喷火器每颗粒独立喷口小闪（橙黄，密集连闪 → 喷口持续点燃感；
-      // 火流主体由 flame 弹迹承担；纯表现，不参与伤害）。
-      renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y, '#ffb24a', 3);
-    } else {
-      renderer.spawnMuzzleFlash(ev.worldPosition.x, ev.worldPosition.y);
-    }
-  },
-  // Q11-C-R3-FINAL：laser 不再播 Cannon 的 'fire' 音（避免与自身爆鸣混叠、保证
-  // 明显区别 Cannon）；laser 的 fire 音由 onWeaponChargeEnd → stopLaserCharge 承担。
-  onFireSound: (ev) => {
-    // Q14-B：喷火器每颗粒都触发 fire 事件（~30/s），不逐发播 'fire' 音（避免连续噪音）；
-    // 喷口/火流表现由渲染层承担。
-    if (ev.behavior !== 'laser' && ev.behavior !== 'flamethrower') sfx.play('fire');
-  },
-  // Q11-C：蓄能光点（laser）——partId 为 key，发射完成清除
-  // Q11-C-R2：蓄能音效升调/增强（progress 驱动）
-  onWeaponCharge: (ev) => {
-    renderer.spawnCharge(ev.partId, ev.worldPosition.x, ev.worldPosition.y, ev.progress);
-    sfx.startLaserCharge(ev.progress);
-  },
-  // Q11-C-R2：fire 立即结束 charge 声 + 高频爆鸣 + 低频冲击
-  onWeaponChargeEnd: (ev) => {
-    renderer.clearCharge(ev.partId);
-    sfx.stopLaserCharge();
-  },
-  onHitFlash: (ev) => renderer.spawnHitFlash(ev.target),
-  onHitSpark: (ev) =>
-    renderer.spawnSpark(
-      ev.contactPoint.x,
-      ev.contactPoint.y,
-      damageFeedbackColors(ev.damageSource).spark,
-    ),
-  onDamageSound: () => sfx.play('hit'),
-  onDamageNumber: (ev) => {
-    // F-PRESENT-1：聚合入口在 Renderer 内（按来源+窗口合并为少量可读数字；
-    // dmg<=0 过滤 / 配色也在 Renderer 内完成）。Gameplay/DamageResolver 仍逐次结算，
-    // onDamageNumber 仍每个真实 damage event 各调用一次（调用次数与聚合无关）。
-    renderer.spawnDamageNumberFromEvent(ev);
-  },
-  onDeathFx: (ev) => {
-    renderer.spawnDeathFx(ev.team);
-    // W2-FX-2：死亡表现层定格 80~120ms（timeScale=0 冻结战斗推进，禁止修改
-    // Gameplay/Physics 时间语义——恢复原 timeScale，不写死进任何规则）
+const presentation = createPlayerPresentation(renderer, sfx, {
+  // Web-only：死亡表现层定格 80~120ms（timeScale=0 冻结战斗推进；恢复原 timeScale）
+  onDeathFreeze: () => {
     if (!lab.paused) {
       if (!deathPause.active) prevTimeScale = lab.timeScale;
       deathPause.trigger(100);
       if (lab.timeScale !== 0) lab.timeScale = 0;
     }
   },
-  onDeathSound: () => sfx.play('death'),
 });
 const lab = new PhysicsLab(renderer, presentation);
 
@@ -507,15 +353,14 @@ for (const [visualId, url] of SILHOUETTE_ASSETS) {
   img.src = url;
 }
 
-/* ---------- F-WX-3/4：玩家 UI 唯一 Host 边界（挂到主画布容器）。
- * 默认 WebDomPlayerUIHost；?canvasui=1 独立切换 CanvasPlayerUIHost（同一 State/Action）。 */
+/* ---------- F-WX-3/4：玩家 UI 唯一 Host 边界（默认 WebDom；?canvasui=1 切换 Canvas） ---------- */
 const canvasUiMode = new URLSearchParams(location.search).has('canvasui');
 const host: PlayerUIHost = canvasUiMode
   ? new CanvasPlayerUIHost(document.createElement('canvas'))
   : new WebDomPlayerUIHost();
 host.mount(canvasWrap);
 
-/* ---------- 稳定取景（Q02-CAM-R1）：只在 load / Reset / resize 时构图一次 ---------- */
+/* ---------- 稳定取景（Q02-CAM-R1）：DEV scenario 相机；build 玩家相机由 runtime 持有 ---------- */
 let currentCamera: ScenarioCamera | null = null;
 
 /** 取指定 orchestrator 的 arena 尺寸（运行时 config，Planck/Matter 共用） */
@@ -529,56 +374,49 @@ function arenaDimsOf(o: BattleOrchestratorApi | null): { w: number; h: number } 
   return { w: 1600, h: 900 };
 }
 
-/** 取当前主 orchestrator 的 arena 尺寸（doResize 用） */
-function arenaDims(): { w: number; h: number } {
-  return arenaDimsOf(lab.orchestrator);
-}
-
-/** 按当前取景模式构图一次并固定（运行期间不再重算，无呼吸缩放/无跟随） */
-function reframeCamera(): void {
+/** DEV scenario 相机（仅机制场景模式；build 模式由 runtime.reframePlayerCamera 负责） */
+function devReframeCamera(): void {
   const orch = lab.orchestrator;
   if (!orch) return;
-  // Q08-A：Custom 正式 Battle（装配测试模式、非 Preview）→ battle fit 按当前 Arena
-  // phase 构图（Active 近景 / Warning 中景 / Closing+End 全景安全构图，见 renderer）；
-  // Editing Preview：近距放大 fit（Q06-UX-R2-FIX）；机制场景维持原 fit 语义。
-  const fit: CameraFit =
-    uiMode === 'build'
-      ? lab.previewMode
-        ? (playerPhase === 'garage' // Q15-UI-R2：Garage 单车固定构图（~40% 宽，不随屏幕无限放大）
-            ? 'previewSolo'
-            : (playerPhase === 'matching' || playerPhase === 'matchPreview') // A左B右固定构图，候选换车不呼吸
-              ? 'previewFixed'
-              : 'preview')
-        : 'battle' // 正式战斗：按 phase 构图（Q08-A）
-      : (currentCamera?.fit ?? 'vehicles');
-  renderer.reframe(
-    orch.getRenderSnapshot(),
-    fit,
-    {
-      forwardExtent: currentCamera?.forwardExtent,
-      recoilExtent: currentCamera?.recoilExtent,
-      // Q08-A：battle fit 需要 phase（Active→近景 / Warning→中景 / Closing+End→全景）
-      phase: fit === 'battle' ? orch.phase : undefined,
-    },
-  );
+  const fit: CameraFit = currentCamera?.fit ?? 'vehicles';
+  renderer.reframe(orch.getRenderSnapshot(), fit, {
+    forwardExtent: currentCamera?.forwardExtent,
+    recoilExtent: currentCamera?.recoilExtent,
+    phase: fit === 'battle' ? orch.phase : undefined,
+  });
 }
 
-/* ---------- 顶层模式 + 战斗状态（Q06-UX-R1） ---------- */
+/** 视口 resize：同步 backing + 按模式重构图（build → runtime 玩家相机；scenario → DEV 相机） */
+function doResize(): void {
+  const d = arenaDimsOf(lab.orchestrator);
+  renderer.resize(d.w, d.h);
+  if (runtime.uiMode === 'scenario') devReframeCamera();
+  else runtime.reframePlayerCamera();
+}
 
-let uiMode: UiMode = 'build'; // 默认【装配测试】
-let battleState: BattleState = 'editing';
-/**
- * Q15：正常玩家主流程状态机（薄层，不重构 main.ts）。
- * - 'garage'：装配我方车辆（A 可编辑；B=队列中的对手，只读预览）；
- * - 'matchPreview'：已匹配对手 → 复核我方 VS 对手（A/B 全部只读）；
- * Fighting / Ended 仍由 battleState 驱动。
- */
-let playerPhase: PlayerPhase = 'garage';
-/** Matching 防重复触发：每次进入 Matching generation+1；旧 timer 校验 generation 失效即跳过 */
-let matchingGeneration = 0;
-let buildControlsLocked = false; // Fighting 时锁定 A/B 全部 Build 控件
-let lastShownResult: BattleOrchestratorApi['result'] = null;
-let battleStartTimeMs = 0; // Q28：记录本场开战时刻，供 battle_end 计算时长
+/* ---------- F-WX-5：Web 战斗宿主（PlayerBattleHost 适配 PhysicsLab；DEV 能力保留在 lab） ---------- */
+const battleHost: PlayerBattleHost = {
+  get orchestrator() {
+    return lab.orchestrator;
+  },
+  get previewMode() {
+    return lab.previewMode;
+  },
+  loadCustomPreview: (a, b, soloA) => lab.loadCustomPreview(a, b, soloA),
+  loadCustom: (a, b, c) => lab.loadCustom(a, b, c),
+  step: (dt) => lab.step(dt),
+  render: () => lab.render(),
+  setPreviewVehicleFx: (fx) => renderer.setPreviewVehicleFx(fx),
+  arenaDims: () => arenaDimsOf(lab.orchestrator),
+  reframe: (fit) => {
+    const o = lab.orchestrator;
+    if (!o) return;
+    renderer.reframe(o.getRenderSnapshot(), fit, { phase: fit === 'battle' ? o.phase : undefined });
+  },
+  resize: (w, h) => renderer.resize(w, h),
+};
+
+/* ---------- DEV Build 编辑状态（面板；玩家装配经 runtime actions） ---------- */
 
 function addButton(parent: HTMLElement, text: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement('button');
@@ -588,97 +426,28 @@ function addButton(parent: HTMLElement, text: string, onClick: () => void): HTML
   return b;
 }
 
-/* ---------- Build 编辑状态（Draft 模型；编辑 → 实时 Preview） ---------- */
+/** Q07-B：A/B 各自当前选中的 Functional 挂点（null = 未选中；per-panel，互不干扰） */
+let selectedSlotA: string | null = null;
+let selectedSlotB: string | null = null;
 
-/** W2-SIL-1 视觉样板 Draft（已提取为 buildEditorModel.makeStarterDraft，可单测）：
- *  - front=pushRod / frontMass=cannon / top=hammer / rear=空
- *  - energy=20+30+25=75；watermelon capacity 110 ✓、banana 90 ✓；≥1 Weapon ✓；drive 默认前进
- *  - 空存档首次启动即生成此合法 Build，玩家无需先修配置即可开战（Q26 要求 1） */
-function silDraft(bodyDefId: string): BuildDraft {
-  return makeStarterDraft(bodyDefId, registry);
-}
-
-let matchedIndex = 0; // 当前匹配对手在 OPPONENT_POOL 中的索引
-// Q15：玩家 Build 从 localStorage 恢复；无存档 / 非法旧存档 → 默认合法 Build
-const draftA = loadPlayerBuild() ?? silDraft('watermelonBody');
-// Q22：部件库存初始化（starter + 旧存档已装备部件迁移；v1 owned-id → 1★ 库存；无存档则落盘）
-ensureInventory(draftA);
-// Q21：每场 Battle 奖励结算器（以 result 引用为幂等键，同场只结算一次）
-const rewardSettler = new BattleRewardSettler();
-// Q23→Q24：每场 Battle 进度结算器（金币 + 段位；同场只结算一次，与 rewardSettler 同模式）
-const progressSettler = new BattleProgressSettler();
-// Q30：Rewarded 发奖器（以每场 result 引用为幂等键，同场只发一次额外奖励，关闭/失败不发）
-const rewardedClaimer = new RewardedAdClaimer();
-// Q26：首轮引导阶段（全新账号进入 pending，老存档直接 done；完成一次闭环后置 done 永久关闭）
-let onboardingStage: OnboardingStage = resolveOnboardingStage();
-// Q15：对手来自固定对手池（玩家不可编辑，仅 DEV 可临时改）
-let draftB = cloneBuildDraft(OPPONENT_POOL[matchedIndex]);
-
-/* ---------- F-WX-3：Player UI 状态（组装给 Host；Gameplay 副作用留在本文件） ---------- */
-let currentResult: PlayerUIState['result'] = null;
-let currentReward: PlayerUIState['reward'] = null;
-let currentEconomy: PlayerUIState['economy'] = null;
-let currentResultOnboarding = false;
-let rewardAdClaimed = false; // Q30：本场是否已领 Rewarded（同场只发一次）
-let readyOverlayVisible = false;
-let matchBarHidden = false; // Q15-FLOW-R1-ATOMIC：MatchPreview 复核条正常流程立即隐藏
-
-/** 组装当前 PlayerUIState 并推给 Host（Gameplay 状态变化 → 玩家 UI 更新的唯一出口） */
-function pushUI(): void {
-  host.render({
-    uiMode,
-    battleState,
-    playerPhase,
-    draft: draftA,
-    draftValid: buildsValid(),
-    blockReason: blockReason(),
-    garageSelected,
-    inventory: getInventory(),
-    progress: getProgress(),
-    onboarding: onboardingStage,
-    resetDevVisible: new URLSearchParams(location.search).has('resetdev'),
-    opponent:
-      playerPhase === 'matchPreview'
-        ? (() => {
-            const bodyB = registry.bodies.get(draftB.bodyDefId);
-            const partsB = bodyB
-              ? editableSlots(bodyB)
-                  .map((hpId) => {
-                    const v = draftB.functionalSelections[hpId];
-                    if (!v || v === EMPTY_SLOT) return null;
-                    return registry.functionals.get(v)?.name ?? v;
-                  })
-                  .filter((x): x is string => x !== null)
-              : [];
-            return {
-              bodyName: bodyB?.name ?? draftB.bodyDefId,
-              parts: partsB,
-              drive: resolveDriveMode(draftB.drive) === 'stationary' ? '停驻' : '前进',
-            };
-          })()
-        : null,
-    matchBarHidden,
-    result: currentResult,
-    reward: currentReward,
-    economy: currentEconomy,
-    resultOnboardingVisible: currentResultOnboarding,
-    rewardAdAvailable: isRewardedAdAvailable(),
-    rewardAdClaimed,
-    readyOverlayVisible,
-  });
-}
-
-function currentSnapshot(side: 'A' | 'B'): BuildSnapshot {
-  return buildSnapshotFromDraft(
-    side === 'A' ? draftA : draftB,
-    registry,
-    side === 'A' ? 'customA' : 'customB',
-  );
+/** 锁定 / 解锁 A/B 全部 Build 控件 DOM（Fighting 时锁定；标志在 runtime） */
+function setBuildControlsLockedDom(locked: boolean): void {
+  for (const sel of panelA.querySelectorAll('select')) {
+    (sel as HTMLSelectElement).disabled = locked;
+  }
+  for (const sel of panelB.querySelectorAll('select')) {
+    (sel as HTMLSelectElement).disabled = locked;
+  }
+  // W2-UX-R2：B 折叠 toggle 同锁（Fighting/Ended 不可展开）
+  for (const b of panelB.querySelectorAll('.panel-collapse button')) {
+    (b as HTMLButtonElement).disabled = locked;
+  }
+  for (const b of presetButtons) b.disabled = locked;
+  sideToggle.disabled = locked;
 }
 
 /** 渲染一侧 Build 面板（Body / 轮径卡片 / 真实 Functional 挂点卡片 / Energy / 校验错误）。
- *  W2-UX-R2：opts.collapsed=true 时表单折叠（B 当前对手默认收起，仅保留「编辑对手」入口）
- *  F-WX-3：DEV/Scenario 专用（正常玩家使用 Garage Dock，不进入 PlayerUIHost） */
+ *  DEV/Scenario 专用（正常玩家使用 Garage Dock，不进入 PlayerUIHost）。 */
 function renderPanel(
   panel: HTMLElement,
   title: string,
@@ -696,10 +465,10 @@ function renderPanel(
     const toggle = document.createElement('button');
     toggle.textContent = opts.collapsed ? `${opts.expandLabel ?? '展开'} ▸` : '收起 ▾';
     // Q15：玩家流程中对手(B)只读 —— PROD 下禁止展开/编辑；dev / test（RC）可临时改对手做验收
-    toggle.disabled = buildControlsLocked || !DEV_TOOLS_VISIBLE;
+    toggle.disabled = runtime.buildControlsLocked || !DEV_TOOLS_VISIBLE;
     toggle.onclick = () => {
-      bEditorOpen = !bEditorOpen;
-      refreshFromEdit();
+      runtime.bEditorOpen = !runtime.bEditorOpen;
+      runtime.refreshFromEdit();
     };
     header.appendChild(toggle);
   }
@@ -710,10 +479,9 @@ function renderPanel(
   panel.appendChild(form);
 
   const body = registry.bodies.get(d.bodyDefId);
-  const snapshot = currentSnapshot(d === draftA ? 'A' : 'B');
+  const snapshot = runtime.snapshotOf(d === runtime.draftA ? 'A' : 'B');
 
   // Q09-A：Body / 前后轮去表单化——选项卡片（看选项 → 点一下 → Preview 立即变化，无 Apply）。
-  // 点击立即更新 Draft → refreshFromEdit（Energy / Validator / 真实 Planck Preview）。
   const mkOptGroup = (
     label: string,
     options: Array<{ v: string; t: string }>,
@@ -727,17 +495,16 @@ function renderPanel(
     gLabel.textContent = label;
     group.appendChild(gLabel);
     const cards = document.createElement('div');
-    // Q10-B：3 档及以下（轮径）同一行等权卡片；更多（Body）保持两列
     cards.className = 'opt-cards' + (options.length <= 3 ? ' wheel' : '');
     for (const opt of options) {
       const b = document.createElement('button');
       b.className = 'opt-card' + (isActive(opt.v) ? ' active' : '');
       b.textContent = opt.t;
-      b.disabled = buildControlsLocked;
+      b.disabled = runtime.buildControlsLocked;
       b.onclick = () => {
-        if (buildControlsLocked) return;
+        if (runtime.buildControlsLocked) return;
         onPick(opt.v);
-        refreshFromEdit(); // Draft → Energy → Validator → 真实 Planck Preview（无 Apply）
+        runtime.refreshFromEdit(); // Draft → Energy → Validator → 真实 Planck Preview（无 Apply）
       };
       cards.appendChild(b);
     }
@@ -758,21 +525,18 @@ function renderPanel(
     d.frontRadius = Number(v);
   });
 
-  // Q07-B：Functional 挂点卡片化——按当前 Body 真实 hardpoints 生成挂点卡片，
-  // 卡片直接显示当前安装内容；点击卡片选中（明确选中态）并展开部件选择区。
-  // 点选项立即更新 Draft → Energy → Validator → 真实 Planck Preview（无 Apply）。
+  // Q07-B：Functional 挂点卡片化——点击卡片选中（明确选中态）并展开部件选择区。
   if (body) {
-    const isA = d === draftA;
+    const isA = d === runtime.draftA;
     const selSlot = isA ? selectedSlotA : selectedSlotB;
     const slotList = document.createElement('div');
     slotList.className = 'part-slots';
     for (const hpId of editableSlots(body)) {
       const cur = d.functionalSelections[hpId] ?? EMPTY_SLOT;
-      const curName =
-        cur === EMPTY_SLOT ? '空' : registry.functionals.get(cur)?.name ?? cur;
+      const curName = cur === EMPTY_SLOT ? '空' : registry.functionals.get(cur)?.name ?? cur;
       const card = document.createElement('button');
       card.className = 'part-slot-card' + (selSlot === hpId ? ' active' : '');
-      card.disabled = buildControlsLocked;
+      card.disabled = runtime.buildControlsLocked;
       const lab2 = document.createElement('span');
       lab2.className = 'ps-label';
       lab2.textContent = slotLabel(hpId);
@@ -782,7 +546,7 @@ function renderPanel(
       card.appendChild(lab2);
       card.appendChild(val);
       card.onclick = () => {
-        if (buildControlsLocked) return;
+        if (runtime.buildControlsLocked) return;
         // 点击挂点：切换选中（再点一次取消）；只重渲染面板，不重建 Preview
         if (isA) selectedSlotA = selectedSlotA === hpId ? null : hpId;
         else selectedSlotB = selectedSlotB === hpId ? null : hpId;
@@ -803,7 +567,6 @@ function renderPanel(
       title.className = 'pp-title';
       title.textContent = `正在改「${slotLabel(selSlot)}」`;
       picker.appendChild(title);
-      // Q22：功能件按 (defId, star) 展开；空槽单独；未拥有星级显示「未获得」仍可见
       const inv = getInventory();
       const options: Array<{ v: string; t: string; meta: string }> = [];
       options.push({ v: EMPTY_SLOT, t: '空', meta: '空 · 0 能量' });
@@ -830,7 +593,7 @@ function renderPanel(
             })();
         const b = document.createElement('button');
         b.className = (opt.v === curValEnc ? 'active' : '') + (equip ? '' : ' locked');
-        b.disabled = buildControlsLocked || !equip;
+        b.disabled = runtime.buildControlsLocked || !equip;
         const nameEl = document.createElement('div');
         nameEl.className = 'pp-name';
         nameEl.textContent = opt.t;
@@ -840,7 +603,7 @@ function renderPanel(
         b.appendChild(nameEl);
         b.appendChild(metaEl);
         b.onclick = () => {
-          if (buildControlsLocked) return;
+          if (runtime.buildControlsLocked) return;
           const oldPart = d.functionalSelections[selSlot] ?? EMPTY_SLOT;
           let newPart = EMPTY_SLOT;
           if (opt.v !== EMPTY_SLOT) {
@@ -853,11 +616,10 @@ function renderPanel(
           } else {
             d.functionalSelections[selSlot] = EMPTY_SLOT;
           }
-          emitBuildChange(selSlot, oldPart, newPart, true); // Q28：功能件变更埋点
-          // Q15-UX-R1：选完一个部件立即收起 picker（selectedSlot 回到 null），降低信息过载
+          runtime.emitBuildChange(selSlot, oldPart, newPart, true); // Q28：功能件变更埋点
           if (isA) selectedSlotA = null;
           else selectedSlotB = null;
-          refreshFromEdit(); // Draft → Energy → Validator → 真实 Planck Preview
+          runtime.refreshFromEdit(); // Draft → Energy → Validator → 真实 Planck Preview
         };
         picker.appendChild(b);
       }
@@ -865,8 +627,7 @@ function renderPanel(
     }
   }
 
-  // Q09-B：Energy 明显表现——used / capacity 条形 + 数字（超载沿用现有
-  // Validator/ computeEnergy 逻辑，仅表现层红色，不新增规则）
+  // Q09-B：Energy 明显表现——used / capacity 条形 + 数字（超载沿用 Validator 逻辑，仅表现层红色）
   const energyRes = computeEnergy(snapshot, registry);
   const used = energyRes.error ? Number.NaN : energyRes.energy;
   const capacity = body?.energyCapacity ?? 0;
@@ -899,8 +660,8 @@ function renderPanel(
     nameSpan.className = 'os-name';
     nameSpan.textContent = `${body?.name ?? d.bodyDefId}`;
     summary.appendChild(nameSpan);
-    const eTxt = Number.isFinite(used) ? String(used) : '?';
-    summary.appendChild(document.createTextNode(` · 能量 ${eTxt}/${capacity}`));
+    const eTxt2 = Number.isFinite(used) ? String(used) : '?';
+    summary.appendChild(document.createTextNode(` · 能量 ${eTxt2}/${capacity}`));
     if (body) {
       const partNames = editableSlots(body)
         .map((hpId) => {
@@ -920,103 +681,22 @@ function renderPanel(
   }
 }
 
-/** W2-UX-R2：B 测试对手编辑是否展开（默认折叠，降低首屏信息量；能力不删除） */
-let bEditorOpen = false;
-
-/** Q07-B：A/B 各自当前选中的 Functional 挂点（null = 未选中；per-panel，互不干扰） */
-let selectedSlotA: string | null = null;
-let selectedSlotB: string | null = null;
-
-/**
- * Q15-UI-R2：Garage Dock 当前展开的第一层选择（null = 全收起只显示槽位 chip）。
- * 统一 'body' / 'rearWheel' / 'frontWheel' / functional hardpoint id。
- */
-let garageSelected: 'body' | 'rearWheel' | 'frontWheel' | string | null = null;
-/** Matching 候选车 B 轻量淡入缩放起始时间（-1 = 无） */
-let bFxStart = -1;
-
-/** 中央显示当前 Draft 的真实 Planck 装配预览（不推进战斗）。
- *  Q15-UX-R1：Garage 只渲染 A（solo-A 预览，B 不 spawn 可见 / 不伪装 / 不遮挡）；
- *  MatchPreview 渲染完整 A+B（真实对阵，不启动 Physics 自动行驶）。 */
-function showPreview(): void {
-  if (playerPhase === 'matchPreview') {
-    const sa = currentSnapshot('A');
-    const sb = currentSnapshot('B');
-    lab.loadCustomPreview(sa, sb);
-    currentCamera = null;
-    reframeCamera();
-    return;
-  }
-  // Garage / Matching：只渲染我的车（solo-A）。B 占位（不绘制 / 不取景）。
-  const sa = currentSnapshot('A');
-  lab.loadCustomPreview(sa, sa, true);
-  currentCamera = null;
-  reframeCamera();
-}
-
-/** Q07-B：只重渲染 A/B 面板（挂点选中态 / 部件选择区显隐），不重建 Preview（Draft 未变）。
- *  Q15-UX-R1：Garage 只渲染 A 编辑器（隐藏 B 面板，不提前存在「当前对手」）；
- *  MatchPreview 彻底退出编辑器（左右面板均不渲染）。 */
+/** Q07-B：只重渲染 A/B 面板（挂点选中态 / 部件选择区显隐），不重建 Preview。
+ *  Q15-UX-R1：Garage 只渲染 A 编辑器；MatchPreview 彻底退出编辑器。 */
 function renderPanelsOnly(): void {
-  if (playerPhase === 'matchPreview') {
+  if (runtime.playerPhase === 'matchPreview') {
     panelA.style.display = 'none';
     panelB.style.display = 'none';
     return;
   }
   // Garage：仅 A 编辑器；B 面板隐藏
   panelB.style.display = 'none';
-  renderPanel(panelA, '我的车辆', draftA);
+  renderPanel(panelA, '我的车辆', runtime.draftA);
 }
 
-/** 编辑后刷新：面板 + （非战斗时）实时 Preview + 玩家 UI（经 Host） */
-function refreshFromEdit(): void {
-  renderPanelsOnly();
-  if (battleState !== 'fighting') {
-    showPreview();
-  }
-  // Q15：玩家 Build 持久化（最小；仅保存 Build Draft，不碰经济系统）
-  savePlayerBuild(draftA);
-  pushUI();
-}
+/* ---------- 工具栏（Q07-A：Start 是唯一主 CTA，位于画布底部；由 PlayerUIHost 提供） ---------- */
 
-/** A/B 是否均合法 */
-function buildsValid(): boolean {
-  return (
-    validateSnapshot(currentSnapshot('A'), registry).valid &&
-    validateSnapshot(currentSnapshot('B'), registry).valid
-  );
-}
-
-/** Start 阻断原因（A/B 各自最主要错误；合法为 null） */
-function blockReason(): string | null {
-  const va = validateSnapshot(currentSnapshot('A'), registry);
-  if (!va.valid && va.errors[0]) return `A：${va.errors[0]}`;
-  const vb = validateSnapshot(currentSnapshot('B'), registry);
-  if (!vb.valid && vb.errors[0]) return `B：${vb.errors[0]}`;
-  return null;
-}
-
-/** 锁定 / 解锁 A/B 全部 Build 控件（Fighting 时锁定） */
-function setBuildControlsLocked(locked: boolean): void {
-  buildControlsLocked = locked;
-  for (const sel of panelA.querySelectorAll('select')) {
-    (sel as HTMLSelectElement).disabled = locked;
-  }
-  for (const sel of panelB.querySelectorAll('select')) {
-    (sel as HTMLSelectElement).disabled = locked;
-  }
-  // W2-UX-R2：B 折叠 toggle 同锁（Fighting/Ended 不可展开）
-  for (const b of panelB.querySelectorAll('.panel-collapse button')) {
-    (b as HTMLButtonElement).disabled = locked;
-  }
-  for (const b of presetButtons) b.disabled = locked;
-  sideToggle.disabled = locked;
-}
-
-/* ---------- 工具栏（Q07-A：不再有模式双主按钮；Start 是唯一主 CTA，位于画布底部） ---------- */
-
-// Q07-A：机制场景不再是同级主按钮——场景选择收进「开发工具」折叠区（toolsHost 内）；
-// scenario 模式下才显示低优先级「返回装配」。
+// Q07-A：机制场景不再是同级主按钮——场景选择收进「开发工具」折叠区。
 const backToBuildBtn = addButton(toolbar, '返回装配', () => setMode('build'));
 backToBuildBtn.style.display = 'none';
 
@@ -1034,297 +714,16 @@ if (DEV_TOOLS_VISIBLE) {
   scenarioSelect.onchange = () => {
     const sc = SCENARIOS.find((s) => s.id === scenarioSelect!.value);
     if (sc) {
-      setMode('scenario'); // Q07-A：从开发工具选中场景 → 直接进入机制场景模式
+      setMode('scenario'); // Q07-A：从开发工具选中场景 → 直接进入机制场景模式（DOM + runtime 流）
       lab.loadScenario(sc);
-      lastShownResult = null;
-      currentResult = null;
+      runtime.clearResultState(); // 清结算/结果状态并重推 UI（Host 按 uiMode 渲染隐藏玩家 Shell）
       currentCamera = sc.camera ?? null;
-      reframeCamera();
-      pushUI(); // 场景模式隐藏玩家 Shell / 结算卡（Host 按 uiMode/battleState 渲染）
+      devReframeCamera();
     }
   };
 }
 
-/** 开战 / 原配置再战：重新 validate 当前 Draft → Planck loadCustom → Fighting 专注模式 */
-function startOrRematch(): void {
-  const sa = currentSnapshot('A');
-  const sb = currentSnapshot('B');
-  if (!validateSnapshot(sa, registry).valid || !validateSnapshot(sb, registry).valid) {
-    return; // 任一非法：不启动
-  }
-  // F-MOVE-1：A(玩家) / B(对手) 各自按自己的驱动配置，复用已验证的 sideDrive / resolveDriveEnable 链。
-  // 前进 → sideDrive 该侧 = true（正常 motor）；停驻 → false（motor off、真实 Physics 保留）。
-  const sideDrive = {
-    a: resolveDriveMode(draftA.drive) === 'forward',
-    b: resolveDriveMode(draftB.drive) === 'forward',
-  };
-  // Q21：开始新一场 Battle 前重置奖励结算器（以 result 引用为幂等键，保证每场只结算一次）
-  rewardSettler.reset();
-  // Q23→Q24：进度结算器同模式重置（每场只结算一次）
-  progressSettler.reset();
-  lab.loadCustom(sa, sb, { autoDrive: true, engine: 'planck', sideDrive });
-  battleState = 'fighting';
-  setBuildControlsLocked(true);
-  // Q28：记录开战时刻 + 重置 battle_end/reward_gain 去重器（每场新的 result 对象）
-  battleStartTimeMs = platform.lifecycle.now();
-  battleEndGuard.clear();
-  track('battle_start', {
-    opponentTier: OPPONENT_TIERS[matchedIndex],
-    playerRating: getProgress().rating,
-    body: draftA.bodyDefId,
-  });
-  // Q15-UI-R2：进入 Fighting → 玩家 Shell（顶部/Dock/MatchPreview 条/MatchInfo）隐藏，
-  // 恢复全战场 + Battle HUD（Host 按 battleState==='fighting' 统一收起）。
-  currentResult = null;
-  panelA.style.display = 'none';
-  panelB.style.display = 'none';
-  toolsToggle.style.display = 'none';
-  toolsHost.style.display = 'none';
-  currentCamera = null;
-  // Q08-CAM-A1：面板隐藏 → canvas CSS clientWidth 已变宽，但 backing
-  // (canvas.width/height) 未同步——必须先 doResize()（内部 renderer.resize 按
-  // clientWidth×DPR 同步 backing + reframeCamera）再构图，否则 Battle 刚进入
-  // 即按新 clientWidth 取景、绘制在旧 backing 上 → 右侧被裁。
-  doResize();
-  pushUI();
-}
-
-/* ---------- Q15-UI-R2：玩家 Shell（顶部状态 / 主舞台 / 底部操作）——由 WebDomPlayerUIHost 创建 ---------- */
-
-let startTransitioning = false;
-
-/** Garage → MatchPreview（由 startMatching 锁定对手后调用）：干净 VS 复核界面，与 Matching 同相机连续 */
-function goToMatchPreview(): void {
-  // Q15-UX-R1：退出 Matching 视觉层（仅文字/按钮变化，车辆位置/尺寸不跳变）
-  playerPhase = 'matchPreview';
-  bEditorOpen = false;
-  setBuildControlsLocked(true); // 只读复核
-  currentResult = null;
-  renderer.setPreviewVehicleFx(null); // 候选淡入缩放结束，B 恢复正常绘制
-  bFxStart = -1;
-  matchBarHidden = true; // Q15-FLOW-R1-ATOMIC：复核条正常流程立即隐藏，永不闪现
-  refreshFromEdit(); // 渲染面板(隐藏) + 完整 A+B 预览(previewFixed 同构图) + pushUI（Host 渲染 MatchInfo）
-  // Q15-FLOW-R1-ATOMIC：匹配完成直接开战——正常流程不再出现「调整配置 / 开始战斗」复核条。
-  // 最终对手展示约 250ms 后自动进入现有 READY → Battle（复用 startBattleWithReady，不复制第二套逻辑）。
-  window.setTimeout(() => {
-    // guard：仅当仍处于 MatchPreview 编辑态才启动；旧 timer / 已切换状态（如 Result 后重进 Matching）直接 no-op。
-    if (playerPhase !== 'matchPreview' || battleState !== 'editing') return;
-    startBattleWithReady();
-  }, 250);
-}
-
-/** Q15-UI-R2：主画布加载 A(玩家) + B(候选) 并固定取景（不创建第二个 Renderer） */
-function loadMatchAB(): void {
-  const sa = currentSnapshot('A');
-  const sb = currentSnapshot('B');
-  lab.loadCustomPreview(sa, sb); // previewFixed 相机由 reframeCamera 决定
-  currentCamera = null;
-  reframeCamera(); // previewFixed：A 左 B 右对称、固定尺度（无呼吸）
-}
-
-/** Q15-UI-R2：Matching 候选换车——只重载 B（不重取景，相机保持固定无呼吸）+ 触发 B 淡入缩放 */
-function swapMatchCandidate(idx: number): void {
-  draftB = cloneBuildDraft(OPPONENT_POOL[idx]);
-  const sa = currentSnapshot('A');
-  const sb = currentSnapshot('B');
-  lab.loadCustomPreview(sa, sb); // 不调用 reframeCamera：保留 previewFixed 固定相机
-  bFxStart = platform.lifecycle.now(); // 触发 B 轻量淡入缩放（A 不动）
-}
-
-/** 每帧应用 Matching 候选 B 的淡入缩放（A 不动；离开 Matching 即清除） */
-function applyMatchingBfx(now: number): void {
-  if (playerPhase === 'matching' && bFxStart >= 0) {
-    const t = (now - bFxStart) / 150;
-    if (t >= 1) { bFxStart = -1; renderer.setPreviewVehicleFx(null); return; }
-    const e = Math.max(0, Math.min(1, t));
-    renderer.setPreviewVehicleFx({ alpha: 0.35 + 0.65 * e, scale: 0.96 + 0.04 * e });
-  } else if (bFxStart !== -1) {
-    bFxStart = -1;
-    renderer.setPreviewVehicleFx(null);
-  }
-}
-
-/**
- * Q15-UI-R2｜玩家主流程：找对手（Garage → Matching → MatchPreview）。
- * - 锁定当前 Player Build，进入 Matching（Dock / CTA 隐藏，主画布 A 左 + 候选 B 右，同尺度同场景）；
- * - 真随机选对手（pickRandomOpponent，pool>1 禁止连续同对手、首场无预设）；
- * - Matching ~1.0s：候选车（真实对手，来自 buildMatchingSequence）至少明显变化 4 次 → 定格真正对手；
- * - generation 守卫：期间按钮不可再次触发；离开该阶段后旧 timer 不再修改 opponent；
- * - 锁定后进入 MatchPreview（同一 A+B 预览，仅文字/按钮变化，视觉连续）。
- */
-function startMatching(): void {
-  if (playerPhase === 'matching') return; // 防重复触发
-  track('find_opponent'); // Q28：发起寻找对手
-  currentResult = null; // 收起结算卡（Host）
-  battleState = 'editing';
-  playerPhase = 'matching';
-  setBuildControlsLocked(true); // 锁定当前 Build
-  // Q25：按玩家段位抽取对手（Bronze→Easy/Normal，Silver→E/N/H，Gold→N/H，Diamond→N/H），
-  // 保持随机匹配 + 不连续重复同一 Build（pickOpponentForTier 内部避开 matchedIndex）。
-  const finalIdx = pickOpponentForTier(tierOf(getProgress().rating), matchedIndex, Math.random);
-  matchedIndex = finalIdx;
-  const seq = buildMatchingSequence(finalIdx, OPPONENT_POOL.length);
-  // 主画布加载 A + 首个候选 B（previewFixed 固定相机）
-  draftB = cloneBuildDraft(OPPONENT_POOL[seq[0]]);
-  loadMatchAB();
-  pushUI(); // Host：隐藏 Dock / 显示 Matching 中央 VS + 顶部「正在寻找对手…」
-
-  const gen = ++matchingGeneration; // 本场 generation
-  // 节奏：快切 → 稍慢 → 最终锁定（0/220/480/780ms，约 1.0s 内 ≥4 次变化）
-  const steps: Array<{ at: number; idx: number }> = [
-    { at: 220, idx: seq[1] },
-    { at: 480, idx: seq[2] },
-    { at: 780, idx: seq[3] }, // 末位 = 实际锁定对手
-  ];
-  for (const s of steps) {
-    window.setTimeout(() => {
-      if (gen !== matchingGeneration) return; // 防重复触发 / 离开阶段后失效
-      swapMatchCandidate(s.idx);
-    }, s.at);
-  }
-  // 锁定 → MatchPreview（~230ms 小停顿后定格）
-  window.setTimeout(() => {
-    if (gen !== matchingGeneration) return;
-    goToMatchPreview();
-  }, 780 + 230);
-}
-
-/** MatchPreview → Fighting：READY 过渡后真正开战（复用正式 Planck Runtime） */
-function startBattleWithReady(): void {
-  if (startTransitioning) return;
-  if (battleState !== 'editing' || playerPhase !== 'matchPreview') return;
-  if (!buildsValid()) return;
-  // Q11-C-R2：用户 Start 交互 → 恢复 AudioContext（浏览器自动播放策略）
-  sfx.resume();
-  startTransitioning = true;
-  setBuildControlsLocked(true);
-  panelA.style.display = 'none';
-  panelB.style.display = 'none';
-  toolsToggle.style.display = 'none';
-  toolsHost.style.display = 'none';
-  doResize();
-  readyOverlayVisible = true;
-  pushUI(); // Host：显示 READY 过渡层
-  window.setTimeout(() => {
-    readyOverlayVisible = false;
-    startTransitioning = false;
-    startOrRematch();
-    if (battleState !== 'fighting') {
-      // 理论上不可达（已锁定且校验通过），防御：完整恢复编辑视觉
-      setBuildControlsLocked(false);
-      panelA.style.display = '';
-      panelB.style.display = '';
-      pushUI();
-    }
-  }, 600);
-}
-
-/* ---------- Q28：Build 变更埋点统一出口 ---------- */
-/**
- * Q28：Build 变更埋点统一出口。slot/oldPart/newPart/drive/body 平铺可解释；
- * 功能件槽且装备了真实部件时额外发 part_equip。车身/轮/驱动变更不发 part_equip。
- */
-function emitBuildChange(slot: string, oldPart: string, newPart: string, isFunctional: boolean): void {
-  const body = draftA.bodyDefId;
-  const drive = resolveDriveMode(draftA.drive);
-  track('build_change', { slot, oldPart, newPart, drive, body });
-  if (isFunctional && newPart && newPart !== EMPTY_SLOT) {
-    track('part_equip', { slot, part: newPart, drive, body });
-  }
-}
-
-/** Ended 后玩家选择：调整配置 → 回 Garage（保留玩家上一场 Build，不重置） */
-function adjustConfig(): void {
-  currentResult = null; // Host 收起结算卡（HUD 由 renderBattleFrame 按 battleState 控制）
-  // Q15-UX-R1：退出 Matching / MatchPreview 视觉层（Host 按 playerPhase 渲染）
-  playerPhase = 'garage'; // 回到装配
-  battleState = 'editing';
-  track('garage_enter'); // Q28：结算后回 Garage（闭环一步）
-  bEditorOpen = false;
-  selectedSlotA = null; // 进入 Garage：默认不展开部件全集
-  garageSelected = null;
-  setBuildControlsLocked(false);
-  // Q08-CAM-A1：面板恢复 → canvas CSS 变窄，先同步 backing 再显示 Preview
-  doResize();
-  refreshFromEdit(); // 按 phase(Garage) 渲染 solo-A 预览 + Dock（pushUI 接入 Host）
-}
-
-/** Ended 后玩家选择：下一场 → 走同一套 Matching（随机新对手）→ MatchPreview。
- *  Q30：在「下一场」安全节点尝试 Interstitial；广告不可用/不合格/失败/无填充均不阻塞本流程。 */
-async function nextMatch(): Promise<void> {
-  await tryInterstitialSafe(() => {
-    currentResult = null;
-    startMatching(); // 复用 Garage「寻找对手」同一状态链
-  });
-}
-
-/** Q30：每场 Result 结算（奖励 + 金币/段位 + 首轮引导 + 广告重置 + 埋点）。
- *  副作用全部留在 main.ts；Host 只负责渲染（经 pushUI 传入 state）。 */
-function finalizeBattleResult(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): void {
-  const isWin = r.winner === 'A';
-  // Q22：结算本场奖励（胜/负均获得 1★、可重复；同场只结算一次，自动入库）
-  const outcome = rewardSettler.settle(r);
-  currentReward = outcome
-    ? (() => {
-        const def = registry.functionals.get(outcome.defId);
-        const cat = def?.category === 'weapon' ? '武器' : def?.category === 'gadget' ? '辅助' : '';
-        return {
-          name: def?.name ?? outcome.defId,
-          starStr: outcome.star >= 2 ? '★★' : '★',
-          cat,
-          countAfter: outcome.countAfter,
-        };
-      })()
-    : null;
-  // Q23→Q24：结算本局金币 + 段位（同场只结算一次，自动入库）
-  const prog = progressSettler.settle(r, isWin);
-  currentEconomy = prog
-    ? {
-        coinDelta: prog.coinDelta,
-        ratingDelta: prog.ratingDelta,
-        tierLabel: TIER_LABEL[tierOf(prog.progress.rating)],
-        rating: prog.progress.rating,
-        coin: prog.progress.coin,
-      }
-    : null;
-  // Q26：首轮引导——全新账号且本场获得新部件时，明确提示「回车库调整」（仅首场，完成闭环后隐藏）
-  currentResultOnboarding = onboardingStage === 'pending' && !!outcome;
-  // Q30：每场 Result 显示时重置 Rewarded 发奖锁与按钮态（同场只发一次；下一场重新可领）
-  rewardedClaimer.reset();
-  rewardAdClaimed = false;
-  // Q30：完整 Battle 结束 → 插屏频控计数 +1（在 battle_end 去重块内，每场只计一次）
-  onBattleEnded();
-  // Q28：battle_end / reward_gain / rank_change —— 关键去重：同一 result 对象只触发一次，
-  // 防止 Result 弹窗因每帧 pollBattleResult 重复触发（与 battleEndGuard.clear() @开战 配合）。
-  if (battleEndGuard.firstTime(r)) {
-    const duration = Math.max(0, (platform.lifecycle.now() - battleStartTimeMs) / 1000);
-    const playerRating = prog ? prog.progress.rating : getProgress().rating;
-    track('battle_end', {
-      result: isWin ? 'win' : 'lose',
-      duration: Number(duration.toFixed(1)),
-      playerRating,
-      opponentTier: OPPONENT_TIERS[matchedIndex],
-    });
-    if (prog) {
-      track('reward_gain', {
-        coinDelta: prog.coinDelta,
-        ratingDelta: prog.ratingDelta,
-        part: outcome?.defId ?? null,
-        star: outcome ? (outcome.star >= 2 ? 2 : 1) : null,
-      });
-      if (prog.ratingDelta !== 0) {
-        track('rank_change', {
-          from: prog.progress.rating - prog.ratingDelta,
-          to: prog.progress.rating,
-          delta: prog.ratingDelta,
-          tier: TIER_LABEL[tierOf(prog.progress.rating)],
-        });
-      }
-    }
-  }
-}
-
-/* ---------- Q07-A：开发工具折叠区（机制场景 / Pause / Reset / Clear / 速度 / Preset 全部收进二级） ---------- */
+/* ---------- Q07-A：开发工具折叠区（机制场景 / Pause / Reset / Clear / 速度 / Preset 收进二级） ---------- */
 const toolsToggle = addButton(toolbar, '开发工具 ▸', () => {
   toolsOpen = !toolsOpen;
   toolsHost.style.display = toolsOpen ? '' : 'none';
@@ -1343,51 +742,9 @@ const toolsLabel = document.createElement('span');
 toolsLabel.className = 'tool-tools-label';
 toolsLabel.textContent = '调试：';
 toolsHost.appendChild(toolsLabel);
-// Q13-C-R4：toolsHost 不再放进 .lab-main（横向 flex 会把它挤压成窄条、Scenario 不可见）。
-// 改为放进 .lab-root，作为 toolbar 与 main 之间的独立纵向一行（全宽，flex-shrink:0，不挤压战场）。
 root.insertBefore(toolsHost, main);
 let toolsOpen = false;
-// 基础 CSS 为 display:flex，这里显式收起，保证首屏默认隐藏（展开由内联 '' 回退到 flex）。
 toolsHost.style.display = 'none';
-
-/** 每帧轮询：result 变化 → Ended（显示中央结算卡；Build 控件保持锁定，先选「调整配置」） */
-function pollBattleResult(): void {
-  const r = lab.orchestrator?.result ?? null;
-  if (r === lastShownResult) return;
-  lastShownResult = r;
-  if (uiMode === 'build' && battleState === 'fighting' && r && r.phase === 'End') {
-    battleState = 'ended';
-    currentResult = { winner: r.winner, hpA: r.hpA, hpB: r.hpB };
-    finalizeBattleResult(currentResult); // 结算副作用（奖励/经济/埋点/广告重置）
-    pushUI(); // Host：结算卡成为第一视觉焦点
-  }
-}
-
-/** 顶层模式切换（Q07-A）：装配（默认主页面）↔ 机制场景（开发工具入口）。
- *  不再有双主按钮——scenario 由开发工具内场景选择进入，backToBuildBtn 返回装配。
- *  F-WX-3：玩家 Shell 可见性统一交给 Host（build 模式隐藏旧 .lab-panel、改用 Dock；
- *  scenario 保留旧 panel）。 */
-function setMode(m: UiMode): void {
-  uiMode = m;
-  backToBuildBtn.style.display = m === 'scenario' ? '' : 'none';
-  const showBuild = m === 'build';
-  // Q07-A：scenarioSelect 位于开发工具折叠区内，显示与否由 toolsHost 控制，不再单独切换
-  // Q31：PROD 下 debugPanel 为 null（Runtime Debug Tools 已隐藏）→ 跳过。
-  if (debugPanel) debugPanel.style.display = showBuild ? 'none' : '';
-  currentResult = null; // 模式切换关闭结算卡（Host）
-  // Q08-CAM-A1：模式切换改面板显隐 → canvas CSS 尺寸变化，先同步 backing 再构图
-  doResize();
-  if (showBuild && battleState !== 'fighting') {
-    // Q15-UX-R1：切回装配 → Garage（solo-A），退出 Matching/MatchPreview 视觉层
-    playerPhase = 'garage';
-    track('garage_enter'); // Q28：进入 Garage（仅当真正切回装配时）
-    selectedSlotA = null;
-    refreshFromEdit(); // 按 phase(Garage) 渲染 A 编辑器 + solo-A 预览
-  }
-  pushUI();
-}
-
-/* ---------- 其余工具栏（Pause / Reset / Clear / 时间缩放）——收进「测试工具」折叠区 ---------- */
 
 const btnPause = addButton(toolsHost, 'Pause', () => {
   lab.paused = !lab.paused;
@@ -1399,36 +756,15 @@ addButton(toolsHost, 'Reset', () => {
   btnPause.textContent = 'Pause';
   btnPause.classList.remove('active');
   lab.reset();
-  lastShownResult = null;
-  currentResult = null;
-  // preview 重建 → Editing（中央恢复装配预览）；battle 重建 → Fighting
-  if (uiMode === 'build') {
-    battleState = lab.previewMode ? 'editing' : 'fighting';
-    setBuildControlsLocked(!lab.previewMode);
-    if (lab.previewMode) {
-      // Q15-UX-R1：回装配恢复（按 phase 渲染面板 + 预览 + CTA；Garage 不显示 B 面板）
-      toolsToggle.style.display = TOOLS_DEV_VISIBLE;
-      doResize();
-      refreshFromEdit();
-    } else {
-      reframeCamera(); // Fighting：布局未变（面板已隐藏）
-    }
-    pushUI();
-  }
+  runtime.syncAfterLabReset(); // flow 同步（preview → Editing / battle → Fighting）
+  if (lab.previewMode) toolsToggle.style.display = TOOLS_DEV_VISIBLE;
 });
 addButton(toolsHost, 'Clear', () => {
   lab.clear();
-  lastShownResult = null;
   currentCamera = null;
-  currentResult = null;
-  if (uiMode === 'build') {
-    battleState = 'editing';
-    setBuildControlsLocked(false);
-    toolsToggle.style.display = TOOLS_DEV_VISIBLE; // Q07-C：回装配恢复开发工具入口
-    selectedSlotA = null;
-    doResize(); // Q08-CAM-A1：面板恢复 → CSS 变窄，先同步 backing
-    refreshFromEdit(); // Clear 后恢复装配预览（Garage：solo-A + 仅 A 面板）
-  }
+  selectedSlotA = null;
+  runtime.syncAfterLabClear(); // flow 同步（→ Editing + 恢复装配预览）
+  toolsToggle.style.display = TOOLS_DEV_VISIBLE;
 });
 
 // 时间缩放（测试工具折叠区内）
@@ -1468,7 +804,7 @@ const presetButtons: HTMLButtonElement[] = [];
     b.style.cssText =
       'display:block;width:100%;margin:4px 0;padding:5px;background:#242b38;color:#e8e8f0;border:1px solid #38414f;border-radius:5px;cursor:pointer;';
     b.onclick = () => {
-      const target = targetSide === 'A' ? draftA : draftB;
+      const target = targetSide === 'A' ? runtime.draftA : runtime.draftB;
       const build = p.build();
       target.bodyDefId = build.bodyDefId;
       const f = build.movements.find((m) => m.hardpointId === 'front');
@@ -1482,7 +818,7 @@ const presetButtons: HTMLButtonElement[] = [];
           target.functionalSelections[hp.id] = EMPTY_SLOT;
         }
       }
-      refreshFromEdit();
+      runtime.refreshFromEdit();
     };
     presetBox.appendChild(b);
     presetButtons.push(b);
@@ -1526,7 +862,6 @@ if (DEV_TOOLS_VISIBLE && debugPanel) {
     checkboxes.set(key, cb);
   }
 
-  // 「全部关闭」（Q02-LAB-DEBUG-UX）：一次取消所有 Debug 显示项，立即更新画面。
   const btnAllOff = document.createElement('button');
   btnAllOff.textContent = '全部关闭';
   btnAllOff.style.cssText =
@@ -1565,7 +900,7 @@ if (DEV_TOOLS_VISIBLE && debugPanel) {
       if (!Number.isNaN(v)) {
         (lab.overrides as Record<string, number>)[key] = v;
         lab.reset();
-        reframeCamera(); // Override 触发 reset：重新构图一次
+        devReframeCamera(); // Override 触发 reset：重新构图一次
       }
     };
     lab2.appendChild(inp);
@@ -1573,181 +908,49 @@ if (DEV_TOOLS_VISIBLE && debugPanel) {
   }
 }
 
-/* ---------- F-WX-3：玩家输入 → PlayerUIActions（转成 Gameplay command） ---------- */
-const playerActions: PlayerUIActions = {
-  onToggleGarageSlot: (key) => {
-    garageSelected = garageSelected === key ? null : key;
-    pushUI(); // Host 重渲染 Dock：展开/收起第二层
-  },
-  onPickGarageOption: (value) => {
-    const slotKey = garageSelected;
-    if (!slotKey) return;
-    const slotIsFunctional =
-      slotKey !== 'body' && slotKey !== 'rearWheel' && slotKey !== 'frontWheel' && slotKey !== 'drive';
-    // Q22：未拥有功能件（含未拥有星级）不可装备（守卫，disabled 仍双保险）
-    if (slotIsFunctional && value !== EMPTY_SLOT) {
-      const { defId, star } = decodePartVal(value);
-      if (!canEquipPart(defId, star)) return;
-    }
-    // Q28：变更前快照
-    const oldVal =
-      slotKey === 'body' ? draftA.bodyDefId
-      : slotKey === 'rearWheel' ? String(draftA.rearRadius)
-      : slotKey === 'frontWheel' ? String(draftA.frontRadius)
-      : slotKey === 'drive' ? resolveDriveMode(draftA.drive)
-      : (draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
-    if (slotKey === 'body') {
-      const migrated = migrateDraftBody(draftA, value, registry);
-      draftA.bodyDefId = migrated.bodyDefId;
-      draftA.functionalSelections = migrated.functionalSelections;
-    } else if (slotKey === 'rearWheel') {
-      draftA.rearRadius = Number(value);
-    } else if (slotKey === 'frontWheel') {
-      draftA.frontRadius = Number(value);
-    } else if (slotKey === 'drive') {
-      draftA.drive = value as DriveMode;
-    } else {
-      // Q22：功能件按 (defId, star) 装备
-      if (value === EMPTY_SLOT) {
-        draftA.functionalSelections[slotKey] = EMPTY_SLOT;
-      } else {
-        const { defId, star } = decodePartVal(value);
-        draftA.functionalSelections[slotKey] = defId;
-        draftA.functionalStars = draftA.functionalStars ?? {};
-        draftA.functionalStars[slotKey] = star;
-      }
-    }
-    // Q28：Build 变更埋点（功能件槽额外发 part_equip）
-    const isFunctional = slotKey !== 'body' && slotKey !== 'rearWheel' && slotKey !== 'frontWheel' && slotKey !== 'drive';
-    const newVal =
-      slotKey === 'body' ? draftA.bodyDefId
-      : slotKey === 'rearWheel' ? String(draftA.rearRadius)
-      : slotKey === 'frontWheel' ? String(draftA.frontRadius)
-      : slotKey === 'drive' ? resolveDriveMode(draftA.drive)
-      : (draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
-    emitBuildChange(slotKey, oldVal, newVal, isFunctional);
-    garageSelected = null; // 选完即收起
-    refreshFromEdit(); // Draft → Energy → Preview + 重渲染 Dock（pushUI）
-  },
-  onFindOpponent: () => {
-    if (!buildsValid()) return;
-    sfx.resume();
-    startMatching();
-  },
-  onMatchAdjust: () => adjustConfig(),
-  onStartBattle: () => startBattleWithReady(),
-  onResultAdjust: () => {
-    // Q26：Result 的「调整配置」= 完成一次 Battle→Result→Garage 闭环 → 关闭首轮引导。
-    completeOnboarding();
-    onboardingStage = 'done';
-    adjustConfig();
-  },
-  onResultNext: () => {
-    void nextMatch();
-  },
-  onClaimRewardAd: async () => {
-    if (rewardAdClaimed) return; // 本场已领 → 直接拒绝
-    const out = await rewardedClaimer.claim();
-    if (out.granted) {
-      rewardAdClaimed = true;
-      // 刷新当前金币展示（若经济区当前可见）
-      if (currentEconomy) {
-        currentEconomy = { ...currentEconomy, coin: out.coinAfter ?? currentEconomy.coin };
-      }
-      pushUI();
-    }
-    // 关闭 / 失败 / 无填充：不发奖，按钮保持可点（玩家可重试），绝不卡死
-  },
-  onMerge: () => {
-    const cur = getInventory();
-    const p = getProgress();
-    track('merge_attempt'); // Q28：发起合成
-    // Q23：合成 = 5×1★ 熔炼 + 固定金币消耗（纯函数，金币不足/副本不足均不生效）
-    const res = mergeWithCost(cur, equippedDefIds(draftA), p.coin);
-    if (!res.ok) return;
-    track('merge_success'); // Q28：合成成功
-    saveInventory(res.inventory);
-    saveProgress({ coin: res.coin, rating: p.rating }); // 仅扣金币，rating 不变
-    pushUI(); // Host 重渲染：反映新 2★ 库存 + 扣费后金币 + 合成面板
-  },
-  onResetProgress: () => {
-    resetPlayerSave();
-    resetAdFrequency(); // Q30：频控一并恢复新账号态
-    location.reload();
-  },
-};
-host.setActions(playerActions);
-
-/* ---------- 初始：默认装配测试模式 + Draft Preview（不启动 Scenario） ---------- */
-track('game_start'); // Q28：应用启动（一次）
-refreshFromEdit();
-setMode('build');
-
-function doResize(): void {
-  const d = arenaDims();
-  renderer.resize(d.w, d.h);
-  reframeCamera(); // viewport resize：重新构图一次
+/* ---------- 顶层模式切换（Q07-A）：装配 ↔ 机制场景（DOM 部分；Gameplay 流在 runtime.setMode） ---------- */
+function setMode(m: UiMode): void {
+  if (m === 'build') selectedSlotA = null; // 切回装配：不展开部件全集（须先于 refresh）
+  runtime.setMode(m);
+  backToBuildBtn.style.display = m === 'scenario' ? '' : 'none';
+  const showBuild = m === 'build';
+  if (debugPanel) debugPanel.style.display = showBuild ? 'none' : '';
 }
+
+/* ---------- F-WX-5：PlayerGameRuntime（Web 接线；玩家流程唯一出口） ---------- */
+const runtime = new PlayerGameRuntime({
+  host,
+  battle: battleHost,
+  sfx,
+  isResetDevVisible: () => new URLSearchParams(location.search).has('resetdev'),
+  onDevResetReload: () => location.reload(),
+  onPanelsChanged: () => renderPanelsOnly(),
+  onBuildLocked: (locked) => setBuildControlsLockedDom(locked),
+  // Web-only 每帧表现：场边红脉冲（Warning）+ Death 定格恢复（timeScale）
+  onArenaFrame: ({ previewMode, inWarning }) => {
+    canvasWrap.classList.toggle('phase-warning', inWarning);
+    if (previewMode) return;
+    if (deathPause.active && deathPause.shouldResume()) {
+      lab.timeScale = prevTimeScale;
+      deathPause.clear();
+    }
+  },
+  onResize: doResize,
+  onCameraReset: () => {
+    currentCamera = null;
+  },
+});
+
+/* ---------- 初始：默认装配测试模式（runtime.init 装载玩家状态 + 初始渲染） ---------- */
+// F-WX-2：Viewport Adapter（window resize → doResize；build 玩家相机 / scenario DEV 相机）
 viewport.onResize(doResize);
-doResize();
+runtime.init(); // track(game_start) + 玩家状态装载 + 初始 doResize/reframe + pushUI
+if (debugPanel) debugPanel.style.display = 'none';
+backToBuildBtn.style.display = 'none';
 
-/* ---------- W2-FX-2：阶段表现轮询（Warning 倒计时 + 场边红脉冲 + 刺墙预高亮/Closing 进入）。
- * 返回 Warning 倒计时文案（null = 隐藏），由 Host 渲染。 ---------- */
-let lastPhase: string | null = null;
-let phaseStartTimeMs = 0;
-let lastPhaseOrch: unknown = null;
-function pollArenaPhase(nowMs: number): string | null {
-  const o = lab.orchestrator;
-  // 战斗实例变化（load / reset / preview 重建）→ 阶段状态重置
-  if (o !== lastPhaseOrch) {
-    lastPhaseOrch = o;
-    lastPhase = null;
-    phaseStartTimeMs = 0;
-  }
-  // Preview / 无战斗：不显示阶段表现
-  if (!o || lab.previewMode) {
-    canvasWrap.classList.remove('phase-warning');
-    return null;
-  }
-  if (o.phase !== lastPhase) {
-    lastPhase = o.phase;
-    phaseStartTimeMs = o.timeMs;
-    // Q08-A：phase 切换（Active→Warning→Closing/End）→ 稳定切换一次构图
-    // （battle fit 按 phase：近景→中景→全景；非每帧重算、无呼吸/无跟随）。
-    reframeCamera();
-  }
-  const phase = o.phase;
-  const inWarning = phase === 'Warning' && o.result?.phase !== 'End';
-  canvasWrap.classList.toggle('phase-warning', inWarning);
-  // Death 定格恢复：表现层 80~120ms 冻结结束 → 恢复原 timeScale（不改 Gameplay/Physics 语义）
-  if (deathPause.active && deathPause.shouldResume()) {
-    lab.timeScale = prevTimeScale;
-    deathPause.clear();
-  }
-  if (inWarning) {
-    const warningMs = o.config.arena?.phases?.warningMs ?? 3000;
-    const remaining = phaseRemainingMs(phase, warningMs, o.timeMs - phaseStartTimeMs);
-    return warningCountdown(remaining);
-  }
-  // Closing / Active / End：倒计时消失（Closing 开始后刺墙正式进入，由 Renderer 表现）
-  void nowMs;
-  return null;
-}
-
-let last = platform.lifecycle.now();
+/* ---------- 主循环（F-WX-5：调度在入口，推进在 runtime.tick；dt 钳制在 runtime） ---------- */
 function loop(now: number): void {
-  const dt = Math.min(50, now - last);
-  last = now;
-  lab.step(dt);
-  applyMatchingBfx(now); // Matching 候选 B 淡入缩放（须先于 render 应用，A 不动）
-  lab.render();
-  const countdownText = pollArenaPhase(now); // 阶段倒计时 / 场边红脉冲 / Death 定格恢复
-  pollBattleResult(); // result 变化 → Ended 迁移 + 结算 + 结果展示（pushUI）
-  host.renderBattleFrame({
-    battleState,
-    battleStatus: lab.orchestrator?.getBattleStatusSnapshot?.() ?? null,
-    phaseCountdownText: countdownText,
-  });
+  runtime.tick(now);
   platform.lifecycle.requestAnimationFrame(loop);
 }
 platform.lifecycle.requestAnimationFrame(loop);

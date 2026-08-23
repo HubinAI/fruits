@@ -143,7 +143,6 @@ describe('F-WX-4 CanvasPlayerUIHost', () => {
 
   it('Garage：点合成 → onMerge（规则在 main.ts，Host 不决定）', () => {
     // 全新账号副本/金币不足 → 合成按钮禁用（不注册命中）；给足库存+金币后可用
-    const freshInv = getInventory();
     host.render(garageState());
     expect(host.getHitAreasForTest().map((a) => a.id)).not.toContain('merge');
 
@@ -227,6 +226,96 @@ describe('F-WX-4 CanvasPlayerUIHost', () => {
       });
       host.render(RESULT_STATE);
       host.render(garageState());
+    }).not.toThrow();
+  });
+});
+
+describe('F-WX-5 CanvasPlayerUIHost mountCanvas（平台中立，无 DOM 容器）', () => {
+  let capturedPointer: ((x: number, y: number) => void) | null = null;
+  let host: CanvasPlayerUIHost;
+  let fired: Record<string, string[]> = {};
+  /** 微信画布：物理像素 + 2D ctx + 无 style（无 DOM） */
+  let wxCanvas: HTMLCanvasElement;
+
+  beforeEach(() => {
+    capturedPointer = null;
+    fired = {};
+    const core = createWebCore();
+    bindPlatformCore({
+      ...core,
+      input: {
+        bindClick: () => {},
+        bindPointer: (_t: EventTarget, h: (x: number, y: number) => void) => {
+          capturedPointer = h;
+        },
+      },
+    } as Parameters<typeof bindPlatformCore>[0]);
+    wxCanvas = {
+      getContext: () => makeStubCtx(),
+      width: 750,
+      height: 1334,
+      style: undefined, // 微信 canvas 无 DOM style
+    } as unknown as HTMLCanvasElement;
+    host = new CanvasPlayerUIHost(wxCanvas);
+    host.mountCanvas(); // 平台中立挂载：不碰 style/appendChild
+    host.setActions({
+      onToggleGarageSlot: (k) => void (fired['toggle'] = [...(fired['toggle'] ?? []), k]),
+      onPickGarageOption: (v) => void (fired['pick'] = [...(fired['pick'] ?? []), v]),
+      onFindOpponent: () => void (fired['find'] = [...(fired['find'] ?? []), 'x']),
+      onMatchAdjust: () => void (fired['matchAdjust'] = [...(fired['matchAdjust'] ?? []), 'x']),
+      onStartBattle: () => void (fired['startBattle'] = [...(fired['startBattle'] ?? []), 'x']),
+      onResultAdjust: () => void (fired['resultAdjust'] = [...(fired['resultAdjust'] ?? []), 'x']),
+      onResultNext: () => void (fired['next'] = [...(fired['next'] ?? []), 'x']),
+      onClaimRewardAd: () => void (fired['reward'] = [...(fired['reward'] ?? []), 'x']),
+      onMerge: () => void (fired['merge'] = [...(fired['merge'] ?? []), 'x']),
+      onResetProgress: () => {},
+    });
+  });
+
+  afterEach(() => {
+    bindPlatformCore(createWebCore());
+  });
+
+  /** 物理像素坐标点击（逻辑坐标按 ensureSize 同源换算） */
+  function tapPhysical(id: string): void {
+    const areas = host.getHitAreasForTest();
+    const a = areas.find((x) => x.id === id);
+    expect(a, `应存在命中区 ${id}`).toBeTruthy();
+    expect(capturedPointer).toBeTruthy();
+    const w = Math.max(1, wxCanvas.width);
+    const h = Math.max(1, wxCanvas.height);
+    const scale = Math.min(w / 1280, h / 720);
+    const ox = (w - 1280 * scale) / 2;
+    const oy = (h - 720 * scale) / 2;
+    capturedPointer!(ox + (a!.x + a!.w / 2) * scale, oy + (a!.y + a!.h / 2) * scale);
+  }
+
+  it('750×1334：mountCanvas 渲染 + 物理坐标命中 CTA → onFindOpponent（验收 viewport）', () => {
+    host.render(garageState());
+    expect(() => host.render(garageState())).not.toThrow();
+    tapPhysical('cta-find');
+    expect(fired['find']).toHaveLength(1);
+  });
+
+  it('828×1792（不同 viewport）：渲染 + 命中不随分辨率漂移（验收多 viewport）', () => {
+    wxCanvas.width = 828;
+    wxCanvas.height = 1792;
+    host.render(garageState());
+    expect(() => host.render(garageState({ playerPhase: 'matching' }))).not.toThrow();
+    host.render(garageState()); // 回到 Garage（matching 无 CTA 命中区）
+    tapPhysical('cta-find');
+    expect(fired['find']).toHaveLength(1);
+  });
+
+  it('无 style 的微信 canvas：战斗 HUD 渲染不抛（draw 内 style 守卫）', () => {
+    host.render(garageState());
+    expect(() => {
+      host.render({ ...garageState(), battleState: 'fighting' });
+      host.renderBattleFrame({
+        battleState: 'fighting',
+        battleStatus: { phase: 'Active', sideA: { hp: 100, maxHp: 100 }, sideB: { hp: 100, maxHp: 100 } },
+        phaseCountdownText: null,
+      });
     }).not.toThrow();
   });
 });
