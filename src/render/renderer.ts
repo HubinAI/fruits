@@ -105,6 +105,14 @@ const SOLO_MIN_X = 400;
 const SOLO_MAX_X = 840;
 const SOLO_MIN_Y = 400;
 const SOLO_MAX_Y = 730;
+// F-WX-8-B：Mobile-first Garage 用紧凑 solo 框——纵向收窄到车辆+地面附近
+// （spawn y=640、车高 ≤80、地面锚 640；groundY+40 钳制后 bh≈146），横向 560
+// （车辆实际世界宽 ~243 含轮/部件，560 框 → 屏占比 ≈243/576≈42%，落在 30~45%
+// 且不随屏宽漂移）。旧框（y∈[400,730] 高 330）在手机 390 逻辑高下被高度 fit 压扁（~24%）。
+const MOBILE_SOLO_MIN_X = 340;
+const MOBILE_SOLO_MAX_X = 900;
+const MOBILE_SOLO_MIN_Y = 550;
+const MOBILE_SOLO_MAX_Y = 660;
 const MATCH_MIN_X = 440;
 const MATCH_MAX_X = 1150;
 const MATCH_MIN_Y = 400;
@@ -1480,8 +1488,16 @@ export class Renderer {
     };
     // Q15-UI-R2：固定预览框（previewSolo / previewFixed）——bounds 直接定死，
     // 不按车辆包围盒取景（候选换车 / 不同车身均不呼吸缩放）。
+    // F-WX-8-B：compact 手机横屏用「Mobile 固定框」——previewSolo 纵向收窄到车辆+
+    // 地面附近（旧框 y∈[400,730] 高 330 被纵向 fit 压扁，车辆只剩 ~19% 宽），
+    // 横向保持 440（所有 body 覆盖）；previewFixed（Matching）语义不变。
+    const isCompact = isCompactLandscape(this.viewWidth / this.viewDpr, this.viewHeight / this.viewDpr);
     if (fit === 'previewSolo') {
-      minX = SOLO_MIN_X; maxX = SOLO_MAX_X; minY = SOLO_MIN_Y; maxY = SOLO_MAX_Y;
+      if (isCompact) {
+        minX = MOBILE_SOLO_MIN_X; maxX = MOBILE_SOLO_MAX_X; minY = MOBILE_SOLO_MIN_Y; maxY = MOBILE_SOLO_MAX_Y;
+      } else {
+        minX = SOLO_MIN_X; maxX = SOLO_MAX_X; minY = SOLO_MIN_Y; maxY = SOLO_MAX_Y;
+      }
     } else if (fit === 'previewFixed') {
       minX = MATCH_MIN_X; maxX = MATCH_MAX_X; minY = MATCH_MIN_Y; maxY = MATCH_MAX_Y;
     }
@@ -1546,7 +1562,10 @@ export class Renderer {
     if (!isFinite(minX) || !isFinite(minY) || maxX - minX < 1 || maxY - minY < 1) return;
     const isPreview = fit === 'preview';
     const isFixed = fit === 'previewSolo' || fit === 'previewFixed';
-    const m = isPreview ? PREVIEW_MARGIN_WORLD : CONTENT_MARGIN_WORLD;
+    // F-WX-8-B：compact 固定框（Mobile previewSolo/previewFixed）用极小 margin——
+    // 固定框 bounds 自带覆盖余量（如 solo 框 440 宽 vs 车辆 180 宽），再叠加 48 的
+    // CONTENT_MARGIN_WORLD 会把纵向 bh 撑大、压扁手机横屏下的车辆（实测 24%）。
+    const m = isFixed && isCompact ? 8 : isPreview ? PREVIEW_MARGIN_WORLD : CONTENT_MARGIN_WORLD;
     minX -= m; maxX += m; minY -= m; maxY += m;
     // 地面表面留出可见区域
     if (maxY < snap.arena.groundY + 40) maxY = snap.arena.groundY + 40;
@@ -1556,13 +1575,12 @@ export class Renderer {
     // R2：可用画布 = 中央实际战斗可视区域（扣除左右 UI 阴影区）；
     // Q15-UI-R2：玩家 Shell 预览（previewSolo / previewFixed）额外内缩 top/bottom，
     // 给顶部状态栏与底部装配 Dock 留位，车辆居中于中间可视带、不被遮挡。
-    // F-WX-6：紧凑横屏（手机）加大 UI 安全区——顶部给 HUD（~56 逻辑 px）、
-    // 底部给 Garage Dock（preview ~220 逻辑 px）；Desktop（h≥600）语义完全不变。
+    // F-WX-6/8-B：紧凑横屏（手机）——顶部给状态条/HUD（~52 逻辑 px）、底部给
+    // Mobile-first Garage 两层操作区（~110 逻辑 px）；previewSolo 左右阴影区收窄到 8
+    // （Mobile Garage 全宽布局，safe area 由 Host insL/insR 处理）→ 车辆占可用宽 30~45%。
+    // Desktop（h≥600）语义完全不变。
     // 注意：view-space 为物理 px（surface 或 canvas 像素），inset 值 ×viewDpr 换算回逻辑 px。
-    const isCompact = isCompactLandscape(
-      this.viewWidth / this.viewDpr,
-      this.viewHeight / this.viewDpr,
-    );
+    const insetX = isFixed && isCompact ? 8 : SAFE_INSET_X;
     const insetTop = isFixed
       ? isCompact
         ? Math.round(52 * this.viewDpr)
@@ -1572,12 +1590,12 @@ export class Renderer {
         : SAFE_INSET_Y;
     const insetBottom = isFixed
       ? isCompact
-        ? Math.round(220 * this.viewDpr)
+        ? Math.round(110 * this.viewDpr) // F-WX-8-B：新三层 Dock 两行 ~100px
         : 160
       : isCompact
         ? Math.round(40 * this.viewDpr)
         : SAFE_INSET_Y;
-    const safeW = Math.max(2, cw - SAFE_INSET_X * 2);
+    const safeW = Math.max(2, cw - insetX * 2);
     const safeH = Math.max(2, ch - insetTop - insetBottom);
     // Q06-UX-R2-FIX / Q08-A-FIX：声明「完整入画」的 fit（preview / battle）直接取
     // fitLimit——任何 >1 的乘数（旧 ×1.9、×1.05）都会使含 margin 的内容超出
@@ -1590,7 +1608,7 @@ export class Renderer {
     if (scale < MIN_CONTENT_SCALE) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
     // 内容居中于安全区中心（offset 含安全区内缩量；玩家 Shell 预览用 top 内缩）
-    const offsetX = SAFE_INSET_X + (safeW - bw * scale) / 2 - minX * scale;
+    const offsetX = insetX + (safeW - bw * scale) / 2 - minX * scale;
     const offsetY = insetTop + (safeH - bh * scale) / 2 - minY * scale;
     this.transform = { scale, offsetX, offsetY };
   }

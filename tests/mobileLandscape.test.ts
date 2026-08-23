@@ -160,21 +160,86 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     bindPlatformCore(createWebCore());
   });
 
-  it('验收1/2｜Garage 关键按钮在有效 safe area + 命中 ≥40px（Mobile viewports）', () => {
+  it('验收1/2｜Garage 首屏：入口行 + 主 CTA 在有效 safe area + 命中 ≥44px；无部件信息墙', () => {
     for (const vp of VIEWPORTS.filter((v) => v.mobile)) {
       const env = makeHost(vp, LANDSCAPE_INSETS);
       env.host.render(richGarageState()); // 富库存+金币：merge 可点（非禁用态才注册命中）
-      const ids = ['cta-find', 'merge', 'chip:body', 'chip:rearWheel', 'chip:frontWheel', 'chip:drive'];
+      const ids = [
+        'cta-find',
+        'merge',
+        'entry:body',
+        'entry:rearWheel',
+        'entry:frontWheel',
+        'entry:drive',
+        'entry-weapons',
+      ];
       for (const id of ids) {
         const a = env.host.getHitAreasForTest().find((x) => x.id === id);
         expect(a, `${vp.w}×${vp.h} 应有 ${id}`).toBeTruthy();
-        expect(a!.h, `${vp.w}×${vp.h} ${id} 命中高 ≥40`).toBeGreaterThanOrEqual(40);
+        expect(a!.h, `${vp.w}×${vp.h} ${id} 命中高 ≥44`).toBeGreaterThanOrEqual(44);
         expect(a!.x, `${id} x 在 safe area 内`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.left);
         expect(a!.x + a!.w, `${id} 右缘在 safe area 内`).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right);
         expect(a!.y, `${id} y 在 safe area 内`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.top);
         expect(a!.y + a!.h, `${id} 底缘在 safe area 内`).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom);
       }
+      // F-WX-8-B：首屏不展开完整部件信息墙——无选项、无武器位 chip、无合成面板
+      expect(areas(env, 'opt:')).toHaveLength(0);
+      expect(areas(env, 'chip:')).toHaveLength(0);
+      expect(areas(env, 'merge-confirm')).toHaveLength(0);
+      expect(areas(env, 'merge-close')).toHaveLength(0);
+      // 「寻找对手」是最大主按钮（宽 > 合成入口宽）
+      const cta = env.host.getHitAreasForTest().find((x) => x.id === 'cta-find')!;
+      const merge = env.host.getHitAreasForTest().find((x) => x.id === 'merge')!;
+      expect(cta.w, 'CTA 宽 > 合成入口宽').toBeGreaterThan(merge.w);
     }
+  });
+
+  it('F-WX-8-B｜一次只处理一个配置决策：点入口才展开该类；展开时不混显其它入口/武器位', () => {
+    const vp = { w: 844, h: 390 };
+    const env = makeHost(vp, LANDSCAPE_INSETS);
+    env.host.render(richGarageState());
+    // 点「车身」入口 → 派发 onToggleGarageSlot('body') → runtime 侧展开
+    const entryBody = env.host.getHitAreasForTest().find((a) => a.id === 'entry:body')!;
+    env.pointer(entryBody.x + entryBody.w / 2, entryBody.y + entryBody.h / 2);
+    expect(env.fired['toggle']).toContain('body');
+    env.host.render(richGarageState({ garageSelected: 'body' }));
+    // 展开态：只有 body 选项；入口行/武器位 chip 不再混显
+    expect(areas(env, 'opt:').length).toBeGreaterThan(0);
+    expect(areas(env, 'entry:')).toHaveLength(0);
+    expect(areas(env, 'chip:')).toHaveLength(0);
+    // 点「武器」入口 → 展开武器位选择（chip: 功能件槽），无选项
+    env.host.render(richGarageState()); // 收起（runtime 选完即收起语义）
+    const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'entry-weapons')!;
+    env.pointer(entryW.x + entryW.w / 2, entryW.y + entryW.h / 2);
+    expect(areas(env, 'chip:').length).toBeGreaterThan(0); // 武器位 chip 出现
+    expect(areas(env, 'opt:')).toHaveLength(0); // 尚未选武器位 → 无选项
+    expect(areas(env, 'entry:')).toHaveLength(0); // 入口行隐藏
+    // 选一个武器位 → 展开该类选项
+    const slot = areas(env, 'chip:')[0];
+    env.pointer(slot.x + slot.w / 2, slot.y + slot.h / 2);
+    expect(env.fired['toggle'].length).toBeGreaterThan(1);
+    env.host.render(richGarageState({ garageSelected: slot.id.slice(5) }));
+    expect(areas(env, 'opt:').length).toBeGreaterThan(0);
+  });
+
+  it('F-WX-8-B｜改一个部件 → 找对手（Mobile Garage 最小闭环）', () => {
+    const vp = { w: 844, h: 390 };
+    const env = makeHost(vp, LANDSCAPE_INSETS);
+    env.host.render(richGarageState());
+    // 改部件：点「车身」入口 → 展开 → 点一个选项（fake 记录 pick）→ 收起
+    const entryBody = env.host.getHitAreasForTest().find((a) => a.id === 'entry:body')!;
+    env.pointer(entryBody.x + entryBody.w / 2, entryBody.y + entryBody.h / 2);
+    env.host.render(richGarageState({ garageSelected: 'body' }));
+    const opt = areas(env, 'opt:')[0];
+    env.pointer(opt.x + opt.w / 2, opt.y + opt.h / 2);
+    expect(env.fired['pick'].length).toBe(1);
+    // runtime 选完即收起 → 回到入口行
+    env.host.render(richGarageState());
+    expect(areas(env, 'entry:').length).toBeGreaterThan(0);
+    // 找对手
+    const cta = env.host.getHitAreasForTest().find((a) => a.id === 'cta-find')!;
+    env.pointer(cta.x + cta.w / 2, cta.y + cta.h / 2);
+    expect(env.fired['find']).toHaveLength(1);
   });
 
   it('验收7｜1280×720 Desktop 不退化（Canvas 逻辑布局保持原值）', () => {
@@ -191,24 +256,25 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     expect(chip!.h).toBe(50); // 旧 chip 高 50 逻辑
   });
 
-  it('验收3｜功能件选项横向滚动：可见选项不超屏、可滚动、滚动后可达更多选项', () => {
+  it('验收3｜功能件选项横向滚动：点入口展开 → 可见选项不超屏、可滚动、滚动后可达更多', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState()); // 富库存：全部 19 个功能件选项可装备（可见）
-    // 找一个功能件 chip（非 body/rearWheel/frontWheel/drive）
-    const base = new Set(['body', 'rearWheel', 'frontWheel', 'drive']);
-    const fnChip = areas(env, 'chip:').map((a) => a.id.slice(5)).find((k) => !base.has(k));
-    expect(fnChip, 'starter 应有功能件 chip').toBeTruthy();
+    // 通过「武器」入口 → 选一个武器位 → 展开功能件选项
+    const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'entry-weapons')!;
+    env.pointer(entryW.x + entryW.w / 2, entryW.y + entryW.h / 2);
+    const fnSlot = areas(env, 'chip:').map((a) => a.id.slice(5)).find((k) => k !== 'body' && k !== 'rearWheel' && k !== 'frontWheel' && k !== 'drive');
+    expect(fnSlot, '武器位 chip 应存在').toBeTruthy();
 
-    env.host.render(richGarageState({ garageSelected: fnChip }));
+    env.host.render(richGarageState({ garageSelected: fnSlot }));
     const firstVisible = areas(env, 'opt:').map((a) => a.id);
     expect(firstVisible.length).toBeGreaterThan(0);
-    // 全部可见选项都在屏幕内（safe area）
+    // 全部可见选项都在屏幕内（safe area）+ 命中 ≥44
     for (const a of env.host.getHitAreasForTest().filter((x) => x.id.startsWith('opt:'))) {
       expect(a.x).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.left);
       expect(a.x + a.w).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right);
       expect(a.y + a.h).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom);
-      expect(a.h).toBeGreaterThanOrEqual(40);
+      expect(a.h).toBeGreaterThanOrEqual(44);
     }
     // 功能件选项很多 → 应有右滚动箭头
     const rightArrow = env.host.getHitAreasForTest().find((a) => a.id === 'opt-scroll-right');

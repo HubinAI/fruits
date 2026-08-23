@@ -104,26 +104,33 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
     });
   }
 
-  it('Garage previewSolo：移动端车辆在 Dock 上方可视带完整可见（不裁切）', () => {
-    const vp = { w: 932, h: 430 };
-    const canvas = { getContext: () => makeStubCtx(), clientWidth: vp.w, clientHeight: vp.h, width: vp.w, height: vp.h } as unknown as HTMLCanvasElement;
-    const surface: CanvasSurface = { width: vp.w, height: vp.h, devicePixelRatio: 1, now: () => 0 };
-    const o = new PlanckBattleOrchestrator(
-      buildSnapshotFromDraft(makeStarterDraft('watermelonBody', registry), registry, 'a'),
-      buildSnapshotFromDraft(makeStarterDraft('watermelonBody', registry), registry, 'b'),
-      registry,
-      { autoDrive: false, engine: 'planck', spawnA: { x: 620, y: 640, facing: 1 }, spawnB: { x: 980, y: 640, facing: -1 } },
-      true, // soloA
-    );
-    const r = new Renderer(canvas, new VisualRegistry(), surface);
-    const snap = o.getRenderSnapshot();
-    r.resize(snap.arena.width, o.arena.config.height);
-    r.reframe(snap, 'previewSolo');
-    const b = vehicleScreenBounds(snap.vehicleA, r.transform);
-    // 移动端 previewSolo：顶部 52 + 底部 Dock 220 → 车辆在中间可视带内完整可见
-    expect(b.minX).toBeGreaterThanOrEqual(-1);
-    expect(b.maxX).toBeLessThanOrEqual(vp.w + 1);
-    expect(b.minY).toBeGreaterThanOrEqual(52 - 1);
-    expect(b.maxY).toBeLessThanOrEqual(vp.h - 220 + 1);
-  });
+  for (const soloVp of VIEWPORTS.filter((v) => !v.desktop)) {
+    it(`F-WX-8-B｜Garage previewSolo ${soloVp.w}×${soloVp.h}：车辆在 Dock 上方可视带完整可见 + 宽度占可用宽 30~45%`, () => {
+      const vp = { w: soloVp.w, h: soloVp.h };
+      const canvas = { getContext: () => makeStubCtx(), clientWidth: vp.w, clientHeight: vp.h, width: vp.w, height: vp.h } as unknown as HTMLCanvasElement;
+      const surface: CanvasSurface = { width: vp.w, height: vp.h, devicePixelRatio: 1, now: () => 0 };
+      const o = new PlanckBattleOrchestrator(
+        buildSnapshotFromDraft(makeStarterDraft('watermelonBody', registry), registry, 'a'),
+        buildSnapshotFromDraft(makeStarterDraft('watermelonBody', registry), registry, 'b'),
+        registry,
+        { autoDrive: false, engine: 'planck', spawnA: { x: 620, y: 640, facing: 1 }, spawnB: { x: 980, y: 640, facing: -1 } },
+        true, // soloA
+      );
+      const r = new Renderer(canvas, new VisualRegistry(), surface);
+      const snap = o.getRenderSnapshot();
+      r.resize(snap.arena.width, o.arena.config.height);
+      r.reframe(snap, 'previewSolo');
+      const b = vehicleScreenBounds(snap.vehicleA, r.transform);
+      // 完整可见：顶部状态条 52 + 底部新三层 Dock 110（F-WX-8-B）
+      expect(b.minX).toBeGreaterThanOrEqual(-1);
+      expect(b.maxX).toBeLessThanOrEqual(vp.w + 1);
+      expect(b.minY).toBeGreaterThanOrEqual(52 - 1);
+      expect(b.maxY).toBeLessThanOrEqual(vp.h - 110 + 1);
+      // F-WX-8-B：车辆视觉宽度占可用宽 30~45%（可用宽 = 屏宽 - compact insetX 8×2）
+      const usableW = vp.w - 16;
+      const ratio = (b.maxX - b.minX) / usableW;
+      expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ∈ [30%,45%]`).toBeGreaterThanOrEqual(0.3);
+      expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ≤ 45%`).toBeLessThanOrEqual(0.45);
+    });
+  }
 });
