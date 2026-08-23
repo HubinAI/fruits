@@ -113,6 +113,11 @@ const MOBILE_SOLO_MIN_X = 340;
 const MOBILE_SOLO_MAX_X = 900;
 const MOBILE_SOLO_MIN_Y = 550;
 const MOBILE_SOLO_MAX_Y = 660;
+// F-WX-8-C：Mobile 战斗 Active corridor——覆盖真实交战区（开局 A(400)/B(1200) 完整
+// 可见，A 顶推 B 到右墙的主要过程在屏内）；宽 1040（含 margin 后车辆占屏 ~21%，
+// 目标 18~28%，旧全宽 corridor 仅 ~17%）。Warning/Closing 回退完整 arena（场地规则优先）。
+const MOBILE_ACTIVE_MIN_X = 300;
+const MOBILE_ACTIVE_MAX_X = 1340;
 const MATCH_MIN_X = 440;
 const MATCH_MAX_X = 1150;
 const MATCH_MIN_Y = 400;
@@ -1507,29 +1512,48 @@ export class Renderer {
       // Q08-A-FIX：正式战斗按 phase 构图——Active/Warning 固定战斗走廊（corridor，
       // 不绑定开局瞬间车辆位置）；Closing/End 完整收束安全构图。
       // 仅 Battle start / phase 切换 / resize 时调用一次，运行期间不重算（无呼吸/无跟随）。
+      // F-WX-8-C：compact 手机横屏用 Mobile corridor——Active 战斗主体优先（收窄到
+      // 真实交战区 [300,1340]，开局 A(400)/B(1200) 完整可见，车辆占屏 ~21% vs 旧 ~17%）；
+      // Warning 场地规则优先（完整 arena + closing 墙，刺墙提示可见）；Desktop 语义不变。
       const phase = opts.phase ?? '';
       if (phase === 'Active' || phase === '') {
-        // Active：固定 corridor = 左界 spawn 预算（width×0.25 − ACTIVE_EXTENT）、
-        // 右界锚定 arena 右缘（width − CORRIDOR_EDGE_PAD）——A 顶推 B 的交战团
-        // 最终可达 arena 右墙内侧（Q08-CAM-D1 实测 B visual 右缘 1534），
-        // 对称 spawn 预算无法覆盖；纵向仅车辆活动高度 + 地面。
-        const cL = snap.arena.width * CORRIDOR_SPAWN_A_RATIO - CORRIDOR_ACTIVE_EXTENT;
-        const cR = snap.arena.width - CORRIDOR_EDGE_PAD;
-        acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
-        acc(cL, snap.arena.groundY);
-        acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
-        acc(cR, snap.arena.groundY);
+        if (isCompact) {
+          const cL = MOBILE_ACTIVE_MIN_X;
+          const cR = MOBILE_ACTIVE_MAX_X;
+          acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
+          acc(cL, snap.arena.groundY);
+          acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
+          acc(cR, snap.arena.groundY);
+        } else {
+          // Active：固定 corridor = 左界 spawn 预算（width×0.25 − ACTIVE_EXTENT）、
+          // 右界锚定 arena 右缘（width − CORRIDOR_EDGE_PAD）——A 顶推 B 的交战团
+          // 最终可达 arena 右墙内侧（Q08-CAM-D1 实测 B visual 右缘 1534），
+          // 对称 spawn 预算无法覆盖；纵向仅车辆活动高度 + 地面。
+          const cL = snap.arena.width * CORRIDOR_SPAWN_A_RATIO - CORRIDOR_ACTIVE_EXTENT;
+          const cR = snap.arena.width - CORRIDOR_EDGE_PAD;
+          acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
+          acc(cL, snap.arena.groundY);
+          acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
+          acc(cR, snap.arena.groundY);
+        }
       } else if (phase === 'Warning') {
-        // Warning：左界再外扩（逐步准备 Closing）；右界已锚定 arena 边界。
-        const cL =
-          snap.arena.width * CORRIDOR_SPAWN_A_RATIO -
-          CORRIDOR_ACTIVE_EXTENT -
-          CORRIDOR_WARNING_SPREAD;
-        const cR = snap.arena.width - CORRIDOR_EDGE_PAD;
-        acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
-        acc(cL, snap.arena.groundY);
-        acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
-        acc(cR, snap.arena.groundY);
+        if (isCompact) {
+          // Mobile Warning：场地规则优先——完整 arena + closing 墙，刺墙收束提示可见
+          acc(0, snap.arena.groundY);
+          acc(snap.arena.width, snap.arena.groundY);
+          for (const cw of snap.arena.closingWalls) includeShape(cw);
+        } else {
+          // Warning：左界再外扩（逐步准备 Closing）；右界已锚定 arena 边界。
+          const cL =
+            snap.arena.width * CORRIDOR_SPAWN_A_RATIO -
+            CORRIDOR_ACTIVE_EXTENT -
+            CORRIDOR_WARNING_SPREAD;
+          const cR = snap.arena.width - CORRIDOR_EDGE_PAD;
+          acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
+          acc(cL, snap.arena.groundY);
+          acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
+          acc(cR, snap.arena.groundY);
+        }
       } else {
         // Closing / End：完整战场安全构图——覆盖 Arena 有效战斗区域（x ∈ [0, width]；
         // y 顶 = Closing 墙顶，底 = 地面），车辆被 Closing 推向边缘/中央的全过程始终

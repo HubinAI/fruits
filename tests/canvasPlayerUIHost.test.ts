@@ -331,4 +331,17 @@ describe('F-WX-5 CanvasPlayerUIHost mountCanvas（平台中立，无 DOM 容器�
       });
     }).not.toThrow();
   });
+
+  it('F-WX-8-C｜Result 出现后 HUD 自动降级隐藏（draw 内 result 优先分支，HUD 让位）', () => {
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    const { fileURLToPath } = require('node:url') as typeof import('node:url');
+    const src = readFileSync(
+      fileURLToPath(new URL('../src/ui/canvasPlayerUIHost.ts', import.meta.url)),
+      'utf8',
+    );
+    // draw()：ended + result → 只画 Result（覆盖层独占），不再画 HUD
+    expect(src).toMatch(
+      /if \(state\.result\) \{\s*\n\s*this\.drawResult\(state\);\s*\n\s*\} else \{\s*\n\s*if \(this\.lastFrame\) this\.drawHud\(this\.lastFrame\);/,
+    );
+  });
 });

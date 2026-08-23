@@ -99,6 +99,25 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
           expect(b.maxY, `${phase} A/B 底缘入画`).toBeLessThanOrEqual(vp.h + 1);
           // HUD 不挡主体：车辆顶缘在 HUD 安全区之下
           expect(b.minY, `${phase} 车辆顶缘低于 HUD 区（${hudTop}）`).toBeGreaterThanOrEqual(hudTop - 1);
+          // F-WX-8-C：Mobile Active 战斗主体优先——单辆战车占屏宽 18~28%
+          if (phase === 'Active' && !vp.desktop) {
+            const ratio = (b.maxX - b.minX) / vp.w;
+            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ∈ [18%,28%]`).toBeGreaterThanOrEqual(0.18);
+            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ≤ 28%`).toBeLessThanOrEqual(0.28);
+          }
+        }
+        // F-WX-8-C：Mobile Warning 场地规则优先——完整 arena 左右墙（x=0 / x=width）在屏内（刺墙提示可见）
+        if (phase === 'Warning' && !vp.desktop) {
+          const l = 0 * cam.scale + cam.offsetX;
+          const rw = snap.arena.width * cam.scale + cam.offsetX;
+          expect(l, `Warning 左墙入屏`).toBeGreaterThanOrEqual(-10);
+          expect(rw, `Warning 右墙入屏`).toBeLessThanOrEqual(vp.w + 10);
+        }
+        // F-WX-8-C：Desktop Active 保持既有构图（旧 corridor 占比 ~15%，不得因 Mobile 改动漂移）
+        if (phase === 'Active' && vp.desktop) {
+          const bb = vehicleScreenBounds(snap.vehicleA, cam);
+          const ratio = (bb.maxX - bb.minX) / vp.w;
+          expect(ratio, `Desktop Active 车辆占比 ${(ratio * 100).toFixed(1)}% 应保持旧值（≤18%）`).toBeLessThanOrEqual(0.18);
         }
       }
     });

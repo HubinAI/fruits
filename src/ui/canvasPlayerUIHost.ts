@@ -310,8 +310,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
 
     if (state.battleState === 'fighting' || state.battleState === 'ended') {
-      if (this.lastFrame) this.drawHud(this.lastFrame);
-      if (state.result) this.drawResult(state);
+      // F-WX-8-C：Result 出现后 HUD 自动降级隐藏（Result 覆盖层独占画面）
+      if (state.result) {
+        this.drawResult(state);
+      } else {
+        if (this.lastFrame) this.drawHud(this.lastFrame);
+      }
     } else {
       // 装配编辑态：玩家 Shell
       if (state.playerPhase === 'garage') {

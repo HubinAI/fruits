@@ -51,12 +51,12 @@ class CtxStub {
   restore(): void { this.record('restore'); }
 }
 
-function makeCanvas(ctx: CtxStub) {
+function makeCanvas(ctx: CtxStub, w = 1000, h = 500) {
   return {
     width: 0,
     height: 0,
-    clientWidth: 1000,
-    clientHeight: 500,
+    clientWidth: w,
+    clientHeight: h,
     getContext: () => ctx,
   } as unknown as HTMLCanvasElement;
 }
@@ -352,12 +352,14 @@ function makeBattleSnapshot(): BattleRenderSnapshot {
 describe('Q08-A Battle Camera 正常观看构图', () => {
   function makeRenderer(): Renderer {
     const ctx = new CtxStub();
-    const renderer = new Renderer(makeCanvas(ctx));
+    // F-WX-8-C：Q08-A 是 Desktop corridor 语义守卫——显式 1280×720（h≥600 非 compact），
+    // 避免 1000×500 被 isCompactLandscape 误归为手机横屏而走 Mobile corridor。
+    const renderer = new Renderer(makeCanvas(ctx, 1280, 720));
     (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
     renderer.resize(1600, 1000);
     return renderer;
   }
-  const SAFE_X = 56, SAFE_Y = 28, CW = 1000, CH = 500;
+  const SAFE_X = 56, SAFE_Y = 28, CW = 1280, CH = 720;
 
   function inSafe(
     renderer: Renderer,
@@ -475,12 +477,13 @@ function visualAABB(v: { position: { x: number; y: number }; rotation: number; s
 describe('Q08-A-FIX Battle Camera 出框根因', () => {
   function makeRenderer(): Renderer {
     const ctx = new CtxStub();
-    const renderer = new Renderer(makeCanvas(ctx));
+    // F-WX-8-C：同 Q08-A——Desktop corridor 语义守卫，显式 1280×720（非 compact）
+    const renderer = new Renderer(makeCanvas(ctx, 1280, 720));
     (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
     renderer.resize(1600, 1000);
     return renderer;
   }
-  const SAFE_X = 56, SAFE_Y = 28, CW = 1000, CH = 500;
+  const SAFE_X = 56, SAFE_Y = 28, CW = 1280, CH = 720;
 
   function inSafe(
     renderer: Renderer,
