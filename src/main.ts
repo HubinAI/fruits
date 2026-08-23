@@ -62,8 +62,10 @@ import {
   cloneBuildDraft,
   buildMatchingSequence,
   pickOpponentForTier,
+  OPPONENT_TIERS,
 } from './player/opponentPool';
 import { loadPlayerBuild, savePlayerBuild } from './core/buildPersistence';
+import { track, battleEndGuard } from './core/analytics';
 import { computePlayerShellVisibility } from './ui/playerShell';
 
 const app = document.getElementById('app')!;
@@ -471,6 +473,34 @@ function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): vo
   } else {
     resultOnboard.style.display = 'none';
   }
+  // Q28：battle_end / reward_gain / rank_change —— 关键去重：同一 result 对象只触发一次，
+  // 防止 Result 弹窗因每帧 pollBattleResult 重复触发（与 battleEndGuard.clear() @开战 配合）。
+  if (battleEndGuard.firstTime(r)) {
+    const duration = Math.max(0, (performance.now() - battleStartTimeMs) / 1000);
+    const playerRating = prog ? prog.progress.rating : getProgress().rating;
+    track('battle_end', {
+      result: isWin ? 'win' : 'lose',
+      duration: Number(duration.toFixed(1)),
+      playerRating,
+      opponentTier: OPPONENT_TIERS[matchedIndex],
+    });
+    if (prog) {
+      track('reward_gain', {
+        coinDelta: prog.coinDelta,
+        ratingDelta: prog.ratingDelta,
+        part: outcome?.defId ?? null,
+        star: outcome ? (outcome.star >= 2 ? 2 : 1) : null,
+      });
+      if (prog.ratingDelta !== 0) {
+        track('rank_change', {
+          from: prog.progress.rating - prog.ratingDelta,
+          to: prog.progress.rating,
+          delta: prog.ratingDelta,
+          tier: TIER_LABEL[tierOf(prog.progress.rating)],
+        });
+      }
+    }
+  }
   resultModal.style.display = 'flex';
 }
 
@@ -483,6 +513,7 @@ function adjustConfig(): void {
   matchInfo.style.display = 'none';
   playerPhase = 'garage'; // 回到装配
   battleState = 'editing';
+  track('garage_enter'); // Q28：结算后回 Garage（闭环一步）
   bEditorOpen = false;
   selectedSlotA = null; // 进入 Garage：默认不展开部件全集
   garageSelected = null;
@@ -700,6 +731,7 @@ let playerPhase: 'garage' | 'matching' | 'matchPreview' = 'garage';
 let matchingGeneration = 0;
 let buildControlsLocked = false; // Fighting 时锁定 A/B 全部 Build 控件
 let lastShownResult: BattleOrchestratorApi['result'] = null;
+let battleStartTimeMs = 0; // Q28：记录本场开战时刻，供 battle_end 计算时长
 
 function addButton(parent: HTMLElement, text: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement('button');
@@ -946,15 +978,19 @@ function renderPanel(
         b.appendChild(metaEl);
         b.onclick = () => {
           if (buildControlsLocked) return;
+          const oldPart = d.functionalSelections[selSlot] ?? EMPTY_SLOT;
+          let newPart = EMPTY_SLOT;
           if (opt.v !== EMPTY_SLOT) {
             const { defId, star } = decodePartVal(opt.v);
             if (!canEquipPart(defId, star)) return;
             d.functionalSelections[selSlot] = defId;
             d.functionalStars = d.functionalStars ?? {};
             d.functionalStars[selSlot] = star;
+            newPart = defId;
           } else {
             d.functionalSelections[selSlot] = EMPTY_SLOT;
           }
+          emitBuildChange(selSlot, oldPart, newPart, true); // Q28：功能件变更埋点
           // Q15-UX-R1：选完一个部件立即收起 picker（selectedSlot 回到 null），降低信息过载
           if (isA) selectedSlotA = null;
           else selectedSlotB = null;
@@ -1161,6 +1197,14 @@ function startOrRematch(): void {
   lab.loadCustom(sa, sb, { autoDrive: true, engine: 'planck', sideDrive });
   battleState = 'fighting';
   setBuildControlsLocked(true);
+  // Q28：记录开战时刻 + 重置 battle_end/reward_gain 去重器（每场新的 result 对象）
+  battleStartTimeMs = performance.now();
+  battleEndGuard.clear();
+  track('battle_start', {
+    opponentTier: OPPONENT_TIERS[matchedIndex],
+    playerRating: getProgress().rating,
+    body: draftA.bodyDefId,
+  });
   // Q15-UI-R2：进入 Fighting → 整个玩家 Shell（顶部状态 / Dock / MatchPreview 条 / MatchInfo）
   // 必须隐藏，恢复全战场 + Battle HUD（applyPlayerShell 按 battleState==='fighting' 统一收起）。
   applyPlayerShell();
@@ -1341,6 +1385,7 @@ function applyMatchingBfx(now: number): void {
  */
 function startMatching(): void {
   if (playerPhase === 'matching') return; // 防重复触发
+  track('find_opponent'); // Q28：发起寻找对手
   resultModal.style.display = 'none';
   hudEl.style.display = 'none';
   battleState = 'editing';
@@ -1413,6 +1458,19 @@ function startBattleWithReady(): void {
 /** 顶部状态区标题（阶段文案；位于 UI 层顶部，不贴车身） */
 function setPlayerTopTitle(text: string): void {
   ptTitle.textContent = text;
+}
+
+/**
+ * Q28：Build 变更埋点统一出口。slot/oldPart/newPart/drive/body 平铺可解释；
+ * 功能件槽且装备了真实部件时额外发 part_equip。车身/轮/驱动变更不发 part_equip。
+ */
+function emitBuildChange(slot: string, oldPart: string, newPart: string, isFunctional: boolean): void {
+  const body = draftA.bodyDefId;
+  const drive = resolveDriveMode(draftA.drive);
+  track('build_change', { slot, oldPart, newPart, drive, body });
+  if (isFunctional && newPart && newPart !== EMPTY_SLOT) {
+    track('part_equip', { slot, part: newPart, drive, body });
+  }
 }
 
 /**
@@ -1632,6 +1690,13 @@ function renderGarageDock(): void {
           const { defId, star } = decodePartVal(o.v);
           if (!canEquipPart(defId, star)) return;
         }
+        // Q28：变更前快照
+        const oldVal =
+          slotKey === 'body' ? draftA.bodyDefId
+          : slotKey === 'rearWheel' ? String(draftA.rearRadius)
+          : slotKey === 'frontWheel' ? String(draftA.frontRadius)
+          : slotKey === 'drive' ? resolveDriveMode(draftA.drive)
+          : (draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
         if (slotKey === 'body') {
           const migrated = migrateDraftBody(draftA, o.v, registry);
           draftA.bodyDefId = migrated.bodyDefId;
@@ -1653,6 +1718,15 @@ function renderGarageDock(): void {
             draftA.functionalStars[slotKey] = star;
           }
         }
+        // Q28：Build 变更埋点（功能件槽额外发 part_equip）
+        const isFunctional = slotKey !== 'body' && slotKey !== 'rearWheel' && slotKey !== 'frontWheel' && slotKey !== 'drive';
+        const newVal =
+          slotKey === 'body' ? draftA.bodyDefId
+          : slotKey === 'rearWheel' ? String(draftA.rearRadius)
+          : slotKey === 'frontWheel' ? String(draftA.frontRadius)
+          : slotKey === 'drive' ? resolveDriveMode(draftA.drive)
+          : (draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
+        emitBuildChange(slotKey, oldVal, newVal, isFunctional);
         garageSelected = null; // 选完即收起
         refreshFromEdit(); // Draft → Energy → Preview + 重渲染 Dock
       };
@@ -1690,9 +1764,11 @@ function renderGarageDock(): void {
     mBtn.onclick = () => {
       const cur = getInventory();
       const p = getProgress();
+      track('merge_attempt'); // Q28：发起合成
       // Q23：合成 = 5×1★ 熔炼 + 固定金币消耗（纯函数，金币不足/副本不足均不生效）
       const res = mergeWithCost(cur, equippedDefIds(draftA), p.coin);
       if (!res.ok) return;
+      track('merge_success'); // Q28：合成成功
       saveInventory(res.inventory);
       saveProgress({ coin: res.coin, rating: p.rating }); // 仅扣金币，rating 不变
       renderGarageDock(); // 重渲染：反映新 2★ 库存 + 扣费后金币 + 合成面板
@@ -1815,6 +1891,7 @@ function setMode(m: UiMode): void {
   if (showBuild && battleState !== 'fighting') {
     // Q15-UX-R1：切回装配 → Garage（solo-A），退出 Matching/MatchPreview 视觉层
     playerPhase = 'garage';
+    track('garage_enter'); // Q28：进入 Garage（仅当真正切回装配时）
     matchInfo.style.display = 'none';
     selectedSlotA = null;
     refreshFromEdit(); // 按 phase(Garage) 渲染 A 编辑器 + solo-A 预览
@@ -2013,6 +2090,7 @@ const presetButtons: HTMLButtonElement[] = [];
 }
 
 /* ---------- 初始：默认装配测试模式 + Draft Preview（不启动 Scenario） ---------- */
+track('game_start'); // Q28：应用启动（一次）
 refreshFromEdit();
 setMode('build');
 
