@@ -123,6 +123,12 @@ style.textContent = `
   .result-actions button.primary { background: #3b6fd4; border-color: #5a8df0; color: #fff; font-size: 16px; font-weight: 700; padding: 12px 34px; box-shadow: 0 4px 14px rgba(59,111,212,0.35); }
   .result-actions button.primary:hover { background: #4a7fe0; }
   .result-actions button.secondary { opacity: 0.85; }
+  /* Q21：战斗奖励区（进入 Result 时已自动入库，无领取按钮） */
+  .result-reward { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 10px 0 4px;
+    padding: 10px 16px; background: #1c2230; border: 1px solid #38414f; border-radius: 10px; }
+  .result-reward .rr-label { font-size: 12px; color: #9aa4b5; letter-spacing: 2px; }
+  .result-reward .rr-name { font-size: 22px; font-weight: 700; color: #ffd479; }
+  .result-reward .rr-cat { font-size: 12px; color: #7c8799; }
   /* Q07-A：开发工具折叠区（机制场景 / Pause/Reset/Clear / 速度 / Preset 收进二级） */
   /* Q13-C-R4：开发工具折叠区改为「工具栏下方全宽独立一行」（不再嵌进 .lab-main 横向 flex 被挤压）。
      基础 display: flex（展开时由内联 '' 回退到此）；收起由内联 display:none 控制。
@@ -224,6 +230,9 @@ style.textContent = `
   .dock-opt.active { background: #3b6fd4; border-color: #5a8df0; color: #fff; }
   .dock-opt .do-meta { font-size: 10px; color: #7c8799; }
   .dock-opt.active .do-meta { color: #d4dcff; }
+  /* Q21：未拥有部件锁定态（仍可见，不可装备） */
+  .dock-opt.locked { opacity: 0.4; cursor: not-allowed; border-style: dashed; }
+  .dock-opt.locked .do-meta { color: #c98b5e; }
   /* 能量（合并进 Dock，不单独占长表单） */
   .dock-energy { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 160px; }
   .dock-energy .de-label { font-size: 12px; color: #9aa4b5; }
@@ -352,6 +361,12 @@ const resultHpB = document.createElement('div');
 resultHpB.className = 'result-hp';
 resultCard.appendChild(resultHpB);
 
+// Q21：战斗奖励区（进入 Result 时已自动入库，无领取按钮）
+const resultReward = document.createElement('div');
+resultReward.className = 'result-reward';
+resultReward.style.display = 'none';
+resultCard.appendChild(resultReward);
+
 const resultActions = document.createElement('div');
 resultActions.className = 'result-actions';
 resultCard.appendChild(resultActions);
@@ -380,6 +395,22 @@ function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): vo
   resultTitle.style.color = isWin ? '#59c97a' : '#ff6b5e';
   resultHpA.textContent = `我方剩余 HP：${Math.round(r.hpA)}`;
   resultHpB.textContent = `对手剩余 HP：${Math.round(r.hpB)}`;
+  // Q21：结算本场奖励（胜/负均获得；同场只结算一次，自动入库）
+  const outcome = rewardSettler.settle(r);
+  if (outcome?.awarded) {
+    const def = registry.functionals.get(outcome.awarded);
+    const cat = def?.category === 'weapon' ? '武器' : def?.category === 'gadget' ? '辅助' : '';
+    resultReward.innerHTML =
+      `<div class="rr-label">获得新部件</div>` +
+      `<div class="rr-name">${def?.name ?? outcome.awarded}</div>` +
+      `<div class="rr-cat">${cat}</div>`;
+    resultReward.style.display = 'flex';
+  } else if (outcome?.collectedAll) {
+    resultReward.innerHTML = `<div class="rr-label">部件已全部收集</div>`;
+    resultReward.style.display = 'flex';
+  } else {
+    resultReward.style.display = 'none';
+  }
   resultModal.style.display = 'flex';
 }
 
@@ -399,6 +430,7 @@ function adjustConfig(): void {
   // Q08-CAM-A1：面板恢复 → canvas CSS 变窄，先同步 backing 再显示 Preview
   doResize();
   refreshFromEdit(); // 按 phase(Garage) 渲染 solo-A 预览 + Dock（updateStartButton 接入 Shell）
+  applyPlayerShell(); // Q21：重渲染 Dock——刚获得的部件已从锁定变为可装备
 }
 
 /** Ended 后玩家选择：下一场 → 走同一套 Matching（随机新对手）→ MatchPreview */
@@ -632,6 +664,12 @@ const WHEEL_OPTIONS: Array<{ v: string; t: string }> = [
 
 // F-DEV-1：PART_OPTIONS 移入独立模块（src/core/partOptions.ts，UI 与测试共用同一数据源）
 import { PART_OPTIONS } from './core/partOptions';
+// Q21：V0.4 最小部件库存（owned 状态 + 每场结算）
+import {
+  BattleRewardSettler,
+  ensureOwnedParts,
+  canEquipPart,
+} from './core/partInventory';
 
 /** W2-SIL-1 视觉样板 Draft：双车并排展示 5 个首批正式 Content 轮廓
  *  - front=pushRod（基座在 chassis 侧、推板在前，Prismatic 伸缩自然）
@@ -654,6 +692,10 @@ function silDraft(bodyDefId: string): BuildDraft {
 let matchedIndex = 0; // 当前匹配对手在 OPPONENT_POOL 中的索引
 // Q15：玩家 Build 从 localStorage 恢复；无存档 / 非法旧存档 → 默认合法 Build
 const draftA = loadPlayerBuild() ?? silDraft('watermelonBody');
+// Q21：部件库存初始化（starter + 旧存档已装备部件一并迁移入 owned；无存档则落盘 starter）
+ensureOwnedParts(draftA);
+// Q21：每场 Battle 奖励结算器（以 result 引用为幂等键，同场只结算一次）
+const rewardSettler = new BattleRewardSettler();
 // Q15：对手来自固定对手池（玩家不可编辑，仅 DEV 可临时改）
 let draftB = cloneBuildDraft(OPPONENT_POOL[matchedIndex]);
 
@@ -1015,6 +1057,8 @@ function startOrRematch(): void {
     a: resolveDriveMode(draftA.drive) === 'forward',
     b: resolveDriveMode(draftB.drive) === 'forward',
   };
+  // Q21：开始新一场 Battle 前重置奖励结算器（以 result 引用为幂等键，保证每场只结算一次）
+  rewardSettler.reset();
   lab.loadCustom(sa, sb, { autoDrive: true, engine: 'planck', sideDrive });
   battleState = 'fighting';
   setBuildControlsLocked(true);
@@ -1360,6 +1404,11 @@ function renderGarageDock(): void {
   // 第二层：当前选中槽的横向选项
   if (garageSelected) {
     const slotKey: string = garageSelected; // 闭包捕获用：窄化为 string（外变量为 string|null）
+    const slotIsFunctional =
+      garageSelected !== 'body' &&
+      garageSelected !== 'rearWheel' &&
+      garageSelected !== 'frontWheel' &&
+      garageSelected !== 'drive';
     const picker = document.createElement('div');
     picker.className = 'dock-picker';
     const title = document.createElement('div');
@@ -1389,7 +1438,9 @@ function renderGarageDock(): void {
           const cat = def
             ? def.category === 'weapon' ? '武器' : def.category === 'gadget' ? '辅助' : def.category
             : '';
-          opts.push({ v: o.v, t, meta: `${cat} · ${def?.energy ?? 0} 能量` });
+          // Q21：未拥有部件显示「未获得」锁定态（仍可见，不隐藏）；已拥有显示类别/能量
+          const owned = canEquipPart(o.v);
+          opts.push({ v: o.v, t, meta: owned ? `${cat} · ${def?.energy ?? 0} 能量` : '未获得' });
         }
       }
     }
@@ -1401,7 +1452,10 @@ function renderGarageDock(): void {
               : (draftA.functionalSelections[garageSelected] ?? EMPTY_SLOT);
     for (const o of opts) {
       const b = document.createElement('button');
-      b.className = 'dock-opt' + (o.v === curVal ? ' active' : '');
+      // Q21：功能件槽中，未拥有部件锁定（不可装备、仍可见），空槽/已拥有正常
+      const equip = slotIsFunctional ? canEquipPart(o.v) : true;
+      b.className = 'dock-opt' + (o.v === curVal ? ' active' : '') + (equip ? '' : ' locked');
+      if (!equip) b.disabled = true;
       const nameEl = document.createElement('div');
       nameEl.className = 'do-name';
       nameEl.textContent = o.t;
@@ -1413,6 +1467,8 @@ function renderGarageDock(): void {
         b.appendChild(metaEl);
       }
       b.onclick = () => {
+        // Q21：未拥有功能件不可装备（守卫，disabled 仍双保险）
+        if (slotIsFunctional && !canEquipPart(o.v)) return;
         if (slotKey === 'body') {
           const migrated = migrateDraftBody(draftA, o.v, registry);
           draftA.bodyDefId = migrated.bodyDefId;
