@@ -24,7 +24,15 @@ describe('Q15-FLOW-R1-ATOMIC 匹配完成直接开战', () => {
   const preview = fnBody('goToMatchPreview');
 
   it('goToMatchPreview 内隐藏 matchBar（正常流程不再出现 调整配置/开始战斗）', () => {
-    expect(preview).toContain(`matchBar.style.display = 'none'`);
+    // F-WX-3：matchBar 显隐收进 PlayerUIHost（matchBarHidden 状态驱动）；
+    // goToMatchPreview 设置 matchBarHidden=true 保证复核条永不闪现（行为与旧直接
+    // matchBar.style.display='none' 等价，但 DOM 不再散落 main.ts）。
+    expect(preview).toContain('matchBarHidden = true');
+    const host = readFileSync(
+      fileURLToPath(new URL('../src/ui/webDomPlayerUIHost.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(host).toContain(`state.matchBarHidden ? 'none' : vis.matchBar`);
   });
 
   it('约 250ms 后自动调用现有 startBattleWithReady（不复制第二套 READY/Battle 逻辑）', () => {
@@ -48,9 +56,19 @@ describe('Q15-FLOW-R1-ATOMIC 匹配完成直接开战', () => {
     expect(next).toContain('startMatching()');
   });
 
-  it('Result「调整配置」仍回 Garage（adjustConfig 接线不变；首轮引导在此结束）', () => {
-    // 接线仍指向 adjustConfig（回 Garage），仅在外层包了「完成首轮引导」；
-    // 不得退化为 btnAdjust.onclick = adjustConfig（那会跳过完成引导的判定）。
-    expect(MAIN).toMatch(/btnAdjust\.onclick\s*=\s*\(\)\s*=>\s*\{[\s\S]*?\badjustConfig\(\);/);
+  it('Result「调整配置」仍回 Garage（onResultAdjust 接线不变；首轮引导在此结束）', () => {
+    // F-WX-3：按钮接线收进 Host（btnAdjust → onResultAdjust action）；
+    // 「完成首轮引导 + 回 Garage」判定仍在 main.ts（onResultAdjust），
+    // 不得退化为直接 adjustConfig（那会跳过完成引导的判定）。
+    expect(MAIN).toMatch(
+      /onResultAdjust:\s*\(\)\s*=>\s*\{[\s\S]*?\bcompleteOnboarding\(\);[\s\S]*?\badjustConfig\(\);/,
+    );
+    const host = readFileSync(
+      fileURLToPath(new URL('../src/ui/webDomPlayerUIHost.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(host).toMatch(
+      /btnAdjust\.onclick\s*=\s*\(\)\s*=>\s*this\.actions\?\.onResultAdjust\(\);/,
+    );
   });
 });

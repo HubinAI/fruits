@@ -1,6 +1,14 @@
 /**
  * 入口：Build 测试交互 UI（Q06-UX-R1 重构，P0）。
  *
+ * F-WX-3：正常玩家 UI（Garage / Matching / Battle HUD / Result / Reward / Inventory
+ * picker / Merge / Onboarding / Stats）已抽到唯一 PlayerUIHost 边界（Web 首阶段 =
+ * WebDomPlayerUIHost，复用原 DOM 结构/样式，视觉不变）。本文件只负责：
+ * - Gameplay flow（PhysicsLab / Battle / 相机 / 结算副作用 / 埋点 / 存档）；
+ * - DEV Scenario / Physics Lab / Runtime Debug Tools（保留 Web-only，不进 Host）；
+ * - Gameplay 状态变化 → 组装 PlayerUIState → host.render / host.renderBattleFrame；
+ * - 玩家输入（PlayerUIActions）→ Gameplay command → 再 push 状态。
+ *
  * 单一清晰流程：配置 → 实时预览 → 开战 → 结果 → 调整 → 再战。
  * - 顶层模式互斥：【装配测试】（默认）/【机制场景】；两模式控件绝不同时出现；
  * - Editing：Build 控件可操作 + 中央实时 Preview（loadCustomPreview，planck 站桩）；
@@ -75,10 +83,43 @@ import {
   RewardedAdClaimer,
   tryInterstitialSafe,
   isRewardedAdAvailable,
-  REWARD_AD_COIN_BONUS,
 } from './core/ads';
 import { onBattleEnded, resetAdFrequency } from './core/adFrequency';
-import { computePlayerShellVisibility } from './ui/playerShell';
+// F-WX-3：玩家 UI 唯一 Host 边界（Web DOM 实现）与平台中立类型
+import { WebDomPlayerUIHost } from './ui/webDomPlayerUIHost';
+import {
+  BODY_OPTIONS,
+  WHEEL_OPTIONS,
+  encodePartVal,
+  decodePartVal,
+} from './ui/playerUI';
+import type {
+  UiMode,
+  BattleState,
+  PlayerPhase,
+  PlayerUIState,
+  PlayerUIActions,
+} from './ui/playerUI';
+// Q22：V0.5 部件库存（数量化 + 星级 + 合成）
+import {
+  BattleRewardSettler,
+  ensureInventory,
+  canEquipPart,
+  getInventory,
+  getCount,
+  saveInventory,
+  equippedDefIds,
+  OFFICIAL_PARTS,
+} from './core/partInventory';
+// Q23→Q24：玩家进度（金币 + 段位）；结算纯函数 + 单例结算器（同场只结算一次）
+import {
+  BattleProgressSettler,
+  getProgress,
+  saveProgress,
+  mergeWithCost,
+  tierOf,
+  TIER_LABEL,
+} from './core/playerProgress';
 
 const app = document.getElementById('app')!;
 
@@ -346,269 +387,6 @@ if (DEV_TOOLS_VISIBLE) {
   canvasWrap.appendChild(debugPanel);
 }
 
-/* ---------- 战斗 HUD（Q06-HUD-U1：Fighting 顶部固定 A/B HP，不随车辆运动带走） ---------- */
-const hudEl = document.createElement('div');
-hudEl.className = 'battle-hud';
-canvasWrap.appendChild(hudEl);
-
-function makeHudSide(teamLabel: string, color: string): {
-  root: HTMLElement;
-  hpText: HTMLElement;
-  barFill: HTMLElement;
-} {
-  const root = document.createElement('div');
-  root.className = 'hud-side';
-  const team = document.createElement('span');
-  team.className = 'hud-team';
-  team.textContent = teamLabel;
-  team.style.color = color;
-  const barWrap = document.createElement('div');
-  barWrap.className = 'hud-bar-wrap';
-  const barFill = document.createElement('div');
-  barFill.className = 'hud-bar-fill';
-  barFill.style.background = color;
-  barWrap.appendChild(barFill);
-  const hpText = document.createElement('span');
-  hpText.className = 'hud-hp';
-  root.appendChild(team);
-  root.appendChild(barWrap);
-  root.appendChild(hpText);
-  hudEl.appendChild(root);
-  return { root, hpText, barFill };
-}
-const hudA = makeHudSide('A', '#3b6fd4');
-const hudB = makeHudSide('B', '#e08a2e');
-const hudPhase = document.createElement('span');
-hudPhase.className = 'hud-phase';
-hudPhase.textContent = '战斗中';
-hudEl.appendChild(hudPhase);
-
-/* ---------- W2-FX-2：Warning 阶段倒计时（3 → 2 → 1；Closing 开始后消失） ---------- */
-const phaseCountdown = document.createElement('span');
-phaseCountdown.className = 'phase-countdown';
-phaseCountdown.textContent = '';
-hudEl.appendChild(phaseCountdown);
-
-/* ---------- 结算 Modal（Q06-HUD-U1：Ended 中央第一视觉焦点） ---------- */
-const resultModal = document.createElement('div');
-resultModal.className = 'result-modal';
-canvasWrap.appendChild(resultModal);
-
-const resultCard = document.createElement('div');
-resultCard.className = 'result-card';
-resultModal.appendChild(resultCard);
-
-const resultTitle = document.createElement('h2');
-resultTitle.className = 'result-title';
-resultCard.appendChild(resultTitle);
-
-const resultHpA = document.createElement('div');
-resultHpA.className = 'result-hp';
-resultCard.appendChild(resultHpA);
-const resultHpB = document.createElement('div');
-resultHpB.className = 'result-hp';
-resultCard.appendChild(resultHpB);
-
-// Q21：战斗奖励区（进入 Result 时已自动入库，无领取按钮）
-const resultReward = document.createElement('div');
-resultReward.className = 'result-reward';
-resultReward.style.display = 'none';
-resultCard.appendChild(resultReward);
-
-// Q23→Q24：经济/段位区（本局金币获得 + 段位变化；进入 Result 时结算并展示）
-const resultEconomy = document.createElement('div');
-resultEconomy.className = 'result-economy';
-resultEconomy.style.display = 'none';
-resultCard.appendChild(resultEconomy);
-
-// Q26：首轮引导提示（仅全新账号首场 Result 显示，提示回车库调整；完成闭环后不再出现）
-const resultOnboard = document.createElement('div');
-resultOnboard.className = 'result-onboard';
-resultOnboard.style.display = 'none';
-resultCard.appendChild(resultOnboard);
-
-const resultActions = document.createElement('div');
-resultActions.className = 'result-actions';
-resultCard.appendChild(resultActions);
-
-/** 每帧刷新 HUD：直读 getBattleStatusSnapshot()；整数 HP + clamp 比例条 */
-function updateHud(): void {
-  const o = lab.orchestrator;
-  const s = o?.getBattleStatusSnapshot?.() ?? null;
-  if ((battleState !== 'fighting' && battleState !== 'ended') || !s) {
-    hudEl.style.display = 'none';
-    return;
-  }
-  hudEl.style.display = 'flex';
-  // W2-UX-R2：Ended 不再显示「战斗中」（改「战斗结束」，避免与结算卡矛盾）
-  hudPhase.textContent = s.phase === 'End' ? '战斗结束' : '战斗中';
-  hudA.hpText.textContent = `${Math.round(s.sideA.hp)} / ${Math.round(s.sideA.maxHp)}`;
-  hudB.hpText.textContent = `${Math.round(s.sideB.hp)} / ${Math.round(s.sideB.maxHp)}`;
-  hudA.barFill.style.width = `${Math.max(0, Math.min(1, s.sideA.hp / Math.max(s.sideA.maxHp, 1))) * 100}%`;
-  hudB.barFill.style.width = `${Math.max(0, Math.min(1, s.sideB.hp / Math.max(s.sideB.maxHp, 1))) * 100}%`;
-}
-
-/** 显示结算卡：胜/负 + 双方整数剩余 HP（W1-END-1：正式战斗无平局，只反映 Runtime result） */
-function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): void {
-  const isWin = r.winner === 'A';
-  resultTitle.textContent = isWin ? '【胜利】' : '【失败】';
-  resultTitle.style.color = isWin ? '#59c97a' : '#ff6b5e';
-  resultHpA.textContent = `我方剩余 HP：${Math.round(r.hpA)}`;
-  resultHpB.textContent = `对手剩余 HP：${Math.round(r.hpB)}`;
-  // Q22：结算本场奖励（胜/负均获得 1★、可重复；同场只结算一次，自动入库）
-  const outcome = rewardSettler.settle(r);
-  if (outcome) {
-    const def = registry.functionals.get(outcome.defId);
-    const cat = def?.category === 'weapon' ? '武器' : def?.category === 'gadget' ? '辅助' : '';
-    const starStr = outcome.star >= 2 ? '★★' : '★';
-    resultReward.innerHTML =
-      `<div class="rr-label">获得部件</div>` +
-      `<div class="rr-name">${def?.name ?? outcome.defId} ${starStr}</div>` +
-      `<div class="rr-cat">${cat} · 当前拥有 ×${outcome.countAfter}</div>`;
-    resultReward.style.display = 'flex';
-  } else {
-    resultReward.style.display = 'none';
-  }
-  // Q23→Q24：结算本局金币 + 段位（同场只结算一次，自动入库）
-  const prog = progressSettler.settle(r, isWin);
-  if (prog) {
-    const coinSign = prog.coinDelta >= 0 ? '+' : '';
-    const ratingSign = prog.ratingDelta >= 0 ? '+' : '';
-    const newTier = tierOf(prog.progress.rating);
-    resultEconomy.innerHTML =
-      `<div class="re-label">本局金币 ${coinSign}${prog.coinDelta} · 段位 ${ratingSign}${prog.ratingDelta}` +
-      `（${TIER_LABEL[newTier]} ${prog.progress.rating}）</div>` +
-      `<div class="re-cat">当前金币 ${prog.progress.coin}</div>`;
-    resultEconomy.style.display = 'flex';
-  } else {
-    resultEconomy.style.display = 'none';
-  }
-  // Q26：首轮引导——全新账号且本场获得新部件时，明确提示「回车库调整」（仅首场，完成闭环后隐藏）
-  if (onboardingStage === 'pending' && outcome) {
-    resultOnboard.textContent = '获得新部件，可以回车库调整';
-    resultOnboard.style.display = 'flex';
-  } else {
-    resultOnboard.style.display = 'none';
-  }
-  // Q30：每场 Result 显示时重置 Rewarded 发奖锁与按钮态（同场只发一次；下一场重新可领）
-  rewardedClaimer.reset();
-  syncRewardAdButton();
-  // Q30：完整 Battle 结束 → 插屏频控计数 +1（在 battle_end 去重块内，每场只计一次）
-  onBattleEnded();
-  // Q28：battle_end / reward_gain / rank_change —— 关键去重：同一 result 对象只触发一次，
-  // 防止 Result 弹窗因每帧 pollBattleResult 重复触发（与 battleEndGuard.clear() @开战 配合）。
-  if (battleEndGuard.firstTime(r)) {
-    const duration = Math.max(0, (platform.lifecycle.now() - battleStartTimeMs) / 1000);
-    const playerRating = prog ? prog.progress.rating : getProgress().rating;
-    track('battle_end', {
-      result: isWin ? 'win' : 'lose',
-      duration: Number(duration.toFixed(1)),
-      playerRating,
-      opponentTier: OPPONENT_TIERS[matchedIndex],
-    });
-    if (prog) {
-      track('reward_gain', {
-        coinDelta: prog.coinDelta,
-        ratingDelta: prog.ratingDelta,
-        part: outcome?.defId ?? null,
-        star: outcome ? (outcome.star >= 2 ? 2 : 1) : null,
-      });
-      if (prog.ratingDelta !== 0) {
-        track('rank_change', {
-          from: prog.progress.rating - prog.ratingDelta,
-          to: prog.progress.rating,
-          delta: prog.ratingDelta,
-          tier: TIER_LABEL[tierOf(prog.progress.rating)],
-        });
-      }
-    }
-  }
-  resultModal.style.display = 'flex';
-}
-
-/** Ended 后玩家选择：调整配置 → 回 Garage（保留玩家上一场 Build，不重置） */
-function adjustConfig(): void {
-  resultModal.style.display = 'none';
-  hudEl.style.display = 'none';
-  // Q15-UX-R1：退出 Matching / MatchPreview 视觉层
-  matchingVs.style.display = 'none';
-  matchInfo.style.display = 'none';
-  playerPhase = 'garage'; // 回到装配
-  battleState = 'editing';
-  track('garage_enter'); // Q28：结算后回 Garage（闭环一步）
-  bEditorOpen = false;
-  selectedSlotA = null; // 进入 Garage：默认不展开部件全集
-  garageSelected = null;
-  setBuildControlsLocked(false);
-  // Q08-CAM-A1：面板恢复 → canvas CSS 变窄，先同步 backing 再显示 Preview
-  doResize();
-  refreshFromEdit(); // 按 phase(Garage) 渲染 solo-A 预览 + Dock（updateStartButton 接入 Shell）
-  applyPlayerShell(); // Q21：重渲染 Dock——刚获得的部件已从锁定变为可装备
-}
-
-/** Ended 后玩家选择：下一场 → 走同一套 Matching（随机新对手）→ MatchPreview。
- *  Q30：在「下一场」安全节点尝试 Interstitial；广告不可用/不合格/失败/无填充均不阻塞本流程。 */
-async function nextMatch(): Promise<void> {
-  await tryInterstitialSafe(() => {
-    resultModal.style.display = 'none';
-    hudEl.style.display = 'none';
-    startMatching(); // 复用 Garage「寻找对手」同一状态链
-  });
-}
-
-/* 结算卡按钮：下一场（主）/ 调整配置（次）—— Q15 玩家主循环闭环 */
-const btnAdjust = document.createElement('button');
-btnAdjust.className = 'secondary';
-btnAdjust.textContent = '调整配置';
-// Q26：Result 的「调整配置」= 完成一次 Battle→Result→Garage 闭环 → 关闭首轮引导。
-// （MatchPreview 的「调整配置」仍直接 adjustConfig，不经过此闭环判定，避免未开战就结束引导。）
-btnAdjust.onclick = () => {
-  completeOnboarding();
-  onboardingStage = 'done';
-  adjustConfig();
-};
-resultActions.appendChild(btnAdjust);
-
-const btnRematch = document.createElement('button');
-btnRematch.className = 'primary'; // Q15：下一场为主 CTA
-btnRematch.textContent = '下一场';
-btnRematch.onclick = nextMatch;
-resultActions.appendChild(btnRematch);
-
-// Q30：Result 额外奖励（Rewarded 广告）——仅广告可用时显示；完整观看成功才发，关闭/失败不发。
-const btnRewardAd = document.createElement('button');
-btnRewardAd.className = 'secondary';
-btnRewardAd.textContent = `看广告领 ${REWARD_AD_COIN_BONUS} 金币`;
-btnRewardAd.onclick = async () => {
-  if (rewardAdClaimed) return; // 本场已领 → 直接拒绝
-  const out = await rewardedClaimer.claim();
-  if (out.granted) {
-    rewardAdClaimed = true;
-    btnRewardAd.textContent = `已领 +${REWARD_AD_COIN_BONUS}`;
-    btnRewardAd.disabled = true;
-    btnRewardAd.style.opacity = '0.6';
-    // 刷新当前金币展示（若经济区当前可见）
-    if (resultEconomy.style.display !== 'none') {
-      resultEconomy.innerHTML = resultEconomy.innerHTML.replace(
-        /当前金币 \d+/,
-        `当前金币 ${out.coinAfter ?? 0}`,
-      );
-    }
-  }
-  // 关闭 / 失败 / 无填充：不发奖，按钮保持可点（玩家可重试），绝不卡死
-};
-resultActions.appendChild(btnRewardAd);
-
-/** Q30：每场 Result 显示时同步 Rewarded 按钮可见性与可点态（无广告环境隐藏，游戏照常完整） */
-let rewardAdClaimed = false;
-function syncRewardAdButton(): void {
-  rewardAdClaimed = false;
-  btnRewardAd.disabled = false;
-  btnRewardAd.style.opacity = '';
-  btnRewardAd.textContent = `看广告领 ${REWARD_AD_COIN_BONUS} 金币`;
-  btnRewardAd.style.display = isRewardedAdAvailable() ? '' : 'none';
-}
-
 // W2-VIS-1：Sprite Visual Registry（首版无正式 Content 资源 → 全部 Collider graybox；
 // 后续 Content 队列经 register + 图片加载注入正式 sprite，Preview/Fighting 共用同一 runtime）
 const visualRegistry = new VisualRegistry();
@@ -726,6 +504,10 @@ for (const [visualId, url] of SILHOUETTE_ASSETS) {
   img.src = url;
 }
 
+/* ---------- F-WX-3：玩家 UI 唯一 Host 边界（Web DOM 实现；挂到主画布容器） ---------- */
+const host = new WebDomPlayerUIHost();
+host.mount(canvasWrap);
+
 /* ---------- 稳定取景（Q02-CAM-R1）：只在 load / Reset / resize 时构图一次 ---------- */
 let currentCamera: ScenarioCamera | null = null;
 
@@ -776,9 +558,6 @@ function reframeCamera(): void {
 
 /* ---------- 顶层模式 + 战斗状态（Q06-UX-R1） ---------- */
 
-type UiMode = 'build' | 'scenario';
-type BattleState = 'editing' | 'fighting' | 'ended';
-
 let uiMode: UiMode = 'build'; // 默认【装配测试】
 let battleState: BattleState = 'editing';
 /**
@@ -787,7 +566,7 @@ let battleState: BattleState = 'editing';
  * - 'matchPreview'：已匹配对手 → 复核我方 VS 对手（A/B 全部只读）；
  * Fighting / Ended 仍由 battleState 驱动。
  */
-let playerPhase: 'garage' | 'matching' | 'matchPreview' = 'garage';
+let playerPhase: PlayerPhase = 'garage';
 /** Matching 防重复触发：每次进入 Matching generation+1；旧 timer 校验 generation 失效即跳过 */
 let matchingGeneration = 0;
 let buildControlsLocked = false; // Fighting 时锁定 A/B 全部 Build 控件
@@ -803,47 +582,6 @@ function addButton(parent: HTMLElement, text: string, onClick: () => void): HTML
 }
 
 /* ---------- Build 编辑状态（Draft 模型；编辑 → 实时 Preview） ---------- */
-
-// Q10-A：正常装配（玩家）只展示当前正式内容——西瓜 / 香蕉 / 菠萝 / 椰子（Q18 新增 2 种）。
-// wedgeBody / boxBody / tallBody / heavyBox 不删除、不在此处暴露，
-// 仍完整保留在 registry 供 Scenario / Preset / 开发测试链使用。
-const BODY_OPTIONS: Array<{ v: string; t: string }> = [
-  { v: 'watermelonBody', t: '西瓜车身（宽厚低矮）' },
-  { v: 'bananaBody', t: '香蕉车身（长条弧形）' },
-  { v: 'pineappleBody', t: '菠萝车身（高窄·顶挂点高）' },
-  { v: 'coconutBody', t: '椰子车身（短沉·更抗推）' },
-];
-
-// Q10-B：玩家侧轮径命名（小/标准/大认知保留；三张等权卡片同一行展示）
-const WHEEL_OPTIONS: Array<{ v: string; t: string }> = [
-  { v: '12', t: '12 小' },
-  { v: '20', t: '20 标准' },
-  { v: '26', t: '26 大' },
-];
-
-// Q22：Garage 功能件选项改用 partInventory.OFFICIAL_PARTS（含星级展开），PART_OPTIONS 不再直接用于 UI
-// Q22：V0.5 部件库存（数量化 + 星级 + 合成）
-import {
-  BattleRewardSettler,
-  ensureInventory,
-  canEquipPart,
-  getInventory,
-  getCount,
-  saveInventory,
-  equippedDefIds,
-  OFFICIAL_PARTS,
-} from './core/partInventory';
-// Q23→Q24：玩家进度（金币 + 段位）；结算纯函数 + 单例结算器（同场只结算一次）
-import {
-  BattleProgressSettler,
-  getProgress,
-  saveProgress,
-  canAffordMerge,
-  mergeWithCost,
-  tierOf,
-  TIER_LABEL,
-  MERGE_COST_COIN,
-} from './core/playerProgress';
 
 /** W2-SIL-1 视觉样板 Draft（已提取为 buildEditorModel.makeStarterDraft，可单测）：
  *  - front=pushRod / frontMass=cannon / top=hammer / rear=空
@@ -869,6 +607,60 @@ let onboardingStage: OnboardingStage = resolveOnboardingStage();
 // Q15：对手来自固定对手池（玩家不可编辑，仅 DEV 可临时改）
 let draftB = cloneBuildDraft(OPPONENT_POOL[matchedIndex]);
 
+/* ---------- F-WX-3：Player UI 状态（组装给 Host；Gameplay 副作用留在本文件） ---------- */
+let currentResult: PlayerUIState['result'] = null;
+let currentReward: PlayerUIState['reward'] = null;
+let currentEconomy: PlayerUIState['economy'] = null;
+let currentResultOnboarding = false;
+let rewardAdClaimed = false; // Q30：本场是否已领 Rewarded（同场只发一次）
+let readyOverlayVisible = false;
+let matchBarHidden = false; // Q15-FLOW-R1-ATOMIC：MatchPreview 复核条正常流程立即隐藏
+
+/** 组装当前 PlayerUIState 并推给 Host（Gameplay 状态变化 → 玩家 UI 更新的唯一出口） */
+function pushUI(): void {
+  host.render({
+    uiMode,
+    battleState,
+    playerPhase,
+    draft: draftA,
+    draftValid: buildsValid(),
+    blockReason: blockReason(),
+    garageSelected,
+    inventory: getInventory(),
+    progress: getProgress(),
+    onboarding: onboardingStage,
+    resetDevVisible: new URLSearchParams(location.search).has('resetdev'),
+    opponent:
+      playerPhase === 'matchPreview'
+        ? (() => {
+            const bodyB = registry.bodies.get(draftB.bodyDefId);
+            const partsB = bodyB
+              ? editableSlots(bodyB)
+                  .map((hpId) => {
+                    const v = draftB.functionalSelections[hpId];
+                    if (!v || v === EMPTY_SLOT) return null;
+                    return registry.functionals.get(v)?.name ?? v;
+                  })
+                  .filter((x): x is string => x !== null)
+              : [];
+            return {
+              bodyName: bodyB?.name ?? draftB.bodyDefId,
+              parts: partsB,
+              drive: resolveDriveMode(draftB.drive) === 'stationary' ? '停驻' : '前进',
+            };
+          })()
+        : null,
+    matchBarHidden,
+    result: currentResult,
+    reward: currentReward,
+    economy: currentEconomy,
+    resultOnboardingVisible: currentResultOnboarding,
+    rewardAdAvailable: isRewardedAdAvailable(),
+    rewardAdClaimed,
+    readyOverlayVisible,
+  });
+}
+
 function currentSnapshot(side: 'A' | 'B'): BuildSnapshot {
   return buildSnapshotFromDraft(
     side === 'A' ? draftA : draftB,
@@ -878,7 +670,8 @@ function currentSnapshot(side: 'A' | 'B'): BuildSnapshot {
 }
 
 /** 渲染一侧 Build 面板（Body / 轮径卡片 / 真实 Functional 挂点卡片 / Energy / 校验错误）。
- *  W2-UX-R2：opts.collapsed=true 时表单折叠（B 当前对手默认收起，仅保留「编辑对手」入口） */
+ *  W2-UX-R2：opts.collapsed=true 时表单折叠（B 当前对手默认收起，仅保留「编辑对手」入口）
+ *  F-WX-3：DEV/Scenario 专用（正常玩家使用 Garage Dock，不进入 PlayerUIHost） */
 function renderPanel(
   panel: HTMLElement,
   title: string,
@@ -1168,7 +961,7 @@ function renderPanelsOnly(): void {
   renderPanel(panelA, '我的车辆', draftA);
 }
 
-/** 编辑后刷新：面板 + （非战斗时）实时 Preview + 按钮/阻断原因 */
+/** 编辑后刷新：面板 + （非战斗时）实时 Preview + 玩家 UI（经 Host） */
 function refreshFromEdit(): void {
   renderPanelsOnly();
   if (battleState !== 'fighting') {
@@ -1176,7 +969,7 @@ function refreshFromEdit(): void {
   }
   // Q15：玩家 Build 持久化（最小；仅保存 Build Draft，不碰经济系统）
   savePlayerBuild(draftA);
-  updateStartButton();
+  pushUI();
 }
 
 /** A/B 是否均合法 */
@@ -1237,9 +1030,10 @@ if (DEV_TOOLS_VISIBLE) {
       setMode('scenario'); // Q07-A：从开发工具选中场景 → 直接进入机制场景模式
       lab.loadScenario(sc);
       lastShownResult = null;
+      currentResult = null;
       currentCamera = sc.camera ?? null;
       reframeCamera();
-      updateHud(); // 场景模式隐藏战斗 HUD
+      pushUI(); // 场景模式隐藏玩家 Shell / 结算卡（Host 按 uiMode/battleState 渲染）
     }
   };
 }
@@ -1272,143 +1066,44 @@ function startOrRematch(): void {
     playerRating: getProgress().rating,
     body: draftA.bodyDefId,
   });
-  // Q15-UI-R2：进入 Fighting → 整个玩家 Shell（顶部状态 / Dock / MatchPreview 条 / MatchInfo）
-  // 必须隐藏，恢复全战场 + Battle HUD（applyPlayerShell 按 battleState==='fighting' 统一收起）。
-  applyPlayerShell();
-  // Q07-C：Fighting 彻底进入「战斗观看状态」——装配编辑 / 对手编辑 / Energy-Validator /
-  // 开发工具入口全部隐藏；只保留战场 + A/B HP + 阶段提示。
+  // Q15-UI-R2：进入 Fighting → 玩家 Shell（顶部/Dock/MatchPreview 条/MatchInfo）隐藏，
+  // 恢复全战场 + Battle HUD（Host 按 battleState==='fighting' 统一收起）。
+  currentResult = null;
   panelA.style.display = 'none';
   panelB.style.display = 'none';
-  matchBar.style.display = 'none';
   toolsToggle.style.display = 'none';
   toolsHost.style.display = 'none';
-  resultModal.style.display = 'none';
   currentCamera = null;
   // Q08-CAM-A1：面板隐藏 → canvas CSS clientWidth 已变宽，但 backing
   // (canvas.width/height) 未同步——必须先 doResize()（内部 renderer.resize 按
   // clientWidth×DPR 同步 backing + reframeCamera）再构图，否则 Battle 刚进入
   // 即按新 clientWidth 取景、绘制在旧 backing 上 → 右侧被裁。
   doResize();
-  updateHud();
-  updateStartButton();
+  pushUI();
 }
 
-/* ---------- Q15-UI-R2：玩家 Shell（顶部状态 / 主舞台 / 底部操作；不再用左右长表单） ---------- */
-const playerTop = document.createElement('div');
-playerTop.className = 'player-top';
-const ptTitle = document.createElement('div');
-ptTitle.className = 'pt-title';
-playerTop.appendChild(ptTitle);
-canvasWrap.appendChild(playerTop);
-
-/* Q15：MatchPreview 复核条（调整配置 / 开始战斗）——与 Garage Dock CTA 同一视觉体系 */
-const matchBar = document.createElement('div');
-matchBar.className = 'start-bar';
-canvasWrap.appendChild(matchBar);
-const btnMatchAdjust = document.createElement('button');
-btnMatchAdjust.className = 'btn-start-cta secondary';
-btnMatchAdjust.textContent = '调整配置';
-btnMatchAdjust.onclick = adjustConfig;
-matchBar.appendChild(btnMatchAdjust);
-const btnFight = document.createElement('button');
-btnFight.className = 'btn-start-cta';
-btnFight.textContent = '开始战斗';
-btnFight.onclick = startBattleWithReady;
-matchBar.appendChild(btnFight);
-matchBar.style.display = 'none';
-
-/* Q15-UI-R2：Matching 中央 VS（文字在顶部状态区，不贴车身） */
-const matchingVs = document.createElement('div');
-matchingVs.className = 'matching-vs';
-matchingVs.textContent = 'VS';
-canvasWrap.appendChild(matchingVs);
-
-/* Q15-UX-R1：MatchPreview 信息层（我的战车 VS 对手；只展示 Body + 主要部件） */
-const matchInfo = document.createElement('div');
-matchInfo.className = 'match-info';
-canvasWrap.appendChild(matchInfo);
-
-/* Q15-UI-R2：Garage 装配 Dock（底部操作区；玩家主 UI，不使用旧 .lab-panel 表单） */
-const garageDock = document.createElement('div');
-garageDock.className = 'garage-dock';
-canvasWrap.appendChild(garageDock);
-
-/* ---------- Q07-C：Start 后短暂状态转换（READY / 开战 0.8s；Presentation 延迟，
- * 不改 Physics 时间与正式 Battle 结果——build/engine/seed 均不变，只是晚 0.8s 创建实例） ---------- */
-const readyOverlay = document.createElement('div');
-readyOverlay.className = 'ready-overlay';
-canvasWrap.appendChild(readyOverlay);
-const readyCard = document.createElement('div');
-readyCard.className = 'ready-card';
-const readySub = document.createElement('div');
-readySub.className = 'rd-sub';
-readySub.textContent = 'READY';
-const readyMain = document.createElement('div');
-readyMain.className = 'rd-main';
-readyMain.textContent = '开战！';
-readyCard.appendChild(readySub);
-readyCard.appendChild(readyMain);
-readyOverlay.appendChild(readyCard);
+/* ---------- Q15-UI-R2：玩家 Shell（顶部状态 / 主舞台 / 底部操作）——由 WebDomPlayerUIHost 创建 ---------- */
 
 let startTransitioning = false;
 
 /** Garage → MatchPreview（由 startMatching 锁定对手后调用）：干净 VS 复核界面，与 Matching 同相机连续 */
 function goToMatchPreview(): void {
   // Q15-UX-R1：退出 Matching 视觉层（仅文字/按钮变化，车辆位置/尺寸不跳变）
-  matchingVs.style.display = 'none';
   playerPhase = 'matchPreview';
   bEditorOpen = false;
   setBuildControlsLocked(true); // 只读复核
-  resultModal.style.display = 'none';
-  hudEl.style.display = 'none';
+  currentResult = null;
   renderer.setPreviewVehicleFx(null); // 候选淡入缩放结束，B 恢复正常绘制
   bFxStart = -1;
-  renderMatchInfo(); // 填充：我的战车 / 对手 Body + 主要部件
-  refreshFromEdit(); // 渲染面板(隐藏) + 完整 A+B 预览(previewFixed 同构图) + 显示 matchBar
-  setPlayerTopTitle('对手已找到');
+  matchBarHidden = true; // Q15-FLOW-R1-ATOMIC：复核条正常流程立即隐藏，永不闪现
+  refreshFromEdit(); // 渲染面板(隐藏) + 完整 A+B 预览(previewFixed 同构图) + pushUI（Host 渲染 MatchInfo）
   // Q15-FLOW-R1-ATOMIC：匹配完成直接开战——正常流程不再出现「调整配置 / 开始战斗」复核条。
-  // （refreshFromEdit → applyPlayerShell 刚把 matchBar 设为 flex；同一同步任务内立即改 none，
-  //   浏览器不重绘中间态 → 复核条永不闪现。)
-  matchBar.style.display = 'none';
   // 最终对手展示约 250ms 后自动进入现有 READY → Battle（复用 startBattleWithReady，不复制第二套逻辑）。
   window.setTimeout(() => {
     // guard：仅当仍处于 MatchPreview 编辑态才启动；旧 timer / 已切换状态（如 Result 后重进 Matching）直接 no-op。
     if (playerPhase !== 'matchPreview' || battleState !== 'editing') return;
     startBattleWithReady();
   }, 250);
-}
-
-/** Q15-UX-R1：MatchPreview 信息层内容（只展示 Body 名 + 已安装主要部件，不展示伤害/数值/调试） */
-function renderMatchInfo(): void {
-  const bodyB = registry.bodies.get(draftB.bodyDefId);
-  const partsB = bodyB
-    ? editableSlots(bodyB)
-        .map((hpId) => {
-          const v = draftB.functionalSelections[hpId];
-          if (!v || v === EMPTY_SLOT) return null;
-          return registry.functionals.get(v)?.name ?? v;
-        })
-        .filter((x): x is string => x !== null)
-    : [];
-  matchInfo.replaceChildren();
-  const left = document.createElement('div');
-  left.className = 'mi-side mi-left';
-  left.innerHTML = '<div class="mi-label">我的战车</div>';
-  const vs = document.createElement('div');
-  vs.className = 'mi-vs';
-  vs.textContent = 'VS';
-  const right = document.createElement('div');
-  right.className = 'mi-side mi-right';
-  // F-MOVE-1：锁定阶段在对手附近显示其真实 Drive 配置（仅表示驱动模式，不做职业/AI 标签）
-  const oppDriveText = resolveDriveMode(draftB.drive) === 'stationary' ? '停驻' : '前进';
-  right.innerHTML =
-    `<div class="mi-label">对手</div>` +
-    `<div class="mi-body">${bodyB?.name ?? draftB.bodyDefId}</div>` +
-    (partsB.length ? `<div class="mi-parts">${partsB.join(' / ')}</div>` : '') +
-    `<div class="mi-drive">驱动 · ${oppDriveText}</div>`;
-  matchInfo.appendChild(left);
-  matchInfo.appendChild(vs);
-  matchInfo.appendChild(right);
 }
 
 /** Q15-UI-R2：主画布加载 A(玩家) + B(候选) 并固定取景（不创建第二个 Renderer） */
@@ -1453,12 +1148,10 @@ function applyMatchingBfx(now: number): void {
 function startMatching(): void {
   if (playerPhase === 'matching') return; // 防重复触发
   track('find_opponent'); // Q28：发起寻找对手
-  resultModal.style.display = 'none';
-  hudEl.style.display = 'none';
+  currentResult = null; // 收起结算卡（Host）
   battleState = 'editing';
   playerPhase = 'matching';
   setBuildControlsLocked(true); // 锁定当前 Build
-  matchInfo.style.display = 'none';
   // Q25：按玩家段位抽取对手（Bronze→Easy/Normal，Silver→E/N/H，Gold→N/H，Diamond→N/H），
   // 保持随机匹配 + 不连续重复同一 Build（pickOpponentForTier 内部避开 matchedIndex）。
   const finalIdx = pickOpponentForTier(tierOf(getProgress().rating), matchedIndex, Math.random);
@@ -1467,8 +1160,7 @@ function startMatching(): void {
   // 主画布加载 A + 首个候选 B（previewFixed 固定相机）
   draftB = cloneBuildDraft(OPPONENT_POOL[seq[0]]);
   loadMatchAB();
-  applyPlayerShell(); // 隐藏 Dock / 显示 Matching 中央 VS + 顶部「正在寻找对手…」
-  setPlayerTopTitle('正在寻找对手…');
+  pushUI(); // Host：隐藏 Dock / 显示 Matching 中央 VS + 顶部「正在寻找对手…」
 
   const gen = ++matchingGeneration; // 本场 generation
   // 节奏：快切 → 稍慢 → 最终锁定（0/220/480/780ms，约 1.0s 内 ≥4 次变化）
@@ -1501,13 +1193,13 @@ function startBattleWithReady(): void {
   setBuildControlsLocked(true);
   panelA.style.display = 'none';
   panelB.style.display = 'none';
-  matchBar.style.display = 'none';
   toolsToggle.style.display = 'none';
   toolsHost.style.display = 'none';
   doResize();
-  readyOverlay.style.display = 'flex';
+  readyOverlayVisible = true;
+  pushUI(); // Host：显示 READY 过渡层
   window.setTimeout(() => {
-    readyOverlay.style.display = 'none';
+    readyOverlayVisible = false;
     startTransitioning = false;
     startOrRematch();
     if (battleState !== 'fighting') {
@@ -1515,18 +1207,12 @@ function startBattleWithReady(): void {
       setBuildControlsLocked(false);
       panelA.style.display = '';
       panelB.style.display = '';
-      updateStartButton();
+      pushUI();
     }
   }, 600);
 }
 
-/* ---------- Q15-UI-R2：玩家 Shell 可见性 + Garage Dock ---------- */
-
-/** 顶部状态区标题（阶段文案；位于 UI 层顶部，不贴车身） */
-function setPlayerTopTitle(text: string): void {
-  ptTitle.textContent = text;
-}
-
+/* ---------- Q28：Build 变更埋点统一出口 ---------- */
 /**
  * Q28：Build 变更埋点统一出口。slot/oldPart/newPart/drive/body 平铺可解释；
  * 功能件槽且装备了真实部件时额外发 part_equip。车身/轮/驱动变更不发 part_equip。
@@ -1540,359 +1226,95 @@ function emitBuildChange(slot: string, oldPart: string, newPart: string, isFunct
   }
 }
 
-/**
- * Q15-UI-R2：玩家 Shell 三层可见性（顶部状态 / 主舞台 / 底部操作）。
- * - DEV/Scenario：保留旧 .lab-panel（A/B 编辑）能力；
- * - 正常玩家（build）：隐藏旧 panel，按 playerPhase 显示 Dock / Matching VS / MatchPreview 条。
- * Fighting：隐藏整个玩家 Shell，恢复全战场 + Battle HUD。
- */
-function applyPlayerShell(): void {
-  const devView = uiMode === 'scenario';
-  // 旧左右 panel：仅 DEV/Scenario 才作为玩家编辑 UI
-  panelA.style.display = devView ? '' : 'none';
-  panelB.style.display = devView ? '' : 'none';
-  // 开发工具入口：玩家 build（非战斗）可见（PROD 隐藏），战斗/Scenario 收起
-  toolsToggle.style.display =
-    !devView && battleState !== 'fighting' ? TOOLS_DEV_VISIBLE : 'none';
-  // 玩家 Shell 仅在「装配编辑态」可见；进入 Fighting / Ended 由战场 + Battle HUD + 结算卡接管。
-  const inPlayer = !devView && battleState === 'editing';
-  // Q15-UI-R2-RECOVER：可见性用明确 display（禁止 '' 回退 CSS 的 display:none，否则元素永远不可见）
-  const vis = computePlayerShellVisibility(uiMode, battleState, playerPhase);
-  playerTop.style.display = vis.playerTop;
-  garageDock.style.display = vis.garageDock;
-  matchingVs.style.display = vis.matchingVs;
-  matchInfo.style.display = vis.matchInfo;
-  matchBar.style.display = vis.matchBar;
-  // 顶部文案
-  if (playerPhase === 'garage') setPlayerTopTitle('我的战车');
-  else if (playerPhase === 'matching') setPlayerTopTitle('正在寻找对手…');
-  else if (playerPhase === 'matchPreview') setPlayerTopTitle('对手已找到');
-  // Garage：重建 Dock（含能量 + 寻找对手 CTA + 当前选中槽选项）
-  if (inPlayer && playerPhase === 'garage') renderGarageDock();
+/** Ended 后玩家选择：调整配置 → 回 Garage（保留玩家上一场 Build，不重置） */
+function adjustConfig(): void {
+  currentResult = null; // Host 收起结算卡（HUD 由 renderBattleFrame 按 battleState 控制）
+  // Q15-UX-R1：退出 Matching / MatchPreview 视觉层（Host 按 playerPhase 渲染）
+  playerPhase = 'garage'; // 回到装配
+  battleState = 'editing';
+  track('garage_enter'); // Q28：结算后回 Garage（闭环一步）
+  bEditorOpen = false;
+  selectedSlotA = null; // 进入 Garage：默认不展开部件全集
+  garageSelected = null;
+  setBuildControlsLocked(false);
+  // Q08-CAM-A1：面板恢复 → canvas CSS 变窄，先同步 backing 再显示 Preview
+  doResize();
+  refreshFromEdit(); // 按 phase(Garage) 渲染 solo-A 预览 + Dock（pushUI 接入 Host）
 }
 
-/**
- * Q15-UI-R2：Garage 装配 Dock 渲染。
- * 第一层：车身 / 后轮 / 前轮 / 各 functional 挂点 chip（只显示当前装备，不铺开全部部件）；
- * 第二层：点击某 chip 后横向展开其选项（选完即收起 garageSelected=null）；
- * Energy 合并进 Dock；「寻找对手」为主 CTA（与 MatchPreview 按钮同一视觉体系）。
- */
-/** Q22：Functional 槽选项的 (defId, star) 编码 / 解码（value 形如 `cannon@2`） */
-function encodePartVal(defId: string, star: number): string {
-  return defId === EMPTY_SLOT ? EMPTY_SLOT : `${defId}@${star}`;
-}
-function decodePartVal(v: string): { defId: string; star: number } {
-  if (v === EMPTY_SLOT) return { defId: EMPTY_SLOT, star: 1 };
-  const i = v.lastIndexOf('@');
-  const defId = i >= 0 ? v.slice(0, i) : v;
-  const star = i >= 0 ? Number(v.slice(i + 1)) || 1 : 1;
-  return { defId, star };
-}
-
-function renderGarageDock(): void {
-  garageDock.replaceChildren();
-  // Q23→Q24：车库顶部状态条（金币 + 段位/rating）
-  {
-    const p = getProgress();
-    const tier = tierOf(p.rating);
-    const stats = document.createElement('div');
-    stats.className = 'dock-stats';
-    stats.innerHTML = `金币 <b>${p.coin}</b> · ${TIER_LABEL[tier]} <b>${p.rating}</b>`;
-    garageDock.appendChild(stats);
-  }
-  // Q26：首轮引导——全新账号仅在首 Garage 显示极简提示，指向唯一重要动作「寻找对手」；
-  // 不弹遮罩、不强制、不堆文字；完成闭环后 onboardingStage 变 done 即不再渲染。
-  if (onboardingStage === 'pending') {
-    const ob = document.createElement('div');
-    ob.className = 'dock-onboard';
-    ob.textContent = '这是你的第一辆战车，点「寻找对手」开始第一场战斗';
-    garageDock.appendChild(ob);
-  }
-  // Q27：DEV/Settings 安全入口——仅当 URL 含 ?resetdev=1 时显示「重置进度」；
-  // 点击经二次确认后清空已知玩家存档 key 并刷新，恢复新账号状态。正常游玩不可见、不可触发。
-  if (new URLSearchParams(location.search).has('resetdev')) {
-    const dev = document.createElement('button');
-    dev.className = 'dock-dev-reset';
-    dev.textContent = 'DEV：重置进度';
-    dev.onclick = () => {
-      if (confirm('确认重置全部进度？此操作不可撤销，将恢复到新账号状态。')) {
-        resetPlayerSave();
-        resetAdFrequency(); // Q30：频控一并恢复新账号态
-        location.reload();
-      }
-    };
-    garageDock.appendChild(dev);
-  }
-  const body = registry.bodies.get(draftA.bodyDefId);
-  const snapshot = currentSnapshot('A');
-  const valid = buildsValid();
-
-  // 第一层：槽位 chip 行
-  const chips = document.createElement('div');
-  chips.className = 'dock-chips';
-  const chipDefs: Array<{ key: string; label: string; value: string; empty: boolean }> = [];
-  chipDefs.push({ key: 'body', label: '车身', value: body?.name ?? draftA.bodyDefId, empty: false });
-  const rw = WHEEL_OPTIONS.find((w) => String(draftA.rearRadius) === w.v);
-  const fw = WHEEL_OPTIONS.find((w) => String(draftA.frontRadius) === w.v);
-  chipDefs.push({ key: 'rearWheel', label: '后轮', value: rw?.t ?? String(draftA.rearRadius), empty: false });
-  chipDefs.push({ key: 'frontWheel', label: '前轮', value: fw?.t ?? String(draftA.frontRadius), empty: false });
-  // F-MOVE-1：驱动模式（前进 / 停驻）—— 与车身/轮子同为 Build 的明确配置
-  chipDefs.push({
-    key: 'drive',
-    label: '驱动',
-    value: resolveDriveMode(draftA.drive) === 'stationary' ? '停驻' : '前进',
-    empty: false,
+/** Ended 后玩家选择：下一场 → 走同一套 Matching（随机新对手）→ MatchPreview。
+ *  Q30：在「下一场」安全节点尝试 Interstitial；广告不可用/不合格/失败/无填充均不阻塞本流程。 */
+async function nextMatch(): Promise<void> {
+  await tryInterstitialSafe(() => {
+    currentResult = null;
+    startMatching(); // 复用 Garage「寻找对手」同一状态链
   });
-  if (body) {
-    for (const hpId of editableSlots(body)) {
-      const cur = draftA.functionalSelections[hpId] ?? EMPTY_SLOT;
-      const curStar = draftA.functionalStars?.[hpId] ?? 1;
-      const name =
-        cur === EMPTY_SLOT
-          ? '空'
-          : (registry.functionals.get(cur)?.name ?? cur) + (curStar >= 2 ? ' ★★' : ' ★');
-      chipDefs.push({ key: hpId, label: slotLabel(hpId), value: name, empty: cur === EMPTY_SLOT });
-    }
-  }
-  for (const def of chipDefs) {
-    const chip = document.createElement('button');
-    chip.className = 'dock-chip' + (garageSelected === def.key ? ' active' : '');
-    const lab = document.createElement('span');
-    lab.className = 'dc-label';
-    lab.textContent = def.label;
-    const val = document.createElement('span');
-    val.className = 'dc-value' + (def.empty ? ' empty' : '');
-    val.textContent = def.value;
-    chip.appendChild(lab);
-    chip.appendChild(val);
-    chip.onclick = () => {
-      garageSelected = garageSelected === def.key ? null : def.key;
-      renderGarageDock(); // 重渲染：展开/收起第二层
-    };
-    chips.appendChild(chip);
-  }
-  garageDock.appendChild(chips);
+}
 
-  // 第二层：当前选中槽的横向选项
-  if (garageSelected) {
-    const slotKey: string = garageSelected; // 闭包捕获用：窄化为 string（外变量为 string|null）
-    const slotIsFunctional =
-      garageSelected !== 'body' &&
-      garageSelected !== 'rearWheel' &&
-      garageSelected !== 'frontWheel' &&
-      garageSelected !== 'drive';
-    const picker = document.createElement('div');
-    picker.className = 'dock-picker';
-    const title = document.createElement('div');
-    title.className = 'dp-title';
-    const selLabel =
-      garageSelected === 'body' ? '车身'
-        : garageSelected === 'rearWheel' ? '后轮'
-          : garageSelected === 'frontWheel' ? '前轮'
-            : garageSelected === 'drive' ? '驱动'
-              : slotLabel(garageSelected);
-    title.textContent = `正在改「${selLabel}」`;
-    picker.appendChild(title);
-    const opts: Array<{ v: string; t: string; meta: string }> = [];
-    if (garageSelected === 'body') {
-      for (const o of BODY_OPTIONS) opts.push({ v: o.v, t: o.t, meta: '' });
-    } else if (garageSelected === 'rearWheel' || garageSelected === 'frontWheel') {
-      for (const o of WHEEL_OPTIONS) opts.push({ v: o.v, t: o.t, meta: '' });
-    } else if (garageSelected === 'drive') {
-      opts.push({ v: 'forward', t: '前进', meta: '轮子正常驱动' });
-      opts.push({ v: 'stationary', t: '停驻', meta: '不主动移动·真实物理保留' });
-    } else {
-      // Q22：功能件按 (defId, star) 展开；空槽单独；未拥有星级显示「未获得」仍可见（不隐藏）
-      opts.push({ v: EMPTY_SLOT, t: '空', meta: '空 · 0 能量' });
-      const inv = getInventory();
-      for (const defId of OFFICIAL_PARTS) {
-        const def = registry.functionals.get(defId);
-        if (!def) continue;
-        const cat = def.category === 'weapon' ? '武器' : def.category === 'gadget' ? '辅助' : def.category;
-        for (const star of [1, 2]) {
-          const count = getCount(inv, defId, star);
-          const starStr = star >= 2 ? '★★' : '★';
-          const t = `${def.name} ${starStr}`;
-          const meta = count > 0
-            ? `${cat} · ${starTierEnergy(def.energy, star)} 能量 · 拥有 ×${count}`
-            : '未获得';
-          opts.push({ v: encodePartVal(defId, star), t, meta });
-        }
+/** Q30：每场 Result 结算（奖励 + 金币/段位 + 首轮引导 + 广告重置 + 埋点）。
+ *  副作用全部留在 main.ts；Host 只负责渲染（经 pushUI 传入 state）。 */
+function finalizeBattleResult(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): void {
+  const isWin = r.winner === 'A';
+  // Q22：结算本场奖励（胜/负均获得 1★、可重复；同场只结算一次，自动入库）
+  const outcome = rewardSettler.settle(r);
+  currentReward = outcome
+    ? (() => {
+        const def = registry.functionals.get(outcome.defId);
+        const cat = def?.category === 'weapon' ? '武器' : def?.category === 'gadget' ? '辅助' : '';
+        return {
+          name: def?.name ?? outcome.defId,
+          starStr: outcome.star >= 2 ? '★★' : '★',
+          cat,
+          countAfter: outcome.countAfter,
+        };
+      })()
+    : null;
+  // Q23→Q24：结算本局金币 + 段位（同场只结算一次，自动入库）
+  const prog = progressSettler.settle(r, isWin);
+  currentEconomy = prog
+    ? {
+        coinDelta: prog.coinDelta,
+        ratingDelta: prog.ratingDelta,
+        tierLabel: TIER_LABEL[tierOf(prog.progress.rating)],
+        rating: prog.progress.rating,
+        coin: prog.progress.coin,
+      }
+    : null;
+  // Q26：首轮引导——全新账号且本场获得新部件时，明确提示「回车库调整」（仅首场，完成闭环后隐藏）
+  currentResultOnboarding = onboardingStage === 'pending' && !!outcome;
+  // Q30：每场 Result 显示时重置 Rewarded 发奖锁与按钮态（同场只发一次；下一场重新可领）
+  rewardedClaimer.reset();
+  rewardAdClaimed = false;
+  // Q30：完整 Battle 结束 → 插屏频控计数 +1（在 battle_end 去重块内，每场只计一次）
+  onBattleEnded();
+  // Q28：battle_end / reward_gain / rank_change —— 关键去重：同一 result 对象只触发一次，
+  // 防止 Result 弹窗因每帧 pollBattleResult 重复触发（与 battleEndGuard.clear() @开战 配合）。
+  if (battleEndGuard.firstTime(r)) {
+    const duration = Math.max(0, (platform.lifecycle.now() - battleStartTimeMs) / 1000);
+    const playerRating = prog ? prog.progress.rating : getProgress().rating;
+    track('battle_end', {
+      result: isWin ? 'win' : 'lose',
+      duration: Number(duration.toFixed(1)),
+      playerRating,
+      opponentTier: OPPONENT_TIERS[matchedIndex],
+    });
+    if (prog) {
+      track('reward_gain', {
+        coinDelta: prog.coinDelta,
+        ratingDelta: prog.ratingDelta,
+        part: outcome?.defId ?? null,
+        star: outcome ? (outcome.star >= 2 ? 2 : 1) : null,
+      });
+      if (prog.ratingDelta !== 0) {
+        track('rank_change', {
+          from: prog.progress.rating - prog.ratingDelta,
+          to: prog.progress.rating,
+          delta: prog.ratingDelta,
+          tier: TIER_LABEL[tierOf(prog.progress.rating)],
+        });
       }
     }
-    const curVal =
-      garageSelected === 'body' ? draftA.bodyDefId
-        : garageSelected === 'rearWheel' ? String(draftA.rearRadius)
-          : garageSelected === 'frontWheel' ? String(draftA.frontRadius)
-            : garageSelected === 'drive' ? resolveDriveMode(draftA.drive)
-              : encodePartVal(
-                  draftA.functionalSelections[garageSelected] ?? EMPTY_SLOT,
-                  draftA.functionalStars?.[garageSelected] ?? 1,
-                );
-    for (const o of opts) {
-      const b = document.createElement('button');
-      // Q22：功能件槽中，未拥有星级锁定（不可装备、仍可见），空槽/已拥有正常
-      const equip = !slotIsFunctional
-        ? true
-        : o.v === EMPTY_SLOT
-          ? true
-          : (() => {
-              const { defId, star } = decodePartVal(o.v);
-              return canEquipPart(defId, star);
-            })();
-      b.className = 'dock-opt' + (o.v === curVal ? ' active' : '') + (equip ? '' : ' locked');
-      if (!equip) b.disabled = true;
-      const nameEl = document.createElement('div');
-      nameEl.className = 'do-name';
-      nameEl.textContent = o.t;
-      b.appendChild(nameEl);
-      if (o.meta) {
-        const metaEl = document.createElement('div');
-        metaEl.className = 'do-meta';
-        metaEl.textContent = o.meta;
-        b.appendChild(metaEl);
-      }
-      b.onclick = () => {
-        // Q22：未拥有功能件（含未拥有星级）不可装备（守卫，disabled 仍双保险）
-        if (slotIsFunctional && o.v !== EMPTY_SLOT) {
-          const { defId, star } = decodePartVal(o.v);
-          if (!canEquipPart(defId, star)) return;
-        }
-        // Q28：变更前快照
-        const oldVal =
-          slotKey === 'body' ? draftA.bodyDefId
-          : slotKey === 'rearWheel' ? String(draftA.rearRadius)
-          : slotKey === 'frontWheel' ? String(draftA.frontRadius)
-          : slotKey === 'drive' ? resolveDriveMode(draftA.drive)
-          : (draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
-        if (slotKey === 'body') {
-          const migrated = migrateDraftBody(draftA, o.v, registry);
-          draftA.bodyDefId = migrated.bodyDefId;
-          draftA.functionalSelections = migrated.functionalSelections;
-        } else if (slotKey === 'rearWheel') {
-          draftA.rearRadius = Number(o.v);
-        } else if (slotKey === 'frontWheel') {
-          draftA.frontRadius = Number(o.v);
-        } else if (slotKey === 'drive') {
-          draftA.drive = o.v as DriveMode;
-        } else {
-          // Q22：功能件按 (defId, star) 装备
-          if (o.v === EMPTY_SLOT) {
-            draftA.functionalSelections[slotKey] = EMPTY_SLOT;
-          } else {
-            const { defId, star } = decodePartVal(o.v);
-            draftA.functionalSelections[slotKey] = defId;
-            draftA.functionalStars = draftA.functionalStars ?? {};
-            draftA.functionalStars[slotKey] = star;
-          }
-        }
-        // Q28：Build 变更埋点（功能件槽额外发 part_equip）
-        const isFunctional = slotKey !== 'body' && slotKey !== 'rearWheel' && slotKey !== 'frontWheel' && slotKey !== 'drive';
-        const newVal =
-          slotKey === 'body' ? draftA.bodyDefId
-          : slotKey === 'rearWheel' ? String(draftA.rearRadius)
-          : slotKey === 'frontWheel' ? String(draftA.frontRadius)
-          : slotKey === 'drive' ? resolveDriveMode(draftA.drive)
-          : (draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
-        emitBuildChange(slotKey, oldVal, newVal, isFunctional);
-        garageSelected = null; // 选完即收起
-        refreshFromEdit(); // Draft → Energy → Preview + 重渲染 Dock
-      };
-      picker.appendChild(b);
-    }
-    garageDock.appendChild(picker);
   }
-
-  // Q22：合成 Panel（Garage 内简易，不新页面、不改布局结构）
-  {
-    const inv = getInventory();
-    const progress = getProgress();
-    const reserved = new Set(equippedDefIds(draftA));
-    let available = 0;
-    for (const p of OFFICIAL_PARTS) available += Math.max(0, inv[p].one - (reserved.has(p) ? 1 : 0));
-    const canMergeParts = available >= 5;
-    const canAfford = canAffordMerge(progress.coin);
-    const mergePanel = document.createElement('div');
-    mergePanel.className = 'merge-panel';
-    const mTitle = document.createElement('div');
-    mTitle.className = 'mp-title';
-    mTitle.textContent = '合成 · 5 × 1★ → 1 × 随机 2★';
-    mergePanel.appendChild(mTitle);
-    const mInfo = document.createElement('div');
-    mInfo.className = 'mp-info';
-    mInfo.textContent =
-      `可合成 1★ 副本：${available}（已装备各保留 1） · 消耗 ${MERGE_COST_COIN} 金币`;
-    mergePanel.appendChild(mInfo);
-    const mBtn = document.createElement('button');
-    mBtn.className = 'mp-btn';
-    if (!canMergeParts) mBtn.textContent = '副本不足';
-    else if (!canAfford) mBtn.textContent = `金币不足（${progress.coin}/${MERGE_COST_COIN}）`;
-    else mBtn.textContent = '合成';
-    mBtn.disabled = !(canMergeParts && canAfford);
-    mBtn.onclick = () => {
-      const cur = getInventory();
-      const p = getProgress();
-      track('merge_attempt'); // Q28：发起合成
-      // Q23：合成 = 5×1★ 熔炼 + 固定金币消耗（纯函数，金币不足/副本不足均不生效）
-      const res = mergeWithCost(cur, equippedDefIds(draftA), p.coin);
-      if (!res.ok) return;
-      track('merge_success'); // Q28：合成成功
-      saveInventory(res.inventory);
-      saveProgress({ coin: res.coin, rating: p.rating }); // 仅扣金币，rating 不变
-      renderGarageDock(); // 重渲染：反映新 2★ 库存 + 扣费后金币 + 合成面板
-    };
-    mergePanel.appendChild(mBtn);
-    garageDock.appendChild(mergePanel);
-  }
-
-  // 底部行：能量 + 寻找对手 CTA
-  const row = document.createElement('div');
-  row.className = 'dock-row';
-  const energyRes = computeEnergy(snapshot, registry);
-  const used = energyRes.error ? Number.NaN : energyRes.energy;
-  const capacity = body?.energyCapacity ?? 0;
-  const overload = Number.isFinite(used) && used > capacity;
-  const eRow = document.createElement('div');
-  eRow.className = 'dock-energy';
-  const eLabel = document.createElement('span');
-  eLabel.className = 'de-label';
-  eLabel.textContent = '能量';
-  const eBar = document.createElement('div');
-  eBar.className = 'de-bar';
-  const pct = Number.isFinite(used) ? Math.min(100, (used / Math.max(capacity, 1)) * 100) : 0;
-  const eFill = document.createElement('div');
-  eFill.className = 'de-fill' + (overload ? ' overload' : '');
-  eFill.style.width = `${pct}%`;
-  eBar.appendChild(eFill);
-  const eTxt = document.createElement('span');
-  eTxt.className = 'de-text' + (overload ? ' overload' : '');
-  eTxt.textContent = Number.isFinite(used) ? `${used} / ${capacity}` : '? / ?';
-  eRow.appendChild(eLabel);
-  eRow.appendChild(eBar);
-  eRow.appendChild(eTxt);
-  row.appendChild(eRow);
-
-  if (!valid) {
-    const reason = blockReason();
-    if (reason) {
-      const hint = document.createElement('span');
-      hint.className = 'dock-hint';
-      hint.textContent = reason;
-      row.appendChild(hint);
-    }
-  }
-
-  const cta = document.createElement('button');
-  cta.className = 'dock-cta';
-  cta.textContent = '寻找对手';
-  cta.disabled = !valid;
-  cta.onclick = () => {
-    if (!buildsValid()) return;
-    sfx.resume();
-    startMatching();
-  };
-  row.appendChild(cta);
-  garageDock.appendChild(row);
 }
 
 /* ---------- Q07-A：开发工具折叠区（机制场景 / Pause / Reset / Clear / 速度 / Preset 全部收进二级） ---------- */
@@ -1921,15 +1343,6 @@ let toolsOpen = false;
 // 基础 CSS 为 display:flex，这里显式收起，保证首屏默认隐藏（展开由内联 '' 回退到 flex）。
 toolsHost.style.display = 'none';
 
-/** 按钮状态机（Q15-UI-R2）：可见性统一由 applyPlayerShell 驱动。
- *  Garage 的「寻找对手」CTA / 能量 / 阻断原因在 renderGarageDock 内渲染；
- *  Matching 期间 CTA 由 applyPlayerShell 按 playerPhase 收起；
- *  MatchPreview 复核条（调整配置 / 开始战斗）由 applyPlayerShell 按 phase 显示。
- *  此处仅作统一触发入口（编辑刷新 / 结算 / 模式切换都会调用）。 */
-function updateStartButton(): void {
-  applyPlayerShell();
-}
-
 /** 每帧轮询：result 变化 → Ended（显示中央结算卡；Build 控件保持锁定，先选「调整配置」） */
 function pollBattleResult(): void {
   const r = lab.orchestrator?.result ?? null;
@@ -1937,16 +1350,16 @@ function pollBattleResult(): void {
   lastShownResult = r;
   if (uiMode === 'build' && battleState === 'fighting' && r && r.phase === 'End') {
     battleState = 'ended';
-    showResultModal(r); // 结算卡成为第一视觉焦点
-    updateHud();
+    currentResult = { winner: r.winner, hpA: r.hpA, hpB: r.hpB };
+    finalizeBattleResult(currentResult); // 结算副作用（奖励/经济/埋点/广告重置）
+    pushUI(); // Host：结算卡成为第一视觉焦点
   }
-  updateStartButton();
 }
 
 /** 顶层模式切换（Q07-A）：装配（默认主页面）↔ 机制场景（开发工具入口）。
  *  不再有双主按钮——scenario 由开发工具内场景选择进入，backToBuildBtn 返回装配。
- *  Q15-UI-R2：panel / 玩家 Shell 可见性统一交给 applyPlayerShell
- *  （build 模式隐藏旧 .lab-panel、改用 Dock；scenario 保留旧 panel）。 */
+ *  F-WX-3：玩家 Shell 可见性统一交给 Host（build 模式隐藏旧 .lab-panel、改用 Dock；
+ *  scenario 保留旧 panel）。 */
 function setMode(m: UiMode): void {
   uiMode = m;
   backToBuildBtn.style.display = m === 'scenario' ? '' : 'none';
@@ -1954,19 +1367,17 @@ function setMode(m: UiMode): void {
   // Q07-A：scenarioSelect 位于开发工具折叠区内，显示与否由 toolsHost 控制，不再单独切换
   // Q31：PROD 下 debugPanel 为 null（Runtime Debug Tools 已隐藏）→ 跳过。
   if (debugPanel) debugPanel.style.display = showBuild ? 'none' : '';
-  resultModal.style.display = 'none'; // 模式切换关闭结算卡
-  hudEl.style.display = 'none';
+  currentResult = null; // 模式切换关闭结算卡（Host）
   // Q08-CAM-A1：模式切换改面板显隐 → canvas CSS 尺寸变化，先同步 backing 再构图
   doResize();
   if (showBuild && battleState !== 'fighting') {
     // Q15-UX-R1：切回装配 → Garage（solo-A），退出 Matching/MatchPreview 视觉层
     playerPhase = 'garage';
     track('garage_enter'); // Q28：进入 Garage（仅当真正切回装配时）
-    matchInfo.style.display = 'none';
     selectedSlotA = null;
     refreshFromEdit(); // 按 phase(Garage) 渲染 A 编辑器 + solo-A 预览
   }
-  applyPlayerShell();
+  pushUI();
 }
 
 /* ---------- 其余工具栏（Pause / Reset / Clear / 时间缩放）——收进「测试工具」折叠区 ---------- */
@@ -1982,7 +1393,7 @@ addButton(toolsHost, 'Reset', () => {
   btnPause.classList.remove('active');
   lab.reset();
   lastShownResult = null;
-  resultModal.style.display = 'none';
+  currentResult = null;
   // preview 重建 → Editing（中央恢复装配预览）；battle 重建 → Fighting
   if (uiMode === 'build') {
     battleState = lab.previewMode ? 'editing' : 'fighting';
@@ -1990,27 +1401,23 @@ addButton(toolsHost, 'Reset', () => {
     if (lab.previewMode) {
       // Q15-UX-R1：回装配恢复（按 phase 渲染面板 + 预览 + CTA；Garage 不显示 B 面板）
       toolsToggle.style.display = TOOLS_DEV_VISIBLE;
-      matchInfo.style.display = 'none';
       doResize();
       refreshFromEdit();
     } else {
       reframeCamera(); // Fighting：布局未变（面板已隐藏）
     }
-    updateHud();
-    updateStartButton();
+    pushUI();
   }
 });
 addButton(toolsHost, 'Clear', () => {
   lab.clear();
   lastShownResult = null;
   currentCamera = null;
-  resultModal.style.display = 'none';
-  hudEl.style.display = 'none';
+  currentResult = null;
   if (uiMode === 'build') {
     battleState = 'editing';
     setBuildControlsLocked(false);
     toolsToggle.style.display = TOOLS_DEV_VISIBLE; // Q07-C：回装配恢复开发工具入口
-    matchInfo.style.display = 'none';
     selectedSlotA = null;
     doResize(); // Q08-CAM-A1：面板恢复 → CSS 变窄，先同步 backing
     refreshFromEdit(); // Clear 后恢复装配预览（Garage：solo-A + 仅 A 面板）
@@ -2159,6 +1566,111 @@ if (DEV_TOOLS_VISIBLE && debugPanel) {
   }
 }
 
+/* ---------- F-WX-3：玩家输入 → PlayerUIActions（转成 Gameplay command） ---------- */
+const playerActions: PlayerUIActions = {
+  onToggleGarageSlot: (key) => {
+    garageSelected = garageSelected === key ? null : key;
+    pushUI(); // Host 重渲染 Dock：展开/收起第二层
+  },
+  onPickGarageOption: (value) => {
+    const slotKey = garageSelected;
+    if (!slotKey) return;
+    const slotIsFunctional =
+      slotKey !== 'body' && slotKey !== 'rearWheel' && slotKey !== 'frontWheel' && slotKey !== 'drive';
+    // Q22：未拥有功能件（含未拥有星级）不可装备（守卫，disabled 仍双保险）
+    if (slotIsFunctional && value !== EMPTY_SLOT) {
+      const { defId, star } = decodePartVal(value);
+      if (!canEquipPart(defId, star)) return;
+    }
+    // Q28：变更前快照
+    const oldVal =
+      slotKey === 'body' ? draftA.bodyDefId
+      : slotKey === 'rearWheel' ? String(draftA.rearRadius)
+      : slotKey === 'frontWheel' ? String(draftA.frontRadius)
+      : slotKey === 'drive' ? resolveDriveMode(draftA.drive)
+      : (draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
+    if (slotKey === 'body') {
+      const migrated = migrateDraftBody(draftA, value, registry);
+      draftA.bodyDefId = migrated.bodyDefId;
+      draftA.functionalSelections = migrated.functionalSelections;
+    } else if (slotKey === 'rearWheel') {
+      draftA.rearRadius = Number(value);
+    } else if (slotKey === 'frontWheel') {
+      draftA.frontRadius = Number(value);
+    } else if (slotKey === 'drive') {
+      draftA.drive = value as DriveMode;
+    } else {
+      // Q22：功能件按 (defId, star) 装备
+      if (value === EMPTY_SLOT) {
+        draftA.functionalSelections[slotKey] = EMPTY_SLOT;
+      } else {
+        const { defId, star } = decodePartVal(value);
+        draftA.functionalSelections[slotKey] = defId;
+        draftA.functionalStars = draftA.functionalStars ?? {};
+        draftA.functionalStars[slotKey] = star;
+      }
+    }
+    // Q28：Build 变更埋点（功能件槽额外发 part_equip）
+    const isFunctional = slotKey !== 'body' && slotKey !== 'rearWheel' && slotKey !== 'frontWheel' && slotKey !== 'drive';
+    const newVal =
+      slotKey === 'body' ? draftA.bodyDefId
+      : slotKey === 'rearWheel' ? String(draftA.rearRadius)
+      : slotKey === 'frontWheel' ? String(draftA.frontRadius)
+      : slotKey === 'drive' ? resolveDriveMode(draftA.drive)
+      : (draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
+    emitBuildChange(slotKey, oldVal, newVal, isFunctional);
+    garageSelected = null; // 选完即收起
+    refreshFromEdit(); // Draft → Energy → Preview + 重渲染 Dock（pushUI）
+  },
+  onFindOpponent: () => {
+    if (!buildsValid()) return;
+    sfx.resume();
+    startMatching();
+  },
+  onMatchAdjust: () => adjustConfig(),
+  onStartBattle: () => startBattleWithReady(),
+  onResultAdjust: () => {
+    // Q26：Result 的「调整配置」= 完成一次 Battle→Result→Garage 闭环 → 关闭首轮引导。
+    completeOnboarding();
+    onboardingStage = 'done';
+    adjustConfig();
+  },
+  onResultNext: () => {
+    void nextMatch();
+  },
+  onClaimRewardAd: async () => {
+    if (rewardAdClaimed) return; // 本场已领 → 直接拒绝
+    const out = await rewardedClaimer.claim();
+    if (out.granted) {
+      rewardAdClaimed = true;
+      // 刷新当前金币展示（若经济区当前可见）
+      if (currentEconomy) {
+        currentEconomy = { ...currentEconomy, coin: out.coinAfter ?? currentEconomy.coin };
+      }
+      pushUI();
+    }
+    // 关闭 / 失败 / 无填充：不发奖，按钮保持可点（玩家可重试），绝不卡死
+  },
+  onMerge: () => {
+    const cur = getInventory();
+    const p = getProgress();
+    track('merge_attempt'); // Q28：发起合成
+    // Q23：合成 = 5×1★ 熔炼 + 固定金币消耗（纯函数，金币不足/副本不足均不生效）
+    const res = mergeWithCost(cur, equippedDefIds(draftA), p.coin);
+    if (!res.ok) return;
+    track('merge_success'); // Q28：合成成功
+    saveInventory(res.inventory);
+    saveProgress({ coin: res.coin, rating: p.rating }); // 仅扣金币，rating 不变
+    pushUI(); // Host 重渲染：反映新 2★ 库存 + 扣费后金币 + 合成面板
+  },
+  onResetProgress: () => {
+    resetPlayerSave();
+    resetAdFrequency(); // Q30：频控一并恢复新账号态
+    location.reload();
+  },
+};
+host.setActions(playerActions);
+
 /* ---------- 初始：默认装配测试模式 + Draft Preview（不启动 Scenario） ---------- */
 track('game_start'); // Q28：应用启动（一次）
 refreshFromEdit();
@@ -2172,11 +1684,12 @@ function doResize(): void {
 viewport.onResize(doResize);
 doResize();
 
-/* ---------- W2-FX-2：阶段表现轮询（Warning 倒计时 + 场边红脉冲 + 刺墙预高亮/Closing 进入） ---------- */
+/* ---------- W2-FX-2：阶段表现轮询（Warning 倒计时 + 场边红脉冲 + 刺墙预高亮/Closing 进入）。
+ * 返回 Warning 倒计时文案（null = 隐藏），由 Host 渲染。 ---------- */
 let lastPhase: string | null = null;
 let phaseStartTimeMs = 0;
 let lastPhaseOrch: unknown = null;
-function pollArenaPhase(nowMs: number): void {
+function pollArenaPhase(nowMs: number): string | null {
   const o = lab.orchestrator;
   // 战斗实例变化（load / reset / preview 重建）→ 阶段状态重置
   if (o !== lastPhaseOrch) {
@@ -2186,9 +1699,8 @@ function pollArenaPhase(nowMs: number): void {
   }
   // Preview / 无战斗：不显示阶段表现
   if (!o || lab.previewMode) {
-    phaseCountdown.style.display = 'none';
     canvasWrap.classList.remove('phase-warning');
-    return;
+    return null;
   }
   if (o.phase !== lastPhase) {
     lastPhase = o.phase;
@@ -2200,21 +1712,19 @@ function pollArenaPhase(nowMs: number): void {
   const phase = o.phase;
   const inWarning = phase === 'Warning' && o.result?.phase !== 'End';
   canvasWrap.classList.toggle('phase-warning', inWarning);
-  if (inWarning) {
-    const warningMs = o.config.arena?.phases?.warningMs ?? 3000;
-    const remaining = phaseRemainingMs(phase, warningMs, o.timeMs - phaseStartTimeMs);
-    phaseCountdown.textContent = warningCountdown(remaining);
-    phaseCountdown.style.display = '';
-  } else {
-    // Closing / Active / End：倒计时消失（Closing 开始后刺墙正式进入，由 Renderer 表现）
-    phaseCountdown.style.display = 'none';
-  }
   // Death 定格恢复：表现层 80~120ms 冻结结束 → 恢复原 timeScale（不改 Gameplay/Physics 语义）
   if (deathPause.active && deathPause.shouldResume()) {
     lab.timeScale = prevTimeScale;
     deathPause.clear();
   }
+  if (inWarning) {
+    const warningMs = o.config.arena?.phases?.warningMs ?? 3000;
+    const remaining = phaseRemainingMs(phase, warningMs, o.timeMs - phaseStartTimeMs);
+    return warningCountdown(remaining);
+  }
+  // Closing / Active / End：倒计时消失（Closing 开始后刺墙正式进入，由 Renderer 表现）
   void nowMs;
+  return null;
 }
 
 let last = platform.lifecycle.now();
@@ -2224,9 +1734,13 @@ function loop(now: number): void {
   lab.step(dt);
   applyMatchingBfx(now); // Matching 候选 B 淡入缩放（须先于 render 应用，A 不动）
   lab.render();
-  pollArenaPhase(now); // 阶段倒计时 / 场边红脉冲 / Death 定格恢复
-  pollBattleResult(); // result 变化 → Ended 迁移 + 结果展示
-  updateHud(); // 每帧读取 getBattleStatusSnapshot() → 顶部 A/B HP 实时
+  const countdownText = pollArenaPhase(now); // 阶段倒计时 / 场边红脉冲 / Death 定格恢复
+  pollBattleResult(); // result 变化 → Ended 迁移 + 结算 + 结果展示（pushUI）
+  host.renderBattleFrame({
+    battleState,
+    battleStatus: lab.orchestrator?.getBattleStatusSnapshot?.() ?? null,
+    phaseCountdownText: countdownText,
+  });
   platform.lifecycle.requestAnimationFrame(loop);
 }
 platform.lifecycle.requestAnimationFrame(loop);
