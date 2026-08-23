@@ -14,6 +14,8 @@
  */
 import type { BuildDraft, DriveMode } from '../lab/buildEditorModel';
 import { EMPTY_SLOT } from '../lab/buildEditorModel';
+import { registry } from '../core/content';
+import type { Tier } from '../core/playerProgress';
 
 /** 轮径组合（单位 px；WHEEL_OPTIONS 正式档位 12 小 / 20 标准 / 26 大） */
 interface OppWheels {
@@ -209,4 +211,104 @@ export function buildMatchingSequence(
     intermediates.push(r);
   }
   return [...intermediates, finalIdx];
+}
+
+/**
+ * Q25｜V0.6 对手难度梯度（不新增 Content，按真实 Build 组合分层）。
+ *
+ * 难度来自真实 Build 变量（可解释数据代理，不按武器名拍脑袋）：
+ *   - 功能件数（越多越具威胁）
+ *   - 能量使用率（energy / capacity，越高越强）
+ *   - Drive（前进更主动 > 停驻）
+ *   - Body 质量（越重越难推动 / 位移）
+ *   - 轮径（越大越具压迫）
+ * 2★ 数量不纳入：对手池均为 1★（Q22 未进入对手侧）。
+ * 严禁：修改 Weapon 参数 / 额外加 HP / 隐藏伤害倍率 / 作弊属性——难度只来自 Build 组合本身。
+ */
+export type OpponentTier = 'easy' | 'normal' | 'hard';
+
+/** 基于真实 Build 变量的难度评分（越高越难）；权重均可解释。 */
+function opponentScore(d: BuildDraft): number {
+  const sels = Object.values(d.functionalSelections);
+  const fnCount = sels.filter((v) => v && v !== EMPTY_SLOT).length; // 功能件数
+  let energy = 0;
+  for (const v of sels) {
+    if (v && v !== EMPTY_SLOT) {
+      const def = registry.functionals.get(v);
+      if (def) energy += def.energy; // 对手均 1★，直接用基础能量
+    }
+  }
+  const cap = registry.bodies.get(d.bodyDefId)?.energyCapacity ?? 100;
+  const energyRate = energy / cap; // 能量使用率
+  const driveTerm = d.drive === 'stationary' ? 0 : 1.2; // 前进更主动
+  const mass = registry.bodies.get(d.bodyDefId)?.baseMass ?? 100;
+  const massTerm = mass / 100; // 越重越难位移
+  const wheelTerm = (d.frontRadius + d.rearRadius) / 12; // 轮径越大越具压迫
+  return fnCount * 3 + energyRate * 4 + driveTerm + massTerm * 1.5 + wheelTerm * 0.5;
+}
+
+/** 36 套按难度评分升序排序后三等分：低 1/3=Easy、中 1/3=Normal、高 1/3=Hard（每层 12 套） */
+function computeTiers(): OpponentTier[] {
+  const n = OPPONENT_POOL.length;
+  const order = OPPONENT_POOL.map((_, i) => i).sort(
+    (a, b) => opponentScore(OPPONENT_POOL[a]) - opponentScore(OPPONENT_POOL[b]),
+  );
+  const third = Math.floor(n / 3);
+  const tiers: OpponentTier[] = new Array(n).fill('normal');
+  for (let k = 0; k < n; k++) {
+    const idx = order[k];
+    if (k < third) tiers[idx] = 'easy';
+    else if (k < third * 2) tiers[idx] = 'normal';
+    else tiers[idx] = 'hard';
+  }
+  return tiers;
+}
+
+/** 每套对手的固定难度层（与 OPPONENT_POOL 索引对齐；每套唯一、不重叠） */
+export const OPPONENT_TIERS: OpponentTier[] = computeTiers();
+
+/** 各难度层包含的对手索引集合 */
+export const TIER_INDICES: Record<OpponentTier, number[]> = { easy: [], normal: [], hard: [] };
+OPPONENT_TIERS.forEach((t, i) => TIER_INDICES[t].push(i));
+
+/** 玩家段位 → 抽取难度层权重（与 Queue 配置一致） */
+export const PLAYER_TIER_WEIGHTS: Record<Tier, { easy: number; normal: number; hard: number }> = {
+  bronze: { easy: 0.7, normal: 0.3, hard: 0 },
+  silver: { easy: 0.3, normal: 0.6, hard: 0.1 },
+  gold: { easy: 0, normal: 0.5, hard: 0.5 },
+  diamond: { easy: 0, normal: 0.2, hard: 0.8 },
+};
+
+function pickTier(weights: { easy: number; normal: number; hard: number }, rng: () => number): OpponentTier {
+  const r = rng();
+  let acc = 0;
+  for (const t of ['easy', 'normal', 'hard'] as OpponentTier[]) {
+    acc += weights[t];
+    if (r < acc) return t;
+  }
+  return 'hard';
+}
+
+/**
+ * Q25｜按玩家段位抽取对手：先按权重选难度层，再在该层内随机选一套 Build。
+ * - 保持「随机匹配」与「不连续重复同一 Build」（避开上一场 final index）；
+ * - 难度只来自真实 Build 组合，不修改任何 Build / Weapon / Physics；
+ * - 若该层无 Build（理论不会发生），回退到全体随机。
+ */
+export function pickOpponentForTier(
+  playerTier: Tier,
+  lastIndex: number,
+  rng: () => number = Math.random,
+): number {
+  const weights = PLAYER_TIER_WEIGHTS[playerTier];
+  const tier = pickTier(weights, rng);
+  const pool = TIER_INDICES[tier];
+  if (pool.length === 0) return pickRandomOpponent(lastIndex, OPPONENT_POOL.length, rng);
+  let idx = pool[Math.floor(rng() * pool.length) % pool.length];
+  let guard = 0;
+  while (idx === lastIndex && pool.length > 1 && guard < 64) {
+    idx = pool[Math.floor(rng() * pool.length) % pool.length];
+    guard++;
+  }
+  return idx;
 }

@@ -53,8 +53,8 @@ import { starTierEnergy } from './core/buildSnapshot';
 import {
   OPPONENT_POOL,
   cloneBuildDraft,
-  pickRandomOpponent,
   buildMatchingSequence,
+  pickOpponentForTier,
 } from './player/opponentPool';
 import { loadPlayerBuild, savePlayerBuild } from './core/buildPersistence';
 import { computePlayerShellVisibility } from './ui/playerShell';
@@ -1323,9 +1323,9 @@ function startMatching(): void {
   playerPhase = 'matching';
   setBuildControlsLocked(true); // 锁定当前 Build
   matchInfo.style.display = 'none';
-  // 真随机选对手（首场 matchedIndex 仍可能为 0，pickRandomOpponent 不限制 last=-1 之外；
-  // 这里用当前 matchedIndex 作为 last，pool>1 禁止连续同对手）
-  const finalIdx = pickRandomOpponent(matchedIndex, OPPONENT_POOL.length);
+  // Q25：按玩家段位抽取对手（Bronze→Easy/Normal，Silver→E/N/H，Gold→N/H，Diamond→N/H），
+  // 保持随机匹配 + 不连续重复同一 Build（pickOpponentForTier 内部避开 matchedIndex）。
+  const finalIdx = pickOpponentForTier(tierOf(getProgress().rating), matchedIndex, Math.random);
   matchedIndex = finalIdx;
   const seq = buildMatchingSequence(finalIdx, OPPONENT_POOL.length);
   // 主画布加载 A + 首个候选 B（previewFixed 固定相机）
