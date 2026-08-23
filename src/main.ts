@@ -137,6 +137,13 @@ style.textContent = `
   .merge-panel .mp-info { font-size: 12px; color: #9aa4b5; }
   .merge-panel .mp-btn { align-self: flex-start; background: #2a3a5e; color: #dce6ff; border: 1px solid #3b6fd4; border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
   .merge-panel .mp-btn:disabled { opacity: 0.45; cursor: not-allowed; border-color: #38414f; background: #242b38; color: #7c8799; }
+  /* Q23：车库顶部状态条（金币 / 段位） */
+  .dock-stats { display: flex; gap: 14px; align-items: baseline; padding: 8px 12px; background: #161c28; border: 1px solid #2a3140; border-radius: 8px; font-size: 13px; color: #9aa4b5; }
+  .dock-stats b { color: #ffd35a; font-size: 15px; }
+  /* Q23→Q24：结算卡经济/段位区 */
+  .result-economy { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; background: #1c2230; border: 1px solid #38414f; border-radius: 8px; }
+  .result-economy .re-label { font-size: 14px; font-weight: 700; color: #ffd35a; }
+  .result-economy .re-cat { font-size: 12px; color: #9aa4b5; }
   /* Q07-A：开发工具折叠区（机制场景 / Pause/Reset/Clear / 速度 / Preset 收进二级） */
   /* Q13-C-R4：开发工具折叠区改为「工具栏下方全宽独立一行」（不再嵌进 .lab-main 横向 flex 被挤压）。
      基础 display: flex（展开时由内联 '' 回退到此）；收起由内联 display:none 控制。
@@ -376,6 +383,12 @@ resultReward.className = 'result-reward';
 resultReward.style.display = 'none';
 resultCard.appendChild(resultReward);
 
+// Q23→Q24：经济/段位区（本局金币获得 + 段位变化；进入 Result 时结算并展示）
+const resultEconomy = document.createElement('div');
+resultEconomy.className = 'result-economy';
+resultEconomy.style.display = 'none';
+resultCard.appendChild(resultEconomy);
+
 const resultActions = document.createElement('div');
 resultActions.className = 'result-actions';
 resultCard.appendChild(resultActions);
@@ -417,6 +430,17 @@ function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): vo
     resultReward.style.display = 'flex';
   } else {
     resultReward.style.display = 'none';
+  }
+  // Q23：结算本局金币（胜 +100 / 负 +60；同场只结算一次，自动入库）
+  const prog = progressSettler.settle(r, isWin);
+  if (prog) {
+    const sign = prog.coinDelta >= 0 ? '+' : '';
+    resultEconomy.innerHTML =
+      `<div class="re-label">本局金币 ${sign}${prog.coinDelta}</div>` +
+      `<div class="re-cat">当前金币 ${prog.progress.coin}</div>`;
+    resultEconomy.style.display = 'flex';
+  } else {
+    resultEconomy.style.display = 'none';
   }
   resultModal.style.display = 'flex';
 }
@@ -678,10 +702,18 @@ import {
   getInventory,
   getCount,
   saveInventory,
-  tryMerge,
   equippedDefIds,
   OFFICIAL_PARTS,
 } from './core/partInventory';
+// Q23→Q24：玩家进度（金币 + 段位）；结算纯函数 + 单例结算器（同场只结算一次）
+import {
+  BattleProgressSettler,
+  getProgress,
+  saveProgress,
+  canAffordMerge,
+  mergeWithCost,
+  MERGE_COST_COIN,
+} from './core/playerProgress';
 
 /** W2-SIL-1 视觉样板 Draft：双车并排展示 5 个首批正式 Content 轮廓
  *  - front=pushRod（基座在 chassis 侧、推板在前，Prismatic 伸缩自然）
@@ -708,6 +740,8 @@ const draftA = loadPlayerBuild() ?? silDraft('watermelonBody');
 ensureInventory(draftA);
 // Q21：每场 Battle 奖励结算器（以 result 引用为幂等键，同场只结算一次）
 const rewardSettler = new BattleRewardSettler();
+// Q23→Q24：每场 Battle 进度结算器（金币 + 段位；同场只结算一次，与 rewardSettler 同模式）
+const progressSettler = new BattleProgressSettler();
 // Q15：对手来自固定对手池（玩家不可编辑，仅 DEV 可临时改）
 let draftB = cloneBuildDraft(OPPONENT_POOL[matchedIndex]);
 
@@ -1093,6 +1127,8 @@ function startOrRematch(): void {
   };
   // Q21：开始新一场 Battle 前重置奖励结算器（以 result 引用为幂等键，保证每场只结算一次）
   rewardSettler.reset();
+  // Q23→Q24：进度结算器同模式重置（每场只结算一次）
+  progressSettler.reset();
   lab.loadCustom(sa, sb, { autoDrive: true, engine: 'planck', sideDrive });
   battleState = 'fighting';
   setBuildControlsLocked(true);
@@ -1401,6 +1437,14 @@ function decodePartVal(v: string): { defId: string; star: number } {
 
 function renderGarageDock(): void {
   garageDock.replaceChildren();
+  // Q23：车库顶部状态条（金币）—— 段位在 Q24 扩展
+  {
+    const p = getProgress();
+    const stats = document.createElement('div');
+    stats.className = 'dock-stats';
+    stats.innerHTML = `金币 <b>${p.coin}</b>`;
+    garageDock.appendChild(stats);
+  }
   const body = registry.bodies.get(draftA.bodyDefId);
   const snapshot = currentSnapshot('A');
   const valid = buildsValid();
@@ -1568,9 +1612,12 @@ function renderGarageDock(): void {
   // Q22：合成 Panel（Garage 内简易，不新页面、不改布局结构）
   {
     const inv = getInventory();
+    const progress = getProgress();
     const reserved = new Set(equippedDefIds(draftA));
     let available = 0;
     for (const p of OFFICIAL_PARTS) available += Math.max(0, inv[p].one - (reserved.has(p) ? 1 : 0));
+    const canMergeParts = available >= 5;
+    const canAfford = canAffordMerge(progress.coin);
     const mergePanel = document.createElement('div');
     mergePanel.className = 'merge-panel';
     const mTitle = document.createElement('div');
@@ -1579,18 +1626,24 @@ function renderGarageDock(): void {
     mergePanel.appendChild(mTitle);
     const mInfo = document.createElement('div');
     mInfo.className = 'mp-info';
-    mInfo.textContent = `可合成 1★ 副本：${available}（已装备各保留 1）`;
+    mInfo.textContent =
+      `可合成 1★ 副本：${available}（已装备各保留 1） · 消耗 ${MERGE_COST_COIN} 金币`;
     mergePanel.appendChild(mInfo);
     const mBtn = document.createElement('button');
     mBtn.className = 'mp-btn';
-    mBtn.textContent = available >= 5 ? '合成' : '副本不足';
-    mBtn.disabled = available < 5;
+    if (!canMergeParts) mBtn.textContent = '副本不足';
+    else if (!canAfford) mBtn.textContent = `金币不足（${progress.coin}/${MERGE_COST_COIN}）`;
+    else mBtn.textContent = '合成';
+    mBtn.disabled = !(canMergeParts && canAfford);
     mBtn.onclick = () => {
       const cur = getInventory();
-      const res = tryMerge(cur, equippedDefIds(draftA));
-      if (!res) return;
+      const p = getProgress();
+      // Q23：合成 = 5×1★ 熔炼 + 固定金币消耗（纯函数，金币不足/副本不足均不生效）
+      const res = mergeWithCost(cur, equippedDefIds(draftA), p.coin);
+      if (!res.ok) return;
       saveInventory(res.inventory);
-      renderGarageDock(); // 重渲染：反映新 2★ 库存 + 合成面板
+      saveProgress({ coin: res.coin, rating: p.rating }); // 仅扣金币，rating 不变
+      renderGarageDock(); // 重渲染：反映新 2★ 库存 + 扣费后金币 + 合成面板
     };
     mergePanel.appendChild(mBtn);
     garageDock.appendChild(mergePanel);
