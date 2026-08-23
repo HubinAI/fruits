@@ -41,6 +41,17 @@ const canvas = wx.createCanvas();
 const ctx = canvas.getContext('2d');
 if (!ctx) throw new Error('Canvas 2D not supported on WeChat');
 
+// F-WX-8-A｜P0 修复：玩家 UI 必须用独立的第二个 canvas（UI overlay）。
+// 根因：此前 CanvasPlayerUIHost 与 Renderer 共享同一个主 canvas——Renderer.render() 每帧
+// clearRect + 全屏深色背景（renderer.ts），第一个 rAF tick 就把 CanvasHost 画的 Garage UI
+// 完全覆盖，玩家首屏只剩「战场」场景（地面线 + preview 车辆），Garage 不可见。
+// 微信小游戏支持多 canvas 层叠（后 createCanvas 的在上层、默认透明）：UI overlay 叠在
+// 主画布之上，与 Web 版（main.ts 的 Renderer battle canvas + CanvasHost 独立 overlay canvas）
+// 结构一致；CanvasHost.clear() 只 clearRect 不画背景（透明透出 renderer 场景）。
+const uiCanvas = wx.createCanvas();
+const uiCtx = uiCanvas.getContext('2d');
+if (!uiCtx) throw new Error('UI Canvas 2D not supported on WeChat');
+
 // —— 2) 视口 surface（经共享 Platform Viewport 抽象；bootstrap 已绑定 WechatCore） ——
 const surface = platform.createViewport(canvas).surface();
 
@@ -55,8 +66,8 @@ const presentation = createPlayerPresentation(renderer, sfx);
 // —— 5) 微信精简战斗宿主（PlanckBattleOrchestrator + Renderer + Presentation；无 lab/debug） ——
 const battleHost = new WechatBattleHost(renderer, presentation);
 
-// —— 6) 玩家 UI：CanvasPlayerUIHost（同一 State/Action；平台中立挂载，无 DOM） ——
-const uiHost = new CanvasPlayerUIHost(canvas as unknown as HTMLCanvasElement);
+// —— 6) 玩家 UI：CanvasPlayerUIHost（同一 State/Action；独立 UI overlay canvas，无 DOM） ——
+const uiHost = new CanvasPlayerUIHost(uiCanvas as unknown as HTMLCanvasElement);
 uiHost.mountCanvas();
 
 // —— 7) 玩家 Gameplay Runtime（与 Web 同一份流程；微信侧无 DEV 钩子） ——

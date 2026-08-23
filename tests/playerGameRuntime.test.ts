@@ -150,6 +150,50 @@ describe('F-WX-5 PlayerGameRuntime（headless 玩家闭环）', () => {
     expect(store.has(INV_KEY_V2)).toBe(true); // ensureInventory 种子落盘
   });
 
+  it('F-WX-8-A｜fresh boot 不自动 Battle：无玩家输入，多 tick 后仍 Garage/editing/preview', () => {
+    const { runtime, host, battle } = setup();
+    // init 后：装配预览模式（preview），非正式战斗；FakeBattleHost.loadCustomPreview 置
+    // orchestrator=null（preview 不推进），证明「启动即创建正式 Battle」被拒绝。
+    expect(battle.previewMode).toBe(true);
+    expect(battle.orchestrator).toBeNull();
+    // 模拟多帧（120 tick ≈ 2s），期间无任何玩家输入
+    tickMany(runtime, 120);
+    expect(runtime.battleState).toBe('editing');
+    expect(runtime.playerPhase).toBe('garage');
+    expect(host.lastState?.battleState).toBe('editing');
+    expect(host.lastState?.playerPhase).toBe('garage');
+    expect(host.lastState?.result).toBeNull();
+    expect(host.frames.some((f) => f.battleState === 'fighting')).toBe(false); // HUD 从未进 fighting
+    expect(battle.previewMode).toBe(true); // 仍是 preview，未 loadCustom（无自动开战）
+    expect(battle.orchestrator).toBeNull();
+  });
+
+  it('F-WX-8-A｜点击「寻找对手」才离开 Garage：Matching → Battle → Result（不自动开战）', () => {
+    vi.useFakeTimers();
+    const { runtime, host, battle } = setup();
+    expect(runtime.playerPhase).toBe('garage');
+    // 无输入时推进也不离开 garage（匹配/开战靠 setTimeout，fake timers 下不会被 tick 触发）
+    tickMany(runtime, 60);
+    expect(runtime.playerPhase).toBe('garage');
+    expect(battle.previewMode).toBe(true); // 仍是装配预览
+    // 玩家点击「寻找对手」→ Matching（注册匹配节奏 setTimeout）
+    runtime.actions.onFindOpponent();
+    expect(runtime.playerPhase).toBe('matching');
+    vi.advanceTimersByTime(1010); // 匹配节奏 780+230 → MatchPreview
+    expect(runtime.playerPhase).toBe('matchPreview');
+    expect(battle.previewMode).toBe(true); // previewFixed 阶段仍是 preview
+    vi.advanceTimersByTime(250); // MatchPreview 250ms → READY 过渡
+    vi.advanceTimersByTime(600); // READY 600ms → 正式开战
+    expect(runtime.battleState).toBe('fighting');
+    expect(battle.previewMode).toBe(false); // 正式战斗已 loadCustom（非 preview）
+    expect(battle.orchestrator).not.toBeNull();
+    // Battle 推进到结束 → Result
+    tickMany(runtime, 90);
+    expect(runtime.battleState).toBe('ended');
+    expect(host.lastState?.result).not.toBeNull();
+    vi.useRealTimers();
+  });
+
   it('装配经 actions 持久化到微信 storage；重进恢复（验收 3 刷新/重进）', () => {
     const { runtime, store } = setup();
     runtime.actions.onToggleGarageSlot('body');

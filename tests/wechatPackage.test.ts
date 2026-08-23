@@ -66,4 +66,20 @@ describe('F-WX-7 微信工程目录（可直接导入）', () => {
     expect(entry).not.toMatch(/document\./);
     expect(entry).not.toMatch(/localStorage/);
   });
+
+  it('F-WX-8-A｜UI overlay 与主画布分离：CanvasPlayerUIHost 用独立第二个 canvas（P0 根因守卫）', () => {
+    // 根因：Renderer 与 CanvasPlayerUIHost 若共享同一 wx.createCanvas()，Renderer.render()
+    // 每帧 clearRect+全屏深色背景会覆盖 CanvasHost 的 Garage UI → 首屏只见「战场」。
+    // 修复：微信入口必须创建第二个 canvas 作 UI overlay（微信多 canvas 层叠，透明在上层）。
+    const entry = read('wechat/game.ts');
+    // 两个独立 createCanvas（主画布 + UI overlay）
+    const creates = (entry.match(/wx\.createCanvas\(\)/g) ?? []).length;
+    expect(creates).toBeGreaterThanOrEqual(2);
+    // Renderer 绑主画布 canvas；CanvasPlayerUIHost 绑 uiCanvas（不是同一个）
+    expect(entry).toMatch(/new Renderer\(canvas/);
+    expect(entry).toMatch(/new CanvasPlayerUIHost\(uiCanvas/);
+    expect(entry).not.toMatch(/new CanvasPlayerUIHost\(canvas/);
+    // overlay 必须有自己的 2d ctx（微信第二个 canvas 独立可绘）
+    expect(entry).toMatch(/const uiCtx = uiCanvas\.getContext\('2d'\)/);
+  });
 });
