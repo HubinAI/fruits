@@ -20,6 +20,7 @@ import { VisualRegistry } from './visualRegistry';
 import { vehicleDeathAlpha, damageFeedbackColors } from '../presentation/battlePhaseFx';
 import { DamageNumberAggregator } from '../presentation/damageNumberAggregator';
 import { buildFireJet } from '../presentation/fireJetBuilder';
+import type { CanvasSurface } from './canvasSurface';
 
 /** Projectile 颜色（Q02-C3B）：A/B 可明显区分（与车身蓝/橙区分，更亮） */
 export const PROJECTILE_COLOR_A = '#7de8ff';
@@ -241,25 +242,51 @@ export class Renderer {
     private canvas: HTMLCanvasElement,
     /** W2-VIS-1：Sprite Visual Registry（缺省空注册表 → 全 Collider 灰盒 fallback，行为与旧版一致） */
     private readonly visualRegistry: VisualRegistry = new VisualRegistry(),
+    /** F-WX-1：可选注入的平台视口/时间源；未注入时退回浏览器全局（Web 行为不变） */
+    private readonly surface?: CanvasSurface,
   ) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D not supported');
     this.ctx = ctx;
   }
 
+  /**
+   * F-WX-1：视口/时间源 guarded 读取——注入 surface 优先，否则退回浏览器全局。
+   * 使 Renderer 在微信小游戏（无 window / 无 clientWidth / performance 形态不同）
+   * 也能运行，且不改变 Web 既有行为（现有渲染测试零回归）。
+   */
+  private get viewWidth(): number {
+    return this.surface ? this.surface.width : this.canvas.clientWidth;
+  }
+  private get viewHeight(): number {
+    return this.surface ? this.surface.height : this.canvas.clientHeight;
+  }
+  private get viewDpr(): number {
+    if (this.surface) return this.surface.devicePixelRatio;
+    const w = typeof window !== 'undefined' ? window : undefined;
+    return w?.devicePixelRatio ?? 1;
+  }
+  private now(): number {
+    if (this.surface?.now) return this.surface.now();
+    if (typeof performance !== 'undefined') return performance.now();
+    return Date.now();
+  }
+
   resize(arenaW: number, arenaH: number): void {
-    const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = this.canvas.clientWidth * dpr;
-    this.canvas.height = this.canvas.clientHeight * dpr;
-    const scale =
-      Math.min(
-        this.canvas.width / arenaW,
-        this.canvas.height / arenaH,
-      ) * VIEW_ZOOM;
+    const dpr = this.viewDpr;
+    // F-WX-1：注入 surface（微信等无 clientWidth/可写 canvas.width）时，不写回
+    // canvas 像素尺寸，直接按 surface 提供的视口计算取景；Web 仍按原逻辑设置 backing store。
+    if (!this.surface) {
+      this.canvas.width = this.canvas.clientWidth * dpr;
+      this.canvas.height = this.canvas.clientHeight * dpr;
+    }
+    const vw = this.surface ? this.surface.width : this.canvas.width;
+    const vh = this.surface ? this.surface.height : this.canvas.height;
+    const scale = Math.min(vw / arenaW, vh / arenaH) * VIEW_ZOOM;
     this.transform = {
       scale,
-      offsetX: (this.canvas.width - arenaW * scale) / 2,
-      offsetY: (this.canvas.height - arenaH * scale) / 2,
+      offsetX: (vw - arenaW * scale) / 2,
+      offsetY: (vh - arenaH * scale) / 2,
     };
   }
 
@@ -304,7 +331,7 @@ export class Renderer {
 
   /** 伤害数字（基础原语：直接加入一个浮动数字，不参与聚合；供测试与直接调用） */
   spawnDamageNumber(x: number, y: number, text: string, color: string): void {
-    this.fx.push({ x, y, text, color, bornAt: performance.now(), ttl: DAMAGE_NUMBER_TTL_MS });
+    this.fx.push({ x, y, text, color, bornAt: this.now(), ttl: DAMAGE_NUMBER_TTL_MS });
   }
 
   /**
@@ -323,7 +350,7 @@ export class Renderer {
     const dmg = Math.round(ev.damage);
     if (dmg <= 0) return;
     const color = damageFeedbackColors(ev.damageSource).number;
-    const now = performance.now();
+    const now = this.now();
     const view = this.damageAggregator.feed(ev, now);
     if (view.isNewGroup) {
       // 新组：立即新建浮动数字（不延迟 → 单发武器即时显示）
@@ -362,7 +389,7 @@ export class Renderer {
 
   /** F-PRESENT-1：当前存活的聚合伤害数字（供测试断言合并 / 组数与累计；过期自动过滤） */
   get activeDamageNumbers(): readonly FloatingText[] {
-    const now = performance.now();
+    const now = this.now();
     return this.fx.filter((f) => now - f.bornAt < f.ttl);
   }
 
@@ -370,7 +397,7 @@ export class Renderer {
    *  Q08-C：同一 team 同时最多一个表现状态——新命中刷新（重置 bornAt），
    *  不 push 多层叠加（纯表现层，不影响真实命中次数/伤害）。 */
   spawnHitFlash(team: string): void {
-    const now = performance.now();
+    const now = this.now();
     const existing = this.hitFlashes.find((h) => h.team === team);
     if (existing) {
       existing.bornAt = now;
@@ -381,13 +408,13 @@ export class Renderer {
 
   /** 命中火花：接触点短暂小圆（W2-FX-2 按 damageSource 区分颜色，缺省黄） */
   spawnSpark(x: number, y: number, color = '#ffd35a'): void {
-    this.sparks.push({ x, y, color, bornAt: performance.now(), ttl: 220 });
+    this.sparks.push({ x, y, color, bornAt: this.now(), ttl: 220 });
   }
 
   /** 炮口闪光：开火点短暂亮圆（真实 muzzle worldPosition）。
    *  color/radius 可选——Cannon 用默认橙黄小闪；laser 用白青大闪（Q11-C-R3-FINAL）。 */
   spawnMuzzleFlash(x: number, y: number, color = '#ffe9a8', radius = 6): void {
-    this.muzzleFlashes.push({ x, y, bornAt: performance.now(), ttl: 90, color, radius });
+    this.muzzleFlashes.push({ x, y, bornAt: this.now(), ttl: 90, color, radius });
   }
 
   /** Q11-C-R3-FINAL：镭射巨炮束——发射瞬间沿真实 fire 方向固定驻留（不跟弹）。
@@ -402,14 +429,14 @@ export class Renderer {
       length: LASER_BEAM_LENGTH,
       coreWidth: LASER_BEAM_CORE,
       glowWidth: LASER_BEAM_GLOW,
-      bornAt: performance.now(),
+      bornAt: this.now(),
       ttl: LASER_BEAM_TTL,
     });
   }
 
   /** Q11-C-R3-FINAL：当前存活的镭射巨炮束（供测试断言几何 / 存活）；过期自动过滤。 */
   get activeLaserBeams(): readonly LaserBeam[] {
-    const now = performance.now();
+    const now = this.now();
     return this.laserBeams.filter((b) => now - b.bornAt < b.ttl);
   }
 
@@ -423,14 +450,14 @@ export class Renderer {
       y,
       dirX: dirX / len,
       dirY: dirY / len,
-      bornAt: performance.now(),
+      bornAt: this.now(),
       ttl: SHOTGUN_FAN_TTL,
     });
   }
 
   /** Q13-B-R1：当前存活的霰弹炮口扇形爆闪（供测试断言几何 / 存活）；过期自动过滤。 */
   get activeShotgunFans(): readonly ShotgunFan[] {
-    const now = performance.now();
+    const now = this.now();
     return this.shotgunFans.filter((f) => now - f.bornAt < f.ttl);
   }
 
@@ -443,14 +470,14 @@ export class Renderer {
       y,
       dirX: dirX / len,
       dirY: dirY / len,
-      bornAt: performance.now(),
+      bornAt: this.now(),
       ttl: MUZZLE_TONGUE_TTL,
     });
   }
 
   /** Q14-A-R1：当前存活的机枪枪口火舌（供测试断言几何 / 存活）；过期自动过滤。 */
   get activeMuzzleTongues(): readonly MuzzleTongue[] {
-    const now = performance.now();
+    const now = this.now();
     return this.muzzleTongues.filter((t) => now - t.bornAt < t.ttl);
   }
 
@@ -462,9 +489,9 @@ export class Renderer {
       existing.x = x;
       existing.y = y;
       existing.progress = progress;
-      existing.lastAt = performance.now();
+      existing.lastAt = this.now();
     } else {
-      this.charges.push({ key, x, y, progress, lastAt: performance.now() });
+      this.charges.push({ key, x, y, progress, lastAt: this.now() });
     }
   }
 
@@ -475,7 +502,7 @@ export class Renderer {
 
   /** 死亡 FX：目标车辆位置短暂扩散环（绘制时取当前 Snapshot） */
   spawnDeathFx(team: string): void {
-    this.deathFxs.push({ team, bornAt: performance.now(), ttl: 500 });
+    this.deathFxs.push({ team, bornAt: this.now(), ttl: 500 });
   }
 
   render(
@@ -483,19 +510,19 @@ export class Renderer {
     debugDraw?: (ctx: CanvasRenderingContext2D, t: ScreenTransform) => void,
   ): void {
     const ctx = this.ctx;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = this.viewDpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, this.canvas.clientWidth, this.canvas.clientHeight);
+    ctx.clearRect(0, 0, this.viewWidth, this.viewHeight);
 
     // 背景
     ctx.fillStyle = '#14181f';
-    ctx.fillRect(0, 0, this.canvas.clientWidth, this.canvas.clientHeight);
+    ctx.fillRect(0, 0, this.viewWidth, this.viewHeight);
 
     const snap = orchestrator.getRenderSnapshot();
     const arena = snap.arena;
     const t = this.transform;
     // W2-FX-2：表现时间基准（阶段闪烁 / 死亡淡出 / FX 共用）
-    const now = performance.now();
+    const now = this.now();
 
     // Ground
     ctx.fillStyle = '#2a2f38';
@@ -1089,7 +1116,7 @@ export class Renderer {
 
   /** 喷焰主体（glow + 主焰 + 火芯）：车辆之前绘制；windup 无长焰、cooldown 快速收掉 */
   private drawFlamePlumes(flames: readonly RenderFlame[]): void {
-    const now = performance.now();
+    const now = this.now();
     for (const f of flames) {
       if (f.phase === 'windup') continue; // 前摇只画喷口小橙光（前景），不长焰
       const len = Math.hypot(f.dirX, f.dirY) || 1;
@@ -1143,7 +1170,7 @@ export class Renderer {
 
   /** 喷口亮核（前景，车辆之后绘制）：windup 小橙光聚能 / thrust·cooldown 小白黄火芯 */
   private drawFlameNozzles(flames: readonly RenderFlame[]): void {
-    const now = performance.now();
+    const now = this.now();
     const ctx = this.ctx;
     for (const f of flames) {
       const rootX = this.sx(f.x), rootY = this.sy(f.y);
@@ -1218,7 +1245,7 @@ export class Renderer {
    */
   private drawLaserBeams(): void {
     const ctx = this.ctx;
-    const now = performance.now();
+    const now = this.now();
     this.laserBeams = this.laserBeams.filter((b) => now - b.bornAt < b.ttl);
     for (const b of this.laserBeams) {
       const age = (now - b.bornAt) / b.ttl; // 0→1
@@ -1265,7 +1292,7 @@ export class Renderer {
    */
   private drawShotgunFans(): void {
     const ctx = this.ctx;
-    const now = performance.now();
+    const now = this.now();
     this.shotgunFans = this.shotgunFans.filter((f) => now - f.bornAt < f.ttl);
     for (const f of this.shotgunFans) {
       const age = (now - f.bornAt) / f.ttl; // 0→1
@@ -1308,7 +1335,7 @@ export class Renderer {
    *  TTL ~60ms），连发时呈枪口连续快速闪动；纯表现，不参与碰撞/伤害。 */
   private drawMuzzleTongues(): void {
     const ctx = this.ctx;
-    const now = performance.now();
+    const now = this.now();
     this.muzzleTongues = this.muzzleTongues.filter((t) => now - t.bornAt < t.ttl);
     for (const t of this.muzzleTongues) {
       const age = (now - t.bornAt) / t.ttl; // 0→1
@@ -1522,7 +1549,7 @@ export class Renderer {
     // 地面表面留出可见区域
     if (maxY < snap.arena.groundY + 40) maxY = snap.arena.groundY + 40;
     const bw = maxX - minX, bh = maxY - minY;
-    const cw = this.canvas.clientWidth, ch = this.canvas.clientHeight;
+    const cw = this.viewWidth, ch = this.viewHeight;
     if (cw < 2 || ch < 2) return;
     // R2：可用画布 = 中央实际战斗可视区域（扣除左右 UI 阴影区）；
     // Q15-UI-R2：玩家 Shell 预览（previewSolo / previewFixed）额外内缩 top/bottom，

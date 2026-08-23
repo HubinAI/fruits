@@ -1,0 +1,11 @@
+{
+  "appid": "touristappid",
+  "projectname": "zuixqiangshuiguo-wechat",
+  "setting": {
+    "es6": true,
+    "minified": false,
+    "postcss": false
+  },
+  "compileType": "game",
+  "libVersion": "latest"
+}

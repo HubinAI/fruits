@@ -24,5 +24,6 @@
     "types": ["vite/client"]
   },
   // F-DEV-1：vite.config.ts 属构建配置（node API），不纳入 src/tests 的 tsc 检查范围
-  "include": ["src", "tests"]
+  // F-WX-1：wechat 微信 Spike 入口也纳入 scoped tsc（保证平台入口类型安全）
+  "include": ["src", "tests", "wechat"]
 }
