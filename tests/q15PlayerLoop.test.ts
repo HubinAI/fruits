@@ -2,9 +2,9 @@
  * Queue Q15｜正常玩家游戏主循环 V1 —— targeted test（纯模块层）。
  *
  * 覆盖：
- * 1. 对手池（OPPONENT_POOL）：24 套、彼此不同、全部合法 Build、仅 watermelon/banana
+ * 1. 对手池（OPPONENT_POOL）：36 套、彼此不同、全部合法 Build、4 种 Body（西瓜/香蕉/菠萝/椰子）
  *    + 当前正式 PART_OPTIONS、不含 wedge/ramHead/lifter/旋锤 等 HOLD 内容；
- *    （Q16：6→24 套铺量，轮径 12/20/26 显式变化，覆盖 6 类战斗身份）
+ *    （Q16：6→24 套铺量；Q19：24→36 套，新增菠萝/椰子，覆盖 6 类战斗身份）
  * 2. nextOpponentIndex：固定顺序循环（与上一场不同）；
  * 3. Build 持久化（buildPersistence）：存取往返、非法 JSON / 未知 Body / 未知部件 /
  *    缺字段 → null（回退默认）；无存档 → null。
@@ -27,7 +27,7 @@ import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator
 
 const PART_OPTION_VALUES = new Set(PART_OPTIONS.map((p) => p.v));
 const HOLD_PARTS = new Set(['wedgeShovel', 'ramHead', 'lifter']); // 楔铲/冲撞头/举升臂（旋锤未实现，无 defId）
-const ALLOWED_BODIES = new Set(['watermelonBody', 'bananaBody']);
+const ALLOWED_BODIES = new Set(['watermelonBody', 'bananaBody', 'pineappleBody', 'coconutBody']);
 
 // buildSnapshot 辅助：Draft → BuildSnapshot（与运行时一致路径）
 import { buildSnapshotFromDraft } from '../src/lab/buildEditorModel';
@@ -36,13 +36,13 @@ function buildSnapshot(d: BuildDraft) {
 }
 
 describe('Q15 对手池', () => {
-  it('1. 共 24 套对手配置（Q16 铺量）', () => {
-    expect(OPPONENT_POOL.length).toBe(24);
+  it('1. 共 36 套对手配置（Q16 + Q19 铺量）', () => {
+    expect(OPPONENT_POOL.length).toBe(36);
   });
 
-  it('2. 24 套配置彼此明显不同（无重复）', () => {
+  it('2. 36 套配置彼此明显不同（无重复）', () => {
     const keys = OPPONENT_POOL.map((d) => JSON.stringify(d));
-    expect(new Set(keys).size).toBe(24);
+    expect(new Set(keys).size).toBe(36);
   });
 
   it('3. 全部合法 Build（≥1 Weapon 且 Energy 不超载）', () => {
@@ -56,7 +56,7 @@ describe('Q15 对手池', () => {
     }
   });
 
-  it('4. 只使用 watermelon / banana Body', () => {
+  it('4. 只使用 4 种正式 Body（西瓜 / 香蕉 / 菠萝 / 椰子）', () => {
     for (const d of OPPONENT_POOL) {
       expect(ALLOWED_BODIES.has(d.bodyDefId)).toBe(true);
     }
@@ -128,11 +128,16 @@ describe('Q16 对手池铺量（24 套）', () => {
     expect(new Set(keys).size).toBe(OPPONENT_POOL.length);
   });
 
-  it('5. watermelon / banana 均有足够覆盖（各 ≥10 套）', () => {
+  it('5. 4 种 Body 均有实际覆盖（西瓜/香蕉 ≥10，菠萝/椰子 ≥4，总计 36）', () => {
     const wm = OPPONENT_POOL.filter((d) => d.bodyDefId === 'watermelonBody').length;
     const bn = OPPONENT_POOL.filter((d) => d.bodyDefId === 'bananaBody').length;
+    const pa = OPPONENT_POOL.filter((d) => d.bodyDefId === 'pineappleBody').length;
+    const co = OPPONENT_POOL.filter((d) => d.bodyDefId === 'coconutBody').length;
     expect(wm).toBeGreaterThanOrEqual(10);
     expect(bn).toBeGreaterThanOrEqual(10);
+    expect(pa).toBeGreaterThanOrEqual(4);
+    expect(co).toBeGreaterThanOrEqual(4);
+    expect(wm + bn + pa + co).toBe(36);
   });
 
   it('6. 六类战斗身份均至少 2 套代表配置（分类仅用于测试覆盖）', () => {

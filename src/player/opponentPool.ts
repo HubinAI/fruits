@@ -1,12 +1,12 @@
 /**
  * Q15 / Q16｜正常玩家对手池（纯数据 + 纯函数，可测试）。
  *
- * Q16：第一轮对手铺量——由 6 套扩到 24 套明显不同、全部合法的正常 Build。
- * - 只使用 watermelon / banana 两种 Body（容量 110 / 90）；
+ * Q16+Q19：对手铺量——由 6 套扩到 36 套明显不同、全部合法的正常 Build。
+ * - 使用 watermelon / banana / pineapple / coconut 四种 Body（容量 110 / 90 / 100 / 100）；
  * - 只使用当前正式 PART_OPTIONS 部件（不含 wedge / ramHead / lifter / 旋锤 等 HOLD / prototype 内容）；
  * - 轮径显式指定（12 / 20 / 26），覆盖 前小后大 / 前大后小 / 双小 / 双标准 / 双大 五类组合，
  *   走真实 Physics，无姿态补偿；
- * - 6 类战斗身份各 ≥4 套：远程压制 / 近距离爆发 / 持续贴身 / 冲锋接敌 / 控距干扰 / 混合型
+ * - 6 类战斗身份各 ≥6 套（旧 4 + Q19 新 2）：远程压制 / 近距离爆发 / 持续贴身 / 冲锋接敌 / 控距干扰 / 混合型
  *   （分类仅用于设计与测试覆盖，不建立正式「职业/标签系统」）；
  * - 每套都是合法 Build（≥1 Weapon、Energy 不超载、槽位合法、无 HOLD）。
  *
@@ -98,7 +98,33 @@ const HYBRID = [
   opp('bananaBody', { rear: 26, front: 26 }, { front: 'flamethrower', frontMass: 'hammer', rear: 'thruster' }), // 双大 75/90
 ];
 
-/** 正式对手池：24 套（6 类 × 4 套，12 西瓜 / 12 香蕉） */
+/**
+ * Q19：新增 12 套（主要使用新 Body；6 类各 2 套 = 菠萝 6 + 椰子 6；3 套停驻）。
+ * 能量（≤ 新 Body 容量 100）：炮30 机枪30 镭射45 霰弹30 圆锯25 刺25 锤25 喷火30 / 推杆20 推进器20。
+ * 停驻：菠萝远程 / 椰子远程 / 菠萝控距 = 3 套（旧 6 + 新 3 = 9/36 ≈ 25%）。
+ */
+const Q19_NEW: BuildDraft[] = [
+  // 远程压制 ×2（菠萝 / 椰子，各 1 停驻）
+  opp('pineappleBody', { rear: 26, front: 12 }, { front: 'machineGun', frontMass: 'cannon' }, 'stationary'), // 前小后大 60/100 · 停驻
+  opp('coconutBody', { rear: 26, front: 12 }, { front: 'laser', frontMass: 'cannon' }, 'stationary'), // 前小后大 75/100 · 停驻
+  // 近距爆发 ×2（前进）
+  opp('pineappleBody', { rear: 12, front: 12 }, { front: 'shotgun', top: 'saw' }), // 双小 55/100
+  opp('coconutBody', { rear: 12, front: 12 }, { front: 'shotgun', frontMass: 'spear' }), // 双小 55/100
+  // 持续贴身 ×2（前进）
+  opp('pineappleBody', { rear: 20, front: 20 }, { front: 'flamethrower', top: 'hammer' }), // 双标准 55/100
+  opp('coconutBody', { rear: 20, front: 20 }, { front: 'flamethrower', frontMass: 'saw' }), // 双标准 55/100
+  // 冲锋接敌 ×2（前进）
+  opp('pineappleBody', { rear: 12, front: 26 }, { front: 'saw', rear: 'thruster' }), // 前大后小 45/100
+  opp('coconutBody', { rear: 12, front: 26 }, { front: 'hammer', rear: 'thruster' }), // 前大后小 45/100
+  // 控距干扰 ×2（菠萝 1 停驻 / 椰子 前进）
+  opp('pineappleBody', { rear: 26, front: 26 }, { front: 'pushRod', frontMass: 'shotgun' }, 'stationary'), // 双大 50/100 · 停驻
+  opp('coconutBody', { rear: 26, front: 12 }, { front: 'pushRod', frontMass: 'machineGun' }), // 前小后大 50/100 · 前进
+  // 混合型 ×2（前进）
+  opp('pineappleBody', { rear: 20, front: 20 }, { front: 'machineGun', frontMass: 'saw', rear: 'thruster' }), // 双标准 75/100
+  opp('coconutBody', { rear: 26, front: 26 }, { front: 'cannon', top: 'hammer', rear: 'thruster' }), // 双大 75/100
+];
+
+/** 正式对手池：36 套（6 类 × 6 套；12 西瓜 / 12 香蕉 / 6 菠萝 / 6 椰子） */
 export const OPPONENT_POOL: BuildDraft[] = [
   ...RANGED_SUPPRESSION,
   ...CLOSE_BURST,
@@ -106,6 +132,7 @@ export const OPPONENT_POOL: BuildDraft[] = [
   ...CHARGE,
   ...RANGE_CONTROL,
   ...HYBRID,
+  ...Q19_NEW,
 ];
 
 /** 深拷贝一份 Build Draft（避免直接改写池内常量） */
