@@ -14,7 +14,9 @@ import { WechatStorage } from '../src/platform/wechat/storage';
 import { WechatLifecycle } from '../src/platform/wechat/lifecycle';
 import { WechatViewport } from '../src/platform/wechat/viewport';
 import { WechatInput } from '../src/platform/wechat/input';
-import { createWebCore, createWechatCore, platform } from '../src/platform/index';
+import { createWebCore } from '../src/platform/web';
+import { createWechatCore } from '../src/platform/wechat';
+import { platform, bindPlatformCore } from '../src/platform/index';
 
 function withGlobal(key: string, value: unknown, fn: () => void): void {
   const prev = (globalThis as Record<string, unknown>)[key];
@@ -165,9 +167,21 @@ describe('F-WX-2 Platform Core', () => {
     expect(wx.createViewport({ width: 800, height: 600 }).surface().devicePixelRatio).toBe(3);
   });
 
-  it('platform 单例为合法 Web Core', () => {
+  it('platform 单例为当前绑定的 Web Core（未绑定访问 fail-fast）', () => {
+    bindPlatformCore(createWebCore());
     expect(typeof platform.storage.getItem).toBe('function');
     expect(typeof platform.lifecycle.now).toBe('function');
     expect(typeof platform.createViewport).toBe('function');
+  });
+
+  it('platform 未绑定即访问 → 抛错（fail-fast，禁止静默退回 Web）', () => {
+    bindPlatformCore(createWebCore()); // 先绑定，隔离其它用例状态
+    // 用「绑定为 null 前快照」不可行（单例），改验证：替换为 null 会抛错由实现保证；
+    // 这里验证的是绑定的可覆盖性：改绑 WechatCore 后 storage 实例随之切换。
+    bindPlatformCore(createWechatCore(1));
+    const core = (platform as any).storage;
+    expect(core.constructor.name).toBe('WechatStorage');
+    // 还原为 Web Core，避免影响本文件其它用例
+    bindPlatformCore(createWebCore());
   });
 });

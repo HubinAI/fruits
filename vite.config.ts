@@ -66,5 +66,8 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     globals: false,
+    // F-WX-2.1：每个测试文件求值前先绑定 Web Core（与 Web 启动一致），
+    // 使既有持久化测试无需逐个改造；验证 WeChat 绑定的用例内再 bindPlatformCore 并还原。
+    setupFiles: ['tests/setup.ts'],
   },
 });

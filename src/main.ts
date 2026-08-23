@@ -8,6 +8,9 @@
  * - 首屏默认合法配置（A/B 各 front Cannon），Start 立即可点；
  * - 非法配置时 Start 明显禁用且旁边直接显示阻断原因（A：… / B：…）。
  */
+// F-WX-2.1：Web 启动 bootstrap 必须是第一个 import —— 在业务模块（含顶层读 storage 的
+// adFrequency）求值前绑定 WebCore，否则它们会读到未绑定/错误平台的 Storage。
+import './platform/bootstrap';
 import { Renderer, type CameraFit } from './render/renderer';
 import { platform } from './platform';
 import { VisualRegistry } from './render/visualRegistry';
