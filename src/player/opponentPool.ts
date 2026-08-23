@@ -1,26 +1,36 @@
 /**
- * Q15｜正常玩家游戏主循环 V1 —— 最小对手池（纯数据 + 纯函数，可测试）。
+ * Q15 / Q16｜正常玩家对手池（纯数据 + 纯函数，可测试）。
  *
- * 要求：
- * - 只使用 watermelon / banana 两种 Body；
- * - 只使用当前正式 PART_OPTIONS 部件（不含 wedge / ramHead / lifter / 旋锤 等 HOLD 内容）；
- * - 6 套配置彼此明显不同（不同 Body / 部件组合 / 远近战定位）；
- * - 每套都是合法 Build（≥1 Weapon、Energy 不超载）。
+ * Q16：第一轮对手铺量——由 6 套扩到 24 套明显不同、全部合法的正常 Build。
+ * - 只使用 watermelon / banana 两种 Body（容量 110 / 90）；
+ * - 只使用当前正式 PART_OPTIONS 部件（不含 wedge / ramHead / lifter / 旋锤 等 HOLD / prototype 内容）；
+ * - 轮径显式指定（12 / 20 / 26），覆盖 前小后大 / 前大后小 / 双小 / 双标准 / 双大 五类组合，
+ *   走真实 Physics，无姿态补偿；
+ * - 6 类战斗身份各 ≥4 套：远程压制 / 近距离爆发 / 持续贴身 / 冲锋接敌 / 控距干扰 / 混合型
+ *   （分类仅用于设计与测试覆盖，不建立正式「职业/标签系统」）；
+ * - 每套都是合法 Build（≥1 Weapon、Energy 不超载、槽位合法、无 HOLD）。
  *
- * 不做匹配算法 / 段位 / Elo —— 玩家「寻找对手」按固定顺序循环取用本池。
+ * 不做匹配算法 / 段位 / Elo —— 玩家「寻找对手」随机抽取（不连续重复同一 index）。
  */
 import type { BuildDraft } from '../lab/buildEditorModel';
 import { EMPTY_SLOT } from '../lab/buildEditorModel';
 
-/** 生成一份完整 4 挂点（其余默认空槽）的对手 Draft */
+/** 轮径组合（单位 px；WHEEL_OPTIONS 正式档位 12 小 / 20 标准 / 26 大） */
+interface OppWheels {
+  rear: number;
+  front: number;
+}
+
+/** 生成一份完整 4 挂点（其余默认空槽）的对手 Draft；轮径必须显式指定 */
 function opp(
   bodyDefId: string,
+  wheels: OppWheels,
   selections: Partial<Record<string, string>>,
 ): BuildDraft {
   return {
     bodyDefId,
-    rearRadius: 20,
-    frontRadius: 20,
+    rearRadius: wheels.rear,
+    frontRadius: wheels.front,
     functionalSelections: {
       front: EMPTY_SLOT,
       frontMass: EMPTY_SLOT,
@@ -32,21 +42,68 @@ function opp(
 }
 
 /**
- * 6 套人工对手配置（车队风格明显不同）：
- * 1. 西瓜重甲炮车：炮 + 推杆 + 锤（均衡近中距离）
- * 2. 香蕉机枪机动：机枪 + 锤 + 推杆（高速持续压制）
- * 3. 西瓜霰弹近战：霰弹炮 + 圆锯 + 推杆（近距离爆发 + 切割）
- * 4. 香蕉冲撞手：冲锤 + 锤 + 推进器（前压突进）
- * 5. 西瓜锯炮：圆锯 + 炮 + 推进器（旋转 + 远程 + 机动）
- * 6. 香蕉双枪：机枪 + 霰弹炮 + 锤（双远程武器压制）
+ * 24 套人工对手配置（车队风格明显不同；每类 4 套）。
+ * 槽位：front / frontMass / top / rear（两 Body 均有这 4 个 functional 挂点）。
+ * 能量（≤ 容量，西瓜 110 / 香蕉 90）：炮30 机枪30 镭射45 霰弹30 冲锤25 圆锯25 刺25
+ *       锤25 喷火30 / 推杆20 推进器20。
  */
+
+/* 1｜远程压制：炮 / 机枪 / 镭射 组合（4 套） */
+const RANGED_SUPPRESSION = [
+  opp('watermelonBody', { rear: 26, front: 12 }, { front: 'machineGun', frontMass: 'cannon' }), // 前小后大 60/110
+  opp('bananaBody', { rear: 20, front: 20 }, { front: 'laser', frontMass: 'cannon' }), // 双标准 75/90
+  opp('watermelonBody', { rear: 26, front: 26 }, { front: 'cannon', frontMass: 'machineGun' }), // 双大 60/110
+  opp('bananaBody', { rear: 12, front: 26 }, { front: 'machineGun', frontMass: 'laser' }), // 前大后小 75/90
+];
+
+/* 2｜近距离爆发：霰弹 / 圆锯 / 刺 组合（4 套） */
+const CLOSE_BURST = [
+  opp('watermelonBody', { rear: 12, front: 12 }, { front: 'shotgun', top: 'saw' }), // 双小 55/110
+  opp('bananaBody', { rear: 20, front: 20 }, { front: 'shotgun', frontMass: 'spear' }), // 双标准 55/90
+  opp('watermelonBody', { rear: 26, front: 12 }, { front: 'saw', frontMass: 'shotgun' }), // 前小后大 55/110
+  opp('bananaBody', { rear: 12, front: 26 }, { front: 'spear', frontMass: 'shotgun' }), // 前大后小 55/90
+];
+
+/* 3｜持续贴身：喷火 / 圆锯 / 锤 组合（4 套） */
+const CONTINUOUS_CONTACT = [
+  opp('watermelonBody', { rear: 12, front: 12 }, { front: 'flamethrower', top: 'hammer' }), // 双小 55/110
+  opp('bananaBody', { rear: 20, front: 20 }, { front: 'flamethrower', frontMass: 'saw' }), // 双标准 55/90
+  opp('watermelonBody', { rear: 26, front: 26 }, { front: 'saw', frontMass: 'hammer' }), // 双大 50/110
+  opp('bananaBody', { rear: 26, front: 12 }, { front: 'hammer', frontMass: 'flamethrower' }), // 前小后大 55/90
+];
+
+/* 4｜冲锋接敌：推进器 + 近战武器（4 套） */
+const CHARGE = [
+  opp('watermelonBody', { rear: 12, front: 12 }, { front: 'rammer', rear: 'thruster' }), // 双小 45/110
+  opp('bananaBody', { rear: 12, front: 26 }, { front: 'saw', rear: 'thruster' }), // 前大后小 45/90
+  opp('watermelonBody', { rear: 20, front: 20 }, { front: 'spear', top: 'hammer', rear: 'thruster' }), // 双标准 70/110
+  opp('bananaBody', { rear: 26, front: 26 }, { front: 'hammer', rear: 'thruster' }), // 双大 45/90
+];
+
+/* 5｜控距干扰：推杆 + 远程（4 套） */
+const RANGE_CONTROL = [
+  opp('watermelonBody', { rear: 26, front: 12 }, { front: 'pushRod', frontMass: 'cannon' }), // 前小后大 50/110
+  opp('bananaBody', { rear: 20, front: 20 }, { front: 'pushRod', frontMass: 'machineGun' }), // 双标准 50/90
+  opp('watermelonBody', { rear: 26, front: 26 }, { front: 'pushRod', frontMass: 'shotgun' }), // 双大 50/110
+  opp('bananaBody', { rear: 12, front: 26 }, { front: 'pushRod', frontMass: 'laser' }), // 前大后小 65/90
+];
+
+/* 6｜混合型：远程 + 近战 + Gadget（4 套） */
+const HYBRID = [
+  opp('watermelonBody', { rear: 20, front: 20 }, { front: 'machineGun', frontMass: 'saw', rear: 'thruster' }), // 双标准 75/110
+  opp('bananaBody', { rear: 26, front: 12 }, { front: 'cannon', top: 'hammer', rear: 'thruster' }), // 前小后大 75/90
+  opp('watermelonBody', { rear: 12, front: 12 }, { front: 'shotgun', frontMass: 'hammer', rear: 'pushRod' }), // 双小 75/110
+  opp('bananaBody', { rear: 26, front: 26 }, { front: 'flamethrower', frontMass: 'hammer', rear: 'thruster' }), // 双大 75/90
+];
+
+/** 正式对手池：24 套（6 类 × 4 套，12 西瓜 / 12 香蕉） */
 export const OPPONENT_POOL: BuildDraft[] = [
-  opp('watermelonBody', { front: 'cannon', frontMass: 'pushRod', top: 'hammer' }),
-  opp('bananaBody', { front: 'machineGun', top: 'hammer', frontMass: 'pushRod' }),
-  opp('watermelonBody', { front: 'shotgun', top: 'saw', frontMass: 'pushRod' }),
-  opp('bananaBody', { front: 'rammer', top: 'hammer', rear: 'thruster' }),
-  opp('watermelonBody', { front: 'saw', frontMass: 'cannon', rear: 'thruster' }),
-  opp('bananaBody', { front: 'machineGun', frontMass: 'shotgun', top: 'hammer' }),
+  ...RANGED_SUPPRESSION,
+  ...CLOSE_BURST,
+  ...CONTINUOUS_CONTACT,
+  ...CHARGE,
+  ...RANGE_CONTROL,
+  ...HYBRID,
 ];
 
 /** 深拷贝一份 Build Draft（避免直接改写池内常量） */
