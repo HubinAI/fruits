@@ -12,6 +12,7 @@
  * - 难度 / 抽取逻辑在 opponentPool（Q25），本模块不涉对手。
  */
 import { tryMerge, type PartInventory } from './partInventory';
+import { readJsonWithVersion, migrateLegacy, stampVersion } from './saveVersion';
 
 export type Tier = 'bronze' | 'silver' | 'gold' | 'diamond';
 
@@ -68,25 +69,28 @@ export function applyBattleResult(p: ProgressState, isWin: boolean): ProgressSta
   };
 }
 
-/** 写入进度（隐私模式 / 配额失败静默忽略） */
+/** 写入进度（附带 saveVersion 信封；隐私模式 / 配额失败静默忽略） */
 export function saveProgress(p: ProgressState): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stampVersion(p)));
   } catch {
     // 写入失败静默忽略
   }
 }
 
-/** 读进度（无存档 / 解析失败 → null） */
+/** 读进度（无存档 / 解析失败 → null；旧格式经统一迁移 + 字段级安全校验） */
 export function loadProgressRaw(): ProgressState | null {
   if (typeof localStorage === 'undefined') return null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const d = JSON.parse(raw) as Record<string, unknown>;
+    const parsed = readJsonWithVersion(raw);
+    if (!parsed) return null;
+    const d = migrateLegacy('progress', parsed.obj, parsed.version) as Record<string, unknown>;
     if (!d || typeof d !== 'object') return null;
     return {
+      // 字段级安全：单字段非法/缺失只回退该字段默认（coin 缺省 0、rating 夹 0），不丢全部
       coin: Math.max(0, Math.floor(Number(d.coin) || 0)),
       rating: Math.max(RATING_MIN, Math.floor(Number(d.rating) || 0)),
     };

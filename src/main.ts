@@ -53,6 +53,7 @@ import {
   completeOnboarding,
   type OnboardingStage,
 } from './core/onboarding';
+import { resetPlayerSave } from './core/saveVersion';
 import { computeEnergy, validateSnapshot } from './core/buildValidator';
 // Q22：星级统一倍率（用于 Garage 卡片展示 2★ 实际 Energy）
 import { starTierEnergy } from './core/buildSnapshot';
@@ -148,6 +149,8 @@ style.textContent = `
   .dock-stats b { color: #ffd35a; font-size: 15px; }
   /* Q26：首轮引导提示（仅全新账号首 Garage 显示；极简 banner，非遮罩、不阻断操作） */
   .dock-onboard { padding: 8px 12px; background: #15233a; border: 1px solid #2f5fa0; border-radius: 8px; font-size: 13px; color: #bcd4ff; }
+  /* Q27：DEV 重置入口（仅 ?resetdev=1 可见，正常游玩不可达） */
+  .dock-dev-reset { padding: 6px 10px; background: #3a1f1f; border: 1px solid #a04a4a; border-radius: 8px; font-size: 12px; color: #ffbdbd; cursor: pointer; }
   /* Q23→Q24：结算卡经济/段位区 */
   .result-economy { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; background: #1c2230; border: 1px solid #38414f; border-radius: 8px; }
   .result-economy .re-label { font-size: 14px; font-weight: 700; color: #ffd35a; }
@@ -1479,6 +1482,20 @@ function renderGarageDock(): void {
     ob.className = 'dock-onboard';
     ob.textContent = '这是你的第一辆战车，点「寻找对手」开始第一场战斗';
     garageDock.appendChild(ob);
+  }
+  // Q27：DEV/Settings 安全入口——仅当 URL 含 ?resetdev=1 时显示「重置进度」；
+  // 点击经二次确认后清空已知玩家存档 key 并刷新，恢复新账号状态。正常游玩不可见、不可触发。
+  if (new URLSearchParams(location.search).has('resetdev')) {
+    const dev = document.createElement('button');
+    dev.className = 'dock-dev-reset';
+    dev.textContent = 'DEV：重置进度';
+    dev.onclick = () => {
+      if (confirm('确认重置全部进度？此操作不可撤销，将恢复到新账号状态。')) {
+        resetPlayerSave();
+        location.reload();
+      }
+    };
+    garageDock.appendChild(dev);
   }
   const body = registry.bodies.get(draftA.bodyDefId);
   const snapshot = currentSnapshot('A');

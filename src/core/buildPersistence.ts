@@ -12,6 +12,7 @@ import type { BuildDraft } from '../lab/buildEditorModel';
 import { EMPTY_SLOT, buildSnapshotFromDraft, resolveDriveMode } from '../lab/buildEditorModel';
 import { registry } from './content';
 import { validateSnapshot } from './buildValidator';
+import { readJsonWithVersion, migrateLegacy, stampVersion, STAMP_KEY } from './saveVersion';
 
 const STORAGE_KEY = 'strongfruit.playerBuild.v1';
 
@@ -28,14 +29,12 @@ export function loadPlayerBuild(): BuildDraft | null {
     return null;
   }
   if (!raw) return null;
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!isBuildDraftShape(data)) return null;
-  const draft = data as BuildDraft;
+  const parsed = readJsonWithVersion(raw);
+  if (!parsed) return null;
+  const migrated = migrateLegacy('build', parsed.obj, parsed.version) as Record<string, unknown>;
+  delete migrated[STAMP_KEY]; // 版本信封不泄漏进领域对象（BuildDraft 语义不含 __v）
+  if (!isBuildDraftShape(migrated)) return null;
+  const draft = migrated as BuildDraft;
   // F-MOVE-1：驱动模式归一（旧 localStorage 无 drive 字段 / 非法值 → 前进）
   draft.drive = resolveDriveMode(draft.drive);
   // 必须构成合法 Build（未知部件 / 超载 / 无 Weapon → 旧存档非法）
@@ -44,11 +43,11 @@ export function loadPlayerBuild(): BuildDraft | null {
   return draft;
 }
 
-/** 写入玩家 Build（结构性序列化） */
+/** 写入玩家 Build（附带 saveVersion 信封；结构性序列化） */
 export function savePlayerBuild(d: BuildDraft): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stampVersion(d)));
   } catch {
     // 写入失败静默忽略（隐私模式 / 配额），不影响当前对局
   }

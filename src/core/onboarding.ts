@@ -10,18 +10,21 @@
  * - 不触碰 Weapon / Physics / 经济 / 段位逻辑（那些在各自模块）。
  */
 import { loadPlayerBuild } from './buildPersistence';
+import { readJsonWithVersion, migrateLegacy, stampVersion } from './saveVersion';
 
 export type OnboardingStage = 'pending' | 'done';
 
 const STORAGE_KEY = 'strongfruit.onboarding.v1';
 
-/** 读引导状态：'pending' | 'done' | null（无标志） */
+/** 读引导状态：'pending' | 'done' | null（无标志）；旧格式经统一迁移 */
 export function loadOnboarding(): OnboardingStage | null {
   if (typeof localStorage === 'undefined') return null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const d = JSON.parse(raw) as Record<string, unknown>;
+    const parsed = readJsonWithVersion(raw);
+    if (!parsed) return null;
+    const d = migrateLegacy('onboarding', parsed.obj, parsed.version) as Record<string, unknown>;
     if (d && d.stage === 'done') return 'done';
     if (d && d.stage === 'pending') return 'pending';
     return null;
@@ -30,11 +33,11 @@ export function loadOnboarding(): OnboardingStage | null {
   }
 }
 
-/** 写引导状态（隐私模式 / 配额失败静默忽略） */
+/** 写引导状态（附带 saveVersion 信封；隐私模式 / 配额失败静默忽略） */
 export function saveOnboarding(stage: OnboardingStage): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ stage }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stampVersion({ stage })));
   } catch {
     // 写入失败静默忽略
   }
