@@ -431,12 +431,15 @@ function showResultModal(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): vo
   } else {
     resultReward.style.display = 'none';
   }
-  // Q23：结算本局金币（胜 +100 / 负 +60；同场只结算一次，自动入库）
+  // Q23→Q24：结算本局金币 + 段位（同场只结算一次，自动入库）
   const prog = progressSettler.settle(r, isWin);
   if (prog) {
-    const sign = prog.coinDelta >= 0 ? '+' : '';
+    const coinSign = prog.coinDelta >= 0 ? '+' : '';
+    const ratingSign = prog.ratingDelta >= 0 ? '+' : '';
+    const newTier = tierOf(prog.progress.rating);
     resultEconomy.innerHTML =
-      `<div class="re-label">本局金币 ${sign}${prog.coinDelta}</div>` +
+      `<div class="re-label">本局金币 ${coinSign}${prog.coinDelta} · 段位 ${ratingSign}${prog.ratingDelta}` +
+      `（${TIER_LABEL[newTier]} ${prog.progress.rating}）</div>` +
       `<div class="re-cat">当前金币 ${prog.progress.coin}</div>`;
     resultEconomy.style.display = 'flex';
   } else {
@@ -712,6 +715,8 @@ import {
   saveProgress,
   canAffordMerge,
   mergeWithCost,
+  tierOf,
+  TIER_LABEL,
   MERGE_COST_COIN,
 } from './core/playerProgress';
 
@@ -1437,12 +1442,13 @@ function decodePartVal(v: string): { defId: string; star: number } {
 
 function renderGarageDock(): void {
   garageDock.replaceChildren();
-  // Q23：车库顶部状态条（金币）—— 段位在 Q24 扩展
+  // Q23→Q24：车库顶部状态条（金币 + 段位/rating）
   {
     const p = getProgress();
+    const tier = tierOf(p.rating);
     const stats = document.createElement('div');
     stats.className = 'dock-stats';
-    stats.innerHTML = `金币 <b>${p.coin}</b>`;
+    stats.innerHTML = `金币 <b>${p.coin}</b> · ${TIER_LABEL[tier]} <b>${p.rating}</b>`;
     garageDock.appendChild(stats);
   }
   const body = registry.bodies.get(draftA.bodyDefId);
