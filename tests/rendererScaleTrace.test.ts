@@ -1,13 +1,15 @@
 /**
- * F-WX-9A｜DEV-only 取景尺度日志 [WX-REF] 运行时验证。
+ * F-WX-9A / F-WX-RCA-1｜DEV 取景尺度日志运行时验证（双口径：core / envelope）。
  *
- * 目标：证明 Renderer reframe 的 DEV 日志能输出「真实车辆屏宽占比」，
- * 且：
- * 1. Garage previewSolo（含 framingRect）→ screenWidthPct ∈ [28%, 38%]；
- * 2. Battle Active → screenWidthPct ∈ [18%, 28%]；
- * 3. DPR=2（surface 物理像素 1688×780）与 DPR=1（844×390）逻辑空间一致
- *    → 两次 reframe 的占比差 < 2pp（尺度链自洽的直接证据；若差异大 = 尺度链错误）；
- * 4. __WX_DEBUG__=false/undefined → 零 [WX-REF] 输出（PROD 不输出日志）。
+ * 目标：
+ * 1. [WX-REF]（__WX_DEBUG__）输出 vehicleA.core.screenWidthPct（Body+Wheels）
+ *    与 vehicleA.envelope.screenWidthPct（+Functional Parts），两个指标并存；
+ * 2. core < envelope（coreBounds 明确排除 Functional Parts 的直接证据）；
+ * 3. Garage previewSolo（framingRect）envelope ∈ [32%,38%]（9B 阈值）；
+ *    Battle Active envelope ∈ [24%,30%]（9C 阈值）——阈值不因 RCA 调整；
+ * 4. DPR=2 与 DPR=1 逻辑占比一致（尺度链自洽）；
+ * 5. [WX-RCA]（__WX_RCA__，build:wechat:rca）在 garage/battle reframe 输出双口径；
+ * 6. __WX_DEBUG__=false / __WX_RCA__=false/undefined → 零日志（PROD）。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
@@ -42,52 +44,73 @@ function makeEnv(vp: { w: number; h: number }, dpr: number) {
   return { r, o };
 }
 
-/** 抓取最后一次 [WX-REF] 日志的 JSON 主体 */
-function lastWxRef(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown> | null {
-  const call = spy.mock.calls.find((c: unknown[]) => c[0] === '[WX-REF]');
-  if (!call) return null;
-  return JSON.parse(String(call[1])) as Record<string, unknown>;
+/** 与 CanvasHost.getPreviewFramingRect 同几何的 Garage 左侧展示区（mobileBattleFraming 同款） */
+function garageFramingRect(vp: { w: number; h: number }): { x: number; y: number; w: number; h: number } {
+  const topH = 34;
+  const ctaH = 56;
+  const ctaY = vp.h - 16 - ctaH;
+  const panelX = 10 + Math.round(vp.w * 0.57) + 12;
+  const showX = 10;
+  const showW = Math.max(200, panelX - 12 - showX);
+  const bodyTop = topH + 14;
+  const bodyBot = ctaY - 14;
+  return { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
 }
 
-describe('F-WX-9A｜[WX-REF] reframe 尺度日志（DEV-only）', () => {
+/** 抓取最后一个指定前缀日志的 JSON 主体（同一帧可能有 garage+battle 两条 [WX-RCA]） */
+function lastLog(spy: ReturnType<typeof vi.spyOn>, tag: string): Record<string, unknown> | null {
+  for (let i = spy.mock.calls.length - 1; i >= 0; i--) {
+    const c = spy.mock.calls[i] as unknown[];
+    if (c[0] === tag) return JSON.parse(String(c[1])) as Record<string, unknown>;
+  }
+  return null;
+}
+
+describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口径）', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
-  it('Garage previewSolo（framingRect 左侧展示区）：screenWidthPct ∈ [28%,38%]', () => {
+  it('Garage previewSolo：envelope ∈ [32%,38%]（9B 阈值不变）+ core 存在且 < envelope', () => {
     vi.stubGlobal('__WX_DEBUG__', true);
     const { r, o } = makeEnv({ w: 844, h: 390 }, 1);
     const snap = o.getRenderSnapshot();
     r.resize(snap.arena.width, o.arena.config.height);
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    // Mobile Garage 左侧展示区（与 CanvasHost getPreviewFramingRect 同语义）
-    r.reframe(snap, 'previewSolo', { framingRect: { x: 10, y: 62, w: 450, h: 250 } });
-    const log = lastWxRef(spy);
+    r.reframe(snap, 'previewSolo', { framingRect: garageFramingRect({ w: 844, h: 390 }) });
+    const log = lastLog(spy, '[WX-REF]');
     expect(log, '应有 [WX-REF] 日志').not.toBeNull();
-    const vehicle = log!.vehicleA as { screenWidthPct: number; world: unknown; screen: unknown };
-    expect(vehicle.screenWidthPct).toBeGreaterThanOrEqual(28);
-    expect(vehicle.screenWidthPct).toBeLessThanOrEqual(38);
+    const vehicle = log!.vehicleA as {
+      core: { screenWidthPct: number };
+      envelope: { screenWidthPct: number; screen: { minX: number; maxX: number } };
+    };
+    expect(vehicle.core.screenWidthPct, 'core 存在').toBeGreaterThanOrEqual(0);
+    expect(vehicle.envelope.screenWidthPct, 'envelope 存在').toBeGreaterThanOrEqual(0);
+    expect(vehicle.envelope.screenWidthPct).toBeGreaterThanOrEqual(32);
+    expect(vehicle.envelope.screenWidthPct).toBeLessThanOrEqual(38);
+    expect(vehicle.core.screenWidthPct, 'core（Body+Wheels）应小于 envelope（含 Parts）').toBeLessThan(vehicle.envelope.screenWidthPct);
     expect((log!.view as { dpr: number }).dpr).toBe(1);
   });
 
-  it('Battle Active：screenWidthPct ∈ [24%,30%]（F-WX-9C corridor 收窄后三屏统一 24.4%）', () => {
+  it('Battle Active：envelope ∈ [24%,30%]（9C 阈值不变）+ core 存在且 < envelope', () => {
     vi.stubGlobal('__WX_DEBUG__', true);
     const { r, o } = makeEnv({ w: 844, h: 390 }, 1);
     const snap = o.getRenderSnapshot();
     r.resize(snap.arena.width, o.arena.config.height);
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     r.reframe(snap, 'battle', { phase: 'Active' });
-    const log = lastWxRef(spy);
+    const log = lastLog(spy, '[WX-REF]');
     expect(log, '应有 [WX-REF] 日志').not.toBeNull();
     expect(log!.fit).toBe('battle');
     expect(log!.framingRect).toBeNull();
-    const vehicle = log!.vehicleA as { screenWidthPct: number };
-    expect(vehicle.screenWidthPct).toBeGreaterThanOrEqual(24);
-    expect(vehicle.screenWidthPct).toBeLessThanOrEqual(30);
+    const vehicle = log!.vehicleA as { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
+    expect(vehicle.envelope.screenWidthPct).toBeGreaterThanOrEqual(24);
+    expect(vehicle.envelope.screenWidthPct).toBeLessThanOrEqual(30);
+    expect(vehicle.core.screenWidthPct).toBeLessThan(vehicle.envelope.screenWidthPct);
   });
 
-  it('DPR=2（surface 1688×780 物理）与 DPR=1（844×390）逻辑占比一致（尺度链自洽）', () => {
+  it('DPR=2（surface 1688×780 物理）与 DPR=1（844×390）逻辑占比一致（尺度链自洽，用 envelope 口径）', () => {
     vi.stubGlobal('__WX_DEBUG__', true);
     const pcts: number[] = [];
     for (const dpr of [1, 2]) {
@@ -95,15 +118,53 @@ describe('F-WX-9A｜[WX-REF] reframe 尺度日志（DEV-only）', () => {
       const snap = o.getRenderSnapshot();
       r.resize(snap.arena.width, o.arena.config.height);
       const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      r.reframe(snap, 'previewSolo', { framingRect: { x: 10, y: 62, w: 450, h: 250 } });
-      const log = lastWxRef(spy);
+      r.reframe(snap, 'previewSolo', { framingRect: garageFramingRect({ w: 844, h: 390 }) });
+      const log = lastLog(spy, '[WX-REF]');
       expect(log).not.toBeNull();
       expect((log!.view as { dpr: number }).dpr).toBe(dpr);
-      pcts.push((log!.vehicleA as { screenWidthPct: number }).screenWidthPct);
+      pcts.push(((log!.vehicleA as { envelope: { screenWidthPct: number } }).envelope).screenWidthPct);
       vi.restoreAllMocks();
     }
     // dpr 只改物理像素，不改逻辑空间 → 占比差必须 < 2pp
     expect(Math.abs(pcts[0] - pcts[1]), `dpr=1 ${pcts[0]}% vs dpr=2 ${pcts[1]}%`).toBeLessThan(2);
+  });
+
+  it('[WX-RCA]（build:wechat:rca）：garage 与 battle reframe 输出 step + 双口径；false/undefined 零输出', () => {
+    // garage 段
+    vi.stubGlobal('__WX_RCA__', true);
+    const { r, o } = makeEnv({ w: 844, h: 390 }, 1);
+    const snap = o.getRenderSnapshot();
+    r.resize(snap.arena.width, o.arena.config.height);
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    r.reframe(snap, 'previewSolo', { framingRect: garageFramingRect({ w: 844, h: 390 }) });
+    const garage = lastLog(spy, '[WX-RCA]');
+    expect(garage, '应有 [WX-RCA] garage 段').not.toBeNull();
+    expect(garage!.step).toBe('garage');
+    const gv = garage as { core: { screenWidthPct: number }; envelope: { screenWidthPct: number }; transform: { scale: number } };
+    expect(gv.transform.scale).toBeGreaterThan(0);
+    expect(gv.core.screenWidthPct).toBeGreaterThanOrEqual(0);
+    expect(gv.envelope.screenWidthPct).toBeGreaterThan(0);
+    expect(gv.core.screenWidthPct).toBeLessThan(gv.envelope.screenWidthPct);
+    // battle 段
+    r.reframe(snap, 'battle', { phase: 'Active' });
+    const battle = lastLog(spy, '[WX-RCA]');
+    expect(battle, '应有 [WX-RCA] battle 段').not.toBeNull();
+    expect(battle!.step).toBe('battle');
+    expect(battle!.phase).toBe('Active');
+    const bv = battle as { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
+    expect(bv.envelope.screenWidthPct).toBeGreaterThan(0);
+    expect(bv.core.screenWidthPct).toBeLessThan(bv.envelope.screenWidthPct);
+    // false / undefined → 零 [WX-RCA]（先 restore 主 spy，避免重复 spyOn 返回同一 mock 混入历史调用）
+    vi.restoreAllMocks();
+    for (const v of [false, undefined]) {
+      if (v === undefined) vi.unstubAllGlobals();
+      else vi.stubGlobal('__WX_RCA__', false);
+      const spy2 = vi.spyOn(console, 'log').mockImplementation(() => {});
+      r.reframe(snap, 'previewSolo');
+      r.reframe(snap, 'battle', { phase: 'Active' });
+      expect(spy2.mock.calls.some((c) => c[0] === '[WX-RCA]'), `${String(v)} 不应输出 [WX-RCA]`).toBe(false);
+      vi.restoreAllMocks();
+    }
   });
 
   it('__WX_DEBUG__=false / undefined：零 [WX-REF] 输出（PROD 不输出日志）', () => {

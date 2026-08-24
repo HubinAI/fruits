@@ -75,11 +75,14 @@ export default defineConfig({
   // ads PROD 路径）；显式 define 注入，与 Web production 构建行为一致。
   // F-WX-P0-INPUT：__WX_DEBUG__ 默认 false（PROD 零诊断日志）；WECHAT_DEBUG_INPUT=1 构建
   // 时为 true（输出 [WX-INPUT] 触摸诊断，供微信开发者工具定位坐标/命中）。
+  // F-WX-RCA-1：__WX_RCA__ 默认 false（PROD 零日志）；WECHAT_RCA=1 构建（npm run build:wechat:rca）
+  // 时为 true（输出 [WX-RCA] 真实尺度数据，供真人 Runtime 核对 Garage/Battle 主体占比）。
   define: {
     'import.meta': JSON.stringify({
       env: { MODE: 'production', DEV: false, PROD: true },
     }),
     __WX_DEBUG__: process.env.WECHAT_DEBUG_INPUT ? 'true' : 'false',
+    __WX_RCA__: process.env.WECHAT_RCA ? 'true' : 'false',
   },
   plugins: [
     runtimeInfoPlugin(),

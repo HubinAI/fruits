@@ -139,4 +139,48 @@ describe('F-WX-7 微信工程目录（可直接导入）', () => {
     // 日志是只读诊断：不改变 framing 语义（赋值在前、日志在后）
     expect(renderer.indexOf('this.transform = { scale, offsetX, offsetY }')).toBeLessThan(refIdx);
   });
+
+  it('F-WX-RCA-1｜双口径 Bounds：coreBounds 排除 Functional Parts、envelopeBounds 保留；build:wechat:rca 可运行且 PROD 无 [WX-RCA]', () => {
+    const renderer = read('src/render/renderer.ts');
+    // 1) 双口径同时存在，不再混用单一 vehicleWidth
+    expect(renderer).toContain('scaleDiagnostics');
+    expect(renderer).toContain('core: diag(false)');
+    expect(renderer).toContain('envelope: diag(true)');
+    expect(renderer).toContain('includeParts');
+    // coreBounds 明确排除 Functional Parts（parts 只在 includeParts=true 时计入）
+    const boundsIdx = renderer.indexOf('private vehicleBounds(');
+    expect(boundsIdx).toBeGreaterThan(-1);
+    const boundsEnd = renderer.indexOf('\n  private ', boundsIdx + 10);
+    const boundsBody = renderer.slice(boundsIdx, boundsEnd === -1 ? boundsIdx + 1200 : boundsEnd);
+    const incIdx = boundsBody.indexOf('if (includeParts)');
+    expect(incIdx, 'includeParts 条件存在').toBeGreaterThan(-1);
+    const partsIdx = boundsBody.indexOf('for (const p of v.parts)');
+    expect(partsIdx, 'parts 计入逻辑存在（includeParts 分支内）').toBeGreaterThan(-1);
+    // coreBounds（includeParts=false）路径不含 parts：parts 必须在 includeParts 条件之后
+    expect(partsIdx, 'parts 必须在 includeParts 条件之后（coreBounds 排除 Functional Parts）').toBeGreaterThan(incIdx);
+    // 2) [WX-RCA] 在 renderer 且包在 __WX_RCA__ gate 内（只读诊断）
+    const rcaIdx = renderer.indexOf('[WX-RCA]');
+    expect(rcaIdx, 'renderer 应有 [WX-RCA]').toBeGreaterThan(-1);
+    const rcaGate = renderer.lastIndexOf('typeof __WX_RCA__ !==', rcaIdx);
+    expect(rcaGate, '[WX-RCA] 必须在 __WX_RCA__ gate 内').toBeGreaterThan(-1);
+    // 3) build:wechat:rca 脚本存在（仅该构建注入 WECHAT_RCA）
+    const pkg = read('package.json');
+    expect(pkg).toContain('"build:wechat:rca"');
+    expect(pkg).toContain('scripts/wechat-rca.js');
+    const script = read('scripts/wechat-rca.js');
+    expect(script).toContain('WECHAT_RCA: \'1\'');
+    // 4) vite define __WX_RCA__ 默认 false（PROD 零日志）
+    const cfg = read('vite.wechat.config.ts');
+    expect(cfg).toContain('__WX_RCA__');
+    expect(cfg).toContain('WECHAT_RCA');
+    expect(cfg).toMatch(/__WX_RCA__: process\.env\.WECHAT_RCA \? 'true' : 'false'/);
+    // 5) 微信入口一次性 [WX-RCA] viewport 段也在 __WX_RCA__ gate 内（if 行在日志之前）
+    const entry = read('wechat/game.ts');
+    expect(entry).toContain('[WX-RCA]');
+    const evLogIdx = entry.indexOf("'[WX-RCA]'"); // 代码字符串字面量（跳过注释里的 [WX-RCA]）
+    expect(evLogIdx, '入口应有 [WX-RCA] 日志字面量').toBeGreaterThan(-1);
+    const evGate = entry.indexOf('typeof __WX_RCA__ !==');
+    expect(evGate, '入口 [WX-RCA] 前应有 __WX_RCA__ gate').toBeGreaterThan(-1);
+    expect(evGate, 'gate if 行必须在 [WX-RCA] 日志之前').toBeLessThan(evLogIdx);
+  });
 });

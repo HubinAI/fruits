@@ -355,10 +355,12 @@ export class Renderer {
   }
 
   /**
-   * F-WX-9A：车辆世界 AABB（body + wheels，口径与 framing 测试 vehicleScreenBounds 一致）。
-   * 只读诊断辅助（供 DEV 取景尺度日志 / 测试断言），不参与绘制、不改变 framing 语义。
+   * F-WX-RCA-1：车辆世界 AABB（只读诊断辅助，不参与绘制、不改变 framing 语义）。
+   * includeParts=false → coreBounds（Body + Wheels，玩家感知的车身主体）；
+   * includeParts=true  → envelopeBounds（Body + Wheels + Functional Parts，完整战斗外廓）。
+   * 口径与 framing 测试 vehicleScreenBounds 一致。
    */
-  private vehicleWorldBounds(v: RenderVehicle): { minX: number; minY: number; maxX: number; maxY: number } {
+  private vehicleBounds(v: RenderVehicle, includeParts: boolean): { minX: number; minY: number; maxX: number; maxY: number } {
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -382,8 +384,43 @@ export class Renderer {
       acc(w.center.x - w.radius, w.center.y - w.radius);
       acc(w.center.x + w.radius, w.center.y + w.radius);
     }
-    for (const p of v.parts) shape(p.shape);
+    if (includeParts) {
+      for (const p of v.parts) shape(p.shape);
+    }
     return { minX, minY, maxX, maxY };
+  }
+
+  /**
+   * F-WX-RCA-1：当前 transform 下车辆双口径屏幕诊断（只读）。
+   * core = Body + Wheels；envelope = + Functional Parts。供 DEV/RCA 日志与测试断言，
+   * 不参与绘制、不改变任何 framing 语义。
+   */
+  scaleDiagnostics(snap: BattleRenderSnapshot): {
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+    view: { w: number; h: number; dpr: number };
+    core: { world: { minX: number; minY: number; maxX: number; maxY: number }; screen: { minX: number; minY: number; maxX: number; maxY: number }; screenWidthPct: number };
+    envelope: { world: { minX: number; minY: number; maxX: number; maxY: number }; screen: { minX: number; minY: number; maxX: number; maxY: number }; screenWidthPct: number };
+  } {
+    const t = this.transform;
+    const diag = (includeParts: boolean): { world: { minX: number; minY: number; maxX: number; maxY: number }; screen: { minX: number; minY: number; maxX: number; maxY: number }; screenWidthPct: number } => {
+      const w = this.vehicleBounds(snap.vehicleA, includeParts);
+      const s = this.worldRectToScreen(w.minX, w.minY, w.maxX, w.maxY);
+      return {
+        world: w,
+        screen: s,
+        screenWidthPct: Math.round(((s.maxX - s.minX) / this.viewWidth) * 1000) / 10,
+      };
+    };
+    return {
+      scale: t.scale,
+      offsetX: t.offsetX,
+      offsetY: t.offsetY,
+      view: { w: this.viewWidth, h: this.viewHeight, dpr: this.viewDpr },
+      core: diag(false),
+      envelope: diag(true),
+    };
   }
 
   /**
@@ -1707,18 +1744,36 @@ export class Renderer {
     // F-WX-9A：DEV-only 取景尺度日志（__WX_DEBUG__=true，WECHAT_DEBUG_INPUT=1 构建注入；
     // PROD __WX_DEBUG__=false → 编译期常量折叠，零日志）。只读诊断，不改变任何 framing 语义。
     if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
-      const vb = this.vehicleWorldBounds(snap.vehicleA);
-      const sb = this.worldRectToScreen(vb.minX, vb.minY, vb.maxX, vb.maxY);
-      const widthPct = Math.round(((sb.maxX - sb.minX) / this.viewWidth) * 1000) / 10;
+      // F-WX-RCA-1：双口径——core = Body+Wheels（玩家主体）；envelope = +Parts（完整战斗外廓）
+      const d = this.scaleDiagnostics(snap);
       // eslint-disable-next-line no-console
       console.log(
         '[WX-REF]',
         JSON.stringify({
           fit,
           framingRect: opts.framingRect ?? null,
-          view: { w: this.viewWidth, h: this.viewHeight, dpr: this.viewDpr },
+          view: d.view,
           transform: { scale, offsetX, offsetY },
-          vehicleA: { world: vb, screen: sb, screenWidthPct: widthPct },
+          vehicleA: { core: d.core, envelope: d.envelope },
+        }),
+      );
+    }
+    // F-WX-RCA-1：RCA 专用构建（WECHAT_RCA=1 注入 __WX_RCA__=true）——真实微信尺度数据。
+    // Garage 段（previewSolo/previewFixed）与 Battle 段（battle + phase）随每次 reframe 输出；
+    // 普通 build:wechat PROD __WX_RCA__=false → 零日志。只读诊断，不改变 framing 语义。
+    if (typeof __WX_RCA__ !== 'undefined' && __WX_RCA__ && (isFixed || fit === 'battle')) {
+      const d = this.scaleDiagnostics(snap);
+      // eslint-disable-next-line no-console
+      console.log(
+        '[WX-RCA]',
+        JSON.stringify({
+          step: fit === 'battle' ? 'battle' : 'garage',
+          phase: fit === 'battle' ? (opts.phase ?? '') : null,
+          framingRect: opts.framingRect ?? null,
+          view: d.view,
+          transform: { scale, offsetX, offsetY },
+          core: d.core,
+          envelope: d.envelope,
         }),
       );
     }

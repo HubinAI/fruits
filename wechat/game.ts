@@ -124,6 +124,27 @@ if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
   );
 }
 
+// —— 9b) F-WX-RCA-1：RCA 专用构建一次性视口日志（__WX_RCA__=true，仅 npm run build:wechat:rca；
+//         PROD false → 常量折叠零日志）。Garage/Battle 段的 core/envelope 占比由 renderer
+//         reframe 的 [WX-RCA] 输出（step=garage / step=battle）。 ——
+if (typeof __WX_RCA__ !== 'undefined' && __WX_RCA__) {
+  const sys = wx.getSystemInfoSync ? wx.getSystemInfoSync() : {};
+  const dpr = sys.pixelRatio || 1;
+  // eslint-disable-next-line no-console
+  console.log(
+    '[WX-RCA]',
+    JSON.stringify({
+      step: 'viewport',
+      viewport: {
+        logicalWidth: screenCanvas.width / dpr,
+        logicalHeight: screenCanvas.height / dpr,
+        dpr,
+      },
+      screenCanvas: { width: screenCanvas.width, height: screenCanvas.height },
+    }),
+  );
+}
+
 // —— 10) 每帧 UI 合成：把最新 UI offscreen canvas 作为最后一层画到唯一上屏 canvas ——
 function compositeUi(): void {
   // 上一帧 Renderer 可能残留非单位变换；合成必须用单位变换 1:1 覆盖。
