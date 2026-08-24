@@ -114,4 +114,29 @@ describe('F-WX-7 微信工程目录（可直接导入）', () => {
     expect(host).toContain('screenToLayoutPoint');
     expect(host).toMatch(/private screenToLayoutPoint\(x: number, y: number\)/);
   });
+
+  it('F-WX-9A｜DEV-only 尺度诊断日志：一次性 [WX-VIEWPORT] + reframe [WX-REF]，均在 __WX_DEBUG__ gate 内（PROD 零输出）', () => {
+    // 一次性视口日志在微信入口（wechat/game.ts），且必须包在 __WX_DEBUG__ gate 内
+    const entry = read('wechat/game.ts');
+    expect(entry).toContain('[WX-VIEWPORT]');
+    // gate 结构：typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__ 包裹日志
+    const viewportIdx = entry.indexOf('[WX-VIEWPORT]');
+    const gateIdx = entry.lastIndexOf('typeof __WX_DEBUG__ !==', viewportIdx);
+    expect(gateIdx, '[WX-VIEWPORT] 必须在 __WX_DEBUG__ gate 内').toBeGreaterThan(-1);
+    expect(entry.indexOf('__WX_DEBUG__', gateIdx), 'gate 闭合条件存在').toBeGreaterThan(-1);
+    // 日志必须包含尺度链关键字段（DPR/逻辑 viewport/profile/safeInsets/画布匹配）
+    expect(entry).toContain('screenCanvas: { width: screenCanvas.width, height: screenCanvas.height }');
+    expect(entry).toContain('logicalViewport');
+    expect(entry).toContain('canvasMatchesWindow');
+    expect(entry).toContain('resolveLayoutProfile');
+    // reframe 尺度日志在 Renderer（平台中立，Web/微信共用），同样 DEV gate 内
+    const renderer = read('src/render/renderer.ts');
+    expect(renderer).toContain('[WX-REF]');
+    expect(renderer).toContain('screenWidthPct');
+    const refIdx = renderer.indexOf('[WX-REF]');
+    const rGateIdx = renderer.lastIndexOf('typeof __WX_DEBUG__ !==', refIdx);
+    expect(rGateIdx, '[WX-REF] 必须在 __WX_DEBUG__ gate 内').toBeGreaterThan(-1);
+    // 日志是只读诊断：不改变 framing 语义（赋值在前、日志在后）
+    expect(renderer.indexOf('this.transform = { scale, offsetX, offsetY }')).toBeLessThan(refIdx);
+  });
 });

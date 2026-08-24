@@ -39,6 +39,7 @@ import { VisualRegistry } from '../src/render/visualRegistry';
 import { SfxAudioService } from '../src/presentation/audioService';
 import { createPlayerPresentation } from '../src/presentation/playerPresentation';
 import { CanvasPlayerUIHost } from '../src/ui/canvasPlayerUIHost';
+import { resolveLayoutProfile } from '../src/ui/layoutProfile';
 import { PlayerGameRuntime } from '../src/game/playerGameRuntime';
 import { WechatBattleHost } from '../src/game/wechatBattleHost';
 import { APP_VERSION } from '../src/core/env';
@@ -93,6 +94,35 @@ runtime.init(); // 装载存档 + 绑定 actions + 初始预览/取景/渲染
 console.log(
   `[WECHAT-RUNTIME] ${runtimeInfo.branch} @ ${runtimeInfo.sha.slice(0, 7)} · ${APP_VERSION}`,
 );
+
+// —— 9a) F-WX-9A：DEV-only 一次性视口尺度日志（__WX_DEBUG__=true，WECHAT_DEBUG_INPUT=1 构建注入；
+//         PROD false → 常量折叠零日志）。用于核对「测试尺寸 vs 真实微信尺寸」的尺度链。 ——
+if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
+  const sys = wx.getSystemInfoSync ? wx.getSystemInfoSync() : {};
+  const dpr = sys.pixelRatio || 1;
+  const lw = screenCanvas.width / dpr;
+  const lh = screenCanvas.height / dpr;
+  const insets = platform.createViewport(screenCanvas).safeInsets();
+  // eslint-disable-next-line no-console
+  console.log(
+    '[WX-VIEWPORT]',
+    JSON.stringify({
+      window: {
+        width: typeof sys.windowWidth === 'number' ? sys.windowWidth : null,
+        height: typeof sys.windowHeight === 'number' ? sys.windowHeight : null,
+        pixelRatio: dpr,
+        safeArea: sys.safeArea ?? null,
+      },
+      screenCanvas: { width: screenCanvas.width, height: screenCanvas.height },
+      logicalViewport: { width: lw, height: lh },
+      layoutProfile: resolveLayoutProfile(lw, lh).mode,
+      safeInsets: insets,
+      canvasMatchesWindow:
+        Math.abs(lw - (typeof sys.windowWidth === 'number' ? sys.windowWidth : 0)) < 0.5 &&
+        Math.abs(lh - (typeof sys.windowHeight === 'number' ? sys.windowHeight : 0)) < 0.5,
+    }),
+  );
+}
 
 // —— 10) 每帧 UI 合成：把最新 UI offscreen canvas 作为最后一层画到唯一上屏 canvas ——
 function compositeUi(): void {

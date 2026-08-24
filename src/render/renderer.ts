@@ -353,6 +353,38 @@ export class Renderer {
   }
 
   /**
+   * F-WX-9A：车辆世界 AABB（body + wheels，口径与 framing 测试 vehicleScreenBounds 一致）。
+   * 只读诊断辅助（供 DEV 取景尺度日志 / 测试断言），不参与绘制、不改变 framing 语义。
+   */
+  private vehicleWorldBounds(v: RenderVehicle): { minX: number; minY: number; maxX: number; maxY: number } {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const acc = (x: number, y: number): void => {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    };
+    const shape = (s: RenderShape): void => {
+      if (s.kind === 'polygons') {
+        for (const poly of s.polygons) for (const p of poly.points) acc(p.x, p.y);
+      } else {
+        acc(s.circle.center.x - s.circle.radius, s.circle.center.y - s.circle.radius);
+        acc(s.circle.center.x + s.circle.radius, s.circle.center.y + s.circle.radius);
+      }
+    };
+    shape(v.body);
+    for (const w of v.wheels) {
+      acc(w.center.x - w.radius, w.center.y - w.radius);
+      acc(w.center.x + w.radius, w.center.y + w.radius);
+    }
+    for (const p of v.parts) shape(p.shape);
+    return { minX, minY, maxX, maxY };
+  }
+
+  /**
    * W2-FX-1：表现入口统一由 BattlePresentationController 调用，本模块只负责「画」。
    * 以下方法均为纯表现（不决定 Gameplay / 不触发伤害）。
    */
@@ -1670,6 +1702,24 @@ export class Renderer {
     const offsetX = baseX + (safeW - bw * scale) / 2 - minX * scale;
     const offsetY = baseY + (safeH - bh * scale) / 2 - minY * scale;
     this.transform = { scale, offsetX, offsetY };
+    // F-WX-9A：DEV-only 取景尺度日志（__WX_DEBUG__=true，WECHAT_DEBUG_INPUT=1 构建注入；
+    // PROD __WX_DEBUG__=false → 编译期常量折叠，零日志）。只读诊断，不改变任何 framing 语义。
+    if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
+      const vb = this.vehicleWorldBounds(snap.vehicleA);
+      const sb = this.worldRectToScreen(vb.minX, vb.minY, vb.maxX, vb.maxY);
+      const widthPct = Math.round(((sb.maxX - sb.minX) / this.viewWidth) * 1000) / 10;
+      // eslint-disable-next-line no-console
+      console.log(
+        '[WX-REF]',
+        JSON.stringify({
+          fit,
+          framingRect: opts.framingRect ?? null,
+          view: { w: this.viewWidth, h: this.viewHeight, dpr: this.viewDpr },
+          transform: { scale, offsetX, offsetY },
+          vehicleA: { world: vb, screen: sb, screenWidthPct: widthPct },
+        }),
+      );
+    }
   }
 
   /**
