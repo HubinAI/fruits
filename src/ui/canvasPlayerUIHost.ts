@@ -104,6 +104,8 @@ interface ModalSpec {
   body: string[];
   primary: string;
   secondary?: string;
+  /** F-META-5：可选第三按钮（如既有广告领币点；点击不关闭 Modal，回调由调用方更新内容） */
+  tertiary?: { label: string; disabled?: boolean; onPress?: () => void };
   onPrimary?: () => void;
   onSecondary?: () => void;
 }
@@ -136,6 +138,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private backpackFilter: 'all' | 'weapon' | 'gadget' = 'all';
   /** F-META-4：当前激活的 Modal（null = 无）；覆盖绘制 + 拦截底层点击，关闭恢复当前页 */
   private modal: ModalSpec | null = null;
+  /** F-META-5：Result Modal 已弹出标志（防每帧重复弹出；result 清空时复位） */
+  private resultModalShown = false;
+  /** F-META-5：Result Modal 展示时的 rewardAdClaimed（广告领币后需刷新弹窗文案） */
+  private resultAdClaimedShown = false;
   /** F-WX-UI-1：选项网格面板内垂直滚动（面板不溢出屏幕） */
   private panelScroll = 0;
   /** F-WX-8-B：Mobile 合成面板展开态（点击「合成」次级入口后展开；确认才派发 onMerge） */
@@ -207,6 +213,19 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (state.playerPhase !== 'garage') this.metaPage = 'garage';
     // F-META-3：离开局外同时复位 Backpack 分类（回 Garage 默认全部）
     if (state.playerPhase !== 'garage') this.backpackFilter = 'all';
+    // F-META-5：Result 状态 → 一次性弹出正式结算 Modal（奖励信息单弹窗集中；
+    // 广告领币后 rewardAdClaimed 变化 → 刷新弹窗文案；result 清空 → 复位）
+    if (state.result) {
+      const claimed = !!state.rewardAdClaimed;
+      if (!this.resultModalShown || this.resultAdClaimedShown !== claimed) {
+        this.resultModalShown = true;
+        this.resultAdClaimedShown = claimed;
+        this.showResultModal(state);
+      }
+    } else {
+      this.resultModalShown = false;
+      this.resultAdClaimedShown = false;
+    }
     this.draw();
   }
 
@@ -373,6 +392,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         cb?.();
         break;
       }
+      case 'modal-tertiary':
+        // F-META-5：第三按钮（广告领币）——不关闭 Modal，回调触发后由新 state 更新内容
+        this.modal?.tertiary?.onPress?.();
+        break;
       case 'modal-veil':
         // 遮罩命中：拦截底层点击（无操作）
         break;
@@ -431,9 +454,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
 
     if (state.battleState === 'fighting' || state.battleState === 'ended') {
-      // F-WX-8-C：Result 出现后 HUD 自动降级隐藏（Result 覆盖层独占画面）
+      // F-WX-8-C：Result 出现后 HUD 自动降级隐藏（结算 Modal 覆盖层独占画面）
       if (state.result) {
-        this.drawResult(state);
+        // F-META-5：Mobile Result 走通用 Modal（render 触发 showResultModal）；Desktop 保留旧结算
+        if (!this.isMobile) this.drawResult(state);
       } else {
         if (this.lastFrame) this.drawHud(this.lastFrame);
       }
@@ -1350,10 +1374,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   // ==================== Result ====================
 
   private drawResult(state: PlayerUIState): void {
-    if (this.isMobile) {
-      this.drawMobileResult(state);
-      return;
-    }
+    // F-META-5：仅 Desktop 使用（Mobile Result 走通用 Modal showResultModal）
     this.rect(0, 0, BASE_W, BASE_H, C.overlayBg);
     const cardX = 430;
     const cardY = 150;
@@ -1399,79 +1420,45 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /** F-WX-9D：Mobile Result——统一中央单卡片（胜/负 + 奖励 + 段位 + 双决策），必要文字 ≥16px */
-  private drawMobileResult(state: PlayerUIState): void {
-    this.rect(0, 0, this.W, this.H, C.overlayBg);
-    const r = state.result!;
-    const isWin = r.winner === 'A';
-    const L = this.insL + 8;
-    const R = this.W - this.insR - 8;
-    const cardW = Math.min(460, R - L);
-    const cardX = L + (R - L - cardW) / 2;
-    // 内容行高固定（与绘制一致）：标题 42 / HP 24 / 奖励 44 / 段位 44 / 引导 24 / 按钮行 52
-    const titleH = 42;
-    const rowH = 26;
-    const btnH = TARGET_TOUCH_H;
-    const bodyRows = 1 + (state.reward ? 1 : 0) + (state.economy ? 1 : 0) + (state.resultOnboardingVisible ? 1 : 0);
-    const cardH = 14 + titleH + bodyRows * rowH + 10 + btnH + 14;
-    const cardY = Math.max(this.insT + 10, (this.H - cardH) / 2);
-    // 统一中央单卡片背景
-    this.rect(cardX, cardY, cardW, cardH, '#141a26', C.border, 1);
-    let y = cardY + 12;
-    this.text(isWin ? '【胜利】' : '【失败】', this.W / 2, y + titleH / 2, 24, isWin ? C.green : C.red, 'center', 800);
-    y += titleH;
-    this.text(`我方 HP ${Math.round(r.hpA)} · 对手 HP ${Math.round(r.hpB)}`, this.W / 2, y + 16, 16, C.textDim, 'center');
-    y += rowH;
-    if (state.reward) {
-      this.rect(cardX + 10, y - 2, cardW - 20, 36, '#1c2230', C.border, 1);
-      this.text(`获得 ${state.reward.name} ${state.reward.starStr}`, this.W / 2, y + 16, 16, C.gold, 'center', 700);
-      y += 44;
-    }
-    if (state.economy) {
-      const coinSign = state.economy.coinDelta >= 0 ? '+' : '';
-      const ratingSign = state.economy.ratingDelta >= 0 ? '+' : '';
-      this.rect(cardX + 10, y - 2, cardW - 20, 36, '#1c2230', C.border, 1);
-      this.text(
-        `金币 ${coinSign}${state.economy.coinDelta} · 段位 ${ratingSign}${state.economy.ratingDelta}（${state.economy.tierLabel} ${state.economy.rating}）`,
-        this.W / 2,
-        y + 16,
-        16,
-        C.gold,
-        'center',
-        700,
-      );
-      y += 44;
-    }
-    if (state.resultOnboardingVisible) {
-      this.text('获得新部件，可以回车库调整', this.W / 2, y + 14, 16, C.onboardText, 'center');
-      y += rowH;
-    }
-    // 决策按钮行（恒 ≥ TARGET_TOUCH_H；广告可用时三列）
-    const by = y + 6;
-    if (state.rewardAdAvailable) {
-      const bw = (cardW - 20) / 3;
-      this.button(cardX, by, bw, btnH, 'result-adjust', '调整配置');
-      this.button(cardX + bw + 10, by, bw, btnH, 'result-next', '下一场', { primary: true });
-      this.button(
-        cardX + 2 * (bw + 10),
-        by,
-        bw,
-        btnH,
-        'reward-ad',
-        state.rewardAdClaimed ? `已领 +${REWARD_AD_COIN_BONUS}` : '看广告领币',
-        { disabled: state.rewardAdClaimed },
-      );
-    } else {
-      const bw = (cardW - 10) / 2;
-      this.button(cardX, by, bw, btnH, 'result-adjust', '调整配置');
-      this.button(cardX + bw + 10, by, bw, btnH, 'result-next', '下一场', { primary: true });
-    }
-  }
-
   /**
    * F-META-4：打开通用 Modal（居中卡片 + 全屏遮罩；覆盖当前 UI 并拦截底层点击）。
    * 最小 API：调用方提供标题/内容/按钮文案与回调；不接具体业务逻辑、无动画、无美术依赖。
    */
+  /**
+   * F-META-5：正式结算 Modal——胜/负 + 本局获得（金币/部件/星级/段位）+ [调整配置][下一场]。
+   * 奖励信息全部集中在此弹窗（无第二个领奖确认）；广告领币沿用既有 reward-ad 逻辑（tertiary）。
+   */
+  private showResultModal(state: PlayerUIState): void {
+    const r = state.result!;
+    const isWin = r.winner === 'A';
+    const body: string[] = [];
+    if (state.economy) {
+      const cs = state.economy.coinDelta >= 0 ? '+' : '';
+      const rs = state.economy.ratingDelta >= 0 ? '+' : '';
+      body.push(`金币 ${cs}${state.economy.coinDelta} · 段位 ${rs}${state.economy.ratingDelta}（${state.economy.tierLabel} ${state.economy.rating}）`);
+    }
+    if (state.reward) {
+      // 新获得部件：名称 + ★ + 当前库存数量
+      body.push(`获得 ${state.reward.name} ${state.reward.starStr} · 库存 ${state.reward.countAfter}`);
+    }
+    if (state.resultOnboardingVisible) body.push('获得新部件，可以回车库调整');
+    this.showModal({
+      title: isWin ? '胜利' : '失败',
+      body,
+      primary: '下一场',
+      secondary: '调整配置',
+      tertiary: state.rewardAdAvailable
+        ? {
+            label: state.rewardAdClaimed ? `已领 +${REWARD_AD_COIN_BONUS}` : '看广告领币',
+            disabled: state.rewardAdClaimed,
+            onPress: () => this.actions?.onClaimRewardAd(),
+          }
+        : undefined,
+      onPrimary: () => this.actions?.onResultNext(),
+      onSecondary: () => this.actions?.onResultAdjust(),
+    });
+  }
+
   showModal(spec: ModalSpec): void {
     this.modal = spec;
     this.draw();
@@ -1506,13 +1493,26 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.text(line, cx + cardW / 2, yy + rowH / 2, 14, C.textDim, 'center');
       yy += rowH;
     }
-    // 按钮行：次按钮（可选）左、主按钮右
+    // 按钮行：次按钮左 / 主按钮右；有 tertiary 时三列（次|主|第三）
     const by = cy + pad + titleH + spec.body.length * rowH + 10;
     const gap = 10;
-    if (spec.secondary) {
+    const bw3 = (cardW - 2 * pad - 2 * gap) / 3;
+    if (spec.secondary && spec.tertiary) {
+      this.button(cx + pad, by, bw3, btnH, 'modal-secondary', spec.secondary, {});
+      this.button(cx + pad + bw3 + gap, by, bw3, btnH, 'modal-primary', spec.primary, { primary: true });
+      this.button(cx + pad + 2 * (bw3 + gap), by, bw3, btnH, 'modal-tertiary', spec.tertiary.label, {
+        disabled: spec.tertiary.disabled,
+      });
+    } else if (spec.secondary) {
       const bw = (cardW - 2 * pad - gap) / 2;
       this.button(cx + pad, by, bw, btnH, 'modal-secondary', spec.secondary, {});
       this.button(cx + pad + bw + gap, by, bw, btnH, 'modal-primary', spec.primary, { primary: true });
+    } else if (spec.tertiary) {
+      const bw = (cardW - 2 * pad - gap) / 2;
+      this.button(cx + pad, by, bw, btnH, 'modal-primary', spec.primary, { primary: true });
+      this.button(cx + pad + bw + gap, by, bw, btnH, 'modal-tertiary', spec.tertiary.label, {
+        disabled: spec.tertiary.disabled,
+      });
     } else {
       this.button(cx + pad, by, cardW - 2 * pad, btnH, 'modal-primary', spec.primary, { primary: true });
     }

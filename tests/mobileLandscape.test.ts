@@ -318,7 +318,8 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const vp = { w: 932, h: 430 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(RESULT_STATE);
-    for (const id of ['result-adjust', 'result-next', 'reward-ad']) {
+    // F-META-5：Result 走结算 Modal（modal-secondary=调整配置 / modal-primary=下一场 / tertiary=广告）
+    for (const id of ['modal-secondary', 'modal-primary', 'modal-tertiary']) {
       const a = env.host.getHitAreasForTest().find((x) => x.id === id);
       expect(a, `应有 ${id}`).toBeTruthy();
       expect(a!.h, `${id} ≥48`).toBeGreaterThanOrEqual(48);
@@ -329,14 +330,13 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       expect(a!.y + a!.h, `${id} 不贴下缘`).toBeLessThanOrEqual(vp.h * 0.9);
     }
     // 两个主要决策并列（调整配置在左、下一场在右，同一行）
-    const adjust = env.host.getHitAreasForTest().find((x) => x.id === 'result-adjust')!;
-    const next = env.host.getHitAreasForTest().find((x) => x.id === 'result-next')!;
+    const adjust = env.host.getHitAreasForTest().find((x) => x.id === 'modal-secondary')!;
+    const next = env.host.getHitAreasForTest().find((x) => x.id === 'modal-primary')!;
     expect(Math.abs(adjust.y - next.y), '两决策同一行').toBeLessThanOrEqual(2);
     expect(next.x, '下一场在右').toBeGreaterThan(adjust.x + adjust.w);
+    // 点击派发（一次一个：Modal 关闭后按钮消失；next 派发由 canvasPlayerUIHost 用例覆盖）
     env.pointer(adjust.x + adjust.w / 2, adjust.y + adjust.h / 2);
-    env.pointer(next.x + next.w / 2, next.y + next.h / 2);
     expect(env.fired['resultAdjust']).toHaveLength(1);
-    expect(env.fired['next']).toHaveLength(1);
   });
 
   it('验收5｜HUD / READY / Matching / MatchPreview 渲染不抛且命中不越界', () => {
@@ -452,13 +452,18 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const infoMethod = src.slice(src.indexOf('private drawMatchInfo'), src.indexOf('private drawMatchBar'));
     expect(infoMethod).not.toMatch(/parts\.join/);
     expect(infoMethod).toContain('驱动 ·');
-    // 3) Result：统一中央单卡片（cardH 统一高度 + 两决策同卡）
-    const resultMethod = src.slice(src.indexOf('private drawMobileResult'), src.indexOf('private drawReadyOverlay'));
-    expect(resultMethod).toMatch(/const cardH = /);
-    expect(resultMethod).toContain("this.rect(cardX, cardY, cardW, cardH, '#141a26', C.border, 1)");
-    // 4) 三个方法内所有直接文本字号 ≥16（Matching/Result 必要文字）
+    // 3) F-META-5：Result 走结算 Modal（showResultModal）——胜/负 title + 奖励 body + 双决策
+    const resultModalIdx = src.indexOf('private showResultModal');
+    expect(resultModalIdx, 'showResultModal 存在').toBeGreaterThan(-1);
+    const resultMethod = src.slice(resultModalIdx, src.indexOf('showModal(spec: ModalSpec): void'));
+    expect(resultMethod).toContain("title: isWin ? '胜利' : '失败'");
+    expect(resultMethod).toContain('金币');
+    expect(resultMethod).toContain('获得');
+    expect(resultMethod).toContain("primary: '下一场'");
+    expect(resultMethod).toContain("secondary: '调整配置'");
+    // 4) 方法内所有直接文本字号 ≥16（Matching/MatchPreview 必要文字；Result 走 Modal 统一规格）
     const re = /this\.text\(([^)]*)\)/g;
-    for (const name of ['drawMatchingVs', 'drawMatchInfo', 'drawMobileResult']) {
+    for (const name of ['drawMatchingVs', 'drawMatchInfo']) {
       const start = src.indexOf(`private ${name}(`);
       const next = src.indexOf('\n  private ', start + 10);
       const body = src.slice(start, next === -1 ? src.length : next);

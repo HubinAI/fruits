@@ -153,25 +153,31 @@ describe('F-WX-4 CanvasPlayerUIHost', () => {
     expect(fired['merge']).toHaveLength(1);
   });
 
-  it('Result：点「下一场」→ onResultNext；点「调整配置」→ onResultAdjust', () => {
+  it('F-META-5｜Result Modal：点「下一场」→ onResultNext；点「调整配置」→ onResultAdjust', () => {
     host.render(RESULT_STATE);
-    click('result-next');
+    expect(host.getHitAreasForTest().some((a) => a.id === 'modal-primary'), '结算 Modal 出现').toBe(true);
+    click('modal-primary');
     expect(fired['next']).toHaveLength(1);
-    click('result-adjust');
+  });
+
+  it('F-META-5｜Result Modal：调整配置 → onResultAdjust（次按钮）', () => {
+    host.render(RESULT_STATE);
+    click('modal-secondary');
     expect(fired['resultAdjust']).toHaveLength(1);
   });
 
-  it('Result：广告可用时显示「看广告领」→ onClaimRewardAd', () => {
+  it('F-META-5｜Result Modal：广告可用时显示「看广告领」→ onClaimRewardAd（tertiary，不关闭）', () => {
     host.render(RESULT_STATE);
-    click('reward-ad');
+    click('modal-tertiary');
     expect(fired['reward']).toHaveLength(1);
+    expect(host.getHitAreasForTest().some((a) => a.id === 'modal-tertiary'), '广告按钮仍在（不关闭）').toBe(true);
   });
 
-  it('Result：广告不可用时不注册 reward-ad 命中区', () => {
+  it('F-META-5｜Result Modal：广告不可用时不注册 tertiary 命中区', () => {
     host.render({ ...RESULT_STATE, rewardAdAvailable: false });
     const ids = host.getHitAreasForTest().map((a) => a.id);
-    expect(ids).not.toContain('reward-ad');
-    expect(ids).toContain('result-next');
+    expect(ids).not.toContain('modal-tertiary');
+    expect(ids).toContain('modal-primary');
   });
 
   it('Matching：只画 VS，无命中区（纯表现）', () => {
@@ -341,7 +347,7 @@ describe('F-WX-5 CanvasPlayerUIHost mountCanvas（平台中立，无 DOM 容器�
     );
     // draw()：ended + result → 只画 Result（覆盖层独占），不再画 HUD
     expect(src).toMatch(
-      /if \(state\.result\) \{\s*\n\s*this\.drawResult\(state\);\s*\n\s*\} else \{\s*\n\s*if \(this\.lastFrame\) this\.drawHud\(this\.lastFrame\);/,
+      /if \(state\.result\) \{\s*\n\s*\/\/ F-META-5[^\n]*\n\s*if \(!this\.isMobile\) this\.drawResult\(state\);\s*\n\s*\} else \{\s*\n\s*if \(this\.lastFrame\) this\.drawHud\(this\.lastFrame\);/,
     );
   });
 });
