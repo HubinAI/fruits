@@ -17,6 +17,7 @@ import { Renderer } from '../src/render/renderer';
 import { VisualRegistry } from '../src/render/visualRegistry';
 import { registry } from '../src/core/content';
 import { makeStarterDraft, buildSnapshotFromDraft } from '../src/lab/buildEditorModel';
+import { computeMobileGarageLayout } from '../src/ui/mobileGarageLayout';
 import type { CanvasSurface } from '../src/render/canvasSurface';
 
 function makeStubCtx(): CanvasRenderingContext2D {
@@ -46,14 +47,9 @@ function makeEnv(vp: { w: number; h: number }, dpr: number) {
 
 /** 与 CanvasHost.getPreviewFramingRect 同几何的 Garage 左侧展示区（F-WX-RCA-3A：
  *  底部独立使用 safe bottom，不再由右侧 CTA 决定） */
+/** F-WX-UI-F1：车辆取景区直接来自唯一布局源（insets=0 测试夹具）；不再手算重复几何 */
 function garageFramingRect(vp: { w: number; h: number }): { x: number; y: number; w: number; h: number } {
-  const topH = 34;
-  const panelX = 10 + Math.round(vp.w * 0.57) + 12;
-  const showX = 10;
-  const showW = Math.max(200, panelX - 12 - showX);
-  const bodyTop = topH + 14;
-  const bodyBot = vp.h - 16; // insets=0（测试夹具）下的 safe bottom 独立取值
-  return { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
+  return computeMobileGarageLayout(vp, { left: 0, right: 0, top: 0, bottom: 0 }).vehicleRect;
 }
 
 /** 抓取最后一个指定前缀日志的 JSON 主体（同一帧可能有 garage+battle 两条 [WX-RCA]） */

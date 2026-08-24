@@ -16,6 +16,7 @@
  */
 import { platform } from '../platform';
 import type { SafeInsets } from '../platform/types';
+import { computeMobileGarageLayout, type Rect } from './mobileGarageLayout';
 import { registry } from '../core/content';
 import {
   buildSnapshotFromDraft,
@@ -670,73 +671,57 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private drawMobileGarageDock(state: PlayerUIState): void {
     const draft = state.draft;
     if (!draft) return;
-    const uL = this.insL;
-    const uR = this.insR;
-    const uT = this.insT;
-    const uB = this.insB;
-    const usableW = Math.max(240, this.W - uL - uR);
-    const topH = 34;
-    const ctaH = 56;
-    const ctaBottomGap = 16;
-    // 区域几何（只使用中央 80~85% 安全区，左右极边缘只留安全边距）
-    const ctaY = this.H - uB - ctaBottomGap - ctaH;
-    const panelX = uL + 10 + Math.round(usableW * 0.57) + 12; // 展示区 ~57% → 面板左缘
-    const panelR = Math.max(panelX + 200, this.W - uR - 10);
-    const panelW = panelR - panelX;
-    const ctaW = Math.min(300, Math.max(220, panelW));
-    const ctaX = panelR - ctaW;
-    const bodyTop = uT + topH + 14;
-    const bodyBot = ctaY - 14;
-    const bodyH = Math.max(120, bodyBot - bodyTop);
+    // F-WX-UI-F1：唯一布局源——绘制 / HitArea / Preview Camera 全部读取同一份结果，
+    // 禁止在此手算 topBar/vehicle/panel/cta 区域（几何规则见 computeMobileGarageLayout）
+    const layout = computeMobileGarageLayout(
+      { w: this.W, h: this.H },
+      { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
+    );
+    const { topBarRect, panelRect, ctaRect } = layout;
 
     // 顶栏（只信息，不放主要操作）
-    this.drawMobileTopBar(state, draft, uL, uT, usableW, topH);
+    this.drawMobileTopBar(state, draft, topBarRect);
 
     // 主 CTA（唯一最大）+ 首轮引导气泡 + 非法原因
-    this.button(ctaX, ctaY, ctaW, ctaH, 'cta-find', state.draftValid ? '寻找对手' : '配置不合法', {
+    this.button(ctaRect.x, ctaRect.y, ctaRect.w, ctaRect.h, 'cta-find', state.draftValid ? '寻找对手' : '配置不合法', {
       primary: true,
       disabled: !state.draftValid,
     });
     if (!state.draftValid && state.blockReason) {
-      this.text(state.blockReason, ctaX, ctaY - 8, 14, C.red, 'right', 600);
+      this.text(state.blockReason, ctaRect.x, ctaRect.y - 8, 14, C.red, 'right', 600);
     } else if (state.onboarding === 'pending') {
       // 首轮引导：CTA 上方局部气泡（不横贯屏幕）
-      const bw = Math.min(240, ctaW - 20);
-      this.rect(ctaX + ctaW - bw - 10, ctaY - 30, bw, 22, C.onboardBg, C.onboardBorder, 1);
-      this.text('准备好了，去找个对手', ctaX + ctaW - 16, ctaY - 17, 14, C.onboardText, 'right');
+      const bw = Math.min(240, ctaRect.w - 20);
+      this.rect(ctaRect.x + ctaRect.w - bw - 10, ctaRect.y - 30, bw, 22, C.onboardBg, C.onboardBorder, 1);
+      this.text('准备好了，去找个对手', ctaRect.x + ctaRect.w - 16, ctaRect.y - 17, 14, C.onboardText, 'right');
     }
 
-    // 装配面板（右侧中央）
-    this.rect(panelX, bodyTop, panelW, bodyH, C.dockBg, C.border, 1);
-    const py = bodyTop + 10;
-    const pH = bodyH - 20;
+    // 装配面板（右侧中央；绘制与 HitArea 均基于 panelRect）
+    this.rect(panelRect.x, panelRect.y, panelRect.w, panelRect.h, C.dockBg, C.border, 1);
+    const py = panelRect.y + 10;
+    const pH = panelRect.h - 20;
     if (this.mergeOpen) {
-      this.drawGaragePanelMerge(state, draft, panelX, panelW, py);
+      this.drawGaragePanelMerge(state, draft, panelRect.x, panelRect.w, py);
     } else if (state.garageSelected) {
-      this.drawGaragePanelOptions(state, draft, panelX, panelW, py, pH);
+      this.drawGaragePanelOptions(state, draft, panelRect.x, panelRect.w, py, pH);
     } else if (this.panelView === 'wheelPick') {
-      this.drawGaragePanelWheelPick(draft, panelX, panelW, py, pH);
+      this.drawGaragePanelWheelPick(draft, panelRect.x, panelRect.w, py, pH);
     } else if (this.panelView === 'weaponPick') {
-      this.drawGaragePanelWeaponPick(draft, panelX, panelW, py, pH);
+      this.drawGaragePanelWeaponPick(draft, panelRect.x, panelRect.w, py, pH);
     } else {
-      this.drawGaragePanelHome(draft, panelX, panelW, py, pH);
+      this.drawGaragePanelHome(draft, panelRect.x, panelRect.w, py, pH);
     }
   }
 
-  /** 顶栏：金币 · 段位 · 能量（单行 ≤42 高，只信息） */
-  private drawMobileTopBar(
-    state: PlayerUIState,
-    draft: BuildDraft,
-    uL: number,
-    uT: number,
-    usableW: number,
-    topH: number,
-  ): void {
+  /** 顶栏：金币 · 段位 · 能量（单行 ≤42 高，只信息；区域来自唯一布局源 topBarRect） */
+  private drawMobileTopBar(state: PlayerUIState, draft: BuildDraft, topBarRect: Rect): void {
     const p = state.progress;
     const tier = tierOf(p.rating);
     const body = registry.bodies.get(draft.bodyDefId);
-    const x0 = uL + 10;
-    const w = Math.max(200, usableW - 20);
+    const x0 = topBarRect.x;
+    const w = topBarRect.w;
+    const uT = topBarRect.y;
+    const topH = topBarRect.h;
     this.rect(x0 - 4, uT, w + 8, topH, 'rgba(8,10,14,0.72)', C.border, 1);
     this.text(`金币 ${p.coin}`, x0, uT + topH / 2 + 5, 15, C.gold, 'left', 700);
     this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, x0 + 150, uT + topH / 2 + 5, 14, C.textDim);
@@ -928,20 +913,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (!this.isMobile) return null;
     const state = this.lastState;
     if (!state || state.playerPhase !== 'garage' || state.battleState !== 'editing') return null;
-    const uL = this.insL;
-    const uR = this.insR;
-    const uT = this.insT;
-    const uB = this.insB;
-    const usableW = Math.max(240, this.W - uL - uR);
-    const topH = 34;
-    const panelX = uL + 10 + Math.round(usableW * 0.57) + 12;
-    const showX = uL + 10;
-    const showW = Math.max(200, panelX - 12 - showX);
-    const bodyTop = uT + topH + 14;
-    // F-WX-RCA-3A：左侧车辆展示区底部独立使用 safe bottom（不再由右侧 CTA 的 ctaY 决定——
-    // 右侧面板/CTA 高度变化不再压缩车辆取景区）
-    const bodyBot = this.H - uB - 16;
-    return { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
+    // F-WX-UI-F1：车辆取景区 = 唯一布局源 vehicleRect（与绘制/HitArea 完全同一份结果）
+    return computeMobileGarageLayout(
+      { w: this.W, h: this.H },
+      { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
+    ).vehicleRect;
   }
 
 

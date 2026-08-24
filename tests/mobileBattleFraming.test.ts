@@ -13,6 +13,7 @@ import { Renderer } from '../src/render/renderer';
 import { VisualRegistry } from '../src/render/visualRegistry';
 import { registry } from '../src/core/content';
 import { makeStarterDraft, buildSnapshotFromDraft } from '../src/lab/buildEditorModel';
+import { computeMobileGarageLayout } from '../src/ui/mobileGarageLayout';
 import type { CanvasSurface } from '../src/render/canvasSurface';
 import type { RenderVehicle } from '../src/battle/battleContract';
 import { bindPlatformCore } from '../src/platform/context';
@@ -144,15 +145,9 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
       const r = new Renderer(canvas, new VisualRegistry(), surface);
       const snap = o.getRenderSnapshot();
       r.resize(snap.arena.width, o.arena.config.height);
-      // framingRect = 左侧展示区（与 CanvasHost.getPreviewFramingRect 同几何：
-      // F-WX-RCA-3A：展示区 ~57% 屏宽，顶部 34+14，底部独立 safe bottom（不随右侧 CTA）
-      const topH = 34;
-      const panelX = 10 + Math.round(vp.w * 0.57) + 12;
-      const showX = 10;
-      const showW = Math.max(200, panelX - 12 - showX);
-      const bodyTop = topH + 14;
-      const bodyBot = vp.h - 16; // insets=0 夹具下的 safe bottom 独立取值
-      const framingRect = { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
+      // framingRect = 唯一布局源 vehicleRect（F-WX-UI-F1：与 CanvasHost.getPreviewFramingRect 同源，
+      // insets=0 夹具；不再手算重复几何）
+      const framingRect = computeMobileGarageLayout({ w: vp.w, h: vp.h }, { left: 0, right: 0, top: 0, bottom: 0 }).vehicleRect;
       r.reframe(snap, 'previewSolo', { framingRect });
       // coreBounds（Body+Wheels）= Garage 主尺度验收口径；envelope 仅作完整入画校验
       const core = vehicleScreenBounds(snap.vehicleA, r.transform, false);
@@ -218,14 +213,8 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
         const r = new Renderer(canvas, new VisualRegistry(), surface);
         const snap = o.getRenderSnapshot();
         r.resize(snap.arena.width, o.arena.config.height);
-        // F-WX-RCA-3A framingRect：展示区 ~57% 屏宽、顶部 34+14、底部独立 safe bottom
-        const topH = 34;
-        const panelX = 10 + Math.round(w * 0.57) + 12;
-        const showX = 10;
-        const showW = Math.max(200, panelX - 12 - showX);
-        const bodyTop = topH + 14;
-        const bodyBot = h - 16;
-        const framingRect = { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
+        // F-WX-UI-F1：唯一布局源 vehicleRect（多 Body 用例；insets=0）
+        const framingRect = computeMobileGarageLayout({ w, h }, { left: 0, right: 0, top: 0, bottom: 0 }).vehicleRect;
         r.reframe(snap, 'previewSolo', { framingRect });
         const d = r.scaleDiagnostics(snap);
         // core 完整入画（screen 为物理 px → /dpr 换算逻辑 px 判定）
