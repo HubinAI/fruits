@@ -95,6 +95,21 @@ const ZERO_INSETS: SafeInsets = { left: 0, right: 0, top: 0, bottom: 0 };
 type MetaPage = 'garage' | 'backpack' | 'more';
 
 /**
+ * F-META-6：设置偏好持久化 key（platform.storage，值 '1'/'0'）。
+ * 仅保存 UI preference——当前 Runtime 无音效/震动设置接口，不得借此扩大战斗架构。
+ */
+const PREF_SOUND_KEY = 'pref.sound';
+const PREF_VIBRATION_KEY = 'pref.vibration';
+
+/** F-META-6：More 页未来功能入口（只做入口，不做业务；前三者统一弹「功能开发中」） */
+const MORE_ENTRIES: Array<{ id: string; label: string; sub: string }> = [
+  { id: 'more:task', label: '任务', sub: '敬请期待' },
+  { id: 'more:shop', label: '商店', sub: '敬请期待' },
+  { id: 'more:pass', label: '战令', sub: '敬请期待' },
+  { id: 'more:settings', label: '设置', sub: '音效/震动' },
+];
+
+/**
  * F-META-4：通用 Modal Frame 规格（轻量 UI Foundation，不接具体业务逻辑）。
  * - 居中卡片：标题区 + 内容行 + 主按钮 + 可选次按钮 + 全屏遮罩（拦截底层点击）。
  * - 关闭后重绘恢复当前页面；按钮回调由调用方提供（最小 API，无全局 Modal Manager）。
@@ -134,6 +149,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private panelView: 'home' | 'wheelPick' | 'weaponPick' | 'options' = 'home';
   /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机） */
   private metaPage: MetaPage = 'garage';
+  /** F-META-6：More 页子视图（功能卡主页 / 设置子页；UI-only，不进 Gameplay） */
+  private moreView: 'home' | 'settings' = 'home';
+  /** F-META-6：音效开关（UI preference；Runtime 无音效设置接口 → 仅持久化，不接音频） */
+  private soundOn = true;
+  /** F-META-6：震动开关（预留；UI preference 持久化，不接平台震动 API） */
+  private vibrationOn = true;
   /** F-META-3：Backpack 分类过滤（全部/武器/功能件；UI-only，不做复杂筛选） */
   private backpackFilter: 'all' | 'weapon' | 'gadget' = 'all';
   /** F-META-4：当前激活的 Modal（null = 无）；覆盖绘制 + 拦截底层点击，关闭恢复当前页 */
@@ -147,7 +168,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** F-WX-8-B：Mobile 合成面板展开态（点击「合成」次级入口后展开；确认才派发 onMerge） */
   private mergeOpen = false;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {}
+  constructor(private readonly canvas: HTMLCanvasElement) {
+    // F-META-6：读取偏好（platform.storage 无存储环境静默降级为默认开；值 '0' = 关）
+    this.soundOn = platform.storage.getItem(PREF_SOUND_KEY) !== '0';
+    this.vibrationOn = platform.storage.getItem(PREF_VIBRATION_KEY) !== '0';
+  }
 
   setActions(actions: PlayerUIActions): void {
     this.actions = actions;
@@ -213,6 +238,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (state.playerPhase !== 'garage') this.metaPage = 'garage';
     // F-META-3：离开局外同时复位 Backpack 分类（回 Garage 默认全部）
     if (state.playerPhase !== 'garage') this.backpackFilter = 'all';
+    // F-META-6：离开局外同时复位 More 子视图（回 Garage 默认功能卡主页）
+    if (state.playerPhase !== 'garage') this.moreView = 'home';
     // F-META-5：Result 状态 → 一次性弹出正式结算 Modal（奖励信息单弹窗集中；
     // 广告领币后 rewardAdClaimed 变化 → 刷新弹窗文案；result 清空 → 复位）
     if (state.result) {
@@ -298,6 +325,42 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.panelView = 'home';
       this.panelScroll = 0;
       this.mergeOpen = false;
+      this.moreView = 'home'; // F-META-6：离开 More 复位子视图（下次进入默认功能卡主页）
+      this.draw();
+      return;
+    }
+    if (id.startsWith('more:')) {
+      // F-META-6：More 未来功能入口——任务/商店/战令统一弹「功能开发中」；设置进设置子页
+      if (id === 'more:settings') {
+        this.moreView = 'settings';
+        this.draw();
+      } else {
+        const label = MORE_ENTRIES.find((e) => e.id === id)?.label ?? '';
+        this.showModal({
+          title: '功能开发中',
+          body: [`「${label}」功能正在建设中`, '敬请期待后续版本'],
+          primary: '知道了',
+        });
+      }
+      return;
+    }
+    if (id === 'settings-back') {
+      // F-META-6：设置子页返回（UI-only）
+      this.moreView = 'home';
+      this.draw();
+      return;
+    }
+    if (id === 'settings-sound') {
+      // F-META-6：音效开关（仅保存 UI preference，不接 Runtime 音频——当前无音效设置接口）
+      this.soundOn = !this.soundOn;
+      platform.storage.setItem(PREF_SOUND_KEY, this.soundOn ? '1' : '0');
+      this.draw();
+      return;
+    }
+    if (id === 'settings-vibration') {
+      // F-META-6：震动开关（预留；仅保存 UI preference）
+      this.vibrationOn = !this.vibrationOn;
+      platform.storage.setItem(PREF_VIBRATION_KEY, this.vibrationOn ? '1' : '0');
       this.draw();
       return;
     }
@@ -933,12 +996,69 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.button(c.x + 12, mergeY, Math.min(200, c.w - 24), mergeH, 'merge', '合成', { sub: '更多' });
   }
 
-  /** F-META-1：more MetaPage——占位页（不新增真正商店/任务逻辑） */
+  /**
+   * F-META-6：more MetaPage——未来功能入口预留（只做入口，不做业务）：
+   * - 主页：2×2 功能卡（任务/商店/战令/设置；前三者统一弹「功能开发中」Modal）；
+   * - 设置子页：音效/震动开关（仅保存 UI preference，不扩大战斗架构）。
+   * 所有预留入口集中在 More，不散落到 Garage/Backpack。
+   */
   private drawMorePage(layout: MobileGarageLayout): void {
     const c = layout.contentRect;
     this.rect(c.x, c.y, c.w, c.h, C.dockBg, C.border, 1);
     this.text('更多', c.x + 12, c.y + 22, 20, C.text, 'left', 700);
-    this.text('设置与更多功能开发中', c.x + 12, c.y + 56, 14, C.textDim);
+    if (this.moreView === 'settings') {
+      this.drawMoreSettings(c);
+    } else {
+      this.drawMoreEntries(c);
+    }
+  }
+
+  /** F-META-6：More 主页——2×2 功能卡（填充内容区；触控 ≥48；只注册入口命中） */
+  private drawMoreEntries(c: Rect): void {
+    const pad = 12;
+    const gap = 10;
+    const areaTop = c.y + 36; // 标题「更多」下方
+    const areaH = Math.max(0, c.y + c.h - areaTop - pad);
+    const cardW = Math.floor((c.w - pad * 2 - gap) / 2);
+    const cardH = Math.max(MIN_TOUCH_H, Math.floor((areaH - gap) / 2));
+    for (let i = 0; i < MORE_ENTRIES.length; i++) {
+      const e = MORE_ENTRIES[i];
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      this.button(c.x + pad + col * (cardW + gap), areaTop + row * (cardH + gap), cardW, cardH, e.id, e.label, {
+        sub: e.sub,
+      });
+    }
+  }
+
+  /** F-META-6：More 设置子页——返回 + 音效/震动开关行（整行可点 ≥48；右侧开关指示） */
+  private drawMoreSettings(c: Rect): void {
+    // 返回按钮（左上；标题「设置」同行右侧）
+    this.button(c.x + 12, c.y + 6, 96, MIN_TOUCH_H, 'settings-back', '‹ 返回', {});
+    this.text('设置', c.x + 120, c.y + 30, 20, C.text, 'left', 700);
+    const rows: Array<{ id: string; label: string; sub: string; on: boolean }> = [
+      { id: 'settings-sound', label: '音效', sub: '战斗与界面音效', on: this.soundOn },
+      { id: 'settings-vibration', label: '震动', sub: '战斗震动（预留）', on: this.vibrationOn },
+    ];
+    const rowX = c.x + 12;
+    const rowW = c.w - 24;
+    const rowH = TARGET_TOUCH_H;
+    const rowGap = 10;
+    let y = c.y + 6 + MIN_TOUCH_H + 12;
+    for (const r of rows) {
+      this.rect(rowX, y, rowW, rowH, C.panel, C.border, 1);
+      this.text(r.label, rowX + 12, y + rowH / 2 - 8, 17, C.text, 'left', 600);
+      this.text(r.sub, rowX + 12, y + rowH / 2 + 12, 14, C.textDim, 'left');
+      // 右侧开关指示（命中整行：触控 ≥52；active = 开）
+      const swW = 56;
+      const swH = 30;
+      const swX = rowX + rowW - swW - 12;
+      const swY = y + (rowH - swH) / 2;
+      this.rect(swX, swY, swW, swH, r.on ? C.blue : C.border, C.blueBright, 1);
+      this.text(r.on ? '开' : '关', swX + swW / 2, swY + swH / 2, 14, r.on ? C.white : C.textDim, 'center', 600);
+      this.hit(r.id, rowX, y, rowW, rowH);
+      y += rowH + rowGap;
+    }
   }
 
   /** 顶栏：当前页面标题 · 金币 · 段位 · 能量（单行 ≤42 高，只信息；区域来自唯一布局源 topBarRect） */
