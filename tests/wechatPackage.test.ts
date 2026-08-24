@@ -95,4 +95,23 @@ describe('F-WX-7 微信工程目录（可直接导入）', () => {
     // SHA 来自 virtual:runtime-info 构建期注入，非手写
     expect(entry).toContain('runtimeInfo.sha.slice(0, 7)');
   });
+
+  it('F-WX-P0-INPUT｜DEV-only Input Trace：__WX_DEBUG__ 默认 false（PROD 零日志），WECHAT_DEBUG_INPUT=1 构建注入 true', () => {
+    // 构建配置：define __WX_DEBUG__ 默认 false，环境变量可开
+    const cfg = read('vite.wechat.config.ts');
+    expect(cfg).toContain('__WX_DEBUG__');
+    expect(cfg).toContain('WECHAT_DEBUG_INPUT');
+    // 输入层有 [WX-INPUT] 诊断日志（raw/viewport/converted）
+    const input = read('src/platform/wechat/input.ts');
+    expect(input).toContain('[WX-INPUT] raw');
+    expect(input).toContain('[WX-INPUT] converted');
+    // Host 有 ui/layout/hit 命中诊断
+    const host = read('src/ui/canvasPlayerUIHost.ts');
+    expect(host).toContain('[WX-INPUT] hit');
+    expect(host).toContain('HIT:');
+    expect(host).toContain('MISS');
+    // Host 输入转换收敛到单一 screenToLayoutPoint（禁止各按钮自行修坐标）
+    expect(host).toContain('screenToLayoutPoint');
+    expect(host).toMatch(/private screenToLayoutPoint\(x: number, y: number\)/);
+  });
 });

@@ -176,20 +176,28 @@ describe('F-WX-2 Platform Core', () => {
     expect(got).toEqual([45, 50]);
   });
 
-  it('PlatformInput：WeChat bindPointer 经 wx.onTouchStart 回传坐标', () => {
+  it('PlatformInput：WeChat bindPointer 经 wx.onTouchStart 回传 **Viewport Logical** 坐标（归一化契约）', () => {
     let onTouch: ((e: unknown) => void) | null = null;
+    let sys = { pixelRatio: 2, windowWidth: 844, windowHeight: 390 }; // 可变：逻辑/物理坐标系
     (globalThis as Record<string, unknown>).wx = {
+      getSystemInfoSync: () => sys,
       onTouchStart: (cb: (e: unknown) => void) => {
         onTouch = cb;
       },
     };
     const wxInput = new WechatInput();
     let got: [number, number] | null = null;
-    wxInput.bindPointer({} as EventTarget, (x, y) => {
+    // target = uiCanvas（物理 1688×780 = 844×390 × dpr2）；windowWidth=844（逻辑）→ 比例 1
+    wxInput.bindPointer({ width: 1688, height: 780 } as unknown as EventTarget, (x, y) => {
       got = [x, y];
     });
-    onTouch!({ touches: [{ clientX: 320, clientY: 240 }] });
-    expect(got).toEqual([320, 240]);
+    // 场景 A：raw 是窗口逻辑 px（clientX ∈ [0,844]，windowWidth=844 同坐标系）→ 比例 1
+    onTouch!({ touches: [{ clientX: 422, clientY: 195 }] });
+    expect(got).toEqual([422, 195]);
+    // 场景 B：raw 是物理 px（clientX ∈ [0,1688]，windowWidth=1688 同物理坐标系）→ 归一化 844/1688
+    sys = { pixelRatio: 2, windowWidth: 1688, windowHeight: 780 };
+    onTouch!({ touches: [{ clientX: 844, clientY: 390 }] });
+    expect(got).toEqual([422, 195]);
   });
 
   it('createWebCore / createWechatCore 组装合法 PlatformCore', () => {

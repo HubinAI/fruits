@@ -73,10 +73,13 @@ export default defineConfig({
   // F-WX-5：IIFE 格式下 vite 会把 import.meta 替换为 {}（env 信息丢失 → env.ts 兜底成 dev）。
   // 微信正式玩家版本必须是 production 语义（DEV_TOOLS_VISIBLE=false / ANALYTICS_DEV=false /
   // ads PROD 路径）；显式 define 注入，与 Web production 构建行为一致。
+  // F-WX-P0-INPUT：__WX_DEBUG__ 默认 false（PROD 零诊断日志）；WECHAT_DEBUG_INPUT=1 构建
+  // 时为 true（输出 [WX-INPUT] 触摸诊断，供微信开发者工具定位坐标/命中）。
   define: {
     'import.meta': JSON.stringify({
       env: { MODE: 'production', DEV: false, PROD: true },
     }),
+    __WX_DEBUG__: process.env.WECHAT_DEBUG_INPUT ? 'true' : 'false',
   },
   plugins: [
     runtimeInfoPlugin(),

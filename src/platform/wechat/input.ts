@@ -1,10 +1,27 @@
 import type { PlatformInput } from '../types';
 
 /**
- * 微信输入后端：
- * - bindClick：无 DOM UI（Player UI 未移植 DOM）→ 安全 no-op；
- * - bindPointer：Canvas 命中输入走 wx.onTouchStart（F-WX-4 CanvasPlayerUIHost 入口）。
+ * F-WX-P0-INPUT｜微信输入后端——Viewport Logical Coordinates Contract。
+ *
+ * 契约：PlatformInput 输出 **Viewport Logical Coordinates**（x ∈ [0, viewportLogicalWidth]，
+ * y ∈ [0, viewportLogicalHeight]），与 CanvasPlayerUIHost 的布局空间（canvas.width/pixelRatio）
+ * 同一体系；CanvasPlayerUIHost 不感知 physical pixel / devicePixelRatio / 微信原始坐标差异。
+ *
+ * 归一化（不硬编码 /2 /3 /机型比例）：
+ *   logicalX = rawX × logicalViewportWidth / rawCoordinateWidth
+ *   logicalY = rawY × logicalViewportHeight / rawCoordinateHeight
+ * 微信小游戏 touch clientX/clientY 官方语义 = 窗口逻辑 px（与 windowWidth/Height 同体系），
+ * 此时 rawCoordinateWidth == logicalViewportWidth → 比例 1 直接使用；
+ * 若某平台/模拟器返回物理 px（rawCoordinateWidth == 物理宽），比例自动归一化到逻辑空间。
+ *
+ * DEV-only Input Trace（__WX_DEBUG__ = true，WECHAT_DEBUG_INPUT=1 构建注入）：
+ * 每次真实触摸输出 [WX-INPUT] raw / viewport / canvas / converted 结构化日志；
+ * PROD 构建 __WX_DEBUG__=false → 零日志。
+ *
+ * 事件生命周期：wx.onTouchStart 一次触摸 → 一次 handler 调用 → 一次 action（无 touchend 二次派发）。
  */
+const isDebug = typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__ === true;
+
 export class WechatInput implements PlatformInput {
   private get wx(): any {
     return (globalThis as any).wx;
@@ -14,12 +31,36 @@ export class WechatInput implements PlatformInput {
     // 微信侧无 DOM UI；占位 no-op
   }
 
-  bindPointer(_target: EventTarget, handler: (x: number, y: number) => void): void {
+  bindPointer(target: EventTarget, handler: (x: number, y: number) => void): void {
     const wx = this.wx;
     if (!wx || typeof wx.onTouchStart !== 'function') return;
     wx.onTouchStart((e: any) => {
       const t = e && e.touches && e.touches[0];
-      if (t) handler(t.clientX, t.clientY);
+      if (!t) return;
+      const rawX = typeof t.clientX === 'number' ? t.clientX : (t.pageX ?? 0);
+      const rawY = typeof t.clientY === 'number' ? t.clientY : (t.pageY ?? 0);
+      const sys = wx.getSystemInfoSync ? wx.getSystemInfoSync() : null;
+      const pixelRatio = (sys && sys.pixelRatio) || 1;
+      const windowWidth = (sys && sys.windowWidth) || 0;
+      const windowHeight = (sys && sys.windowHeight) || 0;
+      const el = target as { width?: number; height?: number };
+      // target = uiCanvas（F-WX-P0 已显式同步 screenCanvas 物理尺寸）→ 逻辑视口宽高
+      const logicalVW = (el.width ?? 0) / Math.max(pixelRatio, 1);
+      const logicalVH = (el.height ?? 0) / Math.max(pixelRatio, 1);
+      // Viewport Logical Coordinates 归一化（比例防御，不硬编码）
+      const logicalX = rawX * (logicalVW / Math.max(windowWidth, 1));
+      const logicalY = rawY * (logicalVH / Math.max(windowHeight, 1));
+      if (isDebug) {
+        // eslint-disable-next-line no-console
+        console.log('[WX-INPUT] raw', JSON.stringify({ clientX: t.clientX, clientY: t.clientY, pageX: t.pageX, pageY: t.pageY }));
+        // eslint-disable-next-line no-console
+        console.log('[WX-INPUT] viewport', JSON.stringify({ windowWidth, windowHeight, pixelRatio }));
+        // eslint-disable-next-line no-console
+        console.log('[WX-INPUT] canvas', JSON.stringify({ screenCanvasW: el.width, screenCanvasH: el.height, uiCanvasW: el.width, uiCanvasH: el.height }));
+        // eslint-disable-next-line no-console
+        console.log('[WX-INPUT] converted', JSON.stringify({ logicalX: +logicalX.toFixed(2), logicalY: +logicalY.toFixed(2) }));
+      }
+      handler(logicalX, logicalY);
     });
   }
 }

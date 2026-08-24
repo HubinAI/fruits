@@ -70,7 +70,9 @@ function makeFakeWx() {
   const screenCanvas = makeStubCanvas(750, 1334, drawImages);
   const uiCanvas = makeStubCanvas(750, 1334);
   const wx = {
-    getSystemInfoSync: () => ({ pixelRatio: 2, windowWidth: 750, windowHeight: 1334 }),
+    // F-WX-P0-INPUT：真实微信坐标语义——windowWidth/Height 是逻辑 px（= canvas.width/pixelRatio）。
+    // fake canvas 750×1334 物理（dpr=2）→ 逻辑 375×667；保持与 WechatInput 归一化（比例=1）一致。
+    getSystemInfoSync: () => ({ pixelRatio: 2, windowWidth: 375, windowHeight: 667 }),
     createCanvas: () => {
       createCount++;
       return createCount === 1 ? screenCanvas : uiCanvas;
@@ -130,12 +132,16 @@ function toPhysical(canvas: HTMLCanvasElement, dpr: number, lx: number, ly: numb
 describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     delete (globalThis as any).wx;
     delete (globalThis as any).localStorage;
   });
 
   it('完整玩家闭环 + 触摸输入 + 微信存储 + 后台/前台 + 再战（验收 2/3/6）', async () => {
     vi.useFakeTimers();
+    // F-WX-P0-INPUT：固定随机对手（pickOpponentForTier 用 Math.random）——避免特定
+    // 对手组合战斗超 1600 tick 兜底导致非确定性失败（852 全量回归实测偶发）。
+    vi.spyOn(Math, 'random').mockReturnValue(0.42);
     const fake = makeFakeWx();
     (globalThis as any).wx = fake.wx;
     delete (globalThis as any).localStorage; // 全程无 Web storage 可用 → 任何 Web fallback 都会失败

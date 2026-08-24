@@ -192,15 +192,41 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   // ---------- 输入 → Action ----------
+  /**
+   * F-WX-P0-INPUT：Viewport Logical → Layout 的**唯一**转换点。
+   * 输入 = viewport logical coordinates（PlatformInput 契约，x∈[0,cssW] y∈[0,cssH]）；
+   * 输出 = 布局坐标（hitAreas 注册空间）。禁止各按钮自行修坐标。
+   */
+  private screenToLayoutPoint(x: number, y: number): { x: number; y: number } {
+    return { x: (x - this.ox) / this.scale, y: (y - this.oy) / this.scale };
+  }
+
   private handlePointer(x: number, y: number): void {
-    const lx = (x - this.ox) / this.scale;
-    const ly = (y - this.oy) / this.scale;
+    const p = this.screenToLayoutPoint(x, y);
+    const lx = p.x;
+    const ly = p.y;
     for (let i = this.hitAreas.length - 1; i >= 0; i--) {
       const a = this.hitAreas[i];
       if (lx >= a.x && lx <= a.x + a.w && ly >= a.y && ly <= a.y + a.h) {
+        if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
+          // eslint-disable-next-line no-console
+          console.log('[WX-INPUT] ui', JSON.stringify({ cssW: this.cssW, cssH: this.cssH, profile: this.profile.mode, scale: this.scale, ox: this.ox, oy: this.oy, insets: this.insets }));
+          // eslint-disable-next-line no-console
+          console.log('[WX-INPUT] layout', JSON.stringify({ logicalX: +x.toFixed(2), logicalY: +y.toFixed(2), layoutX: +lx.toFixed(2), layoutY: +ly.toFixed(2) }));
+          // eslint-disable-next-line no-console
+          console.log('[WX-INPUT] hit', `HIT:${a.id}`, JSON.stringify({ x: a.x, y: a.y, w: a.w, h: a.h }));
+        }
         this.dispatch(a.id);
         return;
       }
+    }
+    if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
+      // eslint-disable-next-line no-console
+      console.log('[WX-INPUT] ui', JSON.stringify({ cssW: this.cssW, cssH: this.cssH, profile: this.profile.mode, scale: this.scale, ox: this.ox, oy: this.oy, insets: this.insets }));
+      // eslint-disable-next-line no-console
+      console.log('[WX-INPUT] layout', JSON.stringify({ logicalX: +x.toFixed(2), logicalY: +y.toFixed(2), layoutX: +lx.toFixed(2), layoutY: +ly.toFixed(2) }));
+      // eslint-disable-next-line no-console
+      console.log('[WX-INPUT] hit', 'MISS');
     }
   }
 
