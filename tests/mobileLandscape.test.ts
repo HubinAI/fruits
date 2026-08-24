@@ -166,7 +166,8 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       const env = makeHost(vp, LANDSCAPE_INSETS);
       env.host.render(richGarageState()); // 富库存+金币：merge 可点（非禁用态才注册命中）
       // 主分类（2×2）：车身/轮子/驱动/武器——不暴露 frontWheel/rearWheel/武器位一级入口
-      const ids = ['cta-find', 'merge', 'entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons'];
+      // F-META-2：Garage 职责纯化——首屏无合成（合成在 Backpack），只 2×2 主分类 + CTA
+      const ids = ['cta-find', 'entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons'];
       for (const id of ids) {
         const a = env.host.getHitAreasForTest().find((x) => x.id === id);
         expect(a, `${vp.w}×${vp.h} 应有 ${id}`).toBeTruthy();
@@ -196,10 +197,9 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       for (const id of ['entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons']) {
         expect(entries, `${vp.w}×${vp.h} 应含一级入口 ${id}`).toContain(id);
       }
-      // 「寻找对手」唯一最大主按钮：宽 > 合成入口、高 ≥52、距 safe bottom ≥16
+      // 「寻找对手」唯一最大主按钮：高 ≥52、距 safe bottom ≥16（Garage 无合成入口可比较）
       const cta = env.host.getHitAreasForTest().find((x) => x.id === 'cta-find')!;
-      const merge = env.host.getHitAreasForTest().find((x) => x.id === 'merge')!;
-      expect(cta.w, 'CTA 宽 > 合成入口宽').toBeGreaterThan(merge.w);
+      expect(env.host.getHitAreasForTest().some((x) => x.id === 'merge'), 'Garage 首屏无合成入口').toBe(false);
       expect(cta.h, 'CTA 高 ≥52').toBeGreaterThanOrEqual(52);
       expect(vp.h - LANDSCAPE_INSETS.bottom - (cta.y + cta.h), 'CTA 距 safe bottom ≥16').toBeGreaterThanOrEqual(16);
     }

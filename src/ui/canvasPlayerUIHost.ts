@@ -717,25 +717,20 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /** F-META-1：Main 导航行——车库/背包/更多 tab（garage 页第 4 位为合成次级入口） */
+  /** F-META-1/2：Main 导航行——车库/背包/更多 tab（三页恒等，合成已移到 Backpack 页内） */
   private drawMainNav(layout: MobileGarageLayout): void {
     const { navRect } = layout;
-    const showMerge = this.metaPage === 'garage';
     const tabs: Array<{ id: string; label: string }> = [
       { id: 'nav:garage', label: '车库' },
       { id: 'nav:backpack', label: '背包' },
       { id: 'nav:more', label: '更多' },
     ];
     const gap = 8;
-    const n = showMerge ? 4 : 3;
-    const tabW = Math.floor((navRect.w - gap * (n - 1)) / n);
+    const tabW = Math.floor((navRect.w - gap * (tabs.length - 1)) / tabs.length);
     let x = navRect.x;
     for (const t of tabs) {
       this.button(x, navRect.y, tabW, navRect.h, t.id, t.label, { active: this.metaPage === t.id.slice(4) });
       x += tabW + gap;
-    }
-    if (showMerge) {
-      // 合成次级入口（导航行末位；点击展开合成面板，确认才 onMerge）
-      this.button(x, navRect.y, navRect.x + navRect.w - x, navRect.h, 'merge', '合成', { sub: '更多' });
     }
   }
 
@@ -757,13 +752,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.text('准备好了，去找个对手', ctaRect.x + ctaRect.w - 16, ctaRect.y - 17, 14, C.onboardText, 'right');
     }
 
-    // 装配面板（右侧中央；绘制与 HitArea 均基于 panelRect）
+    // 装配面板（右侧中央；绘制与 HitArea 均基于 panelRect；F-META-2：Garage 无合成，
+    // 只处理配置——选中槽选项 / 轮子二级 / 武器二级 / 2×2 主分类）
     this.rect(panelRect.x, panelRect.y, panelRect.w, panelRect.h, C.dockBg, C.border, 1);
     const py = panelRect.y + 10;
     const pH = panelRect.h - 20;
-    if (this.mergeOpen) {
-      this.drawGaragePanelMerge(state, draft, panelRect.x, panelRect.w, py);
-    } else if (state.garageSelected) {
+    if (state.garageSelected) {
       this.drawGaragePanelOptions(state, draft, panelRect.x, panelRect.w, py, pH);
     } else if (this.panelView === 'wheelPick') {
       this.drawGaragePanelWheelPick(draft, panelRect.x, panelRect.w, py, pH);
@@ -774,11 +768,20 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /** F-META-1：backpack MetaPage——玩家部件库存展示（纯读 inventory，不新增商店/任务逻辑） */
+  /**
+   * F-META-1/2：backpack MetaPage——玩家部件库存展示 + 合成（Garage 职责规整后，
+   * 合成只存在于 Backpack；点击「合成」展开面板，确认才 onMerge——规则仍在 runtime）。
+   */
   private drawBackpackPage(state: PlayerUIState, layout: MobileGarageLayout): void {
+    const draft = state.draft;
     const c = layout.contentRect;
     this.rect(c.x, c.y, c.w, c.h, C.dockBg, C.border, 1);
     this.text('背包', c.x + 12, c.y + 22, 20, C.text, 'left', 700);
+    if (this.mergeOpen && draft) {
+      // 合成面板（内容区顶部；确认/关闭按钮）
+      this.drawGaragePanelMerge(state, draft, c.x, c.w, c.y + 8);
+      return;
+    }
     this.text('我拥有的部件', c.x + 12, c.y + 46, 14, C.textDim);
     const inv = state.inventory;
     const cols = 2;
@@ -792,13 +795,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const row = Math.floor(idx / cols);
       const x = c.x + 12 + col * (cardW + gap);
       const y = c.y + 58 + row * (cardH + gap);
-      if (y + cardH > c.y + c.h - 8) break; // 面板内不溢出（只读展示，无点击）
+      if (y + cardH > c.y + c.h - 46) break; // 底部给合成入口留位（只读展示，无点击）
       this.rect(x, y, cardW, cardH, C.panel, C.border, 1);
       this.text(pp, x + 10, y + cardH / 2 - 6, 16, C.text, 'left', 600);
       this.text(`×${count}`, x + cardW - 10, y + cardH / 2 - 6, 16, C.gold, 'right', 700);
       idx++;
     }
     if (idx === 0) this.text('暂无部件', c.x + 12, c.y + 80, 14, C.textDim);
+    // 底部：合成次级入口（触控 ≥48；点击展开合成面板）
+    const mergeH = Math.max(MIN_TOUCH_H, 48);
+    const mergeY = c.y + c.h - mergeH - 8;
+    this.button(c.x + 12, mergeY, Math.min(200, c.w - 24), mergeH, 'merge', '合成', { sub: '更多' });
   }
 
   /** F-META-1：more MetaPage——占位页（不新增真正商店/任务逻辑） */

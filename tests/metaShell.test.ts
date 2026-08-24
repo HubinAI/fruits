@@ -5,7 +5,7 @@ import { bindPlatformCore } from '../src/platform/context';
 import { createWebCore } from '../src/platform/web';
 import { makeStarterDraft } from '../src/lab/buildEditorModel';
 import { registry } from '../src/core/content';
-import { getInventory } from '../src/core/partInventory';
+import { getInventory, OFFICIAL_PARTS } from '../src/core/partInventory';
 import type { SafeInsets } from '../src/platform/types';
 import type { PlayerUIState } from '../src/ui/playerUI';
 
@@ -94,6 +94,13 @@ function garageState(over: Partial<PlayerUIState> = {}): PlayerUIState {
 
 const INSETS: SafeInsets = { left: 44, right: 20, top: 12, bottom: 16 };
 
+/** 富库存：每类部件 1★×2 + 2★×1，金币 600——合成可确认（merge-confirm 非禁用态才注册命中） */
+function richState(): PlayerUIState {
+  const inv: Record<string, { one: number; two: number }> = {};
+  for (const p of OFFICIAL_PARTS) inv[p] = { one: 2, two: 1 };
+  return garageState({ inventory: inv as never, progress: { coin: 600, rating: 20 } });
+}
+
 describe('F-META-1｜Main UI Shell', () => {
   it('验收1｜三个 MetaPage 可切换：garage → backpack → more → garage', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
@@ -102,16 +109,17 @@ describe('F-META-1｜Main UI Shell', () => {
     // garage 页：2×2 主分类 + CTA + 合成入口 + 三个 nav tab
     expect(env.areas().some((a) => a.id === 'entry:body'), 'garage 页有车身入口').toBe(true);
     expect(env.areas().some((a) => a.id === 'cta-find'), 'garage 页有 CTA').toBe(true);
-    expect(env.areas().some((a) => a.id === 'merge'), 'garage 页有合成次级入口').toBe(true);
+    expect(env.areas().some((a) => a.id === 'merge'), 'F-META-2：Garage 无合成入口').toBe(false);
+    expect(env.areas().some((a) => a.id === 'merge-close'), 'Garage 无合成面板').toBe(false);
     for (const id of ['nav:garage', 'nav:backpack', 'nav:more']) {
       expect(env.areas().some((a) => a.id === id), `应有 ${id}`).toBe(true);
     }
-    // 点「背包」→ backpack 页：无 garage 专属（entry/cta/merge），仍有三 nav
+    // 点「背包」→ backpack 页：无 garage 专属（entry/cta），有合成入口（F-META-2），仍有三 nav
     const navBp = env.areas().find((a) => a.id === 'nav:backpack')!;
     env.pointer(navBp.x + navBp.w / 2, navBp.y + navBp.h / 2);
     expect(env.areas().some((a) => a.id === 'entry:body'), 'backpack 页无车身入口').toBe(false);
     expect(env.areas().some((a) => a.id === 'cta-find'), 'backpack 页无 CTA').toBe(false);
-    expect(env.areas().some((a) => a.id === 'merge'), 'backpack 页无合成入口').toBe(false);
+    expect(env.areas().some((a) => a.id === 'merge'), 'backpack 页有合成入口（合成只存在于 Backpack）').toBe(true);
     expect(env.areas().some((a) => a.id === 'nav:garage'), 'backpack 页仍有车库 tab').toBe(true);
     // 点「更多」→ more 页
     const navMore = env.areas().find((a) => a.id === 'nav:more')!;
@@ -143,21 +151,29 @@ describe('F-META-1｜Main UI Shell', () => {
     expect(navG2.h, 'backpack 页 nav 高不变').toBe(layout.navRect.h);
   });
 
-  it('验收3｜Garage 现有功能不回归：改部件入口 + 合成面板仍可用', () => {
+  it('验收3｜Garage 职责纯化（只配置/开战，无合成）；Backpack 合成面板可用', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
-    env.host.render(garageState());
-    // 点车身 → onToggleGarageSlot 语义（entry:body 存在即可点；actions mock 空——验证 hitArea 存在）
+    env.host.render(richState());
+    // Garage 只处理配置：2×2 入口 + CTA 可用
     const entry = env.areas().find((a) => a.id === 'entry:body')!;
     expect(entry.h, '入口高 ≥48').toBeGreaterThanOrEqual(48);
-    // 点合成（nav 行第 4 位）→ 合成面板展开（merge-close 出现）
+    expect(env.areas().some((a) => a.id === 'cta-find'), 'Garage 有 CTA').toBe(true);
+    expect(env.areas().some((a) => a.id === 'merge' || a.id === 'merge-close' || a.id === 'merge-confirm'), 'Garage 无任何合成痕迹').toBe(false);
+    // Backpack：合成入口 → 展开面板 → 关闭
+    const navBp = env.areas().find((a) => a.id === 'nav:backpack')!;
+    env.pointer(navBp.x + navBp.w / 2, navBp.y + navBp.h / 2);
     const merge = env.areas().find((a) => a.id === 'merge')!;
     expect(merge.h, '合成入口高 ≥48').toBeGreaterThanOrEqual(48);
     env.pointer(merge.x + merge.w / 2, merge.y + merge.h / 2);
-    expect(env.areas().some((a) => a.id === 'merge-close'), '合成面板展开').toBe(true);
-    // 关闭合成面板
+    expect(env.areas().some((a) => a.id === 'merge-close'), 'Backpack 合成面板展开').toBe(true);
+    expect(env.areas().some((a) => a.id === 'merge-confirm'), 'Backpack 合成确认按钮出现').toBe(true);
     const close = env.areas().find((a) => a.id === 'merge-close')!;
     env.pointer(close.x + close.w / 2, close.y + close.h / 2);
     expect(env.areas().some((a) => a.id === 'merge-close'), '合成面板关闭').toBe(false);
+    // 回 Garage：仍无合成（页面切换复位）
+    const navGarage = env.areas().find((a) => a.id === 'nav:garage')!;
+    env.pointer(navGarage.x + navGarage.w / 2, navGarage.y + navGarage.h / 2);
+    expect(env.areas().some((a) => a.id === 'merge' || a.id === 'merge-close'), '回 Garage 仍无合成').toBe(false);
   });
 
   it('验收4｜Battle 状态不残留局外导航；回 Garage 默认回车库页', () => {

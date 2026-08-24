@@ -17,7 +17,7 @@ import { createWebCore } from '../src/platform/web';
 import { createWechatCore } from '../src/platform/wechat';
 import { makeStarterDraft } from '../src/lab/buildEditorModel';
 import { registry } from '../src/core/content';
-import { getInventory } from '../src/core/partInventory';
+import { getInventory, OFFICIAL_PARTS } from '../src/core/partInventory';
 import type { PlayerUIState } from '../src/ui/playerUI';
 import type { SafeInsets } from '../src/platform/types';
 
@@ -162,16 +162,14 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
       it(`DPR=${dpr} ${vp.w}×${vp.h}：raw 逻辑坐标 → 归一化 → 命中同一 id（F-WX-UI-1 中央面板）`, () => {
         const env = setup(vp, dpr);
         env.host.render(garageState());
-        for (const id of ['cta-find', 'entry:body', 'entry-wheels', 'entry-weapons', 'merge']) {
+        // F-META-2：Garage 无合成入口（合成在 Backpack）；本循环只验证 garage 页交互
+        for (const id of ['cta-find', 'entry:body', 'entry-wheels', 'entry-weapons']) {
           const area = env.areas().find((a) => a.id === id);
           expect(area, `${vp.w}×${vp.h} DPR=${dpr} 应有 ${id}`).toBeTruthy();
           const raw = rawFor(area!, vp, dpr, false); // raw = window logical px
           env.fireTouch(raw.rawX, raw.rawY);
           if (id === 'cta-find') {
             expect(env.fired['find'], `DPR=${dpr} ${id} 应派发 find`).toHaveLength(1);
-          } else if (id === 'merge') {
-            expect(env.fired['merge'] ?? []).toHaveLength(0); // Mobile merge 展开面板（非直接合成）
-            expect(env.areas().some((a) => a.id === 'merge-close')).toBe(true); // 合成面板已展开
           } else if (id === 'entry-wheels') {
             // 轮子一级 → 面板内前轮/后轮二级（首屏不暴露 frontWheel/rearWheel 入口）
             expect(env.areas().some((a) => a.id === 'wheel-side:front')).toBe(true);
@@ -267,5 +265,32 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
     env.fireTouch(10, 10); // 左上角空白（顶部状态条区域无按钮命中）
     const dispatched = Object.keys(env.fired).filter((k) => env.fired[k].length > 0);
     expect(dispatched).toHaveLength(0);
+  });
+
+  it('F-META-2｜Backpack 合成流程：garage 无合成 → 切背包 → 点合成展开面板（真实坐标链命中）', () => {
+    const vp = { w: 844, h: 390 };
+    const env = setup(vp, 2);
+    // 富库存（合成可确认——merge-confirm 非禁用态才注册命中）
+    const inv: Record<string, { one: number; two: number }> = {};
+    for (const p of OFFICIAL_PARTS) inv[p] = { one: 2, two: 1 };
+    env.host.render(garageState({ inventory: inv as never, progress: { coin: 600, rating: 20 } }));
+    // Garage 页无任何合成入口/面板
+    expect(env.areas().some((a) => a.id === 'merge' || a.id === 'merge-close')).toBe(false);
+    // 点导航「背包」→ backpack 页（nav 按钮真实坐标命中）
+    const navBp = env.areas().find((a) => a.id === 'nav:backpack')!;
+    const rawNav = rawFor(navBp, vp, 2, false);
+    env.fireTouch(rawNav.rawX, rawNav.rawY);
+    const merge = env.areas().find((a) => a.id === 'merge')!;
+    expect(merge, 'backpack 页有合成入口').toBeTruthy();
+    // 点合成 → 合成面板展开（merge-close 出现）
+    const rawMerge = rawFor(merge, vp, 2, false);
+    env.fireTouch(rawMerge.rawX, rawMerge.rawY);
+    expect(env.areas().some((a) => a.id === 'merge-close'), '合成面板展开').toBe(true);
+    expect(env.areas().some((a) => a.id === 'merge-confirm'), '合成确认按钮出现').toBe(true);
+    // 关闭 → 面板消失
+    const close = env.areas().find((a) => a.id === 'merge-close')!;
+    const rawClose = rawFor(close, vp, 2, false);
+    env.fireTouch(rawClose.rawX, rawClose.rawY);
+    expect(env.areas().some((a) => a.id === 'merge-close'), '合成面板关闭').toBe(false);
   });
 });
