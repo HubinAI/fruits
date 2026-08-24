@@ -32,7 +32,7 @@ import { getCount, canEquipPart, equippedDefIds, OFFICIAL_PARTS } from '../core/
 import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/playerProgress';
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { BODY_OPTIONS, WHEEL_OPTIONS, encodePartVal } from './playerUI';
-import { resolveLayoutProfile, TARGET_TOUCH_H, MIN_TOUCH_H, type LayoutProfile } from './layoutProfile';
+import { resolveLayoutProfile, type LayoutProfile } from './layoutProfile';
 import type {
   PlayerUIHost,
   PlayerUIState,
@@ -161,7 +161,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private scale = 1;
   private ox = 0;
   private oy = 0;
-  private profile: LayoutProfile = { mode: 'desktop', baseW: BASE_W, baseH: BASE_H };
+  private profile: LayoutProfile = {
+    mode: 'desktop',
+    baseW: BASE_W,
+    baseH: BASE_H,
+    fontScale: 1,
+    minTouchH: 48,
+    targetTouchH: 52,
+  };
   private insets: SafeInsets = { ...ZERO_INSETS };
   private hitAreas: HitArea[] = [];
   private lastState: PlayerUIState | null = null;
@@ -453,7 +460,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id === 'panel-scroll-up' || id === 'panel-scroll-down') {
-      const step = Math.round(TARGET_TOUCH_H * 1.6);
+      const step = Math.round(this.targetTouchH * 1.6);
       this.panelScroll += id === 'panel-scroll-up' ? -step : step;
       if (this.panelScroll < 0) this.panelScroll = 0;
       this.draw();
@@ -600,8 +607,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.canvas.height = Math.round(h * dpr);
     }
     // F-WX-6：布局 Profile——Desktop 保持 1280×720 整体 fit；Compact Mobile 逻辑 px scale=1
+    // F-WX-MOBILE-RCA-1：mobile-short（logicalH<260）→ 更薄 TopBar/更紧凑触控/字体 ×0.8
     this.profile = resolveLayoutProfile(this.cssW, this.cssH);
-    if (this.profile.mode === 'mobile') {
+    if (this.isMobile) {
       this.scale = 1;
       this.ox = 0;
       this.oy = 0;
@@ -625,7 +633,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
 
   // ---------- 布局坐标辅助（Desktop=1280×720 逻辑；Mobile=视口逻辑 px） ----------
   private get isMobile(): boolean {
-    return this.profile.mode === 'mobile';
+    return this.profile.mode === 'desktop' ? false : true;
+  }
+  /** F-WX-MOBILE-RCA-1：short 档（logicalH<260）——更紧凑触控/字号/布局 */
+  private get isShort(): boolean {
+    return this.profile.mode === 'mobile-short';
+  }
+  /** 主触控目标最小高度（short 36 / normal 48；由 availableH 反推不足时以布局为准） */
+  private get minTouchH(): number {
+    return this.profile.minTouchH;
+  }
+  /** 主触控目标高度（short 40 / normal 52） */
+  private get targetTouchH(): number {
+    return this.profile.targetTouchH;
+  }
+  /** 字体 scale（short 0.8 / 其余 1.0）——统一经 text() 应用，禁止页面自行除 0.8 */
+  private get fontScale(): number {
+    return this.profile.fontScale;
   }
   private get W(): number {
     return this.isMobile ? this.cssW : BASE_W;
@@ -674,8 +698,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     weight = 400,
   ): void {
     const ctx = this.ctx;
+    // F-WX-MOBILE-RCA-1：字体统一经 fontScale（mobile-short ×0.8）缩放，禁止页面自行除 0.8
+    const fs = Math.max(8, size * this.fontScale * this.scale);
     ctx.fillStyle = color;
-    ctx.font = `${weight} ${Math.max(8, size * this.scale)}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
+    ctx.font = `${weight} ${fs}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
     ctx.textAlign = align;
     ctx.textBaseline = 'middle';
     ctx.fillText(s, this.ox + x * this.scale, this.oy + y * this.scale);
@@ -860,9 +886,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (!draft) return;
     // F-WX-UI-F1：唯一布局源——绘制 / HitArea / Preview Camera 全部读取同一份结果，
     // 禁止在此手算 topBar/vehicle/panel/cta 区域（几何规则见 computeMobileGarageLayout）
+    // F-WX-MOBILE-RCA-1：布局只基于 logical viewport + profile（DPR 不参与）
     const layout = computeMobileGarageLayout(
       { w: this.W, h: this.H },
       { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
+      this.profile,
     );
 
     // 顶部轻量状态栏（金币/段位/能量；只信息，不放主要操作；F-META-UX1：无页面大标题）
@@ -910,11 +938,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 装配面板（右侧中央；绘制与 HitArea 均基于 panelRect；F-META-2：Garage 无合成，
     // 只处理配置——选中槽选项 / 轮子二级 / 武器二级 / 2×2 主分类）
     this.rect(panelRect.x, panelRect.y, panelRect.w, panelRect.h, C.dockBg, C.border, 1);
-    // F-META-UX1：面板底部预留次级入口行（背包/更多，48 高），内容区在其上方
-    const subH = MIN_TOUCH_H;
-    const subGap = 8;
-    const py = panelRect.y + 10;
-    const pH = panelRect.h - 20 - subH - subGap;
+    // F-META-UX1：面板底部预留次级入口行（背包/更多），内容区在其上方；
+    // F-WX-MOBILE-RCA-1：short 档更紧凑（padY/gap 缩小，内容区由 availableH 反推）
+    const subH = this.isShort ? 28 : this.minTouchH;
+    const subGap = this.isShort ? 6 : 8;
+    const padY = this.isShort ? 6 : 10;
+    const py = panelRect.y + padY;
+    const pH = Math.max(1, panelRect.h - 2 * padY - subH - subGap);
     if (state.garageSelected) {
       this.drawGaragePanelOptions(state, draft, panelRect.x, panelRect.w, py, pH);
     } else if (this.panelView === 'wheelPick') {
@@ -939,12 +969,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const c = layout.contentRect;
     this.rect(c.x, c.y, c.w, c.h, C.dockBg, C.border, 1);
     // F-META-UX1：顶部「← 返回车库」（唯一返回入口，禁止恢复全局 Tab）
-    this.button(c.x + 12, c.y + 6, 96, MIN_TOUCH_H, 'nav:garage', '‹ 返回车库', {});
+    this.button(c.x + 12, c.y + 6, 96, this.minTouchH, 'nav:garage', '‹ 返回车库', {});
     this.text('背包', c.x + 120, c.y + 30, 20, C.text, 'left', 700);
     // 分类 tabs：全部 / 武器 / 功能件（简单分类，不做复杂筛选系统；位于返回行下方）
-    const tabH = 44;
+    // F-WX-MOBILE-RCA-1：short 档更紧凑（tabH 30 / 偏移随返回按钮高 / gaps 4）
+    const tabH = this.isShort ? 30 : 44;
     const tabGap = 8;
-    const tabTop = c.y + 62;
+    const tabTop = c.y + 6 + this.minTouchH + (this.isShort ? 4 : 8);
     const tabs: Array<{ id: string; label: string; v: 'all' | 'weapon' | 'gadget' }> = [
       { id: 'bfilter:all', label: '全部', v: 'all' },
       { id: 'bfilter:weapon', label: '武器', v: 'weapon' },
@@ -957,9 +988,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       tx += tabW + tabGap;
     }
     // 库存列表（已拥有 = one/two > 0 或 已装备；未拥有不占列表）
-    const listTop = tabTop + tabH + 6;
-    const mergeH = Math.max(MIN_TOUCH_H, 48);
-    const listBot = c.y + c.h - mergeH - 8;
+    const listTop = tabTop + tabH + (this.isShort ? 4 : 6);
+    const mergeH = this.isShort ? 32 : Math.max(this.minTouchH, 48);
+    const listBot = c.y + c.h - mergeH - (this.isShort ? 4 : 8);
     const inv = state.inventory;
     const equipped = new Set(equippedDefIds(draft));
     const items: Array<{ defId: string; name: string; one: number; two: number; equipped: boolean }> = [];
@@ -974,17 +1005,25 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       if (this.backpackFilter === 'gadget' && cat !== 'gadget') continue;
       items.push({ defId: pp, name: def?.name ?? pp, one, two, equipped: eq });
     }
-    const cardH = 52;
+    const cardH = this.isShort ? 28 : 52;
     const cardGap = 6;
-    const viewH = Math.max(40, listBot - listTop);
+    const viewH = Math.max(8, listBot - listTop);
     const contentH = items.length * (cardH + cardGap) - cardGap;
     const maxScroll = Math.max(0, contentH - viewH);
     if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
     const btnColX = c.x + c.w - 12 - 56; // 右侧按钮列（列表项宽度让出，不重叠）
     const itemW = c.w - 24 - 64;
+    // 滚动按钮列——高度受列表可视区约束（F-WX-MOBILE-RCA-1：short 极限屏不溢出；
+    // 空间不足时退化为单个「▼」，再不足则不显示）
     if (maxScroll > 0) {
-      this.button(btnColX, listTop, 56, TARGET_TOUCH_H, 'panel-scroll-up', '▲');
-      this.button(btnColX, listTop + TARGET_TOUCH_H + 8, 56, TARGET_TOUCH_H, 'panel-scroll-down', '▼');
+      const btnH = Math.min(this.targetTouchH, Math.floor((viewH - 6) / 2));
+      if (btnH >= 16) {
+        this.button(btnColX, listTop, 56, btnH, 'panel-scroll-up', '▲');
+        this.button(btnColX, listTop + btnH + 6, 56, btnH, 'panel-scroll-down', '▼');
+      } else if (viewH >= 20) {
+        const singleH = Math.min(this.targetTouchH, viewH);
+        this.button(btnColX, listTop, 56, singleH, 'panel-scroll-down', '▼');
+      }
     }
     const ctx = this.ctx;
     ctx.save();
@@ -1038,19 +1077,22 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     // F-META-UX1：顶部「← 返回车库」（唯一返回入口，禁止恢复全局 Tab）
-    this.button(c.x + 12, c.y + 6, 96, MIN_TOUCH_H, 'nav:garage', '‹ 返回车库', {});
+    this.button(c.x + 12, c.y + 6, 96, this.minTouchH, 'nav:garage', '‹ 返回车库', {});
     this.text('更多', c.x + 120, c.y + 30, 20, C.text, 'left', 700);
     this.drawMoreEntries(c);
   }
 
-  /** F-META-6：More 主页——2×2 功能卡（填充内容区；触控 ≥48；只注册入口命中） */
+  /** F-META-6：More 主页——2×2 功能卡（填充内容区；只注册入口命中；
+   *  F-WX-MOBILE-RCA-1：short 档 cardH 由 availableH 反推，normal ≥48） */
   private drawMoreEntries(c: Rect): void {
     const pad = 12;
     const gap = 10;
-    const areaTop = c.y + 62; // 顶部「← 返回车库」行下方
+    const areaTop = c.y + 6 + this.minTouchH + (this.isShort ? 6 : 8); // 顶部「← 返回车库」行下方
     const areaH = Math.max(0, c.y + c.h - areaTop - pad);
     const cardW = Math.floor((c.w - pad * 2 - gap) / 2);
-    const cardH = Math.max(MIN_TOUCH_H, Math.floor((areaH - gap) / 2));
+    const cardH = this.isShort
+      ? Math.max(8, Math.floor((areaH - gap) / 2))
+      : Math.max(this.minTouchH, Math.floor((areaH - gap) / 2));
     for (let i = 0; i < MORE_ENTRIES.length; i++) {
       const e = MORE_ENTRIES[i];
       const col = i % 2;
@@ -1064,7 +1106,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** F-META-6：More 设置子页——返回 + 音效/震动开关行（整行可点 ≥48；右侧开关指示） */
   private drawMoreSettings(c: Rect): void {
     // 返回按钮（左上；标题「设置」同行右侧）
-    this.button(c.x + 12, c.y + 6, 96, MIN_TOUCH_H, 'settings-back', '‹ 返回', {});
+    this.button(c.x + 12, c.y + 6, 96, this.minTouchH, 'settings-back', '‹ 返回', {});
     this.text('设置', c.x + 120, c.y + 30, 20, C.text, 'left', 700);
     const rows: Array<{ id: string; label: string; sub: string; on: boolean }> = [
       { id: 'settings-sound', label: '音效', sub: '战斗与界面音效', on: this.soundOn },
@@ -1072,9 +1114,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ];
     const rowX = c.x + 12;
     const rowW = c.w - 24;
-    const rowH = TARGET_TOUCH_H;
+    const rowH = this.targetTouchH;
     const rowGap = 10;
-    let y = c.y + 6 + MIN_TOUCH_H + 12;
+    let y = c.y + 6 + this.minTouchH + 12;
     for (const r of rows) {
       this.rect(rowX, y, rowW, rowH, C.panel, C.border, 1);
       this.text(r.label, rowX + 12, y + rowH / 2 - 8, 17, C.text, 'left', 600);
@@ -1151,12 +1193,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ];
     const gap = 8;
     const cellW = (pw - gap) / 2;
-    // F-WX-UI-2A/F-META-1：2×2 大卡片尽量取满 TARGET_TOUCH_H；矮面板时动态收缩（≥MIN）。
-    // F-META-UX1：面板底部为「背包/更多」次级入口行（drawGarageSubEntries），本区高度已预留。
-    const cellH = Math.max(
-      MIN_TOUCH_H,
-      Math.min(TARGET_TOUCH_H, Math.floor((ph - gap) / 2)),
-    );
+    // F-WX-UI-2A/F-META-1：2×2 大卡片尽量取满 targetTouchH；矮面板时动态收缩。
+    // F-WX-MOBILE-RCA-1：short 档由 availableH 纯反推（不机械坚持 36，防溢出）；normal 保持 ≥48。
+    const cellH = this.isShort
+      ? Math.max(8, Math.floor((ph - gap) / 2))
+      : Math.max(this.minTouchH, Math.min(this.targetTouchH, Math.floor((ph - gap) / 2)));
     for (let i = 0; i < 4; i++) {
       const col = i % 2;
       const row = Math.floor(i / 2);
@@ -1168,8 +1209,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
 
   /** 面板返回条（轮子/武器/选项二级顶部） */
   private drawPanelBackRow(px: number, py: number): number {
-    this.button(px, py, 96, TARGET_TOUCH_H, 'panel-back', '‹ 返回', {});
-    return py + TARGET_TOUCH_H + 8;
+    this.button(px, py, 96, this.targetTouchH, 'panel-back', '‹ 返回', {});
+    return py + this.targetTouchH + 8;
   }
 
   /** 轮子二级：前轮 / 后轮（一级「轮子」后才出现） */
@@ -1185,7 +1226,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const front = defs.find((d) => d.key === 'frontWheel');
     const rear = defs.find((d) => d.key === 'rearWheel');
     const gap = 8;
-    const h = TARGET_TOUCH_H;
+    const h = this.targetTouchH;
     if (y + h > py + ph) return;
     this.button(px, y, pw, h, 'wheel-side:front', '前轮', { sub: front?.value ?? '?' });
     if (y + h * 2 + gap > py + ph) return;
@@ -1205,7 +1246,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       (d) => d.key !== 'body' && d.key !== 'rearWheel' && d.key !== 'frontWheel' && d.key !== 'drive',
     );
     const gap = 8;
-    const h = TARGET_TOUCH_H;
+    const h = this.targetTouchH;
     let yy = y;
     for (const s of funcSlots) {
       if (yy + h > py + ph) break; // 面板内不溢出
@@ -1229,7 +1270,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const opts = this.garageOptions(state, slot);
     const curVal = this.garageCurrentValue(draft, slot);
     const gap = 8;
-    const cardH = TARGET_TOUCH_H;
+    const cardH = this.targetTouchH;
     const colW = (pw - gap) / 2;
     const rows = Math.ceil(opts.length / 2);
     const contentH = rows * (cardH + gap) - gap;
@@ -1237,8 +1278,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const maxScroll = Math.max(0, contentH - viewH);
     if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
     if (maxScroll > 0) {
-      this.button(px, py + ph - TARGET_TOUCH_H, 60, TARGET_TOUCH_H, 'panel-scroll-up', '▲');
-      this.button(px + 68, py + ph - TARGET_TOUCH_H, 60, TARGET_TOUCH_H, 'panel-scroll-down', '▼');
+      this.button(px, py + ph - this.targetTouchH, 60, this.targetTouchH, 'panel-scroll-up', '▲');
+      this.button(px + 68, py + ph - this.targetTouchH, 60, this.targetTouchH, 'panel-scroll-down', '▼');
     }
     const ctx = this.ctx;
     ctx.save();
@@ -1318,6 +1359,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return computeMobileGarageLayout(
       { w: this.W, h: this.H },
       { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
+      this.profile,
     ).vehicleRect;
   }
 
@@ -1489,7 +1531,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
 
   private drawMatchBar(): void {
     const bw = this.isMobile ? Math.min(180, this.W * 0.32) : 200;
-    const bh = this.isMobile ? TARGET_TOUCH_H : 48;
+    const bh = this.isMobile ? this.targetTouchH : 48;
     const y = this.H - (this.isMobile ? this.insB + 12 : 64) - bh;
     this.button(this.W / 2 - bw - 8, y, bw, bh, 'match-adjust', '调整配置');
     this.button(this.W / 2 + 8, y, bw, bh, 'match-start', '开始战斗', { primary: true });
@@ -1657,7 +1699,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /**
    * F-META-4：Modal 覆盖层绘制——全屏遮罩（拦截底层）+ 居中卡片（标题/内容/按钮）。
    * F-META-UX4：内容支持三层结构——body 文字行 + rewardRows 奖励行（label 左/value 右着色）
-   * + partCard 独立部件卡；卡片高度按实际内容自适应（621×351 等小屏内合法）。
+   * + partCard 独立部件卡。
+   * F-WX-MOBILE-RCA-1：卡片必须完整落在 safe area——short 极限屏下行高自适应压缩、
+   * cy 取「居中」与「safe 内」的交集（宁可顶到 safeTop 也不溢出）。
    */
   private drawModal(spec: ModalSpec): void {
     const W = this.W;
@@ -1665,27 +1709,21 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 全屏遮罩（先注册 → 逆序命中时被卡片按钮覆盖；底层按钮被拦截不可点）
     this.rect(0, 0, W, H, C.overlayBg);
     this.hit('modal-veil', 0, 0, W, H);
-    // 居中卡片（尺寸自适应：标题 + 内容 + 按钮）
+    // 居中卡片（尺寸自适应：标题 + 内容 + 按钮；short 档整体紧凑，保证 safe 内完整）
     const cardW = Math.min(420, W - this.insL - this.insR - 40);
-    const rowH = 22;
-    const rewardRowH = 26;
-    const titleH = 40;
-    const btnH = TARGET_TOUCH_H;
-    const pad = 16;
-    const partH = spec.partCard ? 58 : 0;
-    const partGap = spec.partCard && (spec.body.length > 0 || (spec.rewardRows?.length ?? 0) > 0) ? 8 : 0;
-    const cardH =
-      pad +
-      titleH +
-      spec.body.length * rowH +
-      (spec.rewardRows?.length ?? 0) * rewardRowH +
-      partH +
-      partGap +
-      10 +
-      btnH +
-      pad;
-    const cx = Math.max(8, (W - cardW) / 2);
-    const cy = Math.max(8, (H - cardH) / 2);
+    const rewardRowH = this.isShort ? 14 : 26;
+    const titleH = this.isShort ? 24 : 40;
+    const btnH = this.isShort ? Math.min(this.targetTouchH, 36) : this.targetTouchH;
+    const pad = this.isShort ? 10 : 16;
+    const partH = spec.partCard ? (this.isShort ? 32 : 58) : 0;
+    const partGap = spec.partCard && (spec.body.length > 0 || (spec.rewardRows?.length ?? 0) > 0) ? (this.isShort ? 4 : 8) : 0;
+    // 固定部分高（不含 body 行）——body 行高在剩余空间内自适应（short 极限屏不溢出）
+    const fixedH = pad + titleH + (spec.rewardRows?.length ?? 0) * rewardRowH + partH + partGap + (this.isShort ? 4 : 10) + btnH + pad;
+    const availBodyH = H - this.insT - this.insB - fixedH;
+    const rowH = spec.body.length > 0 ? Math.max(12, Math.min(22, availBodyH / spec.body.length)) : 22;
+    const cardH = fixedH + spec.body.length * rowH;
+    const cx = Math.max(this.insL, Math.min((W - cardW) / 2, W - this.insR - cardW));
+    const cy = Math.max(this.insT, Math.min((H - cardH) / 2, H - this.insB - cardH));
     this.rect(cx, cy, cardW, cardH, C.dockBg, C.border, 1);
     // ① 顶部：标题（胜利/失败）
     this.text(spec.title, cx + cardW / 2, cy + pad + titleH / 2, 20, C.text, 'center', 700);
