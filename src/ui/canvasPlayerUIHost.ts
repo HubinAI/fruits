@@ -934,13 +934,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const uB = this.insB;
     const usableW = Math.max(240, this.W - uL - uR);
     const topH = 34;
-    const ctaH = 56;
-    const ctaY = this.H - uB - 16 - ctaH;
     const panelX = uL + 10 + Math.round(usableW * 0.57) + 12;
     const showX = uL + 10;
     const showW = Math.max(200, panelX - 12 - showX);
     const bodyTop = uT + topH + 14;
-    const bodyBot = ctaY - 14;
+    // F-WX-RCA-3A：左侧车辆展示区底部独立使用 safe bottom（不再由右侧 CTA 的 ctaY 决定——
+    // 右侧面板/CTA 高度变化不再压缩车辆取景区）
+    const bodyBot = this.H - uB - 16;
     return { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
   }
 

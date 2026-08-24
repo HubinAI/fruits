@@ -145,21 +145,19 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
       const snap = o.getRenderSnapshot();
       r.resize(snap.arena.width, o.arena.config.height);
       // framingRect = 左侧展示区（与 CanvasHost.getPreviewFramingRect 同几何：
-      // 展示区 ~57% 屏宽，顶部 34+14，底部 CTA 56+16）
+      // F-WX-RCA-3A：展示区 ~57% 屏宽，顶部 34+14，底部独立 safe bottom（不随右侧 CTA）
       const topH = 34;
-      const ctaH = 56;
-      const ctaY = vp.h - 16 - ctaH;
       const panelX = 10 + Math.round(vp.w * 0.57) + 12;
       const showX = 10;
       const showW = Math.max(200, panelX - 12 - showX);
       const bodyTop = topH + 14;
-      const bodyBot = ctaY - 14;
+      const bodyBot = vp.h - 16; // insets=0 夹具下的 safe bottom 独立取值
       const framingRect = { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
       r.reframe(snap, 'previewSolo', { framingRect });
       // coreBounds（Body+Wheels）= Garage 主尺度验收口径；envelope 仅作完整入画校验
       const core = vehicleScreenBounds(snap.vehicleA, r.transform, false);
       const env = vehicleScreenBounds(snap.vehicleA, r.transform, true);
-      // 完整入画（core + envelope 均在屏内；普通武器由横向 margin 65 覆盖）
+      // 完整入画（core + envelope 均在屏内；普通武器由横向比例 padding 覆盖）
       for (const b of [core, env]) {
         expect(b.minX).toBeGreaterThanOrEqual(-1);
         expect(b.maxX).toBeLessThanOrEqual(vp.w + 1);
@@ -188,4 +186,61 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
       expect(envRatio, 'envelope 占比 > core 占比').toBeGreaterThan(coreRatio);
     });
   }
+
+  it('F-WX-RCA-3A｜多 Body core 完整入画（覆盖最窄/最宽/最高/最低 core）+ 真实微信 621×351 DPR1.5', () => {
+    const vps: Array<{ w: number; h: number; dpr: number }> = [
+      { w: 844, h: 390, dpr: 1 },
+      { w: 621, h: 351, dpr: 1.5 }, // 真实微信 logical viewport，DPR=1.5
+    ];
+    for (const vp of vps) {
+      const { w, h, dpr } = vp;
+      for (const bodyId of registry.bodies.keys()) {
+        const canvas = {
+          getContext: () => makeStubCtx(),
+          clientWidth: w,
+          clientHeight: h,
+          width: Math.round(w * dpr),
+          height: Math.round(h * dpr),
+        } as unknown as HTMLCanvasElement;
+        const surface: CanvasSurface = {
+          width: Math.round(w * dpr),
+          height: Math.round(h * dpr),
+          devicePixelRatio: dpr,
+          now: () => 0,
+        };
+        const o = new PlanckBattleOrchestrator(
+          buildSnapshotFromDraft(makeStarterDraft(bodyId as never, registry), registry, 'a'),
+          buildSnapshotFromDraft(makeStarterDraft(bodyId as never, registry), registry, 'b'),
+          registry,
+          { autoDrive: false, engine: 'planck', spawnA: { x: 620, y: 640, facing: 1 }, spawnB: { x: 980, y: 640, facing: -1 } },
+          true, // soloA
+        );
+        const r = new Renderer(canvas, new VisualRegistry(), surface);
+        const snap = o.getRenderSnapshot();
+        r.resize(snap.arena.width, o.arena.config.height);
+        // F-WX-RCA-3A framingRect：展示区 ~57% 屏宽、顶部 34+14、底部独立 safe bottom
+        const topH = 34;
+        const panelX = 10 + Math.round(w * 0.57) + 12;
+        const showX = 10;
+        const showW = Math.max(200, panelX - 12 - showX);
+        const bodyTop = topH + 14;
+        const bodyBot = h - 16;
+        const framingRect = { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
+        r.reframe(snap, 'previewSolo', { framingRect });
+        const d = r.scaleDiagnostics(snap);
+        // core 完整入画（screen 为物理 px → /dpr 换算逻辑 px 判定）
+        const s = d.core.screen;
+        const L = s.minX / dpr;
+        const R = s.maxX / dpr;
+        const T = s.minY / dpr;
+        const B = s.maxY / dpr;
+        expect(L, `${bodyId} @${w}x${h} core 左缘入画`).toBeGreaterThanOrEqual(-1);
+        expect(R, `${bodyId} @${w}x${h} core 右缘入画`).toBeLessThanOrEqual(w + 1);
+        expect(T, `${bodyId} @${w}x${h} core 顶缘入画`).toBeGreaterThanOrEqual(-1);
+        expect(B, `${bodyId} @${w}x${h} core 底缘入画`).toBeLessThanOrEqual(h + 1);
+        // 任何 body 都有可见主体（core 屏宽 > 0）
+        expect(d.core.screenWidthPct, `${bodyId} @${w}x${h} core 占屏 > 0`).toBeGreaterThan(0);
+      }
+    }
+  });
 });

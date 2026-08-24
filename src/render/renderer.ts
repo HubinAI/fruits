@@ -118,14 +118,16 @@ const SOLO_MIN_X = 400;
 const SOLO_MAX_X = 840;
 const SOLO_MIN_Y = 400;
 const SOLO_MAX_Y = 730;
-// F-WX-RCA-2A：Mobile Garage previewSolo 不再用固定世界框——以 coreBounds（Body+Wheels）
-// 外扩固定 margin 决定主尺度（真实微信 RCA：旧 framingRect+固定 MOBILE_SOLO 框 core=14%、
-// framingRect 前 20.2% → 固定框把车身主体缩小了）。横向 margin 65 世界单位：core 170 宽
-// → bounds 300，同时覆盖普通武器外伸（envelope 243 < 300 完整入画；极长武器尖端允许
-// 越界，优先保证车身主体可读）；纵向 margin 24（车高 ~77 → bh~125，保持横向主导）。
-// 屏占比 ≈ coreW/(coreW+130) × safeW/viewportW ≈ 0.567×0.56 ≈ 32%（28~34% 目标）。
-const MOBILE_SOLO_MARGIN_X = 65;
-const MOBILE_SOLO_MARGIN_Y = 24;
+// F-WX-RCA-3A：Mobile Garage previewSolo 以 coreBounds（Body+Wheels）为主尺度，
+// padding 按 core 尺寸比例（非固定 world margin）——不同 Body 的 core（最窄/最宽/最高/
+// 最低）均完整入画且屏占比稳定（padding 比例固定 → coreW/(coreW+2×padX) 与屏宽无关）。
+// 横向 0.38×core 宽（watermelon core 170 → padX 65，覆盖普通武器外伸 envelope 243<300；
+// 极长武器尖端允许越界，优先保证车身主体可读）；纵向 0.31×core 高（core 高 77 → padY 24，
+// 保持横向主导）；MIN 下限保证极窄/极矮 core 也有余量。
+const SOLO_PAD_X_RATIO = 0.38;
+const SOLO_PAD_Y_RATIO = 0.31;
+const MIN_SOLO_PAD_X = 40;
+const MIN_SOLO_PAD_Y = 20;
 // F-WX-8-C：Mobile 战斗 Active corridor——覆盖真实交战区（开局 A(400)/B(1200) 完整
 // 可见，A 顶推 B 到右墙的主要过程在屏内）；宽 980 = 开局精确边界（A 左缘 315 / B 右缘 1295，
 // 实测 vehicleA watermelon [315,558]、vehicleB banana [1038,1295]）；配合 compact battle
@@ -1620,13 +1622,17 @@ export class Renderer {
     const isCompact = isCompactLandscape(this.viewWidth / this.viewDpr, this.viewHeight / this.viewDpr);
     if (fit === 'previewSolo') {
       if (isCompact) {
-        // F-WX-RCA-2A：以 coreBounds（Body+Wheels）+ 固定 margin 决定主尺度（不用固定世界框）。
-        // envelope 由横向 margin 65 覆盖（普通武器完整入画；极长武器尖端允许越界）。
+        // F-WX-RCA-3A：coreBounds 自适应 padding（按 core 尺寸比例，非固定 world margin——
+        // 不同 Body 的 core 均完整入画且屏占比稳定；envelope 由横向比例 padding 覆盖普通武器）
         const core = this.vehicleBounds(snap.vehicleA, false);
-        minX = core.minX - MOBILE_SOLO_MARGIN_X;
-        maxX = core.maxX + MOBILE_SOLO_MARGIN_X;
-        minY = core.minY - MOBILE_SOLO_MARGIN_Y;
-        maxY = core.maxY + MOBILE_SOLO_MARGIN_Y;
+        const cw = Math.max(1, core.maxX - core.minX);
+        const ch = Math.max(1, core.maxY - core.minY);
+        const padX = Math.max(MIN_SOLO_PAD_X, cw * SOLO_PAD_X_RATIO);
+        const padY = Math.max(MIN_SOLO_PAD_Y, ch * SOLO_PAD_Y_RATIO);
+        minX = core.minX - padX;
+        maxX = core.maxX + padX;
+        minY = core.minY - padY;
+        maxY = core.maxY + padY;
       } else {
         minX = SOLO_MIN_X; maxX = SOLO_MAX_X; minY = SOLO_MIN_Y; maxY = SOLO_MAX_Y;
       }
@@ -1718,8 +1724,12 @@ export class Renderer {
     // CONTENT_MARGIN_WORLD 会把纵向 bh 撑大、压扁手机横屏下的车辆（实测 24%）。
     const m = (isFixed || fit === 'battle') && isCompact ? 8 : isPreview ? PREVIEW_MARGIN_WORLD : CONTENT_MARGIN_WORLD;
     minX -= m; maxX += m; minY -= m; maxY += m;
-    // 地面表面留出可见区域
-    if (maxY < snap.arena.groundY + 40) maxY = snap.arena.groundY + 40;
+    // 地面表面留出可见区域。F-WX-RCA-3A：previewSolo compact（coreBounds 自适应 padding）
+    // 自带完整车辆余量，跳过此钳制——否则 bounds 底部被推到 groundY+40（740）使 bounds 中心
+    // 偏离 core 中心，破坏多 body 下的垂直居中（实测 9px 偏移）。
+    if (!(fit === 'previewSolo' && isCompact) && maxY < snap.arena.groundY + 40) {
+      maxY = snap.arena.groundY + 40;
+    }
     const bw = maxX - minX, bh = maxY - minY;
     const cw = this.viewWidth, ch = this.viewHeight;
     if (cw < 2 || ch < 2) return;

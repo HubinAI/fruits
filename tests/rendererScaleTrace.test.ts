@@ -44,16 +44,15 @@ function makeEnv(vp: { w: number; h: number }, dpr: number) {
   return { r, o };
 }
 
-/** 与 CanvasHost.getPreviewFramingRect 同几何的 Garage 左侧展示区（mobileBattleFraming 同款） */
+/** 与 CanvasHost.getPreviewFramingRect 同几何的 Garage 左侧展示区（F-WX-RCA-3A：
+ *  底部独立使用 safe bottom，不再由右侧 CTA 决定） */
 function garageFramingRect(vp: { w: number; h: number }): { x: number; y: number; w: number; h: number } {
   const topH = 34;
-  const ctaH = 56;
-  const ctaY = vp.h - 16 - ctaH;
   const panelX = 10 + Math.round(vp.w * 0.57) + 12;
   const showX = 10;
   const showW = Math.max(200, panelX - 12 - showX);
   const bodyTop = topH + 14;
-  const bodyBot = ctaY - 14;
+  const bodyBot = vp.h - 16; // insets=0（测试夹具）下的 safe bottom 独立取值
   return { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
 }
 
