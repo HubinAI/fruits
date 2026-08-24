@@ -442,16 +442,25 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     }
   });
 
-  it('F-WX-9D｜Matching / MatchPreview / Result 必要文字 ≥16px（源码守卫）+ 中央双车标注 + 无确认按钮', () => {
+  it('F-META-UX3｜Matching / MatchPreview 连续画面（源码守卫）：同一布局锚点 + 扫描占位 + 无确认按钮', () => {
     const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
-    // 1) Matching：中央构图固定「我方车 —— VS —— 对手车」
-    const vsMethod = src.slice(src.indexOf('private drawMatchingVs'), src.indexOf('\n  private drawMatchInfo'));
-    expect(vsMethod).toContain('我方车');
-    expect(vsMethod).toContain('对手车');
-    // 2) MatchPreview：删除零件长串（无 parts.join 直接文本）；保留驱动 pill
-    const infoMethod = src.slice(src.indexOf('private drawMatchInfo'), src.indexOf('private drawMatchBar'));
-    expect(infoMethod).not.toMatch(/parts\.join/);
-    expect(infoMethod).toContain('驱动 ·');
+    // 1) 连续画面方法存在：左我方车 / 中 VS+状态 / 右对手区域；搜索中扫描占位；锁定「对手已锁定」
+    const methodStart = src.indexOf('private drawMatchingContinuum');
+    expect(methodStart, 'drawMatchingContinuum 存在').toBeGreaterThan(-1);
+    const method = src.slice(methodStart, src.indexOf('private drawMatchBar'));
+    expect(method).toContain('我方车');
+    expect(method).toContain('对手');
+    expect(method).toContain('正在寻找对手…');
+    expect(method).toContain('对手已锁定');
+    expect(method).toContain('扫描对手中…');
+    expect(method).toContain('驱动 ·');
+    expect(method).not.toMatch(/parts\.join/);
+    // 2) 布局锚点统一：matching 与 matchPreview 共用同一函数（无分阶段独立绘制函数）
+    const drawIdx = src.indexOf('private draw(): void');
+    const drawBody = src.slice(drawIdx, src.indexOf('private ensureSize'));
+    expect(drawBody.match(/drawMatchingContinuum\(state\)/g)?.length, 'matching+matchPreview 两分支均调用同一函数').toBe(2);
+    expect(src, '旧分阶段绘制已删除').not.toContain('private drawMatchingVs');
+    expect(src, '旧分阶段绘制已删除').not.toContain('private drawMatchInfo');
     // 3) F-META-5：Result 走结算 Modal（showResultModal）——胜/负 title + 奖励 body + 双决策
     const resultModalIdx = src.indexOf('private showResultModal');
     expect(resultModalIdx, 'showResultModal 存在').toBeGreaterThan(-1);
@@ -463,7 +472,7 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     expect(resultMethod).toContain("secondary: '调整配置'");
     // 4) 方法内所有直接文本字号 ≥16（Matching/MatchPreview 必要文字；Result 走 Modal 统一规格）
     const re = /this\.text\(([^)]*)\)/g;
-    for (const name of ['drawMatchingVs', 'drawMatchInfo']) {
+    for (const name of ['drawMatchingContinuum']) {
       const start = src.indexOf(`private ${name}(`);
       const next = src.indexOf('\n  private ', start + 10);
       const body = src.slice(start, next === -1 ? src.length : next);

@@ -554,11 +554,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         // F-WX-UI-1：Mobile 中央三段式（顶栏信息收进 drawMobileGarageDock）；Desktop 用旧 Dock
         this.drawGarageDock(state);
       } else if (state.playerPhase === 'matching') {
+        // F-META-UX3：Matching 连续画面（搜索中）
         this.drawPlayerTop('正在寻找对手…');
-        this.drawMatchingVs();
+        this.drawMatchingContinuum(state);
       } else if (state.playerPhase === 'matchPreview') {
-        this.drawPlayerTop('对手已找到');
-        this.drawMatchInfo(state.opponent);
+        // F-META-UX3：同一画面（已锁定）——只变对手内容与状态，不改变布局锚点
+        this.drawPlayerTop('对手已锁定');
+        this.drawMatchingContinuum(state);
         if (!state.matchBarHidden) this.drawMatchBar();
       }
     }
@@ -1425,34 +1427,56 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return y + 58;
   }
 
-  // ==================== Matching / MatchPreview ====================
+  // ==================== Matching / MatchPreview（连续画面） ====================
 
-  private drawMatchingVs(): void {
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.globalAlpha = 0.22;
-    this.text('VS', this.W / 2, this.H / 2, this.isMobile ? 40 : 54, C.text, 'center', 900);
-    ctx.restore();
-    // F-WX-9D：中央构图固定「我方车 —— VS —— 对手车」（renderer previewFixed 画 A 左 B 右）
-    this.text('我方车', this.W * 0.3, this.H / 2 - 24, this.isMobile ? 16 : 18, C.textDim, 'center', 700);
-    this.text('对手车', this.W * 0.7, this.H / 2 - 24, this.isMobile ? 16 : 18, C.textDim, 'center', 700);
-  }
-
-  private drawMatchInfo(opponent: { bodyName: string; parts: string[]; drive: '前进' | '停驻' } | null): void {
+  /**
+   * F-META-UX3：matching / matchPreview 共用同一连续画面（布局锚点恒定，禁止整屏硬切）：
+   * - 左 30%：我的车（renderer previewFixed 画 A 左 B 右，进入 Matching 后始终可见）；
+   * - 中：VS + 状态文字（搜索中「正在寻找对手…」/ 已锁定「对手已锁定」）；
+   * - 右 70%：对手区域——搜索中为扫描占位（非文字+VS 空屏）；已锁定在同一 opX 锚点
+   *   直接替换为真实对手信息（bodyName + 驱动 pill）。
+   * 只改变对手内容与状态文字，不改变整体布局锚点；正常流程无「开始战斗」按钮
+   * （matchBar 能力保留，matchBarHidden=false 时仍可测）。
+   */
+  private drawMatchingContinuum(state: PlayerUIState): void {
+    const locked = state.playerPhase === 'matchPreview';
+    const op = state.opponent;
+    // 统一布局锚点（matching / matchPreview 同值，禁止分阶段偏移）
     const centerY = this.H / 2 - 20;
     const myX = this.W * 0.3;
     const opX = this.W * 0.7;
-    // F-WX-9D：双方一眼可读（≥16px）；删除对手零件长串（开发原型味边缘信息）
-    this.text('我的战车', myX, centerY, this.isMobile ? 16 : 18, C.textDim, 'center', 700);
-    this.text('VS', this.W / 2, centerY, this.isMobile ? 40 : 56, C.gold, 'center', 900);
+    const ctx = this.ctx;
+    // 中央 VS（半透明大字）+ 状态文字（两阶段同锚点，仅文案/颜色变化）
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+    this.text('VS', this.W / 2, this.H / 2 - 4, this.isMobile ? 40 : 54, C.text, 'center', 900);
+    ctx.restore();
+    this.text(
+      locked ? '对手已锁定' : '正在寻找对手…',
+      this.W / 2,
+      this.H / 2 + (this.isMobile ? 42 : 50),
+      this.isMobile ? 16 : 18,
+      locked ? C.gold : C.textDim,
+      'center',
+      700,
+    );
+    // 左：我的车标注（renderer 已画 A；始终可见）
+    this.text('我方车', myX, centerY, this.isMobile ? 16 : 18, C.textDim, 'center', 700);
+    // 右：对手区域（同一 opX 锚点；搜索中占位 / 锁定替换真实信息）
     this.text('对手', opX, centerY - (this.isMobile ? 34 : 42), this.isMobile ? 16 : 18, C.textDim, 'center', 700);
-    if (opponent) {
-      this.text(opponent.bodyName, opX, centerY + 4, this.isMobile ? 18 : 20, C.orange, 'center', 700);
-      const pillText = `驱动 · ${opponent.drive}`;
+    if (locked && op) {
+      this.text(op.bodyName, opX, centerY + 4, this.isMobile ? 18 : 20, C.orange, 'center', 700);
+      const pillText = `驱动 · ${op.drive}`;
       const pillW = this.isMobile ? 110 : 130;
       const py = centerY + (this.isMobile ? 42 : 48);
       this.rect(opX - pillW / 2, py, pillW, 26, 'rgba(59,111,212,0.16)', C.blue, 1);
       this.text(pillText, opX, py + 13, this.isMobile ? 16 : 14, C.driveBlue, 'center', 600);
+    } else {
+      // 搜索中：右侧扫描占位（候选 B 由 renderer 绘制；占位补充状态，杜绝大面积空屏）
+      const sw = this.isMobile ? 132 : 160;
+      const sh = 30;
+      this.rect(opX - sw / 2, centerY - sh / 2, sw, sh, 'rgba(59,111,212,0.12)', C.border, 1);
+      this.text('扫描对手中…', opX, centerY + 1, this.isMobile ? 16 : 14, C.textDim, 'center', 600);
     }
   }
 

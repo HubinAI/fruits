@@ -185,6 +185,23 @@ describe('F-WX-4 CanvasPlayerUIHost', () => {
     expect(host.getHitAreasForTest()).toHaveLength(0);
   });
 
+  it('F-META-UX3｜Matching 连续画面：搜索与锁定均无按钮/无空白交互层；锁定状态渲染不抛', () => {
+    // 搜索中：无命中区（车辆由 renderer previewFixed 绘制，UI 只加标注 + 扫描占位）
+    host.render(garageState({ playerPhase: 'matching' }));
+    expect(host.getHitAreasForTest()).toHaveLength(0);
+    // 已锁定（正常流程 matchBarHidden=true）：同一画面无「开始战斗」按钮（禁止新增确认步骤）
+    expect(() =>
+      host.render(
+        garageState({
+          playerPhase: 'matchPreview',
+          matchBarHidden: true,
+          opponent: { bodyName: '香蕉车', parts: [], drive: '前进' },
+        }),
+      ),
+    ).not.toThrow();
+    expect(host.getHitAreasForTest(), 'matchPreview 正常流程无开始战斗按钮').toHaveLength(0);
+  });
+
   it('MatchPreview：matchBarHidden=false 时显示 调整配置/开始战斗 → 派发 onMatchAdjust/onStartBattle', () => {
     const state = garageState({ playerPhase: 'matchPreview', matchBarHidden: false });
     host.render(state);
