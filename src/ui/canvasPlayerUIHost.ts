@@ -1065,25 +1065,26 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ctx.globalAlpha = 0.22;
     this.text('VS', this.W / 2, this.H / 2, this.isMobile ? 40 : 54, C.text, 'center', 900);
     ctx.restore();
+    // F-WX-9D：中央构图固定「我方车 —— VS —— 对手车」（renderer previewFixed 画 A 左 B 右）
+    this.text('我方车', this.W * 0.3, this.H / 2 - 24, this.isMobile ? 16 : 18, C.textDim, 'center', 700);
+    this.text('对手车', this.W * 0.7, this.H / 2 - 24, this.isMobile ? 16 : 18, C.textDim, 'center', 700);
   }
 
   private drawMatchInfo(opponent: { bodyName: string; parts: string[]; drive: '前进' | '停驻' } | null): void {
     const centerY = this.H / 2 - 20;
     const myX = this.W * 0.3;
     const opX = this.W * 0.7;
-    this.text('我的战车', myX, centerY, this.isMobile ? 14 : 16, C.textDim, 'center');
+    // F-WX-9D：双方一眼可读（≥16px）；删除对手零件长串（开发原型味边缘信息）
+    this.text('我的战车', myX, centerY, this.isMobile ? 16 : 18, C.textDim, 'center', 700);
     this.text('VS', this.W / 2, centerY, this.isMobile ? 40 : 56, C.gold, 'center', 900);
-    this.text('对手', opX, centerY - (this.isMobile ? 32 : 40), this.isMobile ? 14 : 16, C.textDim, 'center');
+    this.text('对手', opX, centerY - (this.isMobile ? 34 : 42), this.isMobile ? 16 : 18, C.textDim, 'center', 700);
     if (opponent) {
-      this.text(opponent.bodyName, opX, centerY + (this.isMobile ? 4 : 6), this.isMobile ? 16 : 20, C.orange, 'center', 700);
-      if (opponent.parts.length) {
-        this.text(opponent.parts.join(' / '), opX, centerY + (this.isMobile ? 26 : 32), this.isMobile ? 14 : 12, C.textDim, 'center');
-      }
+      this.text(opponent.bodyName, opX, centerY + 4, this.isMobile ? 18 : 20, C.orange, 'center', 700);
       const pillText = `驱动 · ${opponent.drive}`;
       const pillW = this.isMobile ? 110 : 130;
-      const py = centerY + (this.isMobile ? 40 : 48);
+      const py = centerY + (this.isMobile ? 42 : 48);
       this.rect(opX - pillW / 2, py, pillW, 26, 'rgba(59,111,212,0.16)', C.blue, 1);
-      this.text(pillText, opX, py + 13, this.isMobile ? 14 : 13, C.driveBlue, 'center', 600);
+      this.text(pillText, opX, py + 13, this.isMobile ? 16 : 14, C.driveBlue, 'center', 600);
     }
   }
 
@@ -1199,7 +1200,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /** F-WX-6：Mobile Result——自适应高度卡片（按钮恒 ≥ TARGET_TOUCH_H、完整可点） */
+  /** F-WX-9D：Mobile Result——统一中央单卡片（胜/负 + 奖励 + 段位 + 双决策），必要文字 ≥16px */
   private drawMobileResult(state: PlayerUIState): void {
     this.rect(0, 0, this.W, this.H, C.overlayBg);
     const r = state.result!;
@@ -1208,41 +1209,52 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const R = this.W - this.insR - 8;
     const cardW = Math.min(460, R - L);
     const cardX = L + (R - L - cardW) / 2;
-    let y = this.insT + 48 + 6;
-
+    // 内容行高固定（与绘制一致）：标题 42 / HP 24 / 奖励 44 / 段位 44 / 引导 24 / 按钮行 52
     const titleH = 42;
+    const rowH = 26;
+    const btnH = TARGET_TOUCH_H;
+    const bodyRows = 1 + (state.reward ? 1 : 0) + (state.economy ? 1 : 0) + (state.resultOnboardingVisible ? 1 : 0);
+    const cardH = 14 + titleH + bodyRows * rowH + 10 + btnH + 14;
+    const cardY = Math.max(this.insT + 10, (this.H - cardH) / 2);
+    // 统一中央单卡片背景
+    this.rect(cardX, cardY, cardW, cardH, '#141a26', C.border, 1);
+    let y = cardY + 12;
     this.text(isWin ? '【胜利】' : '【失败】', this.W / 2, y + titleH / 2, 24, isWin ? C.green : C.red, 'center', 800);
     y += titleH;
-    this.text(`我方 HP ${Math.round(r.hpA)} · 对手 HP ${Math.round(r.hpB)}`, this.W / 2, y + 12, 14, C.textDim, 'center');
-    y += 24;
-
+    this.text(`我方 HP ${Math.round(r.hpA)} · 对手 HP ${Math.round(r.hpB)}`, this.W / 2, y + 16, 16, C.textDim, 'center');
+    y += rowH;
     if (state.reward) {
-      this.rect(cardX, y, cardW, 44, '#1c2230', C.border, 1);
-      this.text(`获得 ${state.reward.name} ${state.reward.starStr}`, this.W / 2, y + 22, 15, C.gold, 'center', 700);
-      y += 52;
+      this.rect(cardX + 10, y - 2, cardW - 20, 36, '#1c2230', C.border, 1);
+      this.text(`获得 ${state.reward.name} ${state.reward.starStr}`, this.W / 2, y + 16, 16, C.gold, 'center', 700);
+      y += 44;
     }
     if (state.economy) {
       const coinSign = state.economy.coinDelta >= 0 ? '+' : '';
       const ratingSign = state.economy.ratingDelta >= 0 ? '+' : '';
-      this.rect(cardX, y, cardW, 36, '#1c2230', C.border, 1);
-      this.text(`金币 ${coinSign}${state.economy.coinDelta} · 段位 ${ratingSign}${state.economy.ratingDelta}（${state.economy.tierLabel} ${state.economy.rating}）`, this.W / 2, y + 18, 14, C.gold, 'center', 700);
+      this.rect(cardX + 10, y - 2, cardW - 20, 36, '#1c2230', C.border, 1);
+      this.text(
+        `金币 ${coinSign}${state.economy.coinDelta} · 段位 ${ratingSign}${state.economy.ratingDelta}（${state.economy.tierLabel} ${state.economy.rating}）`,
+        this.W / 2,
+        y + 16,
+        16,
+        C.gold,
+        'center',
+        700,
+      );
       y += 44;
     }
     if (state.resultOnboardingVisible) {
-      this.text('获得新部件，可以回车库调整', this.W / 2, y + 10, 14, C.onboardText, 'center');
-      y += 22;
+      this.text('获得新部件，可以回车库调整', this.W / 2, y + 14, 16, C.onboardText, 'center');
+      y += rowH;
     }
-
     // 决策按钮行（恒 ≥ TARGET_TOUCH_H；广告可用时三列）
-    const btnH = TARGET_TOUCH_H;
-    const gap = 10;
-    const by = y + 4;
+    const by = y + 6;
     if (state.rewardAdAvailable) {
-      const bw = (cardW - gap * 2) / 3;
+      const bw = (cardW - 20) / 3;
       this.button(cardX, by, bw, btnH, 'result-adjust', '调整配置');
-      this.button(cardX + bw + gap, by, bw, btnH, 'result-next', '下一场', { primary: true });
+      this.button(cardX + bw + 10, by, bw, btnH, 'result-next', '下一场', { primary: true });
       this.button(
-        cardX + 2 * (bw + gap),
+        cardX + 2 * (bw + 10),
         by,
         bw,
         btnH,
@@ -1251,9 +1263,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         { disabled: state.rewardAdClaimed },
       );
     } else {
-      const bw = (cardW - gap) / 2;
+      const bw = (cardW - 10) / 2;
       this.button(cardX, by, bw, btnH, 'result-adjust', '调整配置');
-      this.button(cardX + bw + gap, by, bw, btnH, 'result-next', '下一场', { primary: true });
+      this.button(cardX + bw + 10, by, bw, btnH, 'result-next', '下一场', { primary: true });
     }
   }
 

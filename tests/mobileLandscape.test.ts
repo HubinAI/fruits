@@ -441,4 +441,45 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       }
     }
   });
+
+  it('F-WX-9D｜Matching / MatchPreview / Result 必要文字 ≥16px（源码守卫）+ 中央双车标注 + 无确认按钮', () => {
+    const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
+    // 1) Matching：中央构图固定「我方车 —— VS —— 对手车」
+    const vsMethod = src.slice(src.indexOf('private drawMatchingVs'), src.indexOf('\n  private drawMatchInfo'));
+    expect(vsMethod).toContain('我方车');
+    expect(vsMethod).toContain('对手车');
+    // 2) MatchPreview：删除零件长串（无 parts.join 直接文本）；保留驱动 pill
+    const infoMethod = src.slice(src.indexOf('private drawMatchInfo'), src.indexOf('private drawMatchBar'));
+    expect(infoMethod).not.toMatch(/parts\.join/);
+    expect(infoMethod).toContain('驱动 ·');
+    // 3) Result：统一中央单卡片（cardH 统一高度 + 两决策同卡）
+    const resultMethod = src.slice(src.indexOf('private drawMobileResult'), src.indexOf('private drawReadyOverlay'));
+    expect(resultMethod).toMatch(/const cardH = /);
+    expect(resultMethod).toContain("this.rect(cardX, cardY, cardW, cardH, '#141a26', C.border, 1)");
+    // 4) 三个方法内所有直接文本字号 ≥16（Matching/Result 必要文字）
+    const re = /this\.text\(([^)]*)\)/g;
+    for (const name of ['drawMatchingVs', 'drawMatchInfo', 'drawMobileResult']) {
+      const start = src.indexOf(`private ${name}(`);
+      const next = src.indexOf('\n  private ', start + 10);
+      const body = src.slice(start, next === -1 ? src.length : next);
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(body)) !== null) {
+        const args = m[1].split(',').map((s) => s.trim());
+        const size = parseInt(args[3] ?? '', 10); // text, x, y, size, color, align, weight
+        if (Number.isFinite(size) && size > 0) {
+          expect(size, `${name} 内字号 <16px 的直接文本：${m[0].slice(0, 64)}`).toBeGreaterThanOrEqual(16);
+        }
+      }
+    }
+  });
+
+  it('F-WX-9D｜MatchPreview 正常流程无「开始战斗/调整配置」确认按钮（Q15 自动开战，matchBar 常驻隐藏）', () => {
+    const vp = { w: 844, h: 390 };
+    const env = makeHost(vp, LANDSCAPE_INSETS);
+    // matchBarHidden 默认 true（runtime Q15-FLOW-R1-ATOMIC：复核条立即隐藏，永不闪现）
+    env.host.render(garageState({ playerPhase: 'matchPreview', opponent: { bodyName: '西瓜', parts: ['炮'], drive: '前进' } }));
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'match-start'), '不应有「开始战斗」').toBe(false);
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'match-adjust'), '不应有「调整配置」').toBe(false);
+  });
 });
