@@ -140,13 +140,17 @@ describe('F-WX-7 微信工程目录（可直接导入）', () => {
     expect(renderer.indexOf('this.transform = { scale, offsetX, offsetY }')).toBeLessThan(refIdx);
   });
 
-  it('F-WX-RCA-1｜双口径 Bounds：coreBounds 排除 Functional Parts、envelopeBounds 保留；build:wechat:rca 可运行且 PROD 无 [WX-RCA]', () => {
+  it('F-WX-RCA-1/2B｜双口径 Bounds：coreBounds 排除 Functional Parts、envelopeBounds 保留；battle 段 A/B 双车 + Active 首帧一次；build:wechat:rca 可运行且 PROD 无 [WX-RCA]', () => {
     const renderer = read('src/render/renderer.ts');
     // 1) 双口径同时存在，不再混用单一 vehicleWidth
     expect(renderer).toContain('scaleDiagnostics');
-    expect(renderer).toContain('core: diag(false)');
-    expect(renderer).toContain('envelope: diag(true)');
+    expect(renderer).toContain('vehicleDiag');
+    expect(renderer).toContain('scaleDiagnosticsBoth');
     expect(renderer).toContain('includeParts');
+    // 2) F-WX-RCA-2B：battle 段 A/B 双车 + Active 首帧一次性（battleRcaLogged）
+    expect(renderer).toContain('battleRcaLogged');
+    expect(renderer).toContain("A: { core: this.vehicleDiag(snap.vehicleA, false), envelope: this.vehicleDiag(snap.vehicleA, true) }");
+    expect(renderer).toContain("B: { core: this.vehicleDiag(snap.vehicleB, false), envelope: this.vehicleDiag(snap.vehicleB, true) }");
     // coreBounds 明确排除 Functional Parts（parts 只在 includeParts=true 时计入）
     const boundsIdx = renderer.indexOf('private vehicleBounds(');
     expect(boundsIdx).toBeGreaterThan(-1);
@@ -159,8 +163,8 @@ describe('F-WX-7 微信工程目录（可直接导入）', () => {
     // coreBounds（includeParts=false）路径不含 parts：parts 必须在 includeParts 条件之后
     expect(partsIdx, 'parts 必须在 includeParts 条件之后（coreBounds 排除 Functional Parts）').toBeGreaterThan(incIdx);
     // 2) [WX-RCA] 在 renderer 且包在 __WX_RCA__ gate 内（只读诊断）
-    const rcaIdx = renderer.indexOf('[WX-RCA]');
-    expect(rcaIdx, 'renderer 应有 [WX-RCA]').toBeGreaterThan(-1);
+    const rcaIdx = renderer.indexOf("'[WX-RCA]'"); // 代码字符串字面量（跳过 JSDoc 注释里的 [WX-RCA]）
+    expect(rcaIdx, 'renderer 应有 [WX-RCA] 日志字面量').toBeGreaterThan(-1);
     const rcaGate = renderer.lastIndexOf('typeof __WX_RCA__ !==', rcaIdx);
     expect(rcaGate, '[WX-RCA] 必须在 __WX_RCA__ gate 内').toBeGreaterThan(-1);
     // 3) build:wechat:rca 脚本存在（仅该构建注入 WECHAT_RCA）

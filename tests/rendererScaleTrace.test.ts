@@ -146,15 +146,27 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     expect(gv.core.screenWidthPct).toBeGreaterThanOrEqual(0);
     expect(gv.envelope.screenWidthPct).toBeGreaterThan(0);
     expect(gv.core.screenWidthPct).toBeLessThan(gv.envelope.screenWidthPct);
-    // battle 段
+    // battle 段：A/B 双车 core+envelope 四值（F-WX-RCA-2B）
     r.reframe(snap, 'battle', { phase: 'Active' });
     const battle = lastLog(spy, '[WX-RCA]');
     expect(battle, '应有 [WX-RCA] battle 段').not.toBeNull();
     expect(battle!.step).toBe('battle');
     expect(battle!.phase).toBe('Active');
-    const bv = battle as { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
-    expect(bv.envelope.screenWidthPct).toBeGreaterThan(0);
-    expect(bv.core.screenWidthPct).toBeLessThan(bv.envelope.screenWidthPct);
+    const bv = battle as {
+      A: { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
+      B: { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
+    };
+    expect(bv.A.core.screenWidthPct, 'A core 存在').toBeGreaterThanOrEqual(0);
+    expect(bv.A.envelope.screenWidthPct, 'A envelope 存在').toBeGreaterThan(0);
+    expect(bv.A.core.screenWidthPct).toBeLessThan(bv.A.envelope.screenWidthPct);
+    expect(bv.B.core.screenWidthPct, 'B core 存在').toBeGreaterThanOrEqual(0);
+    expect(bv.B.envelope.screenWidthPct, 'B envelope 存在').toBeGreaterThan(0);
+    expect(bv.B.core.screenWidthPct).toBeLessThan(bv.B.envelope.screenWidthPct);
+    // 一次性：再次 reframe Active → battle 段不重复（battleRcaLogged once，防刷屏）
+    const battleCountBefore = spy.mock.calls.filter((c: unknown[]) => c[0] === '[WX-RCA]' && String(c[1]).includes('"step":"battle"')).length;
+    r.reframe(snap, 'battle', { phase: 'Active' });
+    const battleCountAfter = spy.mock.calls.filter((c: unknown[]) => c[0] === '[WX-RCA]' && String(c[1]).includes('"step":"battle"')).length;
+    expect(battleCountAfter, 'Active 首帧只输出一次 battle 段').toBe(battleCountBefore);
     // false / undefined → 零 [WX-RCA]（先 restore 主 spy，避免重复 spyOn 返回同一 mock 混入历史调用）
     vi.restoreAllMocks();
     for (const v of [false, undefined]) {

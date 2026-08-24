@@ -262,6 +262,8 @@ export class Renderer {
   private shotgunFans: ShotgunFan[] = [];
   /** Q14-A-R1：机枪方向性枪口火舌 VFX 数组（发射后驻留 ~60ms 衰减，纯表现） */
   private muzzleTongues: MuzzleTongue[] = [];
+  /** F-WX-RCA-2B：Battle Active [WX-RCA] 一次性输出标志（每场运行时首次 Active reframe 只记一次） */
+  private battleRcaLogged = false;
 
   /** F-PRESENT-1：高频伤害数字聚合器（纯 Presentation；决定「合并 / 新建数字」） */
   private damageAggregator = new DamageNumberAggregator(DAMAGE_AGGREGATE_WINDOW_MS);
@@ -390,8 +392,23 @@ export class Renderer {
     return { minX, minY, maxX, maxY };
   }
 
+  /** 单辆车双口径屏幕诊断（只读；core=Body+Wheels / envelope=+Parts） */
+  private vehicleDiag(v: RenderVehicle, includeParts: boolean): {
+    world: { minX: number; minY: number; maxX: number; maxY: number };
+    screen: { minX: number; minY: number; maxX: number; maxY: number };
+    screenWidthPct: number;
+  } {
+    const w = this.vehicleBounds(v, includeParts);
+    const s = this.worldRectToScreen(w.minX, w.minY, w.maxX, w.maxY);
+    return {
+      world: w,
+      screen: s,
+      screenWidthPct: Math.round(((s.maxX - s.minX) / this.viewWidth) * 1000) / 10,
+    };
+  }
+
   /**
-   * F-WX-RCA-1：当前 transform 下车辆双口径屏幕诊断（只读）。
+   * F-WX-RCA-1：当前 transform 下车辆双口径屏幕诊断（只读，vehicleA）。
    * core = Body + Wheels；envelope = + Functional Parts。供 DEV/RCA 日志与测试断言，
    * 不参与绘制、不改变任何 framing 语义。
    */
@@ -404,22 +421,42 @@ export class Renderer {
     envelope: { world: { minX: number; minY: number; maxX: number; maxY: number }; screen: { minX: number; minY: number; maxX: number; maxY: number }; screenWidthPct: number };
   } {
     const t = this.transform;
-    const diag = (includeParts: boolean): { world: { minX: number; minY: number; maxX: number; maxY: number }; screen: { minX: number; minY: number; maxX: number; maxY: number }; screenWidthPct: number } => {
-      const w = this.vehicleBounds(snap.vehicleA, includeParts);
-      const s = this.worldRectToScreen(w.minX, w.minY, w.maxX, w.maxY);
-      return {
-        world: w,
-        screen: s,
-        screenWidthPct: Math.round(((s.maxX - s.minX) / this.viewWidth) * 1000) / 10,
-      };
-    };
     return {
       scale: t.scale,
       offsetX: t.offsetX,
       offsetY: t.offsetY,
       view: { w: this.viewWidth, h: this.viewHeight, dpr: this.viewDpr },
-      core: diag(false),
-      envelope: diag(true),
+      core: this.vehicleDiag(snap.vehicleA, false),
+      envelope: this.vehicleDiag(snap.vehicleA, true),
+    };
+  }
+
+  /**
+   * F-WX-RCA-2B：当前 transform 下 A/B 双车双口径屏幕诊断（只读）。
+   * 供 [WX-RCA] battle 段确认双方 core/envelope 真实占比；不参与绘制、不改变 framing 语义。
+   */
+  scaleDiagnosticsBoth(snap: BattleRenderSnapshot): {
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+    view: { w: number; h: number; dpr: number };
+    A: {
+      core: { world: { minX: number; minY: number; maxX: number; maxY: number }; screen: { minX: number; minY: number; maxX: number; maxY: number }; screenWidthPct: number };
+      envelope: { world: { minX: number; minY: number; maxX: number; maxY: number }; screen: { minX: number; minY: number; maxX: number; maxY: number }; screenWidthPct: number };
+    };
+    B: {
+      core: { world: { minX: number; minY: number; maxX: number; maxY: number }; screen: { minX: number; minY: number; maxX: number; maxY: number }; screenWidthPct: number };
+      envelope: { world: { minX: number; minY: number; maxX: number; maxY: number }; screen: { minX: number; minY: number; maxX: number; maxY: number }; screenWidthPct: number };
+    };
+  } {
+    const t = this.transform;
+    return {
+      scale: t.scale,
+      offsetX: t.offsetX,
+      offsetY: t.offsetY,
+      view: { w: this.viewWidth, h: this.viewHeight, dpr: this.viewDpr },
+      A: { core: this.vehicleDiag(snap.vehicleA, false), envelope: this.vehicleDiag(snap.vehicleA, true) },
+      B: { core: this.vehicleDiag(snap.vehicleB, false), envelope: this.vehicleDiag(snap.vehicleB, true) },
     };
   }
 
@@ -1764,24 +1801,41 @@ export class Renderer {
         }),
       );
     }
-    // F-WX-RCA-1：RCA 专用构建（WECHAT_RCA=1 注入 __WX_RCA__=true）——真实微信尺度数据。
-    // Garage 段（previewSolo/previewFixed）与 Battle 段（battle + phase）随每次 reframe 输出；
+    // F-WX-RCA-1/2B：RCA 专用构建（WECHAT_RCA=1 注入 __WX_RCA__=true）——真实微信尺度数据。
+    // Garage 段（previewSolo/previewFixed）随 reframe 输出（低频预览）；Battle 段仅 Active
+    // 首帧一次（battleRcaLogged，防刷屏），输出 A/B 双车 core/envelope 四值。
     // 普通 build:wechat PROD __WX_RCA__=false → 零日志。只读诊断，不改变 framing 语义。
-    if (typeof __WX_RCA__ !== 'undefined' && __WX_RCA__ && (isFixed || fit === 'battle')) {
-      const d = this.scaleDiagnostics(snap);
-      // eslint-disable-next-line no-console
-      console.log(
-        '[WX-RCA]',
-        JSON.stringify({
-          step: fit === 'battle' ? 'battle' : 'garage',
-          phase: fit === 'battle' ? (opts.phase ?? '') : null,
-          framingRect: opts.framingRect ?? null,
-          view: d.view,
-          transform: { scale, offsetX, offsetY },
-          core: d.core,
-          envelope: d.envelope,
-        }),
-      );
+    if (typeof __WX_RCA__ !== 'undefined' && __WX_RCA__) {
+      if (fit === 'battle' && (opts.phase ?? '') === 'Active' && !this.battleRcaLogged) {
+        this.battleRcaLogged = true;
+        const d = this.scaleDiagnosticsBoth(snap);
+        // eslint-disable-next-line no-console
+        console.log(
+          '[WX-RCA]',
+          JSON.stringify({
+            step: 'battle',
+            phase: opts.phase,
+            view: d.view,
+            transform: { scale, offsetX, offsetY },
+            A: d.A,
+            B: d.B,
+          }),
+        );
+      } else if (isFixed) {
+        const d = this.scaleDiagnostics(snap);
+        // eslint-disable-next-line no-console
+        console.log(
+          '[WX-RCA]',
+          JSON.stringify({
+            step: 'garage',
+            framingRect: opts.framingRect ?? null,
+            view: d.view,
+            transform: { scale, offsetX, offsetY },
+            core: d.core,
+            envelope: d.envelope,
+          }),
+        );
+      }
     }
   }
 
