@@ -31,7 +31,7 @@ import { getCount, canEquipPart, equippedDefIds, OFFICIAL_PARTS } from '../core/
 import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/playerProgress';
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { BODY_OPTIONS, WHEEL_OPTIONS, encodePartVal } from './playerUI';
-import { resolveLayoutProfile, TARGET_TOUCH_H, type LayoutProfile } from './layoutProfile';
+import { resolveLayoutProfile, TARGET_TOUCH_H, MIN_TOUCH_H, type LayoutProfile } from './layoutProfile';
 import type {
   PlayerUIHost,
   PlayerUIState,
@@ -110,8 +110,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** F-WX-6：功能件选项横向滚动偏移（仅 Mobile options strip） */
   private optScroll = 0;
   private optScrollFor: string | null = null;
-  /** F-WX-8-B：Mobile 武器入口展开态（选「改哪个武器位」；内部态，不派发 action） */
-  private weaponMenuOpen = false;
+  /** F-WX-UI-1：装配面板视图（home 2×2 分类 / wheelPick 轮子二级 / weaponPick 武器位 / options 选项） */
+  private panelView: 'home' | 'wheelPick' | 'weaponPick' | 'options' = 'home';
+  /** F-WX-UI-1：选项网格面板内垂直滚动（面板不溢出屏幕） */
+  private panelScroll = 0;
   /** F-WX-8-B：Mobile 合成面板展开态（点击「合成」次级入口后展开；确认才派发 onMerge） */
   private mergeOpen = false;
 
@@ -169,8 +171,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.optScrollFor = state.garageSelected;
       this.optScroll = 0;
     }
-    // F-WX-8-B：非 garage 阶段 / 已选中槽位时退出武器菜单（展开选项优先）
-    if (state.garageSelected) this.weaponMenuOpen = false;
+    // F-WX-UI-1：装配面板视图同步——已选中槽位 → options；选完收起 → home
+    if (state.garageSelected) {
+      this.panelView = 'options';
+    } else if (this.panelView === 'options') {
+      this.panelView = 'home';
+      this.panelScroll = 0;
+    }
     if (state.battleState !== 'editing' || state.playerPhase !== 'garage') this.mergeOpen = false;
     this.draw();
   }
@@ -239,20 +246,49 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id.startsWith('entry:')) {
-      // F-WX-8-B：Mobile-first Garage 配置入口（车身/前轮/后轮/驱动 → 直接展开对应槽）
-      this.weaponMenuOpen = false;
+      // F-WX-UI-1：车身/驱动一级入口 → 直接展开对应槽
       this.actions?.onToggleGarageSlot(id.slice(6));
       return;
     }
-    if (id === 'entry-weapons') {
-      // 武器入口：先展开「改哪个武器位」选择（一次一个决策；内部态，不派发 action）
-      this.weaponMenuOpen = true;
+    if (id === 'entry-wheels') {
+      // 轮子一级入口 → 面板内「前轮/后轮」二级选择（内部态，不派发 action）
+      this.panelView = 'wheelPick';
+      this.panelScroll = 0;
       this.draw();
       return;
     }
-    if (id === 'entry-back') {
-      // 武器位选择返回入口行
-      this.weaponMenuOpen = false;
+    if (id === 'entry-weapons') {
+      // 武器一级入口 → 面板内武器位列表（内部态）
+      this.panelView = 'weaponPick';
+      this.panelScroll = 0;
+      this.draw();
+      return;
+    }
+    if (id.startsWith('wheel-side:')) {
+      // 轮子二级：选前轮/后轮 → 展开该槽选项（'wheel-side:' 11 字符，用 endsWith 判定）
+      this.actions?.onToggleGarageSlot(id.endsWith('front') ? 'frontWheel' : 'rearWheel');
+      return;
+    }
+    if (id.startsWith('weapon-slot:')) {
+      // 武器二级：选武器位 → 展开该位选项（'weapon-slot:' 12 字符）
+      this.actions?.onToggleGarageSlot(id.slice(12));
+      return;
+    }
+    if (id === 'panel-back') {
+      // 面板返回：轮子/武器二级 → home；选项 → 收起选中槽（toggle 语义）
+      if (this.panelView === 'wheelPick' || this.panelView === 'weaponPick') {
+        this.panelView = 'home';
+        this.panelScroll = 0;
+        this.draw();
+      } else {
+        this.actions?.onToggleGarageSlot(this.lastState?.garageSelected ?? '');
+      }
+      return;
+    }
+    if (id === 'panel-scroll-up' || id === 'panel-scroll-down') {
+      const step = Math.round(TARGET_TOUCH_H * 1.6);
+      this.panelScroll += id === 'panel-scroll-up' ? -step : step;
+      if (this.panelScroll < 0) this.panelScroll = 0;
       this.draw();
       return;
     }
@@ -272,7 +308,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id.startsWith('chip:')) {
-      this.weaponMenuOpen = false;
       this.actions?.onToggleGarageSlot(id.slice(5));
       return;
     }
@@ -345,7 +380,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     } else {
       // 装配编辑态：玩家 Shell
       if (state.playerPhase === 'garage') {
-        this.drawPlayerTop('我的战车');
+        // F-WX-UI-1：Mobile 中央三段式（顶栏信息收进 drawMobileGarageDock）；Desktop 用旧 Dock
         this.drawGarageDock(state);
       } else if (state.playerPhase === 'matching') {
         this.drawPlayerTop('正在寻找对手…');
@@ -490,11 +525,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
           : C.border;
     const labelColor = opts.disabled ? C.textDark : C.text;
     this.rect(x, y, w, h, fill, stroke, opts.locked ? 1.5 : 1);
+    // F-WX-UI-1：Mobile 字号层级（主按钮 17 / 卡名 17 / 辅助 14）；Desktop 保持旧值（15/12）
+    const labelFs = this.isMobile ? 17 : 15;
+    const subFs = this.isMobile ? 14 : 12;
     if (opts.sub) {
-      this.text(opts.sub, x + w / 2, y + h * 0.3, 12, opts.disabled ? C.textDark : C.textDim, 'center');
-      this.text(label, x + w / 2, y + h * 0.66, 14, labelColor, 'center', 600);
+      this.text(opts.sub, x + w / 2, y + h * 0.3, subFs, opts.disabled ? C.textDark : C.textDim, 'center');
+      this.text(label, x + w / 2, y + h * 0.66, labelFs, labelColor, 'center', 600);
     } else {
-      this.text(label, x + w / 2, y + h / 2, 15, labelColor, 'center', 600);
+      this.text(label, x + w / 2, y + h / 2, labelFs, labelColor, 'center', 600);
     }
     if (!opts.disabled) this.hit(id, x, y, w, h);
   }
@@ -620,106 +658,117 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       disabled: !state.draftValid,
     });
   }
-
   /**
-   * F-WX-8-B：Mobile-first Garage（三层信息层级，一次只处理一个配置决策）。
-   * - 顶部：金币 / 段位 / 能量（单行）；
-   * - 中央：战车大预览（renderer previewSolo compact 框，车辆约占可用宽 30~45%）；
-   * - 底部两行：入口行（车身/前轮/后轮/驱动/武器，点开才展开该类）+ 主行
-   *   （合成次级入口 + 「寻找对手」最大主 CTA）。
-   * 首屏不展开完整部件全集；选项条只出现在「已选槽位」时；武器位选择、合成面板
-   * 都是点击后展开的次级界面（内部态，不派发新 Action，State/Action 完全复用）。
+   * F-WX-UI-1：Mobile-first Garage——中央三段式（信息架构重做，非 PC 压缩）。
+   * - 顶栏（≤42 逻辑 px，只信息）：金币 · 段位 · 能量；
+   * - 左展示区（~55-57% 屏宽）：战车大预览（renderer previewSolo + framingRect fit 到本区）；
+   * - 右装配面板（~40%）：2×2 主分类（车身/轮子/驱动/武器）→ 二级（轮子前/后、武器位）→
+   *   部件选项卡（面板内滚动），面板不溢出屏幕；
+   * - 面板下主 CTA「寻找对手」：唯一最大（220-300×56），距 safe bottom ≥16，不贴底。
+   * 合成降级为面板内次级入口；首轮引导为 CTA 上方局部气泡。State/Action/Gameplay 复用。
    */
   private drawMobileGarageDock(state: PlayerUIState): void {
     const draft = state.draft;
     if (!draft) return;
-    const L = this.insL + 8;
-    const R = this.W - this.insR - 8;
-    const usableW = Math.max(120, R - L);
-    const body = registry.bodies.get(draft.bodyDefId);
+    const uL = this.insL;
+    const uR = this.insR;
+    const uT = this.insT;
+    const uB = this.insB;
+    const usableW = Math.max(240, this.W - uL - uR);
+    const topH = 34;
+    const ctaH = 56;
+    const ctaBottomGap = 16;
+    // 区域几何（只使用中央 80~85% 安全区，左右极边缘只留安全边距）
+    const ctaY = this.H - uB - ctaBottomGap - ctaH;
+    const panelX = uL + 10 + Math.round(usableW * 0.57) + 12; // 展示区 ~57% → 面板左缘
+    const panelR = Math.max(panelX + 200, this.W - uR - 10);
+    const panelW = panelR - panelX;
+    const ctaW = Math.min(300, Math.max(220, panelW));
+    const ctaX = panelR - ctaW;
+    const bodyTop = uT + topH + 14;
+    const bodyBot = ctaY - 14;
+    const bodyH = Math.max(120, bodyBot - bodyTop);
+
+    // 顶栏（只信息，不放主要操作）
+    this.drawMobileTopBar(state, draft, uL, uT, usableW, topH);
+
+    // 主 CTA（唯一最大）+ 首轮引导气泡 + 非法原因
+    this.button(ctaX, ctaY, ctaW, ctaH, 'cta-find', state.draftValid ? '寻找对手' : '配置不合法', {
+      primary: true,
+      disabled: !state.draftValid,
+    });
+    if (!state.draftValid && state.blockReason) {
+      this.text(state.blockReason, ctaX, ctaY - 8, 14, C.red, 'right', 600);
+    } else if (state.onboarding === 'pending') {
+      // 首轮引导：CTA 上方局部气泡（不横贯屏幕）
+      const bw = Math.min(240, ctaW - 20);
+      this.rect(ctaX + ctaW - bw - 10, ctaY - 30, bw, 22, C.onboardBg, C.onboardBorder, 1);
+      this.text('准备好了，去找个对手', ctaX + ctaW - 16, ctaY - 17, 14, C.onboardText, 'right');
+    }
+
+    // 装配面板（右侧中央）
+    this.rect(panelX, bodyTop, panelW, bodyH, C.dockBg, C.border, 1);
+    const py = bodyTop + 10;
+    const pH = bodyH - 20;
+    if (this.mergeOpen) {
+      this.drawGaragePanelMerge(state, draft, panelX, panelW, py);
+    } else if (state.garageSelected) {
+      this.drawGaragePanelOptions(state, draft, panelX, panelW, py, pH);
+    } else if (this.panelView === 'wheelPick') {
+      this.drawGaragePanelWheelPick(draft, panelX, panelW, py, pH);
+    } else if (this.panelView === 'weaponPick') {
+      this.drawGaragePanelWeaponPick(draft, panelX, panelW, py, pH);
+    } else {
+      this.drawGaragePanelHome(draft, panelX, panelW, py, pH);
+    }
+  }
+
+  /** 顶栏：金币 · 段位 · 能量（单行 ≤42 高，只信息） */
+  private drawMobileTopBar(
+    state: PlayerUIState,
+    draft: BuildDraft,
+    uL: number,
+    uT: number,
+    usableW: number,
+    topH: number,
+  ): void {
     const p = state.progress;
     const tier = tierOf(p.rating);
-
-    // —— 顶部：单行状态（金币 · 段位 · 能量）——
-    const topY = this.insT + 4;
-    const topH = 34;
-    this.rect(L - 8, this.insT, usableW + 16, topH, 'rgba(8,10,14,0.82)', C.border, 1);
-    this.text(`金币 ${p.coin}`, L, topY + 15, 15, C.gold, 'left', 700);
-    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, L + 132, topY + 15, 13, C.textDim);
+    const body = registry.bodies.get(draft.bodyDefId);
+    const x0 = uL + 10;
+    const w = Math.max(200, usableW - 20);
+    this.rect(x0 - 4, uT, w + 8, topH, 'rgba(8,10,14,0.72)', C.border, 1);
+    this.text(`金币 ${p.coin}`, x0, uT + topH / 2 + 5, 15, C.gold, 'left', 700);
+    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, x0 + 150, uT + topH / 2 + 5, 14, C.textDim);
     const snapshot = buildSnapshotFromDraft(draft, registry, 'customA');
     const energyRes = computeEnergy(snapshot, registry);
     const used = energyRes.error ? Number.NaN : energyRes.energy;
     const capacity = body?.energyCapacity ?? 0;
     const overload = Number.isFinite(used) && used > capacity;
-    const eBarW = Math.min(130, usableW * 0.22);
-    const eBarX = R - eBarW;
-    this.text('能量', eBarX - 36, topY + 15, 12, C.textDim);
+    const eBarW = Math.min(120, w * 0.2);
+    const eBarX = x0 + w - eBarW;
+    this.text('能量', eBarX - 38, uT + topH / 2 + 5, 14, C.textDim);
     const pct = Number.isFinite(used) ? Math.min(100, (used / Math.max(capacity, 1)) * 100) : 0;
-    this.rect(eBarX, topY + 9, eBarW, 10, '#232b38', C.border, 1);
-    if (pct > 0) this.rect(eBarX, topY + 9, eBarW * (pct / 100), 10, overload ? C.red : C.blue);
+    this.rect(eBarX, uT + topH / 2 - 4, eBarW, 10, '#232b38', C.border, 1);
+    if (pct > 0) this.rect(eBarX, uT + topH / 2 - 4, eBarW * (pct / 100), 10, overload ? C.red : C.blue);
     this.text(
       Number.isFinite(used) ? `${Math.round(used)}/${capacity}` : '?/?',
       eBarX + eBarW + 6,
-      topY + 15,
-      12,
+      uT + topH / 2 + 5,
+      14,
       overload ? C.red : C.text,
       'left',
     );
-
-    // 首轮引导（单行，不挤占配车）
-    let guideY = topY + topH + 4;
-    if (state.onboarding === 'pending') {
-      this.rect(L, guideY, usableW, 20, C.onboardBg, C.onboardBorder, 1);
-      this.text('这是你的战车，点「寻找对手」开始第一场战斗', L + 8, guideY + 10, 11, C.onboardText);
-      guideY += 24;
-    }
-
-    // —— 底部操作区（两行）——
-    const rowH = TARGET_TOUCH_H;
-    const gap = 8;
-    const areaH = rowH * 2 + gap;
-    const y0 = this.H - this.insB - 8 - areaH;
-    const y1 = y0 + rowH + gap;
-    this.rect(L - 8, y0 - 4, usableW + 16, areaH + 8, C.dockBg, C.border, 1);
-
-    // —— 行1（四态：入口 / 武器位选择 / 选项条 / 合成面板）——
-    if (this.mergeOpen) {
-      this.drawMobileMergePanel(state, L, R, usableW, y0, rowH, y1);
-    } else if (state.garageSelected) {
-      this.drawMobileOptionStrip(state, L, R, y0, rowH);
-    } else if (this.weaponMenuOpen) {
-      this.drawMobileWeaponMenu(state, L, usableW, y0, rowH);
-    } else {
-      this.drawMobileEntries(state, L, usableW, y0, rowH);
-    }
-
-    // —— 行2：合成次级入口 + 寻找对手主 CTA ——
-    const mergeW = 104;
-    const ctaX = L + mergeW + 10;
-    const ctaW = Math.max(180, R - ctaX);
-    this.button(L, y1, mergeW, rowH, 'merge', '合成', {});
-    // Build 非法：CTA 禁用 + 一句直接原因（红字，画在 CTA 上方车辆区底部边缘）
-    if (!state.draftValid && state.blockReason) {
-      const rw = Math.min(usableW * 0.6, ctaW);
-      this.text(state.blockReason, R - 8, y1 - 8, 12, C.red, 'right', 600);
-      void rw;
-    }
-    this.button(ctaX, y1, ctaW, rowH, 'cta-find', state.draftValid ? '寻找对手' : '配置不合法', {
-      primary: true,
-      disabled: !state.draftValid,
-    });
   }
 
-  /** 入口行（首屏）：车身 / 前轮 / 后轮 / 驱动 / 武器——点开才展开该类选项 */
-  private drawMobileEntries(
-    state: PlayerUIState,
-    L: number,
-    usableW: number,
-    y: number,
-    rowH: number,
+  /** 面板首页：2×2 主分类（车身/轮子/驱动/武器）+ 底部合成次级入口 */
+  private drawGaragePanelHome(
+    draft: BuildDraft,
+    px: number,
+    pw: number,
+    py: number,
+    ph: number,
   ): void {
-    const draft = state.draft;
-    if (!draft) return;
     const defs = this.garageChipDefs(draft);
     const bodyDef = defs.find((d) => d.key === 'body');
     const rear = defs.find((d) => d.key === 'rearWheel');
@@ -728,128 +777,133 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const funcSlots = defs.filter(
       (d) => d.key !== 'body' && d.key !== 'rearWheel' && d.key !== 'frontWheel' && d.key !== 'drive',
     );
-    const equipped = funcSlots.filter((d) => d.value !== '空' && !d.value.endsWith('★') && d.value !== '').length;
-    const entries: Array<{ id: string; label: string; sub: string }> = [
+    const equipped = funcSlots.filter((d) => d.value !== '空' && d.value !== '').length;
+    const cells: Array<{ id: string; label: string; sub: string }> = [
       { id: 'entry:body', label: '车身', sub: bodyDef?.value ?? '?' },
-      { id: 'entry:rearWheel', label: '后轮', sub: rear?.value ?? '?' },
-      { id: 'entry:frontWheel', label: '前轮', sub: front?.value ?? '?' },
+      { id: 'entry-wheels', label: '轮子', sub: `${front?.value ?? '?'} / ${rear?.value ?? '?'}` },
       { id: 'entry:drive', label: '驱动', sub: drive?.value ?? '?' },
       { id: 'entry-weapons', label: '武器', sub: `${equipped}/${funcSlots.length}` },
     ];
     const gap = 8;
-    const w = (usableW - gap * (entries.length - 1)) / entries.length;
-    for (let i = 0; i < entries.length; i++) {
-      this.button(L + i * (w + gap), y, w, rowH, entries[i].id, entries[i].label, {
-        sub: entries[i].sub,
+    const cellW = (pw - gap) / 2;
+    const cellH = TARGET_TOUCH_H;
+    for (let i = 0; i < 4; i++) {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      this.button(px + col * (cellW + gap), py + row * (cellH + gap), cellW, cellH, cells[i].id, cells[i].label, {
+        sub: cells[i].sub,
       });
+    }
+    // 底部：合成次级入口（触控 ≥48；点击展开合成面板）
+    const mergeH = Math.max(MIN_TOUCH_H, 48);
+    const mergeY = py + 2 * (cellH + gap) + 12;
+    if (mergeY + mergeH <= py + ph) {
+      this.button(px, mergeY, 120, mergeH, 'merge', '合成', { sub: '更多' });
     }
   }
 
-  /** 武器位选择：点「武器」入口后展开——先选改哪个武器位（一次一个决策） */
-  private drawMobileWeaponMenu(
-    state: PlayerUIState,
-    L: number,
-    usableW: number,
-    y: number,
-    rowH: number,
+  /** 面板返回条（轮子/武器/选项二级顶部） */
+  private drawPanelBackRow(px: number, py: number): number {
+    this.button(px, py, 96, TARGET_TOUCH_H, 'panel-back', '‹ 返回', {});
+    return py + TARGET_TOUCH_H + 8;
+  }
+
+  /** 轮子二级：前轮 / 后轮（一级「轮子」后才出现） */
+  private drawGaragePanelWheelPick(
+    draft: BuildDraft,
+    px: number,
+    pw: number,
+    py: number,
+    ph: number,
   ): void {
-    const draft = state.draft;
-    if (!draft) return;
+    const y = this.drawPanelBackRow(px, py);
+    const defs = this.garageChipDefs(draft);
+    const front = defs.find((d) => d.key === 'frontWheel');
+    const rear = defs.find((d) => d.key === 'rearWheel');
+    const gap = 8;
+    const h = TARGET_TOUCH_H;
+    if (y + h > py + ph) return;
+    this.button(px, y, pw, h, 'wheel-side:front', '前轮', { sub: front?.value ?? '?' });
+    if (y + h * 2 + gap > py + ph) return;
+    this.button(px, y + h + gap, pw, h, 'wheel-side:rear', '后轮', { sub: rear?.value ?? '?' });
+  }
+
+  /** 武器二级：武器位列表（点武器位 → 该位部件卡） */
+  private drawGaragePanelWeaponPick(
+    draft: BuildDraft,
+    px: number,
+    pw: number,
+    py: number,
+    ph: number,
+  ): void {
+    const y = this.drawPanelBackRow(px, py);
     const funcSlots = this.garageChipDefs(draft).filter(
       (d) => d.key !== 'body' && d.key !== 'rearWheel' && d.key !== 'frontWheel' && d.key !== 'drive',
     );
-    const backW = 64;
     const gap = 8;
-    const restW = usableW - backW - gap;
-    const w = (restW - gap * Math.max(0, funcSlots.length - 1)) / Math.max(1, funcSlots.length);
-    this.button(L, y, backW, rowH, 'entry-back', '‹ 返回', {});
-    for (let i = 0; i < funcSlots.length; i++) {
-      const s = funcSlots[i];
-      this.button(L + backW + gap + i * (w + gap), y, w, rowH, `chip:${s.key}`, s.label, {
-        sub: s.value,
-        active: state.garageSelected === s.key,
-      });
+    const h = TARGET_TOUCH_H;
+    let yy = y;
+    for (const s of funcSlots) {
+      if (yy + h > py + ph) break; // 面板内不溢出
+      this.button(px, yy, pw, h, `weapon-slot:${s.key}`, s.label, { sub: s.value });
+      yy += h + gap;
     }
   }
 
-  /** 选项条（展开态）：横向卡片 + 收起 + 滚动；选中自动收起由 runtime 保证 */
-  private drawMobileOptionStrip(
+  /** 选项（已选槽位）：选项卡 2 列网格 + 面板内垂直滚动；选中自动收起由 runtime 保证 */
+  private drawGaragePanelOptions(
     state: PlayerUIState,
-    L: number,
-    R: number,
-    y: number,
-    rowH: number,
+    draft: BuildDraft,
+    px: number,
+    pw: number,
+    py: number,
+    ph: number,
   ): void {
-    const draft = state.draft;
-    const garageSelected = state.garageSelected;
-    if (!draft || !garageSelected) return;
-    const opts = this.garageOptions(state, garageSelected);
-    const curVal = this.garageCurrentValue(draft, garageSelected);
-    const closeW = 58;
-    const arrowW = 40;
-    const gap = 6;
-    const optW = 170;
-    const closeX = L;
-    const stripL = L + closeW + gap;
-    const stripR = R;
-    const stripW = Math.max(60, stripR - stripL);
-    const totalW = opts.length * (optW + gap) - gap;
-    const maxScroll = Math.max(0, totalW - stripW);
-    if (this.optScroll > maxScroll) this.optScroll = maxScroll;
-    const canLeft = this.optScroll > 0;
-    const canRight = this.optScroll < maxScroll;
-    // 收起按钮（‹ 返回入口行；toggle 语义关闭选中槽）
-    this.button(closeX, y, closeW, rowH, 'opt-close', '‹', { sub: '收起' });
-    // 标题（改「X」）放在 strip 左端若空间足够
-    let optLeft = stripL;
-    if (canLeft) {
-      this.button(stripL, y, arrowW, rowH, 'opt-scroll-left', '‹');
-      optLeft = stripL + arrowW + gap;
+    const slot = state.garageSelected;
+    if (!slot) return;
+    const y = this.drawPanelBackRow(px, py);
+    const opts = this.garageOptions(state, slot);
+    const curVal = this.garageCurrentValue(draft, slot);
+    const gap = 8;
+    const cardH = TARGET_TOUCH_H;
+    const colW = (pw - gap) / 2;
+    const rows = Math.ceil(opts.length / 2);
+    const contentH = rows * (cardH + gap) - gap;
+    const viewH = Math.max(80, py + ph - y - 8);
+    const maxScroll = Math.max(0, contentH - viewH);
+    if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
+    if (maxScroll > 0) {
+      this.button(px, py + ph - TARGET_TOUCH_H, 60, TARGET_TOUCH_H, 'panel-scroll-up', '▲');
+      this.button(px + 68, py + ph - TARGET_TOUCH_H, 60, TARGET_TOUCH_H, 'panel-scroll-down', '▼');
     }
-    let optRight = stripR;
-    if (canRight) {
-      this.button(stripR - arrowW, y, arrowW, rowH, 'opt-scroll-right', '›');
-      optRight = stripR - arrowW - gap;
-    }
-    const clipW = Math.max(1, optRight - optLeft);
     const ctx = this.ctx;
     ctx.save();
     ctx.beginPath();
-    ctx.rect(this.ox + optLeft * this.scale, this.oy + y * this.scale, clipW * this.scale, rowH * this.scale);
+    ctx.rect(this.ox + px * this.scale, this.oy + y * this.scale, pw * this.scale, viewH * this.scale);
     ctx.clip();
-    let x = optLeft - this.optScroll;
-    for (const o of opts) {
-      const x0 = x;
-      const x1 = x0 + optW;
-      const fully = x0 >= optLeft - 0.5 && x1 <= optRight + 0.5;
-      if (fully) {
-        this.button(x0, y, optW, rowH, `opt:${o.v}`, o.t, {
-          sub: o.meta || undefined,
-          active: o.v === curVal,
-          locked: o.locked,
-          disabled: !!o.locked,
-        });
-      } else if (x1 > optLeft && x0 < optRight) {
-        const fill = o.locked ? '#262e3d' : o.v === curVal ? C.blueDeep : C.panel;
-        this.rect(x0, y, optW, rowH, fill, o.locked ? C.lockText : C.border, 1);
-        this.text(o.t, x0 + optW / 2, y + rowH / 2, 15, o.locked ? C.textDark : C.text, 'center', 600);
-      }
-      x += optW + gap;
+    let yy = y - this.panelScroll;
+    for (let i = 0; i < opts.length; i++) {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const c = opts[i];
+      this.button(px + col * (colW + gap), yy + row * (cardH + gap), colW, cardH, `opt:${c.v}`, c.t, {
+        sub: c.meta || undefined,
+        active: c.v === curVal,
+        locked: c.locked,
+        disabled: !!c.locked,
+      });
     }
     ctx.restore();
   }
 
-  /** 合成面板（点击「合成」入口后展开；规则仍在 runtime onMerge，Host 不决定） */
-  private drawMobileMergePanel(
+  /** 合成面板（点击「合成」次级入口后展开；规则仍在 runtime onMerge） */
+  private drawGaragePanelMerge(
     state: PlayerUIState,
-    L: number,
-    R: number,
-    usableW: number,
-    y0: number,
-    rowH: number,
-    y1: number,
+    draft: BuildDraft,
+    px: number,
+    pw: number,
+    py: number,
   ): void {
-    const draft = state.draft;
     const p = state.progress;
     const inv = state.inventory;
     const reserved = new Set(equippedDefIds(draft));
@@ -857,17 +911,40 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     for (const pp of OFFICIAL_PARTS) available += Math.max(0, inv[pp].one - (reserved.has(pp) ? 1 : 0));
     const canMergeParts = available >= 5;
     const canAfford = canAffordMerge(p.coin);
-    // 行1：说明（一次一行，不堆长文）
-    this.text(`合成：5 × 1★ → 1 × 随机 2★ · 消耗 ${MERGE_COST_COIN} 金币`, L, y0 + 14, 13, C.text, 'left', 700);
-    this.text(`可合成副本 ${available} · 持有金币 ${p.coin}`, L, y0 + 32, 12, C.textDim);
-    // 行2：关闭 + 确认
-    const confirmW = Math.max(140, usableW * 0.32);
-    this.button(R - confirmW, y1, confirmW, rowH, 'merge-confirm',
-      !canMergeParts ? '副本不足' : !canAfford ? `金币不足（${p.coin}/${MERGE_COST_COIN}）` : '确认合成',
+    this.text('合成：5 × 1★ → 1 × 随机 2★', px, py + 14, 14, C.text, 'left', 700);
+    this.text(`可合成 ${available} · 消耗 ${MERGE_COST_COIN} 金币`, px, py + 34, 14, C.textDim);
+    const confirmW = Math.max(140, pw * 0.5);
+    this.button(px + pw - confirmW, py + 60, confirmW, TARGET_TOUCH_H, 'merge-confirm',
+      !canMergeParts ? '副本不足' : !canAfford ? `金币不足` : '确认合成',
       { disabled: !(canMergeParts && canAfford), primary: canMergeParts && canAfford });
-    const closeW = 96;
-    this.button(R - confirmW - closeW - 8, y1, closeW, rowH, 'merge-close', '关闭', {});
+    this.button(px, py + 60, 92, TARGET_TOUCH_H, 'merge-close', '关闭', {});
   }
+
+  /**
+   * F-WX-UI-1：装配预览取景子区域（viewport logical）——Mobile Garage 时 = 左侧展示区。
+   * Runtime reframePlayerCamera 经 battle.reframe(fit, framingRect) 使 previewSolo fit 到本区。
+   */
+  getPreviewFramingRect(): { x: number; y: number; w: number; h: number } | null {
+    if (!this.isMobile) return null;
+    const state = this.lastState;
+    if (!state || state.playerPhase !== 'garage' || state.battleState !== 'editing') return null;
+    const uL = this.insL;
+    const uR = this.insR;
+    const uT = this.insT;
+    const uB = this.insB;
+    const usableW = Math.max(240, this.W - uL - uR);
+    const topH = 34;
+    const ctaH = 56;
+    const ctaY = this.H - uB - 16 - ctaH;
+    const panelX = uL + 10 + Math.round(usableW * 0.57) + 12;
+    const showX = uL + 10;
+    const showW = Math.max(200, panelX - 12 - showX);
+    const bodyTop = uT + topH + 14;
+    const bodyBot = ctaY - 14;
+    return { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
+  }
+
+
 
 
   /** 槽位 chip 定义（Desktop/Mobile 共用） */
@@ -994,19 +1071,19 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const centerY = this.H / 2 - 20;
     const myX = this.W * 0.3;
     const opX = this.W * 0.7;
-    this.text('我的战车', myX, centerY, this.isMobile ? 13 : 16, C.textDim, 'center');
+    this.text('我的战车', myX, centerY, this.isMobile ? 14 : 16, C.textDim, 'center');
     this.text('VS', this.W / 2, centerY, this.isMobile ? 40 : 56, C.gold, 'center', 900);
-    this.text('对手', opX, centerY - (this.isMobile ? 32 : 40), this.isMobile ? 13 : 16, C.textDim, 'center');
+    this.text('对手', opX, centerY - (this.isMobile ? 32 : 40), this.isMobile ? 14 : 16, C.textDim, 'center');
     if (opponent) {
       this.text(opponent.bodyName, opX, centerY + (this.isMobile ? 4 : 6), this.isMobile ? 16 : 20, C.orange, 'center', 700);
       if (opponent.parts.length) {
-        this.text(opponent.parts.join(' / '), opX, centerY + (this.isMobile ? 26 : 32), this.isMobile ? 10 : 12, C.textDim, 'center');
+        this.text(opponent.parts.join(' / '), opX, centerY + (this.isMobile ? 26 : 32), this.isMobile ? 14 : 12, C.textDim, 'center');
       }
       const pillText = `驱动 · ${opponent.drive}`;
       const pillW = this.isMobile ? 110 : 130;
       const py = centerY + (this.isMobile ? 40 : 48);
       this.rect(opX - pillW / 2, py, pillW, 26, 'rgba(59,111,212,0.16)', C.blue, 1);
-      this.text(pillText, opX, py + 13, this.isMobile ? 12 : 13, C.driveBlue, 'center', 600);
+      this.text(pillText, opX, py + 13, this.isMobile ? 14 : 13, C.driveBlue, 'center', 600);
     }
   }
 
@@ -1029,22 +1106,22 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const h = 10;
       const barBase = this.insL + 8;
       const barW = Math.max(64, (this.W - this.insL - this.insR - 64) * 0.32);
-      this.text('A', barBase, top + 12, 13, C.blue, 'left', 700);
+      this.text('A', barBase, top + 12, 14, C.blue, 'left', 700);
       const barAX = barBase + 16;
       const pctA = Math.max(0, Math.min(1, s.sideA.hp / Math.max(s.sideA.maxHp, 1))) * 100;
       this.rect(barAX, top, barW, h, '#232b38', C.border, 1);
       if (pctA > 0) this.rect(barAX, top, barW * (pctA / 100), h, C.blue);
-      this.text(`${Math.round(s.sideA.hp)}`, barAX + barW + 6, top + 12, 12, C.text);
+      this.text(`${Math.round(s.sideA.hp)}`, barAX + barW + 6, top + 12, 14, C.text);
 
       const barBRight = this.W - this.insR - 8;
-      this.text('B', barBRight, top + 12, 13, '#e08a2e', 'right', 700);
+      this.text('B', barBRight, top + 12, 14, '#e08a2e', 'right', 700);
       const barBX = barBRight - 16 - barW;
       const pctB = Math.max(0, Math.min(1, s.sideB.hp / Math.max(s.sideB.maxHp, 1))) * 100;
       this.rect(barBX, top, barW, h, '#232b38', C.border, 1);
       if (pctB > 0) this.rect(barBX, top, barW * (pctB / 100), h, '#e08a2e');
-      this.text(`${Math.round(s.sideB.hp)}`, barBX - 6, top + 12, 12, C.text, 'right');
+      this.text(`${Math.round(s.sideB.hp)}`, barBX - 6, top + 12, 14, C.text, 'right');
 
-      this.text(s.phase === 'End' ? '战斗结束' : '战斗中', this.W / 2, top + 12, 13, C.gold, 'center');
+      this.text(s.phase === 'End' ? '战斗结束' : '战斗中', this.W / 2, top + 12, 14, C.gold, 'center');
       if (frame.phaseCountdownText != null) {
         this.text(frame.phaseCountdownText, this.W / 2, top + 60, 34, C.red, 'center', 800);
       }
@@ -1134,9 +1211,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     let y = this.insT + 48 + 6;
 
     const titleH = 42;
-    this.text(isWin ? '【胜利】' : '【失败】', this.W / 2, y + titleH / 2, 32, isWin ? C.green : C.red, 'center', 800);
+    this.text(isWin ? '【胜利】' : '【失败】', this.W / 2, y + titleH / 2, 24, isWin ? C.green : C.red, 'center', 800);
     y += titleH;
-    this.text(`我方 HP ${Math.round(r.hpA)} · 对手 HP ${Math.round(r.hpB)}`, this.W / 2, y + 12, 13, C.textDim, 'center');
+    this.text(`我方 HP ${Math.round(r.hpA)} · 对手 HP ${Math.round(r.hpB)}`, this.W / 2, y + 12, 14, C.textDim, 'center');
     y += 24;
 
     if (state.reward) {
@@ -1148,11 +1225,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const coinSign = state.economy.coinDelta >= 0 ? '+' : '';
       const ratingSign = state.economy.ratingDelta >= 0 ? '+' : '';
       this.rect(cardX, y, cardW, 36, '#1c2230', C.border, 1);
-      this.text(`金币 ${coinSign}${state.economy.coinDelta} · 段位 ${ratingSign}${state.economy.ratingDelta}（${state.economy.tierLabel} ${state.economy.rating}）`, this.W / 2, y + 18, 13, C.gold, 'center', 700);
+      this.text(`金币 ${coinSign}${state.economy.coinDelta} · 段位 ${ratingSign}${state.economy.ratingDelta}（${state.economy.tierLabel} ${state.economy.rating}）`, this.W / 2, y + 18, 14, C.gold, 'center', 700);
       y += 44;
     }
     if (state.resultOnboardingVisible) {
-      this.text('获得新部件，可以回车库调整', this.W / 2, y + 10, 12, C.onboardText, 'center');
+      this.text('获得新部件，可以回车库调整', this.W / 2, y + 10, 14, C.onboardText, 'center');
       y += 22;
     }
 

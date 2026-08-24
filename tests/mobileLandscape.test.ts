@@ -160,65 +160,80 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     bindPlatformCore(createWebCore());
   });
 
-  it('验收1/2｜Garage 首屏：入口行 + 主 CTA 在有效 safe area + 命中 ≥44px；无部件信息墙', () => {
+  it('验收1/2｜Garage 首屏：2×2 主分类 + 主 CTA 在中央交互区 + 命中 ≥48px；无部件信息墙', () => {
     for (const vp of VIEWPORTS.filter((v) => v.mobile)) {
       const env = makeHost(vp, LANDSCAPE_INSETS);
       env.host.render(richGarageState()); // 富库存+金币：merge 可点（非禁用态才注册命中）
-      const ids = [
-        'cta-find',
-        'merge',
-        'entry:body',
-        'entry:rearWheel',
-        'entry:frontWheel',
-        'entry:drive',
-        'entry-weapons',
-      ];
+      // 主分类（2×2）：车身/轮子/驱动/武器——不暴露 frontWheel/rearWheel/武器位一级入口
+      const ids = ['cta-find', 'merge', 'entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons'];
       for (const id of ids) {
         const a = env.host.getHitAreasForTest().find((x) => x.id === id);
         expect(a, `${vp.w}×${vp.h} 应有 ${id}`).toBeTruthy();
-        expect(a!.h, `${vp.w}×${vp.h} ${id} 命中高 ≥44`).toBeGreaterThanOrEqual(44);
+        expect(a!.h, `${vp.w}×${vp.h} ${id} 命中高 ≥48`).toBeGreaterThanOrEqual(48);
         expect(a!.x, `${id} x 在 safe area 内`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.left);
         expect(a!.x + a!.w, `${id} 右缘在 safe area 内`).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right);
         expect(a!.y, `${id} y 在 safe area 内`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.top);
         expect(a!.y + a!.h, `${id} 底缘在 safe area 内`).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom);
+        // 主要交互位于中央交互区（安全区内再留 ≥4px 边距，不贴安全区边缘）
+        expect(a!.x, `${id} 不贴左安全缘`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.left + 4);
+        expect(a!.x + a!.w, `${id} 不贴右安全缘`).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right - 4);
+        expect(a!.y, `${id} 不贴上安全缘`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.top + 4);
+        expect(a!.y + a!.h, `${id} 不贴下安全缘`).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom - 4);
       }
-      // F-WX-8-B：首屏不展开完整部件信息墙——无选项、无武器位 chip、无合成面板
+      // 首屏不展开完整部件信息墙：无选项、无轮子/武器位二级、无合成面板
       expect(areas(env, 'opt:')).toHaveLength(0);
       expect(areas(env, 'chip:')).toHaveLength(0);
+      expect(areas(env, 'wheel-side:')).toHaveLength(0);
+      expect(areas(env, 'weapon-slot:')).toHaveLength(0);
       expect(areas(env, 'merge-confirm')).toHaveLength(0);
       expect(areas(env, 'merge-close')).toHaveLength(0);
-      // 「寻找对手」是最大主按钮（宽 > 合成入口宽）
+      // 「寻找对手」唯一最大主按钮：宽 > 合成入口、高 ≥52、距 safe bottom ≥16
       const cta = env.host.getHitAreasForTest().find((x) => x.id === 'cta-find')!;
       const merge = env.host.getHitAreasForTest().find((x) => x.id === 'merge')!;
       expect(cta.w, 'CTA 宽 > 合成入口宽').toBeGreaterThan(merge.w);
+      expect(cta.h, 'CTA 高 ≥52').toBeGreaterThanOrEqual(52);
+      expect(vp.h - LANDSCAPE_INSETS.bottom - (cta.y + cta.h), 'CTA 距 safe bottom ≥16').toBeGreaterThanOrEqual(16);
     }
   });
 
-  it('F-WX-8-B｜一次只处理一个配置决策：点入口才展开该类；展开时不混显其它入口/武器位', () => {
+  it('F-WX-UI-1｜一次只处理一个配置决策：点分类才展开；轮子/武器二级不混显；展开时车辆预览仍可见', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState());
-    // 点「车身」入口 → 派发 onToggleGarageSlot('body') → runtime 侧展开
+    // 点「车身」→ 派发 onToggleGarageSlot('body') → runtime 侧展开
     const entryBody = env.host.getHitAreasForTest().find((a) => a.id === 'entry:body')!;
     env.pointer(entryBody.x + entryBody.w / 2, entryBody.y + entryBody.h / 2);
     expect(env.fired['toggle']).toContain('body');
     env.host.render(richGarageState({ garageSelected: 'body' }));
-    // 展开态：只有 body 选项；入口行/武器位 chip 不再混显
+    // 展开态：只有 body 选项；不混显其它分类/轮子/武器位
     expect(areas(env, 'opt:').length).toBeGreaterThan(0);
     expect(areas(env, 'entry:')).toHaveLength(0);
-    expect(areas(env, 'chip:')).toHaveLength(0);
-    // 点「武器」入口 → 展开武器位选择（chip: 功能件槽），无选项
+    expect(areas(env, 'entry-wheels')).toHaveLength(0);
+    expect(areas(env, 'wheel-side:')).toHaveLength(0);
+    expect(areas(env, 'weapon-slot:')).toHaveLength(0);
+    // 点「轮子」→ 面板内前轮/后轮二级（首屏不暴露前/后轮一级入口）
     env.host.render(richGarageState()); // 收起（runtime 选完即收起语义）
-    const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'entry-weapons')!;
+    const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'entry-wheels')!;
     env.pointer(entryW.x + entryW.w / 2, entryW.y + entryW.h / 2);
-    expect(areas(env, 'chip:').length).toBeGreaterThan(0); // 武器位 chip 出现
-    expect(areas(env, 'opt:')).toHaveLength(0); // 尚未选武器位 → 无选项
-    expect(areas(env, 'entry:')).toHaveLength(0); // 入口行隐藏
-    // 选一个武器位 → 展开该类选项
-    const slot = areas(env, 'chip:')[0];
+    expect(areas(env, 'wheel-side:front').length).toBeGreaterThan(0); // 前轮二级
+    expect(areas(env, 'wheel-side:rear').length).toBeGreaterThan(0); // 后轮二级
+    expect(areas(env, 'opt:')).toHaveLength(0); // 尚未选轮子 → 无选项
+    // 选前轮 → 展开 frontWheel 选项
+    const front = env.host.getHitAreasForTest().find((a) => a.id === 'wheel-side:front')!;
+    env.pointer(front.x + front.w / 2, front.y + front.h / 2);
+    expect(env.fired['toggle']).toContain('frontWheel');
+    env.host.render(richGarageState({ garageSelected: 'frontWheel' }));
+    expect(areas(env, 'opt:').length).toBeGreaterThan(0);
+    // 点「武器」→ 武器位列表（无选项）
+    env.host.render(richGarageState());
+    const entryWe = env.host.getHitAreasForTest().find((a) => a.id === 'entry-weapons')!;
+    env.pointer(entryWe.x + entryWe.w / 2, entryWe.y + entryWe.h / 2);
+    expect(areas(env, 'weapon-slot:').length).toBeGreaterThan(0);
+    expect(areas(env, 'opt:')).toHaveLength(0);
+    // 选武器位 → 展开该位选项
+    const slot = areas(env, 'weapon-slot:')[0];
     env.pointer(slot.x + slot.w / 2, slot.y + slot.h / 2);
-    expect(env.fired['toggle'].length).toBeGreaterThan(1);
-    env.host.render(richGarageState({ garageSelected: slot.id.slice(5) }));
+    env.host.render(richGarageState({ garageSelected: slot.id.slice(12) }));
     expect(areas(env, 'opt:').length).toBeGreaterThan(0);
   });
 
@@ -256,52 +271,59 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     expect(chip!.h).toBe(50); // 旧 chip 高 50 逻辑
   });
 
-  it('验收3｜功能件选项横向滚动：点入口展开 → 可见选项不超屏、可滚动、滚动后可达更多', () => {
+  it('验收3｜功能件选项面板滚动：武器入口 → 武器位 → 选项卡不超屏、面板内滚动可达更多', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState()); // 富库存：全部 19 个功能件选项可装备（可见）
     // 通过「武器」入口 → 选一个武器位 → 展开功能件选项
     const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'entry-weapons')!;
     env.pointer(entryW.x + entryW.w / 2, entryW.y + entryW.h / 2);
-    const fnSlot = areas(env, 'chip:').map((a) => a.id.slice(5)).find((k) => k !== 'body' && k !== 'rearWheel' && k !== 'frontWheel' && k !== 'drive');
-    expect(fnSlot, '武器位 chip 应存在').toBeTruthy();
+    const fnSlot = areas(env, 'weapon-slot:').map((a) => a.id.slice(12)).find((k) => k !== 'body' && k !== 'rearWheel' && k !== 'frontWheel' && k !== 'drive');
+    expect(fnSlot, '武器位应存在').toBeTruthy();
 
     env.host.render(richGarageState({ garageSelected: fnSlot }));
     const firstVisible = areas(env, 'opt:').map((a) => a.id);
     expect(firstVisible.length).toBeGreaterThan(0);
-    // 全部可见选项都在屏幕内（safe area）+ 命中 ≥44
+    // 全部可见选项都在面板内（safe area）+ 命中 ≥48
     for (const a of env.host.getHitAreasForTest().filter((x) => x.id.startsWith('opt:'))) {
       expect(a.x).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.left);
       expect(a.x + a.w).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right);
       expect(a.y + a.h).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom);
-      expect(a.h).toBeGreaterThanOrEqual(44);
+      expect(a.h).toBeGreaterThanOrEqual(48);
     }
-    // 功能件选项很多 → 应有右滚动箭头
-    const rightArrow = env.host.getHitAreasForTest().find((a) => a.id === 'opt-scroll-right');
-    expect(rightArrow, '应有右滚动箭头').toBeTruthy();
-    // 点右箭头 → 滚动 → 可见选项变化
-    env.pointer(rightArrow!.x + rightArrow!.w / 2, rightArrow!.y + rightArrow!.h / 2);
-    const secondVisible = areas(env, 'opt:').map((a) => a.id);
-    expect(secondVisible.some((id) => !firstVisible.includes(id)), '滚动后应出现新选项').toBe(true);
+    // 功能件选项很多（2 列网格超出面板）→ 应有面板内滚动箭头
+    const scrollDown = env.host.getHitAreasForTest().find((a) => a.id === 'panel-scroll-down');
+    expect(scrollDown, '应有面板内滚动箭头').toBeTruthy();
+    // 点滚动 → 选项在面板内上移（内容滚动，不整屏滚动）
+    const yBefore = areas(env, 'opt:')[0].y;
+    env.pointer(scrollDown!.x + scrollDown!.w / 2, scrollDown!.y + scrollDown!.h / 2);
+    const yAfter = areas(env, 'opt:')[0].y;
+    expect(yAfter, '滚动后选项上移（面板内滚动）').toBeLessThan(yBefore);
     for (const a of env.host.getHitAreasForTest().filter((x) => x.id.startsWith('opt:'))) {
       expect(a.x + a.w).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right);
+      expect(a.y + a.h).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom);
     }
   });
 
-  it('验收4｜Result 两个主要决策完整可点（≥40px、在屏内、点击派发）', () => {
+  it('验收4｜Result 中央 Card：两个主要决策并列居中（不贴边缘、≥48px、点击派发）', () => {
     const vp = { w: 932, h: 430 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(RESULT_STATE);
     for (const id of ['result-adjust', 'result-next', 'reward-ad']) {
       const a = env.host.getHitAreasForTest().find((x) => x.id === id);
       expect(a, `应有 ${id}`).toBeTruthy();
-      expect(a!.h, `${id} ≥40`).toBeGreaterThanOrEqual(40);
-      expect(a!.x).toBeGreaterThanOrEqual(0);
-      expect(a!.x + a!.w).toBeLessThanOrEqual(vp.w);
-      expect(a!.y + a!.h).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom);
+      expect(a!.h, `${id} ≥48`).toBeGreaterThanOrEqual(48);
+      // 中央 Result Card：按钮位于中央区域（不贴左右/上下边缘）
+      expect(a!.x, `${id} 不贴左缘`).toBeGreaterThanOrEqual(vp.w * 0.1);
+      expect(a!.x + a!.w, `${id} 不贴右缘`).toBeLessThanOrEqual(vp.w * 0.9);
+      expect(a!.y, `${id} 不贴上缘`).toBeGreaterThanOrEqual(vp.h * 0.1);
+      expect(a!.y + a!.h, `${id} 不贴下缘`).toBeLessThanOrEqual(vp.h * 0.9);
     }
+    // 两个主要决策并列（调整配置在左、下一场在右，同一行）
     const adjust = env.host.getHitAreasForTest().find((x) => x.id === 'result-adjust')!;
     const next = env.host.getHitAreasForTest().find((x) => x.id === 'result-next')!;
+    expect(Math.abs(adjust.y - next.y), '两决策同一行').toBeLessThanOrEqual(2);
+    expect(next.x, '下一场在右').toBeGreaterThan(adjust.x + adjust.w);
     env.pointer(adjust.x + adjust.w / 2, adjust.y + adjust.h / 2);
     env.pointer(next.x + next.w / 2, next.y + next.h / 2);
     expect(env.fired['resultAdjust']).toHaveLength(1);

@@ -422,10 +422,13 @@ const battleHost: PlayerBattleHost = {
   render: () => lab.render(),
   setPreviewVehicleFx: (fx) => renderer.setPreviewVehicleFx(fx),
   arenaDims: () => arenaDimsOf(lab.orchestrator),
-  reframe: (fit) => {
+  reframe: (fit, framingRect) => {
     const o = lab.orchestrator;
     if (!o) return;
-    renderer.reframe(o.getRenderSnapshot(), fit, { phase: fit === 'battle' ? o.phase : undefined });
+    renderer.reframe(o.getRenderSnapshot(), fit, {
+      phase: fit === 'battle' ? o.phase : undefined,
+      framingRect,
+    });
   },
   resize: (w, h) => renderer.resize(w, h),
 };

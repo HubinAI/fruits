@@ -124,7 +124,7 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
   }
 
   for (const soloVp of VIEWPORTS.filter((v) => !v.desktop)) {
-    it(`F-WX-8-B｜Garage previewSolo ${soloVp.w}×${soloVp.h}：车辆在 Dock 上方可视带完整可见 + 宽度占可用宽 30~45%`, () => {
+    it(`F-WX-UI-1｜Garage previewSolo ${soloVp.w}×${soloVp.h}：车辆 fit 到左侧展示区（framingRect）+ 占屏 28~38% + 中心在展示区`, () => {
       const vp = { w: soloVp.w, h: soloVp.h };
       const canvas = { getContext: () => makeStubCtx(), clientWidth: vp.w, clientHeight: vp.h, width: vp.w, height: vp.h } as unknown as HTMLCanvasElement;
       const surface: CanvasSurface = { width: vp.w, height: vp.h, devicePixelRatio: 1, now: () => 0 };
@@ -138,18 +138,35 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
       const r = new Renderer(canvas, new VisualRegistry(), surface);
       const snap = o.getRenderSnapshot();
       r.resize(snap.arena.width, o.arena.config.height);
-      r.reframe(snap, 'previewSolo');
+      // F-WX-UI-1：framingRect = 左侧展示区（与 CanvasHost.getPreviewFramingRect 同几何：
+      // 展示区 ~57% 屏宽，顶部 34+14，底部 CTA 56+16）
+      const topH = 34;
+      const ctaH = 56;
+      const ctaY = vp.h - 16 - ctaH;
+      const panelX = 10 + Math.round(vp.w * 0.57) + 12;
+      const showX = 10;
+      const showW = Math.max(200, panelX - 12 - showX);
+      const bodyTop = topH + 14;
+      const bodyBot = ctaY - 14;
+      const framingRect = { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
+      r.reframe(snap, 'previewSolo', { framingRect });
       const b = vehicleScreenBounds(snap.vehicleA, r.transform);
-      // 完整可见：顶部状态条 52 + 底部新三层 Dock 110（F-WX-8-B）
+      // 完整可见
       expect(b.minX).toBeGreaterThanOrEqual(-1);
       expect(b.maxX).toBeLessThanOrEqual(vp.w + 1);
-      expect(b.minY).toBeGreaterThanOrEqual(52 - 1);
-      expect(b.maxY).toBeLessThanOrEqual(vp.h - 110 + 1);
-      // F-WX-8-B：车辆视觉宽度占可用宽 30~45%（可用宽 = 屏宽 - compact insetX 8×2）
-      const usableW = vp.w - 16;
-      const ratio = (b.maxX - b.minX) / usableW;
-      expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ∈ [30%,45%]`).toBeGreaterThanOrEqual(0.3);
-      expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ≤ 45%`).toBeLessThanOrEqual(0.45);
+      expect(b.minY).toBeGreaterThanOrEqual(-1);
+      expect(b.maxY).toBeLessThanOrEqual(vp.h + 1);
+      // 车辆中心位于左侧展示区（x∈[showX,showX+showW] y∈[bodyTop,bodyBot]）
+      const centerX = (b.minX + b.maxX) / 2;
+      const centerY = (b.minY + b.maxY) / 2;
+      expect(centerX, `${vp.w}×${vp.h} 车辆中心 x 在展示区`).toBeGreaterThanOrEqual(framingRect.x - 2);
+      expect(centerX, `${vp.w}×${vp.h} 车辆中心 x 在展示区内`).toBeLessThanOrEqual(framingRect.x + framingRect.w + 2);
+      expect(centerY, `${vp.w}×${vp.h} 车辆中心 y 在展示区`).toBeGreaterThanOrEqual(framingRect.y - 2);
+      expect(centerY, `${vp.w}×${vp.h} 车辆中心 y 在展示区内`).toBeLessThanOrEqual(framingRect.y + framingRect.h + 2);
+      // F-WX-UI-1：车辆视觉宽度占屏 28~38%
+      const ratio = (b.maxX - b.minX) / vp.w;
+      expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ∈ [28%,38%]`).toBeGreaterThanOrEqual(0.28);
+      expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ≤ 38%`).toBeLessThanOrEqual(0.38);
     });
   }
 });

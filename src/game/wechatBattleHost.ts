@@ -13,7 +13,7 @@ import { registry } from '../core/content';
 import { PlanckBattleOrchestrator } from '../battle/planckBattleOrchestrator';
 import { PREVIEW_BATTLE_CONFIG } from '../battle/previewConfig';
 import type { BattleConfig, BattleOrchestratorApi } from '../battle/battleContract';
-import type { Renderer, CameraFit } from '../render/renderer';
+import type { Renderer, CameraFit, FramingRect } from '../render/renderer';
 import type { BattlePresentationController, BattleEventSource } from '../presentation/battlePresentationController';
 import type { BuildSnapshot } from '../core/types';
 import type { PlayerBattleHost } from './playerGameRuntime';
@@ -78,11 +78,12 @@ export class WechatBattleHost implements PlayerBattleHost {
     return { w: 1600, h: 900 };
   }
 
-  reframe(fit: CameraFit): void {
+  reframe(fit: CameraFit, framingRect?: FramingRect): void {
     const o = this.orchestrator;
     if (!o) return;
     this.renderer.reframe(o.getRenderSnapshot(), fit, {
       phase: fit === 'battle' ? o.phase : undefined,
+      framingRect,
     });
   }
 

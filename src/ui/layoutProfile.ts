@@ -27,6 +27,7 @@ export function resolveLayoutProfile(logicalW: number, logicalH: number): Layout
   return { mode: 'desktop', baseW: 1280, baseH: 720 };
 }
 
-/** 移动端主要触控目标的最小/目标高度（CSS px / 逻辑 px）；视觉可略小，命中区不可小于此 */
-export const MIN_TOUCH_H = 40;
-export const TARGET_TOUCH_H = 46;
+/** 移动端主要触控目标的最小/目标高度（CSS px / 逻辑 px）；视觉可略小，命中区不可小于此
+ *  F-WX-UI-1：最小 48（Queue 规格），目标 52~60 */
+export const MIN_TOUCH_H = 48;
+export const TARGET_TOUCH_H = 52;

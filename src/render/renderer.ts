@@ -94,6 +94,19 @@ const SAFE_INSET_Y = 28;
 export type CameraFit = 'vehicles' | 'primary-fire' | 'battle' | 'preview' | 'previewSolo' | 'previewFixed';
 
 /**
+ * F-WX-UI-1：取景子区域（viewport logical 坐标）。
+ * reframe 的 opts.framingRect 存在时，固定预览框（previewSolo/previewFixed）fit 到该
+ * 子区域内的安全区（rect 已含布局留白），用于 Mobile Garage 把车辆 fit 到「左侧展示区」。
+ * 无 framingRect → 全屏安全区逻辑不变（Desktop 零影响）。
+ */
+export interface FramingRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
  * Q15-UI-R2：玩家 Shell 固定预览取景（不呼吸缩放，不随 B 车身 bounds 重新 zoom）。
  * - previewSolo：Garage 只渲染「我的车」——固定世界框，使单车约占安全可视宽 ~40%，
  *   不因 2560/1920 宽屏把车无限放大、也不留大片黑区；
@@ -105,12 +118,12 @@ const SOLO_MIN_X = 400;
 const SOLO_MAX_X = 840;
 const SOLO_MIN_Y = 400;
 const SOLO_MAX_Y = 730;
-// F-WX-8-B：Mobile-first Garage 用紧凑 solo 框——纵向收窄到车辆+地面附近
-// （spawn y=640、车高 ≤80、地面锚 640；groundY+40 钳制后 bh≈146），横向 560
-// （车辆实际世界宽 ~243 含轮/部件，560 框 → 屏占比 ≈243/576≈42%，落在 30~45%
-// 且不随屏宽漂移）。旧框（y∈[400,730] 高 330）在手机 390 逻辑高下被高度 fit 压扁（~24%）。
-const MOBILE_SOLO_MIN_X = 340;
-const MOBILE_SOLO_MAX_X = 900;
+// F-WX-UI-1：Mobile Garage 车辆 fit 到「左侧展示区」（framingRect，~55-57% 屏宽）——
+// solo 框收窄到 400 世界宽（spawn A x=620 中心，车辆世界宽 ~243 含轮/部件），
+// 区内占比 ≈243/416≈58% → 屏占比 ≈0.57×0.58≈29~30%，落在 28~38% 且不随屏宽漂移。
+// 纵向保持车辆+地面附近（groundY+40 钳制后 bh≈146）。
+const MOBILE_SOLO_MIN_X = 420;
+const MOBILE_SOLO_MAX_X = 820;
 const MOBILE_SOLO_MIN_Y = 550;
 const MOBILE_SOLO_MAX_Y = 660;
 // F-WX-8-C：Mobile 战斗 Active corridor——覆盖真实交战区（开局 A(400)/B(1200) 完整
@@ -1440,7 +1453,7 @@ export class Renderer {
   reframe(
     snap: BattleRenderSnapshot,
     fit: CameraFit = 'vehicles',
-    opts: { forwardExtent?: number; recoilExtent?: number; phase?: string } = {},
+    opts: { forwardExtent?: number; recoilExtent?: number; phase?: string; framingRect?: FramingRect } = {},
   ): void {
     const forwardExtent = opts.forwardExtent ?? 520;
     const recoilExtent = opts.recoilExtent ?? 180;
@@ -1619,8 +1632,30 @@ export class Renderer {
       : isCompact
         ? Math.round(40 * this.viewDpr)
         : SAFE_INSET_Y;
-    const safeW = Math.max(2, cw - insetX * 2);
-    const safeH = Math.max(2, ch - insetTop - insetBottom);
+    // F-WX-UI-1：framingRect（viewport logical 子区域）存在时，固定预览框 fit 到该区域
+    // 内的安全区（rect 已含布局留白，内部仅留小边距）——Mobile Garage 车辆 fit 到左侧
+    // 展示区；无 framingRect → 全屏安全区逻辑（Desktop 零影响）。
+    const framing = opts.framingRect;
+    let baseX: number;
+    let baseY: number;
+    let safeW: number;
+    let safeH: number;
+    if (framing && isFixed) {
+      const pad = 6 * this.viewDpr;
+      const fx = framing.x * this.viewDpr;
+      const fy = framing.y * this.viewDpr;
+      const fw = framing.w * this.viewDpr;
+      const fh = framing.h * this.viewDpr;
+      baseX = fx + pad;
+      baseY = fy + pad;
+      safeW = Math.max(2, fw - pad * 2);
+      safeH = Math.max(2, fh - pad * 2);
+    } else {
+      baseX = insetX;
+      baseY = insetTop;
+      safeW = Math.max(2, cw - insetX * 2);
+      safeH = Math.max(2, ch - insetTop - insetBottom);
+    }
     // Q06-UX-R2-FIX / Q08-A-FIX：声明「完整入画」的 fit（preview / battle）直接取
     // fitLimit——任何 >1 的乘数（旧 ×1.9、×1.05）都会使含 margin 的内容超出
     // safeW×safeH 被左右裁切，破坏完整入画硬约束。preview 的明显放大来自近距 spawn
@@ -1632,8 +1667,8 @@ export class Renderer {
     if (scale < MIN_CONTENT_SCALE) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
     // 内容居中于安全区中心（offset 含安全区内缩量；玩家 Shell 预览用 top 内缩）
-    const offsetX = insetX + (safeW - bw * scale) / 2 - minX * scale;
-    const offsetY = insetTop + (safeH - bh * scale) / 2 - minY * scale;
+    const offsetX = baseX + (safeW - bw * scale) / 2 - minX * scale;
+    const offsetY = baseY + (safeH - bh * scale) / 2 - minY * scale;
     this.transform = { scale, offsetX, offsetY };
   }
 

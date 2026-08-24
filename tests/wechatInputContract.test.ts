@@ -159,10 +159,10 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
 
   for (const dpr of DPRS) {
     for (const vp of MOBILE_VPS) {
-      it(`DPR=${dpr} ${vp.w}×${vp.h}：raw 逻辑坐标 → 归一化 → 命中同一 id（cta-find / entry:body）`, () => {
+      it(`DPR=${dpr} ${vp.w}×${vp.h}：raw 逻辑坐标 → 归一化 → 命中同一 id（F-WX-UI-1 中央面板）`, () => {
         const env = setup(vp, dpr);
         env.host.render(garageState());
-        for (const id of ['cta-find', 'entry:body', 'entry-weapons', 'merge']) {
+        for (const id of ['cta-find', 'entry:body', 'entry-wheels', 'entry-weapons', 'merge']) {
           const area = env.areas().find((a) => a.id === id);
           expect(area, `${vp.w}×${vp.h} DPR=${dpr} 应有 ${id}`).toBeTruthy();
           const raw = rawFor(area!, vp, dpr, false); // raw = window logical px
@@ -172,13 +172,26 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
           } else if (id === 'merge') {
             expect(env.fired['merge'] ?? []).toHaveLength(0); // Mobile merge 展开面板（非直接合成）
             expect(env.areas().some((a) => a.id === 'merge-close')).toBe(true); // 合成面板已展开
+          } else if (id === 'entry-wheels') {
+            // 轮子一级 → 面板内前轮/后轮二级（首屏不暴露 frontWheel/rearWheel 入口）
+            expect(env.areas().some((a) => a.id === 'wheel-side:front')).toBe(true);
+            const front = env.areas().find((a) => a.id === 'wheel-side:front')!;
+            const raw2 = rawFor(front, vp, dpr, false);
+            env.fireTouch(raw2.rawX, raw2.rawY);
+            expect(env.fired['toggle']).toContain('frontWheel');
           } else if (id === 'entry-weapons') {
-            expect(env.areas().some((a) => a.id.startsWith('chip:'))).toBe(true); // 武器位选择
+            // 武器一级 → 面板内武器位列表（weapon-slot:）
+            expect(env.areas().some((a) => a.id.startsWith('weapon-slot:'))).toBe(true);
           } else {
             expect(env.fired['toggle']).toContain(id.slice(6));
           }
-          // 复位：回到 Garage 首屏（runtime 收起语义）
+          // 复位：回到 Garage 首屏（runtime 收起语义 + 面板返回 home）
           env.host.render(garageState());
+          const back = env.areas().find((a) => a.id === 'panel-back');
+          if (back) {
+            const rawB = rawFor(back, vp, dpr, false);
+            env.fireTouch(rawB.rawX, rawB.rawY);
+          }
           delete env.fired['find'];
           delete env.fired['toggle'];
         }

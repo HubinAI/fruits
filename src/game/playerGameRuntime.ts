@@ -64,7 +64,7 @@ import {
 } from '../core/playerProgress';
 import { phaseRemainingMs, warningCountdown } from '../presentation/battlePhaseFx';
 import type { BattleConfig, BattleOrchestratorApi } from '../battle/battleContract';
-import type { CameraFit } from '../render/renderer';
+import type { CameraFit, FramingRect } from '../render/renderer';
 import type { BuildSnapshot } from '../core/types';
 import type { UiMode, BattleState, PlayerPhase } from '../ui/playerShell';
 import type { PlayerUIState, PlayerUIActions, PlayerUIHost } from '../ui/playerUI';
@@ -82,8 +82,9 @@ export interface PlayerBattleHost {
   render(): void;
   setPreviewVehicleFx(fx: { alpha: number; scale: number } | null): void;
   arenaDims(): { w: number; h: number };
-  /** 按 fit 构图一次（host 用自己的 renderer.reframe；battle fit 需带 phase） */
-  reframe(fit: CameraFit): void;
+  /** 按 fit 构图一次（host 用自己的 renderer.reframe；battle fit 需带 phase）；
+   *  framingRect（viewport logical 子区域）存在时固定预览框 fit 到该区域（Mobile Garage） */
+  reframe(fit: CameraFit, framingRect?: FramingRect): void;
   resize(w: number, h: number): void;
 }
 
@@ -407,7 +408,7 @@ export class PlayerGameRuntime {
             ? 'previewFixed'
             : 'preview')
       : 'battle'; // 正式战斗：按 phase 构图（Q08-A）
-    this.deps.battle.reframe(fit);
+    this.deps.battle.reframe(fit, this.deps.host.getPreviewFramingRect?.() ?? undefined);
   }
 
   /** 视口 resize：arena 尺寸 → host resize + 重构图（Web 可经 deps.onResize 接管 scenario 分支） */

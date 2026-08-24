@@ -127,4 +127,9 @@ export interface PlayerUIHost {
   render(state: PlayerUIState): void;
   /** 每帧：Battle HUD（HP + 阶段 + Warning 倒计时） */
   renderBattleFrame(frame: PlayerUIHudFrame): void;
+  /**
+   * F-WX-UI-1：装配预览取景子区域（viewport logical 坐标；Mobile Garage = 左侧展示区）。
+   * Runtime 构图（reframePlayerCamera）经它取 framingRect；无实现/非适用阶段 → null。
+   */
+  getPreviewFramingRect?(): { x: number; y: number; w: number; h: number } | null;
 }
