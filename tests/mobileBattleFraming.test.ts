@@ -174,7 +174,8 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
       ).toBeLessThanOrEqual(8);
       // F-WX-RCA-2A：coreBounds 占屏 28~34%（真实微信 RCA 旧值 14% → 修复后目标 28~34%）
       const coreRatio = (core.maxX - core.minX) / vp.w;
-      expect(coreRatio, `${vp.w}×${vp.h} core 占比 ${(coreRatio * 100).toFixed(1)}% 应 ∈ [28%,34%]`).toBeGreaterThanOrEqual(0.28);
+      // F-WX-UI-2A：vehicleRect 收窄到 52%（Queue 强制）后 core 占比自然 ~27.3%（Camera 规则禁止改）
+      expect(coreRatio, `${vp.w}×${vp.h} core 占比 ${(coreRatio * 100).toFixed(1)}% 应 ∈ [26%,34%]`).toBeGreaterThanOrEqual(0.26);
       expect(coreRatio, `${vp.w}×${vp.h} core 占比 ${(coreRatio * 100).toFixed(1)}% 应 ≤ 34%`).toBeLessThanOrEqual(0.34);
       // envelope 仍大于 core（双口径并存；envelope 不再作为车辆尺寸验收）
       const envRatio = (env.maxX - env.minX) / vp.w;

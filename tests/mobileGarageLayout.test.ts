@@ -98,17 +98,37 @@ describe('F-WX-UI-F1｜computeMobileGarageLayout 纯函数（唯一几何来源�
         expect(r.w, `${vp.w}×${vp.h} ${k} 宽 >0`).toBeGreaterThan(0);
         expect(r.h, `${vp.w}×${vp.h} ${k} 高 >0`).toBeGreaterThan(0);
       }
-      // vehicle 与 panel 不重叠（左右分区）
+      // vehicle 与 panel 不重叠（左右分区；中间留 12~16px）
       expect(l.vehicleRect.x + l.vehicleRect.w, `${vp.w}×${vp.h} vehicle 右缘 ≤ panel 左缘`).toBeLessThanOrEqual(l.panelRect.x);
-      // CTA：高 56、距 safe bottom ≥16、宽 220-300
+      expect(l.panelRect.x - (l.vehicleRect.x + l.vehicleRect.w), '两区中间 gap 12~16').toBeGreaterThanOrEqual(12);
+      expect(l.panelRect.x - (l.vehicleRect.x + l.vehicleRect.w), '两区中间 gap ≤16').toBeLessThanOrEqual(16);
+      // F-WX-UI-2A：CTA 与面板同宽（右侧完整操作组）、高 56、距 safe bottom ≥16、不贴底
+      expect(l.ctaRect.w, 'CTA 与面板同宽').toBe(l.panelRect.w);
+      expect(l.ctaRect.x, 'CTA x == panel.x').toBe(l.panelRect.x);
       expect(l.ctaRect.h, 'CTA 高 = 56').toBe(56);
       expect(vp.h - INSETS.bottom - (l.ctaRect.y + l.ctaRect.h), 'CTA 距 safe bottom ≥16').toBeGreaterThanOrEqual(16);
-      expect(l.ctaRect.w, 'CTA 宽 220-300').toBeGreaterThanOrEqual(220);
-      expect(l.ctaRect.w, 'CTA 宽 ≤300').toBeLessThanOrEqual(300);
+      expect(l.ctaRect.w, 'CTA 宽 ≥220').toBeGreaterThanOrEqual(220);
       // 顶栏高 ≤42（只信息）
       expect(l.topBarRect.h, '顶栏 ≤42').toBeLessThanOrEqual(42);
       // vehicleRect 底部 = 独立 safe bottom（不随 CTA 变化）
       expect(vp.h - INSETS.bottom - (l.vehicleRect.y + l.vehicleRect.h), 'vehicle 底部独立 safe bottom').toBe(16);
+    }
+  });
+
+  it('F-WX-UI-2A｜621×351 目标比例：vehicle ~48~52% / panel ~40~44%（可用宽）', () => {
+    for (const vp of VIEWPORTS) {
+      const l = computeMobileGarageLayout(vp, INSETS);
+      const usableW = vp.w - INSETS.left - INSETS.right;
+      const vRatio = l.vehicleRect.w / usableW;
+      const pRatio = l.panelRect.w / usableW;
+      expect(vRatio, `${vp.w}×${vp.h} vehicle 占比 ${(vRatio * 100).toFixed(1)}% ∈ [48%,52%]`).toBeGreaterThanOrEqual(0.48);
+      expect(vRatio, `${vp.w}×${vp.h} vehicle 占比 ${(vRatio * 100).toFixed(1)}% ≤ 52%`).toBeLessThanOrEqual(0.52);
+      expect(pRatio, `${vp.w}×${vp.h} panel 占比 ${(pRatio * 100).toFixed(1)}% ∈ [40%,44%]`).toBeGreaterThanOrEqual(0.4);
+      expect(pRatio, `${vp.w}×${vp.h} panel 占比 ${(pRatio * 100).toFixed(1)}% ≤ 44%`).toBeLessThanOrEqual(0.44);
+      // 不再使用 57% 旧 split：vehicle 必须 < 55%
+      expect(vRatio, '不再使用 57% 旧 split').toBeLessThan(0.55);
+      // 左侧车辆区 > 右侧面板区（左看车占主要空间）
+      expect(l.vehicleRect.w).toBeGreaterThan(l.panelRect.w);
     }
   });
 
@@ -175,8 +195,9 @@ describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
     const layoutSrc = require('fs').readFileSync('src/ui/mobileGarageLayout.ts', 'utf-8');
     expect(hostSrc, 'CanvasHost 不再出现 0.57 分区手算').not.toContain('* 0.57');
     expect(hostSrc, 'CanvasHost 不再出现 ctaBottomGap').not.toContain('ctaBottomGap');
-    // 布局模块负责全部几何常量
-    expect(layoutSrc).toContain('0.57');
+    // 布局模块负责全部几何常量（F-WX-UI-2A：52/42 分区替代旧 0.57 split）
+    expect(layoutSrc).toContain('VEHICLE_RATIO');
+    expect(layoutSrc).toContain('PANEL_RATIO');
     expect(layoutSrc).toContain('GARAGE_CTA_H');
     expect(layoutSrc).toContain('vehicleRect');
   });

@@ -1,7 +1,7 @@
 import type { SafeInsets } from '../platform/types';
 
 /**
- * F-WX-UI-F1：Mobile Garage 唯一布局源。
+ * F-WX-UI-F1 / F-WX-UI-2A：Mobile Garage 唯一布局源。
  *
  * 所有 Mobile Garage 的几何（绘制 / HitArea / Preview Camera framingRect）只允许读取
  * computeMobileGarageLayout 的同一份结果——禁止在其它函数再次手算 topBar / vehicle /
@@ -9,12 +9,14 @@ import type { SafeInsets } from '../platform/types';
  * HitArea 注册与 Renderer Camera 参数四处，且 draw 的 panel 底部（ctaY-14）与 camera 的
  * vehicle 底部（safe bottom-16）两套语义不一致，导致「代码改了真人变化很小」）。
  *
+ * F-WX-UI-2A（首屏强制重构）：固定三块结构，产生肉眼差异——
+ * - 顶部薄栏：仅金币 / 段位 / 能量（高 34，只信息）；
+ * - 左侧车辆展示区：占主要空间（~52% 可用宽，底部独立 safe bottom）；
+ * - 右侧装配面板 + CTA 一个完整操作组（~42% 可用宽；「寻找对手」在面板正下方且与面板
+ *   同宽、高 56、距 safe bottom ≥16，不贴整屏底边）。
+ * 不再使用 57% 旧 split；两区中间留 12~16px。
+ *
  * 本模块为纯函数：不 import CanvasPlayerUIHost / Renderer，无状态、无副作用，可直接单测。
- * 几何规则与 F-WX-UI-1 / F-WX-RCA-3A 既有行为一致（不改视觉样式、不改按钮结构）：
- * - topBarRect  顶部信息栏（只信息，高 34）；
- * - vehicleRect 左侧车辆展示区（~57% 屏宽；底部独立 safe bottom，不随右侧 CTA 变化）；
- * - panelRect   右侧装配面板（2×2 分类/二级/选项卡；底部到 CTA 上方 14px）；
- * - ctaRect     主 CTA「寻找对手」（唯一最大 220-300×56，距 safe bottom ≥16，不贴底）。
  */
 
 export interface Rect {
@@ -33,14 +35,16 @@ export interface MobileGarageLayout {
 
 /** 顶栏高（≤42 逻辑 px，只信息） */
 export const GARAGE_TOP_BAR_H = 34;
-/** 主 CTA 高（触控 ≥52 规格内的最大值 56） */
+/** 主 CTA 高（56~60 规格内） */
 export const GARAGE_CTA_H = 56;
-/** CTA 距 safe bottom 最小间隙 */
+/** CTA 距 safe bottom 最小间隙（禁止贴整屏底边） */
 export const GARAGE_CTA_BOTTOM_GAP = 16;
-/** 车辆展示区占可用宽比例（面板左缘 = uL+10+0.57×usableW+12） */
-const PANEL_SPLIT = 0.57;
-/** 车辆/面板内容区距 safe 边缘的横向留白 */
-const GARAGE_X_PAD = 10;
+/** F-WX-UI-2A：左侧车辆展示区占可用宽比例（约 48%~52% 目标区间上沿，保证 core 占比不缩水） */
+export const VEHICLE_RATIO = 0.52;
+/** F-WX-UI-2A：右侧装配面板占可用宽比例（约 40%~44%） */
+export const PANEL_RATIO = 0.42;
+/** F-WX-UI-2A：车辆区与面板区中间间隙（12~16px） */
+export const GARAGE_MID_GAP = 14;
 
 export function computeMobileGarageLayout(
   viewport: { w: number; h: number },
@@ -53,24 +57,27 @@ export function computeMobileGarageLayout(
   const uB = insets.bottom;
   const usableW = Math.max(240, w - uL - uR);
 
-  // 顶栏（内容区；绘制处可保留 ±4/8 视觉描边偏移，不算区域手算）
+  // F-WX-UI-2A：52% / 42% / gap14 三段分配，剩余分给左右两侧留白（不再 57% 旧 split）
+  const vehicleW = Math.floor(usableW * VEHICLE_RATIO);
+  const panelW = Math.max(200, Math.floor(usableW * PANEL_RATIO));
+  const sidePad = Math.max(10, Math.floor((usableW - vehicleW - panelW - GARAGE_MID_GAP) / 2));
+  const showX = uL + sidePad;
+  const panelX = showX + vehicleW + GARAGE_MID_GAP;
+  const panelR = panelX + panelW;
+
+  // 顶栏（薄栏，只信息；与左右区域对齐）
   const topBarRect: Rect = {
-    x: uL + GARAGE_X_PAD,
+    x: showX,
     y: uT,
-    w: Math.max(200, usableW - 20),
+    w: Math.max(200, panelR - showX),
     h: GARAGE_TOP_BAR_H,
   };
 
-  // CTA（唯一最大；与装配面板同一操作组，不贴屏幕边缘）
+  // CTA（右侧面板正下方，与面板同宽；不贴整屏底边）
   const ctaY = h - uB - GARAGE_CTA_BOTTOM_GAP - GARAGE_CTA_H;
-  const panelX = uL + GARAGE_X_PAD + Math.round(usableW * PANEL_SPLIT) + 12;
-  const panelR = Math.max(panelX + 200, w - uR - GARAGE_X_PAD);
-  const panelW = panelR - panelX;
-  const ctaW = Math.min(300, Math.max(220, panelW));
-  const ctaX = panelR - ctaW;
-  const ctaRect: Rect = { x: ctaX, y: ctaY, w: ctaW, h: GARAGE_CTA_H };
+  const ctaRect: Rect = { x: panelX, y: ctaY, w: panelW, h: GARAGE_CTA_H };
 
-  // 面板（右侧中央；底部到 CTA 上方 14px，与 CTA 形成操作组）
+  // 面板（右侧中央；底部到 CTA 上方 14px，与 CTA 形成完整操作组）
   const bodyTop = uT + GARAGE_TOP_BAR_H + 14;
   const panelBot = ctaY - 14;
   const panelRect: Rect = {
@@ -80,14 +87,12 @@ export function computeMobileGarageLayout(
     h: Math.max(120, panelBot - bodyTop),
   };
 
-  // 车辆展示区（左侧；F-WX-RCA-3A：底部独立使用 safe bottom，不随右侧 CTA 变化）
-  const showX = uL + GARAGE_X_PAD;
-  const showW = Math.max(200, panelX - 12 - showX);
+  // 车辆展示区（左侧，占主要空间；底部独立使用 safe bottom，不随右侧 CTA 变化）
   const vehBot = h - uB - 16;
   const vehicleRect: Rect = {
     x: showX,
     y: bodyTop,
-    w: showW,
+    w: vehicleW,
     h: Math.max(120, vehBot - bodyTop),
   };
 

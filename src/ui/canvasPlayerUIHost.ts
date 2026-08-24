@@ -771,7 +771,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ];
     const gap = 8;
     const cellW = (pw - gap) / 2;
-    const cellH = TARGET_TOUCH_H;
+    // F-WX-UI-2A：2×2 大卡片优先取满 TARGET_TOUCH_H，但必须保证底部合成次级入口
+    // （mergeH ≥48）放得下——面板偏矮（如 621×351）时卡片高度动态收缩，不丢入口
+    const mergeH = Math.max(MIN_TOUCH_H, 48);
+    const cellH = Math.max(
+      MIN_TOUCH_H,
+      Math.min(TARGET_TOUCH_H, Math.floor((ph - 12 - mergeH - gap) / 2)),
+    );
     for (let i = 0; i < 4; i++) {
       const col = i % 2;
       const row = Math.floor(i / 2);
@@ -780,7 +786,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       });
     }
     // 底部：合成次级入口（触控 ≥48；点击展开合成面板）
-    const mergeH = Math.max(MIN_TOUCH_H, 48);
     const mergeY = py + 2 * (cellH + gap) + 12;
     if (mergeY + mergeH <= py + ph) {
       this.button(px, mergeY, 120, mergeH, 'merge', '合成', { sub: '更多' });

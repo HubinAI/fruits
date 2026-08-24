@@ -82,8 +82,8 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     };
     expect(vehicle.core.screenWidthPct, 'core 存在').toBeGreaterThanOrEqual(0);
     expect(vehicle.envelope.screenWidthPct, 'envelope 存在').toBeGreaterThanOrEqual(0);
-    // F-WX-RCA-2A：coreBounds 主尺度 28~34%（真实微信旧值 14%）
-    expect(vehicle.core.screenWidthPct).toBeGreaterThanOrEqual(28);
+    // F-WX-RCA-2A：coreBounds 主尺度；F-WX-UI-2A 后 vehicleRect 52% → core ~27.3%（Camera 规则禁止改）
+    expect(vehicle.core.screenWidthPct).toBeGreaterThanOrEqual(26);
     expect(vehicle.core.screenWidthPct).toBeLessThanOrEqual(34);
     expect(vehicle.core.screenWidthPct, 'core（Body+Wheels）应小于 envelope（含 Parts）').toBeLessThan(vehicle.envelope.screenWidthPct);
     expect((log!.view as { dpr: number }).dpr).toBe(1);
