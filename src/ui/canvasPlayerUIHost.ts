@@ -118,6 +118,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private panelView: 'home' | 'wheelPick' | 'weaponPick' | 'options' = 'home';
   /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机） */
   private metaPage: MetaPage = 'garage';
+  /** F-META-3：Backpack 分类过滤（全部/武器/功能件；UI-only，不做复杂筛选） */
+  private backpackFilter: 'all' | 'weapon' | 'gadget' = 'all';
   /** F-WX-UI-1：选项网格面板内垂直滚动（面板不溢出屏幕） */
   private panelScroll = 0;
   /** F-WX-8-B：Mobile 合成面板展开态（点击「合成」次级入口后展开；确认才派发 onMerge） */
@@ -187,6 +189,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (state.battleState !== 'editing' || state.playerPhase !== 'garage') this.mergeOpen = false;
     // F-META-1：离开局外（进 Matching/Battle/Result）时复位 MetaPage——回 Garage 后默认回车库页
     if (state.playerPhase !== 'garage') this.metaPage = 'garage';
+    // F-META-3：离开局外同时复位 Backpack 分类（回 Garage 默认全部）
+    if (state.playerPhase !== 'garage') this.backpackFilter = 'all';
     this.draw();
   }
 
@@ -259,6 +263,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.panelView = 'home';
       this.panelScroll = 0;
       this.mergeOpen = false;
+      this.draw();
+      return;
+    }
+    if (id.startsWith('bfilter:')) {
+      // F-META-3：Backpack 分类过滤（全部/武器/功能件；复位列表滚动）
+      this.backpackFilter = id.slice(8) as 'all' | 'weapon' | 'gadget';
+      this.panelScroll = 0;
       this.draw();
       return;
     }
@@ -769,8 +780,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /**
-   * F-META-1/2：backpack MetaPage——玩家部件库存展示 + 合成（Garage 职责规整后，
-   * 合成只存在于 Backpack；点击「合成」展开面板，确认才 onMerge——规则仍在 runtime）。
+   * F-META-1/2/3：backpack MetaPage——「已获得部件」唯一管理页：
+   * 分类（全部/武器/功能件）+ 库存列表（名称/星级/数量/装备态，未拥有不占列表）
+   * + 合成（5合1 完整迁入；确认才 onMerge，规则复用 mergeWithCost，不重写）。
    */
   private drawBackpackPage(state: PlayerUIState, layout: MobileGarageLayout): void {
     const draft = state.draft;
@@ -782,28 +794,83 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.drawGaragePanelMerge(state, draft, c.x, c.w, c.y + 8);
       return;
     }
-    this.text('我拥有的部件', c.x + 12, c.y + 46, 14, C.textDim);
-    const inv = state.inventory;
-    const cols = 2;
-    const gap = 8;
-    const cardW = (c.w - 24 - gap * (cols - 1)) / cols;
-    const cardH = TARGET_TOUCH_H;
-    let idx = 0;
-    for (const pp of OFFICIAL_PARTS) {
-      const count = Math.max(0, inv[pp].one);
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      const x = c.x + 12 + col * (cardW + gap);
-      const y = c.y + 58 + row * (cardH + gap);
-      if (y + cardH > c.y + c.h - 46) break; // 底部给合成入口留位（只读展示，无点击）
-      this.rect(x, y, cardW, cardH, C.panel, C.border, 1);
-      this.text(pp, x + 10, y + cardH / 2 - 6, 16, C.text, 'left', 600);
-      this.text(`×${count}`, x + cardW - 10, y + cardH / 2 - 6, 16, C.gold, 'right', 700);
-      idx++;
+    // 分类 tabs：全部 / 武器 / 功能件（简单分类，不做复杂筛选系统）
+    const tabH = 44;
+    const tabGap = 8;
+    const tabs: Array<{ id: string; label: string; v: 'all' | 'weapon' | 'gadget' }> = [
+      { id: 'bfilter:all', label: '全部', v: 'all' },
+      { id: 'bfilter:weapon', label: '武器', v: 'weapon' },
+      { id: 'bfilter:gadget', label: '功能件', v: 'gadget' },
+    ];
+    const tabW = (c.w - 24 - tabGap * (tabs.length - 1)) / tabs.length;
+    let tx = c.x + 12;
+    for (const t of tabs) {
+      this.button(tx, c.y + 32, tabW, tabH, t.id, t.label, { active: this.backpackFilter === t.v });
+      tx += tabW + tabGap;
     }
-    if (idx === 0) this.text('暂无部件', c.x + 12, c.y + 80, 14, C.textDim);
-    // 底部：合成次级入口（触控 ≥48；点击展开合成面板）
+    // 库存列表（已拥有 = one/two > 0 或 已装备；未拥有不占列表）
+    const listTop = c.y + 32 + tabH + 6;
     const mergeH = Math.max(MIN_TOUCH_H, 48);
+    const listBot = c.y + c.h - mergeH - 8;
+    const inv = state.inventory;
+    const equipped = new Set(equippedDefIds(draft));
+    const items: Array<{ defId: string; name: string; one: number; two: number; equipped: boolean }> = [];
+    for (const pp of OFFICIAL_PARTS) {
+      const one = Math.max(0, inv[pp].one);
+      const two = Math.max(0, inv[pp].two);
+      const eq = equipped.has(pp);
+      if (one === 0 && two === 0 && !eq) continue; // 未拥有不占主列表
+      const def = registry.functionals.get(pp);
+      const cat = def?.category;
+      if (this.backpackFilter === 'weapon' && cat !== 'weapon') continue;
+      if (this.backpackFilter === 'gadget' && cat !== 'gadget') continue;
+      items.push({ defId: pp, name: def?.name ?? pp, one, two, equipped: eq });
+    }
+    const cardH = 52;
+    const cardGap = 6;
+    const viewH = Math.max(40, listBot - listTop);
+    const contentH = items.length * (cardH + cardGap) - cardGap;
+    const maxScroll = Math.max(0, contentH - viewH);
+    if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
+    const btnColX = c.x + c.w - 12 - 56; // 右侧按钮列（列表项宽度让出，不重叠）
+    const itemW = c.w - 24 - 64;
+    if (maxScroll > 0) {
+      this.button(btnColX, listTop, 56, TARGET_TOUCH_H, 'panel-scroll-up', '▲');
+      this.button(btnColX, listTop + TARGET_TOUCH_H + 8, 56, TARGET_TOUCH_H, 'panel-scroll-down', '▼');
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(this.ox + c.x * this.scale, this.oy + listTop * this.scale, c.w * this.scale, viewH * this.scale);
+    ctx.clip();
+    let yy = listTop - this.panelScroll;
+    let shown = 0;
+    for (const it of items) {
+      const y = yy;
+      const fully = y >= listTop - 0.5 && y + cardH <= listTop + viewH + 0.5;
+      if (fully) {
+        // 完全可见：绘制 + 只读命中区（供测试断言列表项；dispatch 对 bpack-item: 无操作）
+        this.rect(c.x + 12, y, itemW, cardH, it.equipped ? C.blueDeep : C.panel, C.border, 1);
+        this.text(it.name, c.x + 22, y + 18, 16, C.text, 'left', 600);
+        this.text(`★×${it.one}  ★★×${it.two}`, c.x + 22, y + 38, 14, C.gold, 'left');
+        if (it.equipped) {
+          this.text('已装备', c.x + 12 + itemW - 6, y + 18, 14, C.blue, 'right', 700);
+        }
+        this.hit(`bpack-item:${it.defId}`, c.x + 12, y, itemW, cardH);
+        shown++;
+      } else if (y < listTop + viewH && y + cardH > listTop) {
+        // 部分可见：只画不注册命中（不盖住滚动按钮，也不产生超区 hitArea）
+        this.rect(c.x + 12, y, itemW, cardH, it.equipped ? C.blueDeep : C.panel, C.border, 1);
+        this.text(it.name, c.x + 22, y + 18, 16, C.text, 'left', 600);
+        this.text(`★×${it.one}  ★★×${it.two}`, c.x + 22, y + 38, 14, C.gold, 'left');
+      }
+      if (y > listTop + viewH + cardH) break; // 超出可视区不再处理
+      yy += cardH + cardGap;
+    }
+    ctx.restore();
+    if (items.length === 0) this.text('该分类暂无部件', c.x + 12, listTop + 30, 14, C.textDim);
+    void shown;
+    // 底部：合成次级入口（触控 ≥48；点击展开合成面板）
     const mergeY = c.y + c.h - mergeH - 8;
     this.button(c.x + 12, mergeY, Math.min(200, c.w - 24), mergeH, 'merge', '合成', { sub: '更多' });
   }
@@ -1016,13 +1083,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     for (const pp of OFFICIAL_PARTS) available += Math.max(0, inv[pp].one - (reserved.has(pp) ? 1 : 0));
     const canMergeParts = available >= 5;
     const canAfford = canAffordMerge(p.coin);
+    // F-META-3：合成区明确信息——当前可用 1★ / 需要 5 / 消耗金币 / 可获随机 2★（规则复用 mergeWithCost）
     this.text('合成：5 × 1★ → 1 × 随机 2★', px, py + 14, 14, C.text, 'left', 700);
-    this.text(`可合成 ${available} · 消耗 ${MERGE_COST_COIN} 金币`, px, py + 34, 14, C.textDim);
+    this.text(`当前可用 1★：${available} / 需要 5`, px, py + 34, 14, C.textDim);
+    this.text(`消耗 ${MERGE_COST_COIN} 金币 · 可能获得随机 2★`, px, py + 54, 14, C.textDim);
     const confirmW = Math.max(140, pw * 0.5);
-    this.button(px + pw - confirmW, py + 60, confirmW, TARGET_TOUCH_H, 'merge-confirm',
+    this.button(px + pw - confirmW, py + 76, confirmW, TARGET_TOUCH_H, 'merge-confirm',
       !canMergeParts ? '副本不足' : !canAfford ? `金币不足` : '确认合成',
       { disabled: !(canMergeParts && canAfford), primary: canMergeParts && canAfford });
-    this.button(px, py + 60, 92, TARGET_TOUCH_H, 'merge-close', '关闭', {});
+    this.button(px, py + 76, 92, TARGET_TOUCH_H, 'merge-close', '关闭', {});
   }
 
   /**
