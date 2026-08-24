@@ -817,28 +817,25 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * 合成降级为面板内次级入口；首轮引导为 CTA 上方局部气泡。State/Action/Gameplay 复用。
    */
   /**
-   * F-META-1：Main Shell（playerPhase=garage 时唯一局外框架）——顶部薄状态栏（段位/金币/标题）
-   * + Main 导航行（车库/背包/更多）+ 中央功能内容区；导航在内容框架内，不铺满屏幕边缘。
+   * F-META-UX1：局外唯一框架（playerPhase=garage 时）——Garage 是唯一 Home：
+   * 顶部轻量状态栏（金币/段位/能量，无大标题）+ 中央内容区（garage 装配面板 / backpack /
+   * more）。无整行全局 Tab；背包/更多是装配区内次级入口，Backpack/More 顶部「← 返回车库」。
    * 进入 Matching/Battle/Result 后本 Shell 不绘制（draw() 分支保证）；回 Garage 默认回车库页。
    */
   private drawMobileGarageDock(state: PlayerUIState): void {
     const draft = state.draft;
     if (!draft) return;
     // F-WX-UI-F1：唯一布局源——绘制 / HitArea / Preview Camera 全部读取同一份结果，
-    // 禁止在此手算 topBar/nav/vehicle/panel/cta 区域（几何规则见 computeMobileGarageLayout）
+    // 禁止在此手算 topBar/vehicle/panel/cta 区域（几何规则见 computeMobileGarageLayout）
     const layout = computeMobileGarageLayout(
       { w: this.W, h: this.H },
       { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
     );
 
-    // 顶部薄状态栏（段位/金币/当前页面标题；只信息，不放主要操作）
-    const title = this.metaPage === 'backpack' ? '背包' : this.metaPage === 'more' ? '更多' : '我的战车';
-    this.drawMobileTopBar(state, draft, layout.topBarRect, title);
+    // 顶部轻量状态栏（金币/段位/能量；只信息，不放主要操作；F-META-UX1：无页面大标题）
+    this.drawMobileTopBar(state, draft, layout.topBarRect);
 
-    // Main 导航行（车库/背包/更多；garage 页额外挂合成次级入口）
-    this.drawMainNav(layout);
-
-    // 中央功能内容区（按 MetaPage 分派；三页共享同一 Shell 几何）
+    // 中央功能内容区（按 MetaPage 分派）
     if (this.metaPage === 'backpack') {
       this.drawBackpackPage(state, layout);
     } else if (this.metaPage === 'more') {
@@ -848,22 +845,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /** F-META-1：Main 导航行——车库/背包/更多 tab（garage 页第 4 位为合成次级入口） */
-  /** F-META-1/2：Main 导航行——车库/背包/更多 tab（三页恒等，合成已移到 Backpack 页内） */
-  private drawMainNav(layout: MobileGarageLayout): void {
-    const { navRect } = layout;
-    const tabs: Array<{ id: string; label: string }> = [
-      { id: 'nav:garage', label: '车库' },
-      { id: 'nav:backpack', label: '背包' },
-      { id: 'nav:more', label: '更多' },
-    ];
+  /**
+   * F-META-UX1：Garage 装配区内次级入口行（背包/更多）——明显弱于主 CTA「寻找对手」
+   * （普通面板按钮 vs primary 全宽大按钮）。面板内容区（2×2/选项/二级）高度已预留此行。
+   */
+  private drawGarageSubEntries(panelRect: Rect, subY: number, subH: number): void {
     const gap = 8;
-    const tabW = Math.floor((navRect.w - gap * (tabs.length - 1)) / tabs.length);
-    let x = navRect.x;
-    for (const t of tabs) {
-      this.button(x, navRect.y, tabW, navRect.h, t.id, t.label, { active: this.metaPage === t.id.slice(4) });
-      x += tabW + gap;
-    }
+    const subW = Math.floor((panelRect.w - 24 - gap) / 2);
+    this.button(panelRect.x + 12, subY, subW, subH, 'nav:backpack', '背包', {});
+    this.button(panelRect.x + 12 + subW + gap, subY, subW, subH, 'nav:more', '更多', {});
   }
 
   /** F-META-1：garage MetaPage——车辆展示（renderer 画）+ 右侧装配面板 + 主 CTA */
@@ -887,8 +877,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 装配面板（右侧中央；绘制与 HitArea 均基于 panelRect；F-META-2：Garage 无合成，
     // 只处理配置——选中槽选项 / 轮子二级 / 武器二级 / 2×2 主分类）
     this.rect(panelRect.x, panelRect.y, panelRect.w, panelRect.h, C.dockBg, C.border, 1);
+    // F-META-UX1：面板底部预留次级入口行（背包/更多，48 高），内容区在其上方
+    const subH = MIN_TOUCH_H;
+    const subGap = 8;
     const py = panelRect.y + 10;
-    const pH = panelRect.h - 20;
+    const pH = panelRect.h - 20 - subH - subGap;
     if (state.garageSelected) {
       this.drawGaragePanelOptions(state, draft, panelRect.x, panelRect.w, py, pH);
     } else if (this.panelView === 'wheelPick') {
@@ -898,26 +891,32 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     } else {
       this.drawGaragePanelHome(draft, panelRect.x, panelRect.w, py, pH);
     }
+    // 底部：背包/更多 次级入口（明显弱于「寻找对手」主 CTA）
+    this.drawGarageSubEntries(panelRect, py + pH + subGap, subH);
   }
 
   /**
-   * F-META-1/2/3：backpack MetaPage——「已获得部件」唯一管理页：
+   * F-META-1/2/3 + F-META-UX1：backpack MetaPage——「已获得部件」唯一管理页：
    * 分类（全部/武器/功能件）+ 库存列表（名称/星级/数量/装备态，未拥有不占列表）
    * + 合成（5合1 完整迁入；确认才 onMerge，规则复用 mergeWithCost，不重写）。
+   * F-META-UX1：顶部唯一「← 返回车库」（无全局 Tab）；合成面板内用 merge-close 返回列表。
    */
   private drawBackpackPage(state: PlayerUIState, layout: MobileGarageLayout): void {
     const draft = state.draft;
     const c = layout.contentRect;
     this.rect(c.x, c.y, c.w, c.h, C.dockBg, C.border, 1);
-    this.text('背包', c.x + 12, c.y + 22, 20, C.text, 'left', 700);
     if (this.mergeOpen && draft) {
       // 合成面板（内容区顶部；确认/关闭按钮）
       this.drawGaragePanelMerge(state, draft, c.x, c.w, c.y + 8);
       return;
     }
-    // 分类 tabs：全部 / 武器 / 功能件（简单分类，不做复杂筛选系统）
+    // F-META-UX1：顶部「← 返回车库」（唯一返回入口，禁止恢复全局 Tab）
+    this.button(c.x + 12, c.y + 6, 96, MIN_TOUCH_H, 'nav:garage', '‹ 返回车库', {});
+    this.text('背包', c.x + 120, c.y + 30, 20, C.text, 'left', 700);
+    // 分类 tabs：全部 / 武器 / 功能件（简单分类，不做复杂筛选系统；位于返回行下方）
     const tabH = 44;
     const tabGap = 8;
+    const tabTop = c.y + 62;
     const tabs: Array<{ id: string; label: string; v: 'all' | 'weapon' | 'gadget' }> = [
       { id: 'bfilter:all', label: '全部', v: 'all' },
       { id: 'bfilter:weapon', label: '武器', v: 'weapon' },
@@ -926,11 +925,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const tabW = (c.w - 24 - tabGap * (tabs.length - 1)) / tabs.length;
     let tx = c.x + 12;
     for (const t of tabs) {
-      this.button(tx, c.y + 32, tabW, tabH, t.id, t.label, { active: this.backpackFilter === t.v });
+      this.button(tx, tabTop, tabW, tabH, t.id, t.label, { active: this.backpackFilter === t.v });
       tx += tabW + tabGap;
     }
     // 库存列表（已拥有 = one/two > 0 或 已装备；未拥有不占列表）
-    const listTop = c.y + 32 + tabH + 6;
+    const listTop = tabTop + tabH + 6;
     const mergeH = Math.max(MIN_TOUCH_H, 48);
     const listBot = c.y + c.h - mergeH - 8;
     const inv = state.inventory;
@@ -997,27 +996,30 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /**
-   * F-META-6：more MetaPage——未来功能入口预留（只做入口，不做业务）：
-   * - 主页：2×2 功能卡（任务/商店/战令/设置；前三者统一弹「功能开发中」Modal）；
+   * F-META-6 + F-META-UX1：more MetaPage——未来功能入口预留（只做入口，不做业务）：
+   * - 主页：2×2 功能卡（任务/商店/战令/设置；前三者统一弹「功能开发中」Modal）+ 顶部
+   *   「← 返回车库」（无全局 Tab）；
    * - 设置子页：音效/震动开关（仅保存 UI preference，不扩大战斗架构）。
    * 所有预留入口集中在 More，不散落到 Garage/Backpack。
    */
   private drawMorePage(layout: MobileGarageLayout): void {
     const c = layout.contentRect;
     this.rect(c.x, c.y, c.w, c.h, C.dockBg, C.border, 1);
-    this.text('更多', c.x + 12, c.y + 22, 20, C.text, 'left', 700);
     if (this.moreView === 'settings') {
       this.drawMoreSettings(c);
-    } else {
-      this.drawMoreEntries(c);
+      return;
     }
+    // F-META-UX1：顶部「← 返回车库」（唯一返回入口，禁止恢复全局 Tab）
+    this.button(c.x + 12, c.y + 6, 96, MIN_TOUCH_H, 'nav:garage', '‹ 返回车库', {});
+    this.text('更多', c.x + 120, c.y + 30, 20, C.text, 'left', 700);
+    this.drawMoreEntries(c);
   }
 
   /** F-META-6：More 主页——2×2 功能卡（填充内容区；触控 ≥48；只注册入口命中） */
   private drawMoreEntries(c: Rect): void {
     const pad = 12;
     const gap = 10;
-    const areaTop = c.y + 36; // 标题「更多」下方
+    const areaTop = c.y + 62; // 顶部「← 返回车库」行下方
     const areaH = Math.max(0, c.y + c.h - areaTop - pad);
     const cardW = Math.floor((c.w - pad * 2 - gap) / 2);
     const cardH = Math.max(MIN_TOUCH_H, Math.floor((areaH - gap) / 2));
@@ -1061,13 +1063,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /** 顶栏：当前页面标题 · 金币 · 段位 · 能量（单行 ≤42 高，只信息；区域来自唯一布局源 topBarRect） */
-  private drawMobileTopBar(
-    state: PlayerUIState,
-    draft: BuildDraft,
-    topBarRect: Rect,
-    title: string,
-  ): void {
+  /** 顶栏：金币 · 段位 · 能量（单行 ≤42 高，只信息；F-META-UX1：无页面大标题；
+   *  区域来自唯一布局源 topBarRect） */
+  private drawMobileTopBar(state: PlayerUIState, draft: BuildDraft, topBarRect: Rect): void {
     const p = state.progress;
     const tier = tierOf(p.rating);
     const body = registry.bodies.get(draft.bodyDefId);
@@ -1076,10 +1074,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const uT = topBarRect.y;
     const topH = topBarRect.h;
     this.rect(x0 - 4, uT, w + 8, topH, 'rgba(8,10,14,0.72)', C.border, 1);
-    // F-META-1：当前页面标题（最左）→ 金币 → 段位 → 能量（右侧）
-    this.text(title, x0, uT + topH / 2 + 5, 15, C.text, 'left', 700);
-    this.text(`金币 ${p.coin}`, x0 + 56, uT + topH / 2 + 5, 14, C.gold, 'left', 700);
-    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, x0 + 190, uT + topH / 2 + 5, 14, C.textDim);
+    // 金币（最左）→ 段位 → 能量（右侧）；全部轻量信息
+    this.text(`金币 ${p.coin}`, x0, uT + topH / 2 + 5, 14, C.gold, 'left', 700);
+    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, x0 + 134, uT + topH / 2 + 5, 14, C.textDim);
     const snapshot = buildSnapshotFromDraft(draft, registry, 'customA');
     const energyRes = computeEnergy(snapshot, registry);
     const used = energyRes.error ? Number.NaN : energyRes.energy;
@@ -1127,7 +1124,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const gap = 8;
     const cellW = (pw - gap) / 2;
     // F-WX-UI-2A/F-META-1：2×2 大卡片尽量取满 TARGET_TOUCH_H；矮面板时动态收缩（≥MIN）。
-    // 合成次级入口已移到 Main Shell 导航行（drawMainNav），面板内不再需要 merge 行。
+    // F-META-UX1：面板底部为「背包/更多」次级入口行（drawGarageSubEntries），本区高度已预留。
     const cellH = Math.max(
       MIN_TOUCH_H,
       Math.min(TARGET_TOUCH_H, Math.floor((ph - gap) / 2)),

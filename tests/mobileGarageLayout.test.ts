@@ -91,17 +91,14 @@ describe('F-WX-UI-F1｜computeMobileGarageLayout 纯函数（唯一几何来源�
         r.x >= INSETS.left && r.y >= INSETS.top &&
         r.x + r.w <= vp.w - INSETS.right && r.y + r.h <= vp.h - INSETS.bottom;
       expect(inSafe(l.topBarRect), `${vp.w}×${vp.h} topBar 在 safe 内`).toBe(true);
-      expect(inSafe(l.navRect), `${vp.w}×${vp.h} nav 在 safe 内`).toBe(true);
       expect(inSafe(l.contentRect), `${vp.w}×${vp.h} content 在 safe 内`).toBe(true);
       expect(inSafe(l.vehicleRect), `${vp.w}×${vp.h} vehicle 在 safe 内`).toBe(true);
       expect(inSafe(l.panelRect), `${vp.w}×${vp.h} panel 在 safe 内`).toBe(true);
       expect(inSafe(l.ctaRect), `${vp.w}×${vp.h} cta 在 safe 内`).toBe(true);
-      // F-META-1：导航行在顶栏下方、内容区上方（Shell 三段结构）
-      expect(l.navRect.y, 'nav 在 topBar 下方').toBeGreaterThanOrEqual(l.topBarRect.y + l.topBarRect.h);
-      expect(l.navRect.h, 'nav 高 ≥48').toBeGreaterThanOrEqual(48);
-      expect(l.contentRect.y, 'content 在 nav 下方').toBeGreaterThanOrEqual(l.navRect.y + l.navRect.h);
-      expect(l.contentRect.x, 'content 与 nav 左对齐').toBe(l.navRect.x);
-      expect(l.contentRect.w, 'content 与 nav 同宽').toBe(l.navRect.w);
+      // F-META-UX1：无导航行——内容区直接位于顶栏下方（删除 navRect/GARAGE_NAV_H）
+      expect(l.contentRect.y, 'content 在 topBar 下方（无 nav 行）').toBe(l.topBarRect.y + l.topBarRect.h + 8);
+      expect(l.vehicleRect.y, 'vehicle 与 content 同顶').toBe(l.contentRect.y);
+      expect(l.panelRect.y, 'panel 与 content 同顶').toBe(l.contentRect.y);
       for (const [k, r] of Object.entries(l)) {
         expect(r.w, `${vp.w}×${vp.h} ${k} 宽 >0`).toBeGreaterThan(0);
         expect(r.h, `${vp.w}×${vp.h} ${k} 高 >0`).toBeGreaterThan(0);
@@ -120,6 +117,12 @@ describe('F-WX-UI-F1｜computeMobileGarageLayout 纯函数（唯一几何来源�
       expect(l.topBarRect.h, '顶栏 ≤42').toBeLessThanOrEqual(42);
       // vehicleRect 底部 = 独立 safe bottom（不随 CTA 变化）
       expect(vp.h - INSETS.bottom - (l.vehicleRect.y + l.vehicleRect.h), 'vehicle 底部独立 safe bottom').toBe(16);
+      // F-META-UX1：621×351 内容区比旧版（含 nav 行：topBar34 + gap8 + nav48 + gap8）至少多 48px
+      if (vp.w === 621 && vp.h === 351) {
+        const oldBodyTop = INSETS.top + 34 + 8 + 48 + 8;
+        const gain = oldBodyTop - l.contentRect.y;
+        expect(gain, '621×351 内容区比旧版多 ≥48px').toBeGreaterThanOrEqual(48);
+      }
     }
   });
 
@@ -203,10 +206,14 @@ describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
     const layoutSrc = require('fs').readFileSync('src/ui/mobileGarageLayout.ts', 'utf-8');
     expect(hostSrc, 'CanvasHost 不再出现 0.57 分区手算').not.toContain('* 0.57');
     expect(hostSrc, 'CanvasHost 不再出现 ctaBottomGap').not.toContain('ctaBottomGap');
+    // F-META-UX1：全局导航行已删除（布局无 navRect/GARAGE_NAV_H；Host 无 drawMainNav）
+    expect(hostSrc, 'CanvasHost 无 drawMainNav').not.toContain('drawMainNav');
     // 布局模块负责全部几何常量（F-WX-UI-2A：52/42 分区替代旧 0.57 split）
     expect(layoutSrc).toContain('VEHICLE_RATIO');
     expect(layoutSrc).toContain('PANEL_RATIO');
     expect(layoutSrc).toContain('GARAGE_CTA_H');
     expect(layoutSrc).toContain('vehicleRect');
+    expect(layoutSrc, 'UX1：布局无 GARAGE_NAV_H 定义').not.toContain('GARAGE_NAV_H =');
+    expect(layoutSrc, 'UX1：布局无 navRect 字段定义').not.toContain('navRect:');
   });
 });

@@ -210,10 +210,11 @@ describe('F-META-6｜未来功能入口预留', () => {
     env.host.render(state());
     expect(env.areas().some((a) => a.id.startsWith('more:')), 'Garage 无 More 入口').toBe(false);
     expect(env.areas().some((a) => a.id.startsWith('settings-')), 'Garage 无设置元素').toBe(false);
-    // Backpack：无任何 more/settings 入口
+    // Backpack：无任何 more/settings 入口（UX1：backpack 页仅顶部「← 返回车库」）
     click(env, 'nav:backpack');
     expect(env.areas().some((a) => a.id.startsWith('more:')), 'Backpack 无 More 入口').toBe(false);
     expect(env.areas().some((a) => a.id.startsWith('settings-')), 'Backpack 无设置元素').toBe(false);
+    click(env, 'nav:garage'); // 返回车库（Home）后再进 More
     // More 页：每个入口都有响应（无死按钮）
     click(env, 'nav:more');
     for (const id of ['more:task', 'more:shop', 'more:pass']) {

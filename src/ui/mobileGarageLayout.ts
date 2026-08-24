@@ -28,8 +28,6 @@ export interface Rect {
 
 export interface MobileGarageLayout {
   topBarRect: Rect;
-  /** F-META-1：Main Shell 导航行（车库/背包/更多 tab，整宽居中，高 48） */
-  navRect: Rect;
   /** F-META-1：Main Shell 中央功能内容区（backpack/more 页用；garage 页用 vehicle/panel/cta） */
   contentRect: Rect;
   vehicleRect: Rect;
@@ -49,8 +47,6 @@ export const VEHICLE_RATIO = 0.52;
 export const PANEL_RATIO = 0.42;
 /** F-WX-UI-2A：车辆区与面板区中间间隙（12~16px） */
 export const GARAGE_MID_GAP = 14;
-/** F-META-1：Main Shell 导航行高（触控 ≥48；车库/背包/更多 tab） */
-export const GARAGE_NAV_H = 48;
 
 export function computeMobileGarageLayout(
   viewport: { w: number; h: number },
@@ -79,20 +75,15 @@ export function computeMobileGarageLayout(
     h: GARAGE_TOP_BAR_H,
   };
 
-  // F-META-1：Main Shell 导航行（顶栏下方整宽，高 48；内容区在其下方）
-  const navRect: Rect = {
-    x: showX,
-    y: uT + GARAGE_TOP_BAR_H + 8,
-    w: Math.max(200, panelR - showX),
-    h: GARAGE_NAV_H,
-  };
+  // F-META-UX1：已删除 Main Shell 导航行（navRect/GARAGE_NAV_H）——Garage 回归唯一 Home，
+  // 背包/更多改为装配区内次级入口，Backpack/More 顶部「← 返回车库」。内容区直接在顶栏下方。
 
   // CTA（右侧面板正下方，与面板同宽；不贴整屏底边）
   const ctaY = h - uB - GARAGE_CTA_BOTTOM_GAP - GARAGE_CTA_H;
   const ctaRect: Rect = { x: panelX, y: ctaY, w: panelW, h: GARAGE_CTA_H };
 
   // 面板（右侧中央；底部到 CTA 上方 14px，与 CTA 形成完整操作组）
-  const bodyTop = navRect.y + GARAGE_NAV_H + 8;
+  const bodyTop = uT + GARAGE_TOP_BAR_H + 8;
   const panelBot = ctaY - 14;
   const panelRect: Rect = {
     x: panelX,
@@ -118,5 +109,5 @@ export function computeMobileGarageLayout(
     h: Math.max(120, vehBot - bodyTop),
   };
 
-  return { topBarRect, navRect, contentRect, vehicleRect, panelRect, ctaRect };
+  return { topBarRect, contentRect, vehicleRect, panelRect, ctaRect };
 }
