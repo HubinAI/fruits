@@ -461,15 +461,29 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     expect(drawBody.match(/drawMatchingContinuum\(state\)/g)?.length, 'matching+matchPreview 两分支均调用同一函数').toBe(2);
     expect(src, '旧分阶段绘制已删除').not.toContain('private drawMatchingVs');
     expect(src, '旧分阶段绘制已删除').not.toContain('private drawMatchInfo');
-    // 3) F-META-5：Result 走结算 Modal（showResultModal）——胜/负 title + 奖励 body + 双决策
+    // 3) F-META-5 + F-META-UX4：Result 走结算 Modal——胜/负 title + 三层结构（奖励行分块 +
+    //    独立部件卡 + 双决策）；金币/段位/部件不再拼成一长句
     const resultModalIdx = src.indexOf('private showResultModal');
     expect(resultModalIdx, 'showResultModal 存在').toBeGreaterThan(-1);
     const resultMethod = src.slice(resultModalIdx, src.indexOf('showModal(spec: ModalSpec): void'));
     expect(resultMethod).toContain("title: isWin ? '胜利' : '失败'");
-    expect(resultMethod).toContain('金币');
+    expect(resultMethod).toContain('rewardRows');
+    expect(resultMethod).toContain('partCard');
+    expect(resultMethod).toContain('金币奖励');
+    expect(resultMethod).toContain('段位变化');
     expect(resultMethod).toContain('获得');
     expect(resultMethod).toContain("primary: '下一场'");
     expect(resultMethod).toContain("secondary: '调整配置'");
+    const bodyPushes = resultMethod.match(/body\.push\([^)]*\)/g) ?? [];
+    expect(
+      bodyPushes.some((p) => p.includes('金币') || p.includes('段位') || p.includes('库存') || p.includes('★★')),
+      '金币/段位/部件明细不再拼进 body 长句（仅允许 onboarding 引导文案）',
+    ).toBe(false);
+    // drawModal 支持 rewardRows / partCard 绘制（三层结构落地）
+    const modalMethod = src.slice(src.indexOf('private drawModal'), src.indexOf('private drawReadyOverlay'));
+    expect(modalMethod).toContain('rewardRows');
+    expect(modalMethod).toContain('partCard');
+    expect(modalMethod).toContain('库存');
     // 4) 方法内所有直接文本字号 ≥16（Matching/MatchPreview 必要文字；Result 走 Modal 统一规格）
     const re = /this\.text\(([^)]*)\)/g;
     for (const name of ['drawMatchingContinuum']) {

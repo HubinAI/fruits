@@ -199,4 +199,38 @@ describe('F-META-4｜通用 Modal / Popup Foundation', () => {
       expect(p.h, '按钮高 ≥52').toBeGreaterThanOrEqual(52);
     }
   });
+
+  it('F-META-UX4｜Result 三层结算：rewardRows + partCard 结构下按钮全在屏内、无领取步骤', () => {
+    for (const vp of VIEWPORTS) {
+      const env = makeHost(vp, INSETS);
+      env.host.render(
+        state({
+          playerPhase: 'matchPreview',
+          battleState: 'ended',
+          result: { winner: 'A', hpA: 100, hpB: 0 },
+          reward: { name: '榴莲炮', starStr: '★★', cat: 'weapon', countAfter: 2 },
+          economy: { coinDelta: 50, ratingDelta: 12, tierLabel: '青铜', rating: 212, coin: 150 },
+        }),
+      );
+      // 主（下一场）/ 次（调整配置）明确；无额外「领取奖励」步骤按钮
+      expect(env.areas().some((a) => a.id === 'modal-primary'), '主按钮（下一场）').toBe(true);
+      expect(env.areas().some((a) => a.id === 'modal-secondary'), '次按钮（调整配置）').toBe(true);
+      const modalIds = env
+        .areas()
+        .filter((a) => a.id.startsWith('modal-'))
+        .map((a) => a.id)
+        .sort();
+      expect(modalIds, `${vp.w}×${vp.h} 仅主/次/遮罩（无领取确认等额外按钮）`).toEqual(['modal-primary', 'modal-secondary', 'modal-veil']);
+      // 三层结构下按钮全在屏内、主在次右
+      const p = env.areas().find((x) => x.id === 'modal-primary')!;
+      const s = env.areas().find((x) => x.id === 'modal-secondary')!;
+      expect(p.x, '主按钮在次按钮右侧').toBeGreaterThanOrEqual(s.x + s.w);
+      for (const a of [p, s]) {
+        expect(a.x, '按钮 x ≥0').toBeGreaterThanOrEqual(0);
+        expect(a.x + a.w, '按钮右缘 ≤ 屏宽').toBeLessThanOrEqual(vp.w);
+        expect(a.y, '按钮 y ≥0').toBeGreaterThanOrEqual(0);
+        expect(a.y + a.h, '按钮底缘 ≤ 屏高').toBeLessThanOrEqual(vp.h);
+      }
+    }
+  });
 });

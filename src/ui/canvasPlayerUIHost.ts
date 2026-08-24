@@ -130,9 +130,16 @@ function diffMergeGain(
  * - 居中卡片：标题区 + 内容行 + 主按钮 + 可选次按钮 + 全屏遮罩（拦截底层点击）。
  * - 关闭后重绘恢复当前页面；按钮回调由调用方提供（最小 API，无全局 Modal Manager）。
  */
+/** 奖励行色调（F-META-UX4：金币/段位独立行的 value 着色） */
+type ModalTone = 'gold' | 'blue' | 'red' | 'green';
+
 interface ModalSpec {
   title: string;
   body: string[];
+  /** F-META-UX4：结构化奖励行（金币/段位等；label 左 + value 右，层级清晰，不再拼长句） */
+  rewardRows?: Array<{ label: string; value: string; tone?: ModalTone }>;
+  /** F-META-UX4：独立奖励卡（获得部件：名称 + 星级 + 当前数量） */
+  partCard?: { name: string; starStr: string; count: number };
   primary: string;
   secondary?: string;
   /** F-META-5：可选第三按钮（如既有广告领币点；点击不关闭 Modal，回调由调用方更新内容） */
@@ -1594,26 +1601,34 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * 最小 API：调用方提供标题/内容/按钮文案与回调；不接具体业务逻辑、无动画、无美术依赖。
    */
   /**
-   * F-META-5：正式结算 Modal——胜/负 + 本局获得（金币/部件/星级/段位）+ [调整配置][下一场]。
-   * 奖励信息全部集中在此弹窗（无第二个领奖确认）；广告领币沿用既有 reward-ad 逻辑（tertiary）。
+   * F-META-5 + F-META-UX4：正式结算 Modal——固定三层（不拼长句）：
+   * ① 顶部：胜利/失败（title）；② 中部：金币奖励 + 段位变化（rewardRows 分块），
+   *    获得部件时独立奖励卡（partCard：名称+星级+当前数量）；③ 底部：[调整配置][下一场]。
+   * 不增加「领取奖励」步骤——奖励自动结算；广告领币沿用既有 reward-ad 逻辑（tertiary）。
    */
   private showResultModal(state: PlayerUIState): void {
     const r = state.result!;
     const isWin = r.winner === 'A';
-    const body: string[] = [];
+    const rows: NonNullable<ModalSpec['rewardRows']> = [];
     if (state.economy) {
       const cs = state.economy.coinDelta >= 0 ? '+' : '';
       const rs = state.economy.ratingDelta >= 0 ? '+' : '';
-      body.push(`金币 ${cs}${state.economy.coinDelta} · 段位 ${rs}${state.economy.ratingDelta}（${state.economy.tierLabel} ${state.economy.rating}）`);
+      rows.push({ label: '金币奖励', value: `${cs}${state.economy.coinDelta}`, tone: 'gold' });
+      rows.push({
+        label: '段位变化',
+        value: `${rs}${state.economy.ratingDelta} · ${state.economy.tierLabel} ${state.economy.rating}`,
+        tone: state.economy.ratingDelta >= 0 ? 'blue' : 'red',
+      });
     }
-    if (state.reward) {
-      // 新获得部件：名称 + ★ + 当前库存数量
-      body.push(`获得 ${state.reward.name} ${state.reward.starStr} · 库存 ${state.reward.countAfter}`);
-    }
+    const body: string[] = [];
     if (state.resultOnboardingVisible) body.push('获得新部件，可以回车库调整');
     this.showModal({
       title: isWin ? '胜利' : '失败',
       body,
+      rewardRows: rows.length ? rows : undefined,
+      partCard: state.reward
+        ? { name: state.reward.name, starStr: state.reward.starStr, count: state.reward.countAfter }
+        : undefined,
       primary: '下一场',
       secondary: '调整配置',
       tertiary: state.rewardAdAvailable
@@ -1639,32 +1654,76 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.draw();
   }
 
-  /** F-META-4：Modal 覆盖层绘制——全屏遮罩（拦截底层）+ 居中卡片（标题/内容/主次按钮） */
+  /**
+   * F-META-4：Modal 覆盖层绘制——全屏遮罩（拦截底层）+ 居中卡片（标题/内容/按钮）。
+   * F-META-UX4：内容支持三层结构——body 文字行 + rewardRows 奖励行（label 左/value 右着色）
+   * + partCard 独立部件卡；卡片高度按实际内容自适应（621×351 等小屏内合法）。
+   */
   private drawModal(spec: ModalSpec): void {
     const W = this.W;
     const H = this.H;
     // 全屏遮罩（先注册 → 逆序命中时被卡片按钮覆盖；底层按钮被拦截不可点）
     this.rect(0, 0, W, H, C.overlayBg);
     this.hit('modal-veil', 0, 0, W, H);
-    // 居中卡片（尺寸自适应：标题 + 内容行 + 按钮；621×351 等小屏内合法）
+    // 居中卡片（尺寸自适应：标题 + 内容 + 按钮）
     const cardW = Math.min(420, W - this.insL - this.insR - 40);
     const rowH = 22;
+    const rewardRowH = 26;
     const titleH = 40;
     const btnH = TARGET_TOUCH_H;
     const pad = 16;
-    const cardH = pad + titleH + spec.body.length * rowH + 10 + btnH + pad;
+    const partH = spec.partCard ? 58 : 0;
+    const partGap = spec.partCard && (spec.body.length > 0 || (spec.rewardRows?.length ?? 0) > 0) ? 8 : 0;
+    const cardH =
+      pad +
+      titleH +
+      spec.body.length * rowH +
+      (spec.rewardRows?.length ?? 0) * rewardRowH +
+      partH +
+      partGap +
+      10 +
+      btnH +
+      pad;
     const cx = Math.max(8, (W - cardW) / 2);
     const cy = Math.max(8, (H - cardH) / 2);
     this.rect(cx, cy, cardW, cardH, C.dockBg, C.border, 1);
+    // ① 顶部：标题（胜利/失败）
     this.text(spec.title, cx + cardW / 2, cy + pad + titleH / 2, 20, C.text, 'center', 700);
     let yy = cy + pad + titleH + 4;
+    // ② 中部：body 文字行（onboarding 引导等）
     for (const line of spec.body) {
       this.text(line, cx + cardW / 2, yy + rowH / 2, 14, C.textDim, 'center');
       yy += rowH;
     }
-    // 按钮行：次按钮左 / 主按钮右；有 tertiary 时三列（次|主|第三）
+    // ② 中部：奖励行（金币/段位；label 左 + value 右，独立行不拼长句）
+    if (spec.rewardRows) {
+      const toneColor: Record<ModalTone, string> = {
+        gold: C.gold,
+        blue: C.driveBlue,
+        red: C.red,
+        green: C.green,
+      };
+      for (const rr of spec.rewardRows) {
+        this.text(rr.label, cx + pad, yy + rewardRowH / 2, 14, C.textDim, 'left');
+        this.text(rr.value, cx + cardW - pad, yy + rewardRowH / 2, 15, rr.tone ? toneColor[rr.tone] : C.text, 'right', 700);
+        yy += rewardRowH;
+      }
+    }
+    // ② 中部：独立奖励卡（获得部件：名称 + 星级 + 当前数量）
+    if (spec.partCard) {
+      yy += partGap;
+      const ph = partH - 8;
+      const pw = cardW - 2 * pad;
+      this.rect(cx + pad, yy, pw, ph, C.cardBg, C.border, 1);
+      this.text('获得', cx + pad + 12, yy + 12, 12, C.textDim, 'left');
+      this.text(spec.partCard.name, cx + pad + 12, yy + 30, 16, C.text, 'left', 700);
+      this.text(spec.partCard.starStr, cx + pad + 12, yy + 46, 15, C.gold, 'left', 700);
+      this.text(`库存 ${spec.partCard.count}`, cx + cardW - pad - 12, yy + 30, 14, C.textDim, 'right');
+      yy += ph + 8;
+    }
+    // ③ 底部：按钮行（次按钮左 / 主按钮右；有 tertiary 时三列）
     // F-META-UX2：primaryDisabled → 主按钮禁用（不注册命中，显示原因文案）
-    const by = cy + pad + titleH + spec.body.length * rowH + 10;
+    const by = yy + 2;
     const gap = 10;
     const bw3 = (cardW - 2 * pad - 2 * gap) / 3;
     if (spec.secondary && spec.tertiary) {
