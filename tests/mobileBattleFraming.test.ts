@@ -30,10 +30,13 @@ function makeStubCtx(): CanvasRenderingContext2D {
   return new Proxy({} as CanvasRenderingContext2D, handler);
 }
 
-/** 车辆世界 AABB → 屏幕 AABB（用 renderer.transform 的相机变换，同 reframe 语义） */
+/** 车辆世界 AABB → 屏幕 AABB（用 renderer.transform 的相机变换，同 reframe 语义）。
+ *  F-WX-RCA-2A：includeParts=false → coreBounds（Body+Wheels，Garage 主尺度验收口径）；
+ *  includeParts=true → envelopeBounds（+Functional Parts，完整外廓/完整入画校验）。 */
 function vehicleScreenBounds(
   v: RenderVehicle,
   cam: { scale: number; offsetX: number; offsetY: number },
+  includeParts = true,
 ): { minX: number; minY: number; maxX: number; maxY: number } {
   let minX = Infinity;
   let maxX = -Infinity;
@@ -58,7 +61,9 @@ function vehicleScreenBounds(
     acc(w.center.x - w.radius, w.center.y - w.radius);
     acc(w.center.x + w.radius, w.center.y + w.radius);
   }
-  for (const p of v.parts) shape(p.shape);
+  if (includeParts) {
+    for (const p of v.parts) shape(p.shape);
+  }
   const sx = (x: number): number => x * cam.scale + cam.offsetX;
   const sy = (y: number): number => y * cam.scale + cam.offsetY;
   return { minX: sx(minX), minY: sy(minY), maxX: sx(maxX), maxY: sy(maxY) };
@@ -125,7 +130,7 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
   }
 
   for (const soloVp of VIEWPORTS.filter((v) => !v.desktop)) {
-    it(`F-WX-UI-1｜Garage previewSolo ${soloVp.w}×${soloVp.h}：车辆 fit 到左侧展示区（framingRect）+ 占屏 28~38% + 中心在展示区`, () => {
+    it(`F-WX-RCA-2A｜Garage previewSolo ${soloVp.w}×${soloVp.h}：coreBounds（Body+Wheels）主尺度 28~34% + 完整入画 + 展示区居中`, () => {
       const vp = { w: soloVp.w, h: soloVp.h };
       const canvas = { getContext: () => makeStubCtx(), clientWidth: vp.w, clientHeight: vp.h, width: vp.w, height: vp.h } as unknown as HTMLCanvasElement;
       const surface: CanvasSurface = { width: vp.w, height: vp.h, devicePixelRatio: 1, now: () => 0 };
@@ -139,7 +144,7 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
       const r = new Renderer(canvas, new VisualRegistry(), surface);
       const snap = o.getRenderSnapshot();
       r.resize(snap.arena.width, o.arena.config.height);
-      // F-WX-UI-1：framingRect = 左侧展示区（与 CanvasHost.getPreviewFramingRect 同几何：
+      // framingRect = 左侧展示区（与 CanvasHost.getPreviewFramingRect 同几何：
       // 展示区 ~57% 屏宽，顶部 34+14，底部 CTA 56+16）
       const topH = 34;
       const ctaH = 56;
@@ -151,29 +156,36 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
       const bodyBot = ctaY - 14;
       const framingRect = { x: showX, y: bodyTop, w: showW, h: Math.max(120, bodyBot - bodyTop) };
       r.reframe(snap, 'previewSolo', { framingRect });
-      const b = vehicleScreenBounds(snap.vehicleA, r.transform);
-      // 完整可见
-      expect(b.minX).toBeGreaterThanOrEqual(-1);
-      expect(b.maxX).toBeLessThanOrEqual(vp.w + 1);
-      expect(b.minY).toBeGreaterThanOrEqual(-1);
-      expect(b.maxY).toBeLessThanOrEqual(vp.h + 1);
-      // 车辆中心位于左侧展示区（x∈[showX,showX+showW] y∈[bodyTop,bodyBot]）
-      const centerX = (b.minX + b.maxX) / 2;
-      const centerY = (b.minY + b.maxY) / 2;
-      expect(centerX, `${vp.w}×${vp.h} 车辆中心 x 在展示区`).toBeGreaterThanOrEqual(framingRect.x - 2);
-      expect(centerX, `${vp.w}×${vp.h} 车辆中心 x 在展示区内`).toBeLessThanOrEqual(framingRect.x + framingRect.w + 2);
-      expect(centerY, `${vp.w}×${vp.h} 车辆中心 y 在展示区`).toBeGreaterThanOrEqual(framingRect.y - 2);
-      expect(centerY, `${vp.w}×${vp.h} 车辆中心 y 在展示区内`).toBeLessThanOrEqual(framingRect.y + framingRect.h + 2);
-      // F-WX-9B：车辆垂直居中（中心 ≈ 展示区垂直中点，容差 8px，不贴底/贴顶）
+      // coreBounds（Body+Wheels）= Garage 主尺度验收口径；envelope 仅作完整入画校验
+      const core = vehicleScreenBounds(snap.vehicleA, r.transform, false);
+      const env = vehicleScreenBounds(snap.vehicleA, r.transform, true);
+      // 完整入画（core + envelope 均在屏内；普通武器由横向 margin 65 覆盖）
+      for (const b of [core, env]) {
+        expect(b.minX).toBeGreaterThanOrEqual(-1);
+        expect(b.maxX).toBeLessThanOrEqual(vp.w + 1);
+        expect(b.minY).toBeGreaterThanOrEqual(-1);
+        expect(b.maxY).toBeLessThanOrEqual(vp.h + 1);
+      }
+      // 车辆核心中心位于左侧展示区（x∈[showX,showX+showW] y∈[bodyTop,bodyBot]）
+      const centerX = (core.minX + core.maxX) / 2;
+      const centerY = (core.minY + core.maxY) / 2;
+      expect(centerX, `${vp.w}×${vp.h} 车辆核心中心 x 在展示区`).toBeGreaterThanOrEqual(framingRect.x - 2);
+      expect(centerX, `${vp.w}×${vp.h} 车辆核心中心 x 在展示区内`).toBeLessThanOrEqual(framingRect.x + framingRect.w + 2);
+      expect(centerY, `${vp.w}×${vp.h} 车辆核心中心 y 在展示区`).toBeGreaterThanOrEqual(framingRect.y - 2);
+      expect(centerY, `${vp.w}×${vp.h} 车辆核心中心 y 在展示区内`).toBeLessThanOrEqual(framingRect.y + framingRect.h + 2);
+      // 垂直居中（中心 ≈ 展示区垂直中点，容差 8px）
       const rectCenterY = framingRect.y + framingRect.h / 2;
       expect(
         Math.abs(centerY - rectCenterY),
-        `${vp.w}×${vp.h} 车辆中心 y ${centerY.toFixed(1)} 应接近展示区中点 ${rectCenterY.toFixed(1)}（|Δ|≤8）`,
+        `${vp.w}×${vp.h} 核心中心 y ${centerY.toFixed(1)} 应接近展示区中点 ${rectCenterY.toFixed(1)}（|Δ|≤8）`,
       ).toBeLessThanOrEqual(8);
-      // F-WX-9B：车辆视觉宽度占屏 32~38%（收敛下限：真实车辆屏宽目标 32%+）
-      const ratio = (b.maxX - b.minX) / vp.w;
-      expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ∈ [32%,38%]`).toBeGreaterThanOrEqual(0.32);
-      expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ≤ 38%`).toBeLessThanOrEqual(0.38);
+      // F-WX-RCA-2A：coreBounds 占屏 28~34%（真实微信 RCA 旧值 14% → 修复后目标 28~34%）
+      const coreRatio = (core.maxX - core.minX) / vp.w;
+      expect(coreRatio, `${vp.w}×${vp.h} core 占比 ${(coreRatio * 100).toFixed(1)}% 应 ∈ [28%,34%]`).toBeGreaterThanOrEqual(0.28);
+      expect(coreRatio, `${vp.w}×${vp.h} core 占比 ${(coreRatio * 100).toFixed(1)}% 应 ≤ 34%`).toBeLessThanOrEqual(0.34);
+      // envelope 仍大于 core（双口径并存；envelope 不再作为车辆尺寸验收）
+      const envRatio = (env.maxX - env.minX) / vp.w;
+      expect(envRatio, 'envelope 占比 > core 占比').toBeGreaterThan(coreRatio);
     });
   }
 });

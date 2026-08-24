@@ -118,14 +118,14 @@ const SOLO_MIN_X = 400;
 const SOLO_MAX_X = 840;
 const SOLO_MIN_Y = 400;
 const SOLO_MAX_Y = 730;
-// F-WX-UI-1：Mobile Garage 车辆 fit 到「左侧展示区」（framingRect，~55-57% 屏宽）——
-// solo 框收窄到 400 世界宽（spawn A x=620 中心，车辆世界宽 ~243 含轮/部件），
-// 区内占比 ≈243/416≈58% → 屏占比 ≈0.57×0.58≈29~30%，落在 28~38% 且不随屏宽漂移。
-// 纵向保持车辆+地面附近（groundY+40 钳制后 bh≈146）。
-const MOBILE_SOLO_MIN_X = 420;
-const MOBILE_SOLO_MAX_X = 820;
-const MOBILE_SOLO_MIN_Y = 589;
-const MOBILE_SOLO_MAX_Y = 699;
+// F-WX-RCA-2A：Mobile Garage previewSolo 不再用固定世界框——以 coreBounds（Body+Wheels）
+// 外扩固定 margin 决定主尺度（真实微信 RCA：旧 framingRect+固定 MOBILE_SOLO 框 core=14%、
+// framingRect 前 20.2% → 固定框把车身主体缩小了）。横向 margin 65 世界单位：core 170 宽
+// → bounds 300，同时覆盖普通武器外伸（envelope 243 < 300 完整入画；极长武器尖端允许
+// 越界，优先保证车身主体可读）；纵向 margin 24（车高 ~77 → bh~125，保持横向主导）。
+// 屏占比 ≈ coreW/(coreW+130) × safeW/viewportW ≈ 0.567×0.56 ≈ 32%（28~34% 目标）。
+const MOBILE_SOLO_MARGIN_X = 65;
+const MOBILE_SOLO_MARGIN_Y = 24;
 // F-WX-8-C：Mobile 战斗 Active corridor——覆盖真实交战区（开局 A(400)/B(1200) 完整
 // 可见，A 顶推 B 到右墙的主要过程在屏内）；宽 980 = 开局精确边界（A 左缘 315 / B 右缘 1295，
 // 实测 vehicleA watermelon [315,558]、vehicleB banana [1038,1295]）；配合 compact battle
@@ -1583,7 +1583,13 @@ export class Renderer {
     const isCompact = isCompactLandscape(this.viewWidth / this.viewDpr, this.viewHeight / this.viewDpr);
     if (fit === 'previewSolo') {
       if (isCompact) {
-        minX = MOBILE_SOLO_MIN_X; maxX = MOBILE_SOLO_MAX_X; minY = MOBILE_SOLO_MIN_Y; maxY = MOBILE_SOLO_MAX_Y;
+        // F-WX-RCA-2A：以 coreBounds（Body+Wheels）+ 固定 margin 决定主尺度（不用固定世界框）。
+        // envelope 由横向 margin 65 覆盖（普通武器完整入画；极长武器尖端允许越界）。
+        const core = this.vehicleBounds(snap.vehicleA, false);
+        minX = core.minX - MOBILE_SOLO_MARGIN_X;
+        maxX = core.maxX + MOBILE_SOLO_MARGIN_X;
+        minY = core.minY - MOBILE_SOLO_MARGIN_Y;
+        maxY = core.maxY + MOBILE_SOLO_MARGIN_Y;
       } else {
         minX = SOLO_MIN_X; maxX = SOLO_MAX_X; minY = SOLO_MIN_Y; maxY = SOLO_MAX_Y;
       }

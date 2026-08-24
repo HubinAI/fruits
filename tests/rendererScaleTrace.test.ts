@@ -72,7 +72,7 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     vi.restoreAllMocks();
   });
 
-  it('Garage previewSolo：envelope ∈ [32%,38%]（9B 阈值不变）+ core 存在且 < envelope', () => {
+  it('Garage previewSolo：core（Body+Wheels）∈ [28%,34%]（F-WX-RCA-2A 主尺度）+ envelope 存在且 > core', () => {
     vi.stubGlobal('__WX_DEBUG__', true);
     const { r, o } = makeEnv({ w: 844, h: 390 }, 1);
     const snap = o.getRenderSnapshot();
@@ -83,12 +83,13 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     expect(log, '应有 [WX-REF] 日志').not.toBeNull();
     const vehicle = log!.vehicleA as {
       core: { screenWidthPct: number };
-      envelope: { screenWidthPct: number; screen: { minX: number; maxX: number } };
+      envelope: { screenWidthPct: number };
     };
     expect(vehicle.core.screenWidthPct, 'core 存在').toBeGreaterThanOrEqual(0);
     expect(vehicle.envelope.screenWidthPct, 'envelope 存在').toBeGreaterThanOrEqual(0);
-    expect(vehicle.envelope.screenWidthPct).toBeGreaterThanOrEqual(32);
-    expect(vehicle.envelope.screenWidthPct).toBeLessThanOrEqual(38);
+    // F-WX-RCA-2A：coreBounds 主尺度 28~34%（真实微信旧值 14%）
+    expect(vehicle.core.screenWidthPct).toBeGreaterThanOrEqual(28);
+    expect(vehicle.core.screenWidthPct).toBeLessThanOrEqual(34);
     expect(vehicle.core.screenWidthPct, 'core（Body+Wheels）应小于 envelope（含 Parts）').toBeLessThan(vehicle.envelope.screenWidthPct);
     expect((log!.view as { dpr: number }).dpr).toBe(1);
   });
