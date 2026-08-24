@@ -16,7 +16,7 @@
  */
 import { platform } from '../platform';
 import type { SafeInsets } from '../platform/types';
-import { computeMobileGarageLayout, type Rect } from './mobileGarageLayout';
+import { computeMobileGarageLayout, type Rect, type MobileGarageLayout } from './mobileGarageLayout';
 import { registry } from '../core/content';
 import {
   buildSnapshotFromDraft,
@@ -91,6 +91,9 @@ interface GarageOpt {
 
 const ZERO_INSETS: SafeInsets = { left: 0, right: 0, top: 0, bottom: 0 };
 
+/** F-META-1：Main Shell 局外页面（UI-only，不进 Gameplay 状态机） */
+type MetaPage = 'garage' | 'backpack' | 'more';
+
 export class CanvasPlayerUIHost implements PlayerUIHost {
   private actions: PlayerUIActions | null = null;
   private parent!: HTMLElement;
@@ -113,6 +116,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private optScrollFor: string | null = null;
   /** F-WX-UI-1：装配面板视图（home 2×2 分类 / wheelPick 轮子二级 / weaponPick 武器位 / options 选项） */
   private panelView: 'home' | 'wheelPick' | 'weaponPick' | 'options' = 'home';
+  /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机） */
+  private metaPage: MetaPage = 'garage';
   /** F-WX-UI-1：选项网格面板内垂直滚动（面板不溢出屏幕） */
   private panelScroll = 0;
   /** F-WX-8-B：Mobile 合成面板展开态（点击「合成」次级入口后展开；确认才派发 onMerge） */
@@ -180,6 +185,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.panelScroll = 0;
     }
     if (state.battleState !== 'editing' || state.playerPhase !== 'garage') this.mergeOpen = false;
+    // F-META-1：离开局外（进 Matching/Battle/Result）时复位 MetaPage——回 Garage 后默认回车库页
+    if (state.playerPhase !== 'garage') this.metaPage = 'garage';
     this.draw();
   }
 
@@ -243,6 +250,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (id === 'opt-scroll-left' || id === 'opt-scroll-right') {
       this.optScroll += id === 'opt-scroll-left' ? -140 : 140;
       if (this.optScroll < 0) this.optScroll = 0;
+      this.draw();
+      return;
+    }
+    if (id.startsWith('nav:')) {
+      // F-META-1：Main Shell 导航切换（UI-only，不派发 Gameplay action；离开当前页复位面板态）
+      this.metaPage = id.slice(4) as MetaPage;
+      this.panelView = 'home';
+      this.panelScroll = 0;
+      this.mergeOpen = false;
       this.draw();
       return;
     }
@@ -668,19 +684,64 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * - 面板下主 CTA「寻找对手」：唯一最大（220-300×56），距 safe bottom ≥16，不贴底。
    * 合成降级为面板内次级入口；首轮引导为 CTA 上方局部气泡。State/Action/Gameplay 复用。
    */
+  /**
+   * F-META-1：Main Shell（playerPhase=garage 时唯一局外框架）——顶部薄状态栏（段位/金币/标题）
+   * + Main 导航行（车库/背包/更多）+ 中央功能内容区；导航在内容框架内，不铺满屏幕边缘。
+   * 进入 Matching/Battle/Result 后本 Shell 不绘制（draw() 分支保证）；回 Garage 默认回车库页。
+   */
   private drawMobileGarageDock(state: PlayerUIState): void {
     const draft = state.draft;
     if (!draft) return;
     // F-WX-UI-F1：唯一布局源——绘制 / HitArea / Preview Camera 全部读取同一份结果，
-    // 禁止在此手算 topBar/vehicle/panel/cta 区域（几何规则见 computeMobileGarageLayout）
+    // 禁止在此手算 topBar/nav/vehicle/panel/cta 区域（几何规则见 computeMobileGarageLayout）
     const layout = computeMobileGarageLayout(
       { w: this.W, h: this.H },
       { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
     );
-    const { topBarRect, panelRect, ctaRect } = layout;
 
-    // 顶栏（只信息，不放主要操作）
-    this.drawMobileTopBar(state, draft, topBarRect);
+    // 顶部薄状态栏（段位/金币/当前页面标题；只信息，不放主要操作）
+    const title = this.metaPage === 'backpack' ? '背包' : this.metaPage === 'more' ? '更多' : '我的战车';
+    this.drawMobileTopBar(state, draft, layout.topBarRect, title);
+
+    // Main 导航行（车库/背包/更多；garage 页额外挂合成次级入口）
+    this.drawMainNav(layout);
+
+    // 中央功能内容区（按 MetaPage 分派；三页共享同一 Shell 几何）
+    if (this.metaPage === 'backpack') {
+      this.drawBackpackPage(state, layout);
+    } else if (this.metaPage === 'more') {
+      this.drawMorePage(layout);
+    } else {
+      this.drawGarageMetaPage(state, draft, layout);
+    }
+  }
+
+  /** F-META-1：Main 导航行——车库/背包/更多 tab（garage 页第 4 位为合成次级入口） */
+  private drawMainNav(layout: MobileGarageLayout): void {
+    const { navRect } = layout;
+    const showMerge = this.metaPage === 'garage';
+    const tabs: Array<{ id: string; label: string }> = [
+      { id: 'nav:garage', label: '车库' },
+      { id: 'nav:backpack', label: '背包' },
+      { id: 'nav:more', label: '更多' },
+    ];
+    const gap = 8;
+    const n = showMerge ? 4 : 3;
+    const tabW = Math.floor((navRect.w - gap * (n - 1)) / n);
+    let x = navRect.x;
+    for (const t of tabs) {
+      this.button(x, navRect.y, tabW, navRect.h, t.id, t.label, { active: this.metaPage === t.id.slice(4) });
+      x += tabW + gap;
+    }
+    if (showMerge) {
+      // 合成次级入口（导航行末位；点击展开合成面板，确认才 onMerge）
+      this.button(x, navRect.y, navRect.x + navRect.w - x, navRect.h, 'merge', '合成', { sub: '更多' });
+    }
+  }
+
+  /** F-META-1：garage MetaPage——车辆展示（renderer 画）+ 右侧装配面板 + 主 CTA */
+  private drawGarageMetaPage(state: PlayerUIState, draft: BuildDraft, layout: MobileGarageLayout): void {
+    const { panelRect, ctaRect } = layout;
 
     // 主 CTA（唯一最大）+ 首轮引导气泡 + 非法原因
     this.button(ctaRect.x, ctaRect.y, ctaRect.w, ctaRect.h, 'cta-find', state.draftValid ? '寻找对手' : '配置不合法', {
@@ -713,8 +774,48 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /** 顶栏：金币 · 段位 · 能量（单行 ≤42 高，只信息；区域来自唯一布局源 topBarRect） */
-  private drawMobileTopBar(state: PlayerUIState, draft: BuildDraft, topBarRect: Rect): void {
+  /** F-META-1：backpack MetaPage——玩家部件库存展示（纯读 inventory，不新增商店/任务逻辑） */
+  private drawBackpackPage(state: PlayerUIState, layout: MobileGarageLayout): void {
+    const c = layout.contentRect;
+    this.rect(c.x, c.y, c.w, c.h, C.dockBg, C.border, 1);
+    this.text('背包', c.x + 12, c.y + 22, 20, C.text, 'left', 700);
+    this.text('我拥有的部件', c.x + 12, c.y + 46, 14, C.textDim);
+    const inv = state.inventory;
+    const cols = 2;
+    const gap = 8;
+    const cardW = (c.w - 24 - gap * (cols - 1)) / cols;
+    const cardH = TARGET_TOUCH_H;
+    let idx = 0;
+    for (const pp of OFFICIAL_PARTS) {
+      const count = Math.max(0, inv[pp].one);
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      const x = c.x + 12 + col * (cardW + gap);
+      const y = c.y + 58 + row * (cardH + gap);
+      if (y + cardH > c.y + c.h - 8) break; // 面板内不溢出（只读展示，无点击）
+      this.rect(x, y, cardW, cardH, C.panel, C.border, 1);
+      this.text(pp, x + 10, y + cardH / 2 - 6, 16, C.text, 'left', 600);
+      this.text(`×${count}`, x + cardW - 10, y + cardH / 2 - 6, 16, C.gold, 'right', 700);
+      idx++;
+    }
+    if (idx === 0) this.text('暂无部件', c.x + 12, c.y + 80, 14, C.textDim);
+  }
+
+  /** F-META-1：more MetaPage——占位页（不新增真正商店/任务逻辑） */
+  private drawMorePage(layout: MobileGarageLayout): void {
+    const c = layout.contentRect;
+    this.rect(c.x, c.y, c.w, c.h, C.dockBg, C.border, 1);
+    this.text('更多', c.x + 12, c.y + 22, 20, C.text, 'left', 700);
+    this.text('设置与更多功能开发中', c.x + 12, c.y + 56, 14, C.textDim);
+  }
+
+  /** 顶栏：当前页面标题 · 金币 · 段位 · 能量（单行 ≤42 高，只信息；区域来自唯一布局源 topBarRect） */
+  private drawMobileTopBar(
+    state: PlayerUIState,
+    draft: BuildDraft,
+    topBarRect: Rect,
+    title: string,
+  ): void {
     const p = state.progress;
     const tier = tierOf(p.rating);
     const body = registry.bodies.get(draft.bodyDefId);
@@ -723,8 +824,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const uT = topBarRect.y;
     const topH = topBarRect.h;
     this.rect(x0 - 4, uT, w + 8, topH, 'rgba(8,10,14,0.72)', C.border, 1);
-    this.text(`金币 ${p.coin}`, x0, uT + topH / 2 + 5, 15, C.gold, 'left', 700);
-    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, x0 + 150, uT + topH / 2 + 5, 14, C.textDim);
+    // F-META-1：当前页面标题（最左）→ 金币 → 段位 → 能量（右侧）
+    this.text(title, x0, uT + topH / 2 + 5, 15, C.text, 'left', 700);
+    this.text(`金币 ${p.coin}`, x0 + 56, uT + topH / 2 + 5, 14, C.gold, 'left', 700);
+    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, x0 + 190, uT + topH / 2 + 5, 14, C.textDim);
     const snapshot = buildSnapshotFromDraft(draft, registry, 'customA');
     const energyRes = computeEnergy(snapshot, registry);
     const used = energyRes.error ? Number.NaN : energyRes.energy;
@@ -771,12 +874,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ];
     const gap = 8;
     const cellW = (pw - gap) / 2;
-    // F-WX-UI-2A：2×2 大卡片优先取满 TARGET_TOUCH_H，但必须保证底部合成次级入口
-    // （mergeH ≥48）放得下——面板偏矮（如 621×351）时卡片高度动态收缩，不丢入口
-    const mergeH = Math.max(MIN_TOUCH_H, 48);
+    // F-WX-UI-2A/F-META-1：2×2 大卡片尽量取满 TARGET_TOUCH_H；矮面板时动态收缩（≥MIN）。
+    // 合成次级入口已移到 Main Shell 导航行（drawMainNav），面板内不再需要 merge 行。
     const cellH = Math.max(
       MIN_TOUCH_H,
-      Math.min(TARGET_TOUCH_H, Math.floor((ph - 12 - mergeH - gap) / 2)),
+      Math.min(TARGET_TOUCH_H, Math.floor((ph - gap) / 2)),
     );
     for (let i = 0; i < 4; i++) {
       const col = i % 2;
@@ -784,11 +886,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.button(px + col * (cellW + gap), py + row * (cellH + gap), cellW, cellH, cells[i].id, cells[i].label, {
         sub: cells[i].sub,
       });
-    }
-    // 底部：合成次级入口（触控 ≥48；点击展开合成面板）
-    const mergeY = py + 2 * (cellH + gap) + 12;
-    if (mergeY + mergeH <= py + ph) {
-      this.button(px, mergeY, 120, mergeH, 'merge', '合成', { sub: '更多' });
     }
   }
 
@@ -876,12 +973,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const col = i % 2;
       const row = Math.floor(i / 2);
       const c = opts[i];
-      this.button(px + col * (colW + gap), yy + row * (cardH + gap), colW, cardH, `opt:${c.v}`, c.t, {
-        sub: c.meta || undefined,
-        active: c.v === curVal,
-        locked: c.locked,
-        disabled: !!c.locked,
-      });
+      const ox = px + col * (colW + gap);
+      const oy = yy + row * (cardH + gap);
+      const fully = oy >= y - 0.5 && oy + cardH <= y + viewH + 0.5;
+      if (fully) {
+        // 完全可见：绘制 + 注册命中（视觉 rect == hit rect）
+        this.button(ox, oy, colW, cardH, `opt:${c.v}`, c.t, {
+          sub: c.meta || undefined,
+          active: c.v === curVal,
+          locked: c.locked,
+          disabled: !!c.locked,
+        });
+      } else if (oy < y + viewH && oy + cardH > y) {
+        // 部分可见：只画不注册命中（半显边缘 = 可继续滚动提示；不产生超屏 hitArea）
+        const fill = c.locked ? '#262e3d' : c.v === curVal ? C.blueDeep : C.panel;
+        this.rect(ox, oy, colW, cardH, fill, c.locked ? C.lockText : C.border, 1);
+        this.text(c.t, ox + colW / 2, oy + cardH / 2, 15, c.locked ? C.textDark : C.text, 'center', 600);
+      }
     }
     ctx.restore();
   }

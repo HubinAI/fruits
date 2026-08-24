@@ -91,9 +91,17 @@ describe('F-WX-UI-F1｜computeMobileGarageLayout 纯函数（唯一几何来源�
         r.x >= INSETS.left && r.y >= INSETS.top &&
         r.x + r.w <= vp.w - INSETS.right && r.y + r.h <= vp.h - INSETS.bottom;
       expect(inSafe(l.topBarRect), `${vp.w}×${vp.h} topBar 在 safe 内`).toBe(true);
+      expect(inSafe(l.navRect), `${vp.w}×${vp.h} nav 在 safe 内`).toBe(true);
+      expect(inSafe(l.contentRect), `${vp.w}×${vp.h} content 在 safe 内`).toBe(true);
       expect(inSafe(l.vehicleRect), `${vp.w}×${vp.h} vehicle 在 safe 内`).toBe(true);
       expect(inSafe(l.panelRect), `${vp.w}×${vp.h} panel 在 safe 内`).toBe(true);
       expect(inSafe(l.ctaRect), `${vp.w}×${vp.h} cta 在 safe 内`).toBe(true);
+      // F-META-1：导航行在顶栏下方、内容区上方（Shell 三段结构）
+      expect(l.navRect.y, 'nav 在 topBar 下方').toBeGreaterThanOrEqual(l.topBarRect.y + l.topBarRect.h);
+      expect(l.navRect.h, 'nav 高 ≥48').toBeGreaterThanOrEqual(48);
+      expect(l.contentRect.y, 'content 在 nav 下方').toBeGreaterThanOrEqual(l.navRect.y + l.navRect.h);
+      expect(l.contentRect.x, 'content 与 nav 左对齐').toBe(l.navRect.x);
+      expect(l.contentRect.w, 'content 与 nav 同宽').toBe(l.navRect.w);
       for (const [k, r] of Object.entries(l)) {
         expect(r.w, `${vp.w}×${vp.h} ${k} 宽 >0`).toBeGreaterThan(0);
         expect(r.h, `${vp.w}×${vp.h} ${k} 高 >0`).toBeGreaterThan(0);

@@ -303,11 +303,11 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     // 功能件选项很多（2 列网格超出面板）→ 应有面板内滚动箭头
     const scrollDown = env.host.getHitAreasForTest().find((a) => a.id === 'panel-scroll-down');
     expect(scrollDown, '应有面板内滚动箭头').toBeTruthy();
-    // 点滚动 → 选项在面板内上移（内容滚动，不整屏滚动）
-    const yBefore = areas(env, 'opt:')[0].y;
+    // 点滚动 → 可见选项集合变化（F-META-1 后面板变矮，部分可见选项不注册命中——
+    // 滚动后新的「完全可见」选项出现；不用 y 单调断言，矮面板下首个可见项可能后移）
     env.pointer(scrollDown!.x + scrollDown!.w / 2, scrollDown!.y + scrollDown!.h / 2);
-    const yAfter = areas(env, 'opt:')[0].y;
-    expect(yAfter, '滚动后选项上移（面板内滚动）').toBeLessThan(yBefore);
+    const secondVisible = areas(env, 'opt:').map((a) => a.id);
+    expect(secondVisible.some((id) => !firstVisible.includes(id)), '滚动后应出现新选项').toBe(true);
     for (const a of env.host.getHitAreasForTest().filter((x) => x.id.startsWith('opt:'))) {
       expect(a.x + a.w).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right);
       expect(a.y + a.h).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom);
