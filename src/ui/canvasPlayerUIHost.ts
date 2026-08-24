@@ -94,6 +94,20 @@ const ZERO_INSETS: SafeInsets = { left: 0, right: 0, top: 0, bottom: 0 };
 /** F-META-1：Main Shell 局外页面（UI-only，不进 Gameplay 状态机） */
 type MetaPage = 'garage' | 'backpack' | 'more';
 
+/**
+ * F-META-4：通用 Modal Frame 规格（轻量 UI Foundation，不接具体业务逻辑）。
+ * - 居中卡片：标题区 + 内容行 + 主按钮 + 可选次按钮 + 全屏遮罩（拦截底层点击）。
+ * - 关闭后重绘恢复当前页面；按钮回调由调用方提供（最小 API，无全局 Modal Manager）。
+ */
+interface ModalSpec {
+  title: string;
+  body: string[];
+  primary: string;
+  secondary?: string;
+  onPrimary?: () => void;
+  onSecondary?: () => void;
+}
+
 export class CanvasPlayerUIHost implements PlayerUIHost {
   private actions: PlayerUIActions | null = null;
   private parent!: HTMLElement;
@@ -120,6 +134,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private metaPage: MetaPage = 'garage';
   /** F-META-3：Backpack 分类过滤（全部/武器/功能件；UI-only，不做复杂筛选） */
   private backpackFilter: 'all' | 'weapon' | 'gadget' = 'all';
+  /** F-META-4：当前激活的 Modal（null = 无）；覆盖绘制 + 拦截底层点击，关闭恢复当前页 */
+  private modal: ModalSpec | null = null;
   /** F-WX-UI-1：选项网格面板内垂直滚动（面板不溢出屏幕） */
   private panelScroll = 0;
   /** F-WX-8-B：Mobile 合成面板展开态（点击「合成」次级入口后展开；确认才派发 onMerge） */
@@ -344,6 +360,22 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     switch (id) {
+      case 'modal-primary': {
+        // F-META-4：主按钮——先取回调再关闭（关闭后重绘恢复当前页）
+        const cb = this.modal?.onPrimary;
+        this.closeModal();
+        cb?.();
+        break;
+      }
+      case 'modal-secondary': {
+        const cb = this.modal?.onSecondary;
+        this.closeModal();
+        cb?.();
+        break;
+      }
+      case 'modal-veil':
+        // 遮罩命中：拦截底层点击（无操作）
+        break;
       case 'cta-find':
         this.actions?.onFindOpponent();
         break;
@@ -420,6 +452,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       }
     }
     if (state.readyOverlayVisible) this.drawReadyOverlay();
+    // F-META-4：Modal 覆盖层（最后绘制 → 最上层；遮罩拦截底层点击）
+    if (this.modal) this.drawModal(this.modal);
   }
 
   private ensureSize(): void {
@@ -1431,6 +1465,56 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const bw = (cardW - 10) / 2;
       this.button(cardX, by, bw, btnH, 'result-adjust', '调整配置');
       this.button(cardX + bw + 10, by, bw, btnH, 'result-next', '下一场', { primary: true });
+    }
+  }
+
+  /**
+   * F-META-4：打开通用 Modal（居中卡片 + 全屏遮罩；覆盖当前 UI 并拦截底层点击）。
+   * 最小 API：调用方提供标题/内容/按钮文案与回调；不接具体业务逻辑、无动画、无美术依赖。
+   */
+  showModal(spec: ModalSpec): void {
+    this.modal = spec;
+    this.draw();
+  }
+
+  /** F-META-4：关闭 Modal——重绘后恢复当前页面（lastState 与 Host 内部态均保留） */
+  closeModal(): void {
+    this.modal = null;
+    this.draw();
+  }
+
+  /** F-META-4：Modal 覆盖层绘制——全屏遮罩（拦截底层）+ 居中卡片（标题/内容/主次按钮） */
+  private drawModal(spec: ModalSpec): void {
+    const W = this.W;
+    const H = this.H;
+    // 全屏遮罩（先注册 → 逆序命中时被卡片按钮覆盖；底层按钮被拦截不可点）
+    this.rect(0, 0, W, H, C.overlayBg);
+    this.hit('modal-veil', 0, 0, W, H);
+    // 居中卡片（尺寸自适应：标题 + 内容行 + 按钮；621×351 等小屏内合法）
+    const cardW = Math.min(420, W - this.insL - this.insR - 40);
+    const rowH = 22;
+    const titleH = 40;
+    const btnH = TARGET_TOUCH_H;
+    const pad = 16;
+    const cardH = pad + titleH + spec.body.length * rowH + 10 + btnH + pad;
+    const cx = Math.max(8, (W - cardW) / 2);
+    const cy = Math.max(8, (H - cardH) / 2);
+    this.rect(cx, cy, cardW, cardH, C.dockBg, C.border, 1);
+    this.text(spec.title, cx + cardW / 2, cy + pad + titleH / 2, 20, C.text, 'center', 700);
+    let yy = cy + pad + titleH + 4;
+    for (const line of spec.body) {
+      this.text(line, cx + cardW / 2, yy + rowH / 2, 14, C.textDim, 'center');
+      yy += rowH;
+    }
+    // 按钮行：次按钮（可选）左、主按钮右
+    const by = cy + pad + titleH + spec.body.length * rowH + 10;
+    const gap = 10;
+    if (spec.secondary) {
+      const bw = (cardW - 2 * pad - gap) / 2;
+      this.button(cx + pad, by, bw, btnH, 'modal-secondary', spec.secondary, {});
+      this.button(cx + pad + bw + gap, by, bw, btnH, 'modal-primary', spec.primary, { primary: true });
+    } else {
+      this.button(cx + pad, by, cardW - 2 * pad, btnH, 'modal-primary', spec.primary, { primary: true });
     }
   }
 
