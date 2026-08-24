@@ -71,7 +71,7 @@ describe('F-WX-9A｜[WX-REF] reframe 尺度日志（DEV-only）', () => {
     expect((log!.view as { dpr: number }).dpr).toBe(1);
   });
 
-  it('Battle Active：screenWidthPct ∈ [18%,28%]', () => {
+  it('Battle Active：screenWidthPct ∈ [24%,30%]（F-WX-9C corridor 收窄后三屏统一 24.4%）', () => {
     vi.stubGlobal('__WX_DEBUG__', true);
     const { r, o } = makeEnv({ w: 844, h: 390 }, 1);
     const snap = o.getRenderSnapshot();
@@ -83,8 +83,8 @@ describe('F-WX-9A｜[WX-REF] reframe 尺度日志（DEV-only）', () => {
     expect(log!.fit).toBe('battle');
     expect(log!.framingRect).toBeNull();
     const vehicle = log!.vehicleA as { screenWidthPct: number };
-    expect(vehicle.screenWidthPct).toBeGreaterThanOrEqual(18);
-    expect(vehicle.screenWidthPct).toBeLessThanOrEqual(28);
+    expect(vehicle.screenWidthPct).toBeGreaterThanOrEqual(24);
+    expect(vehicle.screenWidthPct).toBeLessThanOrEqual(30);
   });
 
   it('DPR=2（surface 1688×780 物理）与 DPR=1（844×390）逻辑占比一致（尺度链自洽）', () => {

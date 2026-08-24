@@ -99,11 +99,12 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
           expect(b.maxY, `${phase} A/B 底缘入画`).toBeLessThanOrEqual(vp.h + 1);
           // HUD 不挡主体：车辆顶缘在 HUD 安全区之下
           expect(b.minY, `${phase} 车辆顶缘低于 HUD 区（${hudTop}）`).toBeGreaterThanOrEqual(hudTop - 1);
-          // F-WX-8-C：Mobile Active 战斗主体优先——单辆战车占屏宽 18~28%
+          // F-WX-9C：Mobile Active 战斗主体优先——单车视觉宽度 24~30%（corridor 收窄到
+          // 开局精确边界 + compact battle margin 8/insetX 0，实测三屏统一 24.4%）
           if (phase === 'Active' && !vp.desktop) {
             const ratio = (b.maxX - b.minX) / vp.w;
-            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ∈ [18%,28%]`).toBeGreaterThanOrEqual(0.18);
-            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ≤ 28%`).toBeLessThanOrEqual(0.28);
+            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ∈ [24%,30%]`).toBeGreaterThanOrEqual(0.24);
+            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ≤ 30%`).toBeLessThanOrEqual(0.3);
           }
         }
         // F-WX-8-C：Mobile Warning 场地规则优先——完整 arena 左右墙（x=0 / x=width）在屏内（刺墙提示可见）

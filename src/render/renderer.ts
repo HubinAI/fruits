@@ -127,10 +127,12 @@ const MOBILE_SOLO_MAX_X = 820;
 const MOBILE_SOLO_MIN_Y = 589;
 const MOBILE_SOLO_MAX_Y = 699;
 // F-WX-8-C：Mobile 战斗 Active corridor——覆盖真实交战区（开局 A(400)/B(1200) 完整
-// 可见，A 顶推 B 到右墙的主要过程在屏内）；宽 1040（含 margin 后车辆占屏 ~21%，
-// 目标 18~28%，旧全宽 corridor 仅 ~17%）。Warning/Closing 回退完整 arena（场地规则优先）。
-const MOBILE_ACTIVE_MIN_X = 300;
-const MOBILE_ACTIVE_MAX_X = 1340;
+// 可见，A 顶推 B 到右墙的主要过程在屏内）；宽 980 = 开局精确边界（A 左缘 315 / B 右缘 1295，
+// 实测 vehicleA watermelon [315,558]、vehicleB banana [1038,1295]）；配合 compact battle
+// margin 8 + insetX 0 → 单车占屏 ~24.4%（F-WX-9C 目标 24~30%，旧 300-1340+margin64+inset56 仅 ~18%）。
+// Warning/Closing 回退完整 arena（场地规则优先）。
+const MOBILE_ACTIVE_MIN_X = 315;
+const MOBILE_ACTIVE_MAX_X = 1295;
 const MATCH_MIN_X = 440;
 const MATCH_MAX_X = 1150;
 const MATCH_MIN_Y = 400;
@@ -1634,7 +1636,7 @@ export class Renderer {
     // F-WX-8-B：compact 固定框（Mobile previewSolo/previewFixed）用极小 margin——
     // 固定框 bounds 自带覆盖余量（如 solo 框 440 宽 vs 车辆 180 宽），再叠加 48 的
     // CONTENT_MARGIN_WORLD 会把纵向 bh 撑大、压扁手机横屏下的车辆（实测 24%）。
-    const m = isFixed && isCompact ? 8 : isPreview ? PREVIEW_MARGIN_WORLD : CONTENT_MARGIN_WORLD;
+    const m = (isFixed || fit === 'battle') && isCompact ? 8 : isPreview ? PREVIEW_MARGIN_WORLD : CONTENT_MARGIN_WORLD;
     minX -= m; maxX += m; minY -= m; maxY += m;
     // 地面表面留出可见区域
     if (maxY < snap.arena.groundY + 40) maxY = snap.arena.groundY + 40;
@@ -1649,7 +1651,7 @@ export class Renderer {
     // （Mobile Garage 全宽布局，safe area 由 Host insL/insR 处理）→ 车辆占可用宽 30~45%。
     // Desktop（h≥600）语义完全不变。
     // 注意：view-space 为物理 px（surface 或 canvas 像素），inset 值 ×viewDpr 换算回逻辑 px。
-    const insetX = isFixed && isCompact ? 8 : SAFE_INSET_X;
+    const insetX = isCompact ? (fit === 'battle' ? 0 : isFixed ? 8 : SAFE_INSET_X) : SAFE_INSET_X;
     const insetTop = isFixed
       ? isCompact
         ? Math.round(52 * this.viewDpr)
