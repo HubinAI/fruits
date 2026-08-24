@@ -15,6 +15,7 @@
  * State / Action / Gameplay 完全复用（Host 不决定规则）。
  */
 import { describe, it, expect, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { CanvasPlayerUIHost } from '../src/ui/canvasPlayerUIHost';
 import { bindPlatformCore } from '../src/platform/context';
 import { createWebCore } from '../src/platform/web';
@@ -187,6 +188,14 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       expect(areas(env, 'weapon-slot:')).toHaveLength(0);
       expect(areas(env, 'merge-confirm')).toHaveLength(0);
       expect(areas(env, 'merge-close')).toHaveLength(0);
+      // F-WX-9B：首屏只有 4 个一级配置入口（车身/轮子/驱动/武器），无第 5 个 entry
+      const entries = env.host.getHitAreasForTest()
+        .filter((a) => a.id.startsWith('entry'))
+        .map((a) => a.id);
+      expect(entries, `${vp.w}×${vp.h} 一级配置入口恰好 4 个`).toHaveLength(4);
+      for (const id of ['entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons']) {
+        expect(entries, `${vp.w}×${vp.h} 应含一级入口 ${id}`).toContain(id);
+      }
       // 「寻找对手」唯一最大主按钮：宽 > 合成入口、高 ≥52、距 safe bottom ≥16
       const cta = env.host.getHitAreasForTest().find((x) => x.id === 'cta-find')!;
       const merge = env.host.getHitAreasForTest().find((x) => x.id === 'merge')!;
@@ -402,5 +411,34 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const webAreas = host.getHitAreasForTest().map((a) => ({ id: a.id, x: a.x, y: a.y, w: a.w, h: a.h }));
     expect(webAreas).toEqual(wxAreas); // 同一 Mobile Layout 规则
     void captured;
+  });
+
+  it('F-WX-9B｜Garage 首屏绘制方法内所有直接文本字号 ≥14px（Mobile 真人距离可读）', () => {
+    // 源码守卫：Mobile 首屏方法体内 this.text(text, x, y, size, color, ...) 的 size 参数必须 ≥14
+    const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
+    const methods = [
+      'drawMobileGarageDock',
+      'drawMobileTopBar',
+      'drawGaragePanelHome',
+      'drawGaragePanelWheelPick',
+      'drawGaragePanelWeaponPick',
+      'drawGaragePanelMerge',
+    ];
+    const re = /this\.text\(([^)]*)\)/g;
+    for (const name of methods) {
+      const start = src.indexOf(`private ${name}(`);
+      expect(start, `${name} 应存在`).toBeGreaterThan(-1);
+      const next = src.indexOf('\n  private ', start + 10);
+      const body = src.slice(start, next === -1 ? src.length : next);
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(body)) !== null) {
+        const args = m[1].split(',').map((s) => s.trim());
+        const size = parseInt(args[3] ?? '', 10); // text, x, y, size, color, align, weight
+        if (Number.isFinite(size) && size > 0) {
+          expect(size, `${name} 内字号 <14px 的直接文本：${m[0].slice(0, 64)}`).toBeGreaterThanOrEqual(14);
+        }
+      }
+    }
   });
 });

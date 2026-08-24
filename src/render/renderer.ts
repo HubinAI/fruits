@@ -124,8 +124,8 @@ const SOLO_MAX_Y = 730;
 // 纵向保持车辆+地面附近（groundY+40 钳制后 bh≈146）。
 const MOBILE_SOLO_MIN_X = 420;
 const MOBILE_SOLO_MAX_X = 820;
-const MOBILE_SOLO_MIN_Y = 550;
-const MOBILE_SOLO_MAX_Y = 660;
+const MOBILE_SOLO_MIN_Y = 589;
+const MOBILE_SOLO_MAX_Y = 699;
 // F-WX-8-C：Mobile 战斗 Active corridor——覆盖真实交战区（开局 A(400)/B(1200) 完整
 // 可见，A 顶推 B 到右墙的主要过程在屏内）；宽 1040（含 margin 后车辆占屏 ~21%，
 // 目标 18~28%，旧全宽 corridor 仅 ~17%）。Warning/Closing 回退完整 arena（场地规则优先）。

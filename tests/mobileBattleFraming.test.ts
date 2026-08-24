@@ -163,9 +163,15 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
       expect(centerX, `${vp.w}×${vp.h} 车辆中心 x 在展示区内`).toBeLessThanOrEqual(framingRect.x + framingRect.w + 2);
       expect(centerY, `${vp.w}×${vp.h} 车辆中心 y 在展示区`).toBeGreaterThanOrEqual(framingRect.y - 2);
       expect(centerY, `${vp.w}×${vp.h} 车辆中心 y 在展示区内`).toBeLessThanOrEqual(framingRect.y + framingRect.h + 2);
-      // F-WX-UI-1：车辆视觉宽度占屏 28~38%
+      // F-WX-9B：车辆垂直居中（中心 ≈ 展示区垂直中点，容差 8px，不贴底/贴顶）
+      const rectCenterY = framingRect.y + framingRect.h / 2;
+      expect(
+        Math.abs(centerY - rectCenterY),
+        `${vp.w}×${vp.h} 车辆中心 y ${centerY.toFixed(1)} 应接近展示区中点 ${rectCenterY.toFixed(1)}（|Δ|≤8）`,
+      ).toBeLessThanOrEqual(8);
+      // F-WX-9B：车辆视觉宽度占屏 32~38%（收敛下限：真实车辆屏宽目标 32%+）
       const ratio = (b.maxX - b.minX) / vp.w;
-      expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ∈ [28%,38%]`).toBeGreaterThanOrEqual(0.28);
+      expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ∈ [32%,38%]`).toBeGreaterThanOrEqual(0.32);
       expect(ratio, `${vp.w}×${vp.h} 车辆占比 ${(ratio * 100).toFixed(1)}% 应 ≤ 38%`).toBeLessThanOrEqual(0.38);
     });
   }
