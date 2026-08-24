@@ -67,19 +67,32 @@ describe('F-WX-7 微信工程目录（可直接导入）', () => {
     expect(entry).not.toMatch(/localStorage/);
   });
 
-  it('F-WX-8-A｜UI overlay 与主画布分离：CanvasPlayerUIHost 用独立第二个 canvas（P0 根因守卫）', () => {
-    // 根因：Renderer 与 CanvasPlayerUIHost 若共享同一 wx.createCanvas()，Renderer.render()
-    // 每帧 clearRect+全屏深色背景会覆盖 CanvasHost 的 Garage UI → 首屏只见「战场」。
-    // 修复：微信入口必须创建第二个 canvas 作 UI overlay（微信多 canvas 层叠，透明在上层）。
+  it('F-WX-P0｜唯一上屏 Canvas 合成链：首 canvas=screenCanvas、offscreen 不假设自动上屏、frame 末段 drawImage 合成', () => {
     const entry = read('wechat/game.ts');
-    // 两个独立 createCanvas（主画布 + UI overlay）
+    // 1) 第一次 createCanvas = 唯一上屏 canvas（screenCanvas，Renderer 绑定它）
     const creates = (entry.match(/wx\.createCanvas\(\)/g) ?? []).length;
     expect(creates).toBeGreaterThanOrEqual(2);
-    // Renderer 绑主画布 canvas；CanvasPlayerUIHost 绑 uiCanvas（不是同一个）
-    expect(entry).toMatch(/new Renderer\(canvas/);
+    expect(entry).toMatch(/const screenCanvas = wx\.createCanvas\(\)/); // 第一个 = 上屏
+    expect(entry).toMatch(/const uiCanvas = wx\.createCanvas\(\)/); // 第二个 = offscreen
+    expect(entry).toMatch(/new Renderer\(screenCanvas/);
     expect(entry).toMatch(/new CanvasPlayerUIHost\(uiCanvas/);
-    expect(entry).not.toMatch(/new CanvasPlayerUIHost\(canvas/);
-    // overlay 必须有自己的 2d ctx（微信第二个 canvas 独立可绘）
-    expect(entry).toMatch(/const uiCtx = uiCanvas\.getContext\('2d'\)/);
+    // 2) 第二 canvas 不被假设自动上屏——源码必须有显式 drawImage 合成
+    //    （不依赖「后创建的 canvas 自动叠层」这类错误假设）
+    expect(entry).toMatch(/screenCtx\.drawImage\(uiCanvas/);
+    // 3) frame 最后阶段：runtime.tick 之后执行 UI composite（最后一层；中间允许注释）
+    expect(entry).toMatch(/\bruntime\.tick\(now\);[\s\S]*?compositeUi\(\);/);
+    // 4) uiCanvas 尺寸显式同步 screenCanvas 物理像素（不依赖第二次 createCanvas 默认尺寸）
+    expect(entry).toMatch(/uiCanvas\.width = screenCanvas\.width/);
+    expect(entry).toMatch(/uiCanvas\.height = screenCanvas\.height/);
+    // 5) 合成必须用单位变换（上一帧 Renderer 可能残留非单位 transform）
+    expect(entry).toMatch(/screenCtx\.setTransform\(1, 0, 0, 1, 0, 0\)/);
+  });
+
+  it('F-WX-P0｜Runtime 版本标识稳定语义 [WECHAT-RUNTIME]，Queue 编号不作类型名，SHA 构建期注入', () => {
+    const entry = read('wechat/game.ts');
+    expect(entry).toContain('[WECHAT-RUNTIME]');
+    expect(entry).not.toContain('[F-WX-5]'); // 旧 Queue 编号标识已移除（误导）
+    // SHA 来自 virtual:runtime-info 构建期注入，非手写
+    expect(entry).toContain('runtimeInfo.sha.slice(0, 7)');
   });
 });

@@ -28,9 +28,25 @@ function makeStubCtx(): CanvasRenderingContext2D {
   return new Proxy({}, handler) as unknown as CanvasRenderingContext2D;
 }
 
-/** 微信显示画布桩：物理像素尺寸 + 2D ctx（无 DOM style） */
-function makeStubCanvas(w: number, h: number): HTMLCanvasElement {
-  const ctx = makeStubCtx();
+/** 微信显示画布桩：物理像素尺寸 + 2D ctx（无 DOM style）；rec 存在时记录 drawImage 调用 */
+function makeStubCanvas(
+  w: number,
+  h: number,
+  rec?: Array<{ src: unknown; w: number; h: number }>,
+): HTMLCanvasElement {
+  const ctx = rec
+    ? (new Proxy({} as CanvasRenderingContext2D, {
+        get: (_t, k) => {
+          if (k === 'drawImage') {
+            return (src: unknown, _dx: number, _dy: number, dw?: number, dh?: number) => {
+              rec.push({ src, w: dw ?? 0, h: dh ?? 0 });
+            };
+          }
+          return () => ({ width: 0 });
+        },
+        set: () => true,
+      }) as unknown as CanvasRenderingContext2D)
+    : makeStubCtx();
   return {
     getContext: () => ctx,
     clientWidth: w,
@@ -43,14 +59,22 @@ function makeStubCanvas(w: number, h: number): HTMLCanvasElement {
 function makeFakeWx() {
   const store = new Map<string, unknown>();
   const rafCallbacks: Array<(t: number) => void> = [];
+  const drawImages: Array<{ src: unknown; w: number; h: number }> = [];
   let touchHandler: ((e: unknown) => void) | null = null;
   let hideHandler: (() => void) | null = null;
   let showHandler: (() => void) | null = null;
   let nextRaf = 1;
-  const canvas = makeStubCanvas(750, 1334); // 竖屏物理像素（safeArea 类 viewport 变化在 host 测试覆盖）
+  let createCount = 0;
+  // F-WX-P0：第一次 createCanvas = 唯一上屏 canvas（screenCanvas，记录 drawImage）；
+  // 后续 createCanvas = offscreen（uiCanvas），不得假设自动叠层。
+  const screenCanvas = makeStubCanvas(750, 1334, drawImages);
+  const uiCanvas = makeStubCanvas(750, 1334);
   const wx = {
     getSystemInfoSync: () => ({ pixelRatio: 2, windowWidth: 750, windowHeight: 1334 }),
-    createCanvas: () => canvas,
+    createCanvas: () => {
+      createCount++;
+      return createCount === 1 ? screenCanvas : uiCanvas;
+    },
     getStorageSync: (k: string) => (store.has(k) ? store.get(k) : null),
     setStorageSync: (k: string, v: unknown) => void store.set(k, v),
     removeStorageSync: (k: string) => void store.delete(k),
@@ -75,7 +99,12 @@ function makeFakeWx() {
     wx,
     store,
     rafCallbacks,
-    canvas,
+    canvas: screenCanvas,
+    uiCanvas,
+    drawImages,
+    get createCount() {
+      return createCount; // 活引用：game.ts 调用 createCanvas 后实时更新
+    },
     touch: () => touchHandler,
     hide: () => hideHandler,
     show: () => showHandler,
@@ -114,6 +143,18 @@ describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
 
     const mod = await import('../wechat/game');
     const runtime = mod.runtime;
+
+    // —— F-WX-P0：Canvas 合成链（真实 Runtime 规则）——
+    // 1) 第一次 createCanvas = 唯一上屏 canvas；2) 第二 canvas 是 offscreen（不假设自动上屏）
+    expect(fake.createCount).toBeGreaterThanOrEqual(2);
+    expect(mod.screenCanvas).toBe(fake.canvas); // game.ts 用第一个 canvas 作 screenCanvas
+    expect(mod.uiCanvas).toBe(fake.uiCanvas); // 第二个 canvas 作 UI offscreen
+    expect(mod.screenCanvas).not.toBe(mod.uiCanvas);
+    // 3) uiCanvas 尺寸显式同步 screenCanvas 物理像素
+    expect(mod.uiCanvas.width).toBe(mod.screenCanvas.width);
+    expect(mod.uiCanvas.height).toBe(mod.screenCanvas.height);
+    // 启动尚未驱动帧 → 尚无合成（证明 composite 只在 frame 内）
+    expect(fake.drawImages.length).toBe(0);
 
     // —— 启动：新账号 → Garage（验收 2 起点）——
     expect(runtime.uiMode).toBe('build');
@@ -182,6 +223,10 @@ describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
     expect(fake.rafCallbacks.length).toBeGreaterThan(0); // 恢复后重新排队
     driveFrame(fake, now + 16.7);
     expect(fake.rafCallbacks.length).toBeGreaterThan(0); // 帧循环继续
+    // F-WX-P0：frame 最后阶段执行 UI composite——screenCtx.drawImage(uiCanvas) 作为最后一层
+    expect(fake.drawImages.length).toBeGreaterThan(0); // composite 已执行
+    expect(fake.drawImages[fake.drawImages.length - 1].src).toBe(fake.uiCanvas); // 合成源 = UI offscreen
+    expect(fake.drawImages[fake.drawImages.length - 1].w).toBe(fake.uiCanvas.width); // 全尺寸 1:1
     void rafBefore;
   });
 
