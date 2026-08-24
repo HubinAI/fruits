@@ -25,8 +25,14 @@ export class WebInput implements PlatformInput {
         cx = withTouches.touches[0].clientX;
         cy = withTouches.touches[0].clientY;
       }
+      // F-UX-REVIEW-1：容器可能被 CSS transform 放大（PC Mobile Review 2x 显示）——
+      // getBoundingClientRect 返回视觉尺寸，必须归一化回元素 CSS 逻辑坐标：
+      //   localX = (clientX - rect.left) × clientWidth / rect.width
+      // 未缩放（rect.width === clientWidth）时该式恒等于 (clientX - rect.left)，保持原行为。
       const r = node.getBoundingClientRect();
-      handler(cx - r.left, cy - r.top);
+      const cw = node.clientWidth || r.width;
+      const ch = node.clientHeight || r.height;
+      handler(((cx - r.left) * cw) / r.width, ((cy - r.top) * ch) / r.height);
     };
     node.addEventListener('pointerdown', onDown);
     node.addEventListener('mousedown', onDown);

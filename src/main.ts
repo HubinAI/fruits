@@ -55,6 +55,15 @@ import { DEV_TOOLS_VISIBLE, APP_VERSION } from './core/env';
 // F-WX-3/4：玩家 UI Host（Web DOM 实现 / Canvas 实现；同一 State/Action）
 import { WebDomPlayerUIHost } from './ui/webDomPlayerUIHost';
 import { CanvasPlayerUIHost } from './ui/canvasPlayerUIHost';
+// F-UX-REVIEW-1：DEV Mobile Review 纯逻辑（PC 复现手机 logical viewport；游戏内部零改动）
+import {
+  REVIEW_PRESETS,
+  createMobileReviewState,
+  selectReviewPreset,
+  toggleReviewScale,
+  reviewViewport,
+  reviewContainerStyle,
+} from './dev/reviewMode';
 import {
   BODY_OPTIONS,
   WHEEL_OPTIONS,
@@ -367,8 +376,10 @@ for (const [visualId, url] of SILHOUETTE_ASSETS) {
 
 /* ---------- F-WX-3/4：玩家 UI 唯一 Host 边界（默认 WebDom；?canvasui=1 切换 Canvas） ----------
  * F-WX-6.1：Pages Preview 构建默认启用 Canvas Player UI（手机横屏可体验版本），
- * 无需手输 ?canvasui=1；普通 DEV Web 默认行为不变（isPagesPreview=false）。 */
-const canvasUiMode = isPagesPreview || new URLSearchParams(location.search).has('canvasui');
+ * 无需手输 ?canvasui=1；普通 DEV Web 默认行为不变（isPagesPreview=false）。
+ * F-UX-REVIEW-1：?mobile-review=1 强制 Canvas Host（Review 验收对象 = 手机 Canvas UI）。 */
+const reviewOn = new URLSearchParams(location.search).has('mobile-review');
+const canvasUiMode = isPagesPreview || reviewOn || new URLSearchParams(location.search).has('canvasui');
 const host: PlayerUIHost = canvasUiMode
   ? new CanvasPlayerUIHost(document.createElement('canvas'))
   : new WebDomPlayerUIHost();
@@ -964,6 +975,61 @@ viewport.onResize(doResize);
 runtime.init(); // track(game_start) + 玩家状态装载 + 初始 doResize/reframe + pushUI
 if (debugPanel) debugPanel.style.display = 'none';
 backToBuildBtn.style.display = 'none';
+
+/* ---------- F-UX-REVIEW-1：DEV Mobile Review（?mobile-review=1） ----------
+ * PC 直接复现真实手机 logical viewport：游戏内部逻辑尺寸严格等于所选 viewport
+ * （容器 CSS 尺寸 = vp.w×vp.h），视觉放大只走 CSS transform（WebInput 已归一化坐标）。
+ * 工具栏在游戏画面外部（顶部条），不占用游戏内部空间；正常流程全部可用鼠标完成。 */
+if (reviewOn) {
+  const reviewBar = document.createElement('div');
+  reviewBar.className = 'tool-tools-host';
+  reviewBar.style.justifyContent = 'center';
+  root.insertBefore(reviewBar, main);
+
+  // canvasWrap：flex:1 填满 → 固定逻辑尺寸 + 居中 + transform 放大（仅显示）
+  canvasWrap.style.flex = 'none';
+  canvasWrap.style.margin = 'auto';
+  canvasWrap.style.transformOrigin = 'top left';
+
+  const vpLabel = document.createElement('span');
+  vpLabel.style.cssText = 'font:12px monospace;color:#ffd35a;margin-left:8px;';
+  reviewBar.appendChild(vpLabel);
+
+  let reviewState = createMobileReviewState();
+  const applyReview = (): void => {
+    const vp = reviewViewport(reviewState);
+    const st = reviewContainerStyle(vp, reviewState.scale);
+    canvasWrap.style.width = `${st.width}px`;
+    canvasWrap.style.height = `${st.height}px`;
+    canvasWrap.style.transform = st.transform;
+    canvasWrap.style.transformOrigin = st.transformOrigin;
+    vpLabel.textContent = `logical ${vp.w}×${vp.h} @ ${reviewState.scale}x`;
+    // 游戏内部尺寸随容器变化 → 重排（host ensureSize + 相机重构图）
+    runtime.refreshFromEdit();
+    doResize();
+  };
+  for (let i = 0; i < REVIEW_PRESETS.length; i++) {
+    const vp = REVIEW_PRESETS[i];
+    const b = document.createElement('button');
+    b.textContent = `${vp.w}×${vp.h}`;
+    b.style.fontFamily = 'monospace';
+    b.onclick = () => {
+      reviewState = selectReviewPreset(reviewState, i);
+      applyReview();
+    };
+    reviewBar.appendChild(b);
+  }
+  const scaleBtn = document.createElement('button');
+  scaleBtn.textContent = '显示 2x';
+  scaleBtn.style.fontFamily = 'monospace';
+  scaleBtn.onclick = () => {
+    reviewState = toggleReviewScale(reviewState);
+    scaleBtn.textContent = `显示 ${reviewState.scale}x`;
+    applyReview();
+  };
+  reviewBar.appendChild(scaleBtn);
+  applyReview();
+}
 
 /* ---------- 主循环（F-WX-5：调度在入口，推进在 runtime.tick；dt 钳制在 runtime） ---------- */
 function loop(now: number): void {
