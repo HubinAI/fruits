@@ -126,12 +126,6 @@ const SOLO_MAX_Y = 730;
 // 屏占比 ≈ coreW/(coreW+130) × safeW/viewportW ≈ 0.567×0.56 ≈ 32%（28~34% 目标）。
 const MOBILE_SOLO_MARGIN_X = 65;
 const MOBILE_SOLO_MARGIN_Y = 24;
-// F-WX-RCA-3B：Battle Engage 相对 margin——A+B coreBounds（Body+Wheels）并集外扩，
-// 距离阈值触发瞬间一次性构图（不每帧跟随/不呼吸）。横向 90：A 左缘固定（顶推）+ B 右缘
-// 右移余量（碰撞点 A 前锋 ≤ 触发瞬间 B 右缘+90）；纵向 24（core 高 ~77 → 保持横向主导）。
-// Engage A core 屏占比 ≈ 33%（Approach 宽视野 core ~17%，明显放大）。
-const ENGAGE_MARGIN_X = 90;
-const ENGAGE_MARGIN_Y = 24;
 // F-WX-8-C：Mobile 战斗 Active corridor——覆盖真实交战区（开局 A(400)/B(1200) 完整
 // 可见，A 顶推 B 到右墙的主要过程在屏内）；宽 980 = 开局精确边界（A 左缘 315 / B 右缘 1295，
 // 实测 vehicleA watermelon [315,558]、vehicleB banana [1038,1295]）；配合 compact battle
@@ -270,8 +264,6 @@ export class Renderer {
   private muzzleTongues: MuzzleTongue[] = [];
   /** F-WX-RCA-2B：Battle Active [WX-RCA] 一次性输出标志（每场运行时首次 Active reframe 只记一次） */
   private battleRcaLogged = false;
-  /** F-WX-RCA-3B：Battle Engage [WX-RCA] 一次性输出标志 */
-  private engageRcaLogged = false;
 
   /** F-PRESENT-1：高频伤害数字聚合器（纯 Presentation；决定「合并 / 新建数字」） */
   private damageAggregator = new DamageNumberAggregator(DAMAGE_AGGREGATE_WINDOW_MS);
@@ -1569,7 +1561,7 @@ export class Renderer {
   reframe(
     snap: BattleRenderSnapshot,
     fit: CameraFit = 'vehicles',
-    opts: { forwardExtent?: number; recoilExtent?: number; phase?: string; framingRect?: FramingRect; engage?: boolean } = {},
+    opts: { forwardExtent?: number; recoilExtent?: number; phase?: string; framingRect?: FramingRect } = {},
   ): void {
     const forwardExtent = opts.forwardExtent ?? 520;
     const recoilExtent = opts.recoilExtent ?? 180;
@@ -1653,24 +1645,12 @@ export class Renderer {
       const phase = opts.phase ?? '';
       if (phase === 'Active' || phase === '') {
         if (isCompact) {
-          if (opts.engage) {
-            // F-WX-RCA-3B：Engage——A+B coreBounds 并集 + 相对 margin（一次性触发瞬间构图，
-            // 近距离碰撞阶段主体明显放大；不每帧跟随/不呼吸缩放）
-            const ea = this.vehicleBounds(snap.vehicleA, false);
-            const eb = this.vehicleBounds(snap.vehicleB, false);
-            minX = ea.minX - ENGAGE_MARGIN_X;
-            maxX = eb.maxX + ENGAGE_MARGIN_X;
-            minY = Math.min(ea.minY, eb.minY) - ENGAGE_MARGIN_Y;
-            maxY = Math.max(ea.maxY, eb.maxY) + ENGAGE_MARGIN_Y;
-          } else {
-            // Approach：开局宽视野（MOBILE_ACTIVE corridor），双方完整可见，不要求车辆大
-            const cL = MOBILE_ACTIVE_MIN_X;
-            const cR = MOBILE_ACTIVE_MAX_X;
-            acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
-            acc(cL, snap.arena.groundY);
-            acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
-            acc(cR, snap.arena.groundY);
-          }
+          const cL = MOBILE_ACTIVE_MIN_X;
+          const cR = MOBILE_ACTIVE_MAX_X;
+          acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
+          acc(cL, snap.arena.groundY);
+          acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
+          acc(cR, snap.arena.groundY);
         } else {
           // Active：固定 corridor = 左界 spawn 预算（width×0.25 − ACTIVE_EXTENT）、
           // 右界锚定 arena 右缘（width − CORRIDOR_EDGE_PAD）——A 顶推 B 的交战团
@@ -1821,46 +1801,26 @@ export class Renderer {
         }),
       );
     }
-    // F-WX-RCA-1/2B/3B：RCA 专用构建（WECHAT_RCA=1 注入 __WX_RCA__=true）——真实微信尺度数据。
-    // Garage 段（previewSolo/previewFixed）随 reframe 输出（低频预览）；Battle 段：
-    // Approach（Active 首帧）输出一次（battleRcaLogged），Engage（opts.engage 触发）输出一次
-    // （engageRcaLogged）——两阶段 A/B 双车 core/envelope 四值，防刷屏。
+    // F-WX-RCA-1/2B：RCA 专用构建（WECHAT_RCA=1 注入 __WX_RCA__=true）——真实微信尺度数据。
+    // Garage 段（previewSolo/previewFixed）随 reframe 输出（低频预览）；Battle 段仅 Active
+    // 首帧一次（battleRcaLogged，防刷屏），输出 A/B 双车 core/envelope 四值。
     // 普通 build:wechat PROD __WX_RCA__=false → 零日志。只读诊断，不改变 framing 语义。
     if (typeof __WX_RCA__ !== 'undefined' && __WX_RCA__) {
-      if (fit === 'battle' && (opts.phase ?? '') === 'Active') {
-        if (!this.battleRcaLogged) {
-          this.battleRcaLogged = true;
-          const d = this.scaleDiagnosticsBoth(snap);
-          // eslint-disable-next-line no-console
-          console.log(
-            '[WX-RCA]',
-            JSON.stringify({
-              step: 'battle',
-              phase: opts.phase,
-              engage: false,
-              view: d.view,
-              transform: { scale, offsetX, offsetY },
-              A: d.A,
-              B: d.B,
-            }),
-          );
-        } else if (opts.engage && !this.engageRcaLogged) {
-          this.engageRcaLogged = true;
-          const d = this.scaleDiagnosticsBoth(snap);
-          // eslint-disable-next-line no-console
-          console.log(
-            '[WX-RCA]',
-            JSON.stringify({
-              step: 'battle',
-              phase: opts.phase,
-              engage: true,
-              view: d.view,
-              transform: { scale, offsetX, offsetY },
-              A: d.A,
-              B: d.B,
-            }),
-          );
-        }
+      if (fit === 'battle' && (opts.phase ?? '') === 'Active' && !this.battleRcaLogged) {
+        this.battleRcaLogged = true;
+        const d = this.scaleDiagnosticsBoth(snap);
+        // eslint-disable-next-line no-console
+        console.log(
+          '[WX-RCA]',
+          JSON.stringify({
+            step: 'battle',
+            phase: opts.phase,
+            view: d.view,
+            transform: { scale, offsetX, offsetY },
+            A: d.A,
+            B: d.B,
+          }),
+        );
       } else if (isFixed) {
         const d = this.scaleDiagnostics(snap);
         // eslint-disable-next-line no-console
