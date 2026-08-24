@@ -94,7 +94,7 @@ function garageState(over: Partial<PlayerUIState> = {}): PlayerUIState {
 
 const INSETS: SafeInsets = { left: 44, right: 20, top: 12, bottom: 16 };
 
-/** 富库存：每类部件 1★×2 + 2★×1，金币 600——合成可确认（merge-confirm 非禁用态才注册命中） */
+/** 富库存：每类部件 1★×2 + 2★×1，金币 600——合成可确认（Modal 主按钮非禁用态才注册命中） */
 function richState(): PlayerUIState {
   const inv: Record<string, { one: number; two: number }> = {};
   for (const p of OFFICIAL_PARTS) inv[p] = { one: 2, two: 1 };
@@ -163,27 +163,28 @@ describe('F-META-UX1｜Garage 唯一 Home（删全局导航）', () => {
     expect(sub.y, '次级入口 y ≥ panel 顶').toBeGreaterThanOrEqual(layout.panelRect.y);
   });
 
-  it('验收3｜Garage 职责纯化（只配置/开战，无合成）；Backpack 合成面板可用且可返回', () => {
+  it('验收3｜Garage 职责纯化（只配置/开战，无合成）；Backpack 合成走 Modal 且可返回', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(richState());
     // Garage 只处理配置：2×2 入口 + CTA 可用
     const entry = env.areas().find((a) => a.id === 'entry:body')!;
     expect(entry.h, '入口高 ≥48').toBeGreaterThanOrEqual(48);
     expect(env.areas().some((a) => a.id === 'cta-find'), 'Garage 有 CTA').toBe(true);
-    expect(env.areas().some((a) => a.id === 'merge' || a.id === 'merge-close' || a.id === 'merge-confirm'), 'Garage 无任何合成痕迹').toBe(false);
-    // 装配区次级入口 → Backpack：合成入口 → 展开面板 → 关闭 → 返回车库
+    expect(env.areas().some((a) => a.id === 'merge'), 'Garage 无任何合成入口').toBe(false);
+    // 装配区次级入口 → Backpack：合成入口 → Modal（不切换全屏页面）→ 取消 → 返回车库
     click(env, 'nav:backpack');
     const merge = env.areas().find((a) => a.id === 'merge')!;
     expect(merge.h, '合成入口高 ≥48').toBeGreaterThanOrEqual(48);
     click(env, 'merge');
-    expect(env.areas().some((a) => a.id === 'merge-close'), 'Backpack 合成面板展开').toBe(true);
-    expect(env.areas().some((a) => a.id === 'merge-confirm'), 'Backpack 合成确认按钮出现').toBe(true);
-    click(env, 'merge-close');
-    expect(env.areas().some((a) => a.id === 'merge-close'), '合成面板关闭').toBe(false);
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 出现（不再是全屏面板）').toBe(true);
+    expect(env.areas().some((a) => a.id === 'modal-primary'), '合成主按钮出现').toBe(true);
+    click(env, 'modal-secondary'); // 取消（metaShell 无 onMerge 实现，不派发）
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 关闭').toBe(false);
+    expect(env.areas().some((a) => a.id === 'merge'), '仍停留 Backpack').toBe(true);
     // 顶部「← 返回车库」→ 回 Garage（仍无合成）
     click(env, 'nav:garage');
     expect(env.areas().some((a) => a.id === 'entry:body'), '返回后 garage 恢复').toBe(true);
-    expect(env.areas().some((a) => a.id === 'merge' || a.id === 'merge-close'), '回 Garage 仍无合成').toBe(false);
+    expect(env.areas().some((a) => a.id === 'merge'), '回 Garage 仍无合成').toBe(false);
   });
 
   it('验收4｜Battle 状态不残留局外元素；回 Garage 默认回车库页（Home）', () => {

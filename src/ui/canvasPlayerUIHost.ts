@@ -110,6 +110,22 @@ const MORE_ENTRIES: Array<{ id: string; label: string; sub: string }> = [
 ];
 
 /**
+ * F-META-UX2：合成前后库存快照 diff → 新 2★ 部件（2★ 数量恰好 +1 的 defId）。
+ * 仅用于「合成成功」结果 Modal 文案；不参与任何规则（规则仍在 mergeWithCost / runtime）。
+ */
+function diffMergeGain(
+  before: Record<string, { one: number; two: number }>,
+  after: Record<string, { one: number; two: number }>,
+): { defId: string; two: number } | null {
+  for (const p of OFFICIAL_PARTS) {
+    const b = Math.max(0, before[p]?.two ?? 0);
+    const a = Math.max(0, after[p]?.two ?? 0);
+    if (a > b) return { defId: p, two: a };
+  }
+  return null;
+}
+
+/**
  * F-META-4：通用 Modal Frame 规格（轻量 UI Foundation，不接具体业务逻辑）。
  * - 居中卡片：标题区 + 内容行 + 主按钮 + 可选次按钮 + 全屏遮罩（拦截底层点击）。
  * - 关闭后重绘恢复当前页面；按钮回调由调用方提供（最小 API，无全局 Modal Manager）。
@@ -121,6 +137,8 @@ interface ModalSpec {
   secondary?: string;
   /** F-META-5：可选第三按钮（如既有广告领币点；点击不关闭 Modal，回调由调用方更新内容） */
   tertiary?: { label: string; disabled?: boolean; onPress?: () => void };
+  /** F-META-UX2：主按钮禁用（不注册命中；如合成条件不满足时显示原因但不可执行） */
+  primaryDisabled?: boolean;
   onPrimary?: () => void;
   onSecondary?: () => void;
 }
@@ -165,8 +183,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private resultAdClaimedShown = false;
   /** F-WX-UI-1：选项网格面板内垂直滚动（面板不溢出屏幕） */
   private panelScroll = 0;
-  /** F-WX-8-B：Mobile 合成面板展开态（点击「合成」次级入口后展开；确认才派发 onMerge） */
-  private mergeOpen = false;
+  /**
+   * F-META-UX2：合成前库存快照（确认合成时捕获）——onMerge 后 render 时 diff 出
+   * 新 2★ 部件用于「合成成功」结果 Modal。仅 UI 呈现，不改任何合成规则。
+   */
+  private mergeSnapshot: Record<string, { one: number; two: number }> | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     // F-META-6：读取偏好（platform.storage 无存储环境静默降级为默认开；值 '0' = 关）
@@ -233,13 +254,27 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.panelView = 'home';
       this.panelScroll = 0;
     }
-    if (state.battleState !== 'editing' || state.playerPhase !== 'garage') this.mergeOpen = false;
     // F-META-1：离开局外（进 Matching/Battle/Result）时复位 MetaPage——回 Garage 后默认回车库页
     if (state.playerPhase !== 'garage') this.metaPage = 'garage';
     // F-META-3：离开局外同时复位 Backpack 分类（回 Garage 默认全部）
     if (state.playerPhase !== 'garage') this.backpackFilter = 'all';
     // F-META-6：离开局外同时复位 More 子视图（回 Garage 默认功能卡主页）
     if (state.playerPhase !== 'garage') this.moreView = 'home';
+    // F-META-UX2：合成确认后（mergeSnapshot 非空）→ diff 出新 2★ → 弹「合成成功」结果 Modal
+    // （合成失败则库存无变化 → 不弹；结果 Modal 关闭后仍停留 Backpack）
+    if (this.mergeSnapshot && state.playerPhase === 'garage') {
+      const snap = this.mergeSnapshot;
+      this.mergeSnapshot = null;
+      const gain = diffMergeGain(snap, state.inventory);
+      if (gain) {
+        const def = registry.functionals.get(gain.defId);
+        this.showModal({
+          title: '合成成功',
+          body: [`获得 ${def?.name ?? gain.defId} ★★`, `库存 ${gain.two} · 金币 ${state.progress.coin}`],
+          primary: '知道了',
+        });
+      }
+    }
     // F-META-5：Result 状态 → 一次性弹出正式结算 Modal（奖励信息单弹窗集中；
     // 广告领币后 rewardAdClaimed 变化 → 刷新弹窗文案；result 清空 → 复位）
     if (state.result) {
@@ -324,7 +359,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.metaPage = id.slice(4) as MetaPage;
       this.panelView = 'home';
       this.panelScroll = 0;
-      this.mergeOpen = false;
       this.moreView = 'home'; // F-META-6：离开 More 复位子视图（下次进入默认功能卡主页）
       this.draw();
       return;
@@ -423,16 +457,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.actions?.onToggleGarageSlot(this.lastState?.garageSelected ?? '');
       return;
     }
-    if (id === 'merge-confirm') {
-      // 合成面板确认：真正派发 onMerge（规则仍在 runtime）
-      this.actions?.onMerge();
-      return;
-    }
-    if (id === 'merge-close') {
-      this.mergeOpen = false;
-      this.draw();
-      return;
-    }
     if (id.startsWith('chip:')) {
       this.actions?.onToggleGarageSlot(id.slice(5));
       return;
@@ -466,10 +490,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.actions?.onFindOpponent();
         break;
       case 'merge':
-        // F-WX-8-B：Mobile 合成是次级入口（点击展开面板，确认才合成）；Desktop 直接合成
+        // F-META-UX2：Mobile 合成用 Modal 展示规则（5×1★+金币+随机2★），确认才 onMerge；
+        // Desktop 保持直接合成
         if (this.isMobile) {
-          this.mergeOpen = true;
-          this.draw();
+          this.showMergeModal();
         } else {
           this.actions?.onMerge();
         }
@@ -905,11 +929,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const draft = state.draft;
     const c = layout.contentRect;
     this.rect(c.x, c.y, c.w, c.h, C.dockBg, C.border, 1);
-    if (this.mergeOpen && draft) {
-      // 合成面板（内容区顶部；确认/关闭按钮）
-      this.drawGaragePanelMerge(state, draft, c.x, c.w, c.y + 8);
-      return;
-    }
     // F-META-UX1：顶部「← 返回车库」（唯一返回入口，禁止恢复全局 Tab）
     this.button(c.x + 12, c.y + 6, 96, MIN_TOUCH_H, 'nav:garage', '‹ 返回车库', {});
     this.text('背包', c.x + 120, c.y + 30, 20, C.text, 'left', 700);
@@ -1243,30 +1262,39 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ctx.restore();
   }
 
-  /** 合成面板（点击「合成」次级入口后展开；规则仍在 runtime onMerge） */
-  private drawGaragePanelMerge(
-    state: PlayerUIState,
-    draft: BuildDraft,
-    px: number,
-    pw: number,
-    py: number,
-  ): void {
-    const p = state.progress;
-    const inv = state.inventory;
-    const reserved = new Set(equippedDefIds(draft));
+  /**
+   * F-META-UX2：合成说明 Modal（Backpack 底部「合成」入口触发；不切换全屏页面）。
+   * 展示 5×1★ + 金币成本 + 随机 2★ 规则；条件不满足时 primary 显示原因并禁用（不注册命中）。
+   * 确认 → 捕获库存快照 → 派发 onMerge（规则仍在 runtime；成功后 render 弹「合成成功」结果 Modal）。
+   */
+  private showMergeModal(): void {
+    const st = this.lastState;
+    if (!st || !st.draft) return;
+    const p = st.progress;
+    const inv = st.inventory;
+    const reserved = new Set(equippedDefIds(st.draft));
     let available = 0;
     for (const pp of OFFICIAL_PARTS) available += Math.max(0, inv[pp].one - (reserved.has(pp) ? 1 : 0));
-    const canMergeParts = available >= 5;
+    const canMerge = available >= 5;
     const canAfford = canAffordMerge(p.coin);
-    // F-META-3：合成区明确信息——当前可用 1★ / 需要 5 / 消耗金币 / 可获随机 2★（规则复用 mergeWithCost）
-    this.text('合成：5 × 1★ → 1 × 随机 2★', px, py + 14, 14, C.text, 'left', 700);
-    this.text(`当前可用 1★：${available} / 需要 5`, px, py + 34, 14, C.textDim);
-    this.text(`消耗 ${MERGE_COST_COIN} 金币 · 可能获得随机 2★`, px, py + 54, 14, C.textDim);
-    const confirmW = Math.max(140, pw * 0.5);
-    this.button(px + pw - confirmW, py + 76, confirmW, TARGET_TOUCH_H, 'merge-confirm',
-      !canMergeParts ? '副本不足' : !canAfford ? `金币不足` : '确认合成',
-      { disabled: !(canMergeParts && canAfford), primary: canMergeParts && canAfford });
-    this.button(px, py + 76, 92, TARGET_TOUCH_H, 'merge-close', '关闭', {});
+    const ok = canMerge && canAfford;
+    this.showModal({
+      title: '合成',
+      body: ['5 × 1★ → 1 × 随机 2★', `当前可用 1★：${available} / 需要 5`, `消耗 ${MERGE_COST_COIN} 金币 · 剩余 ${p.coin}`],
+      primary: ok ? '合成' : !canMerge ? '副本不足' : '金币不足',
+      primaryDisabled: !ok,
+      secondary: '取消',
+      onPrimary: () => {
+        // 捕获合成前库存快照（用于成功 Modal diff）；onMerge 后 render 消费
+        const cur = this.lastState;
+        if (cur) {
+          const snap: Record<string, { one: number; two: number }> = {};
+          for (const pp of OFFICIAL_PARTS) snap[pp] = { one: cur.inventory[pp]?.one ?? 0, two: cur.inventory[pp]?.two ?? 0 };
+          this.mergeSnapshot = snap;
+        }
+        this.actions?.onMerge();
+      },
+    });
   }
 
   /**
@@ -1611,27 +1639,40 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       yy += rowH;
     }
     // 按钮行：次按钮左 / 主按钮右；有 tertiary 时三列（次|主|第三）
+    // F-META-UX2：primaryDisabled → 主按钮禁用（不注册命中，显示原因文案）
     const by = cy + pad + titleH + spec.body.length * rowH + 10;
     const gap = 10;
     const bw3 = (cardW - 2 * pad - 2 * gap) / 3;
     if (spec.secondary && spec.tertiary) {
       this.button(cx + pad, by, bw3, btnH, 'modal-secondary', spec.secondary, {});
-      this.button(cx + pad + bw3 + gap, by, bw3, btnH, 'modal-primary', spec.primary, { primary: true });
+      this.button(cx + pad + bw3 + gap, by, bw3, btnH, 'modal-primary', spec.primary, {
+        primary: !spec.primaryDisabled,
+        disabled: spec.primaryDisabled,
+      });
       this.button(cx + pad + 2 * (bw3 + gap), by, bw3, btnH, 'modal-tertiary', spec.tertiary.label, {
         disabled: spec.tertiary.disabled,
       });
     } else if (spec.secondary) {
       const bw = (cardW - 2 * pad - gap) / 2;
       this.button(cx + pad, by, bw, btnH, 'modal-secondary', spec.secondary, {});
-      this.button(cx + pad + bw + gap, by, bw, btnH, 'modal-primary', spec.primary, { primary: true });
+      this.button(cx + pad + bw + gap, by, bw, btnH, 'modal-primary', spec.primary, {
+        primary: !spec.primaryDisabled,
+        disabled: spec.primaryDisabled,
+      });
     } else if (spec.tertiary) {
       const bw = (cardW - 2 * pad - gap) / 2;
-      this.button(cx + pad, by, bw, btnH, 'modal-primary', spec.primary, { primary: true });
+      this.button(cx + pad, by, bw, btnH, 'modal-primary', spec.primary, {
+        primary: !spec.primaryDisabled,
+        disabled: spec.primaryDisabled,
+      });
       this.button(cx + pad + bw + gap, by, bw, btnH, 'modal-tertiary', spec.tertiary.label, {
         disabled: spec.tertiary.disabled,
       });
     } else {
-      this.button(cx + pad, by, cardW - 2 * pad, btnH, 'modal-primary', spec.primary, { primary: true });
+      this.button(cx + pad, by, cardW - 2 * pad, btnH, 'modal-primary', spec.primary, {
+        primary: !spec.primaryDisabled,
+        disabled: spec.primaryDisabled,
+      });
     }
   }
 

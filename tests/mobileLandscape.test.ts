@@ -422,7 +422,7 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       'drawGaragePanelHome',
       'drawGaragePanelWheelPick',
       'drawGaragePanelWeaponPick',
-      'drawGaragePanelMerge',
+      'showMergeModal',
     ];
     const re = /this\.text\(([^)]*)\)/g;
     for (const name of methods) {

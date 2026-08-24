@@ -170,37 +170,52 @@ describe('F-META-3｜Backpack V1 + 合成整合', () => {
     expect(items(env).length, '恢复全部').toBe(allCount);
   });
 
-  it('验收3｜合成后更新：确认派发 onMerge；render 新 state 后列表更新；副本不足时确认禁用', () => {
+  it('验收3｜合成用 Modal 流：确认派发 onMerge + 合成成功结果 Modal + 库存即时刷新 + 仍停留 Backpack', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
-    env.host.render(state({ inventory: richInv() as never, progress: { coin: 600, rating: 20 } }));
+    // cannon 1★×6（装备 1 → 可用 5）→ 可合成
+    env.host.render(state({ inventory: cannonOnlyInv(6) as never, progress: { coin: 600, rating: 20 } }));
     goBackpack(env);
-    click(env, 'merge'); // 展开合成面板
-    expect(env.areas().some((a) => a.id === 'merge-confirm'), '可合成时确认按钮出现').toBe(true);
-    click(env, 'merge-confirm'); // 确认 → 派发 onMerge（数量/金币更新由 runtime mergeWithCost 处理）
+    click(env, 'merge'); // 合成说明 Modal（不切换全屏页面）
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 遮罩出现').toBe(true);
+    expect(env.areas().some((a) => a.id === 'modal-primary'), '可合成 → 主按钮注册').toBe(true);
+    expect(env.areas().some((a) => a.id === 'modal-secondary'), '取消按钮出现').toBe(true);
+    // 模拟 runtime 合成成功：onMerge → 新 state（cannon 1★×6 消耗 5 → one=1 two=1、金币扣 100）
+    const afterInv: Record<string, { one: number; two: number }> = {};
+    for (const p of OFFICIAL_PARTS) afterInv[p] = { one: 0, two: 0 };
+    afterInv['cannon'] = { one: 1, two: 1 };
+    env.host.setActions({
+      onMerge: () => {
+        env.fired['merge'] = (env.fired['merge'] ?? 0) + 1;
+        env.host.render(state({ inventory: afterInv as never, progress: { coin: 500, rating: 20 } }));
+      },
+    } as never);
+    click(env, 'modal-primary'); // 确认合成
     expect(env.fired['merge'], 'onMerge 已派发').toBe(1);
-    // 关闭合成面板 → runtime 合成后返回新 state（各扣 1 个 1★）→ render 后列表仍显示
-    click(env, 'merge-close');
-    const mergedInv: Record<string, { one: number; two: number }> = {};
-    for (const p of OFFICIAL_PARTS) mergedInv[p] = { one: 1, two: 1 };
-    env.host.render(state({ inventory: mergedInv as never, progress: { coin: 100, rating: 20 } }));
-    expect(items(env).length, '更新后列表仍显示').toBeGreaterThan(0);
-    // 再开合成面板：可用 1★ 减少后（副本不足）确认按钮禁用（不注册命中）
+    // 合成成功结果 Modal（diff 出新 2★）→ 关闭后仍停留 Backpack + 库存即时变化
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成成功结果 Modal 出现').toBe(true);
+    click(env, 'modal-primary'); // 知道了
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '成功 Modal 关闭').toBe(false);
+    expect(env.areas().some((a) => a.id === 'merge'), '仍停留 Backpack（合成入口仍在）').toBe(true);
+    expect(items(env), '库存即时变化：cannon（2★）显示').toContain('cannon');
+    // 合成后可用 1★ = 1-1(装备) = 0 < 5 → 再开合成主按钮禁用（不注册命中）
     click(env, 'merge');
-    expect(env.areas().some((a) => a.id === 'merge-confirm'), '1★ 不足时确认按钮禁用（不注册命中）').toBe(false);
+    expect(env.areas().some((a) => a.id === 'modal-primary'), '1★ 不足时主按钮禁用（不注册命中）').toBe(false);
+    click(env, 'modal-secondary'); // 取消
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '取消关闭合成 Modal').toBe(false);
   });
 
-  it('验收4｜当前装备不会被错误吃掉：available 排除 equipped', () => {
+  it('验收4｜当前装备不会被错误吃掉：available 排除 equipped（主按钮禁用语义）', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
-    // starter 已装备 cannon；cannon 1★×5 → 可用 = 5-1 = 4 < 5 → 不可合成（disabled）
+    // starter 已装备 cannon；cannon 1★×5 → 可用 = 5-1 = 4 < 5 → 主按钮禁用（不注册命中）
     env.host.render(state({ inventory: cannonOnlyInv(5) as never, progress: { coin: 600, rating: 20 } }));
     goBackpack(env);
     click(env, 'merge');
-    expect(env.areas().some((a) => a.id === 'merge-confirm'), 'cannon 1★×5 已装备 1 → 可用 4 < 5，确认禁用').toBe(false);
-    click(env, 'merge-close');
+    expect(env.areas().some((a) => a.id === 'modal-primary'), 'cannon 1★×5 已装备 1 → 可用 4 < 5，主按钮禁用').toBe(false);
+    click(env, 'modal-secondary');
     // cannon 1★×6 → 可用 = 6-1 = 5 ≥ 5 → 可合成（装备副本被排除，未被错误吃掉）
     env.host.render(state({ inventory: cannonOnlyInv(6) as never, progress: { coin: 600, rating: 20 } }));
     click(env, 'merge');
-    expect(env.areas().some((a) => a.id === 'merge-confirm'), 'cannon 1★×6 排除装备后可用 5 → 可合成').toBe(true);
+    expect(env.areas().some((a) => a.id === 'modal-primary'), 'cannon 1★×6 排除装备后可用 5 → 可合成').toBe(true);
   });
 
   it('验收5｜返回 Garage 装备状态正常：离开局外后回 Garage 默认车库页 + Backpack 分类复位', () => {
@@ -225,6 +240,6 @@ describe('F-META-3｜Backpack V1 + 合成整合', () => {
   it('验收1｜Garage 完全无合成入口（META-2 保持）', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(state({ inventory: richInv() as never, progress: { coin: 600, rating: 20 } }));
-    expect(env.areas().some((a) => a.id === 'merge' || a.id === 'merge-close' || a.id === 'merge-confirm'), 'Garage 无任何合成痕迹').toBe(false);
+    expect(env.areas().some((a) => a.id === 'merge'), 'Garage 无任何合成入口').toBe(false);
   });
 });

@@ -267,30 +267,31 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
     expect(dispatched).toHaveLength(0);
   });
 
-  it('F-META-2｜Backpack 合成流程：garage 无合成 → 切背包 → 点合成展开面板（真实坐标链命中）', () => {
+  it('F-META-UX2｜Backpack 合成 Modal 流程：garage 无合成 → 切背包 → 点合成弹 Modal（真实坐标链命中）', () => {
     const vp = { w: 844, h: 390 };
     const env = setup(vp, 2);
-    // 富库存（合成可确认——merge-confirm 非禁用态才注册命中）
+    // 富库存（合成可确认——Modal 主按钮非禁用态才注册命中）
     const inv: Record<string, { one: number; two: number }> = {};
     for (const p of OFFICIAL_PARTS) inv[p] = { one: 2, two: 1 };
     env.host.render(garageState({ inventory: inv as never, progress: { coin: 600, rating: 20 } }));
     // Garage 页无任何合成入口/面板
-    expect(env.areas().some((a) => a.id === 'merge' || a.id === 'merge-close')).toBe(false);
-    // 点导航「背包」→ backpack 页（nav 按钮真实坐标命中）
+    expect(env.areas().some((a) => a.id === 'merge')).toBe(false);
+    // 点装配区次级入口「背包」→ backpack 页（按钮真实坐标命中）
     const navBp = env.areas().find((a) => a.id === 'nav:backpack')!;
     const rawNav = rawFor(navBp, vp, 2, false);
     env.fireTouch(rawNav.rawX, rawNav.rawY);
     const merge = env.areas().find((a) => a.id === 'merge')!;
     expect(merge, 'backpack 页有合成入口').toBeTruthy();
-    // 点合成 → 合成面板展开（merge-close 出现）
+    // 点合成 → 合成说明 Modal（不切换全屏页面）
     const rawMerge = rawFor(merge, vp, 2, false);
     env.fireTouch(rawMerge.rawX, rawMerge.rawY);
-    expect(env.areas().some((a) => a.id === 'merge-close'), '合成面板展开').toBe(true);
-    expect(env.areas().some((a) => a.id === 'merge-confirm'), '合成确认按钮出现').toBe(true);
-    // 关闭 → 面板消失
-    const close = env.areas().find((a) => a.id === 'merge-close')!;
-    const rawClose = rawFor(close, vp, 2, false);
-    env.fireTouch(rawClose.rawX, rawClose.rawY);
-    expect(env.areas().some((a) => a.id === 'merge-close'), '合成面板关闭').toBe(false);
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 出现').toBe(true);
+    expect(env.areas().some((a) => a.id === 'modal-primary'), '合成主按钮出现').toBe(true);
+    // 取消 → Modal 消失，仍停留 Backpack
+    const cancel = env.areas().find((a) => a.id === 'modal-secondary')!;
+    const rawCancel = rawFor(cancel, vp, 2, false);
+    env.fireTouch(rawCancel.rawX, rawCancel.rawY);
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 关闭').toBe(false);
+    expect(env.areas().some((a) => a.id === 'merge'), '仍停留 Backpack').toBe(true);
   });
 });
