@@ -104,13 +104,8 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
           expect(b.maxY, `${phase} A/B 底缘入画`).toBeLessThanOrEqual(vp.h + 1);
           // HUD 不挡主体：车辆顶缘在 HUD 安全区之下
           expect(b.minY, `${phase} 车辆顶缘低于 HUD 区（${hudTop}）`).toBeGreaterThanOrEqual(hudTop - 1);
-          // F-WX-9C：Mobile Active 战斗主体优先——单车视觉宽度 24~30%（corridor 收窄到
-          // 开局精确边界 + compact battle margin 8/insetX 0，实测三屏统一 24.4%）
-          if (phase === 'Active' && !vp.desktop) {
-            const ratio = (b.maxX - b.minX) / vp.w;
-            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ∈ [24%,30%]`).toBeGreaterThanOrEqual(0.24);
-            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ≤ 30%`).toBeLessThanOrEqual(0.3);
-          }
+          // F-WX-RCA-3B：Approach（开局 Active 宽视野）只验双方完整可见，不要求车辆大
+          // （占比由 Engage 阶段负责；envelope 不再作为车体尺寸验收口径）
         }
         // F-WX-8-C：Mobile Warning 场地规则优先——完整 arena 左右墙（x=0 / x=width）在屏内（刺墙提示可见）
         if (phase === 'Warning' && !vp.desktop) {
@@ -186,6 +181,43 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
       // envelope 仍大于 core（双口径并存；envelope 不再作为车辆尺寸验收）
       const envRatio = (env.maxX - env.minX) / vp.w;
       expect(envRatio, 'envelope 占比 > core 占比').toBeGreaterThan(coreRatio);
+    });
+  }
+
+  for (const vp of VIEWPORTS.filter((v) => !v.desktop)) {
+    it(`F-WX-RCA-3B｜Battle Engage ${vp.w}×${vp.h}：近距离触发构图——A/B core 完整入画 + core 明显大于 Approach + 一次构图`, () => {
+      const canvas = { getContext: () => makeStubCtx(), clientWidth: vp.w, clientHeight: vp.h, width: vp.w, height: vp.h } as unknown as HTMLCanvasElement;
+      const surface: CanvasSurface = { width: vp.w, height: vp.h, devicePixelRatio: 1, now: () => 0 };
+      // 近距离 spawn（Engage 触发距离内：A core 右缘 558 / B core 左缘 ~600，gap≈42 ≤ ENGAGE_DIST=40 附近）
+      const o = new PlanckBattleOrchestrator(
+        buildSnapshotFromDraft(makeStarterDraft('watermelonBody', registry), registry, 'a'),
+        buildSnapshotFromDraft(makeStarterDraft('bananaBody', registry), registry, 'b'),
+        registry,
+        { autoDrive: false, engine: 'planck', spawnA: { x: 620, y: 640, facing: 1 }, spawnB: { x: 700, y: 640, facing: -1 } },
+      );
+      const r = new Renderer(canvas, new VisualRegistry(), surface);
+      const snap = o.getRenderSnapshot();
+      r.resize(snap.arena.width, o.arena.config.height);
+      // Approach（开局宽视野）
+      r.reframe(snap, 'battle', { phase: 'Active' });
+      const ap = r.scaleDiagnosticsBoth(snap);
+      // Engage（距离阈值触发瞬间，A+B coreBounds + margin）
+      r.reframe(snap, 'battle', { phase: 'Active', engage: true });
+      const en = r.scaleDiagnosticsBoth(snap);
+      // 1) Engage 双方 core 完整入画
+      for (const d of [en.A.core, en.B.core]) {
+        expect(d.screen.minX).toBeGreaterThanOrEqual(-1);
+        expect(d.screen.maxX).toBeLessThanOrEqual(vp.w + 1);
+        expect(d.screen.minY).toBeGreaterThanOrEqual(-1);
+        expect(d.screen.maxY).toBeLessThanOrEqual(vp.h + 1);
+      }
+      // 2) Engage 时 A core 明显大于 Approach（core 口径，不碰 envelope）
+      expect(en.A.core.screenWidthPct, 'Engage A core 应明显大于 Approach A core').toBeGreaterThan(ap.A.core.screenWidthPct);
+      expect(en.A.core.screenWidthPct).toBeGreaterThanOrEqual(25);
+      expect(en.B.core.screenWidthPct).toBeGreaterThan(ap.B.core.screenWidthPct);
+      // 3) 一次构图：再次 engage reframe → 同 transform（无呼吸缩放）
+      r.reframe(snap, 'battle', { phase: 'Active', engage: true });
+      expect(r.transform.scale).toBeCloseTo(en.scale, 5);
     });
   }
 });

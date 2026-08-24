@@ -94,21 +94,29 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     expect((log!.view as { dpr: number }).dpr).toBe(1);
   });
 
-  it('Battle Active：envelope ∈ [24%,30%]（9C 阈值不变）+ core 存在且 < envelope', () => {
+  it('Battle 两阶段（F-WX-RCA-3B）：Approach 不验占比；Engage（engage:true）A core 明显大于 Approach + 双口径并存', () => {
     vi.stubGlobal('__WX_DEBUG__', true);
     const { r, o } = makeEnv({ w: 844, h: 390 }, 1);
     const snap = o.getRenderSnapshot();
     r.resize(snap.arena.width, o.arena.config.height);
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    // Approach（开局宽视野）——只确认日志结构与 core<envelope 口径，不验占比（Approach 不要求车大）
     r.reframe(snap, 'battle', { phase: 'Active' });
-    const log = lastLog(spy, '[WX-REF]');
-    expect(log, '应有 [WX-REF] 日志').not.toBeNull();
-    expect(log!.fit).toBe('battle');
-    expect(log!.framingRect).toBeNull();
-    const vehicle = log!.vehicleA as { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
-    expect(vehicle.envelope.screenWidthPct).toBeGreaterThanOrEqual(24);
-    expect(vehicle.envelope.screenWidthPct).toBeLessThanOrEqual(30);
-    expect(vehicle.core.screenWidthPct).toBeLessThan(vehicle.envelope.screenWidthPct);
+    const approach = lastLog(spy, '[WX-REF]');
+    expect(approach, '应有 Approach [WX-REF] 日志').not.toBeNull();
+    expect(approach!.fit).toBe('battle');
+    expect(approach!.framingRect).toBeNull();
+    const ap = approach!.vehicleA as { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
+    expect(ap.core.screenWidthPct).toBeGreaterThan(0);
+    expect(ap.core.screenWidthPct).toBeLessThan(ap.envelope.screenWidthPct);
+    // Engage（近距离触发构图）——A core 明显大于 Approach（core 口径验收）
+    r.reframe(snap, 'battle', { phase: 'Active', engage: true });
+    const engage = lastLog(spy, '[WX-REF]');
+    expect(engage, '应有 Engage [WX-REF] 日志').not.toBeNull();
+    const en = engage!.vehicleA as { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
+    expect(en.core.screenWidthPct, 'Engage A core 应明显大于 Approach A core').toBeGreaterThan(ap.core.screenWidthPct);
+    expect(en.core.screenWidthPct, 'Engage A core 应 ≥ Approach × 1.3（明显放大）').toBeGreaterThan(ap.core.screenWidthPct * 1.3);
+    expect(en.core.screenWidthPct).toBeLessThan(en.envelope.screenWidthPct);
   });
 
   it('DPR=2（surface 1688×780 物理）与 DPR=1（844×390）逻辑占比一致（尺度链自洽，用 envelope 口径）', () => {
@@ -146,12 +154,13 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     expect(gv.core.screenWidthPct).toBeGreaterThanOrEqual(0);
     expect(gv.envelope.screenWidthPct).toBeGreaterThan(0);
     expect(gv.core.screenWidthPct).toBeLessThan(gv.envelope.screenWidthPct);
-    // battle 段：A/B 双车 core+envelope 四值（F-WX-RCA-2B）
+    // battle 段：Approach（engage:false）→ A/B 双车 core+envelope 四值（F-WX-RCA-2B）
     r.reframe(snap, 'battle', { phase: 'Active' });
     const battle = lastLog(spy, '[WX-RCA]');
     expect(battle, '应有 [WX-RCA] battle 段').not.toBeNull();
     expect(battle!.step).toBe('battle');
     expect(battle!.phase).toBe('Active');
+    expect(battle!.engage).toBe(false);
     const bv = battle as {
       A: { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
       B: { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
@@ -162,11 +171,20 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     expect(bv.B.core.screenWidthPct, 'B core 存在').toBeGreaterThanOrEqual(0);
     expect(bv.B.envelope.screenWidthPct, 'B envelope 存在').toBeGreaterThan(0);
     expect(bv.B.core.screenWidthPct).toBeLessThan(bv.B.envelope.screenWidthPct);
-    // 一次性：再次 reframe Active → battle 段不重复（battleRcaLogged once，防刷屏）
+    // F-WX-RCA-3B：Engage 段（engage:true）→ 再输出一次（A/B 四值），此后不再重复
+    r.reframe(snap, 'battle', { phase: 'Active', engage: true });
+    const engageLog = lastLog(spy, '[WX-RCA]');
+    expect(engageLog, '应有 [WX-RCA] Engage 段').not.toBeNull();
+    expect(engageLog!.engage).toBe(true);
+    const ev = engageLog as { A: { core: { screenWidthPct: number } }; B: { core: { screenWidthPct: number } } };
+    expect(ev.A.core.screenWidthPct).toBeGreaterThan(0);
+    expect(ev.B.core.screenWidthPct).toBeGreaterThan(0);
+    // 一次性：approach / engage 各自只输出一次（battleRcaLogged + engageRcaLogged once）
     const battleCountBefore = spy.mock.calls.filter((c: unknown[]) => c[0] === '[WX-RCA]' && String(c[1]).includes('"step":"battle"')).length;
     r.reframe(snap, 'battle', { phase: 'Active' });
+    r.reframe(snap, 'battle', { phase: 'Active', engage: true });
     const battleCountAfter = spy.mock.calls.filter((c: unknown[]) => c[0] === '[WX-RCA]' && String(c[1]).includes('"step":"battle"')).length;
-    expect(battleCountAfter, 'Active 首帧只输出一次 battle 段').toBe(battleCountBefore);
+    expect(battleCountAfter, 'approach + engage 各只输出一次').toBe(battleCountBefore);
     // false / undefined → 零 [WX-RCA]（先 restore 主 spy，避免重复 spyOn 返回同一 mock 混入历史调用）
     vi.restoreAllMocks();
     for (const v of [false, undefined]) {

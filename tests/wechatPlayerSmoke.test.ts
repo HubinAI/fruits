@@ -137,7 +137,8 @@ describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
     delete (globalThis as any).localStorage;
   });
 
-  it('完整玩家闭环 + 触摸输入 + 微信存储 + 后台/前台 + 再战（验收 2/3/6）', async () => {
+  it('完整玩家闭环 + 触摸输入 + 微信存储 + 后台/前台 + 再战（验收 2/3/6）', { timeout: 30000 }, async () => {
+    // F-WX-RCA-3B：真实 Planck 1600 tick 同步推进 + Engage 距离检测，放宽执行时长（非断言）
     vi.useFakeTimers();
     // F-WX-P0-INPUT：固定随机对手（pickOpponentForTier 用 Math.random）——避免特定
     // 对手组合战斗超 1600 tick 兜底导致非确定性失败（852 全量回归实测偶发）。

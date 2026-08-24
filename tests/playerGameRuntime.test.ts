@@ -34,15 +34,28 @@ const PROG_KEY = 'strongfruit.playerProgress.v1';
 
 const BATTLE_STEPS = 60; // 假战斗 60 步后出结果
 
+/** F-WX-RCA-3B：近距离双车 snapshot（A core 右缘 540 / B core 左缘 560，gap=20 ≤ ENGAGE_DIST） */
+function makeCloseSnap(): never {
+  const rect = (x: number, y: number, w: number, h: number) => ({
+    kind: 'polygons',
+    polygons: [{ points: [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }] }],
+  });
+  return {
+    arena: { width: 1600, groundY: 700, normalWalls: [], closingWalls: [] },
+    vehicleA: { team: 'A', body: rect(400, 620, 140, 60), wheels: [{ center: { x: 430, y: 690 }, radius: 12, angle: 0 }], parts: [] },
+    vehicleB: { team: 'B', body: rect(560, 620, 140, 60), wheels: [{ center: { x: 590, y: 690 }, radius: 12, angle: 0 }], parts: [] },
+  } as never;
+}
+
 /** 假战斗：仅提供 runtime 读取的最小字段（result/phase/timeMs/config + no-op 方法） */
-function makeOrch(steps: number): BattleOrchestratorApi {
+function makeOrch(steps: number, closeSnapshot = false): BattleOrchestratorApi {
   const done = steps >= BATTLE_STEPS;
   return {
     result: done ? { winner: 'A', hpA: 100, hpB: 0, phase: 'End', endReason: 'hp' } : null,
     phase: done ? 'End' : 'Active',
     timeMs: steps * 16.7,
     config: { autoDrive: true, arena: { phases: { warningMs: 3000 } } } as BattleConfig,
-    getRenderSnapshot: () => ({}) as unknown as never,
+    getRenderSnapshot: () => (closeSnapshot ? makeCloseSnap() : (({}) as unknown as never)),
     getBattleStatusSnapshot: () => null as never,
     step: () => {},
     onCombatEvent: () => () => {},
@@ -54,6 +67,8 @@ class FakeBattleHost implements PlayerBattleHost {
   previewMode = false;
   orchestrator: BattleOrchestratorApi | null = null;
   private steps = 0;
+  /** F-WX-RCA-3B：true → orchestrator snapshot 为近距离双车（Engage 触发测试用） */
+  closeWhen = false;
   loadCustomPreview(): void {
     this.previewMode = true;
     this.steps = 0;
@@ -62,12 +77,12 @@ class FakeBattleHost implements PlayerBattleHost {
   loadCustom(): void {
     this.previewMode = false;
     this.steps = 0;
-    this.orchestrator = makeOrch(0);
+    this.orchestrator = makeOrch(0, this.closeWhen);
   }
   step(): void {
     if (this.previewMode || !this.orchestrator) return;
     this.steps++;
-    this.orchestrator = makeOrch(this.steps);
+    this.orchestrator = makeOrch(this.steps, this.closeWhen);
   }
   render(): void {}
   setPreviewVehicleFx(): void {}
@@ -191,6 +206,32 @@ describe('F-WX-5 PlayerGameRuntime（headless 玩家闭环）', () => {
     tickMany(runtime, 90);
     expect(runtime.battleState).toBe('ended');
     expect(host.lastState?.result).not.toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('F-WX-RCA-3B｜距离进入阈值触发一次 Engage reframe（正式战斗 Active；不每帧跟随/不重复）', () => {
+    vi.useFakeTimers();
+    const { runtime, battle } = setup();
+    const reframes: Array<{ fit: string; engage?: boolean }> = [];
+    battle.reframe = ((fit: unknown, _fr?: unknown, opts?: { engage?: boolean }) => {
+      reframes.push({ fit: String(fit), engage: opts?.engage });
+    }) as never;
+    // 走到正式战斗（fighting）
+    runtime.actions.onFindOpponent();
+    vi.advanceTimersByTime(1010);
+    vi.advanceTimersByTime(250);
+    vi.advanceTimersByTime(600);
+    expect(runtime.battleState).toBe('fighting');
+    expect(battle.previewMode).toBe(false);
+    // 注入近距离 snapshot：A core 右缘 540 / B core 左缘 560 → gap=20 ≤ ENGAGE_DIST(40)
+    battle.closeWhen = true;
+    tickMany(runtime, 6); // 距离进入阈值（节流每 6 tick 检测一次）→ 触发一次 Engage reframe
+    const engaged = reframes.filter((r) => r.engage);
+    expect(engaged.length, '近距离应触发一次 Engage reframe').toBe(1);
+    expect(engaged[0].fit).toBe('battle');
+    // 继续推进 → 不重复触发（一次性，不每帧跟随）
+    tickMany(runtime, 30);
+    expect(reframes.filter((r) => r.engage).length, 'Engage 只触发一次').toBe(1);
     vi.useRealTimers();
   });
 

@@ -63,7 +63,9 @@ import {
   TIER_LABEL,
 } from '../core/playerProgress';
 import { phaseRemainingMs, warningCountdown } from '../presentation/battlePhaseFx';
-import type { BattleConfig, BattleOrchestratorApi } from '../battle/battleContract';
+import type { BattleConfig, BattleOrchestratorApi, RenderVehicle, RenderShape } from '../battle/battleContract';
+// F-WX-RCA-3B：Engage 触发距离（世界单位）——A 前锋（core 右缘）距 B 左缘 ≤ 此值时触发一次
+const ENGAGE_DIST = 40;
 import type { CameraFit, FramingRect } from '../render/renderer';
 import type { BuildSnapshot } from '../core/types';
 import type { UiMode, BattleState, PlayerPhase } from '../ui/playerShell';
@@ -83,8 +85,9 @@ export interface PlayerBattleHost {
   setPreviewVehicleFx(fx: { alpha: number; scale: number } | null): void;
   arenaDims(): { w: number; h: number };
   /** 按 fit 构图一次（host 用自己的 renderer.reframe；battle fit 需带 phase）；
-   *  framingRect（viewport logical 子区域）存在时固定预览框 fit 到该区域（Mobile Garage） */
-  reframe(fit: CameraFit, framingRect?: FramingRect): void;
+   *  framingRect（viewport logical 子区域）存在时固定预览框 fit 到该区域（Mobile Garage）；
+   *  opts.engage=true（F-WX-RCA-3B）→ battle Active Engage 构图（A+B coreBounds + margin） */
+  reframe(fit: CameraFit, framingRect?: FramingRect, opts?: { engage?: boolean }): void;
   resize(w: number, h: number): void;
 }
 
@@ -146,6 +149,10 @@ export class PlayerGameRuntime {
   private rewardAdClaimed = false;
   private readyOverlayVisible = false;
   private matchBarHidden = false;
+  /** F-WX-RCA-3B：Battle Engage reframe 一次性触发标志（距离进入阈值后触发一次，不再重算） */
+  private battleEngageReframed = false;
+  /** F-WX-RCA-3B：Engage 距离检测节流（每 6 tick ≈100ms 检测一次，避免每帧构建 snapshot 开销） */
+  private engageCheckCounter = 0;
   private lastPhase: string | null = null;
   private phaseStartTimeMs = 0;
   private lastPhaseOrch: unknown = null;
@@ -325,6 +332,48 @@ export class PlayerGameRuntime {
     this.pushUI();
   }
 
+  /** F-WX-RCA-3B：车辆 core（Body+Wheels）X 跨度（世界），供 Engage 距离检测（纯几何只读） */
+  private coreSpanX(v: RenderVehicle): { minX: number; maxX: number } {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    const shape = (s: RenderShape): void => {
+      if (s.kind === 'polygons') {
+        for (const p of s.polygons) for (const pt of p.points) {
+          minX = Math.min(minX, pt.x);
+          maxX = Math.max(maxX, pt.x);
+        }
+      } else {
+        minX = Math.min(minX, s.circle.center.x - s.circle.radius);
+        maxX = Math.max(maxX, s.circle.center.x + s.circle.radius);
+      }
+    };
+    shape(v.body);
+    for (const w of v.wheels) {
+      minX = Math.min(minX, w.center.x - w.radius);
+      maxX = Math.max(maxX, w.center.x + w.radius);
+    }
+    return { minX, maxX };
+  }
+
+  /** F-WX-RCA-3B：双方距离进入阈值 / 首次接触 → 只触发一次 Engage reframe（不每帧跟随/不呼吸缩放） */
+  private maybeEngageBattle(): void {
+    if (this.battleEngageReframed) return;
+    if (this.battleStateInternal !== 'fighting') return;
+    const orch = this.deps.battle.orchestrator;
+    if (!orch || orch.phase !== 'Active') return;
+    // 节流：每 6 tick（~100ms）检测一次距离（触发时机 ≤100ms 可接受，避免每帧 snapshot 开销）
+    this.engageCheckCounter++;
+    if (this.engageCheckCounter % 6 !== 0) return;
+    const snap = orch.getRenderSnapshot();
+    if (!snap?.vehicleA || !snap?.vehicleB) return; // 无真实 snapshot（测试 fake / 预览）→ 安全 no-op
+    const a = this.coreSpanX(snap.vehicleA);
+    const b = this.coreSpanX(snap.vehicleB);
+    if (b.minX - a.maxX <= ENGAGE_DIST) {
+      this.battleEngageReframed = true;
+      this.reframePlayerCamera(true); // Engage 构图（一次性，触发瞬间 A+B coreBounds + margin）
+    }
+  }
+
   /** 每帧推进（入口调度 rAF）：战斗步进 + Matching B FX + 渲染 + 阶段/结果轮询 + HUD 帧 */
   tick(now: number): void {
     // dt 双端钳制：上限 50ms（Q31 后台挂起防物理爆发）；下界 0（时钟回退/首帧时间源
@@ -332,6 +381,7 @@ export class PlayerGameRuntime {
     const dt = Math.max(0, Math.min(50, now - this.last));
     this.last = now;
     this.deps.battle.step(dt);
+    this.maybeEngageBattle(); // F-WX-RCA-3B：距离阈值触发一次 Engage reframe（正式战斗 Active）
     this.applyMatchingBfx(now); // Matching 候选 B 淡入缩放（须先于 render 应用，A 不动）
     this.deps.battle.render();
     const countdownText = this.pollArenaPhase(now); // 阶段倒计时 / 场边红脉冲 / Death 定格恢复
@@ -398,7 +448,8 @@ export class PlayerGameRuntime {
   // ==================== 相机 / 视口（player-only） ====================
 
   /** 按当前 playerPhase/battleState 构图一次（Q15-UI-R2 / Q08-A 语义，与旧 main.ts 一致） */
-  reframePlayerCamera(): void {
+  /** 按当前 playerPhase/battleState 构图一次；engage=true（F-WX-RCA-3B）→ battle Active Engage 构图 */
+  reframePlayerCamera(engage = false): void {
     const orch = this.deps.battle.orchestrator;
     if (!orch) return;
     const fit: CameraFit = this.deps.battle.previewMode
@@ -408,7 +459,9 @@ export class PlayerGameRuntime {
             ? 'previewFixed'
             : 'preview')
       : 'battle'; // 正式战斗：按 phase 构图（Q08-A）
-    this.deps.battle.reframe(fit, this.deps.host.getPreviewFramingRect?.() ?? undefined);
+    this.deps.battle.reframe(fit, this.deps.host.getPreviewFramingRect?.() ?? undefined, {
+      engage: engage && fit === 'battle',
+    });
   }
 
   /** 视口 resize：arena 尺寸 → host resize + 重构图（Web 可经 deps.onResize 接管 scenario 分支） */
@@ -484,6 +537,7 @@ export class PlayerGameRuntime {
 
   /** 开战 / 原配置再战：重新 validate 当前 Draft → 正式 Battle */
   private startOrRematch(): void {
+    this.battleEngageReframed = false; // F-WX-RCA-3B：新战斗重置 Engage 触发（再战可再次触发）
     const sa = this.snapshotOf('A');
     const sb = this.snapshotOf('B');
     if (!validateSnapshot(sa, registry).valid || !validateSnapshot(sb, registry).valid) {

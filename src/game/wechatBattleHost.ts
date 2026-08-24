@@ -78,12 +78,13 @@ export class WechatBattleHost implements PlayerBattleHost {
     return { w: 1600, h: 900 };
   }
 
-  reframe(fit: CameraFit, framingRect?: FramingRect): void {
+  reframe(fit: CameraFit, framingRect?: FramingRect, opts?: { engage?: boolean }): void {
     const o = this.orchestrator;
     if (!o) return;
     this.renderer.reframe(o.getRenderSnapshot(), fit, {
       phase: fit === 'battle' ? o.phase : undefined,
       framingRect,
+      engage: opts?.engage,
     });
   }
 
