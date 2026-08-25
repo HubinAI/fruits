@@ -129,7 +129,7 @@ describe('F-HOME-P0-LAYER｜首页图层（背景<车辆<UI）', () => {
     expect(log.some((e) => e.fillStyle === '#0a0d13'), '关闭后不绘制首页渐变带').toBe(false);
   });
 
-  it('4. 首页 UI host：不再用渐变带（#0a0d13）覆盖车辆；CTA（#3b6fd4）仍正常绘制（覆盖车辆之上）', () => {
+  it('4. 首页 UI host：不再用渐变带（#0a0d13）覆盖车辆；CTA/主操作（#ffb229 金黄）仍正常绘制（覆盖车辆之上）', () => {
     const { ctx, log } = makeTraceCtx();
     const core = createWebCore();
     bindPlatformCore({
@@ -148,8 +148,8 @@ describe('F-HOME-P0-LAYER｜首页图层（背景<车辆<UI）', () => {
     host.render(homeState());
     // UI 层不再绘制首页渐变带（即不再用不透明背景覆盖下层车辆）
     expect(log.some((e) => e.fillStyle === '#0a0d13'), 'UI 层不再绘制渐变带覆盖车辆').toBe(false);
-    // UI 控件仍绘制（CTA 主色）——证明 UI 层正常位于车辆之上
-    expect(log.some((e) => e.fillStyle === '#3b6fd4'), 'CTA 等 UI 控件仍正常绘制').toBe(true);
+    // UI 控件仍绘制（F-MOBILE-VISUAL-BASE-R1：主操作为金黄 #ffb229）——证明 UI 层正常位于车辆之上
+    expect(log.some((e) => e.fillStyle === '#ffb229'), 'CTA/主操作等 UI 控件仍正常绘制').toBe(true);
     expect(log.length, 'UI 层确有绘制内容').toBeGreaterThan(0);
   });
 

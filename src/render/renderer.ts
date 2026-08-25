@@ -21,6 +21,7 @@ import { vehicleDeathAlpha, damageFeedbackColors } from '../presentation/battleP
 import { DamageNumberAggregator } from '../presentation/damageNumberAggregator';
 import { buildFireJet } from '../presentation/fireJetBuilder';
 import { isCompactLandscape } from './viewportProfile';
+import { V } from '../ui/visualTokens';
 import type { CanvasSurface } from './canvasSurface';
 
 /** Projectile 颜色（Q02-C3B）：A/B 可明显区分（与车身蓝/橙区分，更亮） */
@@ -702,15 +703,15 @@ export class Renderer {
     const now = this.now();
 
     if (!this.homeBackdrop) {
-      // Ground
-      ctx.fillStyle = '#2a2f38';
+      // Ground（统一竞技场地面语义）
+      ctx.fillStyle = V.arenaGround;
       ctx.fillRect(
         t.offsetX,
         this.sy(arena.groundY),
         this.ss(arena.width),
         this.canvas.height - this.sy(arena.groundY),
       );
-      ctx.strokeStyle = '#4a5260';
+      ctx.strokeStyle = V.arenaGroundEdge;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(t.offsetX, this.sy(arena.groundY));
@@ -912,7 +913,9 @@ export class Renderer {
    * 在 renderer 底层绘制（车辆之下），与 UI 顶层控件（车辆之上）构成正确图层顺序。
    */
   private drawHomeBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-    const bands = ['#0a0d13', '#0e141e', '#141d2b', '#1a2740'];
+    // F-MOBILE-VISUAL-BASE-R1：统一竞技场背景；首带保留字面 #0a0d13 以满足 homeLayout 测试契约
+    // 与 V.arenaBgTop 取值一致（语义来源见 visualTokens.ts）。
+    const bands = ['#0a0d13', V.arenaBgMid, V.arenaBgLow, V.arenaBgHorizon];
     const bh = h / bands.length;
     for (let i = 0; i < bands.length; i++) {
       ctx.fillStyle = bands[i];

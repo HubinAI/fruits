@@ -81,12 +81,12 @@ describe('F-RESULT-UX-R1｜结算页信息层级与再战主路径', () => {
     const resultMethod = src.slice(resultModalIdx, src.indexOf('showModal(spec: ModalSpec): void'));
     expect(resultMethod, '胜利传 green 色调').toContain("titleTone: isWin ? 'green' : 'red'");
     const modalMethod = src.slice(src.indexOf('private drawModal'), src.indexOf('private drawReadyOverlay'));
-    expect(modalMethod, '标题按 titleTone 着色（green→C.green / red→C.red）').toContain(
-      "const titleColor = spec.titleTone === 'green' ? C.green : spec.titleTone === 'red' ? C.red : C.text;",
+    expect(modalMethod, '标题按 titleTone 着色（green→V.win / red→V.lose；语义同旧 C.green/C.red）').toContain(
+      "const titleColor = spec.titleTone === 'green' ? V.win : spec.titleTone === 'red' ? V.lose : V.textPrimary;",
     );
-    // 部件卡：不再用 C.border 整框；改用极淡顶部分隔线（rgba 白 0.06）
+    // 部件卡：不再用 C.border 整框；改用极淡顶部分隔线（V.borderSoft）
     expect(modalMethod, '部件卡去除整框表格线').not.toContain('this.rect(cx + pad, yy, pw, ph, C.cardBg, C.border, 1)');
-    expect(modalMethod, '部件卡改极淡顶部分隔线').toContain("'rgba(255,255,255,0.06)'");
+    expect(modalMethod, '部件卡改极淡顶部分隔线').toContain('V.borderSoft');
     // 顺序：rewardRows（金币/段位）→ partCard → adRow 内层 → primary/secondary
     expect(resultMethod).toContain("label: '金币'");
     expect(resultMethod).toContain("label: '段位'");

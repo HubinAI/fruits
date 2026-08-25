@@ -34,6 +34,7 @@ import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { BODY_OPTIONS, WHEEL_OPTIONS, encodePartVal } from './playerUI';
 import { resolveLayoutProfile, type LayoutProfile } from './layoutProfile';
 import { computeHomeLayout } from './homeLayout';
+import { V } from './visualTokens';
 import type {
   PlayerUIHost,
   PlayerUIState,
@@ -50,33 +51,46 @@ const BASE_H = 720;
 const PHONE_LOGICAL_W = 844;
 const PHONE_LOGICAL_H = 390;
 
-/** 与 WebDOM 同源的色板（纯功能性绘制，无渐变/动效） */
+/**
+ * F-MOBILE-VISUAL-BASE-R1｜统一手机玩家视觉体系（语义视觉源，单一事实来源）。
+ * 与 WebDOM 同源的色板（纯功能性绘制，无渐变/动效）——取值全部映射到 V（visualTokens.ts），
+ * 禁止只在 C 内改名字而画面不变。以下 key 保持历史名以兼容 153 处调用站点；语义见 V。
+ */
 const C = {
-  bg: '#171c26',
-  panel: '#242b38',
-  panelHover: '#2e3747',
-  border: '#38414f',
-  borderActive: '#4a7fe0',
-  blue: '#3b6fd4',
-  blueBright: '#5a8df0',
-  blueDeep: '#2a3a5c',
-  gold: '#ffd35a',
-  text: '#e8e8f0',
-  textDim: '#9aa4b5',
-  textDark: '#7c8799',
-  red: '#ff6b5e',
-  green: '#59c97a',
-  orange: '#ff9d5a',
-  dockBg: 'rgba(15,19,27,0.93)',
-  overlayBg: 'rgba(4,6,10,0.78)',
-  readyBg: 'rgba(6,8,12,0.35)',
-  cardBg: '#1c2330',
-  title: '#cdd6e6',
-  onboardBg: '#15233a',
+  /** 场景背景（保留旧 layering 测试标记色 #0a0d13：首页背景下沉第一带） */
+  bg: V.arenaBgTop,
+  panel: V.panel,
+  panelHover: V.panelEmph,
+  border: V.border,
+  borderActive: V.ownBlueBright,
+  blue: V.ownBlue,
+  blueBright: V.ownBlueBright,
+  blueDeep: '#1c2c47',
+  /** 主操作为金黄（替代旧浅金 #ffd35a，权重更明确） */
+  gold: V.primary,
+  text: V.textPrimary,
+  textDim: V.textSecondary,
+  textDark: V.textFaint,
+  /** 失败/危险红 */
+  red: V.lose,
+  /** 胜利绿 */
+  green: V.win,
+  /** 敌方橙（高饱和，替代旧 #ff9d5a） */
+  orange: V.enemyOrange,
+  /** 面板实底（偏蓝深色，替代旧 rgba(15,19,27,0.93) 中性黑） */
+  dockBg: 'rgba(18,26,40,0.94)',
+  overlayBg: 'rgba(4,7,12,0.80)',
+  readyBg: 'rgba(6,9,14,0.38)',
+  /** 卡片底（偏蓝深，替代旧 #1c2330） */
+  cardBg: '#162032',
+  title: V.textPrimary,
+  onboardBg: '#16233c',
   onboardBorder: '#2f5fa0',
   onboardText: '#bcd4ff',
-  driveBlue: '#cfe0ff',
-  lockText: '#c98b5e',
+  /** 我方能量蓝（明亮，替代旧 #cfe0ff） */
+  driveBlue: '#7fb2ff',
+  /** 锁定文字（橙调，替代旧 #c98b5e 棕） */
+  lockText: '#ff9d5a',
   white: '#ffffff',
 };
 
@@ -889,7 +903,35 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ctx.fillText(s, this.ox + x * this.scale, this.oy + y * this.scale);
   }
 
-  /** 绘制按钮并注册命中区（disabled 时仅绘制，不注册 hit） */
+  /** F-MOBILE-VISUAL-BASE-R1：统一圆角矩形（替代逐处 strokeRect 直角硬边框；分组靠色块/间距/明暗，而非重框） */
+  private panel(x: number, y: number, w: number, h: number, fill?: string, stroke?: string, radius: number = V.radiusL): void {
+    const ctx = this.ctx;
+    const X = this.ox + x * this.scale;
+    const Y = this.oy + y * this.scale;
+    const W = w * this.scale;
+    const H = h * this.scale;
+    const r = Math.min(radius * this.scale, W / 2, H / 2);
+    ctx.beginPath();
+    ctx.moveTo(X + r, Y);
+    ctx.arcTo(X + W, Y, X + W, Y + H, r);
+    ctx.arcTo(X + W, Y + H, X, Y + H, r);
+    ctx.arcTo(X, Y + H, X, Y, r);
+    ctx.arcTo(X, Y, X + W, Y, r);
+    ctx.closePath();
+    if (fill) {
+      ctx.fillStyle = fill;
+      ctx.fill();
+    }
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = V.strokeW;
+      ctx.stroke();
+    }
+  }
+
+  /** F-MOBILE-VISUAL-BASE-R1：绘制按钮并注册命中区（disabled 时仅绘制，不注册 hit）。
+   * 主按钮 = 金黄实底（最深操作权重，白底文字）；次/普通 = 轻量半透明蓝填充、无重框；
+   * 选中 = 蓝实底（高对比，区别于普通次级）；锁定 = 橙描边提示。 */
   private button(
     x: number,
     y: number,
@@ -900,29 +942,35 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     opts: { sub?: string; active?: boolean; locked?: boolean; disabled?: boolean; primary?: boolean } = {},
   ): void {
     const fill = opts.disabled
-      ? '#262e3d'
+      ? '#22303f'
       : opts.primary
-        ? C.blue
+        ? V.primary
         : opts.active
-          ? C.blueDeep
-          : C.panel;
+          ? C.blue
+          : V.secondary;
     const stroke = opts.disabled
       ? C.border
-      : opts.primary || opts.active
-        ? C.blueBright
-        : opts.locked
-          ? C.lockText
-          : C.border;
-    const labelColor = opts.disabled ? C.textDark : C.text;
-    this.rect(x, y, w, h, fill, stroke, opts.locked ? 1.5 : 1);
+      : opts.primary
+        ? V.primaryBright
+        : opts.active
+          ? C.blueBright
+          : opts.locked
+            ? V.enemyOrange
+            : V.borderSoft;
+    const labelColor = opts.disabled
+      ? C.textDark
+      : opts.primary
+        ? V.primaryText
+        : C.text;
+    this.panel(x, y, w, h, fill, stroke, V.radiusM);
     // F-WX-UI-1：Mobile 字号层级（主按钮 17 / 卡名 17 / 辅助 14）；Desktop 保持旧值（15/12）
     const labelFs = this.isMobile ? 17 : 15;
     const subFs = this.isMobile ? 14 : 12;
     if (opts.sub) {
       this.text(opts.sub, x + w / 2, y + h * 0.3, subFs, opts.disabled ? C.textDark : C.textDim, 'center');
-      this.text(label, x + w / 2, y + h * 0.66, labelFs, labelColor, 'center', 600);
+      this.text(label, x + w / 2, y + h * 0.66, labelFs, labelColor, 'center', 700);
     } else {
-      this.text(label, x + w / 2, y + h / 2, labelFs, labelColor, 'center', 600);
+      this.text(label, x + w / 2, y + h / 2, labelFs, labelColor, 'center', 700);
     }
     if (!opts.disabled) this.hit(id, x, y, w, h);
   }
@@ -938,12 +986,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const x = this.insL;
       const y = this.insT;
       const w = this.W - this.insL - this.insR;
-      this.rect(x, y, w, 40, 'rgba(8,10,14,0.82)');
-      this.text(title, x + w / 2, y + 20, 16, C.title, 'center', 700);
+      this.panel(x, y, w, 40, V.panelSolid);
+      this.text(title, x + w / 2, y + 20, 16, V.textPrimary, 'center', 700);
       return;
     }
-    this.rect(0, 0, BASE_W, 56, 'rgba(8,10,14,0.82)');
-    this.text(title, BASE_W / 2, 28, 18, C.title, 'center', 700);
+    this.panel(0, 0, BASE_W, 56, V.panelSolid);
+    this.text(title, BASE_W / 2, 28, 18, V.textPrimary, 'center', 700);
   }
 
   // ==================== Garage ====================
@@ -956,7 +1004,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const draft = state.draft;
     if (!draft) return;
     const dockY = 410;
-    this.rect(0, dockY, BASE_W, BASE_H - dockY, C.dockBg, C.border, 1);
+    this.panel(0, dockY, BASE_W, BASE_H - dockY, C.dockBg, undefined, 0);
 
     // 顶部状态条（金币 + 段位）
     const p = state.progress;
@@ -1207,11 +1255,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private drawHomeBottomEntry(r: Rect, id: string, icon: string, label: string): void {
     const iw = this.isShort ? 20 : 26;
     const iy = r.y + (r.h - iw) / 2;
-    // 轻量 chip：极淡填充、无重边框（旧版 C.dockBg 实底 + C.border 重框 → 像操作台按钮）
-    this.rect(r.x + 6, r.y + 4, r.w - 12, r.h - 8, 'rgba(28,36,50,0.45)');
-    this.rect(r.x + 8, iy, iw, iw, 'rgba(140,160,190,0.16)');
-    this.text(icon, r.x + 8 + iw / 2, iy + iw / 2, this.isShort ? 11 : 14, C.textDim, 'center', 700);
-    this.text(label, r.x + 8 + iw + 8, r.y + r.h / 2, this.isShort ? 12 : 14, C.textDim, 'left', 500);
+    // F-MOBILE-VISUAL-BASE-R1：轻量次级入口（半透明蓝填充、无重框、明亮文字）；
+    // 与中央金黄主按钮形成明确主次，消除「后台操作台」厚重感。
+    this.panel(r.x + 6, r.y + 4, r.w - 12, r.h - 8, V.secondary, V.borderSoft, V.radiusM);
+    this.panel(r.x + 8, iy, iw, iw, 'rgba(120,150,190,0.18)', undefined, V.radiusM);
+    this.text(icon, r.x + 8 + iw / 2, iy + iw / 2, this.isShort ? 11 : 14, V.textPrimary, 'center', 700);
+    this.text(label, r.x + 8 + iw + 8, r.y + r.h / 2, this.isShort ? 12 : 14, V.secondaryText, 'left', 600);
     this.hit(id, r.x, r.y, r.w, r.h);
   }
 
@@ -1235,7 +1284,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
 
     // 装配面板（右侧中央；绘制与 HitArea 均基于 panelRect；F-META-2：Garage 无合成，
     // 只处理配置——选中槽选项 / 轮子二级 / 武器二级 / 2×2 主分类）
-    this.rect(panelRect.x, panelRect.y, panelRect.w, panelRect.h, C.dockBg, C.border, 1);
+    this.panel(panelRect.x, panelRect.y, panelRect.w, panelRect.h, V.panelSolid);
     // F-UX-3A：背包/更多已移到顶栏最右小按钮（drawMobileTopBar），配置区独占整个面板；
     // 内容区由 availableH 反推（F-WX-MOBILE-RCA-1：short 更紧凑）
     const padY = this.isShort ? 6 : 10;
@@ -1262,7 +1311,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private drawBackpackPage(state: PlayerUIState, layout: MobileGarageLayout): void {
     const draft = state.draft;
     const c = layout.contentRect;
-    this.rect(c.x, c.y, c.w, c.h, C.dockBg, C.border, 1);
+    this.panel(c.x, c.y, c.w, c.h, V.panelSolid);
     // F-META-UX1：顶部「← 返回车库」（唯一返回入口，禁止恢复全局 Tab）
     this.button(c.x + 12, c.y + 6, 96, this.minTouchH, 'nav:garage', '‹ 返回车库', {});
     this.text('背包', c.x + 120, c.y + 30, 20, C.text, 'left', 700);
@@ -1351,7 +1400,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    */
   private drawMorePage(layout: MobileGarageLayout): void {
     const c = layout.contentRect;
-    this.rect(c.x, c.y, c.w, c.h, C.dockBg, C.border, 1);
+    this.panel(c.x, c.y, c.w, c.h, V.panelSolid);
     if (this.moreView === 'settings') {
       this.drawMoreSettings(c);
       return;
@@ -1427,7 +1476,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const w = topBarRect.w;
     const uT = topBarRect.y;
     const topH = topBarRect.h;
-    this.rect(x0 - 4, uT, w + 8, topH, 'rgba(8,10,14,0.72)', C.border, 1);
+    this.panel(x0 - 4, uT, w + 8, topH, V.panelSolid, V.borderSoft, V.radiusM);
     // F-HOME-1：配置页（garage）顶部最左「‹ 首页」返回小按钮；金币/段位右移让位
     const homeW = this.metaPage === 'garage' ? (this.isShort ? 44 : 56) : 0;
     const homeGap = this.metaPage === 'garage' ? 8 : 0;
@@ -1436,8 +1485,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     const infoX = x0 + homeW + homeGap;
     // 金币（最左）→ 段位（中）→ 能量（右偏）→ [背包][更多] 小按钮（最右，仅 Garage 页）
-    this.text(`金币 ${p.coin}`, infoX, uT + topH / 2 + 5, 14, C.gold, 'left', 700);
-    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, infoX + 134, uT + topH / 2 + 5, 14, C.textDim);
+    this.text(`金币 ${p.coin}`, infoX, uT + topH / 2 + 5, 14, V.primary, 'left', 700);
+    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, infoX + 134, uT + topH / 2 + 5, 14, V.textSecondary);
     let eBarW = Math.min(120, w * 0.2);
     let eBarX = x0 + w - eBarW;
     if (this.metaPage === 'garage') {
@@ -1458,16 +1507,16 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const used = energyRes.error ? Number.NaN : energyRes.energy;
     const capacity = body?.energyCapacity ?? 0;
     const overload = Number.isFinite(used) && used > capacity;
-    this.text('能量', eBarX - 38, uT + topH / 2 + 5, 14, C.textDim);
+    this.text('能量', eBarX - 38, uT + topH / 2 + 5, 14, V.textSecondary);
     const pct = Number.isFinite(used) ? Math.min(100, (used / Math.max(capacity, 1)) * 100) : 0;
-    this.rect(eBarX, uT + topH / 2 - 4, eBarW, 10, '#232b38', C.border, 1);
-    if (pct > 0) this.rect(eBarX, uT + topH / 2 - 4, eBarW * (pct / 100), 10, overload ? C.red : C.blue);
+    this.panel(eBarX, uT + topH / 2 - 4, eBarW, 10, '#1c2434', V.borderSoft, 5);
+    if (pct > 0) this.rect(eBarX, uT + topH / 2 - 4, eBarW * (pct / 100), 10, overload ? V.lose : V.ownBlue);
     this.text(
       Number.isFinite(used) ? `${Math.round(used)}/${capacity}` : '?/?',
       eBarX + eBarW + 6,
       uT + topH / 2 + 5,
       14,
-      overload ? C.red : C.text,
+      overload ? V.lose : V.textPrimary,
       'left',
     );
   }
@@ -1591,9 +1640,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         });
       } else if (oy < y + viewH && oy + cardH > y) {
         // 部分可见：只画不注册命中（半显边缘 = 可继续滚动提示；不产生超屏 hitArea）
-        const fill = c.locked ? '#262e3d' : c.v === curVal ? C.blueDeep : C.panel;
-        this.rect(ox, oy, colW, cardH, fill, c.locked ? C.lockText : C.border, 1);
-        this.text(c.t, ox + colW / 2, oy + cardH / 2, 15, c.locked ? C.textDark : C.text, 'center', 600);
+        const fill = c.locked ? '#262e3d' : c.v === curVal ? C.blueDeep : V.panel;
+        this.rect(ox, oy, colW, cardH, fill, c.locked ? V.enemyOrange : V.border, 1);
+        this.text(c.t, ox + colW / 2, oy + cardH / 2, 15, c.locked ? V.textFaint : V.textPrimary, 'center', 600);
       }
     }
     ctx.restore();
@@ -1812,7 +1861,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 中央 VS（半透明大字，恒定屏幕中心）
     ctx.save();
     ctx.globalAlpha = 0.22;
-    this.text('VS', this.W / 2, this.H / 2 - 4, this.isMobile ? 40 : 54, C.text, 'center', 900);
+    this.text('VS', this.W / 2, this.H / 2 - 4, this.isMobile ? 40 : 54, V.textPrimary, 'center', 900);
     ctx.restore();
     // 单一状态文字（顶部居中横幅，全屏唯一状态表达；不覆盖车辆）
     this.text(
@@ -1820,7 +1869,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.W / 2,
       this.insT + (this.isMobile ? 24 : 30),
       this.isMobile ? 16 : 18,
-      locked ? C.gold : C.textDim,
+      locked ? V.primary : V.textSecondary,
       'center',
       700,
     );
@@ -1829,7 +1878,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       // 不进入车辆 envelope；不与轮组 / 武器 / 地面线相交）。无驱动 pill、无左右大标签。
       const topLimit = this.insT + 2;
       const nameY = Math.max(topLimit, bRect.y - 8);
-      this.text(op.bodyName, bCx, nameY, this.isMobile ? 18 : 20, C.orange, 'center', 700);
+      this.text(op.bodyName, bCx, nameY, this.isMobile ? 18 : 20, V.enemyOrange, 'center', 700);
     } else {
       // 搜索中：四角括号 + 顶部扫描线严格围绕真实候选车辆 bRect（不圈空白、不覆盖车辆、
       // 不触及中央 VS：bRect 在右半屏，扫描框整体位于 VS 右侧）。nowMs 驱动呼吸 / 扫描。
@@ -1880,42 +1929,42 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.drawHudShort(frame, top, h, barBase, barW, pctA, pctB);
         return;
       }
-      this.text('A', barBase, top + 12, 14, C.blue, 'left', 700);
+      this.text('A', barBase, top + 12, 14, V.ownBlue, 'left', 700);
       const barAX = barBase + 16;
-      this.rect(barAX, top, barW, h, '#232b38', C.border, 1);
-      if (pctA > 0) this.rect(barAX, top, barW * (pctA / 100), h, C.blue);
-      this.text(`${Math.round(s.sideA.hp)}`, barAX + barW + 6, top + 12, 14, C.text);
+      this.rect(barAX, top, barW, h, '#232b38', V.border, 1);
+      if (pctA > 0) this.rect(barAX, top, barW * (pctA / 100), h, V.ownBlue);
+      this.text(`${Math.round(s.sideA.hp)}`, barAX + barW + 6, top + 12, 14, V.textPrimary);
 
       const barBRight = this.W - this.insR - 8;
-      this.text('B', barBRight, top + 12, 14, '#e08a2e', 'right', 700);
+      this.text('B', barBRight, top + 12, 14, V.enemyOrange, 'right', 700);
       const barBX = barBRight - 16 - barW;
-      this.rect(barBX, top, barW, h, '#232b38', C.border, 1);
-      if (pctB > 0) this.rect(barBX, top, barW * (pctB / 100), h, '#e08a2e');
-      this.text(`${Math.round(s.sideB.hp)}`, barBX - 6, top + 12, 14, C.text, 'right');
+      this.rect(barBX, top, barW, h, '#232b38', V.border, 1);
+      if (pctB > 0) this.rect(barBX, top, barW * (pctB / 100), h, V.enemyOrange);
+      this.text(`${Math.round(s.sideB.hp)}`, barBX - 6, top + 12, 14, V.textPrimary, 'right');
 
-      this.text(s.phase === 'End' ? '战斗结束' : '战斗中', this.W / 2, top + 12, 14, C.gold, 'center');
+      this.text(s.phase === 'End' ? '战斗结束' : '战斗中', this.W / 2, top + 12, 14, V.primary, 'center');
       if (frame.phaseCountdownText != null) {
-        this.text(frame.phaseCountdownText, this.W / 2, top + 60, 34, C.red, 'center', 800);
+        this.text(frame.phaseCountdownText, this.W / 2, top + 60, 34, V.lose, 'center', 800);
       }
       return;
     }
     // A 左上
-    this.text('A', 24, 26, 15, C.blue, 'left', 700);
-    this.rect(44, 21, 170, 10, '#232b38', C.border, 1);
+    this.text('A', 24, 26, 15, V.ownBlue, 'left', 700);
+    this.rect(44, 21, 170, 10, '#232b38', V.border, 1);
     const pctA = Math.max(0, Math.min(1, s.sideA.hp / Math.max(s.sideA.maxHp, 1))) * 100;
-    if (pctA > 0) this.rect(44, 21, 170 * (pctA / 100), 10, C.blue);
-    this.text(`${Math.round(s.sideA.hp)} / ${Math.round(s.sideA.maxHp)}`, 44 + 170 + 10, 26, 13, C.text);
+    if (pctA > 0) this.rect(44, 21, 170 * (pctA / 100), 10, V.ownBlue);
+    this.text(`${Math.round(s.sideA.hp)} / ${Math.round(s.sideA.maxHp)}`, 44 + 170 + 10, 26, 13, V.textPrimary);
     // B 右上
-    this.text('B', BASE_W - 24, 26, 15, '#e08a2e', 'right', 700);
-    this.rect(BASE_W - 24 - 170, 21, 170, 10, '#232b38', C.border, 1);
+    this.text('B', BASE_W - 24, 26, 15, V.enemyOrange, 'right', 700);
+    this.rect(BASE_W - 24 - 170, 21, 170, 10, '#232b38', V.border, 1);
     const pctB = Math.max(0, Math.min(1, s.sideB.hp / Math.max(s.sideB.maxHp, 1))) * 100;
-    if (pctB > 0) this.rect(BASE_W - 24 - 170, 21, 170 * (pctB / 100), 10, '#e08a2e');
-    this.text(`${Math.round(s.sideB.hp)} / ${Math.round(s.sideB.maxHp)}`, BASE_W - 24 - 170 - 10, 26, 13, C.text, 'right');
+    if (pctB > 0) this.rect(BASE_W - 24 - 170, 21, 170 * (pctB / 100), 10, V.enemyOrange);
+    this.text(`${Math.round(s.sideB.hp)} / ${Math.round(s.sideB.maxHp)}`, BASE_W - 24 - 170 - 10, 26, 13, V.textPrimary, 'right');
     // 阶段文案
-    this.text(s.phase === 'End' ? '战斗结束' : '战斗中', BASE_W / 2, 26, 14, C.gold, 'center');
+    this.text(s.phase === 'End' ? '战斗结束' : '战斗中', BASE_W / 2, 26, 14, V.primary, 'center');
     // Warning 倒计时
     if (frame.phaseCountdownText != null) {
-      this.text(frame.phaseCountdownText, BASE_W / 2, 110, 44, C.red, 'center', 800);
+      this.text(frame.phaseCountdownText, BASE_W / 2, 110, 44, V.lose, 'center', 800);
     }
   }
 
@@ -1936,17 +1985,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   ): void {
     const s = frame.battleStatus!;
     // 左右 HP 条（纯条，无文字）
-    this.rect(barBase, top, barW, h, '#232b38', C.border, 1);
-    if (pctA > 0) this.rect(barBase, top, barW * (pctA / 100), h, C.blue);
+    this.rect(barBase, top, barW, h, '#232b38', V.border, 1);
+    if (pctA > 0) this.rect(barBase, top, barW * (pctA / 100), h, V.ownBlue);
     const barBRight = this.W - this.insR - 8;
     const barBX = barBRight - barW;
-    this.rect(barBX, top, barW, h, '#232b38', C.border, 1);
-    if (pctB > 0) this.rect(barBX, top, barW * (pctB / 100), h, '#e08a2e');
+    this.rect(barBX, top, barW, h, '#232b38', V.border, 1);
+    if (pctB > 0) this.rect(barBX, top, barW * (pctB / 100), h, V.enemyOrange);
     // 中央阶段提示：仅 Warning / Closing（不遮挡车辆/武器/FX——车辆位于下部战斗带）
     if (s.phase === 'Warning' || s.phase === 'Closing') {
       const label = s.phase === 'Warning' ? '警告' : '刺墙逼近';
       const cd = frame.phaseCountdownText != null ? frame.phaseCountdownText : '';
-      this.text(cd !== '' ? `${label} ${cd}` : label, this.W / 2, top + 44, 24, C.red, 'center', 800);
+      this.text(cd !== '' ? `${label} ${cd}` : label, this.W / 2, top + 44, 24, V.lose, 'center', 800);
     }
   }
 
@@ -1959,31 +2008,31 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const cardY = 150;
     const cardW = 420;
     const cardH = 430;
-    this.rect(cardX, cardY, cardW, cardH, C.cardBg, C.border, 1);
+    this.panel(cardX, cardY, cardW, cardH, V.panelSolid, V.border, V.radiusL);
     const r = state.result!;
     const isWin = r.winner === 'A';
-    this.text(isWin ? '【胜利】' : '【失败】', BASE_W / 2, cardY + 44, 44, isWin ? C.green : C.red, 'center', 800);
-    this.text(`我方剩余 HP：${Math.round(r.hpA)}`, BASE_W / 2, cardY + 84, 14, C.textDim, 'center');
-    this.text(`对手剩余 HP：${Math.round(r.hpB)}`, BASE_W / 2, cardY + 106, 14, C.textDim, 'center');
+    this.text(isWin ? '【胜利】' : '【失败】', BASE_W / 2, cardY + 44, 44, isWin ? V.win : V.lose, 'center', 800);
+    this.text(`我方剩余 HP：${Math.round(r.hpA)}`, BASE_W / 2, cardY + 84, 14, V.textSecondary, 'center');
+    this.text(`对手剩余 HP：${Math.round(r.hpB)}`, BASE_W / 2, cardY + 106, 14, V.textSecondary, 'center');
 
     let y = cardY + 132;
     if (state.reward) {
-      this.rect(cardX + 20, y, cardW - 40, 58, '#1c2230', C.border, 1);
-      this.text('获得部件', BASE_W / 2, y + 16, 12, C.textDim, 'center');
-      this.text(`${state.reward.name} ${state.reward.starStr}`, BASE_W / 2, y + 38, 22, C.gold, 'center', 700);
-      this.text(state.reward.cat, BASE_W / 2, y + 52, 12, C.textDark, 'center');
+      this.panel(cardX + 20, y, cardW - 40, 58, V.panelEmph, V.border, V.radiusM);
+      this.text('获得部件', BASE_W / 2, y + 16, 12, V.textSecondary, 'center');
+      this.text(`${state.reward.name} ${state.reward.starStr}`, BASE_W / 2, y + 38, 22, V.primary, 'center', 700);
+      this.text(state.reward.cat, BASE_W / 2, y + 52, 12, V.textFaint, 'center');
       y += 66;
     }
     if (state.economy) {
       const coinSign = state.economy.coinDelta >= 0 ? '+' : '';
       const ratingSign = state.economy.ratingDelta >= 0 ? '+' : '';
-      this.rect(cardX + 20, y, cardW - 40, 52, '#1c2230', C.border, 1);
-      this.text(`本局金币 ${coinSign}${state.economy.coinDelta} · 段位 ${ratingSign}${state.economy.ratingDelta}（${state.economy.tierLabel} ${state.economy.rating}）`, BASE_W / 2, y + 18, 14, C.gold, 'center', 700);
-      this.text(`当前金币 ${state.economy.coin}`, BASE_W / 2, y + 38, 12, C.textDim, 'center');
+      this.panel(cardX + 20, y, cardW - 40, 52, V.panelEmph, V.border, V.radiusM);
+      this.text(`本局金币 ${coinSign}${state.economy.coinDelta} · 段位 ${ratingSign}${state.economy.ratingDelta}（${state.economy.tierLabel} ${state.economy.rating}）`, BASE_W / 2, y + 18, 14, V.primary, 'center', 700);
+      this.text(`当前金币 ${state.economy.coin}`, BASE_W / 2, y + 38, 12, V.textSecondary, 'center');
       y += 60;
     }
     if (state.resultOnboardingVisible) {
-      this.text('获得新部件，可以回车库调整', BASE_W / 2, y + 12, 13, C.onboardText, 'center');
+      this.text('获得新部件，可以回车库调整', BASE_W / 2, y + 12, 13, C.onboardText, 'center'); // C.onboardText 仍为 onboard 引导语义
       y += 28;
     }
     // 按钮行
@@ -2109,27 +2158,27 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const cardH = large ? Math.min(maxCardH, Math.max(contentH, minLargeH)) : contentH;
     const cx = Math.max(this.insL, Math.min((W - cardW) / 2, W - this.insR - cardW));
     const cy = Math.max(this.insT, Math.min((H - cardH) / 2, H - this.insB - cardH));
-    this.rect(cx, cy, cardW, cardH, C.dockBg, C.border, 1);
+    this.panel(cx, cy, cardW, cardH, C.dockBg, V.border, V.radiusL);
     // ① 顶部：标题（胜利/失败）——F-RESULT-UX-R1：语义色调，第一眼知道输赢
-    const titleColor = spec.titleTone === 'green' ? C.green : spec.titleTone === 'red' ? C.red : C.text;
+    const titleColor = spec.titleTone === 'green' ? V.win : spec.titleTone === 'red' ? V.lose : V.textPrimary;
     this.text(spec.title, cx + cardW / 2, cy + pad + titleH / 2, large ? (this.isShort ? 20 : 28) : 20, titleColor, 'center', 800);
     let yy = cy + pad + titleH + 4;
     // ② 中部：body 文字行（onboarding 引导等）
     for (const line of spec.body) {
-      this.text(line, cx + cardW / 2, yy + rowH / 2, 14, C.textDim, 'center');
+      this.text(line, cx + cardW / 2, yy + rowH / 2, 14, V.textSecondary, 'center');
       yy += rowH;
     }
     // ② 中部：奖励行（金币/段位；label 左 + value 右，独立行不拼长句）
     if (spec.rewardRows) {
       const toneColor: Record<ModalTone, string> = {
-        gold: C.gold,
-        blue: C.driveBlue,
-        red: C.red,
-        green: C.green,
+        gold: V.primary,
+        blue: V.ownBlue,
+        red: V.lose,
+        green: V.win,
       };
       for (const rr of spec.rewardRows) {
-        this.text(rr.label, cx + pad, yy + rewardRowH / 2, 14, C.textDim, 'left');
-        this.text(rr.value, cx + cardW - pad, yy + rewardRowH / 2, 15, rr.tone ? toneColor[rr.tone] : C.text, 'right', 700);
+        this.text(rr.label, cx + pad, yy + rewardRowH / 2, 14, V.textSecondary, 'left');
+        this.text(rr.value, cx + cardW - pad, yy + rewardRowH / 2, 15, rr.tone ? toneColor[rr.tone] : V.textPrimary, 'right', 700);
         yy += rewardRowH;
       }
     }
@@ -2150,16 +2199,16 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const pw = cardW - 2 * pad;
       // F-RESULT-UX-R1：去掉整框表格线——改用极淡顶部分隔线（不画满框 / 不画整行边框），
       // 卡片靠留白与淡分隔线分组，不再像后台数据表。
-      this.rect(cx + pad, yy, pw, 1, undefined, 'rgba(255,255,255,0.06)', 1);
+      this.rect(cx + pad, yy, pw, 1, undefined, V.borderSoft, 1);
       if (this.isShort) {
         // short 紧凑两行：名称 + 库存（上）· 星级（下）
-        this.text(spec.partCard.name, cx + pad + 12, yy + 8, 12, C.text, 'left', 700);
-        this.text(`库存 ${spec.partCard.count}`, cx + cardW - pad - 12, yy + 8, 11, C.textDim, 'right');
-        this.text(spec.partCard.starStr, cx + pad + 12, yy + 18, 11, C.gold, 'left', 700);
+        this.text(spec.partCard.name, cx + pad + 12, yy + 8, 12, V.textPrimary, 'left', 700);
+        this.text(`库存 ${spec.partCard.count}`, cx + cardW - pad - 12, yy + 8, 11, V.textSecondary, 'right');
+        this.text(spec.partCard.starStr, cx + pad + 12, yy + 18, 11, V.primary, 'left', 700);
       } else {
-        this.text(spec.partCard.name, cx + pad + 12, yy + 18, 16, C.text, 'left', 700);
-        this.text(`库存 ${spec.partCard.count}`, cx + cardW - pad - 12, yy + 18, 14, C.textDim, 'right');
-        this.text(spec.partCard.starStr, cx + pad + 12, yy + 36, 15, C.gold, 'left', 700);
+        this.text(spec.partCard.name, cx + pad + 12, yy + 18, 16, V.textPrimary, 'left', 700);
+        this.text(`库存 ${spec.partCard.count}`, cx + cardW - pad - 12, yy + 18, 14, V.textSecondary, 'right');
+        this.text(spec.partCard.starStr, cx + pad + 12, yy + 36, 15, V.primary, 'left', 700);
       }
       yy += ph + 8;
     }
@@ -2185,7 +2234,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
 
   private drawReadyOverlay(): void {
     this.rect(0, 0, this.W, this.H, C.readyBg);
-    this.text('READY', this.W / 2, this.H / 2 - 40, this.isMobile ? 13 : 15, C.textDim, 'center');
-    this.text('开战！', this.W / 2, this.H / 2 + 14, this.isMobile ? 36 : 46, C.gold, 'center', 800);
+    this.text('READY', this.W / 2, this.H / 2 - 40, this.isMobile ? 13 : 15, V.textSecondary, 'center');
+    this.text('开战！', this.W / 2, this.H / 2 + 14, this.isMobile ? 36 : 46, V.primary, 'center', 800);
   }
 }
