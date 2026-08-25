@@ -5,9 +5,9 @@
  *    （扫描线 + 占位框脉冲，nowMs 驱动）；画面含「正在寻找对手…」；
  * 3. 首页 CTA 全页最显眼：420×210 高 ≥48 且 > 辅助入口（明显好点、可读）。
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { CanvasPlayerUIHost } from '../src/ui/canvasPlayerUIHost';
+import { CanvasPlayerUIHost, HOME_TIPS } from '../src/ui/canvasPlayerUIHost';
 import { computeHomeLayout } from '../src/ui/homeLayout';
 import { bindPlatformCore } from '../src/platform/context';
 import { createWebCore } from '../src/platform/web';
@@ -108,6 +108,9 @@ function click(env: ReturnType<typeof makeRecHost>, id: string): void {
 }
 
 describe('F-HOME-2｜寻找对手主交互', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   it('1. 首页点击「寻找对手」直接匹配：派发 find、无前置确认 Modal、画面立即切换（不停留原地）', () => {
     const env = makeRecHost({ w: 420, h: 210 });
     env.host.render(garageState());
@@ -154,5 +157,45 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     const mc = src.slice(mcStart, mcEnd === -1 ? src.length : mcEnd);
     expect(mc, '扫描动效含脉冲呼吸').toContain('Math.sin(t * 0.012)');
     expect(mc, '扫描动效含扫描线').toContain('this.nowMs');
+  });
+
+  it('F-HOME-3｜车辆可点：点击首页车辆 → 随机出现 1 条气泡 tips（每次重新随机）', () => {
+    const env = makeRecHost({ w: 420, h: 210 });
+    env.host.render(garageState());
+    // 车辆区可点（覆盖 vehicleRect 区域）
+    const v = env.host.getHitAreasForTest().find((a) => a.id === 'home-vehicle');
+    expect(v, '首页车辆区可点').toBeTruthy();
+    expect(v!.w, '车辆区宽（不是小缩略图）').toBeGreaterThanOrEqual(200);
+    // mock 随机 → 第一条 tips
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    click(env, 'home-vehicle');
+    expect(env.texts().some((s) => s === HOME_TIPS[0]), '气泡显示随机 tips 第 1 条').toBe(true);
+    // 再次点击 → 重新随机（mock 返回 0.5 → 第 10 条左右）
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    click(env, 'home-vehicle');
+    const idx = Math.floor(0.5 * HOME_TIPS.length);
+    expect(env.texts().some((s) => s === HOME_TIPS[idx]), '再次点击换一条 tips').toBe(true);
+  });
+
+  it('F-HOME-3｜≥20 条内置 tips、每条一句话简洁；点别处可关闭气泡', () => {
+    expect(HOME_TIPS.length, 'tips ≥20 条').toBeGreaterThanOrEqual(20);
+    for (const t of HOME_TIPS) {
+      expect(t.length, `tips 每条 ≤24 字（${t}）`).toBeLessThanOrEqual(24);
+    }
+    // 点车辆出现气泡 → 点其它入口（home-garage 进配置页）→ 气泡随离开消失（vehicleTip 清除）
+    const env = makeRecHost({ w: 420, h: 210 });
+    env.host.render(garageState());
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    click(env, 'home-vehicle');
+    expect(env.texts().some((s) => s === HOME_TIPS[0]), '气泡出现').toBe(true);
+    click(env, 'home-garage');
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'entry:body'), '已进配置页').toBe(true);
+    // 回 Home → 气泡已关闭（返回这次绘制的新增文本不再含 tips 文字）
+    const back = env.host.getHitAreasForTest().find((a) => a.id === 'nav:home')!;
+    const beforeBack = env.texts().length;
+    env.pointer(back.x + back.w / 2, back.y + back.h / 2);
+    const added = env.texts().slice(beforeBack);
+    expect(added.some((s) => s === HOME_TIPS[0]), '返回后未再画气泡 tips').toBe(false);
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'home-vehicle'), '返回首页车辆可点').toBe(true);
   });
 });

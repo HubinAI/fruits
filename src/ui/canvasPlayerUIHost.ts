@@ -111,6 +111,34 @@ const MORE_ENTRIES: Array<{ id: string; label: string; sub: string }> = [
 ];
 
 /**
+ * F-HOME-3：首页车辆气泡 tips（20 条内置，写死）。
+ * 作用：指引操作 / 介绍玩法 / 轻度趣味；每条一句话、简洁可读；
+ * 点击首页车辆随机显示 1 条（轻量气泡，非 Modal，点别处关闭）。
+ */
+export const HOME_TIPS: string[] = [
+  '点击「车库」可以重新组装你的战车',
+  '不同武器的攻击方式完全不同',
+  '轮子的高低会影响整车姿态',
+  '驱动方式会影响接敌节奏',
+  '近战车更依赖贴脸输出',
+  '远程车更需要争取输出时间',
+  '合理搭配武器和车身很重要',
+  '车身越稳，越不容易被掀翻',
+  '有些战斗输在结构，不一定输在数值',
+  '试着换个轮子，也许效果完全不同',
+  '调整配置后再打一局，可能就赢了',
+  '宝箱能带来新的成长资源',
+  '战令里会有赛季奖励',
+  '排行榜会记录你的当前段位表现',
+  '每辆车都有自己的战斗风格',
+  '战斗开始后，观察对手的接敌方式',
+  '车库是你变强的核心入口',
+  '先保证能打，再考虑打得漂亮',
+  '一套顺手的配置比盲目堆属性更重要',
+  '你现在看到的是当前出战车辆',
+];
+
+/**
  * F-META-UX2：合成前后库存快照 diff → 新 2★ 部件（2★ 数量恰好 +1 的 defId）。
  * 仅用于「合成成功」结果 Modal 文案；不参与任何规则（规则仍在 mergeWithCost / runtime）。
  */
@@ -194,6 +222,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private backpackFilter: 'all' | 'weapon' | 'gadget' = 'all';
   /** F-UX-2C：Backpack 2×2 卡片分页（每页 4 张；[上一页]/[下一页]；合成后仍停当前页） */
   private backpackPage = 0;
+  /** F-HOME-3：首页车辆气泡 tips（点击车辆随机显示 1 条；null = 隐藏；轻量，非 Modal） */
+  private vehicleTip: string | null = null;
   /** F-META-4：当前激活的 Modal（null = 无）；覆盖绘制 + 拦截底层点击，关闭恢复当前页 */
   private modal: ModalSpec | null = null;
   /** F-META-5：Result Modal 已弹出标志（防每帧重复弹出；result 清空时复位） */
@@ -275,6 +305,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     // F-META-1：离开局外（进 Matching/Battle/Result）时复位 MetaPage——回 Garage 后默认回车库页
     if (state.playerPhase !== 'garage') this.metaPage = 'home'; // F-HOME-1：离开局外回 Home（正式首页）
+    // F-HOME-3：离开局外同时复位车辆气泡 tips（回 Home 默认不显示）
+    if (state.playerPhase !== 'garage') this.vehicleTip = null;
     // F-META-3：离开局外同时复位 Backpack 分类（回 Garage 默认全部）
     if (state.playerPhase !== 'garage') this.backpackFilter = 'all';
     // F-UX-2C：离开局外同时复位 Backpack 分页（回 Garage 默认第一页）
@@ -371,6 +403,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   private dispatch(id: string): void {
+    // F-HOME-3：点击车辆之外任意按钮 → 关闭车辆气泡 tips（轻量：点别处即关闭）
+    if (id !== 'home-vehicle') this.vehicleTip = null;
     // F-WX-6：Mobile 功能件选项条横向滚动（内部状态，不派发 PlayerUIActions）
     if (id === 'opt-scroll-left' || id === 'opt-scroll-right') {
       this.optScroll += id === 'opt-scroll-left' ? -140 : 140;
@@ -391,8 +425,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     if (id.startsWith('home-')) {
       // F-HOME-1：正式首页入口——车库进配置页；排行榜/战令/宝箱槽为占位（「功能开发中」，无假数据页）
+      // F-HOME-3：点击车辆 → 随机显示 1 条气泡 tips（每次点击重新随机；轻量，非 Modal）
       if (id === 'home-garage') {
         this.metaPage = 'garage';
+        this.draw();
+        return;
+      }
+      if (id === 'home-vehicle') {
+        this.vehicleTip = HOME_TIPS[Math.floor(Math.random() * HOME_TIPS.length)];
         this.draw();
         return;
       }
@@ -979,8 +1019,30 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.hit(`home-chest-${i}`, s.x, s.y, s.w, s.h);
     }
     // ② 中上：车辆展示台（车辆由 renderer previewSolo 画在 vehicleRect 内；台座给「展示」感）
+    // F-HOME-3：车辆区可点（点击 → 随机气泡 tips）
     const v = L.vehicleRect;
     this.rect(v.x, v.y, v.w, v.h, 'rgba(10,14,22,0.35)', C.border, 1);
+    this.hit('home-vehicle', v.x, v.y, v.w, v.h);
+    // F-HOME-3：气泡 tips（轻量，非 Modal——只画一个小气泡 + 指向箭头，不拦截其它按钮）
+    if (this.vehicleTip) {
+      const tipW = Math.min(v.w - 16, 300);
+      const tipH = this.isShort ? 32 : 40;
+      const tipX = v.x + (v.w - tipW) / 2;
+      const tipY = v.y + 6;
+      this.rect(tipX, tipY, tipW, tipH, 'rgba(14,20,32,0.94)', C.gold, 1);
+      this.text(this.vehicleTip, tipX + 10, tipY + tipH / 2, this.isShort ? 12 : 14, C.text, 'left');
+      // 指向车辆的小箭头（气泡底部三角）
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.fillStyle = C.gold;
+      ctx.beginPath();
+      ctx.moveTo(this.ox + (tipX + tipW / 2 - 6) * this.scale, this.oy + (tipY + tipH) * this.scale);
+      ctx.lineTo(this.ox + (tipX + tipW / 2 + 6) * this.scale, this.oy + (tipY + tipH) * this.scale);
+      ctx.lineTo(this.ox + (tipX + tipW / 2) * this.scale, this.oy + (tipY + tipH + 6) * this.scale);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
     // ③ 中部：寻找对手主按钮（全宽 primary，全页最强视觉焦点）
     this.button(L.ctaRect.x, L.ctaRect.y, L.ctaRect.w, L.ctaRect.h, 'cta-find', state.draftValid ? '寻找对手' : '配置不合法', {
       primary: true,
