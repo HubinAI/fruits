@@ -1622,17 +1622,18 @@ export class Renderer {
     const isCompact = isCompactLandscape(this.viewWidth / this.viewDpr, this.viewHeight / this.viewDpr);
     if (fit === 'previewSolo') {
       if (isCompact) {
-        // F-WX-RCA-3A：coreBounds 自适应 padding（按 core 尺寸比例，非固定 world margin——
-        // 不同 Body 的 core 均完整入画且屏占比稳定；envelope 由横向比例 padding 覆盖普通武器）
-        const core = this.vehicleBounds(snap.vehicleA, false);
-        const cw = Math.max(1, core.maxX - core.minX);
-        const ch = Math.max(1, core.maxY - core.minY);
-        const padX = Math.max(MIN_SOLO_PAD_X, cw * SOLO_PAD_X_RATIO);
-        const padY = Math.max(MIN_SOLO_PAD_Y, ch * SOLO_PAD_Y_RATIO);
-        minX = core.minX - padX;
-        maxX = core.maxX + padX;
-        minY = core.minY - padY;
-        maxY = core.maxY + padY;
+        // F-UX-3A：envelopeBounds（Body+Wheels+Functional Parts）自适应 padding——
+        // 完整车辆外廓必须不进入右侧 panelRect（scale 适配 envelope 即整辆车落在
+        // vehicleRect 内）；core（车身主体）自然更小（层级：完整 > 主体）。
+        const env = this.vehicleBounds(snap.vehicleA, true);
+        const ew = Math.max(1, env.maxX - env.minX);
+        const eh = Math.max(1, env.maxY - env.minY);
+        const padX = Math.max(MIN_SOLO_PAD_X, ew * SOLO_PAD_X_RATIO);
+        const padY = Math.max(MIN_SOLO_PAD_Y, eh * SOLO_PAD_Y_RATIO);
+        minX = env.minX - padX;
+        maxX = env.maxX + padX;
+        minY = env.minY - padY;
+        maxY = env.maxY + padY;
       } else {
         minX = SOLO_MIN_X; maxX = SOLO_MAX_X; minY = SOLO_MIN_Y; maxY = SOLO_MAX_Y;
       }

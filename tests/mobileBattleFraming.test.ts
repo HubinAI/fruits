@@ -131,7 +131,7 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
   }
 
   for (const soloVp of VIEWPORTS.filter((v) => !v.desktop)) {
-    it(`F-WX-RCA-2A｜Garage previewSolo ${soloVp.w}×${soloVp.h}：coreBounds（Body+Wheels）主尺度 28~34% + 完整入画 + 展示区居中`, () => {
+    it(`F-UX-3A｜Garage previewSolo ${soloVp.w}×${soloVp.h}：envelope 主尺度（完整车辆不进入 panelRect）+ 完整入画 + 展示区居中`, () => {
       const vp = { w: soloVp.w, h: soloVp.h };
       const canvas = { getContext: () => makeStubCtx(), clientWidth: vp.w, clientHeight: vp.h, width: vp.w, height: vp.h } as unknown as HTMLCanvasElement;
       const surface: CanvasSurface = { width: vp.w, height: vp.h, devicePixelRatio: 1, now: () => 0 };
@@ -149,37 +149,40 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
       // insets=0 夹具；不再手算重复几何）
       const framingRect = computeMobileGarageLayout({ w: vp.w, h: vp.h }, { left: 0, right: 0, top: 0, bottom: 0 }).vehicleRect;
       r.reframe(snap, 'previewSolo', { framingRect });
-      // coreBounds（Body+Wheels）= Garage 主尺度验收口径；envelope 仅作完整入画校验
+      // F-UX-3A：envelopeBounds（Body+Wheels+Functional Parts）= Garage 主尺度验收口径
       const core = vehicleScreenBounds(snap.vehicleA, r.transform, false);
       const env = vehicleScreenBounds(snap.vehicleA, r.transform, true);
-      // 完整入画（core + envelope 均在屏内；普通武器由横向比例 padding 覆盖）
+      // 完整入画（core + envelope 均在屏内）
       for (const b of [core, env]) {
         expect(b.minX).toBeGreaterThanOrEqual(-1);
         expect(b.maxX).toBeLessThanOrEqual(vp.w + 1);
         expect(b.minY).toBeGreaterThanOrEqual(-1);
         expect(b.maxY).toBeLessThanOrEqual(vp.h + 1);
       }
-      // 车辆核心中心位于左侧展示区（x∈[showX,showX+showW] y∈[bodyTop,bodyBot]）
-      const centerX = (core.minX + core.maxX) / 2;
-      const centerY = (core.minY + core.maxY) / 2;
-      expect(centerX, `${vp.w}×${vp.h} 车辆核心中心 x 在展示区`).toBeGreaterThanOrEqual(framingRect.x - 2);
-      expect(centerX, `${vp.w}×${vp.h} 车辆核心中心 x 在展示区内`).toBeLessThanOrEqual(framingRect.x + framingRect.w + 2);
-      expect(centerY, `${vp.w}×${vp.h} 车辆核心中心 y 在展示区`).toBeGreaterThanOrEqual(framingRect.y - 2);
-      expect(centerY, `${vp.w}×${vp.h} 车辆核心中心 y 在展示区内`).toBeLessThanOrEqual(framingRect.y + framingRect.h + 2);
-      // 垂直居中（中心 ≈ 展示区垂直中点，容差 8px）
+      // F-UX-3A：完整车辆 envelope 不进入右侧 panelRect——左缘 ≥ vehicleRect 左缘、
+      // 右缘 ≤ vehicleRect 右缘（整辆车完整落在左侧展示区内）
+      expect(env.minX, `${vp.w}×${vp.h} envelope 左缘 ≥ vehicleRect 左缘`).toBeGreaterThanOrEqual(framingRect.x - 1);
+      expect(env.maxX, `${vp.w}×${vp.h} envelope 右缘 ≤ vehicleRect 右缘（不进入 panelRect）`).toBeLessThanOrEqual(framingRect.x + framingRect.w + 1);
+      // envelope 中心位于展示区内 + 垂直居中（容差 8px）
+      const centerX = (env.minX + env.maxX) / 2;
+      const centerY = (env.minY + env.maxY) / 2;
+      expect(centerX, `${vp.w}×${vp.h} envelope 中心 x 在展示区`).toBeGreaterThanOrEqual(framingRect.x - 2);
+      expect(centerX, `${vp.w}×${vp.h} envelope 中心 x 在展示区内`).toBeLessThanOrEqual(framingRect.x + framingRect.w + 2);
+      expect(centerY, `${vp.w}×${vp.h} envelope 中心 y 在展示区`).toBeGreaterThanOrEqual(framingRect.y - 2);
+      expect(centerY, `${vp.w}×${vp.h} envelope 中心 y 在展示区内`).toBeLessThanOrEqual(framingRect.y + framingRect.h + 2);
       const rectCenterY = framingRect.y + framingRect.h / 2;
       expect(
         Math.abs(centerY - rectCenterY),
-        `${vp.w}×${vp.h} 核心中心 y ${centerY.toFixed(1)} 应接近展示区中点 ${rectCenterY.toFixed(1)}（|Δ|≤8）`,
+        `${vp.w}×${vp.h} envelope 中心 y ${centerY.toFixed(1)} 应接近展示区中点 ${rectCenterY.toFixed(1)}（|Δ|≤8）`,
       ).toBeLessThanOrEqual(8);
-      // F-WX-RCA-2A：coreBounds 占屏 28~34%（真实微信 RCA 旧值 14% → 修复后目标 28~34%）
-      const coreRatio = (core.maxX - core.minX) / vp.w;
-      // F-WX-UI-2A：vehicleRect 收窄到 52%（Queue 强制）后 core 占比自然 ~27.3%（Camera 规则禁止改）
-      expect(coreRatio, `${vp.w}×${vp.h} core 占比 ${(coreRatio * 100).toFixed(1)}% 应 ∈ [26%,34%]`).toBeGreaterThanOrEqual(0.26);
-      expect(coreRatio, `${vp.w}×${vp.h} core 占比 ${(coreRatio * 100).toFixed(1)}% 应 ≤ 34%`).toBeLessThanOrEqual(0.34);
-      // envelope 仍大于 core（双口径并存；envelope 不再作为车辆尺寸验收）
+      // F-UX-3A：envelope（完整车辆）主尺度——占屏 ∈ [24%,32%]（3A 布局重构后实测 ~26~28%）
       const envRatio = (env.maxX - env.minX) / vp.w;
-      expect(envRatio, 'envelope 占比 > core 占比').toBeGreaterThan(coreRatio);
+      expect(envRatio, `${vp.w}×${vp.h} envelope 占比 ${(envRatio * 100).toFixed(1)}% 应 ∈ [24%,32%]`).toBeGreaterThanOrEqual(0.24);
+      expect(envRatio, `${vp.w}×${vp.h} envelope 占比 ${(envRatio * 100).toFixed(1)}% 应 ≤ 32%`).toBeLessThanOrEqual(0.32);
+      // core 仍存在且 < envelope（双口径并存）
+      const coreRatio = (core.maxX - core.minX) / vp.w;
+      expect(coreRatio, 'core 占屏 > 0').toBeGreaterThan(0);
+      expect(coreRatio, 'core < envelope（双口径并存）').toBeLessThan(envRatio);
     });
   }
 

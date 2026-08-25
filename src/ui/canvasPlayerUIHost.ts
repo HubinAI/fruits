@@ -919,19 +919,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /**
-   * F-UX-2B：Garage 装配区顶部右侧两个小型次级入口（背包/更多）——
-   * 明显弱于 2×2 配置与「寻找对手」主 CTA（矮 + 小宽 + 非 primary + 右对齐）。
-   * 面板内容区（2×2/选项/二级）高度已预留此行。
-   */
-  private drawGarageSubEntries(panelRect: Rect, subY: number, subH: number): void {
-    const gap = 8;
-    const bw = Math.min(80, Math.floor((panelRect.w - 24 - gap) / 2));
-    const right = panelRect.x + panelRect.w - 12;
-    this.button(right - bw * 2 - gap, subY, bw, subH, 'nav:backpack', '背包', {});
-    this.button(right - bw, subY, bw, subH, 'nav:more', '更多', {});
-  }
-
   /** F-META-1：garage MetaPage——车辆展示（renderer 画）+ 右侧装配面板 + 主 CTA */
   private drawGarageMetaPage(state: PlayerUIState, draft: BuildDraft, layout: MobileGarageLayout): void {
     const { panelRect, ctaRect } = layout;
@@ -953,15 +940,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 装配面板（右侧中央；绘制与 HitArea 均基于 panelRect；F-META-2：Garage 无合成，
     // 只处理配置——选中槽选项 / 轮子二级 / 武器二级 / 2×2 主分类）
     this.rect(panelRect.x, panelRect.y, panelRect.w, panelRect.h, C.dockBg, C.border, 1);
-    // F-UX-2B：次级入口（背包/更多）移到面板顶部右侧小按钮，移出 2×2 配置区；
-    // 配置内容区（2×2/选项/二级）在其下方，高度已预留此行。
-    // F-WX-MOBILE-RCA-1：short 档更紧凑（padY/gap 缩小，内容区由 availableH 反推）
-    const subH = this.isShort ? 30 : 40;
-    const subGap = this.isShort ? 4 : 8;
+    // F-UX-3A：背包/更多已移到顶栏最右小按钮（drawMobileTopBar），配置区独占整个面板；
+    // 内容区由 availableH 反推（F-WX-MOBILE-RCA-1：short 更紧凑）
     const padY = this.isShort ? 6 : 10;
-    this.drawGarageSubEntries(panelRect, panelRect.y + padY, subH);
-    const py = panelRect.y + padY + subH + subGap;
-    const pH = Math.max(1, panelRect.h - padY - subH - subGap - padY);
+    const py = panelRect.y + padY;
+    const pH = Math.max(1, panelRect.h - 2 * padY);
     if (state.garageSelected) {
       this.drawGaragePanelOptions(state, draft, panelRect.x, panelRect.w, py, pH);
     } else if (this.panelView === 'wheelPick') {
@@ -969,7 +952,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     } else if (this.panelView === 'weaponPick') {
       this.drawGaragePanelWeaponPick(draft, panelRect.x, panelRect.w, py, pH);
     } else {
-      this.drawGaragePanelHome(draft, panelRect.x, panelRect.w, py, pH);
+      this.drawGaragePanelHome(panelRect.x, panelRect.w, py, pH);
     }
   }
 
@@ -1134,8 +1117,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /** 顶栏：金币 · 段位 · 能量（单行 ≤42 高，只信息；F-META-UX1：无页面大标题；
-   *  区域来自唯一布局源 topBarRect） */
+  /**
+   * 顶栏：金币 · 段位 · 能量（单行 ≤42 高，只信息；F-META-UX1：无页面大标题；
+   * 区域来自唯一布局源 topBarRect）。
+   * F-UX-3A：Garage 页顶栏最右两个很小的次级入口 [背包][更多]（不占配置区行、
+   * 明显弱于配置与 CTA）；Backpack/More 页顶栏不显示（它们有「← 返回车库」）。
+   */
   private drawMobileTopBar(state: PlayerUIState, draft: BuildDraft, topBarRect: Rect): void {
     const p = state.progress;
     const tier = tierOf(p.rating);
@@ -1145,16 +1132,29 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const uT = topBarRect.y;
     const topH = topBarRect.h;
     this.rect(x0 - 4, uT, w + 8, topH, 'rgba(8,10,14,0.72)', C.border, 1);
-    // 金币（最左）→ 段位 → 能量（右侧）；全部轻量信息
+    // 金币（最左）→ 段位（中）→ 能量（右偏）→ [背包][更多] 小按钮（最右，仅 Garage 页）
     this.text(`金币 ${p.coin}`, x0, uT + topH / 2 + 5, 14, C.gold, 'left', 700);
     this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, x0 + 134, uT + topH / 2 + 5, 14, C.textDim);
+    let eBarW = Math.min(120, w * 0.2);
+    let eBarX = x0 + w - eBarW;
+    if (this.metaPage === 'garage') {
+      // F-UX-3A：很小的次级入口（高 ≤24，宽 ~44~56；右对齐顶栏最右）
+      const tinyW = this.isShort ? 44 : 56;
+      const tinyH = this.isShort ? 18 : 22;
+      const tinyGap = 4;
+      const moreX = x0 + w - tinyW;
+      const bpX = moreX - tinyW - tinyGap;
+      this.button(bpX, uT + (topH - tinyH) / 2, tinyW, tinyH, 'nav:backpack', '背包', {});
+      this.button(moreX, uT + (topH - tinyH) / 2, tinyW, tinyH, 'nav:more', '更多', {});
+      // 能量条让位（压缩到小按钮左侧）
+      eBarW = Math.max(48, Math.min(90, w * 0.14));
+      eBarX = bpX - 10 - eBarW;
+    }
     const snapshot = buildSnapshotFromDraft(draft, registry, 'customA');
     const energyRes = computeEnergy(snapshot, registry);
     const used = energyRes.error ? Number.NaN : energyRes.energy;
     const capacity = body?.energyCapacity ?? 0;
     const overload = Number.isFinite(used) && used > capacity;
-    const eBarW = Math.min(120, w * 0.2);
-    const eBarX = x0 + w - eBarW;
     this.text('能量', eBarX - 38, uT + topH / 2 + 5, 14, C.textDim);
     const pct = Number.isFinite(used) ? Math.min(100, (used / Math.max(capacity, 1)) * 100) : 0;
     this.rect(eBarX, uT + topH / 2 - 4, eBarW, 10, '#232b38', C.border, 1);
@@ -1169,28 +1169,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     );
   }
 
-  /** 面板首页：2×2 主分类（车身/轮子/驱动/武器）+ 底部合成次级入口 */
-  private drawGaragePanelHome(
-    draft: BuildDraft,
-    px: number,
-    pw: number,
-    py: number,
-    ph: number,
-  ): void {
-    const defs = this.garageChipDefs(draft);
-    const bodyDef = defs.find((d) => d.key === 'body');
-    const rear = defs.find((d) => d.key === 'rearWheel');
-    const front = defs.find((d) => d.key === 'frontWheel');
-    const drive = defs.find((d) => d.key === 'drive');
-    const funcSlots = defs.filter(
-      (d) => d.key !== 'body' && d.key !== 'rearWheel' && d.key !== 'frontWheel' && d.key !== 'drive',
-    );
-    const equipped = funcSlots.filter((d) => d.value !== '空' && d.value !== '').length;
-    const cells: Array<{ id: string; label: string; sub: string }> = [
-      { id: 'entry:body', label: '车身', sub: bodyDef?.value ?? '?' },
-      { id: 'entry-wheels', label: '轮子', sub: `${front?.value ?? '?'} / ${rear?.value ?? '?'}` },
-      { id: 'entry:drive', label: '驱动', sub: drive?.value ?? '?' },
-      { id: 'entry-weapons', label: '武器', sub: `${equipped}/${funcSlots.length}` },
+  /** 面板首页：2×2 主分类（车身/轮子/驱动/武器）——F-UX-3A：首屏卡片只显示名称（无副文字，详情点进去再看） */
+  private drawGaragePanelHome(px: number, pw: number, py: number, ph: number): void {
+    const cells: Array<{ id: string; label: string }> = [
+      { id: 'entry:body', label: '车身' },
+      { id: 'entry-wheels', label: '轮子' },
+      { id: 'entry:drive', label: '驱动' },
+      { id: 'entry-weapons', label: '武器' },
     ];
     const gap = 8;
     const cellW = (pw - gap) / 2;
@@ -1202,9 +1187,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     for (let i = 0; i < 4; i++) {
       const col = i % 2;
       const row = Math.floor(i / 2);
-      this.button(px + col * (cellW + gap), py + row * (cellH + gap), cellW, cellH, cells[i].id, cells[i].label, {
-        sub: cells[i].sub,
-      });
+      this.button(px + col * (cellW + gap), py + row * (cellH + gap), cellW, cellH, cells[i].id, cells[i].label, {});
     }
   }
 

@@ -118,13 +118,14 @@ describe('F-META-UX1｜Garage 唯一 Home（删全局导航）', () => {
     expect(navIds.sort(), 'Garage 无三等分导航，仅装配区内背包/更多次级入口').toEqual(['nav:backpack', 'nav:more']);
     expect(env.areas().some((a) => a.id === 'entry:body'), 'garage 页有车身入口').toBe(true);
     expect(env.areas().some((a) => a.id === 'cta-find'), 'garage 页有 CTA').toBe(true);
-    // F-UX-2B：次级入口在装配面板顶部区域（顶部右侧小按钮，不在配置区），且高 ≥30（弱于配置）
+    // F-UX-3A：次级入口移到顶栏最右两个很小的按钮（高 ≤24，明显弱于配置/CTA）
     const layout = computeMobileGarageLayout({ w: 844, h: 390 }, INSETS);
     const subBp = env.areas().find((a) => a.id === 'nav:backpack')!;
     const subMore = env.areas().find((a) => a.id === 'nav:more')!;
-    expect(subBp.h, '次级入口高 ≥30').toBeGreaterThanOrEqual(30);
-    expect(subMore.h, '次级入口高 ≥30').toBeGreaterThanOrEqual(30);
-    expect(subBp.y, '次级入口在面板顶部区域').toBeLessThanOrEqual(layout.panelRect.y + 48);
+    expect(subBp.h, '次级入口高 ≤24（很小）').toBeLessThanOrEqual(24);
+    expect(subMore.h, '次级入口高 ≤24（很小）').toBeLessThanOrEqual(24);
+    expect(subBp.y, '次级入口在顶栏内').toBeGreaterThanOrEqual(layout.topBarRect.y);
+    expect(subBp.y + subBp.h, '次级入口在顶栏内（不占配置区行）').toBeLessThanOrEqual(layout.topBarRect.y + layout.topBarRect.h);
     expect(subBp.y, '次级入口在 CTA 上方（不与 CTA 重叠）').toBeLessThan(layout.ctaRect.y);
     // 次级入口不与 2×2 配置重叠：配置入口（entry:body）在次级入口下方
     const entry = env.areas().find((a) => a.id === 'entry:body')!;
@@ -161,10 +162,11 @@ describe('F-META-UX1｜Garage 唯一 Home（删全局导航）', () => {
     // Garage 首屏无三等分导航（无 nav:garage；仅 2 个次级入口）
     expect(env.areas().some((a) => a.id === 'nav:garage'), 'Garage 无返回车库按钮').toBe(false);
     expect(env.areas().filter((a) => a.id.startsWith('nav:')).length, 'Garage 仅 2 个次级入口').toBe(2);
-    // 次级入口在面板内且不与 CTA 重叠（621 小屏）
+    // 次级入口在顶栏内且不与 CTA 重叠（621 小屏）
     const sub = env.areas().find((a) => a.id === 'nav:more')!;
     expect(sub.y + sub.h, '次级入口底 ≤ CTA 顶').toBeLessThanOrEqual(layout.ctaRect.y);
-    expect(sub.y, '次级入口 y ≥ panel 顶').toBeGreaterThanOrEqual(layout.panelRect.y);
+    expect(sub.y, '次级入口在顶栏内').toBeGreaterThanOrEqual(layout.topBarRect.y);
+    expect(sub.y + sub.h, '次级入口在顶栏内（很小）').toBeLessThanOrEqual(layout.topBarRect.y + layout.topBarRect.h);
   });
 
   it('F-UX-2B｜切配置时车辆位置稳定：展开 options 后左侧取景区（vehicleRect）不变', () => {

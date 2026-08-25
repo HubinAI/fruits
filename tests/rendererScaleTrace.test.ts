@@ -67,7 +67,7 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     vi.restoreAllMocks();
   });
 
-  it('Garage previewSolo：core（Body+Wheels）∈ [28%,34%]（F-WX-RCA-2A 主尺度）+ envelope 存在且 > core', () => {
+  it('Garage previewSolo：envelope（完整车辆）∈ [24%,32%]（F-UX-3A 主尺度）+ core 存在且 < envelope', () => {
     vi.stubGlobal('__WX_DEBUG__', true);
     const { r, o } = makeEnv({ w: 844, h: 390 }, 1);
     const snap = o.getRenderSnapshot();
@@ -82,9 +82,10 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     };
     expect(vehicle.core.screenWidthPct, 'core 存在').toBeGreaterThanOrEqual(0);
     expect(vehicle.envelope.screenWidthPct, 'envelope 存在').toBeGreaterThanOrEqual(0);
-    // F-WX-RCA-2A：coreBounds 主尺度；F-WX-UI-2A 后 vehicleRect 52% → core ~27.3%（Camera 规则禁止改）
-    expect(vehicle.core.screenWidthPct).toBeGreaterThanOrEqual(26);
-    expect(vehicle.core.screenWidthPct).toBeLessThanOrEqual(34);
+    // F-UX-3A：envelopeBounds 主尺度（完整车辆不进入 panelRect）；core < envelope（双口径并存）
+    expect(vehicle.envelope.screenWidthPct).toBeGreaterThanOrEqual(24);
+    expect(vehicle.envelope.screenWidthPct).toBeLessThanOrEqual(32);
+    expect(vehicle.core.screenWidthPct).toBeGreaterThanOrEqual(10);
     expect(vehicle.core.screenWidthPct, 'core（Body+Wheels）应小于 envelope（含 Parts）').toBeLessThan(vehicle.envelope.screenWidthPct);
     expect((log!.view as { dpr: number }).dpr).toBe(1);
   });
