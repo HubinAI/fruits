@@ -11,7 +11,8 @@ import type { SafeInsets } from '../platform/types';
  * 规则：
  * - 所有 rect 必须完全处于 safe area（x ≥ insets.left 等，无例外）；
  * - 尺寸一律由 availableW / availableH 反推（禁止固定下限强撑）；
- * - short（logicalH<260）更紧凑：topBar 30 / cta 40 / assist 36；normal：44 / 52 / 44；
+ * - short（logicalH<260）更紧凑：topBar 30 / cta 48 / assist 36；normal：44 / 52 / 44；
+ * - 寻找对手 CTA 始终是全页最高按钮（short 48 > assist 36；normal 52 > 44）——最显眼焦点；
  * - 车辆区高度 = 剩余可用高（中上展示重点，尽量大）。
  */
 export interface HomeRect {
@@ -42,7 +43,7 @@ export function computeHomeLayout(
   const x1 = Math.max(x0 + 1, W - insets.right);
   const topBarH = short ? 30 : 44;
   const gap = short ? 6 : 10;
-  const ctaH = short ? 40 : 52;
+  const ctaH = short ? 48 : 52; // F-HOME-2：寻找对手主按钮全页最高（short 48 > assist 36）
   const assistH = short ? 36 : 44;
   const topBarY = insets.top;
   const vehicleY = topBarY + topBarH + gap;

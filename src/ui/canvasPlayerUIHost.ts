@@ -316,7 +316,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.lastFrame = frame;
     const state = this.lastState;
     const inBattle = !!state && (state.battleState === 'fighting' || state.battleState === 'ended');
-    if (inBattle || this.dirty) {
+    // F-HOME-2：Matching / MatchPreview 每帧强制重绘——匹配扫描动效（扫描线/脉冲）由
+    // runtime.tick 每帧驱动（候选快切之间无状态事件，不重绘则动画冻结在「扫描对手中…」静态文字）
+    const inMatching = !!state && (state.playerPhase === 'matching' || state.playerPhase === 'matchPreview');
+    if (inBattle || inMatching || this.dirty) {
       this.dirty = false;
       this.draw();
     }
@@ -680,6 +683,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** 字体 scale（short 0.8 / 其余 1.0）——统一经 text() 应用，禁止页面自行除 0.8 */
   private get fontScale(): number {
     return this.profile.fontScale;
+  }
+  /** F-HOME-2：表现层时钟（匹配扫描动效用；微信/Web 均可用，测试 stub 环境回落 Date.now） */
+  private get nowMs(): number {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
   }
   private get W(): number {
     return this.isMobile ? this.cssW : BASE_W;
@@ -1627,10 +1636,24 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.rect(opX - pillW / 2, py, pillW, 26, 'rgba(59,111,212,0.16)', C.blue, 1);
       this.text(pillText, opX, py + 13, this.isMobile ? 16 : 14, C.driveBlue, 'center', 600);
     } else {
-      // 搜索中：右侧扫描占位（候选 B 由 renderer 绘制；占位补充状态，杜绝大面积空屏）
+      // 搜索中：右侧扫描占位 + F-HOME-2 匹配动效——占位框脉冲呼吸 + 扫描线上下扫
+      // （nowMs 驱动，renderBattleFrame 每帧重绘；候选 B 由 renderer 绘制快切）
       const sw = this.isMobile ? 132 : 160;
       const sh = 30;
-      this.rect(opX - sw / 2, centerY - sh / 2, sw, sh, 'rgba(59,111,212,0.12)', C.border, 1);
+      const t = this.nowMs;
+      const pulse = 0.8 + 0.2 * Math.sin(t * 0.012);
+      const rectFill = `rgba(59,111,212,${(0.10 * pulse).toFixed(3)})`;
+      this.rect(opX - sw / 2, centerY - sh / 2, sw, sh, rectFill, C.border, 1);
+      // 扫描线：在占位框内上下移动的亮带（周期 ~1.2s）
+      const scanY = centerY - sh / 2 + 4 + ((t % 1200) / 1200) * (sh - 8);
+      const grad = this.ctx;
+      grad.fillStyle = 'rgba(120,170,255,0.5)';
+      grad.fillRect(
+        this.ox + (opX - sw / 2 + 6) * this.scale,
+        this.oy + scanY * this.scale,
+        (sw - 12) * this.scale,
+        2 * this.scale,
+      );
       this.text('扫描对手中…', opX, centerY + 1, this.isMobile ? 16 : 14, C.textDim, 'center', 600);
     }
   }
