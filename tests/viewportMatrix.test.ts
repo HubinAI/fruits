@@ -247,10 +247,10 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
       expect(a!.y, `${id} y ≥ safeTop`).toBeGreaterThanOrEqual(INSETS.top);
       expect(a!.y + a!.h, `${id} 底缘 ≤ safeBottom`).toBeLessThanOrEqual(180 - INSETS.bottom + 0.5);
     }
-    // 主 CTA 在辅助入口上方且两者不重叠（操作组完整）
+    // 单底部条结构（F-HOME-IA-R1）：主 CTA 与辅助入口同处底部主条、水平不重叠（操作组完整）
     const cta = env.areas().find((x) => x.id === 'cta-find')!;
     const assist = env.areas().find((x) => x.id === 'home-garage')!;
-    expect(assist.y, '辅助入口在 CTA 下方').toBeGreaterThanOrEqual(cta.y + cta.h);
+    expect(assist.x + assist.w, '车库右缘 ≤ 寻找对手左缘（水平不重叠）').toBeLessThanOrEqual(cta.x + 0.5);
     // 配置页（360×180 极限屏）同样全在 safe 内
     click(env, 'home-garage');
     for (const id of ['entry:body', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {

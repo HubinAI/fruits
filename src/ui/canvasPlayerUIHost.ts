@@ -1050,13 +1050,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /**
-   * F-HOME-1：正式小游戏首页——只保留核心模块：
-   * ① 顶部：个人信息（左）+ 宝箱栏 4 槽（右）；② 中上：当前组装车辆展示（renderer previewSolo）；
-   * ③ 中部：寻找对手主按钮（全页最强视觉）；④ 底部：车库 / 排行榜 / 战令 三个辅助入口。
-   * 背景 = renderer.drawHomeBackdrop（程序化 underlay，单一入口；正式背景资源后续注入，
-   * 由 draw() 经 setHomeBackdrop 在「出局外 + metaPage=home」时开启，绘制于车辆之下）。
-   * 背包/合成/更多/复杂配置不堆在首页。布局唯一源 = computeHomeLayout（Home 模式下
-   * getPreviewFramingRect 同源）。
+   * F-HOME-IA-R1｜正式小游戏首页（场景式信息架构重做）：
+   * ① 顶部：个人信息（左上：头像 + 段位，不含金币，可点 → 占位页）+ 宝箱栏 4 槽（右上）；
+   * ② 中央：stageRect 场景（renderer 画背景 underlay + 车辆 previewSolo；不画全宽车辆框/边框）；
+   *    车辆可点（点击 → 随机气泡 tips，气泡在车辆上方、不遮挡宝箱/个人信息）；
+   * ③ 下方中央：寻找对手主按钮（中等宽悬浮，不再横贯整屏）；
+   * ④ 底部：车库（左下）/ 排行榜·战令（右下）——紧凑图标 + 短标签（禁止三等分大按钮）。
+   * 背景 = renderer.drawHomeBackdrop（程序化 underlay，单一入口；绘制于车辆之下）。
+   * 背包/合成/更多/复杂配置不堆在首页。布局唯一源 = computeHomeLayout（Home 模式
+   * getPreviewFramingRect 同源：vehicleFramingRect 为 stage 上部、CTA 之上）。
    */
   private drawHomePage(state: PlayerUIState): void {
     const draft = state.draft;
@@ -1066,14 +1068,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
       this.profile,
     );
-    // ① 顶部：个人信息（左：头像 + 段位 + 金币，可点 → 个人详情占位页）+ 宝箱栏（右，4 槽状态占位）
+
+    // ① 顶部：个人信息（左上：头像 + 段位；删除首页金币）+ 宝箱栏（右上）
     const p = state.progress;
     const tier = tierOf(p.rating);
-    const tb = L.topBarRect;
-    // 头像（圆形）+ 段位徽章（F-HOME-4：正式个人信息入口，点击开详情占位页）
+    const pr = L.profileRect;
     const avR = this.isShort ? 11 : 15;
-    const avCX = tb.x + avR + 3;
-    const avCY = tb.y + tb.h / 2;
+    const avCX = pr.x + avR + 3;
+    const avCY = pr.y + pr.h / 2;
     const ctx = this.ctx;
     ctx.save();
     ctx.beginPath();
@@ -1088,24 +1090,20 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ctx.textBaseline = 'middle';
     ctx.fillText('我', this.ox + avCX * this.scale, this.oy + avCY * this.scale);
     ctx.restore();
-    this.text(`${TIER_LABEL[tier]} ${p.rating}`, avCX + avR + 8, tb.y + tb.h / 2, this.isShort ? 13 : 15, C.gold, 'left', 700);
-    this.text(`金币 ${p.coin}`, avCX + avR + 8 + (this.isShort ? 96 : 132), tb.y + tb.h / 2, this.isShort ? 11 : 14, C.textDim);
-    // 个人信息点击区（头像 + 段位 + 金币整段）
-    const profileW = avCX + avR + 8 + (this.isShort ? 96 : 132) + 70 - tb.x;
-    this.hit('home-profile', tb.x, tb.y, profileW, tb.h);
-    // 宝箱栏（皇室战争式槽位感：槽盖 + 状态表现——可领取 / 计时中 / 空槽）
+    this.text(`${TIER_LABEL[tier]} ${p.rating}`, avCX + avR + 8, pr.y + pr.h / 2, this.isShort ? 13 : 15, C.gold, 'left', 700);
+    this.hit('home-profile', pr.x, pr.y, pr.w, pr.h);
+
+    // 宝箱栏（4 槽，右上；槽盖 + 状态：可领 / 计时 / 空）
     for (let i = 0; i < 4; i++) {
       const s = L.chestSlot(i);
       const st = HOME_CHEST_STATES[i];
       const bg = st === 'empty' ? 'rgba(20,26,38,0.55)' : st === 'claimable' ? 'rgba(96,74,24,0.4)' : 'rgba(30,40,58,0.6)';
       const border = st === 'claimable' ? C.gold : C.border;
       this.rect(s.x, s.y, s.w, s.h, bg, border, st === 'claimable' ? 1.5 : 1);
-      // 槽盖（顶部小横条，宝箱槽位感）
       this.rect(s.x - 2, s.y - 3, s.w + 4, 4, 'rgba(210,220,240,0.4)');
       if (st === 'claimable') {
         this.text('可领', s.x + s.w / 2, s.y + s.h / 2 + 2, this.isShort ? 9 : 11, C.gold, 'center', 700);
       } else if (st === 'timing') {
-        // 计时进度条 + 状态字
         this.rect(s.x + 3, s.y + s.h - 5, s.w - 6, 3, '#2a3345');
         this.rect(s.x + 3, s.y + s.h - 5, (s.w - 6) * 0.5, 3, C.driveBlue);
         this.text('计时', s.x + s.w / 2, s.y + s.h / 2 + 2, this.isShort ? 9 : 11, C.textDim, 'center');
@@ -1114,54 +1112,52 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       }
       this.hit(`home-chest-${i}`, s.x, s.y, s.w, s.h);
     }
-    // ② 中上：车辆展示台（车辆由 renderer previewSolo 画在 vehicleRect 内；台座给「展示」感）
-    // F-HOME-3：车辆区可点（点击 → 随机气泡 tips）
-    const v = L.vehicleRect;
-    this.rect(v.x, v.y, v.w, v.h, 'rgba(10,14,22,0.35)', C.border, 1);
+
+    // ② 中央舞台：背景（renderer underlay）+ 车辆（renderer previewSolo 已 fit 到
+    //    vehicleFramingRect）。不画全宽车辆框/边框——只保留车辆点击区（透明）。
+    // F-HOME-3：车辆可点（点击 → 随机气泡 tips）
+    const v = L.vehicleFramingRect;
     this.hit('home-vehicle', v.x, v.y, v.w, v.h);
-    // F-HOME-3：气泡 tips（轻量，非 Modal——只画一个小气泡 + 指向箭头，不拦截其它按钮）
     if (this.vehicleTip) {
       const tipW = Math.min(v.w - 16, 300);
       const tipH = this.isShort ? 32 : 40;
       const tipX = v.x + (v.w - tipW) / 2;
-      const tipY = v.y + 6;
+      const tipY = v.y + 6; // 气泡在车辆上方（stage 上部），不遮挡顶部宝箱/个人信息
       this.rect(tipX, tipY, tipW, tipH, 'rgba(14,20,32,0.94)', C.gold, 1);
       this.text(this.vehicleTip, tipX + 10, tipY + tipH / 2, this.isShort ? 12 : 14, C.text, 'left');
-      // 指向车辆的小箭头（气泡底部三角）
-      const ctx = this.ctx;
-      ctx.save();
-      ctx.fillStyle = C.gold;
-      ctx.beginPath();
-      ctx.moveTo(this.ox + (tipX + tipW / 2 - 6) * this.scale, this.oy + (tipY + tipH) * this.scale);
-      ctx.lineTo(this.ox + (tipX + tipW / 2 + 6) * this.scale, this.oy + (tipY + tipH) * this.scale);
-      ctx.lineTo(this.ox + (tipX + tipW / 2) * this.scale, this.oy + (tipY + tipH + 6) * this.scale);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
+      const tctx = this.ctx;
+      tctx.save();
+      tctx.fillStyle = C.gold;
+      tctx.beginPath();
+      tctx.moveTo(this.ox + (tipX + tipW / 2 - 6) * this.scale, this.oy + (tipY + tipH) * this.scale);
+      tctx.lineTo(this.ox + (tipX + tipW / 2 + 6) * this.scale, this.oy + (tipY + tipH) * this.scale);
+      tctx.lineTo(this.ox + (tipX + tipW / 2) * this.scale, this.oy + (tipY + tipH + 6) * this.scale);
+      tctx.closePath();
+      tctx.fill();
+      tctx.restore();
     }
-    // ③ 中部：寻找对手主按钮（全宽 primary，全页最强视觉焦点）
+
+    // ③ 下方中央：寻找对手主按钮（中等宽悬浮，不横贯整屏）
     this.button(L.ctaRect.x, L.ctaRect.y, L.ctaRect.w, L.ctaRect.h, 'cta-find', state.draftValid ? '寻找对手' : '配置不合法', {
       primary: true,
       disabled: !state.draftValid,
     });
-    // ④ 底部：三个辅助入口（车库 / 排行榜 / 战令）——明显弱于主 CTA；F-HOME-4：图标 + 文字（正式入口感）
-    const assists: Array<{ id: string; label: string; icon: string }> = [
-      { id: 'home-garage', label: '车库', icon: '装' },
-      { id: 'home-rank', label: '排行榜', icon: '榜' },
-      { id: 'home-pass', label: '战令', icon: '令' },
-    ];
-    const gap = this.isShort ? 6 : 10;
-    const aw = (L.assistRect.w - gap * (assists.length - 1)) / assists.length;
-    for (let i = 0; i < assists.length; i++) {
-      const a = assists[i];
-      const ix = L.assistRect.x + i * (aw + gap);
-      // 图标方块（左侧）
-      const iw = this.isShort ? 20 : 26;
-      const iy = L.assistRect.y + (L.assistRect.h - iw) / 2;
-      this.rect(ix + 8, iy, iw, iw, C.panel, C.border, 1);
-      this.text(a.icon, ix + 8 + iw / 2, iy + iw / 2, this.isShort ? 11 : 14, C.textDim, 'center', 700);
-      this.button(ix, L.assistRect.y, aw, L.assistRect.h, a.id, a.label, {});
-    }
+
+    // ④ 底部主条：车库（左）| 寻找对手 CTA（中央主按钮）| 排行榜·战令（右）——紧凑图标 + 短标签（禁止三等分大按钮）
+    this.drawHomeBottomEntry(L.garageRect, 'home-garage', '装', '车库');
+    this.drawHomeBottomEntry(L.rankRect, 'home-rank', '榜', '排行榜');
+    this.drawHomeBottomEntry(L.passRect, 'home-pass', '令', '战令');
+  }
+
+  /** F-HOME-IA-R1：首页底部紧凑入口（图标方块 + 短标签；禁止三等分大按钮） */
+  private drawHomeBottomEntry(r: Rect, id: string, icon: string, label: string): void {
+    const iw = this.isShort ? 20 : 26;
+    const iy = r.y + (r.h - iw) / 2;
+    this.rect(r.x, r.y, r.w, r.h, C.dockBg, C.border, 1);
+    this.rect(r.x + 8, iy, iw, iw, C.panel, C.border, 1);
+    this.text(icon, r.x + 8 + iw / 2, iy + iw / 2, this.isShort ? 11 : 14, C.textDim, 'center', 700);
+    this.text(label, r.x + 8 + iw + 8, r.y + r.h / 2, this.isShort ? 12 : 14, C.text, 'left', 600);
+    this.hit(id, r.x, r.y, r.w, r.h);
   }
 
   /** F-META-1：garage MetaPage——车辆展示（renderer 画）+ 右侧装配面板 + 主 CTA */
@@ -1591,13 +1587,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (!this.isMobile) return null;
     const state = this.lastState;
     if (!state || state.playerPhase !== 'garage' || state.battleState !== 'editing') return null;
-    // F-HOME-1：正式首页车辆展示区 = Home 布局 vehicleRect（与绘制/HitArea 同一份结果）
+    // F-HOME-IA-R1：正式首页车辆取景区 = Home 布局 vehicleFramingRect（stage 上部、CTA 之上；
+    // 与绘制/HitArea 同一份结果；完整车辆 envelope 进入 stageRect 且不被 CTA 裁切）
     if (this.metaPage === 'home') {
       return computeHomeLayout(
         { w: this.W, h: this.H },
         { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
         this.profile,
-      ).vehicleRect;
+      ).vehicleFramingRect;
     }
     // F-WX-UI-F1：车辆取景区 = 唯一布局源 vehicleRect（与绘制/HitArea 完全同一份结果）
     return computeMobileGarageLayout(

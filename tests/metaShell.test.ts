@@ -140,7 +140,7 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
     // 车辆展示区存在（Home framingRect 非空且面积大）
     const homeLayout = computeHomeLayout({ w: 844, h: 390 }, INSETS, { mode: 'mobile' } as never);
     const v = env.host.getPreviewFramingRect()!;
-    expect(v, 'Home 车辆取景区').toEqual(homeLayout.vehicleRect);
+    expect(v, 'Home 车辆取景区').toEqual(homeLayout.vehicleFramingRect);
     expect(v.h, '车辆展示区高（明显可见）').toBeGreaterThanOrEqual(80);
   });
 

@@ -172,9 +172,9 @@ describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
     const insets: SafeInsets = { left: 44, right: 20, top: 12, bottom: 16 };
     const host = makeHost({ w: 844, h: 390 }, insets);
     host.render(garageState());
-    // F-HOME-1：默认 Home → 取景区 = Home vehicleRect（首页车辆展示区）
+    // F-HOME-1：默认 Home → 取景区 = Home vehicleFramingRect（首页车辆展示区）
     const homeLayout = computeHomeLayout({ w: 844, h: 390 }, insets, { mode: 'mobile' } as never);
-    expect(host.getPreviewFramingRect()).toEqual(homeLayout.vehicleRect);
+    expect(host.getPreviewFramingRect()).toEqual(homeLayout.vehicleFramingRect);
     // 进配置页 → 取景区 = 配置页 vehicleRect（唯一布局源）
     const homeBtn = host.getHitAreasForTest().find((a) => a.id === 'home-garage')!;
     host.pointerForTest?.(homeBtn.x + homeBtn.w / 2, homeBtn.y + homeBtn.h / 2);

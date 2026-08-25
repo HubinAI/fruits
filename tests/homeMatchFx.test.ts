@@ -145,9 +145,15 @@ describe('F-HOME-2｜寻找对手主交互', () => {
   it('3. 首页 CTA 全页最显眼：420×210 高 ≥48 且 > 辅助入口；动画/流程源码守卫', () => {
     const prof = { mode: 'mobile-short' } as never;
     const l = computeHomeLayout({ w: 420, h: 210 }, INSETS, prof);
-    expect(l.ctaRect.h, '420×210 CTA 高 ≥48').toBeGreaterThanOrEqual(48);
-    expect(l.assistRect.h, '辅助入口矮于 CTA').toBeLessThan(l.ctaRect.h);
-    expect(l.ctaRect.w, 'CTA 全宽').toBe(l.topBarRect.w);
+    expect(l.ctaRect.h, '420×210 CTA 高 ≥44（short 触控目标，全页最高）').toBeGreaterThanOrEqual(44);
+    expect(l.garageRect.h, '辅助入口矮于 CTA').toBeLessThan(l.ctaRect.h);
+    // F-HOME-IA-R1：删除「CTA 与 topBar 等宽」旧断言——CTA 改为中等宽、居中、不横贯整屏
+    const availW = 420 - INSETS.left - INSETS.right;
+    expect(l.ctaRect.w, 'CTA 不横贯整屏（中等宽）').toBeLessThan(availW);
+    // CTA 居中于底部主条中央留白区（车库右缘 ↔ 排行榜左缘 的中点），不与辅助入口重叠
+    const ctaCx = l.ctaRect.x + l.ctaRect.w / 2;
+    const bandCx = (l.garageRect.x + l.garageRect.w + l.rankRect.x) / 2;
+    expect(Math.abs(ctaCx - bandCx), 'CTA 水平居中于底部主条').toBeLessThanOrEqual(1.5);
     // 源码守卫：matching 每帧重绘 + 扫描动效（nowMs 驱动）
     const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
     const rf = src.slice(src.indexOf('renderBattleFrame('), src.indexOf('getHitAreasForTest'));

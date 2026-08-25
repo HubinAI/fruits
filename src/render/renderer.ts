@@ -1697,8 +1697,10 @@ export class Renderer {
     } else if (fit === 'previewFixed') {
       minX = MATCH_MIN_X; maxX = MATCH_MAX_X; minY = MATCH_MIN_Y; maxY = MATCH_MAX_Y;
     }
-    // ground anchor：保证地面线在 y 范围内
-    acc(snap.arena.groundY, snap.arena.groundY);
+    // ground anchor：保证地面线在 y 范围内（仅锚定 Y；不把 groundY 误作 X 污染水平 bounds，
+    // 否则 preview 车辆的包围盒中心被右移、最终屏幕水平偏心——F-HOME-IA-R1 修复）。
+    minY = Math.min(minY, snap.arena.groundY);
+    maxY = Math.max(maxY, snap.arena.groundY);
     if (fit === 'battle') {
       // Q08-A-FIX：正式战斗按 phase 构图——Active/Warning 固定战斗走廊（corridor，
       // 不绑定开局瞬间车辆位置）；Closing/End 完整收束安全构图。
@@ -1855,7 +1857,10 @@ export class Renderer {
     const fitLimit = Math.min(safeW / bw, safeH / bh);
     const enforceFitLimit = isPreview || fit === 'battle' || isFixed;
     let scale = enforceFitLimit ? fitLimit : fitLimit * CONTENT_ZOOM;
-    if (scale < MIN_CONTENT_SCALE) scale = MIN_CONTENT_SCALE;
+    // F-HOME-IA-R1：固定预览框（previewSolo/previewFixed）传入 framingRect 时，取景必须
+    // 真正 fit 到该子区域——不再用 MIN_CONTENT_SCALE 兜底放大（否则矮屏小取景区里完整车辆
+    // 会被强行放大溢出取景区）。无 framingRect 的全屏固定框仍保留下限，避免车辆在全屏框里过小。
+    if (!(framing && isFixed) && scale < MIN_CONTENT_SCALE) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
     // 内容定位：默认居中于安全区中心（offset 含安全区内缩量；玩家 Shell 预览用 top 内缩）。
     // F-UX-3B：compact battle Active 底部锚定——车辆站在地面上（Ground 只改视觉厚度，
