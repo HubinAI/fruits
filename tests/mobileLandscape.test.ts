@@ -460,16 +460,17 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
 
   it('F-META-UX3｜Matching / MatchPreview 连续画面（源码守卫）：同一布局锚点 + 扫描占位 + 无确认按钮', () => {
     const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
-    // 1) 连续画面方法存在：左我方车 / 中 VS+状态 / 右对手区域；搜索中扫描占位；锁定「对手已锁定」
+    // 1) 连续画面方法存在：左我方车（renderer 绘制，无文字大标签）/ 中 VS+单一状态 / 右对手区域；锁定「对手已锁定」
     const methodStart = src.indexOf('private drawMatchingContinuum');
     expect(methodStart, 'drawMatchingContinuum 存在').toBeGreaterThan(-1);
     const method = src.slice(methodStart, src.indexOf('private drawMatchBar'));
-    expect(method).toContain('我方车');
-    expect(method).toContain('对手');
+    expect(method).toContain('对手'); // 「对手已锁定」状态（含「对手」）
     expect(method).toContain('正在寻找对手…');
     expect(method).toContain('对手已锁定');
-    expect(method).toContain('扫描对手中…');
-    expect(method).toContain('驱动 ·');
+    // 信息减法：删除重复「扫描对手中」文字、删除驱动 pill、删除「我方车」大标签
+    expect(method, '已删除重复「扫描对手中」文字').not.toContain('扫描对手中…');
+    expect(method, 'Locked 已删除驱动 pill').not.toContain('驱动 ·');
+    expect(method, '已删除「我方车」大标签').not.toContain('我方车');
     expect(method).not.toMatch(/parts\.join/);
     // 2) 布局锚点统一：matching 与 matchPreview 共用同一函数（无分阶段独立绘制函数）
     const drawIdx = src.indexOf('private draw(): void');

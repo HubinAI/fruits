@@ -115,6 +115,11 @@ describe('F-PREBATTLE-P0｜Mobile 战前重复 UI 删除（逐帧文字断言）
     const texts = env.texts();
     expect(count(texts, '正在寻找对手…'), 'Matching 只出现一次「正在寻找对手…」').toBe(1);
     expect(texts.some((s) => s === '对手已锁定'), 'Matching 不应出现「对手已锁定」').toBe(false);
+    // 信息减法：搜索只有一套状态文字（无重复「扫描对手中」）；无左右大标签；无驱动 pill
+    expect(texts.some((s) => s === '扫描对手中…'), 'Matching 不应出现重复「扫描对手中」').toBe(false);
+    expect(texts.some((s) => s === '我方车'), 'Matching 不应出现「我方车」大标签').toBe(false);
+    expect(texts.some((s) => s === '对手'), 'Matching 不应出现「对手」大标签').toBe(false);
+    expect(texts.some((s) => s.includes('驱动')), 'Matching 不应出现驱动 pill').toBe(false);
     assertNoLegacyOverlay(texts, 'Matching');
     expect(env.host.getHitAreasForTest(), 'Matching 无命中区（纯表现，无 MatchBar 按钮）').toHaveLength(0);
   });
@@ -131,6 +136,11 @@ describe('F-PREBATTLE-P0｜Mobile 战前重复 UI 删除（逐帧文字断言）
     const texts = env.texts();
     expect(count(texts, '对手已锁定'), 'Locked 只出现一次「对手已锁定」').toBe(1);
     expect(texts.some((s) => s === '正在寻找对手…'), 'Locked 不应出现「正在寻找对手…」').toBe(false);
+    // 信息减法：Locked 无驱动 pill、无左右大标签、无重复扫描文字
+    expect(texts.some((s) => s.includes('驱动')), 'Locked 不应出现驱动 pill').toBe(false);
+    expect(texts.some((s) => s === '我方车'), 'Locked 不应出现「我方车」大标签').toBe(false);
+    expect(texts.some((s) => s === '对手'), 'Locked 不应出现「对手」大标签').toBe(false);
+    expect(texts.some((s) => s === '扫描对手中…'), 'Locked 不应出现「扫描对手中」').toBe(false);
     assertNoLegacyOverlay(texts, 'Locked');
     expect(env.host.getHitAreasForTest(), 'Locked 正常流程无 MatchBar 按钮').toHaveLength(0);
   });
@@ -147,6 +157,10 @@ describe('F-PREBATTLE-P0｜Mobile 战前重复 UI 删除（逐帧文字断言）
     const texts = env.texts();
     expect(count(texts, '对手已锁定')).toBe(1);
     assertNoLegacyOverlay(texts, 'Locked(matchBarHidden=false)');
+    // 信息减法即便 matchBarHidden=false 也成立：无驱动 pill / 无大标签 / 无重复扫描文字
+    expect(texts.some((s) => s.includes('驱动')), 'Locked(matchBarHidden=false) 不应出现驱动 pill').toBe(false);
+    expect(texts.some((s) => s === '我方车'), 'Locked(matchBarHidden=false) 不应出现「我方车」大标签').toBe(false);
+    expect(texts.some((s) => s === '对手'), 'Locked(matchBarHidden=false) 不应出现「对手」大标签').toBe(false);
     const ids = env.host.getHitAreasForTest().map((a) => a.id);
     expect(ids).not.toContain('match-adjust');
     expect(ids).not.toContain('match-start');
@@ -164,8 +178,10 @@ describe('F-PREBATTLE-P0｜Mobile 战前重复 UI 删除（逐帧文字断言）
     const texts = env.texts();
     expect(count(texts, 'READY'), 'Mobile ready 过渡帧不应出现 READY').toBe(0);
     expect(count(texts, '开战！'), 'Mobile ready 过渡帧不应出现 开战！').toBe(0);
-    // 连续页仍在：锁定状态唯一出现，对手信息仍在（驱动 pill 等）
+    // 连续页仍在：锁定状态唯一出现，对手信息仍在（对手名称）；无驱动 pill / 无重复扫描文字
     expect(count(texts, '对手已锁定'), 'ready 过渡帧连续页仍显示唯一「对手已锁定」').toBe(1);
+    expect(texts.some((s) => s.includes('驱动')), 'ready 过渡帧不应出现驱动 pill').toBe(false);
+    expect(texts.some((s) => s === '扫描对手中…'), 'ready 过渡帧不应出现「扫描对手中」').toBe(false);
   });
 
   it('5. Desktop/Test 回归：旧 UI 全部保留（顶部状态条 + MatchBar + READY/开战 仍绘制）', () => {
