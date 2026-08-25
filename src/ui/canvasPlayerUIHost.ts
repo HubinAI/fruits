@@ -1055,7 +1055,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * ② 中央：stageRect 场景（renderer 画背景 underlay + 车辆 previewSolo；不画全宽车辆框/边框）；
    *    车辆可点（点击 → 随机气泡 tips，气泡在车辆上方、不遮挡宝箱/个人信息）；
    * ③ 下方中央：寻找对手主按钮（中等宽悬浮，不再横贯整屏）；
-   * ④ 底部：车库（左下）/ 排行榜·战令（右下）——紧凑图标 + 短标签（禁止三等分大按钮）。
+   * ④ 底部：车库（左下）/ 排行榜·战令（右下）——紧凑次级入口（轻量 chip，弱对比；F-HOME-STAGE-R3
+   *    已降级，不再用实底重框，消除「后台操作台」厚重感）；寻找对手 cta-find 为唯一主按钮（实底蓝）。
    * 背景 = renderer.drawHomeBackdrop（程序化 underlay，单一入口；绘制于车辆之下）。
    * 背包/合成/更多/复杂配置不堆在首页。布局唯一源 = computeHomeLayout（Home 模式
    * getPreviewFramingRect 同源：vehicleFramingRect 为 stage 上部、CTA 之上）。
@@ -1156,14 +1157,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.drawHomeBottomEntry(L.passRect, 'home-pass', '令', '战令');
   }
 
-  /** F-HOME-IA-R1：首页底部紧凑入口（图标方块 + 短标签；禁止三等分大按钮） */
+  /** F-HOME-STAGE-R3：首页底部紧凑次级入口（轻量 chip：极淡填充、无重边框 + 弱对比短标签），
+   * 与中央主按钮 cta-find（实底蓝、白字）形成明确主次，消除「后台操作台」厚重感。
+   * 点击区不变；图标/标签字号与旧版一致（不靠缩小字号代替构图修复）。 */
   private drawHomeBottomEntry(r: Rect, id: string, icon: string, label: string): void {
     const iw = this.isShort ? 20 : 26;
     const iy = r.y + (r.h - iw) / 2;
-    this.rect(r.x, r.y, r.w, r.h, C.dockBg, C.border, 1);
-    this.rect(r.x + 8, iy, iw, iw, C.panel, C.border, 1);
+    // 轻量 chip：极淡填充、无重边框（旧版 C.dockBg 实底 + C.border 重框 → 像操作台按钮）
+    this.rect(r.x + 6, r.y + 4, r.w - 12, r.h - 8, 'rgba(28,36,50,0.45)');
+    this.rect(r.x + 8, iy, iw, iw, 'rgba(140,160,190,0.16)');
     this.text(icon, r.x + 8 + iw / 2, iy + iw / 2, this.isShort ? 11 : 14, C.textDim, 'center', 700);
-    this.text(label, r.x + 8 + iw + 8, r.y + r.h / 2, this.isShort ? 12 : 14, C.text, 'left', 600);
+    this.text(label, r.x + 8 + iw + 8, r.y + r.h / 2, this.isShort ? 12 : 14, C.textDim, 'left', 500);
     this.hit(id, r.x, r.y, r.w, r.h);
   }
 
