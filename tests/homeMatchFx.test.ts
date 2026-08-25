@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { CanvasPlayerUIHost, HOME_TIPS } from '../src/ui/canvasPlayerUIHost';
+import { CanvasPlayerUIHost, HOME_TIPS, HOME_CHEST_STATES } from '../src/ui/canvasPlayerUIHost';
 import { computeHomeLayout } from '../src/ui/homeLayout';
 import { bindPlatformCore } from '../src/platform/context';
 import { createWebCore } from '../src/platform/web';
@@ -197,5 +197,56 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     const added = env.texts().slice(beforeBack);
     expect(added.some((s) => s === HOME_TIPS[0]), '返回后未再画气泡 tips').toBe(false);
     expect(env.host.getHitAreasForTest().some((a) => a.id === 'home-vehicle'), '返回首页车辆可点').toBe(true);
+  });
+
+  it('F-HOME-4｜个人信息/排行榜/战令/宝箱四个正式入口：可点 → 打开占位页（large Modal）→ 关闭恢复首页', () => {
+    const env = makeRecHost({ w: 420, h: 210 });
+    env.host.render(garageState());
+    const ids = env.host.getHitAreasForTest().map((a) => a.id);
+    for (const id of ['home-profile', 'home-rank', 'home-pass', 'home-chest-0', 'home-chest-3']) {
+      expect(ids, `首页应有正式入口 ${id}`).toContain(id);
+    }
+    // 各入口 → 占位页（大卡片 Modal，标题正确）
+    const cases: Array<[string, string]> = [
+      ['home-profile', '个人信息'],
+      ['home-rank', '排行榜'],
+      ['home-pass', '战令'],
+      ['home-chest-0', '宝箱'],
+      ['home-chest-3', '宝箱'],
+    ];
+    for (const [entryId, title] of cases) {
+      click(env, entryId);
+      expect(env.host.getHitAreasForTest().some((a) => a.id === 'modal-veil'), `${entryId} 打开占位页`).toBe(true);
+      expect(env.texts().some((s) => s.includes(title)), `${entryId} 占位页标题「${title}」`).toBe(true);
+      click(env, 'modal-primary'); // 知道了
+      expect(env.host.getHitAreasForTest().some((a) => a.id === 'modal-veil'), `${entryId} 关闭`).toBe(false);
+      expect(env.host.getHitAreasForTest().some((a) => a.id === 'home-garage'), '关闭后恢复首页').toBe(true);
+    }
+  });
+
+  it('F-HOME-4｜个人信息展示头像+段位；宝箱 4 槽含三种状态占位；源码守卫区分状态', () => {
+    const env = makeRecHost({ w: 420, h: 210 });
+    env.host.render(garageState({ progress: { coin: 100, rating: 50 } }));
+    // 顶部个人信息：头像「我」+ 段位（rating 50 → 青铜）
+    expect(env.texts().some((s) => s === '我'), '头像「我」').toBe(true);
+    expect(env.texts().some((s) => s.includes('青铜')), '段位徽章显示').toBe(true);
+    // 宝箱状态占位：4 槽恰好 claimable/timing/timing/empty
+    expect(HOME_CHEST_STATES).toHaveLength(4);
+    expect(HOME_CHEST_STATES.filter((s) => s === 'claimable').length).toBeGreaterThanOrEqual(1);
+    expect(HOME_CHEST_STATES.filter((s) => s === 'timing').length).toBeGreaterThanOrEqual(1);
+    expect(HOME_CHEST_STATES.includes('empty'), '含空槽状态').toBe(true);
+    // 源码守卫：drawHomePage 区分三种宝箱状态
+    const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
+    const start = src.indexOf('private drawHomePage');
+    const end = src.indexOf('\n  private ', start + 10);
+    const hp = src.slice(start, end === -1 ? src.length : end);
+    expect(hp, '宝箱状态「可领」').toContain('可领');
+    expect(hp, '宝箱状态「计时」').toContain('计时');
+    expect(hp, '宝箱状态「空」').toContain("'空'");
+    // 视觉权重：CTA 高于辅助入口（homeLayout 已断言 cta>assist）；宝箱槽高 < CTA 高
+    const prof = { mode: 'mobile-short' } as never;
+    const l = computeHomeLayout({ w: 420, h: 210 }, INSETS, prof);
+    expect(l.ctaRect.h, 'CTA 高于宝箱槽（视觉主次）').toBeGreaterThan(l.chestSlot(0).h);
+    expect(l.chestSlot(0).h, '宝箱槽可点高度').toBeGreaterThanOrEqual(20);
   });
 });

@@ -139,6 +139,17 @@ export const HOME_TIPS: string[] = [
 ];
 
 /**
+ * F-HOME-4：首页宝箱栏 4 槽基础状态占位（可领取 / 计时中 / 空槽）。
+ * 只做状态表现（视觉 + 可交互入口），不做完整奖励逻辑——点击弹占位页。
+ */
+export const HOME_CHEST_STATES: Array<'claimable' | 'timing' | 'empty'> = [
+  'claimable',
+  'timing',
+  'timing',
+  'empty',
+];
+
+/**
  * F-META-UX2：合成前后库存快照 diff → 新 2★ 部件（2★ 数量恰好 +1 的 defId）。
  * 仅用于「合成成功」结果 Modal 文案；不参与任何规则（规则仍在 mergeWithCost / runtime）。
  */
@@ -436,10 +447,48 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.draw();
         return;
       }
-      const label =
-        id === 'home-rank' ? '排行榜' : id === 'home-pass' ? '战令' : id.startsWith('home-chest-') ? '宝箱' : '';
-      if (label !== '') {
-        this.showModal({ title: '功能开发中', body: [label], primary: '知道了' });
+      // F-HOME-4：正式占位页（large Modal，结构先行）——个人信息/排行榜/战令/宝箱
+      if (id === 'home-profile') {
+        const tier = tierOf(this.lastState?.progress?.rating ?? 0);
+        this.showModal({
+          title: '个人信息',
+          body: [
+            `当前段位：${TIER_LABEL[tier]} ${this.lastState?.progress?.rating ?? 0}`,
+            `金币：${this.lastState?.progress?.coin ?? 0}`,
+            '更多信息敬请期待',
+          ],
+          large: true,
+          primary: '知道了',
+        });
+        return;
+      }
+      if (id === 'home-rank') {
+        const tier = tierOf(this.lastState?.progress?.rating ?? 0);
+        this.showModal({
+          title: '排行榜',
+          body: [`当前段位：${TIER_LABEL[tier]} ${this.lastState?.progress?.rating ?? 0}`, '赛季排行榜敬请期待'],
+          large: true,
+          primary: '知道了',
+        });
+        return;
+      }
+      if (id === 'home-pass') {
+        this.showModal({
+          title: '战令',
+          body: ['第 1 赛季 · 奖励敬请期待', '完成战斗可获得战令经验'],
+          large: true,
+          primary: '知道了',
+        });
+        return;
+      }
+      if (id.startsWith('home-chest-')) {
+        this.showModal({
+          title: '宝箱',
+          body: ['宝箱功能开发中', '当前展示：可领取 / 计时中 / 空槽'],
+          large: true,
+          primary: '知道了',
+        });
+        return;
       }
       return;
     }
@@ -1006,16 +1055,52 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
       this.profile,
     );
-    // ① 顶部：个人信息（左）+ 宝箱栏（右，4 槽）
+    // ① 顶部：个人信息（左：头像 + 段位 + 金币，可点 → 个人详情占位页）+ 宝箱栏（右，4 槽状态占位）
     const p = state.progress;
     const tier = tierOf(p.rating);
     const tb = L.topBarRect;
-    this.text(`金币 ${p.coin}`, tb.x, tb.y + tb.h / 2, this.isShort ? 13 : 15, C.gold, 'left', 700);
-    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, tb.x + (this.isShort ? 96 : 130), tb.y + tb.h / 2, this.isShort ? 12 : 14, C.textDim);
+    // 头像（圆形）+ 段位徽章（F-HOME-4：正式个人信息入口，点击开详情占位页）
+    const avR = this.isShort ? 11 : 15;
+    const avCX = tb.x + avR + 3;
+    const avCY = tb.y + tb.h / 2;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(this.ox + avCX * this.scale, this.oy + avCY * this.scale, avR * this.scale, 0, Math.PI * 2);
+    ctx.fillStyle = C.blue;
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.font = `${Math.round((this.isShort ? 11 : 14) * this.fontScale * this.scale)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('我', this.ox + avCX * this.scale, this.oy + avCY * this.scale);
+    ctx.restore();
+    this.text(`${TIER_LABEL[tier]} ${p.rating}`, avCX + avR + 8, tb.y + tb.h / 2, this.isShort ? 13 : 15, C.gold, 'left', 700);
+    this.text(`金币 ${p.coin}`, avCX + avR + 8 + (this.isShort ? 96 : 132), tb.y + tb.h / 2, this.isShort ? 11 : 14, C.textDim);
+    // 个人信息点击区（头像 + 段位 + 金币整段）
+    const profileW = avCX + avR + 8 + (this.isShort ? 96 : 132) + 70 - tb.x;
+    this.hit('home-profile', tb.x, tb.y, profileW, tb.h);
+    // 宝箱栏（皇室战争式槽位感：槽盖 + 状态表现——可领取 / 计时中 / 空槽）
     for (let i = 0; i < 4; i++) {
       const s = L.chestSlot(i);
-      this.rect(s.x, s.y, s.w, s.h, C.panel, C.border, 1);
-      this.text('箱', s.x + s.w / 2, s.y + s.h / 2, this.isShort ? 10 : 12, C.textDim, 'center');
+      const st = HOME_CHEST_STATES[i];
+      const bg = st === 'empty' ? 'rgba(20,26,38,0.55)' : st === 'claimable' ? 'rgba(96,74,24,0.4)' : 'rgba(30,40,58,0.6)';
+      const border = st === 'claimable' ? C.gold : C.border;
+      this.rect(s.x, s.y, s.w, s.h, bg, border, st === 'claimable' ? 1.5 : 1);
+      // 槽盖（顶部小横条，宝箱槽位感）
+      this.rect(s.x - 2, s.y - 3, s.w + 4, 4, 'rgba(210,220,240,0.4)');
+      if (st === 'claimable') {
+        this.text('可领', s.x + s.w / 2, s.y + s.h / 2 + 2, this.isShort ? 9 : 11, C.gold, 'center', 700);
+      } else if (st === 'timing') {
+        // 计时进度条 + 状态字
+        this.rect(s.x + 3, s.y + s.h - 5, s.w - 6, 3, '#2a3345');
+        this.rect(s.x + 3, s.y + s.h - 5, (s.w - 6) * 0.5, 3, C.driveBlue);
+        this.text('计时', s.x + s.w / 2, s.y + s.h / 2 + 2, this.isShort ? 9 : 11, C.textDim, 'center');
+      } else {
+        this.text('空', s.x + s.w / 2, s.y + s.h / 2 + 2, this.isShort ? 9 : 11, C.textDark, 'center');
+      }
       this.hit(`home-chest-${i}`, s.x, s.y, s.w, s.h);
     }
     // ② 中上：车辆展示台（车辆由 renderer previewSolo 画在 vehicleRect 内；台座给「展示」感）
@@ -1048,16 +1133,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       primary: true,
       disabled: !state.draftValid,
     });
-    // ④ 底部：三个辅助入口（车库 / 排行榜 / 战令）——明显弱于主 CTA
-    const assists: Array<{ id: string; label: string }> = [
-      { id: 'home-garage', label: '车库' },
-      { id: 'home-rank', label: '排行榜' },
-      { id: 'home-pass', label: '战令' },
+    // ④ 底部：三个辅助入口（车库 / 排行榜 / 战令）——明显弱于主 CTA；F-HOME-4：图标 + 文字（正式入口感）
+    const assists: Array<{ id: string; label: string; icon: string }> = [
+      { id: 'home-garage', label: '车库', icon: '装' },
+      { id: 'home-rank', label: '排行榜', icon: '榜' },
+      { id: 'home-pass', label: '战令', icon: '令' },
     ];
     const gap = this.isShort ? 6 : 10;
     const aw = (L.assistRect.w - gap * (assists.length - 1)) / assists.length;
     for (let i = 0; i < assists.length; i++) {
-      this.button(L.assistRect.x + i * (aw + gap), L.assistRect.y, aw, L.assistRect.h, assists[i].id, assists[i].label, {});
+      const a = assists[i];
+      const ix = L.assistRect.x + i * (aw + gap);
+      // 图标方块（左侧）
+      const iw = this.isShort ? 20 : 26;
+      const iy = L.assistRect.y + (L.assistRect.h - iw) / 2;
+      this.rect(ix + 8, iy, iw, iw, C.panel, C.border, 1);
+      this.text(a.icon, ix + 8 + iw / 2, iy + iw / 2, this.isShort ? 11 : 14, C.textDim, 'center', 700);
+      this.button(ix, L.assistRect.y, aw, L.assistRect.h, a.id, a.label, {});
     }
   }
 

@@ -51,9 +51,9 @@ export function computeHomeLayout(
   const vehicleH = Math.max(1, H - insets.bottom - vehicleY - ctaH - gap - assistH - gap);
   const ctaY = vehicleY + vehicleH + gap;
   const assistY = ctaY + ctaH + gap;
-  const chestW = short ? 28 : 36;
+  const chestW = short ? 32 : 44; // F-HOME-4：宝箱槽位更大（正式入口感）
   const chestGap = short ? 6 : 10;
-  const chestH = Math.max(1, topBarH - 8);
+  const chestH = Math.max(1, topBarH - 6);
   const chestX0 = x1 - 4 * chestW - 3 * chestGap;
   return {
     topBarRect: { x: x0, y: topBarY, w: x1 - x0, h: topBarH },
@@ -62,7 +62,7 @@ export function computeHomeLayout(
     assistRect: { x: x0, y: assistY, w: x1 - x0, h: assistH },
     chestSlot: (i: number): HomeRect => {
       const x = chestX0 + i * (chestW + chestGap);
-      return { x, y: topBarY + 4, w: chestW, h: chestH };
+      return { x, y: topBarY + 3, w: chestW, h: chestH };
     },
   };
 }
