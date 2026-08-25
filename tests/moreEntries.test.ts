@@ -117,9 +117,10 @@ function click(env: HostEnv, id: string): void {
   env.pointer(a!.x + a!.w / 2, a!.y + a!.h / 2);
 }
 
-/** 切到 More 页（从 garage 起始） */
+/** 切到 More 页（F-HOME-1：Home → 配置页 → 顶栏「更多」） */
 function goMore(env: HostEnv): void {
   env.host.render(state());
+  if (env.areas().some((a) => a.id === 'home-garage')) click(env, 'home-garage');
   click(env, 'nav:more');
 }
 
@@ -204,19 +205,21 @@ describe('F-META-6｜未来功能入口预留', () => {
     expect(env.store['pref.sound'], '从关切到开写 1').toBe('1');
   });
 
-  it('验收4｜Garage/Backpack 不被污染；More 页与设置页无死按钮', () => {
+  it('验收4｜Home/Backpack 不被污染；More 页与设置页无死按钮', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
-    // Garage：无任何 more/settings 入口
+    // Home（F-HOME-1 正式首页）：无任何 more/settings 入口
     env.host.render(state());
-    expect(env.areas().some((a) => a.id.startsWith('more:')), 'Garage 无 More 入口').toBe(false);
-    expect(env.areas().some((a) => a.id.startsWith('settings-')), 'Garage 无设置元素').toBe(false);
-    // Backpack：无任何 more/settings 入口（UX1：backpack 页仅顶部「← 返回车库」）
+    expect(env.areas().some((a) => a.id.startsWith('more:')), 'Home 无 More 入口').toBe(false);
+    expect(env.areas().some((a) => a.id.startsWith('settings-')), 'Home 无设置元素').toBe(false);
+    // Backpack：无任何 more/settings 入口（backpack 页仅顶部「← 返回车库」）
+    click(env, 'home-garage'); // 进配置页
     click(env, 'nav:backpack');
     expect(env.areas().some((a) => a.id.startsWith('more:')), 'Backpack 无 More 入口').toBe(false);
     expect(env.areas().some((a) => a.id.startsWith('settings-')), 'Backpack 无设置元素').toBe(false);
-    click(env, 'nav:garage'); // 返回车库（Home）后再进 More
-    // More 页：每个入口都有响应（无死按钮）
+    click(env, 'nav:garage'); // 返回 Home
+    click(env, 'home-garage'); // 再进配置页 → More
     click(env, 'nav:more');
+    // More 页：每个入口都有响应（无死按钮）
     for (const id of ['more:task', 'more:shop', 'more:pass']) {
       click(env, id);
       expect(env.areas().some((a) => a.id === 'modal-primary'), `${id} 有响应（Modal）`).toBe(true);

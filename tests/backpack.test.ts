@@ -115,6 +115,11 @@ function items(env: HostEnv): string[] {
 }
 
 function goBackpack(env: HostEnv): void {
+  // F-HOME-1：Home（默认）→ 配置页 → 顶栏「背包」
+  if (env.areas().some((a) => a.id === 'home-garage')) {
+    const homeGarage = env.areas().find((a) => a.id === 'home-garage')!;
+    env.pointer(homeGarage.x + homeGarage.w / 2, homeGarage.y + homeGarage.h / 2);
+  }
   const navBp = env.areas().find((a) => a.id === 'nav:backpack')!;
   env.pointer(navBp.x + navBp.w / 2, navBp.y + navBp.h / 2);
 }
@@ -234,10 +239,10 @@ describe('F-META-3｜Backpack V1 + 合成整合', () => {
     const gItems = items(env);
     expect(gItems.length).toBeGreaterThan(0);
     expect(gItems, 'gadget 过滤下无 weapon 项').not.toContain('cannon');
-    // 离开局外（matching）→ 回 garage（metaPage/backpackFilter 复位）
+    // 离开局外（matching）→ 回 garage（metaPage 复位 Home + backpackFilter 复位）
     env.host.render(state({ playerPhase: 'matching', battleState: 'editing' }));
     env.host.render(state());
-    expect(env.areas().some((a) => a.id === 'entry:body'), '回 Garage 显示车库页').toBe(true);
+    expect(env.areas().some((a) => a.id === 'home-garage'), '回 Garage 默认显示首页（F-HOME-1）').toBe(true);
     expect(env.areas().some((a) => a.id === 'cta-find'), '回 Garage 显示 CTA').toBe(true);
     // 再进 Backpack → 分类复位为「全部」：cannon（weapon）重新可见（gadget 过滤不残留）
     goBackpack(env);

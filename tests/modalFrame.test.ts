@@ -99,6 +99,13 @@ function click(env: HostEnv, id: string): void {
   env.pointer(a!.x + a!.w / 2, a!.y + a!.h / 2);
 }
 
+/** F-HOME-1：Home（默认首页）→ 点「车库」→ 配置页 */
+function goGarage(env: HostEnv): void {
+  const a = env.areas().find((x) => x.id === 'home-garage');
+  expect(a, '首页有「车库」入口').toBeTruthy();
+  env.pointer(a!.x + a!.w / 2, a!.y + a!.h / 2);
+}
+
 const VIEWPORTS = [
   { w: 621, h: 351 },
   { w: 844, h: 390 },
@@ -122,8 +129,8 @@ describe('F-META-4｜通用 Modal / Popup Foundation', () => {
     expect(env.areas().some((a) => a.id === 'modal-primary'), '主按钮出现').toBe(true);
     expect(env.areas().some((a) => a.id === 'modal-secondary'), '次按钮出现').toBe(true);
     expect(env.areas().some((a) => a.id === 'modal-veil'), '遮罩出现').toBe(true);
-    // 底层按钮仍注册（渲染层在）但不可命中——点 entry:body / cta-find 中心 → 无 action 派发
-    const entry = env.areas().find((a) => a.id === 'entry:body');
+    // 底层按钮仍注册（渲染层在）但不可命中——点 home-garage / cta-find 中心 → 无 action 派发
+    const entry = env.areas().find((a) => a.id === 'home-garage');
     expect(entry, '底层按钮仍绘制').toBeTruthy();
     if (entry) env.pointer(entry.x + entry.w / 2, entry.y + entry.h / 2);
     const cta = env.areas().find((a) => a.id === 'cta-find');
@@ -167,6 +174,7 @@ describe('F-META-4｜通用 Modal / Popup Foundation', () => {
   it('验收3｜关闭后页面状态不丢：展开的配置选项面板保持', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(state());
+    goGarage(env); // F-HOME-1：Home → 配置页（原 Garage 状态断言）
     // 展开车身选项（garageSelected=body → options 面板）
     env.host.render(state({ garageSelected: 'body' }));
     expect(env.areas().some((a) => a.id.startsWith('opt:')), '选项面板展开').toBe(true);

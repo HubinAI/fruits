@@ -156,6 +156,13 @@ function areas(env: HostEnv, idPrefix: string) {
   return env.host.getHitAreasForTest().filter((a) => a.id.startsWith(idPrefix));
 }
 
+/** F-HOME-1：Home（默认首页）→ 点「车库」→ 配置页（原 Garage 布局断言用） */
+function goGarage(env: HostEnv): void {
+  const home = env.host.getHitAreasForTest().find((a) => a.id === 'home-garage')!;
+  expect(home, '首页有「车库」入口').toBeTruthy();
+  env.pointer(home.x + home.w / 2, home.y + home.h / 2);
+}
+
 describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
   afterEach(() => {
     bindPlatformCore(createWebCore());
@@ -165,6 +172,7 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     for (const vp of VIEWPORTS.filter((v) => v.mobile)) {
       const env = makeHost(vp, LANDSCAPE_INSETS);
       env.host.render(richGarageState()); // 富库存+金币：merge 可点（非禁用态才注册命中）
+      goGarage(env); // F-HOME-1：Home → 配置页（原 Garage 布局断言）
       // 主分类（2×2）：车身/轮子/驱动/武器——不暴露 frontWheel/rearWheel/武器位一级入口
       // F-META-2：Garage 职责纯化——首屏无合成（合成在 Backpack），只 2×2 主分类 + CTA
       const ids = ['cta-find', 'entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons'];
@@ -209,6 +217,7 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState());
+    goGarage(env); // F-HOME-1：Home → 配置页
     // 点「车身」→ 派发 onToggleGarageSlot('body') → runtime 侧展开
     const entryBody = env.host.getHitAreasForTest().find((a) => a.id === 'entry:body')!;
     env.pointer(entryBody.x + entryBody.w / 2, entryBody.y + entryBody.h / 2);
@@ -250,6 +259,7 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState());
+    goGarage(env); // F-HOME-1：Home → 配置页
     // 改部件：点「车身」入口 → 展开 → 点一个选项（fake 记录 pick）→ 收起
     const entryBody = env.host.getHitAreasForTest().find((a) => a.id === 'entry:body')!;
     env.pointer(entryBody.x + entryBody.w / 2, entryBody.y + entryBody.h / 2);
@@ -284,6 +294,7 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState()); // 富库存：全部 19 个功能件选项可装备（可见）
+    goGarage(env); // F-HOME-1：Home → 配置页
     // 通过「武器」入口 → 选一个武器位 → 展开功能件选项
     const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'entry-weapons')!;
     env.pointer(entryW.x + entryW.w / 2, entryW.y + entryW.h / 2);

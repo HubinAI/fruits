@@ -145,6 +145,14 @@ function rawFor(
   return { rawX: (logicalX * rawWidth) / logicalVW, rawY: (logicalY * rawHeight) / logicalVH };
 }
 
+/** F-HOME-1：Home（默认首页）→ 点「车库」→ 配置页（真实坐标链） */
+function goGarage(env: Env, vp: { w: number; h: number }, dpr: number): void {
+  const home = env.areas().find((a) => a.id === 'home-garage')!;
+  expect(home, '首页有「车库」入口').toBeTruthy();
+  const raw = rawFor(home, vp, dpr, false);
+  env.fireTouch(raw.rawX, raw.rawY);
+}
+
 describe('F-WX-P0-INPUT 微信触控链契约', () => {
   afterEach(() => {
     bindPlatformCore(createWebCore());
@@ -162,6 +170,7 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
       it(`DPR=${dpr} ${vp.w}×${vp.h}：raw 逻辑坐标 → 归一化 → 命中同一 id（F-WX-UI-1 中央面板）`, () => {
         const env = setup(vp, dpr);
         env.host.render(garageState());
+        goGarage(env, vp, dpr); // F-HOME-1：Home → 配置页（原 Garage 面板断言）
         // F-META-2：Garage 无合成入口（合成在 Backpack）；本循环只验证 garage 页交互
         for (const id of ['cta-find', 'entry:body', 'entry-wheels', 'entry-weapons']) {
           const area = env.areas().find((a) => a.id === id);
@@ -214,6 +223,7 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
     const insets: SafeInsets = { left: 44, right: 44, top: 0, bottom: 12 };
     const env = setup(vp, 2, insets);
     env.host.render(garageState());
+    goGarage(env, vp, 2); // F-HOME-1：Home → 配置页
     for (const id of ['cta-find', 'entry:body']) {
       const area = env.areas().find((a) => a.id === id)!;
       expect(area.x, `${id} 起点 ≥ insL`).toBeGreaterThanOrEqual(insets.left);
@@ -274,9 +284,10 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
     const inv: Record<string, { one: number; two: number }> = {};
     for (const p of OFFICIAL_PARTS) inv[p] = { one: 2, two: 1 };
     env.host.render(garageState({ inventory: inv as never, progress: { coin: 600, rating: 20 } }));
-    // Garage 页无任何合成入口/面板
+    goGarage(env, vp, 2); // F-HOME-1：Home → 配置页
+    // 配置页无任何合成入口/面板
     expect(env.areas().some((a) => a.id === 'merge')).toBe(false);
-    // 点装配区次级入口「背包」→ backpack 页（按钮真实坐标命中）
+    // 点配置页顶栏「背包」→ backpack 页（按钮真实坐标命中）
     const navBp = env.areas().find((a) => a.id === 'nav:backpack')!;
     const rawNav = rawFor(navBp, vp, 2, false);
     env.fireTouch(rawNav.rawX, rawNav.rawY);

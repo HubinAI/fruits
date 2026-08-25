@@ -33,6 +33,7 @@ import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/pla
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { BODY_OPTIONS, WHEEL_OPTIONS, encodePartVal } from './playerUI';
 import { resolveLayoutProfile, type LayoutProfile } from './layoutProfile';
+import { computeHomeLayout } from './homeLayout';
 import type {
   PlayerUIHost,
   PlayerUIState,
@@ -92,7 +93,7 @@ interface GarageOpt {
 const ZERO_INSETS: SafeInsets = { left: 0, right: 0, top: 0, bottom: 0 };
 
 /** F-META-1：Main Shell 局外页面（UI-only，不进 Gameplay 状态机） */
-type MetaPage = 'garage' | 'backpack' | 'more';
+type MetaPage = 'home' | 'garage' | 'backpack' | 'more';
 
 /**
  * F-META-6：设置偏好持久化 key（platform.storage，值 '1'/'0'）。
@@ -181,8 +182,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private optScrollFor: string | null = null;
   /** F-WX-UI-1：装配面板视图（home 2×2 分类 / wheelPick 轮子二级 / weaponPick 武器位 / options 选项） */
   private panelView: 'home' | 'wheelPick' | 'weaponPick' | 'options' = 'home';
-  /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机） */
-  private metaPage: MetaPage = 'garage';
+  /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机）；F-HOME-1：默认 Home（正式首页） */
+  private metaPage: MetaPage = 'home';
   /** F-META-6：More 页子视图（功能卡主页 / 设置子页；UI-only，不进 Gameplay） */
   private moreView: 'home' | 'settings' = 'home';
   /** F-META-6：音效开关（UI preference；Runtime 无音效设置接口 → 仅持久化，不接音频） */
@@ -273,7 +274,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.panelScroll = 0;
     }
     // F-META-1：离开局外（进 Matching/Battle/Result）时复位 MetaPage——回 Garage 后默认回车库页
-    if (state.playerPhase !== 'garage') this.metaPage = 'garage';
+    if (state.playerPhase !== 'garage') this.metaPage = 'home'; // F-HOME-1：离开局外回 Home（正式首页）
     // F-META-3：离开局外同时复位 Backpack 分类（回 Garage 默认全部）
     if (state.playerPhase !== 'garage') this.backpackFilter = 'all';
     // F-UX-2C：离开局外同时复位 Backpack 分页（回 Garage 默认第一页）
@@ -376,11 +377,27 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     if (id.startsWith('nav:')) {
       // F-META-1：Main Shell 导航切换（UI-only，不派发 Gameplay action；离开当前页复位面板态）
-      this.metaPage = id.slice(4) as MetaPage;
+      // F-HOME-1：'nav:garage'（Backpack/More 的「返回车库」）→ 回 Home（正式首页）；'nav:home'（配置页返回）
+      const page = id.slice(4) as MetaPage;
+      this.metaPage = page === 'garage' ? 'home' : page;
       this.panelView = 'home';
       this.panelScroll = 0;
       this.moreView = 'home'; // F-META-6：离开 More 复位子视图（下次进入默认功能卡主页）
       this.draw();
+      return;
+    }
+    if (id.startsWith('home-')) {
+      // F-HOME-1：正式首页入口——车库进配置页；排行榜/战令/宝箱槽为占位（「功能开发中」，无假数据页）
+      if (id === 'home-garage') {
+        this.metaPage = 'garage';
+        this.draw();
+        return;
+      }
+      const label =
+        id === 'home-rank' ? '排行榜' : id === 'home-pass' ? '战令' : id.startsWith('home-chest-') ? '宝箱' : '';
+      if (label !== '') {
+        this.showModal({ title: '功能开发中', body: [label], primary: '知道了' });
+      }
       return;
     }
     if (id.startsWith('more:')) {
@@ -897,6 +914,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private drawMobileGarageDock(state: PlayerUIState): void {
     const draft = state.draft;
     if (!draft) return;
+    // F-HOME-1：正式首页（metaPage='home'）不画旧 topBar/配置布局——独立 Home 布局 + 背景
+    if (this.metaPage === 'home') {
+      this.drawHomePage(state);
+      return;
+    }
     // F-WX-UI-F1：唯一布局源——绘制 / HitArea / Preview Camera 全部读取同一份结果，
     // 禁止在此手算 topBar/vehicle/panel/cta 区域（几何规则见 computeMobileGarageLayout）
     // F-WX-MOBILE-RCA-1：布局只基于 logical viewport + profile（DPR 不参与）
@@ -917,6 +939,91 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     } else {
       this.drawGarageMetaPage(state, draft, layout);
     }
+  }
+
+  /**
+   * F-HOME-1：正式小游戏首页——只保留核心模块：
+   * ① 顶部：个人信息（左）+ 宝箱栏 4 槽（右）；② 中上：当前组装车辆展示（renderer previewSolo）；
+   * ③ 中部：寻找对手主按钮（全页最强视觉）；④ 底部：车库 / 排行榜 / 战令 三个辅助入口。
+   * 背景 = drawHomeBackground（渐变 + 装饰，非纯底色）；背包/合成/更多/复杂配置不堆在首页。
+   * 布局唯一源 = computeHomeLayout（Home 模式下 getPreviewFramingRect 同源）。
+   */
+  private drawHomePage(state: PlayerUIState): void {
+    const draft = state.draft;
+    if (!draft) return;
+    this.drawHomeBackground();
+    const L = computeHomeLayout(
+      { w: this.W, h: this.H },
+      { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
+      this.profile,
+    );
+    // ① 顶部：个人信息（左）+ 宝箱栏（右，4 槽）
+    const p = state.progress;
+    const tier = tierOf(p.rating);
+    const tb = L.topBarRect;
+    this.text(`金币 ${p.coin}`, tb.x, tb.y + tb.h / 2, this.isShort ? 13 : 15, C.gold, 'left', 700);
+    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, tb.x + (this.isShort ? 96 : 130), tb.y + tb.h / 2, this.isShort ? 12 : 14, C.textDim);
+    for (let i = 0; i < 4; i++) {
+      const s = L.chestSlot(i);
+      this.rect(s.x, s.y, s.w, s.h, C.panel, C.border, 1);
+      this.text('箱', s.x + s.w / 2, s.y + s.h / 2, this.isShort ? 10 : 12, C.textDim, 'center');
+      this.hit(`home-chest-${i}`, s.x, s.y, s.w, s.h);
+    }
+    // ② 中上：车辆展示台（车辆由 renderer previewSolo 画在 vehicleRect 内；台座给「展示」感）
+    const v = L.vehicleRect;
+    this.rect(v.x, v.y, v.w, v.h, 'rgba(10,14,22,0.35)', C.border, 1);
+    // ③ 中部：寻找对手主按钮（全宽 primary，全页最强视觉焦点）
+    this.button(L.ctaRect.x, L.ctaRect.y, L.ctaRect.w, L.ctaRect.h, 'cta-find', state.draftValid ? '寻找对手' : '配置不合法', {
+      primary: true,
+      disabled: !state.draftValid,
+    });
+    // ④ 底部：三个辅助入口（车库 / 排行榜 / 战令）——明显弱于主 CTA
+    const assists: Array<{ id: string; label: string }> = [
+      { id: 'home-garage', label: '车库' },
+      { id: 'home-rank', label: '排行榜' },
+      { id: 'home-pass', label: '战令' },
+    ];
+    const gap = this.isShort ? 6 : 10;
+    const aw = (L.assistRect.w - gap * (assists.length - 1)) / assists.length;
+    for (let i = 0; i < assists.length; i++) {
+      this.button(L.assistRect.x + i * (aw + gap), L.assistRect.y, aw, L.assistRect.h, assists[i].id, assists[i].label, {});
+    }
+  }
+
+  /** F-HOME-1：首页背景——渐变天空（多段叠加，不依赖 createLinearGradient）+ 光晕 + 远山剪影 + 地面光带（非纯底色） */
+  private drawHomeBackground(): void {
+    const W = this.W;
+    const H = this.H;
+    const bands = ['#0a0d13', '#0e141e', '#141d2b', '#1a2740'];
+    const bh = H / bands.length;
+    for (let i = 0; i < bands.length; i++) this.rect(0, i * bh, W, bh + 1, bands[i]);
+    const ctx = this.ctx;
+    ctx.save();
+    // 光晕（左上 + 右上，半透明圆）
+    for (const [gx, gy, r] of [
+      [W * 0.18, H * 0.3, Math.min(W, H) * 0.34],
+      [W * 0.85, H * 0.26, Math.min(W, H) * 0.28],
+    ] as const) {
+      ctx.beginPath();
+      ctx.arc(this.ox + gx * this.scale, this.oy + gy * this.scale, r * this.scale, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(90,140,240,0.08)';
+      ctx.fill();
+    }
+    // 远山剪影（深色山带）
+    ctx.fillStyle = 'rgba(20,28,44,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(this.ox, this.oy + H * 0.62 * this.scale);
+    ctx.lineTo(this.ox + W * 0.3 * this.scale, this.oy + H * 0.5 * this.scale);
+    ctx.lineTo(this.ox + W * 0.6 * this.scale, this.oy + H * 0.66 * this.scale);
+    ctx.lineTo(this.ox + W * this.scale, this.oy + H * 0.55 * this.scale);
+    ctx.lineTo(this.ox + W * this.scale, this.oy + H * 0.75 * this.scale);
+    ctx.lineTo(this.ox, this.oy + H * 0.75 * this.scale);
+    ctx.closePath();
+    ctx.fill();
+    // 地面光带（底部氛围光）
+    ctx.fillStyle = 'rgba(70,110,200,0.10)';
+    ctx.fillRect(this.ox, this.oy + H * 0.78 * this.scale, W * this.scale, H * 0.22 * this.scale);
+    ctx.restore();
   }
 
   /** F-META-1：garage MetaPage——车辆展示（renderer 画）+ 右侧装配面板 + 主 CTA */
@@ -1132,9 +1239,16 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const uT = topBarRect.y;
     const topH = topBarRect.h;
     this.rect(x0 - 4, uT, w + 8, topH, 'rgba(8,10,14,0.72)', C.border, 1);
+    // F-HOME-1：配置页（garage）顶部最左「‹ 首页」返回小按钮；金币/段位右移让位
+    const homeW = this.metaPage === 'garage' ? (this.isShort ? 44 : 56) : 0;
+    const homeGap = this.metaPage === 'garage' ? 8 : 0;
+    if (homeW > 0) {
+      this.button(x0, uT + (topH - (this.isShort ? 18 : 22)) / 2, homeW, this.isShort ? 18 : 22, 'nav:home', '‹ 首页', {});
+    }
+    const infoX = x0 + homeW + homeGap;
     // 金币（最左）→ 段位（中）→ 能量（右偏）→ [背包][更多] 小按钮（最右，仅 Garage 页）
-    this.text(`金币 ${p.coin}`, x0, uT + topH / 2 + 5, 14, C.gold, 'left', 700);
-    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, x0 + 134, uT + topH / 2 + 5, 14, C.textDim);
+    this.text(`金币 ${p.coin}`, infoX, uT + topH / 2 + 5, 14, C.gold, 'left', 700);
+    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, infoX + 134, uT + topH / 2 + 5, 14, C.textDim);
     let eBarW = Math.min(120, w * 0.2);
     let eBarX = x0 + w - eBarW;
     if (this.metaPage === 'garage') {
@@ -1339,6 +1453,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (!this.isMobile) return null;
     const state = this.lastState;
     if (!state || state.playerPhase !== 'garage' || state.battleState !== 'editing') return null;
+    // F-HOME-1：正式首页车辆展示区 = Home 布局 vehicleRect（与绘制/HitArea 同一份结果）
+    if (this.metaPage === 'home') {
+      return computeHomeLayout(
+        { w: this.W, h: this.H },
+        { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
+        this.profile,
+      ).vehicleRect;
+    }
     // F-WX-UI-F1：车辆取景区 = 唯一布局源 vehicleRect（与绘制/HitArea 完全同一份结果）
     return computeMobileGarageLayout(
       { w: this.W, h: this.H },

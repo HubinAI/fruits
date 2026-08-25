@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { CanvasPlayerUIHost } from '../src/ui/canvasPlayerUIHost';
 import { computeMobileGarageLayout } from '../src/ui/mobileGarageLayout';
+import { computeHomeLayout } from '../src/ui/homeLayout';
 import { bindPlatformCore } from '../src/platform/context';
 import { createWebCore } from '../src/platform/web';
 import { makeStarterDraft } from '../src/lab/buildEditorModel';
@@ -21,17 +22,22 @@ function makeStubCtx(): CanvasRenderingContext2D {
   });
 }
 
+type TestHost = CanvasPlayerUIHost & { pointerForTest?: (x: number, y: number) => void };
+
 function makeHost(
   vp: { w: number; h: number },
   insets: SafeInsets = { left: 0, right: 0, top: 0, bottom: 0 },
   dpr = 1,
-): CanvasPlayerUIHost {
+): TestHost {
+  let captured: ((x: number, y: number) => void) | null = null;
   const core = createWebCore();
   bindPlatformCore({
     ...core,
     input: {
       bindClick: () => {},
-      bindPointer: () => {},
+      bindPointer: (_t: EventTarget, h: (x: number, y: number) => void) => {
+        captured = h;
+      },
     },
     createViewport: () => ({
       surface: () => ({ width: vp.w, height: vp.h, devicePixelRatio: dpr, now: () => 0 }),
@@ -48,7 +54,9 @@ function makeHost(
   const host = new CanvasPlayerUIHost(canvas);
   host.mountCanvas();
   host.setActions({} as never);
-  return host;
+  // F-HOME-1：测试钩子——真实坐标链进配置页（Home → home-garage）
+  (host as TestHost).pointerForTest = (x, y) => captured!(x, y);
+  return host as TestHost;
 }
 
 function garageState(): PlayerUIState {
@@ -164,6 +172,12 @@ describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
     const insets: SafeInsets = { left: 44, right: 20, top: 12, bottom: 16 };
     const host = makeHost({ w: 844, h: 390 }, insets);
     host.render(garageState());
+    // F-HOME-1：默认 Home → 取景区 = Home vehicleRect（首页车辆展示区）
+    const homeLayout = computeHomeLayout({ w: 844, h: 390 }, insets, { mode: 'mobile' } as never);
+    expect(host.getPreviewFramingRect()).toEqual(homeLayout.vehicleRect);
+    // 进配置页 → 取景区 = 配置页 vehicleRect（唯一布局源）
+    const homeBtn = host.getHitAreasForTest().find((a) => a.id === 'home-garage')!;
+    host.pointerForTest?.(homeBtn.x + homeBtn.w / 2, homeBtn.y + homeBtn.h / 2);
     const expected = computeMobileGarageLayout({ w: 844, h: 390 }, insets).vehicleRect;
     const got = host.getPreviewFramingRect();
     expect(got, '非空').not.toBeNull();
@@ -171,6 +185,8 @@ describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
     // resize 语义：host 尺寸变化（新 host 用新 viewport）→ 取景同步变化（同一函数同一输入同一输出）
     const host2 = makeHost({ w: 932, h: 430 }, insets);
     host2.render(garageState());
+    const homeBtn2 = host2.getHitAreasForTest().find((a) => a.id === 'home-garage')!;
+    host2.pointerForTest?.(homeBtn2.x + homeBtn2.w / 2, homeBtn2.y + homeBtn2.h / 2);
     const expected2 = computeMobileGarageLayout({ w: 932, h: 430 }, insets).vehicleRect;
     expect(host2.getPreviewFramingRect()).toEqual(expected2);
     expect(host2.getPreviewFramingRect()!.w).toBeGreaterThan(got!.w);
@@ -180,6 +196,9 @@ describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
     const insets: SafeInsets = { left: 44, right: 20, top: 12, bottom: 16 };
     const host = makeHost({ w: 844, h: 390 }, insets);
     host.render(garageState());
+    // F-HOME-1：Home → 配置页（原 Garage 布局同源断言）
+    const homeBtn = host.getHitAreasForTest().find((a) => a.id === 'home-garage')!;
+    host.pointerForTest?.(homeBtn.x + homeBtn.w / 2, homeBtn.y + homeBtn.h / 2);
     const l = computeMobileGarageLayout({ w: 844, h: 390 }, insets);
     const areas = host.getHitAreasForTest();
     const cta = areas.find((a) => a.id === 'cta-find');

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CanvasPlayerUIHost } from '../src/ui/canvasPlayerUIHost';
-import { computeMobileGarageLayout } from '../src/ui/mobileGarageLayout';
+import { computeHomeLayout } from '../src/ui/homeLayout';
 import { bindPlatformCore } from '../src/platform/context';
 import { createWebCore } from '../src/platform/web';
 import { makeStarterDraft } from '../src/lab/buildEditorModel';
@@ -10,11 +10,12 @@ import type { SafeInsets } from '../src/platform/types';
 import type { PlayerUIState } from '../src/ui/playerUI';
 
 /**
- * F-META-UX1｜删除顶部大导航，Garage 回归唯一 Home：
- * 1. Garage 首屏无三等分顶部导航（nav 行删除；背包/更多为装配区内次级入口，弱于「寻找对手」）；
- * 2. Backpack / More 打开后顶部只提供「← 返回车库」（无全局 Tab），均可进入并返回；
- * 3. 621×351 内容区比旧版（含 nav 行）至少多 48px 高度；
- * 4. Garage 现有功能不回归（2×2 主分类 + CTA 可用）；Battle 状态不残留局外元素。
+ * F-HOME-1｜正式小游戏首页（默认主界面）：
+ * 1. 首页只保留核心模块：寻找对手（主）/ 车辆展示 / 车库 / 排行榜 / 战令 / 宝箱栏 4 槽 / 个人信息；
+ *    —— 背包/合成/更多/复杂配置不堆在首页；
+ * 2. 「车库」→ 配置页（原 Garage：4 配置 + CTA + 顶栏背包/更多小按钮）；「‹ 首页」返回；
+ * 3. Backpack / More 返回 → Home；离开局外回 Home；
+ * 4. 配置页回归：2×2 主分类 + CTA + 车辆位置稳定（原 META-UX1/2B/3 断言保留）。
  */
 
 function makeStubCtx(): CanvasRenderingContext2D {
@@ -58,7 +59,6 @@ function makeHost(
   } as unknown as HTMLCanvasElement;
   const host = new CanvasPlayerUIHost(canvas);
   host.mountCanvas();
-  // F-UX-2B：Garage 配置入口点击走 onToggleGarageSlot（no-op；metaShell 只验证 UI 结构）
   host.setActions({ onToggleGarageSlot: () => {} } as never);
   return {
     host,
@@ -108,138 +108,123 @@ function click(env: HostEnv, id: string): void {
   env.pointer(a!.x + a!.w / 2, a!.y + a!.h / 2);
 }
 
-describe('F-META-UX1｜Garage 唯一 Home（删全局导航）', () => {
-  it('验收1｜Garage 首屏无三等分顶部导航：背包/更多是装配区内次级入口（弱于 CTA），可进入并返回', () => {
-    const env = makeHost({ w: 844, h: 390 }, INSETS);
-    const s = garageState();
-    env.host.render(s);
-    // Garage 只有 2 个次级入口（nav:backpack/nav:more），无 nav:garage（Garage 是 Home，无需返回）
-    const navIds = env.areas().filter((a) => a.id.startsWith('nav:')).map((a) => a.id);
-    expect(navIds.sort(), 'Garage 无三等分导航，仅装配区内背包/更多次级入口').toEqual(['nav:backpack', 'nav:more']);
-    expect(env.areas().some((a) => a.id === 'entry:body'), 'garage 页有车身入口').toBe(true);
-    expect(env.areas().some((a) => a.id === 'cta-find'), 'garage 页有 CTA').toBe(true);
-    // F-UX-3A：次级入口移到顶栏最右两个很小的按钮（高 ≤24，明显弱于配置/CTA）
-    const layout = computeMobileGarageLayout({ w: 844, h: 390 }, INSETS);
-    const subBp = env.areas().find((a) => a.id === 'nav:backpack')!;
-    const subMore = env.areas().find((a) => a.id === 'nav:more')!;
-    expect(subBp.h, '次级入口高 ≤24（很小）').toBeLessThanOrEqual(24);
-    expect(subMore.h, '次级入口高 ≤24（很小）').toBeLessThanOrEqual(24);
-    expect(subBp.y, '次级入口在顶栏内').toBeGreaterThanOrEqual(layout.topBarRect.y);
-    expect(subBp.y + subBp.h, '次级入口在顶栏内（不占配置区行）').toBeLessThanOrEqual(layout.topBarRect.y + layout.topBarRect.h);
-    expect(subBp.y, '次级入口在 CTA 上方（不与 CTA 重叠）').toBeLessThan(layout.ctaRect.y);
-    // 次级入口不与 2×2 配置重叠：配置入口（entry:body）在次级入口下方
-    const entry = env.areas().find((a) => a.id === 'entry:body')!;
-    expect(entry.y, '2×2 配置区在次级入口下方（背包/更多移出配置区）').toBeGreaterThanOrEqual(subBp.y + subBp.h);
-    // 次级入口明显弱于「寻找对手」：CTA 宽 ≥ 两次级入口宽之和
-    const cta = env.areas().find((a) => a.id === 'cta-find')!;
-    expect(cta.w, 'CTA 宽 ≥ 两个次级入口宽之和').toBeGreaterThanOrEqual(subBp.w + subMore.w + 8);
-    // 点「背包」→ backpack 页：顶部有「← 返回车库」，无全局 Tab（无 nav:backpack/nav:more）
-    click(env, 'nav:backpack');
-    expect(env.areas().some((a) => a.id === 'nav:garage'), 'backpack 页有返回车库').toBe(true);
-    expect(env.areas().some((a) => a.id === 'nav:backpack' || a.id === 'nav:more'), 'backpack 页无全局 Tab').toBe(false);
-    expect(env.areas().some((a) => a.id === 'entry:body'), 'backpack 页无车身入口').toBe(false);
-    // 返回车库
-    click(env, 'nav:garage');
-    expect(env.areas().some((a) => a.id === 'entry:body'), '返回后 garage 恢复').toBe(true);
-    expect(env.areas().some((a) => a.id === 'cta-find'), '返回后 CTA 恢复').toBe(true);
-    // 点「更多」→ more 页：顶部有「← 返回车库」，无全局 Tab
-    click(env, 'nav:more');
-    expect(env.areas().some((a) => a.id === 'nav:garage'), 'more 页有返回车库').toBe(true);
-    expect(env.areas().some((a) => a.id === 'nav:backpack' || a.id === 'nav:more'), 'more 页无全局 Tab').toBe(false);
-    click(env, 'nav:garage');
-    expect(env.areas().some((a) => a.id === 'entry:body'), '更多返回后 garage 恢复').toBe(true);
-  });
+/** F-HOME-1：Home → 点「车库」→ 配置页 */
+function goGarage(env: HostEnv): void {
+  click(env, 'home-garage');
+  expect(env.areas().some((a) => a.id === 'entry:body'), '已进入配置页').toBe(true);
+}
 
-  it('验收2｜621×351 内容区比旧版至少多 48px；Garage 无三等分导航；Shell 几何仍来自唯一布局源', () => {
-    const env = makeHost({ w: 621, h: 351 }, INSETS);
-    env.host.render(garageState());
-    const layout = computeMobileGarageLayout({ w: 621, h: 351 }, INSETS);
-    // 内容区直接位于顶栏下方（旧版含 nav 行 → 顶 = topBar+34+8+48+8=110；新版 = 54）
-    expect(layout.contentRect.y, '内容区顶 = topBar 下方').toBe(layout.topBarRect.y + layout.topBarRect.h + 8);
-    const oldBodyTop = INSETS.top + 34 + 8 + 48 + 8;
-    const gain = oldBodyTop - layout.contentRect.y;
-    expect(gain, '621×351 内容区比旧版多 ≥48px').toBeGreaterThanOrEqual(48);
-    // Garage 首屏无三等分导航（无 nav:garage；仅 2 个次级入口）
-    expect(env.areas().some((a) => a.id === 'nav:garage'), 'Garage 无返回车库按钮').toBe(false);
-    expect(env.areas().filter((a) => a.id.startsWith('nav:')).length, 'Garage 仅 2 个次级入口').toBe(2);
-    // 次级入口在顶栏内且不与 CTA 重叠（621 小屏）
-    const sub = env.areas().find((a) => a.id === 'nav:more')!;
-    expect(sub.y + sub.h, '次级入口底 ≤ CTA 顶').toBeLessThanOrEqual(layout.ctaRect.y);
-    expect(sub.y, '次级入口在顶栏内').toBeGreaterThanOrEqual(layout.topBarRect.y);
-    expect(sub.y + sub.h, '次级入口在顶栏内（很小）').toBeLessThanOrEqual(layout.topBarRect.y + layout.topBarRect.h);
-  });
-
-  it('F-UX-2B｜切配置时车辆位置稳定：展开 options 后左侧取景区（vehicleRect）不变', () => {
+describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => {
+  it('验收1｜首页第一眼只有核心模块：寻找对手主按钮 + 车辆展示 + 车库/排行榜/战令 + 宝箱栏；无背包/合成/更多/配置', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(garageState());
-    const before = env.host.getPreviewFramingRect();
-    // 选中车身 → 原右侧区域替换为选项内容（Garage 面板内替换，不触发布局重排）
-    env.host.render(garageState({ garageSelected: 'body' }));
-    expect(env.areas().some((a) => a.id.startsWith('opt:')), '车身选项展开').toBe(true);
-    expect(env.host.getPreviewFramingRect(), '切配置后左侧车辆取景区不变').toEqual(before);
-    // 面板返回（收起选中槽）→ 取景区仍不变
-    env.host.render(garageState());
-    expect(env.host.getPreviewFramingRect(), '收起配置后取景区不变').toEqual(before);
-  });
-
-  it('F-UX-2B｜第一眼层级：配置区只有 4 个配置入口，背包/更多不在配置区同级', () => {
-    const env = makeHost({ w: 844, h: 390 }, INSETS);
-    env.host.render(garageState());
-    // 配置入口恰好 4 个（车身/轮子/驱动/武器）
-    const entries = env.areas().filter((a) => a.id.startsWith('entry')).map((a) => a.id);
-    expect(entries, '配置区只有 4 个配置入口').toHaveLength(4);
-    for (const id of ['entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons']) {
-      expect(entries, `应含配置入口 ${id}`).toContain(id);
+    const ids = env.areas().map((a) => a.id);
+    // 核心模块入口
+    expect(ids, '寻找对手主按钮').toContain('cta-find');
+    for (const id of ['home-garage', 'home-rank', 'home-pass']) {
+      expect(ids, `辅助入口 ${id}`).toContain(id);
     }
-    // 背包/更多（nav:）在配置区顶部上方，不与 2×2 同级
-    const entryY = env.areas().find((a) => a.id === 'entry:body')!.y;
-    const subMore = env.areas().find((a) => a.id === 'nav:more')!;
-    expect(subMore.y + subMore.h, '背包/更多位于配置区上方（移出 2×2）').toBeLessThanOrEqual(entryY);
-    // 次级入口高度 < 配置入口高度（视觉弱于配置）
-    const entryH = env.areas().find((a) => a.id === 'entry:body')!.h;
-    expect(subMore.h, '次级入口矮于配置入口（层级弱化）').toBeLessThan(entryH);
+    for (let i = 0; i < 4; i++) {
+      expect(ids, `宝箱槽 ${i}`).toContain(`home-chest-${i}`);
+    }
+    // 不堆在首页：无背包/合成/更多/配置/导航
+    expect(ids.some((id) => id === 'nav:backpack' || id === 'nav:more' || id === 'nav:garage'), '首页无背包/更多导航').toBe(false);
+    expect(ids.some((id) => id.startsWith('entry:')), '首页无配置入口').toBe(false);
+    expect(ids.some((id) => id === 'merge' || id.startsWith('bfilter:') || id.startsWith('more:')), '首页无背包/合成/更多内容').toBe(false);
+    // 「寻找对手」是首页最强视觉：全宽 primary（宽 ≥ 全部辅助入口之和）
+    const cta = env.areas().find((a) => a.id === 'cta-find')!;
+    const assist = env.areas().find((a) => a.id === 'home-garage')!;
+    const rank = env.areas().find((a) => a.id === 'home-rank')!;
+    const pass = env.areas().find((a) => a.id === 'home-pass')!;
+    expect(cta.w, 'CTA 宽 ≥ 三辅助入口之和').toBeGreaterThanOrEqual(assist.w + rank.w + pass.w);
+    // 车辆展示区存在（Home framingRect 非空且面积大）
+    const homeLayout = computeHomeLayout({ w: 844, h: 390 }, INSETS, { mode: 'mobile' } as never);
+    const v = env.host.getPreviewFramingRect()!;
+    expect(v, 'Home 车辆取景区').toEqual(homeLayout.vehicleRect);
+    expect(v.h, '车辆展示区高（明显可见）').toBeGreaterThanOrEqual(80);
   });
 
-  it('验收3｜Garage 职责纯化（只配置/开战，无合成）；Backpack 合成走 Modal 且可返回', () => {
+  it('验收2｜首页只回答核心动作：点「车库」进配置页，「‹ 首页」返回；排行榜/战令/宝箱弹「功能开发中」', () => {
+    const env = makeHost({ w: 844, h: 390 }, INSETS);
+    env.host.render(garageState());
+    // 车库 → 配置页（原 Garage 布局回归：4 配置 + CTA + 顶栏背包/更多）
+    click(env, 'home-garage');
+    const ids = env.areas().map((a) => a.id);
+    for (const id of ['entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {
+      expect(ids, `配置页应含 ${id}`).toContain(id);
+    }
+    // 「‹ 首页」返回 Home
+    click(env, 'nav:home');
+    expect(env.areas().some((a) => a.id === 'home-garage'), '返回首页').toBe(true);
+    expect(env.areas().some((a) => a.id === 'entry:body'), '首页无配置入口').toBe(false);
+    // 排行榜 / 战令 / 宝箱槽 → 「功能开发中」（无假数据页）
+    for (const id of ['home-rank', 'home-pass', 'home-chest-0', 'home-chest-3']) {
+      click(env, id);
+      expect(env.areas().some((a) => a.id === 'modal-veil'), `${id} 弹占位 Modal`).toBe(true);
+      click(env, 'modal-primary'); // 知道了 → 关闭
+      expect(env.areas().some((a) => a.id === 'modal-veil'), `${id} Modal 关闭`).toBe(false);
+      expect(env.areas().some((a) => a.id === 'home-garage'), '仍在首页').toBe(true);
+    }
+  });
+
+  it('验收3｜Backpack / More 经配置页进入并返回 Home；返回后首页恢复（无配置残留）', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(richState());
-    // Garage 只处理配置：2×2 入口 + CTA 可用
-    const entry = env.areas().find((a) => a.id === 'entry:body')!;
-    expect(entry.h, '入口高 ≥48').toBeGreaterThanOrEqual(48);
-    expect(env.areas().some((a) => a.id === 'cta-find'), 'Garage 有 CTA').toBe(true);
-    expect(env.areas().some((a) => a.id === 'merge'), 'Garage 无任何合成入口').toBe(false);
-    // 装配区次级入口 → Backpack：合成入口 → Modal（不切换全屏页面）→ 取消 → 返回车库
+    goGarage(env);
+    // 配置页顶栏「背包」→ Backpack（合成入口在）
+    click(env, 'nav:backpack');
+    expect(env.areas().some((a) => a.id === 'merge'), 'Backpack 有合成入口').toBe(true);
+    // 返回（nav:garage）→ Home（非配置页）
+    click(env, 'nav:garage');
+    expect(env.areas().some((a) => a.id === 'home-garage'), '返回首页').toBe(true);
+    expect(env.areas().some((a) => a.id === 'merge' || a.id.startsWith('entry:')), '首页无配置/合成残留').toBe(false);
+    // 配置页顶栏「更多」→ More → 返回 Home
+    goGarage(env);
+    click(env, 'nav:more');
+    expect(env.areas().some((a) => a.id === 'more:task'), 'More 页有入口').toBe(true);
+    click(env, 'nav:garage');
+    expect(env.areas().some((a) => a.id === 'home-garage'), '返回首页').toBe(true);
+  });
+
+  it('验收4｜配置页回归：合成走 Modal 且可返回；车辆位置稳定（切配置不跳）', () => {
+    const env = makeHost({ w: 844, h: 390 }, INSETS);
+    env.host.render(richState());
+    goGarage(env);
+    // 配置页无合成（Garage 职责纯化）
+    expect(env.areas().some((a) => a.id === 'merge'), '配置页无合成入口').toBe(false);
+    // Backpack 合成 Modal
     click(env, 'nav:backpack');
     const merge = env.areas().find((a) => a.id === 'merge')!;
     expect(merge.h, '合成入口高 ≥48').toBeGreaterThanOrEqual(48);
     click(env, 'merge');
-    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 出现（不再是全屏面板）').toBe(true);
-    expect(env.areas().some((a) => a.id === 'modal-primary'), '合成主按钮出现').toBe(true);
-    click(env, 'modal-secondary'); // 取消（metaShell 无 onMerge 实现，不派发）
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 出现').toBe(true);
+    click(env, 'modal-secondary'); // 取消
     expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 关闭').toBe(false);
     expect(env.areas().some((a) => a.id === 'merge'), '仍停留 Backpack').toBe(true);
-    // 顶部「← 返回车库」→ 回 Garage（仍无合成）
+    // 返回 Home
     click(env, 'nav:garage');
-    expect(env.areas().some((a) => a.id === 'entry:body'), '返回后 garage 恢复').toBe(true);
-    expect(env.areas().some((a) => a.id === 'merge'), '回 Garage 仍无合成').toBe(false);
+    expect(env.areas().some((a) => a.id === 'home-garage'), '返回首页').toBe(true);
+    // 车辆位置稳定：配置页内切配置 → 取景区不变
+    goGarage(env);
+    const before = env.host.getPreviewFramingRect();
+    env.host.render(garageState({ garageSelected: 'body' }));
+    expect(env.areas().some((a) => a.id.startsWith('opt:')), '车身选项展开').toBe(true);
+    expect(env.host.getPreviewFramingRect(), '切配置后取景区不变').toEqual(before);
   });
 
-  it('验收4｜Battle 状态不残留局外元素；回 Garage 默认回车库页（Home）', () => {
+  it('验收5｜离开局外回 Garage 默认回 Home；Battle 状态不残留局外元素', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
-    // 先进 Backpack，验证离开局外后复位
     env.host.render(garageState());
-    click(env, 'nav:backpack');
-    expect(env.areas().some((a) => a.id === 'entry:body'), 'backpack 页无入口').toBe(false);
-    // 进入 matching（离开 garage）→ 无任何局外元素（无 nav 次级入口 / 配置入口）
+    goGarage(env);
+    // 进入 matching（离开 garage）→ 无任何局外元素
     env.host.render(garageState({ playerPhase: 'matching', battleState: 'editing' }));
-    expect(env.areas().some((a) => a.id.startsWith('nav:')), 'matching 无局外导航/次级入口').toBe(false);
-    expect(env.areas().some((a) => a.id.startsWith('entry:')), 'matching 无配置入口').toBe(false);
-    // 回 garage → metaPage 已复位为 garage（默认回车库页 Home）
+    expect(env.areas().some((a) => a.id.startsWith('nav:') || a.id.startsWith('entry:') || a.id.startsWith('home-')), 'matching 无局外元素').toBe(false);
+    // 回 garage → metaPage 复位为 home（默认首页）
     env.host.render(garageState());
-    expect(env.areas().some((a) => a.id === 'entry:body'), '回 garage 显示车库页').toBe(true);
-    expect(env.areas().some((a) => a.id === 'cta-find'), '回 garage 显示 CTA').toBe(true);
-    // 再进 battle（fighting）→ 仍无局外元素
+    expect(env.areas().some((a) => a.id === 'home-garage'), '回 garage 显示首页').toBe(true);
+    expect(env.areas().some((a) => a.id === 'entry:body'), '首页无配置入口').toBe(false);
+    // 进 battle（fighting）→ 仍无局外元素
     env.host.render(garageState({ playerPhase: 'matchPreview', battleState: 'fighting' }));
-    expect(env.areas().some((a) => a.id.startsWith('nav:')), 'battle 无局外导航/次级入口').toBe(false);
+    expect(env.areas().some((a) => a.id.startsWith('nav:') || a.id.startsWith('home-')), 'battle 无局外元素').toBe(false);
   });
 });

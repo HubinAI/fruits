@@ -197,21 +197,26 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
     expect(hostSrc).toContain('size * this.fontScale');
   });
 
-  it('验收4｜全屏溢出守卫：Garage / Backpack / More / Modal / Result 主要 UI rect 全在 safe 内（5 屏）', () => {
+  it('验收4｜全屏溢出守卫：Home / Backpack / More / Modal / Result 主要 UI rect 全在 safe 内（5 屏）', () => {
     for (const vp of VIEWPORTS.slice(0, 5)) {
       const env = makeHost(vp, INSETS);
-      // Garage（装配区次级入口 + CTA + 2×2）
+      // F-HOME-1：Home（正式首页：CTA + 三辅助入口 + 宝箱 4 槽）
       env.host.render(garageState());
+      assertAllInSafe(env, vp, INSETS, `Home ${vp.w}×${vp.h}`);
+      // 配置页（garage：2×2 + CTA + 顶栏背包/更多/‹首页）
+      click(env, 'home-garage');
       assertAllInSafe(env, vp, INSETS, `Garage ${vp.w}×${vp.h}`);
       // Backpack（返回 + tabs + 列表 + 合成入口）
       click(env, 'nav:backpack');
       assertAllInSafe(env, vp, INSETS, `Backpack ${vp.w}×${vp.h}`);
       // More（返回 + 2×2 功能卡）
-      click(env, 'nav:garage');
+      click(env, 'nav:garage'); // 回 Home
+      click(env, 'home-garage'); // 进配置页
       click(env, 'nav:more');
       assertAllInSafe(env, vp, INSETS, `More ${vp.w}×${vp.h}`);
       // Modal（合成说明 Modal：遮罩+主/次按钮）
-      click(env, 'nav:garage');
+      click(env, 'nav:garage'); // 回 Home
+      click(env, 'home-garage'); // 进配置页
       click(env, 'nav:backpack');
       click(env, 'merge');
       assertAllInSafe(env, vp, INSETS, `Modal ${vp.w}×${vp.h}`);
@@ -230,16 +235,31 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
     }
   });
 
-  it('验收5｜360×180 极限屏 Garage 首屏可交互：2×2 入口 / CTA / 次级入口全部在屏内且不重叠', () => {
+  it('验收5｜360×180 极限屏首页可交互：CTA / 三辅助入口 / 宝箱 4 槽全部在屏内且不重叠；配置页同样无溢出', () => {
     const env = makeHost({ w: 360, h: 180 }, INSETS);
     env.host.render(garageState());
-    for (const id of ['entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons', 'cta-find', 'nav:backpack', 'nav:more']) {
+    // F-HOME-1：Home 首屏核心入口
+    for (const id of ['cta-find', 'home-garage', 'home-rank', 'home-pass', 'home-chest-0', 'home-chest-3']) {
       const a = env.areas().find((x) => x.id === id);
-      expect(a, `360×180 应有 ${id}`).toBeTruthy();
+      expect(a, `360×180 首页应有 ${id}`).toBeTruthy();
+      expect(a!.x, `${id} x ≥ safeLeft`).toBeGreaterThanOrEqual(INSETS.left);
+      expect(a!.x + a!.w, `${id} 右缘 ≤ safeRight`).toBeLessThanOrEqual(360 - INSETS.right + 0.5);
+      expect(a!.y, `${id} y ≥ safeTop`).toBeGreaterThanOrEqual(INSETS.top);
+      expect(a!.y + a!.h, `${id} 底缘 ≤ safeBottom`).toBeLessThanOrEqual(180 - INSETS.bottom + 0.5);
     }
-    // 主 CTA 在次级入口下方且两者不重叠（操作组完整）
+    // 主 CTA 在辅助入口上方且两者不重叠（操作组完整）
     const cta = env.areas().find((x) => x.id === 'cta-find')!;
-    const sub = env.areas().find((x) => x.id === 'nav:more')!;
-    expect(cta.y, 'CTA 在次级入口下方').toBeGreaterThanOrEqual(sub.y + sub.h);
+    const assist = env.areas().find((x) => x.id === 'home-garage')!;
+    expect(assist.y, '辅助入口在 CTA 下方').toBeGreaterThanOrEqual(cta.y + cta.h);
+    // 配置页（360×180 极限屏）同样全在 safe 内
+    click(env, 'home-garage');
+    for (const id of ['entry:body', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {
+      const a = env.areas().find((x) => x.id === id);
+      expect(a, `360×180 配置页应有 ${id}`).toBeTruthy();
+      expect(a!.x, `${id} x ≥ safeLeft`).toBeGreaterThanOrEqual(INSETS.left);
+      expect(a!.x + a!.w, `${id} 右缘 ≤ safeRight`).toBeLessThanOrEqual(360 - INSETS.right + 0.5);
+      expect(a!.y, `${id} y ≥ safeTop`).toBeGreaterThanOrEqual(INSETS.top);
+      expect(a!.y + a!.h, `${id} 底缘 ≤ safeBottom`).toBeLessThanOrEqual(180 - INSETS.bottom + 0.5);
+    }
   });
 });
