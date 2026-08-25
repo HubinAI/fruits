@@ -907,14 +907,16 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /**
-   * F-META-UX1：Garage 装配区内次级入口行（背包/更多）——明显弱于主 CTA「寻找对手」
-   * （普通面板按钮 vs primary 全宽大按钮）。面板内容区（2×2/选项/二级）高度已预留此行。
+   * F-UX-2B：Garage 装配区顶部右侧两个小型次级入口（背包/更多）——
+   * 明显弱于 2×2 配置与「寻找对手」主 CTA（矮 + 小宽 + 非 primary + 右对齐）。
+   * 面板内容区（2×2/选项/二级）高度已预留此行。
    */
   private drawGarageSubEntries(panelRect: Rect, subY: number, subH: number): void {
     const gap = 8;
-    const subW = Math.floor((panelRect.w - 24 - gap) / 2);
-    this.button(panelRect.x + 12, subY, subW, subH, 'nav:backpack', '背包', {});
-    this.button(panelRect.x + 12 + subW + gap, subY, subW, subH, 'nav:more', '更多', {});
+    const bw = Math.min(80, Math.floor((panelRect.w - 24 - gap) / 2));
+    const right = panelRect.x + panelRect.w - 12;
+    this.button(right - bw * 2 - gap, subY, bw, subH, 'nav:backpack', '背包', {});
+    this.button(right - bw, subY, bw, subH, 'nav:more', '更多', {});
   }
 
   /** F-META-1：garage MetaPage——车辆展示（renderer 画）+ 右侧装配面板 + 主 CTA */
@@ -938,13 +940,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 装配面板（右侧中央；绘制与 HitArea 均基于 panelRect；F-META-2：Garage 无合成，
     // 只处理配置——选中槽选项 / 轮子二级 / 武器二级 / 2×2 主分类）
     this.rect(panelRect.x, panelRect.y, panelRect.w, panelRect.h, C.dockBg, C.border, 1);
-    // F-META-UX1：面板底部预留次级入口行（背包/更多），内容区在其上方；
+    // F-UX-2B：次级入口（背包/更多）移到面板顶部右侧小按钮，移出 2×2 配置区；
+    // 配置内容区（2×2/选项/二级）在其下方，高度已预留此行。
     // F-WX-MOBILE-RCA-1：short 档更紧凑（padY/gap 缩小，内容区由 availableH 反推）
-    const subH = this.isShort ? 28 : this.minTouchH;
-    const subGap = this.isShort ? 6 : 8;
+    const subH = this.isShort ? 30 : 40;
+    const subGap = this.isShort ? 4 : 8;
     const padY = this.isShort ? 6 : 10;
-    const py = panelRect.y + padY;
-    const pH = Math.max(1, panelRect.h - 2 * padY - subH - subGap);
+    this.drawGarageSubEntries(panelRect, panelRect.y + padY, subH);
+    const py = panelRect.y + padY + subH + subGap;
+    const pH = Math.max(1, panelRect.h - padY - subH - subGap - padY);
     if (state.garageSelected) {
       this.drawGaragePanelOptions(state, draft, panelRect.x, panelRect.w, py, pH);
     } else if (this.panelView === 'wheelPick') {
@@ -954,8 +958,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     } else {
       this.drawGaragePanelHome(draft, panelRect.x, panelRect.w, py, pH);
     }
-    // 底部：背包/更多 次级入口（明显弱于「寻找对手」主 CTA）
-    this.drawGarageSubEntries(panelRect, py + pH + subGap, subH);
   }
 
   /**

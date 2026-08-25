@@ -58,7 +58,8 @@ function makeHost(
   } as unknown as HTMLCanvasElement;
   const host = new CanvasPlayerUIHost(canvas);
   host.mountCanvas();
-  host.setActions({} as never);
+  // F-UX-2B：Garage 配置入口点击走 onToggleGarageSlot（no-op；metaShell 只验证 UI 结构）
+  host.setActions({ onToggleGarageSlot: () => {} } as never);
   return {
     host,
     pointer: (x, y) => captured!(x, y),
@@ -117,14 +118,17 @@ describe('F-META-UX1｜Garage 唯一 Home（删全局导航）', () => {
     expect(navIds.sort(), 'Garage 无三等分导航，仅装配区内背包/更多次级入口').toEqual(['nav:backpack', 'nav:more']);
     expect(env.areas().some((a) => a.id === 'entry:body'), 'garage 页有车身入口').toBe(true);
     expect(env.areas().some((a) => a.id === 'cta-find'), 'garage 页有 CTA').toBe(true);
-    // 次级入口在装配面板底部区域（y ≥ panelRect 内 2×2 卡片区之后），且高 ≥48
+    // F-UX-2B：次级入口在装配面板顶部区域（顶部右侧小按钮，不在配置区），且高 ≥30（弱于配置）
     const layout = computeMobileGarageLayout({ w: 844, h: 390 }, INSETS);
     const subBp = env.areas().find((a) => a.id === 'nav:backpack')!;
     const subMore = env.areas().find((a) => a.id === 'nav:more')!;
-    expect(subBp.h, '次级入口高 ≥48').toBeGreaterThanOrEqual(48);
-    expect(subMore.h, '次级入口高 ≥48').toBeGreaterThanOrEqual(48);
-    expect(subBp.y, '次级入口在面板底部区域').toBeGreaterThanOrEqual(layout.panelRect.y + layout.panelRect.h - 70);
+    expect(subBp.h, '次级入口高 ≥30').toBeGreaterThanOrEqual(30);
+    expect(subMore.h, '次级入口高 ≥30').toBeGreaterThanOrEqual(30);
+    expect(subBp.y, '次级入口在面板顶部区域').toBeLessThanOrEqual(layout.panelRect.y + 48);
     expect(subBp.y, '次级入口在 CTA 上方（不与 CTA 重叠）').toBeLessThan(layout.ctaRect.y);
+    // 次级入口不与 2×2 配置重叠：配置入口（entry:body）在次级入口下方
+    const entry = env.areas().find((a) => a.id === 'entry:body')!;
+    expect(entry.y, '2×2 配置区在次级入口下方（背包/更多移出配置区）').toBeGreaterThanOrEqual(subBp.y + subBp.h);
     // 次级入口明显弱于「寻找对手」：CTA 宽 ≥ 两次级入口宽之和
     const cta = env.areas().find((a) => a.id === 'cta-find')!;
     expect(cta.w, 'CTA 宽 ≥ 两个次级入口宽之和').toBeGreaterThanOrEqual(subBp.w + subMore.w + 8);
@@ -157,10 +161,41 @@ describe('F-META-UX1｜Garage 唯一 Home（删全局导航）', () => {
     // Garage 首屏无三等分导航（无 nav:garage；仅 2 个次级入口）
     expect(env.areas().some((a) => a.id === 'nav:garage'), 'Garage 无返回车库按钮').toBe(false);
     expect(env.areas().filter((a) => a.id.startsWith('nav:')).length, 'Garage 仅 2 个次级入口').toBe(2);
-    // 次级入口在面板底部且不与 CTA 重叠（621 小屏）
+    // 次级入口在面板内且不与 CTA 重叠（621 小屏）
     const sub = env.areas().find((a) => a.id === 'nav:more')!;
     expect(sub.y + sub.h, '次级入口底 ≤ CTA 顶').toBeLessThanOrEqual(layout.ctaRect.y);
     expect(sub.y, '次级入口 y ≥ panel 顶').toBeGreaterThanOrEqual(layout.panelRect.y);
+  });
+
+  it('F-UX-2B｜切配置时车辆位置稳定：展开 options 后左侧取景区（vehicleRect）不变', () => {
+    const env = makeHost({ w: 844, h: 390 }, INSETS);
+    env.host.render(garageState());
+    const before = env.host.getPreviewFramingRect();
+    // 选中车身 → 原右侧区域替换为选项内容（Garage 面板内替换，不触发布局重排）
+    env.host.render(garageState({ garageSelected: 'body' }));
+    expect(env.areas().some((a) => a.id.startsWith('opt:')), '车身选项展开').toBe(true);
+    expect(env.host.getPreviewFramingRect(), '切配置后左侧车辆取景区不变').toEqual(before);
+    // 面板返回（收起选中槽）→ 取景区仍不变
+    env.host.render(garageState());
+    expect(env.host.getPreviewFramingRect(), '收起配置后取景区不变').toEqual(before);
+  });
+
+  it('F-UX-2B｜第一眼层级：配置区只有 4 个配置入口，背包/更多不在配置区同级', () => {
+    const env = makeHost({ w: 844, h: 390 }, INSETS);
+    env.host.render(garageState());
+    // 配置入口恰好 4 个（车身/轮子/驱动/武器）
+    const entries = env.areas().filter((a) => a.id.startsWith('entry')).map((a) => a.id);
+    expect(entries, '配置区只有 4 个配置入口').toHaveLength(4);
+    for (const id of ['entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons']) {
+      expect(entries, `应含配置入口 ${id}`).toContain(id);
+    }
+    // 背包/更多（nav:）在配置区顶部上方，不与 2×2 同级
+    const entryY = env.areas().find((a) => a.id === 'entry:body')!.y;
+    const subMore = env.areas().find((a) => a.id === 'nav:more')!;
+    expect(subMore.y + subMore.h, '背包/更多位于配置区上方（移出 2×2）').toBeLessThanOrEqual(entryY);
+    // 次级入口高度 < 配置入口高度（视觉弱于配置）
+    const entryH = env.areas().find((a) => a.id === 'entry:body')!.h;
+    expect(subMore.h, '次级入口矮于配置入口（层级弱化）').toBeLessThan(entryH);
   });
 
   it('验收3｜Garage 职责纯化（只配置/开战，无合成）；Backpack 合成走 Modal 且可返回', () => {
