@@ -146,6 +146,8 @@ interface ModalSpec {
   tertiary?: { label: string; disabled?: boolean; onPress?: () => void };
   /** F-META-UX2：主按钮禁用（不注册命中；如合成条件不满足时显示原因但不可执行） */
   primaryDisabled?: boolean;
+  /** F-UX-2D：大尺寸档（Result 结算层）——占 viewport 70~80% 宽 / 60~75% 高（short 用满 safe） */
+  large?: boolean;
   onPrimary?: () => void;
   onSecondary?: () => void;
 }
@@ -1670,6 +1672,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       partCard: state.reward
         ? { name: state.reward.name, starStr: state.reward.starStr, count: state.reward.countAfter }
         : undefined,
+      // F-UX-2D：Result 是最终决策层——大尺寸档（明显放大）
+      large: true,
       primary: '下一场',
       secondary: '调整配置',
       tertiary: state.rewardAdAvailable
@@ -1701,6 +1705,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * + partCard 独立部件卡。
    * F-WX-MOBILE-RCA-1：卡片必须完整落在 safe area——short 极限屏下行高自适应压缩、
    * cy 取「居中」与「safe 内」的交集（宁可顶到 safeTop 也不溢出）。
+   * F-UX-2D：`large`（Result）明显放大——normal 约占 viewport 70~80% 宽 / 60~75% 高；
+   * short 尽可能用 safe viewport 但保留边距。内容锚点恒定（胜/负→奖励→部件→按钮），
+   * 多余高度作为留白，按钮行贴卡片底部——形成明确的最终决策层。
    */
   private drawModal(spec: ModalSpec): void {
     const W = this.W;
@@ -1709,7 +1716,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.rect(0, 0, W, H, C.overlayBg);
     this.hit('modal-veil', 0, 0, W, H);
     // 居中卡片（尺寸自适应：标题 + 内容 + 按钮；short 档整体紧凑，保证 safe 内完整）
-    const cardW = Math.min(420, W - this.insL - this.insR - 40);
+    // F-UX-2D：large（Result）放大到 viewport 比例；普通 Modal（合成/占位等）保持小尺寸
+    const large = !!spec.large;
+    const cardW = large
+      ? Math.min(W - this.insL - this.insR - (this.isShort ? 24 : 32), W * (this.isShort ? 0.9 : 0.78))
+      : Math.min(420, W - this.insL - this.insR - 40);
     const rewardRowH = this.isShort ? 14 : 26;
     const titleH = this.isShort ? 24 : 40;
     const btnH = this.isShort ? Math.min(this.targetTouchH, 36) : this.targetTouchH;
@@ -1720,12 +1731,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const fixedH = pad + titleH + (spec.rewardRows?.length ?? 0) * rewardRowH + partH + partGap + (this.isShort ? 4 : 10) + btnH + pad;
     const availBodyH = H - this.insT - this.insB - fixedH;
     const rowH = spec.body.length > 0 ? Math.max(12, Math.min(22, availBodyH / spec.body.length)) : 22;
-    const cardH = fixedH + spec.body.length * rowH;
+    const contentH = fixedH + spec.body.length * rowH;
+    // large：最小高 = viewport 60~75%（normal）/ ~82%（short 尽量用满 safe）；内容不足时留白
+    const cardH = large ? Math.max(contentH, Math.floor(H * (this.isShort ? 0.82 : 0.62))) : contentH;
     const cx = Math.max(this.insL, Math.min((W - cardW) / 2, W - this.insR - cardW));
     const cy = Math.max(this.insT, Math.min((H - cardH) / 2, H - this.insB - cardH));
     this.rect(cx, cy, cardW, cardH, C.dockBg, C.border, 1);
     // ① 顶部：标题（胜利/失败）
-    this.text(spec.title, cx + cardW / 2, cy + pad + titleH / 2, 20, C.text, 'center', 700);
+    this.text(spec.title, cx + cardW / 2, cy + pad + titleH / 2, large ? (this.isShort ? 20 : 28) : 20, C.text, 'center', 700);
     let yy = cy + pad + titleH + 4;
     // ② 中部：body 文字行（onboarding 引导等）
     for (const line of spec.body) {
@@ -1760,7 +1773,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     // ③ 底部：按钮行（次按钮左 / 主按钮右；有 tertiary 时三列）
     // F-META-UX2：primaryDisabled → 主按钮禁用（不注册命中，显示原因文案）
-    const by = yy + 2;
+    // F-UX-2D：large 时按钮行贴卡片底部（内容顶部排、多余高度留白 → 明确的最终决策层）
+    const by = large ? cy + cardH - pad - btnH : yy + 2;
     const gap = 10;
     const bw3 = (cardW - 2 * pad - 2 * gap) / 3;
     if (spec.secondary && spec.tertiary) {

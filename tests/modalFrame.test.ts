@@ -233,4 +233,43 @@ describe('F-META-4｜通用 Modal / Popup Foundation', () => {
       }
     }
   });
+
+  it('F-UX-2D｜Result 大尺寸档：showResultModal 传 large；drawModal 按 viewport 比例放大；按钮贴底', () => {
+    const src = require('fs').readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
+    const resultMethod = src.slice(src.indexOf('private showResultModal'), src.indexOf('showModal(spec: ModalSpec): void'));
+    expect(resultMethod, 'Result 走大尺寸档').toContain('large: true');
+    const modalMethod = src.slice(src.indexOf('private drawModal'), src.indexOf('private drawReadyOverlay'));
+    expect(modalMethod).toContain('const large = !!spec.large');
+    // normal：宽 ×0.78（70~80%）、高 ×0.62（60~75%）；short：宽 ×0.9 / 高 ×0.82（safe 用满留边距）
+    expect(modalMethod).toContain('0.78');
+    expect(modalMethod).toContain('0.62');
+    expect(modalMethod).toContain('0.9');
+    expect(modalMethod).toContain('0.82');
+    // 按钮行贴卡片底部（明确最终决策层）
+    expect(modalMethod).toContain('const by = large ? cy + cardH - pad - btnH : yy + 2;');
+  });
+
+  it('F-UX-2D｜Result large 在 621×351 / 844×390 下按钮全在屏内且明显放大（一屏决策层）', () => {
+    for (const vp of VIEWPORTS) {
+      const env = makeHost(vp, INSETS);
+      env.host.render(
+        state({
+          playerPhase: 'matchPreview',
+          battleState: 'ended',
+          result: { winner: 'A', hpA: 100, hpB: 0 },
+          reward: { name: '榴莲炮', starStr: '★★', cat: 'weapon', countAfter: 2 },
+          economy: { coinDelta: 50, ratingDelta: 12, tierLabel: '青铜', rating: 212, coin: 150 },
+        }),
+      );
+      const p = env.areas().find((x) => x.id === 'modal-primary')!;
+      const s = env.areas().find((x) => x.id === 'modal-secondary')!;
+      // 两个下一步按钮清楚（主在次右、均屏内、高 ≥36）
+      expect(p.x, '主按钮在次按钮右侧').toBeGreaterThanOrEqual(s.x + s.w);
+      expect(p.h, '主按钮高 ≥36').toBeGreaterThanOrEqual(36);
+      for (const a of [p, s]) {
+        expect(a.x + a.w, `${vp.w}×${vp.h} 按钮右缘 ≤ 屏宽`).toBeLessThanOrEqual(vp.w);
+        expect(a.y + a.h, `${vp.w}×${vp.h} 按钮底缘 ≤ 屏高`).toBeLessThanOrEqual(vp.h);
+      }
+    }
+  });
 });
