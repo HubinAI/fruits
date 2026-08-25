@@ -695,16 +695,22 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.drawGarageDock(state);
       } else if (state.playerPhase === 'matching') {
         // F-META-UX3：Matching 连续画面（搜索中）
-        this.drawPlayerTop('正在寻找对手…');
+        // F-PREBATTLE-P0：Mobile 正式流程只保留连续页（drawMatchingContinuum 内含单一状态文字）；
+        // 旧顶部状态条（drawPlayerTop）仅 Desktop/Test 保留，Mobile 不绘制（避免与连续页中央状态重复）。
+        if (!this.isMobile) this.drawPlayerTop('正在寻找对手…');
         this.drawMatchingContinuum(state);
       } else if (state.playerPhase === 'matchPreview') {
         // F-META-UX3：同一画面（已锁定）——只变对手内容与状态，不改变布局锚点
-        this.drawPlayerTop('对手已锁定');
+        if (!this.isMobile) this.drawPlayerTop('对手已锁定');
         this.drawMatchingContinuum(state);
-        if (!state.matchBarHidden) this.drawMatchBar();
+        // matchBar（调整配置/开始战斗 复核条）仅 Desktop/Test 显示；Mobile 正式流程不显示
+        // （不新增确认按钮；Locked 后短暂停留由 runtime 直接自动 Battle）。
+        if (!this.isMobile && !state.matchBarHidden) this.drawMatchBar();
       }
     }
-    if (state.readyOverlayVisible) this.drawReadyOverlay();
+    // F-PREBATTLE-P0：READY 过渡层（READY / 开战！）仅 Desktop/Test 显示；
+    // Mobile 正式流程锁定后短暂停留直接自动 Battle，不叠加 READY/开战 覆盖层。
+    if (state.readyOverlayVisible && !this.isMobile) this.drawReadyOverlay();
     // F-META-4：Modal 覆盖层（最后绘制 → 最上层；遮罩拦截底层点击）
     if (this.modal) this.drawModal(this.modal);
   }

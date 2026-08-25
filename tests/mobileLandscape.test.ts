@@ -362,16 +362,14 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const env = makeHost(vp, LANDSCAPE_INSETS);
     // Matching
     expect(() => env.host.render(garageState({ playerPhase: 'matching' }))).not.toThrow();
-    // MatchPreview + matchBar
+    // MatchPreview + matchBar（Mobile 正式流程不显示复核条，无确认按钮）
     expect(() =>
       env.host.render(garageState({ playerPhase: 'matchPreview', matchBarHidden: false, opponent: { bodyName: '西瓜', parts: ['炮'], drive: '前进' } })),
     ).not.toThrow();
-    for (const id of ['match-adjust', 'match-start']) {
-      const a = env.host.getHitAreasForTest().find((x) => x.id === id);
-      expect(a, `应有 ${id}`).toBeTruthy();
-      expect(a!.h).toBeGreaterThanOrEqual(40);
-      expect(a!.y + a!.h).toBeLessThanOrEqual(vp.h);
-    }
+    // F-PREBATTLE-P0：Mobile 即便 matchBarHidden=false 也不注册 match-adjust/match-start（禁止新增确认按钮）
+    const ids = env.host.getHitAreasForTest().map((a) => a.id);
+    expect(ids, 'Mobile 不应有调整配置按钮').not.toContain('match-adjust');
+    expect(ids, 'Mobile 不应有开始战斗按钮').not.toContain('match-start');
     // Battle HUD + READY
     expect(() => {
       env.host.render({ ...garageState(), battleState: 'fighting' });
