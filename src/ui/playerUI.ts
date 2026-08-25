@@ -75,6 +75,12 @@ export interface PlayerUIState {
   resetDevVisible: boolean;
   // —— Matching / MatchPreview ——
   opponent: { bodyName: string; parts: string[]; drive: '前进' | '停驻' } | null;
+  /**
+   * F-MATCH-FRAME-R2：Matching / MatchPreview 阶段 A/B 双车的真实屏幕 envelope（逻辑 px），
+   * 由 Runtime 经 battle.getMatchVehicleRects() 计算并推入。UI 据此绘制扫描框 / 对手名称，
+   * 保证与 renderer 实际落点一致（无此数据时 UI 回落到比例锚点，真实流程恒有此数据）。
+   */
+  matchVehicleRects?: { a: { x: number; y: number; w: number; h: number }; b: { x: number; y: number; w: number; h: number } } | null;
   /** MatchPreview 复核条（Q15-FLOW-R1-ATOMIC：正常流程立即隐藏，永不闪现） */
   matchBarHidden: boolean;
   // —— Result ——

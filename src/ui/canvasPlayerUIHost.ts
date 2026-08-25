@@ -1728,47 +1728,63 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    *   已锁定在同一 opX 锚点替换为真实对手（仅对手名称，不画驱动 pill、不画左右大标签）。
    * 只改变对手内容与状态文字，不改变整体布局锚点；正常流程无「开始战斗」按钮。
    */
+  /**
+   * F-MATCH-FRAME-R2：matching / matchPreview 共用同一连续画面，UI 直接读取 Runtime 推入的
+   * 真实 A/B 屏幕 envelope（state.matchVehicleRects，逻辑 px）来绘制——根治「UI 锚点猜测与
+   * renderer 实际落点脱节」的构图错位（扫描框圈空白 / 车辆右裁 / Locked 跳位）。
+   * - 左：我的车（aRect，renderer previewFixed 画 A 左）——不画文字大标签（避免覆盖车辆）。
+   * - 中：VS（半透明大字，恒定屏幕中心）+ 单一状态文字（顶部居中横幅）。
+   * - 右：对手区域（bRect）。搜索中四角括号 + 顶部扫描线严格围绕 bRect（= 真实候选车辆）；
+   *   锁定在同一 bRect 替换为真实对手名称（置于 bRect 上方独立标题区，不进入车辆 envelope）。
+   * Matching → Locked 只替换内容与状态，aRect/bRect 中心不变（无跳位 / 无呼吸）。
+   */
   private drawMatchingContinuum(state: PlayerUIState): void {
     const locked = state.playerPhase === 'matchPreview';
     const op = state.opponent;
-    // 统一布局锚点（matching / matchPreview 同值，禁止分阶段偏移）
-    const centerY = this.H / 2 - 20;
-    const opX = this.W * 0.7;
     const ctx = this.ctx;
-    // 中央 VS（半透明大字）
+    // 真实 A/B 屏幕 envelope（逻辑 px）；无数据（测试 / 非预览态）回落到比例锚点（真实流程恒有）。
+    const rv = state.matchVehicleRects;
+    let bRect: { x: number; y: number; w: number; h: number };
+    if (rv) {
+      bRect = rv.b;
+    } else {
+      const centerY = this.H / 2 - 20;
+      const vw = Math.min(this.W * 0.26, 180);
+      const vh = Math.min(this.H * 0.5, 220);
+      bRect = { x: this.W * 0.7 - vw / 2, y: centerY - vh / 2, w: vw, h: vh };
+    }
+    const bCx = bRect.x + bRect.w / 2;
+    // 中央 VS（半透明大字，恒定屏幕中心）
     ctx.save();
     ctx.globalAlpha = 0.22;
     this.text('VS', this.W / 2, this.H / 2 - 4, this.isMobile ? 40 : 54, C.text, 'center', 900);
     ctx.restore();
-    // 单一状态文字（两阶段同锚点，仅文案/颜色变化）——全屏唯一状态表达
+    // 单一状态文字（顶部居中横幅，全屏唯一状态表达；不覆盖车辆）
     this.text(
       locked ? '对手已锁定' : '正在寻找对手…',
       this.W / 2,
-      this.H / 2 + (this.isMobile ? 42 : 50),
+      this.insT + (this.isMobile ? 24 : 30),
       this.isMobile ? 16 : 18,
       locked ? C.gold : C.textDim,
       'center',
       700,
     );
     if (locked && op) {
-      // 锁定：同一 opX 锚点替换为真实对手——仅对手名称（无驱动 pill、无左右大标签）；
-      // 名称置于车辆下方安全留白（不进入车辆 envelope），Mobile / Desktop 均不压在车辆上。
-      const nameY = this.H - (this.isMobile ? this.insB + 74 : 130);
-      this.text(op.bodyName, opX, nameY, this.isMobile ? 18 : 20, C.orange, 'center', 700);
+      // 锁定：同一 bRect 锚点替换为真实对手——仅对手名称（置于 bRect 上方独立标题区，
+      // 不进入车辆 envelope；不与轮组 / 武器 / 地面线相交）。无驱动 pill、无左右大标签。
+      const topLimit = this.insT + 2;
+      const nameY = Math.max(topLimit, bRect.y - 8);
+      this.text(op.bodyName, bCx, nameY, this.isMobile ? 18 : 20, C.orange, 'center', 700);
     } else {
-      // 搜索中：对手区域扫描占位——四角括号 + 顶部扫描线（纯边框，不覆盖车辆；
-      // 左缘严格约束在 VS 右侧，不触及中央 VS；扫描线在框内顶部区域，在车辆之上不压车辆）。
+      // 搜索中：四角括号 + 顶部扫描线严格围绕真实候选车辆 bRect（不圈空白、不覆盖车辆、
+      // 不触及中央 VS：bRect 在右半屏，扫描框整体位于 VS 右侧）。nowMs 驱动呼吸 / 扫描。
       const t = this.nowMs;
       const pulse = 0.5 + 0.5 * Math.sin(t * 0.012); // 呼吸（homeMatchFx 守卫：Math.sin(t * 0.012)）
-      const halfWBase = this.isMobile ? 78 : 96;
-      const halfH = this.isMobile ? 78 : 96;
-      const maxHalfW = Math.max(44, opX - (this.W / 2 + 14)); // 左缘在 VS 右侧，不覆盖 VS
-      const halfW = Math.min(halfWBase, maxHalfW);
-      const fx = opX - halfW, fy = centerY - halfH;
-      const fw = halfW * 2, fh = halfH * 2;
-      const corner = Math.min(fw, fh) * (0.20 + 0.05 * pulse);
+      const pad = this.isMobile ? 8 : 12;
+      const fx = bRect.x - pad, fy = bRect.y - pad;
+      const fw = bRect.w + pad * 2, fh = bRect.h + pad * 2;
+      const corner = Math.min(fw, fh) * (0.22 + 0.05 * pulse);
       const bc = `rgba(120,170,255,${(0.5 + 0.35 * pulse).toFixed(3)})`;
-      // 四角括号（L 形）：每角横臂 + 竖臂（纯边框，不填充覆盖车辆）
       const arms: Array<[number, number]> = [
         [fx, fy], [fx + fw - corner, fy], [fx, fy + fh - corner], [fx + fw - corner, fy + fh - corner],
       ];
@@ -1776,8 +1792,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.rect(cx, cy, corner, 3, bc);
         this.rect(cx, cy, 3, corner, bc);
       }
-      // 顶部扫描线：在框内顶部区域上下扫动（nowMs 驱动；在车辆之上，不覆盖车辆）
-      const sweepY = fy + 6 + ((t % 1300) / 1300) * (fh * 0.30);
+      // 顶部扫描线：在扫描框内顶部区域上下扫动（在车辆之上，不覆盖车辆主体）
+      const sweepY = fy + 6 + ((t % 1300) / 1300) * (fh * 0.34);
       this.rect(fx + 10, sweepY, fw - 20, 2, 'rgba(150,200,255,0.85)');
     }
   }

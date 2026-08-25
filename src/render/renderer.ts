@@ -135,10 +135,15 @@ const MIN_SOLO_PAD_Y = 20;
 // Warning/Closing 回退完整 arena（场地规则优先）。
 const MOBILE_ACTIVE_MIN_X = 315;
 const MOBILE_ACTIVE_MAX_X = 1295;
-const MATCH_MIN_X = 440;
-const MATCH_MAX_X = 1150;
-const MATCH_MIN_Y = 400;
-const MATCH_MAX_Y = 730;
+// F-MATCH-FRAME-R2：previewFixed 固定框必须容纳「全部候选 Body 的真实 envelope」（含武器外伸），
+// 否则候选车辆被右边界裁切 / 左车被左边界裁切。实测所有候选 Body 组合 envelope 并集为
+// minX≈305 / maxX≈1295 / minY≈560 / maxY≈699；框放宽到 [290,1310]×[535,712] 含余量，
+// 且为固定框（候选切换 / Locked 替换均不呼吸、不裁切、不跳位）。A 固定 620、B 固定 980 →
+// 框内分数 ≈ 0.33 / 0.66，左右槽位对称、中留 VS 间隙。
+const MATCH_MIN_X = 290;
+const MATCH_MAX_X = 1310;
+const MATCH_MIN_Y = 535;
+const MATCH_MAX_Y = 712;
 
 interface FloatingText {
   x: number;
@@ -462,6 +467,32 @@ export class Renderer {
       A: { core: this.vehicleDiag(snap.vehicleA, false), envelope: this.vehicleDiag(snap.vehicleA, true) },
       B: { core: this.vehicleDiag(snap.vehicleB, false), envelope: this.vehicleDiag(snap.vehicleB, true) },
     };
+  }
+
+  /**
+   * F-MATCH-FRAME-R2：当前 transform 下 A/B 双车「可见 envelope」的屏幕矩形（只读，逻辑 px）。
+   * 供 UI 层（Matching / MatchPreview）直接读取真实车辆屏幕位置来绘制扫描框 / 对手名称 /
+   * 检测文字与车辆 envelope 相交——根治「UI 锚点猜测与 renderer 实际落点脱节」的构图错位。
+   * 坐标由 view px（物理）÷ viewDpr 转为逻辑 px，与 UI Host 的布局坐标空间一致（同 dpr）。
+   */
+  getVehicleScreenRects(
+    snap: BattleRenderSnapshot,
+  ): { a: { x: number; y: number; w: number; h: number }; b: { x: number; y: number; w: number; h: number } } | null {
+    if (!snap.vehicleA || !snap.vehicleB) return null;
+    const d = this.scaleDiagnosticsBoth(snap);
+    const toRect = (e: { screen: { minX: number; minY: number; maxX: number; maxY: number } }): {
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    } => {
+      const x = e.screen.minX / this.viewDpr;
+      const y = e.screen.minY / this.viewDpr;
+      const w = (e.screen.maxX - e.screen.minX) / this.viewDpr;
+      const h = (e.screen.maxY - e.screen.minY) / this.viewDpr;
+      return { x, y, w, h };
+    };
+    return { a: toRect(d.A.envelope), b: toRect(d.B.envelope) };
   }
 
   /**
@@ -1859,8 +1890,14 @@ export class Renderer {
     let scale = enforceFitLimit ? fitLimit : fitLimit * CONTENT_ZOOM;
     // F-HOME-IA-R1：固定预览框（previewSolo/previewFixed）传入 framingRect 时，取景必须
     // 真正 fit 到该子区域——不再用 MIN_CONTENT_SCALE 兜底放大（否则矮屏小取景区里完整车辆
-    // 会被强行放大溢出取景区）。无 framingRect 的全屏固定框仍保留下限，避免车辆在全屏框里过小。
-    if (!(framing && isFixed) && scale < MIN_CONTENT_SCALE) scale = MIN_CONTENT_SCALE;
+    // 会被强行放大溢出取景区）。
+    // F-MATCH-FRAME-R2：previewFixed（Matching/Locked 全屏固定框，无 framingRect）也必须
+    // 精确 fit 到安全区——若仍用 MIN_CONTENT_SCALE 兜底（0.4），窄屏（safeW<414）会把车辆
+    // 放大溢出裁切（真机暴露「候选车辆被右边界裁切」）。故 previewFixed 与「带 framingRect
+    // 的固定预览」同样跳过下限，保证完整入画、无裁切；左右车辆尺度接近、无呼吸。
+    // 其余固定/非固定 fit 仍保留下限，避免车辆在全屏框里过小。
+    const applyMinScale = !(framing && isFixed) && fit !== 'previewFixed';
+    if (scale < MIN_CONTENT_SCALE && applyMinScale) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
     // 内容定位：默认居中于安全区中心（offset 含安全区内缩量；玩家 Shell 预览用 top 内缩）。
     // F-UX-3B：compact battle Active 底部锚定——车辆站在地面上（Ground 只改视觉厚度，

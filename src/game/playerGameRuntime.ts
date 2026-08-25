@@ -88,6 +88,12 @@ export interface PlayerBattleHost {
   resize(w: number, h: number): void;
   /** 首页程序化背景下沉为 renderer underlay 开关（仅首页开启；车库/匹配/战斗关闭） */
   setHomeBackdrop?(on: boolean): void;
+  /**
+   * F-MATCH-FRAME-R2：当前 transform 下 A/B 双车「可见 envelope」屏幕矩形（逻辑 px）。
+   * Matching / MatchPreview 的 UI 据此绘制扫描框 / 对手名称，保证与 renderer 实际落点一致
+   * （根治 UI 锚点猜测脱节）。无 orchestrator（非预览/战斗）→ null。
+   */
+  getMatchVehicleRects?(): { a: { x: number; y: number; w: number; h: number }; b: { x: number; y: number; w: number; h: number } } | null;
 }
 
 /** 依赖注入：入口（Web/微信）提供 Host / 表现 / Web-only 钩子 */
@@ -391,6 +397,12 @@ export class PlayerGameRuntime {
             })()
           : null,
       matchBarHidden: this.matchBarHidden,
+      // F-MATCH-FRAME-R2：Matching / MatchPreview 推入真实 A/B 屏幕 envelope（逻辑 px），
+      // 供 UI 绘制扫描框 / 对手名称；仅此两阶段有值，其余阶段为 null。
+      matchVehicleRects:
+        this.playerPhaseInternal === 'matching' || this.playerPhaseInternal === 'matchPreview'
+          ? this.deps.battle.getMatchVehicleRects?.() ?? null
+          : null,
       result: this.currentResult,
       reward: this.currentReward,
       economy: this.currentEconomy,
@@ -542,12 +554,13 @@ export class PlayerGameRuntime {
     this.matchBarHidden = true; // Q15-FLOW-R1-ATOMIC：复核条正常流程立即隐藏，永不闪现
     this.refreshFromEdit(); // 渲染面板(隐藏) + 完整 A+B 预览(previewFixed 同构图) + pushUI
     // Q15-FLOW-R1-ATOMIC：匹配完成直接开战——正常流程不再出现「调整配置 / 开始战斗」复核条。
-    // 最终对手展示约 250ms 后自动进入现有 READY → Battle（复用 startBattleWithReady）。
+    // F-MATCH-FRAME-R2：最终对手「对手已锁定」稳定展示约 700ms（原 250ms 偏短，玩家来不及识别），
+    // 随后自动进入现有 READY → Battle（复用 startBattleWithReady，无新增确认按钮）。
     globalThis.setTimeout(() => {
       // guard：仅当仍处于 MatchPreview 编辑态才启动；旧 timer / 已切换状态直接 no-op。
       if (this.playerPhaseInternal !== 'matchPreview' || this.battleStateInternal !== 'editing') return;
       this.startBattleWithReady();
-    }, 250);
+    }, 700);
   }
 
   /** 主画布加载 A(玩家) + B(候选) 并固定取景（不创建第二个 Renderer） */
@@ -565,6 +578,7 @@ export class PlayerGameRuntime {
     const sb = this.snapshotOf('B');
     this.deps.battle.loadCustomPreview(sa, sb); // 不重构图：保留 previewFixed 固定相机
     this.bFxStart = platform.lifecycle.now(); // 触发 B 轻量淡入缩放（A 不动）
+    this.pushUI(); // F-MATCH-FRAME-R2：重新计算并推入新候选的 matchVehicleRects（扫描框跟随真实 envelope）
   }
 
   /** 每帧应用 Matching 候选 B 的淡入缩放（A 不动；离开 Matching 即清除） */

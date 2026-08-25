@@ -95,4 +95,10 @@ export class WechatBattleHost implements PlayerBattleHost {
     // F-HOME-P0-LAYER：首页程序化背景下沉为 renderer underlay（背景层<车辆层<UI层）
     this.renderer.setHomeBackdrop(on);
   }
+
+  getMatchVehicleRects(): { a: { x: number; y: number; w: number; h: number }; b: { x: number; y: number; w: number; h: number } } | null {
+    const o = this.orchestrator;
+    if (!o) return null;
+    return this.renderer.getVehicleScreenRects(o.getRenderSnapshot());
+  }
 }

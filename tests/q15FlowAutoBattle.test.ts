@@ -3,7 +3,7 @@
  *
  * F-WX-5：正常玩家 Gameplay 流程已从 main.ts 抽到平台中立 PlayerGameRuntime
  * （src/game/playerGameRuntime.ts，Web/微信双入口共用）。本测试断言目标同步迁移到该文件，
- * 守护「goToMatchPreview 隐藏复核条 + 250ms 自动调用现有 startBattleWithReady + 状态 guard」，
+ * 守护「goToMatchPreview 隐藏复核条 + 700ms 自动调用现有 startBattleWithReady + 状态 guard」，
  * 防止将来误删自动开战链 / 让「调整配置 / 开始战斗」重现 / 复制第二套 READY-Battle 逻辑；
  * 同时守卫 main.ts 不再包含玩家流程函数（防回退）。
  * 纯只读，不新增 dependency / production hook。
@@ -30,10 +30,11 @@ describe('Q15-FLOW-R1-ATOMIC 匹配完成直接开战（PlayerGameRuntime）', (
     expect(host).toContain(`state.matchBarHidden ? 'none' : vis.matchBar`);
   });
 
-  it('约 250ms 后自动调用现有 startBattleWithReady（不复制第二套 READY/Battle 逻辑）', () => {
-    // goToMatchPreview 内：startBattleWithReady() 出现在 setTimeout(..., 250) 中
-    expect(RUNTIME).toMatch(/startBattleWithReady\(\);[\s\S]*?\}, 250\);/);
-    expect(RUNTIME).toContain('}, 250);');
+  it('约 700ms 后自动调用现有 startBattleWithReady（不复制第二套 READY/Battle 逻辑）', () => {
+    // goToMatchPreview 内：startBattleWithReady() 出现在 setTimeout(..., 700) 中
+    // （F-MATCH-FRAME-R2：Lock 停留延长到 600–800ms，给玩家看清锁定对手）。
+    expect(RUNTIME).toMatch(/startBattleWithReady\(\);[\s\S]*?\}, 700\);/);
+    expect(RUNTIME).toContain('}, 700);');
   });
 
   it('自动启动带 guard：仅 matchPreview + editing 才启动，否则 no-op', () => {

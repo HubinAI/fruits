@@ -443,6 +443,11 @@ const battleHost: PlayerBattleHost = {
   },
   resize: (w, h) => renderer.resize(w, h),
   setHomeBackdrop: (on) => renderer.setHomeBackdrop(on),
+  getMatchVehicleRects: () => {
+    const o = lab.orchestrator;
+    if (!o) return null;
+    return renderer.getVehicleScreenRects(o.getRenderSnapshot());
+  },
 };
 
 /* ---------- DEV Build 编辑状态（面板；玩家装配经 runtime actions） ---------- */
