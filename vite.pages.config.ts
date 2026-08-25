@@ -22,6 +22,9 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist-pages',
-    emptyOutDir: true,
+    // F-DEMO-WEB-R1：emptyOutDir 关闭——与 vite.wechat.config.ts 同源：本机 safe-delete shim
+    // 拦截 fs.rmSync（emptyDir 必失败）；产物文件名恒定（index.html + hash assets，旧文件
+    // 不被 index.html 引用即无残留），覆盖写即可；Linux CI 无 shim 影响。
+    emptyOutDir: false,
   },
 });

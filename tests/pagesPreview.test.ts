@@ -60,8 +60,10 @@ describe('F-WX-6.1 main.ts 默认 Canvas + short SHA Badge', () => {
     expect(MAIN).toMatch(/canvasUiMode\s*=\s*isPagesPreview\s*\|\|\s*reviewOn\s*\|\|\s*new URLSearchParams\(location\.search\)\.has\('canvasui'\)/);
   });
 
-  it('Badge 在 Pages Preview（production 语义下 DEV_TOOLS_VISIBLE=false）仍显示 short SHA', () => {
-    expect(MAIN).toContain('if (DEV_TOOLS_VISIBLE || isPagesPreview) {');
+  it('F-DEMO-WEB-R1：Badge 仅 dev/test（DEV_TOOLS_VISIBLE）显示，PROD 公开版隐藏', () => {
+    // 改动后：badge 条件不再含 isPagesPreview（公开 Pages PROD 不再显示调试角标）
+    expect(MAIN).toContain('if (DEV_TOOLS_VISIBLE) {');
+    expect(MAIN).not.toContain('if (DEV_TOOLS_VISIBLE || isPagesPreview) {');
     // short SHA 来自构建期 runtimeInfo（slice(0,7)），非手写常量
     expect(MAIN).toContain('runtimeInfo.sha.slice(0, 7)');
   });
@@ -75,9 +77,14 @@ describe('F-WX-6.1 main.ts 默认 Canvas + short SHA Badge', () => {
 describe('F-WX-6.1 GitHub Actions Pages workflow', () => {
   const WF = read('.github/workflows/pages.yml');
 
-  it('push foundation-02-wechat 触发 + workflow_dispatch 手动触发', () => {
-    expect(WF).toContain('branches: [foundation-02-wechat]');
+  it('F-DEMO-WEB-R1：仅 workflow_dispatch 手动触发，不自动跟随开发提交', () => {
+    // 手动触发入口必须存在
     expect(WF).toContain('workflow_dispatch');
+    // 不得有 push 自动触发（避免每次提交误推外网版本）
+    const onBlock = WF.split('on:')[1] ?? '';
+    const afterOn = onBlock.split('permissions:')[0] ?? '';
+    expect(afterOn).not.toMatch(/^\s*push\s*:/m);
+    expect(afterOn).not.toContain('branches:');
   });
 
   it('官方流程：npm ci → build:pages → upload-pages-artifact(dist-pages) → deploy-pages', () => {

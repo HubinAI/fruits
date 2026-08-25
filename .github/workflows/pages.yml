@@ -1,17 +1,32 @@
 name: Pages Preview (Web Canvas Mobile)
 
-# F-WX-6.1｜固定 Web Mobile Preview（GitHub Pages）。
-# foundation-02-wechat 每次更新并成功构建后，自动部署 Canvas Player UI 预览页：
-# https://hubinai.github.io/fruits/（手机直接打开，无需同 Wi-Fi / Dev Server）。
+# F-DEMO-WEB-R1｜对外网页试玩发布链路（手动触发）。
 #
-# - push trigger：foundation-02-wechat 分支任何更新都触发（含本 workflow 自身变更）；
-# - workflow_dispatch：手动重跑（如切换 Pages Source 后补部署）；
+# 目标：对外分享、无需登录的稳定 HTTPS 地址 https://hubinai.github.io/fruits/
+# （手机浏览器打开后默认 Canvas 玩家 UI，可横屏完成完整流程）。
+#
+# 安全/发布纪律（来自 Queue 必做#5/#8）：
+# - **仅 workflow_dispatch 手动触发**——不自动跟随 foundation-02-wechat 每次提交部署
+#   （删除原 push 触发器，避免开发提交误推外网版本）；
+# - 发布采用手动，便于在「确认 Matching P0 已修复 / 指定 commit」后再点一次发布；
 # - dist 只作为 artifact 上传，绝不手工 commit 到业务分支。
+#
+# 部署前置（一次性，需仓库管理员在 GitHub 设置）：
+#   Settings → Pages → Build and deployment → Source = "GitHub Actions"
+# （未设置时 deploy-pages 会失败；本队列不绕过、不使用临时隧道。）
+#
+# 外网版本干净度（来自 Queue 必做#3）：
+# - build:pages 走 production 语义（DEV_TOOLS_VISIBLE=false → 开发工具/Scenario/Debug 隐藏）；
+# - main.ts 角标仅在 dev/test（DEV_TOOLS_VISIBLE=true）显示，PROD 公开版隐藏；
+# - 手机横屏入口无「分辨率按钮」控件（公开 Canvas UI 不含该元素）。
 
 on:
-  push:
-    branches: [foundation-02-wechat]
   workflow_dispatch:
+    inputs:
+      note:
+        description: '发布备注（可选，记录在构建日志）'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -33,7 +48,15 @@ jobs:
           cache: npm
       - run: npm ci
       - uses: actions/configure-pages@v5
-      - name: Build Pages Preview
+      - name: Record publish commit SHA
+        run: |
+          SHA=$(git rev-parse HEAD)
+          echo "PUBLISH_SHA=$SHA" >> "$GITHUB_ENV"
+          echo "::notice title=Publish SHA::发布所用 commit = $SHA"
+          if [ -n "${{ inputs.note }}" ]; then
+            echo "::notice title=Publish Note::${{ inputs.note }}"
+          fi
+      - name: Build Pages Preview (public, PROD-clean)
         run: npm run build:pages
       - uses: actions/upload-pages-artifact@v3
         with:

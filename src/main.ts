@@ -83,10 +83,12 @@ const TOOLS_DEV_VISIBLE: string = DEV_TOOLS_VISIBLE ? '' : 'none';
 const isPagesPreview: boolean =
   typeof __PAGES_PREVIEW__ !== 'undefined' && __PAGES_PREVIEW__ === true;
 
-// F-DEV-1：Runtime Badge——开发 / 内部 RC 构建显示 branch + short SHA + 版本号；
-// F-WX-6.1：Pages Preview（production 语义下 DEV_TOOLS_VISIBLE=false）同样显示 short SHA，
-// 用于确认「手机当前看到的页面 = 刚部署的 commit」（构建期注入，非手写常量）。
-if (DEV_TOOLS_VISIBLE || isPagesPreview) {
+// F-DEV-1：Runtime Badge——仅开发 / 内部 RC（dev/test，DEV_TOOLS_VISIBLE=true）显示
+// branch + short SHA + 版本号，用于确认「运行画面 = 刚构建的 commit」；
+// F-DEMO-WEB-R1：对外公开 Pages 版本（PROD）一律隐藏角标（不再因 isPagesPreview 显示），
+// 满足「页面不显示调试内容 / 版本调试角标」验收。SHA 仍经 runtimeInfoPlugin 注入包内，
+// 可追溯但不以可见角标形式出现。
+if (DEV_TOOLS_VISIBLE) {
   const badge = document.createElement('div');
   badge.style.cssText =
     'position:fixed;right:8px;bottom:8px;z-index:9999;font:11px/1.4 monospace;' +
