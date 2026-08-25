@@ -986,7 +986,15 @@ if (reviewOn) {
   reviewBar.style.justifyContent = 'center';
   root.insertBefore(reviewBar, main);
 
-  // canvasWrap：flex:1 填满 → 固定逻辑尺寸 + 居中 + transform 放大（仅显示）
+  // F-UX-2A：纯净模式——Review 页面只留 顶部 Review 工具栏 + 手机游戏画面，
+  // 隐藏全部 DEV 控件（Build Editor / DEV side panel / Physics·Lab 控件 / 开发工具按钮 /
+  // 非游戏状态栏）；1x/2x 切换不涉及它们（一次性隐藏，与显示倍率无关）。
+  toolbar.style.display = 'none';
+  panelA.style.display = 'none';
+  panelB.style.display = 'none';
+  if (debugPanel) debugPanel.style.display = 'none';
+
+  // canvasWrap：flex:1 填满 → 固定逻辑尺寸 + 居中 + transform 放大（仅视觉，不改变位置逻辑）
   canvasWrap.style.flex = 'none';
   canvasWrap.style.margin = 'auto';
   canvasWrap.style.transformOrigin = 'top left';

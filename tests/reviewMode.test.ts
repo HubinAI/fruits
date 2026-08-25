@@ -140,3 +140,32 @@ describe('F-UX-REVIEW-1｜reviewMode 纯逻辑（预设/状态机/样式）', ()
     }
   });
 });
+
+describe('F-UX-2A｜Mobile Review 纯净模式（源码守卫）', () => {
+  it('验收1/2｜Review 开启时隐藏全部 DEV 控件；隐藏与 1x/2x 无关；普通 DEV 不受影响', () => {
+    const src = require('fs').readFileSync('src/main.ts', 'utf-8');
+    const reviewStart = src.lastIndexOf('DEV Mobile Review'); // review 块注释（非 import 注释）
+    const reviewEnd = src.indexOf('/* ---------- 主循环');
+    const reviewBlock = src.slice(reviewStart, reviewEnd);
+    // review 块内一次性隐藏全部 DEV 控件（Build Editor / 侧栏 / Debug 面板 / 原 DEV 工具栏）
+    expect(reviewBlock).toContain("toolbar.style.display = 'none'");
+    expect(reviewBlock).toContain("panelA.style.display = 'none'");
+    expect(reviewBlock).toContain("panelB.style.display = 'none'");
+    expect(reviewBlock).toContain('debugPanel) debugPanel.style.display');
+    // 隐藏发生在 applyReview（1x/2x 逻辑）之前——一次性执行，与显示倍率无关
+    const applyStart = reviewBlock.indexOf('const applyReview');
+    const hideIdx = reviewBlock.indexOf("toolbar.style.display = 'none'");
+    expect(hideIdx, 'DEV 控件隐藏先于 applyReview').toBeGreaterThan(-1);
+    expect(hideIdx, '隐藏不依赖 applyReview（倍率逻辑外一次性执行）').toBeLessThan(applyStart);
+    // 普通 DEV 路径不受影响：整个 review 块在 if (reviewOn) 条件内（无参数时不执行，
+    // 不触碰任何 DEV 控件）；scenario 的 panelA/panelB 隐藏是既有独立逻辑，与 review 无关
+    const ifIdx = src.indexOf('if (reviewOn) {');
+    expect(ifIdx, 'if (reviewOn) 存在').toBeGreaterThan(-1);
+    expect(ifIdx, 'if (reviewOn) 位于 review 块注释内').toBeGreaterThan(reviewStart);
+    expect(ifIdx, 'if (reviewOn) 在主循环之前').toBeLessThan(reviewEnd);
+    // 游戏区域保持页面中央：flex:none + margin auto + transformOrigin top left（1x/2x 只变视觉）
+    expect(reviewBlock).toContain("canvasWrap.style.flex = 'none'");
+    expect(reviewBlock).toContain("canvasWrap.style.margin = 'auto'");
+    expect(reviewBlock).toContain('top left');
+  });
+});
