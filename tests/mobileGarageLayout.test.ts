@@ -208,7 +208,7 @@ describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
     expect(cta!.w, 'cta-find w == layout.ctaRect.w').toBe(l.ctaRect.w);
     expect(cta!.h, 'cta-find h == layout.ctaRect.h').toBe(l.ctaRect.h);
     // 2×2 主分类入口全部落在 panelRect 内（绘制与命中同源）
-    for (const id of ['entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons']) {
+    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets']) {
       const a = areas.find((x) => x.id === id);
       expect(a, `应有 ${id}`).toBeTruthy();
       expect(a!.x, `${id} x ≥ panel.x`).toBeGreaterThanOrEqual(l.panelRect.x);

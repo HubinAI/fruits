@@ -240,8 +240,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** F-WX-6：功能件选项横向滚动偏移（仅 Mobile options strip） */
   private optScroll = 0;
   private optScrollFor: string | null = null;
-  /** F-WX-UI-1：装配面板视图（home 2×2 分类 / wheelPick 轮子二级 / weaponPick 武器位 / options 选项） */
-  private panelView: 'home' | 'wheelPick' | 'weaponPick' | 'options' = 'home';
+  /** F-LOBBY-GARAGE-DEMO-R1：装配面板视图（home 4 主分类 / movePick 移动二级 / weaponPick 武器位 / gadgetPick 辅助位 / options 选项） */
+  private panelView: 'home' | 'movePick' | 'weaponPick' | 'gadgetPick' | 'options' = 'home';
   /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机）；F-HOME-1：默认 Home（正式首页） */
   private metaPage: MetaPage = 'home';
   /** F-META-6：More 页子视图（功能卡主页 / 设置子页；UI-only，不进 Gameplay） */
@@ -575,9 +575,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.actions?.onToggleGarageSlot(id.slice(6));
       return;
     }
-    if (id === 'entry-wheels') {
-      // 轮子一级入口 → 面板内「前轮/后轮」二级选择（内部态，不派发 action）
-      this.panelView = 'wheelPick';
+    if (id === 'entry-move') {
+      // 移动一级入口 → 面板内「前轮/后轮/驱动」二级选择（内部态，不派发 action）
+      this.panelView = 'movePick';
       this.panelScroll = 0;
       this.draw();
       return;
@@ -585,6 +585,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (id === 'entry-weapons') {
       // 武器一级入口 → 面板内武器位列表（内部态）
       this.panelView = 'weaponPick';
+      this.panelScroll = 0;
+      this.draw();
+      return;
+    }
+    if (id === 'entry-gadgets') {
+      // 辅助一级入口 → 面板内辅助件硬点列表（内部态）
+      this.panelView = 'gadgetPick';
       this.panelScroll = 0;
       this.draw();
       return;
@@ -599,9 +606,19 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.actions?.onToggleGarageSlot(id.slice(12));
       return;
     }
+    if (id.startsWith('gadget-slot:')) {
+      // 辅助二级：选辅助位 → 展开该位选项（'gadget-slot:' 12 字符）
+      this.actions?.onToggleGarageSlot(id.slice(12));
+      return;
+    }
+    if (id === 'slot:drive') {
+      // 移动二级：驱动 → 展开驱动选项（复用 drive 槽）
+      this.actions?.onToggleGarageSlot('drive');
+      return;
+    }
     if (id === 'panel-back') {
-      // 面板返回：轮子/武器二级 → home；选项 → 收起选中槽（toggle 语义）
-      if (this.panelView === 'wheelPick' || this.panelView === 'weaponPick') {
+      // 面板返回：移动/武器/辅助二级 → home；选项 → 收起选中槽（toggle 语义）
+      if (this.panelView === 'movePick' || this.panelView === 'weaponPick' || this.panelView === 'gadgetPick') {
         this.panelView = 'home';
         this.panelScroll = 0;
         this.draw();
@@ -1292,10 +1309,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const pH = Math.max(1, panelRect.h - 2 * padY);
     if (state.garageSelected) {
       this.drawGaragePanelOptions(state, draft, panelRect.x, panelRect.w, py, pH);
-    } else if (this.panelView === 'wheelPick') {
-      this.drawGaragePanelWheelPick(draft, panelRect.x, panelRect.w, py, pH);
+    } else if (this.panelView === 'movePick') {
+      this.drawGaragePanelMovePick(draft, panelRect.x, panelRect.w, py, pH);
     } else if (this.panelView === 'weaponPick') {
       this.drawGaragePanelWeaponPick(draft, panelRect.x, panelRect.w, py, pH);
+    } else if (this.panelView === 'gadgetPick') {
+      this.drawGaragePanelGadgetPick(draft, panelRect.x, panelRect.w, py, pH);
     } else {
       this.drawGaragePanelHome(panelRect.x, panelRect.w, py, pH);
     }
@@ -1521,13 +1540,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     );
   }
 
-  /** 面板首页：2×2 主分类（车身/轮子/驱动/武器）——F-UX-3A：首屏卡片只显示名称（无副文字，详情点进去再看） */
+  /** 面板首页：2×2 主分类（车身/移动/武器/辅助）——F-LOBBY-GARAGE-DEMO-R1：按玩家认知分组，
+   * 轮径+驱动归入「移动」；功能件按类别拆为「武器」/「辅助」二级（点进去见具体硬点）。 */
   private drawGaragePanelHome(px: number, pw: number, py: number, ph: number): void {
     const cells: Array<{ id: string; label: string }> = [
       { id: 'entry:body', label: '车身' },
-      { id: 'entry-wheels', label: '轮子' },
-      { id: 'entry:drive', label: '驱动' },
+      { id: 'entry-move', label: '移动' },
       { id: 'entry-weapons', label: '武器' },
+      { id: 'entry-gadgets', label: '辅助' },
     ];
     const gap = 8;
     const cellW = (pw - gap) / 2;
@@ -1543,30 +1563,46 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /** 面板返回条（轮子/武器/选项二级顶部） */
-  private drawPanelBackRow(px: number, py: number): number {
-    this.button(px, py, 96, this.targetTouchH, 'panel-back', '‹ 返回', {});
-    return py + this.targetTouchH + 8;
-  }
-
-  /** 轮子二级：前轮 / 后轮（一级「轮子」后才出现） */
-  private drawGaragePanelWheelPick(
-    draft: BuildDraft,
-    px: number,
-    pw: number,
-    py: number,
-    ph: number,
-  ): void {
+  /** 移动二级：前轮 / 后轮 / 驱动（一级「移动」后才出现；轮子细项 + 驱动同组） */
+  private drawGaragePanelMovePick(draft: BuildDraft, px: number, pw: number, py: number, ph: number): void {
     const y = this.drawPanelBackRow(px, py);
     const defs = this.garageChipDefs(draft);
     const front = defs.find((d) => d.key === 'frontWheel');
     const rear = defs.find((d) => d.key === 'rearWheel');
+    const drive = defs.find((d) => d.key === 'drive');
+    const gap = 8;
+    // F-LOBBY-GARAGE-DEMO-R1：前轮/后轮/驱动共 3 行二级；行高动态适配面板可用高度，
+    // 保证矮视口（如 844×390）也能完整绘制且不溢出（固定 targetTouchH 在 390 会截掉驱动行）。
+    const rows = 3;
+    const availH = (py + ph) - y - gap * (rows - 1);
+    const h = Math.max(this.minTouchH, Math.min(this.targetTouchH, Math.floor(availH / rows)));
+    if (h < this.minTouchH) return; // 面板过低，二级不可达
+    this.button(px, y, pw, h, 'wheel-side:front', '前轮', { sub: front?.value ?? '?' });
+    this.button(px, y + (h + gap), pw, h, 'wheel-side:rear', '后轮', { sub: rear?.value ?? '?' });
+    this.button(px, y + (h + gap) * 2, pw, h, 'slot:drive', '驱动', { sub: drive?.value ?? '?' });
+  }
+
+  /** 辅助二级：辅助件硬点列表（点辅助位 → 该位部件卡；与武器二级同构，按类别过滤） */
+  private drawGaragePanelGadgetPick(draft: BuildDraft, px: number, pw: number, py: number, ph: number): void {
+    const y = this.drawPanelBackRow(px, py);
+    const funcSlots = this.garageChipDefs(draft).filter(
+      (d) => d.key !== 'body' && d.key !== 'rearWheel' && d.key !== 'frontWheel' && d.key !== 'drive',
+    );
     const gap = 8;
     const h = this.targetTouchH;
-    if (y + h > py + ph) return;
-    this.button(px, y, pw, h, 'wheel-side:front', '前轮', { sub: front?.value ?? '?' });
-    if (y + h * 2 + gap > py + ph) return;
-    this.button(px, y + h + gap, pw, h, 'wheel-side:rear', '后轮', { sub: rear?.value ?? '?' });
+    let yy = y;
+    for (const s of funcSlots) {
+      if (yy + h > py + ph) break; // 面板内不溢出
+      // F-LOBBY-GARAGE-DEMO-R1：硬点标签只显示「方位」，类别含义由一级「辅助」承担（避免每个卡片重复「辅助」）
+      this.button(px, yy, pw, h, `gadget-slot:${s.key}`, s.label, { sub: s.value });
+      yy += h + gap;
+    }
+  }
+
+  /** 面板返回条（轮子/武器/选项二级顶部） */
+  private drawPanelBackRow(px: number, py: number): number {
+    this.button(px, py, 96, this.targetTouchH, 'panel-back', '‹ 返回', {});
+    return py + this.targetTouchH + 8;
   }
 
   /** 武器二级：武器位列表（点武器位 → 该位部件卡） */

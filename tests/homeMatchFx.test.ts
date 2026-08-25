@@ -284,10 +284,10 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     const homeGarage = env.host.getHitAreasForTest().find((a) => a.id === 'home-garage')!;
     expect(homeGarage, '首页保留车库入口').toBeTruthy();
     expect(env.host.getHitAreasForTest().some((a) => a.id === 'entry:body'), '首页无组装入口').toBe(false);
-    // 点车库 → 独立组装界面（配车/轮子/驱动/武器全部在此）
+    // 点车库 → 独立组装界面（车身/移动/武器/辅助 4 主分类全部在此）
     click(env, 'home-garage');
     const ids = env.host.getHitAreasForTest().map((a) => a.id);
-    for (const id of ['entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {
+    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {
       expect(ids, `车库页应含 ${id}`).toContain(id);
     }
     // 车库无合成（合成在背包页）

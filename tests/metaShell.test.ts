@@ -150,7 +150,7 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
     // 车库 → 配置页（原 Garage 布局回归：4 配置 + CTA + 顶栏背包/更多）
     click(env, 'home-garage');
     const ids = env.areas().map((a) => a.id);
-    for (const id of ['entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {
+    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {
       expect(ids, `配置页应含 ${id}`).toContain(id);
     }
     // 「‹ 首页」返回 Home

@@ -172,15 +172,15 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
         env.host.render(garageState());
         goGarage(env, vp, dpr); // F-HOME-1：Home → 配置页（原 Garage 面板断言）
         // F-META-2：Garage 无合成入口（合成在 Backpack）；本循环只验证 garage 页交互
-        for (const id of ['cta-find', 'entry:body', 'entry-wheels', 'entry-weapons']) {
+        for (const id of ['cta-find', 'entry:body', 'entry-move', 'entry-weapons']) {
           const area = env.areas().find((a) => a.id === id);
           expect(area, `${vp.w}×${vp.h} DPR=${dpr} 应有 ${id}`).toBeTruthy();
           const raw = rawFor(area!, vp, dpr, false); // raw = window logical px
           env.fireTouch(raw.rawX, raw.rawY);
           if (id === 'cta-find') {
             expect(env.fired['find'], `DPR=${dpr} ${id} 应派发 find`).toHaveLength(1);
-          } else if (id === 'entry-wheels') {
-            // 轮子一级 → 面板内前轮/后轮二级（首屏不暴露 frontWheel/rearWheel 入口）
+          } else if (id === 'entry-move') {
+            // 移动一级 → 面板内前轮/后轮/驱动二级（首屏不暴露 frontWheel/rearWheel 入口）
             expect(env.areas().some((a) => a.id === 'wheel-side:front')).toBe(true);
             const front = env.areas().find((a) => a.id === 'wheel-side:front')!;
             const raw2 = rawFor(front, vp, dpr, false);
