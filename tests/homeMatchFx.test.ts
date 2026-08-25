@@ -249,4 +249,47 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     expect(l.ctaRect.h, 'CTA 高于宝箱槽（视觉主次）').toBeGreaterThan(l.chestSlot(0).h);
     expect(l.chestSlot(0).h, '宝箱槽可点高度').toBeGreaterThanOrEqual(20);
   });
+
+  it('F-HOME-5｜首页职责纯净：零组装操作残留——命中区全为 home-* / cta-find 白名单', () => {
+    const env = makeRecHost({ w: 420, h: 210 });
+    env.host.render(garageState());
+    const ids = env.host.getHitAreasForTest().map((a) => a.id);
+    // 首页不允许出现任何组装/背包/合成操作 id
+    const banned = [
+      'entry:', 'opt:', 'chip:', 'wheel-side:', 'weapon-slot:', 'merge', 'bpack-item:', 'backpack-',
+      'panel-back', 'panel-scroll', 'opt-scroll', 'bfilter:', 'nav:',
+    ];
+    for (const b of banned) {
+      expect(ids.some((id) => id.startsWith(b) || id.includes(b)), `首页无 ${b} 组装残留`).toBe(false);
+    }
+    // 首页入口白名单：仅展示/开战/功能入口
+    for (const id of ids) {
+      expect(id === 'cta-find' || id.startsWith('home-'), `首页命中区 ${id} 属白名单`).toBe(true);
+    }
+    // 用户点击任意首页入口都不会进入组装操作（车辆 → tips；其余 → 占位页/配置入口/开战）
+    expect(ids.filter((id) => id === 'home-vehicle' || id === 'cta-find' || id.startsWith('home-')).length,
+      '首页仅 10 个核心入口（CTA+车辆+3辅助+个人+4宝箱槽）').toBe(10);
+  });
+
+  it('F-HOME-5｜车库职责：组装与调整收归独立车库页——4 配置入口 + CTA + 背包/更多次级；首页只留入口', () => {
+    const env = makeRecHost({ w: 420, h: 210 });
+    env.host.render(garageState());
+    // 首页只有「车库」入口按钮
+    const homeGarage = env.host.getHitAreasForTest().find((a) => a.id === 'home-garage')!;
+    expect(homeGarage, '首页保留车库入口').toBeTruthy();
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'entry:body'), '首页无组装入口').toBe(false);
+    // 点车库 → 独立组装界面（配车/轮子/驱动/武器全部在此）
+    click(env, 'home-garage');
+    const ids = env.host.getHitAreasForTest().map((a) => a.id);
+    for (const id of ['entry:body', 'entry-wheels', 'entry:drive', 'entry-weapons', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {
+      expect(ids, `车库页应含 ${id}`).toContain(id);
+    }
+    // 车库无合成（合成在背包页）
+    expect(ids.some((id) => id === 'merge'), '车库页无合成').toBe(false);
+    // 返回首页 → 仍无组装残留
+    const back = env.host.getHitAreasForTest().find((a) => a.id === 'nav:home')!;
+    env.pointer(back.x + back.w / 2, back.y + back.h / 2);
+    const homeIds = env.host.getHitAreasForTest().map((a) => a.id);
+    expect(homeIds.some((id) => id.startsWith('entry:') || id.startsWith('opt:')), '返回首页无组装残留').toBe(false);
+  });
 });
