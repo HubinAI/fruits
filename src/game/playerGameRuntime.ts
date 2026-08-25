@@ -635,11 +635,13 @@ export class PlayerGameRuntime {
     this.pushUI(); // Host：隐藏 Dock / 显示 Matching 中央 VS + 顶部「正在寻找对手…」
 
     const gen = ++this.matchingGeneration; // 本场 generation
-    // 节奏：快切 → 稍慢 → 最终锁定（0/220/480/780ms，约 1.0s 内 ≥4 次变化）
+    // F-MATCH-DEMO-R1：节奏校准——搜索总时长 1420ms ∈ [1.2s, 1.8s]（验收 4），
+    // 候选 4 个显示（3 次切换）∈ [3,5]；末位定格 = 实际锁定对手。
+    // 节奏：快切 → 稍慢 → 最终锁定（0/340/720/1100ms，~1.1s 内 ≥4 次变化 → 定格）
     const steps: Array<{ at: number; idx: number }> = [
-      { at: 220, idx: seq[1] },
-      { at: 480, idx: seq[2] },
-      { at: 780, idx: seq[3] }, // 末位 = 实际锁定对手
+      { at: 340, idx: seq[1] },
+      { at: 720, idx: seq[2] },
+      { at: 1100, idx: seq[3] }, // 末位 = 实际锁定对手
     ];
     for (const s of steps) {
       globalThis.setTimeout(() => {
@@ -647,11 +649,11 @@ export class PlayerGameRuntime {
         this.swapMatchCandidate(s.idx);
       }, s.at);
     }
-    // 锁定 → MatchPreview（~230ms 小停顿后定格）
+    // 锁定 → MatchPreview（~320ms 小停顿后定格）
     globalThis.setTimeout(() => {
       if (gen !== this.matchingGeneration) return;
       this.goToMatchPreview();
-    }, 780 + 230);
+    }, 1100 + 320);
   }
 
   /** MatchPreview → Fighting：READY 过渡后真正开战（复用正式 Planck Runtime） */
@@ -665,7 +667,11 @@ export class PlayerGameRuntime {
     this.setBuildControlsLocked(true);
     this.doResize();
     this.readyOverlayVisible = true;
-    this.pushUI(); // Host：显示 READY 过渡层
+    this.pushUI(); // Host：显示 READY 过渡层（mobile 由 Host 门控不绘制，画面仍为「对手已锁定」）
+    // F-MATCH-DEMO-R1：mobile 无 READY 覆盖层——Locked 稳定 ~700ms（goToMatchPreview）后
+    // 直接开战，不追加 600ms READY 空等（Locked 总时长 600~800ms 验收 6）；
+    // 桌面（未实现 isMobileView → undefined）保留 READY 600ms 过渡语义。
+    const readyHoldMs = this.deps.host.isMobileView?.() ? 0 : 600;
     globalThis.setTimeout(() => {
       this.readyOverlayVisible = false;
       this.startTransitioning = false;
@@ -675,7 +681,7 @@ export class PlayerGameRuntime {
         this.setBuildControlsLocked(false);
         this.pushUI();
       }
-    }, 600);
+    }, readyHoldMs);
   }
 
   /** Q28：Build 变更埋点统一出口（DEV 面板直接改 Draft 时也经此出口） */

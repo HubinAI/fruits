@@ -179,11 +179,11 @@ describe('F-WX-5 PlayerGameRuntime（headless 玩家闭环）', () => {
     // 玩家点击「寻找对手」→ Matching（注册匹配节奏 setTimeout）
     runtime.actions.onFindOpponent();
     expect(runtime.playerPhase).toBe('matching');
-    vi.advanceTimersByTime(1010); // 匹配节奏 780+230 → MatchPreview
+    vi.advanceTimersByTime(1420); // F-MATCH-DEMO-R1：匹配节奏 1100+320 → MatchPreview（1.42s ∈ [1.2,1.8]）
     expect(runtime.playerPhase).toBe('matchPreview');
     expect(battle.previewMode).toBe(true); // previewFixed 阶段仍是 preview
     vi.advanceTimersByTime(700); // F-MATCH-FRAME-R2：MatchPreview 停留 ~700ms → READY 过渡
-    vi.advanceTimersByTime(600); // READY 600ms → 正式开战
+    vi.advanceTimersByTime(600); // READY 600ms → 正式开战（桌面语义；mobile 由 isMobileView 压缩为 0）
     expect(runtime.battleState).toBe('fighting');
     expect(battle.previewMode).toBe(false); // 正式战斗已 loadCustom（非 preview）
     expect(battle.orchestrator).not.toBeNull();
@@ -219,8 +219,8 @@ describe('F-WX-5 PlayerGameRuntime（headless 玩家闭环）', () => {
     expect(runtime.playerPhase).toBe('matching');
     expect(host.lastState?.playerPhase).toBe('matching');
 
-    // —— 候选切换 ~1.0s → MatchPreview ——
-    vi.advanceTimersByTime(1010);
+    // —— 候选切换 ~1.42s → MatchPreview ——
+    vi.advanceTimersByTime(1420);
     expect(runtime.playerPhase).toBe('matchPreview');
     expect(host.lastState?.opponent).not.toBeNull();
     expect(host.lastState?.matchBarHidden).toBe(true); // 复核条永不闪现
@@ -254,7 +254,7 @@ describe('F-WX-5 PlayerGameRuntime（headless 玩家闭环）', () => {
     // —— 再战：下一场 → Matching → Battle → Ended（闭环可循环）——
     runtime.actions.onFindOpponent();
     expect(runtime.playerPhase).toBe('matching');
-    vi.advanceTimersByTime(1010 + 700 + 600);
+    vi.advanceTimersByTime(1420 + 700 + 600); // F-MATCH-DEMO-R1：匹配 1.42s + Locked 700ms + READY 600ms(桌面)
     expect(runtime.battleState).toBe('fighting');
     tickMany(runtime, BATTLE_STEPS + 5);
     expect(runtime.battleState).toBe('ended');

@@ -177,9 +177,10 @@ describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
     fake.touch()!({ touches: [{ clientX: p.x, clientY: p.y }] });
     expect(runtime.playerPhase).toBe('matching'); // 触摸 → Action → Gameplay command 全链路
 
-    // —— Matching 候选 ~1.0s → MatchPreview（700ms 自动开战）→ READY → 开战 ——
-    // （F-MATCH-FRAME-R2：Lock 停留延长到 600–800ms，给玩家看清锁定对手）。
-    vi.advanceTimersByTime(1010 + 700 + 600);
+    // —— Matching 候选 1.42s → MatchPreview（700ms 锁定稳定）→ READY → 开战 ——
+    // （F-MATCH-FRAME-R2：Lock 停留延长到 600–800ms，给玩家看清锁定对手；
+    //  F-MATCH-DEMO-R1：搜索总时长 1.42s ∈ [1.2,1.8]s，候选 4 个显示）。
+    vi.advanceTimersByTime(1420 + 700 + 600);
     expect(runtime.battleState).toBe('fighting');
 
     // —— 真实 Planck Battle 推进（≈18s，最多 26.6s 兜底）——
@@ -210,7 +211,7 @@ describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
     // —— 再战：下一场 → Matching → Battle → Ended（验收 2 循环）——
     runtime.actions.onFindOpponent();
     expect(runtime.playerPhase).toBe('matching');
-    vi.advanceTimersByTime(1010 + 700 + 600);
+    vi.advanceTimersByTime(1420 + 700 + 600);
     expect(runtime.battleState).toBe('fighting');
     ticks = 0;
     while (runtime.battleState !== 'ended' && ticks < 1600) {

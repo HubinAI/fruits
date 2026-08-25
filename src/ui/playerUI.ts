@@ -147,4 +147,11 @@ export interface PlayerUIHost {
    * Runtime 构图（reframePlayerCamera）经它取 framingRect；无实现/非适用阶段 → null。
    */
   getPreviewFramingRect?(): { x: number; y: number; w: number; h: number } | null;
+  /**
+   * F-MATCH-DEMO-R1：compact mobile 手机流程标志（Canvas host 实现返回 true）。
+   * Runtime 用它压缩战前过渡——mobile 无 READY 覆盖层（Host 侧 !isMobile 门控），
+   * Locked 稳定 ~700ms 后直接开战，不追加 600ms READY 空等；桌面（未实现 → undefined）
+   * 保持 READY 600ms 过渡语义不变。
+   */
+  isMobileView?(): boolean;
 }

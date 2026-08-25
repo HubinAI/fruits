@@ -1720,6 +1720,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /**
+   * F-MATCH-DEMO-R1：compact mobile 手机流程标志——Runtime 用它压缩战前过渡
+   * （mobile 无 READY 覆盖层，Locked 稳定 ~700ms 后直接开战；桌面保持 READY 语义）。
+   */
+  isMobileView(): boolean {
+    return this.isMobile;
+  }
+
+  /**
    * F-WX-UI-1：装配预览取景子区域（viewport logical）——Mobile Garage 时 = 左侧展示区。
    * Runtime reframePlayerCamera 经 battle.reframe(fit, framingRect) 使 previewSolo fit 到本区。
    */
