@@ -1527,14 +1527,21 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const s = frame.battleStatus;
     if ((frame.battleState !== 'fighting' && frame.battleState !== 'ended') || !s) return;
     if (this.isMobile) {
-      // F-WX-6：Mobile HUD 顶条（避开顶部 safe inset；HP 条等宽压缩；阶段居中）
+      // F-WX-6：Mobile HUD 顶条（避开顶部 safe inset；HP 条等宽压缩）
+      // F-UX-3B：mobile-short 只保留左右 HP 条（删 A/B 字母、HP 数字、「战斗中」常驻文字）；
+      // 只有 Warning / Closing 才在中央显示阶段提示/倒计时（drawHudShort）。
       const top = this.insT + 4;
-      const h = 10;
+      const h = this.isShort ? 8 : 10;
       const barBase = this.insL + 8;
       const barW = Math.max(64, (this.W - this.insL - this.insR - 64) * 0.32);
+      const pctA = Math.max(0, Math.min(1, s.sideA.hp / Math.max(s.sideA.maxHp, 1))) * 100;
+      const pctB = Math.max(0, Math.min(1, s.sideB.hp / Math.max(s.sideB.maxHp, 1))) * 100;
+      if (this.isShort) {
+        this.drawHudShort(frame, top, h, barBase, barW, pctA, pctB);
+        return;
+      }
       this.text('A', barBase, top + 12, 14, C.blue, 'left', 700);
       const barAX = barBase + 16;
-      const pctA = Math.max(0, Math.min(1, s.sideA.hp / Math.max(s.sideA.maxHp, 1))) * 100;
       this.rect(barAX, top, barW, h, '#232b38', C.border, 1);
       if (pctA > 0) this.rect(barAX, top, barW * (pctA / 100), h, C.blue);
       this.text(`${Math.round(s.sideA.hp)}`, barAX + barW + 6, top + 12, 14, C.text);
@@ -1542,7 +1549,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const barBRight = this.W - this.insR - 8;
       this.text('B', barBRight, top + 12, 14, '#e08a2e', 'right', 700);
       const barBX = barBRight - 16 - barW;
-      const pctB = Math.max(0, Math.min(1, s.sideB.hp / Math.max(s.sideB.maxHp, 1))) * 100;
       this.rect(barBX, top, barW, h, '#232b38', C.border, 1);
       if (pctB > 0) this.rect(barBX, top, barW * (pctB / 100), h, '#e08a2e');
       this.text(`${Math.round(s.sideB.hp)}`, barBX - 6, top + 12, 14, C.text, 'right');
@@ -1570,6 +1576,37 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // Warning 倒计时
     if (frame.phaseCountdownText != null) {
       this.text(frame.phaseCountdownText, BASE_W / 2, 110, 44, C.red, 'center', 800);
+    }
+  }
+
+  /**
+   * F-UX-3B：mobile-short Battle HUD——只保留左右两条 HP 条（无 A/B 字母、无 HP 数字、
+   * 无「战斗中」常驻文字）；仅 Warning / Closing 才在中央显示阶段提示 + 倒计时
+   * （倒计时文案由 runtime pollArenaPhase 提供：Warning=3/2/1，Closing=刺墙剩余秒数）。
+   * 顶部让出的空间全部还给战斗画面（配合 renderer 薄地面构图）。
+   */
+  private drawHudShort(
+    frame: PlayerUIHudFrame,
+    top: number,
+    h: number,
+    barBase: number,
+    barW: number,
+    pctA: number,
+    pctB: number,
+  ): void {
+    const s = frame.battleStatus!;
+    // 左右 HP 条（纯条，无文字）
+    this.rect(barBase, top, barW, h, '#232b38', C.border, 1);
+    if (pctA > 0) this.rect(barBase, top, barW * (pctA / 100), h, C.blue);
+    const barBRight = this.W - this.insR - 8;
+    const barBX = barBRight - barW;
+    this.rect(barBX, top, barW, h, '#232b38', C.border, 1);
+    if (pctB > 0) this.rect(barBX, top, barW * (pctB / 100), h, '#e08a2e');
+    // 中央阶段提示：仅 Warning / Closing（不遮挡车辆/武器/FX——车辆位于下部战斗带）
+    if (s.phase === 'Warning' || s.phase === 'Closing') {
+      const label = s.phase === 'Warning' ? '警告' : '刺墙逼近';
+      const cd = frame.phaseCountdownText != null ? frame.phaseCountdownText : '';
+      this.text(cd !== '' ? `${label} ${cd}` : label, this.W / 2, top + 44, 24, C.red, 'center', 800);
     }
   }
 

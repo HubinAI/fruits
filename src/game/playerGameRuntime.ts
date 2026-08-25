@@ -775,6 +775,12 @@ export class PlayerGameRuntime {
       const remaining = phaseRemainingMs(o.phase, warningMs, o.timeMs - this.phaseStartTimeMs);
       return warningCountdown(remaining);
     }
+    // F-UX-3B：Closing 阶段同样中央显示倒计时（刺墙逼近；表现层纯逻辑，不碰 Physics/伤害）
+    if (o.phase === 'Closing' && o.result?.phase !== 'End') {
+      const closingMs = o.config.arena?.phases?.closingMs ?? 5000;
+      const remaining = phaseRemainingMs(o.phase, closingMs, o.timeMs - this.phaseStartTimeMs);
+      return warningCountdown(remaining);
+    }
     void nowMs;
     return null;
   }

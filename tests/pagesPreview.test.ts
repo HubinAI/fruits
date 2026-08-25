@@ -56,8 +56,8 @@ describe('F-WX-6.1 main.ts 默认 Canvas + short SHA Badge', () => {
   it('Pages 预览默认启用 Canvas UI：isPagesPreview || ?canvasui=1，普通 DEV 行为不变', () => {
     // 守卫：typeof __PAGES_PREVIEW__（未注入构建为 undefined → false）
     expect(MAIN).toContain("typeof __PAGES_PREVIEW__ !== 'undefined'");
-    // 默认 Canvas：isPagesPreview || URLSearchParams(location.search).has('canvasui')
-    expect(MAIN).toMatch(/canvasUiMode\s*=\s*isPagesPreview\s*\|\|\s*new URLSearchParams\(location\.search\)\.has\('canvasui'\)/);
+    // 默认 Canvas：isPagesPreview || ?mobile-review=1 || URLSearchParams(location.search).has('canvasui')
+    expect(MAIN).toMatch(/canvasUiMode\s*=\s*isPagesPreview\s*\|\|\s*reviewOn\s*\|\|\s*new URLSearchParams\(location\.search\)\.has\('canvasui'\)/);
   });
 
   it('Badge 在 Pages Preview（production 语义下 DEV_TOOLS_VISIBLE=false）仍显示 short SHA', () => {

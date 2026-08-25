@@ -29,10 +29,13 @@ export class WebInput implements PlatformInput {
       // getBoundingClientRect 返回视觉尺寸，必须归一化回元素 CSS 逻辑坐标：
       //   localX = (clientX - rect.left) × clientWidth / rect.width
       // 未缩放（rect.width === clientWidth）时该式恒等于 (clientX - rect.left)，保持原行为。
+      // 守卫：rect 无 width/height（极简环境/测试桩）或 clientWidth 缺失时 scale=1（不产生 NaN）。
       const r = node.getBoundingClientRect();
-      const cw = node.clientWidth || r.width;
-      const ch = node.clientHeight || r.height;
-      handler(((cx - r.left) * cw) / r.width, ((cy - r.top) * ch) / r.height);
+      const rw = r.width > 0 ? r.width : (node.clientWidth || 1);
+      const rh = r.height > 0 ? r.height : (node.clientHeight || 1);
+      const scaleX = node.clientWidth > 0 && rw > 0 ? node.clientWidth / rw : 1;
+      const scaleY = node.clientHeight > 0 && rh > 0 ? node.clientHeight / rh : 1;
+      handler((cx - r.left) * scaleX, (cy - r.top) * scaleY);
     };
     node.addEventListener('pointerdown', onDown);
     node.addEventListener('mousedown', onDown);

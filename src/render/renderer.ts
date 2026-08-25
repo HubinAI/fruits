@@ -1567,6 +1567,8 @@ export class Renderer {
   ): void {
     const forwardExtent = opts.forwardExtent ?? 520;
     const recoilExtent = opts.recoilExtent ?? 180;
+    // F-UX-3B：构图 phase（battle 专用；非 battle 一律 '' → Active 语义）
+    const phase = opts.phase ?? '';
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     const acc = (x: number, y: number): void => {
       if (x < minX) minX = x;
@@ -1649,7 +1651,6 @@ export class Renderer {
       // F-WX-8-C：compact 手机横屏用 Mobile corridor——Active 战斗主体优先（收窄到
       // 真实交战区 [300,1340]，开局 A(400)/B(1200) 完整可见，车辆占屏 ~21% vs 旧 ~17%）；
       // Warning 场地规则优先（完整 arena + closing 墙，刺墙提示可见）；Desktop 语义不变。
-      const phase = opts.phase ?? '';
       if (phase === 'Active' || phase === '') {
         if (isCompact) {
           const cL = MOBILE_ACTIVE_MIN_X;
@@ -1720,6 +1721,10 @@ export class Renderer {
     if (!isFinite(minX) || !isFinite(minY) || maxX - minX < 1 || maxY - minY < 1) return;
     const isPreview = fit === 'preview';
     const isFixed = fit === 'previewSolo' || fit === 'previewFixed';
+    // F-UX-3B：compact Mobile battle Active 薄地面构图——Ground 只改视觉厚度
+    // （Physics ground 不动）：内容底部锚定（车辆站在地面上）、insetBottom 缩小、
+    // groundY 下方多留 48 world（配合 scale → 地面占屏 ~12~16%）；仅 Active 固定构图。
+    const compactBattleActive = fit === 'battle' && isCompact && (phase === 'Active' || phase === '');
     // F-WX-8-B：compact 固定框（Mobile previewSolo/previewFixed）用极小 margin——
     // 固定框 bounds 自带覆盖余量（如 solo 框 440 宽 vs 车辆 180 宽），再叠加 48 的
     // CONTENT_MARGIN_WORLD 会把纵向 bh 撑大、压扁手机横屏下的车辆（实测 24%）。
@@ -1728,8 +1733,11 @@ export class Renderer {
     // 地面表面留出可见区域。F-WX-RCA-3A：previewSolo compact（coreBounds 自适应 padding）
     // 自带完整车辆余量，跳过此钳制——否则 bounds 底部被推到 groundY+40（740）使 bounds 中心
     // 偏离 core 中心，破坏多 body 下的垂直居中（实测 9px 偏移）。
-    if (!(fit === 'previewSolo' && isCompact) && maxY < snap.arena.groundY + 40) {
-      maxY = snap.arena.groundY + 40;
+    // F-UX-3B：compact battle Active 用 48（配合底部锚定 → 地面占屏 12~16%）；
+    // 其余构图保持 groundY+40 语义。
+    const groundBelow = compactBattleActive ? 48 : 40;
+    if (!(fit === 'previewSolo' && isCompact) && maxY < snap.arena.groundY + groundBelow) {
+      maxY = snap.arena.groundY + groundBelow;
     }
     const bw = maxX - minX, bh = maxY - minY;
     const cw = this.viewWidth, ch = this.viewHeight;
@@ -1740,6 +1748,7 @@ export class Renderer {
     // F-WX-6/8-B：紧凑横屏（手机）——顶部给状态条/HUD（~52 逻辑 px）、底部给
     // Mobile-first Garage 两层操作区（~110 逻辑 px）；previewSolo 左右阴影区收窄到 8
     // （Mobile Garage 全宽布局，safe area 由 Host insL/insR 处理）→ 车辆占可用宽 30~45%。
+    // F-UX-3B：compact battle Active 底部只留 12（薄地面构图，上方空间全部还给战斗）。
     // Desktop（h≥600）语义完全不变。
     // 注意：view-space 为物理 px（surface 或 canvas 像素），inset 值 ×viewDpr 换算回逻辑 px。
     const insetX = isCompact ? (fit === 'battle' ? 0 : isFixed ? 8 : SAFE_INSET_X) : SAFE_INSET_X;
@@ -1755,7 +1764,9 @@ export class Renderer {
         ? Math.round(110 * this.viewDpr) // F-WX-8-B：新三层 Dock 两行 ~100px
         : 160
       : isCompact
-        ? Math.round(40 * this.viewDpr)
+        ? compactBattleActive
+          ? Math.round(12 * this.viewDpr) // F-UX-3B：薄地面构图（地面占屏 12~16%）
+          : Math.round(40 * this.viewDpr)
         : SAFE_INSET_Y;
     // F-WX-UI-1：framingRect（viewport logical 子区域）存在时，固定预览框 fit 到该区域
     // 内的安全区（rect 已含布局留白，内部仅留小边距）——Mobile Garage 车辆 fit 到左侧
@@ -1791,9 +1802,13 @@ export class Renderer {
     let scale = enforceFitLimit ? fitLimit : fitLimit * CONTENT_ZOOM;
     if (scale < MIN_CONTENT_SCALE) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
-    // 内容居中于安全区中心（offset 含安全区内缩量；玩家 Shell 预览用 top 内缩）
+    // 内容定位：默认居中于安全区中心（offset 含安全区内缩量；玩家 Shell 预览用 top 内缩）。
+    // F-UX-3B：compact battle Active 底部锚定——车辆站在地面上（Ground 只改视觉厚度，
+    // 不居中留上下空隙；顶部的空间全部还给战斗主体）。
     const offsetX = baseX + (safeW - bw * scale) / 2 - minX * scale;
-    const offsetY = baseY + (safeH - bh * scale) / 2 - minY * scale;
+    const offsetY = compactBattleActive
+      ? baseY + (safeH - bh * scale) - minY * scale
+      : baseY + (safeH - bh * scale) / 2 - minY * scale;
     this.transform = { scale, offsetX, offsetY };
     // F-WX-9A：DEV-only 取景尺度日志（__WX_DEBUG__=true，WECHAT_DEBUG_INPUT=1 构建注入；
     // PROD __WX_DEBUG__=false → 编译期常量折叠，零日志）。只读诊断，不改变任何 framing 语义。
