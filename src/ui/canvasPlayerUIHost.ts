@@ -189,6 +189,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private vibrationOn = true;
   /** F-META-3：Backpack 分类过滤（全部/武器/功能件；UI-only，不做复杂筛选） */
   private backpackFilter: 'all' | 'weapon' | 'gadget' = 'all';
+  /** F-UX-2C：Backpack 2×2 卡片分页（每页 4 张；[上一页]/[下一页]；合成后仍停当前页） */
+  private backpackPage = 0;
   /** F-META-4：当前激活的 Modal（null = 无）；覆盖绘制 + 拦截底层点击，关闭恢复当前页 */
   private modal: ModalSpec | null = null;
   /** F-META-5：Result Modal 已弹出标志（防每帧重复弹出；result 清空时复位） */
@@ -272,6 +274,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (state.playerPhase !== 'garage') this.metaPage = 'garage';
     // F-META-3：离开局外同时复位 Backpack 分类（回 Garage 默认全部）
     if (state.playerPhase !== 'garage') this.backpackFilter = 'all';
+    // F-UX-2C：离开局外同时复位 Backpack 分页（回 Garage 默认第一页）
+    if (state.playerPhase !== 'garage') this.backpackPage = 0;
     // F-META-6：离开局外同时复位 More 子视图（回 Garage 默认功能卡主页）
     if (state.playerPhase !== 'garage') this.moreView = 'home';
     // F-META-UX2：合成确认后（mergeSnapshot 非空）→ diff 出新 2★ → 弹「合成成功」结果 Modal
@@ -413,9 +417,16 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id.startsWith('bfilter:')) {
-      // F-META-3：Backpack 分类过滤（全部/武器/功能件；复位列表滚动）
+      // F-META-3：Backpack 分类过滤（全部/武器/功能件；复位列表分页到第一页）
       this.backpackFilter = id.slice(8) as 'all' | 'weapon' | 'gadget';
-      this.panelScroll = 0;
+      this.backpackPage = 0;
+      this.draw();
+      return;
+    }
+    if (id === 'backpack-page-prev' || id === 'backpack-page-next') {
+      // F-UX-2C：Backpack 分页（[上一页]/[下一页]；上限在 draw 内按 pageCount 钳制）
+      this.backpackPage += id === 'backpack-page-prev' ? -1 : 1;
+      if (this.backpackPage < 0) this.backpackPage = 0;
       this.draw();
       return;
     }
@@ -961,10 +972,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /**
-   * F-META-1/2/3 + F-META-UX1：backpack MetaPage——「已获得部件」唯一管理页：
-   * 分类（全部/武器/功能件）+ 库存列表（名称/星级/数量/装备态，未拥有不占列表）
-   * + 合成（5合1 完整迁入；确认才 onMerge，规则复用 mergeWithCost，不重写）。
-   * F-META-UX1：顶部唯一「← 返回车库」（无全局 Tab）；合成面板内用 merge-close 返回列表。
+   * F-META-1/2/3 + F-META-UX1 + F-UX-2C：backpack MetaPage——「已获得部件」唯一管理页：
+   * 分类（全部/武器/功能件）+ 库存 **2×2 部件卡分页**（每页 4 张：名称/星级×数量/装备态，
+   * 未拥有不占列表；[上一页] 1/N [下一页] 分页，无 ▲▼ 滚动）+ 合成（5合1 完整迁入；
+   * 确认才 onMerge，规则复用 mergeWithCost，不重写）。
+   * F-META-UX1：顶部唯一「← 返回车库」；F-UX-2C：合成后仍停留 Backpack 当前页。
    */
   private drawBackpackPage(state: PlayerUIState, layout: MobileGarageLayout): void {
     const draft = state.draft;
@@ -989,13 +1001,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.button(tx, tabTop, tabW, tabH, t.id, t.label, { active: this.backpackFilter === t.v });
       tx += tabW + tabGap;
     }
-    // 库存列表（已拥有 = one/two > 0 或 已装备；未拥有不占列表）
-    const listTop = tabTop + tabH + (this.isShort ? 4 : 6);
-    const mergeH = this.isShort ? 32 : Math.max(this.minTouchH, 48);
-    const listBot = c.y + c.h - mergeH - (this.isShort ? 4 : 8);
+    // 库存（已拥有 = one/two > 0 或 已装备；未拥有不占列表）
     const inv = state.inventory;
     const equipped = new Set(equippedDefIds(draft));
-    const items: Array<{ defId: string; name: string; one: number; two: number; equipped: boolean }> = [];
+    const items: Array<{ defId: string; name: string; star: string; equipped: boolean }> = [];
     for (const pp of OFFICIAL_PARTS) {
       const one = Math.max(0, inv[pp].one);
       const two = Math.max(0, inv[pp].two);
@@ -1005,63 +1014,51 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const cat = def?.category;
       if (this.backpackFilter === 'weapon' && cat !== 'weapon') continue;
       if (this.backpackFilter === 'gadget' && cat !== 'gadget') continue;
-      items.push({ defId: pp, name: def?.name ?? pp, one, two, equipped: eq });
+      const star = [one > 0 ? `★×${one}` : '', two > 0 ? `★★×${two}` : ''].filter(Boolean).join(' ');
+      items.push({ defId: pp, name: def?.name ?? pp, star, equipped: eq });
     }
-    const cardH = this.isShort ? 28 : 52;
-    const cardGap = 6;
+    // 底部行：合成按钮（左）+ 分页控件（右，多于 4 项时）
+    const mergeH = this.isShort ? 32 : Math.max(this.minTouchH, 48);
+    const mergeY = c.y + c.h - mergeH - (this.isShort ? 4 : 8);
+    this.button(c.x + 12, mergeY, Math.min(140, c.w * 0.4), mergeH, 'merge', '合成', { sub: '更多' });
+    // F-UX-2C：2×2 部件卡分页（每页 4 张；[上一页] 1/N [下一页]，无 ▲▼ 滚动）
+    const PAGE_SIZE = 4;
+    const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    if (this.backpackPage >= pageCount) this.backpackPage = pageCount - 1;
+    if (this.backpackPage < 0) this.backpackPage = 0;
+    const listTop = tabTop + tabH + (this.isShort ? 4 : 6);
+    const listBot = mergeY - (this.isShort ? 4 : 6);
     const viewH = Math.max(8, listBot - listTop);
-    const contentH = items.length * (cardH + cardGap) - cardGap;
-    const maxScroll = Math.max(0, contentH - viewH);
-    if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
-    const btnColX = c.x + c.w - 12 - 56; // 右侧按钮列（列表项宽度让出，不重叠）
-    const itemW = c.w - 24 - 64;
-    // 滚动按钮列——高度受列表可视区约束（F-WX-MOBILE-RCA-1：short 极限屏不溢出；
-    // 空间不足时退化为单个「▼」，再不足则不显示）
-    if (maxScroll > 0) {
-      const btnH = Math.min(this.targetTouchH, Math.floor((viewH - 6) / 2));
-      if (btnH >= 16) {
-        this.button(btnColX, listTop, 56, btnH, 'panel-scroll-up', '▲');
-        this.button(btnColX, listTop + btnH + 6, 56, btnH, 'panel-scroll-down', '▼');
-      } else if (viewH >= 20) {
-        const singleH = Math.min(this.targetTouchH, viewH);
-        this.button(btnColX, listTop, 56, singleH, 'panel-scroll-down', '▼');
+    const gap = 8;
+    const cardW = Math.floor((c.w - 24 - gap) / 2);
+    const cardH = Math.max(8, Math.floor((viewH - gap) / 2));
+    const pageItems = items.slice(this.backpackPage * PAGE_SIZE, this.backpackPage * PAGE_SIZE + PAGE_SIZE);
+    for (let i = 0; i < pageItems.length; i++) {
+      const it = pageItems[i];
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const x = c.x + 12 + col * (cardW + gap);
+      const y = listTop + row * (cardH + gap);
+      this.rect(x, y, cardW, cardH, it.equipped ? C.blueDeep : C.panel, C.border, 1);
+      this.text(it.name, x + 10, y + cardH * 0.32, this.isShort ? 13 : 15, C.text, 'left', 600);
+      this.text(it.star, x + cardW - 10, y + cardH * 0.32, this.isShort ? 12 : 13, C.gold, 'right');
+      if (it.equipped) {
+        this.text('已装备', x + cardW - 10, y + cardH * 0.78, this.isShort ? 11 : 12, C.blue, 'right', 700);
       }
+      // 只读命中区（供测试断言列表项；dispatch 对 bpack-item: 无操作）
+      this.hit(`bpack-item:${it.defId}`, x, y, cardW, cardH);
     }
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(this.ox + c.x * this.scale, this.oy + listTop * this.scale, c.w * this.scale, viewH * this.scale);
-    ctx.clip();
-    let yy = listTop - this.panelScroll;
-    let shown = 0;
-    for (const it of items) {
-      const y = yy;
-      const fully = y >= listTop - 0.5 && y + cardH <= listTop + viewH + 0.5;
-      if (fully) {
-        // 完全可见：绘制 + 只读命中区（供测试断言列表项；dispatch 对 bpack-item: 无操作）
-        this.rect(c.x + 12, y, itemW, cardH, it.equipped ? C.blueDeep : C.panel, C.border, 1);
-        this.text(it.name, c.x + 22, y + 18, 16, C.text, 'left', 600);
-        this.text(`★×${it.one}  ★★×${it.two}`, c.x + 22, y + 38, 14, C.gold, 'left');
-        if (it.equipped) {
-          this.text('已装备', c.x + 12 + itemW - 6, y + 18, 14, C.blue, 'right', 700);
-        }
-        this.hit(`bpack-item:${it.defId}`, c.x + 12, y, itemW, cardH);
-        shown++;
-      } else if (y < listTop + viewH && y + cardH > listTop) {
-        // 部分可见：只画不注册命中（不盖住滚动按钮，也不产生超区 hitArea）
-        this.rect(c.x + 12, y, itemW, cardH, it.equipped ? C.blueDeep : C.panel, C.border, 1);
-        this.text(it.name, c.x + 22, y + 18, 16, C.text, 'left', 600);
-        this.text(`★×${it.one}  ★★×${it.two}`, c.x + 22, y + 38, 14, C.gold, 'left');
-      }
-      if (y > listTop + viewH + cardH) break; // 超出可视区不再处理
-      yy += cardH + cardGap;
-    }
-    ctx.restore();
     if (items.length === 0) this.text('该分类暂无部件', c.x + 12, listTop + 30, 14, C.textDim);
-    void shown;
-    // 底部：合成次级入口（触控 ≥48；点击展开合成面板）
-    const mergeY = c.y + c.h - mergeH - 8;
-    this.button(c.x + 12, mergeY, Math.min(200, c.w - 24), mergeH, 'merge', '合成', { sub: '更多' });
+    // 分页条（右对齐；与合成按钮同一底部行，不额外占高）
+    if (pageCount > 1) {
+      const pgH = Math.min(mergeH, 28);
+      const pgY = mergeY + (mergeH - pgH) / 2;
+      const nextX = c.x + c.w - 12 - 56;
+      const prevX = nextX - 56 - 8 - 44; // 页码文字区 ~44
+      this.button(prevX, pgY, 56, pgH, 'backpack-page-prev', '上一页', {});
+      this.text(`${this.backpackPage + 1} / ${pageCount}`, prevX + 56 + 4, pgY + pgH / 2, 13, C.textDim, 'left');
+      this.button(nextX, pgY, 56, pgH, 'backpack-page-next', '下一页', {});
+    }
   }
 
   /**

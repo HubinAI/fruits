@@ -126,7 +126,7 @@ function click(env: HostEnv, id: string): void {
 }
 
 describe('F-META-3｜Backpack V1 + 合成整合', () => {
-  it('验收2｜Backpack 显示真实库存：未拥有不占列表；滚动可达更多；装备项显示', () => {
+  it('验收2｜Backpack 显示真实库存：未拥有不占列表；2×2 分页可达全部；装备项显示', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     // 只有 cannon 有货 → 列表显示 cannon + starter 装备项（pushRod/cannon/hammer——装备态必显示）；
     // 未拥有的非装备项（如 laser）不占主列表
@@ -136,17 +136,24 @@ describe('F-META-3｜Backpack V1 + 合成整合', () => {
     expect(sparse, 'cannon（有货）显示').toContain('cannon');
     expect(sparse, '装备项 hammer 显示（装备态不隐藏）').toContain('hammer');
     expect(sparse, '未拥有的非装备项不占列表').not.toContain('laser');
-    // 富库存：首屏可见若干项（含 starter 装备项 cannon——装备态不被隐藏）
+    // 富库存：首屏 2×2 一屏 4 张卡（含 starter 装备项 cannon——装备态不被隐藏）
     env.host.render(state({ inventory: richInv() as never, progress: { coin: 600, rating: 20 } }));
-    expect(items(env).length, '富库存首屏可见 > 0').toBeGreaterThan(0);
+    expect(items(env).length, '一屏最多 4 张卡').toBeLessThanOrEqual(4);
     expect(items(env), '装备项 cannon 显示').toContain('cannon');
-    // 滚动后可见集合变化（更多项可达）
+    // F-UX-2C：分页（无 ▲▼ 滚动）——点 [下一页] 出现新项，可到达全部库存
+    expect(env.areas().some((a) => a.id === 'panel-scroll-up' || a.id === 'panel-scroll-down'), '无 ▲▼ 滚动按钮').toBe(false);
     const before = items(env);
-    const sd = env.areas().find((a) => a.id === 'panel-scroll-down');
-    expect(sd, '富库存列表应有滚动').toBeTruthy();
-    env.pointer(sd!.x + sd!.w / 2, sd!.y + sd!.h / 2);
+    const next = env.areas().find((a) => a.id === 'backpack-page-next');
+    expect(next, '多于 4 项有下一页').toBeTruthy();
+    env.pointer(next!.x + next!.w / 2, next!.y + next!.h / 2);
     const after = items(env);
-    expect(after.some((id) => !before.includes(id)), '滚动后出现新项').toBe(true);
+    expect(after.some((id) => !before.includes(id)), '翻页后出现新项').toBe(true);
+    expect(after.length, '翻页后仍一屏 ≤4 张').toBeLessThanOrEqual(4);
+    // 回到第一页
+    const prev = env.areas().find((a) => a.id === 'backpack-page-prev');
+    expect(prev, '有上一页').toBeTruthy();
+    env.pointer(prev!.x + prev!.w / 2, prev!.y + prev!.h / 2);
+    expect(items(env), '回到第一页').toEqual(before);
   });
 
   it('验收2b｜分类：全部 / 武器 / 功能件——过滤后可见项集合满足分类约束', () => {
@@ -241,5 +248,30 @@ describe('F-META-3｜Backpack V1 + 合成整合', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(state({ inventory: richInv() as never, progress: { coin: 600, rating: 20 } }));
     expect(env.areas().some((a) => a.id === 'merge'), 'Garage 无任何合成入口').toBe(false);
+  });
+
+  it('F-UX-2C｜合成结束仍停在背包当前页：翻页后合成 → 关闭成功 Modal → 分页未复位', () => {
+    const env = makeHost({ w: 844, h: 390 }, INSETS);
+    env.host.render(state({ inventory: richInv() as never, progress: { coin: 600, rating: 20 } }));
+    goBackpack(env);
+    // 翻到第 2 页（富库存 7 项 → 2 页）
+    click(env, 'backpack-page-next');
+    expect(env.areas().some((a) => a.id === 'backpack-page-prev'), '第 2 页有上一页').toBe(true);
+    // 合成（onMerge mock → 合成后 state：各 one 2→1，cannon two 1→2）
+    const afterInv: Record<string, { one: number; two: number }> = {};
+    for (const p of OFFICIAL_PARTS) afterInv[p] = { one: 1, two: p === 'cannon' ? 2 : 1 };
+    env.host.setActions({
+      onMerge: () => {
+        env.fired['merge'] = (env.fired['merge'] ?? 0) + 1;
+        env.host.render(state({ inventory: afterInv as never, progress: { coin: 500, rating: 20 } }));
+      },
+    } as never);
+    click(env, 'merge');
+    click(env, 'modal-primary'); // 合成
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成成功 Modal').toBe(true);
+    click(env, 'modal-primary'); // 知道了
+    expect(env.areas().some((a) => a.id === 'merge'), '合成后仍停留 Backpack').toBe(true);
+    // 仍停留当前页（分页未因合成复位——backpack-page-prev 仍显示 = 非第一页）
+    expect(env.areas().some((a) => a.id === 'backpack-page-prev'), '合成后分页未复位（仍第 2 页）').toBe(true);
   });
 });
