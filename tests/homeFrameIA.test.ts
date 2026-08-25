@@ -26,7 +26,9 @@ import type { SafeInsets } from '../src/platform/types';
 const INSETS: SafeInsets = { left: 44, right: 20, top: 12, bottom: 16 };
 const VIEWPORTS = [
   { w: 360, h: 180 },
+  { w: 390, h: 195 },
   { w: 420, h: 210 },
+  { w: 460, h: 230 },
   { w: 621, h: 351 },
   { w: 844, h: 390 },
 ];
@@ -48,7 +50,7 @@ interface FrameData {
 }
 
 /** 渲染 Home 预览并取真实 transform 下的车辆 envelope 屏幕 bounds */
-function frameHome(vp: { w: number; h: number }, bodyId: string): {
+function frameHome(vp: { w: number; h: number }, bodyId: string, fit: 'preview' | 'previewSolo' = 'previewSolo'): {
   screen: { minX: number; minY: number; maxX: number; maxY: number };
   scale: number;
   transform: { scale: number; offsetX: number; offsetY: number };
@@ -73,7 +75,9 @@ function frameHome(vp: { w: number; h: number }, bodyId: string): {
   const snap = o.getRenderSnapshot();
   r.resize(snap.arena.width, o.arena.config.height);
   // 真实取景：framingRect 用 Home 布局 vehicleFramingRect（logical px）
-  r.reframe(snap, 'previewSolo', { framingRect: L.vehicleFramingRect });
+  // fit='previewSolo' = 修复后首页路径（runtime.reframePlayerCamera 对 home 阶段选定）；
+  // fit='preview'  = 修复前路径（isFixed=false → framingRect 被忽略，按全屏 inset 取景）。
+  r.reframe(snap, fit, { framingRect: L.vehicleFramingRect });
   const diag = r.scaleDiagnostics(snap);
   return { screen: diag.envelope.screen, scale: diag.scale, transform: { scale: diag.scale, offsetX: diag.offsetX, offsetY: diag.offsetY }, view: diag.view };
 }
@@ -118,6 +122,27 @@ describe('F-HOME-IA-R1｜首页车辆真实 Runtime 取景', () => {
       });
     }
   }
+
+  // F-HOME-STAGE-R2｜根因固化：修复前的 'preview' 路径（isFixed=false → framingRect 被忽略，
+  // 按全屏 inset 取景）会让「我的车」偏离 homeStageRect 中央、且下缘压到 CTA 主条。本块把这条
+  // 旧行为显式断言出来，作为「为何首页必须走 previewSolo」的回归哨兵——一旦有人把 home 阶段
+  // 的 fit 改回 'preview'，previewSolo 主块（上方）立即失败，本块则记录旧偏离量。
+  describe('根因固化｜旧 preview 路径偏离 homeStageRect（不应复现）', () => {
+    for (const vp of VIEWPORTS) {
+      const prof = resolveLayoutProfile(vp.w, vp.h);
+      const Lold = computeHomeLayout(vp, INSETS, prof);
+      const stagePhysOld = { x: Lold.stageRect.x * DPR, y: Lold.stageRect.y * DPR, w: Lold.stageRect.w * DPR, h: Lold.stageRect.h * DPR };
+      for (const body of BODIES) {
+        it(`${vp.w}×${vp.h}｜${body}：旧 'preview' 路径使车辆偏离舞台中央（修复前症状）`, () => {
+          const { screen } = frameHome(vp, body, 'preview');
+          const stageCx = stagePhysOld.x + stagePhysOld.w / 2;
+          const cx = (screen.minX + screen.maxX) / 2;
+          // 旧路径下水平偏心应明显（>3px）；修复后首页走 previewSolo（|dx|≤3，见主块）。
+          expect(Math.abs(cx - stageCx), '旧 preview 路径水平偏心应 > 3px（否则根因已不存在）').toBeGreaterThan(3);
+        });
+      }
+    }
+  });
 
   it('数据汇总：输出最终 Runtime 取景数据（用于交付报告）', () => {
     for (const e of collected) {

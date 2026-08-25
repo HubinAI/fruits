@@ -94,6 +94,12 @@ export interface PlayerBattleHost {
    * （根治 UI 锚点猜测脱节）。无 orchestrator（非预览/战斗）→ null。
    */
   getMatchVehicleRects?(): { a: { x: number; y: number; w: number; h: number }; b: { x: number; y: number; w: number; h: number } } | null;
+  /**
+   * F-HOME-STAGE-R2：首页当前 transform 下「我的车」可见 envelope 屏幕矩形（逻辑 px）。
+   * Home 车辆点击区据此注册（点击跟随真实 envelope，而非整块 vehicleFramingRect）；
+   * 无 orchestrator（非预览/战斗）→ null。
+   */
+  getHomeVehicleRect?(): { x: number; y: number; w: number; h: number } | null;
 }
 
 /** 依赖注入：入口（Web/微信）提供 Host / 表现 / Web-only 钩子 */
@@ -403,6 +409,11 @@ export class PlayerGameRuntime {
         this.playerPhaseInternal === 'matching' || this.playerPhaseInternal === 'matchPreview'
           ? this.deps.battle.getMatchVehicleRects?.() ?? null
           : null,
+      // F-HOME-STAGE-R2：Home 阶段（= garage 阶段 + metaPage==='home'，见 reframePlayerCamera 注释）
+      // 推入「我的车」真实 envelope（逻辑 px），供 UI 注册车辆点击区（点击跟随真实 envelope）；
+      // 仅预览阶段（garage/matching/matchPreview）有值，Battle 阶段为 null。UI Host 仅在 Home
+      // 页（metaPage==='home'）使用此值，其余预览页（如车库编辑页）虽同属 garage 阶段但不用。
+      homeVehicleRect: this.deps.battle.previewMode ? this.deps.battle.getHomeVehicleRect?.() ?? null : null,
       result: this.currentResult,
       reward: this.currentReward,
       economy: this.currentEconomy,
@@ -419,12 +430,16 @@ export class PlayerGameRuntime {
   reframePlayerCamera(): void {
     const orch = this.deps.battle.orchestrator;
     if (!orch) return;
+    // 注：PlayerPhase 仅有 'garage' | 'matching' | 'matchPreview'，无独立 'home' 阶段——
+    // 正式首页 = garage 阶段 + metaPage==='home'，故首页同样走 'previewSolo'（garage 分支）+
+    // getPreviewFramingRect 返回的 home.vehicleFramingRect，已正确 fit 到 homeStageRect。
+    // 末尾 else 为防御性兜底（当前不可达），保持 previewSolo 以兼容未来可能新增的预览阶段。
     const fit: CameraFit = this.deps.battle.previewMode
-      ? (this.playerPhaseInternal === 'garage' // Q15-UI-R2：Garage 单车固定构图（~40% 宽）
+      ? (this.playerPhaseInternal === 'garage' // Q15-UI-R2 / F-HOME-IA-R1：Garage/首页 单车固定构图（fit 到 vehicleFramingRect）
           ? 'previewSolo'
           : (this.playerPhaseInternal === 'matching' || this.playerPhaseInternal === 'matchPreview') // A左B右固定构图，候选换车不呼吸
             ? 'previewFixed'
-            : 'preview')
+            : 'previewSolo')
       : 'battle'; // 正式战斗：按 phase 构图（Q08-A）
     this.deps.battle.reframe(fit, this.deps.host.getPreviewFramingRect?.() ?? undefined);
   }
@@ -458,12 +473,16 @@ export class PlayerGameRuntime {
       const sb = this.snapshotOf('B');
       this.deps.battle.loadCustomPreview(sa, sb);
       this.reframePlayerCamera();
+      // F-MATCH-FRAME-R2 / F-HOME-STAGE-R2：取景后立即推 UI，保证 match/home vehicle
+      // envelope 与 renderer 实际落点同步（扫描框 / 车辆点击区精确跟随）。
+      this.pushUI();
       return;
     }
     // Garage / Matching：只渲染我的车（solo-A）。B 占位（不绘制 / 不取景）。
     const sa = this.snapshotOf('A');
     this.deps.battle.loadCustomPreview(sa, sa, true);
     this.reframePlayerCamera();
+    this.pushUI();
   }
 
   /** 编辑后刷新：预览（非战斗时）+ 存档 + 玩家 UI（经 Host）；DEV 面板经 onPanelsChanged */

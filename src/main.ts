@@ -448,6 +448,12 @@ const battleHost: PlayerBattleHost = {
     if (!o) return null;
     return renderer.getVehicleScreenRects(o.getRenderSnapshot());
   },
+  getHomeVehicleRect: () => {
+    const o = lab.orchestrator;
+    if (!o) return null;
+    const rects = renderer.getVehicleScreenRects(o.getRenderSnapshot());
+    return rects ? rects.a : null;
+  },
 };
 
 /* ---------- DEV Build 编辑状态（面板；玩家装配经 runtime actions） ---------- */

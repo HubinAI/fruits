@@ -1115,9 +1115,16 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
 
     // ② 中央舞台：背景（renderer underlay）+ 车辆（renderer previewSolo 已 fit 到
     //    vehicleFramingRect）。不画全宽车辆框/边框——只保留车辆点击区（透明）。
-    // F-HOME-3：车辆可点（点击 → 随机气泡 tips）
+    // F-HOME-3：车辆可点（点击 → 随机气泡 tips）。
+    // F-HOME-STAGE-R2：点击区跟随真实 envelope（state.homeVehicleRect），而非整块
+    // vehicleFramingRect——点击精准落在车上；无数据（测试/非 home）回落到 framingRect。
     const v = L.vehicleFramingRect;
-    this.hit('home-vehicle', v.x, v.y, v.w, v.h);
+    const hv = state.homeVehicleRect;
+    if (hv) {
+      this.hit('home-vehicle', hv.x, hv.y, hv.w, hv.h);
+    } else {
+      this.hit('home-vehicle', v.x, v.y, v.w, v.h);
+    }
     if (this.vehicleTip) {
       const tipW = Math.min(v.w - 16, 300);
       const tipH = this.isShort ? 32 : 40;

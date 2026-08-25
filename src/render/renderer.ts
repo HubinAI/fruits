@@ -1707,9 +1707,12 @@ export class Renderer {
     // F-WX-8-B：compact 手机横屏用「Mobile 固定框」——previewSolo 纵向收窄到车辆+
     // 地面附近（旧框 y∈[400,730] 高 330 被纵向 fit 压扁，车辆只剩 ~19% 宽），
     // 横向保持 440（所有 body 覆盖）；previewFixed（Matching）语义不变。
+    // F-HOME-STAGE-R2：previewSolo 一旦传入 framingRect（首页/车库取景区），无论 compact
+    // 与否都走「envelope 自适应」分支——把真实整车 envelope 居中 fit 到该子区域（含桌面
+    // Web 首页/车库）；否则桌面无 framing 时仍用旧固定 SOLO 框（历史语义，向后兼容）。
     const isCompact = isCompactLandscape(this.viewWidth / this.viewDpr, this.viewHeight / this.viewDpr);
     if (fit === 'previewSolo') {
-      if (isCompact) {
+      if (isCompact || opts.framingRect) {
         // F-UX-3A：envelopeBounds（Body+Wheels+Functional Parts）自适应 padding——
         // 完整车辆外廓必须不进入右侧 panelRect（scale 适配 envelope 即整辆车落在
         // vehicleRect 内）；core（车身主体）自然更小（层级：完整 > 主体）。

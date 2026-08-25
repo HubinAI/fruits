@@ -101,4 +101,12 @@ export class WechatBattleHost implements PlayerBattleHost {
     if (!o) return null;
     return this.renderer.getVehicleScreenRects(o.getRenderSnapshot());
   }
+
+  /** F-HOME-STAGE-R2：首页「我的车」真实 envelope（逻辑 px）；无 orchestrator → null */
+  getHomeVehicleRect(): { x: number; y: number; w: number; h: number } | null {
+    const o = this.orchestrator;
+    if (!o) return null;
+    const rects = this.renderer.getVehicleScreenRects(o.getRenderSnapshot());
+    return rects ? rects.a : null;
+  }
 }

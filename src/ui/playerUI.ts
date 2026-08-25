@@ -81,6 +81,13 @@ export interface PlayerUIState {
    * 保证与 renderer 实际落点一致（无此数据时 UI 回落到比例锚点，真实流程恒有此数据）。
    */
   matchVehicleRects?: { a: { x: number; y: number; w: number; h: number }; b: { x: number; y: number; w: number; h: number } } | null;
+  /**
+   * F-HOME-STAGE-R2：首页「我的车」可见 envelope 屏幕矩形（逻辑 px）。
+   * 由 Runtime 经 battle.getHomeVehicleRect() 计算并推入。UI 据此注册车辆点击区
+   * （点击跟随真实 envelope，而非整块 vehicleFramingRect）。无此数据时 UI 回落到
+   * vehicleFramingRect，真实流程恒有此数据。
+   */
+  homeVehicleRect?: { x: number; y: number; w: number; h: number } | null;
   /** MatchPreview 复核条（Q15-FLOW-R1-ATOMIC：正常流程立即隐藏，永不闪现） */
   matchBarHidden: boolean;
   // —— Result ——
