@@ -175,6 +175,8 @@ type ModalTone = 'gold' | 'blue' | 'red' | 'green';
 
 interface ModalSpec {
   title: string;
+  /** F-RESULT-UX-R1：标题语义色调（结算页 胜利=green / 失败=red，第一眼知道输赢） */
+  titleTone?: 'green' | 'red';
   body: string[];
   /** F-META-UX4：结构化奖励行（金币/段位等；label 左 + value 右，层级清晰，不再拼长句） */
   rewardRows?: Array<{ label: string; value: string; tone?: ModalTone }>;
@@ -1985,6 +1987,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (state.resultOnboardingVisible) body.push('获得新部件，可以回车库调整');
     this.showModal({
       title: isWin ? '胜利' : '失败',
+      titleTone: isWin ? 'green' : 'red',
       body,
       rewardRows: rows.length ? rows : undefined,
       partCard: state.reward
@@ -2042,13 +2045,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const cardW = large
       ? Math.min(W - this.insL - this.insR - (this.isShort ? 24 : 32), W * (this.isShort ? 0.9 : 0.78))
       : Math.min(420, W - this.insL - this.insR - 40);
-    const rewardRowH = this.isShort ? 14 : 26;
-    const titleH = this.isShort ? 24 : 40;
+    const rewardRowH = this.isShort ? 12 : 26;
+    const titleH = this.isShort ? 20 : 40;
     const btnH = this.isShort ? Math.min(this.targetTouchH, 36) : this.targetTouchH;
-    const pad = this.isShort ? 10 : 16;
+    const pad = this.isShort ? 6 : 16;
     // F-UX-3C：广告小型入口高（short 16 / normal 22）+ 前后间隙（明显弱于底部按钮）
-    const adH = spec.adRow ? (this.isShort ? 16 : 22) + (this.isShort ? 6 : 14) : 0;
-    const partH = spec.partCard ? (this.isShort ? 32 : 58) : 0;
+    const adH = spec.adRow ? (this.isShort ? 16 : 22) + (this.isShort ? 4 : 14) : 0;
+    const partH = spec.partCard ? (this.isShort ? 26 : 58) : 0;
     const hasContentBefore =
       spec.body.length > 0 || (spec.rewardRows?.length ?? 0) > 0 || !!spec.adRow;
     const partGap = spec.partCard && hasContentBefore ? (this.isShort ? 4 : 8) : 0;
@@ -2057,13 +2060,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const availBodyH = H - this.insT - this.insB - fixedH;
     const rowH = spec.body.length > 0 ? Math.max(12, Math.min(22, availBodyH / spec.body.length)) : 22;
     const contentH = fixedH + spec.body.length * rowH;
-    // large：最小高 = viewport 60~75%（normal）/ ~86%（short：内容不足时明确留白）；内容不足时留白
-    const cardH = large ? Math.max(contentH, Math.floor(H * (this.isShort ? 0.86 : 0.62))) : contentH;
+    // large：最小高 = viewport 60~75%（normal）/ ~86%（short：内容不足时明确留白）；
+    // F-RESULT-UX-R1：硬上限 = safe 区高（maxCardH），避免 360×180 等极限短屏按钮溢出 safe 底缘。
+    const maxCardH = H - this.insT - this.insB;
+    const minLargeH = Math.floor(H * (this.isShort ? 0.86 : 0.62));
+    const cardH = large ? Math.min(maxCardH, Math.max(contentH, minLargeH)) : contentH;
     const cx = Math.max(this.insL, Math.min((W - cardW) / 2, W - this.insR - cardW));
     const cy = Math.max(this.insT, Math.min((H - cardH) / 2, H - this.insB - cardH));
     this.rect(cx, cy, cardW, cardH, C.dockBg, C.border, 1);
-    // ① 顶部：标题（胜利/失败）
-    this.text(spec.title, cx + cardW / 2, cy + pad + titleH / 2, large ? (this.isShort ? 20 : 28) : 20, C.text, 'center', 700);
+    // ① 顶部：标题（胜利/失败）——F-RESULT-UX-R1：语义色调，第一眼知道输赢
+    const titleColor = spec.titleTone === 'green' ? C.green : spec.titleTone === 'red' ? C.red : C.text;
+    this.text(spec.title, cx + cardW / 2, cy + pad + titleH / 2, large ? (this.isShort ? 20 : 28) : 20, titleColor, 'center', 800);
     let yy = cy + pad + titleH + 4;
     // ② 中部：body 文字行（onboarding 引导等）
     for (const line of spec.body) {
@@ -2099,7 +2106,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       yy += partGap;
       const ph = partH - 8;
       const pw = cardW - 2 * pad;
-      this.rect(cx + pad, yy, pw, ph, C.cardBg, C.border, 1);
+      // F-RESULT-UX-R1：去掉整框表格线——改用极淡顶部分隔线（不画满框 / 不画整行边框），
+      // 卡片靠留白与淡分隔线分组，不再像后台数据表。
+      this.rect(cx + pad, yy, pw, 1, undefined, 'rgba(255,255,255,0.06)', 1);
       if (this.isShort) {
         // short 紧凑两行：名称 + 库存（上）· 星级（下）
         this.text(spec.partCard.name, cx + pad + 12, yy + 8, 12, C.text, 'left', 700);
