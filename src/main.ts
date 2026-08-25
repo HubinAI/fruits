@@ -442,6 +442,7 @@ const battleHost: PlayerBattleHost = {
     });
   },
   resize: (w, h) => renderer.resize(w, h),
+  setHomeBackdrop: (on) => renderer.setHomeBackdrop(on),
 };
 
 /* ---------- DEV Build 编辑状态（面板；玩家装配经 runtime actions） ---------- */

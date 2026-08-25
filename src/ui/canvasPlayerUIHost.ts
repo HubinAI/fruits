@@ -661,6 +661,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.clear();
     const state = this.lastState;
     if (!state) return;
+    // F-HOME-P0-LAYER：首页背景下沉为 renderer underlay（背景层<车辆层<UI层）。
+    // 仅「出局外 + metaPage=home」开启；车库/匹配/战斗各自保持背景（不覆盖车辆）。
+    const homeScreen = state.uiMode !== 'scenario' && state.playerPhase === 'garage' && this.metaPage === 'home';
+    this.actions?.setHomeBackdrop?.(homeScreen);
     if (state.uiMode === 'scenario') {
       // DEV Lab 继续 DOM；Canvas 不绘制且不挡指针（微信玩家版无 scenario，永不进入）
       const st = this.canvas.style;
@@ -1043,13 +1047,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * F-HOME-1：正式小游戏首页——只保留核心模块：
    * ① 顶部：个人信息（左）+ 宝箱栏 4 槽（右）；② 中上：当前组装车辆展示（renderer previewSolo）；
    * ③ 中部：寻找对手主按钮（全页最强视觉）；④ 底部：车库 / 排行榜 / 战令 三个辅助入口。
-   * 背景 = drawHomeBackground（渐变 + 装饰，非纯底色）；背包/合成/更多/复杂配置不堆在首页。
-   * 布局唯一源 = computeHomeLayout（Home 模式下 getPreviewFramingRect 同源）。
+   * 背景 = renderer.drawHomeBackdrop（程序化 underlay，单一入口；正式背景资源后续注入，
+   * 由 draw() 经 setHomeBackdrop 在「出局外 + metaPage=home」时开启，绘制于车辆之下）。
+   * 背包/合成/更多/复杂配置不堆在首页。布局唯一源 = computeHomeLayout（Home 模式下
+   * getPreviewFramingRect 同源）。
    */
   private drawHomePage(state: PlayerUIState): void {
     const draft = state.draft;
     if (!draft) return;
-    this.drawHomeBackground();
     const L = computeHomeLayout(
       { w: this.W, h: this.H },
       { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
@@ -1151,42 +1156,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.text(a.icon, ix + 8 + iw / 2, iy + iw / 2, this.isShort ? 11 : 14, C.textDim, 'center', 700);
       this.button(ix, L.assistRect.y, aw, L.assistRect.h, a.id, a.label, {});
     }
-  }
-
-  /** F-HOME-1：首页背景——渐变天空（多段叠加，不依赖 createLinearGradient）+ 光晕 + 远山剪影 + 地面光带（非纯底色） */
-  private drawHomeBackground(): void {
-    const W = this.W;
-    const H = this.H;
-    const bands = ['#0a0d13', '#0e141e', '#141d2b', '#1a2740'];
-    const bh = H / bands.length;
-    for (let i = 0; i < bands.length; i++) this.rect(0, i * bh, W, bh + 1, bands[i]);
-    const ctx = this.ctx;
-    ctx.save();
-    // 光晕（左上 + 右上，半透明圆）
-    for (const [gx, gy, r] of [
-      [W * 0.18, H * 0.3, Math.min(W, H) * 0.34],
-      [W * 0.85, H * 0.26, Math.min(W, H) * 0.28],
-    ] as const) {
-      ctx.beginPath();
-      ctx.arc(this.ox + gx * this.scale, this.oy + gy * this.scale, r * this.scale, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(90,140,240,0.08)';
-      ctx.fill();
-    }
-    // 远山剪影（深色山带）
-    ctx.fillStyle = 'rgba(20,28,44,0.9)';
-    ctx.beginPath();
-    ctx.moveTo(this.ox, this.oy + H * 0.62 * this.scale);
-    ctx.lineTo(this.ox + W * 0.3 * this.scale, this.oy + H * 0.5 * this.scale);
-    ctx.lineTo(this.ox + W * 0.6 * this.scale, this.oy + H * 0.66 * this.scale);
-    ctx.lineTo(this.ox + W * this.scale, this.oy + H * 0.55 * this.scale);
-    ctx.lineTo(this.ox + W * this.scale, this.oy + H * 0.75 * this.scale);
-    ctx.lineTo(this.ox, this.oy + H * 0.75 * this.scale);
-    ctx.closePath();
-    ctx.fill();
-    // 地面光带（底部氛围光）
-    ctx.fillStyle = 'rgba(70,110,200,0.10)';
-    ctx.fillRect(this.ox, this.oy + H * 0.78 * this.scale, W * this.scale, H * 0.22 * this.scale);
-    ctx.restore();
   }
 
   /** F-META-1：garage MetaPage——车辆展示（renderer 画）+ 右侧装配面板 + 主 CTA */

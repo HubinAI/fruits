@@ -86,6 +86,8 @@ export interface PlayerBattleHost {
    *  framingRect（viewport logical 子区域）存在时固定预览框 fit 到该区域（Mobile Garage） */
   reframe(fit: CameraFit, framingRect?: FramingRect): void;
   resize(w: number, h: number): void;
+  /** 首页程序化背景下沉为 renderer underlay 开关（仅首页开启；车库/匹配/战斗关闭） */
+  setHomeBackdrop?(on: boolean): void;
 }
 
 /** 依赖注入：入口（Web/微信）提供 Host / 表现 / Web-only 钩子 */
@@ -278,6 +280,10 @@ export class PlayerGameRuntime {
         // 无刷新能力（微信）：重读存档并重建初始状态（仅 DEV 可达，微信恒 false 不触发）
         this.reinitFromStorage();
       }
+    },
+    setHomeBackdrop: (on: boolean) => {
+      // F-HOME-P0-LAYER：首页背景下沉为 renderer underlay（背景层<车辆层<UI层）
+      this.deps.battle.setHomeBackdrop?.(on);
     },
   };
 

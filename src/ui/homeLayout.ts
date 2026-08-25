@@ -6,7 +6,8 @@ import type { SafeInsets } from '../platform/types';
  *
  * 只保留核心模块：个人信息（顶部左）+ 宝箱栏 4 槽（顶部右）+ 当前车辆展示（中上）
  * + 寻找对手主按钮（中部，全页最强视觉）+ 车库/排行榜/战令三个辅助入口（底部）。
- * 背景（drawHomeBackground）与车辆（renderer previewSolo fit 到 vehicleRect）不含在本布局内。
+ * 背景（renderer.drawHomeBackdrop 程序化 underlay，单一入口；绘制于车辆之下）与车辆
+ * （renderer previewSolo fit 到 vehicleRect）不含在本布局内。
  *
  * 规则：
  * - 所有 rect 必须完全处于 safe area（x ≥ insets.left 等，无例外）；

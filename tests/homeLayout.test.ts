@@ -75,18 +75,20 @@ describe('F-HOME-1｜正式首页布局', () => {
     expect(l.assistRect.h, '辅助入口矮于 CTA').toBeLessThan(l.ctaRect.h);
   });
 
-  it('4. 背景非纯底色（源码守卫）：drawHomeBackground 有多段渐变 + 光晕/远山装饰', () => {
-    const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
-    const start = src.indexOf('private drawHomeBackground');
-    expect(start, 'drawHomeBackground 存在').toBeGreaterThan(-1);
-    const method = src.slice(start, src.indexOf('private drawGarageMetaPage'));
-    // 多段天空（非单一 fillRect）
+  it('4. 背景单一入口 + 不再 UI 覆盖车辆（F-HOME-P0-LAYER）：renderer.drawHomeBackdrop 为唯一入口，host 不再绘制全屏不透明背景', () => {
+    const host = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
+    const renderer = readFileSync('src/render/renderer.ts', 'utf-8');
+    // 单一入口：renderer 提供 drawHomeBackdrop（程序化渐变+光晕+远山+地面光带；正式背景资源后续从此注入）
+    const start = renderer.indexOf('private drawHomeBackdrop');
+    expect(start, 'renderer.drawHomeBackdrop 存在（正式背景资源单一入口）').toBeGreaterThan(-1);
+    const method = renderer.slice(start, renderer.indexOf('private vehicleCenter'));
     expect(method).toContain('bands');
     expect(method).toContain("'#0a0d13'");
-    // 光晕（arc 圆）+ 远山剪影（polygon）+ 地面光带
-    expect(method).toContain('ctx.arc');
-    expect(method).toContain('fillStyle = \'rgba(20,28,44,0.9)\''); // 远山
-    expect(method).toContain('fillRect'); // 地面光带
+    expect(method).toContain('ctx.arc'); // 光晕
+    expect(method).toContain('rgba(20,28,44,0.9)'); // 远山
+    expect(method).toContain('rgba(70,110,200,0.10)'); // 地面光带
+    // host 不再持有/调用 drawHomeBackground（背景已下沉为 renderer underlay，不再 UI 覆盖车辆）
+    expect(host, 'host 不再引用 drawHomeBackground').not.toContain('drawHomeBackground');
   });
 
   it('5. DPR 不参与 Home 布局（纯函数：同 viewport 同 profile → 同结果）', () => {

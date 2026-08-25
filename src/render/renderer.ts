@@ -271,6 +271,8 @@ export class Renderer {
   private damageAggregator = new DamageNumberAggregator(DAMAGE_AGGREGATE_WINDOW_MS);
   /** F-PRESENT-1：分组键 → 当前组浮动数字引用（组内命中原地更新 text/position，不新建） */
   private damageGroupFx = new Map<string, FloatingText>();
+  /** F-HOME-P0-LAYER：首页程序化背景下沉开关（背景层<车辆层<UI层）；仅首页开启 */
+  private homeBackdrop = false;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -653,8 +655,14 @@ export class Renderer {
     ctx.clearRect(0, 0, this.viewWidth, this.viewHeight);
 
     // 背景
-    ctx.fillStyle = '#14181f';
-    ctx.fillRect(0, 0, this.viewWidth, this.viewHeight);
+    if (this.homeBackdrop) {
+      // F-HOME-P0-LAYER：首页程序化背景作为 underlay（背景层<车辆层<UI层）；
+      // 单一入口 drawHomeBackdrop —— 正式背景美术资源后续从此注入。
+      this.drawHomeBackdrop(ctx, this.viewWidth, this.viewHeight);
+    } else {
+      ctx.fillStyle = '#14181f';
+      ctx.fillRect(0, 0, this.viewWidth, this.viewHeight);
+    }
 
     const snap = orchestrator.getRenderSnapshot();
     const arena = snap.arena;
@@ -662,44 +670,46 @@ export class Renderer {
     // W2-FX-2：表现时间基准（阶段闪烁 / 死亡淡出 / FX 共用）
     const now = this.now();
 
-    // Ground
-    ctx.fillStyle = '#2a2f38';
-    ctx.fillRect(
-      t.offsetX,
-      this.sy(arena.groundY),
-      this.ss(arena.width),
-      this.canvas.height - this.sy(arena.groundY),
-    );
-    ctx.strokeStyle = '#4a5260';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(t.offsetX, this.sy(arena.groundY));
-    ctx.lineTo(this.ss(arena.width) + t.offsetX, this.sy(arena.groundY));
-    ctx.stroke();
+    if (!this.homeBackdrop) {
+      // Ground
+      ctx.fillStyle = '#2a2f38';
+      ctx.fillRect(
+        t.offsetX,
+        this.sy(arena.groundY),
+        this.ss(arena.width),
+        this.canvas.height - this.sy(arena.groundY),
+      );
+      ctx.strokeStyle = '#4a5260';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(t.offsetX, this.sy(arena.groundY));
+      ctx.lineTo(this.ss(arena.width) + t.offsetX, this.sy(arena.groundY));
+      ctx.stroke();
 
-    // Walls（normal）
-    for (const wall of arena.normalWalls) {
-      this.drawShape(wall, '#3a4150');
-    }
+      // Walls（normal）
+      for (const wall of arena.normalWalls) {
+        this.drawShape(wall, '#3a4150');
+      }
 
-    // Closing walls（Hazard；W2-FX-2 阶段视觉：Warning 预高亮闪烁、Closing 正式刺墙锯齿）
-    const arenaPhase = orchestrator.phase;
-    for (const cw of arena.closingWalls) {
-      this.drawShape(cw, '#7a2f2f');
-      if (arenaPhase === 'Warning') {
-        // 预高亮：橙红描边 + 闪烁（不画刺，刺墙尚未「进入」）
-        const blink = 0.45 + 0.35 * Math.sin(now * 0.012);
-        ctx.globalAlpha = blink;
-        this.strokeShape(cw, '#e8a33c');
-        ctx.globalAlpha = 1;
-      } else if (arenaPhase === 'Closing') {
-        // 正式进入：亮红填充 + 朝 arena 内部的锯齿尖刺 + 脉动描边
-        const pulse = 0.85 + 0.15 * Math.sin(now * 0.01);
-        this.drawShape(cw, '#c0403a');
-        this.drawSpikes(cw, '#c0403a', now);
-        ctx.globalAlpha = pulse;
-        this.strokeShape(cw, '#ff8a70');
-        ctx.globalAlpha = 1;
+      // Closing walls（Hazard；W2-FX-2 阶段视觉：Warning 预高亮闪烁、Closing 正式刺墙锯齿）
+      const arenaPhase = orchestrator.phase;
+      for (const cw of arena.closingWalls) {
+        this.drawShape(cw, '#7a2f2f');
+        if (arenaPhase === 'Warning') {
+          // 预高亮：橙红描边 + 闪烁（不画刺，刺墙尚未「进入」）
+          const blink = 0.45 + 0.35 * Math.sin(now * 0.012);
+          ctx.globalAlpha = blink;
+          this.strokeShape(cw, '#e8a33c');
+          ctx.globalAlpha = 1;
+        } else if (arenaPhase === 'Closing') {
+          // 正式进入：亮红填充 + 朝 arena 内部的锯齿尖刺 + 脉动描边
+          const pulse = 0.85 + 0.15 * Math.sin(now * 0.01);
+          this.drawShape(cw, '#c0403a');
+          this.drawSpikes(cw, '#c0403a', now);
+          ctx.globalAlpha = pulse;
+          this.strokeShape(cw, '#ff8a70');
+          ctx.globalAlpha = 1;
+        }
       }
     }
 
@@ -858,6 +868,51 @@ export class Renderer {
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
+  }
+
+  /** F-HOME-P0-LAYER：首页程序化背景下沉开关（背景层<车辆层<UI层）；仅首页开启 */
+  setHomeBackdrop(on: boolean): void {
+    this.homeBackdrop = on;
+  }
+
+  /**
+   * F-HOME-P0-LAYER：首页程序化背景（临时 underlay fallback）——渐变天空 + 光晕 + 远山 + 地面光带。
+   * 单一入口：正式背景美术资源（图片）后续从此函数注入，不另开第二入口。
+   * 在 renderer 底层绘制（车辆之下），与 UI 顶层控件（车辆之上）构成正确图层顺序。
+   */
+  private drawHomeBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    const bands = ['#0a0d13', '#0e141e', '#141d2b', '#1a2740'];
+    const bh = h / bands.length;
+    for (let i = 0; i < bands.length; i++) {
+      ctx.fillStyle = bands[i];
+      ctx.fillRect(0, i * bh, w, bh + 1);
+    }
+    ctx.save();
+    // 光晕（左上 + 右上，半透明圆）
+    for (const [gx, gy, r] of [
+      [w * 0.18, h * 0.3, Math.min(w, h) * 0.34],
+      [w * 0.85, h * 0.26, Math.min(w, h) * 0.28],
+    ] as const) {
+      ctx.beginPath();
+      ctx.arc(gx, gy, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(90,140,240,0.08)';
+      ctx.fill();
+    }
+    // 远山剪影
+    ctx.fillStyle = 'rgba(20,28,44,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.62);
+    ctx.lineTo(w * 0.3, h * 0.5);
+    ctx.lineTo(w * 0.6, h * 0.66);
+    ctx.lineTo(w, h * 0.55);
+    ctx.lineTo(w, h * 0.75);
+    ctx.lineTo(0, h * 0.75);
+    ctx.closePath();
+    ctx.fill();
+    // 地面光带
+    ctx.fillStyle = 'rgba(70,110,200,0.10)';
+    ctx.fillRect(0, h * 0.78, w, h * 0.22);
+    ctx.restore();
   }
 
   /** 车辆世界包围盒中心（供死亡 FX 定位；snapshot 为引擎中立形状） */

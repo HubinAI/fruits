@@ -90,4 +90,9 @@ export class WechatBattleHost implements PlayerBattleHost {
   resize(w: number, h: number): void {
     this.renderer.resize(w, h);
   }
+
+  setHomeBackdrop(on: boolean): void {
+    // F-HOME-P0-LAYER：首页程序化背景下沉为 renderer underlay（背景层<车辆层<UI层）
+    this.renderer.setHomeBackdrop(on);
+  }
 }

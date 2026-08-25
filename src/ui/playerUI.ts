@@ -116,6 +116,8 @@ export interface PlayerUIActions {
   onMerge(): void;
   /** DEV：重置进度（?resetdev=1 可见；二次确认后调用） */
   onResetProgress(): void;
+  /** 首页程序化背景下沉为 renderer underlay 开关（仅首页开启；车库/匹配/战斗关闭） */
+  setHomeBackdrop?(on: boolean): void;
 }
 
 /** 平台中立 Host 接口：绑定 State → 渲染、Action → 回调。 */
