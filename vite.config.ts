@@ -17,6 +17,15 @@ export default defineConfig({
   },
   plugins: [
     runtimeInfoPlugin(),
+    // F-DEMO-PLAYER-RUNTIME-P0：本地玩家演示模式（npm run dev:player / ?player=1）。
+    // 与 vite.pages.config.ts 的 __PAGES_PREVIEW__ 同源机制——构建期注入标志，
+    // 使 main.ts 进入「唯一手机玩家 Canvas 宿主」分支（结构性禁止 DEV 工具栏/侧栏/Debug）。
+    {
+      name: 'player-mode-define',
+      config: () => ({
+        define: { __PLAYER_MODE__: 'true' },
+      }),
+    },
     {
       name: 'runtime-version-listening-log',
       configureServer(server) {

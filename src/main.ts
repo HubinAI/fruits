@@ -83,12 +83,24 @@ const TOOLS_DEV_VISIBLE: string = DEV_TOOLS_VISIBLE ? '' : 'none';
 const isPagesPreview: boolean =
   typeof __PAGES_PREVIEW__ !== 'undefined' && __PAGES_PREVIEW__ === true;
 
-// F-DEV-1：Runtime Badge——仅开发 / 内部 RC（dev/test，DEV_TOOLS_VISIBLE=true）显示
+// F-DEMO-PLAYER-RUNTIME-P0：统一的「手机玩家演示入口」模式判定（必须早于 badge / 结构段声明，
+// 因 badge 与 DEV DOM 创建都依赖它）。
+//   playerMode = Pages 预览 / __PLAYER_MODE__ 本地构建标志 / ?player=1 任一为真；
+//   玩家模式结构性禁止挂载 DEV 工具栏 / panelA·panelB 侧栏 / Physics Lab 与开发工具 /
+//   WebDomPlayerUIHost / Debug 面板与版本角标，强制 CanvasPlayerUIHost。
+const PLAYER_MODE_BUILD =
+  typeof __PLAYER_MODE__ !== 'undefined' && __PLAYER_MODE__ === true;
+const playerMode =
+  isPagesPreview ||
+  PLAYER_MODE_BUILD ||
+  new URLSearchParams(location.search).has('player');
+
+// F-DEV-1：Runtime Badge——仅开发 / 内部 RC（dev/test，DEV_TOOLS_VISIBLE=true）且非玩家模式显示
 // branch + short SHA + 版本号，用于确认「运行画面 = 刚构建的 commit」；
-// F-DEMO-WEB-R1：对外公开 Pages 版本（PROD）一律隐藏角标（不再因 isPagesPreview 显示），
-// 满足「页面不显示调试内容 / 版本调试角标」验收。SHA 仍经 runtimeInfoPlugin 注入包内，
-// 可追溯但不以可见角标形式出现。
-if (DEV_TOOLS_VISIBLE) {
+// F-DEMO-WEB-R1：对外公开 Pages 版本（PROD）一律隐藏角标（不再因 isPagesPreview 显示）；
+// F-DEMO-PLAYER-RUNTIME-P0：玩家模式（含 Pages 预览）也隐藏角标，满足「页面不显示调试内容 / 版本调试角标」验收。
+// SHA 仍经 runtimeInfoPlugin 注入包内，可追溯但不以可见角标形式出现。
+if (DEV_TOOLS_VISIBLE && !playerMode) {
   const badge = document.createElement('div');
   badge.style.cssText =
     'position:fixed;right:8px;bottom:8px;z-index:9999;font:11px/1.4 monospace;' +
@@ -307,7 +319,6 @@ app.appendChild(root);
 
 const toolbar = document.createElement('div');
 toolbar.className = 'lab-toolbar';
-root.appendChild(toolbar);
 
 const main = document.createElement('div');
 main.className = 'lab-main';
@@ -315,7 +326,6 @@ root.appendChild(main);
 
 const panelA = document.createElement('div');
 panelA.className = 'lab-panel';
-main.appendChild(panelA);
 
 const canvasWrap = document.createElement('div');
 canvasWrap.className = 'lab-canvas-wrap';
@@ -326,11 +336,20 @@ canvasWrap.appendChild(canvas);
 
 const panelB = document.createElement('div');
 panelB.className = 'lab-panel right';
-main.appendChild(panelB);
 
-// Q31：Runtime Debug Tools 仅在非 PROD 创建（PROD 对正常玩家完全隐藏）。
+// F-DEMO-PLAYER-RUNTIME-P0：玩家模式结构性禁止挂载 DEV 工具栏 / panelA·panelB 侧栏 /
+// Debug 面板——它们本身不进入 DOM（非 CSS 遮挡），renderPanelsOnly/setBuildControlsLockedDom
+// 等 DEV 引用在无面板时已是空操作（querySelectorAll 返回空），安全降级。
+// 非玩家模式（普通 DEV Web）保留既有挂载行为。
+if (!playerMode) {
+  root.appendChild(toolbar);
+  main.appendChild(panelA);
+  main.appendChild(panelB);
+}
+
+// Q31：Runtime Debug Tools 仅在非 PROD 且非玩家模式创建（PROD / 玩家模式对正常玩家完全隐藏）。
 let debugPanel: HTMLDivElement | null = null;
-if (DEV_TOOLS_VISIBLE) {
+if (DEV_TOOLS_VISIBLE && !playerMode) {
   debugPanel = document.createElement('div');
   debugPanel.className = 'lab-debug';
   canvasWrap.appendChild(debugPanel);
@@ -376,14 +395,25 @@ for (const [visualId, url] of SILHOUETTE_ASSETS) {
   img.src = url;
 }
 
-/* ---------- F-WX-3/4：玩家 UI 唯一 Host 边界（默认 WebDom；?canvasui=1 切换 Canvas） ----------
- * F-WX-6.1：Pages Preview 构建默认启用 Canvas Player UI（手机横屏可体验版本），
- * 无需手输 ?canvasui=1；普通 DEV Web 默认行为不变（isPagesPreview=false）。
- * F-UX-REVIEW-1：?mobile-review=1 强制 Canvas Host（Review 验收对象 = 手机 Canvas UI）。 */
+/* ---------- F-WX-3/4：玩家 UI 唯一 Host 边界 ----------
+ * F-WX-6.1：Pages Preview 构建默认启用 Canvas Player UI（手机横屏可体验版本）。
+ * F-DEMO-WEB-R1：外网 Pages 生产构建（isPagesPreview）默认进入同一玩家模式。
+ * F-DEMO-PLAYER-RUNTIME-P0：统一的「手机玩家演示入口」——
+ *   playerMode = Pages 预览 / __PLAYER_MODE__ 构建标志 / ?player=1 任一为真；
+ *   玩家模式结构性禁止挂载 DEV 工具栏 / panelA·panelB 侧栏 / Physics Lab 与开发工具 /
+ *   WebDomPlayerUIHost / Debug 面板与版本角标（非 CSS 遮挡，直接不创建这些 DOM），
+ *   强制使用 CanvasPlayerUIHost，桌面打开时用 844×390 手机逻辑画布 + CSS contain 放大居中。
+ * 非玩家模式（普通 DEV Web：isPagesPreview=false 且无 ?player/__PLAYER_MODE__）保留既有
+ *   WebDom 行为（DEV 装配编辑器 + 开发工具），用于机制开发。 */
 const reviewOn = new URLSearchParams(location.search).has('mobile-review');
-const canvasUiMode = isPagesPreview || reviewOn || new URLSearchParams(location.search).has('canvasui');
+// 玩家模式固定 Canvas Host；其余保持既有规则（pages/review/canvasui → Canvas，否则 WebDom）
+const canvasUiMode = playerMode || reviewOn || new URLSearchParams(location.search).has('canvasui');
 const host: PlayerUIHost = canvasUiMode
-  ? new CanvasPlayerUIHost(document.createElement('canvas'))
+  ? new CanvasPlayerUIHost(document.createElement('canvas'), {
+      // 桌面打开玩家模式：用手机逻辑画布（约 844×390）+ CSS contain 放大居中，
+      // 不切回 Desktop 布局（isMobile=手机 profile，scale=1，点击坐标经 getBoundingClientRect 归一化反算）。
+      phoneLogical: playerMode,
+    })
   : new WebDomPlayerUIHost();
 host.mount(canvasWrap);
 
@@ -724,8 +754,10 @@ function renderPanel(
 }
 
 /** Q07-B：只重渲染 A/B 面板（挂点选中态 / 部件选择区显隐），不重建 Preview。
- *  Q15-UX-R1：Garage 只渲染 A 编辑器；MatchPreview 彻底退出编辑器。 */
+ *  Q15-UX-R1：Garage 只渲染 A 编辑器；MatchPreview 彻底退出编辑器。
+ *  F-DEMO-PLAYER-RUNTIME-P0：玩家模式下无 DEV 侧栏面板，直接跳过（结构性已不挂载）。 */
 function renderPanelsOnly(): void {
+  if (playerMode) return;
   if (runtime.playerPhase === 'matchPreview') {
     panelA.style.display = 'none';
     panelB.style.display = 'none';
@@ -736,15 +768,31 @@ function renderPanelsOnly(): void {
   renderPanel(panelA, '我的车辆', runtime.draftA);
 }
 
-/* ---------- 工具栏（Q07-A：Start 是唯一主 CTA，位于画布底部；由 PlayerUIHost 提供） ---------- */
+/* ---------- 工具栏（Q07-A：Start 是唯一主 CTA，位于画布底部；由 PlayerUIHost 提供） ----------
+ * F-DEMO-PLAYER-RUNTIME-P0：玩家模式下整段 DEV 工具栏 / 场景选择 / 开发工具折叠区 / Debug /
+ * Preset 均不创建（结构性禁止挂载），不进入 DOM、不占用玩家流程。 */
 
 // Q07-A：机制场景不再是同级主按钮——场景选择收进「开发工具」折叠区。
-const backToBuildBtn = addButton(toolbar, '返回装配', () => setMode('build'));
+// F-DEMO-PLAYER-RUNTIME-P0：这些 DEV-only 变量仅在 if (!playerMode) 块内赋值（definite assignment）；
+// 玩家模式下不创建，外部守卫（if (x)）静态正确跳过。
+let backToBuildBtn!: HTMLButtonElement;
+// 场景选择（开发工具折叠区内显示；选中即进入机制场景模式）
+// Q31：Scenario 仅在非 PROD 且非玩家模式创建（PROD / 玩家模式对正常玩家完全隐藏）。
+let scenarioSelect: HTMLSelectElement | null = null;
+// Q07-A：开发工具折叠区（机制场景 / Pause / Reset / Clear / 速度 / Preset 收进二级）。
+let toolsToggle!: HTMLButtonElement;
+let toolsHost!: HTMLDivElement;
+let toolsOpen = false;
+let sideToggle!: HTMLButtonElement;
+const presetButtons: HTMLButtonElement[] = [];
+
+if (!playerMode) {
+// Q07-A：机制场景不再是同级主按钮——场景选择收进「开发工具」折叠区。
+backToBuildBtn = addButton(toolbar, '返回装配', () => setMode('build'));
 backToBuildBtn.style.display = 'none';
 
 // 场景选择（开发工具折叠区内显示；选中即进入机制场景模式）
 // Q31：Scenario 仅在非 PROD 创建（PROD 对正常玩家完全隐藏）。
-let scenarioSelect: HTMLSelectElement | null = null;
 if (DEV_TOOLS_VISIBLE) {
   scenarioSelect = document.createElement('select');
   SCENARIOS.forEach((s) => {
@@ -766,16 +814,16 @@ if (DEV_TOOLS_VISIBLE) {
 }
 
 /* ---------- Q07-A：开发工具折叠区（机制场景 / Pause / Reset / Clear / 速度 / Preset 收进二级） ---------- */
-const toolsToggle = addButton(toolbar, '开发工具 ▸', () => {
+toolsToggle = addButton(toolbar, '开发工具 ▸', () => {
   toolsOpen = !toolsOpen;
-  toolsHost.style.display = toolsOpen ? '' : 'none';
-  toolsToggle.textContent = toolsOpen ? '开发工具 ▾' : '开发工具 ▸';
-  toolsToggle.classList.toggle('active', toolsOpen);
+  if (toolsHost) toolsHost.style.display = toolsOpen ? '' : 'none';
+  toolsToggle!.textContent = toolsOpen ? '开发工具 ▾' : '开发工具 ▸';
+  toolsToggle!.classList.toggle('active', toolsOpen);
 });
 toolsToggle.classList.add('dev-toggle');
 // Q15：PROD 对正常玩家隐藏开发工具（玩家流程不依赖它）；DEV 仍可见可用
 toolsToggle.style.display = TOOLS_DEV_VISIBLE;
-const toolsHost = document.createElement('div');
+toolsHost = document.createElement('div');
 toolsHost.className = 'tool-tools-host';
 // Q07-A：机制场景入口收进开发工具（不再是同级主模式按钮）
 // Q31：PROD 下 scenarioSelect 为 null（Scenario 已隐藏）→ 不挂载。
@@ -785,7 +833,6 @@ toolsLabel.className = 'tool-tools-label';
 toolsLabel.textContent = '调试：';
 toolsHost.appendChild(toolsLabel);
 root.insertBefore(toolsHost, main);
-let toolsOpen = false;
 toolsHost.style.display = 'none';
 
 const btnPause = addButton(toolsHost, 'Pause', () => {
@@ -799,14 +846,14 @@ addButton(toolsHost, 'Reset', () => {
   btnPause.classList.remove('active');
   lab.reset();
   runtime.syncAfterLabReset(); // flow 同步（preview → Editing / battle → Fighting）
-  if (lab.previewMode) toolsToggle.style.display = TOOLS_DEV_VISIBLE;
+  if (lab.previewMode && toolsToggle) toolsToggle.style.display = TOOLS_DEV_VISIBLE;
 });
 addButton(toolsHost, 'Clear', () => {
   lab.clear();
   currentCamera = null;
   selectedSlotA = null;
   runtime.syncAfterLabClear(); // flow 同步（→ Editing + 恢复装配预览）
-  toolsToggle.style.display = TOOLS_DEV_VISIBLE;
+  if (toolsToggle) toolsToggle.style.display = TOOLS_DEV_VISIBLE;
 });
 
 // 时间缩放（测试工具折叠区内）
@@ -823,8 +870,6 @@ TIME_SCALES.forEach((ts) => {
 tsButtons[0].classList.add('active');
 
 /* ---------- Preset 快捷（测试工具折叠区内；只装载 Body/轮径，功能槽重置 none） ---------- */
-let sideToggle!: HTMLButtonElement;
-const presetButtons: HTMLButtonElement[] = [];
 {
   let targetSide: 'A' | 'B' = 'A';
   const presetBox = document.createElement('div');
@@ -836,7 +881,7 @@ const presetButtons: HTMLButtonElement[] = [];
 
   sideToggle = addButton(toolsHost, '装载 → A', () => {
     targetSide = targetSide === 'A' ? 'B' : 'A';
-    sideToggle.textContent = `装载 → ${targetSide}`;
+    sideToggle!.textContent = `装载 → ${targetSide}`;
     ph.textContent = 'Preset 快捷（装到 ' + targetSide + '）';
   });
 
@@ -866,6 +911,7 @@ const presetButtons: HTMLButtonElement[] = [];
     presetButtons.push(b);
   });
 }
+} // F-DEMO-PLAYER-RUNTIME-P0：if (!playerMode) —— 玩家模式下整段 DEV 工具栏 / 侧栏 / 工具 / Debug / Preset 结构性不创建
 
 /* ---------- Debug 面板（仅机制场景模式显示；PROD 完全不构建） ---------- */
 if (DEV_TOOLS_VISIBLE && debugPanel) {
@@ -954,7 +1000,7 @@ if (DEV_TOOLS_VISIBLE && debugPanel) {
 function setMode(m: UiMode): void {
   if (m === 'build') selectedSlotA = null; // 切回装配：不展开部件全集（须先于 refresh）
   runtime.setMode(m);
-  backToBuildBtn.style.display = m === 'scenario' ? '' : 'none';
+  if (backToBuildBtn) backToBuildBtn.style.display = m === 'scenario' ? '' : 'none';
   const showBuild = m === 'build';
   if (debugPanel) debugPanel.style.display = showBuild ? 'none' : '';
 }
@@ -988,7 +1034,7 @@ const runtime = new PlayerGameRuntime({
 viewport.onResize(doResize);
 runtime.init(); // track(game_start) + 玩家状态装载 + 初始 doResize/reframe + pushUI
 if (debugPanel) debugPanel.style.display = 'none';
-backToBuildBtn.style.display = 'none';
+if (backToBuildBtn) backToBuildBtn.style.display = 'none';
 
 /* ---------- F-UX-REVIEW-1：DEV Mobile Review（?mobile-review=1） ----------
  * PC 直接复现真实手机 logical viewport：游戏内部逻辑尺寸严格等于所选 viewport

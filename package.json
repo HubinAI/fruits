@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "vite",
     "dev:mobile": "vite --host 0.0.0.0",
+    "dev:player": "vite --host 0.0.0.0",
     "build": "vite build",
     "build:test": "vite build --mode test",
     "build:wechat": "vite build -c vite.wechat.config.ts",

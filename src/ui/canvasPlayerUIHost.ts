@@ -45,6 +45,11 @@ import type {
 const BASE_W = 1280;
 const BASE_H = 720;
 
+/** F-DEMO-PLAYER-RUNTIME-P0：玩家演示固定手机逻辑画布（约 844×390，常见 iPhone 横屏），
+ *  桌面打开时用它做逻辑布局，CSS contain 放大居中，不切回 Desktop 布局。 */
+const PHONE_LOGICAL_W = 844;
+const PHONE_LOGICAL_H = 390;
+
 /** 与 WebDOM 同源的色板（纯功能性绘制，无渐变/动效） */
 const C = {
   bg: '#171c26',
@@ -251,7 +256,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    */
   private mergeSnapshot: Record<string, { one: number; two: number }> | null = null;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  /** F-DEMO-PLAYER-RUNTIME-P0：玩家演示「手机逻辑画布」选项——桌面打开时固定手机逻辑尺寸
+   *  （约 844×390），CSS contain 等比放大居中（不切回 Desktop 布局）；逻辑布局 = 手机 profile，
+   *  点击坐标经 PlatformInput 归一化反算（见 platform/web/input.ts）。 */
+  private phoneLogical = false;
+  private canvas: HTMLCanvasElement;
+
+  constructor(canvas: HTMLCanvasElement, opts?: { phoneLogical?: boolean }) {
+    this.canvas = canvas;
+    this.phoneLogical = !!opts?.phoneLogical;
     // F-META-6：读取偏好（platform.storage 无存储环境静默降级为默认开；值 '0' = 关）
     this.soundOn = platform.storage.getItem(PREF_SOUND_KEY) !== '0';
     this.vibrationOn = platform.storage.getItem(PREF_VIBRATION_KEY) !== '0';
@@ -723,8 +736,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     let dpr: number;
     if (this.parent) {
       // Web：随容器尺寸 + window.devicePixelRatio（CSS px 布局空间）
-      w = Math.max(1, this.parent.clientWidth || BASE_W);
-      h = Math.max(1, this.parent.clientHeight || BASE_H);
+      if (this.phoneLogical) {
+        // F-DEMO-PLAYER-RUNTIME-P0：玩家演示固定手机逻辑画布（844×390），
+        // canvas CSS 尺寸 = 逻辑尺寸；视觉放大走 CSS transform（contain 居中，见 applyPhoneScale）。
+        w = PHONE_LOGICAL_W;
+        h = PHONE_LOGICAL_H;
+      } else {
+        w = Math.max(1, this.parent.clientWidth || BASE_W);
+        h = Math.max(1, this.parent.clientHeight || BASE_H);
+      }
       dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
     } else {
       // F-WX-5/6：平台中立挂载（微信）：canvas 物理像素 → 逻辑 px 布局空间（除以 surface dpr）
@@ -742,7 +762,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     // F-WX-6：布局 Profile——Desktop 保持 1280×720 整体 fit；Compact Mobile 逻辑 px scale=1
     // F-WX-MOBILE-RCA-1：mobile-short（logicalH<260）→ 更薄 TopBar/更紧凑触控/字体 ×0.8
-    this.profile = resolveLayoutProfile(this.cssW, this.cssH);
+    // F-DEMO-PLAYER-RUNTIME-P0：phoneLogical 固定手机逻辑画布 → 走 Compact Mobile profile（不切 Desktop）
+    this.profile = resolveLayoutProfile(
+      this.phoneLogical ? PHONE_LOGICAL_W : this.cssW,
+      this.phoneLogical ? PHONE_LOGICAL_H : this.cssH,
+    );
     if (this.isMobile) {
       this.scale = 1;
       this.ox = 0;
@@ -755,6 +779,24 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.insets = { ...ZERO_INSETS };
     }
     this.ctx.setTransform(dpr * this.scale, 0, 0, dpr * this.scale, dpr * this.ox, dpr * this.oy);
+    // F-DEMO-PLAYER-RUNTIME-P0：桌面打开玩家模式 → CSS contain 放大居中（仅视觉，逻辑坐标不变）
+    if (this.phoneLogical && this.parent) this.applyPhoneScale();
+  }
+
+  /** F-DEMO-PLAYER-RUNTIME-P0：桌面视口（远大于 844×390）下，把手机逻辑画布等比 contain 放大居中，
+   *  逻辑布局空间仍为 844×390（isMobile=mobile-normal），点击坐标经 getBoundingClientRect 归一化反算。 */
+  private applyPhoneScale(): void {
+    const pw = this.parent!.clientWidth || PHONE_LOGICAL_W;
+    const ph = this.parent!.clientHeight || PHONE_LOGICAL_H;
+    const s = Math.min(pw / PHONE_LOGICAL_W, ph / PHONE_LOGICAL_H);
+    const st = this.canvas.style;
+    st.position = 'absolute';
+    st.width = `${PHONE_LOGICAL_W}px`;
+    st.height = `${PHONE_LOGICAL_H}px`;
+    st.left = `${Math.round((pw - PHONE_LOGICAL_W * s) / 2)}px`;
+    st.top = `${Math.round((ph - PHONE_LOGICAL_H * s) / 2)}px`;
+    st.transformOrigin = 'top left';
+    st.transform = `scale(${s})`;
   }
 
   private clear(): void {
