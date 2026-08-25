@@ -314,12 +314,13 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     }
   });
 
-  it('验收4｜Result 中央 Card：两个主要决策并列居中（不贴边缘、≥48px、点击派发）', () => {
+  it('验收4｜Result 中央 Card：底部仅两个流程决策并列居中（不贴边缘、≥48px、点击派发）；广告入口在奖励区内部且弱于决策', () => {
     const vp = { w: 932, h: 430 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(RESULT_STATE);
-    // F-META-5：Result 走结算 Modal（modal-secondary=调整配置 / modal-primary=下一场 / tertiary=广告）
-    for (const id of ['modal-secondary', 'modal-primary', 'modal-tertiary']) {
+    // F-UX-3C：底部只保留两个流程决策（modal-secondary=调整配置 / modal-primary=下一场）；
+    // 广告不再做第三个同级底部按钮（无 modal-tertiary，改奖励区内 modal-ad）
+    for (const id of ['modal-secondary', 'modal-primary']) {
       const a = env.host.getHitAreasForTest().find((x) => x.id === id);
       expect(a, `应有 ${id}`).toBeTruthy();
       expect(a!.h, `${id} ≥48`).toBeGreaterThanOrEqual(48);
@@ -329,9 +330,15 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       expect(a!.y, `${id} 不贴上缘`).toBeGreaterThanOrEqual(vp.h * 0.1);
       expect(a!.y + a!.h, `${id} 不贴下缘`).toBeLessThanOrEqual(vp.h * 0.9);
     }
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'modal-tertiary'), '底部无第三个同级按钮').toBe(false);
+    // 广告入口在奖励区内部：高度明显 < 决策按钮（弱化），且 y 在决策行上方
+    const ad = env.host.getHitAreasForTest().find((x) => x.id === 'modal-ad');
+    expect(ad, '广告小型入口存在（rewardAdAvailable）').toBeTruthy();
+    const next = env.host.getHitAreasForTest().find((x) => x.id === 'modal-primary')!;
+    expect(ad!.h, '广告入口矮于决策按钮（弱化）').toBeLessThan(next.h);
+    expect(ad!.y + ad!.h, '广告入口在决策行上方（奖励区内）').toBeLessThanOrEqual(next.y);
     // 两个主要决策并列（调整配置在左、下一场在右，同一行）
     const adjust = env.host.getHitAreasForTest().find((x) => x.id === 'modal-secondary')!;
-    const next = env.host.getHitAreasForTest().find((x) => x.id === 'modal-primary')!;
     expect(Math.abs(adjust.y - next.y), '两决策同一行').toBeLessThanOrEqual(2);
     expect(next.x, '下一场在右').toBeGreaterThan(adjust.x + adjust.w);
     // 点击派发（一次一个：Modal 关闭后按钮消失；next 派发由 canvasPlayerUIHost 用例覆盖）
@@ -461,19 +468,25 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     expect(drawBody.match(/drawMatchingContinuum\(state\)/g)?.length, 'matching+matchPreview 两分支均调用同一函数').toBe(2);
     expect(src, '旧分阶段绘制已删除').not.toContain('private drawMatchingVs');
     expect(src, '旧分阶段绘制已删除').not.toContain('private drawMatchInfo');
-    // 3) F-META-5 + F-META-UX4：Result 走结算 Modal——胜/负 title + 三层结构（奖励行分块 +
-    //    独立部件卡 + 双决策）；金币/段位/部件不再拼成一长句
+    // 3) F-META-5 + F-META-UX4 + F-UX-3C：Result 走结算 Modal——胜/负 title + 三层结构
+    //    （奖励行分块 + 独立部件卡 + 双决策）；金币/段位/部件不再拼成一长句；
+    //    广告是奖励区内部 adRow（不做第三个底部按钮）
     const resultModalIdx = src.indexOf('private showResultModal');
     expect(resultModalIdx, 'showResultModal 存在').toBeGreaterThan(-1);
     const resultMethod = src.slice(resultModalIdx, src.indexOf('showModal(spec: ModalSpec): void'));
     expect(resultMethod).toContain("title: isWin ? '胜利' : '失败'");
     expect(resultMethod).toContain('rewardRows');
     expect(resultMethod).toContain('partCard');
-    expect(resultMethod).toContain('金币奖励');
-    expect(resultMethod).toContain('段位变化');
-    expect(resultMethod).toContain('获得');
+    expect(resultMethod).toContain("label: '金币'");
+    expect(resultMethod).toContain("label: '段位'");
+    expect(resultMethod).toContain('获得新部件');
     expect(resultMethod).toContain("primary: '下一场'");
     expect(resultMethod).toContain("secondary: '调整配置'");
+    // F-UX-3C：广告不再走 tertiary 底部按钮 → 改 adRow（奖励区内）
+    expect(resultMethod).toContain('adRow');
+    expect(resultMethod).toContain('额外 +');
+    expect(resultMethod).toContain('看广告');
+    expect(resultMethod, '无 tertiary 底部按钮').not.toContain('tertiary:');
     const bodyPushes = resultMethod.match(/body\.push\([^)]*\)/g) ?? [];
     expect(
       bodyPushes.some((p) => p.includes('金币') || p.includes('段位') || p.includes('库存') || p.includes('★★')),
@@ -484,6 +497,9 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     expect(modalMethod).toContain('rewardRows');
     expect(modalMethod).toContain('partCard');
     expect(modalMethod).toContain('库存');
+    // F-UX-3C：部件卡删除「获得」标题行（卡片本身即获得语义）；无 modal-tertiary 注册
+    expect(modalMethod, '部件卡无「获得」标题行').not.toContain("text('获得'");
+    expect(modalMethod, '无 tertiary 三列分支').not.toContain('modal-tertiary');
     // 4) 方法内所有直接文本字号 ≥16（Matching/MatchPreview 必要文字；Result 走 Modal 统一规格）
     const re = /this\.text\(([^)]*)\)/g;
     for (const name of ['drawMatchingContinuum']) {

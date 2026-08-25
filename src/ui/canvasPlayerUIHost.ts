@@ -140,10 +140,10 @@ interface ModalSpec {
   rewardRows?: Array<{ label: string; value: string; tone?: ModalTone }>;
   /** F-META-UX4：独立奖励卡（获得部件：名称 + 星级 + 当前数量） */
   partCard?: { name: string; starStr: string; count: number };
+  /** F-UX-3C：奖励区内部的小型次级入口（如广告领币）——不再做第三个底部按钮 */
+  adRow?: { label: string; disabled?: boolean; onPress?: () => void };
   primary: string;
   secondary?: string;
-  /** F-META-5：可选第三按钮（如既有广告领币点；点击不关闭 Modal，回调由调用方更新内容） */
-  tertiary?: { label: string; disabled?: boolean; onPress?: () => void };
   /** F-META-UX2：主按钮禁用（不注册命中；如合成条件不满足时显示原因但不可执行） */
   primaryDisabled?: boolean;
   /** F-UX-2D：大尺寸档（Result 结算层）——占 viewport 70~80% 宽 / 60~75% 高（short 用满 safe） */
@@ -506,9 +506,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         cb?.();
         break;
       }
-      case 'modal-tertiary':
-        // F-META-5：第三按钮（广告领币）——不关闭 Modal，回调触发后由新 state 更新内容
-        this.modal?.tertiary?.onPress?.();
+      case 'modal-ad':
+        // F-UX-3C：广告小型次级入口（奖励区内部）——不关闭 Modal，回调触发后由新 state 更新内容
+        this.modal?.adRow?.onPress?.();
         break;
       case 'modal-veil':
         // 遮罩命中：拦截底层点击（无操作）
@@ -1664,10 +1664,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * 最小 API：调用方提供标题/内容/按钮文案与回调；不接具体业务逻辑、无动画、无美术依赖。
    */
   /**
-   * F-META-5 + F-META-UX4：正式结算 Modal——固定三层（不拼长句）：
+   * F-META-5 + F-META-UX4 + F-UX-3C：正式结算 Modal——固定三层（不拼长句）：
    * ① 顶部：胜利/失败（title）；② 中部：金币奖励 + 段位变化（rewardRows 分块），
-   *    获得部件时独立奖励卡（partCard：名称+星级+当前数量）；③ 底部：[调整配置][下一场]。
-   * 不增加「领取奖励」步骤——奖励自动结算；广告领币沿用既有 reward-ad 逻辑（tertiary）。
+   *    获得部件时独立奖励卡（partCard：名称+星级+当前数量；无「获得」标题行）；
+   *    广告领币是奖励区内部的小型入口（adRow，明显弱于下一场），不做第三个底部按钮；
+   * ③ 底部：仅两个流程决策 [调整配置][下一场]（下一场主按钮）。
+   * 不增加「领取奖励」步骤——奖励自动结算。
    */
   private showResultModal(state: PlayerUIState): void {
     const r = state.result!;
@@ -1676,9 +1678,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (state.economy) {
       const cs = state.economy.coinDelta >= 0 ? '+' : '';
       const rs = state.economy.ratingDelta >= 0 ? '+' : '';
-      rows.push({ label: '金币奖励', value: `${cs}${state.economy.coinDelta}`, tone: 'gold' });
+      rows.push({ label: '金币', value: `${cs}${state.economy.coinDelta}`, tone: 'gold' });
       rows.push({
-        label: '段位变化',
+        label: '段位',
         value: `${rs}${state.economy.ratingDelta} · ${state.economy.tierLabel} ${state.economy.rating}`,
         tone: state.economy.ratingDelta >= 0 ? 'blue' : 'red',
       });
@@ -1696,9 +1698,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       large: true,
       primary: '下一场',
       secondary: '调整配置',
-      tertiary: state.rewardAdAvailable
+      // F-UX-3C：广告入口在奖励区内部（「额外 +50金币 · 看广告」），明显弱于底部两决策
+      adRow: state.rewardAdAvailable
         ? {
-            label: state.rewardAdClaimed ? `已领 +${REWARD_AD_COIN_BONUS}` : '看广告领币',
+            label: state.rewardAdClaimed ? `已领 +${REWARD_AD_COIN_BONUS}金币` : `额外 +${REWARD_AD_COIN_BONUS}金币 · 看广告`,
             disabled: state.rewardAdClaimed,
             onPress: () => this.actions?.onClaimRewardAd(),
           }
@@ -1728,6 +1731,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * F-UX-2D：`large`（Result）明显放大——normal 约占 viewport 70~80% 宽 / 60~75% 高；
    * short 尽可能用 safe viewport 但保留边距。内容锚点恒定（胜/负→奖励→部件→按钮），
    * 多余高度作为留白，按钮行贴卡片底部——形成明确的最终决策层。
+   * F-UX-3C：底部只保留两个流程决策按钮（[调整配置][下一场]）；广告改奖励区内部的
+   * 小型入口（adRow）；short 档 large 高度 0.86（420×210 内容不足时留出明确留白）。
    */
   private drawModal(spec: ModalSpec): void {
     const W = this.W;
@@ -1745,15 +1750,19 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const titleH = this.isShort ? 24 : 40;
     const btnH = this.isShort ? Math.min(this.targetTouchH, 36) : this.targetTouchH;
     const pad = this.isShort ? 10 : 16;
+    // F-UX-3C：广告小型入口高（short 16 / normal 22）+ 前后间隙（明显弱于底部按钮）
+    const adH = spec.adRow ? (this.isShort ? 16 : 22) + (this.isShort ? 6 : 14) : 0;
     const partH = spec.partCard ? (this.isShort ? 32 : 58) : 0;
-    const partGap = spec.partCard && (spec.body.length > 0 || (spec.rewardRows?.length ?? 0) > 0) ? (this.isShort ? 4 : 8) : 0;
+    const hasContentBefore =
+      spec.body.length > 0 || (spec.rewardRows?.length ?? 0) > 0 || !!spec.adRow;
+    const partGap = spec.partCard && hasContentBefore ? (this.isShort ? 4 : 8) : 0;
     // 固定部分高（不含 body 行）——body 行高在剩余空间内自适应（short 极限屏不溢出）
-    const fixedH = pad + titleH + (spec.rewardRows?.length ?? 0) * rewardRowH + partH + partGap + (this.isShort ? 4 : 10) + btnH + pad;
+    const fixedH = pad + titleH + (spec.rewardRows?.length ?? 0) * rewardRowH + adH + partH + partGap + (this.isShort ? 4 : 10) + btnH + pad;
     const availBodyH = H - this.insT - this.insB - fixedH;
     const rowH = spec.body.length > 0 ? Math.max(12, Math.min(22, availBodyH / spec.body.length)) : 22;
     const contentH = fixedH + spec.body.length * rowH;
-    // large：最小高 = viewport 60~75%（normal）/ ~82%（short 尽量用满 safe）；内容不足时留白
-    const cardH = large ? Math.max(contentH, Math.floor(H * (this.isShort ? 0.82 : 0.62))) : contentH;
+    // large：最小高 = viewport 60~75%（normal）/ ~86%（short：内容不足时明确留白）；内容不足时留白
+    const cardH = large ? Math.max(contentH, Math.floor(H * (this.isShort ? 0.86 : 0.62))) : contentH;
     const cx = Math.max(this.insL, Math.min((W - cardW) / 2, W - this.insR - cardW));
     const cy = Math.max(this.insT, Math.min((H - cardH) / 2, H - this.insB - cardH));
     this.rect(cx, cy, cardW, cardH, C.dockBg, C.border, 1);
@@ -1779,48 +1788,45 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         yy += rewardRowH;
       }
     }
-    // ② 中部：独立奖励卡（获得部件：名称 + 星级 + 当前数量）
+    // ② 中部：广告小型次级入口（F-UX-3C：奖励区内部，明显弱于底部流程按钮；点击不关闭）
+    if (spec.adRow) {
+      yy += this.isShort ? 2 : 6;
+      const ah = this.isShort ? 16 : 22;
+      const aw = Math.min(cardW - 2 * pad - 20, 230);
+      this.button(cx + pad, yy, aw, ah, 'modal-ad', spec.adRow.label, {
+        disabled: spec.adRow.disabled,
+      });
+      yy += ah + (this.isShort ? 4 : 8);
+    }
+    // ② 中部：独立奖励卡（获得部件：名称 + 星级 + 当前数量；F-UX-3C 删「获得」标题行）
     if (spec.partCard) {
       yy += partGap;
       const ph = partH - 8;
       const pw = cardW - 2 * pad;
       this.rect(cx + pad, yy, pw, ph, C.cardBg, C.border, 1);
-      this.text('获得', cx + pad + 12, yy + 12, 12, C.textDim, 'left');
-      this.text(spec.partCard.name, cx + pad + 12, yy + 30, 16, C.text, 'left', 700);
-      this.text(spec.partCard.starStr, cx + pad + 12, yy + 46, 15, C.gold, 'left', 700);
-      this.text(`库存 ${spec.partCard.count}`, cx + cardW - pad - 12, yy + 30, 14, C.textDim, 'right');
+      if (this.isShort) {
+        // short 紧凑两行：名称 + 库存（上）· 星级（下）
+        this.text(spec.partCard.name, cx + pad + 12, yy + 8, 12, C.text, 'left', 700);
+        this.text(`库存 ${spec.partCard.count}`, cx + cardW - pad - 12, yy + 8, 11, C.textDim, 'right');
+        this.text(spec.partCard.starStr, cx + pad + 12, yy + 18, 11, C.gold, 'left', 700);
+      } else {
+        this.text(spec.partCard.name, cx + pad + 12, yy + 18, 16, C.text, 'left', 700);
+        this.text(`库存 ${spec.partCard.count}`, cx + cardW - pad - 12, yy + 18, 14, C.textDim, 'right');
+        this.text(spec.partCard.starStr, cx + pad + 12, yy + 36, 15, C.gold, 'left', 700);
+      }
       yy += ph + 8;
     }
-    // ③ 底部：按钮行（次按钮左 / 主按钮右；有 tertiary 时三列）
+    // ③ 底部：按钮行（次按钮左 / 主按钮右）——F-UX-3C：仅两个流程决策（删 tertiary 三列）
     // F-META-UX2：primaryDisabled → 主按钮禁用（不注册命中，显示原因文案）
     // F-UX-2D：large 时按钮行贴卡片底部（内容顶部排、多余高度留白 → 明确的最终决策层）
     const by = large ? cy + cardH - pad - btnH : yy + 2;
     const gap = 10;
-    const bw3 = (cardW - 2 * pad - 2 * gap) / 3;
-    if (spec.secondary && spec.tertiary) {
-      this.button(cx + pad, by, bw3, btnH, 'modal-secondary', spec.secondary, {});
-      this.button(cx + pad + bw3 + gap, by, bw3, btnH, 'modal-primary', spec.primary, {
-        primary: !spec.primaryDisabled,
-        disabled: spec.primaryDisabled,
-      });
-      this.button(cx + pad + 2 * (bw3 + gap), by, bw3, btnH, 'modal-tertiary', spec.tertiary.label, {
-        disabled: spec.tertiary.disabled,
-      });
-    } else if (spec.secondary) {
+    if (spec.secondary) {
       const bw = (cardW - 2 * pad - gap) / 2;
       this.button(cx + pad, by, bw, btnH, 'modal-secondary', spec.secondary, {});
       this.button(cx + pad + bw + gap, by, bw, btnH, 'modal-primary', spec.primary, {
         primary: !spec.primaryDisabled,
         disabled: spec.primaryDisabled,
-      });
-    } else if (spec.tertiary) {
-      const bw = (cardW - 2 * pad - gap) / 2;
-      this.button(cx + pad, by, bw, btnH, 'modal-primary', spec.primary, {
-        primary: !spec.primaryDisabled,
-        disabled: spec.primaryDisabled,
-      });
-      this.button(cx + pad + bw + gap, by, bw, btnH, 'modal-tertiary', spec.tertiary.label, {
-        disabled: spec.tertiary.disabled,
       });
     } else {
       this.button(cx + pad, by, cardW - 2 * pad, btnH, 'modal-primary', spec.primary, {

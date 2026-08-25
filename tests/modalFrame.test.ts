@@ -240,11 +240,11 @@ describe('F-META-4｜通用 Modal / Popup Foundation', () => {
     expect(resultMethod, 'Result 走大尺寸档').toContain('large: true');
     const modalMethod = src.slice(src.indexOf('private drawModal'), src.indexOf('private drawReadyOverlay'));
     expect(modalMethod).toContain('const large = !!spec.large');
-    // normal：宽 ×0.78（70~80%）、高 ×0.62（60~75%）；short：宽 ×0.9 / 高 ×0.82（safe 用满留边距）
+    // normal：宽 ×0.78（70~80%）、高 ×0.62（60~75%）；short：宽 ×0.9 / 高 ×0.86（safe 用满留边距，3C 保证 420×210 明确留白）
     expect(modalMethod).toContain('0.78');
     expect(modalMethod).toContain('0.62');
     expect(modalMethod).toContain('0.9');
-    expect(modalMethod).toContain('0.82');
+    expect(modalMethod).toContain('0.86');
     // 按钮行贴卡片底部（明确最终决策层）
     expect(modalMethod).toContain('const by = large ? cy + cardH - pad - btnH : yy + 2;');
   });
@@ -272,4 +272,61 @@ describe('F-META-4｜通用 Modal / Popup Foundation', () => {
       }
     }
   });
+
+  it('F-UX-3C｜Result 减少决策密度：底部仅两决策、广告入口在奖励区内部且弱化、420×210 明确留白', () => {
+    // —— 底部只有两个流程决策（含广告可用时）：无 modal-tertiary ——
+    for (const vp of VIEWPORTS) {
+      const env = makeHost(vp, INSETS);
+      env.host.render(
+        state({
+          playerPhase: 'matchPreview',
+          battleState: 'ended',
+          result: { winner: 'A', hpA: 100, hpB: 0 },
+          reward: { name: '榴莲炮', starStr: '★★', cat: 'weapon', countAfter: 2 },
+          economy: { coinDelta: 50, ratingDelta: 12, tierLabel: '青铜', rating: 212, coin: 150 },
+          rewardAdAvailable: true,
+        }),
+      );
+      const ids = env.areas().map((a) => a.id);
+      expect(ids.includes('modal-tertiary'), `${vp.w}×${vp.h} 底部无第三个同级按钮`).toBe(false);
+      // 广告入口（modal-ad）在奖励区内部、明显弱于底部决策按钮
+      const ad = env.areas().find((a) => a.id === 'modal-ad');
+      expect(ad, `${vp.w}×${vp.h} 广告入口存在`).toBeTruthy();
+      const p = env.areas().find((a) => a.id === 'modal-primary')!;
+      const s = env.areas().find((a) => a.id === 'modal-secondary')!;
+      expect(ad!.h, '广告入口矮于决策按钮（弱化）').toBeLessThan(p.h);
+      expect(ad!.y + ad!.h, '广告入口在决策行上方（奖励区内）').toBeLessThanOrEqual(p.y);
+      // 底部恰好两个流程决策（+ 遮罩），主在次右
+      const decisionIds = ids.filter((id) => id.startsWith('modal-')).sort();
+      expect(decisionIds, `${vp.w}×${vp.h} 主/次/遮罩/广告入口（无第三个决策）`).toEqual([
+        'modal-ad',
+        'modal-primary',
+        'modal-secondary',
+        'modal-veil',
+      ]);
+      expect(p.x, '下一场主按钮在右').toBeGreaterThanOrEqual(s.x + s.w);
+    }
+    // —— 420×210（short）明确留白：卡片不占满、决策按钮上方有可见间隙 ——
+    const env = makeHost({ w: 420, h: 210 }, INSETS);
+    env.host.render(
+      state({
+        playerPhase: 'matchPreview',
+        battleState: 'ended',
+        result: { winner: 'A', hpA: 100, hpB: 0 },
+        reward: { name: '榴莲炮', starStr: '★★', cat: 'weapon', countAfter: 2 },
+        economy: { coinDelta: 50, ratingDelta: 12, tierLabel: '青铜', rating: 212, coin: 150 },
+        rewardAdAvailable: true,
+      }),
+    );
+    const p420 = env.areas().find((a) => a.id === 'modal-primary')!;
+    // 卡片四周留白：按钮不贴屏缘（上下各有 >8px）
+    expect(p420.y, '决策按钮 y ≥8（上方留白）').toBeGreaterThanOrEqual(8);
+    expect(p420.y + p420.h, '决策按钮底 ≤ 屏高−8（下方留白）').toBeLessThanOrEqual(210 - 8);
+    // 决策按钮上方有明确间隙（内容顶部排、按钮贴卡片底 → 按钮 y 明显大于内容估算底）
+    // 内容底 ≈ ad 底 + partGap(4) + partH(32) + 按钮上方间距(4)；留白 = primary.y − 内容底 ≥ 8
+    const ad420 = env.areas().find((a) => a.id === 'modal-ad')!;
+    const contentBottomEst = ad420.y + ad420.h + 4 + 32 + 4;
+    expect(p420.y, '按钮行上方有明确留白（≥8）').toBeGreaterThanOrEqual(contentBottomEst + 8);
+  });
+
 });

@@ -166,18 +166,24 @@ describe('F-WX-4 CanvasPlayerUIHost', () => {
     expect(fired['resultAdjust']).toHaveLength(1);
   });
 
-  it('F-META-5｜Result Modal：广告可用时显示「看广告领」→ onClaimRewardAd（tertiary，不关闭）', () => {
+  it('F-UX-3C｜Result Modal：广告可用时奖励区内有「额外…看广告」入口 → onClaimRewardAd（不关闭）', () => {
     host.render(RESULT_STATE);
-    click('modal-tertiary');
+    click('modal-ad');
     expect(fired['reward']).toHaveLength(1);
-    expect(host.getHitAreasForTest().some((a) => a.id === 'modal-tertiary'), '广告按钮仍在（不关闭）').toBe(true);
-  });
-
-  it('F-META-5｜Result Modal：广告不可用时不注册 tertiary 命中区', () => {
-    host.render({ ...RESULT_STATE, rewardAdAvailable: false });
+    expect(host.getHitAreasForTest().some((a) => a.id === 'modal-ad'), '广告入口仍在（不关闭）').toBe(true);
+    // F-UX-3C：底部只剩两个流程决策（无第三个同级按钮）
     const ids = host.getHitAreasForTest().map((a) => a.id);
     expect(ids).not.toContain('modal-tertiary');
+    expect(ids).toContain('modal-secondary');
     expect(ids).toContain('modal-primary');
+  });
+
+  it('F-UX-3C｜Result Modal：广告不可用时不注册 modal-ad 命中区；无广告时底部仍两决策', () => {
+    host.render({ ...RESULT_STATE, rewardAdAvailable: false });
+    const ids = host.getHitAreasForTest().map((a) => a.id);
+    expect(ids).not.toContain('modal-ad');
+    expect(ids).toContain('modal-primary');
+    expect(ids).toContain('modal-secondary');
   });
 
   it('Matching：只画 VS，无命中区（纯表现）', () => {
