@@ -454,7 +454,11 @@ export class PlayerGameRuntime {
             ? 'previewFixed'
             : 'previewSolo')
       : 'battle'; // 正式战斗：按 phase 构图（Q08-A）
-    this.deps.battle.reframe(fit, this.deps.host.getPreviewFramingRect?.() ?? undefined);
+    // F-MATCH-CAMERA-TRANSACTION-P0：previewFixed 是全屏固定框语义（MATCH_MIN/MAX 世界框 +
+    // 全屏安全区）——不得混入 getPreviewFramingRect（matching 时 metaPage 已被复位为 'home'，
+    // 会误返回 home 取景区，使 Locked 构图与首帧不一致造成跳变）。previewSolo 保留 framing。
+    const framing = fit === 'previewFixed' ? undefined : (this.deps.host.getPreviewFramingRect?.() ?? undefined);
+    this.deps.battle.reframe(fit, framing);
   }
 
   /** 视口 resize：arena 尺寸 → host resize + 重构图（Web 可经 deps.onResize 接管 scenario 分支） */
@@ -599,8 +603,13 @@ export class PlayerGameRuntime {
   private loadMatchAB(): void {
     const sa = this.snapshotOf('A');
     const sb = this.snapshotOf('B');
-    this.deps.battle.loadCustomPreview(sa, sb); // previewFixed 相机由 reframePlayerCamera 决定
-    this.reframePlayerCamera();
+    this.deps.battle.loadCustomPreview(sa, sb);
+    // F-MATCH-CAMERA-TRANSACTION-P0：战前准备【显式】previewFixed——此时 playerPhaseInternal
+    // 仍为 'garage'（成功路径最后才提交），若经 reframePlayerCamera 会误选 previewSolo，
+    // 导致首帧 Matching 单车构图（车辆过大/对手裁切），进入 matchPreview 才切 previewFixed
+    // 造成 Locked 突然缩小。显式 previewFixed 使首帧即正确双车构图，Matching → Locked
+    // 相机连续（同 fit + 固定框 + 同 spawn，无跳位/无缩放呼吸）。
+    this.deps.battle.reframe('previewFixed');
   }
 
   /** Matching 候选换车——只重载 B（不重取景，相机保持固定无呼吸）+ 触发 B 淡入缩放 */
