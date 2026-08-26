@@ -53,11 +53,12 @@ describe('F-WX-6.1 Pages Preview 构建配置', () => {
 describe('F-WX-6.1 main.ts 默认 Canvas + short SHA Badge', () => {
   const MAIN = read('src/main.ts');
 
-  it('Pages 预览默认启用 Canvas UI：isPagesPreview || ?canvasui=1，普通 DEV 行为不变', () => {
+  it('Pages 预览默认启用 Canvas UI：playerMode（含 isPagesPreview）|| ?canvasui=1，普通 DEV 行为不变', () => {
     // 守卫：typeof __PAGES_PREVIEW__（未注入构建为 undefined → false）
     expect(MAIN).toContain("typeof __PAGES_PREVIEW__ !== 'undefined'");
-    // 默认 Canvas：isPagesPreview || ?mobile-review=1 || URLSearchParams(location.search).has('canvasui')
-    expect(MAIN).toMatch(/canvasUiMode\s*=\s*isPagesPreview\s*\|\|\s*reviewOn\s*\|\|\s*new URLSearchParams\(location\.search\)\.has\('canvasui'\)/);
+    // F-DEMO-PLAYER-RUNTIME-P0：唯一玩家入口 = playerMode（isPagesPreview / __PLAYER_MODE__ / ?player=1）
+    // → canvasUiMode（Canvas host）；非玩家模式保留 WebDom DEV 行为
+    expect(MAIN).toMatch(/canvasUiMode\s*=\s*playerMode\s*\|\|\s*reviewOn\s*\|\|\s*new URLSearchParams\(location\.search\)\.has\('canvasui'\)/);
   });
 
   it('F-DEMO-WEB-R1：Badge 仅 dev/test（DEV_TOOLS_VISIBLE）显示，PROD 公开版隐藏', () => {

@@ -15,6 +15,12 @@ export default defineConfig({
     port: 5173,
     strictPort: true, // F-DEV-1：端口被占用直接失败，不自动切端口
   },
+  build: {
+    // F-DEMO-GATE-R2：emptyOutDir 关闭——与 vite.pages/vite.wechat 同源处理：
+    // 本机 safe-delete shim 拦截 fs.rmSync（emptyDir 必失败），产物覆盖写即可
+    // （dist 内容始终是 index.html + assets，无旧产物残留）。
+    emptyOutDir: false,
+  },
   plugins: [
     runtimeInfoPlugin(),
     // F-DEMO-PLAYER-RUNTIME-P0：本地玩家演示模式（npm run dev:player / ?player=1）。
