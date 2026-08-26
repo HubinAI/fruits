@@ -81,11 +81,24 @@ describe('F-DEMO-GATE-R2｜手机演示版本技术 Gate', () => {
     expect(MAIN).toContain('phoneLogical: playerMode');
   });
 
-  it('G2. 画布 surface + 点击坐标：输入 → 布局唯一转换点 + surface 注入（Web 无 devicePixelRatio 假设）', () => {
-    // Canvas host 屏幕→布局唯一转换点（F-WX-P0-INPUT：所有按钮坐标经此反算）
-    expect(HOST).toContain('private screenToLayoutPoint(x: number, y: number)');
-    expect(HOST, '输入归一化契约').toMatch(/viewport logical/);
-    expect(HOST, '布局坐标注册').toContain('getHitAreasForTest');
+  it('G2. F-DEMO-FLOW-GATE-R3：真实构建 E2E 门禁替代字符串 Gate（删除 screenToLayoutPoint 检查）', () => {
+    // Must#8：不再以「源码含 screenToLayoutPoint 字符串」宣告点击通过——真实浏览器 E2E
+    // （tests/_e2e_gate.cjs：构建产物 → 本地服务 → 系统 Edge → 真实 hitArea 坐标点击 → 完整
+    // 玩家闭环/页面职责/输入/控制台 Gate）才是点击验收。此处只守卫 Gate 链路存在且可运行。
+    const fs = require('fs') as typeof import('node:fs');
+    const e2eExists = fs.existsSync('tests/_e2e_gate.cjs');
+    expect(e2eExists, '真实构建 E2E Gate 脚本存在').toBe(true);
+    expect(fs.existsSync('tests/_serve_pages.cjs'), '本地构建产物服务脚本存在').toBe(true);
+    const pkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+    expect(pkg.scripts['test:e2e-gate'], 'package.json 有 test:e2e-gate（构建→服务→真实浏览器）').toBeTruthy();
+    const e2eSrc = fs.readFileSync('tests/_e2e_gate.cjs', 'utf-8');
+    // E2E 必须是「真实浏览器 + 真实 Canvas 坐标」，不得直接调 runtime.actions（Must#2）
+    expect(e2eSrc, 'E2E 驱动真实浏览器（playwright-core）').toContain('playwright-core');
+    expect(e2eSrc, 'E2E 点击走真实 pointer 事件到 canvas').toContain("PointerEvent('pointerdown'");
+    expect(e2eSrc, 'E2E 坐标来自页面运行时真实 hitArea').toContain('getHitAreasForTest');
+    expect(e2eSrc, 'E2E 不直接调 runtime.actions').not.toMatch(/runtime\.actions/);
+    // 输入/坐标唯一转换点仍存在（真实用户路径经 WebInput；不再以字符串断言点击通过）
+    expect(HOST, '布局坐标注册（E2E 探针读真实 hitArea）').toContain('getHitAreasForTest');
     // Renderer 注入 surface（微信无 clientWidth / devicePixelRatio 形态差异安全）
     expect(RENDERER).toContain('return this.surface ? this.surface.width : this.canvas.clientWidth;');
     // 微信构建含触摸输入接线（WechatInput 归一化）

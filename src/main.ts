@@ -416,6 +416,8 @@ const host: PlayerUIHost = canvasUiMode
     })
   : new WebDomPlayerUIHost();
 host.mount(canvasWrap);
+// F-DEMO-FLOW-GATE-R3：暴露 host 实例供 E2E Gate 探针（不参与 Gameplay；生产无副作用）
+(globalThis as { __h?: typeof host }).__h = host;
 
 /* ---------- 稳定取景（Q02-CAM-R1）：DEV scenario 相机；build 玩家相机由 runtime 持有 ---------- */
 let currentCamera: ScenarioCamera | null = null;
