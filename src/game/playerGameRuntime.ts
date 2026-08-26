@@ -106,8 +106,12 @@ export interface PlayerBattleHost {
 export interface PlayerGameDeps {
   host: PlayerUIHost;
   battle: PlayerBattleHost;
-  /** 用户交互恢复音频（Web=AudioContext resume；微信省略/no-op） */
-  sfx?: { resume(): void };
+  /**
+   * F-BATTLE-READABILITY-R1：战斗关键音效（攻击/命中/收束预警/胜负）。
+   * Web = SfxAudioService；微信 = 惰性 no-op（play 安全跳过）。
+   * 用户交互恢复音频（Web=AudioContext resume；微信省略/no-op）。
+   */
+  sfx?: { resume(): void; play?(id: import('../presentation/audioService').SfxId): void };
   /** Web：`() => new URLSearchParams(location.search).has('resetdev')`；微信：缺省 false */
   isResetDevVisible?: () => boolean;
   /** DEV 重置后刷新（Web=location.reload；微信缺省 → 运行时重读存档） */
@@ -358,7 +362,16 @@ export class PlayerGameRuntime {
       battleState: this.battleStateInternal,
       battleStatus: this.deps.battle.orchestrator?.getBattleStatusSnapshot?.() ?? null,
       phaseCountdownText: countdownText,
+      // F-BATTLE-READABILITY-R1：左右阵营卡名称（我方/对手车辆名；不再只显示 A/B）
+      names: this.battleNames(),
     });
+  }
+
+  /** F-BATTLE-READABILITY-R1：当前对局 A/B 车辆名（registry Body 名；draftB 恒为对手池 Build） */
+  private battleNames(): { a: string; b: string } {
+    const ba = registry.bodies.get(this.draftA.bodyDefId);
+    const bb = registry.bodies.get(this.draftB.bodyDefId);
+    return { a: ba?.name ?? this.draftA.bodyDefId, b: bb?.name ?? this.draftB.bodyDefId };
   }
 
   /** 后台→前台恢复：重置 dt 时钟（避免大 dt 一步钳制失真） */
@@ -788,6 +801,8 @@ export class PlayerGameRuntime {
     if (this.uiModeInternal === 'build' && this.battleStateInternal === 'fighting' && r && r.phase === 'End') {
       this.battleStateInternal = 'ended';
       this.currentResult = { winner: r.winner, hpA: r.hpA, hpB: r.hpB };
+      // F-BATTLE-READABILITY-R1：胜负音效（赢=上扬 / 输=低频下沉；仅每场结算一次）
+      this.deps.sfx?.play?.(r.winner === 'A' ? 'win' : 'lose');
       this.finalizeBattleResult(this.currentResult); // 结算副作用（奖励/经济/埋点/广告重置）
       this.pushUI(); // Host：结算卡成为第一视觉焦点
     }
@@ -810,6 +825,11 @@ export class PlayerGameRuntime {
     if (o.phase !== this.lastPhase) {
       this.lastPhase = o.phase;
       this.phaseStartTimeMs = o.timeMs;
+      // F-BATTLE-READABILITY-R1：Warning/Closing 进入时收束预警音（玩家提前感知刺墙压力；
+      // 微信 no-op / Web 无 AudioContext 安全跳过）
+      if (o.phase === 'Warning' || o.phase === 'Closing') {
+        this.deps.sfx?.play?.('closing');
+      }
       // Q08-A：phase 切换（Active→Warning→Closing/End）→ 稳定切换一次构图
       this.reframePlayerCamera();
     }

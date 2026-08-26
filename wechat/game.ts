@@ -43,6 +43,13 @@ import { resolveLayoutProfile } from '../src/ui/layoutProfile';
 import { PlayerGameRuntime } from '../src/game/playerGameRuntime';
 import { WechatBattleHost } from '../src/game/wechatBattleHost';
 import { APP_VERSION } from '../src/core/env';
+// F-BATTLE-READABILITY-R1：正式 Content 视觉（构建期 base64 内联 → wx.createImage 加载；
+// 无此资源时 Renderer 灰盒 fallback——本加载使车辆显示正式 sprite，不再像 Physics Lab）
+import bodyWatermelonUrl from '../assets/visuals/body_watermelon.png';
+import bodyBananaUrl from '../assets/visuals/body_banana.png';
+import partCannonUrl from '../assets/visuals/part_cannon.png';
+import partHammerUrl from '../assets/visuals/part_hammer.png';
+import partPushRodUrl from '../assets/visuals/part_pushRod.png';
 
 const g = globalThis as any;
 const wx = g.wx as any;
@@ -68,6 +75,25 @@ const surface = platform.createViewport(screenCanvas).surface();
 // —— 4) Renderer（画 screenCanvas；注入 surface，不感知平台；无正式 Content → 灰盒绘制） ——
 const visualRegistry = new VisualRegistry();
 const renderer = new Renderer(screenCanvas as unknown as HTMLCanvasElement, visualRegistry, surface);
+
+// —— 4a) F-BATTLE-READABILITY-R1：正式 Content 视觉注册 + 微信图片加载 ——
+// （wx.createImage 是微信小游戏唯一图片加载方式；base64 data URI 由构建内联，无需网络）
+const SILHOUETTE_ASSETS: Array<[string, string]> = [
+  ['body_watermelon', bodyWatermelonUrl],
+  ['body_banana', bodyBananaUrl],
+  ['part_cannon', partCannonUrl],
+  ['part_hammer', partHammerUrl],
+  ['part_pushRod', partPushRodUrl],
+];
+for (const [visualId, url] of SILHOUETTE_ASSETS) {
+  visualRegistry.register(visualId, url);
+  const img = wx.createImage();
+  img.onload = () => visualRegistry.setImage(visualId, img);
+  img.onerror = () => {
+    // 加载失败：保持 registry 无 image → Renderer 灰盒 fallback（不白屏/不抛错）
+  };
+  img.src = url;
+}
 
 // —— 5) 表现层（共享接线；微信无 Web Audio → SfxAudioService 惰性 no-op；无 timeScale 定格） ——
 const sfx = new SfxAudioService();

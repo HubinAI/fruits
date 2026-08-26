@@ -57,6 +57,10 @@ export default defineConfig({
     // Linux CI 无 shim 影响；目录内容始终是这 3 个文件，不会残留旧产物。
     emptyOutDir: false,
     target: 'es2018',
+    // F-BATTLE-READABILITY-R1：正式 Content 视觉（assets/visuals/*.png）base64 内联进
+    // game.js——微信小游戏无静态资源服务器，包内 data URI 由 wx.createImage 直接加载
+    // （否则车辆/部件全部回退 collider 灰盒，战斗看起来像 Physics Lab）。
+    assetsInlineLimit: 100000000,
     lib: {
       entry: resolve(__dirname, 'wechat/game.ts'),
       name: 'WeChatPlayerGame',

@@ -210,7 +210,7 @@ describe('F-UX-3B Battle 去 UI 化 + 主体放大', () => {
     expect(texts().some((s) => s.includes('刺墙逼近') && s.includes('3')), 'Closing 中央提示含倒计时').toBe(true);
   });
 
-  it('3. mobile-normal（844×390）HUD 零回归：仍有 A/B/数字/「战斗中」', () => {
+  it('3. mobile-normal（844×390）HUD 阵营卡：名称（我方/对手）+ HP 数字辅助 +「战斗中」；不再只显示 A/B', () => {
     const { host, texts } = makeRecHost({ w: 844, h: 390 });
     host.render(garageState({ battleState: 'fighting' }));
     host.renderBattleFrame({
@@ -219,9 +219,9 @@ describe('F-UX-3B Battle 去 UI 化 + 主体放大', () => {
       phaseCountdownText: null,
     });
     const t = texts();
-    expect(t.some((s) => s === 'A'), 'normal HUD 保留 A').toBe(true);
-    expect(t.some((s) => s === 'B'), 'normal HUD 保留 B').toBe(true);
-    expect(t.some((s) => s === '70' || s === '40'), 'normal HUD 保留 HP 数字').toBe(true);
+    expect(t.some((s) => s === 'A' || s === 'B'), 'F-BATTLE-READABILITY-R1：阵营卡不再只显示 A/B 字母').toBe(false);
+    expect(t.some((s) => s.includes('我方') || s.includes('对手')), '阵营卡显示我方/对手名（无 names 回落）').toBe(true);
+    expect(t.some((s) => s === '70' || s === '40'), 'normal HUD 保留 HP 数字（辅助信息）').toBe(true);
     expect(t.some((s) => s.includes('战斗中')), 'normal HUD 保留「战斗中」').toBe(true);
   });
 

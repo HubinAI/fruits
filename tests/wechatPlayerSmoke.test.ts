@@ -77,6 +77,13 @@ function makeFakeWx() {
       createCount++;
       return createCount === 1 ? screenCanvas : uiCanvas;
     },
+    // F-BATTLE-READABILITY-R1：微信图片加载（game.ts 注册 Content 视觉；stub 不触发
+    // onload → 视觉灰盒 fallback，headless 不影响战斗流程）
+    createImage: () => ({
+      onload: null as (() => void) | null,
+      onerror: null as (() => void) | null,
+      src: '',
+    }),
     getStorageSync: (k: string) => (store.has(k) ? store.get(k) : null),
     setStorageSync: (k: string, v: unknown) => void store.set(k, v),
     removeStorageSync: (k: string) => void store.delete(k),

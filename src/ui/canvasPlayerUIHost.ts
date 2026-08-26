@@ -1973,22 +1973,33 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.drawHudShort(frame, top, h, barBase, barW, pctA, pctB);
         return;
       }
-      this.text('A', barBase, top + 12, 14, V.ownBlue, 'left', 700);
-      const barAX = barBase + 16;
-      this.rect(barAX, top, barW, h, '#232b38', V.border, 1);
-      if (pctA > 0) this.rect(barAX, top, barW * (pctA / 100), h, V.ownBlue);
-      this.text(`${Math.round(s.sideA.hp)}`, barAX + barW + 6, top + 12, 14, V.textPrimary);
-
+      // F-BATTLE-READABILITY-R1：左右阵营卡——左蓝（我方名+HP条+数字辅助）/
+      // 右橙（对手名+HP条+数字辅助）；不再只显示 A/B 字母（数字降为辅助信息）。
+      const aName = frame.names?.a ?? '我方';
+      const bName = frame.names?.b ?? '对手';
+      // 左阵营（我方 / 蓝）
+      this.text(aName, barBase, top + 11, 13, V.ownBlue, 'left', 700);
+      const barAX = barBase;
+      const barY = top + 17;
+      this.rect(barAX, barY, barW, h, '#232b38', V.border, 1);
+      if (pctA > 0) this.rect(barAX, barY, barW * (pctA / 100), h, V.ownBlue);
+      this.text(`${Math.round(s.sideA.hp)}`, barAX + barW + 6, barY + h / 2, 12, V.textPrimary);
+      // 右阵营（对手 / 橙）
       const barBRight = this.W - this.insR - 8;
-      this.text('B', barBRight, top + 12, 14, V.enemyOrange, 'right', 700);
-      const barBX = barBRight - 16 - barW;
-      this.rect(barBX, top, barW, h, '#232b38', V.border, 1);
-      if (pctB > 0) this.rect(barBX, top, barW * (pctB / 100), h, V.enemyOrange);
-      this.text(`${Math.round(s.sideB.hp)}`, barBX - 6, top + 12, 14, V.textPrimary, 'right');
+      this.text(bName, barBRight, top + 11, 13, V.enemyOrange, 'right', 700);
+      const barBX = barBRight - barW;
+      this.rect(barBX, barY, barW, h, '#232b38', V.border, 1);
+      if (pctB > 0) this.rect(barBX, barY, barW * (pctB / 100), h, V.enemyOrange);
+      this.text(`${Math.round(s.sideB.hp)}`, barBX - 6, barY + h / 2, 12, V.textPrimary, 'right');
 
-      this.text(s.phase === 'End' ? '战斗结束' : '战斗中', this.W / 2, top + 12, 14, V.primary, 'center');
+      this.text(s.phase === 'End' ? '战斗结束' : '战斗中', this.W / 2, top + 11, 14, V.primary, 'center');
       if (frame.phaseCountdownText != null) {
         this.text(frame.phaseCountdownText, this.W / 2, top + 60, 34, V.lose, 'center', 800);
+      }
+      // F-BATTLE-READABILITY-R1：Warning/Closing 左右边缘危险脉冲（收束压力来自两侧；
+      // 细条贴边，不遮挡车辆/战场核心）
+      if (s.phase === 'Warning' || s.phase === 'Closing') {
+        this.drawDangerEdgePulse(s.phase === 'Closing');
       }
       return;
     }
@@ -2010,6 +2021,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (frame.phaseCountdownText != null) {
       this.text(frame.phaseCountdownText, BASE_W / 2, 110, 44, V.lose, 'center', 800);
     }
+  }
+
+  /**
+   * F-BATTLE-READABILITY-R1：Warning/Closing 左右边缘危险脉冲——半透明红竖条 + 脉动
+   * （Closing 更亮更强），提示「收束压力来自两侧」；细条贴边，不遮挡车辆/战场核心。
+   */
+  private drawDangerEdgePulse(closing: boolean): void {
+    const pulse = 0.5 + 0.5 * Math.sin(this.nowMs * 0.012);
+    const alpha = closing ? 0.55 + 0.3 * pulse : 0.28 + 0.28 * pulse;
+    const w = Math.max(5, Math.round(this.W * 0.012));
+    const topY = this.insT;
+    const h = this.H - this.insT - this.insB;
+    const ctx = this.ctx;
+    ctx.globalAlpha = alpha;
+    this.rect(this.insL, topY, w, h, '#ff3b3b');
+    this.rect(this.W - this.insR - w, topY, w, h, '#ff3b3b');
+    ctx.globalAlpha = 1;
   }
 
   /**

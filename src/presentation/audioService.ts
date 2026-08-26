@@ -7,8 +7,12 @@
  * - 后续正式队列可把占位 beep 换成预加载 AudioBuffer / 音频资源，接口不变。
  */
 
-/** 本轮正式表现需要的音效 id（占位集合，后续可扩展） */
-export type SfxId = 'fire' | 'hit' | 'death';
+/**
+ * F-BATTLE-READABILITY-R1：正式战斗关键音效 id。
+ * fire（攻击）/ hit（命中）/ death（败北车辆死亡）由 BattleEvent 触发；
+ * closing（收束预警）/ win / lose 由 Runtime 阶段/结算切换触发。
+ */
+export type SfxId = 'fire' | 'hit' | 'death' | 'closing' | 'win' | 'lose';
 
 /** 统一音频服务接口（控制器 / 测试可注入） */
 export interface SfxService {
@@ -31,6 +35,12 @@ const BEEP_PARAMS: Record<SfxId, { freq: number; endFreq: number; dur: number; g
   hit: { freq: 320, endFreq: 160, dur: 0.09, gain: 0.14 },
   // 死亡：低频较长下沉
   death: { freq: 220, endFreq: 60, dur: 0.35, gain: 0.18 },
+  // F-BATTLE-READABILITY-R1：收束预警（Warning/Closing 进入）——低沉双段警鸣（区别于普通 hit）
+  closing: { freq: 420, endFreq: 210, dur: 0.3, gain: 0.15 },
+  // 胜利：上扬三连感（高频 → 更高，单 beep 上扬）
+  win: { freq: 660, endFreq: 1320, dur: 0.25, gain: 0.16 },
+  // 失败：低频下沉（比 death 更缓）
+  lose: { freq: 240, endFreq: 90, dur: 0.4, gain: 0.16 },
 };
 
 /**

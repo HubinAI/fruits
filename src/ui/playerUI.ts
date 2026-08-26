@@ -57,6 +57,11 @@ export interface PlayerUIHudFrame {
   } | null;
   /** Warning 倒计时文案；null = 隐藏 */
   phaseCountdownText: string | null;
+  /**
+   * F-BATTLE-READABILITY-R1：左右阵营卡名称（我方/对手车辆名，如「西瓜」/「香蕉」）。
+   * HUD 不再只显示 A/B；缺省时 HUD 回落到阵营色条。
+   */
+  names?: { a: string; b: string };
 }
 
 /** 玩家 UI 当前应展示的全部数据快照（纯数据；由 main.ts 组装）。 */

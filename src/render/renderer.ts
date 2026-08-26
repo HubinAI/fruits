@@ -736,8 +736,11 @@ export class Renderer {
       for (const cw of arena.closingWalls) {
         this.drawShape(cw, '#7a2f2f');
         if (arenaPhase === 'Warning') {
-          // 预高亮：橙红描边 + 闪烁（不画刺，刺墙尚未「进入」）
+          // F-BATTLE-READABILITY-R1：预高亮——墙体半透明红填充 + 橙红脉动描边
+          // （危险机关而非纯红灰矩形；玩家提前感知收束方向）
           const blink = 0.45 + 0.35 * Math.sin(now * 0.012);
+          ctx.globalAlpha = 0.2 + 0.18 * blink;
+          this.drawShape(cw, '#c0403a');
           ctx.globalAlpha = blink;
           this.strokeShape(cw, '#e8a33c');
           ctx.globalAlpha = 1;
@@ -842,15 +845,29 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
 
-    // W2-FX-1/2：命中火花（接触点短暂小圆；hazard 用红色刺伤色）
+    // W2-FX-1/2：命中火花（接触点短暂小圆；hazard 用红色刺伤色）。
+    // F-BATTLE-READABILITY-R1：短促爆点——中心亮核 + 十字短射线（区别于调试纯色小圆）
     this.sparks = this.sparks.filter((s) => now - s.bornAt < s.ttl);
     for (const s of this.sparks) {
       const age = (now - s.bornAt) / s.ttl;
+      const x = this.sx(s.x);
+      const y = this.sy(s.y);
+      const r = Math.max(1, this.ss(3 + age * 2));
       ctx.globalAlpha = 1 - age;
       ctx.fillStyle = s.color;
       ctx.beginPath();
-      ctx.arc(this.sx(s.x), this.sy(s.y), this.ss(3 + age * 2), 0, Math.PI * 2);
+      ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
+      // 十字短射线（爆点感；长度随 age 收缩，短促不遮车）
+      const L = r * 2.4;
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = Math.max(1.5, this.ss(1.2));
+      ctx.beginPath();
+      ctx.moveTo(x - L, y);
+      ctx.lineTo(x + L, y);
+      ctx.moveTo(x, y - L);
+      ctx.lineTo(x, y + L);
+      ctx.stroke();
       ctx.globalAlpha = 1;
     }
 
@@ -874,7 +891,9 @@ export class Renderer {
       const alpha = 0.35 + p * 0.6;
       const r = this.ss(7 + p * 14);
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = p > 0.85 ? '#fff2b8' : p > 0.5 ? '#ffd35a' : '#6fa8ff';
+      // F-BATTLE-READABILITY-R1：蓄能光点统一暖色（金黄→亮白）——不再用青色圆点
+      // （调试感）；激光的身份由「飞行青色能量束」承担（见 drawProjectiles）。
+      ctx.fillStyle = p > 0.85 ? '#fff2b8' : '#ffd35a';
       ctx.beginPath();
       ctx.arc(this.sx(c.x), this.sy(c.y), r, 0, Math.PI * 2);
       ctx.fill();
@@ -1158,8 +1177,24 @@ export class Renderer {
         // Q11-C-R3-FINAL：镭射弹（真实伤害载体）只画一个小亮头 + 微 glow，
         // 「巨大激光炮」的视觉由发射后驻留的 laserBeam VFX 承担（不跟随高速弹、
         // 不假长束）。真实 Collider 半径 p.radius 未扩大；hit/miss/CCD 不变。
+        // F-BATTLE-READABILITY-R1：加沿真实飞行方向的短青色能量拖尾——不再是孤立
+        // 青色圆点（与碰撞爆点 / 普通炮弹明显区分，一眼可辨「这是激光在飞」）。
         const cx = this.sx(p.center.x);
         const cy = this.sy(p.center.y);
+        const v = p.velocity ?? { x: 1, y: 0 };
+        const vl = Math.max(1e-6, Math.hypot(v.x, v.y));
+        const ux = v.x / vl;
+        const uy = v.y / vl;
+        const TRAIL = this.ss(26);
+        ctx.globalAlpha = 0.55;
+        ctx.strokeStyle = '#7fd8ff';
+        ctx.lineWidth = Math.max(2, this.ss(p.radius));
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(cx - ux * TRAIL, cy - uy * TRAIL);
+        ctx.lineTo(cx, cy);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
         ctx.globalAlpha = 0.35;
         ctx.fillStyle = '#7fd8ff';
         ctx.beginPath();
