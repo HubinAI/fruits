@@ -235,11 +235,11 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
     }
   });
 
-  it('验收5｜360×180 极限屏首页可交互：CTA / 三辅助入口 / 宝箱 4 槽全部在屏内且不重叠；配置页同样无溢出', () => {
+  it('验收5｜360×180 极限屏首页可交互：寻找对手 / 三辅助入口 / 宝箱 4 槽全部在屏内且不重叠；配置页同样无溢出', () => {
     const env = makeHost({ w: 360, h: 180 }, INSETS);
     env.host.render(garageState());
-    // F-HOME-1：Home 首屏核心入口
-    for (const id of ['cta-find', 'home-garage', 'home-rank', 'home-pass', 'home-chest-0', 'home-chest-3']) {
+    // F-HOME-1：Home 首屏核心入口（F-NAV-ACTION-OWNERSHIP-P0：寻找对手 = home-find-opponent）
+    for (const id of ['home-find-opponent', 'home-garage', 'home-rank', 'home-pass', 'home-chest-0', 'home-chest-3']) {
       const a = env.areas().find((x) => x.id === id);
       expect(a, `360×180 首页应有 ${id}`).toBeTruthy();
       expect(a!.x, `${id} x ≥ safeLeft`).toBeGreaterThanOrEqual(INSETS.left);
@@ -248,12 +248,16 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
       expect(a!.y + a!.h, `${id} 底缘 ≤ safeBottom`).toBeLessThanOrEqual(180 - INSETS.bottom + 0.5);
     }
     // 单底部条结构（F-HOME-IA-R1）：主 CTA 与辅助入口同处底部主条、水平不重叠（操作组完整）
-    const cta = env.areas().find((x) => x.id === 'cta-find')!;
+    const cta = env.areas().find((x) => x.id === 'home-find-opponent')!;
     const assist = env.areas().find((x) => x.id === 'home-garage')!;
     expect(assist.x + assist.w, '车库右缘 ≤ 寻找对手左缘（水平不重叠）').toBeLessThanOrEqual(cta.x + 0.5);
-    // 配置页（360×180 极限屏）同样全在 safe 内
+    // 配置页（360×180 极限屏）同样全在 safe 内（F-NAV-ACTION-OWNERSHIP-P0：配置页无寻找对手）
     click(env, 'home-garage');
-    for (const id of ['entry:body', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {
+    expect(
+      env.areas().some((x) => x.id === 'cta-find' || x.id === 'home-find-opponent'),
+      '配置页无寻找对手',
+    ).toBe(false);
+    for (const id of ['entry:body', 'nav:home', 'nav:backpack', 'nav:more']) {
       const a = env.areas().find((x) => x.id === id);
       expect(a, `360×180 配置页应有 ${id}`).toBeTruthy();
       expect(a!.x, `${id} x ≥ safeLeft`).toBeGreaterThanOrEqual(INSETS.left);

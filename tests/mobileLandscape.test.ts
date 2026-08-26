@@ -168,15 +168,16 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     bindPlatformCore(createWebCore());
   });
 
-  it('验收1/2｜Garage 首屏：2×2 主分类 + 主 CTA 在中央交互区 + 命中 ≥48px；无部件信息墙', () => {
+  it('验收1/2｜Garage 首屏：2×2 主分类在中央交互区 + 命中 ≥48px；无部件信息墙；无寻找对手（F-NAV-ACTION-OWNERSHIP-P0）', () => {
     for (const vp of VIEWPORTS.filter((v) => v.mobile)) {
       const env = makeHost(vp, LANDSCAPE_INSETS);
       env.host.render(richGarageState()); // 富库存+金币：merge 可点（非禁用态才注册命中）
       goGarage(env); // F-HOME-1：Home → 配置页（原 Garage 布局断言）
       // 主分类（2×2）：车身/移动/武器/辅助——不暴露 frontWheel/rearWheel/武器位一级入口
       // F-LOBBY-GARAGE-DEMO-R1：轮子+驱动归入「移动」；功能件按类别拆「武器」/「辅助」
-      // F-META-2：Garage 职责纯化——首屏无合成（合成在 Backpack），只 2×2 主分类 + CTA
-      const ids = ['cta-find', 'entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets'];
+      // F-META-2：Garage 职责纯化——首屏无合成（合成在 Backpack），只 2×2 主分类
+      // F-NAV-ACTION-OWNERSHIP-P0：配置页不再含 cta-find（寻找对手只属首页）
+      const ids = ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets'];
       for (const id of ids) {
         const a = env.host.getHitAreasForTest().find((x) => x.id === id);
         expect(a, `${vp.w}×${vp.h} 应有 ${id}`).toBeTruthy();
@@ -206,11 +207,12 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets']) {
         expect(entries, `${vp.w}×${vp.h} 应含一级入口 ${id}`).toContain(id);
       }
-      // 「寻找对手」唯一最大主按钮：高 ≥52、距 safe bottom ≥16（Garage 无合成入口可比较）
-      const cta = env.host.getHitAreasForTest().find((x) => x.id === 'cta-find')!;
+      // F-NAV-ACTION-OWNERSHIP-P0：配置页无寻找对手（旧 Garage CTA 契约已删除）
+      expect(
+        env.host.getHitAreasForTest().some((x) => x.id === 'cta-find' || x.id === 'home-find-opponent'),
+        `${vp.w}×${vp.h} 配置页无寻找对手`,
+      ).toBe(false);
       expect(env.host.getHitAreasForTest().some((x) => x.id === 'merge'), 'Garage 首屏无合成入口').toBe(false);
-      expect(cta.h, 'CTA 高 ≥52').toBeGreaterThanOrEqual(52);
-      expect(vp.h - LANDSCAPE_INSETS.bottom - (cta.y + cta.h), 'CTA 距 safe bottom ≥16').toBeGreaterThanOrEqual(16);
     }
   });
 
@@ -272,22 +274,21 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     // runtime 选完即收起 → 回到入口行
     env.host.render(richGarageState());
     expect(areas(env, 'entry:').length).toBeGreaterThan(0);
-    // 找对手
-    const cta = env.host.getHitAreasForTest().find((a) => a.id === 'cta-find')!;
-    env.pointer(cta.x + cta.w / 2, cta.y + cta.h / 2);
-    expect(env.fired['find']).toHaveLength(1);
+    // F-NAV-ACTION-OWNERSHIP-P0：配置页无寻找对手（旧「Garage 点 cta-find 匹配」契约已删除）
+    expect(
+      env.host.getHitAreasForTest().some((a) => a.id === 'cta-find' || a.id === 'home-find-opponent'),
+      '配置页无寻找对手',
+    ).toBe(false);
   });
 
   it('验收7｜1280×720 Desktop 不退化（Canvas 逻辑布局保持原值）', () => {
     const env = makeHost({ w: 1280, h: 720 });
     env.host.render(garageState());
-    const cta = env.host.getHitAreasForTest().find((a) => a.id === 'cta-find');
-    expect(cta).toBeTruthy();
-    // 旧 Desktop 布局：CTA 位于 1280×720 逻辑底部（y=662, h=44）——不变
-    expect(cta!.x).toBe(1280 - 24 - 190);
-    expect(cta!.y).toBe(720 - 46 - 12);
-    expect(cta!.w).toBe(190);
-    expect(cta!.h).toBe(44);
+    // F-NAV-ACTION-OWNERSHIP-P0：Desktop 装配页也无寻找对手（旧 Desktop CTA 布局契约删除）
+    expect(
+      env.host.getHitAreasForTest().some((a) => a.id === 'cta-find' || a.id === 'home-find-opponent'),
+      'Desktop 装配页无寻找对手',
+    ).toBe(false);
     const chip = env.host.getHitAreasForTest().find((a) => a.id === 'chip:body');
     expect(chip!.h).toBe(50); // 旧 chip 高 50 逻辑
   });
@@ -345,13 +346,12 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     expect(areas(env, 'slot:drive').length, '一级不暴露驱动细项').toBe(0);
     expect(areas(env, 'weapon-slot:').length, '一级不暴露武器位细项').toBe(0);
 
-    // 验收（必改5 + 验收「第一主动作始终是寻找对手」）：CTA 始终是首页/车库唯一主按钮，
-    // 且车库内所有 entry 为二级配置入口，不抢主操作视觉（CTA 宽 ≥ 任意单个 entry 宽）
-    const cta = env.host.getHitAreasForTest().find((a) => a.id === 'cta-find')!;
-    expect(cta, '车库有寻找对手主按钮').toBeTruthy();
-    for (const e of firstLayer) {
-      expect(cta.w, `CTA 强于配置入口 ${e.id}`).toBeGreaterThanOrEqual(e.w);
-    }
+    // F-NAV-ACTION-OWNERSHIP-P0：车库页无寻找对手主按钮（旧「CTA 始终是首页/车库唯一主按钮」
+    // 契约已删除——CTA 只属首页；配置页 entry 为唯一配置操作，无 CTA 抢占主操作）
+    expect(
+      env.host.getHitAreasForTest().some((a) => a.id === 'cta-find' || a.id === 'home-find-opponent'),
+      '车库无寻找对手',
+    ).toBe(false);
 
     // 验收（验收「3 次点击以内可以更换一件武器并看到车辆变化」）：
     // 点「武器」→ 点一个武器位 → 点一个选项（pick 派发即视为换装）。共 3 击。
@@ -436,13 +436,14 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
   it('验收6｜横屏 resize 后布局即时更新', () => {
     const env = makeHost({ w: 844, h: 390 });
     env.host.render(garageState());
-    const cta1 = env.host.getHitAreasForTest().find((a) => a.id === 'cta-find')!;
+    // F-NAV-ACTION-OWNERSHIP-P0：首页寻找对手入口 = home-find-opponent
+    const cta1 = env.host.getHitAreasForTest().find((a) => a.id === 'home-find-opponent')!;
     expect(cta1.y + cta1.h).toBeLessThanOrEqual(390);
     // resize → 932×430
     env.canvas.width = 932;
     env.canvas.height = 430;
     env.host.render(garageState());
-    const cta2 = env.host.getHitAreasForTest().find((a) => a.id === 'cta-find')!;
+    const cta2 = env.host.getHitAreasForTest().find((a) => a.id === 'home-find-opponent')!;
     expect(cta2.y + cta2.h).toBeLessThanOrEqual(430);
     expect(cta2.x + cta2.w).toBeLessThanOrEqual(932);
     expect(cta2.h).toBeGreaterThanOrEqual(40);

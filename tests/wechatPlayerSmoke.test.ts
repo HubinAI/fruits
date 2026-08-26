@@ -67,12 +67,14 @@ function makeFakeWx() {
   let createCount = 0;
   // F-WX-P0：第一次 createCanvas = 唯一上屏 canvas（screenCanvas，记录 drawImage）；
   // 后续 createCanvas = offscreen（uiCanvas），不得假设自动叠层。
-  const screenCanvas = makeStubCanvas(750, 1334, drawImages);
-  const uiCanvas = makeStubCanvas(750, 1334);
+  // F-NAV-ACTION-OWNERSHIP-P0：fake 改手机横屏（game.json deviceOrientation: landscape）——
+  // 逻辑 844×390（dpr=2 → 物理 1688×780）；竖屏下无正式首页，无法验收 home-find-opponent 触控链。
+  const screenCanvas = makeStubCanvas(1688, 780, drawImages);
+  const uiCanvas = makeStubCanvas(1688, 780);
   const wx = {
     // F-WX-P0-INPUT：真实微信坐标语义——windowWidth/Height 是逻辑 px（= canvas.width/pixelRatio）。
-    // fake canvas 750×1334 物理（dpr=2）→ 逻辑 375×667；保持与 WechatInput 归一化（比例=1）一致。
-    getSystemInfoSync: () => ({ pixelRatio: 2, windowWidth: 375, windowHeight: 667 }),
+    // fake canvas 1688×780 物理（dpr=2）→ 逻辑 844×390 横屏；保持与 WechatInput 归一化（比例=1）一致。
+    getSystemInfoSync: () => ({ pixelRatio: 2, windowWidth: 844, windowHeight: 390 }),
     createCanvas: () => {
       createCount++;
       return createCount === 1 ? screenCanvas : uiCanvas;
@@ -126,10 +128,15 @@ function driveFrame(fake: ReturnType<typeof makeFakeWx>, now: number): void {
   if (cb) cb(now);
 }
 
-/** CanvasHost 布局坐标 → 微信触摸输入坐标（逻辑 px；与 mountCanvas 的 cssW=canvas/dpr 同源） */
+/**
+ * CanvasHost 布局坐标 → 微信触摸输入坐标（逻辑 px；与 mountCanvas 的 cssW=canvas/dpr 同源）。
+ * F-NAV-ACTION-OWNERSHIP-P0：Mobile 横屏布局（逻辑宽 < 1280）host scale=1/ox=0，布局坐标
+ * 即逻辑坐标（WechatInput 归一化比例=1 直通）——原样透传；仅 Desktop fit（1280×720 系）换算。
+ */
 function toPhysical(canvas: HTMLCanvasElement, dpr: number, lx: number, ly: number): { x: number; y: number } {
   const w = Math.max(1, canvas.width / dpr);
   const h = Math.max(1, canvas.height / dpr);
+  if (w < 1280) return { x: lx, y: ly };
   const scale = Math.min(w / 1280, h / 720);
   const ox = (w - 1280 * scale) / 2;
   const oy = (h - 720 * scale) / 2;
@@ -176,10 +183,10 @@ describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
     expect(fake.store.has(BUILD_KEY)).toBe(true); // 存档落微信 storage
     expect((globalThis as any).localStorage).toBeUndefined(); // 无 Web fallback（验收 6）
 
-    // —— 触摸输入经 Platform Input Adapter：点「寻找对手」CTA ——
+    // —— 触摸输入经 Platform Input Adapter：点首页「寻找对手」CTA ——
     const hitAreas = mod.uiHost.getHitAreasForTest();
-    const cta = hitAreas.find((a) => a.id === 'cta-find');
-    expect(cta).toBeDefined(); // Garage Dock CTA 已注册命中区
+    const cta = hitAreas.find((a) => a.id === 'home-find-opponent');
+    expect(cta).toBeDefined(); // 正式首页 CTA 已注册命中区（F-NAV-ACTION-OWNERSHIP-P0：唯一入口）
     const p = toPhysical(fake.canvas, 2, cta!.x + cta!.w / 2, cta!.y + cta!.h / 2); // fake wx pixelRatio=2
     fake.touch()!({ touches: [{ clientX: p.x, clientY: p.y }] });
     expect(runtime.playerPhase).toBe('matching'); // 触摸 → Action → Gameplay command 全链路

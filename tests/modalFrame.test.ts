@@ -129,11 +129,11 @@ describe('F-META-4｜通用 Modal / Popup Foundation', () => {
     expect(env.areas().some((a) => a.id === 'modal-primary'), '主按钮出现').toBe(true);
     expect(env.areas().some((a) => a.id === 'modal-secondary'), '次按钮出现').toBe(true);
     expect(env.areas().some((a) => a.id === 'modal-veil'), '遮罩出现').toBe(true);
-    // 底层按钮仍注册（渲染层在）但不可命中——点 home-garage / cta-find 中心 → 无 action 派发
+    // 底层按钮仍注册（渲染层在）但不可命中——点 home-garage / home-find-opponent 中心 → 无 action 派发
     const entry = env.areas().find((a) => a.id === 'home-garage');
     expect(entry, '底层按钮仍绘制').toBeTruthy();
     if (entry) env.pointer(entry.x + entry.w / 2, entry.y + entry.h / 2);
-    const cta = env.areas().find((a) => a.id === 'cta-find');
+    const cta = env.areas().find((a) => a.id === 'home-find-opponent');
     if (cta) env.pointer(cta.x + cta.w / 2, cta.y + cta.h / 2);
     const dispatched = Object.keys(env.fired).filter((k) => env.fired[k] > 0);
     expect(dispatched, '底层点击被遮罩拦截（无 action 派发）').toHaveLength(0);

@@ -172,14 +172,13 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
         env.host.render(garageState());
         goGarage(env, vp, dpr); // F-HOME-1：Home → 配置页（原 Garage 面板断言）
         // F-META-2：Garage 无合成入口（合成在 Backpack）；本循环只验证 garage 页交互
-        for (const id of ['cta-find', 'entry:body', 'entry-move', 'entry-weapons']) {
+        // F-NAV-ACTION-OWNERSHIP-P0：配置页无 cta-find（寻找对手只属首页——下方独立验证）
+        for (const id of ['entry:body', 'entry-move', 'entry-weapons']) {
           const area = env.areas().find((a) => a.id === id);
           expect(area, `${vp.w}×${vp.h} DPR=${dpr} 应有 ${id}`).toBeTruthy();
           const raw = rawFor(area!, vp, dpr, false); // raw = window logical px
           env.fireTouch(raw.rawX, raw.rawY);
-          if (id === 'cta-find') {
-            expect(env.fired['find'], `DPR=${dpr} ${id} 应派发 find`).toHaveLength(1);
-          } else if (id === 'entry-move') {
+          if (id === 'entry-move') {
             // 移动一级 → 面板内前轮/后轮/驱动二级（首屏不暴露 frontWheel/rearWheel 入口）
             expect(env.areas().some((a) => a.id === 'wheel-side:front')).toBe(true);
             const front = env.areas().find((a) => a.id === 'wheel-side:front')!;
@@ -207,11 +206,12 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
   }
 
   for (const dpr of DPRS) {
-    it(`DPR=${dpr}：raw 物理坐标输入（windowWidth 同物理坐标系）→ 归一化到逻辑 → 命中 cta-find`, () => {
+    it(`DPR=${dpr}：raw 物理坐标输入（windowWidth 同物理坐标系）→ 归一化到逻辑 → 命中 home-find-opponent`, () => {
       const vp = { w: 844, h: 390 };
       const env = setup(vp, dpr, { left: 0, right: 0, top: 0, bottom: 0 }, true); // sysIsPhysical
       env.host.render(garageState());
-      const area = env.areas().find((a) => a.id === 'cta-find')!;
+      // F-NAV-ACTION-OWNERSHIP-P0：寻找对手只属首页（home-find-opponent）
+      const area = env.areas().find((a) => a.id === 'home-find-opponent')!;
       const raw = rawFor(area, vp, dpr, true); // raw = 物理 px（windowWidth 同物理坐标系）
       env.fireTouch(raw.rawX, raw.rawY);
       expect(env.fired['find'], `DPR=${dpr} raw physical 应命中`).toHaveLength(1);
@@ -223,44 +223,56 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
     const insets: SafeInsets = { left: 44, right: 44, top: 0, bottom: 12 };
     const env = setup(vp, 2, insets);
     env.host.render(garageState());
-    goGarage(env, vp, 2); // F-HOME-1：Home → 配置页
-    for (const id of ['cta-find', 'entry:body']) {
-      const area = env.areas().find((a) => a.id === id)!;
-      expect(area.x, `${id} 起点 ≥ insL`).toBeGreaterThanOrEqual(insets.left);
-      expect(area.x + area.w, `${id} 右缘 ≤ W-insR`).toBeLessThanOrEqual(vp.w - insets.right);
-      expect(area.y + area.h, `${id} 底缘 ≤ H-insB`).toBeLessThanOrEqual(vp.h - insets.bottom);
-      const raw = rawFor(area, vp, 2, false);
-      env.fireTouch(raw.rawX, raw.rawY);
-    }
+    // 首页：home-find-opponent 在 safe 内且命中
+    const find = env.areas().find((a) => a.id === 'home-find-opponent')!;
+    expect(find.x, 'find 起点 ≥ insL').toBeGreaterThanOrEqual(insets.left);
+    expect(find.x + find.w, 'find 右缘 ≤ W-insR').toBeLessThanOrEqual(vp.w - insets.right);
+    expect(find.y + find.h, 'find 底缘 ≤ H-insB').toBeLessThanOrEqual(vp.h - insets.bottom);
+    const rawF = rawFor(find, vp, 2, false);
+    env.fireTouch(rawF.rawX, rawF.rawY);
     expect(env.fired['find']).toHaveLength(1);
+    // 配置页：entry:body 在 safe 内且命中（无 cta-find）
+    goGarage(env, vp, 2);
+    expect(
+      env.areas().some((a) => a.id === 'cta-find' || a.id === 'home-find-opponent'),
+      '配置页无寻找对手',
+    ).toBe(false);
+    const entry = env.areas().find((a) => a.id === 'entry:body')!;
+    expect(entry.x, 'entry 起点 ≥ insL').toBeGreaterThanOrEqual(insets.left);
+    expect(entry.x + entry.w, 'entry 右缘 ≤ W-insR').toBeLessThanOrEqual(vp.w - insets.right);
+    expect(entry.y + entry.h, 'entry 底缘 ≤ H-insB').toBeLessThanOrEqual(vp.h - insets.bottom);
+    const rawE = rawFor(entry, vp, 2, false);
+    env.fireTouch(rawE.rawX, rawE.rawY);
     expect(env.fired['toggle']).toContain('body');
   });
 
-  it('Desktop profile（1280×720）：screenToLayoutPoint 统一转换后命中', () => {
+  it('Desktop profile（1280×720）：screenToLayoutPoint 统一转换后命中（配置入口 chip:body；Desktop 无首页 CTA）', () => {
     const vp = { w: 1280, h: 720 };
     const env = setup(vp, 1);
     env.host.render(garageState());
-    const area = env.areas().find((a) => a.id === 'cta-find')!;
+    // F-NAV-ACTION-OWNERSHIP-P0：Desktop 装配页无寻找对手
+    expect(env.areas().some((a) => a.id === 'cta-find' || a.id === 'home-find-opponent'), 'Desktop 无寻找对手').toBe(false);
+    const area = env.areas().find((a) => a.id === 'chip:body')!;
     const raw = rawFor(area, vp, 1, false);
     env.fireTouch(raw.rawX, raw.rawY);
-    expect(env.fired['find']).toHaveLength(1);
+    expect(env.fired['toggle']).toContain('body');
   });
 
-  it('Desktop profile（1600×900，scale≠1）：fit 布局下仍命中同一视觉中心', () => {
+  it('Desktop profile（1600×900，scale≠1）：fit 布局下仍命中同一视觉中心（chip:body）', () => {
     const vp = { w: 1600, h: 900 };
     const env = setup(vp, 1);
     env.host.render(garageState());
-    const area = env.areas().find((a) => a.id === 'cta-find')!;
+    const area = env.areas().find((a) => a.id === 'chip:body')!;
     const raw = rawFor(area, vp, 1, false);
     env.fireTouch(raw.rawX, raw.rawY);
-    expect(env.fired['find']).toHaveLength(1);
+    expect(env.fired['toggle']).toContain('body');
   });
 
   it('一次触摸 → 一次 action：重复 fireTouch 同一位置不重复累积（事件生命周期）', () => {
     const vp = { w: 844, h: 390 };
     const env = setup(vp, 2);
     env.host.render(garageState());
-    const area = env.areas().find((a) => a.id === 'cta-find')!;
+    const area = env.areas().find((a) => a.id === 'home-find-opponent')!;
     const raw = rawFor(area, vp, 2, false);
     env.fireTouch(raw.rawX, raw.rawY);
     env.fireTouch(raw.rawX, raw.rawY);

@@ -119,8 +119,9 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(garageState());
     const ids = env.areas().map((a) => a.id);
-    // 核心模块入口
-    expect(ids, '寻找对手主按钮').toContain('cta-find');
+    // 核心模块入口（F-NAV-ACTION-OWNERSHIP-P0：唯一首页入口 id = home-find-opponent）
+    expect(ids, '寻找对手主按钮').toContain('home-find-opponent');
+    expect(ids, '首页无旧 cta-find').not.toContain('cta-find');
     for (const id of ['home-garage', 'home-rank', 'home-pass']) {
       expect(ids, `辅助入口 ${id}`).toContain(id);
     }
@@ -132,7 +133,7 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
     expect(ids.some((id) => id.startsWith('entry:')), '首页无配置入口').toBe(false);
     expect(ids.some((id) => id === 'merge' || id.startsWith('bfilter:') || id.startsWith('more:')), '首页无背包/合成/更多内容').toBe(false);
     // 「寻找对手」是首页最强视觉：全宽 primary（宽 ≥ 全部辅助入口之和）
-    const cta = env.areas().find((a) => a.id === 'cta-find')!;
+    const cta = env.areas().find((a) => a.id === 'home-find-opponent')!;
     const assist = env.areas().find((a) => a.id === 'home-garage')!;
     const rank = env.areas().find((a) => a.id === 'home-rank')!;
     const pass = env.areas().find((a) => a.id === 'home-pass')!;
@@ -147,12 +148,14 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
   it('验收2｜首页只回答核心动作：点「车库」进配置页，「‹ 首页」返回；排行榜/战令/宝箱弹「功能开发中」', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(garageState());
-    // 车库 → 配置页（原 Garage 布局回归：4 配置 + CTA + 顶栏背包/更多）
+    // 车库 → 配置页（原 Garage 布局回归：4 配置入口 + 顶栏背包/更多；F-NAV-ACTION-OWNERSHIP-P0：
+    // 配置页不再含 cta-find——寻找对手只属首页）
     click(env, 'home-garage');
     const ids = env.areas().map((a) => a.id);
-    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {
+    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets', 'nav:home', 'nav:backpack', 'nav:more']) {
       expect(ids, `配置页应含 ${id}`).toContain(id);
     }
+    expect(ids.some((id) => id === 'cta-find' || id === 'home-find-opponent'), '配置页无寻找对手').toBe(false);
     // 「‹ 首页」返回 Home
     click(env, 'nav:home');
     expect(env.areas().some((a) => a.id === 'home-garage'), '返回首页').toBe(true);

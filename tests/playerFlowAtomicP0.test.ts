@@ -156,8 +156,8 @@ describe('F-PLAYER-FLOW-ATOMIC-P0｜首页匹配原子流', () => {
       // 初始 Home
       expect(env.runtime.playerPhase).toBe('garage');
       env.battle.throwOnPreview = true;
-      // 真实输入链触发 cta-find（异常不被吞——向外抛）
-      const cta = env.host.getHitAreasForTest().find((a) => a.id === 'cta-find')!;
+      // 真实输入链触发 home-find-opponent（异常不被吞——向外抛）
+      const cta = env.host.getHitAreasForTest().find((a) => a.id === 'home-find-opponent')!;
       expect(cta, '首页 CTA 已注册').toBeTruthy();
       expect(() => dispatchTap(env.canvas, 'pointerdown', cta.x + cta.w / 2, cta.y + cta.h / 2)).toThrow();
       // 状态保持 Home（playerPhase 未半提交成 matching）
@@ -167,7 +167,7 @@ describe('F-PLAYER-FLOW-ATOMIC-P0｜首页匹配原子流', () => {
 
     it('B3. 成功原子性：一次点击 → 完整 Matching（A+B 已加载 + pushUI）', () => {
       const env = makeRealChain({ w: 844, h: 390 }, new FakeAtomicBattleHost());
-      const cta = env.host.getHitAreasForTest().find((a) => a.id === 'cta-find')!;
+      const cta = env.host.getHitAreasForTest().find((a) => a.id === 'home-find-opponent')!;
       dispatchTap(env.canvas, 'pointerdown', cta.x + cta.w / 2, cta.y + cta.h / 2);
       // Runtime 进入 matching
       expect(env.runtime.playerPhase, '进入 matching').toBe('matching');
@@ -176,7 +176,7 @@ describe('F-PLAYER-FLOW-ATOMIC-P0｜首页匹配原子流', () => {
       expect(env.battle.loadedPreview!.a, 'A 已加载').toBeTruthy();
       expect(env.battle.loadedPreview!.b, 'B 已加载').toBeTruthy();
       // Host UI 已推入 matching 状态 + A/B rect 非空（扫描框用 B 真实 rect）
-      expect(env.host.getHitAreasForTest().some((a) => a.id === 'cta-find'), 'Home CTA 已隐藏（进入 Matching）').toBe(false);
+      expect(env.host.getHitAreasForTest().some((a) => a.id === 'home-find-opponent'), 'Home CTA 已隐藏（进入 Matching）').toBe(false);
     });
   });
 
@@ -207,9 +207,9 @@ describe('F-PLAYER-FLOW-ATOMIC-P0｜首页匹配原子流', () => {
   });
 
   describe('D｜真实输入链：WebInput → Canvas hitArea → dispatch → Runtime → Matching', () => {
-    it('D1. 真实 pointer 事件命中 cta-find → Runtime 进入 Matching，onFindOpponent 仅一次', () => {
+    it('D1. 真实 pointer 事件命中 home-find-opponent → Runtime 进入 Matching，onFindOpponent 仅一次', () => {
       const env = makeRealChain({ w: 844, h: 390 }, new FakeAtomicBattleHost());
-      const cta = env.host.getHitAreasForTest().find((a) => a.id === 'cta-find')!;
+      const cta = env.host.getHitAreasForTest().find((a) => a.id === 'home-find-opponent')!;
       // 真实 WebInput listener（canvas.__listeners.pointerdown = WebInput 绑定的 onDown）
       expect(canvasListens(env.canvas, 'pointerdown'), 'WebInput 已绑定 pointerdown').toBe(true);
       // 一次物理点击

@@ -466,8 +466,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.draw();
       return;
     }
-    if (id.startsWith('home-')) {
+    if (id.startsWith('home-') && id !== 'home-find-opponent') {
       // F-HOME-1：正式首页入口——车库进配置页；排行榜/战令/宝箱槽为占位（「功能开发中」，无假数据页）
+      // F-NAV-ACTION-OWNERSHIP-P0：home-find-opponent 不在此处理——落到下方 switch case
+      // （含「仅正式首页」页面上下文守卫），避免被 home- 通用块吞掉而无法开战。
       // F-HOME-3：点击车辆 → 随机显示 1 条气泡 tips（每次点击重新随机；轻量，非 Modal）
       if (id === 'home-garage') {
         this.metaPage = 'garage';
@@ -671,8 +673,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       case 'modal-veil':
         // 遮罩命中：拦截底层点击（无操作）
         break;
+      case 'home-find-opponent':
       case 'cta-find':
-        this.actions?.onFindOpponent();
+        // F-NAV-ACTION-OWNERSHIP-P0：「寻找对手」只能由正式首页拥有（metaPage=home +
+        // playerPhase=garage）。旧 'cta-find' id 仅作兼容，但必须通过页面上下文守卫——
+        // Garage/Backpack/More/Matching/Battle/Result 即使收到旧 id 或残留坐标也绝不进入匹配。
+        if (this.metaPage === 'home' && this.lastState?.playerPhase === 'garage') {
+          this.actions?.onFindOpponent();
+        }
         break;
       case 'merge':
         // F-META-UX2：Mobile 合成用 Modal 展示规则（5×1★+金币+随机2★），确认才 onMerge；
@@ -1106,15 +1114,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       !canMergeParts ? '副本不足' : !canAfford ? `金币不足（${p.coin}/${MERGE_COST_COIN}）` : '合成',
       { disabled: !(canMergeParts && canAfford) },
     );
-
-    // CTA：寻找对手（主）
-    if (!state.draftValid) {
-      this.text(state.blockReason ?? '', BASE_W - 24 - 190, bottomY - 20, 12, C.red, 'right');
-    }
-    this.button(BASE_W - 24 - 190, bottomY - 12, 190, 44, 'cta-find', '寻找对手', {
-      primary: true,
-      disabled: !state.draftValid,
-    });
+    // F-NAV-ACTION-OWNERSHIP-P0：Backpack 只承载查看库存与合成——删除「寻找对手」CTA
+    //（不替换成新大按钮/无关入口；空间留白，合成面板为 Backpack 唯一操作）
   }
   /**
    * F-WX-UI-1：Mobile-first Garage——中央三段式（信息架构重做，非 PC 压缩）。
@@ -1258,7 +1259,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
 
     // ③ 下方中央：寻找对手主按钮（中等宽悬浮，不横贯整屏）
-    this.button(L.ctaRect.x, L.ctaRect.y, L.ctaRect.w, L.ctaRect.h, 'cta-find', state.draftValid ? '寻找对手' : '配置不合法', {
+    // F-NAV-ACTION-OWNERSHIP-P0：唯一正式首页入口 id = home-find-opponent
+    // （页面语义明确；不再与 Garage/Backpack 复用 cta-find）
+    this.button(L.ctaRect.x, L.ctaRect.y, L.ctaRect.w, L.ctaRect.h, 'home-find-opponent', state.draftValid ? '寻找对手' : '配置不合法', {
       primary: true,
       disabled: !state.draftValid,
     });
@@ -1284,22 +1287,16 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.hit(id, r.x, r.y, r.w, r.h);
   }
 
-  /** F-META-1：garage MetaPage——车辆展示（renderer 画）+ 右侧装配面板 + 主 CTA */
+  /** F-META-1：garage MetaPage——车辆展示（renderer 画）+ 右侧装配面板。
+   *  F-NAV-ACTION-OWNERSHIP-P0：Garage 只调整车辆配置并返回首页——不再绘制
+   *  「寻找对手」主 CTA（ctaRect 空间留白，不替换成新大按钮/无关入口；
+   *  配置面板独占内容区）。返回能力由顶部「‹ 首页」nav 提供（drawMobileTopBar）。 */
   private drawGarageMetaPage(state: PlayerUIState, draft: BuildDraft, layout: MobileGarageLayout): void {
-    const { panelRect, ctaRect } = layout;
+    const { panelRect } = layout;
 
-    // 主 CTA（唯一最大）+ 首轮引导气泡 + 非法原因
-    this.button(ctaRect.x, ctaRect.y, ctaRect.w, ctaRect.h, 'cta-find', state.draftValid ? '寻找对手' : '配置不合法', {
-      primary: true,
-      disabled: !state.draftValid,
-    });
+    // 非法原因仍在面板上方提示（不占 CTA 位）
     if (!state.draftValid && state.blockReason) {
-      this.text(state.blockReason, ctaRect.x, ctaRect.y - 8, 14, C.red, 'right', 600);
-    } else if (state.onboarding === 'pending') {
-      // 首轮引导：CTA 上方局部气泡（不横贯屏幕）
-      const bw = Math.min(240, ctaRect.w - 20);
-      this.rect(ctaRect.x + ctaRect.w - bw - 10, ctaRect.y - 30, bw, 22, C.onboardBg, C.onboardBorder, 1);
-      this.text('准备好了，去找个对手', ctaRect.x + ctaRect.w - 16, ctaRect.y - 17, 14, C.onboardText, 'right');
+      this.text(state.blockReason, panelRect.x + panelRect.w / 2, panelRect.y - 8, 13, C.red, 'center', 600);
     }
 
     // 装配面板（右侧中央；绘制与 HitArea 均基于 panelRect；F-META-2：Garage 无合成，

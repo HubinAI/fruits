@@ -243,7 +243,9 @@ describe('F-META-3｜Backpack V1 + 合成整合', () => {
     env.host.render(state({ playerPhase: 'matching', battleState: 'editing' }));
     env.host.render(state());
     expect(env.areas().some((a) => a.id === 'home-garage'), '回 Garage 默认显示首页（F-HOME-1）').toBe(true);
-    expect(env.areas().some((a) => a.id === 'cta-find'), '回 Garage 显示 CTA').toBe(true);
+    // F-NAV-ACTION-OWNERSHIP-P0：回 Garage 后首页显示 home-find-opponent（唯一寻找对手入口）
+    expect(env.areas().some((a) => a.id === 'home-find-opponent'), '回 Garage 首页显示寻找对手').toBe(true);
+    expect(env.areas().some((a) => a.id === 'cta-find'), '无旧 cta-find').toBe(false);
     // 再进 Backpack → 分类复位为「全部」：cannon（weapon）重新可见（gadget 过滤不残留）
     goBackpack(env);
     expect(items(env), '分类复位后 cannon（weapon）可见').toContain('cannon');

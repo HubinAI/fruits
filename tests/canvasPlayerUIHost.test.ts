@@ -15,7 +15,7 @@ import { createWebCore } from '../src/platform/web';
 import { makeStarterDraft } from '../src/lab/buildEditorModel';
 import { registry } from '../src/core/content';
 import { getInventory } from '../src/core/partInventory';
-import type { PlayerUIState } from '../src/ui/playerUI';
+import type { PlayerUIState, PlayerUIActions } from '../src/ui/playerUI';
 
 function makeStubCtx(): CanvasRenderingContext2D {
   const handler = {
@@ -61,6 +61,45 @@ function garageState(over: Partial<PlayerUIState> = {}): PlayerUIState {
     rewardAdClaimed: false,
     readyOverlayVisible: false,
     ...over,
+  };
+}
+
+/**
+ * F-NAV-ACTION-OWNERSHIP-P0：正式首页（Mobile 横屏）验收环境——旧「Garage 点 cta-find」
+ * 契约已删除（Garage/Backpack/More 无寻找对手）；寻找对手只属首页，用真实横屏首页验收。
+ */
+function makeHomeEnv(vp: { w: number; h: number }): {
+  host: CanvasPlayerUIHost;
+  render: (over?: Partial<PlayerUIState>) => void;
+  click: (id: string) => void;
+  fired: Record<string, string[]>;
+} {
+  let captured: ((x: number, y: number) => void) | null = null;
+  const core = createWebCore();
+  bindPlatformCore({
+    ...core,
+    createViewport: () => ({
+      surface: () => ({ width: vp.w, height: vp.h, devicePixelRatio: 1, now: () => 0 }),
+      onResize: () => {},
+      safeInsets: () => ({ left: 0, right: 0, top: 0, bottom: 0 }),
+    }),
+    input: { bindClick: () => {}, bindPointer: (_t: EventTarget, h: (x: number, y: number) => void) => { captured = h; } },
+  } as Parameters<typeof bindPlatformCore>[0]);
+  const canvas = { getContext: () => makeStubCtx(), width: vp.w, height: vp.h, style: undefined } as unknown as HTMLCanvasElement;
+  const host = new CanvasPlayerUIHost(canvas);
+  host.mountCanvas();
+  const fired: Record<string, string[]> = {};
+  host.setActions({ onFindOpponent: () => void (fired['find'] = [...(fired['find'] ?? []), 'x']) } as unknown as PlayerUIActions);
+  return {
+    host,
+    render: (over: Partial<PlayerUIState> = {}) => void host.render({ ...garageState(), ...over }),
+    click: (id: string) => {
+      const a = host.getHitAreasForTest().find((x) => x.id === id);
+      expect(a, `应存在命中区 ${id}`).toBeTruthy();
+      expect(captured).toBeTruthy();
+      captured!(a!.x + a!.w / 2, a!.y + a!.h / 2);
+    },
+    fired,
   };
 }
 
@@ -121,10 +160,13 @@ describe('F-WX-4 CanvasPlayerUIHost', () => {
     capturedPointer!(a!.x + a!.w / 2, a!.y + a!.h / 2);
   }
 
-  it('Garage：点「寻找对手」CTA → onFindOpponent（输入经 bindPointer）', () => {
-    host.render(garageState());
-    click('cta-find');
-    expect(fired['find']).toHaveLength(1);
+  it('首页（Mobile 横屏）：点「寻找对手」home-find-opponent → onFindOpponent（输入经 bindPointer）', () => {
+    // F-NAV-ACTION-OWNERSHIP-P0：旧「Garage 点 cta-find」契约已删除（Garage/Backpack/More
+    // 无寻找对手）；寻找对手只属正式首页——用 Mobile 横屏首页环境验收
+    const env = makeHomeEnv({ w: 844, h: 390 });
+    env.render();
+    env.click('home-find-opponent');
+    expect(env.fired['find']).toHaveLength(1);
   });
 
   it('Garage：点 chip → onToggleGarageSlot(该槽位)', () => {
@@ -260,14 +302,12 @@ describe('F-WX-4 CanvasPlayerUIHost', () => {
 });
 
 describe('F-WX-5 CanvasPlayerUIHost mountCanvas（平台中立，无 DOM 容器）', () => {
-  let capturedPointer: ((x: number, y: number) => void) | null = null;
   let host: CanvasPlayerUIHost;
   let fired: Record<string, string[]> = {};
   /** 微信画布：物理像素 + 2D ctx + 无 style（无 DOM） */
   let wxCanvas: HTMLCanvasElement;
 
   beforeEach(() => {
-    capturedPointer = null;
     fired = {};
     const core = createWebCore();
     bindPlatformCore({
@@ -287,9 +327,7 @@ describe('F-WX-5 CanvasPlayerUIHost mountCanvas（平台中立，无 DOM 容器�
       }),
       input: {
         bindClick: () => {},
-        bindPointer: (_t: EventTarget, h: (x: number, y: number) => void) => {
-          capturedPointer = h;
-        },
+        bindPointer: () => {},
       },
     } as Parameters<typeof bindPlatformCore>[0]);
     wxCanvas = {
@@ -318,35 +356,22 @@ describe('F-WX-5 CanvasPlayerUIHost mountCanvas（平台中立，无 DOM 容器�
     bindPlatformCore(createWebCore());
   });
 
-  /** 物理像素坐标点击（逻辑坐标按 ensureSize 同源换算） */
-  function tapPhysical(id: string): void {
-    const areas = host.getHitAreasForTest();
-    const a = areas.find((x) => x.id === id);
-    expect(a, `应存在命中区 ${id}`).toBeTruthy();
-    expect(capturedPointer).toBeTruthy();
-    const w = Math.max(1, wxCanvas.width);
-    const h = Math.max(1, wxCanvas.height);
-    const scale = Math.min(w / 1280, h / 720);
-    const ox = (w - 1280 * scale) / 2;
-    const oy = (h - 720 * scale) / 2;
-    capturedPointer!(ox + (a!.x + a!.w / 2) * scale, oy + (a!.y + a!.h / 2) * scale);
-  }
-
-  it('750×1334：mountCanvas 渲染 + 物理坐标命中 CTA → onFindOpponent（验收 viewport）', () => {
-    host.render(garageState());
-    expect(() => host.render(garageState())).not.toThrow();
-    tapPhysical('cta-find');
-    expect(fired['find']).toHaveLength(1);
+  it('Mobile 横屏（mountCanvas）：物理坐标命中首页 home-find-opponent → onFindOpponent（验收 viewport）', () => {
+    // F-NAV-ACTION-OWNERSHIP-P0：微信输入验收从「Garage cta-find」改为「首页 home-find-opponent」
+    const env = makeHomeEnv({ w: 750, h: 390 });
+    env.render();
+    expect(() => env.render()).not.toThrow();
+    env.click('home-find-opponent');
+    expect(env.fired['find']).toHaveLength(1);
   });
 
-  it('828×1792（不同 viewport）：渲染 + 命中不随分辨率漂移（验收多 viewport）', () => {
-    wxCanvas.width = 828;
-    wxCanvas.height = 1792;
-    host.render(garageState());
-    expect(() => host.render(garageState({ playerPhase: 'matching' }))).not.toThrow();
-    host.render(garageState()); // 回到 Garage（matching 无 CTA 命中区）
-    tapPhysical('cta-find');
-    expect(fired['find']).toHaveLength(1);
+  it('不同 viewport（828×390）：渲染 + 命中不随分辨率漂移（验收多 viewport）', () => {
+    const env = makeHomeEnv({ w: 828, h: 390 });
+    env.render();
+    expect(() => env.render({ playerPhase: 'matching' })).not.toThrow();
+    env.render(); // 回到首页（matching 无 home-find-opponent 命中区）
+    env.click('home-find-opponent');
+    expect(env.fired['find']).toHaveLength(1);
   });
 
   it('无 style 的微信 canvas：战斗 HUD 渲染不抛（draw 内 style 守卫）', () => {

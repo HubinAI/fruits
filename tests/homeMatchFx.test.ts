@@ -114,8 +114,8 @@ describe('F-HOME-2｜寻找对手主交互', () => {
   it('1. 首页点击「寻找对手」直接匹配：派发 find、无前置确认 Modal、画面立即切换（不停留原地）', () => {
     const env = makeRecHost({ w: 420, h: 210 });
     env.host.render(garageState());
-    expect(env.host.getHitAreasForTest().some((a) => a.id === 'cta-find'), '首页有寻找对手主按钮').toBe(true);
-    click(env, 'cta-find');
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'home-find-opponent'), '首页有寻找对手主按钮').toBe(true);
+    click(env, 'home-find-opponent');
     expect(env.fired['find'], 'onFindOpponent 已派发（点击即匹配）').toBe(1);
     expect(env.host.getHitAreasForTest().some((a) => a.id === 'modal-veil'), '无前置确认 Modal').toBe(false);
     // 派发后 runtime 切 matching → Host 渲染 matching 画面（「正在寻找对手…」）
@@ -256,7 +256,7 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     expect(l.chestSlot(0).h, '宝箱槽可点高度').toBeGreaterThanOrEqual(20);
   });
 
-  it('F-HOME-5｜首页职责纯净：零组装操作残留——命中区全为 home-* / cta-find 白名单', () => {
+  it('F-HOME-5｜首页职责纯净：零组装操作残留——命中区全为 home-* / home-find-opponent 白名单', () => {
     const env = makeRecHost({ w: 420, h: 210 });
     env.host.render(garageState());
     const ids = env.host.getHitAreasForTest().map((a) => a.id);
@@ -268,16 +268,16 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     for (const b of banned) {
       expect(ids.some((id) => id.startsWith(b) || id.includes(b)), `首页无 ${b} 组装残留`).toBe(false);
     }
-    // 首页入口白名单：仅展示/开战/功能入口
+    // 首页入口白名单：仅展示/开战/功能入口（F-NAV-ACTION-OWNERSHIP-P0：唯一开战入口 id）
     for (const id of ids) {
-      expect(id === 'cta-find' || id.startsWith('home-'), `首页命中区 ${id} 属白名单`).toBe(true);
+      expect(id === 'home-find-opponent' || id.startsWith('home-'), `首页命中区 ${id} 属白名单`).toBe(true);
     }
     // 用户点击任意首页入口都不会进入组装操作（车辆 → tips；其余 → 占位页/配置入口/开战）
-    expect(ids.filter((id) => id === 'home-vehicle' || id === 'cta-find' || id.startsWith('home-')).length,
+    expect(ids.filter((id) => id === 'home-vehicle' || id === 'home-find-opponent' || id.startsWith('home-')).length,
       '首页仅 10 个核心入口（CTA+车辆+3辅助+个人+4宝箱槽）').toBe(10);
   });
 
-  it('F-HOME-5｜车库职责：组装与调整收归独立车库页——4 配置入口 + CTA + 背包/更多次级；首页只留入口', () => {
+  it('F-HOME-5｜车库职责：组装与调整收归独立车库页——4 配置入口 + 返回首页；无寻找对手；首页只留入口', () => {
     const env = makeRecHost({ w: 420, h: 210 });
     env.host.render(garageState());
     // 首页只有「车库」入口按钮
@@ -287,9 +287,11 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     // 点车库 → 独立组装界面（车身/移动/武器/辅助 4 主分类全部在此）
     click(env, 'home-garage');
     const ids = env.host.getHitAreasForTest().map((a) => a.id);
-    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets', 'cta-find', 'nav:home', 'nav:backpack', 'nav:more']) {
+    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets', 'nav:home', 'nav:backpack', 'nav:more']) {
       expect(ids, `车库页应含 ${id}`).toContain(id);
     }
+    // F-NAV-ACTION-OWNERSHIP-P0：车库页无寻找对手（cta-find/home-find-opponent 均不注册）
+    expect(ids.some((id) => id === 'cta-find' || id === 'home-find-opponent'), '车库页无寻找对手').toBe(false);
     // 车库无合成（合成在背包页）
     expect(ids.some((id) => id === 'merge'), '车库页无合成').toBe(false);
     // 返回首页 → 仍无组装残留

@@ -192,7 +192,7 @@ describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
     expect(host2.getPreviewFramingRect()!.w).toBeGreaterThan(got!.w);
   });
 
-  it('验收2｜HitArea 与布局同源：cta-find rect == layout.ctaRect、入口在 panelRect 内', () => {
+  it('验收2｜F-NAV-ACTION-OWNERSHIP-P0：HitArea 与布局同源——配置页无寻找对手命中区（CTA 只属首页）；2×2 入口在 panelRect 内', () => {
     const insets: SafeInsets = { left: 44, right: 20, top: 12, bottom: 16 };
     const host = makeHost({ w: 844, h: 390 }, insets);
     host.render(garageState());
@@ -201,12 +201,12 @@ describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
     host.pointerForTest?.(homeBtn.x + homeBtn.w / 2, homeBtn.y + homeBtn.h / 2);
     const l = computeMobileGarageLayout({ w: 844, h: 390 }, insets);
     const areas = host.getHitAreasForTest();
-    const cta = areas.find((a) => a.id === 'cta-find');
-    expect(cta, 'cta-find 命中区存在').toBeTruthy();
-    expect(cta!.x, 'cta-find x == layout.ctaRect.x').toBe(l.ctaRect.x);
-    expect(cta!.y, 'cta-find y == layout.ctaRect.y').toBe(l.ctaRect.y);
-    expect(cta!.w, 'cta-find w == layout.ctaRect.w').toBe(l.ctaRect.w);
-    expect(cta!.h, 'cta-find h == layout.ctaRect.h').toBe(l.ctaRect.h);
+    // F-NAV-ACTION-OWNERSHIP-P0：配置页只调整车辆配置并返回首页——无寻找对手命中区
+    //（cta-find 已从 Garage/Backpack 删除；home-find-opponent 只注册于首页）
+    expect(
+      areas.some((a) => a.id === 'cta-find' || a.id === 'home-find-opponent'),
+      '配置页无寻找对手命中区',
+    ).toBe(false);
     // 2×2 主分类入口全部落在 panelRect 内（绘制与命中同源）
     for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets']) {
       const a = areas.find((x) => x.id === id);
