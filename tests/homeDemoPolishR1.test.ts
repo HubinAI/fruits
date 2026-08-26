@@ -5,7 +5,8 @@
  *   framingRect mode='home') + vehicleDiag（envelope 屏幕矩形）验证：
  *   - 普通初始车辆可见宽 ∈ [38%,52%] 安全宽（5 视口矩阵）；
  *   - 可见 envelope 中心偏差 ≤ 取景区宽 5%；
- *   - 贴地：groundY 屏幕位置 = 取景区底 - 12 - baseY（≈18px）；
+ *   - 视觉中心：车辆 envelope 中心 ≈ 取景区中心（F-HOME-VISUAL-R2 取代贴地锚定；
+ *     贴地展示由前景展示平台表达）；
  *   - 完整入画：envelope 屏幕矩形在取景区内（不裁切）。
  *   - 极端构筑（高窄 pineapple / 长武器）优先完整入画（不强行满足普通比例）。
  * D：底部操作层级——home-find-opponent 唯一实底主按钮（视觉==命中同源）；辅助入口
@@ -151,17 +152,17 @@ describe('F-HOME-DEMO-POLISH-R1｜首页车辆主视觉', () => {
     }
   });
 
-  it('B1. 贴地：groundY 屏幕位置 ≈ 取景区底 - 12 - baseY（6）→ 差 ∈ [14,24]px；不悬浮不沉底', () => {
+  it('B1. 视觉中心（F-HOME-VISUAL-R2）：车辆 envelope 中心 ≈ 取景区中心（偏差 ≤ 取景区高 20%）；底部仍完整在取景区内', () => {
     for (const body of ['watermelonBody', 'boxBody']) {
       for (const vp of VPS) {
         const m = measureHome(body, vp);
-        const bottomGap = m.frame.y + m.frame.h - m.groundScreen;
-        expect(bottomGap, `${body} ${vp.w}×${vp.h} groundY 距取景区底 ${bottomGap.toFixed(0)}px ∈ [14,24]`)
-          .toBeGreaterThanOrEqual(14);
-        expect(bottomGap, `${body} ${vp.w}×${vp.h} groundY 距取景区底 ${bottomGap.toFixed(0)}px ≤ 24`)
-          .toBeLessThanOrEqual(24);
-        // groundY 在取景区内（不沉入底部主条）
-        expect(m.groundScreen, `${body} ${vp.w}×${vp.h} groundY 在取景区内`).toBeLessThanOrEqual(m.frame.y + m.frame.h);
+        const cy = (m.diag.screen.minY + m.diag.screen.maxY) / 2;
+        const frameCy = m.frame.y + m.frame.h / 2;
+        const devY = Math.abs(cy - frameCy) / m.frame.h;
+        expect(devY, `${body} ${vp.w}×${vp.h} 垂直中心偏差 ${(devY * 100).toFixed(1)}% ≤ 20%`)
+          .toBeLessThanOrEqual(0.2);
+        // 完整入画（车辆不沉入底部主条）
+        expect(m.diag.screen.maxY, `${body} ${vp.w}×${vp.h} envelope 底缘 ≤ 取景区底（不沉底）`).toBeLessThanOrEqual(m.frame.y + m.frame.h + 1);
       }
     }
   });
@@ -284,7 +285,8 @@ describe('F-HOME-DEMO-POLISH-R1｜首页车辆主视觉', () => {
     // 本组 A/B/C 全部经「真实 snapshot → reframe → vehicleDiag envelope 屏幕矩形」度量——
     // 不是直接断言布局 rect，而是验证真实渲染后的可见 envelope 几何（Must#8 技术面）。
     expect(RENDERER_SRC, 'home 取景宽度目标区间 [38%,52%] clamp').toContain('HOME_VEHICLE_WIDTH_MIN_PCT');
-    expect(RENDERER_SRC, 'home 贴地锚定').toContain('HOME_VEHICLE_BOTTOM_PAD');
+    expect(RENDERER_SRC, 'F-HOME-VISUAL-R2 垂直居中（视觉中心构图）').toContain('(safeH - bh * scale) / 2');
+    expect(RENDERER_SRC, '不再底部锚定贴地（HOME_VEHICLE_BOTTOM_PAD 已删）').not.toContain('HOME_VEHICLE_BOTTOM_PAD');
     expect(RENDERER_SRC, 'home 模式判定').toContain("framing?.mode === 'home'");
     expect(HOST_SRC, 'getPreviewFramingRect 带 home mode').toContain("return { ...rect, mode: 'home' };");
   });

@@ -53,10 +53,8 @@ describe('F-HOME-STAGE-R3｜底部操作层主次构图', () => {
       expect(l.ctaRect.h, 'CTA 高于次级入口(garage)').toBeGreaterThan(l.garageRect.h);
       expect(l.ctaRect.h, 'CTA 高于次级入口(rank)').toBeGreaterThan(l.rankRect.h);
       expect(l.ctaRect.h, 'CTA 高于次级入口(pass)').toBeGreaterThan(l.passRect.h);
-      // CTA 左右等距居中
-      const leftGap = l.ctaRect.x - (l.garageRect.x + l.garageRect.w);
-      const rightGap = l.rankRect.x - (l.ctaRect.x + l.ctaRect.w);
-      expect(Math.abs(leftGap - rightGap), 'CTA 左右等距居中').toBeLessThanOrEqual(1);
+      // F-HOME-VISUAL-R2 Must#5：CTA 中心 = 屏幕水平主轴 W/2（禁止左右入口剩余空间中心）
+      expect(Math.abs(l.ctaRect.x + l.ctaRect.w / 2 - vp.w / 2), 'CTA 中心 = 屏幕主轴 W/2').toBeLessThanOrEqual(1);
       // 不横贯：CTA 宽 < 可用宽（两侧留次级入口位）
       expect(l.ctaRect.w, 'CTA 不横贯整屏').toBeLessThan(vp.w - INSETS.left - INSETS.right);
     });

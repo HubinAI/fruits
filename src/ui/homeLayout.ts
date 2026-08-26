@@ -11,12 +11,15 @@ import type { SafeInsets } from '../platform/types';
  * 视觉层级（F-HOME-P0-LAYER 已定，本队列不改）：
  * 背景（renderer.drawHomeBackdrop 程序化 underlay，单一入口，绘制于车辆之下）< 车辆 < UI 控件。
  *
- * 空间关系（本队列重做）——单底部条结构：
+ * 空间关系（F-HOME-VISUAL-R2 重做）——单底部条结构：
  * - 第一视觉 = 当前完整战车（stageRect 从顶部行下缘直达【底部主条上缘】，占据中央主体
- *   全部竖向空间；vehicleFramingRect = stageRect 上部留净空，CTA/辅助入口在底部条、不压车）；
- * - 第一交互 = 寻找对手（底部主条中央主按钮 ctaRect，中等宽、居中、不横贯整屏）；
- * - 宝箱 = 第二层（顶部右上 4 槽）；
- * - 车库 / 排行榜 / 战令 = 第三层（底部主条左右紧凑入口，与主按钮同条）。
+ *   全部竖向空间；renderer previewSolo fit 到 vehicleFramingRect：安全宽 38~52% +
+ *   垂直居中 → 车辆可见宽 ≈ 屏幕 38~48%、envelope 中心 = 舞台视觉中心）；
+ * - 第一交互 = 寻找对手（CTA 中心 = 屏幕水平主轴 W/2，中等宽、金黄主按钮、不横贯整屏；
+ *   禁止「左右入口剩余空间中心」——左侧 1 入口 + 右侧 2 入口会让主轴右偏）；
+ * - 宝箱 = 第二层（顶部右上 4 槽，四态视觉：可领 / 计时 / 空 / 锁定）；
+ * - 车库 / 排行榜 / 战令 = 第三层（底部主条左右轻量图标入口：左下 车库、右下 排行·战令，
+ *   不与 CTA 重叠、不形成厚重底部控制台）。
  *
  * 为什么是单底部条（而非「CTA 之上再叠辅助底栏」）：
  * 矮屏（如 360×180，逻辑高仅 180）若把 CTA 与辅助入口拆成两条横栏，叠加顶部行后中央
@@ -27,8 +30,9 @@ import type { SafeInsets } from '../platform/types';
  * 规则：
  * - 所有 rect 必须完全处于 safe area（x ≥ insets.left 等，无例外）；
  * - 尺寸一律由 availableW / availableH 反推（禁止固定下限强撑）；
- * - short（logicalH<260）更紧凑：topRow 32 / 底部主条 44 / 辅助入口 36；normal：42 / 50 / 42；
- * - 寻找对手 CTA 仍全页最高/最显眼（= 主条高 44/50 > 辅助入口 36/42），但不横贯整屏；
+ * - short（logicalH<260）更紧凑：topRow 32 / 底部主条 44 / 辅助入口 34；normal：42 / 50 / 40；
+ * - 寻找对手 CTA 仍全页最高/最显眼（= 主条高 44/50 > 辅助入口 34/40），中心恒为 W/2；
+ * - 辅助入口（garage 左下 / rank·pass 右下）为轻量图标 + 短标签，不与 CTA 重叠；
  * - 车辆取景区（vehicleFramingRect）= stageRect 顶部 → 底部主条上缘（留 gap 净空，避免压 CTA）；
  *   完整车辆 envelope 进入 stageRect 且不被 CTA 裁切（getPreviewFramingRect 同源）。
  */
@@ -74,12 +78,12 @@ export function computeHomeLayout(
   const topRowH = short ? 32 : 42;
   const topY = insets.top;
 
-  // 底部主条（车库 | 寻找对手 CTA | 排行榜 | 战令 同处一条，浮于场景底部）：
+  // 底部主条（车库 | 寻找对手 CTA | 排行榜·战令 同处一条，浮于场景底部）：
   // 给中央 stage 最大竖向空间——stage 从顶部行下缘直达底部主条上缘，车辆取景区不再被
   // 拆成「CTA 栏 + 辅助栏」两段挤压（矮屏 360×180 取景区由 ~20px → ~64px）。
   const bandH = short ? 44 : 50; // 底部主条高度 = CTA 高度（主按钮最显眼）
   const bandY = H - insets.bottom - bandH; // 底部主条顶缘
-  const entryH = bandH - 8; // 辅助入口略矮于 CTA（视觉主次；仍满足触控目标）
+  const entryH = bandH - 10; // 辅助入口略矮于 CTA（视觉主次；仍满足触控目标）
 
   // 中央主体舞台：顶部行之下 → 底部主条之上（车辆完整占据）
   const stageTop = topY + topRowH + gap;
@@ -90,7 +94,9 @@ export function computeHomeLayout(
     h: Math.max(1, bandY - stageTop),
   };
 
-  // 车辆取景子区：stage 顶部 → 底部主条上缘（留 gap 净空，车辆落在取景区底缘着地，不压 CTA）
+  // 车辆取景子区：stage 顶部 → 底部主条上缘（留 gap 净空；renderer previewSolo 按
+  // 「安全宽 38%~52% + 垂直居中」构图 → 车辆可见宽 ≈ 屏幕 38~48% 且 envelope 中心 =
+  // 舞台视觉中心（F-HOME-VISUAL-R2 Must#1/#2））。
   const vehicleFramingRect: HomeRect = {
     x: stageRect.x,
     y: stageRect.y,
@@ -108,23 +114,21 @@ export function computeHomeLayout(
   const chestH = Math.max(1, topRowH - 6);
   const chestX0 = x1 - 4 * chestW - 3 * chestGap;
 
-  // 底部主条内布局：[garage][gap][CTA][gap][rank][gap][pass]
-  // CTA 居中于「车库右缘 ↔ 排行榜左缘」的中央留白区，左右等距（不与辅助入口重叠、不横贯整屏）；
-  // 辅助入口在两侧，互不重叠。
-  const entryW = short ? 60 : 76;
-  const ctaMaxW = short ? 200 : 300; // 主按钮中等宽（不横贯整屏）
-  const sideL = x0 + entryW; // 车库右缘
-  const sideR = x1 - 2 * entryW - gap; // 排行榜左缘（rank + pass 占最右 2*entryW + gap）
-  const sideRegion = Math.max(2, sideR - sideL - 2 * gap);
-  const ctaW = Math.min(ctaMaxW, sideRegion);
-  const ctaX = sideL + gap + (sideRegion - ctaW) / 2; // 左右等距居中
-  const ctaRect: HomeRect = { x: ctaX, y: bandY, w: ctaW, h: bandH };
+  // 底部主条内布局（F-HOME-VISUAL-R2）：
+  // - 寻找对手 CTA：中心 = 屏幕水平主轴（W/2）——禁止「左右入口剩余空间中心」（左侧 1 个
+  //   入口、右侧 2 个入口会导致主轴右偏，Must#5）；
+  // - 辅助入口：轻量图标（左下 车库；右下 排行榜·战令），不与 CTA 重叠、不形成厚重控制台
+  //   （Must#6：不依赖「剩余空间居中」决定 CTA 位置）。
+  const ctaW = Math.min(short ? 170 : 280, W * 0.42); // 主按钮中等宽（不横贯整屏；621 等中宽屏留出辅助入口空间）
+  const ctaRect: HomeRect = { x: Math.round(W / 2 - ctaW / 2), y: bandY, w: ctaW, h: bandH };
 
-  // 辅助入口（底部主条，图标 + 短标签；入口略矮、垂直居中于主条）
+  // 辅助入口（轻量图标 + 短标签；左下 1 + 右下 2，均不与 CTA 重叠）
+  const entryW = short ? 36 : 72;
+  const entryGap = short ? 4 : 10;
   const entryY = bandY + (bandH - entryH) / 2;
   const garageRect: HomeRect = { x: x0, y: entryY, w: entryW, h: entryH };
   const passRect: HomeRect = { x: x1 - entryW, y: entryY, w: entryW, h: entryH };
-  const rankRect: HomeRect = { x: passRect.x - gap - entryW, y: entryY, w: entryW, h: entryH };
+  const rankRect: HomeRect = { x: passRect.x - entryGap - entryW, y: entryY, w: entryW, h: entryH };
 
   return {
     profileRect,

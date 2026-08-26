@@ -1249,21 +1249,49 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.text(`${TIER_LABEL[tier]} ${p.rating}`, avCX + avR + 8, pr.y + pr.h / 2, this.isShort ? 13 : 15, C.gold, 'left', 700);
     this.hit('home-profile', pr.x, pr.y, pr.w, pr.h);
 
-    // 宝箱栏（4 槽，右上；槽盖 + 状态：可领 / 计时 / 空）
+    // 宝箱栏（4 槽，右上；F-HOME-VISUAL-R2 四态视觉：可领金光 / 计时进度+时标 / 空槽弱化——
+    // 不再只是四个相同线框（Must#7）；状态集合不变（claimable/timing/empty，零运营功能）。
     for (let i = 0; i < 4; i++) {
       const s = L.chestSlot(i);
       const st = HOME_CHEST_STATES[i];
-      const bg = st === 'empty' ? 'rgba(20,26,38,0.55)' : st === 'claimable' ? 'rgba(96,74,24,0.4)' : 'rgba(30,40,58,0.6)';
-      const border = st === 'claimable' ? C.gold : C.border;
-      this.rect(s.x, s.y, s.w, s.h, bg, border, st === 'claimable' ? 1.5 : 1);
-      this.rect(s.x - 2, s.y - 3, s.w + 4, 4, 'rgba(210,220,240,0.4)');
       if (st === 'claimable') {
+        // 可领取：金色底光 + 加粗描边 + 槽盖亮边 + 右上光点 + 「可领」金字
+        this.rect(s.x - 1, s.y - 1, s.w + 2, s.h + 2, 'rgba(160,120,30,0.28)', undefined);
+        this.rect(s.x, s.y, s.w, s.h, 'rgba(96,74,24,0.42)', C.gold, 1.5);
+        this.rect(s.x - 2, s.y - 3, s.w + 4, 4, 'rgba(255,214,130,0.75)');
+        this.rect(s.x + s.w - 4, s.y - 2, 3, 3, C.gold);
         this.text('可领', s.x + s.w / 2, s.y + s.h / 2 + 2, this.isShort ? 9 : 11, C.gold, 'center', 700);
       } else if (st === 'timing') {
+        // 计时：进度条 + 时钟小标 + 「计时」——进度随时间推进（视觉与可领/空明显区分）
+        this.rect(s.x, s.y, s.w, s.h, 'rgba(30,40,58,0.6)', C.border, 1);
+        this.rect(s.x - 2, s.y - 3, s.w + 4, 4, 'rgba(120,150,190,0.5)');
         this.rect(s.x + 3, s.y + s.h - 5, s.w - 6, 3, '#2a3345');
         this.rect(s.x + 3, s.y + s.h - 5, (s.w - 6) * 0.5, 3, C.driveBlue);
-        this.text('计时', s.x + s.w / 2, s.y + s.h / 2 + 2, this.isShort ? 9 : 11, C.textDim, 'center');
+        const tctx = this.ctx;
+        tctx.save();
+        tctx.fillStyle = C.driveBlue;
+        tctx.beginPath();
+        tctx.arc(
+          this.ox + (s.x + s.w / 2 - 4) * this.scale,
+          this.oy + (s.y + s.h / 2 - 4) * this.scale,
+          (this.isShort ? 4 : 5) * this.scale,
+          0,
+          Math.PI * 2,
+        );
+        tctx.moveTo(this.ox + (s.x + s.w / 2 - 4) * this.scale, this.oy + (s.y + s.h / 2 - 4) * this.scale);
+        tctx.lineTo(this.ox + (s.x + s.w / 2 - 2) * this.scale, this.oy + (s.y + s.h / 2 - 7) * this.scale);
+        tctx.strokeStyle = C.driveBlue;
+        tctx.lineWidth = 1.5;
+        tctx.stroke();
+        tctx.fill();
+        tctx.restore();
+        this.text('计时', s.x + s.w / 2 + 6, s.y + s.h / 2 + 2, this.isShort ? 9 : 11, C.textDim, 'center');
       } else {
+        // 空槽：暗底 + 细边 + 中心弱化十字（区别于「线框可领」）
+        this.rect(s.x, s.y, s.w, s.h, 'rgba(16,22,34,0.5)', 'rgba(51,69,95,0.6)', 1);
+        const ccx = s.x + s.w / 2;
+        const ccy = s.y + s.h / 2;
+        this.rect(ccx - 2, ccy - 2, 4, 4, 'rgba(90,110,140,0.5)');
         this.text('空', s.x + s.w / 2, s.y + s.h / 2 + 2, this.isShort ? 9 : 11, C.textDark, 'center');
       }
       this.hit(`home-chest-${i}`, s.x, s.y, s.w, s.h);
@@ -1312,27 +1340,61 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       disabled: !state.draftValid,
     });
 
-    // ④ 底部主条：车库（左）| 寻找对手 CTA（中央主按钮）| 排行榜·战令（右）——紧凑图标 + 短标签（禁止三等分大按钮）
-    this.drawHomeBottomEntry(L.garageRect, 'home-garage', '装', '车库');
-    this.drawHomeBottomEntry(L.rankRect, 'home-rank', '榜', '排行榜');
-    this.drawHomeBottomEntry(L.passRect, 'home-pass', '令', '战令');
+    // ④ 底部主条：车库（左下）| 寻找对手 CTA（中央金黄主按钮，主轴居中）| 排行榜·战令（右下）
+    // F-HOME-VISUAL-R2：轻量矢量图标入口（车 / 柱 / 旗），取代「装/榜/令」单字圆片（Must#6）。
+    this.drawHomeBottomEntry(L.garageRect, 'home-garage', 'garage', '车库');
+    this.drawHomeBottomEntry(L.rankRect, 'home-rank', 'rank', '排行榜');
+    this.drawHomeBottomEntry(L.passRect, 'home-pass', 'pass', '战令');
   }
 
-  /** F-HOME-STAGE-R3：首页底部紧凑次级入口（轻量 chip：极淡填充、无重边框 + 弱对比短标签），
-   * 与中央主按钮 cta-find（实底蓝、白字）形成明确主次，消除「后台操作台」厚重感。
-   * 点击区不变；图标/标签字号与旧版一致（不靠缩小字号代替构图修复）。 */
-  /** F-HOME-STAGE-R3 / F-HOME-DEMO-POLISH-R1：首页底部紧凑次级入口。
-   *  R3：轻量 chip（极淡填充、无重边框 + 弱对比短标签）与中央实底金黄主按钮形成主次。
-   *  POLISH-R1：再降一级——去掉整块 panel 底（消除「厚重底带」），只保留图标 chip +
-   *  短文字；命中区与视觉入口同源（hit 注册完整 r rect，一次点击一次动作）。 */
-  private drawHomeBottomEntry(r: Rect, id: string, icon: string, label: string): void {
-    const iw = this.isShort ? 20 : 26;
+  /** F-HOME-STAGE-R3 / F-HOME-DEMO-POLISH-R1：首页底部紧凑次级入口（轻量 chip + 短标签）。
+   *  F-HOME-VISUAL-R2：图标从单字（装/榜/令）改为轻量矢量图形（车/柱/旗）——不再单字圆片；
+   *  命中区与视觉入口同源（hit 注册完整 r rect，一次点击一次动作）。 */
+  private drawHomeBottomEntry(
+    r: Rect,
+    id: string,
+    iconKind: 'garage' | 'rank' | 'pass',
+    label: string,
+  ): void {
+    const iw = this.isShort ? 18 : 24;
     const iy = r.y + (r.h - iw) / 2;
     // 图标 chip（极淡，无外框——不构成连续底带）
     this.panel(r.x + 2, iy, iw, iw, 'rgba(120,150,190,0.14)', undefined, V.radiusM);
-    this.text(icon, r.x + 2 + iw / 2, iy + iw / 2, this.isShort ? 11 : 14, V.textPrimary, 'center', 700);
-    this.text(label, r.x + 2 + iw + 6, r.y + r.h / 2, this.isShort ? 12 : 14, V.secondaryText, 'left', 600);
+    this.drawHomeEntryIcon(iconKind, r.x + 2 + iw / 2, iy + iw / 2, this.isShort ? 9 : 12);
+    this.text(label, r.x + 2 + iw + 5, r.y + r.h / 2, this.isShort ? 12 : 14, V.secondaryText, 'left', 600);
     this.hit(id, r.x, r.y, r.w, r.h);
+  }
+
+  /** F-HOME-VISUAL-R2：轻量矢量入口图标（车库=小车、排行榜=柱状图、战令=旗帜）。 */
+  private drawHomeEntryIcon(kind: 'garage' | 'rank' | 'pass', cx: number, cy: number, s: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = V.textPrimary;
+    if (kind === 'garage') {
+      // 小车：车身 + 两轮
+      ctx.fillRect(cx - s * 0.8, cy - s * 0.25, s * 1.6, s * 0.6);
+      for (const wx of [cx - s * 0.5, cx + s * 0.5]) {
+        ctx.beginPath();
+        ctx.arc(wx, cy + s * 0.45, s * 0.26, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (kind === 'rank') {
+      // 排行榜：3 根柱（中高边低）
+      const bw = s * 0.26;
+      ctx.fillRect(cx - s * 0.75, cy + s * 0.4 - s * 0.5, bw, s * 0.5);
+      ctx.fillRect(cx - bw / 2, cy + s * 0.4 - s * 0.85, bw, s * 0.85);
+      ctx.fillRect(cx + s * 0.5, cy + s * 0.4 - s * 0.65, bw, s * 0.65);
+    } else {
+      // 战令：旗杆 + 三角旗
+      ctx.fillRect(cx - s * 0.12, cy - s * 0.8, s * 0.18, s * 1.5);
+      ctx.beginPath();
+      ctx.moveTo(cx + s * 0.06, cy - s * 0.6);
+      ctx.lineTo(cx + s * 0.78, cy - s * 0.3);
+      ctx.lineTo(cx + s * 0.06, cy);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   /** F-META-1：garage MetaPage——车辆展示（renderer 画）+ 右侧装配面板。

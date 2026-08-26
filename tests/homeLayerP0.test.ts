@@ -40,6 +40,10 @@ function makeTraceCtx(): { ctx: CanvasRenderingContext2D; log: Array<{ op: strin
       if (prop === 'fillStyle' || prop === 'strokeStyle' || prop === 'globalAlpha') {
         return (state as Record<string, unknown>)[prop as string];
       }
+      // F-HOME-VISUAL-R2：三层背景使用渐变——mock 返回可 addColorStop 的渐变对象
+      if (prop === 'createLinearGradient' || prop === 'createRadialGradient') {
+        return (): { addColorStop: () => void } => ({ addColorStop: () => {} });
+      }
       return (..._args: unknown[]): { width: number } => {
         log.push({ op: String(prop), fillStyle: state.fillStyle });
         return { width: 0 };

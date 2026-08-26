@@ -135,11 +135,11 @@ const SOLO_PAD_X_RATIO = 0.38;
 const SOLO_PAD_Y_RATIO = 0.31;
 const MIN_SOLO_PAD_X = 40;
 const MIN_SOLO_PAD_Y = 20;
-// F-HOME-DEMO-POLISH-R1：首页车辆主视觉——普通初始车辆可见宽目标 = 安全宽 38%~52%
-// （clamp fitLimit；高度主导时 fitLimit 优先保证完整入画）；底部锚定贴地留白。
+// F-HOME-VISUAL-R2：首页车辆主视觉——普通初始车辆可见宽目标 = 安全宽 38%~47%
+// （clamp fitLimit；高度主导时 fitLimit 优先保证完整入画）；垂直居中构图（视觉中心 Must#1，
+// 贴地由前景展示平台表达；不再底部锚定贴地留白）。上限 47% 使实际屏幕占比 ≤ 48%（Must#2）。
 const HOME_VEHICLE_WIDTH_MIN_PCT = 0.38;
-const HOME_VEHICLE_WIDTH_MAX_PCT = 0.52;
-const HOME_VEHICLE_BOTTOM_PAD = 12;
+const HOME_VEHICLE_WIDTH_MAX_PCT = 0.47;
 // F-BATTLE-CAMERA-R2：battle 相机不再用 Mobile/Desktop 固定 corridor（旧 F-WX-8-C
 // MOBILE_ACTIVE_* / Q08-A-FIX CORRIDOR_* 已删除）——统一按 A+B 真实 envelope 构图，
 // 见 reframe battle 分支与 applyBattleFollow。
@@ -1017,39 +1017,90 @@ export class Renderer {
    * 在 renderer 底层绘制（车辆之下），与 UI 顶层控件（车辆之上）构成正确图层顺序。
    */
   private drawHomeBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-    // F-MOBILE-VISUAL-BASE-R1：统一竞技场背景；首带保留字面 #0a0d13 以满足 homeLayout 测试契约
-    // 与 V.arenaBgTop 取值一致（语义来源见 visualTokens.ts）。
-    const bands = ['#0a0d13', V.arenaBgMid, V.arenaBgLow, V.arenaBgHorizon];
-    const bh = h / bands.length;
-    for (let i = 0; i < bands.length; i++) {
-      ctx.fillStyle = bands[i];
-      ctx.fillRect(0, i * bh, w, bh + 1);
-    }
+    // F-HOME-VISUAL-R2：正式首页「水果竞技场」三层背景（程序化，无美术资源依赖）——
+    // 远景：深蓝竞技场天空 + 对称看台轮廓（多层阶梯向中心收拢 + 看台灯点）；
+    // 中景：两侧聚光灯锥（顶部射向舞台中心，半透明渐变）+ 环境灯柱；
+    // 前景：中央车辆展示平台（台面 + 前缘高光 + 台体暗面）。
+    // 取代旧「4 纯色带 + 两个巨型圆形光晕 + 远山剪影」（Must#4：禁大面积纯黑/纯蓝 + 巨圆主背景）。
+    // 首带保留字面 #0a0d13（homeLayout 测试契约 / V.arenaBgTop 取值一致）：先铺基座，
+    // 再叠天空渐变（视觉以渐变为主）。
+    ctx.fillStyle = '#0a0d13';
+    ctx.fillRect(0, 0, w, h);
+    const sky = ctx.createLinearGradient(0, 0, 0, h * 0.78);
+    sky.addColorStop(0, '#0a0d13');
+    sky.addColorStop(0.45, '#0f1830');
+    sky.addColorStop(0.78, '#131f3c');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, h);
     ctx.save();
-    // 光晕（左上 + 右上，半透明圆）
-    for (const [gx, gy, r] of [
-      [w * 0.18, h * 0.3, Math.min(w, h) * 0.34],
-      [w * 0.85, h * 0.26, Math.min(w, h) * 0.28],
-    ] as const) {
-      ctx.beginPath();
-      ctx.arc(gx, gy, r, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(90,140,240,0.08)';
-      ctx.fill();
+
+    // ---- 远景：对称看台轮廓（多层阶梯，向中心收拢；中间留舞台开口；非纯色块/非巨圆） ----
+    const tiers = 6;
+    for (let i = 0; i < tiers; i++) {
+      const ty = h * (0.34 + i * 0.055);
+      const half = Math.max(w * 0.06, w * (0.48 - 0.062 * i)); // 每层向中心收拢（中间留舞台开口）
+      ctx.fillStyle = `rgba(42,64,102,${(0.3 + i * 0.045).toFixed(3)})`;
+      ctx.fillRect(w / 2 - half, ty, half * 2, Math.max(2, h * 0.02));
+      // 看台灯点（沿每层阶梯的小亮点：竞技场氛围，非主视觉）
+      ctx.fillStyle = 'rgba(150,195,255,0.4)';
+      const lamps = Math.max(5, Math.floor((half * 2) / (w * 0.09)));
+      for (let k = 0; k < lamps; k++) {
+        const lx = w / 2 - half + 10 + k * ((half * 2 - 20) / Math.max(1, lamps - 1));
+        ctx.fillRect(lx, ty - 1, 2, 2);
+      }
     }
-    // 远山剪影
-    ctx.fillStyle = 'rgba(20,28,44,0.9)';
-    ctx.beginPath();
-    ctx.moveTo(0, h * 0.62);
-    ctx.lineTo(w * 0.3, h * 0.5);
-    ctx.lineTo(w * 0.6, h * 0.66);
-    ctx.lineTo(w, h * 0.55);
-    ctx.lineTo(w, h * 0.75);
-    ctx.lineTo(0, h * 0.75);
-    ctx.closePath();
-    ctx.fill();
-    // 地面光带
-    ctx.fillStyle = 'rgba(70,110,200,0.10)';
-    ctx.fillRect(0, h * 0.78, w, h * 0.22);
+    // 穹顶微光（弱于聚光；小半径渐变，不构成「巨圆主背景」）
+    const dome = ctx.createRadialGradient(w / 2, h * 0.1, w * 0.08, w / 2, h * 0.1, w * 0.42);
+    dome.addColorStop(0, 'rgba(110,160,240,0.10)');
+    dome.addColorStop(1, 'rgba(110,160,240,0)');
+    ctx.fillStyle = dome;
+    ctx.fillRect(0, 0, w, h * 0.5);
+
+    // ---- 中景：两侧聚光灯锥（顶部射向舞台中心；半透明渐变，不遮车辆主体） ----
+    for (const side of [-1, 1] as const) {
+      const sx = w / 2 + side * w * 0.2;
+      const cone = ctx.createLinearGradient(0, 0, 0, h);
+      cone.addColorStop(0, 'rgba(150,190,255,0.16)');
+      cone.addColorStop(0.55, 'rgba(150,190,255,0.045)');
+      cone.addColorStop(1, 'rgba(150,190,255,0)');
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(sx, -4);
+      ctx.lineTo(sx - side * w * 0.11, h * 0.9);
+      ctx.lineTo(sx + side * w * 0.11, h * 0.9);
+      ctx.closePath();
+      ctx.fill();
+      // 灯头（聚光光源点）
+      ctx.fillStyle = 'rgba(190,220,255,0.5)';
+      ctx.fillRect(sx - 3, 0, 6, 4);
+    }
+    // 中景：两侧环境灯柱（细柱 + 顶部灯头，低对比）
+    for (const side of [-1, 1] as const) {
+      const px = w / 2 + side * w * 0.47;
+      ctx.fillStyle = 'rgba(30,46,74,0.7)';
+      ctx.fillRect(px - 1.5, h * 0.3, 3, h * 0.5);
+      ctx.fillStyle = 'rgba(150,190,255,0.28)';
+      ctx.fillRect(px - 3, h * 0.3 - 3, 6, 3);
+    }
+
+    // ---- 前景：中央车辆展示平台（台面 + 前缘高光 + 台体暗面；车辆「站」在台面上） ----
+    const py = h * 0.8;
+    const pw = w * 0.84;
+    ctx.fillStyle = 'rgba(15,23,40,0.94)';
+    ctx.fillRect(w / 2 - pw / 2, py, pw, h - py);
+    // 台面前缘高光（车底水平线）
+    ctx.fillStyle = 'rgba(120,170,255,0.32)';
+    ctx.fillRect(w / 2 - pw / 2, py, pw, 2);
+    // 台面中央柔光（车后光带，弱）
+    const stageGlow = ctx.createLinearGradient(0, py - 40, 0, py);
+    stageGlow.addColorStop(0, 'rgba(120,170,255,0.10)');
+    stageGlow.addColorStop(1, 'rgba(120,170,255,0)');
+    ctx.fillStyle = stageGlow;
+    ctx.fillRect(w * 0.2, py - 40, w * 0.6, 40);
+    // 台体底部暗带（收束）
+    ctx.fillStyle = 'rgba(6,10,18,0.6)';
+    ctx.fillRect(w / 2 - pw / 2, h - 6, pw, 6);
+
     ctx.restore();
   }
 
@@ -2044,9 +2095,9 @@ export class Renderer {
         ? (this.battleCam?.groundScreenY ?? baseY + safeH * BATTLE_STAGE_GROUND_MIN * 0.8) -
           snap.arena.groundY * scale
         : framing?.mode === 'home'
-          ? // F-HOME-DEMO-POLISH-R1：首页贴地锚定——groundY 落到取景区底缘上方
-            // HOME_VEHICLE_BOTTOM_PAD（车辆站在地面线上，不悬浮、不沉入底部主条）
-            baseY + safeH - HOME_VEHICLE_BOTTOM_PAD - snap.arena.groundY * scale
+          ? // F-HOME-VISUAL-R2：车辆 envelope 垂直居中于取景区（视觉中心构图 Must#1——
+            // 不得贴底偏下；「贴地展示」由前景展示平台（drawHomeBackdrop 前景层）表达）。
+            baseY + (safeH - bh * scale) / 2 - minY * scale
           : compactBattleActive
             ? baseY + (safeH - bh * scale) - minY * scale
             : baseY + (safeH - bh * scale) / 2 - minY * scale;

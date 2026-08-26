@@ -151,9 +151,9 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     const availW = 420 - INSETS.left - INSETS.right;
     expect(l.ctaRect.w, 'CTA 不横贯整屏（中等宽）').toBeLessThan(availW);
     // CTA 居中于底部主条中央留白区（车库右缘 ↔ 排行榜左缘 的中点），不与辅助入口重叠
+    // F-HOME-VISUAL-R2 Must#5：CTA 中心 = 屏幕水平主轴 W/2（取代「底部主条留白区中心」）
     const ctaCx = l.ctaRect.x + l.ctaRect.w / 2;
-    const bandCx = (l.garageRect.x + l.garageRect.w + l.rankRect.x) / 2;
-    expect(Math.abs(ctaCx - bandCx), 'CTA 水平居中于底部主条').toBeLessThanOrEqual(1.5);
+    expect(Math.abs(ctaCx - 420 / 2), 'CTA 中心 = 屏幕主轴 W/2').toBeLessThanOrEqual(1);
     // 源码守卫：matching 每帧重绘 + 扫描动效（nowMs 驱动）
     const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
     const rf = src.slice(src.indexOf('renderBattleFrame('), src.indexOf('getHitAreasForTest'));

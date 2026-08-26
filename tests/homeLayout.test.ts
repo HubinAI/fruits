@@ -69,10 +69,11 @@ describe('F-HOME-IA-R1｜正式首页场景式布局', () => {
       expect(l.vehicleFramingRect.y, 'vehicleFraming 在 stage 内（上）').toBeGreaterThanOrEqual(l.stageRect.y - 0.5);
       expect(l.vehicleFramingRect.x + l.vehicleFramingRect.w, 'vehicleFraming 在 stage 内（右）').toBeLessThanOrEqual(l.stageRect.x + l.stageRect.w + 0.5);
       expect(l.vehicleFramingRect.y + l.vehicleFramingRect.h, 'vehicleFraming 在 stage 内（下）').toBeLessThanOrEqual(l.stageRect.y + l.stageRect.h + 0.5);
-      // 单底部条结构（F-HOME-IA-R1）：CTA 与辅助入口同处底部主条、水平不重叠
-      // （CTA 居中于「车库右缘 → 排行榜左缘」中央留白区，不与 garage/rank/pass 重叠）
-      expect(l.ctaRect.x, 'CTA 左缘 ≥ 车库右缘（水平不重叠）').toBeGreaterThanOrEqual(l.garageRect.x + l.garageRect.w - 0.5);
-      expect(l.ctaRect.x + l.ctaRect.w, 'CTA 右缘 ≤ 排行榜左缘（水平不重叠）').toBeLessThanOrEqual(l.rankRect.x + 0.5);
+      // 单底部条结构（F-HOME-VISUAL-R2）：CTA 中心 = 屏幕水平主轴 W/2（Must#5——禁止
+      // 「左右入口剩余空间中心」：左侧 1 入口 + 右侧 2 入口会使主轴右偏）；与辅助入口不重叠
+      expect(Math.abs(l.ctaRect.x + l.ctaRect.w / 2 - vp.w / 2), `${vp.w}×${vp.h} CTA 中心 = 屏幕主轴 W/2`).toBeLessThanOrEqual(1);
+      expect(l.ctaRect.x, 'CTA 左缘 ≥ 车库右缘（水平不重叠）').toBeGreaterThanOrEqual(l.garageRect.x + l.garageRect.w - 1);
+      expect(l.ctaRect.x + l.ctaRect.w, 'CTA 右缘 ≤ 排行榜左缘（水平不重叠）').toBeLessThanOrEqual(l.rankRect.x + 1);
       // 底部入口（garage 左；rank/pass 右）互不重叠
       expect(l.garageRect.x + l.garageRect.w, 'garage 右缘 ≤ rank 左缘').toBeLessThanOrEqual(l.rankRect.x + 0.5);
       expect(l.rankRect.x + l.rankRect.w, 'rank 右缘 ≤ pass 左缘').toBeLessThanOrEqual(l.passRect.x + 0.5);
@@ -90,33 +91,37 @@ describe('F-HOME-IA-R1｜正式首页场景式布局', () => {
     expect(computeHomeLayout({ w: 420, h: 210 }, INSETS, s).vehicleFramingRect.h, '420×210 vehicleFraming 高 ≥40').toBeGreaterThanOrEqual(40);
   });
 
-  it('3. CTA 中等宽、居中于底部主条中央留白区、全页最高（不横贯整屏、不三等分底栏）', () => {
+  it('3. CTA 中等宽、中心 = 屏幕水平主轴 W/2、全页最高（不横贯整屏、不三等分底栏）', () => {
     for (const vp of VIEWPORTS) {
       const prof = resolveLayoutProfile(vp.w, vp.h);
       const l = computeHomeLayout(vp, INSETS, prof);
       const availW = vp.w - INSETS.left - INSETS.right;
       // 不横贯整屏：CTA 宽 < 可用宽（中等宽）
       expect(l.ctaRect.w, 'CTA 不横贯整屏（中等宽）').toBeLessThan(availW);
-      // 居中于底部主条中央留白区（车库右缘 → 排行榜左缘 的中点）；不与辅助入口重叠
+      // F-HOME-VISUAL-R2 Must#5：CTA 中心 = 屏幕水平主轴 W/2（禁止左右入口剩余空间中心）
       const ctaCx = l.ctaRect.x + l.ctaRect.w / 2;
-      const bandCx = (l.garageRect.x + l.garageRect.w + l.rankRect.x) / 2;
-      expect(Math.abs(ctaCx - bandCx), 'CTA 居中于底部主条中央留白区').toBeLessThanOrEqual(1.5);
+      expect(Math.abs(ctaCx - vp.w / 2), `${vp.w}×${vp.h} CTA 中心 = 屏幕主轴 W/2`).toBeLessThanOrEqual(1);
       // 全页最高：CTA 高 > 底部入口高（主按钮视觉主次）
       expect(l.ctaRect.h, 'CTA 高于底部入口').toBeGreaterThan(l.garageRect.h);
     }
   });
 
-  it('4. 背景单一入口 + 不再 UI 覆盖车辆（F-HOME-P0-LAYER）：renderer.drawHomeBackdrop 为唯一入口，host 不再绘制全屏不透明背景', () => {
+  it('4. 背景单一入口 + 三层竞技场（F-HOME-VISUAL-R2）：drawHomeBackdrop 为唯一入口；远景看台 / 中景聚光 / 前景展示平台', () => {
     const host = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
     const renderer = readFileSync('src/render/renderer.ts', 'utf-8');
     const start = renderer.indexOf('private drawHomeBackdrop');
     expect(start, 'renderer.drawHomeBackdrop 存在（正式背景资源单一入口）').toBeGreaterThan(-1);
     const method = renderer.slice(start, renderer.indexOf('private vehicleCenter'));
-    expect(method).toContain('bands');
-    expect(method).toContain("'#0a0d13'");
-    expect(method).toContain('ctx.arc'); // 光晕
-    expect(method).toContain('rgba(20,28,44,0.9)'); // 远山
-    expect(method).toContain('rgba(70,110,200,0.10)'); // 地面光带
+    // 三层背景：远景看台（tiers 阶梯）+ 中景聚光（spotlight 锥）+ 前景展示平台（台面前缘高光）
+    expect(method, '远景看台层').toContain('const tiers = 6');
+    expect(method, '看台灯点').toContain('rgba(150,195,255,0.4)');
+    expect(method, '中景聚光锥').toContain('createLinearGradient');
+    expect(method, '中景环境灯柱').toContain('rgba(30,46,74,0.7)');
+    expect(method, '前景展示平台').toContain('rgba(120,170,255,0.32)');
+    expect(method, '首带 #0a0d13 保留').toContain("'#0a0d13'");
+    // Must#4：不再「4 纯色带 + 2 巨圆 + 远山」
+    expect(method, '不再 bands 纯色带').not.toContain("const bands");
+    expect(method, '不再远山剪影').not.toContain('rgba(20,28,44,0.9)');
     expect(host, 'host 不再引用 drawHomeBackground').not.toContain('drawHomeBackground');
   });
 
