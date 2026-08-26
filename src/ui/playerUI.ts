@@ -16,6 +16,7 @@ import type { PartInventory } from '../core/partInventory';
 import type { ProgressState } from '../core/playerProgress';
 import type { OnboardingStage } from '../core/onboarding';
 import type { UiMode, BattleState, PlayerPhase } from './playerShell';
+import type { FramingRect } from '../render/renderer';
 
 export type { UiMode, BattleState, PlayerPhase } from './playerShell';
 
@@ -151,7 +152,7 @@ export interface PlayerUIHost {
    * F-WX-UI-1：装配预览取景子区域（viewport logical 坐标；Mobile Garage = 左侧展示区）。
    * Runtime 构图（reframePlayerCamera）经它取 framingRect；无实现/非适用阶段 → null。
    */
-  getPreviewFramingRect?(): { x: number; y: number; w: number; h: number } | null;
+  getPreviewFramingRect?(): FramingRect | null;
   /**
    * F-MATCH-DEMO-R1：compact mobile 手机流程标志（Canvas host 实现返回 true）。
    * Runtime 用它压缩战前过渡——mobile 无 READY 覆盖层（Host 侧 !isMobile 门控），

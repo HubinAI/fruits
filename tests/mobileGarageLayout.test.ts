@@ -166,28 +166,41 @@ describe('F-WX-UI-F1｜computeMobileGarageLayout 纯函数（唯一几何来源�
 });
 
 describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
-  it('验收2/3｜getPreviewFramingRect == layout.vehicleRect；resize 后同步', () => {
+  it('验收2/3｜getPreviewFramingRect == layout.vehicleRect（含 mode）；resize 后同步', () => {
     const insets: SafeInsets = { left: 44, right: 20, top: 12, bottom: 16 };
     const host = makeHost({ w: 844, h: 390 }, insets);
     host.render(garageState());
     // F-HOME-1：默认 Home → 取景区 = Home vehicleFramingRect（首页车辆展示区）
+    // F-HOME-DEMO-POLISH-R1：home 取景带 mode='home'（renderer 按宽 38~52% + 贴地构图）
     const homeLayout = computeHomeLayout({ w: 844, h: 390 }, insets, { mode: 'mobile' } as never);
-    expect(host.getPreviewFramingRect()).toEqual(homeLayout.vehicleFramingRect);
-    // 进配置页 → 取景区 = 配置页 vehicleRect（唯一布局源）
+    const gotHome = host.getPreviewFramingRect();
+    expect(gotHome, '非空').not.toBeNull();
+    expect(gotHome!.x, 'home x').toBe(homeLayout.vehicleFramingRect.x);
+    expect(gotHome!.y, 'home y').toBe(homeLayout.vehicleFramingRect.y);
+    expect(gotHome!.w, 'home w').toBe(homeLayout.vehicleFramingRect.w);
+    expect(gotHome!.h, 'home h').toBe(homeLayout.vehicleFramingRect.h);
+    expect(gotHome!.mode, 'home mode').toBe('home');
+    // 进配置页 → 取景区 = 配置页 vehicleRect（唯一布局源；mode='garage'）
     const homeBtn = host.getHitAreasForTest().find((a) => a.id === 'home-garage')!;
     host.pointerForTest?.(homeBtn.x + homeBtn.w / 2, homeBtn.y + homeBtn.h / 2);
     const expected = computeMobileGarageLayout({ w: 844, h: 390 }, insets).vehicleRect;
     const got = host.getPreviewFramingRect();
     expect(got, '非空').not.toBeNull();
-    expect(got).toEqual(expected);
+    expect(got!.x, 'garage x').toBe(expected.x);
+    expect(got!.y, 'garage y').toBe(expected.y);
+    expect(got!.w, 'garage w').toBe(expected.w);
+    expect(got!.h, 'garage h').toBe(expected.h);
+    expect(got!.mode, 'garage mode').toBe('garage');
     // resize 语义：host 尺寸变化（新 host 用新 viewport）→ 取景同步变化（同一函数同一输入同一输出）
     const host2 = makeHost({ w: 932, h: 430 }, insets);
     host2.render(garageState());
     const homeBtn2 = host2.getHitAreasForTest().find((a) => a.id === 'home-garage')!;
     host2.pointerForTest?.(homeBtn2.x + homeBtn2.w / 2, homeBtn2.y + homeBtn2.h / 2);
     const expected2 = computeMobileGarageLayout({ w: 932, h: 430 }, insets).vehicleRect;
-    expect(host2.getPreviewFramingRect()).toEqual(expected2);
-    expect(host2.getPreviewFramingRect()!.w).toBeGreaterThan(got!.w);
+    const got2 = host2.getPreviewFramingRect();
+    expect(got2!.x, 'resize garage x').toBe(expected2.x);
+    expect(got2!.w, 'resize garage w').toBe(expected2.w);
+    expect(got2!.w).toBeGreaterThan(got!.w);
   });
 
   it('验收2｜F-NAV-ACTION-OWNERSHIP-P0：HitArea 与布局同源——配置页无寻找对手命中区（CTA 只属首页）；2×2 入口在 panelRect 内', () => {

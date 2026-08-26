@@ -152,6 +152,8 @@ describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
   });
 
   it('完整玩家闭环 + 触摸输入 + 微信存储 + 后台/前台 + 再战（验收 2/3/6）', async () => {
+    // 该用例驱动真实 Planck 战斗 2 场（每场至多 1600 tick 全渲染），本机负载下真实耗时
+    // ~5.6s 逼近默认 5s 上限（曾全量偶发超时）——显式放宽到 15s（仅超时上限，不改逻辑）。
     vi.useFakeTimers();
     // F-WX-P0-INPUT：固定随机对手（pickOpponentForTier 用 Math.random）——避免特定
     // 对手组合战斗超 1600 tick 兜底导致非确定性失败（852 全量回归实测偶发）。
@@ -250,7 +252,7 @@ describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
     expect(fake.drawImages[fake.drawImages.length - 1].src).toBe(fake.uiCanvas); // 合成源 = UI offscreen
     expect(fake.drawImages[fake.drawImages.length - 1].w).toBe(fake.uiCanvas.width); // 全尺寸 1:1
     void rafBefore;
-  });
+  }, 15000); // 完整闭环驱动真实 Planck 战斗 2 场（真实耗时 ~5.6s 逼近默认 5s）——显式放宽超时上限
 
   it('刷新/重进恢复：新模块实例从微信 storage 恢复 Build（验收 3）', async () => {
     vi.useFakeTimers();

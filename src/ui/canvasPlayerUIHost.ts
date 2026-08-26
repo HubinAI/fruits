@@ -16,6 +16,7 @@
  */
 import { platform } from '../platform';
 import type { SafeInsets } from '../platform/types';
+import type { FramingRect } from '../render/renderer';
 import {
   computeMobileGarageLayout,
   computeGarageTopBarLayout,
@@ -1248,8 +1249,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (this.vehicleTip) {
       const tipW = Math.min(v.w - 16, 300);
       const tipH = this.isShort ? 32 : 40;
-      const tipX = v.x + (v.w - tipW) / 2;
-      const tipY = v.y + 6; // 气泡在车辆上方（stage 上部），不遮挡顶部宝箱/个人信息
+      // F-HOME-DEMO-POLISH-R1：气泡跟随车辆真实 envelope（homeVehicleRect）顶部上方——
+      // 车辆居中贴地后，气泡紧贴车身、不覆盖顶部信息层（clamp 到取景区顶缘）、
+      // 也不压底部主按钮（气泡在车辆上方）。
+      const envR = hv ?? v;
+      const tipX = Math.max(v.x, Math.min(v.x + v.w - tipW, envR.x + (envR.w - tipW) / 2));
+      const tipY = Math.max(v.y, envR.y - tipH - 8);
       this.rect(tipX, tipY, tipW, tipH, 'rgba(14,20,32,0.94)', C.gold, 1);
       this.text(this.vehicleTip, tipX + 10, tipY + tipH / 2, this.isShort ? 12 : 14, C.text, 'left');
       const tctx = this.ctx;
@@ -1281,15 +1286,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** F-HOME-STAGE-R3：首页底部紧凑次级入口（轻量 chip：极淡填充、无重边框 + 弱对比短标签），
    * 与中央主按钮 cta-find（实底蓝、白字）形成明确主次，消除「后台操作台」厚重感。
    * 点击区不变；图标/标签字号与旧版一致（不靠缩小字号代替构图修复）。 */
+  /** F-HOME-STAGE-R3 / F-HOME-DEMO-POLISH-R1：首页底部紧凑次级入口。
+   *  R3：轻量 chip（极淡填充、无重边框 + 弱对比短标签）与中央实底金黄主按钮形成主次。
+   *  POLISH-R1：再降一级——去掉整块 panel 底（消除「厚重底带」），只保留图标 chip +
+   *  短文字；命中区与视觉入口同源（hit 注册完整 r rect，一次点击一次动作）。 */
   private drawHomeBottomEntry(r: Rect, id: string, icon: string, label: string): void {
     const iw = this.isShort ? 20 : 26;
     const iy = r.y + (r.h - iw) / 2;
-    // F-MOBILE-VISUAL-BASE-R1：轻量次级入口（半透明蓝填充、无重框、明亮文字）；
-    // 与中央金黄主按钮形成明确主次，消除「后台操作台」厚重感。
-    this.panel(r.x + 6, r.y + 4, r.w - 12, r.h - 8, V.secondary, V.borderSoft, V.radiusM);
-    this.panel(r.x + 8, iy, iw, iw, 'rgba(120,150,190,0.18)', undefined, V.radiusM);
-    this.text(icon, r.x + 8 + iw / 2, iy + iw / 2, this.isShort ? 11 : 14, V.textPrimary, 'center', 700);
-    this.text(label, r.x + 8 + iw + 8, r.y + r.h / 2, this.isShort ? 12 : 14, V.secondaryText, 'left', 600);
+    // 图标 chip（极淡，无外框——不构成连续底带）
+    this.panel(r.x + 2, iy, iw, iw, 'rgba(120,150,190,0.14)', undefined, V.radiusM);
+    this.text(icon, r.x + 2 + iw / 2, iy + iw / 2, this.isShort ? 11 : 14, V.textPrimary, 'center', 700);
+    this.text(label, r.x + 2 + iw + 6, r.y + r.h / 2, this.isShort ? 12 : 14, V.secondaryText, 'left', 600);
     this.hit(id, r.x, r.y, r.w, r.h);
   }
 
@@ -1755,25 +1762,30 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * F-WX-UI-1：装配预览取景子区域（viewport logical）——Mobile Garage 时 = 左侧展示区。
    * Runtime reframePlayerCamera 经 battle.reframe(fit, framingRect) 使 previewSolo fit 到本区。
    */
-  getPreviewFramingRect(): { x: number; y: number; w: number; h: number } | null {
+  getPreviewFramingRect(): FramingRect | null {
     if (!this.isMobile) return null;
     const state = this.lastState;
     if (!state || state.playerPhase !== 'garage' || state.battleState !== 'editing') return null;
     // F-HOME-IA-R1：正式首页车辆取景区 = Home 布局 vehicleFramingRect（stage 上部、CTA 之上；
     // 与绘制/HitArea 同一份结果；完整车辆 envelope 进入 stageRect 且不被 CTA 裁切）
+    // F-HOME-DEMO-POLISH-R1：home 取景 mode——renderer 按「宽 38%~52% + 底部锚定贴地」构图
     if (this.metaPage === 'home') {
-      return computeHomeLayout(
+      const rect = computeHomeLayout(
         { w: this.W, h: this.H },
         { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
         this.profile,
       ).vehicleFramingRect;
+      return { ...rect, mode: 'home' };
     }
     // F-WX-UI-F1：车辆取景区 = 唯一布局源 vehicleRect（与绘制/HitArea 完全同一份结果）
-    return computeMobileGarageLayout(
-      { w: this.W, h: this.H },
-      { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
-      this.profile,
-    ).vehicleRect;
+    return {
+      ...computeMobileGarageLayout(
+        { w: this.W, h: this.H },
+        { left: this.insL, right: this.insR, top: this.insT, bottom: this.insB },
+        this.profile,
+      ).vehicleRect,
+      mode: 'garage',
+    };
   }
 
 

@@ -97,6 +97,13 @@ export interface FramingRect {
   y: number;
   w: number;
   h: number;
+  /**
+   * F-HOME-DEMO-POLISH-R1：取景模式。
+   * - 'home'（首页全宽取景区）：车辆宽目标 = 安全宽 38%~52%（clamp）+ 底部锚定贴地
+   *   （groundY 落到取景区底缘上方 12px，消除悬浮）；极端构筑由 envelope 口径保证完整入画。
+   * - 'garage'（配置页左侧竖条，缺省语义）：保持垂直居中 fit（既有行为）。
+   */
+  mode?: 'home' | 'garage';
 }
 
 /**
@@ -121,6 +128,11 @@ const SOLO_PAD_X_RATIO = 0.38;
 const SOLO_PAD_Y_RATIO = 0.31;
 const MIN_SOLO_PAD_X = 40;
 const MIN_SOLO_PAD_Y = 20;
+// F-HOME-DEMO-POLISH-R1：首页车辆主视觉——普通初始车辆可见宽目标 = 安全宽 38%~52%
+// （clamp fitLimit；高度主导时 fitLimit 优先保证完整入画）；底部锚定贴地留白。
+const HOME_VEHICLE_WIDTH_MIN_PCT = 0.38;
+const HOME_VEHICLE_WIDTH_MAX_PCT = 0.52;
+const HOME_VEHICLE_BOTTOM_PAD = 12;
 // F-BATTLE-CAMERA-R2：battle 相机不再用 Mobile/Desktop 固定 corridor（旧 F-WX-8-C
 // MOBILE_ACTIVE_* / Q08-A-FIX CORRIDOR_* 已删除）——统一按 A+B 真实 envelope 构图，
 // 见 reframe battle 分支与 applyBattleFollow。
@@ -1757,6 +1769,8 @@ export class Renderer {
     // 与否都走「envelope 自适应」分支——把真实整车 envelope 居中 fit 到该子区域（含桌面
     // Web 首页/车库）；否则桌面无 framing 时仍用旧固定 SOLO 框（历史语义，向后兼容）。
     const isCompact = isCompactLandscape(this.viewWidth / this.viewDpr, this.viewHeight / this.viewDpr);
+    // F-HOME-DEMO-POLISH-R1：home 取景记录车辆 envelope 宽（供宽度目标区间 clamp）
+    let soloEnvW = 0;
     if (fit === 'previewSolo') {
       if (isCompact || opts.framingRect) {
         // F-UX-3A：envelopeBounds（Body+Wheels+Functional Parts）自适应 padding——
@@ -1765,6 +1779,7 @@ export class Renderer {
         const env = this.vehicleBounds(snap.vehicleA, true);
         const ew = Math.max(1, env.maxX - env.minX);
         const eh = Math.max(1, env.maxY - env.minY);
+        soloEnvW = ew;
         const padX = Math.max(MIN_SOLO_PAD_X, ew * SOLO_PAD_X_RATIO);
         const padY = Math.max(MIN_SOLO_PAD_Y, eh * SOLO_PAD_Y_RATIO);
         minX = env.minX - padX;
@@ -1908,6 +1923,18 @@ export class Renderer {
     const applyMinScale = !(framing && isFixed) && fit !== 'previewFixed';
     if (scale < MIN_CONTENT_SCALE && applyMinScale) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
+    // F-HOME-DEMO-POLISH-R1：首页取景——普通初始车辆可见宽目标 = 安全宽 38%~52%
+    // （clamp fitLimit；高度主导时 fitLimit 较小则保持 → 极端构筑/矮屏优先完整入画）。
+    // 高度完整入画上限优先：底部锚定把全部纵向余量集中到顶部，若 clamp 下限（≥38% 宽）
+    // 超过高度上限会把车辆顶出取景区（360×180 + 高窄车实测顶缘越界）——先 clamp 再
+    // min(高度上限)，保证「极端优先完整入画」硬约束。
+    // garage 竖条取景保持既有 fit 语义（零回归）。
+    if (fit === 'previewSolo' && framing?.mode === 'home' && soloEnvW > 0) {
+      const minS = (HOME_VEHICLE_WIDTH_MIN_PCT * safeW) / soloEnvW;
+      const maxS = (HOME_VEHICLE_WIDTH_MAX_PCT * safeW) / soloEnvW;
+      const hLimit = safeH / bh; // 高度完整入画上限（bh>0 已由上方 bounds 守卫保证）
+      scale = Math.min(hLimit, Math.min(maxS, Math.max(minS, scale)));
+    }
     // F-BATTLE-CAMERA-R2：battle 相机基准记录 / 非 Active 阶段尺度钳制。
     // Active（正常战斗）构图时记录基准（供运行期跟随 + 后续阶段相对钳制）；
     // Warning/Closing/End 用同一 envelope 构图但把 scale 钳制在基准 ±15%——
@@ -1943,9 +1970,13 @@ export class Renderer {
     const offsetY =
       fit === 'battle'
         ? baseY + safeH * BATTLE_GROUND_LINE_RATIO - snap.arena.groundY * scale
-        : compactBattleActive
-          ? baseY + (safeH - bh * scale) - minY * scale
-          : baseY + (safeH - bh * scale) / 2 - minY * scale;
+        : framing?.mode === 'home'
+          ? // F-HOME-DEMO-POLISH-R1：首页贴地锚定——groundY 落到取景区底缘上方
+            // HOME_VEHICLE_BOTTOM_PAD（车辆站在地面线上，不悬浮、不沉入底部主条）
+            baseY + safeH - HOME_VEHICLE_BOTTOM_PAD - snap.arena.groundY * scale
+          : compactBattleActive
+            ? baseY + (safeH - bh * scale) - minY * scale
+            : baseY + (safeH - bh * scale) / 2 - minY * scale;
     this.transform = { scale, offsetX, offsetY };
     // F-WX-9A：DEV-only 取景尺度日志（__WX_DEBUG__=true，WECHAT_DEBUG_INPUT=1 构建注入；
     // PROD __WX_DEBUG__=false → 编译期常量折叠，零日志）。只读诊断，不改变任何 framing 语义。

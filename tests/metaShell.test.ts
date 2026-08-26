@@ -138,10 +138,14 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
     const rank = env.areas().find((a) => a.id === 'home-rank')!;
     const pass = env.areas().find((a) => a.id === 'home-pass')!;
     expect(cta.w, 'CTA 宽 ≥ 三辅助入口之和').toBeGreaterThanOrEqual(assist.w + rank.w + pass.w);
-    // 车辆展示区存在（Home framingRect 非空且面积大）
+    // 车辆展示区存在（Home framingRect 非空且面积大；F-HOME-DEMO-POLISH-R1 带 mode='home'）
     const homeLayout = computeHomeLayout({ w: 844, h: 390 }, INSETS, { mode: 'mobile' } as never);
     const v = env.host.getPreviewFramingRect()!;
-    expect(v, 'Home 车辆取景区').toEqual(homeLayout.vehicleFramingRect);
+    expect(v.x, 'Home 取景区 x').toBe(homeLayout.vehicleFramingRect.x);
+    expect(v.y, 'Home 取景区 y').toBe(homeLayout.vehicleFramingRect.y);
+    expect(v.w, 'Home 取景区 w').toBe(homeLayout.vehicleFramingRect.w);
+    expect(v.h, 'Home 取景区 h').toBe(homeLayout.vehicleFramingRect.h);
+    expect(v.mode, 'Home 取景 mode').toBe('home');
     expect(v.h, '车辆展示区高（明显可见）').toBeGreaterThanOrEqual(80);
   });
 
