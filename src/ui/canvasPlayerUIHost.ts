@@ -40,6 +40,13 @@ import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/pla
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { BODY_OPTIONS, WHEEL_OPTIONS, encodePartVal } from './playerUI';
 import { resolveLayoutProfile, type LayoutProfile } from './layoutProfile';
+// F-PLAYER-CANVAS-COMPOSE-P0：手机逻辑画布尺寸单一来源（PlayerViewportTransform）；
+// 本地别名保持既有调用点不变（PHONE_LOGICAL_W/H 即 PLAYER_LOGICAL_W/H）。
+import {
+  PLAYER_LOGICAL_W as PHONE_LOGICAL_W,
+  PLAYER_LOGICAL_H as PHONE_LOGICAL_H,
+  type PlayerViewportTransform,
+} from '../platform/playerViewport';
 import { computeHomeLayout } from './homeLayout';
 import { V } from './visualTokens';
 import type {
@@ -52,12 +59,6 @@ import type {
 /** 逻辑布局基准（Desktop 等比缩放适配实际画布；中心留白） */
 const BASE_W = 1280;
 const BASE_H = 720;
-
-/** F-DEMO-PLAYER-RUNTIME-P0：玩家演示固定手机逻辑画布（约 844×390，常见 iPhone 横屏），
- *  桌面打开时用它做逻辑布局，CSS contain 放大居中，不切回 Desktop 布局。 */
-const PHONE_LOGICAL_W = 844;
-const PHONE_LOGICAL_H = 390;
-
 /**
  * F-MOBILE-VISUAL-BASE-R1｜统一手机玩家视觉体系（语义视觉源，单一事实来源）。
  * 与 WebDOM 同源的色板（纯功能性绘制，无渐变/动效）——取值全部映射到 V（visualTokens.ts），
@@ -284,11 +285,20 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    *  （约 844×390），CSS contain 等比放大居中（不切回 Desktop 布局）；逻辑布局 = 手机 profile，
    *  点击坐标经 PlatformInput 归一化反算（见 platform/web/input.ts）。 */
   private phoneLogical = false;
+  /** F-PLAYER-CANVAS-COMPOSE-P0：共享 PlayerViewportTransform（playerMode 由 main.ts 注入；
+   *  无共享实例时保持既有独立 applyPhoneScale 行为——测试/非玩家路径不变）。 */
+  private viewportTransform: PlayerViewportTransform | null = null;
   private canvas: HTMLCanvasElement;
 
-  constructor(canvas: HTMLCanvasElement, opts?: { phoneLogical?: boolean }) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    opts?: { phoneLogical?: boolean; viewportTransform?: PlayerViewportTransform },
+  ) {
     this.canvas = canvas;
     this.phoneLogical = !!opts?.phoneLogical;
+    // F-PLAYER-CANVAS-COMPOSE-P0：共享 PlayerViewportTransform（玩家模式下与 Renderer
+    // Canvas 共用同一变换 → 两画布 CSS rect/contain/backing/DPR 完全一致）。
+    this.viewportTransform = opts?.viewportTransform ?? null;
     // F-META-6：读取偏好（platform.storage 无存储环境静默降级为默认开；值 '0' = 关）
     this.soundOn = platform.storage.getItem(PREF_SOUND_KEY) !== '0';
     this.vibrationOn = platform.storage.getItem(PREF_VIBRATION_KEY) !== '0';
@@ -790,16 +800,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     let dpr: number;
     if (this.parent) {
       // Web：随容器尺寸 + window.devicePixelRatio（CSS px 布局空间）
-      if (this.phoneLogical) {
+      if (this.phoneLogical && this.viewportTransform) {
+        // F-PLAYER-CANVAS-COMPOSE-P0：共享 PlayerViewportTransform——尺寸/DPR 单一来源
+        // （与 Renderer Canvas 完全一致：logical 844×390 × DPR）。
+        w = this.viewportTransform.logicalW;
+        h = this.viewportTransform.logicalH;
+        dpr = this.viewportTransform.dpr;
+      } else if (this.phoneLogical) {
         // F-DEMO-PLAYER-RUNTIME-P0：玩家演示固定手机逻辑画布（844×390），
         // canvas CSS 尺寸 = 逻辑尺寸；视觉放大走 CSS transform（contain 居中，见 applyPhoneScale）。
         w = PHONE_LOGICAL_W;
         h = PHONE_LOGICAL_H;
+        dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
       } else {
         w = Math.max(1, this.parent.clientWidth || BASE_W);
         h = Math.max(1, this.parent.clientHeight || BASE_H);
+        dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
       }
-      dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
     } else {
       // F-WX-5/6：平台中立挂载（微信）：canvas 物理像素 → 逻辑 px 布局空间（除以 surface dpr）
       const s = this.viewport?.surface();
@@ -838,8 +855,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /** F-DEMO-PLAYER-RUNTIME-P0：桌面视口（远大于 844×390）下，把手机逻辑画布等比 contain 放大居中，
-   *  逻辑布局空间仍为 844×390（isMobile=mobile-normal），点击坐标经 getBoundingClientRect 归一化反算。 */
+   *  逻辑布局空间仍为 844×390（isMobile=mobile-normal），点击坐标经 getBoundingClientRect 归一化反算。
+   *  F-PLAYER-CANVAS-COMPOSE-P0：共享 PlayerViewportTransform 时（玩家模式）直接复用同一变换
+   *  （与 Renderer Canvas 同一 contain scale/offset/backing/DPR）——禁止本端独立算一份放大。 */
   private applyPhoneScale(): void {
+    if (this.viewportTransform) {
+      this.viewportTransform.applyTo(this.canvas);
+      return;
+    }
     const pw = this.parent!.clientWidth || PHONE_LOGICAL_W;
     const ph = this.parent!.clientHeight || PHONE_LOGICAL_H;
     const s = Math.min(pw / PHONE_LOGICAL_W, ph / PHONE_LOGICAL_H);
@@ -851,6 +874,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     st.top = `${Math.round((ph - PHONE_LOGICAL_H * s) / 2)}px`;
     st.transformOrigin = 'top left';
     st.transform = `scale(${s})`;
+  }
+
+  /** F-PLAYER-CANVAS-COMPOSE-P0：容器/DPR 变化后把共享变换同步到本画布
+   *  （玩家模式 resize 入口；无共享变换时为空操作——独立路径在 ensureSize 内处理）。 */
+  syncViewport(): void {
+    if (!this.viewportTransform || !this.parent) return;
+    this.applyPhoneScale();
   }
 
   private clear(): void {

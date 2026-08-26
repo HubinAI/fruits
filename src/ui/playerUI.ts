@@ -160,4 +160,9 @@ export interface PlayerUIHost {
    * 保持 READY 600ms 过渡语义不变。
    */
   isMobileView?(): boolean;
+  /**
+   * F-PLAYER-CANVAS-COMPOSE-P0：容器/DPR 变化后把共享 PlayerViewportTransform 同步到
+   * 本画布（玩家模式 resize 入口；无共享变换的实现可为空操作——可选方法）。
+   */
+  syncViewport?(): void;
 }

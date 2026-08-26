@@ -179,12 +179,17 @@ async function main() {
     log(hp !== null && hp.playerPhase === 'garage', 'E2E 探针已注入（window.__probe 只读快照）');
     log(hp !== null && typeof hp.vehicleRects !== 'undefined', '探针含 A/B vehicleRects 字段');
 
-    // 点击「寻找对手」→ Matching 全程跟踪最后一帧（锁定候选 = 与 Locked 同候选对比基准）
+    // 点击「寻找对手」→ 顺序跟踪 matching 最后一帧（无并发 evaluate 乱序：轮询循环读到的
+    // matching 帧即最新；进入 matchPreview 即退出 → lastMatchFrame = 锁定候选的最后一帧 matching）
     let lastMatchFrame = null;
-    const trackMatch = setInterval(async () => {
-      const p = await probe(page);
-      if (p && p.playerPhase === 'matching' && p.vehicleRects) lastMatchFrame = p;
-    }, 100);
+    const trackMatch = (async () => {
+      for (;;) {
+        const p = await probe(page);
+        if (p && p.playerPhase === 'matchPreview') return; // Locked：跟踪结束
+        if (p && p.playerPhase === 'matching' && p.vehicleRects) lastMatchFrame = p;
+        await page.waitForTimeout(80);
+      }
+    })();
     await tapArea(page, 'home-find-opponent');
     const matchP = await waitProbe(page, (p) => p.playerPhase === 'matching', 4000);
     log(matchP !== null, '首页 CTA 点击进入 Matching');
@@ -203,11 +208,13 @@ async function main() {
     log(candChanged, 'Matching 动画持续（hash 辅助信号）');
 
     // Locked：中心位移 ≤2px、尺度 ≤2%。对比基准 = matching 最后一帧（锁定候选与 Locked
-    // 同一候选——previewFixed 同相机，仅 envelope 尺寸差异会被排除）
+    // 同一候选——previewFixed 同相机，仅 envelope 尺寸差异会被排除）。
+    // F-PLAYER-CANVAS-COMPOSE-P0：matchPreview 仅停留 ~700ms 后自动开战（F-MATCH-FRAME-R2），
+    // 命中后【立即】取 locked 帧——再等 trackMatch 会让 probe 落入 Battle（battle fit A/B 分离，
+    // 产生 ~200px 假位移）。trackMatch 循环已捕获 lastMatchFrame = 最后 matching 帧，无需等待。
     const lockedP = await waitProbe(page, (p) => p.playerPhase === 'matchPreview', 5000);
-    clearInterval(trackMatch);
-    log(lockedP !== null, 'Matching → Locked（matchPreview）');
     const lockedFrame = await probe(page);
+    log(lockedP !== null, 'Matching → Locked（matchPreview）');
     const g2 = assertLockedStable(
       { a: lastMatchFrame.vehicleRects?.a, b: lastMatchFrame.vehicleRects?.b, scale: lastMatchFrame.transform?.scale },
       { a: lockedFrame.vehicleRects?.a, b: lockedFrame.vehicleRects?.b, scale: lockedFrame.transform?.scale },

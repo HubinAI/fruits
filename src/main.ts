@@ -17,6 +17,7 @@
 import './platform/bootstrap';
 import { Renderer, type CameraFit } from './render/renderer';
 import { platform } from './platform';
+import { PlayerViewportTransform, PLAYER_LOGICAL_W, PLAYER_LOGICAL_H } from './platform/playerViewport';
 import { VisualRegistry } from './render/visualRegistry';
 import { SfxAudioService } from './presentation/audioService';
 import { createPlayerPresentation } from './presentation/playerPresentation';
@@ -408,14 +409,29 @@ for (const [visualId, url] of SILHOUETTE_ASSETS) {
 const reviewOn = new URLSearchParams(location.search).has('mobile-review');
 // 玩家模式固定 Canvas Host；其余保持既有规则（pages/review/canvasui → Canvas，否则 WebDom）
 const canvasUiMode = playerMode || reviewOn || new URLSearchParams(location.search).has('canvasui');
+// F-PLAYER-CANVAS-COMPOSE-P0：玩家模式双画布共享同一 PlayerViewportTransform——
+// Renderer Canvas（战斗/预览主体）与玩家 UI Canvas（HUD/扫描框/名称）用同一 logical 尺寸、
+// 同一 CSS contain rect、同一 scale/offset、同一 DPR；跨层矩形只在逻辑空间转换一次。
+const playerViewport = playerMode ? new PlayerViewportTransform() : null;
 const host: PlayerUIHost = canvasUiMode
   ? new CanvasPlayerUIHost(document.createElement('canvas'), {
       // 桌面打开玩家模式：用手机逻辑画布（约 844×390）+ CSS contain 放大居中，
       // 不切回 Desktop 布局（isMobile=手机 profile，scale=1，点击坐标经 getBoundingClientRect 归一化反算）。
       phoneLogical: playerMode,
+      viewportTransform: playerViewport ?? undefined,
     })
   : new WebDomPlayerUIHost();
 host.mount(canvasWrap);
+// F-PLAYER-CANVAS-COMPOSE-P0：Renderer Canvas 与 UI Canvas 应用同一视口变换
+// （先 update 容器/DPR → 再 applyTo：backing = logical×DPR，CSS = logical px + contain 居中）。
+if (playerViewport) {
+  playerViewport.update(
+    canvasWrap.clientWidth || PLAYER_LOGICAL_W,
+    canvasWrap.clientHeight || PLAYER_LOGICAL_H,
+    (typeof window !== 'undefined' && window.devicePixelRatio) || 1,
+  );
+  playerViewport.applyTo(canvas);
+}
 // F-DEMO-VISUAL-GATE-R4：E2E 探针（window.__h）仅存在于专用 E2E 构建（__E2E_PROBE__ define）；
 // 正式 Pages/Web/微信构建编译期折叠为 false → 生产零调试对象暴露。几何快照在 loop() 内注入。
 if (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__) {
@@ -1054,7 +1070,21 @@ const runtime = new PlayerGameRuntime({
 
 /* ---------- 初始：默认装配测试模式（runtime.init 装载玩家状态 + 初始渲染） ---------- */
 // F-WX-2：Viewport Adapter（window resize → doResize；build 玩家相机 / scenario DEV 相机）
-viewport.onResize(doResize);
+viewport.onResize(() => {
+  if (playerViewport) {
+    // F-PLAYER-CANVAS-COMPOSE-P0：玩家模式 resize——重算 contain 并同步到两画布
+    // （Renderer Canvas + UI Canvas 同一变换；host 画布在 syncViewport 内复用同一 transform），
+    // 再走既有 doResize（renderer.resize 读 clientWidth = logical → 与 UI 完全同源）。
+    playerViewport.update(
+      canvasWrap.clientWidth || PLAYER_LOGICAL_W,
+      canvasWrap.clientHeight || PLAYER_LOGICAL_H,
+      (typeof window !== 'undefined' && window.devicePixelRatio) || 1,
+    );
+    playerViewport.applyTo(canvas);
+    host.syncViewport?.();
+  }
+  doResize();
+});
 runtime.init(); // track(game_start) + 玩家状态装载 + 初始 doResize/reframe + pushUI
 if (debugPanel) debugPanel.style.display = 'none';
 if (backToBuildBtn) backToBuildBtn.style.display = 'none';
