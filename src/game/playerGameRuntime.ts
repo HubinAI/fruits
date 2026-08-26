@@ -630,21 +630,28 @@ export class PlayerGameRuntime {
     }
   }
 
-  /** 玩家主流程：找对手（Garage → Matching → MatchPreview） */
+  /** 玩家主流程：找对手（Garage → Matching → MatchPreview）。
+   *  F-PLAYER-FLOW-ATOMIC-P0：原子提交——所有可失败的外围调用（埋点/控件锁定/对手抽取/
+   *  A+B 预览加载）先行，最后一次性提交状态（battleState + playerPhase + pushUI）。
+   *  任意外围步骤抛异常 → 状态保持完整 Home（不再出现「playerPhase 已改但 draftB/UI
+   *  未完成」的半提交分裂）。防重复触发用 `matching` 状态门，非延时/重试。 */
   private startMatching(): void {
     if (this.playerPhaseInternal === 'matching') return; // 防重复触发
+    // ① 外围副作用（先行；任何失败都不污染状态）
     track('find_opponent'); // Q28：发起寻找对手
     this.currentResult = null; // 收起结算卡（Host）
-    this.battleStateInternal = 'editing';
-    this.playerPhaseInternal = 'matching';
-    this.setBuildControlsLocked(true); // 锁定当前 Build
+    // 控件锁定（playerMode 不注入 onBuildLocked → no-op；Web 由守卫后的 setBuildControlsLockedDom 处理）
+    this.setBuildControlsLocked(true);
     // Q25：按玩家段位抽取对手（保持随机匹配 + 不连续重复同一 Build）
     const finalIdx = pickOpponentForTier(tierOf(getProgress().rating), this.matchedIndex, Math.random);
     this.matchedIndex = finalIdx;
     const seq = buildMatchingSequence(finalIdx, OPPONENT_POOL.length);
-    // 主画布加载 A + 首个候选 B（previewFixed 固定相机）
+    // 主画布加载 A + 首个候选 B（previewFixed 固定相机）——A/B 同帧就绪
     this.draftB = cloneBuildDraft(OPPONENT_POOL[seq[0]]);
     this.loadMatchAB();
+    // ② 最后一次性提交状态（成功路径唯一出口）
+    this.battleStateInternal = 'editing';
+    this.playerPhaseInternal = 'matching';
     this.pushUI(); // Host：隐藏 Dock / 显示 Matching 中央 VS + 顶部「正在寻找对手…」
 
     const gen = ++this.matchingGeneration; // 本场 generation

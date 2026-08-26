@@ -12,7 +12,8 @@ export class WebInput implements PlatformInput {
     }
   }
 
-  /** Canvas 命中输入：pointerdown/mousedown/touchstart → 元素本地坐标（CSS px） */
+  /** Canvas 命中输入：pointerdown（支持 Pointer Event 时唯一绑定）/ 回退 mousedown+touchstart
+   *  （F-PLAYER-FLOW-ATOMIC-P0：旧实现三者全绑 → 一次物理点击重复派发多次 action） */
   bindPointer(target: EventTarget, handler: (x: number, y: number) => void): void {
     if (target == null) return;
     const node = target as HTMLElement;
@@ -37,8 +38,15 @@ export class WebInput implements PlatformInput {
       const scaleY = node.clientHeight > 0 && rh > 0 ? node.clientHeight / rh : 1;
       handler((cx - r.left) * scaleX, (cy - r.top) * scaleY);
     };
-    node.addEventListener('pointerdown', onDown);
-    node.addEventListener('mousedown', onDown);
-    node.addEventListener('touchstart', onDown, { passive: true });
+    // F-PLAYER-FLOW-ATOMIC-P0：支持 Pointer Event → 只绑 pointerdown（一次物理点击 = 一次
+    // 派发）；仅在不支持 Pointer Event 的环境回退 mouse/touch（二者互斥，不叠加）。
+    const supportsPointer =
+      typeof window !== 'undefined' && typeof window.PointerEvent === 'function';
+    if (supportsPointer) {
+      node.addEventListener('pointerdown', onDown);
+    } else {
+      node.addEventListener('mousedown', onDown);
+      node.addEventListener('touchstart', onDown, { passive: true });
+    }
   }
 }

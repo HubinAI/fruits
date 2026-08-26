@@ -157,7 +157,7 @@ describe('F-WX-2 Platform Core', () => {
     expect(() => wxInput.bindClick(el, () => {})).not.toThrow();
   });
 
-  it('PlatformInput：Web bindPointer 把 client 坐标换算为元素本地坐标', () => {
+  it('PlatformInput：Web bindPointer 坐标换算 + 去重绑定（F-PLAYER-FLOW-ATOMIC-P0：无 PointerEvent 环境回退 mousedown+touchstart，不叠加 pointerdown）', () => {
     const web = new WebInput();
     const listeners = new Map<string, (ev: unknown) => void>();
     const el: any = {
@@ -168,8 +168,12 @@ describe('F-WX-2 Platform Core', () => {
     web.bindPointer(el, (x, y) => {
       got = [x, y];
     });
-    // 模拟 pointerdown：clientX=110, clientY=220 → 本地 (100, 200)
-    listeners.get('pointerdown')!({ clientX: 110, clientY: 220 });
+    // node 无 window.PointerEvent → 回退绑定（旧三者全绑已改为互斥回退，杜绝一次物理点击重复派发）
+    expect(listeners.get('pointerdown'), '无 PointerEvent 不绑 pointerdown').toBeUndefined();
+    expect(listeners.get('mousedown'), '回退 mousedown').toBeTruthy();
+    expect(listeners.get('touchstart'), '回退 touchstart').toBeTruthy();
+    // 模拟 mousedown：clientX=110, clientY=220 → 本地 (100, 200)
+    listeners.get('mousedown')!({ clientX: 110, clientY: 220 });
     expect(got).toEqual([100, 200]);
     // 模拟 touchstart：touches[0]
     listeners.get('touchstart')!({ touches: [{ clientX: 55, clientY: 70 }] });

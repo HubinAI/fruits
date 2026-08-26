@@ -502,7 +502,11 @@ function addButton(parent: HTMLElement, text: string, onClick: () => void): HTML
 let selectedSlotA: string | null = null;
 let selectedSlotB: string | null = null;
 
-/** 锁定 / 解锁 A/B 全部 Build 控件 DOM（Fighting 时锁定；标志在 runtime） */
+/** 锁定 / 解锁 A/B 全部 Build 控件 DOM（Fighting 时锁定；标志在 runtime）。
+ *  F-PLAYER-FLOW-ATOMIC-P0：sideToggle 仅在 DEV（DEV_TOOLS_VISIBLE && !playerMode）
+ *  挂载（见 882 行赋值）——玩家模式/未创建时 guard 解引用，杜绝
+ *  「Cannot set properties of undefined (setting 'disabled')」。panelA/panelB 恒为
+ *  createElement 元素（即使玩家模式不挂载，querySelectorAll 也安全返回空）。 */
 function setBuildControlsLockedDom(locked: boolean): void {
   for (const sel of panelA.querySelectorAll('select')) {
     (sel as HTMLSelectElement).disabled = locked;
@@ -515,7 +519,8 @@ function setBuildControlsLockedDom(locked: boolean): void {
     (b as HTMLButtonElement).disabled = locked;
   }
   for (const b of presetButtons) b.disabled = locked;
-  sideToggle.disabled = locked;
+  // sideToggle 未创建（玩家模式 / PROD）→ 不解引用（守卫与实际变量状态一致）
+  if (sideToggle) sideToggle.disabled = locked;
 }
 
 /** 渲染一侧 Build 面板（Body / 轮径卡片 / 真实 Functional 挂点卡片 / Energy / 校验错误）。
@@ -783,7 +788,10 @@ let scenarioSelect: HTMLSelectElement | null = null;
 let toolsToggle!: HTMLButtonElement;
 let toolsHost!: HTMLDivElement;
 let toolsOpen = false;
-let sideToggle!: HTMLButtonElement;
+// F-PLAYER-FLOW-ATOMIC-P0：sideToggle 仅 DEV 挂载（if (!playerMode) 块内赋值）。
+// 声明为 `| null`（初始 null）——setBuildControlsLockedDom 的 `if (sideToggle)` 守卫
+// 与实际变量状态一致（旧 `!` 断言在玩家模式下是 undefined，解引用即崩溃）。
+let sideToggle: HTMLButtonElement | null = null;
 const presetButtons: HTMLButtonElement[] = [];
 
 if (!playerMode) {
@@ -1006,14 +1014,24 @@ function setMode(m: UiMode): void {
 }
 
 /* ---------- F-WX-5：PlayerGameRuntime（Web 接线；玩家流程唯一出口） ---------- */
+// F-PLAYER-FLOW-ATOMIC-P0：玩家模式不注入任何依赖未挂载 DEV DOM 的回调
+// （onBuildLocked/onPanelsChanged/isResetDevVisible/onDevResetReload 全部 DEV-only——
+// sideToggle/panelA·B/tools 等 DOM 在 playerMode 下不创建；注入即存在解引用 undefined
+// 的崩溃路径，见外网 TypeError: Cannot set properties of undefined (setting 'disabled')）。
+// 非玩家模式（普通 DEV Web）保留既有 DEV 接线（面板锁定/重渲染/重置刷新）。
+// onArenaFrame（场边红脉冲 + Death 定格）不依赖 DEV DOM（canvasWrap 恒存在），两侧共用。
 const runtime = new PlayerGameRuntime({
   host,
   battle: battleHost,
   sfx,
-  isResetDevVisible: () => new URLSearchParams(location.search).has('resetdev'),
-  onDevResetReload: () => location.reload(),
-  onPanelsChanged: () => renderPanelsOnly(),
-  onBuildLocked: (locked) => setBuildControlsLockedDom(locked),
+  ...(playerMode
+    ? {}
+    : {
+        isResetDevVisible: () => new URLSearchParams(location.search).has('resetdev'),
+        onDevResetReload: () => location.reload(),
+        onPanelsChanged: () => renderPanelsOnly(),
+        onBuildLocked: (locked: boolean) => setBuildControlsLockedDom(locked),
+      }),
   // Web-only 每帧表现：场边红脉冲（Warning）+ Death 定格恢复（timeScale）
   onArenaFrame: ({ previewMode, inWarning }) => {
     canvasWrap.classList.toggle('phase-warning', inWarning);
