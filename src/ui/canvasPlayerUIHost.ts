@@ -16,7 +16,13 @@
  */
 import { platform } from '../platform';
 import type { SafeInsets } from '../platform/types';
-import { computeMobileGarageLayout, type Rect, type MobileGarageLayout } from './mobileGarageLayout';
+import {
+  computeMobileGarageLayout,
+  computeGarageTopBarLayout,
+  type Rect,
+  type MobileGarageLayout,
+  type GarageTopBarTexts,
+} from './mobileGarageLayout';
 import { registry } from '../core/content';
 import {
   buildSnapshotFromDraft,
@@ -1316,7 +1322,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     } else if (this.panelView === 'gadgetPick') {
       this.drawGaragePanelGadgetPick(draft, panelRect.x, panelRect.w, py, pH);
     } else {
-      this.drawGaragePanelHome(panelRect.x, panelRect.w, py, pH);
+      this.drawGaragePanelHome(draft, panelRect.x, panelRect.w, py, pH);
     }
   }
 
@@ -1482,67 +1488,63 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /**
-   * 顶栏：金币 · 段位 · 能量（单行 ≤42 高，只信息；F-META-UX1：无页面大标题；
-   * 区域来自唯一布局源 topBarRect）。
-   * F-UX-3A：Garage 页顶栏最右两个很小的次级入口 [背包][更多]（不占配置区行、
-   * 明显弱于配置与 CTA）；Backpack/More 页顶栏不显示（它们有「← 返回车库」）。
+   * 顶栏：返回首页 · 金币 · 段位 · 能量（标签+条+数值）· 背包 · 更多——每组独立 rect
+   * 契约（F-GARAGE-MOBILE-SHELL-R1 Must#1），几何全部来自 computeGarageTopBarLayout
+   * （唯一布局源）；能量数值绘制在组内右对齐，永不向右溢出进入背包按钮。
+   * F-META-UX1：无页面大标题；F-UX-3A：Garage 页顶栏最右两个很小的次级入口 [背包][更多]
+   * （明显弱于配置区）；Backpack/More 页顶栏仅 金币/段位/能量（shell 模式）。
+   * F-HOME-1：配置页（garage）顶部最左「‹ 首页」返回小按钮。
    */
   private drawMobileTopBar(state: PlayerUIState, draft: BuildDraft, topBarRect: Rect): void {
     const p = state.progress;
     const tier = tierOf(p.rating);
     const body = registry.bodies.get(draft.bodyDefId);
     const x0 = topBarRect.x;
-    const w = topBarRect.w;
     const uT = topBarRect.y;
     const topH = topBarRect.h;
-    this.panel(x0 - 4, uT, w + 8, topH, V.panelSolid, V.borderSoft, V.radiusM);
-    // F-HOME-1：配置页（garage）顶部最左「‹ 首页」返回小按钮；金币/段位右移让位
-    const homeW = this.metaPage === 'garage' ? (this.isShort ? 44 : 56) : 0;
-    const homeGap = this.metaPage === 'garage' ? 8 : 0;
-    if (homeW > 0) {
-      this.button(x0, uT + (topH - (this.isShort ? 18 : 22)) / 2, homeW, this.isShort ? 18 : 22, 'nav:home', '‹ 首页', {});
-    }
-    const infoX = x0 + homeW + homeGap;
-    // 金币（最左）→ 段位（中）→ 能量（右偏）→ [背包][更多] 小按钮（最右，仅 Garage 页）
-    this.text(`金币 ${p.coin}`, infoX, uT + topH / 2 + 5, 14, V.primary, 'left', 700);
-    this.text(`段位 ${TIER_LABEL[tier]} ${p.rating}`, infoX + 134, uT + topH / 2 + 5, 14, V.textSecondary);
-    let eBarW = Math.min(120, w * 0.2);
-    let eBarX = x0 + w - eBarW;
-    if (this.metaPage === 'garage') {
-      // F-UX-3A：很小的次级入口（高 ≤24，宽 ~44~56；右对齐顶栏最右）
-      const tinyW = this.isShort ? 44 : 56;
-      const tinyH = this.isShort ? 18 : 22;
-      const tinyGap = 4;
-      const moreX = x0 + w - tinyW;
-      const bpX = moreX - tinyW - tinyGap;
-      this.button(bpX, uT + (topH - tinyH) / 2, tinyW, tinyH, 'nav:backpack', '背包', {});
-      this.button(moreX, uT + (topH - tinyH) / 2, tinyW, tinyH, 'nav:more', '更多', {});
-      // 能量条让位（压缩到小按钮左侧）
-      eBarW = Math.max(48, Math.min(90, w * 0.14));
-      eBarX = bpX - 10 - eBarW;
-    }
+    this.panel(x0 - 4, uT, topBarRect.w + 8, topH, V.panelSolid, V.borderSoft, V.radiusM);
     const snapshot = buildSnapshotFromDraft(draft, registry, 'customA');
     const energyRes = computeEnergy(snapshot, registry);
     const used = energyRes.error ? Number.NaN : energyRes.energy;
     const capacity = body?.energyCapacity ?? 0;
     const overload = Number.isFinite(used) && used > capacity;
-    this.text('能量', eBarX - 38, uT + topH / 2 + 5, 14, V.textSecondary);
+    const mode = this.metaPage === 'garage' ? 'garage' : 'shell';
+    const texts: GarageTopBarTexts = {
+      back: '‹ 首页',
+      coin: `金币 ${p.coin}`,
+      rating: `段位 ${TIER_LABEL[tier]} ${p.rating}`,
+      ratingShort: `${TIER_LABEL[tier]} ${p.rating}`,
+      ratingTier: TIER_LABEL[tier],
+      energyLabel: '能量',
+      energyValue: Number.isFinite(used) ? `${Math.round(used)}/${capacity}` : '?/?',
+      backpack: '背包',
+      more: '更多',
+    };
+    const tb = computeGarageTopBarLayout(topBarRect, this.profile, { mode }, texts);
+    const midY = uT + topH / 2 + 5;
+    if (tb.back) this.button(tb.back.x, tb.back.y, tb.back.w, tb.back.h, 'nav:home', texts.back, {});
+    if (tb.coin) this.text(texts.coin, tb.coin.x, midY, 14, V.primary, 'left', 700);
+    if (tb.rating) {
+      this.text(tb.ratingRender, tb.rating.x, midY, 14, V.textSecondary, 'left');
+    }
+    this.text(texts.energyLabel, tb.energyLabel.x, midY, 14, V.textSecondary);
     const pct = Number.isFinite(used) ? Math.min(100, (used / Math.max(capacity, 1)) * 100) : 0;
-    this.panel(eBarX, uT + topH / 2 - 4, eBarW, 10, '#1c2434', V.borderSoft, 5);
-    if (pct > 0) this.rect(eBarX, uT + topH / 2 - 4, eBarW * (pct / 100), 10, overload ? V.lose : V.ownBlue);
-    this.text(
-      Number.isFinite(used) ? `${Math.round(used)}/${capacity}` : '?/?',
-      eBarX + eBarW + 6,
-      uT + topH / 2 + 5,
-      14,
-      overload ? V.lose : V.textPrimary,
-      'left',
-    );
+    this.panel(tb.energyBar.x, tb.energyBar.y, tb.energyBar.w, tb.energyBar.h, '#1c2434', V.borderSoft, 5);
+    if (pct > 0) {
+      this.rect(tb.energyBar.x, tb.energyBar.y, tb.energyBar.w * (pct / 100), tb.energyBar.h, overload ? V.lose : V.ownBlue);
+    }
+    this.text(texts.energyValue, tb.energyValue.x + tb.energyValue.w, midY, 14, overload ? V.lose : V.textPrimary, 'right');
+    if (tb.backpack) this.button(tb.backpack.x, tb.backpack.y, tb.backpack.w, tb.backpack.h, 'nav:backpack', texts.backpack, {});
+    if (tb.more) this.button(tb.more.x, tb.more.y, tb.more.w, tb.more.h, 'nav:more', texts.more, {});
   }
 
-  /** 面板首页：2×2 主分类（车身/移动/武器/辅助）——F-LOBBY-GARAGE-DEMO-R1：按玩家认知分组，
-   * 轮径+驱动归入「移动」；功能件按类别拆为「武器」/「辅助」二级（点进去见具体硬点）。 */
-  private drawGaragePanelHome(px: number, pw: number, py: number, ph: number): void {
+  /** 面板首页：2×2 主分类（车身/移动/武器/辅助）+ 底部「当前车辆」摘要条。
+   *  F-LOBBY-GARAGE-DEMO-R1：按玩家认知分组，轮径+驱动归入「移动」；功能件按类别拆
+   *  「武器」/「辅助」二级。
+   *  F-GARAGE-MOBILE-SHELL-R1：2×2 卡片撑满面板可用高（正常档上限放宽，消除下半部
+   *  大块空白）；面板底部摘要条展示当前车辆名+驱动（复用原 CTA 空间，第一眼知道
+   *  正在配置哪辆车）。 */
+  private drawGaragePanelHome(draft: BuildDraft, px: number, pw: number, py: number, ph: number): void {
     const cells: Array<{ id: string; label: string }> = [
       { id: 'entry:body', label: '车身' },
       { id: 'entry-move', label: '移动' },
@@ -1551,16 +1553,28 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ];
     const gap = 8;
     const cellW = (pw - gap) / 2;
-    // F-WX-UI-2A/F-META-1：2×2 大卡片尽量取满 targetTouchH；矮面板时动态收缩。
-    // F-WX-MOBILE-RCA-1：short 档由 availableH 纯反推（不机械坚持 36，防溢出）；normal 保持 ≥48。
+    // F-GARAGE-MOBILE-SHELL-R1：底部摘要条（normal 40 / short 26）占面板底，上方全部给 2×2
+    const summaryH = this.isShort ? 26 : 40;
+    const sumY = py + ph - summaryH;
+    const cellAreaH = Math.max(1, ph - summaryH); // 卡片区 = py → sumY（贴住摘要条顶）
+    // F-WX-UI-2A/F-META-1：2×2 大卡片尽量取满可用高（撑满 = 无大块空面板）；
+    // F-WX-MOBILE-RCA-1：short 档由 availableH 纯反推（不机械坚持 36，防溢出）
     const cellH = this.isShort
-      ? Math.max(8, Math.floor((ph - gap) / 2))
-      : Math.max(this.minTouchH, Math.min(this.targetTouchH, Math.floor((ph - gap) / 2)));
+      ? Math.max(8, Math.floor((cellAreaH - gap) / 2))
+      : Math.max(this.minTouchH, Math.min(128, Math.floor((cellAreaH - gap) / 2)));
     for (let i = 0; i < 4; i++) {
       const col = i % 2;
       const row = Math.floor(i / 2);
       this.button(px + col * (cellW + gap), py + row * (cellH + gap), cellW, cellH, cells[i].id, cells[i].label, {});
     }
+    // 底部摘要条：当前车辆（只信息，不注册命中——不抢配置操作）
+    const body = registry.bodies.get(draft.bodyDefId);
+    const bodyName = body?.name ?? draft.bodyDefId;
+    const drive = resolveDriveMode(draft.drive) === 'stationary' ? '停驻' : '前进';
+    this.panel(px, sumY, pw, summaryH, V.panelSolid, V.borderSoft, V.radiusM);
+    this.text('当前车辆', px + 10, sumY + summaryH / 2, this.isShort ? 11 : 13, V.textSecondary);
+    this.text(bodyName, px + 10 + (this.isShort ? 48 : 64), sumY + summaryH / 2, this.isShort ? 11 : 14, V.textPrimary, 'left', 700);
+    this.text(`驱动·${drive}`, px + pw - 10, sumY + summaryH / 2, this.isShort ? 11 : 13, V.textSecondary, 'right');
   }
 
   /** 移动二级：前轮 / 后轮 / 驱动（一级「移动」后才出现；轮子细项 + 驱动同组） */
@@ -1646,13 +1660,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const colW = (pw - gap) / 2;
     const rows = Math.ceil(opts.length / 2);
     const contentH = rows * (cardH + gap) - gap;
-    const viewH = Math.max(80, py + ph - y - 8);
-    const maxScroll = Math.max(0, contentH - viewH);
-    if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
+    // F-GARAGE-MOBILE-SHELL-R1：内容超出时滚动按钮常驻面板底——可见窗口让出按钮高，
+    // 选项 clip/hit 不覆盖按钮（旧布局不遮纯属 6px 巧合；面板并入原 CTA 空间后
+    // 选项第 4 行 y 292-344 与按钮区 y 290-342 必然重叠，会吃掉滚动点击）。
+    const btnH = this.targetTouchH;
+    let viewH = Math.max(80, py + ph - y - 8);
+    let maxScroll = Math.max(0, contentH - viewH);
     if (maxScroll > 0) {
-      this.button(px, py + ph - this.targetTouchH, 60, this.targetTouchH, 'panel-scroll-up', '▲');
-      this.button(px + 68, py + ph - this.targetTouchH, 60, this.targetTouchH, 'panel-scroll-down', '▼');
+      viewH = Math.max(80, py + ph - y - 8 - btnH);
+      maxScroll = Math.max(0, contentH - viewH);
     }
+    if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
     const ctx = this.ctx;
     ctx.save();
     ctx.beginPath();
@@ -1682,6 +1700,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       }
     }
     ctx.restore();
+    // 滚动按钮最后注册（后注册优先命中——与选项网格重叠时按钮优先；视觉上选项
+    // 已被 clip 让出按钮区，双重保证滚动可点）
+    if (maxScroll > 0) {
+      this.button(px, py + ph - btnH, 60, btnH, 'panel-scroll-up', '▲');
+      this.button(px + 68, py + ph - btnH, 60, btnH, 'panel-scroll-down', '▼');
+    }
   }
 
   /**

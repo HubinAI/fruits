@@ -14,7 +14,7 @@
  *
  * State / Action / Gameplay 完全复用（Host 不决定规则）。
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { CanvasPlayerUIHost } from '../src/ui/canvasPlayerUIHost';
 import { bindPlatformCore } from '../src/platform/context';
@@ -166,6 +166,7 @@ function goGarage(env: HostEnv): void {
 describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
   afterEach(() => {
     bindPlatformCore(createWebCore());
+    vi.unstubAllGlobals();
   });
 
   it('验收1/2｜Garage 首屏：2×2 主分类在中央交互区 + 命中 ≥48px；无部件信息墙；无寻找对手（F-NAV-ACTION-OWNERSHIP-P0）', () => {
@@ -294,6 +295,15 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
   });
 
   it('验收3｜功能件选项面板滚动：武器入口 → 武器位 → 选项卡不超屏、面板内滚动可达更多', () => {
+    // F-GARAGE-MOBILE-SHELL-R1：canEquipPart 读全局库存（getInventory → platform.storage）——
+    // 注入富库存 localStorage stub，使全部选项可点（否则种子库存 4 件下「滚动出现新可点项」
+    // 数学上不可能：可点项全在初始可见窗口内）
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) =>
+        key === 'strongfruit.ownedParts.v2' ? JSON.stringify({ ...richInv(), __v: 2 }) : null,
+      setItem: () => {},
+      removeItem: () => {},
+    });
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState()); // 富库存：全部 19 个功能件选项可装备（可见）

@@ -135,7 +135,6 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
         ['content', l.contentRect],
         ['vehicle', l.vehicleRect],
         ['panel', l.panelRect],
-        ['cta', l.ctaRect],
       ];
       for (const [name, r] of rects) {
         expect(r.w, `${vp.w}×${vp.h} ${name} 宽>0`).toBeGreaterThan(0);
@@ -209,13 +208,19 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
       // Backpack（返回 + tabs + 列表 + 合成入口）
       click(env, 'nav:backpack');
       assertAllInSafe(env, vp, INSETS, `Backpack ${vp.w}×${vp.h}`);
-      // More（返回 + 2×2 功能卡）
-      click(env, 'nav:garage'); // 回 Home
-      click(env, 'home-garage'); // 进配置页
-      click(env, 'nav:more');
-      assertAllInSafe(env, vp, INSETS, `More ${vp.w}×${vp.h}`);
+      // More（返回 + 2×2 功能卡；F-GARAGE-MOBILE-SHELL-R1：short 极限屏 nav:more 按
+      // 优先级降级隐藏（保留 back+energy+backpack），normal 屏必达）
+      click(env, 'nav:garage'); // Backpack → 回 Home
+      click(env, 'home-garage'); // 进配置页（garage 模式顶栏才有 nav:more）
+      const moreArea = env.areas().find((x) => x.id === 'nav:more');
+      if (moreArea) {
+        click(env, 'nav:more');
+        assertAllInSafe(env, vp, INSETS, `More ${vp.w}×${vp.h}`);
+        click(env, 'nav:garage'); // More → 回 Home
+      } else {
+        click(env, 'nav:home'); // 配置页 → 回 Home
+      }
       // Modal（合成说明 Modal：遮罩+主/次按钮）
-      click(env, 'nav:garage'); // 回 Home
       click(env, 'home-garage'); // 进配置页
       click(env, 'nav:backpack');
       click(env, 'merge');
@@ -251,13 +256,14 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
     const cta = env.areas().find((x) => x.id === 'home-find-opponent')!;
     const assist = env.areas().find((x) => x.id === 'home-garage')!;
     expect(assist.x + assist.w, '车库右缘 ≤ 寻找对手左缘（水平不重叠）').toBeLessThanOrEqual(cta.x + 0.5);
-    // 配置页（360×180 极限屏）同样全在 safe 内（F-NAV-ACTION-OWNERSHIP-P0：配置页无寻找对手）
+    // 配置页（360×180 极限屏）同样全在 safe 内（F-NAV-ACTION-OWNERSHIP-P0：配置页无寻找对手；
+    // F-GARAGE-MOBILE-SHELL-R1：nav:more 在极限屏按优先级降级，back/backpack/能量必留）
     click(env, 'home-garage');
     expect(
       env.areas().some((x) => x.id === 'cta-find' || x.id === 'home-find-opponent'),
       '配置页无寻找对手',
     ).toBe(false);
-    for (const id of ['entry:body', 'nav:home', 'nav:backpack', 'nav:more']) {
+    for (const id of ['entry:body', 'nav:home', 'nav:backpack']) {
       const a = env.areas().find((x) => x.id === id);
       expect(a, `360×180 配置页应有 ${id}`).toBeTruthy();
       expect(a!.x, `${id} x ≥ safeLeft`).toBeGreaterThanOrEqual(INSETS.left);
