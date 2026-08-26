@@ -149,6 +149,8 @@ export class PlayerGameRuntime {
   private uiModeInternal: UiMode = 'build';
   private battleStateInternal: BattleState = 'editing';
   private playerPhaseInternal: PlayerPhase = 'garage';
+  /** F-DEMO-VISUAL-GATE-R4：E2E 探针缓存的阶段文案（只读诊断；正式构建无调用方） */
+  private lastPhaseCountdownText: string | null = null;
   private buildControlsLockedInternal = false;
   private garageSelected: string | null = null;
   private matchingGeneration = 0;
@@ -184,6 +186,10 @@ export class PlayerGameRuntime {
   }
   get playerPhase(): PlayerPhase {
     return this.playerPhaseInternal;
+  }
+  /** F-DEMO-VISUAL-GATE-R4：E2E 探针——最新阶段文案（只读诊断；不参与 Gameplay 规则） */
+  getProbeCountdownText(): string | null {
+    return this.lastPhaseCountdownText ?? null;
   }
   get buildControlsLocked(): boolean {
     return this.buildControlsLockedInternal;
@@ -357,6 +363,8 @@ export class PlayerGameRuntime {
     this.applyMatchingBfx(now); // Matching 候选 B 淡入缩放（须先于 render 应用，A 不动）
     this.deps.battle.render();
     const countdownText = this.pollArenaPhase(now); // 阶段倒计时 / 场边红脉冲 / Death 定格恢复
+    // F-DEMO-VISUAL-GATE-R4：缓存最新阶段文案供 E2E 探针只读诊断（不参与 Gameplay 规则）
+    this.lastPhaseCountdownText = countdownText;
     this.pollBattleResult(); // result 变化 → Ended 迁移 + 结算 + 结果展示（pushUI）
     this.deps.host.renderBattleFrame({
       battleState: this.battleStateInternal,

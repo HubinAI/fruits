@@ -21,7 +21,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e-gate": "npm run build:pages && node tests/_serve_pages.cjs & node tests/_e2e_gate.cjs"
+    "test:e2e-gate": "npm run build:e2e && node tests/_serve_pages.cjs & node tests/_e2e_gate.cjs",
+    "build:e2e": "vite build -c vite.e2e.config.ts"
   },
   "devDependencies": {
     "@types/matter-js": "^0.20.2",

@@ -263,7 +263,8 @@ describe('F-BATTLE-READABILITY-R1｜战斗HUD与命中反馈', () => {
 
   describe('F｜收束墙危险机关', () => {
     it('F1. Warning 墙半透明红填充 + 脉动描边（非纯矩形）；Closing 刺墙', () => {
-      const wallsBlock = RENDERER_SRC.slice(RENDERER_SRC.indexOf('arena.closingWalls'), RENDERER_SRC.indexOf('arena.closingWalls') + 900);
+      // F-DEMO-VISUAL-GATE-R4：锚点用绘制循环（getProbeHazardRects 也含 closingWalls，避免误锚）
+      const wallsBlock = RENDERER_SRC.slice(RENDERER_SRC.indexOf('for (const cw of arena.closingWalls)'), RENDERER_SRC.indexOf('for (const cw of arena.closingWalls)') + 900);
       expect(wallsBlock, 'Warning 墙半透明红填充').toContain("'#c0403a'");
       expect(wallsBlock, 'Warning 脉动描边').toContain("strokeShape(cw, '#e8a33c')");
       expect(RENDERER_SRC, 'Closing 锯齿刺墙').toContain('private drawSpikes');

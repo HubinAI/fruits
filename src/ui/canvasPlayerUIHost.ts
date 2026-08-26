@@ -316,9 +316,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (!ctx) throw new Error('Canvas 2D not supported');
     this.ctx = ctx;
     this.viewport = platform.createViewport(this.canvas);
-    // F-DEMO-FLOW-GATE-R3：暴露 host 实例供 E2E Gate 诊断（hitAreas/state 读取）；
-    // 生产无副作用（玩家页不引用此字段），不参与 Gameplay 规则。
-    (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
+    // F-DEMO-VISUAL-GATE-R4：host 探针仅存在于专用 E2E 构建（__E2E_PROBE__ define）——
+    // 正式 Pages/Web/微信构建编译期折叠为 false，window.__h 恒为 undefined（生产零调试对象）。
+    if (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__) {
+      (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
+    }
     // 输入唯一入口：Platform Input Adapter（F-WX-4）
     platform.input.bindPointer(this.canvas, (x, y) => this.handlePointer(x, y));
   }

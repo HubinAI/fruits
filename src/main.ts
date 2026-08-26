@@ -416,8 +416,11 @@ const host: PlayerUIHost = canvasUiMode
     })
   : new WebDomPlayerUIHost();
 host.mount(canvasWrap);
-// F-DEMO-FLOW-GATE-R3：暴露 host 实例供 E2E Gate 探针（不参与 Gameplay；生产无副作用）
-(globalThis as { __h?: typeof host }).__h = host;
+// F-DEMO-VISUAL-GATE-R4：E2E 探针（window.__h）仅存在于专用 E2E 构建（__E2E_PROBE__ define）；
+// 正式 Pages/Web/微信构建编译期折叠为 false → 生产零调试对象暴露。几何快照在 loop() 内注入。
+if (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__) {
+  (globalThis as { __h?: typeof host }).__h = host;
+}
 
 /* ---------- 稳定取景（Q02-CAM-R1）：DEV scenario 相机；build 玩家相机由 runtime 持有 ---------- */
 let currentCamera: ScenarioCamera | null = null;
@@ -1122,6 +1125,30 @@ if (reviewOn) {
 /* ---------- 主循环（F-WX-5：调度在入口，推进在 runtime.tick；dt 钳制在 runtime） ---------- */
 function loop(now: number): void {
   runtime.tick(now);
+  // F-DEMO-VISUAL-GATE-R4：E2E 构建（__E2E_PROBE__）每帧写入只读几何诊断快照——
+  // phase / A/B 屏幕 envelope / matchVehicleRects / transform / groundScreenY /
+  // 收束墙屏幕 rect / 阶段文案（供浏览器 Gate 硬断言；只读、不参与任何 Gameplay 规则；
+  // 正式构建编译期折叠为零开销）。
+  if (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__) {
+    try {
+      const orch = lab.orchestrator;
+      const snap = orch?.getRenderSnapshot?.();
+      const cam = renderer?.getProbeCamera?.() ?? null;
+      (globalThis as { __probe?: unknown }).__probe = {
+        playerPhase: runtime.playerPhase,
+        battleState: runtime.battleState,
+        battlePhase: orch?.phase ?? null,
+        phaseCountdownText: runtime.getProbeCountdownText?.() ?? null,
+        matchVehicleRects: battleHost.getMatchVehicleRects?.() ?? null,
+        transform: cam ? { scale: cam.scale, offsetX: cam.offsetX, offsetY: cam.offsetY } : null,
+        groundScreenY: cam ? cam.groundScreenY : null,
+        hazardRects: snap ? (renderer?.getProbeHazardRects?.(snap) ?? null) : null,
+        vehicleRects: snap ? (renderer?.getVehicleScreenRects(snap) ?? null) : null,
+      };
+    } catch {
+      // 探针失败静默（不因诊断影响游戏运行）
+    }
+  }
   platform.lifecycle.requestAnimationFrame(loop);
 }
 platform.lifecycle.requestAnimationFrame(loop);

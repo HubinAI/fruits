@@ -14,3 +14,12 @@ declare const __PAGES_PREVIEW__: boolean | undefined;
  * Pages / 微信构建未注入 → 运行时为 undefined（必须用 typeof 守卫）。
  */
 declare const __PLAYER_MODE__: boolean | undefined;
+
+/**
+ * F-DEMO-VISUAL-GATE-R4｜E2E 几何门禁探针构建标志的全局类型声明。
+ *
+ * 仅 `vite.e2e.config.ts` 的 `define.__E2E_PROBE__` 会注入真值（npm run build:e2e → dist-e2e）；
+ * 正式 Pages / Web / 微信构建未注入 → 运行时为 undefined（必须用 typeof 守卫）——
+ * window.__h / window.__probe 只读几何诊断仅存在于 E2E 专用构建，生产零调试对象暴露。
+ */
+declare const __E2E_PROBE__: boolean | undefined;

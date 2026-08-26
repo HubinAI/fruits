@@ -99,6 +99,17 @@ describe('F-DEMO-GATE-R2｜手机演示版本技术 Gate', () => {
     expect(e2eSrc, 'E2E 不直接调 runtime.actions').not.toMatch(/runtime\.actions/);
     // 输入/坐标唯一转换点仍存在（真实用户路径经 WebInput；不再以字符串断言点击通过）
     expect(HOST, '布局坐标注册（E2E 探针读真实 hitArea）').toContain('getHitAreasForTest');
+    // F-DEMO-VISUAL-GATE-R4：E2E 探针隔离——window.__h/__probe 仅存在于专用 E2E 构建
+    // （vite.e2e.config.ts define __E2E_PROBE__=true）；正式 pages define 显式 false →
+    // 编译期折叠（生产 bundle 零探针；运行时 undefined）。
+    const e2eVite = readFileSync('vite.e2e.config.ts', 'utf-8');
+    const pagesVite = readFileSync('vite.pages.config.ts', 'utf-8');
+    expect(e2eVite, 'E2E 专用构建注入 __E2E_PROBE__=true').toContain("__E2E_PROBE__: 'true'");
+    expect(pagesVite, '正式 Pages 显式 __E2E_PROBE__=false（编译期折叠）').toContain("__E2E_PROBE__: 'false'");
+    expect(pkg.scripts['build:e2e'], 'package.json 有 build:e2e（探针构建）').toBeTruthy();
+    const hostSrc = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
+    expect(hostSrc, 'host 探针受 __E2E_PROBE__ 守卫').toMatch(/typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__/);
+    expect(e2eSrc, 'E2E 几何断言读探针快照（window.__probe）').toContain('window.__probe');
     // Renderer 注入 surface（微信无 clientWidth / devicePixelRatio 形态差异安全）
     expect(RENDERER).toContain('return this.surface ? this.surface.width : this.canvas.clientWidth;');
     // 微信构建含触摸输入接线（WechatInput 归一化）

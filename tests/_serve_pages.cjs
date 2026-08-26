@@ -1,9 +1,11 @@
-// F-DEMO-FLOW-GATE-R3：本地静态服务器（构建产物 E2E 用）
+// F-DEMO-FLOW-GATE-R3 / F-DEMO-VISUAL-GATE-R4：本地静态服务器（构建产物 E2E 用）
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.join(__dirname, '..', 'dist-pages');
+// 服务目录参数化：F-DEMO-VISUAL-GATE-R4 起 E2E Gate 用 dist-e2e（含探针构建）；
+// 默认 dist-pages（正式产物）用于人工预览。
+const ROOT = path.join(__dirname, '..', process.env.E2E_DIR === 'e2e' ? 'dist-e2e' : 'dist-pages');
 const PORT = 8138;
 
 const MIME = {

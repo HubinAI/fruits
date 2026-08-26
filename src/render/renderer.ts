@@ -527,6 +527,53 @@ export class Renderer {
    * 以下方法均为纯表现（不决定 Gameplay / 不触发伤害）。
    */
 
+  /**
+   * F-DEMO-VISUAL-GATE-R4：E2E 只读几何诊断（不参与任何 Gameplay 规则；仅在 E2E 构建
+   * 的探针快照中被读取，正式构建无调用方 → 零开销）。返回相机 transform + 战斗舞台
+   * 地面线（逻辑 px）；非 battle 相机 → groundScreenY null。
+   */
+  getProbeCamera(): { scale: number; offsetX: number; offsetY: number; groundScreenY: number | null } {
+    return {
+      scale: this.transform.scale,
+      offsetX: this.transform.offsetX,
+      offsetY: this.transform.offsetY,
+      groundScreenY: this.battleCam ? this.battleCam.groundScreenY / this.viewDpr : null,
+    };
+  }
+
+  /** F-DEMO-VISUAL-GATE-R4：E2E 只读几何诊断——收束墙（hazard）屏幕矩形（逻辑 px）。 */
+  getProbeHazardRects(
+    snap: BattleRenderSnapshot,
+  ): Array<{ x: number; y: number; w: number; h: number }> {
+    const out: Array<{ x: number; y: number; w: number; h: number }> = [];
+    for (const cw of snap.arena.closingWalls) {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      const acc = (x: number, y: number): void => {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      };
+      if (cw.kind === 'polygons') {
+        for (const poly of cw.polygons) for (const p of poly.points) acc(p.x, p.y);
+      } else {
+        acc(cw.circle.center.x - cw.circle.radius, cw.circle.center.y - cw.circle.radius);
+        acc(cw.circle.center.x + cw.circle.radius, cw.circle.center.y + cw.circle.radius);
+      }
+      if (!Number.isFinite(minX)) continue;
+      out.push({
+        x: this.sx(minX) / this.viewDpr,
+        y: this.sy(minY) / this.viewDpr,
+        w: (this.sx(maxX) - this.sx(minX)) / this.viewDpr,
+        h: (this.sy(maxY) - this.sy(minY)) / this.viewDpr,
+      });
+    }
+    return out;
+  }
+
   /** 伤害数字（基础原语：直接加入一个浮动数字，不参与聚合；供测试与直接调用） */
   spawnDamageNumber(x: number, y: number, text: string, color: string): void {
     this.fx.push({ x, y, text, color, bornAt: this.now(), ttl: DAMAGE_NUMBER_TTL_MS });
