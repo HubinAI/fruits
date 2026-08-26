@@ -7,7 +7,8 @@
  *
  * 本文件沿真实 Runtime 锁定验收（禁止单帧位置测试代替完整阶段切换）：
  * A. 真实 PlanckBattleOrchestrator 推进 Active→Warning→Closing：每阶段 A/B 完整入画、
- *    地面线 78~84%、Closing/Warning 尺度相对 Active ≤15%、墙不遮挡车辆。
+ *    地面线 68~72%（视口高度，F-BATTLE-STAGE-COMPOSITION-P0 战斗舞台）、
+ *    Closing/Warning 尺度相对 Active ≤10%、地面线位移 ≤3px、墙不遮挡车辆。
  * B. 运行期跟随：step+render 多帧，尺度变化平滑（无骤缩/跳位）、车辆始终入画。
  * C. 极端构筑（长武器 / 无轮站桩 / 高车身 / 翻转姿态）：主要车身 + 武器不裁切。
  */
@@ -23,10 +24,10 @@ import type { CanvasSurface } from '../src/render/canvasSurface';
 import type { BattleRenderSnapshot, RenderVehicle } from '../src/battle/battleContract';
 
 const VP = { w: 844, h: 390 }; // 手机横屏（用户录屏目标视口）
-const SAFE_TOP = 56; // compact battle insetTop（逻辑 px）
-const SAFE_BOTTOM = 12; // compact battle insetBottom
-const GROUND_LINE_LO = 0.78;
-const GROUND_LINE_HI = 0.84;
+const SAFE_TOP = 56; // compact battle insetTop（逻辑 px；battleStageRect 顶 = HUD 下缘）
+// F-BATTLE-STAGE-COMPOSITION-P0：地面线契约改为「视口高度 68~72%」（取代旧 78~84% 安全区契约）
+const GROUND_LINE_LO = 0.68;
+const GROUND_LINE_HI = 0.72;
 
 function makeStubCtx(): CanvasRenderingContext2D {
   const handler = { get: () => () => ({ width: 0 }), set: () => true };
@@ -100,14 +101,17 @@ function vehicleScreenBounds(
 }
 
 function assertGroundLine(r: Renderer, arena: BattleRenderSnapshot['arena'], label: string): void {
+  // F-BATTLE-STAGE-COMPOSITION-P0：battleStageRect 契约——groundY ∈ 视口高 68~72%
+  // （Must#3：顶部避开 HUD、底部保留有限地面带）；地面下保留 28~32% 场景带。
   const t = r.transform;
   const groundScreenY = t.offsetY + arena.groundY * t.scale;
-  const safeTop = SAFE_TOP;
-  const safeBottom = SAFE_BOTTOM;
-  const safeH = VP.h - safeTop - safeBottom;
-  const ratio = (groundScreenY - safeTop) / safeH;
-  expect(ratio, `${label} 地面线 ${(ratio * 100).toFixed(1)}% ∈ [78%,84%]`).toBeGreaterThanOrEqual(GROUND_LINE_LO);
-  expect(ratio, `${label} 地面线 ${(ratio * 100).toFixed(1)}% ≤ 84%`).toBeLessThanOrEqual(GROUND_LINE_HI);
+  const ratio = groundScreenY / VP.h; // 视口比例（不是安全区比例）
+  expect(ratio, `${label} 地面线 ${(ratio * 100).toFixed(1)}% ∈ [68%,72%]（视口高）`).toBeGreaterThanOrEqual(GROUND_LINE_LO);
+  expect(ratio, `${label} 地面线 ${(ratio * 100).toFixed(1)}% ≤ 72%`).toBeLessThanOrEqual(GROUND_LINE_HI);
+  expect(1 - ratio, `${label} 地面带 ${((1 - ratio) * 100).toFixed(1)}% ∈ [28%,32%]`).toBeGreaterThanOrEqual(0.28 - 1e-9);
+  expect(1 - ratio, `${label} 地面带 ≤ 32%`).toBeLessThanOrEqual(0.32);
+  // 车辆不贴 HUD（groundScreenY 上方有主体空间）
+  expect(groundScreenY - SAFE_TOP, `${label} 车辆区高于 HUD 下缘`).toBeGreaterThanOrEqual(VP.h * 0.3);
 }
 
 function assertVehiclesInView(r: Renderer, snap: BattleRenderSnapshot, label: string): void {
@@ -149,7 +153,7 @@ describe('F-BATTLE-CAMERA-R2｜战斗跟随相机与收束构图', () => {
     bindPlatformCore(createWebCore());
   });
 
-  it('A1. 真实阶段切换：Active/Warning/Closing(End) 每阶段 A/B 完整入画 + 地面线 78~84% + 尺度 ≤15%', () => {
+  it('A1. 真实阶段切换：Active/Warning/Closing(End) 每阶段 A/B 完整入画 + 地面线 68~72% + 尺度 ≤10% + 地面线位移 ≤3px', () => {
     bindPlatformCore(createWebCore());
     const r = makeRenderer(VP.w, VP.h);
     // 肉装 boxBody 对局：战斗足够长，能真实推进经过 Warning → Closing（非单帧位置测试）
@@ -174,14 +178,18 @@ describe('F-BATTLE-CAMERA-R2｜战斗跟随相机与收束构图', () => {
       names.some((n) => n === 'Closing' || n === 'End'),
       `应记录 Closing 或 End（实际 ${names.join('/')}）`,
     ).toBe(true);
+    const activeGround = r.transform.offsetY + phases[0]!.snap.arena.groundY * r.transformScale;
     for (const rec of phases) {
       const phase = rec.phase;
       r.reframe(rec.snap, 'battle', { phase });
       const scale = r.transformScale;
       const delta = Math.abs(scale - activeScale) / activeScale;
-      expect(delta, `${phase} 尺度相对 Active ≤15%（实测 ${(delta * 100).toFixed(1)}%）`).toBeLessThanOrEqual(0.15);
+      expect(delta, `${phase} 尺度相对 Active ≤10%（实测 ${(delta * 100).toFixed(1)}%）`).toBeLessThanOrEqual(0.1 + 1e-9);
       assertGroundLine(r, rec.snap.arena, phase);
       assertVehiclesInView(r, rec.snap, phase);
+      // F-BATTLE-STAGE-COMPOSITION-P0：地面线位移 ≤3px（Active 首帧记录、阶段复用）
+      const groundHere = r.transform.offsetY + rec.snap.arena.groundY * r.transformScale;
+      expect(Math.abs(groundHere - activeGround), `${phase} 地面线位移 ≤3px`).toBeLessThanOrEqual(3);
     }
   });
 

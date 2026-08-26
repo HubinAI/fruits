@@ -11,7 +11,7 @@
  * 3. 关键页面无文字与按钮越界（mobileLandscape 验收系列已逐屏锁定；
  *    Gate 复算按钮/卡片 safe 区几何）；
  * 4. Battle 相机阶段切换无明显尺度突变（battleCameraR2 已锁定 Closing/Warning 相对
- *    Active ≤15%；Gate 复算 Active/Closing scale）；
+ *    Active ≤10%；Gate 复算 Active/Closing scale）；
  * 5. Result 所有奖励值位于安全区（resultDemoR2 已锁定 360×180~844×390；Gate 复算）。
  */
 import { describe, it, expect } from 'vitest';
@@ -126,9 +126,9 @@ describe('F-DEMO-GATE-R2｜手机演示版本技术 Gate', () => {
     }
   });
 
-  it('G4. Battle 相机阶段切换无明显尺度突变（复算 Active/Closing scale 差 ≤15%；battleCameraR2 已锁定完整阶段切换）', () => {
+  it('G4. Battle 相机阶段切换无明显尺度突变（复算 Active/Closing scale 差 ≤10%；battleCameraR2 已锁定完整阶段切换）', () => {
     // 源码常量：Closing/Warning 相对 Active 基准钳制 ±15%（battleCameraR2 A1 已实测）
-    expect(RENDERER, 'Closing/Warning 相对 Active ≤15%').toContain('BATTLE_CLOSE_SCALE_DELTA = 0.15');
+    expect(RENDERER, 'Closing/Warning 相对 Active ≤10%（F-BATTLE-STAGE-COMPOSITION-P0）').toContain('BATTLE_CLOSE_SCALE_DELTA = 0.1');
     expect(RENDERER, 'battle 构图基于 A+B envelope（不按全 arena 骤缩）').toContain('includeVehicle(snap.vehicleA);');
     expect(RENDERER, '收束墙不入 bounds（墙从画面边缘进入）').toMatch(/Closing\/End 不把两侧收束墙纳入 bounds/);
   });

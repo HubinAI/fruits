@@ -68,9 +68,16 @@ const PREVIEW_MARGIN_WORLD = 18;
  * Arena / 收束墙全量 fit（旧 Closing 全景把车辆缩成小模型；旧 corridor 预算高度
  * 在横向主导时产生车辆贴底 + 顶部大片无意义空白）。
  */
-const BATTLE_GROUND_LINE_RATIO = 0.81; // 地面线锚定在安全画面 78~84% 高度（中值）——车辆不再贴底
+// F-BATTLE-STAGE-COMPOSITION-P0：battleStageRect（显式舞台，非单一比例）——
+// 顶部避开 HUD（stageTop = HUD 下缘）、底部保留有限地面带（groundY ∈ 视口高 68%~72%，
+// 地面下 28%~32% 场景带）。groundScreenY 由 Active 首帧按「车辆完整位于 HUD 下」计算并
+// 记录到 battleCam，Warning/Closing/End 复用同一地面线（位移 0），杜绝压底 + 顶部死区。
+const BATTLE_STAGE_GROUND_MIN = 0.68; // groundY 下限（视口高比例；避开 HUD 上方死区）
+const BATTLE_STAGE_GROUND_MAX = 0.72; // groundY 上限（视口高比例；不重新贴底）
+const BATTLE_STAGE_VEHICLE_CLEAR = 12; // 车辆 envelope 顶与 HUD 下缘净空（逻辑 px）
 const BATTLE_ENV_PAD_X = 48; // A+B envelope 并集横向 padding（世界 px；有限活动空间，不过度拉远）
-const BATTLE_CLOSE_SCALE_DELTA = 0.15; // Closing/End 相对正常战斗（Active 基准）最大尺度变化
+const BATTLE_CLOSE_SCALE_DELTA = 0.1; // F-BATTLE-STAGE-COMPOSITION-P0：阶段切换尺度变化 ≤10%
+// （原 0.15 → 0.10；Must：Active/Warning/Closing/End 切换无骤缩）
 const BATTLE_SEPARATE_SCALE_MIN = 0.88; // 分离拉远下限（相对 Active 基准；车辆仍可识别）
 /** 构图安全区：左右 UI 阴影区不计入可用画布（CSS px，每侧内缩量） */
 const SAFE_INSET_X = 56;
@@ -338,10 +345,12 @@ export class Renderer {
    * 「中点追踪 + 分离有限拉远」（纯 Presentation，不触碰 Physics/结果）。
    */
   private battleCam: {
-    baseScale: number; // Active/Warning 构图基准 scale（Closing 相对此钳制 ±15%）
+    baseScale: number; // Active/Warning 构图基准 scale（Closing 相对此钳制 ±10%）
     baseEnvW: number; // A+B envelope 并集宽（含 padding）——分离拉远基准
     minScale: number; // 分离拉远下限（baseScale × BATTLE_SEPARATE_SCALE_MIN）
-    groundRatio: number; // 地面线锚定高度（安全画面 78~84%）
+    // F-BATTLE-STAGE-COMPOSITION-P0：战斗舞台地面线（视口逻辑 px，Active 首帧计算、
+    // 后续阶段复用 → 地面线位移 0；取代旧 groundRatio 78~84% 安全区比例）
+    groundScreenY: number;
     arenaW: number; // arena 宽（视野 clamp，不露出 arena 外）
     safeBaseX: number; // 安全区左缘（物理 px）
     safeW: number; // 安全区宽（物理 px）
@@ -1942,11 +1951,19 @@ export class Renderer {
     // 收束墙不参与 bounds（不会因墙全量 fit 骤缩），车辆始终是视觉主体。
     if (fit === 'battle') {
       if (phase === 'Active' || phase === '') {
+        // F-BATTLE-STAGE-COMPOSITION-P0：Active 首帧计算战斗舞台地面线并记录——
+        // Warning/Closing/End 复用同一 groundScreenY（地面线位移 0，阶段连续）。
+        const stageTop = baseY; // HUD 下缘（compact=56 / desktop=insetTop，物理 px）
+        const logicalH = this.viewHeight / this.viewDpr; // 视口逻辑高
+        // 车辆完整位于 HUD 下方所需的最小 groundY（vehicleClear 净空）；再 clamp 到视口 68~72%
+        const vehBottomNeed = stageTop / this.viewDpr + (bh * scale) / this.viewDpr + BATTLE_STAGE_VEHICLE_CLEAR;
+        let groundScreenYLog = Math.max(logicalH * BATTLE_STAGE_GROUND_MIN, vehBottomNeed);
+        groundScreenYLog = Math.min(groundScreenYLog, logicalH * BATTLE_STAGE_GROUND_MAX);
         this.battleCam = {
           baseScale: scale,
           baseEnvW: Math.max(1, bw),
           minScale: scale * BATTLE_SEPARATE_SCALE_MIN,
-          groundRatio: BATTLE_GROUND_LINE_RATIO,
+          groundScreenY: groundScreenYLog * this.viewDpr, // 物理 px（与 offsetY 同空间）
           arenaW: snap.arena.width,
           safeBaseX: baseX,
           safeW,
@@ -1962,14 +1979,14 @@ export class Renderer {
       this.battleCam = null;
     }
     // 内容定位：默认居中于安全区中心（offset 含安全区内缩量；玩家 Shell 预览用 top 内缩）。
-    // F-UX-3B：compact battle Active 底部锚定——车辆站在地面上（Ground 只改视觉厚度，
-    // 不居中留上下空隙；顶部的空间全部还给战斗主体）。
-    // F-BATTLE-CAMERA-R2：battle 统一「地面线锚定」——groundY 映射到安全画面 78~84%
-    // 高度，车辆站上地面线、上方全部还给战斗主体（消除旧「车辆贴底 + 顶部大片空白」）。
+    // F-BATTLE-STAGE-COMPOSITION-P0：battle 统一「战斗舞台地面线锚定」——groundY 映射到
+    // Active 首帧计算的 groundScreenY（视口高 68~72%，顶部避开 HUD、底部保留有限地面带），
+    // 后续阶段复用同一地面线（位移 0）。车辆站上地面线、主体居中，杜绝「压底 + 顶部死区」。
     const offsetX = baseX + (safeW - bw * scale) / 2 - minX * scale;
     const offsetY =
       fit === 'battle'
-        ? baseY + safeH * BATTLE_GROUND_LINE_RATIO - snap.arena.groundY * scale
+        ? (this.battleCam?.groundScreenY ?? baseY + safeH * BATTLE_STAGE_GROUND_MIN * 0.8) -
+          snap.arena.groundY * scale
         : framing?.mode === 'home'
           ? // F-HOME-DEMO-POLISH-R1：首页贴地锚定——groundY 落到取景区底缘上方
             // HOME_VEHICLE_BOTTOM_PAD（车辆站在地面线上，不悬浮、不沉入底部主条）
@@ -2109,8 +2126,9 @@ export class Renderer {
     const stepLimit = t.scale * 0.004;
     const scaleStep = Math.max(-stepLimit, Math.min(stepLimit, targetScale - t.scale));
     const scale = t.scale + scaleStep;
-    // 地面线恒定锚定（scale 变化时 offsetY 同步补偿）
-    const offsetY = cam.baseY + cam.safeH * cam.groundRatio - snap.arena.groundY * scale;
+    // F-BATTLE-STAGE-COMPOSITION-P0：地面线恒定锚定（Active 首帧计算的 groundScreenY；
+    // scale 分离变化时 offsetY 同步补偿 → 地面线位移 0，车辆始终站在同一舞台地面线）
+    const offsetY = cam.groundScreenY - snap.arena.groundY * scale;
     this.transform = { scale, offsetX: offX, offsetY };
   }
 
