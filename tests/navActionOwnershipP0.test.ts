@@ -91,7 +91,7 @@ describe('F-NAV-ACTION-OWNERSHIP-P0｜页面职责与动作白名单', () => {
     env.host.render(garageState());
     click(env, 'home-garage'); // → 配置页
     const ids = env.host.getHitAreasForTest().map((a) => a.id);
-    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets', 'nav:home']) {
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget', 'nav:home']) {
       expect(ids, `配置页有 ${id}`).toBeTruthy();
     }
     // 无寻找对手（home-find-opponent / 旧 cta-find 均不注册）

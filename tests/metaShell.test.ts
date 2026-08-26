@@ -111,7 +111,7 @@ function click(env: HostEnv, id: string): void {
 /** F-HOME-1：Home → 点「车库」→ 配置页 */
 function goGarage(env: HostEnv): void {
   click(env, 'home-garage');
-  expect(env.areas().some((a) => a.id === 'entry:body'), '已进入配置页').toBe(true);
+  expect(env.areas().some((a) => a.id === 'garage-cat:body'), '已进入配置页').toBe(true);
 }
 
 describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => {
@@ -156,14 +156,14 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
     // 配置页不再含 cta-find——寻找对手只属首页）
     click(env, 'home-garage');
     const ids = env.areas().map((a) => a.id);
-    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets', 'nav:home', 'nav:backpack', 'nav:more']) {
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget', 'nav:home', 'nav:backpack', 'nav:more']) {
       expect(ids, `配置页应含 ${id}`).toContain(id);
     }
     expect(ids.some((id) => id === 'cta-find' || id === 'home-find-opponent'), '配置页无寻找对手').toBe(false);
     // 「‹ 首页」返回 Home
     click(env, 'nav:home');
     expect(env.areas().some((a) => a.id === 'home-garage'), '返回首页').toBe(true);
-    expect(env.areas().some((a) => a.id === 'entry:body'), '首页无配置入口').toBe(false);
+    expect(env.areas().some((a) => a.id === 'garage-cat:body'), '首页无配置入口').toBe(false);
     // 排行榜 / 战令 / 宝箱槽 → 「功能开发中」（无假数据页）
     for (const id of ['home-rank', 'home-pass', 'home-chest-0', 'home-chest-3']) {
       click(env, id);
@@ -229,7 +229,7 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
     // 回 garage → metaPage 复位为 home（默认首页）
     env.host.render(garageState());
     expect(env.areas().some((a) => a.id === 'home-garage'), '回 garage 显示首页').toBe(true);
-    expect(env.areas().some((a) => a.id === 'entry:body'), '首页无配置入口').toBe(false);
+    expect(env.areas().some((a) => a.id === 'garage-cat:body'), '首页无配置入口').toBe(false);
     // 进 battle（fighting）→ 仍无局外元素
     env.host.render(garageState({ playerPhase: 'matchPreview', battleState: 'fighting' }));
     expect(env.areas().some((a) => a.id.startsWith('nav:') || a.id.startsWith('home-')), 'battle 无局外元素').toBe(false);

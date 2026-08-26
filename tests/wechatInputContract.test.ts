@@ -173,31 +173,26 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
         goGarage(env, vp, dpr); // F-HOME-1：Home → 配置页（原 Garage 面板断言）
         // F-META-2：Garage 无合成入口（合成在 Backpack）；本循环只验证 garage 页交互
         // F-NAV-ACTION-OWNERSHIP-P0：配置页无 cta-find（寻找对手只属首页——下方独立验证）
-        for (const id of ['entry:body', 'entry-move', 'entry-weapons']) {
+        for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon']) {
           const area = env.areas().find((a) => a.id === id);
           expect(area, `${vp.w}×${vp.h} DPR=${dpr} 应有 ${id}`).toBeTruthy();
           const raw = rawFor(area!, vp, dpr, false); // raw = window logical px
           env.fireTouch(raw.rawX, raw.rawY);
-          if (id === 'entry-move') {
-            // 移动一级 → 面板内前轮/后轮/驱动二级（首屏不暴露 frontWheel/rearWheel 入口）
-            expect(env.areas().some((a) => a.id === 'wheel-side:front')).toBe(true);
-            const front = env.areas().find((a) => a.id === 'wheel-side:front')!;
-            const raw2 = rawFor(front, vp, dpr, false);
-            env.fireTouch(raw2.rawX, raw2.rawY);
-            expect(env.fired['toggle']).toContain('frontWheel');
-          } else if (id === 'entry-weapons') {
-            // 武器一级 → 面板内武器位列表（weapon-slot:）
-            expect(env.areas().some((a) => a.id.startsWith('weapon-slot:'))).toBe(true);
+          if (id === 'garage-cat:move') {
+            // 移动分类 → 自动选中第一个挂点（后轮）+ 挂点 chip 行（后轮/前轮/驱动）
+            expect(env.fired['toggle']).toContain('rearWheel');
+            expect(env.areas().some((a) => a.id.startsWith('garage-slot:'))).toBe(true);
+          } else if (id === 'garage-cat:weapon') {
+            // 武器分类 → 自动选中第一个硬点 + 挂点 chip 行
+            const last = env.fired['toggle'].slice(-1)[0];
+            expect(last, '武器分类自动选中硬点').toBeTruthy();
+            expect(env.areas().some((a) => a.id.startsWith('garage-slot:'))).toBe(true);
           } else {
-            expect(env.fired['toggle']).toContain(id.slice(6));
+            expect(env.fired['toggle']).toContain('body');
           }
-          // 复位：回到 Garage 首屏（runtime 收起语义 + 面板返回 home）
+          // 复位：回到 Garage 首屏（runtime 收起语义；装配台无面板返回）
           env.host.render(garageState());
-          const back = env.areas().find((a) => a.id === 'panel-back');
-          if (back) {
-            const rawB = rawFor(back, vp, dpr, false);
-            env.fireTouch(rawB.rawX, rawB.rawY);
-          }
+          expect(env.areas().some((a) => a.id === 'panel-back'), '装配台无 panel-back').toBe(false);
           delete env.fired['find'];
           delete env.fired['toggle'];
         }
@@ -237,10 +232,10 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
       env.areas().some((a) => a.id === 'cta-find' || a.id === 'home-find-opponent'),
       '配置页无寻找对手',
     ).toBe(false);
-    const entry = env.areas().find((a) => a.id === 'entry:body')!;
-    expect(entry.x, 'entry 起点 ≥ insL').toBeGreaterThanOrEqual(insets.left);
-    expect(entry.x + entry.w, 'entry 右缘 ≤ W-insR').toBeLessThanOrEqual(vp.w - insets.right);
-    expect(entry.y + entry.h, 'entry 底缘 ≤ H-insB').toBeLessThanOrEqual(vp.h - insets.bottom);
+    const entry = env.areas().find((a) => a.id === 'garage-cat:body')!;
+    expect(entry.x, '分类 tab 起点 ≥ insL').toBeGreaterThanOrEqual(insets.left);
+    expect(entry.x + entry.w, '分类 tab 右缘 ≤ W-insR').toBeLessThanOrEqual(vp.w - insets.right);
+    expect(entry.y + entry.h, '分类 tab 底缘 ≤ H-insB').toBeLessThanOrEqual(vp.h - insets.bottom);
     const rawE = rawFor(entry, vp, 2, false);
     env.fireTouch(rawE.rawX, rawE.rawY);
     expect(env.fired['toggle']).toContain('body');

@@ -263,7 +263,7 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
       env.areas().some((x) => x.id === 'cta-find' || x.id === 'home-find-opponent'),
       '配置页无寻找对手',
     ).toBe(false);
-    for (const id of ['entry:body', 'nav:home', 'nav:backpack']) {
+    for (const id of ['garage-cat:body', 'nav:home', 'nav:backpack']) {
       const a = env.areas().find((x) => x.id === id);
       expect(a, `360×180 配置页应有 ${id}`).toBeTruthy();
       expect(a!.x, `${id} x ≥ safeLeft`).toBeGreaterThanOrEqual(INSETS.left);

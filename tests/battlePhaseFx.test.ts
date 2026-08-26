@@ -10,7 +10,7 @@
  * 6. Renderer 阶段视觉 smoke：Warning 刺墙预高亮描边；Closing 锯齿尖刺；
  *    Active 无高亮（回归不变）；spawnDeathFx 后 render 正常。
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { Renderer } from '../src/render/renderer';
 import type {
   BattleOrchestratorApi,
@@ -23,6 +23,13 @@ import {
   vehicleDeathAlpha,
   warningCountdown,
 } from '../src/presentation/battlePhaseFx';
+
+// 测试隔离：本文件多处改写全局 window.devicePixelRatio（含 Q08 设 2），
+// 若无还原会泄漏到后续独立 phoneLogical 路径测试（读 window.devicePixelRatio）→ 全量 suite 红。
+// 每个用例后复位为安全默认，避免污染进程级全局。
+afterEach(() => {
+  (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
+});
 
 /** 记录 ctx 调用的最小 stub（补齐 W2-FX-2 render 需要的 save/restore） */
 class CtxStub {

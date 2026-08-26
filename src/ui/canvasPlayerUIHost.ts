@@ -38,7 +38,7 @@ import { starTierEnergy } from '../core/buildSnapshot';
 import { getCount, canEquipPart, equippedDefIds, OFFICIAL_PARTS } from '../core/partInventory';
 import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/playerProgress';
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
-import { BODY_OPTIONS, WHEEL_OPTIONS, encodePartVal } from './playerUI';
+import { BODY_OPTIONS, WHEEL_OPTIONS, encodePartVal, decodePartVal } from './playerUI';
 import { resolveLayoutProfile, type LayoutProfile } from './layoutProfile';
 // F-PLAYER-CANVAS-COMPOSE-P0：手机逻辑画布尺寸单一来源（PlayerViewportTransform）；
 // 本地别名保持既有调用点不变（PHONE_LOGICAL_W/H 即 PLAYER_LOGICAL_W/H）。
@@ -253,6 +253,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private optScrollFor: string | null = null;
   /** F-LOBBY-GARAGE-DEMO-R1：装配面板视图（home 4 主分类 / movePick 移动二级 / weaponPick 武器位 / gadgetPick 辅助位 / options 选项） */
   private panelView: 'home' | 'movePick' | 'weaponPick' | 'gadgetPick' | 'options' = 'home';
+  /** F-GARAGE-BUILD-BOARD-P0：装配台常驻分类（单屏装配台取代多层菜单——右顶分类 tab 常驻）。 */
+  private garageCategory: 'body' | 'move' | 'weapon' | 'gadget' = 'body';
   /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机）；F-HOME-1：默认 Home（正式首页） */
   private metaPage: MetaPage = 'home';
   /** F-META-6：More 页子视图（功能卡主页 / 设置子页；UI-only，不进 Gameplay） */
@@ -602,56 +604,30 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.actions?.onToggleGarageSlot(id.slice(6));
       return;
     }
-    if (id === 'entry-move') {
-      // 移动一级入口 → 面板内「前轮/后轮/驱动」二级选择（内部态，不派发 action）
-      this.panelView = 'movePick';
+    if (id.startsWith('garage-cat:')) {
+      // F-GARAGE-BUILD-BOARD-P0：右顶常驻分类 tab（车身/移动/武器/辅助）——
+      // 切换分类 → 自动选中该分类第一个挂点（不再进入多层页面；重复点当前分类不收起）。
+      const cat = id.slice(11) as 'body' | 'move' | 'weapon' | 'gadget';
+      this.garageCategory = cat;
       this.panelScroll = 0;
+      const draft = this.lastState?.draft;
+      const slots = draft ? this.garageSlotsFor(draft) : [];
+      const sel = this.lastState?.garageSelected;
+      if (slots.length > 0 && sel !== slots[0].key) {
+        this.actions?.onToggleGarageSlot(slots[0].key);
+      }
       this.draw();
       return;
     }
-    if (id === 'entry-weapons') {
-      // 武器一级入口 → 面板内武器位列表（内部态）
-      this.panelView = 'weaponPick';
-      this.panelScroll = 0;
-      this.draw();
-      return;
-    }
-    if (id === 'entry-gadgets') {
-      // 辅助一级入口 → 面板内辅助件硬点列表（内部态）
-      this.panelView = 'gadgetPick';
-      this.panelScroll = 0;
-      this.draw();
-      return;
-    }
-    if (id.startsWith('wheel-side:')) {
-      // 轮子二级：选前轮/后轮 → 展开该槽选项（'wheel-side:' 11 字符，用 endsWith 判定）
-      this.actions?.onToggleGarageSlot(id.endsWith('front') ? 'frontWheel' : 'rearWheel');
-      return;
-    }
-    if (id.startsWith('weapon-slot:')) {
-      // 武器二级：选武器位 → 展开该位选项（'weapon-slot:' 12 字符）
+    if (id.startsWith('garage-slot:')) {
+      // F-GARAGE-BUILD-BOARD-P0：武器/辅助分类下的挂点 chip → 展开该挂点部件卡
       this.actions?.onToggleGarageSlot(id.slice(12));
-      return;
-    }
-    if (id.startsWith('gadget-slot:')) {
-      // 辅助二级：选辅助位 → 展开该位选项（'gadget-slot:' 12 字符）
-      this.actions?.onToggleGarageSlot(id.slice(12));
-      return;
-    }
-    if (id === 'slot:drive') {
-      // 移动二级：驱动 → 展开驱动选项（复用 drive 槽）
-      this.actions?.onToggleGarageSlot('drive');
       return;
     }
     if (id === 'panel-back') {
-      // 面板返回：移动/武器/辅助二级 → home；选项 → 收起选中槽（toggle 语义）
-      if (this.panelView === 'movePick' || this.panelView === 'weaponPick' || this.panelView === 'gadgetPick') {
-        this.panelView = 'home';
-        this.panelScroll = 0;
-        this.draw();
-      } else {
-        this.actions?.onToggleGarageSlot(this.lastState?.garageSelected ?? '');
-      }
+      // F-GARAGE-BUILD-BOARD-P0：装配台无面板内返回（唯一返回 = 左上「‹ 首页」nav:home）。
+      // 兼容旧命中（不应出现）：按收起选中槽处理。
+      this.actions?.onToggleGarageSlot(this.lastState?.garageSelected ?? '');
       return;
     }
     if (id === 'panel-scroll-up' || id === 'panel-scroll-down') {
@@ -1009,7 +985,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     h: number,
     id: string,
     label: string,
-    opts: { sub?: string; active?: boolean; locked?: boolean; disabled?: boolean; primary?: boolean } = {},
+    opts: {
+      sub?: string;
+      active?: boolean;
+      locked?: boolean;
+      disabled?: boolean;
+      primary?: boolean;
+      /** F-GARAGE-BUILD-BOARD-P0：左侧小图标（分类 tab 图形识别；Must#2） */
+      icon?: 'body' | 'wheel' | 'weapon' | 'gadget';
+    } = {},
   ): void {
     const fill = opts.disabled
       ? '#22303f'
@@ -1036,13 +1020,49 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // F-WX-UI-1：Mobile 字号层级（主按钮 17 / 卡名 17 / 辅助 14）；Desktop 保持旧值（15/12）
     const labelFs = this.isMobile ? 17 : 15;
     const subFs = this.isMobile ? 14 : 12;
-    if (opts.sub) {
+    if (opts.icon) {
+      // F-GARAGE-BUILD-BOARD-P0：分类 tab 小图标 + 文字（紧凑；图形识别当前分类）
+      this.drawTabIcon(opts.icon, x + (this.isShort ? 12 : 15), y + h / 2, this.isShort ? 6 : 7, !!opts.disabled);
+      this.text(label, x + (this.isShort ? 20 : 26), y + h / 2, this.isShort ? 12 : 14, labelColor, 'left', 700);
+    } else if (opts.sub) {
       this.text(opts.sub, x + w / 2, y + h * 0.3, subFs, opts.disabled ? C.textDark : C.textDim, 'center');
       this.text(label, x + w / 2, y + h * 0.66, labelFs, labelColor, 'center', 700);
     } else {
       this.text(label, x + w / 2, y + h / 2, labelFs, labelColor, 'center', 700);
     }
     if (!opts.disabled) this.hit(id, x, y, w, h);
+  }
+
+  /** F-GARAGE-BUILD-BOARD-P0：分类 tab 小图标（车身/轮/炮/方块）。 */
+  private drawTabIcon(kind: 'body' | 'wheel' | 'weapon' | 'gadget', cx: number, cy: number, s: number, disabled: boolean): void {
+    const ctx = this.ctx;
+    const col = disabled ? C.textDark : V.textPrimary;
+    ctx.save();
+    ctx.fillStyle = col;
+    if (kind === 'body') {
+      ctx.fillRect(cx - s * 0.9, cy - s * 0.3, s * 1.8, s * 0.55);
+      for (const wx of [cx - s * 0.5, cx + s * 0.5]) {
+        ctx.beginPath();
+        ctx.arc(wx, cy + s * 0.42, s * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (kind === 'wheel') {
+      ctx.beginPath();
+      ctx.arc(cx, cy, s * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = V.panelSolid;
+      ctx.beginPath();
+      ctx.arc(cx, cy, s * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (kind === 'weapon') {
+      ctx.fillRect(cx - s * 0.9, cy - s * 0.3, s * 1.5, s * 0.6);
+      ctx.beginPath();
+      ctx.arc(cx + s * 0.75, cy, s * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillRect(cx - s * 0.55, cy - s * 0.55, s * 1.1, s * 1.1);
+    }
+    ctx.restore();
   }
 
   private hit(id: string, x: number, y: number, w: number, h: number): void {
@@ -1409,24 +1429,268 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.text(state.blockReason, panelRect.x + panelRect.w / 2, panelRect.y - 8, 13, C.red, 'center', 600);
     }
 
-    // 装配面板（右侧中央；绘制与 HitArea 均基于 panelRect；F-META-2：Garage 无合成，
-    // 只处理配置——选中槽选项 / 轮子二级 / 武器二级 / 2×2 主分类）
+    // F-GARAGE-BUILD-BOARD-P0：单屏装配台（取代多层巨型文字菜单）——
+    // 右顶常驻分类 tab（车身/移动/武器/辅助，紧凑+高亮）→ 武器/辅助时挂点 chip 行 →
+    // 右主体部件卡（简图+名称+星级+能量+状态）→ 底部能量条+超载原因。
+    // 唯一返回 = 左上「‹ 首页」（drawMobileTopBar nav:home）；面板内无重复返回按钮（Must#1）。
     this.panel(panelRect.x, panelRect.y, panelRect.w, panelRect.h, V.panelSolid);
-    // F-UX-3A：背包/更多已移到顶栏最右小按钮（drawMobileTopBar），配置区独占整个面板；
-    // 内容区由 availableH 反推（F-WX-MOBILE-RCA-1：short 更紧凑）
+    const px = panelRect.x;
+    const pw = panelRect.w;
     const padY = this.isShort ? 6 : 10;
-    const py = panelRect.y + padY;
-    const pH = Math.max(1, panelRect.h - 2 * padY);
-    if (state.garageSelected) {
-      this.drawGaragePanelOptions(state, draft, panelRect.x, panelRect.w, py, pH);
-    } else if (this.panelView === 'movePick') {
-      this.drawGaragePanelMovePick(draft, panelRect.x, panelRect.w, py, pH);
-    } else if (this.panelView === 'weaponPick') {
-      this.drawGaragePanelWeaponPick(draft, panelRect.x, panelRect.w, py, pH);
-    } else if (this.panelView === 'gadgetPick') {
-      this.drawGaragePanelGadgetPick(draft, panelRect.x, panelRect.w, py, pH);
+    // 分类 tab 行（常驻顶部）
+    const tabH = this.isShort ? 26 : 32;
+    const tabY = panelRect.y + padY;
+    this.drawGarageCategoryTabs(px, pw, tabY, tabH);
+    // 挂点/槽位 chip 行（分类下的可选挂点；武器/辅助 = 车身全部硬点）
+    const slotY = tabY + tabH + (this.isShort ? 4 : 6);
+    const slotH = this.isShort ? 24 : 28;
+    const slots = this.garageSlotsFor(draft);
+    this.drawGarageSlotChips(px, pw, slotY, slotH, slots, state.garageSelected);
+    // 右主体：部件卡（所选槽位选项，按分类过滤）
+    const energyH = this.isShort ? 30 : 40;
+    const listTop = slotY + slotH + (this.isShort ? 4 : 6);
+    const listBot = panelRect.y + panelRect.h - padY - energyH - (this.isShort ? 4 : 6);
+    const listH = Math.max(8, listBot - listTop);
+    if (state.garageSelected && slots.some((s) => s.key === state.garageSelected)) {
+      this.drawGaragePartCards(state, draft, px, pw, listTop, listH);
     } else {
-      this.drawGaragePanelHome(draft, panelRect.x, panelRect.w, py, pH);
+      // 未选挂点（或分类与所选槽不匹配）：分类总览提示（不撑满空卡）
+      this.text(
+        this.garageCategory === 'weapon' || this.garageCategory === 'gadget' ? '选择一个部件位' : '选择部件',
+        px + pw / 2,
+        listTop + listH / 2 - 6,
+        this.isShort ? 12 : 14,
+        V.textSecondary,
+        'center',
+      );
+    }
+    // 底部：能量条 + 超载原因（靠近选择区，Must#6）
+    this.drawGarageEnergyBar(state, draft, panelRect, energyH);
+  }
+
+  /** F-GARAGE-BUILD-BOARD-P0：右顶常驻分类 tab（紧凑 + 图形识别 + 当前高亮；不占四个巨大方块）。 */
+  private drawGarageCategoryTabs(px: number, pw: number, y: number, h: number): void {
+    const tabs: Array<{ cat: 'body' | 'move' | 'weapon' | 'gadget'; label: string; icon: 'body' | 'wheel' | 'weapon' | 'gadget' }> = [
+      { cat: 'body', label: '车身', icon: 'body' },
+      { cat: 'move', label: '移动', icon: 'wheel' },
+      { cat: 'weapon', label: '武器', icon: 'weapon' },
+      { cat: 'gadget', label: '辅助', icon: 'gadget' },
+    ];
+    const gap = 6;
+    const w = (pw - gap * 3) / 4;
+    for (let i = 0; i < tabs.length; i++) {
+      const t = tabs[i];
+      const x = px + i * (w + gap);
+      this.button(x, y, w, h, `garage-cat:${t.cat}`, t.label, {
+        active: this.garageCategory === t.cat,
+        icon: t.icon,
+      });
+    }
+  }
+
+  /** F-GARAGE-BUILD-BOARD-P0：分类下的挂点/槽位 chip 行（车身=车身；移动=后轮/前轮/驱动；
+   *  武器/辅助=该车身全部硬点）。 */
+  private garageSlotsFor(draft: BuildDraft): Array<{ key: string; label: string }> {
+    if (this.garageCategory === 'body') return [{ key: 'body', label: '车身' }];
+    if (this.garageCategory === 'move') {
+      return [
+        { key: 'rearWheel', label: '后轮' },
+        { key: 'frontWheel', label: '前轮' },
+        { key: 'drive', label: '驱动' },
+      ];
+    }
+    const body = registry.bodies.get(draft.bodyDefId);
+    const hps = body ? editableSlots(body) : [];
+    return hps.length > 0 ? hps.map((hp) => ({ key: hp, label: slotLabel(hp) })) : [];
+  }
+
+  private drawGarageSlotChips(
+    px: number,
+    pw: number,
+    y: number,
+    h: number,
+    slots: Array<{ key: string; label: string }>,
+    selected: string | null,
+  ): void {
+    if (slots.length === 0) return;
+    const gap = 6;
+    const per = Math.min(slots.length, 4);
+    const w = (pw - gap * (per - 1)) / per;
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      const x = px + i * (w + gap);
+      if (x + w > px + pw + 0.5) break; // 不溢出面板
+      this.button(x, y, w, h, `garage-slot:${s.key}`, s.label, { active: selected === s.key });
+    }
+  }
+
+  /** F-GARAGE-BUILD-BOARD-P0：部件卡网格（2 列）——简图 + 名称 + 星级 + 能量 + 状态徽标。
+   *  点击 → onPickGarageOption（装备 → 左侧战车实时更新）；选中态（当前装备）明确。 */
+  private drawGaragePartCards(
+    state: PlayerUIState,
+    draft: BuildDraft,
+    px: number,
+    pw: number,
+    listTop: number,
+    listH: number,
+  ): void {
+    const slot = state.garageSelected;
+    if (!slot) return;
+    const opts = this.garageOptionsFiltered(state, slot);
+    const curVal = this.garageCurrentValue(draft, slot);
+    const gap = 8;
+    const cardW = (pw - gap) / 2;
+    const rows = Math.ceil(opts.length / 2);
+    const cardH = Math.max(
+      this.isShort ? 34 : 46,
+      Math.min(this.isShort ? 56 : 72, Math.floor((listH - gap * (rows - 1)) / Math.max(1, rows))),
+    );
+    const contentH = rows * (cardH + gap) - gap;
+    let viewH = listH;
+    let maxScroll = Math.max(0, contentH - viewH);
+    const btnH = this.targetTouchH;
+    if (maxScroll > 0) {
+      viewH = Math.max(40, listH - btnH);
+      maxScroll = Math.max(0, contentH - viewH);
+    }
+    if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(this.ox + px * this.scale, this.oy + listTop * this.scale, pw * this.scale, viewH * this.scale);
+    ctx.clip();
+    let yy = listTop - this.panelScroll;
+    for (let i = 0; i < opts.length; i++) {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const c = opts[i];
+      const x = px + col * (cardW + gap);
+      const y = yy + row * (cardH + gap);
+      const fully = y >= listTop - 0.5 && y + cardH <= listTop + viewH + 0.5;
+      if (fully) {
+        this.drawPartCard(x, y, cardW, cardH, c, c.v === curVal);
+      } else if (y < listTop + viewH && y + cardH > listTop) {
+        const fill = c.locked ? '#262e3d' : c.v === curVal ? C.blueDeep : V.panel;
+        this.rect(x, y, cardW, cardH, fill, c.locked ? V.enemyOrange : V.border, 1);
+      }
+    }
+    ctx.restore();
+    if (maxScroll > 0) {
+      this.button(px, listTop + viewH, 60, btnH, 'panel-scroll-up', '▲');
+      this.button(px + 68, listTop + viewH, 60, btnH, 'panel-scroll-down', '▼');
+    }
+  }
+
+  /** F-GARAGE-BUILD-BOARD-P0：单张部件卡（简图+名称+星级+能量+状态徽标；hit 与视觉同源）。 */
+  private drawPartCard(x: number, y: number, w: number, h: number, c: GarageOpt, equipped: boolean): void {
+    const iconS = this.isShort ? 10 : 13;
+    const iconCX = x + (this.isShort ? 16 : 20);
+    const iconCY = y + h / 2;
+    this.button(x, y, w, h, `opt:${c.v}`, '', {
+      active: equipped,
+      locked: c.locked,
+      disabled: !!c.locked,
+    });
+    this.drawPartIcon(c.v, iconCX, iconCY, iconS, !!c.locked);
+    const tx = x + (this.isShort ? 30 : 38);
+    const name = c.t.replace(/\s*★+$/, '');
+    this.text(name, tx, y + (this.isShort ? 10 : 13), this.isShort ? 11 : 13, c.locked ? C.textDark : V.textPrimary, 'left', 600);
+    const stars = c.t.match(/★+/)?.[0] ?? '';
+    if (stars) this.text(stars, tx, y + (this.isShort ? 21 : 29), this.isShort ? 9 : 11, C.gold, 'left');
+    const meta = c.meta ?? '';
+    this.text(meta, tx, y + (this.isShort ? 30 : 41), this.isShort ? 8 : 10, c.locked ? C.textDark : C.textDim, 'left');
+    // 状态徽标（右上角）
+    const badge = c.locked ? '未获得' : equipped ? '已装备' : '';
+    if (badge) {
+      const bw = this.isShort ? 28 : 34;
+      const bh = this.isShort ? 12 : 15;
+      this.panel(x + w - bw - 4, y + 3, bw, bh, equipped ? 'rgba(56,148,90,0.75)' : 'rgba(120,130,150,0.55)', undefined, 3);
+      this.text(badge, x + w - bw / 2 - 4, y + 3 + bh / 2, this.isShort ? 8 : 9, '#fff', 'center', 700);
+    }
+  }
+
+  /** F-GARAGE-BUILD-BOARD-P0：部件 mini 简图（按类别：车身=小车 / 轮=圆 / 武器=炮管 / 辅助=方块）。 */
+  private drawPartIcon(v: string, cx: number, cy: number, s: number, locked: boolean): void {
+    const ctx = this.ctx;
+    const col = locked ? 'rgba(140,150,170,0.55)' : V.textPrimary;
+    ctx.save();
+    ctx.fillStyle = col;
+    if (v === EMPTY_SLOT) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(cx - s, cy - s, s * 2, s * 2);
+      ctx.fillRect(cx - s * 0.25, cy - s * 0.25, s * 0.5, s * 0.5);
+      ctx.restore();
+      return;
+    }
+    const { defId } = decodePartVal(v);
+    const def = registry.functionals.get(defId);
+    const cat = def?.category;
+    if (cat === 'weapon') {
+      ctx.fillRect(cx - s, cy - s * 0.32, s * 1.7, s * 0.64);
+      ctx.beginPath();
+      ctx.arc(cx + s * 0.85, cy, s * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (cat === 'gadget') {
+      ctx.fillRect(cx - s * 0.55, cy - s * 0.55, s * 1.1, s * 1.1);
+    } else if (registry.bodies.get(defId)) {
+      ctx.fillRect(cx - s * 0.9, cy - s * 0.3, s * 1.8, s * 0.55);
+      for (const wx of [cx - s * 0.55, cx + s * 0.55]) {
+        ctx.beginPath();
+        ctx.arc(wx, cy + s * 0.42, s * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      ctx.beginPath();
+      ctx.arc(cx, cy, s * 0.75, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /** F-GARAGE-BUILD-BOARD-P0：选项按分类过滤（武器/辅助分类只显示对应类别部件 + 空槽）。 */
+  private garageOptionsFiltered(state: PlayerUIState, slot: string): GarageOpt[] {
+    const opts = this.garageOptions(state, slot);
+    if (this.garageCategory !== 'weapon' && this.garageCategory !== 'gadget') return opts;
+    const want = this.garageCategory === 'weapon' ? 'weapon' : 'gadget';
+    return opts.filter((o) => {
+      if (o.v === EMPTY_SLOT) return true;
+      const def = registry.functionals.get(decodePartVal(o.v).defId);
+      return def?.category === want;
+    });
+  }
+
+  /** F-GARAGE-BUILD-BOARD-P0：底部能量条 + 超载原因（靠近选择区反馈，Must#6）。 */
+  private drawGarageEnergyBar(state: PlayerUIState, draft: BuildDraft, panelRect: Rect, h: number): void {
+    const snapshot = buildSnapshotFromDraft(draft, registry, 'customA');
+    const energyRes = computeEnergy(snapshot, registry);
+    const used = energyRes.error ? Number.NaN : energyRes.energy;
+    const body = registry.bodies.get(draft.bodyDefId);
+    const capacity = body?.energyCapacity ?? 0;
+    const overload = Number.isFinite(used) && used > capacity;
+    const y = panelRect.y + panelRect.h - h - (this.isShort ? 4 : 6);
+    this.panel(panelRect.x + 2, y, panelRect.w - 4, h, overload ? 'rgba(60,24,28,0.55)' : '#141d2c', overload ? V.lose : V.borderSoft, V.radiusM);
+    const pct = Number.isFinite(used) ? Math.min(100, (used / Math.max(capacity, 1)) * 100) : 0;
+    this.text('能量', panelRect.x + 8, y + h / 2, this.isShort ? 10 : 12, V.textSecondary);
+    const barX = panelRect.x + 40;
+    const barW = Math.max(20, panelRect.w - 40 - (this.isShort ? 46 : 62));
+    this.panel(barX, y + h / 2 - 4, barW, 8, '#0f1524', undefined, 4);
+    if (pct > 0) {
+      this.rect(barX, y + h / 2 - 4, barW * (pct / 100), 8, overload ? V.lose : V.ownBlue);
+    }
+    this.text(
+      Number.isFinite(used) ? `${Math.round(used)}/${capacity}` : '?/?',
+      barX + barW + 6,
+      y + h / 2,
+      this.isShort ? 10 : 12,
+      overload ? V.lose : V.textPrimary,
+      'right',
+      700,
+    );
+    // 超载原因（靠近选择区，红色一行；不只有顶栏数字）
+    if (overload) {
+      const reason = state.blockReason ?? (energyRes.error ? String(energyRes.error) : '能量超载');
+      this.text(reason, panelRect.x + panelRect.w / 2, y - (this.isShort ? 8 : 10), this.isShort ? 9 : 11, V.lose, 'center', 600);
     }
   }
 
@@ -1648,170 +1912,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    *  F-GARAGE-MOBILE-SHELL-R1：2×2 卡片撑满面板可用高（正常档上限放宽，消除下半部
    *  大块空白）；面板底部摘要条展示当前车辆名+驱动（复用原 CTA 空间，第一眼知道
    *  正在配置哪辆车）。 */
-  private drawGaragePanelHome(draft: BuildDraft, px: number, pw: number, py: number, ph: number): void {
-    const cells: Array<{ id: string; label: string }> = [
-      { id: 'entry:body', label: '车身' },
-      { id: 'entry-move', label: '移动' },
-      { id: 'entry-weapons', label: '武器' },
-      { id: 'entry-gadgets', label: '辅助' },
-    ];
-    const gap = 8;
-    const cellW = (pw - gap) / 2;
-    // F-GARAGE-MOBILE-SHELL-R1：底部摘要条（normal 40 / short 26）占面板底，上方全部给 2×2
-    const summaryH = this.isShort ? 26 : 40;
-    const sumY = py + ph - summaryH;
-    const cellAreaH = Math.max(1, ph - summaryH); // 卡片区 = py → sumY（贴住摘要条顶）
-    // F-WX-UI-2A/F-META-1：2×2 大卡片尽量取满可用高（撑满 = 无大块空面板）；
-    // F-WX-MOBILE-RCA-1：short 档由 availableH 纯反推（不机械坚持 36，防溢出）
-    const cellH = this.isShort
-      ? Math.max(8, Math.floor((cellAreaH - gap) / 2))
-      : Math.max(this.minTouchH, Math.min(128, Math.floor((cellAreaH - gap) / 2)));
-    for (let i = 0; i < 4; i++) {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      this.button(px + col * (cellW + gap), py + row * (cellH + gap), cellW, cellH, cells[i].id, cells[i].label, {});
-    }
-    // 底部摘要条：当前车辆（只信息，不注册命中——不抢配置操作）
-    const body = registry.bodies.get(draft.bodyDefId);
-    const bodyName = body?.name ?? draft.bodyDefId;
-    const drive = resolveDriveMode(draft.drive) === 'stationary' ? '停驻' : '前进';
-    this.panel(px, sumY, pw, summaryH, V.panelSolid, V.borderSoft, V.radiusM);
-    this.text('当前车辆', px + 10, sumY + summaryH / 2, this.isShort ? 11 : 13, V.textSecondary);
-    this.text(bodyName, px + 10 + (this.isShort ? 48 : 64), sumY + summaryH / 2, this.isShort ? 11 : 14, V.textPrimary, 'left', 700);
-    this.text(`驱动·${drive}`, px + pw - 10, sumY + summaryH / 2, this.isShort ? 11 : 13, V.textSecondary, 'right');
-  }
-
-  /** 移动二级：前轮 / 后轮 / 驱动（一级「移动」后才出现；轮子细项 + 驱动同组） */
-  private drawGaragePanelMovePick(draft: BuildDraft, px: number, pw: number, py: number, ph: number): void {
-    const y = this.drawPanelBackRow(px, py);
-    const defs = this.garageChipDefs(draft);
-    const front = defs.find((d) => d.key === 'frontWheel');
-    const rear = defs.find((d) => d.key === 'rearWheel');
-    const drive = defs.find((d) => d.key === 'drive');
-    const gap = 8;
-    // F-LOBBY-GARAGE-DEMO-R1：前轮/后轮/驱动共 3 行二级；行高动态适配面板可用高度，
-    // 保证矮视口（如 844×390）也能完整绘制且不溢出（固定 targetTouchH 在 390 会截掉驱动行）。
-    const rows = 3;
-    const availH = (py + ph) - y - gap * (rows - 1);
-    const h = Math.max(this.minTouchH, Math.min(this.targetTouchH, Math.floor(availH / rows)));
-    if (h < this.minTouchH) return; // 面板过低，二级不可达
-    this.button(px, y, pw, h, 'wheel-side:front', '前轮', { sub: front?.value ?? '?' });
-    this.button(px, y + (h + gap), pw, h, 'wheel-side:rear', '后轮', { sub: rear?.value ?? '?' });
-    this.button(px, y + (h + gap) * 2, pw, h, 'slot:drive', '驱动', { sub: drive?.value ?? '?' });
-  }
-
-  /** 辅助二级：辅助件硬点列表（点辅助位 → 该位部件卡；与武器二级同构，按类别过滤） */
-  private drawGaragePanelGadgetPick(draft: BuildDraft, px: number, pw: number, py: number, ph: number): void {
-    const y = this.drawPanelBackRow(px, py);
-    const funcSlots = this.garageChipDefs(draft).filter(
-      (d) => d.key !== 'body' && d.key !== 'rearWheel' && d.key !== 'frontWheel' && d.key !== 'drive',
-    );
-    const gap = 8;
-    const h = this.targetTouchH;
-    let yy = y;
-    for (const s of funcSlots) {
-      if (yy + h > py + ph) break; // 面板内不溢出
-      // F-LOBBY-GARAGE-DEMO-R1：硬点标签只显示「方位」，类别含义由一级「辅助」承担（避免每个卡片重复「辅助」）
-      this.button(px, yy, pw, h, `gadget-slot:${s.key}`, s.label, { sub: s.value });
-      yy += h + gap;
-    }
-  }
-
-  /** 面板返回条（轮子/武器/选项二级顶部） */
-  private drawPanelBackRow(px: number, py: number): number {
-    this.button(px, py, 96, this.targetTouchH, 'panel-back', '‹ 返回', {});
-    return py + this.targetTouchH + 8;
-  }
-
-  /** 武器二级：武器位列表（点武器位 → 该位部件卡） */
-  private drawGaragePanelWeaponPick(
-    draft: BuildDraft,
-    px: number,
-    pw: number,
-    py: number,
-    ph: number,
-  ): void {
-    const y = this.drawPanelBackRow(px, py);
-    const funcSlots = this.garageChipDefs(draft).filter(
-      (d) => d.key !== 'body' && d.key !== 'rearWheel' && d.key !== 'frontWheel' && d.key !== 'drive',
-    );
-    const gap = 8;
-    const h = this.targetTouchH;
-    let yy = y;
-    for (const s of funcSlots) {
-      if (yy + h > py + ph) break; // 面板内不溢出
-      this.button(px, yy, pw, h, `weapon-slot:${s.key}`, s.label, { sub: s.value });
-      yy += h + gap;
-    }
-  }
-
-  /** 选项（已选槽位）：选项卡 2 列网格 + 面板内垂直滚动；选中自动收起由 runtime 保证 */
-  private drawGaragePanelOptions(
-    state: PlayerUIState,
-    draft: BuildDraft,
-    px: number,
-    pw: number,
-    py: number,
-    ph: number,
-  ): void {
-    const slot = state.garageSelected;
-    if (!slot) return;
-    const y = this.drawPanelBackRow(px, py);
-    const opts = this.garageOptions(state, slot);
-    const curVal = this.garageCurrentValue(draft, slot);
-    const gap = 8;
-    const cardH = this.targetTouchH;
-    const colW = (pw - gap) / 2;
-    const rows = Math.ceil(opts.length / 2);
-    const contentH = rows * (cardH + gap) - gap;
-    // F-GARAGE-MOBILE-SHELL-R1：内容超出时滚动按钮常驻面板底——可见窗口让出按钮高，
-    // 选项 clip/hit 不覆盖按钮（旧布局不遮纯属 6px 巧合；面板并入原 CTA 空间后
-    // 选项第 4 行 y 292-344 与按钮区 y 290-342 必然重叠，会吃掉滚动点击）。
-    const btnH = this.targetTouchH;
-    let viewH = Math.max(80, py + ph - y - 8);
-    let maxScroll = Math.max(0, contentH - viewH);
-    if (maxScroll > 0) {
-      viewH = Math.max(80, py + ph - y - 8 - btnH);
-      maxScroll = Math.max(0, contentH - viewH);
-    }
-    if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(this.ox + px * this.scale, this.oy + y * this.scale, pw * this.scale, viewH * this.scale);
-    ctx.clip();
-    let yy = y - this.panelScroll;
-    for (let i = 0; i < opts.length; i++) {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const c = opts[i];
-      const ox = px + col * (colW + gap);
-      const oy = yy + row * (cardH + gap);
-      const fully = oy >= y - 0.5 && oy + cardH <= y + viewH + 0.5;
-      if (fully) {
-        // 完全可见：绘制 + 注册命中（视觉 rect == hit rect）
-        this.button(ox, oy, colW, cardH, `opt:${c.v}`, c.t, {
-          sub: c.meta || undefined,
-          active: c.v === curVal,
-          locked: c.locked,
-          disabled: !!c.locked,
-        });
-      } else if (oy < y + viewH && oy + cardH > y) {
-        // 部分可见：只画不注册命中（半显边缘 = 可继续滚动提示；不产生超屏 hitArea）
-        const fill = c.locked ? '#262e3d' : c.v === curVal ? C.blueDeep : V.panel;
-        this.rect(ox, oy, colW, cardH, fill, c.locked ? V.enemyOrange : V.border, 1);
-        this.text(c.t, ox + colW / 2, oy + cardH / 2, 15, c.locked ? V.textFaint : V.textPrimary, 'center', 600);
-      }
-    }
-    ctx.restore();
-    // 滚动按钮最后注册（后注册优先命中——与选项网格重叠时按钮优先；视觉上选项
-    // 已被 clip 让出按钮区，双重保证滚动可点）
-    if (maxScroll > 0) {
-      this.button(px, py + ph - btnH, 60, btnH, 'panel-scroll-up', '▲');
-      this.button(px + 68, py + ph - btnH, 60, btnH, 'panel-scroll-down', '▼');
-    }
-  }
-
   /**
    * F-META-UX2：合成说明 Modal（Backpack 底部「合成」入口触发；不切换全屏页面）。
    * 展示 5×1★ + 金币成本 + 随机 2★ 规则；条件不满足时 primary 显示原因并禁用（不注册命中）。

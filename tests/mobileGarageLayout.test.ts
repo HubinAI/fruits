@@ -219,7 +219,7 @@ describe('F-WX-UI-F1｜CanvasPlayerUIHost 与唯一布局源一致', () => {
       '配置页无寻找对手命中区',
     ).toBe(false);
     // 2×2 主分类入口全部落在 panelRect 内（绘制与命中同源）
-    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets']) {
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget']) {
       const a = areas.find((x) => x.id === id);
       expect(a, `应有 ${id}`).toBeTruthy();
       expect(a!.x, `${id} x ≥ panel.x`).toBeGreaterThanOrEqual(l.panelRect.x);

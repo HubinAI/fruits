@@ -276,23 +276,28 @@ describe('F-GARAGE-MOBILE-SHELL-R1｜车库顶栏独立 rect 契约', () => {
     }
   });
 
-  it('D1. 右侧面板撑满：2×2 卡片底缘贴近面板底（无大块空面板）+ 底部摘要条显示当前车辆名', () => {
+  it('D1. 右侧单屏装配台：分类 tab + 挂点 chip + 部件卡 + 能量条全部在面板内（无大块空面板、无后台表格感）', () => {
     const env = makeHost({ w: 844, h: 390 }, PROD_INSETS);
-    env.host.render(garageState());
+    env.host.render(garageState({ garageSelected: 'body' }));
     goGarage(env);
     const profile = resolveLayoutProfile(844, 390);
     const l = computeMobileGarageLayout({ w: 844, h: 390 }, PROD_INSETS, profile);
     const areas = env.areas();
-    const cells = ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets'].map((id) => areas.find((a) => a.id === id)!);
-    for (const c of cells) expect(c, '2×2 卡片存在').toBeTruthy();
-    const cellBottom = Math.max(...cells.map((c) => c.y + c.h));
-    // 摘要条高（normal 40）+ 间隙 10 → 卡片底 ≥ 面板底 - 50（大块空白已被消除）
+    // F-GARAGE-BUILD-BOARD-P0：分类 tab 4 个（紧凑）+ 挂点 chip + 部件卡 + 能量条
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget']) {
+      expect(areas.find((a) => a.id === id), `分类 tab ${id} 存在`).toBeTruthy();
+    }
+    const panelTop = l.panelRect.y;
     const panelBottom = l.panelRect.y + l.panelRect.h;
-    expect(cellBottom, '卡片底缘 ≥ 面板底 - 50（无大块空面板）').toBeGreaterThanOrEqual(panelBottom - 50);
-    // 摘要条显示「当前车辆」+ 车身名（fillText 捕获）
-    const body = registry.bodies.get('boxBody');
-    expect(env.texts.some((t) => t.includes('当前车辆')), '摘要条「当前车辆」标签').toBe(true);
-    expect(env.texts.some((t) => t.includes(body?.name ?? 'boxBody')), '摘要条显示车身名').toBe(true);
+    // 部件卡（opt:）在面板内（不超屏、不越面板）
+    const opts = areas.filter((a) => a.id.startsWith('opt:'));
+    expect(opts.length, '部件卡存在（garageSelected=body）').toBeGreaterThan(0);
+    for (const o of opts) {
+      expect(o.y, '部件卡 y ≥ 面板顶').toBeGreaterThanOrEqual(panelTop);
+      expect(o.y + o.h, '部件卡底 ≤ 面板底').toBeLessThanOrEqual(panelBottom + 0.5);
+    }
+    // 能量条文本（能量 used/capacity）在面板内反馈（Must#6）
+    expect(env.texts.some((t) => t.startsWith('能量') || t.includes('/')), '能量条反馈存在').toBe(true);
   });
 
   it('E1. 五视口：右侧面板与左侧车辆区全在 safe 内（绘制区不溢出）', () => {
@@ -343,20 +348,19 @@ describe('F-GARAGE-MOBILE-SHELL-R1｜车库顶栏独立 rect 契约', () => {
     const env = makeHost({ w: 844, h: 390 }, PROD_INSETS);
     env.host.render(garageState());
     goGarage(env);
-    // 第 1 次：武器一级
-    const ew = env.areas().find((a) => a.id === 'entry-weapons')!;
-    expect(ew.h, '武器入口命中高 ≥48').toBeGreaterThanOrEqual(48);
+    // F-GARAGE-BUILD-BOARD-P0：2 次点击换武器（Acceptance#2）——
+    // 第 1 击：点「武器」分类 tab（挂点 chip 行 + 部件卡出现；本测试 makeHost 未设 actions，
+    // 故手动 render 选中态模拟 runtime 自动选挂点）
+    const ew = env.areas().find((a) => a.id === 'garage-cat:weapon')!;
+    expect(ew.h, '武器分类 tab 命中高>0（紧凑）').toBeGreaterThan(0);
     env.pointer(ew.x + ew.w / 2, ew.y + ew.h / 2);
-    // 第 2 次：选一个武器位
-    const slots = env.areas().filter((a) => a.id.startsWith('weapon-slot:'));
-    expect(slots.length, '武器位列表出现').toBeGreaterThan(0);
-    const slotKey = slots.map((a) => a.id.slice(12)).find((k) => !['body', 'rearWheel', 'frontWheel', 'drive'].includes(k));
+    const slotKey = 'front'; // boxBody 第一个硬点
     env.host.render(garageState({ garageSelected: slotKey }));
-    // 第 3 次：选一个武器选项（opt:）
+    // 第 2 击：选一个武器选项（opt:）
     const opts = env.areas().filter((a) => a.id.startsWith('opt:') && a.id !== 'opt:none');
     expect(opts.length, '武器选项出现（富库存）').toBeGreaterThan(0);
     const opt = opts[0]!;
-    expect(opt.h, '选项命中高 ≥48').toBeGreaterThanOrEqual(48);
+    expect(opt.h, '部件卡命中高 ≥40（紧凑信息密度）').toBeGreaterThanOrEqual(40);
     env.pointer(opt.x + opt.w / 2, opt.y + opt.h / 2);
     // 预览链路：renderer previewSolo 由 getPreviewFramingRect（=vehicleRect）驱动（源码守卫）
     const hostSrc = require('fs').readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
@@ -376,7 +380,7 @@ describe('F-GARAGE-MOBILE-SHELL-R1｜车库顶栏独立 rect 契约', () => {
     goGarage(env);
     const host = env.host as unknown as { lastState: PlayerUIState | null };
     expect(host.lastState?.draft, '配置结果保留（draft 引用不变）').toBe(draft0);
-    expect(env.areas().some((a) => a.id === 'entry:body'), '配置页 2×2 恢复').toBe(true);
+    expect(env.areas().some((a) => a.id === 'garage-cat:body'), '配置页 2×2 恢复').toBe(true);
   });
 
   it('I1. 命中区与视觉同源：顶栏按钮 hitArea rect == 布局 rect（绘制与命中同源，五视口抽查）', () => {

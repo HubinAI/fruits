@@ -184,7 +184,8 @@ describe('F-META-4｜通用 Modal / Popup Foundation', () => {
     click(env, 'modal-primary');
     // 页面状态不丢：选项面板仍在（garageSelected 保持）
     expect(env.areas().filter((a) => a.id.startsWith('opt:')).length, '关闭后选项面板保持').toBe(optBefore);
-    expect(env.areas().some((a) => a.id === 'panel-back'), '面板返回按钮仍在').toBe(true);
+    expect(env.areas().some((a) => a.id === 'garage-cat:body'), '分类 tab 常驻（装配台无返回按钮）').toBe(true);
+    expect(env.areas().some((a) => a.id === 'panel-back'), '装配台无面板返回按钮').toBe(false);
   });
 
   it('验收4｜621×351 / 844×390 正常：Modal 卡片与按钮全在屏内', () => {

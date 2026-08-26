@@ -195,7 +195,7 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     click(env, 'home-vehicle');
     expect(env.texts().some((s) => s === HOME_TIPS[0]), '气泡出现').toBe(true);
     click(env, 'home-garage');
-    expect(env.host.getHitAreasForTest().some((a) => a.id === 'entry:body'), '已进配置页').toBe(true);
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'garage-cat:body'), '已进配置页').toBe(true);
     // 回 Home → 气泡已关闭（返回这次绘制的新增文本不再含 tips 文字）
     const back = env.host.getHitAreasForTest().find((a) => a.id === 'nav:home')!;
     const beforeBack = env.texts().length;
@@ -283,11 +283,11 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     // 首页只有「车库」入口按钮
     const homeGarage = env.host.getHitAreasForTest().find((a) => a.id === 'home-garage')!;
     expect(homeGarage, '首页保留车库入口').toBeTruthy();
-    expect(env.host.getHitAreasForTest().some((a) => a.id === 'entry:body'), '首页无组装入口').toBe(false);
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'garage-cat:body'), '首页无组装入口').toBe(false);
     // 点车库 → 独立组装界面（车身/移动/武器/辅助 4 主分类全部在此）
     click(env, 'home-garage');
     const ids = env.host.getHitAreasForTest().map((a) => a.id);
-    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets', 'nav:home', 'nav:backpack', 'nav:more']) {
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget', 'nav:home', 'nav:backpack', 'nav:more']) {
       expect(ids, `车库页应含 ${id}`).toContain(id);
     }
     // F-NAV-ACTION-OWNERSHIP-P0：车库页无寻找对手（cta-find/home-find-opponent 均不注册）

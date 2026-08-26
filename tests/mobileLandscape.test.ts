@@ -178,11 +178,12 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       // F-LOBBY-GARAGE-DEMO-R1：轮子+驱动归入「移动」；功能件按类别拆「武器」/「辅助」
       // F-META-2：Garage 职责纯化——首屏无合成（合成在 Backpack），只 2×2 主分类
       // F-NAV-ACTION-OWNERSHIP-P0：配置页不再含 cta-find（寻找对手只属首页）
-      const ids = ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets'];
+      const ids = ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget'];
       for (const id of ids) {
         const a = env.host.getHitAreasForTest().find((x) => x.id === id);
         expect(a, `${vp.w}×${vp.h} 应有 ${id}`).toBeTruthy();
-        expect(a!.h, `${vp.w}×${vp.h} ${id} 命中高 ≥48`).toBeGreaterThanOrEqual(48);
+        // F-GARAGE-BUILD-BOARD-P0：分类 tab 为紧凑 chip（Must#2 不占四个巨大方块）——命中=视觉，不要求 48px
+        expect(a!.h, `${vp.w}×${vp.h} ${id} 命中高>0（紧凑 tab）`).toBeGreaterThan(0);
         expect(a!.x, `${id} x 在 safe area 内`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.left);
         expect(a!.x + a!.w, `${id} 右缘在 safe area 内`).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right);
         expect(a!.y, `${id} y 在 safe area 内`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.top);
@@ -202,11 +203,11 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       expect(areas(env, 'merge-close')).toHaveLength(0);
       // F-WX-9B：首屏只有 4 个一级配置入口（车身/移动/武器/辅助），无第 5 个 entry
       const entries = env.host.getHitAreasForTest()
-        .filter((a) => a.id.startsWith('entry'))
+        .filter((a) => a.id.startsWith('garage-cat'))
         .map((a) => a.id);
-      expect(entries, `${vp.w}×${vp.h} 一级配置入口恰好 4 个`).toHaveLength(4);
-      for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets']) {
-        expect(entries, `${vp.w}×${vp.h} 应含一级入口 ${id}`).toContain(id);
+      expect(entries, `${vp.w}×${vp.h} 分类 tab 恰好 4 个`).toHaveLength(4);
+      for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget']) {
+        expect(entries, `${vp.w}×${vp.h} 应含分类 tab ${id}`).toContain(id);
       }
       // F-NAV-ACTION-OWNERSHIP-P0：配置页无寻找对手（旧 Garage CTA 契约已删除）
       expect(
@@ -217,64 +218,65 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     }
   });
 
-  it('F-WX-UI-1｜一次只处理一个配置决策：点分类才展开；轮子/武器二级不混显；展开时车辆预览仍可见', () => {
+  it('F-GARAGE-BUILD-BOARD-P0｜单屏装配台：右顶分类 tab 常驻 + 挂点 chip + 部件卡；一次只处理一个配置决策', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState());
     goGarage(env); // F-HOME-1：Home → 配置页
-    // 点「车身」→ 派发 onToggleGarageSlot('body') → runtime 侧展开
-    const entryBody = env.host.getHitAreasForTest().find((a) => a.id === 'entry:body')!;
-    env.pointer(entryBody.x + entryBody.w / 2, entryBody.y + entryBody.h / 2);
+    // 分类 tab 行恒存在（车身/移动/武器/辅助 4 个，紧凑）
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget']) {
+      expect(env.host.getHitAreasForTest().some((a) => a.id === id), `分类 tab ${id} 存在`).toBe(true);
+    }
+    // 点「车身」→ 派发 onToggleGarageSlot('body') → runtime 侧展开 → 部件卡
+    const tabBody = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:body')!;
+    env.pointer(tabBody.x + tabBody.w / 2, tabBody.y + tabBody.h / 2);
     expect(env.fired['toggle']).toContain('body');
     env.host.render(richGarageState({ garageSelected: 'body' }));
-    // 展开态：只有 body 选项；不混显其它分类/轮子/武器位
-    expect(areas(env, 'opt:').length).toBeGreaterThan(0);
-    expect(areas(env, 'entry:')).toHaveLength(0);
-    expect(areas(env, 'entry-wheels')).toHaveLength(0);
-    expect(areas(env, 'wheel-side:')).toHaveLength(0);
-    expect(areas(env, 'weapon-slot:')).toHaveLength(0);
-    // 点「移动」→ 面板内前轮/后轮/驱动二级（首屏不暴露前/后轮一级入口）
-    env.host.render(richGarageState()); // 收起（runtime 选完即收起语义）
-    const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'entry-move')!;
-    env.pointer(entryW.x + entryW.w / 2, entryW.y + entryW.h / 2);
-    expect(areas(env, 'wheel-side:front').length).toBeGreaterThan(0); // 前轮二级
-    expect(areas(env, 'wheel-side:rear').length).toBeGreaterThan(0); // 后轮二级
-    expect(areas(env, 'slot:drive').length).toBeGreaterThan(0); // 驱动二级
-    expect(areas(env, 'opt:')).toHaveLength(0); // 尚未选轮子 → 无选项
-    // 选前轮 → 展开 frontWheel 选项
-    const front = env.host.getHitAreasForTest().find((a) => a.id === 'wheel-side:front')!;
-    env.pointer(front.x + front.w / 2, front.y + front.h / 2);
-    expect(env.fired['toggle']).toContain('frontWheel');
-    env.host.render(richGarageState({ garageSelected: 'frontWheel' }));
-    expect(areas(env, 'opt:').length).toBeGreaterThan(0);
-    // 点「武器」→ 武器位列表（无选项）
+    expect(areas(env, 'opt:').length, '车身分类展开部件卡').toBeGreaterThan(0);
+    // 车身分类有 1 个挂点 chip（车身；统一「分类 → 挂点 → 部件卡」结构）
+    expect(areas(env, 'garage-slot:').length, '车身分类 1 个挂点 chip').toBe(1);
+    expect(areas(env, 'garage-slot:body').length, '车身挂点 chip').toBe(1);
+    // 点「移动」→ 自动选中第一个挂点（后轮）+ 挂点 chip 行出现
     env.host.render(richGarageState());
-    const entryWe = env.host.getHitAreasForTest().find((a) => a.id === 'entry-weapons')!;
-    env.pointer(entryWe.x + entryWe.w / 2, entryWe.y + entryWe.h / 2);
-    expect(areas(env, 'weapon-slot:').length).toBeGreaterThan(0);
-    expect(areas(env, 'opt:')).toHaveLength(0);
-    // 选武器位 → 展开该位选项
-    const slot = areas(env, 'weapon-slot:')[0];
-    env.pointer(slot.x + slot.w / 2, slot.y + slot.h / 2);
-    env.host.render(richGarageState({ garageSelected: slot.id.slice(12) }));
-    expect(areas(env, 'opt:').length).toBeGreaterThan(0);
+    const tabMove = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:move')!;
+    env.pointer(tabMove.x + tabMove.w / 2, tabMove.y + tabMove.h / 2);
+    expect(env.fired['toggle']).toContain('rearWheel'); // 移动分类默认挂点 = 后轮
+    env.host.render(richGarageState({ garageSelected: 'rearWheel' }));
+    const slotIds = areas(env, 'garage-slot:').map((a) => a.id.slice(12));
+    expect(slotIds, '移动分类挂点 chip：后轮/前轮/驱动').toEqual(expect.arrayContaining(['rearWheel', 'frontWheel', 'drive']));
+    expect(areas(env, 'opt:').length, '后轮展开部件卡').toBeGreaterThan(0);
+    // 切换挂点 chip → frontWheel 选项
+    const chipFront = areas(env, 'garage-slot:frontWheel')[0];
+    env.pointer(chipFront.x + chipFront.w / 2, chipFront.y + chipFront.h / 2);
+    expect(env.fired['toggle']).toContain('frontWheel');
+    // 点「武器」→ 自动选中第一个硬点 + 挂点 chip 行 + 武器分类过滤选项（无辅助混入）
+    env.host.render(richGarageState());
+    const tabWe = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:weapon')!;
+    env.pointer(tabWe.x + tabWe.w / 2, tabWe.y + tabWe.h / 2);
+    env.host.render(richGarageState({ garageSelected: env.fired['toggle'].slice(-1)[0] }));
+    expect(areas(env, 'garage-slot:').length, '武器分类挂点 chip 行存在').toBeGreaterThan(0);
+    const optIds = areas(env, 'opt:').map((a) => a.id);
+    expect(optIds.length, '武器分类展开部件卡').toBeGreaterThan(0);
+    // 空槽 + 武器（不混入辅助部件）
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'opt:none'), '武器分类含空槽').toBe(true);
   });
 
-  it('F-WX-8-B｜改一个部件 → 找对手（Mobile Garage 最小闭环）', () => {
+  it('F-GARAGE-BUILD-BOARD-P0｜改一个部件：分类 tab → 部件卡 → pick（单屏，无多层返回）；无寻找对手', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState());
     goGarage(env); // F-HOME-1：Home → 配置页
-    // 改部件：点「车身」入口 → 展开 → 点一个选项（fake 记录 pick）→ 收起
-    const entryBody = env.host.getHitAreasForTest().find((a) => a.id === 'entry:body')!;
-    env.pointer(entryBody.x + entryBody.w / 2, entryBody.y + entryBody.h / 2);
+    // 改部件：点「车身」分类 tab → 部件卡出现 → 点一个选项（pick 记录）
+    const tabBody = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:body')!;
+    env.pointer(tabBody.x + tabBody.w / 2, tabBody.y + tabBody.h / 2);
     env.host.render(richGarageState({ garageSelected: 'body' }));
     const opt = areas(env, 'opt:')[0];
     env.pointer(opt.x + opt.w / 2, opt.y + opt.h / 2);
     expect(env.fired['pick'].length).toBe(1);
-    // runtime 选完即收起 → 回到入口行
+    // runtime 选完即收起 → 分类 tab 行仍常驻（无重复返回按钮）
     env.host.render(richGarageState());
-    expect(areas(env, 'entry:').length).toBeGreaterThan(0);
+    expect(areas(env, 'garage-cat:').length).toBeGreaterThan(0);
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'panel-back'), '无面板内返回按钮（唯一返回=左上首页）').toBe(false);
     // F-NAV-ACTION-OWNERSHIP-P0：配置页无寻找对手（旧「Garage 点 cta-find 匹配」契约已删除）
     expect(
       env.host.getHitAreasForTest().some((a) => a.id === 'cta-find' || a.id === 'home-find-opponent'),
@@ -308,11 +310,11 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState()); // 富库存：全部 19 个功能件选项可装备（可见）
     goGarage(env); // F-HOME-1：Home → 配置页
-    // 通过「武器」入口 → 选一个武器位 → 展开功能件选项
-    const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'entry-weapons')!;
+    // F-GARAGE-BUILD-BOARD-P0：点「武器」分类 → 自动选中第一个硬点 → 展开功能件部件卡
+    const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:weapon')!;
     env.pointer(entryW.x + entryW.w / 2, entryW.y + entryW.h / 2);
-    const fnSlot = areas(env, 'weapon-slot:').map((a) => a.id.slice(12)).find((k) => k !== 'body' && k !== 'rearWheel' && k !== 'frontWheel' && k !== 'drive');
-    expect(fnSlot, '武器位应存在').toBeTruthy();
+    const fnSlot = env.fired['toggle'].slice(-1)[0];
+    expect(fnSlot, '武器分类应自动选中一个硬点').toBeTruthy();
 
     env.host.render(richGarageState({ garageSelected: fnSlot }));
     const firstVisible = areas(env, 'opt:').map((a) => a.id);
@@ -322,7 +324,8 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       expect(a.x).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.left);
       expect(a.x + a.w).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right);
       expect(a.y + a.h).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom);
-      expect(a.h).toBeGreaterThanOrEqual(48);
+      // F-GARAGE-BUILD-BOARD-P0：部件卡按真实信息密度（紧凑 40+；非 48 大按钮）
+      expect(a.h).toBeGreaterThanOrEqual(40);
     }
     // 功能件选项很多（2 列网格超出面板）→ 应有面板内滚动箭头
     const scrollDown = env.host.getHitAreasForTest().find((a) => a.id === 'panel-scroll-down');
@@ -346,9 +349,9 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
 
     // 验收（必改3）：配置第一层恰好 4 个「玩家认知」分组：车身 / 移动 / 武器 / 辅助
     // 注：id 分隔符不一致（entry:body 用冒号，entry-move/weapons/gadgets 用连字符）——按前缀 entry 统配 4 个。
-    const firstLayer = env.host.getHitAreasForTest().filter((a) => a.id.startsWith('entry'));
-    expect(firstLayer, '配置第一层恰好 4 个分组').toHaveLength(4);
-    for (const id of ['entry:body', 'entry-move', 'entry-weapons', 'entry-gadgets']) {
+    const firstLayer = env.host.getHitAreasForTest().filter((a) => a.id.startsWith('garage-cat'));
+    expect(firstLayer, '分类 tab 恰好 4 个').toHaveLength(4);
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget']) {
       expect(firstLayer, `配置第一层应含 ${id}`).toContainEqual(expect.objectContaining({ id }));
     }
     // 不应把轮子/驱动/挂点细项同时铺在一级（已收进二级）
@@ -363,18 +366,17 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       '车库无寻找对手',
     ).toBe(false);
 
-    // 验收（验收「3 次点击以内可以更换一件武器并看到车辆变化」）：
-    // 点「武器」→ 点一个武器位 → 点一个选项（pick 派发即视为换装）。共 3 击。
-    const entryWe = env.host.getHitAreasForTest().find((a) => a.id === 'entry-weapons')!;
-    env.pointer(entryWe.x + entryWe.w / 2, entryWe.y + entryWe.h / 2); // 第 1 击
-    const wSlot = areas(env, 'weapon-slot:')[0];
-    expect(wSlot, '武器二级应列出武器位').toBeTruthy();
-    env.pointer(wSlot.x + wSlot.w / 2, wSlot.y + wSlot.h / 2); // 第 2 击 → 展开选项
-    env.host.render(richGarageState({ garageSelected: wSlot.id.slice(12) }));
+    // F-GARAGE-BUILD-BOARD-P0：2 次点击换武器（Acceptance#2）——点「武器」分类 tab
+    // （自动选中第一挂点并展开部件卡）→ 点一个选项（pick 派发即视为换装）。共 2 击。
+    const entryWe = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:weapon')!;
+    env.pointer(entryWe.x + entryWe.w / 2, entryWe.y + entryWe.h / 2); // 第 1 击 → 展开挂点部件卡
+    const wSlot = env.fired['toggle'].slice(-1)[0];
+    expect(wSlot, '武器分类应自动选中挂点').toBeTruthy();
+    env.host.render(richGarageState({ garageSelected: wSlot }));
     const opt = areas(env, 'opt:')[0];
-    expect(opt, '武器位应展开选项').toBeTruthy();
-    env.pointer(opt.x + opt.w / 2, opt.y + opt.h / 2); // 第 3 击 → 选装
-    expect(env.fired['pick'].length, '3 击内完成换武器 pick 派发').toBeGreaterThanOrEqual(1);
+    expect(opt, '挂点应展开部件卡').toBeTruthy();
+    env.pointer(opt.x + opt.w / 2, opt.y + opt.h / 2); // 第 2 击 → 选装
+    expect(env.fired['pick'].length, '2 击内完成换武器 pick 派发').toBeGreaterThanOrEqual(1);
 
     // 验收（必改5 + 验收「返回首页后配置正确保留」）：收起 → 返回首页 → 首页无配置残留
     env.host.render(richGarageState());
@@ -382,7 +384,7 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     env.pointer(back.x + back.w / 2, back.y + back.h / 2); // 返回首页
     const homeIds = env.host.getHitAreasForTest().map((a) => a.id);
     expect(homeIds.some((id) => id === 'home-garage'), '已返回首页').toBe(true);
-    expect(homeIds.some((id) => id.startsWith('entry') || id.startsWith('opt:') || id.startsWith('wheel-side:')),
+    expect(homeIds.some((id) => id.startsWith('garage-cat') || id.startsWith('opt:') || id.startsWith('garage-slot')),
       '返回首页后无车库配置残留').toBe(false);
   });
 
@@ -497,10 +499,10 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const methods = [
       'drawMobileGarageDock',
       'drawMobileTopBar',
-      'drawGaragePanelHome',
-      'drawGaragePanelMovePick',
-      'drawGaragePanelWeaponPick',
-      'drawGaragePanelGadgetPick',
+      'drawGarageCategoryTabs',
+      'drawGarageSlotChips',
+      'drawPartCard',
+      'drawGarageEnergyBar',
       'showMergeModal',
     ];
     const re = /this\.text\(([^)]*)\)/g;
@@ -515,7 +517,10 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
         const args = m[1].split(',').map((s) => s.trim());
         const size = parseInt(args[3] ?? '', 10); // text, x, y, size, color, align, weight
         if (Number.isFinite(size) && size > 0) {
-          expect(size, `${name} 内字号 <14px 的直接文本：${m[0].slice(0, 64)}`).toBeGreaterThanOrEqual(14);
+          // F-GARAGE-BUILD-BOARD-P0：分类 tab 为紧凑 chip（Must#2）→ 字号下限 12（短屏 10）；
+          // 其余首屏方法保持 ≥14（真人距离可读）。
+          const floor = name === 'drawGarageCategoryTabs' || name === 'drawGarageSlotChips' ? 10 : 14;
+          expect(size, `${name} 内字号 <${floor}px 的直接文本：${m[0].slice(0, 64)}`).toBeGreaterThanOrEqual(floor);
         }
       }
     }
