@@ -225,28 +225,28 @@ describe('F-UX-3B Battle 去 UI 化 + 主体放大', () => {
     expect(t.some((s) => s.includes('战斗中')), 'normal HUD 保留「战斗中」').toBe(true);
   });
 
-  it('4. compact battle Active 薄地面：420×210 地面占屏 ∈ [12,16]%（旧 30%）+ 双车完整入画', () => {
+  it('4. compact battle 地面线 78~84%（420×210 地面占屏 ∈ [16,22]%，旧贴底 30%）+ 双车完整入画', () => {
     const { groundFillPct, vehicles } = battleActiveCam(420, 210);
-    expect(groundFillPct, `420×210 地面 ${groundFillPct.toFixed(1)}% ∈ [12,16]%`).toBeGreaterThanOrEqual(12);
-    expect(groundFillPct, `420×210 地面 ${groundFillPct.toFixed(1)}% ≤ 16%`).toBeLessThanOrEqual(16);
+    expect(groundFillPct, `420×210 地面 ${groundFillPct.toFixed(1)}% ∈ [16,22]%（地面线 78~84%）`).toBeGreaterThanOrEqual(16);
+    expect(groundFillPct, `420×210 地面 ${groundFillPct.toFixed(1)}% ≤ 22%`).toBeLessThanOrEqual(22);
     for (const [i, b] of vehicles.entries()) {
       expect(b.minX, `车辆${i} 左缘入画`).toBeGreaterThanOrEqual(-1);
       expect(b.maxX, `车辆${i} 右缘入画`).toBeLessThanOrEqual(421);
       expect(b.minY, `车辆${i} 顶缘入画`).toBeGreaterThanOrEqual(-1);
       expect(b.maxY, `车辆${i} 底缘入画`).toBeLessThanOrEqual(211);
-      // F-UX-3B：FX/武器/车辆不被 HUD 遮挡——薄 HUD 只占顶部 ~12px，车辆明显在其下
-      expect(b.minY, `车辆${i} 顶缘在薄 HUD（12px）之下`).toBeGreaterThanOrEqual(12);
+      // F-BATTLE-CAMERA-R2：车辆顶缘在 HUD 安全区（56 逻辑 px）之下、不被顶部遮挡
+      expect(b.minY, `车辆${i} 顶缘在 HUD 安全区（56px）之下`).toBeGreaterThanOrEqual(56);
     }
   });
 
-  it('5. 全 compact 矩阵地面明显变薄（[10,17]%，对比旧 ~30%）；w≥400 双车完整入画', () => {
+  it('5. 全 compact 矩阵地面线 78~84%（地面占屏 [16,22]%，对比旧贴底 ~30%）；w≥400 双车完整入画', () => {
     for (const vp of COMPACT_VPS) {
       const { groundFillPct, vehicles } = battleActiveCam(vp.w, vp.h);
       expect(
         groundFillPct,
-        `${vp.w}×${vp.h} 地面 ${groundFillPct.toFixed(1)}% ∈ [10,18]%（旧 ~30%，明显变薄）`,
-      ).toBeGreaterThanOrEqual(10);
-      expect(groundFillPct, `${vp.w}×${vp.h} 地面 ${groundFillPct.toFixed(1)}% ≤ 18%`).toBeLessThanOrEqual(18);
+        `${vp.w}×${vp.h} 地面 ${groundFillPct.toFixed(1)}% ∈ [16,22]%（地面线 78~84%）`,
+      ).toBeGreaterThanOrEqual(16);
+      expect(groundFillPct, `${vp.w}×${vp.h} 地面 ${groundFillPct.toFixed(1)}% ≤ 22%`).toBeLessThanOrEqual(22);
       // w<400（360/390）受既有 MIN_CONTENT_SCALE=0.4 下限钳制（预存行为，非 3B 引入）——
       // 只验收「地面变薄」；完整入画断言限定 w≥400（corridor 数学上可容纳）。
       if (vp.w >= 400) {

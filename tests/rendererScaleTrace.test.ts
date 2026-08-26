@@ -90,11 +90,19 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     expect((log!.view as { dpr: number }).dpr).toBe(1);
   });
 
-  it('Battle Active：envelope ∈ [24%,30%]（9C 阈值不变）+ core 存在且 < envelope', () => {
+  it('Battle Active：envelope ∈ [20%,28%]（F-BATTLE-CAMERA-R2 envelope 构图）+ core 存在且 < envelope', () => {
     vi.stubGlobal('__WX_DEBUG__', true);
-    const { r, o } = makeEnv({ w: 844, h: 390 }, 1);
-    const snap = o.getRenderSnapshot();
-    r.resize(snap.arena.width, o.arena.config.height);
+    const { r } = makeEnv({ w: 844, h: 390 }, 1);
+    // F-BATTLE-CAMERA-R2：battle 用真实双方对局（makeEnv 是 soloA Garage 夹具，
+    // battle 构图按 A+B 双方 envelope——soloA 场景只框 A 会放大失真）
+    const o2 = new PlanckBattleOrchestrator(
+      buildSnapshotFromDraft(makeStarterDraft('watermelonBody', registry), registry, 'a'),
+      buildSnapshotFromDraft(makeStarterDraft('bananaBody', registry), registry, 'b'),
+      registry,
+      { autoDrive: true },
+    );
+    const snap = o2.getRenderSnapshot();
+    r.resize(snap.arena.width, o2.arena.config.height);
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     r.reframe(snap, 'battle', { phase: 'Active' });
     const log = lastLog(spy, '[WX-REF]');
@@ -102,8 +110,8 @@ describe('F-WX-9A/RCA-1｜[WX-REF]/[WX-RCA] 尺度日志（DEV/RCA-only，双口
     expect(log!.fit).toBe('battle');
     expect(log!.framingRect).toBeNull();
     const vehicle = log!.vehicleA as { core: { screenWidthPct: number }; envelope: { screenWidthPct: number } };
-    expect(vehicle.envelope.screenWidthPct).toBeGreaterThanOrEqual(24);
-    expect(vehicle.envelope.screenWidthPct).toBeLessThanOrEqual(30);
+    expect(vehicle.envelope.screenWidthPct).toBeGreaterThanOrEqual(20);
+    expect(vehicle.envelope.screenWidthPct).toBeLessThanOrEqual(28);
     expect(vehicle.core.screenWidthPct).toBeLessThan(vehicle.envelope.screenWidthPct);
   });
 

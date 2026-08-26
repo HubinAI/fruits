@@ -63,23 +63,15 @@ const MAX_CONTENT_SCALE = 5;
  */
 const PREVIEW_MARGIN_WORLD = 18;
 /**
- * Q08-A-FIX / Q08-CAM-D1：正式 Battle 固定战斗走廊（corridor）——不绑定开局瞬间车辆位置。
- * 横向左界基于正式 spawn（arena.width×0.25）外扩「位移预算 160 + 最大视觉半宽 110」；
- * 横向右界直接锚定 arena 右缘（width − 墙厚）——真实物理中 A（质量 120+）持续驱动
- * +X 顶推 B（质量 45）会使 A/B 交战团整体右移（录像与 Runtime 实测一致），
- * 最终可达 arena 右墙内侧；对称 spawn 预算无法覆盖该真实可达范围（旧 1470 < 实测 1534
- * 出框，Q08-CAM-D1 诊断 firstOOB t=11767ms Active B visual 右缘 1534.7）。
- * 纵向只覆盖车辆活动高度（地面以上 190）+ 地面——不含 Closing 墙顶，
- * 上方无巨大无效空间，车辆保持足够大。Warning 左侧再外扩 WARNING_SPREAD=100
- * 逐步准备 Closing；Closing/End 用完整收束安全构图。
+ * F-BATTLE-CAMERA-R2：战斗相机——envelope 主体构图常量。
+ * 战斗构图以 A+B 真实可见 envelope（body+wheel+parts+visual）为基准，不再按整个
+ * Arena / 收束墙全量 fit（旧 Closing 全景把车辆缩成小模型；旧 corridor 预算高度
+ * 在横向主导时产生车辆贴底 + 顶部大片无意义空白）。
  */
-const CORRIDOR_SPAWN_A_RATIO = 0.25;
-const CORRIDOR_MOVE_BUDGET = 160; // 每侧可承受的碰撞/后坐位移预算
-const CORRIDOR_VISUAL_HALF = 110; // 最大真实视觉半宽（banana body visual 100 + 余量）
-const CORRIDOR_ACTIVE_EXTENT = CORRIDOR_MOVE_BUDGET + CORRIDOR_VISUAL_HALF; // 270
-const CORRIDOR_WARNING_SPREAD = 100; // Warning 相对 Active 的额外外扩（逐步准备 Closing）
-const CORRIDOR_HEIGHT = 190; // 纵向：车辆活动高度（地面以上预算，不含 Closing 墙顶）
-const CORRIDOR_EDGE_PAD = 60; // Q08-CAM-D1：corridor 右界锚定 arena 右缘（对齐墙厚 60）
+const BATTLE_GROUND_LINE_RATIO = 0.81; // 地面线锚定在安全画面 78~84% 高度（中值）——车辆不再贴底
+const BATTLE_ENV_PAD_X = 48; // A+B envelope 并集横向 padding（世界 px；有限活动空间，不过度拉远）
+const BATTLE_CLOSE_SCALE_DELTA = 0.15; // Closing/End 相对正常战斗（Active 基准）最大尺度变化
+const BATTLE_SEPARATE_SCALE_MIN = 0.88; // 分离拉远下限（相对 Active 基准；车辆仍可识别）
 /** 构图安全区：左右 UI 阴影区不计入可用画布（CSS px，每侧内缩量） */
 const SAFE_INSET_X = 56;
 const SAFE_INSET_Y = 28;
@@ -129,13 +121,9 @@ const SOLO_PAD_X_RATIO = 0.38;
 const SOLO_PAD_Y_RATIO = 0.31;
 const MIN_SOLO_PAD_X = 40;
 const MIN_SOLO_PAD_Y = 20;
-// F-WX-8-C：Mobile 战斗 Active corridor——覆盖真实交战区（开局 A(400)/B(1200) 完整
-// 可见，A 顶推 B 到右墙的主要过程在屏内）；宽 980 = 开局精确边界（A 左缘 315 / B 右缘 1295，
-// 实测 vehicleA watermelon [315,558]、vehicleB banana [1038,1295]）；配合 compact battle
-// margin 8 + insetX 0 → 单车占屏 ~24.4%（F-WX-9C 目标 24~30%，旧 300-1340+margin64+inset56 仅 ~18%）。
-// Warning/Closing 回退完整 arena（场地规则优先）。
-const MOBILE_ACTIVE_MIN_X = 315;
-const MOBILE_ACTIVE_MAX_X = 1295;
+// F-BATTLE-CAMERA-R2：battle 相机不再用 Mobile/Desktop 固定 corridor（旧 F-WX-8-C
+// MOBILE_ACTIVE_* / Q08-A-FIX CORRIDOR_* 已删除）——统一按 A+B 真实 envelope 构图，
+// 见 reframe battle 分支与 applyBattleFollow。
 // F-MATCH-FRAME-R2：previewFixed 固定框必须容纳「全部候选 Body 的真实 envelope」（含武器外伸），
 // 否则候选车辆被右边界裁切 / 左车被左边界裁切。实测所有候选 Body 组合 envelope 并集为
 // minX≈305 / maxX≈1295 / minY≈560 / maxY≈699；框放宽到 [290,1310]×[535,712] 含余量，
@@ -331,6 +319,23 @@ export class Renderer {
       offsetY: (vh - arenaH * scale) / 2,
     };
   }
+
+  /**
+   * F-BATTLE-CAMERA-R2：战斗跟随相机状态（fit==='battle' 构图时激活，其余 fit 置 null）。
+   * reframe 记录基准（Active/Warning）；render() 每帧按 A/B 实时 envelope 做
+   * 「中点追踪 + 分离有限拉远」（纯 Presentation，不触碰 Physics/结果）。
+   */
+  private battleCam: {
+    baseScale: number; // Active/Warning 构图基准 scale（Closing 相对此钳制 ±15%）
+    baseEnvW: number; // A+B envelope 并集宽（含 padding）——分离拉远基准
+    minScale: number; // 分离拉远下限（baseScale × BATTLE_SEPARATE_SCALE_MIN）
+    groundRatio: number; // 地面线锚定高度（安全画面 78~84%）
+    arenaW: number; // arena 宽（视野 clamp，不露出 arena 外）
+    safeBaseX: number; // 安全区左缘（物理 px）
+    safeW: number; // 安全区宽（物理 px）
+    baseY: number; // 安全区顶（物理 px）
+    safeH: number; // 安全区高（物理 px）
+  } | null = null;
 
   private sx(x: number): number {
     return x * this.transform.scale + this.transform.offsetX;
@@ -698,6 +703,9 @@ export class Renderer {
 
     const snap = orchestrator.getRenderSnapshot();
     const arena = snap.arena;
+    // F-BATTLE-CAMERA-R2：战斗跟随相机——每帧按 A/B 真实 envelope 追踪双方中点 +
+    // 分离有限拉远（纯 Presentation；无 battleCam 时（预览/非战斗）零开销直接返回）。
+    this.applyBattleFollow(snap);
     const t = this.transform;
     // W2-FX-2：表现时间基准（阶段闪烁 / 死亡淡出 / FX 共用）
     const now = this.now();
@@ -1739,59 +1747,19 @@ export class Renderer {
     minY = Math.min(minY, snap.arena.groundY);
     maxY = Math.max(maxY, snap.arena.groundY);
     if (fit === 'battle') {
-      // Q08-A-FIX：正式战斗按 phase 构图——Active/Warning 固定战斗走廊（corridor，
-      // 不绑定开局瞬间车辆位置）；Closing/End 完整收束安全构图。
-      // 仅 Battle start / phase 切换 / resize 时调用一次，运行期间不重算（无呼吸/无跟随）。
-      // F-WX-8-C：compact 手机横屏用 Mobile corridor——Active 战斗主体优先（收窄到
-      // 真实交战区 [300,1340]，开局 A(400)/B(1200) 完整可见，车辆占屏 ~21% vs 旧 ~17%）；
-      // Warning 场地规则优先（完整 arena + closing 墙，刺墙提示可见）；Desktop 语义不变。
-      if (phase === 'Active' || phase === '') {
-        if (isCompact) {
-          const cL = MOBILE_ACTIVE_MIN_X;
-          const cR = MOBILE_ACTIVE_MAX_X;
-          acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
-          acc(cL, snap.arena.groundY);
-          acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
-          acc(cR, snap.arena.groundY);
-        } else {
-          // Active：固定 corridor = 左界 spawn 预算（width×0.25 − ACTIVE_EXTENT）、
-          // 右界锚定 arena 右缘（width − CORRIDOR_EDGE_PAD）——A 顶推 B 的交战团
-          // 最终可达 arena 右墙内侧（Q08-CAM-D1 实测 B visual 右缘 1534），
-          // 对称 spawn 预算无法覆盖；纵向仅车辆活动高度 + 地面。
-          const cL = snap.arena.width * CORRIDOR_SPAWN_A_RATIO - CORRIDOR_ACTIVE_EXTENT;
-          const cR = snap.arena.width - CORRIDOR_EDGE_PAD;
-          acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
-          acc(cL, snap.arena.groundY);
-          acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
-          acc(cR, snap.arena.groundY);
-        }
-      } else if (phase === 'Warning') {
-        if (isCompact) {
-          // Mobile Warning：场地规则优先——完整 arena + closing 墙，刺墙收束提示可见
-          acc(0, snap.arena.groundY);
-          acc(snap.arena.width, snap.arena.groundY);
-          for (const cw of snap.arena.closingWalls) includeShape(cw);
-        } else {
-          // Warning：左界再外扩（逐步准备 Closing）；右界已锚定 arena 边界。
-          const cL =
-            snap.arena.width * CORRIDOR_SPAWN_A_RATIO -
-            CORRIDOR_ACTIVE_EXTENT -
-            CORRIDOR_WARNING_SPREAD;
-          const cR = snap.arena.width - CORRIDOR_EDGE_PAD;
-          acc(cL, snap.arena.groundY - CORRIDOR_HEIGHT);
-          acc(cL, snap.arena.groundY);
-          acc(cR, snap.arena.groundY - CORRIDOR_HEIGHT);
-          acc(cR, snap.arena.groundY);
-        }
-      } else {
-        // Closing / End：完整战场安全构图——覆盖 Arena 有效战斗区域（x ∈ [0, width]；
-        // y 顶 = Closing 墙顶，底 = 地面），车辆被 Closing 推向边缘/中央的全过程始终
-        // 入画；墙体外很远的无效空间不纳入（W1-P0-CLOSE-FIX 原语义）。End 保持此构图，
-        // 不二次 zoom。
-        acc(0, snap.arena.groundY);
-        acc(snap.arena.width, snap.arena.groundY);
-        for (const cw of snap.arena.closingWalls) includeShape(cw);
-      }
+      // F-BATTLE-CAMERA-R2：战斗相机基于 A+B 真实可见 envelope 构图——不再按整个
+      // Arena / 收束墙全量 fit（旧 Closing 全景把车辆缩成小模型；旧 corridor 预算高度
+      // 在横向主导时产生车辆贴底 + 顶部大片无意义空白）。所有 phase（Active/Warning/
+      // Closing/End）同构图语义：
+      // - bounds = A+B 完整车辆（body+wheel+parts+visual）并集 + 横向固定 padding；
+      // - 纵向 = 车辆 envelope 顶 .. groundY + 地面余量；地面线锚定安全画面 78~84%；
+      // - Closing/End 不把两侧收束墙纳入 bounds——墙从当前画面边缘进入，车辆仍为主体；
+      // - Closing scale 相对正常战斗（battleCam.baseScale）变化 ≤15%（防骤缩）；
+      // - 极端构筑（长武器/无轮站桩/高车身/翻转姿态）由 envelope 口径天然覆盖。
+      includeVehicle(snap.vehicleA);
+      if (!snap.soloA) includeVehicle(snap.vehicleB);
+      minX -= BATTLE_ENV_PAD_X;
+      maxX += BATTLE_ENV_PAD_X;
     } else if (fit === 'primary-fire') {
       includeVehicle(snap.vehicleA);
       // 身后明确 recoil 空间 + 前方固定射击空间（A 朝 +X 发射方向）
@@ -1815,10 +1783,10 @@ export class Renderer {
     if (!isFinite(minX) || !isFinite(minY) || maxX - minX < 1 || maxY - minY < 1) return;
     const isPreview = fit === 'preview';
     const isFixed = fit === 'previewSolo' || fit === 'previewFixed';
-    // F-UX-3B：compact Mobile battle Active 薄地面构图——Ground 只改视觉厚度
-    // （Physics ground 不动）：内容底部锚定（车辆站在地面上）、insetBottom 缩小、
-    // groundY 下方多留 48 world（配合 scale → 地面占屏 ~12~16%）；仅 Active 固定构图。
-    const compactBattleActive = fit === 'battle' && isCompact && (phase === 'Active' || phase === '');
+    // F-BATTLE-CAMERA-R2：compact battle（手机横屏）统一薄地面构图——所有 phase
+    // （Active/Warning/Closing/End）同 inset（顶部 HUD 56 / 底部 12），地面线在全屏
+    // 78~84% 恒定（旧 phase 切换 insetBottom 40→12 会改变 safeH，使地面线位置漂移）。
+    const compactBattleActive = fit === 'battle' && isCompact;
     // F-WX-8-B：compact 固定框（Mobile previewSolo/previewFixed）用极小 margin——
     // 固定框 bounds 自带覆盖余量（如 solo 框 440 宽 vs 车辆 180 宽），再叠加 48 的
     // CONTENT_MARGIN_WORLD 会把纵向 bh 撑大、压扁手机横屏下的车辆（实测 24%）。
@@ -1905,13 +1873,44 @@ export class Renderer {
     const applyMinScale = !(framing && isFixed) && fit !== 'previewFixed';
     if (scale < MIN_CONTENT_SCALE && applyMinScale) scale = MIN_CONTENT_SCALE;
     if (scale > MAX_CONTENT_SCALE) scale = MAX_CONTENT_SCALE;
+    // F-BATTLE-CAMERA-R2：battle 相机基准记录 / 非 Active 阶段尺度钳制。
+    // Active（正常战斗）构图时记录基准（供运行期跟随 + 后续阶段相对钳制）；
+    // Warning/Closing/End 用同一 envelope 构图但把 scale 钳制在基准 ±15%——
+    // 接近碰撞时 envelope 收窄也不放大（保持稳定尺度）、分离时有限拉远、
+    // 收束墙不参与 bounds（不会因墙全量 fit 骤缩），车辆始终是视觉主体。
+    if (fit === 'battle') {
+      if (phase === 'Active' || phase === '') {
+        this.battleCam = {
+          baseScale: scale,
+          baseEnvW: Math.max(1, bw),
+          minScale: scale * BATTLE_SEPARATE_SCALE_MIN,
+          groundRatio: BATTLE_GROUND_LINE_RATIO,
+          arenaW: snap.arena.width,
+          safeBaseX: baseX,
+          safeW,
+          baseY,
+          safeH,
+        };
+      } else if (this.battleCam) {
+        const lo = this.battleCam.baseScale * (1 - BATTLE_CLOSE_SCALE_DELTA);
+        const hi = this.battleCam.baseScale * (1 + BATTLE_CLOSE_SCALE_DELTA);
+        scale = Math.min(hi, Math.max(lo, scale));
+      }
+    } else {
+      this.battleCam = null;
+    }
     // 内容定位：默认居中于安全区中心（offset 含安全区内缩量；玩家 Shell 预览用 top 内缩）。
     // F-UX-3B：compact battle Active 底部锚定——车辆站在地面上（Ground 只改视觉厚度，
     // 不居中留上下空隙；顶部的空间全部还给战斗主体）。
+    // F-BATTLE-CAMERA-R2：battle 统一「地面线锚定」——groundY 映射到安全画面 78~84%
+    // 高度，车辆站上地面线、上方全部还给战斗主体（消除旧「车辆贴底 + 顶部大片空白」）。
     const offsetX = baseX + (safeW - bw * scale) / 2 - minX * scale;
-    const offsetY = compactBattleActive
-      ? baseY + (safeH - bh * scale) - minY * scale
-      : baseY + (safeH - bh * scale) / 2 - minY * scale;
+    const offsetY =
+      fit === 'battle'
+        ? baseY + safeH * BATTLE_GROUND_LINE_RATIO - snap.arena.groundY * scale
+        : compactBattleActive
+          ? baseY + (safeH - bh * scale) - minY * scale
+          : baseY + (safeH - bh * scale) / 2 - minY * scale;
     this.transform = { scale, offsetX, offsetY };
     // F-WX-9A：DEV-only 取景尺度日志（__WX_DEBUG__=true，WECHAT_DEBUG_INPUT=1 构建注入；
     // PROD __WX_DEBUG__=false → 编译期常量折叠，零日志）。只读诊断，不改变任何 framing 语义。
@@ -1966,6 +1965,87 @@ export class Renderer {
         );
       }
     }
+  }
+
+  /**
+   * F-BATTLE-CAMERA-R2：战斗运行期跟随（fit==='battle' 构图后每帧调用，纯 Presentation；
+   * 不修改 Physics 世界与结果）。
+   * - 尺度：双方 envelope 并集宽 > 构图基准 → 有限拉远（≤12%）；≤ 基准 → 保持稳定尺度
+   *   （接近碰撞不放大，无呼吸）；
+   * - 位置：x 追踪双方中点（视野 clamp 不露出 arena 外）；y 固定地面线锚定（78~84%）；
+   * - 平滑：offsetX 每帧 20% 收敛、scale 每帧 ≤0.4% → 无骤缩 / 跳位 / 相机呼吸。
+   * - Closing 阶段：基准钳制仍生效（scale 相对正常战斗 ≤15%），墙由 Physics 推进自然
+   *   从当前画面边缘进入——车辆始终是视觉主体。
+   */
+  private applyBattleFollow(snap: BattleRenderSnapshot): void {
+    const cam = this.battleCam;
+    if (!cam) return;
+    // A+B 当前真实 envelope（body+wheel+parts+visual，与构图同口径）
+    let minX = Infinity;
+    let maxX = -Infinity;
+    const acc = (x: number): void => {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+    };
+    const accShape = (s: RenderShape): void => {
+      if (s.kind === 'polygons') {
+        for (const poly of s.polygons) for (const p of poly.points) acc(p.x);
+      } else {
+        acc(s.circle.center.x - s.circle.radius);
+        acc(s.circle.center.x + s.circle.radius);
+      }
+    };
+    const accVisual = (v: { position: { x: number; y: number }; rotation: number; size: { width: number; height: number } }): void => {
+      const hw = v.size.width / 2;
+      const hh = v.size.height / 2;
+      const cos = Math.cos(v.rotation);
+      const sin = Math.sin(v.rotation);
+      for (const c of [
+        { x: -hw, y: -hh }, { x: hw, y: -hh }, { x: hw, y: hh }, { x: -hw, y: hh },
+      ]) {
+        acc(c.x * cos - c.y * sin + v.position.x);
+      }
+    };
+    const inc = (v: RenderVehicle): void => {
+      accShape(v.body);
+      if (v.bodyVisual) accVisual(v.bodyVisual);
+      for (const w of v.wheels) {
+        acc(w.center.x - w.radius);
+        acc(w.center.x + w.radius);
+      }
+      if (v.wheelVisuals) {
+        for (const wv of v.wheelVisuals) {
+          if (wv) accVisual(wv);
+        }
+      }
+      for (const p of v.parts) {
+        accShape(p.shape);
+        if (p.visual) accVisual(p.visual);
+      }
+    };
+    inc(snap.vehicleA);
+    if (!snap.soloA) inc(snap.vehicleB);
+    const envW = Math.max(1, maxX - minX);
+    // 分离（envW > 基准）→ 有限拉远；接近（envW ≤ 基准）→ 保持稳定（不放大）
+    const targetScale = Math.max(cam.minScale, Math.min(cam.baseScale, (cam.baseScale * cam.baseEnvW) / envW));
+    const t = this.transform;
+    const midX = (minX + maxX) / 2;
+    const targetOffX = cam.safeBaseX + cam.safeW / 2 - midX * targetScale;
+    // clamp：视野不露出 arena 外（world 0..arenaW 保持入画）
+    const minOff = cam.safeBaseX + cam.safeW - cam.arenaW * targetScale;
+    const maxOff = cam.safeBaseX;
+    const clampedOffX =
+      minOff > maxOff
+        ? cam.safeBaseX + (cam.safeW - cam.arenaW * targetScale) / 2 // 视野比 arena 宽：居中
+        : Math.min(maxOff, Math.max(minOff, targetOffX));
+    // 平滑（防呼吸/骤缩/跳位）
+    const offX = t.offsetX + (clampedOffX - t.offsetX) * 0.2;
+    const stepLimit = t.scale * 0.004;
+    const scaleStep = Math.max(-stepLimit, Math.min(stepLimit, targetScale - t.scale));
+    const scale = t.scale + scaleStep;
+    // 地面线恒定锚定（scale 变化时 offsetY 同步补偿）
+    const offsetY = cam.baseY + cam.safeH * cam.groundRatio - snap.arena.groundY * scale;
+    this.transform = { scale, offsetX: offX, offsetY };
   }
 
   /**

@@ -378,7 +378,7 @@ describe('Q08-A Battle Camera 正常观看构图', () => {
     return s.maxY - s.minY;
   }
 
-  it('1. Active：A/B body + wheel + functional parts 完整入画，车辆明显大于 full-arena（Closing）构图', () => {
+  it('1. Active/Closing：A/B body + wheel + functional parts 完整入画，Closing 尺度相对 Active ≤15%（不骤缩）', () => {
     const renderer = makeRenderer();
     const snap = makeBattleSnapshot();
     renderer.reframe(snap, 'battle', { phase: 'Active' });
@@ -395,18 +395,18 @@ describe('Q08-A Battle Camera 正常观看构图', () => {
     inSafe(renderer, { minX: 1078, minY: 660, maxX: 1118, maxY: 700 }, 'B wheel rear');
     inSafe(renderer, { minX: 1202, minY: 660, maxX: 1242, maxY: 700 }, 'B wheel front');
     inSafe(renderer, { minX: 1090, minY: 660, maxX: 1170, maxY: 690 }, 'B part');
-    // 车辆明显大于 full-arena（Closing 全景）构图
+    // F-BATTLE-CAMERA-R2：Closing 不因两侧墙骤缩——尺度相对 Active ≤15%
     renderer.reframe(snap, 'battle', { phase: 'Closing' });
     const closingScale = renderer.transformScale;
-    expect(activeScale).toBeGreaterThan(closingScale);
-    // 屏幕尺寸对比（Active 下同一 A body 屏幕更高 → 上方无效空间显著减少）
+    expect(Math.abs(closingScale - activeScale) / activeScale, 'Closing 相对 Active 尺度变化 ≤15%').toBeLessThanOrEqual(0.15);
+    // 屏幕尺寸对比（同一 A body 屏幕高度变化 ≤20%）
     const aHClosing = screenHeight(renderer, { minX: 300, minY: 650, maxX: 470, maxY: 700 });
     renderer.reframe(snap, 'battle', { phase: 'Active' });
     const aHActive = screenHeight(renderer, { minX: 300, minY: 650, maxX: 470, maxY: 700 });
-    expect(aHActive).toBeGreaterThan(aHClosing);
+    expect(Math.abs(aHClosing - aHActive) / aHActive, 'Closing 车辆屏幕高度相对 Active ≤20%').toBeLessThanOrEqual(0.2);
   });
 
-  it('2. Warning：适度拉远（介于 Active 与全景之间）且 A/B 仍完整入画', () => {
+  it('2. Warning/Closing：尺度相对 Active 均 ≤15%（同 envelope 构图，无全景骤缩）且 A/B 完整入画', () => {
     const renderer = makeRenderer();
     const snap = makeBattleSnapshot();
     renderer.reframe(snap, 'battle', { phase: 'Active' });
@@ -415,21 +415,26 @@ describe('Q08-A Battle Camera 正常观看构图', () => {
     const warningScale = renderer.transformScale;
     renderer.reframe(snap, 'battle', { phase: 'Closing' });
     const closingScale = renderer.transformScale;
-    expect(warningScale).toBeLessThan(activeScale); // 开始拉远
-    expect(warningScale).toBeGreaterThan(closingScale); // 但未到全景那么远
+    expect(Math.abs(warningScale - activeScale) / activeScale, 'Warning 相对 Active ≤15%').toBeLessThanOrEqual(0.15);
+    expect(Math.abs(closingScale - activeScale) / activeScale, 'Closing 相对 Active ≤15%').toBeLessThanOrEqual(0.15);
     renderer.reframe(snap, 'battle', { phase: 'Warning' });
     inSafe(renderer, { minX: 300, minY: 650, maxX: 470, maxY: 700 }, 'A body');
     inSafe(renderer, { minX: 1100, minY: 656, maxX: 1220, maxY: 700 }, 'B body');
   });
 
-  it('3. Closing：两侧有效 Closing wall + A/B 完整入画（收束全程安全）', () => {
+  it('3. Closing：收束墙从画面边缘进入、不遮挡车辆——A/B 完整入画且墙在车辆外侧', () => {
     const renderer = makeRenderer();
     const snap = makeBattleSnapshot();
     renderer.reframe(snap, 'battle', { phase: 'Closing' });
-    inSafe(renderer, { minX: 250, minY: 500, maxX: 290, maxY: 700 }, 'Closing wall L');
-    inSafe(renderer, { minX: 1310, minY: 500, maxX: 1350, maxY: 700 }, 'Closing wall R');
     inSafe(renderer, { minX: 300, minY: 650, maxX: 470, maxY: 700 }, 'A body');
     inSafe(renderer, { minX: 1100, minY: 656, maxX: 1220, maxY: 700 }, 'B body');
+    // F-BATTLE-CAMERA-R2：墙不进入画面中央（车辆主体区）——从画面边缘进入
+    const wallL = renderer.worldRectToScreen(250, 500, 290, 700);
+    const wallR = renderer.worldRectToScreen(1310, 500, 1350, 700);
+    const a = renderer.worldRectToScreen(300, 650, 470, 700);
+    const b = renderer.worldRectToScreen(1100, 656, 1220, 700);
+    expect(wallL.maxX, '左墙在 A 车辆左侧（不遮挡车辆）').toBeLessThanOrEqual(a.minX + 1);
+    expect(wallR.minX, '右墙在 B 车辆右侧（不遮挡车辆）').toBeGreaterThanOrEqual(b.maxX - 1);
   });
 
   it('4. Projectile 不参与 camera bounds（含/不含 projectile 构图结果完全一致）', () => {
@@ -543,38 +548,42 @@ describe('Q08-A-FIX Battle Camera 出框根因', () => {
     // 修复后 corridor 右界 1540（+margin 64 吸收）→ 完整入画
     inSafe(renderer, visualAABB(snap.vehicleB.bodyVisual!), 'B bodyVisual(实测右移位置)');
     inSafe(renderer, visualAABB(snap.vehicleA.bodyVisual!), 'A bodyVisual');
-    // 仍比 Closing 全景构图大（不回退超远景）
+    // F-BATTLE-CAMERA-R2：Closing 不骤缩——相对 Active ≤15%
     renderer.reframe(snap, 'battle', { phase: 'Closing' });
     const closingScale = renderer.transformScale;
     renderer.reframe(snap, 'battle', { phase: 'Active' });
-    expect(renderer.transformScale).toBeGreaterThan(closingScale);
+    expect(Math.abs(closingScale - renderer.transformScale) / renderer.transformScale, 'Closing 相对 Active ≤15%').toBeLessThanOrEqual(0.15);
   });
 
-  it('3. Warning：corridor 外扩后两车 Visual 仍完整可见', () => {
+  it('3. Warning/Closing：尺度相对 Active 均 ≤15%（同 envelope 构图），两车 Visual 完整可见', () => {
     const renderer = makeRenderer();
     const snap = makeBattleSnapshot();
     renderer.reframe(snap, 'battle', { phase: 'Warning' });
     expectVehicleVisualsInView(renderer, snap.vehicleA, 'A');
     expectVehicleVisualsInView(renderer, snap.vehicleB, 'B');
-    // Warning 拉远（介于 Active 与全景之间）——稳定切换，无突然跳变
     renderer.reframe(snap, 'battle', { phase: 'Active' });
     const activeScale = renderer.transformScale;
     renderer.reframe(snap, 'battle', { phase: 'Warning' });
     const warningScale = renderer.transformScale;
     renderer.reframe(snap, 'battle', { phase: 'Closing' });
     const closingScale = renderer.transformScale;
-    expect(warningScale).toBeLessThan(activeScale);
-    expect(warningScale).toBeGreaterThan(closingScale);
+    expect(Math.abs(warningScale - activeScale) / activeScale, 'Warning 相对 Active ≤15%').toBeLessThanOrEqual(0.15);
+    expect(Math.abs(closingScale - activeScale) / activeScale, 'Closing 相对 Active ≤15%').toBeLessThanOrEqual(0.15);
   });
 
-  it('4. Closing：两车 Visual + 有效 Closing wall 完整入画（收束全程安全）', () => {
+  it('4. Closing：两车 Visual 完整入画；收束墙从画面边缘进入、不遮挡车辆', () => {
     const renderer = makeRenderer();
     const snap = makeBattleSnapshot();
     renderer.reframe(snap, 'battle', { phase: 'Closing' });
     expectVehicleVisualsInView(renderer, snap.vehicleA, 'A');
     expectVehicleVisualsInView(renderer, snap.vehicleB, 'B');
-    inSafe(renderer, { minX: 250, minY: 500, maxX: 290, maxY: 700 }, 'Closing wall L');
-    inSafe(renderer, { minX: 1310, minY: 500, maxX: 1350, maxY: 700 }, 'Closing wall R');
+    // F-BATTLE-CAMERA-R2：墙不进入画面中央（车辆主体区）——从画面边缘进入
+    const wallL = renderer.worldRectToScreen(250, 500, 290, 700);
+    const wallR = renderer.worldRectToScreen(1310, 500, 1350, 700);
+    const a = renderer.worldRectToScreen(300, 650, 470, 700);
+    const b = renderer.worldRectToScreen(1100, 656, 1220, 700);
+    expect(wallL.maxX, '左墙在 A 车辆左侧（不遮挡车辆）').toBeLessThanOrEqual(a.minX + 1);
+    expect(wallR.minX, '右墙在 B 车辆右侧（不遮挡车辆）').toBeGreaterThanOrEqual(b.maxX - 1);
   });
 
   it('5. banana visual 明确大于 collider：只含 Collider 的旧 framing 会让 Sprite 出框（本实现必须抓住）', () => {

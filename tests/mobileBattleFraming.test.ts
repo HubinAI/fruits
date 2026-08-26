@@ -105,26 +105,28 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
           expect(b.maxY, `${phase} A/B 底缘入画`).toBeLessThanOrEqual(vp.h + 1);
           // HUD 不挡主体：车辆顶缘在 HUD 安全区之下
           expect(b.minY, `${phase} 车辆顶缘低于 HUD 区（${hudTop}）`).toBeGreaterThanOrEqual(hudTop - 1);
-          // F-WX-9C：Mobile Active 战斗主体优先——单车视觉宽度 24~30%（corridor 收窄到
-          // 开局精确边界 + compact battle margin 8/insetX 0，实测三屏统一 24.4%）
+          // F-BATTLE-CAMERA-R2：battle 按 A+B 真实 envelope 构图——单车视觉宽 ~22%
+          // （实测 844/932/960 三屏统一 22.1%）
           if (phase === 'Active' && !vp.desktop) {
             const ratio = (b.maxX - b.minX) / vp.w;
-            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ∈ [24%,30%]`).toBeGreaterThanOrEqual(0.24);
-            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ≤ 30%`).toBeLessThanOrEqual(0.3);
+            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ∈ [20%,28%]`).toBeGreaterThanOrEqual(0.2);
+            expect(ratio, `${vp.w}×${vp.h} Active 车辆占比 ${(ratio * 100).toFixed(1)}% ≤ 28%`).toBeLessThanOrEqual(0.28);
           }
         }
-        // F-WX-8-C：Mobile Warning 场地规则优先——完整 arena 左右墙（x=0 / x=width）在屏内（刺墙提示可见）
-        if (phase === 'Warning' && !vp.desktop) {
+        // F-BATTLE-CAMERA-R2：Warning/Closing 收束墙从画面边缘进入——墙不进入画面中央
+        // 1/3（车辆主体区；墙初始在 arena 两侧，envelope 构图下自然位于屏外或边缘）
+        if ((phase === 'Warning' || phase === 'Closing') && !vp.desktop) {
           const l = 0 * cam.scale + cam.offsetX;
           const rw = snap.arena.width * cam.scale + cam.offsetX;
-          expect(l, `Warning 左墙入屏`).toBeGreaterThanOrEqual(-10);
-          expect(rw, `Warning 右墙入屏`).toBeLessThanOrEqual(vp.w + 10);
+          expect(l, `${phase} 左墙不在画面中央（≤35% 或屏外）`).toBeLessThanOrEqual(vp.w * 0.35);
+          expect(rw, `${phase} 右墙不在画面中央（≥65% 或屏外）`).toBeGreaterThanOrEqual(vp.w * 0.65);
         }
-        // F-WX-8-C：Desktop Active 保持既有构图（旧 corridor 占比 ~15%，不得因 Mobile 改动漂移）
+        // F-BATTLE-CAMERA-R2：Desktop Active 同 envelope 构图（单车占比 ~18%，旧 corridor ≤18%）
         if (phase === 'Active' && vp.desktop) {
           const bb = vehicleScreenBounds(snap.vehicleA, cam);
           const ratio = (bb.maxX - bb.minX) / vp.w;
-          expect(ratio, `Desktop Active 车辆占比 ${(ratio * 100).toFixed(1)}% 应保持旧值（≤18%）`).toBeLessThanOrEqual(0.18);
+          expect(ratio, `Desktop Active 车辆占比 ${(ratio * 100).toFixed(1)}% ∈ [16%,24%]`).toBeGreaterThanOrEqual(0.16);
+          expect(ratio, `Desktop Active 车辆占比 ${(ratio * 100).toFixed(1)}% ≤ 24%`).toBeLessThanOrEqual(0.24);
         }
       }
     });
