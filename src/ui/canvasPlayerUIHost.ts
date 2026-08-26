@@ -197,8 +197,11 @@ interface ModalSpec {
   /** F-RESULT-UX-R1：标题语义色调（结算页 胜利=green / 失败=red，第一眼知道输赢） */
   titleTone?: 'green' | 'red';
   body: string[];
-  /** F-META-UX4：结构化奖励行（金币/段位等；label 左 + value 右，层级清晰，不再拼长句） */
-  rewardRows?: Array<{ label: string; value: string; tone?: ModalTone }>;
+  /**
+   * F-META-UX4：结构化奖励行（金币/段位等；label + value 同块紧凑显示，不再两端分离）。
+   * F-RESULT-DEMO-R2：sub 为辅助小字（如段位名 + 当前值），与 value 同块、紧邻不分离。
+   */
+  rewardRows?: Array<{ label: string; value: string; sub?: string; tone?: ModalTone }>;
   /** F-META-UX4：独立奖励卡（获得部件：名称 + 星级 + 当前数量） */
   partCard?: { name: string; starStr: string; count: number };
   /** F-UX-3C：奖励区内部的小型次级入口（如广告领币）——不再做第三个底部按钮 */
@@ -2137,14 +2140,20 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const isWin = r.winner === 'A';
     const rows: NonNullable<ModalSpec['rewardRows']> = [];
     if (state.economy) {
-      const cs = state.economy.coinDelta >= 0 ? '+' : '';
-      const rs = state.economy.ratingDelta >= 0 ? '+' : '';
-      rows.push({ label: '金币', value: `${cs}${state.economy.coinDelta}`, tone: 'gold' });
-      rows.push({
-        label: '段位',
-        value: `${rs}${state.economy.ratingDelta} · ${state.economy.tierLabel} ${state.economy.rating}`,
-        tone: state.economy.ratingDelta >= 0 ? 'blue' : 'red',
-      });
+      // F-RESULT-DEMO-R2：零增量不显示孤立「+0」/空字段（金币/段位 delta=0 → 隐藏该块）
+      if (state.economy.coinDelta !== 0) {
+        const cs = state.economy.coinDelta > 0 ? '+' : '';
+        rows.push({ label: '金币', value: `${cs}${state.economy.coinDelta}`, tone: 'gold' });
+      }
+      if (state.economy.ratingDelta !== 0) {
+        const rs = state.economy.ratingDelta > 0 ? '+' : '';
+        rows.push({
+          label: '段位',
+          value: `${rs}${state.economy.ratingDelta}`,
+          sub: `${state.economy.tierLabel} ${state.economy.rating}`,
+          tone: state.economy.ratingDelta >= 0 ? 'blue' : 'red',
+        });
+      }
     }
     const body: string[] = [];
     if (state.resultOnboardingVisible) body.push('获得新部件，可以回车库调整');
@@ -2208,7 +2217,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const cardW = large
       ? Math.min(W - this.insL - this.insR - (this.isShort ? 24 : 32), W * (this.isShort ? 0.9 : 0.78))
       : Math.min(420, W - this.insL - this.insR - 40);
-    const rewardRowH = this.isShort ? 12 : 26;
+    const rewardRowH = this.isShort ? 26 : 38; // F-RESULT-DEMO-R2：紧凑结果块高（金币/段位并排，值紧跟标签）
     const titleH = this.isShort ? 20 : 40;
     const btnH = this.isShort ? Math.min(this.targetTouchH, 36) : this.targetTouchH;
     const pad = this.isShort ? 6 : 16;
@@ -2218,15 +2227,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const hasContentBefore =
       spec.body.length > 0 || (spec.rewardRows?.length ?? 0) > 0 || !!spec.adRow;
     const partGap = spec.partCard && hasContentBefore ? (this.isShort ? 4 : 8) : 0;
-    // 固定部分高（不含 body 行）——body 行高在剩余空间内自适应（short 极限屏不溢出）
-    const fixedH = pad + titleH + (spec.rewardRows?.length ?? 0) * rewardRowH + adH + partH + partGap + (this.isShort ? 4 : 10) + btnH + pad;
+    // 固定部分高（不含 body 行）——rewardRows 为并排紧凑块（一行）
+    const fixedH = pad + titleH + ((spec.rewardRows?.length ?? 0) > 0 ? rewardRowH : 0) + adH + partH + partGap + (this.isShort ? 4 : 10) + btnH + pad;
     const availBodyH = H - this.insT - this.insB - fixedH;
     const rowH = spec.body.length > 0 ? Math.max(12, Math.min(22, availBodyH / spec.body.length)) : 22;
     const contentH = fixedH + spec.body.length * rowH;
-    // large：最小高 = viewport 60~75%（normal）/ ~86%（short：内容不足时明确留白）；
-    // F-RESULT-UX-R1：硬上限 = safe 区高（maxCardH），避免 360×180 等极限短屏按钮溢出 safe 底缘。
+    // F-RESULT-DEMO-R2：删除 R1 强制大留白（0.62H/0.86H）——卡片内容自适应（紧凑），
+    // 仅保留小保底（0.45H/0.55H）避免过小；硬上限 = safe 区高（maxCardH），极限短屏不溢出。
     const maxCardH = H - this.insT - this.insB;
-    const minLargeH = Math.floor(H * (this.isShort ? 0.86 : 0.62));
+    const minLargeH = Math.floor(H * (this.isShort ? 0.55 : 0.45));
     const cardH = large ? Math.min(maxCardH, Math.max(contentH, minLargeH)) : contentH;
     const cx = Math.max(this.insL, Math.min((W - cardW) / 2, W - this.insR - cardW));
     const cy = Math.max(this.insT, Math.min((H - cardH) / 2, H - this.insB - cardH));
@@ -2240,7 +2249,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.text(line, cx + cardW / 2, yy + rowH / 2, 14, V.textSecondary, 'center');
       yy += rowH;
     }
-    // ② 中部：奖励行（金币/段位；label 左 + value 右，独立行不拼长句）
+    // ② 中部：奖励块（金币/段位；F-RESULT-DEMO-R2：紧凑结果块——label 与 value 同块
+    // 紧邻（不再两端分离 / 无整行表格线），sub（段位名+当前值）为块内辅助小字）
     if (spec.rewardRows) {
       const toneColor: Record<ModalTone, string> = {
         gold: V.primary,
@@ -2248,11 +2258,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         red: V.lose,
         green: V.win,
       };
-      for (const rr of spec.rewardRows) {
-        this.text(rr.label, cx + pad, yy + rewardRowH / 2, 14, V.textSecondary, 'left');
-        this.text(rr.value, cx + cardW - pad, yy + rewardRowH / 2, 15, rr.tone ? toneColor[rr.tone] : V.textPrimary, 'right', 700);
-        yy += rewardRowH;
+      const n = spec.rewardRows.length;
+      const gapX = this.isShort ? 8 : 16;
+      const blockW = (cardW - 2 * pad - gapX * (n - 1)) / n;
+      for (let i = 0; i < n; i++) {
+        const rr = spec.rewardRows[i]!;
+        const bx = cx + pad + i * (blockW + gapX);
+        const ls = this.isShort ? 10 : 13;
+        const vs = this.isShort ? 15 : 22;
+        // label 宽估算（stub ctx 无 measureText）：字号 × 字符数 × 0.9
+        const lw = rr.label.length * ls * 0.9;
+        this.text(rr.label, bx, yy + (this.isShort ? 8 : 12), ls, V.textSecondary, 'left');
+        this.text(rr.value, bx + lw + (this.isShort ? 4 : 6), yy + (this.isShort ? 8 : 12), vs, rr.tone ? toneColor[rr.tone] : V.textPrimary, 'left', 800);
+        if (rr.sub) {
+          this.text(rr.sub, bx, yy + (this.isShort ? 20 : 30), this.isShort ? 9 : 12, V.textFaint, 'left');
+        }
       }
+      yy += rewardRowH;
     }
     // ② 中部：广告小型次级入口（F-UX-3C：奖励区内部，明显弱于底部流程按钮；点击不关闭）
     if (spec.adRow) {

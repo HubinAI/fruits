@@ -314,7 +314,8 @@ describe('F-META-4｜通用 Modal / Popup Foundation', () => {
       ]);
       expect(p.x, '下一场主按钮在右').toBeGreaterThanOrEqual(s.x + s.w);
     }
-    // —— 420×210（short）明确留白：卡片不占满、决策按钮上方有可见间隙 ——
+    // —— 420×210（short）紧凑：F-RESULT-DEMO-R2 删除强制大留白（不再要求「明确留白」，
+    // 但保留安全边距：按钮不贴屏缘、safe 内完整）——
     const env = makeHost({ w: 420, h: 210 }, INSETS);
     env.host.render(
       state({
@@ -330,11 +331,11 @@ describe('F-META-4｜通用 Modal / Popup Foundation', () => {
     // 卡片四周留白：按钮不贴屏缘（上下各有 >8px）
     expect(p420.y, '决策按钮 y ≥8（上方留白）').toBeGreaterThanOrEqual(8);
     expect(p420.y + p420.h, '决策按钮底 ≤ 屏高−8（下方留白）').toBeLessThanOrEqual(210 - 8);
-    // 决策按钮上方有明确间隙（内容顶部排、按钮贴卡片底 → 按钮 y 明显大于内容估算底）
-    // 内容底 ≈ ad 底 + partGap(4) + partH(32) + 按钮上方间距(4)；留白 = primary.y − 内容底 ≥ 8
+    // 内容底 ≈ ad 底 + partGap(4) + partH(32) + 按钮上方间距(4)
     const ad420 = env.areas().find((a) => a.id === 'modal-ad')!;
     const contentBottomEst = ad420.y + ad420.h + 4 + 32 + 4;
-    expect(p420.y, '按钮行上方有明确留白（≥8）').toBeGreaterThanOrEqual(contentBottomEst + 8);
+    // F-RESULT-DEMO-R2：紧凑卡片——按钮行上方不保留旧强制大留白（旧 0.86H 空洞 ≥32）
+    expect(p420.y, '按钮行上方无强制大留白（紧凑；< 内容底 + 32 旧空洞）').toBeLessThan(contentBottomEst + 32);
   });
 
 });
