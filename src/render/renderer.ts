@@ -760,15 +760,18 @@ export class Renderer {
           // F-BATTLE-READABILITY-R1：预高亮——墙体半透明红填充 + 橙红脉动描边
           // （危险机关而非纯红灰矩形；玩家提前感知收束方向）
           const blink = 0.45 + 0.35 * Math.sin(now * 0.012);
-          ctx.globalAlpha = 0.2 + 0.18 * blink;
+          ctx.globalAlpha = 0.18 + 0.14 * blink;
           this.drawShape(cw, '#c0403a');
           ctx.globalAlpha = blink;
           this.strokeShape(cw, '#e8a33c');
           ctx.globalAlpha = 1;
         } else if (arenaPhase === 'Closing') {
-          // 正式进入：亮红填充 + 朝 arena 内部的锯齿尖刺 + 脉动描边
-          const pulse = 0.85 + 0.15 * Math.sin(now * 0.01);
+          // F-BATTLE-HUD-HAZARD-R1：正式进入——墙体填充降为半透明（车辆不被大片实心红
+          // 遮住），轮廓描边 + 尖刺保持清晰（危险方向先于特效）；脉动描边弱化。
+          const pulse = 0.7 + 0.2 * Math.sin(now * 0.01);
+          ctx.globalAlpha = 0.26;
           this.drawShape(cw, '#c0403a');
+          ctx.globalAlpha = 1;
           this.drawSpikes(cw, '#c0403a', now);
           ctx.globalAlpha = pulse;
           this.strokeShape(cw, '#ff8a70');
@@ -839,16 +842,22 @@ export class Renderer {
 
     // FX（now 已在 render 顶部声明）
     this.fx = this.fx.filter((f) => now - f.bornAt < f.ttl);
-    for (const f of this.fx) {
+    // F-BATTLE-HUD-HAZARD-R1：伤害数字同侧短时聚合/错开——按世界 x 相近分桶，
+    // 桶内各组纵向错开（14px·scale 一档），避免数字堆叠遮挡车辆/墙体/HUD。
+    const fxSorted = [...this.fx].sort((a, b) => a.x - b.x);
+    const laneByBucket = new Map<number, number>();
+    for (const f of fxSorted) {
       const age = (now - f.bornAt) / f.ttl;
+      const bucket = Math.round(f.x / 90);
+      const lane = laneByBucket.get(bucket) ?? 0;
+      laneByBucket.set(bucket, lane + 1);
       ctx.globalAlpha = 1 - age;
       ctx.fillStyle = f.color;
       ctx.font = `bold ${Math.max(14, this.ss(22))}px sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(f.text, this.sx(f.x), this.sy(f.y) - age * this.ss(40));
+      ctx.fillText(f.text, this.sx(f.x), this.sy(f.y) - age * this.ss(40) + lane * this.ss(14));
       ctx.globalAlpha = 1;
     }
-
     this.hitFlashes = this.hitFlashes.filter((h) => now - h.bornAt < h.ttl);
     for (const h of this.hitFlashes) {
       // W2-FX-2：已死亡（淡出中/已消失）车辆不叠加受击反馈

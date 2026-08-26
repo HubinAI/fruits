@@ -854,13 +854,15 @@ export class PlayerGameRuntime {
     if (inWarning) {
       const warningMs = o.config.arena?.phases?.warningMs ?? 3000;
       const remaining = phaseRemainingMs(o.phase, warningMs, o.timeMs - this.phaseStartTimeMs);
-      return warningCountdown(remaining);
+      // F-BATTLE-HUD-HAZARD-R1：阶段提示 = 文字 + 倒计时一个信息组（mobile-normal 与
+      // short HUD 同源）；「收束警告」→「刺墙逼近」文字变化解释 Warning→Closing 重置。
+      return `收束警告 ${warningCountdown(remaining)}`;
     }
     // F-UX-3B：Closing 阶段同样中央显示倒计时（刺墙逼近；表现层纯逻辑，不碰 Physics/伤害）
     if (o.phase === 'Closing' && o.result?.phase !== 'End') {
       const closingMs = o.config.arena?.phases?.closingMs ?? 5000;
       const remaining = phaseRemainingMs(o.phase, closingMs, o.timeMs - this.phaseStartTimeMs);
-      return warningCountdown(remaining);
+      return `刺墙逼近 ${warningCountdown(remaining)}`;
     }
     void nowMs;
     return null;

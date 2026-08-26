@@ -2031,9 +2031,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       if (pctB > 0) this.rect(barBX, barY, barW * (pctB / 100), h, V.enemyOrange);
       this.text(`${Math.round(s.sideB.hp)}`, barBX - 6, barY + h / 2, 12, V.textPrimary, 'right');
 
-      this.text(s.phase === 'End' ? '战斗结束' : '战斗中', this.W / 2, top + 11, 14, V.primary, 'center');
-      if (frame.phaseCountdownText != null) {
-        this.text(frame.phaseCountdownText, this.W / 2, top + 60, 34, V.lose, 'center', 800);
+      // F-BATTLE-HUD-HAZARD-R1：阶段提示统一语义——Active 无需持续占据中央「战斗中」；
+      // Warning/Closing 才在中央显示「收束警告 N / 刺墙逼近 N」完整信息组（文案来自
+      // runtime phaseCountdownText，与 short HUD 同源；文字变化解释 Warning→Closing 重置）。
+      if (s.phase === 'Warning' || s.phase === 'Closing') {
+        if (frame.phaseCountdownText != null) {
+          this.text(frame.phaseCountdownText, this.W / 2, top + 46, 26, V.lose, 'center', 800);
+        }
+      } else if (s.phase === 'End') {
+        this.text('战斗结束', this.W / 2, top + 11, 14, V.primary, 'center');
       }
       // F-BATTLE-READABILITY-R1：Warning/Closing 左右边缘危险脉冲（收束压力来自两侧；
       // 细条贴边，不遮挡车辆/战场核心）
@@ -2065,10 +2071,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /**
    * F-BATTLE-READABILITY-R1：Warning/Closing 左右边缘危险脉冲——半透明红竖条 + 脉动
    * （Closing 更亮更强），提示「收束压力来自两侧」；细条贴边，不遮挡车辆/战场核心。
+   * F-BATTLE-HUD-HAZARD-R1：降低叠加饱和度——墙体已降为半透明填充，边缘脉冲同步克制
+   * （Closing 0.55→0.40、Warning 0.28→0.22），车辆/轮廓/尖刺成为最强视觉元素而非红幕。
    */
   private drawDangerEdgePulse(closing: boolean): void {
     const pulse = 0.5 + 0.5 * Math.sin(this.nowMs * 0.012);
-    const alpha = closing ? 0.55 + 0.3 * pulse : 0.28 + 0.28 * pulse;
+    const alpha = closing ? 0.4 + 0.16 * pulse : 0.22 + 0.18 * pulse;
     const w = Math.max(5, Math.round(this.W * 0.012));
     const topY = this.insT;
     const h = this.H - this.insT - this.insB;
@@ -2103,10 +2111,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.rect(barBX, top, barW, h, '#232b38', V.border, 1);
     if (pctB > 0) this.rect(barBX, top, barW * (pctB / 100), h, V.enemyOrange);
     // 中央阶段提示：仅 Warning / Closing（不遮挡车辆/武器/FX——车辆位于下部战斗带）
+    // F-BATTLE-HUD-HAZARD-R1：直接用 runtime 完整文案（「收束警告 N / 刺墙逼近 N」），
+    // 与 mobile-normal 同源同一语义；不再本端拼接 label（孤立数字已消除）。
     if (s.phase === 'Warning' || s.phase === 'Closing') {
-      const label = s.phase === 'Warning' ? '警告' : '刺墙逼近';
-      const cd = frame.phaseCountdownText != null ? frame.phaseCountdownText : '';
-      this.text(cd !== '' ? `${label} ${cd}` : label, this.W / 2, top + 44, 24, V.lose, 'center', 800);
+      if (frame.phaseCountdownText != null) {
+        this.text(frame.phaseCountdownText, this.W / 2, top + 44, 24, V.lose, 'center', 800);
+      }
     }
   }
 

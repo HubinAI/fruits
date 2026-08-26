@@ -193,24 +193,27 @@ describe('F-UX-3B Battle 去 UI 化 + 主体放大', () => {
     expect(t.some((s) => s.includes('警告') || s.includes('刺墙')), 'Active 无阶段提示').toBe(false);
   });
 
-  it('2. mobile-short HUD：Warning/Closing 才中央显示阶段提示 + 倒计时', () => {
+  it('2. mobile-short HUD：Warning/Closing 才中央显示阶段提示（文字+倒计时一个信息组，完整文案同源）', () => {
     const { host, texts } = makeRecHost({ w: 420, h: 210 });
     host.render(garageState({ battleState: 'fighting' }));
+    // F-BATTLE-HUD-HAZARD-R1：phaseCountdownText = 完整文案（runtime 提供「收束警告 N /
+    // 刺墙逼近 N」），host 两端直接绘制同一信息组——不再孤立数字、不再本端拼 label。
     host.renderBattleFrame({
       battleState: 'fighting',
       battleStatus: { phase: 'Warning', sideA: { hp: 50, maxHp: 100 }, sideB: { hp: 50, maxHp: 100 } },
-      phaseCountdownText: '2',
+      phaseCountdownText: '收束警告 2',
     });
-    expect(texts().some((s) => s.includes('警告') && s.includes('2')), 'Warning 中央提示含倒计时').toBe(true);
+    expect(texts().some((s) => s.includes('收束警告') && s.includes('2')), 'Warning 中央完整文案含倒计时').toBe(true);
+    expect(texts().some((s) => s === '2'), '不绘制孤立数字（文字+数字一体）').toBe(false);
     host.renderBattleFrame({
       battleState: 'fighting',
       battleStatus: { phase: 'Closing', sideA: { hp: 50, maxHp: 100 }, sideB: { hp: 50, maxHp: 100 } },
-      phaseCountdownText: '3',
+      phaseCountdownText: '刺墙逼近 3',
     });
-    expect(texts().some((s) => s.includes('刺墙逼近') && s.includes('3')), 'Closing 中央提示含倒计时').toBe(true);
+    expect(texts().some((s) => s.includes('刺墙逼近') && s.includes('3')), 'Closing 中央完整文案含倒计时').toBe(true);
   });
 
-  it('3. mobile-normal（844×390）HUD 阵营卡：名称（我方/对手）+ HP 数字辅助 +「战斗中」；不再只显示 A/B', () => {
+  it('3. mobile-normal（844×390）HUD 阵营卡：名称（我方/对手）+ HP 数字辅助；Active 无中央「战斗中」常驻；Warning/Closing 显示完整阶段组', () => {
     const { host, texts } = makeRecHost({ w: 844, h: 390 });
     host.render(garageState({ battleState: 'fighting' }));
     host.renderBattleFrame({
@@ -222,7 +225,16 @@ describe('F-UX-3B Battle 去 UI 化 + 主体放大', () => {
     expect(t.some((s) => s === 'A' || s === 'B'), 'F-BATTLE-READABILITY-R1：阵营卡不再只显示 A/B 字母').toBe(false);
     expect(t.some((s) => s.includes('我方') || s.includes('对手')), '阵营卡显示我方/对手名（无 names 回落）').toBe(true);
     expect(t.some((s) => s === '70' || s === '40'), 'normal HUD 保留 HP 数字（辅助信息）').toBe(true);
-    expect(t.some((s) => s.includes('战斗中')), 'normal HUD 保留「战斗中」').toBe(true);
+    // F-BATTLE-HUD-HAZARD-R1：Active 无需持续占据中央「战斗中」
+    expect(t.some((s) => s.includes('战斗中')), 'Active 无中央「战斗中」常驻').toBe(false);
+    expect(t.some((s) => s.includes('收束警告') || s.includes('刺墙逼近')), 'Active 无阶段提示').toBe(false);
+    // Warning：完整文案信息组（与 short 同一语义）
+    host.renderBattleFrame({
+      battleState: 'fighting',
+      battleStatus: { phase: 'Warning', sideA: { hp: 70, maxHp: 100 }, sideB: { hp: 40, maxHp: 100 } },
+      phaseCountdownText: '收束警告 2',
+    });
+    expect(texts().some((s) => s.includes('收束警告') && s.includes('2')), 'normal Warning 显示完整阶段组').toBe(true);
   });
 
   it('4. compact battle 地面线 68~72% 视口（420×210 地面占屏 ∈ [28,32]%，battleStageRect）+ 双车完整入画', () => {
