@@ -30,12 +30,21 @@ export interface AggregatedDamageView {
   windowStart: number;
   /** true=本次为新建浮动数字（首击 / 窗口到期）；false=合并进已有组（原地更新） */
   isNewGroup: boolean;
+  /** F-BATTLE-PRESENTATION-R2：本次命中是否为「重要伤害」（单次大额）→ 渲染提高层级（放大+高亮） */
+  important: boolean;
 }
 
 interface GroupState {
   windowStart: number;
   accumDamage: number;
 }
+
+/**
+ * F-BATTLE-PRESENTATION-R2：单次大额伤害阈值——达到即视为「重要伤害」，渲染层提高层级
+ * （放大字号 + 高亮），让 Cannon/Hammer 等重击从高频小伤害中脱颖而出（Must#8 重要伤害提高层级）。
+ * 纯展示阈值，不改 Damage Resolver / 武器参数 / 命中判定。
+ */
+export const BIG_HIT_THRESHOLD = 15;
 
 export class DamageNumberAggregator {
   private groups = new Map<string, GroupState>();
@@ -54,6 +63,7 @@ export class DamageNumberAggregator {
    */
   feed(ev: DamageEvent, nowMs: number): AggregatedDamageView {
     const dmg = Math.round(ev.damage);
+    const important = ev.damage >= BIG_HIT_THRESHOLD;
     const key = DamageNumberAggregator.groupKey(ev);
     const existing = this.groups.get(key);
     // 窗口以该组首次命中时间为起点；窗口内 → 合并进当前组
@@ -66,6 +76,27 @@ export class DamageNumberAggregator {
         groupKey: key,
         windowStart: existing.windowStart,
         isNewGroup: false,
+        important,
+      };
+    }
+    // F-BATTLE-PRESENTATION-R2：同一车辆同时最多 2 组浮动数字（Must#8）。
+    // 若该 target 已有 ≥2 组「窗口内活跃」数字，则合并进最旧活跃组（不新建数字），
+    // 避免多武器同时命中产生 >2 组数字云遮挡车辆主体；连续小伤害仍走窗口合并。
+    const targetActive = [...this.groups.entries()].filter(
+      ([k, g]) => k.split('|')[0] === ev.target && nowMs - g.windowStart < this.windowMs,
+    );
+    if (targetActive.length >= 2) {
+      targetActive.sort((a, b) => a[1].windowStart - b[1].windowStart);
+      const [mergeKey, mergeG] = targetActive[0];
+      mergeG.accumDamage += dmg;
+      return {
+        accumulatedDamage: mergeG.accumDamage,
+        x: ev.contactPoint.x,
+        y: ev.contactPoint.y,
+        groupKey: mergeKey,
+        windowStart: mergeG.windowStart,
+        isNewGroup: false,
+        important,
       };
     }
     // 新组：首击或窗口到期 → 立即新建（不延迟）
@@ -77,6 +108,7 @@ export class DamageNumberAggregator {
       groupKey: key,
       windowStart: nowMs,
       isNewGroup: true,
+      important,
     };
   }
 

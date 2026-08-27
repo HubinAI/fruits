@@ -19,10 +19,19 @@ const BUILD_KEY = 'strongfruit.playerBuild.v1';
 const INV_KEY_V2 = 'strongfruit.ownedParts.v2';
 const PROG_KEY = 'strongfruit.playerProgress.v1';
 
-/** 零实现 2D 上下文桩（所有方法 noop；所有属性 set 静默成功） */
+/** 零实现 2D 上下文桩（所有方法 noop；所有属性 set 静默成功）。
+ * F-BATTLE-PRESENTATION-R2：梯度创建需返回带 addColorStop 的渐变桩，否则 renderer 的
+ * drawHomeBackdrop / drawPrebattleSky / drawBattleArena（均用 createLinearGradient/createRadialGradient）
+ * 在 headless 桩下抛「addColorStop is not a function」。渐变桩为 no-op，不影响状态机/存储验收。 */
+const STUB_GRADIENT = { addColorStop() {} };
 function makeStubCtx(): CanvasRenderingContext2D {
   const handler = {
-    get: () => () => ({ width: 0 }),
+    get: (_t: unknown, k: string | symbol) => {
+      if (k === 'createLinearGradient' || k === 'createRadialGradient' || k === 'createPattern') {
+        return () => STUB_GRADIENT;
+      }
+      return () => ({ width: 0 });
+    },
     set: () => true,
   };
   return new Proxy({}, handler) as unknown as CanvasRenderingContext2D;
@@ -41,6 +50,9 @@ function makeStubCanvas(
             return (src: unknown, _dx: number, _dy: number, dw?: number, dh?: number) => {
               rec.push({ src, w: dw ?? 0, h: dh ?? 0 });
             };
+          }
+          if (k === 'createLinearGradient' || k === 'createRadialGradient' || k === 'createPattern') {
+            return () => STUB_GRADIENT;
           }
           return () => ({ width: 0 });
         },

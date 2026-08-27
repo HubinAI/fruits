@@ -139,6 +139,8 @@ export interface PlayerUIActions {
   setHomeBackdrop?(on: boolean): void;
   /** F-PREBATTLE-VISUAL-R1：战前（Matching/MatchPreview）程序化背景下沉为 renderer underlay 开关（仅战前开启） */
   setPrebattleBackdrop?(on: boolean): void;
+  /** F-BATTLE-PRESENTATION-R2：战斗（fighting/ended）程序化竞技场背景下沉为 renderer underlay 开关（仅战斗开启） */
+  setBattleBackdrop?(on: boolean): void;
 }
 
 /** 平台中立 Host 接口：绑定 State → 渲染、Action → 回调。 */

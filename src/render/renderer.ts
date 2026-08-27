@@ -164,6 +164,10 @@ interface FloatingText {
   color: string;
   bornAt: number;
   ttl: number;
+  /** F-BATTLE-PRESENTATION-R2：重要伤害放大字号（px，逻辑）；缺省走常规字号 */
+  size?: number;
+  /** F-BATTLE-PRESENTATION-R2：重要伤害（单次大额）→ 绘制高亮光环、提高层级 */
+  important?: boolean;
 }
 
 /**
@@ -176,6 +180,8 @@ interface FloatingText {
 const DAMAGE_AGGREGATE_WINDOW_MS = 210;
 /** 伤害数字浮动停留时长（ms）；与旧版一致，不改动 */
 const DAMAGE_NUMBER_TTL_MS = 900;
+/** F-BATTLE-PRESENTATION-R2：重要伤害数字放大字号（逻辑 px；常规为 ss(22) 系） */
+const DAMAGE_NUMBER_IMPORTANT_SIZE = 32;
 
 /** 命中火花（W2-FX-1/2）：接触点短暂小圆（W2-FX-2 支持按伤害来源着色） */
 interface Spark {
@@ -293,6 +299,9 @@ export class Renderer {
   /** F-PREBATTLE-VISUAL-R1：战前（Matching/MatchPreview）程序化背景下沉开关——水果竞技场
    *  简化版（背景层<车辆层<UI层）；仅战前开启；与 homeBackdrop 互斥（Battle 两者皆关）。 */
   private prebattleBackdrop = false;
+  /** F-BATTLE-PRESENTATION-R2：正式战斗（fighting/ended）竞技场背景开关（背景层<车辆层<UI层）；
+   *  与 homeBackdrop / prebattleBackdrop 互斥；优先级 battle > prebattle > home。 */
+  private battleBackdrop = false;
   /** F-PREBATTLE-VISUAL-R1：每帧绘制的真实地面线（逻辑 px），供 E2E probe.groundScreenY
    *  在 battle 相机未激活（预览/战前）时可靠取数——根治渲染层取 this.orchestrator 为 null
    *  导致 groundScreenY 恒 null 的缺陷。与 battleCam.groundScreenY 二选一。 */
@@ -621,19 +630,24 @@ export class Renderer {
   spawnDamageNumberFromEvent(ev: DamageEvent): void {
     const dmg = Math.round(ev.damage);
     if (dmg <= 0) return;
-    const color = damageFeedbackColors(ev.damageSource).number;
     const now = this.now();
     const view = this.damageAggregator.feed(ev, now);
+    // F-BATTLE-PRESENTATION-R2：重要伤害（单次大额）→ 放大 + 高亮金白，从高频小伤害中脱颖而出
+    const important = view.important;
+    const color = important ? '#fff0b0' : damageFeedbackColors(ev.damageSource).number;
+    const mk = (): FloatingText => ({
+      x: view.x,
+      y: view.y,
+      text: `-${view.accumulatedDamage}`,
+      color,
+      bornAt: now,
+      ttl: DAMAGE_NUMBER_TTL_MS,
+      size: important ? DAMAGE_NUMBER_IMPORTANT_SIZE : undefined,
+      important,
+    });
     if (view.isNewGroup) {
       // 新组：立即新建浮动数字（不延迟 → 单发武器即时显示）
-      const fx: FloatingText = {
-        x: view.x,
-        y: view.y,
-        text: `-${view.accumulatedDamage}`,
-        color,
-        bornAt: now,
-        ttl: DAMAGE_NUMBER_TTL_MS,
-      };
+      const fx = mk();
       this.fx.push(fx);
       this.damageGroupFx.set(view.groupKey, fx);
       return;
@@ -644,16 +658,12 @@ export class Renderer {
       fx.text = `-${view.accumulatedDamage}`;
       fx.x = view.x;
       fx.y = view.y;
+      fx.color = color;
+      fx.important = important;
+      if (important) fx.size = DAMAGE_NUMBER_IMPORTANT_SIZE;
     } else {
       // 防御：聚合器判定为合并但本地无浮动数字引用（理论上不会）→ 退回新建
-      const fxNew: FloatingText = {
-        x: view.x,
-        y: view.y,
-        text: `-${view.accumulatedDamage}`,
-        color,
-        bornAt: now,
-        ttl: DAMAGE_NUMBER_TTL_MS,
-      };
+      const fxNew = mk();
       this.fx.push(fxNew);
       this.damageGroupFx.set(view.groupKey, fxNew);
     }
@@ -795,6 +805,9 @@ export class Renderer {
       // F-PREBATTLE-VISUAL-R1：战前程序化背景（水果竞技场简化版 underlay；
       // 单一入口 drawPrebattleSky —— 天空渐变 + 简化对称看台 + 灯点，无 battle 墙）。
       this.drawPrebattleSky(ctx, this.viewWidth, this.viewHeight);
+    } else if (this.battleBackdrop) {
+      // F-BATTLE-PRESENTATION-R2：正式战斗竞技场（天空+地面平台）由下方 drawBattleArena 绘制；
+      // 此处不填充纯黑，避免「纯黑上半屏」（Must#2）。
     } else {
       ctx.fillStyle = '#14181f';
       ctx.fillRect(0, 0, this.viewWidth, this.viewHeight);
@@ -809,8 +822,48 @@ export class Renderer {
     // W2-FX-2：表现时间基准（阶段闪烁 / 死亡淡出 / FX 共用）
     const now = this.now();
 
-    if (!this.homeBackdrop && !this.prebattleBackdrop) {
-      // Ground（统一竞技场地面语义）
+    if (this.battleBackdrop) {
+      // F-BATTLE-PRESENTATION-R2：正式竞技场（天空渐变 + 远景看台 + 中景灯光 + 近景实体战斗平台）
+      // 替换旧「纯黑上半屏 + 纯蓝下半屏 + 细线」。drawBattleArena 填充 [0,gy] 天空 + [gy,h] 平台。
+      const gy = this.sy(arena.groundY);
+      this.drawBattleArena(ctx, this.viewWidth, this.viewHeight, gy, t);
+      this.lastGroundScreenYLogical = gy / this.viewDpr;
+      // 地平线高光（车底水平线，强调地面边缘；车辆「站」在平台面上）
+      ctx.strokeStyle = V.arenaGroundEdge;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(t.offsetX, gy);
+      ctx.lineTo(this.ss(arena.width) + t.offsetX, gy);
+      ctx.stroke();
+      // Walls（normal）
+      for (const wall of arena.normalWalls) {
+        this.drawShape(wall, '#3a4150');
+      }
+      // Closing walls（Hazard；W2-FX-2 阶段视觉：Warning 预高亮闪烁、Closing 正式刺墙锯齿）
+      const arenaPhase = orchestrator.phase;
+      for (const cw of arena.closingWalls) {
+        this.drawShape(cw, '#7a2f2f');
+        if (arenaPhase === 'Warning') {
+          const blink = 0.45 + 0.35 * Math.sin(now * 0.012);
+          ctx.globalAlpha = 0.18 + 0.14 * blink;
+          this.drawShape(cw, '#c0403a');
+          ctx.globalAlpha = blink;
+          this.strokeShape(cw, '#e8a33c');
+          ctx.globalAlpha = 1;
+        } else if (arenaPhase === 'Closing') {
+          // 正式进入——墙体填充降为半透明：Closing 墙体仅半透明填充（globalAlpha 0.26），尖刺/轮廓在 alpha 外清晰绘制
+          const pulse = 0.7 + 0.2 * Math.sin(now * 0.01);
+          ctx.globalAlpha = 0.26;
+          this.drawShape(cw, '#c0403a');
+          ctx.globalAlpha = 1;
+          this.drawSpikes(cw, '#c0403a', now);
+          ctx.globalAlpha = pulse;
+          this.strokeShape(cw, '#ff8a70');
+          ctx.globalAlpha = 1;
+        }
+      }
+    } else if (!this.homeBackdrop && !this.prebattleBackdrop) {
+      // Ground（统一竞技场地面语义；legacy fallback，battle 已由 battleBackdrop 覆盖）
       ctx.fillStyle = V.arenaGround;
       ctx.fillRect(
         t.offsetX,
@@ -836,8 +889,6 @@ export class Renderer {
       for (const cw of arena.closingWalls) {
         this.drawShape(cw, '#7a2f2f');
         if (arenaPhase === 'Warning') {
-          // F-BATTLE-READABILITY-R1：预高亮——墙体半透明红填充 + 橙红脉动描边
-          // （危险机关而非纯红灰矩形；玩家提前感知收束方向）
           const blink = 0.45 + 0.35 * Math.sin(now * 0.012);
           ctx.globalAlpha = 0.18 + 0.14 * blink;
           this.drawShape(cw, '#c0403a');
@@ -845,8 +896,7 @@ export class Renderer {
           this.strokeShape(cw, '#e8a33c');
           ctx.globalAlpha = 1;
         } else if (arenaPhase === 'Closing') {
-          // F-BATTLE-HUD-HAZARD-R1：正式进入——墙体填充降为半透明（车辆不被大片实心红
-          // 遮住），轮廓描边 + 尖刺保持清晰（危险方向先于特效）；脉动描边弱化。
+          // 正式进入——墙体填充降为半透明：Closing 墙体仅半透明填充（globalAlpha 0.26），尖刺/轮廓在 alpha 外清晰绘制
           const pulse = 0.7 + 0.2 * Math.sin(now * 0.01);
           ctx.globalAlpha = 0.26;
           this.drawShape(cw, '#c0403a');
@@ -943,11 +993,22 @@ export class Renderer {
       const bucket = Math.round(f.x / 90);
       const lane = laneByBucket.get(bucket) ?? 0;
       laneByBucket.set(bucket, lane + 1);
+      const tx = this.sx(f.x);
+      const ty = this.sy(f.y) - age * this.ss(40) + lane * this.ss(14);
+      const fs = f.size ?? Math.max(14, this.ss(22));
+      ctx.textAlign = 'center';
+      // F-BATTLE-PRESENTATION-R2：重要伤害（单次大额）→ 金白高亮光环（描边）提高层级，
+      // 从高频小伤害数字云中脱颖而出（Must#8 重要伤害提高层级）。
+      if (f.important) {
+        ctx.globalAlpha = (1 - age) * 0.9;
+        ctx.lineWidth = Math.max(2, this.ss(2.5));
+        ctx.strokeStyle = '#fff3c0';
+        ctx.strokeText(f.text, tx, ty);
+      }
       ctx.globalAlpha = 1 - age;
       ctx.fillStyle = f.color;
-      ctx.font = `bold ${Math.max(14, this.ss(22))}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(f.text, this.sx(f.x), this.sy(f.y) - age * this.ss(40) + lane * this.ss(14));
+      ctx.font = `bold ${fs}px sans-serif`;
+      ctx.fillText(f.text, tx, ty);
       ctx.globalAlpha = 1;
     }
     this.hitFlashes = this.hitFlashes.filter((h) => now - h.bornAt < h.ttl);
@@ -1058,6 +1119,15 @@ export class Renderer {
   /** F-PREBATTLE-VISUAL-R1：战前背景开关（水果竞技场简化版；与 homeBackdrop 互斥） */
   setPrebattleBackdrop(on: boolean): void {
     this.prebattleBackdrop = on;
+  }
+
+  /**
+   * F-BATTLE-PRESENTATION-R2：战斗（fighting/ended）程序化竞技场背景下沉为 renderer underlay 开关。
+   * 与 homeBackdrop / prebattleBackdrop 互斥；优先级 battle > prebattle > home。
+   * 仅战斗阶段开启；Matching / MatchPreview / Garage / Home 不受影响（不修改这些页面逻辑）。
+   */
+  setBattleBackdrop(on: boolean): void {
+    this.battleBackdrop = on;
   }
 
   /**
@@ -1192,6 +1262,121 @@ export class Renderer {
     ctx.fillStyle = dome;
     ctx.fillRect(0, 0, w, h * 0.5);
     ctx.restore();
+  }
+
+  /**
+   * F-BATTLE-PRESENTATION-R2：正式战斗竞技场背景（程序化 underlay，单一入口）。
+   * 远景：深蓝竞技场天空渐变 + 对称多层看台（向中心收拢）+ 看台灯点 + 穹顶微光；
+   * 中景：顶部两侧聚光灯锥（射向场地中心）+ 两侧边缘光柱（结构感）；
+   * 近景：实体战斗平台（台面 arenaGround + 顶部边缘高光 + 台后柔光 halo + 底部暗收束）。
+   * 取代旧「纯黑上半屏 + 纯蓝下半屏 + 细线」（Must#2：屏幕主体不得由纯黑+纯蓝构成）。
+   * 车辆是主体：天空/看台占上部，平台占下部，中央留给双方车辆；不画遮挡车辆的大墙。
+   */
+  private drawBattleArena(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    groundY: number,
+    _t: ScreenTransform,
+  ): void {
+    const gy = groundY;
+
+    // ---- 远景底色：天空渐变（非纯色块），从顶过渡到底地平线辉光 ----
+    ctx.fillStyle = V.arenaBgTop;
+    ctx.fillRect(0, 0, w, gy);
+    const sky = ctx.createLinearGradient(0, 0, 0, gy);
+    sky.addColorStop(0, V.arenaBgTop);
+    sky.addColorStop(0.4, V.arenaBgMid);
+    sky.addColorStop(0.7, V.arenaBgLow);
+    sky.addColorStop(1, V.arenaBgHorizon);
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, gy);
+    ctx.save();
+
+    // 穹顶微光（弱，不构成巨圆主背景）
+    const dome = ctx.createRadialGradient(w / 2, gy * 0.05, w * 0.06, w / 2, gy * 0.05, w * 0.5);
+    dome.addColorStop(0, 'rgba(120,165,240,0.10)');
+    dome.addColorStop(1, 'rgba(120,165,240,0)');
+    ctx.fillStyle = dome;
+    ctx.fillRect(0, 0, w, gy * 0.6);
+
+    // 远景：对称看台轮廓（多层阶梯，向中心收拢；中间留舞台开口；非纯色块）
+    const tiers = 7;
+    for (let i = 0; i < tiers; i++) {
+      const ty = gy * (0.18 + i * 0.075);
+      const half = Math.max(w * 0.05, w * (0.49 - 0.072 * i));
+      ctx.fillStyle = `rgba(40,64,108,${(0.24 + i * 0.04).toFixed(3)})`;
+      ctx.fillRect(w / 2 - half, ty, half * 2, Math.max(2, gy * 0.02));
+      // 看台灯点（竞技场氛围，非主视觉）
+      ctx.fillStyle = 'rgba(150,195,255,0.42)';
+      const lamps = Math.max(6, Math.floor((half * 2) / (w * 0.085)));
+      for (let k = 0; k < lamps; k++) {
+        const lx = w / 2 - half + 10 + k * ((half * 2 - 20) / Math.max(1, lamps - 1));
+        ctx.fillRect(lx, ty - 1, 2, 2);
+      }
+    }
+
+    // 中景：两侧聚光灯锥（顶部射向场地中心；半透明渐变，不遮车辆主体）
+    for (const side of [-1, 1] as const) {
+      const sx = w / 2 + side * w * 0.22;
+      const cone = ctx.createLinearGradient(0, 0, 0, gy);
+      cone.addColorStop(0, 'rgba(150,190,255,0.15)');
+      cone.addColorStop(0.6, 'rgba(150,190,255,0.04)');
+      cone.addColorStop(1, 'rgba(150,190,255,0)');
+      ctx.fillStyle = cone;
+      ctx.beginPath();
+      ctx.moveTo(sx, -4);
+      ctx.lineTo(sx - side * w * 0.12, gy);
+      ctx.lineTo(sx + side * w * 0.12, gy);
+      ctx.closePath();
+      ctx.fill();
+      // 灯头（聚光光源点）
+      ctx.fillStyle = 'rgba(190,220,255,0.5)';
+      ctx.fillRect(sx - 3, 0, 6, 4);
+    }
+    // 中景：两侧边缘光柱（细柱 + 顶部灯头，结构感，低对比）
+    for (const side of [-1, 1] as const) {
+      const px = w / 2 + side * w * 0.49;
+      ctx.fillStyle = 'rgba(28,44,72,0.7)';
+      ctx.fillRect(px - 1.5, gy * 0.28, 3, gy * 0.55);
+      ctx.fillStyle = 'rgba(150,190,255,0.26)';
+      ctx.fillRect(px - 3, gy * 0.28 - 3, 6, 3);
+    }
+    ctx.restore();
+
+    // ---- 近景：实体战斗平台（台面 + 顶部边缘高光 + 台后柔光 + 底部暗收束） ----
+    // 台后柔光 halo（车后光带，让车辆从背景中浮出；弱，不抢主体）
+    const backGlow = ctx.createLinearGradient(0, gy - 46, 0, gy + 6);
+    backGlow.addColorStop(0, 'rgba(120,170,255,0)');
+    backGlow.addColorStop(0.7, 'rgba(120,170,255,0.12)');
+    backGlow.addColorStop(1, 'rgba(120,170,255,0)');
+    ctx.fillStyle = backGlow;
+    ctx.fillRect(w * 0.12, gy - 46, w * 0.76, 52);
+
+    // 台面（arenaGround，带轻微纵向渐变：地平线附近更亮 → 底部更暗）
+    const plat = ctx.createLinearGradient(0, gy, 0, h);
+    plat.addColorStop(0, V.arenaGround);
+    plat.addColorStop(0.5, '#1f2c40');
+    plat.addColorStop(1, '#141d2c');
+    ctx.fillStyle = plat;
+    ctx.fillRect(0, gy, w, h - gy);
+
+    // 台面前缘柔光带（车底水平线下方补一条过渡光，弱）
+    const edgeGlow = ctx.createLinearGradient(0, gy, 0, gy + 8);
+    edgeGlow.addColorStop(0, 'rgba(120,170,255,0.20)');
+    edgeGlow.addColorStop(1, 'rgba(120,170,255,0)');
+    ctx.fillStyle = edgeGlow;
+    ctx.fillRect(0, gy, w, 8);
+
+    // 台体底部暗带（收束）
+    ctx.fillStyle = 'rgba(6,10,18,0.55)';
+    ctx.fillRect(0, h - 6, w, 6);
+
+    // 近景：两侧台肩结构（强化「实体平台」边界，极窄不遮挡车辆主体）
+    const shoulder = Math.min(6, w * 0.02);
+    ctx.fillStyle = 'rgba(20,30,48,0.9)';
+    ctx.fillRect(0, gy, shoulder, h - gy);
+    ctx.fillRect(w - shoulder, gy, shoulder, h - gy);
   }
 
   /** 车辆世界包围盒中心（供死亡 FX 定位；snapshot 为引擎中立形状） */

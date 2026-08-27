@@ -727,6 +727,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 与 homeBackdrop 互斥（Battle 两者皆关，走 battle 地面）。
     const prebattle = state.playerPhase === 'matching' || state.playerPhase === 'matchPreview';
     this.actions?.setPrebattleBackdrop?.(prebattle);
+    // F-BATTLE-PRESENTATION-R2：战斗（fighting/ended）启用正式竞技场背景；与 home/prebattle 互斥。
+    // 注意：battleState 进入 fighting 后 playerPhase 仍保持 matchPreview，故不能复用 prebattle 开关。
+    const battle = state.battleState === 'fighting' || state.battleState === 'ended';
+    this.actions?.setBattleBackdrop?.(battle);
     if (state.uiMode === 'scenario') {
       // DEV Lab 继续 DOM；Canvas 不绘制且不挡指针（微信玩家版无 scenario，永不进入）
       const st = this.canvas.style;
@@ -2294,23 +2298,42 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       }
       return;
     }
-    // A 左上
-    this.text('A', 24, 26, 15, V.ownBlue, 'left', 700);
-    this.rect(44, 21, 170, 10, '#232b38', V.border, 1);
+    // A 左上（桌面 HUD 起点：下方为阵营卡，与 mobile 分支以本注释为界）
+    // F-BATTLE-PRESENTATION-R2：Desktop HUD 统一为阵营卡（与 mobile 同源同语义，消除调试 A/B 字母 +
+    // 全宽调试条 + 常驻「战斗中」）。左右阵营卡：车辆名 + HP 条 + 当前/最大 HP + 蓝/橙阵营色；
+    // 仅在 Warning / Closing 中央显示阶段提示/倒计时；End 显示「战斗结束」。不遮挡车辆/战场核心。
+    const aName = frame.names?.a ?? '我方';
+    const bName = frame.names?.b ?? '对手';
     const pctA = Math.max(0, Math.min(1, s.sideA.hp / Math.max(s.sideA.maxHp, 1))) * 100;
-    if (pctA > 0) this.rect(44, 21, 170 * (pctA / 100), 10, V.ownBlue);
-    this.text(`${Math.round(s.sideA.hp)} / ${Math.round(s.sideA.maxHp)}`, 44 + 170 + 10, 26, 13, V.textPrimary);
-    // B 右上
-    this.text('B', BASE_W - 24, 26, 15, V.enemyOrange, 'right', 700);
-    this.rect(BASE_W - 24 - 170, 21, 170, 10, '#232b38', V.border, 1);
     const pctB = Math.max(0, Math.min(1, s.sideB.hp / Math.max(s.sideB.maxHp, 1))) * 100;
-    if (pctB > 0) this.rect(BASE_W - 24 - 170, 21, 170 * (pctB / 100), 10, V.enemyOrange);
-    this.text(`${Math.round(s.sideB.hp)} / ${Math.round(s.sideB.maxHp)}`, BASE_W - 24 - 170 - 10, 26, 13, V.textPrimary, 'right');
-    // 阶段文案
-    this.text(s.phase === 'End' ? '战斗结束' : '战斗中', BASE_W / 2, 26, 14, V.primary, 'center');
-    // Warning 倒计时
-    if (frame.phaseCountdownText != null) {
-      this.text(frame.phaseCountdownText, BASE_W / 2, 110, 44, V.lose, 'center', 800);
+    const barBase = this.insL + 12;
+    const barW = Math.max(96, (this.W - this.insL - this.insR - 120) * 0.3);
+    const top = this.insT + 8;
+    const h = 12;
+    const barY = top + 17;
+    // 左阵营（我方 / 蓝）
+    this.text(aName, barBase, top + 11, 14, V.ownBlue, 'left', 700);
+    this.rect(barBase, barY, barW, h, '#232b38', V.border, 1);
+    if (pctA > 0) this.rect(barBase, barY, barW * (pctA / 100), h, V.ownBlue);
+    this.text(`${Math.round(s.sideA.hp)} / ${Math.round(s.sideA.maxHp)}`, barBase + barW + 8, barY + h / 2, 12, V.textPrimary);
+    // 右阵营（对手 / 橙）
+    const barBRight = this.W - this.insR - 12;
+    this.text(bName, barBRight, top + 11, 14, V.enemyOrange, 'right', 700);
+    const barBX = barBRight - barW;
+    this.rect(barBX, barY, barW, h, '#232b38', V.border, 1);
+    if (pctB > 0) this.rect(barBX, barY, barW * (pctB / 100), h, V.enemyOrange);
+    this.text(`${Math.round(s.sideB.hp)} / ${Math.round(s.sideB.maxHp)}`, barBX - 8, barY + h / 2, 12, V.textPrimary, 'right');
+    // 阶段文案：仅 Warning/Closing 中央显示；End 显示「战斗结束」；Active 不占中央（Must#6）
+    if (s.phase === 'Warning' || s.phase === 'Closing') {
+      if (frame.phaseCountdownText != null) {
+        this.text(frame.phaseCountdownText, this.W / 2, top + 11, 26, V.lose, 'center', 800);
+      }
+    } else if (s.phase === 'End') {
+      this.text('战斗结束', this.W / 2, top + 11, 14, V.primary, 'center');
+    }
+    // Warning/Closing 左右边缘危险脉冲（收束压力来自两侧；细条贴边，不遮挡车辆/战场核心）
+    if (s.phase === 'Warning' || s.phase === 'Closing') {
+      this.drawDangerEdgePulse(s.phase === 'Closing');
     }
   }
 
