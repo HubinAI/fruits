@@ -302,6 +302,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    *  无共享实例时保持既有独立 applyPhoneScale 行为——测试/非玩家路径不变）。 */
   private viewportTransform: PlayerViewportTransform | null = null;
   private canvas: HTMLCanvasElement;
+  // F-PLAYER-SINGLE-CANVAS-RECOVERY-P0：玩家模式「唯一可见屏幕画布」引用（Renderer canvas）。
+  // this.canvas 在屏幕合成模式下改为离屏绘制目标（不进入 DOM），最终由 Renderer 每帧合成到屏幕。
+  private screenCanvas: HTMLCanvasElement | null = null;
+  // 屏幕合成模式下是否跳过合成（如 scenario 隐藏 UI）；玩家模式永不使用 scenario，恒 false。
+  private hideScreen = false;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -346,6 +351,47 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     // 输入唯一入口：Platform Input Adapter（F-WX-4）
     platform.input.bindPointer(this.canvas, (x, y) => this.handlePointer(x, y));
+  }
+
+  /**
+   * F-PLAYER-SINGLE-CANVAS-RECOVERY-P0｜屏幕合成挂载（玩家模式唯一入口）
+   *
+   * 与 `mount(parent)` 的区别：
+   * - 本方法不把 this.canvas 追加到 DOM——UI 改为离屏绘制目标，不参与 CSS contain / 页面定位 / 点击；
+   * - 输入只绑定到唯一可见屏幕 Canvas（screen = Renderer canvas）；WebInput 以该画布 CSS(=逻辑 844×390)
+   *   与可视 rect(contain) 自动归一化 → 逻辑坐标一次到位（client→contain→logical 只转换一次）；
+   * - 每帧由 Renderer 把离屏 UI（compositeCanvas）合成到 screen 的最终 backing（1:1 映射到 844×390 逻辑舞台）。
+   *
+   * 非玩家 / DEV 桌面模式仍走 `mount(parent)`（保留既有双画布独立路径，不在本 Queue 改造范围）。
+   */
+  mountScreen(screen: HTMLCanvasElement, parent: HTMLElement): void {
+    this.parent = parent;
+    this.screenCanvas = screen;
+    // this.canvas 成为离屏绘制目标（不进入 DOM）
+    const ctx = this.canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas 2D not supported');
+    this.ctx = ctx;
+    this.viewport = platform.createViewport(this.canvas);
+    if (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__) {
+      (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
+    }
+    // 唯一输入入口：绑定到唯一可见屏幕 Canvas（Renderer canvas）
+    platform.input.bindPointer(screen, (x, y) => this.handlePointer(x, y));
+  }
+
+  /** 屏幕合成模式下返回离屏 UI 画布供 Renderer 合成；非屏幕模式（DEV/WebDom）或隐藏时返回 null。 */
+  get compositeCanvas(): HTMLCanvasElement | null {
+    if (!this.screenCanvas) return null;
+    if (this.hideScreen) return null;
+    return this.canvas;
+  }
+
+  /**
+   * F-PLAYER-SINGLE-CANVAS-RECOVERY-P0｜只读诊断：暴露当前 Garage 页签分类。
+   * 仅用于 E2E 像素门禁的【验证】读数（不用于生成点击位置），编译期在非 __E2E_PROBE__ 构建中无引用。
+   */
+  getGarageCategory(): 'body' | 'move' | 'combat' {
+    return this.garageCategory;
   }
 
   /**
@@ -746,6 +792,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private draw(): void {
     this.ensureSize();
     this.hitAreas = [];
+    this.hideScreen = false;
     this.clear();
     const state = this.lastState;
     if (!state) return;
@@ -768,6 +815,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         st.pointerEvents = 'none';
         st.visibility = 'hidden';
       }
+      // 屏幕合成模式：标记跳过合成（离屏 UI 不绘制到屏幕）；玩家模式无 scenario，恒不触发。
+      this.hideScreen = true;
       return;
     }
     const st = this.canvas.style;
@@ -870,9 +919,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 布局 → CSS 的 scale/ox/oy 已由 rect/text/panel/button 原语手动烤入坐标
     // （this.ox + x*this.scale），此处若再乘 this.scale 会与 screenToLayoutPoint
     // 的反推不一致 → 宽屏（scale≠1）可见像素≠命中区。故 transform 仅 DPR。
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // F-DEMO-PLAYER-RUNTIME-P0：桌面打开玩家模式 → CSS contain 放大居中（仅视觉，逻辑坐标不变）
+    // F-PLAYER-SINGLE-CANVAS-RECOVERY-P0：applyPhoneScale → viewportTransform.applyTo 会重设
+    // canvas.width，从而把 ctx transform 重置为 identity；必须在其【之后】回写 DPR 变换，
+    // 否则 DPR>1 时 UI 以 identity 绘制 → 仅占 backing 左 1/DPR（金 CTA 中心漂到 50/DPR，整类错位）。
     if (this.phoneLogical && this.parent) this.applyPhoneScale();
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   /** F-DEMO-PLAYER-RUNTIME-P0：桌面视口（远大于 844×390）下，把手机逻辑画布等比 contain 放大居中，

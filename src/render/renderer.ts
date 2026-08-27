@@ -364,6 +364,33 @@ export class Renderer {
   }
 
   /**
+   * F-PLAYER-SINGLE-CANVAS-RECOVERY-P0｜把离屏 UI 画布合成到最终屏幕画布。
+   *
+   * 玩家模式：UI 在 844×390 逻辑离屏绘制，Renderer 场景也在同一 844×390 逻辑舞台绘制，
+   * 二者 1:1 映射到本画布 backing（= logical×DPR）。本方法在每帧 renderer.render 之后调用，
+   * 将离屏 UI 以 9 参数 drawImage 精确覆盖到本画布——保证 UI 与场景共用同一像素舞台，
+   * 从根上消除「双画布坐标错位」整类问题（唯一可见 Canvas 参与最终展示与输入）。
+   * 非玩家 / DEV 模式不调用本方法（compositeCanvas 为 null）。
+   */
+  compositeOverlay(src: HTMLCanvasElement): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(
+      src as unknown as CanvasImageSource,
+      0,
+      0,
+      src.width,
+      src.height,
+      0,
+      0,
+      this.canvas.width,
+      this.canvas.height,
+    );
+    ctx.restore();
+  }
+
+  /**
    * F-BATTLE-CAMERA-R2：战斗跟随相机状态（fit==='battle' 构图时激活，其余 fit 置 null）。
    * reframe 记录基准（Active/Warning）；render() 每帧按 A/B 实时 envelope 做
    * 「中点追踪 + 分离有限拉远」（纯 Presentation，不触碰 Physics/结果）。

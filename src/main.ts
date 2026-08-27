@@ -421,7 +421,13 @@ const host: PlayerUIHost = canvasUiMode
       viewportTransform: playerViewport ?? undefined,
     })
   : new WebDomPlayerUIHost();
-host.mount(canvasWrap);
+// F-PLAYER-SINGLE-CANVAS-RECOVERY-P0：玩家模式走「屏幕合成」单一可见画布路径——
+// UI 离屏绘制，输入只绑定 Renderer 唯一可见画布；非玩家 / DEV 桌面保留既有 mount(canvasWrap)。
+if (playerMode) {
+  (host as CanvasPlayerUIHost).mountScreen(canvas, canvasWrap);
+} else if (canvasUiMode) {
+  (host as CanvasPlayerUIHost).mount(canvasWrap);
+}
 // F-PLAYER-CANVAS-COMPOSE-P0：Renderer Canvas 与 UI Canvas 应用同一视口变换
 // （先 update 容器/DPR → 再 applyTo：backing = logical×DPR，CSS = logical px + contain 居中）。
 if (playerViewport) {
@@ -1157,6 +1163,12 @@ if (reviewOn) {
 /* ---------- 主循环（F-WX-5：调度在入口，推进在 runtime.tick；dt 钳制在 runtime） ---------- */
 function loop(now: number): void {
   runtime.tick(now);
+  // F-PLAYER-SINGLE-CANVAS-RECOVERY-P0：玩家模式每帧把离屏 UI 合成到唯一可见屏幕画布
+  // （UI 与 Renderer 场景共用同一 844×390 逻辑舞台 → 像素级对齐，根除双画布坐标错位）。
+  if (playerViewport && host instanceof CanvasPlayerUIHost) {
+    const oc = host.compositeCanvas;
+    if (oc) renderer.compositeOverlay(oc);
+  }
   // F-DEMO-VISUAL-GATE-R4：E2E 构建（__E2E_PROBE__）每帧写入只读几何诊断快照——
   // phase / A/B 屏幕 envelope / matchVehicleRects / transform / groundScreenY /
   // 收束墙屏幕 rect / 阶段文案（供浏览器 Gate 硬断言；只读、不参与任何 Gameplay 规则；
@@ -1168,6 +1180,7 @@ function loop(now: number): void {
       const cam = renderer?.getProbeCamera?.() ?? null;
       (globalThis as { __probe?: unknown }).__probe = {
         playerPhase: runtime.playerPhase,
+        garageCategory: host instanceof CanvasPlayerUIHost ? host.getGarageCategory() : null,
         battleState: runtime.battleState,
         battlePhase: orch?.phase ?? null,
         phaseCountdownText: runtime.getProbeCountdownText?.() ?? null,
