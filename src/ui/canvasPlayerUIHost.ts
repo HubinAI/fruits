@@ -253,8 +253,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private optScrollFor: string | null = null;
   /** F-LOBBY-GARAGE-DEMO-R1：装配面板视图（home 4 主分类 / movePick 移动二级 / weaponPick 武器位 / gadgetPick 辅助位 / options 选项） */
   private panelView: 'home' | 'movePick' | 'weaponPick' | 'gadgetPick' | 'options' = 'home';
-  /** F-GARAGE-BUILD-BOARD-P0：装配台常驻分类（单屏装配台取代多层菜单——右顶分类 tab 常驻）。 */
-  private garageCategory: 'body' | 'move' | 'weapon' | 'gadget' = 'body';
+  /** F-GARAGE-COMBAT-TAB-R1：装配台常驻分类（车身/移动/战斗；武器+辅助合并为「战斗」突出入口）。 */
+  private garageCategory: 'body' | 'move' | 'combat' = 'body';
+  /** F-GARAGE-COMBAT-TAB-R1：战斗页武器/辅助挂点分组过滤（仅展示层；内部 weapon/gadget 类型不变）。 */
+  private garageCombatGroup: 'weapon' | 'gadget' = 'weapon';
   /** F-PREBATTLE-VISUAL-R1：Locked 揭晓高亮环计时（克制；~500ms 淡出；不移动车辆） */
   private prebattleLockSeen = false;
   private prebattleLockAt = 0;
@@ -280,6 +282,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private resultAdClaimedShown = false;
   /** F-WX-UI-1：选项网格面板内垂直滚动（面板不溢出屏幕） */
   private panelScroll = 0;
+  /**
+   * F-GARAGE-COMBAT-TAB-R1：面板内滚动单步（px）。绑定到当前可见列表高度，
+   * 保证矮面板（战斗页两组挂点挤压后只剩 1 行部件卡）滚动也能翻出下一页，
+   * 不会因固定大步长直接跳过全部可见项（验收 360×180~1920×1008 不溢出且可翻页）。
+   */
+  private panelScrollStepPx = 40;
   /**
    * F-META-UX2：合成前库存快照（确认合成时捕获）——onMerge 后 render 时 diff 出
    * 新 2★ 部件用于「合成成功」结果 Modal。仅 UI 呈现，不改任何合成规则。
@@ -614,10 +622,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id.startsWith('garage-cat:')) {
-      // F-GARAGE-BUILD-BOARD-P0：右顶常驻分类 tab（车身/移动/武器/辅助）——
-      // 切换分类 → 自动选中该分类第一个挂点（不再进入多层页面；重复点当前分类不收起）。
-      const cat = id.slice(11) as 'body' | 'move' | 'weapon' | 'gadget';
+      // F-GARAGE-COMBAT-TAB-R1：右顶常驻分类 tab（车身/移动/战斗；武器+辅助合并为「战斗」）。
+      // 切换分类 → 自动选中该分类第一个挂点；进入战斗默认武器分组（重复点当前分类不收起）。
+      const cat = id.slice(11) as 'body' | 'move' | 'combat';
+      const wasCombat = this.garageCategory === 'combat';
       this.garageCategory = cat;
+      if (cat === 'combat' && !wasCombat) this.garageCombatGroup = 'weapon';
       this.panelScroll = 0;
       const draft = this.lastState?.draft;
       const slots = draft ? this.garageSlotsFor(draft) : [];
@@ -626,6 +636,20 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.actions?.onToggleGarageSlot(slots[0].key);
       }
       this.draw();
+      return;
+    }
+    if (id.startsWith('garage-cgroup:')) {
+      // F-GARAGE-COMBAT-TAB-R1：战斗页「武器｜辅助」分段切换（只切过滤分组，不收起面板）
+      // 前缀 'garage-cgroup:' 共 14 字符（slice(14) 才截到分组名，slice(13) 会带冒号）
+      const g = id.slice(14);
+      this.garageCombatGroup = g === 'gadget' ? 'gadget' : 'weapon';
+      this.draw();
+      return;
+    }
+    if (id.startsWith('garage-cslot:')) {
+      // F-GARAGE-COMBAT-TAB-R1：战斗页共享挂点 chip（只选不收起；分组由 garage-cgroup 决定）
+      const hp = id.slice(13);
+      this.actions?.selectGarageSlot?.(hp);
       return;
     }
     if (id.startsWith('garage-slot:')) {
@@ -640,7 +664,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id === 'panel-scroll-up' || id === 'panel-scroll-down') {
-      const step = Math.round(this.targetTouchH * 1.6);
+      const step = this.panelScrollStepPx;
       this.panelScroll += id === 'panel-scroll-up' ? -step : step;
       if (this.panelScroll < 0) this.panelScroll = 0;
       this.draw();
@@ -1012,31 +1036,44 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       locked?: boolean;
       disabled?: boolean;
       primary?: boolean;
+      /** F-GARAGE-COMBAT-TAB-R1：战斗主分类强调（更宽/更亮；选中=金橙高亮，未选中仍可识别为主入口且不似已选中） */
+      combat?: boolean;
       /** F-GARAGE-BUILD-BOARD-P0：左侧小图标（分类 tab 图形识别；Must#2） */
-      icon?: 'body' | 'wheel' | 'weapon' | 'gadget';
+      icon?: 'body' | 'wheel' | 'weapon' | 'gadget' | 'combat';
     } = {},
   ): void {
+    const isCombat = !!opts.combat;
     const fill = opts.disabled
       ? '#22303f'
-      : opts.primary
-        ? V.primary
-        : opts.active
-          ? C.blue
-          : V.secondary;
+      : isCombat && opts.active
+        ? 'rgba(222,164,52,0.96)' // 选中：金橙实底（主高亮）
+        : isCombat
+          ? 'rgba(58,44,18,0.62)' // 未选中：暗金底（仍识别为主入口，不似已选中）
+          : opts.primary
+            ? V.primary
+            : opts.active
+              ? C.blue
+              : V.secondary;
     const stroke = opts.disabled
       ? C.border
-      : opts.primary
-        ? V.primaryBright
-        : opts.active
-          ? C.blueBright
-          : opts.locked
-            ? V.enemyOrange
-            : V.borderSoft;
+      : isCombat && opts.active
+        ? C.gold
+        : isCombat
+          ? 'rgba(222,164,52,0.72)' // 暗金描边（未选中主入口识别）
+          : opts.primary
+            ? V.primaryBright
+            : opts.active
+              ? C.blueBright
+              : opts.locked
+                ? V.enemyOrange
+                : V.borderSoft;
     const labelColor = opts.disabled
       ? C.textDark
-      : opts.primary
-        ? V.primaryText
-        : C.text;
+      : isCombat
+        ? (opts.active ? '#1c1405' : '#f4d99c') // 选中深字 / 未选中暖金字（区别于选中）
+        : opts.primary
+          ? V.primaryText
+          : C.text;
     this.panel(x, y, w, h, fill, stroke, V.radiusM);
     // F-WX-UI-1：Mobile 字号层级（主按钮 17 / 卡名 17 / 辅助 14）；Desktop 保持旧值（15/12）
     const labelFs = this.isMobile ? 17 : 15;
@@ -1055,7 +1092,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /** F-GARAGE-BUILD-BOARD-P0：分类 tab 小图标（车身/轮/炮/方块）。 */
-  private drawTabIcon(kind: 'body' | 'wheel' | 'weapon' | 'gadget', cx: number, cy: number, s: number, disabled: boolean): void {
+  private drawTabIcon(kind: 'body' | 'wheel' | 'weapon' | 'gadget' | 'combat', cx: number, cy: number, s: number, disabled: boolean): void {
     const ctx = this.ctx;
     const col = disabled ? C.textDark : V.textPrimary;
     ctx.save();
@@ -1079,6 +1116,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       ctx.fillRect(cx - s * 0.9, cy - s * 0.3, s * 1.5, s * 0.6);
       ctx.beginPath();
       ctx.arc(cx + s * 0.75, cy, s * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (kind === 'combat') {
+      // F-GARAGE-COMBAT-TAB-R1：战斗图标（闪电——清晰攻击语义）
+      ctx.beginPath();
+      ctx.moveTo(cx + s * 0.15, cy - s);
+      ctx.lineTo(cx - s * 0.5, cy + s * 0.15);
+      ctx.lineTo(cx - s * 0.02, cy + s * 0.15);
+      ctx.lineTo(cx - s * 0.15, cy + s);
+      ctx.lineTo(cx + s * 0.55, cy - s * 0.2);
+      ctx.lineTo(cx + s * 0.05, cy - s * 0.2);
+      ctx.closePath();
       ctx.fill();
     } else {
       ctx.fillRect(cx - s * 0.55, cy - s * 0.55, s * 1.1, s * 1.1);
@@ -1450,10 +1498,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.text(state.blockReason, panelRect.x + panelRect.w / 2, panelRect.y - 8, 13, C.red, 'center', 600);
     }
 
-    // F-GARAGE-BUILD-BOARD-P0：单屏装配台（取代多层巨型文字菜单）——
-    // 右顶常驻分类 tab（车身/移动/武器/辅助，紧凑+高亮）→ 武器/辅助时挂点 chip 行 →
-    // 右主体部件卡（简图+名称+星级+能量+状态）→ 底部能量条+超载原因。
-    // 唯一返回 = 左上「‹ 首页」（drawMobileTopBar nav:home）；面板内无重复返回按钮（Must#1）。
+    // F-GARAGE-COMBAT-TAB-R1：单屏装配台（取代多层巨型文字菜单）——
+    // 右顶常驻分类 tab（车身/移动/战斗；战斗最宽+金橙强调，突出战斗配置主入口）→
+    // 战斗页两组紧凑挂点（武器挂点/辅助挂点）→ 右主体部件卡（简图+名称+星级+能量+状态）→
+    // 底部能量条+超载原因。唯一返回 = 左上「‹ 首页」（drawMobileTopBar nav:home）；面板内无重复返回按钮。
     this.panel(panelRect.x, panelRect.y, panelRect.w, panelRect.h, V.panelSolid);
     const px = panelRect.x;
     const pw = panelRect.w;
@@ -1462,22 +1510,30 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const tabH = this.isShort ? 26 : 32;
     const tabY = panelRect.y + padY;
     this.drawGarageCategoryTabs(px, pw, tabY, tabH);
-    // 挂点/槽位 chip 行（分类下的可选挂点；武器/辅助 = 车身全部硬点）
+    // 挂点/槽位 chip 行（分类下的可选挂点；F-GARAGE-COMBAT-TAB-R1：战斗页展示两组紧凑挂点）
     const slotY = tabY + tabH + (this.isShort ? 4 : 6);
     const slotH = this.isShort ? 24 : 28;
-    const slots = this.garageSlotsFor(draft);
-    this.drawGarageSlotChips(px, pw, slotY, slotH, slots, state.garageSelected);
+    const allSlots = this.garageSlotsFor(draft);
+    let listTop: number;
+    if (this.garageCategory === 'combat') {
+      listTop = this.drawCombatSlotGroups(px, pw, slotY, slotH);
+    } else {
+      this.drawGarageSlotChips(px, pw, slotY, slotH, allSlots, state.garageSelected);
+      listTop = slotY + slotH + (this.isShort ? 4 : 6);
+    }
     // 右主体：部件卡（所选槽位选项，按分类过滤）
     const energyH = this.isShort ? 30 : 40;
-    const listTop = slotY + slotH + (this.isShort ? 4 : 6);
     const listBot = panelRect.y + panelRect.h - padY - energyH - (this.isShort ? 4 : 6);
+    // F-GARAGE-COMBAT-TAB-R1：矮面板（360×180）下战斗挂点条可能逼近 listBot——
+    // 钳制 listTop 确保部件卡区域不溢出面板/安全区（溢出由裁剪+完全可见命中保证）。
+    if (listTop > listBot) listTop = listBot;
     const listH = Math.max(8, listBot - listTop);
-    if (state.garageSelected && slots.some((s) => s.key === state.garageSelected)) {
+    if (state.garageSelected && allSlots.some((s) => s.key === state.garageSelected)) {
       this.drawGaragePartCards(state, draft, px, pw, listTop, listH);
     } else {
       // 未选挂点（或分类与所选槽不匹配）：分类总览提示（不撑满空卡）
       this.text(
-        this.garageCategory === 'weapon' || this.garageCategory === 'gadget' ? '选择一个部件位' : '选择部件',
+        this.garageCategory === 'combat' ? '选择一个武器/辅助挂点' : '选择部件',
         px + pw / 2,
         listTop + listH / 2 - 6,
         this.isShort ? 12 : 14,
@@ -1489,22 +1545,27 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.drawGarageEnergyBar(state, draft, panelRect, energyH);
   }
 
-  /** F-GARAGE-BUILD-BOARD-P0：右顶常驻分类 tab（紧凑 + 图形识别 + 当前高亮；不占四个巨大方块）。 */
+  /** F-GARAGE-COMBAT-TAB-R1：右顶常驻分类 tab（车身/移动/战斗；战斗最宽+金橙强调，突出战斗配置主入口）。 */
   private drawGarageCategoryTabs(px: number, pw: number, y: number, h: number): void {
-    const tabs: Array<{ cat: 'body' | 'move' | 'weapon' | 'gadget'; label: string; icon: 'body' | 'wheel' | 'weapon' | 'gadget' }> = [
+    const tabs: Array<{ cat: 'body' | 'move' | 'combat'; label: string; icon: 'body' | 'wheel' | 'combat' }> = [
       { cat: 'body', label: '车身', icon: 'body' },
       { cat: 'move', label: '移动', icon: 'wheel' },
-      { cat: 'weapon', label: '武器', icon: 'weapon' },
-      { cat: 'gadget', label: '辅助', icon: 'gadget' },
+      { cat: 'combat', label: '战斗', icon: 'combat' },
     ];
     const gap = 6;
-    const w = (pw - gap * 3) / 4;
-    for (let i = 0; i < tabs.length; i++) {
-      const t = tabs[i];
-      const x = px + i * (w + gap);
-      this.button(x, y, w, h, `garage-cat:${t.cat}`, t.label, {
-        active: this.garageCategory === t.cat,
-        icon: t.icon,
+    // 战斗 tab 更宽（宽度高于另外两个）以突出主入口；两侧车身/移动均分剩余宽度
+    const combatW = Math.round(pw * 0.42);
+    const sideW = (pw - combatW - gap * 2) / 2;
+    const rects = [
+      { x: px, y, w: sideW, t: tabs[0] },
+      { x: px + sideW + gap, y, w: sideW, t: tabs[1] },
+      { x: px + 2 * (sideW + gap), y, w: combatW, t: tabs[2] },
+    ];
+    for (const r of rects) {
+      this.button(r.x, r.y, r.w, h, `garage-cat:${r.t.cat}`, r.t.label, {
+        active: this.garageCategory === r.t.cat,
+        icon: r.t.icon,
+        combat: r.t.cat === 'combat',
       });
     }
   }
@@ -1532,6 +1593,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     h: number,
     slots: Array<{ key: string; label: string }>,
     selected: string | null,
+    combat?: boolean,
   ): void {
     if (slots.length === 0) return;
     const gap = 6;
@@ -1541,8 +1603,34 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const s = slots[i];
       const x = px + i * (w + gap);
       if (x + w > px + pw + 0.5) break; // 不溢出面板
-      this.button(x, y, w, h, `garage-slot:${s.key}`, s.label, { active: selected === s.key });
+      // F-GARAGE-COMBAT-TAB-R1：战斗页共享挂点行（武器/辅助共用同一组孔位，分组仅决定部件过滤）
+      // 用 garage-cslot:<hp>（无分组前缀，区别于已废弃的分组前缀 chip）；普通分类（body/move/desktop）用 garage-slot:<hp>。
+      const id = combat ? `garage-cslot:${s.key}` : `garage-slot:${s.key}`;
+      this.button(x, y, w, h, id, s.label, { active: selected === s.key });
     }
+  }
+
+  /** F-GARAGE-COMBAT-TAB-R1：战斗页「武器｜辅助」分段切换 + 单个共享挂点行（同内容页同屏）。
+   *  分段控件同时展示两组入口（一次点击切换过滤、不收起面板）；硬点武器/辅助共用同一组孔位，
+   *  分组仅决定部件过滤（武器/辅助），内部 weapon/gadget 类型不变。紧凑单行使 360×180 矮面板不溢出（验收#7）。 */
+  private drawCombatSlotGroups(px: number, pw: number, startY: number, slotH: number): number {
+    const draft = this.lastState?.draft;
+    const hps = draft ? this.garageSlotsFor(draft) : [];
+    const segH = this.isShort ? 20 : 26;
+    const segGap = 6;
+    const segW = (pw - segGap) / 2;
+    // 分段切换（武器 | 辅助）：两组同屏可见、一次点击切换（set-not-toggle，不误收起面板）
+    this.button(px, startY, segW, segH, 'garage-cgroup:weapon', '武器', {
+      active: this.garageCombatGroup === 'weapon',
+    });
+    this.button(px + segW + segGap, startY, segW, segH, 'garage-cgroup:gadget', '辅助', {
+      active: this.garageCombatGroup === 'gadget',
+    });
+    let y = startY + segH + (this.isShort ? 3 : 5);
+    // 单个共享挂点行（武器/辅助共用同一组硬点；分组仅决定部件过滤）
+    this.drawGarageSlotChips(px, pw, y, slotH, hps, this.lastState?.garageSelected ?? null, true);
+    y += slotH + (this.isShort ? 3 : 5);
+    return y;
   }
 
   /** F-GARAGE-BUILD-BOARD-P0：部件卡网格（2 列）——简图 + 名称 + 星级 + 能量 + 状态徽标。
@@ -1575,6 +1663,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       maxScroll = Math.max(0, contentH - viewH);
     }
     if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
+    // F-GARAGE-COMBAT-TAB-R1：单步滚动绑定可见列表高——矮面板也能翻出下一页（不跳空）
+    this.panelScrollStepPx = Math.max(24, Math.round(viewH * 0.85));
     const ctx = this.ctx;
     ctx.save();
     ctx.beginPath();
@@ -1669,11 +1759,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ctx.restore();
   }
 
-  /** F-GARAGE-BUILD-BOARD-P0：选项按分类过滤（武器/辅助分类只显示对应类别部件 + 空槽）。 */
+  /** F-GARAGE-COMBAT-TAB-R1：战斗页选项按分组过滤（武器/辅助只显示对应类别部件 + 空槽）；其余分类不过滤。 */
   private garageOptionsFiltered(state: PlayerUIState, slot: string): GarageOpt[] {
     const opts = this.garageOptions(state, slot);
-    if (this.garageCategory !== 'weapon' && this.garageCategory !== 'gadget') return opts;
-    const want = this.garageCategory === 'weapon' ? 'weapon' : 'gadget';
+    if (this.garageCategory !== 'combat') return opts;
+    const want = this.garageCombatGroup; // 'weapon' | 'gadget'
     return opts.filter((o) => {
       if (o.v === EMPTY_SLOT) return true;
       const def = registry.functionals.get(decodePartVal(o.v).defId);

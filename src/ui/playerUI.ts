@@ -117,6 +117,8 @@ export interface PlayerUIState {
 export interface PlayerUIActions {
   /** Garage Dock 第一层 chip 选中切换（再点收起） */
   onToggleGarageSlot(key: string): void;
+  /** F-GARAGE-COMBAT-TAB-R1：战斗页跨组选中（只选不收起——用于武器/辅助挂点点击切换过滤，不误收起） */
+  selectGarageSlot?(key: string): void;
   /** Garage Dock 第二层选项选择（车身/轮/驱动/功能件） */
   onPickGarageOption(value: string): void;
   /** Garage「寻找对手」 */

@@ -225,6 +225,12 @@ export class PlayerGameRuntime {
       this.garageSelected = this.garageSelected === key ? null : key;
       this.pushUI(); // Host 重渲染 Dock：展开/收起第二层
     },
+    selectGarageSlot: (key) => {
+      // F-GARAGE-COMBAT-TAB-R1：只选不收起（战斗页武器/辅助挂点点击切换过滤，避免误收起）
+      if (!key) return;
+      this.garageSelected = key;
+      this.pushUI();
+    },
     onPickGarageOption: (value) => {
       const slotKey = this.garageSelected;
       if (!slotKey) return;

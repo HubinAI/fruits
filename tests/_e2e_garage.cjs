@@ -128,19 +128,36 @@ async function runMobilePath(browser, vp, playerMode) {
   const g = await tapVisibleById(page, 'home-garage');
   log(!!g, `[${tag}|${vp.w}x${vp.h}] B. 真实点击可见车库中心进入装配台`, '');
   let B = await areas(page);
-  const tabs = ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget'];
+  // F-GARAGE-COMBAT-TAB-R1：顶部只 3 个分类（车身/移动/战斗；武器+辅助合并）
+  const tabs = ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat'];
   const missing = tabs.filter((t) => !find(B, t));
-  log(missing.length === 0, `[${tag}|${vp.w}x${vp.h}] B. 4 个分类 tab 出现`, missing.length ? '缺失:' + missing.join(',') : 'ok');
+  log(missing.length === 0, `[${tag}|${vp.w}x${vp.h}] B. 3 个分类 tab 出现`, missing.length ? '缺失:' + missing.join(',') : 'ok');
+  // 旧 武器/辅助 主 tab 彻底消失
+  const oldTabs = ['garage-cat:weapon', 'garage-cat:gadget'].filter((t) => find(B, t));
+  log(oldTabs.length === 0, `[${tag}|${vp.w}x${vp.h}] B. 旧武器/辅助主 tab 消失`, oldTabs.length ? '残留:' + oldTabs.join(',') : 'ok');
   log(!!find(B, 'nav:home'), `[${tag}|${vp.w}x${vp.h}] B. 唯一返回 nav:home`, '');
 
-  await tapVisibleById(page, 'garage-cat:weapon');
+  // 进入战斗（默认武器分组）
+  await tapVisibleById(page, 'garage-cat:combat');
   let C = await areas(page);
-  log(prefixed(C, 'garage-slot:').length >= 1, `[${tag}|${vp.w}x${vp.h}] C. 武器分类挂点 chip 出现`, `n=${prefixed(C, 'garage-slot:').length}`);
-  log(prefixed(C, 'opt:').length >= 1, `[${tag}|${vp.w}x${vp.h}] C. 武器分类部件卡同屏`, `n=${prefixed(C, 'opt:').length}`);
+  log(!!find(C, 'garage-cgroup:weapon') && !!find(C, 'garage-cgroup:gadget'), `[${tag}|${vp.w}x${vp.h}] C. 战斗页「武器|辅助」分段控件出现`, '');
+  log(prefixed(C, 'garage-cslot:').length >= 1, `[${tag}|${vp.w}x${vp.h}] C. 战斗页共享挂点 chip 出现`, `n=${prefixed(C, 'garage-cslot:').length}`);
+  log(prefixed(C, 'opt:').length >= 1, `[${tag}|${vp.w}x${vp.h}] C. 战斗页（武器分组）部件卡同屏`, `n=${prefixed(C, 'opt:').length}`);
 
-  await tapVisibleById(page, 'garage-cat:gadget');
-  let E = await areas(page);
-  log(prefixed(E, 'garage-slot:').length >= 1, `[${tag}|${vp.w}x${vp.h}] E. 辅助分类挂点 chip 出现`, `n=${prefixed(E, 'garage-slot:').length}`);
+  // 一次点击「辅助」分段 → 切到 gadget 分组
+  await tapVisibleById(page, 'garage-cgroup:gadget');
+  let D = await areas(page);
+  log(prefixed(D, 'opt:').length >= 1, `[${tag}|${vp.w}x${vp.h}] D. 辅助分组部件卡同屏`, `n=${prefixed(D, 'opt:').length}`);
+
+  // 选一个共享挂点（selectGarageSlot，只选不收起）
+  const chipId = prefixed(D, 'garage-cslot:')[0] ? prefixed(D, 'garage-cslot:')[0].id : null;
+  if (chipId) {
+    await tapVisibleById(page, chipId);
+    let E = await areas(page);
+    log(prefixed(E, 'opt:').length >= 1, `[${tag}|${vp.w}x${vp.h}] E. 选挂点后部件卡出现`, `n=${prefixed(E, 'opt:').length}`);
+  } else {
+    log(false, `[${tag}|${vp.w}x${vp.h}] E. 共享挂点 chip 可点`, '无 garage-cslot:');
+  }
 
   await tapVisibleById(page, 'nav:home');
   let F = await areas(page);

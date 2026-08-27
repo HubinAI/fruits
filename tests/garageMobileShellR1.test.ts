@@ -283,8 +283,8 @@ describe('F-GARAGE-MOBILE-SHELL-R1｜车库顶栏独立 rect 契约', () => {
     const profile = resolveLayoutProfile(844, 390);
     const l = computeMobileGarageLayout({ w: 844, h: 390 }, PROD_INSETS, profile);
     const areas = env.areas();
-    // F-GARAGE-BUILD-BOARD-P0：分类 tab 4 个（紧凑）+ 挂点 chip + 部件卡 + 能量条
-    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget']) {
+    // F-GARAGE-COMBAT-TAB-R1：分类 tab 3 个（车身/移动/战斗，武器+辅助合并为战斗）+ 挂点 chip + 部件卡 + 能量条
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat']) {
       expect(areas.find((a) => a.id === id), `分类 tab ${id} 存在`).toBeTruthy();
     }
     const panelTop = l.panelRect.y;
@@ -348,10 +348,10 @@ describe('F-GARAGE-MOBILE-SHELL-R1｜车库顶栏独立 rect 契约', () => {
     const env = makeHost({ w: 844, h: 390 }, PROD_INSETS);
     env.host.render(garageState());
     goGarage(env);
-    // F-GARAGE-BUILD-BOARD-P0：2 次点击换武器（Acceptance#2）——
-    // 第 1 击：点「武器」分类 tab（挂点 chip 行 + 部件卡出现；本测试 makeHost 未设 actions，
+    // F-GARAGE-COMBAT-TAB-R1：2 次点击换装（Acceptance#2）——
+    // 第 1 击：点「战斗」分类 tab（两组挂点 chip + 默认武器分组部件卡出现；本测试 makeHost 未设 actions，
     // 故手动 render 选中态模拟 runtime 自动选挂点）
-    const ew = env.areas().find((a) => a.id === 'garage-cat:weapon')!;
+    const ew = env.areas().find((a) => a.id === 'garage-cat:combat')!;
     expect(ew.h, '武器分类 tab 命中高>0（紧凑）').toBeGreaterThan(0);
     env.pointer(ew.x + ew.w / 2, ew.y + ew.h / 2);
     const slotKey = 'front'; // boxBody 第一个硬点

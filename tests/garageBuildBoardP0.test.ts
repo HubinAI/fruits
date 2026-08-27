@@ -144,11 +144,11 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
     expect(env.host.getHitAreasForTest().some((a) => a.id === 'panel-back'), '无面板返回按钮').toBe(false);
   });
 
-  it('T2. 右顶常驻分类 tab：4 个紧凑 tab + 图形识别 + 当前高亮（Must#2）', () => {
+  it('T2. 右顶常驻分类 tab：3 个紧凑 tab（车身/移动/战斗）+ 图形识别 + 当前高亮（Must#2）', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(garageState());
     goGarage(env);
-    const tabs = ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget'];
+    const tabs = ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat'];
     for (const id of tabs) {
       const a = env.host.getHitAreasForTest().find((x) => x.id === id);
       expect(a, `分类 tab ${id} 存在`).toBeTruthy();
@@ -156,11 +156,11 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
     }
     // 图形识别：button 的 icon 分支绘制 drawTabIcon（车身/轮/炮/方块）
     const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
-    expect(src, 'button 支持 icon 参数').toContain("icon?: 'body' | 'wheel' | 'weapon' | 'gadget'");
+    expect(src, 'button 支持 icon 参数（含 combat）').toContain("icon?: 'body' | 'wheel' | 'weapon' | 'gadget' | 'combat'");
     expect(src, '分类 tab 绘制小图标').toContain('drawTabIcon(opts.icon');
     // 当前分类高亮（active = garageCategory）——在 drawGarageCategoryTabs 方法体内
     const tabStart = src.indexOf('private drawGarageCategoryTabs');
-    expect(src.slice(tabStart, tabStart + 800), '分类 tab active 高亮').toContain('active: this.garageCategory === t.cat');
+    expect(src.slice(tabStart, tabStart + 1300), '分类 tab active 高亮').toContain('active: this.garageCategory === r.t.cat');
   });
 
   it('T3. 部件卡四要素：简图 + 名称 + 星级 + 能量 + 状态（已装备/可装备/未获得；Must#3）', () => {
@@ -191,23 +191,26 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
     expect(cardBody, '部件卡绘制未获得徽标').toContain("'未获得'");
   });
 
-  it('T4. 武器/辅助分类：挂点 chip 行 + 选挂点立即刷新部件卡（Must#4）', () => {
+  it('T4. 战斗分类：武器｜辅助分段 + 共享挂点行 + 选挂点立即刷新部件卡（Must#4）', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(garageState());
     goGarage(env);
-    // 点「武器」分类 tab（garageCategory='weapon'）→ render front 选中态 → 挂点 chip 行
-    const tabWe = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:weapon')!;
-    env.pointer(tabWe.x + tabWe.w / 2, tabWe.y + tabWe.h / 2);
+    // 点「战斗」分类 tab（garageCategory='combat'，默认武器分组）→ 分段 + 共享挂点行 + 部件卡
+    const tabCombat = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:combat')!;
+    env.pointer(tabCombat.x + tabCombat.w / 2, tabCombat.y + tabCombat.h / 2);
     env.host.render(garageState({ garageSelected: 'front' }));
-    // 武器分类 → 挂点 chip 行存在（boxBody 硬点 front/top/rear）
-    const slotChips = env.host.getHitAreasForTest().filter((a) => a.id.startsWith('garage-slot:'));
-    expect(slotChips.length, '武器分类挂点 chip 行').toBeGreaterThanOrEqual(3);
-    // 挂点 chip 与部件卡并存（同一屏：不再独立挂点列表页）
+    // 战斗分类 → 分段「武器｜辅助」（两组入口同屏）+ 共享挂点行（garage-cslot:<hp>）
+    const wSeg = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cgroup:weapon');
+    const gSeg = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cgroup:gadget');
+    expect(wSeg, '武器分段入口').toBeTruthy();
+    expect(gSeg, '辅助分段入口').toBeTruthy();
+    const chips = env.host.getHitAreasForTest().filter((a) => a.id.startsWith('garage-cslot:'));
+    expect(chips.length, '共享挂点行 chip').toBeGreaterThanOrEqual(1);
+    // 默认武器分组 → 部件卡（武器）同屏出现（同一屏：不再独立挂点列表页）
     const opts = env.host.getHitAreasForTest().filter((a) => a.id.startsWith('opt:'));
-    expect(opts.length, '当前挂点部件卡同屏出现').toBeGreaterThan(0);
-    // 点击挂点 chip → 派发 onToggleGarageSlot（runtime 切换挂点 → 部件卡刷新）
-    // makeHost 未设 actions → 验证 chip hit 存在且可点（视觉==命中）
-    const chip = slotChips[0]!;
+    expect(opts.length, '默认武器分组部件卡同屏出现').toBeGreaterThan(0);
+    // 挂点 chip 命中区正常（视觉==命中）
+    const chip = chips[0]!;
     expect(chip.x >= 0 && chip.w > 0, '挂点 chip 命中区正常').toBe(true);
   });
 
@@ -238,7 +241,7 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
     expect(src, '部件卡点击派发 pick').toContain("this.actions?.onPickGarageOption(id.slice(4))");
     // 选中态明确：drawGaragePartCards 调用 drawPartCard 时传 equipped = c.v === curVal（Must#5）
     const cardsStart = src.indexOf('private drawGaragePartCards');
-    expect(src.slice(cardsStart, cardsStart + 1600), '选中态 = 当前装备（调用传参）').toContain('this.drawPartCard(x, y, cardW, cardH, c, c.v === curVal)');
+    expect(src.slice(cardsStart, cardsStart + 2200), '选中态 = 当前装备（调用传参）').toContain('this.drawPartCard(x, y, cardW, cardH, c, c.v === curVal)');
   });
 
   it('T7. 360×180~844×390 矩阵：装配台不抛 + 全部 hit 在 safe 内 + 无寻找对手（Must#10）', () => {

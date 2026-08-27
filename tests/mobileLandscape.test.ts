@@ -174,11 +174,12 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       const env = makeHost(vp, LANDSCAPE_INSETS);
       env.host.render(richGarageState()); // 富库存+金币：merge 可点（非禁用态才注册命中）
       goGarage(env); // F-HOME-1：Home → 配置页（原 Garage 布局断言）
-      // 主分类（2×2）：车身/移动/武器/辅助——不暴露 frontWheel/rearWheel/武器位一级入口
-      // F-LOBBY-GARAGE-DEMO-R1：轮子+驱动归入「移动」；功能件按类别拆「武器」/「辅助」
-      // F-META-2：Garage 职责纯化——首屏无合成（合成在 Backpack），只 2×2 主分类
+      // 主分类（车身/移动/战斗）：F-GARAGE-COMBAT-TAB-R1 武器+辅助合并为「战斗」突出入口
+      // 不暴露 frontWheel/rearWheel/武器位一级入口
+      // F-LOBBY-GARAGE-DEMO-R1：轮子+驱动归入「移动」；功能件（武器/辅助）合并进「战斗」
+      // F-META-2：Garage 职责纯化——首屏无合成（合成在 Backpack），只 3 个主分类
       // F-NAV-ACTION-OWNERSHIP-P0：配置页不再含 cta-find（寻找对手只属首页）
-      const ids = ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget'];
+      const ids = ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat'];
       for (const id of ids) {
         const a = env.host.getHitAreasForTest().find((x) => x.id === id);
         expect(a, `${vp.w}×${vp.h} 应有 ${id}`).toBeTruthy();
@@ -201,12 +202,12 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       expect(areas(env, 'weapon-slot:')).toHaveLength(0);
       expect(areas(env, 'merge-confirm')).toHaveLength(0);
       expect(areas(env, 'merge-close')).toHaveLength(0);
-      // F-WX-9B：首屏只有 4 个一级配置入口（车身/移动/武器/辅助），无第 5 个 entry
+      // F-WX-9B：首屏只有 3 个一级配置入口（车身/移动/战斗），无第 4 个 entry
       const entries = env.host.getHitAreasForTest()
         .filter((a) => a.id.startsWith('garage-cat'))
         .map((a) => a.id);
-      expect(entries, `${vp.w}×${vp.h} 分类 tab 恰好 4 个`).toHaveLength(4);
-      for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget']) {
+      expect(entries, `${vp.w}×${vp.h} 分类 tab 恰好 3 个`).toHaveLength(3);
+      for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat']) {
         expect(entries, `${vp.w}×${vp.h} 应含分类 tab ${id}`).toContain(id);
       }
       // F-NAV-ACTION-OWNERSHIP-P0：配置页无寻找对手（旧 Garage CTA 契约已删除）
@@ -223,8 +224,8 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState());
     goGarage(env); // F-HOME-1：Home → 配置页
-    // 分类 tab 行恒存在（车身/移动/武器/辅助 4 个，紧凑）
-    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget']) {
+    // 分类 tab 行恒存在（车身/移动/战斗 3 个，紧凑；战斗最宽+金橙强调）
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat']) {
       expect(env.host.getHitAreasForTest().some((a) => a.id === id), `分类 tab ${id} 存在`).toBe(true);
     }
     // 点「车身」→ 派发 onToggleGarageSlot('body') → runtime 侧展开 → 部件卡
@@ -249,16 +250,16 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const chipFront = areas(env, 'garage-slot:frontWheel')[0];
     env.pointer(chipFront.x + chipFront.w / 2, chipFront.y + chipFront.h / 2);
     expect(env.fired['toggle']).toContain('frontWheel');
-    // 点「武器」→ 自动选中第一个硬点 + 挂点 chip 行 + 武器分类过滤选项（无辅助混入）
+    // 点「战斗」→ 默认武器分组 + 自动选中第一个硬点 + 两组挂点 chip + 武器分类过滤选项（无辅助混入）
     env.host.render(richGarageState());
-    const tabWe = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:weapon')!;
+    const tabWe = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:combat')!;
     env.pointer(tabWe.x + tabWe.w / 2, tabWe.y + tabWe.h / 2);
     env.host.render(richGarageState({ garageSelected: env.fired['toggle'].slice(-1)[0] }));
-    expect(areas(env, 'garage-slot:').length, '武器分类挂点 chip 行存在').toBeGreaterThan(0);
+    expect(areas(env, 'garage-cslot:').length, '战斗页两组挂点 chip 行存在').toBeGreaterThan(0);
     const optIds = areas(env, 'opt:').map((a) => a.id);
-    expect(optIds.length, '武器分类展开部件卡').toBeGreaterThan(0);
-    // 空槽 + 武器（不混入辅助部件）
-    expect(env.host.getHitAreasForTest().some((a) => a.id === 'opt:none'), '武器分类含空槽').toBe(true);
+    expect(optIds.length, '战斗页武器分组展开部件卡').toBeGreaterThan(0);
+    // 空槽 + 武器（不混入辅助部件；默认分组 weapon）
+    expect(env.host.getHitAreasForTest().some((a) => a.id === 'opt:none'), '战斗页武器分组含空槽').toBe(true);
   });
 
   it('F-GARAGE-BUILD-BOARD-P0｜改一个部件：分类 tab → 部件卡 → pick（单屏，无多层返回）；无寻找对手', () => {
@@ -310,8 +311,8 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState()); // 富库存：全部 19 个功能件选项可装备（可见）
     goGarage(env); // F-HOME-1：Home → 配置页
-    // F-GARAGE-BUILD-BOARD-P0：点「武器」分类 → 自动选中第一个硬点 → 展开功能件部件卡
-    const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:weapon')!;
+    // F-GARAGE-BUILD-BOARD-P0：点「战斗」分类 → 默认武器分组 → 自动选中第一个硬点 → 展开功能件部件卡
+    const entryW = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:combat')!;
     env.pointer(entryW.x + entryW.w / 2, entryW.y + entryW.h / 2);
     const fnSlot = env.fired['toggle'].slice(-1)[0];
     expect(fnSlot, '武器分类应自动选中一个硬点').toBeTruthy();
@@ -347,11 +348,10 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     env.host.render(richGarageState());
     goGarage(env); // F-HOME-1：Home → 配置页
 
-    // 验收（必改3）：配置第一层恰好 4 个「玩家认知」分组：车身 / 移动 / 武器 / 辅助
-    // 注：id 分隔符不一致（entry:body 用冒号，entry-move/weapons/gadgets 用连字符）——按前缀 entry 统配 4 个。
+    // 验收（必改3）：配置第一层恰好 3 个「玩家认知」分组：车身 / 移动 / 战斗（武器+辅助合并）
     const firstLayer = env.host.getHitAreasForTest().filter((a) => a.id.startsWith('garage-cat'));
-    expect(firstLayer, '分类 tab 恰好 4 个').toHaveLength(4);
-    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon', 'garage-cat:gadget']) {
+    expect(firstLayer, '分类 tab 恰好 3 个').toHaveLength(3);
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat']) {
       expect(firstLayer, `配置第一层应含 ${id}`).toContainEqual(expect.objectContaining({ id }));
     }
     // 不应把轮子/驱动/挂点细项同时铺在一级（已收进二级）
@@ -366,9 +366,9 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       '车库无寻找对手',
     ).toBe(false);
 
-    // F-GARAGE-BUILD-BOARD-P0：2 次点击换武器（Acceptance#2）——点「武器」分类 tab
-    // （自动选中第一挂点并展开部件卡）→ 点一个选项（pick 派发即视为换装）。共 2 击。
-    const entryWe = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:weapon')!;
+    // F-GARAGE-BUILD-BOARD-P0：2 次点击换武器（Acceptance#2）——点「战斗」分类 tab
+    // （默认武器分组 + 自动选中第一挂点并展开部件卡）→ 点一个选项（pick 派发即视为换装）。共 2 击。
+    const entryWe = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:combat')!;
     env.pointer(entryWe.x + entryWe.w / 2, entryWe.y + entryWe.h / 2); // 第 1 击 → 展开挂点部件卡
     const wSlot = env.fired['toggle'].slice(-1)[0];
     expect(wSlot, '武器分类应自动选中挂点').toBeTruthy();

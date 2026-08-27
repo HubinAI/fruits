@@ -173,7 +173,7 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
         goGarage(env, vp, dpr); // F-HOME-1：Home → 配置页（原 Garage 面板断言）
         // F-META-2：Garage 无合成入口（合成在 Backpack）；本循环只验证 garage 页交互
         // F-NAV-ACTION-OWNERSHIP-P0：配置页无 cta-find（寻找对手只属首页——下方独立验证）
-        for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:weapon']) {
+        for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat']) {
           const area = env.areas().find((a) => a.id === id);
           expect(area, `${vp.w}×${vp.h} DPR=${dpr} 应有 ${id}`).toBeTruthy();
           const raw = rawFor(area!, vp, dpr, false); // raw = window logical px
@@ -182,11 +182,11 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
             // 移动分类 → 自动选中第一个挂点（后轮）+ 挂点 chip 行（后轮/前轮/驱动）
             expect(env.fired['toggle']).toContain('rearWheel');
             expect(env.areas().some((a) => a.id.startsWith('garage-slot:'))).toBe(true);
-          } else if (id === 'garage-cat:weapon') {
-            // 武器分类 → 自动选中第一个硬点 + 挂点 chip 行
+          } else if (id === 'garage-cat:combat') {
+            // 战斗分类 → 默认武器分组 + 自动选中第一个硬点 + 两组挂点 chip 行
             const last = env.fired['toggle'].slice(-1)[0];
-            expect(last, '武器分类自动选中硬点').toBeTruthy();
-            expect(env.areas().some((a) => a.id.startsWith('garage-slot:'))).toBe(true);
+            expect(last, '战斗分类自动选中硬点').toBeTruthy();
+            expect(env.areas().some((a) => a.id.startsWith('garage-cslot:'))).toBe(true);
           } else {
             expect(env.fired['toggle']).toContain('body');
           }
