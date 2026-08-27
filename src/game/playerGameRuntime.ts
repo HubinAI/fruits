@@ -115,7 +115,20 @@ export interface PlayerGameDeps {
    * Web = SfxAudioService；微信 = 惰性 no-op（play 安全跳过）。
    * 用户交互恢复音频（Web=AudioContext resume；微信省略/no-op）。
    */
-  sfx?: { resume(): void; play?(id: import('../presentation/audioService').SfxId): void };
+  /** F-BATTLE-READABILITY-R1：战斗关键音效（攻击/命中/收束预警/胜负）+ 战斗音频生命周期
+   *  （startBattleAudio / stopBattleAudio / getAudioProbe）。
+   *  Web = SfxAudioService；微信 = 同一实例（无 Web Audio → 惰性 no-op）。
+   *  新音频方法均为可选：现有测试桩（如 { resume() }）与双端实现均向后兼容。 */
+  sfx?: {
+    resume(): void;
+    play?(id: import('../presentation/audioService').SfxId): void;
+    /** F-AUDIO-RESULT-LIFECYCLE-P0：战斗音频会话开始（幂等；新会话先清上一局泄漏） */
+    startBattleAudio?(sessionId: string): void;
+    /** F-AUDIO-RESULT-LIFECYCLE-P0：胜负确定后停止全部循环战斗音源 */
+    stopBattleAudio?(): void;
+    /** F-AUDIO-RESULT-LIFECYCLE-P0：测试探针（当前状态 / 活跃循环音源数 / 会话 / 待执行计时器） */
+    getAudioProbe?(): import('../presentation/audioService').AudioProbeState;
+  };
   /** Web：`() => new URLSearchParams(location.search).has('resetdev')`；微信：缺省 false */
   isResetDevVisible?: () => boolean;
   /** DEV 重置后刷新（Web=location.reload；微信缺省 → 运行时重读存档） */
@@ -160,6 +173,8 @@ export class PlayerGameRuntime {
   private matchingGeneration = 0;
   private lastShownResult: BattleOrchestratorApi['result'] = null;
   private battleStartTimeMs = 0;
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：每场战斗的音频会话序号（startBattleAudio 幂等键；新战斗 +1） */
+  private battleSessionSeq = 0;
   private startTransitioning = false;
   private bFxStart = -1;
   private onboardingStage: OnboardingStage = 'pending';
@@ -194,6 +209,11 @@ export class PlayerGameRuntime {
   /** F-DEMO-VISUAL-GATE-R4：E2E 探针——最新阶段文案（只读诊断；不参与 Gameplay 规则） */
   getProbeCountdownText(): string | null {
     return this.lastPhaseCountdownText ?? null;
+  }
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：E2E 探针——当前音频状态（只读诊断；不参与 Gameplay 规则）。
+   *  音频管理层未注入（如微信 no-op）时返回 null。 */
+  getAudioProbe(): import('../presentation/audioService').AudioProbeState | null {
+    return this.deps.sfx?.getAudioProbe?.() ?? null;
   }
   get buildControlsLocked(): boolean {
     return this.buildControlsLockedInternal;
@@ -575,6 +595,9 @@ export class PlayerGameRuntime {
     this.deps.battle.loadCustom(sa, sb, { autoDrive: true, engine: 'planck', sideDrive });
     this.battleStateInternal = 'fighting';
     this.setBuildControlsLocked(true);
+    // F-AUDIO-RESULT-LIFECYCLE-P0：新战斗会话开始——先清理上一局可能泄漏的循环音源，再登记本局会话
+    this.battleSessionSeq += 1;
+    this.deps.sfx?.startBattleAudio?.(`battle-${this.battleSessionSeq}`);
     // Q28：记录开战时刻 + 重置 battle_end/reward_gain 去重器（每场新的 result 对象）
     this.battleStartTimeMs = platform.lifecycle.now();
     battleEndGuard.clear();
@@ -745,6 +768,7 @@ export class PlayerGameRuntime {
 
   /** Ended 后玩家选择：调整配置 → 回 Garage（保留玩家上一场 Build，不重置） */
   private adjustConfig(): void {
+    this.deps.sfx?.stopBattleAudio?.(); // F-AUDIO-RESULT-LIFECYCLE-P0：离开战斗即停循环音源
     this.currentResult = null; // Host 收起结算卡（HUD 由 renderBattleFrame 按 battleState 控制）
     this.playerPhaseInternal = 'garage'; // 回到装配
     this.battleStateInternal = 'editing';
@@ -759,6 +783,7 @@ export class PlayerGameRuntime {
 
   /** Ended 后玩家选择：下一场 → 走同一套 Matching（随机新对手）→ MatchPreview */
   private async nextMatch(): Promise<void> {
+    this.deps.sfx?.stopBattleAudio?.(); // F-AUDIO-RESULT-LIFECYCLE-P0：离开结算即停，下一场 startBattleAudio 再清残留
     await tryInterstitialSafe(() => {
       this.currentResult = null;
       this.startMatching(); // 复用 Garage「寻找对手」同一状态链
@@ -836,6 +861,8 @@ export class PlayerGameRuntime {
     this.lastShownResult = r;
     if (this.uiModeInternal === 'build' && this.battleStateInternal === 'fighting' && r && r.phase === 'End') {
       this.battleStateInternal = 'ended';
+      // F-AUDIO-RESULT-LIFECYCLE-P0：胜负确定 → 立即阻止并停止循环战斗音源（淡出 150~300ms + stop + disconnect）
+      this.deps.sfx?.stopBattleAudio?.();
       this.currentResult = { winner: r.winner, hpA: r.hpA, hpB: r.hpB };
       // F-BATTLE-READABILITY-R1：胜负音效（赢=上扬 / 输=低频下沉；仅每场结算一次）
       this.deps.sfx?.play?.(r.winner === 'A' ? 'win' : 'lose');
@@ -896,6 +923,7 @@ export class PlayerGameRuntime {
    * DOM（backToBuildBtn/debugPanel 显隐）由入口 setMode 包装处理。
    */
   setMode(m: UiMode): void {
+    this.deps.sfx?.stopBattleAudio?.(); // F-AUDIO-RESULT-LIFECYCLE-P0：切换顶层模式即停循环音源（无则 no-op）
     this.uiModeInternal = m;
     this.currentResult = null; // 模式切换关闭结算卡（Host）
     // Q08-CAM-A1：模式切换改面板显隐 → canvas CSS 尺寸变化，先同步 backing 再构图

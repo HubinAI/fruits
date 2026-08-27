@@ -25,6 +25,38 @@ export interface SfxService {
   startLaserCharge(progress: number): void;
   /** Q11-C-R2：fire 立即结束 charge 声 + 高频爆鸣 + 低频冲击 */
   stopLaserCharge(): void;
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：战斗音频会话开始（幂等；新会话先清理上一局泄漏的循环音源） */
+  startBattleAudio(sessionId: string): void;
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：胜负确定后停止全部循环战斗音源（淡出 150~300ms + stop + disconnect） */
+  stopBattleAudio(): void;
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：测试探针——当前音频状态 / 活跃循环音源数 / 当前会话 / 待执行计时器 */
+  getAudioProbe(): AudioProbeState;
+}
+
+/**
+ * F-AUDIO-RESULT-LIFECYCLE-P0：音频探针快照（仅测试用，不参与任何 Gameplay 规则）。
+ * - state：'battle-audio' = 存在活跃循环战斗音源（Battle BGM）；'idle' = 无。
+ * - activeBgmSources：活跃循环战斗音源数（Battle BGM 实例数；恒 ≤1）。
+ * - battleSession：当前战斗会话 id（null = 无进行中的战斗音频会话）。
+ * - pendingAudioTimers：待执行的音频计时器（淡出 / 停止 / 断开排程）数。
+ */
+export interface AudioProbeState {
+  state: 'battle-audio' | 'idle';
+  activeBgmSources: number;
+  battleSession: string | null;
+  pendingAudioTimers: number;
+}
+
+/** F-AUDIO-RESULT-LIFECYCLE-P0：单条循环战斗音源（Battle BGM 实例）的内部句柄 */
+interface LoopingBattleSource {
+  osc: ReturnType<MinimalAudioContext['createOscillator']> | null;
+  gain: ReturnType<MinimalAudioContext['createGain']> | null;
+  /** 当前增益（用于淡出起点；exponential 不能从 0 起跳） */
+  currentGain: number;
+  /** 是否已调度停止（防止重复 stop / 重复计入活跃集） */
+  stopped: boolean;
+  /** 淡出后断开节点的计时器（null = 已清理） */
+  fadeTimer: ReturnType<typeof setTimeout> | null;
 }
 
 /** Web Audio 占位音色参数：id → 频率 / 时长 / 音量 */
@@ -55,12 +87,14 @@ interface MinimalAudioContext {
     type: string;
     frequency: { setValueAtTime(v: number, t: number): void; exponentialRampToValueAtTime(v: number, t: number): void };
     connect(d: unknown): void;
+    disconnect(): void;
     start(t?: number): void;
     stop(t?: number): void;
   };
   createGain(): {
     gain: { setValueAtTime(v: number, t: number): void; exponentialRampToValueAtTime(v: number, t: number): void };
     connect(d: unknown): void;
+    disconnect(): void;
   };
 }
 
@@ -125,32 +159,42 @@ export class SfxAudioService implements SfxService {
     }
   }
 
-  private chargeOsc: ReturnType<MinimalAudioContext['createOscillator']> | null = null;
-  private chargeGain: ReturnType<MinimalAudioContext['createGain']> | null = null;
+  // F-AUDIO-RESULT-LIFECYCLE-P0：循环战斗音源（唯一持续性战斗音频 = Battle BGM）生命周期管理
+  /** 活跃循环音源集（Battle BGM 实例；恒 ≤1，charge 单例 + 全路径走淡出停止） */
+  private battleLoops = new Set<LoopingBattleSource>();
+  /** charge 当前绑定的循环源（与 battleLoops 中同一实例；便于开火时精准停药） */
+  private chargeSource: LoopingBattleSource | null = null;
+  /** 当前战斗音频会话 id（startBattleAudio 登记；stop 清 null） */
+  private battleSessionId: string | null = null;
+  /** 待执行的音频计时器（淡出/停止/断开排程）计数——探针用 */
+  private pendingAudioTimers = 0;
 
-  /** Q11-C-R2：蓄能期间升调/增强（progress 0→1；重复调用持续更新频率与增益） */
+  /** Q11-C-R2：蓄能期间升调/增强（progress 0→1；重复调用持续更新频率与增益）。
+   *  F-AUDIO-RESULT-LIFECYCLE-P0：charge 为单例循环源，重复调用幂等（复用同一 osc，不新增）。 */
   startLaserCharge(progress: number): void {
     if (this.muted) return;
     const ctx = this.ensureContext();
     if (!ctx) return; // 缺资源 / 无音频环境：安全 skip
     try {
-      let osc = this.chargeOsc;
-      let gain = this.chargeGain;
-      if (!osc) {
-        osc = ctx.createOscillator();
+      let src = this.chargeSource;
+      if (!src || src.stopped) {
+        const osc = ctx.createOscillator();
         osc.type = 'sawtooth';
         const g = ctx.createGain();
         osc.connect(g);
         g.connect(ctx.destination);
         osc.start(ctx.currentTime);
-        this.chargeOsc = osc;
-        this.chargeGain = g;
-        gain = g;
+        src = { osc, gain: g, currentGain: 0.03, stopped: false, fadeTimer: null };
+        this.chargeSource = src;
+        this.battleLoops.add(src); // 活跃循环音源 +1（恒 ≤1：charge 单例）
       }
       const t = ctx.currentTime;
       const p = Math.max(0, Math.min(1, progress));
-      osc.frequency.setValueAtTime(180 + p * 420, t); // 180→600 升调
-      if (gain) gain.gain.setValueAtTime(0.03 + p * 0.07, t); // 增强
+      // 此时 src 必为非空（true 分支已重建 / false 分支本就非空）
+      const live = src!;
+      live.osc!.frequency.setValueAtTime(180 + p * 420, t); // 180→600 升调
+      live.currentGain = 0.03 + p * 0.07;
+      live.gain!.gain.setValueAtTime(live.currentGain, t); // 增强
     } catch {
       // 任何音频异常都不影响战斗表现
     }
@@ -158,16 +202,10 @@ export class SfxAudioService implements SfxService {
 
   /** Q11-C-R2：fire 立即结束 charge 声 + 高频爆鸣 + 低频冲击 */
   stopLaserCharge(): void {
+    const src = this.chargeSource;
+    this.chargeSource = null;
+    this.fadeOutAndStop(src, 50); // 开火即结束 charge 声（快速淡出，不循环）
     const ctx = this.ctx;
-    try {
-      if (this.chargeOsc && ctx) {
-        this.chargeOsc.stop(ctx.currentTime + 0.05);
-      }
-    } catch {
-      // 忽略
-    }
-    this.chargeOsc = null;
-    this.chargeGain = null;
     if (!ctx || this.muted) return;
     try {
       const t0 = ctx.currentTime;
@@ -199,5 +237,69 @@ export class SfxAudioService implements SfxService {
     } catch {
       // 忽略
     }
+  }
+
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：内部——淡出 + 停止调度 + 延时断开（不得只把 volume 设为 0）。
+   *  立即从活跃集移除（probe activeBgmSources 同步归零），fadeMs 后真正 stop 并 disconnect 回收节点。 */
+  private fadeOutAndStop(src: LoopingBattleSource | null, fadeMs: number): void {
+    if (!src || src.stopped) return;
+    src.stopped = true;
+    this.battleLoops.delete(src); // 立即移出活跃集（同步归零，满足「Result 后 500ms 内 source=0」）
+    const ctx = this.ctx;
+    if (ctx && src.osc && src.currentGain > 0.0001) {
+      try {
+        const t = ctx.currentTime;
+        if (src.gain) {
+          src.gain.gain.setValueAtTime(src.currentGain, t); // 从当前增益起跳（exponential 不能从 0）
+          src.gain.gain.exponentialRampToValueAtTime(0.0001, t + fadeMs / 1000);
+        }
+        src.osc.stop(t + fadeMs / 1000 + 0.02);
+      } catch {
+        // 忽略：节点异常不影响战斗
+      }
+    }
+    // 淡出后断开节点，回收资源（不能只把 volume 设为 0）
+    this.pendingAudioTimers += 1;
+    src.fadeTimer = globalThis.setTimeout(() => {
+      try {
+        src.osc?.disconnect();
+        src.gain?.disconnect();
+      } catch {
+        // 忽略
+      }
+      src.fadeTimer = null;
+      this.pendingAudioTimers = Math.max(0, this.pendingAudioTimers - 1);
+    }, fadeMs + 60);
+  }
+
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：战斗音频会话开始。
+   *  幂等：同一 session 重复调用不新增音源；新 session 先淡出清理上一局可能泄漏的循环音源
+   *  （满足「下一场只创建一个新 BGM，不得复用已结束/泄漏的上一局音源」）。 */
+  startBattleAudio(sessionId: string): void {
+    // 幂等：同一会话重复调用 = 纯 no-op（不得停掉当前战斗正在播放的音频，也不新增音源）
+    if (this.battleSessionId === sessionId) return;
+    // 新会话：先停掉上一局残留/泄漏的循环音源（满足「下一场只创建一个新 BGM，不得复用已结束/泄漏的上一局音源」）
+    if (this.battleLoops.size > 0) {
+      for (const s of [...this.battleLoops]) this.fadeOutAndStop(s, 200);
+    }
+    this.chargeSource = null;
+    this.battleSessionId = sessionId;
+  }
+
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：胜负确定后停止全部循环战斗音源（150~300ms 内淡出+stop+disconnect）。 */
+  stopBattleAudio(): void {
+    for (const s of [...this.battleLoops]) this.fadeOutAndStop(s, 220);
+    this.chargeSource = null;
+    this.battleSessionId = null;
+  }
+
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：测试探针（仅测试用） */
+  getAudioProbe(): AudioProbeState {
+    return {
+      state: this.battleLoops.size > 0 ? 'battle-audio' : 'idle',
+      activeBgmSources: this.battleLoops.size,
+      battleSession: this.battleSessionId,
+      pendingAudioTimers: this.pendingAudioTimers,
+    };
   }
 }
