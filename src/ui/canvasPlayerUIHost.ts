@@ -433,6 +433,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return this.hitAreas;
   }
 
+  /** F-PLAYER-UI-HITMAP-P0：E2E 真实像素门禁用——暴露当前 host 实际使用的变换（绘制与命中同源）。
+   *  供 e2e 把命中区中心换算到「真实绘制的可见页面坐标」：drawnCss = (ox + scale·(x+w/2), oy + scale·(y+h/2))。 */
+  getTransformInfo(): { scale: number; ox: number; oy: number; cssW: number; cssH: number; dpr: number } {
+    return { scale: this.scale, ox: this.ox, oy: this.oy, cssW: this.cssW, cssH: this.cssH, dpr: this.dpr };
+  }
+
   // ---------- 输入 → Action ----------
   /**
    * F-WX-P0-INPUT：Viewport Logical → Layout 的**唯一**转换点。
@@ -836,7 +842,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.oy = (this.cssH - BASE_H * this.scale) / 2;
       this.insets = { ...ZERO_INSETS };
     }
-    this.ctx.setTransform(dpr * this.scale, 0, 0, dpr * this.scale, dpr * this.ox, dpr * this.oy);
+    // F-PLAYER-UI-HITMAP-P0：ctx 变换只负责 DPR（CSS px → device px）。
+    // 布局 → CSS 的 scale/ox/oy 已由 rect/text/panel/button 原语手动烤入坐标
+    // （this.ox + x*this.scale），此处若再乘 this.scale 会与 screenToLayoutPoint
+    // 的反推不一致 → 宽屏（scale≠1）可见像素≠命中区。故 transform 仅 DPR。
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // F-DEMO-PLAYER-RUNTIME-P0：桌面打开玩家模式 → CSS contain 放大居中（仅视觉，逻辑坐标不变）
     if (this.phoneLogical && this.parent) this.applyPhoneScale();
   }
