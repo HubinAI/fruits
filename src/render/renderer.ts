@@ -152,6 +152,10 @@ const MATCH_MIN_X = 290;
 const MATCH_MAX_X = 1310;
 const MATCH_MIN_Y = 535;
 const MATCH_MAX_Y = 712;
+// F-PREBATTLE-VISUAL-R1：战前（Matching/Locked）地面线锚定在视口高 PREBATTLE_GROUND_FRAC——
+// 地面以下带 ≈ (1-frac) ≈ 28%（Must#8：24%~30%，杜绝「车辆悬上、近半屏纯色地面空区」）。
+// 与 battle 同锚定语义（groundScreenY 恒定），但战前要求更薄地面带。
+const PREBATTLE_GROUND_FRAC = 0.72;
 
 interface FloatingText {
   x: number;
@@ -286,6 +290,17 @@ export class Renderer {
   private damageGroupFx = new Map<string, FloatingText>();
   /** F-HOME-P0-LAYER：首页程序化背景下沉开关（背景层<车辆层<UI层）；仅首页开启 */
   private homeBackdrop = false;
+  /** F-PREBATTLE-VISUAL-R1：战前（Matching/MatchPreview）程序化背景下沉开关——水果竞技场
+   *  简化版（背景层<车辆层<UI层）；仅战前开启；与 homeBackdrop 互斥（Battle 两者皆关）。 */
+  private prebattleBackdrop = false;
+  /** F-PREBATTLE-VISUAL-R1：每帧绘制的真实地面线（逻辑 px），供 E2E probe.groundScreenY
+   *  在 battle 相机未激活（预览/战前）时可靠取数——根治渲染层取 this.orchestrator 为 null
+   *  导致 groundScreenY 恒 null 的缺陷。与 battleCam.groundScreenY 二选一。 */
+  private lastGroundScreenYLogical: number | null = null;
+  /** F-PREBATTLE-VISUAL-R1：最近一次 reframe 的 arena.groundY（世界坐标）。
+   * 供 getProbeCamera 在「非 battle 相机且无绘制上下文（headless 单测）」时推算地面线——
+   * 比只依赖 lastGroundScreenYLogical（需 draw）更鲁棒，且不触碰 this.orchestrator（恒 null）。 */
+  private previewGroundY: number | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -533,11 +548,23 @@ export class Renderer {
    * 地面线（逻辑 px）；非 battle 相机 → groundScreenY null。
    */
   getProbeCamera(): { scale: number; offsetX: number; offsetY: number; groundScreenY: number | null } {
+    // groundScreenY：battle 相机（groundScreenY 恒定）；preview（Matching/MatchPreview）用
+    // 当前 transform + arena.groundY 计算真实地面线（逻辑 px），使 E2E 能验证地面带占比。
+    let groundScreenY: number | null = this.battleCam ? this.battleCam.groundScreenY / this.viewDpr : null;
+    // 非 battle 相机（预览 / 战前）：优先用每帧绘制时捕获的真实地面线（逻辑 px）；
+    // 否则用最近一次 reframe 的 arena.groundY + 当前 transform 推算（headless 单测 / 未 draw 也可靠）；
+    // 不再依赖 this.orchestrator（渲染层仅持有局部 orchestrator 引用，this.orchestrator 恒 null）。
+    if (groundScreenY == null) {
+      if (this.lastGroundScreenYLogical != null) groundScreenY = this.lastGroundScreenYLogical;
+      else if (this.previewGroundY != null) {
+        groundScreenY = (this.transform.offsetY + this.previewGroundY * this.transform.scale) / this.viewDpr;
+      }
+    }
     return {
       scale: this.transform.scale,
       offsetX: this.transform.offsetX,
       offsetY: this.transform.offsetY,
-      groundScreenY: this.battleCam ? this.battleCam.groundScreenY / this.viewDpr : null,
+      groundScreenY,
     };
   }
 
@@ -764,6 +791,10 @@ export class Renderer {
       // F-HOME-P0-LAYER：首页程序化背景作为 underlay（背景层<车辆层<UI层）；
       // 单一入口 drawHomeBackdrop —— 正式背景美术资源后续从此注入。
       this.drawHomeBackdrop(ctx, this.viewWidth, this.viewHeight);
+    } else if (this.prebattleBackdrop) {
+      // F-PREBATTLE-VISUAL-R1：战前程序化背景（水果竞技场简化版 underlay；
+      // 单一入口 drawPrebattleSky —— 天空渐变 + 简化对称看台 + 灯点，无 battle 墙）。
+      this.drawPrebattleSky(ctx, this.viewWidth, this.viewHeight);
     } else {
       ctx.fillStyle = '#14181f';
       ctx.fillRect(0, 0, this.viewWidth, this.viewHeight);
@@ -778,7 +809,7 @@ export class Renderer {
     // W2-FX-2：表现时间基准（阶段闪烁 / 死亡淡出 / FX 共用）
     const now = this.now();
 
-    if (!this.homeBackdrop) {
+    if (!this.homeBackdrop && !this.prebattleBackdrop) {
       // Ground（统一竞技场地面语义）
       ctx.fillStyle = V.arenaGround;
       ctx.fillRect(
@@ -787,6 +818,7 @@ export class Renderer {
         this.ss(arena.width),
         this.canvas.height - this.sy(arena.groundY),
       );
+      this.lastGroundScreenYLogical = this.sy(arena.groundY) / this.viewDpr;
       ctx.strokeStyle = V.arenaGroundEdge;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -825,6 +857,19 @@ export class Renderer {
           ctx.globalAlpha = 1;
         }
       }
+    } else if (this.prebattleBackdrop) {
+      // F-PREBATTLE-VISUAL-R1：战前地面带（与双方车辆同一 groundY；不画 battle 墙）。
+      // 中性板岩色（非纯蓝），顶部暖白地平线高光，底部暗收束 —— 地面以下约占 24~30%。
+      const gy = this.sy(arena.groundY);
+      const grad = ctx.createLinearGradient(0, gy, 0, this.viewHeight);
+      grad.addColorStop(0, '#2b3242');
+      grad.addColorStop(1, '#171c28');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, gy, this.viewWidth, this.viewHeight - gy);
+      this.lastGroundScreenYLogical = gy / this.viewDpr;
+      // 地平线高光（车底水平线，弱暖白）
+      ctx.fillStyle = 'rgba(190,210,245,0.30)';
+      ctx.fillRect(0, gy - 1, this.viewWidth, 2);
     }
 
     // Q13-C-R3：喷焰主体（glow + 主焰 + 火芯）在车辆之前绘制，车身自然遮住与车体重叠
@@ -1010,6 +1055,10 @@ export class Renderer {
   setHomeBackdrop(on: boolean): void {
     this.homeBackdrop = on;
   }
+  /** F-PREBATTLE-VISUAL-R1：战前背景开关（水果竞技场简化版；与 homeBackdrop 互斥） */
+  setPrebattleBackdrop(on: boolean): void {
+    this.prebattleBackdrop = on;
+  }
 
   /**
    * F-HOME-P0-LAYER：首页程序化背景（临时 underlay fallback）——渐变天空 + 光晕 + 远山 + 地面光带。
@@ -1101,6 +1150,47 @@ export class Renderer {
     ctx.fillStyle = 'rgba(6,10,18,0.6)';
     ctx.fillRect(w / 2 - pw / 2, h - 6, pw, 6);
 
+    ctx.restore();
+  }
+
+  /**
+   * F-PREBATTLE-VISUAL-R1：战前「水果竞技场」简化天空（程序化 underlay，单一入口）。
+   * 沿用首页视觉语言（对称看台 + 灯点 + 穹顶微光），但降低复杂度：看台层数更少、
+   * 不画聚光锥（避免与中央 VS / 扫描动效争夺注意力）；保证双方车辆是主体。
+   * 天空为渐变而非纯色，消除「大面积纯黑」的调试预览感。地面带由 draw() 的
+   * prebattle 分支单独绘制（对齐车辆 groundY）。
+   */
+  private drawPrebattleSky(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    // 基座 + 天空渐变（视觉以渐变为主，非纯色块）
+    ctx.fillStyle = '#0a0d13';
+    ctx.fillRect(0, 0, w, h);
+    const sky = ctx.createLinearGradient(0, 0, 0, h * 0.82);
+    sky.addColorStop(0, '#0a0d13');
+    sky.addColorStop(0.5, '#0f1830');
+    sky.addColorStop(0.82, '#16243c');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, h);
+    ctx.save();
+    // 简化对称看台（4 层，向中心收拢；中间留舞台开口；非纯色块）
+    const tiers = 4;
+    for (let i = 0; i < tiers; i++) {
+      const ty = h * (0.30 + i * 0.05);
+      const half = Math.max(w * 0.06, w * (0.47 - 0.085 * i));
+      ctx.fillStyle = `rgba(42,64,102,${(0.26 + i * 0.04).toFixed(3)})`;
+      ctx.fillRect(w / 2 - half, ty, half * 2, Math.max(2, h * 0.018));
+      ctx.fillStyle = 'rgba(150,195,255,0.34)';
+      const lamps = Math.max(5, Math.floor((half * 2) / (w * 0.11)));
+      for (let k = 0; k < lamps; k++) {
+        const lx = w / 2 - half + 10 + k * ((half * 2 - 20) / Math.max(1, lamps - 1));
+        ctx.fillRect(lx, ty - 1, 2, 2);
+      }
+    }
+    // 穹顶微光（弱，不构成巨圆主背景）
+    const dome = ctx.createRadialGradient(w / 2, h * 0.08, w * 0.06, w / 2, h * 0.08, w * 0.4);
+    dome.addColorStop(0, 'rgba(110,160,240,0.09)');
+    dome.addColorStop(1, 'rgba(110,160,240,0)');
+    ctx.fillStyle = dome;
+    ctx.fillRect(0, 0, w, h * 0.5);
     ctx.restore();
   }
 
@@ -2090,18 +2180,33 @@ export class Renderer {
     // Active 首帧计算的 groundScreenY（视口高 68~72%，顶部避开 HUD、底部保留有限地面带），
     // 后续阶段复用同一地面线（位移 0）。车辆站上地面线、主体居中，杜绝「压底 + 顶部死区」。
     const offsetX = baseX + (safeW - bw * scale) / 2 - minX * scale;
-    const offsetY =
-      fit === 'battle'
-        ? (this.battleCam?.groundScreenY ?? baseY + safeH * BATTLE_STAGE_GROUND_MIN * 0.8) -
-          snap.arena.groundY * scale
-        : framing?.mode === 'home'
-          ? // F-HOME-VISUAL-R2：车辆 envelope 垂直居中于取景区（视觉中心构图 Must#1——
-            // 不得贴底偏下；「贴地展示」由前景展示平台（drawHomeBackdrop 前景层）表达）。
-            baseY + (safeH - bh * scale) / 2 - minY * scale
-          : compactBattleActive
-            ? baseY + (safeH - bh * scale) - minY * scale
-            : baseY + (safeH - bh * scale) / 2 - minY * scale;
+    let offsetY: number;
+    if (fit === 'battle') {
+      offsetY =
+        (this.battleCam?.groundScreenY ?? baseY + safeH * BATTLE_STAGE_GROUND_MIN * 0.8) -
+        snap.arena.groundY * scale;
+    } else if (fit === 'previewFixed') {
+      // F-PREBATTLE-VISUAL-R1：战前地面线锚定视口 ~72%——地面以下带 ≈28%（24%~30%），
+      // 杜绝「车辆悬上、近半屏纯色地面空区」（Must#8）。与 battle 同锚定语义（groundScreenY
+      // 恒定 → Matching→Locked 地面线位移 0，不切换背景/不跳位）。
+      // 安全钳制：车辆 box 顶不低于安全区顶、底不超出视口（极端矮屏下退化为贴顶安全构图）。
+      let gY = (this.viewHeight / this.viewDpr) * PREBATTLE_GROUND_FRAC * this.viewDpr;
+      const boxTop = gY - (snap.arena.groundY - minY) * scale;
+      const boxBot = gY + (maxY - snap.arena.groundY) * scale;
+      if (boxTop < baseY) gY += baseY - boxTop;
+      if (boxBot > this.viewHeight) gY -= boxBot - this.viewHeight;
+      offsetY = gY - snap.arena.groundY * scale;
+    } else if (framing?.mode === 'home') {
+      // F-HOME-VISUAL-R2：车辆 envelope 垂直居中于取景区（视觉中心构图 Must#1——
+      // 不得贴底偏下；「贴地展示」由前景展示平台（drawHomeBackdrop 前景层）表达）。
+      offsetY = baseY + (safeH - bh * scale) / 2 - minY * scale;
+    } else if (compactBattleActive) {
+      offsetY = baseY + (safeH - bh * scale) - minY * scale;
+    } else {
+      offsetY = baseY + (safeH - bh * scale) / 2 - minY * scale;
+    }
     this.transform = { scale, offsetX, offsetY };
+    this.previewGroundY = snap.arena.groundY;
     // F-WX-9A：DEV-only 取景尺度日志（__WX_DEBUG__=true，WECHAT_DEBUG_INPUT=1 构建注入；
     // PROD __WX_DEBUG__=false → 编译期常量折叠，零日志）。只读诊断，不改变任何 framing 语义。
     if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {

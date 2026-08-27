@@ -137,6 +137,8 @@ export interface PlayerUIActions {
   onResetProgress(): void;
   /** 首页程序化背景下沉为 renderer underlay 开关（仅首页开启；车库/匹配/战斗关闭） */
   setHomeBackdrop?(on: boolean): void;
+  /** F-PREBATTLE-VISUAL-R1：战前（Matching/MatchPreview）程序化背景下沉为 renderer underlay 开关（仅战前开启） */
+  setPrebattleBackdrop?(on: boolean): void;
 }
 
 /** 平台中立 Host 接口：绑定 State → 渲染、Action → 回调。 */

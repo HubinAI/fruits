@@ -255,6 +255,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private panelView: 'home' | 'movePick' | 'weaponPick' | 'gadgetPick' | 'options' = 'home';
   /** F-GARAGE-BUILD-BOARD-P0：装配台常驻分类（单屏装配台取代多层菜单——右顶分类 tab 常驻）。 */
   private garageCategory: 'body' | 'move' | 'weapon' | 'gadget' = 'body';
+  /** F-PREBATTLE-VISUAL-R1：Locked 揭晓高亮环计时（克制；~500ms 淡出；不移动车辆） */
+  private prebattleLockSeen = false;
+  private prebattleLockAt = 0;
   /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机）；F-HOME-1：默认 Home（正式首页） */
   private metaPage: MetaPage = 'home';
   /** F-META-6：More 页子视图（功能卡主页 / 设置子页；UI-only，不进 Gameplay） */
@@ -720,6 +723,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 仅「出局外 + metaPage=home」开启；车库/匹配/战斗各自保持背景（不覆盖车辆）。
     const homeScreen = state.uiMode !== 'scenario' && state.playerPhase === 'garage' && this.metaPage === 'home';
     this.actions?.setHomeBackdrop?.(homeScreen);
+    // F-PREBATTLE-VISUAL-R1：战前（Matching/MatchPreview）启用水果竞技场简化背景；
+    // 与 homeBackdrop 互斥（Battle 两者皆关，走 battle 地面）。
+    const prebattle = state.playerPhase === 'matching' || state.playerPhase === 'matchPreview';
+    this.actions?.setPrebattleBackdrop?.(prebattle);
     if (state.uiMode === 'scenario') {
       // DEV Lab 继续 DOM；Canvas 不绘制且不挡指针（微信玩家版无 scenario，永不进入）
       const st = this.canvas.style;
@@ -2135,37 +2142,60 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       bRect = { x: this.W * 0.7 - vw / 2, y: centerY - vh / 2, w: vw, h: vh };
     }
     const bCx = bRect.x + bRect.w / 2;
-    // 中央 VS（半透明大字，恒定屏幕中心）
+
+    // 中央 VS（辅助信息：小字、恒定屏幕中心、低透明；不成为屏幕最大元素）
     ctx.save();
-    ctx.globalAlpha = 0.22;
-    this.text('VS', this.W / 2, this.H / 2 - 4, this.isMobile ? 40 : 54, V.textPrimary, 'center', 900);
+    ctx.globalAlpha = 0.5;
+    this.text('VS', this.W / 2, this.H / 2, this.isMobile ? 18 : 20, V.textSecondary, 'center', 800);
     ctx.restore();
-    // 单一状态文字（顶部居中横幅，全屏唯一状态表达；不覆盖车辆）
+
+    // 顶部中央单一状态文字（全屏唯一状态表达；不覆盖车辆）
     this.text(
       locked ? '对手已锁定' : '正在寻找对手…',
       this.W / 2,
-      this.insT + (this.isMobile ? 24 : 30),
-      this.isMobile ? 16 : 18,
+      this.insT + (this.isMobile ? 22 : 28),
+      this.isMobile ? 15 : 17,
       locked ? V.primary : V.textSecondary,
       'center',
       700,
     );
+
+    // F-PREBATTLE-VISUAL-R1：Locked 揭晓高亮环计时（克制；不移动车辆 / 不切换背景）
+    if (locked && !this.prebattleLockSeen) this.prebattleLockAt = this.nowMs;
+    this.prebattleLockSeen = locked;
+    const reveal = locked ? Math.max(0, 1 - (this.nowMs - this.prebattleLockAt) / 500) : 0;
+
     if (locked && op) {
-      // 锁定：同一 bRect 锚点替换为真实对手——仅对手名称（置于 bRect 上方独立标题区，
-      // 不进入车辆 envelope；不与轮组 / 武器 / 地面线相交）。无驱动 pill、无左右大标签。
-      const topLimit = this.insT + 2;
-      const nameY = Math.max(topLimit, bRect.y - 8);
-      this.text(op.bodyName, bCx, nameY, this.isMobile ? 18 : 20, V.enemyOrange, 'center', 700);
+      // 锁定：独立名牌区（右车上方），不与车辆 / 武器 / 轮组 / 地面相交
+      const plateH = this.isMobile ? 22 : 26;
+      const gap = 8; // 名牌与车辆 envelope 顶部的可见间距（6~12px）
+      const plateY = Math.max(this.insT + 4, bRect.y - plateH - gap);
+      const nameFs = Math.max(8, (this.isMobile ? 15 : 17) * this.fontScale * this.scale);
+      ctx.font = `700 ${nameFs}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
+      const nameW = Math.max(120, ctx.measureText(op.bodyName).width + 36);
+      const plateW = Math.min(this.W * 0.6, nameW);
+      this.panel(bCx - plateW / 2, plateY, plateW, plateH, 'rgba(20,28,44,0.82)', 'rgba(255,138,61,0.55)', 6);
+      this.text(op.bodyName, bCx, plateY + plateH / 2 + 1, this.isMobile ? 15 : 17, V.enemyOrange, 'center', 700);
+      // 揭晓反馈（克制）：右车高亮环，锁定后 ~500ms 淡出（不进入中央 VS、不位移车辆）
+      if (reveal > 0) {
+        ctx.save();
+        ctx.globalAlpha = 0.5 * reveal;
+        ctx.strokeStyle = V.enemyOrange;
+        ctx.lineWidth = 2;
+        const pr = 6 + (1 - reveal) * 10;
+        this.panel(bRect.x - pr, bRect.y - pr, bRect.w + pr * 2, bRect.h + pr * 2, undefined, V.enemyOrange, 8);
+        ctx.restore();
+      }
     } else {
-      // 搜索中：四角括号 + 顶部扫描线严格围绕真实候选车辆 bRect（不圈空白、不覆盖车辆、
-      // 不触及中央 VS：bRect 在右半屏，扫描框整体位于 VS 右侧）。nowMs 驱动呼吸 / 扫描。
+      // 搜索中：扫描框严格围绕真实候选车辆 bRect（不圈空白、不覆盖车辆、不进入中央 VS）。
+      // bRect 来自 renderer 真实 envelope（matchVehicleRects.b），框四边与车辆可见 envelope 间距 6~12px。
       const t = this.nowMs;
-      const pulse = 0.5 + 0.5 * Math.sin(t * 0.012); // 呼吸（homeMatchFx 守卫：Math.sin(t * 0.012)）
-      const pad = this.isMobile ? 8 : 12;
+      const pulse = 0.5 + 0.5 * Math.sin(t * 0.012);
+      const pad = this.isMobile ? 8 : 10; // 6~12px
       const fx = bRect.x - pad, fy = bRect.y - pad;
       const fw = bRect.w + pad * 2, fh = bRect.h + pad * 2;
-      const corner = Math.min(fw, fh) * (0.22 + 0.05 * pulse);
-      const bc = `rgba(120,170,255,${(0.5 + 0.35 * pulse).toFixed(3)})`;
+      const corner = Math.min(fw, fh) * 0.2;
+      const bc = `rgba(120,175,255,${(0.55 + 0.3 * pulse).toFixed(3)})`;
       const arms: Array<[number, number]> = [
         [fx, fy], [fx + fw - corner, fy], [fx, fy + fh - corner], [fx + fw - corner, fy + fh - corner],
       ];
@@ -2173,9 +2203,31 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.rect(cx, cy, corner, 3, bc);
         this.rect(cx, cy, 3, corner, bc);
       }
-      // 顶部扫描线：在扫描框内顶部区域上下扫动（在车辆之上，不覆盖车辆主体）
-      const sweepY = fy + 6 + ((t % 1300) / 1300) * (fh * 0.34);
-      this.rect(fx + 10, sweepY, fw - 20, 2, 'rgba(150,200,255,0.85)');
+      // 细边框（弱，强调「框住车辆」而非空区）
+      ctx.save();
+      ctx.globalAlpha = 0.22 + 0.14 * pulse;
+      ctx.strokeStyle = 'rgba(120,175,255,0.9)';
+      ctx.lineWidth = 1;
+      this.panel(fx, fy, fw, fh, undefined, 'rgba(120,175,255,0.9)', 6);
+      ctx.restore();
+      // 扫描线（框内上下扫动，克制；在车辆之上不覆盖主体）
+      const sweepY = fy + 6 + ((t % 1400) / 1400) * (fh * 0.5);
+      this.rect(fx + 10, sweepY, fw - 20, 2, 'rgba(160,205,255,0.85)');
+      // 中央准星（强调「作用于右车」）
+      const retR = 7;
+      const rcY = bRect.y + bRect.h / 2;
+      ctx.save();
+      ctx.globalAlpha = 0.5 + 0.3 * pulse;
+      ctx.strokeStyle = 'rgba(160,205,255,0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(bCx, rcY, retR, 0, Math.PI * 2);
+      ctx.moveTo(bCx - retR - 4, rcY);
+      ctx.lineTo(bCx - retR + 2, rcY);
+      ctx.moveTo(bCx + retR - 2, rcY);
+      ctx.lineTo(bCx + retR + 4, rcY);
+      ctx.stroke();
+      ctx.restore();
     }
   }
 

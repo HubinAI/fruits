@@ -88,6 +88,8 @@ export interface PlayerBattleHost {
   resize(w: number, h: number): void;
   /** 首页程序化背景下沉为 renderer underlay 开关（仅首页开启；车库/匹配/战斗关闭） */
   setHomeBackdrop?(on: boolean): void;
+  /** F-PREBATTLE-VISUAL-R1：战前（Matching/MatchPreview）程序化背景下沉为 renderer underlay 开关（仅战前开启） */
+  setPrebattleBackdrop?(on: boolean): void;
   /**
    * F-MATCH-FRAME-R2：当前 transform 下 A/B 双车「可见 envelope」屏幕矩形（逻辑 px）。
    * Matching / MatchPreview 的 UI 据此绘制扫描框 / 对手名称，保证与 renderer 实际落点一致
@@ -306,6 +308,10 @@ export class PlayerGameRuntime {
     setHomeBackdrop: (on: boolean) => {
       // F-HOME-P0-LAYER：首页背景下沉为 renderer underlay（背景层<车辆层<UI层）
       this.deps.battle.setHomeBackdrop?.(on);
+    },
+    setPrebattleBackdrop: (on: boolean) => {
+      // F-PREBATTLE-VISUAL-R1：战前背景下沉为 renderer underlay（背景层<车辆层<UI层）
+      this.deps.battle.setPrebattleBackdrop?.(on);
     },
   };
 

@@ -496,6 +496,7 @@ const battleHost: PlayerBattleHost = {
   },
   resize: (w, h) => renderer.resize(w, h),
   setHomeBackdrop: (on) => renderer.setHomeBackdrop(on),
+  setPrebattleBackdrop: (on) => renderer.setPrebattleBackdrop(on),
   getMatchVehicleRects: () => {
     const o = lab.orchestrator;
     if (!o) return null;
