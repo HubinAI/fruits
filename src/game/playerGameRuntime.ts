@@ -34,7 +34,7 @@ import {
 } from '../lab/buildEditorModel';
 import { resolveOnboardingStage, completeOnboarding, type OnboardingStage } from '../core/onboarding';
 import { resetPlayerSave } from '../core/saveVersion';
-import { validateSnapshot } from '../core/buildValidator';
+import { validateSnapshot, computeEnergy } from '../core/buildValidator';
 import {
   OPPONENT_POOL,
   cloneBuildDraft,
@@ -104,6 +104,12 @@ export interface PlayerBattleHost {
    * 无 orchestrator（非预览/战斗）→ null。
    */
   getHomeVehicleRect?(): { x: number; y: number; w: number; h: number } | null;
+  /**
+   * F-GARAGE-LIVE-ASSEMBLY-P0：当前车辆（A）真实装配挂点屏幕坐标（逻辑 px）。
+   * Garage 在战车上显示可用挂点（轮廓/选中高亮/已占用）并作为点击区域（视觉与点击同源）；
+   * 无 orchestrator → []。
+   */
+  getVehicleHardpointScreenPts?(): Array<{ id: string; kind: 'movement' | 'functional'; x: number; y: number; occupied: boolean }>;
 }
 
 /** 依赖注入：入口（Web/微信）提供 Host / 表现 / Web-only 钩子 */
@@ -170,6 +176,8 @@ export class PlayerGameRuntime {
   private lastPhaseCountdownText: string | null = null;
   private buildControlsLockedInternal = false;
   private garageSelected: string | null = null;
+  /** F-GARAGE-LIVE-ASSEMBLY-P0：最近一次被拒绝的超载差值（能量区显示；null=无） */
+  private overloadDeltaInternal: number | null = null;
   private matchingGeneration = 0;
   private lastShownResult: BattleOrchestratorApi['result'] = null;
   private battleStartTimeMs = 0;
@@ -241,7 +249,15 @@ export class PlayerGameRuntime {
         const { defId, star } = decodePartValShared(value);
         if (!canEquipPart(defId, star)) return;
       }
-      // Q28：变更前快照
+      // Q28：变更前快照（F-GARAGE-LIVE-ASSEMBLY-P0：超载回滚用）
+      const prev = {
+        body: this.draftA.bodyDefId,
+        selections: { ...this.draftA.functionalSelections },
+        stars: { ...(this.draftA.functionalStars ?? {}) },
+        rear: this.draftA.rearRadius,
+        front: this.draftA.frontRadius,
+        drive: this.draftA.drive,
+      };
       const oldVal =
         slotKey === 'body' ? this.draftA.bodyDefId
         : slotKey === 'rearWheel' ? String(this.draftA.rearRadius)
@@ -269,6 +285,23 @@ export class PlayerGameRuntime {
           this.draftA.functionalStars[slotKey] = star;
         }
       }
+      // F-GARAGE-LIVE-ASSEMBLY-P0：能量超载预检（Must#9：超载不修改车辆，能量区显示差值）
+      {
+        const es = computeEnergy(this.snapshotOf('A'), registry);
+        const cap = registry.bodies.get(this.draftA.bodyDefId)?.energyCapacity ?? 0;
+        if (!es.error && Number.isFinite(es.energy) && es.energy > cap) {
+          this.draftA.bodyDefId = prev.body;
+          this.draftA.functionalSelections = prev.selections;
+          this.draftA.functionalStars = prev.stars;
+          this.draftA.rearRadius = prev.rear;
+          this.draftA.frontRadius = prev.front;
+          this.draftA.drive = prev.drive;
+          this.overloadDeltaInternal = es.energy - cap;
+          this.pushUI();
+          return;
+        }
+        this.overloadDeltaInternal = null;
+      }
       // Q28：Build 变更埋点（功能件槽额外发 part_equip）
       const isFunctional =
         slotKey !== 'body' && slotKey !== 'rearWheel' && slotKey !== 'frontWheel' && slotKey !== 'drive';
@@ -280,6 +313,8 @@ export class PlayerGameRuntime {
         : (this.draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
       this.emitBuildChange(slotKey, oldVal, newVal, isFunctional);
       this.garageSelected = null; // 选完即收起
+      // F-GARAGE-LIVE-ASSEMBLY-P0：装备成功 → 挂点吸附反馈（金圈 150~220ms，Host 绘制）
+      this.deps.host.flashEquip?.(slotKey);
       this.refreshFromEdit(); // Draft → Energy → Preview + 重渲染 Dock（pushUI）
     },
     onFindOpponent: () => {
@@ -437,6 +472,7 @@ export class PlayerGameRuntime {
       draftValid: this.buildsValid(),
       blockReason: this.blockReason(),
       garageSelected: this.garageSelected,
+      overloadDelta: this.overloadDeltaInternal,
       inventory: getInventory(),
       progress: getProgress(),
       onboarding: this.onboardingStage,
@@ -473,6 +509,9 @@ export class PlayerGameRuntime {
       // 仅预览阶段（garage/matching/matchPreview）有值，Battle 阶段为 null。UI Host 仅在 Home
       // 页（metaPage==='home'）使用此值，其余预览页（如车库编辑页）虽同属 garage 阶段但不用。
       homeVehicleRect: this.deps.battle.previewMode ? this.deps.battle.getHomeVehicleRect?.() ?? null : null,
+      // F-GARAGE-LIVE-ASSEMBLY-P0：Garage 阶段推入真实挂点屏幕坐标（UI 挂点视觉/点击同源）
+      hardpointScreenPts:
+        this.playerPhaseInternal === 'garage' ? this.deps.battle.getVehicleHardpointScreenPts?.() ?? [] : [],
       result: this.currentResult,
       reward: this.currentReward,
       economy: this.currentEconomy,

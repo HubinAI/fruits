@@ -119,4 +119,11 @@ export class WechatBattleHost implements PlayerBattleHost {
     const rects = this.renderer.getVehicleScreenRects(o.getRenderSnapshot());
     return rects ? rects.a : null;
   }
+
+  /** F-GARAGE-LIVE-ASSEMBLY-P0：当前车辆（A）真实装配挂点屏幕坐标（逻辑 px，只读）。 */
+  getVehicleHardpointScreenPts(): Array<{ id: string; kind: "movement" | "functional"; x: number; y: number; occupied: boolean }> {
+    const o = this.orchestrator;
+    if (!o) return [];
+    return this.renderer.getVehicleHardpointScreenPts(o.getRenderSnapshot(), 'a');
+  }
 }

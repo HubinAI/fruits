@@ -515,6 +515,12 @@ const battleHost: PlayerBattleHost = {
     const rects = renderer.getVehicleScreenRects(o.getRenderSnapshot());
     return rects ? rects.a : null;
   },
+  // F-GARAGE-LIVE-ASSEMBLY-P0：真实装配挂点屏幕坐标（逻辑 px；Garage 挂点 overlay/点击同源）
+  getVehicleHardpointScreenPts: () => {
+    const o = lab.orchestrator;
+    if (!o) return [];
+    return renderer.getVehicleHardpointScreenPts(o.getRenderSnapshot(), 'a');
+  },
 };
 
 /* ---------- DEV Build 编辑状态（面板；玩家装配经 runtime actions） ---------- */

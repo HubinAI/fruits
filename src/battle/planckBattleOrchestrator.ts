@@ -44,6 +44,7 @@ import {
   type RenderShape,
   type RenderCircle,
   type RenderFunctionalPart,
+  type RenderHardpoint,
   type RenderArena,
   type RenderVec2,
   type RenderProjectile,
@@ -527,7 +528,23 @@ export class PlanckBattleOrchestrator {
             : undefined,
       };
     });
-    return { team: vehicle.team, body, bodyVisual, wheels, wheelVisuals, parts };
+    // F-GARAGE-LIVE-ASSEMBLY-P0：真实装配挂点世界坐标（供 Garage 挂点视觉/点击）。
+    // - movementHardpoints（轮/驱动）恒 occupied（默认安装）；
+    // - functionalHardpoints 按 parts 实际安装标记 occupied；
+    // - world = bPos + rotate({facing×local.x, local.y}, bAng)（与 prismaticAnchorWorld 同公式）。
+    const occupiedIds = new Set(vehicle.parts.map((p) => p.id));
+    const hpWorld = (local: { x: number; y: number }): RenderVec2 => {
+      const w = rotateLocal({ x: vehicle.facing * local.x, y: local.y }, bAng);
+      return { x: bPos.x + w.x, y: bPos.y + w.y };
+    };
+    const hardpoints: RenderHardpoint[] = [];
+    for (const hp of vehicle.resolved.body.movementHardpoints ?? []) {
+      hardpoints.push({ id: hp.id, kind: 'movement', world: hpWorld(hp.localPosition), occupied: true });
+    }
+    for (const hp of vehicle.resolved.body.functionalHardpoints ?? []) {
+      hardpoints.push({ id: hp.id, kind: 'functional', world: hpWorld(hp.localPosition), occupied: occupiedIds.has(hp.id) });
+    }
+    return { team: vehicle.team, body, bodyVisual, wheels, wheelVisuals, parts, hardpoints };
   }
 
   private buildArenaSnapshot(): RenderArena {

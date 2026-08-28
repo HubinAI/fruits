@@ -94,6 +94,15 @@ export interface PlayerUIState {
    * vehicleFramingRect，真实流程恒有此数据。
    */
   homeVehicleRect?: { x: number; y: number; w: number; h: number } | null;
+  /**
+   * F-GARAGE-LIVE-ASSEMBLY-P0：Garage 当前车辆（A）真实装配挂点屏幕坐标（逻辑 px），
+   * 由 Runtime 经 battle.getVehicleHardpointScreenPts() 计算并推入（Garage 阶段）。
+   * UI 据此在战车上显示挂点（可用白/蓝轮廓、选中金高亮、已占用当前部件）并注册点击区
+   * （视觉与点击同源）。空数组 → 不绘制挂点 overlay。
+   */
+  hardpointScreenPts?: Array<{ id: string; kind: 'movement' | 'functional'; x: number; y: number; occupied: boolean }>;
+  /** F-GARAGE-LIVE-ASSEMBLY-P0：最近一次被拒绝的超载差值（能量区显示；null=无） */
+  overloadDelta?: number | null;
   /** MatchPreview 复核条（Q15-FLOW-R1-ATOMIC：正常流程立即隐藏，永不闪现） */
   matchBarHidden: boolean;
   // —— Result ——
@@ -150,6 +159,8 @@ export interface PlayerUIHost {
   /** 创建并挂载玩家 UI DOM（Web 挂到 canvasWrap；其它平台可挂到各自容器） */
   mount(parent: HTMLElement): void;
   setActions(actions: PlayerUIActions): void;
+  /** F-GARAGE-LIVE-ASSEMBLY-P0：装备成功吸附反馈（挂点金圈脉冲 150~220ms；Runtime 装备成功调用） */
+  flashEquip?(hp: string): void;
   /** 离散状态变化 → 全量渲染（Shell 可见性 / Garage Dock / MatchInfo / Result / Reward / READY） */
   render(state: PlayerUIState): void;
   /** 每帧：Battle HUD（HP + 阶段 + Warning 倒计时） */

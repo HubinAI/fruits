@@ -275,6 +275,8 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
     const rt = readFileSync('src/game/playerGameRuntime.ts', 'utf-8');
     const pickStart = rt.indexOf('onPickGarageOption:');
     expect(rt.slice(pickStart, pickStart + 700), 'runtime 装备规则保留').toContain('canEquipPart');
-    expect(rt.slice(pickStart, pickStart + 1100), 'runtime 车身迁移保留').toContain('migrateDraftBody');
+    // F-GARAGE-LIVE-ASSEMBLY-P0：装备逻辑保留 + 能量超载守卫（Must#9）——断言范围扩展到守卫段后
+    expect(rt.slice(pickStart, pickStart + 1800), 'runtime 车身迁移保留').toContain('migrateDraftBody');
+    expect(rt, '能量超载守卫保留（onPickGarageOption 内，回滚不修改车辆）').toMatch(/onPickGarageOption:[\s\S]*能量超载预检/);
   });
 });

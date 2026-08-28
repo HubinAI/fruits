@@ -548,6 +548,30 @@ export class Renderer {
   }
 
   /**
+   * F-GARAGE-LIVE-ASSEMBLY-P0：当前 transform 下指定侧车辆的【真实装配挂点】屏幕坐标
+   * （只读，logical px，与 getVehicleScreenRects 同域规则：Web 无 surface=logical 直接输出；
+   * 注入 surface 时 ÷viewDpr 域对齐）。坐标来自引擎 snapshot 的挂点世界坐标（body 位姿 +
+   * hardpoint.localPosition），禁止 UI 按图片尺寸重估。供 Garage 在战车上显示挂点
+   * （可用/选中/已占用）并作为点击区域（视觉与点击同源）。
+   */
+  getVehicleHardpointScreenPts(
+    snap: BattleRenderSnapshot,
+    side: 'a' | 'b',
+  ): Array<{ id: string; kind: 'movement' | 'functional'; x: number; y: number; occupied: boolean }> {
+    const v = side === 'a' ? snap.vehicleA : snap.vehicleB;
+    const hps = v?.hardpoints;
+    if (!hps || hps.length === 0) return [];
+    const vk = this.surface ? this.viewDpr : 1;
+    return hps.map((hp) => ({
+      id: hp.id,
+      kind: hp.kind,
+      x: this.sx(hp.world.x) / vk,
+      y: this.sy(hp.world.y) / vk,
+      occupied: hp.occupied,
+    }));
+  }
+
+  /**
    * F-MATCH-FRAME-R2：当前 transform 下 A/B 双车「可见 envelope」的屏幕矩形（只读，逻辑 px）。
    * 供 UI 层（Matching / MatchPreview）直接读取真实车辆屏幕位置来绘制扫描框 / 对手名称 /
    * 检测文字与车辆 envelope 相交——根治「UI 锚点猜测与 renderer 实际落点脱节」的构图错位。

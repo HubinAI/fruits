@@ -274,7 +274,24 @@ export interface RenderVehicle {
   /** W1-VIS-1：与 wheels 对齐的 wheel VisualDef 世界 transform（无视觉的轮为 undefined） */
   wheelVisuals?: Array<RenderVisual | undefined>;
   parts: RenderFunctionalPart[];
+  /**
+   * F-GARAGE-LIVE-ASSEMBLY-P0：真实装配挂点（世界坐标，引擎中立）。
+   * 供 Garage 在战车上显示可用挂点（白/蓝轮廓）、选中（金高亮）、已占用（当前部件）；
+   * 坐标来自 body 真实位姿 + hardpoint.localPosition（facing 镜像同装配公式），
+   * 禁止 UI 按图片尺寸重估。movement 挂点恒 occupied（轮/驱动默认安装）。
+   */
+  hardpoints?: RenderHardpoint[];
 }
+
+/** F-GARAGE-LIVE-ASSEMBLY-P0：单个装配挂点的世界坐标与占用状态（引擎中立） */
+export interface RenderHardpoint {
+  id: string;
+  /** 'movement' = 轮/驱动挂点（后轮/前轮/驱动）；'functional' = 武器/辅助孔位 */
+  kind: 'movement' | 'functional';
+  world: RenderVec2;
+  occupied: boolean;
+}
+
 
 /** 竞技场墙体渲染数据 */
 export interface RenderArena {

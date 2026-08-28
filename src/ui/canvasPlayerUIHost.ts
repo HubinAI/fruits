@@ -260,6 +260,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** F-PREBATTLE-VISUAL-R1：Locked 揭晓高亮环计时（克制；~500ms 淡出；不移动车辆） */
   private prebattleLockSeen = false;
   private prebattleLockAt = 0;
+  /** F-GARAGE-LIVE-ASSEMBLY-P0：装备成功吸附反馈（挂点金圈 150~220ms；Runtime flashEquip 触发） */
+  private equipFlash: { hp: string; until: number } | null = null;
   /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机）；F-HOME-1：默认 Home（正式首页） */
   private metaPage: MetaPage = 'home';
   /** F-META-6：More 页子视图（功能卡主页 / 设置子页；UI-only，不进 Gameplay） */
@@ -324,6 +326,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
 
   setActions(actions: PlayerUIActions): void {
     this.actions = actions;
+  }
+
+  /** F-GARAGE-LIVE-ASSEMBLY-P0：装备成功吸附反馈（挂点金圈 150~220ms） */
+  flashEquip(hp: string): void {
+    this.equipFlash = { hp, until: this.nowMs + 200 };
+    this.draw();
   }
 
   mount(parent: HTMLElement): void {
@@ -705,6 +713,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       // F-GARAGE-COMBAT-TAB-R1：战斗页共享挂点 chip（只选不收起；分组由 garage-cgroup 决定）
       const hp = id.slice(13);
       this.actions?.selectGarageSlot?.(hp);
+      return;
+    }
+    if (id.startsWith('hp-sel:')) {
+      // F-GARAGE-LIVE-ASSEMBLY-P0：战车挂点点击（视觉与点击同源）——切换当前挂点
+      // 战斗=只选不收起；移动/车身=toggle（与 chips 等价）
+      const hp = id.slice(7);
+      if (this.garageCategory === 'combat') this.actions?.selectGarageSlot?.(hp);
+      else this.actions?.onToggleGarageSlot(hp);
       return;
     }
     if (id.startsWith('garage-slot:')) {
@@ -1552,6 +1568,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    *  配置面板独占内容区）。返回能力由顶部「‹ 首页」nav 提供（drawMobileTopBar）。 */
   private drawGarageMetaPage(state: PlayerUIState, draft: BuildDraft, layout: MobileGarageLayout): void {
     const { panelRect } = layout;
+    // F-GARAGE-LIVE-ASSEMBLY-P0：默认选择（Must#5）——当前分类有挂点但未选中/选中失效 → 自动选
+    this.ensureGarageSlotSelection(state, draft);
+    // F-GARAGE-LIVE-ASSEMBLY-P0：真实挂点 overlay（移动/战斗分类在战车上显示可用/选中/占用挂点）
+    this.drawVehicleHardpoints(state);
 
     // 非法原因仍在面板上方提示（不占 CTA 位）
     if (!state.draftValid && state.blockReason) {
@@ -1603,6 +1623,80 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     // 底部：能量条 + 超载原因（靠近选择区，Must#6）
     this.drawGarageEnergyBar(state, draft, panelRect, energyH);
+  }
+
+  /**
+   * F-GARAGE-LIVE-ASSEMBLY-P0：默认选择（Must#5）——当前分类有挂点但未选中/选中失效时，
+   * 自动选中「当前已有装备的第一个挂点」（无装备则第一个可用挂点）。惰性：仅当选中无效时
+   * 触发一次 actions（设置后 next render 即满足，不递归）。
+   */
+  private ensureGarageSlotSelection(state: PlayerUIState, draft: BuildDraft): void {
+    if (state.playerPhase !== 'garage') return;
+    const slots = this.garageSlotsFor(draft);
+    if (slots.length === 0) return;
+    const cur = state.garageSelected;
+    if (cur && slots.some((s) => s.key === cur)) return;
+    const equipped = slots.find((s) => this.garageCurrentValue(draft, s.key) !== EMPTY_SLOT);
+    const sel = (equipped ?? slots[0]).key;
+    if (sel !== cur) this.actions?.onToggleGarageSlot?.(sel);
+  }
+
+  /**
+   * F-GARAGE-LIVE-ASSEMBLY-P0：真实装配挂点 overlay（Must#3）——在战车上显示当前分类的挂点：
+   *  - 可用挂点：白/蓝轮廓圆；
+   *  - 当前选中：金色高亮圆；
+   *  - 已占用：实心小点（当前部件占位）；
+   *  - 装备成功 flash（150~220ms）：金圈呼吸脉冲；
+   * 坐标来自 Renderer 真实挂点（snapshot hardpoints 世界坐标 → logical px，与绘制同源），
+   * 禁止 UI 按图片尺寸重估；点击区与视觉同源（hp-sel:<id>）。
+   */
+  private drawVehicleHardpoints(state: PlayerUIState): void {
+    const pts = state.hardpointScreenPts ?? [];
+    if (pts.length === 0) return;
+    const cat = this.garageCategory;
+    // 分类过滤：移动 → movement 挂点；战斗 → functional（武器/辅助）；车身 → 不显示
+    const shown = pts.filter((p) => (cat === 'move' ? p.kind === 'movement' : p.kind === 'functional'));
+    if (shown.length === 0) return;
+    const sel = state.garageSelected;
+    const t = this.nowMs;
+    const flash = this.equipFlash && t < this.equipFlash.until ? this.equipFlash : null;
+    const ctx = this.ctx;
+    const R = 7; // 视觉圆半径（logical px）
+    const HIT = 30; // 触控命中区（≥24px 手指可操作）
+    ctx.save();
+    for (const p of shown) {
+      const selected = p.id === sel;
+      const flashing = flash != null && flash.hp === p.id;
+      const cx = p.x;
+      const cy = p.y;
+      if (selected || flashing) {
+        // 金色高亮（选中恒显示；flash 呼吸放大 150~220ms）
+        const pr = flashing ? R + 2 + 3 * Math.abs(Math.sin((t / 25) * Math.PI)) : R + 2;
+        ctx.strokeStyle = V.primary;
+        ctx.lineWidth = flashing ? 2.5 : 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, pr, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (p.occupied) {
+        // 已占用：实心小点（当前部件占位）
+        ctx.fillStyle = 'rgba(255,255,255,0.65)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // 可用挂点：白/蓝轮廓
+        ctx.strokeStyle = 'rgba(120,175,255,0.9)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, R, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+    // 点击区与视觉同源
+    for (const p of shown) {
+      this.button(p.x - HIT / 2, p.y - HIT / 2, HIT, HIT, `hp-sel:${p.id}`, '', {});
+    }
   }
 
   /** F-GARAGE-COMBAT-TAB-R1：右顶常驻分类 tab（车身/移动/战斗；战斗最宽+金橙强调，突出战斗配置主入口）。 */
@@ -1862,6 +1956,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (overload) {
       const reason = state.blockReason ?? (energyRes.error ? String(energyRes.error) : '能量超载');
       this.text(reason, panelRect.x + panelRect.w / 2, y - (this.isShort ? 8 : 10), this.isShort ? 9 : 11, V.lose, 'center', 600);
+    } else if (state.overloadDelta != null && state.overloadDelta > 0) {
+      // F-GARAGE-LIVE-ASSEMBLY-P0：被拒绝的超载差值（Must#9：能量区显示超载差值）
+      this.text(`超载 +${Math.round(state.overloadDelta)}`, panelRect.x + panelRect.w / 2, y - (this.isShort ? 8 : 10), this.isShort ? 9 : 11, V.lose, 'center', 600);
     }
   }
 
