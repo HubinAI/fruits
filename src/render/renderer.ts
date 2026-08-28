@@ -551,23 +551,28 @@ export class Renderer {
    * F-MATCH-FRAME-R2：当前 transform 下 A/B 双车「可见 envelope」的屏幕矩形（只读，逻辑 px）。
    * 供 UI 层（Matching / MatchPreview）直接读取真实车辆屏幕位置来绘制扫描框 / 对手名称 /
    * 检测文字与车辆 envelope 相交——根治「UI 锚点猜测与 renderer 实际落点脱节」的构图错位。
-   * 坐标由 view px（物理）÷ viewDpr 转为逻辑 px，与 UI Host 的布局坐标空间一致（同 dpr）。
+   * F-CROSSLAYER-RECT-DPR-P0：screen 坐标来自 sx()/sy()（x×transform.scale+offset，域与
+   * viewWidth 相同：无 surface 注入（Web）= logical；注入 surface（微信/单测）= backing）。
+   * 旧实现无条件 ÷viewDpr → Web 下把逻辑坐标缩小 1/dpr（DPR1.5 时右车逻辑 524→349，
+   * 扫描框/名牌偏左 ≈×1/1.5，与用户 1220→815 实测精确吻合）。现仅在 viewWidth=backing
+   * （surface 注入）时做域对齐 ÷dpr；Web（logical）直接返回。DPR 仅在最终 backing 绘制阶段使用。
    */
   getVehicleScreenRects(
     snap: BattleRenderSnapshot,
   ): { a: { x: number; y: number; w: number; h: number }; b: { x: number; y: number; w: number; h: number } } | null {
     if (!snap.vehicleA || !snap.vehicleB) return null;
     const d = this.scaleDiagnosticsBoth(snap);
+    const vk = this.surface ? this.viewDpr : 1;
     const toRect = (e: { screen: { minX: number; minY: number; maxX: number; maxY: number } }): {
       x: number;
       y: number;
       w: number;
       h: number;
     } => {
-      const x = e.screen.minX / this.viewDpr;
-      const y = e.screen.minY / this.viewDpr;
-      const w = (e.screen.maxX - e.screen.minX) / this.viewDpr;
-      const h = (e.screen.maxY - e.screen.minY) / this.viewDpr;
+      const x = e.screen.minX / vk;
+      const y = e.screen.minY / vk;
+      const w = (e.screen.maxX - e.screen.minX) / vk;
+      const h = (e.screen.maxY - e.screen.minY) / vk;
       return { x, y, w, h };
     };
     return { a: toRect(d.A.envelope), b: toRect(d.B.envelope) };
@@ -2280,24 +2285,36 @@ export class Renderer {
     // （Mobile Garage 全宽布局，safe area 由 Host insL/insR 处理）→ 车辆占可用宽 30~45%。
     // F-UX-3B：compact battle Active 底部只留 12（薄地面构图，上方空间全部还给战斗）。
     // Desktop（h≥600）语义完全不变。
-    // 注意：view-space 为物理 px（surface 或 canvas 像素），inset 值 ×viewDpr 换算回逻辑 px。
-    const insetX = isCompact ? (fit === 'battle' ? 0 : isFixed ? 8 : SAFE_INSET_X) : SAFE_INSET_X;
+    // F-CROSSLAYER-RECT-DPR-P0：view-space 域 = viewWidth 域（注入 surface=backing=logical×dpr；
+    // Web 无 surface=logical）。inset 常量语义为【logical px】，统一经 vk 换算到 view 域：
+    //   vk = surface ? dpr : 1（Web 下 vk=1 → 保持历史 logical 语义零回归；surface 下 ×dpr
+    //   与 backing viewWidth 对齐 → ÷dpr 后逻辑构图与 DPR 无关，满足 Must#9）。
+    // 旧实现 compact 分支 ×viewDpr 但 desktop/isFixed 分支与 insetX 用裸 logical → 域混，
+    // surface 注入 DPR1 vs 1.5 逻辑 safeW 差 (16/dpr) px、A 中心差 ~1.85px。
+    const vk = this.surface ? this.viewDpr : 1;
+    const insetX = isCompact
+      ? fit === 'battle'
+        ? 0
+        : isFixed
+          ? 8 * vk
+          : SAFE_INSET_X * vk
+      : SAFE_INSET_X * vk;
     const insetTop = isFixed
       ? isCompact
-        ? Math.round(52 * this.viewDpr)
-        : 70
+        ? Math.round(52 * vk)
+        : 70 * vk
       : isCompact
-        ? Math.round(56 * this.viewDpr)
-        : SAFE_INSET_Y;
+        ? Math.round(56 * vk)
+        : SAFE_INSET_Y * vk;
     const insetBottom = isFixed
       ? isCompact
-        ? Math.round(110 * this.viewDpr) // F-WX-8-B：新三层 Dock 两行 ~100px
-        : 160
+        ? Math.round(110 * vk) // F-WX-8-B：新三层 Dock 两行 ~100px
+        : 160 * vk
       : isCompact
         ? compactBattleActive
-          ? Math.round(12 * this.viewDpr) // F-UX-3B：薄地面构图（地面占屏 12~16%）
-          : Math.round(40 * this.viewDpr)
-        : SAFE_INSET_Y;
+          ? Math.round(12 * vk) // F-UX-3B：薄地面构图（地面占屏 12~16%）
+          : Math.round(40 * vk)
+        : SAFE_INSET_Y * vk;
     // F-WX-UI-1：framingRect（viewport logical 子区域）存在时，固定预览框 fit 到该区域
     // 内的安全区（rect 已含布局留白，内部仅留小边距）——Mobile Garage 车辆 fit 到左侧
     // 展示区；无 framingRect → 全屏安全区逻辑（Desktop 零影响）。
@@ -2307,11 +2324,19 @@ export class Renderer {
     let safeW: number;
     let safeH: number;
     if (framing && isFixed) {
-      const pad = 6 * this.viewDpr;
-      const fx = framing.x * this.viewDpr;
-      const fy = framing.y * this.viewDpr;
-      const fw = framing.w * this.viewDpr;
-      const fh = framing.h * this.viewDpr;
+      // F-CROSSLAYER-RECT-DPR-P0：framingRect 是【viewport logical】子区域（844×390 空间，
+      // 来自 UI getPreviewFramingRect / homeLayout / garageLayout）。view 坐标域由 viewWidth
+      // 决定：无 surface 注入（Web 玩家模式）时 viewWidth=canvas.clientWidth=logical，此时
+      // 【不得】×viewDpr（旧实现×viewDpr 使 safeW 变 backing 域而绘制假设 logical →
+      // scale 域分裂 → DPR>1 车辆放大 1.5× 越界，用户 150% 缩放实测首页绿车越出右侧屏幕、
+      // Garage 车进右侧面板）；注入 surface（微信/单测）时 viewWidth=backing，×viewDpr 是
+      // 必需域对齐。统一规则：转换只做域对齐，不做多余 DPR 转换。
+      const vk = this.surface ? this.viewDpr : 1;
+      const pad = 6 * vk;
+      const fx = framing.x * vk;
+      const fy = framing.y * vk;
+      const fw = framing.w * vk;
+      const fh = framing.h * vk;
       baseX = fx + pad;
       baseY = fy + pad;
       safeW = Math.max(2, fw - pad * 2);

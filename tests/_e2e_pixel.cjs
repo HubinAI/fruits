@@ -51,6 +51,36 @@ function isBlueish(r, g, b) {
 function isLightText(r, g, b) {
   return r > 150 && g > 150 && b > 150; // 浅色标签文字（车库/排行榜/战令）
 }
+// F-CROSSLAYER-RECT-DPR-P0：车辆（绿）、扫描框（亮蓝边框）、名牌（橙文字）像素签名
+function isVehicleGreen(r, g, b) {
+  return g > 110 && g > r + 25 && g > b + 15 && r < 150;
+}
+function isScanBlue(r, g, b) {
+  return b > 150 && r < 130 && g < 190 && b - r > 60;
+}
+function isPlateOrange(r, g, b) {
+  // 名牌/血条深橙 #FF8A3D 类（区别于车身橙黄 g>155）：r 高、g 中（<155）、b 低
+  return r > 200 && g > 90 && g < 155 && b < 120;
+}
+function isYellowBanana(r, g, b) {
+  // 香蕉车身/候选车黄（宽阈值，适配截图重采样抗锯齿边缘像素）。
+  // 香蕉黄 #FFD740 类：r 高、g 中高、b 低，且整体暖色（r+g >> b）。
+  return r > 150 && g > 100 && b < 160 && (r + g) > b + 200 && r > b;
+}
+
+// 像素点集 → 外接矩形（backing 空间）
+function envOf(pts) {
+  if (!pts || pts.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of pts) {
+    const x = p[0], y = p[1];
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
 
 // ---- 在浏览器内读取「最终页面截图」像素 + 几何，返回紧凑结构（data 用于 Node 端独立聚类/签名）----
 // F-PLAYER-INPUT-SCALE-P0：识别来源升级为最终页面截图——构造与 page.screenshot 同内容的
@@ -187,6 +217,21 @@ async function run() {
         log(a.canvasCount === 1, `[${tag}] #10 唯一可见Canvas`, `canvasN=${a.canvasCount}`);
         if (a.canvasCount !== 1) { await page.close(); continue; }
 
+        // F-CROSSLAYER-RECT-DPR-P0 #5：首页车辆 envelope 与安全舞台（绿色车辆像素，
+        // 修复前 framing×dpr 域分裂 → 车辆 1.5× 放大右缘贴画布 100%；修复后 ≈73% 且宽 ~46%）
+        const homeVehPts = collect(a.data, a.w, a.h, isVehicleGreen);
+        const homeVeh = envOf(homeVehPts);
+        if (!homeVeh) {
+          log(false, `[${tag}] #5 首页车辆envelope`, '未检测到绿色车辆');
+        } else {
+          const Wb = a.w;
+          const rightPct = ((homeVeh.x + homeVeh.w) / Wb) * 100;
+          const widthPct = (homeVeh.w / Wb) * 100;
+          const rightOk = homeVeh.x + homeVeh.w <= Wb * 0.92;
+          const widthOk = widthPct > 30 && widthPct < 55;
+          log(rightOk && widthOk, `[${tag}] #5 首页车辆envelope安全舞台`, `right=${rightPct.toFixed(0)}% width=${widthPct.toFixed(1)}% rightOk=${rightOk} widthOk=${widthOk}`);
+        }
+
         // 验收#1（CTA 中心≈50%）+ #1（点击进入 Matching）+ #2（空白角无误触）
         const goldHome = clusterize(collect(a.data, a.w, a.h, isGold), a.w, a.h);
         if (goldHome.length === 0) {
@@ -200,16 +245,61 @@ async function run() {
           const goldMaxHome = cta.n;
           // #1 点击 CTA → 离开首页（居中大体量金 CTA 消失：仍居中且体量>50% 的金聚类不再存在）
           await page.mouse.click(screen.x, screen.y);
+          await page.waitForTimeout(700);
+          // F-CROSSLAYER-RECT-DPR-P0 #7：Matching 扫描框（亮蓝）位置精确反映右车位置——
+          // 修复前因 getVehicleScreenRects ÷viewDpr 偏左 ~1/dpr（用户 1220→815）；修复后扫描框
+          // cx 在右半屏（>0.55W）、cy 在车辆竖直带、宽高为车比例。直接以扫描框作右车位置代理。
+          let scan7 = null;
+          {
+            const m = await analyze(page);
+            const dprS = m.w / 844;
+            const scan = envOf(collect(m.data, m.w, m.h, isScanBlue));
+            scan7 = scan;
+            if (!scan7) {
+              log(false, `[${tag}] #7 扫描框位置`, '未检测到扫描框');
+            } else {
+              const cxS = scan7.x + scan7.w / 2;
+              const cyS = scan7.y + scan7.h / 2;
+              const rightSide = cxS > m.w * 0.55;
+              const cyInBand = cyS > m.h * 0.3 && cyS < m.h * 0.85;
+              const reasonableSize = scan7.w > 40 && scan7.w < m.w * 0.4 && scan7.h > 20 && scan7.h < m.h * 0.6;
+              log(rightSide && cyInBand && reasonableSize, `[${tag}] #7 扫描框位置`, `cx=${cxS.toFixed(0)} cy=${cyS.toFixed(0)} (cx/W=${(cxS/m.w*100).toFixed(0)}% 期望>55%) size=${scan7.w}×${scan7.h}`);
+            }
+          }
           // F-PLAYER-INPUT-SCALE-P0：匹配流程会自动推进（匹配中→VS→预览锁定），等待其稳定
           // （约 2.4s 后画面静止，诊断确认 fill 精确不变），再做 #2 空白角验证——避免把
           // 「流程推进」误判为「误触」。
-          await page.waitForTimeout(2600);
+          await page.waitForTimeout(1900);
           const a3 = await analyze(page);
           const gc3 = clusterize(collect(a3.data, a3.w, a3.h, isGold), a3.w, a3.h);
           const centeredBig = gc3.some((c) => c.n > goldMaxHome * 0.5 && Math.abs(c.cx / a3.w - 0.5) < 0.15);
           const navPix = !centeredBig;
           const navProbe = a3.playerPhase === 'matching' || a3.playerPhase === 'matchPreview';
           log(navProbe || navPix, `[${tag}] #1 点击CTA→进入Matching`, `probe=${a3.playerPhase} navPix=${navPix}`);
+          // F-CROSSLAYER-RECT-DPR-P0 #8/#9：Locked 名牌（橙顶部聚类）位置精确反映右车上方；
+          // Matching 扫描框 vs Locked 名牌 中心对齐（两者均 ≈ 右车中心 → 偏差 = 右车位移代理，
+          // 修复前扫描框偏左 ~1/dpr → 名牌 vs 扫描框差 ~28%W；修复后 ≤2%W）。
+          {
+            const platePts = collect(a3.data, a3.w, a3.h, isPlateOrange).filter((p) => p[0] > a3.w / 2 && p[1] < a3.h * 0.25);
+            const plateClusters = clusterize(platePts, a3.w, a3.h);
+            let plate = null;
+            if (plateClusters.length) {
+              const c = plateClusters[0];
+              plate = { x: c.x0, y: c.y0, w: c.x1 - c.x0 + 1, h: c.y1 - c.y0 + 1 };
+            }
+            if (!plate) {
+              console.log(`[${tag}] DIAG #8 plate 未检出`);
+            } else {
+              const cxP = plate.x + plate.w / 2;
+              const topRegion = plate.y + plate.h < a3.h * 0.4;
+              console.log(`[${tag}] DIAG #8 plate cx=${cxP.toFixed(0)} (${(cxP/a3.w*100).toFixed(0)}%) topOK=${topRegion}`);
+            }
+            if (scan7 && plate) {
+              const dCx = Math.abs((scan7.x + scan7.w / 2) - (plate.x + plate.w / 2));
+              const dW = Math.abs(scan7.w - plate.w);
+              console.log(`[${tag}] DIAG #9 scan7cx=${(scan7.x + scan7.w/2).toFixed(0)} platecx=${(plate.x + plate.w/2).toFixed(0)} dCx=${dCx.toFixed(1)} dW=${dW.toFixed(1)}`);
+            }
+          }
           // #2：匹配稳定后点击空白角不得误触——不得发生【导航】。判据（像素，backing 空间随 dpr² 缩放）：
           //   回 Home = 底部居中（cy>0.7·h 且 cx≈0.5·w）大体量金色重新出现（Home CTA ~54k@DPR2，
           //     匹配各阶段≈0；阈值 5000×dpr²）；
@@ -273,6 +363,20 @@ async function run() {
           const enterPix = tabAfter > tabBefore + 50;
           const enterProbe = gar.garageCategory != null || gar.playerPhase === 'garage';
           log(enterProbe || enterPix, `[${tag}] #3 点击车库入口→进入Garage`, `probe=${gar.garageCategory}/${gar.playerPhase} tabFill ${tabBefore}→${tabAfter} pix=${enterPix}`);
+
+          // F-CROSSLAYER-RECT-DPR-P0 #6：Garage 车辆（绿）完整位于左侧展示区，不进入右侧部件面板
+          // （修复前 framing×dpr 域分裂 → 车辆放大/偏移进入右侧面板区；面板区 ≈ 逻辑 x>62%）
+          {
+            const gv = envOf(collect(gar.data, gar.w, gar.h, isVehicleGreen));
+            if (!gv) {
+              log(false, `[${tag}] #6 Garage车辆不触面板`, '未检测到绿色车辆');
+            } else {
+              const rightPct = ((gv.x + gv.w) / gar.w) * 100;
+              const rightOk = gv.x + gv.w <= gar.w * 0.62;
+              const leftOk = gv.x >= 0;
+              log(rightOk && leftOk, `[${tag}] #6 Garage车辆不触面板`, `right=${rightPct.toFixed(0)}% (≤62%)`);
+            }
+          }
 
           // 验收#4：车身/移动/战斗 三页签从像素识别并点击，像素签名依次变化。
           const gar2 = await analyze(page);
