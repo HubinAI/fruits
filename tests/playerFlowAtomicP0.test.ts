@@ -105,12 +105,18 @@ function dispatchTap(
   clientX: number,
   clientY: number,
 ): void {
+  // F-GARAGE-CENTER-STAGE-P0：手势生命周期下，pointerdown 仅记录 down，dispatch 在 pointerup。
+  // C1 仍断言「支持 Pointer Event 时不叠加 mousedown/touchstart」——pointerup 不破坏该契约。
   const ev =
     type === 'touchstart'
       ? { touches: [{ clientX, clientY }] }
       : { clientX, clientY };
   const fns = canvas.__listeners[type] ?? [];
   for (const fn of fns) fn(ev);
+  if (type === 'pointerdown' && canvas.__listeners['pointerup']) {
+    const upEv = { clientX, clientY };
+    for (const fn of canvas.__listeners['pointerup']) fn(upEv);
+  }
 }
 
 describe('F-PLAYER-FLOW-ATOMIC-P0｜首页匹配原子流', () => {

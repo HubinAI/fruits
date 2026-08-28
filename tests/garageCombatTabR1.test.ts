@@ -193,46 +193,34 @@ describe('F-GARAGE-COMBAT-TAB-R1｜战斗配置入口合并与突出', () => {
     expect(src, 'drawTabIcon 含 combat 分支').toContain("else if (kind === 'combat')");
   });
 
-  it('A3｜战斗页内一次点击切换 武器挂点/辅助挂点 两组（≤1 击；内部 weapon/gadget 类型不变）', () => {
+  it('A3｜战斗页卡片带武器+辅助混排（类型小标区分）+ 挂点选择只通过战车真实挂点（Must#7）', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, INSETS);
     env.host.render(garageState());
     goGarage(env);
-    // 进入战斗（默认武器分组）
+    // 进入战斗 → 自动选中第一个挂点（Must#8 默认选择，runtime 侧 toggle）
     const combat = env.areas().find((a) => a.id === 'garage-cat:combat')!;
     env.pointer(combat.x + combat.w / 2, combat.y + combat.h / 2);
     const fnSlot = env.fired['toggle'].slice(-1)[0];
     expect(fnSlot, '战斗页默认自动选中一个硬点').toBeTruthy();
     env.host.render(garageState({ garageSelected: fnSlot }));
-    // 武器分组部件卡（均为 weapon 类别，空槽除外）
-    const weaponOpts = env.areas().filter((a) => a.id.startsWith('opt:')).map((a) => a.id);
-    expect(weaponOpts.length, '武器分组展开部件卡').toBeGreaterThan(0);
-    for (const id of weaponOpts) {
-      const cat = optDefCategory(id);
-      expect(cat === null || cat === 'weapon', `武器分组只显示 weapon（${id}）`).toBe(true);
-    }
-    // 一次点击「辅助」分段 → 切换到 gadget 分组（≤1 击；内部类型不变）
-    const gSeg = env.areas().find((a) => a.id === 'garage-cgroup:gadget');
-    expect(gSeg, '辅助分段入口存在').toBeTruthy();
-    env.pointer(gSeg!.x + gSeg!.w / 2, gSeg!.y + gSeg!.h / 2);
-    // 分段点击只切过滤分组（不派发 toggle/select）；分组状态在 host 内部保持
-    env.host.render(garageState({ garageSelected: fnSlot }));
-    // 切换后：gadget 分组部件卡（均为 gadget 类别）
-    const gadgetOpts = env.areas().filter((a) => a.id.startsWith('opt:')).map((a) => a.id);
-    expect(gadgetOpts.length, '辅助分组展开部件卡').toBeGreaterThan(0);
-    for (const id of gadgetOpts) {
-      const cat = optDefCategory(id);
-      expect(cat === null || cat === 'gadget', `辅助分组只显示 gadget（${id}）`).toBe(true);
-    }
-    // 内部类型未合并：weapon/gadget 仍是两个独立类别（过滤结果互斥且完整）
-    expect(weaponOpts.some((id) => optDefCategory(id) === 'weapon'), '武器组含 weapon 件').toBe(true);
-    expect(gadgetOpts.some((id) => optDefCategory(id) === 'gadget'), '辅助组含 gadget 件').toBe(true);
-    // 共享挂点行 chip 点击 → selectGarageSlot（只选不收起；分组由分段决定）
-    const chip = env.areas().find((a) => a.id.startsWith('garage-cslot:'));
-    expect(chip, '共享挂点 chip 存在').toBeTruthy();
-    const cHp = chip!.id.slice('garage-cslot:'.length);
-    env.pointer(chip!.x + chip!.w / 2, chip!.y + chip!.h / 2);
-    expect(env.fired['select'], '点击挂点 chip 派发 selectGarageSlot').toContain(cHp);
+    // 卡片带可见首屏含 weapon 件；数据层（garageOptions）武器+辅助混排（Must#1/12——
+    // 不再分段过滤，thruster 等 gadget 件与武器同列表，卡片带用 武/辅 小标区分）
+    const opts = env.areas().filter((a) => a.id.startsWith('opt:')).map((a) => a.id);
+    expect(opts.length, '战斗部件选项展开').toBeGreaterThan(0);
+    const cats = new Set(opts.map(optDefCategory).filter((c): c is string => c !== null));
+    expect(cats.has('weapon'), '可见首屏含 weapon 件').toBe(true);
+    // 数据层混排：front 挂点选项同时含 weapon 与 gadget 类别（无分段过滤）
+    const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
+    expect(src, '战斗分类不再按 cgroup 分段过滤').not.toContain("this.garageCombatGroup");
+    expect(src, '卡片带武器/辅助小型类型标识（武/辅）').toContain("'武'");
+    expect(src, '卡片带武器/辅助小型类型标识（辅）').toContain("'辅'");
+    // 挂点选择只通过战车真实挂点（hp-sel；视觉==命中，坐标来自 Renderer）——源码守卫
+    expect(src, 'hp-sel 挂点点击处理').toContain("id.startsWith('hp-sel:')");
+    expect(src, 'hp-sel 派发 selectGarageSlot').toContain('this.actions?.selectGarageSlot?.(hp)');
+    // 无文字挂点页签（Must#7）
+    expect(env.areas().some((a) => a.id.startsWith('garage-cslot:')), '无文字挂点 chip').toBe(false);
+    expect(env.areas().some((a) => a.id.startsWith('garage-cgroup:')), '无武器/辅助文字分段').toBe(false);
   });
 
   it('A4+A5｜≤2 次点击完成部件替换：点「战斗」(1) → 点部件卡(2) 派发 onPickGarageOption', () => {
@@ -251,7 +239,7 @@ describe('F-GARAGE-COMBAT-TAB-R1｜战斗配置入口合并与突出', () => {
     expect(env.fired['pick'][0], 'pick 派发值 = 部件 val').toBe(opt!.id.slice('opt:'.length));
   });
 
-  it('A6｜旧武器/辅助主 tab 与隐藏 hit area 全部消失（无 garage-cat:weapon/gadget、无 weapon-slot:、无独立硬点列表页）', () => {
+  it('A6｜旧武器/辅助主 tab 与隐藏 hit area 全部消失（无 garage-cat:weapon/gadget、无 weapon-slot:、无文字挂点页签）', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, INSETS);
     env.host.render(garageState());
@@ -260,16 +248,13 @@ describe('F-GARAGE-COMBAT-TAB-R1｜战斗配置入口合并与突出', () => {
       '无旧武器/辅助主 tab').toBe(false);
     expect(env.areas().some((a) => a.id.startsWith('weapon-slot:')), '无隐藏 weapon-slot: hit').toBe(false);
     expect(env.areas().some((a) => a.id.startsWith('gadget-slot:')), '无隐藏 gadget-slot: hit').toBe(false);
-    // 战斗页用「武器｜辅助」分段控件 + 共享挂点行（garage-cgroup: / garage-cslot:），非分组前缀 chip
+    // F-GARAGE-CENTER-STAGE-P0（Must#7）：战斗页无文字挂点页签（garage-cgroup:/garage-cslot: 全部消失）
     const combat = env.areas().find((a) => a.id === 'garage-cat:combat')!;
     env.pointer(combat.x + combat.w / 2, combat.y + combat.h / 2);
     env.host.render(garageState({ garageSelected: env.fired['toggle'].slice(-1)[0] }));
-    expect(env.areas().some((a) => a.id === 'garage-cgroup:weapon' || a.id === 'garage-cgroup:gadget'),
-      '战斗页用分段控件（garage-cgroup:）').toBe(true);
-    expect(env.areas().some((a) => a.id.startsWith('garage-cslot:')),
-      '战斗页用共享挂点 chip（garage-cslot:）').toBe(true);
-    expect(env.areas().some((a) => a.id.startsWith('garage-cslot:weapon:') || a.id.startsWith('garage-cslot:gadget:')),
-      '战斗页不再用分组前缀 chip（改为分段控件）').toBe(false);
+    expect(env.areas().some((a) => a.id.startsWith('garage-cgroup:')), '无文字分段（武器/辅助）').toBe(false);
+    expect(env.areas().some((a) => a.id.startsWith('garage-cslot:')), '无文字挂点 chip').toBe(false);
+    expect(env.areas().some((a) => a.id.startsWith('garage-slot:')), '无文字挂点 chip（普通）').toBe(false);
   });
 
   it('A7｜360×180~1920×1008：战斗 tab + 部件卡 在 safe area 内、可点、不溢出', () => {
@@ -296,22 +281,13 @@ describe('F-GARAGE-COMBAT-TAB-R1｜战斗配置入口合并与突出', () => {
         expect(a.y).toBeGreaterThanOrEqual(INSETS.top);
         expect(a.y + a.h).toBeLessThanOrEqual(vp.h - INSETS.bottom);
       }
-      // 分组挂点 chip 同样在 safe area 内
-      for (const a of env.areas().filter((x) => x.id.startsWith('garage-cslot:'))) {
-        expect(a.x).toBeGreaterThanOrEqual(INSETS.left);
-        expect(a.x + a.w).toBeLessThanOrEqual(vp.w - INSETS.right);
-        expect(a.y + a.h).toBeLessThanOrEqual(vp.h - INSETS.bottom);
-      }
-      // 分段控件（武器｜辅助）也在 safe area 内
-      for (const a of env.areas().filter((x) => x.id.startsWith('garage-cgroup:'))) {
-        expect(a.x).toBeGreaterThanOrEqual(INSETS.left);
-        expect(a.x + a.w).toBeLessThanOrEqual(vp.w - INSETS.right);
-        expect(a.y + a.h).toBeLessThanOrEqual(vp.h - INSETS.bottom);
-      }
+      // F-GARAGE-CENTER-STAGE-P0：无文字挂点页签残留（garage-cslot:/garage-cgroup:）
+      expect(env.areas().some((x) => x.id.startsWith('garage-cslot:') || x.id.startsWith('garage-cgroup:')),
+        `${vp.w}×${vp.h} 无文字挂点页签`).toBe(false);
     }
   });
 
-  it('A7b｜1920×1008（phoneLogical 强制 Mobile，真实部署同款）：战斗 tab + 分段 + 部件卡 不溢出', () => {
+  it('A7b｜1920×1008（phoneLogical 强制 Mobile，真实部署同款）：战斗 tab + 部件卡 不溢出', () => {
     const vp = { w: 1920, h: 1008 };
     const env = makeHost(vp, INSETS, true); // phoneLogical：真实部署在桌面宽屏强制 Mobile Profile
     env.host.render(garageState());
@@ -323,15 +299,16 @@ describe('F-GARAGE-COMBAT-TAB-R1｜战斗配置入口合并与突出', () => {
     expect(combat.y + combat.h).toBeLessThanOrEqual(vp.h - INSETS.bottom);
     env.pointer(combat.x + combat.w / 2, combat.y + combat.h / 2);
     env.host.render(garageState({ garageSelected: env.fired['toggle'].slice(-1)[0] }));
-    // 分段 + 共享挂点行 + 部件卡 全部在 safe area 内
-    for (const a of env.areas().filter((x) => x.id.startsWith('opt:') || x.id.startsWith('garage-cslot:') || x.id.startsWith('garage-cgroup:'))) {
+    // 部件卡全部在 safe area 内；无文字挂点页签残留
+    for (const a of env.areas().filter((x) => x.id.startsWith('opt:'))) {
       expect(a.x).toBeGreaterThanOrEqual(INSETS.left);
       expect(a.x + a.w).toBeLessThanOrEqual(vp.w - INSETS.right);
       expect(a.y + a.h).toBeLessThanOrEqual(vp.h - INSETS.bottom);
     }
+    expect(env.areas().some((x) => x.id.startsWith('garage-cslot:') || x.id.startsWith('garage-cgroup:')), '无文字挂点页签').toBe(false);
   });
 
-  it('A4 实战路径｜进入车库 → 战斗 → 选武器挂点看部件 → 选辅助挂点看部件 → 换件 → 返回首页配置保留', () => {
+  it('A4 实战路径｜进入车库 → 战斗 → 选挂点看混排部件 → 换件 → 返回首页配置保留', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, INSETS);
     env.host.render(garageState());
@@ -341,33 +318,22 @@ describe('F-GARAGE-COMBAT-TAB-R1｜战斗配置入口合并与突出', () => {
     env.pointer(combat.x + combat.w / 2, combat.y + combat.h / 2);
     const wHp = env.fired['toggle'].slice(-1)[0];
     env.host.render(garageState({ garageSelected: wHp }));
-    // 选武器挂点（共享行第一个 chip；默认武器分组）
-    const wChip = env.areas().find((a) => a.id.startsWith('garage-cslot:'));
-    expect(wChip, '共享挂点 chip 存在').toBeTruthy();
-    env.pointer(wChip!.x + wChip!.w / 2, wChip!.y + wChip!.h / 2);
-    env.host.render(garageState({ garageSelected: wChip!.id.slice('garage-cslot:'.length) }));
-    expect(env.areas().some((a) => a.id.startsWith('opt:')), '武器挂点展开部件卡').toBe(true);
-    // 选辅助挂点：点「辅助」分段 → 点共享行一个 chip
-    const gSeg = env.areas().find((a) => a.id === 'garage-cgroup:gadget')!;
-    env.pointer(gSeg.x + gSeg.w / 2, gSeg.y + gSeg.h / 2);
-    const gChip = env.areas().find((a) => a.id.startsWith('garage-cslot:'));
-    expect(gChip, '辅助挂点 chip 存在（共享行）').toBeTruthy();
-    const gHp = gChip!.id.slice('garage-cslot:'.length);
-    env.pointer(gChip!.x + gChip!.w / 2, gChip!.y + gChip!.h / 2);
-    env.host.render(garageState({ garageSelected: gHp }));
-    expect(env.areas().some((a) => a.id.startsWith('opt:')), '辅助挂点展开部件卡').toBe(true);
-    // 换件
-    const opt = env.areas().find((a) => a.id.startsWith('opt:') && a.id !== 'opt:none');
-    expect(opt, '辅助挂点有可换部件').toBeTruthy();
+    // 战斗挂点（runtime 自动选中）→ 卡片带可见首屏含武器件（Must#1/12：武器+辅助合并，类型小标区分）
+    expect(env.areas().some((a) => a.id.startsWith('opt:')), '战斗挂点展开部件卡').toBe(true);
+    const optWeapon = env.areas().find((a) => a.id.startsWith('opt:') && optDefCategory(a.id) === 'weapon');
+    expect(optWeapon, '卡片带含武器件').toBeTruthy();
+    // 换件（选一件武器）
+    const opt = env.areas().find((a) => a.id.startsWith('opt:') && a.id !== 'opt:none' && optDefCategory(a.id) === 'weapon');
+    expect(opt, '有可换武器部件').toBeTruthy();
     env.pointer(opt!.x + opt!.w / 2, opt!.y + opt!.h / 2);
     expect(env.fired['pick'].length).toBeGreaterThanOrEqual(1);
     // 返回首页（唯一返回 = 左上 nav:home）→ 配置态无残留命中
-    env.host.render(garageState({ garageSelected: gHp }));
+    env.host.render(garageState({ garageSelected: wHp }));
     const back = env.areas().find((a) => a.id === 'nav:home')!;
     env.pointer(back.x + back.w / 2, back.y + back.h / 2);
     const homeIds = env.areas().map((a) => a.id);
     expect(homeIds.some((id) => id === 'home-garage'), '已返回首页').toBe(true);
-    expect(homeIds.some((id) => id.startsWith('garage-cat') || id.startsWith('opt:') || id.startsWith('garage-cslot')),
+    expect(homeIds.some((id) => id.startsWith('garage-cat') || id.startsWith('opt:') || id.startsWith('garage-cslot') || id.startsWith('hp-sel:')),
       '返回首页后无车库配置残留').toBe(false);
   });
 });

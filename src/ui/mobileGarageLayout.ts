@@ -29,22 +29,20 @@ export interface Rect {
 
 export interface MobileGarageLayout {
   topBarRect: Rect;
-  /** F-META-1：Main Shell 中央功能内容区（backpack/more 页用；garage 页用 vehicle/panel） */
+  /** F-META-1：Main Shell 中央功能内容区（backpack/more 页用；garage 页用 stageRect） */
   contentRect: Rect;
+  /** F-GARAGE-CENTER-STAGE-P0：中央战车舞台（全宽；顶栏下至装配带上）。车辆取景同源。 */
+  stageRect: Rect;
+  /** F-GARAGE-CENTER-STAGE-P0：车辆取景区 == stageRect（唯一布局源；绘制/取景/HitArea 同源） */
   vehicleRect: Rect;
-  panelRect: Rect;
+  /** F-GARAGE-CENTER-STAGE-P0：底部横向装配带（第一行分类 tab + 第二行部件卡带） */
+  stripRect: Rect;
 }
 
 /** 顶栏高（normal；只信息） */
 export const GARAGE_TOP_BAR_H = 34;
-/** CTA 距 safe bottom 最小间隙（normal；short 用 6） */
-export const GARAGE_CTA_BOTTOM_GAP = 16;
-/** F-WX-UI-2A：左侧车辆展示区占可用宽比例（约 48%~52% 目标区间上沿） */
-export const VEHICLE_RATIO = 0.52;
-/** F-WX-UI-2A：右侧装配面板占可用宽比例（约 40%~44%） */
-export const PANEL_RATIO = 0.42;
-/** F-WX-UI-2A：车辆区与面板区中间间隙（12~16px；short 用 8） */
-export const GARAGE_MID_GAP = 14;
+/** F-GARAGE-CENTER-STAGE-P0：底部装配带高占屏幕高比例（Must#5：27%~34%） */
+export const STRIP_HEIGHT_RATIO = 0.32;
 
 export function computeMobileGarageLayout(
   viewport: { w: number; h: number },
@@ -66,60 +64,51 @@ export function computeMobileGarageLayout(
   const uB = insets.bottom;
   // F-WX-MOBILE-RCA-1：不再 max(240) 强撑——可用宽由真实 viewport 反推
   const usableW = Math.max(40, w - uL - uR);
+  const usableH = Math.max(40, h - uT - uB);
 
-  // 横向：52% / gap / 42% 三段，剩余分两侧留白；panelW 由 availableW 反推（不再 max(200)）
-  const sidePad = Math.max(6, Math.floor(usableW * 0.02));
-  const vehicleW = Math.max(60, Math.floor(usableW * VEHICLE_RATIO));
-  const midGap = short ? 8 : GARAGE_MID_GAP;
-  const panelW = Math.max(48, usableW - vehicleW - midGap - 2 * sidePad);
-  const showX = uL + sidePad;
-  const panelX = showX + vehicleW + midGap;
-  const panelR = panelX + panelW;
-
-  // 纵向：TopBar / 内容区全部由 availableH 反推（short 更薄、间隙更小）
+  // 纵向：顶栏 / 中央舞台 / 底部装配带（F-GARAGE-CENTER-STAGE-P0）
   const topBarH = short ? 24 : GARAGE_TOP_BAR_H;
   const bodyGap = short ? 6 : 8;
-  const vehBottomGap = short ? 8 : 16;
 
-  // 顶栏（薄栏，只信息；与左右区域对齐）
+  // 顶栏（全宽薄栏；garage 模式只 back + 能量；shell 模式保留 金币/段位/能量）
   const topBarRect: Rect = {
-    x: showX,
+    x: uL,
     y: uT,
-    w: Math.max(60, panelR - showX),
+    w: Math.max(60, usableW),
     h: topBarH,
   };
 
-  // F-META-UX1：已删除 Main Shell 导航行——Garage 回归唯一 Home，内容区直接在顶栏下方。
-  // F-GARAGE-MOBILE-SHELL-R1：Garage 已无「寻找对手」CTA——原 ctaRect（面板下方 56+14 高）
-  // 空间整体并入右侧面板与中央内容区（消灭「下半部大块空白」），左右区底统一到 vehicle 底。
+  // F-GARAGE-CENTER-STAGE-P0：底部横向装配带——高 = 屏幕高 27%~34%（取 32%）。
+  // 第一行分类 tab（车身/移动/战斗）、第二行部件卡带；能量变化/失败原因嵌入带内。
+  const stripH = Math.max(44, Math.round(h * STRIP_HEIGHT_RATIO));
+  const stripRect: Rect = {
+    x: uL,
+    y: Math.max(uT + topBarH + bodyGap, h - uB - stripH),
+    w: Math.max(60, usableW),
+    h: stripH,
+  };
 
-  // 面板与车辆区（右侧中央/左侧展示；底部统一，高由 available 反推，不再 max(120)）
+  // F-GARAGE-CENTER-STAGE-P0：中央战车舞台（全宽；顶栏下至装配带上）——车辆取景同源
   const bodyTop = uT + topBarH + bodyGap;
-  const vehBot = h - uB - vehBottomGap;
-  const panelRect: Rect = {
-    x: panelX,
+  const stageRect: Rect = {
+    x: uL,
     y: bodyTop,
-    w: panelW,
-    h: Math.max(1, vehBot - bodyTop),
+    w: Math.max(60, usableW),
+    h: Math.max(1, stripRect.y - bodyTop),
   };
 
-  // 车辆展示区（左侧；底部独立 safe bottom；高反推）
-  const vehicleRect: Rect = {
-    x: showX,
-    y: bodyTop,
-    w: vehicleW,
-    h: Math.max(1, vehBot - bodyTop),
-  };
+  // 车辆取景区 == 中央舞台（Garage previewSolo fit 到该区域 → 车辆最终像素居中）
+  const vehicleRect: Rect = { ...stageRect };
 
-  // F-META-1：中央功能内容区（backpack/more 页；跨车辆区+面板区整宽；高反推）
+  // F-META-1：中央功能内容区（backpack/more 页；全宽，顶栏下到底部 safe bottom）
   const contentRect: Rect = {
-    x: showX,
+    x: uL,
     y: bodyTop,
-    w: Math.max(60, panelR - showX),
-    h: Math.max(1, vehBot - bodyTop),
+    w: Math.max(60, usableW),
+    h: Math.max(1, usableH - topBarH - bodyGap),
   };
 
-  return { topBarRect, contentRect, vehicleRect, panelRect };
+  return { topBarRect, contentRect, stageRect, vehicleRect, stripRect };
 }
 
 /**
@@ -203,37 +192,39 @@ export function computeGarageTopBarLayout(
   const barMin = short ? 36 : 56;
   const barMax = short ? 56 : 96;
 
-  // —— 最左：返回首页（garage 必留） ——
-  const back: Rect | null =
-    opts.mode === 'garage'
-      ? { x: x0, y: y + (h - tinyH) / 2, w: tinyW, h: tinyH }
-      : null;
-  const leftX = x0 + (back ? back.w + (short ? 6 : 8) : 0);
-
-  // —— 最右：背包（garage 必留） ——
-  const backpack: Rect | null =
-    opts.mode === 'garage'
-      ? { x: x0 + W - tinyW, y: y + (h - tinyH) / 2, w: tinyW, h: tinyH }
-      : null;
-  let cursor = backpack ? backpack.x - gap : x0 + W;
-
-  // —— 更多（候选；带 more 时能量组仍有最小宽度才保留） ——
-  const eLabelW = estimateTextWidth(texts.energyLabel, fs);
-  const eValueW = estimateTextWidth(texts.energyValue, fs);
-  const energyMin = eLabelW + groupGap + barMin + groupGap + eValueW;
-  let more: Rect | null = null;
+  // F-GARAGE-CENTER-STAGE-P0：garage 模式顶栏极简——左「‹ 首页」+ 右「能量 used/cap」。
+  // 金币/段位/背包/更多不再出现在装配页（数据与其他页入口保留，只是不在 Garage 展示）。
   if (opts.mode === 'garage') {
-    const moreX = cursor - gap - tinyW;
-    // 带 more 后：能量组最小宽 + 左侧至少一个段位缩写，仍放得下才保留 more
-    const leftMin = leftX + estimateTextWidth(texts.ratingShort, fs);
-    if (moreX - gap - energyMin >= leftMin) {
-      more = { x: moreX, y: y + (h - tinyH) / 2, w: tinyW, h: tinyH };
-      cursor = more.x - gap;
-    }
+    const back: Rect = { x: x0, y: y + (h - tinyH) / 2, w: tinyW, h: tinyH };
+    const eLabelW = estimateTextWidth(texts.energyLabel, fs);
+    const eValueW = estimateTextWidth(texts.energyValue, fs);
+    const energyRight = x0 + W - (short ? 4 : 8); // 右端留白
+    const leftX = x0 + back.w + (short ? 6 : 8);
+    const barW = Math.min(barMax, Math.max(barMin, energyRight - eLabelW - groupGap - eValueW - leftX));
+    const groupW = eLabelW + groupGap + barW + groupGap + eValueW;
+    const groupX = Math.max(leftX, energyRight - groupW);
+    const barY = y + (h - 10) / 2;
+    const energyGroup: Rect = { x: groupX, y, w: groupW, h };
+    const energyLabel: Rect = { x: groupX, y, w: eLabelW, h };
+    const energyBar: Rect = { x: groupX + eLabelW + groupGap, y: barY, w: barW, h: 10 };
+    const energyValue: Rect = {
+      x: groupX + eLabelW + groupGap + barW + groupGap,
+      y,
+      w: eValueW,
+      h,
+    };
+    return { back, coin: null, rating: null, ratingRender: texts.rating, energyGroup, energyLabel, energyBar, energyValue, backpack: null, more: null };
   }
 
-  // —— 能量组（bar 宽在 [barMin, barMax] 收缩；数值矩形在组内右对齐） ——
-  const energyRight = cursor - groupGap;
+  // —— shell 模式（backpack/more 页）：无 back/backpack/more，仅 金币/段位/能量 ——
+  const back: Rect | null = null;
+  const backpack: Rect | null = null;
+  const more: Rect | null = null;
+  const leftX = x0;
+  const eLabelW = estimateTextWidth(texts.energyLabel, fs);
+  const eValueW = estimateTextWidth(texts.energyValue, fs);
+  const cursor = x0 + W; // 能量组从右端排
+  const energyRight = cursor - (short ? 4 : 8);
   const barW = Math.min(barMax, Math.max(barMin, energyRight - eLabelW - groupGap - eValueW - leftX));
   const groupW = eLabelW + groupGap + barW + groupGap + eValueW;
   const groupX = Math.max(leftX, energyRight - groupW);

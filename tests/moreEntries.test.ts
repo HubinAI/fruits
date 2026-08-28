@@ -113,6 +113,11 @@ const VIEWPORTS = [
 
 function click(env: HostEnv, id: string): void {
   const a = env.areas().find((x) => x.id === id);
+  // F-GARAGE-CENTER-STAGE-P0：Garage 顶栏不再暴露 backpack/more 入口——走私有 dispatch
+  if (!a && (id === 'nav:backpack' || id === 'nav:more' || id === 'nav:garage')) {
+    (env.host as unknown as { dispatch: (i: string) => void }).dispatch(id);
+    return;
+  }
   expect(a, `应有 ${id}`).toBeTruthy();
   env.pointer(a!.x + a!.w / 2, a!.y + a!.h / 2);
 }

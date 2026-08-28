@@ -255,8 +255,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private panelView: 'home' | 'movePick' | 'weaponPick' | 'gadgetPick' | 'options' = 'home';
   /** F-GARAGE-COMBAT-TAB-R1：装配台常驻分类（车身/移动/战斗；武器+辅助合并为「战斗」突出入口）。 */
   private garageCategory: 'body' | 'move' | 'combat' = 'body';
-  /** F-GARAGE-COMBAT-TAB-R1：战斗页武器/辅助挂点分组过滤（仅展示层；内部 weapon/gadget 类型不变）。 */
-  private garageCombatGroup: 'weapon' | 'gadget' = 'weapon';
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：底部部件带横向滚动偏移（0..maxScroll；左右箭头/横滑驱动）。
+   * 由绘制时按内容宽与可视宽计算 maxScroll 并钳制。
+   */
+  private garageStripScroll = 0;
+  /** F-GARAGE-CENTER-STAGE-P0：当前帧部件卡带可视行 rect（logical px；供手势横滑判定起点是否在带内） */
+  private stripCardRow: { x: number; y: number; w: number; h: number } | null = null;
+  /** F-GARAGE-CENTER-STAGE-P0：指针手势状态（down/move/up；滑动 >8 logical px 取消该次点击） */
+  private gesture: { px: number; py: number; dx: number; dy: number; cancelled: boolean } | null = null;
   /** F-PREBATTLE-VISUAL-R1：Locked 揭晓高亮环计时（克制；~500ms 淡出；不移动车辆） */
   private prebattleLockSeen = false;
   private prebattleLockAt = 0;
@@ -282,14 +289,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private resultModalShown = false;
   /** F-META-5：Result Modal 展示时的 rewardAdClaimed（广告领币后需刷新弹窗文案） */
   private resultAdClaimedShown = false;
-  /** F-WX-UI-1：选项网格面板内垂直滚动（面板不溢出屏幕） */
-  private panelScroll = 0;
-  /**
-   * F-GARAGE-COMBAT-TAB-R1：面板内滚动单步（px）。绑定到当前可见列表高度，
-   * 保证矮面板（战斗页两组挂点挤压后只剩 1 行部件卡）滚动也能翻出下一页，
-   * 不会因固定大步长直接跳过全部可见项（验收 360×180~1920×1008 不溢出且可翻页）。
-   */
-  private panelScrollStepPx = 40;
   /**
    * F-META-UX2：合成前库存快照（确认合成时捕获）——onMerge 后 render 时 diff 出
    * 新 2★ 部件用于「合成成功」结果 Modal。仅 UI 呈现，不改任何合成规则。
@@ -358,7 +357,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
     }
     // 输入唯一入口：Platform Input Adapter（F-WX-4）
-    platform.input.bindPointer(this.canvas, (x, y) => this.handlePointer(x, y));
+    // F-GARAGE-CENTER-STAGE-P0：优先手势（down/move/up + 8px 取消）；平台不支持时回退 tap
+    this.bindInput(this.canvas, platform.input.bindPointer.bind(platform.input), (x, y) => this.handlePointer(x, y));
   }
 
   /**
@@ -387,13 +387,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // F-PLAYER-INPUT-SCALE-P0：传 PlayerViewportTransform.clientToLogical 作统一转换——
     // client → 可见 rect → 844×390 logical 只发生一次（不再依赖 WebInput 的 CSS 归一化巧合，
     // 也杜绝「把 canvas CSS 局部坐标直接当 logical」的整类错位）。
-    platform.input.bindPointer(
-      screen,
-      (x, y) => this.handlePointer(x, y),
-      this.viewportTransform
-        ? (cx, cy, rect) => this.viewportTransform!.clientToLogical(cx, cy, rect)
-        : undefined,
-    );
+    // F-GARAGE-CENTER-STAGE-P0：优先手势（滑动 8px 取消点击）；不支持时回退 tap。
+    const toLogical = this.viewportTransform
+      ? (cx: number, cy: number, rect: { left: number; top: number; width: number; height: number }) =>
+          this.viewportTransform!.clientToLogical(cx, cy, rect)
+      : undefined;
+    this.bindInput(screen, platform.input.bindPointer.bind(platform.input), (x, y) => this.handlePointer(x, y), toLogical);
   }
 
   /** 屏幕合成模式下返回离屏 UI 画布供 Renderer 合成；非屏幕模式（DEV/WebDom）或隐藏时返回 null。 */
@@ -426,7 +425,31 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.cssW = Math.max(1, this.canvas.width / dpr);
     this.cssH = Math.max(1, this.canvas.height / dpr);
     this.dpr = dpr;
-    platform.input.bindPointer(this.canvas, (x, y) => this.handlePointer(x, y));
+    this.bindInput(this.canvas, platform.input.bindPointer.bind(platform.input), (x, y) => this.handlePointer(x, y));
+  }
+
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：输入绑定统一入口——优先 bindGesture（down/move/up + 滑动取消），
+   * 平台/测试桩无 bindGesture 时回退 bindPointer（纯 tap，语义与旧行为完全一致）。
+   */
+  private bindInput(
+    target: EventTarget,
+    bindTap: (target: EventTarget, handler: (x: number, y: number) => void, toLogical?: (cx: number, cy: number, rect: { left: number; top: number; width: number; height: number }) => { x: number; y: number }) => void,
+    tapHandler: (x: number, y: number) => void,
+    toLogical?: (cx: number, cy: number, rect: { left: number; top: number; width: number; height: number }) => { x: number; y: number },
+  ): void {
+    const g = platform.input.bindGesture;
+    if (g) {
+      // F-GARAGE-CENTER-STAGE-P0：用 .call 绑定 this（input adapter 在调用时不传 this 上下文，
+      // 否则 WechatInput.this.wx getter 抛 TypeError）
+      g.call(platform.input, target, {
+        onDown: (x, y) => this.gestureDown(x, y),
+        onMove: (x, y) => this.gestureMove(x, y),
+        onUp: (x, y, cancelled) => this.gestureUp(x, y, cancelled, tapHandler),
+      }, toLogical);
+    } else {
+      bindTap(target, tapHandler, toLogical);
+    }
   }
 
   render(state: PlayerUIState): void {
@@ -442,7 +465,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.panelView = 'options';
     } else if (this.panelView === 'options') {
       this.panelView = 'home';
-      this.panelScroll = 0;
     }
     // F-META-1：离开局外（进 Matching/Battle/Result）时复位 MetaPage——回 Garage 后默认回车库页
     if (state.playerPhase !== 'garage') this.metaPage = 'home'; // F-HOME-1：离开局外回 Home（正式首页）
@@ -520,6 +542,63 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return { x: (x - this.ox) / this.scale, y: (y - this.oy) / this.scale };
   }
 
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：手势状态机（bindGesture 驱动）——
+   * 指针按下后累计位移；任一点相对起点位移 > 8 logical px → cancelled（up 时不再 dispatch）。
+   * 横向滑动（起点在部件卡带内）驱动卡带滚动；其余方向仅取消点击（不误触挂点/分类/顶栏）。
+   */
+  private gestureDown(x: number, y: number): void {
+    this.gesture = { px: x, py: y, dx: 0, dy: 0, cancelled: false };
+  }
+
+  private gestureMove(x: number, y: number): void {
+    const g = this.gesture;
+    if (!g || g.cancelled) return;
+    const mx = x - g.px;
+    const my = y - g.py;
+    g.px = x;
+    g.py = y;
+    g.dx += mx;
+    g.dy += my;
+    if (Math.hypot(g.dx, g.dy) > 8) {
+      g.cancelled = true;
+      // 横向滑动：起点在部件卡带内 → 滚动卡带（跟随手指；clamp 由 scrollStripBy 内做）
+      const row = this.stripCardRow;
+      if (row && this.isStripGestureTarget()) {
+        this.scrollStripBy(-mx);
+      }
+    }
+  }
+
+  private gestureUp(
+    x: number,
+    y: number,
+    cancelled: boolean,
+    tapHandler: (x: number, y: number) => void,
+  ): void {
+    const g = this.gesture;
+    this.gesture = null;
+    if (cancelled || (g && g.cancelled)) return; // 滑动/系统取消 → 不派发
+    tapHandler(x, y);
+  }
+
+  /** 手势横滑滚动目标判定：仅 Garage 装配页（metaPage=garage + playerPhase=garage） */
+  private isStripGestureTarget(): boolean {
+    return this.metaPage === 'garage' && this.lastState?.playerPhase === 'garage';
+  }
+
+  /** 部件带横向滚动（钳制到 [0, maxScroll]）；maxScroll 由当前帧卡片带宽度计算 */
+  private scrollStripBy(dx: number): void {
+    const row = this.stripCardRow;
+    if (!row) return;
+    const maxScroll = Math.max(0, this.stripContentW - row.w);
+    this.garageStripScroll = Math.max(0, Math.min(maxScroll, this.garageStripScroll + dx));
+    this.draw();
+  }
+
+  /** 当前分类部件带内容总宽（绘制时计算并缓存；供滚动钳制与箭头步长使用） */
+  private stripContentW = 0;
+
   private handlePointer(x: number, y: number): void {
     const p = this.screenToLayoutPoint(x, y);
     const lx = p.x;
@@ -562,11 +641,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (id.startsWith('nav:')) {
       // F-META-1：Main Shell 导航切换（UI-only，不派发 Gameplay action；离开当前页复位面板态）
       // F-HOME-1：'nav:garage'（Backpack/More 的「返回车库」）→ 回 Home（正式首页）；'nav:home'（配置页返回）
+      // F-GARAGE-CENTER-STAGE-P0：metaPage 切换后通知 runtime 重 fit（renderer.transform 跨页面不再 stale）
       const page = id.slice(4) as MetaPage;
       this.metaPage = page === 'garage' ? 'home' : page;
       this.panelView = 'home';
-      this.panelScroll = 0;
+      this.garageStripScroll = 0;
       this.moreView = 'home'; // F-META-6：离开 More 复位子视图（下次进入默认功能卡主页）
+      this.actions?.reframeCamera?.();
       this.draw();
       return;
     }
@@ -577,6 +658,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       // F-HOME-3：点击车辆 → 随机显示 1 条气泡 tips（每次点击重新随机；轻量，非 Modal）
       if (id === 'home-garage') {
         this.metaPage = 'garage';
+        // F-GARAGE-CENTER-STAGE-P0：进入装配页（中央舞台全宽取景）→ 重 fit
+        this.actions?.reframeCamera?.();
         this.draw();
         return;
       }
@@ -685,13 +768,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id.startsWith('garage-cat:')) {
-      // F-GARAGE-COMBAT-TAB-R1：右顶常驻分类 tab（车身/移动/战斗；武器+辅助合并为「战斗」）。
-      // 切换分类 → 自动选中该分类第一个挂点；进入战斗默认武器分组（重复点当前分类不收起）。
+      // F-GARAGE-CENTER-STAGE-P0：底部装配带第一行分类 tab（车身/移动/战斗；武器+辅助合并）。
+      // 切换分类 → 自动选中该分类第一个挂点（ensureGarageSlotSelection 兜底）；复位部件带滚动。
       const cat = id.slice(11) as 'body' | 'move' | 'combat';
-      const wasCombat = this.garageCategory === 'combat';
       this.garageCategory = cat;
-      if (cat === 'combat' && !wasCombat) this.garageCombatGroup = 'weapon';
-      this.panelScroll = 0;
+      this.garageStripScroll = 0;
       const draft = this.lastState?.draft;
       const slots = draft ? this.garageSlotsFor(draft) : [];
       const sel = this.lastState?.garageSelected;
@@ -701,48 +782,24 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.draw();
       return;
     }
-    if (id.startsWith('garage-cgroup:')) {
-      // F-GARAGE-COMBAT-TAB-R1：战斗页「武器｜辅助」分段切换（只切过滤分组，不收起面板）
-      // 前缀 'garage-cgroup:' 共 14 字符（slice(14) 才截到分组名，slice(13) 会带冒号）
-      const g = id.slice(14);
-      this.garageCombatGroup = g === 'gadget' ? 'gadget' : 'weapon';
-      this.draw();
-      return;
-    }
-    if (id.startsWith('garage-cslot:')) {
-      // F-GARAGE-COMBAT-TAB-R1：战斗页共享挂点 chip（只选不收起；分组由 garage-cgroup 决定）
-      const hp = id.slice(13);
+    if (id.startsWith('hp-sel:')) {
+      // F-GARAGE-LIVE-ASSEMBLY-P0：战车挂点点击（视觉与点击同源）——切换当前挂点。
+      // F-GARAGE-CENTER-STAGE-P0：文字挂点页签已删除，挂点选择只通过战车真实挂点完成。
+      const hp = id.slice(7);
       this.actions?.selectGarageSlot?.(hp);
       return;
     }
-    if (id.startsWith('hp-sel:')) {
-      // F-GARAGE-LIVE-ASSEMBLY-P0：战车挂点点击（视觉与点击同源）——切换当前挂点
-      // 战斗=只选不收起；移动/车身=toggle（与 chips 等价）
-      const hp = id.slice(7);
-      if (this.garageCategory === 'combat') this.actions?.selectGarageSlot?.(hp);
-      else this.actions?.onToggleGarageSlot(hp);
-      return;
-    }
-    if (id.startsWith('garage-slot:')) {
-      // F-GARAGE-BUILD-BOARD-P0：武器/辅助分类下的挂点 chip → 展开该挂点部件卡
-      this.actions?.onToggleGarageSlot(id.slice(12));
+    if (id === 'strip-scroll-left' || id === 'strip-scroll-right') {
+      // F-GARAGE-CENTER-STAGE-P0：部件带左右翻页箭头（鼠标辅助；横滑同样驱动）
+      const step = Math.max(96, Math.round((this.stripCardRow?.w ?? 240) * 0.8));
+      this.garageStripScroll += id === 'strip-scroll-left' ? -step : step;
+      if (this.garageStripScroll < 0) this.garageStripScroll = 0;
+      this.draw();
       return;
     }
     if (id === 'panel-back') {
       // F-GARAGE-BUILD-BOARD-P0：装配台无面板内返回（唯一返回 = 左上「‹ 首页」nav:home）。
       // 兼容旧命中（不应出现）：按收起选中槽处理。
-      this.actions?.onToggleGarageSlot(this.lastState?.garageSelected ?? '');
-      return;
-    }
-    if (id === 'panel-scroll-up' || id === 'panel-scroll-down') {
-      const step = this.panelScrollStepPx;
-      this.panelScroll += id === 'panel-scroll-up' ? -step : step;
-      if (this.panelScroll < 0) this.panelScroll = 0;
-      this.draw();
-      return;
-    }
-    if (id === 'opt-close') {
-      // F-WX-8-B：选项条收起（toggle 语义关闭当前选中槽）
       this.actions?.onToggleGarageSlot(this.lastState?.garageSelected ?? '');
       return;
     }
@@ -825,6 +882,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 仅「出局外 + metaPage=home」开启；车库/匹配/战斗各自保持背景（不覆盖车辆）。
     const homeScreen = state.uiMode !== 'scenario' && state.playerPhase === 'garage' && this.metaPage === 'home';
     this.actions?.setHomeBackdrop?.(homeScreen);
+    // F-GARAGE-CENTER-STAGE-P0：Garage 装配页背景（深蓝车库展示台 + 地面 + 少量灯光）；
+    // 与 homeBackdrop 互斥（home 只在 metaPage=home 时开，garage 只在 metaPage=garage 时开）。
+    const garageScreen = state.uiMode !== 'scenario' && state.playerPhase === 'garage' && this.metaPage === 'garage';
+    this.actions?.setGarageBackdrop?.(garageScreen);
     // F-PREBATTLE-VISUAL-R1：战前（Matching/MatchPreview）启用水果竞技场简化背景；
     // 与 homeBackdrop 互斥（Battle 两者皆关，走 battle 地面）。
     const prebattle = state.playerPhase === 'matching' || state.playerPhase === 'matchPreview';
@@ -1567,62 +1628,125 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    *  「寻找对手」主 CTA（ctaRect 空间留白，不替换成新大按钮/无关入口；
    *  配置面板独占内容区）。返回能力由顶部「‹ 首页」nav 提供（drawMobileTopBar）。 */
   private drawGarageMetaPage(state: PlayerUIState, draft: BuildDraft, layout: MobileGarageLayout): void {
-    const { panelRect } = layout;
+    const { stageRect, stripRect } = layout;
     // F-GARAGE-LIVE-ASSEMBLY-P0：默认选择（Must#5）——当前分类有挂点但未选中/选中失效 → 自动选
     this.ensureGarageSlotSelection(state, draft);
-    // F-GARAGE-LIVE-ASSEMBLY-P0：真实挂点 overlay（移动/战斗分类在战车上显示可用/选中/占用挂点）
+    // F-GARAGE-LIVE-ASSEMBLY-P0：真实挂点 overlay（移动/战斗分类在中央战车上显示可用/选中/占用挂点）
     this.drawVehicleHardpoints(state);
 
-    // 非法原因仍在面板上方提示（不占 CTA 位）
-    if (!state.draftValid && state.blockReason) {
-      this.text(state.blockReason, panelRect.x + panelRect.w / 2, panelRect.y - 8, 13, C.red, 'center', 600);
-    }
+    // F-GARAGE-CENTER-STAGE-P0：中央装配舞台——右侧面板已删除，车辆由 renderer previewSolo
+    // fit 到 stageRect（全宽、居中、贴地）；非法原因与能量变化均嵌入底部装配带，不占舞台。
+    // 唯一返回 = 左上「‹ 首页」（drawMobileTopBar nav:home）。
+    void stageRect;
+    this.drawGarageStrip(state, draft, stripRect);
+  }
 
-    // F-GARAGE-COMBAT-TAB-R1：单屏装配台（取代多层巨型文字菜单）——
-    // 右顶常驻分类 tab（车身/移动/战斗；战斗最宽+金橙强调，突出战斗配置主入口）→
-    // 战斗页两组紧凑挂点（武器挂点/辅助挂点）→ 右主体部件卡（简图+名称+星级+能量+状态）→
-    // 底部能量条+超载原因。唯一返回 = 左上「‹ 首页」（drawMobileTopBar nav:home）；面板内无重复返回按钮。
-    this.panel(panelRect.x, panelRect.y, panelRect.w, panelRect.h, V.panelSolid);
-    const px = panelRect.x;
-    const pw = panelRect.w;
-    const padY = this.isShort ? 6 : 10;
-    // 分类 tab 行（常驻顶部）
-    const tabH = this.isShort ? 26 : 32;
-    const tabY = panelRect.y + padY;
-    this.drawGarageCategoryTabs(px, pw, tabY, tabH);
-    // 挂点/槽位 chip 行（分类下的可选挂点；F-GARAGE-COMBAT-TAB-R1：战斗页展示两组紧凑挂点）
-    const slotY = tabY + tabH + (this.isShort ? 4 : 6);
-    const slotH = this.isShort ? 24 : 28;
-    const allSlots = this.garageSlotsFor(draft);
-    let listTop: number;
-    if (this.garageCategory === 'combat') {
-      listTop = this.drawCombatSlotGroups(px, pw, slotY, slotH);
-    } else {
-      this.drawGarageSlotChips(px, pw, slotY, slotH, allSlots, state.garageSelected);
-      listTop = slotY + slotH + (this.isShort ? 4 : 6);
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：底部横向装配带（Must#5）——
+   * 第一行：车身/移动/战斗 三个紧凑分类 tab（全宽）；
+   * 第二行：当前分类/挂点的部件横向卡片带（clip + 横向滚动 + 8px 横滑取消点击）；
+   * 状态行（超载差值/未获得原因）在卡带上方按需显示（半透明横幅，不占卡带高）。
+   * 能量 used/cap 已常驻顶栏（drawMobileTopBar garage 模式）。
+   */
+  private drawGarageStrip(state: PlayerUIState, draft: BuildDraft, stripRect: Rect): void {
+    const pad = this.isShort ? 4 : 6;
+    const tabH = this.isShort ? 22 : 30;
+    const tabY = stripRect.y + pad;
+    const gap = this.isShort ? 3 : 5;
+    // 第一行：分类 tab
+    this.drawGarageCategoryTabs(stripRect.x, stripRect.w, tabY, tabH);
+    // 状态行（超载差值 / blockReason / overloadDelta；无状态不占位）
+    const statusH = this.garageStripStatus(state, draft, stripRect, tabY + tabH + gap);
+    // 第二行：部件卡带
+    const cardTop = tabY + tabH + gap + statusH;
+    const cardBot = stripRect.y + stripRect.h - pad;
+    const cardH = Math.max(24, cardBot - cardTop);
+    const row: Rect = { x: stripRect.x, y: cardTop, w: stripRect.w, h: cardH };
+    this.stripCardRow = row;
+    this.drawGarageStripCards(state, draft, row);
+  }
+
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：装配带状态行（Must#13）——超载/未获得/不兼容原因显示在
+   * 装配带内（卡带上方半透明横幅），不使用中央 Modal 或右侧说明面板。返回占用高度。
+   */
+  private garageStripStatus(state: PlayerUIState, draft: BuildDraft, stripRect: Rect, y: number): number {
+    const snapshot = buildSnapshotFromDraft(draft, registry, 'customA');
+    const energyRes = computeEnergy(snapshot, registry);
+    const body = registry.bodies.get(draft.bodyDefId);
+    const capacity = body?.energyCapacity ?? 0;
+    const used = energyRes.error ? Number.NaN : energyRes.energy;
+    const overload = Number.isFinite(used) && used > capacity;
+    let msg: string | null = null;
+    if (state.blockReason) {
+      msg = state.blockReason;
+    } else if (overload) {
+      msg = energyRes.error ? String(energyRes.error) : '能量超载';
+    } else if (state.overloadDelta != null && state.overloadDelta > 0) {
+      msg = `超载 +${Math.round(state.overloadDelta)}`;
     }
-    // 右主体：部件卡（所选槽位选项，按分类过滤）
-    const energyH = this.isShort ? 30 : 40;
-    const listBot = panelRect.y + panelRect.h - padY - energyH - (this.isShort ? 4 : 6);
-    // F-GARAGE-COMBAT-TAB-R1：矮面板（360×180）下战斗挂点条可能逼近 listBot——
-    // 钳制 listTop 确保部件卡区域不溢出面板/安全区（溢出由裁剪+完全可见命中保证）。
-    if (listTop > listBot) listTop = listBot;
-    const listH = Math.max(8, listBot - listTop);
-    if (state.garageSelected && allSlots.some((s) => s.key === state.garageSelected)) {
-      this.drawGaragePartCards(state, draft, px, pw, listTop, listH);
-    } else {
-      // 未选挂点（或分类与所选槽不匹配）：分类总览提示（不撑满空卡）
+    if (!msg) return 0;
+    const h = this.isShort ? 12 : 14;
+    this.panel(stripRect.x, y, stripRect.w, h, 'rgba(40,18,22,0.85)', undefined, 0);
+    this.text(msg, stripRect.x + stripRect.w / 2, y + h / 2, this.isShort ? 9 : 11, V.lose, 'center', 600);
+    return h + (this.isShort ? 2 : 3);
+  }
+
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：部件横向卡片带（Must#9/10/11）——
+   * 单行横排；内容超宽时横向滚动（左右小箭头 + 横滑）；横滑 >8px 取消该次点击（不误装备）；
+   * 卡片只含 mini preview / 名称 / 星级 / 能量 / 武器·辅助小标 / 已装备·未获得状态。
+   */
+  private drawGarageStripCards(state: PlayerUIState, draft: BuildDraft, row: Rect): void {
+    const slot = state.garageSelected;
+    const allSlots = this.garageSlotsFor(draft);
+    const hasSlot = !!slot && allSlots.some((s) => s.key === slot);
+    if (!hasSlot) {
+      // 未选挂点（或分类与所选槽不匹配）：引导提示（不撑满空卡）
       this.text(
-        this.garageCategory === 'combat' ? '选择一个武器/辅助挂点' : '选择部件',
-        px + pw / 2,
-        listTop + listH / 2 - 6,
-        this.isShort ? 12 : 14,
+        this.garageCategory === 'body' ? '选择车身部件' : '点击战车上的挂点选择装配位',
+        row.x + row.w / 2,
+        row.y + row.h / 2,
+        this.isShort ? 11 : 13,
         V.textSecondary,
         'center',
       );
+      this.stripContentW = row.w;
+      return;
     }
-    // 底部：能量条 + 超载原因（靠近选择区，Must#6）
-    this.drawGarageEnergyBar(state, draft, panelRect, energyH);
+    const opts = this.garageOptionsFiltered(state, slot);
+    const curVal = this.garageCurrentValue(draft, slot);
+    const gap = this.isShort ? 6 : 8;
+    const cardW = this.isShort ? 100 : 132;
+    const cardH = row.h;
+    const contentW = opts.length > 0 ? opts.length * cardW + (opts.length - 1) * gap : row.w;
+    this.stripContentW = contentW;
+    const maxScroll = Math.max(0, contentW - row.w);
+    if (this.garageStripScroll > maxScroll) this.garageStripScroll = maxScroll;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(this.ox + row.x * this.scale, this.oy + row.y * this.scale, row.w * this.scale, row.h * this.scale);
+    ctx.clip();
+    let x = row.x - this.garageStripScroll;
+    for (const c of opts) {
+      // 部分可见卡只绘制（视觉连续）、不注册 hitArea——hitArea 不受 clip 影响，
+      // 越出可视区的命中会造成「可见区外可点 / 溢出 safe」（Must#10 点击区与视觉一致）。
+      const fully = x >= row.x - 0.5 && x + cardW <= row.x + row.w + 0.5;
+      const visible = x + cardW > row.x && x < row.x + row.w;
+      if (visible) {
+        this.drawPartCard(x, row.y, cardW, cardH, c, c.v === curVal, fully);
+      }
+      x += cardW + gap;
+    }
+    ctx.restore();
+    // 两侧小型翻页箭头（内容超宽时；鼠标辅助，触屏以横滑为主）
+    if (maxScroll > 1) {
+      const ah = this.isShort ? 22 : 26;
+      const ay = row.y + (row.h - ah) / 2;
+      this.button(row.x + 2, ay, 18, ah, 'strip-scroll-left', '‹', {});
+      this.button(row.x + row.w - 20, ay, 18, ah, 'strip-scroll-right', '›', {});
+    }
   }
 
   /**
@@ -1740,137 +1864,61 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return hps.length > 0 ? hps.map((hp) => ({ key: hp, label: slotLabel(hp) })) : [];
   }
 
-  private drawGarageSlotChips(
-    px: number,
-    pw: number,
-    y: number,
-    h: number,
-    slots: Array<{ key: string; label: string }>,
-    selected: string | null,
-    combat?: boolean,
-  ): void {
-    if (slots.length === 0) return;
-    const gap = 6;
-    const per = Math.min(slots.length, 4);
-    const w = (pw - gap * (per - 1)) / per;
-    for (let i = 0; i < slots.length; i++) {
-      const s = slots[i];
-      const x = px + i * (w + gap);
-      if (x + w > px + pw + 0.5) break; // 不溢出面板
-      // F-GARAGE-COMBAT-TAB-R1：战斗页共享挂点行（武器/辅助共用同一组孔位，分组仅决定部件过滤）
-      // 用 garage-cslot:<hp>（无分组前缀，区别于已废弃的分组前缀 chip）；普通分类（body/move/desktop）用 garage-slot:<hp>。
-      const id = combat ? `garage-cslot:${s.key}` : `garage-slot:${s.key}`;
-      this.button(x, y, w, h, id, s.label, { active: selected === s.key });
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：单张部件卡（Must#9）——mini preview + 名称 + 星级 + 能量 +
+   * 武器/辅助小标 + 已装备/未获得状态。禁大段属性说明/全宽文字按钮/表格布局。
+   * 点击 → onPickGarageOption（装备 → 中央战车实时更新；实测 ≤150ms）。
+   */
+  private drawPartCard(x: number, y: number, w: number, h: number, c: GarageOpt, equipped: boolean, registerHit = true): void {
+    if (registerHit) {
+      this.button(x, y, w, h, `opt:${c.v}`, '', {
+        active: equipped,
+        locked: c.locked,
+        disabled: !!c.locked,
+      });
+    } else {
+      // 部分可见：只画不注册（hitArea 不受 clip 限制；越界命中破坏「点击区与视觉一致」）
+      this.rect(x, y, w, h, c.locked ? '#262e3d' : equipped ? C.blueDeep : V.panel, c.locked ? V.enemyOrange : V.border, 1);
     }
-  }
-
-  /** F-GARAGE-COMBAT-TAB-R1：战斗页「武器｜辅助」分段切换 + 单个共享挂点行（同内容页同屏）。
-   *  分段控件同时展示两组入口（一次点击切换过滤、不收起面板）；硬点武器/辅助共用同一组孔位，
-   *  分组仅决定部件过滤（武器/辅助），内部 weapon/gadget 类型不变。紧凑单行使 360×180 矮面板不溢出（验收#7）。 */
-  private drawCombatSlotGroups(px: number, pw: number, startY: number, slotH: number): number {
-    const draft = this.lastState?.draft;
-    const hps = draft ? this.garageSlotsFor(draft) : [];
-    const segH = this.isShort ? 20 : 26;
-    const segGap = 6;
-    const segW = (pw - segGap) / 2;
-    // 分段切换（武器 | 辅助）：两组同屏可见、一次点击切换（set-not-toggle，不误收起面板）
-    this.button(px, startY, segW, segH, 'garage-cgroup:weapon', '武器', {
-      active: this.garageCombatGroup === 'weapon',
-    });
-    this.button(px + segW + segGap, startY, segW, segH, 'garage-cgroup:gadget', '辅助', {
-      active: this.garageCombatGroup === 'gadget',
-    });
-    let y = startY + segH + (this.isShort ? 3 : 5);
-    // 单个共享挂点行（武器/辅助共用同一组硬点；分组仅决定部件过滤）
-    this.drawGarageSlotChips(px, pw, y, slotH, hps, this.lastState?.garageSelected ?? null, true);
-    y += slotH + (this.isShort ? 3 : 5);
-    return y;
-  }
-
-  /** F-GARAGE-BUILD-BOARD-P0：部件卡网格（2 列）——简图 + 名称 + 星级 + 能量 + 状态徽标。
-   *  点击 → onPickGarageOption（装备 → 左侧战车实时更新）；选中态（当前装备）明确。 */
-  private drawGaragePartCards(
-    state: PlayerUIState,
-    draft: BuildDraft,
-    px: number,
-    pw: number,
-    listTop: number,
-    listH: number,
-  ): void {
-    const slot = state.garageSelected;
-    if (!slot) return;
-    const opts = this.garageOptionsFiltered(state, slot);
-    const curVal = this.garageCurrentValue(draft, slot);
-    const gap = 8;
-    const cardW = (pw - gap) / 2;
-    const rows = Math.ceil(opts.length / 2);
-    const cardH = Math.max(
-      this.isShort ? 34 : 46,
-      Math.min(this.isShort ? 56 : 72, Math.floor((listH - gap * (rows - 1)) / Math.max(1, rows))),
-    );
-    const contentH = rows * (cardH + gap) - gap;
-    let viewH = listH;
-    let maxScroll = Math.max(0, contentH - viewH);
-    const btnH = this.targetTouchH;
-    if (maxScroll > 0) {
-      viewH = Math.max(40, listH - btnH);
-      maxScroll = Math.max(0, contentH - viewH);
-    }
-    if (this.panelScroll > maxScroll) this.panelScroll = maxScroll;
-    // F-GARAGE-COMBAT-TAB-R1：单步滚动绑定可见列表高——矮面板也能翻出下一页（不跳空）
-    this.panelScrollStepPx = Math.max(24, Math.round(viewH * 0.85));
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(this.ox + px * this.scale, this.oy + listTop * this.scale, pw * this.scale, viewH * this.scale);
-    ctx.clip();
-    let yy = listTop - this.panelScroll;
-    for (let i = 0; i < opts.length; i++) {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const c = opts[i];
-      const x = px + col * (cardW + gap);
-      const y = yy + row * (cardH + gap);
-      const fully = y >= listTop - 0.5 && y + cardH <= listTop + viewH + 0.5;
-      if (fully) {
-        this.drawPartCard(x, y, cardW, cardH, c, c.v === curVal);
-      } else if (y < listTop + viewH && y + cardH > listTop) {
-        const fill = c.locked ? '#262e3d' : c.v === curVal ? C.blueDeep : V.panel;
-        this.rect(x, y, cardW, cardH, fill, c.locked ? V.enemyOrange : V.border, 1);
+    const short = h < 40;
+    // 左侧 mini preview（部件简图；武器=炮管 / 辅助=方块 / 车身=小车 / 轮=圆）
+    const iconS = Math.max(7, Math.min(short ? 10 : 13, Math.round(h * 0.24)));
+    const iconCX = x + (short ? 10 : 16) + iconS;
+    const iconCY = y + h / 2;
+    this.drawPartIcon(c.v, iconCX, iconCY, iconS, !!c.locked);
+    // 名称（卡内单/双行；超长截断）
+    const name = (c.t.replace(/\s*★+$/, '') || '空').slice(0, short ? 7 : 9);
+    const tx = x + (short ? 24 : 34);
+    const fs1 = short ? 9 : 11;
+    const fs2 = short ? 7 : 9;
+    const fs3 = short ? 7 : 9;
+    this.text(name, tx, y + (short ? 10 : 13), fs1, c.locked ? C.textDark : V.textPrimary, 'left', 600);
+    const stars = c.t.match(/★+/)?.[0] ?? '';
+    if (stars && !short) this.text(stars, tx, y + 25, fs2, C.gold, 'left');
+    // 能量/库存 meta（左下；短卡与名称同行下方）
+    const meta = c.meta ?? '';
+    const metaY = short ? y + h - 7 : y + (h >= 56 ? 40 : 36);
+    this.text(meta, tx, metaY, fs3, c.locked ? C.textDark : C.textDim, 'left', 600);
+    // 武器/辅助小型类型标识（右上角；Must#1/12）
+    if (this.garageCategory === 'combat' && c.v !== EMPTY_SLOT) {
+      const def = registry.functionals.get(decodePartVal(c.v).defId);
+      if (def) {
+        const tag = def.category === 'weapon' ? '武' : '辅';
+        const tagCol = def.category === 'weapon' ? 'rgba(222,164,52,0.9)' : 'rgba(120,175,255,0.9)';
+        const ts = short ? 11 : 14;
+        const tsz = short ? 7 : 9;
+        this.panel(x + w - ts - 4, y + 3, ts, ts, tagCol, undefined, 3);
+        this.text(tag, x + w - ts / 2 - 4, y + 3 + ts / 2, tsz, '#fff', 'center', 700);
       }
     }
-    ctx.restore();
-    if (maxScroll > 0) {
-      this.button(px, listTop + viewH, 60, btnH, 'panel-scroll-up', '▲');
-      this.button(px + 68, listTop + viewH, 60, btnH, 'panel-scroll-down', '▼');
-    }
-  }
-
-  /** F-GARAGE-BUILD-BOARD-P0：单张部件卡（简图+名称+星级+能量+状态徽标；hit 与视觉同源）。 */
-  private drawPartCard(x: number, y: number, w: number, h: number, c: GarageOpt, equipped: boolean): void {
-    const iconS = this.isShort ? 10 : 13;
-    const iconCX = x + (this.isShort ? 16 : 20);
-    const iconCY = y + h / 2;
-    this.button(x, y, w, h, `opt:${c.v}`, '', {
-      active: equipped,
-      locked: c.locked,
-      disabled: !!c.locked,
-    });
-    this.drawPartIcon(c.v, iconCX, iconCY, iconS, !!c.locked);
-    const tx = x + (this.isShort ? 30 : 38);
-    const name = c.t.replace(/\s*★+$/, '');
-    this.text(name, tx, y + (this.isShort ? 10 : 13), this.isShort ? 11 : 13, c.locked ? C.textDark : V.textPrimary, 'left', 600);
-    const stars = c.t.match(/★+/)?.[0] ?? '';
-    if (stars) this.text(stars, tx, y + (this.isShort ? 21 : 29), this.isShort ? 9 : 11, C.gold, 'left');
-    const meta = c.meta ?? '';
-    this.text(meta, tx, y + (this.isShort ? 30 : 41), this.isShort ? 8 : 10, c.locked ? C.textDark : C.textDim, 'left');
-    // 状态徽标（右上角）
+    // 状态徽标（右下：已装备/未获得；Must#9）
     const badge = c.locked ? '未获得' : equipped ? '已装备' : '';
     if (badge) {
-      const bw = this.isShort ? 28 : 34;
-      const bh = this.isShort ? 12 : 15;
-      this.panel(x + w - bw - 4, y + 3, bw, bh, equipped ? 'rgba(56,148,90,0.75)' : 'rgba(120,130,150,0.55)', undefined, 3);
-      this.text(badge, x + w - bw / 2 - 4, y + 3 + bh / 2, this.isShort ? 8 : 9, '#fff', 'center', 700);
+      const bw = short ? 26 : 32;
+      const bh = short ? 11 : 14;
+      const by = y + h - bh - (short ? 2 : 3);
+      this.panel(x + w - bw - (short ? 3 : 4), by, bw, bh, equipped ? 'rgba(56,148,90,0.8)' : 'rgba(120,130,150,0.6)', undefined, 3);
+      this.text(badge, x + w - bw / 2 - (short ? 3 : 4), by + bh / 2, short ? 7 : 8, '#fff', 'center', 700);
     }
   }
 
@@ -1913,54 +1961,18 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ctx.restore();
   }
 
-  /** F-GARAGE-COMBAT-TAB-R1：战斗页选项按分组过滤（武器/辅助只显示对应类别部件 + 空槽）；其余分类不过滤。 */
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：部件带选项（Must#1/12）——战斗分类武器/辅助**混排**展示
+   * （不再按 cgroup 分段过滤），由卡片上的小型类型标识区分；其余分类按槽位返回。
+   */
   private garageOptionsFiltered(state: PlayerUIState, slot: string): GarageOpt[] {
-    const opts = this.garageOptions(state, slot);
-    if (this.garageCategory !== 'combat') return opts;
-    const want = this.garageCombatGroup; // 'weapon' | 'gadget'
-    return opts.filter((o) => {
-      if (o.v === EMPTY_SLOT) return true;
-      const def = registry.functionals.get(decodePartVal(o.v).defId);
-      return def?.category === want;
-    });
+    return this.garageOptions(state, slot);
   }
 
-  /** F-GARAGE-BUILD-BOARD-P0：底部能量条 + 超载原因（靠近选择区反馈，Must#6）。 */
-  private drawGarageEnergyBar(state: PlayerUIState, draft: BuildDraft, panelRect: Rect, h: number): void {
-    const snapshot = buildSnapshotFromDraft(draft, registry, 'customA');
-    const energyRes = computeEnergy(snapshot, registry);
-    const used = energyRes.error ? Number.NaN : energyRes.energy;
-    const body = registry.bodies.get(draft.bodyDefId);
-    const capacity = body?.energyCapacity ?? 0;
-    const overload = Number.isFinite(used) && used > capacity;
-    const y = panelRect.y + panelRect.h - h - (this.isShort ? 4 : 6);
-    this.panel(panelRect.x + 2, y, panelRect.w - 4, h, overload ? 'rgba(60,24,28,0.55)' : '#141d2c', overload ? V.lose : V.borderSoft, V.radiusM);
-    const pct = Number.isFinite(used) ? Math.min(100, (used / Math.max(capacity, 1)) * 100) : 0;
-    this.text('能量', panelRect.x + 8, y + h / 2, this.isShort ? 10 : 12, V.textSecondary);
-    const barX = panelRect.x + 40;
-    const barW = Math.max(20, panelRect.w - 40 - (this.isShort ? 46 : 62));
-    this.panel(barX, y + h / 2 - 4, barW, 8, '#0f1524', undefined, 4);
-    if (pct > 0) {
-      this.rect(barX, y + h / 2 - 4, barW * (pct / 100), 8, overload ? V.lose : V.ownBlue);
-    }
-    this.text(
-      Number.isFinite(used) ? `${Math.round(used)}/${capacity}` : '?/?',
-      barX + barW + 6,
-      y + h / 2,
-      this.isShort ? 10 : 12,
-      overload ? V.lose : V.textPrimary,
-      'right',
-      700,
-    );
-    // 超载原因（靠近选择区，红色一行；不只有顶栏数字）
-    if (overload) {
-      const reason = state.blockReason ?? (energyRes.error ? String(energyRes.error) : '能量超载');
-      this.text(reason, panelRect.x + panelRect.w / 2, y - (this.isShort ? 8 : 10), this.isShort ? 9 : 11, V.lose, 'center', 600);
-    } else if (state.overloadDelta != null && state.overloadDelta > 0) {
-      // F-GARAGE-LIVE-ASSEMBLY-P0：被拒绝的超载差值（Must#9：能量区显示超载差值）
-      this.text(`超载 +${Math.round(state.overloadDelta)}`, panelRect.x + panelRect.w / 2, y - (this.isShort ? 8 : 10), this.isShort ? 9 : 11, V.lose, 'center', 600);
-    }
-  }
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：能量条已常驻顶栏（garage 模式：首页 + 能量 used/cap）。
+   * 超载差值/未获得/不兼容原因由 garageStripStatus 显示在装配带内（Must#13）。
+   */
 
   /**
    * F-META-1/2/3 + F-META-UX1 + F-UX-2C：backpack MetaPage——「已获得部件」唯一管理页：

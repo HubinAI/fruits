@@ -73,6 +73,7 @@ function makeFakeWx() {
   const rafCallbacks: Array<(t: number) => void> = [];
   const drawImages: Array<{ src: unknown; w: number; h: number }> = [];
   let touchHandler: ((e: unknown) => void) | null = null;
+  let touchEndHandler: ((e: unknown) => void) | null = null; // F-GARAGE-CENTER-STAGE-P0：手势 onTouchEnd
   let hideHandler: (() => void) | null = null;
   let showHandler: (() => void) | null = null;
   let nextRaf = 1;
@@ -111,6 +112,10 @@ function makeFakeWx() {
     onTouchStart: (cb: (e: unknown) => void) => {
       touchHandler = cb;
     },
+    // F-GARAGE-CENTER-STAGE-P0：手势生命周期需 onTouchEnd（down→up 才 dispatch；真机恒有）
+    onTouchEnd: (cb: (e: unknown) => void) => {
+      touchEndHandler = cb;
+    },
     onHide: (cb: () => void) => {
       hideHandler = cb;
     },
@@ -129,6 +134,7 @@ function makeFakeWx() {
       return createCount; // 活引用：game.ts 调用 createCanvas 后实时更新
     },
     touch: () => touchHandler,
+    touchEnd: () => touchEndHandler, // F-GARAGE-CENTER-STAGE-P0：手势 onTouchEnd
     hide: () => hideHandler,
     show: () => showHandler,
   };
@@ -203,6 +209,8 @@ describe('F-WX-5 WeChat 玩家闭环 platform smoke（headless）', () => {
     expect(cta).toBeDefined(); // 正式首页 CTA 已注册命中区（F-NAV-ACTION-OWNERSHIP-P0：唯一入口）
     const p = toPhysical(fake.canvas, 2, cta!.x + cta!.w / 2, cta!.y + cta!.h / 2); // fake wx pixelRatio=2
     fake.touch()!({ touches: [{ clientX: p.x, clientY: p.y }] });
+    // F-GARAGE-CENTER-STAGE-P0：手势生命周期——start 后必 end（onTouchEnd 才派发 tap）
+    fake.touchEnd()!({ touches: [{ clientX: p.x, clientY: p.y }] });
     expect(runtime.playerPhase).toBe('matching'); // 触摸 → Action → Gameplay command 全链路
 
     // —— Matching 候选 1.42s → MatchPreview（700ms 锁定稳定）→ READY → 开战 ——

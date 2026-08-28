@@ -116,12 +116,13 @@ function items(env: HostEnv): string[] {
 
 function goBackpack(env: HostEnv): void {
   // F-HOME-1：Home（默认）→ 配置页 → 顶栏「背包」
+  // F-GARAGE-CENTER-STAGE-P0：Garage 顶栏不再含 backpack/more 入口（页面仍存在）；
+  // 测试走私有 dispatch（metaPage='home' 后 dispatch('nav:backpack')）。
   if (env.areas().some((a) => a.id === 'home-garage')) {
     const homeGarage = env.areas().find((a) => a.id === 'home-garage')!;
     env.pointer(homeGarage.x + homeGarage.w / 2, homeGarage.y + homeGarage.h / 2);
   }
-  const navBp = env.areas().find((a) => a.id === 'nav:backpack')!;
-  env.pointer(navBp.x + navBp.w / 2, navBp.y + navBp.h / 2);
+  (env.host as unknown as { dispatch: (id: string) => void }).dispatch('nav:backpack');
 }
 
 function click(env: HostEnv, id: string): void {

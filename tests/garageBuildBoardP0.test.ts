@@ -182,53 +182,51 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
     // 卡内容（源码守卫）：简图 drawPartIcon / 名称 / 星级 C.gold / 能量 meta / 状态徽标
     const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
     const cardStart = src.indexOf('private drawPartCard');
-    const cardBody = src.slice(cardStart, cardStart + 1300);
+    const cardBody = src.slice(cardStart, cardStart + 2400);
     expect(cardBody, '部件卡绘制简图').toContain('drawPartIcon');
     expect(cardBody, '部件卡绘制名称').toContain('c.t.replace');
     expect(cardBody, '部件卡绘制星级（★ 金色）').toContain('C.gold');
     expect(cardBody, '部件卡绘制能量 meta').toContain('c.meta');
     expect(cardBody, '部件卡绘制状态徽标（已装备/未获得）').toContain("'已装备'");
     expect(cardBody, '部件卡绘制未获得徽标').toContain("'未获得'");
+    // F-GARAGE-CENTER-STAGE-P0：战斗分类卡片带内武器/辅助小型类型标识（Must#1/12）
+    expect(cardBody, '部件卡武器/辅助小标').toContain("'武'");
+    expect(cardBody, '部件卡武器/辅助小标').toContain("'辅'");
   });
 
-  it('T4. 战斗分类：武器｜辅助分段 + 共享挂点行 + 选挂点立即刷新部件卡（Must#4）', () => {
+  it('T4. 战斗分类：挂点选择只通过战车真实挂点（hp-sel）+ 武器/辅助混排卡片带（Must#4/7）', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(garageState());
     goGarage(env);
-    // 点「战斗」分类 tab（garageCategory='combat'，默认武器分组）→ 分段 + 共享挂点行 + 部件卡
+    // 点「战斗」分类 tab（garageCategory='combat'）→ 默认选挂点（runtime 侧自动）→ 卡片带
     const tabCombat = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:combat')!;
     env.pointer(tabCombat.x + tabCombat.w / 2, tabCombat.y + tabCombat.h / 2);
     env.host.render(garageState({ garageSelected: 'front' }));
-    // 战斗分类 → 分段「武器｜辅助」（两组入口同屏）+ 共享挂点行（garage-cslot:<hp>）
-    const wSeg = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cgroup:weapon');
-    const gSeg = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cgroup:gadget');
-    expect(wSeg, '武器分段入口').toBeTruthy();
-    expect(gSeg, '辅助分段入口').toBeTruthy();
-    const chips = env.host.getHitAreasForTest().filter((a) => a.id.startsWith('garage-cslot:'));
-    expect(chips.length, '共享挂点行 chip').toBeGreaterThanOrEqual(1);
-    // 默认武器分组 → 部件卡（武器）同屏出现（同一屏：不再独立挂点列表页）
+    // 无文字挂点页签（Must#7）：战斗页不存在 garage-cslot:/garage-cgroup: 命中区
+    expect(env.host.getHitAreasForTest().some((a) => a.id.startsWith('garage-cslot:')), '无文字挂点 chip').toBe(false);
+    expect(env.host.getHitAreasForTest().some((a) => a.id.startsWith('garage-cgroup:')), '无武器/辅助文字分段').toBe(false);
+    // 部件卡同屏出现（武器+辅助混排；类型由卡片小标区分）
     const opts = env.host.getHitAreasForTest().filter((a) => a.id.startsWith('opt:'));
-    expect(opts.length, '默认武器分组部件卡同屏出现').toBeGreaterThan(0);
-    // 挂点 chip 命中区正常（视觉==命中）
-    const chip = chips[0]!;
-    expect(chip.x >= 0 && chip.w > 0, '挂点 chip 命中区正常').toBe(true);
+    expect(opts.length, '战斗部件选项出现').toBeGreaterThan(0);
   });
 
-  it('T5. 能量条 + 超载原因靠近选择区（Must#6）', () => {
+  it('T5. 能量 used/cap 常驻顶栏 + 超载差值/原因嵌入装配带（Must#6/13）', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(garageState());
     goGarage(env);
     const tabBody = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:body')!;
     env.pointer(tabBody.x + tabBody.w / 2, tabBody.y + tabBody.h / 2);
     env.host.render(garageState({ garageSelected: 'body' }));
-    // 能量条文本（used/capacity 或 能量 标签）在面板内
-    expect(env.texts.some((t) => t.includes('/') || t.startsWith('能量')), '能量条反馈存在').toBe(true);
+    // 能量文本（used/capacity 或 能量 标签）存在
+    expect(env.texts.some((t) => t.includes('/') || t.startsWith('能量')), '能量反馈存在').toBe(true);
     const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
-    const barStart = src.indexOf('private drawGarageEnergyBar');
-    const barBody = src.slice(barStart, barStart + 1000);
-    expect(barBody, '能量条画在面板底部').toContain('panelRect.y + panelRect.h - h');
-    expect(barBody, '超载原因红字（overload 分支）').toContain('V.lose');
-    expect(src, '超载原因文本（blockReason/energyRes.error）').toContain('state.blockReason');
+    // 顶栏常驻能量（drawMobileTopBar → computeGarageTopBarLayout garage 模式）
+    expect(src, '顶栏能量组').toContain('drawMobileTopBar');
+    expect(src, '能量 used/cap 文案').toContain('energyValue');
+    // 超载差值/原因显示在装配带内（garageStripStatus，Must#13）
+    expect(src, '装配带状态行（超载差值）').toContain('garageStripStatus');
+    expect(src, '超载差值红字（V.lose）').toContain('V.lose');
+    expect(src, '原因来源 blockReason').toContain('state.blockReason');
   });
 
   it('T6. 2 次点击完成一次已选挂点的部件替换（Acceptance#2）+ 装备变化可见（Must#5）', () => {
@@ -236,12 +234,11 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
     // 源码路径：garage-cat（1 击分类）→ opt（2 击选件）；无中间挂点列表页
     expect(src, '分类 tab 点击处理').toContain("id.startsWith('garage-cat:')");
     expect(src, '部件卡点击处理 opt:').toContain("id.startsWith('opt:')");
-    // 装备变化可见：选件 → onPickGarageOption → runtime 更新 draft → 左侧 preview 重绘
-    // （runtime 层行为；host 侧确保 opt 点击派发 onPickGarageOption）
+    // 装备变化可见：选件 → onPickGarageOption → runtime 更新 draft → 中央 preview 重绘
     expect(src, '部件卡点击派发 pick').toContain("this.actions?.onPickGarageOption(id.slice(4))");
-    // 选中态明确：drawGaragePartCards 调用 drawPartCard 时传 equipped = c.v === curVal（Must#5）
-    const cardsStart = src.indexOf('private drawGaragePartCards');
-    expect(src.slice(cardsStart, cardsStart + 2200), '选中态 = 当前装备（调用传参）').toContain('this.drawPartCard(x, y, cardW, cardH, c, c.v === curVal)');
+    // 选中态明确：drawGarageStripCards 调用 drawPartCard 时传 equipped = c.v === curVal（Must#5）
+    const cardsStart = src.indexOf('private drawGarageStripCards');
+    expect(src.slice(cardsStart, cardsStart + 2600), '选中态 = 当前装备（调用传参）').toContain('this.drawPartCard(x, row.y, cardW, cardH, c, c.v === curVal');
   });
 
   it('T7. 360×180~844×390 矩阵：装配台不抛 + 全部 hit 在 safe 内 + 无寻找对手（Must#10）', () => {

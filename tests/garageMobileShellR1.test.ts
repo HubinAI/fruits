@@ -1,18 +1,18 @@
 /**
- * F-GARAGE-MOBILE-SHELL-R1｜车库顶栏冲突与配置布局验收（自动化矩阵）。
+ * F-GARAGE-CENTER-STAGE-P0｜车库顶栏极简与中央装配台布局验收（演进自 F-GARAGE-MOBILE-SHELL-R1）。
  *
  * 覆盖：
- * A. 顶栏每组独立 rect 契约（back/coin/rating/energyGroup/backpack/more 互不重叠；
- *    能量数值 rect 右缘 < 背包左缘——回归「75/90 与背包重叠」bug）。
- * B. 文字 envelope 验证（estimateTextWidth 上界：coin/rating/energyValue 文案宽 ≤ 各自 rect 宽；
- *    长段位与三位数资源值完整显示）。
- * C. 空间不足按优先级降级（360×180 short：保留 back+energy+backpack；more/coin 可降级；
- *    段位缩写仍完整）。
- * D. 右侧配置区撑满（2×2 卡片底缘贴近面板底——无大块空面板；摘要条显示当前车辆名）。
- * E. 五视口矩阵（360×180 / 420×210 / 460×230 / 621×351 / 844×390）：顶栏无重叠、面板/车辆 safe。
- * F. 左侧车辆取景区 = vehicleRect（唯一布局源；不被顶栏/右侧面板覆盖）。
- * G. 三次点击完成换武器（武器入口 → 武器位 → 选项）且预览链路存在。
+ * A. 顶栏 garage 模式只保留 首页 + 能量 used/cap（金币/段位/背包/更多不显示——Must#4）；
+ *    back/energy 独立 rect 互不重叠；能量数值右缘 ≤ 能量组右缘。
+ * B. 文字 envelope 验证（estimateTextWidth 上界：energyLabel/energyValue 文案宽 ≤ 各自 rect 宽）。
+ * C. 空间不足按优先级（360×180 short：back + 能量必留）。
+ * D. 中央装配台：分类 tab + 部件卡 + 战车挂点 hp-sel 全部位于舞台/装配带；无右侧面板。
+ * E. 五视口矩阵（360×180 / 420×210 / 460×230 / 621×351 / 844×390）：顶栏/stage/strip 全 safe；
+ *    strip 高占屏幕 27%~34%；stage 全宽；车辆取景 = stageRect（中央）。
+ * F. 中央取景区 = stageRect（唯一布局源；getPreviewFramingRect 同源）。
+ * G. 换武器链路（战斗分类 → 挂点 → 部件卡）命中完整。
  * H. 返回首页后配置保留（nav:home → Home → home-garage 回来 draft 不变）。
+ * I. 命中区与视觉同源（nav:home / 分类 tab 位于装配带内）。
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { CanvasPlayerUIHost } from '../src/ui/canvasPlayerUIHost';
@@ -146,199 +146,162 @@ function goGarage(env: HostEnv): void {
   env.pointer(home.x + home.w / 2, home.y + home.h / 2);
 }
 
-describe('F-GARAGE-MOBILE-SHELL-R1｜车库顶栏独立 rect 契约', () => {
+describe('F-GARAGE-CENTER-STAGE-P0｜车库顶栏极简（garage 模式只 back+能量）', () => {
   afterEach(() => {
     bindPlatformCore(createWebCore());
     vi.unstubAllGlobals();
   });
 
-  it('A1. 844×390 garage 模式：全部 8 组独立 rect 存在、互不重叠、能量数值右缘 < 背包左缘', () => {
+  it('A1. 844×390 garage 模式：只 back + energy（coin/rating/backpack/more 为 null）、互不重叠、能量数值右缘 ≤ 组右缘', () => {
     const profile = resolveLayoutProfile(844, 390);
     const l = computeMobileGarageLayout({ w: 844, h: 390 }, PROD_INSETS, profile);
     const tb = computeGarageTopBarLayout(l.topBarRect, profile, { mode: 'garage' }, topBarTexts());
-    expect(tb.back, '‹ 首页').toBeTruthy();
-    expect(tb.coin, '金币').toBeTruthy();
-    expect(tb.rating, '段位').toBeTruthy();
-    expect(tb.backpack, '背包').toBeTruthy();
-    expect(tb.more, '更多').toBeTruthy();
-    // 能量数值 rect 右缘 ≤ 能量组右缘 < 背包左缘（回归「75/90 与背包重叠」）
+    expect(tb.back, '‹ 首页 存在').toBeTruthy();
+    expect(tb.energyGroup, '能量组存在').toBeTruthy();
+    // Must#4：金币/段位/背包/更多不在装配页顶栏显示
+    expect(tb.coin, '金币不显示').toBeNull();
+    expect(tb.rating, '段位不显示').toBeNull();
+    expect(tb.backpack, '背包不显示').toBeNull();
+    expect(tb.more, '更多不显示').toBeNull();
+    // 能量数值右缘 ≤ 能量组右缘（不溢出）
     expect(tb.energyValue.x + tb.energyValue.w, '能量数值右缘 ≤ 能量组右缘').toBeLessThanOrEqual(tb.energyGroup.x + tb.energyGroup.w);
-    expect(tb.energyGroup.x + tb.energyGroup.w, '能量组右缘 < 背包左缘').toBeLessThanOrEqual(tb.backpack!.x - 1);
-    // 所有组互不重叠（水平）
-    const groups: Array<[string, { x: number; w: number }]> = [
-      ['back', tb.back!],
-      ['coin', tb.coin!],
-      ['rating', tb.rating!],
-      ['energyGroup', tb.energyGroup],
-      ['backpack', tb.backpack!],
-      ['more', tb.more!],
-    ];
-    for (let i = 0; i < groups.length; i++) {
-      for (let j = i + 1; j < groups.length; j++) {
-        const a = groups[i]!;
-        const b = groups[j]!;
-        const overlap = a[1].x < b[1].x + b[1].w && b[1].x < a[1].x + a[1].w;
-        expect(overlap, `${a[0]} 与 ${b[0]} 水平不重叠`).toBe(false);
-      }
-    }
+    // back 与 energy 组互不重叠
+    expect(tb.back!.x + tb.back!.w, 'back 右缘 ≤ energy 左缘').toBeLessThanOrEqual(tb.energyGroup.x);
   });
 
-  it('A2. Host 渲染：顶栏按钮 hitArea == 布局 rect（绘制与命中同源）', () => {
+  it('A2. Host 渲染：顶栏只注册 nav:home；Garage 内无 nav:backpack / nav:more / 金币段位（Must#4）', () => {
     const env = makeHost({ w: 844, h: 390 }, PROD_INSETS);
     env.host.render(garageState());
     goGarage(env);
-    const profile = resolveLayoutProfile(844, 390);
-    const l = computeMobileGarageLayout({ w: 844, h: 390 }, PROD_INSETS, profile);
-    const tb = computeGarageTopBarLayout(l.topBarRect, profile, { mode: 'garage' }, topBarTexts());
     const areas = env.areas();
-    for (const [id, rect] of [
-      ['nav:home', tb.back!],
-      ['nav:backpack', tb.backpack!],
-      ['nav:more', tb.more!],
-    ] as const) {
-      const a = areas.find((x) => x.id === id);
-      expect(a, `${id} hitArea 存在`).toBeTruthy();
-      expect(a!.x, `${id} x == layout`).toBeCloseTo(rect.x, 5);
-      expect(a!.y, `${id} y == layout`).toBeCloseTo(rect.y, 5);
-      expect(a!.w, `${id} w == layout`).toBeCloseTo(rect.w, 5);
-      expect(a!.h, `${id} h == layout`).toBeCloseTo(rect.h, 5);
-    }
-    // 能量数值 rect 不与背包 hitArea 重叠（用户 bug 的直接回归：75/90 必须画在背包左侧）
-    const bp = areas.find((x) => x.id === 'nav:backpack')!;
-    expect(tb.energyValue.x + tb.energyValue.w, '能量数值右缘 ≤ 背包 hitArea 左缘').toBeLessThanOrEqual(bp.x);
+    expect(areas.find((x) => x.id === 'nav:home'), 'nav:home 存在').toBeTruthy();
+    expect(areas.some((x) => x.id === 'nav:backpack'), '装配页无背包入口').toBe(false);
+    expect(areas.some((x) => x.id === 'nav:more'), '装配页无更多入口').toBe(false);
   });
 
-  it('B1. 文字 envelope：coin/rating/energyValue 文案估算宽 ≤ 各自 rect 宽（长段位与三位数资源完整）', () => {
+  it('B1. 文字 envelope：energyLabel/energyValue 文案估算宽 ≤ 各自 rect 宽', () => {
     const profile = resolveLayoutProfile(844, 390);
     const l = computeMobileGarageLayout({ w: 844, h: 390 }, PROD_INSETS, profile);
     const texts = topBarTexts();
     const tb = computeGarageTopBarLayout(l.topBarRect, profile, { mode: 'garage' }, texts);
     const fs = 14 * profile.fontScale;
-    expect(estimateTextWidth(texts.coin, fs), '金币文案宽 ≤ coin rect 宽').toBeLessThanOrEqual(tb.coin!.w);
-    expect(estimateTextWidth(texts.rating, fs), '段位完整文案宽 ≤ rating rect 宽（不缩写不裁切）').toBeLessThanOrEqual(tb.rating!.w);
     expect(estimateTextWidth(texts.energyValue, fs), '能量数值宽 ≤ energyValue rect 宽').toBeLessThanOrEqual(tb.energyValue.w);
     expect(estimateTextWidth(texts.energyLabel, fs), '能量标签宽 ≤ energyLabel rect 宽').toBeLessThanOrEqual(tb.energyLabel.w);
   });
 
-  it('C1. 360×180 short 降级：保留 back+能量+背包；more 可隐藏；段位缩写仍完整显示', () => {
+  it('C1. 360×180 short：back + 能量必留；其余恒 null', () => {
     const profile = resolveLayoutProfile(360, 180);
     const l = computeMobileGarageLayout({ w: 360, h: 180 }, PROD_INSETS, profile);
-    const texts = topBarTexts();
-    const tb = computeGarageTopBarLayout(l.topBarRect, profile, { mode: 'garage' }, texts);
+    const tb = computeGarageTopBarLayout(l.topBarRect, profile, { mode: 'garage' }, topBarTexts());
     expect(tb.back, '‹ 首页 必留').toBeTruthy();
-    expect(tb.backpack, '背包 必留').toBeTruthy();
     expect(tb.energyGroup, '能量组 必留').toBeTruthy();
-    // 降级项：coin 可隐藏；more 可隐藏
-    // 段位若显示，则其 rect 宽必须容纳最终渲染文案（ratingRender 与 rect 同源）
-    if (tb.rating) {
-      const fs = 14 * profile.fontScale;
-      expect(estimateTextWidth(tb.ratingRender, fs), '段位缩写文案 ≤ rating rect 宽').toBeLessThanOrEqual(tb.rating.w);
-    }
-    // 能量数值仍不与背包重叠
-    if (tb.backpack) {
-      expect(tb.energyValue.x + tb.energyValue.w, 'short 屏能量数值右缘 ≤ 背包左缘').toBeLessThanOrEqual(tb.backpack.x);
-    }
+    expect(tb.backpack, '背包不显示').toBeNull();
+    expect(tb.more, '更多不显示').toBeNull();
+    expect(tb.coin, '金币不显示').toBeNull();
+    expect(tb.rating, '段位不显示').toBeNull();
   });
 
-  it('C2. 五视口矩阵：顶栏各组水平不重叠 + 保留项（back/能量/背包）恒存在 + 全部在 safe 内', () => {
+  it('C2. 五视口矩阵：back/能量恒存在 + 组水平不重叠 + 全部在 safe 内', () => {
     for (const vp of VPS) {
       const profile = resolveLayoutProfile(vp.w, vp.h);
       const l = computeMobileGarageLayout(vp, PROD_INSETS, profile);
       const tb = computeGarageTopBarLayout(l.topBarRect, profile, { mode: 'garage' }, topBarTexts());
       expect(tb.back, `${vp.w}×${vp.h} back 必留`).toBeTruthy();
-      expect(tb.backpack, `${vp.w}×${vp.h} backpack 必留`).toBeTruthy();
       expect(tb.energyGroup, `${vp.w}×${vp.h} energy 必留`).toBeTruthy();
-      const groups: Array<[string, { x: number; w: number }]> = [];
-      for (const [k, r] of [
-        ['back', tb.back],
-        ['coin', tb.coin],
-        ['rating', tb.rating],
+      const groups: Array<[string, { x: number; w: number }]> = [
+        ['back', tb.back!],
         ['energyGroup', tb.energyGroup],
-        ['backpack', tb.backpack],
-        ['more', tb.more],
-      ] as const) {
-        if (r) groups.push([k, r]);
-      }
+      ];
       for (let i = 0; i < groups.length; i++) {
         for (let j = i + 1; j < groups.length; j++) {
           const a = groups[i]!;
           const b = groups[j]!;
-          expect(a[1].x < b[1].x + b[1].w && b[1].x < a[1].x + a[1].w, `${vp.w}×${vp.h} ${a[0]} 与 ${b[0]} 不重叠`).toBe(false);
+          const overlap = a[1].x < b[1].x + b[1].w && b[1].x < a[1].x + a[1].w;
+          expect(overlap, `${vp.w}×${vp.h} ${a[0]} 与 ${b[0]} 水平不重叠`).toBe(false);
         }
         expect(groups[i]![1].x, `${vp.w}×${vp.h} ${groups[i]![0]} x ≥ safeLeft`).toBeGreaterThanOrEqual(PROD_INSETS.left);
         expect(groups[i]![1].x + groups[i]![1].w, `${vp.w}×${vp.h} ${groups[i]![0]} 右缘 ≤ safeRight`).toBeLessThanOrEqual(vp.w - PROD_INSETS.right);
       }
-      // 能量数值 rect 右缘 ≤ 能量组右缘 < 背包左缘（所有视口）
-      expect(tb.energyValue.x + tb.energyValue.w, `${vp.w}×${vp.h} 能量数值右缘 ≤ 组右缘`).toBeLessThanOrEqual(tb.energyGroup.x + tb.energyGroup.w);
-      if (tb.backpack) {
-        expect(tb.energyValue.x + tb.energyValue.w, `${vp.w}×${vp.h} 能量数值 < 背包左缘`).toBeLessThanOrEqual(tb.backpack.x);
-      }
     }
   });
 
-  it('D1. 右侧单屏装配台：分类 tab + 挂点 chip + 部件卡 + 能量条全部在面板内（无大块空面板、无后台表格感）', () => {
+  it('D1. 中央装配台：分类 tab + 部件卡 + 战车挂点全部在舞台/装配带；无右侧面板', () => {
     const env = makeHost({ w: 844, h: 390 }, PROD_INSETS);
     env.host.render(garageState({ garageSelected: 'body' }));
     goGarage(env);
     const profile = resolveLayoutProfile(844, 390);
     const l = computeMobileGarageLayout({ w: 844, h: 390 }, PROD_INSETS, profile);
     const areas = env.areas();
-    // F-GARAGE-COMBAT-TAB-R1：分类 tab 3 个（车身/移动/战斗，武器+辅助合并为战斗）+ 挂点 chip + 部件卡 + 能量条
+    // 分类 tab 3 个（车身/移动/战斗；武器+辅助合并）全部在底部装配带内
     for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat']) {
-      expect(areas.find((a) => a.id === id), `分类 tab ${id} 存在`).toBeTruthy();
+      const a = areas.find((x) => x.id === id);
+      expect(a, `分类 tab ${id} 存在`).toBeTruthy();
+      expect(a!.y, `${id} 位于装配带内`).toBeGreaterThanOrEqual(l.stripRect.y);
+      expect(a!.y + a!.h, `${id} 不超出装配带`).toBeLessThanOrEqual(l.stripRect.y + l.stripRect.h + 0.5);
     }
-    const panelTop = l.panelRect.y;
-    const panelBottom = l.panelRect.y + l.panelRect.h;
-    // 部件卡（opt:）在面板内（不超屏、不越面板）
+    // 部件卡（opt:）在装配带内（不超屏、不越带）
     const opts = areas.filter((a) => a.id.startsWith('opt:'));
     expect(opts.length, '部件卡存在（garageSelected=body）').toBeGreaterThan(0);
     for (const o of opts) {
-      expect(o.y, '部件卡 y ≥ 面板顶').toBeGreaterThanOrEqual(panelTop);
-      expect(o.y + o.h, '部件卡底 ≤ 面板底').toBeLessThanOrEqual(panelBottom + 0.5);
+      expect(o.y, '部件卡 y ≥ 装配带顶').toBeGreaterThanOrEqual(l.stripRect.y);
+      expect(o.y + o.h, '部件卡底 ≤ 装配带底').toBeLessThanOrEqual(l.stripRect.y + l.stripRect.h + 0.5);
     }
-    // 能量条文本（能量 used/capacity）在面板内反馈（Must#6）
-    expect(env.texts.some((t) => t.startsWith('能量') || t.includes('/')), '能量条反馈存在').toBe(true);
+    // Must#2/Forbidden：无右侧固定面板——右半屏（x ≥ w/2）不得出现全高配置面板
+    const rightPanel = areas.filter(
+      (a) => a.x >= 844 / 2 - 1 && a.y < 100 && a.y + a.h > 200 && a.w > 150,
+    );
+    expect(rightPanel.length, '右半屏无固定配置面板').toBe(0);
   });
 
-  it('E1. 五视口：右侧面板与左侧车辆区全在 safe 内（绘制区不溢出）', () => {
+  it('E1. 五视口：topBar/stage/strip/vehicle 全 safe；stage 全宽；strip 高 27%~34%', () => {
     for (const vp of VPS) {
       const profile = resolveLayoutProfile(vp.w, vp.h);
       const l = computeMobileGarageLayout(vp, PROD_INSETS, profile);
       for (const [k, r] of [
         ['topBar', l.topBarRect],
+        ['stage', l.stageRect],
+        ['strip', l.stripRect],
         ['vehicle', l.vehicleRect],
-        ['panel', l.panelRect],
-        ['content', l.contentRect],
       ] as const) {
-        expect(r.x, `${vp.w}×${vp.h} ${k} x ≥ safeLeft`).toBeGreaterThanOrEqual(PROD_INSETS.left);
-        expect(r.y, `${vp.w}×${vp.h} ${k} y ≥ safeTop`).toBeGreaterThanOrEqual(PROD_INSETS.top);
+        expect(r.x, `${vp.w}×${vp.h} ${k} x ≥ safeLeft`).toBeGreaterThanOrEqual(PROD_INSETS.left - 0.5);
+        expect(r.y, `${vp.w}×${vp.h} ${k} y ≥ safeTop`).toBeGreaterThanOrEqual(PROD_INSETS.top - 0.5);
         expect(r.x + r.w, `${vp.w}×${vp.h} ${k} 右缘 ≤ safeRight`).toBeLessThanOrEqual(vp.w - PROD_INSETS.right + 0.5);
         expect(r.y + r.h, `${vp.w}×${vp.h} ${k} 底缘 ≤ safeBottom`).toBeLessThanOrEqual(vp.h - PROD_INSETS.bottom + 0.5);
       }
-      // 面板与车辆不重叠（中间 gap）
-      expect(l.vehicleRect.x + l.vehicleRect.w, `${vp.w}×${vp.h} vehicle 右缘 ≤ panel 左缘`).toBeLessThanOrEqual(l.panelRect.x);
-      // 车辆顶缘在顶栏之下（不被顶栏裁切）
-      expect(l.vehicleRect.y, `${vp.w}×${vp.h} vehicle 顶缘 ≥ topBar 底`).toBeGreaterThanOrEqual(l.topBarRect.y + l.topBarRect.h);
+      // Must#2：中央舞台全宽（左右贴 safe 边）
+      expect(l.stageRect.x, `${vp.w}×${vp.h} stage x == safeLeft`).toBe(PROD_INSETS.left);
+      expect(l.stageRect.x + l.stageRect.w, `${vp.w}×${vp.h} stage 右缘 == safeRight`).toBe(vp.w - PROD_INSETS.right);
+      expect(l.vehicleRect, 'vehicleRect == stageRect（中央取景同源）').toEqual(l.stageRect);
+      // Must#5：装配带高占屏幕 27%~34%
+      const ratio = l.stripRect.h / vp.h;
+      expect(ratio, `${vp.w}×${vp.h} strip 高占比 ${(ratio * 100).toFixed(1)}% ≥ 27%`).toBeGreaterThanOrEqual(0.27);
+      expect(ratio, `${vp.w}×${vp.h} strip 高占比 ${(ratio * 100).toFixed(1)}% ≤ 34%`).toBeLessThanOrEqual(0.34);
+      // 舞台顶缘在顶栏之下（不被顶栏裁切）
+      expect(l.stageRect.y, `${vp.w}×${vp.h} stage 顶缘 ≥ topBar 底`).toBeGreaterThanOrEqual(l.topBarRect.y + l.topBarRect.h);
+      // 舞台不与装配带重叠
+      expect(l.stageRect.y + l.stageRect.h, `${vp.w}×${vp.h} stage 底 ≤ strip 顶`).toBeLessThanOrEqual(l.stripRect.y);
     }
   });
 
-  it('F1. 左侧车辆取景区 = vehicleRect（唯一布局源；getPreviewFramingRect 同源）', () => {
+  it('F1. 中央取景区 = stageRect（唯一布局源；getPreviewFramingRect 同源）', () => {
     const env = makeHost({ w: 360, h: 180 }, PROD_INSETS);
     env.host.render(garageState());
     goGarage(env);
     const profile = resolveLayoutProfile(360, 180);
     const expected = computeMobileGarageLayout({ w: 360, h: 180 }, PROD_INSETS, profile).vehicleRect;
-    const host = env.host as unknown as { getPreviewFramingRect?: () => { x: number; y: number; w: number; h: number } | null };
+    const host = env.host as unknown as {
+      getPreviewFramingRect?: () => { x: number; y: number; w: number; h: number; mode?: string } | null;
+    };
     const framing = host.getPreviewFramingRect?.();
     expect(framing, '车辆取景区存在').toBeTruthy();
     expect(framing!.x, '取景区 x == vehicleRect.x').toBe(expected.x);
     expect(framing!.y, '取景区 y == vehicleRect.y').toBe(expected.y);
     expect(framing!.w, '取景区 w == vehicleRect.w').toBe(expected.w);
     expect(framing!.h, '取景区 h == vehicleRect.h').toBe(expected.h);
+    expect(framing!.mode, '取景区 mode = garage').toBe('garage');
   });
 
-  it('G1. 三次点击换武器链路完整：武器入口 → 武器位 → 选项（富库存）+ 命中 ≥48', () => {
-    // canEquipPart 读全局库存 → 注入富库存使全部选项可点
+  it('G1. 换武器链路完整：战斗分类 tab → 挂点选中 → 部件卡命中 ≥40', () => {
     vi.stubGlobal('localStorage', {
       getItem: (key: string) =>
         key === 'strongfruit.ownedParts.v2' ? JSON.stringify({ ...richInv(), __v: 2 }) : null,
@@ -348,23 +311,21 @@ describe('F-GARAGE-MOBILE-SHELL-R1｜车库顶栏独立 rect 契约', () => {
     const env = makeHost({ w: 844, h: 390 }, PROD_INSETS);
     env.host.render(garageState());
     goGarage(env);
-    // F-GARAGE-COMBAT-TAB-R1：2 次点击换装（Acceptance#2）——
-    // 第 1 击：点「战斗」分类 tab（两组挂点 chip + 默认武器分组部件卡出现；本测试 makeHost 未设 actions，
-    // 故手动 render 选中态模拟 runtime 自动选挂点）
-    const ew = env.areas().find((a) => a.id === 'garage-cat:combat')!;
-    expect(ew.h, '武器分类 tab 命中高>0（紧凑）').toBeGreaterThan(0);
-    env.pointer(ew.x + ew.w / 2, ew.y + ew.h / 2);
+    // 第 1 击：点「战斗」分类 tab
+    const combat = env.areas().find((a) => a.id === 'garage-cat:combat')!;
+    expect(combat.h, '战斗分类 tab 命中高>0').toBeGreaterThan(0);
+    env.pointer(combat.x + combat.w / 2, combat.y + combat.h / 2);
+    // 模拟 runtime 自动选中第一个挂点（Must#8 默认选择）
     const slotKey = 'front'; // boxBody 第一个硬点
     env.host.render(garageState({ garageSelected: slotKey }));
-    // 第 2 击：选一个武器选项（opt:）
+    // 第 2 击：选一个武器选项（opt:）——部件卡命中高 ≥40
     const opts = env.areas().filter((a) => a.id.startsWith('opt:') && a.id !== 'opt:none');
-    expect(opts.length, '武器选项出现（富库存）').toBeGreaterThan(0);
+    expect(opts.length, '战斗部件选项出现（富库存）').toBeGreaterThan(0);
     const opt = opts[0]!;
-    expect(opt.h, '部件卡命中高 ≥40（紧凑信息密度）').toBeGreaterThanOrEqual(40);
-    env.pointer(opt.x + opt.w / 2, opt.y + opt.h / 2);
-    // 预览链路：renderer previewSolo 由 getPreviewFramingRect（=vehicleRect）驱动（源码守卫）
-    const hostSrc = require('fs').readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
-    expect(hostSrc, '预览经 getPreviewFramingRect 取景区').toContain('getPreviewFramingRect');
+    expect(opt.h, '部件卡命中高 ≥40').toBeGreaterThanOrEqual(40);
+    // 无文字挂点页签（Must#7）：战斗页不存在 garage-cslot:/garage-cgroup: 命中区
+    expect(env.areas().some((a) => a.id.startsWith('garage-cslot:')), '无文字挂点 chip').toBe(false);
+    expect(env.areas().some((a) => a.id.startsWith('garage-cgroup:')), '无武器/辅助文字分段').toBe(false);
   });
 
   it('H1. 返回首页后配置保留：nav:home → Home → home-garage 回来 draft 引用不变', () => {
@@ -380,10 +341,10 @@ describe('F-GARAGE-MOBILE-SHELL-R1｜车库顶栏独立 rect 契约', () => {
     goGarage(env);
     const host = env.host as unknown as { lastState: PlayerUIState | null };
     expect(host.lastState?.draft, '配置结果保留（draft 引用不变）').toBe(draft0);
-    expect(env.areas().some((a) => a.id === 'garage-cat:body'), '配置页 2×2 恢复').toBe(true);
+    expect(env.areas().some((a) => a.id === 'garage-cat:body'), '配置页装配带恢复').toBe(true);
   });
 
-  it('I1. 命中区与视觉同源：顶栏按钮 hitArea rect == 布局 rect（绘制与命中同源，五视口抽查）', () => {
+  it('I1. 命中区与视觉同源：nav:home 顶栏按钮 + 分类 tab 装配带内（绘制与命中同源）', () => {
     for (const vp of [VPS[0]!, VPS[3]!, VPS[4]!]) {
       const env = makeHost(vp, PROD_INSETS);
       env.host.render(garageState());
@@ -392,14 +353,13 @@ describe('F-GARAGE-MOBILE-SHELL-R1｜车库顶栏独立 rect 契约', () => {
       const l = computeMobileGarageLayout(vp, PROD_INSETS, profile);
       const tb = computeGarageTopBarLayout(l.topBarRect, profile, { mode: 'garage' }, topBarTexts());
       const areas = env.areas();
-      if (tb.back) {
-        const a = areas.find((x) => x.id === 'nav:home')!;
-        expect(a.x, `${vp.w}×${vp.h} nav:home x 同源`).toBe(tb.back.x);
-      }
-      if (tb.backpack) {
-        const a = areas.find((x) => x.id === 'nav:backpack')!;
-        expect(a.x, `${vp.w}×${vp.h} nav:backpack x 同源`).toBe(tb.backpack.x);
-        expect(a.w, `${vp.w}×${vp.h} nav:backpack w 同源`).toBe(tb.backpack.w);
+      const a = areas.find((x) => x.id === 'nav:home')!;
+      expect(a.x, `${vp.w}×${vp.h} nav:home x 同源`).toBe(tb.back!.x);
+      expect(a.y, `${vp.w}×${vp.h} nav:home y 同源`).toBe(tb.back!.y);
+      for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat']) {
+        const t = areas.find((x) => x.id === id)!;
+        expect(t.y, `${vp.w}×${vp.h} ${id} 在装配带内`).toBeGreaterThanOrEqual(l.stripRect.y);
+        expect(t.y + t.h, `${vp.w}×${vp.h} ${id} 不超装配带`).toBeLessThanOrEqual(l.stripRect.y + l.stripRect.h);
       }
     }
   });

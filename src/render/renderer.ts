@@ -296,6 +296,8 @@ export class Renderer {
   private damageGroupFx = new Map<string, FloatingText>();
   /** F-HOME-P0-LAYER：首页程序化背景下沉开关（背景层<车辆层<UI层）；仅首页开启 */
   private homeBackdrop = false;
+  /** F-GARAGE-CENTER-STAGE-P0：Garage 装配页背景（深蓝车库展示台；与 homeBackdrop 互斥） */
+  private garageBackdrop = false;
   /** F-PREBATTLE-VISUAL-R1：战前（Matching/MatchPreview）程序化背景下沉开关——水果竞技场
    *  简化版（背景层<车辆层<UI层）；仅战前开启；与 homeBackdrop 互斥（Battle 两者皆关）。 */
   private prebattleBackdrop = false;
@@ -857,6 +859,10 @@ export class Renderer {
       // F-HOME-P0-LAYER：首页程序化背景作为 underlay（背景层<车辆层<UI层）；
       // 单一入口 drawHomeBackdrop —— 正式背景美术资源后续从此注入。
       this.drawHomeBackdrop(ctx, this.viewWidth, this.viewHeight);
+    } else if (this.garageBackdrop) {
+      // F-GARAGE-CENTER-STAGE-P0：Garage 装配页轻量装配环境——深蓝车库 + 明确展示地面 +
+      // 少量灯光（Must#14）。不新增面板/装饰人物；地面线由下方统一 Ground 语义绘制。
+      this.drawGarageBackdrop(ctx, this.viewWidth, this.viewHeight);
     } else if (this.prebattleBackdrop) {
       // F-PREBATTLE-VISUAL-R1：战前程序化背景（水果竞技场简化版 underlay；
       // 单一入口 drawPrebattleSky —— 天空渐变 + 简化对称看台 + 灯点，无 battle 墙）。
@@ -1172,6 +1178,10 @@ export class Renderer {
   setHomeBackdrop(on: boolean): void {
     this.homeBackdrop = on;
   }
+  /** F-GARAGE-CENTER-STAGE-P0：Garage 装配页背景开关（深蓝车库展示台；与 homeBackdrop 互斥） */
+  setGarageBackdrop(on: boolean): void {
+    this.garageBackdrop = on;
+  }
   /** F-PREBATTLE-VISUAL-R1：战前背景开关（水果竞技场简化版；与 homeBackdrop 互斥） */
   setPrebattleBackdrop(on: boolean): void {
     this.prebattleBackdrop = on;
@@ -1277,6 +1287,35 @@ export class Renderer {
     ctx.fillRect(w / 2 - pw / 2, h - 6, pw, 6);
 
     ctx.restore();
+  }
+
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：Garage 装配页轻量装配环境（Must#14）——深蓝车库/展示台背景：
+   * 深蓝渐变天空 + 顶部一排灯光（少量、弱）+ 展示台氛围微光；不新增面板、装饰人物与无关信息。
+   * 地面带（arenaGround）由 draw() 的统一 Ground 语义绘制（对齐车辆 groundY），此处不重复画。
+   */
+  private drawGarageBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    ctx.fillStyle = '#0a0e16';
+    ctx.fillRect(0, 0, w, h);
+    const sky = ctx.createLinearGradient(0, 0, 0, h * 0.82);
+    sky.addColorStop(0, '#0b1020');
+    sky.addColorStop(0.5, '#0e1a33');
+    sky.addColorStop(0.82, '#12203c');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, w, h);
+    // 顶部少量灯光（小亮点，非大光柱；装配环境氛围）
+    ctx.fillStyle = 'rgba(150,190,255,0.5)';
+    const lampN = Math.max(4, Math.floor(w / 110));
+    for (let k = 0; k < lampN; k++) {
+      const lx = w / 2 - ((lampN - 1) * w * 0.1) / 2 + k * w * 0.1;
+      ctx.fillRect(lx, 8, 2, 2);
+    }
+    // 展示台后部氛围微光（车辆背后，弱；不构成巨圆主背景）
+    const glow = ctx.createRadialGradient(w / 2, h * 0.55, w * 0.05, w / 2, h * 0.55, w * 0.45);
+    glow.addColorStop(0, 'rgba(110,160,240,0.08)');
+    glow.addColorStop(1, 'rgba(110,160,240,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w, h * 0.8);
   }
 
   /**
@@ -2395,8 +2434,9 @@ export class Renderer {
     // 高度完整入画上限优先：底部锚定把全部纵向余量集中到顶部，若 clamp 下限（≥38% 宽）
     // 超过高度上限会把车辆顶出取景区（360×180 + 高窄车实测顶缘越界）——先 clamp 再
     // min(高度上限)，保证「极端优先完整入画」硬约束。
-    // garage 竖条取景保持既有 fit 语义（零回归）。
-    if (fit === 'previewSolo' && framing?.mode === 'home' && soloEnvW > 0) {
+    // F-GARAGE-CENTER-STAGE-P0：garage 模式（中央舞台取景）同款宽度 clamp（Must#2：
+    // 车辆最终可见宽约占屏幕 38%~48%）——clamp 区间与 home 相同（38%~47%）。
+    if (fit === 'previewSolo' && (framing?.mode === 'home' || framing?.mode === 'garage') && soloEnvW > 0) {
       const minS = (HOME_VEHICLE_WIDTH_MIN_PCT * safeW) / soloEnvW;
       const maxS = (HOME_VEHICLE_WIDTH_MAX_PCT * safeW) / soloEnvW;
       const hLimit = safeH / bh; // 高度完整入画上限（bh>0 已由上方 bounds 守卫保证）

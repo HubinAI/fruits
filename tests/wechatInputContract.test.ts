@@ -42,6 +42,7 @@ function setup(
 ): Env {
   const store = new Map<string, unknown>();
   const touchHandlers: Array<(e: unknown) => void> = [];
+  const endHandlers: Array<(e: unknown) => void> = []; // F-GARAGE-CENTER-STAGE-P0：手势 onTouchEnd
   const fired: Record<string, string[]> = {};
   const ww = sysIsPhysical ? vp.w * dpr : vp.w;
   const wh = sysIsPhysical ? vp.h * dpr : vp.h;
@@ -57,6 +58,10 @@ function setup(
     removeStorageSync: (k: string) => void store.delete(k),
     onTouchStart: (cb: (e: unknown) => void) => {
       touchHandlers.push(cb);
+    },
+    // F-GARAGE-CENTER-STAGE-P0：手势生命周期需 onTouchEnd（down→up 才 dispatch；真机恒有）
+    onTouchEnd: (cb: (e: unknown) => void) => {
+      endHandlers.push(cb);
     },
   };
   bindPlatformCore(createWechatCore(dpr)); // 真实 WechatInput + WechatViewport
@@ -86,6 +91,8 @@ function setup(
     fired,
     fireTouch: (rawX: number, rawY: number) => {
       for (const cb of touchHandlers) cb({ touches: [{ clientX: rawX, clientY: rawY }] });
+      // F-GARAGE-CENTER-STAGE-P0：手势生命周期——start 后必 end（onTouchEnd 派发 tap）
+      for (const cb of endHandlers) cb({ touches: [{ clientX: rawX, clientY: rawY }] });
     },
     areas: () => host.getHitAreasForTest() as unknown as Array<{ id: string; x: number; y: number; w: number; h: number }>,
   };
@@ -179,14 +186,19 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
           const raw = rawFor(area!, vp, dpr, false); // raw = window logical px
           env.fireTouch(raw.rawX, raw.rawY);
           if (id === 'garage-cat:move') {
-            // 移动分类 → 自动选中第一个挂点（后轮）+ 挂点 chip 行（后轮/前轮/驱动）
+            // F-GARAGE-CENTER-STAGE-P0：移动分类 → 自动选中第一个挂点（后轮）+ 卡片带
             expect(env.fired['toggle']).toContain('rearWheel');
-            expect(env.areas().some((a) => a.id.startsWith('garage-slot:'))).toBe(true);
+            // runtime 自动选中后 render（卡片带依赖 garageSelected）
+            env.host.render(garageState({ garageSelected: 'rearWheel' }));
+            expect(env.areas().some((a) => a.id.startsWith('opt:'))).toBe(true);
+            expect(env.areas().some((a) => a.id.startsWith('garage-slot:')), '无文字挂点 chip（Must#7）').toBe(false);
           } else if (id === 'garage-cat:combat') {
-            // 战斗分类 → 默认武器分组 + 自动选中第一个硬点 + 两组挂点 chip 行
+            // F-GARAGE-CENTER-STAGE-P0：战斗分类 → 自动选中第一个硬点 + 卡片带（武器/辅助混排）
             const last = env.fired['toggle'].slice(-1)[0];
             expect(last, '战斗分类自动选中硬点').toBeTruthy();
-            expect(env.areas().some((a) => a.id.startsWith('garage-cslot:'))).toBe(true);
+            env.host.render(garageState({ garageSelected: last }));
+            expect(env.areas().some((a) => a.id.startsWith('opt:'))).toBe(true);
+            expect(env.areas().some((a) => a.id.startsWith('garage-cslot:')), '无文字挂点 chip（Must#7）').toBe(false);
           } else {
             expect(env.fired['toggle']).toContain('body');
           }
@@ -294,10 +306,9 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
     goGarage(env, vp, 2); // F-HOME-1：Home → 配置页
     // 配置页无任何合成入口/面板
     expect(env.areas().some((a) => a.id === 'merge')).toBe(false);
-    // 点配置页顶栏「背包」→ backpack 页（按钮真实坐标命中）
-    const navBp = env.areas().find((a) => a.id === 'nav:backpack')!;
-    const rawNav = rawFor(navBp, vp, 2, false);
-    env.fireTouch(rawNav.rawX, rawNav.rawY);
+    // F-GARAGE-CENTER-STAGE-P0：Garage 顶栏已无 nav:backpack（Must#4）——走私有 dispatch 进 Backpack
+    expect(env.areas().some((a) => a.id === 'nav:backpack'), 'Garage 顶栏无背包入口（Must#4）').toBe(false);
+    (env.host as unknown as { dispatch: (i: string) => void }).dispatch('nav:backpack');
     const merge = env.areas().find((a) => a.id === 'merge')!;
     expect(merge, 'backpack 页有合成入口').toBeTruthy();
     // 点合成 → 合成说明 Modal（不切换全屏页面）

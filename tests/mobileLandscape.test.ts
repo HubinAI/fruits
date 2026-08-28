@@ -17,6 +17,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { CanvasPlayerUIHost } from '../src/ui/canvasPlayerUIHost';
+import { computeMobileGarageLayout } from '../src/ui/mobileGarageLayout';
+import { resolveLayoutProfile } from '../src/ui/layoutProfile';
 import { bindPlatformCore } from '../src/platform/context';
 import { createWebCore } from '../src/platform/web';
 import { makeStarterDraft } from '../src/lab/buildEditorModel';
@@ -24,6 +26,11 @@ import { registry } from '../src/core/content';
 import { getInventory, OFFICIAL_PARTS } from '../src/core/partInventory';
 import type { PlayerUIState, PlayerUIActions } from '../src/ui/playerUI';
 import type { SafeInsets } from '../src/platform/types';
+
+/** F-GARAGE-CENTER-STAGE-P0：装配带顶缘（布局唯一源 stripRect.y） */
+function layoutStripTop(vp: { w: number; h: number }): number {
+  return computeMobileGarageLayout(vp, LANDSCAPE_INSETS, resolveLayoutProfile(vp.w, vp.h)).stripRect.y;
+}
 
 const VIEWPORTS: Array<{ w: number; h: number; mobile: boolean }> = [
   { w: 844, h: 390, mobile: true },
@@ -189,11 +196,9 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
         expect(a!.x + a!.w, `${id} 右缘在 safe area 内`).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right);
         expect(a!.y, `${id} y 在 safe area 内`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.top);
         expect(a!.y + a!.h, `${id} 底缘在 safe area 内`).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom);
-        // 主要交互位于中央交互区（安全区内再留 ≥4px 边距，不贴安全区边缘）
-        expect(a!.x, `${id} 不贴左安全缘`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.left + 4);
-        expect(a!.x + a!.w, `${id} 不贴右安全缘`).toBeLessThanOrEqual(vp.w - LANDSCAPE_INSETS.right - 4);
-        expect(a!.y, `${id} 不贴上安全缘`).toBeGreaterThanOrEqual(LANDSCAPE_INSETS.top + 4);
-        expect(a!.y + a!.h, `${id} 不贴下安全缘`).toBeLessThanOrEqual(vp.h - LANDSCAPE_INSETS.bottom - 4);
+        // F-GARAGE-CENTER-STAGE-P0：分类 tab 位于底部装配带内（Must#5 第一行全宽横贯——
+        // 不再要求「不贴安全缘 ±4px」，装配带本身占据底部全宽）
+        expect(a!.y, `${id} 位于装配带内`).toBeGreaterThanOrEqual(layoutStripTop(vp));
       }
       // 首屏不展开完整部件信息墙：无选项、无轮子/武器位二级、无合成面板
       expect(areas(env, 'opt:')).toHaveLength(0);
@@ -219,7 +224,7 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     }
   });
 
-  it('F-GARAGE-BUILD-BOARD-P0｜单屏装配台：右顶分类 tab 常驻 + 挂点 chip + 部件卡；一次只处理一个配置决策', () => {
+  it('F-GARAGE-CENTER-STAGE-P0｜单屏中央装配台：分类 tab 常驻 + 部件卡带；挂点只通过战车真实挂点（无文字挂点页签）', () => {
     const vp = { w: 844, h: 390 };
     const env = makeHost(vp, LANDSCAPE_INSETS);
     env.host.render(richGarageState());
@@ -234,32 +239,27 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     expect(env.fired['toggle']).toContain('body');
     env.host.render(richGarageState({ garageSelected: 'body' }));
     expect(areas(env, 'opt:').length, '车身分类展开部件卡').toBeGreaterThan(0);
-    // 车身分类有 1 个挂点 chip（车身；统一「分类 → 挂点 → 部件卡」结构）
-    expect(areas(env, 'garage-slot:').length, '车身分类 1 个挂点 chip').toBe(1);
-    expect(areas(env, 'garage-slot:body').length, '车身挂点 chip').toBe(1);
-    // 点「移动」→ 自动选中第一个挂点（后轮）+ 挂点 chip 行出现
+    // Must#7：车身分类无文字挂点 chip（挂点选择只通过战车真实挂点）
+    expect(areas(env, 'garage-slot:').length, '车身分类无文字挂点 chip').toBe(0);
+    // 点「移动」→ 自动选中第一个挂点（后轮）+ 部件卡带出现
     env.host.render(richGarageState());
     const tabMove = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:move')!;
     env.pointer(tabMove.x + tabMove.w / 2, tabMove.y + tabMove.h / 2);
     expect(env.fired['toggle']).toContain('rearWheel'); // 移动分类默认挂点 = 后轮
     env.host.render(richGarageState({ garageSelected: 'rearWheel' }));
-    const slotIds = areas(env, 'garage-slot:').map((a) => a.id.slice(12));
-    expect(slotIds, '移动分类挂点 chip：后轮/前轮/驱动').toEqual(expect.arrayContaining(['rearWheel', 'frontWheel', 'drive']));
+    // Must#7：移动分类无「后轮/前轮/驱动」文字页签（挂点选择在战车轮组挂点上完成）
+    expect(areas(env, 'garage-slot:').length, '移动分类无文字挂点 chip').toBe(0);
     expect(areas(env, 'opt:').length, '后轮展开部件卡').toBeGreaterThan(0);
-    // 切换挂点 chip → frontWheel 选项
-    const chipFront = areas(env, 'garage-slot:frontWheel')[0];
-    env.pointer(chipFront.x + chipFront.w / 2, chipFront.y + chipFront.h / 2);
-    expect(env.fired['toggle']).toContain('frontWheel');
-    // 点「战斗」→ 默认武器分组 + 自动选中第一个硬点 + 两组挂点 chip + 武器分类过滤选项（无辅助混入）
+    // 点「战斗」→ 自动选中第一个硬点 → 部件卡带出现
     env.host.render(richGarageState());
     const tabWe = env.host.getHitAreasForTest().find((a) => a.id === 'garage-cat:combat')!;
     env.pointer(tabWe.x + tabWe.w / 2, tabWe.y + tabWe.h / 2);
     env.host.render(richGarageState({ garageSelected: env.fired['toggle'].slice(-1)[0] }));
-    expect(areas(env, 'garage-cslot:').length, '战斗页两组挂点 chip 行存在').toBeGreaterThan(0);
+    // Must#7：战斗页无「武器/辅助+前端/前上/顶部/后部挂点」文字页签（garage-cslot:/garage-cgroup: 全删）
+    expect(areas(env, 'garage-cslot:').length, '战斗页无文字挂点 chip').toBe(0);
+    expect(areas(env, 'garage-cgroup:').length, '战斗页无武器/辅助文字分段').toBe(0);
     const optIds = areas(env, 'opt:').map((a) => a.id);
-    expect(optIds.length, '战斗页武器分组展开部件卡').toBeGreaterThan(0);
-    // 空槽 + 武器（不混入辅助部件；默认分组 weapon）
-    expect(env.host.getHitAreasForTest().some((a) => a.id === 'opt:none'), '战斗页武器分组含空槽').toBe(true);
+    expect(optIds.length, '战斗页展开部件卡').toBeGreaterThan(0);
   });
 
   it('F-GARAGE-BUILD-BOARD-P0｜改一个部件：分类 tab → 部件卡 → pick（单屏，无多层返回）；无寻找对手', () => {
@@ -328,12 +328,11 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       // F-GARAGE-BUILD-BOARD-P0：部件卡按真实信息密度（紧凑 40+；非 48 大按钮）
       expect(a.h).toBeGreaterThanOrEqual(40);
     }
-    // 功能件选项很多（2 列网格超出面板）→ 应有面板内滚动箭头
-    const scrollDown = env.host.getHitAreasForTest().find((a) => a.id === 'panel-scroll-down');
-    expect(scrollDown, '应有面板内滚动箭头').toBeTruthy();
-    // 点滚动 → 可见选项集合变化（F-META-1 后面板变矮，部分可见选项不注册命中——
-    // 滚动后新的「完全可见」选项出现；不用 y 单调断言，矮面板下首个可见项可能后移）
-    env.pointer(scrollDown!.x + scrollDown!.w / 2, scrollDown!.y + scrollDown!.h / 2);
+    // 功能件选项很多（卡片带超宽）→ 应有横向滚动箭头（strip-scroll-right）
+    const scrollRight = env.host.getHitAreasForTest().find((a) => a.id === 'strip-scroll-right');
+    expect(scrollRight, '应有部件带横向滚动箭头').toBeTruthy();
+    // 点滚动 → 可见选项集合变化（新选项出现；部分可见卡不注册命中，滚动后新完全可见卡出现）
+    env.pointer(scrollRight!.x + scrollRight!.w / 2, scrollRight!.y + scrollRight!.h / 2);
     const secondVisible = areas(env, 'opt:').map((a) => a.id);
     expect(secondVisible.some((id) => !firstVisible.includes(id)), '滚动后应出现新选项').toBe(true);
     for (const a of env.host.getHitAreasForTest().filter((x) => x.id.startsWith('opt:'))) {
@@ -493,20 +492,22 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     void captured;
   });
 
-  it('F-WX-9B｜Garage 首屏绘制方法内所有直接文本字号 ≥14px（Mobile 真人距离可读）', () => {
-    // 源码守卫：Mobile 首屏方法体内 this.text(text, x, y, size, color, ...) 的 size 参数必须 ≥14
+  it('F-WX-9B｜Garage 装配页主要方法内直接文本字号下限（Mobile 真人距离可读；卡片带紧凑信息除外）', () => {
+    // 源码守卫：Mobile 装配页方法体内 this.text(text, x, y, size, ...) 的 size 参数必须 ≥ 下限。
+    // F-GARAGE-CENTER-STAGE-P0（Must#9）：部件卡带为紧凑横向卡（mini preview/名称/星级/能量/小标），
+    // 卡片内元信息字号下限 7（short）/9（normal）由代码自适应；主要交互/提示文本保持 ≥14/10。
     const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
-    const methods = [
-      'drawMobileGarageDock',
-      'drawMobileTopBar',
-      'drawGarageCategoryTabs',
-      'drawGarageSlotChips',
-      'drawPartCard',
-      'drawGarageEnergyBar',
-      'showMergeModal',
+    const methods: Array<[string, number]> = [
+      ['drawMobileGarageDock', 14],
+      ['drawMobileTopBar', 14],
+      ['drawGarageCategoryTabs', 10],
+      ['drawGarageStrip', 10],
+      ['garageStripStatus', 9],
+      ['drawPartCard', 7], // 卡片带紧凑信息（Must#9：名称/星级/能量/类型小标小字号）
+      ['showMergeModal', 14],
     ];
     const re = /this\.text\(([^)]*)\)/g;
-    for (const name of methods) {
+    for (const [name, floor] of methods) {
       const start = src.indexOf(`private ${name}(`);
       expect(start, `${name} 应存在`).toBeGreaterThan(-1);
       const next = src.indexOf('\n  private ', start + 10);
@@ -517,9 +518,6 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
         const args = m[1].split(',').map((s) => s.trim());
         const size = parseInt(args[3] ?? '', 10); // text, x, y, size, color, align, weight
         if (Number.isFinite(size) && size > 0) {
-          // F-GARAGE-BUILD-BOARD-P0：分类 tab 为紧凑 chip（Must#2）→ 字号下限 12（短屏 10）；
-          // 其余首屏方法保持 ≥14（真人距离可读）。
-          const floor = name === 'drawGarageCategoryTabs' || name === 'drawGarageSlotChips' ? 10 : 14;
           expect(size, `${name} 内字号 <${floor}px 的直接文本：${m[0].slice(0, 64)}`).toBeGreaterThanOrEqual(floor);
         }
       }

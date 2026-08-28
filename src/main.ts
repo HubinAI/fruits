@@ -502,6 +502,7 @@ const battleHost: PlayerBattleHost = {
   },
   resize: (w, h) => renderer.resize(w, h),
   setHomeBackdrop: (on) => renderer.setHomeBackdrop(on),
+  setGarageBackdrop: (on) => renderer.setGarageBackdrop(on),
   setPrebattleBackdrop: (on) => renderer.setPrebattleBackdrop(on),
   setBattleBackdrop: (on) => renderer.setBattleBackdrop(on),
   getMatchVehicleRects: () => {

@@ -103,6 +103,11 @@ function makeRecHost(vp: { w: number; h: number }): {
 function click(env: ReturnType<typeof makeRecHost>, id: string): void {
   const areas = env.host.getHitAreasForTest();
   const a = areas.find((x) => x.id === id);
+  // F-GARAGE-CENTER-STAGE-P0：Garage 顶栏不再暴露 backpack/more 入口——走私有 dispatch
+  if (!a && (id === 'nav:backpack' || id === 'nav:more' || id === 'nav:garage')) {
+    (env.host as unknown as { dispatch: (i: string) => void }).dispatch(id);
+    return;
+  }
   expect(a, `应有 ${id}`).toBeTruthy();
   env.pointer(a!.x + a!.w / 2, a!.y + a!.h / 2);
 }
@@ -287,9 +292,12 @@ describe('F-HOME-2｜寻找对手主交互', () => {
     // 点车库 → 独立组装界面（车身/移动/战斗 3 主分类全部在此；武器+辅助合并为「战斗」）
     click(env, 'home-garage');
     const ids = env.host.getHitAreasForTest().map((a) => a.id);
-    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat', 'nav:home', 'nav:backpack', 'nav:more']) {
+    // F-GARAGE-CENTER-STAGE-P0（Must#4）：车库顶栏仅 nav:home + 能量；背包/更多不再注册
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat', 'nav:home']) {
       expect(ids, `车库页应含 ${id}`).toContain(id);
     }
+    expect(ids.some((id) => id === 'nav:backpack'), '车库页无背包入口（Must#4）').toBe(false);
+    expect(ids.some((id) => id === 'nav:more'), '车库页无更多入口（Must#4）').toBe(false);
     // F-NAV-ACTION-OWNERSHIP-P0：车库页无寻找对手（cta-find/home-find-opponent 均不注册）
     expect(ids.some((id) => id === 'cta-find' || id === 'home-find-opponent'), '车库页无寻找对手').toBe(false);
     // 车库无合成（合成在背包页）

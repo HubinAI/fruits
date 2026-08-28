@@ -148,10 +148,14 @@ export interface PlayerUIActions {
   onResetProgress(): void;
   /** 首页程序化背景下沉为 renderer underlay 开关（仅首页开启；车库/匹配/战斗关闭） */
   setHomeBackdrop?(on: boolean): void;
+  /** F-GARAGE-CENTER-STAGE-P0：Garage 装配页背景（深蓝车库展示台 + 地面 + 少量灯光）开关 */
+  setGarageBackdrop?(on: boolean): void;
   /** F-PREBATTLE-VISUAL-R1：战前（Matching/MatchPreview）程序化背景下沉为 renderer underlay 开关（仅战前开启） */
   setPrebattleBackdrop?(on: boolean): void;
   /** F-BATTLE-PRESENTATION-R2：战斗（fighting/ended）程序化竞技场背景下沉为 renderer underlay 开关（仅战斗开启） */
   setBattleBackdrop?(on: boolean): void;
+  /** F-GARAGE-CENTER-STAGE-P0：Garage ↔ Home metaPage 切换时通知 runtime 重构图（renderer.transform 跨页面不再 stale） */
+  reframeCamera?(): void;
 }
 
 /** 平台中立 Host 接口：绑定 State → 渲染、Action → 回调。 */
@@ -159,7 +163,7 @@ export interface PlayerUIHost {
   /** 创建并挂载玩家 UI DOM（Web 挂到 canvasWrap；其它平台可挂到各自容器） */
   mount(parent: HTMLElement): void;
   setActions(actions: PlayerUIActions): void;
-  /** F-GARAGE-LIVE-ASSEMBLY-P0：装备成功吸附反馈（挂点金圈脉冲 150~220ms；Runtime 装备成功调用） */
+  /** F-GARAGE-CENTER-STAGE-P0：装备成功吸附反馈（挂点金圈脉冲 150~220ms；Runtime 装备成功调用） */
   flashEquip?(hp: string): void;
   /** 离散状态变化 → 全量渲染（Shell 可见性 / Garage Dock / MatchInfo / Result / Reward / READY） */
   render(state: PlayerUIState): void;

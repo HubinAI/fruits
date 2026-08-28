@@ -1,4 +1,4 @@
-import type { ClientToLogical, PlatformInput } from '../types';
+import type { ClientToLogical, PlatformInput, PointerGestureHandlers } from '../types';
 
 /** Web 输入后端：直接包装 DOM 事件绑定 */
 export class WebInput implements PlatformInput {
@@ -62,6 +62,69 @@ export class WebInput implements PlatformInput {
     } else {
       node.addEventListener('mousedown', onDown);
       node.addEventListener('touchstart', onDown, { passive: true });
+    }
+  }
+
+  /** F-GARAGE-CENTER-STAGE-P0：手势生命周期（down/move/up + pointercancel）；
+   *  坐标转换与 bindPointer 同一 toPoint 单点。 */
+  bindGesture(
+    target: EventTarget,
+    handlers: PointerGestureHandlers,
+    toLogical?: ClientToLogical,
+  ): void {
+    if (target == null) return;
+    const node = target as HTMLElement;
+    const toPoint = (cx: number, cy: number, r: DOMRect): { x: number; y: number } => {
+      if (toLogical) return toLogical(cx, cy, { left: r.left, top: r.top, width: r.width, height: r.height });
+      const rw = r.width > 0 ? r.width : (node.clientWidth || 1);
+      const rh = r.height > 0 ? r.height : (node.clientHeight || 1);
+      const scaleX = node.clientWidth > 0 && rw > 0 ? node.clientWidth / rw : 1;
+      const scaleY = node.clientHeight > 0 && rh > 0 ? node.clientHeight / rh : 1;
+      return { x: (cx - r.left) * scaleX, y: (cy - r.top) * scaleY };
+    };
+    const pointOf = (ev: Event): { x: number; y: number } => {
+      const withTouches = ev as unknown as { touches?: ReadonlyArray<{ clientX: number; clientY: number }> };
+      const withClient = ev as unknown as { clientX?: number; clientY?: number };
+      let cx = withClient.clientX ?? 0;
+      let cy = withClient.clientY ?? 0;
+      if (withTouches.touches && withTouches.touches.length > 0) {
+        cx = withTouches.touches[0].clientX;
+        cy = withTouches.touches[0].clientY;
+      }
+      return toPoint(cx, cy, node.getBoundingClientRect());
+    };
+    const supportsPointer =
+      typeof window !== 'undefined' && typeof window.PointerEvent === 'function';
+    if (supportsPointer) {
+      node.addEventListener('pointerdown', (ev) => handlers.onDown(pointOf(ev).x, pointOf(ev).y));
+      const onMove = (ev: Event): void => {
+        const p = pointOf(ev);
+        handlers.onMove(p.x, p.y);
+      };
+      const onUp = (ev: Event, cancelled: boolean): void => {
+        const p = pointOf(ev);
+        handlers.onUp(p.x, p.y, cancelled);
+      };
+      node.addEventListener('pointermove', onMove);
+      node.addEventListener('pointerup', (ev) => onUp(ev, false));
+      node.addEventListener('pointercancel', (ev) => onUp(ev, true));
+    } else {
+      node.addEventListener('touchstart', (ev) => {
+        const p = pointOf(ev);
+        handlers.onDown(p.x, p.y);
+      }, { passive: true });
+      node.addEventListener('touchmove', (ev) => {
+        const p = pointOf(ev);
+        handlers.onMove(p.x, p.y);
+      }, { passive: true });
+      node.addEventListener('touchend', (ev) => {
+        const p = pointOf(ev);
+        handlers.onUp(p.x, p.y, false);
+      });
+      node.addEventListener('touchcancel', (ev) => {
+        const p = pointOf(ev);
+        handlers.onUp(p.x, p.y, true);
+      });
     }
   }
 }

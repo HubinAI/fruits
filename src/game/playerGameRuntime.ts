@@ -88,6 +88,8 @@ export interface PlayerBattleHost {
   resize(w: number, h: number): void;
   /** 首页程序化背景下沉为 renderer underlay 开关（仅首页开启；车库/匹配/战斗关闭） */
   setHomeBackdrop?(on: boolean): void;
+  /** F-GARAGE-CENTER-STAGE-P0：Garage 装配页背景（深蓝车库展示台 + 地面 + 少量灯光）开关 */
+  setGarageBackdrop?(on: boolean): void;
   /** F-PREBATTLE-VISUAL-R1：战前（Matching/MatchPreview）程序化背景下沉为 renderer underlay 开关（仅战前开启） */
   setPrebattleBackdrop?(on: boolean): void;
   /** F-BATTLE-PRESENTATION-R2：战斗（fighting/ended）程序化竞技场背景下沉为 renderer underlay 开关（仅战斗开启） */
@@ -379,6 +381,13 @@ export class PlayerGameRuntime {
     setBattleBackdrop: (on: boolean) => {
       // F-BATTLE-PRESENTATION-R2：战斗竞技场背景下沉为 renderer underlay（背景层<车辆层<UI层）
       this.deps.battle.setBattleBackdrop?.(on);
+    },
+    /**
+     * F-GARAGE-CENTER-STAGE-P0：Garage ↔ Home metaPage 切换时重 fit（renderer.transform 跨页面
+     * 不再 stale；canvasPlayerUIHost 在 nav:* / home-garage dispatch 后调用）。
+     */
+    reframeCamera: () => {
+      this.reframePlayerCamera();
     },
   };
 

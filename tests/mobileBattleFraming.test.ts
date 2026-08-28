@@ -177,10 +177,10 @@ describe('F-WX-6 Battle 横屏构图（E 项）', () => {
         Math.abs(centerY - rectCenterY),
         `${vp.w}×${vp.h} envelope 中心 y ${centerY.toFixed(1)} 应接近展示区中点 ${rectCenterY.toFixed(1)}（|Δ|≤8）`,
       ).toBeLessThanOrEqual(8);
-      // F-UX-3A：envelope（完整车辆）主尺度——占屏 ∈ [24%,32%]（3A 布局重构后实测 ~26~28%）
+      // F-GARAGE-CENTER-STAGE-P0：envelope（完整车辆）主尺度——中央舞台全宽取景，vehicle 宽约占屏 38~48%（Must#2）
       const envRatio = (env.maxX - env.minX) / vp.w;
-      expect(envRatio, `${vp.w}×${vp.h} envelope 占比 ${(envRatio * 100).toFixed(1)}% 应 ∈ [24%,32%]`).toBeGreaterThanOrEqual(0.24);
-      expect(envRatio, `${vp.w}×${vp.h} envelope 占比 ${(envRatio * 100).toFixed(1)}% 应 ≤ 32%`).toBeLessThanOrEqual(0.32);
+      expect(envRatio, `${vp.w}×${vp.h} envelope 占比 ${(envRatio * 100).toFixed(1)}% 应 ∈ [35%,55%]`).toBeGreaterThanOrEqual(0.35);
+      expect(envRatio, `${vp.w}×${vp.h} envelope 占比 ${(envRatio * 100).toFixed(1)}% 应 ≤ 55%`).toBeLessThanOrEqual(0.55);
       // core 仍存在且 < envelope（双口径并存）
       const coreRatio = (core.maxX - core.minX) / vp.w;
       expect(coreRatio, 'core 占屏 > 0').toBeGreaterThan(0);

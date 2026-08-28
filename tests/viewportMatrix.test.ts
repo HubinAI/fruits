@@ -133,8 +133,9 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
       const rects: Array<[string, { x: number; y: number; w: number; h: number }]> = [
         ['topBar', l.topBarRect],
         ['content', l.contentRect],
+        ['stage', l.stageRect],
+        ['strip', l.stripRect],
         ['vehicle', l.vehicleRect],
-        ['panel', l.panelRect],
       ];
       for (const [name, r] of rects) {
         expect(r.w, `${vp.w}×${vp.h} ${name} 宽>0`).toBeGreaterThan(0);
@@ -144,8 +145,9 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
         expect(r.x + r.w, `${vp.w}×${vp.h} ${name} 右缘 ≤ logicalW-safeRight`).toBeLessThanOrEqual(vp.w - INSETS.right + 0.5);
         expect(r.y + r.h, `${vp.w}×${vp.h} ${name} 底缘 ≤ logicalH-safeBottom`).toBeLessThanOrEqual(vp.h - INSETS.bottom + 0.5);
       }
-      // 车辆区与面板区不重叠（左右分区）
-      expect(l.vehicleRect.x + l.vehicleRect.w, `${vp.w}×${vp.h} vehicle 右缘 ≤ panel 左缘`).toBeLessThanOrEqual(l.panelRect.x + 0.5);
+      // 中央舞台与装配带不重叠（纵向分区；车辆取景 = 中央舞台）
+      expect(l.stageRect.y + l.stageRect.h, `${vp.w}×${vp.h} stage 底 ≤ strip 顶`).toBeLessThanOrEqual(l.stripRect.y + 0.5);
+      expect(l.vehicleRect, `${vp.w}×${vp.h} vehicle == stage（中央取景）`).toEqual(l.stageRect);
     }
   });
 
@@ -196,36 +198,23 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
     expect(hostSrc).toContain('size * this.fontScale');
   });
 
-  it('验收4｜全屏溢出守卫：Home / Backpack / More / Modal / Result 主要 UI rect 全在 safe 内（5 屏）', () => {
+  it('验收4｜全屏溢出守卫：Home / Garage / Modal / Result 主要 UI rect 全在 safe 内（5 屏）', () => {
     for (const vp of VIEWPORTS.slice(0, 5)) {
       const env = makeHost(vp, INSETS);
       // F-HOME-1：Home（正式首页：CTA + 三辅助入口 + 宝箱 4 槽）
       env.host.render(garageState());
       assertAllInSafe(env, vp, INSETS, `Home ${vp.w}×${vp.h}`);
-      // 配置页（garage：2×2 + CTA + 顶栏背包/更多/‹首页）
+      // 配置页（中央装配台：分类 tab + 部件带 + 顶栏 ‹首页/能量）
       click(env, 'home-garage');
       assertAllInSafe(env, vp, INSETS, `Garage ${vp.w}×${vp.h}`);
-      // Backpack（返回 + tabs + 列表 + 合成入口）
-      click(env, 'nav:backpack');
-      assertAllInSafe(env, vp, INSETS, `Backpack ${vp.w}×${vp.h}`);
-      // More（返回 + 2×2 功能卡；F-GARAGE-MOBILE-SHELL-R1：short 极限屏 nav:more 按
-      // 优先级降级隐藏（保留 back+energy+backpack），normal 屏必达）
-      click(env, 'nav:garage'); // Backpack → 回 Home
-      click(env, 'home-garage'); // 进配置页（garage 模式顶栏才有 nav:more）
-      const moreArea = env.areas().find((x) => x.id === 'nav:more');
-      if (moreArea) {
-        click(env, 'nav:more');
-        assertAllInSafe(env, vp, INSETS, `More ${vp.w}×${vp.h}`);
-        click(env, 'nav:garage'); // More → 回 Home
-      } else {
-        click(env, 'nav:home'); // 配置页 → 回 Home
-      }
-      // Modal（合成说明 Modal：遮罩+主/次按钮）
-      click(env, 'home-garage'); // 进配置页
-      click(env, 'nav:backpack');
-      click(env, 'merge');
+      // F-GARAGE-CENTER-STAGE-P0（Must#4）：配置页顶栏不再暴露 背包/更多 入口
+      expect(env.areas().some((x) => x.id === 'nav:backpack'), '配置页无背包入口').toBe(false);
+      expect(env.areas().some((x) => x.id === 'nav:more'), '配置页无更多入口').toBe(false);
+      // Modal（个人信息 Modal：遮罩+主按钮；Home 入口可直达）
+      click(env, 'nav:home');
+      click(env, 'home-profile');
       assertAllInSafe(env, vp, INSETS, `Modal ${vp.w}×${vp.h}`);
-      click(env, 'modal-secondary');
+      click(env, 'modal-primary');
       // Result（三层结算 Modal）
       env.host.render(
         garageState({
@@ -257,13 +246,13 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
     const assist = env.areas().find((x) => x.id === 'home-garage')!;
     expect(assist.x + assist.w, '车库右缘 ≤ 寻找对手左缘（水平不重叠）').toBeLessThanOrEqual(cta.x + 0.5);
     // 配置页（360×180 极限屏）同样全在 safe 内（F-NAV-ACTION-OWNERSHIP-P0：配置页无寻找对手；
-    // F-GARAGE-MOBILE-SHELL-R1：nav:more 在极限屏按优先级降级，back/backpack/能量必留）
+    // F-GARAGE-CENTER-STAGE-P0：顶栏极简只 back+能量，无背包/更多）
     click(env, 'home-garage');
     expect(
       env.areas().some((x) => x.id === 'cta-find' || x.id === 'home-find-opponent'),
       '配置页无寻找对手',
     ).toBe(false);
-    for (const id of ['garage-cat:body', 'nav:home', 'nav:backpack']) {
+    for (const id of ['garage-cat:body', 'nav:home']) {
       const a = env.areas().find((x) => x.id === id);
       expect(a, `360×180 配置页应有 ${id}`).toBeTruthy();
       expect(a!.x, `${id} x ≥ safeLeft`).toBeGreaterThanOrEqual(INSETS.left);
@@ -271,5 +260,8 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
       expect(a!.y, `${id} y ≥ safeTop`).toBeGreaterThanOrEqual(INSETS.top);
       expect(a!.y + a!.h, `${id} 底缘 ≤ safeBottom`).toBeLessThanOrEqual(180 - INSETS.bottom + 0.5);
     }
+    // Must#4：360×180 配置页无 背包/更多 入口
+    expect(env.areas().some((x) => x.id === 'nav:backpack'), '无背包入口').toBe(false);
+    expect(env.areas().some((x) => x.id === 'nav:more'), '无更多入口').toBe(false);
   });
 });

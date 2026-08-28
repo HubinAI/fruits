@@ -96,6 +96,11 @@ export class WechatBattleHost implements PlayerBattleHost {
     this.renderer.setHomeBackdrop(on);
   }
 
+  setGarageBackdrop(on: boolean): void {
+    // F-GARAGE-CENTER-STAGE-P0：Garage 装配页轻量装配环境背景（renderer underlay）
+    this.renderer.setGarageBackdrop(on);
+  }
+
   setPrebattleBackdrop(on: boolean): void {
     // F-PREBATTLE-VISUAL-R1：战前程序化背景下沉为 renderer underlay（背景层<车辆层<UI层）
     this.renderer.setPrebattleBackdrop(on);

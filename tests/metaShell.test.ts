@@ -104,6 +104,11 @@ function richState(): PlayerUIState {
 
 function click(env: HostEnv, id: string): void {
   const a = env.areas().find((x) => x.id === id);
+  // F-GARAGE-CENTER-STAGE-P0：Garage 顶栏不再暴露 backpack/more 入口——走私有 dispatch
+  if (!a && (id === 'nav:backpack' || id === 'nav:more' || id === 'nav:garage')) {
+    (env.host as unknown as { dispatch: (i: string) => void }).dispatch(id);
+    return;
+  }
   expect(a, `应有 ${id}`).toBeTruthy();
   env.pointer(a!.x + a!.w / 2, a!.y + a!.h / 2);
 }
@@ -152,13 +157,14 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
   it('验收2｜首页只回答核心动作：点「车库」进配置页，「‹ 首页」返回；排行榜/战令/宝箱弹「功能开发中」', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(garageState());
-    // 车库 → 配置页（原 Garage 布局回归：3 配置入口（车身/移动/战斗）+ 顶栏背包/更多；F-NAV-ACTION-OWNERSHIP-P0：
-    // 配置页不再含 cta-find——寻找对手只属首页）
+    // F-GARAGE-CENTER-STAGE-P0：车库 → 配置页（3 主分类 + 顶栏只 nav:home/能量；背包/更多不展示——Must#4）
     click(env, 'home-garage');
     const ids = env.areas().map((a) => a.id);
-    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat', 'nav:home', 'nav:backpack', 'nav:more']) {
+    for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat', 'nav:home']) {
       expect(ids, `配置页应含 ${id}`).toContain(id);
     }
+    expect(ids.some((id) => id === 'nav:backpack'), '配置页无背包入口（Must#4）').toBe(false);
+    expect(ids.some((id) => id === 'nav:more'), '配置页无更多入口（Must#4）').toBe(false);
     expect(ids.some((id) => id === 'cta-find' || id === 'home-find-opponent'), '配置页无寻找对手').toBe(false);
     // 「‹ 首页」返回 Home
     click(env, 'nav:home');

@@ -62,6 +62,14 @@ export type ClientToLogical = (
   rect: { left: number; top: number; width: number; height: number },
 ) => { x: number; y: number };
 
+/** F-GARAGE-CENTER-STAGE-P0：指针手势生命周期（down/move/up；up 的 cancelled=true 表示系统取消）。
+ *  用于「横向滑动超过 8 logical px 取消该次点击」——部件带滑动浏览不误装备。 */
+export interface PointerGestureHandlers {
+  onDown(x: number, y: number): void;
+  onMove(x: number, y: number): void;
+  onUp(x: number, y: number, cancelled: boolean): void;
+}
+
 export interface PlatformInput {
   /** 绑定 UI 元素点击事件；微信侧安全忽略（Player UI 未移植 DOM） */
   bindClick(el: EventTarget, handler: () => void): void;
@@ -78,6 +86,16 @@ export interface PlatformInput {
   bindPointer(
     target: EventTarget,
     handler: (x: number, y: number) => void,
+    toLogical?: ClientToLogical,
+  ): void;
+  /**
+   * F-GARAGE-CENTER-STAGE-P0：可选手势绑定（down/move/up 完整生命周期）。
+   * 供 UI 实现「横向滑动取消点击 + 部件带滑动浏览」；平台不支持时（测试桩/旧后端）
+   * 可省略本方法，调用方回退 bindPointer（纯 tap）。坐标语义与 bindPointer 一致。
+   */
+  bindGesture?(
+    target: EventTarget,
+    handlers: PointerGestureHandlers,
     toLogical?: ClientToLogical,
   ): void;
 }
