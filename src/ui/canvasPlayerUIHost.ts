@@ -376,7 +376,16 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
     }
     // 唯一输入入口：绑定到唯一可见屏幕 Canvas（Renderer canvas）
-    platform.input.bindPointer(screen, (x, y) => this.handlePointer(x, y));
+    // F-PLAYER-INPUT-SCALE-P0：传 PlayerViewportTransform.clientToLogical 作统一转换——
+    // client → 可见 rect → 844×390 logical 只发生一次（不再依赖 WebInput 的 CSS 归一化巧合，
+    // 也杜绝「把 canvas CSS 局部坐标直接当 logical」的整类错位）。
+    platform.input.bindPointer(
+      screen,
+      (x, y) => this.handlePointer(x, y),
+      this.viewportTransform
+        ? (cx, cy, rect) => this.viewportTransform!.clientToLogical(cx, cy, rect)
+        : undefined,
+    );
   }
 
   /** 屏幕合成模式下返回离屏 UI 画布供 Renderer 合成；非屏幕模式（DEV/WebDom）或隐藏时返回 null。 */

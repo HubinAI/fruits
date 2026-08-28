@@ -55,6 +55,13 @@ export interface PlatformViewport {
 }
 
 // —— Input（UI 事件抽象；微信无 DOM UI → bindClick no-op，bindPointer 走 wx 触摸）——
+/** client 坐标 → 逻辑舞台坐标的转换（F-PLAYER-INPUT-SCALE-P0：PlayerViewportTransform.clientToLogical） */
+export type ClientToLogical = (
+  clientX: number,
+  clientY: number,
+  rect: { left: number; top: number; width: number; height: number },
+) => { x: number; y: number };
+
 export interface PlatformInput {
   /** 绑定 UI 元素点击事件；微信侧安全忽略（Player UI 未移植 DOM） */
   bindClick(el: EventTarget, handler: () => void): void;
@@ -62,8 +69,17 @@ export interface PlatformInput {
    * Canvas 命中输入：绑定指针/触摸按下，回调元素本地坐标（CSS px，相对元素左上角）。
    * Web=pointerdown/mousedown/touchstart + getBoundingClientRect；
    * 微信=wx.onTouchStart（clientX/clientY）。F-WX-4 CanvasPlayerUIHost 唯一输入入口。
+   *
+   * F-PLAYER-INPUT-SCALE-P0：可传可选 `toLogical` 转换——提供时回调输出为转换后的
+   * 逻辑舞台坐标（844×390，经 PlayerViewportTransform.clientToLogical 统一转换，
+   * client→可见 rect→logical 只发生一次）；不传时保持后端默认输出（Web=元素 CSS 局部
+   * 坐标归一化；微信=viewport logical）。down/move/up/cancel 一律经同一转换（单点）。
    */
-  bindPointer(target: EventTarget, handler: (x: number, y: number) => void): void;
+  bindPointer(
+    target: EventTarget,
+    handler: (x: number, y: number) => void,
+    toLogical?: ClientToLogical,
+  ): void;
 }
 
 // —— 聚合 ——

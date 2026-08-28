@@ -74,6 +74,32 @@ export class PlayerViewportTransform {
     return { x: px / this.dpr, y: py / this.dpr };
   }
 
+  /**
+   * F-PLAYER-INPUT-SCALE-P0｜client 坐标（viewport CSS px）→ 逻辑舞台坐标（844×390）唯一转换点。
+   *
+   * 输入只绑定唯一可见 Canvas；canvas 被 CSS contain 缩放（transform: scale(s)）时，
+   * getBoundingClientRect() 返回的是【视觉矩形】而非逻辑尺寸。此处用该视觉矩形一步完成：
+   *
+   *   logicalX = (clientX - rect.left) × logicalW / rect.width
+   *   logicalY = (clientY - rect.top)  × logicalH / rect.height
+   *
+   * 注意 logicalW/H 必须是逻辑舞台（844×390），【不得】使用含 DPR 的 backing 尺寸——
+   * backing = logical × DPR，二者只在 DPR=1 时数值相等，DPR>1 时用 backing 会把命中点缩到
+   * 舞台左上 1/DPR 区域（正是旧实现整类坐标错位的根源）。
+   */
+  clientToLogical(
+    clientX: number,
+    clientY: number,
+    rect: { left: number; top: number; width: number; height: number },
+  ): { x: number; y: number } {
+    const rw = rect && rect.width > 0 ? rect.width : this.logicalW;
+    const rh = rect && rect.height > 0 ? rect.height : this.logicalH;
+    return {
+      x: ((clientX - (rect ? rect.left : 0)) * this.logicalW) / rw,
+      y: ((clientY - (rect ? rect.top : 0)) * this.logicalH) / rh,
+    };
+  }
+
   /** 逻辑坐标 → 容器 CSS px（含 contain 缩放与居中） */
   logicalToCss(lx: number, ly: number): { x: number; y: number } {
     return { x: this.ox + lx * this.s, y: this.oy + ly * this.s };

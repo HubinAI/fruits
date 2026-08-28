@@ -52,7 +52,11 @@ function isLightText(r, g, b) {
   return r > 150 && g > 150 && b > 150; // 浅色标签文字（车库/排行榜/战令）
 }
 
-// ---- 在浏览器内读取像素 + 几何，返回紧凑结构（data 用于 Node 端独立聚类/签名）----
+// ---- 在浏览器内读取「最终页面截图」像素 + 几何，返回紧凑结构（data 用于 Node 端独立聚类/签名）----
+// F-PLAYER-INPUT-SCALE-P0：识别来源升级为最终页面截图——构造与 page.screenshot 同内容的
+// viewport 截图画布（背景 + 唯一可见 canvas 按可见 rect 映射），再裁剪画布矩形重采样回
+// backing 尺寸（识别空间/聚类参数不变）。识别结果即「可见按钮在截图中的位置」，
+// 点击坐标经 toScreen 落到 client（viewport CSS px）——绝不把 backing 像素直接当点击坐标。
 async function analyze(page) {
   return page.evaluate(() => {
     const cs = document.querySelectorAll('canvas');
@@ -61,10 +65,22 @@ async function analyze(page) {
     const rect = c.getBoundingClientRect();
     let data = null, w = 0, h = 0;
     try {
-      const ctx = c.getContext('2d');
-      const img = ctx.getImageData(0, 0, c.width, c.height);
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const shot = document.createElement('canvas');
+      shot.width = vw; shot.height = vh;
+      const sctx = shot.getContext('2d');
+      const bg = getComputedStyle(document.body).backgroundColor;
+      sctx.fillStyle = bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : '#141a26';
+      sctx.fillRect(0, 0, vw, vh);
+      sctx.drawImage(c, 0, 0, c.width, c.height, rect.x, rect.y, rect.width, rect.height);
+      // 裁剪可见矩形 → backing 尺寸（保持既有识别空间不变）
+      const out = document.createElement('canvas');
+      out.width = c.width; out.height = c.height;
+      const octx = out.getContext('2d');
+      octx.drawImage(shot, rect.x, rect.y, rect.width, rect.height, 0, 0, c.width, c.height);
+      const img = octx.getImageData(0, 0, out.width, out.height);
       data = Array.from(img.data);
-      w = c.width; h = c.height;
+      w = out.width; h = out.height;
     } catch (e) {
       data = null;
     }
@@ -184,22 +200,40 @@ async function run() {
           const goldMaxHome = cta.n;
           // #1 点击 CTA → 离开首页（居中大体量金 CTA 消失：仍居中且体量>50% 的金聚类不再存在）
           await page.mouse.click(screen.x, screen.y);
-          await page.waitForTimeout(500);
+          // F-PLAYER-INPUT-SCALE-P0：匹配流程会自动推进（匹配中→VS→预览锁定），等待其稳定
+          // （约 2.4s 后画面静止，诊断确认 fill 精确不变），再做 #2 空白角验证——避免把
+          // 「流程推进」误判为「误触」。
+          await page.waitForTimeout(2600);
           const a3 = await analyze(page);
           const gc3 = clusterize(collect(a3.data, a3.w, a3.h, isGold), a3.w, a3.h);
           const centeredBig = gc3.some((c) => c.n > goldMaxHome * 0.5 && Math.abs(c.cx / a3.w - 0.5) < 0.15);
           const navPix = !centeredBig;
           const navProbe = a3.playerPhase === 'matching' || a3.playerPhase === 'matchPreview';
           log(navProbe || navPix, `[${tag}] #1 点击CTA→进入Matching`, `probe=${a3.playerPhase} navPix=${navPix}`);
-          // #2：在 Matching 屏点击空白角不得误触（仍在 matching，像素稳定）
+          // #2：匹配稳定后点击空白角不得误触——不得发生【导航】。判据（像素，backing 空间随 dpr² 缩放）：
+          //   回 Home = 底部居中（cy>0.7·h 且 cx≈0.5·w）大体量金色重新出现（Home CTA ~54k@DPR2，
+          //     匹配各阶段≈0；阈值 5000×dpr²）；
+          //   进 Garage = 顶部 tab 行填充剧增（Garage ~22k@DPR1 / ~90k@DPR2，匹配流程 max ~11.9k@DPR1
+          //     / ~47.7k@DPR2；阈值 65000×dpr²，两档之间）。
+          // 匹配流程自带循环动画（匹配中 fill~4.5k ↔ 预览 fill~47.7k @DPR2 交替）——不作为误触。
           const gmBase = goldMaxOf(a3);
+          const tabBase = tabSigOf(a3);
           await page.mouse.click(a.rect.x + 4, a.rect.y + 4);
-          await page.waitForTimeout(300);
+          await page.waitForTimeout(500);
           const a4 = await analyze(page);
           const gmCorner = goldMaxOf(a4);
-          const stablePix = gmCorner > gmBase * 0.85;
+          const tabCorner = tabSigOf(a4);
+          const dpr2 = (a4.w / 844) ** 2;
+          const goldPts4 = collect(a4.data, a4.w, a4.h, isGold);
+          const bottomCenteredGold = goldPts4.filter(([x, y]) => y > a4.h * 0.7 && Math.abs(x / a4.w - 0.5) < 0.25).length;
+          // 阈值（@DPR1 backing 空间，随 dpr² 缩放）：
+          //   Home CTA 底部居中金 ≈13549；匹配 locked 阶段底部金按钮 ≈7110 → notHome 阈值 10000；
+          //   匹配流程 topFill max ≈11932；Garage tab 行 fill ≈22080 → notGarage 阈值 17000。
+          const notHome = bottomCenteredGold < 10000 * dpr2;
+          const notGarage = tabCorner.fill < 17000 * dpr2;
+          const stablePix = notHome && notGarage;
           const stableProbe = a4.playerPhase === 'matching' || a4.playerPhase === 'matchPreview';
-          log(stableProbe || stablePix, `[${tag}] #2 空白角点击不误触`, `probe=${a4.playerPhase} goldMax ${gmBase}→${gmCorner} pix=${stablePix}`);
+          log(stableProbe || stablePix, `[${tag}] #2 空白角点击不误触`, `probe=${a4.playerPhase} goldMax ${gmBase}→${gmCorner} tabFill ${tabBase.fill}→${tabCorner.fill} bottomGold=${bottomCenteredGold} notHome=${notHome} notGarage=${notGarage} pix=${stablePix}`);
         }
 
         // 验收#3：底部浅色入口点击 → 进入 Garage（顶部 tab 行出现）
@@ -207,6 +241,21 @@ async function run() {
         await page.waitForFunction(() => document.querySelectorAll('canvas').length >= 1, { timeout: 20000 });
         await page.waitForTimeout(700);
         const home = await analyze(page);
+
+        // F-PLAYER-INPUT-SCALE-P0 Must：1363×936 DPR1 下点击旧错误点 (422,518) 不得触发 CTA
+        // （旧实现把 client 直接当 logical → 该点落 422,365 命中 CTA；修复后 422,518→logical
+        //  (261,226) 空白区，CTA 保持 → 仍 Home）。点击坐标 = 截图像素坐标（client）。
+        if (vp.w === 1363 && dpr === 1) {
+          const gmHomeOld = goldMaxOf(home);
+          await page.mouse.click(422, 518);
+          await page.waitForTimeout(450);
+          const hOldErr = await analyze(page);
+          const gmAfterOld = goldMaxOf(hOldErr);
+          const stillHome = gmAfterOld > gmHomeOld * 0.6;
+          const notMatching = hOldErr.playerPhase !== 'matching' && hOldErr.playerPhase !== 'matchPreview';
+          log(stillHome && notMatching, `[${tag}] Must-旧错点(422,518)不触发CTA`, `gold ${gmHomeOld}→${gmAfterOld} phase=${hOldErr.playerPhase} pix=${stillHome}`);
+        }
+
         const lightPts = collect(home.data, home.w, home.h, isLightText);
         const lightClusters = clusterize(lightPts, home.w, home.h);
         const bottomClusters = lightClusters.filter((c) => c.cy / home.h > 0.55);
