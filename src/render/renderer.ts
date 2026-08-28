@@ -168,6 +168,13 @@ interface FloatingText {
   size?: number;
   /** F-BATTLE-PRESENTATION-R2：重要伤害（单次大额）→ 绘制高亮光环、提高层级 */
   important?: boolean;
+  /**
+   * F-BATTLE-HIT-READABILITY-R1：伤害数字所属 target（车辆 side；同车渲染层硬限制 ≤2 组，
+   * Must#2「以最终绘制数量为准」）。非伤害数字（spawnDamageNumber 直加）缺省 undefined。
+   */
+  target?: string;
+  /** F-BATTLE-HIT-READABILITY-R1：同车纵向槽位（0/1；Must#4 稳定错层 12~16px） */
+  slot?: number;
 }
 
 /**
@@ -223,9 +230,12 @@ interface LaserBeam {
   ttl: number; // ms（≈100~150ms 残留后快速衰减）
 }
 /** 镭射巨炮束尺度（世界 px）：长 450~600 / 核心 12~18 / glow 30~45 */
-const LASER_BEAM_LENGTH = 520;
+// F-BATTLE-HIT-READABILITY-R1：镭射巨炮束收敛——520→240 世界 px（844 逻辑宽 ~28%，
+// 不再「贯穿半屏的持续色带」，Must#7）；glow 38→22（≤ 弹体宽 40×60% = 24，Must#7
+// 「最大宽度不超过弹体主要宽度的 60%」）；core/TTL 保持（发射线清楚，Must#8 三阶段可区分）。
+const LASER_BEAM_LENGTH = 240;
 const LASER_BEAM_CORE = 15;
-const LASER_BEAM_GLOW = 38;
+const LASER_BEAM_GLOW = 22;
 const LASER_BEAM_TTL = 130; // ms：30fps 下 ≈ 3.9 帧，可读 3~4 帧
 
 /** Q13-B-R1：霰弹炮口「扇形」爆闪 VFX——有方向的短促扇形爆闪（非普通圆形 flash）。
@@ -693,7 +703,10 @@ export class Renderer {
     // F-BATTLE-PRESENTATION-R2：重要伤害（单次大额）→ 放大 + 高亮金白，从高频小伤害中脱颖而出
     const important = view.important;
     const color = important ? '#fff0b0' : damageFeedbackColors(ev.damageSource).number;
-    const mk = (): FloatingText => ({
+    // F-BATTLE-HIT-READABILITY-R1：同车存活伤害数字（最终绘制数量为准，Must#2）
+    const sameTargetAlive = (): FloatingText[] =>
+      this.fx.filter((f) => f.target === ev.target && now - f.bornAt < f.ttl).sort((a, b) => a.bornAt - b.bornAt);
+    const mk = (slot: number): FloatingText => ({
       x: view.x,
       y: view.y,
       text: `-${view.accumulatedDamage}`,
@@ -702,26 +715,50 @@ export class Renderer {
       ttl: DAMAGE_NUMBER_TTL_MS,
       size: important ? DAMAGE_NUMBER_IMPORTANT_SIZE : undefined,
       important,
+      target: ev.target,
+      slot,
     });
-    if (view.isNewGroup) {
-      // 新组：立即新建浮动数字（不延迟 → 单发武器即时显示）
-      const fx = mk();
-      this.fx.push(fx);
-      this.damageGroupFx.set(view.groupKey, fx);
-      return;
-    }
-    // 合并进当前组：累计真实伤害 + 跟随最新 contactPoint（原地更新，不新建）
-    const fx = this.damageGroupFx.get(view.groupKey);
-    if (fx) {
-      fx.text = `-${view.accumulatedDamage}`;
+    // 复用/刷新一组：更新内容 + 跟随最新 contactPoint + **刷新剩余显示时间**（Must#3）。
+    // reuseAccum=true（渲染层复用最旧组）：旧值 + 新组累计（显示只增不减，总量守恒）；
+    // 否则（窗口内合并）：显示当前组累计（不重复叠加）。
+    const refresh = (fx: FloatingText, reuseAccum = false): void => {
+      if (reuseAccum) {
+        const prev = Number(fx.text.replace('-', '')) || 0;
+        fx.text = `-${prev + view.accumulatedDamage}`;
+      } else {
+        fx.text = `-${view.accumulatedDamage}`;
+      }
       fx.x = view.x;
       fx.y = view.y;
       fx.color = color;
       fx.important = important;
       if (important) fx.size = DAMAGE_NUMBER_IMPORTANT_SIZE;
+      fx.bornAt = now;
+    };
+    if (view.isNewGroup) {
+      // 新组：渲染层硬限制同车存活伤害数字 ≤2 组（聚合窗口 210ms ≪ 数字 TTL 900ms，
+      // 若只靠聚合器内部限制，最终绘制会叠到 900/210 ≈ 4 组——Must#2 要求以最终绘制数量为准）。
+      const alive = sameTargetAlive();
+      if (alive.length >= 2) {
+        // 已满 2 组：复用同车最旧一组（累加显示，不新建第 3 个数字；重要伤害同样 ≤2 组）
+        const oldest = alive[0];
+        refresh(oldest, true);
+        this.damageGroupFx.set(view.groupKey, oldest);
+        return;
+      }
+      // 0 或 1 组：新建数字，slot 占位（0/1 → 绘制层稳定错层 14px，Must#4）
+      const fx = mk(alive.length);
+      this.fx.push(fx);
+      this.damageGroupFx.set(view.groupKey, fx);
+      return;
+    }
+    // 合并进当前组：累计真实伤害 + 跟随最新 contactPoint（原地更新，不新建数字）
+    const fx = this.damageGroupFx.get(view.groupKey);
+    if (fx) {
+      refresh(fx);
     } else {
       // 防御：聚合器判定为合并但本地无浮动数字引用（理论上不会）→ 退回新建
-      const fxNew = mk();
+      const fxNew = mk(sameTargetAlive().length);
       this.fx.push(fxNew);
       this.damageGroupFx.set(view.groupKey, fxNew);
     }
@@ -1048,15 +1085,27 @@ export class Renderer {
     this.fx = this.fx.filter((f) => now - f.bornAt < f.ttl);
     // F-BATTLE-HUD-HAZARD-R1：伤害数字同侧短时聚合/错开——按世界 x 相近分桶，
     // 桶内各组纵向错开（14px·scale 一档），避免数字堆叠遮挡车辆/墙体/HUD。
+    // F-BATTLE-HIT-READABILITY-R1：同车伤害数字改按 **slot 槽位**稳定错层（Must#4：
+    // 两组数字最小间距 12~16px、不互相覆盖）；非伤害数字仍走 x 桶兜底。
     const fxSorted = [...this.fx].sort((a, b) => a.x - b.x);
     const laneByBucket = new Map<number, number>();
     for (const f of fxSorted) {
       const age = (now - f.bornAt) / f.ttl;
-      const bucket = Math.round(f.x / 90);
-      const lane = laneByBucket.get(bucket) ?? 0;
-      laneByBucket.set(bucket, lane + 1);
+      let lane = 0;
+      if (f.target !== undefined && f.slot !== undefined) {
+        lane = f.slot; // 同车槽位（0/1）→ 稳定纵向错层
+      } else {
+        const bucket = Math.round(f.x / 90);
+        lane = laneByBucket.get(bucket) ?? 0;
+        laneByBucket.set(bucket, lane + 1);
+      }
       const tx = this.sx(f.x);
-      const ty = this.sy(f.y) - age * this.ss(40) + lane * this.ss(14);
+      // F-BATTLE-HIT-READABILITY-R1：稳定纵向错层（Must#4 12~16px）——
+      // 上浮封顶（age≤0.25 → 最多 10px）防止旧数字因上浮量追上并抵消 slot 错层
+      //（否则持续命中时两组数字会因 age 差恰好重叠到同一 y）。
+      // lane 0/1 → 16px 槽位差；上浮后两组最小间距 ≥ 16-10 = 6px（可分辨）。
+      const rise = Math.min(age, 0.25) * this.ss(40);
+      const ty = Math.max(this.ss(44), this.sy(f.y) + lane * this.ss(16) - rise);
       const fs = f.size ?? Math.max(14, this.ss(22));
       ctx.textAlign = 'center';
       // F-BATTLE-PRESENTATION-R2：重要伤害（单次大额）→ 金白高亮光环（描边）提高层级，
@@ -2021,8 +2070,20 @@ export class Renderer {
       // 束起点略退后（从炮口内一点射出），终点沿方向延伸 length
       const sx0 = this.sx(b.x - b.dirX * 18);
       const sy0 = this.sy(b.y - b.dirY * 18);
-      const sx1 = this.sx(b.x + b.dirX * b.length);
-      const sy1 = this.sy(b.y + b.dirY * b.length);
+      let sx1 = this.sx(b.x + b.dirX * b.length);
+      let sy1 = this.sy(b.y + b.dirY * b.length);
+      // F-BATTLE-HIT-READABILITY-R1：按**屏幕可见长度**收敛——世界长度在相机 zoom 下仍会被
+      // 放大（battle Active scale≈3 → 240 世界 px ≈ 720 屏 px 贯穿半屏），故 clamp 屏幕
+      // 长度 ≤ 45% 屏宽（Must#7 不形成贯穿半屏的持续色带；发射线保持清楚，Must#8）。
+      const maxScreenLen = this.viewWidth * 0.45;
+      const bdx = sx1 - sx0;
+      const bdy = sy1 - sy0;
+      const blen = Math.hypot(bdx, bdy);
+      if (blen > maxScreenLen) {
+        const k = maxScreenLen / blen;
+        sx1 = sx0 + bdx * k;
+        sy1 = sy0 + bdy * k;
+      }
       ctx.lineCap = 'round';
       // glow（最外层，半透明，衰减）
       ctx.globalAlpha = 0.32 * decay;

@@ -170,7 +170,7 @@ describe('F-PRESENT-1 Renderer 伤害数字聚合', () => {
     expect(nums[0].y).toBe(603);
   });
 
-  it('8. 机枪 7 发 burst（100ms 间隔）→ 仅少数（3 组）数字，不 7 个叠云', () => {
+  it('8. 机枪 7 发 burst（100ms 间隔）→ 渲染层硬限制 2 组（Must#2 以最终绘制数量为准），复用累加总量守恒', () => {
     const r = makeRenderer();
     // 用可控 performance.now：每发 +100ms（burst 总跨度 600ms）
     const orig = (globalThis.performance as { now: () => number }).now;
@@ -183,10 +183,14 @@ describe('F-PRESENT-1 Renderer 伤害数字聚合', () => {
         fakeNow += 100;
       }
       const nums = r.activeDamageNumbers;
-      expect(nums.length).toBe(3); // 3 组：[0-200],[300-500],[600]
-      // 各组累计：前两组各 60（3×20），最后一组 20
+      // F-BATTLE-HIT-READABILITY-R1：聚合窗口(210ms) ≪ 数字 TTL(900ms) → 若不限渲染层，
+      // 同车可见 900/210≈4 组；渲染层硬限制 ≤2 组（Must#2）。
+      expect(nums.length).toBe(2);
+      // 复用最旧组时累加显示：组 A 被第 3 窗口复用 → -60 + -20 = -80；组 B = -60
       const totals = nums.map((n) => Number(n.text.replace('-', ''))).sort((a, b) => a - b);
-      expect(totals).toEqual([20, 60, 60]);
+      expect(totals).toEqual([60, 80]);
+      // 显示合计 == 真实总量 7×20=140（复用累加守恒）
+      expect(totals[0] + totals[1]).toBe(140);
     } finally {
       (globalThis.performance as { now: () => number }).now = orig;
     }

@@ -35,6 +35,7 @@ import { TIME_SCALES } from './render/debugOverlay';
 import { BattleOrchestrator } from './battle/battleOrchestrator';
 import { PlanckBattleOrchestrator } from './battle/planckBattleOrchestrator';
 import type { BattleOrchestratorApi } from './battle/battleContract';
+import type { DamageEvent } from './battle/combatEvents';
 // F-WX-5：玩家 Gameplay Runtime（Web/微信共用）+ 战斗宿主接口
 import { PlayerGameRuntime } from './game/playerGameRuntime';
 import type { PlayerBattleHost } from './game/playerGameRuntime';
@@ -442,6 +443,26 @@ if (playerViewport) {
 // 正式 Pages/Web/微信构建编译期折叠为 false → 生产零调试对象暴露。几何快照在 loop() 内注入。
 if (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__) {
   (globalThis as { __h?: typeof host }).__h = host;
+  // F-BATTLE-HIT-READABILITY-R1：E2E 确定性高频命中探针——门禁注入真实 DamageEvent /
+  // 激光束到正式渲染管线（合成像素验收：不得只读内部数组）。__E2E_PROBE__ 构建专属，
+  // 生产零暴露；不修改任何战斗行为（spawn 纯表现）。
+  (globalThis as { __fx?: unknown }).__fx = {
+    spawnDamage: (ev: DamageEvent) =>
+      renderer.spawnDamageNumberFromEvent(ev),
+    spawnSpark: (x: number, y: number, color?: string) => renderer.spawnSpark(x, y, color),
+    spawnLaserBeam: (x: number, y: number, dx: number, dy: number) => renderer.spawnLaserBeam(x, y, dx, dy),
+    debug: () => {
+      const r = renderer as unknown as {
+        fx: Array<{ x: number; y: number; text: string; color: string; bornAt: number; ttl: number; target?: string; slot?: number }>;
+        damageGroupFx: Map<string, unknown>;
+      };
+      return {
+        fxCount: r.fx.length,
+        groupCount: r.damageGroupFx.size,
+        fx: r.fx.map((f) => ({ x: f.x, y: f.y, text: f.text, color: f.color, target: f.target, slot: f.slot, bornAt: f.bornAt })),
+      };
+    },
+  };
 }
 
 /* ---------- 稳定取景（Q02-CAM-R1）：DEV scenario 相机；build 玩家相机由 runtime 持有 ---------- */

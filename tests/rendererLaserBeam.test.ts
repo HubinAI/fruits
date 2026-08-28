@@ -76,12 +76,14 @@ describe('Q11-C-R3-FINAL Renderer 镭射巨炮束', () => {
     const beams = renderer.activeLaserBeams;
     expect(beams.length).toBe(1);
     const b = beams[0]!;
-    expect(b.length).toBeGreaterThanOrEqual(450);
-    expect(b.length).toBeLessThanOrEqual(600);
+    // F-BATTLE-HIT-READABILITY-R1：巨炮束收敛——长度 520→240（不贯穿半屏）、glow 38→22
+    //（≤ 弹体宽 60%），core 不变（发射线清楚）
+    expect(b.length).toBeGreaterThanOrEqual(210);
+    expect(b.length).toBeLessThanOrEqual(270);
     expect(b.coreWidth).toBeGreaterThanOrEqual(12);
     expect(b.coreWidth).toBeLessThanOrEqual(18);
-    expect(b.glowWidth).toBeGreaterThanOrEqual(30);
-    expect(b.glowWidth).toBeLessThanOrEqual(45);
+    expect(b.glowWidth).toBeGreaterThanOrEqual(18);
+    expect(b.glowWidth).toBeLessThanOrEqual(26);
     expect(b.dirX).toBeCloseTo(1, 6); // 沿真实 fire 方向（facing +X）
     expect(b.dirY).toBeCloseTo(0, 6);
   });
@@ -93,9 +95,9 @@ describe('Q11-C-R3-FINAL Renderer 镭射巨炮束', () => {
     renderer.resize(1600, 1000); // scale = 0.9
     renderer.spawnLaserBeam(500, 600, 1, 0);
     renderer.render(makeFakeOrch() as never);
-    // 三层 lineWidth（世界 px × scale 0.9）：glow 38→34.2 / mid 21→18.9 / core 15→13.5
+    // 三层 lineWidth（世界 px × scale 0.9）：glow 22→19.8 / mid 21→18.9 / core 15→13.5
     const widths = ctx.strokes.map((s) => s.lineWidth).sort((a, b) => b - a);
-    expect(widths[0]!).toBeCloseTo(38 * 0.9, 1);
+    expect(widths[0]!).toBeCloseTo(22 * 0.9, 1);
     expect(widths[1]!).toBeCloseTo(21 * 0.9, 1);
     expect(widths[2]!).toBeCloseTo(15 * 0.9, 1);
     // 白青色系

@@ -932,13 +932,13 @@ describe('Q11-C 蓄能镭射 Weapon', () => {
     const beams = renderer.activeLaserBeams;
     expect(beams.length).toBeGreaterThan(0);
     const b = beams[0]!;
-    // 验收 1：巨炮（长 450~600 / 核心 12~18 / glow 30~45）
-    expect(b.length).toBeGreaterThanOrEqual(450);
-    expect(b.length).toBeLessThanOrEqual(600);
+    // 验收 1：巨炮（F-BATTLE-HIT-READABILITY-R1 收敛：长 210~270 / 核心 12~18 / glow 18~26）
+    expect(b.length).toBeGreaterThanOrEqual(210);
+    expect(b.length).toBeLessThanOrEqual(270);
     expect(b.coreWidth).toBeGreaterThanOrEqual(12);
     expect(b.coreWidth).toBeLessThanOrEqual(18);
-    expect(b.glowWidth).toBeGreaterThanOrEqual(30);
-    expect(b.glowWidth).toBeLessThanOrEqual(45);
+    expect(b.glowWidth).toBeGreaterThanOrEqual(18);
+    expect(b.glowWidth).toBeLessThanOrEqual(26);
     // 沿真实 fire 方向（A facing +X → dirX>0）
     expect(b.dirX).toBeGreaterThan(0.9);
     controller.stop();
