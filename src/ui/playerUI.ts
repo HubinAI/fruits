@@ -103,6 +103,8 @@ export interface PlayerUIState {
   hardpointScreenPts?: Array<{ id: string; kind: 'movement' | 'functional'; x: number; y: number; occupied: boolean }>;
   /** F-GARAGE-LIVE-ASSEMBLY-P0：最近一次被拒绝的超载差值（能量区显示；null=无） */
   overloadDelta?: number | null;
+  /** F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件反馈文案（?resetdev=1 可见；轻量，不占布局） */
+  devGrantMessage?: string | null;
   /** MatchPreview 复核条（Q15-FLOW-R1-ATOMIC：正常流程立即隐藏，永不闪现） */
   matchBarHidden: boolean;
   // —— Result ——
@@ -146,6 +148,8 @@ export interface PlayerUIActions {
   onMerge(): void;
   /** DEV：重置进度（?resetdev=1 可见；二次确认后调用） */
   onResetProgress(): void;
+  /** F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件 ×1（?resetdev=1 可见；不自动装备/不升星） */
+  onGrantAllParts?(): void;
   /** 首页程序化背景下沉为 renderer underlay 开关（仅首页开启；车库/匹配/战斗关闭） */
   setHomeBackdrop?(on: boolean): void;
   /** F-GARAGE-CENTER-STAGE-P0：Garage 装配页背景（深蓝车库展示台 + 地面 + 少量灯光）开关 */

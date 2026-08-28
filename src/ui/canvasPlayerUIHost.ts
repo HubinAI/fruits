@@ -25,6 +25,7 @@ import {
   type GarageTopBarTexts,
 } from './mobileGarageLayout';
 import { registry } from '../core/content';
+import { DEV_TOOLS_VISIBLE } from '../core/env';
 import {
   buildSnapshotFromDraft,
   editableSlots,
@@ -1168,6 +1169,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.draw();
       return;
     }
+    if (id === 'dev-grant-all') {
+      // F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件 ×1（Runtime 入库 + 持久化 + 反馈文案）
+      this.actions?.onGrantAllParts?.();
+      return;
+    }
     if (id.startsWith('nav:')) {
       // F-META-1：Main Shell 导航切换（UI-only，不派发 Gameplay action；离开当前页复位面板态）
       // F-HOME-1：'nav:garage'（Backpack/More 的「返回车库」）→ 回 Home（正式首页）；'nav:home'（配置页返回）
@@ -2183,6 +2189,31 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.drawGarageStrip(state, draft, stripRect);
     // F-GARAGE-DRAG-ASSEMBLY-P0：拖动 ghost 与吸附反馈绘制在最上层（不影响车辆取景/尺度，Must#18）
     this.drawGarageDragGhost(state);
+    // F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件按钮（仅 DEV 构建 + ?resetdev=1；条件绘制零布局占用）
+    this.drawDevGrantEntry(state);
+  }
+
+  /**
+   * F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件按钮（Must#2）——
+   * - 显示条件 = （DEV_TOOLS_VISIBLE 或 __E2E_PROBE__ 构建）&& state.resetDevVisible
+   *   （?resetdev=1 玩家调试参数）→ 正式 Pages（prod 无 probe）与正式微信（resetdev 恒 false）
+   *   零按钮零命中区；dev/test/e2e 构建 + 参数才显示；
+   * - 位置 = Garage 舞台右上角小按钮（仅条件绘制，隐藏时不占 Garage/Home 布局）；
+   * - 反馈 = runtime 返回的「已获得全部件×1（N种）」（N 来自实际去重数量，Must#8）。
+   */
+  private drawDevGrantEntry(state: PlayerUIState): void {
+    const e2eProbe = typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__;
+    if (!(DEV_TOOLS_VISIBLE || e2eProbe) || !state.resetDevVisible) return;
+    const stage = this.garageStageRect;
+    if (!stage) return;
+    const btnW = this.isShort ? 74 : 88;
+    const btnH = this.isShort ? 20 : 24;
+    const x = stage.x + stage.w - btnW - 6;
+    const y = stage.y + 6;
+    this.button(x, y, btnW, btnH, 'dev-grant-all', '全部件 +1', {});
+    if (state.devGrantMessage) {
+      this.text(state.devGrantMessage, x + btnW / 2, y + btnH + 8, this.isShort ? 8 : 9, V.primary, 'center', 600);
+    }
   }
 
   /**

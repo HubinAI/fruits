@@ -34,6 +34,7 @@ import {
 } from '../lab/buildEditorModel';
 import { resolveOnboardingStage, completeOnboarding, type OnboardingStage } from '../core/onboarding';
 import { resetPlayerSave } from '../core/saveVersion';
+import { grantAllPartsOnce } from '../core/debugGrants';
 import { validateSnapshot, computeEnergy } from '../core/buildValidator';
 import {
   OPPONENT_POOL,
@@ -180,6 +181,8 @@ export class PlayerGameRuntime {
   private garageSelected: string | null = null;
   /** F-GARAGE-LIVE-ASSEMBLY-P0：最近一次被拒绝的超载差值（能量区显示；null=无） */
   private overloadDeltaInternal: number | null = null;
+  /** F-DEBUG-GRANT-ALL-PARTS-P0：一键全部件反馈文案（pushUI 传给 host；一次性） */
+  private devGrantMessage: string | null = null;
   private matchingGeneration = 0;
   private lastShownResult: BattleOrchestratorApi['result'] = null;
   private battleStartTimeMs = 0;
@@ -370,6 +373,13 @@ export class PlayerGameRuntime {
         this.reinitFromStorage();
       }
     },
+    // F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件 ×1（仅 ?resetdev=1 + DEV 构建可达；
+    // 不自动装备 / 不升星 / 不改金币段位能量）
+    onGrantAllParts: () => {
+      const n = grantAllPartsOnce();
+      this.devGrantMessage = `已获得全部件×1（${n}种）`;
+      this.pushUI();
+    },
     setHomeBackdrop: (on: boolean) => {
       // F-HOME-P0-LAYER：首页背景下沉为 renderer underlay（背景层<车辆层<UI层）
       this.deps.battle.setHomeBackdrop?.(on);
@@ -482,6 +492,7 @@ export class PlayerGameRuntime {
       blockReason: this.blockReason(),
       garageSelected: this.garageSelected,
       overloadDelta: this.overloadDeltaInternal,
+      devGrantMessage: this.devGrantMessage,
       inventory: getInventory(),
       progress: getProgress(),
       onboarding: this.onboardingStage,

@@ -1072,19 +1072,21 @@ function setMode(m: UiMode): void {
 
 /* ---------- F-WX-5：PlayerGameRuntime（Web 接线；玩家流程唯一出口） ---------- */
 // F-PLAYER-FLOW-ATOMIC-P0：玩家模式不注入任何依赖未挂载 DEV DOM 的回调
-// （onBuildLocked/onPanelsChanged/isResetDevVisible/onDevResetReload 全部 DEV-only——
+// （onBuildLocked/onPanelsChanged/onDevResetReload 全部 DEV-only——
 // sideToggle/panelA·B/tools 等 DOM 在 playerMode 下不创建；注入即存在解引用 undefined
 // 的崩溃路径，见外网 TypeError: Cannot set properties of undefined (setting 'disabled')）。
 // 非玩家模式（普通 DEV Web）保留既有 DEV 接线（面板锁定/重渲染/重置刷新）。
+// F-DEBUG-GRANT-ALL-PARTS-P0：isResetDevVisible（纯 URL 参数读取，无 DOM 依赖）玩家模式
+// 也注入——按钮显示仍受 DEV_TOOLS_VISIBLE/__E2E_PROBE__ 门控，正式构建零暴露。
 // onArenaFrame（场边红脉冲 + Death 定格）不依赖 DEV DOM（canvasWrap 恒存在），两侧共用。
 const runtime = new PlayerGameRuntime({
   host,
   battle: battleHost,
   sfx,
+  isResetDevVisible: () => new URLSearchParams(location.search).has('resetdev'),
   ...(playerMode
     ? {}
     : {
-        isResetDevVisible: () => new URLSearchParams(location.search).has('resetdev'),
         onDevResetReload: () => location.reload(),
         onPanelsChanged: () => renderPanelsOnly(),
         onBuildLocked: (locked: boolean) => setBuildControlsLockedDom(locked),
