@@ -90,11 +90,15 @@ export default defineConfig({
     }),
     __WX_DEBUG__: process.env.WECHAT_DEBUG_INPUT ? 'true' : 'false',
     __WX_RCA__: process.env.WECHAT_RCA ? 'true' : 'false',
-    __WX_BADGE__: process.env.WECHAT_BADGE ? 'true' : 'false',
-    // F-WX-EXPERIENCE-RC-P0：__E2E_PROBE__ 默认 false（正式构建零调试探针 / 零「全部件×1」入口）；
-    // WECHAT_PROBE=1 构建（build:wechat:rc）时为 true，作为「调试体验入口」——配合 game.ts 的
-    // isResetDevVisible 使「全部件×1」可达且隔离于普通体验入口（普通玩家用 prod 构建，永不出现）。
-    __E2E_PROBE__: process.env.WECHAT_PROBE ? 'true' : 'false',
+    // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：SHA 水印仅依赖 __WX_BUILD_BADGE__（WECHAT_BADGE=1 内部 RC
+    // 构建开启）；普通微信构建 / 正式 prod 构建恒 false → 画面无 SHA（正式发布前可关闭）。
+    __WX_BUILD_BADGE__: process.env.WECHAT_BADGE ? 'true' : 'false',
+    // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：「全部件×1」调试入口仅依赖独立标志 __WX_DEBUG_GRANT__
+    // （WECHAT_DEBUG_GRANT=1 内部 RC 构建开启）；与 SHA 解耦，且 E2E probe 不再作为微信体验版
+    // Debug 总开关。普通微信包两者均 false。
+    __WX_DEBUG_GRANT__: process.env.WECHAT_DEBUG_GRANT ? 'true' : 'false',
+    // 注意：__E2E_PROBE__ 已弃用（已迁移到 __WX_DEBUG__），不得出现在任何微信构建中（Web E2E 构建见 vite.e2e.config.ts 的 __WX_DEBUG__），
+    // 禁止把 __h / __probe / E2E 专用路径带入微信真机。
   },
   plugins: [
     runtimeInfoPlugin(),

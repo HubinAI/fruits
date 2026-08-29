@@ -16,10 +16,11 @@ declare const __PAGES_PREVIEW__: boolean | undefined;
 declare const __PLAYER_MODE__: boolean | undefined;
 
 /**
- * F-DEMO-VISUAL-GATE-R4｜E2E 几何门禁探针构建标志的全局类型声明。
+ * F-WX-IOS-CANVAS-CRASH-P0｜Must#6｜E2E 几何门禁探针构建标志说明（构建标志已迁移到 __WX_DEBUG__）。
  *
- * 仅 `vite.e2e.config.ts` 的 `define.__E2E_PROBE__` 会注入真值（npm run build:e2e → dist-e2e）；
+ * 仅 `vite.e2e.config.ts` 的 `define.__WX_DEBUG__` 会注入真值（npm run build:e2e → dist-e2e）；
  * 正式 Pages / Web / 微信构建未注入 → 运行时为 undefined（必须用 typeof 守卫）——
- * window.__h / window.__probe 只读几何诊断仅存在于 E2E 专用构建，生产零调试对象暴露。
+ * window.__h 只读几何诊断仅存在于 E2E 专用构建，生产零调试对象暴露。
+ * 注意：__E2E_PROBE__ 已弃用（已迁移到 __WX_DEBUG__），不得出现在任何微信构建中。
+ * （__WX_DEBUG__ 的全局类型声明见 wechat-debug.d.ts，此处不再重复声明。）
  */
-declare const __E2E_PROBE__: boolean | undefined;

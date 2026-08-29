@@ -114,10 +114,10 @@ const runtime = new PlayerGameRuntime({
   battle: battleHost,
   sfx, // AudioContext 缺失 → play/resume 安全 no-op
   // isResetDevVisible / onDevResetReload：微信恒 false / 无 reload（DEV ?resetdev 不可达）。
-  // F-WX-EXPERIENCE-RC-P0（Must#3「调试体验入口」）：仅当 __E2E_PROBE__ 构建（build:wechat:rc:debug）
-  // 为真时「全部件×1」可达；普通体验 / 正式 prod 构建（__E2E_PROBE__ 恒 false）永不出现 →
-  // 与普通体验入口隔离、且普通玩家无法误触开启。
-  isResetDevVisible: () => (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__),
+  // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：「全部件×1」调试入口仅依赖独立标志 __WX_DEBUG_GRANT__
+  // （内部 RC 构建开启）；普通微信 / 正式 prod 构建恒 false → 永不出现、无法误触。
+  // 与 SHA 水印（__WX_BUILD_BADGE__）解耦；E2E probe 不再作为微信体验版 Debug 总开关。
+  isResetDevVisible: () => (typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__),
 });
 runtime.init(); // 装载存档 + 绑定 actions + 初始预览/取景/渲染
 
@@ -179,10 +179,24 @@ if (typeof __WX_RCA__ !== 'undefined' && __WX_RCA__) {
 
 // —— 10) 每帧 UI 合成：把最新 UI offscreen canvas 作为最后一层画到唯一上屏 canvas ——
 function compositeUi(): void {
-  // 上一帧 Renderer 可能残留非单位变换；合成必须用单位变换 1:1 覆盖。
+  // F-WX-IOS-CANVAS-CRASH-P0｜Must#3：合成前显式恢复预期 transform（单位变换），
+  // 不被上一帧世界相机变换污染；globalAlpha / globalCompositeOperation 复位为默认值；
+  // 明确 source backing rect 与 destination backing rect，drawImage 仅执行一次；UI 离屏只作 overlay source。
   screenCtx.save();
   screenCtx.setTransform(1, 0, 0, 1, 0, 0);
-  screenCtx.drawImage(uiCanvas, 0, 0, uiCanvas.width, uiCanvas.height);
+  screenCtx.globalAlpha = 1;
+  screenCtx.globalCompositeOperation = 'source-over';
+  screenCtx.drawImage(
+    uiCanvas,
+    0,
+    0,
+    uiCanvas.width,
+    uiCanvas.height,
+    0,
+    0,
+    screenCanvas.width,
+    screenCanvas.height,
+  );
   screenCtx.restore();
 }
 
@@ -229,10 +243,19 @@ installWechatErrorGuard({
   getPhase: () => (typeof runtime !== 'undefined' && runtime ? runtime.playerPhase : 'boot'),
 });
 
+// F-WX-IOS-CANVAS-CRASH-P0｜Must#5：SingleLoop 已捕获 onFrame 异常并续帧（避免静默卡死），
+// 但异常根因不得被吞掉——首帧异常在此上报（SHA + 玩家阶段），供真机回溯。
+loop.onError = (err) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  const phase = typeof runtime !== 'undefined' && runtime ? runtime.playerPhase : 'boot';
+  // eslint-disable-next-line no-console
+  console.error(`[WECHAT-ERROR] sha=${runtimeInfo.sha.slice(0, 7)} phase=${phase} frame: ${msg}`);
+};
+
 // —— 13) 体验版 SHA 水印（F-WX-EXPERIENCE-RC-P0）：
-// 仅 RC 体验构建（__WX_BADGE__=true）在画面角落绘制短 SHA，供真人录屏确认版本；
-// 正式发布构建（build:wechat，__WX_BADGE__=false）→ 不注入 → 画面无 SHA（正式发布前可关闭）。
-if (typeof __WX_BADGE__ !== 'undefined' && __WX_BADGE__) {
+// 仅 RC 体验构建（__WX_BUILD_BADGE__=true）在画面角落绘制短 SHA，供真人录屏确认版本；
+// 正式发布构建（build:wechat，__WX_BUILD_BADGE__=false）→ 不注入 → 画面无 SHA（正式发布前可关闭）。
+if (typeof __WX_BUILD_BADGE__ !== 'undefined' && __WX_BUILD_BADGE__) {
   uiHost.setBuildBadge(`#${runtimeInfo.sha.slice(0, 7)}`);
 }
 

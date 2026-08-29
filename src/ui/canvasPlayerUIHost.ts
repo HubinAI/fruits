@@ -468,9 +468,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (!ctx) throw new Error('Canvas 2D not supported');
     this.ctx = ctx;
     this.viewport = platform.createViewport(this.canvas);
-    // F-DEMO-VISUAL-GATE-R4：host 探针仅存在于专用 E2E 构建（__E2E_PROBE__ define）——
-    // 正式 Pages/Web/微信构建编译期折叠为 false，window.__h 恒为 undefined（生产零调试对象）。
-    if (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__) {
+    // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：host 探针（window.__h）仅存在于专用构建。
+    // 微信构建经 __WX_DEBUG__（恒为 false）编译期折叠为 undefined，绝无调试句柄(__h)泄漏；
+    // Web E2E 构建（vite.e2e.config.ts）注入 __WX_DEBUG__=true 以暴露几何诊断。
+    if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
       (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
     }
     // 输入唯一入口：Platform Input Adapter（F-WX-4）
@@ -497,7 +498,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (!ctx) throw new Error('Canvas 2D not supported');
     this.ctx = ctx;
     this.viewport = platform.createViewport(this.canvas);
-    if (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__) {
+    // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：仅内部 RC 调试构建（__WX_DEBUG_GRANT__）暴露 __h 调试句柄；
+    // 普通微信构建恒 false → 调试句柄不带入真机。
+    if (typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__) {
       (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
     }
     // 唯一输入入口：绑定到唯一可见屏幕 Canvas（Renderer canvas）
@@ -521,7 +524,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
 
   /**
    * F-PLAYER-SINGLE-CANVAS-RECOVERY-P0｜只读诊断：暴露当前 Garage 页签分类。
-   * 仅用于 E2E 像素门禁的【验证】读数（不用于生成点击位置），编译期在非 __E2E_PROBE__ 构建中无引用。
+   * 仅用于 E2E 像素门禁的【验证】读数（不用于生成点击位置），编译期在非 __WX_DEBUG__ 构建中无引用。
    */
   getGarageCategory(): 'body' | 'move' | 'combat' {
     return this.garageCategory;
@@ -2300,14 +2303,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
 
   /**
    * F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件按钮（Must#2）——
-   * - 显示条件 = （DEV_TOOLS_VISIBLE 或 __E2E_PROBE__ 构建）&& state.resetDevVisible
+   * - 显示条件 = （DEV_TOOLS_VISIBLE 或 __WX_DEBUG__ 构建）&& state.resetDevVisible
    *   （?resetdev=1 玩家调试参数）→ 正式 Pages（prod 无 probe）与正式微信（resetdev 恒 false）
    *   零按钮零命中区；dev/test/e2e 构建 + 参数才显示；
    * - 位置 = Garage 舞台右上角小按钮（仅条件绘制，隐藏时不占 Garage/Home 布局）；
    * - 反馈 = runtime 返回的「已获得全部件×1（N种）」（N 来自实际去重数量，Must#8）。
    */
   private drawDevGrantEntry(state: PlayerUIState): void {
-    const e2eProbe = typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__;
+    const e2eProbe = typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__;
     if (!(DEV_TOOLS_VISIBLE || e2eProbe) || !state.resetDevVisible) return;
     const stage = this.garageStageRect;
     if (!stage) return;

@@ -384,10 +384,30 @@ export class Renderer {
    * 从根上消除「双画布坐标错位」整类问题（唯一可见 Canvas 参与最终展示与输入）。
    * 非玩家 / DEV 模式不调用本方法（compositeCanvas 为 null）。
    */
+  /**
+   * F-WX-IOS-CANVAS-CRASH-P0｜Must#2：可见 Canvas 清屏——显式 identity 变换 + 完整 backing 尺寸。
+   * 独立于后续世界绘制所用的 dpr 变换，杜绝「在已有 scale/translate 变换下用 backing 宽高 clearRect」
+   * 导致的清屏区域错位 / 残留。调用后 transform 恢复到 clearScreen 之前的状态（save/restore 平衡）。
+   */
+  private clearScreen(): void {
+    const ctx = this.ctx;
+    // F-WX-IOS-CANVAS-CRASH-P0｜Must#2：清屏必须显式 identity + 完整 backing 尺寸，
+    // 不依赖上一步的 dpr 变换（避免非整数 DPR 下清屏区域错位 / 残留）。
+    // 不用 ctx.save/restore：部分测试用 mock 2D ctx 未实现 save/restore；render() 调用前
+    // 已 setTransform(dpr,…)，此处清屏后直接将变换恢复为同一 dpr 变换即可（save/restore 的平衡等价物）。
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.setTransform(this.viewDpr, 0, 0, this.viewDpr, 0, 0);
+  }
+
   compositeOverlay(src: HTMLCanvasElement): void {
     const ctx = this.ctx;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    // F-WX-IOS-CANVAS-CRASH-P0｜Must#3：明确 source backing rect 与 destination backing rect，
+    // drawImage 仅执行一次；不依赖上一步世界相机变换。UI 离屏只作 overlay source。
     ctx.drawImage(
       src as unknown as CanvasImageSource,
       0,
@@ -889,7 +909,9 @@ export class Renderer {
     const ctx = this.ctx;
     const dpr = this.viewDpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, this.viewWidth, this.viewHeight);
+    // F-WX-IOS-CANVAS-CRASH-P0｜Must#2：可见 Canvas 清屏必须显式 identity + 完整 backing 尺寸，
+    // 不依赖上一步的 dpr 变换（避免非整数 DPR 下清屏区域错位 / 残留）。
+    this.clearScreen();
 
     // 背景
     if (this.homeBackdrop) {

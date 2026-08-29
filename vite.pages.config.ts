@@ -19,9 +19,10 @@ export default defineConfig({
   plugins: [runtimeInfoPlugin()],
   define: {
     __PAGES_PREVIEW__: 'true',
-    // F-DEMO-VISUAL-GATE-R4：正式 Pages 显式注入 false → esbuild 编译期折叠 + 死代码消除，
-    // window.__h / window.__probe 探针代码不进入生产 bundle（E2E 专用构建才注入 true）。
-    __E2E_PROBE__: 'false',
+    // F-DEMO-VISUAL-GATE-R4｜Must#6：正式 Pages 显式注入 false → esbuild 编译期折叠 + 死代码消除，
+    // window.__h / window.__probe 探针代码不进入生产 bundle（E2E 专用构建 vite.e2e.config.ts 注入 true）。
+    // 原 __E2E_PROBE__ 已弃用，统一迁移到 __WX_DEBUG__。
+    __WX_DEBUG__: 'false',
   },
   build: {
     outDir: 'dist-pages',

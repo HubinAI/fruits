@@ -9,6 +9,8 @@
 export type FrameCallback = (now: number) => void;
 export type RafFn = (cb: FrameCallback) => number;
 export type CafFn = (handle: number) => void;
+/** 首帧异常上报（仅上报一次，避免无限刷屏；详见 Must#5） */
+export type LoopErrorReporter = (err: unknown, t: number) => void;
 
 export class SingleLoop {
   private handle: number | null = null;
@@ -16,6 +18,10 @@ export class SingleLoop {
   private running = true;
   /** 每帧回调（需在构造后、启动前设置；避免循环引用） */
   onFrame: FrameCallback = () => {};
+  /** 首帧异常上报钩子（可选）；异常被捕获后继续调度，不会静默吞掉根因 */
+  onError: LoopErrorReporter | null = null;
+  /** 已上报过的首异常（去重，避免每帧重复刷屏） */
+  private reportedError = false;
 
   constructor(
     private readonly raf: RafFn,
@@ -57,7 +63,17 @@ export class SingleLoop {
   private step(t: number): void {
     this.scheduled = false; // 本帧已消费该次调度
     if (!this.running) return;
-    this.onFrame(t);
+    // F-WX-IOS-CANVAS-CRASH-P0｜Must#5：onFrame 抛异常不得导致循环静默卡死。
+    // 捕获首异常并上报（不吞根因），随后仍续帧——保证主循环不因单帧错误停摆
+    // （避免「running=true 但 pending=0」的假运行态）。同一异常只上报一次，杜绝无限刷屏。
+    try {
+      this.onFrame(t);
+    } catch (err) {
+      if (!this.reportedError) {
+        this.reportedError = true;
+        this.onError?.(err, t);
+      }
+    }
     if (this.running) this.request(); // 续帧（仍受幂等保护）
   }
 }

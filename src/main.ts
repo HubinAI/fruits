@@ -439,12 +439,13 @@ if (playerViewport) {
   );
   playerViewport.applyTo(canvas);
 }
-// F-DEMO-VISUAL-GATE-R4：E2E 探针（window.__h）仅存在于专用 E2E 构建（__E2E_PROBE__ define）；
+// F-WX-IOS-CANVAS-CRASH-P0｜Must#6：E2E 探针（window.__h）仅存在于专用 E2E 构建（__WX_DEBUG__ define）；
 // 正式 Pages/Web/微信构建编译期折叠为 false → 生产零调试对象暴露。几何快照在 loop() 内注入。
-if (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__) {
+// 注意：__E2E_PROBE__ 已弃用（已迁移到 __WX_DEBUG__），不得出现在任何微信构建中。
+if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
   (globalThis as { __h?: typeof host }).__h = host;
   // F-BATTLE-HIT-READABILITY-R1：E2E 确定性高频命中探针——门禁注入真实 DamageEvent /
-  // 激光束到正式渲染管线（合成像素验收：不得只读内部数组）。__E2E_PROBE__ 构建专属，
+  // 激光束到正式渲染管线（合成像素验收：不得只读内部数组）。__WX_DEBUG__ 构建专属，
   // 生产零暴露；不修改任何战斗行为（spawn 纯表现）。
   (globalThis as { __fx?: unknown }).__fx = {
     spawnDamage: (ev: DamageEvent) =>
@@ -1077,7 +1078,7 @@ function setMode(m: UiMode): void {
 // 的崩溃路径，见外网 TypeError: Cannot set properties of undefined (setting 'disabled')）。
 // 非玩家模式（普通 DEV Web）保留既有 DEV 接线（面板锁定/重渲染/重置刷新）。
 // F-DEBUG-GRANT-ALL-PARTS-P0：isResetDevVisible（纯 URL 参数读取，无 DOM 依赖）玩家模式
-// 也注入——按钮显示仍受 DEV_TOOLS_VISIBLE/__E2E_PROBE__ 门控，正式构建零暴露。
+// 也注入——按钮显示仍受 DEV_TOOLS_VISIBLE/__WX_DEBUG__ 门控，正式构建零暴露。
 // onArenaFrame（场边红脉冲 + Death 定格）不依赖 DEV DOM（canvasWrap 恒存在），两侧共用。
 const runtime = new PlayerGameRuntime({
   host,
@@ -1199,11 +1200,11 @@ function loop(now: number): void {
     const oc = host.compositeCanvas;
     if (oc) renderer.compositeOverlay(oc);
   }
-  // F-DEMO-VISUAL-GATE-R4：E2E 构建（__E2E_PROBE__）每帧写入只读几何诊断快照——
+  // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：E2E 构建（__WX_DEBUG__）每帧写入只读几何诊断快照——
   // phase / A/B 屏幕 envelope / matchVehicleRects / transform / groundScreenY /
   // 收束墙屏幕 rect / 阶段文案（供浏览器 Gate 硬断言；只读、不参与任何 Gameplay 规则；
-  // 正式构建编译期折叠为零开销）。
-  if (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__) {
+  // 正式构建编译期折叠为零开销）。__E2E_PROBE__ 已弃用（已迁移到 __WX_DEBUG__）。
+  if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
     try {
       const orch = lab.orchestrator;
       const snap = orch?.getRenderSnapshot?.();
