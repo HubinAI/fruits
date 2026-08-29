@@ -3,6 +3,8 @@ dist/
 dist-e2e/
 dist-wechat/
 dist-pages/
+# F-WX-EXPERIENCE-C5-RC｜唯一 RC 候选包（本地导入微信开发者工具，禁止入库/与旧 C3/C4 混用）
+dist-wechat-c5-*/
 *.log
 .DS_Store
 
