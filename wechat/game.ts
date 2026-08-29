@@ -42,6 +42,8 @@ import { CanvasPlayerUIHost } from '../src/ui/canvasPlayerUIHost';
 import { resolveLayoutProfile } from '../src/ui/layoutProfile';
 import { PlayerGameRuntime } from '../src/game/playerGameRuntime';
 import { WechatBattleHost } from '../src/game/wechatBattleHost';
+import { SingleLoop } from '../src/platform/wechat/singleLoop';
+import { installWechatErrorGuard } from '../src/platform/wechat/errorGuard';
 import { APP_VERSION } from '../src/core/env';
 // F-BATTLE-READABILITY-R1：正式 Content 视觉（构建期 base64 内联 → wx.createImage 加载；
 // 无此资源时 Renderer 灰盒 fallback——本加载使车辆显示正式 sprite，不再像 Physics Lab）
@@ -181,34 +183,47 @@ function compositeUi(): void {
 }
 
 // —— 11) 主循环（经共享 Platform Lifecycle；后台暂停 / 前台恢复） ——
-let running = true;
-let rafHandle: number | null = null;
-
-function frame(now: number): void {
-  if (!running) return;
+/**
+ * F-WX-RUNTIME-LIFECYCLE-P0（Must#3「onShow 只恢复一套循环 / 无重复 RAF」）：
+ * 单循环守卫——任意时刻至多一个待执行帧。快速切后台再回前台 / 连续 onShow 不会起第二个
+ * frame 循环（避免双倍 tick / 双倍渲染 / 双倍音频调度）。逻辑抽到 SingleLoop 以便单测。
+ */
+const loop = new SingleLoop(
+  (cb) => platform.lifecycle.requestAnimationFrame(cb),
+  (h) => platform.lifecycle.cancelAnimationFrame(h),
+);
+loop.onFrame = (now: number) => {
   // 固定顺序（F-WX-P0）：Renderer 画 screenCanvas（Battle/Preview）→ UI Host 画 uiCanvas →
   // screenCtx.drawImage(uiCanvas) 作为最后一层。UI 透明区透出 Renderer。
   runtime.tick(now); // 战斗步进 + Matching B FX + 渲染 + 阶段/结果轮询 + HUD 帧
   compositeUi();
-  if (running) rafHandle = platform.lifecycle.requestAnimationFrame(frame);
-}
+};
 
-// 后台→前台：wx.onHide 暂停调度（微信会挂起 JS）；onShow 恢复 + 重置 dt 时钟防爆发
+// 后台→前台：wx.onHide 暂停调度（微信会挂起 JS）；onShow 恢复 + 重置 dt 时钟防爆发。
+// F-WX-RUNTIME-LIFECYCLE-P0：onHide 同时停止持续音源并清理交互瞬时状态（微信无 window，
+// host 的 window 安全网恒不生效，必须在此显式处理）。
 platform.lifecycle.onVisibilityChange((hidden) => {
   if (hidden) {
-    running = false;
-    if (rafHandle !== null) {
-      platform.lifecycle.cancelAnimationFrame(rafHandle);
-      rafHandle = null;
-    }
+    loop.stop(); // 停 tick（含取消待执行帧）/ 清记账
+    // Must#3/5：停止或暂停 tick（上）+ 持续音源 + 输入瞬时状态
+    sfx.stopBattleAudio?.(); // 切后台停止全部循环战斗音源（回前台由新战斗重新登记，不叠加）
+    uiHost.cancelInteraction(); // 清拖动 ghost / armed / 未闭合手势（不修改 Build 与存档）
   } else {
-    running = true;
+    loop.start();
     runtime.resetClock();
-    rafHandle = platform.lifecycle.requestAnimationFrame(frame);
+    loop.request(); // 幂等：若循环仍在跑则不重复起
   }
 });
 
-rafHandle = platform.lifecycle.requestAnimationFrame(frame);
+loop.request();
+
+// —— 12) 微信错误兜底（Must#7）：捕获未处理异常 / 拒绝，记录构建 SHA + 玩家阶段；
+//         仅日志，不向玩家界面展示任何调试堆栈。wx 缺失 / 无钩子时安全降级。 ——
+installWechatErrorGuard({
+  wx: (globalThis as any).  wx,
+  sha: runtimeInfo.sha,
+  getPhase: () => (typeof runtime !== 'undefined' && runtime ? runtime.playerPhase : 'boot'),
+});
 
 // 导出供调试 / headless smoke 断言（IIFE 下挂到全局返回对象）
 export { runtime, renderer, uiHost, runtimeInfo, screenCanvas, uiCanvas };

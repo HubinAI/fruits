@@ -104,17 +104,43 @@ export class SfxAudioService implements SfxService {
   private ctx: MinimalAudioContext | null = null;
   private muted = false;
 
-  /** 惰性创建 AudioContext（无音频环境 / 创建失败 → null，play 安全 no-op） */
+  /**
+   * 惰性创建 AudioContext（无音频环境 / 创建失败 → null，play 安全 no-op）。
+   *
+   * F-WX-RUNTIME-LIFECYCLE-P0（Must#5）：**微信小游戏没有 `globalThis.AudioContext`**——
+   * 旧实现只查标准构造器，导致微信端 ensureContext 恒返回 null，全部音效静默失效
+   * （「Web 有实现」≠「微信端成立」）。此处按序尝试：
+   *   1) 标准 AudioContext（Web / 部分微信基础库）；
+   *   2) `wx.createWebAudioContext()`（微信小游戏官方音频接口，基础库 2.19.0+）；
+   * 两者都缺失/失败 → null（既有安全 no-op 行为不变）。
+   * 只创建一次并缓存（Must#3：不重复创建 AudioContext）。
+   */
   private ensureContext(): MinimalAudioContext | null {
     if (this.ctx) return this.ctx;
-    const Ctor = (globalThis as { AudioContext?: AudioContextCtor }).AudioContext;
-    if (typeof Ctor !== 'function') return null;
-    try {
-      this.ctx = new Ctor();
-    } catch {
-      this.ctx = null;
+    const g = globalThis as {
+      AudioContext?: AudioContextCtor;
+      webkitAudioContext?: AudioContextCtor;
+      wx?: { createWebAudioContext?: () => MinimalAudioContext };
+    };
+    const Ctor = g.AudioContext ?? g.webkitAudioContext;
+    if (typeof Ctor === 'function') {
+      try {
+        this.ctx = new Ctor();
+        return this.ctx;
+      } catch {
+        this.ctx = null; // 创建失败 → 继续尝试微信接口
+      }
     }
-    return this.ctx;
+    const wx = g.wx;
+    if (wx && typeof wx.createWebAudioContext === 'function') {
+      try {
+        this.ctx = wx.createWebAudioContext();
+        return this.ctx;
+      } catch {
+        this.ctx = null;
+      }
+    }
+    return null;
   }
 
   play(id: SfxId): void {

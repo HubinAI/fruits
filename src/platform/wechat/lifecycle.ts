@@ -8,6 +8,15 @@ export class WechatLifecycle implements PlatformLifecycle {
   private get wx(): any {
     return (globalThis as any).wx;
   }
+  /**
+   * F-WX-RUNTIME-LIFECYCLE-P0（Must#3「不重复注册 listener」）：
+   * wx.onHide / wx.onShow 是**全局单例监听**（重复注册会叠加回调，导致一次切后台
+   * 触发 N 次处理 → 多套循环 / 多次音频停止）。故此处：
+   * - wx.onHide/onShow **只绑定一次**（bound 标志），后续调用只往本地数组追加回调；
+   * - 多个业务方可安全调用 onVisibilityChange，各自收到通知，但 wx 侧仍只有一对监听。
+   */
+  private visibilityCbs: Array<(hidden: boolean) => void> = [];
+  private bound = false;
   now(): number {
     return Date.now();
   }
@@ -28,9 +37,34 @@ export class WechatLifecycle implements PlatformLifecycle {
     }
   }
   onVisibilityChange(cb: (hidden: boolean) => void): void {
+    this.visibilityCbs.push(cb);
+    if (this.bound) return; // 已绑定：只登记回调，绝不二次注册 wx.onHide/onShow
     const wx = this.wx;
-    if (!wx) return;
-    if (typeof wx.onHide === 'function') wx.onHide(() => cb(true));
-    if (typeof wx.onShow === 'function') wx.onShow(() => cb(false));
+    if (!wx) return; // wx 缺失（测试桩）：保持未绑定，待 wx 出现后首次绑定
+    const hasHide = typeof wx.onHide === 'function';
+    const hasShow = typeof wx.onShow === 'function';
+    if (!hasHide && !hasShow) return;
+    this.bound = true;
+    if (hasHide) wx.onHide(() => this.emitVisibility(true));
+    if (hasShow) wx.onShow(() => this.emitVisibility(false));
+  }
+
+  /** 微信侧一次 onHide/onShow → 通知所有登记方（异常隔离：单个回调抛错不影响其它） */
+  private emitVisibility(hidden: boolean): void {
+    for (const cb of [...this.visibilityCbs]) {
+      try {
+        cb(hidden);
+      } catch {
+        // 单个回调异常不得中断其它生命周期处理（也不得冒泡为崩溃）
+      }
+    }
+  }
+
+  /** 测试/诊断探针：wx.onHide/onShow 的实际注册次数（Must#3：恒 ≤1 对） */
+  get boundOnce(): boolean {
+    return this.bound;
+  }
+  get listenerCount(): number {
+    return this.visibilityCbs.length;
   }
 }

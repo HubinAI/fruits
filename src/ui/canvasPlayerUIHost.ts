@@ -415,6 +415,26 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.draw();
   }
 
+  /**
+   * F-WX-RUNTIME-LIFECYCLE-P0（Must#3/4）：宿主在 **切后台 / 输入丢失** 时调用——
+   * 清理交互层瞬时状态（按下 / armed / 拖动 ghost / 未闭合手势），保证下一次拖动从 idle
+   * 正常开始（Must#11：不继承上一手势的 pointerId、ghost、hover 或 cancel 状态）。
+   *
+   * 为何必须提供平台无关入口：`installDragSafetyNet()` 依赖 `window`（pointerup/blur/
+   * visibilitychange），**微信小游戏无 window → 安全网恒不生效**；微信侧只能由宿主在
+   * onHide 显式调用本方法。Web 侧调用同样安全（幂等，无状态则 no-op）。
+   *
+   * 只清理**交互瞬时状态**，不修改 BuildDraft / 存档 / 装备 / 能量。
+   */
+  cancelInteraction(): void {
+    this.gesture = null;
+    if (this.garageDrag) {
+      this.resetGarageDrag('cancelled');
+      this.garageDragNotice = null;
+    }
+    this.draw();
+  }
+
   mount(parent: HTMLElement): void {
     this.parent = parent;
     // 覆盖主画布容器，位于战斗 canvas 之上；指针交给 hit-test
