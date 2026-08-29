@@ -13,6 +13,7 @@ import { WebInput } from '../src/platform/web/input';
 import { WechatStorage } from '../src/platform/wechat/storage';
 import { WechatLifecycle } from '../src/platform/wechat/lifecycle';
 import { WechatViewport } from '../src/platform/wechat/viewport';
+import { readWechatWindowInfo } from '../src/platform/wechat/windowInfo';
 import { WechatInput } from '../src/platform/wechat/input';
 import { createWebCore } from '../src/platform/web';
 import { createWechatCore } from '../src/platform/wechat';
@@ -294,5 +295,103 @@ describe('F-WX-6 PlatformViewport.safeInsets（Safe Area 最小扩展）', () =>
     expect(vp.safeInsets()).toEqual({ left: 44, right: 0, top: 0, bottom: 12 });
     delete (globalThis as any).document;
     delete (globalThis as any).window;
+  });
+
+  it('F-WX-SAFE-AREA-P0：readWechatWindowInfo 读取胶囊矩形（menu button）', () => {
+    (globalThis as any).wx = {
+      getWindowInfo: () => ({
+        windowWidth: 844,
+        windowHeight: 390,
+        pixelRatio: 2,
+        safeArea: { left: 0, top: 0, right: 844, bottom: 390, width: 844, height: 390 },
+      }),
+      getMenuButtonBoundingClientRect: () => ({
+        width: 87,
+        height: 32,
+        top: 4,
+        left: 744,
+        right: 831,
+        bottom: 36,
+      }),
+    };
+    const info = readWechatWindowInfo();
+    expect(info, 'windowInfo 应成功读取').toBeTruthy();
+    expect(info!.menuButton, '胶囊矩形应被填充').toBeTruthy();
+    expect(info!.menuButton!.left).toBe(744);
+    expect(info!.menuButton!.right).toBe(831);
+    expect(info!.menuButton!.top).toBe(4);
+    expect(info!.menuButton!.bottom).toBe(36);
+    expect(info!.menuButton!.width).toBe(87);
+    expect(info!.menuButton!.height).toBe(32);
+  });
+
+  it('F-WX-SAFE-AREA-P0：menuButton API 缺失 → menuButton=null（安全降级）', () => {
+    (globalThis as any).wx = {
+      getWindowInfo: () => ({
+        windowWidth: 844,
+        windowHeight: 390,
+        pixelRatio: 1,
+        safeArea: null,
+      }),
+    };
+    const info = readWechatWindowInfo();
+    expect(info!.menuButton).toBeNull();
+    expect(info!.safeArea).toBeNull();
+  });
+
+  it('F-WX-SAFE-AREA-P0：safeInsets 折叠胶囊进 right/top（顶部右侧避让，≥6px gap）', () => {
+    (globalThis as any).wx = {
+      getWindowInfo: () => ({
+        windowWidth: 844,
+        windowHeight: 390,
+        pixelRatio: 2,
+        safeArea: { left: 0, top: 0, right: 844, bottom: 390, width: 844, height: 390 },
+      }),
+      getMenuButtonBoundingClientRect: () => ({
+        width: 87,
+        height: 32,
+        top: 4,
+        left: 744,
+        right: 831,
+        bottom: 36,
+      }),
+    };
+    const vp = new WechatViewport({ width: 1688, height: 780 } as any, 2);
+    const ins = vp.safeInsets();
+    // 胶囊左侧 744 → 右侧内缩 = 844-744 = 100；+ GAP 6 = 106
+    expect(ins.right).toBe(106);
+    // 胶囊顶部 4 → 顶部内缩 = 4 + GAP 6 = 10
+    expect(ins.top).toBe(10);
+    // 无刘海 → left/bottom 不受胶囊影响
+    expect(ins.left).toBe(0);
+    expect(ins.bottom).toBe(0);
+    // 右缘应落在胶囊左侧（744）左侧 ≥6px：W - insR = 844-106 = 738 ≤ 744 ✓
+    expect(844 - ins.right).toBeLessThanOrEqual(744);
+    expect(744 - (844 - ins.right), '与胶囊水平间距 ≥6px').toBeGreaterThanOrEqual(6);
+  });
+
+  it('F-WX-SAFE-AREA-P0：胶囊与 safeArea 取较大者（横屏左刘海 + 右上胶囊）', () => {
+    (globalThis as any).wx = {
+      getWindowInfo: () => ({
+        windowWidth: 932,
+        windowHeight: 430,
+        pixelRatio: 3,
+        safeArea: { left: 44, top: 0, right: 932, bottom: 430, width: 888, height: 430 },
+      }),
+      getMenuButtonBoundingClientRect: () => ({
+        width: 87,
+        height: 32,
+        top: 4,
+        left: 844,
+        right: 931,
+        bottom: 36,
+      }),
+    };
+    const vp = new WechatViewport({ width: 2796, height: 1290 } as any, 3);
+    const ins = vp.safeInsets();
+    expect(ins.left).toBe(44); // safeArea 主导
+    expect(ins.right).toBe(932 - 844 + 6); // 胶囊主导：88+6=94
+    expect(ins.top).toBe(4 + 6); // 胶囊顶部 4 + 6 = 10
+    expect(ins.bottom).toBe(0);
   });
 });

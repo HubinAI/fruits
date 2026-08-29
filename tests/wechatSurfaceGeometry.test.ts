@@ -273,3 +273,92 @@ describe('F-WX-VIEWPORT-SURFACE-P0｜微信最终像素几何验收（每环境�
     }, 120000);
   }
 });
+
+/**
+ * F-WX-SAFE-AREA-P0｜胶囊避让几何验收（Must#3/#4）：唯一安全区契约（safeInsets 折叠胶囊）
+ * 经 insets 传播到所有顶部/右侧锚点。注入真实胶囊矩形后，断言：
+ *  - 首页宝箱 4 槽最右缘 ≤ capsule.left（水平避让，≥6px）；
+ *  - Battle 顶部右 HUD 最右缘 ≤ capsule.left（顶部右侧避让，≥6px）；
+ *  - SHA 水印位于左上（不卷入胶囊区域）。
+ * 验证「无需各页面独立硬编码 iPhone 偏移」即可统一避让胶囊。
+ */
+describe('F-WX-SAFE-AREA-P0｜胶囊避让几何验收（Home 宝箱 / Battle 右 HUD ≤ capsule.left）', () => {
+  afterEach(() => {
+    delete (globalThis as any).wx;
+    delete (globalThis as any).__WX_BUILD_BADGE__;
+    delete (globalThis as any).__WX_DEBUG__;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('env 844x390@1：注入胶囊 → 宝箱右缘与 Battle 右 HUD 右缘均落在胶囊左侧（≥6px）', async () => {
+    vi.useFakeTimers();
+    const env = SURFACE_ENVS[0]!; // 844x390@1（cssW=844, dpr=1）
+    const fake = makeSurfaceFakeWx(env);
+    fake.screen.ctx.fastRaster = true;
+    fake.ui.ctx.fastRaster = true;
+    // 注入胶囊（menu button）：左上 (744,4) → 右下 (831,36)，宽 87 高 32（window 逻辑 px）
+    (fake.wx as Record<string, unknown>).getMenuButtonBoundingClientRect = () => ({
+      width:  87,
+      height: 32,
+      top: 4,
+      left: 744,
+      right: 831,
+      bottom: 36,
+    });
+    (globalThis as any).wx = fake.wx;
+    (globalThis as any).__WX_BUILD_BADGE__ = true;
+    (globalThis as any).__WX_DEBUG__ = false;
+    vi.resetModules();
+
+    const mod = await import('../wechat/game');
+    const runtime = mod.runtime;
+    const uiHost = mod.uiHost;
+    const dpr = env.dpr;
+    const cssW = env.windowW;
+    const capsuleLeft = 744;
+
+    // ============ HOME ============
+    driveFrames(fake, 10);
+    // 初始 boot 绘制已包含 SHA 水印与首页 UI；直接取样（不 clear，避免 UI 非 dirty 不重绘丢 SHA）
+    const homeOps: Op[] = [...fake.ui.ctx.drawOps];
+    const chests = uiHost.getHitAreasForTest().filter((a) => a.id.startsWith('home-chest-'));
+    expect(chests.length, '应存在 4 个宝箱命中区').toBe(4);
+    const maxChestRight = Math.max(...chests.map((c) => c.x + c.w));
+    // 宝箱右缘应落在胶囊左侧（744）左侧，且与胶囊间距 ≥6px：844-insR = 738 ≤ 744 ✓
+    expect(maxChestRight, '宝箱最右缘应 ≤ capsule.left（避让胶囊）').toBeLessThanOrEqual(capsuleLeft);
+    expect(capsuleLeft - maxChestRight, '宝箱与胶囊水平间距应 ≥6px').toBeGreaterThanOrEqual(6);
+
+    // SHA 水印位于左上（胶囊在右上，不冲突；验证其 x 在左上象限）
+    const badgeOp = homeOps.find((o) => o.type === 'text' && typeof o.text === 'string' && o.text.startsWith('#'));
+    expect(badgeOp, 'SHA 水印应存在').toBeTruthy();
+    expect(badgeOp!.devX, 'SHA 应位于左上（不卷入胶囊区）').toBeLessThanOrEqual(env.backingW * 0.15);
+
+    // ============ BATTLE（经 CTA 点击进入；验证右 HUD 避让胶囊） ============
+    const cta = uiHost.getHitAreasForTest().find((a) => a.id === 'home-find-opponent');
+    expect(cta, '首页 CTA 命中区应存在').toBeTruthy();
+    fake.tap(cta!.x + cta!.w / 2, cta!.y + cta!.h / 2);
+    vi.advanceTimersByTime(1420 + 700 + 600);
+    expect(runtime.battleState, '应进入 fighting').toBe('fighting');
+    fake.ui.ctx.clearDrawOps();
+    fake.screen.ctx.clearDrawOps();
+    driveFrames(fake, 3);
+    const bUiOps: Op[] = [...fake.ui.ctx.drawOps];
+    // capsule rect (device px) at top-right; assert no drawn (non-clear) UI pixel falls inside
+    const capsuleDev = { x: capsuleLeft * dpr, y: 4 * dpr, w: 87 * dpr, h: 32 * dpr };
+    const hitsCapsule = bUiOps.some(
+      (o) =>
+        o.type !== 'clear' && o.type !== 'image' &&
+        o.devW > 0 &&
+        o.devH > 0 &&
+        o.devX < capsuleDev.x + capsuleDev.w &&
+        o.devX + o.devW > capsuleDev.x &&
+        o.devY < capsuleDev.y + capsuleDev.h &&
+        o.devY + o.devH > capsuleDev.y,
+    );
+    expect(hitsCapsule, "Battle: no UI pixel should overlap capsule rect").toBe(false);
+
+    // 退出前清理
+    vi.useRealTimers();
+  }, 120000);
+});

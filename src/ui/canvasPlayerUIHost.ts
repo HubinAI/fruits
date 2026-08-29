@@ -1579,8 +1579,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
 
     // F-WX-EXPERIENCE-RC-P0：体验版 SHA 水印（角落、极小、半透明、不遮挡游戏主体）。
     // 仅当 game.ts 注入了 buildBadge（RC 构建）才绘制；正式构建为空 → 恒跳过。
+    // F-WX-SAFE-AREA-P0：水印锚点纳入唯一安全区契约（insets）——避免贴近左上状态栏/刘海。
     if (this.buildBadge) {
-      this.text(this.buildBadge, 6, 8, 9, 'rgba(255,255,255,0.5)', 'left', 400);
+      this.text(this.buildBadge, this.insL + 6, this.insT + 6, 9, 'rgba(255,255,255,0.5)', 'left', 400);
     }
   }
 
@@ -2316,7 +2317,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (!stage) return;
     const btnW = this.isShort ? 74 : 88;
     const btnH = this.isShort ? 20 : 24;
-    const x = stage.x + stage.w - btnW - 6;
+    // F-WX-SAFE-AREA-P0：入口落在车库舞台右上角，须避让顶部右侧胶囊——
+    // 钳制右缘 ≤ W − insR（唯一契约胶囊右侧内缩）− 4，确保与胶囊 ≥6px 间距（Must#7 不留 occlusion）。
+    const maxRight = this.W - (this.insR > 0 ? this.insR : 8) - 4;
+    let x = stage.x + stage.w - btnW - 6;
+    if (x + btnW > maxRight) x = maxRight - btnW;
     const y = stage.y + 6;
     this.button(x, y, btnW, btnH, 'dev-grant-all', '全部件 +1', {});
     if (state.devGrantMessage) {
@@ -3316,8 +3321,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       ctx.font = `700 ${nameFs}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
       const nameW = Math.max(120, ctx.measureText(op.bodyName).width + 36);
       const plateW = Math.min(this.W * 0.6, nameW);
-      this.panel(bCx - plateW / 2, plateY, plateW, plateH, 'rgba(20,28,44,0.82)', 'rgba(255,138,61,0.55)', 6);
-      this.text(op.bodyName, bCx, plateY + plateH / 2 + 1, this.isMobile ? 15 : 17, V.enemyOrange, 'center', 700);
+      // F-WX-SAFE-AREA-P0：名牌中心在 0.7W，长名字时右缘会顶到顶部右侧胶囊——
+      // 整体左移，使名牌右缘 ≤ W − insR（唯一契约的胶囊右侧内缩）− 4，确保与胶囊 ≥6px 间距。
+      const maxRight = this.W - (this.insR > 0 ? this.insR : 8) - 4;
+      let plateX = bCx - plateW / 2;
+      const plateRight = plateX + plateW;
+      if (plateRight > maxRight) plateX -= plateRight - maxRight;
+      this.panel(plateX, plateY, plateW, plateH, 'rgba(20,28,44,0.82)', 'rgba(255,138,61,0.55)', 6);
+      this.text(op.bodyName, plateX + plateW / 2, plateY + plateH / 2 + 1, this.isMobile ? 15 : 17, V.enemyOrange, 'center', 700);
       // 揭晓反馈（克制）：右车高亮环，锁定后 ~500ms 淡出（不进入中央 VS、不位移车辆）
       if (reveal > 0) {
         ctx.save();

@@ -1,5 +1,6 @@
 import type { PlatformViewport, CanvasLike, SafeInsets } from '../types';
 import type { CanvasSurface } from '../../render/canvasSurface';
+import { readWechatWindowInfo } from './windowInfo';
 
 const ZERO_INSETS: SafeInsets = { left: 0, right: 0, top: 0, bottom: 0 };
 
@@ -42,24 +43,36 @@ export class WechatViewport implements PlatformViewport {
     // 微信小游戏固定方向（landscape），无运行时 resize
   }
 
+  /**
+   * 唯一横屏安全区契约（F-WX-SAFE-AREA-P0｜Must#3）：统一读取 `wx.getWindowInfo()` 的
+   * `safeArea` 与 `wx.getMenuButtonBoundingClientRect()` 的胶囊矩形（两者同属 window 逻辑域），
+   * 把「胶囊顶部 + 右侧」折叠进 insets.top / insets.right。UI 仅消费 insets 即可同时避让
+   * 刘海/圆角与胶囊，禁止各页面独立硬编码 iPhone 偏移。
+   *
+   * - 顶部内缩 = max(safeArea.top, capsule.top) + GAP（横屏顶部短边/状态栏，兼避胶囊顶部）
+   * - 右侧内缩 = max(safeArea.right, windowWidth − capsule.left) + GAP
+   *   （胶囊位于顶部右侧，右侧 UI 右缘须 ≤ capsule.left 才不被遮挡）
+   * - 无胶囊（menuButton=null，如测试桩 / 部分环境）→ 仅 safeArea 生效，行为不变。
+   */
   safeInsets(): SafeInsets {
-    const wx = (globalThis as any).wx as any;
-    if (!wx || typeof wx.getSystemInfoSync !== 'function') return ZERO_INSETS;
-    try {
-      const sys = wx.getSystemInfoSync();
-      const sa = sys && sys.safeArea;
-      if (!sa || typeof sa.left !== 'number') return ZERO_INSETS;
-      const ww = typeof sys.windowWidth === 'number' ? sys.windowWidth : 0;
-      const wh = typeof sys.windowHeight === 'number' ? sys.windowHeight : 0;
-      const clamp = (v: number): number => (Number.isFinite(v) && v > 0 ? v : 0);
-      return {
-        left: clamp(sa.left),
-        right: ww > 0 ? clamp(ww - sa.right) : 0,
-        top: clamp(sa.top),
-        bottom: wh > 0 ? clamp(wh - sa.bottom) : 0,
-      };
-    } catch {
-      return ZERO_INSETS;
+    const info = readWechatWindowInfo();
+    if (!info) return ZERO_INSETS;
+    const ww = info.windowWidth;
+    const wh = info.windowHeight;
+    const sa = info.safeArea;
+    const clamp = (v: number): number => (Number.isFinite(v) && v > 0 ? v : 0);
+    let left = sa ? clamp(sa.left) : 0;
+    let right = sa && ww > 0 ? clamp(ww - sa.right) : 0;
+    let top = sa ? clamp(sa.top) : 0;
+    let bottom = sa && wh > 0 ? clamp(wh - sa.bottom) : 0;
+    const mb = info.menuButton;
+    if (mb) {
+      const CAPSULE_GAP = 6; // Must#4：与胶囊保持 ≥6px logical 间距
+      const rightCapsule = ww > 0 ? clamp(ww - mb.left) : 0;
+      const topCapsule = clamp(mb.top);
+      if (rightCapsule + CAPSULE_GAP > right) right = rightCapsule + CAPSULE_GAP;
+      if (topCapsule + CAPSULE_GAP > top) top = topCapsule + CAPSULE_GAP;
     }
+    return { left, right, top, bottom };
   }
 }

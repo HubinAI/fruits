@@ -34,6 +34,19 @@ export interface WechatWindowInfo {
     width: number;
     height: number;
   } | null;
+  /**
+   * 微信胶囊（menu button）矩形——window 逻辑 px。`safeArea` 不含胶囊，
+   * 顶部右侧正式 UI（宝箱 / Matching 状态 / Battle 右 HUD / Result）必须单独避让它。
+   * 实测坐标域与 safeArea / windowWidth / windowHeight 一致（同一 window 逻辑域）。null = 无胶囊。
+   */
+  menuButton: {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+  } | null;
 }
 
 /** 读取微信窗口信息；wx 缺失 / API 异常时返回 null（调用方自行兜底）。 */
@@ -58,6 +71,26 @@ export function readWechatWindowInfo(): WechatWindowInfo | null {
   const sa = info.safeArea && typeof (info.safeArea as { left?: unknown }).left === 'number'
     ? (info.safeArea as { left: number; top: number; right: number; bottom: number; width: number; height: number })
     : null;
+  // 胶囊矩形来自独立 API；坐标域与 safeArea / windowWidth / windowHeight 同为 window 逻辑 px。
+  // 该 API 在所有微信环境（含基础库）均可用；异常时回退 null（调用方按"顶部无胶囊"兜底）。
+  let menuButton: WechatWindowInfo['menuButton'] = null;
+  try {
+    if (typeof wx.getMenuButtonBoundingClientRect === 'function') {
+      const mb = wx.getMenuButtonBoundingClientRect();
+      if (mb && typeof mb.left === 'number' && typeof mb.width === 'number') {
+        menuButton = {
+          left: mb.left,
+          top: mb.top,
+          right: mb.right ?? mb.left + mb.width,
+          bottom: mb.bottom ?? mb.top + mb.height,
+          width: mb.width,
+          height: mb.height,
+        };
+      }
+    }
+  } catch {
+    menuButton = null;
+  }
   return {
     windowWidth: num('windowWidth'),
     windowHeight: num('windowHeight'),
@@ -65,5 +98,6 @@ export function readWechatWindowInfo(): WechatWindowInfo | null {
     screenHeight: num('screenHeight'),
     pixelRatio: num('pixelRatio') || 1,
     safeArea: sa,
+    menuButton,
   };
 }
