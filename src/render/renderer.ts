@@ -190,6 +190,76 @@ const DAMAGE_NUMBER_TTL_MS = 900;
 /** F-BATTLE-PRESENTATION-R2：重要伤害数字放大字号（逻辑 px；常规为 ss(22) 系） */
 const DAMAGE_NUMBER_IMPORTANT_SIZE = 32;
 
+/**
+ * F-BATTLE-VISUAL-CLEANUP-R3｜Must#4：伤害数字「双方接触点屏幕空间避让」。
+ *
+ * 根因：A 打 B 与 B 打 A 的接触点在同一处时，两组数字都以同一 contactPoint 世界坐标
+ * 生成（damageNumberAggregator 原样透传 ev.contactPoint），slot 只在**同车**两组之间
+ * 做纵向错层 → 跨方两组数字在屏幕上完全重合，读不出「谁在打谁扣了多少」。
+ *
+ * 避让规则（纯表现，不改 contactPoint / 不改 damage 总量 / 不改 Gameplay）：
+ * 受伤方的数字朝「受伤方所在一侧」推开——我方(target = vehicleA.team)数字偏我方，
+ * 对手数字偏对手；方向来自两车真实包围盒中心 x 之差（不写死左右）。
+ *
+ * 量值：世界 px 基准经镜头 ss() 后再 clamp 到屏幕域下/上限：
+ * - 下限 14（屏幕 px）：420×210 最小档 scale 很小，若纯按世界量会缩到 ~3px 不可分辨；
+ *   两侧各偏 14 → 跨方数字最小水平间距 28px（> 常规字号一半，肉眼可区分）；
+ * - 上限 34（屏幕 px）：高缩放下不把数字甩离接触点（仍能归因到命中位置）。
+ */
+const DAMAGE_LATERAL_WORLD = 26;
+const DAMAGE_LATERAL_MIN_SCREEN = 14;
+const DAMAGE_LATERAL_MAX_SCREEN = 34;
+
+/**
+ * F-BATTLE-VISUAL-CLEANUP-R3｜Must#3：正式部件「表现轮廓」基色与混合比。
+ *
+ * Must#1 调查结论（先确认再改）：真机 Battle「部件周围明显矩形外框」的来源**不是**
+ * 碰撞调试绘制（render() 的 debugDraw 只由 DEV physicsLab 传入，wechatBattleHost /
+ * playerGameRuntime 正式路径从不传）、**不是**挂点提示或 Garage 吸附反馈
+ * （drawVehicleHardpoints / drawGarageDragGhost 只在 garage MetaPage 绘制）、
+ * **不是** E2E 诊断轮廓——而是**正式部件视觉**：drawShape 对每个 collider polygon
+ * 画近黑 `#0d0f14` + 恒定 1.5px 硬描边。compound 车身逐 polygon 描边 → 内部接缝
+ * 全部显形 = 工程线框感；且线宽恒定不随镜头收敛，420×210 小档时线宽占部件比例极大。
+ *
+ * Must#3 要求「重做表现轮廓而不是删除真实部件」：几何 / collider / 部件集合一字不改，
+ * 只把描边表现换成同色系派生的柔和轮廓（见 partOutlineColor / applyPartOutline）。
+ */
+const PART_OUTLINE_BASE = '#1b2130';
+const PART_OUTLINE_MIX = 0.5;
+/** 表现轮廓线宽（屏幕 px）：随镜头尺度收敛，小分辨率不再是粗黑框 */
+const PART_OUTLINE_WORLD_WIDTH = 0.9;
+const PART_OUTLINE_MIN_WIDTH = 0.6;
+const PART_OUTLINE_MAX_WIDTH = 1.2;
+
+/** `#rrggbb` → 分量；非法输入回退中性灰（不抛错，缺色不白屏） */
+function parseHexColor(hex: string): { r: number; g: number; b: number } {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!m) return { r: 128, g: 128, b: 128 };
+  const n = parseInt(m[1], 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+/** 线性混色（t=0 → a，t=1 → b），供表现轮廓由填充色派生 */
+export function mixHexColor(a: string, b: string, t: number): string {
+  const ca = parseHexColor(a);
+  const cb = parseHexColor(b);
+  const k = Math.max(0, Math.min(1, t));
+  const ch = (x: number, y: number): string =>
+    Math.round(x + (y - x) * k)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${ch(ca.r, cb.r)}${ch(ca.g, cb.g)}${ch(ca.b, cb.b)}`;
+}
+
+/**
+ * F-BATTLE-VISUAL-CLEANUP-R3｜Must#3：表现轮廓色 = 填充色朝 PART_OUTLINE_BASE 加深。
+ * 与旧近黑 `#0d0f14` 的差别：轮廓与填充同色系 → 对比度大幅下降，读作「部件自身边缘暗部」
+ * 而不是「叠在部件上的调试线框」；仍保留边界可读（相邻部件 / 车辆与背景可分）。
+ */
+export function partOutlineColor(fill: string): string {
+  return mixHexColor(fill, PART_OUTLINE_BASE, PART_OUTLINE_MIX);
+}
+
 /** 命中火花（W2-FX-1/2）：接触点短暂小圆（W2-FX-2 支持按伤害来源着色） */
 interface Spark {
   x: number;
@@ -1121,6 +1191,9 @@ export class Renderer {
     // 桶内各组纵向错开（14px·scale 一档），避免数字堆叠遮挡车辆/墙体/HUD。
     // F-BATTLE-HIT-READABILITY-R1：同车伤害数字改按 **slot 槽位**稳定错层（Must#4：
     // 两组数字最小间距 12~16px、不互相覆盖）；非伤害数字仍走 x 桶兜底。
+    // F-BATTLE-VISUAL-CLEANUP-R3｜Must#4：双方接触点屏幕空间避让（受伤方数字偏向受伤方一侧；
+    // 同车 ≤2 组 + slot 纵向错层保持不变，本偏移只解决「跨方两组落在同一接触点」的完全重合）。
+    const lateralByTeam = this.damageLateralOffsets(snap);
     const fxSorted = [...this.fx].sort((a, b) => a.x - b.x);
     const laneByBucket = new Map<number, number>();
     for (const f of fxSorted) {
@@ -1133,7 +1206,10 @@ export class Renderer {
         lane = laneByBucket.get(bucket) ?? 0;
         laneByBucket.set(bucket, lane + 1);
       }
-      const tx = this.sx(f.x);
+      // F-BATTLE-VISUAL-CLEANUP-R3｜Must#4：受伤方一侧横向偏让（非伤害数字 target=undefined
+      // → 偏移 0，走原有 x 桶兜底逻辑，行为不变）。
+      const lateral = f.target !== undefined ? (lateralByTeam?.get(f.target) ?? 0) : 0;
+      const tx = this.sx(f.x) + lateral;
       // F-BATTLE-HIT-READABILITY-R1：稳定纵向错层（Must#4 12~16px）——
       // 上浮封顶（age≤0.25 → 最多 10px）防止旧数字因上浮量追上并抵消 slot 错层
       //（否则持续命中时两组数字会因 age 差恰好重叠到同一 y）。
@@ -1581,6 +1657,35 @@ export class Renderer {
     };
   }
 
+  /**
+   * F-BATTLE-VISUAL-CLEANUP-R3｜Must#4：伤害数字「双方接触点屏幕空间避让」偏移表。
+   *
+   * 返回 team → 屏幕横向偏移（px）：受伤方（DamageEvent.target）的数字朝**受伤方所在一侧**
+   * 推开，我方数字偏我方、对手数字偏对手。方向来自两车真实包围盒中心 x 之差（不写死左右，
+   * 双方换边后自动跟随）；两车中心 x 完全重合时按「A 偏左 / B 偏右」稳定兜底（不抖动）。
+   *
+   * 纯表现：不改 contactPoint、不改 accumulatedDamage、不改同车 ≤2 组与 slot 纵向错层，
+   * 因此显示总伤害守恒（只挪像素位置，不动文本）。
+   * 单车（solo 预览 / 缺 vehicleB）无「双方同点」问题 → 返回 null（零偏移、零开销）。
+   */
+  private damageLateralOffsets(snap: BattleRenderSnapshot): Map<string, number> | null {
+    const a = snap.vehicleA;
+    const b = snap.vehicleB;
+    if (!a || !b || snap.soloA) return null;
+    // 屏幕域 px（vehicleCenter 已应用 sx；scale>0 故与世界域同号）
+    const ca = this.vehicleCenter(a).x;
+    const cb = this.vehicleCenter(b).x;
+    const mag = Math.max(
+      DAMAGE_LATERAL_MIN_SCREEN,
+      Math.min(DAMAGE_LATERAL_MAX_SCREEN, this.ss(DAMAGE_LATERAL_WORLD)),
+    );
+    const dirA = ca > cb ? 1 : -1; // A 在右 → A 的数字右偏；否则左偏
+    return new Map<string, number>([
+      [a.team, dirA * mag],
+      [b.team, -dirA * mag],
+    ]);
+  }
+
   private drawVehicle(v: RenderVehicle, color: string): void {
     // 车身（W2-VIS-1）：有 visual 且资源就绪 → sprite（跟随 chassis 世界 transform）；
     // 否则 Collider graybox fallback（缺资源不白屏/不报错）。
@@ -1656,12 +1761,12 @@ export class Renderer {
     ctx.closePath();
     ctx.fill();
     ctx.globalAlpha = 1;
-    // 盘体描边
-    ctx.strokeStyle = '#0d0f14';
-    ctx.lineWidth = 1.5;
+    // 盘体描边（F-BATTLE-VISUAL-CLEANUP-R3｜Must#3：表现轮廓，非近黑硬线框）
+    this.applyPartOutline(color);
     ctx.beginPath();
     ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
     ctx.stroke();
+    this.resetPartOutline();
     // Q13-A-R1：3 个非对称辐条/开槽（120° 间隔深色窄楔形，随真实 a 旋转；与高对比
     // 标记组合打破纯对称，使旋转肉眼可辨）
     ctx.fillStyle = 'rgba(18,20,26,0.55)';
@@ -1681,9 +1786,9 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(cx, cy, r * 0.22, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#0d0f14';
-    ctx.lineWidth = 1.5;
+    this.applyPartOutline('#3a4150');
     ctx.stroke();
+    this.resetPartOutline();
     // Q13-A-R1：1 个高对比旋转标记（醒目红橙粗线，从圆心到齿尖，随真实 a 旋转；
     // 单条 1-fold 标记打破 3 辐条/16 齿的对称，旋转方向一眼可辨）
     ctx.strokeStyle = '#ff5a3c';
@@ -1871,13 +1976,16 @@ export class Renderer {
         flames.push(p);
         continue;
       }
-      ctx.fillStyle = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
+      const pColor = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
+      ctx.fillStyle = pColor;
       ctx.beginPath();
       ctx.arc(this.sx(p.center.x), this.sy(p.center.y), this.ss(p.radius), 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#0d0f14';
-      ctx.lineWidth = 1.5;
+      // F-BATTLE-VISUAL-CLEANUP-R3｜Must#3：弹体沿用同一表现轮廓语言（不再近黑硬圈，
+      // 否则 2~3px 弹体在真机上读作「调试小圆点」）。真实 Collider 半径不变。
+      this.applyPartOutline(pColor);
       ctx.stroke();
+      this.resetPartOutline();
     }
     // Q14-B-R2-FINAL：统一绘制火焰 Fire Jet（按 muzzle 分组，每个武器一股连续火流）
     if (flames.length > 0) {
@@ -2741,8 +2849,36 @@ export class Renderer {
   }
 
   /**
+   * F-BATTLE-VISUAL-CLEANUP-R3｜Must#3：套用「表现轮廓」样式（替代旧近黑硬描边）。
+   *
+   * - 颜色：由填充色派生（partOutlineColor），同色系加深，不再是 `#0d0f14` 近黑；
+   * - 线宽：ss(0.9) 后 clamp 到 [0.6, 1.2] —— 随镜头尺度收敛，420×210 小档不再粗黑框；
+   * - lineJoin='round'：去掉「工程直角盒」的轮廓语气（几何本身不变，只改描边表现）。
+   *
+   * 调用方负责在描边结束后调用 resetPartOutline() 还原 lineJoin，避免影响 HUD / 阶段 FX
+   * 等后续描边（Renderer 各处本就逐次设置 strokeStyle/lineWidth，唯 lineJoin 需显式还原）。
+   */
+  private applyPartOutline(fill: string): void {
+    const ctx = this.ctx;
+    ctx.strokeStyle = partOutlineColor(fill);
+    ctx.lineWidth = Math.max(
+      PART_OUTLINE_MIN_WIDTH,
+      Math.min(PART_OUTLINE_MAX_WIDTH, this.ss(PART_OUTLINE_WORLD_WIDTH)),
+    );
+    ctx.lineJoin = 'round';
+  }
+
+  /** F-BATTLE-VISUAL-CLEANUP-R3：还原 lineJoin（表现轮廓是局部样式，不污染后续描边） */
+  private resetPartOutline(): void {
+    this.ctx.lineJoin = 'miter';
+  }
+
+  /**
    * 引擎中立形状绘制：discriminated union（polygons / circle），不依赖 Matter Body。
    * circle 真实绘制圆弧（不近似为多边形）；polygons 逐多边形描边（沿用 Matter 视觉语义）。
+   *
+   * F-BATTLE-VISUAL-CLEANUP-R3｜Must#3：描边改走 applyPartOutline（表现轮廓），
+   * 真实几何 / 顶点 / collider 完全不变——只是不再画近黑硬线框。
    */
   private drawShape(shape: RenderShape, color: string): void {
     const ctx = this.ctx;
@@ -2754,9 +2890,9 @@ export class Renderer {
       ctx.arc(this.sx(c.center.x), this.sy(c.center.y), this.ss(c.radius), 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = '#0d0f14';
-      ctx.lineWidth = 1.5;
+      this.applyPartOutline(color);
       ctx.stroke();
+      this.resetPartOutline();
       // Q05-V1：圆形 Functional Part（如 Lift Roller）旋转可感知——
       // 沿真实 RenderCircle.angle 画一条径向方向线（radius × 0.8）：
       // 完全使用 snapshot 的真实物理角度，不新增 gameplay 状态、不伪造旋转。
@@ -2785,9 +2921,9 @@ export class Renderer {
       ctx.globalAlpha = 0.9;
       ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = '#0d0f14';
-      ctx.lineWidth = 1.5;
+      this.applyPartOutline(color);
       ctx.stroke();
+      this.resetPartOutline();
     }
   }
 

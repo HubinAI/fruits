@@ -36,6 +36,8 @@ class CtxStub {
   calls: string[] = [];
   fillStyle = '';
   strokeStyle = '';
+  /** 每次 stroke() 时记录当时的 strokeStyle，用于回归校验（R3：Active 阶段不得出现近黑调试框 #0d0f14） */
+  strokeStyles: string[] = [];
   lineWidth = 1;
   globalAlpha = 1;
   font = '';
@@ -51,7 +53,7 @@ class CtxStub {
   lineTo(): void { this.record('lineTo'); }
   closePath(): void { this.record('closePath'); }
   fill(): void { this.record('fill'); }
-  stroke(): void { this.record('stroke'); }
+  stroke(): void { this.record('stroke'); this.strokeStyles.push(this.strokeStyle); }
   arc(): void { this.record('arc'); }
   fillText(): void { this.record('fillText'); }
   save(): void { this.record('save'); }
@@ -209,9 +211,12 @@ describe('W2-FX-2 阶段视觉（Renderer smoke）', () => {
     return ctx;
   }
 
-  it('6a. Active：刺墙无高亮（stroke 只来自 drawShape 内部 #0d0f14 描边）', () => {
+  it('6a. Active：刺墙无高亮（drawShape 内部描边已重做为柔和派生轮廓，不再是近黑调试框 #0d0f14）', () => {
     const ctx = renderWith('Active');
-    expect(ctx.strokeStyle).toBe('#0d0f14'); // 未被 strokeShape 覆盖
+    // R3 清理：旧近黑硬描边 #0d0f14 已移除，Active 阶段任何 stroke 都不应再用它
+    expect(ctx.strokeStyles.every((s) => s !== '#0d0f14')).toBe(true);
+    // Active 阶段最后一笔描边来自 drawShape 表现轮廓（柔和派生色，非近黑调试框）
+    expect(ctx.strokeStyle).not.toBe('#0d0f14');
     // 无锯齿（Closing 才有额外 moveTo/lineTo/fill）
   });
 
