@@ -357,6 +357,18 @@ export class Renderer {
     return Date.now();
   }
 
+  /**
+   * F-WX-VIEWPORT-SURFACE-P0｜Must#3：view 域 → 逻辑域换算除数。
+   * 契约：view 域即【逻辑绘制域】——Web（无 surface）view = canvas.clientWidth（CSS 逻辑）；
+   * 注入 surface 后 surface.width 恒为逻辑窗口尺寸（canvas.backing ÷ dpr，见 WechatViewport）。
+   * 故本除数为 1（无换算）；DPR 只在最终 backing 绘制阶段经 setTransform(dpr) 一次应用。
+   * 全仓 `surface ? viewDpr : 1` / `÷viewDpr` 的域对齐统一收敛到本 getter（恒 1），
+   * 杜绝「fit 按 backing、绘制再 ×dpr」的双重缩放（微信真机全局放大+裁切根因）。
+   */
+  private get viewToLogical(): number {
+    return 1;
+  }
+
   resize(arenaW: number, arenaH: number): void {
     const dpr = this.viewDpr;
     // F-WX-1：注入 surface（微信等无 clientWidth/可写 canvas.width）时，不写回
@@ -593,7 +605,7 @@ export class Renderer {
     const v = side === 'a' ? snap.vehicleA : snap.vehicleB;
     const hps = v?.hardpoints;
     if (!hps || hps.length === 0) return [];
-    const vk = this.surface ? this.viewDpr : 1;
+    const vk = this.viewToLogical;
     return hps.map((hp) => ({
       id: hp.id,
       kind: hp.kind,
@@ -618,7 +630,7 @@ export class Renderer {
   ): { a: { x: number; y: number; w: number; h: number }; b: { x: number; y: number; w: number; h: number } } | null {
     if (!snap.vehicleA || !snap.vehicleB) return null;
     const d = this.scaleDiagnosticsBoth(snap);
-    const vk = this.surface ? this.viewDpr : 1;
+    const vk = this.viewToLogical;
     const toRect = (e: { screen: { minX: number; minY: number; maxX: number; maxY: number } }): {
       x: number;
       y: number;
@@ -647,14 +659,14 @@ export class Renderer {
   getProbeCamera(): { scale: number; offsetX: number; offsetY: number; groundScreenY: number | null } {
     // groundScreenY：battle 相机（groundScreenY 恒定）；preview（Matching/MatchPreview）用
     // 当前 transform + arena.groundY 计算真实地面线（逻辑 px），使 E2E 能验证地面带占比。
-    let groundScreenY: number | null = this.battleCam ? this.battleCam.groundScreenY / this.viewDpr : null;
+    let groundScreenY: number | null = this.battleCam ? this.battleCam.groundScreenY / this.viewToLogical : null;
     // 非 battle 相机（预览 / 战前）：优先用每帧绘制时捕获的真实地面线（逻辑 px）；
     // 否则用最近一次 reframe 的 arena.groundY + 当前 transform 推算（headless 单测 / 未 draw 也可靠）；
     // 不再依赖 this.orchestrator（渲染层仅持有局部 orchestrator 引用，this.orchestrator 恒 null）。
     if (groundScreenY == null) {
       if (this.lastGroundScreenYLogical != null) groundScreenY = this.lastGroundScreenYLogical;
       else if (this.previewGroundY != null) {
-        groundScreenY = (this.transform.offsetY + this.previewGroundY * this.transform.scale) / this.viewDpr;
+        groundScreenY = (this.transform.offsetY + this.previewGroundY * this.transform.scale) / this.viewToLogical;
       }
     }
     return {
@@ -689,10 +701,10 @@ export class Renderer {
       }
       if (!Number.isFinite(minX)) continue;
       out.push({
-        x: this.sx(minX) / this.viewDpr,
-        y: this.sy(minY) / this.viewDpr,
-        w: (this.sx(maxX) - this.sx(minX)) / this.viewDpr,
-        h: (this.sy(maxY) - this.sy(minY)) / this.viewDpr,
+        x: this.sx(minX) / this.viewToLogical,
+        y: this.sy(minY) / this.viewToLogical,
+        w: (this.sx(maxX) - this.sx(minX)) / this.viewToLogical,
+        h: (this.sy(maxY) - this.sy(minY)) / this.viewToLogical,
       });
     }
     return out;
@@ -948,7 +960,7 @@ export class Renderer {
       // 替换旧「纯黑上半屏 + 纯蓝下半屏 + 细线」。drawBattleArena 填充 [0,gy] 天空 + [gy,h] 平台。
       const gy = this.sy(arena.groundY);
       this.drawBattleArena(ctx, this.viewWidth, this.viewHeight, gy, t);
-      this.lastGroundScreenYLogical = gy / this.viewDpr;
+      this.lastGroundScreenYLogical = gy / this.viewToLogical;
       // 地平线高光（车底水平线，强调地面边缘；车辆「站」在平台面上）
       ctx.strokeStyle = V.arenaGroundEdge;
       ctx.lineWidth = 2;
@@ -992,7 +1004,7 @@ export class Renderer {
         this.ss(arena.width),
         this.canvas.height - this.sy(arena.groundY),
       );
-      this.lastGroundScreenYLogical = this.sy(arena.groundY) / this.viewDpr;
+      this.lastGroundScreenYLogical = this.sy(arena.groundY) / this.viewToLogical;
       ctx.strokeStyle = V.arenaGroundEdge;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -1037,7 +1049,7 @@ export class Renderer {
       grad.addColorStop(1, '#171c28');
       ctx.fillStyle = grad;
       ctx.fillRect(0, gy, this.viewWidth, this.viewHeight - gy);
-      this.lastGroundScreenYLogical = gy / this.viewDpr;
+      this.lastGroundScreenYLogical = gy / this.viewToLogical;
       // 地平线高光（车底水平线，弱暖白）
       ctx.fillStyle = 'rgba(190,210,245,0.30)';
       ctx.fillRect(0, gy - 1, this.viewWidth, 2);
@@ -2337,7 +2349,7 @@ export class Renderer {
     // F-HOME-STAGE-R2：previewSolo 一旦传入 framingRect（首页/车库取景区），无论 compact
     // 与否都走「envelope 自适应」分支——把真实整车 envelope 居中 fit 到该子区域（含桌面
     // Web 首页/车库）；否则桌面无 framing 时仍用旧固定 SOLO 框（历史语义，向后兼容）。
-    const isCompact = isCompactLandscape(this.viewWidth / this.viewDpr, this.viewHeight / this.viewDpr);
+    const isCompact = isCompactLandscape(this.viewWidth / this.viewToLogical, this.viewHeight / this.viewToLogical);
     // F-HOME-DEMO-POLISH-R1：home 取景记录车辆 envelope 宽（供宽度目标区间 clamp）
     let soloEnvW = 0;
     if (fit === 'previewSolo') {
@@ -2437,7 +2449,7 @@ export class Renderer {
     //   与 backing viewWidth 对齐 → ÷dpr 后逻辑构图与 DPR 无关，满足 Must#9）。
     // 旧实现 compact 分支 ×viewDpr 但 desktop/isFixed 分支与 insetX 用裸 logical → 域混，
     // surface 注入 DPR1 vs 1.5 逻辑 safeW 差 (16/dpr) px、A 中心差 ~1.85px。
-    const vk = this.surface ? this.viewDpr : 1;
+    const vk = this.viewToLogical;
     const insetX = isCompact
       ? fit === 'battle'
         ? 0
@@ -2477,7 +2489,7 @@ export class Renderer {
       // scale 域分裂 → DPR>1 车辆放大 1.5× 越界，用户 150% 缩放实测首页绿车越出右侧屏幕、
       // Garage 车进右侧面板）；注入 surface（微信/单测）时 viewWidth=backing，×viewDpr 是
       // 必需域对齐。统一规则：转换只做域对齐，不做多余 DPR 转换。
-      const vk = this.surface ? this.viewDpr : 1;
+      const vk = this.viewToLogical;
       const pad = 6 * vk;
       const fx = framing.x * vk;
       const fy = framing.y * vk;
@@ -2535,16 +2547,16 @@ export class Renderer {
         // F-BATTLE-STAGE-COMPOSITION-P0：Active 首帧计算战斗舞台地面线并记录——
         // Warning/Closing/End 复用同一 groundScreenY（地面线位移 0，阶段连续）。
         const stageTop = baseY; // HUD 下缘（compact=56 / desktop=insetTop，物理 px）
-        const logicalH = this.viewHeight / this.viewDpr; // 视口逻辑高
+        const logicalH = this.viewHeight / this.viewToLogical; // 视口逻辑高
         // 车辆完整位于 HUD 下方所需的最小 groundY（vehicleClear 净空）；再 clamp 到视口 68~72%
-        const vehBottomNeed = stageTop / this.viewDpr + (bh * scale) / this.viewDpr + BATTLE_STAGE_VEHICLE_CLEAR;
+        const vehBottomNeed = stageTop / this.viewToLogical + (bh * scale) / this.viewToLogical + BATTLE_STAGE_VEHICLE_CLEAR;
         let groundScreenYLog = Math.max(logicalH * BATTLE_STAGE_GROUND_MIN, vehBottomNeed);
         groundScreenYLog = Math.min(groundScreenYLog, logicalH * BATTLE_STAGE_GROUND_MAX);
         this.battleCam = {
           baseScale: scale,
           baseEnvW: Math.max(1, bw),
           minScale: scale * BATTLE_SEPARATE_SCALE_MIN,
-          groundScreenY: groundScreenYLog * this.viewDpr, // 物理 px（与 offsetY 同空间）
+          groundScreenY: groundScreenYLog * this.viewToLogical, // 与 offsetY 同空间（surface=逻辑；Web=历史 ×dpr）
           arenaW: snap.arena.width,
           safeBaseX: baseX,
           safeW,

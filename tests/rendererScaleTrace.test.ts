@@ -33,7 +33,7 @@ function makeEnv(vp: { w: number; h: number }, dpr: number) {
     width: vp.w * dpr,
     height: vp.h * dpr,
   } as unknown as HTMLCanvasElement;
-  const surface: CanvasSurface = { width: vp.w * dpr, height: vp.h * dpr, devicePixelRatio: dpr, now: () => 0 };
+  const surface: CanvasSurface = { width: vp.w, height: vp.h, devicePixelRatio: dpr, now: () => 0 }; // 契约=逻辑视口（F-WX-VIEWPORT-SURFACE-P0）
   const o = new PlanckBattleOrchestrator(
     buildSnapshotFromDraft(makeStarterDraft('watermelonBody', registry), registry, 'a'),
     buildSnapshotFromDraft(makeStarterDraft('bananaBody', registry), registry, 'b'),

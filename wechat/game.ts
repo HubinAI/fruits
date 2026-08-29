@@ -45,6 +45,8 @@ import { WechatBattleHost } from '../src/game/wechatBattleHost';
 import { SingleLoop } from '../src/platform/wechat/singleLoop';
 import { installWechatErrorGuard } from '../src/platform/wechat/errorGuard';
 import { APP_VERSION } from '../src/core/env';
+import { PLAYER_LOGICAL_W, PLAYER_LOGICAL_H } from '../src/platform/playerViewport';
+import { readWechatWindowInfo } from '../src/platform/wechat/windowInfo';
 // F-BATTLE-READABILITY-R1：正式 Content 视觉（构建期 base64 内联 → wx.createImage 加载；
 // 无此资源时 Renderer 灰盒 fallback——本加载使车辆显示正式 sprite，不再像 Physics Lab）
 import bodyWatermelonUrl from '../assets/visuals/body_watermelon.png';
@@ -58,6 +60,23 @@ const wx = g.wx as any;
 
 // —— 1) 唯一上屏 Canvas：第一次 wx.createCanvas()（微信真实规则：仅此画布最终上屏） ——
 const screenCanvas = wx.createCanvas();
+// F-WX-VIEWPORT-SURFACE-P0｜Must#1/#2/#3：微信首画布默认 width/height = window【逻辑】尺寸，
+// 而整条链路（surface/UI/Input/诊断）按「canvas.width = 物理 backing = windowWidth×pixelRatio」
+// 假设工作。必须在此【立刻】按 window×dpr 定版 backing，且必须发生在任何 surface / Renderer /
+// UI mount / Input 绑定之前——否则所有 ×dpr 变换都作用在逻辑宽 buffer 上 → 全局放大+裁切。
+// 官方高清渲染惯例：canvas.width = windowWidth × pixelRatio，绘制坐标系 = 逻辑 px（ctx ×dpr）。
+const __wxInfo = readWechatWindowInfo();
+const __backingDpr = (__wxInfo && __wxInfo.pixelRatio) || 1;
+const __backingW =
+  __wxInfo && __wxInfo.windowWidth > 0
+    ? Math.max(1, Math.round(__wxInfo.windowWidth * __backingDpr))
+    : screenCanvas.width;
+const __backingH =
+  __wxInfo && __wxInfo.windowHeight > 0
+    ? Math.max(1, Math.round(__wxInfo.windowHeight * __backingDpr))
+    : screenCanvas.height;
+screenCanvas.width = __backingW;
+screenCanvas.height = __backingH;
 const screenCtx = screenCanvas.getContext('2d');
 if (!screenCtx) throw new Error('Screen Canvas 2D not supported on WeChat');
 
@@ -65,6 +84,8 @@ if (!screenCtx) throw new Error('Screen Canvas 2D not supported on WeChat');
 // F-WX-P0：微信小游戏后续 createCanvas 均为离屏 canvas——不得假设「自动透明叠层」。
 // UI 必须显式同步 screenCanvas 的物理像素尺寸（不能依赖第二次 createCanvas 的默认值），
 // 再由 screenCtx.drawImage(uiCanvas) 逐帧合成上屏。
+// F-WX-VIEWPORT-SURFACE-P0｜Must#3：uiCanvas 必须与 screenCanvas 完全同尺寸（同为
+// window×dpr backing）——绝不允许一个是 844×dpr、另一个是 window×dpr。
 const uiCanvas = wx.createCanvas();
 uiCanvas.width = screenCanvas.width;
 uiCanvas.height = screenCanvas.height;
@@ -156,6 +177,70 @@ if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
   );
 }
 
+// —— 9a2) F-WX-VIEWPORT-SURFACE-P0｜Must#1：微信尺寸全链诊断（__WX_DEBUG__=true 构建，
+//         WECHAT_DEBUG_INPUT=1 注入）。boot（首尺寸定版，微信固定方向无运行时 resize）与
+//         首帧各记录一次 logical / window / backing 三域数值链；PROD __WX_DEBUG__=false →
+//         常量折叠零日志零行为。checks 用于判别「canvas.width 是物理 backing（window×DPR）
+//         还是逻辑默认（window）」。 ——
+function logSurfaceChain(step: 'resize' | 'frame'): void {
+  if (typeof __WX_DEBUG__ === 'undefined' || !__WX_DEBUG__) return;
+  const sys = wx.getSystemInfoSync ? wx.getSystemInfoSync() : {};
+  const dpr = sys.pixelRatio || 1;
+  const ww = typeof sys.windowWidth === 'number' ? sys.windowWidth : null;
+  const wh = typeof sys.windowHeight === 'number' ? sys.windowHeight : null;
+  const containS = ww !== null && wh !== null ? Math.min(ww / PLAYER_LOGICAL_W, wh / PLAYER_LOGICAL_H) : null;
+  const containOx = containS !== null && ww !== null ? (ww - PLAYER_LOGICAL_W * containS) / 2 : null;
+  const containOy = containS !== null && wh !== null ? (wh - PLAYER_LOGICAL_H * containS) / 2 : null;
+  const ti = uiHost.getTransformInfo();
+  // eslint-disable-next-line no-console
+  console.log(
+    '[WX-SURF]',
+    JSON.stringify({
+      step,
+      // —— 坐标域标注：logical = 设计/布局 px；window = wx 窗口逻辑 px；backing = canvas 物理 px ——
+      window: {
+        width: ww, height: wh, // logical
+        screenWidth: typeof sys.screenWidth === 'number' ? sys.screenWidth : null, // physical
+        screenHeight: typeof sys.screenHeight === 'number' ? sys.screenHeight : null, // physical
+        pixelRatio: dpr,
+        safeArea: sys.safeArea ?? null, // logical
+      },
+      canvases: {
+        screen: { width: screenCanvas.width, height: screenCanvas.height }, // backing
+        ui: { width: uiCanvas.width, height: uiCanvas.height }, // backing
+        uiMatchesScreen: uiCanvas.width === screenCanvas.width && uiCanvas.height === screenCanvas.height,
+      },
+      stageLogical: { width: PLAYER_LOGICAL_W, height: PLAYER_LOGICAL_H }, // 设计逻辑舞台
+      // F-WX-VIEWPORT-SURFACE-P0：surface 契约 = 逻辑视口（backing ÷ dpr）——
+      // renderer.viewWidth/viewHeight = 逻辑窗口尺寸；绘制经 setTransform(dpr) 一次映射 backing
+      renderer: {
+        viewWidth: screenCanvas.width / dpr,
+        viewHeight: screenCanvas.height / dpr,
+        viewDpr: dpr,
+      }, // 逻辑 + dpr
+      uiLayout: { cssW: ti.cssW, cssH: ti.cssH, dpr: ti.dpr, scale: ti.scale, ox: ti.ox, oy: ti.oy }, // logical
+      contain: { scale: containS, offsetX: containOx, offsetY: containOy }, // logical→window
+      windowToBacking: { scale: dpr }, // window→backing（应为 pixelRatio）
+      finalLogicalToBacking: {
+        // logical→backing 唯一最终变换（contain × DPR；offset 同乘）
+        scale: containS !== null ? +(containS * dpr).toFixed(4) : null,
+        offsetX: containOx !== null ? Math.round(containOx * dpr) : null,
+        offsetY: containOy !== null ? Math.round(containOy * dpr) : null,
+      },
+      checks: {
+        // canvas.width == windowWidth（原始值相等，非 /dpr）→ 画布停留在微信默认「逻辑尺寸」→ 链路塌缩（错）
+        canvasIsLogicalDefault:
+          ww !== null && wh !== null &&
+          Math.abs(screenCanvas.width - ww) < 0.5 && Math.abs(screenCanvas.height - wh) < 0.5,
+        // canvas.width == windowWidth × dpr → 画布是物理 backing（正确约定；dpr=1 时两判据数值重合）
+        canvasIsBacking:
+          ww !== null && wh !== null &&
+          Math.abs(screenCanvas.width - ww * dpr) < 0.5 && Math.abs(screenCanvas.height - wh * dpr) < 0.5,
+      },
+    }),
+  );
+}
+
 // —— 9b) F-WX-RCA-1：RCA 专用构建一次性视口日志（__WX_RCA__=true，仅 npm run build:wechat:rca；
 //         PROD false → 常量折叠零日志）。Garage/Battle 段的 core/envelope 占比由 renderer
 //         reframe 的 [WX-RCA] 输出（step=garage / step=battle）。 ——
@@ -176,6 +261,10 @@ if (typeof __WX_RCA__ !== 'undefined' && __WX_RCA__) {
     }),
   );
 }
+
+// —— 9c) F-WX-VIEWPORT-SURFACE-P0｜Must#1：boot 首尺寸定版记录（微信固定方向，无运行时 resize，
+//          即「首次 resize」；首帧另记一次见 loop.onFrame）。仅 __WX_DEBUG__ 构建输出。 ——
+logSurfaceChain('resize');
 
 // —— 10) 每帧 UI 合成：把最新 UI offscreen canvas 作为最后一层画到唯一上屏 canvas ——
 function compositeUi(): void {
@@ -210,7 +299,13 @@ const loop = new SingleLoop(
   (cb) => platform.lifecycle.requestAnimationFrame(cb),
   (h) => platform.lifecycle.cancelAnimationFrame(h),
 );
+let surfFrameLogged = false;
 loop.onFrame = (now: number) => {
+  // F-WX-VIEWPORT-SURFACE-P0｜Must#1：首帧再记录一次（确认 boot 后无尺寸漂移）。
+  if (!surfFrameLogged) {
+    surfFrameLogged = true;
+    logSurfaceChain('frame');
+  }
   // 固定顺序（F-WX-P0）：Renderer 画 screenCanvas（Battle/Preview）→ UI Host 画 uiCanvas →
   // screenCtx.drawImage(uiCanvas) 作为最后一层。UI 透明区透出 Renderer。
   runtime.tick(now); // 战斗步进 + Matching B FX + 渲染 + 阶段/结果轮询 + HUD 帧
@@ -234,6 +329,27 @@ platform.lifecycle.onVisibilityChange((hidden) => {
 });
 
 loop.request();
+
+// —— 11a) F-WX-VIEWPORT-SURFACE-P0｜Must#8：窗口尺寸变化（DevTools 模拟器拖拽/横竖屏切换等，
+//   部分基础库存在 wx.onWindowResize）→ 同步两块 Canvas backing 为 window×dpr，随后
+//   runtime.doResize() 重取景。canvas resize 会重置 ctx state → Renderer.render 每帧首行
+//   setTransform(dpr)、UIHost.ensureSize 每帧 draw 顶部重建 transform，无需手工重设；
+//   surface 已实时读 canvas（viewport.ts getter），无遗留旧尺寸。 ——
+if (typeof wx.onWindowResize === 'function') {
+  wx.onWindowResize(() => {
+    const info = readWechatWindowInfo();
+    if (!info || info.windowWidth <= 0 || info.windowHeight <= 0) return;
+    const d = info.pixelRatio || __backingDpr;
+    const w = Math.max(1, Math.round(info.windowWidth * d));
+    const h = Math.max(1, Math.round(info.windowHeight * d));
+    if (w === screenCanvas.width && h === screenCanvas.height) return; // 尺寸未变：跳过
+    screenCanvas.width = w;
+    screenCanvas.height = h;
+    uiCanvas.width = w;
+    uiCanvas.height = h;
+    runtime.doResize(); // host resize + reframePlayerCamera（renderer/UI 下帧自动按新 viewport）
+  });
+}
 
 // —— 12) 微信错误兜底（Must#7）：捕获未处理异常 / 拒绝，记录构建 SHA + 玩家阶段；
 //         仅日志，不向玩家界面展示任何调试堆栈。wx 缺失 / 无钩子时安全降级。 ——

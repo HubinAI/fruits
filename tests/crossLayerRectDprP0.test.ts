@@ -94,15 +94,16 @@ describe('F-CROSSLAYER-RECT-DPR-P0', () => {
   });
 
   it('T3. B链 surface 注入（DPR1.5）回归：仍输出 logical（与 Web 域一致）', () => {
-    const canvas = makeCanvas(844 * 1.5, 390 * 1.5);
-    const surface: CanvasSurface = { width: 844 * 1.5, height: 390 * 1.5, devicePixelRatio: 1.5, now: () => 0 };
+    const canvas = makeCanvas(844 * 1.5, 390 * 1.5); // backing = 逻辑 × dpr
+    // F-WX-VIEWPORT-SURFACE-P0：surface 契约 = 逻辑视口（backing ÷ dpr）
+    const surface: CanvasSurface = { width: 844, height: 390, devicePixelRatio: 1.5, now: () => 0 };
     const o = makeOrch();
     const r = new Renderer(canvas, new VisualRegistry(), surface);
     const snap = o.getRenderSnapshot();
     r.resize(snap.arena.width, o.arena.config.height);
     r.reframe(snap, 'previewFixed');
     const m = r.getVehicleScreenRects(snap)!;
-    // surface 注入（backing viewWidth）时 ÷dpr 是域对齐 → 输出 logical
+    // surface 注入（view=logical）→ 直接输出 logical，与 Web 域一致
     expect(cx(m.b), 'B 中心 >422').toBeGreaterThan(844 / 2);
     expect(m.b.x + m.b.w, 'B 完整在 844 逻辑域内').toBeLessThanOrEqual(845);
     expect(cx(m.a), 'A 在左半屏').toBeLessThan(844 / 2);
@@ -110,8 +111,9 @@ describe('F-CROSSLAYER-RECT-DPR-P0', () => {
 
   it('T4. Must#9：DPR 1 与 DPR 1.5 逻辑构图一致（仅像素密度不同）', () => {
     const make = (dpr: number) => {
-      const canvas = makeCanvas(844 * dpr, 390 * dpr);
-      const surface: CanvasSurface = { width: 844 * dpr, height: 390 * dpr, devicePixelRatio: dpr, now: () => 0 };
+      const canvas = makeCanvas(844 * dpr, 390 * dpr); // backing = 逻辑 × dpr
+      // F-WX-VIEWPORT-SURFACE-P0：surface = 逻辑视口（不随 dpr 变宽）
+      const surface: CanvasSurface = { width: 844, height: 390, devicePixelRatio: dpr, now: () => 0 };
       const o = makeOrch();
       const r = new Renderer(canvas, new VisualRegistry(), surface);
       const snap = o.getRenderSnapshot();

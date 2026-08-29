@@ -133,12 +133,14 @@ describe('F-WX-2 Platform Core', () => {
     });
   });
 
-  it('WechatViewport：surface 来自 canvas + pixelRatio；onResize no-op', () => {
+  it('WechatViewport：surface 为逻辑窗口尺寸（canvas.backing ÷ pixelRatio）；onResize no-op', () => {
+    // F-WX-VIEWPORT-SURFACE-P0：surface 契约 = 逻辑视口。入口保证 canvas.width =
+    // windowWidth×pixelRatio（backing）→ surface.width = canvas.width/pixelRatio = 逻辑宽。
     const canvas = { width: 1280, height: 720 } as any;
     const vp = new WechatViewport(canvas, 2);
     const s = vp.surface();
-    expect(s.width).toBe(1280);
-    expect(s.height).toBe(720);
+    expect(s.width).toBe(640); // 逻辑窗口宽（backing 1280 ÷ dpr 2）
+    expect(s.height).toBe(360); // 逻辑窗口高（backing 720 ÷ dpr 2）
     expect(s.devicePixelRatio).toBe(2);
     expect(() => vp.onResize(() => {})).not.toThrow();
   });

@@ -130,7 +130,7 @@ describe('F-DEBUG-GRANT-ALL-PARTS-P0｜全部件 ×1 调试入口', () => {
   it('T7. 构建隔离（源码守卫）：按钮仅 dev/test/e2e 构建 + ?resetdev=1 显示', () => {
     const host = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
     expect(host).toContain('DEV_TOOLS_VISIBLE');
-    expect(host).toContain('__E2E_PROBE__');
+    expect(host).toContain('__WX_DEBUG__');
     expect(host).toContain('state.resetDevVisible');
     expect(host, 'dev-grant-all 命中区').toContain("'dev-grant-all'");
     // 正式玩家模式（无 resetdev 参数）→ resetDevVisible=false → 无按钮（条件绘制）
