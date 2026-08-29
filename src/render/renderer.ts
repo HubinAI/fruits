@@ -138,7 +138,7 @@ const MIN_SOLO_PAD_Y = 20;
 // F-HOME-VISUAL-R2：首页车辆主视觉——普通初始车辆可见宽目标 = 安全宽 38%~47%
 // （clamp fitLimit；高度主导时 fitLimit 优先保证完整入画）；垂直居中构图（视觉中心 Must#1，
 // 贴地由前景展示平台表达；不再底部锚定贴地留白）。上限 47% 使实际屏幕占比 ≤ 48%（Must#2）。
-const HOME_VEHICLE_WIDTH_MIN_PCT = 0.38;
+const HOME_VEHICLE_WIDTH_MIN_PCT = 0.40;
 const HOME_VEHICLE_WIDTH_MAX_PCT = 0.47;
 // F-BATTLE-CAMERA-R2：battle 相机不再用 Mobile/Desktop 固定 corridor（旧 F-WX-8-C
 // MOBILE_ACTIVE_* / Q08-A-FIX CORRIDOR_* 已删除）——统一按 A+B 真实 envelope 构图，
@@ -2529,8 +2529,8 @@ export class Renderer {
     // 高度完整入画上限优先：底部锚定把全部纵向余量集中到顶部，若 clamp 下限（≥38% 宽）
     // 超过高度上限会把车辆顶出取景区（360×180 + 高窄车实测顶缘越界）——先 clamp 再
     // min(高度上限)，保证「极端优先完整入画」硬约束。
-    // F-GARAGE-CENTER-STAGE-P0：garage 模式（中央舞台取景）同款宽度 clamp（Must#2：
-    // 车辆最终可见宽约占屏幕 38%~48%）——clamp 区间与 home 相同（38%~47%）。
+    // F-GARAGE-CENTER-STAGE-P0 / F-GARAGE-VISUAL-DENSITY-R2：garage 模式（中央舞台取景）同款
+    // 宽度 clamp（Must#2：车辆最终可见宽约占屏幕 40%~48%）——clamp 区间与 home 相同（40%~47%）。
     if (fit === 'previewSolo' && (framing?.mode === 'home' || framing?.mode === 'garage') && soloEnvW > 0) {
       const minS = (HOME_VEHICLE_WIDTH_MIN_PCT * safeW) / soloEnvW;
       const maxS = (HOME_VEHICLE_WIDTH_MAX_PCT * safeW) / soloEnvW;

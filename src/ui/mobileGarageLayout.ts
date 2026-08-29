@@ -41,8 +41,8 @@ export interface MobileGarageLayout {
 
 /** 顶栏高（normal；只信息） */
 export const GARAGE_TOP_BAR_H = 34;
-/** F-GARAGE-CENTER-STAGE-P0：底部装配带高占屏幕高比例（Must#5：27%~34%） */
-export const STRIP_HEIGHT_RATIO = 0.32;
+/** F-GARAGE-CENTER-STAGE-P0 / F-GARAGE-VISUAL-DENSITY-R2：底部装配带高占屏幕高比例（Must#3：30%~34%） */
+export const STRIP_HEIGHT_RATIO = 0.30;
 
 export function computeMobileGarageLayout(
   viewport: { w: number; h: number },
@@ -80,7 +80,8 @@ export function computeMobileGarageLayout(
 
   // F-GARAGE-CENTER-STAGE-P0：底部横向装配带——高 = 屏幕高 27%~34%（取 32%）。
   // 第一行分类 tab（车身/移动/战斗）、第二行部件卡带；能量变化/失败原因嵌入带内。
-  const stripH = Math.max(44, Math.round(h * STRIP_HEIGHT_RATIO));
+  // 向上取整：保证 stripH 始终 ≥ 屏幕高 30%（Must#3 下限，避免 小数舍入跌到 29.9%）
+  const stripH = Math.max(44, Math.ceil(h * STRIP_HEIGHT_RATIO));
   const stripRect: Rect = {
     x: uL,
     y: Math.max(uT + topBarH + bodyGap, h - uB - stripH),

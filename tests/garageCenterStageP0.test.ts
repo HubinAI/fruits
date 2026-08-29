@@ -17,7 +17,7 @@ import type { SafeInsets } from '../src/platform/types';
 /**
  * F-GARAGE-CENTER-STAGE-P0｜中央战车舞台 + 底部横向装配带（targeted）
  * T1 手势状态机：滑动 >8 logical px 取消该次点击（Must#10 横滑浏览不误装备）。
- * T2 Renderer garage 取景宽度 clamp（38%~47%，Must#2 车辆宽约占屏幕 38~48%）。
+ * T2 Renderer garage 取景宽度 clamp（40%~47%，Must#2 车辆宽约占屏幕 40~48%）。
  * T3 中央取景车辆最终像素居中：fit stageRect 后车辆中心 ≈ 舞台中心（±2%W）。
  * T4 装配带卡片横向排列：全部 opt: 命中区 y 位于 strip 内、横向一排（Must#9）。
  * T5 无文字挂点页签残留（源码守卫 + hitArea 守卫）。
@@ -120,7 +120,7 @@ describe('F-GARAGE-CENTER-STAGE-P0｜中央战车舞台 + 底部横向装配带'
     // 源码守卫：garage 模式进入宽度 clamp（与 home 同区间）
     const src = readFileSync('src/render/renderer.ts', 'utf-8');
     expect(src, 'garage 模式宽度 clamp').toContain("framing?.mode === 'home' || framing?.mode === 'garage'");
-    // 数值验证：fit 到中央舞台（全宽）后 A 车可见宽占安全宽 ∈ [38%, 47%]
+    // 数值验证：fit 到中央舞台（全宽）后 A 车可见宽占安全宽 ∈ [40%, 48%]
     const canvas = {
       getContext: () => new Proxy({} as CanvasRenderingContext2D, { get: () => () => ({ width: 0 }), set: () => true }),
       width: 844,
@@ -146,8 +146,8 @@ describe('F-GARAGE-CENTER-STAGE-P0｜中央战车舞台 + 底部横向装配带'
     expect(rects, '车辆 rect 非空').toBeTruthy();
     const a = rects!.a;
     const wPct = a.w / 844;
-    expect(wPct, `garage 车辆宽占比 ${(wPct * 100).toFixed(1)}% ∈ [38%,47%]`).toBeGreaterThanOrEqual(0.38);
-    expect(wPct, `garage 车辆宽占比 ${(wPct * 100).toFixed(1)}% ≤ 47%`).toBeLessThanOrEqual(0.47);
+    expect(wPct, `garage 车辆宽占比 ${(wPct * 100).toFixed(1)}% ∈ [40%,48%]`).toBeGreaterThanOrEqual(0.40);
+    expect(wPct, `garage 车辆宽占比 ${(wPct * 100).toFixed(1)}% ≤ 48%`).toBeLessThanOrEqual(0.48);
     // 完整入画（不越出舞台）
     expect(a.x, '车辆左缘 ≥ 0').toBeGreaterThanOrEqual(-1);
     expect(a.x + a.w, '车辆右缘 ≤ 844').toBeLessThanOrEqual(845);

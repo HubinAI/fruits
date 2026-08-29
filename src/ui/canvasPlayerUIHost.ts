@@ -2438,9 +2438,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const cardTop = tabY + tabH + gap + statusH;
     const cardBot = stripRect.y + stripRect.h - pad;
     const cardH = Math.max(24, cardBot - cardTop);
-    const row: Rect = { x: stripRect.x, y: cardTop, w: stripRect.w, h: cardH };
+    // F-GARAGE-VISUAL-DENSITY-R2（Must#8/#9）：卡片行两侧预留箭头槽（gutter），左右翻页箭头
+    // 落在槽位内、不覆盖卡片内容与命中区；部分露出的边缘卡只作滚动暗示（命中区仍只注册完全可见卡）。
+    const gutter = this.isShort ? 16 : 20;
+    const row: Rect = { x: stripRect.x + gutter, y: cardTop, w: Math.max(40, stripRect.w - gutter * 2), h: cardH };
     this.stripCardRow = row;
-    this.drawGarageStripCards(state, draft, row);
+    this.drawGarageStripCards(state, draft, row, stripRect, gutter);
   }
 
   /**
@@ -2477,7 +2480,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * 单行横排；内容超宽时横向滚动（左右小箭头 + 横滑）；横滑 >8px 取消该次点击（不误装备）；
    * 卡片只含 mini preview / 名称 / 星级 / 能量 / 武器·辅助小标 / 已装备·未获得状态。
    */
-  private drawGarageStripCards(state: PlayerUIState, draft: BuildDraft, row: Rect): void {
+  private drawGarageStripCards(state: PlayerUIState, draft: BuildDraft, row: Rect, stripRect: Rect, gutter: number): void {
     const slot = state.garageSelected;
     const allSlots = this.garageSlotsFor(draft);
     const hasSlot = !!slot && allSlots.some((s) => s.key === slot);
@@ -2525,12 +2528,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       x += cardW + gap;
     }
     ctx.restore();
-    // 两侧小型翻页箭头（内容超宽时；鼠标辅助，触屏以横滑为主）
+    // 两侧小型翻页箭头（内容超宽时；落在卡片行两侧 gutter 槽位内，不覆盖卡片内容/命中区）
     if (maxScroll > 1) {
-      const ah = this.isShort ? 22 : 26;
+      const aw = Math.max(12, gutter - 4);
+      const ah = Math.min(this.isShort ? 22 : 26, row.h);
       const ay = row.y + (row.h - ah) / 2;
-      this.button(row.x + 2, ay, 18, ah, 'strip-scroll-left', '‹', {});
-      this.button(row.x + row.w - 20, ay, 18, ah, 'strip-scroll-right', '›', {});
+      this.button(stripRect.x + 2, ay, aw, ah, 'strip-scroll-left', '‹', {});
+      this.button(stripRect.x + stripRect.w - aw - 2, ay, aw, ah, 'strip-scroll-right', '›', {});
     }
   }
 
@@ -2744,8 +2748,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         y,
         w,
         h,
-        c.locked ? '#1b2130' : equipped ? V.equippedFill : V.panel,
-        c.locked ? V.enemyOrange : isArmed ? C.gold : equipped ? V.equippedStroke : V.border,
+        c.locked ? '#1b2130' : equipped ? V.equippedFill : V.availableFill,
+        c.locked ? V.enemyOrange : isArmed ? C.gold : equipped ? V.border : V.equippedStroke,
         isArmed ? 2 : 1,
       );
     }
