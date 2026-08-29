@@ -96,18 +96,56 @@ export class WebInput implements PlatformInput {
     const supportsPointer =
       typeof window !== 'undefined' && typeof window.PointerEvent === 'function';
     if (supportsPointer) {
-      node.addEventListener('pointerdown', (ev) => handlers.onDown(pointOf(ev).x, pointOf(ev).y));
+      // F-GARAGE-DRAG-CONTINUITY-R1（Must#1/7/11）：pointer capture 生命周期。
+      // 捕获期间 move/up 即使发生在元素外部也派发到本元素 → 拖动离开装配带/卡片不断流；
+      // up/cancel/lostpointercapture 一律释放并归零，不残留到下一次手势。
+      let capturedId: number | null = null;
+      const release = (): void => {
+        if (capturedId === null) return;
+        try {
+          if (typeof node.releasePointerCapture === 'function' && node.hasPointerCapture?.(capturedId)) {
+            node.releasePointerCapture(capturedId);
+          }
+        } catch {
+          /* 指针已消失/未捕获：忽略，仅归零记账 */
+        }
+        capturedId = null;
+      };
+      node.addEventListener('pointerdown', (ev) => {
+        const p = pointOf(ev);
+        const id = (ev as PointerEvent).pointerId;
+        if (handlers.captureOnDown && handlers.captureOnDown(p.x, p.y) && id !== undefined && id !== null) {
+          try {
+            if (typeof node.setPointerCapture === 'function') {
+              node.setPointerCapture(id);
+              capturedId = id;
+            }
+          } catch {
+            capturedId = null; // 捕获失败 → 退回既有行为（不捕获），不影响功能
+          }
+        }
+        handlers.onDown(p.x, p.y, {
+          pointerId: typeof id === 'number' ? id : null,
+          pointerType: (ev as PointerEvent).pointerType ?? null,
+        });
+      });
       const onMove = (ev: Event): void => {
         const p = pointOf(ev);
         handlers.onMove(p.x, p.y);
       };
       const onUp = (ev: Event, cancelled: boolean): void => {
         const p = pointOf(ev);
+        // 先释放 capture（保证 lostpointercapture 不二次触发 onUp），再派发业务 up
+        release();
         handlers.onUp(p.x, p.y, cancelled);
       };
       node.addEventListener('pointermove', onMove);
       node.addEventListener('pointerup', (ev) => onUp(ev, false));
       node.addEventListener('pointercancel', (ev) => onUp(ev, true));
+      // 兜底：capture 被系统剥夺（如元素移除/指针设备丢失）→ 记账归零，避免状态残留
+      node.addEventListener('lostpointercapture', () => {
+        capturedId = null;
+      });
     } else {
       node.addEventListener('touchstart', (ev) => {
         const p = pointOf(ev);

@@ -77,7 +77,13 @@ async function pixStats(page) {
       for (let x = 0; x < W; x++) {
         const i = (y * W + x) * 4;
         const r = d[i], g = d[i + 1], b = d[i + 2];
-        if (g > 110 && g > r + 20 && g > b + 10 && r < 150 && b < 140) {
+        // F-GARAGE-DRAG-CONTINUITY-R1：车辆 envelope 必须**排除底部卡带区**（与 dark 同一约束）。
+        // 旧判据未排除 → 「已装备」徽标的绿色 rgba(56,148,90) 被误算进 green envelope
+        // （实测该 252px 位于 y=367 的 32×14 区域，正是卡片右下角徽标，与车辆无关）。
+        // 本 Queue 按 Must#1 把徽标改为中性灰蓝后该绿色消失 → 旧判据产生 null/NaN。
+        // 卡带装饰本就不属于「车辆」，排除它才是判据的正确语义。
+        const inVehicleBand = x > 30 && x < W - 30 && y > 30 && y < H - 80;
+        if (inVehicleBand && g > 110 && g > r + 20 && g > b + 10 && r < 150 && b < 140) {
           if (x < greenMinX) greenMinX = x;
           if (x > greenMaxX) greenMaxX = x;
           if (y < greenMinY) greenMinY = y;
@@ -85,15 +91,15 @@ async function pixStats(page) {
           greenN++;
         }
         // 车辆外缘（黑轮 + 深色炮体）——包围盒
-        if (r < 80 && g < 80 && b < 80 && (x > 30 && x < W - 30 && y > 30 && y < H - 80)) {
+        if (r < 80 && g < 80 && b < 80 && inVehicleBand) {
           if (x < darkMinX) darkMinX = x;
           if (x > darkMaxX) darkMaxX = x;
           if (y < darkMinY) darkMinY = y;
           if (y > darkMaxY) darkMaxY = y;
           darkN++;
         }
-        // 香蕉炮黄（橙黄）
-        if (r > 180 && g > 130 && b < 130 && (r - b) > 40) {
+        // 香蕉炮黄（橙黄）——同样排除卡带（卡片上的橙色部件图标/徽标不属车辆）
+        if (inVehicleBand && r > 180 && g > 130 && b < 130 && (r - b) > 40) {
           if (x < yellowMinX) yellowMinX = x;
           if (x > yellowMaxX) yellowMaxX = x;
           if (y < yellowMinY) yellowMinY = y;
@@ -102,18 +108,24 @@ async function pixStats(page) {
         }
       }
     }
-    // vehBox（车身 + 香蕉炮 envelope）—— 跨视口统一在 logical 域 0..844
-    const allX = [greenN?greenMinX:Infinity, greenN?greenMaxX:-Infinity, yellowN?yellowMinX:Infinity, yellowN?yellowMaxX:-Infinity];
-    const allY = [greenN?greenMinY:Infinity, greenN?greenMaxY:-Infinity, yellowN?yellowMinY:Infinity, yellowN?yellowMaxY:-Infinity];
+    // vehBox（车身 + 香蕉炮 envelope）—— 跨视口统一在 logical 域 0..844。
+    // F-GARAGE-DRAG-CONTINUITY-R1：旧实现用 [greenN?greenMinX:Infinity, ...] 占位，
+    // 当 greenN=0（如车身换成香蕉黄后无绿色）时占位符 Infinity 污染 Math.max →
+    // cx=(-Inf+Inf)/2=NaN。基线靠「已装备徽标」的绿色 252px 恰好掩盖该缺陷。
+    // 正确做法：只收集**有效**边界（排除卡带后车辆区域仍由 yellow/dark 提供 envelope）。
+    const xs = [];
+    const ys = [];
+    if (greenN > 0) { xs.push(greenMinX, greenMaxX); ys.push(greenMinY, greenMaxY); }
+    if (yellowN > 0) { xs.push(yellowMinX, yellowMaxX); ys.push(yellowMinY, yellowMaxY); }
     const bodyOnlyN = greenN + yellowN;
-    const vehBox = bodyOnlyN > 0 ? {
-      x: Math.min(...allX),
-      y: Math.min(...allY),
-      xMax: Math.max(...allX),
-      yMax: Math.max(...allY),
-      w: Math.max(...allX) - Math.min(...allX) + 1,
-      h: Math.max(...allY) - Math.min(...allY) + 1,
-      cx: (Math.min(...allX) + Math.max(...allX)) / 2,
+    const vehBox = bodyOnlyN > 0 && xs.length > 0 ? {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      xMax: Math.max(...xs),
+      yMax: Math.max(...ys),
+      w: Math.max(...xs) - Math.min(...xs) + 1,
+      h: Math.max(...ys) - Math.min(...ys) + 1,
+      cx: (Math.min(...xs) + Math.max(...xs)) / 2,
     } : null;
     return {
       W, H,

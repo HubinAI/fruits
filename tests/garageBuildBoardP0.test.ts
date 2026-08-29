@@ -182,7 +182,10 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
     // 卡内容（源码守卫）：简图 drawPartIcon / 名称 / 星级 C.gold / 能量 meta / 状态徽标
     const src = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
     const cardStart = src.indexOf('private drawPartCard');
-    const cardBody = src.slice(cardStart, cardStart + 2400);
+    // F-GARAGE-DRAG-CONTINUITY-R1：按【方法边界】截取，不用固定字符窗口——
+    // 旧实现固定 2400 字符，方法内新增代码会把尾部（状态徽标）挤出窗口而误报失败。
+    const nextMethod = src.indexOf('\n  private ', cardStart + 10);
+    const cardBody = src.slice(cardStart, nextMethod > 0 ? nextMethod : cardStart + 2400);
     expect(cardBody, '部件卡绘制简图').toContain('drawPartIcon');
     expect(cardBody, '部件卡绘制名称').toContain('c.t.replace');
     expect(cardBody, '部件卡绘制星级（★ 金色）').toContain('C.gold');

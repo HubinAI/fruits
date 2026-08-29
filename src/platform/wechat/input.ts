@@ -47,13 +47,21 @@ export class WechatInput implements PlatformInput {
     const wx = this.wx;
     if (!wx || typeof wx.onTouchStart !== 'function') return;
     const touch0 = (e: any): any => e && e.touches && e.touches[0];
+    /**
+     * F-GARAGE-DRAG-CONTINUITY-R1（Must#2）：touchend/touchcancel 必须取 changedTouches——
+     * 手指离开时 `e.touches` 为空（已离开的触点只在 changedTouches 里）。旧实现取
+     * touches[0] → 真机 onUp 永不派发 → 拖装无法提交（测试桩因构造了 touches 而掩盖）。
+     * 仍回退 touches[0] 兼容既有测试桩/简化环境。
+     */
+    const changed0 = (e: any): any =>
+      (e && e.changedTouches && e.changedTouches[0]) || touch0(e);
     // 防御性：测试桩 wx 可能只含 onTouchStart；缺 move/end/cancel 时单次点击仍能派发（onUp 必调）。
     if (typeof wx.onTouchStart === 'function') {
       wx.onTouchStart((e: any) => {
         const t = touch0(e);
         if (!t) return;
         const p = this.toLogical(t, target);
-        handlers.onDown(p.x, p.y);
+        handlers.onDown(p.x, p.y, { pointerId: null, pointerType: 'touch' });
       });
     }
     if (typeof wx.onTouchMove === 'function') {
@@ -62,11 +70,16 @@ export class WechatInput implements PlatformInput {
         if (!t) return;
         const p = this.toLogical(t, target);
         handlers.onMove(p.x, p.y);
+        // F-GARAGE-DRAG-CONTINUITY-R1（Must#2）：仅【活跃 Garage 拖动期间】阻止页面默认
+        // 滚动——由 UI 层谓词决定，不全局 preventDefault（不破坏其他页面/组件的输入）。
+        if (handlers.preventDefaultOnMove && handlers.preventDefaultOnMove() && e && typeof e.preventDefault === 'function') {
+          e.preventDefault();
+        }
       });
     }
     if (typeof wx.onTouchEnd === 'function') {
       wx.onTouchEnd((e: any) => {
-        const t = touch0(e);
+        const t = changed0(e);
         if (!t) return;
         const p = this.toLogical(t, target);
         handlers.onUp(p.x, p.y, false);
@@ -74,7 +87,7 @@ export class WechatInput implements PlatformInput {
     }
     if (typeof wx.onTouchCancel === 'function') {
       wx.onTouchCancel((e: any) => {
-        const t = touch0(e);
+        const t = changed0(e);
         if (!t) return;
         const p = this.toLogical(t, target);
         handlers.onUp(p.x, p.y, true);

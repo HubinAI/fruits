@@ -62,12 +62,34 @@ export type ClientToLogical = (
   rect: { left: number; top: number; width: number; height: number },
 ) => { x: number; y: number };
 
+/** F-GARAGE-DRAG-CONTINUITY-R1：指针元信息（随 onDown 传入；测试桩/简化环境可省略） */
+export interface PointerMeta {
+  pointerId?: number | null;
+  pointerType?: string | null;
+}
+
 /** F-GARAGE-CENTER-STAGE-P0：指针手势生命周期（down/move/up；up 的 cancelled=true 表示系统取消）。
  *  用于「横向滑动超过 8 logical px 取消该次点击」——部件带滑动浏览不误装备。 */
 export interface PointerGestureHandlers {
-  onDown(x: number, y: number): void;
+  /**
+   * @param meta F-GARAGE-DRAG-CONTINUITY-R1：可选的指针元信息（pointerId / pointerType）。
+   *   用于 pointer capture 记账与触屏 ghost 避让手指；不提供时按鼠标语义处理，行为不变。
+   */
+  onDown(x: number, y: number, meta?: PointerMeta): void;
   onMove(x: number, y: number): void;
   onUp(x: number, y: number, cancelled: boolean): void;
+  /**
+   * F-GARAGE-DRAG-CONTINUITY-R1（Must#1/7/11）：pointerdown 后是否需要对该 pointerId
+   * 施加 pointer capture —— 返回 true 时，move/up 即使发生在元素外部也持续派发到本元素，
+   * 并在 up/cancel 时可靠释放（不残留到下一次手势）。
+   * 可选：不提供时后端按既有行为（不 capture，语义完全不变）。
+   */
+  captureOnDown?(x: number, y: number): boolean;
+  /**
+   * F-GARAGE-DRAG-CONTINUITY-R1（Must#2）：touchmove 是否需要 preventDefault（阻止页面
+   * 默认滚动）。仅在【活跃 Garage 拖动期间】返回 true —— 不全局拦截，避免破坏其他页面输入。
+   */
+  preventDefaultOnMove?(): boolean;
 }
 
 export interface PlatformInput {

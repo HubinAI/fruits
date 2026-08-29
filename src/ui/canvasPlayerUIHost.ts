@@ -15,7 +15,7 @@
  * 禁止：美术重做 / 动效 polish / Gameplay 规则修改。布局为功能性布局（同色板、纯矩形+文字）。
  */
 import { platform } from '../platform';
-import type { SafeInsets } from '../platform/types';
+import type { PointerMeta, SafeInsets } from '../platform/types';
 import type { FramingRect } from '../render/renderer';
 import {
   computeMobileGarageLayout,
@@ -170,9 +170,23 @@ interface GarageDragSnapshot {
   armed: boolean;
   /** 无效 / 锁定原因（装配带内文字提示；不新增 Modal） */
   notice: string | null;
+  /**
+   * F-GARAGE-DRAG-CONTINUITY-R1（Must#11）：本次手势的 pointerId。
+   * 用于「不继承上一手势的 pointerId」——手势结束时与 ghost/hover/cancel 一并清空。
+   * 测试桩/无 pointerId 环境为 null。
+   */
+  pointerId: number | null;
+  /** pointerType（'mouse' | 'touch' | 'pen'）——触屏 ghost 上移避让手指（Must#6） */
+  pointerType: string | null;
 }
 
 const ZERO_INSETS: SafeInsets = { left: 0, right: 0, top: 0, bottom: 0 };
+
+/**
+ * F-GARAGE-DRAG-CONTINUITY-R1（Must#6）：触屏 ghost 抬升量（logical px）。
+ * 区间要求 16~24，取中值 20；目的 = 避免手指遮挡 ghost，不改变落点判定。
+ */
+const GHOST_TOUCH_LIFT = 20;
 
 /** F-META-1：Main Shell 局外页面（UI-only，不进 Gameplay 状态机） */
 type MetaPage = 'home' | 'garage' | 'backpack' | 'more';
@@ -511,9 +525,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       // F-GARAGE-CENTER-STAGE-P0：用 .call 绑定 this（input adapter 在调用时不传 this 上下文，
       // 否则 WechatInput.this.wx getter 抛 TypeError）
       g.call(platform.input, target, {
-        onDown: (x, y) => this.gestureDown(x, y),
+        onDown: (x, y, meta) => this.gestureDown(x, y, meta),
         onMove: (x, y) => this.gestureMove(x, y),
         onUp: (x, y, cancelled) => this.gestureUp(x, y, cancelled, tapHandler),
+        // F-GARAGE-DRAG-CONTINUITY-R1（Must#1）：仅「装配带卡片起点」才 pointer capture——
+        // 不全局捕获，普通点击/挂点点击/其他页面输入语义完全不变。
+        captureOnDown: (x, y) => !!this.garageCardAt(x, y),
+        // Must#2：仅在活跃 Garage 拖动期间阻止页面默认滚动（微信 touchmove）
+        preventDefaultOnMove: () => this.isGarageDragActive(),
       }, toLogical);
     } else {
       bindTap(target, tapHandler, toLogical);
@@ -623,7 +642,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * 指针按下后累计位移；任一点相对起点位移 > 8 logical px → cancelled（up 时不再 dispatch）。
    * 横向滑动（起点在部件卡带内）驱动卡带滚动；其余方向仅取消点击（不误触挂点/分类/顶栏）。
    */
-  private gestureDown(x: number, y: number): void {
+  private gestureDown(x: number, y: number, meta?: PointerMeta): void {
     this.gesture = { px: x, py: y, dx: 0, dy: 0, cancelled: false };
     // F-GARAGE-DRAG-ASSEMBLY-P0：装配带卡片按下 → partPressed（记录卡片，等方向锁判定 Must#16）
     const card = this.garageCardAt(x, y);
@@ -642,8 +661,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         submitted: false,
         armed: false,
         notice: null,
+        // Must#11：pointerId/pointerType 随手势建立，手势结束时一并清空（不继承到下一次）
+        pointerId: meta?.pointerId ?? null,
+        pointerType: meta?.pointerType ?? null,
       };
       this.garageDragNotice = null;
+      // Must#5：按下即重绘 → 卡片「抬起/压暗」反馈（无需等 80ms 定时器，下一帧即见）
       this.draw();
       return;
     }
@@ -676,19 +699,31 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     g.dy += my;
     const d = this.garageDrag;
 
-    // —— Garage 拖动方向锁（Must#16）——
+    // —— Garage 拖动方向锁（Must#16 + F-GARAGE-DRAG-CONTINUITY-R1 Must#3/4）——
+    // 判定全部基于【从起点累计位移 g.dx/g.dy】（Must#3），绝不使用相邻两帧位移。
     if (d && d.phase === 'partPressed') {
       const adx = Math.abs(g.dx);
-      const ady = Math.abs(g.dy);
-      const verticalUp = g.dy <= -8 && ady > adx; // 向上拖（核心手势 #2）
-      const horizontal = adx > 8 && adx >= ady; // 横滑浏览（核心手势 #1）
-      if (verticalUp && !d.card?.locked) {
+      const up = -g.dy; // 向上累计位移（正 = 向车辆/上方离开卡带）
+      // Must#4：向上离开卡带累计 ~5~7px 即进入拖动（取 6）
+      const DRAG_START = 6;
+      // 明显横滑才进入滚动（横向显著主导；避免斜向拖被误判为浏览）
+      const SCROLL_LOCK = 10;
+      // Must#4：兼容真实手势的斜向抖动——不要求 ady > adx，只要求向上分量为主导之一
+      // （实测旧式 `ady > adx` 会让「卡(66,345)→挂点(280,181)」这类最自然斜拖
+      //   被判成横滑 → ghost 一帧不出现，必须重复拖动）。
+      const wantDrag = up >= DRAG_START && up >= adx * 0.6;
+      const wantScroll = adx >= SCROLL_LOCK && adx > up * 1.6;
+      if (wantDrag && !d.card?.locked) {
         d.phase = 'draggingPart';
         g.cancelled = true; // 进入拖动 → 本次手势不再派发 tap
         this.garageDragNotice = null;
-      } else if (horizontal) {
+        // Must#6：进入 draggingPart 的**同一帧**立即重绘 → ghost 从第一帧就出现
+        // （旧实现缺此 draw()，ghost 要等下一次 move 才出现 → 观感「迟出现/突然出现」）
+        this.draw();
+      } else if (wantScroll) {
         d.phase = 'stripScrolling';
         g.cancelled = true; // 一旦横滑，本次手势不得装备
+        this.draw();
       }
     }
     if (d && d.phase === 'stripScrolling') {
@@ -803,6 +838,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (phase === 'idle' || phase === 'completed' || phase === 'cancelled') this.garageDrag = null;
   }
 
+  /**
+   * F-GARAGE-DRAG-CONTINUITY-R1：是否处于【活跃拖动】（draggingPart / hovering*）。
+   * 用途：①微信 touchmove 的 preventDefault 谓词（Must#2：仅拖动期间阻止页面滚动，
+   * 不全局拦截）；②门禁断言「capture 在结束后归零」的运行时依据。
+   * partPressed（尚未判定方向）与 stripScrolling 不算活跃拖动。
+   */
+  private isGarageDragActive(): boolean {
+    const p = this.garageDrag?.phase;
+    return p === 'draggingPart' || p === 'hoveringValidMount' || p === 'hoveringInvalidMount';
+  }
+
   private emptyDrag(): GarageDragSnapshot {
     return {
       phase: 'idle',
@@ -818,6 +864,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       submitted: false,
       armed: false,
       notice: null,
+      pointerId: null,
+      pointerType: null,
     };
   }
 
@@ -1718,6 +1766,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       active?: boolean;
       locked?: boolean;
       disabled?: boolean;
+      /**
+       * F-GARAGE-DRAG-CONTINUITY-R1：已装备（中性灰蓝底 + 「已装备」文字）。
+       * 与 `active`（亮蓝选中）互斥——已装备**不**用亮蓝，避免与可选卡片混淆。
+       */
+      equipped?: boolean;
+      /** armed（已拿起、尚未装备）：暖金底 + 金描边，与已装备灰态一眼可区分 */
+      armed?: boolean;
       primary?: boolean;
       /** F-GARAGE-COMBAT-TAB-R1：战斗主分类强调（更宽/更亮；选中=金橙高亮，未选中仍可识别为主入口且不似已选中） */
       combat?: boolean;
@@ -1734,9 +1789,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
           ? 'rgba(58,44,18,0.62)' // 未选中：暗金底（仍识别为主入口，不似已选中）
           : opts.primary
             ? V.primary
-            : opts.active
-              ? C.blue
-              : V.secondary;
+            // F-GARAGE-DRAG-CONTINUITY-R1：已装备 = 中性灰蓝（不用亮蓝）；armed = 暖金
+            : opts.armed
+              ? V.armedFill
+              : opts.equipped
+                ? V.equippedFill
+                : opts.active
+                  ? C.blue
+                  : V.secondary;
     const stroke = opts.disabled
       ? C.border
       : isCombat && opts.active
@@ -1745,11 +1805,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
           ? 'rgba(222,164,52,0.72)' // 暗金描边（未选中主入口识别）
           : opts.primary
             ? V.primaryBright
-            : opts.active
-              ? C.blueBright
-              : opts.locked
-                ? V.enemyOrange
-                : V.borderSoft;
+            : opts.armed
+              ? V.armedStroke
+              : opts.equipped
+                ? V.equippedStroke
+                : opts.active
+                  ? C.blueBright
+                  : opts.locked
+                    ? V.enemyOrange
+                    : V.borderSoft;
     const labelColor = opts.disabled
       ? C.textDark
       : isCombat
@@ -2231,6 +2295,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     let gx = d.x;
     let gy = d.y;
     let snapped = !!d.hoverHp;
+    // F-GARAGE-DRAG-CONTINUITY-R1（Must#6）：触屏 ghost 上移 20 logical px（16~24 区间中值）
+    // 避让手指遮挡；鼠标/笔不做偏移（与指针距离 = 0 ≤ 4px）。**仅影响绘制**，
+    // 落点判定仍用真实指针 d.x/d.y —— 吸附后统一移到挂点中心（不偏移）。
+    if (!snapped && d.pointerType === 'touch') {
+      gy -= GHOST_TOUCH_LIFT;
+    }
     if (snapped) {
       const hp = (state.hardpointScreenPts ?? []).find((p) => p.id === d.hoverHp);
       if (hp) {
@@ -2384,8 +2454,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const visible = x + cardW > row.x && x < row.x + row.w;
       if (visible) {
         // Must#4：拖动中的卡片保留原位置但降低亮度（ghost 从原卡飞出）
-        const dimmed = !!drag && !!drag.card && drag.card.v === c.v && drag.slot === slot;
-        this.drawPartCard(x, row.y, cardW, cardH, c, c.v === curVal, fully, dimmed);
+        const isSrc = !!drag && !!drag.card && drag.card.v === c.v && drag.slot === slot;
+        const dimmed = isSrc && drag!.phase !== 'partPressed';
+        // Must#5：按下（尚未判定方向）→ 轻量「抬起/压暗」反馈，让玩家知道已抓住部件
+        const pressed = isSrc && drag!.phase === 'partPressed';
+        this.drawPartCard(x, row.y, cardW, cardH, c, c.v === curVal, fully, dimmed, pressed);
       }
       x += cardW + gap;
     }
@@ -2580,16 +2653,30 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     equipped: boolean,
     registerHit = true,
     dimmed = false,
+    pressed = false,
   ): void {
+    // F-GARAGE-DRAG-CONTINUITY-R1（Must：已装备卡片状态 #1/#3/#5）：
+    // 已装备 = 中性灰蓝底（**不用亮蓝 active 填充**，旧实现与「选中/armed」混淆）；
+    // armed（已拿起待装）= 金色描边；两者互斥，且都不使用亮蓝实底。
+    const isArmed = !!(this.garageDrag?.armed && this.garageDrag.card?.v === c.v);
     if (registerHit) {
       this.button(x, y, w, h, `opt:${c.v}`, '', {
-        active: equipped,
+        equipped: equipped,
         locked: c.locked,
         disabled: !!c.locked,
+        armed: isArmed,
       });
     } else {
       // 部分可见：只画不注册（hitArea 不受 clip 限制；越界命中破坏「点击区与视觉一致」）
-      this.rect(x, y, w, h, c.locked ? '#262e3d' : equipped ? C.blueDeep : V.panel, c.locked ? V.enemyOrange : V.border, 1);
+      this.rect(
+        x,
+        y,
+        w,
+        h,
+        c.locked ? '#1b2130' : equipped ? V.equippedFill : V.panel,
+        c.locked ? V.enemyOrange : isArmed ? C.gold : equipped ? V.equippedStroke : V.border,
+        isArmed ? 2 : 1,
+      );
     }
     const short = h < 40;
     // 左侧 mini preview（部件简图；武器=炮管 / 辅助=方块 / 车身=小车 / 轮=圆）
@@ -2622,18 +2709,42 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.text(tag, x + w - ts / 2 - 4, y + 3 + ts / 2, tsz, '#fff', 'center', 700);
       }
     }
-    // 状态徽标（右下：已装备/未获得；Must#9）
+    // 状态徽标（右下：已装备/未获得；Must#9）。
+    // F-GARAGE-DRAG-CONTINUITY-R1：已装备改为「深灰蓝底 + 亮字 + 浅描边」——在中性灰蓝
+    // 卡片上仍清晰可辨，**文字不可省略**（Must：可加小标识，但文字不能省）。
     const badge = c.locked ? '未获得' : equipped ? '已装备' : '';
     if (badge) {
-      const bw = short ? 26 : 32;
-      const bh = short ? 11 : 14;
+      const bw = short ? 28 : 36;
+      const bh = short ? 12 : 15;
+      const bx = x + w - bw - (short ? 3 : 4);
       const by = y + h - bh - (short ? 2 : 3);
-      this.panel(x + w - bw - (short ? 3 : 4), by, bw, bh, equipped ? 'rgba(56,148,90,0.8)' : 'rgba(120,130,150,0.6)', undefined, 3);
-      this.text(badge, x + w - bw / 2 - (short ? 3 : 4), by + bh / 2, short ? 7 : 8, '#fff', 'center', 700);
+      this.panel(
+        bx,
+        by,
+        bw,
+        bh,
+        equipped ? 'rgba(52,64,82,0.98)' : 'rgba(30,36,46,0.92)',
+        equipped ? 'rgba(150,168,192,0.9)' : 'rgba(110,120,138,0.75)',
+        3,
+      );
+      this.text(badge, bx + bw / 2, by + bh / 2, short ? 7 : 9, equipped ? '#eef3fb' : '#8d99ab', 'center', 700);
+    }
+    // F-GARAGE-DRAG-CONTINUITY-R1（Must#1 已装备）：左侧中性灰蓝标识条。
+    // 背景色差（已装备 #2a3444 vs 普通 secondary 合成）偏弱，仅靠底色「肉眼可区分」不足；
+    // 加一条不改变布局的竖条（卡片内装饰，非新 UI 结构），与右下「已装备」文字双通道标识。
+    if (equipped && !c.locked) {
+      this.rect(x + 2, y + 3, 3, h - 6, V.equippedMark);
     }
     // F-GARAGE-DRAG-ASSEMBLY-P0（Must#4）：拖动中的原卡保留位置但降低亮度——
     // ghost 已从该卡飞出，原卡作为「已拿起」的视觉锚点（不改变卡片布局/尺寸）。
     if (dimmed) this.rect(x, y, w, h, 'rgba(8,12,20,0.55)');
+    // F-GARAGE-DRAG-CONTINUITY-R1（Must#5）：按下后 80ms 内的轻量反馈——
+    // 轻微压暗 + 金色描边 = 「已经抓住这个部件」。与拖动中的强压暗（dimmed）分级，
+    // 与 armed 的暖金底区分（pressed 只是描边，不改底色）。
+    if (pressed) {
+      this.rect(x, y, w, h, 'rgba(10,16,26,0.30)');
+      this.rect(x, y, w, h, undefined, 'rgba(255,190,80,0.9)', 2);
+    }
   }
 
   /** F-GARAGE-BUILD-BOARD-P0：部件 mini 简图（按类别：车身=小车 / 轮=圆 / 武器=炮管 / 辅助=方块）。 */
