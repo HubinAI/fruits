@@ -1205,10 +1205,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    */
   private installDragSafetyNet(): void {
     if (this.dragSafetyInstalled) return;
+    this.dragSafetyInstalled = true;
+    // Must#8（切后台清理）：平台生命周期（Web + 微信统一）进入后台（hidden）→ 清理全部手势状态。
+    // 微信无 window → 旧的 window 级安全网恒不生效；此处用平台生命周期覆盖两端，
+    // 与 cancelInteraction 注释「微信侧只能由宿主在 onHide 显式调用」一致。
+    try {
+      if (platform && platform.lifecycle && typeof platform.lifecycle.onVisibilityChange === 'function') {
+        platform.lifecycle.onVisibilityChange((hidden: boolean) => {
+          if (hidden) this.cancelInteraction();
+        });
+      }
+    } catch {
+      /* 生命周期缺失环境静默降级 */
+    }
+    // Web 兜底：window 级 pointerup/cancel/blur/visibilitychange（指针在画布外松开等）
     if (typeof window === 'undefined') return;
     const w = window as unknown as { addEventListener?: (type: string, fn: () => void) => void };
     if (typeof w.addEventListener !== 'function') return;
-    this.dragSafetyInstalled = true;
     const clear = (): void => this.cancelGarageDrag();
     w.addEventListener('pointerup', clear);
     w.addEventListener('pointercancel', clear);
@@ -2579,40 +2592,49 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const cx = p.x;
       const cy = p.y;
       if (compat) {
-        // —— 拖动 / 选中态：兼容挂点变亮放大，不兼容降低亮度（Must#5）——
+        // —— Must#4：拖动态只突出「最近的一个有效挂点」——
+        // 不兼容：极淡小点，绝不显示红圈（避免反馈过杂）。
         if (!compat.has(p.id)) {
-          ctx.fillStyle = 'rgba(120,130,150,0.30)';
+          ctx.fillStyle = 'rgba(120,130,150,0.20)';
           ctx.beginPath();
-          ctx.arc(cx, cy, Math.max(2, R * 0.3), 0, Math.PI * 2);
+          ctx.arc(cx, cy, Math.max(2, R * 0.26), 0, Math.PI * 2);
           ctx.fill();
           continue;
         }
         const isHover = hoverId === p.id;
         const isOverload = isHover && !!(drag as GarageDragSnapshot).overload;
-        // 金色呼吸（仅最近兼容挂点；轻微缩放，不改车辆取景/尺度——Must#18）
-        const breathe = isHover ? 1 + 0.12 * Math.abs(Math.sin((t / 220) * Math.PI)) : 1;
-        const pr = (R + (isHover ? 4 : 2)) * breathe;
-        ctx.strokeStyle = isOverload ? V.lose : isHover ? V.primary : 'rgba(150,205,255,0.95)';
-        ctx.lineWidth = isHover || isOverload ? 2.6 : 2;
-        ctx.beginPath();
-        ctx.arc(cx, cy, pr, 0, Math.PI * 2);
-        ctx.stroke();
-        // 已占用挂点：显示「将被替换的当前部件」轮廓（虚线外环）
-        if (p.occupied) {
-          ctx.strokeStyle = isOverload ? 'rgba(226,88,88,0.75)' : 'rgba(255,255,255,0.68)';
-          ctx.lineWidth = 1.4;
-          ctx.setLineDash([3, 3]);
-          ctx.beginPath();
-          ctx.arc(cx, cy, pr + 4, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
-        // 金色吸附环（最近兼容挂点；超载转红环）
         if (isHover) {
-          ctx.strokeStyle = isOverload ? 'rgba(226,88,88,0.55)' : 'rgba(255,209,102,0.45)';
+          // 最近有效挂点：金色吸附（唯一突出目标；超载转克制红环，不放大红域）
+          const breathe = 1 + 0.12 * Math.abs(Math.sin((t / 220) * Math.PI));
+          const pr = (R + 4) * breathe;
+          ctx.strokeStyle = isOverload ? V.lose : V.primary;
+          ctx.lineWidth = isOverload ? 2.6 : 2.6;
+          ctx.beginPath();
+          ctx.arc(cx, cy, pr, 0, Math.PI * 2);
+          ctx.stroke();
+          // 占用：仅目标挂点显示「将被替换」虚线外环（克制，不喧宾夺主）
+          if (p.occupied && !isOverload) {
+            ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+            ctx.lineWidth = 1.3;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.arc(cx, cy, pr + 4, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+          if (!isOverload) {
+            ctx.strokeStyle = 'rgba(255,209,102,0.4)';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, pr + 5, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+        } else {
+          // 其他有效挂点：弱提示（淡环，不与目标抢视觉；Must#4「其他有效=弱提示」）
+          ctx.strokeStyle = 'rgba(150,205,255,0.35)';
           ctx.lineWidth = 1.2;
           ctx.beginPath();
-          ctx.arc(cx, cy, pr + 5, 0, Math.PI * 2);
+          ctx.arc(cx, cy, R * 0.8, 0, Math.PI * 2);
           ctx.stroke();
         }
         continue;

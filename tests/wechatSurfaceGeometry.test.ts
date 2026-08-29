@@ -315,7 +315,6 @@ describe('F-WX-SAFE-AREA-P0｜胶囊避让几何验收（Home 宝箱 / Battle �
     const runtime = mod.runtime;
     const uiHost = mod.uiHost;
     const dpr = env.dpr;
-    const cssW = env.windowW;
     const capsuleLeft = 744;
 
     // ============ HOME ============
