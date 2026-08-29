@@ -81,12 +81,20 @@ export default defineConfig({
   // 时为 true（输出 [WX-INPUT] 触摸诊断，供微信开发者工具定位坐标/命中）。
   // F-WX-RCA-1：__WX_RCA__ 默认 false（PROD 零日志）；WECHAT_RCA=1 构建（npm run build:wechat:rca）
   // 时为 true（输出 [WX-RCA] 真实尺度数据，供真人 Runtime 核对 Garage/Battle 主体占比）。
+  // F-WX-EXPERIENCE-RC-P0：__WX_BADGE__ 默认 false（正式构建零 SHA 水印）；WECHAT_BADGE=1 构建
+  // （npm run build:wechat:rc）时为 true，于画面角落绘制短 SHA 水印，供真人录屏确认版本；
+  // 正式发布走 build:wechat（不注入）→ 自动关闭。
   define: {
     'import.meta': JSON.stringify({
       env: { MODE: 'production', DEV: false, PROD: true },
     }),
     __WX_DEBUG__: process.env.WECHAT_DEBUG_INPUT ? 'true' : 'false',
     __WX_RCA__: process.env.WECHAT_RCA ? 'true' : 'false',
+    __WX_BADGE__: process.env.WECHAT_BADGE ? 'true' : 'false',
+    // F-WX-EXPERIENCE-RC-P0：__E2E_PROBE__ 默认 false（正式构建零调试探针 / 零「全部件×1」入口）；
+    // WECHAT_PROBE=1 构建（build:wechat:rc）时为 true，作为「调试体验入口」——配合 game.ts 的
+    // isResetDevVisible 使「全部件×1」可达且隔离于普通体验入口（普通玩家用 prod 构建，永不出现）。
+    __E2E_PROBE__: process.env.WECHAT_PROBE ? 'true' : 'false',
   },
   plugins: [
     runtimeInfoPlugin(),

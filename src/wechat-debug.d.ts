@@ -16,3 +16,21 @@ declare const __WX_DEBUG__: boolean | undefined;
  * 普通 build:wechat PROD 零日志。
  */
 declare const __WX_RCA__: boolean | undefined;
+
+/**
+ * F-WX-EXPERIENCE-RC-P0｜体验版 SHA 水印构建标志。
+ *
+ * 仅 `vite.wechat.config.ts` 的 `define.__WX_BADGE__` 注入（WECHAT_BADGE=1 构建 = true，
+ * 即 `npm run build:wechat:rc`；默认 false）。RC 构建于画面角落绘制短 SHA 水印，供真人录屏
+ * 确认版本；正式 build:wechat PROD 不注入 → 恒不绘制（正式发布前可关闭）。
+ */
+declare const __WX_BADGE__: boolean | undefined;
+
+/**
+ * F-WX-EXPERIENCE-RC-P0｜调试体验入口构建标志。
+ *
+ * 仅 `vite.wechat.config.ts` 的 `define.__E2E_PROBE__` 注入（WECHAT_PROBE=1 构建 = true，
+ * 即 `npm run build:wechat:rc`；默认 false）。配合 game.ts 的 isResetDevVisible 使「全部件×1」
+ * 可达且隔离于普通体验入口；普通 prod 构建恒 false → 永不出现、无法误触。
+ */
+declare const __E2E_PROBE__: boolean | undefined;

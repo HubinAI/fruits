@@ -299,7 +299,7 @@ describe('F-GARAGE-DRAG-CONTINUITY-R1｜拖装连续性与已装备卡片状态'
     ) => {
       (listeners[t] ||= []).push(fn);
     };
-    const hadWindow = 'window' in globalThis;
+    const prevWindow = (globalThis as { window?: unknown }).window;
     (globalThis as { window?: unknown }).window = { PointerEvent: function () {} };
     try {
       const calls: Array<{ x: number; y: number; cancelled: boolean }> = [];
@@ -323,7 +323,7 @@ describe('F-GARAGE-DRAG-CONTINUITY-R1｜拖装连续性与已装备卡片状态'
       expect(ops, 'cancel → 同样释放').toEqual(['set', 'release', 'set', 'release']);
       expect(calls[1]?.cancelled, 'cancel 标记正确').toBe(true);
     } finally {
-      if (!hadWindow) delete (globalThis as { window?: unknown }).window;
+      (globalThis as { window?: unknown }).window = prevWindow;
     }
   });
 

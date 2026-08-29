@@ -14,6 +14,7 @@
     "build": "vite build",
     "build:test": "vite build --mode test",
     "build:wechat": "vite build -c vite.wechat.config.ts",
+    "build:wechat:rc": "node scripts/wechat-rc.js",
     "build:wechat:rca": "node scripts/wechat-rca.js",
     "dev:wechat": "node scripts/wechat-dev.js",
     "build:pages": "vite build -c vite.pages.config.ts",

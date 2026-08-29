@@ -113,7 +113,11 @@ const runtime = new PlayerGameRuntime({
   host: uiHost,
   battle: battleHost,
   sfx, // AudioContext 缺失 → play/resume 安全 no-op
-  // isResetDevVisible / onDevResetReload：微信恒 false / 无 reload（DEV ?resetdev 不可达）
+  // isResetDevVisible / onDevResetReload：微信恒 false / 无 reload（DEV ?resetdev 不可达）。
+  // F-WX-EXPERIENCE-RC-P0（Must#3「调试体验入口」）：仅当 __E2E_PROBE__ 构建（build:wechat:rc:debug）
+  // 为真时「全部件×1」可达；普通体验 / 正式 prod 构建（__E2E_PROBE__ 恒 false）永不出现 →
+  // 与普通体验入口隔离、且普通玩家无法误触开启。
+  isResetDevVisible: () => (typeof __E2E_PROBE__ !== 'undefined' && __E2E_PROBE__),
 });
 runtime.init(); // 装载存档 + 绑定 actions + 初始预览/取景/渲染
 
@@ -224,6 +228,13 @@ installWechatErrorGuard({
   sha: runtimeInfo.sha,
   getPhase: () => (typeof runtime !== 'undefined' && runtime ? runtime.playerPhase : 'boot'),
 });
+
+// —— 13) 体验版 SHA 水印（F-WX-EXPERIENCE-RC-P0）：
+// 仅 RC 体验构建（__WX_BADGE__=true）在画面角落绘制短 SHA，供真人录屏确认版本；
+// 正式发布构建（build:wechat，__WX_BADGE__=false）→ 不注入 → 画面无 SHA（正式发布前可关闭）。
+if (typeof __WX_BADGE__ !== 'undefined' && __WX_BADGE__) {
+  uiHost.setBuildBadge(`#${runtimeInfo.sha.slice(0, 7)}`);
+}
 
 // 导出供调试 / headless smoke 断言（IIFE 下挂到全局返回对象）
 export { runtime, renderer, uiHost, runtimeInfo, screenCanvas, uiCanvas };

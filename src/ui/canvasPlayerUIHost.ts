@@ -338,6 +338,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private prebattleLockAt = 0;
   /** F-GARAGE-LIVE-ASSEMBLY-P0：装备成功吸附反馈（挂点金圈 150~220ms；Runtime flashEquip 触发） */
   private equipFlash: { hp: string; until: number } | null = null;
+  /**
+   * F-WX-EXPERIENCE-RC-P0：体验版 SHA 水印文本。仅 RC 体验构建经 game.ts 注入
+   * （`__WX_BADGE__` 为真时）；正式构建不调用 → 恒为空 → 不绘制。用于「录屏时可确认版本」，
+   * 且正式发布前可关闭（不注入即可）。
+   */
+  private buildBadge = '';
   /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机）；F-HOME-1：默认 Home（正式首页） */
   private metaPage: MetaPage = 'home';
   /** F-META-6：More 页子视图（功能卡主页 / 设置子页；UI-only，不进 Gameplay） */
@@ -427,11 +433,20 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * 只清理**交互瞬时状态**，不修改 BuildDraft / 存档 / 装备 / 能量。
    */
   cancelInteraction(): void {
-    this.gesture = null;
+    this.gesture =  null;
     if (this.garageDrag) {
       this.resetGarageDrag('cancelled');
       this.garageDragNotice = null;
     }
+    this.draw();
+  }
+
+  /**
+   * F-WX-EXPERIENCE-RC-P0：设置体验版 SHA 水印（game.ts 在 `__WX_BADGE__` 为真时调用）。
+   * 传入形如 `#575f1d0` 的短 SHA；传空字符串即关闭（正式发布前可一键关闭）。
+   */
+  setBuildBadge(text: string): void {
+    this.buildBadge = text;
     this.draw();
   }
 
@@ -1558,6 +1573,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (state.readyOverlayVisible && !this.isMobile) this.drawReadyOverlay();
     // F-META-4：Modal 覆盖层（最后绘制 → 最上层；遮罩拦截底层点击）
     if (this.modal) this.drawModal(this.modal);
+
+    // F-WX-EXPERIENCE-RC-P0：体验版 SHA 水印（角落、极小、半透明、不遮挡游戏主体）。
+    // 仅当 game.ts 注入了 buildBadge（RC 构建）才绘制；正式构建为空 → 恒跳过。
+    if (this.buildBadge) {
+      this.text(this.buildBadge, 6, 8, 9, 'rgba(255,255,255,0.5)', 'left', 400);
+    }
   }
 
   private ensureSize(): void {
