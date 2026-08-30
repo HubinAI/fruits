@@ -652,6 +652,51 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.draw();
     }
     // 编辑态且无状态变化：画布已是当前 Garage/Matching/MatchPreview 画面，不重绘
+    // F-WX-RC-SAFE-BADGE-P0（Must#2）：RC 版号每帧在所有世界场景与 UI 合成之后最后绘制——
+    // 不依赖 dirty / 离屏残留（wx.onWindowResize 清空 backing 后下一帧即恢复；稳态页 120 帧持续存在）。
+    this.drawBuildBadge();
+  }
+
+  /**
+   * F-WX-RC-SAFE-BADGE-P0｜RC 版号水印（每帧最后绘制；iOS 横屏安全区 + 高对比 + 不挡点击）。
+   *
+   * - 触发：renderBattleFrame 每帧无条件调用（Must#2「不得只在启动第一帧绘制」）。
+   * - 位置：safeArea 左上角内缩 6 logical px，完整包围盒钳制在安全区内（Must#3）。
+   *   insets 每帧实时读 viewport.safeInsets()（logical px；wx safeArea + 胶囊折叠契约）→
+   *   横屏方向改变 / 窗口 resize 后首帧即按新安全区重算。
+   * - 样式：半透明深色底 + 纯白粗体、字号 11 logical px（Must#4；绕开 fontScale 0.8 的
+   *   mobile-short 收缩——诊断水印不随 UI 风格缩放；绘制经 DPR 变换放大到 backing）。
+   * - 层级：save → 显式 source-over + DPR 单次 logical→backing 变换 → 绘制 → restore（Must#2）。
+   * - 不注册 hitArea → 不影响点击（Must#4）；buildBadge 为空（普通 build:wechat）→ 恒跳过。
+   */
+  private drawBuildBadge(): void {
+    const text = this.buildBadge;
+    if (!text) return;
+    const ctx = this.ctx;
+    const dpr = Math.max(1, this.dpr);
+    const ins = this.viewport?.safeInsets() ?? this.insets;
+    const W = this.cssW > 0 ? this.cssW : (this.canvas.width > 0 ? this.canvas.width / dpr : BASE_W);
+    const H = this.cssH > 0 ? this.cssH : (this.canvas.height > 0 ? this.canvas.height / dpr : BASE_H);
+    const pad = 4; // logical px 内边距
+    const size = 11; // logical px 字号（≥11）
+    const w = Math.ceil(text.length * Math.ceil(size * 0.62)) + pad * 2;
+    const h = size + pad * 2;
+    // 锚点：安全区左上角内缩 6 logical px；越界时右/下对齐钳回安全区（完整包围盒不超 safeArea）
+    let bx = ins.left + 6;
+    let by = ins.top + 6;
+    if (bx + w > W - ins.right) bx = Math.max(ins.left, W - ins.right - w);
+    if (by + h > H - ins.bottom) by = Math.max(ins.top, H - ins.bottom - h);
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // logical → backing 单次（DPR 只应用一次）
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(bx, by, w, h);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${size}px system-ui, -apple-system, 'Segoe UI', sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, bx + pad, by + h / 2);
+    ctx.restore();
   }
 
   /** 测试钩子：当前命中区域（布局坐标：Desktop=1280×720 逻辑；Mobile=逻辑 px/CSS px） */
@@ -1590,12 +1635,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // F-META-4：Modal 覆盖层（最后绘制 → 最上层；遮罩拦截底层点击）
     if (this.modal) this.drawModal(this.modal);
 
-    // F-WX-EXPERIENCE-RC-P0：体验版 SHA 水印（角落、极小、半透明、不遮挡游戏主体）。
-    // 仅当 game.ts 注入了 buildBadge（RC 构建）才绘制；正式构建为空 → 恒跳过。
-    // F-WX-SAFE-AREA-P0：水印锚点纳入唯一安全区契约（insets）——避免贴近左上状态栏/刘海。
-    if (this.buildBadge) {
-      this.text(this.buildBadge, this.insL + 6, this.insT + 6, 9, 'rgba(255,255,255,0.5)', 'left', 400);
-    }
+    // F-WX-RC-SAFE-BADGE-P0：RC 版号水印不再在此绘制——统一由 renderBattleFrame 每帧末尾
+    // 无条件调用 drawBuildBadge()（Must#2 每帧最后绘制；稳态页不依赖本 draw 触发）。
   }
 
   private ensureSize(): void {
