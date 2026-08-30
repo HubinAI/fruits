@@ -376,8 +376,11 @@ loop.onError = (err) => {
 // —— 13) 体验版 SHA 水印（F-WX-EXPERIENCE-RC-P0）：
 // 仅 RC 体验构建（__WX_BUILD_BADGE__=true）在画面角落绘制短 SHA，供真人录屏确认版本；
 // 正式发布构建（build:wechat，__WX_BUILD_BADGE__=false）→ 不注入 → 画面无 SHA（正式发布前可关闭）。
+// F-WX-RC-REPRODUCIBLE-BUILD-P0：诊断 dirty 构建（wechat-rc.js --dirty → __WX_RC_DIRTY__=true）
+// badge 显示 #<sha>-dirty（Must#4：临时诊断包，不伪装正式 RC）；正常 RC / 普通包无后缀。
 if (typeof __WX_BUILD_BADGE__ !== 'undefined' && __WX_BUILD_BADGE__) {
-  uiHost.setBuildBadge(`#${runtimeInfo.sha.slice(0, 7)}`);
+  const dirty = typeof __WX_RC_DIRTY__ !== 'undefined' && __WX_RC_DIRTY__;
+  uiHost.setBuildBadge(`#${runtimeInfo.sha.slice(0, 7)}${dirty ? '-dirty' : ''}`);
 }
 
 // 导出供调试 / headless smoke 断言（IIFE 下挂到全局返回对象）

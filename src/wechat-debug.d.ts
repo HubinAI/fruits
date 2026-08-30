@@ -35,3 +35,12 @@ declare const __WX_BUILD_BADGE__: boolean | undefined;
  * 注意：E2E probe（__E2E_PROBE__，已弃用、已迁移到 __WX_DEBUG__）不得出现在任何微信构建中。
  */
 declare const __WX_DEBUG_GRANT__: boolean | undefined;
+
+/**
+ * F-WX-RC-REPRODUCIBLE-BUILD-P0｜诊断 dirty 构建标记。
+ *
+ * 仅 `vite.wechat.config.ts` 的 `define.__WX_RC_DIRTY__` 注入（scripts/wechat-rc.js --dirty 诊断
+ * 构建时 WECHAT_RC_DIRTY=1 → true；默认 false）。此时 badge 显示 #<sha>-dirty（Must#4：临时诊断
+ * 包，不得伪装正式 RC）；正常 RC / 普通 build:wechat 恒 false → 无后缀。
+ */
+declare const __WX_RC_DIRTY__: boolean | undefined;

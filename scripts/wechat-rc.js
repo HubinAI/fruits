@@ -1,31 +1,103 @@
 /**
- * F-WX-IOS-CANVAS-CRASH-P0｜Must#6｜`npm run build:wechat:rc`——内部体验版（RC）候选包专用构建。
+ * F-WX-RC-REPRODUCIBLE-BUILD-P0｜`npm run build:wechat:rc`——RC 包与 Git 提交一一对应的强制门禁。
  *
- * 本构建同时注入两个相互独立的编译期标志（均不依赖 E2E probe）：
- * - WECHAT_BADGE=1（__WX_BUILD_BADGE__=true）→ dist-wechat 在画面角落绘制短 SHA 水印（#7位），
- *   供真人微信开发者工具 / 真机录屏确认版本（SHA 三路一致）；
- * - WECHAT_DEBUG_GRANT=1（__WX_DEBUG_GRANT__=true）→ 作为「调试体验入口」：配合 game.ts 的
- *   isResetDevVisible 使「全部件×1」可达且隔离于普通体验入口（普通玩家用 build:wechat，永不出现，无法误触）。
+ * 背景：连续两轮出现「代码在未提交 working tree 中完成 → build:wechat:rc 读取旧 HEAD →
+ * 随后 commit → RC 包包含新代码但 badge 仍显示旧 SHA」，版号无法代表真实源码。
  *
- * 普通 `npm run build:wechat`（无这两个 env）→ 正式包零 SHA 水印、零「全部件×1」入口
- * （正式发布前可关闭 / 不可误触）。E2E probe（__E2E_PROBE__，已弃用、已迁移到 __WX_DEBUG__）不得出现在任何微信构建中。
- * 零新依赖：仅 node:child_process / node:path / node:url（同 scripts/wechat-rca.js 模式）。
+ * 本脚本强制：
+ * 1. 构建前检查 Git 状态（Must#1）：受控路径（src/ tests/ scripts/ wechat/ package.json
+ *    vite*.config.* tsconfig* 等）存在未提交/已暂存改动 → RC 构建失败（Must#2/#3）；
+ *    .workbuddy/memory、dist、outputs 等非源码记录忽略。
+ * 2. 临时诊断必须显式 `--dirty`（或 WECHAT_RC_DIRTY=1）：放行但 badge 显示 `#<sha>-dirty`
+ *    （Must#4），不得伪装正式 RC。
+ * 3. 构建成功后生成 dist-wechat/rc-build.json（fullSha/shortSha/branch/dirty/buildTime/
+ *    buildMode=rc；Must#5）。
+ * 4. 构建结束自动校验三方 SHA（Must#6）：badge 前 7 位 = HEAD 前 7 位、rc-build.json fullSha
+ *    = HEAD、bundle runtimeInfo sha = HEAD；不一致则构建失败。
+ *
+ * 另注入 __WX_DEBUG_GRANT__（「全部件×1」调试入口，与 badge 解耦；普通 build:wechat 两者均无）。
+ * 零新依赖：node:child_process / node:path / node:url / node:fs + 本地 rc-gate.js。
  */
 import { spawnSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readGitState, makeRcBuildInfo, verifyRcShas, extractBundleSha, git } from './rc-gate.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
+const outDir = resolve(root, 'dist-wechat');
+
+// —— 显式诊断参数（Must#4）：仅临时诊断使用，badge 标记 -dirty，不伪装正式 RC ——
+const allowDirty = process.argv.includes('--dirty') || process.env.WECHAT_RC_DIRTY === '1';
+
+// —— Must#1/#2/#3：构建前 Git 状态检查 ——
+let state;
+try {
+  state = readGitState((args) => git(args, root));
+} catch (e) {
+  console.error(`[build:wechat:rc] ❌ 无法读取 Git 状态：${e instanceof Error ? e.message : e}`);
+  process.exit(1);
+}
+if (state.dirtyFiles.length > 0) {
+  if (!allowDirty) {
+    console.error('[build:wechat:rc] ❌ 工作树含受控路径未提交/已暂存改动，拒绝构建——RC 包必须与 Git 提交一一对应：');
+    for (const f of state.dirtyFiles) console.error(`   - ${f}`);
+    console.error('   如确需临时诊断，请用 `npm run build:wechat:rc -- --dirty`（badge 显示 #<sha>-dirty，不得作为正式 RC 发布）。');
+    process.exit(1);
+  }
+  console.warn('[build:wechat:rc] ⚠️ 诊断模式（--dirty）：以下受控路径 dirty，badge 将标记 -dirty：');
+  for (const f of state.dirtyFiles) console.warn(`   - ${f}`);
+}
+
+// —— 构建（含 badge / 调试入口注入；诊断 dirty 时注入 __WX_RC_DIRTY__ → badge 拼接 -dirty） ——
+const env = {
+  ...process.env,
+  WECHAT_BADGE: '1',
+  WECHAT_DEBUG_GRANT: '1',
+};
+if (state.dirtyFiles.length > 0 && allowDirty) env.WECHAT_RC_DIRTY = '1';
 
 const build = spawnSync(
   process.execPath,
   [resolve(root, 'node_modules/vite/bin/vite.js'), 'build', '-c', 'vite.wechat.config.ts'],
-  { cwd: root, stdio: 'inherit', env: { ...process.env, WECHAT_BADGE: '1', WECHAT_DEBUG_GRANT: '1' } },
+  { cwd: root, stdio: 'inherit', env },
 );
 if (build.status !== 0) {
   console.error('[build:wechat:rc] ❌ 构建失败');
   process.exit(build.status || 1);
 }
-console.log('[build:wechat:rc] ✅ 完成：dist-wechat 含角落 SHA 水印（__WX_BUILD_BADGE__）+ 调试「全部件×1」入口（__WX_DEBUG_GRANT__）；正式 build:wechat 均无');
+
+// —— Must#5：生成 rc-build.json ——
+const headSha = git(['rev-parse', 'HEAD'], root);
+const dirty = state.dirtyFiles.length > 0;
+const rcJsonPath = resolve(outDir, 'rc-build.json');
+const rcInfo = makeRcBuildInfo({
+  fullSha: headSha,
+  shortSha: headSha.slice(0, 7),
+  branch: state.branch,
+  dirty,
+  buildTime: new Date().toISOString(),
+  buildMode: 'rc',
+});
+writeFileSync(rcJsonPath, JSON.stringify(rcInfo, null, 2) + '\n');
+
+// —— Must#6：构建结束自动校验三方 SHA ——
+const bundleSha = extractBundleSha(readFileSync(resolve(outDir, 'game.js'), 'utf8'));
+const badgeSha = bundleSha ? bundleSha.slice(0, 7) : null;
+const rcJsonSha = existsSync(rcJsonPath) ? JSON.parse(readFileSync(rcJsonPath, 'utf8')).fullSha : null;
+if (!verifyRcShas({ headSha, badgeSha, rcJsonSha, bundleSha })) {
+  console.error('[build:wechat:rc] ❌ SHA 三方校验失败（badge / rc-build.json / bundle runtimeInfo 与 HEAD 不一致）：');
+  console.error(`   HEAD           = ${headSha}`);
+  console.error(`   badge          = ${badgeSha ?? 'null'}`);
+  console.error(`   rc-build.json  = ${rcJsonSha ?? 'null'}`);
+  console.error(`   bundle runtime = ${bundleSha ?? 'null'}`);
+  process.exit(1);
+}
+
+console.log(
+  `[build:wechat:rc] ✅ 完成：dist-wechat 含 SHA 水印 #${badgeSha}${dirty ? '-dirty' : ''}（dirty=${dirty}）` +
+    `+ rc-build.json（fullSha=${headSha.slice(0, 12)}…，branch=${state.branch}）；三方 SHA 校验通过。`,
+);
+console.log('   正式 build:wechat（无 WECHAT_BADGE）→ 零 SHA 水印、零「全部件×1」入口。');
 process.exit(0);

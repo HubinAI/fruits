@@ -93,6 +93,9 @@ export default defineConfig({
     // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：SHA 水印仅依赖 __WX_BUILD_BADGE__（WECHAT_BADGE=1 内部 RC
     // 构建开启）；普通微信构建 / 正式 prod 构建恒 false → 画面无 SHA（正式发布前可关闭）。
     __WX_BUILD_BADGE__: process.env.WECHAT_BADGE ? 'true' : 'false',
+    // F-WX-RC-REPRODUCIBLE-BUILD-P0：诊断 dirty 构建标记（仅 scripts/wechat-rc.js --dirty 时注入
+    // WECHAT_RC_DIRTY=1）→ game.ts badge 显示 #<sha>-dirty（不得伪装正式 RC）；正常 RC / 普通包恒 false。
+    __WX_RC_DIRTY__: process.env.WECHAT_RC_DIRTY ? 'true' : 'false',
     // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：「全部件×1」调试入口仅依赖独立标志 __WX_DEBUG_GRANT__
     // （WECHAT_DEBUG_GRANT=1 内部 RC 构建开启）；与 SHA 解耦，且 E2E probe 不再作为微信体验版
     // Debug 总开关。普通微信包两者均 false。
