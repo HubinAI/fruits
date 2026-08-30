@@ -158,6 +158,8 @@ export interface PlayerUIActions {
   setPrebattleBackdrop?(on: boolean): void;
   /** F-BATTLE-PRESENTATION-R2：战斗（fighting/ended）程序化竞技场背景下沉为 renderer underlay 开关（仅战斗开启） */
   setBattleBackdrop?(on: boolean): void;
+  /** F-WX-RESUME-RENDER-STATE-P0：离开战斗进入 Home/Garage 时原子清理战斗表现 FX（仅清表现，不动 Build/装备/库存） */
+  clearBattleFx?(): void;
   /** F-GARAGE-CENTER-STAGE-P0：Garage ↔ Home metaPage 切换时通知 runtime 重构图（renderer.transform 跨页面不再 stale） */
   reframeCamera?(): void;
 }

@@ -111,6 +111,11 @@ export class WechatBattleHost implements PlayerBattleHost {
     this.renderer.setBattleBackdrop(on);
   }
 
+  clearBattleFx(): void {
+    // F-WX-RESUME-RENDER-STATE-P0：离开战斗进入 Home/Garage 时原子清理战斗表现 FX（Must#4）
+    this.renderer.clearBattleVisualFx();
+  }
+
   getMatchVehicleRects(): { a: { x: number; y: number; w: number; h: number }; b: { x: number; y: number; w: number; h: number } } | null {
     const o = this.orchestrator;
     if (!o) return null;

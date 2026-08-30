@@ -95,6 +95,8 @@ export interface PlayerBattleHost {
   setPrebattleBackdrop?(on: boolean): void;
   /** F-BATTLE-PRESENTATION-R2：战斗（fighting/ended）程序化竞技场背景下沉为 renderer underlay 开关（仅战斗开启） */
   setBattleBackdrop?(on: boolean): void;
+  /** F-WX-RESUME-RENDER-STATE-P0：离开战斗进入 Home/Garage 时原子清理战斗表现 FX（仅清表现，不动 Build/装备/库存） */
+  clearBattleFx?(): void;
   /**
    * F-MATCH-FRAME-R2：当前 transform 下 A/B 双车「可见 envelope」屏幕矩形（逻辑 px）。
    * Matching / MatchPreview 的 UI 据此绘制扫描框 / 对手名称，保证与 renderer 实际落点一致
@@ -384,6 +386,11 @@ export class PlayerGameRuntime {
       // F-HOME-P0-LAYER：首页背景下沉为 renderer underlay（背景层<车辆层<UI层）
       this.deps.battle.setHomeBackdrop?.(on);
     },
+    setGarageBackdrop: (on: boolean) => {
+      // F-GARAGE-CENTER-STAGE-P0：Garage 装配页背景下沉为 renderer underlay（背景层<车辆层<UI层）。
+      // 此前漏接 → garageBackdrop 永不为真 → Garage 页走 renderer fallback 分支绘制 Battle 墙（红墙/灰墙泄漏）。
+      this.deps.battle.setGarageBackdrop?.(on);
+    },
     setPrebattleBackdrop: (on: boolean) => {
       // F-PREBATTLE-VISUAL-R1：战前背景下沉为 renderer underlay（背景层<车辆层<UI层）
       this.deps.battle.setPrebattleBackdrop?.(on);
@@ -391,6 +398,10 @@ export class PlayerGameRuntime {
     setBattleBackdrop: (on: boolean) => {
       // F-BATTLE-PRESENTATION-R2：战斗竞技场背景下沉为 renderer underlay（背景层<车辆层<UI层）
       this.deps.battle.setBattleBackdrop?.(on);
+    },
+    clearBattleFx: () => {
+      // F-WX-RESUME-RENDER-STATE-P0：离开战斗进入 Home/Garage 时原子清理战斗表现 FX（Must#4）
+      this.deps.battle.clearBattleFx?.();
     },
     /**
      * F-GARAGE-CENTER-STAGE-P0：Garage ↔ Home metaPage 切换时重 fit（renderer.transform 跨页面
@@ -837,6 +848,7 @@ export class PlayerGameRuntime {
     this.currentResult = null; // Host 收起结算卡（HUD 由 renderBattleFrame 按 battleState 控制）
     this.playerPhaseInternal = 'garage'; // 回到装配
     this.battleStateInternal = 'editing';
+    this.deps.battle.clearBattleFx?.(); // F-WX-RESUME-RENDER-STATE-P0：原子清理战斗表现 FX（Must#4；仅清表现，不动 Build/装备/库存）
     track('garage_enter'); // Q28：结算后回 Garage（闭环一步）
     this.bEditorOpen = false;
     this.garageSelected = null;
@@ -996,6 +1008,7 @@ export class PlayerGameRuntime {
     if (m === 'build' && this.battleStateInternal !== 'fighting') {
       // Q15-UX-R1：切回装配 → Garage（solo-A），退出 Matching/MatchPreview 视觉层
       this.playerPhaseInternal = 'garage';
+      this.deps.battle.clearBattleFx?.(); // F-WX-RESUME-RENDER-STATE-P0：原子清理战斗表现 FX（Must#4）
       track('garage_enter'); // Q28：进入 Garage（仅当真正切回装配时）
       this.refreshFromEdit(); // 按 phase(Garage) 渲染 A 编辑器 + solo-A 预览
     }

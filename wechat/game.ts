@@ -324,6 +324,11 @@ platform.lifecycle.onVisibilityChange((hidden) => {
   } else {
     loop.start();
     runtime.resetClock();
+    // F-WX-RESUME-RENDER-STATE-P0｜Must#6：后台→前台按当前页重取景（Home→home、Garage→garage、
+    // Matching/Locked→previewFixed、Battle→battle fit），确保恢复后第一张合成帧即正确居中，
+    // 不残留 hide 前旧相机 transform（如战斗竞技场相机）。reframePlayerCamera 按当前 playerPhase/
+    // battleState 幂等重算同一 transform，无副作用；不触碰 PlayerViewportTransform / Canvas DPR / 已验证 surface 契约。
+    runtime.reframePlayerCamera();
     loop.request(); // 幂等：若循环仍在跑则不重复起
   }
 });

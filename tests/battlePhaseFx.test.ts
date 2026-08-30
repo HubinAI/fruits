@@ -58,6 +58,15 @@ class CtxStub {
   fillText(): void { this.record('fillText'); }
   save(): void { this.record('save'); }
   restore(): void { this.record('restore'); }
+  // drawBattleArena 经 battle 分支调用（battleBackdrop 真）：补齐渐变 ctx stub
+  createLinearGradient(): { addColorStop: () => void } {
+    this.record('createLinearGradient');
+    return { addColorStop: () => {} };
+  }
+  createRadialGradient(): { addColorStop: () => void } {
+    this.record('createRadialGradient');
+    return { addColorStop: () => {} };
+  }
 }
 
 function makeCanvas(ctx: CtxStub, w = 1000, h = 500) {
@@ -207,6 +216,10 @@ describe('W2-FX-2 阶段视觉（Renderer smoke）', () => {
     const renderer = new Renderer(makeCanvas(ctx));
     (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
     renderer.resize(1600, 1000);
+    // Warning/Closing 墙 FX 仅在 battleBackdrop 真时由 battle 分支绘制（fallback 不再画 battle 墙，
+    // 避免泄漏到 Home/Garage；F-WX-RESUME-RENDER-STATE-P0）。Active 保持非战斗上下文
+    // （无墙、无调试描边），6a 的「无 #0d0f14」校验不受影响；Battle 视觉冻结不在此 Queue 范围。
+    renderer.setBattleBackdrop(phase === 'Warning' || phase === 'Closing');
     renderer.render(makeFakeOrch(phase));
     return ctx;
   }

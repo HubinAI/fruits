@@ -1065,8 +1065,11 @@ export class Renderer {
           ctx.globalAlpha = 1;
         }
       }
-    } else if (!this.homeBackdrop && !this.prebattleBackdrop) {
-      // Ground（统一竞技场地面语义；legacy fallback，battle 已由 battleBackdrop 覆盖）
+    } else if (!this.homeBackdrop && !this.prebattleBackdrop && !this.garageBackdrop) {
+      // 非战斗 / 非首页 / 非车库 / 非战前 的瞬时间隙帧：仅铺中性地面，绝不绘制 battle 墙。
+      // closingWalls / normalWalls 为 battle 专属 Hazard，仅 battleBackdrop 真时绘制（见上方 battle 分支）；
+      // Garage 页由 drawGarageBackdrop 提供地面、Home 由 drawHomeBackdrop 提供，均不重画 battle 墙
+      // —— 避免「上一场 Battle Closing 红墙/灰墙」泄漏到 Home/Garage（F-WX-RESUME-RENDER-STATE-P0）。
       ctx.fillStyle = V.arenaGround;
       ctx.fillRect(
         t.offsetX,
@@ -1081,35 +1084,6 @@ export class Renderer {
       ctx.moveTo(t.offsetX, this.sy(arena.groundY));
       ctx.lineTo(this.ss(arena.width) + t.offsetX, this.sy(arena.groundY));
       ctx.stroke();
-
-      // Walls（normal）
-      for (const wall of arena.normalWalls) {
-        this.drawShape(wall, '#3a4150');
-      }
-
-      // Closing walls（Hazard；W2-FX-2 阶段视觉：Warning 预高亮闪烁、Closing 正式刺墙锯齿）
-      const arenaPhase = orchestrator.phase;
-      for (const cw of arena.closingWalls) {
-        this.drawShape(cw, '#7a2f2f');
-        if (arenaPhase === 'Warning') {
-          const blink = 0.45 + 0.35 * Math.sin(now * 0.012);
-          ctx.globalAlpha = 0.18 + 0.14 * blink;
-          this.drawShape(cw, '#c0403a');
-          ctx.globalAlpha = blink;
-          this.strokeShape(cw, '#e8a33c');
-          ctx.globalAlpha = 1;
-        } else if (arenaPhase === 'Closing') {
-          // 正式进入——墙体填充降为半透明：Closing 墙体仅半透明填充（globalAlpha 0.26），尖刺/轮廓在 alpha 外清晰绘制
-          const pulse = 0.7 + 0.2 * Math.sin(now * 0.01);
-          ctx.globalAlpha = 0.26;
-          this.drawShape(cw, '#c0403a');
-          ctx.globalAlpha = 1;
-          this.drawSpikes(cw, '#c0403a', now);
-          ctx.globalAlpha = pulse;
-          this.strokeShape(cw, '#ff8a70');
-          ctx.globalAlpha = 1;
-        }
-      }
     } else if (this.prebattleBackdrop) {
       // F-PREBATTLE-VISUAL-R1：战前地面带（与双方车辆同一 groundY；不画 battle 墙）。
       // 中性板岩色（非纯蓝），顶部暖白地平线高光，底部暗收束 —— 地面以下约占 24~30%。
@@ -1353,6 +1327,24 @@ export class Renderer {
    */
   setBattleBackdrop(on: boolean): void {
     this.battleBackdrop = on;
+  }
+
+  /**
+   * F-WX-RESUME-RENDER-STATE-P0：离开战斗进入 Home/Garage 时，原子清理全部战斗表现 FX
+   * （伤害数字 / 受击白描边 / 接触火花 / 炮口闪光 / 蓄能光点 / 死亡扩散环 / 激光束 / 霰弹扇 / 枪口火舌）。
+   * 这些 FX 仅由 battle 阶段产生、TTL 驱动；离开战斗后若残留会在 Home/Garage 上短暂绘制（状态泄漏）。
+   * 仅清表现状态，不影响 BuildDraft / 装备 / 库存 / 能量 / 物理 / 存档。
+   */
+  clearBattleVisualFx(): void {
+    this.fx = [];
+    this.hitFlashes = [];
+    this.sparks = [];
+    this.muzzleFlashes = [];
+    this.charges = [];
+    this.deathFxs = [];
+    this.laserBeams = [];
+    this.shotgunFans = [];
+    this.muzzleTongues = [];
   }
 
   /**
