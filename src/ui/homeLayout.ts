@@ -85,12 +85,18 @@ export function computeHomeLayout(
   const bandY = H - insets.bottom - bandH; // 底部主条顶缘
   const entryH = bandH - 10; // 辅助入口略矮于 CTA（视觉主次；仍满足触控目标）
 
-  // 中央主体舞台：顶部行之下 → 底部主条之上（车辆完整占据）
+  // 中央主体舞台：顶部行之下 → 底部主条之上（车辆完整占据）。
+  // F-WX-SAFE-AREA-R1：舞台水平居中于屏幕主轴 W/2（右侧原生胶囊保留不再把车辆推向左侧）——
+  // 宽度 = min(安全区可用宽, 左右半区各 2 倍)（保证可居中且不越 safeArea 左右边界）；
+  // 顶部右侧 UI（宝箱）仍按 insets.right 让位胶囊，车辆取景与胶囊避让解耦。
   const stageTop = topY + topRowH + gap;
+  const availW = Math.max(1, x1 - x0);
+  const stageW = Math.max(1, Math.min(availW, 2 * (W / 2 - x0), 2 * (x1 - W / 2)));
+  const stageX = Math.round(W / 2 - stageW / 2);
   const stageRect: HomeRect = {
-    x: x0,
+    x: stageX,
     y: stageTop,
-    w: x1 - x0,
+    w: stageW,
     h: Math.max(1, bandY - stageTop),
   };
 

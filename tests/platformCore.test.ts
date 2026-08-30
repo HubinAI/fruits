@@ -263,10 +263,11 @@ describe('F-WX-6 PlatformViewport.safeInsets（Safe Area 最小扩展）', () =>
       }),
     };
     const vp = new WechatViewport({ width: 2796, height: 1290 } as any, 3);
+    // 无 getMenuButtonBoundingClientRect（无胶囊能力环境）→ 仅 safeArea 生效
     expect(vp.safeInsets()).toEqual({ left: 44, right: 44, top: 0, bottom: 0 });
   });
 
-  it('WechatViewport：safeArea 缺失 → 全 0（老基础库安全降级）', () => {
+  it('WechatViewport：safeArea 缺失 → 全 0（老基础库安全降级；无胶囊 API 环境）', () => {
     (globalThis as any).wx = { getSystemInfoSync: () => ({ windowWidth: 932, windowHeight: 430 }) };
     const vp = new WechatViewport({ width: 932, height: 430 } as any, 1);
     expect(vp.safeInsets()).toEqual({ left: 0, right: 0, top: 0, bottom: 0 });

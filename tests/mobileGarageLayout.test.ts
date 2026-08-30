@@ -110,9 +110,12 @@ describe('F-WX-UI-F1｜computeMobileGarageLayout 纯函数（唯一几何来源�
         expect(r.w, `${vp.w}×${vp.h} ${k} 宽 >0`).toBeGreaterThan(0);
         expect(r.h, `${vp.w}×${vp.h} ${k} 高 >0`).toBeGreaterThan(0);
       }
-      // F-GARAGE-CENTER-STAGE-P0：中央舞台全宽（左右贴 safe 边）；stage 与 strip 不重叠
-      expect(l.stageRect.x, `${vp.w}×${vp.h} stage x == safeLeft`).toBe(INSETS.left);
-      expect(l.stageRect.x + l.stageRect.w, `${vp.w}×${vp.h} stage 右缘 == safeRight`).toBe(vp.w - INSETS.right);
+      // F-GARAGE-CENTER-STAGE-P0：中央舞台（车辆取景同源）；stage 与 strip 不重叠。
+      // F-WX-SAFE-AREA-R1：舞台水平居中于屏幕主轴 W/2（右侧原生胶囊保留不再把车辆推向左侧），
+      // 宽度 = min(可用宽, 左右半区 2 倍) → 居中且不越 safe 边。
+      expect(l.stageRect.x + l.stageRect.w / 2, `${vp.w}×${vp.h} stage 中心 == W/2`).toBeCloseTo(vp.w / 2, 6);
+      expect(l.stageRect.x, `${vp.w}×${vp.h} stage x ≥ safeLeft`).toBeGreaterThanOrEqual(INSETS.left);
+      expect(l.stageRect.x + l.stageRect.w, `${vp.w}×${vp.h} stage 右缘 ≤ safeRight`).toBeLessThanOrEqual(vp.w - INSETS.right);
       expect(l.vehicleRect, 'vehicleRect == stageRect（中央取景同源）').toEqual(l.stageRect);
       expect(l.stageRect.y + l.stageRect.h, `${vp.w}×${vp.h} stage 底 ≤ strip 顶`).toBeLessThanOrEqual(l.stripRect.y);
       // Must#5：strip 高占屏幕 27%~34%

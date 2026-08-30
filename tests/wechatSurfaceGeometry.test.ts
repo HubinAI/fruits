@@ -145,6 +145,7 @@ describe('F-WX-VIEWPORT-SURFACE-P0｜微信最终像素几何验收（每环境�
       expect(uiBox, '首页应有 UI 绘制').not.toBeNull();
       expect(uiBox!.x, 'UI 左边缘应从 0 起').toBeLessThanOrEqual(bw * 0.05);
       expect(uiBox!.y, 'UI 上边缘应从 0 起').toBeLessThanOrEqual(bh * 0.05);
+      // 本环境（makeSurfaceFakeWx 无胶囊 API）insets.right=0 → UI 触达全屏右侧
       expect(uiBox!.x + uiBox!.w, 'UI 右边缘应触达（无右侧裁切）').toBeGreaterThanOrEqual(bw * 0.92);
       expect(uiBox!.y + uiBox!.h, 'UI 下边缘应触达（无底部裁切）').toBeGreaterThanOrEqual(bh * 0.88);
 
@@ -224,6 +225,7 @@ describe('F-WX-VIEWPORT-SURFACE-P0｜微信最终像素几何验收（每环境�
       expect(opCovers(gOps, bw * 0.5, bh * 0.9), 'Garage 底部中央应有绘制（装配带）').toBe(true);
       const gBox = unionBBox(gOps);
       expect(gBox).not.toBeNull();
+      // 本环境（无胶囊 API）insets.right=0 → Garage UI 触达全屏右侧
       expect(gBox!.x + gBox!.w, 'Garage UI 右边缘触达').toBeGreaterThanOrEqual(bw * 0.92);
       expect(allWithinBacking(gOps, bw, bh, dpr), 'Garage UI 应在 backing 内').toBe(true);
       const gVeh = vehicleOps(gScreenOps, gFraming!.x * dpr, gFraming!.y * dpr, gFraming!.w * dpr, gFraming!.h * dpr);

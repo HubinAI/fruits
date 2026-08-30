@@ -89,12 +89,16 @@ export function computeMobileGarageLayout(
     h: stripH,
   };
 
-  // F-GARAGE-CENTER-STAGE-P0：中央战车舞台（全宽；顶栏下至装配带上）——车辆取景同源
+  // F-GARAGE-CENTER-STAGE-P0：中央战车舞台（顶栏下至装配带上）——车辆取景同源。
+  // F-WX-SAFE-AREA-R1：舞台水平居中于屏幕主轴 W/2（右侧原生胶囊保留不再把车辆推向左侧）；
+  // 宽度 = min(可用宽, 左右半区各 2 倍)（可居中且不越 safeArea 左右边界）；装配带/顶栏不受影响。
   const bodyTop = uT + topBarH + bodyGap;
+  const stageW = Math.max(60, Math.min(usableW, 2 * (w / 2 - uL), 2 * (w - uR - w / 2)));
+  const stageX = Math.round(w / 2 - stageW / 2);
   const stageRect: Rect = {
-    x: uL,
+    x: stageX,
     y: bodyTop,
-    w: Math.max(60, usableW),
+    w: stageW,
     h: Math.max(1, stripRect.y - bodyTop),
   };
 

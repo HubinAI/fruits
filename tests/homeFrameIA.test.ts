@@ -127,18 +127,23 @@ describe('F-HOME-IA-R1｜首页车辆真实 Runtime 取景', () => {
   // 按全屏 inset 取景）会让「我的车」偏离 homeStageRect 中央、且下缘压到 CTA 主条。本块把这条
   // 旧行为显式断言出来，作为「为何首页必须走 previewSolo」的回归哨兵——一旦有人把 home 阶段
   // 的 fit 改回 'preview'，previewSolo 主块（上方）立即失败，本块则记录旧偏离量。
-  describe('根因固化｜旧 preview 路径偏离 homeStageRect（不应复现）', () => {
+  // F-WX-SAFE-AREA-R1：Home 舞台已水平居中于 W/2（胶囊避让后车辆不偏左），preview 与 previewSolo
+  // 的水平中心不再可区分 → 哨兵改断言「preview 忽略 framingRect → 车辆取景（宽度/构图）显著不同」。
+  describe('根因固化｜旧 preview 路径忽略 homeStageRect（不应复现）', () => {
     for (const vp of VIEWPORTS) {
       const prof = resolveLayoutProfile(vp.w, vp.h);
       const Lold = computeHomeLayout(vp, INSETS, prof);
       const stagePhysOld = { x: Lold.stageRect.x * DPR, y: Lold.stageRect.y * DPR, w: Lold.stageRect.w * DPR, h: Lold.stageRect.h * DPR };
       for (const body of BODIES) {
-        it(`${vp.w}×${vp.h}｜${body}：旧 'preview' 路径使车辆偏离舞台中央（修复前症状）`, () => {
-          const { screen } = frameHome(vp, body, 'preview');
-          const stageCx = stagePhysOld.x + stagePhysOld.w / 2;
-          const cx = (screen.minX + screen.maxX) / 2;
-          // 旧路径下水平偏心应明显（>3px）；修复后首页走 previewSolo（|dx|≤3，见主块）。
-          expect(Math.abs(cx - stageCx), '旧 preview 路径水平偏心应 > 3px（否则根因已不存在）').toBeGreaterThan(3);
+        it(`${vp.w}×${vp.h}｜${body}：旧 'preview' 路径取景显著不同于 previewSolo（framingRect 被忽略）`, () => {
+          const preview = frameHome(vp, body, 'preview');
+          const solo = frameHome(vp, body, 'previewSolo');
+          const previewW = preview.screen.maxX - preview.screen.minX;
+          const soloW = solo.screen.maxX - solo.screen.minX;
+          // 旧路径忽略 framingRect（全屏取景）→ 车辆可见宽显著不同于 previewSolo（fit stageRect）
+          expect(Math.abs(previewW - soloW), '旧 preview 路径取景应显著不同于 previewSolo').toBeGreaterThan(3);
+          // preview 取景区（全屏）应明显大于 stageRect 比例（framingRect 被忽略的直接证据）
+          expect(previewW, '旧 preview 路径车辆应显著宽于 stage 内构图').toBeGreaterThan(stagePhysOld.w * 0.45);
         });
       }
     }
