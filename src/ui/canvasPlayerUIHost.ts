@@ -51,6 +51,7 @@ import {
   type PlayerViewportTransform,
 } from '../platform/playerViewport';
 import { computeHomeLayout } from './homeLayout';
+import { computeTopSafeAreas } from './topSafeLayout';
 import { V } from './visualTokens';
 import type {
   PlayerUIHost,
@@ -661,9 +662,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * F-WX-RC-SAFE-BADGE-P0｜RC 版号水印（每帧最后绘制；iOS 横屏安全区 + 高对比 + 不挡点击）。
    *
    * - 触发：renderBattleFrame 每帧无条件调用（Must#2「不得只在启动第一帧绘制」）。
-   * - 位置：safeArea 左上角内缩 6 logical px，完整包围盒钳制在安全区内（Must#3）。
-   *   insets 每帧实时读 viewport.safeInsets()（logical px；wx safeArea + 胶囊折叠契约）→
-   *   横屏方向改变 / 窗口 resize 后首帧即按新安全区重算。
+   * - 位置：F-WX-SAFE-AREA-P0 统一顶部三区契约的 badge 锚点（左上角、顶部信息行之下 4px）——
+   *   完整包围盒钳制在安全区内（Must#3）；不覆盖头像/货币/返回/HP/Matching·Locked 状态
+   *   （Must#5）。insets 每帧实时读 viewport.safeInsets()（logical px；wx safeArea + 胶囊
+   *   折叠契约）→ 横屏方向改变 / 窗口 resize 后首帧即按新安全区重算（Must#7）。
    * - 样式：半透明深色底 + 纯白粗体、字号 11 logical px（Must#4；绕开 fontScale 0.8 的
    *   mobile-short 收缩——诊断水印不随 UI 风格缩放；绘制经 DPR 变换放大到 backing）。
    * - 层级：save → 显式 source-over + DPR 单次 logical→backing 变换 → 绘制 → restore（Must#2）。
@@ -681,9 +683,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const size = 11; // logical px 字号（≥11）
     const w = Math.ceil(text.length * Math.ceil(size * 0.62)) + pad * 2;
     const h = size + pad * 2;
-    // 锚点：安全区左上角内缩 6 logical px；越界时右/下对齐钳回安全区（完整包围盒不超 safeArea）
-    let bx = ins.left + 6;
-    let by = ins.top + 6;
+    // 锚点：统一顶部三区契约的 badge 低干扰位（避开左侧信息区/头像/货币/返回/HP/状态）。
+    // 越界时右/下对齐钳回安全区（完整包围盒不超 safeArea）。
+    const areas = computeTopSafeAreas({ w: W, h: H }, ins, this.profile);
+    let bx = areas.badge.x;
+    let by = areas.badge.y;
     if (bx + w > W - ins.right) bx = Math.max(ins.left, W - ins.right - w);
     if (by + h > H - ins.bottom) by = Math.max(ins.top, H - ins.bottom - h);
     ctx.save();

@@ -158,11 +158,13 @@ describe('F-WX-VIEWPORT-SURFACE-P0｜微信最终像素几何验收（每环境�
       expect(ctaCy, 'CTA 应在下部（底部主条）').toBeGreaterThan(cssH * 0.7);
       expect(opCovers(uiOps, ctaCx * dpr, ctaCy * dpr), 'CTA 中心应有绘制像素').toBe(true);
 
-      // 1. SHA 左上安全区 + 字号 ≤ 屏高 4%
+      // 1. SHA 安全区左上 + 顶部信息行下方（F-WX-SAFE-AREA-P0：badge 低干扰位，不压首页头像）
+      //    + 字号 ≤ 屏高 4%
       const badgeOp = uiOps.find((o) => o.type === 'text' && typeof o.text === 'string' && o.text.startsWith('#'));
       expect(badgeOp, 'SHA 水印文本 op 应存在（__WX_BUILD_BADGE__=true）').toBeTruthy();
       expect(badgeOp!.devX, 'SHA 应位于左上（x）').toBeLessThanOrEqual(bw * 0.12);
-      expect(badgeOp!.devY, 'SHA 应位于左上（y）').toBeLessThanOrEqual(bh * 0.12);
+      expect(badgeOp!.devY, 'SHA 应在顶部信息行下方（避开头像）').toBeGreaterThan(bh * 0.08);
+      expect(badgeOp!.devY, 'SHA 应仍在画布上部（未移出顶部区域）').toBeLessThanOrEqual(bh * 0.32);
       const fontLogical = badgeOp!.fontSize ?? 0;
       expect(fontLogical, 'SHA 字号应 > 0').toBeGreaterThan(0);
       expect(fontLogical, 'SHA 字号不应超过屏高 4%').toBeLessThanOrEqual(0.04 * cssH + 1);

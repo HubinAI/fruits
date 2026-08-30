@@ -146,9 +146,10 @@ describe('F-WX-IOS-CANVAS-CRASH-P0｜微信 Canvas 120 帧稳定像素门禁', (
     // 3) 文字像素不随帧数增长（末帧不得显著多于首帧）
     expect(textInkSeries[119]).toBeLessThanOrEqual(textInkSeries[0] + 1);
 
-    // 4) SHA 位于逻辑 (6,8) 对应 device 左上区域（dpr=2 → (12,16) 附近）
+    // 4) SHA 位于安全区左上、顶部信息行下方（F-WX-SAFE-AREA-P0：badge 低干扰位，不贴 (6,8)
+    //    以免压首页头像）——逻辑 (6, insT+topRowH+4)，本 harness insets=0 → (6,46)，dpr=2 → (12,92)
     const shaX = 6 * DPR;
-    const shaY = 8 * DPR;
+    const shaY = (0 + 42 + 4) * DPR;
     let found = false;
     for (let dx = -2; dx <= 2 && !found; dx++) {
       for (let dy = -2; dy <= 2 && !found; dy++) {
