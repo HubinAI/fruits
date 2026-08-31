@@ -232,6 +232,15 @@ function draftSig(d) {
     await tapById(page, 'garage-cat:combat');
     await sleep(350);
 
+    // ---------- K 已装备卡灰态 + 「已装备」标签（F-GARAGE-VISUAL-DENSITY-R2 Must#4） ----------
+    {
+      // 像素亮度差已在 tests/garageVisualDensityR2 T4（可装备 vs 已装备 V token）覆盖；
+      // 本门禁做源码守卫：已装备 = 中性深灰底（equippedFill）+ 不省略「已装备」文字徽标。
+      const gsrc = require('fs').readFileSync(__dirname + '/../src/ui/canvasPlayerUIHost.ts', 'utf8');
+      check(gsrc.includes('equipped ? V.equippedFill : V.availableFill'), 'K. 已装备卡用中性灰底（equippedFill）区分可装备卡');
+      check(gsrc.includes("'已装备'"), 'K. 已装备卡含「已装备」文字徽标（不省略）');
+    }
+
     // ---------- A 横滑浏览不装备 ----------
     {
       const before = await diag(page);

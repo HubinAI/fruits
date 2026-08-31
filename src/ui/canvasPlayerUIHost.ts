@@ -378,7 +378,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** F-GARAGE-DRAG-ASSEMBLY-P0：装配带内临时提示（超载差值 / 未获得原因；Must#11/13） */
   private garageDragNotice: string | null = null;
   /** F-GARAGE-DRAG-ASSEMBLY-P0：教学提示（Must#17）——首次成功拖装后本次会话隐藏 */
-  private dragHintDismissed = false;
   /** F-GARAGE-DRAG-ASSEMBLY-P0：当前帧中央舞台 rect（车身卡拖放目标；布局源，非像素估算） */
   private garageStageRect: { x: number; y: number; w: number; h: number } | null = null;
   /** F-GARAGE-DRAG-ASSEMBLY-P0：window 级拖动安全网只安装一次 */
@@ -1148,7 +1147,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     d.submitted = true;
     this.garageDragNotice = null;
     this.equipGaragePart(slot, d.card.v, hpId);
-    this.dragHintDismissed = true; // Must#17：首次成功拖装后隐藏教学提示
     this.resetGarageDrag('completed');
   }
 
@@ -1181,7 +1179,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       }
       d.submitted = true;
       this.equipGaragePart('body', d.card.v, null);
-      this.dragHintDismissed = true;
       this.resetGarageDrag('completed');
       this.draw();
       return;
@@ -1196,7 +1193,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       }
       d.submitted = true;
       this.equipGaragePart(t.slot, d.card.v, t.hp.id);
-      this.dragHintDismissed = true;
       this.resetGarageDrag('completed');
       this.draw();
       return;
@@ -1221,7 +1217,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     d.submitted = true;
     this.equipGaragePart(t.slot, d.card.v, t.hp.id);
-    this.dragHintDismissed = true;
     this.resetGarageDrag('completed');
     this.draw();
     return true;
@@ -2437,28 +2432,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ctx.restore();
   }
 
-  /**
-   * F-GARAGE-DRAG-ASSEMBLY-P0：教学提示（Must#17）——装配带上方一行细横幅；
-   * 首次成功拖装后本次会话隐藏；不新增 Modal / 手指动画 / 大型说明面板。
-   */
-  private drawGarageDragHint(stripRect: Rect): void {
-    if (this.dragHintDismissed) return;
-    const h = this.isShort ? 11 : 13;
-    const y = stripRect.y - h - (this.isShort ? 1 : 2);
-    if (y < 0) return;
-    const w = Math.min(stripRect.w, this.isShort ? 150 : 190);
-    const x = stripRect.x + (stripRect.w - w) / 2;
-    this.panel(x, y, w, h, 'rgba(18,30,48,0.72)', undefined, 3);
-    this.text(
-      '拖到车辆挂点安装',
-      x + w / 2,
-      y + h / 2,
-      this.isShort ? 8 : 9,
-      'rgba(190,210,240,0.92)',
-      'center',
-      600,
-    );
-  }
+  // F-GARAGE-VISUAL-DENSITY-R2（Must#3）：drawGarageDragHint「拖到车辆挂点安装」教学横幅已删除
+  // （一次性、与未选挂点提示/卡片状态徽标语义重复）——装配带只保留组装必要信息。
 
   /**
    * F-GARAGE-CENTER-STAGE-P0：底部横向装配带（Must#5）——
@@ -2466,15 +2441,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * 第二行：当前分类/挂点的部件横向卡片带（clip + 横向滚动 + 8px 横滑取消点击）；
    * 状态行（超载差值/未获得原因）在卡带上方按需显示（半透明横幅，不占卡带高）。
    * 能量 used/cap 已常驻顶栏（drawMobileTopBar garage 模式）。
+   * F-GARAGE-VISUAL-DENSITY-R2（Must#3）：删除「拖到车辆挂点安装」教学横幅（一次性、与
+   * 未选挂点提示/卡片状态徽标语义重复）——装配带只保留组装必要信息。
    */
   private drawGarageStrip(state: PlayerUIState, draft: BuildDraft, stripRect: Rect): void {
     const pad = this.isShort ? 4 : 6;
     const tabH = this.isShort ? 22 : 30;
     const tabY = stripRect.y + pad;
     const gap = this.isShort ? 3 : 5;
-    // F-GARAGE-DRAG-ASSEMBLY-P0：教学提示（Must#17）——装配带上方一行细横幅，
-    // 首次成功拖装后本次会话隐藏；不新增 Modal / 手指动画 / 大型说明面板。
-    this.drawGarageDragHint(stripRect);
     // 第一行：分类 tab
     this.drawGarageCategoryTabs(stripRect.x, stripRect.w, tabY, tabH);
     // 状态行（超载差值 / blockReason / overloadDelta；无状态不占位）
@@ -2615,7 +2589,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 分类过滤：移动 → movement 挂点；战斗 → functional（武器/辅助）；车身 → 不显示
     const shown = pts.filter((p) => (cat === 'move' ? p.kind === 'movement' : p.kind === 'functional'));
     if (shown.length === 0) return;
-    const sel = state.garageSelected;
     const t = this.nowMs;
     const flash = this.equipFlash && t < this.equipFlash.until ? this.equipFlash : null;
     const ctx = this.ctx;
@@ -2636,7 +2609,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const hoverId = dragActive ? (drag as GarageDragSnapshot).hoverHp : null;
     ctx.save();
     for (const p of shown) {
-      const selected = p.id === sel;
       const flashing = flash != null && flash.hp === p.id;
       const cx = p.x;
       const cy = p.y;
@@ -2688,28 +2660,18 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         }
         continue;
       }
-      if (selected || flashing) {
-        // 金色高亮（选中恒显示；flash 呼吸放大 150~220ms）
-        const pr = flashing ? R + 2 + 3 * Math.abs(Math.sin((t / 25) * Math.PI)) : R + 2;
+      // —— F-GARAGE-VISUAL-DENSITY-R2（Must#5）：挂点只在「拖动 / armed / 成功吸附反馈」期间显示；
+      //   Garage idle（未拖动、未 armed、无 flash）不常驻任何挂点圆——车辆是唯一视觉中心。
+      //   成功吸附 flash 期间仅反馈目标挂点（金色呼吸，保留原视觉）。 ——
+      if (flashing) {
+        const pr = R + 2 + 3 * Math.abs(Math.sin((t / 25) * Math.PI));
         ctx.strokeStyle = V.primary;
-        ctx.lineWidth = flashing ? 2.5 : 2;
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
         ctx.arc(cx, cy, pr, 0, Math.PI * 2);
         ctx.stroke();
-      } else if (p.occupied) {
-        // 已占用：实心小点（当前部件占位）
-        ctx.fillStyle = 'rgba(255,255,255,0.65)';
-        ctx.beginPath();
-        ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        // 可用挂点：白/蓝轮廓
-        ctx.strokeStyle = 'rgba(120,175,255,0.9)';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(cx, cy, R, 0, Math.PI * 2);
-        ctx.stroke();
       }
+      // idle（无 flash）：不绘制（不画 selected/occupied/可用轮廓圆）
     }
     ctx.restore();
     // 点击区与视觉同源
