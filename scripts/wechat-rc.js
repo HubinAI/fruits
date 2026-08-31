@@ -16,13 +16,16 @@
  *    = HEAD、bundle runtimeInfo sha = HEAD；不一致则构建失败。
  *
  * 另注入 __WX_DEBUG_GRANT__（「全部件×1」调试入口，与 badge 解耦；普通 build:wechat 两者均无）。
- * 零新依赖：node:child_process / node:path / node:url / node:fs + 本地 rc-gate.js。
+ * F-REPO-HEALTH-GUARD-P0：dirty 检查前先跑只读仓库健康门禁（scripts/repo-health.js）——
+ * 任一关键检查失败 → RC 拒绝并输出人工恢复指引；健康门禁绝不自动修复仓库。
+ * 零新依赖：node:child_process / node:path / node:url / node:fs + 本地 rc-gate.js / repo-health.js。
  */
 import { spawnSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { readGitState, makeRcBuildInfo, verifyRcShas, extractBundleSha, git } from './rc-gate.js';
+import { checkRepoHealth, recoveryGuidance } from './repo-health.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
@@ -30,6 +33,25 @@ const outDir = resolve(root, 'dist-wechat');
 
 // —— 显式诊断参数（Must#4）：仅临时诊断使用，badge 标记 -dirty，不伪装正式 RC ——
 const allowDirty = process.argv.includes('--dirty') || process.env.WECHAT_RC_DIRTY === '1';
+
+// —— F-REPO-HEALTH-GUARD-P0（Must#3）：RC 构建前先跑只读仓库健康门禁（在 dirty 检查之前）——
+let health;
+try {
+  health = checkRepoHealth((args) => git(args, root), root);
+} catch (e) {
+  console.error(`[build:wechat:rc] ❌ 仓库健康检查无法执行：${e instanceof Error ? e.message : e}`);
+  console.error(recoveryGuidance());
+  process.exit(1);
+}
+if (!health.ok) {
+  console.error('[build:wechat:rc] ❌ 仓库健康检查失败（只读门禁，未做任何自动修复），拒绝构建：');
+  for (const c of health.checks) {
+    if (!c.ok) console.error(`   - ${c.name}: ${c.detail}`);
+  }
+  console.error('');
+  console.error(recoveryGuidance());
+  process.exit(1);
+}
 
 // —— Must#1/#2/#3：构建前 Git 状态检查 ——
 let state;
