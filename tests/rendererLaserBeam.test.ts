@@ -95,11 +95,12 @@ describe('Q11-C-R3-FINAL Renderer 镭射巨炮束', () => {
     renderer.resize(1600, 1000); // scale = 0.9
     renderer.spawnLaserBeam(500, 600, 1, 0);
     renderer.render(makeFakeOrch() as never);
-    // 三层 lineWidth（世界 px × scale 0.9）：glow 22→19.8 / mid 21→18.9 / core 15→13.5
+    // F-BATTLE-FX-SCREENSPACE-R2：三层 lineWidth 为 screen-space 常量（不乘 scale）：
+    // glow 22 / mid 21 / core 15（旧 ×scale 语义 19.8/18.9/13.5）
     const widths = ctx.strokes.map((s) => s.lineWidth).sort((a, b) => b - a);
-    expect(widths[0]!).toBeCloseTo(22 * 0.9, 1);
-    expect(widths[1]!).toBeCloseTo(21 * 0.9, 1);
-    expect(widths[2]!).toBeCloseTo(15 * 0.9, 1);
+    expect(widths[0]!).toBeCloseTo(22, 1);
+    expect(widths[1]!).toBeCloseTo(21, 1);
+    expect(widths[2]!).toBeCloseTo(15, 1);
     // 白青色系
     expect(ctx.strokes.some((s) => s.strokeStyle === '#eafdff')).toBe(true); // 核心
     expect(ctx.strokes.some((s) => s.strokeStyle === '#5fc8ff')).toBe(true); // glow

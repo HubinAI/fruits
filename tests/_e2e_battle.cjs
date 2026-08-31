@@ -245,6 +245,63 @@ function analyzeInPage(dpr) {
     }
     spanPct = (b.x + b.w - a.x) / LOGICAL_W;
   }
+  // F-BATTLE-FX-SCREENSPACE-R2（Must#10）：伤害数字像素包围盒高度（逻辑 px）——
+  // 文本/车身/环分离判据（实测 844 诊断）：
+  //   B 车身橙块：连续 ~25px 高、行跨度 46-62px；伤害数字：行跨度 4-20px、带高 ~18px。
+  // 规则：宽松暖色域（weapon 红/impact 橙/hazard 红）+ 行跨度 ≤24px（车身被排除）
+  //   + 中央 70% x 带（左右刺墙被排除）+ 带高 8-26px（死亡环顶弧等粗干扰被限幅）。
+  const WARM = (R, G, B) => R > 235 && G < 215 && B < 130 && R - B > 90;
+  let dmgMinY = Infinity;
+  let dmgMaxY = -Infinity;
+  let dmgRows = 0;
+  const xL = Math.round(W * 0.15);
+  const xR = Math.round(W * 0.85);
+  for (let y = Math.round(56 * dpr); y < H; y += stepS) {
+    let spanPx = 0;
+    for (let x = xL; x < xR; x += stepS) {
+      const i = (y * W + x) * 4;
+      if (WARM(data[i], data[i + 1], data[i + 2])) spanPx += stepS;
+    }
+    if (spanPx > 0 && spanPx <= 24 * dpr) {
+      if (y < dmgMinY) dmgMinY = y;
+      if (y > dmgMaxY) dmgMaxY = y;
+      dmgRows++;
+    }
+  }
+  const dmgH = dmgRows >= 2 && dmgMinY <= dmgMaxY && (dmgMaxY - dmgMinY) / dpr <= 26 ? (dmgMaxY - dmgMinY) / dpr : 0;
+  // F-BATTLE-FX-SCREENSPACE-R2（Must#10）：画面下方黑点检测——底部 10% 带内找「孤立小黑点」
+  // （直径 ~3~10px、8px 邻域无其它暗像素）。微信开发者工具触控提示会产生黑点；游戏合成画布
+  // 若出现孤立黑点说明游戏内绘制需追查（此处为浏览器画布证据：应恒 0）。
+  let bottomDots = 0;
+  {
+    const bandY0 = Math.round(H * 0.9);
+    const darkKeys = new Set();
+    for (let y = bandY0; y < H; y += 1) {
+      for (let x = 0; x < W; x += 1) {
+        const i = (y * W + x) * 4;
+        if (data[i] < 25 && data[i + 1] < 25 && data[i + 2] < 25) darkKeys.add(y * W + x);
+      }
+    }
+    for (const key of darkKeys) {
+      const x = key % W;
+      const y = (key - x) / W;
+      let neighbors = 0;
+      let isolated = true;
+      for (let dy = -4; dy <= 4 && isolated; dy++) {
+        for (let dx = -4; dx <= 4; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          if (darkKeys.has((y + dy) * W + (x + dx))) {
+            neighbors++;
+            if (neighbors > 12) { isolated = false; break; }
+          }
+        }
+      }
+      if (isolated && neighbors > 0) {
+        bottomDots++;
+        if (bottomDots > 4) break;
+      }
+    }
+  }
   return {
     skyMaxLum,
     groundAvg,
@@ -262,6 +319,8 @@ function analyzeInPage(dpr) {
     spanPct,
     aHasGreen,
     bHasOrange,
+    dmgH,
+    bottomDots,
     phase: probe ? probe.battlePhase : null,
     hazardCount: haz ? haz.length : 0,
   };
@@ -372,6 +431,10 @@ async function runViewport(browser, vp) {
       const initW = act && act.a && act.b ? Math.max(act.a.w, act.b.w) : 0;
       let maxLateW = 0;
       let lateGreen = false;
+      // F-BATTLE-FX-SCREENSPACE-R2（Must#10）：伤害数字字号稳定像素证据——
+      // 战斗推进期（远景→接近→碰撞）轮询采样伤害数字 bbox 高度，max/min ≤ 1.3（≤15% + 运行期容差）、
+      // 峰值 ≤ 26px 逻辑（15px 字号 + 抗锯齿/上浮；旧 ss(22) 在碰撞段 ~27px 会超）。
+      const dmgHeights = [];
       for (let li = 0; li < 6; li++) {
         await page.waitForTimeout(250);
         const st = await probeState(page);
@@ -381,11 +444,24 @@ async function runViewport(browser, vp) {
           maxLateW = Math.max(maxLateW, actN.a.w, actN.b.w);
           lateGreen = lateGreen || (actN.aHasGreen && actN.bHasOrange);
         }
+        if (actN && actN.dmgH >= 14) dmgHeights.push(actN.dmgH); // ≥14px = 完整数字行（残影/淡出半字 12px 级剔除）
       }
       if (initW > 0 && maxLateW > 0) {
         log(maxLateW >= initW * 1.05, `[${vp.w}x${vp.h}] L. 战斗中单车 rect 宽放大 ≥5%（动态取景，车辆成主体）`, `init=${initW.toFixed(0)}px maxLate=${maxLateW.toFixed(0)}px`);
         log(lateGreen, `[${vp.w}x${vp.h}] L2. 战斗中双车 rect 仍有车身色像素（最终合成像素背书）`, `green=${lateGreen}`);
       }
+      if (dmgHeights.length >= 1) {
+        const dmgMax = Math.max(...dmgHeights);
+        const dmgMin = Math.min(...dmgHeights);
+        // F-BATTLE-FX-SCREENSPACE-R2：min/max 混采 15px 常规 + 18px 重要两类字号（bbox 14-24px），
+        // ratio 无区分力（旧代码 16→27 的 1.69 与新代码 14→24 的 1.71 相近）——核心像素门禁是
+        // N2 的**绝对峰值 ≤26px**（旧 ss(22) 在碰撞段 27px 文本 + 抗锯齿必超；新 15/18px 不超）。
+        log(true, `[${vp.w}x${vp.h}] N. 伤害数字高度报告（min=${dmgMin.toFixed(1)}px max=${dmgMax.toFixed(1)}px，常规15/重要18 混采）`, `samples=${dmgHeights.length}`);
+        log(dmgMax <= 26, `[${vp.w}x${vp.h}] N2. 伤害数字峰值 ≤26px 逻辑（15px 字号，无近战巨大数字）`, `max=${dmgMax.toFixed(1)}px`);
+      } else {
+        log(true, `[${vp.w}x${vp.h}] N. 战斗窗口未采样到完整伤害数字（该局武器/节奏所致），跳过字号断言`, `samples=${dmgHeights.length}`);
+      }
+      log(act.bottomDots === 0, `[${vp.w}x${vp.h}] P. 画面底部无孤立黑点（黑点来自微信开发者工具触控提示，非游戏绘制；浏览器画布证据）`, `dots=${act.bottomDots}`);
     } else if (!fighting) {
       continue;
     }

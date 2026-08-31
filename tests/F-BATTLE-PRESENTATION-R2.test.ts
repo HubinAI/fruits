@@ -6,7 +6,7 @@
  *    （不新建第 3 组浮动数字，避免多武器数字云遮挡车辆主体）；
  * 2. 真实 damage 总量守恒（合并仅重组显示，不吞伤害）；
  * 3. 重要伤害标记：单次 damage ≥ BIG_HIT_THRESHOLD → important=true；低于 → false；
- * 4. Renderer：重要伤害 → 浮动数字 important=true + size=32（放大高亮）；普通小伤害 → important=false + size 未设；
+ * 4. Renderer：重要伤害 → 浮动数字 important=true + size=18（放大高亮）；普通小伤害 → important=false + size 未设；
  * 5. Renderer：setBattleBackdrop(true) 正确点亮 battle 背景开关，render() 不抛错（drawBattleArena 入口可达）。
  *
  * 设计边界（与禁改项一致）：不改 Damage Resolver / HP / Weapon 参数 / 命中判定 / 胜负。
@@ -133,7 +133,7 @@ function makeRenderer(): Renderer {
 }
 
 describe('F-BATTLE-PRESENTATION-R2 Renderer 伤害数字 + 竞技场背景', () => {
-  it('4. 重要伤害 → 浮动数字 important=true + size=32；普通小伤害 → important=false + size 未设', () => {
+  it('4. 重要伤害 → 浮动数字 important=true + size=18（F-BATTLE-FX-SCREENSPACE-R2 收敛至 12-18px 上限）；普通小伤害 → important=false + size 未设', () => {
     const r = makeRenderer();
     // 重要伤害（Cannon 单次大额）
     r.spawnDamageNumberFromEvent(
@@ -142,7 +142,7 @@ describe('F-BATTLE-PRESENTATION-R2 Renderer 伤害数字 + 竞技场背景', () 
     let nums = r.activeDamageNumbers;
     expect(nums.length).toBe(1);
     expect(nums[0].important).toBe(true);
-    expect(nums[0].size).toBe(32);
+    expect(nums[0].size).toBe(18);
     // 普通小伤害（机枪/喷火单跳）
     r.spawnDamageNumberFromEvent(
       makeDamage({ partId: 'flame-1', behavior: 'flamethrower', damage: 8, contactPoint: { x: 520, y: 620 } }),

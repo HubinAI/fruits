@@ -138,13 +138,14 @@ describe('Q02-C3B Renderer Projectile', () => {
     const arcB = ctx.arcs.find((a) => a.fillStyle === PROJECTILE_COLOR_B);
     expect(arcA).toBeDefined();
     expect(arcB).toBeDefined();
-    // 真实世界坐标 × 镜头
+    // 真实世界坐标 × 镜头（位置保持准确）；半径 = screen-space 常量（F-BATTLE-FX-SCREENSPACE-R2，
+    // 不乘 scale —— 旧 ×scale 语义在 scale 0.9 下为 5.4px）
     expect(arcA!.x).toBeCloseTo(500 * 0.9 - 220, 6);
     expect(arcA!.y).toBeCloseTo(600 * 0.9 - 200, 6);
-    expect(arcA!.r).toBeCloseTo(6 * 0.9, 6);
+    expect(arcA!.r).toBeCloseTo(6, 6);
     expect(arcB!.x).toBeCloseTo(700 * 0.9 - 220, 6);
     expect(arcB!.y).toBeCloseTo(600 * 0.9 - 200, 6);
-    expect(arcB!.r).toBeCloseTo(6 * 0.9, 6);
+    expect(arcB!.r).toBeCloseTo(6, 6);
     // A/B 颜色可明显区分
     expect(PROJECTILE_COLOR_A).not.toBe(PROJECTILE_COLOR_B);
     // 顺序：车辆多边形 fill < projectile arc < FX fillText

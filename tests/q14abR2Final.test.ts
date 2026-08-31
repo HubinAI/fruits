@@ -112,12 +112,11 @@ describe('Q14-A-R2-FINAL 机枪短弹迹', () => {
     expect(MACHINE_GUN_TRACER_WORLD_LENGTH).toBeLessThanOrEqual(24);
   });
 
-  it('机枪弹迹绘制：主 tracer 线段 ≈ 22px×scale 且弹头亮核半径 ≈ 2px×scale（去珍珠链）', () => {
+  it('机枪弹迹绘制：主 tracer 线段 ≈ 22px 逻辑常量（screen-space，不随 scale）且弹头亮核 ≈ 2px 常量', () => {
     (globalThis as { window?: { devicePixelRatio: number } }).window = { devicePixelRatio: 1 };
     const ctx = new CtxStub();
     const renderer = new Renderer(makeCanvas(ctx));
     // scale = min(1000/1600, 500/1000)*1.8 = 0.9
-    const SCALE = 0.9;
     const orch = makeFakeOrch(
       makeSnapshot([
         {
@@ -129,20 +128,21 @@ describe('Q14-A-R2-FINAL 机枪短弹迹', () => {
     renderer.resize(1600, 1000);
     renderer.render(orch);
 
-    // 主 tracer（暖白 #fff2c8）线段长度 = 22 × scale
+    // 主 tracer（暖白 #fff2c8）线段长度 = 22px 逻辑常量（F-BATTLE-FX-SCREENSPACE-R2：不乘 scale，
+    // 远景/近景尺寸稳定 ≤20%；旧 ×scale 语义在 scale 0.9 下为 19.8px）
     const mainLines = ctx.lines.filter((l) => l.strokeStyle === '#fff2c8');
     expect(mainLines.length).toBeGreaterThanOrEqual(1);
     const segLen = Math.hypot(mainLines[0]!.x1 - mainLines[0]!.x0, mainLines[0]!.y1 - mainLines[0]!.y0);
-    expect(segLen).toBeCloseTo(MACHINE_GUN_TRACER_WORLD_LENGTH * SCALE, 4);
+    expect(segLen).toBeCloseTo(MACHINE_GUN_TRACER_WORLD_LENGTH, 4);
     // 远短于旧 70px（约 63），确认不再首尾相接成光束
     expect(segLen).toBeLessThan(30);
 
-    // 弹头亮核（#fff6d8）半径 ≈ min(1.5, 2*scale)=1.5（视觉 ~2px 世界）
+    // 弹头亮核（#fff6d8）半径 = 2px 逻辑常量（视觉 ~2px）
     const head = ctx.arcs.find((a) => a.fillStyle === '#fff6d8');
     expect(head).toBeDefined();
-    expect(head!.r).toBeCloseTo(Math.max(1.5, 2 * SCALE), 4);
-    // 不再画「完整 Collider 半径」的大白球（旧 p.radius=5 → 4.5px）
-    expect(head!.r).toBeLessThan(5 * SCALE);
+    expect(head!.r).toBeCloseTo(Math.max(1.5, 2), 4);
+    // 不再画「完整 Collider 半径」的大白球（旧 p.radius=5）
+    expect(head!.r).toBeLessThanOrEqual(2.5);
   });
 });
 

@@ -195,8 +195,8 @@ describe('F-BATTLE-HUD-HAZARD-R1｜统一阶段提示 + 收束墙视觉克制', 
   it('T5. 伤害数字同侧短时聚合/错开：同 x 桶内纵向错开（避免堆叠遮挡车辆/墙/HUD）', () => {
     expect(RENDERER, '按世界 x 相近分桶').toContain('const bucket = Math.round(f.x / 90);');
     // F-BATTLE-HIT-READABILITY-R1：同车 slot 错层 16px + 上浮封顶（防 age 差异抵消错层）
-    expect(RENDERER, '纵向错层').toContain('lane * this.ss(16)');
-    expect(RENDERER, '上浮封顶防抵消').toContain('Math.min(age, 0.25) * this.ss(40)');
+    expect(RENDERER, '纵向错层（screen-space 常量，F-BATTLE-FX-SCREENSPACE-R2）').toContain('lane * 16');
+    expect(RENDERER, '上浮封顶防抵消（screen-space 常量，F-BATTLE-FX-SCREENSPACE-R2）').toContain('Math.min(age, 0.25) * 40');
     // 聚合器仍保留（F-PRESENT-1 不变——同源短时合并先于错开）
     expect(RENDERER, '聚合器保留').toContain('DamageNumberAggregator');
   });

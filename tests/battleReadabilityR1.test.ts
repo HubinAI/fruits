@@ -219,8 +219,10 @@ describe('F-BATTLE-READABILITY-R1｜战斗HUD与命中反馈', () => {
 
   describe('C｜炮弹/镭射/尾焰与碰撞明显区分', () => {
     it('C1. 三种武器飞行视觉分支不同（laser 青色拖尾 / tracer 弹迹 / 尾焰粒子）', () => {
-      expect(RENDERER_SRC, 'laser 弹带青色能量拖尾').toMatch(/#7fd8ff';\s*\r?\n\s*ctx\.lineWidth = Math\.max\(2, this\.ss\(p\.radius\)\)/);
-      expect(RENDERER_SRC, '霰弹 tracer 沿飞行方向短弹迹').toMatch(/TRACER = this\.ss\(42\)/);
+      // F-BATTLE-FX-SCREENSPACE-R2：laser 拖尾线宽改 screen-space 常量（不乘 scale）
+      expect(RENDERER_SRC, 'laser 弹带青色能量拖尾').toMatch(/#7fd8ff';\s*\r?\n\s*ctx\.lineWidth = Math\.max\(2, p\.radius\)/);
+      // F-BATTLE-FX-SCREENSPACE-R2：tracer 长度改 screen-space 常量
+      expect(RENDERER_SRC, '霰弹 tracer 沿飞行方向短弹迹').toMatch(/TRACER = 42/);
       expect(RENDERER_SRC, '推进尾焰 drawFlamePlumes').toContain('private drawFlamePlumes');
       // 普通碰撞 = sparks 十字爆点（暖色），与青色激光飞行视觉区分
       expect(RENDERER_SRC, '碰撞爆点默认暖黄').toContain("spawnSpark(x: number, y: number, color = '#ffd35a')");
@@ -229,7 +231,7 @@ describe('F-BATTLE-READABILITY-R1｜战斗HUD与命中反馈', () => {
 
   describe('D｜删除调试感反馈', () => {
     it('D1. 蓄能光点不再青色（统一暖金→亮白）', () => {
-      const chargeBlock = RENDERER_SRC.slice(RENDERER_SRC.indexOf('now - c.lastAt < 500'), RENDERER_SRC.indexOf('now - c.lastAt < 500') + 400);
+      const chargeBlock = RENDERER_SRC.slice(RENDERER_SRC.indexOf('now - c.lastAt < 500'), RENDERER_SRC.indexOf('now - c.lastAt < 500') + 520);
       expect(chargeBlock.includes('#6fa8ff'), '蓄能光点无青色').toBe(false);
       expect(chargeBlock, '蓄能光点金黄→亮白').toContain("'#ffd35a'");
     });
@@ -242,7 +244,8 @@ describe('F-BATTLE-READABILITY-R1｜战斗HUD与命中反馈', () => {
     });
 
     it('D3. 激光弹带飞行拖尾（不再是孤立青色圆点）', () => {
-      expect(RENDERER_SRC, 'laser 拖尾 TRAIL').toMatch(/TRAIL = this\.ss\(26\)/);
+      // F-BATTLE-FX-SCREENSPACE-R2：TRAIL 改 screen-space 常量（不乘 scale）
+      expect(RENDERER_SRC, 'laser 拖尾 TRAIL').toMatch(/TRAIL = 26/);
     });
   });
 

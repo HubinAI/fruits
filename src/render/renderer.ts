@@ -207,8 +207,12 @@ interface FloatingText {
 const DAMAGE_AGGREGATE_WINDOW_MS = 210;
 /** 伤害数字浮动停留时长（ms）；与旧版一致，不改动 */
 const DAMAGE_NUMBER_TTL_MS = 900;
-/** F-BATTLE-PRESENTATION-R2：重要伤害数字放大字号（逻辑 px；常规为 ss(22) 系） */
-const DAMAGE_NUMBER_IMPORTANT_SIZE = 32;
+/**
+ * F-BATTLE-PRESENTATION-R2：重要伤害数字提高层级字号（逻辑 px；金白描边高亮在
+ * F-BATTLE-FX-SCREENSPACE-R2 后承担主要层级区分，字号从 32 收敛到 18——Must#3 最终
+ * 逻辑字号 12–18px 上限；常规伤害固定 15px）。
+ */
+const DAMAGE_NUMBER_IMPORTANT_SIZE = 18;
 
 /**
  * F-BATTLE-VISUAL-CLEANUP-R3｜Must#4：伤害数字「双方接触点屏幕空间避让」。
@@ -892,13 +896,24 @@ export class Renderer {
     return this.fx.filter((f) => now - f.bornAt < f.ttl);
   }
 
+  /** F-BATTLE-FX-SCREENSPACE-R2：当前存活受击白描边（供测试断言单次时长/刷新节流；过期自动过滤） */
+  get activeHitFlashes(): ReadonlyArray<{ team: string; bornAt: number; ttl: number }> {
+    const now = this.now();
+    return this.hitFlashes.filter((h) => now - h.bornAt < h.ttl);
+  }
+
   /** 命中闪白：目标车辆形状短暂描边反馈（绘制时取当前 Snapshot）
    *  Q08-C：同一 team 同时最多一个表现状态——新命中刷新（重置 bornAt），
-   *  不 push 多层叠加（纯表现层，不影响真实命中次数/伤害）。 */
+   *  不 push 多层叠加（纯表现层，不影响真实命中次数/伤害）。
+   *  F-BATTLE-FX-SCREENSPACE-R2（Must#4）：高频连续命中不得形成**常驻白框**——
+   *  仅在旧闪已淡出大半（>60% ttl）时才重新触发，持续火力下轮廓呈「亮→淡→再亮」
+   *  闪烁而非常亮；单次 ≤120ms（<160ms 上限），峰值透明度收敛到 0.35。 */
   spawnHitFlash(team: string): void {
     const now = this.now();
     const existing = this.hitFlashes.find((h) => h.team === team);
     if (existing) {
+      // 旧闪仍亮（未到 60% ttl）→ 不刷新，让它在 ttl 内自然淡出（防常驻白框）
+      if (now - existing.bornAt < existing.ttl * 0.6) return;
       existing.bornAt = now;
     } else {
       this.hitFlashes.push({ team, bornAt: now, ttl: 120 });
@@ -1207,16 +1222,19 @@ export class Renderer {
       // F-BATTLE-HIT-READABILITY-R1：稳定纵向错层（Must#4 12~16px）——
       // 上浮封顶（age≤0.25 → 最多 10px）防止旧数字因上浮量追上并抵消 slot 错层
       //（否则持续命中时两组数字会因 age 差恰好重叠到同一 y）。
+      // F-BATTLE-FX-SCREENSPACE-R2（Must#3）：字号/错层/上浮全部改 **screen-space 常量**
+      // （不乘 camera scale）——旧实现 ss() 随动态取景放大（近战 16.2→27.4px，+69%）。
       // lane 0/1 → 16px 槽位差；上浮后两组最小间距 ≥ 16-10 = 6px（可分辨）。
-      const rise = Math.min(age, 0.25) * this.ss(40);
-      const ty = Math.max(this.ss(44), this.sy(f.y) + lane * this.ss(16) - rise);
-      const fs = f.size ?? Math.max(14, this.ss(22));
+      const rise = Math.min(age, 0.25) * 40;
+      // ty 下限沿用 ss(44)（HUD 守卫：高缩放时数字更靠下、不进顶部 HUD；F-BATTLE-HIT-READABILITY-R1 T6）
+      const ty = Math.max(this.ss(44), this.sy(f.y) + lane * 16 - rise);
+      const fs = f.size ?? 15; // 常规伤害固定 15px 逻辑字号（12–18px 区间内，远景/近景变化 0%）
       ctx.textAlign = 'center';
       // F-BATTLE-PRESENTATION-R2：重要伤害（单次大额）→ 金白高亮光环（描边）提高层级，
       // 从高频小伤害数字云中脱颖而出（Must#8 重要伤害提高层级）。
       if (f.important) {
         ctx.globalAlpha = (1 - age) * 0.9;
-        ctx.lineWidth = Math.max(2, this.ss(2.5));
+        ctx.lineWidth = Math.max(2, 2.5); // F-BATTLE-FX-SCREENSPACE-R2：screen-space 常量
         ctx.strokeStyle = '#fff3c0';
         ctx.strokeText(f.text, tx, ty);
       }
@@ -1237,7 +1255,9 @@ export class Renderer {
       // Q08-C：不再整块白色填充（大面积白块会遮掉 sprite 视觉身份）——
       // 改短暂白描边轮廓（body + parts），保留受击可感知且不遮挡
       // 「谁在打谁、车辆是什么」；spark/damage number 仍照常表现。
-      ctx.globalAlpha = (1 - age) * 0.85;
+      // F-BATTLE-FX-SCREENSPACE-R2（Must#4）：峰值透明度 0.85→0.35（短促、低透明度的
+      // 局部轮廓；与 spawnHitFlash 的 60% ttl 刷新节流共同保证高频命中不常驻白框）。
+      ctx.globalAlpha = (1 - age) * 0.35;
       this.strokeShape(v.body, '#ffffff');
       for (const p of v.parts) this.strokeShape(p.shape, '#ffffff');
       ctx.globalAlpha = 1;
@@ -1250,7 +1270,7 @@ export class Renderer {
       const age = (now - s.bornAt) / s.ttl;
       const x = this.sx(s.x);
       const y = this.sy(s.y);
-      const r = Math.max(1, this.ss(3 + age * 2));
+      const r = Math.max(1, 3 + age * 2); // F-BATTLE-FX-SCREENSPACE-R2：screen-space 常量（不乘 scale）
       ctx.globalAlpha = 1 - age;
       ctx.fillStyle = s.color;
       ctx.beginPath();
@@ -1259,7 +1279,7 @@ export class Renderer {
       // 十字短射线（爆点感；长度随 age 收缩，短促不遮车）
       const L = r * 2.4;
       ctx.strokeStyle = s.color;
-      ctx.lineWidth = Math.max(1.5, this.ss(1.2));
+      ctx.lineWidth = Math.max(1.5, 1.2);
       ctx.beginPath();
       ctx.moveTo(x - L, y);
       ctx.lineTo(x + L, y);
@@ -1276,7 +1296,7 @@ export class Renderer {
       ctx.globalAlpha = 1 - age;
       ctx.fillStyle = m.color;
       ctx.beginPath();
-      ctx.arc(this.sx(m.x), this.sy(m.y), this.ss(m.radius + age * m.radius * 1.6), 0, Math.PI * 2);
+      ctx.arc(this.sx(m.x), this.sy(m.y), m.radius + age * m.radius * 1.6, 0, Math.PI * 2); // FX-SCREENSPACE-R2：不乘 scale
       ctx.fill();
       ctx.globalAlpha = 1;
     }
@@ -1287,7 +1307,7 @@ export class Renderer {
     for (const c of this.charges) {
       const p = Math.max(0, Math.min(1, c.progress));
       const alpha = 0.35 + p * 0.6;
-      const r = this.ss(7 + p * 14);
+      const r = 7 + p * 14; // F-BATTLE-FX-SCREENSPACE-R2：screen-space 常量（不乘 scale）
       ctx.globalAlpha = alpha;
       // F-BATTLE-READABILITY-R1：蓄能光点统一暖色（金黄→亮白）——不再用青色圆点
       // （调试感）；激光的身份由「飞行青色能量束」承担（见 drawProjectiles）。
@@ -1302,9 +1322,9 @@ export class Renderer {
       const outerExtra = 5 + stage * 22; // 外圈随末段明显扩大
       ctx.globalAlpha = (alpha * 0.4) * (0.7 + stage * 0.5); // 亮度随末段提升
       ctx.strokeStyle = p > 0.7 ? '#fff2b8' : '#ffd35a';
-      ctx.lineWidth = this.ss(2 + stage * 2.5);
+      ctx.lineWidth = 2 + stage * 2.5; // FX-SCREENSPACE-R2：不乘 scale
       ctx.beginPath();
-      ctx.arc(this.sx(c.x), this.sy(c.y), (r + this.ss(outerExtra)) * pulse, 0, Math.PI * 2);
+      ctx.arc(this.sx(c.x), this.sy(c.y), (r + outerExtra) * pulse, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -1317,11 +1337,11 @@ export class Renderer {
       const age = (now - d.bornAt) / d.ttl;
       ctx.globalAlpha = (1 - age) * 0.9;
       ctx.strokeStyle = '#ff6b5e';
-      ctx.lineWidth = this.ss(4);
+      ctx.lineWidth = 4; // F-BATTLE-FX-SCREENSPACE-R2：screen-space 常量
       const v = d.team === snap.vehicleA.team ? snap.vehicleA : snap.vehicleB;
       const center = this.vehicleCenter(v);
       ctx.beginPath();
-      ctx.arc(center.x, center.y, this.ss(10 + age * 42), 0, Math.PI * 2);
+      ctx.arc(center.x, center.y, 10 + age * 42, 0, Math.PI * 2); // FX-SCREENSPACE-R2：不乘 scale
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -1365,6 +1385,9 @@ export class Renderer {
     this.laserBeams = [];
     this.shotgunFans = [];
     this.muzzleTongues = [];
+    // F-BATTLE-FX-SCREENSPACE-R2（Must#7）：分组缓存一并清空——下一局不继承上一局
+    // 伤害数字分组引用（groupKey 虽带时间窗，双保险防止跨局复用旧组）。
+    this.damageGroupFx.clear();
   }
 
   /**
@@ -1883,10 +1906,10 @@ export class Renderer {
         const vl = Math.max(1e-6, Math.hypot(v.x, v.y));
         const ux = v.x / vl;
         const uy = v.y / vl;
-        const TRAIL = this.ss(26);
+        const TRAIL = 26; // F-BATTLE-FX-SCREENSPACE-R2：screen-space 常量（旧 ss(26) 随 scale 放大）
         ctx.globalAlpha = 0.55;
         ctx.strokeStyle = '#7fd8ff';
-        ctx.lineWidth = Math.max(2, this.ss(p.radius));
+        ctx.lineWidth = Math.max(2, p.radius);
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(cx - ux * TRAIL, cy - uy * TRAIL);
@@ -1896,12 +1919,12 @@ export class Renderer {
         ctx.globalAlpha = 0.35;
         ctx.fillStyle = '#7fd8ff';
         ctx.beginPath();
-        ctx.arc(cx, cy, this.ss(p.radius + 6), 0, Math.PI * 2);
+        ctx.arc(cx, cy, p.radius + 6, 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 1;
         ctx.fillStyle = '#eafdff';
         ctx.beginPath();
-        ctx.arc(cx, cy, this.ss(p.radius), 0, Math.PI * 2);
+        ctx.arc(cx, cy, p.radius, 0, Math.PI * 2);
         ctx.fill();
         continue;
       }
@@ -1914,14 +1937,14 @@ export class Renderer {
         const len = Math.max(1e-6, Math.hypot(v.x, v.y));
         const ux = v.x / len;
         const uy = v.y / len;
-        const TRACER = this.ss(42); // 沿真实飞行方向的短高速弹迹（世界 px，35~50）
+        const TRACER = 42; // F-BATTLE-FX-SCREENSPACE-R2：screen-space 常量（旧 ss(42)，沿真实飞行方向）
         const tx = cx - ux * TRACER;
         const ty = cy - uy * TRACER;
         const col = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
         // 弹迹（亮条，尾→头）
         ctx.globalAlpha = 0.85;
         ctx.strokeStyle = col;
-        ctx.lineWidth = Math.max(2, this.ss(p.radius * 1.4));
+        ctx.lineWidth = Math.max(2, p.radius * 1.4);
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(tx, ty);
@@ -1932,11 +1955,11 @@ export class Renderer {
         ctx.globalAlpha = 1;
         ctx.fillStyle = '#fff6d8';
         ctx.beginPath();
-        ctx.arc(cx, cy, this.ss(p.radius), 0, Math.PI * 2);
+        ctx.arc(cx, cy, p.radius, 0, Math.PI * 2); // FX-SCREENSPACE-R2：常量
         ctx.fill();
         ctx.fillStyle = col;
         ctx.beginPath();
-        ctx.arc(cx, cy, this.ss(p.radius * 0.6), 0, Math.PI * 2);
+        ctx.arc(cx, cy, p.radius * 0.6, 0, Math.PI * 2);
         ctx.fill();
         continue;
       }
@@ -1951,14 +1974,14 @@ export class Renderer {
         const len = Math.max(1e-6, Math.hypot(v.x, v.y));
         const ux = v.x / len;
         const uy = v.y / len;
-        const CHAIN = this.ss(MACHINE_GUN_TRACER_WORLD_LENGTH);
+        const CHAIN = MACHINE_GUN_TRACER_WORLD_LENGTH; // FX-SCREENSPACE-R2：screen-space 常量（~22px 逻辑）
         const tx = cx - ux * CHAIN;
         const ty = cy - uy * CHAIN;
         const col = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
         // 淡 team 色外沿（很淡，弹链身份提示）
         ctx.globalAlpha = 0.18;
         ctx.strokeStyle = col;
-        ctx.lineWidth = Math.max(2.5, this.ss(4));
+        ctx.lineWidth = Math.max(2.5, 4); // FX-SCREENSPACE-R2
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(tx, ty);
@@ -1967,7 +1990,7 @@ export class Renderer {
         // 细亮暖白主体（核心 2~3px）
         ctx.globalAlpha = 0.95;
         ctx.strokeStyle = '#fff2c8';
-        ctx.lineWidth = Math.max(1.5, this.ss(2.5));
+        ctx.lineWidth = Math.max(1.5, 2.5); // FX-SCREENSPACE-R2
         ctx.beginPath();
         ctx.moveTo(tx, ty);
         ctx.lineTo(cx, cy);
@@ -1976,7 +1999,7 @@ export class Renderer {
         // 弹头亮核（视觉半径 ~2px；真实 Collider 半径未变、不扩大命中范围）
         ctx.fillStyle = '#fff6d8';
         ctx.beginPath();
-        ctx.arc(cx, cy, Math.max(1.5, this.ss(2)), 0, Math.PI * 2);
+        ctx.arc(cx, cy, Math.max(1.5, 2), 0, Math.PI * 2); // FX-SCREENSPACE-R2
         ctx.fill();
         ctx.globalAlpha = 1;
         continue;
@@ -1991,7 +2014,7 @@ export class Renderer {
       const pColor = p.team === 'A' ? PROJECTILE_COLOR_A : PROJECTILE_COLOR_B;
       ctx.fillStyle = pColor;
       ctx.beginPath();
-      ctx.arc(this.sx(p.center.x), this.sy(p.center.y), this.ss(p.radius), 0, Math.PI * 2);
+      ctx.arc(this.sx(p.center.x), this.sy(p.center.y), p.radius, 0, Math.PI * 2); // FX-SCREENSPACE-R2
       ctx.fill();
       // F-BATTLE-VISUAL-CLEANUP-R3｜Must#3：弹体沿用同一表现轮廓语言（不再近黑硬圈，
       // 否则 2~3px 弹体在真机上读作「调试小圆点」）。真实 Collider 半径不变。
@@ -2161,7 +2184,7 @@ export class Renderer {
         ctx.globalAlpha = 0.95 * shrink;
         ctx.fillStyle = '#fff3d0';
         ctx.beginPath();
-        ctx.arc(rootX, rootY, this.ss(3.5) * shrink, 0, Math.PI * 2);
+        ctx.arc(rootX, rootY, 3.5 * shrink, 0, Math.PI * 2); // FX-SCREENSPACE-R2
         ctx.fill();
         ctx.globalAlpha = 1;
       }
@@ -2186,17 +2209,17 @@ export class Renderer {
       // 中心亮核（白橙）
       ctx.fillStyle = 'rgba(255,242,180,0.95)';
       ctx.beginPath();
-      ctx.arc(0, 0, this.ss(4), 0, Math.PI * 2);
+      ctx.arc(0, 0, 4, 0, Math.PI * 2); // FX-SCREENSPACE-R2
       ctx.fill();
       // 短亮弧（切向，亮橙）
       ctx.strokeStyle = 'rgba(255,200,90,0.9)';
-      ctx.lineWidth = Math.max(1.5, this.ss(2));
+      ctx.lineWidth = Math.max(1.5, 2); // FX-SCREENSPACE-R2
       ctx.beginPath();
-      ctx.arc(0, 0, this.ss(8), -0.9, 0.9);
+      ctx.arc(0, 0, 8, -0.9, 0.9);
       ctx.stroke();
       // 几根火花射线（确定性角度偏移，禁用随机；亮橙黄）
       ctx.strokeStyle = 'rgba(255,170,60,0.85)';
-      ctx.lineWidth = Math.max(1, this.ss(1.5));
+      ctx.lineWidth = Math.max(1, 1.5); // FX-SCREENSPACE-R2
       for (let k = -2; k <= 2; k++) {
         const sa = k * 0.35;
         const len = this.ss(13);
@@ -2239,10 +2262,10 @@ export class Renderer {
         sy1 = sy0 + bdy * k;
       }
       ctx.lineCap = 'round';
-      // glow（最外层，半透明，衰减）
+      // glow（最外层，半透明，衰减）——F-BATTLE-FX-SCREENSPACE-R2：束宽 screen-space 常量（不乘 scale）
       ctx.globalAlpha = 0.32 * decay;
       ctx.strokeStyle = '#5fc8ff';
-      ctx.lineWidth = this.ss(b.glowWidth);
+      ctx.lineWidth = b.glowWidth;
       ctx.beginPath();
       ctx.moveTo(sx0, sy0);
       ctx.lineTo(sx1, sy1);
@@ -2250,7 +2273,7 @@ export class Renderer {
       // 中亮层
       ctx.globalAlpha = 0.7 * decay;
       ctx.strokeStyle = '#a9eeff';
-      ctx.lineWidth = this.ss(b.coreWidth * 1.4);
+      ctx.lineWidth = b.coreWidth * 1.4;
       ctx.beginPath();
       ctx.moveTo(sx0, sy0);
       ctx.lineTo(sx1, sy1);
@@ -2258,7 +2281,7 @@ export class Renderer {
       // 高亮核心
       ctx.globalAlpha = decay;
       ctx.strokeStyle = '#eafdff';
-      ctx.lineWidth = this.ss(b.coreWidth);
+      ctx.lineWidth = b.coreWidth;
       ctx.beginPath();
       ctx.moveTo(sx0, sy0);
       ctx.lineTo(sx1, sy1);
@@ -2282,7 +2305,7 @@ export class Renderer {
       const decay = 1 - age * age;
       const base = Math.atan2(f.dirY, f.dirX);
       const spread = (14 * Math.PI) / 180; // 扇形半角 ±14°
-      const R = this.ss(34); // 爆闪半径（世界 px）
+      const R = 34; // F-BATTLE-FX-SCREENSPACE-R2：扇形爆闪半径 screen-space 常量（旧 ss(34)）
       const cx = this.sx(f.x);
       const cy = this.sy(f.y);
       // 扇形填充（暖橙）
@@ -2296,7 +2319,7 @@ export class Renderer {
       // 沿扇形方向几根亮射线（确定性，禁用随机；与 5 发弹道 -12/-6/0/+6/+12 呼应）
       ctx.globalAlpha = 0.95 * decay;
       ctx.strokeStyle = '#fff0c0';
-      ctx.lineWidth = Math.max(1.5, this.ss(2));
+      ctx.lineWidth = Math.max(1.5, 2); // FX-SCREENSPACE-R2
       for (const d of [-12, -6, 0, 6, 12]) {
         const a = base + (d * Math.PI) / 180;
         ctx.beginPath();
@@ -2308,7 +2331,7 @@ export class Renderer {
       ctx.globalAlpha = decay;
       ctx.fillStyle = '#fff6d8';
       ctx.beginPath();
-      ctx.arc(cx, cy, this.ss(6), 0, Math.PI * 2);
+      ctx.arc(cx, cy, 6, 0, Math.PI * 2); // FX-SCREENSPACE-R2
       ctx.fill();
       ctx.globalAlpha = 1;
     }
@@ -2325,13 +2348,13 @@ export class Renderer {
       const decay = 1 - age;
       const cx = this.sx(t.x);
       const cy = this.sy(t.y);
-      const L = this.ss(20); // 火舌长 15~25px
+      const L = 20; // F-BATTLE-FX-SCREENSPACE-R2：火舌长 screen-space 常量（旧 ss(20)）
       const tx = cx + t.dirX * L;
       const ty = cy + t.dirY * L;
       // 外沿暖橙（窄火舌轮廓）
       ctx.globalAlpha = 0.55 * decay;
       ctx.strokeStyle = '#ff9a3c';
-      ctx.lineWidth = Math.max(2, this.ss(6));
+      ctx.lineWidth = Math.max(2, 6); // FX-SCREENSPACE-R2
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(cx, cy);
@@ -2340,7 +2363,7 @@ export class Renderer {
       // 内芯暖白（细亮）
       ctx.globalAlpha = 0.95 * decay;
       ctx.strokeStyle = '#fff2c8';
-      ctx.lineWidth = Math.max(1.2, this.ss(2.5));
+      ctx.lineWidth = Math.max(1.2, 2.5); // FX-SCREENSPACE-R2
       ctx.beginPath();
       ctx.moveTo(cx, cy);
       ctx.lineTo(tx, ty);
@@ -2350,7 +2373,7 @@ export class Renderer {
       ctx.globalAlpha = decay;
       ctx.fillStyle = '#fff6d8';
       ctx.beginPath();
-      ctx.arc(cx, cy, this.ss(2.5), 0, Math.PI * 2);
+      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); // FX-SCREENSPACE-R2
       ctx.fill();
       ctx.globalAlpha = 1;
     }
