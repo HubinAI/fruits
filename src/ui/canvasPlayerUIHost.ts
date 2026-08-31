@@ -347,6 +347,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private buildBadge = '';
   /** F-META-1：Main Shell 当前 MetaPage（UI-only，由 Host 局部管理，不进 Gameplay 状态机）；F-HOME-1：默认 Home（正式首页） */
   private metaPage: MetaPage = 'home';
+  /** F-GARAGE-ADJUST-REMATCH-P0：瞬时 Garage 入口上下文（UI-only，不持久化）——
+   *  true = 从战败 Result「调整配置」进入装配台（显示「完成并再战」）；
+   *  false = 正常 Home→Garage（不显示）。返回 Home / 进入 Matching / 新 Battle / 重启 均清除。 */
+  private garageFromResult = false;
   /** F-META-6：More 页子视图（功能卡主页 / 设置子页；UI-only，不进 Gameplay） */
   private moreView: 'home' | 'settings' = 'home';
   /** F-META-6：音效开关（UI preference；Runtime 无音效设置接口 → 仅持久化，不接音频） */
@@ -587,6 +591,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (prevState && prevState.battleState === 'ended' && state.battleState === 'editing' && state.playerPhase === 'garage') {
       this.metaPage = 'garage';
       this.panelView = 'home';
+      // F-GARAGE-ADJUST-REMATCH-P0（Must#2）：本次装配台会话来自战败 Result「调整配置」——
+      // 瞬时上下文置位（「完成并再战」按钮随之显示）；normal（Home→Garage）路径不置位。
+      this.garageFromResult = true;
     }
     this.lastState = state;
     this.dirty = true;
@@ -609,6 +616,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     // F-META-1：离开局外（进 Matching/Battle/Result）时复位 MetaPage——回 Garage 后默认回车库页
     if (state.playerPhase !== 'garage') this.metaPage = 'home'; // F-HOME-1：离开局外回 Home（正式首页）
+    // F-GARAGE-ADJUST-REMATCH-P0（Must#2）：进入 Matching / 新 Battle → 瞬时上下文清除
+    //（「完成并再战」不再显示；重启应用自然不恢复——上下文从不落盘）。
+    if (state.playerPhase !== 'garage') this.garageFromResult = false;
     // F-HOME-3：离开局外同时复位车辆气泡 tips（回 Home 默认不显示）
     if (state.playerPhase !== 'garage') this.vehicleTip = null;
     // F-META-3：离开局外同时复位 Backpack 分类（回 Garage 默认全部）
@@ -1332,6 +1342,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const page = id.slice(4) as MetaPage;
       this.metaPage = page === 'garage' ? 'home' : page;
       this.panelView = 'home';
+      // F-GARAGE-ADJUST-REMATCH-P0（Must#4）：返回 Home → 瞬时 result-adjust 上下文清除——
+      // 玩家保留返回能力（不被强制再战）；再进 Garage 走 normal 路径不显示「完成并再战」。
+      this.garageFromResult = false;
       this.garageStripScroll = 0;
       this.moreView = 'home'; // F-META-6：离开 More 复位子视图（下次进入默认功能卡主页）
       this.actions?.reframeCamera?.();
@@ -1552,6 +1565,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         break;
       case 'result-next':
         this.actions?.onResultNext();
+        break;
+      case 'garage-retry':
+        // F-GARAGE-ADJUST-REMATCH-P0：装配台「完成并再战」→ 直接进入 Matching（不经过 Home）
+        this.actions?.onGarageRetry?.();
         break;
       case 'reward-ad':
         this.actions?.onClaimRewardAd();
@@ -3102,6 +3119,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.text(texts.energyValue, tb.energyValue.x + tb.energyValue.w, midY, 14, overload ? V.lose : V.textPrimary, 'right');
     if (tb.backpack) this.button(tb.backpack.x, tb.backpack.y, tb.backpack.w, tb.backpack.h, 'nav:backpack', texts.backpack, {});
     if (tb.more) this.button(tb.more.x, tb.more.y, tb.more.w, tb.more.h, 'nav:more', texts.more, {});
+    // F-GARAGE-ADJUST-REMATCH-P0（Must#3）：战败 Result→装配台时的「完成并再战」暖金主操作。
+    // 位置 = 顶栏中部（左「‹ 首页」右侧 ↔ 右能量组左侧），不遮挡中央车辆/真实挂点/底部装配带；
+    // 极简结构零新增层级；hitArea 由 button() 每次绘制注册 → 与视觉同源。
+    // 无效配置（超载/缺失）→ 文案「配置不合法」+ disabled（复用既有 dock 错误/能量提示，Must#6）。
+    if (mode === 'garage' && this.garageFromResult && tb.back) {
+      const g = this.isShort ? 6 : 8;
+      const btnL = tb.back.x + tb.back.w + g;
+      const btnR = tb.energyLabel.x - g;
+      const btnW = Math.max(this.isShort ? 80 : 104, Math.min(btnR - btnL, this.isShort ? 132 : 172));
+      const btnH = tb.back.h;
+      const btnY = tb.back.y;
+      const valid = state.draftValid && !overload;
+      this.button(btnL, btnY, btnW, btnH, 'garage-retry', valid ? '完成并再战' : '配置不合法', {
+        primary: valid,
+        disabled: !valid,
+      });
+    }
   }
 
   /** 面板首页：2×2 主分类（车身/移动/武器/辅助）+ 底部「当前车辆」摘要条。

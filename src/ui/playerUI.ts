@@ -142,6 +142,9 @@ export interface PlayerUIActions {
   onResultAdjust(): void;
   /** Result「下一场」 */
   onResultNext(): void;
+  /** F-GARAGE-ADJUST-REMATCH-P0：战败 Result→Garage 装配台的「完成并再战」——用当前已持久化
+   *  Build 直接进入 Matching（不经过 Home）；由 runtime 复用既有 startMatching 状态链。 */
+  onGarageRetry?(): void;
   /** Result「看广告领金币」 */
   onClaimRewardAd(): void;
   /** Garage 合成（5×1★ → 随机 2★） */

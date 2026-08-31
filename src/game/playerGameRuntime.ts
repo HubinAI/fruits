@@ -340,6 +340,15 @@ export class PlayerGameRuntime {
     onResultNext: () => {
       void this.nextMatch();
     },
+    // F-GARAGE-ADJUST-REMATCH-P0｜Must#5/#6：战败 Result→Garage「完成并再战」——
+    // 直接复用既有 Matching 状态链（startMatching：matching 相位门防重入 + 新 draftB +
+    // generation 防重复触发 + currentResult 收起）。无效配置（超载/缺失/装备规则）由
+    // buildsValid 守卫拦截——留在 Garage，错误/能量提示沿用既有 dock 呈现，不静默回滚。
+    onGarageRetry: () => {
+      if (!this.buildsValid()) return; // 复用现有校验（与 onFindOpponent 同一条规则，不新增第二套）
+      this.deps.sfx?.resume?.(); // 用户交互恢复 AudioContext（与 onFindOpponent 同语义）
+      this.startMatching(); // 复用既有匹配入口（Must#1：直接再战与 Home「寻找对手」同一状态链）
+    },
     onClaimRewardAd: async () => {
       if (this.rewardAdClaimed) return; // 本场已领 → 直接拒绝
       const out = await this.rewardedClaimer.claim();
