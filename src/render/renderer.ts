@@ -135,11 +135,20 @@ const SOLO_PAD_X_RATIO = 0.38;
 const SOLO_PAD_Y_RATIO = 0.31;
 const MIN_SOLO_PAD_X = 40;
 const MIN_SOLO_PAD_Y = 20;
+// F-GARAGE-CENTER-SCALE-R2.1：Garage 专用更小 padding（中央舞台已由 stageRect 留白——
+// 顶栏/分类栏/卡片带边界即安全边界，bounds 无需再叠大余量；Home 保持原 padding 语义）。
+const SOLO_PAD_X_RATIO_GARAGE = 0.24;
+const SOLO_PAD_Y_RATIO_GARAGE = 0.14;
+const MIN_SOLO_PAD_X_GARAGE = 24;
+const MIN_SOLO_PAD_Y_GARAGE = 10;
 // F-HOME-VISUAL-R2：首页车辆主视觉——普通初始车辆可见宽目标 = 安全宽 38%~47%
 // （clamp fitLimit；高度主导时 fitLimit 优先保证完整入画）；垂直居中构图（视觉中心 Must#1，
 // 贴地由前景展示平台表达；不再底部锚定贴地留白）。上限 47% 使实际屏幕占比 ≤ 48%（Must#2）。
 const HOME_VEHICLE_WIDTH_MIN_PCT = 0.40;
 const HOME_VEHICLE_WIDTH_MAX_PCT = 0.47;
+// F-GARAGE-CENTER-SCALE-R2.1：Garage 专用上限（中央舞台车辆为主视觉，允许略宽于 Home 的 47%，
+// 但 ≤48% 保证任何 stage 宽度下车辆最终可见宽不超 48% 屏；Home 不动）
+const HOME_VEHICLE_WIDTH_MAX_PCT_GARAGE = 0.48;
 // F-BATTLE-CAMERA-R2：battle 相机不再用 Mobile/Desktop 固定 corridor（旧 F-WX-8-C
 // MOBILE_ACTIVE_* / Q08-A-FIX CORRIDOR_* 已删除）——统一按 A+B 真实 envelope 构图，
 // 见 reframe battle 分支与 applyBattleFollow。
@@ -2461,8 +2470,9 @@ export class Renderer {
         const ew = Math.max(1, env.maxX - env.minX);
         const eh = Math.max(1, env.maxY - env.minY);
         soloEnvW = ew;
-        const padX = Math.max(MIN_SOLO_PAD_X, ew * SOLO_PAD_X_RATIO);
-        const padY = Math.max(MIN_SOLO_PAD_Y, eh * SOLO_PAD_Y_RATIO);
+        const isGarageMode = opts.framingRect?.mode === 'garage';
+        const padX = Math.max(isGarageMode ? MIN_SOLO_PAD_X_GARAGE : MIN_SOLO_PAD_X, ew * (isGarageMode ? SOLO_PAD_X_RATIO_GARAGE : SOLO_PAD_X_RATIO));
+        const padY = Math.max(isGarageMode ? MIN_SOLO_PAD_Y_GARAGE : MIN_SOLO_PAD_Y, eh * (isGarageMode ? SOLO_PAD_Y_RATIO_GARAGE : SOLO_PAD_Y_RATIO));
         minX = env.minX - padX;
         maxX = env.maxX + padX;
         minY = env.minY - padY;
@@ -2521,7 +2531,9 @@ export class Renderer {
     // F-WX-8-B：compact 固定框（Mobile previewSolo/previewFixed）用极小 margin——
     // 固定框 bounds 自带覆盖余量（如 solo 框 440 宽 vs 车辆 180 宽），再叠加 48 的
     // CONTENT_MARGIN_WORLD 会把纵向 bh 撑大、压扁手机横屏下的车辆（实测 24%）。
-    const m = (isFixed || fit === 'battle') && isCompact ? 8 : isPreview ? PREVIEW_MARGIN_WORLD : CONTENT_MARGIN_WORLD;
+    // F-GARAGE-CENTER-SCALE-R2.1：Garage 中央舞台再收窄到 4（车辆 envelope 为主尺度，
+    // 高度余量全部还给车辆；Home 保持 8）。
+    const m = (isFixed || fit === 'battle') && isCompact ? (opts.framingRect?.mode === 'garage' ? 4 : 8) : isPreview ? PREVIEW_MARGIN_WORLD : CONTENT_MARGIN_WORLD;
     minX -= m; maxX += m; minY -= m; maxY += m;
     // 地面表面留出可见区域。F-WX-RCA-3A：previewSolo compact（coreBounds 自适应 padding）
     // 自带完整车辆余量，跳过此钳制——否则 bounds 底部被推到 groundY+40（740）使 bounds 中心
@@ -2633,7 +2645,12 @@ export class Renderer {
     // 宽度 clamp（Must#2：车辆最终可见宽约占屏幕 40%~48%）——clamp 区间与 home 相同（40%~47%）。
     if (fit === 'previewSolo' && (framing?.mode === 'home' || framing?.mode === 'garage') && soloEnvW > 0) {
       const minS = (HOME_VEHICLE_WIDTH_MIN_PCT * safeW) / soloEnvW;
-      const maxS = (HOME_VEHICLE_WIDTH_MAX_PCT * safeW) / soloEnvW;
+      // F-GARAGE-CENTER-SCALE-R2.1：Garage 上限按「最终可见宽 ≤48% 屏宽」定义（任何 stage 宽度下
+      // 不超 48% 屏；Home 保持安全宽 47% 语义不变）。
+      const maxS =
+        framing?.mode === 'garage'
+          ? ((HOME_VEHICLE_WIDTH_MAX_PCT_GARAGE * (this.viewWidth / this.viewToLogical)) / soloEnvW)
+          : (HOME_VEHICLE_WIDTH_MAX_PCT * safeW) / soloEnvW;
       const hLimit = safeH / bh; // 高度完整入画上限（bh>0 已由上方 bounds 守卫保证）
       scale = Math.min(hLimit, Math.min(maxS, Math.max(minS, scale)));
     }

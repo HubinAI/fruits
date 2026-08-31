@@ -2674,9 +2674,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       // idle（无 flash）：不绘制（不画 selected/occupied/可用轮廓圆）
     }
     ctx.restore();
-    // 点击区与视觉同源
-    for (const p of shown) {
-      this.button(p.x - HIT / 2, p.y - HIT / 2, HIT, HIT, `hp-sel:${p.id}`, '', {});
+    // 点击区与视觉同源（F-GARAGE-VISUAL-DENSITY-R2 / CENTER-SCALE-R2.1：挂点只在
+    // 「拖动 / armed / 吸附反馈」期间显示与可点；Garage idle 不注册挂点命中——看不见不可点）。
+    if (compat != null || flash != null) {
+      for (const p of shown) {
+        this.button(p.x - HIT / 2, p.y - HIT / 2, HIT, HIT, `hp-sel:${p.id}`, '', {});
+      }
     }
   }
 
