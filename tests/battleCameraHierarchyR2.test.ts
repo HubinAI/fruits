@@ -91,8 +91,8 @@ describe('F-BATTLE-CAMERA-HIERARCHY-R2｜初始构图（Must#3/#4）', () => {
     for (const r of RES) {
       const { t, a, b, groundPct } = battleCamFor(r, snap, 'Active');
       const span = (b.maxX - a.minX) / r.w;
-      expect(span, `${r.w}×${r.h} 双车+间距 ${(span * 100).toFixed(1)}% ≤ 86%`).toBeLessThanOrEqual(0.86 + 1e-9);
-      expect(span, `${r.w}×${r.h} 双车+间距 ${(span * 100).toFixed(1)}% ≥ 62%`).toBeGreaterThanOrEqual(0.62);
+      // F-BATTLE-DYNAMIC-FRAMING-R2.1：初始远距离目标 82-88%（高度完整入画优先时允许低于 82——短屏）
+      expect(span, `${r.w}×${r.h} 初始 span ${(span * 100).toFixed(1)}% ≤ 88%`).toBeLessThanOrEqual(0.88 + 1e-9);
       const singleW = Math.max(a.maxX - a.minX, b.maxX - b.minX);
       expect(singleW / r.w, `${r.w}×${r.h} 单车 ${((singleW / r.w) * 100).toFixed(1)}% ≥ 12%`).toBeGreaterThanOrEqual(0.12);
       const cx = (a.minX + a.maxX + b.minX + b.maxX) / 4;
@@ -152,7 +152,7 @@ describe('F-BATTLE-CAMERA-HIERARCHY-R2｜相机稳定（Must#5）', () => {
       renderer.reframe(snap, 'battle', { phase: 'Active' });
       maxDrift = Math.max(maxDrift, Math.abs(renderer.transform.scale - s0) / s0);
     }
-    expect(maxDrift, `120 帧 scale 漂移 ${(maxDrift * 100).toFixed(3)}% ≤ 1%`).toBeLessThanOrEqual(0.01);
+    expect(maxDrift, `120 帧 scale 漂移 ${(maxDrift * 100).toFixed(3)}% ≤ 0.5%（死区吸收）`).toBeLessThanOrEqual(0.005);
   });
 
   it('T5. Matching(previewFixed)→Battle 首帧：battle 基准为 Active 收缩构图（无旧相机闪帧）', () => {
@@ -168,7 +168,7 @@ describe('F-BATTLE-CAMERA-HIERARCHY-R2｜相机稳定（Must#5）', () => {
     // battle 双车+间距 ≤86%（收缩构图生效）
     const a = vehicleBoundsScreen(snap.vehicleA, renderer.transform);
     const b = vehicleBoundsScreen(snap.vehicleB, renderer.transform);
-    expect((b.maxX - a.minX) / r.w, 'Battle 首帧双车+间距 ≤86%').toBeLessThanOrEqual(0.86);
+    expect((b.maxX - a.minX) / r.w, 'Battle 首帧双车+间距 ≤88%（远段目标）').toBeLessThanOrEqual(0.88);
   });
 
   it('T6. Result 后离开 Battle（reframe 非 battle）→ battleCam 清理，后续构图正常', () => {

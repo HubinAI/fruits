@@ -79,10 +79,17 @@ const BATTLE_ENV_PAD_X = 48; // A+B envelope 并集横向 padding（世界 px；
 const BATTLE_CLOSE_SCALE_DELTA = 0.1; // F-BATTLE-STAGE-COMPOSITION-P0：阶段切换尺度变化 ≤10%
 // （原 0.15 → 0.10；Must：Active/Warning/Closing/End 切换无骤缩）
 const BATTLE_SEPARATE_SCALE_MIN = 0.88; // 分离拉远下限（相对 Active 基准；车辆仍可识别）
-// F-BATTLE-CAMERA-HIERARCHY-R2（Must#3/#4）：初始构图「双车+间距」占可用宽 ≤86%（留边距、
-// 车辆为视觉主体）；单车可见宽下限 12% 屏宽（远距离 fit 也不得缩到难以辨认）。
-const BATTLE_SPAN_MAX_PCT = 0.86;
-const BATTLE_SINGLE_MIN_PCT = 0.12;
+// F-BATTLE-DYNAMIC-FRAMING-R2.1（Must#3）：三段动态取景目标——双车组合外廓占可用宽
+// （由双车世界间距比例驱动）：远 82-88% / 接近 68-82% / 碰撞近战 48-70%（车辆成为主体）。
+const BATTLE_GAP_FAR = 0.55; // 世界间距/union 宽 ≥ 此值 → 初始远距离段
+const BATTLE_GAP_NEAR = 0.25; // 世界间距/union 宽 ≥ 此值 → 接近段；< 此值 → 碰撞/近战段
+const BATTLE_SPAN_FAR = 0.87;
+const BATTLE_SPAN_MID = 0.75;
+const BATTLE_SPAN_NEAR = 0.60;
+// Must#4/#5：阻尼与稳定——目标 scale 与当前差距 <0.3% 视为静止（死区，防轮胎震动呼吸）；
+// 单帧最大变化 ≤1.5%（平滑接近，不瞬移）；正常接近时单帧变化自然 ≤1.5%。
+const BATTLE_SCALE_DEADBAND = 0.003;
+const BATTLE_SCALE_MAX_STEP = 0.015;
 /** 构图安全区：左右 UI 阴影区不计入可用画布（CSS px，每侧内缩量） */
 const SAFE_INSET_X = 56;
 const SAFE_INSET_Y = 28;
@@ -2659,29 +2666,68 @@ export class Renderer {
       scale = Math.min(hLimit, Math.min(maxS, Math.max(minS, scale)));
     }
     // F-BATTLE-CAMERA-R2：battle 相机基准记录 / 非 Active 阶段尺度钳制。
-    // Active（正常战斗）构图时记录基准（供运行期跟随 + 后续阶段相对钳制）；
-    // Warning/Closing/End 用同一 envelope 构图但把 scale 钳制在基准 ±15%——
-    // 接近碰撞时 envelope 收窄也不放大（保持稳定尺度）、分离时有限拉远、
+    // F-BATTLE-DYNAMIC-FRAMING-R2.1（Must#3/#4）：Active 每帧按 A∪B 真实 bounds 计算目标
+    // scale（三段：远 82-88% / 接近 68-82% / 碰撞 48-70%，由双车世界间距比例驱动，非固定时间或
+    // 视口特判），阻尼 + 单帧钳制（≤1.5%/帧）平滑接近 + 死区滞回（<0.3% 不更新，防轮胎震动呼吸）。
+    // 移除「Active 首帧算一次、后续固定 scale」（旧实现导致接近/碰撞不放大，车辆不成主体）。
+    // Warning/Closing/End 用同一 envelope 构图但把 scale 钳制在 Active 末态基准 ±15%——
     // 收束墙不参与 bounds（不会因墙全量 fit 骤缩），车辆始终是视觉主体。
     if (fit === 'battle') {
       if (phase === 'Active' || phase === '') {
-        if (!this.battleCam) {
-          // F-BATTLE-CAMERA-HIERARCHY-R2（Must#3）：初始构图「双车+间距」占可用宽 ≤86%——
-          // 旧 fit 满宽使双车贴安全区边缘（实测 89~91%）、中间 59% 间距空白。按 A∪B 真实
-          // envelope 外廓动态收缩留边距（不缩放至单车不可辨：单车可见宽下限保护 12% 屏宽）。
-          const envA = this.vehicleBounds(snap.vehicleA, true);
-          const envB = this.vehicleBounds(snap.vehicleB, true);
-          const outerWorld = Math.max(1, Math.max(envA.maxX, envB.maxX) - Math.min(envA.minX, envB.minX));
-          const outerPct = (outerWorld * scale) / safeW;
-          if (outerPct > BATTLE_SPAN_MAX_PCT) {
-            const shrunk = (BATTLE_SPAN_MAX_PCT / outerPct) * scale;
-            const singleW = Math.max(envA.maxX - envA.minX, envB.maxX - envB.minX);
-            const singlePct = (singleW * shrunk) / this.viewWidth * this.viewToLogical;
-            if (singlePct >= BATTLE_SINGLE_MIN_PCT) scale = shrunk; // 单车仍可辨才收缩
+        // 双车 envelope（含 parts）：用于 span 目标（完整入画含武器/辅助外廓）。
+        // F-BATTLE-DYNAMIC-FRAMING-R2.1：合并 bodyVisual sprite（碰撞/后坐/Push 视觉位移——
+        // 视觉外廓也必须完整入画，Q08-A-FIX 回归语义；gap 阶段判定仍用 core）。
+        const envA = this.vehicleBounds(snap.vehicleA, true);
+        const envB = this.vehicleBounds(snap.vehicleB, true);
+        {
+          const bvA = snap.vehicleA.bodyVisual;
+          if (bvA) {
+            const hw = (envA.maxX - envA.minX) / 2;
+            const hh = (envA.maxY - envA.minY) / 2;
+            envA.minX = Math.min(envA.minX, bvA.position.x - hw);
+            envA.maxX = Math.max(envA.maxX, bvA.position.x + hw);
+            envA.minY = Math.min(envA.minY, bvA.position.y - hh);
+            envA.maxY = Math.max(envA.maxY, bvA.position.y + hh);
           }
+          const bvB = snap.vehicleB.bodyVisual;
+          if (bvB) {
+            const hw = (envB.maxX - envB.minX) / 2;
+            const hh = (envB.maxY - envB.minY) / 2;
+            envB.minX = Math.min(envB.minX, bvB.position.x - hw);
+            envB.maxX = Math.max(envB.maxX, bvB.position.x + hw);
+            envB.minY = Math.min(envB.minY, bvB.position.y - hh);
+            envB.maxY = Math.max(envB.maxY, bvB.position.y + hh);
+          }
+        }
+        const uMinX = Math.min(envA.minX, envB.minX);
+        const uMaxX = Math.max(envA.maxX, envB.maxX);
+        const uMinY = Math.min(envA.minY, envB.minY);
+        const uMaxY = Math.max(envA.maxY, envB.maxY);
+        const uw = Math.max(1, uMaxX - uMinX);
+        const uh = Math.max(1, uMaxY - uMinY);
+        // 间距判定用 core（body+wheels，不含 parts）——武器伸出不应扭曲「两车距离」阶段判定
+        const coreA = this.vehicleBounds(snap.vehicleA, false);
+        const coreB = this.vehicleBounds(snap.vehicleB, false);
+        const coreUW = Math.max(1, Math.max(coreA.maxX, coreB.maxX) - Math.min(coreA.minX, coreB.minX));
+        const gapWorld = Math.max(0, Math.max(coreA.minX, coreB.minX) - Math.min(coreA.maxX, coreB.maxX));
+        const gapRatio = gapWorld / coreUW;
+        // eslint-disable-next-line no-console
+        // 三段目标外廓占比（由真实世界间距驱动）
+        let targetSpan: number;
+        if (gapRatio >= BATTLE_GAP_FAR) targetSpan = BATTLE_SPAN_FAR; // 初始远距离 → 82-88%
+        else if (gapRatio >= BATTLE_GAP_NEAR) targetSpan = BATTLE_SPAN_MID; // 接近 → 68-82%
+        else targetSpan = BATTLE_SPAN_NEAR; // 碰撞/近战 → 48-70%（车辆成为主体）
+        // 目标 scale：外廓宽 fit + 高度完整入画上限（高瘦车 min(宽/高) 双约束）
+        const targetScale = Math.min((targetSpan * safeW) / uw, safeH / uh);
+        const prevScale = this.battleCam ? this.battleCam.baseScale : scale;
+        if (!this.battleCam) {
+          // 首帧（Matching→Battle）：直达目标（无旧相机闪帧；Must#8）；后续帧才阻尼平滑
+          scale = targetScale;
         } else {
-          // 后续 Active 帧：复用 Active 首帧记录的基准 scale（相机稳定，不逐帧重新 fit 放大）
-          scale = this.battleCam.baseScale;
+          // 死区滞回：目标与当前差距 < 0.3% → 保持当前（吸收 envelope 微震，防相机呼吸）
+          const settledTarget = Math.abs(targetScale - prevScale) / prevScale < BATTLE_SCALE_DEADBAND ? prevScale : targetScale;
+          // 阻尼 + 单帧钳制（≤1.5%/帧）：不瞬移、不振荡
+          scale = settledTarget > prevScale ? Math.min(prevScale + prevScale * BATTLE_SCALE_MAX_STEP, settledTarget) : Math.max(prevScale - prevScale * BATTLE_SCALE_MAX_STEP, settledTarget);
         }
         // F-BATTLE-STAGE-COMPOSITION-P0：Active 首帧计算战斗舞台地面线并记录——
         // Warning/Closing/End 复用同一 groundScreenY（地面线位移 0，阶段连续）。
@@ -2691,11 +2737,12 @@ export class Renderer {
         const vehBottomNeed = stageTop / this.viewToLogical + (bh * scale) / this.viewToLogical + BATTLE_STAGE_VEHICLE_CLEAR;
         let groundScreenYLog = Math.max(logicalH * BATTLE_STAGE_GROUND_MIN, vehBottomNeed);
         groundScreenYLog = Math.min(groundScreenYLog, logicalH * BATTLE_STAGE_GROUND_MAX);
+        const prevCam = this.battleCam;
         this.battleCam = {
-          baseScale: scale,
-          baseEnvW: Math.max(1, bw),
+          baseScale: scale, // 每帧更新（Warning/Closing clamp 基准随动态取景）
+          baseEnvW: prevCam ? prevCam.baseEnvW : Math.max(1, bw),
           minScale: scale * BATTLE_SEPARATE_SCALE_MIN,
-          groundScreenY: groundScreenYLog * this.viewToLogical, // 与 offsetY 同空间（surface=逻辑；Web=历史 ×dpr）
+          groundScreenY: prevCam ? prevCam.groundScreenY : groundScreenYLog * this.viewToLogical, // 首帧锁定地面线
           arenaW: snap.arena.width,
           safeBaseX: baseX,
           safeW,
@@ -2706,6 +2753,32 @@ export class Renderer {
         const lo = this.battleCam.baseScale * (1 - BATTLE_CLOSE_SCALE_DELTA);
         const hi = this.battleCam.baseScale * (1 + BATTLE_CLOSE_SCALE_DELTA);
         scale = Math.min(hi, Math.max(lo, scale));
+        // F-BATTLE-DYNAMIC-FRAMING-R2.1（Must#6/#7）：Closing 收束墙+双车+地面同时可见——
+        // 墙推进后（wallSpan < arena 全宽）相机渐进拉远到「左右墙内缘可见」（阻尼 3%/帧，非突然
+        // 拉远）；墙未推进（初始/阶段首帧）不触发 → 阶段转换保持既有 ±10% clamp 语义。
+        if (phase === 'Closing' && snap.arena.closingWalls.length >= 2) {
+          let wallMinX = Infinity;
+          let wallMaxX = -Infinity;
+          for (const cw of snap.arena.closingWalls) {
+            if (cw.kind === 'polygons') {
+              for (const poly of cw.polygons) for (const p of poly.points) {
+                wallMinX = Math.min(wallMinX, p.x);
+                wallMaxX = Math.max(wallMaxX, p.x);
+              }
+            } else {
+              wallMinX = Math.min(wallMinX, cw.circle.center.x - cw.circle.radius);
+              wallMaxX = Math.max(wallMaxX, cw.circle.center.x + cw.circle.radius);
+            }
+          }
+          const wallSpan = Math.max(1, wallMaxX - wallMinX);
+          const arenaW = Math.max(1, snap.arena.width);
+          if (wallSpan < arenaW * 0.98) {
+            const wallFit = (0.95 * safeW) / wallSpan;
+            if (wallFit < scale) {
+              scale = Math.max(scale - scale * BATTLE_SCALE_MAX_STEP * 2, wallFit);
+            }
+          }
+        }
       }
     } else {
       this.battleCam = null;

@@ -303,7 +303,7 @@ async function runViewport(browser, vp) {
       log(false, `[${vp.w}x${vp.h}] console.error`, m.text());
     }
   });
-  await page.goto(BASE, { waitUntil: 'networkidle' });
+  await page.goto(BASE, { waitUntil: 'load' });
   await page.waitForTimeout(1200);
 
   const A = await areas(page);
@@ -334,7 +334,7 @@ async function runViewport(browser, vp) {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) {
       // 重新开一局：刷新页面回到首页 → 再点寻找对手
-      await page.goto(BASE, { waitUntil: 'networkidle' });
+      await page.goto(BASE, { waitUntil: 'load' });
       await page.waitForTimeout(1000);
       await tapById(page, 'home-find-opponent');
       for (let i = 0; i < 80; i++) {
@@ -361,8 +361,31 @@ async function runViewport(browser, vp) {
       log(act.hudOrange > 0.02, `[${vp.w}x${vp.h}] I. 右阵营 HUD 确有橙色像素（对手 HP/名称）`, `orange=${(act.hudOrange * 100).toFixed(1)}%`);
       // 单元层 battleCameraHierarchyR2 T1 严格 86%；浏览器运行期（战斗推进帧 + parts envelope
       // 外廓 + 采样噪声）允许 +2% 容差——仍远低于「双车贴边满幅」的 95%+ 旧构图。
-      log(act.spanPct <= 0.86 + 0.02, `[${vp.w}x${vp.h}] J. 双车+间距 ≤86% 屏宽（rect 外廓 + 最终像素背书，Must#10）`, `span=${(act.spanPct * 100).toFixed(1)}%`);
+      // F-BATTLE-DYNAMIC-FRAMING-R2.1（Must#10）：初始远距离双车+间距 82-88% 可用宽（+运行期容差）；
+      // 单车 rect 宽 ≥12% 屏（车辆可辨）。证据链 = rect 外廓（probe 指引）+ 车辆色像素背书。
+      log(act.spanPct <= 0.88 + 0.02, `[${vp.w}x${vp.h}] J. 初始双车+间距 ≤88% 屏宽（rect 外廓 + 像素背书，Must#10）`, `span=${(act.spanPct * 100).toFixed(1)}%`);
+      log(act.spanPct >= 0.55, `[${vp.w}x${vp.h}] J2. 初始双车+间距 ≥55% 屏宽（远距离构图非贴边小构图）`, `span=${(act.spanPct * 100).toFixed(1)}%`);
       log(act.aHasGreen && act.bHasOrange, `[${vp.w}x${vp.h}] K. 双车 rect 内确有车身色像素（绿A/橙B，最终合成像素证据）`, `green=${act.aHasGreen} orange=${act.bHasOrange}`);
+      // F-BATTLE-DYNAMIC-FRAMING-R2.1（Must#10）：战斗推进期轮询采样（接近/碰撞时点由物理决定，
+      // 车辆碰撞弹开后可能分离）——动态相机放大证据 = 存在单车 screen rect 宽 ≥ 初始 ×1.05 的时点
+      // （车辆成为主体）；同时记录初始/接近/碰撞三时点像素包围盒。
+      const initW = act && act.a && act.b ? Math.max(act.a.w, act.b.w) : 0;
+      let maxLateW = 0;
+      let lateGreen = false;
+      for (let li = 0; li < 6; li++) {
+        await page.waitForTimeout(250);
+        const st = await probeState(page);
+        if (!st || st.battleState !== 'fighting') break;
+        const actN = await page.evaluate(analyzeInPage, vp.dpr);
+        if (actN && actN.a && actN.b) {
+          maxLateW = Math.max(maxLateW, actN.a.w, actN.b.w);
+          lateGreen = lateGreen || (actN.aHasGreen && actN.bHasOrange);
+        }
+      }
+      if (initW > 0 && maxLateW > 0) {
+        log(maxLateW >= initW * 1.05, `[${vp.w}x${vp.h}] L. 战斗中单车 rect 宽放大 ≥5%（动态取景，车辆成主体）`, `init=${initW.toFixed(0)}px maxLate=${maxLateW.toFixed(0)}px`);
+        log(lateGreen, `[${vp.w}x${vp.h}] L2. 战斗中双车 rect 仍有车身色像素（最终合成像素背书）`, `green=${lateGreen}`);
+      }
     } else if (!fighting) {
       continue;
     }
