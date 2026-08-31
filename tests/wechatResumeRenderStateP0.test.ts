@@ -184,28 +184,34 @@ describe('F-WX-RESUME-RENDER-STATE-P0｜6 类确定性生命周期', () => {
     const rBattleBackdropA = (renderer as any).battleBackdrop as boolean;
     expect(rBattleBackdropA).toBe(true); // 战斗语境 backdrop 仍开
 
-    // Result → Home
+    // Result → Garage 中央装配舞台（F-LOSS-ADJUST-REMATCH-LOOP-P0｜Must#4：战败「调整配置」
+    // 直接进入装配台，metaPage 由 host render 状态转换切入 garage——不再停在首页态）
     runtime.actions.onResultAdjust();
     expect(runtime.playerPhase).toBe('garage');
     expect(runtime.battleState).toBe('editing');
     driveFrame();
 
-    // 节点 B：Home
+    // 节点 B：Garage 装配台（新语义；旧语义为 Home 首页态）
     const homeSnap = snapshotColors(screen, ui);
     const rBattleBackdropB = (renderer as any).battleBackdrop as boolean;
-    const rHomeBackdropB = (renderer as any).homeBackdrop as boolean;
-    const rTransformB = (renderer as any).transform as { scale: number; offsetX: number; offsetY: number };
-    const homeOffsetPct = measureHomeOffsetAndScale(screen, ui, uiHost).off;
+    const rGarageBackdropB = (renderer as any).garageBackdrop as boolean;
 
-    // hide → show
+    // hide → show（Garage 态；渲染状态不得泄漏）
     for (const cb of visibilityCbs) cb(true);
     driveFrame();
     for (const cb of visibilityCbs) cb(false);
     driveFrame();
 
-    // 节点 C：onShow 后 Home
+    // 节点 C：onShow 后仍 Garage 装配台（无旧 Battle 状态）
     const showSnap = snapshotColors(screen, ui);
-    const showOffsetPct = measureHomeOffsetAndScale(screen, ui, uiHost).off;
+
+    // Garage → Home（真实 host dispatch 路径；F-LOSS-ADJUST-REMATCH-LOOP-P0 后回首页需显式 nav）
+    (uiHost as any).dispatch('nav:home');
+    driveFrame();
+    const rTransformB = (renderer as any).transform as { scale: number; offsetX: number; offsetY: number };
+    const rHomeBackdropB = (renderer as any).homeBackdrop as boolean;
+    const homeOffsetPct = measureHomeOffsetAndScale(screen, ui, uiHost).off;
+    const homeSnap2 = snapshotColors(screen, ui);
 
     // Home → Garage（真实 host dispatch 路径）
     (uiHost as any).dispatch('home-garage');
@@ -217,19 +223,20 @@ describe('F-WX-RESUME-RENDER-STATE-P0｜6 类确定性生命周期', () => {
     const rGarageBackdropD = (renderer as any).garageBackdrop as boolean;
 
     // ---- 验收 ----
-    expect(hasClosingWallColor(homeSnap.screen)).toBe(false); // Home 无红墙
+    expect(hasClosingWallColor(homeSnap.screen)).toBe(false); // Result→Garage 无红墙
     expect(hasClosingWallColor(showSnap.screen)).toBe(false); // onShow 后无红墙
     expect(hasClosingWallColor(garageSnap.screen)).toBe(false); // Garage 无红墙（Fix A+B）
+    expect(hasClosingWallColor(homeSnap2.screen)).toBe(false); // 回首页无红墙
     // 首页居偏 vs 全新 boot 基线（差值 ≤2% → 非泄漏；7% 为 home 相机稳态取景，frozen 首页不动）
     expect(Math.abs(homeOffsetPct - freshHome.off)).toBeLessThanOrEqual(0.02);
-    expect(Math.abs(showOffsetPct - freshHome.off)).toBeLessThanOrEqual(0.02);
     // 首页相机确已应用（re-reframe 生效）：scale 与 boot 首页一致且非 battle 相机
     expect(rTransformB.scale).toBeCloseTo(freshHomeScale, 1);
     expect(rTransformB.scale).toBeGreaterThan(1.0);
     // backdrop 原子翻转
     expect(rBattleBackdropB).toBe(false);
     expect(rBattleBackdropD).toBe(false);
-    expect(rHomeBackdropB).toBe(true);
+    expect(rHomeBackdropB).toBe(true); // 显式 nav:home 后回首页
+    expect(rGarageBackdropB).toBe(true); // F-LOSS-ADJUST-REMATCH-LOOP-P0：Result→装配台即 garageBackdrop
     expect(rGarageBackdropD).toBe(true); // Fix A：garageBackdrop 已接通
     // 战斗表现 FX 已清理（Must#4）
     expect((renderer as any).fx.length).toBe(0);

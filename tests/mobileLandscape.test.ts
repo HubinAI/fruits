@@ -556,8 +556,9 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
     expect(resultMethod).toContain("label: '金币'");
     expect(resultMethod).toContain("label: '段位'");
     expect(resultMethod).toContain('获得新部件');
-    expect(resultMethod).toContain("primary: '下一场'");
-    expect(resultMethod).toContain("secondary: '调整配置'");
+    // F-LOSS-ADJUST-REMATCH-LOOP-P0｜Must#3：主/次按胜负切换（战败主=调整配置；胜利主=下一场）
+    expect(resultMethod).toContain("primary: isWin ? '下一场' : '调整配置'");
+    expect(resultMethod).toContain("secondary: isWin ? '调整配置' : '下一场'");
     // F-UX-3C：广告不再走 tertiary 底部按钮 → 改 adRow（奖励区内）
     expect(resultMethod).toContain('adRow');
     expect(resultMethod).toContain('额外 +');

@@ -858,13 +858,26 @@ export class PlayerGameRuntime {
     this.refreshFromEdit(); // 按 phase(Garage) 渲染 solo-A 预览 + Dock（pushUI 接入 Host）
   }
 
-  /** Ended 后玩家选择：下一场 → 走同一套 Matching（随机新对手）→ MatchPreview */
+  /** Ended 后玩家选择：下一场 → 走同一套 Matching（随机新对手）→ MatchPreview
+   *  F-LOSS-ADJUST-REMATCH-LOOP-P0｜Must#7/#9：
+   *  - 防重入：`nextMatchInFlight` 门——广告展示（tryInterstitialSafe await）期间二次点击直接拒绝
+   *    （同步路径仍由 startMatching 的 matching 相位门兜底，双层防「同时创建两场」）；
+   *  - 离开 Result 清理全部 Battle FX（与 adjustConfig 对称；上一局伤害数字/死亡环/激光束
+   *    若残留会在 Matching previewSolo 绘制泄漏——fx 绘制不 gate 于 battle fit）。 */
+  private nextMatchInFlight = false;
   private async nextMatch(): Promise<void> {
-    this.deps.sfx?.stopBattleAudio?.(); // F-AUDIO-RESULT-LIFECYCLE-P0：离开结算即停，下一场 startBattleAudio 再清残留
-    await tryInterstitialSafe(() => {
-      this.currentResult = null;
-      this.startMatching(); // 复用 Garage「寻找对手」同一状态链
-    });
+    if (this.nextMatchInFlight) return;
+    this.nextMatchInFlight = true;
+    try {
+      this.deps.sfx?.stopBattleAudio?.(); // F-AUDIO-RESULT-LIFECYCLE-P0：离开结算即停，下一场 startBattleAudio 再清残留
+      this.deps.battle.clearBattleFx?.(); // F-LOSS-ADJUST-REMATCH-LOOP-P0：Next 路径与 Adjust 对称清 FX
+      await tryInterstitialSafe(() => {
+        this.currentResult = null;
+        this.startMatching(); // 复用 Garage「寻找对手」同一状态链
+      });
+    } finally {
+      this.nextMatchInFlight = false;
+    }
   }
 
   /** Q30：每场 Result 结算（奖励 + 金币/段位 + 首轮引导 + 广告重置 + 埋点） */

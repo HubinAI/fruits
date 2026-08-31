@@ -580,6 +580,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   render(state: PlayerUIState): void {
+    // F-LOSS-ADJUST-REMATCH-LOOP-P0（Must#4）：Result「调整配置」→ 直接进入 Garage 中央装配舞台。
+    // 从 ended（结算卡）离开 → playerPhase=garage 时，metaPage 若仍为 home（进战斗前首页态）
+    // 会停在首页而非装配台（Garage dock/挂点不可见）——此处按 state 转换切入装配页。
+    const prevState = this.lastState;
+    if (prevState && prevState.battleState === 'ended' && state.battleState === 'editing' && state.playerPhase === 'garage') {
+      this.metaPage = 'garage';
+      this.panelView = 'home';
+    }
     this.lastState = state;
     this.dirty = true;
     // F-WX-6：切换选中槽时重置选项条横向滚动
@@ -3610,12 +3618,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.text('获得新部件，可以回车库调整', BASE_W / 2, y + 12, 13, C.onboardText, 'center'); // C.onboardText 仍为 onboard 引导语义
       y += 28;
     }
-    // 按钮行
+    // 按钮行（F-LOSS-ADJUST-REMATCH-LOOP-P0｜Must#3：主/次按钮按胜负切换——
+    // 战败主=「调整配置」暖金（先修车再打）、胜利主=「下一场」；另一为次按钮；
+    // 位置不变（调整配置左 / 下一场右），hitArea 由 button() 每次绘制注册 → 与视觉同源）。
     const btnY = cardY + cardH - 56;
     let bx = cardX + 20;
-    this.button(bx, btnY, 120, 40, 'result-adjust', '调整配置');
+    this.button(bx, btnY, 120, 40, 'result-adjust', '调整配置', { primary: !isWin });
     bx += 130;
-    this.button(bx, btnY, 120, 40, 'result-next', '下一场', { primary: true });
+    this.button(bx, btnY, 120, 40, 'result-next', '下一场', { primary: isWin });
     if (state.rewardAdAvailable) {
       this.button(cardX + cardW - 20 - 170, btnY, 170, 40, 'reward-ad',
         state.rewardAdClaimed ? `已领 +${REWARD_AD_COIN_BONUS}` : `看广告领 ${REWARD_AD_COIN_BONUS} 金币`,
@@ -3666,9 +3676,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         ? { name: state.reward.name, starStr: state.reward.starStr, count: state.reward.countAfter }
         : undefined,
       // F-UX-2D：Result 是最终决策层——大尺寸档（明显放大）
+      // F-LOSS-ADJUST-REMATCH-LOOP-P0｜Must#3：战败主=调整配置（先修车再打）、胜利主=下一场
       large: true,
-      primary: '下一场',
-      secondary: '调整配置',
+      primary: isWin ? '下一场' : '调整配置',
+      secondary: isWin ? '调整配置' : '下一场',
       // F-UX-3C：广告入口在奖励区内部（「额外 +50金币 · 看广告」），明显弱于底部两决策
       adRow: state.rewardAdAvailable
         ? {
@@ -3677,8 +3688,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
             onPress: () => this.actions?.onClaimRewardAd(),
           }
         : undefined,
-      onPrimary: () => this.actions?.onResultNext(),
-      onSecondary: () => this.actions?.onResultAdjust(),
+      onPrimary: () => (isWin ? this.actions?.onResultNext() : this.actions?.onResultAdjust()),
+      onSecondary: () => (isWin ? this.actions?.onResultAdjust() : this.actions?.onResultNext()),
     });
   }
 

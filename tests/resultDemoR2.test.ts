@@ -91,12 +91,13 @@ describe('F-RESULT-DEMO-R2｜手机结算卡与再战路径', () => {
       expect(RESULT_METHOD, '金币块').toContain("label: '金币'");
       expect(RESULT_METHOD, '段位块').toContain("label: '段位'");
       expect(RESULT_METHOD, '部件卡').toContain('partCard');
-      expect(RESULT_METHOD, '下一场主按钮').toContain("primary: '下一场'");
-      expect(RESULT_METHOD, '调整配置次按钮').toContain("secondary: '调整配置'");
+      // F-LOSS-ADJUST-REMATCH-LOOP-P0｜Must#3：主/次按胜负切换（战败主=调整配置；胜利主=下一场）
+      expect(RESULT_METHOD, '主按钮按胜负切换').toContain("primary: isWin ? '下一场' : '调整配置'");
+      expect(RESULT_METHOD, '次按钮按胜负切换').toContain("secondary: isWin ? '调整配置' : '下一场'");
       // 顺序：rewardRows 定义在 partCard 之前（奖励先于部件卡）
       const idxRows = RESULT_METHOD.indexOf("label: '金币'");
       const idxPart = RESULT_METHOD.indexOf('partCard:');
-      const idxBtn = RESULT_METHOD.indexOf("primary: '下一场'");
+      const idxBtn = RESULT_METHOD.indexOf("primary: isWin ? '下一场' : '调整配置'");
       expect(idxRows, '金币块在部件卡前').toBeGreaterThan(-1);
       expect(idxPart, '部件卡在金币块后').toBeGreaterThan(idxRows);
       expect(idxBtn, '按钮在部件卡后').toBeGreaterThan(idxPart);
