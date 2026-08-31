@@ -79,6 +79,10 @@ const BATTLE_ENV_PAD_X = 48; // A+B envelope 并集横向 padding（世界 px；
 const BATTLE_CLOSE_SCALE_DELTA = 0.1; // F-BATTLE-STAGE-COMPOSITION-P0：阶段切换尺度变化 ≤10%
 // （原 0.15 → 0.10；Must：Active/Warning/Closing/End 切换无骤缩）
 const BATTLE_SEPARATE_SCALE_MIN = 0.88; // 分离拉远下限（相对 Active 基准；车辆仍可识别）
+// F-BATTLE-CAMERA-HIERARCHY-R2（Must#3/#4）：初始构图「双车+间距」占可用宽 ≤86%（留边距、
+// 车辆为视觉主体）；单车可见宽下限 12% 屏宽（远距离 fit 也不得缩到难以辨认）。
+const BATTLE_SPAN_MAX_PCT = 0.86;
+const BATTLE_SINGLE_MIN_PCT = 0.12;
 /** 构图安全区：左右 UI 阴影区不计入可用画布（CSS px，每侧内缩量） */
 const SAFE_INSET_X = 56;
 const SAFE_INSET_Y = 28;
@@ -2661,6 +2665,24 @@ export class Renderer {
     // 收束墙不参与 bounds（不会因墙全量 fit 骤缩），车辆始终是视觉主体。
     if (fit === 'battle') {
       if (phase === 'Active' || phase === '') {
+        if (!this.battleCam) {
+          // F-BATTLE-CAMERA-HIERARCHY-R2（Must#3）：初始构图「双车+间距」占可用宽 ≤86%——
+          // 旧 fit 满宽使双车贴安全区边缘（实测 89~91%）、中间 59% 间距空白。按 A∪B 真实
+          // envelope 外廓动态收缩留边距（不缩放至单车不可辨：单车可见宽下限保护 12% 屏宽）。
+          const envA = this.vehicleBounds(snap.vehicleA, true);
+          const envB = this.vehicleBounds(snap.vehicleB, true);
+          const outerWorld = Math.max(1, Math.max(envA.maxX, envB.maxX) - Math.min(envA.minX, envB.minX));
+          const outerPct = (outerWorld * scale) / safeW;
+          if (outerPct > BATTLE_SPAN_MAX_PCT) {
+            const shrunk = (BATTLE_SPAN_MAX_PCT / outerPct) * scale;
+            const singleW = Math.max(envA.maxX - envA.minX, envB.maxX - envB.minX);
+            const singlePct = (singleW * shrunk) / this.viewWidth * this.viewToLogical;
+            if (singlePct >= BATTLE_SINGLE_MIN_PCT) scale = shrunk; // 单车仍可辨才收缩
+          }
+        } else {
+          // 后续 Active 帧：复用 Active 首帧记录的基准 scale（相机稳定，不逐帧重新 fit 放大）
+          scale = this.battleCam.baseScale;
+        }
         // F-BATTLE-STAGE-COMPOSITION-P0：Active 首帧计算战斗舞台地面线并记录——
         // Warning/Closing/End 复用同一 groundScreenY（地面线位移 0，阶段连续）。
         const stageTop = baseY; // HUD 下缘（compact=56 / desktop=insetTop，物理 px）

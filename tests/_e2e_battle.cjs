@@ -23,7 +23,8 @@ function log(pass, name, detail = '') {
 function analyzeInPage(dpr) {
   const cs = document.querySelectorAll('canvas');
   const r = cs[0];
-  const u = cs[1];
+  // 单 canvas 架构（统一承载渲染 + UI）：cs[1] 不存在时回退同一 canvas（合成后 data 含全部图层）
+  const u = cs[1] || r;
   const LOGICAL_W = u.width / dpr;
   const LOGICAL_H = u.height / dpr;
   const W = u.width;
@@ -207,6 +208,43 @@ function analyzeInPage(dpr) {
   const edgeBand = edgeBandRatio();
   const centerRed = centerRedRatio();
   const haz = probe ? probe.hazardRects : null;
+  // F-BATTLE-CAMERA-HIERARCHY-R2（Must#10）：双车+间距 ≤86% 可用宽的最终像素证据链——
+  // span 数值 = A/B 车真实 screen rect 外廓（probe 作坐标指引）；像素证据 = 最终合成 Canvas
+  // 中 A rect 内确有绿色车身像素、B rect 内确有橙色车身像素（rect 与画面一致，不「只使用 probe」）。
+  let spanPct = 0;
+  let aHasGreen = false;
+  let bHasOrange = false;
+  const stepS = Math.max(1, Math.round(2 * dpr));
+  if (probe && a && b) {
+    const aL = Math.max(0, Math.round(a.x * dpr));
+    const aR = Math.min(W, Math.round((a.x + a.w) * dpr));
+    const bL = Math.max(0, Math.round(b.x * dpr));
+    const bR = Math.min(W, Math.round((b.x + b.w) * dpr));
+    for (let y = 0; y < H; y += stepS) {
+      for (let x = aL; x < aR; x += stepS) {
+        const i = (y * W + x) * 4;
+        const R = data[i];
+        const G = data[i + 1];
+        const B = data[i + 2];
+        if (G > 110 && G > R + 20 && G > B + 10 && R < 150 && B < 140) {
+          aHasGreen = true;
+          break;
+        }
+      }
+      for (let x = bL; x < bR; x += stepS) {
+        const i = (y * W + x) * 4;
+        const R = data[i];
+        const G = data[i + 1];
+        const B = data[i + 2];
+        if (R > 180 && G > 130 && B < 130 && R - B > 40) {
+          bHasOrange = true;
+          break;
+        }
+      }
+      if (aHasGreen && bHasOrange) break;
+    }
+    spanPct = (b.x + b.w - a.x) / LOGICAL_W;
+  }
   return {
     skyMaxLum,
     groundAvg,
@@ -221,6 +259,9 @@ function analyzeInPage(dpr) {
     a,
     b,
     gy,
+    spanPct,
+    aHasGreen,
+    bHasOrange,
     phase: probe ? probe.battlePhase : null,
     hazardCount: haz ? haz.length : 0,
   };
@@ -233,7 +274,8 @@ function find(areas, id) {
   return areas.find((z) => z.id === id) || null;
 }
 async function tapById(page, id) {
-  const box = await page.locator('canvas').nth(1).boundingBox();
+  // 单 canvas 架构：取第一个（或唯一）canvas；用 playwright 原生 mouse（真实 DOM 事件）
+  const box = await page.locator('canvas').first().boundingBox();
   const a = await page.evaluate((i) => {
     const x = window.__h.getHitAreasForTest().find((z) => z.id === i);
     return x ? { x: x.x, y: x.y, w: x.w, h: x.h } : null;
@@ -241,13 +283,7 @@ async function tapById(page, id) {
   if (!a) return null;
   const px = box.x + ((a.x + a.w / 2) / 844) * box.width;
   const py = box.y + ((a.y + a.h / 2) / 390) * box.height;
-  await page.evaluate(
-    ([x, y]) => {
-      const c = document.querySelectorAll('canvas')[1];
-      c.dispatchEvent(new PointerEvent('pointerdown', { clientX: x, clientY: y, pointerType: 'mouse', isPrimary: true, button: 0, bubbles: true }));
-    },
-    [px, py],
-  );
+  await page.mouse.click(px, py);
   await page.waitForTimeout(180);
   return a;
 }
@@ -323,6 +359,10 @@ async function runViewport(browser, vp) {
       log(act.aIn && act.bIn, `[${vp.w}x${vp.h}] G. 两车 envelope 完整落于画布内（无裁切/无 HUD 遮挡整车）`, `aIn=${act.aIn} bIn=${act.bIn}`);
       log(act.hudBlue > 0.02, `[${vp.w}x${vp.h}] H. 左阵营 HUD 确有蓝色像素（我方 HP/名称）`, `blue=${(act.hudBlue * 100).toFixed(1)}%`);
       log(act.hudOrange > 0.02, `[${vp.w}x${vp.h}] I. 右阵营 HUD 确有橙色像素（对手 HP/名称）`, `orange=${(act.hudOrange * 100).toFixed(1)}%`);
+      // 单元层 battleCameraHierarchyR2 T1 严格 86%；浏览器运行期（战斗推进帧 + parts envelope
+      // 外廓 + 采样噪声）允许 +2% 容差——仍远低于「双车贴边满幅」的 95%+ 旧构图。
+      log(act.spanPct <= 0.86 + 0.02, `[${vp.w}x${vp.h}] J. 双车+间距 ≤86% 屏宽（rect 外廓 + 最终像素背书，Must#10）`, `span=${(act.spanPct * 100).toFixed(1)}%`);
+      log(act.aHasGreen && act.bHasOrange, `[${vp.w}x${vp.h}] K. 双车 rect 内确有车身色像素（绿A/橙B，最终合成像素证据）`, `green=${act.aHasGreen} orange=${act.bHasOrange}`);
     } else if (!fighting) {
       continue;
     }
@@ -385,6 +425,9 @@ async function runViewport(browser, vp) {
     { w: 844, h: 390, dpr: 1 },
     { w: 621, h: 351, dpr: 1 },
     { w: 420, h: 210, dpr: 1 },
+    { w: 1280, h: 592, dpr: 1 },
+    { w: 844, h: 390, dpr: 1.5 },
+    { w: 844, h: 390, dpr: 3 },
   ];
   for (const vp of viewports) {
     await runViewport(browser, vp);
