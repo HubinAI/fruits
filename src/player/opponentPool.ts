@@ -2,12 +2,17 @@
  * Q15 / Q16｜正常玩家对手池（纯数据 + 纯函数，可测试）。
  *
  * Q16+Q19：对手铺量——由 6 套扩到 36 套明显不同、全部合法的正常 Build。
- * - 使用 watermelon / banana / pineapple / coconut 四种 Body（容量 110 / 90 / 100 / 100）；
+ * F-CONTENT-OPPONENT-BUILD-POOL-R1：新增 13 套模板（heavyBox / tallBody 首次进对手池，
+ * 补「重型/高惯性」类别），并给全部 49 套建立正式模板 ID + 五类战斗定位（rush/ranged/
+ * heavy/control/hybrid）。只做内容组合铺量：不新增机制、不调整任何部件数值。
+ * - Body：watermelon / banana / pineapple / coconut（Q16+Q19）+ heavyBox / tallBody（R1 新增）；
+ *   容量 110 / 90 / 100 / 100 / 100 / 100；
  * - 只使用当前正式 PART_OPTIONS 部件（不含 wedge / ramHead / lifter / 旋锤 等 HOLD / prototype 内容）；
  * - 轮径显式指定（12 / 20 / 26），覆盖 前小后大 / 前大后小 / 双小 / 双标准 / 双大 五类组合，
  *   走真实 Physics，无姿态补偿；
- * - 6 类战斗身份各 ≥6 套（旧 4 + Q19 新 2）：远程压制 / 近距离爆发 / 持续贴身 / 冲锋接敌 / 控距干扰 / 混合型
- *   （分类仅用于设计与测试覆盖，不建立正式「职业/标签系统」）；
+ * - 6 类战斗身份各 ≥6 套（旧 4 + Q19 新 2）：远程压制 / 近距离爆发 / 持续贴身 / 冲锋接敌 / 控距干扰 / 混合型；
+ *   R1 五类定位（模板表）：近战突进 rush ≥3 / 远程压制 ranged ≥3 / 重型高惯 heavy ≥2 /
+ *   控距姿态 control ≥2 / 混合 hybrid ≥2；
  * - 每套都是合法 Build（≥1 Weapon、Energy 不超载、槽位合法、无 HOLD）。
  *
  * 不做匹配算法 / 段位 / Elo —— 玩家「寻找对手」随机抽取（不连续重复同一 index）。
@@ -127,7 +132,7 @@ const Q19_NEW: BuildDraft[] = [
 ];
 
 /** 正式对手池：36 套（6 类 × 6 套；12 西瓜 / 12 香蕉 / 6 菠萝 / 6 椰子） */
-export const OPPONENT_POOL: BuildDraft[] = [
+const LEGACY_POOL: BuildDraft[] = [
   ...RANGED_SUPPRESSION,
   ...CLOSE_BURST,
   ...CONTINUOUS_CONTACT,
@@ -136,6 +141,86 @@ export const OPPONENT_POOL: BuildDraft[] = [
   ...HYBRID,
   ...Q19_NEW,
 ];
+
+/* =====================================================================
+ * F-CONTENT-OPPONENT-BUILD-POOL-R1｜新增 13 套模板
+ * - heavyBox（baseMass 150）与 tallBody（高重心 110×80）首次进对手池；
+ * - 全部使用 PART_OPTIONS 正式部件 + 现有轮径（12/20/26）+ drive（forward/stationary）；
+ * - 能量全部 ≤ Body 容量（heavyBox 100 / tallBody 100 / pineapple 100）；
+ * - 每套 ≥1 Weapon（validateSnapshot 正式校验）。
+ * 定位五类：rush 近战突进 / ranged 远程压制 / heavy 重型高惯 / control 控距姿态 / hybrid 混合。
+ * ===================================================================== */
+export type OpponentRole = 'rush' | 'ranged' | 'heavy' | 'control' | 'hybrid';
+
+/** 对手模板：唯一内部 ID + 五类战斗定位 + 可序列化 Draft */
+export interface OpponentTemplate {
+  id: string;
+  role: OpponentRole;
+  draft: BuildDraft;
+}
+
+function tmpl(id: string, role: OpponentRole, draft: BuildDraft): OpponentTemplate {
+  return { id, role, draft };
+}
+
+const R1_NEW_TEMPLATES: OpponentTemplate[] = [
+  /* ---- 重型/高惯性（heavyBox baseMass 150：推不动、压着打；≥2 目标达成 3 套）---- */
+  tmpl('R1-HVY-01', 'heavy', opp('heavyBox', { rear: 26, front: 26 }, { front: 'cannon', frontMass: 'laser' }, 'stationary')), // 重炮要塞 75/100 · 停驻
+  tmpl('R1-HVY-02', 'heavy', opp('heavyBox', { rear: 26, front: 26 }, { front: 'shotgun', top: 'hammer' })), // 重装近战 55/100 · 前进
+  tmpl('R1-HVY-03', 'heavy', opp('heavyBox', { rear: 26, front: 12 }, { front: 'machineGun', rear: 'thruster' })), // 重装压制推进 50/100 · 前进
+  /* ---- 近战突进（重型/高重心冲撞；≥3 达成 3 套）---- */
+  tmpl('R1-RUSH-01', 'rush', opp('heavyBox', { rear: 12, front: 12 }, { front: 'rammer', rear: 'thruster' })), // 重装冲锤 45/100 · 前进
+  tmpl('R1-RUSH-02', 'rush', opp('pineappleBody', { rear: 26, front: 12 }, { front: 'saw', frontMass: 'spear', rear: 'thruster' })), // 菠萝高重心冲刺 70/100 · 前进
+  tmpl('R1-RUSH-03', 'rush', opp('tallBody', { rear: 12, front: 26 }, { front: 'saw', rear: 'thruster' })), // 高身冲刺锯 45/100 · 前进
+  /* ---- 远程压制（重型/高身远程；≥3 达成 3 套）---- */
+  tmpl('R1-GUN-01', 'ranged', opp('heavyBox', { rear: 26, front: 26 }, { front: 'laser', frontMass: 'shotgun' }, 'stationary')), // 重炮压制 75/100 · 停驻
+  tmpl('R1-GUN-02', 'ranged', opp('tallBody', { rear: 20, front: 20 }, { front: 'machineGun', top: 'laser' }, 'stationary')), // 高架机枪+镭射 75/100 · 停驻
+  tmpl('R1-GUN-03', 'ranged', opp('heavyBox', { rear: 26, front: 12 }, { front: 'cannon', frontMass: 'machineGun' })), // 重炮压制前进 60/100 · 前进
+  /* ---- 控距/姿态干扰（推杆 + 高重心；≥2 达成 2 套）---- */
+  tmpl('R1-CTRL-01', 'control', opp('tallBody', { rear: 12, front: 26 }, { front: 'pushRod', top: 'shotgun' }, 'stationary')), // 高重心推杆炮台 50/100 · 停驻
+  tmpl('R1-CTRL-02', 'control', opp('heavyBox', { rear: 26, front: 12 }, { front: 'pushRod', frontMass: 'machineGun' })), // 重推杆压制 50/100 · 前进
+  /* ---- 混合型（≥2 达成 2 套）---- */
+  tmpl('R1-MIX-01', 'hybrid', opp('heavyBox', { rear: 20, front: 20 }, { front: 'cannon', top: 'saw', rear: 'thruster' })), // 重装混合 75/100 · 前进
+  tmpl('R1-MIX-02', 'hybrid', opp('tallBody', { rear: 20, front: 20 }, { front: 'flamethrower', top: 'saw' })), // 高身喷火锯 55/100 · 前进
+];
+
+/**
+ * 全部对手模板（49 套：36 旧 + 13 新）。id 全局唯一；role 为五类战斗定位。
+ * 旧 36 套按原设计分类映射：远程压制/近距离爆发/持续贴身/冲锋接敌→rush 或 ranged、
+ * 控距干扰→control、混合型→hybrid（持续贴身归 rush：同为近战接敌压进）。
+ */
+export const OPPONENT_TEMPLATES: OpponentTemplate[] = [
+  ...LEGACY_POOL.map((draft, i) =>
+    tmpl(`OPP-${String(i + 1).padStart(2, '0')}`, legacyRole(i), draft),
+  ),
+  ...R1_NEW_TEMPLATES,
+];
+
+/** 旧 36 套的定位映射（按 LEGACY_POOL 索引，与设计分类一一对应） */
+function legacyRole(i: number): OpponentRole {
+  if (i < 4 || (i >= 24 && i < 26)) return 'ranged'; // RANGED_SUPPRESSION 0-3 + Q19 远程 24-25
+  if (i >= 16 && i < 20) return 'control'; // RANGE_CONTROL 16-19
+  if (i >= 32 && i < 34) return 'control'; // Q19 控距 32-33
+  if (i >= 20 && i < 24) return 'hybrid'; // HYBRID 20-23
+  if (i >= 34 && i < 36) return 'hybrid'; // Q19 混合 34-35
+  return 'rush'; // 近爆 4-7 / 贴身 8-11 / 冲锋 12-15 / Q19 近爆 26-27 / 贴身 28-29 / 冲锋 30-31
+}
+
+/** 每套模板的定位（与 OPPONENT_TEMPLATES 索引对齐） */
+export const OPPONENT_ROLES: OpponentRole[] = OPPONENT_TEMPLATES.map((t) => t.role);
+
+/** 各定位包含的模板索引集合 */
+export const ROLE_INDICES: Record<OpponentRole, number[]> = {
+  rush: [],
+  ranged: [],
+  heavy: [],
+  control: [],
+  hybrid: [],
+};
+OPPONENT_ROLES.forEach((r, i) => ROLE_INDICES[r].push(i));
+
+/** 正式对手池：49 套（模板 draft 的深拷贝，供匹配链路消费；保持 BuildDraft[] 兼容） */
+export const OPPONENT_POOL: BuildDraft[] = OPPONENT_TEMPLATES.map((t) => cloneBuildDraft(t.draft));
 
 /** 深拷贝一份 Build Draft（避免直接改写池内常量） */
 export function cloneBuildDraft(d: BuildDraft): BuildDraft {

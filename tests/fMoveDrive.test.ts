@@ -55,16 +55,16 @@ describe('F-MOVE-1 BuildDraft.drive 数据链', () => {
 });
 
 describe('F-MOVE-1 Q16 对手池 drive 分配', () => {
-  it('Q19 铺量后共 36 套（Q16 24 + Q19 12，不重复 Body 组合）', () => {
-    expect(OPPONENT_POOL.length).toBe(36);
+  it('F-CONTENT-OPPONENT-BUILD-POOL-R1 后共 49 套（Q16 24 + Q19 12 + R1 13，不重复 Body 组合）', () => {
+    expect(OPPONENT_POOL.length).toBe(49);
   });
 
-  it('停驻总数 = 9（旧 6 + 新 3），约占 25%（不超半数）', () => {
+  it('停驻总数 = 13（旧 6 + Q19 3 + R1 4），约占 26.5%（不超半数）', () => {
     const stationary = OPPONENT_POOL.filter((d) => d.drive === 'stationary');
-    expect(stationary.length).toBe(9);
+    expect(stationary.length).toBe(13);
     expect(
       OPPONENT_POOL.filter((d) => resolveDriveMode(d.drive) === 'forward').length,
-    ).toBe(27);
+    ).toBe(36);
   });
 
   it('远程压制 4 套全部停驻（索引 0..3）', () => {
@@ -91,7 +91,7 @@ describe('F-MOVE-1 Q16 对手池 drive 分配', () => {
     }
   });
 
-  it('36 套全部通过正式 Validator（≥1 Weapon、Energy≤容量、槽位合法）', () => {
+  it('全部 49 套通过正式 Validator（≥1 Weapon、Energy≤容量、槽位合法）', () => {
     for (const d of OPPONENT_POOL) {
       const snap = buildSnapshot(d);
       const res = validateSnapshot(snap, registry);

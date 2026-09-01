@@ -234,9 +234,10 @@ describe('F-WX-RC-SAFE-BADGE-P0｜RC 版号安全区与合成层级', () => {
     expect(runtime.battleState).toBe('fighting');
     driveFrame();
     expect(badgeTextOps(ui).length).toBe(1); // Battle 仍画 badge
-    // Result（ended）
+    // Result（ended）。guard 为防御性预算（防死循环）：R1 对手池扩容后固定抽取
+    // 0.42 命中最长 ~968 帧 KO 的战斗，900 帧不足，放大到 1200（+24% 余量）。
     let guard = 0;
-    while (runtime.battleState !== 'ended' && guard < 900) {
+    while (runtime.battleState !== 'ended' && guard < 1200) {
       driveFrame();
       guard++;
     }

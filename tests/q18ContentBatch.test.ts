@@ -6,7 +6,7 @@
  *    （菠萝高窄+顶挂点更高；椰子短沉+更抗推），且无特殊规则/隐藏属性；
  * B｜Q19 对手池 24→36：全部合法、无重复、4 Body 均覆盖、stationary 20%~30%、不含 HOLD；
  * D｜V0.3 技术 Merge Gate：4 Body 均能实例化正式 Planck Battle（初始无 NaN）；
- *    36 套对手全部可实例化；代表性配置（4 Body × forward/stationary × 12/20/26 ×
+ *    49 套对手全部可实例化；代表性配置（4 Body × forward/stationary × 12/20/26 ×
  *    远程/近战/Gadget）最小 Battle smoke（步进无 NaN / 缺 def / 非法 hardpoint）。
  *
  * 注：本测试只证明技术链成立，不证明「好不好玩」。
@@ -161,9 +161,9 @@ describe('Q18 新 Body（菠萝 / 椰子）', () => {
   });
 });
 
-describe('Q19 对手池 24→36', () => {
-  it('B1. 共 36 套，且全部通过 Validator + Energy≤容量', () => {
-    expect(OPPONENT_POOL.length).toBe(36);
+describe('Q19 对手池 24→36（R1 → 49）', () => {
+  it('B1. 共 49 套（R1 新增 13），且全部通过 Validator + Energy≤容量', () => {
+    expect(OPPONENT_POOL.length).toBe(49);
     for (const d of OPPONENT_POOL) {
       const snap = buildSnapshotFromDraft(d, registry, 'customB')!;
       const res = validateSnapshot(snap, registry);
@@ -187,12 +187,14 @@ describe('Q19 对手池 24→36', () => {
     expect(new Set(keys).size).toBe(OPPONENT_POOL.length);
   });
 
-  it('B3. 4 种 Body 均覆盖，stationary 比例 20%~30%', () => {
+  it('B3. 6 种 Body 均覆盖（R1 新增 heavyBox/tallBody），stationary 比例 20%~30%', () => {
     const bodies = new Set(OPPONENT_POOL.map((d) => d.bodyDefId));
     expect(bodies.has('watermelonBody')).toBe(true);
     expect(bodies.has('bananaBody')).toBe(true);
     expect(bodies.has('pineappleBody')).toBe(true);
     expect(bodies.has('coconutBody')).toBe(true);
+    expect(bodies.has('heavyBox')).toBe(true); // R1 重型
+    expect(bodies.has('tallBody')).toBe(true); // R1 高重心
     const sta = OPPONENT_POOL.filter((d) => d.drive === 'stationary').length;
     const ratio = sta / OPPONENT_POOL.length;
     expect(ratio).toBeGreaterThanOrEqual(0.2);
@@ -221,7 +223,7 @@ describe('D｜V0.3 技术 Merge Gate', () => {
     }
   });
 
-  it('D2. 36 套对手全部能实例化正式 Planck Battle（无缺 def / 非法 hardpoint / NaN）', () => {
+  it('D2. 全部 49 套对手能实例化正式 Planck Battle（无缺 def / 非法 hardpoint / NaN）', () => {
     for (const d of OPPONENT_POOL) {
       let o: PlanckBattleOrchestrator;
       expect(() => {

@@ -1,6 +1,6 @@
 /**
  * Q25｜V0.6 对手难度梯度验收。
- * 覆盖：36 套唯一 Tier / 每层足够变化 / 段位抽取分布符合配置 / 不连续重复同 Build / 全部 Validator 合法。
+ * 覆盖：49 套唯一 Tier / 每层足够变化 / 段位抽取分布符合配置 / 不连续重复同 Build / 全部 Validator 合法。
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -29,15 +29,15 @@ function mulberry32(seed: number): () => number {
 
 const TIERS: OpponentTier[] = ['easy', 'normal', 'hard'];
 
-describe('Q25 A｜36 套全部属于唯一 Tier', () => {
-  it('A1. 长度 = 36，每套唯一切仅属于一个 Tier', () => {
+describe('Q25 A｜49 套全部属于唯一 Tier', () => {
+  it('A1. 长度 = 池长，每套唯一切仅属于一个 Tier', () => {
     expect(OPPONENT_TIERS.length).toBe(OPPONENT_POOL.length);
     for (const t of OPPONENT_TIERS) expect(TIERS).toContain(t);
   });
-  it('A2. 三层索引互不重叠且并集 = 全部 36', () => {
+  it('A2. 三层索引互不重叠且并集 = 全部池（F-CONTENT-OPPONENT-BUILD-POOL-R1 后 49）', () => {
     const all = [...TIER_INDICES.easy, ...TIER_INDICES.normal, ...TIER_INDICES.hard];
-    expect(all.length).toBe(36);
-    expect(new Set(all).size).toBe(36); // 无重叠
+    expect(all.length).toBe(OPPONENT_POOL.length);
+    expect(new Set(all).size).toBe(OPPONENT_POOL.length); // 无重叠
   });
 });
 
@@ -118,7 +118,7 @@ describe('Q25 D｜不连续重复同一 Build', () => {
 });
 
 describe('Q25 E｜所有 Build 继续 Validator 合法', () => {
-  it('E1. 36 套均可构建为合法 Snapshot（无 HOLD / 超载 / 非法槽）', () => {
+  it('E1. 49 套均可构建为合法 Snapshot（无 HOLD / 超载 / 非法槽）', () => {
     for (const d of OPPONENT_POOL) {
       const snap = buildSnapshotFromDraft(d as BuildDraft, registry, 'opp');
       const res = validateSnapshot(snap, registry);

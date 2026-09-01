@@ -155,7 +155,10 @@ function driveBattleTo(runtime: PlayerGameRuntime, driveFrame: (dt?: number) => 
   return reached;
 }
 
-function driveBattleToEnd(runtime: PlayerGameRuntime, driveFrame: (dt?: number) => void, maxTicks = 900) {
+// maxTicks 为防御性 guard（防死循环），非性能断言。R1 对手池 36→49 后固定抽取
+// 0.42 命中需要 ~968 帧 KO 的 heavyBox/tallBody 战斗（旧池最短 789 帧），900 帧预算不足，
+// 放大到 1200 帧（覆盖最坏 968 + 24% 余量）——合法战斗必须放行，预算只是防挂死。
+function driveBattleToEnd(runtime: PlayerGameRuntime, driveFrame: (dt?: number) => void, maxTicks = 1200) {
   let guard = 0;
   while (runtime.battleState !== 'ended' && guard < maxTicks) {
     driveFrame();

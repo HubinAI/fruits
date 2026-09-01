@@ -311,8 +311,8 @@ describe('Q21→Q22 E｜闭环守卫 + 不退化', () => {
     expect(canEquipPart('laser', 2)).toBe(false); // 未拥有 2★
   });
 
-  it('E3. 36 对手全部合法、可实例化、步进无 NaN；含 2★ 装备不退化', () => {
-    expect(OPPONENT_POOL.length).toBe(36);
+  it('E3. 49 对手全部合法、可实例化、步进无 NaN；含 2★ 装备不退化', () => {
+    expect(OPPONENT_POOL.length).toBe(49);
     for (const d of OPPONENT_POOL) {
       const snap = buildSnapshotFromDraft(d, registry, 'opp');
       expect(validateSnapshot(snap, registry).valid).toBe(true);
