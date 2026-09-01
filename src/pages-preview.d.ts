@@ -24,3 +24,13 @@ declare const __PLAYER_MODE__: boolean | undefined;
  * 注意：__E2E_PROBE__ 已弃用（已迁移到 __WX_DEBUG__），不得出现在任何微信构建中。
  * （__WX_DEBUG__ 的全局类型声明见 wechat-debug.d.ts，此处不再重复声明。）
  */
+
+/**
+ * F-WX-E2E-HANDLE-ISOLATION-P0｜E2E-only 内部句柄宏。
+ *
+ * 仅 `vite.e2e.config.ts` 的 `define.__E2E_INTERNAL_HANDLE__` 注入（'true'）；
+ * 微信/普通/Pages/RC 构建均不注入 → 运行时 undefined（typeof 守卫折叠为 false）。
+ * 职责唯一：控制 E2E 内部句柄（globalThis.__h / __probe / __fx）——与 __WX_DEBUG__
+ * （微信诊断日志）、__WX_DEBUG_GRANT__（全部件×1）、__WX_BUILD_BADGE__（RC 版号）互不借用。
+ */
+declare const __E2E_INTERNAL_HANDLE__: boolean | undefined;

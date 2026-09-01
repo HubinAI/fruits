@@ -45,14 +45,29 @@ afterEach(() => {
 });
 
 describe('F-WX-RC-BUNDLE-CLEAN-P0', () => {
-  it('T1. mountScreen 的 __h 已与 __WX_DEBUG_GRANT__ 解耦（改绑 __WX_DEBUG__，RC 不泄漏）', () => {
-    const mountScreenBlock = UI_SRC.slice(UI_SRC.indexOf('mountScreen('), UI_SRC.indexOf('mountScreen(') + 900);
-    // __h 赋值块不再以 __WX_DEBUG_GRANT__ 为条件（检查代码行：条件宏紧跟 __h 赋值）
-    const hAssignIdx = mountScreenBlock.indexOf('globalThis as { __h?: CanvasPlayerUIHost }');
-    const condStart = mountScreenBlock.lastIndexOf('if (typeof', hAssignIdx);
-    const cond = mountScreenBlock.slice(condStart, hAssignIdx);
-    expect(cond.includes('__WX_DEBUG_GRANT__'), '__h 条件不使用 grant 宏').toBe(false);
-    expect(cond.includes('__WX_DEBUG__'), '__h 条件使用 __WX_DEBUG__（E2E 专用）').toBe(true);
+  it('T1. __h 周边无 __WX_DEBUG__/grant/badge（E2E-only 宏隔离，微信诊断不泄漏）', () => {
+    const MAIN_SRC = readFileSync(resolve(__dirname, '../src/main.ts'), 'utf8');
+    // 检查全部 __h/__probe/__fx 赋值块的条件宏
+    const pats: RegExp[] = [
+      /\(globalThis as \{ __h\?: CanvasPlayerUIHost \}\)\.__h = this/g,
+      /\(globalThis as \{ __h\?: typeof host \}\)\.__h = host/g,
+      /\(globalThis as \{ __probe\?: unknown \}\)\.__probe/g,
+      /\(globalThis as \{ __fx\?: unknown \}\)\.__fx/g,
+    ];
+    const blocks: Array<{ src: string; idx: number }> = [];
+    for (const pat of pats) {
+      for (const m of MAIN_SRC.matchAll(pat)) blocks.push({ src: MAIN_SRC, idx: m.index });
+      for (const m of UI_SRC.matchAll(pat)) blocks.push({ src: UI_SRC, idx: m.index });
+    }
+    expect(blocks.length, '找到全部内部句柄赋值点').toBeGreaterThanOrEqual(5);
+    for (const b of blocks) {
+      const condStart = b.src.lastIndexOf('if (typeof', b.idx);
+      const cond = b.src.slice(condStart, b.idx);
+      expect(cond.includes('__E2E_INTERNAL_HANDLE__'), '句柄条件 = __E2E_INTERNAL_HANDLE__').toBe(true);
+      expect(cond.includes('__WX_DEBUG_GRANT__'), '不使用 grant').toBe(false);
+      expect(cond.includes('__WX_BUILD_BADGE__'), '不使用 badge').toBe(false);
+      expect(cond.includes('typeof __WX_DEBUG__'), '不使用 __WX_DEBUG__ 条件').toBe(false);
+    }
     // grant 宏只保留玩家可见入口（wechat/game.ts isResetDevVisible）
     const gameSrc = readFileSync(resolve(__dirname, '../wechat/game.ts'), 'utf8');
     const grantUses = gameSrc.match(/__WX_DEBUG_GRANT__/g) ?? [];
@@ -78,10 +93,14 @@ describe('F-WX-RC-BUNDLE-CLEAN-P0', () => {
     expect(r.stderr).toContain('FAIL');
   });
 
-  it('T6. 命中 window.__probe = → exit 1（RC/普通微信模式）', () => {
+  it('T6. 命中 window.__probe / __h → exit 1（RC/普通微信/微信诊断模式）', () => {
     const r = runCheck('window.__probe = {phase:"Active"};', 'wechat');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('window.__probe = ');
+    // 微信诊断（diag）模式同样禁止内部句柄
+    const d = runCheck('globalThis.__h = this;', 'diag');
+    expect(d.status).toBe(1);
+    expect(d.stderr).toContain('globalThis.__h = ');
   });
 
   it('T7. 普通业务 dirty 字段不误报', () => {

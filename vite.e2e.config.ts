@@ -15,6 +15,9 @@ export default defineConfig({
   define: {
     __PAGES_PREVIEW__: 'true',
     __WX_DEBUG__: 'true',
+    // F-WX-E2E-HANDLE-ISOLATION-P0：E2E 内部句柄（__h/__probe/__fx）专属宏——微信诊断构建
+    //（WECHAT_DEBUG_INPUT=1 也设 __WX_DEBUG__=true）不再因此暴露任何内部句柄。
+    __E2E_INTERNAL_HANDLE__: 'true',
   },
   build: {
     outDir: 'dist-e2e',

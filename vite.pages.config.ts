@@ -23,6 +23,8 @@ export default defineConfig({
     // window.__h / window.__probe 探针代码不进入生产 bundle（E2E 专用构建 vite.e2e.config.ts 注入 true）。
     // 原 __E2E_PROBE__ 已弃用，统一迁移到 __WX_DEBUG__。
     __WX_DEBUG__: 'false',
+    // F-WX-E2E-HANDLE-ISOLATION-P0：E2E-only 内部句柄宏显式 false → 编译期折叠（死代码消除）
+    __E2E_INTERNAL_HANDLE__: 'false',
   },
   build: {
     outDir: 'dist-pages',

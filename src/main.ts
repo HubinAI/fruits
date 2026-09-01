@@ -442,7 +442,9 @@ if (playerViewport) {
 // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：E2E 探针（window.__h）仅存在于专用 E2E 构建（__WX_DEBUG__ define）；
 // 正式 Pages/Web/微信构建编译期折叠为 false → 生产零调试对象暴露。几何快照在 loop() 内注入。
 // 注意：__E2E_PROBE__ 已弃用（已迁移到 __WX_DEBUG__），不得出现在任何微信构建中。
-if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
+// F-WX-E2E-HANDLE-ISOLATION-P0：E2E 内部句柄只归 __E2E_INTERNAL_HANDLE__（E2E 构建专属）；
+// 微信诊断构建（WECHAT_DEBUG_INPUT=1 也设 __WX_DEBUG__=true）不得因此暴露 __h/__fx。
+if (typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__) {
   (globalThis as { __h?: typeof host }).__h = host;
   // F-BATTLE-HIT-READABILITY-R1：E2E 确定性高频命中探针——门禁注入真实 DamageEvent /
   // 激光束到正式渲染管线（合成像素验收：不得只读内部数组）。__WX_DEBUG__ 构建专属，
@@ -1204,7 +1206,8 @@ function loop(now: number): void {
   // phase / A/B 屏幕 envelope / matchVehicleRects / transform / groundScreenY /
   // 收束墙屏幕 rect / 阶段文案（供浏览器 Gate 硬断言；只读、不参与任何 Gameplay 规则；
   // 正式构建编译期折叠为零开销）。__E2E_PROBE__ 已弃用（已迁移到 __WX_DEBUG__）。
-  if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
+  // F-WX-E2E-HANDLE-ISOLATION-P0：__probe 每帧几何快照是 E2E 内部句柄 → 只归 __E2E_INTERNAL_HANDLE__。
+  if (typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__) {
     try {
       const orch = lab.orchestrator;
       const snap = orch?.getRenderSnapshot?.();

@@ -473,9 +473,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.ctx = ctx;
     this.viewport = platform.createViewport(this.canvas);
     // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：host 探针（window.__h）仅存在于专用构建。
-    // 微信构建经 __WX_DEBUG__（恒为 false）编译期折叠为 undefined，绝无调试句柄(__h)泄漏；
-    // Web E2E 构建（vite.e2e.config.ts）注入 __WX_DEBUG__=true 以暴露几何诊断。
-    if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
+    // F-WX-E2E-HANDLE-ISOLATION-P0：__h 只归 __E2E_INTERNAL_HANDLE__（E2E 构建专属宏）——
+    // 微信诊断构建（WECHAT_DEBUG_INPUT=1 也设 __WX_DEBUG__=true）不得暴露任何内部句柄。
+    if (typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__) {
       (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
     }
     // 输入唯一入口：Platform Input Adapter（F-WX-4）
@@ -502,10 +502,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (!ctx) throw new Error('Canvas 2D not supported');
     this.ctx = ctx;
     this.viewport = platform.createViewport(this.canvas);
-    // F-WX-RC-BUNDLE-CLEAN-P0｜Must#2：`__h` 内部句柄只归 E2E 专用宏 __WX_DEBUG__（与 mount()/main.ts 一致），
-    // 与 __WX_DEBUG_GRANT__（「全部件×1」玩家可见入口）完全解耦——
-    // RC/普通微信构建 __WX_DEBUG__=false → 编译期折叠为零，bundle 中绝不出现 globalThis.__h。
-    if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
+    // F-WX-RC-BUNDLE-CLEAN-P0｜Must#2：`__h` 内部句柄只归 E2E-only 宏 __E2E_INTERNAL_HANDLE__，
+    // 与 __WX_DEBUG_GRANT__（「全部件×1」）、__WX_DEBUG__（微信诊断日志）完全解耦——
+    // RC/普通微信/微信诊断构建编译期折叠为零，bundle 中绝不出现 globalThis.__h。
+    if (typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__) {
       (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
     }
     // 唯一输入入口：绑定到唯一可见屏幕 Canvas（Renderer canvas）
@@ -2390,7 +2390,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * - 反馈 = runtime 返回的「已获得全部件×1（N种）」（N 来自实际去重数量，Must#8）。
    */
   private drawDevGrantEntry(state: PlayerUIState): void {
-    const e2eProbe = typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__;
+    // F-WX-E2E-HANDLE-ISOLATION-P0：E2E 构建显示 DEV 按钮归 E2E-only 宏（非微信诊断日志宏）
+    const e2eProbe = typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__;
     if (!(DEV_TOOLS_VISIBLE || e2eProbe) || !state.resetDevVisible) return;
     const stage = this.garageStageRect;
     if (!stage) return;

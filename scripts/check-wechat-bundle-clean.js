@@ -3,10 +3,11 @@
  *
  * 用法：
  *   node scripts/check-wechat-bundle-clean.js <bundle.js> <mode>
- *   mode: rc | wechat | e2e
+ *   mode: rc | wechat | diag | e2e
  *
- * - RC/普通微信（rc|wechat）：禁止任何内部句柄赋值（globalThis/window.__h/__probe/__fx
- *   /__runtime/__renderer/__player/__battle）——命中即 exit 1，绝不报告「RC 构建成功」。
+ * - RC/普通微信/微信诊断（rc|wechat|diag）：禁止任何内部句柄赋值（globalThis/window
+ *   .__h/__probe/__fx/__runtime/__renderer/__player/__battle）——命中即 exit 1，
+ *   绝不报告「RC 构建成功」。微信诊断（WECHAT_DEBUG_INPUT=1）只有日志、零内部句柄。
  * - E2E（e2e）：显式 allowlist 放行 E2E 专用句柄（__h/__probe/__fx），但仍禁止
  *   __runtime/__renderer/__player/__battle 等未授权句柄。
  * - 使用**精确赋值模式**（`globalThis.__h = `）而非宽泛 grep——合法的 `dirty` 业务字段、
@@ -48,8 +49,8 @@ function main() {
     console.error('[bundle-clean] 用法: node scripts/check-wechat-bundle-clean.js <bundle.js> <rc|wechat|e2e>');
     process.exit(2);
   }
-  if (!['rc', 'wechat', 'e2e'].includes(mode)) {
-    console.error(`[bundle-clean] 未知构建模式: ${mode}（应为 rc|wechat|e2e）`);
+  if (!['rc', 'wechat', 'e2e', 'diag'].includes(mode)) {
+    console.error(`[bundle-clean] 未知构建模式: ${mode}（应为 rc|wechat|e2e|diag）`);
     process.exit(2);
   }
   const src = readFileSync(bundlePath, 'utf8');

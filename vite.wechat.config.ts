@@ -102,6 +102,9 @@ export default defineConfig({
     __WX_DEBUG_GRANT__: process.env.WECHAT_DEBUG_GRANT ? 'true' : 'false',
     // 注意：__E2E_PROBE__ 已弃用（已迁移到 __WX_DEBUG__），不得出现在任何微信构建中（Web E2E 构建见 vite.e2e.config.ts 的 __WX_DEBUG__），
     // 禁止把 __h / __probe / E2E 专用路径带入微信真机。
+    // F-WX-E2E-HANDLE-ISOLATION-P0：E2E-only 内部句柄宏在微信构建显式注入 false →
+    // esbuild 编译期折叠 + 死代码消除（不注入则 typeof 运行时检查保留在 bundle，门禁按文本判定 FAIL）。
+    __E2E_INTERNAL_HANDLE__: 'false',
   },
   plugins: [
     runtimeInfoPlugin(),

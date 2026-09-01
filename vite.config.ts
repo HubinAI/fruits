@@ -21,6 +21,12 @@ export default defineConfig({
     // （dist 内容始终是 index.html + assets，无旧产物残留）。
     emptyOutDir: false,
   },
+  define: {
+    // F-WX-E2E-HANDLE-ISOLATION-P0：Web 生产构建同样显式折叠 E2E-only 内部句柄宏
+    //（未 define 则 typeof 运行时检查保留，__h 赋值留在 bundle 文本——按门禁语义视为泄漏）。
+    __WX_DEBUG__: 'false',
+    __E2E_INTERNAL_HANDLE__: 'false',
+  },
   plugins: [
     runtimeInfoPlugin(),
     // F-DEMO-PLAYER-RUNTIME-P0：本地玩家演示模式（npm run dev:player / ?player=1）。
