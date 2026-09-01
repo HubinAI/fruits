@@ -28,6 +28,7 @@ import { bindPlatformCore } from '../src/platform/context';
 import { createWechatCore } from '../src/platform/wechat';
 import { createWebCore } from '../src/platform/web';
 import { getInventory, saveInventory } from '../src/core/partInventory';
+import { grantAllNewBodies } from '../src/core/bodyOwnership';
 import { savePlayerBuild, loadPlayerBuild } from '../src/core/buildPersistence';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -202,6 +203,7 @@ describe('F-LOSS-ADJUST-REMATCH-LOOP-P0', () => {
 
   it('T4. 奖励只结算一次：End 后多次 tick，库存不再变化', () => {
     const { runtime, host } = runtimeSetup([{ phase: 'Active' }, { phase: 'End' }]);
+    grantAllNewBodies(); // REWARD-ACQ-R1：storage 就绪后去 body（body 不入 PartInventory），库存 +1 断言只对 functional/movement 成立
     const totalBefore = invTotal();
     fightToEnd(runtime, host);
     expect(host.lastState?.battleState).toBe('ended');
@@ -214,6 +216,7 @@ describe('F-LOSS-ADJUST-REMATCH-LOOP-P0', () => {
 
   it('T5. 新获得部件进入库存：End 结算后库存 +1', () => {
     const { runtime, host } = runtimeSetup([{ phase: 'Active' }, { phase: 'End' }]);
+    grantAllNewBodies(); // REWARD-ACQ-R1：同 T4——去 body 后结算必入 PartInventory
     const before = invTotal();
     fightToEnd(runtime, host);
     expect(host.lastState?.battleState).toBe('ended');

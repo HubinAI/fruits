@@ -12,7 +12,7 @@
  * 使用真实 Renderer + 最小 DOM canvas/context stub（node 环境无 DOM）。
  * 唯一允许的窄类型断言仅用于 DOM canvas/context stub；Orchestrator / Runtime 类型零 cast / any。
  */
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PhysicsLab } from '../src/lab/physicsLab';
 import { Renderer } from '../src/render/renderer';
 import { BattleOrchestrator } from '../src/battle/battleOrchestrator';
@@ -107,6 +107,13 @@ beforeAll(() => {
   // node 环境无 window；Renderer.render 读取 window.devicePixelRatio（|| 1 兜底）。
   // performance.now() 为 Node 全局，无需 stub。
   vi.stubGlobal('window', { devicePixelRatio: 1 });
+});
+
+// ⚠️ 泄漏防护（2026-09-01 REWARD-ACQUISITION 交付时发现）：beforeAll 的 stubGlobal 若不在
+// 文件结束后恢复，window 被替换为 { devicePixelRatio:1 } 会污染后续所有测试文件
+// （WebLifecycle 读 window.rAF/setTimeout 超时——vmForks 串行同进程全量 flake 根因）。
+afterAll(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('F-02M-B17B-T · PhysicsLab 双引擎入口 selector + lifecycle', () => {

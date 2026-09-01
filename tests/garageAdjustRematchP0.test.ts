@@ -29,6 +29,7 @@ import type { BuildSnapshot } from '../src/core/types';
 import { registry } from '../src/core/content';
 import { makeStarterDraft } from '../src/lab/buildEditorModel';
 import { getInventory } from '../src/core/partInventory';
+import { grantAllNewBodies } from '../src/core/bodyOwnership';
 import { savePlayerBuild, loadPlayerBuild } from '../src/core/buildPersistence';
 const INSETS = { left: 44, right: 20, top: 12, bottom: 16 }; // 与 resultUxR1 测试同款
 import { computeEnergy } from '../src/core/buildValidator';
@@ -319,6 +320,7 @@ describe('F-GARAGE-ADJUST-REMATCH-P0', () => {
 
   it('T8. 奖励不重复：onGarageRetry 不触发结算；第二局 End 库存 +1 只一次', () => {
     const { runtime, host } = runtimeSetup([{ phase: 'Active' }, { phase: 'End' }]);
+    grantAllNewBodies(); // REWARD-ACQ-R1：storage 就绪后去 body（body 解锁 bodyOwnership 不入 PartInventory），库存 +1 断言只对 functional/movement 成立
     const before = invTotal();
     fightToEnd(runtime, host); // 第一局 End → 结算 +1
     const after1 = invTotal();
