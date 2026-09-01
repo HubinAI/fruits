@@ -5,14 +5,20 @@
  *   → Result 调整配置进 Garage（保留配置）
  *   → Garage 换装（body + 移动件/武器）
  *   → 再次匹配 → 下一局：最终 Canvas 像素证明外观变化 + probe snapshot 证明 Build 一致
- *   → 返回 Result：奖励未重复（localStorage 库存差 = 1 次）
+ *   → 返回 Result：奖励未重复（统一奖励变化断言：PartInventory +1 或 ownedBodies +1，只结算一次）
  *   → Next Match 路径单独覆盖（win→primary 下一场 / loss→secondary 下一场 → matching 不进 garage）。
  * 视觉结果来自最终合成 Canvas 像素（A 车 rect 区域像素签名对比）；内部 probe 只用于
  * 配置（draft）与 session（battleState/playerPhase）证据。
+ *
+ * F-CONTENT-PACK-BROWSER-GATE-R1：奖励断言从「库存必 +1」改为「统一奖励变化」——
+ * typed reward 命中 body 时变化发生在 bodyOwnership（ownedBodies +1），PartInventory 不变；
+ * 命中 movement/functional 时 PartInventory +1。两者互斥且同场只结算一次。
+ * 不做任何 grantAllNewBodies 预置（正式 body reward 路径必须真实走通）。
  */
 const { chromium } = require('playwright-core');
 const BASE = 'http://127.0.0.1:8138/?player=1';
 const INV_KEY = 'strongfruit.ownedParts.v2';
+const BODIES_KEY = 'strongfruit.ownedBodies.v1';
 
 let PASS = 0;
 let FAIL = 0;
@@ -112,6 +118,49 @@ async function invTotal(page) {
       return n;
     } catch { return -1; }
   }, INV_KEY);
+}
+
+/**
+ * F-CONTENT-PACK-BROWSER-GATE-R1｜统一奖励状态快照（结算前后各取一次，比较增量）：
+ * - inv：PartInventory 总量（strongfruit.ownedParts.v2）
+ * - bodies：ownedBodies 已解锁新车身数（strongfruit.ownedBodies.v1，数组长度）
+ */
+async function rewardState(page) {
+  return page.evaluate(
+    ([invK, bodyK]) => {
+      const readInv = () => {
+        try {
+          const raw = localStorage.getItem(invK);
+          if (!raw) return 0;
+          const obj = JSON.parse(raw);
+          const inv = obj && typeof obj === 'object' && 'obj' in obj ? obj.obj : obj;
+          let n = 0;
+          for (const key of Object.keys(inv)) {
+            const e = inv[key];
+            if (e && typeof e === 'object') n += (e.one || 0) + (e.two || 0);
+          }
+          return n;
+        } catch { return -1; }
+      };
+      const readBodies = () => {
+        try {
+          const raw = localStorage.getItem(bodyK);
+          if (!raw) return 0;
+          const arr = JSON.parse(raw);
+          return Array.isArray(arr) ? arr.length : 0;
+        } catch { return 0; }
+      };
+      return { inv: readInv(), bodies: readBodies() };
+    },
+    [INV_KEY, BODIES_KEY],
+  );
+}
+
+/** 统一奖励变化断言：恰好一次结算 → (Δinv=1 ∧ Δbodies=0) 或 (Δinv=0 ∧ Δbodies=1)，二者互斥 */
+function logReward(ok, name, info, before, after) {
+  const d = { inv: after.inv - before.inv, bodies: after.bodies - before.bodies };
+  const valid = (d.inv === 1 && d.bodies === 0) || (d.inv === 0 && d.bodies === 1);
+  log(ok && valid, name, `${info} | Δinv=${d.inv} Δbodies=${d.bodies}`);
 }
 
 (async () => {
@@ -243,14 +292,15 @@ async function invTotal(page) {
     log(false, 'E/F. 像素对比基准缺失', `first=${!!firstA} second=${!!secondA}`);
   }
 
-  // ---------- G. 第二局 Result：奖励未重复（库存差 = 1 次结算） ----------
-  const s1 = await invTotal(page); // 第二局结算前（= S0 + 第一局 loss 1 次 + 中间 win 局次数）
+  // ---------- G. 第二局 Result：奖励未重复（统一奖励变化 = 恰好 1 次结算） ----------
+  const r1 = await rewardState(page); // 第二局结算前（= S0 + 第一局 loss 1 次 + 中间 win 局次数）
   const ended2 = await waitProbe(page, (p) => p && p.battleState === 'ended', 60000);
   log(!!ended2, 'G. 第二局结束（ended）', '');
   const primary2 = await findHit(page, 'modal-primary', 12);
   log(!!primary2, 'G. 第二局 Result 决策按钮出现', '');
-  const s2 = await invTotal(page);
-  log(s2 === s1 + 1, 'G. 奖励未重复：第二局库存 +1（只结算一次）', `s1=${s1} s2=${s2}`);
+  const r2 = await rewardState(page);
+  logReward(true, 'G. 奖励未重复：第二局恰好结算一次（PartInventory +1 或 ownedBodies +1，互斥且不重复）',
+    `s1=${JSON.stringify(r1)} s2=${JSON.stringify(r2)}`, r1, r2);
 
   // ---------- H. Next Match 路径：重试直到 Win 局 → 点 primary（下一场，主按钮）→ matching（不进 garage） ----------
   // Loss 主按钮=调整配置 语义已在 A 步骤 e2e 验证（primary→garage）；本步骤专验 Win 主按钮=下一场。
