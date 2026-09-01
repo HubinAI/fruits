@@ -160,6 +160,10 @@ const HOME_VEHICLE_WIDTH_MAX_PCT = 0.47;
 // F-GARAGE-CENTER-SCALE-R2.1：Garage 专用上限（中央舞台车辆为主视觉，允许略宽于 Home 的 47%，
 // 但 ≤48% 保证任何 stage 宽度下车辆最终可见宽不超 48% 屏；Home 不动）
 const HOME_VEHICLE_WIDTH_MAX_PCT_GARAGE = 0.48;
+// F-WX-IOS-COLD-BOOT-PREVIEW-P0：Garage 专用宽度下限（屏宽基准）。R2.1 T1 断言语义
+// 「车辆可见宽 ∈ [40%,48%] 屏宽」——高度充足时 minS（safeW 基准 40%）先行；高车/强 insets
+// 高度不足（hLimit < minS）时以本下限兜底宽度目标（允许车辆上下轻微溢出取景区）。
+const HOME_VEHICLE_WIDTH_MIN_PCT_GARAGE = 0.40;
 // F-BATTLE-CAMERA-R2：battle 相机不再用 Mobile/Desktop 固定 corridor（旧 F-WX-8-C
 // MOBILE_ACTIVE_* / Q08-A-FIX CORRIDOR_* 已删除）——统一按 A+B 真实 envelope 构图，
 // 见 reframe battle 分支与 applyBattleFollow。
@@ -2686,7 +2690,23 @@ export class Renderer {
           ? ((HOME_VEHICLE_WIDTH_MAX_PCT_GARAGE * (this.viewWidth / this.viewToLogical)) / soloEnvW)
           : (HOME_VEHICLE_WIDTH_MAX_PCT * safeW) / soloEnvW;
       const hLimit = safeH / bh; // 高度完整入画上限（bh>0 已由上方 bounds 守卫保证）
-      scale = Math.min(hLimit, Math.min(maxS, Math.max(minS, scale)));
+      // F-WX-IOS-COLD-BOOT-PREVIEW-P0｜高车/强 insets 高度不足（hLimit < minS）：
+      // 宽度目标优先——去掉 hLimit 硬锁，scale 提到宽度下限（garage 按 R2.1 屏宽 40% 语义；
+      // home 保持 safeW 语义），允许车辆上下轻微溢出取景区（取景区与顶栏/装配带的间隙由
+      // 布局兜底；溢出量 = 宽度目标对应高度 − safeH，高车时 ≤ ~30px）。
+      // 高度充足（hLimit ≥ minS，矮车/常规车）：完整入画优先（原逻辑，零回归）。
+      scale =
+        hLimit >= minS
+          ? Math.min(hLimit, Math.min(maxS, Math.max(minS, scale)))
+          : Math.min(
+              maxS,
+              Math.max(
+                framing?.mode === 'garage'
+                  ? (HOME_VEHICLE_WIDTH_MIN_PCT_GARAGE * (this.viewWidth / this.viewToLogical)) / soloEnvW
+                  : minS,
+                scale,
+              ),
+            );
     }
     // F-BATTLE-CAMERA-R2：battle 相机基准记录 / 非 Active 阶段尺度钳制。
     // F-BATTLE-DYNAMIC-FRAMING-R2.1（Must#3/#4）：Active 每帧按 A∪B 真实 bounds 计算目标
