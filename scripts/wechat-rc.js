@@ -90,6 +90,19 @@ if (build.status !== 0) {
   process.exit(build.status || 1);
 }
 
+// —— F-WX-RC-BUNDLE-CLEAN-P0：bundle-clean 门禁（生成/确认 rc-build.json 之前、四方 SHA 之前）——
+// RC bundle 不得包含任何内部句柄赋值（globalThis/window.__h/__probe/__fx 等）；
+// 命中 → exit 1 → 不输出「RC 构建成功」。
+const bundleClean = spawnSync(
+  process.execPath,
+  [resolve(__dirname, 'check-wechat-bundle-clean.js'), resolve(outDir, 'game.js'), 'rc'],
+  { cwd: root, stdio: 'inherit' },
+);
+if (bundleClean.status !== 0) {
+  console.error('[build:wechat:rc] ❌ bundle-clean 门禁未通过（RC bundle 含内部句柄泄漏）——RC 判定失败。');
+  process.exit(bundleClean.status || 1);
+}
+
 // —— Must#5：生成 rc-build.json ——
 const headSha = git(['rev-parse', 'HEAD'], root);
 const dirty = state.dirtyFiles.length > 0;

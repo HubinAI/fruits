@@ -502,9 +502,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (!ctx) throw new Error('Canvas 2D not supported');
     this.ctx = ctx;
     this.viewport = platform.createViewport(this.canvas);
-    // F-WX-IOS-CANVAS-CRASH-P0｜Must#6：仅内部 RC 调试构建（__WX_DEBUG_GRANT__）暴露 __h 调试句柄；
-    // 普通微信构建恒 false → 调试句柄不带入真机。
-    if (typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__) {
+    // F-WX-RC-BUNDLE-CLEAN-P0｜Must#2：`__h` 内部句柄只归 E2E 专用宏 __WX_DEBUG__（与 mount()/main.ts 一致），
+    // 与 __WX_DEBUG_GRANT__（「全部件×1」玩家可见入口）完全解耦——
+    // RC/普通微信构建 __WX_DEBUG__=false → 编译期折叠为零，bundle 中绝不出现 globalThis.__h。
+    if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
       (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
     }
     // 唯一输入入口：绑定到唯一可见屏幕 Canvas（Renderer canvas）
