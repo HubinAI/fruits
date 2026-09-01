@@ -107,7 +107,7 @@ const RESULT_STATE: PlayerUIState = {
   ...garageState(),
   battleState: 'ended',
   result: { winner: 'A', hpA: 80, hpB: 0 },
-  reward: { name: '炮', starStr: '★', cat: '武器', countAfter: 2 },
+  reward: { kind: 'functional', name: '炮', starStr: '★', cat: '武器', countAfter: 2 },
   economy: { coinDelta: 100, ratingDelta: 10, tierLabel: '青铜', rating: 10, coin: 100 },
   resultOnboardingVisible: false,
   rewardAdAvailable: true,

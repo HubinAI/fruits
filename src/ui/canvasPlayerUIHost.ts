@@ -281,8 +281,8 @@ interface ModalSpec {
    * F-RESULT-DEMO-R2：sub 为辅助小字（如段位名 + 当前值），与 value 同块、紧邻不分离。
    */
   rewardRows?: Array<{ label: string; value: string; sub?: string; tone?: ModalTone }>;
-  /** F-META-UX4：独立奖励卡（获得部件：名称 + 星级 + 当前数量） */
-  partCard?: { name: string; starStr: string; count: number };
+  /** F-META-UX4：独立奖励卡（获得部件：名称 + 星级 + 当前数量；unlocked 车身奖励显示「已解锁」） */
+  partCard?: { name: string; starStr: string; count: number; unlocked?: boolean };
   /** F-UX-3C：奖励区内部的小型次级入口（如广告领币）——不再做第三个底部按钮 */
   adRow?: { label: string; disabled?: boolean; onPress?: () => void };
   primary: string;
@@ -3730,7 +3730,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.panel(cardX + 20, y, cardW - 40, 58, V.panelEmph, V.border, V.radiusM);
       this.text('获得部件', BASE_W / 2, y + 16, 12, V.textSecondary, 'center');
       this.text(`${state.reward.name} ${state.reward.starStr}`, BASE_W / 2, y + 38, 22, V.primary, 'center', 700);
-      this.text(state.reward.cat, BASE_W / 2, y + 52, 12, V.textFaint, 'center');
+      // F-CONTENT-REWARD-ACQUISITION-R1：车身奖励追加「已解锁」（无 x1 概念）
+      this.text(
+        state.reward.kind === 'body' ? `${state.reward.cat} · 已解锁` : state.reward.cat,
+        BASE_W / 2,
+        y + 52,
+        12,
+        V.textFaint,
+        'center',
+      );
       y += 66;
     }
     if (state.economy) {
@@ -3800,7 +3808,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       body,
       rewardRows: rows.length ? rows : undefined,
       partCard: state.reward
-        ? { name: state.reward.name, starStr: state.reward.starStr, count: state.reward.countAfter }
+        ? {
+            name: state.reward.name,
+            starStr: state.reward.starStr,
+            count: state.reward.countAfter,
+            // F-CONTENT-REWARD-ACQUISITION-R1：车身奖励显示「已解锁」（无意义 x1 不展示）
+            unlocked: state.reward.kind === 'body',
+          }
         : undefined,
       // F-UX-2D：Result 是最终决策层——大尺寸档（明显放大）
       // F-LOSS-ADJUST-REMATCH-LOOP-P0｜Must#3：战败主=调整配置（先修车再打）、胜利主=下一场
@@ -3935,11 +3949,25 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       if (this.isShort) {
         // short 紧凑两行：名称 + 库存（上）· 星级（下）
         this.text(spec.partCard.name, cx + pad + 12, yy + 8, 12, V.textPrimary, 'left', 700);
-        this.text(`库存 ${spec.partCard.count}`, cx + cardW - pad - 12, yy + 8, 11, V.textSecondary, 'right');
+        this.text(
+          spec.partCard.unlocked ? '已解锁' : `库存 ${spec.partCard.count}`,
+          cx + cardW - pad - 12,
+          yy + 8,
+          11,
+          V.textSecondary,
+          'right',
+        );
         this.text(spec.partCard.starStr, cx + pad + 12, yy + 18, 11, V.primary, 'left', 700);
       } else {
         this.text(spec.partCard.name, cx + pad + 12, yy + 18, 16, V.textPrimary, 'left', 700);
-        this.text(`库存 ${spec.partCard.count}`, cx + cardW - pad - 12, yy + 18, 14, V.textSecondary, 'right');
+        this.text(
+          spec.partCard.unlocked ? '已解锁' : `库存 ${spec.partCard.count}`,
+          cx + cardW - pad - 12,
+          yy + 18,
+          14,
+          V.textSecondary,
+          'right',
+        );
         this.text(spec.partCard.starStr, cx + pad + 12, yy + 36, 15, V.primary, 'left', 700);
       }
       yy += ph + 8;

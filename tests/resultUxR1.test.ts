@@ -60,7 +60,7 @@ function resultState(over: Partial<PlayerUIState> = {}): PlayerUIState {
     opponent: null,
     matchBarHidden: true,
     result: { winner: 'A', hpA: 90, hpB: 0 },
-    reward: { name: '榴莲炮', starStr: '★★', cat: 'weapon', countAfter: 2 },
+    reward: { kind: 'functional', name: '榴莲炮', starStr: '★★', cat: 'weapon', countAfter: 2 },
     economy: { coinDelta: 50, ratingDelta: 12, tierLabel: '青铜', rating: 212, coin: 150 },
     resultOnboardingVisible: true,
     rewardAdAvailable: true,

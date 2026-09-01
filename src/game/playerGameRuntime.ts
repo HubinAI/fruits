@@ -909,12 +909,36 @@ export class PlayerGameRuntime {
   private finalizeBattleResult(r: { winner: 'A' | 'B'; hpA: number; hpB: number }): void {
     const isWin = r.winner === 'A';
     // Q22：结算本场奖励（胜/负均获得 1★、可重复；同场只结算一次，自动入库）
+    // F-CONTENT-REWARD-ACQUISITION-R1：typed 奖励（functional/movement/body）——
+    // body 走 bodyOwnership 解锁（Result 显示「已解锁」，无 x1）；movement 走 PartInventory；
+    // functional 既有行为不变。
     const outcome = this.rewardSettler.settle(r);
     this.currentReward = outcome
       ? (() => {
+          if (outcome.kind === 'body') {
+            const def = registry.bodies.get(outcome.defId);
+            return {
+              kind: 'body',
+              name: def?.name ?? outcome.defId,
+              starStr: '',
+              cat: '车身',
+              countAfter: 1,
+            };
+          }
+          if (outcome.kind === 'movement') {
+            const def = registry.movements.get(outcome.defId);
+            return {
+              kind: 'movement',
+              name: def?.name ?? outcome.defId,
+              starStr: '★',
+              cat: '移动',
+              countAfter: outcome.countAfter,
+            };
+          }
           const def = registry.functionals.get(outcome.defId);
           const cat = def?.category === 'weapon' ? '武器' : def?.category === 'gadget' ? '辅助' : '';
           return {
+            kind: 'functional',
             name: def?.name ?? outcome.defId,
             starStr: outcome.star >= 2 ? '★★' : '★',
             cat,

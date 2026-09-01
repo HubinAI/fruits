@@ -63,7 +63,7 @@ function resultState(): PlayerUIState {
     garageSelected: null, inventory: getInventory(), progress: { coin: 100, rating: 200 },
     onboarding: 'done', resetDevVisible: false, opponent: null, matchBarHidden: true,
     result: { winner: 'A', hpA: 90, hpB: 0 },
-    reward: { name: '榴莲炮', starStr: '★★', cat: 'weapon', countAfter: 2 },
+    reward: { kind: 'functional', name: '榴莲炮', starStr: '★★', cat: 'weapon', countAfter: 2 },
     economy: { coinDelta: 50, ratingDelta: 12, tierLabel: '青铜', rating: 212, coin: 150 },
     resultOnboardingVisible: false, rewardAdAvailable: true, rewardAdClaimed: false,
     readyOverlayVisible: false,

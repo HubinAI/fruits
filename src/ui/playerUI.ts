@@ -121,7 +121,14 @@ export interface PlayerUIState {
   matchBarHidden: boolean;
   // —— Result ——
   result: { winner: 'A' | 'B'; hpA: number; hpB: number } | null;
-  reward: { name: string; starStr: string; cat: string; countAfter: number } | null;
+  reward: {
+    /** F-CONTENT-REWARD-ACQUISITION-R1：奖励类型（body 显示「已解锁」；movement/functional 显示 x1） */
+    kind: 'functional' | 'movement' | 'body';
+    name: string;
+    starStr: string;
+    cat: string;
+    countAfter: number;
+  } | null;
   economy: {
     coinDelta: number;
     ratingDelta: number;

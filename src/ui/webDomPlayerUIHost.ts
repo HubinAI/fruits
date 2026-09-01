@@ -298,10 +298,12 @@ export class WebDomPlayerUIHost implements PlayerUIHost {
     this.resultHpA.textContent = `我方剩余 HP：${Math.round(state.result.hpA)}`;
     this.resultHpB.textContent = `对手剩余 HP：${Math.round(state.result.hpB)}`;
     if (state.reward) {
+      // F-CONTENT-REWARD-ACQUISITION-R1：车身奖励显示「已解锁」（无数量概念）；其余显示当前拥有 ×N
+      const countText = state.reward.kind === 'body' ? '已解锁' : `当前拥有 ×${state.reward.countAfter}`;
       this.resultReward.innerHTML =
         `<div class="rr-label">获得部件</div>` +
         `<div class="rr-name">${state.reward.name} ${state.reward.starStr}</div>` +
-        `<div class="rr-cat">${state.reward.cat} · 当前拥有 ×${state.reward.countAfter}</div>`;
+        `<div class="rr-cat">${state.reward.cat} · ${countText}</div>`;
       this.resultReward.style.display = 'flex';
     } else {
       this.resultReward.style.display = 'none';

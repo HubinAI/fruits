@@ -19,6 +19,7 @@
 import { PART_OPTIONS } from './partOptions';
 import { EMPTY_SLOT } from '../lab/buildEditorModel';
 import { platform } from '../platform';
+import { grantBody, isBodyOwned, loadOwnedBodies, NEW_OFFICIAL_BODIES } from './bodyOwnership';
 import type { BuildDraft } from '../lab/buildEditorModel';
 import { readJsonWithVersion, migrateLegacy, stampVersion } from './saveVersion';
 
@@ -223,8 +224,15 @@ export function ensureInventory(build: BuildDraft | null): PartInventory {
   return seeded;
 }
 
-/** 战斗奖励产出 */
+/**
+ * F-CONTENT-REWARD-ACQUISITION-R1｜奖励候选类型。
+ * functional = 既有战斗/辅助部件；movement = 3 新轮组；body = 4 新车身。
+ */
+export type RewardKind = 'functional' | 'movement' | 'body';
+
+/** 战斗奖励产出（typed：functional/movement/body；star 恒 1★，body 无星级概念为占位） */
 export interface RewardOutcome {
+  kind: RewardKind;
   defId: string;
   /** V0.5：奖励永远是 1★（可重复获得） */
   star: 1;
@@ -233,16 +241,53 @@ export interface RewardOutcome {
 /**
  * 纯计算：从正式 PART_OPTIONS 随机挑 1 个部件作为 1★ 奖励（可重复，不限是否已拥有）。
  * rng 可注入以便测试确定性；默认 Math.random。
+ * F-CONTENT-REWARD-ACQUISITION-R1：返回 kind='functional'（与 typed 池同构；既有语义不变）。
  */
 export function computeReward(rng: () => number = Math.random): RewardOutcome {
   const idx = Math.min(OFFICIAL_PARTS.length - 1, Math.floor(rng() * OFFICIAL_PARTS.length));
-  return { defId: OFFICIAL_PARTS[idx], star: 1 };
+  return { kind: 'functional', defId: OFFICIAL_PARTS[idx], star: 1 };
 }
 
-/** 结算结果（供 Result 卡展示「当前拥有 ×N」） */
+/**
+ * F-CONTENT-REWARD-ACQUISITION-R1｜typed 奖励候选池（平铺选择语义，无权重/无保底/无新随机源）：
+ * - functional：OFFICIAL_PARTS 恒在池（重复获得正常累计，既有行为不变）；
+ * - movement：OFFICIAL_MOVEMENTS 恒在池（每场 x1，复用 PartInventory one 计数）；
+ * - body：NEW_OFFICIAL_BODIES 中「尚未拥有」者——获得后经 grantBody 解锁即移出，
+ *   四个车身全部拥有后自动从池移除（已拥有车身不再作为空奖励出现）；
+ * - 过滤后为空（防御分支：实际恒非空）→ 安全 fallback 纯 functional，不报错、不发空奖励。
+ */
+export function buildRewardCandidates(): Array<{ kind: RewardKind; defId: string }> {
+  const cands: Array<{ kind: RewardKind; defId: string }> = [];
+  for (const p of OFFICIAL_PARTS) cands.push({ kind: 'functional', defId: p });
+  for (const m of OFFICIAL_MOVEMENTS) cands.push({ kind: 'movement', defId: m });
+  const owned = new Set(loadOwnedBodies());
+  for (const b of NEW_OFFICIAL_BODIES) {
+    if (!owned.has(b)) cands.push({ kind: 'body', defId: b });
+  }
+  if (cands.length === 0) {
+    for (const p of OFFICIAL_PARTS) cands.push({ kind: 'functional', defId: p });
+  }
+  return cands;
+}
+
+/**
+ * F-CONTENT-REWARD-ACQUISITION-R1｜typed 奖励选择：与 computeReward 同构的平铺随机
+ * （沿用候选池平铺语义，不新建未经验证的复杂权重系统）。rng 可注入以便测试确定性。
+ * 纯选择不修改库存/拥有状态——由调用方（BattleRewardSettler.settle）按 kind 入账。
+ */
+export function computeTypedReward(rng: () => number = Math.random): RewardOutcome {
+  const pool = buildRewardCandidates();
+  const idx = Math.min(pool.length - 1, Math.floor(rng() * pool.length));
+  const pick = pool[idx];
+  return { kind: pick.kind, defId: pick.defId, star: 1 };
+}
+
+/** 结算结果（供 Result 卡展示：functional/movement 显示当前拥有 ×N；body 显示「已解锁」） */
 export interface SettleResult {
+  kind: RewardKind;
   defId: string;
   star: number;
+  /** functional/movement：入账后库存数；body：1（拥有即解锁，无数量概念） */
   countAfter: number;
 }
 
@@ -259,14 +304,25 @@ export class BattleRewardSettler {
   settle(resultRef: unknown, rng: () => number = Math.random): SettleResult | null {
     if (this.settledRef === resultRef) return this.last; // 同场已结算
     this.settledRef = resultRef;
-    const r = computeReward(rng);
-    const inv = getInventory();
-    addPart(inv, r.defId, r.star, 1);
-    saveInventory(inv);
+    const r = computeTypedReward(rng);
+    // F-CONTENT-REWARD-ACQUISITION-R1：按类型入账——
+    // body → bodyOwnership 解锁（拥有即解锁，无数量概念；已拥有车身因候选池移除不会再被选中）；
+    // movement/functional → PartInventory 1★ x1（重复获得正常累计，行为不变）。
+    let countAfter = 0;
+    if (r.kind === 'body') {
+      grantBody(r.defId);
+      countAfter = isBodyOwned(r.defId) ? 1 : 0;
+    } else {
+      const inv = getInventory();
+      addPart(inv, r.defId, r.star, 1);
+      saveInventory(inv);
+      countAfter = getCount(inv, r.defId, r.star);
+    }
     const res: SettleResult = {
+      kind: r.kind,
       defId: r.defId,
       star: r.star,
-      countAfter: getCount(inv, r.defId, r.star),
+      countAfter,
     };
     this.last = res;
     return res;

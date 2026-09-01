@@ -221,7 +221,7 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
           playerPhase: 'matchPreview',
           battleState: 'ended',
           result: { winner: 'A', hpA: 100, hpB: 0 },
-          reward: { name: '榴莲炮', starStr: '★★', cat: 'weapon', countAfter: 2 },
+          reward: { kind: 'functional', name: '榴莲炮', starStr: '★★', cat: 'weapon', countAfter: 2 },
           economy: { coinDelta: 50, ratingDelta: 12, tierLabel: '青铜', rating: 212, coin: 150 },
         }),
       );
