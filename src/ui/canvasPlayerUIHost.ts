@@ -446,6 +446,22 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /**
+   * F-WX-IOS-RESUME-VIEWPORT-P0：iOS 切后台返回 / canvas backing 被系统清空或重置后，
+   * 强制整页重绘（仅置 dirty 标志，下一帧 renderBattleFrame / render 走完整 ensureSize +
+   * clear + 重绘）。
+   *
+   * 为什么需要：稳态页（Home / Garage 编辑态）在「无状态事件」时 dirty=false → UI Host
+   * 不重绘——若 backing 位图已被系统清空（iOS 后台回收）而尺寸未变，顶栏/底栏会持续缺失
+   * 直到下一次状态变化（用户回 Home）。syncWechatViewport 在 onShow/resize 恢复后调用本
+   * 方法强制重建画面，不依赖旧 Canvas 像素残留。
+   *
+   * 零副作用：不触碰任何 UI 状态 / Gameplay / Build / 存档；幂等（重复调用无害）。
+   */
+  forceRedraw(): void {
+    this.dirty = true;
+  }
+
+  /**
    * F-WX-EXPERIENCE-RC-P0：设置体验版 SHA 水印（game.ts 在 `__WX_BADGE__` 为真时调用）。
    * 传入形如 `#575f1d0` 的短 SHA；传空字符串即关闭（正式发布前可一键关闭）。
    */

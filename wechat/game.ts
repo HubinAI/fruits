@@ -43,6 +43,7 @@ import { resolveLayoutProfile } from '../src/ui/layoutProfile';
 import { PlayerGameRuntime } from '../src/game/playerGameRuntime';
 import { WechatBattleHost } from '../src/game/wechatBattleHost';
 import { SingleLoop } from '../src/platform/wechat/singleLoop';
+import { createViewportSync, type ViewportSyncReason } from '../src/platform/wechat/viewportSync';
 import { installWechatErrorGuard } from '../src/platform/wechat/errorGuard';
 import { APP_VERSION } from '../src/core/env';
 import { PLAYER_LOGICAL_W, PLAYER_LOGICAL_H } from '../src/platform/playerViewport';
@@ -312,9 +313,30 @@ loop.onFrame = (now: number) => {
   compositeUi();
 };
 
+// —— 11a0) F-WX-IOS-RESUME-VIEWPORT-P0｜唯一视口同步入口（syncWechatViewport）。
+// 所有 onShow / onWindowResize / transient 重试复用同一个入口（禁止两套尺寸逻辑）。
+// 内部顺序（Queue 三节 1~11 步）：读 windowInfo → 判横屏稳定 → 同步双 Canvas backing →
+// surface logical（getter 自动反映）→ PlayerViewportTransform（微信未实例化 no-op）→
+// runtime.doResize（Renderer resize + reframe）→ UI Host forceRedraw → ctx DPR 单次变换 →
+// 完成后 loop.start+request 恢复。竖屏 transient 不提交、有限帧重试；backing 内容清空
+// 时同尺寸也重设 + 强制重绘（不依赖旧像素残留）。 ——
+const viewportSync = createViewportSync({
+  screenCanvas,
+  uiCanvas,
+  uiHost,
+  runtime,
+  loop,
+  readWindowInfo: readWechatWindowInfo,
+  scheduleRetry: (fn, ms) => setTimeout(fn, ms),
+});
+
 // 后台→前台：wx.onHide 暂停调度（微信会挂起 JS）；onShow 恢复 + 重置 dt 时钟防爆发。
 // F-WX-RUNTIME-LIFECYCLE-P0：onHide 同时停止持续音源并清理交互瞬时状态（微信无 window，
 // host 的 window 安全网恒不生效，必须在此显式处理）。
+// F-WX-IOS-RESUME-VIEWPORT-P0：onShow 不再「只 reframe」——统一走唯一视口同步入口
+// syncWechatViewport('show')（读 windowInfo → 判横屏稳定 → 同步双 Canvas backing →
+// doResize/reframe → forceRedraw → 恢复 SingleLoop）。iOS 切后台返回时 window 可能短暂
+// 报竖屏（390×844）或 canvas backing 被系统清空/重置——旧接线不回同步导致跨层错乱。
 platform.lifecycle.onVisibilityChange((hidden) => {
   if (hidden) {
     loop.stop(); // 停 tick（含取消待执行帧）/ 清记账
@@ -322,38 +344,38 @@ platform.lifecycle.onVisibilityChange((hidden) => {
     sfx.stopBattleAudio?.(); // 切后台停止全部循环战斗音源（回前台由新战斗重新登记，不叠加）
     uiHost.cancelInteraction(); // 清拖动 ghost / armed / 未闭合手势（不修改 Build 与存档）
   } else {
-    loop.start();
-    runtime.resetClock();
-    // F-WX-RESUME-RENDER-STATE-P0｜Must#6：后台→前台按当前页重取景（Home→home、Garage→garage、
-    // Matching/Locked→previewFixed、Battle→battle fit），确保恢复后第一张合成帧即正确居中，
-    // 不残留 hide 前旧相机 transform（如战斗竞技场相机）。reframePlayerCamera 按当前 playerPhase/
-    // battleState 幂等重算同一 transform，无副作用；不触碰 PlayerViewportTransform / Canvas DPR / 已验证 surface 契约。
-    runtime.reframePlayerCamera();
-    loop.request(); // 幂等：若循环仍在跑则不重复起
+    runtime.resetClock(); // 防 dt 爆发（同步/重试期间不 tick）
+    syncViewport('show'); // 唯一入口：读窗口→判横屏→同步 backing→doResize→forceRedraw→loop.start+request
   }
 });
 
+/**
+ * F-WX-IOS-RESUME-VIEWPORT-P0｜唯一视口同步入口的微信接线（诊断 + 转发）。
+ *
+ * 所有 onShow / onWindowResize / transient 重试都必须经此转发到 createViewportSync 的
+ * syncWechatViewport —— 不允许任何其它路径独立修改 canvas backing 或调用 runtime.doResize
+ * （禁止两套尺寸逻辑）。
+ *
+ * 诊断：__WX_DEBUG__=true（WECHAT_DEBUG_INPUT=1 诊断构建）输出 [WX-VIEWPORT-SYNC] 单次
+ * JSON；PROD false → 常量折叠零日志。不暴露 globalThis 句柄、不进最终 RC。
+ */
+function syncViewport(reason: ViewportSyncReason): void {
+  const r = viewportSync.syncWechatViewport(reason);
+  if (typeof __WX_DEBUG__ !== 'undefined' && __WX_DEBUG__) {
+    // eslint-disable-next-line no-console
+    console.log('[WX-VIEWPORT-SYNC]', JSON.stringify(r));
+  }
+}
+
+// boot 首帧启动主循环（后续由 syncWechatViewport 的 loop.start+request 恢复）
 loop.request();
 
-// —— 11a) F-WX-VIEWPORT-SURFACE-P0｜Must#8：窗口尺寸变化（DevTools 模拟器拖拽/横竖屏切换等，
-//   部分基础库存在 wx.onWindowResize）→ 同步两块 Canvas backing 为 window×dpr，随后
-//   runtime.doResize() 重取景。canvas resize 会重置 ctx state → Renderer.render 每帧首行
-//   setTransform(dpr)、UIHost.ensureSize 每帧 draw 顶部重建 transform，无需手工重设；
-//   surface 已实时读 canvas（viewport.ts getter），无遗留旧尺寸。 ——
+// —— 11a) F-WX-VIEWPORT-SURFACE-P0｜Must#8 + F-WX-IOS-RESUME-VIEWPORT-P0：窗口尺寸变化
+//   （DevTools 模拟器拖拽/横竖屏切换等，部分基础库存在 wx.onWindowResize）→ 统一走唯一
+//   入口（读 windowInfo → 判横屏 → 同步两块 Canvas backing → runtime.doResize 重取景 →
+//   forceRedraw → 恢复 loop）。不再保留独立的尺寸同步逻辑；竖屏 transient 值不会被提交。 ——
 if (typeof wx.onWindowResize === 'function') {
-  wx.onWindowResize(() => {
-    const info = readWechatWindowInfo();
-    if (!info || info.windowWidth <= 0 || info.windowHeight <= 0) return;
-    const d = info.pixelRatio || __backingDpr;
-    const w = Math.max(1, Math.round(info.windowWidth * d));
-    const h = Math.max(1, Math.round(info.windowHeight * d));
-    if (w === screenCanvas.width && h === screenCanvas.height) return; // 尺寸未变：跳过
-    screenCanvas.width = w;
-    screenCanvas.height = h;
-    uiCanvas.width = w;
-    uiCanvas.height = h;
-    runtime.doResize(); // host resize + reframePlayerCamera（renderer/UI 下帧自动按新 viewport）
-  });
+  wx.onWindowResize(() => syncViewport('resize'));
 }
 
 // —— 12) 微信错误兜底（Must#7）：捕获未处理异常 / 拒绝，记录构建 SHA + 玩家阶段；
