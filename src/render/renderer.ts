@@ -1971,6 +1971,56 @@ export class Renderer {
       ctx.beginPath();
       ctx.ellipse(r * 0.18, -r * 0.92, r * 0.4, r * 0.18, 0.5, 0, Math.PI * 2);
       ctx.fill();
+    } else if (id === 'body_pineapple') {
+      // 菠萝：高窄黄绿椭圆体 + 顶部冠叶（高重心车身身份一眼可辨）
+      const rx = w * 0.42;
+      const ry = h * 0.42;
+      ctx.fillStyle = '#c9c24a';
+      ctx.globalAlpha = 0.92;
+      ctx.beginPath();
+      ctx.ellipse(0, h * 0.06, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      this.applyPartOutline('#b7ad3f');
+      ctx.stroke();
+      this.resetPartOutline();
+      // 网格纹理（轻量，仅外观）
+      ctx.strokeStyle = 'rgba(150,140,50,0.5)';
+      ctx.lineWidth = Math.max(1, ry * 0.06);
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.ellipse(0, h * 0.06, rx * (0.4 + 0.15 * Math.abs(i)), ry * (0.5 + 0.1 * Math.abs(i)), 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      // 顶部冠叶
+      ctx.strokeStyle = '#5f9e3f';
+      ctx.lineWidth = Math.max(1.5, ry * 0.14);
+      ctx.lineCap = 'round';
+      for (const ang of [-0.5, 0, 0.5]) {
+        ctx.beginPath();
+        ctx.moveTo(0, -ry * 0.9 + h * 0.06);
+        ctx.lineTo(Math.sin(ang) * rx * 0.5, -ry * 1.35 + h * 0.06);
+        ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
+    } else if (id === 'body_coconut') {
+      // 椰子：短沉棕圆体 + 顶部三芽点（更抗推身份）
+      const r = Math.min(w, h) * 0.46;
+      ctx.fillStyle = '#8a5a32';
+      ctx.globalAlpha = 0.92;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      this.applyPartOutline('#6f4626');
+      ctx.stroke();
+      this.resetPartOutline();
+      ctx.fillStyle = '#5a3a20';
+      for (const [dx, dy] of [[-0.18, -0.7], [0.18, -0.7], [0, -0.5]] as const) {
+        ctx.beginPath();
+        ctx.arc(dx * r, dy * r, r * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+      }
     } else {
       ctx.restore();
       return false;

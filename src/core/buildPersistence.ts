@@ -61,8 +61,9 @@ function isBuildDraftShape(d: unknown): d is BuildDraft {
   const o = d as Record<string, unknown>;
   if (typeof o.bodyDefId !== 'string' || !KNOWN_BODIES.has(o.bodyDefId)) return false;
   if (typeof o.rearRadius !== 'number' || typeof o.frontRadius !== 'number') return false;
-  if (o.rearWheelDefId !== undefined && (typeof o.rearWheelDefId !== 'string' || !KNOWN_MOVEMENTS.has(o.rearWheelDefId))) return false;
-  if (o.frontWheelDefId !== undefined && (typeof o.frontWheelDefId !== 'string' || !KNOWN_MOVEMENTS.has(o.frontWheelDefId))) return false;
+  // F-CONTENT-PACK-REAL-UI-R1｜Fix 4：卸下轮组存为 EMPTY_SLOT（站桩 Build 可持久化重载）
+  if (o.rearWheelDefId !== undefined && (typeof o.rearWheelDefId !== 'string' || (o.rearWheelDefId !== EMPTY_SLOT && !KNOWN_MOVEMENTS.has(o.rearWheelDefId)))) return false;
+  if (o.frontWheelDefId !== undefined && (typeof o.frontWheelDefId !== 'string' || (o.frontWheelDefId !== EMPTY_SLOT && !KNOWN_MOVEMENTS.has(o.frontWheelDefId)))) return false;
   if (typeof o.functionalSelections !== 'object' || o.functionalSelections === null) {
     return false;
   }

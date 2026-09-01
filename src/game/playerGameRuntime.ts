@@ -264,7 +264,9 @@ export class PlayerGameRuntime {
       if (slotKey === 'body' && NEW_OFFICIAL_BODIES.includes(value) && !isBodyOwned(value)) return;
       // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：轮组装备守卫——未获得的新轮组不可装备（T6）。
       // wheelStd 恒默认拥有；small/large/heavy 需库存（canEquipMovement，复用 PartInventory）。
-      if ((slotKey === 'rearWheel' || slotKey === 'frontWheel') && !canEquipMovement(value)) return;
+      // F-CONTENT-PACK-REAL-UI-R1｜Fix 4：卸轮放行——EMPTY_SLOT（卸下单个/双轮形成站桩 Build）
+      // 不走 canEquipMovement 守卫（EMPTY_SLOT ∉ OFFICIAL_MOVEMENTS → 旧守卫误拦截卸轮）。
+      if ((slotKey === 'rearWheel' || slotKey === 'frontWheel') && value !== EMPTY_SLOT && !canEquipMovement(value)) return;
       // Q28：变更前快照（F-GARAGE-LIVE-ASSEMBLY-P0：超载回滚用）
       const prev = {
         body: this.draftA.bodyDefId,

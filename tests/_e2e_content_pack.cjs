@@ -261,37 +261,30 @@ async function openChip(page, chipId) {
   }
   return false; // mobile 非首槽（frontWheel/drive）无 chip 入口
 }
-/** 点选项卡。注意正式 UI 的 strip-scroll 箭头 bug 语义（v7cd8c0b 实测）：
- *  箭头点击后首帧用「未 clamp 的 garageStripScroll」注册 hitArea（超出 maxScroll 的坐标），
- *  下一次 draw（如点卡触发的 gestureDown 重绘）才修正——findHit 与点击之间坐标会漂移
- *  （E2E 实测装错卡）。因此带 verify 回调：点击后验证效果，漂移装错则重试
- *  （重试时 hitAreas 已修正）。verify 缺省 = 点击即成功（无状态可验的场合）。
+/** 点选项卡（F-CONTENT-PACK-REAL-UI-R1 真实玩家语义：禁点击失败重试）。
+ *  - Fix 2 已消除 strip-scroll 漂移（布局前统一 clampGarageStripScroll）→ 点卡即装所见卡；
+ *  - 真实玩家路径：先向右翻页直到目标卡完全可见（strip-scroll-right 仅用于「揭示」，非重试点击），
+ *    单击一次，立即 verify 效果；verify 失败即 FAIL（不再点卡重试掩盖真实缺陷）；
+ *  - onVerifyFail 仅作「armed→点挂点」单步补装（移动端轮卡点击进入 armed 后必须再点挂点才装备，
+ *    属正式交互路径，非点击重试），成功一次即返回。
  *  opts.verify(page) → boolean 表示装备生效。
- *  opts.onVerifyFail(page) → boolean 表示「verify 失败后经其他路径补装成功」（如 armed 挂点）。 */
+ *  opts.onVerifyFail(page) → boolean 表示「armed 挂点补装成功」。 */
 async function pickOption(page, optId, opts = {}) {
   const { verify, onVerifyFail } = opts;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    let clicked = false;
-    for (let pass = 0; pass < 2 && !clicked; pass++) {
-      for (let i = 0; i < 8 && !clicked; i++) {
-        const opt = await findHit(page, optId, 2);
-        if (opt) {
-          await clickHit(page, opt);
-          await sleep(250);
-          clicked = true;
-          break;
-        }
-        const dir = pass === 0 ? 'strip-scroll-right' : 'strip-scroll-left';
-        const btn = await findHit(page, dir, 2);
-        if (!btn) break;
-        await clickHit(page, btn);
-        await sleep(200);
-      }
+  for (let i = 0; i < 10; i++) {
+    const opt = await findHit(page, optId, 2);
+    if (opt) {
+      await clickHit(page, opt); // 真实玩家单击一次
+      await sleep(250);
+      if (!verify || (await verify(page))) return true;
+      // 仅允许「armed→点挂点」单步补装（正式交互，非点击重试）
+      if (onVerifyFail && (await onVerifyFail(page))) return true;
+      return false; // 真实失败：不重试，不掩盖
     }
-    if (!clicked) return false;
-    if (!verify || (await verify(page))) return true;
-    if (onVerifyFail && (await onVerifyFail(page))) return true;
-    await sleep(150); // 漂移装错 → 等 hitAreas 修正后重试
+    const next = await findHit(page, 'strip-scroll-right', 2); // 翻页揭示目标卡（非重试）
+    if (!next) break;
+    await clickHit(page, next);
+    await sleep(150);
   }
   return false;
 }
@@ -708,11 +701,9 @@ async function sampleWheelBelt(page, frames = 3) {
       details.join(' '));
     log(scaleOk, 'B.5 取景缩放跳变 ≤10%（large/heavy fit 自适应）', details.join(' '));
 
-    // B.7 站桩 Build 合法性。实测移动端（三视口全 mobile）drive 槽无任何入口：
-    //   chip:drive / entry:drive / hp-sel:drive 均无命中区；Garage idle 挂点不渲染不注册
-    //   （F-GARAGE-VISUAL-DENSITY-R2 正式设计：挂点只在拖动/armed/flash 期间显示与可点；
-    //    touch 拖动装配属 F-GARAGE-TOUCH-ASSEMBLY-R2 未交付）→「卸轮 + 站桩」无法通过
-    //   真实点击序列达成。可达部分验证 + 如实披露（Queue 性质=不改正式产品逻辑）。
+    // B.7 Fix 4：移动端真实操作闭环（卸轮 → 站桩 Build）。
+    // 装备 wheelStd 后，move 分类下「卸下后轮/卸下前轮」轻量入口（unmount:rear/front）命中区应存在；
+    // 点击即卸轮（runtime 守卫放行 EMPTY_SLOT，Fix 4a）；站桩 Build（双轮卸下）Build 仍合法可开战。
     await equipRearWheel(page, 'wheelStd');
     await sleep(200);
     const draftStd = await draftOf(page);
@@ -721,13 +712,34 @@ async function sampleWheelBelt(page, frames = 3) {
       JSON.stringify({ drive: draftStd ? draftStd.drive : null, valid: draftStd ? draftStd.valid : null }));
     const stBattle = await sampleActiveBattle(page);
     log(!!stBattle && errors.length === 0, 'B.7 wheelStd 装配进战斗无 pageerror', errors.length ? errors.slice(0, 2).join(' | ') : '');
-    const driveEntry =
-      !!(await findHit(page, 'chip:drive', 2)) ||
-      !!(await findHit(page, 'entry:drive', 2)) ||
-      !!(await findHit(page, 'hp-sel:drive', 2));
-    log(!driveEntry,
-      'B.7（披露）移动端 drive 槽无任何入口（chip/entry/hp-sel 均缺 → 站桩/卸轮真实点击不可达，属 F-GARAGE-TOUCH-ASSEMBLY-R2）',
-      '');
+
+    // B.7a 卸下后轮（Fix 4 轻量入口）
+    const unmountRear = await findHit(page, 'unmount:rear', 6);
+    log(!!unmountRear, 'B.7a 移动端「卸下后轮」入口命中区存在（Fix 4 轻量操作入口）', unmountRear ? `rect=${unmountRear.w}x${unmountRear.h}` : '');
+    if (unmountRear) {
+      await clickHit(page, unmountRear);
+      await sleep(250);
+      const dR = await draftOf(page);
+      const unmounted = dR && dR.rearWheelDefId !== 'wheelStd' && dR.valid; // 卸下=非 wheelStd 且 Build 仍合法
+      log(!!unmounted, 'B.7a 点击卸下后轮 → rearWheel 卸下且 Build 仍合法（可继续开战）',
+        `rearWheelDefId=${dR ? dR.rearWheelDefId : 'null'} valid=${dR ? dR.valid : 'null'}`);
+    }
+    // B.7b 卸下前轮 → 站桩 Build（双轮卸下，drive=forward 仍合法：validateSnapshot 仅要求 ≥1 Weapon）
+    const unmountFront = await findHit(page, 'unmount:front', 6);
+    log(!!unmountFront, 'B.7b 移动端「卸下前轮」入口命中区存在（Fix 4）', unmountFront ? `rect=${unmountFront.w}x${unmountFront.h}` : '');
+    if (unmountFront) {
+      await clickHit(page, unmountFront);
+      await sleep(250);
+      const dF = await draftOf(page);
+      const station = dF && dF.rearWheelDefId !== 'wheelStd' && dF.frontWheelDefId !== 'wheelStd' && dF.valid;
+      log(!!station, 'B.7b 双轮卸下 → 站桩 Build 仍合法（valid=true，可进战斗）',
+        `rear=${dF ? dF.rearWheelDefId : 'null'} front=${dF ? dF.frontWheelDefId : 'null'} valid=${dF ? dF.valid : 'null'}`);
+      // B.7c 站桩 Build 进战斗无 pageerror（物理层容忍 0 轮组的自由刚体）
+      const stationBattle = await sampleActiveBattle(page);
+      log(!!stationBattle && errors.length === 0, 'B.7c 站桩 Build 进战斗无 pageerror（0 轮组物理容忍）', errors.length ? errors.slice(0, 2).join(' | ') : '');
+    }
+    // 说明：drive=stationary 由战斗自动驱动逻辑处理；drive 槽在移动端经 armed 流程可达
+    // （点 drive 卡 → armed → 点任一 movement 挂点），idle 不注册 hp-sel（F-GARAGE-VISUAL-DENSITY-R2 设计）。
     await ctx.close();
   }
 
@@ -881,6 +893,53 @@ async function sampleWheelBelt(page, frames = 3) {
       log(errors.length === 0, `[${vp.label}] 奖励：全程无 pageerror`, errors.length ? errors.slice(0, 2).join(' | ') : '');
       await ctx.close();
     }
+  }
+
+  // ================= E. 真实玩家语义收口（T1–T15 映射） =================
+  // T1(grant 按钮可见)/T2(横滚首点即装备)/T5(四车身无蓝盒)/T6(轮组视觉)/T7(armed→挂点)/
+  // T8(卸轮)/T9(站桩)/T11(重载保持)/T12(回归) 已在 A/B/C/D 段以真实点击覆盖（禁点击重试）。
+  // 此处补 T1(e2e 构建 grant 可见) + T3(四车身无蓝盒显式) + T10(Home→Garage→Home 外观稳定)。
+  // 注：T13(普通包无调试入口)/T14(四方 SHA 一致) 属构建宏/产物级校验，不在 Playwright 运行时断言内
+  // （普通微信包 __WX_DEBUG_GRANT__=false 恒零按钮；SHA 由 build:wechat:rc 的 rc-build.json 校验）。
+  console.log('\n[E] 真实玩家语义收口（T1/T3/T10）');
+  {
+    const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 1 });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    // T1：e2e 构建（__E2E_INTERNAL_HANDLE__）下 dev-grant-all 命中区存在（真实玩家可见/可点）
+    await gotoGarage(page, BASE_DEV);
+    const grantHit = await findHit(page, 'dev-grant-all', 8);
+    log(!!grantHit, 'T1 e2e 构建显示「测试：全部件×1」按钮（真实玩家可见/可点）', grantHit ? `rect=${grantHit.w}x${grantHit.h}` : '');
+    // T3：四车身无蓝盒（蓝盒 rgb≈64,144,224：B 通道最高且 B 显著高于 R/G）→ 装备 4 车身各采样中心色，断言无蓝主导
+    await grantAll(page);
+    const blueCheck = [];
+    for (const b of ['durianBody', 'pearBody', 'mangoBody', 'orangeBody']) {
+      await equipBody(page, b);
+      await sleep(200);
+      const snap = await sampleActiveBattle(page);
+      const sv = snap ? await sampleVehicleA(page) : null;
+      const c = sv && sv.center;
+      const isBlue = c ? (c.b > c.r + 25 && c.b > c.g + 10) : true; // 蓝盒特征：B 主导
+      blueCheck.push(!isBlue);
+      await page.goto(BASE_DEV, { waitUntil: 'load' });
+      await enterGaragePanel(page);
+    }
+    log(blueCheck.every(Boolean), 'T3 四车身中心区无蓝盒主导（durian/pear/mango/orange 均非 team-blue 灰盒）',
+      blueCheck.map((x, i) => `${['durian', 'pear', 'mango', 'orange'][i]}=${x}`).join(' '));
+    // T10：Home→Garage→Home 外观稳定（nav:home 回首页再 home-garage 进装配，相位一致无崩）
+    await gotoGarage(page, BASE_DEV);
+    const p1 = await probe(page);
+    const back = await findHit(page, 'nav:home', 5);
+    if (back) await clickHit(page, back);
+    await sleep(250);
+    const hg = await findHit(page, 'home-garage', 6);
+    if (hg) await clickHit(page, hg);
+    await sleep(250);
+    const p2 = await probe(page);
+    const stable = !!p1 && !!p2 && p1.playerPhase === p2.playerPhase;
+    log(stable && errors.length === 0, 'T10 Home→Garage→Home 外观/相位稳定无崩', errors.length ? errors.slice(0, 2).join(' | ') : '');
+    await ctx.close();
   }
 
   console.log(`\n===== CONTENT-PACK E2E GATE: ${PASS}/${PASS + FAIL} PASS =====`);

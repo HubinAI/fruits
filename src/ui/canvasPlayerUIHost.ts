@@ -331,6 +331,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * 由绘制时按内容宽与可视宽计算 maxScroll 并钳制。
    */
   private garageStripScroll = 0;
+  /**
+   * F-CONTENT-PACK-REAL-UI-R1｜「测试：全部件×1」一键领用态。
+   * 普通微信包/Web prod 永不显示（门控见 drawDevGrantEntry）；RC 体验包（__WX_DEBUG_GRANT__）
+   * 或 E2E 包（__E2E_INTERNAL_HANDLE__）首次点击后置 true → 按钮变「已领取」且 inert，
+   * 重复点击不再重复写入库存（grantAllPartsOnce 本身幂等，此处仅做 UI 反馈与防重复派发）。
+   */
+  private devGrantClaimed = false;
   /** F-GARAGE-CENTER-STAGE-P0：当前帧部件卡带可视行 rect（logical px；供手势横滑判定起点是否在带内） */
   private stripCardRow: { x: number; y: number; w: number; h: number } | null = null;
   /** F-GARAGE-CENTER-STAGE-P0：指针手势状态（down/move/up；滑动 >8 logical px 取消该次点击） */
@@ -1009,6 +1016,28 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return { opts, curVal: this.garageCurrentValue(draft, slot), cardW, gap, startX: row.x - this.garageStripScroll };
   }
 
+  /**
+   * F-CONTENT-PACK-REAL-UI-R1｜部件带滚动钳制（单一真源）。
+   * 将 garageStripScroll 限制在 [0, maxScroll]，其中 maxScroll = 内容总宽 − 行宽，
+   * 内容总宽由当前分类 opts 推导（与 garageStripCardLayout 同源）。必须在「计算卡片布局 /
+   * 注册 hitArea / 手势命中」之前调用——箭头步进若先以未钳制值改 scroll、再在绘制时钳制，
+   * 会导致同一帧 hitArea 落在过滚位置（点卡装错卡）。
+   * 调用点：strip-scroll 箭头步进后、drawGarageStripCards 布局前、手势横滑 scrollStripBy。
+   */
+  private clampGarageStripScroll(
+    state: PlayerUIState,
+    draft: BuildDraft,
+    row: { x: number; y: number; w: number; h: number },
+  ): void {
+    const lay = this.garageStripCardLayout(state, draft, row);
+    if (!lay) return;
+    const { opts, cardW, gap } = lay;
+    const contentW = opts.length > 0 ? opts.length * cardW + (opts.length - 1) * gap : row.w;
+    const maxScroll = Math.max(0, contentW - row.w);
+    if (this.garageStripScroll > maxScroll) this.garageStripScroll = maxScroll;
+    if (this.garageStripScroll < 0) this.garageStripScroll = 0;
+  }
+
   /** 命中装配带内的一张部件卡（完全可见的卡才注册命中，与 drawGarageStripCards 一致）。 */
   private garageCardAt(
     x: number,
@@ -1349,7 +1378,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id === 'dev-grant-all') {
-      // F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件 ×1（Runtime 入库 + 持久化 + 反馈文案）
+      // F-CONTENT-PACK-REAL-UI-R1：一键全部件 ×1（Runtime 入库 + 持久化 + 反馈文案）。
+      // 首次点击后置 devGrantClaimed → 按钮转「已领取」inert；grantAllPartsOnce 幂等，
+      // 即便重复派发也不重复写入库存。
+      this.devGrantClaimed = true;
       this.actions?.onGrantAllParts?.();
       return;
     }
@@ -1521,8 +1553,22 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       // F-GARAGE-CENTER-STAGE-P0：部件带左右翻页箭头（鼠标辅助；横滑同样驱动）
       const step = Math.max(96, Math.round((this.stripCardRow?.w ?? 240) * 0.8));
       this.garageStripScroll += id === 'strip-scroll-left' ? -step : step;
-      if (this.garageStripScroll < 0) this.garageStripScroll = 0;
+      // F-CONTENT-PACK-REAL-UI-R1：步进后立即钳制到 [0, maxScroll]，避免未钳制 scroll
+      // 进入后续布局/hitArea（绘制时的钳制若晚于布局会导致 hitArea 跳位）。
+      if (this.lastState && this.lastState.draft && this.stripCardRow) {
+        this.clampGarageStripScroll(this.lastState, this.lastState.draft, this.stripCardRow);
+      } else if (this.garageStripScroll < 0) {
+        this.garageStripScroll = 0;
+      }
       this.draw();
+      return;
+    }
+    if (id.startsWith('unmount:')) {
+      // F-CONTENT-PACK-REAL-UI-R1｜Fix 4：移动端轻量卸轮入口（不新弹窗、hitArea 与视觉同源）。
+      // 先选中目标轮槽再派发 EMPTY_SLOT——runtime 守卫已放行 EMPTY_SLOT 卸轮（Fix 4a）。
+      const slot = id.slice(7) === 'rear' ? 'rearWheel' : 'frontWheel';
+      this.actions?.selectGarageSlot?.(slot);
+      this.actions?.onPickGarageOption?.(EMPTY_SLOT);
       return;
     }
     if (id === 'panel-back') {
@@ -2392,6 +2438,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 唯一返回 = 左上「‹ 首页」（drawMobileTopBar nav:home）。
     void stageRect;
     this.drawGarageStrip(state, draft, stripRect);
+    // F-CONTENT-PACK-REAL-UI-R1｜Fix 4：移动端轻量卸轮入口（仅移动分类 + 该轮已装备时显示）
+    this.drawGarageUnmountEntry(draft);
     // F-GARAGE-DRAG-ASSEMBLY-P0：拖动 ghost 与吸附反馈绘制在最上层（不影响车辆取景/尺度，Must#18）
     this.drawGarageDragGhost(state);
     // F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件按钮（仅 DEV 构建 + ?resetdev=1；条件绘制零布局占用）
@@ -2399,20 +2447,55 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /**
-   * F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件按钮（Must#2）——
-   * - 显示条件 = （DEV_TOOLS_VISIBLE 或 __WX_DEBUG__ 构建）&& state.resetDevVisible
-   *   （?resetdev=1 玩家调试参数）→ 正式 Pages（prod 无 probe）与正式微信（resetdev 恒 false）
-   *   零按钮零命中区；dev/test/e2e 构建 + 参数才显示；
-   * - 位置 = Garage 舞台右上角小按钮（仅条件绘制，隐藏时不占 Garage/Home 布局）；
-   * - 反馈 = runtime 返回的「已获得全部件×1（N种）」（N 来自实际去重数量，Must#8）。
+   * F-CONTENT-PACK-REAL-UI-R1｜「测试：全部件×1」一键领用按钮（替换原 F-DEBUG-GRANT-ALL-PARTS-P0
+   * 的 DEV/?resetdev=1 门控）。
+   * - 显示条件 = RC 体验包（__WX_DEBUG_GRANT__ 宏，微信开发者工具预览可达，无需 Web URL 参数）
+   *   || E2E 包（__E2E_INTERNAL_HANDLE__ 宏）|| Web DEV（DEV_TOOLS_VISIBLE && ?resetdev=1）；
+   * - 普通微信正式包（__WX_DEBUG_GRANT__=false）与正式 Web prod 恒零按钮零命中区；
+   * - 微信预览环境无 ?resetdev=1 概念 → 必须靠 RC 宏而非 resetDevVisible（F-WX-IOS-CANVAS-CRASH-P0
+   *   Must#6 已把 isResetDevVisible 接到 __WX_DEBUG_GRANT__，但按钮门控此前仍卡在 DEV/e2e 子句，
+   *   导致 RC 包也不可见——本 Queue 修正为直接读 RC 宏）；
+   * - 位置 = Garage 舞台右上角小按钮（仅条件绘制，隐藏时不占布局）；
+   * - 反馈 = runtime 返回的「已获得全部件×1（N种）」；首次点击后置 devGrantClaimed →
+   *   按钮变「已领取」且注册为 inert id（dev-grant-done），重复点击不重复写入。
    */
-  private drawDevGrantEntry(state: PlayerUIState): void {
-    // F-WX-E2E-HANDLE-ISOLATION-P0：E2E 构建显示 DEV 按钮归 E2E-only 宏（非微信诊断日志宏）
-    const e2eProbe = typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__;
-    if (!(DEV_TOOLS_VISIBLE || e2eProbe) || !state.resetDevVisible) return;
+  /**
+   * F-CONTENT-PACK-REAL-UI-R1｜Fix 4：移动端轻量卸轮入口。
+   * - 仅「移动」分类、且该轮当前已装备时显示（卸下后轮 / 卸下前轮）；
+   * - 位置 = 中央舞台左上角竖排两个小按钮（避让右上角 grant 按钮与顶部 nav:home 顶栏）；
+   * - 点击 → dispatch('unmount:rear'/'unmount:front') → 选中轮槽 + onPickGarageOption(EMPTY_SLOT)；
+   * - 不新弹窗、hitArea 与视觉同源（this.button 注册，绘制即命中区）。
+   */
+  private drawGarageUnmountEntry(draft: BuildDraft): void {
+    if (this.garageCategory !== 'move') return;
     const stage = this.garageStageRect;
     if (!stage) return;
-    const btnW = this.isShort ? 74 : 88;
+    const rearEquipped = (draft.rearWheelDefId ?? 'wheelStd') !== EMPTY_SLOT;
+    const frontEquipped = (draft.frontWheelDefId ?? 'wheelStd') !== EMPTY_SLOT;
+    if (!rearEquipped && !frontEquipped) return;
+    const bw = this.isShort ? 76 : 84;
+    const bh = this.isShort ? 20 : 22;
+    const x = stage.x + 6;
+    let y = stage.y + 6;
+    if (rearEquipped) {
+      this.button(x, y, bw, bh, 'unmount:rear', '卸下后轮', {});
+      y += bh + 6;
+    }
+    if (frontEquipped) {
+      this.button(x, y, bw, bh, 'unmount:front', '卸下前轮', {});
+    }
+  }
+
+  private drawDevGrantEntry(state: PlayerUIState): void {
+    // F-WX-E2E-HANDLE-ISOLATION-P0：E2E 构建显示归 E2E-only 宏。
+    const e2eProbe = typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__;
+    // F-CONTENT-PACK-REAL-UI-R1：RC 体验包（微信预览可达）直接读宏，不再依赖 Web ?resetdev=1。
+    const rcGrant = typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__;
+    const devReset = DEV_TOOLS_VISIBLE && state.resetDevVisible;
+    if (!(rcGrant || e2eProbe || devReset)) return;
+    const stage = this.garageStageRect;
+    if (!stage) return;
+    const btnW = this.isShort ? 96 : 112;
     const btnH = this.isShort ? 20 : 24;
     // F-WX-SAFE-AREA-P0：入口落在车库舞台右上角，须避让顶部右侧胶囊——
     // 钳制右缘 ≤ W − insR（唯一契约胶囊右侧内缩）− 4，确保与胶囊 ≥6px 间距（Must#7 不留 occlusion）。
@@ -2420,8 +2503,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     let x = stage.x + stage.w - btnW - 6;
     if (x + btnW > maxRight) x = maxRight - btnW;
     const y = stage.y + 6;
-    this.button(x, y, btnW, btnH, 'dev-grant-all', '全部件 +1', {});
-    if (state.devGrantMessage) {
+    const claimed = this.devGrantClaimed;
+    const id = claimed ? 'dev-grant-done' : 'dev-grant-all';
+    const label = claimed ? '已领取' : '测试：全部件×1';
+    this.button(x, y, btnW, btnH, id, label, {});
+    if (!claimed && state.devGrantMessage) {
       this.text(state.devGrantMessage, x + btnW / 2, y + btnH + 8, this.isShort ? 8 : 9, V.primary, 'center', 600);
     }
   }
@@ -2561,13 +2647,18 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     // F-GARAGE-DRAG-ASSEMBLY-P0：布局改为与命中判定同源（garageStripCardLayout 唯一来源）
+    // F-CONTENT-PACK-REAL-UI-R1：布局前先钳制 scroll（单一 clampedScroll 同时用于布局/
+    // clip/hitArea/手势命中），消除「箭头先以未钳制值改 scroll、绘制时再钳制」导致的
+    // 同一帧 hitArea 跳位（点卡装错卡）。
+    this.clampGarageStripScroll(state, draft, row);
     const lay = this.garageStripCardLayout(state, draft, row)!;
     const { opts, curVal, cardW, gap } = lay;
     const cardH = row.h;
     const contentW = opts.length > 0 ? opts.length * cardW + (opts.length - 1) * gap : row.w;
     this.stripContentW = contentW;
+    // F-CONTENT-PACK-REAL-UI-R1：Fix 2 配套——maxScroll 单一真源（与 clampGarageStripScroll 同源），
+    // 用于横滚箭头可见性判定（内容未超宽则不显示箭头）。
     const maxScroll = Math.max(0, contentW - row.w);
-    if (this.garageStripScroll > maxScroll) this.garageStripScroll = maxScroll;
     const ctx = this.ctx;
     ctx.save();
     ctx.beginPath();
@@ -2954,6 +3045,30 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         ctx.beginPath();
         ctx.ellipse(cx + s * 0.12, cy - s * 0.66, s * 0.34, s * 0.16, 0.5, 0, Math.PI * 2);
         ctx.fill();
+      } else if (defId === 'pineappleBody') {
+        // 菠萝：高窄椭圆 + 顶部冠叶（mini 简图）
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + s * 0.12, s * 0.6, s * 0.82, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1.1;
+        for (const ang of [-0.5, 0, 0.5]) {
+          ctx.beginPath();
+          ctx.moveTo(cx, cy - s * 0.6);
+          ctx.lineTo(cx + Math.sin(ang) * s * 0.4, cy - s * 0.95);
+          ctx.stroke();
+        }
+      } else if (defId === 'coconutBody') {
+        // 椰子：短圆棕体 + 顶部三芽点（mini 简图）
+        ctx.beginPath();
+        ctx.arc(cx, cy, s * 0.72, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(90,58,32,0.9)';
+        for (const [dx, dy] of [[-0.18, -0.6], [0.18, -0.6], [0, -0.42]] as const) {
+          ctx.beginPath();
+          ctx.arc(cx + dx * s, cy + dy * s, s * 0.12, 0, Math.PI * 2);
+          ctx.fill();
+        }
       } else {
         ctx.fillRect(cx - s * 0.9, cy - s * 0.3, s * 1.8, s * 0.55);
         for (const wx of [cx - s * 0.55, cx + s * 0.55]) {

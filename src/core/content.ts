@@ -192,6 +192,16 @@ const pineappleBody: BodyDef = {
     { id: 'top', localPosition: { x: 0, y: -56 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -46, y: -6 }, localRotation: 0 },
   ],
+  // F-CONTENT-PACK-REAL-UI-R1：补程序化视觉（此前缺 visual → 落 team-color 蓝盒）。
+  // 菠萝 = 高窄椭圆体 + 顶部冠叶；视觉尺寸略大于 collider 以容纳冠叶。
+  visual: {
+    visualId: 'body_pineapple',
+    size: { width: 104, height: 128 },
+    anchor: { x: 0, y: 0 },
+    rotation: 0,
+    layer: 1,
+    mirrorWithFacing: true,
+  },
 };
 
 /**
@@ -218,6 +228,16 @@ const coconutBody: BodyDef = {
     { id: 'top', localPosition: { x: 0, y: -23 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -66, y: 0 }, localRotation: 0 },
   ],
+  // F-CONTENT-PACK-REAL-UI-R1：补程序化视觉（此前缺 visual → 落 team-color 蓝盒）。
+  // 椰子 = 短沉圆棕体 + 顶部三芽点；视觉尺寸略大于 collider。
+  visual: {
+    visualId: 'body_coconut',
+    size: { width: 146, height: 60 },
+    anchor: { x: 0, y: 0 },
+    rotation: 0,
+    layer: 1,
+    mirrorWithFacing: true,
+  },
 };
 
 /**

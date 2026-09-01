@@ -132,18 +132,18 @@ export function buildSnapshotFromDraft(
   const body = registry.bodies.get(draft.bodyDefId);
   const rearDefId = draft.rearWheelDefId ?? 'wheelStd';
   const frontDefId = draft.frontWheelDefId ?? 'wheelStd';
-  const movements: BuildSnapshot['movements'] = [
-    {
-      hardpointId: 'rear',
-      defId: rearDefId,
-      overrides: { radius: draft.rearRadius },
-    },
-    {
-      hardpointId: 'front',
-      defId: frontDefId,
-      overrides: { radius: draft.frontRadius },
-    },
-  ];
+  // F-CONTENT-PACK-REAL-UI-R1｜Fix 4：卸下的轮组（EMPTY_SLOT）不进 Battle Snapshot——
+  // 否则 validateSnapshot 报「未知 Movement」、resolveSnapshot 抛错，站桩 Build 无法开战。
+  // 与下方 functionalSelections 的 EMPTY_SLOT 过滤同源。
+  const movementSpecs = [
+    { hardpointId: 'rear', defId: rearDefId, radius: draft.rearRadius },
+    { hardpointId: 'front', defId: frontDefId, radius: draft.frontRadius },
+  ].filter((m) => m.defId !== EMPTY_SLOT);
+  const movements: BuildSnapshot['movements'] = movementSpecs.map((m) => ({
+    hardpointId: m.hardpointId,
+    defId: m.defId,
+    overrides: { radius: m.radius },
+  }));
   const validHardpoints = body
     ? new Set(body.functionalHardpoints.map((h) => h.id))
     : new Set<string>(); // 未知 Body：无真实槽位，functionals 全部过滤
