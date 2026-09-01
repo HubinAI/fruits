@@ -13,7 +13,7 @@
  * Must#5：三分类切换中心漂移 ≤2%W、scale 漂移 ≤1%。
  * Must#6：idle 挂点 0（不显示不注册）；armed/dragging 挂点 >0。
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
 import { Renderer } from '../src/render/renderer';
 import { VisualRegistry } from '../src/render/visualRegistry';
@@ -124,6 +124,14 @@ describe('F-GARAGE-CENTER-SCALE-R2.1｜车辆实际可见面积', () => {
 });
 
 describe('F-GARAGE-CENTER-SCALE-R2.1｜挂点显示时机（Must#6）', () => {
+  // F-CONTENT-PLAYER-MOVEMENT-PACK-R1（回归门禁修复）：buildGarageHost 每次调用
+  // vi.useFakeTimers() 但从不恢复——泄漏到后续测试文件（vmForks 串行同进程），
+  // 使 platformCore WebLifecycle 的真实 setTimeout 永不触发导致超时。
+  // 每测试后恢复（不改变本文件断言语义）。
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
   function buildGarageHost(vp: { w: number; h: number }, dpr = 1) {
     vi.useFakeTimers();
     let fakeNow = 0;

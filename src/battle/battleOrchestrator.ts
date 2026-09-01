@@ -196,7 +196,7 @@ export class BattleOrchestrator {
         bodyVisual: v.resolved.body.visual
           ? visualWorldTransform(v.resolved.body.visual, v.facing, bPos, bAng)
           : undefined,
-        wheels: v.wheels.map((w) => toCircle(w.body)),
+        wheels: v.wheels.map((w) => ({ ...toCircle(w.body), defId: w.def.id })),
         wheelVisuals: v.wheels.map((w) =>
           w.def.visual
             ? visualWorldTransform(w.def.visual, v.facing, getPosition(w.body), getAngle(w.body))

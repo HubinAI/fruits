@@ -68,13 +68,13 @@ import {
 } from './dev/reviewMode';
 import {
   BODY_OPTIONS,
-  WHEEL_OPTIONS,
+  MOVEMENT_OPTIONS,
   encodePartVal,
   decodePartVal,
 } from './ui/playerUI';
 import type { UiMode, PlayerUIHost } from './ui/playerUI';
 // Q22：V0.5 部件库存（DEV 面板只读库存展示 + 装备校验）
-import { canEquipPart, getInventory, getCount, OFFICIAL_PARTS } from './core/partInventory';
+import { canEquipPart, canEquipMovement, getInventory, getCount, OFFICIAL_PARTS } from './core/partInventory';
 
 const app = document.getElementById('app')!;
 
@@ -655,11 +655,18 @@ function renderPanel(
     d.bodyDefId = migrated.bodyDefId;
     d.functionalSelections = migrated.functionalSelections;
   });
-  mkOptGroup('后轮', WHEEL_OPTIONS, (v) => String(d.rearRadius) === v, (v) => {
-    d.rearRadius = Number(v);
+  // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：DEV 面板轮组选项（defId；缺省标准轮+数值兼容）
+  const wheelVal = (d: BuildDraft, key: 'rearWheelDefId' | 'frontWheelDefId') =>
+    d[key] ?? 'wheelStd';
+  mkOptGroup('后轮', MOVEMENT_OPTIONS, (v) => wheelVal(d, 'rearWheelDefId') === v, (v) => {
+    if (!canEquipMovement(v)) return;
+    d.rearWheelDefId = v;
+    d.rearRadius = registry.movements.get(v)?.radius ?? d.rearRadius;
   });
-  mkOptGroup('前轮', WHEEL_OPTIONS, (v) => String(d.frontRadius) === v, (v) => {
-    d.frontRadius = Number(v);
+  mkOptGroup('前轮', MOVEMENT_OPTIONS, (v) => wheelVal(d, 'frontWheelDefId') === v, (v) => {
+    if (!canEquipMovement(v)) return;
+    d.frontWheelDefId = v;
+    d.frontRadius = registry.movements.get(v)?.radius ?? d.frontRadius;
   });
 
   // Q07-B：Functional 挂点卡片化——点击卡片选中（明确选中态）并展开部件选择区。

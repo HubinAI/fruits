@@ -64,6 +64,14 @@ export interface BuildDraft {
   rearRadius: number;
   /** 前轮半径（px） */
   frontRadius: number;
+  /**
+   * F-CONTENT-PLAYER-MOVEMENT-PACK-R1｜前后轮组 defId（可选）。
+   * 缺省 undefined = 标准轮（wheelStd）+ 保留 rearRadius/frontRadius 数值
+   * （旧存档 / 对手池兼容：行为完全不变）。选中轮组卡时写入 defId 并把
+   * rearRadius/frontRadius 置为该轮组默认 radius（下游数值链路零改动）。
+   */
+  rearWheelDefId?: string;
+  frontWheelDefId?: string;
   /** Functional 槽位选择：hardpointId → defId 或 'none'（空槽） */
   functionalSelections: Record<string, string>;
   /**
@@ -111,7 +119,8 @@ export function migrateDraftBody(
 
 /**
  * Draft → BuildSnapshot：
- * - movements 固定生成 rear/front 两个 wheelStd（带 radius overrides）；
+ * - movements 固定生成 rear/front 两个 wheel（F-CONTENT-PLAYER-MOVEMENT-PACK-R1：
+ *   defId = draft 轮组选择，缺省 wheelStd；radius overrides 保留——旧档数值兼容）；
  * - functionals 只生成非 none 项，且硬点必须真实存在于当前 Body（不创造不存在槽位）；
  * - 不自动塞 ramHead / 其他部件（ramHead 选择由 PART_OPTIONS 控制，Q12-A-HOLD 已移除）。
  */
@@ -121,15 +130,17 @@ export function buildSnapshotFromDraft(
   id = 'customDraft',
 ): BuildSnapshot {
   const body = registry.bodies.get(draft.bodyDefId);
+  const rearDefId = draft.rearWheelDefId ?? 'wheelStd';
+  const frontDefId = draft.frontWheelDefId ?? 'wheelStd';
   const movements: BuildSnapshot['movements'] = [
     {
       hardpointId: 'rear',
-      defId: 'wheelStd',
+      defId: rearDefId,
       overrides: { radius: draft.rearRadius },
     },
     {
       hardpointId: 'front',
-      defId: 'wheelStd',
+      defId: frontDefId,
       overrides: { radius: draft.frontRadius },
     },
   ];

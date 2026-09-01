@@ -10,7 +10,7 @@
  * 验收（Must#2-7）：统一三区几何；badge 不覆盖头像/货币/返回/HP/Matching·Locked；
  * 中央状态真居中（左右 insets 不对称不偏移）；120 帧无跳位；方向变化/resize 重算。
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { computeTopSafeAreas } from '../src/ui/topSafeLayout';
 import { resolveLayoutProfile } from '../src/ui/layoutProfile';
 import { computeHomeLayout } from '../src/ui/homeLayout';
@@ -123,6 +123,16 @@ function badgeBgLogical(ui: FakeCanvas, dpr: number) {
 function overlaps(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) {
   return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
+
+// F-CONTENT-PLAYER-MOVEMENT-PACK-R1（回归门禁修复）：buildHarness 每次调用
+// vi.useFakeTimers() + vi.spyOn(Math,'random') 但从不恢复——泄漏到后续测试文件
+// （vmForks 串行同进程），使 platformCore 的真实 setTimeout 永不触发导致超时。
+// 提升为模块顶层 afterEach（覆盖本文件两个 describe 的全部测试），每测试后恢复
+// （不改变本文件断言语义）。
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('F-WX-SAFE-AREA-P0｜统一顶部三区（纯函数）', () => {
   const insets = { top: 44, bottom: 21, left: 47, right: 59 };

@@ -34,11 +34,18 @@ export const BODY_OPTIONS: Array<{ v: string; t: string }> = [
   { v: 'orangeBody', t: '橙子车身（短圆均衡·新手通用）' },
 ];
 
-/** Q10-B：玩家侧轮径命名（小/标准/大；三张等权卡片同一行展示）。 */
-export const WHEEL_OPTIONS: Array<{ v: string; t: string }> = [
-  { v: '12', t: '12 小' },
-  { v: '20', t: '20 标准' },
-  { v: '26', t: '26 大' },
+/**
+ * F-CONTENT-PLAYER-MOVEMENT-PACK-R1｜正式轮组目录（标准/小/大/重）。
+ * 取代旧「12/20/26 数值轮径卡」：轮组卡自带完整物理（radius/mass/drive/maxRPM/
+ * energy），选中即整套生效；旧存档（无 defId）fallback 标准轮 + 原数值，零回归。
+ * wheelStd 恒默认拥有；small/large/heavy 默认未获得（partInventory 拥有计数，
+ * debug「全部件×1」解锁）。卡片沿用五态（已装备/可装备/未获得/armed/拖动源）。
+ */
+export const MOVEMENT_OPTIONS: Array<{ v: string; t: string }> = [
+  { v: 'smallWheel', t: '小轮组' },
+  { v: 'wheelStd', t: '标准轮' },
+  { v: 'largeWheel', t: '大轮组' },
+  { v: 'heavyWheel', t: '重型轮组' },
 ];
 
 /** Q22：Functional 槽选项的 (defId, star) 编码 / 解码（value 形如 `cannon@2`）。 */

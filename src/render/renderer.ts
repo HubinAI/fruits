@@ -2499,24 +2499,90 @@ export class Renderer {
     }
   }
 
+  /**
+   * F-CONTENT-PLAYER-MOVEMENT-PACK-R1：按轮组画可一眼区分的轮毂/胎纹样式
+   * （辐条数/胎纹/胎宽结构区分，不只靠颜色）。circle.defId 缺省 = 标准轮旧样式。
+   * - wheelStd：暗胎 + 单辐条（既有样式，零变化）；
+   * - smallWheel：细窄胎面 + 双辐条（轻快）；
+   * - largeWheel：辐条轮（4 辐条）+ 外圈胎纹（大轮轻量感）；
+   * - heavyWheel：实心厚胎 + 双环轮毂（重质感）。
+   */
   private drawWheel(circle: RenderCircle, color: string): void {
     const ctx = this.ctx;
     const r = circle.radius;
     const pos = circle.center;
+    const a = circle.angle;
+    const cx = this.sx(pos.x);
+    const cy = this.sy(pos.y);
+    const sr = this.ss(r);
     ctx.fillStyle = '#22262e';
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(this.sx(pos.x), this.sy(pos.y), this.ss(r), 0, Math.PI * 2);
+    ctx.arc(cx, cy, sr, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    // 轮辐（显示旋转）
-    const a = circle.angle;
-    ctx.strokeStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(this.sx(pos.x), this.sy(pos.y));
-    ctx.lineTo(this.sx(pos.x + Math.cos(a) * r), this.sy(pos.y + Math.sin(a) * r));
-    ctx.stroke();
+    const defId = circle.defId;
+    if (defId === 'smallWheel') {
+      // 细窄胎面（略小于外圈）+ 双辐条
+      const tr = sr * 0.82;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(cx, cy, tr, 0, Math.PI * 2);
+      ctx.stroke();
+      for (let i = 0; i < 2; i++) {
+        const ang = a + (i * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(ang) * tr, cy + Math.sin(ang) * tr);
+        ctx.stroke();
+      }
+    } else if (defId === 'largeWheel') {
+      // 辐条轮（4 辐条）+ 外圈胎纹
+      const tr = sr * 0.78;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.4;
+      for (let i = 0; i < 4; i++) {
+        const ang = a + (i * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(ang) * tr, cy + Math.sin(ang) * tr);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(cx, cy, tr, 0, Math.PI * 2);
+      ctx.stroke();
+      // 胎纹：外圈短齿
+      ctx.lineWidth = 1.2;
+      const teeth = 12;
+      for (let i = 0; i < teeth; i++) {
+        const t0 = a + (i / teeth) * Math.PI * 2;
+        const t1 = a + ((i + 0.25) / teeth) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(t0) * sr, cy + Math.sin(t0) * sr);
+        ctx.lineTo(cx + Math.cos(t1) * sr, cy + Math.sin(t1) * sr);
+        ctx.stroke();
+      }
+    } else if (defId === 'heavyWheel') {
+      // 实心厚胎：双环轮毂（无辐条，重质感）
+      const tr = sr * 0.62;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(cx, cy, tr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, sr * 0.22, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      // 轮辐（显示旋转；标准轮既有样式）
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(a) * sr, cy + Math.sin(a) * sr);
+      ctx.stroke();
+    }
   }
 
   /**

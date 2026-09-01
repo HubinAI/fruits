@@ -38,11 +38,11 @@ import {
 } from '../lab/buildEditorModel';
 import { computeEnergy } from '../core/buildValidator';
 import { starTierEnergy } from '../core/buildSnapshot';
-import { getCount, canEquipPart, equippedDefIds, OFFICIAL_PARTS } from '../core/partInventory';
+import { getCount, canEquipPart, canEquipMovement, equippedDefIds, OFFICIAL_PARTS } from '../core/partInventory';
 import { canEquipBody } from '../core/bodyOwnership';
 import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/playerProgress';
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
-import { BODY_OPTIONS, WHEEL_OPTIONS, encodePartVal, decodePartVal } from './playerUI';
+import { BODY_OPTIONS, MOVEMENT_OPTIONS, encodePartVal, decodePartVal } from './playerUI';
 import { resolveLayoutProfile, type LayoutProfile } from './layoutProfile';
 // F-PLAYER-CANVAS-COMPOSE-P0：手机逻辑画布尺寸单一来源（PlayerViewportTransform）；
 // 本地别名保持既有调用点不变（PHONE_LOGICAL_W/H 即 PLAYER_LOGICAL_W/H）。
@@ -3297,17 +3297,21 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** 槽位 chip 定义（Desktop/Mobile 共用） */
   private garageChipDefs(draft: BuildDraft): Array<{ key: string; label: string; value: string }> {
     const body = registry.bodies.get(draft.bodyDefId);
+    const wheelLabel = (defId: string | undefined, radius: number): string => {
+      if (defId) return MOVEMENT_OPTIONS.find((o) => o.v === defId)?.t ?? registry.movements.get(defId)?.name ?? defId;
+      return MOVEMENT_OPTIONS.find((o) => o.v === 'wheelStd')?.t ?? String(radius);
+    };
     const defs: Array<{ key: string; label: string; value: string }> = [
       { key: 'body', label: '车身', value: body?.name ?? draft.bodyDefId },
       {
         key: 'rearWheel',
         label: '后轮',
-        value: WHEEL_OPTIONS.find((w) => String(draft.rearRadius) === w.v)?.t ?? String(draft.rearRadius),
+        value: wheelLabel(draft.rearWheelDefId, draft.rearRadius),
       },
       {
         key: 'frontWheel',
         label: '前轮',
-        value: WHEEL_OPTIONS.find((w) => String(draft.frontRadius) === w.v)?.t ?? String(draft.frontRadius),
+        value: wheelLabel(draft.frontWheelDefId, draft.frontRadius),
       },
       { key: 'drive', label: '驱动', value: resolveDriveMode(draft.drive) === 'stationary' ? '停驻' : '前进' },
     ];
@@ -3341,7 +3345,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         opts.push({ v: o.v, t: o.t, meta: owned ? '' : '未获得', locked: !owned });
       }
     } else if (slot === 'rearWheel' || slot === 'frontWheel') {
-      for (const o of WHEEL_OPTIONS) opts.push({ v: o.v, t: o.t, meta: '' });
+      // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：正式轮组目录 + 未获得锁定（wheelStd 恒可装备）
+      for (const o of MOVEMENT_OPTIONS) {
+        const owned = canEquipMovement(o.v);
+        const def = registry.movements.get(o.v);
+        opts.push({
+          v: o.v,
+          t: o.t,
+          meta: owned ? `${def?.energy ?? 0} 能量` : '未获得',
+          locked: !owned,
+        });
+      }
     } else if (slot === 'drive') {
       opts.push({ v: 'forward', t: '前进', meta: '轮子正常驱动' });
       opts.push({ v: 'stationary', t: '停驻', meta: '不主动移动·真实物理保留' });
@@ -3370,8 +3384,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** 当前槽位已选值（编码；Desktop/Mobile 共用） */
   private garageCurrentValue(draft: BuildDraft, slot: string): string {
     if (slot === 'body') return draft.bodyDefId;
-    if (slot === 'rearWheel') return String(draft.rearRadius);
-    if (slot === 'frontWheel') return String(draft.frontRadius);
+    if (slot === 'rearWheel') return draft.rearWheelDefId ?? String(draft.rearRadius);
+    if (slot === 'frontWheel') return draft.frontWheelDefId ?? String(draft.frontRadius);
     if (slot === 'drive') return resolveDriveMode(draft.drive);
     return encodePartVal(
       draft.functionalSelections[slot] ?? EMPTY_SLOT,

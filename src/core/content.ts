@@ -366,7 +366,7 @@ const orangeBody: BodyDef = {
 };
 
 
-/** 标准轮子 */
+/** 标准轮子（F-CONTENT-PLAYER-MOVEMENT-PACK-R1：energy=0 保持旧 Build 零回归） */
 const wheelStd: WheelDef = {
   kind: 'wheel',
   id: 'wheelStd',
@@ -377,6 +377,73 @@ const wheelStd: WheelDef = {
   driveForce: 0.005,
   maxRPM: 300,
   grip: 0.9,
+  energy: 0,
+};
+
+/**
+ * F-CONTENT-PLAYER-MOVEMENT-PACK-R1｜小型轮组。
+ * - radius 12：车身更低（实测轮中心比标准轮低 ~8px）、离地间隙更低；
+ * - mass 6 + driveTorque 520：小惯量需更高角加速度补偿（maxTorque=0.5·m·r²·α），
+ *   启动更快、接敌响应更灵敏（实测 2s 位移 160 vs 标准 145）；
+ * - maxRPM 380：小轮转得更快（同线速度需更高角速度）；
+ * - energy 5：低能量档。
+ */
+const smallWheel: WheelDef = {
+  kind: 'wheel',
+  id: 'smallWheel',
+  name: '小轮组',
+  radius: 12,
+  mass: 6,
+  driveTorque: 520,
+  driveForce: 0.005,
+  maxRPM: 380,
+  grip: 0.9,
+  energy: 5,
+};
+
+/**
+ * F-CONTENT-PLAYER-MOVEMENT-PACK-R1｜大型轮组。
+ * - radius 26：车身更高（实测轮中心比标准轮高 ~6px）、离地间隙更高，更易改变
+ *   车身攻击高度；
+ * - mass 14 + driveTorque 40：重轮大惯量 + 保守角加速度 → 接敌响应更慢、
+ *   姿态更稳（实测 2s 位移 130 vs 标准 145，maxAngle 更小）；
+ * - maxRPM 240：大轮转速上限更低；
+ * - energy 12：中高能量档。
+ */
+const largeWheel: WheelDef = {
+  kind: 'wheel',
+  id: 'largeWheel',
+  name: '大轮组',
+  radius: 26,
+  mass: 14,
+  driveTorque: 40,
+  driveForce: 0.005,
+  maxRPM: 240,
+  grip: 0.9,
+  energy: 12,
+};
+
+/**
+ * F-CONTENT-PLAYER-MOVEMENT-PACK-R1｜重型轮组。
+ * - mass 20（标准 2 倍）+ driveTorque 35：最大惯量 → 启动最慢、姿态最稳
+ *   （实测 2s 位移 123 vs 标准 145，maxAngle 0.0007 vs 0.0012）；
+ * - radius 20：离地高度与标准轮一致（差异维度 = 质量/惯性，非高度）；
+ * - maxRPM 260：转速上限介于小/大轮之间；
+ * - energy 15：高能量档。
+ * 判定依据：Must#1 实测 Planck motor 路径下 grip（friction）对前进/推挤行为
+ * 无差异（纯滚动无滑动）→ 不做抓地换皮轮组；质量/惯性差异真实可测 → heavyWheel。
+ */
+const heavyWheel: WheelDef = {
+  kind: 'wheel',
+  id: 'heavyWheel',
+  name: '重型轮组',
+  radius: 20,
+  mass: 20,
+  driveTorque: 35,
+  driveForce: 0.005,
+  maxRPM: 260,
+  grip: 0.9,
+  energy: 15,
 };
 
 /**
@@ -939,7 +1006,13 @@ export function createRegistry(): ContentRegistry {
       [mangoBody.id, mangoBody],
       [orangeBody.id, orangeBody],
     ]),
-    movements: new Map([[wheelStd.id, wheelStd]]),
+    movements: new Map([
+      [wheelStd.id, wheelStd],
+      // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：正式轮组 1→4（标准/小/大/重）
+      [smallWheel.id, smallWheel],
+      [largeWheel.id, largeWheel],
+      [heavyWheel.id, heavyWheel],
+    ]),
     functionals: new Map([
       [ramHead.id, ramHead],
       [cannon.id, cannon],

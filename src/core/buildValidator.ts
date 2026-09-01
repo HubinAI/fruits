@@ -27,12 +27,20 @@ function ok(): ValidationResult {
   return { valid: true, errors: [] };
 }
 
-/** 计算一个 snapshot 当前的 totalEnergy（仅 functional 部件贡献能量） */
+/**
+ * 计算一个 snapshot 当前的 totalEnergy（functional 部件 + F-CONTENT-PLAYER-
+ * MOVEMENT-PACK-R1 起计入 movements 轮组能量；wheelStd=0 保持旧 Build 零回归）。
+ */
 export function computeEnergy(
   snapshot: BuildSnapshot,
   registry: ContentRegistry,
 ): { energy: number; error?: string } {
   let energy = 0;
+  for (const install of snapshot.movements) {
+    const def = registry.movements.get(install.defId);
+    if (!def) return { energy, error: `未知 Movement "${install.defId}"` };
+    energy += def.energy;
+  }
   for (const install of snapshot.functionals) {
     const def = registry.functionals.get(install.defId);
     if (!def) return { energy, error: `未知功能部件 "${install.defId}"` };
@@ -57,6 +65,8 @@ export function validateSnapshot(
 
   // Movement 安装校验
   const usedMovementHardpoints = new Set<string>();
+  // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：Movement 计能（wheelStd=0 零回归）
+  let movementEnergy = 0;
   for (const install of snapshot.movements) {
     const hp = body.movementHardpoints.find((h) => h.id === install.hardpointId);
     if (!hp) {
@@ -76,6 +86,7 @@ export function validateSnapshot(
     if (def.kind !== 'wheel') {
       errors.push(`V1 阶段 Movement 仅支持 Wheel，收到 "${def.kind}"`);
     }
+    movementEnergy += def.energy;
   }
 
   // Functional 安装校验
@@ -104,10 +115,10 @@ export function validateSnapshot(
     if (def.category === 'weapon') weaponCount += 1;
   }
 
-  // Energy 合法
-  if (energy > body.energyCapacity) {
+  // Energy 合法（F-CONTENT-PLAYER-MOVEMENT-PACK-R1：含 Movement 能量）
+  if (energy + movementEnergy > body.energyCapacity) {
     errors.push(
-      `能量超载：${energy} > 容量 ${body.energyCapacity}`,
+      `能量超载：${energy + movementEnergy} > 容量 ${body.energyCapacity}`,
     );
   }
 

@@ -169,6 +169,12 @@ export interface RenderCircle {
   center: RenderVec2;
   radius: number;
   angle: number;
+  /**
+   * F-CONTENT-PLAYER-MOVEMENT-PACK-R1｜轮组 defId（引擎中立）。
+   * 供 Renderer 按轮组画不同轮毂/胎纹样式（小轮窄胎 / 大轮辐条 / 重轮实心）；
+   * 缺省 undefined = 旧行为（标准轮统一样式）。不影响任何物理。
+   */
+  defId?: string;
 }
 
 /** 引擎中立可绘制形状（discriminated union，无 any / cast） */

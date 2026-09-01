@@ -486,6 +486,8 @@ export class PlanckBattleOrchestrator {
       center: this.world.getPosition(w.body),
       radius: w.def.radius,
       angle: this.world.getAngle(w.body),
+      // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：透传轮组 defId（Renderer 按轮组画样式）
+      defId: w.def.id,
     }));
     const wheelVisuals = vehicle.wheels.map((w) =>
       w.def.visual

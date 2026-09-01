@@ -17,7 +17,7 @@
  * 2796×1290 backing DPR3 / 左右横屏 / Home·Garage·Matching·Battle·Result / 120 帧持续 /
  * 包围盒完整位于 safeArea / UI 合成后高对比像素。
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { bindPlatformCore } from '../src/platform/context';
 import { FakeCanvas } from './wechatCanvasFrameHost';
 import { Renderer } from '../src/render/renderer';
@@ -125,6 +125,14 @@ function badgeBgOps(ui: FakeCanvas) {
 }
 
 describe('F-WX-RC-SAFE-BADGE-P0｜RC 版号安全区与合成层级', () => {
+  // F-CONTENT-PLAYER-MOVEMENT-PACK-R1（回归门禁修复）：buildHarness 每次调用
+  // vi.useFakeTimers() + vi.spyOn(Math,'random') 但从不恢复——泄漏到后续测试文件
+  // （vmForks 串行同进程），使 audioLifecycleP0/platformCore 的真实 setTimeout 永不
+  // 触发导致超时。每测试后恢复（不改变本文件断言语义）。
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
   // ============ 1. 位置/字号/颜色/层级（Must#2/#4）============
   it('1. Home 帧：badge 深色底 + 白字 11px + DPR 单次变换（source-over 合成层级）', () => {
     const { ui, driveFrame } = buildHarness();

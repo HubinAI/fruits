@@ -280,7 +280,9 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
     const pickStart = rt.indexOf('onPickGarageOption:');
     expect(rt.slice(pickStart, pickStart + 700), 'runtime 装备规则保留').toContain('canEquipPart');
     // F-GARAGE-LIVE-ASSEMBLY-P0：装备逻辑保留 + 能量超载守卫（Must#9）——断言范围扩展到守卫段后
-    expect(rt.slice(pickStart, pickStart + 1800), 'runtime 车身迁移保留').toContain('migrateDraftBody');
+    // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：轮组守卫（canEquipMovement）+ prev/oldVal 的 defId
+    // 字段把 migrateDraftBody 调用推至 pickStart+1896 字符，窗口扩大至 2200（BODY-PACK 先例）。
+    expect(rt.slice(pickStart, pickStart + 2200), 'runtime 车身迁移保留').toContain('migrateDraftBody');
     expect(rt, '能量超载守卫保留（onPickGarageOption 内，回滚不修改车辆）').toMatch(/onPickGarageOption:[\s\S]*能量超载预检/);
   });
 });

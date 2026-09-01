@@ -20,7 +20,7 @@ import {
 } from '../lab/buildEditorModel';
 import { computeEnergy } from '../core/buildValidator';
 import { starTierEnergy } from '../core/buildSnapshot';
-import { getCount, canEquipPart, equippedDefIds, OFFICIAL_PARTS } from '../core/partInventory';
+import { getCount, canEquipPart, canEquipMovement, equippedDefIds, OFFICIAL_PARTS } from '../core/partInventory';
 // F-CONTENT-PLAYER-BODY-PACK-R1：车身拥有守卫（未获得的新车身锁定）
 import { canEquipBody } from '../core/bodyOwnership';
 import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/playerProgress';
@@ -28,7 +28,7 @@ import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { computePlayerShellVisibility } from './playerShell';
 import {
   BODY_OPTIONS,
-  WHEEL_OPTIONS,
+  MOVEMENT_OPTIONS,
   encodePartVal,
   decodePartVal,
 } from './playerUI';
@@ -408,10 +408,14 @@ export class WebDomPlayerUIHost implements PlayerUIHost {
     chips.className = 'dock-chips';
     const chipDefs: Array<{ key: string; label: string; value: string; empty: boolean }> = [];
     chipDefs.push({ key: 'body', label: '车身', value: body?.name ?? draft.bodyDefId, empty: false });
-    const rw = WHEEL_OPTIONS.find((w) => String(draft.rearRadius) === w.v);
-    const fw = WHEEL_OPTIONS.find((w) => String(draft.frontRadius) === w.v);
-    chipDefs.push({ key: 'rearWheel', label: '后轮', value: rw?.t ?? String(draft.rearRadius), empty: false });
-    chipDefs.push({ key: 'frontWheel', label: '前轮', value: fw?.t ?? String(draft.frontRadius), empty: false });
+    const rw = draft.rearWheelDefId
+      ? MOVEMENT_OPTIONS.find((o) => o.v === draft.rearWheelDefId)?.t ?? registry.movements.get(draft.rearWheelDefId)?.name ?? draft.rearWheelDefId
+      : (MOVEMENT_OPTIONS.find((o) => o.v === 'wheelStd')?.t ?? String(draft.rearRadius));
+    const fw = draft.frontWheelDefId
+      ? MOVEMENT_OPTIONS.find((o) => o.v === draft.frontWheelDefId)?.t ?? registry.movements.get(draft.frontWheelDefId)?.name ?? draft.frontWheelDefId
+      : (MOVEMENT_OPTIONS.find((o) => o.v === 'wheelStd')?.t ?? String(draft.frontRadius));
+    chipDefs.push({ key: 'rearWheel', label: '后轮', value: rw, empty: false });
+    chipDefs.push({ key: 'frontWheel', label: '前轮', value: fw, empty: false });
     // F-MOVE-1：驱动模式（前进 / 停驻）——与车身/轮子同为 Build 的明确配置
     chipDefs.push({
       key: 'drive',
@@ -476,7 +480,12 @@ export class WebDomPlayerUIHost implements PlayerUIHost {
           opts.push({ v: o.v, t: o.t, meta: owned ? '' : '未获得' });
         }
       } else if (garageSelected === 'rearWheel' || garageSelected === 'frontWheel') {
-        for (const o of WHEEL_OPTIONS) opts.push({ v: o.v, t: o.t, meta: '' });
+        // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：正式轮组目录 + 未获得锁定
+        for (const o of MOVEMENT_OPTIONS) {
+          const owned = canEquipMovement(o.v);
+          const def = registry.movements.get(o.v);
+          opts.push({ v: o.v, t: o.t, meta: owned ? `${def?.energy ?? 0} 能量` : '未获得' });
+        }
       } else if (garageSelected === 'drive') {
         opts.push({ v: 'forward', t: '前进', meta: '轮子正常驱动' });
         opts.push({ v: 'stationary', t: '停驻', meta: '不主动移动·真实物理保留' });

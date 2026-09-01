@@ -30,7 +30,15 @@ export const OFFICIAL_PARTS: string[] = PART_OPTIONS.filter((o) => o.v !== EMPTY
   (o) => o.v,
 );
 
-/** 库存：每件正式部件按星级记录副本数（V0.5 仅 1/2 星） */
+/**
+ * F-CONTENT-PLAYER-MOVEMENT-PACK-R1｜正式轮组集合（默认未获得）。
+ * wheelStd 恒默认拥有（不进库存，见 canEquipMovement），故库存只记录
+ * small/large/heavy 三个新轮组。复用 PartInventory 计数（one=拥有数，two 恒 0），
+ * 禁止另建独立 movementOwnership storage（Queue 冻结项）。
+ */
+export const OFFICIAL_MOVEMENTS: readonly string[] = ['smallWheel', 'largeWheel', 'heavyWheel'];
+
+/** 库存：每件正式部件按星级记录副本数（V0.5 仅 1/2 星；轮组复用 one 计数） */
 export interface PartInventory {
   [defId: string]: { one: number; two: number };
 }
@@ -42,10 +50,11 @@ export function isOfficialPart(id: string): boolean {
   return OFFICIAL_PARTS.includes(id);
 }
 
-/** 全零库存（仅含正式部件键） */
+/** 全零库存（仅含正式部件键 + 正式轮组键） */
 function emptyInventory(): PartInventory {
   const inv: PartInventory = {};
   for (const p of OFFICIAL_PARTS) inv[p] = { one: 0, two: 0 };
+  for (const m of OFFICIAL_MOVEMENTS) inv[m] = { one: 0, two: 0 };
   return inv;
 }
 
@@ -56,10 +65,11 @@ export function defaultInventory(): PartInventory {
   return inv;
 }
 
-/** 只保留正式部件、补齐缺失键、夹紧负数（防御脏数据） */
+/** 只保留正式部件 + 正式轮组、补齐缺失键、夹紧负数（防御脏数据） */
 function normalizeInventory(data: Record<string, unknown>): PartInventory {
   const inv = emptyInventory();
-  for (const p of OFFICIAL_PARTS) {
+  const allKeys = [...OFFICIAL_PARTS, ...OFFICIAL_MOVEMENTS];
+  for (const p of allKeys) {
     const e = data[p];
     if (e && typeof e === 'object') {
       const o = e as Record<string, unknown>;
@@ -119,9 +129,9 @@ export function getCount(inv: PartInventory, defId: string, star: number): numbe
   return star >= 2 ? e.two : e.one;
 }
 
-/** 永久入库：增加副本（非正式部件忽略） */
+/** 永久入库：增加副本（非正式部件/轮组忽略） */
 export function addPart(inv: PartInventory, defId: string, star: number, n = 1): void {
-  if (!isOfficialPart(defId)) return;
+  if (!isOfficialPart(defId) && !OFFICIAL_MOVEMENTS.includes(defId)) return;
   if (!inv[defId]) inv[defId] = { one: 0, two: 0 };
   if (star >= 2) inv[defId].two += n;
   else inv[defId].one += n;
@@ -144,6 +154,32 @@ export function isOwned(defId: string, star = 1): boolean {
 /** Garage 装备守卫：空槽恒可装备；其余必须已拥有对应星级 */
 export function canEquipPart(defId: string, star = 1): boolean {
   return defId === EMPTY_SLOT || isOwned(defId, star);
+}
+
+/**
+ * F-CONTENT-PLAYER-MOVEMENT-PACK-R1｜轮组装备守卫。
+ * - wheelStd 恒默认拥有（零回归，旧档/对手池兼容）；
+ * - small/large/heavy 需库存 one≥1（debug「全部件×1」授予，复用 PartInventory，
+ *   禁止独立 movementOwnership storage）。
+ */
+export function canEquipMovement(defId: string): boolean {
+  if (defId === 'wheelStd') return true;
+  if (!OFFICIAL_MOVEMENTS.includes(defId)) return false;
+  return getCount(getInventory(), defId, 1) > 0;
+}
+
+/** F-CONTENT-PLAYER-MOVEMENT-PACK-R1：一次性解锁全部新轮组（debug「全部件×1」）。幂等。 */
+export function grantAllNewMovements(inv?: PartInventory): number {
+  const store = inv ?? getInventory();
+  let added = 0;
+  for (const m of OFFICIAL_MOVEMENTS) {
+    if (getCount(store, m, 1) < 1) {
+      addPart(store, m, 1, 1);
+      added += 1;
+    }
+  }
+  saveInventory(store);
+  return added;
 }
 
 /** 当前 Build 已装备的正式 defId 集合（用于合成「已装备保留」规则） */

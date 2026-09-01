@@ -19,6 +19,7 @@ const STORAGE_KEY = 'strongfruit.playerBuild.v1';
 
 const KNOWN_BODIES = new Set(registry.bodies.keys());
 const KNOWN_FUNCTIONALS = new Set(registry.functionals.keys());
+const KNOWN_MOVEMENTS = new Set(registry.movements.keys());
 
 /** 读取并校验玩家 Build；无存档 / 解析失败 / 非法 → null */
 export function loadPlayerBuild(): BuildDraft | null {
@@ -52,12 +53,16 @@ export function savePlayerBuild(d: BuildDraft): void {
   }
 }
 
-/** 结构校验：body 已知、轮径为数字、functionalSelections 值为已知部件或空槽 */
+/** 结构校验：body 已知、轮径为数字、functionalSelections 值为已知部件或空槽；
+ *  F-CONTENT-PLAYER-MOVEMENT-PACK-R1：rearWheelDefId/frontWheelDefId 可选，
+ *  若存在必须是已知 Movement defId（旧存档无此字段 = 标准轮）。 */
 function isBuildDraftShape(d: unknown): d is BuildDraft {
   if (!d || typeof d !== 'object') return false;
   const o = d as Record<string, unknown>;
   if (typeof o.bodyDefId !== 'string' || !KNOWN_BODIES.has(o.bodyDefId)) return false;
   if (typeof o.rearRadius !== 'number' || typeof o.frontRadius !== 'number') return false;
+  if (o.rearWheelDefId !== undefined && (typeof o.rearWheelDefId !== 'string' || !KNOWN_MOVEMENTS.has(o.rearWheelDefId))) return false;
+  if (o.frontWheelDefId !== undefined && (typeof o.frontWheelDefId !== 'string' || !KNOWN_MOVEMENTS.has(o.frontWheelDefId))) return false;
   if (typeof o.functionalSelections !== 'object' || o.functionalSelections === null) {
     return false;
   }

@@ -109,6 +109,12 @@ export interface WheelDef {
   maxRPM: number;
   /** 抓地力（Grip → 映射为 friction） */
   grip: number;
+  /**
+   * F-CONTENT-PLAYER-MOVEMENT-PACK-R1｜轮组能量占用。
+   * V1 起 Movement 正式计能（wheelStd=0 保持旧 Build 零回归）；
+   * computeEnergy / validateSnapshot 计入 movements 能量。
+   */
+  energy: number;
   /** W1-VIS-1：可选视觉定义（无则 Renderer 用 Collider/Circle fallback） */
   visual?: VisualDef;
 }

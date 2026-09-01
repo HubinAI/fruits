@@ -56,6 +56,7 @@ import {
   equippedDefIds,
 } from '../core/partInventory';
 import { NEW_OFFICIAL_BODIES, isBodyOwned } from '../core/bodyOwnership';
+import { canEquipMovement } from '../core/partInventory';
 import {
   BattleProgressSettler,
   getProgress,
@@ -261,6 +262,9 @@ export class PlayerGameRuntime {
       // 旧 4 个正式车身恒默认拥有（零回归）；新 4 个（榴莲/梨子/芒果/橙子）需先获得。
       // 非正式车身（boxBody 等测试/对手池专用）不在此列，保持既有可装备行为（T6 回归锚）。
       if (slotKey === 'body' && NEW_OFFICIAL_BODIES.includes(value) && !isBodyOwned(value)) return;
+      // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：轮组装备守卫——未获得的新轮组不可装备（T6）。
+      // wheelStd 恒默认拥有；small/large/heavy 需库存（canEquipMovement，复用 PartInventory）。
+      if ((slotKey === 'rearWheel' || slotKey === 'frontWheel') && !canEquipMovement(value)) return;
       // Q28：变更前快照（F-GARAGE-LIVE-ASSEMBLY-P0：超载回滚用）
       const prev = {
         body: this.draftA.bodyDefId,
@@ -268,12 +272,14 @@ export class PlayerGameRuntime {
         stars: { ...(this.draftA.functionalStars ?? {}) },
         rear: this.draftA.rearRadius,
         front: this.draftA.frontRadius,
+        rearDef: this.draftA.rearWheelDefId,
+        frontDef: this.draftA.frontWheelDefId,
         drive: this.draftA.drive,
       };
       const oldVal =
         slotKey === 'body' ? this.draftA.bodyDefId
-        : slotKey === 'rearWheel' ? String(this.draftA.rearRadius)
-        : slotKey === 'frontWheel' ? String(this.draftA.frontRadius)
+        : slotKey === 'rearWheel' ? (this.draftA.rearWheelDefId ?? String(this.draftA.rearRadius))
+        : slotKey === 'frontWheel' ? (this.draftA.frontWheelDefId ?? String(this.draftA.frontRadius))
         : slotKey === 'drive' ? resolveDriveMode(this.draftA.drive)
         : (this.draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
       if (slotKey === 'body') {
@@ -281,9 +287,12 @@ export class PlayerGameRuntime {
         this.draftA.bodyDefId = migrated.bodyDefId;
         this.draftA.functionalSelections = migrated.functionalSelections;
       } else if (slotKey === 'rearWheel') {
-        this.draftA.rearRadius = Number(value);
+        // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：轮组 defId + 该轮组默认半径（数值链路零改动）
+        this.draftA.rearWheelDefId = value;
+        this.draftA.rearRadius = registry.movements.get(value)?.radius ?? this.draftA.rearRadius;
       } else if (slotKey === 'frontWheel') {
-        this.draftA.frontRadius = Number(value);
+        this.draftA.frontWheelDefId = value;
+        this.draftA.frontRadius = registry.movements.get(value)?.radius ?? this.draftA.frontRadius;
       } else if (slotKey === 'drive') {
         this.draftA.drive = value as DriveMode;
       } else {
@@ -307,6 +316,8 @@ export class PlayerGameRuntime {
           this.draftA.functionalStars = prev.stars;
           this.draftA.rearRadius = prev.rear;
           this.draftA.frontRadius = prev.front;
+          this.draftA.rearWheelDefId = prev.rearDef;
+          this.draftA.frontWheelDefId = prev.frontDef;
           this.draftA.drive = prev.drive;
           this.overloadDeltaInternal = es.energy - cap;
           this.pushUI();
@@ -319,8 +330,8 @@ export class PlayerGameRuntime {
         slotKey !== 'body' && slotKey !== 'rearWheel' && slotKey !== 'frontWheel' && slotKey !== 'drive';
       const newVal =
         slotKey === 'body' ? this.draftA.bodyDefId
-        : slotKey === 'rearWheel' ? String(this.draftA.rearRadius)
-        : slotKey === 'frontWheel' ? String(this.draftA.frontRadius)
+        : slotKey === 'rearWheel' ? (this.draftA.rearWheelDefId ?? String(this.draftA.rearRadius))
+        : slotKey === 'frontWheel' ? (this.draftA.frontWheelDefId ?? String(this.draftA.frontRadius))
         : slotKey === 'drive' ? resolveDriveMode(this.draftA.drive)
         : (this.draftA.functionalSelections[slotKey] ?? EMPTY_SLOT);
       this.emitBuildChange(slotKey, oldVal, newVal, isFunctional);

@@ -24,6 +24,7 @@ import {
   getInventory,
   isOfficialPart,
   saveInventory,
+  grantAllNewMovements,
   type PartInventory,
 } from './partInventory';
 import { grantAllNewBodies } from './bodyOwnership';
@@ -45,7 +46,9 @@ export function grantablePartIds(): string[] {
 /**
  * 一键全部件 ×1：为当前存档每种真实可获得功能件各 +1 并持久化；
  * F-CONTENT-PLAYER-BODY-PACK-R1：同时解锁全部新增正式车身（榴莲/梨子/芒果/橙子，
- * 车身拥有为「拥有即解锁」集合，无数量概念，见 bodyOwnership.ts）。
+ * 车身拥有为「拥有即解锁」集合，无数量概念，见 bodyOwnership.ts）；
+ * F-CONTENT-PLAYER-MOVEMENT-PACK-R1：同时解锁全部新正式轮组（small/large/heavy，
+ * 复用 PartInventory one 计数，见 grantAllNewMovements）。
  * @returns 实际去重后增加的功能件种类数 N（反馈文案「已获得全部件×1（N种）」用；Must#8）
  */
 export function grantAllPartsOnce(inv?: PartInventory): number {
@@ -58,5 +61,7 @@ export function grantAllPartsOnce(inv?: PartInventory): number {
   saveInventory(store);
   // F-CONTENT-PLAYER-BODY-PACK-R1：车身部分（拥有即解锁，非计数；幂等）
   grantAllNewBodies();
+  // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：轮组部分（复用同一库存；幂等）
+  grantAllNewMovements(store);
   return target.length;
 }
