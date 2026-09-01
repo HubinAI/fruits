@@ -39,6 +39,7 @@ import {
 import { computeEnergy } from '../core/buildValidator';
 import { starTierEnergy } from '../core/buildSnapshot';
 import { getCount, canEquipPart, equippedDefIds, OFFICIAL_PARTS } from '../core/partInventory';
+import { canEquipBody } from '../core/bodyOwnership';
 import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/playerProgress';
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { BODY_OPTIONS, WHEEL_OPTIONS, encodePartVal, decodePartVal } from './playerUI';
@@ -2574,11 +2575,21 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ctx.clip();
     let x = lay.startX;
     const drag = this.garageDrag;
+    // F-CONTENT-PLAYER-BODY-PACK-R1：可见性收紧——只绘制「不越出装配带可视区（stripRect
+    // 左右缘）」的卡。旧判定（与 row 有交集）会绘制右缘超出屏幕的「部分可见」卡：真实
+    // canvas 靠 clip 裁切（无可见问题），但像素几何验收记录的是未裁切坐标 → 误报超界。
+    // 收紧后：左缘 ≥ strip 左缘、右缘 ≤ strip 右缘才绘制——不超屏，同时保留完全可见卡与
+    // 边缘滚动暗示的视觉连续（被 clip 裁掉的部分本就不可见）。hitArea 仍只注册完全可见卡
+    // （fully，不变）。
+    const stripLeft = stripRect.x;
+    const stripRight = stripRect.x + stripRect.w;
     for (const c of opts) {
       // 部分可见卡只绘制（视觉连续）、不注册 hitArea——hitArea 不受 clip 影响，
       // 越出可视区的命中会造成「可见区外可点 / 溢出 safe」（Must#10 点击区与视觉一致）。
       const fully = x >= row.x - 0.5 && x + cardW <= row.x + row.w + 0.5;
-      const visible = x + cardW > row.x && x < row.x + row.w;
+      const visible =
+        x + cardW > row.x && x < row.x + row.w &&
+        x >= stripLeft - 0.5 && x + cardW <= stripRight + 0.5;
       if (visible) {
         // Must#4：拖动中的卡片保留原位置但降低亮度（ghost 从原卡飞出）
         const isSrc = !!drag && !!drag.card && drag.card.v === c.v && drag.slot === slot;
@@ -2900,11 +2911,56 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     } else if (cat === 'gadget') {
       ctx.fillRect(cx - s * 0.55, cy - s * 0.55, s * 1.1, s * 1.1);
     } else if (registry.bodies.get(defId)) {
-      ctx.fillRect(cx - s * 0.9, cy - s * 0.3, s * 1.8, s * 0.55);
-      for (const wx of [cx - s * 0.55, cx + s * 0.55]) {
+      // F-CONTENT-PLAYER-BODY-PACK-R1：正式车身卡片 mini 简图按车身区分——
+      // 新 4 个车身画各自轮廓（榴莲尖刺 / 梨子上窄下宽 / 芒果低矮长形 / 橙子圆+叶），
+      // 旧 4 个保持既有「小车」简图（零回归）。
+      if (defId === 'durianBody') {
+        // 榴莲：椭圆体 + 顶部/底部短刺
         ctx.beginPath();
-        ctx.arc(wx, cy + s * 0.42, s * 0.2, 0, Math.PI * 2);
+        ctx.ellipse(cx, cy, s * 0.95, s * 0.6, 0, 0, Math.PI * 2);
         ctx.fill();
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1.2;
+        for (const [ax, ay] of [[-0.7, -0.5], [-0.2, -0.62], [0.35, -0.55], [0.7, -0.3], [-0.75, 0.3], [0.75, 0.25]] as const) {
+          ctx.beginPath();
+          ctx.moveTo(cx + ax * s, cy + ay * s);
+          ctx.lineTo(cx + ax * s * 1.18, cy + ay * s * 1.25);
+          ctx.stroke();
+        }
+      } else if (defId === 'pearBody') {
+        // 梨子：上窄下宽（上椭圆 + 下宽圆）
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + s * 0.45, s * 0.85, s * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(cx, cy - s * 0.28, s * 0.5, s * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (defId === 'mangoBody') {
+        // 芒果：低矮修长扁椭圆 + 短柄
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, s * 1.15, s * 0.34, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(cx + s * 0.9, cy - s * 0.18);
+        ctx.lineTo(cx + s * 1.12, cy - s * 0.34);
+        ctx.stroke();
+      } else if (defId === 'orangeBody') {
+        // 橙子：圆 + 顶部叶片
+        ctx.beginPath();
+        ctx.arc(cx, cy, s * 0.72, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(cx + s * 0.12, cy - s * 0.66, s * 0.34, s * 0.16, 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(cx - s * 0.9, cy - s * 0.3, s * 1.8, s * 0.55);
+        for (const wx of [cx - s * 0.55, cx + s * 0.55]) {
+          ctx.beginPath();
+          ctx.arc(wx, cy + s * 0.42, s * 0.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     } else {
       ctx.beginPath();
@@ -3278,7 +3334,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const opts: GarageOpt[] = [];
     if (!draft) return opts;
     if (slot === 'body') {
-      for (const o of BODY_OPTIONS) opts.push({ v: o.v, t: o.t, meta: '' });
+      // F-CONTENT-PLAYER-BODY-PACK-R1：正式车身目录 4→8；新 4 个默认未拥有 →
+      // 卡片显示「未获得」+ 锁定（仍可见、不隐藏；与功能件未拥有星级同规范）
+      for (const o of BODY_OPTIONS) {
+        const owned = canEquipBody(o.v);
+        opts.push({ v: o.v, t: o.t, meta: owned ? '' : '未获得', locked: !owned });
+      }
     } else if (slot === 'rearWheel' || slot === 'frontWheel') {
       for (const o of WHEEL_OPTIONS) opts.push({ v: o.v, t: o.t, meta: '' });
     } else if (slot === 'drive') {

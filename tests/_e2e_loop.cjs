@@ -198,7 +198,7 @@ async function invTotal(page) {
   const weaponOpts = await page.evaluate(() => {
     const h = globalThis.__h;
     if (!h || !h.hitAreas) return [];
-    return h.hitAreas.filter((a) => a.id && a.id.startsWith('opt:') && a.id.length > 5 && !/^opt:(12|20|26|none)$/.test(a.id) && !/^opt:(watermelonBody|bananaBody|pineappleBody|coconutBody)$/.test(a.id)).map((a) => a.id);
+    return h.hitAreas.filter((a) => a.id && a.id.startsWith('opt:') && a.id.length > 5 && !/^opt:(12|20|26|none)$/.test(a.id) && !/^opt:(watermelonBody|bananaBody|pineappleBody|coconutBody|durianBody|pearBody|mangoBody|orangeBody)$/.test(a.id)).map((a) => a.id);
   }).catch(() => []);
   if (hpTop && weaponOpts.length > 0) {
     await clickHit(page, hpTop);

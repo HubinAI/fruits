@@ -21,12 +21,17 @@ import type { FramingRect } from '../render/renderer';
 export type { UiMode, BattleState, PlayerPhase } from './playerShell';
 
 // —— 玩家可见选项常量（原 main.ts，抽到平台中立边界；DEV 面板与玩家 Dock 共用） ——
-/** Q10-A：正常装配（玩家）只展示当前正式内容（西瓜/香蕉/菠萝/椰子）。 */
+/** Q10-A + F-CONTENT-PLAYER-BODY-PACK-R1：正式车身目录（西瓜/香蕉/菠萝/椰子 + 榴莲/梨子/芒果/橙子）。
+ *  新 4 个车身默认未拥有（bodyOwnership 模型），Garage 卡片显示「未获得」锁定，获得后可装备。 */
 export const BODY_OPTIONS: Array<{ v: string; t: string }> = [
   { v: 'watermelonBody', t: '西瓜车身（宽厚低矮）' },
   { v: 'bananaBody', t: '香蕉车身（长条弧形）' },
   { v: 'pineappleBody', t: '菠萝车身（高窄·顶挂点高）' },
   { v: 'coconutBody', t: '椰子车身（短沉·更抗推）' },
+  { v: 'durianBody', t: '榴莲车身（重型紧凑·低重心）' },
+  { v: 'pearBody', t: '梨子车身（上窄下宽·偏高）' },
+  { v: 'mangoBody', t: '芒果车身（低矮修长·前挂点前）' },
+  { v: 'orangeBody', t: '橙子车身（短圆均衡·新手通用）' },
 ];
 
 /** Q10-B：玩家侧轮径命名（小/标准/大；三张等权卡片同一行展示）。 */

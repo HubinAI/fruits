@@ -220,6 +220,152 @@ const coconutBody: BodyDef = {
   ],
 };
 
+/**
+ * F-CONTENT-PLAYER-BODY-PACK-R1｜榴莲车身：重型、紧凑、低重心。
+ * - Collider：单宽扁 box（148×54），比西瓜（170×50）更紧凑、比椰子（132×46）更宽厚；
+ *   低重心（collider 中心 y=0、挂点 y 小）→ 冲撞/控距构筑的自然选择；
+ * - baseMass 135（>西瓜 120、<椰子 160，重装但非最沉）；
+ * - 尖刺**仅外观**（程序化矢量轮廓），不新增车身伤害 / 被动技能 / 护甲；
+ * - Energy capacity = 105；标准 4 Functional hardpoints；不加特殊规则。
+ */
+const durianBody: BodyDef = {
+  id: 'durianBody',
+  name: '榴莲车身',
+  colliders: [{ shape: 'box', width: 148, height: 54, offset: { x: 0, y: 0 } }],
+  baseMass: 135,
+  hp: 1100,
+  energyCapacity: 105,
+  movementHardpoints: [
+    { id: 'rear', localPosition: { x: -50, y: 27 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 50, y: 27 }, localRotation: 0 },
+  ],
+  functionalHardpoints: [
+    { id: 'front', localPosition: { x: 72, y: 0 }, localRotation: 0 },
+    { id: 'frontMass', localPosition: { x: 42, y: -8 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: 0, y: -27 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -72, y: 0 }, localRotation: 0 },
+  ],
+  visual: {
+    visualId: 'body_durian',
+    size: { width: 160, height: 64 },
+    anchor: { x: 0, y: 0 },
+    rotation: 0,
+    layer: 1,
+    mirrorWithFacing: true,
+  },
+};
+
+/**
+ * F-CONTENT-PLAYER-BODY-PACK-R1｜梨子车身：上窄下宽、车身偏高。
+ * - Collider：两段 box 组合近似梨形（上段窄 80×46、下段宽 116×52）——上窄下宽，
+ *   与菠萝（88×112 高窄矩形）轮廓一眼不同；高重心（COM 高于轮轴）→ 既有物理体系
+ *   下俯仰/翻倾风险为 emergent，不新增姿态规则；
+ * - 顶部挂点明显更高（top y=-46，介于菠萝 -56 与西瓜 -25 之间）→ 上部挂点更适合
+ *   远程/控距构筑；
+ * - baseMass 55（轻中档）；Energy capacity = 95；标准 4 Functional hardpoints。
+ */
+const pearBody: BodyDef = {
+  id: 'pearBody',
+  name: '梨子车身',
+  colliders: [
+    { shape: 'box', width: 80, height: 46, offset: { x: 0, y: -20 } },
+    { shape: 'box', width: 116, height: 52, offset: { x: 0, y: 20 } },
+  ],
+  baseMass: 55,
+  hp: 1000,
+  energyCapacity: 95,
+  movementHardpoints: [
+    { id: 'rear', localPosition: { x: -46, y: 40 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 46, y: 40 }, localRotation: 0 },
+  ],
+  functionalHardpoints: [
+    { id: 'front', localPosition: { x: 56, y: -4 }, localRotation: 0 },
+    { id: 'frontMass', localPosition: { x: 34, y: -14 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: 0, y: -46 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -56, y: -4 }, localRotation: 0 },
+  ],
+  visual: {
+    visualId: 'body_pear',
+    size: { width: 152, height: 80 },
+    anchor: { x: 0, y: 0 },
+    rotation: 0,
+    layer: 1,
+    mirrorWithFacing: true,
+  },
+};
+
+/**
+ * F-CONTENT-PLAYER-BODY-PACK-R1｜芒果车身：低矮、修长、轻型。
+ * - Collider：单低扁 box（150×36）——比香蕉（120×40+120×44 两段弧形）更长更扁，
+ *   低矮修长轮廓与香蕉的弧形高低差明显不同；低重心低姿态 → 主动接敌；
+ * - 前向挂点明显（front x=84，比西瓜 78 / 香蕉 82 都更靠前）→ 前装武器/冲撞件
+ *   天然向前突出，适合主动接敌构筑；
+ * - baseMass 48（最轻档，接近香蕉 45）；Energy capacity = 95。
+ */
+const mangoBody: BodyDef = {
+  id: 'mangoBody',
+  name: '芒果车身',
+  colliders: [{ shape: 'box', width: 150, height: 36, offset: { x: 0, y: 0 } }],
+  baseMass: 48,
+  hp: 950,
+  energyCapacity: 95,
+  movementHardpoints: [
+    { id: 'rear', localPosition: { x: -64, y: 18 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 64, y: 18 }, localRotation: 0 },
+  ],
+  functionalHardpoints: [
+    { id: 'front', localPosition: { x: 84, y: 0 }, localRotation: 0 },
+    { id: 'frontMass', localPosition: { x: 50, y: -6 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: 0, y: -18 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -84, y: 0 }, localRotation: 0 },
+  ],
+  visual: {
+    visualId: 'body_mango',
+    size: { width: 172, height: 48 },
+    anchor: { x: 0, y: 0 },
+    rotation: 0,
+    layer: 1,
+    mirrorWithFacing: true,
+  },
+};
+
+/**
+ * F-CONTENT-PLAYER-BODY-PACK-R1｜橙子车身：短、圆、紧凑、均衡。
+ * - Collider：单近方 box（112×76，短圆紧凑；物理用 box 保持稳定，视觉画圆+叶片）——
+ *   与椰子（132×46 短宽扁）、菠萝（88×112 高窄）轮廓均不同；
+ * - baseMass 80（中等，正式区间 45~160 中位偏下）、Energy 100（标准）→ 新手友好的
+ *   通用构筑；**刻意不成为全面优于旧车身的最优解**（质量/能量/尺寸均处中间档，
+ *   无任何隐藏优势）；
+ * - 标准 4 Functional hardpoints（坐标居中均衡）。
+ */
+const orangeBody: BodyDef = {
+  id: 'orangeBody',
+  name: '橙子车身',
+  colliders: [{ shape: 'box', width: 112, height: 76, offset: { x: 0, y: 0 } }],
+  baseMass: 80,
+  hp: 1000,
+  energyCapacity: 100,
+  movementHardpoints: [
+    { id: 'rear', localPosition: { x: -42, y: 38 }, localRotation: 0 },
+    { id: 'front', localPosition: { x: 42, y: 38 }, localRotation: 0 },
+  ],
+  functionalHardpoints: [
+    { id: 'front', localPosition: { x: 56, y: 0 }, localRotation: 0 },
+    { id: 'frontMass', localPosition: { x: 36, y: -12 }, localRotation: 0 },
+    { id: 'top', localPosition: { x: 0, y: -38 }, localRotation: 0 },
+    { id: 'rear', localPosition: { x: -56, y: 0 }, localRotation: 0 },
+  ],
+  visual: {
+    visualId: 'body_orange',
+    size: { width: 132, height: 92 },
+    anchor: { x: 0, y: 0 },
+    rotation: 0,
+    layer: 1,
+    mirrorWithFacing: true,
+  },
+};
+
+
 /** 标准轮子 */
 const wheelStd: WheelDef = {
   kind: 'wheel',
@@ -787,6 +933,11 @@ export function createRegistry(): ContentRegistry {
       [bananaBody.id, bananaBody],
       [pineappleBody.id, pineappleBody],
       [coconutBody.id, coconutBody],
+      // F-CONTENT-PLAYER-BODY-PACK-R1：新增 4 个正式水果车身
+      [durianBody.id, durianBody],
+      [pearBody.id, pearBody],
+      [mangoBody.id, mangoBody],
+      [orangeBody.id, orangeBody],
     ]),
     movements: new Map([[wheelStd.id, wheelStd]]),
     functionals: new Map([

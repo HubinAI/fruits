@@ -1727,9 +1727,13 @@ export class Renderer {
 
   private drawVehicle(v: RenderVehicle, color: string): void {
     // 车身（W2-VIS-1）：有 visual 且资源就绪 → sprite（跟随 chassis 世界 transform）；
-    // 否则 Collider graybox fallback（缺资源不白屏/不报错）。
+    // F-CONTENT-PLAYER-BODY-PACK-R1：新 4 车身无 sprite 资源时按 visualId 画程序化
+    // 矢量轮廓（榴莲尖刺 / 梨子上窄下宽 / 芒果低矮长形 / 橙子圆+叶），避免临时矩形；
+    // 其余仍回退 Collider graybox（缺资源不白屏/不报错）。
     if (v.bodyVisual && this.drawVisual(v.bodyVisual)) {
       // sprite 已绘制
+    } else if (v.bodyVisual && this.drawBodyVector(v.bodyVisual)) {
+      // 程序化矢量轮廓已绘制
     } else {
       this.drawShape(v.body, color);
     }
@@ -1859,6 +1863,118 @@ export class Renderer {
     const h = this.ss(v.size.height);
     // VisualImageLike 是最小结构接口；运行时为可绘制源（HTMLImageElement 等）→ 窄断言
     ctx.drawImage(img as unknown as CanvasImageSource, -w / 2, -h / 2, w, h);
+    ctx.restore();
+    return true;
+  }
+
+  /**
+   * F-CONTENT-PLAYER-BODY-PACK-R1｜新 4 车身程序化矢量轮廓。
+   * - 仅当 sprite 资源缺失时调用（drawVisual 返回 false）：新 4 车身在未提供 sprite
+   *   资源前，用可辨识的矢量轮廓绘制（榴莲尖刺 / 梨子上窄下宽 / 芒果低矮长形 /
+   *   橙子圆+叶片），避免退化为临时矩形 graybox（视觉约束）；
+   * - 变换与 drawVisual 完全一致：translate(position) · [scale(-1,1) mirror] ·
+   *   rotate(rotation)，局部坐标以 (0,0) 为中心、size 为参考框 → 轮廓严格跟随真实
+   *   chassis transform（含 facing 镜像）；
+   * - 纯表现：只消费 RenderVisual 世界 transform，不新增 gameplay 状态、
+   *   不改 collider / 伤害 / 物理；若将来提供 sprite 资源，drawVisual 成功即让位。
+   * @returns 是否已绘制（非新 4 车身 visualId → false，调用方回退 collider graybox）
+   */
+  private drawBodyVector(v: RenderVisual): boolean {
+    const ctx = this.ctx;
+    const w = this.ss(v.size.width);
+    const h = this.ss(v.size.height);
+    ctx.save();
+    ctx.translate(this.sx(v.position.x), this.sy(v.position.y));
+    if (v.mirror) ctx.scale(-1, 1);
+    ctx.rotate(v.rotation);
+    const id = v.visualId;
+    if (id === 'body_durian') {
+      // 榴莲：绿色椭圆体 + 上下缘 8 根短刺（仅外观，无伤害语义）
+      const rx = w * 0.46;
+      const ry = h * 0.42;
+      ctx.fillStyle = '#5f9e3f';
+      ctx.globalAlpha = 0.92;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      this.applyPartOutline('#5f9e3f');
+      ctx.stroke();
+      this.resetPartOutline();
+      ctx.strokeStyle = '#7cb454';
+      ctx.lineWidth = Math.max(1.5, ry * 0.14);
+      ctx.lineCap = 'round';
+      const spikes: Array<[number, number]> = [
+        [-0.72, -0.62], [-0.3, -0.85], [0.15, -0.88], [0.6, -0.68],
+        [-0.66, 0.68], [-0.18, 0.86], [0.3, 0.84], [0.68, 0.6],
+      ];
+      for (const [sx, sy] of spikes) {
+        ctx.beginPath();
+        ctx.moveTo(sx * rx, sy * ry);
+        ctx.lineTo(sx * rx * 1.22, sy * ry * 1.3);
+        ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
+    } else if (id === 'body_pear') {
+      // 梨子：上窄下宽（下部宽圆 + 上部窄椭圆），上下略有色差增强层次
+      const rw = w * 0.4;
+      const rh = h * 0.34;
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = '#b3c94a';
+      ctx.beginPath();
+      ctx.ellipse(0, h * 0.12, rw, rh, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#cfd95a';
+      ctx.beginPath();
+      ctx.ellipse(0, -h * 0.28, w * 0.26, h * 0.24, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      this.applyPartOutline('#b3c94a');
+      ctx.beginPath();
+      ctx.ellipse(0, h * 0.12, rw, rh, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      this.resetPartOutline();
+    } else if (id === 'body_mango') {
+      // 芒果：低矮修长扁椭圆 + 顶部短柄
+      const rx = w * 0.46;
+      const ry = h * 0.4;
+      ctx.fillStyle = '#f5a63c';
+      ctx.globalAlpha = 0.92;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      this.applyPartOutline('#f5a63c');
+      ctx.stroke();
+      this.resetPartOutline();
+      ctx.strokeStyle = '#c97a24';
+      ctx.lineWidth = Math.max(1.5, ry * 0.2);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(rx * 0.72, -ry * 0.55);
+      ctx.lineTo(rx * 1.02, -ry * 1.05);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+    } else if (id === 'body_orange') {
+      // 橙子：橙色圆 + 顶部小叶片
+      const r = w * 0.34;
+      ctx.fillStyle = '#f2872e';
+      ctx.globalAlpha = 0.92;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      this.applyPartOutline('#f2872e');
+      ctx.stroke();
+      this.resetPartOutline();
+      ctx.fillStyle = '#5f9e3f';
+      ctx.beginPath();
+      ctx.ellipse(r * 0.18, -r * 0.92, r * 0.4, r * 0.18, 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.restore();
+      return false;
+    }
     ctx.restore();
     return true;
   }

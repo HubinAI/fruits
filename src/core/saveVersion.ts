@@ -33,6 +33,7 @@ export const RESET_KEYS: readonly string[] = [
   'strongfruit.ownedParts.v1', // 旧版遗留 key，一并清理
   'strongfruit.playerProgress.v1',
   'strongfruit.onboarding.v1',
+  'strongfruit.ownedBodies.v1', // F-CONTENT-PLAYER-BODY-PACK-R1：车身拥有集合
 ];
 
 /** 给对象附加/更新版本信封（写入时调用；不修改入参，返回新对象） */

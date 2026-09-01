@@ -55,6 +55,7 @@ import {
   saveInventory,
   equippedDefIds,
 } from '../core/partInventory';
+import { NEW_OFFICIAL_BODIES, isBodyOwned } from '../core/bodyOwnership';
 import {
   BattleProgressSettler,
   getProgress,
@@ -256,6 +257,10 @@ export class PlayerGameRuntime {
         const { defId, star } = decodePartValShared(value);
         if (!canEquipPart(defId, star)) return;
       }
+      // F-CONTENT-PLAYER-BODY-PACK-R1：车身装备守卫——未获得的新车身不可装备（T6）。
+      // 旧 4 个正式车身恒默认拥有（零回归）；新 4 个（榴莲/梨子/芒果/橙子）需先获得。
+      // 非正式车身（boxBody 等测试/对手池专用）不在此列，保持既有可装备行为（T6 回归锚）。
+      if (slotKey === 'body' && NEW_OFFICIAL_BODIES.includes(value) && !isBodyOwned(value)) return;
       // Q28：变更前快照（F-GARAGE-LIVE-ASSEMBLY-P0：超载回滚用）
       const prev = {
         body: this.draftA.bodyDefId,

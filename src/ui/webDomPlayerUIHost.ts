@@ -21,6 +21,8 @@ import {
 import { computeEnergy } from '../core/buildValidator';
 import { starTierEnergy } from '../core/buildSnapshot';
 import { getCount, canEquipPart, equippedDefIds, OFFICIAL_PARTS } from '../core/partInventory';
+// F-CONTENT-PLAYER-BODY-PACK-R1：车身拥有守卫（未获得的新车身锁定）
+import { canEquipBody } from '../core/bodyOwnership';
 import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/playerProgress';
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { computePlayerShellVisibility } from './playerShell';
@@ -468,7 +470,11 @@ export class WebDomPlayerUIHost implements PlayerUIHost {
       picker.appendChild(title);
       const opts: Array<{ v: string; t: string; meta: string }> = [];
       if (garageSelected === 'body') {
-        for (const o of BODY_OPTIONS) opts.push({ v: o.v, t: o.t, meta: '' });
+        // F-CONTENT-PLAYER-BODY-PACK-R1：新 4 车身默认未拥有 → 「未获得」仍可见、锁定
+        for (const o of BODY_OPTIONS) {
+          const owned = canEquipBody(o.v);
+          opts.push({ v: o.v, t: o.t, meta: owned ? '' : '未获得' });
+        }
       } else if (garageSelected === 'rearWheel' || garageSelected === 'frontWheel') {
         for (const o of WHEEL_OPTIONS) opts.push({ v: o.v, t: o.t, meta: '' });
       } else if (garageSelected === 'drive') {
@@ -504,15 +510,18 @@ export class WebDomPlayerUIHost implements PlayerUIHost {
                   );
       for (const o of opts) {
         const b = document.createElement('button');
+        // F-CONTENT-PLAYER-BODY-PACK-R1：车身槽未获得的新车身锁定（与 Canvas 玩家模式一致）；
         // Q22：功能件槽中，未拥有星级锁定（不可装备、仍可见），空槽/已拥有正常
-        const equip = !slotIsFunctional
-          ? true
-          : o.v === EMPTY_SLOT
+        const equip = garageSelected === 'body'
+          ? canEquipBody(o.v)
+          : !slotIsFunctional
             ? true
-            : (() => {
-                const { defId, star } = decodePartVal(o.v);
-                return canEquipPart(defId, star);
-              })();
+            : o.v === EMPTY_SLOT
+              ? true
+              : (() => {
+                  const { defId, star } = decodePartVal(o.v);
+                  return canEquipPart(defId, star);
+                })();
         b.className = 'dock-opt' + (o.v === curVal ? ' active' : '') + (equip ? '' : ' locked');
         if (!equip) b.disabled = true;
         const nameEl = document.createElement('div');

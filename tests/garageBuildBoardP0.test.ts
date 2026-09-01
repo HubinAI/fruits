@@ -266,11 +266,15 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
   it('T8. 数据/规则保留（Must#9）：garageOptions 仍读 canEquipPart / 星级 / 能量 / 库存；runtime 装备逻辑未改', () => {
     const host = readFileSync('src/ui/canvasPlayerUIHost.ts', 'utf-8');
     const optStart = host.indexOf('private garageOptions(');
-    const optBody = host.slice(optStart, optStart + 1400);
+    // F-CONTENT-PLAYER-BODY-PACK-R1：body 分支新增 canEquipBody 未获得锁定后，
+    // 窗口扩大到 2400 字符以覆盖后续功能件分支（canEquipPart/starTierEnergy/getCount）。
+    const optBody = host.slice(optStart, optStart + 2400);
     expect(optBody, '未获得判定 canEquipPart').toContain('canEquipPart');
     expect(optBody, '星级能量 starTierEnergy').toContain('starTierEnergy');
     expect(optBody, '库存 getCount').toContain('getCount');
     expect(optBody, '空槽选项保留').toContain("v: EMPTY_SLOT");
+    // F-CONTENT-PLAYER-BODY-PACK-R1：车身槽未获得锁定（canEquipBody）与旧分支共存
+    expect(optBody, '车身槽未获得锁定 canEquipBody').toContain('canEquipBody');
     // runtime 装备规则未改（onPickGarageOption 仍用 migrateDraftBody / canEquipPart / decodePartVal）
     const rt = readFileSync('src/game/playerGameRuntime.ts', 'utf-8');
     const pickStart = rt.indexOf('onPickGarageOption:');
