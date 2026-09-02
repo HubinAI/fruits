@@ -23,8 +23,7 @@ import {
   addPart,
   canEquipPart,
   computeReward,
-  tryMerge,
-  equippedDefIds,
+  fuseSameStar,
   BattleRewardSettler,
 } from '../src/core/partInventory';
 import { EMPTY_SLOT } from '../src/lab/buildEditorModel';
@@ -205,43 +204,44 @@ describe('Q21→Q22 B｜每场奖励（可重复 / 同场幂等 / 排除 HOLD）
   });
 });
 
-describe('Q21→Q22 C｜最小 5合1 合成', () => {
-  it('C1. 5×1★（跨 defId）→ 1×随机 2★，库存正确消耗/产出', () => {
+describe('Q21→Q22 C｜最小 5合1 合成（F-GARAGE-INVENTORY-FUSION-P0：同 defId、无金币）', () => {
+  it('C1. 5×1★（同 defId）→ 1×同 defId 2★，库存正确消耗/产出', () => {
     const inv = defaultInventory();
     addPart(inv, 'cannon', 1, 5); // 5 个 1★
-    const res = tryMerge(inv, [], () => 0);
+    const res = fuseSameStar(inv, 'cannon', 1, null);
     expect(res).not.toBeNull();
-    expect(res!.inventory[res!.product].two).toBe(1);
-    expect(getCount(inv, 'cannon', 1)).toBe(5 - 5 + 1); // starter 1 + 5 加 - 5 扣
+    expect(res!.product).toBe('cannon');
+    expect(res!.star).toBe(2);
+    expect(getCount(inv, 'cannon', 2)).toBe(1);
+    expect(getCount(inv, 'cannon', 1)).toBe(1 + 5 - 5); // starter 1 + 5 加 - 5 扣
   });
 
   it('C2. 不足 5 个 1★ 不可合成（返回 null、不消耗）', () => {
     const inv = defaultInventory();
-    // tryMerge 会聚合所有正式部件的 1★ 副本，故先清零其他 starter 副本
-    for (const p of OFFICIAL_PARTS) inv[p].one = 0;
+    for (const p of OFFICIAL_PARTS) inv[p].one = 0; // 清零
     addPart(inv, 'laser', 1, 4); // 仅 4 个 1★ < 5
     const before = getCount(inv, 'laser', 1);
-    const res = tryMerge(inv, [], () => 0);
+    const res = fuseSameStar(inv, 'laser', 1, null);
     expect(res).toBeNull();
     expect(getCount(inv, 'laser', 1)).toBe(before);
   });
 
-  it('C3. 已装备保留：Build 装备 cannon 时合成不消耗其 1★（Build 不变非法）', () => {
+  it('C3. 已装备保护：Build 装备 cannon 时合成不消耗其 1★（Build 不变非法）', () => {
     const inv = defaultInventory();
-    // 仅 cannon 有 5 个 1★，且 defaultBuild 装备 cannon
-    addPart(inv, 'cannon', 1, 5);
-    const res = tryMerge(inv, equippedDefIds(defaultBuild()), () => 0);
+    addPart(inv, 'cannon', 1, 5); // 6 个 1★（starter 1 + 5）
+    const res = fuseSameStar(inv, 'cannon', 1, defaultBuild());
     expect(res).not.toBeNull();
-    expect(getCount(inv, 'cannon', 1)).toBeGreaterThanOrEqual(1); // 保留 1 个
+    expect(getCount(inv, 'cannon', 1)).toBeGreaterThanOrEqual(1); // 保留 1 个（已装备）
     // Build 仍合法（cannon 1★ 仍拥有）
     expect(canEquipPart('cannon', 1)).toBe(true);
   });
 
-  it('C4. 合成产物来自正式 PART_OPTIONS（不 HOLD / EMPTY）', () => {
+  it('C4. 合成产物来自正式 PART_OPTIONS（不 HOLD / EMPTY / 跨 defId）', () => {
     const inv = defaultInventory();
     addPart(inv, 'laser', 1, 5);
-    const res = tryMerge(inv, [], () => 0)!;
+    const res = fuseSameStar(inv, 'laser', 1, null)!;
     expect(OFFICIAL_PARTS).toContain(res.product);
+    expect(res.product).toBe('laser'); // 同 defId，不跨 defId
   });
 });
 

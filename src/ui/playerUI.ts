@@ -166,8 +166,8 @@ export interface PlayerUIActions {
   onGarageRetry?(): void;
   /** Result「看广告领金币」 */
   onClaimRewardAd(): void;
-  /** Garage 合成（5×1★ → 随机 2★） */
-  onMerge(): void;
+  /** F-GARAGE-INVENTORY-FUSION-P0：背包合成（5 个同 defId 同星级未装备副本 → 1 个同 defId 下一星级；无经济） */
+  onFuse(defId: string, star: number): void;
   /** DEV：重置进度（?resetdev=1 可见；二次确认后调用） */
   onResetProgress(): void;
   /** F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件 ×1（?resetdev=1 可见；不自动装备/不升星） */

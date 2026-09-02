@@ -38,10 +38,10 @@ import {
 } from '../lab/buildEditorModel';
 import { computeEnergy } from '../core/buildValidator';
 import { starTierEnergy } from '../core/buildSnapshot';
-import { getCount, canEquipPart, canEquipMovement, equippedDefIds, getInventory, OFFICIAL_PARTS } from '../core/partInventory';
-import { canEquipBody } from '../core/bodyOwnership';
+import { getCount, canEquipPart, canEquipMovement, getInventory, OFFICIAL_PARTS, OFFICIAL_MOVEMENTS, canFuse, equippedSlots } from '../core/partInventory';
+import { canEquipBody, OFFICIAL_BODIES } from '../core/bodyOwnership';
 import { hasAllOfficialDebugContent } from '../core/debugGrants';
-import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/playerProgress';
+import { tierOf, TIER_LABEL } from '../core/playerProgress';
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { BODY_OPTIONS, MOVEMENT_OPTIONS, encodePartVal, decodePartVal } from './playerUI';
 import { resolveLayoutProfile, type LayoutProfile } from './layoutProfile';
@@ -249,22 +249,6 @@ export const HOME_CHEST_STATES: Array<'claimable' | 'timing' | 'empty'> = [
 ];
 
 /**
- * F-META-UX2：合成前后库存快照 diff → 新 2★ 部件（2★ 数量恰好 +1 的 defId）。
- * 仅用于「合成成功」结果 Modal 文案；不参与任何规则（规则仍在 mergeWithCost / runtime）。
- */
-function diffMergeGain(
-  before: Record<string, { one: number; two: number }>,
-  after: Record<string, { one: number; two: number }>,
-): { defId: string; two: number } | null {
-  for (const p of OFFICIAL_PARTS) {
-    const b = Math.max(0, before[p]?.two ?? 0);
-    const a = Math.max(0, after[p]?.two ?? 0);
-    if (a > b) return { defId: p, two: a };
-  }
-  return null;
-}
-
-/**
  * F-META-4：通用 Modal Frame 规格（轻量 UI Foundation，不接具体业务逻辑）。
  * - 居中卡片：标题区 + 内容行 + 主按钮 + 可选次按钮 + 全屏遮罩（拦截底层点击）。
  * - 关闭后重绘恢复当前页面；按钮回调由调用方提供（最小 API，无全局 Modal Manager）。
@@ -366,8 +350,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private soundOn = true;
   /** F-META-6：震动开关（预留；UI preference 持久化，不接平台震动 API） */
   private vibrationOn = true;
-  /** F-META-3：Backpack 分类过滤（全部/武器/功能件；UI-only，不做复杂筛选） */
-  private backpackFilter: 'all' | 'weapon' | 'gadget' = 'all';
+  /** F-GARAGE-INVENTORY-FUSION-P0：Backpack 分类（战斗/移动/车身；UI-only）。默认「战斗」。 */
+  private backpackFilter: 'combat' | 'movement' | 'body' = 'combat';
+  /** F-GARAGE-INVENTORY-FUSION-P0：当前选中的可合成 defId（点击卡片选中；null = 未选）。 */
+  private backpackSelected: string | null = null;
+  /** F-GARAGE-INVENTORY-FUSION-P0：合成成功轻反馈（无重型动画；下次交互/离开清除）。 */
+  private fuseToast: string | null = null;
   /** F-UX-2C：Backpack 2×2 卡片分页（每页 4 张；[上一页]/[下一页]；合成后仍停当前页） */
   private backpackPage = 0;
   /** F-HOME-3：首页车辆气泡 tips（点击车辆随机显示 1 条；null = 隐藏；轻量，非 Modal） */
@@ -378,11 +366,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private resultModalShown = false;
   /** F-META-5：Result Modal 展示时的 rewardAdClaimed（广告领币后需刷新弹窗文案） */
   private resultAdClaimedShown = false;
-  /**
-   * F-META-UX2：合成前库存快照（确认合成时捕获）——onMerge 后 render 时 diff 出
-   * 新 2★ 部件用于「合成成功」结果 Modal。仅 UI 呈现，不改任何合成规则。
-   */
-  private mergeSnapshot: Record<string, { one: number; two: number }> | null = null;
   /**
    * F-GARAGE-DRAG-ASSEMBLY-P0：Garage 拖动状态机（Must#3）。
    * null = idle。仅装配带卡片按下时创建；离开 garage / 手势结束 / 系统取消即复位。
@@ -647,27 +630,18 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (state.playerPhase !== 'garage') this.garageFromResult = false;
     // F-HOME-3：离开局外同时复位车辆气泡 tips（回 Home 默认不显示）
     if (state.playerPhase !== 'garage') this.vehicleTip = null;
-    // F-META-3：离开局外同时复位 Backpack 分类（回 Garage 默认全部）
-    if (state.playerPhase !== 'garage') this.backpackFilter = 'all';
+    // F-GARAGE-INVENTORY-FUSION-P0：离开局外同时复位 Backpack 状态（回 Garage 默认战斗/未选/无反馈）
+    if (state.playerPhase !== 'garage') {
+      this.backpackFilter = 'combat';
+      this.backpackSelected = null;
+      this.fuseToast = null;
+    }
     // F-UX-2C：离开局外同时复位 Backpack 分页（回 Garage 默认第一页）
     if (state.playerPhase !== 'garage') this.backpackPage = 0;
     // F-META-6：离开局外同时复位 More 子视图（回 Garage 默认功能卡主页）
     if (state.playerPhase !== 'garage') this.moreView = 'home';
-    // F-META-UX2：合成确认后（mergeSnapshot 非空）→ diff 出新 2★ → 弹「合成成功」结果 Modal
-    // （合成失败则库存无变化 → 不弹；结果 Modal 关闭后仍停留 Backpack）
-    if (this.mergeSnapshot && state.playerPhase === 'garage') {
-      const snap = this.mergeSnapshot;
-      this.mergeSnapshot = null;
-      const gain = diffMergeGain(snap, state.inventory);
-      if (gain) {
-        const def = registry.functionals.get(gain.defId);
-        this.showModal({
-          title: '合成成功',
-          body: [`获得 ${def?.name ?? gain.defId} ★★`, `库存 ${gain.two} · 金币 ${state.progress.coin}`],
-          primary: '知道了',
-        });
-      }
-    }
+    // F-GARAGE-INVENTORY-FUSION-P0：合成反馈改为背包页内轻量 fuseToast（见 drawBackpackPage），
+    // 不再弹「合成成功」结果 Modal；此处不再消费 mergeSnapshot（已移除）。
     // F-META-5：Result 状态 → 一次性弹出正式结算 Modal（奖励信息单弹窗集中；
     // 广告领币后 rewardAdClaimed 变化 → 刷新弹窗文案；result 清空 → 复位）
     if (state.result) {
@@ -1386,10 +1360,32 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     if (id.startsWith('nav:')) {
       // F-META-1：Main Shell 导航切换（UI-only，不派发 Gameplay action；离开当前页复位面板态）
-      // F-HOME-1：'nav:garage'（Backpack/More 的「返回车库」）→ 回 Home（正式首页）；'nav:home'（配置页返回）
-      // F-GARAGE-CENTER-STAGE-P0：metaPage 切换后通知 runtime 重 fit（renderer.transform 跨页面不再 stale）
+      // F-GARAGE-INVENTORY-FUSION-P0：背包导航——进入/返回均保留 Result-adjust 上下文
+      //（garageFromResult 不清零），满足「返回保持原上下文、不经过 Home、不重建 runtime/session」。
       const page = id.slice(4) as MetaPage;
-      this.metaPage = page === 'garage' ? 'home' : page;
+      if (page === 'backpack') {
+        this.metaPage = 'backpack';
+        this.backpackSelected = null;
+        this.fuseToast = null;
+        this.panelView = 'home';
+        this.moreView = 'home';
+        this.actions?.reframeCamera?.();
+        this.draw();
+        return;
+      }
+      if (page === 'garage') {
+        // 「‹ 返回车库」→ 回装配页（非首页），保留 Result-adjust 上下文（完成并再战仍可见）
+        this.metaPage = 'garage';
+        this.backpackSelected = null;
+        this.fuseToast = null;
+        this.panelView = 'home';
+        this.moreView = 'home';
+        this.actions?.reframeCamera?.();
+        this.draw();
+        return;
+      }
+      // 其余（home/more）：回首页/更多，清除 Result-adjust 上下文
+      this.metaPage = page === 'home' ? 'home' : page;
       this.panelView = 'home';
       // F-GARAGE-ADJUST-REMATCH-P0（Must#4）：返回 Home → 瞬时 result-adjust 上下文清除——
       // 玩家保留返回能力（不被强制再战）；再进 Garage 走 normal 路径不显示「完成并再战」。
@@ -1498,9 +1494,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id.startsWith('bfilter:')) {
-      // F-META-3：Backpack 分类过滤（全部/武器/功能件；复位列表分页到第一页）
-      this.backpackFilter = id.slice(8) as 'all' | 'weapon' | 'gadget';
+      // F-GARAGE-INVENTORY-FUSION-P0：Backpack 分类（战斗/移动/车身；复位分页与选中）
+      this.backpackFilter = id.slice(8) as 'combat' | 'movement' | 'body';
       this.backpackPage = 0;
+      this.backpackSelected = null;
+      this.fuseToast = null;
       this.draw();
       return;
     }
@@ -1508,6 +1506,13 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       // F-UX-2C：Backpack 分页（[上一页]/[下一页]；上限在 draw 内按 pageCount 钳制）
       this.backpackPage += id === 'backpack-page-prev' ? -1 : 1;
       if (this.backpackPage < 0) this.backpackPage = 0;
+      this.draw();
+      return;
+    }
+    if (id.startsWith('backpack-select:')) {
+      // F-GARAGE-INVENTORY-FUSION-P0：点卡选中（不用拖动）；焦点留原卡，清除上一次合成反馈
+      this.backpackSelected = id.slice('backpack-select:'.length);
+      this.fuseToast = null;
       this.draw();
       return;
     }
@@ -1614,15 +1619,19 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
           this.actions?.onFindOpponent();
         }
         break;
-      case 'merge':
-        // F-META-UX2：Mobile 合成用 Modal 展示规则（5×1★+金币+随机2★），确认才 onMerge；
-        // Desktop 保持直接合成
-        if (this.isMobile) {
-          this.showMergeModal();
-        } else {
-          this.actions?.onMerge();
+      case 'backpack-fuse': {
+        // F-GARAGE-INVENTORY-FUSION-P0：对当前选中卡的 1★ 发起合成（onFuse 内部再校验+保护已装备）。
+        // 连续快速点击只执行一次：第一次成功后可用数下降，第二次 canFuse 返回 false → runtime 空操作。
+        const defId = this.backpackSelected;
+        if (defId) {
+          const st = this.lastState;
+          const pre = st ? canFuse(st.inventory, defId, 1, st.draft) : { ok: false, available: 0, need: 5, maxStar: false };
+          this.actions?.onFuse(defId, 1);
+          this.fuseToast = pre.ok ? `合成成功 · 获得 ${this.partDisplayName(defId)} ★★` : null;
         }
+        this.draw();
         break;
+      }
       case 'result-adjust':
         this.actions?.onResultAdjust();
         break;
@@ -2093,6 +2102,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.drawMobileGarageDock(state);
       return;
     }
+    // F-GARAGE-INVENTORY-FUSION-P0：Desktop/Test 模式同样渲染背包/更多二级页（复用 Mobile 布局渲染），
+    // 保证背包合成入口在桌面预览与单测中可达（与 mobile 同源单一实现）。
+    if (this.metaPage === 'backpack' || this.metaPage === 'more') {
+      this.drawMobileGarageDock(state);
+      return;
+    }
     const draft = state.draft;
     if (!draft) return;
     const dockY = 410;
@@ -2105,6 +2120,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.text(`${p.coin}`, 24 + 34, dockY + 26, 15, C.gold, 'left', 700);
     this.text(` · ${TIER_LABEL[tier]}`, 24 + 34 + 74, dockY + 26, 13, C.textDim);
     this.text(`${p.rating}`, 24 + 34 + 74 + 92, dockY + 26, 15, C.gold, 'left', 700);
+
+    // F-GARAGE-INVENTORY-FUSION-P0：Garage 顶栏「背包」入口（不进首页；hitArea 与可见按钮同源）
+    this.button(BASE_W - 120, dockY + 12, 96, 30, 'nav:backpack', '背包', {});
 
     // 首轮引导
     let y = dockY + 46;
@@ -2165,21 +2183,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       overload ? 700 : 400,
     );
 
-    // 合成面板（Q22：Garage 内简易）
-    const inv = state.inventory;
-    const reserved = new Set(equippedDefIds(draft));
-    let available = 0;
-    for (const pp of OFFICIAL_PARTS) available += Math.max(0, inv[pp].one - (reserved.has(pp) ? 1 : 0));
-    const canMergeParts = available >= 5;
-    const canAfford = canAffordMerge(p.coin);
-    this.text('合成 · 5 × 1★ → 1 × 随机 2★', 340, bottomY - 16, 13, C.text, 'left', 700);
-    this.text(`可合成 1★ 副本：${available}（已装备各保留 1） · 消耗 ${MERGE_COST_COIN} 金币`, 340, bottomY + 2, 11, C.textDim);
-    this.button(340, bottomY + 12, 120, 26, 'merge',
-      !canMergeParts ? '副本不足' : !canAfford ? `金币不足（${p.coin}/${MERGE_COST_COIN}）` : '合成',
-      { disabled: !(canMergeParts && canAfford) },
-    );
-    // F-NAV-ACTION-OWNERSHIP-P0：Backpack 只承载查看库存与合成——删除「寻找对手」CTA
-    //（不替换成新大按钮/无关入口；空间留白，合成面板为 Backpack 唯一操作）
+    // F-GARAGE-INVENTORY-FUSION-P0：合成已迁入背包二级页（Garage 顶栏「背包」入口进入），
+    // 此处不再承载合成面板（避免与背包页重复/第二套合成入口）。
   }
   /**
    * F-WX-UI-1：Mobile-first Garage——中央三段式（信息架构重做，非 PC 压缩）。
@@ -3101,93 +3106,186 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    */
 
   /**
-   * F-META-1/2/3 + F-META-UX1 + F-UX-2C：backpack MetaPage——「已获得部件」唯一管理页：
-   * 分类（全部/武器/功能件）+ 库存 **2×2 部件卡分页**（每页 4 张：名称/星级×数量/装备态，
-   * 未拥有不占列表；[上一页] 1/N [下一页] 分页，无 ▲▼ 滚动）+ 合成（5合1 完整迁入；
-   * 确认才 onMerge，规则复用 mergeWithCost，不重写）。
-   * F-META-UX1：顶部唯一「← 返回车库」；F-UX-2C：合成后仍停留 Backpack 当前页。
+   * F-GARAGE-INVENTORY-FUSION-P0｜背包二级页（garage-inventory）：
+   * - 顶部「‹ 返回车库」（nav:garage，保留 Result-adjust 上下文）+ 标题「背包」；
+   * - 分类 tabs：战斗 / 移动 / 车身（车身仅展示拥有状态，不参与合成）；
+   * - 卡片（含未获得）：名称、当前星级、总数量、已装备数量、可用于合成数量、未获得状态、
+   *   已装备标识（同一卡不同时「未获得」与「已装备」）；
+   * - 选中卡片 → 底部合成面板（当前★1 / 消耗 5 / 产出 ★2 / 可用数量 / 暖金「合成」）；
+   *   available < 5 → disabled「还差 N 个」；MAX_STAR 满星禁；连续点击只执行一次（onFuse 内部再校验）；
+   * - 合成成功轻反馈（fuseToast，无重型动画），焦点留原卡。
    */
   private drawBackpackPage(state: PlayerUIState, layout: MobileGarageLayout): void {
     const draft = state.draft;
     const c = layout.contentRect;
     this.panel(c.x, c.y, c.w, c.h, V.panelSolid);
-    // F-META-UX1：顶部「← 返回车库」（唯一返回入口，禁止恢复全局 Tab）
+    // 顶部「‹ 返回车库」（唯一返回入口，保留 Result-adjust 上下文）
     this.button(c.x + 12, c.y + 6, 96, this.minTouchH, 'nav:garage', '‹ 返回车库', {});
     this.text('背包', c.x + 120, c.y + 30, 20, C.text, 'left', 700);
-    // 分类 tabs：全部 / 武器 / 功能件（简单分类，不做复杂筛选系统；位于返回行下方）
-    // F-WX-MOBILE-RCA-1：short 档更紧凑（tabH 30 / 偏移随返回按钮高 / gaps 4）
+    // 合成成功轻反馈（无重型动画）
+    if (this.fuseToast) {
+      this.text(this.fuseToast, c.x + c.w / 2, c.y + 30, 14, C.gold, 'center', 700);
+    }
+    // 分类 tabs：战斗 / 移动 / 车身
     const tabH = this.isShort ? 30 : 44;
     const tabGap = 8;
     const tabTop = c.y + 6 + this.minTouchH + (this.isShort ? 4 : 8);
-    const tabs: Array<{ id: string; label: string; v: 'all' | 'weapon' | 'gadget' }> = [
-      { id: 'bfilter:all', label: '全部', v: 'all' },
-      { id: 'bfilter:weapon', label: '武器', v: 'weapon' },
-      { id: 'bfilter:gadget', label: '功能件', v: 'gadget' },
+    const tabs: Array<{ id: string; label: string; v: 'combat' | 'movement' | 'body' }> = [
+      { id: 'bfilter:combat', label: '战斗', v: 'combat' },
+      { id: 'bfilter:movement', label: '移动', v: 'movement' },
+      { id: 'bfilter:body', label: '车身', v: 'body' },
     ];
     const tabW = (c.w - 24 - tabGap * (tabs.length - 1)) / tabs.length;
     let tx = c.x + 12;
     for (const t of tabs) {
-      this.button(tx, tabTop, tabW, tabH, t.id, t.label, { active: this.backpackFilter === t.v });
+      this.button(tx, tabTop, tabW, tabH, t.id, t.label, {
+        active: this.backpackFilter === t.v,
+        combat: t.v === 'combat',
+        icon: t.v === 'combat' ? 'combat' : t.v === 'movement' ? 'wheel' : 'body',
+      });
       tx += tabW + tabGap;
     }
-    // 库存（已拥有 = one/two > 0 或 已装备；未拥有不占列表）
+    // 该分类下全部官方 defId（含未获得）
     const inv = state.inventory;
-    const equipped = new Set(equippedDefIds(draft));
-    const items: Array<{ defId: string; name: string; star: string; equipped: boolean }> = [];
-    for (const pp of OFFICIAL_PARTS) {
-      const one = Math.max(0, inv[pp].one);
-      const two = Math.max(0, inv[pp].two);
-      const eq = equipped.has(pp);
-      if (one === 0 && two === 0 && !eq) continue; // 未拥有不占主列表
-      const def = registry.functionals.get(pp);
-      const cat = def?.category;
-      if (this.backpackFilter === 'weapon' && cat !== 'weapon') continue;
-      if (this.backpackFilter === 'gadget' && cat !== 'gadget') continue;
-      const star = [one > 0 ? `★×${one}` : '', two > 0 ? `★★×${two}` : ''].filter(Boolean).join(' ');
-      items.push({ defId: pp, name: def?.name ?? pp, star, equipped: eq });
+    const equipped = equippedSlots(draft);
+    let defIds: string[] = [];
+    if (this.backpackFilter === 'combat') defIds = [...OFFICIAL_PARTS];
+    else if (this.backpackFilter === 'movement') defIds = [...OFFICIAL_MOVEMENTS];
+    else defIds = [...OFFICIAL_BODIES];
+    const isBody = this.backpackFilter === 'body';
+    const items: Array<{
+      defId: string;
+      name: string;
+      starText: string;
+      total: number;
+      equippedCountN: number;
+      available: number;
+      owned: boolean;
+      isEquipped: boolean;
+    }> = [];
+    for (const defId of defIds) {
+      const one = Math.max(0, inv[defId]?.one ?? 0);
+      const two = Math.max(0, inv[defId]?.two ?? 0);
+      const owned = one > 0 || two > 0;
+      // 已装备数量（按 (defId, star) 汇总；车身看 bodyDefId）
+      let eqN = 0;
+      if (isBody) {
+        eqN = draft && draft.bodyDefId === defId ? 1 : 0;
+      } else {
+        for (const s of equipped) if (s.defId === defId) eqN += 1;
+      }
+      // 可用于合成数量 = 1★未装备数（仅 1★ 可合 1★→2★；已装备 1★ 受保护）
+      let available = 0;
+      if (!isBody) {
+        let eqOne = 0;
+        for (const s of equipped) if (s.defId === defId && s.star === 1) eqOne += 1;
+        available = Math.max(0, one - eqOne);
+      }
+      const starText = [one > 0 ? `★×${one}` : '', two > 0 ? `★★×${two}` : ''].filter(Boolean).join('  ');
+      items.push({
+        defId,
+        name: this.partDisplayName(defId),
+        starText: starText || '—',
+        total: one + two,
+        equippedCountN: eqN,
+        available,
+        owned,
+        isEquipped: eqN > 0,
+      });
     }
-    // 底部行：合成按钮（左）+ 分页控件（右，多于 4 项时）
-    const mergeH = this.isShort ? 32 : Math.max(this.minTouchH, 48);
-    const mergeY = c.y + c.h - mergeH - (this.isShort ? 4 : 8);
-    this.button(c.x + 12, mergeY, Math.min(140, c.w * 0.4), mergeH, 'merge', '合成', { sub: '更多' });
-    // F-UX-2C：2×2 部件卡分页（每页 4 张；[上一页] 1/N [下一页]，无 ▲▼ 滚动）
-    const PAGE_SIZE = 4;
+    // 列表区 + 底部合成面板
+    const listTop = tabTop + tabH + (this.isShort ? 4 : 6);
+    const panelH = this.isShort ? 92 : 112;
+    const listBot = c.y + c.h - panelH - (this.isShort ? 8 : 12);
+    const viewH = Math.max(8, listBot - listTop);
+    const gap = 8;
+    const COLS = 2;
+    const ROWS = 3;
+    const PAGE_SIZE = COLS * ROWS;
     const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
     if (this.backpackPage >= pageCount) this.backpackPage = pageCount - 1;
     if (this.backpackPage < 0) this.backpackPage = 0;
-    const listTop = tabTop + tabH + (this.isShort ? 4 : 6);
-    const listBot = mergeY - (this.isShort ? 4 : 6);
-    const viewH = Math.max(8, listBot - listTop);
-    const gap = 8;
-    const cardW = Math.floor((c.w - 24 - gap) / 2);
-    const cardH = Math.max(8, Math.floor((viewH - gap) / 2));
+    const cardW = Math.floor((c.w - 24 - gap) / COLS);
+    const cardH = Math.max(8, Math.floor((viewH - gap * (ROWS - 1)) / ROWS));
     const pageItems = items.slice(this.backpackPage * PAGE_SIZE, this.backpackPage * PAGE_SIZE + PAGE_SIZE);
     for (let i = 0; i < pageItems.length; i++) {
       const it = pageItems[i];
-      const col = i % 2;
-      const row = Math.floor(i / 2);
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
       const x = c.x + 12 + col * (cardW + gap);
       const y = listTop + row * (cardH + gap);
-      this.rect(x, y, cardW, cardH, it.equipped ? C.blueDeep : C.panel, C.border, 1);
-      this.text(it.name, x + 10, y + cardH * 0.32, this.isShort ? 13 : 15, C.text, 'left', 600);
-      this.text(it.star, x + cardW - 10, y + cardH * 0.32, this.isShort ? 12 : 13, C.gold, 'right');
-      if (it.equipped) {
-        this.text('已装备', x + cardW - 10, y + cardH * 0.78, this.isShort ? 11 : 12, C.blue, 'right', 700);
+      const selected = this.backpackSelected === it.defId;
+      // 卡片按钮（active=选中亮蓝；equipped=已装备灰蓝；互斥，已装备不亮蓝）
+      this.button(x, y, cardW, cardH, `backpack-select:${it.defId}`, '', {
+        active: selected,
+        equipped: !selected && it.isEquipped,
+      });
+      // 叠加自定义文本（图标占位 + 名称 + 星级 + 数量信息 + 已装备标识）
+      this.text(it.name, x + 10, y + cardH * 0.28, this.isShort ? 13 : 15, C.text, 'left', 600);
+      this.text(it.starText, x + 10, y + cardH * 0.54, this.isShort ? 12 : 13, C.gold, 'left');
+      const info = !it.owned ? '未获得' : `总 ${it.total} · 装备 ${it.equippedCountN} · 可合 ${it.available}`;
+      this.text(info, x + 10, y + cardH * 0.8, this.isShort ? 10 : 11, it.owned ? C.textDim : C.red, 'left');
+      if (it.isEquipped) {
+        this.text('已装备', x + cardW - 10, y + cardH * 0.8, this.isShort ? 11 : 12, C.blue, 'right', 700);
       }
-      // 只读命中区（供测试断言列表项；dispatch 对 bpack-item: 无操作）
-      this.hit(`bpack-item:${it.defId}`, x, y, cardW, cardH);
     }
     if (items.length === 0) this.text('该分类暂无部件', c.x + 12, listTop + 30, 14, C.textDim);
-    // 分页条（右对齐；与合成按钮同一底部行，不额外占高）
+    // 分页条（多页时）
     if (pageCount > 1) {
-      const pgH = Math.min(mergeH, 28);
-      const pgY = mergeY + (mergeH - pgH) / 2;
+      const pgH = 28;
+      const pgY = listBot + (panelH - pgH) / 2;
       const nextX = c.x + c.w - 12 - 56;
-      const prevX = nextX - 56 - 8 - 44; // 页码文字区 ~44
+      const prevX = nextX - 56 - 8 - 44;
       this.button(prevX, pgY, 56, pgH, 'backpack-page-prev', '上一页', {});
       this.text(`${this.backpackPage + 1} / ${pageCount}`, prevX + 56 + 4, pgY + pgH / 2, 13, C.textDim, 'left');
       this.button(nextX, pgY, 56, pgH, 'backpack-page-next', '下一页', {});
     }
+    // 底部合成面板（选中卡片驱动）
+    this.drawBackpackFusePanel(state, c.x, c.y + c.h - panelH, c.w, panelH);
+  }
+
+  /** F-GARAGE-INVENTORY-FUSION-P0：背包合成面板（当前★1 / 消耗5 / 产出★2 / 可用 / 暖金「合成」）。 */
+  private drawBackpackFusePanel(state: PlayerUIState, x: number, y: number, w: number, h: number): void {
+    this.panel(x + 8, y + 4, w - 16, h - 8, C.dockBg, C.border, V.radiusM);
+    const defId = this.backpackSelected;
+    if (!defId) {
+      this.text('选择一张部件卡片以查看合成', x + w / 2, y + h / 2, 14, C.textDim, 'center');
+      return;
+    }
+    // 车身不参与合成（§4；仅展示拥有状态）
+    if (OFFICIAL_BODIES.includes(defId)) {
+      this.text('车身不参与合成', x + w / 2, y + h / 2, 14, C.textDim, 'center');
+      return;
+    }
+    const inv = state.inventory;
+    const draft = state.draft ?? null;
+    const fuse = canFuse(inv, defId, 1, draft);
+    const name = this.partDisplayName(defId);
+    // 左：规则与可用数量
+    this.text(`${name}  ·  当前 ★1`, x + 20, y + h * 0.32, 14, C.text, 'left', 700);
+    this.text('消耗 5 × 1★  →  产出 ★2', x + 20, y + h * 0.56, 13, C.textDim, 'left');
+    const availColor = fuse.available >= 5 ? C.gold : C.textDim;
+    this.text(`可用数量：${fuse.available} / 需要 5`, x + 20, y + h * 0.8, 13, availColor, 'left');
+    // 右：暖金「合成」按钮（<5 disabled「还差 N 个」；满星「已满星」）
+    let btnLabel = '合成';
+    if (!fuse.ok && fuse.maxStar) btnLabel = '已满星';
+    else if (!fuse.ok) btnLabel = `还差 ${fuse.need - fuse.available} 个`;
+    this.button(x + w - 156, y + h / 2 - 22, 136, 44, 'backpack-fuse', btnLabel, {
+      primary: fuse.ok,
+      disabled: !fuse.ok,
+    });
+  }
+
+  /** F-GARAGE-INVENTORY-FUSION-P0：统一部件显示名（Functional / Movement / Body）。 */
+  private partDisplayName(defId: string): string {
+    return (
+      registry.functionals.get(defId)?.name ??
+      registry.movements.get(defId)?.name ??
+      registry.bodies.get(defId)?.name ??
+      MOVEMENT_OPTIONS.find((o) => o.v === defId)?.t ??
+      BODY_OPTIONS.find((o) => o.v === defId)?.t ??
+      defId
+    );
   }
 
   /**
@@ -3316,7 +3414,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 无效配置（超载/缺失）→ 文案「配置不合法」+ disabled（复用既有 dock 错误/能量提示，Must#6）。
     if (mode === 'garage' && this.garageFromResult && tb.back) {
       const g = this.isShort ? 6 : 8;
-      const btnL = tb.back.x + tb.back.w + g;
+      // F-GARAGE-INVENTORY-FUSION-P0：紧跟「背包」入口右侧起排，避免与背包按钮重叠
+      const anchorR = tb.backpack ? tb.backpack.x + tb.backpack.w : tb.back.x + tb.back.w;
+      const btnL = anchorR + g;
       const btnR = tb.energyLabel.x - g;
       const btnW = Math.max(this.isShort ? 80 : 104, Math.min(btnR - btnL, this.isShort ? 132 : 172));
       const btnH = tb.back.h;
@@ -3335,41 +3435,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    *  F-GARAGE-MOBILE-SHELL-R1：2×2 卡片撑满面板可用高（正常档上限放宽，消除下半部
    *  大块空白）；面板底部摘要条展示当前车辆名+驱动（复用原 CTA 空间，第一眼知道
    *  正在配置哪辆车）。 */
-  /**
-   * F-META-UX2：合成说明 Modal（Backpack 底部「合成」入口触发；不切换全屏页面）。
-   * 展示 5×1★ + 金币成本 + 随机 2★ 规则；条件不满足时 primary 显示原因并禁用（不注册命中）。
-   * 确认 → 捕获库存快照 → 派发 onMerge（规则仍在 runtime；成功后 render 弹「合成成功」结果 Modal）。
-   */
-  private showMergeModal(): void {
-    const st = this.lastState;
-    if (!st || !st.draft) return;
-    const p = st.progress;
-    const inv = st.inventory;
-    const reserved = new Set(equippedDefIds(st.draft));
-    let available = 0;
-    for (const pp of OFFICIAL_PARTS) available += Math.max(0, inv[pp].one - (reserved.has(pp) ? 1 : 0));
-    const canMerge = available >= 5;
-    const canAfford = canAffordMerge(p.coin);
-    const ok = canMerge && canAfford;
-    this.showModal({
-      title: '合成',
-      body: ['5 × 1★ → 1 × 随机 2★', `当前可用 1★：${available} / 需要 5`, `消耗 ${MERGE_COST_COIN} 金币 · 剩余 ${p.coin}`],
-      primary: ok ? '合成' : !canMerge ? '副本不足' : '金币不足',
-      primaryDisabled: !ok,
-      secondary: '取消',
-      onPrimary: () => {
-        // 捕获合成前库存快照（用于成功 Modal diff）；onMerge 后 render 消费
-        const cur = this.lastState;
-        if (cur) {
-          const snap: Record<string, { one: number; two: number }> = {};
-          for (const pp of OFFICIAL_PARTS) snap[pp] = { one: cur.inventory[pp]?.one ?? 0, two: cur.inventory[pp]?.two ?? 0 };
-          this.mergeSnapshot = snap;
-        }
-        this.actions?.onMerge();
-      },
-    });
-  }
-
   /**
    * F-MATCH-DEMO-R1：compact mobile 手机流程标志——Runtime 用它压缩战前过渡
    * （mobile 无 READY 覆盖层，Locked 稳定 ~700ms 后直接开战；桌面保持 READY 语义）。

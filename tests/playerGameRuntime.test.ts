@@ -260,7 +260,7 @@ describe('F-WX-5 PlayerGameRuntime（headless 玩家闭环）', () => {
     expect(runtime.battleState).toBe('ended');
   });
 
-  it('合成（Merge）：5×1★ 熔炼经微信 storage 生效（Equip/Merge 环节）', () => {
+  it('合成（Fuse）：5×1★ 同 defId 熔炼经微信 storage 生效（Equip/Fuse 环节）', () => {
     const store = fakeWxStore();
     store.set(INV_KEY_V2, JSON.stringify({ __v: 1, spear: { one: 6, two: 0 } }));
     store.set(PROG_KEY, JSON.stringify({ __v: 1, coin: 500, rating: 0 }));
@@ -269,17 +269,17 @@ describe('F-WX-5 PlayerGameRuntime（headless 玩家闭环）', () => {
 
     const before = getInventory();
     const beforeTwo = Object.values(before).reduce((s, e) => s + e.two, 0);
-    runtime.actions.onMerge();
+    runtime.actions.onFuse('spear', 1);
     const after = getInventory();
     const afterTwo = Object.values(after).reduce((s, e) => s + e.two, 0);
     expect(afterTwo).toBeGreaterThan(beforeTwo); // 合成出 2★
-    expect(loadProgressRaw()?.coin).toBeLessThan(500); // 扣金币
+    expect(loadProgressRaw()?.coin).toBe(500); // 合成无金币成本（不改 coin）
   });
 
-  it('合成（Merge）资源不足：安全 no-op 不卡死、不改库存', () => {
+  it('合成（Fuse）资源不足：安全 no-op 不卡死、不改库存', () => {
     const { runtime } = setup(); // 全新账号：1★ 各 1，不足以合成
     const before = getInventory();
-    runtime.actions.onMerge(); // 不应抛错 / 不应改动
+    runtime.actions.onFuse('spear', 1); // 不应抛错 / 不应改动
     expect(getInventory()).toEqual(before);
   });
 });

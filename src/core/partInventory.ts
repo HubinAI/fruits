@@ -335,46 +335,94 @@ export class BattleRewardSettler {
   }
 }
 
+/**
+ * F-GARAGE-INVENTORY-FUSION-P0｜合成数据模型与规则。
+ * 库存仅支持 2 星（PartInventory.one/two）→ MAX_STAR 被数据模型钉为 2；
+ * 合成只做 1★ → 2★ 单步跃迁（2★ 即满星，不可再合）。不引入第二套库存/星级系统。
+ */
+export const MAX_STAR = 2;
+
+/** 可合成类别：正式 Functional + 正式 Movement；Body 不参与合成（§2/§4）。 */
+export function isFusable(defId: string): boolean {
+  return isOfficialPart(defId) || OFFICIAL_MOVEMENTS.includes(defId);
+}
+
+/** 当前 Build 已装备的 (defId, star) 槽位（Functional + Movement；wheelStd 不计库存，跳过）。 */
+export function equippedSlots(build: BuildDraft | null): Array<{ defId: string; star: number }> {
+  const out: Array<{ defId: string; star: number }> = [];
+  if (!build) return out;
+  const sel = build.functionalSelections;
+  if (sel) {
+    for (const [hp, v] of Object.entries(sel)) {
+      if (v && v !== EMPTY_SLOT && (isOfficialPart(v) || OFFICIAL_MOVEMENTS.includes(v))) {
+        out.push({ defId: v, star: build.functionalStars?.[hp] ?? 1 });
+      }
+    }
+  }
+  for (const w of [build.rearWheelDefId, build.frontWheelDefId]) {
+    if (w && w !== EMPTY_SLOT && w !== 'wheelStd' && OFFICIAL_MOVEMENTS.includes(w)) {
+      out.push({ defId: w, star: 1 });
+    }
+  }
+  return out;
+}
+
+/** 某 (defId, star) 在当前 Build 中的已装备数量（融合保护口径）。 */
+export function equippedCount(defId: string, star: number, build: BuildDraft | null): number {
+  let n = 0;
+  for (const s of equippedSlots(build)) if (s.defId === defId && s.star === star) n++;
+  return n;
+}
+
 /** 合成结果 */
-export interface MergeResult {
-  /** 产物 defId（2★） */
+export interface FuseResult {
+  ok: true;
+  /** 产物 defId（= 输入 defId，同 defId 下一星级） */
   product: string;
+  /** 产物星级 = star + 1 */
+  star: number;
   inventory: PartInventory;
 }
 
 /**
- * 最小 5合1（V0.5 仅验证规则）：任意 5 个 1★ 副本（可跨 defId）熔炼成 1 个随机 2★ 正式部件。
- * - 已装备所需的 1 个副本自动保留：每个 equipped defId 保留其 1★ 的 1 个，不计入可消耗池；
- * - 不足 5 个（含保留后）不可合成，返回 null（不消耗）。
- * 直接 mutate 传入的 inv（调用方负责传入可变库存对象，合成成功后 saveInventory）。
+ * F-GARAGE-INVENTORY-FUSION-P0｜正式合成规则（最小、确定、无经济）：
+ * 5 个「同 defId、同星级」的未装备副本 → 合成 1 个相同 defId 的下一星级部件。
+ * - Body 不可合成（isFusable 排除）；star >= MAX_STAR（满星）不可合成；
+ * - 已装备副本必须保护：available = owned(star) - equipped(star)，available < 5 不可合成（返回 null）；
+ * - 不允许跨 defId / 跨分类 / 降星 / 负库存；
+ * - 原子：消耗 5×star、产出 1×(star+1)、一次 saveInventory；
+ * - 不修改装备中的 Build、不覆盖已有高星、不引入第二套库存/星级系统。
+ * 调用前建议用 canFuse 预检以驱动 UI 禁用态。
  */
-export function tryMerge(
+export function fuseSameStar(
   inv: PartInventory,
-  equippedDefIds: string[],
-  rng: () => number = Math.random,
-): MergeResult | null {
-  const reserved = new Set(equippedDefIds);
-  // 可消耗 1★ 总数（扣保留），并记录每 defId 可用额
-  let available = 0;
-  const usable: Record<string, number> = {};
-  for (const p of OFFICIAL_PARTS) {
-    const keep = reserved.has(p) ? 1 : 0;
-    const u = Math.max(0, inv[p].one - keep);
-    usable[p] = u;
-    available += u;
-  }
-  if (available < 5) return null; // 不足 5 个：不可合成
-  // 消耗 5 个（按 usable 配额，跨 defId）
-  let need = 5;
-  for (const p of OFFICIAL_PARTS) {
-    if (need <= 0) break;
-    const take = Math.min(need, usable[p]);
-    if (take > 0) inv[p].one -= take;
-    need -= take;
-  }
-  // 产物：随机 1 个 2★ 正式部件
-  const idx = Math.min(OFFICIAL_PARTS.length - 1, Math.floor(rng() * OFFICIAL_PARTS.length));
-  const product = OFFICIAL_PARTS[idx];
-  inv[product].two += 1;
-  return { product, inventory: inv };
+  defId: string,
+  star: number,
+  build: BuildDraft | null,
+): FuseResult | null {
+  if (!isFusable(defId)) return null;
+  if (star < 1 || star >= MAX_STAR) return null;
+  const owned = getCount(inv, defId, star);
+  const eq = equippedCount(defId, star, build);
+  const available = owned - eq;
+  if (available < 5) return null;
+  consume(inv, defId, star, 5);
+  addPart(inv, defId, star + 1, 1);
+  saveInventory(inv);
+  return { ok: true, product: defId, star: star + 1, inventory: inv };
+}
+
+/** UI 预检：是否能对 (defId, star) 发起合成（用于按钮 disabled / 「还差 N 个」）。 */
+export function canFuse(
+  inv: PartInventory,
+  defId: string,
+  star: number,
+  build: BuildDraft | null,
+): { ok: boolean; available: number; need: number; maxStar: boolean } {
+  if (!isFusable(defId)) return { ok: false, available: 0, need: 5, maxStar: false };
+  if (star >= MAX_STAR) return { ok: false, available: getCount(inv, defId, star), need: 5, maxStar: true };
+  const owned = getCount(inv, defId, star);
+  const eq = equippedCount(defId, star, build);
+  const available = owned - eq;
+  return { ok: available >= 5, available, need: 5, maxStar: false };
 }

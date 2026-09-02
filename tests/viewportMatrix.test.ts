@@ -207,8 +207,8 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
       // 配置页（中央装配台：分类 tab + 部件带 + 顶栏 ‹首页/能量）
       click(env, 'home-garage');
       assertAllInSafe(env, vp, INSETS, `Garage ${vp.w}×${vp.h}`);
-      // F-GARAGE-CENTER-STAGE-P0（Must#4）：配置页顶栏不再暴露 背包/更多 入口
-      expect(env.areas().some((x) => x.id === 'nav:backpack'), '配置页无背包入口').toBe(false);
+      // F-GARAGE-INVENTORY-FUSION-P0：配置页顶栏暴露 背包 入口；更多不暴露（Must#4）
+      expect(env.areas().some((x) => x.id === 'nav:backpack'), '配置页有背包入口').toBe(true);
       expect(env.areas().some((x) => x.id === 'nav:more'), '配置页无更多入口').toBe(false);
       // Modal（个人信息 Modal：遮罩+主按钮；Home 入口可直达）
       click(env, 'nav:home');
@@ -246,7 +246,7 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
     const assist = env.areas().find((x) => x.id === 'home-garage')!;
     expect(assist.x + assist.w, '车库右缘 ≤ 寻找对手左缘（水平不重叠）').toBeLessThanOrEqual(cta.x + 0.5);
     // 配置页（360×180 极限屏）同样全在 safe 内（F-NAV-ACTION-OWNERSHIP-P0：配置页无寻找对手；
-    // F-GARAGE-CENTER-STAGE-P0：顶栏极简只 back+能量，无背包/更多）
+    // F-GARAGE-INVENTORY-FUSION-P0：顶栏含 back+能量+背包，无更多）
     click(env, 'home-garage');
     expect(
       env.areas().some((x) => x.id === 'cta-find' || x.id === 'home-find-opponent'),
@@ -260,8 +260,8 @@ describe('F-WX-MOBILE-RCA-1｜真实 viewport matrix 尺寸系统', () => {
       expect(a!.y, `${id} y ≥ safeTop`).toBeGreaterThanOrEqual(INSETS.top);
       expect(a!.y + a!.h, `${id} 底缘 ≤ safeBottom`).toBeLessThanOrEqual(180 - INSETS.bottom + 0.5);
     }
-    // Must#4：360×180 配置页无 背包/更多 入口
-    expect(env.areas().some((x) => x.id === 'nav:backpack'), '无背包入口').toBe(false);
+    // Must#4：360×180 配置页有 背包（F-GARAGE-INVENTORY-FUSION-P0）、无 更多 入口
+    expect(env.areas().some((x) => x.id === 'nav:backpack'), '有背包入口').toBe(true);
     expect(env.areas().some((x) => x.id === 'nav:more'), '无更多入口').toBe(false);
   });
 });

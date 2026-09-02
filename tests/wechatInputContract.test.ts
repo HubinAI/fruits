@@ -83,7 +83,7 @@ function setup(
     onResultAdjust: once('resultAdjust'),
     onResultNext: once('next'),
     onClaimRewardAd: once('reward'),
-    onMerge: once('merge'),
+    onFuse: once('fuse'),
     onResetProgress: () => {},
   });
   return {
@@ -296,31 +296,29 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
     expect(dispatched).toHaveLength(0);
   });
 
-  it('F-META-UX2｜Backpack 合成 Modal 流程：garage 无合成 → 切背包 → 点合成弹 Modal（真实坐标链命中）', () => {
+  it('F-GARAGE-INVENTORY-FUSION-P0｜背包合成闭环（真实坐标链）：Garage 顶栏「背包」→ 进背包 → 选卡 → 合成 → onFuse 触发', () => {
     const vp = { w: 844, h: 390 };
     const env = setup(vp, 2);
-    // 富库存（合成可确认——Modal 主按钮非禁用态才注册命中）
+    // 富库存：每个战斗部件各 6 个 1★（任一选中卡 ≥5 可合 → 合成按钮注册命中）
     const inv: Record<string, { one: number; two: number }> = {};
-    for (const p of OFFICIAL_PARTS) inv[p] = { one: 2, two: 1 };
+    for (const p of OFFICIAL_PARTS) inv[p] = { one: 6, two: 0 };
     env.host.render(garageState({ inventory: inv as never, progress: { coin: 600, rating: 20 } }));
     goGarage(env, vp, 2); // F-HOME-1：Home → 配置页
-    // 配置页无任何合成入口/面板
-    expect(env.areas().some((a) => a.id === 'merge')).toBe(false);
-    // F-GARAGE-CENTER-STAGE-P0：Garage 顶栏已无 nav:backpack（Must#4）——走私有 dispatch 进 Backpack
-    expect(env.areas().some((a) => a.id === 'nav:backpack'), 'Garage 顶栏无背包入口（Must#4）').toBe(false);
-    (env.host as unknown as { dispatch: (i: string) => void }).dispatch('nav:backpack');
-    const merge = env.areas().find((a) => a.id === 'merge')!;
-    expect(merge, 'backpack 页有合成入口').toBeTruthy();
-    // 点合成 → 合成说明 Modal（不切换全屏页面）
-    const rawMerge = rawFor(merge, vp, 2, false);
-    env.fireTouch(rawMerge.rawX, rawMerge.rawY);
-    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 出现').toBe(true);
-    expect(env.areas().some((a) => a.id === 'modal-primary'), '合成主按钮出现').toBe(true);
-    // 取消 → Modal 消失，仍停留 Backpack
-    const cancel = env.areas().find((a) => a.id === 'modal-secondary')!;
-    const rawCancel = rawFor(cancel, vp, 2, false);
-    env.fireTouch(rawCancel.rawX, rawCancel.rawY);
-    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 关闭').toBe(false);
-    expect(env.areas().some((a) => a.id === 'merge'), '仍停留 Backpack').toBe(true);
+    // F-GARAGE-INVENTORY-FUSION-P0 §2：Garage 顶栏含「背包」入口（不进首页、hitArea 与可见按钮同源）
+    const bpEntry = env.areas().find((a) => a.id === 'nav:backpack');
+    expect(bpEntry, 'Garage 顶栏有「背包」入口（§2）').toBeTruthy();
+    const rawBp = rawFor(bpEntry!, vp, 2, false);
+    env.fireTouch(rawBp.rawX, rawBp.rawY); // 进背包页
+    // 背包页（默认战斗分类）首张部件卡存在
+    const firstCard = env.areas().find((a) => a.id.startsWith('backpack-select:'));
+    expect(firstCard, '背包页有部件卡').toBeTruthy();
+    const rawCard = rawFor(firstCard!, vp, 2, false);
+    env.fireTouch(rawCard.rawX, rawCard.rawY); // 选中 → 底部合成面板
+    // 选中后「合成」按钮出现（≥5 未装备 1★ → 可用，按钮才注册命中）
+    const fuseBtn = env.areas().find((a) => a.id === 'backpack-fuse');
+    expect(fuseBtn, '选中后合成按钮出现（≥5 可合）').toBeTruthy();
+    const rawFuse = rawFor(fuseBtn!, vp, 2, false);
+    env.fireTouch(rawFuse.rawX, rawFuse.rawY);
+    expect(env.fired['fuse']).toHaveLength(1); // onFuse 触发一次（原子消耗+产出）
   });
 });

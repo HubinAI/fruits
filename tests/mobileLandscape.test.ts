@@ -96,7 +96,7 @@ function makeHost(
     onResultAdjust: once('resultAdjust'),
     onResultNext: once('next'),
     onClaimRewardAd: once('reward'),
-    onMerge: once('merge'),
+    onFuse: once('fuse'),
     onResetProgress: () => {},
   });
   return {
@@ -504,7 +504,7 @@ describe('F-WX-6 手机横屏适配（自动化矩阵）', () => {
       ['drawGarageStrip', 10],
       ['garageStripStatus', 9],
       ['drawPartCard', 7], // 卡片带紧凑信息（Must#9：名称/星级/能量/类型小标小字号）
-      ['showMergeModal', 14],
+      // 注：F-GARAGE-INVENTORY-FUSION-P0 合成改为背包页内面板（drawBackpackFusePanel），无独立 showMergeModal 方法
     ];
     const re = /this\.text\(([^)]*)\)/g;
     for (const [name, floor] of methods) {

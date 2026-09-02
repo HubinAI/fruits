@@ -152,30 +152,31 @@ describe('F-GARAGE-CENTER-STAGE-P0｜车库顶栏极简（garage 模式只 back+
     vi.unstubAllGlobals();
   });
 
-  it('A1. 844×390 garage 模式：只 back + energy（coin/rating/backpack/more 为 null）、互不重叠、能量数值右缘 ≤ 组右缘', () => {
+  it('A1. 844×390 garage 模式：back + energy + 背包（coin/rating/more 为 null）、互不重叠、能量数值右缘 ≤ 组右缘', () => {
     const profile = resolveLayoutProfile(844, 390);
     const l = computeMobileGarageLayout({ w: 844, h: 390 }, PROD_INSETS, profile);
     const tb = computeGarageTopBarLayout(l.topBarRect, profile, { mode: 'garage' }, topBarTexts());
     expect(tb.back, '‹ 首页 存在').toBeTruthy();
     expect(tb.energyGroup, '能量组存在').toBeTruthy();
-    // Must#4：金币/段位/背包/更多不在装配页顶栏显示
+    // F-GARAGE-INVENTORY-FUSION-P0：装配页顶栏「背包」入口必留；金币/段位/更多不在装配页顶栏显示
+    expect(tb.backpack, '背包入口存在').toBeTruthy();
     expect(tb.coin, '金币不显示').toBeNull();
     expect(tb.rating, '段位不显示').toBeNull();
-    expect(tb.backpack, '背包不显示').toBeNull();
     expect(tb.more, '更多不显示').toBeNull();
     // 能量数值右缘 ≤ 能量组右缘（不溢出）
     expect(tb.energyValue.x + tb.energyValue.w, '能量数值右缘 ≤ 能量组右缘').toBeLessThanOrEqual(tb.energyGroup.x + tb.energyGroup.w);
-    // back 与 energy 组互不重叠
-    expect(tb.back!.x + tb.back!.w, 'back 右缘 ≤ energy 左缘').toBeLessThanOrEqual(tb.energyGroup.x);
+    // back / backpack / energy 三组互不重叠（左侧 → 右侧顺序）
+    expect(tb.back!.x + tb.back!.w, 'back 右缘 ≤ backpack 左缘').toBeLessThanOrEqual(tb.backpack!.x);
+    expect(tb.backpack!.x + tb.backpack!.w, 'backpack 右缘 ≤ 能量组左缘').toBeLessThanOrEqual(tb.energyGroup.x);
   });
 
-  it('A2. Host 渲染：顶栏只注册 nav:home；Garage 内无 nav:backpack / nav:more / 金币段位（Must#4）', () => {
+  it('A2. Host 渲染：顶栏注册 nav:home + nav:backpack；Garage 内无 nav:more / 金币段位（Must#4）', () => {
     const env = makeHost({ w: 844, h: 390 }, PROD_INSETS);
     env.host.render(garageState());
     goGarage(env);
     const areas = env.areas();
     expect(areas.find((x) => x.id === 'nav:home'), 'nav:home 存在').toBeTruthy();
-    expect(areas.some((x) => x.id === 'nav:backpack'), '装配页无背包入口').toBe(false);
+    expect(areas.some((x) => x.id === 'nav:backpack'), '装配页有背包入口（F-GARAGE-INVENTORY-FUSION-P0）').toBe(true);
     expect(areas.some((x) => x.id === 'nav:more'), '装配页无更多入口').toBe(false);
   });
 
@@ -189,13 +190,13 @@ describe('F-GARAGE-CENTER-STAGE-P0｜车库顶栏极简（garage 模式只 back+
     expect(estimateTextWidth(texts.energyLabel, fs), '能量标签宽 ≤ energyLabel rect 宽').toBeLessThanOrEqual(tb.energyLabel.w);
   });
 
-  it('C1. 360×180 short：back + 能量必留；其余恒 null', () => {
+  it('C1. 360×180 short：back + 能量 + 背包 必留；coin/rating/more 恒 null', () => {
     const profile = resolveLayoutProfile(360, 180);
     const l = computeMobileGarageLayout({ w: 360, h: 180 }, PROD_INSETS, profile);
     const tb = computeGarageTopBarLayout(l.topBarRect, profile, { mode: 'garage' }, topBarTexts());
     expect(tb.back, '‹ 首页 必留').toBeTruthy();
     expect(tb.energyGroup, '能量组 必留').toBeTruthy();
-    expect(tb.backpack, '背包不显示').toBeNull();
+    expect(tb.backpack, '背包入口必留（F-GARAGE-INVENTORY-FUSION-P0）').toBeTruthy();
     expect(tb.more, '更多不显示').toBeNull();
     expect(tb.coin, '金币不显示').toBeNull();
     expect(tb.rating, '段位不显示').toBeNull();

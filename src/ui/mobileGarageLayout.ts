@@ -201,10 +201,15 @@ export function computeGarageTopBarLayout(
   // 金币/段位/背包/更多不再出现在装配页（数据与其他页入口保留，只是不在 Garage 展示）。
   if (opts.mode === 'garage') {
     const back: Rect = { x: x0, y: y + (h - tinyH) / 2, w: tinyW, h: tinyH };
+    // F-GARAGE-INVENTORY-FUSION-P0：Garage 顶栏「背包」入口（back 右侧、energy 左侧；
+    // 不遮挡 back/energy/完成并再战/原生胶囊/安全区）。
+    const bpW = short ? 44 : 56;
+    const bpGap = short ? 4 : 6;
+    const backpack: Rect = { x: back.x + back.w + bpGap, y: y + (h - tinyH) / 2, w: bpW, h: tinyH };
     const eLabelW = estimateTextWidth(texts.energyLabel, fs);
     const eValueW = estimateTextWidth(texts.energyValue, fs);
     const energyRight = x0 + W - (short ? 4 : 8); // 右端留白
-    const leftX = x0 + back.w + (short ? 6 : 8);
+    const leftX = backpack.x + bpW + bpGap; // 能量组从 backpack 右侧起排
     const barW = Math.min(barMax, Math.max(barMin, energyRight - eLabelW - groupGap - eValueW - leftX));
     const groupW = eLabelW + groupGap + barW + groupGap + eValueW;
     const groupX = Math.max(leftX, energyRight - groupW);
@@ -218,7 +223,7 @@ export function computeGarageTopBarLayout(
       w: eValueW,
       h,
     };
-    return { back, coin: null, rating: null, ratingRender: texts.rating, energyGroup, energyLabel, energyBar, energyValue, backpack: null, more: null };
+    return { back, coin: null, rating: null, ratingRender: texts.rating, energyGroup, energyLabel, energyBar, energyValue, backpack, more: null };
   }
 
   // —— shell 模式（backpack/more 页）：无 back/backpack/more，仅 金币/段位/能量 ——

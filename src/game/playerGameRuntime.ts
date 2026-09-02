@@ -52,16 +52,12 @@ import {
   ensureInventory,
   canEquipPart,
   getInventory,
-  saveInventory,
-  equippedDefIds,
 } from '../core/partInventory';
 import { NEW_OFFICIAL_BODIES, isBodyOwned } from '../core/bodyOwnership';
-import { canEquipMovement } from '../core/partInventory';
+import { canEquipMovement, fuseSameStar } from '../core/partInventory';
 import {
   BattleProgressSettler,
   getProgress,
-  saveProgress,
-  mergeWithCost,
   tierOf,
   TIER_LABEL,
 } from '../core/playerProgress';
@@ -380,17 +376,15 @@ export class PlayerGameRuntime {
       }
       // 关闭 / 失败 / 无填充：不发奖，按钮保持可点（玩家可重试），绝不卡死
     },
-    onMerge: () => {
+    onFuse: (defId, star) => {
       const cur = getInventory();
-      const p = getProgress();
-      track('merge_attempt'); // Q28：发起合成
-      // Q23：合成 = 5×1★ 熔炼 + 固定金币消耗（纯函数，金币不足/副本不足均不生效）
-      const res = mergeWithCost(cur, equippedDefIds(this.draftA), p.coin);
-      if (!res.ok) return;
-      track('merge_success'); // Q28：合成成功
-      saveInventory(res.inventory);
-      saveProgress({ coin: res.coin, rating: p.rating }); // 仅扣金币，rating 不变
-      this.pushUI(); // Host 重渲染：反映新 2★ 库存 + 扣费后金币 + 合成面板
+      track('merge_attempt'); // F-GARAGE-INVENTORY-FUSION-P0：发起合成（复用既有 merge 事件）
+      // 同 defId 同星级 5→1 下一星；保护已装备、满星/不足返回 null（不消耗）
+      const res = fuseSameStar(cur, defId, star, this.draftA);
+      if (!res) return;
+      track('merge_success'); // 合成成功
+      // fuseSameStar 已原子 saveInventory；pushUI 重读库存反映新星级（无金币变动）
+      this.pushUI();
     },
     onResetProgress: () => {
       resetPlayerSave();

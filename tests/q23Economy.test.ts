@@ -8,9 +8,6 @@ import {
   BattleProgressSettler,
   getProgress,
   saveProgress,
-  canAffordMerge,
-  mergeWithCost,
-  MERGE_COST_COIN,
   COIN_WIN,
   COIN_LOSE,
   RATING_WIN,
@@ -22,7 +19,12 @@ import {
   addPart,
   OFFICIAL_PARTS,
   getCount,
+  fuseSameStar,
+  canFuse,
+  canEquipPart,
 } from '../src/core/partInventory';
+import { EMPTY_SLOT } from '../src/lab/buildEditorModel';
+import type { BuildDraft } from '../src/lab/buildEditorModel';
 
 /** 内存版 localStorage（node 环境无原生） */
 class MemStorage {
@@ -106,40 +108,48 @@ describe('Q23 B｜进度结算器只结算一次（幂等）', () => {
   });
 });
 
-describe('Q23 C｜5合1 金币消耗', () => {
-  it('C1. canAffordMerge：>=500 可 / <500 不可', () => {
-    expect(canAffordMerge(MERGE_COST_COIN)).toBe(true);
-    expect(canAffordMerge(MERGE_COST_COIN - 1)).toBe(false);
-    expect(canAffordMerge(0)).toBe(false);
-  });
-  it('C2. 金币不足：不合成、不扣费、不消耗部件', () => {
-    const inv = defaultInventory();
-    addPart(inv, 'cannon', 1, 4); // 足够副本
-    const before = getCount(inv, 'cannon', 1);
-    const res = mergeWithCost(inv, [], MERGE_COST_COIN - 1);
-    expect(res.ok).toBe(false);
-    expect(res.coin).toBe(MERGE_COST_COIN - 1); // 未扣费
-    expect(getCount(inv, 'cannon', 1)).toBe(before); // 未消耗
-  });
-  it('C3. 副本不足（金币充足）：不合成、不扣费', () => {
+describe('Q23 C｜5合1 合成（无金币成本，F-GARAGE-INVENTORY-FUSION-P0）', () => {
+  const cannonBuild: BuildDraft = {
+    bodyDefId: 'watermelonBody',
+    rearRadius: 20,
+    frontRadius: 20,
+    functionalSelections: { front: 'cannon', frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT },
+    drive: 'forward',
+  };
+  it('C1. 不足 5 个 1★ 不可合成（返回 null、不消耗、不改金币）', () => {
     const inv = defaultInventory();
     for (const p of OFFICIAL_PARTS) inv[p].one = 0; // 清零
-    addPart(inv, 'laser', 1, 4); // 仅 4 个 < 5
-    const res = mergeWithCost(inv, [], MERGE_COST_COIN);
-    expect(res.ok).toBe(false);
-    expect(res.coin).toBe(MERGE_COST_COIN); // 未扣费
+    addPart(inv, 'laser', 1, 4); // 仅 4 个 1★ < 5
+    const before = getCount(inv, 'laser', 1);
+    const res = fuseSameStar(inv, 'laser', 1, null);
+    expect(res).toBeNull();
+    expect(getCount(inv, 'laser', 1)).toBe(before); // 未消耗
+    expect(getProgress().coin).toBe(0); // 金币不受合成影响
   });
-  it('C4. 副本充足 + 金币充足：合成成功、扣 500、消耗 5 个 1★', () => {
+  it('C2. 副本充足：合成成功、消耗 5 个 1★、产出 1 个 2★（无金币扣费）', () => {
+    saveProgress({ coin: 777, rating: 0 }); // 预设金币，验证合成不扣费
     const inv = defaultInventory();
     addPart(inv, 'cannon', 1, 4); // cannon 1+4=5
-    const res = mergeWithCost(inv, [], MERGE_COST_COIN);
-    expect(res.ok).toBe(true);
-    expect(res.coin).toBe(0); // 500 - 500
+    const res = fuseSameStar(inv, 'cannon', 1, null);
+    expect(res).not.toBeNull();
+    expect(res!.ok).toBe(true);
     // 5 个 1★ 被消耗（cannon 1 起 +4 = 5，全扣）
     expect(getCount(inv, 'cannon', 1)).toBe(0);
     // 产出 1 个 2★
     const twoTotal = OFFICIAL_PARTS.reduce((s, p) => s + inv[p].two, 0);
     expect(twoTotal).toBe(1);
+    expect(getProgress().coin).toBe(777); // 无金币成本
+  });
+  it('C3. 已装备副本保护：Build 装备 cannon 时仍可合成但保留 1★（无金币成本）', () => {
+    const inv = defaultInventory();
+    addPart(inv, 'cannon', 1, 5); // 6 个 1★
+    const pre = canFuse(inv, 'cannon', 1, cannonBuild);
+    expect(pre.ok).toBe(true);
+    const res = fuseSameStar(inv, 'cannon', 1, cannonBuild);
+    expect(res).not.toBeNull();
+    expect(getCount(inv, 'cannon', 1)).toBeGreaterThanOrEqual(1); // 保留 1★（已装备）
+    expect(canEquipPart('cannon', 1)).toBe(true);
+    expect(getProgress().coin).toBe(0);
   });
 });
 
@@ -161,8 +171,8 @@ describe('Q23 E｜Q22 成长流程不退化', () => {
   it('E1. 合成产物仍为正式 2★ 部件（无 HOLD / EMPTY / prototype）', () => {
     const inv = defaultInventory();
     addPart(inv, 'cannon', 1, 4);
-    const res = mergeWithCost(inv, [], MERGE_COST_COIN);
-    expect(res.ok).toBe(true);
+    const res = fuseSameStar(inv, 'cannon', 1, null);
+    expect(res).not.toBeNull();
     const product = OFFICIAL_PARTS.find((p) => inv[p].two > 0)!;
     expect(product).toBeTruthy();
     expect(OFFICIAL_PARTS).toContain(product);

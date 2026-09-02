@@ -157,13 +157,13 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
   it('验收2｜首页只回答核心动作：点「车库」进配置页，「‹ 首页」返回；排行榜/战令/宝箱弹「功能开发中」', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(garageState());
-    // F-GARAGE-CENTER-STAGE-P0：车库 → 配置页（3 主分类 + 顶栏只 nav:home/能量；背包/更多不展示——Must#4）
+    // F-GARAGE-CENTER-STAGE-P0：车库 → 配置页（3 主分类 + 顶栏 nav:home/能量/背包；更多不展示——Must#4）
     click(env, 'home-garage');
     const ids = env.areas().map((a) => a.id);
     for (const id of ['garage-cat:body', 'garage-cat:move', 'garage-cat:combat', 'nav:home']) {
       expect(ids, `配置页应含 ${id}`).toContain(id);
     }
-    expect(ids.some((id) => id === 'nav:backpack'), '配置页无背包入口（Must#4）').toBe(false);
+    expect(ids.some((id) => id === 'nav:backpack'), '配置页有背包入口（F-GARAGE-INVENTORY-FUSION-P0）').toBe(true);
     expect(ids.some((id) => id === 'nav:more'), '配置页无更多入口（Must#4）').toBe(false);
     expect(ids.some((id) => id === 'cta-find' || id === 'home-find-opponent'), '配置页无寻找对手').toBe(false);
     // 「‹ 首页」返回 Home
@@ -180,47 +180,55 @@ describe('F-HOME-1｜正式首页（默认主界面）+ 配置页回归', () => 
     }
   });
 
-  it('验收3｜Backpack / More 经配置页进入并返回 Home；返回后首页恢复（无配置残留）', () => {
+  it('验收3｜Backpack / More 经配置页进入并返回车库配置页（不经过 Home，保留 Result-adjust 上下文）', () => {
     const env = makeHost({ w: 844, h: 390 }, INSETS);
     env.host.render(richState());
     goGarage(env);
-    // 配置页顶栏「背包」→ Backpack（合成入口在）
+    // 配置页顶栏「背包」→ Backpack（页内卡片 + 合成面板，无旧 merge Modal）
     click(env, 'nav:backpack');
-    expect(env.areas().some((a) => a.id === 'merge'), 'Backpack 有合成入口').toBe(true);
-    // 返回（nav:garage）→ Home（非配置页）
+    expect(env.areas().some((a) => a.id.startsWith('backpack-select:')), 'Backpack 有部件卡').toBe(true);
+    expect(env.areas().some((a) => a.id === 'merge'), 'Backpack 无旧 modal 合成入口').toBe(false);
+    // 返回（nav:garage）→ 车库配置页（非首页，保留上下文）
     click(env, 'nav:garage');
-    expect(env.areas().some((a) => a.id === 'home-garage'), '返回首页').toBe(true);
-    expect(env.areas().some((a) => a.id === 'merge' || a.id.startsWith('entry:')), '首页无配置/合成残留').toBe(false);
-    // 配置页顶栏「更多」→ More → 返回 Home
-    goGarage(env);
+    expect(env.areas().some((a) => a.id.startsWith('garage-cat:')), '返回车库配置页').toBe(true);
+    expect(env.areas().some((a) => a.id === 'nav:home'), '车库配置页有返回首页入口').toBe(true);
+    expect(env.areas().some((a) => a.id === 'home-garage'), '未穿透到首页').toBe(false);
+    // 配置页顶栏「更多」→ More（经 nav:more dispatch）→ 返回车库配置页
     click(env, 'nav:more');
     expect(env.areas().some((a) => a.id === 'more:task'), 'More 页有入口').toBe(true);
     click(env, 'nav:garage');
-    expect(env.areas().some((a) => a.id === 'home-garage'), '返回首页').toBe(true);
+    expect(env.areas().some((a) => a.id.startsWith('garage-cat:')), '返回车库配置页').toBe(true);
   });
 
-  it('验收4｜配置页回归：合成走 Modal 且可返回；车辆位置稳定（切配置不跳）', () => {
+  it('验收4｜配置页回归：合成走背包页内面板（非 Modal）且可返回；车辆位置稳定（切配置不跳）', () => {
+    const inv: Record<string, { one: number; two: number }> = {};
+    for (const p of OFFICIAL_PARTS) inv[p] = { one: 6, two: 0 };
     const env = makeHost({ w: 844, h: 390 }, INSETS);
-    env.host.render(richState());
+    env.host.render(garageState({ inventory: inv as never, progress: { coin: 600, rating: 20 } }));
     goGarage(env);
     // 配置页无合成（Garage 职责纯化）
     expect(env.areas().some((a) => a.id === 'merge'), '配置页无合成入口').toBe(false);
-    // Backpack 合成 Modal
+    // Backpack 页内合成面板（非 Modal）
     click(env, 'nav:backpack');
-    const merge = env.areas().find((a) => a.id === 'merge')!;
-    expect(merge.h, '合成入口高 ≥48').toBeGreaterThanOrEqual(48);
-    click(env, 'merge');
-    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 出现').toBe(true);
-    click(env, 'modal-secondary'); // 取消
-    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成 Modal 关闭').toBe(false);
-    expect(env.areas().some((a) => a.id === 'merge'), '仍停留 Backpack').toBe(true);
-    // 返回 Home
+    click(env, 'bfilter:combat'); // 切到「战斗」可合成分类
+    // 选一张可合成的卡（出现 backpack-fuse 即代表 ≥5 未装备）
+    let fused = false;
+    for (const a of env.areas().filter((x) => x.id.startsWith('backpack-select:'))) {
+      click(env, a.id);
+      if (env.areas().some((x) => x.id === 'backpack-fuse')) {
+        fused = true;
+        break;
+      }
+    }
+    expect(fused, '存在可合成卡（≥5 未装备）').toBe(true);
+    expect(env.areas().some((a) => a.id === 'modal-veil'), '合成走页内面板（无 Modal）').toBe(false);
+    expect(env.areas().some((a) => a.id === 'backpack-fuse'), '仍停留 Backpack 页内').toBe(true);
+    // 返回车库配置页（nav:garage 回车库，不经过 Home）
     click(env, 'nav:garage');
-    expect(env.areas().some((a) => a.id === 'home-garage'), '返回首页').toBe(true);
-    // 车辆位置稳定：配置页内切配置 → 取景区不变
-    goGarage(env);
+    expect(env.areas().some((a) => a.id.startsWith('garage-cat:')), '返回车库配置页').toBe(true);
+    // 车辆位置稳定：车库配置页内切配置 → 取景区不变
     const before = env.host.getPreviewFramingRect();
-    env.host.render(garageState({ garageSelected: 'body' }));
+    env.host.render(garageState({ garageSelected: 'body', inventory: inv as never, progress: { coin: 600, rating: 20 } }));
     expect(env.areas().some((a) => a.id.startsWith('opt:')), '车身选项展开').toBe(true);
     expect(env.host.getPreviewFramingRect(), '切配置后取景区不变').toEqual(before);
   });

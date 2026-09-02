@@ -7,14 +7,13 @@
  * - 结算为纯函数（可单测，不依赖 DOM）；运行时单例结算器以 result 引用为幂等键，同场只结算一次。
  *
  * 设计约束（来自 Queue 冻结项 + Q30 更新）：
- * - 金币常规来源：Battle 获得（COIN_WIN/LOSE）、5合1 消耗（MERGE_COST_COIN）；
+ * - 金币常规来源：Battle 获得（COIN_WIN/LOSE）、IAA 广告激励（addCoins，Q30）；合成不再消耗金币（F-GARAGE-INVENTORY-FUSION-P0：同 defId 同星 5→1 下一星，无经济）。
  * - Q30 新增唯一额外来源：IAA 广告激励（`addCoins`，仅 Rewarded 完整观看后由 ads 层发放，非 Gameplay 数值）；
  * - 段位只随胜负变化，最低 0；不细分小段；
  * - 难度 / 抽取逻辑在 opponentPool（Q25），本模块不涉对手。
  * - 段位只随胜负变化，最低 0；不细分小段；
  * - 难度 / 抽取逻辑在 opponentPool（Q25），本模块不涉对手。
  */
-import { tryMerge, type PartInventory } from './partInventory';
 import { readJsonWithVersion, migrateLegacy, stampVersion } from './saveVersion';
 import { platform } from '../platform';
 
@@ -32,8 +31,6 @@ const STORAGE_KEY = 'strongfruit.playerProgress.v1';
 // —— 金币（Q23）——
 export const COIN_WIN = 100;
 export const COIN_LOSE = 60;
-/** 5合1 固定金币消耗 */
-export const MERGE_COST_COIN = 500;
 
 // —— 段位（Q24）——
 export const RATING_WIN = 20;
@@ -143,11 +140,6 @@ export class BattleProgressSettler {
   }
 }
 
-/** 合成金币门槛校验（纯函数） */
-export function canAffordMerge(coin: number): boolean {
-  return coin >= MERGE_COST_COIN;
-}
-
 /**
  * Q30｜IAA 广告激励金币（唯一新增金币来源，独立于 Battle / 合成）。
  * - 不修改段位；
@@ -164,28 +156,3 @@ export function addCoins(amount: number): ProgressState {
   return after;
 }
 
-/** 合成 + 扣费结果（纯函数，可单测；不读写存储） */
-export interface MergeWithCostResult {
-  ok: boolean;
-  inventory: PartInventory;
-  coin: number;
-}
-
-/**
- * 5合1 + 固定金币消耗（Q23）。
- * - 金币不足 → ok=false（不消耗部件、不扣费）；
- * - 部件不足 5 个（含已装备保留后）→ ok=false（不扣费）；
- * - 成功 → 消耗 5 个 1★（跨 defId）+ 扣 MERGE_COST_COIN 金币，返回新库存与新金币。
- * 直接 mutate 传入的 inv / coin 由调用方负责落盘。
- */
-export function mergeWithCost(
-  inv: PartInventory,
-  equippedDefIds: string[],
-  coin: number,
-  rng: () => number = Math.random,
-): MergeWithCostResult {
-  if (coin < MERGE_COST_COIN) return { ok: false, inventory: inv, coin };
-  const res = tryMerge(inv, equippedDefIds, rng);
-  if (!res) return { ok: false, inventory: inv, coin };
-  return { ok: true, inventory: res.inventory, coin: coin - MERGE_COST_COIN };
-}

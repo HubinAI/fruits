@@ -20,10 +20,10 @@ import {
 } from '../lab/buildEditorModel';
 import { computeEnergy } from '../core/buildValidator';
 import { starTierEnergy } from '../core/buildSnapshot';
-import { getCount, canEquipPart, canEquipMovement, equippedDefIds, OFFICIAL_PARTS } from '../core/partInventory';
+import { getCount, canEquipPart, canEquipMovement, OFFICIAL_PARTS } from '../core/partInventory';
 // F-CONTENT-PLAYER-BODY-PACK-R1：车身拥有守卫（未获得的新车身锁定）
 import { canEquipBody } from '../core/bodyOwnership';
-import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/playerProgress';
+import { tierOf, TIER_LABEL } from '../core/playerProgress';
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { computePlayerShellVisibility } from './playerShell';
 import {
@@ -553,38 +553,8 @@ export class WebDomPlayerUIHost implements PlayerUIHost {
       dock.appendChild(picker);
     }
 
-    // Q22：合成 Panel（Garage 内简易，不新页面、不改布局结构）
-    {
-      const inv = state.inventory;
-      const progress = state.progress;
-      const reserved = new Set(equippedDefIds(draft));
-      let available = 0;
-      for (const p of OFFICIAL_PARTS) available += Math.max(0, inv[p].one - (reserved.has(p) ? 1 : 0));
-      const canMergeParts = available >= 5;
-      const canAfford = canAffordMerge(progress.coin);
-      const mergePanel = document.createElement('div');
-      mergePanel.className = 'merge-panel';
-      const mTitle = document.createElement('div');
-      mTitle.className = 'mp-title';
-      mTitle.textContent = '合成 · 5 × 1★ → 1 × 随机 2★';
-      mergePanel.appendChild(mTitle);
-      const mInfo = document.createElement('div');
-      mInfo.className = 'mp-info';
-      mInfo.textContent =
-        `可合成 1★ 副本：${available}（已装备各保留 1） · 消耗 ${MERGE_COST_COIN} 金币`;
-      mergePanel.appendChild(mInfo);
-      const mBtn = document.createElement('button');
-      mBtn.className = 'mp-btn';
-      if (!canMergeParts) mBtn.textContent = '副本不足';
-      else if (!canAfford) mBtn.textContent = `金币不足（${progress.coin}/${MERGE_COST_COIN}）`;
-      else mBtn.textContent = '合成';
-      mBtn.disabled = !(canMergeParts && canAfford);
-      mBtn.onclick = () => {
-        this.actions?.onMerge();
-      };
-      mergePanel.appendChild(mBtn);
-      dock.appendChild(mergePanel);
-    }
+    // F-GARAGE-INVENTORY-FUSION-P0：合成已迁入背包二级页（Canvas Player UI），Web DOM Garage
+    // 不再承载旧金币跨 defId 合成面板（player 模式走 Canvas，背包页为唯一合成入口）。
 
     // 底部行：能量 + 寻找对手 CTA
     const row = document.createElement('div');

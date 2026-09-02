@@ -98,7 +98,7 @@ function makeHost(vp: { w: number; h: number }, insets: SafeInsets, phoneLogical
     onResultAdjust: () => {},
     onResultNext: () => {},
     onClaimRewardAd: () => {},
-    onMerge: () => {},
+    onFuse: () => {},
     onResetProgress: () => {},
   });
   return {
