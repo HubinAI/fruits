@@ -38,8 +38,9 @@ import {
 } from '../lab/buildEditorModel';
 import { computeEnergy } from '../core/buildValidator';
 import { starTierEnergy } from '../core/buildSnapshot';
-import { getCount, canEquipPart, canEquipMovement, equippedDefIds, OFFICIAL_PARTS } from '../core/partInventory';
+import { getCount, canEquipPart, canEquipMovement, equippedDefIds, getInventory, OFFICIAL_PARTS } from '../core/partInventory';
 import { canEquipBody } from '../core/bodyOwnership';
+import { hasAllOfficialDebugContent } from '../core/debugGrants';
 import { tierOf, TIER_LABEL, canAffordMerge, MERGE_COST_COIN } from '../core/playerProgress';
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
 import { BODY_OPTIONS, MOVEMENT_OPTIONS, encodePartVal, decodePartVal } from './playerUI';
@@ -332,12 +333,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    */
   private garageStripScroll = 0;
   /**
-   * F-CONTENT-PACK-REAL-UI-R1｜「测试：全部件×1」一键领用态。
+   * F-DEBUG-GRANT-COVERAGE-P0｜「测试：全部件×1」一键领用态。
    * 普通微信包/Web prod 永不显示（门控见 drawDevGrantEntry）；RC 体验包（__WX_DEBUG_GRANT__）
-   * 或 E2E 包（__E2E_INTERNAL_HANDLE__）首次点击后置 true → 按钮变「已领取」且 inert，
-   * 重复点击不再重复写入库存（grantAllPartsOnce 本身幂等，此处仅做 UI 反馈与防重复派发）。
+   * 或 E2E 包（__E2E_INTERNAL_HANDLE__）点击 → runtime 授予 → 按钮「已领取」/inert 由
+   * drawDevGrantEntry 每次从真实库存重算（hasAllOfficialDebugContent），不在此存 UI 内存标记。
    */
-  private devGrantClaimed = false;
+  // 注：claimed 状态已改为运行时从真实库存计算，此处不再保留 devGrantClaimed 内存字段。
   /** F-GARAGE-CENTER-STAGE-P0：当前帧部件卡带可视行 rect（logical px；供手势横滑判定起点是否在带内） */
   private stripCardRow: { x: number; y: number; w: number; h: number } | null = null;
   /** F-GARAGE-CENTER-STAGE-P0：指针手势状态（down/move/up；滑动 >8 logical px 取消该次点击） */
@@ -1378,10 +1379,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id === 'dev-grant-all') {
-      // F-CONTENT-PACK-REAL-UI-R1：一键全部件 ×1（Runtime 入库 + 持久化 + 反馈文案）。
-      // 首次点击后置 devGrantClaimed → 按钮转「已领取」inert；grantAllPartsOnce 幂等，
-      // 即便重复派发也不重复写入库存。
-      this.devGrantClaimed = true;
+      // F-DEBUG-GRANT-COVERAGE-P0：先授予（Runtime 入库 + 持久化），按钮「已领取」状态
+      // 由 drawDevGrantEntry 每次从真实库存重算（hasAllOfficialDebugContent），不依赖 UI 内存标记。
       this.actions?.onGrantAllParts?.();
       return;
     }
@@ -2456,8 +2455,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    *   Must#6 已把 isResetDevVisible 接到 __WX_DEBUG_GRANT__，但按钮门控此前仍卡在 DEV/e2e 子句，
    *   导致 RC 包也不可见——本 Queue 修正为直接读 RC 宏）；
    * - 位置 = Garage 舞台右上角小按钮（仅条件绘制，隐藏时不占布局）；
-   * - 反馈 = runtime 返回的「已获得全部件×1（N种）」；首次点击后置 devGrantClaimed →
-   *   按钮变「已领取」且注册为 inert id（dev-grant-done），重复点击不重复写入。
+   * - 反馈 = runtime 返回的「已获得全部件×1（N种）」；点击 → runtime 授予（入库+持久化）；
+   *   F-DEBUG-GRANT-COVERAGE-P0：按钮「已领取」/inert 状态（dev-grant-done id）由真实库存完整性
+   *   每次重算（hasAllOfficialDebugContent），全部正式内容拥有后显示「已领取」，否则仍「测试：全部件×1」可点。
    */
   /**
    * F-CONTENT-PACK-REAL-UI-R1｜Fix 4：移动端轻量卸轮入口。
@@ -2503,7 +2503,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     let x = stage.x + stage.w - btnW - 6;
     if (x + btnW > maxRight) x = maxRight - btnW;
     const y = stage.y + 6;
-    const claimed = this.devGrantClaimed;
+    // F-DEBUG-GRANT-COVERAGE-P0｜五节：按钮「已领取」状态必须由真实库存完整性计算
+    // （hasAllOfficialDebugContent），每次绘制/重启重算，不依赖 UI 内存标记。
+    const claimed = hasAllOfficialDebugContent(getInventory());
     const id = claimed ? 'dev-grant-done' : 'dev-grant-all';
     const label = claimed ? '已领取' : '测试：全部件×1';
     this.button(x, y, btnW, btnH, id, label, {});

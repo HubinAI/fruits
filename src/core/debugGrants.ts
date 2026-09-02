@@ -20,14 +20,16 @@
 import { EMPTY_SLOT } from '../lab/buildEditorModel';
 import {
   OFFICIAL_PARTS,
+  OFFICIAL_MOVEMENTS,
   addPart,
+  getCount,
   getInventory,
   isOfficialPart,
   saveInventory,
   grantAllNewMovements,
   type PartInventory,
 } from './partInventory';
-import { grantAllNewBodies } from './bodyOwnership';
+import { grantAllNewBodies, OFFICIAL_BODIES, isBodyOwned } from './bodyOwnership';
 
 /** 去重后的真实可获得功能件 id 列表（同一 id 只出现一次；Must#4/9） */
 export function grantablePartIds(): string[] {
@@ -55,8 +57,10 @@ export function grantAllPartsOnce(inv?: PartInventory): number {
   const target = grantablePartIds();
   const store = inv ?? getInventory();
   for (const defId of target) {
-    // 已有副本 → 在原数量上 +1（不重置；Must#5）；star=1 星（不升星；Forbidden）
-    addPart(store, defId, 1, 1);
+    // F-DEBUG-GRANT-COVERAGE-P0｜×1 语义：缺失（count<1）才补到 1；已拥有（≥1）不再增加
+    // （四.1 / T6「第一次点击把所有缺失项补到 1」、T7「第二次点击所有数量不变」）。
+    // 不重置、不累加、不升星（Forbidden）。
+    if (getCount(store, defId, 1) < 1) addPart(store, defId, 1, 1);
   }
   saveInventory(store);
   // F-CONTENT-PLAYER-BODY-PACK-R1：车身部分（拥有即解锁，非计数；幂等）
@@ -64,4 +68,27 @@ export function grantAllPartsOnce(inv?: PartInventory): number {
   // F-CONTENT-PLAYER-MOVEMENT-PACK-R1：轮组部分（复用同一库存；幂等）
   grantAllNewMovements(store);
   return target.length;
+}
+
+/**
+ * F-DEBUG-GRANT-COVERAGE-P0｜「已领取」真实判定：所有正式内容均已拥有 / 数量 ≥1。
+ * - 车身：OFFICIAL_BODIES 全部 isBodyOwned（旧 4 恒默认拥有；新 4 需解锁）；
+ * - 轮组：OFFICIAL_MOVEMENTS 全部 one ≥1；
+ * - 功能件：OFFICIAL_PARTS 全部 one ≥1。
+ * 单一来源 = 正式 Registry（OFFICIAL_BODIES / OFFICIAL_MOVEMENTS / OFFICIAL_PARTS），
+ * 后续新增正式部件自动纳入；boxBody / tallBody / heavyBox / 对手池专用 / 内部占位均不在其中 → 不判定。
+ * 从真实库存 / 拥有存档计算，重启后重算仍正确（不依赖 UI 内存标记；五节）。
+ */
+export function hasAllOfficialDebugContent(inv?: PartInventory): boolean {
+  const store = inv ?? getInventory();
+  for (const b of OFFICIAL_BODIES) {
+    if (!isBodyOwned(b)) return false;
+  }
+  for (const m of OFFICIAL_MOVEMENTS) {
+    if (getCount(store, m, 1) < 1) return false;
+  }
+  for (const p of OFFICIAL_PARTS) {
+    if (getCount(store, p, 1) < 1) return false;
+  }
+  return true;
 }
