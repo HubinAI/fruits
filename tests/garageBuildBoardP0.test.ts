@@ -241,7 +241,13 @@ describe('F-GARAGE-BUILD-BOARD-P0｜手机战车装配台', () => {
     expect(src, '部件卡点击派发 pick').toContain("this.actions?.onPickGarageOption(id.slice(4))");
     // 选中态明确：drawGarageStripCards 调用 drawPartCard 时传 equipped = c.v === curVal（Must#5）
     const cardsStart = src.indexOf('private drawGarageStripCards');
-    expect(src.slice(cardsStart, cardsStart + 2600), '选中态 = 当前装备（调用传参）').toContain('this.drawPartCard(x, row.y, cardW, cardH, c, c.v === curVal');
+    // F-GARAGE-BUILD-BOARD-P0-T6-FIX：按【方法边界】截取，不用固定字符窗口——
+    // 旧实现固定 2600 字符，方法体新增代码（clamp/maxScroll/可见性收紧/drag 反馈等）会把尾部
+    // 的 drawPartCard 调用 + equipped 传参挤出窗口而误报失败。改为找下一个顶层 `private` 方法边界，
+    // 窗口随方法体伸缩，杜绝字符数脆性（与 T3 drawPartCard 守卫同模式）。
+    const cardsNext = src.indexOf('\n  private ', cardsStart + 10);
+    const cardsBody = src.slice(cardsStart, cardsNext > 0 ? cardsNext : cardsStart + 2600);
+    expect(cardsBody, '选中态 = 当前装备（调用传参）').toContain('this.drawPartCard(x, row.y, cardW, cardH, c, c.v === curVal');
   });
 
   it('T7. 360×180~844×390 矩阵：装配台不抛 + 全部 hit 在 safe 内 + 无寻找对手（Must#10）', () => {
