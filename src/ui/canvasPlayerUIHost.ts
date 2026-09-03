@@ -38,7 +38,20 @@ import {
 } from '../lab/buildEditorModel';
 import { computeEnergy } from '../core/buildValidator';
 import { starTierEnergy } from '../core/buildSnapshot';
-import { getCount, canEquipPart, canEquipMovement, getInventory, OFFICIAL_PARTS, OFFICIAL_MOVEMENTS, canFuse, equippedSlots } from '../core/partInventory';
+import {
+  getCount,
+  canEquipPart,
+  canEquipMovement,
+  getInventory,
+  saveInventory,
+  loadInventoryRaw,
+  OFFICIAL_PARTS,
+  OFFICIAL_MOVEMENTS,
+  canFuse,
+  equippedSlots,
+  equippedCount,
+  type PartInventory,
+} from '../core/partInventory';
 import { canEquipBody, OFFICIAL_BODIES } from '../core/bodyOwnership';
 import { hasAllOfficialDebugContent } from '../core/debugGrants';
 import { tierOf, TIER_LABEL } from '../core/playerProgress';
@@ -280,6 +293,46 @@ interface ModalSpec {
   onSecondary?: () => void;
 }
 
+/**
+ * F-GARAGE-INVENTORY-FUSION-R1｜E2E 内部句柄（仅 __E2E_INTERNAL_HANDLE__ 构建暴露，普通/RC 微信包编译期折叠为 undefined）。
+ *
+ * 命名空间刻意用 `globalThis.__inv` 而非 `__fx`：`__fx` 已被 main.ts 的**表现层特效探针**
+ * （spawnDamage / spawnSpark / spawnLaserBeam / debug）整体占用，两处 `= {…}` 直接赋值会
+ * 相互覆盖（实测 main.ts 后落笔 → 宿主 seedInventory 被抹掉，浏览器 E2E F0 断点即此）。
+ * 库存种子与特效注入是两类互不相干的测试能力 → 分命名空间，且 `__inv` 已同步加入
+ * `scripts/check-wechat-bundle-clean.js` 的 FORBIDDEN 清单（E2E allowlist 放行），
+ * 绝不留下未被门禁覆盖的泄漏通道。
+ */
+export interface BackpackE2EHandle {
+  /** 写入测试库存种子（持久化 + 刷新当前背包视图）；不影响 RC「全部件×1」幂等语义。 */
+  seedInventory: (seed: PartInventory) => void;
+}
+
+/**
+ * F-GARAGE-INVENTORY-FUSION-R1｜背包卡片视觉态判别（选中 vs 已装备 vs 普通）。
+ * 选中 = 暖金描边；已装备 = 灰蓝底；二者互斥、一眼可区分。导出供单测断言区分度。
+ */
+export function backpackCardVisualState(selected: boolean, equipped: boolean): 'selected' | 'equipped' | 'normal' {
+  if (selected) return 'selected';
+  if (equipped) return 'equipped';
+  return 'normal';
+}
+
+/**
+ * F-GARAGE-INVENTORY-FUSION-R1｜合成按钮文案（状态规则）：
+ * 未获得 → ''（不显示可操作按钮）；满星 → '已满星'；可用<5 → '还差 N 个'；可用≥5 → '合成'。
+ * 导出供单测断言（T31/T32）与面板复用，单一来源。
+ */
+export function backpackFuseButtonLabel(
+  fuse: { ok: boolean; available: number; need: number; maxStar: boolean },
+  owned: boolean,
+): string {
+  if (!owned) return '';
+  if (!fuse.ok && fuse.maxStar) return '已满星';
+  if (!fuse.ok) return `还差 ${fuse.need - fuse.available} 个`;
+  return '合成';
+}
+
 export class CanvasPlayerUIHost implements PlayerUIHost {
   private actions: PlayerUIActions | null = null;
   private parent!: HTMLElement;
@@ -485,6 +538,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 微信诊断构建（WECHAT_DEBUG_INPUT=1 也设 __WX_DEBUG__=true）不得暴露任何内部句柄。
     if (typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__) {
       (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
+      // F-GARAGE-INVENTORY-FUSION-R1：E2E 内部句柄（仅 e2e 构建）——测试库存种子，不影响 RC「全部件×1」幂等。
+      (globalThis as { __inv?: BackpackE2EHandle }).__inv = {
+        seedInventory: (seed: PartInventory) => {
+          saveInventory(seed);
+          if (this.lastState) this.lastState.inventory = loadInventoryRaw() ?? seed;
+          this.draw();
+        },
+      };
     }
     // 输入唯一入口：Platform Input Adapter（F-WX-4）
     // F-GARAGE-CENTER-STAGE-P0：优先手势（down/move/up + 8px 取消）；平台不支持时回退 tap
@@ -515,6 +576,14 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // RC/普通微信/微信诊断构建编译期折叠为零，bundle 中绝不出现 globalThis.__h。
     if (typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__) {
       (globalThis as { __h?: CanvasPlayerUIHost }).__h = this;
+      // F-GARAGE-INVENTORY-FUSION-R1：E2E 内部句柄（仅 e2e 构建）——测试库存种子，不影响 RC「全部件×1」幂等。
+      (globalThis as { __inv?: BackpackE2EHandle }).__inv = {
+        seedInventory: (seed: PartInventory) => {
+          saveInventory(seed);
+          if (this.lastState) this.lastState.inventory = loadInventoryRaw() ?? seed;
+          this.draw();
+        },
+      };
     }
     // 唯一输入入口：绑定到唯一可见屏幕 Canvas（Renderer canvas）
     // F-PLAYER-INPUT-SCALE-P0：传 PlayerViewportTransform.clientToLogical 作统一转换——
@@ -1966,6 +2035,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
        * 与 `active`（亮蓝选中）互斥——已装备**不**用亮蓝，避免与可选卡片混淆。
        */
       equipped?: boolean;
+      /** F-GARAGE-INVENTORY-FUSION-R1：背包卡片「选中」态（暖金底 + 金描边），与已装备灰蓝态一眼可区分 */
+      selected?: boolean;
       /** armed（已拿起、尚未装备）：暖金底 + 金描边，与已装备灰态一眼可区分 */
       armed?: boolean;
       primary?: boolean;
@@ -1984,14 +2055,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
           ? 'rgba(58,44,18,0.62)' // 未选中：暗金底（仍识别为主入口，不似已选中）
           : opts.primary
             ? V.primary
-            // F-GARAGE-DRAG-CONTINUITY-R1：已装备 = 中性灰蓝（不用亮蓝）；armed = 暖金
-            : opts.armed
+            // F-GARAGE-INVENTORY-FUSION-R1：选中 = 暖金（与 armed 同色系，明确区别于已装备灰蓝）
+            : opts.selected
               ? V.armedFill
-              : opts.equipped
-                ? V.equippedFill
-                : opts.active
-                  ? C.blue
-                  : V.secondary;
+              // F-GARAGE-DRAG-CONTINUITY-R1：已装备 = 中性灰蓝（不用亮蓝）；armed = 暖金
+              : opts.armed
+                ? V.armedFill
+                : opts.equipped
+                  ? V.equippedFill
+                  : opts.active
+                    ? C.blue
+                    : V.secondary;
     const stroke = opts.disabled
       ? C.border
       : isCombat && opts.active
@@ -2000,15 +2074,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
           ? 'rgba(222,164,52,0.72)' // 暗金描边（未选中主入口识别）
           : opts.primary
             ? V.primaryBright
-            : opts.armed
+            : opts.selected
               ? V.armedStroke
-              : opts.equipped
-                ? V.equippedStroke
-                : opts.active
-                  ? C.blueBright
-                  : opts.locked
-                    ? V.enemyOrange
-                    : V.borderSoft;
+              : opts.armed
+                ? V.armedStroke
+                : opts.equipped
+                  ? V.equippedStroke
+                  : opts.active
+                    ? C.blueBright
+                    : opts.locked
+                      ? V.enemyOrange
+                      : V.borderSoft;
     const labelColor = opts.disabled
       ? C.textDark
       : isCombat
@@ -2218,16 +2294,21 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.profile,
     );
 
-    // 顶部轻量状态栏（金币/段位/能量；只信息，不放主要操作；F-META-UX1：无页面大标题）
-    this.drawMobileTopBar(state, draft, layout.topBarRect);
-
     // 中央功能内容区（按 MetaPage 分派）
     if (this.metaPage === 'backpack') {
-      this.drawBackpackPage(state, layout);
-    } else if (this.metaPage === 'more') {
-      this.drawMorePage(layout);
+      // F-GARAGE-INVENTORY-FUSION-R1：背包页不绘制金币/段位/能量 shell 顶栏（仅信息噪音）；
+      // 背包页自绘「‹ 返回车库 / 标题背包 / 三分类」于整页（contentRect 上延至顶栏区），信息层级收敛。
+      const top = layout.topBarRect;
+      const bpRect: Rect = { x: top.x, y: top.y, w: top.w, h: top.h + layout.contentRect.h };
+      this.drawBackpackPage(state, { ...layout, contentRect: bpRect });
     } else {
-      this.drawGarageMetaPage(state, draft, layout);
+      // 顶部轻量状态栏（金币/段位/能量；只信息，不放主要操作；F-META-UX1：无页面大标题）
+      this.drawMobileTopBar(state, draft, layout.topBarRect);
+      if (this.metaPage === 'more') {
+        this.drawMorePage(layout);
+      } else {
+        this.drawGarageMetaPage(state, draft, layout);
+      }
     }
   }
 
@@ -3215,18 +3296,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const x = c.x + 12 + col * (cardW + gap);
       const y = listTop + row * (cardH + gap);
       const selected = this.backpackSelected === it.defId;
-      // 卡片按钮（active=选中亮蓝；equipped=已装备灰蓝；互斥，已装备不亮蓝）
+      // F-GARAGE-INVENTORY-FUSION-R1：选中=暖金描边（selected），已装备=灰蓝（equipped），互斥可区分
+      const vs = backpackCardVisualState(selected, it.isEquipped);
       this.button(x, y, cardW, cardH, `backpack-select:${it.defId}`, '', {
-        active: selected,
-        equipped: !selected && it.isEquipped,
+        selected: vs === 'selected',
+        equipped: vs === 'equipped',
       });
-      // 叠加自定义文本（图标占位 + 名称 + 星级 + 数量信息 + 已装备标识）
-      this.text(it.name, x + 10, y + cardH * 0.28, this.isShort ? 13 : 15, C.text, 'left', 600);
-      this.text(it.starText, x + 10, y + cardH * 0.54, this.isShort ? 12 : 13, C.gold, 'left');
+      // 名称（主，加粗可读；真机逻辑尺寸下直接阅读，不再过薄行高）
+      this.text(it.name, x + 12, y + cardH * 0.26, this.isShort ? 16 : 18, C.text, 'left', 700);
+      // 星级（金）
+      this.text(it.starText, x + 12, y + cardH * 0.50, this.isShort ? 13 : 15, C.gold, 'left', 700);
+      // 数量信息：总 / 装备 / 可合（未获得红色「未获得」）
       const info = !it.owned ? '未获得' : `总 ${it.total} · 装备 ${it.equippedCountN} · 可合 ${it.available}`;
-      this.text(info, x + 10, y + cardH * 0.8, this.isShort ? 10 : 11, it.owned ? C.textDim : C.red, 'left');
+      this.text(info, x + 12, y + cardH * 0.76, this.isShort ? 12 : 13, it.owned ? C.textDim : C.red, 'left');
       if (it.isEquipped) {
-        this.text('已装备', x + cardW - 10, y + cardH * 0.8, this.isShort ? 11 : 12, C.blue, 'right', 700);
+        this.text('已装备', x + cardW - 12, y + cardH * 0.76, this.isShort ? 12 : 13, C.blue, 'right', 700);
+      } else if (selected) {
+        this.text('已选中', x + cardW - 12, y + cardH * 0.76, this.isShort ? 12 : 13, C.gold, 'right', 700);
       }
     }
     if (items.length === 0) this.text('该分类暂无部件', c.x + 12, listTop + 30, 14, C.textDim);
@@ -3244,7 +3330,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.drawBackpackFusePanel(state, c.x, c.y + c.h - panelH, c.w, panelH);
   }
 
-  /** F-GARAGE-INVENTORY-FUSION-P0：背包合成面板（当前★1 / 消耗5 / 产出★2 / 可用 / 暖金「合成」）。 */
+  /** F-GARAGE-INVENTORY-FUSION-R1：背包合成面板（当前★1 / 拥有 / 已装备 / 可用 / 消耗5×1★ / 产出★2 / 暖金「合成」）。 */
   private drawBackpackFusePanel(state: PlayerUIState, x: number, y: number, w: number, h: number): void {
     this.panel(x + 8, y + 4, w - 16, h - 8, C.dockBg, C.border, V.radiusM);
     const defId = this.backpackSelected;
@@ -3261,18 +3347,21 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const draft = state.draft ?? null;
     const fuse = canFuse(inv, defId, 1, draft);
     const name = this.partDisplayName(defId);
-    // 左：规则与可用数量
-    this.text(`${name}  ·  当前 ★1`, x + 20, y + h * 0.32, 14, C.text, 'left', 700);
-    this.text('消耗 5 × 1★  →  产出 ★2', x + 20, y + h * 0.56, 13, C.textDim, 'left');
-    const availColor = fuse.available >= 5 ? C.gold : C.textDim;
-    this.text(`可用数量：${fuse.available} / 需要 5`, x + 20, y + h * 0.8, 13, availColor, 'left');
-    // 右：暖金「合成」按钮（<5 disabled「还差 N 个」；满星「已满星」）
-    let btnLabel = '合成';
-    if (!fuse.ok && fuse.maxStar) btnLabel = '已满星';
-    else if (!fuse.ok) btnLabel = `还差 ${fuse.need - fuse.available} 个`;
+    const ownedOne = getCount(inv, defId, 1);
+    const ownedTwo = getCount(inv, defId, 2);
+    const ownedTotal = ownedOne + ownedTwo;
+    const owned = ownedTotal > 0;
+    const eqN = equippedCount(defId, 1, draft);
+    // 左列：名称 + 拥有 + 已装备/可用 + 消耗产出规则
+    this.text(`${name} · 当前 ★1`, x + 20, y + h * 0.22, 15, C.text, 'left', 700);
+    this.text(`拥有 ${ownedTotal}（1★ ${ownedOne} · 2★ ${ownedTwo}）`, x + 20, y + h * 0.44, 13, C.textDim, 'left');
+    this.text(`已装备 ${eqN} · 可用 ${fuse.available} / 需要 5`, x + 20, y + h * 0.64, 13, fuse.available >= 5 ? C.gold : C.textDim, 'left');
+    this.text('消耗 5 × 1★  →  产出 1 × ★2', x + 20, y + h * 0.84, 12, C.textDim, 'left');
+    // 右：暖金「合成」按钮（<5 disabled「还差 N 个」；满星「已满星」；未获得不显示可操作按钮）
+    const btnLabel = backpackFuseButtonLabel(fuse, owned);
     this.button(x + w - 156, y + h / 2 - 22, 136, 44, 'backpack-fuse', btnLabel, {
-      primary: fuse.ok,
-      disabled: !fuse.ok,
+      selected: fuse.ok,
+      disabled: !fuse.ok || !owned,
     });
   }
 

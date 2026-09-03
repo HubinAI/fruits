@@ -6,9 +6,9 @@
  *   mode: rc | wechat | diag | e2e
  *
  * - RC/普通微信/微信诊断（rc|wechat|diag）：禁止任何内部句柄赋值（globalThis/window
- *   .__h/__probe/__fx/__runtime/__renderer/__player/__battle）——命中即 exit 1，
+ *   .__h/__probe/__fx/__inv/__runtime/__renderer/__player/__battle）——命中即 exit 1，
  *   绝不报告「RC 构建成功」。微信诊断（WECHAT_DEBUG_INPUT=1）只有日志、零内部句柄。
- * - E2E（e2e）：显式 allowlist 放行 E2E 专用句柄（__h/__probe/__fx），但仍禁止
+ * - E2E（e2e）：显式 allowlist 放行 E2E 专用句柄（__h/__probe/__fx/__inv），但仍禁止
  *   __runtime/__renderer/__player/__battle 等未授权句柄。
  * - 使用**精确赋值模式**（`globalThis.__h = `）而非宽泛 grep——合法的 `dirty` 业务字段、
  *   RC badge 水印、grant 按钮文案不会被误判为泄漏。
@@ -23,6 +23,9 @@ const FORBIDDEN = [
   'window.__probe = ',
   'globalThis.__fx = ',
   'window.__fx = ',
+  // F-GARAGE-INVENTORY-FUSION-R1：背包库存种子句柄（__fx 已被表现层特效探针占用，故独立命名空间）
+  'globalThis.__inv = ',
+  'window.__inv = ',
   'globalThis.__runtime = ',
   'window.__runtime = ',
   'globalThis.__renderer = ',
@@ -41,6 +44,9 @@ const E2E_ALLOW = new Set([
   'window.__probe = ',
   'globalThis.__fx = ',
   'window.__fx = ',
+  // F-GARAGE-INVENTORY-FUSION-R1：E2E 构建放行库存种子句柄（普通/RC/微信诊断仍禁止）
+  'globalThis.__inv = ',
+  'window.__inv = ',
 ]);
 
 function main() {
