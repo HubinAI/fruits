@@ -45,7 +45,7 @@ async function tapVisibleById(page, id) {
     const a = h.getHitAreasForTest().find((z) => z.id === i);
     if (!a) return null;
     const t = h.getTransformInfo();
-    const c = document.querySelectorAll('canvas')[1];
+    const c = document.querySelectorAll('canvas')[1] || document.querySelector('canvas');
     const r = c.getBoundingClientRect();
     const drawnX = t.ox + t.scale * (a.x + a.w / 2);
     const drawnY = t.oy + t.scale * (a.y + a.h / 2);
