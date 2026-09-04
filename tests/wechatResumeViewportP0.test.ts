@@ -462,4 +462,69 @@ describe('F-WX-IOS-RESUME-VIEWPORT-P0｜syncWechatViewport 唯一入口验收（
     expect(st2[0]).toBe(DPR);
     expect(st2[3]).toBe(DPR);
   }, 20000);
+
+  // —— F-WX-RESUME-RENDER-STATE-P0｜recovery guarantee / failure tolerance（T-VP-1/2/3）——
+  // 修复前红（syncWechatViewport 序列 resetBacking→doResize→forceRedraw→loop.start 无 try/finally：
+  // doResize 抛错则 forceRedraw/loop.start 跳过 → loop 停摆 + 画面冻结/跨页泄漏）；修复后绿。
+
+  it('T-VP-1. resume 恢复保证：hide→show 后 loop 重启 + dirty 置位 + 当前页重绘', () => {
+    vi.useFakeTimers();
+    const h = buildHarness();
+    for (let i = 0; i < 2; i++) h.drive(); // Home 稳态
+    expect(h.loop.isRunning).toBe(true);
+
+    hide(h);
+    expect(h.loop.isRunning, 'hide 必须停循环').toBe(false);
+
+    h.viewportSync.syncWechatViewport('show');
+    expect(h.loop.isRunning, 'show 后循环必须重启（否则画面冻结/跨页泄漏）').toBe(true);
+    expect((h.uiHost as any).dirty, 'show 后必须强制整页重绘（dirty=true）').toBe(true);
+
+    h.ui.ctx.resetInk();
+    h.drive(); // 等价 loop 重启后排的下一帧
+    expect(h.ui.ctx.inkCount, 'resume 后 Home UI 必须重绘').toBeGreaterThan(0);
+  }, 20000);
+
+  it('T-VP-2. resume 失败容错（leak 防护）：doResize 抛错仍恢复 loop + dirty', () => {
+    vi.useFakeTimers();
+    const h = buildHarness();
+    for (let i = 0; i < 2; i++) h.drive();
+    hide(h);
+    expect(h.loop.isRunning).toBe(false);
+
+    const spy = vi.spyOn(h.runtime, 'doResize').mockImplementation(() => {
+      throw new Error('simulated runtime.doResize failure');
+    });
+
+    // 修复前：doResize 抛错跳过 forceRedraw/loop.start → 调用抛错 / loop 不重启（红）。
+    // 修复后：try/finally 保证恢复动作执行 → 调用不抛错 + loop 重启 + dirty 置位（绿）。
+    expect(() => h.viewportSync.syncWechatViewport('show'), 'doResize 失败不得让 sync 抛错中断恢复').not.toThrow();
+    expect(h.loop.isRunning, 'doResize 抛错后 loop 仍必须重启（防冻结/跨页泄漏）').toBe(true);
+    expect((h.uiHost as any).dirty, 'doResize 抛错后 dirty 仍必须置位').toBe(true);
+    spy.mockRestore();
+  }, 20000);
+
+  it('T-VP-3. resume 后输入链存活：doResize 抛错后 hitAreas 仍按当前页重建', () => {
+    vi.useFakeTimers();
+    const h = buildHarness();
+    (h.uiHost as any).dispatch('home-garage'); // 进入 Garage
+    h.drive();
+    expect(h.runtime.playerPhase).toBe('garage');
+    hide(h);
+    expect(h.loop.isRunning).toBe(false);
+
+    const spy = vi.spyOn(h.runtime, 'doResize').mockImplementation(() => {
+      throw new Error('simulated runtime.doResize failure');
+    });
+
+    expect(() => h.viewportSync.syncWechatViewport('show')).not.toThrow();
+    expect(h.loop.isRunning, 'loop 重启后下一帧会重建 hitAreas').toBe(true);
+
+    h.ui.ctx.resetInk();
+    h.drive(); // 等价 loop 排的下一帧：draw() 以当前 metaPage 重建 hitAreas
+    const hitAreas = (h.uiHost as any).hitAreas as Array<{ id: string }>;
+    expect(hitAreas.length, 'resume 后 hitAreas 必须按当前页重建（输入链存活）').toBeGreaterThan(0);
+    expect(hitAreas.some((a) => a.id === 'nav:backpack'), 'Garage 页 hitArea 含顶栏按钮').toBe(true);
+    spy.mockRestore();
+  }, 20000);
 });

@@ -152,18 +152,27 @@ export function createViewportSync(targets: ViewportSyncTargets): {
     // —— 6. PlayerViewportTransform：微信端未实例化（Web 玩家模式专用）→ 契约 no-op ——
 
     // —— 7/10. Renderer resize + 按当前 phase reframe camera（doResize 内含 reframePlayerCamera） ——
-    targets.runtime.doResize();
+    // F-WX-RESUME-RENDER-STATE-P0：doResize 失败不得阻断 resume 恢复——
+    // 否则 loop 停摆 + 画面冻结/跨页泄漏（见调查报告 §3）。恢复动作置于 finally，
+    // 无论 doResize 成败都执行（仅触达 lifecycle/renderer reset/binding；不碰冻结项）。
+    try {
+      targets.runtime.doResize();
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.error) {
+        console.error('[WX-RESUME] syncWechatViewport: runtime.doResize failed during resume; recovery still applied', err);
+      }
+    } finally {
+      // —— 8. UI Host ensureSize（下一帧 draw 顶部）+ 强制 dirty/redraw ——
+      targets.uiHost.forceRedraw();
 
-    // —— 8. UI Host ensureSize（下一帧 draw 顶部）+ 强制 dirty/redraw ——
-    targets.uiHost.forceRedraw();
+      // —— 9. ctx transform 恢复为 DPR 单次变换（清 identity 后重新 composite 由下一帧完成） ——
+      applyDprTransform(targets.screenCanvas, dpr);
+      applyDprTransform(targets.uiCanvas, dpr);
 
-    // —— 9. ctx transform 恢复为 DPR 单次变换（清 identity 后重新 composite 由下一帧完成） ——
-    applyDprTransform(targets.screenCanvas, dpr);
-    applyDprTransform(targets.uiCanvas, dpr);
-
-    // —— 11. 完成后才恢复/继续 SingleLoop（start 幂等 + request 至多一个 pending frame） ——
-    targets.loop.start();
-    targets.loop.request();
+      // —— 11. 完成后才恢复/继续 SingleLoop（start 幂等 + request 至多一个 pending frame） ——
+      targets.loop.start();
+      targets.loop.request();
+    }
 
     return { reason, committed: true, window: { w, h, dpr }, backing: { w: bw, h: bh } };
   }
