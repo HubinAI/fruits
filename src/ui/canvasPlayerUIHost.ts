@@ -44,6 +44,7 @@ import {
   canEquipMovement,
   getInventory,
   saveInventory,
+  addPart,
   loadInventoryRaw,
   OFFICIAL_PARTS,
   OFFICIAL_MOVEMENTS,
@@ -1701,7 +1702,27 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.draw();
         break;
       }
-      case 'result-adjust':
+      case 'backpack-test-material': {
+        // F-RC-FUSION-TEST-ENTRY-P0｜§三：RC 专用测试材料补足（仅调试/测试构建可点，按钮不注册于生产）。
+        // 补足当前选中 defId 的 1★ 可用数量到 5：requiredOwned = equippedCount + 5；
+        // topUp = max(0, requiredOwned - owned)。已装备副本不被覆盖/消耗；满 5 幂等；
+        // 不影响其它部件 / Build / 能量 / 金币 / 段位 / 奖励池。
+        const defId = this.backpackSelected;
+        if (defId && !OFFICIAL_BODIES.includes(defId) && this.lastState) {
+          const inv = this.lastState.inventory;
+          const draft = this.lastState.draft ?? null;
+          const eq = equippedCount(defId, 1, draft);
+          const owned = getCount(inv, defId, 1);
+          const requiredOwned = eq + 5;
+          const topUp = Math.max(0, requiredOwned - owned);
+          if (topUp > 0) {
+            addPart(inv, defId, 1, topUp);
+            saveInventory(inv);
+          }
+        }
+        this.draw();
+        break;
+      }
         this.actions?.onResultAdjust();
         break;
       case 'result-next':
@@ -2593,7 +2614,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // （hasAllOfficialDebugContent），每次绘制/重启重算，不依赖 UI 内存标记。
     const claimed = hasAllOfficialDebugContent(getInventory());
     const id = claimed ? 'dev-grant-done' : 'dev-grant-all';
-    const label = claimed ? '已领取' : '测试：全部件×1';
+    // F-RC-FUSION-TEST-ENTRY-P0｜§二：领取前显示「全部件×1」、领取后显示「全部件×1 ✓」
+    // （保留可见，不只剩「已领取」；claimed 仍由真实库存完整性计算；×1 幂等语义不变）。
+    const label = claimed ? '全部件×1 ✓' : '全部件×1';
     this.button(x, y, btnW, btnH, id, label, {});
     if (!claimed && state.devGrantMessage) {
       this.text(state.devGrantMessage, x + btnW / 2, y + btnH + 8, this.isShort ? 8 : 9, V.primary, 'center', 600);
@@ -3363,6 +3386,16 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       selected: fuse.ok,
       disabled: !fuse.ok || !owned,
     });
+    // F-RC-FUSION-TEST-ENTRY-P0｜§三：RC/E2E 专用「测试材料×5」中性灰蓝按钮（带「测试」字样，避免误认正式功能）。
+    // 仅调试/测试构建可见（rcGrant || e2eProbe || devReset）；普通微信/Pages/正式Web 恒不绘制、不注册命中区。
+    // 命中：非车身（已在上方 return）+ 未达满星（无 2★ 副本）→ 点击只补足当前 defId 1★ 可用数到 5。
+    const rcGrantTM = typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__;
+    const e2eProbeTM = typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__;
+    const devResetTM = DEV_TOOLS_VISIBLE && state.resetDevVisible;
+    const showTestMaterial = (rcGrantTM || e2eProbeTM || devResetTM) && ownedTwo === 0;
+    if (showTestMaterial) {
+      this.button(x + w - 156 - 140, y + h / 2 - 22, 132, 44, 'backpack-test-material', '测试材料×5', { equipped: true });
+    }
   }
 
   /** F-GARAGE-INVENTORY-FUSION-P0：统一部件显示名（Functional / Movement / Body）。 */

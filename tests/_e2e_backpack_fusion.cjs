@@ -1,19 +1,19 @@
 /**
- * F-GARAGE-INVENTORY-FUSION-R1｜背包信息层级 + **真实 5 合 1 玩家操作闭环** 浏览器门禁
+ * F-RC-FUSION-TEST-ENTRY-P0｜RC 包「真实 5 合 1」验收可达性 —— 浏览器真实可见按钮闭环门禁
  *
- * 与 P0 版的本质区别：P0 只验证「背包页可达 / 卡片渲染 / 门控不出现假可合 / 返回车库」，
- * 本版真正跑完玩家闭环——种子库存 → 真实可见像素点击 → 面板读数（可用/消耗/产出）→ 点击「合成」
- * → 校验 localStorage 1★-5 / 2★+1 → 连点不重复 → 返回车库 Build 不变 → reload 后 2★ 仍在。
+ * 与 R1 版的区别：R1 用 seedInv 直接预置 5 份再点「合成」；本版严格走 §五 真实玩家路径——
+ * 种子仅设「拥有 1 个未装备件（冲锤）」以呈现「还差4个」，**5→1 必须靠真实 UI 按钮**：
+ * 「测试材料×5」（RC/e2e 专用中性灰蓝按钮）→ 面板刷新 → 真实「合成」→ 校验 1★-5 / 2★+1
+ * → 连点不重复 → 返回车库 Build 不变 → reload 后 2★ 仍在。禁止只用内部函数绕过 UI。
  *
- * 关键手段（两者都不污染任何产物 bundle）：
- *  1) 种子库存：window.__inv.seedInventory（宿主内 __E2E_INTERNAL_HANDLE__ 守卫；
- *     build:e2e 才为 true，普通/RC/微信构建 esbuild 折叠移除 → bundle-clean 通过）。
- *     **不复用、不修改** RC「全部件×1」幂等授予路径。
+ * 关键手段（都不污染任何产物 bundle）：
+ *  1) 种子库存：window.__inv.seedInventory（宿主内 __E2E_INTERNAL_HANDLE__ 守卫；build:e2e 才为 true，
+ *     普通/RC/微信构建 esbuild 折叠移除 → bundle-clean 通过）。**仅搭初始态，不走 RC 授予路径、不预置 5 份**。
  *  2) 面板文案读数：page.addInitScript 在浏览器层劫持 CanvasRenderingContext2D.prototype.fillText
  *     记录真实绘制文本 —— 纯测试侧 instrumentation，app 源码零改动、零新增诊断接口。
  *
  * 视口：420×210 / 844×390 / 1280×592 × DPR1 / DPR3（共 6 组）。
- *  - 844×390 DPR1 与 DPR3：跑**完整 5 合 1 闭环**（含装备保护、连点、Build 不变、reload 保持）；
+ *  - 844×390 DPR1 与 DPR3：跑**完整真实按钮闭环**（测试材料×5 → 合成 → 连点 → Build 不变 → reload 保持）；
  *  - 其余 4 组：验证背包页可达 / 三分类 / 战斗 11 项分页全可达 / 卡片点击几何正确 / 返回车库。
  *
  * 用法（需先起服务，且环境装有 Microsoft Edge / Chromium —— channel: 'msedge'）：
@@ -292,96 +292,98 @@ async function runViewport(browser, vp) {
   }
 
   // ================= 全闭环（844×390 DPR1/DPR3）=================
-  const seeded = await seedInv(page, 'cannon', 5, 0);
-  log(seeded, `[${tag}] F0. e2e 种子句柄可用（window.__inv.seedInventory）`);
+  // F-RC-FUSION-TEST-ENTRY-P0｜§五：真实可见按钮走完 还差4个 → 测试材料×5 → 合成 → 2★+1 → reload保持。
+  // 初始种子仅设「拥有 1 个未装备件」以呈现「还差4个」；5→1 必须靠真实 UI 按钮（测试材料×5 + 合成），
+  // 禁止只用内部函数绕过 UI（seedInv 仅搭初始态，不走 RC 授予路径、不预置 5 份）。
+  const seeded = await seedInv(page, 'rammer', 1, 0); // 冲锤未装备、拥有1 → 可用1 → 还差4个
+  log(seeded, `[${tag}] F0. e2e 种子句柄可用（仅设初始 1 份，不走 RC 授予路径）`);
 
-  // F1. 选中 cannon → 读面板（拥有/已装备/可用/消耗/产出）
+  // F1. 进入战斗分类并真实点击选中「冲锤」
   await tapVisibleById(page, 'bfilter:combat');
-  const sel = await selectCard(page, 'cannon');
-  log(sel, `[${tag}] F1. 真实点击选中「炮」卡片`);
+  const sel = await selectCard(page, 'rammer');
+  log(sel, `[${tag}] F1. 真实点击选中「冲锤」卡片`);
   await clearTexts(page);
-  await tapVisibleById(page, 'backpack-select:cannon'); // 重绘当帧读面板
+  await tapVisibleById(page, 'backpack-select:rammer'); // 重绘当帧读面板
   let panel = parsePanel(await readTexts(page));
-  log(panel.one === 5, `[${tag}] F2. 面板「拥有」读数 = 种子 1★×5`, JSON.stringify(panel));
-  const eq = panel.equipped == null ? 0 : panel.equipped;
+  log(panel.one === 1, `[${tag}] F2. 面板「拥有」读数 = 种子 1★×1`, JSON.stringify(panel));
 
-  // F3. 装备保护：拥有 5、装备 eq → 可用 5-eq
-  if (eq > 0) {
-    log(panel.available === 5 - eq, `[${tag}] F3. 装备保护：拥有5/装备${eq} → 可用${5 - eq}`, `available=${panel.available}`);
-    log(!find(await areas(page), 'backpack-fuse'), `[${tag}] F3b. 可用<5 → 合成按钮不可点（无假可合）`);
-    log(panel.btn === `还差 ${5 - panel.available} 个`, `[${tag}] F3c. 文案「还差 N 个」`, `btn=${panel.btn}`);
-  } else {
-    // 未装备 cannon：单独做一次「可用 4 → 还差 1 个」门控验证
-    await seedInv(page, 'cannon', 4, 0);
-    await clearTexts(page);
-    await tapVisibleById(page, 'backpack-select:cannon');
-    const p4 = parsePanel(await readTexts(page));
-    log(p4.available === 4, `[${tag}] F3. 拥有4未装备 → 可用 4`, `available=${p4.available}`);
-    log(!find(await areas(page), 'backpack-fuse'), `[${tag}] F3b. 可用<5 → 合成按钮不可点（无假可合）`);
-    log(p4.btn === '还差 1 个', `[${tag}] F3c. 文案「还差 1 个」`, `btn=${p4.btn}`);
-  }
+  // F3. 初始「还差4个」且 合成按钮不可点（无假可合）
+  log(panel.available === 1, `[${tag}] F3. 拥有1未装备 → 可用 1`, `available=${panel.available}`);
+  log(!find(await areas(page), 'backpack-fuse'), `[${tag}] F3b. 可用<5 → 合成按钮不可点（无假可合）`);
+  log(panel.btn === '还差 4 个', `[${tag}] F3c. 文案「还差 4 个」`, `btn=${panel.btn}`);
 
-  // F4. 可用 = 5（拥有 5+eq）→ 面板齐备 + 暖金「合成」可点
-  await seedInv(page, 'cannon', 5 + eq, 0);
+  // F4. RC 专用「测试材料×5」真实按钮可见（中性灰蓝、带测试字样）
+  const tmHit = find(await areas(page), 'backpack-test-material');
+  log(!!tmHit, `[${tag}] F4. 「测试材料×5」真实按钮可见（RC/e2e 构建）`);
+
+  // F5. 真实点击「测试材料×5」→ 补足 1★ 到可用 5
+  const preTM = await readInv(page, 'rammer');
+  await tapVisibleById(page, 'backpack-test-material');
+  const postTM = await readInv(page, 'rammer');
+  log(postTM.one === preTM.one + 4, `[${tag}] F5. 测试材料×5 补足 1★ +4`, `${preTM.one} → ${postTM.one}`);
   await clearTexts(page);
-  await tapVisibleById(page, 'backpack-select:cannon');
+  await tapVisibleById(page, 'backpack-select:rammer');
   panel = parsePanel(await readTexts(page));
-  log(panel.available === 5, `[${tag}] F4. 可用 = 5`, `available=${panel.available} equipped=${panel.equipped}`);
-  log(panel.consume && panel.produce, `[${tag}] F5. 面板显示「消耗 5 × 1★ → 产出 1 × ★2」`);
-  log(panel.btn === '合成', `[${tag}] F6. 主按钮文案「合成」`, `btn=${panel.btn}`);
+  log(panel.available === 5, `[${tag}] F6. 补足后可用 = 5`, `available=${panel.available} equipped=${panel.equipped}`);
+  log(panel.consume && panel.produce, `[${tag}] F7. 面板显示「消耗 5 × 1★ → 产出 1 × ★2」`);
+  log(panel.btn === '合成', `[${tag}] F8. 主按钮文案「合成」`, `btn=${panel.btn}`);
   const fuseHit = find(await areas(page), 'backpack-fuse');
-  log(!!fuseHit, `[${tag}] F7. 「合成」按钮真实可点（注册命中区）`);
-  log(!find(await areas(page), 'modal-veil'), `[${tag}] F8. 合成走页内面板（无新增 Modal）`);
+  log(!!fuseHit, `[${tag}] F9. 「合成」按钮真实可点（注册命中区）`);
+  log(!find(await areas(page), 'modal-veil'), `[${tag}] F10. 合成走页内面板（无新增 Modal）`);
   const buildBefore = await readBuild(page);
 
-  // F9. 真实点击合成 → 1★-5 / 2★+1
-  const pre = await readInv(page, 'cannon');
+  // F11. 真实点击合成 → 1★-5 / 2★+1
+  const pre = await readInv(page, 'rammer');
   await tapVisibleById(page, 'backpack-fuse');
-  const post = await readInv(page, 'cannon');
-  log(post.one === pre.one - 5, `[${tag}] F9. 1★ 实际 -5`, `${pre.one} → ${post.one}`);
-  log(post.two === pre.two + 1, `[${tag}] F10. 2★ 实际 +1`, `${pre.two} → ${post.two}`);
-  if (eq > 0) log(post.one === eq, `[${tag}] F11. 已装备 ${eq} 件未被消耗`, `one=${post.one}`);
-  else log(true, `[${tag}] F11. 无已装备副本（装备保护由 F3 门控验证）`);
+  const post = await readInv(page, 'rammer');
+  log(post.one === pre.one - 5, `[${tag}] F11. 1★ 实际 -5`, `${pre.one} → ${post.one}`);
+  log(post.two === pre.two + 1, `[${tag}] F12. 2★ 实际 +1`, `${pre.two} → ${post.two}`);
   await clearTexts(page);
-  await tapVisibleById(page, 'backpack-select:cannon');
-  const okText = (await readTexts(page)).some((t) => /合成成功/.test(t) || /2★ 1/.test(t) || /★★×1/.test(t));
-  log(okText, `[${tag}] F12. 合成结果有可见反馈（焦点仍在原卡面板）`);
+  await tapVisibleById(page, 'backpack-select:rammer');
+  const okText = (await readTexts(page)).some((t) => /合成成功/.test(t) || /★★×1/.test(t));
+  log(okText, `[${tag}] F13. 合成结果有可见反馈（焦点仍在原卡面板）`);
 
-  // F13. 连点不重复消耗（恰好可用 5 → 快速两连击只应发生一次合成）
-  await seedInv(page, 'cannon', 5 + eq, 0);
-  await tapVisibleById(page, 'backpack-select:cannon');
-  const pre2 = await readInv(page, 'cannon');
+  // F14. 测试材料×5 幂等：重 seed 5 可用 → 再点一次不应增加
+  await seedInv(page, 'rammer', 5, 0);
+  await tapVisibleById(page, 'backpack-select:rammer');
+  const preIdem = await readInv(page, 'rammer');
+  await tapVisibleById(page, 'backpack-test-material');
+  const postIdem = await readInv(page, 'rammer');
+  log(postIdem.one === preIdem.one, `[${tag}] F14. 测试材料×5 幂等（满5不增加）`, `${preIdem.one} → ${postIdem.one}`);
+
+  // F15. 连点不重复消耗（恰好可用 5 → 快速两连击只应发生一次合成）
+  const pre2 = await readInv(page, 'rammer');
   await tapTwiceFast(page, 'backpack-fuse');
-  const post2 = await readInv(page, 'cannon');
+  const post2 = await readInv(page, 'rammer');
   log(
     post2.one === pre2.one - 5 && post2.two === pre2.two + 1,
-    `[${tag}] F13. 连点不重复消耗（仅一次合成）`,
+    `[${tag}] F15. 连点不重复消耗（仅一次合成）`,
     `1★ ${pre2.one}→${post2.one} / 2★ ${pre2.two}→${post2.two}`,
   );
 
-  // F14. 返回车库 → Build 不变
+  // F16. 返回车库 → Build 不变
   await tapVisibleById(page, 'nav:garage');
   const G = await areas(page);
-  log(!!find(G, 'garage-cat:body'), `[${tag}] F14. 「‹ 返回车库」回装配页`);
-  log(!find(G, 'home-garage'), `[${tag}] F15. 未穿透回首页（保留上下文）`);
-  log((await readBuild(page)) === buildBefore, `[${tag}] F16. 合成不改动 Build（playerBuild 持久化未变）`);
+  log(!!find(G, 'garage-cat:body'), `[${tag}] F16. 「‹ 返回车库」回装配页`);
+  log(!find(G, 'home-garage'), `[${tag}] F17. 未穿透回首页（保留上下文）`);
+  log((await readBuild(page)) === buildBefore, `[${tag}] F18. 合成不改动 Build（playerBuild 持久化未变）`);
 
-  // F17. reload 后 2★ 仍在（等价关掉重进）
-  const beforeReload = await readInv(page, 'cannon');
+  // F19. reload 后 2★ 仍在（等价关掉重进）
+  const beforeReload = await readInv(page, 'rammer');
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForTimeout(1600);
-  const afterReload = await readInv(page, 'cannon');
+  const afterReload = await readInv(page, 'rammer');
   log(
     afterReload.two === beforeReload.two && afterReload.two >= 1,
-    `[${tag}] F17. reload 后 2★ 保持`,
+    `[${tag}] F19. reload 后 2★ 保持`,
     `two ${beforeReload.two} → ${afterReload.two}`,
   );
   await gotoBackpackCombat(page, tag + '/reload');
-  const sel2 = await selectCard(page, 'cannon');
+  const sel2 = await selectCard(page, 'rammer');
   await clearTexts(page);
-  if (sel2) await tapVisibleById(page, 'backpack-select:cannon');
+  if (sel2) await tapVisibleById(page, 'backpack-select:rammer');
   const pr = parsePanel(await readTexts(page));
-  log(pr.two === afterReload.two, `[${tag}] F18. reload 后面板 2★ 读数与库存一致`, `panel2★=${pr.two}`);
+  log(pr.two === afterReload.two, `[${tag}] F20. reload 后面板 2★ 读数与库存一致`, `panel2★=${pr.two}`);
 
   log(errs.length === 0, `[${tag}] Z. 全程无 pageerror/console.error`, errs.join(' | '));
   await ctx.close();
