@@ -11,6 +11,10 @@ dist-wechat-c5-*/
 # 本地调试临时脚本
 tmp/
 
+# 本地生成产物 / 验证录屏（体积大，禁止入库）
+outputs/
+_verify_q15recover/
+
 # 环境变量 / 密钥（禁止上传）
 .env
 .env.*
