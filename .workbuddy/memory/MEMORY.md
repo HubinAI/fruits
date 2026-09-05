@@ -37,6 +37,7 @@
 ## vitest 运行环境（重要）
 - 不带 `--pool` 全失败（vitest 4.1.10 双实例故障，与代码无关）。**所有 vitest 必须带 `--pool`**。
 - **全量回归一律 `--pool=vmForks --maxWorkers=1`**（vmThreads 有 fake timers 顺序耦合偶发失败）；单文件可用 vmThreads。
+- **cwd 盘符大小写坑（2026-09-05 实测锁定）**：Windows Git Bash 下 `d:\…`（小写）会使 vite-node 把模块双实例化 → setup.ts 的 bindPlatformCore 对依赖它的测试（demoPlayerRuntimeP0/q23Economy/q31Stability 等）不可见 → 报「PlatformCore 未绑定」或库存读写 null（loadInventoryRaw null / coin +0 / countAfter 不累加），失败面不稳定。**先 `node -e "console.log(process.cwd())"` 查盘符，统一 `cd /D/…`（大写）再跑 vitest**；禁为此改 src/setup 或加 try/catch 掩盖。
 - fake timers 泄漏：`vi.useFakeTimers()` 不恢复→污染后续文件真实 setTimeout→5s 超时。修复：`afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();})`。
 - 对手池基线（22230fd）：OPPONENT_POOL 36→49 + TEMPLATES(role 五类)+ROLES+ROLE_INDICES；主组合去重 49/49。`vi.spyOn(Math,'random').mockReturnValue(固定值)` 隐式映射对手索引的 harness，铺量后必须复查抽取映射与战斗预算。
 - 已知问题：`docs/KNOWN-ISSUES.md`（KNOWN-<AREA>-<SEQ>）；已登记 KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01。
