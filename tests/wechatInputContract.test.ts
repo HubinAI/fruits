@@ -83,7 +83,10 @@ function setup(
     onResultAdjust: once('resultAdjust'),
     onResultNext: once('next'),
     onClaimRewardAd: once('reward'),
-    onFuse: once('fuse'),
+    onFuseCategory: () => {
+      fired['fuse'] = [...(fired['fuse'] ?? []), 'x'];
+      return { product: 'cannon', star: 2 };
+    },
     onResetProgress: () => {},
   });
   return {
@@ -296,10 +299,10 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
     expect(dispatched).toHaveLength(0);
   });
 
-  it('F-GARAGE-INVENTORY-FUSION-P0｜背包合成闭环（真实坐标链）：Garage 顶栏「背包」→ 进背包 → 选卡 → 合成 → onFuse 触发', () => {
+  it('F-GARAGE-FUSION-UX-R2｜背包合成闭环（真实坐标链）：Garage 顶栏「背包」→ 进背包 → 点卡 5 次放满材料槽 → 合成 → onFuseCategory 触发', () => {
     const vp = { w: 844, h: 390 };
     const env = setup(vp, 2);
-    // 富库存：每个战斗部件各 6 个 1★（任一选中卡 ≥5 可合 → 合成按钮注册命中）
+    // 富库存：每个战斗部件各 6 个 1★（任一卡可用 ≥5 → 5 次点卡可放满材料槽）
     const inv: Record<string, { one: number; two: number }> = {};
     for (const p of OFFICIAL_PARTS) inv[p] = { one: 6, two: 0 };
     env.host.render(garageState({ inventory: inv as never, progress: { coin: 600, rating: 20 } }));
@@ -312,13 +315,14 @@ describe('F-WX-P0-INPUT 微信触控链契约', () => {
     // 背包页（默认战斗分类）首张部件卡存在
     const firstCard = env.areas().find((a) => a.id.startsWith('backpack-select:'));
     expect(firstCard, '背包页有部件卡').toBeTruthy();
+    // F-GARAGE-FUSION-UX-R2：默认不消耗——空材料槽时「合成」不注册；点卡 = 放入 1 件材料
+    expect(env.areas().find((a) => a.id === 'backpack-fuse'), '空材料槽 → 合成不可点').toBeFalsy();
     const rawCard = rawFor(firstCard!, vp, 2, false);
-    env.fireTouch(rawCard.rawX, rawCard.rawY); // 选中 → 底部合成面板
-    // 选中后「合成」按钮出现（≥5 未装备 1★ → 可用，按钮才注册命中）
+    for (let i = 0; i < 5; i++) env.fireTouch(rawCard.rawX, rawCard.rawY); // 5 次真实触摸 → 材料槽满
     const fuseBtn = env.areas().find((a) => a.id === 'backpack-fuse');
-    expect(fuseBtn, '选中后合成按钮出现（≥5 可合）').toBeTruthy();
+    expect(fuseBtn, '材料槽满 5 → 合成按钮注册命中').toBeTruthy();
     const rawFuse = rawFor(fuseBtn!, vp, 2, false);
     env.fireTouch(rawFuse.rawX, rawFuse.rawY);
-    expect(env.fired['fuse']).toHaveLength(1); // onFuse 触发一次（原子消耗+产出）
+    expect(env.fired['fuse']).toHaveLength(1); // onFuseCategory 触发一次（原子消耗+产出）
   });
 });

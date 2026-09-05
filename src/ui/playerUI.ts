@@ -166,8 +166,13 @@ export interface PlayerUIActions {
   onGarageRetry?(): void;
   /** Result「看广告领金币」 */
   onClaimRewardAd(): void;
-  /** F-GARAGE-INVENTORY-FUSION-P0：背包合成（5 个同 defId 同星级未装备副本 → 1 个同 defId 下一星级；无经济） */
-  onFuse(defId: string, star: number): void;
+  /** F-GARAGE-FUSION-UX-R2：背包正式合成（5 个同分类同星级未装备材料[可混合 defId] → 随机 1 个
+   *  同分类下一星级；无经济）。返回产物供页内结果反馈；失败（跨分类/不足/装备保护）返回 null 零消耗。 */
+  onFuseCategory(
+    materials: string[],
+    category: 'combat' | 'movement',
+    star?: number,
+  ): { product: string; star: number } | null;
   /** DEV：重置进度（?resetdev=1 可见；二次确认后调用） */
   onResetProgress(): void;
   /** F-DEBUG-GRANT-ALL-PARTS-P0：DEV 一键全部件 ×1（?resetdev=1 可见；不自动装备/不升星） */

@@ -385,8 +385,9 @@ export interface FuseResult {
 }
 
 /**
- * F-GARAGE-INVENTORY-FUSION-P0｜正式合成规则（最小、确定、无经济）：
- * 5 个「同 defId、同星级」的未装备副本 → 合成 1 个相同 defId 的下一星级部件。
+ * F-GARAGE-FUSION-UX-R2｜LEGACY（仅供旧存档兼容测试与直接调用；正式玩家合成已改走
+ * fuseCategoryMaterials 的分类混合随机规则）。行为保留不变：
+ * 5 个「同 defId、同星级」的未装备副本 → 1 个相同 defId 的下一星级部件。
  * - Body 不可合成（isFusable 排除）；star >= MAX_STAR（满星）不可合成；
  * - 已装备副本必须保护：available = owned(star) - equipped(star)，available < 5 不可合成（返回 null）；
  * - 不允许跨 defId / 跨分类 / 降星 / 负库存；
@@ -425,4 +426,151 @@ export function canFuse(
   const eq = equippedCount(defId, star, build);
   const available = owned - eq;
   return { ok: available >= 5, available, need: 5, maxStar: false };
+}
+
+// ============================================================================
+// F-GARAGE-FUSION-UX-R2｜正式合成规则（恢复项目原设计：同分类混合材料随机合成）
+// ----------------------------------------------------------------------------
+// 规则（替代上述 fuseSameStar 的「同 defId」实现作为正式玩家入口）：
+// - 5 个「同分类、同星级、未装备」的部件 → 随机获得 1 个「同分类」下一星级部件；
+// - 战斗部件只能与战斗部件合成；移动部件只能与移动部件合成；Body 不参与合成；
+// - 材料允许不同 defId 混合（同分类内）；已装备副本不可作为材料；
+// - 不允许跨分类 / 跨星级；MAX_STAR 后不可作为产出升级；
+// - 产出只来自对应正式 Registry（OFFICIAL_PARTS / OFFICIAL_MOVEMENTS），
+//   天然排除 EMPTY / prototype / hold / 测试 defId；
+// - 随机可注入（rng 参数，测试传固定值）；合成原子：全部校验通过后一次 saveInventory，
+//   失败不消耗任何材料。
+// ============================================================================
+
+/** 合成分类（战斗 = OFFICIAL_PARTS；移动 = OFFICIAL_MOVEMENTS；Body 返回 null 不参与） */
+export type FusionCategory = 'combat' | 'movement';
+
+/** 某 defId 的合成分类（Body / 非官方 → null） */
+export function fusionCategoryOf(defId: string): FusionCategory | null {
+  if (isOfficialPart(defId)) return 'combat';
+  if (OFFICIAL_MOVEMENTS.includes(defId)) return 'movement';
+  return null;
+}
+
+/** 分类中文标签（UI「随机获得战斗2★」/「随机获得移动2★」用） */
+export function fusionCategoryLabel(cat: FusionCategory): string {
+  return cat === 'combat' ? '战斗' : '移动';
+}
+
+/** 分类产出/材料候选池（正式 Registry；恒定、确定顺序） */
+export function fusionCategoryPartIds(cat: FusionCategory): readonly string[] {
+  return cat === 'combat' ? OFFICIAL_PARTS : OFFICIAL_MOVEMENTS;
+}
+
+/** 可作材料的 defId（未装备、指定星级、数量 > 0；按 defId 字典序稳定）。 */
+export function fusionEligibleDefIds(
+  inv: PartInventory,
+  cat: FusionCategory,
+  build: BuildDraft | null,
+  star = 1,
+): string[] {
+  const out: string[] = [];
+  for (const defId of fusionCategoryPartIds(cat)) {
+    const avail = getCount(inv, defId, star) - equippedCount(defId, star, build);
+    if (avail > 0) out.push(defId);
+  }
+  return out;
+}
+
+/** 分类总可用材料数（可合成判定/「可合成 1 次 / 还差 N 件」文案用） */
+export function fusionCategoryAvailable(
+  inv: PartInventory,
+  cat: FusionCategory,
+  build: BuildDraft | null,
+  star = 1,
+): number {
+  let total = 0;
+  for (const defId of fusionEligibleDefIds(inv, cat, build, star)) {
+    total += getCount(inv, defId, star) - equippedCount(defId, star, build);
+  }
+  return total;
+}
+
+/** 合成预检（UI 状态文案用） */
+export function canFuseCategory(
+  inv: PartInventory,
+  cat: FusionCategory,
+  build: BuildDraft | null,
+  star = 1,
+): { ok: boolean; available: number; need: number } {
+  const available = fusionCategoryAvailable(inv, cat, build, star);
+  return { ok: available >= 5, available, need: 5 };
+}
+
+/**
+ * 自动放入选择（确定性、可复现）：
+ * 优先级 1. 未装备（候选池已排除装备）→ 2. 当前星级 → 3. 可用副本数多的 defId
+ * → 4. defId 稳定字典序。返回恰好 count 个（不足则返回全部可用数）。
+ */
+export function autoPickFusionMaterials(
+  inv: PartInventory,
+  cat: FusionCategory,
+  build: BuildDraft | null,
+  star = 1,
+  count = 5,
+): string[] {
+  const per: Array<{ defId: string; avail: number }> = [];
+  for (const defId of fusionEligibleDefIds(inv, cat, build, star)) {
+    const avail = getCount(inv, defId, star) - equippedCount(defId, star, build);
+    if (avail > 0) per.push({ defId, avail });
+  }
+  // 数量多优先；同数量按 defId 字典序（稳定）
+  per.sort((a, b) => (b.avail - a.avail) || (a.defId < b.defId ? -1 : a.defId > b.defId ? 1 : 0));
+  const out: string[] = [];
+  for (const p of per) {
+    const take = Math.min(p.avail, count - out.length);
+    for (let i = 0; i < take; i++) out.push(p.defId);
+    if (out.length >= count) break;
+  }
+  return out;
+}
+
+/** 分类合成结果 */
+export interface CategoryFuseOutcome {
+  ok: true;
+  /** 产出 defId（分类 Registry 内随机） */
+  product: string;
+  /** 产出星级 = star + 1 */
+  star: number;
+  inventory: PartInventory;
+}
+
+/**
+ * F-GARAGE-FUSION-UX-R2｜正式分类合成（原子）：
+ * - materials：恰好 5 个同分类 defId（允许重复 defId，但每 defId 用量 ≤ 其可用数）；
+ * - 全部校验通过才变更：按 materials 逐 defId 消耗 1 份 → 随机产出 1 件 star+1 → 一次 saveInventory；
+ * - 任一校验失败（数量≠5 / 跨分类 / 满星 / 材料不可用 / 装备保护）→ null 且零变更；
+ * - rng 可注入（默认 Math.random）；产出池 = 该分类正式 Registry（恒非空、确定顺序）。
+ */
+export function fuseCategoryMaterials(
+  inv: PartInventory,
+  materials: readonly string[],
+  cat: FusionCategory,
+  build: BuildDraft | null,
+  star = 1,
+  rng: () => number = Math.random,
+): CategoryFuseOutcome | null {
+  if (star < 1 || star >= MAX_STAR) return null;
+  if (!materials || materials.length !== 5) return null;
+  const need: Record<string, number> = {};
+  for (const defId of materials) {
+    if (fusionCategoryOf(defId) !== cat) return null; // 跨分类拒绝
+    need[defId] = (need[defId] ?? 0) + 1;
+  }
+  for (const defId of Object.keys(need)) {
+    const avail = getCount(inv, defId, star) - equippedCount(defId, star, build);
+    if (avail < need[defId]) return null; // 已装备保护 / 数量不足
+  }
+  const pool = fusionCategoryPartIds(cat);
+  const idx = Math.min(pool.length - 1, Math.max(0, Math.floor(rng() * pool.length)));
+  const product = pool[idx];
+  for (const defId of Object.keys(need)) consume(inv, defId, star, need[defId]);
+  addPart(inv, product, star + 1, 1);
+  saveInventory(inv); // 原子：成功才持久化一次
+  return { ok: true, product, star: star + 1, inventory: inv };
 }

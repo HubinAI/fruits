@@ -54,7 +54,7 @@ import {
   getInventory,
 } from '../core/partInventory';
 import { NEW_OFFICIAL_BODIES, isBodyOwned } from '../core/bodyOwnership';
-import { canEquipMovement, fuseSameStar } from '../core/partInventory';
+import { canEquipMovement, fuseCategoryMaterials } from '../core/partInventory';
 import {
   BattleProgressSettler,
   getProgress,
@@ -376,15 +376,17 @@ export class PlayerGameRuntime {
       }
       // 关闭 / 失败 / 无填充：不发奖，按钮保持可点（玩家可重试），绝不卡死
     },
-    onFuse: (defId, star) => {
+    onFuseCategory: (materials, category, star = 1) => {
       const cur = getInventory();
       track('merge_attempt'); // F-GARAGE-INVENTORY-FUSION-P0：发起合成（复用既有 merge 事件）
-      // 同 defId 同星级 5→1 下一星；保护已装备、满星/不足返回 null（不消耗）
-      const res = fuseSameStar(cur, defId, star, this.draftA);
-      if (!res) return;
+      // F-GARAGE-FUSION-UX-R2｜正式规则：5 个同分类同星级未装备材料（可混合 defId）
+      // → 随机 1 个同分类下一星级；保护已装备、跨分类/不足/满星返回 null（不消耗）
+      const res = fuseCategoryMaterials(cur, materials, category, this.draftA, star);
+      if (!res) return null;
       track('merge_success'); // 合成成功
-      // fuseSameStar 已原子 saveInventory；pushUI 重读库存反映新星级（无金币变动）
+      // fuseCategoryMaterials 已原子 saveInventory；pushUI 重读库存反映新星级（无金币变动）
       this.pushUI();
+      return { product: res.product, star: res.star };
     },
     onResetProgress: () => {
       resetPlayerSave();

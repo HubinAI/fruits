@@ -48,12 +48,17 @@ import {
   loadInventoryRaw,
   OFFICIAL_PARTS,
   OFFICIAL_MOVEMENTS,
-  canFuse,
   equippedSlots,
   equippedCount,
+  fusionCategoryOf,
+  fusionCategoryAvailable,
+  fusionCategoryPartIds,
+  fusionCategoryLabel,
+  autoPickFusionMaterials,
+  type FusionCategory,
   type PartInventory,
 } from '../core/partInventory';
-import { canEquipBody, OFFICIAL_BODIES } from '../core/bodyOwnership';
+import { canEquipBody, isBodyOwned, OFFICIAL_BODIES } from '../core/bodyOwnership';
 import { hasAllOfficialDebugContent } from '../core/debugGrants';
 import { tierOf, TIER_LABEL } from '../core/playerProgress';
 import { REWARD_AD_COIN_BONUS } from '../core/ads';
@@ -309,31 +314,6 @@ export interface BackpackE2EHandle {
   seedInventory: (seed: PartInventory) => void;
 }
 
-/**
- * F-GARAGE-INVENTORY-FUSION-R1｜背包卡片视觉态判别（选中 vs 已装备 vs 普通）。
- * 选中 = 暖金描边；已装备 = 灰蓝底；二者互斥、一眼可区分。导出供单测断言区分度。
- */
-export function backpackCardVisualState(selected: boolean, equipped: boolean): 'selected' | 'equipped' | 'normal' {
-  if (selected) return 'selected';
-  if (equipped) return 'equipped';
-  return 'normal';
-}
-
-/**
- * F-GARAGE-INVENTORY-FUSION-R1｜合成按钮文案（状态规则）：
- * 未获得 → ''（不显示可操作按钮）；满星 → '已满星'；可用<5 → '还差 N 个'；可用≥5 → '合成'。
- * 导出供单测断言（T31/T32）与面板复用，单一来源。
- */
-export function backpackFuseButtonLabel(
-  fuse: { ok: boolean; available: number; need: number; maxStar: boolean },
-  owned: boolean,
-): string {
-  if (!owned) return '';
-  if (!fuse.ok && fuse.maxStar) return '已满星';
-  if (!fuse.ok) return `还差 ${fuse.need - fuse.available} 个`;
-  return '合成';
-}
-
 export class CanvasPlayerUIHost implements PlayerUIHost {
   private actions: PlayerUIActions | null = null;
   private parent!: HTMLElement;
@@ -404,13 +384,21 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private soundOn = true;
   /** F-META-6：震动开关（预留；UI preference 持久化，不接平台震动 API） */
   private vibrationOn = true;
-  /** F-GARAGE-INVENTORY-FUSION-P0：Backpack 分类（战斗/移动/车身；UI-only）。默认「战斗」。 */
+  /** F-GARAGE-FUSION-UX-R2：Backpack 分类（战斗/移动/车身；UI-only）。默认「战斗」。 */
   private backpackFilter: 'combat' | 'movement' | 'body' = 'combat';
-  /** F-GARAGE-INVENTORY-FUSION-P0：当前选中的可合成 defId（点击卡片选中；null = 未选）。 */
-  private backpackSelected: string | null = null;
-  /** F-GARAGE-INVENTORY-FUSION-P0：合成成功轻反馈（无重型动画；下次交互/离开清除）。 */
-  private fuseToast: string | null = null;
-  /** F-UX-2C：Backpack 2×2 卡片分页（每页 4 张；[上一页]/[下一页]；合成后仍停当前页） */
+  /**
+   * F-GARAGE-FUSION-UX-R2：合成材料槽（长度 5；元素 = defId 或 null）。
+   * 每次「进入背包」「切换分类」「返回车库」「离开局外」「合成成功」都清空——
+   * 未确认的材料选择绝不跨页/跨会话保留（正式主流程 = 点自动放入/手动选 → 点合成）。
+   */
+  private fusionSlots: Array<string | null> = [null, null, null, null, null];
+  /** F-GARAGE-FUSION-UX-R2：合成结果卡（页内中央产出卡；~0.9s 自动回落，可点击跳过）。 */
+  private fusionResult: { product: string; until: number; token: number } | null = null;
+  /** F-GARAGE-FUSION-UX-R2：新产出部件列表暖金高亮（短暂）。 */
+  private fusionGlow: { defId: string; until: number; token: number } | null = null;
+  /** F-GARAGE-FUSION-UX-R2：结果/高亮定时令牌——导航/切分类时 ++ 使迟到回调作废。 */
+  private fusionToken = 0;
+  /** F-UX-2C：Backpack 卡片分页（[上一页]/[下一页]；合成后仍停当前页） */
   private backpackPage = 0;
   /** F-HOME-3：首页车辆气泡 tips（点击车辆随机显示 1 条；null = 隐藏；轻量，非 Modal） */
   private vehicleTip: string | null = null;
@@ -700,18 +688,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     if (state.playerPhase !== 'garage') this.garageFromResult = false;
     // F-HOME-3：离开局外同时复位车辆气泡 tips（回 Home 默认不显示）
     if (state.playerPhase !== 'garage') this.vehicleTip = null;
-    // F-GARAGE-INVENTORY-FUSION-P0：离开局外同时复位 Backpack 状态（回 Garage 默认战斗/未选/无反馈）
+    // F-GARAGE-FUSION-UX-R2：离开局外同时复位 Backpack 会话（分类/材料槽/结果卡/高亮/分页）
     if (state.playerPhase !== 'garage') {
       this.backpackFilter = 'combat';
-      this.backpackSelected = null;
-      this.fuseToast = null;
+      this.clearFusionSession();
     }
     // F-UX-2C：离开局外同时复位 Backpack 分页（回 Garage 默认第一页）
     if (state.playerPhase !== 'garage') this.backpackPage = 0;
     // F-META-6：离开局外同时复位 More 子视图（回 Garage 默认功能卡主页）
     if (state.playerPhase !== 'garage') this.moreView = 'home';
-    // F-GARAGE-INVENTORY-FUSION-P0：合成反馈改为背包页内轻量 fuseToast（见 drawBackpackPage），
-    // 不再弹「合成成功」结果 Modal；此处不再消费 mergeSnapshot（已移除）。
     // F-META-5：Result 状态 → 一次性弹出正式结算 Modal（奖励信息单弹窗集中；
     // 广告领币后 rewardAdClaimed 变化 → 刷新弹窗文案；result 清空 → 复位）
     if (state.result) {
@@ -1435,8 +1420,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const page = id.slice(4) as MetaPage;
       if (page === 'backpack') {
         this.metaPage = 'backpack';
-        this.backpackSelected = null;
-        this.fuseToast = null;
+        // F-GARAGE-FUSION-UX-R2：进入背包清空未确认材料槽/结果（不跨次保留），filter 保持上次
+        this.clearFusionSession();
         this.panelView = 'home';
         this.moreView = 'home';
         this.actions?.reframeCamera?.();
@@ -1446,8 +1431,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       if (page === 'garage') {
         // 「‹ 返回车库」→ 回装配页（非首页），保留 Result-adjust 上下文（完成并再战仍可见）
         this.metaPage = 'garage';
-        this.backpackSelected = null;
-        this.fuseToast = null;
+        // F-GARAGE-FUSION-UX-R2：返回车库清空未确认材料选择；Build 与仓库不受影响
+        this.clearFusionSession();
         this.panelView = 'home';
         this.moreView = 'home';
         this.actions?.reframeCamera?.();
@@ -1564,11 +1549,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id.startsWith('bfilter:')) {
-      // F-GARAGE-INVENTORY-FUSION-P0：Backpack 分类（战斗/移动/车身；复位分页与选中）
+      // F-GARAGE-FUSION-UX-R2：Backpack 分类（战斗/移动/车身；切分类清空上一分类材料槽与结果）
       this.backpackFilter = id.slice(8) as 'combat' | 'movement' | 'body';
       this.backpackPage = 0;
-      this.backpackSelected = null;
-      this.fuseToast = null;
+      this.clearFusionSession();
       this.draw();
       return;
     }
@@ -1580,9 +1564,31 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id.startsWith('backpack-select:')) {
-      // F-GARAGE-INVENTORY-FUSION-P0：点卡选中（不用拖动）；焦点留原卡，清除上一次合成反馈
-      this.backpackSelected = id.slice('backpack-select:'.length);
-      this.fuseToast = null;
+      // F-GARAGE-FUSION-UX-R2：点卡 = 尝试放入 1 件该 defId 材料（可重复至可用数；
+      // 满/装备/未拥有等不可用态 no-op，槽位与状态保持）。手动选择可选，非必经步骤。
+      this.tryAddMaterial(id.slice('backpack-select:'.length));
+      this.draw();
+      return;
+    }
+    if (id.startsWith('fusion-slot:')) {
+      // F-GARAGE-FUSION-UX-R2：点已放入的材料槽 → 移除该件材料（可再点其它卡片补入替换）
+      const i = Number(id.slice('fusion-slot:'.length));
+      if (Number.isFinite(i) && i >= 0 && i < 5) {
+        this.fusionSlots[i] = null;
+      }
+      this.draw();
+      return;
+    }
+    if (id === 'fusion-auto') {
+      // F-GARAGE-FUSION-UX-R2：「自动放入」一键选中 5 个（确定性优先级：未装备→1★→重复多→defId 序）
+      this.autoFillFusion();
+      this.draw();
+      return;
+    }
+    if (id === 'fusion-result-dismiss') {
+      // F-GARAGE-FUSION-UX-R2：结果卡点击跳过（回到列表；新产出暖金高亮保留至到期）
+      this.fusionToken += 1;
+      this.fusionResult = null;
       this.draw();
       return;
     }
@@ -1690,36 +1696,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         }
         break;
       case 'backpack-fuse': {
-        // F-GARAGE-INVENTORY-FUSION-P0：对当前选中卡的 1★ 发起合成（onFuse 内部再校验+保护已装备）。
-        // 连续快速点击只执行一次：第一次成功后可用数下降，第二次 canFuse 返回 false → runtime 空操作。
-        const defId = this.backpackSelected;
-        if (defId) {
-          const st = this.lastState;
-          const pre = st ? canFuse(st.inventory, defId, 1, st.draft) : { ok: false, available: 0, need: 5, maxStar: false };
-          this.actions?.onFuse(defId, 1);
-          this.fuseToast = pre.ok ? `合成成功 · 获得 ${this.partDisplayName(defId)} ★★` : null;
-        }
-        this.draw();
+        // F-GARAGE-FUSION-UX-R2：正式合成主按钮（材料槽满 5 才注册命中）。
+        // 连续点击只执行一次：首次成功后材料槽清空+结果卡出现 → 按钮不再注册 → 第二次不可达。
+        this.runFusion();
         break;
       }
       case 'backpack-test-material': {
-        // F-RC-FUSION-TEST-ENTRY-P0｜§三：RC 专用测试材料补足（仅调试/测试构建可点，按钮不注册于生产）。
-        // 补足当前选中 defId 的 1★ 可用数量到 5：requiredOwned = equippedCount + 5；
-        // topUp = max(0, requiredOwned - owned)。已装备副本不被覆盖/消耗；满 5 幂等；
-        // 不影响其它部件 / Build / 能量 / 金币 / 段位 / 奖励池。
-        const defId = this.backpackSelected;
-        if (defId && !OFFICIAL_BODIES.includes(defId) && this.lastState) {
-          const inv = this.lastState.inventory;
-          const draft = this.lastState.draft ?? null;
-          const eq = equippedCount(defId, 1, draft);
-          const owned = getCount(inv, defId, 1);
-          const requiredOwned = eq + 5;
-          const topUp = Math.max(0, requiredOwned - owned);
-          if (topUp > 0) {
-            addPart(inv, defId, 1, topUp);
-            saveInventory(inv);
-          }
-        }
+        // F-GARAGE-FUSION-UX-R2｜§七：RC/E2E/DEV 专用「测试材料×5」（不占正式核心按钮位；
+        // 仅 (rcGrant||e2eProbe||devReset) && 非车身分类 时绘制+注册）。
+        // 点击 → 让「当前分类」具备 5 件可用 1★ 材料（自动补足缺口到可用材料总数 5；
+        // 幂等：已 ≥5 则 no-op；不影响 Build/能量/金币/段位/奖励池；已装备保护）。
+        this.topUpTestMaterials();
         this.draw();
         break;
       }
@@ -1744,6 +1731,126 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       default:
         break;
     }
+  }
+
+  // ==================== F-GARAGE-FUSION-UX-R2｜合成交互逻辑（UI-only 状态机） ====================
+
+  /** 当前背包分类对应的合成分类（车身 → null：不参与合成，无任何合成入口） */
+  private fusionCategory(): FusionCategory | null {
+    if (this.backpackFilter === 'combat') return 'combat';
+    if (this.backpackFilter === 'movement') return 'movement';
+    return null;
+  }
+
+  /** 清空材料槽 + 结果卡/高亮，并作废迟到定时器（不改 Build/仓库/其它页状态）。 */
+  private clearFusionSession(): void {
+    this.fusionSlots = [null, null, null, null, null];
+    this.fusionToken += 1;
+    this.fusionResult = null;
+    this.fusionGlow = null;
+  }
+
+  /** 已放入材料件数（0..5） */
+  private fusionFilledCount(): number {
+    return this.fusionSlots.reduce((n, s) => n + (s ? 1 : 0), 0);
+  }
+
+  /** 某 defId 已在材料槽中的件数（用于与可用数比对，阻止超额放入） */
+  private fusionUses(defId: string): number {
+    return this.fusionSlots.reduce((n, s) => n + (s === defId ? 1 : 0), 0);
+  }
+
+  /** 某 defId 可作材料的副本数（1★ 未装备；装备保护口径与 core 一致） */
+  private fusionAvail(defId: string, star = 1): number {
+    const st = this.lastState;
+    if (!st) return 0;
+    return Math.max(0, getCount(st.inventory, defId, star) - equippedCount(defId, star, st.draft ?? null));
+  }
+
+  /** 点卡 = 尝试放入 1 件材料（手动选择可选；失败静默，槽位与卡片状态保持） */
+  private tryAddMaterial(defId: string): void {
+    const cat = this.fusionCategory();
+    if (!cat || this.fusionResult) return; // Body 无合成；结果卡展示期间不响应
+    if (fusionCategoryOf(defId) !== cat) return;
+    if (this.fusionUses(defId) >= this.fusionAvail(defId, 1)) return; // 已装备保护/数量用尽
+    const slot = this.fusionSlots.indexOf(null);
+    if (slot < 0) return; // 已满 5 → 先点槽移除，再点其它卡片替换
+    this.fusionSlots[slot] = defId;
+  }
+
+  /** 「自动放入」：一键把 5 个材料槽填满（确定性优先级见 core.autoPickFusionMaterials） */
+  private autoFillFusion(): void {
+    const cat = this.fusionCategory();
+    const st = this.lastState;
+    if (!cat || !st || this.fusionResult) return;
+    const picked = autoPickFusionMaterials(st.inventory, cat, st.draft ?? null, 1, 5);
+    const filled: Array<string | null> = [null, null, null, null, null];
+    for (let i = 0; i < 5 && i < picked.length; i++) filled[i] = picked[i];
+    this.fusionSlots = filled;
+  }
+
+  /** 正式合成（暖金主按钮；材料槽满 5 才注册命中）：
+   *  派发 onFuseCategory → 成功 → 清槽 + 页内结果卡（0.9s 自动回落、可点击跳过）。
+   *  连续点击只执行一次：首次成功后按钮不再注册；结果卡期间二次点击落在跳过区。 */
+  private runFusion(): void {
+    const cat = this.fusionCategory();
+    const st = this.lastState;
+    if (!cat || !st) return;
+    if (this.fusionResult) return;
+    if (this.fusionFilledCount() !== 5) return;
+    const materials = this.fusionSlots.slice() as string[];
+    const res = this.actions?.onFuseCategory?.(materials, cat, 1) ?? null;
+    if (!res) {
+      // 失败（防御：满5时 core 校验通过，理论不可达）→ 清空让玩家重选，绝不扣材料
+      this.clearFusionSession();
+      this.draw();
+      return;
+    }
+    this.showFusionResult(res.product);
+  }
+
+  /** 页内合成结果卡（材料槽收拢清空 → 中央产出卡 → ~0.9s 回落 → 列表新产出暖金高亮） */
+  private showFusionResult(product: string): void {
+    this.fusionSlots = [null, null, null, null, null];
+    this.fusionToken += 1;
+    const token = this.fusionToken;
+    this.fusionResult = { product, until: this.nowMs + 900, token };
+    this.fusionGlow = { defId: product, until: this.nowMs + 1600, token };
+    if (typeof setTimeout === 'function') {
+      setTimeout(() => {
+        if (this.fusionToken === token) {
+          this.fusionResult = null;
+          this.draw();
+        }
+      }, 950);
+      setTimeout(() => {
+        if (this.fusionToken === token) {
+          this.fusionGlow = null;
+          this.draw();
+        }
+      }, 1650);
+    }
+    this.draw();
+  }
+
+  /** RC/E2E/DEV「测试材料×5」：让当前分类可用 1★ 材料总数 ≥5（幂等；缺口加到可用数最多者）。 */
+  private topUpTestMaterials(): void {
+    const cat = this.fusionCategory();
+    const st = this.lastState;
+    if (!cat || !st) return;
+    const inv = st.inventory;
+    const draft = st.draft ?? null;
+    const missing = 5 - fusionCategoryAvailable(inv, cat, draft, 1);
+    if (missing <= 0) return; // 幂等：已 ≥5 不动作
+    const cands = fusionCategoryPartIds(cat)
+      .map((defId) => ({
+        defId,
+        avail: Math.max(0, getCount(inv, defId, 1) - equippedCount(defId, 1, draft)),
+      }))
+      .sort((a, b) => b.avail - a.avail || (a.defId < b.defId ? -1 : a.defId > b.defId ? 1 : 0));
+    if (cands.length === 0) return;
+    addPart(inv, cands[0].defId, 1, missing);
+    saveInventory(inv);
   }
 
   // ---------- 绘制 ----------
@@ -3210,192 +3317,341 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    */
 
   /**
-   * F-GARAGE-INVENTORY-FUSION-P0｜背包二级页（garage-inventory）：
-   * - 顶部「‹ 返回车库」（nav:garage，保留 Result-adjust 上下文）+ 标题「背包」；
-   * - 分类 tabs：战斗 / 移动 / 车身（车身仅展示拥有状态，不参与合成）；
-   * - 卡片（含未获得）：名称、当前星级、总数量、已装备数量、可用于合成数量、未获得状态、
-   *   已装备标识（同一卡不同时「未获得」与「已装备」）；
-   * - 选中卡片 → 底部合成面板（当前★1 / 消耗 5 / 产出 ★2 / 可用数量 / 暖金「合成」）；
-   *   available < 5 → disabled「还差 N 个」；MAX_STAR 满星禁；连续点击只执行一次（onFuse 内部再校验）；
-   * - 合成成功轻反馈（fuseToast，无重型动画），焦点留原卡。
+   * F-GARAGE-FUSION-UX-R2｜部件合成页（背包二级页重构）：
+   * - 顶部：‹ 返回车库（nav:garage，保留 Result-adjust 上下文）+ 标题「部件合成」+ 分类 tabs
+   *   （战斗 / 移动 / 车身）；RC/E2E/DEV 的「测试材料×5」只在页顶右上出现（不占正式核心按钮位）；
+   * - 中部：图标部件卡网格（名称 / 星级 / 数量 ×N / 可用数量 / 已装备标识 / 可选灰化 /
+   *   已放入暖金「已选N」）；分页 + [上一页]/[下一页] 页码，禁止长距拖动；
+   * - 底部：固定合成栏（5 材料槽 + 已选 N/5 + 「自动放入」次按钮 + 「随机获得X类2★」预览
+   *   + 暖金「合成」主按钮）；车身分类无合成栏（车身不参与合成，无合成入口）；
+   * - 默认行为：进入分类直接显示「可合成 1 次」/「还差 N 件1★部件」（无空面板）；
+   *   默认不自动消耗；手动选择可选；正式主流程 = 「自动放入」→「合成」两次核心点击。
+   * - 合成结果在页内完成：材料槽清空 → 中央产出卡（图标/名称/2★/合成成功）≥0.9s 可点跳过
+   *   → 回列表 + 新产出短暂暖金高亮 → 数量星级即时刷新 → 仍够材料显示「继续合成」。
    */
   private drawBackpackPage(state: PlayerUIState, layout: MobileGarageLayout): void {
-    const draft = state.draft;
     const c = layout.contentRect;
+    const draft = state.draft ?? null;
+    const inv = state.inventory;
+    const short = this.isShort;
+    const pad = short ? 6 : 10;
+    const x0 = c.x + pad;
+    const w0 = Math.max(80, c.w - pad * 2);
     this.panel(c.x, c.y, c.w, c.h, V.panelSolid);
-    // 顶部「‹ 返回车库」（唯一返回入口，保留 Result-adjust 上下文）
-    this.button(c.x + 12, c.y + 6, 96, this.minTouchH, 'nav:garage', '‹ 返回车库', {});
-    this.text('背包', c.x + 120, c.y + 30, 20, C.text, 'left', 700);
-    // 合成成功轻反馈（无重型动画）
-    if (this.fuseToast) {
-      this.text(this.fuseToast, c.x + c.w / 2, c.y + 30, 14, C.gold, 'center', 700);
+
+    // —— 结果卡（页内中央；覆盖本页交互；点击跳过） ——
+    const res = this.fusionResult;
+    if (res && this.nowMs <= res.until) {
+      this.drawFusionResultCard(c, res.product);
+      return;
     }
-    // 分类 tabs：战斗 / 移动 / 车身
-    const tabH = this.isShort ? 30 : 44;
-    const tabGap = 8;
-    const tabTop = c.y + 6 + this.minTouchH + (this.isShort ? 4 : 8);
+
+    // —— 顶行：返回 + 标题 +（RC/E2E/DEV）测试材料 ——
+    const hh = short ? 24 : 38;
+    const yy = c.y + (short ? 3 : 6);
+    this.button(x0, yy, short ? 64 : 92, hh, 'nav:garage', short ? '‹ 返回' : '‹ 返回车库', {});
+    this.text('部件合成', x0 + (short ? 64 : 92) + 8, yy + hh / 2, short ? 13 : 18, C.text, 'left', 700);
+    const rcGrantTM = typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__;
+    const e2eProbeTM = typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__;
+    const devResetTM = DEV_TOOLS_VISIBLE && state.resetDevVisible;
+    // §七：测试材料×5 仅调试/测试构建可见；不占正式玩家核心按钮位（页顶右上角落小按钮）；
+    // 车身分类（无合成入口）不显示。
+    const tmShow = (rcGrantTM || e2eProbeTM || devResetTM) && this.backpackFilter !== 'body';
+    if (tmShow) {
+      const tw = short ? 80 : 104;
+      this.button(c.x + c.w - pad - tw, yy, tw, hh, 'backpack-test-material', '测试材料×5', { equipped: true });
+    }
+
+    // —— 分类 tabs：战斗 / 移动 / 车身 ——
+    const th = short ? 22 : 34;
+    const ty = yy + hh + (short ? 3 : 4);
+    const tgap = short ? 5 : 8;
     const tabs: Array<{ id: string; label: string; v: 'combat' | 'movement' | 'body' }> = [
       { id: 'bfilter:combat', label: '战斗', v: 'combat' },
       { id: 'bfilter:movement', label: '移动', v: 'movement' },
       { id: 'bfilter:body', label: '车身', v: 'body' },
     ];
-    const tabW = (c.w - 24 - tabGap * (tabs.length - 1)) / tabs.length;
-    let tx = c.x + 12;
+    const tabW = (w0 - tgap * (tabs.length - 1)) / tabs.length;
+    let tx = x0;
     for (const t of tabs) {
-      this.button(tx, tabTop, tabW, tabH, t.id, t.label, {
+      this.button(tx, ty, tabW, th, t.id, t.label, {
         active: this.backpackFilter === t.v,
         combat: t.v === 'combat',
         icon: t.v === 'combat' ? 'combat' : t.v === 'movement' ? 'wheel' : 'body',
       });
-      tx += tabW + tabGap;
+      tx += tabW + tgap;
     }
-    // 该分类下全部官方 defId（含未获得）
-    const inv = state.inventory;
-    const equipped = equippedSlots(draft);
-    let defIds: string[] = [];
+
+    // —— 状态行（默认直接告知可合成性；无「请选择卡片」空面板） ——
+    const sy = ty + th + (short ? 2 : 3);
+    const isBody = this.backpackFilter === 'body';
+    const cat: FusionCategory | null = isBody ? null : (this.backpackFilter as FusionCategory);
+    const catAvail = cat ? fusionCategoryAvailable(inv, cat, draft, 1) : 0;
+    const statusText = isBody
+      ? '车身不参与合成'
+      : catAvail >= 5
+        ? `可合成 1 次 · 可用 1★材料 ${catAvail} 件`
+        : `还差 ${5 - catAvail} 件1★部件 · 可用 1★材料 ${catAvail} 件`;
+    this.text(statusText, x0 + 2, sy + (short ? 6 : 8), short ? 10 : 13, isBody ? C.textDim : catAvail >= 5 ? C.gold : C.textDim, 'left', 600);
+
+    // —— 该分类全部官方 defId（含未获得，可访问） ——
+    let defIds: string[];
     if (this.backpackFilter === 'combat') defIds = [...OFFICIAL_PARTS];
     else if (this.backpackFilter === 'movement') defIds = [...OFFICIAL_MOVEMENTS];
     else defIds = [...OFFICIAL_BODIES];
-    const isBody = this.backpackFilter === 'body';
+    const equipped = equippedSlots(draft);
     const items: Array<{
       defId: string;
       name: string;
-      starText: string;
-      total: number;
-      equippedCountN: number;
+      one: number;
+      two: number;
+      eqN: number;
       available: number;
       owned: boolean;
-      isEquipped: boolean;
+      usedN: number;
     }> = [];
     for (const defId of defIds) {
-      const one = Math.max(0, inv[defId]?.one ?? 0);
-      const two = Math.max(0, inv[defId]?.two ?? 0);
-      const owned = one > 0 || two > 0;
-      // 已装备数量（按 (defId, star) 汇总；车身看 bodyDefId）
+      const one = isBody ? 0 : Math.max(0, inv[defId]?.one ?? 0);
+      const two = isBody ? 0 : Math.max(0, inv[defId]?.two ?? 0);
+      const owned = isBody ? isBodyOwned(defId) : one > 0 || two > 0;
       let eqN = 0;
       if (isBody) {
         eqN = draft && draft.bodyDefId === defId ? 1 : 0;
       } else {
         for (const s of equipped) if (s.defId === defId) eqN += 1;
       }
-      // 可用于合成数量 = 1★未装备数（仅 1★ 可合 1★→2★；已装备 1★ 受保护）
-      let available = 0;
-      if (!isBody) {
-        let eqOne = 0;
-        for (const s of equipped) if (s.defId === defId && s.star === 1) eqOne += 1;
-        available = Math.max(0, one - eqOne);
-      }
-      const starText = [one > 0 ? `★×${one}` : '', two > 0 ? `★★×${two}` : ''].filter(Boolean).join('  ');
+      let eqOne = 0;
+      if (!isBody) for (const s of equipped) if (s.defId === defId && s.star === 1) eqOne += 1;
+      const available = isBody ? 0 : Math.max(0, one - eqOne);
       items.push({
         defId,
         name: this.partDisplayName(defId),
-        starText: starText || '—',
-        total: one + two,
-        equippedCountN: eqN,
+        one,
+        two,
+        eqN,
         available,
         owned,
-        isEquipped: eqN > 0,
+        usedN: this.fusionUses(defId),
       });
     }
-    // 列表区 + 底部合成面板
-    const listTop = tabTop + tabH + (this.isShort ? 4 : 6);
-    const panelH = this.isShort ? 92 : 112;
-    const listBot = c.y + c.h - panelH - (this.isShort ? 8 : 12);
-    const viewH = Math.max(8, listBot - listTop);
-    const gap = 8;
-    const COLS = 2;
-    const ROWS = 3;
-    const PAGE_SIZE = COLS * ROWS;
-    const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+
+    // —— 网格几何：分页条固定高度，卡片区按可用高反推（不重叠、不越界） ——
+    const barH = isBody ? (short ? 30 : 40) : short ? 66 : 104;
+    const barY = c.y + c.h - barH - (short ? 4 : 8);
+    const gridTop = sy + (short ? 14 : 18);
+    const gridBot = barY - (short ? 3 : 6);
+    const gap = short ? 4 : 8;
+    const COLS = short ? 4 : Math.max(3, Math.min(8, Math.floor((w0 + gap) / (short ? 96 : 168))));
+    const pagerSlot = items.length > COLS ? (short ? 14 : 20) : 0;
+    const rowsH = Math.max(short ? 24 : 36, gridBot - gridTop - pagerSlot - gap);
+    const needRows = Math.ceil(items.length / COLS);
+    const ROWS = rowsH >= (short ? 68 : 96) && needRows > 1 ? Math.min(2, needRows) : 1;
+    let cardH = Math.max(short ? 26 : 40, Math.floor((rowsH - gap * (ROWS - 1)) / ROWS));
+    if (cardH * ROWS + gap * (ROWS - 1) > rowsH) cardH = Math.max(short ? 26 : 40, Math.floor((rowsH - gap * (ROWS - 1)) / ROWS));
+    const PAGE = COLS * ROWS;
+    const pageCount = Math.max(1, Math.ceil(items.length / PAGE));
     if (this.backpackPage >= pageCount) this.backpackPage = pageCount - 1;
     if (this.backpackPage < 0) this.backpackPage = 0;
-    const cardW = Math.floor((c.w - 24 - gap) / COLS);
-    const cardH = Math.max(8, Math.floor((viewH - gap * (ROWS - 1)) / ROWS));
-    const pageItems = items.slice(this.backpackPage * PAGE_SIZE, this.backpackPage * PAGE_SIZE + PAGE_SIZE);
+    const cardW = (w0 - gap * (COLS - 1)) / COLS;
+    const pageItems = items.slice(this.backpackPage * PAGE, this.backpackPage * PAGE + PAGE);
+    const pagerTop = gridBot - pagerSlot;
     for (let i = 0; i < pageItems.length; i++) {
       const it = pageItems[i];
       const col = i % COLS;
       const row = Math.floor(i / COLS);
-      const x = c.x + 12 + col * (cardW + gap);
-      const y = listTop + row * (cardH + gap);
-      const selected = this.backpackSelected === it.defId;
-      // F-GARAGE-INVENTORY-FUSION-R1：选中=暖金描边（selected），已装备=灰蓝（equipped），互斥可区分
-      const vs = backpackCardVisualState(selected, it.isEquipped);
-      this.button(x, y, cardW, cardH, `backpack-select:${it.defId}`, '', {
-        selected: vs === 'selected',
-        equipped: vs === 'equipped',
-      });
-      // 名称（主，加粗可读；真机逻辑尺寸下直接阅读，不再过薄行高）
-      this.text(it.name, x + 12, y + cardH * 0.26, this.isShort ? 16 : 18, C.text, 'left', 700);
-      // 星级（金）
-      this.text(it.starText, x + 12, y + cardH * 0.50, this.isShort ? 13 : 15, C.gold, 'left', 700);
-      // 数量信息：总 / 装备 / 可合（未获得红色「未获得」）
-      const info = !it.owned ? '未获得' : `总 ${it.total} · 装备 ${it.equippedCountN} · 可合 ${it.available}`;
-      this.text(info, x + 12, y + cardH * 0.76, this.isShort ? 12 : 13, it.owned ? C.textDim : C.red, 'left');
-      if (it.isEquipped) {
-        this.text('已装备', x + cardW - 12, y + cardH * 0.76, this.isShort ? 12 : 13, C.blue, 'right', 700);
-      } else if (selected) {
-        this.text('已选中', x + cardW - 12, y + cardH * 0.76, this.isShort ? 12 : 13, C.gold, 'right', 700);
-      }
+      const cx = x0 + col * (cardW + gap);
+      const cy = gridTop + row * (cardH + gap);
+      const glow = !isBody && this.fusionGlow !== null && this.nowMs <= this.fusionGlow.until && this.fusionGlow.defId === it.defId;
+      this.drawFusionCardItem(it, isBody, glow, cx, cy, cardW, cardH);
     }
-    if (items.length === 0) this.text('该分类暂无部件', c.x + 12, listTop + 30, 14, C.textDim);
-    // 分页条（多页时）
+    if (items.length === 0) this.text('该分类暂无部件', x0, gridTop + 20, 14, C.textDim);
+    // 分页条（明确页码 + [上一页]/[下一页]；禁止长距拖动）
     if (pageCount > 1) {
-      const pgH = 28;
-      const pgY = listBot + (panelH - pgH) / 2;
-      const nextX = c.x + c.w - 12 - 56;
-      const prevX = nextX - 56 - 8 - 44;
-      this.button(prevX, pgY, 56, pgH, 'backpack-page-prev', '上一页', {});
-      this.text(`${this.backpackPage + 1} / ${pageCount}`, prevX + 56 + 4, pgY + pgH / 2, 13, C.textDim, 'left');
-      this.button(nextX, pgY, 56, pgH, 'backpack-page-next', '下一页', {});
+      const pgH = pagerSlot;
+      const pgY = pagerTop + (pagerSlot - pgH) / 2;
+      const nextX = c.x + c.w - pad - 52;
+      const prevX = nextX - 52 - 6 - 40;
+      this.button(prevX, pgY, 52, pgH, 'backpack-page-prev', '上一页', {});
+      this.text(`${this.backpackPage + 1} / ${pageCount}`, prevX + 52 + 4, pgY + pgH / 2, short ? 10 : 12, C.textDim, 'left');
+      this.button(nextX, pgY, 52, pgH, 'backpack-page-next', '下一页', {});
     }
-    // 底部合成面板（选中卡片驱动）
-    this.drawBackpackFusePanel(state, c.x, c.y + c.h - panelH, c.w, panelH);
+
+    // —— 底部固定合成栏（战斗/移动）；车身仅提示不参与合成（无入口） ——
+    if (isBody) {
+      this.panel(x0, barY, w0, barH, C.dockBg, undefined, V.radiusM);
+      this.text('车身不参与合成', x0 + w0 / 2, barY + barH / 2, short ? 11 : 14, C.textDim, 'center');
+    } else {
+      this.drawFusionBar(cat!, x0, barY, w0, barH, catAvail);
+    }
   }
 
-  /** F-GARAGE-INVENTORY-FUSION-R1：背包合成面板（当前★1 / 拥有 / 已装备 / 可用 / 消耗5×1★ / 产出★2 / 暖金「合成」）。 */
-  private drawBackpackFusePanel(state: PlayerUIState, x: number, y: number, w: number, h: number): void {
-    this.panel(x + 8, y + 4, w - 16, h - 8, C.dockBg, C.border, V.radiusM);
-    const defId = this.backpackSelected;
-    if (!defId) {
-      this.text('选择一张部件卡片以查看合成', x + w / 2, y + h / 2, 14, C.textDim, 'center');
-      return;
-    }
-    // 车身不参与合成（§4；仅展示拥有状态）
-    if (OFFICIAL_BODIES.includes(defId)) {
-      this.text('车身不参与合成', x + w / 2, y + h / 2, 14, C.textDim, 'center');
-      return;
-    }
-    const inv = state.inventory;
-    const draft = state.draft ?? null;
-    const fuse = canFuse(inv, defId, 1, draft);
-    const name = this.partDisplayName(defId);
-    const ownedOne = getCount(inv, defId, 1);
-    const ownedTwo = getCount(inv, defId, 2);
-    const ownedTotal = ownedOne + ownedTwo;
-    const owned = ownedTotal > 0;
-    const eqN = equippedCount(defId, 1, draft);
-    // 左列：名称 + 拥有 + 已装备/可用 + 消耗产出规则
-    this.text(`${name} · 当前 ★1`, x + 20, y + h * 0.22, 15, C.text, 'left', 700);
-    this.text(`拥有 ${ownedTotal}（1★ ${ownedOne} · 2★ ${ownedTwo}）`, x + 20, y + h * 0.44, 13, C.textDim, 'left');
-    this.text(`已装备 ${eqN} · 可用 ${fuse.available} / 需要 5`, x + 20, y + h * 0.64, 13, fuse.available >= 5 ? C.gold : C.textDim, 'left');
-    this.text('消耗 5 × 1★  →  产出 1 × ★2', x + 20, y + h * 0.84, 12, C.textDim, 'left');
-    // 右：暖金「合成」按钮（<5 disabled「还差 N 个」；满星「已满星」；未获得不显示可操作按钮）
-    const btnLabel = backpackFuseButtonLabel(fuse, owned);
-    this.button(x + w - 156, y + h / 2 - 22, 136, 44, 'backpack-fuse', btnLabel, {
-      selected: fuse.ok,
-      disabled: !fuse.ok || !owned,
+  /** F-GARAGE-FUSION-UX-R2：部件卡网格单元（图标/名称/星级×N/可用数量/已装备标识/可选灰化/已放入「已选N」）。 */
+  private drawFusionCardItem(
+    it: { defId: string; name: string; one: number; two: number; eqN: number; available: number; owned: boolean; usedN: number },
+    isBody: boolean,
+    glow: boolean,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): void {
+    const short = this.isShort;
+    const defId = it.defId;
+    const lockNoSpare = it.owned && !isBody && it.eqN > 0 && it.available <= 0 && it.usedN === 0; // 已装备且无可用副本 → 灰化
+    // 卡片底（命中恒注册——未拥有/灰化只是视觉与不可放入，不影响可达性计数）
+    this.button(x, y, w, h, `backpack-select:${defId}`, '', {
+      equipped: lockNoSpare,
     });
-    // F-RC-FUSION-TEST-ENTRY-P0｜§三：RC/E2E 专用「测试材料×5」中性灰蓝按钮（带「测试」字样，避免误认正式功能）。
-    // 仅调试/测试构建可见（rcGrant || e2eProbe || devReset）；普通微信/Pages/正式Web 恒不绘制、不注册命中区。
-    // 命中：非车身（已在上方 return）+ 未达满星（无 2★ 副本）→ 点击只补足当前 defId 1★ 可用数到 5。
-    const rcGrantTM = typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__;
-    const e2eProbeTM = typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__;
-    const devResetTM = DEV_TOOLS_VISIBLE && state.resetDevVisible;
-    const showTestMaterial = (rcGrantTM || e2eProbeTM || devResetTM) && ownedTwo === 0;
-    if (showTestMaterial) {
-      this.button(x + w - 156 - 140, y + h / 2 - 22, 132, 44, 'backpack-test-material', '测试材料×5', { equipped: true });
+    if (!it.owned) {
+      this.rect(x, y, w, h, 'rgba(10,14,22,0.55)');
     }
+    // 已放入：暖金勾选 + 「已选N」；新产出：短暂暖金高亮
+    if (it.usedN > 0) {
+      this.rect(x, y, w, h, undefined, C.gold, 2);
+      const chipTxt = `已选${it.usedN}`;
+      this.panel(x + w - 34, y + 2, 32, short ? 12 : 14, 'rgba(94,73,32,0.94)', 'rgba(255,190,80,0.9)', 3);
+      this.text(chipTxt, x + w - 18, y + 2 + (short ? 6 : 7), short ? 8 : 10, '#ffe3a3', 'center', 700);
+    }
+    if (glow) {
+      this.rect(x - 1, y - 1, w + 2, h + 2, undefined, 'rgba(255,199,90,0.95)', 2);
+    }
+    // 左侧 mini 图标
+    const iconS = Math.max(7, Math.min(short ? 11 : 15, Math.round(h * 0.24)));
+    const iconCX = x + (short ? 8 : 12) + iconS;
+    const iconCY = y + h / 2;
+    this.drawPartIcon(defId, iconCX, iconCY, iconS, !it.owned);
+    // 文本区
+    const tx = x + (short ? 22 : 32);
+    const tw = x + w - tx - 4;
+    const nameFs = short ? 12 : 15;
+    const name = (it.name || defId).slice(0, Math.max(2, Math.floor(tw / (short ? 13 : 17))));
+    this.text(name, tx, y + h * 0.3, nameFs, it.owned ? C.text : C.textDim, 'left', 700);
+    if (isBody) {
+      const tag = it.eqN > 0 ? '使用中' : it.owned ? '已拥有' : '未拥有';
+      this.text(tag, tx, y + h * 0.66, short ? 10 : 13, it.eqN > 0 ? C.blue : it.owned ? C.gold : C.red, 'left', 700);
+      return;
+    }
+    // 星级 + 数量
+    const starTxt =
+      it.one > 0 && it.two > 0
+        ? `1★×${it.one}  2★×${it.two}`
+        : it.one > 0
+          ? `1★×${it.one}`
+          : it.two > 0
+            ? `2★×${it.two}`
+            : '';
+    this.text(starTxt, tx, y + h * 0.53, short ? 9 : 12, C.gold, 'left', 600);
+    // 可用数量 / 已装备标识（已装备与可用不同行时更清晰；同一卡不出现两套状态）
+    if (it.owned && it.eqN > 0 && it.available > 0) {
+      this.text(`可用 ${it.available} · 已装 ${it.eqN}`, tx, y + h * 0.78, short ? 9 : 11, C.textDim, 'left');
+    } else if (it.owned) {
+      this.text(`可用 ${it.available}`, tx, y + h * 0.78, short ? 9 : 11, it.available > 0 ? C.textDim : C.textDark, 'left');
+    } else {
+      this.text('未拥有', tx, y + h * 0.78, short ? 9 : 11, C.red, 'left');
+    }
+    if (!short && it.owned && it.eqN > 0) {
+      this.text('已装备', x + w - 4, y + h * 0.78, 10, C.blue, 'right', 700);
+    }
+    // 已装备：左侧中性灰蓝标识条（双通道，区别于可选）
+    if (it.owned && it.eqN > 0 && !short) {
+      this.rect(x + 2, y + 4, 3, h - 8, V.equippedMark);
+    }
+  }
+
+  /** F-GARAGE-FUSION-UX-R2：底部固定合成栏（5 材料槽 + N/5 + 自动放入 + 随机预览 + 暖金合成）。 */
+  private drawFusionBar(
+    cat: FusionCategory,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    catAvail: number,
+  ): void {
+    const short = this.isShort;
+    this.panel(x, y, w, h, C.dockBg, C.border, V.radiusM);
+    const padIn = short ? 4 : 8;
+    const n = this.fusionFilledCount();
+    const catLabel = fusionCategoryLabel(cat);
+    const labelName = `随机获得${catLabel}2★`;
+    // 右侧控件宽（自动放入 + 合成）；左侧给材料槽
+    const autoW = short ? 76 : 112;
+    const fuseW = short ? 88 : 128;
+    const ctrlW = autoW + fuseW + (short ? 8 : 12);
+    // 行 1：材料槽 + N/5（槽高：short 22 / normal 30）
+    const row1H = short ? 24 : 32;
+    const row1Y = y + (short ? 4 : 10);
+    const slotGap = short ? 4 : 6;
+    const slotsAreaW = w - padIn * 2 - ctrlW - (short ? 44 : 96) - 8;
+    const slotW = Math.max(short ? 20 : 32, Math.min(short ? 44 : 72, Math.floor((slotsAreaW - slotGap * 4) / 5)));
+    const slotH = Math.min(row1H - 2, short ? 22 : 30);
+    const slotY = row1Y + Math.max(0, (row1H - slotH) / 2);
+    for (let i = 0; i < 5; i++) {
+      const sx = x + padIn + i * (slotW + slotGap);
+      const defId = this.fusionSlots[i];
+      const id = defId ? `fusion-slot:${i}` : '';
+      this.button(sx, slotY, slotW, slotH, id, '', defId ? {} : { disabled: true });
+      if (defId) {
+        const s = Math.max(6, Math.min(10, Math.round(slotH * 0.5)));
+        this.drawPartIcon(defId, sx + slotW / 2, slotY + slotH / 2, s, false);
+      }
+    }
+    const n5Txt = `已选 ${n}/5`;
+    const n5X = x + padIn + 5 * slotW + 4 * slotGap + (short ? 4 : 8);
+    this.text(n5Txt, n5X, row1Y + row1H / 2, short ? 10 : 13, n === 5 ? C.gold : C.textDim, 'left', 700);
+    // 行 2：预览文案（左）+ 自动放入/合成（右）
+    const row2Y = y + row1H + (short ? 2 : 8);
+    const btnH = h - (row2Y - y) - (short ? 4 : 8);
+    const bh = Math.max(short ? 26 : 36, Math.min(short ? 30 : 44, btnH));
+    const by = y + h - bh - (short ? 4 : 6);
+    const fuseX = x + w - padIn - fuseW;
+    const autoX = fuseX - autoW - (short ? 6 : 10);
+    // 预览（若有空间；short 视口空间不足时省略——状态行已含可合提示）
+    const previewFs = short ? 9 : 13;
+    const previewW = labelName.length * previewFs * 0.95 + 8;
+    if (autoX - padIn - previewW > (short ? 84 : 240)) {
+      this.text(labelName, x + padIn + (short ? 2 : 6), by + bh / 2, previewFs, C.textDim, 'left');
+    } else if (!short) {
+      // 窄中间：紧贴按钮左缘右对齐
+      this.text(labelName, autoX - 8, by + bh / 2, previewFs, C.textDim, 'right');
+    }
+    // 自动放入（次按钮；已满 5 / 可用不足 5 / 结果卡期间 → disabled 不注册）
+    const autoDis = n === 5 || catAvail < 5 || this.fusionResult !== null;
+    this.button(autoX, by, autoW, bh, 'fusion-auto', '自动放入', { disabled: autoDis, sub: undefined });
+    // 暖金「合成」主按钮（材料满 5 才可用）
+    const fuseOk = n === 5 && this.fusionResult === null;
+    this.button(fuseX, by, fuseW, bh, 'backpack-fuse', '合成', fuseOk ? { primary: true } : { disabled: true });
+    // 仍够材料（合完回落列表后提示可继续）
+    if (this.fusionResult === null && catAvail >= 5 && n < 5) {
+      const yy = row2Y + 4;
+      if (!short) this.text('材料充足，可再选 5 件继续合成', x + w / 2, yy + 4, 11, C.textDim, 'center');
+    }
+  }
+
+  /** F-GARAGE-FUSION-UX-R2：合成成功页内结果卡（材料槽已清空收拢；中央产出卡；点击任意处跳过）。 */
+  private drawFusionResultCard(c: Rect, product: string): void {
+    const short = this.isShort;
+    const state = this.lastState;
+    // 遮罩（拦截底层点击；整卡即「跳过」目标）
+    this.button(c.x, c.y, c.w, c.h, 'fusion-result-dismiss', '', { disabled: false, equipped: false });
+    this.rect(c.x, c.y, c.w, c.h, 'rgba(6,9,14,0.78)');
+    const ownedTwo = state ? getCount(state.inventory, product, 2) : 1;
+    if (ownedTwo < 1) {
+      // 产物未在库存可见（理论不发生：合成成功即入账）——只显示反馈卡
+    }
+    const cardW = short ? 220 : 320;
+    const cardH = short ? 96 : 150;
+    const cx = c.x + c.w / 2;
+    const cy = c.y + c.h / 2;
+    const x = cx - cardW / 2;
+    const y = cy - cardH / 2;
+    this.panel(x, y, cardW, cardH, 'rgba(20,29,44,0.98)', C.gold, V.radiusL);
+    this.text('合成成功', cx, y + (short ? 16 : 26), short ? 14 : 20, C.gold, 'center', 700);
+    const iconS = short ? 16 : 26;
+    this.drawPartIcon(product, cx, y + (short ? 40 : 62), iconS, false);
+    const name = this.partDisplayName(product);
+    this.text(name, cx, y + (short ? 62 : 96), short ? 12 : 17, C.text, 'center', 700);
+    this.text('2★', cx, y + (short ? 78 : 120), short ? 12 : 16, C.gold, 'center', 700);
+    this.text('点击继续', cx, cy + cardH / 2 - (short ? 8 : 12), short ? 8 : 10, C.textDark, 'center');
   }
 
   /** F-GARAGE-INVENTORY-FUSION-P0：统一部件显示名（Functional / Movement / Body）。 */

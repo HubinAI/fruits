@@ -1,11 +1,13 @@
 /**
- * Queue F-RC-FUSION-TEST-ENTRY-P0｜RC 包「真实 5→1」验收可达性修复（targeted，T1-T16）。
+ * Queue F-RC-FUSION-TEST-ENTRY-P0（F-GARAGE-FUSION-UX-R2 适配版）｜
+ * RC 包「真实 5→1」验收可达性（targeted，T1-T16）。
  *
- * 目标：解决 RC 包无法验证真实 5合1 的问题，并恢复「全部件×1」按钮身份（§二→§七）。
- * 仅改 RC 测试工具/UI 入口，不碰正式经济与合成规则（冻结项）。
+ * 目标：RC 包能通过真实 UI 按钮验证 5合1；并恢复「全部件×1」按钮身份（§二→§七）。
+ * 本 Queue 下测试材料按钮已从「满星选卡面板」改为「背包页顶右上角落 + 按当前分类补足可用 1★ ≥5」；
+ * 正式合成已从「同 defId」改为「同分类混合 5→1（可注入 rng）」。测试相应适配（冻结项不变）。
  *
  * 验证双轨：
- * - 源码守卫（string 断言）：保证门控/文案/公式与实现一致、普通微信包不暴露入口；
+ * - 源码守卫（string 断言）：门控/文案/公式与实现一致、普通微信包不暴露入口；
  * - 逻辑（真实 partInventory 函数）：复算 topUp / fuse 闭环，断言数据正确与幂等。
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -14,10 +16,13 @@ import {
   getCount,
   addPart,
   getInventory,
-  canFuse,
   equippedCount,
-  fuseSameStar,
-  buildRewardCandidates,
+  OFFICIAL_PARTS,
+  fusionCategoryAvailable,
+  fusionCategoryPartIds,
+  canFuseCategory,
+  autoPickFusionMaterials,
+  fuseCategoryMaterials,
   type PartInventory,
 } from '../src/core/partInventory';
 import { grantAllPartsOnce } from '../src/core/debugGrants';
@@ -51,14 +56,35 @@ function bindMemStorage(): { mem: Map<string, string> } {
   return { mem };
 }
 
-/** F-RC-FUSION-TEST-ENTRY-P0｜§三：复算「测试材料×5」补足公式（与 dispatch 内联逻辑同源）。 */
-function topUpToFive(inv: PartInventory, defId: string, draft: BuildDraft | null): number {
-  const eq = equippedCount(defId, 1, draft);
-  const owned = getCount(inv, defId, 1);
-  const requiredOwned = eq + 5;
-  const topUp = Math.max(0, requiredOwned - owned);
-  if (topUp > 0) addPart(inv, defId, 1, topUp);
-  return topUp;
+/** F-GARAGE-FUSION-UX-R2｜§七：复算「测试材料×5」补足公式（与 dispatch 内联逻辑同源）——
+ *  把「当前分类」可用 1★ 总数补到 ≥5；缺口加到可用数最多（次则 defId 序）的那件。 */
+function topUpCategory(inv: PartInventory, cat: 'combat' | 'movement', draft: BuildDraft | null): number {
+  const missing = 5 - fusionCategoryAvailable(inv, cat, draft, 1);
+  if (missing <= 0) return 0; // 幂等：已 ≥5 不动作
+  const cands = fusionCategoryPartIds(cat)
+    .map((defId) => ({
+      defId,
+      avail: Math.max(0, getCount(inv, defId, 1) - equippedCount(defId, 1, draft)),
+    }))
+    .sort((a, b) => b.avail - a.avail || (a.defId < b.defId ? -1 : a.defId > b.defId ? 1 : 0));
+  if (cands.length === 0) return 0;
+  addPart(inv, cands[0].defId, 1, missing);
+  return missing;
+}
+
+/** 库存归零 + 只设目标部件（其余正式键 0；走 normalize 口径） */
+function seed(entries: Record<string, { one?: number; two?: number }>): PartInventory {
+  const inv = getInventory();
+  for (const k of Object.keys(inv)) {
+    inv[k].one = 0;
+    inv[k].two = 0;
+  }
+  for (const [defId, v] of Object.entries(entries)) {
+    if (!inv[defId]) inv[defId] = { one: 0, two: 0 };
+    inv[defId].one = v.one ?? 0;
+    inv[defId].two = v.two ?? 0;
+  }
+  return inv;
 }
 
 /** draft：cannon 装在 frontMass（已装备 1 个 cannon） */
@@ -86,14 +112,13 @@ function runCheck(bundleContent: string, mode: string): { status: number } {
   return { status: r.status ?? -1 };
 }
 
-describe('F-RC-FUSION-TEST-ENTRY-P0｜全部件×1 身份 + 测试材料×5', () => {
+describe('F-RC-FUSION-TEST-ENTRY-P0（R2 适配）｜全部件×1 身份 + 测试材料×5', () => {
   beforeEach(() => bindMemStorage());
   afterEach(() => bindPlatformCore(createWebCore()));
 
   // ───────────────────────── §二 全部件×1 身份 ─────────────────────────
   it('T1. 未领取时显示「全部件×1」（源码守卫：unclaimed 文案）', () => {
     expect(UI_SRC).toContain("const label = claimed ? '全部件×1 ✓' : '全部件×1';");
-    // 未领取分支文案精确为「全部件×1」
     const m = UI_SRC.match(/const label = claimed \? '([^']+)' : '([^']+)';/);
     expect(m).not.toBeNull();
     expect(m![2], '未领取文案 = 全部件×1').toBe('全部件×1');
@@ -114,144 +139,128 @@ describe('F-RC-FUSION-TEST-ENTRY-P0｜全部件×1 身份 + 测试材料×5', ()
     expect(JSON.stringify(after2), '二次领取库存不变').toBe(snap1);
   });
 
-  // ───────────────────────── §三 测试材料×5 门控 ─────────────────────────
-  it('T4. 测试材料按钮仅调试/测试构建可见（源码守卫：含 __WX_DEBUG_GRANT__ 门控）', () => {
+  // ───────────────────────── §三 测试材料×5 门控（R2：页顶右上角 + 分类级） ─────────────────────────
+  it('T4. 测试材料按钮仅调试/测试构建可见（源码守卫：RC/E2E/DEV 宏 + 背包页顶右上角位置）', () => {
     expect(UI_SRC).toContain("'backpack-test-material'");
     expect(UI_SRC).toContain('const rcGrantTM');
     expect(UI_SRC).toContain('const e2eProbeTM');
     expect(UI_SRC).toContain('const devResetTM');
-    expect(UI_SRC).toContain('const showTestMaterial = (rcGrantTM || e2eProbeTM || devResetTM) && ownedTwo === 0;');
-    // 门控确实引用 RC 宏（普通微信包 __WX_DEBUG_GRANT__=false → 不绘制）
-    expect(UI_SRC).toContain('typeof __WX_DEBUG_GRANT__ !== \'undefined\' && __WX_DEBUG_GRANT__');
+    // R2 门控 = RC/E2E/DEV 任一 + 非车身分类（旧「满星 ownedTwo===0」面板级门控已随面板删除）
+    expect(UI_SRC).toContain('const tmShow = (rcGrantTM || e2eProbeTM || devResetTM) && this.backpackFilter !== \'body\';');
+    // 角落按钮：页顶右上（右侧贴边），不占正式核心按钮位
+    expect(UI_SRC).toContain("this.button(c.x + c.w - pad - tw, yy, tw, hh, 'backpack-test-material'");
+    expect(UI_SRC).toContain("typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__");
   });
 
   it('T5. 普通微信包无两个测试入口（源码守卫：两个入口均被调试门控包裹）', () => {
     // 全部件×1 入口：提前 return
     expect(UI_SRC).toContain('if (!(rcGrant || e2eProbe || devReset)) return;');
-    // 测试材料×5：仅 showTestMaterial 为真时绘制
-    expect(UI_SRC).toContain('if (showTestMaterial) {');
+    // 测试材料×5：仅 tmShow 为真时绘制
+    expect(UI_SRC).toContain('if (tmShow) {');
     // 普通微信包：__WX_DEBUG_GRANT__/__E2E_INTERNAL_HANDLE__ 均为 false、DEV_TOOLS_VISIBLE=false
     // → 两个入口都不绘制、不注册命中区 → 无入口。
     expect(UI_SRC).toContain("'全部件×1'");
     expect(UI_SRC).toContain("'测试材料×5'");
   });
 
-  it('T6. Body / 满星不显示测试材料按钮（源码守卫：车身 early-return + 满星 ownedTwo===0 门控）', () => {
-    // 车身：drawBackpackFusePanel 早于测试材料按钮已 early-return
-    expect(UI_SRC).toContain('if (OFFICIAL_BODIES.includes(defId)) {');
-    // 满星：门控要求 ownedTwo === 0（有 2★ 副本则不显示）
-    expect(UI_SRC).toContain('const showTestMaterial = (rcGrantTM || e2eProbeTM || devResetTM) && ownedTwo === 0;');
-    // dispatch 也排除车身
-    expect(UI_SRC).toContain("if (defId && !OFFICIAL_BODIES.includes(defId) && this.lastState) {");
+  it('T6. 车身分类不显示测试材料按钮（源码守卫：filter!==body 门控 + fusionCategory 车身→null 早退）', () => {
+    // tmShow 门控排除车身
+    expect(UI_SRC).toContain("this.backpackFilter !== 'body'");
+    // dispatch/topUp 链路：车身 → fusionCategory()=null → topUp 早退（无任何入库副作用）
+    expect(UI_SRC).toContain('private fusionCategory(): FusionCategory | null');
+    expect(UI_SRC).toContain("if (this.backpackFilter === 'combat') return 'combat';");
+    expect(UI_SRC).toContain('return null;');
   });
 
-  // ───────────────────────── §三 topUp 逻辑 ─────────────────────────
-  it('T7. 未装备且拥有 1 个 → 补到 5 个（1★ 可用=5）', () => {
-    const inv = getInventory();
-    inv.rammer = { one: 1, two: 0 }; // 冲锤：未装备、拥有 1
-    const topUp = topUpToFive(inv, 'rammer', emptyDraft());
+  // ───────────────────────── §三 topUp 逻辑（R2：分类级补足） ─────────────────────────
+  it('T7. 分类可用 1 件（未装备）→ 补到 5（缺口 4 加到可用最多者；1★ 可用=5）', () => {
+    const inv = seed({ rammer: { one: 1 } });
+    const topUp = topUpCategory(inv, 'combat', emptyDraft());
     expect(topUp, 'topUp = 4').toBe(4);
-    expect(getCount(inv, 'rammer', 1), '拥有补到 5').toBe(5);
-    expect(getCount(inv, 'rammer', 1) - equippedCount('rammer', 1, emptyDraft()), '可用 = 5').toBe(5);
+    expect(getCount(inv, 'rammer', 1), 'rammer 拥有 5').toBe(5);
+    expect(fusionCategoryAvailable(inv, 'combat', emptyDraft(), 1), '分类可用 = 5').toBe(5);
   });
 
-  it('T8. 已装备 1 个且拥有 1 个 → 总数 6、可用 5、已装备不消耗', () => {
-    const inv = getInventory();
-    inv.cannon = { one: 1, two: 0 }; // cannon：拥有 1，且装在 frontMass（已装备 1）
+  it('T8. 已装备 1 个 cannon + 拥有 1 个 → 分类可用 0 → 补 5（总数 6、可用 5、已装备不消耗）', () => {
+    const inv = seed({ cannon: { one: 1 } });
     const draft = draftWithCannon();
     expect(equippedCount('cannon', 1, draft), '已装备 1').toBe(1);
-    const topUp = topUpToFive(inv, 'cannon', draft);
-    expect(topUp, 'topUp = 5（requiredOwned=6, owned=1）').toBe(5);
+    const topUp = topUpCategory(inv, 'combat', draft);
+    expect(topUp, 'topUp = 5（分类可用 0 → 需 5）').toBe(5);
     expect(getCount(inv, 'cannon', 1), '总数补到 6').toBe(6);
-    expect(getCount(inv, 'cannon', 1) - equippedCount('cannon', 1, draft), '可用 = 5').toBe(5);
+    expect(fusionCategoryAvailable(inv, 'combat', draft, 1), '分类可用 = 5').toBe(5);
     expect(equippedCount('cannon', 1, draft), '已装备副本未被消耗').toBe(1);
   });
 
-  it('T9. 已有可用 5 个时重复点击不增加（幂等）', () => {
-    const inv = getInventory();
-    inv.rammer = { one: 5, two: 0 }; // 可用 5
-    const topUp = topUpToFive(inv, 'rammer', emptyDraft());
-    expect(topUp, '已满足 5 可用 → topUp=0').toBe(0);
+  it('T9. 分类可用已 ≥5 时重复点击不增加（幂等）', () => {
+    const inv = seed({ rammer: { one: 5 } });
+    expect(topUpCategory(inv, 'combat', emptyDraft()), '已满足 → topUp=0').toBe(0);
     expect(getCount(inv, 'rammer', 1), '拥有保持 5').toBe(5);
     // 已装备 1 + 拥有 6（可用 5）的边界也幂等
-    const inv2 = getInventory();
-    inv2.cannon = { one: 6, two: 0 };
-    const topUp2 = topUpToFive(inv2, 'cannon', draftWithCannon());
-    expect(topUp2, 'available=5 → topUp=0').toBe(0);
+    const inv2 = seed({ cannon: { one: 6 } });
+    expect(topUpCategory(inv2, 'combat', draftWithCannon()), 'available=5 → topUp=0').toBe(0);
     expect(getCount(inv2, 'cannon', 1), '拥有保持 6').toBe(6);
   });
 
-  it('T10. 只影响当前选中 defId（其它部件不变）', () => {
-    const inv = getInventory();
-    inv.rammer = { one: 1, two: 0 };
-    inv.cannon = { one: 1, two: 0 };
-    inv.laser = { one: 3, two: 0 };
-    topUpToFive(inv, 'rammer', emptyDraft());
-    expect(getCount(inv, 'rammer', 1), 'rammer 补到 5').toBe(5);
+  it('T10. 缺口只加到「可用最多」的 defId（其它部件不变）', () => {
+    const inv = seed({ cannon: { one: 1 }, laser: { one: 3 } }); // 分类可用 4 → 缺 1
+    const topUp = topUpCategory(inv, 'combat', emptyDraft());
+    expect(topUp, 'topUp = 1').toBe(1);
+    expect(getCount(inv, 'laser', 1), '可用最多者 laser +1').toBe(4);
     expect(getCount(inv, 'cannon', 1), 'cannon 不变').toBe(1);
-    expect(getCount(inv, 'laser', 1), 'laser 不变').toBe(3);
+    expect(fusionCategoryAvailable(inv, 'combat', emptyDraft(), 1), '分类可用 = 5').toBe(5);
   });
 
-  it('T11. 补足后正式合成按钮出现（canFuse.ok=true）', () => {
-    const inv = getInventory();
-    inv.rammer = { one: 1, two: 0 };
-    topUpToFive(inv, 'rammer', emptyDraft());
-    const fuse = canFuse(inv, 'rammer', 1, emptyDraft());
-    expect(fuse.ok, '可用 5 → 可合成').toBe(true);
+  it('T11. 补足后正式合成预检通过（canFuseCategory.ok=true）', () => {
+    const inv = seed({ rammer: { one: 1 } });
+    topUpCategory(inv, 'combat', emptyDraft());
+    const fuse = canFuseCategory(inv, 'combat', emptyDraft(), 1);
+    expect(fuse.ok, '分类可用 5 → 可合成').toBe(true);
     expect(fuse.available).toBe(5);
   });
 
-  it('T12. 真实 5→1 成功（1★ 消耗 5、2★ 增加 1）', () => {
-    const inv = getInventory();
-    inv.rammer = { one: 1, two: 0 };
-    topUpToFive(inv, 'rammer', emptyDraft());
-    const res = fuseSameStar(inv, 'rammer', 1, emptyDraft());
+  // ───────────────────────── §三/§四 正式合成闭环（R2：分类混合 + rng 注入） ─────────────────────────
+  it('T12. 真实 5→1 成功（自动放入恰 5 → 合成：1★ -5 / 2★ +1，产物 ∈ Registry）', () => {
+    const inv = seed({ cannon: { one: 3 }, hammer: { one: 3 } });
+    const picked = autoPickFusionMaterials(inv, 'combat', emptyDraft(), 1, 5);
+    expect(picked.length, '自动放入恰 5').toBe(5);
+    const before1 = Object.keys(inv).reduce((s, k) => s + getCount(inv, k, 1), 0);
+    const res = fuseCategoryMaterials(inv, picked, 'combat', emptyDraft(), 1, () => 0);
     expect(res, '合成成功').not.toBeNull();
-    expect(getCount(inv, 'rammer', 1), '1★ 消耗 5（5-5=0）').toBe(0);
-    expect(getCount(inv, 'rammer', 2), '2★ 增加 1').toBe(1);
+    expect(OFFICIAL_PARTS, '产物 ∈ OFFICIAL_PARTS').toContain(res!.product);
+    const after1 = Object.keys(inv).reduce((s, k) => s + getCount(inv, k, 1), 0);
+    expect(after1, '1★ 总数 -5').toBe(before1 - 5);
+    expect(getCount(inv, res!.product, 2), '产物 2★ +1').toBe(1);
   });
 
-  it('T13. 连点不重复合成（第二次 canFuse 失败 / fuseSameStar 返回 null）', () => {
-    const inv = getInventory();
-    inv.rammer = { one: 1, two: 0 };
-    topUpToFive(inv, 'rammer', emptyDraft());
-    const res1 = fuseSameStar(inv, 'rammer', 1, emptyDraft());
+  it('T13. 连点不重复合成（材料不足 → null / 不重复产出）', () => {
+    const inv = seed({ cannon: { one: 5 } });
+    const res1 = fuseCategoryMaterials(inv, ['cannon', 'cannon', 'cannon', 'cannon', 'cannon'], 'combat', emptyDraft(), 1, () => 0);
     expect(res1, '第一次合成成功').not.toBeNull();
-    const fuse2 = canFuse(inv, 'rammer', 1, emptyDraft());
-    expect(fuse2.ok, '第二次可用 0 → 不可合成').toBe(false);
-    const res2 = fuseSameStar(inv, 'rammer', 1, emptyDraft());
+    expect(canFuseCategory(inv, 'combat', emptyDraft(), 1).ok, '二次分类可用 0 → 不可合成').toBe(false);
+    const res2 = fuseCategoryMaterials(inv, ['cannon', 'cannon', 'cannon', 'cannon', 'cannon'], 'combat', emptyDraft(), 1, () => 0);
     expect(res2, '第二次合成空操作').toBeNull();
-    expect(getCount(inv, 'rammer', 2), '2★ 仍为 1（不重复产出）').toBe(1);
+    expect(getCount(inv, res1!.product, 2), '2★ 仍为 1（不重复产出）').toBe(1);
   });
 
-  it('T14. Build / 能量 / 奖励池不变（topUp 与 fuse 不触碰 draft / 奖励候选）', () => {
-    const inv = getInventory();
-    inv.ram = { one: 1, two: 0 };
+  it('T14. Build / 能量 / 奖励池不变（topUp 与合成不触碰 draft）', () => {
+    const inv = seed({ cannon: { one: 1 } });
     const draft = draftWithCannon();
     const draftSnap = JSON.stringify(draft);
-    // 奖励候选池（functional 分支 defId 集合）仅依赖 OFFICIAL_PARTS，与库存数量无关
-    const candsBefore = buildRewardCandidates()
-      .filter((c) => c.kind === 'functional')
-      .map((c) => c.defId)
-      .sort();
-    topUpToFive(inv, 'ram', draft);
+    topUpCategory(inv, 'combat', draft);
     expect(JSON.stringify(draft), 'topUp 后 draft 未变').toBe(draftSnap);
-    fuseSameStar(inv, 'ram', 1, draft);
-    expect(JSON.stringify(draft), 'fuse 后 draft 未变').toBe(draftSnap);
-    const candsAfter = buildRewardCandidates()
-      .filter((c) => c.kind === 'functional')
-      .map((c) => c.defId)
-      .sort();
-    expect(candsAfter, '奖励候选池 defId 集合不变').toEqual(candsBefore);
+    const picked = autoPickFusionMaterials(inv, 'combat', draft, 1, 5);
+    fuseCategoryMaterials(inv, picked, 'combat', draft, 1, () => 0.5);
+    expect(JSON.stringify(draft), '合成后 draft 未变').toBe(draftSnap);
+    expect(equippedCount('cannon', 1, draft), '已装备副本始终保留').toBe(1);
   });
 
   it('T15. reload 后 2★ 结果保持（saveInventory 落盘 + 重读）', () => {
     const { mem } = bindMemStorage();
-    const inv = getInventory();
-    inv.rammer = { one: 1, two: 0 };
-    topUpToFive(inv, 'rammer', emptyDraft());
-    fuseSameStar(inv, 'rammer', 1, emptyDraft()); // 内部 saveInventory
-    expect(getCount(inv, 'rammer', 2), '当前 2★=1').toBe(1);
+    const inv = seed({ cannon: { one: 5 } });
+    const res = fuseCategoryMaterials(inv, ['cannon', 'cannon', 'cannon', 'cannon', 'cannon'], 'combat', emptyDraft(), 1, () => 0);
+    expect(res, '合成成功').not.toBeNull();
+    expect(getCount(inv, res!.product, 2), '当前 2★=1').toBe(1);
     // 模拟 reload：重新 bind 同一 mem（同一 localStorage）→ 重读存档
     bindPlatformCore({
       ...createWebCore(),
@@ -266,18 +275,18 @@ describe('F-RC-FUSION-TEST-ENTRY-P0｜全部件×1 身份 + 测试材料×5', ()
       },
     } as unknown as Parameters<typeof bindPlatformCore>[0]);
     const reloaded = getInventory();
-    expect(getCount(reloaded, 'rammer', 1), 'reload 后 1★=0').toBe(0);
-    expect(getCount(reloaded, 'rammer', 2), 'reload 后 2★=1 保持').toBe(1);
+    expect(getCount(reloaded, res!.product, 2), 'reload 后 2★=1 保持').toBe(1);
+    expect(getCount(reloaded, 'cannon', 1), 'reload 后 cannon 1★=0').toBe(0);
   });
 
   it('T16. bundle-clean 确保普通/RC 无内部句柄泄漏（测试材料按钮仅为 UI，无 globalThis 句柄）', () => {
     // 含本 Queue 新增 UI 字符串、但无 globalThis.__* 赋值的合成 bundle → 普通/RC 均 PASS
     const bundle = [
-      "const a = 1;",
+      'const a = 1;',
       "this.button(x, y, w, h, 'backpack-test-material', '测试材料×5', { equipped: true });",
-      "this.button(x, y, w, h, 'backpack-fuse', '合成', { selected: true });",
+      "this.button(x, y, w, h, 'backpack-fuse', '合成', { primary: true });",
       "this.button(x, y, w, h, 'dev-grant-all', '全部件×1', {});",
-      "__WX_DEBUG_GRANT__ = true;",
+      '__WX_DEBUG_GRANT__ = true;',
     ].join('\n');
     expect(runCheck(bundle, 'wechat').status, '普通微信 bundle PASS').toBe(0);
     expect(runCheck(bundle, 'rc').status, 'RC bundle PASS').toBe(0);
@@ -288,10 +297,11 @@ describe('F-RC-FUSION-TEST-ENTRY-P0｜全部件×1 身份 + 测试材料×5', ()
     expect(runCheck('globalThis.__inv = {};', 'e2e').status, '__inv 放行（e2e）').toBe(0);
   });
 
-  it('回归守卫：dispatch 内 topUp 公式与源码一致', () => {
-    expect(UI_SRC).toContain('const requiredOwned = eq + 5;');
-    expect(UI_SRC).toContain('const topUp = Math.max(0, requiredOwned - owned);');
-    expect(UI_SRC).toContain('addPart(inv, defId, 1, topUp);');
+  it('回归守卫：dispatch 内 topUp 公式与源码一致（分类级补足 + 幂等早退）', () => {
+    expect(UI_SRC).toContain('const missing = 5 - fusionCategoryAvailable(inv, cat, draft, 1);');
+    expect(UI_SRC).toContain('if (missing <= 0) return;');
+    expect(UI_SRC).toContain('const cands = fusionCategoryPartIds(cat)');
+    expect(UI_SRC).toContain('addPart(inv, cands[0].defId, 1, missing);');
     expect(UI_SRC).toContain('saveInventory(inv);');
   });
 });

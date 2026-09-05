@@ -143,7 +143,10 @@ describe('F-WX-4 CanvasPlayerUIHost', () => {
       onResultAdjust: () => void (fired['resultAdjust'] = [...(fired['resultAdjust'] ?? []), 'x']),
       onResultNext: () => void (fired['next'] = [...(fired['next'] ?? []), 'x']),
       onClaimRewardAd: () => void (fired['reward'] = [...(fired['reward'] ?? []), 'x']),
-      onFuse: (_d?: string, _s?: number) => void (fired['fuse'] = [...(fired['fuse'] ?? []), 'x']),
+      onFuseCategory: (_m?: string[], _c?: 'combat' | 'movement', _s?: number) => {
+        fired['fuse'] = [...(fired['fuse'] ?? []), 'x'];
+        return { product: 'cannon', star: 2 };
+      },
       onResetProgress: () => {},
     });
   });
@@ -183,16 +186,17 @@ describe('F-WX-4 CanvasPlayerUIHost', () => {
     expect(fired['pick']).toEqual(['watermelonBody']);
   });
 
-  it('Garage：背包合成 → onFuse（规则在 runtime，Host 只派发）', () => {
+  it('Garage：背包合成 → onFuseCategory（规则在 runtime，Host 只派发；材料满 5 才触发）', () => {
     // Garage 首屏无旧「合成」入口（合成迁入背包页）
     host.render(garageState());
     expect(host.getHitAreasForTest().map((a) => a.id)).not.toContain('merge');
-    // 给足 1★ 副本 → 进入背包 → 选中 cannon → 点合成 → onFuse 派发
+    // 给足 1★ 副本 → 进入背包 → 空槽时「合成」不可点 → 手动点卡 5 次放满材料槽 → 点合成 1 次
     const inv = getInventory();
-    inv['cannon'] = { one: 6, two: 0 }; // 未装备 1★ 副本 ≥5 → 可合成
+    inv['cannon'] = { one: 6, two: 0 }; // starter draft 已装 1 件 cannon → 可用 5 → 恰好可合
     host.render(garageState({ inventory: inv, progress: { coin: 500, rating: 0 } }));
     click('nav:backpack');
-    click('backpack-select:cannon');
+    expect(host.getHitAreasForTest().map((a) => a.id), '材料槽空 → 合成不可点（默认不消耗）').not.toContain('backpack-fuse');
+    for (let i = 0; i < 5; i++) click('backpack-select:cannon');
     click('backpack-fuse');
     expect(fired['fuse']).toHaveLength(1);
   });
@@ -349,7 +353,10 @@ describe('F-WX-5 CanvasPlayerUIHost mountCanvas（平台中立，无 DOM 容器�
       onResultAdjust: () => void (fired['resultAdjust'] = [...(fired['resultAdjust'] ?? []), 'x']),
       onResultNext: () => void (fired['next'] = [...(fired['next'] ?? []), 'x']),
       onClaimRewardAd: () => void (fired['reward'] = [...(fired['reward'] ?? []), 'x']),
-      onFuse: (_d?: string, _s?: number) => void (fired['fuse'] = [...(fired['fuse'] ?? []), 'x']),
+      onFuseCategory: (_m?: string[], _c?: 'combat' | 'movement', _s?: number) => {
+        fired['fuse'] = [...(fired['fuse'] ?? []), 'x'];
+        return { product: 'cannon', star: 2 };
+      },
       onResetProgress: () => {},
     });
   });

@@ -96,7 +96,10 @@ function makeHost(
     onResultAdjust: once('resultAdjust'),
     onResultNext: once('next'),
     onClaimRewardAd: once('reward'),
-    onFuse: once('fuse'),
+    onFuseCategory: () => {
+      fired['fuse'] = [...(fired['fuse'] ?? []), 'x'];
+      return { product: 'cannon', star: 2 };
+    },
     onResetProgress: () => {},
   });
   return {

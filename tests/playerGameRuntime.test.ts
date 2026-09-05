@@ -7,7 +7,7 @@
  * 2. 装配经 actions 持久化到微信 storage；重进恢复（验收 3 刷新/重进）；
  * 3. 完整闭环：Garage→Matching→MatchPreview→Battle→Result→Reward→Garage→再战
  *    （验收 2 玩家闭环；Reward/Economy 落微信 storage）；
- * 4. 合成（Merge）：5×1★ 熔炼经微信 storage 生效（Equip/Merge 环节）。
+ * 4. 合成（Fuse）：5×1★ 同分类材料（可混合 defId）经微信 storage 生效（Equip/Fuse 环节）。
  *
  * 本文件绑定 WechatCore（fake wx storage），证明持久化落到微信而非 Web/localStorage；
  * afterEach 还原 Web 绑定（与 platformBinding 同一模式）。
@@ -260,7 +260,7 @@ describe('F-WX-5 PlayerGameRuntime（headless 玩家闭环）', () => {
     expect(runtime.battleState).toBe('ended');
   });
 
-  it('合成（Fuse）：5×1★ 同 defId 熔炼经微信 storage 生效（Equip/Fuse 环节）', () => {
+  it('合成（Fuse）：5×1★ 同分类材料（可混合 defId）经微信 storage 生效（Equip/Fuse 环节）', () => {
     const store = fakeWxStore();
     store.set(INV_KEY_V2, JSON.stringify({ __v: 1, spear: { one: 6, two: 0 } }));
     store.set(PROG_KEY, JSON.stringify({ __v: 1, coin: 500, rating: 0 }));
@@ -269,17 +269,21 @@ describe('F-WX-5 PlayerGameRuntime（headless 玩家闭环）', () => {
 
     const before = getInventory();
     const beforeTwo = Object.values(before).reduce((s, e) => s + e.two, 0);
-    runtime.actions.onFuse('spear', 1);
+    // F-GARAGE-FUSION-UX-R2｜正式规则：5 个同分类（combat）1★ 材料（允许同 defId 重复）
+    const res = runtime.actions.onFuseCategory(['spear', 'spear', 'spear', 'spear', 'spear'], 'combat', 1);
+    expect(res).not.toBeNull();
     const after = getInventory();
     const afterTwo = Object.values(after).reduce((s, e) => s + e.two, 0);
-    expect(afterTwo).toBeGreaterThan(beforeTwo); // 合成出 2★
+    expect(afterTwo).toBe(beforeTwo + 1); // 合成出 1 件 2★
     expect(loadProgressRaw()?.coin).toBe(500); // 合成无金币成本（不改 coin）
   });
 
   it('合成（Fuse）资源不足：安全 no-op 不卡死、不改库存', () => {
     const { runtime } = setup(); // 全新账号：1★ 各 1，不足以合成
     const before = getInventory();
-    runtime.actions.onFuse('spear', 1); // 不应抛错 / 不应改动
+    // 材料缺口：5 件 spear 但仅 1 件可用 → core 拒绝（不抛错 / 不改动 / 无产出）
+    const res = runtime.actions.onFuseCategory(['spear', 'spear', 'spear', 'spear', 'spear'], 'combat', 1);
+    expect(res).toBeNull();
     expect(getInventory()).toEqual(before);
   });
 });

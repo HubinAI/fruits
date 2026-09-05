@@ -172,7 +172,7 @@ function mountEnv(
     onResultAdjust: () => {},
     onResultNext: () => {},
     onClaimRewardAd: () => {},
-    onFuse: () => {},
+    onFuseCategory: () => null,
     onResetProgress: () => {},
     // F-GARAGE-CENTER-STAGE-P0：导航/背景切换（桩需提供，host 用 ?.() 双可选调用）
     setGarageBackdrop: () => {},
