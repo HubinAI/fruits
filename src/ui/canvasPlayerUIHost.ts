@@ -444,11 +444,11 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    * 未确认的材料选择绝不跨页/跨会话保留（正式主流程 = 点自动放入/手动选 → 点合成）。
    */
   private fusionSlots: Array<string | null> = [null, null, null, null, null];
-  /** F-GARAGE-FUSION-UX-R2：合成结果卡（页内中央产出卡；~0.9s 自动回落，可点击跳过）。 */
-  private fusionResult: { product: string; until: number; token: number } | null = null;
+  /** F-GARAGE-FUSION-UX-R2：合成结果卡（页内中央产出卡；R2.2 起不自动关闭，点空白区才关）。 */
+  private fusionResult: { product: string; token: number } | null = null;
   /** F-GARAGE-FUSION-UX-R2：新产出部件列表暖金高亮（短暂）。 */
   private fusionGlow: { defId: string; until: number; token: number } | null = null;
-  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成成功后产出卡的「新获得」角标（~2s，随 glow 展示）。 */
+  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成成功后产出卡的「新获得」角标（R2.2 起 ≥2.5s，随 glow 展示）。 */
   private fusionNew: { defId: string; until: number; token: number } | null = null;
   /**
    * F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：行内即时反馈条（加入/移除/自动放入材料），
@@ -1674,9 +1674,15 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.draw();
       return;
     }
+    if (id === 'fusion-result-card') {
+      // F-GARAGE-FUSION-RESULT-INTERACTION-R2.2：点卡本体 = 阅读态 no-op（不关闭、不跳页）。
+      // 卡区命中层在空白关闭层之上（后注册=先命中），玩家想继续看产出就点卡。
+      return;
+    }
     if (id === 'fusion-result-dismiss') {
       // F-GARAGE-FUSION-UX-R2：结果卡点击跳过（回到列表；新产出暖金高亮保留至到期）
       // F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：关闭后自动切到产出卡所在分页 + 「新获得」高亮 ~2s
+      // F-GARAGE-FUSION-RESULT-INTERACTION-R2.2：仅空白区触发（点卡不关）；高亮窗口加长至 ≥2.5s
       const product = this.fusionResult?.product ?? null;
       this.fusionToken += 1;
       const token = this.fusionToken;
@@ -1684,9 +1690,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.fusionPending = null;
       if (product) {
         this.fusionJumpTo = product; // draw 期按实际 PAGE 翻到产物所在页（布局同源）
-        // 关闭后金色高亮/「新获得」重置为完整 ~2s（玩家刚关闭，理应看清产出）
-        this.fusionGlow = { defId: product, until: this.nowMs + 2000, token };
-        this.fusionNew = { defId: product, until: this.nowMs + 2000, token };
+        // 关闭后金色高亮/「新获得」重置为完整 ≥2.5s（玩家刚关闭，理应看清产出）
+        this.fusionGlow = { defId: product, until: this.nowMs + 2500, token };
+        this.fusionNew = { defId: product, until: this.nowMs + 2500, token };
         if (typeof setTimeout === 'function') {
           setTimeout(() => {
             if (this.fusionToken === token) {
@@ -1694,7 +1700,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
               this.fusionNew = null;
               this.draw();
             }
-          }, 2100);
+          }, 2600);
         }
       }
       this.draw();
@@ -1923,27 +1929,43 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return Math.max(0, getCount(st.inventory, defId, star) - equippedCount(defId, star, st.draft ?? null));
   }
 
-  /** 点卡 = 尝试放入 1 件材料（手动选择可选；失败静默，槽位与卡片状态保持）。成功 → 行内反馈 + 闪亮。 */
+  /** 点卡 = 尝试放入 1 件材料（手动选择可选；失败给行内原因 toast，不静默）。成功 → 行内反馈 + 闪亮。 */
   private tryAddMaterial(defId: string): void {
     const cat = this.fusionCategory();
     if (!cat || this.fusionResult) return; // Body 无合成；结果卡展示期间不响应
     if (fusionCategoryOf(defId) !== cat) return;
-    if (this.fusionUses(defId) >= this.fusionAvail(defId, 1)) return; // 已装备保护/数量用尽
+    // F-GARAGE-FUSION-RESULT-INTERACTION-R2.2：失败原因行内反馈（不再静默无反应）
+    const avail = this.fusionAvail(defId, 1);
+    if (avail <= 0) {
+      this.showFusionToast('暂无可放入的1★材料');
+      return;
+    }
+    if (this.fusionUses(defId) >= avail) {
+      this.showFusionToast('该1★材料已全部放入');
+      return;
+    }
     const slot = this.fusionSlots.indexOf(null);
-    if (slot < 0) return; // 已满 5 → 先点槽移除，再点其它卡片替换
+    if (slot < 0) {
+      this.showFusionToast('材料槽已满，先移除一件');
+      return;
+    }
     this.fusionSlots[slot] = defId;
     this.fusionToastFor(defId, 'add');
     this.showFusionFlash([defId]);
   }
 
   /** 「自动放入」：一键把 5 个材料槽填满（确定性优先级见 core.autoPickFusionMaterials）。
-   *  成功 → 明确列出被放入的 5 件 + 卡片/槽位同步高亮 + 「已自动放入5件材料」。 */
+   *  成功 → 明确列出被放入的 5 件 + 卡片/槽位同步高亮 + 「已自动放入5件材料」。
+   *  R2.2：无可用材料（防御路径）给行内原因 toast。 */
   private autoFillFusion(): void {
     const cat = this.fusionCategory();
     const st = this.lastState;
     if (!cat || !st || this.fusionResult) return;
     const picked = autoPickFusionMaterials(st.inventory, cat, st.draft ?? null, 1, 5);
-    if (picked.length === 0) return;
+    if (picked.length === 0) {
+      this.showFusionToast('暂无可放入的1★材料');
+      return;
+    }
     const filled: Array<string | null> = [null, null, null, null, null];
     for (let i = 0; i < 5 && i < picked.length; i++) filled[i] = picked[i];
     this.fusionSlots = filled;
@@ -1967,8 +1989,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.fusionPending = { until: this.nowMs + 260, token: ptoken };
     const res = this.actions?.onFuseCategory?.(materials, cat, 1) ?? null;
     if (!res) {
-      // 失败（防御：满5时 core 校验通过，理论不可达）→ 清空让玩家重选，绝不扣材料
+      // 失败（防御：满5时 core 校验通过，理论不可达）→ 清空让玩家重选，绝不扣材料；给原因 toast
       this.clearFusionSession();
+      this.showFusionToast('合成失败，材料未扣除');
       this.draw();
       return;
     }
@@ -1985,28 +2008,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /** 页内合成结果卡（材料槽收拢清空 → 中央产出卡 ≥0.8s 自动回落、可点击跳过 → 回列表定位新产出）。 */
+  /** 页内合成结果卡（材料槽收拢清空 → 中央产出卡；不自动关闭——玩家点空白区才关；可点卡本体继续阅读）。
+   *  F-GARAGE-FUSION-RESULT-INTERACTION-R2.2：移除 950ms 自动关闭 timer；高亮窗口 ≥2.5s。 */
   private showFusionResult(product: string): void {
     this.fusionSlots = [null, null, null, null, null];
     this.fusionToken += 1;
     const token = this.fusionToken;
-    this.fusionResult = { product, until: this.nowMs + 900, token };
-    this.fusionGlow = { defId: product, until: this.nowMs + 2000, token };
-    this.fusionNew = { defId: product, until: this.nowMs + 2000, token };
+    this.fusionResult = { product, token };
+    this.fusionGlow = { defId: product, until: this.nowMs + 2500, token };
+    this.fusionNew = { defId: product, until: this.nowMs + 2500, token };
     if (typeof setTimeout === 'function') {
-      setTimeout(() => {
-        if (this.fusionToken === token) {
-          this.fusionResult = null;
-          this.draw();
-        }
-      }, 950);
       setTimeout(() => {
         if (this.fusionToken === token) {
           this.fusionGlow = null;
           this.fusionNew = null;
           this.draw();
         }
-      }, 2100);
+      }, 2600);
     }
     this.draw();
   }
@@ -3766,13 +3784,6 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       cy: gl.backBtn.y + gl.backBtn.h / 2,
     };
 
-    // —— 结果卡（页内中央；全页遮罩 + 产出卡；点击跳过；展示期不绘制页内容，保证聚焦） ——
-    const res = this.fusionResult;
-    if (res && this.nowMs <= res.until) {
-      this.drawFusionResultCard(c, res.product);
-      return;
-    }
-
     // 顶行返回 + 标题 + 测试材料（右上锚定 contentRect 右缘 = 安全区右缘，微信胶囊由 insets 避让）
     this.button(gl.backBtn.x, gl.backBtn.y, gl.backBtn.w, gl.backBtn.h, 'nav:garage', short ? '‹ 返回' : '‹ 返回车库', {});
     this.text('部件合成', gl.titleX, gl.backBtn.y + gl.backBtn.h / 2, short ? 15 : 18, C.text, 'left', 700);
@@ -3871,6 +3882,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.text('车身不参与合成', bar.x + bar.w / 2, bar.y + bar.h / 2, short ? 13 : 15, C.textDim, 'center');
     } else {
       this.drawFusionBar(gl, cat!, draft, catAvail, toast !== null);
+    }
+
+    // —— 合成结果层（R2.2：画在整页**之上**——底层页面保留可读 + 半透明遮罩 + 产出卡；
+    //    不自动关闭；点卡本体不关（阅读态）；点空白区关闭） ——
+    if (this.fusionResult !== null) {
+      this.drawFusionResultCard(c, this.fusionResult.product);
     }
   }
 
@@ -4038,15 +4055,19 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     ctx.restore();
   }
 
-  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成成功结果层。
-   *  遮罩不覆盖胶囊（contentRect 已按 insets 收缩）；卡片内明确「消耗：5件X类1★ / 获得：名2★」+
-   *  真实产出图标；≥0.8s、点击任意处继续；「点击继续」可读（≥10 logical）。 */
+  /** F-GARAGE-FUSION-RESULT-INTERACTION-R2.2：合成成功结果层（画在整页之上）。
+   *  视觉：底层页面保留 + 半透明遮罩（55–70%）+ 中央产出卡；遮罩不覆盖胶囊（contentRect 已按 insets 收缩）。
+   *  关闭规则：不自动关闭；点卡本体不关（阅读态 no-op）；点空白区关闭。
+   *  命中 z 序（后注册 = 先命中）：底层页控件 < 空白关闭层(fusion-result-dismiss) < 卡片消费层(fusion-result-card)。
+   *  卡内明确「消耗：5件X类1★ / 获得：名2★」+ 真实产出图标；文案 = 「点击空白处继续」（与行为一致）。 */
   private drawFusionResultCard(c: Rect, product: string): void {
     const short = this.isShort;
     const cat = this.fusionCategory();
     const catLabel = cat ? fusionCategoryLabel(cat) : '';
-    this.button(c.x, c.y, c.w, c.h, 'fusion-result-dismiss', '', { disabled: false });
-    this.rect(c.x, c.y, c.w, c.h, 'rgba(6,9,14,0.78)');
+    // 遮罩视觉：半透明压暗（底层页面保留可读；0.62 ∈ [0.55, 0.70]）
+    this.rect(c.x, c.y, c.w, c.h, 'rgba(6,9,14,0.62)');
+    // 命中：空白区关闭（先注册 → 位于卡片消费层之下；整页覆盖 → 屏蔽底层页控件）
+    this.hit('fusion-result-dismiss', c.x, c.y, c.w, c.h);
     const cardW = short ? 248 : 356;
     const cardH = short ? 118 : 176;
     const cx = c.x + c.w / 2;
@@ -4054,6 +4075,8 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const x = cx - cardW / 2;
     const y = cy - cardH / 2;
     this.panel(x, y, cardW, cardH, 'rgba(20,29,44,0.98)', C.gold, V.radiusL);
+    // 命中：卡本体 = 阅读态 no-op（后注册 → 最顶层；点卡不关）
+    this.hit('fusion-result-card', x, y, cardW, cardH);
     this.text('合成成功', cx, y + (short ? 17 : 26), short ? 16 : 22, C.gold, 'center', 700);
     const consumedTxt = `消耗：5件${catLabel}1★`;
     this.text(consumedTxt, cx, y + (short ? 32 : 48), short ? 12 : 14, C.textDim, 'center', 600);
@@ -4070,7 +4093,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.text(nameShow, textX, iconY - (short ? 6 : 8), nameFs, C.text, 'left', 700);
     const starX = textX + nameShow.length * nameFs + 6;
     if (starX + nameFs * 2 < x + cardW - 8) this.text('2★', starX, iconY + (short ? 2 : 4), nameFs, C.gold, 'left', 700);
-    this.text('点击任意处继续', cx, y + cardH - (short ? 11 : 16), short ? 12 : 13, C.textDark, 'center', 600);
+    this.text('点击空白处继续', cx, y + cardH - (short ? 11 : 16), short ? 12 : 13, C.textDark, 'center', 600);
   }
 
   private partDisplayName(defId: string): string {

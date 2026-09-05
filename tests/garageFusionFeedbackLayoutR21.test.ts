@@ -197,6 +197,8 @@ interface HostEnv {
   hit: (id: string) => Area | undefined;
   click: (id: string) => void;
   doubleTap: (id: string) => void;
+  /** 任意逻辑坐标真实指针（与 hitArea 同空间；R2.2 结果卡「点空白关」用） */
+  tapAt: (x: number, y: number) => void;
   texts: () => string[];
   ops: () => Op[];
   clearTexts: () => void;
@@ -277,6 +279,10 @@ function makeEnv(vp: { w: number; h: number }, dpr = 1, product = 'shotgun'): Ho
     captured(x, y);
     captured(x, y);
   }
+  function tapAt(x: number, y: number): void {
+    if (!captured) throw new Error('未捕获指针');
+    captured(x, y);
+  }
   function gotoBackpack(over: Partial<PlayerUIState> = {}): void {
     render(over);
     if (hit('home-garage')) click('home-garage');
@@ -296,7 +302,7 @@ function makeEnv(vp: { w: number; h: number }, dpr = 1, product = 'shotgun'): Ho
   function frameBadge(): void {
     host.renderBattleFrame({} as never);
   }
-  return { host, areas, hasHit: (id) => !!hit(id), hit, click, doubleTap, texts: () => texts.slice(), ops: () => ops.slice(), clearTexts: () => void (texts.length = 0), render, gotoBackpack, fillCard, frameBadge };
+  return { host, areas, hasHit: (id) => !!hit(id), hit, click, doubleTap, tapAt, texts: () => texts.slice(), ops: () => ops.slice(), clearTexts: () => void (texts.length = 0), render, gotoBackpack, fillCard, frameBadge };
 }
 
 // ───────────────────────────── 几何/文本辅助 ─────────────────────────────
@@ -739,7 +745,7 @@ describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L4｜状态机与结果闭环（T
     expect(got, '获得行').not.toBeNull();
     expect(got!.includes('霰弹炮'), '获得行含产物名').toBe(true);
     expect(findText(env, /^2★$/), '获得星级（同卡 2★ 标注）').not.toBeNull();
-    expect(findText(env, /^点击任意处继续$/), '点击继续可读').not.toBeNull();
+    expect(findText(env, /^点击空白处继续$/), '点击继续可读').not.toBeNull();
     expect(getCount(getInventory(), 'cannon', 1), '1★ -5').toBe(0);
     expect(getCount(getInventory(), 'shotgun', 2), '产物 2★ +1').toBe(1);
     // 真实产出图标（非通用占位）：结果卡区域存在形状 ops（对应 shotgun 微特征）
@@ -748,16 +754,17 @@ describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L4｜状态机与结果闭环（T
     expect(hasIcon, '结果卡有图标绘制').toBe(true);
   });
 
-  it('T17. 关闭结果卡 → 自动切产物所在分页 + 产物卡「新获得」高亮（~2s）且星级数量立即可见', async () => {
+  it('T17. 关闭结果卡（点空白区）→ 自动切产物所在分页 + 产物卡「新获得」高亮（≥2.5s）且星级数量立即可见', async () => {
     seedInventory({ cannon: { one: 5 } });
     // 420×210 极短屏（pageSize 小 → 产物 shotgun 位于后续页，跳页可观测）
     const env = makeEnv({ w: 420, h: 210 }, 1, 'shotgun');
     env.fillCard('cannon', 5);
     env.click('backpack-fuse');
     await sleep(340);
-    expect(env.hasHit('fusion-result-dismiss'), '结果卡命中区').toBeTruthy();
+    expect(env.hasHit('fusion-result-dismiss'), '结果卡空白关闭命中区').toBeTruthy();
     env.clearTexts();
-    env.click('fusion-result-dismiss');
+    // R2.2：点卡本体不关（阅读态）；关闭必须点卡片外的空白区（右下角）
+    env.tapAt(420 - 8, 210 - 8);
     // 跳页 + 新获得
     const h = env.host as unknown as { fusionJumpTo: string | null; fusionGlow: { defId: string } | null; fusionNew: { defId: string } | null; backpackPage: number };
     expect(h.fusionJumpTo, '跳转标记消费').toBeNull();

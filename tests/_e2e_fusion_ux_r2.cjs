@@ -87,6 +87,27 @@ async function tapTwiceFast(page, id) {
   return info;
 }
 
+/** R2.2：命中区右下角（内缩 inset）真实像素点击——结果卡「点空白区关闭」专用（卡片中心=阅读 no-op，不可再点中）。 */
+async function tapCornerById(page, id, inset = 12) {
+  const info = await page.evaluate(([i, ins]) => {
+    const h = window.__h;
+    const a = h.getHitAreasForTest().find((z) => z.id === i);
+    if (!a) return null;
+    const t = h.getTransformInfo();
+    const c = document.querySelectorAll('canvas')[1] || document.querySelector('canvas');
+    const r = c.getBoundingClientRect();
+    const drawnX = t.ox + t.scale * (a.x + a.w - ins);
+    const drawnY = t.oy + t.scale * (a.y + a.h - ins);
+    const sx = r.width / Math.max(1, c.clientWidth);
+    const sy = r.height / Math.max(1, c.clientHeight);
+    return { px: r.left + drawnX * sx, py: r.top + drawnY * sy };
+  }, [id, inset]);
+  if (!info) return null;
+  await page.mouse.click(info.px, info.py);
+  await page.waitForTimeout(200);
+  return info;
+}
+
 // ---------- 浏览器层文本录制（不改 app 源码） ----------
 const INIT_SCRIPT = `(() => {
   window.__txt = [];
@@ -111,7 +132,7 @@ async function hostState(page) {
     const h = window.__h;
     return {
       slots: h.fusionSlots ? h.fusionSlots.slice() : null,
-      result: h.fusionResult ? { product: h.fusionResult.product, until: h.fusionResult.until, now: h.nowMs } : null,
+      result: h.fusionResult ? { product: h.fusionResult.product, now: h.nowMs } : null,
       glow: h.fusionGlow ? { defId: h.fusionGlow.defId, until: h.fusionGlow.until, now: h.nowMs } : null,
     };
   });
@@ -330,6 +351,7 @@ async function runViewport(browser, vp) {
   const buildBefore = await readBuild(page);
   await clearTexts(page);
   await tapVisibleById(page, 'backpack-fuse');
+  await page.waitForTimeout(340); // 280ms pending → 结果卡（G1-G7 读数窗口；与 feedback R2.1 driver 的 420ms 同法）
   const afterFuse = await hostState(page);
   log(afterFuse.result && afterFuse.result.product, `[${tag}] G1. 结果卡出现（含产出 defId）`, afterFuse.result ? afterFuse.result.product : 'null');
   const after = await readInvAll(page);
@@ -345,9 +367,18 @@ async function runViewport(browser, vp) {
   log(resTexts.some((t) => t === '合成成功'), `[${tag}] G6. 结果卡文案「合成成功」`);
   log(resTexts.some((t) => t === '2★'), `[${tag}] G7. 结果卡星级「2★」`);
   log(!find(await areas(page), 'modal-veil'), `[${tag}] G8. 合成走页内结果卡（无 Modal）`);
+  // R2.2：底层保留 + 不自动关 + 点卡不关（真实交互）
+  log(resTexts.some((t) => t === '部件合成'), `[${tag}] G9. 结果帧底层页面保留（非全黑）`);
+  await page.waitForTimeout(1200); // 静置远超旧 950ms 自动关窗口
+  const persist = await hostState(page);
+  log(persist.result && persist.result.product === product, `[${tag}] G10. 无输入 1.2s 后结果卡仍展示（不自动关）`, persist.result ? persist.result.product : 'null');
+  const beforeCard = await hostState(page);
+  await tapVisibleById(page, 'fusion-result-card'); // 卡中心命中=阅读态 no-op
+  const afterCard = await hostState(page);
+  log(afterCard.result && afterCard.result.product === beforeCard.result.product, `[${tag}] G11. 点卡本体 → 结果卡不关闭（阅读态）`);
 
-  // H. 点击跳过结果卡 → 新产出短暂暖金高亮（fusionGlow.defId = 产物）
-  await tapVisibleById(page, 'fusion-result-dismiss');
+  // H. 点结果卡外空白区关闭（R2.2：右下角空白；点卡本体为阅读 no-op）→ 新产出短暂暖金高亮
+  await tapCornerById(page, 'fusion-result-dismiss');
   const glowState = await hostState(page);
   log(glowState.glow && glowState.glow.defId === product, `[${tag}] H1. 新产出短暂暖金高亮（${product}）`, glowState.glow ? glowState.glow.defId : 'null');
 

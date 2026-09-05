@@ -79,6 +79,27 @@ async function tapVisibleById(page, id) {
   return info;
 }
 
+/** R2.2：命中区右下角（内缩 inset）真实像素点击——结果卡「点空白区关闭」专用（卡片中心=阅读 no-op，不可再点中）。 */
+async function tapCornerById(page, id, inset = 12) {
+  const info = await page.evaluate(([i, ins]) => {
+    const h = window.__h;
+    const a = h.getHitAreasForTest().find((z) => z.id === i);
+    if (!a) return null;
+    const t = h.getTransformInfo();
+    const c = document.querySelectorAll('canvas')[1] || document.querySelector('canvas');
+    const r = c.getBoundingClientRect();
+    const drawnX = t.ox + t.scale * (a.x + a.w - ins);
+    const drawnY = t.oy + t.scale * (a.y + a.h - ins);
+    const sx = r.width / Math.max(1, c.clientWidth);
+    const sy = r.height / Math.max(1, c.clientHeight);
+    return { px: r.left + drawnX * sx, py: r.top + drawnY * sy };
+  }, [id, inset]);
+  if (!info) return null;
+  await page.mouse.click(info.px, info.py);
+  await page.waitForTimeout(180);
+  return info;
+}
+
 // ---------- 浏览器层文本录制（不改 app 源码） ----------
 const INIT_SCRIPT = `(() => {
   window.__txt = [];
@@ -102,7 +123,7 @@ async function hostState(page) {
     const h = window.__h;
     return {
       slots: h.fusionSlots ? h.fusionSlots.slice() : null,
-      result: h.fusionResult ? { product: h.fusionResult.product, until: h.fusionResult.until, now: h.nowMs } : null,
+      result: h.fusionResult ? { product: h.fusionResult.product, now: h.nowMs } : null,
       glow: h.fusionGlow ? { defId: h.fusionGlow.defId, until: h.fusionGlow.until, now: h.nowMs } : null,
       pending: h.fusionPending ? { until: h.fusionPending.until, now: h.nowMs } : null,
       backpackPage: h.backpackPage,
@@ -322,15 +343,34 @@ async function runViewport(browser, vp) {
   const got = resTxt.filter((t) => /^获得：/.test(t));
   log(got.length === 1, `[${tag}] S11c. 「获得：…」行存在`, got.join('|') || '(none)');
   log(resTxt.some((t) => t === '2★'), `[${tag}] S11d. 星级标注「2★」`);
-  log(resTxt.some((t) => t === '点击任意处继续'), `[${tag}] S11e. 「点击任意处继续」可读`);
+  log(resTxt.some((t) => t === '点击空白处继续'), `[${tag}] S11e. 「点击空白处继续」可读`);
+  // R2.2 结果层三连（真实交互；非黑底 + 不自动关 + 点卡不关）
+  log(
+    resTxt.some((t) => t === '部件合成') && resTxt.some((t) => /^‹ 返回车库/.test(t)),
+    `[${tag}] S11f. 结果帧底层页面保留（标题/返回可见，非全黑）`,
+  );
+  await page.waitForTimeout(1200); // 静置远超旧 950ms 自动关窗口
+  const persistState = await hostState(page);
+  log(
+    persistState.result && persistState.result.product === product,
+    `[${tag}] S11g. 无输入 1.2s 后结果卡仍展示（不自动关）`,
+    persistState.result ? persistState.result.product : 'null',
+  );
+  const beforeCardTap = await hostState(page);
+  await tapVisibleById(page, 'fusion-result-card'); // 卡中心命中=阅读态 no-op
+  const afterCardTap = await hostState(page);
+  log(
+    afterCardTap.result && afterCardTap.result.product === beforeCardTap.result.product,
+    `[${tag}] S11h. 点卡本体 → 结果卡不关闭（阅读态）`,
+  );
   const tBefore = totals(before);
   const tAfter = totals(after);
   log(tAfter.one === tBefore.one - 5, `[${tag}] S14a. 1★ 总数 -5（原子扣料）`, `${tBefore.one}→${tAfter.one}`);
   log(tAfter.two === tBefore.two + 1, `[${tag}] S14b. 2★ 总数 +1`, `${tBefore.two}→${tAfter.two}`);
 
-  // S12 关闭结果卡
+  // S12 关闭结果卡（R2.2：点卡片外的空白区——右下角；点卡本体为阅读 no-op）
   await clearTexts(page);
-  await tapVisibleById(page, 'fusion-result-dismiss');
+  await tapCornerById(page, 'fusion-result-dismiss');
   // S13 关闭后：跳产物所在页 + 「新获得」高亮
   const glowState = await hostState(page);
   log(glowState.glow && glowState.glow.defId === product, `[${tag}] S13a. 新产出高亮（glow=产物）`, glowState.glow ? glowState.glow.defId : 'null');
