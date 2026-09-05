@@ -135,6 +135,58 @@ interface HitArea {
   h: number;
 }
 
+/**
+ * F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1｜合成页统一布局（绘制与 hitArea 同源消费）。
+ * 由 computeFusionLayout 每帧计算一次：header/tabs/status/grid/pager/tray/action 全部区域。
+ */
+interface FusionLayout {
+  header: Rect;
+  backBtn: Rect;
+  titleX: number;
+  tabs: Array<{ id: string; v: 'combat' | 'movement' | 'body'; label: string; x: number; y: number; w: number; h: number }>;
+  statusY: number;
+  mainSize: number;
+  subSize: number;
+  gridTop: number;
+  cardH: number;
+  cols: number;
+  rows: number;
+  pageSize: number;
+  pager: Rect | null;
+  tray: Rect;
+  slots: Rect[];
+  n5X: number;
+  action: Rect;
+  autoBtn: Rect;
+  fuseBtn: Rect;
+  previewX: number;
+  previewY: number;
+  barRect: Rect;
+  toastRight: number;
+  toastY: number;
+}
+
+/** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成页部件卡数据（三层信息层级用）。 */
+interface FusionCardItem {
+  defId: string;
+  name: string;
+  one: number;
+  two: number;
+  eqN: number;
+  available: number;
+  owned: boolean;
+  usedN: number;
+  isBody: boolean;
+}
+
+/** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：L3 唯一主状态着色（可用=中性 / 已装备=蓝 / 未拥有=弱红）。 */
+function fusionStatusColor(statusTxt: string): string {
+  if (statusTxt === '已装备') return C.blue;
+  if (statusTxt === '未拥有') return C.red;
+  return C.textDim;
+}
+
+
 interface GarageOpt {
   v: string;
   t: string;
@@ -396,6 +448,26 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   private fusionResult: { product: string; until: number; token: number } | null = null;
   /** F-GARAGE-FUSION-UX-R2：新产出部件列表暖金高亮（短暂）。 */
   private fusionGlow: { defId: string; until: number; token: number } | null = null;
+  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成成功后产出卡的「新获得」角标（~2s，随 glow 展示）。 */
+  private fusionNew: { defId: string; until: number; token: number } | null = null;
+  /**
+   * F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：行内即时反馈条（加入/移除/自动放入材料），
+   * 持续 ~1.5s、不新增 Modal、不遮挡操作（绘制在状态行右侧空位/底栏提示位）。
+   */
+  private fusionToast: { text: string; until: number; token: number } | null = null;
+  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：加入/自动放入的瞬时闪亮（对应卡片 + 对应槽位 ~220ms）。 */
+  private fusionFlash: { defIds: string[]; until: number; token: number } | null = null;
+  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成按钮「合成中…」瞬时态（~260ms 后弹结果卡）。 */
+  private fusionPending: { until: number; token: number } | null = null;
+  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：关闭结果卡后待定位的产出 defId（draw 期按 PAGE 翻页，同源）。 */
+  private fusionJumpTo: string | null = null;
+  /**
+   * F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成页内 RC 版号水印独立位（页头行右缘，布局同源）。
+   * drawBackpackPage 每帧计算 {right, cy}（layout 空间）；drawBuildBadge 仅当 metaPage='backpack'
+   * 时消费——不压「战斗/移动/车身」分类页签与返回按钮；调试包与「测试材料×5」并排（在其左侧 gap≥6）。
+   * 其它页面（含 garage/Home/battle）仍用全局锚点，零影响。
+   */
+  private fusionBadgeSpot: { right: number; cy: number } | null = null;
   /** F-GARAGE-FUSION-UX-R2：结果/高亮定时令牌——导航/切分类时 ++ 使迟到回调作废。 */
   private fusionToken = 0;
   /** F-UX-2C：Backpack 卡片分页（[上一页]/[下一页]；合成后仍停当前页） */
@@ -757,9 +829,18 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const h = size + pad * 2;
     // 锚点：统一顶部三区契约的 badge 低干扰位（避开左侧信息区/头像/货币/返回/HP/状态）。
     // 越界时右/下对齐钳回安全区（完整包围盒不超 safeArea）。
+    // F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成页（metaPage='backpack'）由页面布局提供独立位
+    // （页头行右缘；layout → CSS 用同一 stage 变换），不再使用全局锚点——避免压分类页签 hitArea。
     const areas = computeTopSafeAreas({ w: W, h: H }, ins, this.profile);
     let bx = areas.badge.x;
     let by = areas.badge.y;
+    const spot = this.metaPage === 'backpack' ? this.fusionBadgeSpot : null;
+    if (spot) {
+      bx = this.ox + this.scale * (spot.right - w);
+      by = this.oy + this.scale * (spot.cy - h / 2);
+    }
+    if (bx < ins.left) bx = ins.left;
+    if (by < ins.top) by = ins.top;
     if (bx + w > W - ins.right) bx = Math.max(ins.left, W - ins.right - w);
     if (by + h > H - ins.bottom) by = Math.max(ins.top, H - ins.bottom - h);
     ctx.save();
@@ -1572,9 +1653,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     if (id.startsWith('fusion-slot:')) {
       // F-GARAGE-FUSION-UX-R2：点已放入的材料槽 → 移除该件材料（可再点其它卡片补入替换）
+      // F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：移除即行内反馈「已移除：xxx（n/5）」
       const i = Number(id.slice('fusion-slot:'.length));
       if (Number.isFinite(i) && i >= 0 && i < 5) {
+        const removed = this.fusionSlots[i];
         this.fusionSlots[i] = null;
+        if (removed) {
+          this.fusionToastFor(removed, 'remove');
+          this.fusionToken += 1;
+          const token = this.fusionToken;
+          this.fusionFlash = { defIds: [removed], until: this.nowMs + 220, token };
+        }
       }
       this.draw();
       return;
@@ -1587,8 +1676,27 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
     if (id === 'fusion-result-dismiss') {
       // F-GARAGE-FUSION-UX-R2：结果卡点击跳过（回到列表；新产出暖金高亮保留至到期）
+      // F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：关闭后自动切到产出卡所在分页 + 「新获得」高亮 ~2s
+      const product = this.fusionResult?.product ?? null;
       this.fusionToken += 1;
+      const token = this.fusionToken;
       this.fusionResult = null;
+      this.fusionPending = null;
+      if (product) {
+        this.fusionJumpTo = product; // draw 期按实际 PAGE 翻到产物所在页（布局同源）
+        // 关闭后金色高亮/「新获得」重置为完整 ~2s（玩家刚关闭，理应看清产出）
+        this.fusionGlow = { defId: product, until: this.nowMs + 2000, token };
+        this.fusionNew = { defId: product, until: this.nowMs + 2000, token };
+        if (typeof setTimeout === 'function') {
+          setTimeout(() => {
+            if (this.fusionToken === token) {
+              this.fusionGlow = null;
+              this.fusionNew = null;
+              this.draw();
+            }
+          }, 2100);
+        }
+      }
       this.draw();
       return;
     }
@@ -1742,12 +1850,60 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return null;
   }
 
-  /** 清空材料槽 + 结果卡/高亮，并作废迟到定时器（不改 Build/仓库/其它页状态）。 */
+  /** 清空材料槽 + 结果卡/高亮/新获得/行内反馈/跳转标记，并作废迟到定时器（不改 Build/仓库/其它页状态）。 */
   private clearFusionSession(): void {
     this.fusionSlots = [null, null, null, null, null];
     this.fusionToken += 1;
     this.fusionResult = null;
     this.fusionGlow = null;
+    this.fusionNew = null;
+    this.fusionToast = null;
+    this.fusionPending = null;
+    this.fusionFlash = null;
+    this.fusionJumpTo = null;
+  }
+
+  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：卡片+槽瞬时闪亮（~220ms）。 */
+  private showFusionFlash(defIds: string[]): void {
+    this.fusionToken += 1;
+    const token = this.fusionToken;
+    this.fusionFlash = { defIds, until: this.nowMs + 220, token };
+    if (typeof setTimeout === 'function') {
+      setTimeout(() => {
+        if (this.fusionToken === token) {
+          this.fusionFlash = null;
+          this.draw();
+        }
+      }, 260);
+    }
+  }
+
+  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：行内反馈展示（~1.5s；token 作废迟到回调）。 */
+  private showFusionToast(text: string, ms = 1500): void {
+    this.fusionToken += 1;
+    const token = this.fusionToken;
+    this.fusionToast = { text, until: this.nowMs + ms, token };
+    if (typeof setTimeout === 'function') {
+      setTimeout(() => {
+        if (this.fusionToken === token) {
+          this.fusionToast = null;
+          this.draw();
+        }
+      }, ms + 60);
+    }
+  }
+
+  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：材料槽加入/移除/自动放入后统一行内反馈（含 N/5 增强）。 */
+  private fusionToastFor(defId: string | null, action: 'add' | 'remove' | 'auto'): void {
+    if (action === 'auto') {
+      this.showFusionToast('已自动放入5件材料');
+      return;
+    }
+    if (!defId) return;
+    const name = this.partDisplayName(defId);
+    const n = this.fusionFilledCount();
+    const verb = action === 'add' ? '已放入' : '已移除';
+    this.showFusionToast(`${verb}：${name}（${n}/5）`);
   }
 
   /** 已放入材料件数（0..5） */
@@ -1767,7 +1923,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return Math.max(0, getCount(st.inventory, defId, star) - equippedCount(defId, star, st.draft ?? null));
   }
 
-  /** 点卡 = 尝试放入 1 件材料（手动选择可选；失败静默，槽位与卡片状态保持） */
+  /** 点卡 = 尝试放入 1 件材料（手动选择可选；失败静默，槽位与卡片状态保持）。成功 → 行内反馈 + 闪亮。 */
   private tryAddMaterial(defId: string): void {
     const cat = this.fusionCategory();
     if (!cat || this.fusionResult) return; // Body 无合成；结果卡展示期间不响应
@@ -1776,29 +1932,39 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const slot = this.fusionSlots.indexOf(null);
     if (slot < 0) return; // 已满 5 → 先点槽移除，再点其它卡片替换
     this.fusionSlots[slot] = defId;
+    this.fusionToastFor(defId, 'add');
+    this.showFusionFlash([defId]);
   }
 
-  /** 「自动放入」：一键把 5 个材料槽填满（确定性优先级见 core.autoPickFusionMaterials） */
+  /** 「自动放入」：一键把 5 个材料槽填满（确定性优先级见 core.autoPickFusionMaterials）。
+   *  成功 → 明确列出被放入的 5 件 + 卡片/槽位同步高亮 + 「已自动放入5件材料」。 */
   private autoFillFusion(): void {
     const cat = this.fusionCategory();
     const st = this.lastState;
     if (!cat || !st || this.fusionResult) return;
     const picked = autoPickFusionMaterials(st.inventory, cat, st.draft ?? null, 1, 5);
+    if (picked.length === 0) return;
     const filled: Array<string | null> = [null, null, null, null, null];
     for (let i = 0; i < 5 && i < picked.length; i++) filled[i] = picked[i];
     this.fusionSlots = filled;
+    this.fusionToastFor(null, 'auto');
+    this.showFusionFlash(picked);
   }
 
   /** 正式合成（暖金主按钮；材料槽满 5 才注册命中）：
-   *  派发 onFuseCategory → 成功 → 清槽 + 页内结果卡（0.9s 自动回落、可点击跳过）。
-   *  连续点击只执行一次：首次成功后按钮不再注册；结果卡期间二次点击落在跳过区。 */
+   *  派发 onFuseCategory → 成功 → 「合成中…」瞬时态（~260ms）→ 页内结果卡 → 关闭后定位新产出。
+   *  连续点击只执行一次：首次成功后按钮进入 pending/结果卡，不再重复扣除。 */
   private runFusion(): void {
     const cat = this.fusionCategory();
     const st = this.lastState;
     if (!cat || !st) return;
-    if (this.fusionResult) return;
+    if (this.fusionResult || this.fusionPending) return;
     if (this.fusionFilledCount() !== 5) return;
     const materials = this.fusionSlots.slice() as string[];
+    // 「合成中…」瞬时态：先让玩家看到状态切换，再在 ~260ms 后弹结果卡（同步事务已完成）。
+    this.fusionToken += 1;
+    const ptoken = this.fusionToken;
+    this.fusionPending = { until: this.nowMs + 260, token: ptoken };
     const res = this.actions?.onFuseCategory?.(materials, cat, 1) ?? null;
     if (!res) {
       // 失败（防御：满5时 core 校验通过，理论不可达）→ 清空让玩家重选，绝不扣材料
@@ -1806,16 +1972,27 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.draw();
       return;
     }
-    this.showFusionResult(res.product);
+    if (typeof setTimeout === 'function') {
+      setTimeout(() => {
+        if (this.fusionToken === ptoken) {
+          this.fusionPending = null;
+          this.showFusionResult(res.product);
+        }
+      }, 280);
+    } else {
+      this.fusionPending = null;
+      this.showFusionResult(res.product);
+    }
   }
 
-  /** 页内合成结果卡（材料槽收拢清空 → 中央产出卡 → ~0.9s 回落 → 列表新产出暖金高亮） */
+  /** 页内合成结果卡（材料槽收拢清空 → 中央产出卡 ≥0.8s 自动回落、可点击跳过 → 回列表定位新产出）。 */
   private showFusionResult(product: string): void {
     this.fusionSlots = [null, null, null, null, null];
     this.fusionToken += 1;
     const token = this.fusionToken;
     this.fusionResult = { product, until: this.nowMs + 900, token };
-    this.fusionGlow = { defId: product, until: this.nowMs + 1600, token };
+    this.fusionGlow = { defId: product, until: this.nowMs + 2000, token };
+    this.fusionNew = { defId: product, until: this.nowMs + 2000, token };
     if (typeof setTimeout === 'function') {
       setTimeout(() => {
         if (this.fusionToken === token) {
@@ -1826,9 +2003,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       setTimeout(() => {
         if (this.fusionToken === token) {
           this.fusionGlow = null;
+          this.fusionNew = null;
           this.draw();
         }
-      }, 1650);
+      }, 2100);
     }
     this.draw();
   }
@@ -3195,8 +3373,9 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     }
   }
 
-  /** F-GARAGE-BUILD-BOARD-P0：部件 mini 简图（按类别：车身=小车 / 轮=圆 / 武器=炮管 / 辅助=方块）。 */
-  private drawPartIcon(v: string, cx: number, cy: number, s: number, locked: boolean): void {
+  /** F-GARAGE-BUILD-BOARD-P0：部件 mini 简图（按类别：车身=小车 / 轮=圆 / 武器=炮管 / 辅助=方块）。
+   *  micro=true 仅合成页消费——基形之上叠加 defId 微型差异符（fusionIconMicro），装配带等页面零改动。 */
+  private drawPartIcon(v: string, cx: number, cy: number, s: number, locked: boolean, micro = false): void {
     const ctx = this.ctx;
     const col = locked ? 'rgba(140,150,170,0.55)' : V.textPrimary;
     ctx.save();
@@ -3300,7 +3479,106 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       ctx.arc(cx, cy, s * 0.75, 0, Math.PI * 2);
       ctx.fill();
     }
+    if (micro) this.fusionIconMicro(defId, cx, cy, s, col);
     ctx.restore();
+  }
+
+  /**
+   * F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成页图标 defId 微型差异符（每部件 ≤3 笔小特征）。
+   *  - 只在合成页（材料槽/卡片/结果卡）调用：装配带 / preview 等既有简图零改动（防截图回归）；
+   *  - 基形（武器炮管 / 辅助方块 / 轮圆 / 车身轮廓）之上叠加——不同部件可直接区分图标（T16）；
+   *  - 坐标相对 (cx,cy)×s，全部收在 ±1.2s 内，不越出卡片/槽位图标区与右侧文字预留。
+   */
+  private fusionIconMicro(defId: string, cx: number, cy: number, s: number, col: string): void {
+    const ctx = this.ctx;
+    const seg = (x1: number, y1: number, x2: number, y2: number): void => {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = Math.max(1, s * 0.1);
+      ctx.beginPath();
+      ctx.moveTo(cx + x1 * s, cy + y1 * s);
+      ctx.lineTo(cx + x2 * s, cy + y2 * s);
+      ctx.stroke();
+    };
+    const bar = (x: number, y: number, w: number, h: number): void => ctx.fillRect(cx + x * s, cy + y * s, w * s, h * s);
+    const tri = (p: Array<[number, number]>): void => {
+      ctx.beginPath();
+      ctx.moveTo(cx + p[0][0] * s, cy + p[0][1] * s);
+      for (let i = 1; i < p.length; i++) ctx.lineTo(cx + p[i][0] * s, cy + p[i][1] * s);
+      ctx.closePath();
+      ctx.fill();
+    };
+    const ring = (dx: number, dy: number, r: number): void => {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = Math.max(1, s * 0.1);
+      ctx.beginPath();
+      ctx.arc(cx + dx * s, cy + dy * s, r * s, 0, Math.PI * 2);
+      ctx.stroke();
+    };
+    switch (defId) {
+      case 'cannon':
+        break; // 基准炮管（默认外形即 cannon）
+      case 'machineGun':
+        seg(-0.25, -0.3, -0.25, 0.3); // 枪管膛线 ×2
+        seg(0.28, -0.3, 0.28, 0.3);
+        break;
+      case 'laser':
+        ring(0.85, 0, 0.44); // 空心能量口
+        break;
+      case 'hammer':
+        bar(-0.95, -0.78, 0.85, 0.2); // 锤头上下颚
+        bar(-0.95, 0.58, 0.85, 0.2);
+        break;
+      case 'spear':
+        tri([
+          [0.72, -0.34],
+          [1.18, 0],
+          [0.72, 0.34],
+        ]); // 矛尖
+        break;
+      case 'rammer':
+        bar(0.62, -0.66, 0.3, 1.32); // 前撞板
+        break;
+      case 'saw':
+        ring(0.85, 0, 0.46); // 圆盘齿缘（四向短齿）
+        seg(0.85, -0.62, 0.85, -0.5);
+        seg(0.85, 0.5, 0.85, 0.62);
+        seg(0.35, 0, 0.47, 0);
+        seg(1.23, 0, 1.35, 0);
+        break;
+      case 'shotgun':
+        bar(-1.0, -0.86, 1.7, 0.24); // 并排双管
+        break;
+      case 'flamethrower':
+        tri([
+          [0.62, -0.3],
+          [1.12, 0],
+          [0.62, 0.3],
+        ]); // 喷嘴锥
+        break;
+      case 'pushRod':
+        bar(-0.15, -0.08, 1.18, 0.16); // 前伸推杆
+        break;
+      case 'thruster':
+        ring(0, 0, 0.42); // 喷口 + 尾焰楔
+        tri([
+          [0.5, -0.26],
+          [0.96, 0],
+          [0.5, 0.26],
+        ]);
+        break;
+      case 'smallWheel':
+        break; // 基准小轮（默认圆）
+      case 'largeWheel':
+        ring(0, 0, 0.46); // 大轮：外圈
+        break;
+      case 'heavyWheel':
+        ring(0, 0, 0.46);
+        seg(-0.46, 0, 0.46, 0); // 重轮：外圈 + 十字辐
+        seg(0, -0.46, 0, 0.46);
+        break;
+      default:
+        break; // 未知 defId 不加特征（车身已有独立轮廓）
+    }
   }
 
   /**
@@ -3317,18 +3595,142 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    */
 
   /**
-   * F-GARAGE-FUSION-UX-R2｜部件合成页（背包二级页重构）：
-   * - 顶部：‹ 返回车库（nav:garage，保留 Result-adjust 上下文）+ 标题「部件合成」+ 分类 tabs
-   *   （战斗 / 移动 / 车身）；RC/E2E/DEV 的「测试材料×5」只在页顶右上出现（不占正式核心按钮位）；
-   * - 中部：图标部件卡网格（名称 / 星级 / 数量 ×N / 可用数量 / 已装备标识 / 可选灰化 /
-   *   已放入暖金「已选N」）；分页 + [上一页]/[下一页] 页码，禁止长距拖动；
-   * - 底部：固定合成栏（5 材料槽 + 已选 N/5 + 「自动放入」次按钮 + 「随机获得X类2★」预览
-   *   + 暖金「合成」主按钮）；车身分类无合成栏（车身不参与合成，无合成入口）；
-   * - 默认行为：进入分类直接显示「可合成 1 次」/「还差 N 件1★部件」（无空面板）；
-   *   默认不自动消耗；手动选择可选；正式主流程 = 「自动放入」→「合成」两次核心点击。
-   * - 合成结果在页内完成：材料槽清空 → 中央产出卡（图标/名称/2★/合成成功）≥0.9s 可点跳过
-   *   → 回列表 + 新产出短暂暖金高亮 → 数量星级即时刷新 → 仍够材料显示「继续合成」。
+   * F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1｜部件合成页（统一布局函数 + 信息层级重构）。
+   *
+   * 布局单一来源：computeFusionLayout 输出全部 7 区（safe header / category tabs /
+   * fusion status row / card grid / pagination strip / material tray / action area），
+   * 绘制与 hitArea 全部消费同一份几何——禁止另行手算绘制/点击坐标。
+   * - 字号下限：主要文字最终 ≥12 logical px、次要 ≥10（mobile-short 由 fontScale 折算，size 参数取足）；
+   *   极短屏（mobile-short）优先减次要信息（2★ 并入星级行、卡内合并状态行），不无限缩字。
+   * - 顶部：RC badge 由全局 drawBuildBadge 负责（独立不可交互，见 F-WX-RC-SAFE-BADGE-P0）；
+   *   「测试材料×5」仅调试构建出现，锚定 contentRect 右缘（contentRect 已按 insets 收缩 → 避让微信胶囊）。
+   * - 卡片三层（L1 图标+短名+右上勾/已选数；L2 星级×N；L3 唯一主状态：可用N/已装备/未拥有）。
+   * - 底部合成栏：5 个可辨识材料槽（真实图标+缩写+重复 ×N）+ N/5 + 结果预期 + 自动放入/合成状态机；
+   *   加入/移除/自动放入有行内反馈（toast 显示于状态行右侧，~1.5s，不遮操作、无 Modal）。
    */
+
+  /** 部件短名（≤2 字；槽/卡稳定展示，避免长名挤压相邻卡）。未知 defId 回退显示名前 2 字。 */
+  private fusionShortName(defId: string): string {
+    const known: Record<string, string> = {
+      cannon: '炮',
+      hammer: '锤',
+      pushRod: '推杆',
+      spear: '刺',
+      laser: '镭射',
+      rammer: '冲锤',
+      saw: '圆锯',
+      shotgun: '霰弹',
+      thruster: '推进',
+      machineGun: '机枪',
+      flamethrower: '喷火',
+      smallWheel: '小轮',
+      largeWheel: '大轮',
+      heavyWheel: '重轮',
+    };
+    const k = known[defId];
+    if (k) return k;
+    return (this.partDisplayName(defId) || defId).slice(0, 2);
+  }
+
+  private computeFusionLayout(
+    c: Rect,
+    opts: { short: boolean; defCount: number; isBody: boolean },
+  ): FusionLayout {
+    const short = opts.short;
+    const padX = short ? 6 : 10;
+    const x0 = c.x + padX;
+    const w0 = Math.max(80, c.w - padX * 2);
+    // 1) safe header（返回按钮 + 标题 + 可选测试材料）
+    const hh = short ? 24 : 36;
+    const hY = c.y + (short ? 2 : 6);
+    const backBtn: Rect = { x: x0, y: hY, w: short ? 64 : 92, h: hh };
+    const titleX = backBtn.x + backBtn.w + (short ? 6 : 10);
+    const header: Rect = { x: x0, y: hY, w: w0, h: hh };
+    // 2) category tabs
+    const th = short ? 20 : 30;
+    const tY = hY + hh + (short ? 2 : 4);
+    const tgap = short ? 4 : 8;
+    const tabW = (w0 - tgap * 2) / 3;
+    const tabs: FusionLayout['tabs'] = [
+      { id: 'bfilter:combat', v: 'combat', label: '战斗', x: x0, y: tY, w: tabW, h: th },
+      { id: 'bfilter:movement', v: 'movement', label: '移动', x: x0 + (tabW + tgap), y: tY, w: tabW, h: th },
+      { id: 'bfilter:body', v: 'body', label: '车身', x: x0 + (tabW + tgap) * 2, y: tY, w: tabW, h: th },
+    ];
+    // 3) fusion status row（主信息左 / 次信息或行内反馈右；纯文字行）
+    const sY = tY + th + (short ? 1 : 3);
+    const sH = short ? 16 : 18;
+    // 6+7) material tray + action area（底部固定合成栏）
+    const barH = short ? 74 : 100;
+    const barY = c.y + c.h - barH - (short ? 2 : 6);
+    const trayH = short ? 26 : 36;
+    const tray: Rect = { x: x0, y: barY + (short ? 3 : 7), w: w0, h: trayH };
+    const slotGap = short ? 3 : 6;
+    const n5W = short ? 40 : 60;
+    const slotAreaW = Math.max(1, tray.w - n5W - (short ? 4 : 10));
+    const slotW = Math.max(short ? 44 : 56, Math.min(short ? 56 : 104, Math.floor((slotAreaW - slotGap * 4) / 5)));
+    const slotH = short ? 22 : 30;
+    const slotY = tray.y + Math.max(0, Math.floor((trayH - slotH) / 2));
+    const slots: Rect[] = [];
+    for (let i = 0; i < 5; i++) slots.push({ x: tray.x + i * (slotW + slotGap), y: slotY, w: slotW, h: slotH });
+    const n5X = Math.min(tray.x + tray.w - n5W, slots[4].x + slotW + (short ? 4 : 10));
+    // 5) card grid（可用高 = tray 上缘 − 状态行 − 分页条）
+    const gap = short ? 4 : 8;
+    const gridTop = sY + sH + (short ? 0 : 2);
+    const gridBotRaw = tray.y - (short ? 3 : 6);
+    const cols = short ? 4 : Math.max(3, Math.min(8, Math.floor((w0 + gap) / (short ? 96 : 168))));
+    const needPages = Math.ceil(opts.defCount / Math.max(1, cols));
+    const hasPager = needPages > 1;
+    const pagerH = hasPager ? (short ? 13 : 20) : 0;
+    const gridBot = gridBotRaw - (hasPager ? pagerH + (short ? 1 : 2) : 0);
+    const rowsH = Math.max(1, gridBot - gridTop - gap);
+    const needRows = Math.ceil(opts.defCount / cols);
+    // 行数：空间足够放 2 行（含下限卡高）才 2 行；否则 1 行
+    const cardHMin = short ? 38 : 54;
+    const twoRowCap = Math.floor((rowsH - gap) / 2);
+    const rows = twoRowCap >= cardHMin && needRows > 1 ? Math.min(2, needRows) : 1;
+    const cardH = rows > 1 ? twoRowCap : Math.min(short ? 44 : 92, Math.max(cardHMin, rowsH));
+    const pageSize = cols * rows;
+    const pager: Rect | null = hasPager
+      ? { x: x0, y: gridBot + (short ? 1 : 2), w: w0, h: pagerH }
+      : null;
+    // 4) action area（tray 下方：预览 + 自动放入 + 合成）
+    const aY = tray.y + trayH + (short ? 2 : 6);
+    const aH = Math.max(1, barY + barH - aY - (short ? 2 : 4));
+    const bh = Math.max(short ? 24 : 32, Math.min(short ? 28 : 40, aH));
+    const by = aY + Math.max(0, aH - bh);
+    const fuseW = short ? 82 : 124;
+    const autoW = short ? 64 : 96;
+    const fuseBtn: Rect = { x: x0 + w0 - fuseW, y: by, w: fuseW, h: bh };
+    const autoBtn: Rect = { x: fuseBtn.x - autoW - (short ? 6 : 10), y: by, w: autoW, h: bh };
+    const action: Rect = { x: x0, y: aY, w: w0, h: aH };
+    return {
+      header,
+      backBtn,
+      titleX,
+      tabs,
+      statusY: sY,
+      gridTop,
+      cardH,
+      cols,
+      rows,
+      pageSize,
+      pager,
+      tray,
+      slots,
+      n5X,
+      action,
+      autoBtn,
+      fuseBtn,
+      previewX: x0 + (short ? 2 : 6),
+      previewY: by + bh / 2,
+      barRect: { x: x0, y: barY, w: w0, h: barH },
+      toastRight: x0 + w0 - 2,
+      toastY: sY + sH / 2,
+      mainSize: short ? 15 : 15,
+      subSize: short ? 13 : 13,
+    };
+  }
+
   private drawBackpackPage(state: PlayerUIState, layout: MobileGarageLayout): void {
     const c = layout.contentRect;
     const draft = state.draft ?? null;
@@ -3339,77 +3741,72 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const w0 = Math.max(80, c.w - pad * 2);
     this.panel(c.x, c.y, c.w, c.h, V.panelSolid);
 
-    // —— 结果卡（页内中央；覆盖本页交互；点击跳过） ——
+    // —— 分类与数据准备（几何单一来源见 computeFusionLayout） ——
+    const isBody = this.backpackFilter === 'body';
+    const cat: FusionCategory | null = isBody ? null : (this.backpackFilter as FusionCategory);
+    const defIds: string[] =
+      this.backpackFilter === 'combat'
+        ? [...OFFICIAL_PARTS]
+        : this.backpackFilter === 'movement'
+          ? [...OFFICIAL_MOVEMENTS]
+          : [...OFFICIAL_BODIES];
+    const catAvail = cat ? fusionCategoryAvailable(inv, cat, draft, 1) : 0;
+    const gl = this.computeFusionLayout(c, { short, defCount: defIds.length, isBody });
+    const equipped = equippedSlots(draft);
+
+    // —— RC 版号水印独立位（页头行右缘；调试包与「测试材料」并排）——
+    const rcGrantTM = typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__;
+    const e2eProbeTM = typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__;
+    const devResetTM = DEV_TOOLS_VISIBLE && state.resetDevVisible;
+    const tmShow = (rcGrantTM || e2eProbeTM || devResetTM) && !isBody;
+    const tmW = short ? 64 : 96;
+    const tmX = c.x + c.w - pad - tmW;
+    this.fusionBadgeSpot = {
+      right: tmShow ? tmX - (short ? 6 : 10) : c.x + c.w - pad - 2,
+      cy: gl.backBtn.y + gl.backBtn.h / 2,
+    };
+
+    // —— 结果卡（页内中央；全页遮罩 + 产出卡；点击跳过；展示期不绘制页内容，保证聚焦） ——
     const res = this.fusionResult;
     if (res && this.nowMs <= res.until) {
       this.drawFusionResultCard(c, res.product);
       return;
     }
 
-    // —— 顶行：返回 + 标题 +（RC/E2E/DEV）测试材料 ——
-    const hh = short ? 24 : 38;
-    const yy = c.y + (short ? 3 : 6);
-    this.button(x0, yy, short ? 64 : 92, hh, 'nav:garage', short ? '‹ 返回' : '‹ 返回车库', {});
-    this.text('部件合成', x0 + (short ? 64 : 92) + 8, yy + hh / 2, short ? 13 : 18, C.text, 'left', 700);
-    const rcGrantTM = typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__;
-    const e2eProbeTM = typeof __E2E_INTERNAL_HANDLE__ !== 'undefined' && __E2E_INTERNAL_HANDLE__;
-    const devResetTM = DEV_TOOLS_VISIBLE && state.resetDevVisible;
-    // §七：测试材料×5 仅调试/测试构建可见；不占正式玩家核心按钮位（页顶右上角落小按钮）；
-    // 车身分类（无合成入口）不显示。
-    const tmShow = (rcGrantTM || e2eProbeTM || devResetTM) && this.backpackFilter !== 'body';
+    // 顶行返回 + 标题 + 测试材料（右上锚定 contentRect 右缘 = 安全区右缘，微信胶囊由 insets 避让）
+    this.button(gl.backBtn.x, gl.backBtn.y, gl.backBtn.w, gl.backBtn.h, 'nav:garage', short ? '‹ 返回' : '‹ 返回车库', {});
+    this.text('部件合成', gl.titleX, gl.backBtn.y + gl.backBtn.h / 2, short ? 15 : 18, C.text, 'left', 700);
     if (tmShow) {
-      const tw = short ? 80 : 104;
-      this.button(c.x + c.w - pad - tw, yy, tw, hh, 'backpack-test-material', '测试材料×5', { equipped: true });
+      this.button(tmX, gl.backBtn.y, tmW, gl.backBtn.h, 'backpack-test-material', short ? '测试×5' : '测试材料×5', { active: true });
     }
 
-    // —— 分类 tabs：战斗 / 移动 / 车身 ——
-    const th = short ? 22 : 34;
-    const ty = yy + hh + (short ? 3 : 4);
-    const tgap = short ? 5 : 8;
-    const tabs: Array<{ id: string; label: string; v: 'combat' | 'movement' | 'body' }> = [
-      { id: 'bfilter:combat', label: '战斗', v: 'combat' },
-      { id: 'bfilter:movement', label: '移动', v: 'movement' },
-      { id: 'bfilter:body', label: '车身', v: 'body' },
-    ];
-    const tabW = (w0 - tgap * (tabs.length - 1)) / tabs.length;
-    let tx = x0;
-    for (const t of tabs) {
-      this.button(tx, ty, tabW, th, t.id, t.label, {
+    // 分类 tabs（几何来自统一布局；icon 左侧、文字不重叠）
+    for (const t of gl.tabs) {
+      this.button(t.x, t.y, t.w, t.h, t.id, t.label, {
         active: this.backpackFilter === t.v,
         combat: t.v === 'combat',
         icon: t.v === 'combat' ? 'combat' : t.v === 'movement' ? 'wheel' : 'body',
       });
-      tx += tabW + tgap;
     }
 
-    // —— 状态行（默认直接告知可合成性；无「请选择卡片」空面板） ——
-    const sy = ty + th + (short ? 2 : 3);
-    const isBody = this.backpackFilter === 'body';
-    const cat: FusionCategory | null = isBody ? null : (this.backpackFilter as FusionCategory);
-    const catAvail = cat ? fusionCategoryAvailable(inv, cat, draft, 1) : 0;
-    const statusText = isBody
-      ? '车身不参与合成'
-      : catAvail >= 5
-        ? `可合成 1 次 · 可用 1★材料 ${catAvail} 件`
-        : `还差 ${5 - catAvail} 件1★部件 · 可用 1★材料 ${catAvail} 件`;
-    this.text(statusText, x0 + 2, sy + (short ? 6 : 8), short ? 10 : 13, isBody ? C.textDim : catAvail >= 5 ? C.gold : C.textDim, 'left', 600);
+    // —— 顶部状态行（主/次拆分；行内反馈占用右侧次位 ~1.5s，不新增行、不遮操作） ——
+    const toast = this.fusionToast !== null && this.nowMs <= this.fusionToast.until ? this.fusionToast : null;
+    if (isBody) {
+      this.text('车身不参与合成', x0 + 2, gl.toastY, short ? 15 : 15, C.textDim, 'left', 600);
+    } else if (toast) {
+      const mainTxt = catAvail >= 5 ? `可合成 ${Math.floor(catAvail / 5)} 次` : `还差 ${5 - catAvail} 件1★部件`;
+      this.text(mainTxt, x0 + 2, gl.toastY, gl.mainSize, catAvail >= 5 ? C.gold : C.textDim, 'left', 700);
+      this.text(toast.text, gl.toastRight, gl.toastY, gl.subSize, C.gold, 'right', 700);
+    } else if (catAvail >= 5) {
+      this.text(`可合成 ${Math.floor(catAvail / 5)} 次`, x0 + 2, gl.toastY, gl.mainSize, C.gold, 'left', 700);
+      this.text(`1★材料 ${catAvail} 件`, gl.toastRight, gl.toastY, gl.subSize, C.textDim, 'right', 600);
+    } else {
+      this.text(`还差 ${5 - catAvail} 件1★部件`, x0 + 2, gl.toastY, gl.mainSize, C.textDim, 'left', 600);
+      this.text(`可用 1★材料 ${catAvail} 件`, gl.toastRight, gl.toastY, gl.subSize, C.textDim, 'right', 600);
+    }
 
-    // —— 该分类全部官方 defId（含未获得，可访问） ——
-    let defIds: string[];
-    if (this.backpackFilter === 'combat') defIds = [...OFFICIAL_PARTS];
-    else if (this.backpackFilter === 'movement') defIds = [...OFFICIAL_MOVEMENTS];
-    else defIds = [...OFFICIAL_BODIES];
-    const equipped = equippedSlots(draft);
-    const items: Array<{
-      defId: string;
-      name: string;
-      one: number;
-      two: number;
-      eqN: number;
-      available: number;
-      owned: boolean;
-      usedN: number;
-    }> = [];
+    // —— 卡片数据 ——
+    const items: FusionCardItem[] = [];
     for (const defId of defIds) {
       const one = isBody ? 0 : Math.max(0, inv[defId]?.one ?? 0);
       const two = isBody ? 0 : Math.max(0, inv[defId]?.two ?? 0);
@@ -3425,236 +3822,257 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const available = isBody ? 0 : Math.max(0, one - eqOne);
       items.push({
         defId,
-        name: this.partDisplayName(defId),
+        name: this.fusionShortName(defId),
         one,
         two,
         eqN,
         available,
         owned,
         usedN: this.fusionUses(defId),
+        isBody,
       });
     }
-
-    // —— 网格几何：分页条固定高度，卡片区按可用高反推（不重叠、不越界） ——
-    const barH = isBody ? (short ? 30 : 40) : short ? 66 : 104;
-    const barY = c.y + c.h - barH - (short ? 4 : 8);
-    const gridTop = sy + (short ? 14 : 18);
-    const gridBot = barY - (short ? 3 : 6);
-    const gap = short ? 4 : 8;
-    const COLS = short ? 4 : Math.max(3, Math.min(8, Math.floor((w0 + gap) / (short ? 96 : 168))));
-    const pagerSlot = items.length > COLS ? (short ? 14 : 20) : 0;
-    const rowsH = Math.max(short ? 24 : 36, gridBot - gridTop - pagerSlot - gap);
-    const needRows = Math.ceil(items.length / COLS);
-    const ROWS = rowsH >= (short ? 68 : 96) && needRows > 1 ? Math.min(2, needRows) : 1;
-    let cardH = Math.max(short ? 26 : 40, Math.floor((rowsH - gap * (ROWS - 1)) / ROWS));
-    if (cardH * ROWS + gap * (ROWS - 1) > rowsH) cardH = Math.max(short ? 26 : 40, Math.floor((rowsH - gap * (ROWS - 1)) / ROWS));
-    const PAGE = COLS * ROWS;
-    const pageCount = Math.max(1, Math.ceil(items.length / PAGE));
+    // 分页钳制 + 关闭结果后的定位跳页（PAGE 由统一布局给出 → 同源）
+    const pageCount = Math.max(1, Math.ceil(items.length / Math.max(1, gl.pageSize)));
+    if (this.fusionJumpTo) {
+      const idx = items.findIndex((it) => it.defId === this.fusionJumpTo);
+      if (idx >= 0) this.backpackPage = Math.floor(idx / Math.max(1, gl.pageSize));
+      this.fusionJumpTo = null;
+    }
     if (this.backpackPage >= pageCount) this.backpackPage = pageCount - 1;
     if (this.backpackPage < 0) this.backpackPage = 0;
-    const cardW = (w0 - gap * (COLS - 1)) / COLS;
-    const pageItems = items.slice(this.backpackPage * PAGE, this.backpackPage * PAGE + PAGE);
-    const pagerTop = gridBot - pagerSlot;
+    const pageItems = items.slice(this.backpackPage * gl.pageSize, this.backpackPage * gl.pageSize + gl.pageSize);
+
+    // —— 卡片网格（布局同源；glow/flash/new 传入绘制方法） ——
+    const cGap = short ? 4 : 8;
+    const cw = (w0 - (gl.cols - 1) * cGap) / gl.cols;
     for (let i = 0; i < pageItems.length; i++) {
       const it = pageItems[i];
-      const col = i % COLS;
-      const row = Math.floor(i / COLS);
-      const cx = x0 + col * (cardW + gap);
-      const cy = gridTop + row * (cardH + gap);
-      const glow = !isBody && this.fusionGlow !== null && this.nowMs <= this.fusionGlow.until && this.fusionGlow.defId === it.defId;
-      this.drawFusionCardItem(it, isBody, glow, cx, cy, cardW, cardH);
+      const col = i % gl.cols;
+      const row = Math.floor(i / gl.cols);
+      const cardRect: Rect = { x: x0 + col * (cw + cGap), y: gl.gridTop + row * (gl.cardH + cGap), w: cw, h: gl.cardH };
+      this.drawFusionCardItem(it, cardRect);
     }
-    if (items.length === 0) this.text('该分类暂无部件', x0, gridTop + 20, 14, C.textDim);
-    // 分页条（明确页码 + [上一页]/[下一页]；禁止长距拖动）
-    if (pageCount > 1) {
-      const pgH = pagerSlot;
-      const pgY = pagerTop + (pagerSlot - pgH) / 2;
-      const nextX = c.x + c.w - pad - 52;
-      const prevX = nextX - 52 - 6 - 40;
-      this.button(prevX, pgY, 52, pgH, 'backpack-page-prev', '上一页', {});
-      this.text(`${this.backpackPage + 1} / ${pageCount}`, prevX + 52 + 4, pgY + pgH / 2, short ? 10 : 12, C.textDim, 'left');
-      this.button(nextX, pgY, 52, pgH, 'backpack-page-next', '下一页', {});
+    if (items.length === 0) this.text('该分类暂无部件', x0, gl.gridTop + 20, 14, C.textDim);
+
+    // —— 分页条（页码 + 上一页/下一页；不压卡片与材料栏） ——
+    if (gl.pager) {
+      const pg = gl.pager;
+      const btnW = short ? 52 : 72;
+      this.button(pg.x + pg.w - btnW, pg.y, btnW, pg.h, 'backpack-page-next', '下一页', {});
+      this.text(`${this.backpackPage + 1} / ${pageCount}`, pg.x + pg.w - btnW - (short ? 44 : 64), pg.y + pg.h / 2, short ? 11 : 13, C.textDim, 'left');
+      this.button(pg.x, pg.y, btnW, pg.h, 'backpack-page-prev', '上一页', {});
     }
 
-    // —— 底部固定合成栏（战斗/移动）；车身仅提示不参与合成（无入口） ——
+    // —— 底部固定合成栏 / 车身提示 ——
     if (isBody) {
-      this.panel(x0, barY, w0, barH, C.dockBg, undefined, V.radiusM);
-      this.text('车身不参与合成', x0 + w0 / 2, barY + barH / 2, short ? 11 : 14, C.textDim, 'center');
+      const bar = gl.barRect;
+      this.panel(bar.x, bar.y, bar.w, bar.h, C.dockBg, undefined, V.radiusM);
+      this.text('车身不参与合成', bar.x + bar.w / 2, bar.y + bar.h / 2, short ? 13 : 15, C.textDim, 'center');
     } else {
-      this.drawFusionBar(cat!, x0, barY, w0, barH, catAvail);
+      this.drawFusionBar(gl, cat!, draft, catAvail, toast !== null);
     }
   }
 
-  /** F-GARAGE-FUSION-UX-R2：部件卡网格单元（图标/名称/星级×N/可用数量/已装备标识/可选灰化/已放入「已选N」）。 */
-  private drawFusionCardItem(
-    it: { defId: string; name: string; one: number; two: number; eqN: number; available: number; owned: boolean; usedN: number },
-    isBody: boolean,
-    glow: boolean,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-  ): void {
+  /** flash/glow/new 判断（布局无关的短判断；供卡片与槽绘制消费） */
+  private fusionGlowing(defId: string): boolean {
+    return (
+      (this.fusionGlow !== null && this.nowMs <= this.fusionGlow.until && this.fusionGlow.defId === defId) ||
+      (this.fusionFlash !== null && this.nowMs <= this.fusionFlash.until && this.fusionFlash.defIds.includes(defId))
+    );
+  }
+  private fusionIsNew(defId: string): boolean {
+    return this.fusionNew !== null && this.nowMs <= this.fusionNew.until && this.fusionNew.defId === defId;
+  }
+
+  /**
+   * F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：部件卡（三层信息层级，单主状态，字号下限达标）。
+   * L1 图标 + 短名 +（右上）已选勾/「已选N」；L2 1★×N（有 2★ 库存追加 2★×N）；L3 唯一主状态。
+   * short 极短屏：L2 数量与 L3 主状态同行（左/右）——不减字号、只减次要信息。
+   */
+  private drawFusionCardItem(it: FusionCardItem, r: Rect): void {
     const short = this.isShort;
+    const { x, y, w, h } = r;
     const defId = it.defId;
-    const lockNoSpare = it.owned && !isBody && it.eqN > 0 && it.available <= 0 && it.usedN === 0; // 已装备且无可用副本 → 灰化
-    // 卡片底（命中恒注册——未拥有/灰化只是视觉与不可放入，不影响可达性计数）
-    this.button(x, y, w, h, `backpack-select:${defId}`, '', {
-      equipped: lockNoSpare,
-    });
-    if (!it.owned) {
-      this.rect(x, y, w, h, 'rgba(10,14,22,0.55)');
-    }
-    // 已放入：暖金勾选 + 「已选N」；新产出：短暂暖金高亮
+    const notOwned = !it.owned;
+    const eqOnly = !it.isBody && it.owned && it.eqN > 0 && it.available <= 0;
+    this.button(x, y, w, h, `backpack-select:${defId}`, '', { equipped: eqOnly });
+    if (notOwned) this.rect(x, y, w, h, 'rgba(10,14,22,0.55)');
+    const padIn = short ? 4 : 8;
+    const glow = this.fusionGlowing(defId);
+    const isNew = this.fusionIsNew(defId);
+    if (it.usedN > 0 || glow) this.rect(x, y, w, h, undefined, C.gold, glow ? 2.5 : 2);
     if (it.usedN > 0) {
-      this.rect(x, y, w, h, undefined, C.gold, 2);
-      const chipTxt = `已选${it.usedN}`;
-      this.panel(x + w - 34, y + 2, 32, short ? 12 : 14, 'rgba(94,73,32,0.94)', 'rgba(255,190,80,0.9)', 3);
-      this.text(chipTxt, x + w - 18, y + 2 + (short ? 6 : 7), short ? 8 : 10, '#ffe3a3', 'center', 700);
+      if (short) {
+        this.text('✓', x + w - 8, y + 7, 13, '#ffe3a3', 'center', 700);
+      } else {
+        const chipW = 34;
+        const chipH = 16;
+        this.panel(x + w - chipW - 4, y + 3, chipW, chipH, 'rgba(94,73,32,0.94)', 'rgba(255,190,80,0.9)', 3);
+        this.text(`已选${it.usedN}`, x + w - chipW - 4 + chipW / 2, y + 3 + chipH / 2, 11, '#ffe3a3', 'center', 700);
+      }
     }
-    if (glow) {
-      this.rect(x - 1, y - 1, w + 2, h + 2, undefined, 'rgba(255,199,90,0.95)', 2);
+    if (isNew) {
+      const tagW = short ? 30 : 44;
+      const tagH = short ? 13 : 17;
+      this.panel(x + 2, y + 2, tagW, tagH, 'rgba(120,84,10,0.95)', C.gold, 3);
+      this.text('新获得', x + 2 + tagW / 2, y + 2 + tagH / 2, short ? 10 : 12, '#ffe9c0', 'center', 700);
     }
-    // 左侧 mini 图标
-    const iconS = Math.max(7, Math.min(short ? 11 : 15, Math.round(h * 0.24)));
-    const iconCX = x + (short ? 8 : 12) + iconS;
-    const iconCY = y + h / 2;
-    this.drawPartIcon(defId, iconCX, iconCY, iconS, !it.owned);
-    // 文本区
-    const tx = x + (short ? 22 : 32);
-    const tw = x + w - tx - 4;
-    const nameFs = short ? 12 : 15;
-    const name = (it.name || defId).slice(0, Math.max(2, Math.floor(tw / (short ? 13 : 17))));
-    this.text(name, tx, y + h * 0.3, nameFs, it.owned ? C.text : C.textDim, 'left', 700);
-    if (isBody) {
+    // 已装备标识：左缘色条（非文字竞争）
+    if (it.isBody ? it.eqN > 0 : it.owned && it.eqN > 0) {
+      this.rect(x + 1, y + 3, 2.5, h - 6, V.equippedMark);
+    }
+    // 图标（L1 左上）
+    const iconS = short ? 9 : 13;
+    const iconCX = x + padIn + iconS;
+    const iconCY = y + (short ? h * 0.24 : h * 0.24);
+    this.drawPartIcon(defId, iconCX, iconCY, iconS, notOwned, true);
+    const chipReserve = it.usedN > 0 ? (short ? 18 : 40) : 0;
+    const tx = x + padIn + iconS * 2 + 4;
+    const twMax = Math.max(4, x + w - tx - chipReserve - 3);
+    const charW = short ? 13 : 15;
+    // L1 短名（主要文字：short 15→12 visible / normal 15）
+    this.text((it.name || defId).slice(0, Math.max(1, Math.floor(twMax / charW))), tx, y + (short ? h * 0.2 : h * 0.2), 15, it.owned ? C.text : C.textDim, 'left', 700);
+    if (it.isBody) {
       const tag = it.eqN > 0 ? '使用中' : it.owned ? '已拥有' : '未拥有';
-      this.text(tag, tx, y + h * 0.66, short ? 10 : 13, it.eqN > 0 ? C.blue : it.owned ? C.gold : C.red, 'left', 700);
+      this.text(tag, tx, y + h * 0.82, 13, it.eqN > 0 ? C.blue : it.owned ? C.gold : C.red, 'left', 700);
       return;
     }
-    // 星级 + 数量
+    // L2 星级数量
     const starTxt =
       it.one > 0 && it.two > 0
-        ? `1★×${it.one}  2★×${it.two}`
+        ? `1★×${it.one} 2★×${it.two}`
         : it.one > 0
           ? `1★×${it.one}`
           : it.two > 0
             ? `2★×${it.two}`
             : '';
-    this.text(starTxt, tx, y + h * 0.53, short ? 9 : 12, C.gold, 'left', 600);
-    // 可用数量 / 已装备标识（已装备与可用不同行时更清晰；同一卡不出现两套状态）
-    if (it.owned && it.eqN > 0 && it.available > 0) {
-      this.text(`可用 ${it.available} · 已装 ${it.eqN}`, tx, y + h * 0.78, short ? 9 : 11, C.textDim, 'left');
-    } else if (it.owned) {
-      this.text(`可用 ${it.available}`, tx, y + h * 0.78, short ? 9 : 11, it.available > 0 ? C.textDim : C.textDark, 'left');
+    // L3 唯一主状态（可用 N / 已装备 / 未拥有——单状态，不堆叠）
+    const statusTxt = !it.owned ? '未拥有' : it.eqN > 0 && it.available <= 0 ? '已装备' : `可用 ${Math.max(0, it.available)}`;
+    if (short) {
+      // 极短屏：L2/L3 各自成行（.52/.82）——独立行杜绝「1★×N 与 可用N 同行互压」；数量过宽按行宽截断
+      if (starTxt) this.text(starTxt.slice(0, Math.max(1, Math.floor(twMax / charW))), tx, y + h * 0.52, 13, C.gold, 'left', 600);
+      if (statusTxt) this.text(statusTxt.slice(0, Math.max(1, Math.floor(twMax / charW))), tx, y + h * 0.82, 13, fusionStatusColor(statusTxt), 'left', fusionStatusColor(statusTxt) === C.blue ? 700 : 600);
     } else {
-      this.text('未拥有', tx, y + h * 0.78, short ? 9 : 11, C.red, 'left');
-    }
-    if (!short && it.owned && it.eqN > 0) {
-      this.text('已装备', x + w - 4, y + h * 0.78, 10, C.blue, 'right', 700);
-    }
-    // 已装备：左侧中性灰蓝标识条（双通道，区别于可选）
-    if (it.owned && it.eqN > 0 && !short) {
-      this.rect(x + 2, y + 4, 3, h - 8, V.equippedMark);
+      if (starTxt) this.text(starTxt, tx, y + h * 0.5, 13, C.gold, 'left', 600);
+      if (statusTxt) this.text(statusTxt, tx, y + h * 0.8, 12, fusionStatusColor(statusTxt), 'left', fusionStatusColor(statusTxt) === C.blue ? 700 : 600);
     }
   }
 
-  /** F-GARAGE-FUSION-UX-R2：底部固定合成栏（5 材料槽 + N/5 + 自动放入 + 随机预览 + 暖金合成）。 */
+  /**
+   * F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：底部固定合成栏。
+   * 行1 = 5 个可辨识材料槽（真实图标 + 短名缩写 + 重复 ×N）+ N/5；
+   * 行2 = 结果预期（左）+「自动放入」（次）+「合成」主按钮状态机（还差N件 / 合成 / 合成中…）。
+   */
   private drawFusionBar(
+    gl: FusionLayout,
     cat: FusionCategory,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
+    draft: BuildDraft | null,
     catAvail: number,
+    toastActive: boolean,
   ): void {
     const short = this.isShort;
-    this.panel(x, y, w, h, C.dockBg, C.border, V.radiusM);
-    const padIn = short ? 4 : 8;
+    const bar = gl.barRect;
+    this.panel(bar.x, bar.y, bar.w, bar.h, C.dockBg, C.border, V.radiusM);
     const n = this.fusionFilledCount();
     const catLabel = fusionCategoryLabel(cat);
-    const labelName = `随机获得${catLabel}2★`;
-    // 右侧控件宽（自动放入 + 合成）；左侧给材料槽
-    const autoW = short ? 76 : 112;
-    const fuseW = short ? 88 : 128;
-    const ctrlW = autoW + fuseW + (short ? 8 : 12);
-    // 行 1：材料槽 + N/5（槽高：short 22 / normal 30）
-    const row1H = short ? 24 : 32;
-    const row1Y = y + (short ? 4 : 10);
-    const slotGap = short ? 4 : 6;
-    const slotsAreaW = w - padIn * 2 - ctrlW - (short ? 44 : 96) - 8;
-    const slotW = Math.max(short ? 20 : 32, Math.min(short ? 44 : 72, Math.floor((slotsAreaW - slotGap * 4) / 5)));
-    const slotH = Math.min(row1H - 2, short ? 22 : 30);
-    const slotY = row1Y + Math.max(0, (row1H - slotH) / 2);
+    const filling = this.fusionPending !== null && this.nowMs <= this.fusionPending.until;
+    // 行1：材料槽（可辨识：图标 + 短名 + 重复 ×N；点槽移除）
     for (let i = 0; i < 5; i++) {
-      const sx = x + padIn + i * (slotW + slotGap);
+      const s = gl.slots[i];
       const defId = this.fusionSlots[i];
-      const id = defId ? `fusion-slot:${i}` : '';
-      this.button(sx, slotY, slotW, slotH, id, '', defId ? {} : { disabled: true });
-      if (defId) {
-        const s = Math.max(6, Math.min(10, Math.round(slotH * 0.5)));
-        this.drawPartIcon(defId, sx + slotW / 2, slotY + slotH / 2, s, false);
+      if (!defId) {
+        this.panel(s.x, s.y, s.w, s.h, 'rgba(30,40,54,0.55)', C.border, V.radiusM);
+        this.text('+', s.x + s.w / 2, s.y + s.h / 2, short ? 14 : 16, C.textDark, 'center', 700);
+        continue;
+      }
+      const flashing =
+        this.fusionFlash !== null && this.nowMs <= this.fusionFlash.until && this.fusionFlash.defIds.includes(defId);
+      this.button(s.x, s.y, s.w, s.h, `fusion-slot:${i}`, '', { selected: flashing });
+      const iconS = short ? 8 : 11;
+      this.drawPartIcon(defId, s.x + (short ? 13 : 17), s.y + s.h / 2, iconS, false, true);
+      const nm = this.fusionShortName(defId);
+      this.text(nm, s.x + (short ? 24 : 33), s.y + s.h / 2, short ? 13 : 15, C.text, 'left', 700);
+      const total = this.fusionUses(defId);
+      if (total > 1) {
+        let first = -1;
+        for (let k = 0; k < i; k++) if (this.fusionSlots[k] === defId) { first = k; break; }
+        if (first < 0) this.text(`×${total}`, s.x + s.w - 3, s.y + 3, short ? 11 : 12, '#ffe3a3', 'right', 700);
       }
     }
-    const n5Txt = `已选 ${n}/5`;
-    const n5X = x + padIn + 5 * slotW + 4 * slotGap + (short ? 4 : 8);
-    this.text(n5Txt, n5X, row1Y + row1H / 2, short ? 10 : 13, n === 5 ? C.gold : C.textDim, 'left', 700);
-    // 行 2：预览文案（左）+ 自动放入/合成（右）
-    const row2Y = y + row1H + (short ? 2 : 8);
-    const btnH = h - (row2Y - y) - (short ? 4 : 8);
-    const bh = Math.max(short ? 26 : 36, Math.min(short ? 30 : 44, btnH));
-    const by = y + h - bh - (short ? 4 : 6);
-    const fuseX = x + w - padIn - fuseW;
-    const autoX = fuseX - autoW - (short ? 6 : 10);
-    // 预览（若有空间；short 视口空间不足时省略——状态行已含可合提示）
-    const previewFs = short ? 9 : 13;
-    const previewW = labelName.length * previewFs * 0.95 + 8;
-    if (autoX - padIn - previewW > (short ? 84 : 240)) {
-      this.text(labelName, x + padIn + (short ? 2 : 6), by + bh / 2, previewFs, C.textDim, 'left');
-    } else if (!short) {
-      // 窄中间：紧贴按钮左缘右对齐
-      this.text(labelName, autoX - 8, by + bh / 2, previewFs, C.textDim, 'right');
+    // N/5（加入/移除/自动放入后同步增强：toast 激活或满 5 时金色）
+    this.text(`${n}/5`, gl.n5X, gl.tray.y + gl.tray.h / 2 - (short ? 0 : 3), short ? 17 : 20, n === 5 || toastActive ? C.gold : C.textDim, 'left', 700);
+    if (!short) this.text('材料', gl.n5X + 2, gl.tray.y + gl.tray.h / 2 + 10, 11, C.textDim, 'left');
+
+    // 行2：结果预期（左，含神秘部件图标）+ 自动放入（次）+ 合成（主状态机）
+    const previewTxt = `将随机获得1件${catLabel}2★部件`;
+    const previewFs = short ? 12 : 13;
+    const previewW = previewTxt.length * previewFs * 0.95;
+    const px0 = gl.previewX;
+    this.drawMysteryIcon(px0 + (short ? 7 : 9), gl.previewY, short ? 6 : 8);
+    const availX = px0 + (short ? 16 : 22);
+    if (availX + previewW < gl.autoBtn.x - (short ? 2 : 6)) {
+      this.text(previewTxt, availX, gl.previewY, previewFs, C.textDim, 'left', 600);
     }
-    // 自动放入（次按钮；已满 5 / 可用不足 5 / 结果卡期间 → disabled 不注册）
-    const autoDis = n === 5 || catAvail < 5 || this.fusionResult !== null;
-    this.button(autoX, by, autoW, bh, 'fusion-auto', '自动放入', { disabled: autoDis, sub: undefined });
-    // 暖金「合成」主按钮（材料满 5 才可用）
-    const fuseOk = n === 5 && this.fusionResult === null;
-    this.button(fuseX, by, fuseW, bh, 'backpack-fuse', '合成', fuseOk ? { primary: true } : { disabled: true });
-    // 仍够材料（合完回落列表后提示可继续）
-    if (this.fusionResult === null && catAvail >= 5 && n < 5) {
-      const yy = row2Y + 4;
-      if (!short) this.text('材料充足，可再选 5 件继续合成', x + w / 2, yy + 4, 11, C.textDim, 'center');
-    }
+    const autoDis = n === 5 || catAvail < 5 || this.fusionResult !== null || filling;
+    this.button(gl.autoBtn.x, gl.autoBtn.y, gl.autoBtn.w, gl.autoBtn.h, 'fusion-auto', '自动放入', { disabled: autoDis });
+    const fuseOk = n === 5 && this.fusionResult === null && !filling;
+    const fuseLabel = filling ? '合成中…' : fuseOk ? '合成' : `还差${5 - n}件`;
+    this.button(gl.fuseBtn.x, gl.fuseBtn.y, gl.fuseBtn.w, gl.fuseBtn.h, 'backpack-fuse', fuseLabel, { disabled: !fuseOk, primary: fuseOk });
+    void draft;
   }
 
-  /** F-GARAGE-FUSION-UX-R2：合成成功页内结果卡（材料槽已清空收拢；中央产出卡；点击任意处跳过）。 */
+  /** 神秘部件（结果预期图标）：金色圆底 + 「？」 */
+  private drawMysteryIcon(cx: number, cy: number, s: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = 'rgba(222,164,52,0.9)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#1c1405';
+    ctx.font = `bold ${Math.max(8, Math.round(s * 1.5))}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('?', cx, cy + 0.5);
+    ctx.restore();
+  }
+
+  /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成成功结果层。
+   *  遮罩不覆盖胶囊（contentRect 已按 insets 收缩）；卡片内明确「消耗：5件X类1★ / 获得：名2★」+
+   *  真实产出图标；≥0.8s、点击任意处继续；「点击继续」可读（≥10 logical）。 */
   private drawFusionResultCard(c: Rect, product: string): void {
     const short = this.isShort;
-    const state = this.lastState;
-    // 遮罩（拦截底层点击；整卡即「跳过」目标）
-    this.button(c.x, c.y, c.w, c.h, 'fusion-result-dismiss', '', { disabled: false, equipped: false });
+    const cat = this.fusionCategory();
+    const catLabel = cat ? fusionCategoryLabel(cat) : '';
+    this.button(c.x, c.y, c.w, c.h, 'fusion-result-dismiss', '', { disabled: false });
     this.rect(c.x, c.y, c.w, c.h, 'rgba(6,9,14,0.78)');
-    const ownedTwo = state ? getCount(state.inventory, product, 2) : 1;
-    if (ownedTwo < 1) {
-      // 产物未在库存可见（理论不发生：合成成功即入账）——只显示反馈卡
-    }
-    const cardW = short ? 220 : 320;
-    const cardH = short ? 96 : 150;
+    const cardW = short ? 248 : 356;
+    const cardH = short ? 118 : 176;
     const cx = c.x + c.w / 2;
     const cy = c.y + c.h / 2;
     const x = cx - cardW / 2;
     const y = cy - cardH / 2;
     this.panel(x, y, cardW, cardH, 'rgba(20,29,44,0.98)', C.gold, V.radiusL);
-    this.text('合成成功', cx, y + (short ? 16 : 26), short ? 14 : 20, C.gold, 'center', 700);
+    this.text('合成成功', cx, y + (short ? 17 : 26), short ? 16 : 22, C.gold, 'center', 700);
+    const consumedTxt = `消耗：5件${catLabel}1★`;
+    this.text(consumedTxt, cx, y + (short ? 32 : 48), short ? 12 : 14, C.textDim, 'center', 600);
     const iconS = short ? 16 : 26;
-    this.drawPartIcon(product, cx, y + (short ? 40 : 62), iconS, false);
-    const name = this.partDisplayName(product);
-    this.text(name, cx, y + (short ? 62 : 96), short ? 12 : 17, C.text, 'center', 700);
-    this.text('2★', cx, y + (short ? 78 : 120), short ? 12 : 16, C.gold, 'center', 700);
-    this.text('点击继续', cx, cy + cardH / 2 - (short ? 8 : 12), short ? 8 : 10, C.textDark, 'center');
+    const iconY = y + (short ? 56 : 88);
+    const iconX = cx - (short ? 62 : 96);
+    this.drawPartIcon(product, iconX, iconY, iconS, false, true);
+    const name = this.partDisplayName(product) || product;
+    const gotTxt = `获得：${name}`;
+    const nameFs = short ? 15 : 20;
+    const textX = iconX + (short ? 30 : 46);
+    const textW = x + cardW - textX - 12;
+    const nameShow = gotTxt.slice(0, Math.max(1, Math.floor(textW / nameFs)));
+    this.text(nameShow, textX, iconY - (short ? 6 : 8), nameFs, C.text, 'left', 700);
+    const starX = textX + nameShow.length * nameFs + 6;
+    if (starX + nameFs * 2 < x + cardW - 8) this.text('2★', starX, iconY + (short ? 2 : 4), nameFs, C.gold, 'left', 700);
+    this.text('点击任意处继续', cx, y + cardH - (short ? 11 : 16), short ? 12 : 13, C.textDark, 'center', 600);
   }
 
-  /** F-GARAGE-INVENTORY-FUSION-P0：统一部件显示名（Functional / Movement / Body）。 */
   private partDisplayName(defId: string): string {
     return (
       registry.functionals.get(defId)?.name ??

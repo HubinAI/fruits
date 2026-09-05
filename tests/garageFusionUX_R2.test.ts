@@ -319,8 +319,9 @@ function makeEnv(vp: { w: number; h: number }, dpr = 1): HostEnv {
 // ───────────────────────────── 文本/状态解析 ─────────────────────────────
 
 function barCount(env: HostEnv): number {
+  // F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：底栏 N/5 由固定文本 `${n}/5` 表达（旧卡内「已选 X/5」文案已拆分）
   for (const t of env.texts()) {
-    const m = /^已选 (\d+)\/5$/.exec(t);
+    const m = /^([0-5])\/5$/.exec(t);
     if (m) return +m[1];
   }
   return -1;
@@ -671,7 +672,8 @@ describe('F-GARAGE-FUSION-UX-R2 C｜可达性 / 布局 / DPR（T21-T25）', () =
     }
   });
 
-  it('T24. 三种布局 420×210 / 844×390 / 1280×592：渲染不抛 + 返回/三分类/满 5 合成/结果卡可走通', () => {
+  it('T24. 三种布局 420×210 / 844×390 / 1280×592：渲染不抛 + 返回/三分类/满 5 合成/结果卡可走通', async () => {
+    const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
     for (const vp of [{ w: 420, h: 210 }, { w: 844, h: 390 }, { w: 1280, h: 592 }]) {
       seedInventory({ cannon: { one: 5 } });
       const env = makeEnv(vp);
@@ -685,6 +687,8 @@ describe('F-GARAGE-FUSION-UX-R2 C｜可达性 / 布局 / DPR（T21-T25）', () =
       env.fillCard('cannon', 5);
       expect(env.hasHit('backpack-fuse'), `${vp.w}×${vp.h} 满 5 合成可点`).toBe(true);
       env.click('backpack-fuse');
+      // F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成经「合成中…」瞬时态（~260ms）后弹结果卡
+      await sleep(340);
       env.clearTexts();
       env.render();
       expect(findText(env, /合成成功/), `${vp.w}×${vp.h} 结果卡出现`).not.toBeNull();

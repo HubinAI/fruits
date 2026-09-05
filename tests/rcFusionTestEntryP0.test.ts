@@ -145,10 +145,10 @@ describe('F-RC-FUSION-TEST-ENTRY-P0（R2 适配）｜全部件×1 身份 + 测�
     expect(UI_SRC).toContain('const rcGrantTM');
     expect(UI_SRC).toContain('const e2eProbeTM');
     expect(UI_SRC).toContain('const devResetTM');
-    // R2 门控 = RC/E2E/DEV 任一 + 非车身分类（旧「满星 ownedTwo===0」面板级门控已随面板删除）
-    expect(UI_SRC).toContain('const tmShow = (rcGrantTM || e2eProbeTM || devResetTM) && this.backpackFilter !== \'body\';');
-    // 角落按钮：页顶右上（右侧贴边），不占正式核心按钮位
-    expect(UI_SRC).toContain("this.button(c.x + c.w - pad - tw, yy, tw, hh, 'backpack-test-material'");
+    // R2.1 门控 = RC/E2E/DEV 任一 + 非车身分类（isBody 派生自 backpackFilter；旧面板级门控已随面板删除）
+    expect(UI_SRC).toContain('const tmShow = (rcGrantTM || e2eProbeTM || devResetTM) && !isBody;');
+    // 角落按钮：页顶右上（右侧贴边，contentRect 右缘 - pad），不占正式核心按钮位
+    expect(UI_SRC).toContain("this.button(tmX, gl.backBtn.y, tmW, gl.backBtn.h, 'backpack-test-material'");
     expect(UI_SRC).toContain("typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__");
   });
 
@@ -163,9 +163,10 @@ describe('F-RC-FUSION-TEST-ENTRY-P0（R2 适配）｜全部件×1 身份 + 测�
     expect(UI_SRC).toContain("'测试材料×5'");
   });
 
-  it('T6. 车身分类不显示测试材料按钮（源码守卫：filter!==body 门控 + fusionCategory 车身→null 早退）', () => {
-    // tmShow 门控排除车身
-    expect(UI_SRC).toContain("this.backpackFilter !== 'body'");
+  it('T6. 车身分类不显示测试材料按钮（源码守卫：isBody 排除 + fusionCategory 车身→null 早退）', () => {
+    // tmShow 门控排除车身（R2.1：isBody 派生自 backpackFilter，语义不变）
+    expect(UI_SRC).toContain('const isBody = this.backpackFilter === \'body\';');
+    expect(UI_SRC).toContain('&& !isBody');
     // dispatch/topUp 链路：车身 → fusionCategory()=null → topUp 早退（无任何入库副作用）
     expect(UI_SRC).toContain('private fusionCategory(): FusionCategory | null');
     expect(UI_SRC).toContain("if (this.backpackFilter === 'combat') return 'combat';");
