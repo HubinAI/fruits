@@ -591,19 +591,23 @@ describe('F-GARAGE-FUSION-UX-R2 B｜host 材料槽交互（T7-T10/T14-T16/T18-T2
     expect(findText(env, /车身不参与合成/), '车身提示').not.toBeNull();
   });
 
-  it('T18. 切换分类清空材料槽（未确认选择不跨分类保留；库存零变更）', () => {
+  it('T18. 切换分类清空材料槽（R3：有材料时切分类经轻确认，确认后清空；库存零变更）', () => {
     seedInventory({ cannon: { one: 5 } });
     const env = makeEnv({ w: 844, h: 390 });
     env.fillCard('cannon', 3);
     env.clearTexts();
     env.render();
     expect(barCount(env), '已放 3 件').toBe(3);
-    env.click('bfilter:movement'); // 切分类 → 槽清空
+    env.click('bfilter:movement'); // R3：有材料 → 锁定态，弹轻确认
     env.clearTexts();
     env.render();
-    expect(barCount(env), '切分类 → 已选 0/5').toBe(0);
+    expect(barCount(env), '未确认 → 仍 3/5（不静默清空）').toBe(3);
+    env.click('fusion-switch-confirm'); // 确认切换 → 清空并进入移动分类
+    env.clearTexts();
+    env.render();
+    expect(barCount(env), '确认切分类 → 已选 0/5').toBe(0);
     expect(getCount(getInventory(), 'cannon', 1), '清空不消耗材料').toBe(5);
-    env.click('bfilter:combat'); // 切回 → 仍为空（不跨分类恢复）
+    env.click('bfilter:combat'); // 无材料 → 直接切回
     env.clearTexts();
     env.render();
     expect(barCount(env), '切回战斗仍为空').toBe(0);
@@ -639,14 +643,20 @@ describe('F-GARAGE-FUSION-UX-R2 B｜host 材料槽交互（T7-T10/T14-T16/T18-T2
 
 // ═══════════════════════════ C｜可达性 / 布局 / DPR ═══════════════════════════
 describe('F-GARAGE-FUSION-UX-R2 C｜可达性 / 布局 / DPR（T21-T25）', () => {
-  it('T21. 战斗分类 11 个正式部件全部可达（真实翻页，无屏外隐藏卡）', () => {
+  it('T21. 战斗分类 11 个正式部件全部可达（R3：全库存种子下真实翻页，未拥有隐藏不参与全集）', () => {
+    const allOwned: Record<string, { one: number }> = {};
+    for (const id of [...OFFICIAL_PARTS, ...OFFICIAL_MOVEMENTS, ...OFFICIAL_BODIES]) allOwned[id] = { one: 1 };
+    seedInventory(allOwned);
     const env = makeEnv({ w: 844, h: 390 });
     const ids = collectIds(env, 'combat');
     expect(ids.length).toBe(11);
     expect([...ids].sort()).toEqual([...OFFICIAL_PARTS].sort());
   });
 
-  it('T22. 移动分类 3 项 / 车身分类 8 项全部可达', () => {
+  it('T22. 移动分类 3 项 / 车身分类 8 项全部可达（R3：全库存种子）', () => {
+    const allOwned: Record<string, { one: number }> = {};
+    for (const id of [...OFFICIAL_PARTS, ...OFFICIAL_MOVEMENTS, ...OFFICIAL_BODIES]) allOwned[id] = { one: 1 };
+    seedInventory(allOwned);
     const env = makeEnv({ w: 844, h: 390 });
     const mv = collectIds(env, 'movement');
     expect(mv.length).toBe(3);

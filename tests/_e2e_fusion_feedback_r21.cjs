@@ -283,7 +283,7 @@ async function runViewport(browser, vp) {
   await tapVisibleById(page, 'fusion-auto');
   const autoState = await hostState(page);
   log(autoState.slots && autoState.slots.filter(Boolean).length === 5, `[${tag}] S3a. 自动放入 → 5 槽满`, JSON.stringify(autoState.slots));
-  const sorted = autoState.slots.filter(Boolean).slice().sort();
+  const sorted = autoState.slots.filter(Boolean).map((s) => s.defId).sort(); // R3：槽位 {defId,star} 对象
   log(JSON.stringify(sorted) === JSON.stringify(['cannon', 'cannon', 'hammer', 'hammer', 'saw'].sort()), `[${tag}] S3b. 确定性材料（重复多→defId 序）`, sorted.join(','));
   // S4 五槽可辨识
   const A4 = await areas(page);
@@ -293,12 +293,12 @@ async function runViewport(browser, vp) {
   const shortSeen = ['cannon', 'hammer', 'saw'].map((d) => shortName(d)).filter((n) => txt4.includes(n));
   log(shortSeen.length === 3, `[${tag}] S4b. 槽内短名可辨识（炮/锤/圆锯）`, shortSeen.join(','));
   // S5 自动放入反馈 + N/5
-  log(txt4.some((t) => t === '已自动放入5件材料'), `[${tag}] S5a. 「已自动放入5件材料」行内反馈`);
+  log(txt4.some((t) => t === '已自动放入5件战斗1★材料'), `[${tag}] S5a. 「已自动放入5件战斗1★材料」行内反馈（R3 带分类+星级）`);
   log(txt4.some((t) => /^5\/5$/.test(t)), `[${tag}] S5b. N/5 = 5/5`);
 
   // S6 移除 1 件
   const beforeRem = await readInvAll(page);
-  const removedDefId = autoState.slots[2]; // hammer
+  const removedDefId = autoState.slots[2].defId; // hammer（R3：槽位对象）
   await clearTexts(page);
   await tapVisibleById(page, 'fusion-slot:2');
   const afterRemState = await hostState(page);
@@ -378,9 +378,9 @@ async function runViewport(browser, vp) {
   log(!!find(A13, 'backpack-select:' + product), `[${tag}] S13b. 产出卡当前页可见（自动跳页）`, `page=${glowState.backpackPage}`);
   const txt13 = await readTexts(page);
   log(txt13.some((t) => t === '新获得'), `[${tag}] S13c. 产出卡「新获得」角标`);
-  // 星级数量立即可见（2★×1）
-  const starVisible = await page.evaluate(() => window.__txt.some((t) => /^2★×1$/.test(t)));
-  log(starVisible, `[${tag}] S13d. 产物卡星级数量（2★×1）可见`);
+  // 星级数量立即可见（R3 单星视图：产物 2★ 卡「可用 1」）
+  const starVisible = await page.evaluate(() => window.__txt.some((t) => /^可用 1$/.test(t)));
+  log(starVisible, `[${tag}] S13d. 产物卡数量（可用 1）可见`);
 
   // S14 已在上；S15 reload 持久化 + Build 不变
   log((await readBuild(page)) === buildBefore, `[${tag}] S15a. 合成不改 Build`);
@@ -390,12 +390,16 @@ async function runViewport(browser, vp) {
   const afterReload = await readInvAll(page);
   log(JSON.stringify(afterReload) === JSON.stringify(beforeReload), `[${tag}] S15b. reload 后库存保持`, `two=${totals(afterReload).two}`);
   log(totals(afterReload).two === tBefore.two + 1, `[${tag}] S15c. reload 后 2★ 在档`);
-  // 重进背包 → 材料已扣 → 「还差 N 件」
-  await gotoBackpackCombat(page, tag + '/reload');
+  // 重进背包 → R3：1★ 材料已清零 → 默认定位产物 2★ 满星查看态（产物「可用 1」）
+  await tapVisibleById(page, 'home-garage');
   await clearTexts(page);
-  await tapVisibleById(page, 'bfilter:combat');
+  await tapVisibleById(page, 'nav:backpack');
   const st2 = await readTexts(page);
-  log(st2.some((t) => /^还差 \d+ 件1★部件/.test(t)), `[${tag}] S15d. 重进按剩余材料提示「还差 N 件」`, st2.filter((t) => /可合成|还差/.test(t)).join('|'));
+  log(
+    st2.some((t) => /2★ 满星查看 · 不参与合成/.test(t)) && st2.some((t) => /^可用 1$/.test(t)),
+    `[${tag}] S15d. R3 重进默认产物 2★ 满星查看态（可用 1）`,
+    st2.filter((t) => /满星查看|可用 /.test(t)).join('|'),
+  );
 
   // S16 全程几何门禁 + console 干净
   await geometryGate(page, tag);

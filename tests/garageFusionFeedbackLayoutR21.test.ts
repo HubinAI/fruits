@@ -538,14 +538,14 @@ describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L2｜卡内信息层级（T4-T6�
       expect(cannon, `${vp.w}×${vp.h} cannon 卡在位`).toBeTruthy();
       if (!cannon) continue;
       const inCard = textOpsIn(env, cannon);
-      const expectLabels = short ? ['炮', /^1★×\d+/, /^可用 \d+$/] : ['炮', /^1★×\d+$/, /^可用 \d+$/];
+      const expectLabels = ['炮', /^1★$/, /^可用 \d+$/]; // R3 单星视图：L2={star}★（不再 1★×N）
       for (const lab of expectLabels) {
         const hitOp = inCard.some((o) => (typeof lab === 'string' ? o.s === lab : typeof o.s === 'string' && lab.test(o.s)));
         expect(hitOp, `${vp.w}×${vp.h} 卡内文字含 ${String(lab)}`).toBe(true);
       }
       // 全部在卡内（不含压行）：文字 y 与字号半径估算后不越卡
       const nameOp = inCard.find((o) => o.s === '炮');
-      const starOp = inCard.find((o) => typeof o.s === 'string' && /^1★×/.test(o.s));
+      const starOp = inCard.find((o) => typeof o.s === 'string' && /^1★$/.test(o.s));
       const statOp = inCard.find((o) => typeof o.s === 'string' && /^可用 /.test(o.s));
       const nameFs = 15 * (short ? 0.8 : 1);
       const subFs = 13 * (short ? 0.8 : 1);
@@ -560,25 +560,27 @@ describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L2｜卡内信息层级（T4-T6�
     }
   });
 
-  it('T5. 每张卡最多一个主状态（可用 N / 已装备 / 未拥有），不堆叠', () => {
+  it('T5. 每张卡最多一个主状态（可用 N / 装备占用N），不堆叠；R3 未拥有部件不出现', () => {
     for (const vp of VP4) {
       seedInventory({ cannon: { one: 6 }, hammer: { one: 2 }, spear: { one: 3 }, saw: { one: 2 } });
       const env = makeEnv(vp);
       env.gotoBackpack();
       for (const card of env.areas().filter((a) => a.id.startsWith('backpack-select:'))) {
-        const statuses = textOpsIn(env, card).filter((o) => typeof o.s === 'string' && /^(可用 \d+|已装备|未拥有)$/.test(o.s));
+        const statuses = textOpsIn(env, card).filter(
+          (o) => typeof o.s === 'string' && /^(可用 \d+|装备占用\d+)$/.test(o.s),
+        );
         expect(statuses.length, `${vp.w}×${vp.h} ${card.id} 单主状态`).toBeLessThanOrEqual(1);
       }
     }
-    // 已装备保护场景：装备 1 件 cannon（one=1）→ 状态=已装备
+    // 装备保护场景：装备 1 件 cannon（one=1）→ 状态=装备占用N
     seedInventory({ cannon: { one: 1 } });
     const draft = emptyDraft();
     const eqDraft: BuildDraft = { ...draft, functionalSelections: { frontMass: 'cannon' }, functionalStars: { frontMass: 1 } };
     const env = makeEnv({ w: 844, h: 390 });
     env.gotoBackpack({ draft: eqDraft });
-    expect(findText(env, /^已装备$/), '装备件卡状态=已装备').not.toBeNull();
-    // 未拥有（零库存部件）→ 状态=未拥有
-    expect(findText(env, /^未拥有$/), '未拥有状态存在').not.toBeNull();
+    expect(findText(env, /^装备占用1$/), '装备件卡状态=装备占用1').not.toBeNull();
+    // R3 有意变更：未拥有（零库存）部件不再出现在合成网格（RB7 已覆盖隐藏语义）
+    expect(env.hasHit('backpack-select:machineGun'), '零库存部件不出现在合成网格').toBe(false);
   });
 
   it('T6. 选中徽标/勾不压名称与星级行（normal chip / short ✓ 各占右上角预留位）', () => {
@@ -595,9 +597,11 @@ describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L2｜卡内信息层级（T4-T6�
       const short = vp.h < 260;
       const chipRect: Rect = short
         ? { x: cannon.x + cannon.w - 16, y: cannon.y + 1, w: 14, h: 14 } // ✓ 区域（右上）
-        : { x: cannon.x + cannon.w - 38, y: cannon.y + 3, w: 34, h: 16 }; // 已选N chip
+        : { x: cannon.x + cannon.w - 56, y: cannon.y + 3, w: 52, h: 16 }; // 已选N/可用N chip（R3 加宽 52）
       const inCard = textOpsIn(env, cannon);
-      const otherLines = inCard.filter((o) => !(short && o.s === '✓') && !(!short && typeof o.s === 'string' && /^已选\d+$/.test(o.s)));
+      const otherLines = inCard.filter(
+        (o) => !(short && o.s === '✓') && !(!short && typeof o.s === 'string' && /^已选\d+\/\d+$/.test(o.s)),
+      );
       for (const o of otherLines) {
         // 与徽标垂直带相交的文字必须不横向进入徽标区（名称行被 chipReserve 让位）
         const yBand = short ? o.y - 6 : o.y - 7;
@@ -608,7 +612,7 @@ describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L2｜卡内信息层级（T4-T6�
         }
       }
       if (!short) {
-        expect(inCard.some((o) => typeof o.s === 'string' && /^已选1$/.test(o.s)), `${vp.w}×${vp.h} chip 文案`).toBe(true);
+        expect(inCard.some((o) => typeof o.s === 'string' && /^已选1\/\d+$/.test(o.s)), `${vp.w}×${vp.h} chip 文案`).toBe(true);
       } else {
         expect(inCard.some((o) => o.s === '✓'), `${vp.w}×${vp.h} short 勾`).toBe(true);
       }
@@ -685,13 +689,13 @@ describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L3｜材料槽与行内反馈（T
     expect(env.hasHit('backpack-fuse'), '移除后未满 → 合成不可点').toBe(false);
   });
 
-  it('T12. 自动放入：满 5 槽 + 「已自动放入5件材料」+ N/5=5（卡片/槽同步闪亮由 flash 状态驱动）', () => {
+  it('T12. 自动放入：满 5 槽 + 「已自动放入5件战斗1★材料」+ N/5=5（卡片/槽同步闪亮由 flash 状态驱动）', () => {
     seedInventory({ cannon: { one: 2 }, hammer: { one: 2 }, saw: { one: 1 } });
     const env = makeEnv({ w: 844, h: 390 });
     env.gotoBackpack();
     env.clearTexts();
     env.click('fusion-auto');
-    expect(findText(env, /^已自动放入5件材料$/), '自动放入反馈').not.toBeNull();
+    expect(findText(env, /^已自动放入5件战斗1★材料$/), '自动放入反馈（R3 带分类+星级）').not.toBeNull();
     const slots = env.areas().filter((a) => a.id.startsWith('fusion-slot:'));
     expect(slots.length, '5 槽注册').toBe(5);
     expect(findText(env, /^5\/5$/), 'N/5=5').not.toBeNull();
@@ -775,7 +779,9 @@ describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L4｜状态机与结果闭环（T
     expect(shotCard, '产物卡当前页可见').toBeTruthy();
     if (shotCard) {
       const inCard = textOpsIn(env, shotCard);
-      expect(inCard.some((o) => typeof o.s === 'string' && /^2★×1$/.test(o.s)), '星级数量立即可见').toBe(true);
+      // R3 单星视图：关闭后自动切 2★ 查看态 → L2 星标 2★ + L3 可用 1
+      expect(inCard.some((o) => typeof o.s === 'string' && /^2★$/.test(o.s)), '星级标 2★ 立即可见').toBe(true);
+      expect(inCard.some((o) => typeof o.s === 'string' && /^可用 1$/.test(o.s)), '数量立即可见（可用 1）').toBe(true);
     }
   });
 
@@ -804,7 +810,9 @@ describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L4｜状态机与结果闭环（T
     const reloaded = getInventory();
     expect(getCount(reloaded, 'cannon', 1), 'reload 1★=0').toBe(0);
     expect(getCount(reloaded, 'shotgun', 2), 'reload 2★=1').toBe(1);
-    expect(findText(env2, /^2★×1$/), 'reload 后产物卡 2★×1 可见').not.toBeNull();
+    // R3：reload 后默认星级=最低有库存（cannon 0 件 → 2★满星查看态），产物卡 2★ + 可用 1
+    expect(findText(env2, /^2★$/), 'reload 后产物卡 2★ 可见').not.toBeNull();
+    expect(findText(env2, /^可用 1$/), 'reload 后产物数量可见').not.toBeNull();
   });
 });
 
@@ -867,7 +875,11 @@ describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L5｜图标可区分与构建隔�
 // ───────────────────────────── 分类列表一致性（布局数据源防漂移） ─────────────────────────────
 
 describe('F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1 L0｜布局数据源防漂移', () => {
-  it('战斗/移动/车身分类卡片全集 == 正式 Registry（新增部件自动出现在背包网格）', () => {
+  it('战斗/移动/车身分类卡片全集 == 正式 Registry（R3：未拥有隐藏 → 全量库存种子下全集断言仍成立）', () => {
+    // R3 有意变更：完全未拥有部件从合成网格隐藏（RB7）→ 用全量 one:1 种子保证全集可见
+    const allOwned: Record<string, { one: number }> = {};
+    for (const id of [...OFFICIAL_PARTS, ...OFFICIAL_MOVEMENTS, ...OFFICIAL_BODIES]) allOwned[id] = { one: 1 };
+    seedInventory(allOwned);
     for (const vp of [{ w: 844, h: 390 }, { w: 420, h: 210 }]) {
       const env = makeEnv(vp);
       env.gotoBackpack();

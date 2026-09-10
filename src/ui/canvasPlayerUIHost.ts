@@ -48,13 +48,13 @@ import {
   loadInventoryRaw,
   OFFICIAL_PARTS,
   OFFICIAL_MOVEMENTS,
-  equippedSlots,
   equippedCount,
   fusionCategoryOf,
   fusionCategoryAvailable,
   fusionCategoryPartIds,
   fusionCategoryLabel,
   autoPickFusionMaterials,
+  MAX_STAR,
   type FusionCategory,
   type PartInventory,
 } from '../core/partInventory';
@@ -144,6 +144,8 @@ interface FusionLayout {
   backBtn: Rect;
   titleX: number;
   tabs: Array<{ id: string; v: 'combat' | 'movement' | 'body'; label: string; x: number; y: number; w: number; h: number }>;
+  /** R3：星级选择行 chips（方案C 第二层；body 分类为空数组）。star ∈ 1..MAX_STAR，MAX_STAR=满星查看态。 */
+  starChips: Array<{ x: number; y: number; w: number; h: number; star: number }>;
   statusY: number;
   mainSize: number;
   subSize: number;
@@ -166,22 +168,28 @@ interface FusionLayout {
   toastY: number;
 }
 
-/** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成页部件卡数据（三层信息层级用）。 */
+/** R3：合成页部件卡数据（单星视图：每张卡只表达「当前分类 + 当前星级」的该部件）。 */
 interface FusionCardItem {
   defId: string;
   name: string;
-  one: number;
-  two: number;
-  eqN: number;
+  /** 当前视图星级（1..MAX_STAR；body 卡恒 1 占位） */
+  star: number;
+  /** 该 defId 当前星级的库存数（body 恒 0） */
+  count: number;
+  /** 该 defId 当前星级的已装备数（装备占用口径） */
+  eqStar: number;
+  /** 可作材料数 = count − eqStar（body 恒 0） */
   available: number;
+  /** 跨星级拥有判定（任一星级 count>0；完全未拥有 → 合成网格隐藏） */
   owned: boolean;
+  /** 该 (defId, star) 已选入材料槽数 */
   usedN: number;
   isBody: boolean;
 }
 
-/** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：L3 唯一主状态着色（可用=中性 / 已装备=蓝 / 未拥有=弱红）。 */
+/** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：L3 唯一主状态着色（可用=中性 / 已装备·占用=蓝 / 未拥有=弱红）。 */
 function fusionStatusColor(statusTxt: string): string {
-  if (statusTxt === '已装备') return C.blue;
+  if (statusTxt === '已装备' || statusTxt.startsWith('装备占用')) return C.blue;
   if (statusTxt === '未拥有') return C.red;
   return C.textDim;
 }
@@ -439,13 +447,24 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   /** F-GARAGE-FUSION-UX-R2：Backpack 分类（战斗/移动/车身；UI-only）。默认「战斗」。 */
   private backpackFilter: 'combat' | 'movement' | 'body' = 'combat';
   /**
-   * F-GARAGE-FUSION-UX-R2：合成材料槽（长度 5；元素 = defId 或 null）。
-   * 每次「进入背包」「切换分类」「返回车库」「离开局外」「合成成功」都清空——
+   * F-GARAGE-FUSION-UX-R2：合成材料槽（长度 5；R3 起元素 = {defId, star} 完整保存星级，或 null）。
+   * 每次「进入背包」「切换分类/星级」「返回车库」「离开局外」「合成成功」都清空——
    * 未确认的材料选择绝不跨页/跨会话保留（正式主流程 = 点自动放入/手动选 → 点合成）。
+   * R3 锁定语义：已有材料时分类/星级进入锁定态（切换必须轻确认清空）→ 槽内材料恒同源星级。
    */
-  private fusionSlots: Array<string | null> = [null, null, null, null, null];
+  private fusionSlots: Array<{ defId: string; star: number } | null> = [null, null, null, null, null];
+  /**
+   * F-GARAGE-FUSION-STAR-SELECTION-R3｜合成源星级（方案C 第二层）。
+   * 取值 1..MAX_STAR（读取 core 真实上限，不写死）；= MAX_STAR 时为「满星查看态」（无合成操作）。
+   * 会话内按分类记住最后选择（不持久化到正式存档）。
+   */
+  private fusionStar: number = 1;
+  /** R3：per-category 星级会话记忆（进入分类恢复；不持久化）。 */
+  private fusionStarByCat: { combat?: number; movement?: number } = {};
+  /** R3：切换分类/星级的页内轻确认（已有材料时；取消=完全不变 / 确认=清空并切换）。 */
+  private fusionSwitchAsk: { cat: 'combat' | 'movement' | 'body'; star: number } | null = null;
   /** F-GARAGE-FUSION-UX-R2：合成结果卡（页内中央产出卡；R2.2 起不自动关闭，点空白区才关）。 */
-  private fusionResult: { product: string; token: number } | null = null;
+  private fusionResult: { product: string; productStar: number; token: number } | null = null;
   /** F-GARAGE-FUSION-UX-R2：新产出部件列表暖金高亮（短暂）。 */
   private fusionGlow: { defId: string; until: number; token: number } | null = null;
   /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：合成成功后产出卡的「新获得」角标（R2.2 起 ≥2.5s，随 glow 展示）。 */
@@ -1503,6 +1522,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         this.metaPage = 'backpack';
         // F-GARAGE-FUSION-UX-R2：进入背包清空未确认材料槽/结果（不跨次保留），filter 保持上次
         this.clearFusionSession();
+        // R3：进入合成页 → 星级 = 会话记忆 ?? 默认规则（最低可合成 → 最低有库存 → 1★；不持久化）
+        if (this.backpackFilter !== 'body') {
+          this.fusionStar = this.starForCat(this.backpackFilter);
+        }
         this.panelView = 'home';
         this.moreView = 'home';
         this.actions?.reframeCamera?.();
@@ -1630,10 +1653,33 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       return;
     }
     if (id.startsWith('bfilter:')) {
-      // F-GARAGE-FUSION-UX-R2：Backpack 分类（战斗/移动/车身；切分类清空上一分类材料槽与结果）
-      this.backpackFilter = id.slice(8) as 'combat' | 'movement' | 'body';
-      this.backpackPage = 0;
-      this.clearFusionSession();
+      // F-GARAGE-FUSION-UX-R2：Backpack 分类（战斗/移动/车身）。
+      // R3：已有材料时切换分类/星级 → 页内轻确认（取消=完全不变 / 清空并切换），不静默清空。
+      const target = id.slice(8) as 'combat' | 'movement' | 'body';
+      this.requestFusionSwitch(target, undefined);
+      this.draw();
+      return;
+    }
+    if (id.startsWith('fusion-star:')) {
+      // R3：星级选择行（方案C 第二层；chip 由 drawFusionStarRow 注册，仅非 body 分类）。
+      const s = Number(id.slice('fusion-star:'.length));
+      if (Number.isFinite(s) && s >= 1 && s <= MAX_STAR && s !== this.fusionStar) {
+        this.requestFusionSwitch(this.backpackFilter, s);
+      }
+      this.draw();
+      return;
+    }
+    if (id === 'fusion-switch-cancel') {
+      // R3：轻确认「取消」→ 分类/星级/材料完全不变。
+      this.fusionSwitchAsk = null;
+      this.draw();
+      return;
+    }
+    if (id === 'fusion-switch-confirm') {
+      // R3：轻确认「清空并切换」→ 材料归零 → 应用目标分类与星级。
+      const ask = this.fusionSwitchAsk;
+      this.fusionSwitchAsk = null;
+      if (ask) this.applyFusionSwitch(ask.cat, ask.star);
       this.draw();
       return;
     }
@@ -1659,10 +1705,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         const removed = this.fusionSlots[i];
         this.fusionSlots[i] = null;
         if (removed) {
-          this.fusionToastFor(removed, 'remove');
+          this.fusionToastFor(removed.defId, 'remove');
           this.fusionToken += 1;
           const token = this.fusionToken;
-          this.fusionFlash = { defIds: [removed], until: this.nowMs + 220, token };
+          this.fusionFlash = { defIds: [removed.defId], until: this.nowMs + 220, token };
         }
       }
       this.draw();
@@ -1683,13 +1729,19 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       // F-GARAGE-FUSION-UX-R2：结果卡点击跳过（回到列表；新产出暖金高亮保留至到期）
       // F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：关闭后自动切到产出卡所在分页 + 「新获得」高亮 ~2s
       // F-GARAGE-FUSION-RESULT-INTERACTION-R2.2：仅空白区触发（点卡不关）；高亮窗口加长至 ≥2.5s
+      // R3：关闭后材料槽已清空 + 星级自动切到产出星级（产出为最高星 → 满星查看态）+ 定位产出卡。
       const product = this.fusionResult?.product ?? null;
+      const productStar = this.fusionResult?.productStar ?? null;
       this.fusionToken += 1;
       const token = this.fusionToken;
       this.fusionResult = null;
       this.fusionPending = null;
       if (product) {
         this.fusionJumpTo = product; // draw 期按实际 PAGE 翻到产物所在页（布局同源）
+        if (productStar != null && this.backpackFilter !== 'body') {
+          this.fusionStar = productStar;
+          this.fusionStarByCat[this.backpackFilter] = productStar;
+        }
         // 关闭后金色高亮/「新获得」重置为完整 ≥2.5s（玩家刚关闭，理应看清产出）
         this.fusionGlow = { defId: product, until: this.nowMs + 2500, token };
         this.fusionNew = { defId: product, until: this.nowMs + 2500, token };
@@ -1856,7 +1908,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return null;
   }
 
-  /** 清空材料槽 + 结果卡/高亮/新获得/行内反馈/跳转标记，并作废迟到定时器（不改 Build/仓库/其它页状态）。 */
+  /** 清空材料槽 + 结果卡/高亮/新获得/行内反馈/跳转标记/切换确认，并作废迟到定时器（不改 Build/仓库/其它页状态）。 */
   private clearFusionSession(): void {
     this.fusionSlots = [null, null, null, null, null];
     this.fusionToken += 1;
@@ -1867,6 +1919,54 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.fusionPending = null;
     this.fusionFlash = null;
     this.fusionJumpTo = null;
+    this.fusionSwitchAsk = null;
+  }
+
+  // ---------- R3：星级选择与切换确认 ----------
+
+  /** R3：分类默认星级（进入分类且无会话记忆时）——1) 最低可合成一次；2) 最低有库存（含占用）；3) 1★。 */
+  private defaultFusionStar(cat: FusionCategory): number {
+    const st = this.lastState;
+    if (!st) return 1;
+    const draft = st.draft ?? null;
+    for (let s = 1; s < MAX_STAR; s++) {
+      if (fusionCategoryAvailable(st.inventory, cat, draft, s) >= 5) return s;
+    }
+    for (let s = 1; s <= MAX_STAR; s++) {
+      for (const defId of fusionCategoryPartIds(cat)) {
+        if (getCount(st.inventory, defId, s) > 0) return s;
+      }
+    }
+    return 1;
+  }
+
+  /** R3：目标分类的星级 = 会话记忆 ?? 默认规则（不持久化）。 */
+  private starForCat(cat: FusionCategory): number {
+    const saved = this.fusionStarByCat[cat];
+    return saved ?? this.defaultFusionStar(cat);
+  }
+
+  /** R3：请求切换分类/星级——无材料直接切；已有材料 → 页内轻确认（不静默清空、不禁止切换）。 */
+  private requestFusionSwitch(cat: 'combat' | 'movement' | 'body', star: number | undefined): void {
+    const sameCat = cat === this.backpackFilter;
+    const targetStar = cat === 'body' ? 1 : star ?? this.starForCat(cat);
+    if (sameCat && (cat === 'body' || targetStar === this.fusionStar)) return; // 同类同星 no-op
+    if (this.fusionFilledCount() > 0) {
+      this.fusionSwitchAsk = { cat, star: targetStar };
+      return;
+    }
+    this.applyFusionSwitch(cat, targetStar);
+  }
+
+  /** R3：应用切换（材料已清空的前提下调用）；恢复/计算目标分类星级并记录会话记忆。 */
+  private applyFusionSwitch(cat: 'combat' | 'movement' | 'body', star: number): void {
+    this.backpackFilter = cat;
+    this.backpackPage = 0;
+    this.clearFusionSession();
+    if (cat !== 'body') {
+      this.fusionStar = Math.min(MAX_STAR, Math.max(1, star));
+      this.fusionStarByCat[cat] = this.fusionStar;
+    }
   }
 
   /** F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：卡片+槽瞬时闪亮（~220ms）。 */
@@ -1917,9 +2017,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return this.fusionSlots.reduce((n, s) => n + (s ? 1 : 0), 0);
   }
 
-  /** 某 defId 已在材料槽中的件数（用于与可用数比对，阻止超额放入） */
-  private fusionUses(defId: string): number {
-    return this.fusionSlots.reduce((n, s) => n + (s === defId ? 1 : 0), 0);
+  /** 某 defId（可指定星级）已在材料槽中的件数（用于与可用数比对，阻止超额放入） */
+  private fusionUses(defId: string, star?: number): number {
+    return this.fusionSlots.reduce(
+      (n, s) => n + (s && s.defId === defId && (star === undefined || s.star === star) ? 1 : 0),
+      0,
+    );
   }
 
   /** 某 defId 可作材料的副本数（1★ 未装备；装备保护口径与 core 一致） */
@@ -1929,19 +2032,25 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     return Math.max(0, getCount(st.inventory, defId, star) - equippedCount(defId, star, st.draft ?? null));
   }
 
-  /** 点卡 = 尝试放入 1 件材料（手动选择可选；失败给行内原因 toast，不静默）。成功 → 行内反馈 + 闪亮。 */
+  /** 点卡 = 尝试放入 1 件材料（R3：只加入「当前分类 + 当前源星级 + 该 defId」；失败给行内原因 toast）。
+   *  不跨星补足、不自动改变星级、不消耗已装备件。成功 → 行内反馈 + 闪亮。 */
   private tryAddMaterial(defId: string): void {
     const cat = this.fusionCategory();
+    const star = this.fusionStar;
     if (!cat || this.fusionResult) return; // Body 无合成；结果卡展示期间不响应
-    if (fusionCategoryOf(defId) !== cat) return;
-    // F-GARAGE-FUSION-RESULT-INTERACTION-R2.2：失败原因行内反馈（不再静默无反应）
-    const avail = this.fusionAvail(defId, 1);
-    if (avail <= 0) {
-      this.showFusionToast('暂无可放入的1★材料');
+    if (star >= MAX_STAR) {
+      this.showFusionToast(`${MAX_STAR}★满星查看，不参与合成`);
       return;
     }
-    if (this.fusionUses(defId) >= avail) {
-      this.showFusionToast('该1★材料已全部放入');
+    if (fusionCategoryOf(defId) !== cat) return;
+    // F-GARAGE-FUSION-RESULT-INTERACTION-R2.2：失败原因行内反馈（不再静默无反应）
+    const avail = this.fusionAvail(defId, star);
+    if (avail <= 0) {
+      this.showFusionToast(`暂无可放入的${star}★材料`);
+      return;
+    }
+    if (this.fusionUses(defId, star) >= avail) {
+      this.showFusionToast(`该${star}★材料已全部放入`);
       return;
     }
     const slot = this.fusionSlots.indexOf(null);
@@ -1949,27 +2058,33 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.showFusionToast('材料槽已满，先移除一件');
       return;
     }
-    this.fusionSlots[slot] = defId;
+    this.fusionSlots[slot] = { defId, star };
     this.fusionToastFor(defId, 'add');
     this.showFusionFlash([defId]);
   }
 
   /** 「自动放入」：一键把 5 个材料槽填满（确定性优先级见 core.autoPickFusionMaterials）。
-   *  成功 → 明确列出被放入的 5 件 + 卡片/槽位同步高亮 + 「已自动放入5件材料」。
-   *  R2.2：无可用材料（防御路径）给行内原因 toast。 */
+   *  R3：只使用「当前分类 + 当前源星级 + 未装备」的可消耗库存——不跨星补足、不自动改星级/分类。
+   *  成功 → 「已自动放入5件{分类}{star}★材料」；不足 5 → 「{分类}{star}★还差N件材料」（不部分填入）。 */
   private autoFillFusion(): void {
     const cat = this.fusionCategory();
     const st = this.lastState;
+    const star = this.fusionStar;
     if (!cat || !st || this.fusionResult) return;
-    const picked = autoPickFusionMaterials(st.inventory, cat, st.draft ?? null, 1, 5);
+    if (star >= MAX_STAR) return; // 满星查看态无自动放入入口（按钮不注册，防御）
+    const picked = autoPickFusionMaterials(st.inventory, cat, st.draft ?? null, star, 5);
     if (picked.length === 0) {
-      this.showFusionToast('暂无可放入的1★材料');
+      this.showFusionToast(`暂无可放入的${star}★材料`);
       return;
     }
-    const filled: Array<string | null> = [null, null, null, null, null];
-    for (let i = 0; i < 5 && i < picked.length; i++) filled[i] = picked[i];
+    if (picked.length < 5) {
+      this.showFusionToast(`${fusionCategoryLabel(cat)}${star}★还差${5 - picked.length}件材料`);
+      return;
+    }
+    const filled: Array<{ defId: string; star: number } | null> = [null, null, null, null, null];
+    for (let i = 0; i < 5 && i < picked.length; i++) filled[i] = { defId: picked[i], star };
     this.fusionSlots = filled;
-    this.fusionToastFor(null, 'auto');
+    this.showFusionToast(`已自动放入5件${fusionCategoryLabel(cat)}${star}★材料`);
     this.showFusionFlash(picked);
   }
 
@@ -1981,13 +2096,16 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const st = this.lastState;
     if (!cat || !st) return;
     if (this.fusionResult || this.fusionPending) return;
+    if (this.fusionStar >= MAX_STAR) return; // 满星查看态无合成（按钮不注册，防御）
     if (this.fusionFilledCount() !== 5) return;
-    const materials = this.fusionSlots.slice() as string[];
+    // R3：材料槽完整保存 {defId, star}；core 按当前源星级原子校验+消耗（装备保护同口径）。
+    const star = this.fusionStar;
+    const materials = this.fusionSlots.map((s) => s!.defId);
     // 「合成中…」瞬时态：先让玩家看到状态切换，再在 ~260ms 后弹结果卡（同步事务已完成）。
     this.fusionToken += 1;
     const ptoken = this.fusionToken;
     this.fusionPending = { until: this.nowMs + 260, token: ptoken };
-    const res = this.actions?.onFuseCategory?.(materials, cat, 1) ?? null;
+    const res = this.actions?.onFuseCategory?.(materials, cat, star) ?? null;
     if (!res) {
       // 失败（防御：满5时 core 校验通过，理论不可达）→ 清空让玩家重选，绝不扣材料；给原因 toast
       this.clearFusionSession();
@@ -1999,22 +2117,23 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       setTimeout(() => {
         if (this.fusionToken === ptoken) {
           this.fusionPending = null;
-          this.showFusionResult(res.product);
+          this.showFusionResult(res.product, res.star);
         }
       }, 280);
     } else {
       this.fusionPending = null;
-      this.showFusionResult(res.product);
+      this.showFusionResult(res.product, res.star);
     }
   }
 
   /** 页内合成结果卡（材料槽收拢清空 → 中央产出卡；不自动关闭——玩家点空白区才关；可点卡本体继续阅读）。
-   *  F-GARAGE-FUSION-RESULT-INTERACTION-R2.2：移除 950ms 自动关闭 timer；高亮窗口 ≥2.5s。 */
-  private showFusionResult(product: string): void {
+   *  F-GARAGE-FUSION-RESULT-INTERACTION-R2.2：移除 950ms 自动关闭 timer；高亮窗口 ≥2.5s。
+   *  R3：记录产出星级（关闭结果卡后自动切到该星级的查看视图）。 */
+  private showFusionResult(product: string, productStar: number): void {
     this.fusionSlots = [null, null, null, null, null];
     this.fusionToken += 1;
     const token = this.fusionToken;
-    this.fusionResult = { product, token };
+    this.fusionResult = { product, productStar, token };
     this.fusionGlow = { defId: product, until: this.nowMs + 2500, token };
     this.fusionNew = { defId: product, until: this.nowMs + 2500, token };
     if (typeof setTimeout === 'function') {
@@ -3659,14 +3778,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const x0 = c.x + padX;
     const w0 = Math.max(80, c.w - padX * 2);
     // 1) safe header（返回按钮 + 标题 + 可选测试材料）
-    const hh = short ? 24 : 36;
+    // R3：short 屏新增星级行 → header/tabs/status/pager 各压缩 1-2px，保证卡片行 + pager 仍不重叠；
+    // normal 屏同步压缩（hh 36→30 / th 30→26 / starH 20→18 / sH 18→16）→ 星级行占位后 844×390 仍保 2 行卡网格
+    // （否则 pageSize 8→4，主视口视觉密度掉 50% 且「点卡凑 5」玩家路径需多翻页）。
+    const hh = short ? 22 : 30;
     const hY = c.y + (short ? 2 : 6);
     const backBtn: Rect = { x: x0, y: hY, w: short ? 64 : 92, h: hh };
     const titleX = backBtn.x + backBtn.w + (short ? 6 : 10);
     const header: Rect = { x: x0, y: hY, w: w0, h: hh };
     // 2) category tabs
-    const th = short ? 20 : 30;
-    const tY = hY + hh + (short ? 2 : 4);
+    const th = short ? 18 : 26;
+    const tY = hY + hh + (short ? 2 : 3);
     const tgap = short ? 4 : 8;
     const tabW = (w0 - tgap * 2) / 3;
     const tabs: FusionLayout['tabs'] = [
@@ -3674,9 +3796,21 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       { id: 'bfilter:movement', v: 'movement', label: '移动', x: x0 + (tabW + tgap), y: tY, w: tabW, h: th },
       { id: 'bfilter:body', v: 'body', label: '车身', x: x0 + (tabW + tgap) * 2, y: tY, w: tabW, h: th },
     ];
+    // 2.5) R3 星级选择行（方案C 第二层；仅非 body 分类占行；chip 数由 MAX_STAR 动态决定，不写死）
+    const starN = opts.isBody ? 0 : MAX_STAR;
+    const starY = tY + th + (short ? 1 : 1);
+    const starH = short ? 14 : 18;
+    const starGap = short ? 3 : 5;
+    const starChips: FusionLayout['starChips'] = [];
+    if (starN > 0) {
+      const chipW = (w0 - starGap * (starN - 1)) / starN;
+      for (let s = 1; s <= starN; s++) {
+        starChips.push({ x: x0 + (s - 1) * (chipW + starGap), y: starY, w: chipW, h: starH, star: s });
+      }
+    }
     // 3) fusion status row（主信息左 / 次信息或行内反馈右；纯文字行）
-    const sY = tY + th + (short ? 1 : 3);
-    const sH = short ? 16 : 18;
+    const sY = (starN > 0 ? starY + starH : tY + th) + 1;
+    const sH = short ? 14 : 16;
     // 6+7) material tray + action area（底部固定合成栏）
     const barH = short ? 74 : 100;
     const barY = c.y + c.h - barH - (short ? 2 : 6);
@@ -3693,12 +3827,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const n5X = Math.min(tray.x + tray.w - n5W, slots[4].x + slotW + (short ? 4 : 10));
     // 5) card grid（可用高 = tray 上缘 − 状态行 − 分页条）
     const gap = short ? 4 : 8;
-    const gridTop = sY + sH + (short ? 0 : 2);
+    const gridTop = sY + sH + (short ? 0 : 0);
     const gridBotRaw = tray.y - (short ? 3 : 6);
     const cols = short ? 4 : Math.max(3, Math.min(8, Math.floor((w0 + gap) / (short ? 96 : 168))));
     const needPages = Math.ceil(opts.defCount / Math.max(1, cols));
     const hasPager = needPages > 1;
-    const pagerH = hasPager ? (short ? 13 : 20) : 0;
+    const pagerH = hasPager ? (short ? 12 : 20) : 0;
     const gridBot = gridBotRaw - (hasPager ? pagerH + (short ? 1 : 2) : 0);
     const rowsH = Math.max(1, gridBot - gridTop - gap);
     const needRows = Math.ceil(opts.defCount / cols);
@@ -3726,6 +3860,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       backBtn,
       titleX,
       tabs,
+      starChips,
       statusY: sY,
       gridTop,
       cardH,
@@ -3768,9 +3903,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
         : this.backpackFilter === 'movement'
           ? [...OFFICIAL_MOVEMENTS]
           : [...OFFICIAL_BODIES];
-    const catAvail = cat ? fusionCategoryAvailable(inv, cat, draft, 1) : 0;
+    const star = this.fusionStar;
+    const isMaxView = !isBody && star >= MAX_STAR; // R3：满星查看态（无合成操作）
+    const catAvail = cat ? fusionCategoryAvailable(inv, cat, draft, star) : 0;
     const gl = this.computeFusionLayout(c, { short, defCount: defIds.length, isBody });
-    const equipped = equippedSlots(draft);
 
     // —— RC 版号水印独立位（页头行右缘；调试包与「测试材料」并排）——
     const rcGrantTM = typeof __WX_DEBUG_GRANT__ !== 'undefined' && __WX_DEBUG_GRANT__;
@@ -3800,47 +3936,62 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       });
     }
 
+    // R3 星级选择行（方案C 第二层：分类 → 星级 → 只展示当前星级部件）
+    if (!isBody) this.drawFusionStarRow(gl, cat!, inv, draft);
+
     // —— 顶部状态行（主/次拆分；行内反馈占用右侧次位 ~1.5s，不新增行、不遮操作） ——
     const toast = this.fusionToast !== null && this.nowMs <= this.fusionToast.until ? this.fusionToast : null;
     if (isBody) {
       this.text('车身不参与合成', x0 + 2, gl.toastY, short ? 15 : 15, C.textDim, 'left', 600);
+    } else if (isMaxView) {
+      this.text(`${MAX_STAR}★ 满星查看 · 不参与合成`, x0 + 2, gl.toastY, gl.mainSize, C.textDim, 'left', 600);
+      if (toast) this.text(toast.text, gl.toastRight, gl.toastY, gl.subSize, C.gold, 'right', 700);
     } else if (toast) {
-      const mainTxt = catAvail >= 5 ? `可合成 ${Math.floor(catAvail / 5)} 次` : `还差 ${5 - catAvail} 件1★部件`;
+      const mainTxt = catAvail >= 5 ? `可合成 ${Math.floor(catAvail / 5)} 次` : `还差 ${5 - catAvail} 件${star}★部件`;
       this.text(mainTxt, x0 + 2, gl.toastY, gl.mainSize, catAvail >= 5 ? C.gold : C.textDim, 'left', 700);
       this.text(toast.text, gl.toastRight, gl.toastY, gl.subSize, C.gold, 'right', 700);
     } else if (catAvail >= 5) {
       this.text(`可合成 ${Math.floor(catAvail / 5)} 次`, x0 + 2, gl.toastY, gl.mainSize, C.gold, 'left', 700);
-      this.text(`1★材料 ${catAvail} 件`, gl.toastRight, gl.toastY, gl.subSize, C.textDim, 'right', 600);
+      this.text(`${star}★材料 ${catAvail} 件`, gl.toastRight, gl.toastY, gl.subSize, C.textDim, 'right', 600);
     } else {
-      this.text(`还差 ${5 - catAvail} 件1★部件`, x0 + 2, gl.toastY, gl.mainSize, C.textDim, 'left', 600);
-      this.text(`可用 1★材料 ${catAvail} 件`, gl.toastRight, gl.toastY, gl.subSize, C.textDim, 'right', 600);
+      this.text(`还差 ${5 - catAvail} 件${star}★部件`, x0 + 2, gl.toastY, gl.mainSize, C.textDim, 'left', 600);
+      this.text(`可用 ${star}★材料 ${catAvail} 件`, gl.toastRight, gl.toastY, gl.subSize, C.textDim, 'right', 600);
     }
 
-    // —— 卡片数据 ——
+    // —— 卡片数据（R3：单星视图——每卡只表达当前星级；完全未拥有 → 合成网格隐藏） ——
     const items: FusionCardItem[] = [];
     for (const defId of defIds) {
-      const one = isBody ? 0 : Math.max(0, inv[defId]?.one ?? 0);
-      const two = isBody ? 0 : Math.max(0, inv[defId]?.two ?? 0);
-      const owned = isBody ? isBodyOwned(defId) : one > 0 || two > 0;
-      let eqN = 0;
       if (isBody) {
-        eqN = draft && draft.bodyDefId === defId ? 1 : 0;
-      } else {
-        for (const s of equipped) if (s.defId === defId) eqN += 1;
+        const eqN = draft && draft.bodyDefId === defId ? 1 : 0;
+        items.push({
+          defId,
+          name: this.fusionShortName(defId),
+          star: 1,
+          count: 0,
+          eqStar: eqN,
+          available: 0,
+          owned: isBodyOwned(defId),
+          usedN: 0,
+          isBody: true,
+        });
+        continue;
       }
-      let eqOne = 0;
-      if (!isBody) for (const s of equipped) if (s.defId === defId && s.star === 1) eqOne += 1;
-      const available = isBody ? 0 : Math.max(0, one - eqOne);
+      const one = Math.max(0, inv[defId]?.one ?? 0);
+      const two = Math.max(0, inv[defId]?.two ?? 0);
+      const ownedAny = one > 0 || two > 0;
+      if (!ownedAny) continue; // R3/T13：完全未拥有 → 合成页隐藏（图鉴/普通背包不受影响）
+      const count = star >= 2 ? two : one;
+      const eqStar = equippedCount(defId, star, draft);
       items.push({
         defId,
         name: this.fusionShortName(defId),
-        one,
-        two,
-        eqN,
-        available,
-        owned,
-        usedN: this.fusionUses(defId),
-        isBody,
+        star,
+        count,
+        eqStar,
+        available: Math.max(0, count - eqStar),
+        owned: ownedAny,
+        usedN: this.fusionUses(defId, star),
+        isBody: false,
       });
     }
     // 分页钳制 + 关闭结果后的定位跳页（PAGE 由统一布局给出 → 同源）
@@ -3864,7 +4015,10 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       const cardRect: Rect = { x: x0 + col * (cw + cGap), y: gl.gridTop + row * (gl.cardH + cGap), w: cw, h: gl.cardH };
       this.drawFusionCardItem(it, cardRect);
     }
-    if (items.length === 0) this.text('该分类暂无部件', x0, gl.gridTop + 20, 14, C.textDim);
+    if (items.length === 0) {
+      const label = isBody ? '车身' : fusionCategoryLabel(cat!);
+      this.text(isBody ? '该分类暂无部件' : `暂无${label}${this.fusionStar}★部件`, x0, gl.gridTop + 20, 14, C.textDim);
+    }
 
     // —— 分页条（页码 + 上一页/下一页；不压卡片与材料栏） ——
     if (gl.pager) {
@@ -3884,11 +4038,88 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.drawFusionBar(gl, cat!, draft, catAvail, toast !== null);
     }
 
+    // —— R3 切换轻确认层（页内；画在结果层之下、页面之上；结果期不会出现——底层不可达） ——
+    if (this.fusionSwitchAsk !== null) {
+      this.drawFusionSwitchAsk(c);
+    }
+
     // —— 合成结果层（R2.2：画在整页**之上**——底层页面保留可读 + 半透明遮罩 + 产出卡；
     //    不自动关闭；点卡本体不关（阅读态）；点空白区关闭） ——
     if (this.fusionResult !== null) {
       this.drawFusionResultCard(c, this.fusionResult.product);
     }
+  }
+
+  /** R3：星级选择行（方案C 第二层）。chip 数由 MAX_STAR 动态生成；
+   *  star<MAX：`{s}★ → {s+1}★｜{可作材料件数}件`；star=MAX：`{MAX}★｜满星`（查看态）。
+   *  无材料的星级允许查看（弱态视觉，仍可点）；满星页只允许查看。 */
+  private drawFusionStarRow(
+    gl: FusionLayout,
+    cat: FusionCategory,
+    inv: PartInventory,
+    draft: BuildDraft | null,
+  ): void {
+    const short = this.isShort;
+    for (const chip of gl.starChips) {
+      const active = this.fusionStar === chip.star;
+      const isMaxChip = chip.star >= MAX_STAR;
+      const avail = isMaxChip ? 0 : fusionCategoryAvailable(inv, cat, draft, chip.star);
+      const label = isMaxChip ? `${MAX_STAR}★｜满星` : `${chip.star}★ → ${chip.star + 1}★`;
+      const countTxt = isMaxChip ? '' : `｜${avail}件`;
+      const dim = !isMaxChip && avail <= 0; // 该星级无可作材料 → 弱态（允许查看）
+      this.rect(
+        chip.x,
+        chip.y,
+        chip.w,
+        chip.h,
+        active ? 'rgba(48,58,74,0.95)' : 'rgba(26,34,46,0.9)',
+        active ? C.gold : dim ? 'rgba(70,80,96,0.55)' : C.border,
+        active ? 1.5 : 1,
+      );
+      const fs = short ? 11 : 13;
+      const fullTxt = `${label}${countTxt}`;
+      const maxChars = Math.max(3, Math.floor((chip.w - 8) / fs));
+      this.text(
+        fullTxt.slice(0, maxChars),
+        chip.x + chip.w / 2,
+        chip.y + chip.h / 2,
+        fs,
+        active ? C.gold : dim ? C.textDark : C.text,
+        'center',
+        active ? 700 : 600,
+      );
+      this.hit(`fusion-star:${chip.star}`, chip.x, chip.y, chip.w, chip.h);
+    }
+  }
+
+  /** R3：切换轻确认层（页内 panel，非系统弹窗）：取消=完全不变；清空并切换=材料归零再进入目标。 */
+  private drawFusionSwitchAsk(c: Rect): void {
+    const ask = this.fusionSwitchAsk!;
+    const n = this.fusionFilledCount();
+    const short = this.isShort;
+    this.rect(c.x, c.y, c.w, c.h, 'rgba(6,9,14,0.6)');
+    const w = short ? 230 : 320;
+    const h = short ? 96 : 128;
+    const x = c.x + (c.w - w) / 2;
+    const y = c.y + (c.h - h) / 2;
+    this.panel(x, y, w, h, 'rgba(20,29,44,0.98)', C.gold, V.radiusL);
+    const targetLabel =
+      ask.cat === 'body' ? '车身' : `${fusionCategoryLabel(ask.cat as FusionCategory)}${ask.star}★`;
+    this.text(`切换到${targetLabel}`, x + w / 2, y + (short ? 18 : 26), short ? 14 : 17, C.text, 'center', 700);
+    this.text(
+      `将清空当前${n}件材料`,
+      x + w / 2,
+      y + (short ? 36 : 50),
+      short ? 12 : 14,
+      C.textDim,
+      'center',
+      600,
+    );
+    const bw = short ? 92 : 124;
+    const bh = short ? 26 : 34;
+    const by = y + h - bh - (short ? 10 : 14);
+    this.button(x + w / 2 - bw - (short ? 5 : 8), by, bw, bh, 'fusion-switch-cancel', '取消', {});
+    this.button(x + w / 2 + (short ? 5 : 8), by, bw, bh, 'fusion-switch-confirm', '清空并切换', { primary: true });
   }
 
   /** flash/glow/new 判断（布局无关的短判断；供卡片与槽绘制消费） */
@@ -3903,18 +4134,17 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
   }
 
   /**
-   * F-GARAGE-FUSION-FEEDBACK-LAYOUT-R2.1：部件卡（三层信息层级，单主状态，字号下限达标）。
-   * L1 图标 + 短名 +（右上）已选勾/「已选N」；L2 1★×N（有 2★ 库存追加 2★×N）；L3 唯一主状态。
-   * short 极短屏：L2 数量与 L3 主状态同行（左/右）——不减字号、只减次要信息。
+   * R3：部件卡（三层信息层级，单星视图）——每张卡只表达「当前分类 + 当前星级」的该部件。
+   * L1 图标 + 短名 +（右上）已选勾/「已选N/可用N」；L2 当前星标（{star}★）；L3 唯一主状态
+   * （可用 N / 装备占用N / 可用0 弱态）。禁止再聚合显示 1★×N 2★×N（用户 T1）。
+   * short 极短屏：L2/L3 各自成行，字号不减。
    */
   private drawFusionCardItem(it: FusionCardItem, r: Rect): void {
     const short = this.isShort;
     const { x, y, w, h } = r;
     const defId = it.defId;
-    const notOwned = !it.owned;
-    const eqOnly = !it.isBody && it.owned && it.eqN > 0 && it.available <= 0;
+    const eqOnly = !it.isBody && it.owned && it.count > 0 && it.available <= 0; // 全部被装备占用 → 灰态
     this.button(x, y, w, h, `backpack-select:${defId}`, '', { equipped: eqOnly });
-    if (notOwned) this.rect(x, y, w, h, 'rgba(10,14,22,0.55)');
     const padIn = short ? 4 : 8;
     const glow = this.fusionGlowing(defId);
     const isNew = this.fusionIsNew(defId);
@@ -3923,10 +4153,18 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       if (short) {
         this.text('✓', x + w - 8, y + 7, 13, '#ffe3a3', 'center', 700);
       } else {
-        const chipW = 34;
+        const chipW = 52;
         const chipH = 16;
         this.panel(x + w - chipW - 4, y + 3, chipW, chipH, 'rgba(94,73,32,0.94)', 'rgba(255,190,80,0.9)', 3);
-        this.text(`已选${it.usedN}`, x + w - chipW - 4 + chipW / 2, y + 3 + chipH / 2, 11, '#ffe3a3', 'center', 700);
+        this.text(
+          `已选${it.usedN}/${it.available}`,
+          x + w - chipW - 4 + chipW / 2,
+          y + 3 + chipH / 2,
+          11,
+          '#ffe3a3',
+          'center',
+          700,
+        );
       }
     }
     if (isNew) {
@@ -3936,38 +4174,38 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.text('新获得', x + 2 + tagW / 2, y + 2 + tagH / 2, short ? 10 : 12, '#ffe9c0', 'center', 700);
     }
     // 已装备标识：左缘色条（非文字竞争）
-    if (it.isBody ? it.eqN > 0 : it.owned && it.eqN > 0) {
+    if (it.isBody ? it.eqStar > 0 : it.owned && it.eqStar > 0) {
       this.rect(x + 1, y + 3, 2.5, h - 6, V.equippedMark);
     }
+    // 该星级完全无库存（其它星有）→ 弱态底（允许查看）
+    const dimStar = !it.isBody && it.count <= 0;
+    if (dimStar) this.rect(x, y, w, h, 'rgba(10,14,22,0.35)');
     // 图标（L1 左上）
     const iconS = short ? 9 : 13;
     const iconCX = x + padIn + iconS;
     const iconCY = y + (short ? h * 0.24 : h * 0.24);
-    this.drawPartIcon(defId, iconCX, iconCY, iconS, notOwned, true);
-    const chipReserve = it.usedN > 0 ? (short ? 18 : 40) : 0;
+    this.drawPartIcon(defId, iconCX, iconCY, iconS, dimStar, true);
+    const chipReserve = it.usedN > 0 ? (short ? 18 : 58) : 0;
     const tx = x + padIn + iconS * 2 + 4;
     const twMax = Math.max(4, x + w - tx - chipReserve - 3);
     const charW = short ? 13 : 15;
-    // L1 短名（主要文字：short 15→12 visible / normal 15）
-    this.text((it.name || defId).slice(0, Math.max(1, Math.floor(twMax / charW))), tx, y + (short ? h * 0.2 : h * 0.2), 15, it.owned ? C.text : C.textDim, 'left', 700);
+    // L1 短名
+    this.text((it.name || defId).slice(0, Math.max(1, Math.floor(twMax / charW))), tx, y + (short ? h * 0.2 : h * 0.2), 15, dimStar ? C.textDim : C.text, 'left', 700);
     if (it.isBody) {
-      const tag = it.eqN > 0 ? '使用中' : it.owned ? '已拥有' : '未拥有';
-      this.text(tag, tx, y + h * 0.82, 13, it.eqN > 0 ? C.blue : it.owned ? C.gold : C.red, 'left', 700);
+      const tag = it.eqStar > 0 ? '使用中' : it.owned ? '已拥有' : '未拥有';
+      this.text(tag, tx, y + h * 0.82, 13, it.eqStar > 0 ? C.blue : it.owned ? C.gold : C.red, 'left', 700);
       return;
     }
-    // L2 星级数量
-    const starTxt =
-      it.one > 0 && it.two > 0
-        ? `1★×${it.one} 2★×${it.two}`
-        : it.one > 0
-          ? `1★×${it.one}`
-          : it.two > 0
-            ? `2★×${it.two}`
-            : '';
-    // L3 唯一主状态（可用 N / 已装备 / 未拥有——单状态，不堆叠）
-    const statusTxt = !it.owned ? '未拥有' : it.eqN > 0 && it.available <= 0 ? '已装备' : `可用 ${Math.max(0, it.available)}`;
+    // L2 当前星标（单星视图；不再聚合显示多星数量）
+    const starTxt = `${it.star}★`;
+    // L3 唯一主状态：可用 N / 装备占用N（该星全被装备占用）/ 可用 0（该星无库存弱态）
+    const statusTxt =
+      it.count <= 0
+        ? `可用 0`
+        : it.eqStar > 0 && it.available <= 0
+          ? `装备占用${it.eqStar}`
+          : `可用 ${Math.max(0, it.available)}`;
     if (short) {
-      // 极短屏：L2/L3 各自成行（.52/.82）——独立行杜绝「1★×N 与 可用N 同行互压」；数量过宽按行宽截断
       if (starTxt) this.text(starTxt.slice(0, Math.max(1, Math.floor(twMax / charW))), tx, y + h * 0.52, 13, C.gold, 'left', 600);
       if (statusTxt) this.text(statusTxt.slice(0, Math.max(1, Math.floor(twMax / charW))), tx, y + h * 0.82, 13, fusionStatusColor(statusTxt), 'left', fusionStatusColor(statusTxt) === C.blue ? 700 : 600);
     } else {
@@ -3993,16 +4231,32 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     this.panel(bar.x, bar.y, bar.w, bar.h, C.dockBg, C.border, V.radiusM);
     const n = this.fusionFilledCount();
     const catLabel = fusionCategoryLabel(cat);
+    const star = this.fusionStar;
+    // R3：满星查看态 = 纯查看（无材料槽/自动放入/合成操作）
+    if (star >= MAX_STAR) {
+      this.text(
+        `${MAX_STAR}★满星 · 不参与合成`,
+        bar.x + bar.w / 2,
+        bar.y + bar.h / 2,
+        short ? 13 : 15,
+        C.textDim,
+        'center',
+        600,
+      );
+      void draft;
+      return;
+    }
     const filling = this.fusionPending !== null && this.nowMs <= this.fusionPending.until;
-    // 行1：材料槽（可辨识：图标 + 短名 + 重复 ×N；点槽移除）
+    // 行1：材料槽（可辨识：图标 + 短名 + 星标 + 重复 ×N；点槽移除）
     for (let i = 0; i < 5; i++) {
       const s = gl.slots[i];
-      const defId = this.fusionSlots[i];
-      if (!defId) {
+      const sel = this.fusionSlots[i];
+      if (!sel) {
         this.panel(s.x, s.y, s.w, s.h, 'rgba(30,40,54,0.55)', C.border, V.radiusM);
         this.text('+', s.x + s.w / 2, s.y + s.h / 2, short ? 14 : 16, C.textDark, 'center', 700);
         continue;
       }
+      const defId = sel.defId;
       const flashing =
         this.fusionFlash !== null && this.nowMs <= this.fusionFlash.until && this.fusionFlash.defIds.includes(defId);
       this.button(s.x, s.y, s.w, s.h, `fusion-slot:${i}`, '', { selected: flashing });
@@ -4010,26 +4264,43 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
       this.drawPartIcon(defId, s.x + (short ? 13 : 17), s.y + s.h / 2, iconS, false, true);
       const nm = this.fusionShortName(defId);
       this.text(nm, s.x + (short ? 24 : 33), s.y + s.h / 2, short ? 13 : 15, C.text, 'left', 700);
-      const total = this.fusionUses(defId);
+      // 星标（R3：槽内材料明确源星级）
+      this.text(`${sel.star}★`, s.x + (short ? 24 : 33), s.y + s.h - (short ? 5 : 6), short ? 9 : 10, C.gold, 'left', 700);
+      const total = this.fusionUses(defId, sel.star);
       if (total > 1) {
         let first = -1;
-        for (let k = 0; k < i; k++) if (this.fusionSlots[k] === defId) { first = k; break; }
+        for (let k = 0; k < i; k++) {
+          const p = this.fusionSlots[k];
+          if (p && p.defId === defId && p.star === sel.star) { first = k; break; }
+        }
         if (first < 0) this.text(`×${total}`, s.x + s.w - 3, s.y + 3, short ? 11 : 12, '#ffe3a3', 'right', 700);
       }
     }
     // N/5（加入/移除/自动放入后同步增强：toast 激活或满 5 时金色）
     this.text(`${n}/5`, gl.n5X, gl.tray.y + gl.tray.h / 2 - (short ? 0 : 3), short ? 17 : 20, n === 5 || toastActive ? C.gold : C.textDim, 'left', 700);
-    if (!short) this.text('材料', gl.n5X + 2, gl.tray.y + gl.tray.h / 2 + 10, 11, C.textDim, 'left');
+    if (!short)
+      this.text(n > 0 ? `${catLabel}${star}★材料` : '材料', gl.n5X + 2, gl.tray.y + gl.tray.h / 2 + 10, 11, C.textDim, 'left');
 
-    // 行2：结果预期（左，含神秘部件图标）+ 自动放入（次）+ 合成（主状态机）
-    const previewTxt = `将随机获得1件${catLabel}2★部件`;
+    // 行2：材料锁定标签（R3 T9：n>0 时明确「分类+源星级+N/5」）+ 合成预期（R3：星级动态）+ 按钮
+    const lockTxt = n > 0 ? `${catLabel}${star}★材料 ${n}/5` : '';
+    const expectTxt = `消耗：5件${catLabel}${star}★ · 随机获得：1件${catLabel}${star + 1}★`;
     const previewFs = short ? 12 : 13;
-    const previewW = previewTxt.length * previewFs * 0.95;
     const px0 = gl.previewX;
     this.drawMysteryIcon(px0 + (short ? 7 : 9), gl.previewY, short ? 6 : 8);
-    const availX = px0 + (short ? 16 : 22);
-    if (availX + previewW < gl.autoBtn.x - (short ? 2 : 6)) {
-      this.text(previewTxt, availX, gl.previewY, previewFs, C.textDim, 'left', 600);
+    let tx0 = px0 + (short ? 16 : 22);
+    const maxW = gl.autoBtn.x - (short ? 2 : 6) - tx0;
+    if (lockTxt) {
+      // R3：n>0 → 锁定标签必画（金色优先级最高）；空间足够再追加大预期（否则显示紧凑版）
+      this.text(lockTxt, tx0, gl.previewY, previewFs, C.gold, 'left', 700);
+      tx0 += lockTxt.length * previewFs + (short ? 6 : 10);
+      const compact = `消耗5件${star}★→得1件${star + 1}★`;
+      const rest = maxW - (tx0 - px0);
+      const pick = rest >= expectTxt.length * previewFs * 0.95 ? expectTxt : compact;
+      if (pick.length * previewFs * 0.95 <= rest) {
+        this.text(pick, tx0, gl.previewY, previewFs, C.textDim, 'left', 600);
+      }
+    } else if (expectTxt.length * previewFs * 0.95 <= maxW) {
+      this.text(expectTxt, tx0, gl.previewY, previewFs, C.textDim, 'left', 600);
     }
     const autoDis = n === 5 || catAvail < 5 || this.fusionResult !== null || filling;
     this.button(gl.autoBtn.x, gl.autoBtn.y, gl.autoBtn.w, gl.autoBtn.h, 'fusion-auto', '自动放入', { disabled: autoDis });
@@ -4059,11 +4330,12 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
    *  视觉：底层页面保留 + 半透明遮罩（55–70%）+ 中央产出卡；遮罩不覆盖胶囊（contentRect 已按 insets 收缩）。
    *  关闭规则：不自动关闭；点卡本体不关（阅读态 no-op）；点空白区关闭。
    *  命中 z 序（后注册 = 先命中）：底层页控件 < 空白关闭层(fusion-result-dismiss) < 卡片消费层(fusion-result-card)。
-   *  卡内明确「消耗：5件X类1★ / 获得：名2★」+ 真实产出图标；文案 = 「点击空白处继续」（与行为一致）。 */
+   *  卡内明确「消耗：5件X类{s}★ / 获得：名{s+1}★」（R3：星级按实际源星级，不写死）+ 真实产出图标。 */
   private drawFusionResultCard(c: Rect, product: string): void {
     const short = this.isShort;
     const cat = this.fusionCategory();
     const catLabel = cat ? fusionCategoryLabel(cat) : '';
+    const srcStar = Math.max(1, (this.fusionResult?.productStar ?? 2) - 1); // 源星级 = 产出星级 − 1
     // 遮罩视觉：半透明压暗（底层页面保留可读；0.62 ∈ [0.55, 0.70]）
     this.rect(c.x, c.y, c.w, c.h, 'rgba(6,9,14,0.62)');
     // 命中：空白区关闭（先注册 → 位于卡片消费层之下；整页覆盖 → 屏蔽底层页控件）
@@ -4078,7 +4350,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     // 命中：卡本体 = 阅读态 no-op（后注册 → 最顶层；点卡不关）
     this.hit('fusion-result-card', x, y, cardW, cardH);
     this.text('合成成功', cx, y + (short ? 17 : 26), short ? 16 : 22, C.gold, 'center', 700);
-    const consumedTxt = `消耗：5件${catLabel}1★`;
+    const consumedTxt = `消耗：5件${catLabel}${srcStar}★`;
     this.text(consumedTxt, cx, y + (short ? 32 : 48), short ? 12 : 14, C.textDim, 'center', 600);
     const iconS = short ? 16 : 26;
     const iconY = y + (short ? 56 : 88);
@@ -4092,7 +4364,7 @@ export class CanvasPlayerUIHost implements PlayerUIHost {
     const nameShow = gotTxt.slice(0, Math.max(1, Math.floor(textW / nameFs)));
     this.text(nameShow, textX, iconY - (short ? 6 : 8), nameFs, C.text, 'left', 700);
     const starX = textX + nameShow.length * nameFs + 6;
-    if (starX + nameFs * 2 < x + cardW - 8) this.text('2★', starX, iconY + (short ? 2 : 4), nameFs, C.gold, 'left', 700);
+    if (starX + nameFs * 2 < x + cardW - 8) this.text(`${srcStar + 1}★`, starX, iconY + (short ? 2 : 4), nameFs, C.gold, 'left', 700);
     this.text('点击空白处继续', cx, y + cardH - (short ? 11 : 16), short ? 12 : 13, C.textDark, 'center', 600);
   }
 

@@ -300,6 +300,16 @@ async function runViewport(browser, vp) {
   log(bpTexts.some((t) => t.includes('返回车库')), `[${tag}] B3. 保留「‹ 返回车库」`);
 
   // C. 三分类全部部件可达（真实翻页）
+  // R3：完全未拥有部件从合成网格隐藏 → C 段先临时注入全量 one:1 种子保证全集可见，collect 后恢复场景种子。
+  // id 清单与 COMBAT_TOTAL/MOVEMENT_TOTAL/BODY_TOTAL 同级硬编码（registry 漂移由单测 UX_R2 T21/T22 守护）。
+  const ALL_IDS = [
+    'cannon', 'hammer', 'pushRod', 'spear', 'laser', 'rammer', 'saw', 'shotgun', 'thruster', 'machineGun', 'flamethrower',
+    'smallWheel', 'largeWheel', 'heavyWheel',
+    'watermelonBody', 'bananaBody', 'pineappleBody', 'coconutBody', 'durianBody', 'pearBody', 'mangoBody', 'orangeBody',
+  ];
+  const allSeed = {};
+  for (const d of ALL_IDS) allSeed[d] = { one: 1, two: 0 };
+  await seedInv(page, allSeed);
   const combat = await collectIds(page);
   log(combat.length === COMBAT_TOTAL, `[${tag}] C1. 战斗分类 ${COMBAT_TOTAL} 项全部可达`, `n=${combat.length}`);
   await tapVisibleById(page, 'bfilter:movement');
@@ -308,6 +318,7 @@ async function runViewport(browser, vp) {
   await tapVisibleById(page, 'bfilter:body');
   const body = await collectIds(page);
   log(body.length === BODY_TOTAL, `[${tag}] C3. 车身分类 ${BODY_TOTAL} 项全部可达`, `n=${body.length}`);
+  await seedInv(page, { cannon: { one: 2, two: 0 }, hammer: { one: 2, two: 0 }, saw: { one: 1, two: 0 } });
   await tapVisibleById(page, 'bfilter:combat'); // 回到战斗（含清空材料槽的切换语义）
 
   // D. 种子场景状态：分类可用 5 → 「可合成 1 次」
@@ -327,14 +338,18 @@ async function runViewport(browser, vp) {
   log(autoState.slots && autoState.slots.filter(Boolean).length === 5, `[${tag}] E1. 自动放入后材料槽满 5`, JSON.stringify(autoState.slots));
   log(!!find(await areas(page), 'backpack-fuse'), `[${tag}] E2. 满 5 → 暖金「合成」主按钮可点`);
   // 确定性优先级：可用 2/2/1 → 重复多优先 → cannon×2 hammer×2 saw×1（defId 稳定）
-  const sorted = autoState.slots.filter(Boolean).slice().sort();
+  // R3：槽位为 {defId, star} 对象 → 断言映射到 defId（星标一致性一并校验）
+  const slotDefs = autoState.slots.filter(Boolean).map((s) => s.defId);
+  const allStar1 = autoState.slots.filter(Boolean).every((s) => s.star === 1);
+  const sorted = slotDefs.slice().sort();
   const expectMat = ['cannon', 'cannon', 'hammer', 'hammer', 'saw'].sort();
   log(JSON.stringify(sorted) === JSON.stringify(expectMat), `[${tag}] E3. 自动放入材料 = 未装备→重复多→defId 序`, sorted.join(','));
+  log(allStar1, `[${tag}] E4. R3 自动放入全部同源星级（1★）`);
 
   // F. 手动移除 1 件（点材料槽）→ 再点卡片补回（零消耗）
   const beforeRem = await readInvAll(page);
   const removeIdx = 2;
-  const removedDefId = autoState.slots[removeIdx];
+  const removedDefId = autoState.slots[removeIdx].defId;
   await tapVisibleById(page, `fusion-slot:${removeIdx}`);
   const afterRemState = await hostState(page);
   log(afterRemState.slots.filter(Boolean).length === 4, `[${tag}] F1. 点材料槽移除 → 剩 4 件`);
@@ -361,7 +376,7 @@ async function runViewport(browser, vp) {
   log(tAfter.two === tBefore.two + 1, `[${tag}] G3. 2★ 总数 +1（随机产出）`, `${tBefore.two} → ${tAfter.two}`);
   const product = productOf(before, after);
   log(afterFuse.result && product === afterFuse.result.product, `[${tag}] G4. 产出 defId = 结果卡 defId（${product}）`);
-  log(afterFuse.slots && afterFuse.slots.every((s) => s === null), `[${tag}] G5. 合成成功 → 材料槽清空收拢`);
+  log(afterFuse.slots && afterFuse.slots.every((s) => !s), `[${tag}] G5. 合成成功 → 材料槽清空收拢`);
   // 结果卡可见文案（页内完成，无 Modal）——文本在合成帧已录制（点击前已清空）
   const resTexts = await readTexts(page);
   log(resTexts.some((t) => t === '合成成功'), `[${tag}] G6. 结果卡文案「合成成功」`);
@@ -391,11 +406,17 @@ async function runViewport(browser, vp) {
   log(JSON.stringify(afterReload) === JSON.stringify(beforeReload), `[${tag}] I2. reload 后库存保持（2★ 在档）`);
   log(totals(afterReload).two === tBefore.two + 1, `[${tag}] I3. reload 后 2★ 仍在`, `two=${totals(afterReload).two}`);
   // 重进背包：材料已扣、产物在库存 → 状态行按剩余可算（还差 N 件）
-  await gotoBackpackCombat(page, tag + '/reload');
+  // R3：bfilter:combat 同类同星 no-op 不触发 draw → 捕获 nav:backpack 导航帧文本（确定性）
+  await tapVisibleById(page, 'home-garage');
   await clearTexts(page);
-  await tapVisibleById(page, 'bfilter:combat');
+  await tapVisibleById(page, 'nav:backpack');
   const st2 = await readTexts(page);
-  log(st2.some((t) => /^还差 \d+ 件1★部件/.test(t)), `[${tag}] I4. 重进后按剩余材料提示「还差 N 件1★部件」`, st2.filter((t) => /可合成|还差/.test(t)).join(' | '));
+  // R3：1★ 材料已清零 → 重进背包默认定位产物星级（2★ 满星查看态），产物卡「可用 1」
+  log(
+    st2.some((t) => /2★ 满星查看 · 不参与合成/.test(t)) && st2.some((t) => /^可用 1$/.test(t)),
+    `[${tag}] I4. R3 重进后默认产物 2★ 满星查看态（产物可用 1）`,
+    st2.filter((t) => /满星查看|可用 /.test(t)).join(' | '),
+  );
 
   log(errs.length === 0, `[${tag}] Z. 全程无 pageerror/console.error`, errs.join(' | '));
   await ctx.close();
