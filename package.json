@@ -18,6 +18,8 @@
     "build:wechat:rca": "node scripts/wechat-rca.js",
     "dev:wechat": "node scripts/wechat-dev.js",
     "build:pages": "vite build -c vite.pages.config.ts",
+    "dev:portrait-lab": "vite --open=/portrait-lab.html",
+    "build:portrait-lab": "vite build -c vite.portrait-lab.config.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

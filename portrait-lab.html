@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>最强水果 — Portrait Battle Lab（PBL-F0 实验台）</title>
+    <!--
+      PBL-F0-PORTRAIT-BATTLE-LAB-FOUNDATION｜竖屏战场实验台独立入口。
+      与正式入口 index.html 完全隔离：本页面不参与 npm run build / build:pages / build:e2e /
+      build:wechat 任一正式构建；实验失败可直接删除本文件与 src/lab/portraitBattleLab/。
+      样式仅为「可操作的最小集合」，本 Queue 明确不做 UI 美化。
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: #0d1016;
+        color: #e8e8f0;
+        -webkit-font-smoothing: antialiased;
+      }
+      #pbl-root.pbl-root { display: flex; flex-direction: column; height: 100vh; }
+      .pbl-bar {
+        display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+        padding: 8px 12px; background: #171c26; border-bottom: 1px solid #2a3140;
+      }
+      .pbl-group { display: flex; gap: 6px; align-items: center; }
+      .pbl-group-label { font-size: 12px; color: #8a93a5; margin-right: 2px; }
+      .pbl-btn {
+        background: #242b38; color: #e8e8f0; border: 1px solid #38414f; border-radius: 6px;
+        padding: 6px 12px; cursor: pointer; font-size: 13px;
+      }
+      .pbl-btn:hover { background: #2e3747; }
+      .pbl-btn-active { border-color: #4a7fe0; background: #2a3a5c; box-shadow: 0 0 0 1px #3b6fd4 inset; color: #fff; }
+      .pbl-btn-primary { background: #3b6fd4; border-color: #5a8df0; font-weight: 700; letter-spacing: 2px; }
+      .pbl-btn-primary:hover { background: #4a7fe0; }
+      .pbl-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+      .pbl-status { padding: 6px 12px; font: 12px/1.5 monospace; color: #9aa4b5; background: #12161f; border-bottom: 1px solid #2a3140; }
+      .pbl-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+      .pbl-stage canvas { position: absolute; }
+    </style>
+  </head>
+  <body>
+    <div id="pbl-root"></div>
+    <script type="module" src="/src/lab/portraitBattleLab/main.ts"></script>
+  </body>
+</html>
