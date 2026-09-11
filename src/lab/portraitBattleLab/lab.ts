@@ -1,30 +1,26 @@
 /**
- * PBL-F0｜Portrait Battle Lab 控制器（本实验唯一的 DOM / Canvas 交互层）。
+ * PBL-F0 / PBL-F1｜Portrait Battle Lab 控制器（本实验唯一的 DOM / Canvas 交互层）。
  *
- * 设计边界（严格遵守 Queue 范围）：
+ * 设计边界：
  * - **不接正式 Renderer / Battle Runtime / Physics / Garage / Fusion / R4 / Meta / 存档 / 经济**；
- *   舞台为自绘「占位」场景，只用于证明「竖屏逻辑区可进入 + 状态切换正确」。
+ *   舞台按正式 registry 的真实 collider 几何自绘**占位**场景（不加载 sprite / 不做美术）。
  * - 固定摄像机：逻辑舞台恒为竖屏 390×844，屏幕映射复用正式共享契约
  *   `PlayerViewportTransform(390, 844)`（contain 缩放居中）——不新增第二套坐标系统。
- * - 不做 UI 美化（队列明确排除）；控制面板仅为可操作的最小集合。
+ * - 舞台永远展示「当前选择」的实体组合（Arena / Loadout / Encounter 切换即时可见）；
+ *   Start 把它变成一批运行期实体（spawnSerial 递增），Reset / 切换配置则彻底清空。
  *
  * 删除本文件即移除实验台核心；本目录可整块删除（清单见 constants.ts 头部）。
  */
 import { PlayerViewportTransform } from '../../platform/playerViewport';
 import {
   LAB_ARENAS,
-  LAB_ENCOUNTERS,
-  LAB_LOADOUTS,
   PORTRAIT_LOGICAL_H,
   PORTRAIT_LOGICAL_W,
 } from './constants';
-import {
-  LAB_GROUND_Y,
-  arenaMarkers,
-  enemyMarkerRects,
-  playerBodyRect,
-  stageRect,
-} from './layout';
+import { LAB_ENCOUNTERS, LAB_LOADOUTS } from './testData';
+import { buildSpawnPlan, type SpawnPlan } from './entities';
+import { buildScene } from './scene';
+import { HUD_BAND_H, LAB_GROUND_Y, stageRect, type LabLayerId } from './layout';
 import {
   createPortraitLabState,
   findArena,
@@ -39,16 +35,27 @@ import {
   type PortraitLabState,
 } from './state';
 
+/** 分层颜色：与 E2E 的像素分类一一对应（新增层必须同步 E2E 分类器）。 */
+const LAYER_COLORS: Record<LabLayerId, string> = {
+  arena: '#ffd35a',
+  playerBody: '#4a7fe0',
+  playerPart: '#a06bff',
+  enemyBody: '#ff6b5e',
+  enemyPart: '#ff9b3d',
+};
+
 const COLORS = {
   bg: '#0d1016',
   stage: '#151a24',
   stageBorder: '#2a3140',
   ground: '#3a4353',
-  player: '#4a7fe0',
-  enemy: '#ff6b5e',
-  arena: '#ffd35a',
   text: '#e8e8f0',
   dim: '#8a93a5',
+  /**
+   * 缺口提示色：必须与**任何**分层颜色在 RGB 距离上互斥，否则文字抗锯齿像素会被
+   * E2E 的像素分类器误计为实体（已实测踩坑：曾用 #ffd35a，与 Arena 层同色 → arena 虚增 ~310px）。
+   */
+  warn: '#ff5ee0',
   running: '#5ee08a',
 } as const;
 
@@ -62,6 +69,18 @@ export interface PblProbe {
   readonly phase: string;
   readonly startCount: number;
   readonly revision: number;
+  /** 运行期（Start 后）实体数；idle 为 0。 */
+  readonly liveEntities: number;
+  /** 运行期弹丸数；idle 为 0。 */
+  readonly liveProjectiles: number;
+  /** 累计 spawn 批次号（Reset 不归零）。 */
+  readonly spawnSerial: number;
+  /** 当前展示组合的基础数据指纹（A/B 必须一致）。 */
+  readonly baseKey: string;
+  readonly playerBody: string;
+  readonly enemyBodies: readonly string[];
+  readonly unavailable: readonly string[];
+  readonly layers: Record<LabLayerId, number>;
   readonly camera: { scale: number; offsetX: number; offsetY: number; dpr: number };
   readonly canvas: { backingW: number; backingH: number; cssW: number; cssH: number };
 }
@@ -81,6 +100,8 @@ export class PortraitBattleLab {
   /** 固定摄像机：竖屏 390×844 逻辑舞台（复用共享 contain 变换契约）。 */
   private readonly vp = new PlayerViewportTransform(PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
   private state: PortraitLabState = createPortraitLabState();
+  /** 预览计划缓存（key = loadout|encounter）——舞台始终展示当前选择。 */
+  private previewCache: { key: string; plan: SpawnPlan } | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
 
@@ -192,9 +213,20 @@ export class PortraitBattleLab {
     this.render();
   }
 
+  /** 舞台展示用的计划（按当前选择构造并缓存；纯数据，无副作用）。 */
+  private previewPlan(): SpawnPlan {
+    const key = `${this.state.loadout}|${this.state.encounter}`;
+    if (!this.previewCache || this.previewCache.key !== key) {
+      this.previewCache = { key, plan: buildSpawnPlan(this.state.loadout, this.state.encounter) };
+    }
+    return this.previewCache.plan;
+  }
+
   /** 只读诊断快照（Lab 专属，供独立 E2E 读取；不改变任何状态）。 */
   probe(): PblProbe {
     const r = this.canvas.getBoundingClientRect();
+    const plan = this.previewPlan();
+    const sum = labSummary(this.state);
     return {
       logicalW: PORTRAIT_LOGICAL_W,
       logicalH: PORTRAIT_LOGICAL_H,
@@ -204,6 +236,14 @@ export class PortraitBattleLab {
       phase: this.state.phase,
       startCount: this.state.startCount,
       revision: this.state.revision,
+      liveEntities: this.state.run.entities.length,
+      liveProjectiles: this.state.run.projectiles.length,
+      spawnSerial: this.state.run.spawnSerial,
+      baseKey: plan.baseKey,
+      playerBody: plan.player.bodyDefId,
+      enemyBodies: plan.enemies.map((e) => e.bodyDefId),
+      unavailable: sum.unavailable,
+      layers: this.layerCounts(),
       camera: {
         scale: this.vp.scale,
         offsetX: this.vp.offsetX,
@@ -217,6 +257,18 @@ export class PortraitBattleLab {
         cssH: Math.round(r.height * 100) / 100,
       },
     };
+  }
+
+  private layerCounts(): Record<LabLayerId, number> {
+    const counts: Record<LabLayerId, number> = {
+      arena: 0,
+      playerBody: 0,
+      playerPart: 0,
+      enemyBody: 0,
+      enemyPart: 0,
+    };
+    for (const s of buildScene(this.state.arena, this.previewPlan())) counts[s.layer] += 1;
+    return counts;
   }
 
   /* ------------------------------------------------------------- 渲染 */
@@ -253,67 +305,79 @@ export class PortraitBattleLab {
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, stage.w - 2, stage.h - 2);
 
-    // Arena 占位标记
-    ctx.fillStyle = COLORS.arena;
-    for (const r of arenaMarkers(s.arena)) ctx.fillRect(r.x, r.y, r.w, r.h);
+    // 实体场景：全部几何来自正式 registry（车身 + 功能件 collider）
+    const scene = buildScene(s.arena, this.previewPlan());
+    for (const shape of scene) {
+      ctx.fillStyle = LAYER_COLORS[shape.layer];
+      ctx.fillRect(shape.rect.x, shape.rect.y, shape.rect.w, shape.rect.h);
+    }
 
     // 地面
     ctx.fillStyle = COLORS.ground;
     ctx.fillRect(2, LAB_GROUND_Y, stage.w - 4, 3);
 
-    // 玩家占位轮廓
-    const loadout = findLoadout(s.loadout);
-    if (loadout) {
-      const pb = playerBodyRect(loadout.body);
-      ctx.fillStyle = COLORS.player;
-      ctx.fillRect(pb.x, pb.y, pb.w, pb.h);
-    }
+    // 顶部 HUD 带（纯文字，带内不绘制任何实体 → 文字抗锯齿不会污染像素分类）
+    ctx.fillStyle = 'rgba(13,16,22,0.9)';
+    ctx.fillRect(2, 2, stage.w - 4, HUD_BAND_H);
+    ctx.strokeStyle = COLORS.stageBorder;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(2.5, 2.5, stage.w - 5, HUD_BAND_H);
 
-    // 敌人占位标记
-    const encounter = findEncounter(s.encounter);
-    if (encounter) {
-      ctx.fillStyle = COLORS.enemy;
-      for (const r of enemyMarkerRects(encounter)) ctx.fillRect(r.x, r.y, r.w, r.h);
-    }
-
-    // 舞台信息（占位说明文字）
     const arena = findArena(s.arena);
+    const loadout = findLoadout(s.loadout);
+    const encounter = findEncounter(s.encounter);
     ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = COLORS.text;
     ctx.font = 'bold 17px system-ui, sans-serif';
-    ctx.fillText(`${arena ? arena.label : s.arena} · ${arena ? arena.note : ''}`, 16, 34);
+    ctx.fillText(`${arena ? arena.label : s.arena} · 竖屏 ${stage.w}×${stage.h}`, 12, 28);
     ctx.font = '14px system-ui, sans-serif';
     ctx.fillStyle = COLORS.dim;
-    ctx.fillText(`Loadout: ${loadout ? loadout.label : s.loadout}`, 16, 58);
-    ctx.fillText(`Encounter: ${encounter ? encounter.label : s.encounter}`, 16, 78);
-    ctx.fillText(`竖屏逻辑区 ${stage.w}×${stage.h} · 固定摄像机`, 16, 98);
+    ctx.fillText(`Loadout: ${loadout ? loadout.label : s.loadout}`, 12, 50);
+    ctx.fillText(
+      `Encounter: ${encounter ? encounter.label : s.encounter}（${this.previewPlan().enemies.length} 敌）`,
+      12,
+      70,
+    );
+
+    // 数据缺口披露（正式内容库无对应件 —— 不隐藏、不伪造）
+    const missing = labSummary(s).unavailable;
+    if (missing.length > 0) {
+      ctx.fillStyle = COLORS.warn;
+      ctx.font = '13px system-ui, sans-serif';
+      ctx.fillText(`正式库无：${missing.join(' / ')}（未引入）`, 12, 94);
+    }
 
     // 运行态（占位；此处不推进任何战斗规则）
     if (s.phase === 'running') {
-      ctx.fillStyle = 'rgba(94,224,138,0.14)';
-      ctx.fillRect(2, 2, stage.w - 4, stage.h - 4);
       ctx.fillStyle = COLORS.running;
-      ctx.font = 'bold 22px system-ui, sans-serif';
-      ctx.fillText('RUNNING（占位）', 16, 140);
-      ctx.font = '13px system-ui, sans-serif';
-      ctx.fillText('本 Queue 不实现真实 A/B 战斗规则', 16, 164);
+      ctx.font = 'bold 17px system-ui, sans-serif';
+      ctx.fillText(`RUNNING（占位）· 实体 ${s.run.entities.length}`, 12, 120);
     } else {
       ctx.fillStyle = COLORS.dim;
-      ctx.font = 'bold 18px system-ui, sans-serif';
-      ctx.fillText('IDLE（占位）', 16, 140);
+      ctx.font = 'bold 15px system-ui, sans-serif';
+      ctx.fillText('IDLE（占位）· 未生成实体', 12, 120);
     }
+
+    // 下方 Arena 信息带说明
+    ctx.fillStyle = COLORS.dim;
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillText('Arena 标记（下方带）', 12, PORTRAIT_LOGICAL_H - 6);
   }
 
   private syncStatus(): void {
     const sum = labSummary(this.state);
     this.statusEl.textContent =
       `Arena=${sum.arena}(${sum.arenaLabel}) · Loadout=${sum.loadout}(${sum.loadoutLabel}) · ` +
-      `Encounter=${sum.encounter}(${sum.encounterLabel}) · phase=${sum.phase} · starts=${sum.startCount}`;
+      `Encounter=${sum.encounter}(${sum.encounterLabel}) · phase=${sum.phase} · starts=${sum.startCount} · ` +
+      `实体=${sum.entityCount}(敌 ${sum.enemyCount})` +
+      (sum.unavailable.length ? ` · 缺口=${sum.unavailable.join('/')}` : '');
     this.statusEl.dataset['arena'] = sum.arena;
     this.statusEl.dataset['loadout'] = sum.loadout;
     this.statusEl.dataset['encounter'] = sum.encounter;
     this.statusEl.dataset['phase'] = sum.phase;
     this.statusEl.dataset['startCount'] = String(sum.startCount);
+    this.statusEl.dataset['entityCount'] = String(sum.entityCount);
+    this.statusEl.dataset['baseKey'] = sum.baseKey;
   }
 
   private syncControls(): void {

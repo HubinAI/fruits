@@ -1,5 +1,5 @@
 /**
- * PBL-F0-PORTRAIT-BATTLE-LAB-FOUNDATION｜竖屏战场实验台 targeted 测试。
+ * PBL-F0-PORTRAIT-BATTLE-LAB-FOUNDATION｜竖屏战场实验台 targeted 测试（F0 契约层）。
  *
  * 覆盖四层：
  *   1) 常量契约：逻辑基准竖屏 390×844（宽 < 高）；
@@ -7,8 +7,13 @@
  *   3) 状态机：选择项切换 / running 中变更回 idle / Start 幂等 / Reset 归零；
  *   4) 固定摄像机：正式共享契约 PlayerViewportTransform 直接支持竖屏逻辑尺寸
  *      （contain 数学 + client→logical 归一化），证明本实验台未引入第二套坐标系统；
- *   5) 隔离守卫：Lab 源码不得 import 任何正式玩法模块；正式入口 / 正式构建配置
- *      不得引用 portrait-lab（防止竖屏实验规则被写入正式玩法默认路径）。
+ *   5) 隔离守卫（PBL-F1 起收紧为**单向**）：
+ *      - 反向硬约束：正式源码 / 正式入口 / 四个正式构建配置 0 引用本实验台；
+ *      - 正向白名单：本实验台只允许 import 明确列出的**只读纯数据模块**
+ *        （registry / 解析 / 校验 / 坐标契约 / 对手模板），且不得 import
+ *        任何 Runtime / DOM / 平台 / 物理模块。
+ *
+ * F1 的共享测试数据与 Spawn 流程断言见 tests/portraitBattleLabF1.test.ts。
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,11 +23,10 @@ import { describe, expect, it } from 'vitest';
 import {
   LAB_ARENAS,
   LAB_DEFAULTS,
-  LAB_ENCOUNTERS,
-  LAB_LOADOUTS,
   PORTRAIT_LOGICAL_H,
   PORTRAIT_LOGICAL_W,
 } from '../src/lab/portraitBattleLab/constants';
+import { LAB_ENCOUNTERS, LAB_LOADOUTS } from '../src/lab/portraitBattleLab/testData';
 import {
   createPortraitLabState,
   findArena,
@@ -36,12 +40,19 @@ import {
   start,
 } from '../src/lab/portraitBattleLab/state';
 import {
+  ARENA_BAND_BOTTOM,
+  ENTITY_CENTER_X,
   LAB_GROUND_Y,
+  arenaMarkerArea,
   arenaMarkers,
-  enemyMarkerRects,
-  playerBodyRect,
+  boxBounds,
+  enemyPlacement,
+  overlaps,
+  playerPlacement,
+  rectsArea,
   stageRect,
 } from '../src/lab/portraitBattleLab/layout';
+import { bodyOffsetBoxes } from '../src/lab/portraitBattleLab/scene';
 import { PlayerViewportTransform } from '../src/platform/playerViewport';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -57,14 +68,6 @@ function insideStage(r: { x: number; y: number; w: number; h: number }): boolean
   return r.x >= 0 && r.y >= 0 && r.x + r.w <= PORTRAIT_LOGICAL_W && r.y + r.h <= PORTRAIT_LOGICAL_H;
 }
 
-/** 矩形相交判定（严格相交；边贴边不算）。 */
-function overlaps(
-  a: { x: number; y: number; w: number; h: number },
-  b: { x: number; y: number; w: number; h: number },
-): boolean {
-  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-}
-
 describe('PBL-F0｜逻辑基准：竖屏 390×844', () => {
   it('R1 逻辑舞台宽高为 390×844 且为竖屏（宽 < 高）', () => {
     expect(PORTRAIT_LOGICAL_W).toBe(390);
@@ -78,7 +81,7 @@ describe('PBL-F0｜逻辑基准：竖屏 390×844', () => {
 });
 
 describe('PBL-F0｜目录完整性（Arena A/B · Loadout ×2 · Encounter ×3）', () => {
-  it('R3 Arena 恰好为 A / B 两个占位且 id 唯一', () => {
+  it('R3 Arena 恰好为 A / B 两个且 id 唯一', () => {
     expect(LAB_ARENAS.map((a) => a.id)).toEqual(['A', 'B']);
     expect(new Set(LAB_ARENAS.map((a) => a.id)).size).toBe(LAB_ARENAS.length);
   });
@@ -101,13 +104,15 @@ describe('PBL-F0｜目录完整性（Arena A/B · Loadout ×2 · Encounter ×3�
 });
 
 describe('PBL-F0｜状态机：选择切换 / Start / Reset', () => {
-  it('R7 初始状态为 idle、startCount=0、选择项=默认', () => {
+  it('R7 初始状态为 idle、startCount=0、选择项=默认、场上无实体', () => {
     const s = createPortraitLabState();
     expect(s.phase).toBe('idle');
     expect(s.startCount).toBe(0);
     expect(s.arena).toBe(LAB_DEFAULTS.arena);
     expect(s.loadout).toBe(LAB_DEFAULTS.loadout);
     expect(s.encounter).toBe(LAB_DEFAULTS.encounter);
+    expect(s.run.entities.length).toBe(0);
+    expect(s.run.projectiles.length).toBe(0);
   });
 
   it('R8 Arena A→B 切换生效且 revision 递增；同值切换为 no-op（同引用）', () => {
@@ -138,7 +143,7 @@ describe('PBL-F0｜状态机：选择切换 / Start / Reset', () => {
     expect(start(s1).startCount).toBe(1);
   });
 
-  it('R11 running 中切换任一选择项 → 回到 idle（配置已变，占位运行中止）', () => {
+  it('R11 running 中切换任一选择项 → 回到 idle（配置已变，运行中止）', () => {
     const running = start(createPortraitLabState());
     expect(running.phase).toBe('running');
     expect(setArena(running, 'B').phase).toBe('idle');
@@ -177,6 +182,7 @@ describe('PBL-F0｜状态机：选择切换 / Start / Reset', () => {
     expect(sum.arenaLabel).toBe('Arena B');
     expect(sum.encounterLabel).toBe('3 轻敌人');
     expect(sum.phase).toBe('idle');
+    expect(sum.unavailable).toEqual(['磁铁']); // 默认 Loadout 的缺口如实暴露
   });
 });
 
@@ -187,22 +193,36 @@ describe('PBL-F0｜占位几何（全部为逻辑 px 且不越界）', () => {
     expect(LAB_GROUND_Y).toBeLessThan(PORTRAIT_LOGICAL_H);
   });
 
-  it('R16 玩家占位轮廓贴地、居中于左半区、落在舞台内（两种 Loadout）', () => {
+  it('R16 玩家实体矩形组：贴地、水平居中的左右对称、落在舞台内（两种 Loadout）', () => {
     for (const l of LAB_LOADOUTS) {
-      const r = playerBodyRect(l.body);
-      expect(insideStage(r)).toBe(true);
-      expect(r.y + r.h).toBe(LAB_GROUND_Y); // 贴地
-      expect(r.x + r.w / 2).toBeLessThan(PORTRAIT_LOGICAL_W / 2); // 左半区
+      const boxes = bodyOffsetBoxes(l.draft.bodyDefId);
+      const rects = playerPlacement(boxes);
+      expect(rects.length).toBe(boxes.length);
+      for (const r of rects) expect(insideStage(r)).toBe(true);
+      const b = boxBounds(boxes);
+      const lowest = Math.max(...rects.map((r) => r.y + r.h));
+      expect(lowest).toBe(LAB_GROUND_Y); // 贴地
+      // 外接框中心 == 舞台中心（居中排布）
+      const cx = b.dx + b.w / 2;
+      expect(near(cx, 0)).toBe(true);
     }
+    expect(ENTITY_CENTER_X).toBe(Math.round(PORTRAIT_LOGICAL_W / 2));
   });
 
-  it('R17 敌人占位标记数量 = enemyCount，贴地（或按 lift 抬高）且不越界', () => {
+  it('R17 敌人实体矩形组：数量 = 该 Body 的 collider 数、逐行下移、落在舞台内', () => {
     for (const e of LAB_ENCOUNTERS) {
-      const rects = enemyMarkerRects(e);
-      expect(rects.length).toBe(e.enemyCount);
-      for (const r of rects) {
-        expect(insideStage(r)).toBe(true);
-        expect(r.y + r.h).toBe(LAB_GROUND_Y - e.markerLift);
+      const boxes = bodyOffsetBoxes(e.draft.bodyDefId);
+      const bounds = boxBounds(boxes);
+      const rows = Array.from({ length: e.count }, (_, i) => enemyPlacement(boxes, bounds, i));
+      expect(rows.length).toBe(e.count);
+      for (const row of rows) {
+        expect(row.length).toBe(boxes.length);
+        for (const r of row) expect(insideStage(r)).toBe(true);
+      }
+      for (let i = 1; i < rows.length; i++) {
+        const prevBottom = Math.max(...rows[i - 1].map((r) => r.y + r.h));
+        const curTop = Math.min(...rows[i].map((r) => r.y));
+        expect(curTop).toBeGreaterThan(prevBottom); // 行间留空隙，不与上一行重叠
       }
     }
   });
@@ -214,20 +234,25 @@ describe('PBL-F0｜占位几何（全部为逻辑 px 且不越界）', () => {
     expect(b.length).toBe(3);
     expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
     for (const r of [...a, ...b]) expect(insideStage(r)).toBe(true);
+    expect(arenaMarkerArea('A')).toBe(4200);
+    expect(arenaMarkerArea('B')).toBe(5480);
+    expect(rectsArea(a)).toBe(4200);
   });
 
-  it('R25 占位矩形互不重叠（各占位色块像素面积可精确断言的前提）', () => {
+  it('R25 Arena 标记互不重叠，且整体位于实体活动区之下（不与任何实体相交）', () => {
     for (const arena of LAB_ARENAS) {
       const markers = arenaMarkers(arena.id);
+      for (let i = 0; i < markers.length; i++) {
+        for (let j = i + 1; j < markers.length; j++) {
+          expect(overlaps(markers[i], markers[j]), `${arena.id} 标记自重叠`).toBe(false);
+        }
+        // 全部标记在下方信息带内（底边 = ARENA_BAND_BOTTOM）
+        expect(markers[i].y + markers[i].h).toBe(ARENA_BAND_BOTTOM);
+      }
       for (const l of LAB_LOADOUTS) {
-        const player = playerBodyRect(l.body);
-        for (const e of LAB_ENCOUNTERS) {
-          const enemies = enemyMarkerRects(e);
-          const tag = `${arena.id}/${l.id}/${e.id}`;
-          for (const en of enemies) expect(overlaps(player, en), `${tag} 玩家与敌人重叠`).toBe(false);
-          for (const r of [player, ...enemies]) {
-            for (const m of markers) expect(overlaps(r, m), `${tag} 占位与 Arena 标记重叠`).toBe(false);
-          }
+        const player = playerPlacement(bodyOffsetBoxes(l.draft.bodyDefId));
+        for (const p of player) {
+          for (const m of markers) expect(overlaps(p, m)).toBe(false);
         }
       }
     }
@@ -273,17 +298,74 @@ describe('PBL-F0｜固定摄像机复用正式共享契约（竖屏逻辑尺寸�
   });
 });
 
-describe('PBL-F0｜隔离守卫（实验不得写入正式玩法路径）', () => {
-  it('R22 Lab 源码不得 import 任何正式玩法 / 平台 bootstrap 模块', () => {
-    const files = readdirSync(LAB_DIR).filter((f) => f.endsWith('.ts'));
+describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路径）', () => {
+  /**
+   * PBL-F1 起，Lab 必须**只读引用**正式内容库来建立 A/B 共用数据，
+   * 因此守卫从「禁止一切正式 import」收紧为「白名单 + 反单向」：
+   *   1) 反向硬约束（最关键）：正式源码 / 正式入口 / 正式构建配置 0 引用本实验台；
+   *   2) 正向白名单：只能 import 下列**纯数据 / 纯函数**模块；
+   *   3) 显式禁止 Runtime / DOM / 平台 / 物理 / 渲染 / UI 模块。
+   */
+  const ALLOWED_RELATIVE_IMPORTS = new Set([
+    '../buildEditorModel', // Lab 既有纯模型（BuildDraft / EMPTY_SLOT）
+    '../../core/content', // 只读内容库（PBL-F1）
+    '../../core/buildSnapshot', // 纯解析
+    '../../core/buildValidator', // 纯校验
+    '../../core/types', // 仅类型
+    '../../player/opponentPool', // 只读对手模板数据（PBL-F1）
+    '../../platform/playerViewport', // 纯坐标契约（PBL-F0）
+  ]);
+
+  const FORBIDDEN_RELATIVE =
+    /^\.\.\/\.\.\/(battle|game|render|ui|presentation|physics|dev|platform\/(?!playerViewport))|^\.\.\/\.\.\/(main|platform\/bootstrap)/;
+
+  function labSourceFiles(): string[] {
+    return readdirSync(LAB_DIR).filter((f) => f.endsWith('.ts'));
+  }
+
+  function importSpecifiers(src: string): string[] {
+    const out: string[] = [];
+    const re = /from\s+['"]([^'"]+)['"]/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src)) !== null) out.push(m[1]);
+    return out;
+  }
+
+  it('R22a Lab 源码只 import 白名单内的只读模块，且不含任何 Runtime / DOM / 平台 / 物理模块', () => {
+    const files = labSourceFiles();
     expect(files.length).toBeGreaterThan(0);
-    // 允许的唯一外部相对依赖：../../platform/playerViewport（纯坐标契约，无副作用）
-    const forbidden =
-      /from\s+['"]\.\.\/\.\.\/(battle|game|render|ui|core|presentation|physics|player|dev)\/|from\s+['"]\.\.\/\.\.\/(main|platform\/bootstrap|platform\/bootstrap-wechat)/;
+    const seen = new Set<string>();
     for (const f of files) {
-      const src = readFileSync(join(LAB_DIR, f), 'utf8');
-      expect(forbidden.test(src), `${f} 不得 import 正式玩法模块`).toBe(false);
+      for (const spec of importSpecifiers(readFileSync(join(LAB_DIR, f), 'utf8'))) {
+        if (!spec.startsWith('.')) continue; // 裸包名不在守卫范围
+        if (spec.startsWith('./')) continue; // Lab 内部互相引用
+        seen.add(spec);
+        expect(FORBIDDEN_RELATIVE.test(spec), `${f} 不得 import "${spec}"`).toBe(false);
+        expect(ALLOWED_RELATIVE_IMPORTS.has(spec), `${f} import "${spec}" 不在白名单内`).toBe(true);
+      }
     }
+    // 白名单必须真被用到（防止守卫写成空转）
+    expect(seen.size).toBeGreaterThan(0);
+  });
+
+  it('R22b 反向硬约束：src/ 下（Lab 目录之外）0 处引用 portraitBattleLab / portrait-lab', () => {
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'portraitBattleLab') continue;
+          walk(p);
+        } else if (entry.name.endsWith('.ts')) {
+          const src = readFileSync(p, 'utf8');
+          if (src.includes('portraitBattleLab') || src.includes('portrait-lab')) {
+            offenders.push(p.replace(REPO_ROOT, '').replace(/\\/g, '/'));
+          }
+        }
+      }
+    };
+    walk(join(REPO_ROOT, 'src'));
+    expect(offenders).toEqual([]);
   });
 
   it('R23 正式入口 index.html 与四个正式构建配置均不得引用 portrait-lab', () => {
