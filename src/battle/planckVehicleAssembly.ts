@@ -102,6 +102,74 @@ function vehicleMask(team: TeamId): number {
   );
 }
 
+/* ---------- PBL-F2-MULTI-ENTITY-COMBAT-FOUNDATION：车辆碰撞策略 ---------- */
+
+/**
+ * 车辆碰撞策略（PBL-F2）——把「同 team 永远禁止 vehicle↔vehicle」这一硬编码假设
+ * 收敛成一个显式、可选、默认零回归的 adapter：
+ *
+ * - `'team-exclusive'`（**缺省 = 正式 1v1 语义，取值与行为字面不变**）：
+ *   同队所有车辆共用一个负数 group（A=-1 / B=-2），且 mask 不含己方车辆类别
+ *   → 同车内部不碰撞、同队不同车辆也不碰撞。
+ * - `'instance-exclusive'`（多实体 PvE：1 player + N enemies）：
+ *   每个车辆实例独享负数 group（`-(100 + instanceIndex)`），且 mask 额外含己方车辆类别
+ *   → 同车内部仍共组不碰撞（同组负号 = 永不碰撞）；同队不同车辆 group 不同 + mask 命中
+ *     → 真实 Planck 碰撞。不使用代理碰撞体 / 隐形 Body / 位置排斥力。
+ *
+ * 实例 group 取 `-(100 + i)` 而非 `-(1 + i)`：正式 projectile 的 group 固定为 -1 / -2
+ * （`weaponProjectile.ts` / `cannonBehavior.ts` / `laserBehavior.ts`），若实例 group
+ * 与之重叠，会出现「某辆敌车对弹丸免疫」的静默过滤器错误——100 号偏移避开该占用区间。
+ */
+export type PlanckVehicleCollisionPolicy = 'team-exclusive' | 'instance-exclusive';
+
+/** 车辆碰撞策略参数（缺省 = team-exclusive，现有调用点行为零变化） */
+export interface PlanckVehicleCollisionOptions {
+  policy?: PlanckVehicleCollisionPolicy;
+  /** instance-exclusive 下的实例序号（>= 0 整数；同一 world 内必须唯一） */
+  instanceIndex?: number;
+}
+
+/** instance-exclusive 的 group 偏移基准（避开正式 projectile 占用的 -1 / -2） */
+const INSTANCE_GROUP_BASE = 100;
+
+/**
+ * 由策略推导 (categoryBits, maskBits, groupIndex)。
+ * 缺省 / 未知 policy → 完全走正式 1v1 规则（vehicleCategory / vehicleMask / vehicleGroup），
+ * 保证既有调用点（PlanckBattleOrchestrator 等）行为与数值字面不变。
+ */
+export function resolveVehicleCollisionFilter(
+  team: TeamId,
+  options?: PlanckVehicleCollisionOptions,
+): PlanckCollisionFilter {
+  if (options?.policy !== 'instance-exclusive') {
+    return {
+      categoryBits: vehicleCategory(team),
+      maskBits: vehicleMask(team),
+      groupIndex: vehicleGroup(team),
+    };
+  }
+  const idx = options.instanceIndex;
+  if (!Number.isInteger(idx) || (idx as number) < 0) {
+    throw new Error(
+      'PlanckVehicleAssembly: instance-exclusive 需要 instanceIndex 为 >= 0 的整数，' +
+        `收到 ${String(idx)}`,
+    );
+  }
+  const instanceIndex = idx as number;
+  if (INSTANCE_GROUP_BASE + instanceIndex > 32767) {
+    throw new Error(
+      `PlanckVehicleAssembly: instanceIndex 超出 groupIndex 合法范围（-32768..32767）：${instanceIndex}`,
+    );
+  }
+  const own = vehicleCategory(team);
+  return {
+    categoryBits: own,
+    // 含己方车辆类别：同队不同实例（group 不同）才能按 mask 真实碰撞
+    maskBits: vehicleMask(team) | own,
+    groupIndex: -(INSTANCE_GROUP_BASE + instanceIndex),
+  };
+}
+
 /** facing=-1 时镜像 collider（与 Matter vehicleAssembly.mirrorCollider 逻辑一致） */
 function mirrorCollider(c: ColliderDef): ColliderDef {
   const m: ColliderDef = { ...c, offset: { x: -c.offset.x, y: c.offset.y } };
@@ -213,8 +281,14 @@ export function settlePlanckVehicleToRestPose(
 
 /**
  * 创建 Planck 车辆 chassis（body compound + OwnerTag）。
- * 同车所有 body 使用相同负数 group（A=-1 / B=-2），保证「默认关闭同车普通
- * Collider 互撞」；category/mask 与正式规则一致。材质 friction 0.5、restitution 0.05。
+ * 碰撞过滤由 `resolveVehicleCollisionFilter(team, collision)` 推导：
+ * - 缺省（PBL-F2 之前的行为）：同车所有 body 使用相同负数 group（A=-1 / B=-2），
+ *   保证「默认关闭同车普通 Collider 互撞」；category/mask 与正式规则一致。
+ * - `collision.policy='instance-exclusive'`（多实体 PvE）：同队不同车辆实例也能真实碰撞。
+ * 材质 friction 0.5、restitution 0.05。
+ *
+ * `OwnerTag.vehicleId` 取 `resolved.snapshot.id` —— 调用方给同一模板不同 id 即可获得
+ * 唯一实例身份（ContactRouter 实例级路由依据，见 contactRouter.ts）。
  */
 export function createPlanckVehicle(
   world: PlanckWorld,
@@ -222,12 +296,10 @@ export function createPlanckVehicle(
   team: TeamId,
   initialPos: { x: number; y: number },
   facing: 1 | -1 = 1,
+  /** PBL-F2：缺省 = 正式 1v1 碰撞规则，现有调用点行为不变 */
+  collision?: PlanckVehicleCollisionOptions,
 ): PlanckVehicle {
-  const filter: PlanckCollisionFilter = {
-    categoryBits: vehicleCategory(team),
-    maskBits: vehicleMask(team),
-    groupIndex: vehicleGroup(team),
-  };
+  const filter: PlanckCollisionFilter = resolveVehicleCollisionFilter(team, collision);
 
   // Body 主刚体（compound）。facing=-1 时镜像碰撞轮廓（前鼻指向左）。
   const colliders = resolved.body.colliders.map((c) =>

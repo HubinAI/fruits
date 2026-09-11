@@ -59,6 +59,21 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - ⚠️ 实测踩坑：HUD 缺口提示文字若用 `#ffd35a`（与 Arena 层同色）→ 文字抗锯齿像素被 E2E 分类器误计 → arena 虚增 ~310px。修法 = 提示色改 `#ff5ee0`（与所有分层色 RGB 互斥）+ E2E 统计区排除 HUD 带（y<140），并加 F1-R25 守卫「HUD 带内不得出现任何分层几何」。
 - 门禁：targeted 51/51（F0 26 + F1 25）、E2E 64/64（精确账本：初始 A/西瓜/追猎者 = arena 4200 / playerBody 8360 / playerPart 800 / enemyBody 7618 / enemyPart 1560）、全量 vitest 1792/1792、tsc 0、三端构建 EXIT 0、bundle-clean PASS、repo-health 9/9。正式源码 0 修改。
 
+## 5.3 PBL-A1 先查 → 触发停止（0 行代码）→ 已由 PBL-F2 解除
+- R1｜正式战斗层「每队至多一辆车」：`ContactRouter.findVehicleByTeam`（private）是 Impact/Weapon/Projectile/Grounded/hazard 全部路径的反查依据 → 多实体同场必然**静默错记伤害**（全落到第一个同队车）。`PlanckBattleOrchestrator` 只暴露 `vehicleA`/`vehicleB` 且构造即 `new ContactRouter([A,B])` → 无法扩多敌。
+- R2｜敌人↔敌人物理碰撞被双重锁死：`createPlanckVehicle` 将 `vehicleMask/vehicleGroup(team)` 烘进全车 fixture——同队 mask **排除己方车辆类别** 且同队同负 group；`PlanckWorld` **无**运行期 fixture 过滤器变更 API。实证：同队两车同坐标步进 1s 后位移 0px、仍完全重叠。
+- R3｜`PlanckBattleOrchestrator` 不可用于 Arena A：硬编码重力 `{0,10}` + 无条件 `PlanckArenaRuntime`（phases/刺墙/hazard）且无开关 → 与「俯视/无缩圈/无边界伤害」冲突。
+- 设计外使用提示：`drivePlanckVehicle` 电机开关含 `w.grounded`（`planckMovement.ts:65`），该值只由 `ContactRouter.handleGrounded` 维护；无重力俯视场恒 false → Arena A 需 Lab 自供 `grounded` 或自建 topdown 驱动适配（PBL-G1 明文允许 Movement/Physics Adapter 差异）。
+
+## 5.4 PBL-F2 多实体 Foundation（受控版 C，已交付）
+- 用户裁决受控版 C：允许改 Battle/Physics 底层「每队 1 辆车」假设，仅限 `prototype-portrait-battle-lab`，不改正式 1v1 流程、不改 Arena/刺墙/Match/Flow、不合回主线。
+- `contactRouter.ts`：`resolveVehicle(vehicleId, team)` 规则 = ①vehicleId 唯一命中→该实例；②否则该 team 恰好 1 辆→返回它（旧语义，1v1 等价）；③否则 **undefined 安全跳过**（绝不落到第一个同队车）。全部反查 + Impact/Weapon/activeTick/hazard 的 key 改实例粒度；`projectileHitMeta` 增 `projVehicleId/defVehicleId/defKey`。**DamageEvent source/target 仍是 team → 事件契约零变化。**
+- `planckVehicleAssembly.ts`：新增 `PlanckVehicleCollisionPolicy`（`team-exclusive` 缺省=正式语义 / `instance-exclusive`）+ 导出 `resolveVehicleCollisionFilter`；`createPlanckVehicle` 追加**可选第 6 参** → 现有调用点零改动。
+- ⚠️ **实例 group 必须避开正式 projectile 占用的 -1/-2**（`weaponProjectile.ts:93`/`cannonBehavior.ts:222`/`laserBehavior.ts:228`），否则出现「某辆敌车对弹丸免疫」的静默 bug → 取 `-(100+i)`。
+- 门禁：新测试 7/7（先红 4 failed→后绿）；既有 Contact/Impact/Weapon/Projectile 10 文件 45/45（与改前基线一致）；全量 196 files/1799 passed（基线 195/1792）；tsc 0；五路构建 EXIT 0；bundle-clean 五路 PASS；repo-health 9/9；Lab E2E 64/64。
+- 边界（诚实）：Matter 路径 `vehicleAssembly.ts` 的同类硬编码**未改**（生产/微信走 Planck；Matter 无多实体消费者）；`PlanckBattleOrchestrator` 未改造仍严格 1v1，多实体装配由 Lab/测试侧组合 `PlanckWorld + createPlanckVehicle + ContactRouter`。
+- ⚠️ 全量 vitest 首跑 `garageFusionResultInteractionR22.test.ts` 9 处 5s 超时 = `vmForks + maxWorkers=1` 负载抖动（该文件与本次改动无引用路径；单跑 11/11、全量重跑全绿），**非回归**；vitest 未设 testTimeout（默认 5s）。
+
 ## 6. Next action
-- NEXT: 序列 `PBL-F1 → PBL-A1 → PBL-B1 → PBL-G1` 严格依次执行（用户指令）；**PBL-A1 = 竖屏纵向俯视 Arena A 最小 Runtime**。
+- NEXT: PBL-F2 已交付 → **停等用户回执**（PBL-A1 是否开工）。A1 现在可走：`PlanckWorld + 共享 assembly/router foundation + Lab-local movement/arena adapter`；仍需自建 4 边静态边界 + 自供 `grounded` 或 topdown 驱动适配。Do NOT auto-start.
 - Low-prio: KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01; mobile drive slot (F-GARAGE-TOUCH-ASSEMBLY-R2); strip-scroll no clamp; O1/O2 非阻塞优化项。

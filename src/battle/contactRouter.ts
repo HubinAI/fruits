@@ -166,6 +166,8 @@ export interface ProjectileContactFact {
   /** 来源 weapon part 的 OwnerTag.partId（'part:...'），用于反查来源武器 */
   projectilePartId: string;
   projectileTeam: string;
+  /** PBL-F2：来源车辆实例 id（OwnerTag.vehicleId）——同队多敌时区分归属 */
+  projectileVehicleId?: string;
   otherKind: string;
   otherTeam?: string;
   otherVehicleId?: string;
@@ -198,6 +200,17 @@ export const DEFAULT_IMPACT_CONFIG: ImpactConfig = {
  * 位于诊断候选区间 [0.119, 0.891] 内。
  */
 export const WEAPON_CONTACT_THRESHOLD = 0.5;
+
+/**
+ * Owner meta → 实例级去重 key（PBL-F2）：
+ * - 有 `vehicleId` → `v:<vehicleId>`：同队多车可彼此区分（Impact / Weapon / 弹丸去重单位）；
+ * - 无 `vehicleId`（历史 / 外部 Owner）→ `t:<team>`：等价旧 team 语义，1v1 行为不变。
+ */
+function instanceKeyOf(meta: Record<string, unknown>): string {
+  const id = meta.vehicleId;
+  if (typeof id === 'string' && id.length > 0) return `v:${id}`;
+  return `t:${String(meta.team)}`;
+}
 
 export class ContactRouter {
   readonly debug: ContactDebugState = {
@@ -233,9 +246,61 @@ export class ContactRouter {
     private hazardConfig: HazardTickConfig = { tickMs: 0, damagePerTick: 0 },
   ) {}
 
-  /** 按 team 唯一查找战斗车辆（一个 battle 内每个 team 至多一辆车） */
-  private findVehicleByTeam(team: string): CombatVehicleState | undefined {
-    return this.vehicles.find((v) => v.team === team);
+  /* ---------- PBL-F2-MULTI-ENTITY-COMBAT-FOUNDATION：实例级车辆路由 ---------- */
+
+  /** 实例索引（惰性构建：`vehicles` 参数属性在构造期赋值完成后才会首次被解析） */
+  private vehicleIndex: {
+    byId: Map<string, CombatVehicleState[]>;
+    byTeam: Map<string, CombatVehicleState[]>;
+  } | null = null;
+
+  private index(): {
+    byId: Map<string, CombatVehicleState[]>;
+    byTeam: Map<string, CombatVehicleState[]>;
+  } {
+    if (this.vehicleIndex) return this.vehicleIndex;
+    const byId = new Map<string, CombatVehicleState[]>();
+    const byTeam = new Map<string, CombatVehicleState[]>();
+    for (const v of this.vehicles) {
+      const idSlot = byId.get(v.id);
+      if (idSlot) idSlot.push(v);
+      else byId.set(v.id, [v]);
+      const teamSlot = byTeam.get(v.team);
+      if (teamSlot) teamSlot.push(v);
+      else byTeam.set(v.team, [v]);
+    }
+    this.vehicleIndex = { byId, byTeam };
+    return this.vehicleIndex;
+  }
+
+  /**
+   * 实例级车辆解析（PBL-F2）：
+   * 唯一权威 = `OwnerTag.vehicleId` ↔ `CombatVehicleState.id`（同一 BuildSnapshot.id，
+   * 装配时写入；调用方用同一模板 + 不同 id 即获得唯一实例身份）。
+   *
+   * 规则（严格保证正式 1v1 行为不变）：
+   * 1. `vehicleId` 在本次战斗内**唯一命中** → 返回该实例（多实体正解）；
+   * 2. 否则该 team 恰好一辆车 → 返回它（= 旧 `findVehicleByTeam` 语义，1v1 完全等价）；
+   * 3. 否则（同队多车且无唯一 id 命中）→ `undefined`：**不结算**，
+   *    绝不静默把伤害落到「第一个同队车」上。
+   */
+  private resolveVehicle(
+    vehicleId: unknown,
+    team: unknown,
+  ): CombatVehicleState | undefined {
+    const { byId, byTeam } = this.index();
+    if (typeof vehicleId === 'string' && vehicleId.length > 0) {
+      const hits = byId.get(vehicleId);
+      if (hits && hits.length === 1) return hits[0];
+    }
+    const sameTeam = byTeam.get(typeof team === 'string' ? team : String(team));
+    if (sameTeam && sameTeam.length === 1) return sameTeam[0];
+    return undefined;
+  }
+
+  /** Owner meta → 车辆实例 */
+  private resolveMeta(meta: Record<string, unknown>): CombatVehicleState | undefined {
+    return this.resolveVehicle(meta.vehicleId, meta.team);
   }
 
   private findWheel(
@@ -401,6 +466,7 @@ export class ContactRouter {
     // - 两个不同实例（即使 team/partId/target 完全相同）→ 各自结算一次；
     // 实例 key 用 ev.bodyA/bodyB 的 opaque 引用（Planck BodyHandle，引用相等）；
     // 无 opaque 引用时（Matter 路径，当前无 projectile meta）退化为旧 team|partId 语义。
+    // PBL-F2：defender 维度改用实例级 key（`defKey`）——同队多敌必须各自结算。
     const projByInstance = new Map<unknown, Map<string, BatchEntry>>();
     for (const en of entries) {
       const meta = this.projectileHitMeta(en.ev, en.mA, en.mB);
@@ -410,9 +476,9 @@ export class ContactRouter {
         byDefender = new Map<string, BatchEntry>();
         projByInstance.set(meta.projBody, byDefender);
       }
-      const cur = byDefender.get(meta.defTeam);
+      const cur = byDefender.get(meta.defKey);
       if (!cur || en.ev.relativeVelocity > cur.ev.relativeVelocity) {
-        byDefender.set(meta.defTeam, en);
+        byDefender.set(meta.defKey, en);
       }
     }
     for (const byDefender of projByInstance.values()) {
@@ -429,23 +495,23 @@ export class ContactRouter {
     );
     if (hostile.length === 0) return;
 
-    // --- Impact 合并（无序 team 对） ---
+    // --- Impact 合并（无序 **实例** 对；PBL-F2：同队多车不再互相覆盖） ---
     const impactByKey = new Map<string, BatchEntry>();
     for (const en of hostile) {
-      const key = [String(en.mA.team), String(en.mB.team)].sort().join('|');
+      const key = [instanceKeyOf(en.mA), instanceKeyOf(en.mB)].sort().join('|');
       const cur = impactByKey.get(key);
       if (!cur || en.ev.relativeVelocity > cur.ev.relativeVelocity) {
         impactByKey.set(key, en);
       }
     }
     for (const en of impactByKey.values()) {
-      const va = this.findVehicleByTeam(String(en.mA.team));
-      const vb = this.findVehicleByTeam(String(en.mB.team));
+      const va = this.resolveMeta(en.mA);
+      const vb = this.resolveMeta(en.mB);
       if (!va || !vb) continue;
       this.applyImpact(va, vb, en.ev);
     }
 
-    // --- Weapon 合并（attacker team + partId + defender team，两个方向） ---
+    // --- Weapon 合并（attacker **实例** + partId + defender **实例**，两个方向） ---
     const weaponByKey = new Map<
       string,
       BatchEntry & {
@@ -461,15 +527,16 @@ export class ContactRouter {
       en: BatchEntry,
     ): void => {
       if (!attackerPartId.startsWith('part:')) return;
-      const key = `${attacker.team}|${attackerPartId}|${defender.team}`;
+      // PBL-F2：`CombatVehicleState.id` 即实例身份（= OwnerTag.vehicleId）
+      const key = `${attacker.id}|${attackerPartId}|${defender.id}`;
       const cur = weaponByKey.get(key);
       if (!cur || en.ev.relativeVelocity > cur.ev.relativeVelocity) {
         weaponByKey.set(key, { ...en, attacker, defender, attackerPartId });
       }
     };
     for (const en of hostile) {
-      const va = this.findVehicleByTeam(String(en.mA.team));
-      const vb = this.findVehicleByTeam(String(en.mB.team));
+      const va = this.resolveMeta(en.mA);
+      const vb = this.resolveMeta(en.mB);
       if (!va || !vb) continue;
       const partIdA = String(en.mA.partId ?? '');
       const partIdB = String(en.mB.partId ?? '');
@@ -544,7 +611,8 @@ export class ContactRouter {
     const partId = String(wheelMeta.partId ?? '');
     if (!partId.startsWith('wheel:')) return;
 
-    const v = this.findVehicleByTeam(String(wheelMeta.team));
+    // PBL-F2：按 wheel 的实例身份解析车辆（同队多车时不得落到第一辆）
+    const v = this.resolveMeta(wheelMeta);
     if (!v) return;
     const wheel = this.findWheel(v, partId);
     if (!wheel) return;
@@ -569,8 +637,9 @@ export class ContactRouter {
     const teamB = mB.team as string;
     if (teamA === teamB) return; // 同队（或同车）不产生敌我伤害
 
-    const va = this.findVehicleByTeam(String(mA.team));
-    const vb = this.findVehicleByTeam(String(mB.team));
+    // PBL-F2：实例级解析——命中/撞击只作用于真实接触的那一辆
+    const va = this.resolveMeta(mA);
+    const vb = this.resolveMeta(mB);
     if (!va || !vb) return;
 
     const partIdA = String(mA.partId ?? '');
@@ -578,8 +647,8 @@ export class ContactRouter {
 
     // W1-HIT-1：接触结束 → 停止 contactTick（之后不再有 tick 伤害）
     if (ev.phase === 'end') {
-      this.removeActiveTick(teamA, partIdA, teamB);
-      this.removeActiveTick(teamB, partIdB, teamA);
+      this.removeActiveTick(va.id, partIdA, vb.id);
+      this.removeActiveTick(vb.id, partIdB, va.id);
       return;
     }
 
@@ -644,7 +713,8 @@ export class ContactRouter {
   // ---------- W1-HIT-1：contactTick 生命周期 ----------
 
   /**
-   * 登记一个 contactTick 活跃接触（去重 key = attacker team + part instance + target team）。
+   * 登记一个 contactTick 活跃接触
+   * （去重 key = attacker **实例** + part instance + target **实例**；PBL-F2 起实例级）。
    * - 同一 key 已存在 → 跳过（同一物理步多 contact pair 不重复登记）；
    * - minRelativeVelocity（缺省 = WEAPON_CONTACT_THRESHOLD）不达标 → 不登记；
    * - 登记本身不立即伤害：首 tick 从接触开始计时 intervalMs 后由 advanceContactTicks 结算。
@@ -657,7 +727,7 @@ export class ContactRouter {
     part: CombatPartState,
     policy: Extract<ContactHitPolicy, { mode: 'contactTick' }>,
   ): void {
-    const key = `${attacker.team}|${attackerPartId}|${defender.team}`;
+    const key = `${attacker.id}|${attackerPartId}|${defender.id}`;
     if (this.activeTicks.has(key)) return; // 多 pair / 多 sub-part 去重
     const minRel = policy.minRelativeVelocity ?? WEAPON_CONTACT_THRESHOLD;
     if (ev.relativeVelocity < minRel) return;
@@ -682,8 +752,9 @@ export class ContactRouter {
   /**
    * W1-END-2：closing 刺墙（hazard）↔ vehicle 接触处理。
    * - Active / Warning：刺墙不参与战斗（不登记、0 伤害，仅 Warning 阶段物理已激活但无伤害）；
-   * - Closing：start 登记 hazard contactTick（去重 key = `hazard|<team>`，双侧墙多 pair 去重）；
-   * - end：移除该队 hazard tick（离开刺墙立即停止）。
+   * - Closing：start 登记 hazard contactTick
+   *   （去重 key = `hazard|<实例 id>`，双侧墙多 pair 去重；PBL-F2 起按实例而非 team）；
+   * - end：移除该实例 hazard tick（离开刺墙立即停止）。
    */
   private handleHazardContact(
     ev: RouterContactEvent,
@@ -698,7 +769,8 @@ export class ContactRouter {
     const team = String(vh.team ?? '');
     if (team !== 'A' && team !== 'B') return;
 
-    const key = `hazard|${team}`;
+    // PBL-F2：hazard tick 以车辆实例为单位；正式 1v1 下实例 id 与 team 一一对应，行为不变
+    const key = `hazard|${instanceKeyOf(vh)}`;
     if (ev.phase === 'end') {
       this.activeTicks.delete(key);
       return;
@@ -707,7 +779,7 @@ export class ContactRouter {
     if (arenaPhase !== 'Closing') return; // Active/Warning：0 伤害
     if (this.activeTicks.has(key)) return; // 同一物理步多 pair / 双侧墙去重
 
-    const defender = this.findVehicleByTeam(team);
+    const defender = this.resolveMeta(vh);
     if (!defender) return;
     const cfg = this.hazardConfig;
     if (!(cfg.tickMs > 0 && cfg.damagePerTick > 0)) return; // 未配置 → 无伤害
@@ -726,9 +798,14 @@ export class ContactRouter {
     });
   }
 
-  private removeActiveTick(team: string, partId: string, defenderTeam: string): void {
+  /** 移除一个 contactTick（PBL-F2：参数为**实例 id**，不再是 team） */
+  private removeActiveTick(
+    attackerId: string,
+    partId: string,
+    defenderId: string,
+  ): void {
     if (!partId.startsWith('part:')) return;
-    this.activeTicks.delete(`${team}|${partId}|${defenderTeam}`);
+    this.activeTicks.delete(`${attackerId}|${partId}|${defenderId}`);
   }
 
   /**
@@ -833,6 +910,7 @@ export class ContactRouter {
       projectileBody: proj.body,
       projectilePartId: proj.tag.partId ?? '',
       projectileTeam: proj.tag.team ?? '',
+      projectileVehicleId: proj.tag.vehicleId,
       otherKind: other.kind,
       otherTeam: other.team,
       otherVehicleId: other.vehicleId,
@@ -844,18 +922,31 @@ export class ContactRouter {
   }
 
   /**
-   * 判定 projectile ↔ hostile vehicle 命中元数据（Q02-F2 / F2R1）：
+   * 判定 projectile ↔ hostile vehicle 命中元数据（Q02-F2 / F2R1；PBL-F2 实例化）：
    * - 恰一方是 projectile、另一方是 vehicle 且阵营不同；
    * - projectile 必须有来源 weapon part（partId 形如 'part:...'）；
    * - 同队 / 任一方缺失 → null（无伤害；但接触事实仍由 recordProjectileFact 记录）；
    * - projBody：projectile 实例的 opaque 引用（Planck BodyHandle，来自 ev.bodyA/bodyB），
-   *   用于实例级去重；Matter 路径无引用时为 undefined。
+   *   用于实例级去重；Matter 路径无引用时为 undefined；
+   * - `projVehicleId` / `defVehicleId`：PBL-F2 实例身份 —— 同队多敌时按实例反查与去重，
+   *   不再依赖「一个 team 只有一辆车」。
    */
   private projectileHitMeta(
     ev: RouterContactEvent,
     mA: Record<string, unknown>,
     mB: Record<string, unknown>,
-  ): { projTeam: TeamId; projPartId: string; defTeam: TeamId; projBody: unknown } | null {
+  ): {
+    projTeam: TeamId;
+    projPartId: string;
+    /** PBL-F2：projectile 自身 OwnerTag.vehicleId —— 反查「哪一辆车」发射的 */
+    projVehicleId: unknown;
+    defTeam: TeamId;
+    /** PBL-F2：被命中车辆实例 id */
+    defVehicleId: unknown;
+    /** PBL-F2：实例级 defender 去重 key（同队多敌各自结算） */
+    defKey: string;
+    projBody: unknown;
+  } | null {
     const pa = mA.kind === 'projectile';
     const pb = mB.kind === 'projectile';
     if (pa === pb) return null; // 都不是（vehicle↔vehicle）或都是 projectile → 不结算
@@ -869,16 +960,25 @@ export class ContactRouter {
     if (projTeam === otherTeam) return null; // 同队无伤害
     const projPartId = String(proj.partId ?? '');
     if (!projPartId.startsWith('part:')) return null;
-    return { projTeam, projPartId, defTeam: otherTeam, projBody: pa ? ev.bodyA : ev.bodyB };
+    return {
+      projTeam,
+      projPartId,
+      projVehicleId: proj.vehicleId,
+      defTeam: otherTeam,
+      defVehicleId: other.vehicleId,
+      defKey: instanceKeyOf(other),
+      projBody: pa ? ev.bodyA : ev.bodyB,
+    };
   }
 
   /**
    * projectile → hostile vehicle 的 Direct Weapon Damage：
-   * - 来源武器 = projectile OwnerTag.team + partId 反查的 weapon part；
+   * - 来源武器 = projectile 的**实例身份**（`OwnerTag.vehicleId`）+ partId 反查 weapon part
+   *   （PBL-F2 起实例级：同队多敌时必须反查到真正发射的那一辆）；
    * - 伤害取 behaviorParams.projectileDamage；
    * - 复用 WEAPON_CONTACT_THRESHOLD（真实有效接触才结算）；
    * - 走现有 DamageResolver，damageSource='weapon'；不参与 Impact；
-   * - 同一 batch 去重由 processBatch 的 projByKey 合并保证。
+   * - 同一 batch 去重由 processBatch 的 projByInstance 合并保证（defender 维度 = 实例）。
    */
   private applyProjectileDamage(
     ev: RouterContactEvent,
@@ -888,7 +988,7 @@ export class ContactRouter {
     if (ev.phase !== 'start') return;
     const meta = this.projectileHitMeta(ev, mA, mB);
     if (!meta) return;
-    const attacker = this.findVehicleByTeam(meta.projTeam);
+    const attacker = this.resolveVehicle(meta.projVehicleId, meta.projTeam);
     if (!attacker) return;
     const part = this.findPart(attacker, meta.projPartId);
     if (!part) return;
@@ -896,7 +996,7 @@ export class ContactRouter {
     const damage = (part.def.behaviorParams?.projectileDamage as number) ?? 0;
     if (!(damage > 0)) return;
     if (ev.relativeVelocity < WEAPON_CONTACT_THRESHOLD) return; // 真实有效接触
-    const defender = this.findVehicleByTeam(meta.defTeam);
+    const defender = this.resolveVehicle(meta.defVehicleId, meta.defTeam);
     if (!defender) return;
 
     this.damageResolver.applyDamage(defender, {
