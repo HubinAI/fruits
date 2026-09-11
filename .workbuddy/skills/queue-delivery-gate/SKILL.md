@@ -67,6 +67,8 @@ probe('WORK ', fs.readFileSync('<file>','utf8'));
 - `garageBuildBoardP0.test.ts` T6 —— 用固定 2600 字符源码切片窗口断言，宿主文件一长必失效；base 原文件同样不成立。
 - `platformCore.test.ts` WebLifecycle rAF timeout —— 偶发。
 
+**全量负载超时抖动（先判再修，别当回归）**：vitest 未设 `testTimeout`（默认 5s），`vmForks + maxWorkers=1` 全量跑时个别 canvas/DOM 重型文件会偶发 `Test timed out in 5000ms`（实证：`garageFusionResultInteractionR22.test.ts` 9 处超时）。**判定三步**：① 单跑该文件 —— 绿则排除逻辑问题；② 查该文件 import 面是否与被改动模块有引用路径（无则无因果）；③ 全量重跑 —— 绿即抖动。三步齐了才写「非回归」，否则拆 Bug Queue。
+
 ## 3. 四路构建 + bundle-clean
 
 ```bash
@@ -78,7 +80,11 @@ node scripts/check-wechat-bundle-clean.js dist-wechat/game.js wechat
 node scripts/check-wechat-bundle-clean.js dist-wechat/game.js rc
 node scripts/check-wechat-bundle-clean.js "dist-e2e/$(grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' dist-e2e/index.html | head -1)" e2e
 node scripts/check-wechat-bundle-clean.js "dist/$(grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' dist/index.html | head -1)" wechat
+# PBL Lab 分支额外加一路（入口名与正式不同，别套 index-*）
+node scripts/check-wechat-bundle-clean.js "dist-portrait-lab/$(grep -oE 'assets/portrait-lab-[A-Za-z0-9_-]+\.js' dist-portrait-lab/portrait-lab.html | head -1)" wechat
 ```
+
+> 参数是 **[bundle.js, 模式]**（不是目录 + 模式）。传目录会 `未知构建模式: dist-xxx` 并 exit 2。
 
 模式：`rc|wechat|diag` 禁一切内部句柄；`e2e` allowlist 放行 `__h/__probe/__fx/__inv`。用**精确赋值模式**（`globalThis.__h = `），业务 `dirty` 字段不误报。
 
@@ -123,6 +129,10 @@ E2E 硬约束：禁 hitArea/`__h`/`__probe`/getImageData 捷径当验收结论�
 ## 6. Commit / Push
 
 只 stage 业务文件。`.workbuddy/`、`dist*`、`outputs/`、`HANDOFF_`、`交接文档`、`_verify`、`最强水果*` 均在 RC IGNORED_PREFIXES，**不要混进业务 commit**。
+
+> ⚠️ **例外（易踩）**：`.workbuddy/memory/YYYY-MM-DD.md` 与 `.workbuddy/memory/MEMORY.md` **要随功能 commit 一起提交**（项目铁律「Memory merges into feature commit；禁 standalone memory commit」）。
+> 实证：`6aa8238`(PBL-F1)、`2ab32bb`(PBL-F2) 均含这两个文件。别把 memory 当 dist*/outputs/ 一起排除掉。
+
 受控前缀（dirty 即拒 RC）：`src/ tests/ scripts/ wechat/ package.json package-lock.json vite. tsconfig`。
 
 ```bash
