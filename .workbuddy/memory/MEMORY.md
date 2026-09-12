@@ -42,7 +42,14 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
   根路径被 dev-only 插件重写为玩家体验入口（`build/branchDevEntry.ts`，`apply:'serve'`）。
   用户**不需要记任何 URL**、不需要在多个 localhost 地址间选择。
   `portrait-lab.html` = DEBUG ONLY（`npm run dev:debug-lab`）；`index.html` = 正式横屏游戏（`npm run dev:legacy`，显式备用）。
-  **给用户的回复永远只说一条命令：`npm run dev`。**
+  **给用户的回复永远只说一条命令，但必须带工作目录（两行，缺一不可）：**
+  ```powershell
+  cd D:\0818new\最强水果
+  npm run dev
+  ```
+  ⚠️ 2026-09-12 实测踩坑：用户直接在新开的 PowerShell（默认落在 `C:\Users\62520`）里跑 `npm run dev`
+  → `npm error Missing script: "dev"`。**这不是项目缺陷**，是 npm 在「当前目录」找 `package.json`，
+  而仓库根在 `D:\0818new\最强水果`。给启动指令时**必须把 `cd` 一起给**，否则用户会以为原型坏了。
 - ⚠️ 改 `vite.config.ts` 时注意两条守卫（勿以说明性理由破坏）：R23 禁出现 `portrait-lab`/`portraitBattleLab`；
   RP-27 禁出现 `run-page`/`runMain`。故 dev 默认入口逻辑必须放在 `build/branchDevEntry.ts`，用 `from './build/branchDevEntry.ts'` 引入。
 
