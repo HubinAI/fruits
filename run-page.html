@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>最强水果 — Portrait Run Prototype（PRP-F0 Run Page）</title>
+    <!--
+      PRP-F0-RUN-PAGE-SHELL｜Portrait Run Prototype 玩家入口。
+
+      产品基线：整个单局是**一个持续存在的竖屏 Adventure Run Page**；
+      战斗 / 事件 / 强化 / 结果都是同一页面的不同状态，不存在页面跳转。
+      画布内的五个状态由 src/lab/portraitBattleLab/runPage.ts 全量绘制。
+
+      隔离：本页面不参与 npm run build / build:pages / build:e2e / build:wechat
+      任一正式构建；实验失败可直接删除本文件与 src/lab/portraitBattleLab/。
+
+      Debug 与玩家界面分离：本页**不含**任何开发控制（Arena / Loadout / Encounter /
+      Start / Reset / Gate）。开发控制在独立入口 portrait-lab.html。
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: #06090e;
+        color: #e9eef7;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+      /* 唯一容器 = 整个视口；画布由 PlayerViewportTransform contain 缩放居中 */
+      #run-root.run-root { position: fixed; inset: 0; }
+      .run-stage { position: absolute; inset: 0; overflow: hidden; }
+      .run-stage canvas { touch-action: manipulation; }
+    </style>
+  </head>
+  <body>
+    <div id="run-root"></div>
+    <script type="module" src="/src/lab/portraitBattleLab/runMain.ts"></script>
+  </body>
+</html>

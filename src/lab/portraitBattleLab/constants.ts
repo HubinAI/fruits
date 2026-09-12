@@ -1,7 +1,12 @@
 /**
  * PBL-F0 / PBL-F1｜竖屏战场实验台（Portrait Battle Lab）基础常量与 id 契约。
  *
- * 这是一个**独立、可整块删除**的实验环境（Arena A / B 对照验证共用同一入口）。
+ * PRP-F0 起本目录同时承载两个原型（仍在同一块可整块删除的实验目录内）：
+ *   - **PRP｜Portrait Run Prototype** —— 玩家页面 `run-page.html`
+ *     （`runPage*.ts` / `runMain.ts`：单一 Run Page + 五状态切换 + 日志 + 选择浮层）；
+ *   - **PBL｜Portrait Battle Lab** —— Debug control area `portrait-lab.html`
+ *     （`lab.ts` / `main.ts` / `arenaA.ts` / `gate.ts` …：Arena / Loadout / Encounter / Gate）。
+ *   两者共享本文件的竖屏 390×844 基准与 F1 测试数据，但玩家页面**不引用**任何 Debug 控制器。
  *
  * PBL-F1 起本实验台允许**只读引用**正式内容库来建立 A/B 共用的测试数据
  * （见 testData.ts / entities.ts）：Lab 不复制、不覆盖任何平衡数值，
@@ -13,11 +18,14 @@
  *
  * 删除清单（整块移除本实验）：
  *   1) 本目录 src/lab/portraitBattleLab/（全部文件）
- *   2) 根目录 portrait-lab.html
+ *   2) 根目录 portrait-lab.html、run-page.html
  *   3) 根目录 vite.portrait-lab.config.ts
  *   4) tests/portraitBattleLab.test.ts、tests/portraitBattleLabF1.test.ts、
- *      tests/_e2e_portrait_battle_lab.cjs
- *   5) package.json 中 dev:portrait-lab / build:portrait-lab 两条 script
+ *      tests/portraitBattleLabA1.test.ts、tests/portraitBattleLabG1.test.ts、
+ *      tests/portraitRunPage.test.ts、
+ *      tests/_e2e_portrait_battle_lab.cjs、tests/_e2e_run_page.cjs
+ *   5) package.json 中 dev:portrait-lab / dev:run-page / build:portrait-lab /
+ *      e2e:portrait-lab / e2e:run-page 等 script
  *   6) .gitignore 中 dist-portrait-lab/ 一行
  * 正式玩法 / 物理 / 数值 / Garage / Fusion / R4 / Meta / 存档 / 经济均不在删除影响面内。
  */
