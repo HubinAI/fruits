@@ -1,5 +1,5 @@
 /**
- * PRP-F1-PORTRAIT-PLANCK-BATTLE-INTEGRATION｜Run Page 的真实战斗运行时适配 + 固定远摄相机。
+ * PRP-R5-RESTORE-LEGACY-BATTLE-CAMERA｜Run Page 的真实战斗运行时适配 + **正式 Battle Camera** 接入。
  *
  * 本文件的**唯一职责**：把**旧正式左右侧视 Planck 战斗**接到 Run Page 中部舞台上，
  * 而**不重新定义任何 gameplay 语义**。因此：
@@ -13,13 +13,25 @@
  *          → 出生中心距 **800 世界 px**；
  *        - `autoDrive` 默认开（A 朝 +X、B 朝 −X），Cannon 行为按正式 cooldownMs 自动开火；
  *        - gravity `{x:0, y:10}`（真实贴地，禁止 0 重力假悬浮）。
- *      PRP **不**覆盖以上任何一项；「PRP 只能做 camera transform」（Queue 必改 1）。
+ *      PRP **不**覆盖以上任何一项（Queue 必改 1/3）。
  *
- *   3) 相机 = **固定远摄**：`scale = 舞台带宽 / arena 宽`，地面线锚定在舞台带的
- *      `RUN_BATTLE_GROUND_FRAC`，偏移与**实时位置无关** → 结构上不可能「追踪 / 动态 zoom」。
- *      取景覆盖**完整旧 Battle 世界**（0..1600 全宽，含两侧墙与收束刺墙）：
- *      实测收束阶段玩家车会被推到 x≈86（远小于开局外廓左缘 310），
- *      因此任何「只框开局交战段」的固定取景都会在收束阶段把车裁出画面。
+ *   3) 相机 = **正式 `Renderer` 的 battle 相机链**：`reframe(snap,'battle',{phase})`
+ *      → `battleCam` → 逐帧 `applyBattleFollow`。PRP **不写第二套镜头**：
+ *        - scale 由正式三段动态取景公式给出（远端 0.87 / 接近 0.75 / 碰撞 0.60 × 安全宽，
+ *          由**真实世界间距比例** `gapWorld/coreUnionW` 驱动），不是固定常数；
+ *        - 位置由正式 `applyBattleFollow` 追踪双方中点 + 分离有限拉远（≤ baseScale）；
+ *        - ❌ 无 PRP 专属镜头规则：不按炮弹 zoom / 不按碰撞 zoom / 无震屏 / 无 kill zoom /
+ *          无 cinematic。
+ *      ⚠️ **为什么逐帧 `reframe`**：正式 `Renderer` 的 battle 分支自述「Active 每帧按 A∪B
+ *        真实 bounds 计算目标 scale」，正式相机测试（`tests/battleDynamicFramingR21.test.ts`）
+ *        的调用口径同样是每帧；正式运行时只在阶段切换构图（接线缺环），使三段动态取景在横屏里
+ *        长期休眠。PRP 舞台带只有 390 逻辑宽，必须让正式动态取景真正生效，物理反馈
+ *        （弹丸飞行 / 后坐 / 接敌 / 碰撞）才重新进入可感知尺度。
+ *
+ *   4) **viewport adapter**（唯一为 band 做的适配，相机算法一行不改）：正式相机在
+ *      「安全区」内构图（非 compact battle = insetX **56** / insetTop **28** / insetBottom **28**）。
+ *      PRP 舞台带没有 HUD、整条带都是对焦区 → 离屏视口取「带 + inset」（502×358），
+ *      使**正式安全区恰好等于舞台带**，合成时只裁安全区那一块贴到带上（见 `RUN_BATTLE_VIEW_*`）。
  *
  * ⚠️ 本文件**不写任何战斗数值**：HP / 伤害 / CD / 射速 / 质量 / 后坐全部由正式链路解析。
  * ⚠️ 「PRP 侧被改过的 gameplay」在本适配里**不存在** —— 因为 PRP 此前根本没有战斗
@@ -27,7 +39,6 @@
  */
 
 import { registry } from '../../core/content';
-import { DEFAULT_ARENA_CONFIG } from '../../battle/arenaConfig';
 import type { BattleRenderSnapshot, BattleResult } from '../../battle/battleContract';
 import { PlanckBattleOrchestrator } from '../../battle/planckBattleOrchestrator';
 import { buildSpawnPlan, type SpawnPlan } from './entities';
@@ -38,61 +49,83 @@ import { RUN_DEMO_ENCOUNTER_ID, RUN_DEMO_LOADOUT_ID } from './runPageScene';
 export const RUN_BATTLE_LOADOUT_ID = RUN_DEMO_LOADOUT_ID;
 export const RUN_BATTLE_ENCOUNTER_ID = RUN_DEMO_ENCOUNTER_ID;
 
-/**
- * 地面线在舞台带内的高度占比。
- * 取正式 battle 相机的同一语义（`BATTLE_STAGE_GROUND_MAX = 0.72`：地面下留 ~28% 场景带，
- * 地面线不贴底、上方空间全部留给弹道与击飞）。
- */
-export const RUN_BATTLE_GROUND_FRAC = 0.72;
+/* ------------------------------------------------- viewport adapter 几何 */
 
-/** 固定相机（纯几何，只由「舞台带 + 正式 arena 尺寸」决定）。 */
-export interface RunBattleCamera {
-  /** 世界 px → 视图逻辑 px 的统一缩放（= viewW / arena.width）。 */
+/**
+ * 正式 battle 相机在非 compact 视口使用的 inset（logical px）——与 `src/render/renderer.ts`
+ * 的 `SAFE_INSET_X = 56` / `SAFE_INSET_Y = 28` 同值。
+ *
+ * ⚠️ 这是**只读的几何契约**，不是可调参数：改这里就必须同步核对 renderer 的 inset 常量
+ * （`tests/portraitRunBattle.test.ts` 有机器判据把「安全区 == 舞台带」钉住）。
+ */
+export const RUN_BATTLE_VIEW_INSET = { x: 56, y: 28 } as const;
+
+/**
+ * 离屏战斗视口尺寸 = 舞台带 + 正式 inset × 2。
+ *
+ * `isCompactLandscape(502, 358)` = false（aspect 1.402 < 1.5）→ 正式相机走
+ * 「非 compact」分支 → `insetX 56 / insetTop 28 / insetBottom 28` →
+ * **安全区 = (56,28,390,302) == 舞台带**。
+ */
+export const RUN_BATTLE_VIEW_W = RUN_STAGE_BAND.w + RUN_BATTLE_VIEW_INSET.x * 2;
+export const RUN_BATTLE_VIEW_H = RUN_STAGE_BAND.h + RUN_BATTLE_VIEW_INSET.y * 2;
+
+/**
+ * 相机实时状态（每帧由正式 `reframe` + `applyBattleFollow` 写入）。
+ * 全部为**离屏画布坐标**；换算到舞台带需减去 `cropX/cropY`。
+ */
+export interface RunBattleXform {
   readonly scale: number;
   readonly offsetX: number;
   readonly offsetY: number;
-  readonly viewW: number;
-  readonly viewH: number;
-  /** 正式 arena 世界宽（1600）——**不是**舞台带宽（390）。 */
-  readonly worldW: number;
-  readonly worldH: number;
-  readonly groundY: number;
-  /** 地面线在视图内的 y（逻辑 px）。 */
-  readonly groundScreenY: number;
+  /** 离屏画布 → 舞台带的裁剪原点（= 正式 inset）。 */
+  readonly cropX: number;
+  readonly cropY: number;
+}
+
+/** 世界坐标 → 舞台带逻辑坐标（渲染与 probe 同源，不出现第二套换算）。 */
+export function battleBandX(x: RunBattleXform, worldX: number): number {
+  return x.offsetX + worldX * x.scale - x.cropX;
+}
+export function battleBandY(x: RunBattleXform, worldY: number): number {
+  return x.offsetY + worldY * x.scale - x.cropY;
+}
+
+/** 地面线在舞台带内的 y（逻辑 px）。 */
+export function battleGroundBandY(x: RunBattleXform, groundY: number): number {
+  return battleBandY(x, groundY);
 }
 
 /**
- * 固定远摄相机。
+ * 是否在本帧调用正式 `reframe` —— 正式口径（**不自创规则**）：
  *
- * ⚠️ 这是「Camera 拉远，而不是压缩 Gameplay」的落点：世界宽仍是 1600，
- * 变的是显示层缩放（390/1600 = 0.24375）。四个带 / 世界尺度 / 出生距离一个都没动。
+ *   - `Active`：**每帧**（正式 `Renderer` battle 分支自述「Active 每帧」，正式相机测试
+ *     `battleDynamicFramingR21.test.ts` 同源调用）→ 三段动态取景真正生效；
+ *   - 其它阶段（Warning / Closing / End）：**只在阶段切换那一帧**（正式运行时
+ *     `pollArenaPhase` 的语义）→ 之后交给逐帧 `applyBattleFollow` 平滑收敛。
+ *
+ * ⚠️ 为什么非 Active 不能每帧 reframe：非 Active 分支只做「相对基准 ±10% 钳制」，
+ *    每帧重复施加会与逐帧 `applyBattleFollow` 互相拉扯（0.4%/帧 抖动）——
+ *    既不是正式行为，也会破坏「RESULT 战场冻结」这一既有不变量。
  */
-export function runBattleCamera(
-  viewW: number = RUN_STAGE_BAND.w,
-  viewH: number = RUN_STAGE_BAND.h,
-): RunBattleCamera {
-  const worldW = DEFAULT_ARENA_CONFIG.width;
-  const scale = viewW / worldW;
-  const groundScreenY = viewH * RUN_BATTLE_GROUND_FRAC;
-  return {
-    scale,
-    offsetX: 0,
-    offsetY: groundScreenY - DEFAULT_ARENA_CONFIG.groundY * scale,
-    viewW,
-    viewH,
-    worldW,
-    worldH: DEFAULT_ARENA_CONFIG.height,
-    groundY: DEFAULT_ARENA_CONFIG.groundY,
-    groundScreenY,
-  };
+export function shouldReframeBattleCamera(phase: string, lastPhase: string | null): boolean {
+  return phase !== lastPhase || phase === 'Active';
 }
 
-/** 世界坐标 → 战斗视图逻辑坐标（与相机同源；渲染与 probe 共用，不出现第二套换算）。 */
-export function battleViewX(cam: RunBattleCamera, worldX: number): number {
-  return cam.offsetX + worldX * cam.scale;
-}
-export function battleViewY(cam: RunBattleCamera, worldY: number): number {
-  return cam.offsetY + worldY * cam.scale;
+/**
+ * 舞台带内**实际可见**的世界水平范围。
+ *
+ * ⚠️ 这是「相机不再是完整世界远摄」的直接证据：PRP-R5 之前固定 `scale = 390/1600`
+ * → 可见宽恒为 1600（整世界）；现在由正式动态取景决定，开局约 **1178**（≈ 世界的 74%），
+ * 碰撞期进一步收窄到 ≈ 500。
+ */
+export function battleVisibleWorld(
+  x: RunBattleXform,
+  bandW: number = RUN_STAGE_BAND.w,
+): { minX: number; maxX: number; width: number } {
+  const minX = (x.cropX - x.offsetX) / x.scale;
+  const maxX = (x.cropX + bandW - x.offsetX) / x.scale;
+  return { minX, maxX, width: maxX - minX };
 }
 
 /** 世界空间外接框。 */

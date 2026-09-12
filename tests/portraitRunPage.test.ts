@@ -92,9 +92,10 @@ import {
   runPageLayerShapes,
 } from '../src/lab/portraitBattleLab/runPageScene';
 import {
-  RUN_BATTLE_GROUND_FRAC,
+  RUN_BATTLE_VIEW_H,
+  RUN_BATTLE_VIEW_INSET,
+  RUN_BATTLE_VIEW_W,
   RunBattleRuntime,
-  runBattleCamera,
 } from '../src/lab/portraitBattleLab/runBattleRuntime';
 import { RUN_VISUAL_ASSETS } from '../src/lab/portraitBattleLab/runVehicleAssets';
 
@@ -609,29 +610,40 @@ describe('PRP-F1｜C 中部舞台：IDLE 近景 + 真实战斗世界（正式世
     rt.dispose();
   });
 
-  it('RP-20 必改 3：相机是**固定远摄**（只由舞台带 + 正式 arena 宽决定，与车辆位置无关）', () => {
-    const cam = runBattleCamera(RUN_STAGE_BAND.w, RUN_STAGE_BAND.h);
-    expect(cam.worldW).toBe(1600);
-    expect(cam.worldH).toBe(900);
-    expect(cam.viewW).toBe(RUN_STAGE_BAND.w);
-    expect(cam.viewH).toBe(RUN_STAGE_BAND.h);
-    expect(cam.scale).toBeCloseTo(390 / 1600, 12); // 0.24375
-    expect(cam.offsetX).toBe(0); // 完整世界横向铺满（不裁切）
-    expect(cam.groundScreenY).toBeCloseTo(RUN_STAGE_BAND.h * RUN_BATTLE_GROUND_FRAC, 9);
-    // 同一输入 → 同一输出（纯几何函数：没有任何车辆位置入参）
-    expect(runBattleCamera(RUN_STAGE_BAND.w, RUN_STAGE_BAND.h)).toEqual(cam);
-    expect(runBattleCamera.length).toBeLessThanOrEqual(2);
-    // 世界高 × 缩放 必须完整落在舞台带内（不裁切竖向）
-    expect(cam.worldH * cam.scale).toBeLessThanOrEqual(cam.viewH);
-
-    // 结构证据：视图层**不调用** reframe（那才是智能追踪 + 动态 zoom 的开关）
+  it('RP-20 PRP-R5 必改 1/2：相机 = **正式 battle 相机链**，PRP 只做 viewport adapter', () => {
+    // ① PRP-F1 的「固定全世界远摄」被废除：没有固定相机函数、没有写死的地面占比
+    const runtime = stripComments(read('runBattleRuntime.ts'));
     const view = stripComments(read('runBattleView.ts'));
-    expect(view.includes('reframe(')).toBe(false);
+    expect(runtime.includes('runBattleCamera')).toBe(false);
+    expect(runtime.includes('RUN_BATTLE_GROUND_FRAC')).toBe(false);
+    // 不再出现「视图宽 / 世界宽」这种固定远摄公式
+    expect(/viewW\s*\/\s*world/.test(runtime)).toBe(false);
+
+    // ② PRP 不再自算镜头：视图层**不得**直接写 renderer.transform
+    expect(view.includes('this.renderer.transform =')).toBe(false);
     expect(view.includes('applyBattleFollow')).toBe(false);
-    expect(view.includes('this.renderer.transform =')).toBe(true);
+    // ③ 视图层**必须**调用正式 reframe(snap,'battle',{phase}) —— 这才是「复用正式相机」
+    expect(view.includes('reframe(')).toBe(true);
+    expect(/'battle'/.test(view)).toBe(true);
+    expect(view.includes('const phase = runtime.phase;')).toBe(true);
+    expect(/\{ phase \}/.test(view)).toBe(true);
+    // 节奏必须走**正式口径**判定函数（Active 每帧 + 阶段切换那一帧），不得自造规则
+    expect(view.includes('shouldReframeBattleCamera(phase, this.lastPhase)')).toBe(true);
+    // ④ 每帧 reframe 之后必须 render()（正式 applyBattleFollow 在 render 内逐帧执行）
+    expect(view.indexOf('reframe(')).toBeLessThan(view.indexOf('renderer.render('));
+
+    // ⑤ viewport adapter：离屏视口 = 舞台带 + 正式 inset（安全区恰好等于舞台带）
+    expect(RUN_BATTLE_VIEW_INSET).toEqual({ x: 56, y: 28 });
+    expect(RUN_BATTLE_VIEW_W).toBe(RUN_STAGE_BAND.w + 112);
+    expect(RUN_BATTLE_VIEW_H).toBe(RUN_STAGE_BAND.h + 56);
+    expect(view.includes('RUN_BATTLE_VIEW_W')).toBe(true);
+    expect(view.includes('RUN_BATTLE_VIEW_H')).toBe(true);
+    // 合成时按 adapter 裁剪原点取源矩形（不再整画布 1:1 平铺）
+    expect(view.includes('RUN_BATTLE_VIEW_INSET.x * this.dpr')).toBe(true);
+    expect(view.includes('RUN_BATTLE_VIEW_INSET.y * this.dpr')).toBe(true);
   });
 
-  it('RP-21 IDLE 近景缩放公式对 5 种车体都成立（战斗远摄不参与 IDLE 构图）', () => {
+  it('RP-21 IDLE 近景缩放公式对 5 种车体都成立（战斗相机不参与 IDLE 构图）', () => {
     const avail = RUN_PAGE_W - 2 * RUN_SIDE_VIEW.marginPx - RUN_SIDE_VIEW.gapPx;
     let checked = 0;
     for (const l of LAB_LOADOUTS) {
@@ -779,18 +791,19 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
     for (const t of ['autoDrive:', 'sideDrive:', 'arenaConfig:', 'closingSpeed:', 'phases:']) {
       expect(args[3].includes(t), `config 不得覆盖 "${t}"`).toBe(false);
     }
-    // 3) 世界尺度直接读正式配置（不是自己写 1600）
-    expect(rt.includes('DEFAULT_ARENA_CONFIG.width')).toBe(true);
-    expect(rt.includes('DEFAULT_ARENA_CONFIG.groundY')).toBe(true);
+    // 3) 世界尺度直接读正式配置（不是自己写 1600）；相机也不再需要自己拿 arena 宽
     expect(rt.includes('this.orchestrator.arena.config.width')).toBe(true);
     expect(rt.includes('this.orchestrator.arena.config.groundY')).toBe(true);
+    expect(/=\s*1600\b/.test(rt)).toBe(false);
+    expect(/=\s*900\b/.test(rt)).toBe(false);
     // 真实的出生位置是**实测**（读 world.getPosition），不是写死数字
     expect(rt.includes('w.getPosition(this.orchestrator.vehicleA.body).x')).toBe(true);
     expect(/spawnAx = .*getPosition/.test(rt)).toBe(true);
-    // 4) 相机只写 transform；跑分/追踪一律不接
+    // 4) PRP-R5：相机走正式 reframe（视图层只接线），但**不碰**正式相机内部状态
     const view = stripComments(read('runBattleView.ts'));
-    expect(view.includes('reframe(')).toBe(false);
+    expect(view.includes('reframe(')).toBe(true);
     expect(view.includes('battleCam')).toBe(false);
+    expect(view.includes('this.renderer.transform =')).toBe(false);
     // 5) 战斗剧本 / 演出位移彻底不存在（否则会重新引入「假战斗」）
     const state = stripComments(read('runPageState.ts'));
     for (const t of ['RUN_BATTLE_SCRIPT', 'advanceRunBattle', 'Math.sin']) {

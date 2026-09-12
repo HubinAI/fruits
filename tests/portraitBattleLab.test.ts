@@ -339,7 +339,6 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
     //    战斗本身要跑正式编排器，画面要交给正式 Renderer（否则就是第二套战斗实现）。
     //    代价是 PRP 与正式战斗栈之间**只有** runBattleRuntime / runBattleView 两个文件相连
     //    （见 R22a-4 的单入口守卫）。
-    '../../battle/arenaConfig', // 正式 arena 尺度（1600×900 / groundY 700）
     '../../battle/planckBattleOrchestrator', // 正式侧视战斗编排器（**仅 runBattleRuntime.ts 可用**）
     '../../render/renderer', // 正式渲染器（原样复用，零修改）
     '../../render/visualRegistry', // 正式 sprite 表（Renderer 的依赖）
@@ -471,8 +470,9 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
     expect(args[3]).toBe('{}');
     expect(args.length).toBe(5);
 
-    // 3) 世界尺度必须来自正式配置（不是自己写 1600 / 700）
-    expect(rt.includes('DEFAULT_ARENA_CONFIG')).toBe(true);
+    // 3) 世界尺度必须来自正式 orchestrator 的 arena 配置（不是自己写 1600 / 700）
+    expect(rt.includes('arena.config.width')).toBe(true);
+    expect(rt.includes('arena.config.groundY')).toBe(true);
     expect(rt.includes('1600')).toBe(false); // 源码里不得出现硬编码世界宽
     expect(rt.includes('900')).toBe(false);
     // 4) 出生位置必须实测（读 world.getPosition），不得写死 400 / 1200
@@ -480,10 +480,11 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
     expect(rt.includes('1200')).toBe(false);
     expect(rt.includes('getPosition')).toBe(true);
 
-    // 5) 视图层只做 camera / clip / 合成：绝不启用正式跟随相机（智能追踪 + 动态 zoom）
+    // 5) PRP-R5：视图层只做「正式相机接线 / clip / 合成」——不写第二套镜头
     const view = stripper('runBattleView.ts');
-    expect(view.includes('reframe(')).toBe(false);
-    expect(view.includes('battleCam')).toBe(false);
+    expect(view.includes('reframe(')).toBe(true); // 复用正式 reframe(snap,'battle',{phase})
+    expect(view.includes('battleCam')).toBe(false); // 不碰正式相机内部状态
+    expect(view.includes('this.renderer.transform =')).toBe(false); // 不自算 transform
     expect(view.includes("drawImage(")).toBe(true); // 唯一的合成动作
   });
 

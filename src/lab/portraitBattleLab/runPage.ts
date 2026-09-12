@@ -93,9 +93,13 @@ import {
   type RunStageView,
 } from './runPageScene';
 import {
+  RUN_BATTLE_VIEW_H,
+  RUN_BATTLE_VIEW_W,
   RunBattleRuntime,
-  battleViewX,
-  battleViewY,
+  battleBandX,
+  battleBandY,
+  battleGroundBandY,
+  battleVisibleWorld,
   type RunBattleBox,
 } from './runBattleRuntime';
 import { RunBattleView } from './runBattleView';
@@ -241,15 +245,29 @@ export interface RunProbeBattleWorld {
     readonly initialGap: number;
   };
   readonly camera: {
-    /** 固定远摄缩放 = viewW / world.width。 */
+    /** **正式动态取景**的实时 scale（由真实世界间距驱动，不是固定常数）。 */
     readonly scale: number;
     readonly offsetX: number;
     readonly offsetY: number;
+    /** 地面线在**离屏画布**内的 y。 */
     readonly groundScreenY: number;
+    /** 地面线在**舞台带**内的 y（= groundScreenY − cropY）。 */
+    readonly groundBandY: number;
+    /** 离屏视口（= 舞台带 + 正式 inset，502×358）。 */
     readonly viewW: number;
     readonly viewH: number;
-    /** 相机是否覆盖完整世界 0..worldW（固定取景的结构判据）。 */
-    readonly coversWorld: boolean;
+    /** 可见区（= 正式安全区 = 舞台带 390×302）。 */
+    readonly bandW: number;
+    readonly bandH: number;
+    /** viewport adapter 的裁剪原点（= 正式 inset）。 */
+    readonly cropX: number;
+    readonly cropY: number;
+    /** 舞台带内**实际可见**的世界水平范围（PRP-R5 的「不是完整世界远摄」判据）。 */
+    readonly visibleWorldMinX: number;
+    readonly visibleWorldMaxX: number;
+    readonly visibleWorldWidth: number;
+    /** 可见世界宽 ≥ 世界宽（false = 相机确实在裁世界，即动态取景在起作用）。 */
+    readonly showsWholeWorld: boolean;
   };
   readonly player: RunProbeEntity;
   readonly enemy: RunProbeEntity;
@@ -308,12 +326,13 @@ export interface RunPageProbe {
    *   - `mode === 'idle'`：`ground` / `road` / `player.bounds` 是**页面绝对逻辑坐标**
    *     （`runStageGroundY()` 自带 `RUN_STAGE_BAND.y` 偏移，绘制时直接 `fillRect` 不再加带偏移）；
    *   - `mode === 'battle'`：`player` / `enemy` 的 `bounds` 是**舞台带内相对坐标**
-   *     （经 `battleViewY(cam, …)` 得到 0..带高，合成时由 9 参 `drawImage` 落到带内）。
+   *     （经 `battleBandY(xf, …)` = 正式相机 `offsetY` + 世界 y×scale − `cropY` 得到 0..带高，
+   *      合成时由 9 参 `drawImage` 落到带内）。
    *   即：拿 `bounds` 去采样画布像素时，battle 模式必须再加 `bands.stage.y`，idle 模式**不能**加。
    */
   readonly stage: {
     mode: 'idle' | 'battle';
-    /** 当前生效的显示缩放（idle = 近景缩放；battle = 固定远摄缩放）。 */
+    /** 当前生效的显示缩放（idle = 近景缩放；battle = **正式动态取景**的实时 scale）。 */
     scale: number;
     groundY: number;
     ground: RunRect;
@@ -935,15 +954,16 @@ export class RunPage {
     }
 
     // EVENT / BATTLE / RESULT / CHOICE：真实 Planck 战斗世界
-    const cam = this.battleView.getCamera();
+    const xf = this.battleView.viewTransform();
+    const vis = battleVisibleWorld(xf);
     const aBox = rt.vehicleBox('A');
     const bBox = rt.vehicleBox('B');
     const gapWorld = bBox.minX - aBox.maxX;
     const toView = (b: RunBattleBox): RunRect => ({
-      x: battleViewX(cam, b.minX),
-      y: battleViewY(cam, b.minY),
-      w: (b.maxX - b.minX) * cam.scale,
-      h: (b.maxY - b.minY) * cam.scale,
+      x: battleBandX(xf, b.minX),
+      y: battleBandY(xf, b.minY),
+      w: (b.maxX - b.minX) * xf.scale,
+      h: (b.maxY - b.minY) * xf.scale,
     });
     // 真实战斗世界里「是否有降级占位」的判据 = 正式 sprite 是否全部就绪
     // （正式 Renderer 不会用纯色矩形冒充车辆：它只画 sprite 与真实几何）。
@@ -959,8 +979,8 @@ export class RunPage {
       ...this.baseProbe(s, rect, layers),
       stage: {
         mode: 'battle',
-        scale: cam.scale,
-        groundY: cam.groundScreenY,
+        scale: xf.scale,
+        groundY: battleGroundBandY(xf, rt.groundY),
         ground: copyRect(view.ground),
         road: copyRect(view.road),
         player: battleEntity(aBox),
@@ -974,7 +994,7 @@ export class RunPage {
         steps: rt.stepCount,
         projectiles: rt.projectileCount(),
         gapWorld,
-        gapView: gapWorld * cam.scale,
+        gapView: gapWorld * xf.scale,
         world: {
           width: rt.arenaWidth,
           height: rt.arenaHeight,
@@ -985,13 +1005,21 @@ export class RunPage {
           initialGap: this.battleInitialGap,
         },
         camera: {
-          scale: cam.scale,
-          offsetX: cam.offsetX,
-          offsetY: cam.offsetY,
-          groundScreenY: cam.groundScreenY,
-          viewW: cam.viewW,
-          viewH: cam.viewH,
-          coversWorld: cam.offsetX <= 0 && cam.offsetX + cam.worldW * cam.scale >= cam.viewW - 1e-6,
+          scale: xf.scale,
+          offsetX: xf.offsetX,
+          offsetY: xf.offsetY,
+          groundScreenY: xf.offsetY + rt.groundY * xf.scale,
+          groundBandY: battleGroundBandY(xf, rt.groundY),
+          viewW: RUN_BATTLE_VIEW_W,
+          viewH: RUN_BATTLE_VIEW_H,
+          bandW: RUN_STAGE_BAND.w,
+          bandH: RUN_STAGE_BAND.h,
+          cropX: xf.cropX,
+          cropY: xf.cropY,
+          visibleWorldMinX: vis.minX,
+          visibleWorldMaxX: vis.maxX,
+          visibleWorldWidth: vis.width,
+          showsWholeWorld: vis.width >= rt.arenaWidth,
         },
         player: battleEntity(aBox),
         enemy: battleEntity(bBox),

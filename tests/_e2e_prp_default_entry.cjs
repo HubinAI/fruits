@@ -375,6 +375,9 @@ async function assertFullFlow(page, tag, dpr) {
       lastSteps: 0,
       firstGapPx: null,
       lastGapPx: 0,
+      scaleMin: Infinity,
+      scaleMax: 0,
+      outOfBand: 0,
     };
     const t0 = performance.now();
     while (performance.now() - t0 < 5000) {
@@ -391,6 +394,13 @@ async function assertFullFlow(page, tag, dpr) {
         acc.lastSteps = w.steps;
         const v = `${w.camera.scale}|${w.camera.offsetX}`;
         if (!acc.camVariants.includes(v)) acc.camVariants.push(v);
+        acc.scaleMin = Math.min(acc.scaleMin, w.camera.scale);
+        acc.scaleMax = Math.max(acc.scaleMax, w.camera.scale);
+        if (p.stage.player && p.stage.enemy) {
+          const a = p.stage.player.bounds;
+          const b = p.stage.enemy.bounds;
+          if (a.x < -2 || a.x + a.w > 392 || b.x < -2 || b.x + b.w > 392) acc.outOfBand += 1;
+        }
       }
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -411,18 +421,29 @@ async function assertFullFlow(page, tag, dpr) {
     `gap ${round2(win.firstGapPx)} → ${round2(win.lastGapPx)}（${win.samples} 次采样 · steps→${win.lastSteps}）`,
   );
   /*
-    PRP-F1 必改 3/5①：相机固定远摄（390/1600，完整框住世界）且窗口内零变化；
-    窗口中炮弹**真的在飞**（真实弹丸计数 > 0，不是贴脸扣血）。
+    PRP-R5 必改 1/2/4：相机 = **正式 battle 相机链**（reframe → battleCam → applyBattleFollow）
+    + PRP 的 viewport adapter。窗口内必须看到「镜头真的跟随 + 真的变焦」：
+    scale 取值不再是单一常数、可见世界宽 < 世界宽（不再是固定全世界远摄），
+    且两车全程完整落在舞台带内。窗口中炮弹**真的在飞**（真实弹丸计数 > 0，不是贴脸扣血）。
   */
+  const wMid = pMid.battleWorld;
   log(
-    !!pMid.battleWorld &&
-      Math.abs(pMid.battleWorld.camera.scale - 390 / 1600) < 1e-9 &&
-      pMid.battleWorld.camera.offsetX === 0 &&
-      win.camVariants.length === 1,
-    `[${tag}] F5b 必改 3：固定远摄相机（scale = 390/1600，不做追踪 / 不做动态 zoom）`,
-    pMid.battleWorld
-      ? `scale=${pMid.battleWorld.camera.scale} offsetX=${pMid.battleWorld.camera.offsetX} 窗口内取值种类=${win.camVariants.length}`
+    !!wMid &&
+      wMid.camera.cropX === 56 &&
+      wMid.camera.cropY === 28 &&
+      wMid.camera.bandW === 390 &&
+      wMid.camera.bandH === 302 &&
+      Math.abs(wMid.camera.scale - 390 / 1600) > 1e-6 &&
+      wMid.camera.showsWholeWorld === false,
+    `[${tag}] F5b 必改 1/2：viewport adapter + 不再是固定远摄（可见世界宽 < 世界宽）`,
+    wMid
+      ? `view=${wMid.camera.viewW}×${wMid.camera.viewH} crop=${wMid.camera.cropX},${wMid.camera.cropY} scale=${round2(wMid.camera.scale)} 可见世界宽=${Math.round(wMid.camera.visibleWorldWidth)}/${wMid.world.width}`
       : '',
+  );
+  log(
+    win.camVariants.length > 1 && win.scaleMax / win.scaleMin > 1.2 && win.outOfBand === 0,
+    `[${tag}] F5e 必改 4/5：镜头真的跟随+变焦，且变焦全程两车完整在舞台带内`,
+    `scale ${round2(win.scaleMin)}→${round2(win.scaleMax)}（${round2(win.scaleMax / win.scaleMin)}×）· 窗口内相机取值种类=${win.camVariants.length} · 越界 ${win.outOfBand} 次`,
   );
   log(
     win.maxProjectiles > 0 && win.projSamples > 0,

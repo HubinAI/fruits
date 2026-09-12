@@ -58,9 +58,9 @@ const PALETTE = {
  * - body_watermelon.png：主色团 RGB 近似 48..63 / 128..143 / 48..63（约占不透明像素 60%）
  * - body_banana.png：主色团 RGB 近似 240..255 / 192..207 / 48..63（约占 46%）
  * PRP-R3 必改 2 的判据：「战斗主体是真实车辆视觉」= 画面上真的存在这些色族的像素（纯色矩形做不到）。
- * ⚠️ 必须用 `SPRITE_COLOR_TOL` 做色族匹配，不能要求精确相等：PRP-F1 的固定远摄把车辆缩到
- *    ~50×19 逻辑 px，重采样后**精确色几乎不残留**（实测香蕉精确命中仅 5px）。色族匹配仍保持
- *   两车互斥（实测交叉命中恒为 0），故判据强度不受影响。
+ * ⚠️ 必须用 `SPRITE_COLOR_TOL` 做色族匹配，不能要求精确相等：车辆 sprite 被缩放绘制，
+ *    重采样后**精确色几乎不残留**（实测香蕉精确命中仅 5px）。色族匹配仍保持
+ *    两车互斥（实测交叉命中恒为 0），故判据强度不受影响。
  * ⚠️ 只在 dpr=1 断言（dpr≠1 时画布被浏览器重采样，色值不可复现）。
  */
 const SPRITE_COLORS = {
@@ -69,8 +69,8 @@ const SPRITE_COLORS = {
 };
 
 /**
- * PRP-F1：相机是固定远摄 scale = 390/1600 = 0.24375，车辆 sprite 被缩到 ~50×19 逻辑 px，
- * 重采样后**精确色几乎不残留**（实测香蕉精确命中仅 5px）→ 必须带一个小容差。
+ * 车辆 sprite 特征色的容差。缩放绘制的 sprite 重采样后**精确色几乎不残留**
+ * （实测香蕉精确命中仅 5px）→ 必须带一个小容差。
  * 容差 16 仍能保持两车特征色互斥（实测交叉命中恒为 0），故不影响判据强度。
  */
 const SPRITE_COLOR_TOL = 16;
@@ -591,14 +591,46 @@ async function runViewport(browser, vp) {
     `playerLeftOfEnemy=${p.stage.playerLeftOfEnemy} gap=${p.stage.minGapPx}`,
   );
   /*
-    PRP-F1 必改 3：相机是**固定远摄**（scale = 舞台带宽 / 正式世界宽 = 390/1600 = 0.24375），
-    只由「舞台带 + 正式 arena」决定，与车辆位置无关；从此帧到战斗结束都不变。
+    PRP-R5 必改 1/2：相机 = **正式 battle 相机链**（reframe → battleCam → applyBattleFollow），
+    PRP 只做 viewport adapter（离屏视口 = 舞台带 + 正式 inset 56/28，合成时裁安全区）。
+    判据一：**不再是**固定全世界远摄 —— 可见世界宽 < 世界宽、可见区就是舞台带、裁剪原点 = 56/28。
+    判据二：开局沿用正式三段取景的「远端段」—— A∪B 外廓占舞台宽 82~88%，且两车完整在带内。
   */
   const cam0 = p.battleWorld && p.battleWorld.camera;
+  const b0 = p.battleWorld && p.battleWorld.world;
   log(
-    !!cam0 && Math.abs(cam0.scale - 390 / 1600) < 1e-9 && cam0.offsetX === 0 && cam0.coversWorld === true,
-    `[${tag}] R21 必改 3：固定远摄相机（scale = 390/1600，完整框住 0..1600）`,
-    cam0 ? `scale=${cam0.scale} offsetX=${cam0.offsetX} groundY=${round2(cam0.groundScreenY)} coversWorld=${cam0.coversWorld}` : 'no camera',
+    !!cam0 &&
+      cam0.cropX === 56 &&
+      cam0.cropY === 28 &&
+      cam0.bandW === 390 &&
+      cam0.bandH === 302 &&
+      cam0.viewW === 502 &&
+      cam0.viewH === 358,
+    `[${tag}] R21 必改 1/2：viewport adapter（离屏 502×358 → 安全区 = 舞台带 390×302，裁 56/28）`,
+    cam0 ? `view=${cam0.viewW}×${cam0.viewH} band=${cam0.bandW}×${cam0.bandH} crop=${cam0.cropX},${cam0.cropY}` : 'no camera',
+  );
+  const span0 = p.stage.enemy && p.stage.player
+    ? (p.stage.enemy.bounds.x + p.stage.enemy.bounds.w - p.stage.player.bounds.x) / 390
+    : NaN;
+  log(
+    !!cam0 && !!b0 &&
+      Math.abs(cam0.scale - 390 / 1600) > 1e-6 &&
+      cam0.visibleWorldWidth < b0.width &&
+      cam0.showsWholeWorld === false &&
+      span0 >= 0.8 && span0 <= 0.9,
+    `[${tag}] R21b 必改 1：不再是固定全世界远摄（可见世界宽 < 世界宽）；开局 = 正式远端段 span 82~88%`,
+    cam0 ? `scale=${round2(cam0.scale)}（旧固定=${round2(390 / 1600)}）可见世界宽=${Math.round(cam0.visibleWorldWidth)}/${b0 ? b0.width : '?'} span=${(span0 * 100).toFixed(1)}%` : 'no camera',
+  );
+  log(
+    !!p.stage.player && !!p.stage.enemy &&
+      p.stage.player.bounds.x >= -1 &&
+      p.stage.player.bounds.x + p.stage.player.bounds.w <= 391 &&
+      p.stage.enemy.bounds.x >= -1 &&
+      p.stage.enemy.bounds.x + p.stage.enemy.bounds.w <= 391,
+    `[${tag}] R21c 必改 2：开局两车都完整落在舞台带内（正式取景的「完整入画」语义）`,
+    p.stage.player && p.stage.enemy
+      ? `A=[${round2(p.stage.player.bounds.x)}, ${round2(p.stage.player.bounds.x + p.stage.player.bounds.w)}] B=[${round2(p.stage.enemy.bounds.x)}, ${round2(p.stage.enemy.bounds.x + p.stage.enemy.bounds.w)}]`
+      : 'no bounds',
   );
   const sBattle = await pixelStats(page);
   ledgerCheck(tag, 'R22 BATTLE 开局', sBattle, 'BATTLE', vp.dpr);
@@ -631,6 +663,14 @@ async function runViewport(browser, vp) {
       camVariants: [],
       lastSteps: 0,
       lastGapWorld: 0,
+      scaleMin: Infinity,
+      scaleMax: 0,
+      visWMin: Infinity,
+      spanMin: Infinity,
+      spanMax: 0,
+      outOfBand: 0,
+      groundMin: Infinity,
+      groundMax: -Infinity,
     };
     const t0 = performance.now();
     while (performance.now() - t0 < 5000) {
@@ -646,6 +686,18 @@ async function runViewport(browser, vp) {
         acc.lastGapWorld = w.gapWorld;
         const v = `${w.camera.scale}|${w.camera.offsetX}|${w.camera.offsetY}`;
         if (!acc.camVariants.includes(v)) acc.camVariants.push(v);
+        acc.scaleMin = Math.min(acc.scaleMin, w.camera.scale);
+        acc.scaleMax = Math.max(acc.scaleMax, w.camera.scale);
+        acc.visWMin = Math.min(acc.visWMin, w.camera.visibleWorldWidth);
+        acc.groundMin = Math.min(acc.groundMin, w.camera.groundBandY);
+        acc.groundMax = Math.max(acc.groundMax, w.camera.groundBandY);
+        if (p.stage.player && p.stage.enemy) {
+          const a = p.stage.player.bounds;
+          const b = p.stage.enemy.bounds;
+          if (a.x < -2 || a.x + a.w > 392 || b.x < -2 || b.x + b.w > 392) acc.outOfBand += 1;
+          acc.spanMin = Math.min(acc.spanMin, (b.x + b.w - a.x) / 390);
+          acc.spanMax = Math.max(acc.spanMax, (b.x + b.w - a.x) / 390);
+        }
       }
       if (p.battle) {
         acc.minEnemyHp = Math.min(acc.minEnemyHp, p.battle.enemyHp);
@@ -684,14 +736,28 @@ async function runViewport(browser, vp) {
     `窗口内最多 ${win.maxProjectiles} 发在飞 · ${win.projSamples}/${win.samples} 次采样见弹 · steps→${win.lastSteps} gapWorld=${round2(win.lastGapWorld)}`,
   );
   /*
-    PRP-F1 必改 3：相机在整个战斗中**一动不动**（与开局逐字段相同 → 无追踪、无动态 zoom）。
+    PRP-R5 必改 4/5：相机在战斗中**真的跟随 + 真的变焦**（正式三段动态取景 + 正式
+    applyBattleFollow）—— 从「远端段」渐进推近到「接近段/碰撞段」，可见世界宽同步收窄。
+    ❌ PRP-F1 的「整场一动不动」被废除（那正是「物理反馈不可感知」的根因）。
+    同时验证：取景变化**不把车挤出带**（完整入画），地面线保持锚定（不漂移）。
   */
   log(
     !!wMid &&
-      win.camVariants.length === 1 &&
-      win.camVariants[0] === `${cam0.scale}|${cam0.offsetX}|${cam0.offsetY}`,
-    `[${tag}] R24c 必改 3：战斗中相机零变化（无智能追踪 / 无动态 zoom）`,
-    `scale ${round2(cam0.scale)}→${round2(wMid ? wMid.camera.scale : NaN)} offsetX ${cam0.offsetX}→${wMid ? wMid.camera.offsetX : '?'} · 窗口内相机取值种类=${win.camVariants.length}`,
+      win.camVariants.length > 1 &&
+      win.scaleMax / win.scaleMin > 1.2 &&
+      win.visWMin < (b0 ? b0.width : 1600),
+    `[${tag}] R24c 必改 4/5：镜头真的跟随+变焦（不再是固定远摄）`,
+    `scale ${round2(win.scaleMin)}→${round2(win.scaleMax)}（${round2(win.scaleMax / win.scaleMin)}×）· 可见世界宽最小 ${Math.round(win.visWMin)} · 窗口内相机取值种类=${win.camVariants.length}`,
+  );
+  log(
+    win.outOfBand === 0 && win.spanMin >= 0.4 && win.spanMax <= 0.95,
+    `[${tag}] R24d 必改 4：变焦全程两车完整在舞台带内（A∪B 外廓占宽 40%~95%）`,
+    `${win.samples} 次采样越界 ${win.outOfBand} 次 · span ${(win.spanMin * 100).toFixed(1)}%~${(win.spanMax * 100).toFixed(1)}%`,
+  );
+  log(
+    win.groundMax - win.groundMin <= 1,
+    `[${tag}] R24e 正式「地面线锚定」：战斗中地面线漂移 ≤1px`,
+    `groundBandY ${round2(win.groundMin)}~${round2(win.groundMax)}（带内 302）`,
   );
 
   /* ----------------------------------------- 6) 自动结束 → RESULT */
@@ -715,6 +781,23 @@ async function runViewport(browser, vp) {
     !!p.battle && p.battle.winner === 'A' && p.battle.endReason === 'hp' && Math.min(p.battle.playerHp, p.battle.enemyHp) <= 0,
     `[${tag}] R27b 必改 5：结局由 HP 判据收束（一方耐久归零）`,
     p.battle ? `hpA=${round2(p.battle.playerHp)} hpB=${round2(p.battle.enemyHp)}` : '',
+  );
+  /*
+    PRP-R5：战斗结束后**取景与战场一起冻结** —— 结束帧在像素与几何上逐帧完全一致
+    （相机不再逐帧微调；两车世界坐标与屏幕 rect 都不变）。间隔 300ms 再取一次快照对比。
+  */
+  const frozenA = JSON.stringify({ p: p.stage.player, e: p.stage.enemy, c: p.battleWorld && p.battleWorld.camera });
+  await page.waitForTimeout(300);
+  const pFrozen = await probeOf(page);
+  const frozenB = JSON.stringify({
+    p: pFrozen.stage.player,
+    e: pFrozen.stage.enemy,
+    c: pFrozen.battleWorld && pFrozen.battleWorld.camera,
+  });
+  log(
+    frozenA === frozenB && pFrozen.phase === 'RESULT',
+    `[${tag}] R27c 结束态冻结：RESULT 期间相机与两车几何逐帧完全一致（战场冻结）`,
+    `player/enemy/camera 300ms 前后 ${frozenA === frozenB ? '完全相同' : '发生变化'}`,
   );
   log(p.actionLabel === '继续' && p.actionEnabled, `[${tag}] R28 RESULT 底部重新出现「继续」`, `${p.actionLabel}/${p.actionEnabled}`);
   const sResult = await pixelStats(page);
