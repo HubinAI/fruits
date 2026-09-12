@@ -21,6 +21,8 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - `git stash` **禁止**；git 异常先跑 `scripts/repo-health.js`。
 - 禁 `reset --hard` / `checkout --` / 删 `.git` / 手改 refs / force-push 已交付。
 - 单功能 commit + push + 核对 local=ref=remote。RC 需 clean HEAD，badge/rc-build.json/runtimeInfo/HEAD 四方一致。
+- ⚠️ 本机 remote-tracking refs **无法落地**（`git fetch` 报 `[new branch]` 但 `.git/refs/remotes/` 恒空）→
+  四路核对以 **`git ls-remote`（真实远端）+ `.git/FETCH_HEAD`** 为权威；push 本身正常；**不要为此改 refs**。
 - Memory 并入功能 commit；**不单独提交 memory**。
 - vitest：cwd 盘符必须大写 `/D/…`（小写 `/d/…` → 模块图双实例 → 持久化测试静默假失败）；
   全量 `--pool=vmForks --maxWorkers=1`。
