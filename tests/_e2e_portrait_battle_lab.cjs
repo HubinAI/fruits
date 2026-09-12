@@ -1,5 +1,5 @@
 /**
- * PBL-F0 / PBL-F1｜竖屏战场实验台 —— 浏览器真实闭环验证。
+ * PBL-F0 / PBL-F1 / PBL-A1 / PBL-G1｜竖屏战场实验台 —— 浏览器真实闭环验证。
  *
  * 手段：真实浏览器（playwright-core / msedge）打开独立产物 dist-portrait-lab/portrait-lab.html，
  *   - 真实鼠标点击（page.click，非 evaluate 直调）
@@ -10,6 +10,11 @@
  * 期望面积常量来自纯模型账本 tests/portraitBattleLabF1.test.ts（F1-R22），
  * 本文件是「浏览器真实渲染 == 纯模型预测」的跨语言交叉核对。
  * 面积语义：部件层绘制在车身层之上 → 重叠区计入部件层，车身层相应减少。
+ *
+ * A1 段（A29~A37）：Arena A 已接入真实俯视物理运行时（live / 零重力 / 四边墙 / 步进 / 无穿透）。
+ * G1 段（G1~G12）：PBL-G1 对照门禁 —— 共享配置审计 + Queue 固定 6 步顺序 + 每步切场零残留；
+ *   ⚠️ Arena B 运行时未实现（PBL-B1 停止条件终止）→ B 步骤在执行层面必须 observed=blocked、
+ *   phase 停在 idle、绝不 Start。G10 断言门禁总体结论为 blocked（不允许谎报 pass）。
  *
  * 用法：
  *   npm run build:portrait-lab
@@ -325,6 +330,109 @@ async function runViewport(browser, vp) {
     JSON.stringify(sZ) === JSON.stringify(s0),
     `[${tag}] A31 Reset 后像素签名回到初始（逐层完全一致）`,
     `初始=${JSON.stringify(s0)} 当前=${JSON.stringify(sZ)}`,
+  );
+
+  // 10.5) PBL-G1 对照门禁：审计 + 固定 6 步顺序 + 切场零残留（一次即可完成的 A/B 对照）
+  const g0 = (await probeOf(page)).gate;
+  log(
+    !!g0 && g0.auditOk === true && g0.auditProblems.length === 0 && g0.auditCombos === 6,
+    `[${tag}] G1 共享配置审计通过（6 组合 · 0 数值差异 · 全部由正式链路独立重算）`,
+    `ok=${g0 && g0.auditOk} combos=${g0 && g0.auditCombos} mismatches=${g0 && g0.auditMismatchCount}`,
+  );
+  log(
+    !!g0 &&
+      g0.allowedDifferences.length === 3 &&
+      g0.allowedDifferences.map((d) => d.kind).sort().join(',') ===
+        'arena-geometry,movement-adapter,physics-interpretation',
+    `[${tag}] G2 允许差异恰好 3 类（集中可枚举）`,
+    `${g0 && g0.allowedDifferences.map((d) => d.kind).join(' + ')}`,
+  );
+  log(
+    !!g0 &&
+      g0.sequence.length === 6 &&
+      g0.sequence.map((s) => s.arena).join('') === 'ABABAB' &&
+      g0.sequence.map((s) => s.index).join('') === '123456',
+    `[${tag}] G3 快速验证顺序 = Queue 的 6 步（A/B 交替）`,
+    `${g0 && g0.sequence.map((s) => s.index + s.arena).join(' ')}`,
+  );
+  log(
+    !!g0 &&
+      g0.sequence.filter((s) => s.planned === 'ready').length === 3 &&
+      g0.sequence.filter((s) => s.planned === 'blocked').length === 3,
+    `[${tag}] G4 步骤可用性由运行时派生：A ×3 ready / B ×3 blocked`,
+    `ready=${g0 && g0.sequence.filter((s) => s.planned === 'ready').length} blocked=${g0 && g0.sequence.filter((s) => s.planned === 'blocked').length}`,
+  );
+  log(
+    !!g0 && g0.arenaAvailable.A === true && g0.arenaAvailable.B === false,
+    `[${tag}] G5 Arena 运行时可用性如实：A 已实现 / B 未实现`,
+    JSON.stringify(g0 && g0.arenaAvailable),
+  );
+
+  const gateExpected = [
+    { arena: 'A', loadout: 'WatermelonHeavyCannon', encounter: 'Chaser', planned: 'ready' },
+    { arena: 'B', loadout: 'WatermelonHeavyCannon', encounter: 'Chaser', planned: 'blocked' },
+    { arena: 'A', loadout: 'BananaChargeHammer', encounter: 'RangedTurret', planned: 'ready' },
+    { arena: 'B', loadout: 'BananaChargeHammer', encounter: 'RangedTurret', planned: 'blocked' },
+    { arena: 'A', loadout: 'BananaChargeHammer', encounter: 'LightSwarm3', planned: 'ready' },
+    { arena: 'B', loadout: 'BananaChargeHammer', encounter: 'LightSwarm3', planned: 'blocked' },
+  ];
+  for (let i = 0; i < gateExpected.length; i++) {
+    const exp = gateExpected[i];
+    await clickBtn(page, 'Gate 下一步');
+    await page.waitForTimeout(exp.planned === 'ready' ? 700 : 100);
+    const pg = await probeOf(page);
+    const g = pg.gate;
+    const st = g.sequence[i];
+    log(
+      pg.arena === exp.arena && pg.loadout === exp.loadout && pg.encounter === exp.encounter && g.cursor === i + 1,
+      `[${tag}] G6.${i + 1} 第 ${i + 1} 步配置精确命中 [${exp.arena}] ${exp.loadout} × ${exp.encounter}`,
+      `arena=${pg.arena} loadout=${pg.loadout} encounter=${pg.encounter} cursor=${g.cursor}`,
+    );
+    log(
+      g.switchResidue.length === 0,
+      `[${tag}] G7.${i + 1} 第 ${i + 1} 步切场后零残留（HP/实体/弹丸/接触/AI/移动/arena）`,
+      `residue=${JSON.stringify(g.switchResidue)}`,
+    );
+    log(
+      st.planned === exp.planned && st.observed === (exp.planned === 'ready' ? 'running' : 'blocked'),
+      `[${tag}] G8.${i + 1} 第 ${i + 1} 步执行结果 = ${exp.planned === 'ready' ? 'RUN' : 'BLK'}（不静默降级）`,
+      `planned=${st.planned} observed=${st.observed}`,
+    );
+    if (exp.planned === 'ready') {
+      log(
+        pg.phase === 'running' && !!pg.arenaA && pg.arenaA.live === true && pg.arenaA.steps > 0,
+        `[${tag}] G9.${i + 1} 第 ${i + 1} 步 Arena A 由真实物理运行时推进`,
+        `live=${pg.arenaA && pg.arenaA.live} steps=${pg.arenaA && pg.arenaA.steps}`,
+      );
+    } else {
+      log(
+        pg.phase === 'idle' && pg.arenaA === null && pg.liveEntities === 0,
+        `[${tag}] G9.${i + 1} 第 ${i + 1} 步 Arena B 未实现 → 不 Start（无伪造对照数据）`,
+        `phase=${pg.phase} arenaA=${pg.arenaA === null ? 'null' : 'set'} entities=${pg.liveEntities}`,
+      );
+    }
+  }
+  const gEnd = (await probeOf(page)).gate;
+  log(
+    gEnd.verdict === 'blocked',
+    `[${tag}] G10 门禁总体结论按实际状态为 blocked（不谎报 pass）`,
+    `verdict=${gEnd.verdict}`,
+  );
+
+  await clickBtn(page, 'Gate 清空');
+  const gClear = (await probeOf(page)).gate;
+  log(gClear.cursor === 0, `[${tag}] G11 「Gate 清空」把游标归零`, `cursor=${gClear.cursor}`);
+
+  await clickBtn(page, 'Gate 下一步');
+  await clickBtn(page, 'Reset');
+  const gAfterReset = await probeOf(page);
+  log(
+    gAfterReset.gate.cursor === 0 &&
+      gAfterReset.gate.switchResidue.length === 0 &&
+      gAfterReset.liveEntities === 0 &&
+      gAfterReset.liveProjectiles === 0,
+    `[${tag}] G12 Reset 后门禁游标归零且无任何残留`,
+    `cursor=${gAfterReset.gate.cursor} entities=${gAfterReset.liveEntities}`,
   );
 
   await ctx.close();

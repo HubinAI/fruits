@@ -27,6 +27,18 @@ import {
   TOPDOWN_ANTI_WEDGE,
   type ArenaAView,
 } from './arenaA';
+import {
+  PBL_ALLOWED_ARENA_DIFFERENCES,
+  PBL_GATE_SEQUENCE,
+  PBL_GATE_SEQUENCE_NOTES,
+  arenaAvailability,
+  auditSharedCombatData,
+  gateResidue,
+  gateStepPlan,
+  gateSummary,
+  type GateResidueObservable,
+  type SharedCombatDataAudit,
+} from './gate';
 import { HUD_BAND_H, LAB_GROUND_Y, stageRect, type LabLayerId, type LayeredRect } from './layout';
 import {
   createPortraitLabState,
@@ -90,6 +102,8 @@ export interface PblProbe {
   readonly layers: Record<LabLayerId, number>;
   /** Arena A 真实运行诊断（当前不是 Arena A 时为 null）。 */
   readonly arenaA: PblArenaAProbe | null;
+  /** PBL-G1 对照门禁诊断（审计 + 6 步验证顺序 + 切场零残留）。 */
+  readonly gate: PblGateProbe;
   readonly camera: { scale: number; offsetX: number; offsetY: number; dpr: number };
   readonly canvas: { backingW: number; backingH: number; cssW: number; cssH: number };
 }
@@ -134,6 +148,43 @@ export interface PblArenaAProbe {
   readonly minPairDistancePx: number;
 }
 
+/** PBL-G1 门禁诊断（全部来自 gate.ts 的真实审计结果，不做任何美化/兜底）。 */
+export interface PblGateProbe {
+  /** 共享配置审计是否通过（Body / HP / Weapon 伤害 / CD / 弹丸 全部由正式链路独立重算比对）。 */
+  readonly auditOk: boolean;
+  readonly auditProblems: readonly string[];
+  readonly auditCombos: number;
+  readonly auditMismatchCount: number;
+  /** 允许差异（集中可枚举；A/B 只允许这三类差异）。 */
+  readonly allowedDifferences: readonly {
+    readonly id: string;
+    readonly kind: string;
+    readonly arenas: readonly string[];
+    readonly files: readonly string[];
+    readonly symbols: readonly string[];
+  }[];
+  /** Queue 必改 2 的 6 步快速验证顺序 + 每步的计划可用性与本 Lab 的实际执行结果。 */
+  readonly sequence: readonly {
+    readonly index: number;
+    readonly arena: string;
+    readonly loadout: string;
+    readonly encounter: string;
+    readonly assumed: readonly string[];
+    readonly planned: string;
+    readonly observed: string;
+    readonly reason: string;
+  }[];
+  readonly notes: readonly string[];
+  /** 已推进到的步数（0 = 未开始；Reset / 清空后归零）。 */
+  readonly cursor: number;
+  /** 最近一次切场（最后一次配置变更）= 0 步时记录的残留项（必须为空）。 */
+  readonly switchResidue: readonly string[];
+  /** 门禁总体结论：blocked = 存在因运行时未实现而无法执行的步骤。 */
+  readonly verdict: string;
+  /** 各 Arena 的运行时可用性（由「运行时是否已落地」派生）。 */
+  readonly arenaAvailable: Record<string, boolean>;
+}
+
 export class PortraitBattleLab {
   private readonly root: HTMLElement;
   private readonly stageWrap: HTMLDivElement;
@@ -162,6 +213,19 @@ export class PortraitBattleLab {
   private arenaAView: ArenaAView | null = null;
   private rafHandle = 0;
   private lastFrameMs = 0;
+  private gatePanel: HTMLDivElement | null = null;
+  private btnGateNext: HTMLButtonElement | null = null;
+  private btnGateClear: HTMLButtonElement | null = null;
+  /** 共享配置审计结果（惰性计算一次并缓存；配置目录是模块常量，无需失效）。 */
+  private gateAudit: SharedCombatDataAudit | null = null;
+  /** 已推进到的步数（Reset / Gate 清空后归零）。 */
+  private gateCursor = 0;
+  /** 每步的实际执行结果（未推进的步骤为 pending）。 */
+  private readonly gateObserved = new Map<number, 'pending' | 'running' | 'blocked'>();
+  /** 最近一次「回到 idle」时观测到的残留（必须为空 → 必改 3）。 */
+  private lastIdleResidue: string[] = [];
+  /** 最近一次 Gate 切场后观测到的残留。 */
+  private gateSwitchResidue: string[] = [];
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
 
@@ -236,16 +300,26 @@ export class PortraitBattleLab {
     mkGroup('Run', (host) => {
       this.btnStart = mkButton(host, 'Start', () => this.apply(start(this.state)));
       this.btnStart.classList.add('pbl-btn-primary');
-      this.btnReset = mkButton(host, 'Reset', () => this.apply(reset(this.state)));
+      this.btnReset = mkButton(host, 'Reset', () => {
+        this.gateClear();
+        this.apply(reset(this.state));
+      });
+    });
+    mkGroup('Gate', (host) => {
+      this.btnGateNext = mkButton(host, 'Gate 下一步', () => this.gateNext());
+      this.btnGateClear = mkButton(host, 'Gate 清空', () => this.gateClear());
     });
 
     this.statusEl.className = 'pbl-status';
+    this.gatePanel = document.createElement('div');
+    this.gatePanel.className = 'pbl-gate';
 
     this.stageWrap.className = 'pbl-stage';
     this.stageWrap.appendChild(this.canvas);
 
     this.root.appendChild(bar);
     this.root.appendChild(this.statusEl);
+    this.root.appendChild(this.gatePanel);
     this.root.appendChild(this.stageWrap);
   }
 
@@ -337,6 +411,115 @@ export class PortraitBattleLab {
     }
   }
 
+  /* ------------------------------------------------------- Gate（PBL-G1） */
+
+  /** 门禁残留可观测量的构造（判据唯一来源 = gate.ts 的 `gateResidue`）。 */
+  private residueObservable(): GateResidueObservable {
+    const isA = this.state.arena === 'A';
+    const v = isA ? this.arenaAView : null;
+    return {
+      phase: this.state.phase,
+      liveEntities: this.state.run.entities.length,
+      liveProjectiles: this.state.run.projectiles.length,
+      arenaA: isA
+        ? {
+            live: this.arenaRuntime !== null,
+            steps: v ? v.steps : 0,
+            shotsFired: v ? v.shotsFired : 0,
+            hits: v ? v.hits : 0,
+          }
+        : null,
+    };
+  }
+
+  /** 缓存共享配置审计（目录是模块常量 → 算一次即可）。 */
+  private gateAuditResult(): SharedCombatDataAudit {
+    if (!this.gateAudit) this.gateAudit = auditSharedCombatData();
+    return this.gateAudit;
+  }
+
+  private gateVerdict(): string {
+    const audit = this.gateAuditResult();
+    return gateSummary(
+      audit.ok,
+      PBL_GATE_SEQUENCE.map((s) => gateStepPlan(s).status),
+    ).verdict;
+  }
+
+  /**
+   * 推进一步（Queue 必改 2）：按固定顺序切换 Arena / Loadout / Encounter ——
+   * 状态机对每次配置变更都强制清场，本方法随即核对**零残留**（必改 3）；
+   * 该 Arena 有真实运行时则 Start，否则判 blocked 且**绝不 Start**（不拿占位舞台冒充对照）。
+   * 审计未通过时拒绝推进。
+   */
+  private gateNext(): void {
+    const audit = this.gateAuditResult();
+    if (!audit.ok) {
+      this.render();
+      return;
+    }
+    if (this.gateCursor >= PBL_GATE_SEQUENCE.length) return;
+    const step = PBL_GATE_SEQUENCE[this.gateCursor]!;
+    const planned = gateStepPlan(step);
+    this.gateCursor += 1;
+
+    this.apply(setArena(this.state, step.arena));
+    this.apply(setLoadout(this.state, step.loadout));
+    this.apply(setEncounter(this.state, step.encounter));
+
+    this.lastIdleResidue = gateResidue(this.residueObservable());
+    this.gateSwitchResidue = [...this.lastIdleResidue];
+
+    this.gateObserved.set(step.index, planned.status === 'ready' ? 'running' : 'blocked');
+    if (planned.status === 'ready') this.apply(start(this.state));
+    this.render();
+  }
+
+  /** 复位门禁游标（Reset 时一并调用）。 */
+  private gateClear(): void {
+    this.gateCursor = 0;
+    this.gateObserved.clear();
+    this.gateSwitchResidue = [];
+    this.render();
+  }
+
+  private syncGatePanel(): void {
+    const el = this.gatePanel;
+    if (!el) return;
+    const audit = this.gateAuditResult();
+    const lines: string[] = [];
+    lines.push(
+      `PBL-G1 对照门禁 · verdict=${this.gateVerdict()} · 审计=${audit.ok ? 'PASS' : 'FAIL'}` +
+        `（共享组合 ${audit.combos.length} · 数值不符 ${audit.combos.reduce((s, c) => s + c.mismatches.length, 0)}）`,
+    );
+    lines.push(
+      `允许差异 ${PBL_ALLOWED_ARENA_DIFFERENCES.length} 类（仅此三类）：` +
+        PBL_ALLOWED_ARENA_DIFFERENCES.map((d) => `${d.kind}[${d.arenas.join('/')}]`).join(' · '),
+    );
+    lines.push(`快速验证顺序（已推进 ${this.gateCursor}/${PBL_GATE_SEQUENCE.length}；BLK = 运行时未实现，未 Start）：`);
+    for (const step of PBL_GATE_SEQUENCE) {
+      const planned = gateStepPlan(step);
+      const observed = this.gateObserved.get(step.index) ?? 'pending';
+      const l = findLoadout(step.loadout);
+      const e = findEncounter(step.encounter);
+      const mark = observed === 'running' ? 'RUN' : observed === 'blocked' ? 'BLK' : '---';
+      lines.push(
+        `  ${mark} ${step.index}. [${step.arena}] ${l ? l.label : step.loadout} × ${e ? e.label : step.encounter}` +
+          ` · planned=${planned.status} observed=${observed}` +
+          (planned.status === 'blocked' ? ' ← Arena 运行时未实现' : ''),
+      );
+    }
+    lines.push(
+      `切场零残留：${this.gateSwitchResidue.length === 0 ? '[] （干净）' : JSON.stringify(this.gateSwitchResidue)}`,
+    );
+    for (const n of PBL_GATE_SEQUENCE_NOTES) lines.push(`注：${n}`);
+    for (const p of audit.problems.slice(0, 3)) lines.push(`审计问题：${p}`);
+    el.textContent = lines.join('\n');
+    el.dataset['verdict'] = this.gateVerdict();
+    el.dataset['auditOk'] = String(audit.ok);
+    el.dataset['cursor'] = String(this.gateCursor);
+  }
+
   /* ------------------------------------------------------------- 状态 */
 
   private apply(nextState: PortraitLabState): void {
@@ -344,6 +527,8 @@ export class PortraitBattleLab {
     const prev = this.state;
     this.state = nextState;
     this.syncRuntime(prev);
+    // 回到 idle（Reset / 切配置）时立刻核对零残留：HP / 实体 / 弹丸 / 接触 / AI / 移动 / arena 状态
+    if (nextState.phase === 'idle') this.lastIdleResidue = gateResidue(this.residueObservable());
     this.render();
   }
 
@@ -410,6 +595,7 @@ export class PortraitBattleLab {
       unavailable: sum.unavailable,
       layers: this.layerCounts(),
       arenaA: this.arenaAProbe(),
+      gate: this.gateProbe(),
       camera: {
         scale: this.vp.scale,
         offsetX: this.vp.offsetX,
@@ -473,6 +659,42 @@ export class PortraitBattleLab {
     };
   }
 
+  /** PBL-G1 门禁诊断（审计结果 + 6 步顺序 + 每步实际结果 + 切场零残留）。 */
+  private gateProbe(): PblGateProbe {
+    const audit = this.gateAuditResult();
+    return {
+      auditOk: audit.ok,
+      auditProblems: audit.problems,
+      auditCombos: audit.combos.length,
+      auditMismatchCount: audit.combos.reduce((s, c) => s + c.mismatches.length, 0) + audit.problems.length,
+      allowedDifferences: PBL_ALLOWED_ARENA_DIFFERENCES.map((d) => ({
+        id: d.id,
+        kind: d.kind,
+        arenas: d.arenas,
+        files: d.files,
+        symbols: d.symbols,
+      })),
+      sequence: PBL_GATE_SEQUENCE.map((step) => {
+        const planned = gateStepPlan(step);
+        return {
+          index: step.index,
+          arena: step.arena,
+          loadout: step.loadout,
+          encounter: step.encounter,
+          assumed: step.assumed,
+          planned: planned.status,
+          observed: this.gateObserved.get(step.index) ?? 'pending',
+          reason: planned.reason,
+        };
+      }),
+      notes: PBL_GATE_SEQUENCE_NOTES,
+      cursor: this.gateCursor,
+      switchResidue: this.gateSwitchResidue,
+      verdict: this.gateVerdict(),
+      arenaAvailable: arenaAvailability(),
+    };
+  }
+
   /* ------------------------------------------------------------- 渲染 */
 
   private render(): void {
@@ -491,6 +713,7 @@ export class PortraitBattleLab {
 
     this.syncStatus();
     this.syncControls();
+    this.syncGatePanel();
   }
 
   private draw(ctx: CanvasRenderingContext2D): void {
@@ -621,5 +844,12 @@ export class PortraitBattleLab {
     const running = this.state.phase === 'running';
     if (this.btnStart) this.btnStart.disabled = running; // running 中 Start 幂等 → 禁用
     if (this.btnReset) this.btnReset.disabled = false;
+    // Gate：审计不过 / 顺序已走完 → 不可再推进；未开始 → 无可清空
+    if (this.btnGateNext) {
+      this.btnGateNext.disabled = !this.gateAuditResult().ok || this.gateCursor >= PBL_GATE_SEQUENCE.length;
+    }
+    if (this.btnGateClear) {
+      this.btnGateClear.disabled = this.gateCursor === 0 && this.gateSwitchResidue.length === 0;
+    }
   }
 }

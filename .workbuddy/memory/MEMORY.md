@@ -8,7 +8,9 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果`
 - Branch `foundation-02-wechat` (no new mainline)；实验分支 `prototype-portrait-battle-lab`（PBL-F0 竖屏实验台，可整块删除）
 - R2.1 (体验 FAIL 基线)=`8fbac75`；memory=`ff6a20d`/`9df1eab`
-- Last delivery: PBL-A1 纵向俯视物理竞技场 A = `2ee47bb`；PBL-B1 **触发停止条件，0 行代码**（见 `交接文档_2026-09-12_PBL-B1-STOP.md`）；主线上一交付 R3 `1bb35d7`
+- Last delivery: PBL-G1 A/B 对照门禁（`gate.ts` + Lab `Gate 下一步` 面板；审计 6 组合 0 差异；
+  6 步顺序 A×3 ready / B×3 blocked；切场零残留）。PBL-A1 = `2ee47bb`；PBL-B1 **触发停止条件 0 行代码**；
+  主线上一交付 R3 `1bb35d7`
 - Details -> archive / daily logs / handoff docs
 
 ## 2. Rules
@@ -89,6 +91,17 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - **未来若重开 B，唯一可行方向 = 放宽「固定竖屏摄像机/不加镜头处理」或「Lab-only 缩小车」——两者都需用户先改边界，不得自行扩大范围。**
 - 技术结论（可省一次调研）：B 的正式侧视链路 Lab 内可直接复用且**无需 Lab-local 驱动适配**（`PlanckWorld({0,10})` + 静态 ground/左右墙 + `settlePlanckVehicleToRestPose` + `drivePlanckVehicle` + `ContactRouter.handlePlanckContact` 真实维护 `wheel.grounded` → motor 门控闭合 + `BehaviorRegistry`）；⚠️ 禁复用 `PlanckArenaRuntime`（无条件建左右 Closing 刺墙 + hazard，**无开关**）。
 
+## 5.6 PBL-G1 A/B 对照门禁（已交付）
+- ⚠️ 前提纠偏：Queue 写「A/B Runtime 已存在」→ **对 B 不成立**（B1 停止，Arena B 只是 F1 占位舞台）。故 G1 的 A/B 对照只对 A 成立。
+- 新增 `src/lab/portraitBattleLab/gate.ts`（纯逻辑，无 DOM/fs）：`PBL_ALLOWED_ARENA_DIFFERENCES`（恰好 3 类：arena-geometry / physics-interpretation / movement-adapter，每类带落点文件+符号）、`auditSharedCombatData()`（6 组合，全部战斗数值用**正式链路独立重算**逐字段比对 → 0 差异）、`PBL_ARENA_RUNTIMES`（**可用性唯一来源**，目前只有 A）、`gateStepPlan()`、`gateResidue()`、`gateSummary()`。
+- 关键设计：**Arena B 的 blocked 是「派生」而非写死** —— 哪天 B 真实现，只需把运行时加进 `PBL_ARENA_RUNTIMES`，blocked→ready 自动生效；blocked 时 `plan=null`（绝不伪造可运行的 B 战斗），Lab 不 Start。
+- Lab：`Gate 下一步`（按 Queue 6 步固定顺序切配置 → 立刻核对零残留 → 有运行时才 Start）/`Gate 清空`；DOM 面板（**必须在 canvas 之外**，否则污染 E2E 分层像素分类）；probe 增 `gate`；Reset 一并清游标。第 5/6 步 Queue 未写 Loadout → 沿用香蕉冲锋锤并在 `assumed` 显式暴露。
+- 守卫：G1-04「arena 键控数值表」登记制（目前仅 `ARENA_PILLAR_H`，新增未登记表即失败）；G1-06 **反向验证**（就地改写 HP/CD/质量必须被抓出，证明审计非空转）；G1-07 共享数据文件 `entities.ts`/`testData.ts` 剥注释后 **0 处 arena 字面量**。
+- 门禁：G1 18/18；Lab targeted 95/95；相关回归 30 files/138；全量 **198 files / 1843 passed**（基线 197/1825 +1 文件 +18）；tsc 0；五路构建 EXIT 0；bundle-clean 三路 PASS；E2E **148/148**（84→148，+64）；repo-health 9/9。正式源码 0 修改。
+
 ## 6. Next action
-- NEXT: PBL-B1 触发停止条件 → **停等用户回执三选项**（B1-A 确认停止 / B1-B 授权放宽镜头边界 / B1-C 授权 Lab-only 缩小车）。若确认停止，序列剩 `PBL-G1`。Do NOT auto-start，不得自行放宽边界。
+- NEXT: PBL-F0→F1→F2→A1→B1(停止)→**G1(已交付)** 序列**全部执行完毕**，用户明令「完成后停止全部开发」→
+  **停等回执**，不得自行开 Build / Roguelike 下一阶段。B1 三选项（B1-A 确认停止 / B1-B 放宽镜头边界 /
+  B1-C Lab-only 缩小车）仍未裁决 —— 只有选 B1-B 或 B1-C 才可能让 Arena B 存在，届时把运行时加进
+  `PBL_ARENA_RUNTIMES` 即自动解除 G1 的 3 个 blocked 步骤。
 - Low-prio: KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01; mobile drive slot (F-GARAGE-TOUCH-ASSEMBLY-R2); strip-scroll no clamp; O1/O2 非阻塞优化项。

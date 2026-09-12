@@ -37,6 +37,14 @@
       .pbl-btn-primary:hover { background: #4a7fe0; }
       .pbl-btn:disabled { opacity: 0.45; cursor: not-allowed; }
       .pbl-status { padding: 6px 12px; font: 12px/1.5 monospace; color: #9aa4b5; background: #12161f; border-bottom: 1px solid #2a3140; }
+      /* PBL-G1 门禁面板：纯 DOM 文本，位于 canvas 之外 → 对像素分类零影响 */
+      .pbl-gate {
+        padding: 6px 12px; font: 11px/1.45 monospace; color: #b9c2d2;
+        background: #0f141c; border-bottom: 1px solid #2a3140;
+        white-space: pre; overflow: auto; max-height: 32vh; flex-shrink: 0;
+      }
+      .pbl-gate[data-verdict='blocked'] { color: #ffd35a; }
+      .pbl-gate[data-verdict='fail'] { color: #ff6b5e; }
       .pbl-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
       .pbl-stage canvas { position: absolute; }
     </style>
