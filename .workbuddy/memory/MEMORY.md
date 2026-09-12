@@ -9,7 +9,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 主线 `foundation-02-wechat`（上一交付 R3 `1bb35d7`）；实验分支 `prototype-portrait-battle-lab`（可整块删除）
 - 原型正式名 **PRP｜Portrait Run Prototype**（PBL 旧名仅存 Debug Lab）
 - PRP 链尾（全链见 daily log）：`9d689dc` memory → `21ac9b7` R4 调查(0 行代码) →
-  `6fbf275` **PRP-F1** 正式接入旧侧视 Planck 战斗 → **PRP-R5 恢复正式 Battle Camera（见 §5.5）**
+  `6fbf275` **PRP-F1** 正式接入旧侧视 Planck 战斗 → `c44239b` **PRP-R5 恢复正式 Battle Camera（见 §5.5）**
 - 历史事实：PRP-F1 之前 PRP 战斗区**没有物理**（纯演示脚本）；PRP 链**从未触碰正式 gameplay 目录**
   （PRP-R5 后连 `src/render` 也 0 改动——相机复用靠 PRP 侧 viewport adapter）。
 
@@ -134,7 +134,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
   五路构建 + `repo-health` 全 EXIT 0；E2E Run Page（4 视口）**267/267**、E2E 默认入口 **77/77**（复跑两次全绿）。
 
 ## 6. Next action
-- **PRP-R5 已交付并停等**（单功能 commit + push，见 §1 链尾）。
+- **PRP-R5 已交付并停等**（`c44239b`，单功能 commit + push，三路 SHA 四方一致，见 §1 链尾）。
 - **待用户裁决（真人录屏）**：adapter 口径开局车宽 69·84px / 峰值 172·190px 是否达到「物理可感知」。
   若仍偏小 → 候选（均需重新授权）：调大 `RUN_BATTLE_VIEW_INSET`（视口更宽 → scale 更大，代价是裁切）或分段取景。
   **禁止**在无授权时新增 PRP 专属动态 zoom / 镜头震动 / Kill zoom——**恢复旧模式，不发明新模式**。
