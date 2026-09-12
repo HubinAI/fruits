@@ -52,7 +52,11 @@ import {
   rectsArea,
   stageRect,
 } from '../src/lab/portraitBattleLab/layout';
-import { bodyOffsetBoxes } from '../src/lab/portraitBattleLab/scene';
+import { bodyOffsetBoxes, buildScene } from '../src/lab/portraitBattleLab/scene';
+import { arenaAScene } from '../src/lab/portraitBattleLab/arenaScene';
+import { ArenaARuntime } from '../src/lab/portraitBattleLab/arenaA';
+import { buildSpawnPlan } from '../src/lab/portraitBattleLab/entities';
+import { paintedAreas } from '../src/lab/portraitBattleLab/layout';
 import { PlayerViewportTransform } from '../src/platform/playerViewport';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -300,11 +304,14 @@ describe('PBL-F0｜固定摄像机复用正式共享契约（竖屏逻辑尺寸�
 
 describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路径）', () => {
   /**
-   * PBL-F1 起，Lab 必须**只读引用**正式内容库来建立 A/B 共用数据，
-   * 因此守卫从「禁止一切正式 import」收紧为「白名单 + 反单向」：
-   *   1) 反向硬约束（最关键）：正式源码 / 正式入口 / 正式构建配置 0 引用本实验台；
-   *   2) 正向白名单：只能 import 下列**纯数据 / 纯函数**模块；
-   *   3) 显式禁止 Runtime / DOM / 平台 / 物理 / 渲染 / UI 模块。
+   * PBL-F1 起，Lab 必须**只读引用**正式内容库来建立 A/B 共用数据；
+   * PBL-A1 起，Arena A 必须复用**共享 Battle Foundation**（F2 的真实多实体碰撞 +
+   * 实例级伤害路由 + 正式武器行为链）与 Planck 物理原语 —— 否则只能自造代理碰撞体 /
+   * 第二套物理语义，那是 Queue 明令禁止的。因此守卫从「禁止一切正式 import」收紧为
+   * 「**显式枚举的白名单** + 反单向」，白名单只列到具体模块（不允许整目录通配），
+   * 且下列正式玩法 Runtime / 渲染 / UI / 平台 / 开发工具**永远禁止**：
+   *   planckBattleOrchestrator / planckMovement / playerGameRuntime / canvasPlayerUIHost /
+   *   webDomPlayerUIHost / garage* / fusion* / render* / ui* / dev* / platform 引导。
    */
   const ALLOWED_RELATIVE_IMPORTS = new Set([
     '../buildEditorModel', // Lab 既有纯模型（BuildDraft / EMPTY_SLOT）
@@ -314,10 +321,28 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
     '../../core/types', // 仅类型
     '../../player/opponentPool', // 只读对手模板数据（PBL-F1）
     '../../platform/playerViewport', // 纯坐标契约（PBL-F0）
+    // ---- PBL-A1：共享 Battle Foundation（真实 1vN 复用的最小必要集，逐个枚举）----
+    '../../battle/planckVehicleAssembly', // 真实车辆装配（含 F2 的 collision policy）
+    '../../battle/contactRouter', // 实例级接触路由（F2）
+    '../../battle/damageResolver', // 真实伤害结算
+    '../../battle/combatEvents', // 事件总线（仅类型 + 纯实现）
+    '../../battle/behaviorRuntime', // 行为运行时接口（仅类型）
+    '../../battle/behaviorRegistry', // 正式武器 / 辅助行为工厂
+    // ---- PBL-A1：Planck 物理原语（俯视世界，不做第二套物理）----
+    '../../physics/planckWorld',
+    '../../physics/units',
   ]);
 
   const FORBIDDEN_RELATIVE =
-    /^\.\.\/\.\.\/(battle|game|render|ui|presentation|physics|dev|platform\/(?!playerViewport))|^\.\.\/\.\.\/(main|platform\/bootstrap)/;
+    /^\.\.\/\.\.\/(game|render|ui|presentation|dev|platform\/(?!playerViewport))|^\.\.\/\.\.\/(main|platform\/bootstrap)/;
+
+  /** 即便落在允许目录内，也不得被 Lab 引用的正式玩法 / 侧视驱动模块（A1 起显式钉死）。 */
+  const FORBIDDEN_MODULES = [
+    '../../battle/planckBattleOrchestrator',
+    '../../battle/planckMovement',
+    '../../battle/vehicleAssembly',
+    '../../battle/battleHost',
+  ];
 
   function labSourceFiles(): string[] {
     return readdirSync(LAB_DIR).filter((f) => f.endsWith('.ts'));
@@ -341,11 +366,58 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
         if (spec.startsWith('./')) continue; // Lab 内部互相引用
         seen.add(spec);
         expect(FORBIDDEN_RELATIVE.test(spec), `${f} 不得 import "${spec}"`).toBe(false);
+        expect(
+          FORBIDDEN_MODULES.includes(spec),
+          `${f} 不得 import 正式玩法 / 侧视驱动模块 "${spec}"`,
+        ).toBe(false);
         expect(ALLOWED_RELATIVE_IMPORTS.has(spec), `${f} import "${spec}" 不在白名单内`).toBe(true);
       }
     }
     // 白名单必须真被用到（防止守卫写成空转）
     expect(seen.size).toBeGreaterThan(0);
+    // 白名单条目必须全部命中（防止成为「看起来宽松」的死配置）
+    for (const allowed of ALLOWED_RELATIVE_IMPORTS) {
+      if (allowed.startsWith('../') && !allowed.startsWith('../../')) continue; // Lab 内部模块名不参与
+      expect(seen.has(allowed), `白名单条目 "${allowed}" 从未被任何 Lab 文件引用`).toBe(true);
+    }
+  });
+
+  it('R22a-2 PBL-A1：Arena A 不得调用正式侧视驱动（不伪造 wheel-ground grounded）', () => {
+    // 必须先剥掉注释：本文件的注释里**刻意**写着「不调用 drivePlanckVehicle / 不 setPosition」，
+    // 直接做字符串匹配会被自家注释骗过（守卫必须能扛住这种自指陷阱）。
+    const raw = readFileSync(join(LAB_DIR, 'arenaA.ts'), 'utf8');
+    const code = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    // 正式侧视驱动与 1v1 编排器都不得出现在 Arena A 的可执行代码中
+    expect(code.includes('drivePlanckVehicle')).toBe(false);
+    expect(code.includes('PlanckBattleOrchestrator')).toBe(false);
+    expect(code.includes('planckBattleOrchestrator')).toBe(false);
+    // 不得写速度 / 位置状态（驱动只能来自真实冲量）
+    expect(code.includes('setLinearVelocity')).toBe(false);
+    expect(code.includes('setAngularVelocity')).toBe(false);
+    expect(code.includes('grounded')).toBe(false);
+    // setPosition 只允许出现在「出生定位」辅助函数里（唯一一次），不得用于运行期移动
+    expect(code.split('setPosition(').length - 1).toBe(1);
+    expect(code.includes('function translateVehicle(')).toBe(true);
+    // 注释剥除不能把整个文件削空（防止正则写错导致守卫空转）
+    expect(code.length).toBeGreaterThan(raw.length * 0.5);
+  });
+
+  it('R22a-3 PBL-A1：Lab 的 Arena A 场景必须来自真实物理快照（arenaScene），且与占位舞台可区分', () => {
+    const lab = readFileSync(join(LAB_DIR, 'lab.ts'), 'utf8');
+    // 接线：Lab 必须从 arenaScene 取 Arena A 场景
+    expect(lab.includes("from './arenaScene'")).toBe(true);
+    expect(lab.includes('arenaAScene(')).toBe(true);
+    // 路由：arenaScene 只在 arena === 'A' 时走真实快照（其余 Arena 仍走占位舞台）
+    const routing = readFileSync(join(LAB_DIR, 'arenaScene.ts'), 'utf8');
+    expect(routing.includes("arena === 'A'")).toBe(true);
+    expect(routing.includes('arenaAScene(arenaAView)')).toBe(true);
+    // 两条来源确实不同 → 防止「悄悄换回占位舞台」而外部断言看不出来（Arena A 的 arena 层
+    // 从占位窄带 4200 变成四边实体边界 25200）
+    const plan = buildSpawnPlan('WatermelonHeavyCannon', 'Chaser');
+    const placeholder = paintedAreas(buildScene('A', plan));
+    const real = paintedAreas(arenaAScene(new ArenaARuntime(plan).view()));
+    expect(real.arena).toBe(25200);
+    expect(placeholder.arena).not.toBe(real.arena);
   });
 
   it('R22b 反向硬约束：src/ 下（Lab 目录之外）0 处引用 portraitBattleLab / portrait-lab', () => {

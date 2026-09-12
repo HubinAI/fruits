@@ -30,14 +30,22 @@ const MIME = {
   '.json': 'application/json',
 };
 
-/** 各分层期望像素面积（dpr=1；唯一来源 = tests/portraitBattleLabF1.test.ts F1-R22）。 */
+/**
+ * 各分层期望像素面积（dpr=1，逻辑 px）。
+ *
+ * 唯一来源：
+ *   - `A/...`（Arena A）= PBL-A1 的真实物理快照账本 tests/portraitBattleLabA1.test.ts（A1-24）
+ *     → 四边实体边界墙的真实几何 + 每辆车全部 collider 的真实外接框；
+ *   - `B/...`（Arena B）= PBL-F1 的占位舞台账本 tests/portraitBattleLabF1.test.ts（F1-R22）。
+ * 本文件是「浏览器真实渲染 == 纯模型预测」的跨语言交叉核对。
+ */
 const LEDGER = {
-  'A/WatermelonHeavyCannon/Chaser': { arena: 4200, playerBody: 8360, playerPart: 800, enemyBody: 7618, enemyPart: 1560 },
-  'A/WatermelonHeavyCannon/RangedTurret': { arena: 4200, playerBody: 8360, playerPart: 800, enemyBody: 7790, enemyPart: 1370 },
-  'A/BananaChargeHammer/RangedTurret': { arena: 4200, playerBody: 7798, playerPart: 1560, enemyBody: 7790, enemyPart: 1370 },
+  'A/WatermelonHeavyCannon/Chaser': { arena: 25200, playerBody: 8360, playerPart: 800, enemyBody: 7618, enemyPart: 1560 },
+  'A/WatermelonHeavyCannon/RangedTurret': { arena: 25200, playerBody: 8360, playerPart: 800, enemyBody: 7797, enemyPart: 1363 },
+  'A/BananaChargeHammer/RangedTurret': { arena: 25200, playerBody: 7618, playerPart: 1560, enemyBody: 7797, enemyPart: 1363 },
+  'A/BananaChargeHammer/LightSwarm3': { arena: 25200, playerBody: 7618, playerPart: 1560, enemyBody: 22980, enemyPart: 2160 },
   'B/BananaChargeHammer/RangedTurret': { arena: 5480, playerBody: 7798, playerPart: 1560, enemyBody: 7790, enemyPart: 1370 },
   'B/BananaChargeHammer/LightSwarm3': { arena: 5480, playerBody: 7798, playerPart: 1560, enemyBody: 18060, enemyPart: 11568 },
-  'A/BananaChargeHammer/LightSwarm3': { arena: 4200, playerBody: 7798, playerPart: 1560, enemyBody: 18060, enemyPart: 11568 },
 };
 
 const results = [];
@@ -221,7 +229,7 @@ async function runViewport(browser, vp) {
     '',
   );
 
-  // 8) running 中切换 Arena → 回 idle 并清空实体
+  // 8) running 中切换 Arena → 回 idle 并清空实体（Arena A 的真实运行时同时被释放）
   await clickBtn(page, 'Arena A');
   const pA2 = await probeOf(page);
   log(
@@ -229,12 +237,74 @@ async function runViewport(browser, vp) {
     `[${tag}] A26 running 中切 Arena → 回 idle 且实体 / 弹丸清空`,
     `phase=${pA2.phase} arena=${pA2.arena} entities=${pA2.liveEntities}`,
   );
-  ledgerCheck(tag, 'A27 回到 Arena A 后', await pixelSignature(page), 'A/BananaChargeHammer/LightSwarm3', vp.dpr);
+  log(
+    !!pA2.arenaA && pA2.arenaA.live === false,
+    `[${tag}] A26b 回 idle 后 Arena A 真实运行时已释放（live=false）`,
+    `live=${pA2.arenaA && pA2.arenaA.live}`,
+  );
+  const sIdleA = await pixelSignature(page);
+  ledgerCheck(tag, 'A27 回到 Arena A 后', sIdleA, 'A/BananaChargeHammer/LightSwarm3', vp.dpr);
 
-  // 9) 再次 Start → 新批次（批次号递增）
+  // 9) 再次 Start → 新批次；Arena A 走**真实物理运行时**（PBL-A1）
   await clickBtn(page, 'Start');
   const pR2 = await probeOf(page);
   log(pR2.spawnSerial === 2 && pR2.liveEntities === 4, `[${tag}] A28 重新 Start 得到新批次`, `serial=${pR2.spawnSerial} entities=${pR2.liveEntities}`);
+  const a0 = pR2.arenaA;
+  log(
+    !!a0 && a0.live === true,
+    `[${tag}] A29 Arena A 已接入真实物理运行时（live）`,
+    `live=${a0 && a0.live}`,
+  );
+  log(
+    !!a0 && a0.gravity.x === 0 && a0.gravity.y === 0 && a0.walls.length === 4 && a0.entities.length === 4,
+    `[${tag}] A30 俯视场：零重力 + 四边实体边界 + 1v3 真实实体`,
+    `gravity=${JSON.stringify(a0 && a0.gravity)} walls=${a0 && a0.walls.length} entities=${a0 && a0.entities.length}`,
+  );
+  log(
+    !!a0 && a0.wallRestitution > 0 && a0.wallRestitution <= 0.1 && !!a0.antiWedge,
+    `[${tag}] A31 边界低反弹 + Lab-local 脱困启用`,
+    `restitution=${a0 && a0.wallRestitution} antiWedge=${!!(a0 && a0.antiWedge)}`,
+  );
+  await page.waitForTimeout(700);
+  const pR3 = await probeOf(page);
+  const sRunA = await pixelSignature(page);
+  log(
+    !!pR3.arenaA && pR3.arenaA.live === true && pR3.arenaA.steps > 0,
+    `[${tag}] A32 真实物理步进（steps 随 rAF 递增）`,
+    `steps=${a0.steps}→${pR3.arenaA && pR3.arenaA.steps}`,
+  );
+  const moved = Math.hypot(
+    pR3.arenaA.entities[0].x - a0.entities[0].x,
+    pR3.arenaA.entities[0].y - a0.entities[0].y,
+  );
+  log(moved > 5, `[${tag}] A33 实体真实位移（全自动即时战斗，非静止摆放）`, `moved=${moved.toFixed(1)}px`);
+  log(
+    !!pR3.arenaA && pR3.arenaA.worstEntityOverlapDepthPx <= 0,
+    `[${tag}] A34 真实几何无穿透（整车 collider 判定）`,
+    `worstOverlapDepth=${pR3.arenaA && pR3.arenaA.worstEntityOverlapDepthPx}`,
+  );
+  log(
+    JSON.stringify(sRunA) !== JSON.stringify(sIdleA),
+    `[${tag}] A35 渲染跟随真实物理（舞台几何随时间真实变化）`,
+    '',
+  );
+
+  // 9.5) Arena A 远程交战：真实开火（西瓜重炮 + 远程炮台）
+  await clickBtn(page, '西瓜重炮');
+  await clickBtn(page, '远程炮台');
+  await clickBtn(page, 'Start');
+  await page.waitForTimeout(1500);
+  const pFire = await probeOf(page);
+  log(
+    !!pFire.arenaA && pFire.arenaA.shotsFired > 0,
+    `[${tag}] A36 全自动即时战斗：Arena A 真实开火`,
+    `shots=${pFire.arenaA && pFire.arenaA.shotsFired} steps=${pFire.arenaA && pFire.arenaA.steps}`,
+  );
+  log(
+    !!pFire.arenaA && pFire.arenaA.entities.length === 2 && pFire.arenaA.live === true,
+    `[${tag}] A37 换配置后 Arena A 运行时按新组合重建（1v1）`,
+    `entities=${pFire.arenaA && pFire.arenaA.entities.length}`,
+  );
 
   // 10) Reset → 回默认 + 彻底清空 + 像素签名回到初始
   await clickBtn(page, 'Reset');

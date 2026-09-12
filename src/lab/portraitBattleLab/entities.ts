@@ -15,7 +15,7 @@ import { registry } from '../../core/content';
 import { buildSnapshotFromDraft, type BuildDraft } from '../buildEditorModel';
 import { resolveSnapshot, type ResolvedMovement, type ResolvedFunctional } from '../../core/buildSnapshot';
 import { validateSnapshot } from '../../core/buildValidator';
-import type { BodyDef, FunctionalPartDef } from '../../core/types';
+import type { BodyDef, BuildSnapshot, FunctionalPartDef } from '../../core/types';
 import { findEncounter, findLoadout } from './testData';
 import type { LabEncounterId, LabLoadoutId } from './constants';
 
@@ -82,6 +82,13 @@ export interface SpawnedEntity {
   readonly drive: 'forward' | 'stationary';
   readonly movements: readonly SpawnedMovement[];
   readonly functionals: readonly SpawnedFunctional[];
+  /**
+   * PBL-A1：正式 `BuildSnapshot`（经正式 `buildSnapshotFromDraft` 产出）。
+   * 真实 Arena Runtime 需要用它 + 正式 `resolveSnapshot` 装配真实车辆；
+   * 它是「正式链路产物」而非 Lab 自造数据，且**不进入 baseKey**
+   * （A/B 共用指纹不受影响，见 entityBaseKey）。
+   */
+  readonly snapshot: BuildSnapshot;
 }
 
 export interface SpawnPlan {
@@ -197,6 +204,7 @@ function resolveEntity(
     drive: draft.drive === 'stationary' ? 'stationary' : 'forward',
     movements: resolved.movements.map(toMovement),
     functionals: resolved.functionals.map(toFunctional),
+    snapshot,
   };
 }
 

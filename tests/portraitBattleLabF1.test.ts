@@ -380,7 +380,7 @@ describe('PBL-F1｜像素面积账本（E2E 浏览器硬编码期望值的唯一
     }
   });
 
-  it('F1-R22 面积账本与 E2E 期望常量一致', () => {
+  it('F1-R22 占位舞台面积账本（纯模型；Arena A 的 Lab 场景自 A1 起改由 arenaScene.ts 提供）', () => {
     const areas = (arena: 'A' | 'B', loadout: string, encounter: string) =>
       paintedAreas(buildScene(arena, buildSpawnPlan(loadout, encounter)));
 

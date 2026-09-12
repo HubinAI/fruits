@@ -8,7 +8,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果`
 - Branch `foundation-02-wechat` (no new mainline)；实验分支 `prototype-portrait-battle-lab`（PBL-F0 竖屏实验台，可整块删除）
 - R2.1 (体验 FAIL 基线)=`8fbac75`；memory=`ff6a20d`/`9df1eab`
-- Last delivery: PBL-F1 共享 Loadout/Encounter + Spawn（见同日交接文档）；主线上一交付 R3 `1bb35d7`
+- Last delivery: PBL-A1 纵向俯视物理竞技场 A（见 `2026-09-12.md` 与同日交接文档）；主线上一交付 R3 `1bb35d7`
 - Details -> archive / daily logs / handoff docs
 
 ## 2. Rules
@@ -74,6 +74,14 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 边界（诚实）：Matter 路径 `vehicleAssembly.ts` 的同类硬编码**未改**（生产/微信走 Planck；Matter 无多实体消费者）；`PlanckBattleOrchestrator` 未改造仍严格 1v1，多实体装配由 Lab/测试侧组合 `PlanckWorld + createPlanckVehicle + ContactRouter`。
 - ⚠️ 全量 vitest 首跑 `garageFusionResultInteractionR22.test.ts` 9 处 5s 超时 = `vmForks + maxWorkers=1` 负载抖动（该文件与本次改动无引用路径；单跑 11/11、全量重跑全绿），**非回归**；vitest 未设 testTimeout（默认 5s）。
 
+## 5.5 PBL-A1 纵向俯视物理竞技场 A（已交付）
+- 全部在 Lab 目录内，**正式代码 0 修改**：`arenaA.ts`（新，1136 行：空间/俯视驱动/脱困/真实几何 SAT/运行时）、`arenaScene.ts`（新，真实快照→分层矩形）、`tests/portraitBattleLabA1.test.ts`（新，24 用例）；改 `lab.ts`（running 时长驻真实运行时 + rAF 推进 + probe）、`entities.ts`（暴露 `snapshot`）、`scene.ts`（注释：A 分支已非 Lab 场景来源）。
+- 空间：`ARENA_A_BOUNDS={minX:12, minY:152, maxX:378, maxY:812}`（左/右**让出墙厚 12**、顶墙在 HUD 带下留 `ARENA_A_HUD_CLEARANCE=8`）、零重力、四边静态墙 `restitution 0.05`、hazard `{0,0}`、墙无 OwnerTag → 无刺墙/缩圈/边界伤害。**修掉两个真实缺陷**：①墙伸出舞台 2px 被裁 → 渲染像素≠账本；②顶墙落进 HUD 排除区 → arena 像素少 1560。
+- 驱动：**不调用 `drivePlanckVehicle`**、不伪造 `grounded`、不写速度/位置；平移 = 真实 `applyLinearImpulse`（COM、`J=mass×Δv`），转向 = COM±halfWheelbase **等大反向力偶**；能力全由真实轮组 def 推导。实测开火方向 vs 车身前向偏差 0.0021 rad。脱困用**净位移窗口**（瞬时速度检测不触发）。
+- 关键口径：`DamageEvent.target` 仍是 **TeamId**（实例不可从事件读）→ A1-20 用逐帧差分 + 伤害守恒 + 「enemy-2 必须掉血」判据；**Cannon 渲染快照无 `velocity`** → 改用 `weaponFire.worldDirection`；`rotatePlanckVehicle` 是**相对**旋转；`driveTopdownVehicle(throttle=0)` 不施加冲量；`SpawnedEntity` 字段是 `entityId`；穿透容差 16px（实测最深 -12.47 @ 相对速度 18px/step 的首次高速对撞）。
+- 门禁：targeted 77/77（A1 24 + F0 28 + F1 25）；全量 **197 files / 1825 passed**（= F2 基线 1799 + 24 + R22a-2/R22a-3）；tsc 0；五路构建 EXIT 0；bundle-clean wechat/e2e/lab PASS（未跑 rc 模式：需 clean HEAD 的发布流程）；Lab E2E **84/84**（Arena A 账本 `arena=25200`）；repo-health 9/9。
+- 边界：未改 Orchestrator / 正式 1v1 / 平衡数值 / 磁铁·护盾·履带 / Day·Roguelike·Build / Camera 缩放 / 视觉 polish；俯视驱动+边界+hazard=0 全收敛在 `arenaA.ts`（无第二套隐藏物理语义）。
+
 ## 6. Next action
-- NEXT: PBL-F2 已交付 → **停等用户回执**（PBL-A1 是否开工）。A1 现在可走：`PlanckWorld + 共享 assembly/router foundation + Lab-local movement/arena adapter`；仍需自建 4 边静态边界 + 自供 `grounded` 或 topdown 驱动适配。Do NOT auto-start.
+- NEXT: PBL-A1 已交付 → **停等用户回执**（是否开 PBL-B1）。序列剩余：PBL-B1（Arena B）→ PBL-G1。Do NOT auto-start.
 - Low-prio: KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01; mobile drive slot (F-GARAGE-TOUCH-ASSEMBLY-R2); strip-scroll no clamp; O1/O2 非阻塞优化项。

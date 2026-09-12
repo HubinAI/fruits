@@ -10,8 +10,9 @@
  *   - 不绘制轮组（圆形 collider 的像素面积非整数，会破坏像素级精确断言）；
  *     轮组的真实数值仍在 SpawnPlan.movements 里，属 A1/B1 的表现范围。
  *
- * 真实的空间规则（出生点 / 朝向 / 站位 / 缩圈）由 PBL-A1 / PBL-B1 各自决定，
- * 本模块的排布只是「让数据看得见」。
+ * 真实的空间规则（出生点 / 朝向 / 站位）由 PBL-A1 决定：**Arena A 自 PBL-A1 起已改由
+ * `arenaScene.ts` 直接取自真实物理运行时快照**（本模块的 'A' 分支保留为纯模型对照，
+ * 供 F1 账本用例校验「占位几何」本身，不再被 Lab 实际渲染使用）；Arena B 仍走本模块。
  */
 import { registry } from '../../core/content';
 import type { ColliderDef } from '../../core/types';
