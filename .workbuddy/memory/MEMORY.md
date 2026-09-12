@@ -8,7 +8,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果`
 - Branch `foundation-02-wechat` (no new mainline)；实验分支 `prototype-portrait-battle-lab`（PBL-F0 竖屏实验台，可整块删除）
 - R2.1 (体验 FAIL 基线)=`8fbac75`；memory=`ff6a20d`/`9df1eab`
-- Last delivery: PBL-A1 纵向俯视物理竞技场 A（见 `2026-09-12.md` 与同日交接文档）；主线上一交付 R3 `1bb35d7`
+- Last delivery: PBL-A1 纵向俯视物理竞技场 A = `2ee47bb`；PBL-B1 **触发停止条件，0 行代码**（见 `交接文档_2026-09-12_PBL-B1-STOP.md`）；主线上一交付 R3 `1bb35d7`
 - Details -> archive / daily logs / handoff docs
 
 ## 2. Rules
@@ -82,6 +82,13 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 门禁：targeted 77/77（A1 24 + F0 28 + F1 25）；全量 **197 files / 1825 passed**（= F2 基线 1799 + 24 + R22a-2/R22a-3）；tsc 0；五路构建 EXIT 0；bundle-clean wechat/e2e/lab PASS（未跑 rc 模式：需 clean HEAD 的发布流程）；Lab E2E **84/84**（Arena A 账本 `arena=25200`）；repo-health 9/9。
 - 边界：未改 Orchestrator / 正式 1v1 / 平衡数值 / 磁铁·护盾·履带 / Day·Roguelike·Build / Camera 缩放 / 视觉 polish；俯视驱动+边界+hazard=0 全收敛在 `arenaA.ts`（无第二套隐藏物理语义）。
 
+## 5.5 PBL-B1 竖屏侧视 Arena B → **停止条件触发，未实现（0 行代码）**
+- 核心实测：竖屏舞台 390 宽，左右实体边界各 12 → 横向接敌轴仅 **366 px**。共享测试车**整车真实 collider 外接框**：`WatermelonHeavyCannon` 205 / `BananaChargeHammer` 249 / `Chaser`(OPP-16) 249 / `RangedTurret`(OPP-03) 205 / `LightSwarm3` 单车(OPP-14) 207.6。
+- 1v1 总宽 **410–498**（舞台宽 ×1.13–1.36，缺口 44–132）；1v3 总宽 **828–872**（×2.20–2.32）。**最大分离出生仍互嵌 52–140 px；静止解算后残余 43–124；真实战斗 5s 后仍 46–125**（残余 ≈ 总宽 − 可活动区 = 几何硬约束，非解算失败）。即使忽略武器前伸，`Banana/Chaser` 车身本身仍 +18 放不下。
+- 判定：这是「车体放不下」而非「开局贴脸」（后者按 Queue 应保留为结论）。出路全部被禁或无效 → 命中停止条件。
+- **未来若重开 B，唯一可行方向 = 放宽「固定竖屏摄像机/不加镜头处理」或「Lab-only 缩小车」——两者都需用户先改边界，不得自行扩大范围。**
+- 技术结论（可省一次调研）：B 的正式侧视链路 Lab 内可直接复用且**无需 Lab-local 驱动适配**（`PlanckWorld({0,10})` + 静态 ground/左右墙 + `settlePlanckVehicleToRestPose` + `drivePlanckVehicle` + `ContactRouter.handlePlanckContact` 真实维护 `wheel.grounded` → motor 门控闭合 + `BehaviorRegistry`）；⚠️ 禁复用 `PlanckArenaRuntime`（无条件建左右 Closing 刺墙 + hazard，**无开关**）。
+
 ## 6. Next action
-- NEXT: PBL-A1 已交付 → **停等用户回执**（是否开 PBL-B1）。序列剩余：PBL-B1（Arena B）→ PBL-G1。Do NOT auto-start.
+- NEXT: PBL-B1 触发停止条件 → **停等用户回执三选项**（B1-A 确认停止 / B1-B 授权放宽镜头边界 / B1-C 授权 Lab-only 缩小车）。若确认停止，序列剩 `PBL-G1`。Do NOT auto-start，不得自行放宽边界。
 - Low-prio: KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01; mobile drive slot (F-GARAGE-TOUCH-ASSEMBLY-R2); strip-scroll no clamp; O1/O2 非阻塞优化项。
