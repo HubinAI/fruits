@@ -10,7 +10,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 原型正式名 **PRP｜Portrait Run Prototype**（PBL 旧名仅存 Debug Lab）
 - PRP 链尾（全链见 daily log）：`9d689dc` memory → `21ac9b7` R4 调查(0 行代码) →
   `6fbf275` **PRP-F1** 正式接入旧侧视 Planck 战斗 → `c44239b` **PRP-R5** 恢复正式 Battle Camera（见 §5.5）
-  → **PRP-F2** Run-local 强化 overlay（见 §5.6）
+  → **PRP-F2** Run-local 强化 overlay（`ca3fb43`，见 §5.6）
 - 历史事实：PRP-F1 之前 PRP 战斗区**没有物理**（纯演示脚本）；PRP 链**从未触碰正式 gameplay 目录**
   （PRP-R5 后连 `src/render` 也 0 改动——相机复用靠 PRP 侧 viewport adapter）。
 
@@ -135,7 +135,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 门禁：`tsc` 0 错；定向单测 **93/93**；全量 vitest 200/201 文件 · **1891 passed**（唯一失败为 §5.2 已知偶发）；
   五路构建 + `repo-health` 全 EXIT 0；E2E Run Page（4 视口）**267/267**、E2E 默认入口 **77/77**（复跑两次全绿）。
 
-### 5.6 PRP-F2 首个真实强化闭环（已交付，门禁全绿）
+### 5.6 PRP-F2 首个真实强化闭环（已交付 `ca3fb43`，门禁全绿）
 - **Modifier 接缝 = Run-local overlay registry**（唯一；且是**正式既有范式的复用**，不是新造机制）：
   `createRegistry()`（`src/core/content.ts:1012`，已导出、每次全新实例）造副本 → 在其中注册 `run.mod.<id>`
   （以正式 `cannon` 为基准派生）→ 本局快照里武器的 `defId` 重映射过去。
