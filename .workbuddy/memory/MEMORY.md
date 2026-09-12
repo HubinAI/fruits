@@ -9,7 +9,8 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 原型正式改名：**PRP｜Portrait Run Prototype**（本分支上的玩家向原型；PBL 旧名仅存于 Debug Lab）
 - 主线上一交付 R3 `1bb35d7`；R2.1 体验 FAIL 基线 `8fbac75`
 - PRP 链：`01915e2`(skill) → `2ee47bb`(PBL-A1) → `8c27cd0`(PBL-B1 停止) → `7532f98`(PBL-G1) →
-  `e48aa1a`(PRP-F0 Run Page) → `c3c9b0f`(PRP-R1 入口/预览/比例) → PRP-R2 见 §5.7
+  `e48aa1a`(PRP-F0 Run Page) → `c3c9b0f`(PRP-R1 入口/预览/比例) → `15fd7ac`(PRP-R2 启动链) →
+  `0ddd8f1`(R2 memory) → **`b96a56d`(PRP-R3 信息层级重做，当前 HEAD)**
 
 ## 2. Rules
 - 1 Queue = 1 problem；无静默扩范围。先调查/复现，锁定根因后再改码。
@@ -85,10 +86,11 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 ### 5.5 PBL-G1 之后：PRP｜Portrait Run Prototype
 - 方向裁决：旧 Queue `PBL-R1-PORTRAIT-RUN-LAYOUT` **废止**。产品基线 = 「整个单局是一个持续存在的竖屏
   Adventure Run Page；战斗/事件/强化/结果是同一页面的不同状态；战斗保持**玩家左·敌人右的侧视即时物理**」。
-- **PRP-F0-RUN-PAGE-SHELL 已交付**（commit 见 §1）：
+- **PRP-F0-RUN-PAGE-SHELL 已交付**（commit 见 §1）——⚠️ 下方四带比例与 0.6 缩放**已被 §5.8 覆盖**，
+  数值作历史基线保留：
   - 入口 `run-page.html` + `runMain.ts`（玩家页面）；Debug 控制仍只在 `portrait-lab.html`（Debug control area）。
     `vite.portrait-lab.config.ts` 双入口，同一 `dist-portrait-lab/`。
-  - 分层：四带比例见 §5.6（PRP-R1 已按必改 3 调整为 84/414/262/84）。
+  - 分层：四带比例见 §5.6（PRP-R1 已按必改 3 调整为 84/414/262/84；PRP-R3 再改为 80/302/378/84）。
   - 侧视缩放：`runSideViewScale = min(0.6, (390−2×14−28)/(wP+wE))` → 实测恒 **0.6**；玩家固定左边缘 14、敌人固定右边缘 376；
     BATTLE 演出位移 = `sin(πp)×24`（纯表现，不变量：平移不改变任何像素面积 → 可用账本交叉核对）。
   - 五状态：IDLE→EVENT→BATTLE→(自动 2.4s)→RESULT→CHOICE→IDLE。BATTLE 期间**日志零追加**（不刷逐帧伤害），
@@ -144,13 +146,43 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - ⚠️ 排查记录：dev 模式下 `window.__E2E_INTERNAL_HANDLE__` 存在且为 `false`（宏语义），
   全仓无源码赋值、`dist-portrait-lab` 产物**完全不含**该字符串 → 不构成句柄泄漏，不要再当问题排查。
 
+### 5.8 PRP-R3 CAPYBARA-UI-HIERARCHY-REBUILD（已交付 `b96a56d`，**当前页面真相**）
+- 第三次「技术通过 / 真人 FAIL」的修复，这次是**页面信息层级**：删掉 Debug 味（顶部空槽 + 方括号日志 + 红蓝矩形车）。
+- **四带已改**（覆盖 §5.5/§5.6 的旧值，RP-01b 冻结）：顶部 **80** / 舞台 **302** / 日志 **378** / 动作 **84**
+  = 9.4787% / 35.782% / 44.7867% / 9.9526%。
+- **车辆 = 正式 sprite 只读复用**：正式 `visualWorldTransform()`（`battle/battleContract.ts`）+ 正式
+  `assets/visuals/*.png` + Lab-local 最小绘制胶水（复刻 `Renderer.drawVisual` 的
+  `translate(中心)·scale(-1,1)[mirror]·rotate` + `drawImage(img,-w/2,-h/2,w,h)`）。
+  ⚠️ **不复用正式 `Renderer`**（3367 行、强耦合 camera/battleSnapshot/backdrop/特效池 → 属 Queue 点名的
+  「必须大规模修改正式模块」停止条件）。**正式源码 0 修改。**
+- **零纯色占位纪律**：轮组按真实半径程序化画圆（正式 Renderer 亦如此）；其余可视件必须带正式 `visualId`，
+  资源未就绪**整件不画**；缺 `visual` 的部件整件剔除。机器判据 `hasPlaceholderVisual` / probe `allSprites`。
+- 实测冻结：`runSideViewScale = min(0.9, (390−2×10−14)/(wP+wE)) = 0.7722342733188721`；
+  `groundInsetPx=52 → groundY=330`；`baselineLiftPx=2 → baselineY=328`；车辆纵向占舞台带 **62%~82%**。
+- **日志 = 纯自然语言**：`RunLogKind` 六值 + `formatRunLog(e)=>e.text`（恒等）→ 结构上吐不出方括号前缀。
+  实测累积行数：IDLE 2 → EVENT 4 → BATTLE **零追加** → RESULT 7 → CHOICE 不写 → 选后 8。
+- 账本 8 层：`ground 780 / road 19500 / nodeDone 384 / nodeTodo 512 / buffIcon 0→756 / buffChip 0→144 /
+  cardBar 0→3720 / actionBar 990→0`。
+- ⚠️ **sprite 重采样会污染「精确等色面积」断言**：禁用态动作条本应入账，但西瓜车身缩放重采样产生了
+  **1 个抗锯齿像素 `(149,295)` 恰等于 `#2a3341`** → 精确面积不可能冻结，故删除 `actionBarOff` 层；
+  禁用态改用 probe `actionEnabled===false` + 填充色点位采样。**凡画面含缩放位图，纯色账本只能登记远离它的平涂面。**
+- ⚠️ 分带线必须画在下一条带的**首行** `band.y`；画在 `band.y−1` 会吃掉 `road` 最底一行（18889 ≠ 19500）。
+- ⚠️ **E2E 隔离断言空转陷阱**：`dist-portrait-lab/` 因 `emptyOutDir:false`（本机 safe-delete shim 拦截
+  `fs.rmSync`）累积历次构建旧 chunk → 「按前缀挑第一个 chunk」会读到**过期产物**使断言恒真。
+  → 必须从 `run-page.html` 正则取**真实引用**；相应地不可断言「目录零残留」（那是构建配置既知约束）。
+- 门禁：tsc 0｜`portraitRunPage` **34/34**（新增 RP-29~RP-33）｜`portraitBattleLab` **28/28**｜
+  Portrait 定向 6 文件 **139/139**｜全量 **200 files / 1887 passed**｜Run Page E2E **217/217**｜
+  default-entry E2E **65/65**｜Lab E2E **148/148**｜五路构建 EXIT 0｜repo-health 9/9。
+- 边界：不接正式 Roguelike 数值/Day 状态机/随机强化池/永久奖励/经济/存档；车辆只有真实外观 + 待机 +
+  简单左右位移 + BATTLE 演出位移 `sin(πp)×24`；无敌方 AI / 无射击动画 / 无击飞特效。
+
 ## 6. Next action
-- **停等用户回执**（PRP-R2 已提交，禁止自动开 PRP-F1）：
-  1. **唯一启动命令 = `npm run dev`**（自动打开即 PRP 竖屏 Run Page）—— 只给这一条，不给任何 URL；
-  2. 中部舞台车体偏小（显示缩放上限 0.6）是否放宽 → 属 PRP 显示取舍，需用户裁决；
-  3. B1 三选项仍未裁决（B1-A 确认停止 / B1-B 放宽镜头边界 / B1-C Lab-only 缩小车）；
-  4. 俯视 `WEAPON_CONTACT_THRESHOLD=0.5`（`contactRouter.ts:694`）是否单开 Queue。
-- Low-prio backlog: `tests/_e2e_portrait_battle_lab.cjs` 的 `[iso] I2` 用 `readdirSync().find()` 取「第一个 .js」→
-  多入口后命中的是共享 chunk 而非 Lab 自身 chunk（守卫强度弱化，结论未受影响，尚未修）；
+- **停等用户回执**（PRP-R3 已提交 `b96a56d`，**禁止自动开 PRP-F1**）：
+  1. **电脑录屏真人验收 PRP-R3**（技术门禁 ≠ 体验通过）；启动命令仍只有一条：`npm run dev`；
+  2. 历史挂起未裁决：B1 三选项（B1-A 确认停止 / B1-B 放宽镜头边界 / B1-C Lab-only 缩小车）；
+  3. 俯视 `WEAPON_CONTACT_THRESHOLD=0.5`（`contactRouter.ts:694`）是否单开 Queue。
+- Low-prio backlog: ⚠️ `tests/_e2e_portrait_battle_lab.cjs` 的 `[iso] I2` 仍用 `readdirSync().find()` 取
+  「第一个 .js」→ 与 PRP-R3 修掉的**同一类**「隔断断言读到过期 chunk」缺陷（守卫强度弱化，结论未受影响，
+  尚未修；修法已有现成范式：改从 `portrait-lab.html` 正则取真实引用）；
   KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01；mobile drive slot（F-GARAGE-TOUCH-ASSEMBLY-R2）；
   strip-scroll no clamp；O1/O2 非阻塞优化项。
