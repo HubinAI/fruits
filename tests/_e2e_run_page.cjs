@@ -45,9 +45,9 @@ const PALETTE = {
   road: [0x33, 0x2e, 0x42],
   nodeDone: [0xd2, 0x92, 0x2a],
   nodeTodo: [0x46, 0x53, 0x6b],
-  buffIconHeavy: [0xb8, 0x56, 0x2e], // 重型弹头
-  buffIconExplosive: [0xc0, 0x7a, 0x2a], // 爆裂弹
-  buffIconRepair: [0x3f, 0x8f, 0x5a], // 紧急维修
+  buffIconShell: [0xb8, 0x56, 0x2e], // 重型弹头
+  buffIconTwin: [0xc0, 0x7a, 0x2a], // 双联炮
+  buffIconReload: [0x3f, 0x8f, 0x5a], // 快速装填
   buffChip: [0xe6, 0xed, 0xf8],
   cardBar: [0x5f, 0x86, 0xc4],
   actionBar: [0x33, 0x50, 0x7a],
@@ -76,7 +76,16 @@ const SPRITE_COLORS = {
 const SPRITE_COLOR_TOL = 16;
 
 /** 三个强化图标的底色集合（用于「恰好一个在场」判定）。 */
-const BUFF_ICON_COLORS = [PALETTE.buffIconHeavy, PALETTE.buffIconExplosive, PALETTE.buffIconRepair];
+const BUFF_ICON_COLORS = [PALETTE.buffIconShell, PALETTE.buffIconTwin, PALETTE.buffIconReload];
+
+/**
+ * CHOICE 卡片图标盒内「该选项专属图标色」必须出现的**最小像素数**（46×46 = 2116 盒内）。
+ * ⚠️ PRP-F2：图标判据从「图标中心单点采样」升级为「盒内按面积统计」，原因见
+ *    `runPage.ts` 的 `iconRect` 注释 —— 双联炮图标是两根并排炮管，46×46 盒的几何中心
+ *    恰好落在两管之间的空隙里，单点采样会**假红**。面积统计更强：证明图标成片画出来，
+ *    且对「弹体 / 双炮管 / 循环箭头」三种形状都成立。阈值取 ~1.4%（远低于描边字形的实际覆盖）。
+ */
+const CHOICE_ICON_MIN_PX = 30;
 
 /**
  * 不入面积账本、但需要「按点位精确采样」的颜色（承载文字 / 被描边覆盖的面）。
@@ -89,9 +98,9 @@ const SAMPLE_COLORS = {
   cardBg: [0x1b, 0x24, 0x32],
   cardEdge: [0x3d, 0x4c, 0x66],
   /** CHOICE 卡片左侧矢量图标色（按选项区分）。 */
-  iconHeavy: [0xff, 0xb0, 0x66],
-  iconExplosive: [0xff, 0xd1, 0x66],
-  iconRepair: [0x7f, 0xd6, 0xa0],
+  iconShell: [0xff, 0xb0, 0x66],
+  iconTwin: [0xff, 0xd1, 0x66],
+  iconReload: [0x7f, 0xd6, 0xa0],
 };
 
 /** 各状态整页分层面积的冻结期望（唯一来源：tests/portraitRunPage.test.ts RP-22）。 */
@@ -104,33 +113,38 @@ const LEDGER = {
    */
   IDLE: {
     ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
-    buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
+    buffIconShell: 0, buffIconTwin: 0, buffIconReload: 0, buffChip: 0,
     cardBar: 0, actionBar: 990,
   },
   EVENT: {
     ground: 0, road: 0, nodeDone: 384, nodeTodo: 512,
-    buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
+    buffIconShell: 0, buffIconTwin: 0, buffIconReload: 0, buffChip: 0,
     cardBar: 0, actionBar: 990,
   },
   BATTLE: {
     ground: 0, road: 0, nodeDone: 384, nodeTodo: 512,
-    buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
+    buffIconShell: 0, buffIconTwin: 0, buffIconReload: 0, buffChip: 0,
     cardBar: 0, actionBar: 0,
   },
   RESULT: {
     ground: 0, road: 0, nodeDone: 384, nodeTodo: 512,
-    buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
+    buffIconShell: 0, buffIconTwin: 0, buffIconReload: 0, buffChip: 0,
     cardBar: 0, actionBar: 990,
   },
   CHOICE: {
     ground: 0, road: 0, nodeDone: 0, nodeTodo: 0,
-    buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
+    buffIconShell: 0, buffIconTwin: 0, buffIconReload: 0, buffChip: 0,
     cardBar: 3720, actionBar: 0,
   },
-  // 回到 IDLE 且拿到 1 个强化（爆裂弹）→ 只多出「该选项底色 756 + 高光块 144」
+  /*
+    回到 IDLE 且拿到 1 个强化（双联炮）→ 只多出「该选项底色 756 + 高光块 144」。
+    ⚠️ PRP-F2：进度节点**对调**（`nodeDone 384→512` / `nodeTodo 512→384`）是**预期后果** ——
+    选择强化会推进 `DAY 3 → 4`，已走完节点 +1 / 未走完节点 −1，**总量恒为 896 不变**。
+    这不是放开断言：节点规则（`i < day ? done : todo`，每个 128px²）仍是唯一来源。
+  */
   'IDLE+BUFF': {
-    ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
-    buffIconHeavy: 0, buffIconExplosive: 756, buffIconRepair: 0, buffChip: 144,
+    ground: 780, road: 19500, nodeDone: 512, nodeTodo: 384,
+    buffIconShell: 0, buffIconTwin: 756, buffIconReload: 0, buffChip: 144,
     cardBar: 0, actionBar: 990,
   },
 };
@@ -811,7 +825,7 @@ async function runViewport(browser, vp) {
   log(p.phase === 'CHOICE' && p.choiceOpen, `[${tag}] R30 真实点击「继续」→ CHOICE 浮层`, `phase=${p.phase}`);
   log(p.choiceOptions.length === 3, `[${tag}] R31 三选一浮层恰好 3 个选项`, p.choiceOptions.map((o) => o.label).join(' / '));
   log(
-    JSON.stringify(p.choiceOptions.map((o) => o.label)) === JSON.stringify(['重型弹头', '爆裂弹', '紧急维修']),
+    JSON.stringify(p.choiceOptions.map((o) => o.label)) === JSON.stringify(['重型弹头', '双联炮', '快速装填']),
     `[${tag}] R32 选项正是 Queue 点名的三项`,
     p.choiceOptions.map((o) => o.label).join(' / '),
   );
@@ -838,45 +852,64 @@ async function runViewport(browser, vp) {
       `[${tag}] R36 CHOICE 整页变暗（5 个分带采样点逐点离开 CHOICE 之前的值）`,
       BAND_POINTS.map((p, i) => `${p.key}:${bandSamplesBefore[i].rgb.join(',')}→${after[i].rgb.join(',')}`).join(' '),
     );
-    // 卡片几何：真实像素在「卡片底 / 顶部强调条 / 左侧矢量图标中心」三处命中期望色
+    // 卡片几何：真实像素在「卡片底 / 顶部强调条」两处命中期望色（单点采样即可，均为平涂面）
     const cards = p.choiceOptions.map((o) => o.rect);
     const pts = [];
     for (const c of cards) {
       pts.push(
         { x: c.x + 6, y: c.y + 6 }, // 卡片底（避开 2px 描边与强调条）
         { x: c.x + c.w / 2, y: c.y + 6 }, // 顶部强调条
-        { x: c.x + 18 + 23, y: c.y + Math.round((c.h - 46) / 2) + 23 }, // 图标中心
       );
     }
     const cardPixels = await samplePixels(page, pts);
     const at = (i) => cardPixels[i].rgb.join(',');
-    const bgOk = [0, 3, 6].every((i) => at(i) === SAMPLE_COLORS.cardBg.join(','));
-    const barOk = [1, 4, 7].every((i) => at(i) === PALETTE.cardBar.join(','));
-    const iconOk =
-      at(2) === SAMPLE_COLORS.iconHeavy.join(',') &&
-      at(5) === SAMPLE_COLORS.iconExplosive.join(',') &&
-      at(8) === SAMPLE_COLORS.iconRepair.join(',');
+    const bgOk = [0, 2, 4].every((i) => at(i) === SAMPLE_COLORS.cardBg.join(','));
+    const barOk = [1, 3, 5].every((i) => at(i) === PALETTE.cardBar.join(','));
+    /*
+      图标：在**与绘制同源**的 `iconRect` 内按面积统计该选项专属图标色，并要求「它选项的图标色为 0」
+      （调色板逐对互斥 → 交叉命中恒应为 0，与车辆 sprite 特征色同一套纪律）。
+    */
+    const ICON_COLORS = [SAMPLE_COLORS.iconShell, SAMPLE_COLORS.iconTwin, SAMPLE_COLORS.iconReload];
+    const iconCounts = [];
+    for (let i = 0; i < cards.length; i += 1) {
+      const box = p.choiceOptions[i].iconRect;
+      const own = await countSpriteColorInBox(page, box, 0, ICON_COLORS[i], 0);
+      let cross = 0;
+      for (let j = 0; j < ICON_COLORS.length; j += 1) {
+        if (j === i) continue;
+        cross += await countSpriteColorInBox(page, box, 0, ICON_COLORS[j], 0);
+      }
+      iconCounts.push({ own, cross });
+    }
+    const iconOk = iconCounts.every((c) => c.own >= CHOICE_ICON_MIN_PX && c.cross === 0);
     log(
       bgOk && barOk && iconOk,
       `[${tag}] R37 卡片 = 图标 + 名称 + 一句结果（几何被真实像素命中，位置 = 布局唯一来源）`,
-      `bg=${at(0)} bar=${at(1)} icon=${at(2)}/${at(5)}/${at(8)}`,
+      `bg=${at(0)} bar=${at(1)} icon(盒内px)=${iconCounts.map((c) => c.own).join('/')} 交叉=${iconCounts.map((c) => c.cross).join('/')}`,
     );
   }
 
   /* --------------------------- 8) 真实点击中间卡片 → 回到 IDLE */
-  const card1 = p.choiceOptions[1].rect; // 爆裂弹
+  const card1 = p.choiceOptions[1].rect; // 双联炮
   await clickRect(page, card1);
   p = await probeOf(page);
   log(p.phase === 'IDLE' && !p.choiceOpen, `[${tag}] R38 选择后浮层关闭、原页面恢复（回 IDLE）`, `phase=${p.phase}`);
   log(
-    p.buffs.length === 1 && p.buffLabels[0] === '爆裂弹',
+    p.buffs.length === 1 && p.buffLabels[0] === '双联炮',
     `[${tag}] R39 顶部新增对应强化图标（只加 1 个，不是填满 5 个槽）`,
     `buffs=${p.buffLabels.join('/')} buffIconCount=${p.buffIconCount}`,
   );
+  /*
+    PRP-F2 必改 3：选择后**追加两行**（强化自然语言结果 + 进入下一天），历史完整。
+    ⚠️ 计数从 `+6` 变 `+7` 是**预期后果**：强化从「替换已有装备」改成「本局叠加 Modifier」后，
+    日志由「1 行结果」变为「结果 + DAY N」两行。总量随状态机阶段固定，不是放开断言。
+  */
   log(
-    p.log[p.log.length - 1].text === '你换上了爆裂弹。' && p.logCount === p0.logCount + 6,
-    `[${tag}] R40 日志追加自然语言结果（你换上了爆裂弹。）且历史完整`,
-    `logCount=${p.logCount} last=${p.log[p.log.length - 1].text}`,
+    p.log[p.log.length - 2].text === '你为大炮加装了一门副炮。' &&
+      p.log[p.log.length - 1].text === 'DAY 4' &&
+      p.logCount === p0.logCount + 7,
+    `[${tag}] R40 日志追加自然语言结果 + DAY 4 两行，且历史完整`,
+    `logCount=${p.logCount} tail=${p.log.slice(-2).map((l) => l.text).join(' ｜ ')}`,
   );
   log(
     JSON.stringify(p.phaseTrail) === JSON.stringify(['IDLE', 'EVENT', 'BATTLE', 'RESULT', 'CHOICE', 'IDLE']),
@@ -886,12 +919,12 @@ async function runViewport(browser, vp) {
   const sFinale = await pixelStats(page);
   ledgerCheck(tag, 'R42 回到 IDLE + 1 个强化', sFinale, 'IDLE+BUFF', vp.dpr);
   if (vp.dpr === 1) {
-    // 顶部图标底色按选项区分：拿到「爆裂弹」→ 只应是该选项的底色（其余两个为 0）
-    const icons = [sFinale.buffIconHeavy, sFinale.buffIconExplosive, sFinale.buffIconRepair];
+    // 顶部图标底色按选项区分：拿到「双联炮」→ 只应是该选项的底色（其余两个为 0）
+    const icons = [sFinale.buffIconShell, sFinale.buffIconTwin, sFinale.buffIconReload];
     log(
-      icons.filter((n) => n > 0).length === 1 && sFinale.buffIconExplosive === 756 && sFinale.buffChip === 144,
+      icons.filter((n) => n > 0).length === 1 && sFinale.buffIconTwin === 756 && sFinale.buffChip === 144,
       `[${tag}] R42b 顶部只有 1 个真实图标（无空槽、无 5 个占位格子）`,
-      `heavy/explosive/repair=${icons.join('/')} chip=${sFinale.buffChip}`,
+      `shell/twin/reload=${icons.join('/')} chip=${sFinale.buffChip}`,
     );
     // IDLE（页面绝对坐标 → 偏移 0）
     const melon = await countSpriteColorInBox(page, p.stage.player.bounds, 0, SPRITE_COLORS.watermelonBody, SPRITE_COLOR_TOL);
@@ -910,6 +943,80 @@ async function runViewport(browser, vp) {
     `[${tag}] R44 全程零页面跳转（URL 不变 / navigation 条数不变）`,
     `url=${urlNow.replace(URL_BASE, '')} nav=${navCountAtStart}→${navCountNow}`,
   );
+
+  /*
+    --------------------------------- 10) PRP-F2：DAY 4 的第二场 = 强化后的真实战斗
+    这是真人验收「不看顶部图标文字，能不能仅从第二场看出自己选了什么」的机器侧等价物：
+      ① 运行时真实拿到的 modifier = 刚选的那一项（不是只写了日志 / 只画了图标）；
+      ② 开局 steps / projectiles = 0 → **clean recreate**，没有上一场的弹丸 / 接触 / AI 残留；
+      ③ 开局 HP = 上一场打完剩下的耐久（< 上限）→ **跨战斗耐久**，不自动满血。
+    这一切都在**同一个 canvas 页面**里发生（R44 已证零跳转）。
+  */
+  const hpCarried = p.battle ? p.battle.playerHp : NaN;
+  const hpMaxCarried = p.battle ? p.battle.playerHpMax : NaN;
+  await clickRect(page, pAgain.actionRect);
+  const p2 = await probeOf(page);
+  log(p2.phase === 'BATTLE' && p2.actionLabel === '战斗中', `[${tag}] R45 第二场真实战斗开打（DAY 4 · 同一页面）`, `phase=${p2.phase}/${p2.actionLabel}`);
+  const w2 = p2.battleWorld;
+  log(
+    !!w2 && w2.modifier === 'twinCannon',
+    `[${tag}] R46 必改 5：第二场运行时真实拿到的强化 = 刚选的那一项`,
+    w2 ? `modifier=${w2.modifier}` : 'no battleWorld',
+  );
+  log(
+    !!w2 && w2.steps === 0 && w2.projectiles === 0,
+    `[${tag}] R47 必改 4：clean recreate（步数 / 弹丸从 0 起，无上一场残留）`,
+    w2 ? `steps=${w2.steps} projectiles=${w2.projectiles}` : '',
+  );
+  log(
+    !!w2 &&
+      Math.abs(w2.initialPlayerHp - hpCarried) < 1e-6 &&
+      w2.playerHpMax === hpMaxCarried &&
+      w2.initialPlayerHp > 0 &&
+      w2.initialPlayerHp < w2.playerHpMax,
+    `[${tag}] R48 必改 4：跨战斗耐久成立（带上一场剩余 HP 开打，不自动满血，上限不变）`,
+    w2 ? `开局 ${round2(w2.initialPlayerHp)}/${round2(w2.playerHpMax)}（上一场结束 ${round2(hpCarried)}）` : '',
+  );
+  if (w2) {
+    // 窗口累积观测（理由同 R24b：单点采样会落在开火空窗里）
+    const twinWin = await page.evaluate(async () => {
+      const acc = { samples: 0, maxProjectiles: 0, projSamples: 0, minEnemyHp: Infinity, enemyHpMax: 0, phases: [] };
+      const t0 = performance.now();
+      while (performance.now() - t0 < 4000) {
+        const pr = window.__RUNPAGE__.probe();
+        acc.samples += 1;
+        acc.phases.push(pr.phase);
+        const w = pr.battleWorld;
+        if (w) {
+          acc.maxProjectiles = Math.max(acc.maxProjectiles, w.projectiles);
+          if (w.projectiles > 0) acc.projSamples += 1;
+        }
+        if (pr.battle) {
+          acc.minEnemyHp = Math.min(acc.minEnemyHp, pr.battle.enemyHp);
+          acc.enemyHpMax = pr.battle.enemyHpMax;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return acc;
+    });
+    /*
+      双联炮 = 官方 shotgun 的「一次开火固定 fanAnglesDeg.length 发」→ 每轮齐射都有**两发同时在空中**
+      （不是先后补充）。因此窗口内「同时在飞的弹丸 ≥ 2」是可证的真实 Runtime 差异；
+      同时敌方耐久必须真的被这两发打下去（证明第二发不是视觉假弹）。
+      对比参照：第一场（基础 Cannon）同长度窗口的 maxProjectiles 一并打印，不作硬断言
+      —— 基础单发在远距离飞行时也可能有 2 发重叠（不具排他性），硬断言会变成脆弱判据。
+    */
+    log(
+      twinWin.maxProjectiles >= 2 && twinWin.projSamples > 0,
+      `[${tag}] R49 必改 2/5：双联炮每轮齐射两发同时在飞（真实 projectile，非视觉假弹）`,
+      `窗口内最多 ${twinWin.maxProjectiles} 发在飞 · ${twinWin.projSamples}/${twinWin.samples} 次采样见弹 · 第一场同窗口最多 ${win.maxProjectiles} 发`,
+    );
+    log(
+      twinWin.minEnemyHp < twinWin.enemyHpMax,
+      `[${tag}] R49b 强化后的炮弹真的造成伤害（敌方耐久在掉）`,
+      `窗口内最低 敌方 ${round2(twinWin.minEnemyHp)}/${round2(twinWin.enemyHpMax)}`,
+    );
+  }
 
   await ctx.close();
 }

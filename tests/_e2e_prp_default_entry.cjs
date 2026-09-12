@@ -37,9 +37,9 @@ const PALETTE = {
   road: [0x33, 0x2e, 0x42],
   nodeDone: [0xd2, 0x92, 0x2a],
   nodeTodo: [0x46, 0x53, 0x6b],
-  buffIconHeavy: [0xb8, 0x56, 0x2e],
-  buffIconExplosive: [0xc0, 0x7a, 0x2a],
-  buffIconRepair: [0x3f, 0x8f, 0x5a],
+  buffIconShell: [0xb8, 0x56, 0x2e],
+  buffIconTwin: [0xc0, 0x7a, 0x2a],
+  buffIconReload: [0x3f, 0x8f, 0x5a],
   buffChip: [0xe6, 0xed, 0xf8],
   cardBar: [0x5f, 0x86, 0xc4],
   actionBar: [0x33, 0x50, 0x7a],
@@ -491,9 +491,9 @@ async function assertFullFlow(page, tag, dpr) {
   p = await probeOf(page);
   log(p.phase === 'IDLE' && !p.choiceOpen, `[${tag}] F11 选择后回到 IDLE 原上下文`, `phase=${p.phase}`);
   log(
-    p.buffs.length === buffsBefore + 1 && p.logCount === before + 1 && /你换上了/.test(p.log[p.log.length - 1].text),
-    `[${tag}] F12 顶部 +1 强化图标 且 日志 +1 自然语言结果（你换上了 X。）`,
-    `buffs=${buffsBefore}→${p.buffs.length} log="${p.log[p.log.length - 1].text}"`,
+    p.buffs.length === buffsBefore + 1 && p.logCount === before + 2 && /你为大炮加装了/.test(p.log[p.log.length - 2].text),
+    `[${tag}] F12 顶部 +1 强化图标 且 日志 +2 行（强化自然语言结果 + DAY N）`,
+    `buffs=${buffsBefore}→${p.buffs.length} tail=${p.log.slice(-2).map((l) => l.text).join(' ｜ ')}`,
   );
   log(page.url() === urlBefore && p.transitions > trailBefore, `[${tag}] F13 全程同一页面、URL 未变`, `url=${page.url()}`);
 
@@ -506,9 +506,9 @@ async function assertFullFlow(page, tag, dpr) {
   if (dpr === 1) {
     const stats = await pixelStats(page);
     log(
-      stats.buffIconExplosive === 756 && stats.buffChip === 144,
+      stats.buffIconTwin === 756 && stats.buffChip === 144,
       `[${tag}] F15 顶部图标真实像素（只有所选选项那一个底色，无空槽）`,
-      `explosive=${stats.buffIconExplosive} chip=${stats.buffChip}`,
+      `twin=${stats.buffIconTwin} chip=${stats.buffChip}`,
     );
   }
 }

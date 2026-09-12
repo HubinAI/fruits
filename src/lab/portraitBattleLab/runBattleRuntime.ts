@@ -36,14 +36,38 @@
  * ⚠️ 本文件**不写任何战斗数值**：HP / 伤害 / CD / 射速 / 质量 / 后坐全部由正式链路解析。
  * ⚠️ 「PRP 侧被改过的 gameplay」在本适配里**不存在** —— 因为 PRP 此前根本没有战斗
  *    （旧 `RUN_BATTLE_SCRIPT` 只是 90 步线性 HP 插值 + `sin` 位移动画，已删除）。
+ *
+ * ── PRP-F2-FIRST-REAL-UPGRADE-LOOP 追加（本 Queue 的唯一新语义）──────────────
+ *
+ *   5) **Run-local 强化注入**：本场战斗可以带一个「本局临时强化」，注入方式**不是**在
+ *      Weapon / Projectile / Orchestrator 里加分支，而是：
+ *        a. `createRunRegistry(modifier)` —— 用正式 `createRegistry()` 造一份**独立副本**，
+ *           在其中注册一个本局专用部件 id（数值由正式 Cannon 派生）；
+ *        b. `applyRunModifierToSnapshot(...)` —— 把本局 BuildSnapshot 里基准武器的 `defId`
+ *           重映射到该部件（只动一个字段）；
+ *        c. 正式 `resolveSnapshot` 于是把强化后 def 交给 `PlanckPartRuntime`，
+ *           武器 Behavior 读到的就已经是强化值 → **零改 Weapon / Contact / Orchestrator**。
+ *      ⇒ 正式 `content.ts` / `registry` 单例 / `cannonBehavior` / `ContactRouter` 全部零修改；
+ *        强化只活在本局内存副本里，刷新即消失（不落盘 / 不进 Garage / 不改星级）。
+ *
+ *   6) **跨战斗耐久**：`carriedHp` = 上一场真实剩余 HP，**只写当前 HP、不动 maxHp**
+ *      （与正式测试既有写法一致：`tests/battleStatus.test.ts` 亦直接写 `vehicle.hp`）。
+ *      因此第二场耐久条如实显示「打剩多少」，不会自动满血。
+ *      ⚠️ `carriedHp <= 0`（被打退）不注入 —— 0 HP 的车没有可续用的耐久，正常路径是「存活推进」。
  */
 
-import { registry } from '../../core/content';
+import type { ContentRegistry } from '../../core/types';
+import { validateSnapshot } from '../../core/buildValidator';
 import type { BattleRenderSnapshot, BattleResult } from '../../battle/battleContract';
 import { PlanckBattleOrchestrator } from '../../battle/planckBattleOrchestrator';
 import { buildSpawnPlan, type SpawnPlan } from './entities';
 import { RUN_STAGE_BAND } from './runPageLayout';
 import { RUN_DEMO_ENCOUNTER_ID, RUN_DEMO_LOADOUT_ID } from './runPageScene';
+import {
+  applyRunModifierToSnapshot,
+  createRunRegistry,
+  type RunModifierId,
+} from './runModifiers';
 
 /** 本局演示组合（与 F1 共享测试数据同源；不改 Debug 选择项）。 */
 export const RUN_BATTLE_LOADOUT_ID = RUN_DEMO_LOADOUT_ID;
@@ -214,6 +238,19 @@ export interface RunBattleHp {
 }
 
 /**
+ * 本场战斗的 Run-local 参数（PRP-F2）。
+ *
+ * 只允许两种注入，且都**不改变世界 / 装配 / 正式数值**：
+ *   1) `modifier` —— 本局强化（overlay registry + 武器 defId 重映射，见 `runModifiers.ts`）；
+ *   2) `carriedHp` —— 跨战斗耐久（上一场真实剩余 HP；只写当前 HP，不动 maxHp）。
+ */
+export interface RunBattleOptions {
+  readonly soloA?: boolean;
+  readonly modifier?: RunModifierId | null;
+  readonly carriedHp?: number | null;
+}
+
+/**
  * Run Page 战斗运行时：正式 `PlanckBattleOrchestrator` 的**薄适配**（无反推、无插值）。
  *
  * 生命周期接入 = 本类的全部新增语义；除此之外的一切（世界 / 出生 / 驱动 / 武器 /
@@ -222,25 +259,61 @@ export interface RunBattleHp {
 export class RunBattleRuntime {
   readonly plan: SpawnPlan;
   readonly orchestrator: PlanckBattleOrchestrator;
+  /** 本局**专用** registry（正式副本 + 可选的企业 overlay 部件；不污染正式单例）。 */
+  readonly registry: ContentRegistry;
+  /** 本场战斗生效的 Run 强化（null = 基础状态）。 */
+  readonly modifier: RunModifierId | null;
   /** 真实出生中心 x（构造后实测，不是写死数字）。 */
   readonly spawnAx: number;
   readonly spawnBx: number;
   /** 累计推进的正式物理步数（由 `timeMs / FIXED_DT` 派生，供证据链）。 */
   private steps = 0;
 
-  constructor(soloA = false) {
+  constructor(opts: boolean | RunBattleOptions = false) {
+    const o: RunBattleOptions = typeof opts === 'boolean' ? { soloA: opts } : opts;
     this.plan = buildSpawnPlan(RUN_BATTLE_LOADOUT_ID, RUN_BATTLE_ENCOUNTER_ID);
+    this.modifier = o.modifier ?? null;
+
+    // ① 本局 registry = 正式副本（+ 强化部件）。正式 content 单例与 Cannon 基础定义零修改。
+    this.registry = createRunRegistry(this.modifier);
+    // ② 本局 BuildSnapshot：只把基准武器的 defId 指向本局 overlay 部件。
+    const playerSnapshot = applyRunModifierToSnapshot(this.plan.player.snapshot, this.modifier);
+    // ③ overlay 也必须过正式 BuildValidator（overlay 部件确实存在于本局 registry）。
+    const validation = validateSnapshot(playerSnapshot, this.registry);
+    if (!validation.valid) {
+      throw new Error(`[PRP-F2] 强化后的 Build 非法：${validation.errors.join('；')}`);
+    }
+
     // ⚠️ 空 config：世界尺度 / 出生点 / 阶段全部取正式默认值（PRP 零覆盖）。
     this.orchestrator = new PlanckBattleOrchestrator(
-      this.plan.player.snapshot,
+      playerSnapshot,
       this.plan.enemies[0].snapshot,
-      registry,
+      this.registry,
       {},
-      soloA,
+      o.soloA ?? false,
     );
+
+    // ④ 跨战斗耐久（必改 4）：只写当前 HP，**不动 maxHp** → HUD 耐久条如实显示「打剩多少」。
+    const carried = o.carriedHp ?? null;
+    if (carried != null && carried > 0) {
+      const v = this.orchestrator.vehicleA;
+      v.hp = Math.min(carried, v.maxHp);
+    }
+    // ⚠️ 本场**开局**HP 必须在构造时捕获：此后它会随真实战斗持续下降，
+    //    实时读当前值无法证明「开局确实是从上一场剩余耐久继续的」。
+    this.initialPlayerHp = this.orchestrator.vehicleA.hp;
+
     const w = this.orchestrator.world;
     this.spawnAx = w.getPosition(this.orchestrator.vehicleA.body).x;
     this.spawnBx = w.getPosition(this.orchestrator.vehicleB.body).x;
+  }
+
+  /** 本场**开局真实 HP**（构造时捕获，注入跨战斗耐久后的实际值，供验收断言）。 */
+  readonly initialPlayerHp: number;
+
+  /** 本场 HP 上限（= 正式 resolved body.hp，不因跨战斗耐久改变）。 */
+  get playerMaxHp(): number {
+    return this.orchestrator.vehicleA.maxHp;
   }
 
   /** 出生中心距（世界 px）——必须等于正式 800。 */

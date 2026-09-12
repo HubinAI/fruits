@@ -28,9 +28,10 @@
  *   即：**状态机只负责「生命周期接线 + 结果回填」**，不再持有任何战斗语义。
  */
 
+import { RUN_MODIFIERS, runModifierById, type RunModifierId } from './runModifiers';
+
 /** Run Page 的五个状态（也是唯一允许的状态集合）。 */
 export type RunPhase = 'IDLE' | 'EVENT' | 'BATTLE' | 'RESULT' | 'CHOICE';
-
 export const RUN_PHASES: readonly RunPhase[] = ['IDLE', 'EVENT', 'BATTLE', 'RESULT', 'CHOICE'];
 
 /**
@@ -58,18 +59,21 @@ export const RUN_LOG_MAX = 240;
 /**
  * 三个固定演示强化选项（不随机、不进任何正式强化池）。
  * `note` = **一句结果**（玩家可读，不是开发占位说明 / 不是数值表）。
+ *
+ * ⚠️ PRP-F2 必改 2：三项**全部是 Cannon 强化**（本 Queue 不扩 Body / Movement / Gadget），
+ * 内容唯一来源 = `runModifiers.RUN_MODIFIERS`（含 overlay 数值与因果说明），本文件不重复定义。
  */
 export interface RunChoiceOption {
-  readonly id: string;
+  readonly id: RunModifierId;
   readonly label: string;
   readonly note: string;
 }
 
-export const RUN_CHOICE_OPTIONS: readonly RunChoiceOption[] = [
-  { id: 'heavyWarhead', label: '重型弹头', note: '炮弹更重，撞击和后坐增强' },
-  { id: 'explosiveShell', label: '爆裂弹', note: '炮弹命中后发生范围爆炸' },
-  { id: 'emergencyRepair', label: '紧急维修', note: '立即恢复部分耐久' },
-];
+export const RUN_CHOICE_OPTIONS: readonly RunChoiceOption[] = RUN_MODIFIERS.map((m) => ({
+  id: m.id,
+  label: m.label,
+  note: m.note,
+}));
 
 /** 本 Queue 的演示装载（唯一一套；Run Page 不接 Debug 选择项）。 */
 export interface RunPageContext {
@@ -112,6 +116,13 @@ export interface RunPageState {
   readonly dayTotal: number;
   /** 已获得的核心 Build（顶部图标来源，最多显示 RUN_BUILD_ICON_SLOTS 个）。 */
   readonly buffs: readonly RunChoiceOption[];
+  /**
+   * 本局已生效的 Run 强化（PRP-F2 必改 3）。
+   *
+   * ⚠️ 这是**本局临时状态**：只活在这次 Run 的内存里 ——
+   * 不写 Garage、不改星级、不动正式 content；`createRunPageState()` 新建即回到 `null`。
+   */
+  readonly modifier: RunModifierId | null;
   /** 冒险日志（只追加、不重排；选择强化不会清空历史）。 */
   readonly log: readonly RunLogEntry[];
   /** 当前战斗（仅 BATTLE / RESULT 非空）。 */
@@ -171,6 +182,7 @@ export function createRunPageState(ctx: RunPageContext): RunPageState {
     day: RUN_INITIAL_DAY,
     dayTotal: RUN_TOTAL_DAYS,
     buffs: [],
+    modifier: null,
     log: pushLogs([], [
       { kind: 'day', text: `DAY ${RUN_INITIAL_DAY}` },
       { kind: 'travel', text: `你驾驶着${ctx.vehicleLabel}，在荒原上继续前进。` },
@@ -206,6 +218,18 @@ export function runActionEnabled(s: RunPageState): boolean {
 /** 三选一浮层是否可见（= phase 为 CHOICE，两者永不脱节）。 */
 export function runChoiceOpen(s: RunPageState): boolean {
   return s.phase === 'CHOICE';
+}
+
+/**
+ * 跨战斗耐久（必改 4）：上一场**已结束**战斗的真实剩余 HP。
+ *
+ * - 尚未打过任何战斗 / 上一场还没结束 → `null`（本次遭遇按满耐久开始）；
+ * - 上一场结束且剩 HP > 0 → 返回该真实数值（第二场从「打剩多少」继续）；
+ * - 剩余 0（被打退）→ `null`（0 HP 无耐久可续用；正常推进路径是存活）。
+ */
+export function runCarriedPlayerHp(s: RunPageState): number | null {
+  if (!s.battle || !s.battle.done) return null;
+  return s.battle.playerHp > 0 ? s.battle.playerHp : null;
 }
 
 /** 当前应展示的日志行（底部对齐：新行从下方顶入）。 */
@@ -249,10 +273,12 @@ export function pressRunAction(s: RunPageState, ctx: RunPageContext): RunPageSta
     );
   }
   if (s.phase === 'EVENT') {
+    // 跨战斗耐久（必改 4）：第一场剩余 HP → 第二场继续使用，**不自动满血**。
+    const carried = runCarriedPlayerHp(s);
     const battle: RunBattleState = {
       enemyLabel: ctx.encounterLabel,
       playerHpMax: ctx.playerHpMax,
-      playerHp: ctx.playerHpMax,
+      playerHp: carried ?? ctx.playerHpMax,
       enemyHpMax: ctx.enemyHpMax,
       enemyHp: ctx.enemyHpMax,
       steps: 0,
@@ -334,17 +360,23 @@ export function durabilityPercent(b: RunBattleState): number {
 }
 
 /**
- * 在 CHOICE 浮层里选中一个强化：
- *   - 浮层关闭、原页面恢复（可见状态回到 RESULT 的构图）；
- *   - 顶部出现对应核心 Build 图标（buffs +1）；
- *   - 日志追加「你选择了 XXX」，历史保持完整。
+ * 在 CHOICE 浮层里选中一个强化（PRP-F2 必改 3 / 必改 5 的状态侧）：
+ *   - 记录**本局临时强化** `modifier`（下一场战斗会真正注入）；
+ *   - 浮层关闭、原页面恢复；顶部出现对应核心 Buff 图标（buffs +1）；
+ *   - 日志追加「你为大炮装上了 XXX。」+ 新的 `DAY n` 行 → 推进到 DAY 4；
+ *   - 回到 IDLE 后按唯一主动作「继续」即进入第二场真实战斗。
  * 未知 id / 非 CHOICE 状态 → no-op（同引用）。
  */
 export function chooseRunBuff(s: RunPageState, optionId: string): RunPageState {
   if (s.phase !== 'CHOICE') return s;
-  const opt = RUN_CHOICE_OPTIONS.find((o) => o.id === optionId);
-  if (!opt) return s;
-  return goPhase(next(s, { buffs: [...s.buffs, opt] }), 'IDLE', {
-    log: pushLog(s.log, 'choice', `你换上了${opt.label}。`),
+  const mod = runModifierById(optionId);
+  if (!mod) return s;
+  const opt: RunChoiceOption = { id: mod.id, label: mod.label, note: mod.note };
+  const day = s.day + 1;
+  return goPhase(next(s, { buffs: [...s.buffs, opt], modifier: mod.id, day }), 'IDLE', {
+    log: pushLogs(s.log, [
+      { kind: 'choice', text: mod.logText },
+      { kind: 'day', text: `DAY ${day}` },
+    ]),
   });
 }

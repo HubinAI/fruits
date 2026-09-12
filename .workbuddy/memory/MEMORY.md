@@ -9,7 +9,8 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 主线 `foundation-02-wechat`（上一交付 R3 `1bb35d7`）；实验分支 `prototype-portrait-battle-lab`（可整块删除）
 - 原型正式名 **PRP｜Portrait Run Prototype**（PBL 旧名仅存 Debug Lab）
 - PRP 链尾（全链见 daily log）：`9d689dc` memory → `21ac9b7` R4 调查(0 行代码) →
-  `6fbf275` **PRP-F1** 正式接入旧侧视 Planck 战斗 → `c44239b` **PRP-R5 恢复正式 Battle Camera（见 §5.5）**
+  `6fbf275` **PRP-F1** 正式接入旧侧视 Planck 战斗 → `c44239b` **PRP-R5** 恢复正式 Battle Camera（见 §5.5）
+  → **PRP-F2** Run-local 强化 overlay（见 §5.6）
 - 历史事实：PRP-F1 之前 PRP 战斗区**没有物理**（纯演示脚本）；PRP 链**从未触碰正式 gameplay 目录**
   （PRP-R5 后连 `src/render` 也 0 改动——相机复用靠 PRP 侧 viewport adapter）。
 
@@ -83,7 +84,8 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - **IDLE 待机近景**：`runSideViewScale = min(0.9,(390−2×10−14)/(wP+wE)) = 0.7722…`；`groundInsetPx=52 → groundY=330`。
 - **零纯色占位纪律**：可视件必须带正式 `visualId`，资源未就绪**整件不画**；缺 `visual` 的部件整件剔除。
 - **日志 = 纯自然语言**：`RunLogKind` 六值 + `formatRunLog(e)=>e.text`（恒等）→ 结构上吐不出方括号前缀。
-  累积行数：IDLE 2 → EVENT 4 → BATTLE **零追加** → RESULT 7 → CHOICE 不写 → 选后 8。
+  累积行数：IDLE 2 → EVENT 4 → BATTLE **零追加** → RESULT 7 → CHOICE 不写 → 选后 **9**
+  （PRP-F2 起 = 强化结果 + `DAY N` 两行；R2 时代是「替换已获得强化」的 1 行 → 8）。
 - ⚠️ **sprite 重采样污染等色面积**：禁用态动作条本应入账，但车身缩放重采样有 **1 个抗锯齿像素
   `(149,295)` 恰等于 `#2a3341`** → 删 `actionBarOff` 层，禁用态改用 probe `actionEnabled===false` + 点位采样。
 - ⚠️ 分带线必须画在下一条带**首行** `band.y`；画在 `band.y−1` 会吃掉 `road` 最底一行。
@@ -133,13 +135,44 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 门禁：`tsc` 0 错；定向单测 **93/93**；全量 vitest 200/201 文件 · **1891 passed**（唯一失败为 §5.2 已知偶发）；
   五路构建 + `repo-health` 全 EXIT 0；E2E Run Page（4 视口）**267/267**、E2E 默认入口 **77/77**（复跑两次全绿）。
 
+### 5.6 PRP-F2 首个真实强化闭环（已交付，门禁全绿）
+- **Modifier 接缝 = Run-local overlay registry**（唯一；且是**正式既有范式的复用**，不是新造机制）：
+  `createRegistry()`（`src/core/content.ts:1012`，已导出、每次全新实例）造副本 → 在其中注册 `run.mod.<id>`
+  （以正式 `cannon` 为基准派生）→ 本局快照里武器的 `defId` 重映射过去。
+  正式 `content.ts` / `registry` 单例 / `cannonBehavior` / `ContactRouter` / `Orchestrator` **零修改**。
+  证据：`types.ts:186` 注册表是**可变 Map**；`buildSnapshot.ts:97` def 全经 registry 展开；
+  `buildSnapshot.ts:119` + `types.ts:150` `MovementInstall.overrides` = **override 是正式既有范式**；
+  `cannonBehavior.ts:68` `readCannonParams(part)` 只读 `part.def.behaviorParams`（不读单例/全局）。
+- **关键缺口**：`FunctionalInstall` **只有 `star`、没有 `overrides`**（Movement 有）。
+  将来若要「运行期改 Weapon 任意字段」的最小 Foundation 补正 = 补 `overrides?: Partial<FunctionalPartDef>`。
+- 三项 overlay：重型弹头 `radius 10→16 / mass 1→4 / recoil 30→90`（**damage 刻意不动**）/
+  双联炮（复用官方 `shotgun` + `fanAnglesDeg [-4,4]`，一次开火 **2 发真实弹丸**）/ 快速装填 `cooldownMs 1000→400`。
+- ⚠️ **B 的诚实披露**：正式 `CannonBehavior`（`cannonBehavior.ts:159`）**无 burst 参数**，
+  `getBehaviorFactory`（`behaviorRegistry.ts:41`）是**静态表不可注入** → 给正式 Cannon 加 burst 属**停止条件方向**
+  → 复用官方 shotgun。代价：齐射弹丸渲染标记被正式 runtime 固定为 `'tracer'`（`behaviorRuntime.ts:346`），
+  且语义是「**同时双发**」而非「先后两发」（后者需授权给正式 Cannon 加可选 burst 参数）。
+- ⚠️ **胜负余量极窄**：演示遭遇基础只多剩 `228.09~269.78 / 1100` → **提 DPS 就碾压、降 DPS 就必败**。
+  因此本遭遇只适合做「方向可见」验证，**不适合数值微调对比**（`projectileDamage: 40` 的双联炮实测必败）。
+- **跨战斗耐久**：`PlanckVehicle.hp` 可写、`maxHp` 独立（`planckVehicleAssembly.ts:76-77`）→ **只写 `hp`**；
+  `BattleConfig` 里**没有 HP 字段**。第二场 `initialPlayerHp` = 第一场剩余 → 耐久条如实显示「打剩多少」。
+  ⚠️ `initialPlayerHp` 必须做成**构造时捕获的 `readonly` 字段**，不能是实时读 `vehicleA.hp` 的 getter（会假红）。
+- 冻结量变化（**预期后果**，非放开断言）：选择后 `DAY 3→4` → `nodeDone 384→512 / nodeTodo 512→384`
+  （**总量恒 896 不变**）、日志 `+6 → +7`（强化结果行 + `DAY N` 行）。
+- ⚠️ **图标判据用「盒内面积统计」**：probe 新增 `choiceOptions[].iconRect`（与绘制同源 `runChoiceIconRect`）。
+  双联炮图标 = 两根并排炮管 → 46×46 盒的几何中心落在**两管空隙**里 → **中心单点采样必然假红**。
+- ⚠️ **同一文件的多条 Edit 不要并行发出**（后落盘覆盖前者 → 静默丢改动，改完 grep 仍是旧值）；必须串行。
+
 ## 6. Next action
-- **PRP-R5 已交付并停等**（`c44239b`，单功能 commit + push，三路 SHA 四方一致，见 §1 链尾）。
-- **待用户裁决（真人录屏）**：adapter 口径开局车宽 69·84px / 峰值 172·190px 是否达到「物理可感知」。
-  若仍偏小 → 候选（均需重新授权）：调大 `RUN_BATTLE_VIEW_INSET`（视口更宽 → scale 更大，代价是裁切）或分段取景。
-  **禁止**在无授权时新增 PRP 专属动态 zoom / 镜头震动 / Kill zoom——**恢复旧模式，不发明新模式**。
+- **PRP-F2 已交付并停等**（单功能 commit + push，三路 SHA 见 §5.6）。
+- **待用户裁决（真人录屏 · 本 Queue 的核心假设）**：三种强化各来一次 →
+  判据只有一条：**不看顶部 Buff 文字，能不能仅从第二场战斗看出自己刚才选了什么**
+  （重型弹头 = 单发更重/命中位移更大/自身后坐更明显；双联炮 = 一次攻击两发；快速装填 = 开炮更密）。
+- **PRP-R5 遗留裁决**（若真人仍嫌车小）：adapter 口径开局 69·84px / 峰值 172·190px 是否可感知。
+  候选（均需重新授权）：调大 `RUN_BATTLE_VIEW_INSET`（视口更宽 → scale 更大，代价是裁切）或分段取景。
+  **禁止**在无授权时新增 PRP 专属动态 zoom / 镜头震动 / Kill zoom —— **恢复旧模式，不发明新模式**。
 - 未裁决挂起：俯视 `WEAPON_CONTACT_THRESHOLD=0.5`（`contactRouter.ts:694`）是否单开 Queue。
-- **PRP-R3 / PRP-F1 / PRP-R5 三轮电脑录屏真人验收回执均缺**（本分支唯一未闭环项）。
+- **PRP-R3 / PRP-F1 / PRP-R5 / PRP-F2 四轮电脑录屏真人验收回执均缺**（本分支唯一未闭环项）。
 - Low-prio backlog：`tests/_e2e_portrait_battle_lab.cjs` 的 `[iso] I2` 仍用 `readdirSync().find()`（同类「读到过期 chunk」
   缺陷，修法已有范式）；KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01；mobile drive slot（F-GARAGE-TOUCH-ASSEMBLY-R2）；
-  strip-scroll no clamp；O1/O2 非阻塞优化项。
+  strip-scroll no clamp；O1/O2 非阻塞优化项。**Foundation 补正候选**（见 §5.6）：给 `FunctionalInstall`
+  补 `overrides?: Partial<FunctionalPartDef>`（当前只有 `star`）。

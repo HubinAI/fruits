@@ -77,6 +77,7 @@ import {
   pressRunAction,
   runActionEnabled,
   runActionLabel,
+  runCarriedPlayerHp,
   runChoiceOpen,
   syncRunBattle,
   visibleRunLog,
@@ -149,9 +150,9 @@ const COLORS = {
   textDim: '#8a94a6',
   textFaint: '#5d6675',
   dayAccent: '#e8b23c',
-  iconHeavy: '#b8562e',
-  iconExplosive: '#c07a2a',
-  iconRepair: '#3f8f5a',
+  iconShell: '#b8562e',
+  iconTwin: '#c07a2a',
+  iconReload: '#3f8f5a',
 } as const;
 
 /**
@@ -167,7 +168,7 @@ export const RUN_LEDGER_COLORS: Readonly<Record<string, string>> = {
   road: COLORS.road,
   nodeDone: COLORS.nodeDone,
   nodeTodo: COLORS.nodeTodo,
-  buffIcon: COLORS.iconRepair,
+  buffIcon: COLORS.iconReload,
   buffChip: COLORS.buffChip,
   cardBar: COLORS.cardBar,
   actionBar: COLORS.actionBtn,
@@ -178,16 +179,16 @@ const CHOICE_MASK_COLOR = 'rgba(6,9,14,0.86)';
 
 /** 每个强化选项的图标绘制色（矢量字形，非纯色块；不入面积账本）。 */
 const CHOICE_ICON_COLOR: Readonly<Record<string, string>> = {
-  heavyWarhead: '#ffb066',
-  explosiveShell: '#ffd166',
-  emergencyRepair: '#7fd6a0',
+  heavyShell: '#ffb066',
+  twinCannon: '#ffd166',
+  fastReload: '#7fd6a0',
 };
 
 /** 顶部已获得图标的底色（按选项区分；芯片色统一 → `buffChip` 层可冻结）。 */
 const BUFF_ICON_COLOR: Readonly<Record<string, string>> = {
-  heavyWarhead: COLORS.iconHeavy,
-  explosiveShell: COLORS.iconExplosive,
-  emergencyRepair: COLORS.iconRepair,
+  heavyShell: COLORS.iconShell,
+  twinCannon: COLORS.iconTwin,
+  fastReload: COLORS.iconReload,
 };
 
 export interface RunPageScreenProbe {
@@ -223,6 +224,15 @@ export interface RunProbeEntity {
 export interface RunProbeBattleWorld {
   readonly phase: string;
   readonly timeMs: number;
+  /**
+   * PRP-F2：本场战斗生效的 Run 强化（null = 基础状态）。
+   * 与 `RunPageProbe.modifier` 同源；此处读的是**运行时真实拿到的值**（证明注入真的落地）。
+   */
+  readonly modifier: string | null;
+  /** 本场开局的真实玩家 HP（= 注入跨战斗耐久后的实际值）。 */
+  readonly initialPlayerHp: number;
+  /** 本场玩家 HP 上限（**不因跨战斗耐久改变** → 耐久条如实显示「打剩多少」）。 */
+  readonly playerHpMax: number;
   /** 已推进的**正式物理步数**。 */
   readonly steps: number;
   /** 当前存活弹丸数（真实 projectile 渲染快照 → 可证「炮弹真的在飞」）。 */
@@ -283,6 +293,8 @@ export interface RunPageProbe {
   readonly actionCount: number;
   readonly day: number;
   readonly dayTotal: number;
+  /** PRP-F2：本局已生效的 Run 强化（本局临时状态，新开 Run 即回 null）。 */
+  readonly modifier: string | null;
   readonly buffs: readonly string[];
   readonly buffLabels: readonly string[];
   /** 顶部实际绘制的强化图标数量（0 = 顶部第二行完全没有内容，可反证「没有空槽」）。 */
@@ -293,7 +305,7 @@ export interface RunPageProbe {
   readonly actionEnabled: boolean;
   readonly actionRect: RunRect;
   readonly choiceOpen: boolean;
-  readonly choiceOptions: readonly { id: string; label: string; note: string; rect: RunRect }[];
+  readonly choiceOptions: readonly { id: string; label: string; note: string; rect: RunRect; iconRect: RunRect }[];
   readonly bands: {
     top: RunRect;
     stage: RunRect;
@@ -476,10 +488,20 @@ export class RunPage {
     this.render();
   }
 
-  /** 建立真实战斗运行时（正式 `PlanckBattleOrchestrator`，零 config 覆盖）。 */
+  /**
+   * 建立真实战斗运行时（正式 `PlanckBattleOrchestrator`，零 config 覆盖）。
+   *
+   * PRP-F2：每次遭遇都**全新创建**，并把本局的两项 Run-local 状态注入进去：
+   *   - `modifier`   = 本局已选的 Cannon 强化（overlay registry + 武器 defId 重映射）；
+   *   - `carriedHp`  = 上一场真实剩余耐久（第二场从这里继续，不自动满血）。
+   * 旧运行时在此前已被 `endBattle()` 释放 → 弹丸 / 接触 / 世界不跨场残留。
+   */
   private beginBattle(): void {
     this.endBattle();
-    const rt = new RunBattleRuntime(false);
+    const rt = new RunBattleRuntime({
+      modifier: this.state.modifier,
+      carriedHp: runCarriedPlayerHp(this.state),
+    });
     this.battle = rt;
     // 实测开局外廓间距（不是写死数字）——「开局有明确距离」的证据
     this.battleInitialGap = rt.gapWorld();
@@ -754,7 +776,7 @@ export class RunPage {
     const icons = runBuffIconRects(s.buffs.length);
     icons.forEach((icon, i) => {
       const buff = s.buffs[i];
-      ctx.fillStyle = BUFF_ICON_COLOR[buff.id] ?? COLORS.iconRepair;
+      ctx.fillStyle = BUFF_ICON_COLOR[buff.id] ?? COLORS.iconReload;
       ctx.fillRect(icon.x, icon.y, icon.w, icon.h);
       const chip = runBuffIconChip(icon);
       ctx.fillStyle = COLORS.buffChip;
@@ -857,14 +879,14 @@ export class RunPage {
     });
   }
 
-  /** 每个选项一个可辨识的矢量图标（弹头 / 爆裂 / 维修十字），不承载文字。 */
+  /** 每个选项一个可辨识的矢量图标（重型弹头 = 弹体 / 双联炮 = 两根炮管 / 快速装填 = 循环箭头），不承载文字。 */
   private drawChoiceIcon(ctx: CanvasRenderingContext2D, id: string, r: RunRect): void {
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
     const s = r.w;
     ctx.fillStyle = CHOICE_ICON_COLOR[id] ?? COLORS.textBody;
-    if (id === 'heavyWarhead') {
-      // 弹头：矩形弹体 + 尖头
+    if (id === 'heavyShell') {
+      // 重型弹头：矩形弹体 + 尖头（比基础弹更粗壮）
       ctx.beginPath();
       ctx.moveTo(cx - s * 0.42, cy - s * 0.16);
       ctx.lineTo(cx + s * 0.12, cy - s * 0.16);
@@ -874,26 +896,34 @@ export class RunPage {
       ctx.closePath();
       ctx.fill();
       ctx.fillRect(cx - s * 0.48, cy - s * 0.06, s * 0.08, s * 0.12);
-    } else if (id === 'explosiveShell') {
-      // 爆裂：八芒星
-      const spikes = 8;
-      ctx.beginPath();
-      for (let k = 0; k < spikes * 2; k++) {
-        const ang = (k / (spikes * 2)) * Math.PI * 2 - Math.PI / 2;
-        const rad = k % 2 === 0 ? s * 0.46 : s * 0.2;
-        const px = cx + Math.cos(ang) * rad;
-        const py = cy + Math.sin(ang) * rad;
-        if (k === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
+    } else if (id === 'twinCannon') {
+      // 双联炮：两根并排炮管 + 两发弹头（一眼看出「一次打两发」）
+      const bw = s * 0.2;
+      const bh = s * 0.46;
+      for (const dx of [-s * 0.22, s * 0.02]) {
+        ctx.fillRect(cx + dx, cy - bh / 2, bw, bh);
+        ctx.beginPath();
+        ctx.moveTo(cx + dx, cy - bh / 2);
+        ctx.lineTo(cx + dx + bw / 2, cy - bh / 2 - s * 0.16);
+        ctx.lineTo(cx + dx + bw, cy - bh / 2);
+        ctx.closePath();
+        ctx.fill();
       }
+      ctx.fillRect(cx - s * 0.28, cy + bh / 2, s * 0.56, s * 0.1);
+    } else {
+      // 快速装填：环形循环箭头（装填节奏变快）
+      ctx.lineWidth = Math.max(2, s * 0.11);
+      ctx.strokeStyle = ctx.fillStyle;
+      ctx.beginPath();
+      ctx.arc(cx, cy, s * 0.34, Math.PI * 0.35, Math.PI * 1.75);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx + s * 0.08, cy - s * 0.42);
+      ctx.lineTo(cx + s * 0.42, cy - s * 0.2);
+      ctx.lineTo(cx + s * 0.06, cy - s * 0.02);
       ctx.closePath();
       ctx.fill();
-    } else {
-      // 维修：粗十字
-      const arm = s * 0.16;
-      const len = s * 0.44;
-      ctx.fillRect(cx - arm, cy - len, arm * 2, len * 2);
-      ctx.fillRect(cx - len, cy - arm, len * 2, arm * 2);
+      ctx.fillRect(cx - s * 0.1, cy - s * 0.1, s * 0.2, s * 0.36);
     }
   }
 
@@ -991,6 +1021,9 @@ export class RunPage {
       battleWorld: {
         phase: rt.phase,
         timeMs: rt.timeMs,
+        modifier: rt.modifier,
+        initialPlayerHp: rt.initialPlayerHp,
+        playerHpMax: rt.playerMaxHp,
         steps: rt.stepCount,
         projectiles: rt.projectileCount(),
         gapWorld,
@@ -1043,6 +1076,8 @@ export class RunPage {
       actionCount: s.actionCount,
       day: s.day,
       dayTotal: s.dayTotal,
+      /** PRP-F2：本局已生效的 Run 强化（本局临时，刷新即回 null）。 */
+      modifier: s.modifier,
       buffs: s.buffs.map((b) => b.id),
       buffLabels: s.buffs.map((b) => b.label),
       buffIconCount: runBuffIconRects(s.buffs.length).length,
@@ -1057,6 +1092,14 @@ export class RunPage {
         label: o.label,
         note: o.note,
         rect: runChoiceCardRects(RUN_CHOICE_OPTIONS.length)[i],
+        /**
+         * PRP-F2：图标盒（**与绘制同源** = `runChoiceIconRect`），供 E2E 在盒内**按面积**
+         * 统计「该选项专属图标色」的像素数。
+         * ⚠️ 为什么不再用「图标中心单点采样」：双联炮图标是**两根并排炮管**，
+         * 46×46 盒的几何中心恰好落在两管之间的空隙里 → 单点采样会假红。
+         * 面积统计比单点更强（证明图标真的成片画出来），且对每个图标形状都成立。
+         */
+        iconRect: runChoiceIconRect(runChoiceCardRects(RUN_CHOICE_OPTIONS.length)[i]),
       })),
       bands: {
         top: RUN_TOP_BAND,

@@ -75,6 +75,7 @@ import {
   pressRunAction,
   runActionEnabled,
   runActionLabel,
+  runCarriedPlayerHp,
   runChoiceOpen,
   syncRunBattle,
   visibleRunLog,
@@ -485,7 +486,7 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     expect(runChoiceMaskRect()).toEqual({ x: 0, y: 0, w: RUN_PAGE_W, h: RUN_PAGE_H });
   });
 
-  it('RP-13 选择后回到 IDLE：顶部新增图标 + 日志追加自然语言结果 + 历史完整', () => {
+  it('RP-13 选择后回到 IDLE：顶部新增图标 + 日志追加自然语言结果 + 推进到下一 DAY + 历史完整', () => {
     const { steps, finale } = runFullFlow();
     const choice = steps[4];
     expect(choice.phase).toBe('CHOICE');
@@ -493,14 +494,28 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     expect(finale.buffs.length).toBe(choice.buffs.length + 1);
     expect(finale.buffs[0].id).toBe(RUN_CHOICE_OPTIONS[0].id);
     expect(finale.buffs[0].label).toBe('重型弹头');
-    expect(finale.log.length).toBe(choice.log.length + 1);
+    // PRP-F2 必改 3：选择后追加两行 —— ①强化记录（自然语言）②新的 DAY 行
+    expect(finale.log.length).toBe(choice.log.length + 2);
     const last = finale.log[finale.log.length - 1];
-    expect(last.kind).toBe('choice');
-    expect(last.text).toBe('你换上了重型弹头。');
+    const prev = finale.log[finale.log.length - 2];
+    expect(prev.kind).toBe('choice');
+    expect(prev.text).toBe('你为大炮装上了重型弹头。');
+    expect(last.kind).toBe('day');
+    expect(last.text).toBe(`DAY ${RUN_INITIAL_DAY + 1}`);
+    // 本局临时强化被记录（必改 3）
+    expect(finale.modifier).toBe(RUN_CHOICE_OPTIONS[0].id);
     // 历史完整：CHOICE 之前的全部行原样保留
     expect(finale.log.slice(0, choice.log.length)).toEqual(choice.log);
     // seq 连续单调
     for (let i = 1; i < finale.log.length; i++) expect(finale.log[i].seq).toBe(finale.log[i - 1].seq + 1);
+  });
+
+  it('RP-13b 未选择之前本局没有强化（本局临时状态，新建 Run 回到 null）', () => {
+    const fresh = createRunPageState(CTX);
+    expect(fresh.modifier).toBeNull();
+    const { steps } = runFullFlow();
+    expect(steps[0].modifier).toBeNull(); // IDLE
+    expect(steps[4].modifier).toBeNull(); // CHOICE（还没选）
   });
 
   it('RP-14 误触保护：BATTLE / CHOICE 阶段按主动作 no-op；未知强化 id no-op', () => {
@@ -519,14 +534,15 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     void rt;
   });
 
-  it('RP-15 三个强化选项固定且正是 Queue 点名的三项，note 是玩家向「一句结果」', () => {
+  it('RP-15 三个强化选项固定且正是 Queue 点名的 Cannon 三选一（本局临时，不随机）', () => {
     expect(RUN_CHOICE_OPTIONS.length).toBe(3);
-    expect(RUN_CHOICE_OPTIONS.map((o) => o.label)).toEqual(['重型弹头', '爆裂弹', '紧急维修']);
+    expect(RUN_CHOICE_OPTIONS.map((o) => o.label)).toEqual(['重型弹头', '双联炮', '快速装填']);
     expect(RUN_CHOICE_OPTIONS.map((o) => o.note)).toEqual([
-      '炮弹更重，撞击和后坐增强',
-      '炮弹命中后发生范围爆炸',
-      '立即恢复部分耐久',
+      '炮弹更重，撞击和后坐都更明显',
+      '一次开火连续打出两发炮弹',
+      '开炮节奏明显变快',
     ]);
+    expect(RUN_CHOICE_OPTIONS.map((o) => o.id)).toEqual(['heavyShell', 'twinCannon', 'fastReload']);
     expect(new Set(RUN_CHOICE_OPTIONS.map((o) => o.id)).size).toBe(3);
     for (const o of RUN_CHOICE_OPTIONS) {
       expect(o.note.length).toBeGreaterThan(0);
@@ -536,11 +552,11 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     // 两个不同选项给出可区分的顶部图标 / 日志结果（选择真的生效）
     const a = chooseRunBuff(reachChoice(), RUN_CHOICE_OPTIONS[1].id);
     const b = chooseRunBuff(reachChoice(), RUN_CHOICE_OPTIONS[2].id);
-    expect(a.buffs[0].id).toBe('explosiveShell');
-    expect(b.buffs[0].id).toBe('emergencyRepair');
+    expect(a.buffs[0].id).toBe('twinCannon');
+    expect(b.buffs[0].id).toBe('fastReload');
     expect(a.buffs[0].id).not.toBe(b.buffs[0].id);
-    expect(a.log[a.log.length - 1].text).toBe('你换上了爆裂弹。');
-    expect(b.log[b.log.length - 1].text).toBe('你换上了紧急维修。');
+    expect(a.log[a.log.length - 2].text).toBe('你为大炮加装了一门副炮。');
+    expect(b.log[b.log.length - 2].text).toBe('你改进了大炮的装填机构。');
   });
 
   it('RP-16 真实战斗的帧同步是纯函数：同样的步数序列 → 同样的 HP / 结局', () => {
@@ -717,7 +733,12 @@ describe('PRP-F0｜D 面积账本：逐帧整页像素面积精确冻结', () =>
     });
 
     // 回到 IDLE 且拿到 1 个强化 → 待机近景回来 + 顶部出现 1 个图标（底 900 − 高光块 144 = 756）
-    expect(ledger(finale)).toEqual({ ...idleOnly, ...base, buffIcon: 756, buffChip: 144, ...on });
+    //
+    // ⚠️ PRP-F2：选择后 day 3→4 → 顶部进度节点整体前移一格（done 4×128 / todo 3×128）。
+    //    节点总量不变（896），只是「已完成 / 未完成」对调 → 与 day 推进同源，不是账本漂移。
+    const baseNextDay = { nodeDone: 512, nodeTodo: 384, buffIcon: 0, buffChip: 0, cardBar: 0 };
+    expect(ledger(finale)).toEqual({ ...idleOnly, ...baseNextDay, buffIcon: 756, buffChip: 144, ...on });
+    expect(ledger(finale).nodeDone + ledger(finale).nodeTodo).toBe(base.nodeDone + base.nodeTodo);
     expect(ledger(finale).buffIcon + ledger(finale).buffChip).toBe(30 * 30);
   });
 
@@ -1041,5 +1062,141 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
     }
     // 浮层出现时只有浮层入账（底层几何整体退出精确色 → 焦点唯一）
     expect(layersOf(reachChoice()).map((l) => l.layer)).toEqual(['cardBar', 'cardBar', 'cardBar']);
+  });
+});
+
+/* ============================================== G. PRP-F2 首个真实强化闭环 */
+
+describe('PRP-F2｜G 首个真实强化闭环：DAY 3 基础战斗 → 三选一 → DAY 4 强化战斗', () => {
+  /**
+   * 走完**两场**真实战斗（全程同一个页面 / 同一个状态机）：
+   *   DAY 3 → 战斗①（基础）→ RESULT → CHOICE → 选择 → DAY 4 → 战斗②（强化注入）
+   */
+  function runTwoBattleLoop(modId: string) {
+    const rt1 = new RunBattleRuntime();
+    let s = createRunPageState(CTX);
+    const trail: RunPageState[] = [s]; // IDLE(DAY3)
+    s = pressRunAction(s, CTX); // EVENT
+    s = pressRunAction(s, CTX); // BATTLE
+    trail.push(s);
+    s = driveToEnd(s, rt1); // RESULT
+    trail.push(s);
+    const firstEnd = s;
+    const firstRemaining = s.battle!.playerHp;
+    rt1.dispose();
+
+    s = pressRunAction(s, CTX); // CHOICE
+    trail.push(s);
+    s = chooseRunBuff(s, modId); // 选择 → IDLE(DAY4)
+    trail.push(s);
+    const afterChoice = s;
+
+    // 战斗②：全新运行时 + 本局强化 + 跨战斗剩余耐久
+    const rt2 = new RunBattleRuntime({
+      modifier: afterChoice.modifier,
+      carriedHp: runCarriedPlayerHp(afterChoice),
+    });
+    s = pressRunAction(s, CTX); // EVENT
+    s = pressRunAction(s, CTX); // BATTLE
+    trail.push(s);
+    const secondStartHp = s.battle!.playerHp;
+    s = driveToEnd(s, rt2); // 第二场也真实打到结束（同一页面里的第二次 RESULT）
+    trail.push(s);
+    const secondRuntime = rt2;
+    return { trail, firstEnd, firstRemaining, afterChoice, secondStartHp, secondRuntime };
+  }
+
+  it('RP-F2-01 完整闭环走完，全程同一页面（phaseTrail 无跳转）', () => {
+    const { trail } = runTwoBattleLoop('heavyShell');
+    // trail 里同一 phase 可能连续出现（两次推进之间战斗仍在进行）→ 先做连续去重，
+    // 得到「状态切换序列」，再断言两次完整遭遇确实相邻出现在同一个页面里。
+    const seq: string[] = [];
+    for (const t of trail) if (seq[seq.length - 1] !== t.phase) seq.push(t.phase);
+    expect(seq.filter((p) => p === 'BATTLE').length).toBe(2);
+    expect(seq.filter((p) => p === 'RESULT').length).toBe(2);
+    expect(seq.filter((p) => p === 'CHOICE').length).toBe(1);
+    expect(seq).toEqual(['IDLE', 'BATTLE', 'RESULT', 'CHOICE', 'IDLE', 'BATTLE', 'RESULT']);
+    // transitions 单调递增（状态切换计数只增不减 → 同一页面内推进）
+    for (let i = 1; i < trail.length; i++) {
+      expect(trail[i].transitions).toBeGreaterThanOrEqual(trail[i - 1].transitions);
+    }
+    // 第一场开局没有强化，第二场开局有强化
+    expect(trail[2].modifier).toBeNull();
+    expect(trail[trail.length - 1].modifier).toBe('heavyShell');
+  });
+
+  it('RP-F2-02 DAY 推进 3 → 4，且日志是玩家向自然语言 + 新 DAY 行', () => {
+    const { firstEnd, afterChoice } = runTwoBattleLoop('twinCannon');
+    expect(firstEnd.day).toBe(RUN_INITIAL_DAY);
+    expect(afterChoice.day).toBe(RUN_INITIAL_DAY + 1);
+    const texts = afterChoice.log.map((e) => e.text);
+    expect(texts).toContain('你为大炮加装了一门副炮。');
+    expect(texts).toContain(`DAY ${RUN_INITIAL_DAY + 1}`);
+    // 日志仍是纯自然语言（结构上吐不出方括号前缀）
+    for (const e of afterChoice.log) {
+      expect(formatRunLog(e)).toBe(e.text);
+      expect(/^\[/.test(e.text)).toBe(false);
+    }
+  });
+
+  it('RP-F2-03 跨战斗耐久：第二场从第一场真实剩余耐久开始，不自动满血', () => {
+    const { firstRemaining, secondStartHp, secondRuntime } = runTwoBattleLoop('fastReload');
+    expect(firstRemaining).toBeGreaterThan(0);
+    expect(secondStartHp).toBe(firstRemaining);
+    expect(secondRuntime.initialPlayerHp).toBe(firstRemaining);
+    expect(secondRuntime.playerMaxHp).toBeGreaterThan(secondRuntime.initialPlayerHp);
+    secondRuntime.dispose();
+  });
+
+  it('RP-F2-04 第二场的真实运行时确实带着强化（不是只写在 state 里）', () => {
+    for (const id of ['heavyShell', 'twinCannon', 'fastReload']) {
+      const { secondRuntime } = runTwoBattleLoop(id);
+      expect(secondRuntime.modifier).toBe(id);
+      const params = secondRuntime.orchestrator.vehicleA.parts.find(
+        (p) => p.def.behavior === 'cannon' || p.def.behavior === 'shotgun',
+      )!.def.behaviorParams as Record<string, unknown>;
+      if (id === 'heavyShell') expect(params.projectileMass).toBe(4);
+      if (id === 'twinCannon') expect(params.fanAnglesDeg).toEqual([-4, 4]);
+      if (id === 'fastReload') expect(params.cooldownMs).toBe(400);
+      secondRuntime.dispose();
+    }
+  });
+
+  it('RP-F2-05 强化只在本局：新开 Run 立刻回到基础状态', () => {
+    const { afterChoice } = runTwoBattleLoop('fastReload');
+    expect(afterChoice.modifier).toBe('fastReload');
+    const fresh = createRunPageState(CTX);
+    expect(fresh.modifier).toBeNull();
+    expect(fresh.buffs).toEqual([]);
+    expect(fresh.day).toBe(RUN_INITIAL_DAY);
+    // 新局用基础运行时 → 武器回到正式定义
+    const rt = new RunBattleRuntime();
+    expect(rt.modifier).toBeNull();
+    const params = rt.orchestrator.vehicleA.parts.find(
+      (p) => p.def.behavior === 'cannon',
+    )!.def.behaviorParams as Record<string, number>;
+    expect(params.cooldownMs).toBe(1000);
+    expect(params.projectileRadius).toBe(10);
+    rt.dispose();
+  });
+
+  it('RP-F2-06 宿主把 modifier / carriedHp 真正注入每次新建的战斗', () => {
+    const src = stripComments(read('runPage.ts'));
+    expect(src.includes('runCarriedPlayerHp')).toBe(true);
+    // beginBattle 必须同时传两项 Run-local 状态（缺一即「选了强化但第二场没生效」）
+    expect(/new RunBattleRuntime\(\{[\s\S]{0,220}modifier:\s*this\.state\.modifier/.test(src)).toBe(true);
+    expect(/new RunBattleRuntime\(\{[\s\S]{0,220}carriedHp:\s*runCarriedPlayerHp\(this\.state\)/.test(src)).toBe(
+      true,
+    );
+    // 遭遇结束时释放旧运行时 → 弹丸 / 接触 / 世界不跨场残留
+    expect(src.includes('this.battle.dispose()')).toBe(true);
+  });
+
+  it('RP-F2-07 宿主入口仍是唯一画布点击源（无 DOM 按钮 / 无跳转）', () => {
+    const src = stripComments(read('runPage.ts'));
+    expect(src.includes('runChoiceCardRects(RUN_CHOICE_OPTIONS.length)')).toBe(true);
+    expect(src.includes('chooseRunBuff(this.state, RUN_CHOICE_OPTIONS[i].id)')).toBe(true);
+    expect(src.includes('location.href')).toBe(false);
+    expect(src.includes('window.open')).toBe(false);
   });
 });
