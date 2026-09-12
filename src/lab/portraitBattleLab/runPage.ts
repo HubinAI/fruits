@@ -1,5 +1,6 @@
 /**
  * PRP-F0-RUN-PAGE-SHELL｜PRP-R3-CAPYBARA-UI-HIERARCHY-REBUILD
+ * ｜PRP-F1-PORTRAIT-PLANCK-BATTLE-INTEGRATION
  * Run Page 控制器（本原型**唯一**的 DOM / Canvas / 输入层）。
  *
  * 页面契约（与产品基线一一对应）：
@@ -11,13 +12,20 @@
  *   - 最底只有**一个**主动作按钮；BATTLE 期间进入「战斗中」且不可误触推进；
  *   - CHOICE 期间原页面**位置不变**、整体变暗（画布内遮罩），中央出现三选一浮层。
  *
- * PRP-R3 信息层级重构（本文件是落点）：
- *   1) 顶部减法：只留「DAY 进度一行 + 实际已获得的强化图标一行」，
- *      **删除**「核心构建 X/5」与 5 个固定空槽（结构性：`runBuffIconRects(0)` 为空数组）；
- *   2) 战斗主体：车辆改用**正式 sprite**（`runVehicleAssets`）+ 正式 `visualWorldTransform`；
- *      舞台重新构图（天空 / 远山 / 路面），车辆明显放大且视觉重心偏下；
- *   3) 冒险记录：自然语言叙事、15px 可读字号、底部对齐、最近事件突出 / 旧事件弱化；
- *   4) CHOICE：卡片 = 矢量图标 + 名称 + 一句结果，整页重压暗 → 浮层成为唯一焦点。
+ * PRP-R3 信息层级重构（已通过）：顶部减法 / 叙事日志 / 玩家化三选一（本文件是落点）。
+ *
+ * ⚠️ PRP-F1-PORTRAIT-PLANCK-BATTLE-INTEGRATION（本 Queue 的落点）：
+ *   中部舞台带从「PRP 自己的假战斗舞台」换成**真实 Planck 侧视战斗世界**：
+ *
+ *     IDLE                      → PRP 近景待机舞台（R3 已通过的构图：真实 sprite + 真实地线）
+ *     EVENT / BATTLE / RESULT   → 真实战斗世界（`RunBattleView`：正式 Renderer 渲染，
+ *                                 PRP 固定远摄相机 + 舞台带贴图 = Camera / Clip 适配）
+ *
+ *   - 世界尺度 / 出生点 / 移动 / 武器 / 弹丸 / 后坐 / 碰撞 / 阶段 / 结果**全部是正式的**
+ *     （`RunBattleRuntime` → 正式 `PlanckBattleOrchestrator`，构造时零 config 覆盖）；
+ *   - PRP 在战斗里的新增语义仅剩：生命周期接线、固定 camera transform、clip、HP 展示、
+ *     result → Run Page state（= Queue 必改 4 给本适配划定的理想职责）；
+ *   - BATTLE 的推进是**真实物理时间**（`runtime.step(realDt)`），不再是定时脚本。
  *
  * Debug 与玩家界面分离：
  *   本页面**只有** #run-root / .run-stage / #run-canvas 三层壳，不含任何
@@ -60,17 +68,17 @@ import {
   type RunRect,
 } from './runPageLayout';
 import {
-  RUN_BATTLE_SCRIPT,
   RUN_CHOICE_OPTIONS,
-  advanceRunBattle,
   chooseRunBuff,
   createRunPageState,
   durabilityPercent,
+  finishRunBattle,
   formatRunLog,
   pressRunAction,
   runActionEnabled,
   runActionLabel,
   runChoiceOpen,
+  syncRunBattle,
   visibleRunLog,
   type RunLogEntry,
   type RunPageState,
@@ -84,6 +92,13 @@ import {
   type RunStageEntityView,
   type RunStageView,
 } from './runPageScene';
+import {
+  RunBattleRuntime,
+  battleViewX,
+  battleViewY,
+  type RunBattleBox,
+} from './runBattleRuntime';
+import { RunBattleView } from './runBattleView';
 import { RunVisualStore, type RunAssetStats } from './runVehicleAssets';
 
 const FONT_STACK = 'system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -198,6 +213,48 @@ export interface RunProbeEntity {
   readonly allSprites: boolean;
 }
 
+/**
+ * 真实 Planck 战斗世界的诊断口径（EVENT 起非空）——全部读自正式运行时，零插值、零预测。
+ */
+export interface RunProbeBattleWorld {
+  readonly phase: string;
+  readonly timeMs: number;
+  /** 已推进的**正式物理步数**。 */
+  readonly steps: number;
+  /** 当前存活弹丸数（真实 projectile 渲染快照 → 可证「炮弹真的在飞」）。 */
+  readonly projectiles: number;
+  /** 两车真实可见外廓的世界间距（>0 = 完全分离）。 */
+  readonly gapWorld: number;
+  /** 同上，换算到舞台带逻辑坐标（= gapWorld × 相机缩放）。 */
+  readonly gapView: number;
+  readonly world: {
+    /** 正式 `DEFAULT_ARENA_CONFIG.width` = 1600（**不是**舞台带宽 390）。 */
+    readonly width: number;
+    readonly height: number;
+    readonly groundY: number;
+    /** 构造后实测的出生中心 x（正式 spawnA / spawnB）。 */
+    readonly spawnAx: number;
+    readonly spawnBx: number;
+    /** 出生中心距（世界 px）。 */
+    readonly spawnSeparation: number;
+    /** 开战瞬间实测的两车外廓间距 —— 证明「开局有明确距离」。 */
+    readonly initialGap: number;
+  };
+  readonly camera: {
+    /** 固定远摄缩放 = viewW / world.width。 */
+    readonly scale: number;
+    readonly offsetX: number;
+    readonly offsetY: number;
+    readonly groundScreenY: number;
+    readonly viewW: number;
+    readonly viewH: number;
+    /** 相机是否覆盖完整世界 0..worldW（固定取景的结构判据）。 */
+    readonly coversWorld: boolean;
+  };
+  readonly player: RunProbeEntity;
+  readonly enemy: RunProbeEntity;
+}
+
 /** 只读诊断快照（Run Page 专属；仅存在于本原型页面，不进入任何正式构建）。 */
 export interface RunPageProbe {
   readonly logicalW: number;
@@ -227,29 +284,53 @@ export interface RunPageProbe {
   };
   readonly battle: {
     steps: number;
-    totalSteps: number;
     playerHp: number;
     playerHpMax: number;
     enemyHp: number;
     enemyHpMax: number;
     done: boolean;
+    /** 官方 `resolveBattleResult` 的胜负方（'A' = 玩家；未结束为 null）。 */
+    winner: string | null;
+    /** 官方结束原因（未结束为 null）。 */
+    endReason: string | null;
     durabilityPercent: number;
   } | null;
+  /**
+   * 中部舞台。
+   *
+   * `mode` 是唯一的绘制来源判据：
+   *   - `'idle'`：PRP 待机近景（`ground` / `road` / 单辆玩家车真实存在）；
+   *   - `'battle'`：真实 Planck 战斗世界（离屏位图贴满整个舞台带 →
+   *     `ground` / `road` 这两层**不存在**，其数值仅供布局参照）。
+   * `player` / `enemy` / `playerLeftOfEnemy` / `minGapPx` 两种模式下都有效。
+   *
+   * ⚠️ **坐标系不对称（实测口径，勿混用）**：
+   *   - `mode === 'idle'`：`ground` / `road` / `player.bounds` 是**页面绝对逻辑坐标**
+   *     （`runStageGroundY()` 自带 `RUN_STAGE_BAND.y` 偏移，绘制时直接 `fillRect` 不再加带偏移）；
+   *   - `mode === 'battle'`：`player` / `enemy` 的 `bounds` 是**舞台带内相对坐标**
+   *     （经 `battleViewY(cam, …)` 得到 0..带高，合成时由 9 参 `drawImage` 落到带内）。
+   *   即：拿 `bounds` 去采样画布像素时，battle 模式必须再加 `bands.stage.y`，idle 模式**不能**加。
+   */
   readonly stage: {
+    mode: 'idle' | 'battle';
+    /** 当前生效的显示缩放（idle = 近景缩放；battle = 固定远摄缩放）。 */
     scale: number;
     groundY: number;
     ground: RunRect;
     road: RunRect;
     player: RunProbeEntity;
     enemy: RunProbeEntity | null;
-    enemyGone: boolean;
     /** 玩家是否在敌人**左侧**（无敌人时为 null）—— 验收「玩家左 / 敌人右」。 */
     playerLeftOfEnemy: boolean | null;
     /** 两侧最小水平间距（>0 = 完全分离，无重叠）。 */
     minGapPx: number | null;
   };
+  /** 真实战斗世界（`mode === 'battle'` 时非空）。 */
+  readonly battleWorld: RunProbeBattleWorld | null;
   /** 真实车辆 sprite 的加载状态（未就绪时降级为纯色几何，绝不伪装成已用真实视觉）。 */
   readonly assets: RunAssetStats;
+  /** 战斗世界自己的 sprite 加载状态（与上一条**分开报告**，不混为一谈）。 */
+  readonly battleAssets: { registered: number; ready: number; failed: readonly string[] };
   readonly layers: Record<RunLayerId, number>;
   readonly screen: RunPageScreenProbe;
   /** 玩家页面上的开发控制数量（恒为 0；Debug 控制只存在于独立入口）。 */
@@ -263,15 +344,20 @@ export class RunPage {
   private readonly stageWrap: HTMLDivElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D | null;
+  /** IDLE 待机近景的 sprite 表（PRP-local，只服务待机构图）。 */
   private readonly assets = new RunVisualStore();
+  /** 真实战斗世界视图宿主（正式 Renderer + 固定远摄相机 + 舞台带贴图）。 */
+  private readonly battleView = new RunBattleView();
 
   /** 固定摄像机：竖屏 390×844 逻辑舞台（复用共享 contain 变换契约）。 */
   private readonly vp = new PlayerViewportTransform(PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
   private state: RunPageState = createRunPageState(runPageContext());
   private rafHandle = 0;
   private lastFrameMs = 0;
-  /** BATTLE 脚本的时间累加器（真实时间 → 固定步数，确定性推进）。 */
-  private battleAccMs = 0;
+  /** 当前遭遇的真实战斗运行时（EVENT 建立 → 回到 IDLE 时释放）。 */
+  private battle: RunBattleRuntime | null = null;
+  /** 开战瞬间实测的两车外廓间距（证据：开局有明确距离），不是写死数字。 */
+  private battleInitialGap = 0;
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
 
@@ -286,6 +372,7 @@ export class RunPage {
     this.observeResize();
     // 真实车辆视觉：正式 sprite 异步加载（完成即重绘；缺失则如实降级）
     this.assets.loadAll(() => this.render());
+    this.battleView.onAssetsReady(() => this.render());
     this.render();
   }
 
@@ -316,6 +403,8 @@ export class RunPage {
   /** 释放监听（整块删除 / 热更新友好）。 */
   dispose(): void {
     this.stopLoop();
+    this.endBattle();
+    this.battleView.dispose();
     window.removeEventListener('resize', this.onWindowResize);
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     if (this.resizeObserver) {
@@ -354,8 +443,13 @@ export class RunPage {
   private apply(next: RunPageState): void {
     if (next === this.state) return; // no-op（BATTLE / CHOICE 误触保护）
     this.state = next;
+
+    // 遭遇即建立真实战斗世界（EVENT 时两车已按正式 spawn 摆在战场两端 → 玩家先看到距离）
+    if ((next.phase === 'EVENT' || next.phase === 'BATTLE') && !this.battle) this.beginBattle();
+    // 回到 IDLE = 这一局遭遇结束（释放运行时；RESULT / CHOICE 期间战场保持冻结可见）
+    if (next.phase === 'IDLE' && this.battle) this.endBattle();
+
     if (next.phase === 'BATTLE') {
-      this.battleAccMs = 0;
       this.startLoop();
     } else {
       this.stopLoop();
@@ -363,27 +457,64 @@ export class RunPage {
     this.render();
   }
 
+  /** 建立真实战斗运行时（正式 `PlanckBattleOrchestrator`，零 config 覆盖）。 */
+  private beginBattle(): void {
+    this.endBattle();
+    const rt = new RunBattleRuntime(false);
+    this.battle = rt;
+    // 实测开局外廓间距（不是写死数字）——「开局有明确距离」的证据
+    this.battleInitialGap = rt.gapWorld();
+  }
+
+  /** 释放战斗运行时（战斗世界中双方位置/HP 随之不再保留 → 下一次遭遇从正式 spawn 重来）。 */
+  private endBattle(): void {
+    if (!this.battle) return;
+    this.battle.dispose();
+    this.battle = null;
+    this.battleInitialGap = 0;
+  }
+
+  /**
+   * 战斗循环：**真实物理时间**推进正式 Orchestrator。
+   *
+   * 每帧：`runtime.step(dt)` → 同步真实 HP / 真实步数（不写日志）→
+   * 官方出结果的那一刻一次性 `finishRunBattle` → RESULT。
+   * 这里**没有任何战斗剧本**：步数、伤害、结束时间全部由物理与正式规则决定。
+   */
   private startLoop(): void {
     if (this.rafHandle !== 0) return;
     this.lastFrameMs = performance.now();
     const tick = (now: number): void => {
       const dt = Math.min(64, now - this.lastFrameMs);
       this.lastFrameMs = now;
-      if (this.state.phase !== 'BATTLE') {
+      const rt = this.battle;
+      if (this.state.phase !== 'BATTLE' || !rt) {
         this.rafHandle = 0;
         return;
       }
-      const perStepMs = RUN_BATTLE_SCRIPT.durationMs / RUN_BATTLE_SCRIPT.totalSteps;
-      this.battleAccMs += dt;
-      const steps = Math.floor(this.battleAccMs / perStepMs);
-      if (steps > 0) {
-        this.battleAccMs -= steps * perStepMs;
-        this.apply(advanceRunBattle(this.state, steps));
-        if (this.state.phase !== 'BATTLE') {
-          this.rafHandle = 0;
-          return;
-        }
+
+      rt.step(dt);
+      const hp = rt.hp();
+      this.state = syncRunBattle(this.state, {
+        playerHp: hp.a,
+        enemyHp: hp.b,
+        steps: rt.stepCount,
+      });
+
+      const result = rt.result;
+      if (result) {
+        this.state = finishRunBattle(this.state, {
+          winner: result.winner ?? null,
+          endReason: result.endReason ?? null,
+          playerHp: hp.a,
+          enemyHp: hp.b,
+          steps: rt.stepCount,
+        });
+        this.rafHandle = 0; // 战斗结束 → 自动停止循环（RESULT 是一个静止画面）
+        this.render();
+        return;
       }
+
       this.render();
       this.rafHandle = requestAnimationFrame(tick);
     };
@@ -416,8 +547,9 @@ export class RunPage {
     }
   }
 
+  /** IDLE 待机近景（**只服务 IDLE**：战斗阶段由真实战斗世界接管舞台带）。 */
   private stageView(): RunStageView {
-    return buildRunStageView(this.state.phase, this.state.battle);
+    return buildRunStageView();
   }
 
   /**
@@ -443,11 +575,19 @@ export class RunPage {
     ctx.fillStyle = COLORS.actionBandBg;
     ctx.fillRect(RUN_ACTION_BAND.x, RUN_ACTION_BAND.y, RUN_ACTION_BAND.w, RUN_ACTION_BAND.h);
 
-    // 2) 中部舞台：天空 / 远山 / 路面 / 地线 / 两车（真实 sprite）
+    // 2) 中部舞台：两种模式二选一，**绝不同时出现**
+    //    - IDLE：PRP 待机近景（天空 / 远山 / 路面 / 地线 / 玩家车）
+    //    - EVENT / BATTLE / RESULT / CHOICE：真实 Planck 战斗世界
+    //      （离屏画布 = 舞台带尺寸 → clip 由「画布即带」结构性保证，只有一次 1:1 贴图）
     const view = this.stageView();
-    this.drawBackdrop(ctx, view);
-    this.drawEntity(ctx, view.player);
-    if (view.enemy) this.drawEntity(ctx, view.enemy);
+    if (s.phase === 'IDLE' || !this.battle) {
+      // 兜底：战斗运行时缺失（结构上不可达，除非宿主未按契约建立）→ 如实画待机近景
+      this.drawBackdrop(ctx, view);
+      this.drawEntity(ctx, view.player);
+    } else {
+      this.battleView.render(this.battle);
+      this.battleView.blit(ctx);
+    }
 
     // 分带线（1px）。⚠️ 画在下一条带的**首行**（`band.y`）而不是上一条带的末行（`band.y - 1`）：
     // 后者会吃掉路面最底一行，使「路面 = 纯色矩形」的精确面积断言与实际渲染差一整行。
@@ -754,10 +894,6 @@ export class RunPage {
     const view = this.stageView();
     const shapes = this.layeredShapes();
     const layers = shapes.length === 0 ? emptyRunLayerAreas() : runPaintedAreas(shapes);
-    const playerLeftOfEnemy = view.enemy
-      ? view.player.bounds.x + view.player.bounds.w <= view.enemy.bounds.x
-      : null;
-    const minGapPx = view.enemy ? view.enemy.bounds.x - (view.player.bounds.x + view.player.bounds.w) : null;
 
     const entityProbe = (e: RunStageEntityView): RunProbeEntity => ({
       visuals: e.visuals.map((v) => ({
@@ -775,6 +911,101 @@ export class RunPage {
         ),
     });
 
+    const rt = this.battle;
+    const battleAssets = this.battleView.assetStats();
+
+    if (!rt) {
+      // IDLE：PRP 待机近景（只有玩家一辆车）
+      return {
+        ...this.baseProbe(s, rect, layers),
+        stage: {
+          mode: 'idle',
+          scale: view.scale,
+          groundY: view.groundY,
+          ground: copyRect(view.ground),
+          road: copyRect(view.road),
+          player: entityProbe(view.player),
+          enemy: null,
+          playerLeftOfEnemy: null,
+          minGapPx: null,
+        },
+        battleWorld: null,
+        battleAssets,
+      };
+    }
+
+    // EVENT / BATTLE / RESULT / CHOICE：真实 Planck 战斗世界
+    const cam = this.battleView.getCamera();
+    const aBox = rt.vehicleBox('A');
+    const bBox = rt.vehicleBox('B');
+    const gapWorld = bBox.minX - aBox.maxX;
+    const toView = (b: RunBattleBox): RunRect => ({
+      x: battleViewX(cam, b.minX),
+      y: battleViewY(cam, b.minY),
+      w: (b.maxX - b.minX) * cam.scale,
+      h: (b.maxY - b.minY) * cam.scale,
+    });
+    // 真实战斗世界里「是否有降级占位」的判据 = 正式 sprite 是否全部就绪
+    // （正式 Renderer 不会用纯色矩形冒充车辆：它只画 sprite 与真实几何）。
+    const battleEntity = (b: RunBattleBox): RunProbeEntity => ({
+      visuals: [],
+      bounds: toView(b),
+      allSprites: this.battleView.assetsAllReady,
+    });
+    const aView = toView(aBox);
+    const bView = toView(bBox);
+
+    return {
+      ...this.baseProbe(s, rect, layers),
+      stage: {
+        mode: 'battle',
+        scale: cam.scale,
+        groundY: cam.groundScreenY,
+        ground: copyRect(view.ground),
+        road: copyRect(view.road),
+        player: battleEntity(aBox),
+        enemy: battleEntity(bBox),
+        playerLeftOfEnemy: aView.x + aView.w <= bView.x,
+        minGapPx: bView.x - (aView.x + aView.w),
+      },
+      battleWorld: {
+        phase: rt.phase,
+        timeMs: rt.timeMs,
+        steps: rt.stepCount,
+        projectiles: rt.projectileCount(),
+        gapWorld,
+        gapView: gapWorld * cam.scale,
+        world: {
+          width: rt.arenaWidth,
+          height: rt.arenaHeight,
+          groundY: rt.groundY,
+          spawnAx: rt.spawnAx,
+          spawnBx: rt.spawnBx,
+          spawnSeparation: rt.spawnSeparation,
+          initialGap: this.battleInitialGap,
+        },
+        camera: {
+          scale: cam.scale,
+          offsetX: cam.offsetX,
+          offsetY: cam.offsetY,
+          groundScreenY: cam.groundScreenY,
+          viewW: cam.viewW,
+          viewH: cam.viewH,
+          coversWorld: cam.offsetX <= 0 && cam.offsetX + cam.worldW * cam.scale >= cam.viewW - 1e-6,
+        },
+        player: battleEntity(aBox),
+        enemy: battleEntity(bBox),
+      },
+      battleAssets,
+    };
+  }
+
+  /** 与 phase 无关的那部分诊断快照（顶部 / 日志 / 动作 / CHOICE / 分带 / 屏幕 / 账本）。 */
+  private baseProbe(
+    s: RunPageState,
+    rect: DOMRect,
+    layers: Record<RunLayerId, number>,
+  ): Omit<RunPageProbe, 'stage' | 'battleWorld' | 'battleAssets'> {
     return {
       logicalW: PORTRAIT_LOGICAL_W,
       logicalH: PORTRAIT_LOGICAL_H,
@@ -808,26 +1039,16 @@ export class RunPage {
       battle: s.battle
         ? {
             steps: s.battle.steps,
-            totalSteps: s.battle.totalSteps,
             playerHp: s.battle.playerHp,
             playerHpMax: s.battle.playerHpMax,
             enemyHp: s.battle.enemyHp,
             enemyHpMax: s.battle.enemyHpMax,
             done: s.battle.done,
+            winner: s.battle.winner,
+            endReason: s.battle.endReason,
             durabilityPercent: durabilityPercent(s.battle),
           }
         : null,
-      stage: {
-        scale: view.scale,
-        groundY: view.groundY,
-        ground: copyRect(view.ground),
-        road: copyRect(view.road),
-        player: entityProbe(view.player),
-        enemy: view.enemy ? entityProbe(view.enemy) : null,
-        enemyGone: view.enemyGone,
-        playerLeftOfEnemy,
-        minGapPx,
-      },
       assets: this.assets.stats(),
       layers,
       screen: {

@@ -5,6 +5,11 @@
  *   - **PRP｜Portrait Run Prototype** —— 玩家页面 `run-page.html`
  *     （`runPage*.ts` / `runMain.ts` / `runVehicleAssets.ts`：单一 Run Page +
  *      五状态切换 + 自然语言冒险记录 + 真实车辆 sprite + 选择浮层）；
+ *     ⚠️ PRP-F1 起，中部舞台的**遭遇/战斗/结果**三个阶段接入的是
+ *     **旧正式左右侧视 Planck 战斗本身**（`runBattleRuntime.ts` = 正式
+ *     `PlanckBattleOrchestrator` 的薄适配；`runBattleView.ts` = 正式 `Renderer` +
+ *     固定远摄相机 + 舞台带贴图）。PRP 在战斗里只负责：生命周期接线 / camera transform /
+ *     clip / HP 展示 / result → Run Page state，**不含任何 gameplay 数值或演出脚本**。
  *   - **PBL｜Portrait Battle Lab** —— **DEBUG ONLY** control area `portrait-lab.html`
  *     （`lab.ts` / `main.ts` / `arenaA.ts` / `gate.ts` …：Arena / Loadout / Encounter / Gate）。
  *   两者共享本文件的竖屏 390×844 基准与 F1 测试数据，但玩家页面**不引用**任何 Debug 控制器。
@@ -27,7 +32,7 @@
  *   3) 根目录 vite.portrait-lab.config.ts
  *   4) tests/portraitBattleLab.test.ts、tests/portraitBattleLabF1.test.ts、
  *      tests/portraitBattleLabA1.test.ts、tests/portraitBattleLabG1.test.ts、
- *      tests/portraitRunPage.test.ts、
+ *      tests/portraitRunPage.test.ts、tests/portraitRunBattle.test.ts、
  *      tests/_e2e_portrait_battle_lab.cjs、tests/_e2e_run_page.cjs、
  *      tests/_e2e_prp_default_entry.cjs
  *   5) package.json 中 dev:run-page / dev:debug-lab / build:portrait-lab /

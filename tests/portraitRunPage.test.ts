@@ -1,14 +1,17 @@
 /**
  * PRP-F0-RUN-PAGE-SHELL｜PRP-R3-CAPYBARA-UI-HIERARCHY-REBUILD
+ * ｜PRP-F1-PORTRAIT-PLANCK-BATTLE-INTEGRATION
  * Portrait Run Prototype —— Run Page targeted 测试（纯 node，无 DOM）。
  *
  * 覆盖六层：
- *   A) 页面层级：竖屏 390×844 四条横带无缝无叠；**PRP-R3 新比例**（顶 8~10 / 台 33~36 / 志 40~45 / 作 8~10）；
+ *   A) 页面层级：竖屏 390×844 四条横带无缝无叠；PRP-R3 比例（顶 80 / 台 302 / 志 378 / 作 84）；
  *   B) 五状态机与固定演示流程：IDLE → EVENT → BATTLE → RESULT → CHOICE → IDLE（同一页面内）；
- *   C) 侧视战斗舞台：玩家固定左 / 敌人固定右、EVENT 出现 / RESULT 消失、演出位移不影响数值；
+ *      ⚠️ PRP-F1：BATTLE 由**真实物理**推进（`RunBattleRuntime` → 正式 `PlanckBattleOrchestrator`），
+ *      不再有 `RUN_BATTLE_SCRIPT` —— 本文件用与宿主同一条链（step → sync → finish）驱动。
+ *   C) 中部舞台：IDLE 待机近景（PRP 构图）vs 真实战斗世界（正式世界尺度 + 固定远摄相机）；
  *   D) 面积账本：逐帧整页像素面积**精确冻结**（浏览器端再用真实 getImageData 交叉核对）；
- *   E) 源码守卫：Debug 与玩家界面分离、不接 Arena A/B、不接 Planck、不存在任何页面跳转；
- *   F) **PRP-R3 信息层级**：顶部无空槽 / 战斗主体是真实车辆 sprite / 日志是玩家叙事 / CHOICE 独占焦点。
+ *   E) 源码守卫：Debug 与玩家界面分离、只经 runBattleRuntime 接正式战斗、不存在任何页面跳转；
+ *   F) 信息层级：顶部无空槽 / IDLE 战斗主体是真实车辆 sprite / 日志是玩家叙事 / CHOICE 独占焦点。
  *
  * 面积期望值是**冻结字面量**（不是就地重算）：任何布局改动都必须显式更新这里，
  * 从而让「像素确实变了」这件事无法悄悄发生（与 F1-R22 同一约定）。
@@ -32,7 +35,6 @@ import {
   RUN_PAGE_H,
   RUN_PAGE_W,
   RUN_SIDE_VIEW,
-  RUN_SIDE_VIEW_CLOSING_PX,
   RUN_STAGE_BAND,
   RUN_STAGE_HAZE_H,
   RUN_TOP_BAND,
@@ -54,25 +56,27 @@ import {
   runRectsOverlap,
   runSideViewScale,
   runStageBaselineY,
+  runStageGroundRect,
   runStageGroundY,
+  runStageRoadRect,
   type RunLayeredRect,
   type RunRect,
 } from '../src/lab/portraitBattleLab/runPageLayout';
 import {
-  RUN_BATTLE_SCRIPT,
   RUN_CHOICE_OPTIONS,
   RUN_INITIAL_DAY,
   RUN_PHASES,
   RUN_TOTAL_DAYS,
-  advanceRunBattle,
   chooseRunBuff,
   createRunPageState,
   durabilityPercent,
+  finishRunBattle,
   formatRunLog,
   pressRunAction,
   runActionEnabled,
   runActionLabel,
   runChoiceOpen,
+  syncRunBattle,
   visibleRunLog,
   type RunPageContext,
   type RunPageState,
@@ -87,6 +91,11 @@ import {
   runPageContext,
   runPageLayerShapes,
 } from '../src/lab/portraitBattleLab/runPageScene';
+import {
+  RUN_BATTLE_GROUND_FRAC,
+  RunBattleRuntime,
+  runBattleCamera,
+} from '../src/lab/portraitBattleLab/runBattleRuntime';
 import { RUN_VISUAL_ASSETS } from '../src/lab/portraitBattleLab/runVehicleAssets';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -98,6 +107,8 @@ const RUN_PAGE_FILES = [
   'runPage.ts',
   'runMain.ts',
   'runVehicleAssets.ts',
+  'runBattleRuntime.ts',
+  'runBattleView.ts',
 ];
 
 function read(f: string): string {
@@ -115,42 +126,89 @@ function inside(r: RunRect, band: RunRect): boolean {
 
 /** 逐帧账本（渲染与测试共用的同一入口）。 */
 function ledger(s: RunPageState): Record<string, number> {
-  return runPaintedAreas(runPageLayerShapes(s, buildRunStageView(s.phase, s.battle)));
+  return runPaintedAreas(runPageLayerShapes(s, buildRunStageView()));
 }
 
 function layersOf(s: RunPageState): readonly RunLayeredRect[] {
-  return runPageLayerShapes(s, buildRunStageView(s.phase, s.battle));
+  return runPageLayerShapes(s, buildRunStageView());
 }
 
 const CTX: RunPageContext = runPageContext();
 
-/** 走完整条固定演示流程，返回每一步的状态（IDLE 起点 → 5 次状态切换）。 */
-function runFullFlow(): { steps: RunPageState[]; finale: RunPageState } {
-  const steps: RunPageState[] = [];
+/* ---------------------------------------- 真实战斗驱动器（与宿主同一条链） */
+
+const FRAME_MS = 1000 / 60;
+/** 上限远大于实测结束时间（15.4s ≈ 920 帧）：只用于防止死循环，不参与断言。 */
+const MAX_FRAMES = 4000;
+
+/** 推进 `frames` 帧真实物理，并同步 HP / 步数（**日志零追加**，与宿主一致）。 */
+function driveFrames(s: RunPageState, rt: RunBattleRuntime, frames: number): RunPageState {
+  let cur = s;
+  for (let i = 0; i < frames && cur.phase === 'BATTLE'; i++) {
+    rt.step(FRAME_MS);
+    const hp = rt.hp();
+    cur = syncRunBattle(cur, { playerHp: hp.a, enemyHp: hp.b, steps: rt.stepCount });
+    const r = rt.result;
+    if (r) {
+      cur = finishRunBattle(cur, {
+        winner: r.winner ?? null,
+        endReason: r.endReason ?? null,
+        playerHp: hp.a,
+        enemyHp: hp.b,
+        steps: rt.stepCount,
+      });
+    }
+  }
+  return cur;
+}
+
+/** 推进到官方出结果（或触顶）。 */
+function driveToEnd(s: RunPageState, rt: RunBattleRuntime): RunPageState {
+  return driveFrames(s, rt, MAX_FRAMES);
+}
+
+interface Flow {
+  readonly steps: RunPageState[];
+  readonly finale: RunPageState;
+  readonly runtime: RunBattleRuntime;
+}
+
+let flowCache: Flow | null = null;
+
+/** 走完整条固定演示流程（真实物理，可能较慢 → 只跑一次并缓存；状态不可变，可安全共享）。 */
+function runFullFlow(): Flow {
+  if (flowCache) return flowCache;
+  const runtime = new RunBattleRuntime(false);
   let s = createRunPageState(CTX);
+  const steps: RunPageState[] = [s]; // IDLE
+  s = pressRunAction(s, CTX);
+  steps.push(s); // EVENT
+  s = pressRunAction(s, CTX);
+  steps.push(s); // BATTLE
+  s = driveToEnd(s, runtime);
+  steps.push(s); // RESULT
+  s = pressRunAction(s, CTX);
+  steps.push(s); // CHOICE
+  s = chooseRunBuff(s, RUN_CHOICE_OPTIONS[0].id);
   steps.push(s); // IDLE
-  s = pressRunAction(s, CTX); // EVENT
-  steps.push(s);
-  s = pressRunAction(s, CTX); // BATTLE
-  steps.push(s);
-  s = advanceRunBattle(s, RUN_BATTLE_SCRIPT.totalSteps); // RESULT
-  steps.push(s);
-  s = pressRunAction(s, CTX); // CHOICE
-  steps.push(s);
-  s = chooseRunBuff(s, RUN_CHOICE_OPTIONS[0].id); // IDLE
-  steps.push(s);
-  return { steps, finale: s };
+  flowCache = { steps, finale: s, runtime };
+  return flowCache;
 }
 
-/** 走到 RESULT（战斗已按脚本演完）的状态。 */
+/** 建立战斗（EVENT → BATTLE）并返回新的运行时 + 状态。 */
+function startBattle(): { rt: RunBattleRuntime; bt: RunPageState } {
+  const rt = new RunBattleRuntime(false);
+  const bt = pressRunAction(pressRunAction(createRunPageState(CTX), CTX), CTX);
+  return { rt, bt };
+}
+
+/** 走到 RESULT（真实战斗已打完）。 */
 function reachResult(): RunPageState {
-  return advanceRunBattle(
-    pressRunAction(pressRunAction(createRunPageState(CTX), CTX), CTX),
-    RUN_BATTLE_SCRIPT.totalSteps,
-  );
+  const { rt, bt } = startBattle();
+  return driveToEnd(bt, rt);
 }
 
-/** 走到 CHOICE（改装机会浮层已打开）的状态。 */
+/** 走到 CHOICE（改装机会浮层已打开）。 */
 function reachChoice(): RunPageState {
   return pressRunAction(reachResult(), CTX);
 }
@@ -238,8 +296,8 @@ describe('PRP-F0｜A 页面层级：竖屏 390×844 四条横带', () => {
     expect(icons.length * icons[0].w * icons[0].h).toBe(5 * 30 * 30);
   });
 
-  it('RP-03 中部舞台：玩家固定贴左、敌人固定贴右；车辆贴基线、地面不压带底', () => {
-    const view = buildRunStageView('BATTLE', null);
+  it('RP-03 IDLE 待机近景：地线 / 路面落在舞台带内、车贴基线、近景只有玩家一辆', () => {
+    const view = buildRunStageView();
     expect(view.groundY).toBe(runStageGroundY());
     expect(view.baselineY).toBe(runStageBaselineY());
     expect(view.baselineY).toBe(view.groundY - RUN_SIDE_VIEW.baselineLiftPx);
@@ -247,30 +305,19 @@ describe('PRP-F0｜A 页面层级：竖屏 390×844 四条横带', () => {
     expect(view.groundY).toBeLessThan(RUN_STAGE_BAND.y + RUN_STAGE_BAND.h);
     // 必改 2：地面不压在战斗区最底边（底下要留出路面）
     expect(RUN_STAGE_BAND.y + RUN_STAGE_BAND.h - view.groundY).toBeGreaterThanOrEqual(40);
+    expect(view.ground).toEqual(runStageGroundRect());
+    expect(view.road).toEqual(runStageRoadRect());
     expect(inside(view.ground, RUN_STAGE_BAND)).toBe(true);
     expect(inside(view.road, RUN_STAGE_BAND)).toBe(true);
 
     // 玩家：左边缘 = 舞台左边距
     expect(view.player.bounds.x).toBe(RUN_STAGE_BAND.x + RUN_SIDE_VIEW.marginPx);
-    // 敌人：右边缘 = 舞台右边界 − 右边距
-    expect(view.enemy).not.toBeNull();
-    const eb = view.enemy!.bounds;
-    expect(eb.x + eb.w).toBe(RUN_STAGE_BAND.x + RUN_STAGE_BAND.w - RUN_SIDE_VIEW.marginPx);
-    // 完全分离（中缝 = 约定值，取整误差 ≤ 1）
-    const gap = eb.x - (view.player.bounds.x + view.player.bounds.w);
-    expect(gap).toBeGreaterThan(0);
-    expect(gap).toBeGreaterThanOrEqual(RUN_SIDE_VIEW.gapPx - 1);
-    // 都贴地（底边 = 基线，压在基线上方 2px，不污染路面纯色）
+    // 贴地（底边 = 基线，压在基线上方 2px，不污染路面纯色）
     expect(view.player.bounds.y).toBe(view.baselineY - view.player.bounds.h);
-    expect(eb.y).toBe(view.baselineY - eb.h);
     expect(runRectsOverlap(view.player.bounds, view.ground)).toBe(false);
-    expect(runRectsOverlap(eb, view.ground)).toBe(false);
     expect(runRectsOverlap(view.player.bounds, view.road)).toBe(false);
-    expect(runRectsOverlap(eb, view.road)).toBe(false);
     // 全部可视件落在舞台带内（不得越出玩家可见区）
-    for (const v of [...view.player.visuals, ...view.enemy!.visuals]) {
-      expect(inside(v.rect, RUN_STAGE_BAND)).toBe(true);
-    }
+    for (const v of view.player.visuals) expect(inside(v.rect, RUN_STAGE_BAND)).toBe(true);
   });
 
   it('RP-04 下部冒险记录：标题与全部行都在日志带内，且不越过最底动作区', () => {
@@ -352,42 +399,62 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     expect(ev.log.slice(0, idle.log.length)).toEqual(idle.log);
   });
 
-  it('RP-09 BATTLE：底部切为「战斗中」并不可误触推进；入场不写日志', () => {
-    const ev = pressRunAction(createRunPageState(CTX), CTX);
-    const bt = pressRunAction(ev, CTX);
+  it('RP-09 BATTLE：底部切为「战斗中」并不可误触推进；入场不写日志；战斗数值=真实 HP', () => {
+    const { bt } = startBattle();
     expect(bt.phase).toBe('BATTLE');
     expect(runActionLabel(bt)).toBe('战斗中');
     expect(runActionEnabled(bt)).toBe(false); // 禁触
     expect(pressRunAction(bt, CTX)).toBe(bt); // 同引用 = 真 no-op
-    expect(bt.log).toEqual(ev.log); // 入场不写日志（保持记录稳定）
+    expect(bt.log.length).toBe(4); // 入场不写日志（保持在 EVENT 的 4 行）
     expect(bt.battle).not.toBeNull();
     expect(bt.battle!.enemyHp).toBe(bt.battle!.enemyHpMax);
+    expect(bt.battle!.playerHp).toBe(bt.battle!.playerHpMax);
     expect(bt.battle!.steps).toBe(0);
     expect(bt.battle!.done).toBe(false);
+    expect(bt.battle!.winner).toBeNull();
+    // 耐久上限来自 F1 共享测试数据（正式 registry 解析，不是手写）
+    expect(bt.battle!.playerHpMax).toBe(1100);
+    expect(bt.battle!.enemyHpMax).toBe(900);
+    // 没有任何脚本参数残留（`totalSteps` 已随 RUN_BATTLE_SCRIPT 一并删除）
+    expect('totalSteps' in bt.battle!).toBe(false);
   });
 
-  it('RP-10 BATTLE 期间不刷逐帧伤害日志（多段推进日志条数不变、条目完全一致）', () => {
-    const bt = pressRunAction(pressRunAction(createRunPageState(CTX), CTX), CTX);
+  it('RP-10 BATTLE 期间不刷逐帧伤害日志；开局 41 帧内**零伤害**（远程阶段先于接敌）', () => {
+    const { rt, bt } = startBattle();
     let cur = bt;
     for (const chunk of [1, 1, 1, 5, 13, 20]) {
-      const next = advanceRunBattle(cur, chunk);
-      expect(next.phase).toBe('BATTLE'); // 还没演完
+      const next = driveFrames(cur, rt, chunk);
+      expect(next.phase).toBe('BATTLE'); // 还没打完
       expect(next.log).toEqual(bt.log); // 日志零变化
       expect(next.log.length).toBe(bt.log.length);
       cur = next;
     }
     expect(cur.battle!.steps).toBe(41);
-    expect(cur.battle!.enemyHp).toBeLessThan(bt.battle!.enemyHp);
-    expect(cur.battle!.playerHp).toBeLessThan(bt.battle!.playerHp);
+    // ⚠️ 实测：首次命中在 2.2s（≈131 帧）→ 41 帧时双方仍满血。
+    // 这正是「先有距离、后有交火」的机器证据（旧脚本版会在第 1 帧就开始掉血）。
+    expect(cur.battle!.enemyHp).toBe(bt.battle!.enemyHp);
+    expect(cur.battle!.playerHp).toBe(bt.battle!.playerHp);
+    // 继续推进到首次交火之后 → 敌方耐久真实下降，而日志依旧一字未动
+    const late = driveFrames(cur, rt, 120);
+    expect(late.battle!.steps).toBe(161);
+    expect(late.battle!.enemyHp).toBeLessThan(bt.battle!.enemyHp);
+    expect(late.log).toEqual(bt.log);
+    rt.dispose();
   });
 
-  it('RP-11 RESULT：一次性追加 3 行玩家叙事（胜负 + 耐久百分比 + 改装机会），敌人离开舞台', () => {
-    const bt = pressRunAction(pressRunAction(createRunPageState(CTX), CTX), CTX);
-    const mid = advanceRunBattle(bt, RUN_BATTLE_SCRIPT.totalSteps - 1);
+  it('RP-11 RESULT：一次性追加 3 行玩家叙事（胜负 + 耐久百分比 + 改装机会）', () => {
+    const { rt, bt } = startBattle();
+    let mid = bt;
+    // 推进到「还没结束」的最后一帧（不能写死帧数 → 用真实结束点反推）
+    for (let i = 0; i < MAX_FRAMES; i++) {
+      const next = driveFrames(mid, rt, 1);
+      if (next.phase !== 'BATTLE') break;
+      mid = next;
+    }
     expect(mid.phase).toBe('BATTLE');
-    expect(mid.log.length).toBe(bt.log.length); // 倒数第二步仍不写日志
+    expect(mid.log.length).toBe(bt.log.length); // 结束前一帧仍不写日志
 
-    const res = advanceRunBattle(mid, 1);
+    const res = driveFrames(mid, rt, 1);
     expect(res.phase).toBe('RESULT');
     expect(res.log.length).toBe(bt.log.length + 3); // 一次性只加三条
     const added = res.log.slice(-3);
@@ -395,34 +462,24 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     expect(added[0].text).toBe('战斗胜利。');
     expect(added[1].kind).toBe('durability');
     expect(added[1].text).toBe(`战车耐久剩余 ${durabilityPercent(res.battle!)}%。`);
-    expect(added[1].text).toContain('78%'); // 1100 → 858
     expect(added[2].kind).toBe('result');
     expect(added[2].text).toBe('你发现了一次改装机会……');
-    expect(res.battle!.enemyHp).toBe(0);
     expect(res.battle!.done).toBe(true);
+    // 官方结果被原样带回（不是自算的胜负）
+    expect(res.battle!.winner).toBe('A');
+    expect(res.battle!.endReason).toBe('hp');
     expect(runActionLabel(res)).toBe('继续');
     expect(runActionEnabled(res)).toBe(true);
-    // 敌方进入结束 / 消失状态
-    const view = buildRunStageView(res.phase, res.battle);
-    expect(view.enemy).toBeNull();
-    expect(view.enemyGone).toBe(true);
   });
 
   it('RP-12 CHOICE：浮层打开、日志不变、原页面几何与位置一字不动', () => {
     const res = reachResult();
-    const before = buildRunStageView(res.phase, res.battle);
     const ch = pressRunAction(res, CTX);
     expect(ch.phase).toBe('CHOICE');
     expect(runChoiceOpen(ch)).toBe(true);
     expect(ch.log).toEqual(res.log); // 既不加也不减
     expect(ch.buffs).toEqual(res.buffs);
-    const after = buildRunStageView(ch.phase, ch.battle);
-    // 原页面位置 / 尺寸不变化（只有遮罩 + 浮层叠上去）
-    expect(after.player).toEqual(before.player);
-    expect(after.ground).toEqual(before.ground);
-    expect(after.road).toEqual(before.road);
-    expect(after.enemy).toBeNull();
-    expect(after.enemyGone).toBe(true);
+    expect(ch.battle).toEqual(res.battle); // 战斗结论整体保留（浮层下面是同一个战场）
     // 浮层出现其间「原页面整体变暗」= 遮罩恰好覆盖整个逻辑舞台（不多不少）
     expect(runChoiceMaskRect()).toEqual({ x: 0, y: 0, w: RUN_PAGE_W, h: RUN_PAGE_H });
   });
@@ -450,11 +507,15 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     const bt = steps[2];
     const res = steps[3];
     expect(pressRunAction(bt, CTX)).toBe(bt);
-    expect(advanceRunBattle(res, 10)).toBe(res); // 非 BATTLE 不推进
     const choice = steps[4];
     expect(pressRunAction(choice, CTX)).toBe(choice);
     expect(chooseRunBuff(choice, 'not-a-buff')).toBe(choice);
     expect(chooseRunBuff(res, RUN_CHOICE_OPTIONS[0].id)).toBe(res); // 非 CHOICE 不生效
+    // 非 BATTLE 状态不接受帧同步（真 no-op，同引用）
+    const { rt } = startBattle();
+    expect(syncRunBattle(res, { playerHp: 1, enemyHp: 1, steps: 1 })).toBe(res);
+    expect(finishRunBattle(res, { winner: 'A', endReason: 'hp', playerHp: 1, enemyHp: 0, steps: 1 })).toBe(res);
+    void rt;
   });
 
   it('RP-15 三个强化选项固定且正是 Queue 点名的三项，note 是玩家向「一句结果」', () => {
@@ -481,14 +542,29 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     expect(b.log[b.log.length - 1].text).toBe('你换上了紧急维修。');
   });
 
-  it('RP-16 BATTLE 推进确定性：一次性推到结束 == 任意分块推到结束', () => {
-    const start = pressRunAction(pressRunAction(createRunPageState(CTX), CTX), CTX);
-    const oneShot = advanceRunBattle(start, RUN_BATTLE_SCRIPT.totalSteps);
-    let chunked = start;
-    for (let i = 0; i < RUN_BATTLE_SCRIPT.totalSteps; i++) chunked = advanceRunBattle(chunked, 1);
-    expect(chunked.battle).toEqual(oneShot.battle);
-    expect(chunked.log).toEqual(oneShot.log);
-    expect(chunked.phase).toBe(oneShot.phase);
+  it('RP-16 真实战斗的帧同步是纯函数：同样的步数序列 → 同样的 HP / 结局', () => {
+    const { rt, bt } = startBattle();
+    const oneShot = driveToEnd(bt, rt);
+    expect(oneShot.phase).toBe('RESULT');
+    // 同一个运行时不可能重放；这里验证「同步函数本身无隐藏状态」：
+    // 用结束时的真实 HP 再走一次 sync/finish，结果与 oneShot 完全相同。
+    const replay = finishRunBattle(
+      syncRunBattle(bt, {
+        playerHp: oneShot.battle!.playerHp,
+        enemyHp: oneShot.battle!.enemyHp,
+        steps: oneShot.battle!.steps,
+      }),
+      {
+        winner: oneShot.battle!.winner,
+        endReason: oneShot.battle!.endReason,
+        playerHp: oneShot.battle!.playerHp,
+        enemyHp: oneShot.battle!.enemyHp,
+        steps: oneShot.battle!.steps,
+      },
+    );
+    expect(replay.battle).toEqual(oneShot.battle);
+    expect(replay.log).toEqual(oneShot.log);
+    expect(replay.phase).toBe(oneShot.phase);
   });
 
   it('RP-17 耐久上限来自 F1 共享测试数据（不手写数值）；日志文本不再被二次格式化', () => {
@@ -506,81 +582,56 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
   });
 });
 
-/* ============================================ C. 侧视战斗舞台 */
+/* =================================  C. 中部舞台：待机近景 vs 真实战斗世界 */
 
-describe('PRP-F0｜C 侧视舞台：玩家左 / 敌人右', () => {
-  it('RP-18 状态决定舞台内容：IDLE 仅玩家 → EVENT 敌人在右 → BATTLE 交战 → RESULT/CHOICE 敌人消失', () => {
-    const { steps } = runFullFlow();
-    const [idle, event, battle, result, choice] = steps;
-
-    const vIdle = buildRunStageView(idle.phase, idle.battle);
-    expect(vIdle.enemy).toBeNull();
-    expect(vIdle.enemyGone).toBe(false);
-    expect(vIdle.battle).toBe(false);
-
-    const vEvent = buildRunStageView(event.phase, event.battle);
-    expect(vEvent.enemy).not.toBeNull();
-    expect(vEvent.enemyGone).toBe(false);
-    expect(vEvent.battle).toBe(false);
-
-    for (const [tag, st] of [['EVENT', event], ['BATTLE', battle]] as const) {
-      const v = buildRunStageView(st.phase, st.battle);
-      const pb = v.player.bounds;
-      const eb = v.enemy!.bounds;
-      // 玩家左 / 敌人右（严格分离，不重叠）
-      expect(pb.x + pb.w, `${tag} 玩家应在敌人左侧`).toBeLessThanOrEqual(eb.x);
-      expect(runRectsOverlap(pb, eb), `${tag} 两车不得重叠`).toBe(false);
-      expect(runRectsOverlap(v.player.bounds, v.ground), `${tag} 玩家不得压地线`).toBe(false);
-      expect(runRectsOverlap(eb, v.ground), `${tag} 敌人不得压地线`).toBe(false);
-    }
-
-    const vBattle = buildRunStageView(battle.phase, battle.battle);
-    expect(vBattle.battle).toBe(true);
-
-    for (const st of [result, choice]) {
-      const v = buildRunStageView(st.phase, st.battle);
-      expect(v.enemy).toBeNull();
-      expect(v.enemyGone).toBe(true);
-      // 玩家继续留在舞台上
-      expect(v.player.bounds.x).toBe(RUN_STAGE_BAND.x + RUN_SIDE_VIEW.marginPx);
-    }
+describe('PRP-F1｜C 中部舞台：IDLE 近景 + 真实战斗世界（正式世界尺度）', () => {
+  it('RP-18 必改 1：战斗世界用正式 arena 尺度，不是「按舞台带宽生成的假 arena」', () => {
+    const { rt } = startBattle();
+    expect(rt.arenaWidth).toBe(1600); // 正式 DEFAULT_ARENA_CONFIG.width
+    expect(rt.arenaWidth).not.toBe(RUN_STAGE_BAND.w); // 且**不等于**舞台带宽 390
+    expect(rt.arenaHeight).toBe(900);
+    expect(rt.groundY).toBe(700);
+    // 出生点就是正式 spawnA / spawnB（构造后实测，不是写死）
+    expect(Math.round(rt.spawnAx)).toBe(400);
+    expect(Math.round(rt.spawnBx)).toBe(1200);
+    expect(rt.spawnSeparation).toBeCloseTo(800, 0);
+    rt.dispose();
   });
 
-  it('RP-19 显示缩放与状态无关：敌人出现不会让玩家车体突然缩放', () => {
-    const { steps } = runFullFlow();
-    const [idle, event, battle] = steps;
-    const vIdle = buildRunStageView(idle.phase, idle.battle);
-    const vEvent = buildRunStageView(event.phase, event.battle);
-    const vBattle = buildRunStageView(battle.phase, battle.battle);
-    expect(vEvent.scale).toBe(vIdle.scale);
-    expect(vBattle.scale).toBe(vIdle.scale);
-    // 玩家几何在 EVENT 与 IDLE 完全一致（同一摆位 → 无跳变）
-    expect(vEvent.player).toEqual(vIdle.player);
-    // BATTLE 开局（位移 0）时与 EVENT 完全一致
-    expect(vBattle.player).toEqual(vEvent.player);
-    expect(vBattle.enemy).toEqual(vEvent.enemy);
+  it('RP-19 必改 2：开局有明确距离（实测两车外廓间距 > 400 世界 px）', () => {
+    const { rt } = startBattle();
+    const gap = rt.gapWorld();
+    expect(gap).toBeGreaterThan(400);
+    // 冻结实测值（探针 + 本测试同源口径：车身 + 轮 + 部件 + visual）
+    expect(Math.round(gap)).toBe(529);
+    // 外廓间距与世界宽同量级 → 绝不是「贴车开局」
+    expect(gap / rt.arenaWidth).toBeGreaterThan(0.25);
+    rt.dispose();
   });
 
-  it('RP-20 BATTLE 演出位移：中段最大且不超过约定值，结束时回到 0', () => {
-    const bt = pressRunAction(pressRunAction(createRunPageState(CTX), CTX), CTX);
-    const mid = advanceRunBattle(bt, RUN_BATTLE_SCRIPT.totalSteps / 2);
-    const vMid = buildRunStageView(mid.phase, mid.battle);
-    const v0 = buildRunStageView(bt.phase, bt.battle);
-    const dxMid = vMid.player.bounds.x - v0.player.bounds.x;
-    expect(dxMid).toBeGreaterThan(0);
-    expect(dxMid).toBeLessThanOrEqual(RUN_SIDE_VIEW_CLOSING_PX);
-    // 敌人相向（向左）
-    expect(vMid.enemy!.bounds.x).toBeLessThan(v0.enemy!.bounds.x);
-    // 仍然分离（演出位移不得让两车相撞）
-    expect(vMid.enemy!.bounds.x - (vMid.player.bounds.x + vMid.player.bounds.w)).toBeGreaterThan(0);
+  it('RP-20 必改 3：相机是**固定远摄**（只由舞台带 + 正式 arena 宽决定，与车辆位置无关）', () => {
+    const cam = runBattleCamera(RUN_STAGE_BAND.w, RUN_STAGE_BAND.h);
+    expect(cam.worldW).toBe(1600);
+    expect(cam.worldH).toBe(900);
+    expect(cam.viewW).toBe(RUN_STAGE_BAND.w);
+    expect(cam.viewH).toBe(RUN_STAGE_BAND.h);
+    expect(cam.scale).toBeCloseTo(390 / 1600, 12); // 0.24375
+    expect(cam.offsetX).toBe(0); // 完整世界横向铺满（不裁切）
+    expect(cam.groundScreenY).toBeCloseTo(RUN_STAGE_BAND.h * RUN_BATTLE_GROUND_FRAC, 9);
+    // 同一输入 → 同一输出（纯几何函数：没有任何车辆位置入参）
+    expect(runBattleCamera(RUN_STAGE_BAND.w, RUN_STAGE_BAND.h)).toEqual(cam);
+    expect(runBattleCamera.length).toBeLessThanOrEqual(2);
+    // 世界高 × 缩放 必须完整落在舞台带内（不裁切竖向）
+    expect(cam.worldH * cam.scale).toBeLessThanOrEqual(cam.viewH);
 
-    const last = advanceRunBattle(mid, RUN_BATTLE_SCRIPT.totalSteps / 2);
-    const vEnd = buildRunStageView(last.phase, last.battle);
-    expect(vEnd.enemy).toBeNull(); // 已消失
-    expect(vEnd.player.bounds.x).toBe(v0.player.bounds.x); // 玩家回到固定起点
+    // 结构证据：视图层**不调用** reframe（那才是智能追踪 + 动态 zoom 的开关）
+    const view = stripComments(read('runBattleView.ts'));
+    expect(view.includes('reframe(')).toBe(false);
+    expect(view.includes('applyBattleFollow')).toBe(false);
+    expect(view.includes('this.renderer.transform =')).toBe(true);
   });
 
-  it('RP-21 全部正文车体组合都能两车同框（缩放公式对 5 种车体都成立）', () => {
+  it('RP-21 IDLE 近景缩放公式对 5 种车体都成立（战斗远摄不参与 IDLE 构图）', () => {
     const avail = RUN_PAGE_W - 2 * RUN_SIDE_VIEW.marginPx - RUN_SIDE_VIEW.gapPx;
     let checked = 0;
     for (const l of LAB_LOADOUTS) {
@@ -604,47 +655,42 @@ describe('PRP-F0｜C 侧视舞台：玩家左 / 敌人右', () => {
 /* ============================================ D. 面积账本（像素精确） */
 
 describe('PRP-F0｜D 面积账本：逐帧整页像素面积精确冻结', () => {
-  it('RP-22 六个关键帧的整页分层面积 = 冻结字面量；BATTLE 演出不改变可见面积', () => {
+  it('RP-22 六个关键帧的整页分层面积 = 冻结字面量；真实战场完全覆盖待机近景', () => {
     const { steps } = runFullFlow();
-    const [idle, event, battle, result, choice, finale] = steps;
+    const [idle, event, , result, choice, finale] = steps;
 
     /**
      * 入账的只有「**不承载文字、不被描边、不被 sprite / 图标覆盖**的纯色平铺矩形」：
      * 地线 / 路面 / 进度节点 / 主动作强调条 / 卡片强调条 / 已获得强化图标（底 + 高光块）。
      *
-     * ⚠️ PRP-R3：车辆改用正式 sprite → 车身 / 部件**不再入账**（sprite 像素非纯色），
-     * 其「真实车辆视觉在场」改由 RP-31（模型层）+ 浏览器端 sprite 特征色计数（E2E）证明。
+     * ⚠️ PRP-R3：车辆改用正式 sprite → 车身 / 部件**不再入账**（sprite 像素非纯色）。
+     * ⚠️ PRP-F1：`ground` / `road` 只是 **IDLE 待机近景** 的两层。
+     *    EVENT 起舞台带被真实 Planck 战斗世界（离屏位图）**整块覆盖** →
+     *    这两层在画面上不再带精确色 → 账面归 0（这不是「少画了」，而是「被真实战场替代了」）。
      * 承载文字 / 描边 / 矢量图标的面（分带底色、按钮填充、卡片填充、图标字形）同样不入账。
-     * 禁用态强调条不入账（sprite 重采样会产生 1 个恰好同色的抗锯齿像素 → 面积不可冻结），
-     * BATTLE 的「不可误触」表现为**可用态强调条消失**（actionBar = 0）。
      */
-    const base = {
-      ground: 780,
-      road: 19500,
-      nodeDone: 384,
-      nodeTodo: 512,
-      buffIcon: 0,
-      buffChip: 0,
-      cardBar: 0,
-    };
+    const idleOnly = { ground: 780, road: 19500 };
+    const noStage = { ground: 0, road: 0 };
+    const base = { nodeDone: 384, nodeTodo: 512, buffIcon: 0, buffChip: 0, cardBar: 0 };
     const on = { actionBar: 990 };
 
-    // IDLE：顶部第二行**完全不存在**（不是五个空框）
-    expect(ledger(idle)).toEqual({ ...base, ...on });
+    // IDLE：待机近景（地线 + 路面）+ 顶部第二行**完全不存在**（不是五个空框）
+    expect(ledger(idle)).toEqual({ ...idleOnly, ...base, ...on });
 
-    // EVENT：敌人出现 —— 车辆是 sprite，不入账 → 账面与 IDLE 完全一致
-    expect(ledger(event)).toEqual({ ...base, ...on });
+    // EVENT：真实战斗世界接管舞台带 → 待机近景的地线 / 路面消失（车辆是 sprite，不入账）
+    expect(ledger(event)).toEqual({ ...noStage, ...base, ...on });
 
-    // BATTLE t0：战斗不可误触 → 主动作强调条整条消失
-    expect(ledger(battle)).toEqual({ ...base, actionBar: 0 });
-
-    // BATTLE 中段（两车相向位移中）：整页面积与 t0 **完全一致**（平移不改变面积）
-    const mid = advanceRunBattle(battle, 45);
+    // BATTLE：战斗不可误触 → 主动作强调条整条消失
+    const { rt, bt } = startBattle();
+    const mid = driveFrames(bt, rt, 45);
     expect(mid.phase).toBe('BATTLE');
-    expect(ledger(mid)).toEqual(ledger(battle));
+    expect(ledger(mid)).toEqual({ ...noStage, ...base, actionBar: 0 });
+    // 战斗中段与开局账面完全一致（真实物理推进不改变任何入账面积）
+    expect(ledger(mid)).toEqual(ledger(bt));
+    rt.dispose();
 
-    // RESULT：主动作恢复
-    expect(ledger(result)).toEqual({ ...base, ...on });
+    // RESULT：主动作恢复（战场保持冻结可见）
+    expect(ledger(result)).toEqual({ ...noStage, ...base, ...on });
 
     // CHOICE：整页被遮罩合成 → 底层不再带精确色，只登记浮层自身（3 张卡片 × 强调条 1240）
     expect(ledger(choice)).toEqual({
@@ -658,8 +704,8 @@ describe('PRP-F0｜D 面积账本：逐帧整页像素面积精确冻结', () =>
       actionBar: 0,
     });
 
-    // 回到 IDLE 且拿到 1 个强化 → 顶部出现 1 个图标（底 900 − 高光块 144 = 756）
-    expect(ledger(finale)).toEqual({ ...base, buffIcon: 756, buffChip: 144, ...on });
+    // 回到 IDLE 且拿到 1 个强化 → 待机近景回来 + 顶部出现 1 个图标（底 900 − 高光块 144 = 756）
+    expect(ledger(finale)).toEqual({ ...idleOnly, ...base, buffIcon: 756, buffChip: 144, ...on });
     expect(ledger(finale).buffIcon + ledger(finale).buffChip).toBe(30 * 30);
   });
 
@@ -693,15 +739,14 @@ describe('PRP-F0｜D 面积账本：逐帧整页像素面积精确冻结', () =>
 
 /* ============================================ E. 源码守卫 */
 
-describe('PRP-F0｜E 源码守卫：Debug 分离 / 不接 Arena / 零跳转', () => {
-  it('RP-24 Run Page 源码不得引用 Arena A/B、Gate、PBL Lab 控制器、Planck 或俯视驱动', () => {
+describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战斗 / 零跳转', () => {
+  it('RP-24 Run Page 不得引用 Arena A/B、Gate、PBL Lab 控制器或俯视驱动', () => {
     const bannedTokens = [
       'arenaA', // Arena A（俯视）
       'arenaScene',
       'ArenaARuntime',
       'PlanckArenaRuntime',
-      'planck',
-      'drivePlanckVehicle',
+      'drivePlanckVehicle', // 俯视 Lab 驱动
       "from './gate'",
       'auditSharedCombatData',
       "from './lab'",
@@ -714,6 +759,50 @@ describe('PRP-F0｜E 源码守卫：Debug 分离 / 不接 Arena / 零跳转', ()
       for (const t of bannedTokens) {
         expect(code.includes(t), `${f} 不得出现 "${t}"`).toBe(false);
       }
+    }
+  });
+
+  it('RP-24b 正式 Planck 侧视战斗**只能**从 runBattleRuntime.ts 进入，且构造时零 config 覆盖', () => {
+    // 1) 其它 Run Page 文件一律不得直接摸正式战斗编排器（单一入口）
+    for (const f of RUN_PAGE_FILES.filter((x) => x !== 'runBattleRuntime.ts')) {
+      expect(stripComments(read(f)).includes('planckBattleOrchestrator'), `${f} 必须经 runBattleRuntime`).toBe(false);
+    }
+    const rt = stripComments(read('runBattleRuntime.ts'));
+    expect(rt.includes("from '../../battle/planckBattleOrchestrator'")).toBe(true);
+    // 2) 构造参数里**没有** gameplay 覆盖：第 4 个实参必须是**字面空对象** `{}`
+    //    → 世界尺度 / 出生点 / 阶段 / 驱动 / 武器全部取正式默认值。
+    const call = rt.match(/new PlanckBattleOrchestrator\(([\s\S]*?)\);/);
+    expect(call, 'runBattleRuntime 必须构造正式 PlanckBattleOrchestrator').not.toBeNull();
+    const args = call![1].split(',').map((x) => x.trim()).filter(Boolean);
+    expect(args.length).toBe(5); // A 快照 / B 快照 / registry / config / soloA
+    expect(args[3]).toBe('{}');
+    for (const t of ['autoDrive:', 'sideDrive:', 'arenaConfig:', 'closingSpeed:', 'phases:']) {
+      expect(args[3].includes(t), `config 不得覆盖 "${t}"`).toBe(false);
+    }
+    // 3) 世界尺度直接读正式配置（不是自己写 1600）
+    expect(rt.includes('DEFAULT_ARENA_CONFIG.width')).toBe(true);
+    expect(rt.includes('DEFAULT_ARENA_CONFIG.groundY')).toBe(true);
+    expect(rt.includes('this.orchestrator.arena.config.width')).toBe(true);
+    expect(rt.includes('this.orchestrator.arena.config.groundY')).toBe(true);
+    // 真实的出生位置是**实测**（读 world.getPosition），不是写死数字
+    expect(rt.includes('w.getPosition(this.orchestrator.vehicleA.body).x')).toBe(true);
+    expect(/spawnAx = .*getPosition/.test(rt)).toBe(true);
+    // 4) 相机只写 transform；跑分/追踪一律不接
+    const view = stripComments(read('runBattleView.ts'));
+    expect(view.includes('reframe(')).toBe(false);
+    expect(view.includes('battleCam')).toBe(false);
+    // 5) 战斗剧本 / 演出位移彻底不存在（否则会重新引入「假战斗」）
+    const state = stripComments(read('runPageState.ts'));
+    for (const t of ['RUN_BATTLE_SCRIPT', 'advanceRunBattle', 'Math.sin']) {
+      expect(state.includes(t), `runPageState 不得残留 "${t}"`).toBe(false);
+    }
+    const scene = stripComments(read('runPageScene.ts'));
+    for (const t of ['RUN_SIDE_VIEW_CLOSING_PX', 'translateRunGroup', 'battleClosingOffset']) {
+      expect(scene.includes(t), `runPageScene 不得残留 "${t}"`).toBe(false);
+    }
+    const layout = stripComments(read('runPageLayout.ts'));
+    for (const t of ['RUN_SIDE_VIEW_CLOSING_PX', 'translateRunGroup']) {
+      expect(layout.includes(t), `runPageLayout 不得残留 "${t}"`).toBe(false);
     }
   });
 
@@ -778,7 +867,7 @@ describe('PRP-F0｜E 源码守卫：Debug 分离 / 不接 Arena / 零跳转', ()
   });
 });
 
-/* ====================================== F. PRP-R3 信息层级（本 Queue 的正题） */
+/* ====================================== F. 信息层级（PRP-R3 + PRP-F1） */
 
 describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 / 选择独占焦点', () => {
   it('RP-29 必改 1：顶部彻底减法 —— 无空槽、无「核心构建 X/5」、无预留格子', () => {
@@ -820,9 +909,12 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
     }
     // 使用的语义角色恰好是玩家叙事集（不含 system / battle 这类控制台角色）
     expect([...allKinds].sort()).toEqual(['choice', 'day', 'durability', 'event', 'result', 'travel']);
-    // 逐帧伤害绝不进日志：BATTLE 全程日志条数恒定
-    const bt = steps[2];
-    expect(advanceRunBattle(bt, 89).log).toEqual(bt.log);
+    // 逐帧伤害绝不进日志：BATTLE 全程日志条数恒定（真实物理推进 89 帧）
+    const { rt, bt } = startBattle();
+    const after = driveFrames(bt, rt, 89);
+    expect(after.phase).toBe('BATTLE');
+    expect(after.log).toEqual(bt.log);
+    rt.dispose();
     // 最近事件才突出：可见行 ≤ maxLines，末 N 行视为「最近」
     expect(visibleRunLog(finale, 3).length).toBeLessThanOrEqual(3);
     expect(visibleRunLog(finale, 3)).toEqual(finale.log.slice(-3));
@@ -830,14 +922,14 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
     expect(RUN_LOG.emphasis).toBeLessThanOrEqual(5);
   });
 
-  it('RP-31 必改 2：战斗主体是**真实车辆视觉**（正式 sprite + 正式 anchor/镜像），不是纯色矩形', () => {
+  it('RP-31 必改 2：IDLE 战斗主体是**真实车辆视觉**（正式 sprite + 正式 anchor/镜像）', () => {
     const plan = runDemoPlan();
     // 1) 两个实体都不含「纯色矩形代表车辆」的降级件
     expect(hasPlaceholderVisual(plan.player)).toBe(false);
     expect(hasPlaceholderVisual(plan.enemies[0])).toBe(false);
 
-    const view = buildRunStageView('BATTLE', null);
-    const all = [...view.player.visuals, ...view.enemy!.visuals];
+    const view = buildRunStageView();
+    const all = [...view.player.visuals];
     // 2) 非轮组可视件必须带正式 visualId（= 真实 sprite 外形）
     for (const v of all) {
       if (v.kind === 'wheel') continue;
@@ -845,26 +937,14 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
     }
     const ids = new Set(all.map((v) => v.visualId).filter(Boolean));
     expect(ids.has('body_watermelon')).toBe(true); // 玩家车身（正式 BodyDef.visual）
-    expect(ids.has('body_banana')).toBe(true); // 敌人车身
     expect(ids.has('part_cannon')).toBe(true); // 玩家武器（正式 FunctionalPartDef.visual）
-    expect(ids.has('part_hammer')).toBe(true); // 敌人武器
-
-    // 3) 敌人车体朝左 → 车身 / 武器必须声明镜像（朝向语义来自正式 visual.mirrorWithFacing）
-    for (const v of view.enemy!.visuals) {
-      if (v.kind === 'wheel') continue;
-      expect(v.mirror, `敌人件 ${v.visualId} 应镜像`).toBe(true);
-    }
+    // 3) 玩家车体朝右 → 不镜像（朝向语义来自正式 visual.mirrorWithFacing）
     for (const v of view.player.visuals) expect(v.mirror).toBe(false);
 
-    // 4) 车辆**明显放大**：两车合计横向占用 ≥ 舞台宽的 85%，单体高 ≥ 舞台高的 1/6
+    // 4) 车辆**明显放大**：单体宽 ≥ 舞台宽的 40%，高 ≥ 舞台高的 1/6
     const pw = view.player.bounds.w;
-    const ew = view.enemy!.bounds.w;
-    expect(pw + ew).toBeGreaterThanOrEqual(RUN_STAGE_BAND.w * 0.85);
-    expect(pw).toBeGreaterThan(RUN_STAGE_BAND.w * 0.35);
-    expect(ew).toBeGreaterThan(RUN_STAGE_BAND.w * 0.4);
-    for (const b of [view.player.bounds, view.enemy!.bounds]) {
-      expect(b.h).toBeGreaterThan(RUN_STAGE_BAND.h / 6);
-    }
+    expect(pw).toBeGreaterThan(RUN_STAGE_BAND.w * 0.4);
+    expect(view.player.bounds.h).toBeGreaterThan(RUN_STAGE_BAND.h / 6);
 
     // 5) 资源层：只引用正式 PNG（与正式入口 main.ts 同一批文件），不复制美术
     expect(Object.keys(RUN_VISUAL_ASSETS).sort()).toEqual([
@@ -885,11 +965,18 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
     // 6) 渲染层：不存在「无 sprite 就用纯色矩形」的降级路径
     const page = stripComments(read('runPage.ts'));
     expect(page.includes('partFallback')).toBe(false);
+    // 7) 战斗世界的车辆视觉走**正式 Renderer + 正式 VisualRegistry**（不是 PRP 自绘）
+    const battleView = stripComments(read('runBattleView.ts'));
+    expect(battleView.includes("from '../../render/renderer'")).toBe(true);
+    expect(battleView.includes("from '../../render/visualRegistry'")).toBe(true);
+    expect(battleView.includes('new Renderer(')).toBe(true);
+    expect(battleView.includes('setBattleBackdrop(true)')).toBe(true);
+    expect(battleView.includes("from '../../presentation/playerPresentation'")).toBe(true);
   });
 
-  it('RP-32 必改 2：中部舞台有真实景物，不存在大片空场（山脊 / 雾带填满地平线以上）', () => {
+  it('RP-32 必改 2：IDLE 中部舞台有真实景物，不存在大片空场（山脊 / 雾带填满地平线以上）', () => {
     const hills = runStageHills();
-    const view = buildRunStageView('BATTLE', null);
+    const view = buildRunStageView();
     const hillBaseY = view.groundY - 6; // 与 runPage.drawBackdrop 同源
     const bandMid = RUN_STAGE_BAND.y + RUN_STAGE_BAND.h / 2;
 
@@ -908,10 +995,8 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
     expect(RUN_STAGE_HAZE_H).toBeGreaterThanOrEqual(80);
     expect(view.groundY - RUN_STAGE_HAZE_H).toBeGreaterThan(RUN_STAGE_BAND.y);
     // 4) 战车**视觉重心偏下**（压在较下的地平线上，而不是浮在带中央）
-    for (const b of [view.player.bounds, view.enemy!.bounds]) {
-      expect(b.y + b.h).toBe(view.baselineY);
-      expect(b.y + b.h / 2).toBeGreaterThan(bandMid);
-    }
+    expect(view.player.bounds.y + view.player.bounds.h).toBe(view.baselineY);
+    expect(view.player.bounds.y + view.player.bounds.h / 2).toBeGreaterThan(bandMid);
   });
 
   it('RP-33 必改 4：CHOICE 三选一 = 图标 + 名称 + 一句结果，且成为唯一视觉焦点', () => {

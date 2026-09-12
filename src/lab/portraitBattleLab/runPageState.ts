@@ -16,9 +16,16 @@
  *   - 不开发正式 Day 状态机（`day` 恒为 3 / 7，属占位）；
  *   - 不开发随机强化池（三个选项是**固定**的演示选项，不抽取、不随机）；
  *   - 不做永久奖励 / 经济 / 存档；
- *   - 不做正式敌人 AI，也不做真实战斗数值 —— BATTLE 的推进是**纯演示脚本**
- *     （固定步数线性推进，见 RUN_BATTLE_SCRIPT），耐久上限取自 F1 共享测试数据，
- *     脚本本身只是「让它能自动演完」，不是任何平衡数值。
+ *   - 不做正式敌人 AI，也**不自造战斗数值**。
+ *
+ * ⚠️ PRP-F1-PORTRAIT-PLANCK-BATTLE-INTEGRATION（本 Queue 的关键变化）：
+ *   本文件**不再**包含任何战斗推进脚本。此前 BATTLE 是 90 步线性 HP 插值 + `sin` 位移
+ *   （= 「贴车 → 抖动 → 死亡」观感的根因）；现在 BATTLE 由 `RunBattleRuntime`
+ *   （正式 `PlanckBattleOrchestrator`）以**真实物理**推进，本文件只接收三件事：
+ *     1) `syncRunBattle`  —— 每帧同步真实 HP / 真实物理步数（不写日志、不换状态）；
+ *     2) `finishRunBattle` —— 官方 `resolveBattleResult` 出结果的**那一刻**一次性写 RESULT；
+ *     3) `durabilityPercent` —— 真实耐久百分比（供叙事文本）。
+ *   即：**状态机只负责「生命周期接线 + 结果回填」**，不再持有任何战斗语义。
  */
 
 /** Run Page 的五个状态（也是唯一允许的状态集合）。 */
@@ -70,8 +77,6 @@ export interface RunPageContext {
   readonly vehicleLabel: string;
   /** 遭遇的敌人展示名。 */
   readonly encounterLabel: string;
-  /** 敌人车身 defId（仅用于取真实 collider 几何画占位外形）。 */
-  readonly enemyBodyDefId: string;
   /** 我方耐久上限（取自 F1 共享数据的真实 HP）。 */
   readonly playerHpMax: number;
   /** 敌方耐久上限（取自 F1 共享数据的真实 HP）。 */
@@ -79,28 +84,25 @@ export interface RunPageContext {
 }
 
 /**
- * BATTLE 演示脚本（**不是战斗数值**）：
- *   - `totalSteps` 步内线性推进到结束；
- *   - 敌方耐久从满到 0，我方耐久按固定比例下降 —— 目的只是让 RESULT 有「当前耐久占位」可报；
- *   - `durationMs` 决定真实时间轴长度（约 2.4s，肉眼可辨且不拖沓）。
+ * BATTLE 状态（**全部字段都是真实战斗数据**，没有任何脚本插值）。
+ *
+ * ⚠️ 数值来源：`playerHpMax` / `enemyHpMax` = F1 共享测试数据（正式 registry 解析）；
+ *   `playerHp` / `enemyHp` / `steps` / `winner` / `endReason` = 正式战斗运行时实时回报。
  */
-export const RUN_BATTLE_SCRIPT = {
-  durationMs: 2400,
-  totalSteps: 90,
-  playerDurabilityLossRatio: 0.22,
-} as const;
-
 export interface RunBattleState {
   readonly enemyLabel: string;
-  readonly enemyBodyDefId: string;
   readonly playerHpMax: number;
   readonly playerHp: number;
   readonly enemyHpMax: number;
   readonly enemyHp: number;
+  /** 已推进的**正式物理步数**（真实战斗推进，不是演示脚本步数）。 */
   readonly steps: number;
-  readonly totalSteps: number;
-  /** 是否已演完（= 已进入 RESULT）。 */
+  /** 是否已结束（= 已进入 RESULT）。 */
   readonly done: boolean;
+  /** 官方 `resolveBattleResult` 的胜负方（'A' = 玩家；未结束为 null）。 */
+  readonly winner: string | null;
+  /** 官方结束原因（'hp' / 'phase' 等；未结束为 null）。 */
+  readonly endReason: string | null;
 }
 
 export interface RunPageState {
@@ -224,12 +226,6 @@ export function formatRunLog(e: RunLogEntry): string {
   return e.text;
 }
 
-/** 当前战斗的进度（0..1；无战斗时为 0）。 */
-export function runBattleProgress(b: RunBattleState | null): number {
-  if (!b || b.totalSteps <= 0) return 0;
-  return Math.min(1, Math.max(0, b.steps / b.totalSteps));
-}
-
 /* --------------------------------------------------------------- 动作 */
 
 /**
@@ -255,14 +251,14 @@ export function pressRunAction(s: RunPageState, ctx: RunPageContext): RunPageSta
   if (s.phase === 'EVENT') {
     const battle: RunBattleState = {
       enemyLabel: ctx.encounterLabel,
-      enemyBodyDefId: ctx.enemyBodyDefId,
       playerHpMax: ctx.playerHpMax,
       playerHp: ctx.playerHpMax,
       enemyHpMax: ctx.enemyHpMax,
       enemyHp: ctx.enemyHpMax,
       steps: 0,
-      totalSteps: RUN_BATTLE_SCRIPT.totalSteps,
       done: false,
+      winner: null,
+      endReason: null,
     };
     return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'BATTLE', { battle });
   }
@@ -272,48 +268,66 @@ export function pressRunAction(s: RunPageState, ctx: RunPageContext): RunPageSta
   return s; // BATTLE（自动推进中）/ CHOICE（等选卡）→ 不接受主动作
 }
 
-function enemyHpAt(b: RunBattleState, steps: number): number {
-  const p = b.totalSteps <= 0 ? 1 : Math.min(1, steps / b.totalSteps);
-  return Math.max(0, Math.round(b.enemyHpMax * (1 - p)));
-}
-
-function playerHpAt(b: RunBattleState, steps: number): number {
-  const p = b.totalSteps <= 0 ? 1 : Math.min(1, steps / b.totalSteps);
-  const loss = Math.round(b.playerHpMax * RUN_BATTLE_SCRIPT.playerDurabilityLossRatio * p);
-  return Math.max(0, b.playerHpMax - loss);
+/** 真实战斗的帧同步数据（全部来自正式运行时，无一处由本文件计算）。 */
+export interface RunBattleSync {
+  readonly playerHp: number;
+  readonly enemyHp: number;
+  readonly steps: number;
 }
 
 /**
- * 推进战斗（只接受 BATTLE）。**日志在此阶段不追加任何内容**——
- * 逐帧伤害明细一律不写日志（Queue 硬约束），只在演完时一次性追加结果。
+ * 同步真实战斗数值（只接受 BATTLE）。**日志在此阶段零追加**——
+ * 逐帧伤害明细一律不写日志（Queue 硬约束），只在结束时一次性追加结果。
+ * 数值未变 → 返回同引用（no-op，避免无谓重绘）。
  */
-export function advanceRunBattle(s: RunPageState, steps: number): RunPageState {
+export function syncRunBattle(s: RunPageState, sync: RunBattleSync): RunPageState {
   if (s.phase !== 'BATTLE' || !s.battle) return s;
-  const n = Math.max(0, Math.floor(steps));
-  if (n === 0) return s;
   const b = s.battle;
-  const t = Math.min(b.totalSteps, b.steps + n);
-  const mid: RunBattleState = {
-    ...b,
-    steps: t,
-    enemyHp: enemyHpAt(b, t),
-    playerHp: playerHpAt(b, t),
+  if (b.playerHp === sync.playerHp && b.enemyHp === sync.enemyHp && b.steps === sync.steps) return s;
+  return next(s, {
+    battle: { ...b, playerHp: sync.playerHp, enemyHp: sync.enemyHp, steps: sync.steps },
+  });
+}
+
+/** 战斗结束回报（官方 `resolveBattleResult` 的原始输出 + 最终 HP）。 */
+export interface RunBattleOutcome {
+  readonly winner: string | null;
+  readonly endReason: string | null;
+  readonly playerHp: number;
+  readonly enemyHp: number;
+  readonly steps: number;
+}
+
+/**
+ * 战斗结束 → RESULT（由宿主在**官方 result 出现的那一刻**调用一次）。
+ *
+ * 输出三行叙事，全部是**真实数据的自然语言转写**：
+ *   ① 胜负（官方 winner；'A' = 玩家）
+ *   ② 真实耐久百分比
+ *   ③ 改装机会（进入 CHOICE 的叙事引子）
+ */
+export function finishRunBattle(s: RunPageState, outcome: RunBattleOutcome): RunPageState {
+  if (s.phase !== 'BATTLE' || !s.battle) return s;
+  const b: RunBattleState = {
+    ...s.battle,
+    playerHp: outcome.playerHp,
+    enemyHp: outcome.enemyHp,
+    steps: outcome.steps,
+    done: true,
+    winner: outcome.winner,
+    endReason: outcome.endReason,
   };
-  if (t < b.totalSteps) {
-    // 仍在交战：只更新数值，不写日志、不换 phase
-    return next(s, { battle: mid });
-  }
-  const done: RunBattleState = { ...mid, enemyHp: 0, done: true };
-  return goPhase(next(s, { battle: done }), 'RESULT', {
+  const won = outcome.winner === 'A';
+  return goPhase(next(s, { battle: b }), 'RESULT', {
     log: pushLogs(s.log, [
-      { kind: 'result', text: '战斗胜利。' },
-      { kind: 'durability', text: `战车耐久剩余 ${durabilityPercent(done)}%。` },
+      { kind: 'result', text: won ? '战斗胜利。' : '战车被打退，你撤出了战场。' },
+      { kind: 'durability', text: `战车耐久剩余 ${durabilityPercent(b)}%。` },
       { kind: 'result', text: '你发现了一次改装机会……' },
     ]),
   });
 }
 
-/** 战斗结束时的耐久百分比（0..100，整数；仅用于叙事文本，不是平衡数值）。 */
+/** 战斗结束时的耐久百分比（0..100，整数；真实 HP 比例，不是平衡数值）。 */
 export function durabilityPercent(b: RunBattleState): number {
   if (b.playerHpMax <= 0) return 0;
   return Math.max(0, Math.min(100, Math.round((b.playerHp / b.playerHpMax) * 100)));

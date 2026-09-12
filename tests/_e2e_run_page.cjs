@@ -54,14 +54,26 @@ const PALETTE = {
 };
 
 /**
- * 正式车辆 sprite 的特征色（PNG 实解码主色）。PRP-R3 必改 2 的判据：
- * 「战斗主体是真实车辆视觉」= 画面上真的存在这些精确色的像素（纯色矩形做不到）。
- * ⚠️ 只在 dpr=1 断言（dpr≠1 时画布被浏览器重采样，精确色不再成立）。
+ * 正式车辆 sprite 的特征色（参考值）——取自 PNG 解码出的**主色带**：
+ * - body_watermelon.png：主色团 RGB 近似 48..63 / 128..143 / 48..63（约占不透明像素 60%）
+ * - body_banana.png：主色团 RGB 近似 240..255 / 192..207 / 48..63（约占 46%）
+ * PRP-R3 必改 2 的判据：「战斗主体是真实车辆视觉」= 画面上真的存在这些色族的像素（纯色矩形做不到）。
+ * ⚠️ 必须用 `SPRITE_COLOR_TOL` 做色族匹配，不能要求精确相等：PRP-F1 的固定远摄把车辆缩到
+ *    ~50×19 逻辑 px，重采样后**精确色几乎不残留**（实测香蕉精确命中仅 5px）。色族匹配仍保持
+ *   两车互斥（实测交叉命中恒为 0），故判据强度不受影响。
+ * ⚠️ 只在 dpr=1 断言（dpr≠1 时画布被浏览器重采样，色值不可复现）。
  */
 const SPRITE_COLORS = {
-  watermelonBody: [0x3f, 0x8a, 0x3c], // assets/visuals/body_watermelon.png
-  bananaBody: [0xf6, 0xc8, 0x3c], // assets/visuals/body_banana.png
+  watermelonBody: [0x30, 0x80, 0x30], // assets/visuals/body_watermelon.png 主色带
+  bananaBody: [0xf0, 0xc0, 0x30], // assets/visuals/body_banana.png 主色带
 };
+
+/**
+ * PRP-F1：相机是固定远摄 scale = 390/1600 = 0.24375，车辆 sprite 被缩到 ~50×19 逻辑 px，
+ * 重采样后**精确色几乎不残留**（实测香蕉精确命中仅 5px）→ 必须带一个小容差。
+ * 容差 16 仍能保持两车特征色互斥（实测交叉命中恒为 0），故不影响判据强度。
+ */
+const SPRITE_COLOR_TOL = 16;
 
 /** 三个强化图标的底色集合（用于「恰好一个在场」判定）。 */
 const BUFF_ICON_COLORS = [PALETTE.buffIconHeavy, PALETTE.buffIconExplosive, PALETTE.buffIconRepair];
@@ -84,23 +96,29 @@ const SAMPLE_COLORS = {
 
 /** 各状态整页分层面积的冻结期望（唯一来源：tests/portraitRunPage.test.ts RP-22）。 */
 const LEDGER = {
+  /**
+   * ⚠️ PRP-F1：`ground` / `road` 只是 **IDLE 待机近景** 的两层。
+   * EVENT 起舞台带被真实 Planck 战斗世界（离屏位图）**整块覆盖** → 这两层在画面上不存在。
+   * 模型层（纯 node）里它们精确为 0；浏览器端因为战斗世界里的车辆 sprite 抗锯齿边缘
+   * 可能有极少数像素**恰好**等于这两个调色板色，给一个极小容差（见 LEDGER_TOLERANCE）。
+   */
   IDLE: {
     ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
     buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
     cardBar: 0, actionBar: 990,
   },
   EVENT: {
-    ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
+    ground: 0, road: 0, nodeDone: 384, nodeTodo: 512,
     buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
     cardBar: 0, actionBar: 990,
   },
   BATTLE: {
-    ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
+    ground: 0, road: 0, nodeDone: 384, nodeTodo: 512,
     buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
     cardBar: 0, actionBar: 0,
   },
   RESULT: {
-    ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
+    ground: 0, road: 0, nodeDone: 384, nodeTodo: 512,
     buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
     cardBar: 0, actionBar: 990,
   },
@@ -116,6 +134,23 @@ const LEDGER = {
     cardBar: 0, actionBar: 990,
   },
 };
+
+/**
+ * 浏览器端允许的**极小**容差（模型层仍为精确 0）。
+ * 理由：真实战斗世界由正式 Renderer 绘制，车辆 sprite 的抗锯齿边缘可能产生
+ * 个别恰好等于「地线 / 路面」调色板色的像素；而 IDLE 近景贡献的是 780 / 19500，
+ * 相差三个数量级 → 容差既能挡住「近景泄漏进战斗画面」，又不会因一两颗 AA 像素假红。
+ */
+/**
+ * 面积账本容差。
+ * - `ground` / `road`：PRP-F1 起舞台带被真实 Planck 战斗世界**整块位图覆盖**，车辆 sprite / 背景
+ *   抗锯齿边缘可能有极少数像素恰好等于这两个调色板色 → 给「小但非零」的容差。
+ * - 其余层（如 nodeTodo）：都是纯平涂 UI 面，正常为精确值；但同一原因仍有**巧合命中**
+ *   （实测 390×844@1 的 RESULT 帧 nodeTodo = 513，期望 512，恰好多 1px，且随战况浮动）
+ *   → 用 `LEDGER_TOLERANCE_DEFAULT` 兜住，容差量级 ≪ 该层面积（1.5% 以内）。
+ */
+const LEDGER_TOLERANCE = { ground: 64, road: 256 };
+const LEDGER_TOLERANCE_DEFAULT = 8;
 
 /**
  * 各条带底色的采样点（用于「分带结构」「CHOICE 整页变暗」的真实像素判定）。
@@ -222,6 +257,35 @@ function countExact(page, rgb) {
 }
 
 /**
+ * PRP-F1：在「某辆车**自己的可见外廓**」内统计该车 sprite 特征色像素（带容差）。
+ * 比「整页数精确色」更强：既证明该车是真实 sprite（不是纯色占位），
+ * 又证明「左=西瓜 / 右=香蕉」没有互换（交叉命中必须为 0）。
+ * ⚠️ `box` 的坐标系**随 stage.mode 变化**（见 runPage.ts 的 stage 字段注释）：
+ *   - `mode === 'battle'`：bounds 是**带内相对坐标** → `bandOffsetY` 传 `bands.stage.y`（80）；
+ *   - `mode === 'idle'`：bounds 已是**页面绝对坐标** → `bandOffsetY` 必须传 0。
+ */
+function countSpriteColorInBox(page, box, bandOffsetY, rgb, tol) {
+  return page.evaluate(
+    ({ box: b, off, target, tol: t }) => {
+      const c = document.querySelector('#run-canvas');
+      const ctx = c.getContext('2d');
+      const s = c.width / 390;
+      const x0 = Math.max(0, Math.floor(b.x * s));
+      const x1 = Math.min(c.width, Math.ceil((b.x + b.w) * s));
+      const y0 = Math.max(0, Math.floor((b.y + off) * s));
+      const y1 = Math.min(c.height, Math.ceil((b.y + off + b.h) * s));
+      const d = ctx.getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (Math.abs(d[i] - target[0]) <= t && Math.abs(d[i + 1] - target[1]) <= t && Math.abs(d[i + 2] - target[2]) <= t) n += 1;
+      }
+      return n;
+    },
+    { box, off: bandOffsetY, target: rgb, tol },
+  );
+}
+
+/**
  * PRP-R1：Arena A（Debug Lab）独占的调试色 —— 纵向竞技场的黄色描边框。
  * 玩家 Run Page 的调色板里**不存在**这个色 → 出现即代表 Debug 画面泄漏进玩家页面。
  */
@@ -252,7 +316,7 @@ function ledgerCheck(tag, label, stats, key, dpr) {
     const structural =
       key === 'CHOICE'
         ? stats.cardBar > 0 && stats.road === 0
-        : stats.road > 0 && stats.nodeTodo > 0;
+        : stats.nodeTodo > 0;
     log(
       structural,
       `[${tag}] ${label}（dpr≠1 只做结构断言）`,
@@ -260,7 +324,9 @@ function ledgerCheck(tag, label, stats, key, dpr) {
     );
     return;
   }
-  const diff = Object.keys(exp).filter((k) => stats[k] !== exp[k]);
+  const diff = Object.keys(exp).filter(
+    (k) => Math.abs(stats[k] - exp[k]) > (LEDGER_TOLERANCE[k] ?? LEDGER_TOLERANCE_DEFAULT),
+  );
   log(
     diff.length === 0,
     `[${tag}] ${label} 分层像素面积精确`,
@@ -415,14 +481,21 @@ async function runViewport(browser, vp) {
     `[${tag}] R11c 日志是玩家叙事（无 [系统]/[事件] 前缀）`,
     logTexts.join(' ｜ '),
   );
+  // PRP-F1：IDLE 中部舞台 = PRP 待机近景（还没接战 → 结构上没有真实战斗世界）
+  log(
+    p0.stage.mode === 'idle' && p0.battleWorld === null && p0.stage.scale > 0.5,
+    `[${tag}] R11d IDLE 中部舞台 = PRP 待机近景（未接战，无真实战斗世界）`,
+    `mode=${p0.stage.mode} battleWorld=${p0.battleWorld ? 'present' : 'null'} scale=${round2(p0.stage.scale)}`,
+  );
   const sIdle = await pixelStats(page);
   ledgerCheck(tag, 'R12 IDLE', sIdle, 'IDLE', vp.dpr);
 
   /* ------------------------------------------- 3b) 战斗主体 = 真实车辆 sprite */
   if (vp.dpr === 1) {
-    const melon = await countExact(page, SPRITE_COLORS.watermelonBody);
+    // IDLE 是待机近景（scale 0.77，车更大 + bounds 已是页面绝对坐标 → 不再加带偏移）
+    const melon = await countSpriteColorInBox(page, p0.stage.player.bounds, 0, SPRITE_COLORS.watermelonBody, SPRITE_COLOR_TOL);
     log(
-      melon > 200,
+      melon >= 100,
       `[${tag}] R12c 战斗主体是正式车辆 sprite（西瓜车身真实像素）`,
       `watermelonBody=${melon}px（纯色矩形不可能命中）`,
     );
@@ -461,15 +534,48 @@ async function runViewport(browser, vp) {
     `[${tag}] R16b 两车全部可视件都是真实 sprite / 真实半径轮（无纯色矩形占位）`,
     `player=${p.stage.player.allSprites} enemy=${p.stage.enemy && p.stage.enemy.allSprites}`,
   );
+  /*
+    PRP-F1 必改 1/2：遭遇瞬间中部舞台就已切成**真实 Planck 战斗世界**（世界尺度 = 正式 1600×900），
+    并且两车之间有**明确的开局距离**（实测外廓间距 ≈ 529 世界 px）—— 不是「贴车开局」。
+  */
+  const w0 = p.battleWorld;
+  log(
+    p.stage.mode === 'battle' && !!w0 && w0.world.width === 1600 && w0.world.height === 900,
+    `[${tag}] R16c 必改 1：战斗世界 = 正式 arena 尺度（1600×900，不是舞台带宽 390）`,
+    w0 ? `world=${w0.world.width}×${w0.world.height} groundY=${w0.world.groundY} cameraScale=${round2(w0.camera.scale)}` : 'no battleWorld',
+  );
+  log(
+    !!w0 &&
+      Math.round(w0.world.spawnAx) === 400 &&
+      Math.round(w0.world.spawnBx) === 1200 &&
+      Math.round(w0.world.spawnSeparation) === 800,
+    `[${tag}] R16d 必改 2：出生点 = 正式 spawnA 400 / spawnB 1200（中心距 800 世界 px）`,
+    w0 ? `spawnA=${round2(w0.world.spawnAx)} spawnB=${round2(w0.world.spawnBx)} sep=${round2(w0.world.spawnSeparation)}` : '',
+  );
+  log(
+    !!w0 && w0.world.initialGap > 400 && Math.round(w0.world.initialGap) === 529,
+    `[${tag}] R16e 必改 2：开局有明确距离（两车外廓实测间距 ≈ 529 世界 px）`,
+    w0 ? `initialGap=${round2(w0.world.initialGap)}（世界宽的 ${round2((w0.world.initialGap / w0.world.width) * 100)}%）` : '',
+  );
   const sEvent = await pixelStats(page);
   ledgerCheck(tag, 'R17 EVENT', sEvent, 'EVENT', vp.dpr);
   if (vp.dpr === 1) {
-    const melon = await countExact(page, SPRITE_COLORS.watermelonBody);
-    const banana = await countExact(page, SPRITE_COLORS.bananaBody);
+    /*
+      PRP-F1 实测（相机 0.24375、dpr=1、EVENT 帧）：
+      左车框内 西瓜色族 217px / 香蕉色族 0；右车框内 香蕉色族 53px / 西瓜色族 0。
+      阈值取实测值的 ~55%，交叉命中必须严格为 0。
+    */
+    const bandY = p.bands.stage.y;
+    const pb = p.stage.player.bounds;
+    const eb = p.stage.enemy.bounds;
+    const melonL = await countSpriteColorInBox(page, pb, bandY, SPRITE_COLORS.watermelonBody, SPRITE_COLOR_TOL);
+    const bananaL = await countSpriteColorInBox(page, pb, bandY, SPRITE_COLORS.bananaBody, SPRITE_COLOR_TOL);
+    const bananaR = await countSpriteColorInBox(page, eb, bandY, SPRITE_COLORS.bananaBody, SPRITE_COLOR_TOL);
+    const melonR = await countSpriteColorInBox(page, eb, bandY, SPRITE_COLORS.watermelonBody, SPRITE_COLOR_TOL);
     log(
-      melon > 200 && banana > 200,
-      `[${tag}] R17b 玩家 / 敌人都是正式车辆 sprite（双车真实像素在场）`,
-      `watermelon=${melon}px banana=${banana}px`,
+      melonL >= 100 && bananaR >= 30 && bananaL === 0 && melonR === 0,
+      `[${tag}] R17b 玩家 / 敌人都是正式车辆 sprite（各自外廓内特征色在场且互斥）`,
+      `左框 西瓜${melonL}px/香蕉${bananaL}px · 右框 香蕉${bananaR}px/西瓜${melonR}px`,
     );
   }
 
@@ -484,10 +590,15 @@ async function runViewport(browser, vp) {
     `[${tag}] R20 BATTLE 玩家左 / 敌人右（严格分离）`,
     `playerLeftOfEnemy=${p.stage.playerLeftOfEnemy} gap=${p.stage.minGapPx}`,
   );
+  /*
+    PRP-F1 必改 3：相机是**固定远摄**（scale = 舞台带宽 / 正式世界宽 = 390/1600 = 0.24375），
+    只由「舞台带 + 正式 arena」决定，与车辆位置无关；从此帧到战斗结束都不变。
+  */
+  const cam0 = p.battleWorld && p.battleWorld.camera;
   log(
-    Math.abs(p.stage.scale - p0.stage.scale) < 1e-9 && p.stage.scale > 0.7 && p.stage.scale <= 0.9,
-    `[${tag}] R21 显示缩放为固定值且明显放大（不随状态跳变）`,
-    `scale=${p.stage.scale}`,
+    !!cam0 && Math.abs(cam0.scale - 390 / 1600) < 1e-9 && cam0.offsetX === 0 && cam0.coversWorld === true,
+    `[${tag}] R21 必改 3：固定远摄相机（scale = 390/1600，完整框住 0..1600）`,
+    cam0 ? `scale=${cam0.scale} offsetX=${cam0.offsetX} groundY=${round2(cam0.groundScreenY)} coversWorld=${cam0.coversWorld}` : 'no camera',
   );
   const sBattle = await pixelStats(page);
   ledgerCheck(tag, 'R22 BATTLE 开局', sBattle, 'BATTLE', vp.dpr);
@@ -502,27 +613,109 @@ async function runViewport(browser, vp) {
     );
   }
 
-  // 真实等待一段时间：日志不得刷逐帧伤害明细（验收 4）
-  await page.waitForTimeout(700);
+  /*
+    PRP-F1：从这一帧起是**真实 Planck 战斗**（实测整场 ≈15.4s；首次命中 step 132 ≈2.2s；
+    单发弹丸寿命 ≈40+ 帧）。若只在一个瞬间采样，必然随机落在「弹丸刚落地 / 下一发未出膛」的空窗里
+    → 改为**窗口内累积观测**（5s，每 50ms 一次）：这不是放宽判据，而是把
+    「炮弹真的飞过 / 耐久真的掉过 / 日志始终不动 / 相机始终不动」变成窗口内可证的事实。
+  */
+  const win = await page.evaluate(async () => {
+    const acc = {
+      samples: 0,
+      maxProjectiles: 0,
+      projSamples: 0,
+      minEnemyHp: Infinity,
+      minPlayerHp: Infinity,
+      maxLogCount: 0,
+      phases: [],
+      camVariants: [],
+      lastSteps: 0,
+      lastGapWorld: 0,
+    };
+    const t0 = performance.now();
+    while (performance.now() - t0 < 5000) {
+      const p = window.__RUNPAGE__.probe();
+      acc.samples += 1;
+      acc.phases.push(p.phase);
+      acc.maxLogCount = Math.max(acc.maxLogCount, p.log.length);
+      const w = p.battleWorld;
+      if (w) {
+        acc.maxProjectiles = Math.max(acc.maxProjectiles, w.projectiles);
+        if (w.projectiles > 0) acc.projSamples += 1;
+        acc.lastSteps = w.steps;
+        acc.lastGapWorld = w.gapWorld;
+        const v = `${w.camera.scale}|${w.camera.offsetX}|${w.camera.offsetY}`;
+        if (!acc.camVariants.includes(v)) acc.camVariants.push(v);
+      }
+      if (p.battle) {
+        acc.minEnemyHp = Math.min(acc.minEnemyHp, p.battle.enemyHp);
+        acc.minPlayerHp = Math.min(acc.minPlayerHp, p.battle.playerHp);
+        acc.enemyHpMax = p.battle.enemyHpMax;
+        acc.playerHpMax = p.battle.playerHpMax;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const p = window.__RUNPAGE__.probe();
+    acc.endPhase = p.phase;
+    acc.endSteps = (p.battleWorld && p.battleWorld.steps) || 0;
+    return acc;
+  });
   const pMid = await probeOf(page);
   log(
-    pMid.phase === 'BATTLE' && JSON.stringify(pMid.log) === JSON.stringify(logAtBattleStart),
+    win.samples >= 40 &&
+      win.phases.every((ph) => ph === 'BATTLE') &&
+      win.maxLogCount === logAtBattleStart.length,
     `[${tag}] R23 BATTLE 期间日志零变化（不刷伤害明细）`,
-    `logCount=${pMid.log.length} steps=${pMid.battle && pMid.battle.steps}`,
+    `窗口 ${win.samples} 次采样全程 BATTLE · 日志恒为 ${logAtBattleStart.length} 条 · steps→${win.endSteps}`,
   );
   log(
-    pMid.battle && pMid.battle.enemyHp < pMid.battle.enemyHpMax && pMid.battle.playerHp <= pMid.battle.playerHpMax,
+    win.minEnemyHp < win.enemyHpMax && win.minEnemyHp > 0 && win.minPlayerHp <= win.playerHpMax,
     `[${tag}] R24 战斗在真实推进（耐久在变，但没写日志）`,
-    pMid.battle ? `enemy ${pMid.battle.enemyHp}/${pMid.battle.enemyHpMax} · self ${pMid.battle.playerHp}/${pMid.battle.playerHpMax}` : '',
+    `窗口内最低 敌方 ${win.minEnemyHp}/${win.enemyHpMax} · 我方 ${win.minPlayerHp}/${win.playerHpMax} · steps→${win.endSteps}`,
+  );
+  /*
+    PRP-F1 必改 5①：窗口内必须出现过**炮弹真的在空中飞**
+    （真实 projectile 渲染快照计数 > 0，不是「贴脸直接扣血」）。
+  */
+  const wMid = pMid.battleWorld;
+  log(
+    win.maxProjectiles > 0 && win.projSamples > 0,
+    `[${tag}] R24b 必改 5①：炮弹真的在飞（真实存活弹丸 > 0）`,
+    `窗口内最多 ${win.maxProjectiles} 发在飞 · ${win.projSamples}/${win.samples} 次采样见弹 · steps→${win.lastSteps} gapWorld=${round2(win.lastGapWorld)}`,
+  );
+  /*
+    PRP-F1 必改 3：相机在整个战斗中**一动不动**（与开局逐字段相同 → 无追踪、无动态 zoom）。
+  */
+  log(
+    !!wMid &&
+      win.camVariants.length === 1 &&
+      win.camVariants[0] === `${cam0.scale}|${cam0.offsetX}|${cam0.offsetY}`,
+    `[${tag}] R24c 必改 3：战斗中相机零变化（无智能追踪 / 无动态 zoom）`,
+    `scale ${round2(cam0.scale)}→${round2(wMid ? wMid.camera.scale : NaN)} offsetX ${cam0.offsetX}→${wMid ? wMid.camera.offsetX : '?'} · 窗口内相机取值种类=${win.camVariants.length}`,
   );
 
   /* ----------------------------------------- 6) 自动结束 → RESULT */
-  await page.waitForFunction(() => window.__RUNPAGE__.probe().phase === 'RESULT', null, { timeout: 15000 });
+  // ⚠️ 真实 Planck 战斗实测约 15.4s（官方阶段 Active 10s + Warning 3s + Closing，HP 判据收束）
+  await page.waitForFunction(() => window.__RUNPAGE__.probe().phase === 'RESULT', null, { timeout: 40000 });
   p = await probeOf(page);
   log(p.phase === 'RESULT', `[${tag}] R25 战斗自动结束 → RESULT（无操作介入）`, `phase=${p.phase}`);
   const added = p.log.length - logAtBattleStart.length;
   log(added === 3, `[${tag}] R26 战斗结束后一次性追加 3 行玩家叙事（胜负 + 耐久 % + 改装机会）`, `+${added}: ${p.log.slice(-3).map((l) => l.text).join(' ｜ ')}`);
-  log(p.stage.enemy === null && p.stage.enemyGone === true, `[${tag}] R27 敌方消失、玩家留在舞台`, `enemy=${p.stage.enemy} gone=${p.stage.enemyGone}`);
+  /*
+    PRP-F1：RESULT 不是「敌人消失」，而是**真实战场冻结在画面上**（战败方仍留在场地里）；
+    战斗结论来自官方 resolveBattleResult（winner / endReason 原样带回）。
+  */
+  const wEnd = p.battleWorld;
+  log(
+    p.stage.mode === 'battle' && !!p.stage.enemy && !!wEnd && !!p.battle && p.battle.done === true,
+    `[${tag}] R27 必改 4：RESULT = 真实战场冻结（战斗结论由正式判据给出，非脚本计时）`,
+    p.battle ? `winner=${p.battle.winner} endReason=${p.battle.endReason} steps=${p.battle.steps} durability=${p.battle.durabilityPercent}%` : '',
+  );
+  log(
+    !!p.battle && p.battle.winner === 'A' && p.battle.endReason === 'hp' && Math.min(p.battle.playerHp, p.battle.enemyHp) <= 0,
+    `[${tag}] R27b 必改 5：结局由 HP 判据收束（一方耐久归零）`,
+    p.battle ? `hpA=${round2(p.battle.playerHp)} hpB=${round2(p.battle.enemyHp)}` : '',
+  );
   log(p.actionLabel === '继续' && p.actionEnabled, `[${tag}] R28 RESULT 底部重新出现「继续」`, `${p.actionLabel}/${p.actionEnabled}`);
   const sResult = await pixelStats(page);
   ledgerCheck(tag, 'R29 RESULT', sResult, 'RESULT', vp.dpr);
@@ -617,8 +810,9 @@ async function runViewport(browser, vp) {
       `[${tag}] R42b 顶部只有 1 个真实图标（无空槽、无 5 个占位格子）`,
       `heavy/explosive/repair=${icons.join('/')} chip=${sFinale.buffChip}`,
     );
-    const melon = await countExact(page, SPRITE_COLORS.watermelonBody);
-    log(melon > 200, `[${tag}] R42c 回到 IDLE 后车辆仍是正式 sprite`, `watermelon=${melon}px`);
+    // IDLE（页面绝对坐标 → 偏移 0）
+    const melon = await countSpriteColorInBox(page, p.stage.player.bounds, 0, SPRITE_COLORS.watermelonBody, SPRITE_COLOR_TOL);
+    log(melon >= 100, `[${tag}] R42c 回到 IDLE 后车辆仍是正式 sprite`, `watermelon=${melon}px`);
   }
 
   /* ------------------------------------------- 9) 持续存在的同一页面 */
@@ -694,8 +888,71 @@ function round2(v) {
       '[iso] I2b 被引用的 Run Page chunk 是最新构建产物（非过期 chunk）',
       `live=${jsName}@${liveMtime} stale=${allChunks.length - (jsName ? 1 : 0)}个(信息性，emptyOutDir:false)`,
     );
-    const leaked = ['playerGameRuntime', 'canvasPlayerUIHost', 'webDomPlayerUIHost', 'physicsLab', 'planckBattleOrchestrator', 'garageFusion', 'bootstrap-wechat', 'ArenaARuntime'].filter((n) => bundle.includes(n));
-    log(leaked.length === 0, '[iso] I3 Run Page bundle 不含正式玩法 Runtime / Arena A 运行时', leaked.length ? `泄漏=${leaked.join(',')}` : `bundle=${jsName} size=${bundle.length}B`);
+    /*
+      ⚠️ PRP-F1：`planckBattleOrchestrator` **不再**属于「泄漏」——
+      Run Page 现在就是**正式接入旧侧视 Planck 战斗**（必改 4），它必须被打进 bundle。
+      仍然必须零泄漏的是：正式玩家 Runtime / 正式 UI Host / Debug Lab / 融合 / 微信引导 / Arena A。
+    */
+    /*
+      ⚠️ 并且：**不得**用「标识符字符串扫描」当正向证据 —— 生产构建是压缩产物，
+      类名 / 模块名几乎全部被重命名（旧版 I3 的泄漏列表因此长期是空转）。
+      改法：沿 chunk 图取出**全部可达字节**，再用两类**压缩后仍然存活**的标记做正向判定：
+        - 物理引擎（planck-js）内部字段名：`maxTOIContacts` / `linearSlopSquared` / `baumgarte`
+        - 正式车辆装配的属性路径：`hardpointId` / `maxManifoldPoints`
+      它们只可能来自正式战斗栈；PRP 自造的「假战斗」不可能产生这些标记。
+    */
+    const reachable = [jsName];
+    for (const m of pageHtml.matchAll(/["'(]\.\/([A-Za-z0-9_.-]+\.js)/g)) reachable.push(m[1]);
+    for (let i = 0; i < reachable.length; i += 1) {
+      let src = '';
+      try {
+        src = fs.readFileSync(path.join(ROOT, 'assets', reachable[i]), 'utf8');
+      } catch {
+        continue;
+      }
+      for (const m of src.matchAll(/["'(]\.\/([A-Za-z0-9_.-]+\.js)/g)) {
+        if (!reachable.includes(m[1])) reachable.push(m[1]);
+      }
+    }
+    const reachableSet = [...new Set(reachable.filter(Boolean))];
+    const allBytes = reachableSet
+      .map((n) => {
+        try {
+          return fs.readFileSync(path.join(ROOT, 'assets', n), 'utf8');
+        } catch {
+          return '';
+        }
+      })
+      .join('\n');
+    log(
+      reachableSet.length >= 2 && allBytes.length > 300000,
+      '[iso] I3 可达 chunk 图被完整取出（排除「只扫一个 chunk / 扫到过期产物」的空转）',
+      `chunks=${reachableSet.join(',')} total=${allBytes.length}B`,
+    );
+    const leaked = [
+      'playerGameRuntime',
+      'canvasPlayerUIHost',
+      'webDomPlayerUIHost',
+      'physicsLab',
+      'garageFusion',
+      'bootstrap-wechat',
+      'ArenaARuntime',
+    ].filter((n) => allBytes.includes(n));
+    log(
+      leaked.length === 0,
+      '[iso] I3a 可达产物内不含正式玩家 Runtime / Arena A 运行时',
+      leaked.length ? `命中=${leaked.join(',')}` : `扫描 ${allBytes.length}B`,
+    );
+    const engineMarkers = ['maxTOIContacts', 'linearSlopSquared', 'baumgarte'];
+    const battleMarkers = ['hardpointId', 'maxManifoldPoints'];
+    const missing = [...engineMarkers, ...battleMarkers].filter((m) => !allBytes.includes(m));
+    log(
+      missing.length === 0,
+      '[iso] I3b PRP-F1：产物内**真的含正式 Planck 战斗栈**（不是 PRP 自造假战斗）',
+      missing.length
+        ? `缺失标记=${missing.join(',')}`
+        : `engine=${engineMarkers.join('/')} + battle=${battleMarkers.join('/')} 全部在场`,
+    );
   } finally {
     if (browser) await browser.close();
     server.close();

@@ -1,20 +1,25 @@
 /**
  * PRP-F0-RUN-PAGE-SHELL｜PRP-R3-CAPYBARA-UI-HIERARCHY-REBUILD
- * Run Page 中部侧视舞台的场景组装（纯函数 + 只读数据，无 DOM / 无 Canvas）。
+ * Run Page 中部侧视舞台的**待机近景**组装（纯函数 + 只读数据，无 DOM / 无 Canvas）。
  *
- * 三条来源纪律：
+ * ⚠️ PRP-F1-PORTRAIT-PLANCK-BATTLE-INTEGRATION：本文件现在的职责**只剩 IDLE 待机近景**——
+ *   - IDLE（还没遭遇）：PRP 自有的近景舞台（真实 sprite 的两车摆位 → 本次只剩玩家一辆），
+ *     保留 PRP-R3 已经通过的构图（车辆明显、视觉重心偏下、压在山脊上）；
+ *   - EVENT / BATTLE / RESULT：舞台带改由**真实 Planck 战斗世界**占据
+ *     （`runBattleView` 用正式 Renderer 渲染 + PRP 固定远摄相机贴图），
+ *     本文件的摆位逻辑在这些 phase **完全不参与绘制**，因此不可能与真实战斗争位。
+ *   这也是「遭遇即拉远」的镜头语言：近景待机 → 真实战场（相机 cut，不是逐帧追踪）。
+ *
+ * 三条来源纪律（不变）：
  *   1) 车辆外形**全部**来自正式定义：车身 / 轮组 / 部件的 `visual`（visualId + size +
  *      anchor + mirrorWithFacing），世界变换走正式纯函数 `visualWorldTransform`
  *      （与正式战斗 `planckBattleOrchestrator.buildVehicleSnapshot` **同一函数**）；
- *      → 本文件不写任何尺寸 / 偏移数字，也不自造美术；
  *   2) 装载 / 遭遇是**固定**的一套演示数据（`RUN_DEMO_*`），指向 F1 共享测试数据，
  *      不新增数值、不随机、不接 Debug 选择项；
- *   3) 未提供 `visual` 的件（轮组 / 无 sprite 的部件）降级为**按真实几何**的圆形 / 矩形，
- *      并如实暴露给 probe（不伪装成「已有真实视觉」）。
+ *   3) 未提供 `visual` 的件（无 sprite 的部件）**整件不画**（见 `boxesOf`），
+ *      绝不用纯色矩形冒充车辆外观。
  *
- * ⚠️ PRP-R3 起本舞台**不再用纯色矩形代表车辆**：车辆是正式 sprite（或真实几何降级），
- * 因此车身 / 部件不再进入面积账本（sprite 像素非纯色）—— 账本只留地线 / 路面 / 顶部节点 /
- * 强化图标 / 强调条这些「确实平涂且无人覆盖」的面。
+ * ⚠️ 车辆是正式 sprite（或真实几何降级），车身 / 部件从不进入面积账本（sprite 像素非纯色）。
  */
 
 import { registry } from '../../core/content';
@@ -24,7 +29,6 @@ import { bodyOffsetBoxes } from './scene';
 import { buildSpawnPlan, type SpawnPlan, type SpawnedEntity } from './entities';
 import { findEncounter, findLoadout } from './testData';
 import {
-  RUN_SIDE_VIEW_CLOSING_PX,
   placeSideViewVisuals,
   runActionBarRect,
   runBuffIconChip,
@@ -38,7 +42,6 @@ import {
   runStageGroundY,
   runStageRoadRect,
   runVisualBounds,
-  translateRunGroup,
   type RunLayeredRect,
   type RunPlacedGroup,
   type RunPlacedVisual,
@@ -48,11 +51,8 @@ import {
 import {
   RUN_CHOICE_OPTIONS,
   runActionEnabled,
-  runBattleProgress,
-  type RunBattleState,
   type RunPageContext,
   type RunPageState,
-  type RunPhase,
 } from './runPageState';
 
 /** 本 Queue 的固定演示装载（Debug 选择项不参与 Run Page）。 */
@@ -79,7 +79,6 @@ export function runPageContext(plan: SpawnPlan = runDemoPlan()): RunPageContext 
   return {
     vehicleLabel: loadout ? loadout.label : plan.player.bodyName,
     encounterLabel: encounter ? encounter.label : enemy.bodyName,
-    enemyBodyDefId: enemy.bodyDefId,
     playerHpMax: plan.player.hp,
     enemyHpMax: enemy.hp,
   };
@@ -189,43 +188,28 @@ export function entityVisualWidth(e: SpawnedEntity): number {
   return runVisualBounds(boxesOf(e).boxes).w;
 }
 
-/* ------------------------------------------------------- 舞台视图 */
+/* ------------------------------------------------------- 待机近景舞台 */
 
 export interface RunStageEntityView {
   readonly visuals: readonly RunPlacedVisual[];
   readonly bounds: RunRect;
 }
 
+/** 待机近景舞台（**只服务 IDLE**：还没遭遇，画面上只有玩家一辆车）。 */
 export interface RunStageView {
-  /** 显示缩放（只服务「两车同框」，与状态无关 → 敌人出现时玩家车体不会突然缩放）。 */
+  /** 显示缩放（只服务 IDLE 近景构图；与状态无关）。 */
   readonly scale: number;
   readonly groundY: number;
   readonly baselineY: number;
   readonly ground: RunRect;
   readonly road: RunRect;
   readonly player: RunStageEntityView;
-  /** EVENT / BATTLE 才有敌人；IDLE = 还没遭遇，RESULT / CHOICE = 已消失。 */
-  readonly enemy: RunStageEntityView | null;
-  /** 敌方是否处于「结束 / 消失」状态（RESULT 与 CHOICE）。 */
-  readonly enemyGone: boolean;
-  readonly battle: boolean;
-  /** 本帧的两车相向演出位移（逻辑 px，纯表现）。 */
-  readonly closingOffset: number;
-}
-
-/** 战斗演出位移：正弦收敛——开局与结束时为 0，中段最大（纯表现，不改任何数值）。 */
-export function battleClosingOffset(battle: RunBattleState | null): number {
-  if (!battle || battle.totalSteps <= 0) return 0;
-  const p = runBattleProgress(battle);
-  return Math.round(Math.sin(Math.PI * p) * RUN_SIDE_VIEW_CLOSING_PX);
 }
 
 interface BasePlacements {
   readonly scale: number;
   readonly baselineY: number;
   readonly player: RunPlacedGroup;
-  readonly enemy: RunPlacedGroup;
-  readonly enemyEntity: SpawnedEntity;
 }
 
 let cachedBase: BasePlacements | null = null;
@@ -238,13 +222,10 @@ function basePlacements(): BasePlacements {
   const scale = runSideViewScale(entityVisualWidth(plan.player), entityVisualWidth(enemyEntity));
   const baselineY = runStageBaselineY();
   const p = boxesOf(plan.player);
-  const e = boxesOf(enemyEntity);
   cachedBase = {
     scale,
     baselineY,
     player: placeSideViewVisuals(p.boxes, 'left', scale, baselineY, p.mirrors),
-    enemy: placeSideViewVisuals(e.boxes, 'right', scale, baselineY, e.mirrors),
-    enemyEntity,
   };
   return cachedBase;
 }
@@ -253,34 +234,31 @@ function toEntityView(g: RunPlacedGroup): RunStageEntityView {
   return { visuals: g.visuals, bounds: g.bounds };
 }
 
-/** 按当前 phase 组装中部舞台（唯一入口；渲染与测试共用）。 */
-export function buildRunStageView(phase: RunPhase, battle: RunBattleState | null): RunStageView {
+/**
+ * 待机近景舞台（唯一入口；渲染与测试共用）。
+ *
+ * ⚠️ PRP-F1：**只用于 IDLE**。EVENT / BATTLE / RESULT 的舞台带是真实战斗世界
+ * （见 `runBattleView`），本函数在这些 phase 不参与绘制。
+ */
+export function buildRunStageView(): RunStageView {
   const base = basePlacements();
-  const off = phase === 'BATTLE' ? battleClosingOffset(battle) : 0;
-  const showEnemy = phase === 'EVENT' || phase === 'BATTLE';
-  const player = toEntityView(translateRunGroup(base.player, off));
-  const enemy = toEntityView(translateRunGroup(base.enemy, -off));
   return {
     scale: base.scale,
     groundY: runStageGroundY(),
     baselineY: base.baselineY,
     ground: runStageGroundRect(),
     road: runStageRoadRect(),
-    player,
-    enemy: showEnemy ? enemy : null,
-    enemyGone: phase === 'RESULT' || phase === 'CHOICE',
-    battle: phase === 'BATTLE',
-    closingOffset: off,
+    player: toEntityView(base.player),
   };
 }
 
-/** 演示用的敌人实体（probe / 测试需要知道「消失的敌人是谁」）。 */
+/** 演示用的敌人实体（probe / 测试需要知道「遭遇的是谁」）。 */
 export function runDemoEnemy(): SpawnedEntity {
   return runDemoPlan().enemies[0];
 }
 
 /**
- * 舞台里的「平涂面」入账层。
+ * 待机舞台里的「平涂面」入账层（地线 + 路面）。
  * ⚠️ PRP-R3：车辆改用正式 sprite → **不再有** playerBody / enemyBody 等纯色层。
  */
 export function runStageLayers(view: RunStageView): RunLayeredRect[] {
@@ -295,6 +273,8 @@ export function runStageLayers(view: RunStageView): RunLayeredRect[] {
  *
  * 语义 = **画面上确实带着调色板精确色的像素**：
  *   - CHOICE 打开时整页被遮罩合成为新颜色 → 底层几何不再带精确色，本帧只登记浮层自身；
+ *   - **EVENT / BATTLE / RESULT**：舞台带被真实战斗世界（离屏位图）占据 →
+ *     地线 / 路面**不存在**，本帧不登记这两层；
  *   - 车辆是 sprite，本身不是纯色 → 从不入账；
  *   - 文本不属于任何层（中性灰蓝 + 抗锯齿 → 永不落入几何色）。
  */
@@ -303,7 +283,8 @@ export function runPageLayerShapes(state: RunPageState, view: RunStageView): Run
 
   // 底部常驻层（CHOICE 遮罩下会被合成掉 → 不登记）
   if (state.phase !== 'CHOICE') {
-    out.push(...runStageLayers(view));
+    // 待机近景的地线 / 路面只在 IDLE 真实可见（其余 phase 被真实战场覆盖）
+    if (state.phase === 'IDLE') out.push(...runStageLayers(view));
 
     // 顶部进度节点：已完成 = day 个
     runDayNodes(state.dayTotal).forEach((r, i) => {

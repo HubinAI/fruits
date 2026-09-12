@@ -334,6 +334,17 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
     // ---- PRP-R3：正式战斗契约里的**纯几何换算**（visualWorldTransform）----
     // 车辆视觉的世界变换必须与正式战斗同源（双引擎共享函数），不自造第二套 anchor / 镜像语义。
     '../../battle/battleContract',
+    // ---- PRP-F1：Run Page 正式接入**旧侧视 Planck 战斗**（唯一入口 = runBattleRuntime.ts）----
+    // ⚠️ 这一组是「PRP 不再自造战斗」的关键：世界尺度 / 出生点 / 阶段要读正式配置，
+    //    战斗本身要跑正式编排器，画面要交给正式 Renderer（否则就是第二套战斗实现）。
+    //    代价是 PRP 与正式战斗栈之间**只有** runBattleRuntime / runBattleView 两个文件相连
+    //    （见 R22a-4 的单入口守卫）。
+    '../../battle/arenaConfig', // 正式 arena 尺度（1600×900 / groundY 700）
+    '../../battle/planckBattleOrchestrator', // 正式侧视战斗编排器（**仅 runBattleRuntime.ts 可用**）
+    '../../render/renderer', // 正式渲染器（原样复用，零修改）
+    '../../render/visualRegistry', // 正式 sprite 表（Renderer 的依赖）
+    '../../presentation/audioService', // 正式音效服务（无 AudioContext 时安全 no-op）
+    '../../presentation/playerPresentation', // 正式战斗表现唯一入口（炮口闪光 / 伤害数字 / 冲击）
   ]);
 
   /**
@@ -344,12 +355,17 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
    */
   const ALLOWED_ASSET_PREFIXES = ['../../../assets/'];
 
+  /**
+   * ⚠️ PRP-F1：`render/` 与 `presentation/` 从「整目录禁止」收紧为
+   * 「**只放行两个具体模块**」（`renderer` / `visualRegistry` / `audioService` /
+   * `playerPresentation`）：其余 render / presentation / ui / dev / game / platform 模块
+   * 仍然一律禁止 —— 严禁用法：挡不住 `render/` 通配就等于允许 Lab 摸到整套 UI / 相机 / 开发工具。
+   */
   const FORBIDDEN_RELATIVE =
-    /^\.\.\/\.\.\/(game|render|ui|presentation|dev|platform\/(?!playerViewport))|^\.\.\/\.\.\/(main|platform\/bootstrap)/;
+    /^\.\.\/\.\.\/(game|dev|ui)|^\.\.\/\.\.\/render\/(?!renderer$|visualRegistry$)|^\.\.\/\.\.\/presentation\/(?!audioService$|playerPresentation$)|^\.\.\/\.\.\/platform\/(?!playerViewport)|^\.\.\/\.\.\/(main|platform\/bootstrap)/;
 
   /** 即便落在允许目录内，也不得被 Lab 引用的正式玩法 / 侧视驱动模块（A1 起显式钉死）。 */
   const FORBIDDEN_MODULES = [
-    '../../battle/planckBattleOrchestrator',
     '../../battle/planckMovement',
     '../../battle/vehicleAssembly',
     '../../battle/battleHost',
@@ -431,6 +447,44 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
     const real = paintedAreas(arenaAScene(new ArenaARuntime(plan).view()));
     expect(real.arena).toBe(25200);
     expect(placeholder.arena).not.toBe(real.arena);
+  });
+
+  it('R22a-4 PRP-F1：正式战斗编排器**只允许** runBattleRuntime.ts 引用，且必须零 config 覆盖', () => {
+    const files = labSourceFiles();
+    const stripper = (f: string): string =>
+      readFileSync(join(LAB_DIR, f), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+
+    // 1) 单一入口：只有 runBattleRuntime.ts 能 import 正式编排器
+    const importers = files.filter((f) => importSpecifiers(readFileSync(join(LAB_DIR, f), 'utf8')).includes('../../battle/planckBattleOrchestrator'));
+    expect(importers).toEqual(['runBattleRuntime.ts']);
+
+    // 2) 唯一调用点必须是 `new PlanckBattleOrchestrator(A, B, registry, {}, soloA)`
+    //    —— 第 4 个实参是**字面空对象**：世界尺度 / 出生点 / 阶段 / 驱动 / 武器全取正式默认。
+    const rt = stripper('runBattleRuntime.ts');
+    const calls = [...rt.matchAll(/new PlanckBattleOrchestrator\(/g)];
+    expect(calls.length).toBe(1);
+    const call = rt.match(/new PlanckBattleOrchestrator\(([\s\S]*?)\);/);
+    expect(call).not.toBeNull();
+    const args = call![1].split(',').map((x) => x.trim()).filter(Boolean);
+    expect(args[3]).toBe('{}');
+    expect(args.length).toBe(5);
+
+    // 3) 世界尺度必须来自正式配置（不是自己写 1600 / 700）
+    expect(rt.includes('DEFAULT_ARENA_CONFIG')).toBe(true);
+    expect(rt.includes('1600')).toBe(false); // 源码里不得出现硬编码世界宽
+    expect(rt.includes('900')).toBe(false);
+    // 4) 出生位置必须实测（读 world.getPosition），不得写死 400 / 1200
+    expect(rt.includes('400')).toBe(false);
+    expect(rt.includes('1200')).toBe(false);
+    expect(rt.includes('getPosition')).toBe(true);
+
+    // 5) 视图层只做 camera / clip / 合成：绝不启用正式跟随相机（智能追踪 + 动态 zoom）
+    const view = stripper('runBattleView.ts');
+    expect(view.includes('reframe(')).toBe(false);
+    expect(view.includes('battleCam')).toBe(false);
+    expect(view.includes("drawImage(")).toBe(true); // 唯一的合成动作
   });
 
   it('R22b 反向硬约束：src/ 下（Lab 目录之外）0 处引用 portraitBattleLab / portrait-lab', () => {

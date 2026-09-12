@@ -86,6 +86,22 @@ const ARENA_KEYED_NUMERIC_TABLES = new Set(['ARENA_PILLAR_H']);
 
 const ARENA_CONDITION_RE = /(?:===|!==)\s*['"][AB]['"]|arena\s*(?:={2,3}|!==?)\s*|state\.arena\b|\bLabArenaId\b/;
 
+/**
+ * ⚠️ PRP-F1：`ARENA_CONDITION_RE` 里的裸 `=== 'A'` / `=== 'B'` 分支，本意是抓
+ * 「按 **Arena** 常量分叉」，但 `'A' | 'B'` 在本项目里同时是**队伍 id**（`TeamId`）——
+ * 正式战斗代码里合法存在 `team === 'A'` / `winner === 'A'` 这类比较，
+ * 它们与 Arena（俯视 A / 侧视 B）**毫无关系**。
+ *
+ * 两者是不同的领域，因此这里精确剔除「左侧是队伍语义标识」的行再判定：
+ * Arena 分叉（`arena === 'A'`）依旧 100% 会被抓到，队伍判定不会被误报。
+ */
+const TEAM_COMPARISON_RE = /\b(?:team|winner|loser|vehicle|snapshot|projectile|side|driver)\w*\s*[!=]==?\s*['"][AB]['"]/;
+
+/** 剥注释后，只保留「真正的 arena 条件」行（剔除队伍语义比较）。 */
+function arenaConditionLines(code: string): string[] {
+  return code.split('\n').filter((l) => !TEAM_COMPARISON_RE.test(l) && ARENA_CONDITION_RE.test(l));
+}
+
 describe('PBL-G1｜允许差异注册表（集中、可枚举、防腐烂）', () => {
   it('G1-01 恰好 3 类允许差异，且 kind 覆盖 Queue 白名单三条', () => {
     expect(PBL_ALLOWED_ARENA_DIFFERENCES).toHaveLength(3);
@@ -217,19 +233,24 @@ describe('PBL-G1｜共享配置审计：无 Arena 专属平衡覆盖', () => {
   it('G1-07 共享数据文件（entities.ts / testData.ts）剥注释后完全不感知 arena → 结构性无 Arena 专属覆盖', () => {
     for (const f of SHARED_DATA_FILES) {
       const code = stripComments(readLab(f));
-      const hits = code.split('\n').filter((l) => ARENA_CONDITION_RE.test(l));
+      const hits = arenaConditionLines(code);
       expect(hits, `${f} 出现 arena 条件分支：${hits.join(' | ')}`).toEqual([]);
     }
   });
 
   it('G1-08 arena 感知文件白名单：Lab 内其余 .ts 剥注释后 0 处 arena 条件', () => {
     const offenders: string[] = [];
+    let teamExemptions = 0;
     for (const f of labFiles()) {
-      if (ARENA_AWARE_FILES.has(f)) continue;
       const code = stripComments(readLab(f));
-      if (code.split('\n').some((l) => ARENA_CONDITION_RE.test(l))) offenders.push(f);
+      // 队伍语义比较（team / winner / vehicle …）+ 'A'|'B'）：合法，计入豁免并计数
+      teamExemptions += code.split('\n').filter((l) => TEAM_COMPARISON_RE.test(l)).length;
+      if (ARENA_AWARE_FILES.has(f)) continue;
+      if (arenaConditionLines(code).length > 0) offenders.push(f);
     }
     expect(offenders, `未在白名单内的 arena 感知文件：${offenders.join(', ')}`).toEqual([]);
+    // 豁免不能是空转（必须真的存在被豁免的队伍比较行）
+    expect(teamExemptions).toBeGreaterThan(0);
   });
 
   it('G1-09 SpawnPlan 入参不含 arena：同 (loadout, encounter) 的指纹与 arena 完全无关', () => {

@@ -325,31 +325,122 @@ async function assertFullFlow(page, tag, dpr) {
   let p = await probeOf(page);
   log(p.phase === 'EVENT', `[${tag}] F1 IDLE → EVENT（敌人从右侧出现）`, `phase=${p.phase} log=${p.logCount}`);
   log(!!p.stage.enemy && p.stage.playerLeftOfEnemy === true, `[${tag}] F2 EVENT 敌人出现在玩家右侧`, `gap=${round2(p.stage.minGapPx)}`);
+  /*
+    PRP-F1 必改 1/2：一遭遇就切进**真实 Planck 战斗世界**（正式 1600×900），
+    而且两车之间是**明确的远程开局**（实测外廓间距 ≈ 529 世界 px）。
+  */
+  log(
+    !!p.battleWorld &&
+      p.battleWorld.world.width === 1600 &&
+      p.battleWorld.world.height === 900 &&
+      p.battleWorld.world.groundY === 700,
+    `[${tag}] F2b 必改 1：战斗世界 = 正式 arena 尺度 1600×900（groundY 700）`,
+    p.battleWorld ? `world=${p.battleWorld.world.width}×${p.battleWorld.world.height} stageBand=${p.bands.stage.w}×${p.bands.stage.h}` : 'no battleWorld',
+  );
+  log(
+    !!p.battleWorld &&
+      Math.round(p.battleWorld.world.spawnAx) === 400 &&
+      Math.round(p.battleWorld.world.spawnBx) === 1200 &&
+      Math.round(p.battleWorld.world.initialGap) === 529,
+    `[${tag}] F2c 必改 2：正式出生点 400/1200，开局外廓间距 ≈ 529 世界 px（有纵深、不贴车）`,
+    p.battleWorld ? `spawn=${round2(p.battleWorld.world.spawnAx)}/${round2(p.battleWorld.world.spawnBx)} initialGap=${round2(p.battleWorld.world.initialGap)}` : '',
+  );
 
   await clickRect(page, p.actionRect);
   p = await probeOf(page);
   log(p.phase === 'BATTLE' && p.battle, `[${tag}] F3 EVENT → BATTLE`, `phase=${p.phase} steps=${p.battle.steps}`);
   const logAtBattleStart = p.logCount;
-  await sleep(700);
+  /*
+    PRP-F1 必改 2/5③：**开局瞬间**两车严格分离（玩家左 / 敌人右）。
+    ⚠️ 必须在窗口观测**之前**采样：真实战斗里敌方会逐步接敌，窗口结束时 gap 已为负（真实碰撞），
+    那是必改 5③ 期望的结果，不是「分离失败」。
+  */
+  log(
+    p.stage.playerLeftOfEnemy === true && p.stage.minGapPx > 0,
+    `[${tag}] F5 BATTLE 开局玩家左 / 敌人右（严格分离）`,
+    `gap=${round2(p.stage.minGapPx)}`,
+  );
+  /*
+    PRP-F1：真实 Planck 战斗（实测整场 ≈15.4s、首次命中 step 132 ≈2.2s、单发弹丸寿命 ≈40+ 帧）。
+    单点采样会随机落在「弹丸刚落地 / 下一发未出膛」的空窗 → 改为 5s 窗口累积观测。
+  */
+  const win = await page.evaluate(async () => {
+    const acc = {
+      samples: 0,
+      maxProjectiles: 0,
+      projSamples: 0,
+      phases: [],
+      maxLogCount: 0,
+      camVariants: [],
+      lastSteps: 0,
+      firstGapPx: null,
+      lastGapPx: 0,
+    };
+    const t0 = performance.now();
+    while (performance.now() - t0 < 5000) {
+      const p = window.__RUNPAGE__.probe();
+      acc.samples += 1;
+      acc.phases.push(p.phase);
+      acc.maxLogCount = Math.max(acc.maxLogCount, p.logCount);
+      if (acc.firstGapPx === null) acc.firstGapPx = p.stage.minGapPx;
+      acc.lastGapPx = p.stage.minGapPx;
+      const w = p.battleWorld;
+      if (w) {
+        acc.maxProjectiles = Math.max(acc.maxProjectiles, w.projectiles);
+        if (w.projectiles > 0) acc.projSamples += 1;
+        acc.lastSteps = w.steps;
+        const v = `${w.camera.scale}|${w.camera.offsetX}`;
+        if (!acc.camVariants.includes(v)) acc.camVariants.push(v);
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return acc;
+  });
   const pMid = await probeOf(page);
   log(
-    pMid.phase === 'BATTLE' && pMid.logCount === logAtBattleStart,
+    win.phases.every((ph) => ph === 'BATTLE') && win.maxLogCount === logAtBattleStart,
     `[${tag}] F4 BATTLE 期间日志零追加（不刷逐帧伤害）`,
-    `log=${logAtBattleStart} → ${pMid.logCount}`,
+    `窗口 ${win.samples} 次采样全程 BATTLE · 日志恒为 ${logAtBattleStart}`,
+  );
+  /*
+    PRP-F1 必改 5③：**碰撞需要接敌过程** —— 窗口结束时两车必须比开局更近（真实位移，非脚本演出）。
+  */
+  log(
+    win.lastGapPx < win.firstGapPx - 20,
+    `[${tag}] F5d 必改 5③：敌我距离在真实缩小（接敌过程，非贴车开局）`,
+    `gap ${round2(win.firstGapPx)} → ${round2(win.lastGapPx)}（${win.samples} 次采样 · steps→${win.lastSteps}）`,
+  );
+  /*
+    PRP-F1 必改 3/5①：相机固定远摄（390/1600，完整框住世界）且窗口内零变化；
+    窗口中炮弹**真的在飞**（真实弹丸计数 > 0，不是贴脸扣血）。
+  */
+  log(
+    !!pMid.battleWorld &&
+      Math.abs(pMid.battleWorld.camera.scale - 390 / 1600) < 1e-9 &&
+      pMid.battleWorld.camera.offsetX === 0 &&
+      win.camVariants.length === 1,
+    `[${tag}] F5b 必改 3：固定远摄相机（scale = 390/1600，不做追踪 / 不做动态 zoom）`,
+    pMid.battleWorld
+      ? `scale=${pMid.battleWorld.camera.scale} offsetX=${pMid.battleWorld.camera.offsetX} 窗口内取值种类=${win.camVariants.length}`
+      : '',
   );
   log(
-    pMid.stage.playerLeftOfEnemy === true && pMid.stage.minGapPx > 0,
-    `[${tag}] F5 BATTLE 玩家左 / 敌人右（严格分离）`,
-    `gap=${round2(pMid.stage.minGapPx)}`,
+    win.maxProjectiles > 0 && win.projSamples > 0,
+    `[${tag}] F5c 必改 5①：炮弹真的在空中飞（真实弹丸 > 0，不是贴脸扣血）`,
+    `窗口内最多 ${win.maxProjectiles} 发在飞 · ${win.projSamples}/${win.samples} 次采样见弹 · steps→${win.lastSteps}`,
   );
 
-  // 自动结束（演示脚本 2.4s）
-  await page.waitForFunction("window.__RUNPAGE__.probe().phase === 'RESULT'", null, { timeout: 8000 });
+  // 自动结束（真实 Planck 战斗实测约 15.4s）
+  await page.waitForFunction("window.__RUNPAGE__.probe().phase === 'RESULT'", null, { timeout: 40000 });
   p = await probeOf(page);
+  /*
+    PRP-F1 必改 4：RESULT 不再表现为「敌人消失」，而是**真实战场冻结在画面上**：
+    战斗世界仍在（stage.mode = battle）、双方都还在场地里，战斗结论来自官方判据。
+  */
   log(
-    p.phase === 'RESULT' && !p.stage.enemy && p.stage.enemyGone === true && p.stage.player,
-    `[${tag}] F6 BATTLE → RESULT 自动结束（敌人消失、玩家留场）`,
-    `phase=${p.phase} enemyGone=${p.stage.enemyGone}`,
+    p.phase === 'RESULT' && !!p.stage.enemy && p.stage.player && p.stage.mode === 'battle' && !!p.battleWorld,
+    `[${tag}] F6 BATTLE → RESULT 自动结束（真实战场冻结在画面上，非脚本收尾）`,
+    `phase=${p.phase} mode=${p.stage.mode} winner=${p.battle && p.battle.winner} endReason=${p.battle && p.battle.endReason}`,
   );
   log(
     p.logCount === logAtBattleStart + 3,

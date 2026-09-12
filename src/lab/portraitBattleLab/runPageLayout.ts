@@ -158,9 +158,6 @@ export const RUN_SIDE_VIEW = {
   baselineLiftPx: 2,
 } as const;
 
-/** 战斗演出时两车相向的最大位移（逻辑 px）——纯表现，不是物理。必须 < 中缝的一半。 */
-export const RUN_SIDE_VIEW_CLOSING_PX = 6;
-
 /** 侧视舞台基线 y（车辆底边贴这条线之上）。 */
 export function runStageGroundY(): number {
   return RUN_STAGE_BAND.y + RUN_STAGE_BAND.h - RUN_SIDE_VIEW.groundInsetPx;
@@ -334,28 +331,13 @@ export function placeSideViewVisuals(
   return { visuals, bounds: { x: bx0, y: by0, w: bx1 - bx0, h: by1 - by0 } };
 }
 
-/** 整体水平平移（战斗演出用；不影响任何数值）。 */
-export function translateRunRects(rects: readonly RunRect[], dx: number): RunRect[] {
-  if (dx === 0) return [...rects];
-  return rects.map((r) => ({ x: r.x + dx, y: r.y, w: r.w, h: r.h }));
-}
-
-/** 平移后的精确并集（与 translateRunRects 同源，避免二次推导）。 */
-export function translateRunBounds(b: RunRect, dx: number): RunRect {
-  return { x: b.x + dx, y: b.y, w: b.w, h: b.h };
-}
-
-/** 平移整组可视件（战斗演出）。 */
-export function translateRunGroup(g: RunPlacedGroup, dx: number): RunPlacedGroup {
-  if (dx === 0) return g;
-  return {
-    visuals: v(g.visuals),
-    bounds: translateRunBounds(g.bounds, dx),
-  };
-  function v(list: readonly RunPlacedVisual[]): RunPlacedVisual[] {
-    return list.map((it) => ({ ...it, rect: { x: it.rect.x + dx, y: it.rect.y, w: it.rect.w, h: it.rect.h } }));
-  }
-}
+/**
+ * ⚠️ PRP-F1：原先这里还有 `translateRunRects` / `translateRunBounds` / `translateRunGroup`
+ * 三个「整体水平平移」工具（供 `RUN_BATTLE_SCRIPT` 的 `sin` 演出位移使用）。
+ * 演出位移已被**真实物理**取代（战斗世界里两车的每一像素位移都来自 Planck），
+ * 因此这三个函数连同 `RUN_SIDE_VIEW_CLOSING_PX` 一起**整块删除**：
+ * 保留它们就等于给「PRP 自己伪造战斗位移」留了后门。
+ */
 
 /** 两个矩形是否真实重叠（边贴边不算）。 */
 export function runRectsOverlap(a: RunRect, b: RunRect): boolean {
