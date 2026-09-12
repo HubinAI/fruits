@@ -4,9 +4,13 @@
  * PRP-F0 起本目录同时承载两个原型（仍在同一块可整块删除的实验目录内）：
  *   - **PRP｜Portrait Run Prototype** —— 玩家页面 `run-page.html`
  *     （`runPage*.ts` / `runMain.ts`：单一 Run Page + 五状态切换 + 日志 + 选择浮层）；
- *   - **PBL｜Portrait Battle Lab** —— Debug control area `portrait-lab.html`
+ *   - **PBL｜Portrait Battle Lab** —— **DEBUG ONLY** control area `portrait-lab.html`
  *     （`lab.ts` / `main.ts` / `arenaA.ts` / `gate.ts` …：Arena / Loadout / Encounter / Gate）。
  *   两者共享本文件的竖屏 390×844 基准与 F1 测试数据，但玩家页面**不引用**任何 Debug 控制器。
+ *
+ * ⚠️ PRP-R1-ACTUAL-RUNTIME-ENTRY-LAYOUT-FIX：玩家体验入口**只有** `run-page.html` 一个；
+ *    `portrait-lab.html` 是开发/调试面（页面右上角有 DEBUG ONLY 角标、标题写明非体验入口），
+ *    对应 npm script 已从 `dev:portrait-lab` 改名为 `dev:debug-lab`，防止再被当作体验入口打开。
  *
  * PBL-F1 起本实验台允许**只读引用**正式内容库来建立 A/B 共用的测试数据
  * （见 testData.ts / entities.ts）：Lab 不复制、不覆盖任何平衡数值，
@@ -24,7 +28,7 @@
  *      tests/portraitBattleLabA1.test.ts、tests/portraitBattleLabG1.test.ts、
  *      tests/portraitRunPage.test.ts、
  *      tests/_e2e_portrait_battle_lab.cjs、tests/_e2e_run_page.cjs
- *   5) package.json 中 dev:portrait-lab / dev:run-page / build:portrait-lab /
+ *   5) package.json 中 dev:run-page / dev:debug-lab / build:portrait-lab /
  *      e2e:portrait-lab / e2e:run-page 等 script
  *   6) .gitignore 中 dist-portrait-lab/ 一行
  * 正式玩法 / 物理 / 数值 / Garage / Fusion / R4 / Meta / 存档 / 经济均不在删除影响面内。

@@ -30,8 +30,42 @@
       }
       /* 唯一容器 = 整个视口；画布由 PlayerViewportTransform contain 缩放居中 */
       #run-root.run-root { position: fixed; inset: 0; }
-      .run-stage { position: absolute; inset: 0; overflow: hidden; }
+
+      /*
+        手机画面容器（PRP-R1 必改 4：电脑预览要能直接做真人验收）。
+
+        - 桌面（宽 > 640px）：390×844 画面**居中放大**为一个「手机页面」，
+          高度约 88vh（上限 940px），严格保持 390:844，页面外只留中性背景；
+        - 窄屏（真机 / 窄窗口）：铺满视口，contain 缩放（与 F0 行为一致）。
+
+        容器尺寸只影响 PlayerViewportTransform 的 contain 缩放，
+        逻辑舞台恒为 390×844 —— 不引入第二套坐标，也不影响任何命中区。
+      */
+      .run-stage {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        height: min(88vh, 940px);
+        width: calc(min(88vh, 940px) * 390 / 844);
+        overflow: hidden;
+        background: #0b0e14;
+        border-radius: 10px;
+        box-shadow: 0 0 0 1px #1b2434, 0 24px 70px rgba(0, 0, 0, 0.6);
+      }
       .run-stage canvas { touch-action: manipulation; }
+
+      @media (max-width: 640px), (max-height: 620px) {
+        .run-stage {
+          left: 0;
+          top: 0;
+          transform: none;
+          width: 100%;
+          height: 100%;
+          border-radius: 0;
+          box-shadow: none;
+        }
+      }
     </style>
   </head>
   <body>

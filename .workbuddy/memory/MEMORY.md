@@ -8,7 +8,8 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - Branch `foundation-02-wechat`（无新主线）；实验分支 `prototype-portrait-battle-lab`（可整块删除）
 - 原型正式改名：**PRP｜Portrait Run Prototype**（本分支上的玩家向原型；PBL 旧名仅存于 Debug Lab）
 - 主线上一交付 R3 `1bb35d7`；R2.1 体验 FAIL 基线 `8fbac75`
-- PRP 链：`01915e2`(skill) → `2ee47bb`(PBL-A1) → `8c27cd0`(PBL-B1 停止) → `7532f98`(PBL-G1) → PRP-F0 见 §5.7
+- PRP 链：`01915e2`(skill) → `2ee47bb`(PBL-A1) → `8c27cd0`(PBL-B1 停止) → `7532f98`(PBL-G1) →
+  `e48aa1a`(PRP-F0 Run Page) → PRP-R1 见 §5.6
 
 ## 2. Rules
 - 1 Queue = 1 problem；无静默扩范围。先调查/复现，锁定根因后再改码。
@@ -34,6 +35,8 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 结果层 z 序（后注册先命中）：页控件 < dismiss(空白关) < `fusion-result-card`(点卡 no-op)。
 - **像素账本口径**：只登记「不承载文字、不被描边覆盖」的纯色平铺矩形 → 面积可精确冻结；
   承载文字/描边的面改按点位精确采样。文字抗锯齿会吃掉净色面积（实测差 2018–8476px）。
+- **入口唯一性**：本分支玩家体验入口**只有** `run-page.html`；`portrait-lab.html` = DEBUG ONLY（有角标 + 标题标注）。
+  `index.html` 是正式入口（Physics Lab / 正式玩法），**不要动**。给用户的体验地址永远只给一个。
 
 ## 5. Current truth（按模块，细节见当日 daily log）
 
@@ -78,25 +81,45 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - **PRP-F0-RUN-PAGE-SHELL 已交付**（commit 见 §1）：
   - 入口 `run-page.html` + `runMain.ts`（玩家页面）；Debug 控制仍只在 `portrait-lab.html`（Debug control area）。
     `vite.portrait-lab.config.ts` 双入口，同一 `dist-portrait-lab/`。
-  - 分层：顶部薄层 96（DAY 3/7 占位 + 7 进度节点 + 5 个 Build 图标槽）/ 中部侧视舞台 480 / 日志 200 / 最底唯一动作 68（合计 844）。
+  - 分层：四带比例见 §5.6（PRP-R1 已按必改 3 调整为 84/414/262/84）。
   - 侧视缩放：`runSideViewScale = min(0.6, (390−2×14−28)/(wP+wE))` → 实测恒 **0.6**；玩家固定左边缘 14、敌人固定右边缘 376；
     BATTLE 演出位移 = `sin(πp)×24`（纯表现，不变量：平移不改变任何像素面积 → 可用账本交叉核对）。
   - 五状态：IDLE→EVENT→BATTLE→(自动 2.4s)→RESULT→CHOICE→IDLE。BATTLE 期间**日志零追加**（不刷逐帧伤害），
     RESULT 一次性 +2 行（结果 + 耐久占位）。CHOICE = 画布内遮罩整页变暗 + 中央三选一（重型弹头/爆裂弹/紧急维修，
     固定不随机）；选择后回 IDLE、顶部 +1 图标、日志 +1「你选择了 X」。
   - 全 canvas 单页（无 DOM 按钮 → 结构上无法跳转）；命中区与绘制矩形同源 `runPageLayout`。
-  - 门禁：PRP 单测 28/28、Lab targeted 123/123、E2E PRP **89/89**、Lab E2E 148/148、tsc 0、五路构建 EXIT 0、repo-health 9/9。
-    正式源码 0 修改。
-- ⚠️ 已知既有抖动（**非本 Queue 回归**，已用排除实验证明）：全量 vitest 时
-  `garageFusionResultInteractionR22.test.ts` 出现 5s 超时（负载相关；单跑 11/11 全绿；
-  排除本 Queue 新增测试文件后该文件仍失败）。vitest 未设 `testTimeout`（默认 5s）。
-- 边界：PRP-F0 不接正式 Roguelike 数值/Day 状态机/随机强化池/永久奖励/经济/存档；不改 Garage/Fusion；
+- ⚠️ 已知既有抖动（**非 Queue 回归**，已用排除实验证明）：全量 vitest 时
+  `garageFusionResultInteractionR22.test.ts` 偶发 5s 超时（负载相关；单跑 11/11 全绿）。vitest 未设 `testTimeout`。
+- 边界：PRP 不接正式 Roguelike 数值/Day 状态机/随机强化池/永久奖励/经济/存档；不改 Garage/Fusion；
   不继续 Arena A/B、不做俯视 Movement、不做正式敌人 AI、不做美术精修。
 
+### 5.6 PRP-R1 ACTUAL-RUNTIME-ENTRY-LAYOUT-FIX（已交付）
+- **真人验收 FAIL 的真根因 = 入口给错，不是 Run Page 画面错**。实测三入口（同一 dev server 5173）：
+  `/` = 「最强水果 — Physics Lab」；`/portrait-lab.html` = 旧 Debug Lab（`pbl-canvas` + 11 个开发按钮 +
+  1086 字调试文本 + Arena A 黄框）**← 用户录屏看到的就是这个**；`/run-page.html` = ✅ 正确的 PRP Run Page
+  （`run-canvas`、0 button、正文 0 字、`__RUNPAGE__` 存在）。**`/run-page.html` 无 renderer 覆盖。**
+- ⚠️ **教训**：`npm run dev:portrait-lab` 原是 `vite --open=/portrait-lab.html` → 一条命令就把人送进旧 Debug 面。
+  已改名 `dev:debug-lab`；**唯一玩家体验入口 = `run-page.html`（`npm run dev:run-page`）**。
+  `portrait-lab.html` 标题改为「DEBUG ONLY · …（非玩家体验入口）」+ 右下 fixed `pointer-events:none` 角标
+  （脱离文档流 → 不改变 canvas 几何、不进 getImageData）。
+- 四带比例（必改 3，RP-01b 冻结）：顶部 **84**(9.95%) / 舞台 **414**(49.05%) / 日志 **262**(31.04%) / 动作 **84**(9.95%)。
+  日志 `maxLines` 8→10。**面积账本全部与 y 无关 → 带高调整不需要改任何冻结面积**（仍 1496/3012/288/2774/540/432/576/3920/966）。
+- 桌面预览（必改 4）：`run-stage` 桌面分支 `height:min(88vh,940px)` + `width:calc(…×390/844)` 居中 + 中性背景；
+  窄屏 `@media (max-width:640px),(max-height:620px)` 退回铺满。实测 1920×1080 → 434×939 居中(959.8,539.6)、
+  1280×720(150%缩放真实视口) → 293×634；390×844 真机 → 铺满 scale=1。
+- 门禁：PRP 单测 **29/29**（+RP-01b）、Lab targeted 124/124、tsc 0、五路构建 EXIT 0、
+  PRP E2E **190/190**（4 视口，新增 R2b 居中 / R2c 88vh+比例 / R2d 主体+零开发控制 / R2e 无 Arena 调试黄框 /
+  R2f 无 Debug Lab 句柄）、Lab E2E 148/148、全量 **199 files/1872 passed**、repo-health 9/9。正式源码 0 修改。
+- 已知未做（诚实）：中部舞台在 390 宽竖屏下两车同框，显示缩放上限 0.6 使车体仅约 123×40 逻辑 px，
+  舞台带面积占 49% 但视觉重心偏小 → 属**显示缩放的产品取舍**（≠ B1 的真实物理空间问题），是否放宽需用户裁决。
+
 ## 6. Next action
-- **停等用户回执**（PRP-F0 已提交，禁止自动开 PRP-F1）：
-  1. B1 三选项仍未裁决（B1-A 确认停止 / B1-B 放宽镜头边界 / B1-C Lab-only 缩小车）；
-  2. 俯视 `WEAPON_CONTACT_THRESHOLD=0.5`（`contactRouter.ts:694`）是否单开 Queue；
-  3. Run Page 演示装载是否确认用「西瓜重炮 × 追猎者」。
-- Low-prio backlog: KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01；mobile drive slot（F-GARAGE-TOUCH-ASSEMBLY-R2）；
+- **停等用户回执**（PRP-R1 已提交，禁止自动开 PRP-F1）：
+  1. **唯一真人体验地址 = `http://localhost:5173/run-page.html`**（`npm run dev:run-page`）—— 请只给这一个，不再给 Lab/Debug URL；
+  2. 中部舞台车体偏小（显示缩放上限 0.6）是否放宽 → 属 PRP 显示取舍，需用户裁决；
+  3. B1 三选项仍未裁决（B1-A 确认停止 / B1-B 放宽镜头边界 / B1-C Lab-only 缩小车）；
+  4. 俯视 `WEAPON_CONTACT_THRESHOLD=0.5`（`contactRouter.ts:694`）是否单开 Queue。
+- Low-prio backlog: `tests/_e2e_portrait_battle_lab.cjs` 的 `[iso] I2` 用 `readdirSync().find()` 取「第一个 .js」→
+  多入口后命中的是共享 chunk 而非 Lab 自身 chunk（守卫强度弱化，结论未受影响，尚未修）；
+  KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01；mobile drive slot（F-GARAGE-TOUCH-ASSEMBLY-R2）；
   strip-scroll no clamp；O1/O2 非阻塞优化项。

@@ -7,11 +7,15 @@
  *   同一个页面的不同状态，不存在页面跳转。
  *
  * 页面结构与本模块的对应关系（全部落在逻辑基准 390×844 上，横向 4 条带、无缝无叠）：
- *   ┌ y=0   ── RUN_TOP_BAND   (96)  顶部薄层：本局进度节点 + 当前核心 Build 图标
- *   │ y=96  ── RUN_STAGE_BAND (480) 中部主体：侧视车辆舞台（玩家固定左 / 敌人固定右）
- *   │ y=576 ── RUN_LOG_BAND   (200) 下部：可持续追加的冒险日志
- *   └ y=776 ── RUN_ACTION_BAND(68)  最底：唯一一个当前主动作按钮
- *                                    合计 96+480+200+68 = 844
+ *   ┌ y=0   ── RUN_TOP_BAND   ( 84)  顶部薄层：本局进度节点 + 当前核心 Build 图标    9.95%
+ *   │ y=84  ── RUN_STAGE_BAND (414)  中部主体：侧视车辆舞台（玩家固定左 / 敌人固定右）49.05%
+ *   │ y=498 ── RUN_LOG_BAND   (262)  下部：可持续追加的冒险日志                    31.04%
+ *   └ y=760 ── RUN_ACTION_BAND( 84)  最底：唯一一个当前主动作按钮                   9.95%
+ *                                    合计 84+414+262+84 = 844
+ *
+ * ⚠️ PRP-R1-ACTUAL-RUNTIME-ENTRY-LAYOUT-FIX：比例取自 Queue 必改 3
+ *    （顶部 8~10% / 舞台 45~50% / 日志 28~32% / 动作 8~10%），由 RP-01b 冻结。
+ *    面积账本 `runPaintedAreas` 全部为**与 y 无关**的矩形面积 → 本次带高调整不改变账本。
  *
  * ⚠️ 面积账本 `runPaintedAreas` 与 F0 的 `layout.ts::paintedAreas` 是同一套算法的两份实现。
  * 刻意不去合并：`layout.ts` 属 **PBL-F0 冻结资产**（本 Queue 明令不扩展其能力），
@@ -34,12 +38,12 @@ export interface RunRect {
 
 /* ------------------------------------------------------------- 四条横带 */
 
-/** 顶部薄层高度：只放进度与 Build 图标，禁止做大块状态面板。 */
-export const RUN_TOP_BAND_H = 96;
-/** 下部日志区高度（可持续追加）。 */
-export const RUN_LOG_BAND_H = 200;
-/** 最底动作区高度（只承载唯一一个主动作按钮）。 */
-export const RUN_ACTION_BAND_H = 68;
+/** 顶部薄层高度：只放进度与 Build 图标，禁止做大块状态面板（≈9.95%）。 */
+export const RUN_TOP_BAND_H = 84;
+/** 下部日志区高度（可持续追加，≈31.04%）。 */
+export const RUN_LOG_BAND_H = 262;
+/** 最底动作区高度（只承载唯一一个主动作按钮，≈9.95%）。 */
+export const RUN_ACTION_BAND_H = 84;
 /** 中部舞台高度：由「总高 − 其余三带」反推 → 结构上不可能漏缝或重叠。 */
 export const RUN_STAGE_BAND_H = RUN_PAGE_H - RUN_TOP_BAND_H - RUN_LOG_BAND_H - RUN_ACTION_BAND_H;
 
@@ -264,7 +268,7 @@ export const RUN_LOG = {
   /** 行高。 */
   lineH: 21,
   /** 固定可见行数（新行从底部顶入，呈现「可持续追加」的观感）。 */
-  maxLines: 8,
+  maxLines: 10,
   x: 16,
   right: 16,
 } as const;

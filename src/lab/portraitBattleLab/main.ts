@@ -1,11 +1,14 @@
 /**
- * PBL-F0｜Portrait Battle Lab 入口（独立页面：/portrait-lab.html）。
+ * PBL-F0｜Portrait Battle Lab 入口（独立页面：/portrait-lab.html）= **DEBUG ONLY**。
+ *
+ * ⚠️ PRP-R1-ACTUAL-RUNTIME-ENTRY-LAYOUT-FIX：本页面是开发/调试面，**不是玩家体验入口**。
+ *    玩家体验入口只有一个：`run-page.html`（`npm run dev:run-page`）。
  *
  * 与正式入口 `src/main.ts` 完全隔离：本文件只构造本实验台的控制器，
  * 不 import 平台 bootstrap、不 import PlayerGameRuntime / Renderer / 任何一个正式玩法模块。
  * 因此正式 Home / Garage / Matching / Battle / Result 的默认路径不被竖屏实验规则写入。
  *
- * 开发：`npm run dev`（或 `npm run dev:portrait-lab`）→ 打开 http://127.0.0.1:5173/portrait-lab.html
+ * 开发：`npm run dev:debug-lab` → 打开 http://127.0.0.1:5173/portrait-lab.html（DEBUG ONLY）
  * 构建：`npm run build:portrait-lab` → dist-portrait-lab/（与 dist / dist-pages / dist-e2e /
  *       dist-wechat 完全隔离，不参与任何正式产物）。
  *

@@ -174,6 +174,26 @@ function samplePixels(page, points) {
   }, points);
 }
 
+/** 统计画布中与给定 RGB **精确相等**的像素个数（用于反证「玩家页面上没有 Arena 调试色」）。 */
+function countExact(page, rgb) {
+  return page.evaluate((target) => {
+    const c = document.querySelector('#run-canvas');
+    const ctx = c.getContext('2d');
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] === target[0] && d[i + 1] === target[1] && d[i + 2] === target[2]) n += 1;
+    }
+    return n;
+  }, rgb);
+}
+
+/**
+ * PRP-R1：Arena A（Debug Lab）独占的调试色 —— 纵向竞技场的黄色描边框。
+ * 玩家 Run Page 的调色板里**不存在**这个色 → 出现即代表 Debug 画面泄漏进玩家页面。
+ */
+const ARENA_DEBUG_YELLOW = [0xff, 0xd3, 0x5a];
+
 const probeOf = (page) => page.evaluate(() => window.__RUNPAGE__.probe());
 
 /** 真实鼠标点击：逻辑坐标 → 屏幕坐标（用画布真实 CSS 矩形换算，不用 DPR-backed 尺寸）。 */
@@ -235,6 +255,50 @@ async function runViewport(browser, vp) {
     `[${tag}] R2 画布 CSS 矩形为竖屏比例`,
     `screen=${round2(p0.screen.width)}×${round2(p0.screen.height)} scale=${round2(p0.screen.scale)}`,
   );
+
+  /*
+    PRP-R1 必改 4：电脑预览必须直接把「手机页面」呈到眼前 ——
+    居中、放大到约 88vh、严格 390:844，而不是屏幕中央一个很小的窄框。
+    真机 / 窄窗口（≤640 宽或 ≤620 高）保持铺满，不走手机框。
+  */
+  const isDesktopPreview = vp.w > 640 && vp.h > 620;
+  if (isDesktopPreview) {
+    const expectH = Math.min(vp.h * 0.88, 940);
+    const cx = p0.screen.left + p0.screen.width / 2;
+    const cy = p0.screen.top + p0.screen.height / 2;
+    log(
+      Math.abs(cx - vp.w / 2) <= 2 && Math.abs(cy - vp.h / 2) <= 2,
+      `[${tag}] R2b 手机页面在桌面视口内居中`,
+      `center=${round2(cx)},${round2(cy)} viewport=${vp.w / 2},${vp.h / 2}`,
+    );
+    log(
+      Math.abs(p0.screen.height - expectH) <= 2 &&
+        Math.abs(p0.screen.width / p0.screen.height - 390 / 844) < 0.01,
+      `[${tag}] R2c 手机页面高度≈88vh 且严格保持 390:844`,
+      `h=${round2(p0.screen.height)} expect=${round2(expectH)} ratio=${round2(p0.screen.width / p0.screen.height)}`,
+    );
+    log(
+      p0.screen.height / vp.h >= 0.8 && p0.debugControls === 0 && p0.domButtons === 0,
+      `[${tag}] R2d 手机画面是第一视觉主体，且页面上零开发控制`,
+      `hRatio=${round2(p0.screen.height / vp.h)} debug=${p0.debugControls} buttons=${p0.domButtons}`,
+    );
+  }
+
+  /*
+    PRP-R1 必改 2 / 验收 2：玩家页面里**不得**出现 Arena A 的调试黄框或任何 Debug 句柄。
+    这条断言与「唯一入口」互为保险：即使入口被写错，画面本身也会立刻判 FAIL。
+  */
+  if (vp.dpr === 1) {
+    const arenaPixels = await countExact(page, ARENA_DEBUG_YELLOW);
+    log(arenaPixels === 0, `[${tag}] R2e 玩家页面无 Arena A 调试黄框`, `arenaYellow=${arenaPixels}px`);
+  }
+  const labHandle = await page.evaluate(
+    () =>
+      typeof window.__PBL__ !== 'undefined' ||
+      typeof window.__PBL_LAB__ !== 'undefined' ||
+      !!document.querySelector('#pbl-root, #pbl-canvas'),
+  );
+  log(!labHandle, `[${tag}] R2f 玩家页面不暴露 Debug Lab 句柄 / 节点`, `labHandle=${labHandle}`);
 
   const b = p0.bands;
   const bands = [b.top, b.stage, b.log, b.action];
@@ -469,8 +533,10 @@ function round2(v) {
     }
 
     const viewports = [
-      { w: 390, h: 844, dpr: 1 }, // 容器恰为逻辑尺寸 → scale=1 → 精确像素断言成立
-      { w: 700, h: 900, dpr: 1.5 },
+      { w: 390, h: 844, dpr: 1 }, // 真机竖屏：铺满视口
+      { w: 700, h: 900, dpr: 1.5 }, // 窄窗口：仍走铺满分支
+      { w: 1920, h: 1080, dpr: 1 }, // PRP-R1：桌面真人验收视口（含精确像素账本）
+      { w: 1280, h: 720, dpr: 1.5 }, // PRP-R1：Windows 150% 缩放下的真实 CSS 视口
     ];
     for (const vp of viewports) await runViewport(browser, vp);
 

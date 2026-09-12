@@ -3,12 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>最强水果 — Portrait Battle Lab（PBL-F0 实验台）</title>
+    <title>DEBUG ONLY · Portrait Battle Lab（非玩家体验入口）</title>
     <!--
-      PBL-F0-PORTRAIT-BATTLE-LAB-FOUNDATION｜竖屏战场实验台独立入口。
+      PBL-F0-PORTRAIT-BATTLE-LAB-FOUNDATION｜竖屏战场实验台独立入口 = **Debug control area**。
+
+      PRP-R1-ACTUAL-RUNTIME-ENTRY-LAYOUT-FIX：
+      本页面是开发/调试面（Arena A/B、Loadout、Encounter、Start、Reset、Gate），
+      **不是玩家体验入口**，默认不作为体验链接给出。玩家体验入口只有一个：
+        run-page.html（= npm run dev:run-page）
+      对应 npm script 已改名为 dev:debug-lab，避免再被误当作体验入口打开。
+
       与正式入口 index.html 完全隔离：本页面不参与 npm run build / build:pages / build:e2e /
       build:wechat 任一正式构建；实验失败可直接删除本文件与 src/lab/portraitBattleLab/。
-      样式仅为「可操作的最小集合」，本 Queue 明确不做 UI 美化。
+      样式仅为「可操作的最小集合」，不做 UI 美化。
     -->
     <style>
       :root { color-scheme: dark; }
@@ -47,10 +54,26 @@
       .pbl-gate[data-verdict='fail'] { color: #ff6b5e; }
       .pbl-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
       .pbl-stage canvas { position: absolute; }
+      /*
+        PRP-R1 必改 1：Debug 页面必须自我标识，防止再被当作体验入口截图。
+        position:fixed + pointer-events:none → 完全脱离文档流：
+        不改变 canvas 几何，也不进入 canvas 的 getImageData 像素统计。
+      */
+      .pbl-debug-badge {
+        position: fixed; right: 10px; bottom: 10px; z-index: 9999;
+        pointer-events: none;
+        padding: 6px 12px; border-radius: 999px;
+        font: 700 12px/1.4 monospace; letter-spacing: 0.4px;
+        color: #ffd35a; background: rgba(22, 13, 0, 0.94);
+        border: 1px solid #7a5b00;
+      }
     </style>
   </head>
   <body>
     <div id="pbl-root"></div>
+    <div class="pbl-debug-badge" role="note">
+      DEBUG ONLY · 非玩家体验入口 · 玩家版本请打开 /run-page.html
+    </div>
     <script type="module" src="/src/lab/portraitBattleLab/main.ts"></script>
   </body>
 </html>

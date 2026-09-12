@@ -167,6 +167,25 @@ describe('PRP-F0｜A 页面层级：竖屏 390×844 四条横带', () => {
     expect(RUN_TOP_BAND.h).toBeLessThanOrEqual(Math.round(RUN_PAGE_H * 0.12));
   });
 
+  it('RP-01b PRP-R1 必改 3：四带比例落在指定区间（顶 8~10 / 台 45~50 / 志 28~32 / 作 8~10）', () => {
+    const pct = (h: number): number => (h / RUN_PAGE_H) * 100;
+    const [top, stage, log, action] = RUN_BANDS.map((b) => pct(b.h));
+    expect(top).toBeGreaterThanOrEqual(8);
+    expect(top).toBeLessThanOrEqual(10);
+    expect(stage).toBeGreaterThanOrEqual(45);
+    expect(stage).toBeLessThanOrEqual(50);
+    expect(log).toBeGreaterThanOrEqual(28);
+    expect(log).toBeLessThanOrEqual(32);
+    expect(action).toBeGreaterThanOrEqual(8);
+    expect(action).toBeLessThanOrEqual(10);
+    // 中部舞台必须是面积最大的一条带（「当前最大视觉主体」的结构形式）
+    expect(RUN_STAGE_BAND.h).toBeGreaterThan(RUN_TOP_BAND.h);
+    expect(RUN_STAGE_BAND.h).toBeGreaterThan(RUN_LOG_BAND.h);
+    expect(RUN_STAGE_BAND.h).toBeGreaterThan(RUN_ACTION_BAND.h);
+    // 顶部薄层必须装得下图标行（图标底边不得越入舞台带）
+    for (const s of runBuildIconSlots(RUN_BUILD_ICON_SLOTS)) expect(inside(s, RUN_TOP_BAND)).toBe(true);
+  });
+
   it('RP-02 顶部薄层：进度节点右对齐 + Build 图标左对齐，全部落在带内且互不重叠', () => {
     const nodes = runDayNodes(7);
     expect(nodes.length).toBe(7);
@@ -212,7 +231,7 @@ describe('PRP-F0｜A 页面层级：竖屏 390×844 四条横带', () => {
 
   it('RP-04 下部日志：标题与全部行都在日志带内，且不越过最底动作区', () => {
     const lines = runLogLineRects(RUN_LOG.maxLines);
-    expect(lines.length).toBe(8);
+    expect(lines.length).toBe(10);
     for (const r of lines) expect(inside(r, RUN_LOG_BAND)).toBe(true);
     expect(runLogBottomY(RUN_LOG.maxLines)).toBeLessThan(RUN_ACTION_BAND.y);
     // 行间不重叠，且自上而下顺序排列
