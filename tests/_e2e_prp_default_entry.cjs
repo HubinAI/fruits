@@ -28,22 +28,27 @@ const ROOT_URL = `http://${HOST}:${PORT}/`;
 const LEGACY_URL = `${ROOT_URL}index.html`;
 const DEV_URL_SHOWN = `http://${HOST}:${PORT}/`;
 
-/** Run Page 几何调色板（与 src/lab/portraitBattleLab/runPage.ts 的 COLORS 一一对应）。 */
+/**
+ * Run Page 几何调色板（与 src/lab/portraitBattleLab/runPage.ts 的 COLORS 一一对应）。
+ * ⚠️ PRP-R3：车辆改用正式 sprite → 车身 / 部件不再入账（sprite 像素非纯色）。
+ */
 const PALETTE = {
-  ground: [0x5a, 0x6f, 0x8a],
-  playerBody: [0x4a, 0x7f, 0xe0],
-  playerPart: [0xa0, 0x6b, 0xff],
-  enemyBody: [0xff, 0x6b, 0x5e],
-  enemyPart: [0xff, 0x9b, 0x3d],
+  ground: [0x8f, 0x7a, 0x52],
+  road: [0x33, 0x2e, 0x42],
   nodeDone: [0xd2, 0x92, 0x2a],
-  nodeTodo: [0x3a, 0x46, 0x5e],
-  iconSlot: [0x24, 0x2e, 0x3e],
-  iconOwned: [0x2f, 0xbf, 0x6b],
-  iconChip: [0xd8, 0xf2, 0xa0],
+  nodeTodo: [0x46, 0x53, 0x6b],
+  buffIconHeavy: [0xb8, 0x56, 0x2e],
+  buffIconExplosive: [0xc0, 0x7a, 0x2a],
+  buffIconRepair: [0x3f, 0x8f, 0x5a],
+  buffChip: [0xe6, 0xed, 0xf8],
   cardBar: [0x5f, 0x86, 0xc4],
-  cardChip: [0xf0, 0xc1, 0x4b],
   actionBar: [0x33, 0x50, 0x7a],
-  actionBarOff: [0x2a, 0x33, 0x41],
+};
+
+/** 正式车辆 sprite 的特征色（PNG 实解码主色）→ 证明战斗主体不是纯色矩形。 */
+const SPRITE_COLORS = {
+  watermelonBody: [0x3f, 0x8a, 0x3c],
+  bananaBody: [0xf6, 0xc8, 0x3c],
 };
 
 /** Arena A（Debug Lab）独占的调试黄 —— 玩家页面上出现即判 FAIL。 */
@@ -238,20 +243,20 @@ async function assertFirstScreen(page, tag, vp) {
     `screen=${round2(p.screen.width)}×${round2(p.screen.height)} ratio=${round2(ratio)}`,
   );
 
-  // 5) 三层主结构：顶部薄层 / 中部舞台最大 / 下部日志 / 最底唯一动作
+  // 5) 四带主结构：顶部薄 / 战斗主体够大 / 冒险记录可读 / 最底唯一动作（PRP-R3 新比例）
   const b = p.bands;
   const hSum = b.top.h + b.stage.h + b.log.h + b.action.h;
   log(
     hSum === p.logicalH &&
       b.top.h / p.logicalH >= 0.08 &&
-      b.top.h / p.logicalH <= 0.11 &&
-      b.stage.h / p.logicalH >= 0.45 &&
-      b.stage.h / p.logicalH <= 0.5 &&
-      b.log.h / p.logicalH >= 0.28 &&
-      b.log.h / p.logicalH <= 0.32 &&
+      b.top.h / p.logicalH <= 0.1 &&
+      b.stage.h / p.logicalH >= 0.33 &&
+      b.stage.h / p.logicalH <= 0.36 &&
+      b.log.h / p.logicalH >= 0.4 &&
+      b.log.h / p.logicalH <= 0.45 &&
       b.action.h / p.logicalH >= 0.08 &&
-      b.action.h / p.logicalH <= 0.11,
-    `[${tag}] S7 四带比例合规（顶 8~10% / 舞台 45~50% / 日志 28~32% / 动作 8~10%）`,
+      b.action.h / p.logicalH <= 0.1,
+    `[${tag}] S7 四带比例合规（顶 8~10% / 舞台 33~36% / 日志 40~45% / 动作 8~10%）`,
     `top=${round2((b.top.h / p.logicalH) * 100)}% stage=${round2((b.stage.h / p.logicalH) * 100)}% log=${round2(
       (b.log.h / p.logicalH) * 100,
     )}% action=${round2((b.action.h / p.logicalH) * 100)}%`,
@@ -259,9 +264,22 @@ async function assertFirstScreen(page, tag, vp) {
 
   const L = p.layers;
   log(
-    L.nodeTodo > 0 && L.iconSlot > 0 && L.actionBar > 0 && L.ground > 0 && L.playerBody > 0,
-    `[${tag}] S8 顶部进度/Build 槽 + 中部舞台 + 最底主动作都在场`,
-    `nodeTodo=${L.nodeTodo} iconSlot=${L.iconSlot} ground=${L.ground} playerBody=${L.playerBody} actionBar=${L.actionBar}`,
+    L.nodeTodo > 0 && L.road > 0 && L.actionBar > 0 && L.ground > 0 && L.cardBar === 0,
+    `[${tag}] S8 顶部进度 + 中部舞台路面 + 最底主动作都在场`,
+    `nodeTodo=${L.nodeTodo} road=${L.road} ground=${L.ground} actionBar=${L.actionBar}`,
+  );
+  // PRP-R3 必改 1：未获得强化时顶部第二行**不存在**（不是 5 个空槽 / 不是「核心构建 X/5」）
+  log(
+    p.buffIconCount === 0 && L.buffIcon === 0 && L.buffChip === 0,
+    `[${tag}] S8b 顶部无空槽、无「核心构建」计数（结构性：0 个强化 = 0 个图标矩形）`,
+    `buffIconCount=${p.buffIconCount} buffIcon=${L.buffIcon} buffChip=${L.buffChip}`,
+  );
+  // PRP-R3 必改 3：玩家可见日志是自然语言，不是控制台（无 [系统]/[事件]/[战斗] 前缀）
+  const texts = p.log.map((l) => l.text);
+  log(
+    texts.length > 0 && texts.every((t) => !t.includes('[') && !t.includes(']')),
+    `[${tag}] S8c 日志是玩家叙事（无方括号 Debug 前缀）`,
+    texts.join(' ｜ '),
   );
 
   // 第一屏必须是 IDLE：玩家单独在左，敌人未出现
@@ -277,21 +295,28 @@ async function assertFirstScreen(page, tag, vp) {
     log(arenaYellow === 0, `[${tag}] S10 无 Arena A 黄色纵向竞技框`, `arenaYellow=${arenaYellow}px`);
     const stats = await pixelStats(page);
     log(
-      stats.playerBody > 0 && stats.ground > 0 && stats.actionBar > 0 && stats.iconSlot > 0,
-      `[${tag}] S11 真实像素确认三层结构已绘制`,
-      `playerBody=${stats.playerBody} ground=${stats.ground} actionBar=${stats.actionBar} iconSlot=${stats.iconSlot}`,
+      stats.road > 0 && stats.ground > 0 && stats.actionBar > 0 && stats.nodeTodo > 0,
+      `[${tag}] S11 真实像素确认四带结构已绘制`,
+      `road=${stats.road} ground=${stats.ground} actionBar=${stats.actionBar} nodeTodo=${stats.nodeTodo}`,
     );
     const A = 390 * 844;
     log(
-      stats.playerBody + stats.ground + stats.actionBar + stats.iconSlot < A,
+      stats.road + stats.ground + stats.actionBar + stats.nodeTodo < A,
       `[${tag}] S12 画面不被单一层铺满（存在分带与留白）`,
-      `sum=${stats.playerBody + stats.ground + stats.actionBar + stats.iconSlot} < ${A}`,
+      `sum=${stats.road + stats.ground + stats.actionBar + stats.nodeTodo} < ${A}`,
+    );
+    // PRP-R3 必改 2：战斗主体是**正式车辆 sprite**（真实像素在场 → 纯色矩形不可能命中）
+    const melon = await countExact(page, SPRITE_COLORS.watermelonBody);
+    log(
+      melon > 200 && p.stage.player.allSprites === true,
+      `[${tag}] S12b 战斗主体是正式车辆视觉（西瓜重炮 sprite 真实像素）`,
+      `watermelonBody=${melon}px allSprites=${p.stage.player.allSprites}`,
     );
   }
 }
 
 /** 完整流程：同一页面内 IDLE → EVENT → BATTLE → RESULT → CHOICE → IDLE（不修改 URL）。 */
-async function assertFullFlow(page, tag) {
+async function assertFullFlow(page, tag, dpr) {
   const trailBefore = (await probeOf(page)).transitions;
   const p0 = await probeOf(page);
   const urlBefore = page.url();
@@ -326,16 +351,20 @@ async function assertFullFlow(page, tag) {
     `[${tag}] F6 BATTLE → RESULT 自动结束（敌人消失、玩家留场）`,
     `phase=${p.phase} enemyGone=${p.stage.enemyGone}`,
   );
-  log(p.logCount >= logAtBattleStart + 1, `[${tag}] F7 RESULT 一次性追加结果（非逐帧）`, `${logAtBattleStart} → ${p.logCount}`);
+  log(
+    p.logCount === logAtBattleStart + 3,
+    `[${tag}] F7 RESULT 一次性追加 3 行玩家叙事（非逐帧）`,
+    `${logAtBattleStart} → ${p.logCount}`,
+  );
 
   await clickRect(page, p.actionRect);
   p = await probeOf(page);
   log(p.phase === 'CHOICE' && p.choiceOpen && p.choiceOptions.length === 3, `[${tag}] F8 RESULT → CHOICE（三选一浮层）`, `phase=${p.phase}`);
   const chShapes = p.layers;
   log(
-    chShapes.cardBar > 0 && chShapes.playerBody === 0,
-    `[${tag}] F9 CHOICE 原页面整体变暗（底层几何不再以原色出现）`,
-    `cardBar=${chShapes.cardBar} playerBody=${chShapes.playerBody}`,
+    chShapes.cardBar > 0 && chShapes.road === 0 && chShapes.nodeTodo === 0,
+    `[${tag}] F9 CHOICE 原页面整体变暗（底层几何不再以原色出现 → 三选一独占焦点）`,
+    `cardBar=${chShapes.cardBar} road=${chShapes.road} nodeTodo=${chShapes.nodeTodo}`,
   );
   // 原页面位置不变：主动作按钮几何未挪位
   log(
@@ -350,14 +379,26 @@ async function assertFullFlow(page, tag) {
   p = await probeOf(page);
   log(p.phase === 'IDLE' && !p.choiceOpen, `[${tag}] F11 选择后回到 IDLE 原上下文`, `phase=${p.phase}`);
   log(
-    p.buffs.length === buffsBefore + 1 && p.logCount === before + 1 && /你选择了/.test(p.log[p.log.length - 1].text),
-    `[${tag}] F12 顶部 +1 Build 图标 且 日志 +1「你选择了 X」`,
+    p.buffs.length === buffsBefore + 1 && p.logCount === before + 1 && /你换上了/.test(p.log[p.log.length - 1].text),
+    `[${tag}] F12 顶部 +1 强化图标 且 日志 +1 自然语言结果（你换上了 X。）`,
     `buffs=${buffsBefore}→${p.buffs.length} log="${p.log[p.log.length - 1].text}"`,
   );
   log(page.url() === urlBefore && p.transitions > trailBefore, `[${tag}] F13 全程同一页面、URL 未变`, `url=${page.url()}`);
 
-  // 顶部新图标真的画出来了（dpr=1 时精确像素）
-  log(p.layers.iconOwned > 0 && p.layers.iconChip > 0, `[${tag}] F14 顶部新 Build 图标已绘制`, `iconOwned=${p.layers.iconOwned} iconChip=${p.layers.iconChip}`);
+  // 顶部新图标真的画出来了，而且只有 1 个（不是 5 个空槽 / 不是固定槽位）
+  log(
+    p.layers.buffIcon > 0 && p.layers.buffChip > 0 && p.buffIconCount === 1,
+    `[${tag}] F14 顶部新强化图标已绘制且只有 1 个`,
+    `buffIcon=${p.layers.buffIcon} buffChip=${p.layers.buffChip} buffIconCount=${p.buffIconCount}`,
+  );
+  if (dpr === 1) {
+    const stats = await pixelStats(page);
+    log(
+      stats.buffIconExplosive === 756 && stats.buffChip === 144,
+      `[${tag}] F15 顶部图标真实像素（只有所选选项那一个底色，无空槽）`,
+      `explosive=${stats.buffIconExplosive} chip=${stats.buffChip}`,
+    );
+  }
 }
 
 /* ------------------------------------------------------------------ 主流程 */
@@ -424,11 +465,20 @@ async function main() {
       page.on('pageerror', (e) => consoleErrors.push(String(e)));
       // 只访问根路径 —— 不手输 /run-page.html
       await page.goto(ROOT_URL, { waitUntil: 'load' });
-      await page.waitForFunction('!!window.__RUNPAGE__', null, { timeout: 15000 });
+      // PRP-R3：等正式车辆 sprite 真的加载完成再做任何像素断言
+      await page.waitForFunction(
+        () => {
+          if (!window.__RUNPAGE__) return false;
+          const p = window.__RUNPAGE__.probe();
+          return p.assets.ready >= 5 && p.assets.failed.length === 0 && p.stage.player.allSprites;
+        },
+        null,
+        { timeout: 15000 },
+      );
       await sleep(400);
       await assertFirstScreen(page, vp.tag, vp);
       log(consoleErrors.length === 0, `[${vp.tag}] S13 首屏无运行时报错`, consoleErrors.slice(0, 2).join(' | ') || 'none');
-      await assertFullFlow(page, vp.tag);
+      await assertFullFlow(page, vp.tag, vp.dpr);
       await ctx.close();
     }
 

@@ -331,7 +331,18 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
     // ---- PBL-A1：Planck 物理原语（俯视世界，不做第二套物理）----
     '../../physics/planckWorld',
     '../../physics/units',
+    // ---- PRP-R3：正式战斗契约里的**纯几何换算**（visualWorldTransform）----
+    // 车辆视觉的世界变换必须与正式战斗同源（双引擎共享函数），不自造第二套 anchor / 镜像语义。
+    '../../battle/battleContract',
   ]);
+
+  /**
+   * PRP-R3：Lab 允许**只读引用**正式车辆美术资源（`assets/visuals/*.png`）。
+   * 单一真源是 PNG 文件本体（与正式入口 `src/main.ts` 引用同一批文件，
+   * 后者路径为 `../assets/visuals/*.png`，本目录更深一层 → `../../../assets/visuals/*.png`），
+   * 不是第二套美术、也不写回任何正式目录；因此单独成类，不混进代码模块白名单。
+   */
+  const ALLOWED_ASSET_PREFIXES = ['../../../assets/'];
 
   const FORBIDDEN_RELATIVE =
     /^\.\.\/\.\.\/(game|render|ui|presentation|dev|platform\/(?!playerViewport))|^\.\.\/\.\.\/(main|platform\/bootstrap)/;
@@ -364,6 +375,8 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
       for (const spec of importSpecifiers(readFileSync(join(LAB_DIR, f), 'utf8'))) {
         if (!spec.startsWith('.')) continue; // 裸包名不在守卫范围
         if (spec.startsWith('./')) continue; // Lab 内部互相引用
+        // 正式车辆 PNG（只读美术资源，单一真源 = 文件本体）
+        if (ALLOWED_ASSET_PREFIXES.some((p) => spec.startsWith(p))) continue;
         seen.add(spec);
         expect(FORBIDDEN_RELATIVE.test(spec), `${f} 不得 import "${spec}"`).toBe(false);
         expect(

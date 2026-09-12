@@ -3,7 +3,8 @@
  *
  * PRP-F0 起本目录同时承载两个原型（仍在同一块可整块删除的实验目录内）：
  *   - **PRP｜Portrait Run Prototype** —— 玩家页面 `run-page.html`
- *     （`runPage*.ts` / `runMain.ts`：单一 Run Page + 五状态切换 + 日志 + 选择浮层）；
+ *     （`runPage*.ts` / `runMain.ts` / `runVehicleAssets.ts`：单一 Run Page +
+ *      五状态切换 + 自然语言冒险记录 + 真实车辆 sprite + 选择浮层）；
  *   - **PBL｜Portrait Battle Lab** —— **DEBUG ONLY** control area `portrait-lab.html`
  *     （`lab.ts` / `main.ts` / `arenaA.ts` / `gate.ts` …：Arena / Loadout / Encounter / Gate）。
  *   两者共享本文件的竖屏 390×844 基准与 F1 测试数据，但玩家页面**不引用**任何 Debug 控制器。
@@ -27,11 +28,16 @@
  *   4) tests/portraitBattleLab.test.ts、tests/portraitBattleLabF1.test.ts、
  *      tests/portraitBattleLabA1.test.ts、tests/portraitBattleLabG1.test.ts、
  *      tests/portraitRunPage.test.ts、
- *      tests/_e2e_portrait_battle_lab.cjs、tests/_e2e_run_page.cjs
+ *      tests/_e2e_portrait_battle_lab.cjs、tests/_e2e_run_page.cjs、
+ *      tests/_e2e_prp_default_entry.cjs
  *   5) package.json 中 dev:run-page / dev:debug-lab / build:portrait-lab /
- *      e2e:portrait-lab / e2e:run-page 等 script
+ *      e2e:portrait-lab / e2e:run-page / e2e:default-entry 等 script
  *   6) .gitignore 中 dist-portrait-lab/ 一行
  * 正式玩法 / 物理 / 数值 / Garage / Fusion / R4 / Meta / 存档 / 经济均不在删除影响面内。
+ *
+ * ⚠️ PRP-R3 起本目录只**只读**引用正式车辆美术（`assets/visuals/*.png`）与正式
+ *   纯几何换算 `battle/battleContract.visualWorldTransform`；两者都是共享真源，
+ *   删除本目录**不得**牵动它们（正式玩法路径 0 引用本目录，见 R22b/R23）。
  */
 
 /** 竖屏逻辑舞台宽（逻辑 px）—— Lab 全部布局与占位几何的唯一坐标基准。 */

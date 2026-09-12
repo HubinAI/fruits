@@ -1,11 +1,16 @@
 /**
- * PRP-F0-RUN-PAGE-SHELL｜Portrait Run Prototype —— Run Page 纯状态机
- *（无 DOM / 无 Canvas / 无物理 / 无平台依赖 / 无副作用）。
+ * PRP-F0-RUN-PAGE-SHELL｜PRP-R3-CAPYBARA-UI-HIERARCHY-REBUILD
+ * Run Page 纯状态机（无 DOM / 无 Canvas / 无物理 / 无平台依赖 / 无副作用）。
  *
  * 产品基线：整个单局是**一个持续存在的竖屏 Adventure Run Page**，
  * 战斗 / 事件 / 强化 / 结果是**同一个页面的五个状态**，不存在页面跳转：
  *
  *   IDLE ──继续──▶ EVENT ──遭遇敌人──▶ BATTLE ──自动结束──▶ RESULT ──继续──▶ CHOICE ──选择──▶ IDLE
+ *
+ * ⚠️ PRP-R3 必改 3：冒险记录**从 Console 改成玩家叙事** ——
+ *   不再有 `[系统]` / `[事件]` / `[战斗]` / `[结果]` / `[耐久]` / `[强化]` 之类前缀，
+ *   也没有任何 Runtime 状态 / 内部枚举 / 逐帧伤害；`kind` 只用于**渲染样式**
+ *   （DAY 行加粗、结果行强调），不进入玩家可见文本。
  *
  * 本 Queue 明确不做（见 Queue 禁止项）：
  *   - 不开发正式 Day 状态机（`day` 恒为 3 / 7，属占位）；
@@ -21,28 +26,32 @@ export type RunPhase = 'IDLE' | 'EVENT' | 'BATTLE' | 'RESULT' | 'CHOICE';
 
 export const RUN_PHASES: readonly RunPhase[] = ['IDLE', 'EVENT', 'BATTLE', 'RESULT', 'CHOICE'];
 
-export type RunLogKind = 'system' | 'event' | 'battle' | 'result' | 'durability' | 'choice';
-
-const LOG_PREFIX: Record<RunLogKind, string> = {
-  system: '[系统]',
-  event: '[事件]',
-  battle: '[战斗]',
-  result: '[结果]',
-  durability: '[耐久]',
-  choice: '[强化]',
-};
+/**
+ * 日志条目的语义角色（**仅供渲染分级**，不产生任何玩家可见前缀）。
+ *   - day        = 「今日」分隔行（加粗高亮）
+ *   - travel     = 行进中的氛围叙事
+ *   - event      = 遭遇 / 敌情
+ *   - result     = 战斗结果 / 机会
+ *   - durability = 战车耐久
+ *   - choice     = 玩家做出的强化选择
+ */
+export type RunLogKind = 'day' | 'travel' | 'event' | 'result' | 'durability' | 'choice';
 
 export interface RunLogEntry {
   /** 单调递增序号（跨状态不重置 → 可用于证明日志「保持完整历史」）。 */
   readonly seq: number;
   readonly kind: RunLogKind;
+  /** 玩家可见文本（自然语言，**不含任何方括号前缀**）。 */
   readonly text: string;
 }
 
 /** 日志上限（防止无限增长；正常演示流程远达不到）。 */
 export const RUN_LOG_MAX = 240;
 
-/** 三个固定演示强化选项（不随机、不进任何正式强化池）。 */
+/**
+ * 三个固定演示强化选项（不随机、不进任何正式强化池）。
+ * `note` = **一句结果**（玩家可读，不是开发占位说明 / 不是数值表）。
+ */
 export interface RunChoiceOption {
   readonly id: string;
   readonly label: string;
@@ -50,9 +59,9 @@ export interface RunChoiceOption {
 }
 
 export const RUN_CHOICE_OPTIONS: readonly RunChoiceOption[] = [
-  { id: 'heavyWarhead', label: '重型弹头', note: '弹头更重（占位）' },
-  { id: 'explosiveShell', label: '爆裂弹', note: '命中范围更大（占位）' },
-  { id: 'emergencyRepair', label: '紧急维修', note: '立即恢复耐久（占位）' },
+  { id: 'heavyWarhead', label: '重型弹头', note: '炮弹更重，撞击和后坐增强' },
+  { id: 'explosiveShell', label: '爆裂弹', note: '炮弹命中后发生范围爆炸' },
+  { id: 'emergencyRepair', label: '紧急维修', note: '立即恢复部分耐久' },
 ];
 
 /** 本 Queue 的演示装载（唯一一套；Run Page 不接 Debug 选择项）。 */
@@ -149,17 +158,20 @@ function goPhase(s: RunPageState, phase: RunPhase, patch: Partial<RunPageState>)
   });
 }
 
+/** 本局进度占位（本 Queue 不做正式 Day 状态机）：DAY 3 / 7。 */
+export const RUN_INITIAL_DAY = 3;
+export const RUN_TOTAL_DAYS = 7;
+
 /** 初始状态（= Reset 后的 fresh 状态；IDLE 且日志已可见）。 */
 export function createRunPageState(ctx: RunPageContext): RunPageState {
   return {
     phase: 'IDLE',
-    day: 3,
-    dayTotal: 7,
+    day: RUN_INITIAL_DAY,
+    dayTotal: RUN_TOTAL_DAYS,
     buffs: [],
     log: pushLogs([], [
-      { kind: 'system', text: `DAY 3 / 7 · 车队出发` },
-      { kind: 'system', text: `当前载具：${ctx.vehicleLabel}` },
-      { kind: 'system', text: '前方出现敌情信号…' },
+      { kind: 'day', text: `DAY ${RUN_INITIAL_DAY}` },
+      { kind: 'travel', text: `你驾驶着${ctx.vehicleLabel}，在荒原上继续前进。` },
     ]),
     battle: null,
     actionCount: 0,
@@ -200,9 +212,16 @@ export function visibleRunLog(s: RunPageState, maxLines: number): readonly RunLo
   return s.log.length <= maxLines ? s.log : s.log.slice(s.log.length - maxLines);
 }
 
-/** 日志行文本（含前缀）—— 渲染与测试共用的唯一格式化点。 */
+/**
+ * 日志行的玩家可见文本。
+ *
+ * ⚠️ PRP-R3 必改 3：**不再拼接任何 `[系统]` / `[事件]` 之类前缀** ——
+ * 玩家读到的是「这一局发生了什么」，不是程序执行记录。
+ * 保留函数（而不是让调用方直接读 `.text`）是为了让「文本的唯一格式化点」继续存在，
+ * 将来若需要玩家向修饰（例如 DAY 行、强调行）也只在这里发生。
+ */
 export function formatRunLog(e: RunLogEntry): string {
-  return `${LOG_PREFIX[e.kind]} ${e.text}`;
+  return e.text;
 }
 
 /** 当前战斗的进度（0..1；无战斗时为 0）。 */
@@ -215,8 +234,8 @@ export function runBattleProgress(b: RunBattleState | null): number {
 
 /**
  * 按下底部唯一主动作：
- *   IDLE → EVENT   （日志追加事件文本）
- *   EVENT → BATTLE （建立演示战斗；此后自动推进）
+ *   IDLE → EVENT   （日志追加 2 句自然语言敌情叙事）
+ *   EVENT → BATTLE （建立演示战斗；此后自动推进。**入场不写日志**，保持记录稳定）
  *   RESULT → CHOICE（获得改装机会：原页面保留、整体变暗、中央浮层）
  *   BATTLE / CHOICE → no-op（同引用；BATTLE 由脚本自动结束，CHOICE 只能点卡片）
  */
@@ -226,7 +245,10 @@ export function pressRunAction(s: RunPageState, ctx: RunPageContext): RunPageSta
       next(s, { actionCount: s.actionCount + 1 }),
       'EVENT',
       {
-        log: pushLog(s.log, 'event', `遭遇敌人：${ctx.encounterLabel}`),
+        log: pushLogs(s.log, [
+          { kind: 'event', text: '前方传来急促的引擎声。' },
+          { kind: 'event', text: `你遭遇了${ctx.encounterLabel}。` },
+        ]),
       },
     );
   }
@@ -242,14 +264,7 @@ export function pressRunAction(s: RunPageState, ctx: RunPageContext): RunPageSta
       totalSteps: RUN_BATTLE_SCRIPT.totalSteps,
       done: false,
     };
-    return goPhase(
-      next(s, { actionCount: s.actionCount + 1 }),
-      'BATTLE',
-      {
-        battle,
-        log: pushLog(s.log, 'battle', `交战开始：${ctx.encounterLabel}`),
-      },
-    );
+    return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'BATTLE', { battle });
   }
   if (s.phase === 'RESULT') {
     return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'CHOICE', {});
@@ -291,10 +306,17 @@ export function advanceRunBattle(s: RunPageState, steps: number): RunPageState {
   const done: RunBattleState = { ...mid, enemyHp: 0, done: true };
   return goPhase(next(s, { battle: done }), 'RESULT', {
     log: pushLogs(s.log, [
-      { kind: 'result', text: `击败 ${b.enemyLabel} · 战斗结束` },
-      { kind: 'durability', text: `我方耐久 ${done.playerHp} / ${done.playerHpMax}（占位）` },
+      { kind: 'result', text: '战斗胜利。' },
+      { kind: 'durability', text: `战车耐久剩余 ${durabilityPercent(done)}%。` },
+      { kind: 'result', text: '你发现了一次改装机会……' },
     ]),
   });
+}
+
+/** 战斗结束时的耐久百分比（0..100，整数；仅用于叙事文本，不是平衡数值）。 */
+export function durabilityPercent(b: RunBattleState): number {
+  if (b.playerHpMax <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((b.playerHp / b.playerHpMax) * 100)));
 }
 
 /**
@@ -309,6 +331,6 @@ export function chooseRunBuff(s: RunPageState, optionId: string): RunPageState {
   const opt = RUN_CHOICE_OPTIONS.find((o) => o.id === optionId);
   if (!opt) return s;
   return goPhase(next(s, { buffs: [...s.buffs, opt] }), 'IDLE', {
-    log: pushLog(s.log, 'choice', `你选择了 ${opt.label}`),
+    log: pushLog(s.log, 'choice', `你换上了${opt.label}。`),
   });
 }

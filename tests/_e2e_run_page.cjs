@@ -35,23 +35,36 @@ const MIME = {
 /**
  * Run Page 几何调色板（与 src/lab/portraitBattleLab/runPage.ts 的 COLORS 一一对应）。
  * 逐对互斥 → 精确相等匹配即可分类，无需区间判定（文字抗锯齿永不落入这些色）。
+ *
+ * ⚠️ PRP-R3：车辆改用**正式 sprite** → 车身 / 部件不再入账（sprite 像素非纯色），
+ * 因此这里只剩「确实平涂且无人覆盖」的面：地线 / 路面 / 进度节点 / 强化图标 / 强调条。
+ * 顶部「已获得强化图标」的底色按选项区分（三个色都要登记），高光块统一。
  */
 const PALETTE = {
-  ground: [0x5a, 0x6f, 0x8a],
-  playerBody: [0x4a, 0x7f, 0xe0],
-  playerPart: [0xa0, 0x6b, 0xff],
-  enemyBody: [0xff, 0x6b, 0x5e],
-  enemyPart: [0xff, 0x9b, 0x3d],
+  ground: [0x8f, 0x7a, 0x52],
+  road: [0x33, 0x2e, 0x42],
   nodeDone: [0xd2, 0x92, 0x2a],
-  nodeTodo: [0x3a, 0x46, 0x5e],
-  iconSlot: [0x24, 0x2e, 0x3e],
-  iconOwned: [0x2f, 0xbf, 0x6b],
-  iconChip: [0xd8, 0xf2, 0xa0],
+  nodeTodo: [0x46, 0x53, 0x6b],
+  buffIconHeavy: [0xb8, 0x56, 0x2e], // 重型弹头
+  buffIconExplosive: [0xc0, 0x7a, 0x2a], // 爆裂弹
+  buffIconRepair: [0x3f, 0x8f, 0x5a], // 紧急维修
+  buffChip: [0xe6, 0xed, 0xf8],
   cardBar: [0x5f, 0x86, 0xc4],
-  cardChip: [0xf0, 0xc1, 0x4b],
   actionBar: [0x33, 0x50, 0x7a],
-  actionBarOff: [0x2a, 0x33, 0x41],
 };
+
+/**
+ * 正式车辆 sprite 的特征色（PNG 实解码主色）。PRP-R3 必改 2 的判据：
+ * 「战斗主体是真实车辆视觉」= 画面上真的存在这些精确色的像素（纯色矩形做不到）。
+ * ⚠️ 只在 dpr=1 断言（dpr≠1 时画布被浏览器重采样，精确色不再成立）。
+ */
+const SPRITE_COLORS = {
+  watermelonBody: [0x3f, 0x8a, 0x3c], // assets/visuals/body_watermelon.png
+  bananaBody: [0xf6, 0xc8, 0x3c], // assets/visuals/body_banana.png
+};
+
+/** 三个强化图标的底色集合（用于「恰好一个在场」判定）。 */
+const BUFF_ICON_COLORS = [PALETTE.buffIconHeavy, PALETTE.buffIconExplosive, PALETTE.buffIconRepair];
 
 /**
  * 不入面积账本、但需要「按点位精确采样」的颜色（承载文字 / 被描边覆盖的面）。
@@ -59,52 +72,72 @@ const PALETTE = {
  */
 const SAMPLE_COLORS = {
   actionFill: [0x28, 0x40, 0x5f],
+  actionFillOff: [0x23, 0x2b, 0x38],
   actionEdge: [0x4f, 0x70, 0x99],
   cardBg: [0x1b, 0x24, 0x32],
   cardEdge: [0x3d, 0x4c, 0x66],
+  /** CHOICE 卡片左侧矢量图标色（按选项区分）。 */
+  iconHeavy: [0xff, 0xb0, 0x66],
+  iconExplosive: [0xff, 0xd1, 0x66],
+  iconRepair: [0x7f, 0xd6, 0xa0],
 };
 
 /** 各状态整页分层面积的冻结期望（唯一来源：tests/portraitRunPage.test.ts RP-22）。 */
 const LEDGER = {
   IDLE: {
-    ground: 1496, playerBody: 3012, playerPart: 288, enemyBody: 0, enemyPart: 0,
-    nodeDone: 432, nodeTodo: 576, iconSlot: 3920, iconOwned: 0, iconChip: 0,
-    cardBar: 0, cardChip: 0, actionBar: 966, actionBarOff: 0,
+    ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
+    buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
+    cardBar: 0, actionBar: 990,
   },
   EVENT: {
-    ground: 1496, playerBody: 3012, playerPart: 288, enemyBody: 2774, enemyPart: 540,
-    nodeDone: 432, nodeTodo: 576, iconSlot: 3920, iconOwned: 0, iconChip: 0,
-    cardBar: 0, cardChip: 0, actionBar: 966, actionBarOff: 0,
+    ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
+    buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
+    cardBar: 0, actionBar: 990,
   },
   BATTLE: {
-    ground: 1496, playerBody: 3012, playerPart: 288, enemyBody: 2774, enemyPart: 540,
-    nodeDone: 432, nodeTodo: 576, iconSlot: 3920, iconOwned: 0, iconChip: 0,
-    cardBar: 0, cardChip: 0, actionBar: 0, actionBarOff: 966,
+    ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
+    buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
+    cardBar: 0, actionBar: 0,
   },
   RESULT: {
-    ground: 1496, playerBody: 3012, playerPart: 288, enemyBody: 0, enemyPart: 0,
-    nodeDone: 432, nodeTodo: 576, iconSlot: 3920, iconOwned: 0, iconChip: 0,
-    cardBar: 0, cardChip: 0, actionBar: 966, actionBarOff: 0,
+    ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
+    buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
+    cardBar: 0, actionBar: 990,
   },
   CHOICE: {
-    ground: 0, playerBody: 0, playerPart: 0, enemyBody: 0, enemyPart: 0,
-    nodeDone: 0, nodeTodo: 0, iconSlot: 0, iconOwned: 0, iconChip: 0,
-    cardBar: 3624, cardChip: 2028, actionBar: 0, actionBarOff: 0,
+    ground: 0, road: 0, nodeDone: 0, nodeTodo: 0,
+    buffIconHeavy: 0, buffIconExplosive: 0, buffIconRepair: 0, buffChip: 0,
+    cardBar: 3720, actionBar: 0,
   },
+  // 回到 IDLE 且拿到 1 个强化（爆裂弹）→ 只多出「该选项底色 756 + 高光块 144」
   'IDLE+BUFF': {
-    ground: 1496, playerBody: 3012, playerPart: 288, enemyBody: 0, enemyPart: 0,
-    nodeDone: 432, nodeTodo: 576, iconSlot: 3136, iconOwned: 640, iconChip: 144,
-    cardBar: 0, cardChip: 0, actionBar: 966, actionBarOff: 0,
+    ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
+    buffIconHeavy: 0, buffIconExplosive: 756, buffIconRepair: 0, buffChip: 144,
+    cardBar: 0, actionBar: 990,
   },
 };
 
-/** 各带底色（用于「分带结构」与「CHOICE 整页变暗」的真实像素判定）。 */
+/**
+ * 各条带底色的采样点（用于「分带结构」「CHOICE 整页变暗」的真实像素判定）。
+ * ⚠️ 舞台带**不是平涂**：天空是垂直渐变（夜空 → 地平线暖雾，见 runPage.drawBackdrop）→
+ *    改用「两处天空采样互不相同、且都不等于其它三带底色」判定（同一点位前后对比见 R36）。
+ */
 const BANDS = {
   top: { y: 48, color: [0x15, 0x1c, 0x28] },
-  stage: { y: 300, color: [0x0f, 0x14, 0x1d] },
   log: { y: 650, color: [0x0d, 0x12, 0x1a] },
   action: { y: 810, color: [0x14, 0x1a, 0x26] },
 };
+/** 舞台天空的两个采样高度：都必须在地平线暖端之上、且高于全部山脊顶（不受遮挡）。 */
+const STAGE_SKY_Y = [96, 196];
+/** 四条带的 5 个采样点（top / sky×2 / log / action）——「整页变暗」用同一点位前后对比。 */
+const BAND_POINTS = [
+  { key: 'top', x: 388, y: BANDS.top.y },
+  { key: 'skyHigh', x: 388, y: STAGE_SKY_Y[0] },
+  { key: 'skyLow', x: 388, y: STAGE_SKY_Y[1] },
+  { key: 'log', x: 388, y: BANDS.log.y },
+  { key: 'action', x: 388, y: BANDS.action.y },
+];
+const sampleBands = (page) => samplePixels(page, BAND_POINTS.map((p) => ({ x: p.x, y: p.y })));
 
 const results = [];
 function log(pass, name, detail = '') {
@@ -215,12 +248,16 @@ async function clickRect(page, r) {
 function ledgerCheck(tag, label, stats, key, dpr) {
   const exp = LEDGER[key];
   if (dpr !== 1) {
-    // 重采样后精确值不再成立：改断言「玩家/敌人两侧都存在」这类结构事实
+    // 重采样后精确值不再成立：改断言「结构与流程」（不做精确面积）
     const structural =
       key === 'CHOICE'
-        ? stats.cardBar > 0 && stats.playerBody === 0
-        : stats.playerBody > 0 && (key.startsWith('CHOICE') ? true : stats.playerBody > 0);
-    log(structural, `[${tag}] ${label}（dpr≠1 只做结构断言）`, `playerBody=${stats.playerBody} cardBar=${stats.cardBar}`);
+        ? stats.cardBar > 0 && stats.road === 0
+        : stats.road > 0 && stats.nodeTodo > 0;
+    log(
+      structural,
+      `[${tag}] ${label}（dpr≠1 只做结构断言）`,
+      `road=${stats.road} nodeTodo=${stats.nodeTodo} cardBar=${stats.cardBar} actionBar=${stats.actionBar}`,
+    );
     return;
   }
   const diff = Object.keys(exp).filter((k) => stats[k] !== exp[k]);
@@ -239,10 +276,18 @@ async function runViewport(browser, vp) {
   const page = await ctx.newPage();
 
   await page.goto(PAGE_URL, { waitUntil: 'load' });
-  await page.waitForFunction(() => {
-    const c = document.querySelector('#run-canvas');
-    return !!window.__RUNPAGE__ && !!c && c.width > 0 && window.__RUNPAGE__.probe().screen.width > 0;
-  }, null, { timeout: 15000 });
+  // PRP-R3：车辆视觉来自正式 PNG，必须等资源**真的加载完成**再做像素断言
+  //（加载完成会触发重绘；未就绪时车辆整件不画 —— 绝不画纯色占位）。
+  await page.waitForFunction(
+    () => {
+      const c = document.querySelector('#run-canvas');
+      if (!window.__RUNPAGE__ || !c || c.width === 0) return false;
+      const p = window.__RUNPAGE__.probe();
+      return p.screen.width > 0 && p.assets.ready >= 5 && p.assets.failed.length === 0 && p.stage.player.allSprites;
+    },
+    null,
+    { timeout: 15000 },
+  );
 
   const urlAtStart = page.url();
   const navCountAtStart = await page.evaluate(() => performance.getEntriesByType('navigation').length);
@@ -315,20 +360,23 @@ async function runViewport(browser, vp) {
     `top=${b.top.h} / 844`,
   );
 
-  // 真实像素：四条带的底色（dpr=1 才精确）
+  // 真实像素：三条平涂带的底色精确命中 + 舞台天空是渐变（dpr=1 才精确）
   if (vp.dpr === 1) {
-    const samples = await samplePixels(page, [
-      { x: 388, y: BANDS.top.y },
-      { x: 388, y: BANDS.stage.y },
-      { x: 388, y: BANDS.log.y },
-      { x: 388, y: BANDS.action.y },
-    ]);
-    const keys = ['top', 'stage', 'log', 'action'];
-    const bad = keys.filter((k, i) => samples[i].rgb.join(',') !== BANDS[k].color.join(','));
+    const samples = await sampleBands(page);
+    const at = (i) => samples[i].rgb.join(',');
+    const flatOk =
+      at(0) === BANDS.top.color.join(',') &&
+      at(3) === BANDS.log.color.join(',') &&
+      at(4) === BANDS.action.color.join(',');
+    const skyGradient = at(1) !== at(2);
+    const skyIsSky =
+      at(1) !== BANDS.top.color.join(',') &&
+      at(1) !== BANDS.log.color.join(',') &&
+      at(1) !== BANDS.action.color.join(',');
     log(
-      bad.length === 0,
-      `[${tag}] R5 四条带底色的真实像素与结构定义一致`,
-      bad.length ? bad.map((k, i) => k).join('/') : samples.map((s, i) => `${keys[i]}=${s.rgb.join(',')}`).join(' '),
+      flatOk && skyGradient && skyIsSky,
+      `[${tag}] R5 分带底色真实像素：三条平涂带精确命中，舞台天空为垂直渐变（非大片平涂）`,
+      `top=${at(0)} sky=${at(1)}→${at(2)} log=${at(3)} action=${at(4)}`,
     );
   }
 
@@ -344,11 +392,41 @@ async function runViewport(browser, vp) {
 
   /* -------------------------------------------------- 3) IDLE 起点 */
   log(p0.phase === 'IDLE', `[${tag}] R8 默认打开即 IDLE`, `phase=${p0.phase}`);
-  log(p0.logCount >= 3, `[${tag}] R9 IDLE 日志已可见`, `logCount=${p0.logCount}`);
+  log(p0.logCount === 2, `[${tag}] R9 IDLE 日志已可见（DAY 行 + 行进叙事）`, `logCount=${p0.logCount}`);
   log(p0.actionLabel === '继续' && p0.actionEnabled, `[${tag}] R10 底部显示「继续」且可点`, `${p0.actionLabel}/${p0.actionEnabled}`);
-  log(p0.buffs.length === 0 && p0.day === 3 && p0.dayTotal === 7, `[${tag}] R11 顶部 = DAY 3/7 + 0 个 Build 图标`, `day=${p0.day}/${p0.dayTotal} buffs=${p0.buffs.length}`);
+  log(
+    p0.buffs.length === 0 && p0.day === 3 && p0.dayTotal === 7,
+    `[${tag}] R11 顶部 = DAY 3/7 + 0 个强化图标`,
+    `day=${p0.day}/${p0.dayTotal} buffs=${p0.buffs.length}`,
+  );
+  /*
+    PRP-R3 必改 1：顶部第二行**是空的不存在**，不是「5 个固定空槽」。
+    buffIconCount 由布局函数直接给出（0 个强化 → 0 个图标矩形）。
+  */
+  log(
+    p0.buffIconCount === 0 && p0.layers.buffIcon === 0 && p0.layers.buffChip === 0,
+    `[${tag}] R11b 未获得强化时顶部没有任何图标 / 空槽（结构性）`,
+    `buffIconCount=${p0.buffIconCount} buffIcon=${p0.layers.buffIcon}`,
+  );
+  // 必改 3：玩家可见日志不得含任何方括号 Debug 前缀，也不得是内部状态 dump
+  const logTexts = p0.log.map((l) => l.text);
+  log(
+    logTexts.every((t) => !t.includes('[') && !t.includes(']') && t.trim().length > 0),
+    `[${tag}] R11c 日志是玩家叙事（无 [系统]/[事件] 前缀）`,
+    logTexts.join(' ｜ '),
+  );
   const sIdle = await pixelStats(page);
   ledgerCheck(tag, 'R12 IDLE', sIdle, 'IDLE', vp.dpr);
+
+  /* ------------------------------------------- 3b) 战斗主体 = 真实车辆 sprite */
+  if (vp.dpr === 1) {
+    const melon = await countExact(page, SPRITE_COLORS.watermelonBody);
+    log(
+      melon > 200,
+      `[${tag}] R12c 战斗主体是正式车辆 sprite（西瓜车身真实像素）`,
+      `watermelonBody=${melon}px（纯色矩形不可能命中）`,
+    );
+  }
 
   // 主动作按钮：填充 / 描边（不入账）与强调条（入账）三色都要在预期位置命中
   if (vp.dpr === 1) {
@@ -372,14 +450,28 @@ async function runViewport(browser, vp) {
   let p = await probeOf(page);
   log(p.phase === 'EVENT', `[${tag}] R13 真实点击「继续」→ EVENT`, `phase=${p.phase}`);
   log(
-    p.logCount === p0.logCount + 1 && p.log[p.log.length - 1].text.includes('遭遇敌人'),
-    `[${tag}] R14 EVENT 日志追加事件文本`,
-    p.log[p.log.length - 1].text,
+    p.logCount === p0.logCount + 2 && p.log[p.log.length - 1].text === '你遭遇了追猎者。',
+    `[${tag}] R14 EVENT 日志追加 2 句自然语言敌情`,
+    p.log.slice(-2).map((l) => l.text).join(' ｜ '),
   );
   log(p.actionLabel === '遭遇敌人', `[${tag}] R15 EVENT 底部切换为对应当前动作`, p.actionLabel);
   log(p.stage.enemy !== null && p.stage.playerLeftOfEnemy === true, `[${tag}] R16 EVENT 敌人在右侧出现、玩家在左`, `gap=${p.stage.minGapPx}`);
+  log(
+    !!p.stage.enemy && p.stage.enemy.allSprites === true && p.stage.player.allSprites === true,
+    `[${tag}] R16b 两车全部可视件都是真实 sprite / 真实半径轮（无纯色矩形占位）`,
+    `player=${p.stage.player.allSprites} enemy=${p.stage.enemy && p.stage.enemy.allSprites}`,
+  );
   const sEvent = await pixelStats(page);
   ledgerCheck(tag, 'R17 EVENT', sEvent, 'EVENT', vp.dpr);
+  if (vp.dpr === 1) {
+    const melon = await countExact(page, SPRITE_COLORS.watermelonBody);
+    const banana = await countExact(page, SPRITE_COLORS.bananaBody);
+    log(
+      melon > 200 && banana > 200,
+      `[${tag}] R17b 玩家 / 敌人都是正式车辆 sprite（双车真实像素在场）`,
+      `watermelon=${melon}px banana=${banana}px`,
+    );
+  }
 
   /* --------------------------------- 5) 真实点击「遭遇敌人」→ BATTLE */
   await clickRect(page, p.actionRect);
@@ -393,12 +485,22 @@ async function runViewport(browser, vp) {
     `playerLeftOfEnemy=${p.stage.playerLeftOfEnemy} gap=${p.stage.minGapPx}`,
   );
   log(
-    p.stage.scale === 0.6 && p.stage.scale === p0.stage.scale,
-    `[${tag}] R21 显示缩放为固定值 0.6（不随状态跳变）`,
+    Math.abs(p.stage.scale - p0.stage.scale) < 1e-9 && p.stage.scale > 0.7 && p.stage.scale <= 0.9,
+    `[${tag}] R21 显示缩放为固定值且明显放大（不随状态跳变）`,
     `scale=${p.stage.scale}`,
   );
   const sBattle = await pixelStats(page);
   ledgerCheck(tag, 'R22 BATTLE 开局', sBattle, 'BATTLE', vp.dpr);
+  if (vp.dpr === 1) {
+    // 禁用态的真实像素证据：按钮填充离开可用态色（禁用色在 (btn.x+10, btn.y+24)）
+    const btn = p.actionRect;
+    const off = await samplePixels(page, [{ x: btn.x + 10, y: btn.y + 24 }]);
+    log(
+      off[0].rgb.join(',') === SAMPLE_COLORS.actionFillOff.join(',') && sBattle.actionBar === 0,
+      `[${tag}] R22b BATTLE 主动作进入禁用态（填充变色 + 可用态强调条消失）`,
+      `fill=${off[0].rgb.join(',')} actionBar=${sBattle.actionBar}`,
+    );
+  }
 
   // 真实等待一段时间：日志不得刷逐帧伤害明细（验收 4）
   await page.waitForTimeout(700);
@@ -419,11 +521,12 @@ async function runViewport(browser, vp) {
   p = await probeOf(page);
   log(p.phase === 'RESULT', `[${tag}] R25 战斗自动结束 → RESULT（无操作介入）`, `phase=${p.phase}`);
   const added = p.log.length - logAtBattleStart.length;
-  log(added === 2, `[${tag}] R26 战斗结束后一次性追加 2 行（结果 + 耐久占位）`, `+${added}: ${p.log.slice(-2).map((l) => l.text).join(' ｜ ')}`);
+  log(added === 3, `[${tag}] R26 战斗结束后一次性追加 3 行玩家叙事（胜负 + 耐久 % + 改装机会）`, `+${added}: ${p.log.slice(-3).map((l) => l.text).join(' ｜ ')}`);
   log(p.stage.enemy === null && p.stage.enemyGone === true, `[${tag}] R27 敌方消失、玩家留在舞台`, `enemy=${p.stage.enemy} gone=${p.stage.enemyGone}`);
   log(p.actionLabel === '继续' && p.actionEnabled, `[${tag}] R28 RESULT 底部重新出现「继续」`, `${p.actionLabel}/${p.actionEnabled}`);
   const sResult = await pixelStats(page);
   ledgerCheck(tag, 'R29 RESULT', sResult, 'RESULT', vp.dpr);
+  const bandSamplesBefore = vp.dpr === 1 ? await sampleBands(page) : [];
   const playerRectAtResult = JSON.stringify(p.stage.player);
 
   /* --------------------------------- 7) 真实点击「继续」→ CHOICE */
@@ -436,45 +539,51 @@ async function runViewport(browser, vp) {
     `[${tag}] R32 选项正是 Queue 点名的三项`,
     p.choiceOptions.map((o) => o.label).join(' / '),
   );
-  log(p.logCount === p0.logCount + 4, `[${tag}] R33 打开浮层不写日志（历史全程累积）`, `logCount=${p.logCount}`);
+  log(p.logCount === p0.logCount + 5, `[${tag}] R33 打开浮层不写日志（历史全程累积）`, `logCount=${p.logCount}`);
   log(
     JSON.stringify(p.stage.player) === playerRectAtResult,
     `[${tag}] R34 原页面位置不变（玩家几何与 RESULT 完全一致）`,
     '',
   );
+  // 必改 4：三张卡片各只显示「图标 + 名称 + 一句结果」，且都有一句玩家向结果
+  log(
+    p.choiceOptions.every((o) => typeof o.note === 'string' && o.note.length > 0 && !o.note.includes('[')),
+    `[${tag}] R34b 每张卡片都带「一句结果」（无内部字段 / 无方括号）`,
+    p.choiceOptions.map((o) => `${o.label}：${o.note}`).join(' ｜ '),
+  );
   const sChoice = await pixelStats(page);
   ledgerCheck(tag, 'R35 CHOICE', sChoice, 'CHOICE', vp.dpr);
   if (vp.dpr === 1) {
-    // 「整体变暗」：四条带的真实像素都必须离开原底色（被遮罩合成成新色）
-    const samples = await samplePixels(page, [
-      { x: 388, y: BANDS.top.y },
-      { x: 388, y: BANDS.stage.y },
-      { x: 388, y: BANDS.log.y },
-      { x: 388, y: BANDS.action.y },
-    ]);
-    const keys = ['top', 'stage', 'log', 'action'];
-    const allDarkened = samples.every((s, i) => s.rgb.join(',') !== BANDS[keys[i]].color.join(','));
+    // 「整体变暗」：与 RESULT 时**同一批点位**逐点对比，5 处必须全部离开原色（被遮罩合成）
+    const after = await sampleBands(page);
+    const changed = after.map((s, i) => s.rgb.join(',') !== bandSamplesBefore[i].rgb.join(','));
     log(
-      allDarkened,
-      `[${tag}] R36 CHOICE 整页变暗（四条带全部离开原底色）`,
-      samples.map((s, i) => `${keys[i]}=${s.rgb.join(',')}`).join(' '),
+      changed.every(Boolean),
+      `[${tag}] R36 CHOICE 整页变暗（5 个分带采样点逐点离开 CHOICE 之前的值）`,
+      BAND_POINTS.map((p, i) => `${p.key}:${bandSamplesBefore[i].rgb.join(',')}→${after[i].rgb.join(',')}`).join(' '),
     );
-    // 卡片位置：真实像素在卡片四角与色块中心命中期望色
+    // 卡片几何：真实像素在「卡片底 / 顶部强调条 / 左侧矢量图标中心」三处命中期望色
     const cards = p.choiceOptions.map((o) => o.rect);
     const pts = [];
     for (const c of cards) {
-      pts.push({ x: c.x + 6, y: c.y + 6 }, { x: c.x + c.w - 6, y: c.y + 6 }, { x: c.x + c.w / 2, y: c.y + c.h - 6 });
-      pts.push({ x: c.x + 16 + 13, y: c.y + Math.round((c.h - 26) / 2) + 13 });
+      pts.push(
+        { x: c.x + 6, y: c.y + 6 }, // 卡片底（避开 2px 描边与强调条）
+        { x: c.x + c.w / 2, y: c.y + 6 }, // 顶部强调条
+        { x: c.x + 18 + 23, y: c.y + Math.round((c.h - 46) / 2) + 23 }, // 图标中心
+      );
     }
     const cardPixels = await samplePixels(page, pts);
-    const chipsOk = [3, 7, 11].every((i) => cardPixels[i].rgb.join(',') === PALETTE.cardChip.join(','));
-    const bgOk = [0, 1, 2, 4, 5, 6, 8, 9, 10].every(
-      (i) => cardPixels[i].rgb.join(',') === SAMPLE_COLORS.cardBg.join(','),
-    );
+    const at = (i) => cardPixels[i].rgb.join(',');
+    const bgOk = [0, 3, 6].every((i) => at(i) === SAMPLE_COLORS.cardBg.join(','));
+    const barOk = [1, 4, 7].every((i) => at(i) === PALETTE.cardBar.join(','));
+    const iconOk =
+      at(2) === SAMPLE_COLORS.iconHeavy.join(',') &&
+      at(5) === SAMPLE_COLORS.iconExplosive.join(',') &&
+      at(8) === SAMPLE_COLORS.iconRepair.join(',');
     log(
-      chipsOk && bgOk,
-      `[${tag}] R37 卡片几何可被真实像素命中（位置 = 布局唯一来源）`,
-      `chip=${cardPixels[3].rgb.join(',')} bg=${cardPixels[0].rgb.join(',')}`,
+      bgOk && barOk && iconOk,
+      `[${tag}] R37 卡片 = 图标 + 名称 + 一句结果（几何被真实像素命中，位置 = 布局唯一来源）`,
+      `bg=${at(0)} bar=${at(1)} icon=${at(2)}/${at(5)}/${at(8)}`,
     );
   }
 
@@ -485,12 +594,12 @@ async function runViewport(browser, vp) {
   log(p.phase === 'IDLE' && !p.choiceOpen, `[${tag}] R38 选择后浮层关闭、原页面恢复（回 IDLE）`, `phase=${p.phase}`);
   log(
     p.buffs.length === 1 && p.buffLabels[0] === '爆裂弹',
-    `[${tag}] R39 顶部新增对应核心 Build 图标`,
-    `buffs=${p.buffLabels.join('/')}`,
+    `[${tag}] R39 顶部新增对应强化图标（只加 1 个，不是填满 5 个槽）`,
+    `buffs=${p.buffLabels.join('/')} buffIconCount=${p.buffIconCount}`,
   );
   log(
-    p.log[p.log.length - 1].text === '你选择了 爆裂弹' && p.logCount === p0.logCount + 5,
-    `[${tag}] R40 日志追加「你选择了 XXX」且历史完整`,
+    p.log[p.log.length - 1].text === '你换上了爆裂弹。' && p.logCount === p0.logCount + 6,
+    `[${tag}] R40 日志追加自然语言结果（你换上了爆裂弹。）且历史完整`,
     `logCount=${p.logCount} last=${p.log[p.log.length - 1].text}`,
   );
   log(
@@ -500,6 +609,17 @@ async function runViewport(browser, vp) {
   );
   const sFinale = await pixelStats(page);
   ledgerCheck(tag, 'R42 回到 IDLE + 1 个强化', sFinale, 'IDLE+BUFF', vp.dpr);
+  if (vp.dpr === 1) {
+    // 顶部图标底色按选项区分：拿到「爆裂弹」→ 只应是该选项的底色（其余两个为 0）
+    const icons = [sFinale.buffIconHeavy, sFinale.buffIconExplosive, sFinale.buffIconRepair];
+    log(
+      icons.filter((n) => n > 0).length === 1 && sFinale.buffIconExplosive === 756 && sFinale.buffChip === 144,
+      `[${tag}] R42b 顶部只有 1 个真实图标（无空槽、无 5 个占位格子）`,
+      `heavy/explosive/repair=${icons.join('/')} chip=${sFinale.buffChip}`,
+    );
+    const melon = await countExact(page, SPRITE_COLORS.watermelonBody);
+    log(melon > 200, `[${tag}] R42c 回到 IDLE 后车辆仍是正式 sprite`, `watermelon=${melon}px`);
+  }
 
   /* ------------------------------------------- 9) 持续存在的同一页面 */
   const after = await probeOf(page);
@@ -543,10 +663,37 @@ function round2(v) {
     // 隔离：独立产物内不含正式入口；Run Page bundle 不含正式玩法 Runtime 模块
     const idx = await fetch(`${URL_BASE}/index.html`);
     log(idx.status === 404, '[iso] I1 独立产物内不含正式入口 index.html', `status=${idx.status}`);
-    const assetsDir = path.join(ROOT, 'assets');
-    const jsName = fs.readdirSync(assetsDir).find((f) => f.startsWith('run-page') && f.endsWith('.js'));
-    log(!!jsName, '[iso] I2 Run Page 有独立 chunk', jsName || '(missing)');
-    const bundle = fs.readFileSync(path.join(assetsDir, jsName), 'utf8');
+    // ⚠️ 必须查 **run-page.html 实际引用的那个 chunk**：outDir 采用 safe-delete shim 覆盖写
+    //（emptyOutDir:false），目录里会残留历次构建的旧 chunk —— 按文件名前缀「随便挑一个」会
+    // 挑到过期产物，让隔离断言变成空转。
+    const pageHtml = fs.readFileSync(path.join(ROOT, 'run-page.html'), 'utf8');
+    const chunkMatch = pageHtml.match(/assets\/(run-page[-.\w]*\.js)/);
+    const jsName = chunkMatch ? chunkMatch[1] : '';
+    log(!!jsName, '[iso] I2 Run Page 有独立 chunk（取自 run-page.html 的真实引用）', jsName || '(missing)');
+    const bundle = jsName ? fs.readFileSync(path.join(ROOT, 'assets', jsName), 'utf8') : '';
+    // ⚠️ 本机产物目录**整体不可清理**：vite.portrait-lab.config.ts 走 emptyOutDir:false
+    //（safe-delete shim 拦截 fs.rmSync），历次构建的旧 chunk 会一直留在 assets/ 里。
+    // 所以这里**不能**断言「目录内零残留」——那是构建配置的既知约束，不是产品缺陷。
+    // 真正要防的缺陷是「隔离断言读到过期产物而空转」：I2 已改为取 run-page.html 的真实引用。
+    // I2b 因此改为断言**被引用的 chunk 就是最新一次构建的产物**（mtime 最新），
+    // 残留文件数只作信息性报告（用于提示本地可手动清理）。
+    const allChunks = fs
+      .readdirSync(path.join(ROOT, 'assets'))
+      .filter((f) => f.startsWith('run-page') && f.endsWith('.js'));
+    const mtimeOf = (f) => {
+      try {
+        return fs.statSync(path.join(ROOT, 'assets', f)).mtimeMs;
+      } catch {
+        return -1;
+      }
+    };
+    const liveMtime = jsName ? mtimeOf(jsName) : -1;
+    const newestStale = Math.max(-1, ...allChunks.filter((f) => f !== jsName).map(mtimeOf));
+    log(
+      !!jsName && liveMtime > newestStale,
+      '[iso] I2b 被引用的 Run Page chunk 是最新构建产物（非过期 chunk）',
+      `live=${jsName}@${liveMtime} stale=${allChunks.length - (jsName ? 1 : 0)}个(信息性，emptyOutDir:false)`,
+    );
     const leaked = ['playerGameRuntime', 'canvasPlayerUIHost', 'webDomPlayerUIHost', 'physicsLab', 'planckBattleOrchestrator', 'garageFusion', 'bootstrap-wechat', 'ArenaARuntime'].filter((n) => bundle.includes(n));
     log(leaked.length === 0, '[iso] I3 Run Page bundle 不含正式玩法 Runtime / Arena A 运行时', leaked.length ? `泄漏=${leaked.join(',')}` : `bundle=${jsName} size=${bundle.length}B`);
   } finally {
