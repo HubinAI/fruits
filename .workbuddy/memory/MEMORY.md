@@ -9,7 +9,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 原型正式改名：**PRP｜Portrait Run Prototype**（本分支上的玩家向原型；PBL 旧名仅存于 Debug Lab）
 - 主线上一交付 R3 `1bb35d7`；R2.1 体验 FAIL 基线 `8fbac75`
 - PRP 链：`01915e2`(skill) → `2ee47bb`(PBL-A1) → `8c27cd0`(PBL-B1 停止) → `7532f98`(PBL-G1) →
-  `e48aa1a`(PRP-F0 Run Page) → PRP-R1 见 §5.6
+  `e48aa1a`(PRP-F0 Run Page) → `c3c9b0f`(PRP-R1 入口/预览/比例) → PRP-R2 见 §5.7
 
 ## 2. Rules
 - 1 Queue = 1 problem；无静默扩范围。先调查/复现，锁定根因后再改码。
@@ -35,8 +35,13 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 结果层 z 序（后注册先命中）：页控件 < dismiss(空白关) < `fusion-result-card`(点卡 no-op)。
 - **像素账本口径**：只登记「不承载文字、不被描边覆盖」的纯色平铺矩形 → 面积可精确冻结；
   承载文字/描边的面改按点位精确采样。文字抗锯齿会吃掉净色面积（实测差 2018–8476px）。
-- **入口唯一性**：本分支玩家体验入口**只有** `run-page.html`；`portrait-lab.html` = DEBUG ONLY（有角标 + 标题标注）。
-  `index.html` 是正式入口（Physics Lab / 正式玩法），**不要动**。给用户的体验地址永远只给一个。
+- **入口唯一性（PRP-R2 起）**：本分支**唯一启动命令 = `npm run dev`**，它自动打开浏览器到根路径 `/`，
+  根路径被 dev-only 插件重写为玩家体验入口（`build/branchDevEntry.ts`，`apply:'serve'`）。
+  用户**不需要记任何 URL**、不需要在多个 localhost 地址间选择。
+  `portrait-lab.html` = DEBUG ONLY（`npm run dev:debug-lab`）；`index.html` = 正式横屏游戏（`npm run dev:legacy`，显式备用）。
+  **给用户的回复永远只说一条命令：`npm run dev`。**
+- ⚠️ 改 `vite.config.ts` 时注意两条守卫（勿以说明性理由破坏）：R23 禁出现 `portrait-lab`/`portraitBattleLab`；
+  RP-27 禁出现 `run-page`/`runMain`。故 dev 默认入口逻辑必须放在 `build/branchDevEntry.ts`，用 `from './build/branchDevEntry.ts'` 引入。
 
 ## 5. Current truth（按模块，细节见当日 daily log）
 
@@ -113,9 +118,33 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 已知未做（诚实）：中部舞台在 390 宽竖屏下两车同框，显示缩放上限 0.6 使车体仅约 123×40 逻辑 px，
   舞台带面积占 49% 但视觉重心偏小 → 属**显示缩放的产品取舍**（≠ B1 的真实物理空间问题），是否放宽需用户裁决。
 
+### 5.7 PRP-R2 DEFAULT-EXPERIENCE-ENTRY（已交付）
+- **真人验收第二次 FAIL 的真根因 = 启动链，不是页面**：`npm run dev` = `vite`（无 `--open`）→ 根路径 `/`
+  → Vite 解析为 `index.html` = 正式横屏游戏。用户「正常启动」自然进旧横屏 Home/战斗/结算；
+  必须手输 `/run-page.html` 才看得到原型 → 因此「独立 URL 存在 + 测试全绿」不能算交付完成。
+- 修法（最小、不重构）：`build/branchDevEntry.ts` = dev-only 插件，`configureServer` 中间件把 `/` 重写为
+  `BRANCH_DEFAULT_DEV_ENTRY='/run-page.html'`；`apply:'serve'` → **构建期零影响**。
+  `resolveDevEntryRewrite` 只重写目录根，`/index.html` / `/portrait-lab.html` / 资源路径一律不重写
+  （旧横屏正式游戏仍是可直达的显式备用入口）。目标入口不存在时自动跳过（不会把根路径指向 404）。
+- `package.json`：`dev` → `vite --open`（自动打开根路径）；新增 `dev:legacy`（`--open=/index.html`）与
+  `e2e:default-entry`。旧 `dev:debug-lab` / `dev:run-page` 保留为显式备用。
+- 实测（`node tests/_e2e_prp_default_entry.cjs`，**只访问根路径 `/`，禁止直连 run-page.html 绕过启动链**）：
+  Vite 启动日志 `Local=http://127.0.0.1:5173/`；根路径 HTTP 响应体就是 PRP（含 PRP 标题 + `#run-root`，
+  不含 `/src/main.ts`）；浏览器 1920×1080@1 与 1280×720@1.5 两视口第一屏即 PRP（title / `#run-root` /
+  `#run-canvas`；`#app`、`#pbl-root`、`__PBL__` 全无；debugControls=0、domButtons=0；Arena 调试黄 **0px**；
+  四带比例 9.95/49.05/31.04/9.95；URL 恒为 `/`），并跑完 IDLE→EVENT→BATTLE→RESULT→CHOICE→IDLE；
+  另验 `/index.html` 仍是「最强水果 — Physics Lab」且 `#app` 存在。**59/59 PASS**。
+- 门禁：新单测 `tests/portraitDefaultEntry.test.ts` **10/10**（含「插件已真实注册」「dev-only」「R23/RP-27 复检」
+  「根目录只有三个 HTML 入口」）；Portrait targeted **134/134**；tsc 0；五路构建 EXIT 0；
+  `dist`/`dist-pages`/`dist-wechat`/`dist-e2e` **零** `run-page|run-root` 字样（正式产物未被原型污染）；
+  Run Page E2E 190/190；Lab E2E 148/148；bundle-clean wechat/e2e PASS；全量 **200 files/1882 passed**；
+  repo-health 9/9。**正式源码 0 修改**（index.html 与四个正式构建配置未动）。
+- ⚠️ 排查记录：dev 模式下 `window.__E2E_INTERNAL_HANDLE__` 存在且为 `false`（宏语义），
+  全仓无源码赋值、`dist-portrait-lab` 产物**完全不含**该字符串 → 不构成句柄泄漏，不要再当问题排查。
+
 ## 6. Next action
-- **停等用户回执**（PRP-R1 已提交，禁止自动开 PRP-F1）：
-  1. **唯一真人体验地址 = `http://localhost:5173/run-page.html`**（`npm run dev:run-page`）—— 请只给这一个，不再给 Lab/Debug URL；
+- **停等用户回执**（PRP-R2 已提交，禁止自动开 PRP-F1）：
+  1. **唯一启动命令 = `npm run dev`**（自动打开即 PRP 竖屏 Run Page）—— 只给这一条，不给任何 URL；
   2. 中部舞台车体偏小（显示缩放上限 0.6）是否放宽 → 属 PRP 显示取舍，需用户裁决；
   3. B1 三选项仍未裁决（B1-A 确认停止 / B1-B 放宽镜头边界 / B1-C Lab-only 缩小车）；
   4. 俯视 `WEAPON_CONTACT_THRESHOLD=0.5`（`contactRouter.ts:694`）是否单开 Queue。

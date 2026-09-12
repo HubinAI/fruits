@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { gitRuntimeInfo, runtimeInfoPlugin } from './build/runtimeInfoPlugin.ts';
+import { branchDefaultEntryPlugin } from './build/branchDevEntry.ts';
 
 /**
  * F-DEV-1：Runtime 版本可追溯（插件见 build/runtimeInfoPlugin.ts）。
@@ -28,6 +29,12 @@ export default defineConfig({
     __E2E_INTERNAL_HANDLE__: 'false',
   },
   plugins: [
+    // PRP-R2-DEFAULT-EXPERIENCE-ENTRY：实验分支的默认开发入口重写（dev-only）。
+    // `npm run dev` 的根路径 `/` 不再落到正式横屏入口，而是直接落到本轮原型页面，
+    // 使「按正常方式启动 → 第一屏就是原型」成立，无需用户手输任何 URL。
+    // 实现在 build/branchDevEntry.ts（apply: 'serve'，构建期零影响，正式产物不变）。
+    // 守卫不受影响：本文件不出现任何原型入口字面量（R23 / RP-27 仍为原强度）。
+    branchDefaultEntryPlugin(),
     runtimeInfoPlugin(),
     // F-DEMO-PLAYER-RUNTIME-P0：本地玩家演示模式（npm run dev:player / ?player=1）。
     // 与 vite.pages.config.ts 的 __PAGES_PREVIEW__ 同源机制——构建期注入标志，
