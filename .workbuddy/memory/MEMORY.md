@@ -12,7 +12,7 @@ daily log 与交接文档里（已按此纪律裁剪），本文件不再复制�
 - 原型正式名 **PRP｜Portrait Run Prototype**（PBL 旧名仅存 Debug Lab）
 - **PRP 链尾**：`6fbf275` F1 战场接入 → `c44239b` R5 正式相机 → `ca3fb43` F2 强化闭环
   → `1a3b080` F2-R1 → `896086b` F2-R2 → `39f6af9` BUILD-01 两层 Build → `8ac97a8` memory backfill
-  → `02becf7` RUN-R1 死亡即失败 + 单一耐久 → **`f6b7a3d` BUILD-01-R1 动能爆发可感知（本次交付）**
+  → `02becf7` RUN-R1 死亡即失败 + 单一耐久 → **`5c8b514` BUILD-01-R1 动能爆发可感知（本次交付）**
 - 全链对 `src/core|physics|render|player|platform` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，行为逐帧不变）。
   R5 的相机复用靠 PRP 侧 viewport adapter，不碰 `src/render`。
@@ -172,7 +172,14 @@ daily log 与交接文档里（已按此纪律裁剪），本文件不再复制�
   贴墙位置映射 390.30（越界 0.3 逻辑 px，亚像素）。这是**既有几何事实**，不是本 Queue 引入的越界。
 
 ## 6. Next action
-- **PRP-BUILD-01-R1 已交付并停等**（基线 `02becf7`，单功能 commit + push）。
+- ⚠️ **待裁决：一条既存红（非本 Queue 引入）** —— `npm run e2e:portrait-lab` **146/148**。
+  `tests/_e2e_portrait_battle_lab.cjs:338` 的冻结字面量 `auditCombos === 6` 与源码不符
+  （`gate.ts:387`「2 Loadout × **4** Encounter = **8**」；`LAB_ENCOUNTERS` 含 ProtoRusher）；
+  归属 `02becf7`（RUN-R1 加第 4 个遭遇时改了源码、漏改该 E2E 字面量），RUN-R1 门禁清单里没有
+  `e2e:portrait-lab` → 一直红到本轮才被发现。**BUILD-01-R1 按纪律未混并修复。**
+  需要则单开一条 Bug Queue（改 1 行字面量 + 1 处标签文案）。
+- **PRP-BUILD-01-R1 已交付并停等**（`5c8b514`，基线 `02becf7`，11 文件 / +1333 −97，单功能 commit + push，
+  四路 SHA 一致）。
   必改 1~4 全做完：真实物理量保留（`GAIN × projectileMass × relativeVelocity`，不写死伤害）、
   增益一次性明显放大（12→28）、极简命中冲击环（真实位置 / 短 / 只由真实 trigger）、同条件 A/B 证据。
   **按指令停止，不自动续下一 Queue。**
