@@ -79,6 +79,7 @@ import {
   runActionLabel,
   runCarriedPlayerHp,
   runChoiceOpen,
+  runVerificationComplete,
   syncRunBattle,
   visibleRunLog,
   type RunLogEntry,
@@ -295,6 +296,13 @@ export interface RunPageProbe {
   readonly dayTotal: number;
   /** PRP-F2：本局已生效的 Run 强化（本局临时状态，新开 Run 即回 null）。 */
   readonly modifier: string | null;
+  /**
+   * PRP-F2-R1：本局已打完的真实战斗场数（0/1/2）。
+   * `2` = 验证结束 → 主动作变成「重新开始验证」，且不可能再进 CHOICE。
+   */
+  readonly battlesCompleted: number;
+  /** PRP-F2-R1：本次验证是否已结束（= `battlesCompleted >= 2`）。 */
+  readonly verificationComplete: boolean;
   readonly buffs: readonly string[];
   readonly buffLabels: readonly string[];
   /** 顶部实际绘制的强化图标数量（0 = 顶部第二行完全没有内容，可反证「没有空槽」）。 */
@@ -1078,6 +1086,9 @@ export class RunPage {
       dayTotal: s.dayTotal,
       /** PRP-F2：本局已生效的 Run 强化（本局临时，刷新即回 null）。 */
       modifier: s.modifier,
+      /** PRP-F2-R1：单变量验证进度（0/1/2 场已打完）。 */
+      battlesCompleted: s.battlesCompleted,
+      verificationComplete: runVerificationComplete(s),
       buffs: s.buffs.map((b) => b.id),
       buffLabels: s.buffs.map((b) => b.label),
       buffIconCount: runBuffIconRects(s.buffs.length).length,

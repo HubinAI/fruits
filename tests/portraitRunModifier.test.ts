@@ -27,14 +27,40 @@ const CANNON_OFFICIAL_PARAMS = { ...(CANNON_OFFICIAL.behaviorParams ?? {}) };
 
 const MODIFIER_IDS: readonly RunModifierId[] = ['heavyShell', 'twinCannon', 'fastReload'];
 
-/** 战场里「玩家那门炮」的运行时 def（真实 resolved，不是 PRP 侧自算）。 */
+/**
+ * 战场里「玩家那门炮」的运行时 def（真实 resolved，不是 PRP 侧自算）。
+ *
+ * ⚠️ PRP-F2-R1：三种强化**都是**正式 `cannon`（双联炮不再借用 `shotgun`），
+ * 因此只按 `behavior === 'cannon'` 查找 —— 若哪天又出现 shotgun，这条查找会漏掉，
+ * 从而让「不该有 shotgun」这件事在测试里变响。
+ */
 function weaponPartDef(rt: RunBattleRuntime): FunctionalPartDef {
   const parts = rt.orchestrator.vehicleA.parts;
-  const found = parts.find(
-    (p) => p.def.behavior === 'cannon' || p.def.behavior === 'shotgun',
-  );
+  const found = parts.find((p) => p.def.behavior === 'cannon');
   if (!found) throw new Error('找不到玩家武器部件');
   return found.def;
+}
+
+/**
+ * 每次「新弹丸出现」所在的固定步号（1-based）。
+ *
+ * 口径 = 每步推进后比较 `projectileCount()` 的**增量**：增量 k → 该步新增 k 发。
+ * 这是「真实弹丸何时被创建」的直接证据（不是读 PRP 自算数字，也不是读配置）。
+ *
+ * ⚠️ 仅当新弹丸出现时旧弹丸**尚未销毁**时才能被计数；本场演示的两个口径都满足
+ * （基础炮飞行 ~100+ 步才命中，双联炮第二发只隔 6 步）。
+ */
+function projectileBirthSteps(rt: RunBattleRuntime, frames: number): number[] {
+  const births: number[] = [];
+  let prev = rt.projectileCount();
+  for (let i = 1; i <= frames; i++) {
+    rt.step(1000 / 60);
+    const now = rt.projectileCount();
+    for (let k = prev; k < now; k++) births.push(i);
+    prev = now;
+    if (rt.result) break;
+  }
+  return births;
 }
 
 /** 推进固定帧数，收集开火事件 / 弹丸半径峰值 / 存活累积。 */
@@ -90,6 +116,21 @@ describe('RP-MOD-01｜强化只活在本局 overlay registry（正式定义零�
     }
   });
 
+  it('PRP-F2-R1：正式 content 的 cannon 定义不含 burst 字段（默认单发，平衡零变化）', () => {
+    // 正式 content.ts 不写这两个可选参数 → CannonBehavior 走默认值（burstRounds=1 / burstIntervalMs=0）
+    expect(CANNON_OFFICIAL_PARAMS.burstRounds).toBeUndefined();
+    expect(CANNON_OFFICIAL_PARAMS.burstIntervalMs).toBeUndefined();
+    // 正式 6 个基准参数逐字段冻结（本 Queue 未动任何一项）
+    expect(CANNON_OFFICIAL_PARAMS).toEqual({
+      cooldownMs: 1000,
+      muzzleSpeed: 8,
+      projectileDamage: 80,
+      projectileRadius: 10,
+      projectileMass: 1,
+      recoilImpulse: 30,
+    });
+  });
+
   it('未选强化 → 本局 registry 与正式副本等价，且不注册任何 overlay 部件', () => {
     const runReg = createRunRegistry(null);
     expect(runReg.functionals.get(RUN_BASE_WEAPON_DEF_ID)).toEqual(CANNON_OFFICIAL);
@@ -118,9 +159,15 @@ describe('RP-MOD-01｜强化只活在本局 overlay registry（正式定义零�
       projectileMass: 4,
       recoilImpulse: 90,
     });
-    expect(RUN_MODIFIER_OVERLAY.twinCannon.behavior).toBe('shotgun');
-    // 双联炮**只**声明弹数：#其余 6 个数值全部沿用正式 Cannon（每发都是完整炮弹）
-    expect(RUN_MODIFIER_OVERLAY.twinCannon.behaviorParams).toEqual({ fanAnglesDeg: [-4, 4] });
+    // PRP-F2-R1：双联炮 = 正式 cannon + **真实连发**（不再借用 shotgun 的同步齐射）。
+    expect(RUN_MODIFIER_OVERLAY.twinCannon.behavior).toBe('cannon');
+    // 只声明「一次攻击几发 + 发间隔」；其余 6 个数值全部沿用正式 Cannon（每发都是完整炮弹）
+    expect(RUN_MODIFIER_OVERLAY.twinCannon.behaviorParams).toEqual({
+      burstRounds: 2,
+      burstIntervalMs: 100,
+    });
+    // Queue 必改 4：不靠大散射把两发分开 → twinCannon 不得声明扇形参数
+    expect(RUN_MODIFIER_OVERLAY.twinCannon.behaviorParams.fanAnglesDeg).toBeUndefined();
     expect(RUN_MODIFIER_OVERLAY.fastReload.behavior).toBe('cannon');
     expect(RUN_MODIFIER_OVERLAY.fastReload.behaviorParams).toEqual({ cooldownMs: 400 });
     // 三项都**不碰**弹道速度（强化不改变弹道）
@@ -214,40 +261,76 @@ describe('RP-MOD-02｜三种强化在真实 Runtime 里的差异（必改 5）',
     expect(heavyVx).toBeLessThan(baseVx); // 强化后反速度更负 = 后坐更明显
   });
 
-  it('双联炮：同一次开火产生两发真实弹丸（真实 projectile，不是视觉假弹）', () => {
+  it('双联炮：一次攻击极短间隔连出两发真实弹丸（真实 projectile + 真实时间差 + 同向）', () => {
     const baseRt = new RunBattleRuntime();
     const twinRt = new RunBattleRuntime({ modifier: 'twinCannon' });
 
+    // 仍是正式 cannon（不再借用 shotgun）—— 差别只在两个**可选** burst 参数
     expect(weaponPartDef(baseRt).behavior).toBe('cannon');
-    expect(weaponPartDef(twinRt).behavior).toBe('shotgun');
-
-    // 到第一次开火为止：基础 1 发 / 双联炮 2 发
-    const firstAlive = (rt: RunBattleRuntime): number => {
-      for (let i = 0; i < 20; i++) {
-        rt.step(1000 / 60);
-        const n = rt.projectileCount();
-        if (n > 0) return n;
-      }
-      return 0;
-    };
-    expect(firstAlive(baseRt)).toBe(1);
-    expect(firstAlive(twinRt)).toBe(2);
-
-    // 同一窗口内（300 帧，两场都还没打完）：**开火次数相同**（节奏没变），弹丸投放量约两倍
-    const base = run(baseRt, 300);
-    const twin = run(twinRt, 300);
-    expect(base.fires.every((f) => f.behavior === 'cannon')).toBe(true);
-    expect(twin.fires.every((f) => f.behavior === 'shotgun')).toBe(true);
-    expect(twin.fires.length).toBe(base.fires.length); // 同节奏 → 变量隔离在「弹数」
-    expect(base.fires.length).toBeGreaterThan(2);
-    expect(twin.maxAlive).toBe(2); // 同一时刻确实有两发在空中
-    expect(base.maxAlive).toBe(1);
-    // 真实弹丸投放量更多（严格大于；不是 2.0× —— 扇形把两发分开后，
-    // 单发寿命比基础炮的单发短，所以「存活帧累积」比值小于弹数比）。
-    expect(twin.aliveSum).toBeGreaterThan(base.aliveSum);
-
+    expect(weaponPartDef(twinRt).behavior).toBe('cannon');
+    const bp = (d: FunctionalPartDef) => d.behaviorParams as Record<string, unknown>;
+    expect(bp(weaponPartDef(baseRt)).burstRounds).toBeUndefined(); // 正式定义不写 → 默认 1
+    expect(bp(weaponPartDef(twinRt)).burstRounds).toBe(2);
+    expect(bp(weaponPartDef(twinRt)).burstIntervalMs).toBe(100);
+    // 每发都是**完整炮弹**：伤害 / 质量 / 半径 / 弹速沿用正式值（不是减伤的小弹）
+    expect(bp(weaponPartDef(twinRt)).projectileDamage).toBe(80);
+    expect(bp(weaponPartDef(twinRt)).projectileMass).toBe(1);
+    expect(bp(weaponPartDef(twinRt)).projectileRadius).toBe(10);
+    expect(bp(weaponPartDef(twinRt)).muzzleSpeed).toBe(8);
+    expect(bp(weaponPartDef(twinRt)).fanAnglesDeg).toBeUndefined(); // 不靠扇形分开
     baseRt.dispose();
     twinRt.dispose();
+
+    // ① 真实时间差：第 1 发 → 第 2 发之间的**固定步数**（新弹丸出现的步号差）
+    const baseSrc = new RunBattleRuntime();
+    const twinSrc = new RunBattleRuntime({ modifier: 'twinCannon' });
+    const baseBirths = projectileBirthSteps(baseSrc, 300);
+    const twinBirths = projectileBirthSteps(twinSrc, 300);
+    expect(baseBirths.length).toBeGreaterThan(1);
+    expect(twinBirths.length).toBeGreaterThan(1);
+    // 正式 cannon：一次攻击一发，下一下要等冷却 1000ms ≈ 60 步
+    expect(baseBirths[1] - baseBirths[0]).toBe(60);
+    // 双联炮：第二发只隔 100ms ≈ 6 步 —— 「极短但真实可辨」的连发间隔
+    expect(twinBirths[1] - twinBirths[0]).toBe(6);
+    baseSrc.dispose();
+    twinSrc.dispose();
+
+    // ② 同向：**发射瞬间**两发都出自同一个炮口（认知是「同一个炮口连打两发」）。
+    //
+    // ⚠️ 为什么不是比较「同一时刻两发的 y」：第二发比第一发晚 6 步出发，
+    //    在重力下第一发已经下坠了 ~7px —— 那个差值是**真实弹道的产物**，不是方向差异。
+    //    正确的「同向」证据 = 两发各自**出生那一步**的炮口位置几乎重合。
+    const dirSrc = new RunBattleRuntime({ modifier: 'twinCannon' });
+    const spawnY: number[] = [];
+    let prevAlive = dirSrc.projectileCount();
+    for (let i = 1; i <= 20 && spawnY.length < 2; i++) {
+      dirSrc.step(1000 / 60);
+      const ps = dirSrc.snapshot().projectiles ?? [];
+      if (ps.length > prevAlive) {
+        // 新弹丸挂在集合末尾（插入序）→ 取最后一发 = 刚出生的那发
+        spawnY.push(ps[ps.length - 1].center.y);
+      }
+      prevAlive = ps.length;
+    }
+    expect(spawnY.length).toBe(2);
+    // 阈值 3px：若改用 ±4° 扇形把两发强行分开，第二发的出生 y 会偏 ~56px（差一个数量级）
+    expect(Math.abs(spawnY[0] - spawnY[1])).toBeLessThan(3);
+    dirSrc.dispose();
+
+    // ③ 事件与弹丸投放量：同窗口内每发都触发真实 weaponFire，投放量明确多于基础炮
+    const baseEv = new RunBattleRuntime();
+    const twinEv = new RunBattleRuntime({ modifier: 'twinCannon' });
+    const base = run(baseEv, 300);
+    const twin = run(twinEv, 300);
+    expect(base.fires.every((f) => f.behavior === 'cannon')).toBe(true);
+    expect(twin.fires.every((f) => f.behavior === 'cannon')).toBe(true);
+    expect(base.fires.length).toBeGreaterThan(2);
+    expect(twin.fires.length).toBeGreaterThan(base.fires.length); // 每次攻击多一发真实开火
+    expect(twin.maxAlive).toBeGreaterThanOrEqual(2); // 同一时刻确实有两发在空中
+    expect(base.maxAlive).toBe(1);
+    expect(twin.aliveSum).toBeGreaterThan(base.aliveSum);
+    baseEv.dispose();
+    twinEv.dispose();
   });
 
   it('快速装填：同窗口开火次数明显更多（真实节奏差异）', () => {
@@ -329,7 +412,8 @@ describe('RP-MOD-03｜跨战斗耐久与 clean recreate（必改 4 / 技术正�
 
   it('不带强化重开 → 完全回到基础武器（强化不跨 Run 残留）', () => {
     const withMod = new RunBattleRuntime({ modifier: 'twinCannon' });
-    expect(weaponPartDef(withMod).behavior).toBe('shotgun');
+    expect(weaponPartDef(withMod).behavior).toBe('cannon');
+    expect((weaponPartDef(withMod).behaviorParams as Record<string, unknown>).burstRounds).toBe(2);
     withMod.dispose();
 
     const reset = new RunBattleRuntime();

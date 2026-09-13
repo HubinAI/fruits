@@ -145,12 +145,11 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
   `cannonBehavior.ts:68` `readCannonParams(part)` 只读 `part.def.behaviorParams`（不读单例/全局）。
 - **关键缺口**：`FunctionalInstall` **只有 `star`、没有 `overrides`**（Movement 有）。
   将来若要「运行期改 Weapon 任意字段」的最小 Foundation 补正 = 补 `overrides?: Partial<FunctionalPartDef>`。
-- 三项 overlay：重型弹头 `radius 10→16 / mass 1→4 / recoil 30→90`（**damage 刻意不动**）/
-  双联炮（复用官方 `shotgun` + `fanAnglesDeg [-4,4]`，一次开火 **2 发真实弹丸**）/ 快速装填 `cooldownMs 1000→400`。
-- ⚠️ **B 的诚实披露**：正式 `CannonBehavior`（`cannonBehavior.ts:159`）**无 burst 参数**，
-  `getBehaviorFactory`（`behaviorRegistry.ts:41`）是**静态表不可注入** → 给正式 Cannon 加 burst 属**停止条件方向**
-  → 复用官方 shotgun。代价：齐射弹丸渲染标记被正式 runtime 固定为 `'tracer'`（`behaviorRuntime.ts:346`），
-  且语义是「**同时双发**」而非「先后两发」（后者需授权给正式 Cannon 加可选 burst 参数）。
+- 三项 overlay（**第一版**）：重型弹头 `radius 10→16 / mass 1→4 / recoil 30→90`（**damage 刻意不动**）/
+  双联炮（**第一版**复用官方 `shotgun` + `fanAnglesDeg [-4,4]` → 真人判**不通过**）/ 快速装填 `cooldownMs 1000→400`。
+- ⚠️ 第一版 B 的教训：当时正式 `CannonBehavior` **无 burst 参数**、`getBehaviorFactory`（`behaviorRegistry.ts:41`）
+  是**静态表不可注入** → 只能借 shotgun 同步齐射 → 两发轨迹重叠、无法感知「连续两发」。
+  **PRP-F2-R1 已授权补上真实 burst（见 §5.7）**，此段仅作历史。
 - ⚠️ **胜负余量极窄**：演示遭遇基础只多剩 `228.09~269.78 / 1100` → **提 DPS 就碾压、降 DPS 就必败**。
   因此本遭遇只适合做「方向可见」验证，**不适合数值微调对比**（`projectileDamage: 40` 的双联炮实测必败）。
 - **跨战斗耐久**：`PlanckVehicle.hp` 可写、`maxHp` 独立（`planckVehicleAssembly.ts:76-77`）→ **只写 `hp`**；
@@ -162,11 +161,33 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
   双联炮图标 = 两根并排炮管 → 46×46 盒的几何中心落在**两管空隙**里 → **中心单点采样必然假红**。
 - ⚠️ **同一文件的多条 Edit 不要并行发出**（后落盘覆盖前者 → 静默丢改动，改完 grep 仍是旧值）；必须串行。
 
+### 5.7 PRP-F2-R1 单变量收紧 + Cannon 真实 Burst（已交付，门禁全绿）
+- **流程收紧为严格单变量**（`runPageState.ts`）：新增 `battlesCompleted`(0/1/2) + `RUN_MAX_BATTLES=2`；
+  `pressRunAction` 的 RESULT **分岔** —— 第一场 → CHOICE（**唯一一次**改装机会）/
+  第二场 → **`createRunPageState(ctx)`** = 全新 Run。`runActionLabel` 终局 = `RUN_RESTART_LABEL='重新开始验证'`；
+  `chooseRunBuff` 守卫 `modifier!==null || buffs.length>0 → no-op`。
+  → `DAY 8/7` / 多 Buff 累计 / 重复叠加强化 **结构上不可能**（不靠运行期检查）。
+  终局 RESULT 第三行叙事改为「本次改装的验证到此结束。」；重置清 runtime 复用既有
+  `apply()` 的 `next.phase==='IDLE' && this.battle → endBattle()`。
+- **Cannon 最小 burst**（`src/battle/cannonBehavior.ts`）—— ⚠️ **本分支首个正式 gameplay 改动，由 Queue 显式授权**：
+  新增**可选** `burstRounds`（默认 1）/ `burstIntervalMs`（默认 0）；6 个基准参数仍「缺失即抛错」，
+  这两个走 `optNum`（缺失/非法 → 默认）→ **正式 `content.ts` 零字段新增**，默认行为**逐帧不变**。
+  `stepFixed` = 连发间隔 → 主冷却 → `emitRound()`（**冷却只在最后一发之后计时**）。
+  实测步差（新弹丸出现的固定步号差）：正式 cannon **60 步**（=1000ms）/ 双联炮 **6 步**（=100ms）。
+  双联炮 overlay：`cannon + { burstRounds: 2, burstIntervalMs: 100 }`；弹道同向（两发出生 y 差 **<3px**）、
+  渲染回正式 cannon 弹丸（不再借 shotgun 的 `'tracer'`）。
+- ✅ 默认行为零变化回归：`contentCannon / cannonScenarios / cannonBehavior / contactRouterProjectile / battleIntegration` = **27/27**。
+- E2E 新增 R50–R54：终局 `battlesCompleted=2` / `day=4/7`（无 8/7）/ `actionLabel='重新开始验证'` /
+  新 Run 四项清零 / `phaseTrail=['IDLE']`。单测新增 RP-F2-08/09/10。
+- ⚠️ 重型弹头与快速装填数值**本轮一个未改**（冻结 / 等真人复验）。
+
 ## 6. Next action
-- **PRP-F2 已交付并停等**（单功能 commit + push，三路 SHA 见 §5.6）。
-- **待用户裁决（真人录屏 · 本 Queue 的核心假设）**：三种强化各来一次 →
-  判据只有一条：**不看顶部 Buff 文字，能不能仅从第二场战斗看出自己刚才选了什么**
-  （重型弹头 = 单发更重/命中位移更大/自身后坐更明显；双联炮 = 一次攻击两发；快速装填 = 开炮更密）。
+- **PRP-F2-R1 已交付并停等**（单功能 commit + push，三路 SHA 见 §5.7）。
+- **待用户裁决（真人录屏 · 本 Queue 的核心假设）**：**分别开三个全新 Run**
+  （A 重型弹头 / B 双联炮 / C 快速装填），每次**只录「选择后的第二场战斗」**；
+  判据只有一条：**不看顶部 Buff 文字，能不能看出自己刚才选了什么**
+  （重型弹头 = 一炮更重；双联炮 = 每次开火连续两发；快速装填 = 开炮明显更频繁）。
+  ⚠️ 上一轮真人否决的两点已修：流程不再多 Day 叠加（§5.7 单变量收紧）、双联炮不再同时齐射（真实 100ms 连发）。
 - **PRP-R5 遗留裁决**（若真人仍嫌车小）：adapter 口径开局 69·84px / 峰值 172·190px 是否可感知。
   候选（均需重新授权）：调大 `RUN_BATTLE_VIEW_INSET`（视口更宽 → scale 更大，代价是裁切）或分段取景。
   **禁止**在无授权时新增 PRP 专属动态 zoom / 镜头震动 / Kill zoom —— **恢复旧模式，不发明新模式**。

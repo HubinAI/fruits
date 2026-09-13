@@ -1000,15 +1000,16 @@ async function runViewport(browser, vp) {
       return acc;
     });
     /*
-      双联炮 = 官方 shotgun 的「一次开火固定 fanAnglesDeg.length 发」→ 每轮齐射都有**两发同时在空中**
-      （不是先后补充）。因此窗口内「同时在飞的弹丸 ≥ 2」是可证的真实 Runtime 差异；
-      同时敌方耐久必须真的被这两发打下去（证明第二发不是视觉假弹）。
+      PRP-F2-R1：双联炮 = 正式 Cannon 的**真实连发**（burstRounds=2 / burstIntervalMs=100ms）。
+      一次攻击在第 1 步与第 7 步各出一发真实 projectile（单测里以「新弹丸出现的步差 = 6」精确固化）。
+      100ms 之后两发**同时在空中** → 窗口内「在飞弹丸 ≥ 2」是可证的真实 Runtime 差异；
+      敌方耐久必须真的被这两发打下去（证明第二发不是视觉假弹）。
       对比参照：第一场（基础 Cannon）同长度窗口的 maxProjectiles 一并打印，不作硬断言
       —— 基础单发在远距离飞行时也可能有 2 发重叠（不具排他性），硬断言会变成脆弱判据。
     */
     log(
       twinWin.maxProjectiles >= 2 && twinWin.projSamples > 0,
-      `[${tag}] R49 必改 2/5：双联炮每轮齐射两发同时在飞（真实 projectile，非视觉假弹）`,
+      `[${tag}] R49 必改 2/5：双联炮一次攻击连出两发（先后 100ms · 窗口内两发同时在飞 · 真实 projectile）`,
       `窗口内最多 ${twinWin.maxProjectiles} 发在飞 · ${twinWin.projSamples}/${twinWin.samples} 次采样见弹 · 第一场同窗口最多 ${win.maxProjectiles} 发`,
     );
     log(
@@ -1017,6 +1018,72 @@ async function runViewport(browser, vp) {
       `窗口内最低 敌方 ${round2(twinWin.minEnemyHp)}/${round2(twinWin.enemyHpMax)}`,
     );
   }
+
+  /*
+    -------------------- 11) PRP-F2-R1：第二场结束 = 验证结束（单变量实验的终点）
+    收紧后**不允许**继续 DAY 5/6/7，也不允许叠第二个强化 ——
+    第二场打完那一刻，主动作必须变成「重新开始验证」。
+  */
+  await page.waitForFunction(
+    () => {
+      const pr = window.__RUNPAGE__.probe();
+      return pr.phase === 'RESULT' && pr.battlesCompleted === 2;
+    },
+    null,
+    { timeout: 90000 },
+  );
+  const pEnd = await probeOf(page);
+  log(
+    pEnd.phase === 'RESULT' && pEnd.battlesCompleted === 2 && pEnd.verificationComplete === true,
+    `[${tag}] R50 第二场自动结束 → 终局 RESULT（battlesCompleted=2，不再进入 CHOICE）`,
+    `phase=${pEnd.phase} battlesCompleted=${pEnd.battlesCompleted}`,
+  );
+  log(
+    pEnd.day === 4 &&
+      pEnd.day <= pEnd.dayTotal &&
+      pEnd.buffs.length === 1 &&
+      pEnd.modifier === 'twinCannon' &&
+      pEnd.actionLabel === '重新开始验证',
+    `[${tag}] R51 不继续 Day / 不叠第二个强化：DAY 仍是 4（无 8/7）、只有 1 个强化、主动作=重新开始验证`,
+    `day=${pEnd.day}/${pEnd.dayTotal} buffs=${pEnd.buffLabels.join('/')} action="${pEnd.actionLabel}"`,
+  );
+  // 终局 RESULT 的第三行叙事必须是「验证结束」，不能再引导下一次改装
+  log(
+    pEnd.log[pEnd.log.length - 1].text === '本次改装的验证到此结束。',
+    `[${tag}] R51b 终局叙事不再引导下一次改装`,
+    `tail=${pEnd.log[pEnd.log.length - 1].text}`,
+  );
+
+  /*
+    -------------------- 12) 重新开始验证 = 干净新 Run（可对另一个强化做同条件独立验证）
+  */
+  await clickRect(page, pEnd.actionRect);
+  await page.waitForTimeout(250);
+  const pRestart = await probeOf(page);
+  log(
+    pRestart.phase === 'IDLE' &&
+      pRestart.day === 3 &&
+      pRestart.buffs.length === 0 &&
+      pRestart.modifier === null &&
+      pRestart.battlesCompleted === 0 &&
+      pRestart.verificationComplete === false &&
+      pRestart.actionLabel === '继续',
+    `[${tag}] R52 重新开始验证 = 干净新 Run（DAY 3 / Buff 清零 / Modifier 归 null / 主动作=继续）`,
+    `phase=${pRestart.phase} day=${pRestart.day} buffs=${pRestart.buffs.length} modifier=${pRestart.modifier} battles=${pRestart.battlesCompleted}`,
+  );
+  log(
+    JSON.stringify(pRestart.phaseTrail) === JSON.stringify(['IDLE']),
+    `[${tag}] R53 新 Run 是独立状态机（phaseTrail 从 IDLE 重新开始，不是老页面的延续）`,
+    pRestart.phaseTrail.join('→'),
+  );
+  // 新 Run 里第一场仍是**基础**战斗（点击继续 → EVENT，不再有任何历史强化）
+  await clickRect(page, pRestart.actionRect);
+  const pFreshEvent = await probeOf(page);
+  log(
+    pFreshEvent.phase === 'EVENT' && pFreshEvent.buffs.length === 0 && pFreshEvent.modifier === null,
+    `[${tag}] R54 新 Run 从头开始（第一场准备中 · 无任何强化残留）`,
+    `phase=${pFreshEvent.phase} buffs=${pFreshEvent.buffs.length}`,
+  );
 
   await ctx.close();
 }

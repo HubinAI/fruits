@@ -65,7 +65,9 @@ import {
 import {
   RUN_CHOICE_OPTIONS,
   RUN_INITIAL_DAY,
+  RUN_MAX_BATTLES,
   RUN_PHASES,
+  RUN_RESTART_LABEL,
   RUN_TOTAL_DAYS,
   chooseRunBuff,
   createRunPageState,
@@ -77,6 +79,7 @@ import {
   runActionLabel,
   runCarriedPlayerHp,
   runChoiceOpen,
+  runVerificationComplete,
   syncRunBattle,
   visibleRunLog,
   type RunPageContext,
@@ -1070,7 +1073,10 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
 describe('PRP-F2｜G 首个真实强化闭环：DAY 3 基础战斗 → 三选一 → DAY 4 强化战斗', () => {
   /**
    * 走完**两场**真实战斗（全程同一个页面 / 同一个状态机）：
-   *   DAY 3 → 战斗①（基础）→ RESULT → CHOICE → 选择 → DAY 4 → 战斗②（强化注入）
+   *   DAY 3 → 战斗①（基础）→ RESULT → CHOICE → 选择 → DAY 4 → 战斗②（强化注入）→ RESULT(终局)
+   *
+   * ⚠️ PRP-F2-R1：循环到第二次 RESULT **就停**（这正是新流程的终点）；
+   * 之后的「重新开始验证」不在这里做，由 RP-F2-08/09 单独断言。
    */
   function runTwoBattleLoop(modId: string) {
     const rt1 = new RunBattleRuntime();
@@ -1103,7 +1109,16 @@ describe('PRP-F2｜G 首个真实强化闭环：DAY 3 基础战斗 → 三选一
     s = driveToEnd(s, rt2); // 第二场也真实打到结束（同一页面里的第二次 RESULT）
     trail.push(s);
     const secondRuntime = rt2;
-    return { trail, firstEnd, firstRemaining, afterChoice, secondStartHp, secondRuntime };
+    return {
+      trail,
+      firstEnd,
+      firstRemaining,
+      afterChoice,
+      secondStartHp,
+      secondRuntime,
+      /** 第二场打完的那一刻（终局 RESULT）：用于证明「验证到此结束、不再进入 CHOICE」。 */
+      finale: s,
+    };
   }
 
   it('RP-F2-01 完整闭环走完，全程同一页面（phaseTrail 无跳转）', () => {
@@ -1153,10 +1168,15 @@ describe('PRP-F2｜G 首个真实强化闭环：DAY 3 基础战斗 → 三选一
       const { secondRuntime } = runTwoBattleLoop(id);
       expect(secondRuntime.modifier).toBe(id);
       const params = secondRuntime.orchestrator.vehicleA.parts.find(
-        (p) => p.def.behavior === 'cannon' || p.def.behavior === 'shotgun',
+        (p) => p.def.behavior === 'cannon',
       )!.def.behaviorParams as Record<string, unknown>;
       if (id === 'heavyShell') expect(params.projectileMass).toBe(4);
-      if (id === 'twinCannon') expect(params.fanAnglesDeg).toEqual([-4, 4]);
+      // PRP-F2-R1：双联炮 = 正式 cannon + 真实连发（同向、100ms 间隔；不再借用 shotgun）
+      if (id === 'twinCannon') {
+        expect(params.burstRounds).toBe(2);
+        expect(params.burstIntervalMs).toBe(100);
+        expect(params.fanAnglesDeg).toBeUndefined();
+      }
       if (id === 'fastReload') expect(params.cooldownMs).toBe(400);
       secondRuntime.dispose();
     }
@@ -1169,6 +1189,9 @@ describe('PRP-F2｜G 首个真实强化闭环：DAY 3 基础战斗 → 三选一
     expect(fresh.modifier).toBeNull();
     expect(fresh.buffs).toEqual([]);
     expect(fresh.day).toBe(RUN_INITIAL_DAY);
+    // PRP-F2-R1：新 Run 的验证进度也归零（可对另一个强化做同条件独立验证）
+    expect(fresh.battlesCompleted).toBe(0);
+    expect(runVerificationComplete(fresh)).toBe(false);
     // 新局用基础运行时 → 武器回到正式定义
     const rt = new RunBattleRuntime();
     expect(rt.modifier).toBeNull();
@@ -1198,5 +1221,84 @@ describe('PRP-F2｜G 首个真实强化闭环：DAY 3 基础战斗 → 三选一
     expect(src.includes('chooseRunBuff(this.state, RUN_CHOICE_OPTIONS[i].id)')).toBe(true);
     expect(src.includes('location.href')).toBe(false);
     expect(src.includes('window.open')).toBe(false);
+  });
+
+  /* ---------------------------------------------------------------------
+   * PRP-F2-R1｜单变量收紧（本 Queue 必改 1）
+   * ------------------------------------------------------------------- */
+
+  it('RP-F2-08 第二场结束后验证即停止：不再进 CHOICE、不再加 Day、主动作=重新开始验证', () => {
+    const { finale, afterChoice } = runTwoBattleLoop('heavyShell');
+
+    // 终局 RESULT：两场都打完，day 仍停在 DAY 4（**没有** DAY 5/6/7，更不可能是 8/7）
+    expect(finale.phase).toBe('RESULT');
+    expect(finale.battlesCompleted).toBe(RUN_MAX_BATTLES);
+    expect(runVerificationComplete(finale)).toBe(true);
+    expect(finale.day).toBe(afterChoice.day);
+    expect(finale.day).toBe(RUN_INITIAL_DAY + 1);
+    expect(finale.day).toBeLessThanOrEqual(finale.dayTotal);
+    // 强化仍然只有**一个**（结构上无法叠第二个）
+    expect(finale.buffs.length).toBe(1);
+    expect(finale.modifier).toBe('heavyShell');
+    // 主动作不再是「继续」→ 只有「重新开始验证」
+    expect(runActionLabel(finale)).toBe(RUN_RESTART_LABEL);
+    expect(runActionEnabled(finale)).toBe(true); // 唯一主动作可点
+    // 终局 RESULT 的第三行叙事改为「验证结束」，不再引导下一次改装
+    expect(finale.log.some((e) => e.text === '本次改装的验证到此结束。')).toBe(true);
+    expect(finale.log.some((e) => e.text === '你发现了一次改装机会……')).toBe(true); // 第一场那次仍在
+  });
+
+  it('RP-F2-09 重新开始验证 = 全新 Run（DAY 3 / 强化清零 / 耐久回初始 / 战斗运行时清空）', () => {
+    const { finale } = runTwoBattleLoop('twinCannon');
+    const restart = pressRunAction(finale, CTX);
+
+    expect(restart).not.toBe(finale); // 不是原地改状态，而是**新局**
+    expect(restart.phase).toBe('IDLE');
+    expect(restart.day).toBe(RUN_INITIAL_DAY);
+    expect(restart.dayTotal).toBe(RUN_TOTAL_DAYS);
+    expect(restart.buffs).toEqual([]);
+    expect(restart.modifier).toBeNull();
+    expect(restart.battlesCompleted).toBe(0);
+    expect(restart.battle).toBeNull(); // 上一场战斗状态清空 → HP 回初始
+    expect(runCarriedPlayerHp(restart)).toBeNull(); // 新局第一场从满耐久开始
+    expect(restart.log.length).toBe(2); // 仅「DAY 3」+ 开场叙事
+    expect(restart.log.map((e) => e.text)).toContain(`DAY ${RUN_INITIAL_DAY}`);
+    expect(restart.phaseTrail).toEqual(['IDLE']);
+    // 新局主动作回到「继续」；验证进度归零
+    expect(runActionLabel(restart)).toBe('继续');
+    expect(runVerificationComplete(restart)).toBe(false);
+
+    // 新局的第二场战斗可以换成**另一个**强化做同条件独立验证
+    let s = pressRunAction(restart, CTX); // EVENT
+    s = pressRunAction(s, CTX); // BATTLE
+    s = finishRunBattle(s, { winner: 'A', endReason: 'hp', playerHp: 600, enemyHp: 0, steps: 400 });
+    s = pressRunAction(s, CTX); // CHOICE（新局的第一场照样有改装机会）
+    expect(s.phase).toBe('CHOICE');
+    const other = chooseRunBuff(s, 'fastReload');
+    expect(other.modifier).toBe('fastReload');
+    expect(other.buffs.length).toBe(1);
+    expect(other.day).toBe(RUN_INITIAL_DAY + 1);
+  });
+
+  it('RP-F2-10 一局只允许一次强化（重复选 / 叠第二个都被拒绝）', () => {
+    let s = createRunPageState(CTX);
+    s = pressRunAction(s, CTX); // EVENT
+    s = pressRunAction(s, CTX); // BATTLE
+    s = finishRunBattle(s, { winner: 'A', endReason: 'hp', playerHp: 500, enemyHp: 0, steps: 400 });
+    s = pressRunAction(s, CTX); // CHOICE
+    expect(s.phase).toBe('CHOICE');
+
+    const chosen = chooseRunBuff(s, 'heavyShell');
+    expect(chosen.modifier).toBe('heavyShell');
+    expect(chosen.buffs.length).toBe(1);
+
+    // 非 CHOICE 状态下再选 → no-op（同引用）
+    expect(chooseRunBuff(chosen, 'twinCannon')).toBe(chosen);
+
+    // 即使把状态强行改回 CHOICE，也会被「本局已有强化」守卫拒绝（防重复叠 / 多 Buff 累计）
+    const forced = { ...chosen, phase: 'CHOICE' as const };
+    expect(chooseRunBuff(forced, 'twinCannon')).toBe(forced);
+    expect(forced.buffs.length).toBe(1);
+    expect(forced.modifier).toBe('heavyShell');
   });
 });

@@ -36,18 +36,21 @@
  *   | 选项 | 自然因果 | overlay 改了什么 | 用哪套正式 Behavior |
  *   |---|---|---|---|
  *   | A 重型弹头 | 炮弹更重 → 推得更狠、自己也退得更狠 | `projectileRadius 10→16` / `projectileMass 1→4` / `recoilImpulse 30→90` | 正式 `cannon` |
- *   | B 双联炮 | 一次开火连续打出两发 | `behavior cannon→shotgun` + `fanAnglesDeg [-4,+4]`（2 发真实弹丸） | 正式 `shotgun`（**官方既有「一次攻击多发」能力**） |
+ *   | B 双联炮 | 一次攻击极短间隔连续两发 | `burstRounds 1→2` + `burstIntervalMs 0→100` | 正式 `cannon`（PRP-F2-R1 新增的**可选 burst 参数**） |
  *   | C 快速装填 | 开炮节奏明显变快 | `cooldownMs 1000→400` | 正式 `cannon` |
  *
- * ⚠️ **B 的诚实披露**：正式 `CannonBehavior`（`src/battle/cannonBehavior.ts:159` `stepFixed`）
- *   **没有** burst/多连发参数，只有「冷却→单发→重置冷却」；而 `behaviorRegistry` 的
- *   `getBehaviorFactory`（`src/battle/behaviorRegistry.ts:41`）是**静态表，不可注入**。
- *   给正式 Cannon 增加 burst 能力 = 改正式武器代码，属本 Queue 停止条件所指的方向 →
- *   因此这里改为**复用官方已有的多弹丸齐射行为**（`shotgun`，`fanAnglesDeg.length` 即每次开火的
- *   真实弹丸数，见 `src/battle/shotgunBehavior.ts:116/182`），零改正式代码。
- *   代价（如实记录）：齐射弹丸的渲染标记由正式 shotgun runtime 固定为 `'tracer'`
- *   （`src/battle/behaviorRuntime.ts:346`），**炮口/后坐/碰撞/伤害链仍是真实物理**；
- *   「先后两发」语义需要授权后给正式 Cannon 加可选 burst 参数才能做到。
+ * ## PRP-F2-R1：B 双联炮从 shotgun workaround 改成真实 burst
+ *
+ * 第一版曾复用官方 `shotgun` 的 `fanAnglesDeg`（**同时**齐射两发）。真人录像判定**不通过**：
+ * 两发弹丸在正常速度下轨迹高度重叠，玩家无法自然理解为「双联炮」。
+ *
+ * 因此本 Queue 授权做了**一次最小共享 Foundation**（细节见 `src/battle/cannonBehavior.ts` 文件头）：
+ * 给正式 Cannon 补两个**可选**参数 —— `burstRounds`（默认 `1`）/ `burstIntervalMs`（默认 `0`）。
+ *   - 正式 `content.ts` 的 Cannon 定义**不写**这两个字段 → 走默认值 → 正式武器平衡零变化；
+ *   - `behavior` 仍是正式 `cannon` → 渲染标记就是正式炮弹（不再借用 shotgun 的 `'tracer'`）；
+ *   - B 只声明 `burstRounds: 2` / `burstIntervalMs: 100` → **弹道同向**，靠**时间差**产生可感知性
+ *     （不用大散射把两发强行分开）；
+ *   - 两发都走同一条 `fire()` → 真实 projectile / 碰撞 / 伤害 / recoil / 生命周期，无视觉假弹。
  */
 
 import { createRegistry } from '../../core/content';
@@ -98,9 +101,9 @@ export function runModifierById(id: string): RunModifierDef | undefined {
 /**
  * 单个强化的 overlay：只声明**被强化语义覆盖的那几个字段**，其余字段一律沿用正式 Cannon。
  *
- * `behavior` 允许改变 —— 因为「一次开火打出几发」在正式库里由 behavior 决定
- * （`cannon` = 单发 / `shotgun` = fanAnglesDeg 长度发 / `machineGun` = burstRounds 发），
- * 复用官方能力比在 Cannon 里加特例更干净（见文件头 B 的披露）。
+ * `behavior` 字段保留（三项当前**都是**正式 `cannon`）—— 留作将来「换武器基座」的扩展点。
+ * PRP-F2-R1 之后，「一次攻击打几发」由 Cannon 自己的可选 `burstRounds` 表达，
+ * 不再需要为了多弹丸去换 behavior。
  */
 export interface RunModifierOverlay {
   readonly behavior: string;
@@ -128,12 +131,12 @@ export const RUN_MODIFIER_OVERLAY: Readonly<Record<RunModifierId, RunModifierOve
     cause: '炮弹更重 → 命中推动更明显，同时自身后坐更明显',
   },
   twinCannon: {
-    // 复用官方 shotgun 的「一次开火固定多发」能力：fanAnglesDeg 长度 = 每次开火的真实弹丸数。
-    // 只声明这一个参数 —— 伤害 / 射速 / 弹速 / 半径 / 质量 / 后坐**全部沿用正式 Cannon**，
-    // 因此每发都是完整炮弹（实测每发 40 会因扇形散布导致总伤不足而必败，见交接文档扫描表）。
-    behavior: 'shotgun',
-    behaviorParams: { fanAnglesDeg: [-4, 4] },
-    cause: '一次开火连续打出两发真实炮弹',
+    // PRP-F2-R1：改成正式 Cannon 的**真实连发**（不再借用 shotgun 齐射）。
+    // 只声明这两个参数 —— 伤害 / 射速 / 弹速 / 半径 / 质量 / 后坐**全部沿用正式 Cannon**，
+    // 因此每发都是完整炮弹；两发弹道同向，靠 100ms 时间差产生「连续两发」的可感知性。
+    behavior: 'cannon',
+    behaviorParams: { burstRounds: 2, burstIntervalMs: 100 },
+    cause: '一次攻击连续打出两发真实炮弹（同向、极短间隔）',
   },
   fastReload: {
     // 只改本局当前 Cannon 的攻击间隔；其它一律不动。

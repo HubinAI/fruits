@@ -7,6 +7,18 @@
  *
  *   IDLE ──继续──▶ EVENT ──遭遇敌人──▶ BATTLE ──自动结束──▶ RESULT ──继续──▶ CHOICE ──选择──▶ IDLE
  *
+ * ⚠️ PRP-F2-R1-ISOLATED-UPGRADE-VALIDATION（本 Queue 的收紧）：
+ *   本 Prototype 现在是一个**严格的单变量实验** —— 一局只做一次强化选择、只打两场战斗：
+ *
+ *     DAY 3 基础战斗 → RESULT → CHOICE → 选择 → DAY 4 强化后战斗 → RESULT → 验证结束
+ *
+ *   - 第二场结束后**不再进入 CHOICE / 不再 +Day / 不再开下一场**
+ *     （`pressRunAction` 在「终局 RESULT」直接返回一个全新 Run → 结构上无法叠第二个强化）；
+ *   - 终局 RESULT 的唯一主动作是「重新开始验证」→ 新 Run：DAY 回到 3、buffs 清零、
+ *     `modifier` 回 null、耐久回到初始 → 可对另一个强化做**完全同条件**的独立验证；
+ *   - 因此 `DAY 8/7` / 多 Buff 累计 / 同一 Buff 重复堆叠在**结构上被排除**，
+ *     不依赖运行期检查。
+ *
  * ⚠️ PRP-R3 必改 3：冒险记录**从 Console 改成玩家叙事** ——
  *   不再有 `[系统]` / `[事件]` / `[战斗]` / `[结果]` / `[耐久]` / `[强化]` 之类前缀，
  *   也没有任何 Runtime 状态 / 内部枚举 / 逐帧伤害；`kind` 只用于**渲染样式**
@@ -123,6 +135,14 @@ export interface RunPageState {
    * 不写 Garage、不改星级、不动正式 content；`createRunPageState()` 新建即回到 `null`。
    */
   readonly modifier: RunModifierId | null;
+  /**
+   * 本局**已打完**的真实战斗场数（PRP-F2-R1 的单变量约束）。
+   *
+   * - `0` = 还没打过（DAY 3 基础战斗前）；
+   * - `1` = 只打完基础战斗（此刻 RESULT 的主动作是「继续」→ 进 CHOICE 选强化）；
+   * - `2` = 强化后战斗也打完 → **验证结束**（RESULT 的主动作变成「重新开始验证」）。
+   */
+  readonly battlesCompleted: number;
   /** 冒险日志（只追加、不重排；选择强化不会清空历史）。 */
   readonly log: readonly RunLogEntry[];
   /** 当前战斗（仅 BATTLE / RESULT 非空）。 */
@@ -175,6 +195,15 @@ function goPhase(s: RunPageState, phase: RunPhase, patch: Partial<RunPageState>)
 export const RUN_INITIAL_DAY = 3;
 export const RUN_TOTAL_DAYS = 7;
 
+/**
+ * PRP-F2-R1：一次验证 Run 固定打 **两场**真实战斗（DAY 3 基础 → DAY 4 强化后），打完即停。
+ * 「一局只有一次强化选择」由这个硬上限 + `pressRunAction` 的终局分支共同保证。
+ */
+export const RUN_MAX_BATTLES = 2;
+
+/** 终局 RESULT 的唯一主动作文案（点击 = 新开一个干净 Run）。 */
+export const RUN_RESTART_LABEL = '重新开始验证';
+
 /** 初始状态（= Reset 后的 fresh 状态；IDLE 且日志已可见）。 */
 export function createRunPageState(ctx: RunPageContext): RunPageState {
   return {
@@ -183,6 +212,7 @@ export function createRunPageState(ctx: RunPageContext): RunPageState {
     dayTotal: RUN_TOTAL_DAYS,
     buffs: [],
     modifier: null,
+    battlesCompleted: 0,
     log: pushLogs([], [
       { kind: 'day', text: `DAY ${RUN_INITIAL_DAY}` },
       { kind: 'travel', text: `你驾驶着${ctx.vehicleLabel}，在荒原上继续前进。` },
@@ -206,7 +236,17 @@ export const RUN_ACTION_LABEL: Record<RunPhase, string> = {
   CHOICE: '选择一个强化',
 };
 
+/**
+ * PRP-F2-R1：本次验证是否已结束（= 两场真实战斗都打完）。
+ * 终局 RESULT 不再提供「继续」→ 只有「重新开始验证」。
+ */
+export function runVerificationComplete(s: RunPageState): boolean {
+  return s.battlesCompleted >= RUN_MAX_BATTLES;
+}
+
 export function runActionLabel(s: RunPageState): string {
+  // PRP-F2-R1：终局 RESULT 的主动作是「重新开始验证」（不再继续 Day / 不再进 CHOICE）。
+  if (s.phase === 'RESULT' && runVerificationComplete(s)) return RUN_RESTART_LABEL;
   return RUN_ACTION_LABEL[s.phase];
 }
 
@@ -256,8 +296,9 @@ export function formatRunLog(e: RunLogEntry): string {
  * 按下底部唯一主动作：
  *   IDLE → EVENT   （日志追加 2 句自然语言敌情叙事）
  *   EVENT → BATTLE （建立演示战斗；此后自动推进。**入场不写日志**，保持记录稳定）
- *   RESULT → CHOICE（获得改装机会：原页面保留、整体变暗、中央浮层）
- *   BATTLE / CHOICE → no-op（同引用；BATTLE 由脚本自动结束，CHOICE 只能点卡片）
+ *   RESULT → CHOICE（**仅第一场之后**：获得改装机会 —— 原页面保留、整体变暗、中央浮层）
+ *   RESULT → 全新 Run（**第二场之后**，PRP-F2-R1：验证结束 → 主动作 =「重新开始验证」）
+ *   BATTLE / CHOICE → no-op（同引用；BATTLE 由物理自动结束，CHOICE 只能点卡片）
  */
 export function pressRunAction(s: RunPageState, ctx: RunPageContext): RunPageState {
   if (s.phase === 'IDLE') {
@@ -289,6 +330,9 @@ export function pressRunAction(s: RunPageState, ctx: RunPageContext): RunPageSta
     return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'BATTLE', { battle });
   }
   if (s.phase === 'RESULT') {
+    // PRP-F2-R1：两场都打完 → 不能继续 Day / 不能进 CHOICE；点击即**新开一个干净 Run**
+    // （DAY 回到 3 / buffs 清零 / modifier 归 null / 耐久回到初始 → 单变量验证的下一轮）。
+    if (runVerificationComplete(s)) return createRunPageState(ctx);
     return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'CHOICE', {});
   }
   return s; // BATTLE（自动推进中）/ CHOICE（等选卡）→ 不接受主动作
@@ -330,7 +374,9 @@ export interface RunBattleOutcome {
  * 输出三行叙事，全部是**真实数据的自然语言转写**：
  *   ① 胜负（官方 winner；'A' = 玩家）
  *   ② 真实耐久百分比
- *   ③ 改装机会（进入 CHOICE 的叙事引子）
+ *   ③ 第三行按「这是第几场」分岔（PRP-F2-R1）：
+ *      - 第一场 → 「你发现了一次改装机会……」（进 CHOICE 的叙事引子）；
+ *      - 第二场（终局）→ 「本次改装的验证到此结束。」（**不再引导下一次改装**）。
  */
 export function finishRunBattle(s: RunPageState, outcome: RunBattleOutcome): RunPageState {
   if (s.phase !== 'BATTLE' || !s.battle) return s;
@@ -344,11 +390,17 @@ export function finishRunBattle(s: RunPageState, outcome: RunBattleOutcome): Run
     endReason: outcome.endReason,
   };
   const won = outcome.winner === 'A';
-  return goPhase(next(s, { battle: b }), 'RESULT', {
+  const battlesCompleted = s.battlesCompleted + 1;
+  // 第二场之后 = 验证结束：不再有改装机会，也就不能再进 CHOICE。
+  const finale = battlesCompleted >= RUN_MAX_BATTLES;
+  return goPhase(next(s, { battle: b, battlesCompleted }), 'RESULT', {
     log: pushLogs(s.log, [
       { kind: 'result', text: won ? '战斗胜利。' : '战车被打退，你撤出了战场。' },
       { kind: 'durability', text: `战车耐久剩余 ${durabilityPercent(b)}%。` },
-      { kind: 'result', text: '你发现了一次改装机会……' },
+      {
+        kind: 'result',
+        text: finale ? '本次改装的验证到此结束。' : '你发现了一次改装机会……',
+      },
     ]),
   });
 }
@@ -365,10 +417,14 @@ export function durabilityPercent(b: RunBattleState): number {
  *   - 浮层关闭、原页面恢复；顶部出现对应核心 Buff 图标（buffs +1）；
  *   - 日志追加「你为大炮装上了 XXX。」+ 新的 `DAY n` 行 → 推进到 DAY 4；
  *   - 回到 IDLE 后按唯一主动作「继续」即进入第二场真实战斗。
+ *
+ * PRP-F2-R1：**一局只允许一次强化** —— 已有 `modifier` / 已有 `buffs` 时**拒绝**，
+ * 保证「每次验证都是单变量」（不叠第二个强化、不重复叠同一强化）。
  * 未知 id / 非 CHOICE 状态 → no-op（同引用）。
  */
 export function chooseRunBuff(s: RunPageState, optionId: string): RunPageState {
   if (s.phase !== 'CHOICE') return s;
+  if (s.modifier !== null || s.buffs.length > 0) return s;
   const mod = runModifierById(optionId);
   if (!mod) return s;
   const opt: RunChoiceOption = { id: mod.id, label: mod.label, note: mod.note };
