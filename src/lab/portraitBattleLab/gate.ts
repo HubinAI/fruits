@@ -384,7 +384,7 @@ export function auditSpawnPlan(plan: SpawnPlan): {
 }
 
 /**
- * 全组合共享配置审计：2 Test Loadout × 3 Encounter = 6 个组合。
+ * 全组合共享配置审计：2 Test Loadout × 4 Encounter = 8 个组合。
  * 判定「共享配置完全共享 + 无 Arena 专属平衡覆盖」。
  */
 export function auditSharedCombatData(): SharedCombatDataAudit {

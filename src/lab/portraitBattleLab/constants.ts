@@ -73,10 +73,12 @@ export const LAB_ARENAS: readonly LabArenaDef[] = [
 export type LabLoadoutId = 'WatermelonHeavyCannon' | 'BananaChargeHammer';
 
 /**
- * PBL-F1｜三套共享 Encounter 的规范 id（A / B 共用同一套）。
- * 中文展示名见 testData.ts（追猎者 / 远程炮台 / 3 轻敌人）。
+ * PBL-F1｜共享 Encounter 的规范 id（A / B 共用同一套）。
+ * 中文展示名见 testData.ts（追猎者 / 远程炮台 / 3 轻敌人 / 菠萝冲刺车）。
+ *
+ * `ProtoRusher` = PRP-RUN-R1 的 **Build Prototype Encounter**（见 testData.ts 的说明）。
  */
-export type LabEncounterId = 'Chaser' | 'RangedTurret' | 'LightSwarm3';
+export type LabEncounterId = 'Chaser' | 'RangedTurret' | 'LightSwarm3' | 'ProtoRusher';
 
 /** Lab 初始选择（实验台自身默认值；与正式玩法默认值无任何耦合）。 */
 export const LAB_DEFAULTS: {

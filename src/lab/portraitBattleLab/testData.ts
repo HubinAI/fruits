@@ -185,9 +185,11 @@ export interface LabTestEncounter {
 }
 
 /**
- * 三套共享 Encounter（A / B 完全共用同一套基础数据）。
+ * 四套共享 Encounter（A / B 完全共用同一套基础数据）。
  * `LightSwarm3` = 同一套正式轻型 Build 复制 3 份（正式对手池无「同场多敌人」模型，
  * 本 Lab 只做数量复制，不改任何 HP / 伤害 / CD）。
+ * `ProtoRusher` = 引用既有正式模板 `R1-RUSH-02` 的单车版本，
+ *   PRP-RUN-R1 的 Build Prototype Encounter（选型依据见该条目的注释）。
  */
 export const LAB_ENCOUNTERS: readonly LabTestEncounter[] = [
   {
@@ -213,6 +215,42 @@ export const LAB_ENCOUNTERS: readonly LabTestEncounter[] = [
     templateId: 'OPP-14',
     count: 3,
     draft: formalOpponentDraft('OPP-14'),
+  },
+  {
+    /**
+     * PRP-RUN-R1-DEATH-AND-DURABILITY-CONTINUITY｜**Build Prototype Encounter**。
+     *
+     * 背景：Run Page 的单局验证要连打**三场**真实战斗，而耐久是**单一贯穿**的
+     * （`HP <= 0` = 本局立即失败，见 `runPageState.ts`）。原先用的 `Chaser`（OPP-16）
+     * 第一场就打掉玩家 ~75% 耐久 → 第二场必败，三场验证在结构上跑不完。
+     *
+     * 选择依据 = **两轮实测普查**（全部走生产同构链路，含 `RunBuildAbilities` 的真实冲量）：
+     *
+     *   轮 1（49 套正式对手模板各打一场，玩家满耐久）：只有 12 套能存活；
+     *   轮 2（存活且低压的 6 套 × 3 个第一层 × 各自条件池 3 项 = **9 种组合** 三场连锁）：
+     *     - `OPP-20`  0/9 全部失败 —— 排除；
+     *     - `OPP-29`  7/9（重磅→动能爆发 第二场就只剩 34）；
+     *     - `OPP-14`  8/9（重磅→动能爆发 第三场阵亡，敌剩 10）—— 排除；
+     *     - `OPP-35`  8/9（重磅→紧急维修 第三场阵亡，终局仅剩 48）；
+     *     - `OPP-31`  9/9，但终局战斗玩家只掉 2~42 点（近似沙包，**看不出对打**）；
+     *     - **`R1-RUSH-02` 9/9 且终局仍是对打**：三条路线终局分别掉 177 / 208 / 272 点，
+     *       收在 537 / 470 / 350（上限 1100，余量 32%~49%）→ **选它**。
+     *
+     * 为什么选「对打」而不是余量更大的 `OPP-31`：本原型要让人**看出这辆车形成了方向**，
+     * 终局必须是真实互殴节奏（三条路线终局时长 14.0s / 7.2s / 9.8s，差异可感知），
+     * 而不是快速打死一个不还手的沙包。`R1-RUSH-02` 同时满足「明显更低压」（第一场只损
+     * 257，旧 `Chaser` 是 830）与「保留真实物理接敌」（会真实冲刺撞击）。
+     *
+     * ⚠️ 这是**引用既有正式对手模板**（`R1-RUSH-02`，`opponentPool.ts` 里既有的一套），
+     *   **没有新增敌人、没有改正式敌人定义、没有改任何 HP / 伤害 / 碰撞 / 质量数值**；
+     *   `count: 1` = 单车版本。
+     */
+    id: 'ProtoRusher',
+    label: '菠萝冲刺车',
+    note: '单个低压冲刺车（正式模板 R1-RUSH-02：菠萝 + 圆锯 + 刺 + 推进器）· PRP 三场 Build 验证的对比基准',
+    templateId: 'R1-RUSH-02',
+    count: 1,
+    draft: formalOpponentDraft('R1-RUSH-02'),
   },
 ];
 

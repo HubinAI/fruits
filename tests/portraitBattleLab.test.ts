@@ -95,8 +95,13 @@ describe('PBL-F0｜目录完整性（Arena A/B · Loadout ×2 · Encounter ×3�
     expect(new Set(LAB_LOADOUTS.map((l) => l.id)).size).toBe(LAB_LOADOUTS.length);
   });
 
-  it('R5 Encounter 为追猎者 / 远程炮台 / 3 轻敌人且 id 唯一', () => {
-    expect(LAB_ENCOUNTERS.map((e) => e.label)).toEqual(['追猎者', '远程炮台', '3 轻敌人']);
+  it('R5 Encounter 目录为四套规范项且 id 唯一（含 PRP Build Prototype Encounter）', () => {
+    expect(LAB_ENCOUNTERS.map((e) => e.label)).toEqual([
+      '追猎者',
+      '远程炮台',
+      '3 轻敌人',
+      '菠萝冲刺车',
+    ]);
     expect(new Set(LAB_ENCOUNTERS.map((e) => e.id)).size).toBe(LAB_ENCOUNTERS.length);
   });
 

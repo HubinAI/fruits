@@ -1,10 +1,10 @@
 /**
  * PRP-F0-RUN-PAGE-SHELL｜PRP-R3-CAPYBARA-UI-HIERARCHY-REBUILD
- * ｜PRP-BUILD-01-TWO-STEP-CANNON-BUILD
+ * ｜PRP-BUILD-01-TWO-STEP-CANNON-BUILD｜PRP-RUN-R1-DEATH-AND-DURABILITY-CONTINUITY
  * Run Page 纯状态机（无 DOM / 无 Canvas / 无物理 / 无平台依赖 / 无副作用）。
  *
  * 产品基线：整个单局是**一个持续存在的竖屏 Adventure Run Page**，
- * 战斗 / 事件 / 强化 / 结果是**同一个页面的五个状态**，不存在页面跳转：
+ * 战斗 / 事件 / 强化 / 结果是**同一个页面的若干状态**，不存在页面跳转：
  *
  *   IDLE ──继续──▶ EVENT ──遭遇敌人──▶ BATTLE ──自动结束──▶ RESULT ──继续──▶ CHOICE ──选择──▶ IDLE
  *
@@ -26,6 +26,28 @@
  *
  * ⚠️ 必改 1：**第二次选择必须读取当前 Build** —— 第二层的候选来自
  *   `runModifiers.RUN_LAYER2_POOLS[第一层选择]`，不是同一套通用三选一。
+ *
+ * ── PRP-RUN-R1-DEATH-AND-DURABILITY-CONTINUITY（本 Queue 的唯一新规则）──────────
+ *
+ *   **单一耐久贯穿整个 Run；`HP <= 0` = 本局立即失败。**
+ *
+ *   修复前的缺陷：`finishRunBattle` 从不检查真实 Player HP，`runCarriedPlayerHp` 又把
+ *   「0 HP」与「还没打过」压成同一个 `null`，于是 `pressRunAction` 把 `null` 当「满耐久开幕」
+ *   → 出现「耐久 0% 仍进入 CHOICE → DAY 5 → 下一场满耐久」——整条因果链失效。
+ *
+ *   现在的语义（三层一起咬合，缺一不可）：
+ *     1) `finishRunBattle` 是**唯一**的战斗出口，它**统一**检查 `playerHp <= 0`
+ *        → 直接 goPhase **`FAILED`**（终态），**不经过 RESULT** →
+ *        结构上不可能再走 RESULT→CHOICE 那条边；
+ *     2) `FAILED` 下 `pressRunAction` 的**唯一**动作 = `createRunPageState()`（全新 Run）
+ *        → 不存在「继续当前 Run」这条边，「隐式满血」无处可发生；
+ *     3) `runCarriedPlayerHp` 在「上一场已结束」时**恒返回一个数**（死亡 → `0`），
+ *        只有「本次遭遇还没打过任何结束的战斗」才返回 `null` → 「满耐久开幕」只剩
+ *        真正的第一场这一个来源。
+ *
+ *   `FAILED` 页面（沿用 RESULT 的绘制路径，UI 结构零改动）只呈现三件事：
+ *     失败发生的 **Day**（顶部 `DAY n / 7` + 日志的最后一行 DAY）/ 最终 **Build**（顶部图标）
+ *     / 主动作 =「**重新开始验证**」。它**不**提供耐久恢复、不推进 Day、不展示 Build 选择。
  *
  * ⚠️ PRP-R3 必改 3：冒险记录**从 Console 改成玩家叙事** ——
  *   不再有 `[系统]` / `[事件]` / `[战斗]` / `[结果]` / `[耐久]` / `[强化]` 之类前缀，
@@ -54,9 +76,21 @@ import {
   type RunModifierId,
 } from './runModifiers';
 
-/** Run Page 的五个状态（也是唯一允许的状态集合）。 */
-export type RunPhase = 'IDLE' | 'EVENT' | 'BATTLE' | 'RESULT' | 'CHOICE';
-export const RUN_PHASES: readonly RunPhase[] = ['IDLE', 'EVENT', 'BATTLE', 'RESULT', 'CHOICE'];
+/**
+ * Run Page 的状态（也是唯一允许的状态集合）。
+ *
+ * `FAILED`（PRP-RUN-R1）= **失败终态**：某一场的真实 Player HP 归零。
+ * 它的**唯一**出口是「重新开始验证」→ 全新 Run；没有「继续当前 Run」这条边。
+ */
+export type RunPhase = 'IDLE' | 'EVENT' | 'BATTLE' | 'RESULT' | 'CHOICE' | 'FAILED';
+export const RUN_PHASES: readonly RunPhase[] = [
+  'IDLE',
+  'EVENT',
+  'BATTLE',
+  'RESULT',
+  'CHOICE',
+  'FAILED',
+];
 
 /**
  * 日志条目的语义角色（**仅供渲染分级**，不产生任何玩家可见前缀）。
@@ -165,6 +199,10 @@ export interface RunPageState {
    * - `1` = 只打完基础战斗 → RESULT 的主动作进 CHOICE（第一层三选一）；
    * - `2` = 强化后战斗也打完 → RESULT 的主动作进 CHOICE（**第二层条件池**）；
    * - `3` = 最终战斗打完 → **验证结束**（主动作变成「重新开始验证」）。
+   *
+   * ⚠️ PRP-RUN-R1：**战败也计入**（那一场确实打完了）—— 但战败时 phase 是 `FAILED`
+   *    而不是 RESULT，所以 `runVerificationComplete` 不会被战败「凑满」，
+   *    `runStartsNewRun` 对 `FAILED` 恒为 true。
    */
   readonly battlesCompleted: number;
   /** 冒险日志（只追加、不重排；选择强化不会清空历史）。 */
@@ -257,13 +295,19 @@ export function createRunPageState(ctx: RunPageContext): RunPageState {
 
 /* --------------------------------------------------------------- 查询 */
 
-/** 底部主动作按钮的文案（每个状态一个，永远只有一个主动作）。 */
+/**
+ * 底部主动作按钮的文案（每个状态一个，永远只有一个主动作）。
+ *
+ * `FAILED` 的文案与终局 RESULT 相同（`RUN_RESTART_LABEL`）—— 两者都只能「重新开始」。
+ * `runActionLabel` 对这两个终态做统一分派。
+ */
 export const RUN_ACTION_LABEL: Record<RunPhase, string> = {
   IDLE: '继续',
   EVENT: '遭遇敌人',
   BATTLE: '战斗中',
   RESULT: '继续',
   CHOICE: '选择一个强化',
+  FAILED: RUN_RESTART_LABEL,
 };
 
 /**
@@ -274,15 +318,37 @@ export function runVerificationComplete(s: RunPageState): boolean {
   return s.battlesCompleted >= RUN_MAX_BATTLES;
 }
 
+/** PRP-RUN-R1：本局是否已**失败**（某场真实 Player HP 归零 → 失败终态）。 */
+export function runFailed(s: RunPageState): boolean {
+  return s.phase === 'FAILED';
+}
+
+/**
+ * PRP-RUN-R1 必改 3：按下的这一下会不会**开一个全新 Run**。
+ *
+ * 这正是 Queue 要求「必须明确区分」的两件事的**唯一判据**（状态机侧）：
+ *   - `true`  → 「重新开始新 Run」：`FAILED`（耐久归零）/ 三场打完的终局 RESULT。
+ *               点击 = `createRunPageState()` → 满耐久 / DAY 回到初始 / Build 清空；
+ *   - `false` → 「继续当前 Run」：RESULT（还没打完三场）→ 进 CHOICE → 下一场
+ *               （**继承**上一场真实剩余耐久、**保留**本局 Build）。
+ */
+export function runStartsNewRun(s: RunPageState): boolean {
+  return s.phase === 'FAILED' || (s.phase === 'RESULT' && runVerificationComplete(s));
+}
+
 export function runActionLabel(s: RunPageState): string {
-  // 终局 RESULT 的主动作是「重新开始验证」（不再继续 Day / 不再进 CHOICE）。
-  if (s.phase === 'RESULT' && runVerificationComplete(s)) return RUN_RESTART_LABEL;
+  // 两个终态（失败 / 验证结束）的主动作都是「重新开始验证」——
+  // 既不继续 Day、也不进 CHOICE、更不恢复耐久。
+  if (runStartsNewRun(s)) return RUN_RESTART_LABEL;
   return RUN_ACTION_LABEL[s.phase];
 }
 
-/** BATTLE 期间主动作不可用（禁止误触推进）。 */
+/**
+ * BATTLE 期间主动作不可用（禁止误触推进）。
+ * `FAILED` **可用**（它是终态，主动作就是「重新开始验证」）。
+ */
 export function runActionEnabled(s: RunPageState): boolean {
-  return s.phase === 'IDLE' || s.phase === 'EVENT' || s.phase === 'RESULT';
+  return s.phase === 'IDLE' || s.phase === 'EVENT' || s.phase === 'RESULT' || s.phase === 'FAILED';
 }
 
 /** 三选一浮层是否可见（= phase 为 CHOICE，两者永不脱节）。 */
@@ -316,16 +382,23 @@ export function runChoicePoolHas(s: RunPageState, optionId: string): boolean {
 }
 
 /**
- * 跨战斗耐久（必改 4）：**下一场开局的真实耐久**。
+ * 跨战斗耐久：**下一场开局的真实耐久**（本局**唯一**的耐久传递口径）。
  *
- * - 尚未打过任何战斗 / 上一场还没结束 → `null`（本次遭遇按满耐久开始）；
- * - 上一场结束且剩 HP > 0（或带紧急维修补偿）→ 返回「真实剩余 + 维修补偿」（上限截断）；
- * - 剩 0 且无补偿（被打退）→ `null`（0 HP 无耐久可续用；正常推进路径是存活）。
+ * ⚠️ PRP-RUN-R1 修复：`null` 现在**只剩一个含义** ——
+ *   「本次遭遇还没打过任何**已结束**的战斗」→ 这是本局的第一场，按满耐久开幕。
+ *
+ *   修复前 `carried <= 0` 也返回 `null`，与「还没打过」压成同一个值，于是调用方的
+ *   `carried ?? ctx.playerHpMax` 会把 **0 HP 读成满耐久** —— 这就是被真人录屏抓到的
+ *   「耐久 0% 之后还能满血再打一场」。现在：
+ *     - 上一场结束且剩 HP > 0（或带紧急维修补偿）→ 返回「真实剩余 + 补偿」（上限截断）；
+ *     - 上一场结束且剩 0 且无补偿（被打退）→ 返回 **`0`**（如实回报，**绝不伪装成满耐久**）。
+ *
+ *   注意这条只是「不再掩盖真相」的兜底：真正阻止「死亡后继续」的是
+ *   `finishRunBattle` 直接进 `FAILED`（见文件头）—— `FAILED` 没有通往 BATTLE 的边。
  */
 export function runCarriedPlayerHp(s: RunPageState): number | null {
   if (!s.battle || !s.battle.done) return null;
   const carried = Math.max(0, s.battle.playerHp) + Math.max(0, s.repairBonus);
-  if (carried <= 0) return null;
   return Math.min(s.battle.playerHpMax, carried);
 }
 
@@ -355,9 +428,15 @@ export function formatRunLog(e: RunLogEntry): string {
  *   EVENT → BATTLE （建立演示战斗；此后自动推进。**入场不写日志**，保持记录稳定）
  *   RESULT → CHOICE（**还没打完三场时**：获得改装机会 —— 原页面保留、整体变暗、中央浮层）
  *   RESULT → 全新 Run（**第三场之后**：验证结束 → 主动作 =「重新开始验证」）
+ *   FAILED → 全新 Run（**耐久归零**：失败终态 → 主动作 =「重新开始验证」）
  *   BATTLE / CHOICE → no-op（同引用；BATTLE 由物理自动结束，CHOICE 只能点卡片）
+ *
+ * ⚠️ PRP-RUN-R1：`FAILED` **没有**「继续当前 Run」这条边 ——
+ *    它不接受任何推进，唯一结果就是 `createRunPageState()`（满耐久 / DAY 初始 / Build 清空）。
  */
 export function pressRunAction(s: RunPageState, ctx: RunPageContext): RunPageState {
+  // 失败终态：本局已结束，点击 = 开一个干净新 Run（不是「恢复耐久继续」）。
+  if (s.phase === 'FAILED') return createRunPageState(ctx);
   if (s.phase === 'IDLE') {
     return goPhase(
       next(s, { actionCount: s.actionCount + 1 }),
@@ -389,7 +468,7 @@ export function pressRunAction(s: RunPageState, ctx: RunPageContext): RunPageSta
   if (s.phase === 'RESULT') {
     // 三场都打完 → 不能继续 Day / 不能进 CHOICE；点击即**新开一个干净 Run**
     // （DAY 回到 3 / Build 清零 / 耐久回到初始 → 单变量验证的下一轮）。
-    if (runVerificationComplete(s)) return createRunPageState(ctx);
+    if (runStartsNewRun(s)) return createRunPageState(ctx);
     return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'CHOICE', {});
   }
   return s; // BATTLE（自动推进中）/ CHOICE（等选卡）→ 不接受主动作
@@ -426,9 +505,17 @@ export interface RunBattleOutcome {
 }
 
 /**
- * 战斗结束 → RESULT（由宿主在**官方 result 出现的那一刻**调用一次）。
+ * 战斗结束 → 出口一次性判定（由宿主在**官方 result 出现的那一刻**调用一次）。
  *
- * 输出三行叙事，全部是**真实数据的自然语言转写**：
+ * ⚠️ PRP-RUN-R1 必改 1：这里是**唯一**的战斗出口，因此「真实 Player HP 检查」
+ *    也**只在这里**做一次 —— 所有场次走同一条判据，不存在「某一场忘了检查」的可能。
+ *
+ *   - `playerHp <= 0` → **`FAILED`**（失败终态）：
+ *       日志只有两行（失败叙事 + 真实耐久），**没有**「你发现了一次改装机会……」那一行
+ *       → 玩家读不到任何「继续改装」的引导，结构上也确实进不了 CHOICE；
+ *   - 其余 → `RESULT`（现状不变）：三行叙事，第三行按「第几场」分岔。
+ *
+ * 叙事：
  *   ① 胜负（官方 winner；'A' = 玩家）
  *   ② 真实耐久百分比
  *   ③ 第三行按「这是第几场」分岔：
@@ -446,8 +533,20 @@ export function finishRunBattle(s: RunPageState, outcome: RunBattleOutcome): Run
     winner: outcome.winner,
     endReason: outcome.endReason,
   };
-  const won = outcome.winner === 'A';
   const battlesCompleted = s.battlesCompleted + 1;
+
+  // ① 死亡 = 本局立即失败。⚠️ 判据取**真实 HP**（不是 winner / endReason）：
+  //    「单一耐久贯穿整个 Run」这条冻结规则的直接转写。
+  if (outcome.playerHp <= 0) {
+    return goPhase(next(s, { battle: b, battlesCompleted }), 'FAILED', {
+      log: pushLogs(s.log, [
+        { kind: 'result', text: `战车耐久耗尽，DAY ${s.day} 的验证到此结束。` },
+        { kind: 'durability', text: `战车耐久剩余 ${durabilityPercent(b)}%。` },
+      ]),
+    });
+  }
+
+  const won = outcome.winner === 'A';
   // 第三场之后 = 验证结束：不再有改装机会，也就不能再进 CHOICE。
   const finale = battlesCompleted >= RUN_MAX_BATTLES;
   return goPhase(next(s, { battle: b, battlesCompleted }), 'RESULT', {

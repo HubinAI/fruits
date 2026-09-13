@@ -85,10 +85,19 @@ describe('PBL-F1｜共享 Test Loadout / Encounter 契约', () => {
     expect(LAB_LOADOUTS.map((l) => l.label)).toEqual(['西瓜重炮', '香蕉冲锋锤']);
   });
 
-  it('F1-R2 三套 Encounter 使用规范 id 且唯一', () => {
-    expect(LAB_ENCOUNTERS.map((e) => e.id)).toEqual(['Chaser', 'RangedTurret', 'LightSwarm3']);
+  it('F1-R2 Encounter 使用规范 id 且唯一', () => {
+    expect(LAB_ENCOUNTERS.map((e) => e.id)).toEqual([
+      'Chaser',
+      'RangedTurret',
+      'LightSwarm3',
+      'ProtoRusher',
+    ]);
     expect(new Set(LAB_ENCOUNTERS.map((e) => e.id)).size).toBe(LAB_ENCOUNTERS.length);
-    expect(LAB_ENCOUNTERS.map((e) => e.count)).toEqual([1, 1, 3]);
+    expect(LAB_ENCOUNTERS.map((e) => e.count)).toEqual([1, 1, 3, 1]);
+    // PRP-RUN-R1：`ProtoRusher` 不是新敌人 —— 它引用的是正式对手池里**既有**的模板。
+    const rusher = LAB_ENCOUNTERS.find((e) => e.id === 'ProtoRusher')!;
+    expect(OPPONENT_TEMPLATES.some((t) => t.id === rusher.templateId)).toBe(true);
+    expect(rusher.count).toBe(1);
   });
 
   it('F1-R3 所有 formal / adapted 槽位引用的 defId 必须真实存在于正式内容库', () => {

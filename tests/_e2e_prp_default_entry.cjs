@@ -327,7 +327,7 @@ async function assertFullFlow(page, tag, dpr) {
   log(!!p.stage.enemy && p.stage.playerLeftOfEnemy === true, `[${tag}] F2 EVENT 敌人出现在玩家右侧`, `gap=${round2(p.stage.minGapPx)}`);
   /*
     PRP-F1 必改 1/2：一遭遇就切进**真实 Planck 战斗世界**（正式 1600×900），
-    而且两车之间是**明确的远程开局**（实测外廓间距 ≈ 529 世界 px）。
+    而且两车之间是**明确的远程开局**（实测外廓间距 ≈ 564 世界 px）。
   */
   log(
     !!p.battleWorld &&
@@ -341,8 +341,8 @@ async function assertFullFlow(page, tag, dpr) {
     !!p.battleWorld &&
       Math.round(p.battleWorld.world.spawnAx) === 400 &&
       Math.round(p.battleWorld.world.spawnBx) === 1200 &&
-      Math.round(p.battleWorld.world.initialGap) === 529,
-    `[${tag}] F2c 必改 2：正式出生点 400/1200，开局外廓间距 ≈ 529 世界 px（有纵深、不贴车）`,
+      Math.round(p.battleWorld.world.initialGap) === 564,
+    `[${tag}] F2c 必改 2：正式出生点 400/1200，开局外廓间距 ≈ 564 世界 px（有纵深、不贴车）`,
     p.battleWorld ? `spawn=${round2(p.battleWorld.world.spawnAx)}/${round2(p.battleWorld.world.spawnBx)} initialGap=${round2(p.battleWorld.world.initialGap)}` : '',
   );
 
@@ -361,7 +361,8 @@ async function assertFullFlow(page, tag, dpr) {
     `gap=${round2(p.stage.minGapPx)}`,
   );
   /*
-    PRP-F1：真实 Planck 战斗（实测整场 ≈15.4s、首次命中 step 132 ≈2.2s、单发弹丸寿命 ≈40+ 帧）。
+    PRP-F1：真实 Planck 战斗（实测整场 ≈14.0s / 842 帧、首次命中 step 129 ≈2.15s、
+    单发弹丸可见寿命 ≈8~15 帧 —— 因为前两发真实打在**地上**，只有第 3 发命中）。
     单点采样会随机落在「弹丸刚落地 / 下一发未出膛」的空窗 → 改为 5s 窗口累积观测。
   */
   const win = await page.evaluate(async () => {

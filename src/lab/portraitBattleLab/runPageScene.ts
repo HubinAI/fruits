@@ -57,7 +57,19 @@ import {
 
 /** 本 Queue 的固定演示装载（Debug 选择项不参与 Run Page）。 */
 export const RUN_DEMO_LOADOUT_ID = 'WatermelonHeavyCannon';
-export const RUN_DEMO_ENCOUNTER_ID = 'Chaser';
+/**
+ * ⚠️ PRP-RUN-R1：演示遭遇从 `Chaser`（OPP-16，追猎者）换成 **`ProtoRusher`**
+ * （正式模板 `R1-RUSH-02` 的单车版，菠萝冲刺车）——即 **Build Prototype Encounter**。
+ *
+ * 原因：Run Page 的单局验证连打**三场**真实战斗、耐久**单一贯穿**（`HP <= 0` 即本局失败）。
+ * 实测：`Chaser` 第一场就吃掉玩家 ~75% 耐久 → 第二场必败，三场验证在结构上跑不完；
+ * `ProtoRusher` 在全部 9 种池内组合下三场连锁 **9/9 存活**（三条强联动路线终局余量
+ * 32%~49%），同时**保留真实物理接敌**（会真实冲刺撞击，终局仍是对打而不是沙包）。
+ *
+ * 没有新增敌人 / 没有改正式敌人定义 / 没有改任何数值 —— 只是**换用了另一套既有的
+ * 正式对手模板**（完整选型依据与两轮普查数据见 `testData.ts` 该条目的注释）。
+ */
+export const RUN_DEMO_ENCOUNTER_ID = 'ProtoRusher';
 
 /** 玩家朝右、敌人朝左（侧视对峙的唯一朝向组合）。 */
 export const RUN_PLAYER_FACING = 1 as const;

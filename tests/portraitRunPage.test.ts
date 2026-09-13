@@ -23,6 +23,9 @@ import { describe, expect, it } from 'vitest';
 
 import { PORTRAIT_LOGICAL_H, PORTRAIT_LOGICAL_W } from '../src/lab/portraitBattleLab/constants';
 import { buildSpawnPlan } from '../src/lab/portraitBattleLab/entities';
+import { registry } from '../src/core/content';
+import { PlanckBattleOrchestrator } from '../src/battle/planckBattleOrchestrator';
+import { OPPONENT_TEMPLATES } from '../src/player/opponentPool';
 import { LAB_ENCOUNTERS, LAB_LOADOUTS } from '../src/lab/portraitBattleLab/testData';
 import {
   RUN_ACTION_BAND,
@@ -82,6 +85,8 @@ import {
   runCarriedPlayerHp,
   runChoiceOpen,
   runChoicePool,
+  runFailed,
+  runStartsNewRun,
   runVerificationComplete,
   syncRunBattle,
   visibleRunLog,
@@ -428,7 +433,7 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     expect(bt.battle!.winner).toBeNull();
     // 耐久上限来自 F1 共享测试数据（正式 registry 解析，不是手写）
     expect(bt.battle!.playerHpMax).toBe(1100);
-    expect(bt.battle!.enemyHpMax).toBe(900);
+    expect(bt.battle!.enemyHpMax).toBe(1000); // PRP-RUN-R1：验证对手换为 ProtoRusher（菠萝 1000）
     // 没有任何脚本参数残留（`totalSteps` 已随 RUN_BATTLE_SCRIPT 一并删除）
     expect('totalSteps' in bt.battle!).toBe(false);
   });
@@ -602,11 +607,11 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     expect(CTX.playerHpMax).toBe(plan.player.hp);
     expect(CTX.enemyHpMax).toBe(plan.enemies[0].hp);
     expect(CTX.playerHpMax).toBe(1100);
-    expect(CTX.enemyHpMax).toBe(900);
+    expect(CTX.enemyHpMax).toBe(1000); // ProtoRusher = 菠萝车身（正式模板 R1-RUSH-02）
     expect(CTX.vehicleLabel).toBe('西瓜重炮');
-    expect(CTX.encounterLabel).toBe('追猎者');
+    expect(CTX.encounterLabel).toBe('菠萝冲刺车');
     expect(RUN_DEMO_LOADOUT_ID).toBe('WatermelonHeavyCannon');
-    expect(RUN_DEMO_ENCOUNTER_ID).toBe('Chaser');
+    expect(RUN_DEMO_ENCOUNTER_ID).toBe('ProtoRusher');
     // PRP-R3 必改 3：formatRunLog 是恒等（**不再拼 `[耐久]` 之类前缀**）
     expect(formatRunLog({ seq: 1, kind: 'durability', text: '战车耐久剩余 78%。' })).toBe('战车耐久剩余 78%。');
   });
@@ -633,7 +638,7 @@ describe('PRP-F1｜C 中部舞台：IDLE 近景 + 真实战斗世界（正式世
     const gap = rt.gapWorld();
     expect(gap).toBeGreaterThan(400);
     // 冻结实测值（探针 + 本测试同源口径：车身 + 轮 + 部件 + visual）
-    expect(Math.round(gap)).toBe(529);
+    expect(Math.round(gap)).toBe(564); // PRP-RUN-R1：验证对手换为 ProtoRusher 后重测
     // 外廓间距与世界宽同量级 → 绝不是「贴车开局」
     expect(gap / rt.arenaWidth).toBeGreaterThan(0.25);
     rt.dispose();
@@ -689,7 +694,7 @@ describe('PRP-F1｜C 中部舞台：IDLE 近景 + 真实战斗世界（正式世
         }
       }
     }
-    expect(checked).toBe(10); // 2 Loadout × (1 + 1 + 3) 敌人实例
+    expect(checked).toBe(12); // 2 Loadout × (1 + 1 + 3 + 1) 敌人实例（PRP-RUN-R1 起含 ProtoRusher）
   });
 });
 
@@ -1305,7 +1310,9 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
       'fastReload',
       'recoilCharge',
     );
-    // 规则（`runCarriedPlayerHp`）：carry = 上一场真实剩余 + 维修补偿，上限截断；<= 0 → null（满耐久开幕）。
+    // 规则（PRP-RUN-R1 起，`runCarriedPlayerHp`）：carry = 上一场真实剩余 + 维修补偿，上限截断。
+    // ⚠️ 旧注释「<= 0 → null（满耐久开幕）」已作废：那正是被真人录屏抓到的 P0 缺陷。
+    //    现在「上一场已结束」**恒返回一个数**（死亡 → 0），`null` 只剩「本次遭遇还没打过」一个含义。
     // ① 第一场：真实剩余确实低于上限
     const hp1 = firstEnd.battle!.playerHp;
     expect(hp1).toBeGreaterThan(0);
@@ -1318,25 +1325,32 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
     expect(secondInitialHp).toBe(hp1);
     expect(secondInitialHp).toBeLessThan(finalRuntime.playerMaxHp);
 
-    // ③ 第二场 → 第三场沿用**同一条规则**（胜负由真实物理决定，不做任何数值调优）：
+    // ③ 第二场 → 第三场沿用**同一条规则**（胜负由真实物理决定，不做任何数值调优）。
+    //
+    // ⚠️ PRP-RUN-R1 起这里**没有 else 分支**：若第二场 HP 归零，`finishRunBattle` 会直接
+    //    进 `FAILED`（终态），第三场根本不存在 —— 所以「能走到这里」本身就等于
+    //    「第二场存活」，这就是单一耐久真的续到第三场的直接证据。
+    //    修复前这里有一条「0 HP → carry = null → 终局满耐久开幕」的兜底分支，
+    //    正是被真人录屏抓到的那条错误路径。
+    expect(afterChoice2.phase).toBe('IDLE');
     const hp2 = afterChoice2.battle!.playerHp;
+    expect(hp2).toBeGreaterThan(0);
     const carry2 = runCarriedPlayerHp(afterChoice2);
-    if (hp2 > 0) {
-      expect(carry2).toBe(hp2);
-      expect(finalRuntime.initialPlayerHp).toBe(hp2);
-      expect(finalRuntime.initialPlayerHp).toBeLessThan(finalRuntime.playerMaxHp);
-    } else {
-      // 被打退（0 HP）→ 无耐久可续用 → 终局按满耐久开幕（规则第 3 分支）
-      expect(carry2).toBeNull();
-      expect(finalRuntime.initialPlayerHp).toBe(finalRuntime.playerMaxHp);
-    }
+    expect(carry2).toBe(hp2); // 上一场已结束时恒为真实剩余（死亡 → 0，绝不返回 null）
+    expect(finalRuntime.initialPlayerHp).toBe(hp2);
+    expect(finalRuntime.initialPlayerHp).toBeLessThan(finalRuntime.playerMaxHp);
 
-    // ⚠️ 实测记录（**冻结项下的既然后果，非本 Queue 引入**，留待真人裁决）：
-    //    演示遭遇余量极窄 —— 第一场（无强化）固定收在 ~269.8/1100 ≈ 24.5%，
-    //    于是第二场（第一层 Build）以 ~24.5% 开局，**三条路线都必然被打退**；
-    //    因此终局第三场按规则满耐久开幕 —— 好处是两层 Build 能在满耐久下完整展示方向。
-    //    Queue 明令「不为了联动明显而修改敌方 HP / 不做数值平衡扫描」→ 这里**只记录不调参**。
-    expect(secondInitialHp).toBeLessThan(hp1 * 2); // 结构性证据：确实是「低耐久开局」而非偶然
+    // 三场耐久**单调不增**：不存在任何隐藏回血（本路线没拿紧急维修 → repairBonus 全程 0）
+    expect(afterChoice1.repairBonus).toBe(0);
+    expect(afterChoice2.repairBonus).toBe(0);
+    expect(hp1).toBeLessThanOrEqual(afterChoice1.battle!.playerHpMax);
+    expect(hp2).toBeLessThanOrEqual(hp1);
+    expect(finalRuntime.initialPlayerHp).toBeLessThanOrEqual(hp2);
+    expect(finalRuntime.playerMaxHp).toBe(afterChoice2.battle!.playerHpMax);
+
+    // 演示遭遇余量（PRP-RUN-R1 换用 Build Prototype Encounter = `LightRusher` 之后的实测）：
+    // 第一场（无强化）只损约 1/6 耐久，而不是旧 `Chaser` 的 ~75% → 三场验证有稳定余量。
+    expect(hp1).toBeGreaterThan(afterChoice2.battle!.playerHpMax * 0.75);
     finalRuntime.dispose();
   });
 
@@ -1556,6 +1570,252 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
     const rt = new RunBattleRuntime({ build: runBuildIds(healed), carriedHp: runCarriedPlayerHp(healed) });
     expect(rt.initialPlayerHp).toBe(Math.min(maxHp, hpBefore + expectHeal));
     expect(rt.playerMaxHp).toBe(maxHp);
+    rt.dispose();
+  });
+
+  it('RP-F2-14 单一耐久贯穿三场：每场开局 = 上一场结束，全程单调不增（无隐藏回血）', () => {
+    /**
+     * 三条路线的**冻结实测值**（PRP-RUN-R1｜ProtoRusher 下的真实物理结果，Node 端确定性）。
+     *
+     * ⚠️ 与 RP-19 / RP-22 同一纪律：这些是**冻结字面量**而不是就地重算 ——
+     *    任何影响三场连锁的改动（对手 / 武器 / 物理）都必须回到这里显式更新，
+     *    从而让「三场能不能跑完」这件事无法悄悄变化。
+     *    表内 = [第一场结束(=第二场开局), 第二场结束(=第三场开局), 第三场结束]。
+     */
+    const FROZEN: Record<string, readonly [number, number, number]> = {
+      'heavyShell+kineticBurst': [843, 714, 537],
+      'twinCannon+tripleLoad': [843, 678, 470],
+      'fastReload+recoilCharge': [843, 622, 350],
+    };
+    const routes: readonly [string, string][] = [
+      ['heavyShell', 'kineticBurst'],
+      ['twinCannon', 'tripleLoad'],
+      ['fastReload', 'recoilCharge'],
+    ];
+    for (const [l1, l2] of routes) {
+      const key = `${l1}+${l2}`;
+      const { finale, firstEnd, afterChoice1, afterChoice2, secondInitialHp, finalRuntime } = runBuildLoop(
+        l1,
+        l2,
+      );
+      const hp1 = firstEnd.battle!.playerHp;
+      const hp2 = afterChoice2.battle!.playerHp;
+      const hp3 = finale.battle!.playerHp;
+
+      // ① 第一场确实掉过血，但远未致命（低压验证对手：1100 → 843，只损 257）
+      expect(hp1).toBeLessThan(firstEnd.battle!.playerHpMax);
+      expect(Math.round(hp1), key).toBe(FROZEN[key][0]);
+
+      // ② 第二场开局**就是**第一场结束（不是重算、不是满耐久）
+      expect(secondInitialHp, `${key}: 第二场开局`).toBe(hp1);
+      expect(Math.round(hp2), key).toBe(FROZEN[key][1]);
+
+      // ③ 第三场开局**就是**第二场结束；终局真的打完（RESULT，不是 FAILED）
+      expect(finalRuntime.initialPlayerHp, `${key}: 第三场开局`).toBe(hp2);
+      expect(finale.phase, `${key}: 终局`).toBe('RESULT');
+      expect(Math.round(hp3), key).toBe(FROZEN[key][2]);
+
+      // ④ 单调不增（三场都没拿紧急维修 → repairBonus 恒 0，carry 就是真实剩余）
+      expect(afterChoice1.repairBonus).toBe(0);
+      expect(afterChoice2.repairBonus).toBe(0);
+      expect(hp2, `${key}: hp2<=hp1`).toBeLessThanOrEqual(hp1);
+      expect(hp3, `${key}: hp3<=hp2`).toBeLessThanOrEqual(hp2);
+
+      // ⑤ 三场都活着，且终局留下可观余量（32%~49%）—— 不是勉强擦线
+      expect(hp1, `${key}: 第一场存活`).toBeGreaterThan(0);
+      expect(hp2, `${key}: 第二场存活`).toBeGreaterThan(0);
+      expect(hp3, `${key}: 第三场存活`).toBeGreaterThan(0);
+      expect(hp3).toBeGreaterThan(finalRuntime.playerMaxHp * 0.3);
+      finalRuntime.dispose();
+    }
+  });
+});
+
+/* ============ I. PRP-RUN-R1：「HP <= 0 = 本局立即失败」与耐久连续性修复 */
+
+describe('PRP-RUN-R1｜I 死亡即终局：单一耐久贯穿 Run、失败后只能重开', () => {
+  /** 合成一份「刚打完一场真实战斗」的 BATTLE 状态（不跑物理，纯状态机）。 */
+  function atBattle(): RunPageState {
+    return pressRunAction(pressRunAction(createRunPageState(CTX), CTX), CTX);
+  }
+
+  it('RP-R1-01 任意一场 Player HP = 0 → 立即 FAILED（不经过 RESULT、Day 不推进）', () => {
+    // 先在 CHOICE 里拿一层，确保失败时**本局 Build 非空**（Build 必须原样保留给人看）
+    let s = atBattle();
+    s = finishRunBattle(s, { winner: 'A', endReason: 'hp', playerHp: 700, enemyHp: 0, steps: 300 });
+    expect(s.phase).toBe('RESULT');
+    s = pressRunAction(s, CTX); // CHOICE
+    s = chooseRunBuff(s, 'heavyShell'); // → IDLE(DAY 4)
+    expect(s.day).toBe(RUN_INITIAL_DAY + 1);
+    const dayBeforeDeath = s.day;
+
+    s = pressRunAction(s, CTX); // EVENT
+    s = pressRunAction(s, CTX); // BATTLE②
+    const logBeforeDeath = s.log;
+    s = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp: 420, steps: 500 });
+
+    // ① 直接进失败终态（**没有** RESULT 这一站）
+    expect(s.phase).toBe('FAILED');
+    expect(runFailed(s)).toBe(true);
+    expect(s.phaseTrail[s.phaseTrail.length - 1]).toBe('FAILED');
+    // 这一场是 BATTLE → FAILED（第一场那次 RESULT 仍在历史里，但**之后**没再出现 RESULT）
+    expect(s.phaseTrail.slice(-2)).toEqual(['BATTLE', 'FAILED']);
+    expect(s.phaseTrail.lastIndexOf('RESULT')).toBeLessThan(s.phaseTrail.length - 1);
+    // ② Day 不推进（失败不发生 Day 前进）
+    expect(s.day).toBe(dayBeforeDeath);
+    // ③ 最终 Build 原样保留（失败页要展示它）
+    expect(runBuildIds(s)).toEqual(['heavyShell']);
+    // ④ 战斗记录如实保留（真实 HP 0，没有被改写成满耐久）
+    expect(s.battle!.playerHp).toBe(0);
+    expect(s.battle!.done).toBe(true);
+    expect(s.battle!.endReason).toBe('hp');
+    // ⑤ 失败只追加**两行**（失败叙事 + 真实耐久），且这两行里没有任何「继续 / 改装机会」引导
+    expect(s.log.length).toBe(logBeforeDeath.length + 2);
+    const tail = s.log.slice(-2).map((e) => e.text);
+    expect(tail[0]).toBe(`战车耐久耗尽，DAY ${dayBeforeDeath} 的验证到此结束。`);
+    expect(tail[1]).toBe('战车耐久剩余 0%。');
+    for (const line of tail) {
+      expect(line.includes('改装机会')).toBe(false);
+      expect(line.includes('继续')).toBe(false);
+    }
+    // 第一场那次「改装机会」仍在历史里（日志只追加、不清空）——只是不会再引出第二次
+    expect(logBeforeDeath.some((e) => e.text === '你发现了一次改装机会……')).toBe(true);
+    expect(s.log.slice(-2).some((e) => e.text === '你发现了一次改装机会……')).toBe(false);
+    for (const e of s.log) expect(/^\[/.test(e.text)).toBe(false);
+  });
+
+  it('RP-R1-02 FAILED 下结构上进不了 CHOICE：不推进 Day、不接受选卡、主动作=重新开始验证', () => {
+    let s = atBattle();
+    s = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp: 900, steps: 300 });
+    expect(s.phase).toBe('FAILED');
+
+    // 三选一浮层不打开
+    expect(runChoiceOpen(s)).toBe(false);
+    // 主动作可用，但文案是「重新开始验证」（不是「继续」）
+    expect(runActionEnabled(s)).toBe(true);
+    expect(runActionLabel(s)).toBe(RUN_RESTART_LABEL);
+    expect(runStartsNewRun(s)).toBe(true);
+    // 直接调 chooseRunBuff 也不能改变任何东西（准入要求 phase === 'CHOICE'）
+    expect(chooseRunBuff(s, 'kineticBurst')).toBe(s);
+    expect(chooseRunBuff(s, 'heavyShell')).toBe(s);
+    expect(runBuildIds(chooseRunBuff(s, 'heavyShell'))).toEqual([]);
+    // Day / 战斗记录 / 阶段都没被这些尝试推动
+    expect(s.day).toBe(RUN_INITIAL_DAY);
+    expect(s.phase).toBe('FAILED');
+
+    // ⚠️ 关键回归：`runCarriedPlayerHp` 不再把死亡伪装成「满耐久开幕」。
+    //    修复前它返回 null，调用方 `carried ?? playerHpMax` 会开出满耐久下一场。
+    expect(runCarriedPlayerHp(s)).toBe(0);
+    expect(runCarriedPlayerHp(s)).not.toBeNull();
+  });
+
+  it('RP-R1-03 失败后「重新开始验证」= 全新 Run（满耐久 / DAY 初始 / Build 与补偿清空）', () => {
+    let s = atBattle();
+    s = finishRunBattle(s, { winner: 'A', endReason: 'hp', playerHp: 600, enemyHp: 0, steps: 300 });
+    s = pressRunAction(s, CTX);
+    s = chooseRunBuff(s, 'twinCannon');
+    s = pressRunAction(s, CTX);
+    s = pressRunAction(s, CTX);
+    s = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp: 300, steps: 300 });
+    expect(s.phase).toBe('FAILED');
+    expect(runBuildIds(s)).toEqual(['twinCannon']);
+
+    const restart = pressRunAction(s, CTX);
+    expect(restart).not.toBe(s); // 不是原地改状态，而是**新局**
+    expect(restart.phase).toBe('IDLE');
+    expect(restart.day).toBe(RUN_INITIAL_DAY);
+    expect(restart.dayTotal).toBe(RUN_TOTAL_DAYS);
+    expect(restart.buffs).toEqual([]);
+    expect(runBuildIds(restart)).toEqual([]);
+    expect(restart.repairBonus).toBe(0);
+    expect(restart.battlesCompleted).toBe(0);
+    expect(restart.battle).toBeNull();
+    expect(runFailed(restart)).toBe(false);
+    expect(runStartsNewRun(restart)).toBe(false); // 新局的「继续」是继续**当前** Run
+    expect(runActionLabel(restart)).toBe('继续');
+    expect(runCarriedPlayerHp(restart)).toBeNull(); // 唯一合法的「满耐久开幕」来源
+    expect(restart.phaseTrail).toEqual(['IDLE']);
+    expect(restart.log.length).toBe(2);
+
+    // ⚠️ 必改 3：两种「按主动作」必须可区分 ——
+    //    失败/终局的这一下**开新 Run**；RESULT（未打完）的那一下**继续当前 Run**。
+    let mid = pressRunAction(pressRunAction(restart, CTX), CTX); // EVENT → BATTLE
+    mid = finishRunBattle(mid, { winner: 'A', endReason: 'hp', playerHp: 800, enemyHp: 0, steps: 300 });
+    expect(mid.phase).toBe('RESULT');
+    expect(runStartsNewRun(mid)).toBe(false);
+    expect(runActionLabel(mid)).toBe('继续');
+    const carried = pressRunAction(mid, CTX);
+    expect(carried.phase).toBe('CHOICE'); // 继续**当前** Run
+    expect(carried.day).toBe(mid.day); // 未选择前 Day 不动
+    expect(runBuildIds(carried)).toEqual([]);
+  });
+
+  it('RP-R1-04 真实物理确实能打出 HP = 0（死亡不是假设输入；状态机对真实战果生效）', () => {
+    // 夹具用**既有 Lab encounter** `RangedTurret`（OPP-03，停驻重炮）——它在同一玩家装载下
+    // 第一场就打死玩家。这里只用它来**客观产生**一次真实死亡，不参与 PRP 的演示流程。
+    const plan = buildSpawnPlan(RUN_DEMO_LOADOUT_ID, 'RangedTurret');
+    const rt = new PlanckBattleOrchestrator(plan.player.snapshot, plan.enemies[0].snapshot, registry, {}, false);
+    let frames = 0;
+    while (rt.result === null && frames < MAX_FRAMES) {
+      rt.step(FRAME_MS, 1);
+      frames += 1;
+    }
+    const result = rt.result;
+    expect(result, '夹具必须真的分出胜负').not.toBeNull();
+    // 真实物理死亡：HP 恰好归零、官方 winner = B、官方 endReason = hp
+    expect(rt.vehicleA.hp).toBe(0);
+    expect(result!.winner).toBe('B');
+    expect(result!.endReason).toBe('hp');
+    const enemyHp = rt.vehicleB.hp;
+    rt.dispose();
+
+    // 把**真实战果**喂给状态机 → 必须进 FAILED
+    let s = atBattle();
+    s = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp, steps: frames });
+    expect(s.phase).toBe('FAILED');
+    expect(s.battle!.playerHp).toBe(0);
+    expect(s.battlesCompleted).toBe(1); // 这一场确实打完了（战败也计入）
+    expect(runCarriedPlayerHp(s)).toBe(0);
+    expect(runStartsNewRun(s)).toBe(true);
+  });
+
+  it('RP-R1-05 未死的战败（phase 结束）不误判为失败：判据是真实 HP，不是 winner', () => {
+    // 构造「玩家落败但仍有耐久」的官方结果形态（endReason = 'phase'，HP > 0）
+    let s = atBattle();
+    s = finishRunBattle(s, { winner: 'B', endReason: 'phase', playerHp: 350, enemyHp: 800, steps: 900 });
+    expect(s.phase).toBe('RESULT'); // 不是 FAILED
+    expect(runFailed(s)).toBe(false);
+    expect(runStartsNewRun(s)).toBe(false);
+    expect(runCarriedPlayerHp(s)).toBe(350); // 血还在 → 可继续，且带着这 350 继续
+    const next = pressRunAction(s, CTX);
+    expect(next.phase).toBe('CHOICE');
+  });
+
+  it('RP-R1-06 Build Prototype Encounter 只是**引用**既有正式模板（零数值改动），且低压余量可量化', () => {
+    const rusher = LAB_ENCOUNTERS.find((e) => e.id === RUN_DEMO_ENCOUNTER_ID)!;
+    // ① 引用的模板 id 在正式对手池里真实存在（不是悬空 id）
+    const official = OPPONENT_TEMPLATES.find((t) => t.id === rusher.templateId);
+    expect(official, `正式对手池必须有 ${rusher.templateId}`).toBeDefined();
+    // ② 单体一车 + Draft **逐字段等于**正式池那一套 → 证明「没有修改正式敌人定义」
+    expect(rusher.count).toBe(1);
+    expect(rusher.draft).toEqual(official!.draft);
+    // ③ PRP 演示组合真的指向它（单车）
+    const plan = buildSpawnPlan(RUN_DEMO_LOADOUT_ID, RUN_DEMO_ENCOUNTER_ID);
+    expect(plan.encounterId).toBe(RUN_DEMO_ENCOUNTER_ID);
+    expect(plan.enemies.length).toBe(1);
+    // ④ 第一场（无强化）的真实余量：明显更低压，但**仍然真实接敌**（会掉血、敌人真的被打死）
+    let s = atBattle();
+    const rt = new RunBattleRuntime();
+    s = driveToEnd(s, rt);
+    const maxHp = s.battle!.playerHpMax;
+    const hp1 = s.battle!.playerHp;
+    expect(s.phase).toBe('RESULT'); // 第一场不死
+    expect(s.battle!.winner).toBe('A');
+    expect(s.battle!.endReason).toBe('hp');
+    expect(s.battle!.enemyHp).toBe(0); // 敌人真的被打死（不是放水 / 无接触）
+    expect(hp1).toBeGreaterThan(0);
+    expect(hp1).toBeGreaterThan(maxHp * 0.7); // 余量 > 70%（旧 Chaser 同一场只剩 24.5%）
+    expect(hp1).toBeLessThan(maxHp); // 但确实掉血了 —— 不是「无接敌」
     rt.dispose();
   });
 });

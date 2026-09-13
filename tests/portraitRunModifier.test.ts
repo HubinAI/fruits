@@ -286,25 +286,55 @@ describe('RP-MOD-02｜第一层三种强化在真实 Runtime 里的差异', () =
     heavyRt.dispose();
   });
 
-  it('重型弹头：自身后坐的真实反速度明显更大（真实物理量，不只比参数）', () => {
-    // 同一门炮、相同开火节奏 → 唯一变量是 recoilImpulse。
-    // 判定口径 = 整场里玩家 chassis 的**最负 vx**（= 开火瞬间被真实冲量推回来的峰值反速度）。
-    const peakRearwardVx = (mod: 'heavyShell' | null): number => {
+  it('重型弹头：自身后坐的真实冲量明显更大（真实物理量，不只比参数）', () => {
+    // 同一门炮、相同开火节奏 → 唯一变量是 recoilImpulse（30 → 90）。
+    //
+    // ⚠️ **PRP-RUN-R1 口径修正**：旧口径 = 「整场里 chassis 的最负 vx」。它在本遭遇下**失真**：
+    //    实测最负 vx 出现在**非开火帧**（base 的 −0.625 落在第 278 帧，而开火帧是 1/61/121/…），
+    //    也就是量到的是**两车贴身对顶的接触推挤**，不是后坐 → 旧口径曾给出「重型弹头后坐更小」
+    //    的错误结论（−0.501 vs −0.625）。旧遭遇（重型追猎者）恰好让接触推挤小于后坐峰值才没暴露。
+    //    ⇒ 改为**开火帧对齐 + 按各自局部趋势归一**的冲量凹陷（与 `portraitRunBattle` PB-06 同口径）：
+    //      dip = 开火前 3 帧平均逐帧位移 − 开火帧逐帧位移，只在开火帧测量。
+    const recoilDip = (mod: 'heavyShell' | null): { avg: number; min: number; n: number; allUp: boolean } => {
       const rt = new RunBattleRuntime({ modifier: mod });
       const body = rt.orchestrator.vehicleA.body;
-      let minVx = Infinity;
+      const world = rt.orchestrator.world;
+      const fires: number[] = [];
+      const off = rt.orchestrator.onCombatEvent((ev) => {
+        if (ev.type === 'weaponFire' && ev.team === 'A') fires.push(rt.stepCount + 1);
+      });
+      const ax: number[] = [];
       for (let i = 0; i < 400; i++) {
         rt.step(1000 / 60);
-        minVx = Math.min(minVx, rt.orchestrator.world.getLinearVelocity(body).x);
+        ax.push(world.getPosition(body).x);
         if (rt.result) break;
       }
+      off();
       rt.dispose();
-      return minVx;
+      const d = (i: number): number => ax[i] - ax[i - 1];
+      const use = fires.filter((f) => f >= 3 && f < ax.length);
+      const dips = use.map((f) => (d(f - 1) + d(f - 2) + d(f - 3)) / 3 - d(f));
+      expect(use.length).toBe(6); // 400 帧内共 7 次开火，首帧无前窗 → 6 次可测
+      return {
+        avg: dips.reduce((a, b) => a + b, 0) / dips.length,
+        min: Math.min(...dips),
+        n: dips.length,
+        allUp: dips.every((v) => v > 0),
+      };
     };
-    const baseVx = peakRearwardVx(null);
-    const heavyVx = peakRearwardVx('heavyShell');
-    expect(baseVx).toBeLessThan(0); // 基础炮确实会把自己推回来
-    expect(heavyVx).toBeLessThan(baseVx); // 强化后反速度更负 = 后坐更明显
+    const base = recoilDip(null);
+    const heavy = recoilDip('heavyShell');
+    // 基础炮确实每次开火都把自己推回来（6/6）
+    expect(base.allUp).toBe(true);
+    expect(base.min).toBeGreaterThan(0);
+    // 强化后每一次开火的凹陷都更大（6/6），且平均凹陷明显变大
+    expect(heavy.allUp).toBe(true);
+    expect(heavy.avg).toBeGreaterThan(base.avg * 3); // 实测 4.14×（参数比 3×）
+    // 冻结实测值：base 平均凹陷 0.064 / heavy 平均凹陷 0.265
+    expect(base.avg).toBeCloseTo(0.06401, 3);
+    expect(heavy.avg).toBeCloseTo(0.26507, 3);
+    // 最强一次：base 0.0685 / heavy 0.2850
+    expect(heavy.min).toBeGreaterThan(base.min * 3);
   });
 
   it('双联炮：一次攻击极短间隔连出两发真实弹丸（真实 projectile + 真实时间差 + 同向）', () => {

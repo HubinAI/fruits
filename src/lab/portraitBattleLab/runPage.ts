@@ -80,6 +80,7 @@ import {
   runCarriedPlayerHp,
   runChoiceOpen,
   runChoicePool,
+  runStartsNewRun,
   runVerificationComplete,
   syncRunBattle,
   visibleRunLog,
@@ -353,6 +354,12 @@ export interface RunPageProbe {
   readonly battlesCompleted: number;
   /** PRP-BUILD-01：本次验证是否已结束（= `battlesCompleted >= 3`）。 */
   readonly verificationComplete: boolean;
+  /**
+   * PRP-RUN-R1 必改 3：按下主动作会不会**开一个全新 Run**
+   * （`true` = 失败终态 / 三场打完的终局；`false` = 继续当前 Run → CHOICE）。
+   * 这是「继续当前 Run」与「重新开始新 Run」在浏览器端的**唯一可观测判据**。
+   */
+  readonly startsNewRun: boolean;
   readonly buffs: readonly string[];
   readonly buffLabels: readonly string[];
   /** 顶部实际绘制的强化图标数量（0 = 顶部第二行完全没有内容，可反证「没有空槽」）。 */
@@ -1231,6 +1238,8 @@ export class RunPage {
       /** PRP-BUILD-01：验证进度（0/1/2/3 场已打完）。 */
       battlesCompleted: s.battlesCompleted,
       verificationComplete: runVerificationComplete(s),
+      /** PRP-RUN-R1：「这一下会开新 Run」还是「继续当前 Run」。 */
+      startsNewRun: runStartsNewRun(s),
       /** ⚠️ buffs 与 build 同源（`buffs` 是本局 Build 的唯一状态，probe 只是换了个形状暴露）。 */
       buffs: s.buffs.map((b) => b.id),
       buffLabels: s.buffs.map((b) => b.label),

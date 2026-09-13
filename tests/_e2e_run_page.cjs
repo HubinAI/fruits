@@ -82,6 +82,17 @@ const BUFF_ICON_KEY = {
 const SPRITE_COLORS = {
   watermelonBody: [0x30, 0x80, 0x30], // assets/visuals/body_watermelon.png 主色带
   bananaBody: [0xf0, 0xc0, 0x30], // assets/visuals/body_banana.png 主色带
+  /**
+   * 菠萝车身（PRP-RUN-R1：低压验证对手「菠萝冲刺车」`R1-RUSH-02`）。
+   *
+   * ⚠️ 菠萝没有 PNG 资源 —— 它由**正式 Renderer** 程序化绘制
+   * （`src/render/renderer.ts` 的 `body_pineapple` 分支：`#c9c24a` 填充，
+   * `globalAlpha 0.92`）。因此画到画布上的像素是**与竞技场天空的混合值**：
+   * 0.92 × (201,194,74) + 0.08 × 背景(≈#1d3050 地平线带) ≈ **(187,182,74)**。
+   * 与目标色各通道差 (14,12,0) → 仍在 tol 16 内；同时与西瓜/香蕉色族互斥
+   * （对香蕉差 (39,2,26)、对西瓜差 (153,66,26)，均 > 16）。
+   */
+  pineappleBody: [0xc9, 0xc2, 0x4a],
 };
 
 /**
@@ -282,9 +293,9 @@ function countExact(page, rgb) {
 }
 
 /**
- * PRP-F1：在「某辆车**自己的可见外廓**」内统计该车 sprite 特征色像素（带容差）。
- * 比「整页数精确色」更强：既证明该车是真实 sprite（不是纯色占位），
- * 又证明「左=西瓜 / 右=香蕉」没有互换（交叉命中必须为 0）。
+ * PRP-F1：在「某辆车**自己的可见外廓**」内统计该车体特征色像素（带容差）。
+ * 比「整页数精确色」更强：既证明该车是真实车身外观（不是纯色占位），
+ * 又证明「左=西瓜 / 右=对手车身」没有互换（交叉命中必须为 0）。
  * ⚠️ `box` 的坐标系**随 stage.mode 变化**（见 runPage.ts 的 stage 字段注释）：
  *   - `mode === 'battle'`：bounds 是**带内相对坐标** → `bandOffsetY` 传 `bands.stage.y`（80）；
  *   - `mode === 'idle'`：bounds 已是**页面绝对坐标** → `bandOffsetY` 必须传 0。
@@ -578,7 +589,7 @@ async function runViewport(browser, vp) {
   let p = await probeOf(page);
   log(p.phase === 'EVENT', `[${tag}] R13 真实点击「继续」→ EVENT`, `phase=${p.phase}`);
   log(
-    p.logCount === p0.logCount + 2 && p.log[p.log.length - 1].text === '你遭遇了追猎者。',
+    p.logCount === p0.logCount + 2 && p.log[p.log.length - 1].text === '你遭遇了菠萝冲刺车。',
     `[${tag}] R14 EVENT 日志追加 2 句自然语言敌情`,
     p.log.slice(-2).map((l) => l.text).join(' ｜ '),
   );
@@ -591,7 +602,8 @@ async function runViewport(browser, vp) {
   );
   /*
     PRP-F1 必改 1/2：遭遇瞬间中部舞台就已切成**真实 Planck 战斗世界**（世界尺度 = 正式 1600×900），
-    并且两车之间有**明确的开局距离**（实测外廓间距 ≈ 529 世界 px）—— 不是「贴车开局」。
+    并且两车之间有**明确的开局距离**（实测外廓间距 ≈ 564 世界 px）—— 不是「贴车开局」。
+    ⚠️ PRP-RUN-R1：本值随**敌方车身的真实外廓宽度**变化（开区间距 = 800 − 半宽A − 半宽B）。
   */
   const w0 = p.battleWorld;
   log(
@@ -608,29 +620,37 @@ async function runViewport(browser, vp) {
     w0 ? `spawnA=${round2(w0.world.spawnAx)} spawnB=${round2(w0.world.spawnBx)} sep=${round2(w0.world.spawnSeparation)}` : '',
   );
   log(
-    !!w0 && w0.world.initialGap > 400 && Math.round(w0.world.initialGap) === 529,
-    `[${tag}] R16e 必改 2：开局有明确距离（两车外廓实测间距 ≈ 529 世界 px）`,
+    !!w0 && w0.world.initialGap > 400 && Math.round(w0.world.initialGap) === 564,
+    `[${tag}] R16e 必改 2：开局有明确距离（两车外廓实测间距 ≈ 564 世界 px）`,
     w0 ? `initialGap=${round2(w0.world.initialGap)}（世界宽的 ${round2((w0.world.initialGap / w0.world.width) * 100)}%）` : '',
   );
   const sEvent = await pixelStats(page);
   ledgerCheck(tag, 'R17 EVENT (DAY3)', sEvent, ledgerExpect({ day: 3, stage: 'battle' }), vp.dpr);
   if (vp.dpr === 1) {
     /*
-      PRP-F1 实测（相机 0.24375、dpr=1、EVENT 帧）：
-      左车框内 西瓜色族 217px / 香蕉色族 0；右车框内 香蕉色族 53px / 西瓜色族 0。
+      PRP-RUN-R1 实测（dpr=1、EVENT 帧、tol 16）：
+      左框（玩家西瓜）西瓜色族在场 / 菠萝与香蕉 0；右框（敌人菠萝冲刺车）菠萝色族在场 /
+      西瓜与香蕉 0 → 两车特征色**互斥**，判定「右边那辆确实是另一个正式车身」。
       阈值取实测值的 ~55%，交叉命中必须严格为 0。
     */
     const bandY = p.bands.stage.y;
     const pb = p.stage.player.bounds;
     const eb = p.stage.enemy.bounds;
     const melonL = await countSpriteColorInBox(page, pb, bandY, SPRITE_COLORS.watermelonBody, SPRITE_COLOR_TOL);
+    const pineL = await countSpriteColorInBox(page, pb, bandY, SPRITE_COLORS.pineappleBody, SPRITE_COLOR_TOL);
     const bananaL = await countSpriteColorInBox(page, pb, bandY, SPRITE_COLORS.bananaBody, SPRITE_COLOR_TOL);
+    const pineR = await countSpriteColorInBox(page, eb, bandY, SPRITE_COLORS.pineappleBody, SPRITE_COLOR_TOL);
     const bananaR = await countSpriteColorInBox(page, eb, bandY, SPRITE_COLORS.bananaBody, SPRITE_COLOR_TOL);
     const melonR = await countSpriteColorInBox(page, eb, bandY, SPRITE_COLORS.watermelonBody, SPRITE_COLOR_TOL);
     log(
-      melonL >= 100 && bananaR >= 30 && bananaL === 0 && melonR === 0,
-      `[${tag}] R17b 玩家 / 敌人都是正式车辆 sprite（各自外廓内特征色在场且互斥）`,
-      `左框 西瓜${melonL}px/香蕉${bananaL}px · 右框 香蕉${bananaR}px/西瓜${melonR}px`,
+      melonL >= 100 &&
+        pineR >= 30 &&
+        pineL === 0 &&
+        bananaL === 0 &&
+        bananaR === 0 &&
+        melonR === 0,
+      `[${tag}] R17b 玩家 / 敌人都是正式车辆外观（各自外廓内特征色在场且三色互斥）`,
+      `左框 西瓜${melonL}px/菠萝${pineL}px/香蕉${bananaL}px · 右框 菠萝${pineR}px/西瓜${melonR}px/香蕉${bananaR}px`,
     );
   }
 
@@ -1183,10 +1203,15 @@ async function runViewport(browser, vp) {
   }
 
   /* ------------------ 11d) 第三场 = 最终战斗（两层 Build 同时真实生效） */
-  // 规则：carry = 上一场真实剩余（<= 0 → 满耐久开幕）；本分支没选维修项 → 无补偿
+  /*
+    规则（PRP-RUN-R1 起）：carry = 上一场真实剩余；**耐久 <= 0 = 本局立即结束**（FAILED 终态），
+    所以能走到最终战斗 ⇒ 上一场结束时 hp2 必然 > 0 —— 不存在「0 耐久 → 满耐久开幕」这条
+    已被删除的错误分支。本分支没选维修项 → 无补偿 → 开局耐久必须**恰好等于**上一场剩余
+    （不多不少 = 无隐藏回血）。
+  */
   const hp2 = pRes2.battle ? pRes2.battle.playerHp : NaN;
   const hpMax2 = pRes2.battle ? pRes2.battle.playerHpMax : NaN;
-  const expectInit3 = hp2 > 0 ? hp2 : hpMax2;
+  const expectInit3 = hp2;
   await clickRect(page, pIdle5.actionRect); // IDLE → EVENT
   const pEvent5 = await probeOf(page);
   await clickRect(page, pEvent5.actionRect); // EVENT → BATTLE③
@@ -1219,11 +1244,27 @@ async function runViewport(browser, vp) {
       Math.abs(w3.initialPlayerHp - expectInit3) < 1e-6 &&
       w3.initialPlayerHp > 0 &&
       w3.initialPlayerHp <= w3.playerHpMax,
-    `[${tag}] R53d 跨战斗耐久规则在最终战斗同样成立（carry = 上一场剩余，<=0 → 满耐久）`,
+    `[${tag}] R53d 跨战斗耐久规则在最终战斗同样成立（carry = 上一场剩余，绝不超过上一场剩余 = 无隐藏回血）`,
     w3
       ? `开局 ${round2(w3.initialPlayerHp)}/${round2(w3.playerHpMax)}（上一场结束 ${round2(hp2)} → 期望 ${round2(expectInit3)}）`
       : '',
   );
+  /*
+    PRP-RUN-R1 结构断言（浏览器端真实证据）：
+      三场战斗的**开局耐久单调不增**（第二场 ≤ 第一场结束时剩余，第三场 ≤ 第二场结束时剩余），
+      且只可能因为「耐久没归零」才走到下一步 → 结构上不存在隐藏回血 / 死亡续命。
+  */
+  if (w3) {
+    log(
+      w2.initialPlayerHp <= hpMaxCarried &&
+        w2.initialPlayerHp <= hpCarried + 1e-6 &&
+        w3.initialPlayerHp <= hp2 + 1e-6 &&
+        hpCarried > 0 &&
+        hp2 > 0,
+      `[${tag}] R53e 单一耐久贯穿三场：开局耐久单调不增，且前两场结束耐久均 > 0（无一例死亡续命）`,
+      `B1 结束 ${round2(hpCarried)} → B2 开局 ${round2(w2.initialPlayerHp)} → B2 结束 ${round2(hp2)} → B3 开局 ${round2(w3.initialPlayerHp)}`,
+    );
+  }
   if (w3) {
     /*
       必改 3 的浏览器端真实证据：三连装填 = 同一 burst Foundation 把 burstRounds 2 → 3，
