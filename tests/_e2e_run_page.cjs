@@ -48,9 +48,25 @@ const PALETTE = {
   buffIconShell: [0xb8, 0x56, 0x2e], // 重型弹头
   buffIconTwin: [0xc0, 0x7a, 0x2a], // 双联炮
   buffIconReload: [0x3f, 0x8f, 0x5a], // 快速装填
+  /* ---- PRP-BUILD-01 第二层（条件池）图标底色 ---- */
+  buffIconKinetic: [0x8e, 0x44, 0xc0], // 动能爆发
+  buffIconTriple: [0x2f, 0x8f, 0xc4], // 三连装填
+  buffIconCharge: [0xc9, 0xa2, 0x27], // 反冲蓄能
+  buffIconRepair: [0x4f, 0xc4, 0xa8], // 紧急维修
   buffChip: [0xe6, 0xed, 0xf8],
   cardBar: [0x5f, 0x86, 0xc4],
   actionBar: [0x33, 0x50, 0x7a],
+};
+
+/** 强化 id → 顶部图标底色的调色板键（`BUFF_ICON_COLOR` 的浏览器侧镜像）。 */
+const BUFF_ICON_KEY = {
+  heavyShell: 'buffIconShell',
+  twinCannon: 'buffIconTwin',
+  fastReload: 'buffIconReload',
+  kineticBurst: 'buffIconKinetic',
+  tripleLoad: 'buffIconTriple',
+  recoilCharge: 'buffIconCharge',
+  emergencyRepair: 'buffIconRepair',
 };
 
 /**
@@ -75,9 +91,6 @@ const SPRITE_COLORS = {
  */
 const SPRITE_COLOR_TOL = 16;
 
-/** 三个强化图标的底色集合（用于「恰好一个在场」判定）。 */
-const BUFF_ICON_COLORS = [PALETTE.buffIconShell, PALETTE.buffIconTwin, PALETTE.buffIconReload];
-
 /**
  * CHOICE 卡片图标盒内「该选项专属图标色」必须出现的**最小像素数**（46×46 = 2116 盒内）。
  * ⚠️ PRP-F2：图标判据从「图标中心单点采样」升级为「盒内按面积统计」，原因见
@@ -97,72 +110,70 @@ const SAMPLE_COLORS = {
   actionEdge: [0x4f, 0x70, 0x99],
   cardBg: [0x1b, 0x24, 0x32],
   cardEdge: [0x3d, 0x4c, 0x66],
-  /** CHOICE 卡片左侧矢量图标色（按选项区分）。 */
+  /** CHOICE 卡片左侧矢量图标色（按选项区分；七个两两 RGB 精确互斥）。 */
   iconShell: [0xff, 0xb0, 0x66],
   iconTwin: [0xff, 0xd1, 0x66],
   iconReload: [0x7f, 0xd6, 0xa0],
+  iconKinetic: [0xc9, 0x8c, 0xf0],
+  iconTriple: [0x79, 0xc0, 0xea],
+  iconCharge: [0xe8, 0xc4, 0x6a],
+  iconRepair: [0x5f, 0xd0, 0xc0],
 };
 
-/** 各状态整页分层面积的冻结期望（唯一来源：tests/portraitRunPage.test.ts RP-22）。 */
-const LEDGER = {
-  /**
-   * ⚠️ PRP-F1：`ground` / `road` 只是 **IDLE 待机近景** 的两层。
-   * EVENT 起舞台带被真实 Planck 战斗世界（离屏位图）**整块覆盖** → 这两层在画面上不存在。
-   * 模型层（纯 node）里它们精确为 0；浏览器端因为战斗世界里的车辆 sprite 抗锯齿边缘
-   * 可能有极少数像素**恰好**等于这两个调色板色，给一个极小容差（见 LEDGER_TOLERANCE）。
-   */
-  IDLE: {
-    ground: 780, road: 19500, nodeDone: 384, nodeTodo: 512,
-    buffIconShell: 0, buffIconTwin: 0, buffIconReload: 0, buffChip: 0,
-    cardBar: 0, actionBar: 990,
-  },
-  EVENT: {
-    ground: 0, road: 0, nodeDone: 384, nodeTodo: 512,
-    buffIconShell: 0, buffIconTwin: 0, buffIconReload: 0, buffChip: 0,
-    cardBar: 0, actionBar: 990,
-  },
-  BATTLE: {
-    ground: 0, road: 0, nodeDone: 384, nodeTodo: 512,
-    buffIconShell: 0, buffIconTwin: 0, buffIconReload: 0, buffChip: 0,
-    cardBar: 0, actionBar: 0,
-  },
-  RESULT: {
-    ground: 0, road: 0, nodeDone: 384, nodeTodo: 512,
-    buffIconShell: 0, buffIconTwin: 0, buffIconReload: 0, buffChip: 0,
-    cardBar: 0, actionBar: 990,
-  },
-  CHOICE: {
-    ground: 0, road: 0, nodeDone: 0, nodeTodo: 0,
-    buffIconShell: 0, buffIconTwin: 0, buffIconReload: 0, buffChip: 0,
-    cardBar: 3720, actionBar: 0,
-  },
-  /*
-    回到 IDLE 且拿到 1 个强化（双联炮）→ 只多出「该选项底色 756 + 高光块 144」。
-    ⚠️ PRP-F2：进度节点**对调**（`nodeDone 384→512` / `nodeTodo 512→384`）是**预期后果** ——
-    选择强化会推进 `DAY 3 → 4`，已走完节点 +1 / 未走完节点 −1，**总量恒为 896 不变**。
-    这不是放开断言：节点规则（`i < day ? done : todo`，每个 128px²）仍是唯一来源。
-  */
-  'IDLE+BUFF': {
-    ground: 780, road: 19500, nodeDone: 512, nodeTodo: 384,
-    buffIconShell: 0, buffIconTwin: 756, buffIconReload: 0, buffChip: 144,
-    cardBar: 0, actionBar: 990,
-  },
+/** 选项 id → 该选项的 CHOICE 卡片图标色（`CHOICE_ICON_COLOR` 的浏览器侧镜像）。 */
+const ICON_COLOR_BY_ID = {
+  heavyShell: SAMPLE_COLORS.iconShell,
+  twinCannon: SAMPLE_COLORS.iconTwin,
+  fastReload: SAMPLE_COLORS.iconReload,
+  kineticBurst: SAMPLE_COLORS.iconKinetic,
+  tripleLoad: SAMPLE_COLORS.iconTriple,
+  recoilCharge: SAMPLE_COLORS.iconCharge,
+  emergencyRepair: SAMPLE_COLORS.iconRepair,
 };
 
 /**
- * 浏览器端允许的**极小**容差（模型层仍为精确 0）。
- * 理由：真实战斗世界由正式 Renderer 绘制，车辆 sprite 的抗锯齿边缘可能产生
- * 个别恰好等于「地线 / 路面」调色板色的像素；而 IDLE 近景贡献的是 780 / 19500，
- * 相差三个数量级 → 容差既能挡住「近景泄漏进战斗画面」，又不会因一两颗 AA 像素假红。
+ * 面积账本的**期望值生成器**（唯一来源 = 模型层 `tests/portraitRunPage.test.ts` 的
+ * RP-22 / RP-22b 冻结字面量）。
+ *
+ * ⚠️ 为什么不是一张静态表：PRP-BUILD-01 把流程改成「三场两选」后，**同一个 phase 会出现在
+ *    不同的 day**（DAY 3 / 4 / 5）—— 顶部进度节点随之整体前移一格；顶部强化行也会从
+ *    0 → 1 → 2 个图标。逐帧静态表会退化成手抄，容易与真实规则脱钩，
+ *    因此这里按**与布局函数同源的规则**生成，并与 RP-22b 的字面量保持一致：
+ *      · 节点：`nodeDone = day × 128` / `nodeTodo = (7 − day) × 128`（总量恒 896）；
+ *      · 图标：每个 30×30 = 900（底色 756 + 高光块 144），**只画实际已获得的**。
+ *
+ * ⚠️ `stage === 'idle'` 才有 `ground` / `road`（待机近景两层）；battle 模式舞台带被真实
+ *    Planck 战斗世界整块位图覆盖 → 这两层在画面上不存在（账面 0，不是「少画了」）。
  */
-/**
- * 面积账本容差。
- * - `ground` / `road`：PRP-F1 起舞台带被真实 Planck 战斗世界**整块位图覆盖**，车辆 sprite / 背景
- *   抗锯齿边缘可能有极少数像素恰好等于这两个调色板色 → 给「小但非零」的容差。
- * - 其余层（如 nodeTodo）：都是纯平涂 UI 面，正常为精确值；但同一原因仍有**巧合命中**
- *   （实测 390×844@1 的 RESULT 帧 nodeTodo = 513，期望 512，恰好多 1px，且随战况浮动）
- *   → 用 `LEDGER_TOLERANCE_DEFAULT` 兜住，容差量级 ≪ 该层面积（1.5% 以内）。
- */
+function ledgerExpect({ day, stage, buffs = [], action = true, masked = false }) {
+  const e = {
+    ground: 0,
+    road: 0,
+    nodeDone: 0,
+    nodeTodo: 0,
+    buffChip: 0,
+    cardBar: 0,
+    actionBar: 0,
+  };
+  for (const k of Object.keys(BUFF_ICON_KEY)) e[BUFF_ICON_KEY[k]] = 0;
+  // CHOICE：整页被遮罩合成 → 底层不再带精确色，只登记浮层自身的强调条（3 张 × 1240）
+  if (masked) {
+    e.cardBar = 3 * 1240;
+    return e;
+  }
+  if (stage === 'idle') {
+    e.ground = 780;
+    e.road = 19500;
+  }
+  e.nodeDone = day * 128;
+  e.nodeTodo = (7 - day) * 128;
+  for (const id of buffs) e[BUFF_ICON_KEY[id]] = 756;
+  e.buffChip = 144 * buffs.length;
+  e.actionBar = action ? 990 : 0;
+  return e;
+}
+
+/** 面积比较容差（见 LEDGER_TOLERANCE 注释）。 */
 const LEDGER_TOLERANCE = { ground: 64, road: 256 };
 const LEDGER_TOLERANCE_DEFAULT = 8;
 
@@ -323,14 +334,17 @@ async function clickRect(page, r) {
   await clickLogical(page, c.x, c.y);
 }
 
-function ledgerCheck(tag, label, stats, key, dpr) {
-  const exp = LEDGER[key];
+/**
+ * 面积账本比对。`exp` 由 `ledgerExpect()` 生成（= 模型层 RP-22 / RP-22b 的冻结口径）。
+ * ⚠️ dpr≠1 时画布被浏览器重采样 → 只做结构断言（不做精确面积）。
+ */
+function ledgerCheck(tag, label, stats, exp, dpr) {
   if (dpr !== 1) {
     // 重采样后精确值不再成立：改断言「结构与流程」（不做精确面积）
     const structural =
-      key === 'CHOICE'
+      exp.cardBar > 0
         ? stats.cardBar > 0 && stats.road === 0
-        : stats.nodeTodo > 0;
+        : stats.nodeTodo > 0 || stats.ground > 0;
     log(
       structural,
       `[${tag}] ${label}（dpr≠1 只做结构断言）`,
@@ -339,7 +353,7 @@ function ledgerCheck(tag, label, stats, key, dpr) {
     return;
   }
   const diff = Object.keys(exp).filter(
-    (k) => Math.abs(stats[k] - exp[k]) > (LEDGER_TOLERANCE[k] ?? LEDGER_TOLERANCE_DEFAULT),
+    (k) => Math.abs((stats[k] ?? 0) - exp[k]) > (LEDGER_TOLERANCE[k] ?? LEDGER_TOLERANCE_DEFAULT),
   );
   log(
     diff.length === 0,
@@ -348,6 +362,33 @@ function ledgerCheck(tag, label, stats, key, dpr) {
       ? diff.map((k) => `${k}:实际${stats[k]}≠期望${exp[k]}`).join(' / ')
       : Object.keys(exp).length + ' 层全部一致',
   );
+}
+
+/**
+ * CHOICE 卡片图标判据（PRP-BUILD-01 起两层池共用）。
+ *
+ * 口径：在**与绘制同源**的 `iconRect` 盒内按**精确 RGB 相等**统计该选项的专属图标色，
+ * 并要求其它**全部六个**图标色的命中为 0（七个色两两精确互斥）。
+ * ⚠️ 必须是「盒内面积统计」而不是中心单点采样：双联炮图标是两根并排炮管，
+ *    46×46 盒的几何中心恰好落在两管空隙里，单点采样会假红（见 runPage.ts 的 iconRect 注释）。
+ */
+async function checkChoiceIcons(page, probe) {
+  const all = Object.values(ICON_COLOR_BY_ID);
+  const rows = [];
+  for (const opt of probe.choiceOptions) {
+    const own = ICON_COLOR_BY_ID[opt.id];
+    const ownPx = await countSpriteColorInBox(page, opt.iconRect, 0, own, 0);
+    let cross = 0;
+    for (const c of all) {
+      if (c === own) continue;
+      cross += await countSpriteColorInBox(page, opt.iconRect, 0, c, 0);
+    }
+    rows.push({ id: opt.id, own: ownPx, cross });
+  }
+  return {
+    ok: rows.every((r) => r.own >= CHOICE_ICON_MIN_PX && r.cross === 0),
+    rows,
+  };
 }
 
 async function runViewport(browser, vp) {
@@ -502,7 +543,7 @@ async function runViewport(browser, vp) {
     `mode=${p0.stage.mode} battleWorld=${p0.battleWorld ? 'present' : 'null'} scale=${round2(p0.stage.scale)}`,
   );
   const sIdle = await pixelStats(page);
-  ledgerCheck(tag, 'R12 IDLE', sIdle, 'IDLE', vp.dpr);
+  ledgerCheck(tag, 'R12 IDLE (DAY3 · 0 强化)', sIdle, ledgerExpect({ day: 3, stage: 'idle' }), vp.dpr);
 
   /* ------------------------------------------- 3b) 战斗主体 = 真实车辆 sprite */
   if (vp.dpr === 1) {
@@ -572,7 +613,7 @@ async function runViewport(browser, vp) {
     w0 ? `initialGap=${round2(w0.world.initialGap)}（世界宽的 ${round2((w0.world.initialGap / w0.world.width) * 100)}%）` : '',
   );
   const sEvent = await pixelStats(page);
-  ledgerCheck(tag, 'R17 EVENT', sEvent, 'EVENT', vp.dpr);
+  ledgerCheck(tag, 'R17 EVENT (DAY3)', sEvent, ledgerExpect({ day: 3, stage: 'battle' }), vp.dpr);
   if (vp.dpr === 1) {
     /*
       PRP-F1 实测（相机 0.24375、dpr=1、EVENT 帧）：
@@ -647,7 +688,13 @@ async function runViewport(browser, vp) {
       : 'no bounds',
   );
   const sBattle = await pixelStats(page);
-  ledgerCheck(tag, 'R22 BATTLE 开局', sBattle, 'BATTLE', vp.dpr);
+  ledgerCheck(
+    tag,
+    'R22 BATTLE 开局 (DAY3)',
+    sBattle,
+    ledgerExpect({ day: 3, stage: 'battle', action: false }),
+    vp.dpr,
+  );
   if (vp.dpr === 1) {
     // 禁用态的真实像素证据：按钮填充离开可用态色（禁用色在 (btn.x+10, btn.y+24)）
     const btn = p.actionRect;
@@ -815,7 +862,7 @@ async function runViewport(browser, vp) {
   );
   log(p.actionLabel === '继续' && p.actionEnabled, `[${tag}] R28 RESULT 底部重新出现「继续」`, `${p.actionLabel}/${p.actionEnabled}`);
   const sResult = await pixelStats(page);
-  ledgerCheck(tag, 'R29 RESULT', sResult, 'RESULT', vp.dpr);
+  ledgerCheck(tag, 'R29 RESULT (DAY3)', sResult, ledgerExpect({ day: 3, stage: 'battle' }), vp.dpr);
   const bandSamplesBefore = vp.dpr === 1 ? await sampleBands(page) : [];
   const playerRectAtResult = JSON.stringify(p.stage.player);
 
@@ -824,10 +871,18 @@ async function runViewport(browser, vp) {
   p = await probeOf(page);
   log(p.phase === 'CHOICE' && p.choiceOpen, `[${tag}] R30 真实点击「继续」→ CHOICE 浮层`, `phase=${p.phase}`);
   log(p.choiceOptions.length === 3, `[${tag}] R31 三选一浮层恰好 3 个选项`, p.choiceOptions.map((o) => o.label).join(' / '));
+  /*
+    PRP-BUILD-01 必改 1 的前半：第一次选择**必然是固定的第一层三选一**
+    （`choicePoolLayer === 1`），并且选项 id 正是 Queue 点名的三项。
+  */
   log(
-    JSON.stringify(p.choiceOptions.map((o) => o.label)) === JSON.stringify(['重型弹头', '双联炮', '快速装填']),
-    `[${tag}] R32 选项正是 Queue 点名的三项`,
-    p.choiceOptions.map((o) => o.label).join(' / '),
+    p.choicePoolLayer === 1 &&
+      JSON.stringify(p.choiceOptions.map((o) => o.label)) ===
+        JSON.stringify(['重型弹头', '双联炮', '快速装填']) &&
+      JSON.stringify(p.choiceOptions.map((o) => o.id)) ===
+        JSON.stringify(['heavyShell', 'twinCannon', 'fastReload']),
+    `[${tag}] R32 第一次选择 = 第一层固定三选一（layer=1，正是 Queue 点名的三项）`,
+    `layer=${p.choicePoolLayer} ${p.choiceOptions.map((o) => o.label).join(' / ')}`,
   );
   log(p.logCount === p0.logCount + 5, `[${tag}] R33 打开浮层不写日志（历史全程累积）`, `logCount=${p.logCount}`);
   log(
@@ -842,7 +897,7 @@ async function runViewport(browser, vp) {
     p.choiceOptions.map((o) => `${o.label}：${o.note}`).join(' ｜ '),
   );
   const sChoice = await pixelStats(page);
-  ledgerCheck(tag, 'R35 CHOICE', sChoice, 'CHOICE', vp.dpr);
+  ledgerCheck(tag, 'R35 CHOICE', sChoice, ledgerExpect({ masked: true }), vp.dpr);
   if (vp.dpr === 1) {
     // 「整体变暗」：与 RESULT 时**同一批点位**逐点对比，5 处必须全部离开原色（被遮罩合成）
     const after = await sampleBands(page);
@@ -869,23 +924,13 @@ async function runViewport(browser, vp) {
       图标：在**与绘制同源**的 `iconRect` 内按面积统计该选项专属图标色，并要求「它选项的图标色为 0」
       （调色板逐对互斥 → 交叉命中恒应为 0，与车辆 sprite 特征色同一套纪律）。
     */
-    const ICON_COLORS = [SAMPLE_COLORS.iconShell, SAMPLE_COLORS.iconTwin, SAMPLE_COLORS.iconReload];
-    const iconCounts = [];
-    for (let i = 0; i < cards.length; i += 1) {
-      const box = p.choiceOptions[i].iconRect;
-      const own = await countSpriteColorInBox(page, box, 0, ICON_COLORS[i], 0);
-      let cross = 0;
-      for (let j = 0; j < ICON_COLORS.length; j += 1) {
-        if (j === i) continue;
-        cross += await countSpriteColorInBox(page, box, 0, ICON_COLORS[j], 0);
-      }
-      iconCounts.push({ own, cross });
-    }
-    const iconOk = iconCounts.every((c) => c.own >= CHOICE_ICON_MIN_PX && c.cross === 0);
+    const icons = await checkChoiceIcons(page, p);
     log(
-      bgOk && barOk && iconOk,
+      bgOk && barOk && icons.ok,
       `[${tag}] R37 卡片 = 图标 + 名称 + 一句结果（几何被真实像素命中，位置 = 布局唯一来源）`,
-      `bg=${at(0)} bar=${at(1)} icon(盒内px)=${iconCounts.map((c) => c.own).join('/')} 交叉=${iconCounts.map((c) => c.cross).join('/')}`,
+      `bg=${at(0)} bar=${at(1)} icon(盒内px)=${icons.rows.map((r) => r.own).join('/')} 交叉=${icons.rows
+        .map((r) => r.cross)
+        .join('/')}`,
     );
   }
 
@@ -895,9 +940,12 @@ async function runViewport(browser, vp) {
   p = await probeOf(page);
   log(p.phase === 'IDLE' && !p.choiceOpen, `[${tag}] R38 选择后浮层关闭、原页面恢复（回 IDLE）`, `phase=${p.phase}`);
   log(
-    p.buffs.length === 1 && p.buffLabels[0] === '双联炮',
-    `[${tag}] R39 顶部新增对应强化图标（只加 1 个，不是填满 5 个槽）`,
-    `buffs=${p.buffLabels.join('/')} buffIconCount=${p.buffIconCount}`,
+    p.buffs.length === 1 &&
+      p.buffLabels[0] === '双联炮' &&
+      JSON.stringify(p.build) === JSON.stringify(['twinCannon']) &&
+      p.modifier === 'twinCannon',
+    `[${tag}] R39 顶部新增对应强化图标（只加 1 个，不是填满 5 个槽）· Build = [twinCannon]`,
+    `build=${p.buildLabels.join('/')} modifier=${p.modifier} buffIconCount=${p.buffIconCount}`,
   );
   /*
     PRP-F2 必改 3：选择后**追加两行**（强化自然语言结果 + 进入下一天），历史完整。
@@ -913,18 +961,25 @@ async function runViewport(browser, vp) {
   );
   log(
     JSON.stringify(p.phaseTrail) === JSON.stringify(['IDLE', 'EVENT', 'BATTLE', 'RESULT', 'CHOICE', 'IDLE']),
-    `[${tag}] R41 五状态轨迹精确（同一页面内切换）`,
+    `[${tag}] R41 六状态轨迹精确（同一页面内切换）`,
     p.phaseTrail.join('→'),
   );
-  const sFinale = await pixelStats(page);
-  ledgerCheck(tag, 'R42 回到 IDLE + 1 个强化', sFinale, 'IDLE+BUFF', vp.dpr);
+  const sIdle4 = await pixelStats(page);
+  ledgerCheck(
+    tag,
+    'R42 回到 IDLE + 1 个强化 (DAY4)',
+    sIdle4,
+    ledgerExpect({ day: 4, stage: 'idle', buffs: ['twinCannon'] }),
+    vp.dpr,
+  );
   if (vp.dpr === 1) {
-    // 顶部图标底色按选项区分：拿到「双联炮」→ 只应是该选项的底色（其余两个为 0）
-    const icons = [sFinale.buffIconShell, sFinale.buffIconTwin, sFinale.buffIconReload];
+    // 顶部图标底色按选项区分：拿到「双联炮」→ 只应是该选项的底色（其余六个为 0）
+    const iconKeys = Object.keys(BUFF_ICON_KEY).map((k) => BUFF_ICON_KEY[k]);
+    const icons = iconKeys.map((k) => sIdle4[k]);
     log(
-      icons.filter((n) => n > 0).length === 1 && sFinale.buffIconTwin === 756 && sFinale.buffChip === 144,
+      icons.filter((n) => n > 0).length === 1 && sIdle4.buffIconTwin === 756 && sIdle4.buffChip === 144,
       `[${tag}] R42b 顶部只有 1 个真实图标（无空槽、无 5 个占位格子）`,
-      `shell/twin/reload=${icons.join('/')} chip=${sFinale.buffChip}`,
+      `${iconKeys.map((k, i) => `${k}=${icons[i]}`).join('/')} chip=${sIdle4.buffChip}`,
     );
     // IDLE（页面绝对坐标 → 偏移 0）
     const melon = await countSpriteColorInBox(page, p.stage.player.bounds, 0, SPRITE_COLORS.watermelonBody, SPRITE_COLOR_TOL);
@@ -959,9 +1014,11 @@ async function runViewport(browser, vp) {
   log(p2.phase === 'BATTLE' && p2.actionLabel === '战斗中', `[${tag}] R45 第二场真实战斗开打（DAY 4 · 同一页面）`, `phase=${p2.phase}/${p2.actionLabel}`);
   const w2 = p2.battleWorld;
   log(
-    !!w2 && w2.modifier === 'twinCannon',
-    `[${tag}] R46 必改 5：第二场运行时真实拿到的强化 = 刚选的那一项`,
-    w2 ? `modifier=${w2.modifier}` : 'no battleWorld',
+    !!w2 &&
+      w2.modifier === 'twinCannon' &&
+      JSON.stringify(w2.build) === JSON.stringify(['twinCannon']),
+    `[${tag}] R46 必改 5/6：第二场运行时真实拿到第一层 Build（不是只写日志 / 只画图标）`,
+    w2 ? `modifier=${w2.modifier} build=[${w2.build.join(',')}]` : 'no battleWorld',
   );
   log(
     !!w2 && w2.steps === 0 && w2.projectiles === 0,
@@ -977,6 +1034,8 @@ async function runViewport(browser, vp) {
     `[${tag}] R48 必改 4：跨战斗耐久成立（带上一场剩余 HP 开打，不自动满血，上限不变）`,
     w2 ? `开局 ${round2(w2.initialPlayerHp)}/${round2(w2.playerHpMax)}（上一场结束 ${round2(hpCarried)}）` : '',
   );
+  /** 第二场窗口内「在飞弹丸数」峰值（供最终战斗的三连装填做同口径对照）。 */
+  let twinWinMax = 0;
   if (w2) {
     // 窗口累积观测（理由同 R24b：单点采样会落在开火空窗里）
     const twinWin = await page.evaluate(async () => {
@@ -1007,6 +1066,7 @@ async function runViewport(browser, vp) {
       对比参照：第一场（基础 Cannon）同长度窗口的 maxProjectiles 一并打印，不作硬断言
       —— 基础单发在远距离飞行时也可能有 2 发重叠（不具排他性），硬断言会变成脆弱判据。
     */
+    twinWinMax = twinWin.maxProjectiles;
     log(
       twinWin.maxProjectiles >= 2 && twinWin.projSamples > 0,
       `[${tag}] R49 必改 2/5：双联炮一次攻击连出两发（先后 100ms · 窗口内两发同时在飞 · 真实 projectile）`,
@@ -1020,9 +1080,12 @@ async function runViewport(browser, vp) {
   }
 
   /*
-    -------------------- 11) PRP-F2-R1：第二场结束 = 验证结束（单变量实验的终点）
-    收紧后**不允许**继续 DAY 5/6/7，也不允许叠第二个强化 ——
-    第二场打完那一刻，主动作必须变成「重新开始验证」。
+    -------------------- 11) PRP-BUILD-01：第二场结束 → **第二次选择机会**（条件池）
+    这一步是「Build 而不是两个互不相关的 Buff」的机器侧证据：
+      · 第二场打完**还不是终局**（`verificationComplete === false`），主动作仍是「继续」；
+      · 第二次候选池**由第一层决定**（`choicePoolLayer === 2`，池 = 双联炮分支的三项）；
+      · 池的槽位结构 = 强联动 / 安全通用 / 轻度转向（必改 5 的取舍）；
+      · 选了强联动「三连装填」后 Build = [twinCannon, tripleLoad]（两层同时存在）。
   */
   await page.waitForFunction(
     () => {
@@ -1032,67 +1095,270 @@ async function runViewport(browser, vp) {
     null,
     { timeout: 90000 },
   );
-  const pEnd = await probeOf(page);
+  const pRes2 = await probeOf(page);
   log(
-    pEnd.phase === 'RESULT' && pEnd.battlesCompleted === 2 && pEnd.verificationComplete === true,
-    `[${tag}] R50 第二场自动结束 → 终局 RESULT（battlesCompleted=2，不再进入 CHOICE）`,
-    `phase=${pEnd.phase} battlesCompleted=${pEnd.battlesCompleted}`,
+    pRes2.phase === 'RESULT' && pRes2.battlesCompleted === 2 && pRes2.verificationComplete === false,
+    `[${tag}] R50 第二场自动结束 → RESULT（battlesCompleted=2，**还不是终局**，仍有第二次改装机会）`,
+    `phase=${pRes2.phase} battlesCompleted=${pRes2.battlesCompleted} verificationComplete=${pRes2.verificationComplete} action="${pRes2.actionLabel}"`,
   );
   log(
-    pEnd.day === 4 &&
-      pEnd.day <= pEnd.dayTotal &&
-      pEnd.buffs.length === 1 &&
-      pEnd.modifier === 'twinCannon' &&
-      pEnd.actionLabel === '重新开始验证',
-    `[${tag}] R51 不继续 Day / 不叠第二个强化：DAY 仍是 4（无 8/7）、只有 1 个强化、主动作=重新开始验证`,
-    `day=${pEnd.day}/${pEnd.dayTotal} buffs=${pEnd.buffLabels.join('/')} action="${pEnd.actionLabel}"`,
+    pRes2.day === 4 && pRes2.buffs.length === 1 && pRes2.actionLabel === '继续' && pRes2.actionEnabled,
+    `[${tag}] R50b 第二场后仍是 DAY 4 + 1 个强化 + 主动作「继续」（还没到第三天 / 第二层）`,
+    `day=${pRes2.day}/${pRes2.dayTotal} buffs=${pRes2.buffLabels.join('/')} action="${pRes2.actionLabel}"`,
   );
-  // 终局 RESULT 的第三行叙事必须是「验证结束」，不能再引导下一次改装
   log(
-    pEnd.log[pEnd.log.length - 1].text === '本次改装的验证到此结束。',
-    `[${tag}] R51b 终局叙事不再引导下一次改装`,
-    `tail=${pEnd.log[pEnd.log.length - 1].text}`,
+    pRes2.log[pRes2.log.length - 1].text === '你发现了一次改装机会……',
+    `[${tag}] R50c 第二场 RESULT 仍引导「一次改装机会」（= 即将打开第二次选择）`,
+    `tail=${pRes2.log[pRes2.log.length - 1].text}`,
+  );
+  const sRes2 = await pixelStats(page);
+  ledgerCheck(
+    tag,
+    'R50d RESULT 第二场 (DAY4 · 1 强化)',
+    sRes2,
+    ledgerExpect({ day: 4, stage: 'battle', buffs: ['twinCannon'] }),
+    vp.dpr,
+  );
+
+  /* ------------------ 11b) 真实点击「继续」→ CHOICE②（条件池，不是同一套通用三选一） */
+  await clickRect(page, pRes2.actionRect);
+  const pChoice2 = await probeOf(page);
+  const pool2Ids = pChoice2.choiceOptions.map((o) => o.id);
+  log(
+    pChoice2.phase === 'CHOICE' && pChoice2.choicePoolLayer === 2,
+    `[${tag}] R51 必改 1：第二次选择 = 第二层（choicePoolLayer=2，由第一层决定）`,
+    `phase=${pChoice2.phase} layer=${pChoice2.choicePoolLayer}`,
+  );
+  log(
+    JSON.stringify(pool2Ids) === JSON.stringify(['tripleLoad', 'emergencyRepair', 'heavyShell']) &&
+      JSON.stringify(pChoice2.choiceOptions.map((o) => o.label)) ===
+        JSON.stringify(['三连装填', '紧急维修', '重型弹头']),
+    `[${tag}] R51b 必改 1/5：双联炮分支的条件池 = 强联动「三连装填」+ 安全项「紧急维修」+ 转向项「重型弹头」`,
+    `pool=${pChoice2.choiceOptions.map((o) => `${o.label}(${o.id})`).join(' / ')}`,
+  );
+  log(
+    // 与第一次的固定池**不是同一套**（至少两项不同）→ 「第一次选择改变了后续能拿到的方向」
+    pool2Ids.filter((id) => ['heavyShell', 'twinCannon', 'fastReload'].includes(id)).length <= 1 &&
+      pool2Ids[0] === 'tripleLoad',
+    `[${tag}] R51c 必改 1：第二次池 ≠ 第一次池（强联动占首位，不是通用三选一换个顺序）`,
+    `第一次池=[heavyShell,twinCannon,fastReload] 第二次池=[${pool2Ids.join(',')}]`,
+  );
+  const sChoice2 = await pixelStats(page);
+  ledgerCheck(tag, 'R51d CHOICE②', sChoice2, ledgerExpect({ masked: true }), vp.dpr);
+  if (vp.dpr === 1) {
+    const icons2 = await checkChoiceIcons(page, pChoice2);
+    log(
+      icons2.ok,
+      `[${tag}] R51e 第二层卡片图标同样是真实矢量字形（盒内面积 + 七色精确互斥）`,
+      icons2.rows.map((r) => `${r.id}:${r.own}px/交叉${r.cross}`).join(' '),
+    );
+  }
+
+  /* ------------------ 11c) 选强联动「三连装填」→ IDLE(DAY5)，顶部 2 个图标 */
+  await clickRect(page, pChoice2.choiceOptions[0].rect); // 三连装填
+  const pIdle5 = await probeOf(page);
+  log(
+    pIdle5.phase === 'IDLE' &&
+      pIdle5.day === 5 &&
+      pIdle5.buffs.length === 2 &&
+      JSON.stringify(pIdle5.build) === JSON.stringify(['twinCannon', 'tripleLoad']) &&
+      pIdle5.modifier === 'twinCannon',
+    `[${tag}] R52 必改 6：选择后 Build = [twinCannon, tripleLoad]（DAY 5 · 顶部 2 个图标，不是 1 个）`,
+    `day=${pIdle5.day}/${pIdle5.dayTotal} build=${pIdle5.buildLabels.join('+')} buffIconCount=${pIdle5.buffIconCount}`,
+  );
+  const sIdle5 = await pixelStats(page);
+  ledgerCheck(
+    tag,
+    'R52b IDLE (DAY5 · 2 强化)',
+    sIdle5,
+    ledgerExpect({ day: 5, stage: 'idle', buffs: ['twinCannon', 'tripleLoad'] }),
+    vp.dpr,
+  );
+  if (vp.dpr === 1) {
+    log(
+      sIdle5.buffIconTwin === 756 && sIdle5.buffIconTriple === 756 && sIdle5.buffChip === 288,
+      `[${tag}] R52c 顶部 2 个真实图标 = 各自选项的底色（双联炮 + 三连装填），无空槽`,
+      `twin=${sIdle5.buffIconTwin} triple=${sIdle5.buffIconTriple} chip=${sIdle5.buffChip}`,
+    );
+  }
+
+  /* ------------------ 11d) 第三场 = 最终战斗（两层 Build 同时真实生效） */
+  // 规则：carry = 上一场真实剩余（<= 0 → 满耐久开幕）；本分支没选维修项 → 无补偿
+  const hp2 = pRes2.battle ? pRes2.battle.playerHp : NaN;
+  const hpMax2 = pRes2.battle ? pRes2.battle.playerHpMax : NaN;
+  const expectInit3 = hp2 > 0 ? hp2 : hpMax2;
+  await clickRect(page, pIdle5.actionRect); // IDLE → EVENT
+  const pEvent5 = await probeOf(page);
+  await clickRect(page, pEvent5.actionRect); // EVENT → BATTLE③
+  const p3 = await probeOf(page);
+  const w3 = p3.battleWorld;
+  log(
+    p3.phase === 'BATTLE' && p3.actionLabel === '战斗中',
+    `[${tag}] R53 最终战斗开打（DAY 5 · 两层 Build · 仍在同一页面）`,
+    `phase=${p3.phase}/${p3.actionLabel}`,
+  );
+  log(
+    !!w3 &&
+      w3.modifier === 'twinCannon' &&
+      JSON.stringify(w3.build) === JSON.stringify(['twinCannon', 'tripleLoad']) &&
+      w3.abilities.recoilCharge === false &&
+      w3.abilities.kineticBurst === false,
+    `[${tag}] R53b 必改 6：最终战斗**同时携带两层**（一层改武器 + 二层能力/数值，运行时不串味）`,
+    w3
+      ? `build=[${w3.build.join(',')}] modifier=${w3.modifier} kinetic=${w3.abilities.kineticBurst} charge=${w3.abilities.recoilCharge}`
+      : 'no battleWorld',
+  );
+  log(
+    !!w3 && w3.steps === 0 && w3.projectiles === 0,
+    `[${tag}] R53c clean recreate（最终战斗步数 / 弹丸从 0 起，无上一场残留）`,
+    w3 ? `steps=${w3.steps} projectiles=${w3.projectiles}` : '',
+  );
+  log(
+    !!w3 &&
+      w3.playerHpMax === hpMax2 &&
+      Math.abs(w3.initialPlayerHp - expectInit3) < 1e-6 &&
+      w3.initialPlayerHp > 0 &&
+      w3.initialPlayerHp <= w3.playerHpMax,
+    `[${tag}] R53d 跨战斗耐久规则在最终战斗同样成立（carry = 上一场剩余，<=0 → 满耐久）`,
+    w3
+      ? `开局 ${round2(w3.initialPlayerHp)}/${round2(w3.playerHpMax)}（上一场结束 ${round2(hp2)} → 期望 ${round2(expectInit3)}）`
+      : '',
+  );
+  if (w3) {
+    /*
+      必改 3 的浏览器端真实证据：三连装填 = 同一 burst Foundation 把 burstRounds 2 → 3，
+      因此一次攻击会在 0ms / 100ms / 200ms 各出一发**真实 projectile** →
+      窗口内「同时在飞 ≥ 3」是可证的真实 Runtime 差异（与单测的 6/6/60 步差同源）。
+    */
+    const tripleWin = await page.evaluate(async () => {
+      const acc = { samples: 0, maxProjectiles: 0, projSamples: 0, minEnemyHp: Infinity, enemyHpMax: 0 };
+      const t0 = performance.now();
+      while (performance.now() - t0 < 4500) {
+        const pr = window.__RUNPAGE__.probe();
+        acc.samples += 1;
+        const w = pr.battleWorld;
+        if (w) {
+          acc.maxProjectiles = Math.max(acc.maxProjectiles, w.projectiles);
+          if (w.projectiles > 0) acc.projSamples += 1;
+        }
+        if (pr.battle) {
+          acc.minEnemyHp = Math.min(acc.minEnemyHp, pr.battle.enemyHp);
+          acc.enemyHpMax = pr.battle.enemyHpMax;
+        }
+        await new Promise((r) => setTimeout(r, 40));
+      }
+      return acc;
+    });
+    log(
+      tripleWin.maxProjectiles >= 3 && tripleWin.projSamples > 0,
+      `[${tag}] R54 必改 3：三连装填一次攻击连出三发真实炮弹（0/100/200ms · 窗口内三发同时在飞）`,
+      `窗口内最多 ${tripleWin.maxProjectiles} 发在飞 · ${tripleWin.projSamples}/${tripleWin.samples} 次采样见弹（第二场同口径最多 ${twinWinMax} 发）`,
+    );
+    log(
+      tripleWin.minEnemyHp < tripleWin.enemyHpMax,
+      `[${tag}] R54b 三发都是真弹（敌方耐久真的在掉）`,
+      `窗口内最低 敌方 ${round2(tripleWin.minEnemyHp)}/${round2(tripleWin.enemyHpMax)}`,
+    );
+  }
+
+  /* ------------------ 11e) 第三场结束 = 验证结束（三层 / 更多 Day 结构上不可能） */
+  await page.waitForFunction(
+    () => {
+      const pr = window.__RUNPAGE__.probe();
+      return pr.phase === 'RESULT' && pr.battlesCompleted === 3;
+    },
+    null,
+    { timeout: 90000 },
+  );
+  const pEndFinal = await probeOf(page);
+  log(
+    pEndFinal.phase === 'RESULT' &&
+      pEndFinal.battlesCompleted === 3 &&
+      pEndFinal.verificationComplete === true &&
+      pEndFinal.actionLabel === '重新开始验证' &&
+      pEndFinal.actionEnabled,
+    `[${tag}] R55 第三场自动结束 → 终局 RESULT（battlesCompleted=3，不再进入 CHOICE）`,
+    `phase=${pEndFinal.phase} battlesCompleted=${pEndFinal.battlesCompleted} action="${pEndFinal.actionLabel}"`,
+  );
+  log(
+    pEndFinal.day === 5 &&
+      pEndFinal.day <= pEndFinal.dayTotal &&
+      pEndFinal.buffs.length === 2 &&
+      JSON.stringify(pEndFinal.build) === JSON.stringify(['twinCannon', 'tripleLoad']),
+    `[${tag}] R55b 不继续 Day / 不叠第三层：DAY 停在 5（无 8/7）、仍是两层 Build`,
+    `day=${pEndFinal.day}/${pEndFinal.dayTotal} build=${pEndFinal.buildLabels.join('+')}`,
+  );
+  const sRes5 = await pixelStats(page);
+  ledgerCheck(
+    tag,
+    'R55c RESULT 最终场 (DAY5 · 2 强化)',
+    sRes5,
+    ledgerExpect({ day: 5, stage: 'battle', buffs: ['twinCannon', 'tripleLoad'] }),
+    vp.dpr,
+  );
+  log(
+    pEndFinal.log[pEndFinal.log.length - 1].text === '本次改装的验证到此结束。',
+    `[${tag}] R55d 终局叙事不再引导下一次改装`,
+    `tail=${pEndFinal.log[pEndFinal.log.length - 1].text}`,
+  );
+  log(
+    JSON.stringify(pEndFinal.phaseTrail) ===
+      JSON.stringify([
+        'IDLE', 'EVENT', 'BATTLE', 'RESULT', 'CHOICE', 'IDLE',
+        'EVENT', 'BATTLE', 'RESULT', 'CHOICE', 'IDLE',
+        'EVENT', 'BATTLE', 'RESULT',
+      ]) && pEndFinal.battlesCompleted === 3 && pEndFinal.buffs.length === 2,
+    `[${tag}] R55e 完整闭环轨迹：三场真实战斗 + 两次选择，全程同一个状态机（无第三层）`,
+    pEndFinal.phaseTrail.join('→'),
   );
 
   /*
-    -------------------- 12) 重新开始验证 = 干净新 Run（可对另一个强化做同条件独立验证）
+    -------------------- 12) 重新开始验证 = 干净新 Run（Build 完全清空）
   */
-  await clickRect(page, pEnd.actionRect);
+  await clickRect(page, pEndFinal.actionRect);
   await page.waitForTimeout(250);
   const pRestart = await probeOf(page);
   log(
     pRestart.phase === 'IDLE' &&
       pRestart.day === 3 &&
       pRestart.buffs.length === 0 &&
+      pRestart.build.length === 0 &&
       pRestart.modifier === null &&
       pRestart.battlesCompleted === 0 &&
       pRestart.verificationComplete === false &&
       pRestart.actionLabel === '继续',
-    `[${tag}] R52 重新开始验证 = 干净新 Run（DAY 3 / Buff 清零 / Modifier 归 null / 主动作=继续）`,
-    `phase=${pRestart.phase} day=${pRestart.day} buffs=${pRestart.buffs.length} modifier=${pRestart.modifier} battles=${pRestart.battlesCompleted}`,
+    `[${tag}] R56 重新开始验证 = 干净新 Run（DAY 3 / Build 完全清空 / 主动作=继续）`,
+    `phase=${pRestart.phase} day=${pRestart.day} build=[${pRestart.build.join(',')}] battles=${pRestart.battlesCompleted}`,
   );
+  const sRestart = await pixelStats(page);
+  ledgerCheck(tag, 'R56b 新 Run IDLE (DAY3 · 0 强化)', sRestart, ledgerExpect({ day: 3, stage: 'idle' }), vp.dpr);
   log(
     JSON.stringify(pRestart.phaseTrail) === JSON.stringify(['IDLE']),
-    `[${tag}] R53 新 Run 是独立状态机（phaseTrail 从 IDLE 重新开始，不是老页面的延续）`,
+    `[${tag}] R57 新 Run 是独立状态机（phaseTrail 从 IDLE 重新开始，不是老页面的延续）`,
     pRestart.phaseTrail.join('→'),
   );
   // 新 Run 里第一场仍是**基础**战斗（点击继续 → EVENT，不再有任何历史强化）
   await clickRect(page, pRestart.actionRect);
   const pFreshEvent = await probeOf(page);
   log(
-    pFreshEvent.phase === 'EVENT' && pFreshEvent.buffs.length === 0 && pFreshEvent.modifier === null,
-    `[${tag}] R54 新 Run 从头开始（第一场准备中 · 无任何强化残留）`,
-    `phase=${pFreshEvent.phase} buffs=${pFreshEvent.buffs.length}`,
+    pFreshEvent.phase === 'EVENT' &&
+      pFreshEvent.buffs.length === 0 &&
+      pFreshEvent.build.length === 0 &&
+      pFreshEvent.modifier === null,
+    `[${tag}] R58 新 Run 从头开始（第一场准备中 · 无任何强化残留）`,
+    `phase=${pFreshEvent.phase} build=[${pFreshEvent.build.join(',')}]`,
   );
 
   /*
-    --------------------------- 13) PRP-F2-R2：快速装填参数回收（400 → 650）的浏览器端真实验证
+    --------------------------- 14) PRP-F2-R2：快速装填参数回收（400 → 650）的浏览器端真实验证
     判据（Queue 验收｜方案）：
       · 正常速度下仍能看出「快速装填的炮击频率高于基础炮」；
       · 但相比 400ms（≈2.5×），炮击之间重新留出明显物理运动时间（≈1.54×，不再淹没接敌过程）。
     做法：在**同一个页面的干净新 Run** 里连跑两场 —— 第一场基础炮、第二场只带快速装填 ——
     只用公开 probe 的「在飞弹丸数增量」反推真实开火间隔（不读配置、不看任何文字）。
     同条件保证：Enemy / Player / Battle world / Spawn / Camera / 跨战斗耐久 全部与第一场一致。
+    ⚠️ PRP-BUILD-01：新 Run 现在是「三场两选」，本段只走到**第二场**为止（第三场 / 第二次选择
+       不参与节奏复验），因此 `choiceOptions[2]` 仍是第一层池里的「快速装填」。
   */
   if (!fireCadenceObserved) {
     fireCadenceObserved = true;
@@ -1103,10 +1369,10 @@ async function runViewport(browser, vp) {
     const baseWin = await sampleFireCadence(page, 6000);
     await page.waitForFunction(() => window.__RUNPAGE__.probe().phase === 'RESULT', null, { timeout: 90000 });
     const pBaseEnd = await probeOf(page);
-    await clickRect(page, pBaseEnd.actionRect); // RESULT → CHOICE
+    await clickRect(page, pBaseEnd.actionRect); // RESULT → CHOICE①
     const pChoiceFr = await probeOf(page);
 
-    // 第二场：只带快速装填
+    // 第二场：只带快速装填（第一次选择里 index 2）
     await clickRect(page, pChoiceFr.choiceOptions[2].rect);
     const pAfterFr = await probeOf(page);
     await clickRect(page, pAfterFr.actionRect); // IDLE → EVENT
@@ -1121,20 +1387,22 @@ async function runViewport(browser, vp) {
       pBaseFight.phase === 'BATTLE' &&
         !!pBaseFight.battleWorld &&
         pBaseFight.battleWorld.modifier === null &&
+        pBaseFight.battleWorld.build.length === 0 &&
         pBaseFight.battleWorld.initialPlayerHp === pBaseFight.battleWorld.playerHpMax &&
         baseWin.gaps.length >= 2,
-      `[${tag}] R55 快速装填独立复验：第一场是**无强化的基础炮**（同 Enemy / Player / World / Spawn / Camera，满耐久开局）`,
-      `modifier=${pBaseFight.battleWorld ? pBaseFight.battleWorld.modifier : '?'} · 观测 ${baseWin.volleys} 次开火 · ${
+      `[${tag}] R60 快速装填独立复验：第一场是**无强化的基础炮**（同 Enemy / Player / World / Spawn / Camera，满耐久开局）`,
+      `build=[${pBaseFight.battleWorld ? pBaseFight.battleWorld.build.join(',') : '?'}] · 观测 ${baseWin.volleys} 次开火 · ${
         baseWin.gaps.length
       } 个间隔 · 最小间隔 ${Number.isNaN(baseMin) ? 'n/a' : Math.round(baseMin)}ms`,
     );
     log(
       !!pFastFight.battleWorld &&
         pFastFight.battleWorld.modifier === 'fastReload' &&
+        JSON.stringify(pFastFight.battleWorld.build) === JSON.stringify(['fastReload']) &&
         pAfterFr.buffs.length === 1 &&
         pAfterFr.day === 4,
-      `[${tag}] R56 必改 5：第二场运行时真实拿到「快速装填」（单变量隔离 Run · DAY 4 · 只有这一个强化）`,
-      `modifier=${pFastFight.battleWorld ? pFastFight.battleWorld.modifier : '?'} day=${pAfterFr.day} buffs=${pAfterFr.buffLabels.join('/')}`,
+      `[${tag}] R61 必改 5：第二场运行时真实拿到「快速装填」（单变量隔离 Run · DAY 4 · 只有这一个强化）`,
+      `build=[${pFastFight.battleWorld ? pFastFight.battleWorld.build.join(',') : '?'}] day=${pAfterFr.day} buffs=${pAfterFr.buffLabels.join('/')}`,
     );
     /*
       真实节奏断言（用最小观测间隔）：
@@ -1148,7 +1416,7 @@ async function runViewport(browser, vp) {
         fastMin < 800 &&
         fastMin < baseMin * 0.8 &&
         fastMin > 480,
-      `[${tag}] R57 参数回收成立：真实攻击间隔 ≈650ms（明显快于基础 1000ms，但不再是 400ms 的 2.5×）`,
+      `[${tag}] R62 参数回收成立：真实攻击间隔 ≈650ms（明显快于基础 1000ms，但不再是 400ms 的 2.5×）`,
       `基础 ${Math.round(baseMin)}ms → 快速装填 ${Math.round(fastMin)}ms · 频率比 ${round2(baseMin / fastMin)}×`,
     );
 

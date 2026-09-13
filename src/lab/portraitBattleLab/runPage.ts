@@ -68,7 +68,6 @@ import {
   type RunRect,
 } from './runPageLayout';
 import {
-  RUN_CHOICE_OPTIONS,
   chooseRunBuff,
   createRunPageState,
   durabilityPercent,
@@ -77,8 +76,10 @@ import {
   pressRunAction,
   runActionEnabled,
   runActionLabel,
+  runBuildIds,
   runCarriedPlayerHp,
   runChoiceOpen,
+  runChoicePool,
   runVerificationComplete,
   syncRunBattle,
   visibleRunLog,
@@ -154,6 +155,11 @@ const COLORS = {
   iconShell: '#b8562e',
   iconTwin: '#c07a2a',
   iconReload: '#3f8f5a',
+  /* ---- PRP-BUILD-01 第二层（条件池）图标底色 ---- */
+  iconKinetic: '#8e44c0',
+  iconTriple: '#2f8fc4',
+  iconCharge: '#c9a227',
+  iconRepair: '#4fc4a8',
 } as const;
 
 /**
@@ -178,11 +184,21 @@ export const RUN_LEDGER_COLORS: Readonly<Record<string, string>> = {
 /** CHOICE 遮罩：整页重压暗（画布内合成 → 可被真实 getImageData 验证「变暗」）。 */
 const CHOICE_MASK_COLOR = 'rgba(6,9,14,0.86)';
 
-/** 每个强化选项的图标绘制色（矢量字形，非纯色块；不入面积账本）。 */
+/**
+ * 每个强化选项的图标绘制色（矢量字形，非纯色块；不入面积账本）。
+ *
+ * ⚠️ PRP-BUILD-01：新增第二层四项。这七色**两两 RGB 精确互斥**，且与
+ *    `RUN_LEDGER_COLORS` 全部入账色互斥 —— 浏览器端在图标盒内按**精确相等**统计
+ *    该选项的专属图标色，并要求「它选项的图标色命中为 0」，任何同色歧义都会立刻污染断言。
+ */
 const CHOICE_ICON_COLOR: Readonly<Record<string, string>> = {
   heavyShell: '#ffb066',
   twinCannon: '#ffd166',
   fastReload: '#7fd6a0',
+  kineticBurst: '#c98cf0',
+  tripleLoad: '#79c0ea',
+  recoilCharge: '#e8c46a',
+  emergencyRepair: '#5fd0c0',
 };
 
 /** 顶部已获得图标的底色（按选项区分；芯片色统一 → `buffChip` 层可冻结）。 */
@@ -190,6 +206,10 @@ const BUFF_ICON_COLOR: Readonly<Record<string, string>> = {
   heavyShell: COLORS.iconShell,
   twinCannon: COLORS.iconTwin,
   fastReload: COLORS.iconReload,
+  kineticBurst: COLORS.iconKinetic,
+  tripleLoad: COLORS.iconTriple,
+  recoilCharge: COLORS.iconCharge,
+  emergencyRepair: COLORS.iconRepair,
 };
 
 export interface RunPageScreenProbe {
@@ -226,10 +246,28 @@ export interface RunProbeBattleWorld {
   readonly phase: string;
   readonly timeMs: number;
   /**
-   * PRP-F2：本场战斗生效的 Run 强化（null = 基础状态）。
-   * 与 `RunPageProbe.modifier` 同源；此处读的是**运行时真实拿到的值**（证明注入真的落地）。
+   * PRP-F2：本场战斗生效的**第一层**强化（null = 基础状态）。
+   * 完整两层 Build 读 `build`（两者同源；此处保留单强化口径供逐项独立验证断言）。
    */
   readonly modifier: string | null;
+  /** PRP-BUILD-01：本场战斗真实拿到的完整 Build（按选择顺序；空数组 = 基础状态）。 */
+  readonly build: readonly string[];
+  /**
+   * PRP-BUILD-01：Run 能力的**真实运行状态**（事件驱动；全部是真实发生过的计数与量值）。
+   *   - `kineticHits` / `lastKineticImpulse`：动能爆发真的触发了几次、最近一次多大；
+   *   - `chargesSpent` / `charge`：反冲蓄能真的触发了几次接敌补偿、当前蓄能进度；
+   *   - `projectileMass`：读自本局真实 resolved 武器 def 的「当前炮弹质量」。
+   */
+  readonly abilities: {
+    readonly kineticBurst: boolean;
+    readonly recoilCharge: boolean;
+    readonly charge: number;
+    readonly chargeThreshold: number;
+    readonly chargesSpent: number;
+    readonly kineticHits: number;
+    readonly lastKineticImpulse: number;
+    readonly projectileMass: number;
+  };
   /** 本场开局的真实玩家 HP（= 注入跨战斗耐久后的实际值）。 */
   readonly initialPlayerHp: number;
   /** 本场玩家 HP 上限（**不因跨战斗耐久改变** → 耐久条如实显示「打剩多少」）。 */
@@ -294,14 +332,26 @@ export interface RunPageProbe {
   readonly actionCount: number;
   readonly day: number;
   readonly dayTotal: number;
-  /** PRP-F2：本局已生效的 Run 强化（本局临时状态，新开 Run 即回 null）。 */
-  readonly modifier: string | null;
   /**
-   * PRP-F2-R1：本局已打完的真实战斗场数（0/1/2）。
-   * `2` = 验证结束 → 主动作变成「重新开始验证」，且不可能再进 CHOICE。
+   * 本局已生效的**第一层**强化（= Build 的第一项；null = 尚未选择）。
+   * 完整 Build 读 `build`。两者都只是**本局临时状态**，新开 Run 即回空。
+   */
+  readonly modifier: string | null;
+  /** PRP-BUILD-01：本局完整 Build（按选择顺序，最多两项）。 */
+  readonly build: readonly string[];
+  /** 本局 Build 的中文标签（与 `build` 同序）。 */
+  readonly buildLabels: readonly string[];
+  /**
+   * PRP-BUILD-01：本局已累计的紧急维修补偿（耐久点数；0 = 没拿过维修）。
+   * ⚠️ 不写进 `battle.playerHp`（那是上一场的真实结果，不该被改写）。
+   */
+  readonly repairBonus: number;
+  /**
+   * PRP-BUILD-01：本局已打完的真实战斗场数（0/1/2/3）。
+   * `3` = 验证结束 → 主动作变成「重新开始验证」，且不可能再进 CHOICE。
    */
   readonly battlesCompleted: number;
-  /** PRP-F2-R1：本次验证是否已结束（= `battlesCompleted >= 2`）。 */
+  /** PRP-BUILD-01：本次验证是否已结束（= `battlesCompleted >= 3`）。 */
   readonly verificationComplete: boolean;
   readonly buffs: readonly string[];
   readonly buffLabels: readonly string[];
@@ -313,6 +363,11 @@ export interface RunPageProbe {
   readonly actionEnabled: boolean;
   readonly actionRect: RunRect;
   readonly choiceOpen: boolean;
+  /**
+   * PRP-BUILD-01：当前选择是第几层（1 = 第一层固定三选一 / 2 = 第二层条件池 / 0 = 当前不在 CHOICE）。
+   * 用于证明「第二次选择不是同一套通用三选一」。
+   */
+  readonly choicePoolLayer: number;
   readonly choiceOptions: readonly { id: string; label: string; note: string; rect: RunRect; iconRect: RunRect }[];
   readonly bands: {
     top: RunRect;
@@ -462,10 +517,13 @@ export class RunPage {
     const rect = this.canvas.getBoundingClientRect();
     const p = this.vp.clientToLogical(ev.clientX, ev.clientY, rect);
     if (runChoiceOpen(this.state)) {
-      const cards = runChoiceCardRects(RUN_CHOICE_OPTIONS.length);
+      // ⚠️ PRP-BUILD-01：卡片的**唯一来源 = 当前候选池**（第一层三选一 / 第二层条件池），
+      // 与绘制、命中区、账本四处同源 → 不可能出现「画的是池 A、点的是池 B」。
+      const pool = runChoicePool(this.state);
+      const cards = runChoiceCardRects(pool.length);
       for (let i = 0; i < cards.length; i++) {
         if (hit(cards[i], p)) {
-          this.apply(chooseRunBuff(this.state, RUN_CHOICE_OPTIONS[i].id));
+          this.apply(chooseRunBuff(this.state, pool[i].id));
           return;
         }
       }
@@ -499,15 +557,16 @@ export class RunPage {
   /**
    * 建立真实战斗运行时（正式 `PlanckBattleOrchestrator`，零 config 覆盖）。
    *
-   * PRP-F2：每次遭遇都**全新创建**，并把本局的两项 Run-local 状态注入进去：
-   *   - `modifier`   = 本局已选的 Cannon 强化（overlay registry + 武器 defId 重映射）；
-   *   - `carriedHp`  = 上一场真实剩余耐久（第二场从这里继续，不自动满血）。
-   * 旧运行时在此前已被 `endBattle()` 释放 → 弹丸 / 接触 / 世界不跨场残留。
+   * PRP-BUILD-01：每次遭遇都**全新创建**，并把本局的两项 Run-local 状态注入进去：
+   *   - `build`      = 本局 Build（第一层 + 第二层，按选择顺序；overlay registry + 武器 defId 重映射，
+   *                    能力类（动能爆发 / 反冲蓄能）由运行时订阅正式战斗事件驱动）；
+   *   - `carriedHp`  = 上一场真实剩余耐久（+ 维修补偿；下一场从这里继续，不自动满血）。
+   * 旧运行时在此前已被 `endBattle()` 释放 → 弹丸 / 接触 / 事件订阅不跨场残留。
    */
   private beginBattle(): void {
     this.endBattle();
     const rt = new RunBattleRuntime({
-      modifier: this.state.modifier,
+      build: runBuildIds(this.state),
       carriedHp: runCarriedPlayerHp(this.state),
     });
     this.battle = rt;
@@ -857,14 +916,16 @@ export class RunPage {
     ctx.fillStyle = CHOICE_MASK_COLOR;
     ctx.fillRect(mask.x, mask.y, mask.w, mask.h);
 
-    const cards = runChoiceCardRects(RUN_CHOICE_OPTIONS.length);
-    const title = runChoiceTitlePos(RUN_CHOICE_OPTIONS.length);
+    // ⚠️ 卡片 / 标题 / 图标全部取自**当前候选池**（第一层或第二层条件池）。
+    const pool = runChoicePool(this.state);
+    const cards = runChoiceCardRects(pool.length);
+    const title = runChoiceTitlePos(pool.length);
     ctx.fillStyle = COLORS.textTitle;
     ctx.font = `bold 17px ${FONT_STACK}`;
     ctx.fillText('选择一项改装', title.x, title.y);
 
     cards.forEach((card, i) => {
-      const opt = RUN_CHOICE_OPTIONS[i];
+      const opt = pool[i];
       ctx.fillStyle = COLORS.cardBg;
       ctx.fillRect(card.x, card.y, card.w, card.h);
       ctx.strokeStyle = COLORS.cardEdge;
@@ -887,7 +948,17 @@ export class RunPage {
     });
   }
 
-  /** 每个选项一个可辨识的矢量图标（重型弹头 = 弹体 / 双联炮 = 两根炮管 / 快速装填 = 循环箭头），不承载文字。 */
+  /**
+   * 每个选项一个可辨识的矢量图标（不入面积账本，只按「盒内专属色面积」判定）。
+   *
+   *   heavyShell      = 粗弹体 + 尖头
+   *   twinCannon      = 两根并排炮管 + 两发弹头
+   *   fastReload      = 环形循环箭头
+   *   kineticBurst    = 弹体 + 命中点向外扩散的三道冲击波
+   *   tripleLoad      = 三根并排炮管（比双联多一根）+ 底横条
+   *   recoilCharge    = 后坐箭头 + 中间蓄能条 + 前推箭头
+   *   emergencyRepair = 修理十字
+   */
   private drawChoiceIcon(ctx: CanvasRenderingContext2D, id: string, r: RunRect): void {
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
@@ -918,6 +989,56 @@ export class RunPage {
         ctx.fill();
       }
       ctx.fillRect(cx - s * 0.28, cy + bh / 2, s * 0.56, s * 0.1);
+    } else if (id === 'kineticBurst') {
+      // 动能爆发：弹体 + 命中点向外扩散的三道冲击波
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.48, cy - s * 0.11);
+      ctx.lineTo(cx - s * 0.08, cy - s * 0.11);
+      ctx.lineTo(cx - s * 0.02, cy);
+      ctx.lineTo(cx - s * 0.08, cy + s * 0.11);
+      ctx.lineTo(cx - s * 0.48, cy + s * 0.11);
+      ctx.closePath();
+      ctx.fill();
+      ctx.lineWidth = Math.max(2, s * 0.075);
+      ctx.strokeStyle = ctx.fillStyle;
+      for (const rr of [0.2, 0.32, 0.44]) {
+        ctx.beginPath();
+        ctx.arc(cx - s * 0.04, cy, s * rr, -Math.PI * 0.42, Math.PI * 0.42);
+        ctx.stroke();
+      }
+    } else if (id === 'tripleLoad') {
+      // 三连装填：三根并排炮管（比双联多一根）+ 底横条
+      const bw = s * 0.16;
+      const bh = s * 0.44;
+      for (const dx of [-s * 0.26, -s * 0.08, s * 0.1]) {
+        ctx.fillRect(cx + dx, cy - bh / 2, bw, bh);
+        ctx.beginPath();
+        ctx.moveTo(cx + dx, cy - bh / 2);
+        ctx.lineTo(cx + dx + bw / 2, cy - bh / 2 - s * 0.14);
+        ctx.lineTo(cx + dx + bw, cy - bh / 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.fillRect(cx - s * 0.3, cy + bh / 2, s * 0.6, s * 0.1);
+    } else if (id === 'recoilCharge') {
+      // 反冲蓄能：后坐箭头（左上）+ 中间蓄能条 + 前推箭头（右下）
+      ctx.beginPath();
+      ctx.moveTo(cx - s * 0.48, cy - s * 0.22);
+      ctx.lineTo(cx - s * 0.12, cy - s * 0.38);
+      ctx.lineTo(cx - s * 0.22, cy - s * 0.1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(cx - s * 0.32, cy - s * 0.07, s * 0.64, s * 0.14);
+      ctx.beginPath();
+      ctx.moveTo(cx + s * 0.48, cy + s * 0.22);
+      ctx.lineTo(cx + s * 0.12, cy + s * 0.38);
+      ctx.lineTo(cx + s * 0.22, cy + s * 0.1);
+      ctx.closePath();
+      ctx.fill();
+    } else if (id === 'emergencyRepair') {
+      // 紧急维修：修理十字
+      ctx.fillRect(cx - s * 0.12, cy - s * 0.44, s * 0.24, s * 0.88);
+      ctx.fillRect(cx - s * 0.44, cy - s * 0.12, s * 0.88, s * 0.24);
     } else {
       // 快速装填：环形循环箭头（装填节奏变快）
       ctx.lineWidth = Math.max(2, s * 0.11);
@@ -1030,6 +1151,22 @@ export class RunPage {
         phase: rt.phase,
         timeMs: rt.timeMs,
         modifier: rt.modifier,
+        /** PRP-BUILD-01：本场真实拿到的完整 Build（两层）。 */
+        build: rt.build,
+        /** PRP-BUILD-01：Run 能力真实运行状态。 */
+        abilities: (() => {
+          const a = rt.abilitySnapshot();
+          return {
+            kineticBurst: a.kineticBurst,
+            recoilCharge: a.recoilCharge,
+            charge: a.charge,
+            chargeThreshold: a.chargeThreshold,
+            chargesSpent: a.chargesSpent,
+            kineticHits: a.kineticHits,
+            lastKineticImpulse: a.lastKineticImpulse,
+            projectileMass: a.projectileMass,
+          };
+        })(),
         initialPlayerHp: rt.initialPlayerHp,
         playerHpMax: rt.playerMaxHp,
         steps: rt.stepCount,
@@ -1084,11 +1221,17 @@ export class RunPage {
       actionCount: s.actionCount,
       day: s.day,
       dayTotal: s.dayTotal,
-      /** PRP-F2：本局已生效的 Run 强化（本局临时，刷新即回 null）。 */
-      modifier: s.modifier,
-      /** PRP-F2-R1：单变量验证进度（0/1/2 场已打完）。 */
+      /** PRP-F2：本局第一层强化（本局临时，刷新即回 null）。完整 Build 见下两行。 */
+      modifier: runBuildIds(s)[0] ?? null,
+      /** PRP-BUILD-01：本局完整 Build（按选择顺序）。 */
+      build: runBuildIds(s),
+      buildLabels: s.buffs.map((b) => b.label),
+      /** PRP-BUILD-01：紧急维修累计的耐久补偿（0 = 没拿过）。 */
+      repairBonus: s.repairBonus,
+      /** PRP-BUILD-01：验证进度（0/1/2/3 场已打完）。 */
       battlesCompleted: s.battlesCompleted,
       verificationComplete: runVerificationComplete(s),
+      /** ⚠️ buffs 与 build 同源（`buffs` 是本局 Build 的唯一状态，probe 只是换了个形状暴露）。 */
       buffs: s.buffs.map((b) => b.id),
       buffLabels: s.buffs.map((b) => b.label),
       buffIconCount: runBuffIconRects(s.buffs.length).length,
@@ -1098,11 +1241,16 @@ export class RunPage {
       actionEnabled: runActionEnabled(s),
       actionRect: runActionButtonRect(),
       choiceOpen: runChoiceOpen(s),
-      choiceOptions: RUN_CHOICE_OPTIONS.map((o, i) => ({
+      /**
+       * ⚠️ PRP-BUILD-01：候选**来自当前池**（第一层三选一 / 第二层条件池），
+       * 与绘制、命中区、账本四处同源；`poolLayer` 标明这是第几层的选择（1 / 2 / 0=不适用）。
+       */
+      choicePoolLayer: s.phase === 'CHOICE' ? s.buffs.length + 1 : 0,
+      choiceOptions: runChoicePool(s).map((o, i) => ({
         id: o.id,
         label: o.label,
         note: o.note,
-        rect: runChoiceCardRects(RUN_CHOICE_OPTIONS.length)[i],
+        rect: runChoiceCardRects(runChoicePool(s).length)[i],
         /**
          * PRP-F2：图标盒（**与绘制同源** = `runChoiceIconRect`），供 E2E 在盒内**按面积**
          * 统计「该选项专属图标色」的像素数。
@@ -1110,7 +1258,7 @@ export class RunPage {
          * 46×46 盒的几何中心恰好落在两管之间的空隙里 → 单点采样会假红。
          * 面积统计比单点更强（证明图标真的成片画出来），且对每个图标形状都成立。
          */
-        iconRect: runChoiceIconRect(runChoiceCardRects(RUN_CHOICE_OPTIONS.length)[i]),
+        iconRect: runChoiceIconRect(runChoiceCardRects(runChoicePool(s).length)[i]),
       })),
       bands: {
         top: RUN_TOP_BAND,

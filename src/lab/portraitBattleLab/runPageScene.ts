@@ -49,8 +49,8 @@ import {
   type RunVisualBox,
 } from './runPageLayout';
 import {
-  RUN_CHOICE_OPTIONS,
   runActionEnabled,
+  runChoicePool,
   type RunPageContext,
   type RunPageState,
 } from './runPageState';
@@ -302,8 +302,9 @@ export function runPageLayerShapes(state: RunPageState, view: RunStageView): Run
   }
 
   // CHOICE 浮层：卡片顶部强调条（不含文字、不被描边 / 图标覆盖）
+  // ⚠️ PRP-BUILD-01：卡片数量取自**当前候选池**（第一层 / 第二层条件池），不是写死的第一层三项。
   if (state.phase === 'CHOICE') {
-    for (const card of runChoiceCardRects(RUN_CHOICE_OPTIONS.length)) {
+    for (const card of runChoiceCardRects(runChoicePool(state).length)) {
       out.push({ layer: 'cardBar', rect: runChoiceBarRect(card) });
     }
   }

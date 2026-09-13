@@ -54,6 +54,16 @@
  *      （与正式测试既有写法一致：`tests/battleStatus.test.ts` 亦直接写 `vehicle.hp`）。
  *      因此第二场耐久条如实显示「打剩多少」，不会自动满血。
  *      ⚠️ `carriedHp <= 0`（被打退）不注入 —— 0 HP 的车没有可续用的耐久，正常路径是「存活推进」。
+ *
+ * ── PRP-BUILD-01-TWO-STEP-CANNON-BUILD 追加 ──────────────────────────────
+ *
+ *   7) **两层 Build**：注入参数从「单个 `modifier`」扩展为**有序 `build`**。
+ *      武器数值侧 = 把改武器的项（第一层 + 第二层的 `tripleLoad`）**按顺序浅合并**成一个 overlay 部件
+ *      （`runModifiers.composeRunWeaponDef`），再重映射 `defId`；能力侧（动能爆发 / 反冲蓄能）
+ *      由 `RunBuildAbilities` 订阅**正式战斗事件**驱动。
+ *      `modifier` 仍保留为 `build[0]` 的访问器 → 逐项独立验证的既有断言不受影响。
+ *   8) **Run 能力的冲量在固定步边界施加**（`step()` 里先 `abilities.flush()` 再 `orchestrator.step`）：
+ *      事件回调只入队 → 不在物理求解过程中改速度；战斗结束后不再施加 → 不破坏「RESULT = 战场冻结」。
  */
 
 import type { ContentRegistry } from '../../core/types';
@@ -63,15 +73,35 @@ import { PlanckBattleOrchestrator } from '../../battle/planckBattleOrchestrator'
 import { buildSpawnPlan, type SpawnPlan } from './entities';
 import { RUN_STAGE_BAND } from './runPageLayout';
 import { RUN_DEMO_ENCOUNTER_ID, RUN_DEMO_LOADOUT_ID } from './runPageScene';
+import { RunBuildAbilities, type RunAbilitySnapshot } from './runBuildAbilities';
 import {
-  applyRunModifierToSnapshot,
+  applyRunModifiersToSnapshot,
   createRunRegistry,
+  normalizeBuild,
   type RunModifierId,
 } from './runModifiers';
 
 /** 本局演示组合（与 F1 共享测试数据同源；不改 Debug 选择项）。 */
 export const RUN_BATTLE_LOADOUT_ID = RUN_DEMO_LOADOUT_ID;
 export const RUN_BATTLE_ENCOUNTER_ID = RUN_DEMO_ENCOUNTER_ID;
+
+/**
+ * 本局**真实 projectile 质量**（动能爆发的强度来源）。
+ *
+ * 口径 = 玩家那门武器 part 的 resolved `behaviorParams.projectileMass`
+ * （= 该武器创建的 projectile 的真实质量，不是 PRP 侧自算、也不是写死的「专属伤害」）。
+ * 读不到 → `0`（动能爆发会自然失效，绝不计造强度）。
+ *
+ * ⚠️ 放在本文件而不是能力模块：正式编排器只允许本文件引用（R22a-4 单入口守卫）。
+ */
+function readRunProjectileMass(orchestrator: PlanckBattleOrchestrator): number {
+  for (const part of orchestrator.vehicleA.parts) {
+    if (part.def.category !== 'weapon') continue;
+    const m = part.def.behaviorParams?.projectileMass;
+    if (typeof m === 'number' && Number.isFinite(m)) return m;
+  }
+  return 0;
+}
 
 /* ------------------------------------------------- viewport adapter 几何 */
 
@@ -238,14 +268,18 @@ export interface RunBattleHp {
 }
 
 /**
- * 本场战斗的 Run-local 参数（PRP-F2）。
+ * 本场战斗的 Run-local 参数（PRP-F2 / PRP-BUILD-01）。
  *
- * 只允许两种注入，且都**不改变世界 / 装配 / 正式数值**：
- *   1) `modifier` —— 本局强化（overlay registry + 武器 defId 重映射，见 `runModifiers.ts`）；
- *   2) `carriedHp` —— 跨战斗耐久（上一场真实剩余 HP；只写当前 HP，不动 maxHp）。
+ * 只允许三种注入，且都**不改变世界 / 装配 / 正式数值**：
+ *   1) `build`      —— 本局 Build（两层有序；overlay registry + 武器 defId 重映射，见 `runModifiers.ts`）；
+ *   2) `modifier`   —— 单强化口径（= `build: [modifier]`；保留给逐项独立验证的既有调用点）；
+ *   3) `carriedHp`  —— 跨战斗耐久（上一场真实剩余 HP；只写当前 HP，不动 maxHp）。
  */
 export interface RunBattleOptions {
   readonly soloA?: boolean;
+  /** PRP-BUILD-01：本局完整 Build（按选择顺序，最多两层）。 */
+  readonly build?: readonly RunModifierId[];
+  /** 单强化口径（等价于 `build: [modifier]`）。 */
   readonly modifier?: RunModifierId | null;
   readonly carriedHp?: number | null;
 }
@@ -259,10 +293,15 @@ export interface RunBattleOptions {
 export class RunBattleRuntime {
   readonly plan: SpawnPlan;
   readonly orchestrator: PlanckBattleOrchestrator;
-  /** 本局**专用** registry（正式副本 + 可选的企业 overlay 部件；不污染正式单例）。 */
+  /** 本局**专用** registry（正式副本 + 可选的 Build overlay 部件；不污染正式单例）。 */
   readonly registry: ContentRegistry;
-  /** 本场战斗生效的 Run 强化（null = 基础状态）。 */
-  readonly modifier: RunModifierId | null;
+  /** 本场战斗生效的本局 Build（有序；空数组 = 基础状态）。 */
+  readonly build: readonly RunModifierId[];
+  /**
+   * 本场战斗的 Run 能力（动能爆发 / 反冲蓄能）—— 事件驱动，见 `runBuildAbilities.ts`。
+   * 空 Build 时它只是一个什么都不做的订阅者（零副作用）。
+   */
+  readonly abilities: RunBuildAbilities;
   /** 真实出生中心 x（构造后实测，不是写死数字）。 */
   readonly spawnAx: number;
   readonly spawnBx: number;
@@ -272,12 +311,12 @@ export class RunBattleRuntime {
   constructor(opts: boolean | RunBattleOptions = false) {
     const o: RunBattleOptions = typeof opts === 'boolean' ? { soloA: opts } : opts;
     this.plan = buildSpawnPlan(RUN_BATTLE_LOADOUT_ID, RUN_BATTLE_ENCOUNTER_ID);
-    this.modifier = o.modifier ?? null;
+    this.build = normalizeBuild(o.build ?? o.modifier ?? null);
 
-    // ① 本局 registry = 正式副本（+ 强化部件）。正式 content 单例与 Cannon 基础定义零修改。
-    this.registry = createRunRegistry(this.modifier);
+    // ① 本局 registry = 正式副本（+ Build overlay 部件）。正式 content 单例与 Cannon 基础定义零修改。
+    this.registry = createRunRegistry(this.build);
     // ② 本局 BuildSnapshot：只把基准武器的 defId 指向本局 overlay 部件。
-    const playerSnapshot = applyRunModifierToSnapshot(this.plan.player.snapshot, this.modifier);
+    const playerSnapshot = applyRunModifiersToSnapshot(this.plan.player.snapshot, this.build);
     // ③ overlay 也必须过正式 BuildValidator（overlay 部件确实存在于本局 registry）。
     const validation = validateSnapshot(playerSnapshot, this.registry);
     if (!validation.valid) {
@@ -303,6 +342,32 @@ export class RunBattleRuntime {
     //    实时读当前值无法证明「开局确实是从上一场剩余耐久继续的」。
     this.initialPlayerHp = this.orchestrator.vehicleA.hp;
 
+    // ⑤ Run 能力订阅（必须晚于跨战斗耐久注入：能力不依赖它，但订阅点越晚越少无谓处理）。
+    //
+    // ⚠️ 这里实现 `RunAbilityPorts`：Lab 守卫要求**正式编排器只允许本文件引用**
+    //    （tests/portraitBattleLab.test.ts 的 R22a-4），因此能力模块只拿到这套极窄端口，
+    //    而不是编排器实例本身 → 「PRP ↔ 正式战斗栈」在运行期同样只有本文件相连。
+    this.abilities = new RunBuildAbilities(
+      {
+        subscribe: (fn) => this.orchestrator.onCombatEvent(fn),
+        isFinished: () => this.orchestrator.result !== null,
+        facingOf: (team) =>
+          team === 'A' ? this.orchestrator.vehicleA.facing : this.orchestrator.vehicleB.facing,
+        projectileMass: () => readRunProjectileMass(this.orchestrator),
+        applyImpulse: (team, dirX, dirY, magnitude) => {
+          const world = this.orchestrator.world;
+          const vehicle = team === 'A' ? this.orchestrator.vehicleA : this.orchestrator.vehicleB;
+          const center = world.getPosition(vehicle.body);
+          world.applyLinearImpulse(
+            vehicle.body,
+            { x: dirX * magnitude, y: dirY * magnitude },
+            { x: center.x, y: center.y },
+          );
+        },
+      },
+      this.build,
+    );
+
     const w = this.orchestrator.world;
     this.spawnAx = w.getPosition(this.orchestrator.vehicleA.body).x;
     this.spawnBx = w.getPosition(this.orchestrator.vehicleB.body).x;
@@ -310,6 +375,14 @@ export class RunBattleRuntime {
 
   /** 本场**开局真实 HP**（构造时捕获，注入跨战斗耐久后的实际值，供验收断言）。 */
   readonly initialPlayerHp: number;
+
+  /**
+   * 第一层强化（= `build[0]`；单强化口径的兼容访问器，供逐项独立验证断言使用）。
+   * 完整 Build 请读 `this.build`。
+   */
+  get modifier(): RunModifierId | null {
+    return this.build[0] ?? null;
+  }
 
   /** 本场 HP 上限（= 正式 resolved body.hp，不因跨战斗耐久改变）。 */
   get playerMaxHp(): number {
@@ -352,11 +425,18 @@ export class RunBattleRuntime {
   /** 推进一帧（真实时间 → 内部固定步；与正式 Battle 同一条 `world.step` 语义）。 */
   step(realDtMs: number): void {
     if (realDtMs <= 0) return;
+    // ⚠️ PRP-BUILD-01：Run 能力产生的冲量在**固定步开始之前**统一施加（见 runBuildAbilities 文件头）。
+    this.abilities.flush();
     const before = this.orchestrator.timeMs;
     this.orchestrator.step(realDtMs, 1);
     if (this.orchestrator.timeMs > before) {
       this.steps += 1;
     }
+  }
+
+  /** Run 能力的真实运行状态（诊断 / 验收；全部是真实发生过的计数与量值）。 */
+  abilitySnapshot(): RunAbilitySnapshot {
+    return this.abilities.snapshot();
   }
 
   snapshot(): BattleRenderSnapshot {
@@ -392,6 +472,7 @@ export class RunBattleRuntime {
   }
 
   dispose(): void {
+    this.abilities.dispose();
     this.orchestrator.dispose();
   }
 }
