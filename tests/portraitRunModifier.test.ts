@@ -613,7 +613,13 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
   it('必改 2｜动能爆发：追加真实冲量，强度读当前 Projectile 质量（不写死专属伤害）', () => {
     expect(RUN_MODIFIER_OVERLAY.kineticBurst.affectsWeapon).toBe(false);
     expect(RUN_MODIFIER_OVERLAY.kineticBurst.behaviorParams).toEqual({});
-    expect(KINETIC_BURST_GAIN).toBe(12);
+    // PRP-BUILD-01-R1：增益 12 → 28（一次性倍数级放大，方向验证）。
+    // ⚠️ 这是**实测扫描后的定向值**，不是随手改的数：同条件 A/B 下 28 让「每炮屏幕位移」
+    //    从 1.2px 抬到 15.6px（单炮最高 62px）、绕质心旋转从 **0/12 次** 变成 **7/11 次**
+    //    （最高 55.6°），同时敌车**不越舞台带右缘**（390.3 ≈ 390）、**不出现单帧瞬转**，
+    //    且三场连锁的第三场仍留 430/1100（不伤 PRP-RUN-R1 的「三场都活着且有余量」）。
+    //    完整扫描表与取舍理由见 `runModifiers.ts` 的注释。
+    expect(KINETIC_BURST_GAIN).toBe(28);
 
     // 不带 → 完全不订阅、不产生任何命中追加
     const off = new RunBattleRuntime({ build: ['heavyShell'] });
@@ -632,6 +638,11 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     expect(ab().kineticHits).toBeGreaterThan(0); // 真实打出过命中
     expect(ab().lastKineticImpulse).toBeGreaterThan(0);
     expect(ab().pending).toBeLessThanOrEqual(1); // 冲量在步边界被 flush，不积压
+    // PRP-BUILD-01-R1：最近一次命中必须带**真实命中点**（供表现层把冲击环画在同一位置）
+    const hit = ab().lastKineticHit;
+    expect(hit).not.toBeNull();
+    expect(hit!.magnitude).toBe(ab().lastKineticImpulse);
+    expect(hit!.x).toBeGreaterThan(0);
     on.dispose();
 
     // 同一项「动能爆发」在**轻弹**（基础 mass 1）上强度严格更小 → 「不是写死一个专属伤害」

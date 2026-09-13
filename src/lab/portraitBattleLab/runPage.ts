@@ -107,6 +107,7 @@ import {
   type RunBattleBox,
 } from './runBattleRuntime';
 import { RunBattleView } from './runBattleView';
+import { RUN_IMPACT_RING_MS, runImpactCoreShape, runImpactRingShapes } from './runImpactVfx';
 import { RunVisualStore, type RunAssetStats } from './runVehicleAssets';
 
 const FONT_STACK = 'system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -161,6 +162,16 @@ const COLORS = {
   iconTriple: '#2f8fc4',
   iconCharge: '#c9a227',
   iconRepair: '#4fc4a8',
+  /* ---- PRP-BUILD-01-R1：动能爆发命中冲击环（不入账 — 有透明度、非平涂矩形） ---- */
+  /**
+   * 冲击环描边色。刻意选**亮紫**：与 `kineticBurst` 图标色同色族，玩家能把
+   * 「这个环」与强化选项「动能爆发」对上（可感知性的关键一步）。
+   * ⚠️ 必须与全部入账色 / 七个图标色 RGB 精确互斥（有源码守卫断言）——
+   *    但环只在**舞台带内**绘制，且分带线在其之后绘制 → 不可能污染任何入账面积。
+   */
+  impactRing: '#d9a8ff',
+  /** 命中点核心亮点（更短的定位点）。 */
+  impactCore: '#f6ecff',
 } as const;
 
 /**
@@ -268,7 +279,31 @@ export interface RunProbeBattleWorld {
     readonly kineticHits: number;
     readonly lastKineticImpulse: number;
     readonly projectileMass: number;
+    /**
+     * PRP-BUILD-01-R1：最近一次动能爆发的**真实命中点**（世界坐标）与冲量大小；
+     * `null` = 本场还没触发过。与冲量的真实作用点**同源**（都是 `damage.contactPoint`）。
+     */
+    readonly lastKineticHit: { readonly x: number; readonly y: number; readonly magnitude: number } | null;
   };
+  /**
+   * PRP-BUILD-01-R1：本帧的**命中冲击环**状态（把「额外冲击发生在这一刻」标出来的反馈）。
+   * `null` = 当前没有标记（没触发过 / 已过期 / 战场已冻结）。
+   */
+  readonly kineticImpact: {
+    /** 距离该次真实命中的毫秒数（用战斗自己的时钟，不引入第二个时间源）。 */
+    readonly ageMs: number;
+    /** 真实命中点（世界坐标）。 */
+    readonly worldX: number;
+    readonly worldY: number;
+    /** 真实命中点 → 舞台带逻辑坐标（**绘制坐标与 probe 坐标同源**）。 */
+    readonly bandX: number;
+    readonly bandY: number;
+    /** 本帧实际画出的环数 / 是否画核心亮点（0/false = 已过期）。 */
+    readonly rings: number;
+    readonly core: boolean;
+    readonly maxRadius: number;
+    readonly maxAlpha: number;
+  } | null;
   /** 本场开局的真实玩家 HP（= 注入跨战斗耐久后的实际值）。 */
   readonly initialPlayerHp: number;
   /** 本场玩家 HP 上限（**不因跨战斗耐久改变** → 耐久条如实显示「打剩多少」）。 */
@@ -459,6 +494,13 @@ export class RunPage {
   private battle: RunBattleRuntime | null = null;
   /** 开战瞬间实测的两车外廓间距（证据：开局有明确距离），不是写死数字。 */
   private battleInitialGap = 0;
+  /**
+   * PRP-BUILD-01-R1：最近一次「动能爆发真实命中」的标记（真实命中点 + 触发时的战斗时刻）。
+   * `null` = 当前没有可画的反馈（没触发过 / 已过期 / 战场已冻结）。
+   */
+  private impactMark: { x: number; y: number; atMs: number } | null = null;
+  /** 上一次看到的动能命中计数（计数增加 = 刚刚发生了一次真实 trigger）。 */
+  private lastKineticHits = 0;
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
 
@@ -579,6 +621,9 @@ export class RunPage {
     this.battle = rt;
     // 实测开局外廓间距（不是写死数字）——「开局有明确距离」的证据
     this.battleInitialGap = rt.gapWorld();
+    // PRP-BUILD-01-R1：新一场 → 清掉上一场的命中反馈标记（不跨场残留）
+    this.impactMark = null;
+    this.lastKineticHits = 0;
   }
 
   /** 释放战斗运行时（战斗世界中双方位置/HP 随之不再保留 → 下一次遭遇从正式 spawn 重来）。 */
@@ -587,6 +632,40 @@ export class RunPage {
     this.battle.dispose();
     this.battle = null;
     this.battleInitialGap = 0;
+    this.impactMark = null;
+    this.lastKineticHits = 0;
+  }
+
+  /**
+   * PRP-BUILD-01-R1：把「Run 能力真的触发了一次动能爆发」翻译成一个**带真实位置与时刻**的标记。
+   *
+   * 判据 = `abilities.kineticHits` **计数增加**（只由真实的 `damage` 事件 + 真实 trigger 递增）→
+   * 结构上不可能出现「物理没发生但先画了环」。位置取其 `lastKineticHit`（= 真实 `contactPoint`），
+   * 触发时刻取**战斗自己的时钟** `rt.timeMs`（与之后读 age 同源，不引入第二套时间）。
+   *
+   * ⚠️ 战场冻结（`result !== null`）时不保留任何活动特效 → 不破坏「RESULT = 战场冻结」。
+   * ⚠️ **过期即清空**：标记只表示「此刻有活动反馈」，寿命一到就回到 `null`
+   *   （probe 的 `kineticImpact === null` 语义 = 没触发过 / 已过期 / 战场已冻结；
+   *    否则会留下一个 `ageMs` 无上限增长的僵尸标记，让「环是短的」这件事只能靠读半径间接证明）。
+   *   寿命边界上环的 alpha 正好为 0 → 清空是视觉无缝的（不会「环突然消失」）。
+   */
+  private syncKineticImpact(rt: RunBattleRuntime): void {
+    if (rt.result !== null) {
+      this.impactMark = null;
+      return;
+    }
+    const ab = rt.abilitySnapshot();
+    if (ab.kineticHits !== this.lastKineticHits) {
+      this.lastKineticHits = ab.kineticHits;
+      const hit = ab.lastKineticHit;
+      if (hit) {
+        this.impactMark = { x: hit.x, y: hit.y, atMs: rt.timeMs };
+        return;
+      }
+    }
+    if (this.impactMark !== null && rt.timeMs - this.impactMark.atMs > RUN_IMPACT_RING_MS) {
+      this.impactMark = null;
+    }
   }
 
   /**
@@ -609,6 +688,9 @@ export class RunPage {
       }
 
       rt.step(dt);
+      // PRP-BUILD-01-R1：真实战斗事件 → 命中冲击环标记（必须在读 hp / result 之前，
+      // 使「命中帧」与「画出环的第一帧」是同一帧，age 从 0 开始）
+      this.syncKineticImpact(rt);
       const hp = rt.hp();
       this.state = syncRunBattle(this.state, {
         playerHp: hp.a,
@@ -702,6 +784,10 @@ export class RunPage {
     } else {
       this.battleView.render(this.battle);
       this.battleView.blit(ctx);
+      // PRP-BUILD-01-R1：动能爆发的真实命中反馈。
+      // ⚠️ 必须画在**分带线之前**：环只落在舞台带内，分带线随后覆盖带内首行 →
+      //    分带线像素保持精确（入账面积不受任何影响）。
+      this.drawKineticImpact(ctx);
     }
 
     // 分带线（1px）。⚠️ 画在下一条带的**首行**（`band.y`）而不是上一条带的末行（`band.y - 1`）：
@@ -721,6 +807,62 @@ export class RunPage {
 
     // 6) CHOICE 浮层（必改 4：整页重压暗 + 三张「图标 / 名称 / 一句结果」卡片）
     if (runChoiceOpen(s)) this.drawChoice(ctx);
+  }
+
+  /* ------------------------------------------ PRP-BUILD-01-R1 命中冲击环 */
+
+  /**
+   * 动能爆发的**极简命中反馈**：一个很短的冲击环 + 一个更短的核心亮点，
+   * 画在**这一次真实命中的真实位置**上。
+   *
+   * 它**不是**用特效替代物理（真实位移 / 旋转由 `RunBuildAbilities` 的真实冲量产生），
+   * 只负责告诉玩家「额外冲击就是在这一刻、这一点发生的」—— 这是「存在 → 可感知」这一步
+   * 唯一缺的东西：物理量已经真实改变，但观众无从把改变归因到哪一炮。
+   *
+   * 纪律（Queue 必改 3）：
+   *   - 短：`RUN_IMPACT_RING_MS`（0.28s）后 `runImpactRingShapes` 返回空 → 自然消失，无残留；
+   *   - 只在真实 trigger 时出现：由 `kineticHits` 计数增加驱动（见 `syncKineticImpact`）；
+   *   - 位置来自真实 hit position：`battleBandX/Y(xf, mark.x/y)`，与冲量作用点同源；
+   *   - 不做大爆炸：只有细描边圆环 + 极小亮点，**无填充色块、无粒子、无屏震**；
+   *   - 不遮挡车辆：环从命中点向外扩张且**内部不填充**，描边随寿命变细、透明度递减；
+   *   - 只在舞台带内绘制（clip）→ 不渗进顶部 / 日志 / 动作带。
+   */
+  private drawKineticImpact(ctx: CanvasRenderingContext2D): void {
+    const rt = this.battle;
+    const mark = this.impactMark;
+    if (!rt || !mark || rt.result !== null) return;
+    const ageMs = rt.timeMs - mark.atMs;
+    const rings = runImpactRingShapes(ageMs);
+    const core = runImpactCoreShape(ageMs);
+    if (rings.length === 0 && !core) return;
+
+    const xf = this.battleView.viewTransform();
+    const band = RUN_STAGE_BAND;
+    const cx = band.x + battleBandX(xf, mark.x);
+    const cy = band.y + battleBandY(xf, mark.y);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(band.x, band.y, band.w, band.h);
+    ctx.clip();
+    ctx.lineCap = 'round';
+    for (const ring of rings) {
+      if (ring.alpha <= 0 || ring.lineWidth <= 0 || ring.radius <= 0) continue;
+      ctx.globalAlpha = ring.alpha;
+      ctx.strokeStyle = COLORS.impactRing;
+      ctx.lineWidth = ring.lineWidth;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ring.radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (core && core.alpha > 0 && core.radius > 0) {
+      ctx.globalAlpha = core.alpha;
+      ctx.fillStyle = COLORS.impactCore;
+      ctx.beginPath();
+      ctx.arc(cx, cy, core.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   /* --------------------------------------------------- 舞台：背景与车辆 */
@@ -1172,6 +1314,25 @@ export class RunPage {
             kineticHits: a.kineticHits,
             lastKineticImpulse: a.lastKineticImpulse,
             projectileMass: a.projectileMass,
+            lastKineticHit: a.lastKineticHit ? { ...a.lastKineticHit } : null,
+          };
+        })(),
+        kineticImpact: (() => {
+          const mark = this.impactMark;
+          if (!mark) return null;
+          const ageMs = rt.timeMs - mark.atMs;
+          const rings = runImpactRingShapes(ageMs);
+          const core = runImpactCoreShape(ageMs);
+          return {
+            ageMs,
+            worldX: mark.x,
+            worldY: mark.y,
+            bandX: battleBandX(xf, mark.x),
+            bandY: battleBandY(xf, mark.y),
+            rings: rings.length,
+            core: core !== null,
+            maxRadius: rings.length === 0 ? 0 : Math.max(...rings.map((r) => r.radius)),
+            maxAlpha: rings.length === 0 ? 0 : Math.max(...rings.map((r) => r.alpha)),
           };
         })(),
         initialPlayerHp: rt.initialPlayerHp,

@@ -64,6 +64,15 @@
  *      `modifier` 仍保留为 `build[0]` 的访问器 → 逐项独立验证的既有断言不受影响。
  *   8) **Run 能力的冲量在固定步边界施加**（`step()` 里先 `abilities.flush()` 再 `orchestrator.step`）：
  *      事件回调只入队 → 不在物理求解过程中改速度；战斗结束后不再施加 → 不破坏「RESULT = 战场冻结」。
+ *
+ * ── PRP-BUILD-01-R1-KINETIC-IMPACT-PERCEPTIBILITY 追加 ────────────────────
+ *
+ *   9) **动能爆发的冲量作用点 = 真实命中点**（`damage.contactPoint`，经 `RunAbilityPorts.applyImpulse`
+ *      的 `at` 参数直通 `world.applyLinearImpulse`）。作用在质心只产生平动，而平动会被
+ *      **相机跟随双方中点**追平（实测：世界位移 +20.7px → 舞台带只动 4px）；
+ *      作用在真实命中点额外产生绕质心的**扭矩**，而扭矩（仰俯 / 旋转）无法被相机平移追平。
+ *      这既更接近真实撞击，也是「这一炮命中后把对手明显轰开」唯一可感知的物理通道。
+ *      同时 `abilitySnapshot().lastKineticHit` 暴露该真实命中点 → 表现层的冲击环画在**同一个位置**。
  */
 
 import type { ContentRegistry } from '../../core/types';
@@ -354,14 +363,21 @@ export class RunBattleRuntime {
         facingOf: (team) =>
           team === 'A' ? this.orchestrator.vehicleA.facing : this.orchestrator.vehicleB.facing,
         projectileMass: () => readRunProjectileMass(this.orchestrator),
-        applyImpulse: (team, dirX, dirY, magnitude) => {
+        /**
+         * 施加一次真实冲量。
+         *
+         * `at` = **真实作用点**（世界坐标）→ 直接交给正式 `world.applyLinearImpulse`；
+         * 省略 / `null`（例如没有接触点语义的反冲蓄能）→ 作用在该车自身位置，与原口径一致。
+         * ⚠️ 不在这里做任何「方向修正」或「力度补偿」：方向与大小都是 Run 能力层算好的真实量值。
+         */
+        applyImpulse: (team, dirX, dirY, magnitude, at) => {
           const world = this.orchestrator.world;
           const vehicle = team === 'A' ? this.orchestrator.vehicleA : this.orchestrator.vehicleB;
-          const center = world.getPosition(vehicle.body);
+          const point = at ?? world.getPosition(vehicle.body);
           world.applyLinearImpulse(
             vehicle.body,
             { x: dirX * magnitude, y: dirY * magnitude },
-            { x: center.x, y: center.y },
+            { x: point.x, y: point.y },
           );
         },
       },

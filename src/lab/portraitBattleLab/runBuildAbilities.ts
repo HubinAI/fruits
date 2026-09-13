@@ -45,10 +45,19 @@
  *   - **动能爆发 kineticBurst**：`追加冲量 = KINETIC_BURST_GAIN × projectileMass × relativeVelocity`
  *     —— `projectileMass` 读自本局**真实 resolved 武器 def**（基础 1 / 重型弹头 4），
  *     `relativeVelocity` 读自正式 `damage` 事件。**没有「重型弹头专属伤害」这类写死强度**。
- *     方向 = 该次开火的真实炮口方向（`weaponFire.worldDirection`），作用点为敌车质心
- *     （纯平动推移 → 观感是「被整台撞开」，而不是被掀翻）。
+ *     方向 = 该次开火的真实炮口方向（`weaponFire.worldDirection`）。
+ *     ⚠️ PRP-BUILD-01-R1：作用点从「质心」改为**真实命中点**（`damage.contactPoint`）。
+ *     理由有两条，都不是表现层口味：
+ *       1. **更真实**：冲击本来就发生在接触点 —— 弹丸自己那部分推力也是 Planck 在接触点施加的，
+ *          `applyLinearImpulse(body, impulse, point)` 的 `point` 语义正是「力作用在世界的哪一点」；
+ *          作用在质心反而是把一次偏心撞击当成了纯推。
+ *       2. **可感知**：作用在质心时冲量只产生平动，而平动会被**相机跟随双方中点**追平
+ *          （实测：世界位移 +20.7px → 屏幕只动 4px）；绕质心的扭矩产生的**仰俯 / 旋转**
+ *          无法被相机平移追平，是唯一真正「一眼可辨」的物理通道。
+ *     命中点同时进入 `snapshot().lastKineticHit`，供表现层在**同一个真实位置**画冲击环。
  *   - **反冲蓄能 recoilCharge**：每 `RECOIL_CHARGE_THRESHOLD` 次真实开火蓄满一次，
  *     给玩家车一个**前向**冲量（沿自身 facing）→ 接敌补偿。**只由 fire/recoil 事件驱动，无定时器。**
+ *     ⚠️ 它没有「接触点」语义 → 仍按原口径作用在车辆自身位置（不引入第二套规则）。
  */
 
 import type { BattleEvent } from '../../battle/combatEvents';
@@ -90,8 +99,20 @@ export interface RunAbilityPorts {
    * 动能爆发的强度直接乘这个值 → 强度来自当前炮弹，而不是写死的「专属伤害」。
    */
   readonly projectileMass: () => number;
-  /** 在**步边界**施加一次真实冲量（作用点 = 该车质心）。 */
-  readonly applyImpulse: (team: RunTeamId, dirX: number, dirY: number, magnitude: number) => void;
+  /**
+   * 在**步边界**施加一次真实冲量。
+   *
+   * `at` = **真实作用点**（世界坐标）；省略 / `null` → 作用在该车自身位置。
+   * ⚠️ 动能爆发必须传入 `damage.contactPoint`：作用点决定是否产生绕质心的扭矩，
+   *    而扭矩是「这一炮把它轰得抬/转起来」这一可感知结果的唯一来源（见文件头）。
+   */
+  readonly applyImpulse: (
+    team: RunTeamId,
+    dirX: number,
+    dirY: number,
+    magnitude: number,
+    at?: Readonly<{ x: number; y: number }> | null,
+  ) => void;
 }
 
 /** 一次待施加的真实冲量（步边界统一 flush）。 */
@@ -100,6 +121,8 @@ interface PendingImpulse {
   readonly dirX: number;
   readonly dirY: number;
   readonly magnitude: number;
+  /** 真实作用点（世界坐标）；`null` = 该车自身位置。 */
+  readonly at: Readonly<{ x: number; y: number }> | null;
   readonly label: 'kinetic' | 'charge';
 }
 
@@ -119,6 +142,11 @@ export interface RunAbilitySnapshot {
   readonly kineticHits: number;
   /** 最近一次动能追加冲量的大小（0 = 还没触发过）。 */
   readonly lastKineticImpulse: number;
+  /**
+   * 最近一次动能爆发的**真实命中点**（世界坐标）与冲量大小；`null` = 还没触发过。
+   * 表现层用它把冲击环画在**同一个真实位置**（不另造位置）。
+   */
+  readonly lastKineticHit: Readonly<{ x: number; y: number; magnitude: number }> | null;
   /** 正在读取的「当前 projectile 质量」（来自本局真实 resolved 武器 def）。 */
   readonly projectileMass: number;
   /** 尚未施加的待处理冲量数（正常应恒为 0 或 1）。 */
@@ -137,6 +165,7 @@ export class RunBuildAbilities {
   private chargesSpent = 0;
   private kineticHits = 0;
   private lastKineticImpulse = 0;
+  private lastKineticHit: { x: number; y: number; magnitude: number } | null = null;
   /** 最近一次玩家侧开火的真实炮口方向（动能爆发用；未开火前用玩家朝向兜底）。 */
   private lastFireDirX = 1;
   private lastFireDirY = 0;
@@ -166,11 +195,13 @@ export class RunBuildAbilities {
       this.charge -= RECOIL_CHARGE_THRESHOLD;
       this.chargesSpent += 1;
       // 玩家车「前向」= 自身 facing（A 朝 +X）→ 接敌补偿
+      // ⚠️ 蓄能没有「接触点」语义 → `at: null`（作用在车辆自身位置），不引入第二套规则。
       this.pending.push({
         team: PLAYER_TEAM,
         dirX: this.ports.facingOf(PLAYER_TEAM),
         dirY: 0,
         magnitude: RECOIL_CHARGE_IMPULSE,
+        at: null,
         label: 'charge',
       });
       return;
@@ -188,6 +219,9 @@ export class RunBuildAbilities {
       if (!(magnitude > 0)) return;
       this.kineticHits += 1;
       this.lastKineticImpulse = magnitude;
+      // ⚠️ 真实作用点 = 本次命中的 `contactPoint`（拷贝一份，不持有事件对象）。
+      const at = { x: ev.contactPoint.x, y: ev.contactPoint.y };
+      this.lastKineticHit = { x: at.x, y: at.y, magnitude };
       const dir = this.hasFireDir
         ? { x: this.lastFireDirX, y: this.lastFireDirY }
         : { x: this.ports.facingOf(PLAYER_TEAM), y: 0 };
@@ -197,6 +231,7 @@ export class RunBuildAbilities {
         dirX: dir.x / len,
         dirY: dir.y / len,
         magnitude,
+        at,
         label: 'kinetic',
       });
     }
@@ -214,7 +249,7 @@ export class RunBuildAbilities {
       return;
     }
     for (const p of this.pending) {
-      this.ports.applyImpulse(p.team, p.dirX, p.dirY, p.magnitude);
+      this.ports.applyImpulse(p.team, p.dirX, p.dirY, p.magnitude, p.at);
     }
     this.pending.length = 0;
   }
@@ -228,6 +263,7 @@ export class RunBuildAbilities {
       chargesSpent: this.chargesSpent,
       kineticHits: this.kineticHits,
       lastKineticImpulse: this.lastKineticImpulse,
+      lastKineticHit: this.lastKineticHit ? { ...this.lastKineticHit } : null,
       projectileMass: this.projectileMass,
       pending: this.pending.length,
     };

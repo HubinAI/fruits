@@ -1583,7 +1583,10 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
      *    表内 = [第一场结束(=第二场开局), 第二场结束(=第三场开局), 第三场结束]。
      */
     const FROZEN: Record<string, readonly [number, number, number]> = {
-      'heavyShell+kineticBurst': [843, 714, 537],
+      // ⚠️ PRP-BUILD-01-R1：kineticBurst 的追加冲量从质心改到**真实命中点**（产生扭矩），
+      //    增益 12 → 28；实测第一/第二场开局不变，第三场残血 537 → 430（已按真实测量显式更新，
+      //    不是就地重算）。40% 余量仍在，三场连锁没有被"一次强化把末场打崩"。
+      'heavyShell+kineticBurst': [843, 714, 430],
       'twinCannon+tripleLoad': [843, 678, 470],
       'fastReload+recoilCharge': [843, 622, 350],
     };
@@ -1621,11 +1624,11 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
       expect(hp2, `${key}: hp2<=hp1`).toBeLessThanOrEqual(hp1);
       expect(hp3, `${key}: hp3<=hp2`).toBeLessThanOrEqual(hp2);
 
-      // ⑤ 三场都活着，且终局留下可观余量（32%~49%）—— 不是勉强擦线
+      // ⑤ 三场都活着，且终局留下可观余量（32%~43%）—— 不是勉强擦线
       expect(hp1, `${key}: 第一场存活`).toBeGreaterThan(0);
       expect(hp2, `${key}: 第二场存活`).toBeGreaterThan(0);
       expect(hp3, `${key}: 第三场存活`).toBeGreaterThan(0);
-      expect(hp3).toBeGreaterThan(finalRuntime.playerMaxHp * 0.3);
+      expect(hp3, `${key}: 末场余量`).toBeGreaterThan(finalRuntime.playerMaxHp * 0.3);
       finalRuntime.dispose();
     }
   });

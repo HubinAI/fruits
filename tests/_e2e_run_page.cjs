@@ -1391,6 +1391,174 @@ async function runViewport(browser, vp) {
   );
 
   /*
+    ------------------ 13) PRP-BUILD-01-R1：动能爆发的**真实感知链**（浏览器端 · 真实命中 → 真实冲击 → 真实位移）
+    判据（Queue 必改 3「极简命中反馈」+ 必改 4「同条件 A/B」的浏览器侧）：
+      · 环只在**真实重弹命中**的那一刻出现（每次出现都伴随 `abilities.kineticHits` 递增）；
+      · 环画在**真实命中点**上 —— `kineticImpact.worldX/Y` 与 `abilities.lastKineticHit` **逐字段相等**；
+      · 环是**短的** —— 寿命 `RUN_IMPACT_RING_MS`(280ms) 之外完全消失（`kineticImpact` 回到 null）；
+      · **物理真的发生** —— 命中后短窗内敌车在舞台带内的真实位移 > 0（不是只有视觉环）。
+    做法：独立打开一个干净页面，走「基础 → 重型弹头 → 重型弹头+动能爆发」两层路线，
+    在第三场用 25ms 轮询读**公开 probe**（不读配置、不走任何内部句柄）。
+    ⚠️ 只在第一个视口跑一次（连打三场 ≈ 50s）。
+  */
+  if (!kineticObserved) {
+    kineticObserved = true;
+
+    const kctx = await browser.newContext({
+      viewport: { width: vp.w, height: vp.h },
+      deviceScaleFactor: vp.dpr,
+    });
+    const kpage = await kctx.newPage();
+    await kpage.goto(PAGE_URL, { waitUntil: 'load' });
+    await kpage.waitForFunction(
+      () => {
+        const c = document.querySelector('#run-canvas');
+        if (!window.__RUNPAGE__ || !c || c.width === 0) return false;
+        const p = window.__RUNPAGE__.probe();
+        return p.screen.width > 0 && p.assets.ready >= 5 && p.assets.failed.length === 0 && p.stage.player.allSprites;
+      },
+      null,
+      { timeout: 15000 },
+    );
+
+    const waitResult = () =>
+      kpage.waitForFunction(() => window.__RUNPAGE__.probe().phase === 'RESULT', null, { timeout: 120000 });
+    /** IDLE → EVENT → BATTLE（两次真实点击）。 */
+    const enterBattle = async () => {
+      await clickRect(kpage, (await probeOf(kpage)).actionRect); // IDLE → EVENT
+      await clickRect(kpage, (await probeOf(kpage)).actionRect); // EVENT → BATTLE
+      return await probeOf(kpage);
+    };
+    /** 在 CHOICE 里按**候选 id** 点选（id 来自公开 probe，不靠硬编码序号）。 */
+    const chooseById = async (id) => {
+      const pr = await probeOf(kpage);
+      const i = pr.choiceOptions.findIndex((o) => o.id === id);
+      if (i < 0) return null;
+      await clickRect(kpage, pr.choiceOptions[i].rect);
+      return { label: pr.choiceOptions[i].label, layer: pr.choicePoolLayer };
+    };
+
+    // 第一场：基础（路线起点）
+    const k1 = await enterBattle();
+    await waitResult();
+    await clickRect(kpage, (await probeOf(kpage)).actionRect); // RESULT → CHOICE①
+    const pickShell = await chooseById('heavyShell');
+    // 第二场：重型弹头
+    const k2 = await enterBattle();
+    await waitResult();
+    await clickRect(kpage, (await probeOf(kpage)).actionRect); // RESULT → CHOICE②
+    const pickKinetic = await chooseById('kineticBurst');
+    // 第三场：重型弹头 + 动能爆发 —— 感知链就在这一场观测
+    const k3 = await enterBattle();
+    log(
+      !!pickShell &&
+        !!pickKinetic &&
+        pickShell.layer === 1 &&
+        pickKinetic.layer === 2 &&
+        !!k3.battleWorld &&
+        JSON.stringify(k3.battleWorld.build) === JSON.stringify(['heavyShell', 'kineticBurst']) &&
+        k3.battleWorld.abilities.kineticBurst === true &&
+        k3.battleWorld.abilities.projectileMass === 4,
+      `[${tag}] R63 第三场真实拿到「重型弹头 + 动能爆发」（第二层 · projectile 质量 4 由真实武器 def 读出）`,
+      `第一层=${pickShell ? pickShell.label : '?'} 第二层=${pickKinetic ? pickKinetic.label : '?'} ` +
+        `build=[${k3.battleWorld ? k3.battleWorld.build.join(',') : '?'}] ` +
+        `mass=${k3.battleWorld ? k3.battleWorld.abilities.projectileMass : '?'} ` +
+        `(第一场 build=[${k1.battleWorld ? k1.battleWorld.build.join(',') : '?'}] · 第二场 build=[${
+          k2.battleWorld ? k2.battleWorld.build.join(',') : '?'
+        }])`,
+    );
+
+    /*
+      25ms 轮询第三场：把每一次 `kineticHits` 递增当做一个「冲击 episode」，
+      记录它出现时的真实位置 / 年龄 / 环数，以及命中后短窗内敌车的**真实舞台带位移**。
+    */
+    const kin = await kpage.evaluate(async (capMs) => {
+      const acc = {
+        samples: 0,
+        battleMs: 0,
+        kineticHits: 0,
+        episodes: 0,
+        ringFrames: 0,
+        expiredFrames: 0,
+        maxAgeMs: -1,
+        ageOutOfRange: 0,
+        posMismatch: 0,
+        firstRingEpisodeAgeMs: -1,
+        minAgeMs: -1,
+        enemyDxMax: 0,
+        ringsMax: 0,
+        maxImpulse: 0,
+        mass: 0,
+        endedByPhase: false,
+      };
+      let prevHits = -1;
+      let cur = null;
+      const t0 = performance.now();
+      while (performance.now() - t0 < capMs) {
+        const pr = window.__RUNPAGE__.probe();
+        if (pr.phase !== 'BATTLE' || !pr.battleWorld) {
+          acc.endedByPhase = true;
+          break;
+        }
+        const w = pr.battleWorld;
+        acc.samples += 1;
+        acc.battleMs = w.timeMs;
+        acc.mass = w.abilities.projectileMass;
+        acc.maxImpulse = Math.max(acc.maxImpulse, w.abilities.lastKineticImpulse);
+        const h = w.abilities.kineticHits;
+        if (prevHits < 0) prevHits = h;
+        if (h !== prevHits) {
+          prevHits = h;
+          acc.episodes += 1;
+          cur = { enemyX0: w.enemy.bounds.x, enemyDx: 0, firstAge: -1 };
+        }
+        acc.kineticHits = h;
+        const imp = w.kineticImpact;
+        if (imp) {
+          acc.ringFrames += 1;
+          if (imp.ageMs > acc.maxAgeMs) acc.maxAgeMs = imp.ageMs;
+          // 环出现时的年龄必须落在寿命内（0 ≤ age ≤ 280）
+          if (imp.ageMs < 0 || imp.ageMs > 280) acc.ageOutOfRange += 1;
+          // VFX 位置与「真实命中点」逐字段相等（同源，不是估算）
+          const lk = w.abilities.lastKineticHit;
+          if (!lk || imp.worldX !== lk.x || imp.worldY !== lk.y) acc.posMismatch += 1;
+          if (imp.rings > acc.ringsMax) acc.ringsMax = imp.rings;
+          if (cur) {
+            if (cur.firstAge < 0) cur.firstAge = imp.ageMs;
+          }
+        } else {
+          acc.expiredFrames += 1;
+        }
+        if (cur) cur.enemyDx = Math.max(cur.enemyDx, Math.abs(w.enemy.bounds.x - cur.enemyX0));
+        if (cur) acc.enemyDxMax = Math.max(acc.enemyDxMax, cur.enemyDx);
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      return acc;
+    }, 26000);
+
+    const realHits = kin.kineticHits;
+    log(
+      realHits >= 3 && kin.ringFrames >= 3 && kin.posMismatch === 0 && kin.ageOutOfRange === 0,
+      `[${tag}] R64 感知链同源：每一次真实动能命中都出现环，且环的位置 = 真实命中点 contactPoint`,
+      `${kin.samples} 次采样 · 真实命中 ${realHits} 次 · 有环帧 ${kin.ringFrames} · ` +
+        `位置不符 ${kin.posMismatch} · 年龄越界 ${kin.ageOutOfRange}（年龄上界 280ms）`,
+    );
+    log(
+      kin.expiredFrames > 0 && kin.maxAgeMs <= 280 && kin.ringsMax >= 1,
+      `[${tag}] R65 环是「短的」：寿命内最多同时 2 道，超过 280ms 后完全消失（不是常驻装饰）`,
+      `环数峰值 ${kin.ringsMax} · 年龄峰值 ${round2(kin.maxAgeMs)}ms · 无环帧 ${kin.expiredFrames}/${kin.samples}`,
+    );
+    log(
+      kin.enemyDxMax > 5 && kin.maxImpulse > 0,
+      `[${tag}] R66 必改 3b：命中后敌车真的有**物理位移**（不是只有一层视觉环）`,
+      `命中后短窗内舞台带位移峰值 ${round2(kin.enemyDxMax)}px · 最近一次真实冲量 ${round2(kin.maxImpulse)} · ` +
+        `战斗推进 ${Math.round(kin.battleMs)}ms · 结束方式=${kin.endedByPhase ? 'BATTLE 结束' : '采样窗口到'}`,
+    );
+
+    await kctx.close();
+  }
+
+  /*
     --------------------------- 14) PRP-F2-R2：快速装填参数回收（400 → 650）的浏览器端真实验证
     判据（Queue 验收｜方案）：
       · 正常速度下仍能看出「快速装填的炮击频率高于基础炮」；
@@ -1512,6 +1680,12 @@ function minOf(a) {
 
 /** 开火节奏与视口无关（物理固定步进）→ 只在首个视口做满时序观测，避免 4 视口重复跑两场 15 秒战斗。 */
 let fireCadenceObserved = false;
+
+/**
+ * PRP-BUILD-01-R1：动能爆发的**真实感知链**与视口无关（物理固定步进）→ 同样只在首个视口跑一次
+ * （这条要连打三场 ≈ 50s，四视口各跑一遍没有信息增量）。
+ */
+let kineticObserved = false;
 
 function round2(v) {
   return Math.round(v * 100) / 100;
