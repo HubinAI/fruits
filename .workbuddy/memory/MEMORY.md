@@ -10,7 +10,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 原型正式名 **PRP｜Portrait Run Prototype**（PBL 旧名仅存 Debug Lab）
 - **PRP 链尾**：`6fbf275` F1 接入正式侧视 Planck 战斗 → `c44239b` R5 恢复正式 Battle Camera
   → `ca3fb43` F2 首个强化闭环 → `1a3b080` F2-R1 单变量收紧 + Cannon 真实 burst
-  → F2-R2 快速装填 400→650 → **PRP-BUILD-01 两层 Cannon Build（本次）**。
+  → `896086b` F2-R2 快速装填 400→650 → **`39f6af9` PRP-BUILD-01 两层 Cannon Build（本次交付）**。
 - 历史事实：PRP-F1 之前 PRP 战斗区**没有物理**（纯演示脚本）。全链对
   `src/core|physics|render|player|platform` diff **恒为空**；唯一正式 gameplay 改动 = `src/battle/cannonBehavior.ts`
   的可选 burst（F2-R1 显式授权）。R5 的相机复用靠 PRP 侧 viewport adapter，不碰 `src/render`。
@@ -168,14 +168,20 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - ⚠️ **同一文件的多条 Edit 不要并行发出**（后落盘覆盖前者 → 静默丢改动）；必须串行并 grep 复核。
 
 ## 6. Next action
-- **PRP-BUILD-01 收尾中**：test / e2e / 交接文档 / commit + push（SHA 见 daily log）。
-- **待真人录屏裁决**：三条路线「第一次选择 → 第二次条件选择 → 最终真实战斗」是否呈现**方向感**
-  （不是两个独立加成）。第一层三项已冻结，不得再调。
+- **PRP-BUILD-01 已交付并停等**（`39f6af9`，单功能 commit + push，四方 SHA 一致）。
+  **不继续第三层 Build、不扩正式 7 天**（Queue 明令）。
+- **待真人录屏裁决（本轮唯一关键问题）**：三条路线
+  「第一次选择 → 第二次条件选择 → 最终真实战斗」是否让玩家看出**这辆车形成了一个方向**，
+  而不是只叠了两个独立加成。判定口径：**不看顶部文字/图标**，只看最终战斗。
+- ⚠️ **需同时裁决的既存余量问题**（见 §5.5）：第一场确定性收在 24.5% →
+  **第二场（第一层 Build）三条路线都必然被打退** → 终局满耐久开幕。
+  终局展示效果反而更好，但「强化后那场」玩家看不到赢。**Queue 禁止调参，本 Queue 未动任何数值。**
 - **PRP-R5 遗留裁决**（若真人仍嫌车小）：adapter 口径开局 69·84px / 峰值 172·190px 是否可感知。
   候选（均需重新授权）：调大 `RUN_BATTLE_VIEW_INSET` 或分段取景。**禁止**无授权新增 PRP 专属
   dynamic zoom / 镜头震动 / Kill zoom —— **恢复旧模式，不发明新模式**。
 - 未裁决挂起：俯视 `WEAPON_CONTACT_THRESHOLD=0.5`（`contactRouter.ts:694`）是否单开 Queue。
-- **PRP-R3 / F1 / R5 / F2 / F2-R1 / F2-R2 六轮电脑录屏真人回执仍未全部归档**（本分支唯一未闭环项）。
+- **PRP-R3 / F1 / R5 / F2 / F2-R1 / F2-R2 / BUILD-01 七轮电脑录屏真人回执仍未全部归档**
+  （本分支唯一未闭环项）。
 - Low-prio backlog：`tests/_e2e_portrait_battle_lab.cjs` 的 `[iso] I2` 仍用 `readdirSync().find()`；
   KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01；mobile drive slot（F-GARAGE-TOUCH-ASSEMBLY-R2）；strip-scroll no clamp。
   **Foundation 补正候选**：给 `FunctionalInstall` 补 `overrides`。
