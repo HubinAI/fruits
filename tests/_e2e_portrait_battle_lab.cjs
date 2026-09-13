@@ -335,8 +335,8 @@ async function runViewport(browser, vp) {
   // 10.5) PBL-G1 对照门禁：审计 + 固定 6 步顺序 + 切场零残留（一次即可完成的 A/B 对照）
   const g0 = (await probeOf(page)).gate;
   log(
-    !!g0 && g0.auditOk === true && g0.auditProblems.length === 0 && g0.auditCombos === 6,
-    `[${tag}] G1 共享配置审计通过（6 组合 · 0 数值差异 · 全部由正式链路独立重算）`,
+    !!g0 && g0.auditOk === true && g0.auditProblems.length === 0 && g0.auditCombos === 8,
+    `[${tag}] G1 共享配置审计通过（8 组合 · 0 数值差异 · 全部由正式链路独立重算）`,
     `ok=${g0 && g0.auditOk} combos=${g0 && g0.auditCombos} mismatches=${g0 && g0.auditMismatchCount}`,
   );
   log(
