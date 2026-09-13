@@ -37,7 +37,7 @@
  *   |---|---|---|---|
  *   | A 重型弹头 | 炮弹更重 → 推得更狠、自己也退得更狠 | `projectileRadius 10→16` / `projectileMass 1→4` / `recoilImpulse 30→90` | 正式 `cannon` |
  *   | B 双联炮 | 一次攻击极短间隔连续两发 | `burstRounds 1→2` + `burstIntervalMs 0→100` | 正式 `cannon`（PRP-F2-R1 新增的**可选 burst 参数**） |
- *   | C 快速装填 | 开炮节奏明显变快 | `cooldownMs 1000→400` | 正式 `cannon` |
+ *   | C 快速装填 | 开炮节奏变快（1.54× 基础，保留物理运动时间） | `cooldownMs 1000→650` | 正式 `cannon` |
  *
  * ## PRP-F2-R1：B 双联炮从 shotgun workaround 改成真实 burst
  *
@@ -140,8 +140,13 @@ export const RUN_MODIFIER_OVERLAY: Readonly<Record<RunModifierId, RunModifierOve
   },
   fastReload: {
     // 只改本局当前 Cannon 的攻击间隔；其它一律不动。
+    //
+    // PRP-F2-R2 参数回收：`400 → 650`。第一版 400ms（≈2.5× 基础）真人可感知，
+    // 但把「远程开火 → 后坐 → 敌方接近 → 碰撞」整段正式物理节奏压缩掉了，
+    // 有形成稳定最优解的风险。650ms ≈ **1.54× 基础**，保留可感知的节奏差，
+    // 同时让每轮炮击之间重新留出物理运动时间。**只回收这一个数，不做多档扫描。**
     behavior: 'cannon',
-    behaviorParams: { cooldownMs: 400 },
+    behaviorParams: { cooldownMs: 650 },
     cause: '开炮节奏明显变快',
   },
 };

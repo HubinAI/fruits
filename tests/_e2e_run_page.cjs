@@ -1085,8 +1085,124 @@ async function runViewport(browser, vp) {
     `phase=${pFreshEvent.phase} buffs=${pFreshEvent.buffs.length}`,
   );
 
+  /*
+    --------------------------- 13) PRP-F2-R2：快速装填参数回收（400 → 650）的浏览器端真实验证
+    判据（Queue 验收｜方案）：
+      · 正常速度下仍能看出「快速装填的炮击频率高于基础炮」；
+      · 但相比 400ms（≈2.5×），炮击之间重新留出明显物理运动时间（≈1.54×，不再淹没接敌过程）。
+    做法：在**同一个页面的干净新 Run** 里连跑两场 —— 第一场基础炮、第二场只带快速装填 ——
+    只用公开 probe 的「在飞弹丸数增量」反推真实开火间隔（不读配置、不看任何文字）。
+    同条件保证：Enemy / Player / Battle world / Spawn / Camera / 跨战斗耐久 全部与第一场一致。
+  */
+  if (!fireCadenceObserved) {
+    fireCadenceObserved = true;
+
+    // 第一场：基础炮（DAY 3，无任何强化）
+    await clickRect(page, pFreshEvent.actionRect);
+    const pBaseFight = await probeOf(page);
+    const baseWin = await sampleFireCadence(page, 6000);
+    await page.waitForFunction(() => window.__RUNPAGE__.probe().phase === 'RESULT', null, { timeout: 90000 });
+    const pBaseEnd = await probeOf(page);
+    await clickRect(page, pBaseEnd.actionRect); // RESULT → CHOICE
+    const pChoiceFr = await probeOf(page);
+
+    // 第二场：只带快速装填
+    await clickRect(page, pChoiceFr.choiceOptions[2].rect);
+    const pAfterFr = await probeOf(page);
+    await clickRect(page, pAfterFr.actionRect); // IDLE → EVENT
+    const pEventFr = await probeOf(page);
+    await clickRect(page, pEventFr.actionRect); // EVENT → BATTLE
+    const pFastFight = await probeOf(page);
+    const fastWin = await sampleFireCadence(page, 6000);
+
+    const baseMin = minOf(baseWin.gaps);
+    const fastMin = minOf(fastWin.gaps);
+    log(
+      pBaseFight.phase === 'BATTLE' &&
+        !!pBaseFight.battleWorld &&
+        pBaseFight.battleWorld.modifier === null &&
+        pBaseFight.battleWorld.initialPlayerHp === pBaseFight.battleWorld.playerHpMax &&
+        baseWin.gaps.length >= 2,
+      `[${tag}] R55 快速装填独立复验：第一场是**无强化的基础炮**（同 Enemy / Player / World / Spawn / Camera，满耐久开局）`,
+      `modifier=${pBaseFight.battleWorld ? pBaseFight.battleWorld.modifier : '?'} · 观测 ${baseWin.volleys} 次开火 · ${
+        baseWin.gaps.length
+      } 个间隔 · 最小间隔 ${Number.isNaN(baseMin) ? 'n/a' : Math.round(baseMin)}ms`,
+    );
+    log(
+      !!pFastFight.battleWorld &&
+        pFastFight.battleWorld.modifier === 'fastReload' &&
+        pAfterFr.buffs.length === 1 &&
+        pAfterFr.day === 4,
+      `[${tag}] R56 必改 5：第二场运行时真实拿到「快速装填」（单变量隔离 Run · DAY 4 · 只有这一个强化）`,
+      `modifier=${pFastFight.battleWorld ? pFastFight.battleWorld.modifier : '?'} day=${pAfterFr.day} buffs=${pAfterFr.buffLabels.join('/')}`,
+    );
+    /*
+      真实节奏断言（用最小观测间隔）：
+        基础炮 ≈1000ms（Base Cannon 冻结）/ 快速装填 ≈650ms（400 → 650 回收后）。
+      下界 480ms 用来证明**不再是 400ms 那一版**（若退回 400ms，最小间隔会掉到 ~400 而失败）。
+    */
+    log(
+      baseMin > 880 &&
+        baseMin < 1120 &&
+        fastMin > 560 &&
+        fastMin < 800 &&
+        fastMin < baseMin * 0.8 &&
+        fastMin > 480,
+      `[${tag}] R57 参数回收成立：真实攻击间隔 ≈650ms（明显快于基础 1000ms，但不再是 400ms 的 2.5×）`,
+      `基础 ${Math.round(baseMin)}ms → 快速装填 ${Math.round(fastMin)}ms · 频率比 ${round2(baseMin / fastMin)}×`,
+    );
+
+    await ctx.close();
+    return;
+  }
+
   await ctx.close();
 }
+
+/**
+ * PRP-F2-R2：采样**真实开火节奏**（浏览器端，只看公开 probe 字段，不走任何内部句柄捷径）。
+ *
+ * 口径：每 25ms 读一次 `battleWorld.projectiles`，把「在飞弹丸数增加」记为一次真实开火，
+ * 并记录相对时刻 → 相邻两次开火的时差 = **真实攻击间隔**（不是读配置）。
+ * 战斗结束（phase 离开 BATTLE）即停止，避免把 RESULT 冻结帧算进采样。
+ */
+async function sampleFireCadence(page, windowMs) {
+  return await page.evaluate(async (ms) => {
+    const acc = { samples: 0, volleys: 0, gaps: [], lastAt: null };
+    let prev = -1;
+    const t0 = performance.now();
+    while (performance.now() - t0 < ms) {
+      const pr = window.__RUNPAGE__.probe();
+      if (pr.phase !== 'BATTLE') break;
+      const w = pr.battleWorld;
+      if (w) {
+        if (prev >= 0 && w.projectiles > prev) {
+          acc.volleys += 1;
+          const at = performance.now() - t0;
+          if (acc.lastAt !== null) acc.gaps.push(Math.round(at - acc.lastAt));
+          acc.lastAt = at;
+        }
+        prev = w.projectiles;
+      }
+      acc.samples += 1;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    return acc;
+  }, windowMs);
+}
+
+/**
+ * ⚠️ 口径说明：浏览器端只能用「在飞弹丸数增量」推断开火，而本场演示里
+ * **弹丸命中销毁的那一步常常正好等于下一发的开火步**（单测实测 `birthGaps` 出现 120 步），
+ * 于是会**漏计**若干次开火 → 均值被拉高、计数被压低。
+ * 因此硬断言一律用**最小观测间隔**（漏计只会把间隔变大，不会变小 → 最小值是稳健下界）。
+ */
+function minOf(a) {
+  return a.length ? Math.min(...a) : NaN;
+}
+
+/** 开火节奏与视口无关（物理固定步进）→ 只在首个视口做满时序观测，避免 4 视口重复跑两场 15 秒战斗。 */
+let fireCadenceObserved = false;
 
 function round2(v) {
   return Math.round(v * 100) / 100;

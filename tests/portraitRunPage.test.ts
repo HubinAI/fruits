@@ -1177,7 +1177,8 @@ describe('PRP-F2｜G 首个真实强化闭环：DAY 3 基础战斗 → 三选一
         expect(params.burstIntervalMs).toBe(100);
         expect(params.fanAnglesDeg).toBeUndefined();
       }
-      if (id === 'fastReload') expect(params.cooldownMs).toBe(400);
+      // PRP-F2-R2：快速装填参数回收 400 → 650（Base Cannon 仍 1000ms）
+      if (id === 'fastReload') expect(params.cooldownMs).toBe(650);
       secondRuntime.dispose();
     }
   });

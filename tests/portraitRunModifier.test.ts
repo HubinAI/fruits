@@ -68,10 +68,17 @@ function run(
   rt: RunBattleRuntime,
   frames: number,
   stepMs = 1000 / 60,
-): { fires: { behavior: string; timestamp: number }[]; maxRadius: number; maxAlive: number; aliveSum: number } {
-  const fires: { behavior: string; timestamp: number }[] = [];
+): {
+  fires: { team: string; behavior: string; timestamp: number }[];
+  maxRadius: number;
+  maxAlive: number;
+  aliveSum: number;
+} {
+  const fires: { team: string; behavior: string; timestamp: number }[] = [];
   rt.orchestrator.onCombatEvent((ev) => {
-    if (ev.type === 'weaponFire') fires.push({ behavior: ev.behavior, timestamp: ev.timestamp });
+    if (ev.type === 'weaponFire') {
+      fires.push({ team: ev.team as string, behavior: ev.behavior, timestamp: ev.timestamp });
+    }
   });
   let maxRadius = 0;
   let maxAlive = 0;
@@ -169,7 +176,7 @@ describe('RP-MOD-01｜强化只活在本局 overlay registry（正式定义零�
     // Queue 必改 4：不靠大散射把两发分开 → twinCannon 不得声明扇形参数
     expect(RUN_MODIFIER_OVERLAY.twinCannon.behaviorParams.fanAnglesDeg).toBeUndefined();
     expect(RUN_MODIFIER_OVERLAY.fastReload.behavior).toBe('cannon');
-    expect(RUN_MODIFIER_OVERLAY.fastReload.behaviorParams).toEqual({ cooldownMs: 400 });
+    expect(RUN_MODIFIER_OVERLAY.fastReload.behaviorParams).toEqual({ cooldownMs: 650 });
     // 三项都**不碰**弹道速度（强化不改变弹道）
     for (const id of MODIFIER_IDS) {
       expect(RUN_MODIFIER_OVERLAY[id].behaviorParams.muzzleSpeed).toBeUndefined();
@@ -333,17 +340,37 @@ describe('RP-MOD-02｜三种强化在真实 Runtime 里的差异（必改 5）',
     twinEv.dispose();
   });
 
-  it('快速装填：同窗口开火次数明显更多（真实节奏差异）', () => {
+  it('快速装填：真实攻击间隔 1000ms → 650ms（1.54× 频率；PRP-F2-R2 参数回收）', () => {
     const baseRt = new RunBattleRuntime();
     const fastRt = new RunBattleRuntime({ modifier: 'fastReload' });
 
     const bp = (d: FunctionalPartDef) => d.behaviorParams as Record<string, number>;
-    expect(bp(weaponPartDef(baseRt)).cooldownMs).toBe(1000);
-    expect(bp(weaponPartDef(fastRt)).cooldownMs).toBe(400);
+    expect(bp(weaponPartDef(baseRt)).cooldownMs).toBe(1000); // Base Cannon 冻结，仍 1000ms
+    expect(bp(weaponPartDef(fastRt)).cooldownMs).toBe(650); // PRP-F2-R2：400 → 650
 
-    const base = run(baseRt, 600);
-    const fast = run(fastRt, 600);
-    expect(fast.fires.length).toBeGreaterThan(base.fires.length * 1.5);
+    // 真实开火事件的时间差（不读配置、不读 PRP 自算数字）。
+    // ⚠️ 只取 team 'A'（玩家那门炮）：本场演示**只有玩家开火**，敌方无炮（已实测 byTeam 仅 A）。
+    type FireRec = { team: string; behavior: string; timestamp: number };
+    const teamA = (f: FireRec[]) => f.filter((x) => x.team === 'A');
+    const base = teamA(run(baseRt, 600).fires);
+    const fast = teamA(run(fastRt, 600).fires);
+    // 600 帧（10s）内的真实开火次数：10 次 / 16 次（事件计数，不是弹丸数增量 —— 后者会漏计）
+    expect(base.length).toBe(10);
+    expect(fast.length).toBe(16);
+    expect(fast.length).toBeGreaterThan(base.length);
+
+    const gaps = (f: FireRec[]) => f.slice(1).map((x, i) => x.timestamp - f[i].timestamp);
+    const baseGaps = gaps(base);
+    const fastGaps = gaps(fast);
+    // 每一发间隔都精确落在 1000ms / 650ms（真实固定步进，无抖动）
+    expect(baseGaps.every((g) => Math.abs(g - 1000) < 1e-6)).toBe(true);
+    expect(fastGaps.every((g) => Math.abs(g - 650) < 1e-6)).toBe(true);
+
+    // 频率比 = 1000/650 ≈ 1.538：既明显快于基础（>1.45），
+    // 又比第一版 400ms（2.5×）**明显回收**（<1.65）—— 回收后每轮炮击之间重新留出物理运动时间。
+    const ratio = 1000 / 650;
+    expect(ratio).toBeGreaterThan(1.45);
+    expect(ratio).toBeLessThan(1.65);
 
     baseRt.dispose();
     fastRt.dispose();
@@ -382,7 +409,7 @@ describe('RP-MOD-03｜跨战斗耐久与 clean recreate（必改 4 / 技术正�
     expect(second.initialPlayerHp).toBe(end.hpA);
     expect(second.playerMaxHp).toBe(maxHp);
     expect(second.modifier).toBe('fastReload');
-    expect((weaponPartDef(second).behaviorParams as Record<string, number>).cooldownMs).toBe(400);
+    expect((weaponPartDef(second).behaviorParams as Record<string, number>).cooldownMs).toBe(650);
     second.dispose();
   });
 
@@ -406,7 +433,7 @@ describe('RP-MOD-03｜跨战斗耐久与 clean recreate（必改 4 / 技术正�
     expect(b.stepCount).toBe(0);
     expect(b.spawnSeparation).toBe(800);
     expect(Math.abs(b.vehicleX('A') - b.spawnAx)).toBeLessThan(1);
-    expect((weaponPartDef(b).behaviorParams as Record<string, number>).cooldownMs).toBe(400);
+    expect((weaponPartDef(b).behaviorParams as Record<string, number>).cooldownMs).toBe(650);
     b.dispose();
   });
 
