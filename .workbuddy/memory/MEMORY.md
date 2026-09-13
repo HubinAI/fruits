@@ -11,7 +11,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - **PRP 链尾**：`6fbf275` F1 接入正式侧视 Planck 战斗 → `c44239b` R5 恢复正式 Battle Camera
   → `ca3fb43` F2 首个强化闭环 → `1a3b080` F2-R1 单变量收紧 + Cannon 真实 burst
   → `896086b` F2-R2 快速装填 400→650 → `39f6af9` BUILD-01 两层 Cannon Build
-  → `8ac97a8` memory backfill → **`d29eda0` PRP-RUN-R1 死亡即失败 + 单一耐久贯穿三场（本次交付）**。
+  → `8ac97a8` memory backfill → **`02becf7` PRP-RUN-R1 死亡即失败 + 单一耐久贯穿三场（本次交付）**。
 - 历史事实：PRP-F1 之前 PRP 战斗区**没有物理**（纯演示脚本）。全链对
   `src/core|physics|render|player|platform` diff **恒为空**；唯一正式 gameplay 改动 = `src/battle/cannonBehavior.ts`
   的可选 burst。R5 的相机复用靠 PRP 侧 viewport adapter，不碰 `src/render`。
@@ -133,7 +133,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - **跨战斗耐久**：`PlanckVehicle.hp` 可写、`maxHp` 独立 → **只写 `hp`**；`BattleConfig` 里没有 HP 字段。
   ⚠️ `initialPlayerHp` 必须是**构造时捕获的 `readonly` 字段**，不能是实时读 `vehicleA.hp` 的 getter（会假红）。
 
-### 5.6 PRP-RUN-R1 死亡与耐久连续性（已交付 `d29eda0`）
+### 5.6 PRP-RUN-R1 死亡与耐久连续性（已交付 `02becf7`）
 - 缺陷：`finishRunBattle` 是唯一战斗出口却**从不检查真实 Player HP** + `runCarriedPlayerHp`
   把「0 HP」与「还没打过」压成同一个 `null` → `carried ?? ctx.playerHpMax` 把 0 HP 读成满耐久
   → 死亡后仍进 CHOICE / DAY 推进。
@@ -165,7 +165,7 @@ Authority: `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md`
 - 另：弹丸**真实弹道下坠**，开局 564 px 外前两发落地，第 3 发才命中（首次命中恰掉 **80** = 单发值）。
 
 ## 6. Next action
-- **PRP-RUN-R1 已交付并停等**（`d29eda0`，基線 `8ac97a8`，15 文件 / +850 −278，单功能 commit + push）。
+- **PRP-RUN-R1 已交付并停等**（`02becf7`，基线 `8ac97a8`，16 文件 / +973 −278，单功能 commit + push）。
   必改 1/2/3/4 + 验收 1~5 全部完成；**按指令停止，不继续修改 Build 表现**。
 - **待真人录屏裁决（两条）**：
   ①`FAILED` 失败终态页面的观感（只显示失败 Day / 最终 Build / 重新开始验证，不自动恢复耐久）；
