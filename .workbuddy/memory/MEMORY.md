@@ -15,7 +15,8 @@
 - 原型正式名 **PRP｜Portrait Run Prototype**（PBL 旧名仅存 Debug Lab）
 - **链尾**：`6fbf275` F1 战场接入 → `c44239b` R5 相机 → `ca3fb43` F2 → `1a3b080` F2-R1
   → `896086b` F2-R2 → `39f6af9` BUILD-01 → `8ac97a8` memory → `02becf7` RUN-R1
-  → **`5c8b514` + `eda6ca9` BUILD-01-R1（本次交付）**
+  → `5c8b514` + `eda6ca9` BUILD-01-R1 → `72c7315` memory 精简
+  → **`e90da08` PBL-E2E-AUDIT-COMBO-LITERAL-FIX（本次交付）**
 - 全链对 `src/core|physics|render|player|platform` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，行为逐帧不变）。
   R5 相机复用靠 PRP 侧 viewport adapter，不碰 `src/render`。
@@ -134,12 +135,12 @@
 - 绘制顺序：`drawKineticImpact` 在 `blit` 之后、**分带线之前** + `clip` 到舞台带 → 不可能污染入账面积。
 
 ## 6. Next action
-- ⚠️ **待裁决：一条既存红（非本 Queue 引入）** —— `npm run e2e:portrait-lab` **146/148**。
-  `tests/_e2e_portrait_battle_lab.cjs:338` 的冻结字面量 `auditCombos === 6` 与源码不符
-  （`gate.ts:387`「2 Loadout × **4** Encounter = **8**」；`LAB_ENCOUNTERS` 含 ProtoRusher）；
-  归属 `02becf7`（RUN-R1 加第 4 个遭遇时改了源码、漏改该 E2E 字面量），且 RUN-R1 门禁清单里没有
-  `e2e:portrait-lab` → 一直红到本轮才被发现。**按纪律未混并修复**；需要则单开一条 Bug Queue
-  （改 1 行字面量 + 1 处标签文案）。
+- ✅ **`e2e:portrait-lab` 已恢复 148/148**（Bug Queue `PBL-E2E-AUDIT-COMBO-LITERAL-FIX`，`e90da08`）。
+  根因 = RUN-R1（`02becf7`）加第 4 个 Encounter（ProtoRusher）时改了源码、漏改
+  `tests/_e2e_portrait_battle_lab.cjs:338` 的冻结字面量 `auditCombos === 6`（真值 8）。
+  vitest 侧 `G1-05` 早已是 `toHaveLength(8)` → 该红**只存在于浏览器 E2E 通道**。
+  ⚠️ 教训：**源码口径变更必须同时检查 .cjs E2E 侧的同款字面量**（vitest 绿 ≠ E2E 绿）。
+  注：同段 `g0.sequence.length === 6` 是 A/B 的**固定 6 步顺序**，与组合数无关。
 - **BUILD-01-R1 已交付并停等**（`5c8b514` + memory `eda6ca9`，基线 `02becf7`，11 文件 / +1333 −97）。
   **按指令停止，不自动续下一 Queue。**
 - **待真人录屏裁决（三条）**：①不看顶部文字，`重型弹头` vs `重型弹头 + 动能爆发` 的最终战斗是否
