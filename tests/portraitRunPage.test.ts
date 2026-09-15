@@ -1588,7 +1588,10 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
       //    不是就地重算）。40% 余量仍在，三场连锁没有被"一次强化把末场打崩"。
       'heavyShell+kineticBurst': [843, 714, 430],
       'twinCannon+tripleLoad': [843, 678, 470],
-      'fastReload+recoilCharge': [843, 622, 350],
+      // ⚠️ PRP-BUILD-01-R2：recoilCharge 从「前向接敌补偿」改为「沿炮口反方向的强后坐」
+      //    （冲量 45 → 450）。后坐把玩家持续推离敌人 = 少挨打 → 第三场残血 350 → 582。
+      //    第一/第二场不变（前两场该能力尚未进入战斗 / 末段窗口未受影响）。**显式更新**。
+      'fastReload+recoilCharge': [843, 622, 582],
     };
     const routes: readonly [string, string][] = [
       ['heavyShell', 'kineticBurst'],

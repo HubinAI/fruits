@@ -56,8 +56,14 @@
  *          无法被相机平移追平，是唯一真正「一眼可辨」的物理通道。
  *     命中点同时进入 `snapshot().lastKineticHit`，供表现层在**同一个真实位置**画冲击环。
  *   - **反冲蓄能 recoilCharge**：每 `RECOIL_CHARGE_THRESHOLD` 次真实开火蓄满一次，
- *     给玩家车一个**前向**冲量（沿自身 facing）→ 接敌补偿。**只由 fire/recoil 事件驱动，无定时器。**
- *     ⚠️ 它没有「接触点」语义 → 仍按原口径作用在车辆自身位置（不引入第二套规则）。
+ *     给玩家车一个**沿本次真实炮口反方向**的强后坐冲量。
+ *     **只由 fire/recoil 事件驱动，无定时器。**
+ *     ⚠️ PRP-BUILD-01-R2：旧口径是「沿自身 facing 的**前向**冲量（接敌补偿）」——
+ *     方向与真实后坐**相反**，真人无法把它读成因果（与正常接敌 / 接触推挤 / 相机跟随混在一起）。
+ *     现改为复用本次开火的真实 `worldDirection` **取反**：与普通 recoil 同向、仅量级显著更大，
+ *     于是「高频开炮 → 不断累积普通后坐 → 某一次被明显踹开 → 重新拉开距离」成为纯物理因果链。
+ *     ⚠️ 它没有「接触点」语义 → 仍按原口径作用在车辆**质心**（`at: null`）；
+ *     这同时是刻意的：质心冲量只产生平动、不产生旋转，不会出现「被踹翻」的退化观感。
  */
 
 import type { BattleEvent } from '../../battle/combatEvents';
@@ -136,7 +142,7 @@ export interface RunAbilitySnapshot {
   readonly charge: number;
   /** 蓄满阈值（未带反冲蓄能时为 0）。 */
   readonly chargeThreshold: number;
-  /** 已触发的接敌补偿次数（真实发生）。 */
+  /** 已触发的强后坐次数（真实发生；= 蓄满阈值被消耗的次数）。 */
   readonly chargesSpent: number;
   /** 动能爆发已触发的命中次数（真实发生）。 */
   readonly kineticHits: number;
@@ -169,6 +175,9 @@ export class RunBuildAbilities {
   /** 最近一次玩家侧开火的真实炮口方向（动能爆发用；未开火前用玩家朝向兜底）。 */
   private lastFireDirX = 1;
   private lastFireDirY = 0;
+  /** 最近一次玩家侧开火的**真实炮口位置**（蓄能强后坐的作用点；用不到时保持 0）。 */
+  private lastFireX = 0;
+  private lastFireY = 0;
   private hasFireDir = false;
   private readonly pending: PendingImpulse[] = [];
 
@@ -188,20 +197,39 @@ export class RunBuildAbilities {
       if (ev.team !== PLAYER_TEAM) return;
       this.lastFireDirX = ev.worldDirection.x;
       this.lastFireDirY = ev.worldDirection.y;
+      this.lastFireX = ev.worldPosition.x;
+      this.lastFireY = ev.worldPosition.y;
       this.hasFireDir = true;
       if (!this.hasCharge) return;
       this.charge += 1;
       if (this.charge < RECOIL_CHARGE_THRESHOLD) return;
       this.charge -= RECOIL_CHARGE_THRESHOLD;
       this.chargesSpent += 1;
-      // 玩家车「前向」= 自身 facing（A 朝 +X）→ 接敌补偿
-      // ⚠️ 蓄能没有「接触点」语义 → `at: null`（作用在车辆自身位置），不引入第二套规则。
+      // ⚠️ PRP-BUILD-01-R2：蓄满 → **沿本次真实炮口反方向**的一次明显强后坐。
+      //
+      //    旧口径（已删除）是「沿自身 facing 的前向冲量 = 接敌补偿」：方向与真实后坐**相反**，
+      //    在画面上表现为「车一边接敌一边被推向前」，与正常接敌 / 接触推挤 / 相机跟随混在一起，
+      //    真人无法把它读成因果（真人验收结论：看不出「高频开炮 → 蓄能 → 位移」）。
+      //    新口径不再新造方向，而是**复用本次开火的真实 `worldDirection` 取反** ——
+      //    也就是车辆本来就在承受的那个后坐方向，只是把「每 3 发累积的那一次」显著放大。
+      //    于是因果链变成「开炮（普通后坐）… 开炮（普通后坐）→ 第 3 发被明显踹开」，
+      //    不依赖任何 UI 解释。
+      //    ⚠️ 方向取自本分支上方刚写入的 `lastFireDirX/Y`（同一次开火的真实炮口方向），不是朝向兜底。
+      //    ⚠️ PRP-BUILD-01-R2 的作用点 = **本次开火的真实炮口位置**（`weaponFire.worldPosition`）：
+      //       后坐本来就发生在炮口上，力臂自然产生绕质心的**后仰扭矩**。这不是表现层手法 ——
+      //       只作用在质心时冲量是纯平动，会被「跟随双方中点」的正式相机**追平**
+      //       （实测：世界后退 20~32px → 舞台带只动 3~5px，与 R1 的根因一完全同型）；
+      //       而扭矩产生的仰俯是相机平移追不平的通道（R1 已证）。真实后坐同时有平移与仰俯，
+      //       这里两者都要，才既真实又可感知。
+      const fx = this.lastFireDirX;
+      const fy = this.lastFireDirY;
+      const flen = Math.hypot(fx, fy) || 1;
       this.pending.push({
         team: PLAYER_TEAM,
-        dirX: this.ports.facingOf(PLAYER_TEAM),
-        dirY: 0,
+        dirX: -fx / flen,
+        dirY: -fy / flen,
         magnitude: RECOIL_CHARGE_IMPULSE,
-        at: null,
+        at: { x: this.lastFireX, y: this.lastFireY },
         label: 'charge',
       });
       return;

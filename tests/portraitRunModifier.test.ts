@@ -668,10 +668,10 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     expect(plainImpulse).toBeGreaterThanOrEqual(KINETIC_BURST_GAIN * 1 * 0.5);
   });
 
-  it('必改 4｜反冲蓄能：只由真实开火事件驱动，蓄满给玩家车前向冲量（无定时器）', () => {
+  it('必改 4｜反冲蓄能：只由真实开火事件驱动，蓄满给玩家车一次强后坐（无定时器）', () => {
     expect(RUN_MODIFIER_OVERLAY.recoilCharge.affectsWeapon).toBe(false);
     expect(RECOIL_CHARGE_THRESHOLD).toBe(3);
-    expect(RECOIL_CHARGE_IMPULSE).toBe(45);
+    expect(RECOIL_CHARGE_IMPULSE).toBe(450);
 
     // 不带 → 恒零
     const off = new RunBattleRuntime({ build: ['fastReload'] });
@@ -706,24 +706,77 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     noCharge.dispose();
   });
 
-  it('必改 2｜反冲蓄能：真实推动了玩家车（前向位移可观测，不是只记了个计数）', () => {
-    const travel = (build: readonly RunModifierId[]): number => {
+  it('必改 2｜反冲蓄能：真实把玩家车**向后**踹开，并与敌人重新拉开距离（同条件 A/B）', () => {
+    /**
+     * 同条件 A/B：固定 Player / Enemy / spawn / HP / world / camera，只把 `build` 当变量。
+     * A = `['fastReload']`（只第一层），B = `['fastReload','recoilCharge']`（两层）。
+     *
+     * 指标：
+     *   - `kicks`     = 每次蓄能触发后 20 帧内玩家车位移（世界 px；负 = 向后）
+     *   - `distKicks` = 同一窗口内**双方距离**的净增量（正 = 拉开；距离不受相机平移影响）
+     *   - 自然基线    = 同局任意 20 帧窗口内最大的后移 / 距离增量（普通后坐 + 碰撞抖动）
+     */
+    interface Probe {
+      readonly kicks: readonly number[];
+      readonly distKicks: readonly number[];
+      readonly baselineBack: number;
+      readonly baselineDist: number;
+    }
+    const WINDOW = 20;
+    const probe = (build: readonly RunModifierId[]): Probe => {
       const rt = new RunBattleRuntime({ build });
-      const startX = rt.vehicleX('A');
-      let maxX = startX;
-      for (let i = 0; i < 700; i++) {
+      const xs: number[] = [rt.vehicleX('A')];
+      const dist: number[] = [Math.abs(rt.vehicleX('B') - rt.vehicleX('A'))];
+      const spent: number[] = [0];
+      for (let i = 0; i < 1000; i++) {
         rt.step(1000 / 60);
-        maxX = Math.max(maxX, rt.vehicleX('A'));
+        xs.push(rt.vehicleX('A'));
+        dist.push(Math.abs(rt.vehicleX('B') - rt.vehicleX('A')));
+        spent.push(rt.abilitySnapshot().chargesSpent);
         if (rt.result) break;
       }
+      const kicks: number[] = [];
+      const distKicks: number[] = [];
+      for (let i = 1; i < spent.length; i++) {
+        if (spent[i]! <= spent[i - 1]!) continue;
+        const j = Math.min(i + WINDOW, xs.length - 1);
+        kicks.push(xs[j]! - xs[i]!);
+        const w = dist.slice(i, j + 1);
+        distKicks.push(Math.max(...w) - w[0]!);
+      }
+      let baselineBack = 0;
+      let baselineDist = 0;
+      for (let i = 0; i + WINDOW < xs.length; i++) {
+        baselineBack = Math.min(baselineBack, xs[i + WINDOW]! - xs[i]!);
+        baselineDist = Math.max(baselineDist, dist[i + WINDOW]! - dist[i]!);
+      }
+      const out: Probe = { kicks, distKicks, baselineBack, baselineDist };
       rt.dispose();
-      return maxX - startX;
+      return out;
     };
-    const withCharge = travel(['fastReload', 'recoilCharge']);
-    const withoutCharge = travel(['fastReload']);
-    // 蓄能在真实战斗里把玩家车推得更靠前（接敌补偿）——变异只来自那一项能力
-    expect(withCharge).toBeGreaterThan(withoutCharge);
-    expect(withCharge).toBeGreaterThan(0);
+
+    const a = probe(['fastReload']);
+    const b = probe(['fastReload', 'recoilCharge']);
+
+    // ① 结构：只有带了第二层才会「蓄能触发」（A 组一次都没有）
+    expect(a.kicks).toEqual([]);
+    expect(b.kicks.length).toBeGreaterThan(0);
+
+    // ② 方向：每一次触发都是**向后**（负）—— PRP-BUILD-01-R2 方向反转的直接指纹
+    //    （旧口径是「前向接敌补偿」，所以这一条在旧实现下必红）
+    for (const k of b.kicks) expect(k, '每次蓄能都必须向后').toBeLessThan(0);
+
+    // ③ 幅度：中位显著大于同局自然抖动（否则真人无法从碰撞 / 相机里把它区分出来）
+    const medAbs = (xs: readonly number[]): number => {
+      const s = [...xs].map((x) => Math.abs(x)).sort((p, q) => p - q);
+      return s[Math.floor(s.length / 2)]!;
+    };
+    expect(medAbs(b.kicks)).toBeGreaterThan(Math.abs(a.baselineBack) * 2);
+
+    // ④ 因果结果：同一窗口内双方距离被真实拉开（距离不受相机平移影响 → 屏幕上等价可见）
+    const positive = b.distKicks.filter((d) => d > 0).length;
+    expect(positive).toBeGreaterThan(b.distKicks.length / 2);
+    expect(medAbs(b.distKicks)).toBeGreaterThan(a.baselineDist * 2);
   });
 
   it('必改 5｜紧急维修：不改武器、不写真实战果，只提供选择后的耐久补偿', () => {
