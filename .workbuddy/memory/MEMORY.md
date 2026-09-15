@@ -17,7 +17,7 @@
   → `896086b` F2-R2 → `39f6af9` BUILD-01 → `8ac97a8` memory → `02becf7` RUN-R1
   → `5c8b514` + `eda6ca9` BUILD-01-R1 → `72c7315` memory 精简
   → `e90da08` PBL-E2E-AUDIT-COMBO-LITERAL-FIX + `0fe782f` memory
-  → **`（待回填）` PRP-BUILD-01-R2 反冲蓄能改强后坐（本次交付）**
+  → **`b485a6e` PRP-BUILD-01-R2 反冲蓄能改强后坐（本次交付）**
 - 全链对 `src/core|physics|render|player|platform` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，行为逐帧不变）。
   R5 相机复用靠 PRP 侧 viewport adapter，不碰 `src/render`。
