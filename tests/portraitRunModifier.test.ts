@@ -13,17 +13,17 @@
 import { describe, expect, it } from 'vitest';
 import { registry as officialRegistry } from '../src/core/content';
 import type { FunctionalPartDef } from '../src/core/types';
+import * as runModifiersModule from '../src/lab/portraitBattleLab/runModifiers';
 import {
   EMERGENCY_REPAIR_FRACTION,
   KINETIC_BURST_GAIN,
-  RECOIL_CHARGE_IMPULSE,
-  RECOIL_CHARGE_THRESHOLD,
   RUN_BASE_WEAPON_DEF_ID,
   RUN_BUILD_MODIFIERS,
   RUN_LAYER1_POOL,
   RUN_LAYER2_POOLS,
   RUN_MODIFIER_OVERLAY,
   RUN_MODIFIERS,
+  STRONG_RECOIL_IMPULSE,
   applyRunModifiersToSnapshot,
   composeRunWeaponDef,
   createRunRegistry,
@@ -530,7 +530,7 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     expect(RUN_BUILD_MODIFIERS.map((m) => m.id)).toEqual([
       'kineticBurst',
       'tripleLoad',
-      'recoilCharge',
+      'strongRecoil',
       'emergencyRepair',
     ]);
     expect(RUN_LAYER1_POOL).toEqual(['heavyShell', 'twinCannon', 'fastReload']);
@@ -557,10 +557,10 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     // 三条强联动各自只出现在「它对应的第一层」池里（条件性成立）
     expect(RUN_LAYER2_POOLS.heavyShell[0]).toBe('kineticBurst');
     expect(RUN_LAYER2_POOLS.twinCannon[0]).toBe('tripleLoad');
-    expect(RUN_LAYER2_POOLS.fastReload[0]).toBe('recoilCharge');
+    expect(RUN_LAYER2_POOLS.fastReload[0]).toBe('strongRecoil');
     for (const l1 of LAYER1_IDS) {
       const pool = RUN_LAYER2_POOLS[l1];
-      for (const syn of ['kineticBurst', 'tripleLoad', 'recoilCharge'] as const) {
+      for (const syn of ['kineticBurst', 'tripleLoad', 'strongRecoil'] as const) {
         if (RUN_LAYER2_POOLS[l1][0] !== syn) expect(pool.includes(syn)).toBe(false);
       }
     }
@@ -668,115 +668,151 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     expect(plainImpulse).toBeGreaterThanOrEqual(KINETIC_BURST_GAIN * 1 * 0.5);
   });
 
-  it('必改 4｜反冲蓄能：只由真实开火事件驱动，蓄满给玩家车一次强后坐（无定时器）', () => {
-    expect(RUN_MODIFIER_OVERLAY.recoilCharge.affectsWeapon).toBe(false);
-    expect(RECOIL_CHARGE_THRESHOLD).toBe(3);
-    expect(RECOIL_CHARGE_IMPULSE).toBe(450);
+  it('必改 1/2｜强力后坐：charge / threshold 路径已删除，每一个真实开火对应一次追加后坐', () => {
+    // ① 结构：模块**不再导出**任何 charge / threshold 符号（不是「留着不用」，而是不存在）
+    expect('RECOIL_CHARGE_THRESHOLD' in runModifiersModule).toBe(false);
+    expect('RECOIL_CHARGE_IMPULSE' in runModifiersModule).toBe(false);
 
-    // 不带 → 恒零
-    const off = new RunBattleRuntime({ build: ['fastReload'] });
-    run(off, 500);
-    expect(off.abilitySnapshot().recoilCharge).toBe(false);
-    expect(off.abilitySnapshot().chargesSpent).toBe(0);
-    expect(off.abilitySnapshot().chargeThreshold).toBe(0);
-    off.dispose();
+    // ② 仍是「不改武器」的能力项
+    expect(RUN_MODIFIER_OVERLAY.strongRecoil.affectsWeapon).toBe(false);
+    expect(RUN_MODIFIER_OVERLAY.strongRecoil.behaviorParams).toEqual({});
+    expect(STRONG_RECOIL_IMPULSE).toBeGreaterThan(0);
 
-    // 带 → 蓄能计数与真实开火次数严格同步（charge + spent×THRESHOLD === fires）
-    const rt = new RunBattleRuntime({ build: ['fastReload', 'recoilCharge'] });
+    // ③ 运行状态里也没有 charge 家族字段（探针与状态同时收敛，不留半套旧口径）
+    const rt = new RunBattleRuntime({ build: ['fastReload', 'strongRecoil'] });
     let fires = 0;
     rt.orchestrator.onCombatEvent((ev) => {
       if (ev.type === 'weaponFire' && ev.team === 'A') fires += 1;
     });
-    const ab = () => rt.abilitySnapshot();
-    expect(ab().recoilCharge).toBe(true);
-    expect(ab().chargeThreshold).toBe(RECOIL_CHARGE_THRESHOLD);
-    // 推进到至少触发一次蓄能（650ms 一炮 → 3 发 ≈ 2s）
-    run(rt, 500);
-    expect(fires).toBeGreaterThanOrEqual(RECOIL_CHARGE_THRESHOLD);
-    expect(ab().chargesSpent).toBeGreaterThan(0);
-    expect(ab().chargesSpent).toBe(Math.floor(fires / RECOIL_CHARGE_THRESHOLD));
-    expect(ab().charge).toBe(fires % RECOIL_CHARGE_THRESHOLD);
-    // 「无定时器凭空加速」的结构性证据：计数完全由事件数决定（上式已锁死）
+    const raw = (): Record<string, unknown> =>
+      rt.abilitySnapshot() as unknown as Record<string, unknown>;
+    expect(rt.abilitySnapshot().strongRecoil).toBe(true);
+    for (const gone of ['charge', 'chargeThreshold', 'chargesSpent']) {
+      expect(gone in raw(), `${gone} 必须已被删除`).toBe(false);
+    }
+
+    // ④ 一一对应：推进 4s（战斗远未结束 → 不存在「结束后丢弃」这条路），
+    //    真实施加的强后坐次数 === 玩家真实开火次数（650ms 一炮 → 4s ≥ 4 发）。
+    for (let i = 0; i < 240; i++) rt.step(1000 / 60);
+    expect(rt.result).toBeNull();
+    expect(fires).toBeGreaterThanOrEqual(4);
+    expect(rt.abilitySnapshot().recoilKicks).toBe(fires);
+    expect(rt.abilitySnapshot().lastRecoilImpulse).toBe(STRONG_RECOIL_IMPULSE);
     rt.dispose();
 
-    // 对照：同一局去掉反冲蓄能 → 开火次数不变（蓄能不改武器、不改节奏）
-    const noCharge = new RunBattleRuntime({ build: ['fastReload'] });
-    const noChargeFires = run(noCharge, 500).fires.filter((f) => f.team === 'A').length;
-    expect(noChargeFires).toBe(fires);
-    noCharge.dispose();
+    // ⑤ 不带 → 恒零（且不会留下任何中间计数：没有「2/3」这种隐藏状态）
+    const off = new RunBattleRuntime({ build: ['fastReload'] });
+    run(off, 500);
+    expect(off.abilitySnapshot().strongRecoil).toBe(false);
+    expect(off.abilitySnapshot().recoilKicks).toBe(0);
+    expect(off.abilitySnapshot().lastRecoilImpulse).toBe(0);
+    off.dispose();
   });
 
-  it('必改 2｜反冲蓄能：真实把玩家车**向后**踹开，并与敌人重新拉开距离（同条件 A/B）', () => {
+  it('必改 1｜Reset：新建一局在开火前没有任何遗留状态', () => {
+    const fresh = new RunBattleRuntime({ build: ['fastReload', 'strongRecoil'] });
+    expect(fresh.abilitySnapshot().recoilKicks).toBe(0);
+    expect(fresh.abilitySnapshot().lastRecoilImpulse).toBe(0);
+    expect(fresh.abilitySnapshot().pending).toBe(0);
+    fresh.dispose();
+
+    // 同一「路线」重开一局：计数从 0 起（不是沿用上一次 Runtime 的残留）
+    const again = new RunBattleRuntime({ build: ['fastReload', 'strongRecoil'] });
+    run(again, 200);
+    expect(again.abilitySnapshot().recoilKicks).toBeGreaterThan(0);
+    again.dispose();
+    const reset = new RunBattleRuntime({ build: ['fastReload', 'strongRecoil'] });
+    expect(reset.abilitySnapshot().recoilKicks).toBe(0);
+    reset.dispose();
+  });
+
+  it('必改 2/4｜强力后坐：每一个真实开火都真实把玩家车向后踹（同条件 A/B，一炮一后坐）', () => {
     /**
      * 同条件 A/B：固定 Player / Enemy / spawn / HP / world / camera，只把 `build` 当变量。
-     * A = `['fastReload']`（只第一层），B = `['fastReload','recoilCharge']`（两层）。
+     * A = `['fastReload']`（只第一层），B = `['fastReload','strongRecoil']`（两层）。
      *
-     * 指标：
-     *   - `kicks`     = 每次蓄能触发后 20 帧内玩家车位移（世界 px；负 = 向后）
-     *   - `distKicks` = 同一窗口内**双方距离**的净增量（正 = 拉开；距离不受相机平移影响）
-     *   - 自然基线    = 同局任意 20 帧窗口内最大的后移 / 距离增量（普通后坐 + 碰撞抖动）
+     * 指标 = **开火对齐**的短窗（20 帧）内玩家车的**峰值后移**（世界 px，负 = 向后）。
+     *   - 为什么按「开火」对齐而不是按「蓄满」对齐：R3 起机制里**没有阈值** ——
+     *     每一次开火都必须留下一次后移，这正是 Queue 必改 4 要锁死的「一炮一后坐」。
+     *   - 为什么用世界 px 而不是舞台带 px：正式相机把**双方中点**居中并逐帧 re-frame，
+     *     玩家在屏幕上的位移会被相机追平（实测每炮 6~10 世界 px → 舞台带仅 1~3 px），
+     *     屏幕量纲会把「物理确实发生」测成噪声。世界位移才是冲量的直接后果；
+     *     最终可感知性由真人录屏裁决（扫描表见交接文档）。
      */
-    interface Probe {
-      readonly kicks: readonly number[];
-      readonly distKicks: readonly number[];
-      readonly baselineBack: number;
-      readonly baselineDist: number;
-    }
+    const FRAME = 1000 / 60;
     const WINDOW = 20;
+    interface Probe {
+      readonly fires: number;
+      readonly kicks: readonly number[];
+      readonly baselineBack: number;
+      readonly leftMostX: number;
+      readonly ended: boolean;
+    }
     const probe = (build: readonly RunModifierId[]): Probe => {
       const rt = new RunBattleRuntime({ build });
+      const marks: number[] = [];
+      let step = 0;
+      rt.orchestrator.onCombatEvent((ev) => {
+        if (ev.type === 'weaponFire' && ev.team === 'A') marks.push(step + 1);
+      });
       const xs: number[] = [rt.vehicleX('A')];
-      const dist: number[] = [Math.abs(rt.vehicleX('B') - rt.vehicleX('A'))];
-      const spent: number[] = [0];
-      for (let i = 0; i < 1000; i++) {
-        rt.step(1000 / 60);
-        xs.push(rt.vehicleX('A'));
-        dist.push(Math.abs(rt.vehicleX('B') - rt.vehicleX('A')));
-        spent.push(rt.abilitySnapshot().chargesSpent);
+      for (let i = 0; i < 1100; i++) {
         if (rt.result) break;
+        step += 1;
+        rt.step(FRAME);
+        xs.push(rt.vehicleX('A'));
       }
       const kicks: number[] = [];
-      const distKicks: number[] = [];
-      for (let i = 1; i < spent.length; i++) {
-        if (spent[i]! <= spent[i - 1]!) continue;
-        const j = Math.min(i + WINDOW, xs.length - 1);
-        kicks.push(xs[j]! - xs[i]!);
-        const w = dist.slice(i, j + 1);
-        distKicks.push(Math.max(...w) - w[0]!);
+      for (const m of marks) {
+        if (m + WINDOW >= xs.length) continue; // 窗口被截断的末段开火不计
+        let peak = 0;
+        for (let i = m; i <= m + WINDOW; i++) peak = Math.min(peak, xs[i]! - xs[m]!);
+        kicks.push(peak);
       }
       let baselineBack = 0;
-      let baselineDist = 0;
       for (let i = 0; i + WINDOW < xs.length; i++) {
-        baselineBack = Math.min(baselineBack, xs[i + WINDOW]! - xs[i]!);
-        baselineDist = Math.max(baselineDist, dist[i + WINDOW]! - dist[i]!);
+        let peak = 0;
+        for (let j = i; j <= i + WINDOW; j++) peak = Math.min(peak, xs[j]! - xs[i]!);
+        baselineBack = Math.min(baselineBack, peak);
       }
-      const out: Probe = { kicks, distKicks, baselineBack, baselineDist };
+      const out: Probe = {
+        fires: marks.length,
+        kicks,
+        baselineBack,
+        leftMostX: Math.min(...xs),
+        ended: rt.result !== null,
+      };
       rt.dispose();
       return out;
     };
 
     const a = probe(['fastReload']);
-    const b = probe(['fastReload', 'recoilCharge']);
-
-    // ① 结构：只有带了第二层才会「蓄能触发」（A 组一次都没有）
-    expect(a.kicks).toEqual([]);
-    expect(b.kicks.length).toBeGreaterThan(0);
-
-    // ② 方向：每一次触发都是**向后**（负）—— PRP-BUILD-01-R2 方向反转的直接指纹
-    //    （旧口径是「前向接敌补偿」，所以这一条在旧实现下必红）
-    for (const k of b.kicks) expect(k, '每次蓄能都必须向后').toBeLessThan(0);
-
-    // ③ 幅度：中位显著大于同局自然抖动（否则真人无法从碰撞 / 相机里把它区分出来）
-    const medAbs = (xs: readonly number[]): number => {
-      const s = [...xs].map((x) => Math.abs(x)).sort((p, q) => p - q);
+    const b = probe(['fastReload', 'strongRecoil']);
+    /** 位移幅度的中位数（取绝对值；**负号方向**由 ② 单独锁定）。 */
+    const med = (v: readonly number[]): number => {
+      const s = [...v].map(Math.abs).sort((p, q) => p - q);
       return s[Math.floor(s.length / 2)]!;
     };
-    expect(medAbs(b.kicks)).toBeGreaterThan(Math.abs(a.baselineBack) * 2);
 
-    // ④ 因果结果：同一窗口内双方距离被真实拉开（距离不受相机平移影响 → 屏幕上等价可见）
-    const positive = b.distKicks.filter((d) => d > 0).length;
-    expect(positive).toBeGreaterThan(b.distKicks.length / 2);
-    expect(medAbs(b.distKicks)).toBeGreaterThan(a.baselineDist * 2);
+    // ① 一一对应：带第二层时，开火数与留下后移的窗口数一致（末段截断 ≤ 2）
+    expect(b.fires).toBeGreaterThan(0);
+    expect(b.kicks.length).toBeGreaterThanOrEqual(b.fires - 2);
+    // ② 方向：**每一次**开火后都是向后（负）—— R2 方向反转的直接指纹
+    for (const k of b.kicks) expect(k, '每一炮都必须向后').toBeLessThan(0);
+    // ③ 幅度（系统性）：冻结实测 —— B 组开火窗口后移中位 **7 世界 px**，A 组同口径中位 **0.4**。
+    //    ⚠️ 诚实说明：两组在**尾部**是重叠的 —— A 组也会出现 12.1 世界 px 的后移（真实碰撞把车顶回去，
+    //    见 ④）。所以本 Queue 锁的是「方向 + 一一对应 + 系统性中位」，**不假装**单帧上后坐与碰撞
+    //    可分（那正是必须靠真人录屏裁决的部分）。
+    expect(Math.round(med(b.kicks))).toBe(7);
+    expect(med(a.kicks)).toBeLessThan(1);
+    expect(med(b.kicks)).toBeGreaterThan(med(a.kicks) * 5);
+    // ④ 同局自然抖动上界（含碰撞）：冻结 12 世界 px —— 它同时是「本测试为什么不能按单帧阈值判定」的
+    //    证据，也是「110 这一档并没有把位移抬到脱离真实物理量级」的守卫。
+    expect(Math.round(Math.abs(a.baselineBack))).toBe(12);
+    // ⑤ 健康：战斗打得完，且玩家没有被自己的后坐推出竞技场左界
+    expect(a.ended).toBe(true);
+    expect(b.ended).toBe(true);
+    expect(b.leftMostX).toBeGreaterThan(0);
   });
 
   it('必改 5｜紧急维修：不改武器、不写真实战果，只提供选择后的耐久补偿', () => {
@@ -793,7 +829,7 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     const rt = new RunBattleRuntime({ build: ['emergencyRepair'] });
     expect(weaponPartDef(rt).behaviorParams).toEqual(CANNON_OFFICIAL_PARAMS);
     expect(rt.abilitySnapshot().kineticBurst).toBe(false);
-    expect(rt.abilitySnapshot().recoilCharge).toBe(false);
+    expect(rt.abilitySnapshot().strongRecoil).toBe(false);
     rt.dispose();
   });
 
@@ -801,7 +837,7 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     // 三条路线的「第一层 + 第二层」组合全部能真实开打，并各自留下可区分的方向痕迹
     const routeHeavy: readonly RunModifierId[] = ['heavyShell', 'kineticBurst'];
     const routeTwin: readonly RunModifierId[] = ['twinCannon', 'tripleLoad'];
-    const routeFast: readonly RunModifierId[] = ['fastReload', 'recoilCharge'];
+    const routeFast: readonly RunModifierId[] = ['fastReload', 'strongRecoil'];
 
     const heavy = new RunBattleRuntime({ build: routeHeavy });
     const twin = new RunBattleRuntime({ build: routeTwin });
@@ -816,14 +852,14 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     // 双联炮 + 三连装填 = 多发连射
     expect(bp(twin).burstRounds).toBe(3);
     expect(bp(twin).burstIntervalMs).toBe(100);
-    // 快速装填 + 反冲蓄能 = 高频射击 + 位移联动
+    // 快速装填 + 强力后坐 = 高频射击 + 每一炮都把自己往后踹
     expect(bp(fast).cooldownMs).toBe(650);
-    expect(fast.abilitySnapshot().recoilCharge).toBe(true);
+    expect(fast.abilitySnapshot().strongRecoil).toBe(true);
 
-    // 三层能力互不串味：路线 A 不带蓄能、路线 C 不带动能
-    expect(heavy.abilitySnapshot().recoilCharge).toBe(false);
+    // 三条能力互不串味：重弹路线不带后坐、快速装填路线不带动能
+    expect(heavy.abilitySnapshot().strongRecoil).toBe(false);
     expect(fast.abilitySnapshot().kineticBurst).toBe(false);
-    expect(twin.abilitySnapshot().recoilCharge).toBe(false);
+    expect(twin.abilitySnapshot().strongRecoil).toBe(false);
     expect(twin.abilitySnapshot().kineticBurst).toBe(false);
 
     // 三层都是可打完的真实战斗（不是卡死）
@@ -845,7 +881,7 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     expect(runBuildDefId(['heavyShell'])).toBe('run.mod.heavyShell');
     expect(runBuildDefId(['twinCannon', 'tripleLoad'])).toBe('run.mod.twinCannon+tripleLoad');
     expect(runBuildDefId(['heavyShell', 'kineticBurst'])).toBe('run.mod.heavyShell'); // 能力类不进 id
-    expect(runBuildDefId(['recoilCharge'])).toBeNull();
+    expect(runBuildDefId(['strongRecoil'])).toBeNull();
     // 同一组合 → 同一 id（可复现，无随机）
     expect(runBuildDefId(['fastReload', 'twinCannon'])).toBe(runBuildDefId(['fastReload', 'twinCannon']));
     // 顺序不同 → 结果不同（后选覆盖先选），这是「有序 Build」的确定性语义

@@ -40,7 +40,7 @@
  * 延迟 ≤ 1 个物理步（16.7ms），物理后果完全等价；且**战斗结束后不再施加**，
  * 从而不破坏「RESULT = 战场冻结」这一既有不变量。
  *
- * ## 三项的实现口径
+ * ## 两项的实现口径
  *
  *   - **动能爆发 kineticBurst**：`追加冲量 = KINETIC_BURST_GAIN × projectileMass × relativeVelocity`
  *     —— `projectileMass` 读自本局**真实 resolved 武器 def**（基础 1 / 重型弹头 4），
@@ -55,22 +55,26 @@
  *          （实测：世界位移 +20.7px → 屏幕只动 4px）；绕质心的扭矩产生的**仰俯 / 旋转**
  *          无法被相机平移追平，是唯一真正「一眼可辨」的物理通道。
  *     命中点同时进入 `snapshot().lastKineticHit`，供表现层在**同一个真实位置**画冲击环。
- *   - **反冲蓄能 recoilCharge**：每 `RECOIL_CHARGE_THRESHOLD` 次真实开火蓄满一次，
- *     给玩家车一个**沿本次真实炮口反方向**的强后坐冲量。
- *     **只由 fire/recoil 事件驱动，无定时器。**
- *     ⚠️ PRP-BUILD-01-R2：旧口径是「沿自身 facing 的**前向**冲量（接敌补偿）」——
+ *   - **强力后坐 strongRecoil**：**每一次真实开火**都追加一次强后坐冲量 ——
+ *     方向 = 本次开火的真实炮口方向**取反**（复用本分支已记录的 `lastFireDirX/Y`），
+ *     作用点 = 本次开火的**真实炮口位置**（`weaponFire.worldPosition`）。
+ *     **只由 `weaponFire` 事件驱动：无定时器、无「第 N 发」判断、无 charge / 阈值状态。**
+ *     ⚠️ PRP-BUILD-01-R2：口径曾是「沿自身 facing 的**前向**冲量（接敌补偿）」——
  *     方向与真实后坐**相反**，真人无法把它读成因果（与正常接敌 / 接触推挤 / 相机跟随混在一起）。
- *     现改为复用本次开火的真实 `worldDirection` **取反**：与普通 recoil 同向、仅量级显著更大，
- *     于是「高频开炮 → 不断累积普通后坐 → 某一次被明显踹开 → 重新拉开距离」成为纯物理因果链。
- *     ⚠️ 它没有「接触点」语义 → 仍按原口径作用在车辆**质心**（`at: null`）；
- *     这同时是刻意的：质心冲量只产生平动、不产生旋转，不会出现「被踹翻」的退化观感。
+ *     ⚠️ PRP-BUILD-01-R3：R2 改成同向强后坐之后，仍然是「每 N 发**蓄满一次**才释放一次」的
+ *     **隐藏规则** —— 正常速度下真人分辨不出「哪一发才特殊」，会与普通 Cannon recoil /
+ *     Enemy 接敌 / Collision / Camera follow 混在一起（真人第二次验收仍判失败）。
+ *     现按 Queue 设计改判：**删除 charge 概念**，改成最简单的自然因果 —— **一炮一后坐**。
+ *     高射速因此自然产生高频控距（每一炮都把自己往后踹一点）。
+ *     ⚠️ 作用点用**真实炮口**而非质心：后坐本来就发生在炮口上，力臂产生真实的绕质心扭矩
+ *     （与基础 Cannon 的普通后坐同源）；只作用在质心时冲量是纯平动，会被
+ *     「跟随双方中点」的正式相机**追平**（R1 实测：世界退 20~32px → 舞台带只动 3~5px）。
  */
 
 import type { BattleEvent } from '../../battle/combatEvents';
 import {
   KINETIC_BURST_GAIN,
-  RECOIL_CHARGE_IMPULSE,
-  RECOIL_CHARGE_THRESHOLD,
+  STRONG_RECOIL_IMPULSE,
   buildHas,
   type RunModifierId,
 } from './runModifiers';
@@ -129,21 +133,19 @@ interface PendingImpulse {
   readonly magnitude: number;
   /** 真实作用点（世界坐标）；`null` = 该车自身位置。 */
   readonly at: Readonly<{ x: number; y: number }> | null;
-  readonly label: 'kinetic' | 'charge';
+  readonly label: 'kinetic' | 'recoil';
 }
 
 /** 能力运行状态（诊断 / 验收用；全部是真实发生过的计数与量值）。 */
 export interface RunAbilitySnapshot {
   /** 本局是否带「动能爆发」。 */
   readonly kineticBurst: boolean;
-  /** 本局是否带「反冲蓄能」。 */
-  readonly recoilCharge: boolean;
-  /** 蓄能计数（0..THRESHOLD-1，已触发的已扣减）。 */
-  readonly charge: number;
-  /** 蓄满阈值（未带反冲蓄能时为 0）。 */
-  readonly chargeThreshold: number;
-  /** 已触发的强后坐次数（真实发生；= 蓄满阈值被消耗的次数）。 */
-  readonly chargesSpent: number;
+  /** 本局是否带「强力后坐」。 */
+  readonly strongRecoil: boolean;
+  /** 已**真实施加**的强力后坐次数（每个真实 `weaponFire` 恰好一次 → 与玩家开火次数 1:1）。 */
+  readonly recoilKicks: number;
+  /** 最近一次强力后坐冲量的大小（0 = 本局还没开过火）。 */
+  readonly lastRecoilImpulse: number;
   /** 动能爆发已触发的命中次数（真实发生）。 */
   readonly kineticHits: number;
   /** 最近一次动能追加冲量的大小（0 = 还没触发过）。 */
@@ -155,27 +157,27 @@ export interface RunAbilitySnapshot {
   readonly lastKineticHit: Readonly<{ x: number; y: number; magnitude: number }> | null;
   /** 正在读取的「当前 projectile 质量」（来自本局真实 resolved 武器 def）。 */
   readonly projectileMass: number;
-  /** 尚未施加的待处理冲量数（正常应恒为 0 或 1）。 */
+  /** 尚未施加的待处理冲量数（正常应恒为 0；开火帧 + 命中帧同时发生时最多 2）。 */
   readonly pending: number;
 }
 
 export class RunBuildAbilities {
   private readonly ports: RunAbilityPorts;
   private readonly hasKinetic: boolean;
-  private readonly hasCharge: boolean;
+  private readonly hasStrongRecoil: boolean;
   private readonly unsub: () => void;
   /** 本局真实 projectile 质量（构造时读一次；战斗中不会变）。 */
   readonly projectileMass: number;
 
-  private charge = 0;
-  private chargesSpent = 0;
+  private recoilKicks = 0;
+  private lastRecoilImpulse = 0;
   private kineticHits = 0;
   private lastKineticImpulse = 0;
   private lastKineticHit: { x: number; y: number; magnitude: number } | null = null;
   /** 最近一次玩家侧开火的真实炮口方向（动能爆发用；未开火前用玩家朝向兜底）。 */
   private lastFireDirX = 1;
   private lastFireDirY = 0;
-  /** 最近一次玩家侧开火的**真实炮口位置**（蓄能强后坐的作用点；用不到时保持 0）。 */
+  /** 最近一次玩家侧开火的**真实炮口位置**（强力后坐的作用点）。 */
   private lastFireX = 0;
   private lastFireY = 0;
   private hasFireDir = false;
@@ -184,7 +186,7 @@ export class RunBuildAbilities {
   constructor(ports: RunAbilityPorts, build: readonly RunModifierId[]) {
     this.ports = ports;
     this.hasKinetic = buildHas(build, 'kineticBurst');
-    this.hasCharge = buildHas(build, 'recoilCharge');
+    this.hasStrongRecoil = buildHas(build, 'strongRecoil');
     this.projectileMass = ports.projectileMass();
     this.unsub = ports.subscribe((ev) => this.onEvent(ev));
   }
@@ -200,27 +202,22 @@ export class RunBuildAbilities {
       this.lastFireX = ev.worldPosition.x;
       this.lastFireY = ev.worldPosition.y;
       this.hasFireDir = true;
-      if (!this.hasCharge) return;
-      this.charge += 1;
-      if (this.charge < RECOIL_CHARGE_THRESHOLD) return;
-      this.charge -= RECOIL_CHARGE_THRESHOLD;
-      this.chargesSpent += 1;
-      // ⚠️ PRP-BUILD-01-R2：蓄满 → **沿本次真实炮口反方向**的一次明显强后坐。
+      if (!this.hasStrongRecoil) return;
+      // ⚠️ PRP-BUILD-01-R3：**每一次真实开火都追加一次强后坐** —— 一条 `weaponFire`
+      //    对应一次冲量，没有任何中间状态（无计数、无阈值、无「第 N 发」判断）。
       //
-      //    旧口径（已删除）是「沿自身 facing 的前向冲量 = 接敌补偿」：方向与真实后坐**相反**，
-      //    在画面上表现为「车一边接敌一边被推向前」，与正常接敌 / 接触推挤 / 相机跟随混在一起，
-      //    真人无法把它读成因果（真人验收结论：看不出「高频开炮 → 蓄能 → 位移」）。
-      //    新口径不再新造方向，而是**复用本次开火的真实 `worldDirection` 取反** ——
-      //    也就是车辆本来就在承受的那个后坐方向，只是把「每 3 发累积的那一次」显著放大。
-      //    于是因果链变成「开炮（普通后坐）… 开炮（普通后坐）→ 第 3 发被明显踹开」，
-      //    不依赖任何 UI 解释。
-      //    ⚠️ 方向取自本分支上方刚写入的 `lastFireDirX/Y`（同一次开火的真实炮口方向），不是朝向兜底。
-      //    ⚠️ PRP-BUILD-01-R2 的作用点 = **本次开火的真实炮口位置**（`weaponFire.worldPosition`）：
-      //       后坐本来就发生在炮口上，力臂自然产生绕质心的**后仰扭矩**。这不是表现层手法 ——
-      //       只作用在质心时冲量是纯平动，会被「跟随双方中点」的正式相机**追平**
-      //       （实测：世界后退 20~32px → 舞台带只动 3~5px，与 R1 的根因一完全同型）；
-      //       而扭矩产生的仰俯是相机平移追不平的通道（R1 已证）。真实后坐同时有平移与仰俯，
-      //       这里两者都要，才既真实又可感知。
+      //    R2 的口径是「每 3 发蓄满 → 释放一次」，虽然物理上真实生效（450 冲量确实把车踹开），
+      //    但真人第二次验收仍判失败：正常速度下分辨不出「哪一发才特殊」，
+      //    会与普通 Cannon recoil / Enemy 接敌 / Collision / Camera follow 混在一起。
+      //    根因是**多了一层不可见的累计状态** —— 玩家看不到「2/3」，只能看到一串相似的开炮。
+      //    改成一一对应之后，因果变成「炮弹离膛 → 车马上后退」，连续多炮重复同一件事，
+      //    高射速自然读成「高频控距」，不需要任何 UI 解释。
+      //    ⚠️ 方向 = 本次开火的真实炮口方向取反（本分支上方刚写入的 `lastFireDirX/Y`）——
+      //       就是车辆本来就在承受的那个后坐方向，不是朝向兜底。
+      //    ⚠️ 作用点 = 本次开火的**真实炮口位置**（`weaponFire.worldPosition`）：
+      //       后坐本来就发生在炮口上，力臂自然产生绕质心的后仰扭矩。只作用在质心时冲量是
+      //       纯平动，会被「跟随双方中点」的正式相机**追平**（R1 实测：世界退 20~32px →
+      //       舞台带只动 3~5px）；扭矩产生的仰俯是相机平移追不平的通道（R1 已证）。
       const fx = this.lastFireDirX;
       const fy = this.lastFireDirY;
       const flen = Math.hypot(fx, fy) || 1;
@@ -228,9 +225,9 @@ export class RunBuildAbilities {
         team: PLAYER_TEAM,
         dirX: -fx / flen,
         dirY: -fy / flen,
-        magnitude: RECOIL_CHARGE_IMPULSE,
+        magnitude: STRONG_RECOIL_IMPULSE,
         at: { x: this.lastFireX, y: this.lastFireY },
-        label: 'charge',
+        label: 'recoil',
       });
       return;
     }
@@ -278,6 +275,11 @@ export class RunBuildAbilities {
     }
     for (const p of this.pending) {
       this.ports.applyImpulse(p.team, p.dirX, p.dirY, p.magnitude, p.at);
+      if (p.label === 'recoil') {
+        // 计数点 = **真实施加**处（被 `isFinished` 丢弃的那批不计），与 `kineticHits` 同一纪律。
+        this.recoilKicks += 1;
+        this.lastRecoilImpulse = p.magnitude;
+      }
     }
     this.pending.length = 0;
   }
@@ -285,10 +287,9 @@ export class RunBuildAbilities {
   snapshot(): RunAbilitySnapshot {
     return {
       kineticBurst: this.hasKinetic,
-      recoilCharge: this.hasCharge,
-      charge: this.charge,
-      chargeThreshold: this.hasCharge ? RECOIL_CHARGE_THRESHOLD : 0,
-      chargesSpent: this.chargesSpent,
+      strongRecoil: this.hasStrongRecoil,
+      recoilKicks: this.recoilKicks,
+      lastRecoilImpulse: this.lastRecoilImpulse,
       kineticHits: this.kineticHits,
       lastKineticImpulse: this.lastKineticImpulse,
       lastKineticHit: this.lastKineticHit ? { ...this.lastKineticHit } : null,

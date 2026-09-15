@@ -160,7 +160,7 @@ const COLORS = {
   /* ---- PRP-BUILD-01 第二层（条件池）图标底色 ---- */
   iconKinetic: '#8e44c0',
   iconTriple: '#2f8fc4',
-  iconCharge: '#c9a227',
+  iconRecoil: '#c9a227',
   iconRepair: '#4fc4a8',
   /* ---- PRP-BUILD-01-R1：动能爆发命中冲击环（不入账 — 有透明度、非平涂矩形） ---- */
   /**
@@ -209,7 +209,7 @@ const CHOICE_ICON_COLOR: Readonly<Record<string, string>> = {
   fastReload: '#7fd6a0',
   kineticBurst: '#c98cf0',
   tripleLoad: '#79c0ea',
-  recoilCharge: '#e8c46a',
+  strongRecoil: '#e8c46a',
   emergencyRepair: '#5fd0c0',
 };
 
@@ -220,7 +220,7 @@ const BUFF_ICON_COLOR: Readonly<Record<string, string>> = {
   fastReload: COLORS.iconReload,
   kineticBurst: COLORS.iconKinetic,
   tripleLoad: COLORS.iconTriple,
-  recoilCharge: COLORS.iconCharge,
+  strongRecoil: COLORS.iconRecoil,
   emergencyRepair: COLORS.iconRepair,
 };
 
@@ -267,15 +267,15 @@ export interface RunProbeBattleWorld {
   /**
    * PRP-BUILD-01：Run 能力的**真实运行状态**（事件驱动；全部是真实发生过的计数与量值）。
    *   - `kineticHits` / `lastKineticImpulse`：动能爆发真的触发了几次、最近一次多大；
-   *   - `chargesSpent` / `charge`：反冲蓄能真的触发了几次接敌补偿、当前蓄能进度；
+   *   - `recoilKicks` / `lastRecoilImpulse`：强力后坐真的施加了几次、最近一次多大
+   *     （与玩家真实开火次数 **1:1** —— R3 起没有任何中间阈值状态）；
    *   - `projectileMass`：读自本局真实 resolved 武器 def 的「当前炮弹质量」。
    */
   readonly abilities: {
     readonly kineticBurst: boolean;
-    readonly recoilCharge: boolean;
-    readonly charge: number;
-    readonly chargeThreshold: number;
-    readonly chargesSpent: number;
+    readonly strongRecoil: boolean;
+    readonly recoilKicks: number;
+    readonly lastRecoilImpulse: number;
     readonly kineticHits: number;
     readonly lastKineticImpulse: number;
     readonly projectileMass: number;
@@ -608,7 +608,7 @@ export class RunPage {
    *
    * PRP-BUILD-01：每次遭遇都**全新创建**，并把本局的两项 Run-local 状态注入进去：
    *   - `build`      = 本局 Build（第一层 + 第二层，按选择顺序；overlay registry + 武器 defId 重映射，
-   *                    能力类（动能爆发 / 反冲蓄能）由运行时订阅正式战斗事件驱动）；
+   *                    能力类（动能爆发 / 强力后坐）由运行时订阅正式战斗事件驱动）；
    *   - `carriedHp`  = 上一场真实剩余耐久（+ 维修补偿；下一场从这里继续，不自动满血）。
    * 旧运行时在此前已被 `endBattle()` 释放 → 弹丸 / 接触 / 事件订阅不跨场残留。
    */
@@ -1105,7 +1105,7 @@ export class RunPage {
    *   fastReload      = 环形循环箭头
    *   kineticBurst    = 弹体 + 命中点向外扩散的三道冲击波
    *   tripleLoad      = 三根并排炮管（比双联多一根）+ 底横条
-   *   recoilCharge    = 后坐箭头 + 中间蓄能条 + 前推箭头
+   *   strongRecoil    = 炮口 + 向后箭头（一炮一后坐）
    *   emergencyRepair = 修理十字
    */
   private drawChoiceIcon(ctx: CanvasRenderingContext2D, id: string, r: RunRect): void {
@@ -1169,19 +1169,19 @@ export class RunPage {
         ctx.fill();
       }
       ctx.fillRect(cx - s * 0.3, cy + bh / 2, s * 0.6, s * 0.1);
-    } else if (id === 'recoilCharge') {
-      // 反冲蓄能：后坐箭头（左上）+ 中间蓄能条 + 前推箭头（右下）
+    } else if (id === 'strongRecoil') {
+      // 强力后坐：炮口（右）+ 向后箭头（左）—— 一炮一后坐，不再有蓄能条 / 前推箭头。
+      //
+      // ⚠️ PRP-BUILD-01-R3 只做**最小语义同步**：旧字形是「后坐箭头 + 中间蓄能条 + 前推箭头」，
+      //    其中「蓄能条」与「前推箭头」描述的是已被删除的 charge 机制，留着等于向玩家说谎。
+      //    图标盒的位置 / 尺寸（`runChoiceIconRect`）与颜色（`CHOICE_ICON_COLOR` / `BUFF_ICON_COLOR`）
+      //    全部未动 —— 改的只是盒内笔画。
+      ctx.fillRect(cx + s * 0.1, cy - s * 0.12, s * 0.34, s * 0.24);
+      ctx.fillRect(cx - s * 0.28, cy - s * 0.075, s * 0.34, s * 0.15);
       ctx.beginPath();
-      ctx.moveTo(cx - s * 0.48, cy - s * 0.22);
-      ctx.lineTo(cx - s * 0.12, cy - s * 0.38);
-      ctx.lineTo(cx - s * 0.22, cy - s * 0.1);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillRect(cx - s * 0.32, cy - s * 0.07, s * 0.64, s * 0.14);
-      ctx.beginPath();
-      ctx.moveTo(cx + s * 0.48, cy + s * 0.22);
-      ctx.lineTo(cx + s * 0.12, cy + s * 0.38);
-      ctx.lineTo(cx + s * 0.22, cy + s * 0.1);
+      ctx.moveTo(cx - s * 0.48, cy);
+      ctx.lineTo(cx - s * 0.18, cy - s * 0.24);
+      ctx.lineTo(cx - s * 0.18, cy + s * 0.24);
       ctx.closePath();
       ctx.fill();
     } else if (id === 'emergencyRepair') {
@@ -1307,10 +1307,9 @@ export class RunPage {
           const a = rt.abilitySnapshot();
           return {
             kineticBurst: a.kineticBurst,
-            recoilCharge: a.recoilCharge,
-            charge: a.charge,
-            chargeThreshold: a.chargeThreshold,
-            chargesSpent: a.chargesSpent,
+            strongRecoil: a.strongRecoil,
+            recoilKicks: a.recoilKicks,
+            lastRecoilImpulse: a.lastRecoilImpulse,
             kineticHits: a.kineticHits,
             lastKineticImpulse: a.lastKineticImpulse,
             projectileMass: a.projectileMass,

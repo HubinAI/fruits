@@ -59,7 +59,7 @@
  *
  *   7) **两层 Build**：注入参数从「单个 `modifier`」扩展为**有序 `build`**。
  *      武器数值侧 = 把改武器的项（第一层 + 第二层的 `tripleLoad`）**按顺序浅合并**成一个 overlay 部件
- *      （`runModifiers.composeRunWeaponDef`），再重映射 `defId`；能力侧（动能爆发 / 反冲蓄能）
+ *      （`runModifiers.composeRunWeaponDef`），再重映射 `defId`；能力侧（动能爆发 / 强力后坐）
  *      由 `RunBuildAbilities` 订阅**正式战斗事件**驱动。
  *      `modifier` 仍保留为 `build[0]` 的访问器 → 逐项独立验证的既有断言不受影响。
  *   8) **Run 能力的冲量在固定步边界施加**（`step()` 里先 `abilities.flush()` 再 `orchestrator.step`）：
@@ -307,7 +307,7 @@ export class RunBattleRuntime {
   /** 本场战斗生效的本局 Build（有序；空数组 = 基础状态）。 */
   readonly build: readonly RunModifierId[];
   /**
-   * 本场战斗的 Run 能力（动能爆发 / 反冲蓄能）—— 事件驱动，见 `runBuildAbilities.ts`。
+   * 本场战斗的 Run 能力（动能爆发 / 强力后坐）—— 事件驱动，见 `runBuildAbilities.ts`。
    * 空 Build 时它只是一个什么都不做的订阅者（零副作用）。
    */
   readonly abilities: RunBuildAbilities;
@@ -367,7 +367,8 @@ export class RunBattleRuntime {
          * 施加一次真实冲量。
          *
          * `at` = **真实作用点**（世界坐标）→ 直接交给正式 `world.applyLinearImpulse`；
-         * 省略 / `null`（例如没有接触点语义的反冲蓄能）→ 作用在该车自身位置，与原口径一致。
+         * 省略 / `null` → 作用在该车自身位置（**当前两项能力都传真实作用点**：动能爆发用命中点、
+         * 强力后坐用炮口位置 → 这条兜底分支只是端口的通用语义，本局不会被走到）。
          * ⚠️ 不在这里做任何「方向修正」或「力度补偿」：方向与大小都是 Run 能力层算好的真实量值。
          */
         applyImpulse: (team, dirX, dirY, magnitude, at) => {

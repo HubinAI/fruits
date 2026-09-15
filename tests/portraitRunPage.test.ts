@@ -1308,7 +1308,7 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
   it('RP-F2-03 必改 4：跨战斗耐久逐场按同一规则传递（不自动满血）', () => {
     const { firstEnd, afterChoice1, afterChoice2, secondInitialHp, finalRuntime } = runBuildLoop(
       'fastReload',
-      'recoilCharge',
+      'strongRecoil',
     );
     // 规则（PRP-RUN-R1 起，`runCarriedPlayerHp`）：carry = 上一场真实剩余 + 维修补偿，上限截断。
     // ⚠️ 旧注释「<= 0 → null（满耐久开幕）」已作废：那正是被真人录屏抓到的 P0 缺陷。
@@ -1359,7 +1359,7 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
     const routes: readonly [string, string][] = [
       ['heavyShell', 'kineticBurst'],
       ['twinCannon', 'tripleLoad'],
-      ['fastReload', 'recoilCharge'],
+      ['fastReload', 'strongRecoil'],
     ];
     for (const [l1, l2] of routes) {
       const { finalRuntime } = runBuildLoop(l1, l2);
@@ -1387,13 +1387,13 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
       // 能力类第二层的真实运行状态随 Build 一起注入
       const ab = finalRuntime.abilitySnapshot();
       expect(ab.kineticBurst).toBe(l2 === 'kineticBurst');
-      expect(ab.recoilCharge).toBe(l2 === 'recoilCharge');
+      expect(ab.strongRecoil).toBe(l2 === 'strongRecoil');
       finalRuntime.dispose();
     }
   });
 
   it('RP-F2-05 必改 3：Build 只在本局 —— 新开 Run 立刻回到基础状态', () => {
-    const { afterChoice1, finalRuntime } = runBuildLoop('fastReload', 'recoilCharge');
+    const { afterChoice1, finalRuntime } = runBuildLoop('fastReload', 'strongRecoil');
     expect(runBuildIds(afterChoice1)).toEqual(['fastReload']);
     finalRuntime.dispose();
     const fresh = createRunPageState(CTX);
@@ -1413,7 +1413,7 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
     expect(params.projectileRadius).toBe(10);
     const ab = rt.abilitySnapshot();
     expect(ab.kineticBurst).toBe(false);
-    expect(ab.recoilCharge).toBe(false);
+    expect(ab.strongRecoil).toBe(false);
     rt.dispose();
   });
 
@@ -1507,7 +1507,7 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
     // 三个池的强联动各不相同（三条 Build 方向）
     expect(RUN_LAYER2_POOLS.heavyShell[0]).toBe('kineticBurst');
     expect(RUN_LAYER2_POOLS.twinCannon[0]).toBe('tripleLoad');
-    expect(RUN_LAYER2_POOLS.fastReload[0]).toBe('recoilCharge');
+    expect(RUN_LAYER2_POOLS.fastReload[0]).toBe('strongRecoil');
   });
 
   it('RP-F2-11 一局最多两次选择，且第二次只能从条件池里选（池外选项被拒）', () => {
@@ -1536,7 +1536,7 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
     const routes: readonly [string, string, string][] = [
       ['heavyShell', 'kineticBurst', '动能爆发'],
       ['twinCannon', 'tripleLoad', '三连装填'],
-      ['fastReload', 'recoilCharge', '反冲蓄能'],
+      ['fastReload', 'strongRecoil', '强力后坐'],
     ];
     for (const [l1, l2, label] of routes) {
       const { choice2, afterChoice2, finale } = runBuildLoop(l1, l2);
@@ -1588,15 +1588,17 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
       //    不是就地重算）。40% 余量仍在，三场连锁没有被"一次强化把末场打崩"。
       'heavyShell+kineticBurst': [843, 714, 430],
       'twinCannon+tripleLoad': [843, 678, 470],
-      // ⚠️ PRP-BUILD-01-R2：recoilCharge 从「前向接敌补偿」改为「沿炮口反方向的强后坐」
-      //    （冲量 45 → 450）。后坐把玩家持续推离敌人 = 少挨打 → 第三场残血 350 → 582。
-      //    第一/第二场不变（前两场该能力尚未进入战斗 / 末段窗口未受影响）。**显式更新**。
-      'fastReload+recoilCharge': [843, 622, 582],
+      // ⚠️ PRP-BUILD-01-R3：口径从「每 3 发蓄满 → 一次强后坐」（charge 状态）改为
+      //    **一炮一后坐**（每一次真实开火追加一次强后坐 = `STRONG_RECOIL_IMPULSE 110`，
+      //    阈值 / 计数整条删除）。每炮都被推离敌人 = 更少挨打 → 第三场残血 582 → 554；
+      //    第一/第二场不变（前两场该能力尚未进入战斗）。**显式更新，不是就地重算。**
+      //    ⚠️ 仍然保留真实接敌：末场真实挨打 4 次（120 会掉到 0 次 = 零接触，已否决）。
+      'fastReload+strongRecoil': [843, 622, 554],
     };
     const routes: readonly [string, string][] = [
       ['heavyShell', 'kineticBurst'],
       ['twinCannon', 'tripleLoad'],
-      ['fastReload', 'recoilCharge'],
+      ['fastReload', 'strongRecoil'],
     ];
     for (const [l1, l2] of routes) {
       const key = `${l1}+${l2}`;
@@ -1627,7 +1629,7 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
       expect(hp2, `${key}: hp2<=hp1`).toBeLessThanOrEqual(hp1);
       expect(hp3, `${key}: hp3<=hp2`).toBeLessThanOrEqual(hp2);
 
-      // ⑤ 三场都活着，且终局留下可观余量（32%~43%）—— 不是勉强擦线
+      // ⑤ 三场都活着，且终局留下可观余量（39%~50%）—— 不是勉强擦线
       expect(hp1, `${key}: 第一场存活`).toBeGreaterThan(0);
       expect(hp2, `${key}: 第二场存活`).toBeGreaterThan(0);
       expect(hp3, `${key}: 第三场存活`).toBeGreaterThan(0);

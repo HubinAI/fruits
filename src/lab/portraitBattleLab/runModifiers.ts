@@ -49,7 +49,7 @@
  *   |---|---|---|---|
  *   | 重型弹头 | **动能爆发** kineticBurst | 紧急维修 emergencyRepair | 快速装填 fastReload |
  *   | 双联炮   | **三连装填** tripleLoad   | 紧急维修 emergencyRepair | 重型弹头 heavyShell |
- *   | 快速装填 | **反冲蓄能** recoilCharge | 紧急维修 emergencyRepair | 双联炮 twinCannon |
+ *   | 快速装填 | **强力后坐** strongRecoil | 紧急维修 emergencyRepair | 双联炮 twinCannon |
  *
  * 三种强联动的因果与实现：
  *
@@ -61,8 +61,12 @@
  *     （`damage.contactPoint`）→ 除平动外真实产生绕质心的扭矩（仰俯 / 旋转）。
  *   - **三连装填**：继续复用 PRP-F2-R1 给正式 Cannon 补的**可选 burst 能力**，`burstRounds 2→3`；
  *     `burstIntervalMs` 保持 100ms（第一版不重新调间隔）。三发都是真实 projectile。
- *   - **反冲蓄能**：每 N 次**真实开火**（= 真实 recoil 事件，`weaponFire`）蓄一次能，蓄满给玩家车
- *     一次前向冲量（接敌补偿）。只由 Cannon fire / recoil 事件触发，**没有定时器凭空加速**。
+ *   - **强力后坐**：**每一次真实开火**（= 真实 recoil 事件，`weaponFire`）都追加一次
+ *     沿本次炮口反方向的强后坐冲量。只由 Cannon fire 事件触发，**没有定时器凭空加速**。
+ *     ⚠️ PRP-BUILD-01-R3：旧口径是「每 N 次开火**蓄满一次** → 释放一次强后坐」——
+ *     那是一条**隐藏规则**，正常速度下真人分辨不出「哪一发是特殊的那一发」，
+ *     会与普通 Cannon recoil / Enemy 接敌 / Collision / Camera follow 混在一起。
+ *     现按 Queue 设计改判**删除 charge 概念**：一炮一后坐。
  *
  * ⚠️ 安全性（Queue 必改 4 的「接缝若不存在就停止」判定）：接缝**存在且干净** ——
  *     `PlanckBattleOrchestrator.onCombatEvent`（`planckBattleOrchestrator.ts:413`）是公开订阅口，
@@ -84,7 +88,7 @@ export type Layer1ModifierId = 'heavyShell' | 'twinCannon' | 'fastReload';
  * 第二层（条件池里的项）。
  * `emergencyRepair` 是三个池共用的**安全通用项**（不改武器行为，只在选择时修耐久）。
  */
-export type Layer2ModifierId = 'kineticBurst' | 'tripleLoad' | 'recoilCharge' | 'emergencyRepair';
+export type Layer2ModifierId = 'kineticBurst' | 'tripleLoad' | 'strongRecoil' | 'emergencyRepair';
 
 export type RunModifierId = Layer1ModifierId | Layer2ModifierId;
 
@@ -146,10 +150,10 @@ export const RUN_BUILD_MODIFIERS: readonly RunModifierDef[] = [
     role: 'synergy',
   },
   {
-    id: 'recoilCharge',
-    label: '反冲蓄能',
-    note: '连续开炮攒下的反冲会爆发成一次强后坐',
-    logText: '你在车尾装上了反冲蓄能器。',
+    id: 'strongRecoil',
+    label: '强力后坐',
+    note: '每一炮的后坐都明显更猛，车会被不断推离敌人',
+    logText: '你给大炮装上了强力后坐装置。',
     role: 'synergy',
   },
   {
@@ -184,7 +188,7 @@ export const RUN_LAYER1_POOL: readonly Layer1ModifierId[] = ['heavyShell', 'twin
 export const RUN_LAYER2_POOLS: Readonly<Record<Layer1ModifierId, readonly RunModifierId[]>> = {
   heavyShell: ['kineticBurst', 'emergencyRepair', 'fastReload'],
   twinCannon: ['tripleLoad', 'emergencyRepair', 'heavyShell'],
-  fastReload: ['recoilCharge', 'emergencyRepair', 'twinCannon'],
+  fastReload: ['strongRecoil', 'emergencyRepair', 'twinCannon'],
 };
 
 /** 第二层的选项定义（按池顺序，供 UI / 状态机使用）。 */
@@ -273,10 +277,10 @@ export const RUN_MODIFIER_OVERLAY: Readonly<Record<RunModifierId, RunModifierOve
       '命中追加冲量 = GAIN × 当前 projectile 质量 × 命中相对速度（不写死专属伤害）；作用点 = 真实命中点',
     affectsWeapon: false,
   },
-  recoilCharge: {
+  strongRecoil: {
     behavior: NO_WEAPON_OVERLAY,
     behaviorParams: {},
-    cause: '每 N 次真实开火（真实 recoil）蓄一次能 → 沿本次炮口反方向的一次明显强后坐',
+    cause: '每一次真实开火 → 沿本次炮口反方向的一次明显强后坐（无 charge / 无阈值）',
     affectsWeapon: false,
   },
   emergencyRepair: {
@@ -353,54 +357,61 @@ export const RUN_MODIFIER_OVERLAY: Readonly<Record<RunModifierId, RunModifierOve
  */
 export const KINETIC_BURST_GAIN = 28;
 
-/** **反冲蓄能**：每 N 次真实开火蓄一次。 */
-export const RECOIL_CHARGE_THRESHOLD = 3;
-
 /**
- * **反冲蓄能**：蓄满时给玩家车的**强后坐冲量**（基础普通后坐 = 正式 Cannon def 的 30）。
+ * **强力后坐**：**每一次真实开火**追加的强后坐冲量（基础普通后坐 = 正式 Cannon def 的 30）。
  *
  * 方向 = **本次开火的真实炮口方向取反**（`weaponFire.worldDirection`）—— 车辆本来就在
  * 承受的那个后坐方向；作用点 = **本次开火的真实炮口位置**（`weaponFire.worldPosition`）。
- * ⇒ 与基础 Cannon 的普通后坐**同源同向**，只是把「每 N 发累积的那一次」显著放大。
+ * ⇒ 与基础 Cannon 的普通后坐**同源同向**，且**一炮一次、无中间状态**
+ * （没有计数、没有阈值、没有「第 N 发」判断 —— R3 把旧 charge 概念整条删掉了）。
  *
- * ── PRP-BUILD-01-R2：为什么方向与量级都改了 ────────────────────────────────────
+ * ── PRP-BUILD-01-R3：为什么删除「每 N 发蓄满一次」 ────────────────────────────
  *
- * 旧口径是「沿自身 facing 的**前向**冲量（接敌补偿）」，真人判定**不可读**。
- * 根因不是幅度，而是**方向与接敌同向**：前向冲量与「我本来就在前进」叠加。
- * 实测旧口径 20 帧净后移只有 **0.7px**、每次触发 4~7px，**低于同局自然抖动基线 12.1px**
- * → 结构上不可能被读出来。翻到后侧之后，「开炮（普通后坐）… 开炮 → 第 N 发被明显踹开
- * → 与敌人重新拉开距离」成为纯物理因果链，不需要任何 UI 解释。
+ * R2 把方向从「向前接敌补偿」翻成「沿炮口反方向的强后坐」并放大到 450，物理上真实生效
+ * （真人确认「450 impulse 真实改变双方距离」），但**真人第二次验收仍判失败**：
+ * 正常速度下看不出「这是累计 3 次开火后触发的一次特殊后坐」——它与普通 Cannon recoil /
+ * Enemy 接敌 / Collision / Camera follow 混在一起。
+ * 根因不是幅度，而是机制里多了一层**不可见的累计状态**（玩家看不到「2/3」，只能看到一串
+ * 相似的开炮）。改成一一对应后，因果变成「炮弹离膛 → 车马上后退」并在每一炮重复，
+ * 高频控距不再需要任何 UI 解释。
  *
- * ── 450 的选型依据（实测扫描，冻结）──────────────────────────────────────────
+ * ── 110 的选型依据（实测粗档扫描，冻结）─────────────────────────────────────
  *
- * 口径：真实 Runtime + 正式相机链；A = `['fastReload']`，B = `['fastReload','recoilCharge']`。
- * 指标 = 每次蓄能触发后 20 帧内玩家车位移（世界 px）/ 玩家车左缘在舞台带内的最小值 /
- * 第一场残血。A 组同窗口的**自然基线** = 后移 **12.1px**、距离增量 **6.0px**。
+ * 口径：真实 Runtime + **正式相机链**（逐帧 `reframe` + `applyBattleFollow`）；
+ * 单场 = `build = ['fastReload','strongRecoil']` 直接开打（演示遭遇 ProtoRusher）。
+ * 「每炮世界后移」= 每次真实开火后 20 帧内玩家车的**峰值后移**（世界 px，负 = 向后）中位数。
+ * 「链末场 HP」= `fastReload → strongRecoil` 三场连锁终结时的玩家剩余耐久（上限 1100）。
  *
- *   | 冲量 | 每次踹开（世界 px） | 玩家左缘最小 bandX | 净后移 | 战斗步数 | 第一场残血 |
- *   |---|---|---|---|---|---|
- *   | 45（旧值，仅换向） | +21…−7（淹没在噪声里） | 30.50 | 0.7 | 586 | 967 |
- *   | 300 | −5…−29 | 30.50 | 73.4 | 586 | 1091 |
- *   | **450** | **−11…−46** | **9.24** | **314.5** | 830 | 1060 |
- *   | 500 | −6…−52，另有一次 **+58.6 反弹** | **−2.01（越界）** | — | 937 | **403** |
- *   | 550 | −18…−67，另有一次 **+58.6 反弹** | **−1.58（越界）** | — | 1002 | **0（阵亡）** |
+ *   | 冲量 | 每炮世界后移（中位） | 玩家世界 minX | 左缘最小 bandX | 单场步数 | 单场结束 HP | 链末场 HP | 末场挨打 |
+ *   |---|---|---|---|---|---|---|---|
+ *   | 0（基线） | ≈0（A 组中位 0.4） | 399 | 30.5 | 586 | 879 | 402 | 23 次 |
+ *   | 60 | — | 395 | 29.9 | 586 | 983 | 506 | — |
+ *   | 90 | — | 378 | 29.4 | 628 | 1007 | — | — |
+ *   | 100 | — | 320 | 29.2 | 629 | 1092 | 614 | — |
+ *   | **110** | **−6.0** | **306** | **28.9** | **626** | **1032** | **554** | **4 次** |
+ *   | 120 | −8.9 | 198 | 28.9 | 705 | 1100 | 622 | **0 次（零接触）** |
+ *   | 130 | — | **86** | **−1.7 越界** | 1002 | **0 阵亡** | — | — |
+ *   | 150 | — | **87** | **−1.1 越界** | 1004 | **0 阵亡** | — | — |
  *
- * 取舍（450 是**由既有不变量夹出来的上界下沿**，不是口味）：
- *   1. **可感知**：每次踹开 11~46 世界 px，中位 **≈28px（≈9 舞台带 px）** ——
- *      是自然基线 12.1px 的 **2.3 倍**；双方距离同步被拉开 6~45 世界 px。
- *   2. **不越界**：500 / 550 会把玩家左缘推出舞台带（`bandLeftMin < 0`），
- *      破坏既有「完整入画」不变量；450 仍留 9.24px。
- *   3. **不伤 Run 连锁**：500 掉到 403、550 直接**阵亡** → 破坏 RUN-R1 的
- *      「三场都活着且有余量」；450 第一场仍有 1060。
- *   4. **不引入退化观感**：500+ 会出现一次 **+58.6 的正向跳**（撞左墙被弹回）——
- *      那是「被墙弹回来」，不是「被后坐踹开」，必须避免。
+ * 取 **110**（= 基础后坐的 3.67×，倍数级而非 10% 微调），四条理由：
+ *   1. **上界由既有不变量夹住**：130 / 140 / 150 会把玩家持续推到竞技场左缘
+ *      （`左缘 bandX < 0` = 破坏「完整入画」）并在末段**直接被后坐打死**（HP 0）——
+ *      那正是 Queue 明令避免的「玩家撞左墙 / 越界 / 自己被后坐打死」。
+ *   2. **保留真实接敌**：120 已进入**零接触**（末场一次都没挨打）——
+ *      等价于 Queue 禁止的「战斗完全无法接敌」；110 仍留下 4 次真实接触，
+ *      甚至比 R2 已通过验收的 40 点伤害（2~3 次）更多，即「控距」成立但没有变成无接触。
+ *   3. **与基础后坐同量级语义**：110 相对 30 是明确的「明显更强」，而不是噪声级差异。
+ *   4. **方向可辨**：每炮都是负位移（向后），与「接敌前进」符号相反 → 一炮一后坐可被读成因果。
  *
- * ⚠️ 500 → 550 恶化极陡（403 → 0）说明本冲量对战果**强混沌**：
- *    不能靠继续加大冲量做平衡，只能按不变量取上界下沿。
- * ⚠️ 冻结项（快速装填 650ms / 重型弹头 / 双联炮 / Base Cannon / 敌人 / 相机 /
- *    world / spawn / damage / HP / movement / PRP UI 布局与图标）一个都没动。
+ * ⚠️ 二次核对：链末场 HP 随冲量是**强混沌**的（60→506 / 80→582 / 100→614 / 110→554 / 120→622），
+ *    非单调。因此这里**不改其它数值去凑平衡** —— 只按 Queue 的不变量取「明显成立且不触发退化」的量级。
+ * ⚠️ 屏幕量纲说明：正式相机把**双方中点**居中并逐帧跟随，玩家在屏幕上的位移被追平
+ *    （实测每炮 6~9 世界 px → 舞台带仅 1~3 px）。可感知性由真人录屏裁决；本 Queue 只保证
+ *    「物理真实发生 + 一炮一后坐 + 不触发任何退化」。
+ * ⚠️ 冻结项（快速装填 650ms / 重型弹头 → 动能爆发 / 双联炮 → 三连装填 / Base Cannon /
+ *    伤害 / 敌人 / HP / Movement / Camera / World / spawn / PRP 页面结构）一个都没动。
  */
-export const RECOIL_CHARGE_IMPULSE = 450;
+export const STRONG_RECOIL_IMPULSE = 110;
 
 /** **紧急维修**：选择时修回的耐久比例（相对上限；不超过上限）。 */
 export const EMERGENCY_REPAIR_FRACTION = 0.25;
