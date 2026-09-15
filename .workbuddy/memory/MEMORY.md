@@ -16,7 +16,7 @@
 - **链尾**：`6fbf275` F1 → `c44239b` R5 → `ca3fb43` F2 → `1a3b080` F2-R1 → `896086b` F2-R2
   → `39f6af9` BUILD-01 → `8ac97a8` memory → `02becf7` RUN-R1 → `5c8b514`+`eda6ca9` BUILD-01-R1
   → `72c7315` memory → `e90da08` PBL-E2E-AUDIT-COMBO-LITERAL-FIX + `0fe782f` memory
-  → `b485a6e`+`29045b0` BUILD-01-R2 → **`（本轮）` R3 强力后坐（一炮一后坐）**
+  → `b485a6e`+`29045b0` BUILD-01-R2 → **`db8ad8c` BUILD-01-R3 强力后坐（一炮一后坐，删 charge）**
 - 全链对 `src/core|physics|render|player|platform` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，行为逐帧不变）。
   R5 相机复用靠 PRP 侧 viewport adapter，不碰 `src/render`。
