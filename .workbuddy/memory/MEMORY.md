@@ -13,7 +13,7 @@
 ## 1. Identity / 链尾
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。原型正式名 **PRP｜Portrait Run Prototype**。
-- **链尾**：`db8ad8c` BUILD-01-R3（一炮一后坐）→ **`<R4 SHA>` BUILD-01-R4（删 strongRecoil，换 suppressionShot）**；
+- **链尾**：`db8ad8c` BUILD-01-R3（一炮一后坐）→ **`6ee7fea` BUILD-01-R4（删 strongRecoil，换 suppressionShot）**；
   更早 SHA 查 `git log`。
 - 全链对 `src/core|physics|render|player|platform` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，逐帧不变）。
