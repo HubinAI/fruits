@@ -13,7 +13,8 @@
 ## 1. Identity / 链尾
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。原型正式名 **PRP｜Portrait Run Prototype**。
-- **链尾**：`b485a6e` BUILD-01-R2 → **`db8ad8c` BUILD-01-R3（一炮一后坐，删 charge）**；更早 SHA 查 `git log`。
+- **链尾**：`db8ad8c` BUILD-01-R3（一炮一后坐）→ **`<R4 SHA>` BUILD-01-R4（删 strongRecoil，换 suppressionShot）**；
+  更早 SHA 查 `git log`。
 - 全链对 `src/core|physics|render|player|platform` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，逐帧不变）。
 
@@ -39,6 +40,10 @@
 - 本机 bash PATH 可能缺 `/usr/bin` → 命令前 `export PATH="/usr/bin:/bin:$PATH"`。
 - `交接文档_*.md` 是**本地件**，勿误提交；截图 / 日志落 `outputs/`（gitignored）。
 - ⚠️ **id 改名 = 全通道同步**：`src` + `tests/*.ts` + `tests/*.cjs`（E2E 侧有镜像字面量表）。
+- ⚠️ **跨轮复验 PRP 前必须先 `npm run build:portrait-lab`**：E2E 读 `dist-portrait-lab/`，
+  而该目录 `emptyOutDir:false` 会留下**陈旧 chunk** ⇒ 改完源码直接跑 E2E 会拿到旧产物的假 FAIL
+  （R4 实测：`suppress=undefined` 4 条，重建后 406/406 全绿）。
+  ⚠️ 定位手法：`grep -rl "<新字段>" dist-portrait-lab/` 为空 + `grep -rl "<旧字段>"` 命中 ⇒ 产物陈旧。
 
 ## 4. Stable contracts（改动前必读）
 - DPR 只乘一次（logical→backing）；safe-area / capsule / hitArea 一律逻辑坐标。
@@ -94,22 +99,30 @@
 - ⚠️ 测量口径陷阱：「后坐净后移」只在重型对手下成立 → 改**质量无关**的「开火帧位移凹陷」；
   「整场最负 vx」量到的是**接触推挤**。
 
-### 5.5 BUILD-01-R3 强力后坐（最新交付）
-- 口径 = **一炮一后坐**：每次真实 `weaponFire` → 一次追加冲量（炮口方向**取反**，作用点 = **真实炮口**）；
-  旧 `recoilCharge` / `RECOIL_CHARGE_*` **整条删除**；`STRONG_RECOIL_IMPULSE = 110`。
-- ⚠️ **决定性事实**：110 = 每炮 **6~10 世界 px** 后移，但敌车冲刺同时前进 ⇒ **屏幕只动 1~3 带 px**
-  → 物理真实、**屏幕上几乎不可见**；已如实上报，交真人录屏裁决（**不放大数值**）。
-- ⚠️ **上界由「保留真实接敌」夹住**：120 = 末场**零挨打**（= 禁止的「无法接敌」）；
-  130~150 = 左缘 `bandX<0` 越界 + 被自己后坐打死（HP 0）。
+### 5.5 BUILD-01-R4 压制射击（最新交付）
+- ⚠️ **结构性改判：换作用对象，不是调数值**。`强力后坐` 三版全败（前推 → 3 发蓄能 → 每炮）⇒
+  **整条 recoil 二层机制删除**（`strongRecoil` / `STRONG_RECOIL_IMPULSE` / probe 字段 / 图标，无兼容分支）。
+  改推**敌车**：`suppressionShot`，口径 = **每一次真实炮弹命中敌车 → 沿本次弹道方向一次中等击退**，
+  作用点 = 真实 `contactPoint`；`SUPPRESSION_SHOT_IMPULSE = 300`（粗档扫描，冻结）。
+- ⚠️ **`damage` 事件不带弹道方向**：只有 `contactPoint` / `contactNormal` / `relativeVelocity`；
+  `contactNormal` 是**撞击面法线**（斜撞会读成横向）⇒ 方向必须复用本次 `weaponFire.worldDirection`，
+  作用点用本次命中**自己的** `contactPoint`。
+- ⚠️ **`soloA: true` 下敌人仍会被命中**（实测 4 次）⇒ **不能用来做「miss 不触发」判据**；
+  正确做法 = **合成事件注入**直测 `RunBuildAbilities`（记录型假端口），可逐条否掉四条禁止路径。
+- 触发入口（唯一）：`damageSource === 'weapon' && source === 'A' && target === 'B' && behavior === 'cannon'`。
+- ⚠️ 相机对**敌车**同样追平 ⇒ 屏幕位移仍 ≈ 世界位移一半 × 舞台缩放（中位 35 世界 px ≈ 8~10 舞台 px）；
+  是否够可感知**交真人裁决**。⚠️ 对照事实：`kineticBurst` 自己会把敌车顶到远端墙（258 帧），
+  属**既有现象**，不是本 Queue 缺陷，未处理。
 
 ## 6. Next action
-- **BUILD-01-R3 已交付并停等**（基线 `29045b0`）。**按指令停止，不自动续下一 Queue。**
+- **BUILD-01-R4 已交付并停等**（基线 `9d6eb09`）。**按指令停止，不自动续下一 Queue。**
 - **真人验收进度**：`重型弹头→动能爆发` ✅冻结 · `双联炮→三连装填` ✅冻结 ·
-  `快速装填 → 强力后坐`（R2「反冲蓄能」已废弃）**待第三次裁决**。口径（正常速度、不看 Buff 文字）：
-  第一层 =「它射得很快」；第二层 =「**而且每开一炮，它都会明显把自己往后踹**」。
-  ⚠️ 若仍只能看出「射得快」→ **判失败，不再放大数值** → 需另开**表现层** Queue。
-- ⚠️ 未裁决：`FAILED` 失败终态页面观感；「先选择 → 再条件选择 → 最终战斗」是否让玩家看出**这辆车有方向**。
-- ⚠️ R3 **未覆盖**：`strongRecoil` 新图标字形无 node 侧几何测试（E2E 选项序列不含该选项）。
+  `快速装填 → 压制射击`**待裁决**（旧名「强力后坐」/「反冲蓄能」**已整条废弃，不再挽救**）。
+  口径（正常速度、不看 Buff 文字）：第一层 =「**这辆车开炮很快。**」；
+  第二层 =「**而且它能靠连续炮击不断把敌人顶回去，让敌人很难贴近。**」
+  ⚠️ 若正常速度仍需解释 → **这条第三 Build 方向判失败，停止继续开发**（Queue 原文）。
+- ⚠️ **未裁决**：`FAILED` 失败终态页面观感；「先选择 → 再条件选择 → 最终战斗」是否让玩家看出**这辆车有方向**。
+- ⚠️ R4 **未覆盖**：`suppressionShot` 新图标字形仍无 node 侧几何测试（E2E 选项序列不含该选项）。
 - **PRP 各轮录屏回执未全部归档**（本分支唯一未闭环项）。
 - **PRP-R5 遗留裁决**（若真人仍嫌车小）：adapter 开局 69·84px / 峰值 172·190px 是否可感知。
   **禁止**无授权新增 PRP 专属 dynamic zoom / 镜头震动 / Kill zoom —— **恢复旧模式，不发明新模式**。

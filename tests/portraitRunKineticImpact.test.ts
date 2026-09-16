@@ -530,7 +530,7 @@ describe('PRP-BUILD-01-R1｜同条件 A/B：第二层真的改变了重炮的物
     });
     // 能力类项（含动能爆发）**永不改武器** → 不可能出现「强化了炮弹参数」的暗改
     for (const id of RUN_ALL_MODIFIER_IDS) {
-      if (id === 'kineticBurst' || id === 'strongRecoil' || id === 'emergencyRepair') {
+      if (id === 'kineticBurst' || id === 'suppressionShot' || id === 'emergencyRepair') {
         expect(RUN_MODIFIER_OVERLAY[id].affectsWeapon, id).toBe(false);
         expect(RUN_MODIFIER_OVERLAY[id].behaviorParams, id).toEqual({});
       }
