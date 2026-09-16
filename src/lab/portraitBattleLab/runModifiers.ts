@@ -49,9 +49,16 @@
  *   |---|---|---|---|
  *   | 重型弹头 | **动能爆发** kineticBurst | 紧急维修 emergencyRepair | 快速装填 fastReload |
  *   | 双联炮   | **三连装填** tripleLoad   | 紧急维修 emergencyRepair | 重型弹头 heavyShell |
- *   | 快速装填 | **压制射击** suppressionShot | 紧急维修 emergencyRepair | 双联炮 twinCannon |
+ *   | 快速装填 | （**无专属联动**，见下） | 紧急维修 emergencyRepair | 重型弹头 heavyShell + 双联炮 twinCannon |
  *
- * 三种强联动的因果与实现：
+ * ⚠️ **PRP-BUILD-01-CLOSEOUT-AND-FREEZE**：快速装填的专属第二层尝试过三条
+ * （`反冲蓄能` recoilCharge → `强力后坐` strongRecoil → `压制射击` suppressionShot），
+ * **三条全部真人未通过**，已**正式废弃并整条删除**，不再为该第一层开发专属二层。
+ * 它的第二层改为**通用转向池**：三个**已存在**的方向（重型弹头 / 双联炮 / 紧急维修），
+ * 语义 = 「保留高频特征，同时向重炮 / 多发转型，或者选生存」。
+ * ⇒ **本阶段不验证这些混合组合的平衡**，也不新增第四个第一层强化。
+ *
+ * 两种强联动的因果与实现：
  *
  *   - **动能爆发**：炮弹越重 / 撞击越强 → 命中追加越明显的冲击。追加冲量
  *     `= KINETIC_BURST_GAIN × 当前 projectile 质量 × 命中相对速度`——
@@ -61,16 +68,7 @@
  *     （`damage.contactPoint`）→ 除平动外真实产生绕质心的扭矩（仰俯 / 旋转）。
  *   - **三连装填**：继续复用 PRP-F2-R1 给正式 Cannon 补的**可选 burst 能力**，`burstRounds 2→3`；
  *     `burstIntervalMs` 保持 100ms（第一版不重新调间隔）。三发都是真实 projectile。
- *   - **压制射击**：**每一次真实炮弹命中敌车**（= 真实 `damage` 事件，`source=A` / `target=B` /
- *     `damageSource='weapon'` / `behavior='cannon'`）沿**本次弹道方向**追加一次**中等**击退
- *     冲量，把敌车推离玩家。只由命中事件触发 —— **开炮不触发、未命中不触发、无定时器、
- *     无累计层数、无「第 N 发」、无固定周期**。方向取自本次开火的**真实炮口方向**
- *     （`weaponFire.worldDirection`，直射炮弹的弹道方向即此），作用点 = **真实命中点**（`contactPoint`）。
- *     ⚠️ PRP-BUILD-01-R4：本项**整体替换**了旧的 `strongRecoil`（自车后坐）方向 ——
- *     「让玩家车后退」这条因果在正式车辆约束 + Battle Camera 下**三版都读不出来**
- *     （前推补偿 → 3 发蓄能强后坐 → 每炮强后坐），已按 Queue 整条删除，
- *     改为把作用点放到**敌车**上：挤不动的重车不再当主角，被打的是轻的敌车。
- *  *
+ *
  * ⚠️ 安全性（Queue 必改 4 的「接缝若不存在就停止」判定）：接缝**存在且干净** ——
  *     `PlanckBattleOrchestrator.onCombatEvent`（`planckBattleOrchestrator.ts:413`）是公开订阅口，
  *     `WeaponFireEvent`（`combatEvents.ts:41`，含 `team`/`worldDirection`）与
@@ -90,8 +88,9 @@ export type Layer1ModifierId = 'heavyShell' | 'twinCannon' | 'fastReload';
 /**
  * 第二层（条件池里的项）。
  * `emergencyRepair` 是三个池共用的**安全通用项**（不改武器行为，只在选择时修耐久）。
+ * `heavyShell` / `twinCannon` / `fastReload` 也会作为**转向项**出现在别的第一层的池里。
  */
-export type Layer2ModifierId = 'kineticBurst' | 'tripleLoad' | 'suppressionShot' | 'emergencyRepair';
+export type Layer2ModifierId = 'kineticBurst' | 'tripleLoad' | 'emergencyRepair';
 
 export type RunModifierId = Layer1ModifierId | Layer2ModifierId;
 
@@ -136,7 +135,7 @@ export const RUN_MODIFIERS: readonly RunModifierDef[] = [
   },
 ];
 
-/** 第二层（条件池）四项。 */
+/** 第二层（条件池）三项。 */
 export const RUN_BUILD_MODIFIERS: readonly RunModifierDef[] = [
   {
     id: 'kineticBurst',
@@ -150,13 +149,6 @@ export const RUN_BUILD_MODIFIERS: readonly RunModifierDef[] = [
     label: '三连装填',
     note: '一次开火连续打出三发炮弹',
     logText: '你把副炮接进了主装填链。',
-    role: 'synergy',
-  },
-  {
-    id: 'suppressionShot',
-    label: '压制射击',
-    note: '炮弹命中会把对手顶回去，连射时一直压着它',
-    logText: '你给炮弹装上了压制引信。',
     role: 'synergy',
   },
   {
@@ -185,13 +177,16 @@ export const RUN_LAYER1_POOL: readonly Layer1ModifierId[] = ['heavyShell', 'twin
 /**
  * 第二层条件池：**由第一层选择决定**（必改 1）。
  *
- * 每池固定三项，顺序 = 「强联动 / 安全通用 / 轻度转向」（必改 5 的取舍结构）。
+ * 每池固定三项。重炮 / 多发两池 = 「强联动 / 安全通用 / 轻度转向」（必改 5 的取舍结构）；
+ * ⚠️ 快速装填池已按 `PRP-BUILD-01-CLOSEOUT-AND-FREEZE` 改为**通用转向池**
+ * （无专属联动，三个**已存在**的方向 = 重炮 / 多发 / 生存）。
+ * 三个池长度一律为 3 —— **不新增第四个第一层强化，也不加长任何池**。
  * 这是第一版的条件池，不做正式随机权重、不做稀有度。
  */
 export const RUN_LAYER2_POOLS: Readonly<Record<Layer1ModifierId, readonly RunModifierId[]>> = {
   heavyShell: ['kineticBurst', 'emergencyRepair', 'fastReload'],
   twinCannon: ['tripleLoad', 'emergencyRepair', 'heavyShell'],
-  fastReload: ['suppressionShot', 'emergencyRepair', 'twinCannon'],
+  fastReload: ['heavyShell', 'twinCannon', 'emergencyRepair'],
 };
 
 /** 第二层的选项定义（按池顺序，供 UI / 状态机使用）。 */
@@ -280,12 +275,6 @@ export const RUN_MODIFIER_OVERLAY: Readonly<Record<RunModifierId, RunModifierOve
       '命中追加冲量 = GAIN × 当前 projectile 质量 × 命中相对速度（不写死专属伤害）；作用点 = 真实命中点',
     affectsWeapon: false,
   },
-  suppressionShot: {
-    behavior: NO_WEAPON_OVERLAY,
-    behaviorParams: {},
-    cause: '每一次真实炮弹命中敌车 → 沿本次弹道方向的一次中等击退；作用点 = 真实命中点',
-    affectsWeapon: false,
-  },
   emergencyRepair: {
     behavior: NO_WEAPON_OVERLAY,
     behaviorParams: {},
@@ -359,75 +348,6 @@ export const RUN_MODIFIER_OVERLAY: Readonly<Record<RunModifierId, RunModifierOve
  *    PRP UI）一个都没动。
  */
 export const KINETIC_BURST_GAIN = 28;
-
-/**
- * **压制射击**：**每一次真实炮弹命中敌车**追加的击退冲量。
- *
- * 方向 = **本次开火的真实弹道方向**（`weaponFire.worldDirection`；直射炮弹的命中方向即此，
- * 且因为这一发确实命中了敌车，该方向本就指向「远离玩家」）；作用点 = **本次真实命中点**
- * （`damage.contactPoint`）。
- * ⇒ 与动能爆发**共用同一条真实命中入口**，但语义完全不同：
- *    - 动能爆发 = **单次强冲击**（强度还能被弹重 / 冲击速度放大）→「一炮把对手整个撞开」；
- *    - 压制射击 = **多次小冲击**（固定中等量级，不受弹重放大）→「每一发都把它顶回去一点」，
- *      靠**快速装填的 650ms 高频**不断重复，形成持续压制。
- *
- * ── PRP-BUILD-01-R4：为什么把作用点从「自车」换成「敌车」 ───────────────────────
- *
- * 前两版（R2 前向接敌补偿 → R3 每炮强后坐）都在做同一件事：**推玩家自己**。
- * 真人三轮验收全部判失败，根因是**结构性的**，不是数值：
- *   1. 玩家车是重的（西瓜重车），同样冲量下位移很小；R1 已实测 3000 冲量只有 4.56° 的转动。
- *   2. 正式相机跟**双方中点** → 玩家后退与敌车前进互相抵消 ⇒ 屏幕位移 ≈ 0。
- *   3. 所以「让玩家车后退」在正式车辆约束 + Battle Camera 下**没有可感知通道**，
- *      加数值只会把它推向「撞左墙 / 被自己后坐打死」的退化。
- * ⇒ 按 Queue 改判：**不再挽救自车后坐**，把冲量施加到**敌车**上。
- *   敌车是轻的（ProtoRusher 冲刺车），R1 的动能爆发已经证明**敌车侧是可感知的通道**
- *   （真实位移 + 绕质心扭矩的仰俯）；而「敌车被顶回去」正好等价于「玩家控制了距离」，
- *   与「高频控距 Build」的目标同向，不需要任何 UI 解释。
- *
- * ── 选型依据（实测粗档扫描，冻结）─────────────────────────────────────────────
- *
- * 口径：真实 Runtime，单场 = 直接带完整 Build 开打（演示遭遇 ProtoRusher，真实物理）。
- * 「每命中顶回」= 每次真实命中后 20 帧内**敌车**的峰值位移（世界 px，+ = 被顶离玩家）中位。
- * 「挨打」= 玩家被敌车真实接触伤害的次数（= 敌人贴近到能打到你的次数）。
- * 「贴近远端墙」= 敌车中心 x > 1450 的帧数（竞技场宽 1600）。
- * **K 组 = `重型弹头 + 动能爆发`**，即 Queue 必改 3 要求区分的对照组。
- *
- *   | 冲击 | 每命中顶回（中位/最大） | 敌车最大 x | 越过出生点 | 贴近远端墙 | 挨打 | 步数 | K 占比（中位） |
- *   |---|---|---|---|---|---|---|---|
- *   | 0（A 基线） | 0.2 / 3.5 | 1200 | 0 帧 | 0 帧 | **23 次** | 586 | — |
- *   | 60 | 2.4 / 7.3 | 1200 | — | — | 17 次 | 586 | 3% |
- *   | 150 | 13.6 / 23.7 | 1200 | — | — | 17 次 | 586 | 18% |
- *   | 250 | 39.5 / 50.4 | 1259 | 85 帧 | 0 帧 | 17 次 | 586 | 52% |
- *   | **300** | **35.0 / 61.6** | **1336** | **108 帧** | **0 帧** | **7 次** | **588** | **46%** |
- *   | 350 | 39.9 / 71.6 | 1412 | 150 帧 | 0 帧 | 4 次 | 592 | 52% |
- *   | 450 | 43.5 / 89.7 | 1512 | — | — | 3 次 | 703 | 57% |
- *   | **K（动能爆发）** | **76.5 / 121.3** | **1535（右缘 1626 > 1600）** | 521 帧 | **258 帧** | 16 次 | 1021 | 100% |
- *
- * 取 **300**，逐条对上 Queue 必改 4 的六个条件：
- *   1. **单次命中可感知**：每命中顶回中位 35 世界 px ≈ 敌车自身宽度（~90px）的 39%，
- *      是 A 组自然抖动（0.2px）的 **175×** —— 不是一个需要解释的量级。
- *   2. **多次命中产生持续控距**：玩家**真实挨打 23 → 7 次（−70%）**，
- *      且整场有 108 帧（约 1.8s）敌车被顶到**比它的出生点更远**的位置。
- *   3. **不出现「一次命中直接飞走」**：单次最大位移 61.6，只有动能爆发（121.3）的 **51%** ——
- *      形态是「顿一下 / 被推回一点」，不是「整个轰开」。300 → 450 才 89.7，200 → 35.8。
- *   4. **不把敌人长期顶在 Arena 边界**：敌车最大 x 1336（右缘 1427），
- *      **贴近远端墙 0 帧**；对照动能爆发是 **258 帧**、右缘 1626 已越过竞技场宽度。
- *   5. **仍能最终进入近身 / Collision**：两车最小外廓间距仍为**负值（−29 世界 px）**，
- *      挨打 7 次 ⇒ 压制成立但没有变成「无法接敌」。
- *   6. **不改变 Damage**：`dmgPerHit` 在 A / B 两组**完全相同（76.9）** ——
- *      本项只施加冲量，从不触碰伤害口径。
- *
- * ⚠️ 与动能爆发的**身份差异**（必改 3）：动能爆发是「单次强冲击」——强度还被弹重 / 冲击速度放大，
- *    一击就能把对手顶到竞技场边缘；压制射击是「多次小冲击」——**强度固定**（刻意不乘
- *    `projectileMass` / `relativeVelocity`），只有 ~46% 的量级，靠 650ms 高频不断重复。
- *    两者的可辨差别正是「一次轰飞」vs「一直被压着」。
- * ⚠️ 相机量纲说明：正式相机跟**双方中点**，敌车被顶回时相机同时跟过去，
- *    屏幕位移约为世界位移的一半（再乘舞台缩放）。因此这里坚持用**世界 px** 作为
- *    物理事实的判据；最终可感知性由真人录屏裁决。
- * ⚠️ 冻结项（快速装填 650ms / 重型弹头 → 动能爆发 / 双联炮 → 三连装填 / Base Cannon /
- *    伤害 / 敌人 / HP / Movement / Camera / World / spawn / PRP 页面结构）一个都没动。
- */
-export const SUPPRESSION_SHOT_IMPULSE = 300;
 
 /** **紧急维修**：选择时修回的耐久比例（相对上限；不超过上限）。 */
 export const EMERGENCY_REPAIR_FRACTION = 0.25;

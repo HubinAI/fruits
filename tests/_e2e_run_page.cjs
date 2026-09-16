@@ -51,7 +51,6 @@ const PALETTE = {
   /* ---- PRP-BUILD-01 第二层（条件池）图标底色 ---- */
   buffIconKinetic: [0x8e, 0x44, 0xc0], // 动能爆发
   buffIconTriple: [0x2f, 0x8f, 0xc4], // 三连装填
-  buffIconSuppress: [0xc9, 0xa2, 0x27], // 压制射击
   buffIconRepair: [0x4f, 0xc4, 0xa8], // 紧急维修
   buffChip: [0xe6, 0xed, 0xf8],
   cardBar: [0x5f, 0x86, 0xc4],
@@ -65,7 +64,6 @@ const BUFF_ICON_KEY = {
   fastReload: 'buffIconReload',
   kineticBurst: 'buffIconKinetic',
   tripleLoad: 'buffIconTriple',
-  suppressionShot: 'buffIconSuppress',
   emergencyRepair: 'buffIconRepair',
 };
 
@@ -121,13 +119,12 @@ const SAMPLE_COLORS = {
   actionEdge: [0x4f, 0x70, 0x99],
   cardBg: [0x1b, 0x24, 0x32],
   cardEdge: [0x3d, 0x4c, 0x66],
-  /** CHOICE 卡片左侧矢量图标色（按选项区分；七个两两 RGB 精确互斥）。 */
+  /** CHOICE 卡片左侧矢量图标色（按选项区分；六个两两 RGB 精确互斥）。 */
   iconShell: [0xff, 0xb0, 0x66],
   iconTwin: [0xff, 0xd1, 0x66],
   iconReload: [0x7f, 0xd6, 0xa0],
   iconKinetic: [0xc9, 0x8c, 0xf0],
   iconTriple: [0x79, 0xc0, 0xea],
-  iconSuppress: [0xe8, 0xc4, 0x6a],
   iconRepair: [0x5f, 0xd0, 0xc0],
 };
 
@@ -138,7 +135,6 @@ const ICON_COLOR_BY_ID = {
   fastReload: SAMPLE_COLORS.iconReload,
   kineticBurst: SAMPLE_COLORS.iconKinetic,
   tripleLoad: SAMPLE_COLORS.iconTriple,
-  suppressionShot: SAMPLE_COLORS.iconSuppress,
   emergencyRepair: SAMPLE_COLORS.iconRepair,
 };
 
@@ -379,7 +375,7 @@ function ledgerCheck(tag, label, stats, exp, dpr) {
  * CHOICE 卡片图标判据（PRP-BUILD-01 起两层池共用）。
  *
  * 口径：在**与绘制同源**的 `iconRect` 盒内按**精确 RGB 相等**统计该选项的专属图标色，
- * 并要求其它**全部六个**图标色的命中为 0（七个色两两精确互斥）。
+ * 并要求其它**全部五个**图标色的命中为 0（六个色两两精确互斥）。
  * ⚠️ 必须是「盒内面积统计」而不是中心单点采样：双联炮图标是两根并排炮管，
  *    46×46 盒的几何中心恰好落在两管空隙里，单点采样会假红（见 runPage.ts 的 iconRect 注释）。
  */
@@ -1226,14 +1222,14 @@ async function runViewport(browser, vp) {
     !!w3 &&
       w3.modifier === 'twinCannon' &&
       JSON.stringify(w3.build) === JSON.stringify(['twinCannon', 'tripleLoad']) &&
-      // ⚠️ 本路线的第二层是「三连装填」，所以两项**能力类**强化都必须真的是关的；
-      //    `suppressionHits` 恒 0 = 「压制射击」不会被别的 Build 顺带打开（不串味）。
-      w3.abilities.suppressionShot === false &&
-      w3.abilities.suppressionHits === 0 &&
+      // ⚠️ 本路线的第二层是「三连装填」，所以**能力类**强化必须是关的；
+      //    `kineticBurst === false` = 「动能爆发」不会被别的 Build 顺带打开（不串味）。
+      //    ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：快速装填的专属二层（三条尝试全部未通过）
+      //    已整条废弃，探针里的 suppression* 字段随之一并删除。
       w3.abilities.kineticBurst === false,
     `[${tag}] R53b 必改 6：最终战斗**同时携带两层**（一层改武器 + 二层能力/数值，运行时不串味）`,
     w3
-      ? `build=[${w3.build.join(',')}] modifier=${w3.modifier} kinetic=${w3.abilities.kineticBurst} suppress=${w3.abilities.suppressionHits}`
+      ? `build=[${w3.build.join(',')}] modifier=${w3.modifier} kinetic=${w3.abilities.kineticBurst}`
       : 'no battleWorld',
   );
   log(

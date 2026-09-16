@@ -1308,7 +1308,7 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
   it('RP-F2-03 必改 4：跨战斗耐久逐场按同一规则传递（不自动满血）', () => {
     const { firstEnd, afterChoice1, afterChoice2, secondInitialHp, finalRuntime } = runBuildLoop(
       'fastReload',
-      'suppressionShot',
+      'twinCannon',
     );
     // 规则（PRP-RUN-R1 起，`runCarriedPlayerHp`）：carry = 上一场真实剩余 + 维修补偿，上限截断。
     // ⚠️ 旧注释「<= 0 → null（满耐久开幕）」已作废：那正是被真人录屏抓到的 P0 缺陷。
@@ -1356,10 +1356,12 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
 
   it('RP-F2-04 必改 6：最终战斗的运行时**真的**同时携带两层（不是只写 state / 只画图标）', () => {
     // 三条路线各跑一次；每条的第三场都必须同时带「一层 + 二层」
+    // ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：第三条从「快速装填 + 专属二层」改为
+    //    **通用转向池**里的真实组合（快速装填 → 双联炮）。
     const routes: readonly [string, string][] = [
       ['heavyShell', 'kineticBurst'],
       ['twinCannon', 'tripleLoad'],
-      ['fastReload', 'suppressionShot'],
+      ['fastReload', 'twinCannon'],
     ];
     for (const [l1, l2] of routes) {
       const { finalRuntime } = runBuildLoop(l1, l2);
@@ -1381,19 +1383,21 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
         expect(params.fanAnglesDeg).toBeUndefined();
       }
       if (l1 === 'fastReload') {
+        // 两层浅合并：高频（650ms）与多发（burst 2）**同时**保留，其它字段沿用正式 Cannon
         expect(params.cooldownMs).toBe(650);
-        expect(params.projectileMass).toBe(1); // 其它字段一律沿用正式 Cannon
+        expect(params.burstRounds).toBe(2);
+        expect(params.burstIntervalMs).toBe(100);
+        expect(params.projectileMass).toBe(1);
       }
-      // 能力类第二层的真实运行状态随 Build 一起注入
+      // 能力类第二层的真实运行状态随 Build 一起注入（只有重弹路线带能力）
       const ab = finalRuntime.abilitySnapshot();
       expect(ab.kineticBurst).toBe(l2 === 'kineticBurst');
-      expect(ab.suppressionShot).toBe(l2 === 'suppressionShot');
       finalRuntime.dispose();
     }
   });
 
   it('RP-F2-05 必改 3：Build 只在本局 —— 新开 Run 立刻回到基础状态', () => {
-    const { afterChoice1, finalRuntime } = runBuildLoop('fastReload', 'suppressionShot');
+    const { afterChoice1, finalRuntime } = runBuildLoop('fastReload', 'twinCannon');
     expect(runBuildIds(afterChoice1)).toEqual(['fastReload']);
     finalRuntime.dispose();
     const fresh = createRunPageState(CTX);
@@ -1413,7 +1417,6 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
     expect(params.projectileRadius).toBe(10);
     const ab = rt.abilitySnapshot();
     expect(ab.kineticBurst).toBe(false);
-    expect(ab.suppressionShot).toBe(false);
     rt.dispose();
   });
 
@@ -1495,19 +1498,34 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
       const pool = runChoicePool(atChoice2).map((o) => o.id);
       expect(pool).toEqual([...RUN_LAYER2_POOLS[l1]]);
       expect(pool.length).toBe(3);
-      // 结构 = 强联动 / 安全通用 / 轻度转向（槽位语义；第三格复用第一层的定义 → role 'base'）
-      expect(runModifierById(pool[0])!.role).toBe('synergy');
-      expect(runModifierById(pool[1])!.role).toBe('safe');
-      expect(RUN_LAYER1_POOL).toContain(pool[2]);
-      expect(pool[2]).not.toBe(l1); // 转向的是另一个方向
-      // 第二次池与第一次池**不是同一套**（至少两项不同）
+      expect(new Set(pool).size).toBe(3); // 无重复
+      expect(pool).not.toContain(l1); // 转向的是另一个方向，不原地打转
+      expect(pool).toContain('emergencyRepair'); // 安全通用项三池一致
+      if (l1 === 'fastReload') {
+        // ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：快速装填的**专属**第二层（三条尝试全部真人未通过）
+        //    已整条废弃 → 它的池改为**通用转向池** = 三个已存在的方向（重炮 / 多发 / 生存）。
+        //    因此这一池**没有** role 'synergy' 的项，槽位语义与另两池不同（这是有意的收口结果）。
+        expect(pool).toEqual(['heavyShell', 'twinCannon', 'emergencyRepair']);
+        expect(pool.map((id) => runModifierById(id)!.role)).toEqual(['base', 'base', 'safe']);
+      } else {
+        // 结构 = 强联动 / 安全通用 / 轻度转向（槽位语义；第三格复用第一层的定义 → role 'base'）
+        expect(runModifierById(pool[0])!.role).toBe('synergy');
+        expect(runModifierById(pool[1])!.role).toBe('safe');
+        expect(RUN_LAYER1_POOL).toContain(pool[2]);
+        expect(pool[2]).not.toBe(l1);
+      }
+      // 第二次池与第一次池**不是同一套**通用三选一（至少有一项不在第一层池里）
       const l1Pool = RUN_CHOICE_OPTIONS.map((o) => o.id);
-      expect(pool.filter((id) => l1Pool.includes(id)).length).toBeLessThanOrEqual(1);
+      expect(pool.some((id) => !l1Pool.includes(id))).toBe(true);
     }
-    // 三个池的强联动各不相同（三条 Build 方向）
+    // 仍在生效的两条强联动各不相同（两条已通过真人验收的 Build 方向）
     expect(RUN_LAYER2_POOLS.heavyShell[0]).toBe('kineticBurst');
     expect(RUN_LAYER2_POOLS.twinCannon[0]).toBe('tripleLoad');
-    expect(RUN_LAYER2_POOLS.fastReload[0]).toBe('suppressionShot');
+    // ⚠️ 快速装填不再有专属联动（废弃的三条已从定义表里消失）
+    expect(RUN_LAYER2_POOLS.fastReload).toEqual(['heavyShell', 'twinCannon', 'emergencyRepair']);
+    for (const gone of ['suppressionShot', 'strongRecoil', 'recoilCharge']) {
+      expect(runModifierById(gone), `${gone} 必须已被删除`).toBeUndefined();
+    }
   });
 
   it('RP-F2-11 一局最多两次选择，且第二次只能从条件池里选（池外选项被拒）', () => {
@@ -1532,18 +1550,27 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
     expect(forced.buffs.length).toBe(RUN_MAX_CHOICES);
   });
 
-  it('RP-F2-12 必改 5：三条路线的强联动都能完整执行（一层 → 二层 → 最终真实战斗）', () => {
-    const routes: readonly [string, string, string][] = [
+  it('RP-F2-12 必改 5：两条强联动 + 一条通用转向都能完整执行（一层 → 二层 → 最终真实战斗）', () => {
+    // 前两条 = 已通过真人验收的强联动（第二层固定出现在**槽位 0**）；
+    // 第三条 = 快速装填的第二层。⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE 之后该池已改为
+    // **通用转向池**（不再有专属联动），所以这里只要求「选项来自该池」，不要求槽位 0。
+    const routes: readonly [string, string, string | null][] = [
       ['heavyShell', 'kineticBurst', '动能爆发'],
       ['twinCannon', 'tripleLoad', '三连装填'],
-      ['fastReload', 'suppressionShot', '压制射击'],
+      ['fastReload', 'twinCannon', null],
     ];
     for (const [l1, l2, label] of routes) {
       const { choice2, afterChoice2, finale } = runBuildLoop(l1, l2);
-      // 第二次选择时，强联动确实出现在**由第一层决定**的那一格
       const pool = runChoicePool(choice2);
-      expect(pool[0].id).toBe(l2);
-      expect(pool[0].label).toBe(label);
+      // 第二次候选永远来自**由第一层决定**的那个池
+      const expectedPool = RUN_LAYER2_POOLS[l1 as keyof typeof RUN_LAYER2_POOLS];
+      expect(pool.map((o) => o.id)).toEqual([...expectedPool]);
+      expect(pool.map((o) => o.id)).toContain(l2);
+      if (label) {
+        // 强联动确实出现在**由第一层决定**的那一格
+        expect(pool[0].id).toBe(l2);
+        expect(pool[0].label).toBe(label);
+      }
       expect(afterChoice2.log[afterChoice2.log.length - 2].text).toBe(runModifierById(l2)!.logText);
       expect(runBuildIds(afterChoice2)).toEqual([l1, l2]);
       // 最终战斗真的打完（不是卡死）
@@ -1588,19 +1615,16 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
       //    不是就地重算）。40% 余量仍在，三场连锁没有被"一次强化把末场打崩"。
       'heavyShell+kineticBurst': [843, 714, 430],
       'twinCannon+tripleLoad': [843, 678, 470],
-      // ⚠️ PRP-BUILD-01-R4：第二层从「强力后坐（推自车）」整条换成「压制射击（把敌车顶回去）」。
-      //    老口径三版（前推补偿 / 3 发蓄能强后坐 / 每炮强后坐）在正式车辆约束 + Battle Camera 下
-      //    都被真人判为不可读，已按 Queue 整条删除。
-      //    新口径只作用于**敌车**：每次真实命中一次固定中等击退（`SUPPRESSION_SHOT_IMPULSE 300`）。
-      //    实测第三场 622 → **582**（末场挨打 23 → 7 次，敌人确实更难贴近），
-      //    第一/第二场不变（前两场该能力尚未进入战斗）。**显式更新，不是就地重算。**
-      //    ⚠️ 末场仍保留真实接敌（真实接触 + 敌车仍能打到玩家），没有退化成「无法接敌」。
-      'fastReload+suppressionShot': [843, 622, 582],
+      // ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：第三项路线从「快速装填 + 压制作战」改为
+      //    通用转向池里的真实组合「快速装填 → 双联炮」（高频 650ms + 一次两发）。
+      //    前两场与第一层口径完全相同（第二层不参与第一/第二场），只有第三场是新的实测值。
+      //    **显式更新，不是就地重算。**
+      'fastReload+twinCannon': [843, 622, 546],
     };
     const routes: readonly [string, string][] = [
       ['heavyShell', 'kineticBurst'],
       ['twinCannon', 'tripleLoad'],
-      ['fastReload', 'suppressionShot'],
+      ['fastReload', 'twinCannon'],
     ];
     for (const [l1, l2] of routes) {
       const key = `${l1}+${l2}`;
@@ -1631,7 +1655,7 @@ describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强
       expect(hp2, `${key}: hp2<=hp1`).toBeLessThanOrEqual(hp1);
       expect(hp3, `${key}: hp3<=hp2`).toBeLessThanOrEqual(hp2);
 
-      // ⑤ 三场都活着，且终局留下可观余量（39%~53%）—— 不是勉强擦线
+      // ⑤ 三场都活着，且终局留下可观余量（39%~50%）—— 不是勉强擦线
       expect(hp1, `${key}: 第一场存活`).toBeGreaterThan(0);
       expect(hp2, `${key}: 第二场存活`).toBeGreaterThan(0);
       expect(hp3, `${key}: 第三场存活`).toBeGreaterThan(0);

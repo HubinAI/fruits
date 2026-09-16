@@ -530,10 +530,20 @@ describe('PRP-BUILD-01-R1｜同条件 A/B：第二层真的改变了重炮的物
     });
     // 能力类项（含动能爆发）**永不改武器** → 不可能出现「强化了炮弹参数」的暗改
     for (const id of RUN_ALL_MODIFIER_IDS) {
-      if (id === 'kineticBurst' || id === 'suppressionShot' || id === 'emergencyRepair') {
+      if (id === 'kineticBurst' || id === 'emergencyRepair') {
         expect(RUN_MODIFIER_OVERLAY[id].affectsWeapon, id).toBe(false);
         expect(RUN_MODIFIER_OVERLAY[id].behaviorParams, id).toEqual({});
       }
     }
+    // ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：快速装填的专属二层（三条尝试全部未通过）
+    //    已整条废弃 → 它不再出现在任何 id 枚举里。
+    expect(RUN_ALL_MODIFIER_IDS).toEqual([
+      'heavyShell',
+      'twinCannon',
+      'fastReload',
+      'kineticBurst',
+      'tripleLoad',
+      'emergencyRepair',
+    ]);
   });
 });

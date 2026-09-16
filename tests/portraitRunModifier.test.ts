@@ -23,7 +23,6 @@ import {
   RUN_LAYER2_POOLS,
   RUN_MODIFIER_OVERLAY,
   RUN_MODIFIERS,
-  SUPPRESSION_SHOT_IMPULSE,
   applyRunModifiersToSnapshot,
   composeRunWeaponDef,
   createRunRegistry,
@@ -531,48 +530,82 @@ describe('RP-MOD-03｜跨战斗耐久与 clean recreate', () => {
 
 describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
   it('必改 1｜第二层条件池由第一层选择决定（固定池，无随机权重）', () => {
-    // 第二层四项是固定表；第一层池 = 固定三项
+    /**
+     * ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：快速装填的**专属**第二层（三条尝试全部真人未通过）
+     * 已整条删除，它的池改为**通用转向池**。本用例同时锁住两件事：
+     *   ① 仍然存在的两条强联动**条件性**成立（只出现在它对应的第一层池里）；
+     *   ② 快速装填池 = 三个**已存在**的方向，且第二层定义表里**不存在**任何废弃项。
+     */
+    // 第二层三项是固定表（不再有第四项）
     expect(RUN_BUILD_MODIFIERS.map((m) => m.id)).toEqual([
       'kineticBurst',
       'tripleLoad',
-      'suppressionShot',
       'emergencyRepair',
     ]);
+    // 第一层仍是固定三项 —— **不新增第四个第一层强化**
     expect(RUN_LAYER1_POOL).toEqual(['heavyShell', 'twinCannon', 'fastReload']);
+    expect(RUN_MODIFIERS.map((m) => m.id)).toEqual(['heavyShell', 'twinCannon', 'fastReload']);
 
-    // 每池恰好三项：强联动 / 安全通用 / 轻度转向（必改 5 的取舍结构）
+    // 每池**恰好三项**（不加长任何池），无重复，且都不含自身（转向的是另一个方向）
     for (const l1 of LAYER1_IDS) {
       const pool = RUN_LAYER2_POOLS[l1];
       expect(pool).toHaveLength(3);
-      expect(new Set(pool).size).toBe(3); // 无重复
-      const roles = pool.map((id) => runModifierById(id)!.role);
-      // 槽位 0 = 强联动（本分支专属）；槽位 1 = 安全通用项
-      expect(roles[0]).toBe('synergy');
-      expect(roles[1]).toBe('safe');
-      // 槽位 2 = 轻度转向：复用**第一层**的某一项（因此其 role 是 'base' 而不是 'pivot'
-      // —— `role` 描述的是「该定义在全国池里的身份」，转向语义由槽位表达）。
-      expect(RUN_LAYER1_POOL).toContain(pool[2] as Layer1ModifierId);
-      expect(pool[2]).not.toBe(l1); // 转向的是**另一个**方向，不是原地打转
+      expect(new Set(pool).size).toBe(3);
+      expect(pool).not.toContain(l1);
       // 「安全通用项」在三池里是同一种取舍（紧急维修），不是每个分支专属
-      expect(pool[1]).toBe('emergencyRepair');
-      // 池内不得出现第一层项以外的重复联动
+      expect(pool).toContain('emergencyRepair');
+      // 池里每一项都必须是**已存在**的强化定义（不引入新内容）
+      for (const id of pool) expect(runModifierById(id)).toBeDefined();
+      // 定义解析顺序与池顺序一致
       expect(runLayer2PoolDefs(l1).map((d) => d.id)).toEqual([...pool]);
     }
 
-    // 三条强联动各自只出现在「它对应的第一层」池里（条件性成立）
+    // 两条强联动各自只出现在「它对应的第一层」池里（条件性成立），且固定在槽位 0
     expect(RUN_LAYER2_POOLS.heavyShell[0]).toBe('kineticBurst');
     expect(RUN_LAYER2_POOLS.twinCannon[0]).toBe('tripleLoad');
-    expect(RUN_LAYER2_POOLS.fastReload[0]).toBe('suppressionShot');
     for (const l1 of LAYER1_IDS) {
       const pool = RUN_LAYER2_POOLS[l1];
-      for (const syn of ['kineticBurst', 'tripleLoad', 'suppressionShot'] as const) {
-        if (RUN_LAYER2_POOLS[l1][0] !== syn) expect(pool.includes(syn)).toBe(false);
+      for (const syn of ['kineticBurst', 'tripleLoad'] as const) {
+        if (pool[0] !== syn) expect(pool.includes(syn)).toBe(false);
       }
     }
+    // 强联动在池里的身份就是 'synergy'（另两池槽位 0 是转向项 = 'base'）
+    expect(runModifierById(RUN_LAYER2_POOLS.heavyShell[0]!)!.role).toBe('synergy');
+    expect(runModifierById(RUN_LAYER2_POOLS.twinCannon[0]!)!.role).toBe('synergy');
 
     // 同一个「强联动」不会在两个池里同时出现 → 「第一次选择已经改变了后续可获得的方向」
     const firsts = LAYER1_IDS.map((l1) => RUN_LAYER2_POOLS[l1][0]);
     expect(new Set(firsts).size).toBe(3);
+
+    // ⚠️ 必改 2：快速装填池 = **通用转向池**（三个已存在的方向：重炮 / 多发 / 生存）
+    expect(RUN_LAYER2_POOLS.fastReload).toEqual(['heavyShell', 'twinCannon', 'emergencyRepair']);
+    // 池里每一项都是「已存在」的定义（重型弹头 / 双联炮 / 紧急维修），不是新造内容
+    expect(RUN_LAYER2_POOLS.fastReload.map((id) => runModifierById(id)!.label)).toEqual([
+      '重型弹头',
+      '双联炮',
+      '紧急维修',
+    ]);
+    // 且它**不再**包含任何专属联动（= 池里没有任何 role==='synergy' 的项）
+    expect(RUN_LAYER2_POOLS.fastReload.map((id) => runModifierById(id)!.role)).toEqual([
+      'base',
+      'base',
+      'safe',
+    ]);
+
+    // ⚠️ 必改 1：废弃机制在**定义层**已经不存在（扩展面 / overlay 表都查不到）
+    for (const gone of ['suppressionShot', 'strongRecoil', 'recoilCharge']) {
+      expect(runModifierById(gone), `${gone} 必须已被删除`).toBeUndefined();
+      expect(gone in RUN_MODIFIER_OVERLAY, `${gone} 必须已被删除`).toBe(false);
+    }
+    // ⚠️ 必改 1：废弃机制的**模块级导出常量**也已不存在（不是「留着不用」，而是根本没有）
+    for (const gone of [
+      'SUPPRESSION_SHOT_IMPULSE',
+      'STRONG_RECOIL_IMPULSE',
+      'RECOIL_CHARGE_IMPULSE',
+      'RECOIL_CHARGE_THRESHOLD',
+    ]) {
+      expect(gone in runModifiersModule, `${gone} 必须已被删除`).toBe(false);
+    }
 
     // 未知第一层 → 空池（不静默给通用池）
     expect(runLayer2PoolDefs('nope')).toEqual([]);
@@ -673,90 +706,17 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     expect(plainImpulse).toBeGreaterThanOrEqual(KINETIC_BURST_GAIN * 1 * 0.5);
   });
 
-  it('必改 1/2｜压制射击：旧强力后坐路径已删除，每一次真实命中恰好一次击退（开炮不触发）', () => {
-    // ① 结构：模块**不再导出**任何旧 recoil 家族符号（不是「留着不用」，而是不存在）
-    for (const gone of [
-      'STRONG_RECOIL_IMPULSE',
-      'RECOIL_CHARGE_IMPULSE',
-      'RECOIL_CHARGE_THRESHOLD',
-    ]) {
-      expect(gone in runModifiersModule, `${gone} 必须已被删除`).toBe(false);
-    }
-
-    // ② 仍是「不改武器」的能力项
-    expect(RUN_MODIFIER_OVERLAY.suppressionShot.affectsWeapon).toBe(false);
-    expect(RUN_MODIFIER_OVERLAY.suppressionShot.behaviorParams).toEqual({});
-    expect(SUPPRESSION_SHOT_IMPULSE).toBeGreaterThan(0);
-
-    // ③ 运行状态里也没有旧 recoil 家族字段（探针与状态同时收敛，不留半套旧口径）
-    const rt = new RunBattleRuntime({ build: ['fastReload', 'suppressionShot'] });
-    let fires = 0;
-    let hits = 0;
-    let firstFireStep = -1;
-    let firstHitStep = -1;
-    let step = 0;
-    rt.orchestrator.onCombatEvent((ev) => {
-      if (ev.type === 'weaponFire' && ev.team === 'A') {
-        fires += 1;
-        if (firstFireStep < 0) firstFireStep = step;
-      }
-      if (
-        ev.type === 'damage' &&
-        ev.source === 'A' &&
-        ev.target === 'B' &&
-        ev.damageSource === 'weapon' &&
-        ev.behavior === 'cannon'
-      ) {
-        hits += 1;
-        if (firstHitStep < 0) firstHitStep = step;
-      }
-    });
-    const raw = (): Record<string, unknown> =>
-      rt.abilitySnapshot() as unknown as Record<string, unknown>;
-    expect(rt.abilitySnapshot().suppressionShot).toBe(true);
-    for (const gone of [
-      'strongRecoil',
-      'recoilKicks',
-      'lastRecoilImpulse',
-      'charge',
-      'chargeThreshold',
-      'chargesSpent',
-    ]) {
-      expect(gone in raw(), `${gone} 必须已被删除`).toBe(false);
-    }
-
-    // ④ 一一对应：推进 4s（战斗远未结束 → 不存在「结束后丢弃」这条路）；
-    //    真实施加的击退次数 === 玩家炮弹**真实命中**敌车的次数。
-    for (let i = 0; i < 240; i++) {
-      step += 1;
-      rt.step(1000 / 60);
-    }
-    expect(rt.result).toBeNull();
-    expect(hits).toBeGreaterThanOrEqual(2); // 本窗口内确有真实命中，否则下面的断言无意义
-    expect(rt.abilitySnapshot().suppressionHits).toBe(hits);
-    expect(rt.abilitySnapshot().lastSuppressionImpulse).toBe(SUPPRESSION_SHOT_IMPULSE);
-    // ⚠️ 必改 2「禁止开炮即触发」的两个指纹：
-    //    ① 命中次数**严格少于**开火次数（650ms 一炮 × 4s ≥ 4 发；弹丸飞行 + 敌车移动 ⇒ 不是每发都中）；
-    //    ② 第一次命中**晚于**第一次开火（若是开炮触发，两者会在同一步）。
-    expect(hits).toBeLessThan(fires);
-    expect(firstHitStep).toBeGreaterThan(firstFireStep);
-    rt.dispose();
-
-    // ⑤ 不带 → 恒零（且不会留下任何中间计数：没有阈值 / 计时这种隐藏状态）
-    const off = new RunBattleRuntime({ build: ['fastReload'] });
-    run(off, 500);
-    expect(off.abilitySnapshot().suppressionShot).toBe(false);
-    expect(off.abilitySnapshot().suppressionHits).toBe(0);
-    expect(off.abilitySnapshot().lastSuppressionImpulse).toBe(0);
-    off.dispose();
-  });
-
-  it('必改 2｜miss / 非命中一律不触发：四种禁止路径用合成事件逐个否掉', () => {
+  it('动能爆发入口：四种「非真实命中」路径一律不触发（合成事件逐个否掉）', () => {
     /**
      * 用**合成事件注入**直测能力层（真实 `RunBuildAbilities` + 记录型假端口）——
-     * 这是唯一能把 Queue 必改 2 的四条禁止项逐条落地的方式，且完全确定（不依赖弹道运气）：
-     *   ① 开炮即触发；② 未命中触发（碰撞 / 环境伤害）；③ 反向命中（敌打玩家）；④ 非本武器 behavior；
-     * 另外锁死 ⑤ 每次真实命中**恰好一次**（无累计层数 / 无「第 N 发」）与 ⑥ 结束后不再施加。
+     * 完全确定（不依赖弹道运气），且能把入口条件的每一条逐条否掉：
+     *   ① 开炮即触发；② 未命中触发（碰撞 / 环境伤害）；③ 反向命中（敌打玩家）；④ 非本武器 behavior。
+     * 另外锁死 ⑤ 每次真实命中**恰好一次**（该发只入队一次）与 ⑥ 结束后不再施加。
+     *
+     * ⚠️ 这条入口是**共享接缝**：它不专属任何一个第二层项。
+     *    `PRP-BUILD-01-CLOSEOUT-AND-FREEZE` 删掉废弃的快速装填专属二层时，
+     *    本用例按 Queue「共享能力不因清理误删」的要求**改为驱动仍在生效的动能爆发**，
+     *    而不是随废弃机制一起删掉。
      */
     const listeners: Array<(ev: BattleEvent) => void> = [];
     const applied: { team: string; dirX: number; dirY: number; mag: number; at: unknown }[] = [];
@@ -773,7 +733,7 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
         applied.push({ team, dirX, dirY, mag, at: at ?? null });
       },
     };
-    const ab = new RunBuildAbilities(ports, ['suppressionShot']);
+    const ab = new RunBuildAbilities(ports, ['kineticBurst']);
     const emit = (ev: BattleEvent): void => {
       for (const fn of listeners) fn(ev);
     };
@@ -794,8 +754,10 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
         timestamp: 100,
         ...over,
       }) as DamageEvent;
+    // 冲量 = GAIN × projectileMass(1) × relativeVelocity(3)
+    const EXPECTED = KINETIC_BURST_GAIN * 1 * 3;
 
-    // ① 开炮**不**触发（必改 2 的第一条禁止项）—— 但它必须记录弹道方向供命中时使用
+    // ① 开炮**不**触发 —— 但它必须记录弹道方向供命中时使用
     emit({
       type: 'weaponFire',
       team: 'A',
@@ -806,37 +768,37 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
       timestamp: 0,
     });
     ab.flush();
-    expect(ab.snapshot().suppressionHits).toBe(0);
+    expect(ab.snapshot().kineticHits).toBe(0);
     expect(applied).toHaveLength(0);
 
     // ② 未命中：非 weapon 来源（碰撞 / 环境伤害）不触发
     emit(hit({ damageSource: 'impact', behavior: 'ram' }));
     ab.flush();
-    expect(ab.snapshot().suppressionHits).toBe(0);
+    expect(ab.snapshot().kineticHits).toBe(0);
     // ③ 反向命中（敌车打玩家）不触发
     emit(hit({ source: 'B', target: 'A' }));
     // ④ 不是本武器 behavior 不触发
     emit(hit({ behavior: 'laser' }));
     ab.flush();
-    expect(ab.snapshot().suppressionHits).toBe(0);
+    expect(ab.snapshot().kineticHits).toBe(0);
     expect(applied).toHaveLength(0);
 
     // ⑤ 真实命中 → **恰好一次**，参数逐项正确
     emit(hit());
     ab.flush();
-    expect(ab.snapshot().suppressionHits).toBe(1);
-    expect(ab.snapshot().lastSuppressionImpulse).toBe(SUPPRESSION_SHOT_IMPULSE);
+    expect(ab.snapshot().kineticHits).toBe(1);
+    expect(ab.snapshot().lastKineticImpulse).toBe(EXPECTED);
     expect(applied).toHaveLength(1);
-    expect(applied[0]!.team).toBe('B'); // 推的是**敌车**（R4 改判的核心）
-    expect(applied[0]!.mag).toBe(SUPPRESSION_SHOT_IMPULSE);
+    expect(applied[0]!.team).toBe('B'); // 冲量施加在**敌车**上
+    expect(applied[0]!.mag).toBe(EXPECTED);
     expect(applied[0]!.at).toEqual({ x: 100, y: 50 }); // 真实命中点
     expect(applied[0]!.dirX).toBeCloseTo(1, 6); // 沿本次真实弹道方向
     expect(applied[0]!.dirY).toBeCloseTo(0, 6);
 
-    // ⑥ 再一次命中 → 再一次击退：1:1，无阈值 / 无累计
+    // ⑥ 再一次命中 → 再一次冲量：1:1，无阈值 / 无累计
     emit(hit({ contactPoint: { x: 130, y: 55 } }));
     ab.flush();
-    expect(ab.snapshot().suppressionHits).toBe(2);
+    expect(ab.snapshot().kineticHits).toBe(2);
     expect(applied).toHaveLength(2);
 
     // ⑦ 战斗结束后不再施加（保住「RESULT = 战场冻结」）
@@ -844,157 +806,33 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     emit(hit({ contactPoint: { x: 160, y: 60 } }));
     ab.flush();
     expect(applied).toHaveLength(2);
-    expect(ab.snapshot().suppressionHits).toBe(2);
+    expect(ab.snapshot().kineticHits).toBe(2);
     ab.dispose();
   });
 
-  it('必改 1｜Reset：新建一局在第一次命中之前没有任何遗留状态', () => {
-    const fresh = new RunBattleRuntime({ build: ['fastReload', 'suppressionShot'] });
-    expect(fresh.abilitySnapshot().suppressionHits).toBe(0);
-    expect(fresh.abilitySnapshot().lastSuppressionImpulse).toBe(0);
+  it('Reset：新建一局在第一次命中之前没有任何遗留状态', () => {
+    // ⚠️ 同样是**共享接缝**用例（不专属任何一个第二层项）：能力层必须无「跨局残留 /
+    //    阈值 / 计时」这类隐藏状态。删除废弃的快速装填专属二层时按此口径保留。
+    const fresh = new RunBattleRuntime({ build: ['heavyShell', 'kineticBurst'] });
+    expect(fresh.abilitySnapshot().kineticHits).toBe(0);
+    expect(fresh.abilitySnapshot().lastKineticImpulse).toBe(0);
+    expect(fresh.abilitySnapshot().lastKineticHit).toBeNull();
     expect(fresh.abilitySnapshot().pending).toBe(0);
     fresh.dispose();
 
-    // 同一「路线」重开一局：计数从 0 起（不是沿用上一次 Runtime 的残留）
-    const again = new RunBattleRuntime({ build: ['fastReload', 'suppressionShot'] });
-    run(again, 300);
-    expect(again.abilitySnapshot().suppressionHits).toBeGreaterThan(0);
+    // 同一路线跑过一场之后，新开一局的计数从 0 起（不是沿用上一次 Runtime 的残留）
+    const again = new RunBattleRuntime({ build: ['heavyShell', 'kineticBurst'] });
+    run(again, 600);
+    expect(again.abilitySnapshot().kineticHits).toBeGreaterThan(0);
     again.dispose();
-    const reset = new RunBattleRuntime({ build: ['fastReload', 'suppressionShot'] });
-    expect(reset.abilitySnapshot().suppressionHits).toBe(0);
-    expect(reset.abilitySnapshot().lastSuppressionImpulse).toBe(0);
+    const reset = new RunBattleRuntime({ build: ['heavyShell', 'kineticBurst'] });
+    expect(reset.abilitySnapshot().kineticHits).toBe(0);
+    expect(reset.abilitySnapshot().lastKineticImpulse).toBe(0);
+    expect(reset.abilitySnapshot().lastKineticHit).toBeNull();
     expect(reset.abilitySnapshot().pending).toBe(0);
     reset.dispose();
   });
 
-  it('必改 2/3/4｜压制射击：每一次真实命中都把敌车顶回去（同条件 A/B），且不是动能爆发', () => {
-    /**
-     * 同条件 A/B（外加动能爆发对照组 K）：固定 Player / Enemy / spawn / HP / world，只把 `build` 当变量。
-     *   A = `['fastReload']`（只第一层）
-     *   B = `['fastReload','suppressionShot']`（两层 = 压制射击）
-     *   K = `['heavyShell','kineticBurst']`（对照组 = 动能爆发 —— Queue 必改 3 要求区分的那一项）
-     *
-     * 指标 = **命中对齐**的短窗（20 帧）内**敌车**的峰值前推（世界 px，+ = 被顶离玩家）。
-     *   - 为什么按「命中」对齐：必改 2 规定唯一触发源是真实命中；按命中对齐才能证明
-     *     「命中 → 击退」一一对应（若是开炮触发，命中窗口里根本分不出是哪一发推的）。
-     *   - 为什么用世界 px 而不是舞台带 px：正式相机把**双方中点**居中并逐帧 re-frame，
-     *     敌车被顶回时相机同时跟过去（屏幕位移 ≈ 世界位移的一半 × 舞台缩放）；
-     *     屏幕量纲会把「物理确实发生」压成噪声。世界位移才是冲量的直接后果，
-     *     最终可感知性由真人录屏裁决（选型扫描表见 `runModifiers.ts` 的常量注释）。
-     *   - 为什么断言里冻结算术值：与 RP-19 / RP-22 / RP-F2-14 同一纪律 ——
-     *     任何影响「能不能真的压住敌人」的改动都必须回到这里显式更新，不能悄悄漂移。
-     */
-    const FRAME = 1000 / 60;
-    const WINDOW = 20;
-    interface Probe {
-      readonly fires: number;
-      readonly hits: number;
-      readonly pushes: readonly number[];
-      readonly enemyMaxX: number;
-      readonly framesNearWall: number;
-      readonly minGap: number;
-      readonly playerHits: number;
-      readonly dmgPerHit: number;
-      readonly ended: boolean;
-    }
-    const probe = (build: readonly RunModifierId[]): Probe => {
-      const rt = new RunBattleRuntime({ build });
-      const marks: number[] = [];
-      let fires = 0;
-      let hits = 0;
-      let playerHits = 0;
-      let damageTotal = 0;
-      let step = 0;
-      rt.orchestrator.onCombatEvent((ev) => {
-        if (ev.type === 'weaponFire' && ev.team === 'A') fires += 1;
-        if (ev.type === 'damage') {
-          if (
-            ev.source === 'A' &&
-            ev.target === 'B' &&
-            ev.damageSource === 'weapon' &&
-            ev.behavior === 'cannon'
-          ) {
-            hits += 1;
-            damageTotal += ev.hpBefore - ev.hpAfter;
-            marks.push(step + 1);
-          }
-          if (ev.source === 'B' && ev.target === 'A') playerHits += 1;
-        }
-      });
-      const xs: number[] = [rt.vehicleX('B')];
-      let minGap = Number.POSITIVE_INFINITY;
-      for (let i = 0; i < 1100; i++) {
-        if (rt.result) break;
-        step += 1;
-        rt.step(FRAME);
-        xs.push(rt.vehicleX('B'));
-        if (step % 4 === 0) minGap = Math.min(minGap, rt.gapWorld());
-      }
-      const pushes: number[] = [];
-      for (const m of marks) {
-        if (m + WINDOW >= xs.length) continue; // 窗口被截断的末段命中不计
-        let peak = Number.NEGATIVE_INFINITY;
-        for (let i = m; i <= m + WINDOW; i++) peak = Math.max(peak, xs[i]! - xs[m]!);
-        pushes.push(peak);
-      }
-      const out: Probe = {
-        fires,
-        hits,
-        pushes,
-        enemyMaxX: Math.max(...xs),
-        framesNearWall: xs.filter((v) => v > 1450).length,
-        minGap,
-        playerHits,
-        dmgPerHit: damageTotal / Math.max(1, hits),
-        ended: rt.result !== null,
-      };
-      rt.dispose();
-      return out;
-    };
-    /** 位移幅度的中位数（**符号方向**由 ② 单独锁定）。 */
-    const med = (v: readonly number[]): number => {
-      const s = [...v].sort((p, q) => p - q);
-      return s[Math.floor(s.length / 2)]!;
-    };
-
-    const a = probe(['fastReload']);
-    const b = probe(['fastReload', 'suppressionShot']);
-    const k = probe(['heavyShell', 'kineticBurst']);
-
-    // ① 一一对应：带第二层时，每一次真实命中都留下一次推回（末段截断 ≤ 2）
-    expect(b.fires).toBeGreaterThan(0);
-    expect(b.hits).toBeGreaterThan(0);
-    expect(b.hits).toBeLessThan(b.fires); // 开炮 ≠ 命中（必改 2 的直接指纹）
-    expect(b.pushes.length).toBeGreaterThanOrEqual(b.hits - 2);
-    // ② 方向：**每一次**命中都是把敌车推离玩家（+x）—— 「沿真实弹道方向」的直接指纹
-    for (const p of b.pushes) expect(p, '每一次命中都必须把敌车顶回去').toBeGreaterThan(0);
-    // ③ 幅度（系统性，冻结实测）：B 组命中窗口前推中位 **35 世界 px**；A 组同口径 **0.2**（噪声级）。
-    expect(Math.round(med(b.pushes))).toBe(35);
-    expect(Math.round(med(a.pushes))).toBe(0);
-    // ④ 必改 3「不直接复制动能爆发的夸张力度」：中位必须显著小于动能爆发，
-    //    且单发最大不能进入「一次就飞走」的量级（冻结：B 组最大 62 / K 组中位 77）。
-    expect(Math.round(Math.max(...b.pushes))).toBe(62);
-    expect(Math.round(med(k.pushes))).toBe(77);
-    expect(med(k.pushes)).toBeGreaterThan(med(b.pushes) * 1.8);
-    // ⑤ 必改 4「不把敌人长期顶在 Arena 边界」：压制射击全场 **0 帧**贴到远端墙；
-    //    对照动能爆发会把它持续顶在墙边（冻结 258 帧 —— 那正是它「轰飞」的身份）。
-    expect(b.framesNearWall).toBe(0);
-    expect(Math.round(b.enemyMaxX)).toBe(1336);
-    expect(k.framesNearWall).toBeGreaterThan(100);
-    // ⑥ 必改 4「仍能最终进入近身 / Collision」：两车最小外廓间距仍为负（真实接触），
-    //    且敌车**确实打到了**玩家 —— 压制成立，但没有退化成「无法接敌」。
-    expect(b.minGap).toBeLessThan(0);
-    expect(b.playerHits).toBeGreaterThan(0);
-    // ⑦ 控距效果（冻结实测）：玩家真实挨打 23 → 7 次（−70%）
-    expect(a.playerHits).toBe(23);
-    expect(b.playerHits).toBe(7);
-    // ⑧ 必改 4「不改变 Damage」：每次命中的平均伤害与 A 组一致（本项只施加冲量，从不碰伤害口径）
-    expect(b.dmgPerHit.toFixed(1)).toBe(a.dmgPerHit.toFixed(1));
-    // ⑨ 健康：三组战斗都打得完
-    expect(a.ended).toBe(true);
-    expect(b.ended).toBe(true);
-    expect(k.ended).toBe(true);
-  });
   it('必改 5｜紧急维修：不改武器、不写真实战果，只提供选择后的耐久补偿', () => {
     expect(RUN_MODIFIER_OVERLAY.emergencyRepair.affectsWeapon).toBe(false);
     expect(RUN_MODIFIER_OVERLAY.emergencyRepair.behaviorParams).toEqual({});
@@ -1009,7 +847,6 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     const rt = new RunBattleRuntime({ build: ['emergencyRepair'] });
     expect(weaponPartDef(rt).behaviorParams).toEqual(CANNON_OFFICIAL_PARAMS);
     expect(rt.abilitySnapshot().kineticBurst).toBe(false);
-    expect(rt.abilitySnapshot().suppressionShot).toBe(false);
     rt.dispose();
   });
 
@@ -1017,7 +854,11 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     // 三条路线的「第一层 + 第二层」组合全部能真实开打，并各自留下可区分的方向痕迹
     const routeHeavy: readonly RunModifierId[] = ['heavyShell', 'kineticBurst'];
     const routeTwin: readonly RunModifierId[] = ['twinCannon', 'tripleLoad'];
-    const routeFast: readonly RunModifierId[] = ['fastReload', 'suppressionShot'];
+    // ⚠️ 必改 2：快速装填的第二层已改为**通用转向池**，这里取其中一条真实可选组合
+    //    （快速装填 → 双联炮 = 保留高频的同时向多发转型）。
+    const routeFast: readonly RunModifierId[] = ['fastReload', 'twinCannon'];
+    // 该组合确实来自条件池（不是测试自己编的）
+    expect(RUN_LAYER2_POOLS.fastReload).toContain('twinCannon');
 
     const heavy = new RunBattleRuntime({ build: routeHeavy });
     const twin = new RunBattleRuntime({ build: routeTwin });
@@ -1032,17 +873,18 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     // 双联炮 + 三连装填 = 多发连射
     expect(bp(twin).burstRounds).toBe(3);
     expect(bp(twin).burstIntervalMs).toBe(100);
-    // 快速装填 + 压制射击 = 高频射击 + 每一发命中都把对手顶回去
+    // 快速装填 + 双联炮 = 高频（650ms）**且**一次两发（两层浅合并的结果，两个特征同时保留）
     expect(bp(fast).cooldownMs).toBe(650);
-    expect(fast.abilitySnapshot().suppressionShot).toBe(true);
-
-    // 三条能力互不串味：重弹路线不带压制、快速装填路线不带动能
-    expect(heavy.abilitySnapshot().suppressionShot).toBe(false);
+    expect(bp(fast).burstRounds).toBe(2);
+    expect(bp(fast).burstIntervalMs).toBe(100);
+    // 且它没有意外带上任何能力项（这条路线不提供能力）
     expect(fast.abilitySnapshot().kineticBurst).toBe(false);
-    expect(twin.abilitySnapshot().suppressionShot).toBe(false);
-    expect(twin.abilitySnapshot().kineticBurst).toBe(false);
 
-    // 三层都是可打完的真实战斗（不是卡死）
+    // 能力标记互不串味：只有重弹路线带动能爆发
+    expect(twin.abilitySnapshot().kineticBurst).toBe(false);
+    expect(heavy.abilitySnapshot().kineticBurst).toBe(true);
+
+    // 三条路线都是可打完的真实战斗（不是卡死）
     for (const rt of [heavy, twin, fast]) {
       const end = fightToEnd(rt);
       expect(end.frames).toBeGreaterThan(0);
@@ -1061,7 +903,7 @@ describe('RP-MOD-04｜PRP-BUILD-01 两层 Build（必改 1/2/3/5/6）', () => {
     expect(runBuildDefId(['heavyShell'])).toBe('run.mod.heavyShell');
     expect(runBuildDefId(['twinCannon', 'tripleLoad'])).toBe('run.mod.twinCannon+tripleLoad');
     expect(runBuildDefId(['heavyShell', 'kineticBurst'])).toBe('run.mod.heavyShell'); // 能力类不进 id
-    expect(runBuildDefId(['suppressionShot'])).toBeNull();
+    expect(runBuildDefId(['kineticBurst'])).toBeNull();
     // 同一组合 → 同一 id（可复现，无随机）
     expect(runBuildDefId(['fastReload', 'twinCannon'])).toBe(runBuildDefId(['fastReload', 'twinCannon']));
     // 顺序不同 → 结果不同（后选覆盖先选），这是「有序 Build」的确定性语义

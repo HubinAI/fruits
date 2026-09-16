@@ -42,7 +42,7 @@
   （`affectsWeapon:false`、`behaviorParams:{}`、`runBuildDefId` 返回 null）。
   第二层条件池 `RUN_LAYER2_POOLS`（每层 3 选 1，由第一层决定）：
   `heavyShell → [kineticBurst, emergencyRepair, fastReload]`、`twinCannon → [tripleLoad, …]`、
-  `fastReload → [suppressionShot, …]`。
+  `fastReload → [heavyShell, twinCannon, emergencyRepair]`（**通用转向池，无专属联动**）。
 - 第一层冻结值（**真人已通过，不得再调**）：重型弹头 `radius 16/mass 4/recoil 90`（damage 不动）/
   双联炮 `burstRounds 2/burstIntervalMs 100` / 快速装填 `cooldownMs 650`。
 - 能力类接缝：`PlanckBattleOrchestrator.onCombatEvent`（公开订阅口）+ `WeaponFireEvent` / `DamageEvent`
@@ -83,43 +83,43 @@
 - ⚠️ 两条「测量口径失效」教训（换对手时暴露）：①「后坐让车身净后移」只在重型对手下成立
   → 改**质量无关**的「开火帧位移凹陷」；②「整场最负 vx」量到的是**接触推挤**（最负值落在非开火帧）。
 
-## E. PRP-BUILD-01-R4 压制射击（最新交付）
+## E. PRP-BUILD-01 收口：快速装填专属二层（**已废弃，不要再试**）
 
-- ⚠️ **结构性改判：换作用对象，不是调数值。** `强力后坐` **三版全败**：
-  `反冲蓄能前推` → `3 发蓄能后强后坐` → `每炮强后坐`。Runtime 侧全部真实生效，
-  失败点在**通道本身** —— 整条机制都在推**玩家自己**（车重：3000 冲量仅 4.56° 转动）且相机追平。
-  ⇒ **整条 recoil 二层机制删除，不再通过数值 / VFX / Camera 挽救**（无兼容分支）。
-- 新口径 = **压制射击 suppressionShot**：**每一次真实炮弹命中敌车** → 沿本次弹道方向一次中等击退；
-  作用点 = 本次命中**自己的**真实 `contactPoint`。`SUPPRESSION_SHOT_IMPULSE = 300`。
-  入口唯一：`damageSource === 'weapon' && source === 'A' && target === 'B' && behavior === 'cannon'`。
-  无开炮即触发 / 无定时器 / 无累计层数 / 无「第 N 发」/ 无固定周期。
-- **删除清单**：导出 `STRONG_RECOIL_IMPULSE` / `RECOIL_CHARGE_IMPULSE` / `RECOIL_CHARGE_THRESHOLD`；
-  字段 `strongRecoil` / `recoilKicks` / `lastRecoilImpulse` / `charge` / `chargeThreshold` / `chargesSpent`；
-  `lastFireX/lastFireY`（作用点改为命中点，不再需要开火点）；图标分支与 E2E 采样键 `iconRecoil`。
-  **正式 Cannon 自带 recoil 原样未动。**
-- ⚠️ **`damage` 事件不带弹道方向**：只有 `contactPoint` / `contactNormal` / `relativeVelocity`；
-  `contactNormal` 是**撞击面法线**（斜撞会读成横向）⇒ 方向复用本次 `weaponFire.worldDirection`。
-- ⚠️ **`soloA: true` 下敌人仍会被命中**（实测 4 次）⇒ **不能做「miss 不触发」判据**。
-  正确做法 = **合成事件注入**直测 `RunBuildAbilities(ports, build)`（记录型假端口，纯逻辑确定性），
-  可逐条否掉四条禁止路径（开炮无命中 / 非 weapon 来源 / 反向命中 / 非 cannon）。
-- 与 `kineticBurst` 的区分（**同一入口、两种语义**）：
-  动能爆发 = `KINETIC_BURST_GAIN × 弹丸质量 × 相对速度` = **单次强冲击**（一炮轰飞）；
-  压制射击 = 定值 300 = **多次小冲击**（单发只顿一下），靠 650ms 高频炮击重复。
-- 粗档扫描（真实 Runtime，冻结）：
+- **状态 = 当前设计假设已否决**，不是「待后续优化」。
+  将来若重新设计，**作为新的内容假设处理**，不要在这三条上继续加力。
+- 失败记录（真人多轮验收，逐版都比上一版更简单）：
 
-  | 冲击 | 每命中顶回中位 | 单发最大 | 敌车最大 x | 贴近远端墙 | 玩家挨打 | 步数 | 平均伤害 |
-  |---|---|---|---|---|---|---|---|
-  | 0（A 基线） | 0.2 | 3.5 | 1200 | 0 帧 | **23 次** | 586 | 76.9 |
-  | 250 | 39.5 | 50.4 | 1259 | 0 帧 | 17 次 | 586 | 76.9 |
-  | **300（选定）** | **35.0** | **61.6** | **1336** | **0 帧** | **7 次** | **588** | **76.9** |
-  | 350 | 39.9 | 71.6 | 1412 | 0 帧 | 4 次 | 592 | 76.9 |
-  | 450 | 43.5 | 89.7 | 1512 | 0 帧 | 3 次 | 703 | 76.9 |
-  | **K（动能爆发）** | **76.5** | **121.3** | **1535**（右缘 1626 > 1600） | **258 帧** | 16 次 | 1021 | 79.6 |
+  | 版本 | 机制 | 被判失败的原因 |
+  |---|---|---|
+  | R2-1 | `反冲蓄能` **前向接敌补偿** | 与「快速装填」语义矛盾，读不出关联 |
+  | R2-2 | **3 发蓄能**后强后坐（450） | 多了一层**玩家看不见的累计状态**（看不到「2/3」） |
+  | R3 | **每炮**强后坐（110） | 因果已最简，但对象是**重的玩家自己**，且相机追平 |
+  | R4 | `压制射击` **推敌车**（300） | 换了作用对象仍不够可感知 |
 
-  选 300 = 六条验收全满足里的**最低档**（可感知 175× / 挨打 −70% / 单发最大仅 K 的 51% /
-  nearWall 0 帧 / `minGap` 仍为负 / 平均伤害与 A 组**完全相同**）。**未做 10% 级微调。**
-- ⚠️ **相机对敌车同样追平** ⇒ 屏幕位移仍 ≈ 世界位移一半 × 舞台缩放（中位 35 世界 px ≈ 8~10 舞台 px，
-  敌车宽约 90px 即约 39%）→ 是否够可感知**交真人裁决**。
-  ⚠️ 对照事实：`kineticBurst` 自己会把敌车顶到远端墙（`enemyMaxX 1535` / 258 帧）——
-  **既有现象，不是本 Queue 缺陷，未处理。**
-- 冻结字面量 `FROZEN['fastReload+suppressionShot'] = [843, 622, 582]`（`tests/portraitRunPage.test.ts` RP-F2-14）。
+- **跨 R2~R4 证伪出来的物理结论**（换任何「让玩家自车后退」的设计前先读这里）：
+  1. **作用在质心 → 纯平动 → 被相机追平**（世界 +20.7px → 屏幕 4px；R2 复现 20~32px → 带内 3~5px）
+     ⇒ 想被看见必须**换作用点或换通道**，不是加力。
+  2. **扭矩是唯一相机追不平的通道，但重的玩家车几乎不转**：3000 冲量 → 一步 −4.56°；
+     换算到 110~450 只有 **0~1.2°**（轻的敌车可以 —— R1 动能爆发就是这么过的）。
+  3. **「每 N 发蓄满一次」= 引入不可见状态 ⇒ 必判失败** ⇒ **自然因果优先于幅度**。
+  4. **自然因果也不够 —— 当对象是「重的自己」时，再怎么简化因果都读不出来**
+     （R3 的一炮一后坐仍然三版全败）⇒ 最终只能**换作用对象**。
+  5. **换成推敌车也只是「好一档」，不是解决**：相机同样跟随敌车 ⇒ 屏幕位移仍 ≈
+     世界位移一半 × 舞台缩放（中位 35 世界 px ≈ 8~10 舞台 px）。**真人仍判失败。**
+- **删除清单**（`PRP-BUILD-01-CLOSEOUT-AND-FREEZE`，无兼容分支、无死代码）：
+  id `recoilCharge` / `strongRecoil` / `suppressionShot`；常量 `RECOIL_CHARGE_THRESHOLD` /
+  `RECOIL_CHARGE_IMPULSE` / `STRONG_RECOIL_IMPULSE` / `SUPPRESSION_SHOT_IMPULSE`；
+  字段 `charge` / `chargesSpent` / `chargeThreshold` / `recoilKicks` / `lastRecoilImpulse` /
+  `strongRecoil` / `suppressionShot` / `suppressionHits` / `lastSuppressionImpulse`；
+  开火点 `lastFireX/lastFireY`；图标分支 + 颜色键 `iconRecoil`/`iconSuppress`；
+  E2E 采样键 `buffIconSuppress`/`iconSuppress`。**正式 Cannon 自带 recoil 原样未动。**
+- ⚠️ **清理时最容易误删的「共享接缝」**（它们同时服务动能爆发，**必须保留**）：
+  `weaponFire` 方向记录（`lastFireDirX/Y` + `hasFireDir`）、`damage` 命中入口条件
+  （`damageSource==='weapon' && source==='A' && target==='B' && behavior==='cannon'`）、
+  `RunAbilityPorts` 五端口（`subscribe` / `isFinished` / `facingOf` / `projectileMass` / `applyImpulse`）、
+  `flush()` 的**步边界施加**纪律。
+- ⚠️ 测试侧同样要区分：**专属**用例删掉，但**共享接缝**用例改为驱动 `kineticBurst`
+  （合成事件注入四条禁止路径 / Reset 无残留），**不是一起删**。
+- 冻结字面量（`tests/portraitRunPage.test.ts` RP-F2-14，三条路线的三场残血）：
+  `heavyShell+kineticBurst = [843, 714, 430]` · `twinCannon+tripleLoad = [843, 678, 470]` ·
+  `fastReload+twinCannon = [843, 622, 546]`。

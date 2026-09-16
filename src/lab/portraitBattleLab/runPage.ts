@@ -160,7 +160,6 @@ const COLORS = {
   /* ---- PRP-BUILD-01 第二层（条件池）图标底色 ---- */
   iconKinetic: '#8e44c0',
   iconTriple: '#2f8fc4',
-  iconSuppress: '#c9a227',
   iconRepair: '#4fc4a8',
   /* ---- PRP-BUILD-01-R1：动能爆发命中冲击环（不入账 — 有透明度、非平涂矩形） ---- */
   /**
@@ -209,7 +208,6 @@ const CHOICE_ICON_COLOR: Readonly<Record<string, string>> = {
   fastReload: '#7fd6a0',
   kineticBurst: '#c98cf0',
   tripleLoad: '#79c0ea',
-  suppressionShot: '#e8c46a',
   emergencyRepair: '#5fd0c0',
 };
 
@@ -220,7 +218,6 @@ const BUFF_ICON_COLOR: Readonly<Record<string, string>> = {
   fastReload: COLORS.iconReload,
   kineticBurst: COLORS.iconKinetic,
   tripleLoad: COLORS.iconTriple,
-  suppressionShot: COLORS.iconSuppress,
   emergencyRepair: COLORS.iconRepair,
 };
 
@@ -267,16 +264,14 @@ export interface RunProbeBattleWorld {
   /**
    * PRP-BUILD-01：Run 能力的**真实运行状态**（事件驱动；全部是真实发生过的计数与量值）。
    *   - `kineticHits` / `lastKineticImpulse`：动能爆发真的触发了几次、最近一次多大；
-   *   - `suppressionHits` / `lastSuppressionImpulse`：压制射击真的击退了几次、最近一次多大
-   *     （与「玩家炮弹真实命中敌车」次数 **1:1** —— 开炮不计数、未命中不计数，
-   *      R4 起没有任何阈值 / 计时状态）；
    *   - `projectileMass`：读自本局真实 resolved 武器 def 的「当前炮弹质量」。
+   *
+   * ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：这里曾有 `suppressionShot` / `suppressionHits` /
+   *    `lastSuppressionImpulse` 三个字段（快速装填专属二层）。该路线**真人三轮未通过**，
+   *    已正式废弃并整条删除 —— 探针只保留**仍然生效**的能力字段。
    */
   readonly abilities: {
     readonly kineticBurst: boolean;
-    readonly suppressionShot: boolean;
-    readonly suppressionHits: number;
-    readonly lastSuppressionImpulse: number;
     readonly kineticHits: number;
     readonly lastKineticImpulse: number;
     readonly projectileMass: number;
@@ -609,7 +604,7 @@ export class RunPage {
    *
    * PRP-BUILD-01：每次遭遇都**全新创建**，并把本局的两项 Run-local 状态注入进去：
    *   - `build`      = 本局 Build（第一层 + 第二层，按选择顺序；overlay registry + 武器 defId 重映射，
-   *                    能力类（动能爆发 / 压制射击）由运行时订阅正式战斗事件驱动）；
+   *                    能力类（动能爆发）由运行时订阅正式战斗事件驱动）；
    *   - `carriedHp`  = 上一场真实剩余耐久（+ 维修补偿；下一场从这里继续，不自动满血）。
    * 旧运行时在此前已被 `endBattle()` 释放 → 弹丸 / 接触 / 事件订阅不跨场残留。
    */
@@ -1106,7 +1101,6 @@ export class RunPage {
    *   fastReload      = 环形循环箭头
    *   kineticBurst    = 弹体 + 命中点向外扩散的三道冲击波
    *   tripleLoad      = 三根并排炮管（比双联多一根）+ 底横条
-   *   suppressionShot = 炮弹 + 敌车 + 向后箭头（命中把对手顶回去）
    *   emergencyRepair = 修理十字
    */
   private drawChoiceIcon(ctx: CanvasRenderingContext2D, id: string, r: RunRect): void {
@@ -1170,32 +1164,6 @@ export class RunPage {
         ctx.fill();
       }
       ctx.fillRect(cx - s * 0.3, cy + bh / 2, s * 0.6, s * 0.1);
-    } else if (id === 'suppressionShot') {
-      // 压制射击：炮弹（左，朝右）→ 敌车（中）→ 向后箭头（右）—— 每一发命中都把对手顶回去。
-      //
-      // ⚠️ PRP-BUILD-01-R4 只做**最小语义同步**：旧 `strongRecoil` 字形（炮口 + 向后箭头）
-      //    表达的是「自车被后坐推退」，而那条机制已整条删除，留着等于向玩家说谎。
-      //    图标盒的位置 / 尺寸（`runChoiceIconRect`）与颜色（`CHOICE_ICON_COLOR` / `BUFF_ICON_COLOR`
-      //    / `COLORS.iconSuppress`）全部未动 —— 改的只是盒内笔画。
-      //    ① 炮弹（左，朝右）
-      ctx.beginPath();
-      ctx.moveTo(cx - s * 0.46, cy - s * 0.075);
-      ctx.lineTo(cx - s * 0.26, cy - s * 0.075);
-      ctx.lineTo(cx - s * 0.18, cy);
-      ctx.lineTo(cx - s * 0.26, cy + s * 0.075);
-      ctx.lineTo(cx - s * 0.46, cy + s * 0.075);
-      ctx.closePath();
-      ctx.fill();
-      //    ② 敌车（中）
-      ctx.fillRect(cx - s * 0.12, cy - s * 0.15, s * 0.22, s * 0.3);
-      //    ③ 向后箭头（右）= 被顶回去（箭杆 + 箭头）
-      ctx.fillRect(cx + s * 0.14, cy - s * 0.05, s * 0.16, s * 0.1);
-      ctx.beginPath();
-      ctx.moveTo(cx + s * 0.5, cy);
-      ctx.lineTo(cx + s * 0.26, cy - s * 0.2);
-      ctx.lineTo(cx + s * 0.26, cy + s * 0.2);
-      ctx.closePath();
-      ctx.fill();
     } else if (id === 'emergencyRepair') {
       // 紧急维修：修理十字
       ctx.fillRect(cx - s * 0.12, cy - s * 0.44, s * 0.24, s * 0.88);
@@ -1319,9 +1287,6 @@ export class RunPage {
           const a = rt.abilitySnapshot();
           return {
             kineticBurst: a.kineticBurst,
-            suppressionShot: a.suppressionShot,
-            suppressionHits: a.suppressionHits,
-            lastSuppressionImpulse: a.lastSuppressionImpulse,
             kineticHits: a.kineticHits,
             lastKineticImpulse: a.lastKineticImpulse,
             projectileMass: a.projectileMass,
