@@ -162,8 +162,10 @@
 - 卡片几何 = `runChoiceCardRects(卡片数)`（**2 张也成立**：整体居中）；图标盒 = `runChoiceIconRect`；
   卡面/描边**不入面积账本**，只有顶部强调条入账：`cardBar = 卡片数 × 1240`
   （⇒ 掩码账本必须带**卡片数**，不能只传布尔）。
-- `drawOverlay` 是唯一绘制入口；标题走 `overlayTitle(state)`
-  （DURABILITY → `runDurabilityTitle()` = 「停下来，还是继续改装？」/ CHOICE → 「选择一项改装」）。
+- `drawOverlay` 是唯一绘制入口；标题走 **`overlayTitleNow()`**
+  （种子浮层 → 「带走一项改装」/ DURABILITY → `runDurabilityTitle()` = 「停下来，还是继续改装？」/
+  CHOICE → 「选择一项改装」）。
+  ⚠️ PRP-M2 起**不存在** `overlayTitle(state)` 这类直读 state 的版本 —— 见 §G 的「Now 访问器」。
 - 图标色（8 个，两两互斥）：`heavyShell #ffb066` / `twinCannon #ffd166` / `fastReload #7fd6a0` /
   `kineticBurst #c98cf0` / `tripleLoad #79c0ea` / `emergencyRepair #5fd0c0` /
   `repair #e07a9a`（扳手）/ `upgrade #a8b45c`（齿轮）。
@@ -176,3 +178,58 @@
 - `battleWorld.playerProjectiles`（**只数玩家 A 方**；`projectiles` 是全场口径）。
 - **已删**的旧口径：`verificationComplete`（终局判据改由 `complete` / `failed` / `nodeId` 回答）。
   `choiceOptions`（含 `rect` / `iconRect`）**保留** = CHOICE 候选池口径。
+
+## G. PRP-M2 下一局种子验证（独立入口，运行时细节）
+
+### G.1 入口 / 选项
+
+- **页面**：`next-run.html`（独立 html）+ `src/lab/portraitBattleLab/nextRunMain.ts`；
+  构建在 `vite.portrait-lab.config.ts` 的第三个 input（`'next-run': 'next-run.html'`）。
+- **命令**：`npm run dev:next-run`（`vite --open=/next-run.html`）/ `npm run e2e:next-run`。
+  ⚠️ `npm run dev` **一个字节都没变**（根路径仍只重写到玩家页面；`branchDevEntry.ts` 不含 `next-run`）。
+- **构造项**（`RunPageOptions`，全部可选；不传 = RUN-02 默认完整 Run）：
+  `priorRun`（起点状态）/ `seedOptions`（非空 = 开启验证流程）/ `stopAfterFirstBattle`。
+- **三个种子**（`NEXT_RUN_SEEDS`，顺序 = 第一层既有顺序）：`heavyShell` 重炮开局 /
+  `twinCannon` 双联开局 / `fastReload` 快装开局。种子**不复用第二层**、不新增奖励。
+
+### G.2 流程与状态机接线
+
+- `RUN COMPLETE` 时先点唯一主动作 → **打开种子浮层**（不是开默认新局）；
+  选中 → `createSeededNewRun(ctx, id)` → **全新状态对象**（旧战场运行时先 `endBattle()` 释放）。
+- 新 Run 第一场由宿主在 **EVENT 那一刻**取 `runCarriedPlayerHp`（新局 → `null` → 满耐久）。
+- 第一场结束（`battlesCompleted >= 1`）→ `validationDone = true` → 主动作不可用 + 文案
+  `下一局验证完成`；`onPointerDown` 在 `validationDone` 时**直接 return**。
+- ⚠️ 验证判定**不要求赢**：`RESULT` 与 `FAILED` 都算「第一场结束」。
+
+### G.3 「Now 访问器」纪律（本轮最大陷阱）
+
+页面渲染 / 命中 / 探针 / 账本**四处必须读同一个本帧口径**：
+
+| 访问器 | 语义 |
+|---|---|
+| `overlayOpenNow()` / `overlayCardsNow()` / `overlayTitleNow()` | 种子浮层优先，其次 state 的 CHOICE / DURABILITY |
+| `actionEnabledNow()` / `actionLabelNow()` | 验证停止态强制「不可用 + 终点文案」，否则 = 既有口径 |
+
+- ⚠️ `runOverlayCards(` 在 `runPage.ts` 里**只允许有一个调用点**（在 `overlayCardsNow()` 内部）；
+  绘制 / 命中 / 探针三处都必须经 `overlayCardsNow()`（`RP-RUN-02-05` 守卫机器钉死）。
+- ⚠️ `layeredShapes()`：种子浮层时**只**返回 `cardBar`（整页遮罩 ⇒ 底层几何不带精确色）；
+  验证停止态过滤 `actionBar`（按钮真的不可用 ⇒ 强调条不在画面上）。
+- 种子浮层**复用 CHOICE 卡片几何**（`runChoiceCardRects` / `runChoiceIconRect` / `runChoiceBarRect`），
+  `cardBar` 面积恒 `3 × 1240`；图标复用既有第一层矢量图标（不新增图标）。
+
+### G.4 探针新增字段（E2E 依赖）
+
+`nextRunValidation` / `seedSelectOpen` / `seedOptions[]`（`id` `title` `note` `rect` `iconRect`）/
+`seedChosen` / `priorRun`（摘要：`nodeId` `day` `battlesCompleted` `build` `durabilityPercent` `complete`）/
+`validationComplete`。
+
+### G.5 三个种子的第一场实测结局（真机四视口，真实物理）
+
+| seed | 结局 | 剩余耐久 | 步数 |
+|---|---|---|---|
+| heavyShell | RESULT | **13 / 1100** | 1018 |
+| twinCannon | RESULT | **1009 / 1100** | 727 |
+| fastReload | RESULT | **919 / 1100** | 710 |
+
+⚠️ **重炮开局几乎濒死**（1.2%），战斗也更长 ⇒ 「三个种子难度不等价」是本轮待裁决项。
+**禁止**改第一层数值（已冻结）。另：`heavyShell` 的 `recoil 90`（基础 30）是首要怀疑对象。

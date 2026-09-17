@@ -4,7 +4,7 @@
 
 | 要找什么 | 去哪 |
 |---|---|
-| 本轮 / 近日做了什么、实测数字 | `.workbuddy/memory/YYYY-MM-DD.md`（最新 `2026-09-16.md`） |
+| 本轮 / 近日做了什么、实测数字 | `.workbuddy/memory/YYYY-MM-DD.md`（最新 `2026-09-17.md`） |
 | **PRP 运行时细节**（相机 / 接缝 / 参数 / 能力数值） | `.workbuddy/memory/REF_PRP_RUNTIME.md` |
 | 每个 Queue 的完整交付说明 | repo-root `交接文档_YYYY-MM-DD_<Queue>.md` |
 | 本文件更早的完整版本 | `.workbuddy/memory/archive/MEMORY_FULL_*.md` |
@@ -13,8 +13,8 @@
 ## 1. Identity / 链尾
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。原型正式名 **PRP｜Portrait Run Prototype**。
-- **链尾**：`e088cb0` PRP-BUILD-01-CLOSEOUT-AND-FREEZE → **`PRP-RUN-02-FULL-RUN-VERTICAL-SLICE`
-  （固定 Run Script 九节点 + 四场压力阶梯 + 耐久取舍事件 + `RUN COMPLETE`）**；更早 SHA 查 `git log`。
+- **链尾**：`54fbd6f` PRP-RUN-02-FULL-RUN-VERTICAL-SLICE → **`PRP-M2-NEXT-RUN-SEED-VALIDATION`
+  （独立验证入口 `next-run.html` + 三个起始种子 + `NEXT RUN VALIDATION COMPLETE`）**；更早 SHA 查 `git log`。
 - 全链对 `src/core|physics|render|player|platform|battle|ui` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，逐帧不变）。
 
@@ -45,6 +45,16 @@
   而该目录 `emptyOutDir:false` 会留下**陈旧 chunk** ⇒ 改完源码直接跑 E2E 会拿到旧产物的假 FAIL
   （R4 实测：`suppress=undefined` 4 条，重建后 406/406 全绿）。
   ⚠️ 定位手法：`grep -rl "<新字段>" dist-portrait-lab/` 为空 + `grep -rl "<旧字段>"` 命中 ⇒ 产物陈旧。
+- ⚠️ **R22a 的 `labSourceFiles()` 只扫 Lab 顶层 `.ts`**（`readdirSync(LAB_DIR)`）⇒ 新增 Lab 文件
+  **必须放顶层**；放子目录 = **绕过 import 白名单守卫**（本项目明令不做）。
+- ⚠️ **probe / 账本必须报「本帧真正画出来的东西」**：任何叠在 `state` 之上的临时浮层 / 临时禁用态
+  都要配一个 `*Now()` 访问器，并让**绘制 / 命中 / 探针 / 账本四处同一入口** ——
+  否则 probe 会报出一个屏幕上并不存在的按钮，账本会登记一批被遮罩盖掉的层（E2E 立刻假红）。
+- ⚠️ **「整页压暗」类像素判据不要用高绝对阈值**：页面底色本身极暗（日志带 RGB 合计仅 57），
+  0.86 深色遮罩对暗底的降幅上限很小（实测最小 26）⇒ 阈值取 ~15，并优先用**同点位前后对比**。
+- ⚠️ **根目录 html 清单是冻结断言**（`tests/portraitDefaultEntry.test.ts` R2-10）⇒ 新增 html 入口必须显式更新。
+- ⚠️ **改实现导致源码守卫失败时，要「强化守卫」而不是放宽它**：例 —— `runOverlayCards` 的来源
+  从「多处各自直读」收紧为「全文件唯一调用点 + 绘制/命中/探针三处都经唯一入口」。
 
 ## 4. Stable contracts（改动前必读）
 - DPR 只乘一次（logical→backing）；safe-area / capsule / hitArea 一律逻辑坐标。
@@ -137,9 +147,26 @@
   改装分支 `[919, 907, 699, 217]`）；同一条 `heavyShell+kineticBurst` 维修 → 终局 618，
   改装 → 终局**归零 FAILED**（「耐久改变下一步选择」的真实数值证据）。
 
+### 5.7 下一局种子验证（M2，本轮交付）
+- **M2（PRP-M2-NEXT-RUN-SEED-VALIDATION）**：`RunPageOptions{ priorRun / seedOptions /
+  stopAfterFirstBattle }` —— **全部可选**，`new RunPage(root)` 行为逐字节不变
+  （默认 Run E2E 476/476 复跑通过）。独立入口 `next-run.html` + `npm run dev:next-run`。
+- ⚠️ **RUN-02 的三个文件本轮零改动**：`runPageState.ts` / `runScript.ts` / `runBattleRuntime.ts`
+  逐字节不含 seed 概念（NR-15 守卫钉死）⇒ **新语义只加在 `nextRunValidation.ts` + `runPage.ts` 的可选分支**。
+- ⚠️ 种子 = **既有第一层强化换个语境**（`heavyShell` / `twinCannon` / `fastReload`），**不新增奖励**；
+  新 Run 由 `createSeededNewRun` 从零构造（满耐久 / DAY 1 / 日志重置 / `buffs` 只有这一个 seed）
+  ⇒ 第一场注入的就是 `[seed]`；**「上一局」由 `buildPriorCompletedRun` 走真实状态机快进产出**（确定性）。
+- ⚠️ 验证流程只有四拍：`RUN COMPLETE → 种子三选一 → 新 Run 第一场 → NEXT RUN VALIDATION COMPLETE`
+  （第一场结束即停；种子选择浮层**复用 CHOICE 卡片几何**，零布局新增）。
+
 ## 6. Next action
+- **M2 阶段已交付**（`PRP-M2-NEXT-RUN-SEED-VALIDATION`）。**按指令停止，不自动开下一阶段。**
+- **下一步取决于真人裁决**：① 三个种子的**开局难度是否等价** —— 实测「重炮开局」第一场只活下
+  **13/1100**（另两个 1009 / 919），战斗也更长（1018 步 vs 727/710）⇒ 这是「下一局起点不同」
+  还是「选错就死」？⚠️ **禁止**顺手改第一层数值（已冻结），要改就是**新的设计假设**、单开 Queue。
+  ② 「下一局起点不同」是否真的让人想立刻再打一局（元体验本身）。
 - **RUN-02 阶段已完成并交付**（`PRP-RUN-02-FULL-RUN-VERTICAL-SLICE`）。
-  **按指令停止，不自动开下一阶段**（不自行进入永久奖励 / 下一局系统）。
+  **不自行进入永久奖励 / 下一局系统。**
 - **当前脚本与池结构**：九节点固定脚本（见 §5.6）；第一层 `[heavyShell, twinCannon, fastReload]`（固定三项）；
   第二层条件池 `heavyShell → [kineticBurst, emergencyRepair, fastReload]`、
   `twinCannon → [tripleLoad, emergencyRepair, heavyShell]`、

@@ -27,6 +27,9 @@ export default defineConfig({
       input: {
         'run-page': 'run-page.html',
         'portrait-lab': 'portrait-lab.html',
+        // PRP-M2：验证入口（「下一局起始改装」）。与另两个入口同源 —— 仍是同一块
+        // 可整块删除的实验产物，不进入 dist / dist-pages / dist-e2e / dist-wechat。
+        'next-run': 'next-run.html',
       },
     },
   },

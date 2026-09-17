@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>最强水果 — PRP｜下一局起始改装验证（PRP-M2）</title>
+    <!--
+      PRP-M2-NEXT-RUN-SEED-VALIDATION｜「下一局起始改装」验证入口。
+
+      它验证的是**元体验**：一局结束以后，玩家会不会因为「下一局起点不同」而想再打一局。
+      流程：上一局 RUN COMPLETE → 种子三选一 → 全新 Run 第一场 → NEXT RUN VALIDATION COMPLETE。
+
+      与玩家页面（`run-page.html`）严格分离：
+        - 本页由 `npm run dev:next-run` 打开，**不是** `npm run dev` 的落地页；
+        - 本页不参与 npm run build / build:pages / build:e2e / build:wechat 任一正式构建；
+        - 画布绘制与输入复用同一个 RunPage，只通过构造项开启验证流程。
+
+      实验失败可直接删除本文件与 src/lab/portraitBattleLab/。
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: #06090e;
+        color: #e9eef7;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+      /* 唯一容器 = 整个视口；画布由 PlayerViewportTransform contain 缩放居中 */
+      #run-root.run-root { position: fixed; inset: 0; }
+
+      /* 手机画面容器（与玩家入口同一套：桌面居中放大，窄屏铺满） */
+      .run-stage {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        height: min(88vh, 940px);
+        width: calc(min(88vh, 940px) * 390 / 844);
+        overflow: hidden;
+        background: #0b0e14;
+        border-radius: 10px;
+        box-shadow: 0 0 0 1px #1b2434, 0 24px 70px rgba(0, 0, 0, 0.6);
+      }
+      .run-stage canvas { touch-action: manipulation; }
+
+      @media (max-width: 640px), (max-height: 620px) {
+        .run-stage {
+          left: 0;
+          top: 0;
+          transform: none;
+          width: 100%;
+          height: 100%;
+          border-radius: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="run-root"></div>
+    <script type="module" src="/src/lab/portraitBattleLab/nextRunMain.ts"></script>
+  </body>
+</html>

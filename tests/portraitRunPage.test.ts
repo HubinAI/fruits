@@ -1925,9 +1925,21 @@ describe('PRP-RUN-02｜H 固定 Run Script 数据源与耐久取舍事件', () =
 
   it('RP-RUN-02-05 宿主接线：浮层卡片唯一来源 + 耐久事件走独立动作', () => {
     const src = stripComments(read('runPage.ts'));
-    // 绘制 / 命中 / 账本三处都读 `runOverlayCards`（CHOICE 与 DURABILITY 同源）
-    expect(src.includes('runOverlayCards(this.state)')).toBe(true);
-    expect(src.includes('runOverlayCards(s)')).toBe(true);
+    /**
+     * 浮层卡片的**唯一来源**。
+     *
+     * ⚠️ PRP-M2 起这条守卫从「三处都直读 `runOverlayCards(s)`」**收紧**为
+     * 「`runOverlayCards(` 全文件只有一个调用点 + 绘制 / 命中 / 探针都必须经过它」：
+     * 种子浮层（「下一局起始改装」三选一）打开时 state 仍是上一局的 `COMPLETE`，
+     * 若各处继续各自读 `runOverlayCards(state)` 就会**读到一个空浮层**而实际整页都是浮层。
+     * 单一入口 `overlayCardsNow()` 让「画的是池 A、点的是池 B、探针报的是池 C」结构上不可能。
+     */
+    const overlaySourceCalls = [...src.matchAll(/runOverlayCards\(/g)].length;
+    expect(overlaySourceCalls, '`runOverlayCards(` 只允许出现在唯一入口内部').toBe(1);
+    const nowCalls = [...src.matchAll(/this\.overlayCardsNow\(\)/g)].length;
+    // 三个调用点：onPointerDown（命中）/ drawOverlay（绘制）/ baseProbe（诊断）
+    expect(nowCalls, '绘制 / 命中 / 探针都必须经 overlayCardsNow()').toBeGreaterThanOrEqual(3);
+    expect(src.includes('private overlayCardsNow(')).toBe(true);
     // 浮层分派：耐久事件走 `resolveDurability`，强化走 `chooseRunBuff`（都传 ctx）
     expect(src.includes('resolveDurability(this.state, id as RunDurabilityChoiceId, ctx)')).toBe(true);
     expect(src.includes('chooseRunBuff(this.state, id, ctx)')).toBe(true);

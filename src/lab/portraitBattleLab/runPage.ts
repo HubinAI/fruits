@@ -98,6 +98,21 @@ import {
   type RunPhase,
 } from './runPageState';
 import { RUN_TOTAL_BATTLES, type RunDurabilityChoiceId } from './runScript';
+/**
+ * PRP-M2-NEXT-RUN-SEED-VALIDATION：**验证专属**流程数据与构造器。
+ *
+ * ⚠️ 只有宿主提供了 `RunPageOptions.seedOptions` 时这条链才被走到；
+ *    `new RunPage(root)` 的默认完整 Run 流程**不引用**其中任何一项的运行期值。
+ */
+import {
+  NEXT_RUN_SEED_LEAD,
+  NEXT_RUN_SEED_TITLE,
+  NEXT_RUN_VALIDATION_LABEL,
+  createSeededNewRun,
+  priorRunSummary,
+  type PriorRunSummary,
+  type RunSeedOption,
+} from './nextRunValidation';
 import {
   buildRunStageView,
   runPageContext,
@@ -420,6 +435,36 @@ export interface RunPageProbe {
   readonly complete: boolean;
   /** PRP-RUN-02：本局是否已 `FAILED`（某一场真实 Player HP 归零 → 失败终态）。 */
   readonly failed: boolean;
+
+  /* ---------------- PRP-M2-NEXT-RUN-SEED-VALIDATION（验证专属；默认流程恒为「未启用」） */
+
+  /**
+   * 是否处于「下一局起始改装」验证流程（= 宿主提供了 `RunPageOptions.seedOptions`）。
+   * ⚠️ 默认完整 Run 流程（`new RunPage(root)`）恒为 `false`。
+   */
+  readonly nextRunValidation: boolean;
+  /**
+   * 种子选择浮层是否打开。几何**复用 CHOICE 卡片**（`runChoiceCardRects`），
+   * 因此它与三选一强化在结构上不可能出现两套尺寸。
+   */
+  readonly seedSelectOpen: boolean;
+  /** 种子选择浮层上**真正画出来**的三张卡片（与绘制、命中区同源）。 */
+  readonly seedOptions: readonly {
+    id: string;
+    title: string;
+    note: string;
+    rect: RunRect;
+    iconRect: RunRect;
+  }[];
+  /** 已经选定的种子 id（`null` = 还没选）。 */
+  readonly seedChosen: string | null;
+  /** 上一局（RUN COMPLETE）摘要 —— 「这是下一局，不是上一局继续」的证据。 */
+  readonly priorRun: PriorRunSummary | null;
+  /**
+   * 新 Run 第一场真实战斗已结束且验证**停止**（= `NEXT RUN VALIDATION COMPLETE`）。
+   * 为 `true` 时唯一主动作不可用（不再推进第二场），文案变为验证终点标记。
+   */
+  readonly validationComplete: boolean;
   /**
    * PRP-RUN-R1 必改 3：按下主动作会不会**开一个全新 Run**
    * （`true` = 失败终态 / 三场打完的终局；`false` = 继续当前 Run → CHOICE）。
@@ -521,6 +566,34 @@ export interface RunPageProbe {
   readonly domButtons: number;
 }
 
+/**
+ * PRP-M2-NEXT-RUN-SEED-VALIDATION｜Run Page 的**可选**构造项。
+ *
+ * ⚠️ 全部可省略 —— `new RunPage(root)` 的行为与 PRP-RUN-02 **逐字节相同**
+ *    （默认完整 Run 流程：DAY 1 开场 → 四场战斗 → RUN COMPLETE / RUN FAILED）。
+ *    只有独立验证入口 `/next-run.html` 会带上这些选项（`npm run dev:next-run`）。
+ *
+ * ⚠️ 本 Queue **不修改** RUN-02 的默认完整 Run 结构：默认路径上没有新增 phase、
+ *    没有新增节点、没有新增强化、没有任何一处分支被改动。
+ */
+export interface RunPageOptions {
+  /**
+   * 验证起点：**上一局已 RUN COMPLETE 的真实状态**（`buildPriorCompletedRun` 产出）。
+   * 提供后页面从「上一局终局画面」开始；省略 → 从脚本第一个节点（DAY 1）开始。
+   */
+  readonly priorRun?: RunPageState | null;
+  /**
+   * 种子三选一（**非空 = 开启验证流程**）。
+   * RUN COMPLETE 时唯一主动作不再开默认新局，而是打开这个浮层。
+   */
+  readonly seedOptions?: readonly RunSeedOption[] | null;
+  /**
+   * 新 Run 的**第一场**真实战斗结束后停止验证
+   * （唯一主动作不可用 + 文案变为 `NEXT RUN VALIDATION COMPLETE`）。
+   */
+  readonly stopAfterFirstBattle?: boolean;
+}
+
 export class RunPage {
   private readonly root: HTMLElement;
   private readonly stageWrap: HTMLDivElement;
@@ -533,7 +606,19 @@ export class RunPage {
 
   /** 固定摄像机：竖屏 390×844 逻辑舞台（复用共享 contain 变换契约）。 */
   private readonly vp = new PlayerViewportTransform(PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
-  private state: RunPageState = createRunPageState(runPageContext());
+  /**
+   * 当前 Run 状态。默认 = 全新一局的 DAY 1（`createRunPageState`）；
+   * PRP-M2 验证入口可注入「上一局终局」（`opts.priorRun`）。
+   */
+  private state: RunPageState;
+  /** PRP-M2：验证构造项（默认 `{}` → 完整 Run 流程，零行为差异）。 */
+  private readonly opts: RunPageOptions;
+  /** PRP-M2：种子选择浮层的选项（非 `null` = 浮层打开，盖过当前 state 的浮层）。 */
+  private seedSelect: readonly RunSeedOption[] | null = null;
+  /** PRP-M2：已经选定的种子 id（`null` = 还没选）。 */
+  private seedChosen: string | null = null;
+  /** PRP-M2：第一场结束即停止推进（`NEXT RUN VALIDATION COMPLETE`）。 */
+  private validationDone = false;
   private rafHandle = 0;
   private lastFrameMs = 0;
   /** 当前遭遇的真实战斗运行时（EVENT 建立 → 回到 IDLE 时释放）。 */
@@ -550,8 +635,11 @@ export class RunPage {
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, opts: RunPageOptions = {}) {
+    this.opts = opts;
     this.root = root;
+    // PRP-M2：验证入口注入「上一局终局」；默认入口 = 全新一局的 DAY 1（行为不变）。
+    this.state = opts.priorRun ?? createRunPageState(runPageContext());
     this.stageWrap = document.createElement('div');
     this.canvas = document.createElement('canvas');
     this.canvas.id = 'run-canvas';
@@ -611,11 +699,29 @@ export class RunPage {
   private readonly onPointerDown = (ev: PointerEvent): void => {
     const rect = this.canvas.getBoundingClientRect();
     const p = this.vp.clientToLogical(ev.clientX, ev.clientY, rect);
+
+    // PRP-M2：种子选择浮层 —— 与 CHOICE 共用同一套卡片几何（`runChoiceCardRects`），
+    // 点遮罩其它区域不关窗、不推进（必须显式选一个）。它优先于当前 Run 的浮层。
+    if (this.seedSelect) {
+      const seeds = this.seedSelect;
+      const seedRects = runChoiceCardRects(seeds.length);
+      for (let i = 0; i < seedRects.length; i++) {
+        if (hit(seedRects[i], p)) {
+          this.chooseSeed(seeds[i].id);
+          return;
+        }
+      }
+      return;
+    }
+
     if (runOverlayOpen(this.state)) {
       // ⚠️ PRP-BUILD-01 / RUN-02：卡片的**唯一来源 = 当前浮层上真正画出来的卡片**
       // （CHOICE = 当前候选池；DURABILITY = 耐久事件两项），与绘制、命中区、账本四处同源
       // → 不可能出现「画的是池 A、点的是池 B」。卡片几何两者共用（`runChoiceCardRects`）。
-      const cards = runOverlayCards(this.state);
+      // ⚠️ PRP-M2：此处改经 `overlayCardsNow()`（种子浮层已在上面的分支被拦掉，
+      //    因此走到的这一支与 `runOverlayCards(this.state)` 完全等价）——
+      //    `runOverlayCards(` 于是全文件只剩**一个**调用点，源码守卫可机器钉死「单一来源」。
+      const cards = this.overlayCardsNow();
       const rects = runChoiceCardRects(cards.length);
       for (let i = 0; i < rects.length; i++) {
         if (hit(rects[i], p)) {
@@ -625,8 +731,18 @@ export class RunPage {
       }
       return; // 遮罩其它区域：不关窗、不推进（必须显式选一个）
     }
+
+    // PRP-M2：第一场结束后的验证停止态 —— 不接受任何主动作（结构上跑不到第二场）。
+    if (this.validationDone) return;
+
     if (!runActionEnabled(this.state)) return;
     if (hit(runActionButtonRect(), p)) {
+      // PRP-M2：验证流程里 RUN COMPLETE 的唯一主动作改写为「打开种子选择」，
+      // **不**开默认新局（默认路径没有 `seedOptions` → 这里恒不成立）。
+      if (this.opts.seedOptions && runComplete(this.state)) {
+        this.openSeedSelect();
+        return;
+      }
       this.apply(pressRunAction(this.state, runPageContext()));
     }
   };
@@ -643,6 +759,82 @@ export class RunPage {
       return;
     }
     this.apply(chooseRunBuff(this.state, id, ctx));
+  }
+
+  /* ------------------------------------ PRP-M2 下一局种子验证（可选流程） */
+
+  /**
+   * 打开种子选择浮层（验证流程里 RUN COMPLETE 的唯一主动作）。
+   *
+   * ⚠️ 只改「屏幕上现在有什么」，**不动 Run 状态机** —— 上一局的 `COMPLETE` 状态原样保留，
+   *    因此底下的日志 / DAY / 耐久都还是上一局的真实终局（玩家看得见「这是上一局」）。
+   */
+  private openSeedSelect(): void {
+    const seeds = this.opts.seedOptions;
+    if (!seeds || seeds.length === 0) return;
+    this.seedSelect = seeds;
+    this.render();
+  }
+
+  /**
+   * 选定一个种子 → **开启全新 Run**（必改 2 / 必改 3）。
+   *
+   *   - 新状态来自 `createSeededNewRun`（满耐久 / DAY 1 / 日志重置 / Build 只剩这一个 seed）
+   *     → 与上一局**没有任何共享对象**；
+   *   - 上一局的战斗运行时在切换前**彻底释放**（`endBattle` → 世界 / 弹丸 / 事件订阅不跨局残留）；
+   *   - 未知种子 → 不进入新局，也**不**回退到「无 seed 新局」（绝不静默降级）。
+   */
+  private chooseSeed(id: string): void {
+    const next = createSeededNewRun(runPageContext(), id);
+    if (!next) return;
+    this.endBattle();
+    this.stopLoop();
+    this.seedChosen = id;
+    this.seedSelect = null;
+    this.validationDone = false;
+    this.state = next;
+    this.render();
+  }
+
+  /** 本帧是否有浮层要画（种子选择优先于当前 Run 的 CHOICE / DURABILITY）。 */
+  private overlayOpenNow(): boolean {
+    return this.seedSelect !== null || runOverlayOpen(this.state);
+  }
+
+  /**
+   * 本帧**真正画出来**的浮层卡片（与绘制、命中区、账本同源）。
+   *
+   * 统一形状 `{ id, label, note }`：
+   *   - 种子浮层 → `label` 用种子的 `title`（「重炮开局」= 说的是**下一局的开局**），
+   *     卡片图标仍按 `id` 取既有第一层强化的矢量图标（不新增图标）；
+   *   - 其余 → 既有 `runOverlayCards`（CHOICE 候选池 / 耐久事件两项）。
+   */
+  private overlayCardsNow(): readonly RunOverlayOption[] {
+    const seeds = this.seedSelect;
+    if (seeds) return seeds.map((s) => ({ id: s.id, label: s.title, note: s.note }));
+    return runOverlayCards(this.state);
+  }
+
+  /** 本帧的浮层标题（种子选择 → 验证文案；否则走既有口径）。 */
+  private overlayTitleNow(): string {
+    if (this.seedSelect) return NEXT_RUN_SEED_TITLE;
+    return runDurabilityOpen(this.state) ? runDurabilityTitle() : '选择一项改装';
+  }
+
+  /**
+   * 主动作是否可用。
+   * ⚠️ 默认路径（`validationDone` 恒为 `false`）与 `runActionEnabled(state)` 完全等价。
+   */
+  private actionEnabledNow(): boolean {
+    return !this.validationDone && runActionEnabled(this.state);
+  }
+
+  /**
+   * 主动作文案。
+   * ⚠️ 默认路径与 `runActionLabel(state)` 完全等价；验证停止态换成终点标记。
+   */
+  private actionLabelNow(): string {
+    return this.validationDone ? NEXT_RUN_VALIDATION_LABEL : runActionLabel(this.state);
   }
 
   /* ------------------------------------------------------- 状态与推进 */
@@ -772,6 +964,12 @@ export class RunPage {
           enemyHp: hp.b,
           steps: rt.stepCount,
         });
+        // PRP-M2：验证流程在第一场真实战斗结束后**停止**。
+        // 判据取状态机回报的**真实完成场数**（不是「点了第几下」）→
+        // 结构上不可能出现「第一场还没打完就宣布验证完成」。
+        if (this.opts.stopAfterFirstBattle && this.state.battlesCompleted >= 1) {
+          this.validationDone = true;
+        }
         this.rafHandle = 0; // 战斗结束 → 自动停止循环（RESULT 是一个静止画面）
         this.render();
         return;
@@ -819,7 +1017,20 @@ export class RunPage {
    * node 侧可直接断言同一份账本，浏览器端再用真实 getImageData 交叉核对）。
    */
   private layeredShapes(): RunLayeredRect[] {
-    return runPageLayerShapes(this.state, this.stageView());
+    // PRP-M2：种子选择 = 整页遮罩 + 三张卡片 —— 与被遮罩的底层几何**互斥**
+    // （与 CHOICE 完全同源：只登记 `cardBar`）。若沿用 `runPageLayerShapes(state)`，
+    // 会登记一批实际上被遮罩盖掉的层，账本立刻与实际渲染不符。
+    const seeds = this.seedSelect;
+    if (seeds) {
+      return runChoiceCardRects(seeds.length).map((card) => ({
+        layer: 'cardBar' as const,
+        rect: runChoiceBarRect(card),
+      }));
+    }
+    const shapes = runPageLayerShapes(this.state, this.stageView());
+    // PRP-M2：验证停止态下唯一主动作不可用 → 底部强调条不入账（与实际绘制一致）。
+    // ⚠️ 默认路径 `actionEnabledNow() === runActionEnabled(state)` → 与既有账本逐项相同。
+    return this.actionEnabledNow() ? shapes : shapes.filter((s) => s.layer !== 'actionBar');
   }
 
   private draw(ctx: CanvasRenderingContext2D): void {
@@ -868,12 +1079,13 @@ export class RunPage {
     this.drawLog(ctx, s);
 
     // 5) 最底：唯一主动作按钮（填充承载文案 → 不入账；底部强调条入账）
-    this.drawActionButton(ctx, s);
+    this.drawActionButton(ctx);
 
     // 6) 浮层（必改 4：整页重压暗 + 「图标 / 名称 / 一句结果」卡片）
     //    - CHOICE     = 三选一强化（第一层固定 / 第二层条件池）
     //    - DURABILITY = 耐久取舍（维修 vs 继续改装）
-    if (runOverlayOpen(s)) this.drawOverlay(ctx, s);
+    //    - PRP-M2     = 种子选择（「下一局起始改装」三选一；同为卡片几何）
+    if (this.overlayOpenNow()) this.drawOverlay(ctx);
   }
 
   /* ------------------------------------------ PRP-BUILD-01-R1 命中冲击环 */
@@ -1107,9 +1319,11 @@ export class RunPage {
 
   /* ------------------------------------------------------- 主动作按钮 */
 
-  private drawActionButton(ctx: CanvasRenderingContext2D, s: RunPageState): void {
+  private drawActionButton(ctx: CanvasRenderingContext2D): void {
     const btn = runActionButtonRect();
-    const enabled = runActionEnabled(s);
+    // ⚠️ PRP-M2：这里读的是**本帧实际口径**（默认路径与 `runActionEnabled(s)` /
+    //    `runActionLabel(s)` 完全等价）—— 验证停止态下按钮不可用、文案为终点标记。
+    const enabled = this.actionEnabledNow();
     ctx.fillStyle = enabled ? COLORS.actionFill : COLORS.actionFillOff;
     ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
     ctx.strokeStyle = enabled ? COLORS.actionEdge : COLORS.divider;
@@ -1121,7 +1335,7 @@ export class RunPage {
     ctx.fillStyle = enabled ? COLORS.textTitle : COLORS.textDim;
     ctx.font = `bold 18px ${FONT_STACK}`;
     ctx.textAlign = 'center';
-    ctx.fillText(runActionLabel(s), btn.x + btn.w / 2, btn.y + 32);
+    ctx.fillText(this.actionLabelNow(), btn.x + btn.w / 2, btn.y + 32);
     ctx.textAlign = 'left';
   }
 
@@ -1132,18 +1346,27 @@ export class RunPage {
    * 因此「第二次选择不是同一套通用三选一」是靠**内容**（池 / 标题 / 选项数）区分的，
    * 而不是靠第二套几何。⚠️ 零布局改动（`cardBar` 层被两者复用）。
    */
-  private drawOverlay(ctx: CanvasRenderingContext2D, s: RunPageState): void {
+  private drawOverlay(ctx: CanvasRenderingContext2D): void {
     const mask = runChoiceMaskRect();
     ctx.fillStyle = CHOICE_MASK_COLOR;
     ctx.fillRect(mask.x, mask.y, mask.w, mask.h);
 
-    // ⚠️ 卡片 / 标题 / 图标全部取自**当前浮层真正画出来的卡片**（`runOverlayCards`）。
-    const cards = runOverlayCards(s);
+    // ⚠️ 卡片 / 标题 / 图标全部取自**本帧真正画出来的卡片**（`overlayCardsNow`：
+    //    种子选择优先，其次 state 的 CHOICE / DURABILITY）—— 因此种子浮层与三选一强化
+    //    在几何上是同一套（不可能出现两套尺寸 / 两套命中区）。
+    const cards = this.overlayCardsNow();
     const rects = runChoiceCardRects(cards.length);
     const title = runChoiceTitlePos(cards.length);
     ctx.fillStyle = COLORS.textTitle;
     ctx.font = `bold 17px ${FONT_STACK}`;
-    ctx.fillText(this.overlayTitle(s), title.x, title.y);
+    ctx.fillText(this.overlayTitleNow(), title.x, title.y);
+    // PRP-M2：种子浮层额外一行引导语，说清这是**下一局**（不是继续上一局）。
+    // ⚠️ 画在标题上方 26px —— 不落在任何入账面 / 卡片上，账本口径不变。
+    if (this.seedSelect) {
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = `13px ${FONT_STACK}`;
+      ctx.fillText(NEXT_RUN_SEED_LEAD, title.x, title.y - 26);
+    }
 
     rects.forEach((card, i) => {
       const opt = cards[i];
@@ -1169,10 +1392,7 @@ export class RunPage {
     });
   }
 
-  /** 浮层标题：强化 = 固定文案；耐久事件 = 脚本数据里的标题（唯一来源）。 */
-  private overlayTitle(s: RunPageState): string {
-    return runDurabilityOpen(s) ? runDurabilityTitle() : '选择一项改装';
-  }
+  /** 浮层标题的唯一口径见 `overlayTitleNow()`（默认路径 = 强化固定文案 / 耐久事件脚本标题）。 */
 
   /**
    * 每个选项一个可辨识的矢量图标（不入面积账本，只按「盒内专属色面积」判定）。
@@ -1505,14 +1725,43 @@ export class RunPage {
       failed: runFailed(s),
       /** PRP-RUN-R1：「这一下会开新 Run」还是「继续当前 Run」。 */
       startsNewRun: runStartsNewRun(s),
+
+      /* ---------------- PRP-M2-NEXT-RUN-SEED-VALIDATION ----------------
+       * ⚠️ 默认完整 Run 流程（`new RunPage(root)`）恒为：
+       *    nextRunValidation=false / seedSelectOpen=false / seedOptions=[] /
+       *    seedChosen=null / priorRun=null / validationComplete=false
+       *    → 既有断言一条都不会变。 */
+
+      nextRunValidation: this.opts.seedOptions != null,
+      seedSelectOpen: this.seedSelect !== null,
+      /** 种子卡片几何与绘制、命中区同源（`runChoiceCardRects` / `runChoiceIconRect`）。 */
+      seedOptions: (() => {
+        const seeds = this.seedSelect;
+        if (!seeds) return [];
+        const rects = runChoiceCardRects(seeds.length);
+        return seeds.map((seed, i) => ({
+          id: seed.id,
+          title: seed.title,
+          note: seed.note,
+          rect: rects[i],
+          iconRect: runChoiceIconRect(rects[i]),
+        }));
+      })(),
+      seedChosen: this.seedChosen,
+      /** 上一局摘要（注入的 `priorRun`）—— 与当前 `state` 是**两个独立对象**。 */
+      priorRun: this.opts.priorRun ? priorRunSummary(this.opts.priorRun) : null,
+      /** 验证终点：新 Run 第一场已结束且已停止推进。 */
+      validationComplete: this.validationDone,
       /** ⚠️ buffs 与 build 同源（`buffs` 是本局 Build 的唯一状态，probe 只是换了个形状暴露）。 */
       buffs: s.buffs.map((b) => b.id),
       buffLabels: s.buffs.map((b) => b.label),
       buffIconCount: runBuffIconRects(s.buffs.length).length,
       logCount: s.log.length,
       log: s.log.map((e) => ({ seq: e.seq, kind: e.kind, text: e.text })),
-      actionLabel: runActionLabel(s),
-      actionEnabled: runActionEnabled(s),
+      // ⚠️ PRP-M2：读**当前实际口径**（默认路径与 `runActionLabel(s)` / `runActionEnabled(s)`
+      //    完全等价）—— 否则验证停止态下 probe 会报出一个屏幕上并不存在的「可用继续按钮」。
+      actionLabel: this.actionLabelNow(),
+      actionEnabled: this.actionEnabledNow(),
       actionRect: runActionButtonRect(),
       choiceOpen: runChoiceOpen(s),
       /**
@@ -1537,10 +1786,16 @@ export class RunPage {
       /** PRP-RUN-02：耐久事件浮层的可观测状态。 */
       durabilityOpen: runDurabilityOpen(s),
       durabilityChosen: s.durability,
-      overlayOpen: runOverlayOpen(s),
-      overlayTitle: runOverlayOpen(s) ? (runDurabilityOpen(s) ? runDurabilityTitle() : '选择一项改装') : null,
+      /**
+       * ⚠️ PRP-M2：改读**本帧实际口径**（`overlayOpenNow` / `overlayCardsNow`）——
+       *    种子浮层打开时 state 仍是上一局的 `COMPLETE`（没有浮层），
+       *    若沿用 `runOverlayOpen(s)` 会报「屏幕上没有浮层」而实际整页都是浮层。
+       *    默认路径（`seedSelect === null`）与既有三个字段逐值相同。
+       */
+      overlayOpen: this.overlayOpenNow(),
+      overlayTitle: this.overlayOpenNow() ? this.overlayTitleNow() : null,
       overlayOptions: (() => {
-        const cards = runOverlayCards(s);
+        const cards = this.overlayCardsNow();
         const rects = runChoiceCardRects(cards.length);
         return cards.map((o, i) => ({
           id: o.id,
