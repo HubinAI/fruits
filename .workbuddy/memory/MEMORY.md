@@ -15,7 +15,7 @@
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。原型正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`54fbd6f` RUN-02 整局竖切 → `0cb1956` M2 下一局种子（`next-run.html`）→
   `5df031d` M3 遭遇验证台（`encounter-lab.html` + `RunBattleRuntime.contactResidue()`）→
-  **R1 验证中心**（`validation-hub.html`，纯导航壳）；更早 SHA 查 `git log`。
+  **`d334d0c` R1 验证中心**（`validation-hub.html`，纯导航壳）；更早 SHA 查 `git log`。
 - 全链对 `src/core|physics|render|player|platform|battle|ui` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，逐帧不变）。
 
@@ -214,7 +214,7 @@
   （见 §3「每加一个根目录 html = 四处同步」）。
 
 ## 6. Next action
-- **R1 阶段已交付**（`PRP-VALIDATION-HUB-R1`，SHA 见 §1 链尾）。**按指令停止，不自行进入下一阶段。**
+- **R1 阶段已交付**（`d334d0c` PRP-VALIDATION-HUB-R1）。**按指令停止，不自行进入下一阶段。**
   真人验收 = 一条命令启动 Hub → 连续切三项 → **一段录像批量验收**（本 Queue **不要求真人录屏**）。
 - **R1 唯一待裁决**：Hub 的「整页导航 + 浏览器后退」够不够用（Queue 已明确允许这种降级，理由见 §5.9）。
   若真人要求**单页切换**，那是**新的设计假设**、须单开 Queue —— 要动 `RunPage` / `EncounterLab`
