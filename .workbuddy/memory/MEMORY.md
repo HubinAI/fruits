@@ -14,7 +14,7 @@
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。原型正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`54fbd6f` RUN-02 整局竖切 → `0cb1956` M2 下一局种子（`next-run.html`）→
-  **M3 遭遇验证台**（`encounter-lab.html` + `RunBattleRuntime.contactResidue()`）；更早 SHA 查 `git log`。
+  **`5df031d` M3 遭遇验证台**（`encounter-lab.html` + `RunBattleRuntime.contactResidue()`）；更早 SHA 查 `git log`。
 - 全链对 `src/core|physics|render|player|platform|battle|ui` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，逐帧不变）。
 
@@ -186,7 +186,7 @@
   三条过程完全不同 ⇒ 三个敌人确实提出三个不同问题。⚠️ 见 REF §H.5。
 
 ## 6. Next action
-- **M3 阶段已交付**（`PRP-M3-ENCOUNTER-BATCH-01`）。**按指令停止，等技术通过后才进入最后一个
+- **M3 阶段已交付**（`5df031d` PRP-M3-ENCOUNTER-BATCH-01）。**按指令停止，等技术通过后才进入最后一个
   Validation Tool Queue。**
 - **M3 的下一步取决于真人裁决**（本 Queue 是 Content Batch，**不做平衡**）：真人晚上判断
   「三种敌人是否真的提出了不同的战斗问题」。⚠️ 记录在案的既有事实：`RangedTurret`（OPP-03）
