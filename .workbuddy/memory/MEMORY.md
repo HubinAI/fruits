@@ -14,7 +14,8 @@
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。原型正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`54fbd6f` RUN-02 整局竖切 → `0cb1956` M2 下一局种子（`next-run.html`）→
-  **`5df031d` M3 遭遇验证台**（`encounter-lab.html` + `RunBattleRuntime.contactResidue()`）；更早 SHA 查 `git log`。
+  `5df031d` M3 遭遇验证台（`encounter-lab.html` + `RunBattleRuntime.contactResidue()`）→
+  **R1 验证中心**（`validation-hub.html`，纯导航壳）；更早 SHA 查 `git log`。
 - 全链对 `src/core|physics|render|player|platform|battle|ui` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，逐帧不变）。
 
@@ -41,6 +42,16 @@
 - 本机 bash PATH 可能缺 `/usr/bin` → 命令前 `export PATH="/usr/bin:/bin:$PATH"`。
 - `交接文档_*.md` 是**本地件**，勿误提交；截图 / 日志落 `outputs/`（gitignored）。
 - ⚠️ **id 改名 = 全通道同步**：`src` + `tests/*.ts` + `tests/*.cjs`（E2E 侧有镜像字面量表）。
+- ⚠️ **每加一个根目录 html = 四处同步**（漏一处必红）：① `tests/portraitDefaultEntry.test.ts`
+  R2-03 不重写清单 + R2-10 完整清单（按字典序）；② `vite.portrait-lab.config.ts` 的 `input`；
+  ③ `constants.ts` 头部整块删除清单；④ 新页面自己的守卫测试。
+- ⚠️ **E2E 的「回到某页」判据不要写 `location.pathname`**：`npm run dev:*` 的落地形式是根路径
+  `/`（`vite --open=/x.html` 打开的却是 `/x.html`）⇒ `page.goBack()` 回到的路径取决于**当初怎么进来的**。
+  判据要写**语义**（`typeof window.__PROBE__ !== 'undefined'` + DOM 已渲染），再单独断言「入口 URL 正确」。
+- ⚠️ **probe 字段名 ≠ 展示名**：`EncounterLabProbe.playerBodyName` 是**中文车身名**
+  （`西瓜车身`），正式 loadout id 在 `loadoutId`。写断言前先读接口，别按名字猜。
+- ⚠️ **HTML 注释会命中字符串守卫**：判「页面不得引用 X」前必须**剥 HTML 注释**
+  （`/<!--[\s\S]*?-->/g`）——与 R2-09「说明性注释不算泄漏」同口径。
 - ⚠️ **写断言三坑**：`toEqual` 比较**键集**（`{...x, 覆盖}` 键数不同 ⇒ 永远不等，要写取值函数）；
   浮点**别 round 后再去重**；源码守卫匹配前**剥注释**（HTML 的 `<!-- -->` 同样要剥）。
 - ⚠️ **跨轮复验 PRP 前必须先 `npm run build:portrait-lab`**：E2E 读 `dist-portrait-lab/`，
@@ -185,11 +196,31 @@
   `Chaser` 933 步 / 剩 228（胜）· `RangedTurret` 481 步 / **玩家死**（负）。
   三条过程完全不同 ⇒ 三个敌人确实提出三个不同问题。⚠️ 见 REF §H.5。
 
+### 5.9 验证中心（R1，本轮交付）
+- **R1（PRP-VALIDATION-HUB-R1）**：`validation-hub.html` + `npm run dev:validation` +
+  `e2e:validation-hub`（E2E 端口 **8159**）。三入口的唯一数据源 = `validationHub.ts`
+  的 `VALIDATION_HUB_ENTRIES`（纯数据，**该文件零 import**）。
+- ⚠️ **切换方式 = 整页导航**（真实 `<a href>` 到入口页面**本身**），**不是**在 Hub 里
+  `new RunPage(...)`。三条理由：① Full Run 的入口就是玩家正式页面 `run-page.html`
+  （与根路径重写落地页**同一个文件**）⇒ 另造宿主会丢保真度；② 文档销毁 = Runtime / 弹丸 /
+  接触 / 计时器 / 监听器 / Run-local state 一起消失（比宿主手动逐个 dispose 更强，且宿主忘不掉）；
+  ③ 不复制第二套宿主逻辑。**代价**：入口页面里没有「返回」按钮（加它就要改正式玩家页面）
+  ⇒ 返回 = 浏览器后退（Hub 页脚写明）。⚠️ 三个入口页面对本 Queue **零改动**。
+- ⚠️ **Hub 没有画布**（`canvasCount === 0`）：这是「录像玩家区域不混入 Debug 数据」的物理保证；
+  实测 chunk 仅 **3.4KB**，0 处 `planck` / 正式运行时 / 渲染器符号（E2E I3/I4 钉死）⇒ Hub 是纯导航。
+- ⚠️ 「上次进入」标记 = `sessionStorage` + **`pageshow` 重读**（bfcache 后退回来脚本不重跑，
+  只在 boot 读一次会永远停在旧值）；标记**只指路不判定**，且只认表内 id（历史残留值当没写过）。
+- 删掉 `validation-hub.html` 一行 + `portrait-default-entry` 的两处清单即可整块回退
+  （见 §3「每加一个根目录 html = 四处同步」）。
+
 ## 6. Next action
-- **M3 阶段已交付**（`5df031d` PRP-M3-ENCOUNTER-BATCH-01）。**按指令停止，等技术通过后才进入最后一个
-  Validation Tool Queue。**
-- **M3 的下一步取决于真人裁决**（本 Queue 是 Content Batch，**不做平衡**）：真人晚上判断
-  「三种敌人是否真的提出了不同的战斗问题」。⚠️ 记录在案的既有事实：`RangedTurret`（OPP-03）
+- **R1 阶段已交付**（`PRP-VALIDATION-HUB-R1`，SHA 见 §1 链尾）。**按指令停止，不自行进入下一阶段。**
+  真人验收 = 一条命令启动 Hub → 连续切三项 → **一段录像批量验收**（本 Queue **不要求真人录屏**）。
+- **R1 唯一待裁决**：Hub 的「整页导航 + 浏览器后退」够不够用（Queue 已明确允许这种降级，理由见 §5.9）。
+  若真人要求**单页切换**，那是**新的设计假设**、须单开 Queue —— 要动 `RunPage` / `EncounterLab`
+  的宿主生命周期，且要先解决「Hub 版与玩家页面的保真度」问题，**禁止**顺手改。
+- **M3 阶段已交付**（`5df031d` PRP-M3-ENCOUNTER-BATCH-01），**待真人裁决**（Content Batch，**不做平衡**）：
+  真人晚上判断「三种敌人是否真的提出了不同的战斗问题」。⚠️ 记录在案的既有事实：`RangedTurret`（OPP-03）
   在同玩家基础 Build 下**必输**（实测 481 步玩家阵亡）；**禁止**顺手改数值 —— 要改就是
   **新的设计假设**、单开 Queue。三个 Encounter 的固定批次 / 玩家 / 战场口径**不得**再动。
 - **M2 阶段已交付**（`0cb1956` PRP-M2-NEXT-RUN-SEED-VALIDATION）。

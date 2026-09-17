@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>最强水果 — 验证中心 Validation Hub（PRP-VALIDATION-HUB-R1）</title>
+    <!--
+      PRP-VALIDATION-HUB-R1｜Validation Hub（纯测试壳）。
+
+      它解决的问题是**人工验收成本**，不是玩法：
+        「改一个机制 → 重新找 URL/命令 → 单独录像 → 再切另一个」这条路已经不划算了。
+
+      本页只做导航：把当前需要人工验收的三个验证入口摆在同一页上，
+      `npm run dev:validation` 一次启动 → 连续切换 → 一段录像批量验收。
+
+      边界（Queue 原文）：
+        - 本页不是产品入口，不进入任何正式构建（npm run build / build:pages /
+          build:e2e / build:wechat 零影响）；
+        - `npm run dev` 完全不变（根路径重写规则未动，落地页仍是玩家页面）；
+        - 控件不进玩家 UI：本页与三个入口页面是**各自独立的文档**，
+          玩家页面（run-page.html）里连一个 <button> 都没有；
+        - 本页**没有画布**：不画也不读任何运行期数据（帧率 / 物理 / 内部状态 / 伤害记录），
+          录像玩家区域不可能混入 Debug 数据；
+        - 切换 = 整页导航到入口页面**本身**（真实 <a href>），
+          旧验证的 Runtime / 弹丸 / 接触 / 计时器 / 监听器随文档一起销毁。
+          返回本页的方式见页面底部（浏览器后退）。
+
+      实验失败可直接删除本文件与 src/lab/portraitBattleLab/。
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { min-height: 100%; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: #06090e;
+        color: #e9eef7;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      #vhub-root.vhub-root {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 22px;
+        padding: 40px 20px 32px;
+      }
+
+      /* ---------------------------------------------------------------- 头部 */
+      .vhub-head { width: 100%; max-width: 760px; }
+      .vhub-title { font-size: 22px; font-weight: 700; letter-spacing: 0.02em; }
+      .vhub-lead { margin-top: 6px; font-size: 13px; color: #8a93a5; }
+      .vhub-marker {
+        margin-top: 14px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid #22304a;
+        background: #0d1420;
+        font-size: 13px;
+        color: #a8b6cc;
+      }
+
+      /* ------------------------------------------------------- 三个入口卡片 */
+      .vhub-list { width: 100%; max-width: 760px; list-style: none; display: flex; flex-direction: column; gap: 12px; }
+      .vhub-card {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 16px 18px;
+        border-radius: 12px;
+        border: 1px solid #22304a;
+        background: #0e1420;
+        color: inherit;
+        text-decoration: none;
+        transition: background 0.12s ease, border-color 0.12s ease;
+      }
+      .vhub-card:hover { background: #131c2c; border-color: #34507c; }
+      .vhub-card:focus-visible { outline: 2px solid #5c86c4; outline-offset: 2px; }
+      /* 「建议下一个」只是指路，不改行为 */
+      .vhub-card-next { border-color: #3d5c8f; box-shadow: inset 3px 0 0 #5c86c4; }
+
+      .vhub-index {
+        flex: 0 0 auto;
+        width: 30px; height: 30px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 50%;
+        background: #1a2740;
+        color: #cfe0ff;
+        font-size: 14px; font-weight: 600;
+      }
+      .vhub-body { flex: 1 1 auto; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+      .vhub-name { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+      .vhub-label { font-size: 17px; font-weight: 650; }
+      .vhub-zh { font-size: 12px; color: #7f8b9e; }
+      .vhub-queue { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: #6f7d92; word-break: break-all; }
+      .vhub-verifies { font-size: 13px; color: #b9c4d4; line-height: 1.5; }
+      .vhub-command { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: #5f6b7d; }
+      .vhub-go { flex: 0 0 auto; font-size: 13px; color: #8fb4ea; }
+
+      /* ------------------------------------------------------------------ 底部 */
+      .vhub-foot { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid #16202f; }
+      .vhub-note { font-size: 12px; color: #7b8697; line-height: 1.6; }
+      .vhub-back { color: #9fb0c8; }
+      .vhub-scope { color: #67717f; }
+
+      @media (max-width: 640px) {
+        #vhub-root.vhub-root { padding: 22px 14px 20px; gap: 16px; }
+        .vhub-card { padding: 13px 14px; gap: 12px; }
+        .vhub-title { font-size: 19px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="vhub-root"></div>
+    <script type="module" src="/src/lab/portraitBattleLab/validationHubMain.ts"></script>
+  </body>
+</html>

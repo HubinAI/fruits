@@ -293,3 +293,50 @@ initialPlayerHp == playerHpMax · spawnAx 400 / spawnBx 1200 / sep 800 · gapWor
 `runtimeActive` / `runtimeSerial` / `disposedCount` / `resetCount` / `fresh` / `live` /
 `rounds[]` / `screen` / `camera` / `canvas` / `assets`。
 E2E 端口 **8158**（run-page 8156 / next-run 8157）。
+
+## I. PRP-VALIDATION-HUB-R1 验证中心（独立入口 `validation-hub.html`）
+
+### I.1 三个入口（唯一数据源 = `validationHub.ts` 的 `VALIDATION_HUB_ENTRIES`）
+
+| 顺序 | id | label | 页面 | 对应 Queue | 后备命令 |
+|---|---|---|---|---|---|
+| 1 | `fullRun` | Full Run | `run-page.html` | `PRP-RUN-02-FULL-RUN-VERTICAL-SLICE` | `npm run dev:run-page` |
+| 2 | `nextRun` | Next Run | `next-run.html` | `PRP-M2-NEXT-RUN-SEED-VALIDATION` | `npm run dev:next-run` |
+| 3 | `encounterBatch` | Encounter Batch | `encounter-lab.html` | `PRP-M3-ENCOUNTER-BATCH-01` | `npm run dev:encounter-lab` |
+
+⚠️ `fullRun` 指向的 `run-page.html` **就是玩家正式页面本身**（= `build/branchDevEntry.ts` 的
+`BRANCH_DEFAULT_DEV_ENTRY`，即根路径重写的目标文件）。Hub **不复制、不包裹、不改写**它，
+也不给它注入任何控件；三个入口页面对本 Queue **零改动**。
+
+### I.2 切换 = 整页导航（有意选择，不是做不到）
+
+- 卡片是**真实 `<a href="./<page>">`**：点击 = 浏览器加载那个入口页面**本身**（可中键 / 可复制链接）。
+- 旧文档随之销毁 ⇒ 上一项的 `RunBattleRuntime` / 弹丸 / 接触记录 / RAF / resize 监听器 /
+  Run-local state 一起消失。实测（E2E V18–V24）：先真的打一场（`serial=1`、`steps>0`、`contact=true`），
+  切走再切回后 `fresh === null`、`runtimeActive === false`、`runtimeSerial === 0`、
+  `disposedCount === 0`、`rounds.length === 0`、画布 **1** 块；点一次只建一个运行时（`serial` 严格 +1）。
+- **不做**「在 Hub 里 `new RunPage(...)` 再切控制器」：① Full Run 就不再等于玩家页面（丢保真度）；
+  ② 要复制一套宿主逻辑（两套口径）；③ `RunPage` / `EncounterLab` 虽有 `dispose()`，但文档销毁
+  是**更强**的清理保证（宿主忘不掉）。
+- **代价**：入口页面里**没有**「返回验证中心」按钮 —— 加它就要改正式玩家页面
+  ⇒ 返回 = 浏览器后退（`Alt + ←`，Hub 页脚写明）。
+
+### I.3 「上次进入」标记
+
+`sessionStorage['prp-validation-hub:last-entry']`，**只指路不判定**（只认表内 id；非法 / 残留值
+当「没来过」；storage 被禁用或抛异常一律静默退化）。⚠️ 必须在 **`pageshow`** 里重读：
+后退可能触发 bfcache 恢复（脚本不重跑），只在 boot 读一次会永远停在旧值。
+
+### I.4 探针（E2E 依赖）
+
+`window.__VALIDATIONHUB__.probe()` → `title` / `lead` /
+`entries[]`（`id` / `label` / `zhLabel` / `queueId` / `verifies` / `href` / `pageFile` / `command`）/
+`lastEntry` / `nextEntry` / `cardCount` / `canvasCount`（**恒 0**）。
+E2E 端口 **8159**（run-page 8156 / next-run 8157 / encounter-lab 8158）。
+
+### I.5 Hub 是纯导航（产物实测）
+
+`assets/validation-hub-*.js` 约 **3.4KB**，0 处 `planck` / `PlanckBattleOrchestrator` /
+`contactRouter` / `damageResolver` / `playerGameRuntime` / `canvasPlayerUIHost` /
+`webDomPlayerUIHost` / `renderer` / `visualRegistry` 符号；Hub 只加载自己的 chunk
+（+ Vite 的 `modulepreload-polyfill`），**不捎带任何战斗 chunk**（E2E I3/I4）。

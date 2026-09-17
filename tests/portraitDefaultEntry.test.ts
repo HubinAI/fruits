@@ -56,6 +56,9 @@ describe('PRP-R2｜A. 默认启动链 = 根路径直接落到本轮原型', () =
       '/next-run.html',
       // PRP-M3：遭遇验证台同样**不**被重写（同上；本轮新增的第四个原型入口）
       '/encounter-lab.html',
+      // PRP-VALIDATION-HUB-R1：验证中心（三个验证入口的导航壳）同样**不**被重写
+      // —— 它只是把已验证的入口摆到一页上，不改默认启动链
+      '/validation-hub.html',
       '/src/main.ts',
       '/src/lab/portraitBattleLab/runMain.ts',
       '/@vite/client',
@@ -130,12 +133,13 @@ describe('PRP-R2｜C. 既有隔离守卫未被削弱（R23 / RP-27 改动后复�
     }
   });
 
-  it('R2-10 根目录只有五个 HTML 入口（不存在「绕过默认启动链的页面」）', () => {
+  it('R2-10 根目录只有六个 HTML 入口（不存在「绕过默认启动链的页面」）', () => {
     const htmls = readdirSync(REPO_ROOT)
       .filter((f) => f.endsWith('.html'))
       .sort();
     // ⚠️ PRP-M2 新增 `next-run.html`（「下一局起始改装」验证入口）；PRP-M3 新增
-    //    `encounter-lab.html`（遭遇验证台）。两者同样**不绕过**任何守卫：
+    //    `encounter-lab.html`（遭遇验证台）；PRP-VALIDATION-HUB-R1 新增 `validation-hub.html`
+    //    （验证中心：三个验证入口的导航壳）。三者同样**不绕过**任何守卫：
     //    不在默认启动链上（根路径仍只重写到玩家入口）、不进入任何正式构建、
     //    只由各自的 `npm run dev:*` 显式打开（清单按字典序）。
     expect(htmls).toEqual([
@@ -144,6 +148,7 @@ describe('PRP-R2｜C. 既有隔离守卫未被削弱（R23 / RP-27 改动后复�
       'next-run.html',
       'portrait-lab.html',
       'run-page.html',
+      'validation-hub.html',
     ]);
   });
 });

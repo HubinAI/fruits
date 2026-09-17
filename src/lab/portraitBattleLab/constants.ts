@@ -28,18 +28,21 @@
  *
  * 删除清单（整块移除本实验）：
  *   1) 本目录 src/lab/portraitBattleLab/（全部文件）
- *   2) 根目录 portrait-lab.html、run-page.html、next-run.html、encounter-lab.html
+ *   2) 根目录 portrait-lab.html、run-page.html、next-run.html、encounter-lab.html、
+ *      validation-hub.html
  *   3) 根目录 vite.portrait-lab.config.ts
  *   4) tests/portraitBattleLab.test.ts、tests/portraitBattleLabF1.test.ts、
  *      tests/portraitBattleLabA1.test.ts、tests/portraitBattleLabG1.test.ts、
  *      tests/portraitRunPage.test.ts、tests/portraitRunBattle.test.ts、
  *      tests/portraitNextRunValidation.test.ts、tests/portraitEncounterLab.test.ts、
+ *      tests/portraitValidationHub.test.ts、
  *      tests/_e2e_portrait_battle_lab.cjs、tests/_e2e_run_page.cjs、
  *      tests/_e2e_next_run.cjs、tests/_e2e_encounter_lab.cjs、
+ *      tests/_e2e_validation_hub.cjs、
  *      tests/_e2e_prp_default_entry.cjs
- *   5) package.json 中 dev:run-page / dev:next-run / dev:encounter-lab / dev:debug-lab /
- *      build:portrait-lab / e2e:portrait-lab / e2e:run-page / e2e:next-run /
- *      e2e:encounter-lab / e2e:default-entry 等 script
+ *   5) package.json 中 dev:run-page / dev:next-run / dev:encounter-lab / dev:validation /
+ *      dev:debug-lab / build:portrait-lab / e2e:portrait-lab / e2e:run-page / e2e:next-run /
+ *      e2e:encounter-lab / e2e:validation-hub / e2e:default-entry 等 script
  *   6) .gitignore 中 dist-portrait-lab/ 一行
  * 正式玩法 / 物理 / 数值 / Garage / Fusion / R4 / Meta / 存档 / 经济均不在删除影响面内。
  *
@@ -92,6 +95,13 @@ export type LabLoadoutId = 'WatermelonHeavyCannon' | 'BananaChargeHammer';
  *    它从下表里固定挑三套做集中对照（`ProtoRusher` / `Chaser` / `RangedTurret`，
  *    见 `encounterValidation.ts` 的 `ENCOUNTER_BATCH_IDS`）—— **不新增敌人、不改任何定义、
  *    不做平衡**；同一个玩家车（`WatermelonHeavyCannon`）只换对手。
+ *
+ * ⚠️ PRP-VALIDATION-HUB-R1：新增**验证中心**入口 `validation-hub.html`
+ *    （`validationHub.ts` = 三个入口的唯一数据源；`validationHubMain.ts` = 页面壳）。
+ *    它把 `run-page.html` / `next-run.html` / `encounter-lab.html` 三个验证入口摆到一页上，
+ *    **只做导航**：页面上没有画布、不显示任何运行期数据，也不向任何入口页面注入控件
+ *    （切换 = 整页导航到入口页面本身，旧验证的一切随文档销毁）。
+ *    ⚠️ 它**不**拥有新的战斗 / 物理 / 数值；删除本目录时它一起消失，不影响任何正式路径。
  */
 export type LabEncounterId =
   | 'Chaser'
