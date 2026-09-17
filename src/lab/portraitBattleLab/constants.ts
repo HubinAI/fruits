@@ -28,15 +28,18 @@
  *
  * 删除清单（整块移除本实验）：
  *   1) 本目录 src/lab/portraitBattleLab/（全部文件）
- *   2) 根目录 portrait-lab.html、run-page.html
+ *   2) 根目录 portrait-lab.html、run-page.html、next-run.html、encounter-lab.html
  *   3) 根目录 vite.portrait-lab.config.ts
  *   4) tests/portraitBattleLab.test.ts、tests/portraitBattleLabF1.test.ts、
  *      tests/portraitBattleLabA1.test.ts、tests/portraitBattleLabG1.test.ts、
  *      tests/portraitRunPage.test.ts、tests/portraitRunBattle.test.ts、
+ *      tests/portraitNextRunValidation.test.ts、tests/portraitEncounterLab.test.ts、
  *      tests/_e2e_portrait_battle_lab.cjs、tests/_e2e_run_page.cjs、
+ *      tests/_e2e_next_run.cjs、tests/_e2e_encounter_lab.cjs、
  *      tests/_e2e_prp_default_entry.cjs
- *   5) package.json 中 dev:run-page / dev:debug-lab / build:portrait-lab /
- *      e2e:portrait-lab / e2e:run-page / e2e:default-entry 等 script
+ *   5) package.json 中 dev:run-page / dev:next-run / dev:encounter-lab / dev:debug-lab /
+ *      build:portrait-lab / e2e:portrait-lab / e2e:run-page / e2e:next-run /
+ *      e2e:encounter-lab / e2e:default-entry 等 script
  *   6) .gitignore 中 dist-portrait-lab/ 一行
  * 正式玩法 / 物理 / 数值 / Garage / Fusion / R4 / Meta / 存档 / 经济均不在删除影响面内。
  *
@@ -84,6 +87,11 @@ export type LabLoadoutId = 'WatermelonHeavyCannon' | 'BananaChargeHammer';
  *    为什么不复用既有的 `Chaser` / `RangedTurret` / `LightSwarm3`：见 testData.ts 的普查注释
  *    （`Chaser` 在部分 Build 下会一击必杀、`RangedTurret` 对基础 Build 必杀、
  *     `LightSwarm3` 的展示名写明「3 个敌人」而 Run Page 战斗只能容纳 1 个敌人）。
+ *
+ * ⚠️ PRP-M3：新增**遭遇验证台**入口 `encounter-lab.html`（`encounterLab*.ts`），
+ *    它从下表里固定挑三套做集中对照（`ProtoRusher` / `Chaser` / `RangedTurret`，
+ *    见 `encounterValidation.ts` 的 `ENCOUNTER_BATCH_IDS`）—— **不新增敌人、不改任何定义、
+ *    不做平衡**；同一个玩家车（`WatermelonHeavyCannon`）只换对手。
  */
 export type LabEncounterId =
   | 'Chaser'

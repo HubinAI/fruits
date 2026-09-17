@@ -13,8 +13,8 @@
 ## 1. Identity / 链尾
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。原型正式名 **PRP｜Portrait Run Prototype**。
-- **链尾**：`54fbd6f` PRP-RUN-02-FULL-RUN-VERTICAL-SLICE → **`0cb1956` PRP-M2-NEXT-RUN-SEED-VALIDATION
-  （独立验证入口 `next-run.html` + 三个起始种子 + `NEXT RUN VALIDATION COMPLETE`）**；更早 SHA 查 `git log`。
+- **链尾**：`54fbd6f` RUN-02 整局竖切 → `0cb1956` M2 下一局种子（`next-run.html`）→
+  **M3 遭遇验证台**（`encounter-lab.html` + `RunBattleRuntime.contactResidue()`）；更早 SHA 查 `git log`。
 - 全链对 `src/core|physics|render|player|platform|battle|ui` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，逐帧不变）。
 
@@ -41,6 +41,8 @@
 - 本机 bash PATH 可能缺 `/usr/bin` → 命令前 `export PATH="/usr/bin:/bin:$PATH"`。
 - `交接文档_*.md` 是**本地件**，勿误提交；截图 / 日志落 `outputs/`（gitignored）。
 - ⚠️ **id 改名 = 全通道同步**：`src` + `tests/*.ts` + `tests/*.cjs`（E2E 侧有镜像字面量表）。
+- ⚠️ **写断言三坑**：`toEqual` 比较**键集**（`{...x, 覆盖}` 键数不同 ⇒ 永远不等，要写取值函数）；
+  浮点**别 round 后再去重**；源码守卫匹配前**剥注释**（HTML 的 `<!-- -->` 同样要剥）。
 - ⚠️ **跨轮复验 PRP 前必须先 `npm run build:portrait-lab`**：E2E 读 `dist-portrait-lab/`，
   而该目录 `emptyOutDir:false` 会留下**陈旧 chunk** ⇒ 改完源码直接跑 E2E 会拿到旧产物的假 FAIL
   （R4 实测：`suppress=undefined` 4 条，重建后 406/406 全绿）。
@@ -159,9 +161,39 @@
 - ⚠️ 验证流程只有四拍：`RUN COMPLETE → 种子三选一 → 新 Run 第一场 → NEXT RUN VALIDATION COMPLETE`
   （第一场结束即停；种子选择浮层**复用 CHOICE 卡片几何**，零布局新增）。
 
+### 5.8 遭遇验证台（M3，本轮交付）
+- **M3（PRP-M3-ENCOUNTER-BATCH-01）**：Content Batch，**不开发新敌人、不改任何数值、不做平衡**。
+  独立入口 `encounter-lab.html` + `npm run dev:encounter-lab` + `e2e:encounter-lab`（E2E 端口 **8158**）。
+- **固定批次只三套**（唯一来源 `encounterValidation.ENCOUNTER_BATCH_IDS`）：
+  `ProtoRusher`(R1-RUSH-02) / `Chaser`(OPP-16) / `RangedTurret`(OPP-03)。
+  ⚠️ label / 模板 id / count **必须从 `testData.LAB_ENCOUNTERS` 读现成条目**，不在验证台复制一份；
+  玩家恒为 `ENCOUNTER_LAB_LOADOUT_ID = RUN_DEMO_LOADOUT_ID`（`WatermelonHeavyCannon`）。
+- ⚠️ **清理语义的真相（最容易写错）**：`PlanckBattleOrchestrator.dispose()` **只是丢弃引用**
+  （`PlanckWorld` 无显式销毁）⇒ 被释放的实例**仍可继续 `step`**（实测 dispose 后 240 → 241 步）。
+  「切换前完全 cleanup」**不靠对象变惰性**，靠**宿主生命周期**：
+  `select()` = `disposeRuntime()`（`runtime.dispose()` + `runtime = null`）**先于** `new RunBattleRuntime(...)`；
+  `tick` 在 `runtime === null` 时立刻 `rafHandle = 0`。判据 = **新实例开局读数干净**。
+- ⚠️ **开局读数必须构造时固化**（RAF 一启动物理就前进，页面上抓不到第二遍）；
+  口径 = `steps 0 · timeMs 0 · projectiles 0 · contact/impact/damage 全 false · buildIds [] ·
+  满耐久 · spawn 400/1200/sep 800 · gapWorld > 0`。接触残留来自新增只读
+  `RunBattleRuntime.contactResidue()`（= 正式 `ContactRouter.debug` 三条 last* 是否非空）。
+- ⚠️ 三个测试坑：① `toEqual` **比较键集**（`{...fresh,覆盖}` 与期望对象键数不同 ⇒ 永远不等，
+  要写 `commonOf()` 取同名字段）；② **浮点别四舍五入后再去重**（563.663 与 564.0 取整都是 564）；
+  ③ HTML 注释里的说明文字会命中字符串守卫 ⇒ **剥 HTML 注释**再匹配（与 R2-09 同口径）；
+  「不写战斗数值」的守卫要用**正则**（`includes('damage:')` 会被 `damage: cr.damage` 误伤）。
+- 三套实测结局（同一玩家满耐久，真实物理）：`ProtoRusher` 835 步 / 剩 843（胜）·
+  `Chaser` 933 步 / 剩 228（胜）· `RangedTurret` 481 步 / **玩家死**（负）。
+  三条过程完全不同 ⇒ 三个敌人确实提出三个不同问题。⚠️ 见 REF §H.5。
+
 ## 6. Next action
-- **M2 阶段已交付**（`0cb1956` PRP-M2-NEXT-RUN-SEED-VALIDATION）。**按指令停止，不自动开下一阶段。**
-- **下一步取决于真人裁决**：① 三个种子的**开局难度是否等价** —— 实测「重炮开局」第一场只活下
+- **M3 阶段已交付**（`PRP-M3-ENCOUNTER-BATCH-01`）。**按指令停止，等技术通过后才进入最后一个
+  Validation Tool Queue。**
+- **M3 的下一步取决于真人裁决**（本 Queue 是 Content Batch，**不做平衡**）：真人晚上判断
+  「三种敌人是否真的提出了不同的战斗问题」。⚠️ 记录在案的既有事实：`RangedTurret`（OPP-03）
+  在同玩家基础 Build 下**必输**（实测 481 步玩家阵亡）；**禁止**顺手改数值 —— 要改就是
+  **新的设计假设**、单开 Queue。三个 Encounter 的固定批次 / 玩家 / 战场口径**不得**再动。
+- **M2 阶段已交付**（`0cb1956` PRP-M2-NEXT-RUN-SEED-VALIDATION）。
+- **M2 待真人裁决**：① 三个种子的**开局难度是否等价** —— 实测「重炮开局」第一场只活下
   **13/1100**（另两个 1009 / 919），战斗也更长（1018 步 vs 727/710）⇒ 这是「下一局起点不同」
   还是「选错就死」？⚠️ **禁止**顺手改第一层数值（已冻结），要改就是**新的设计假设**、单开 Queue。
   ② 「下一局起点不同」是否真的让人想立刻再打一局（元体验本身）。

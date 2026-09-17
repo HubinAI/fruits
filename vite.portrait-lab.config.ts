@@ -30,6 +30,9 @@ export default defineConfig({
         // PRP-M2：验证入口（「下一局起始改装」）。与另两个入口同源 —— 仍是同一块
         // 可整块删除的实验产物，不进入 dist / dist-pages / dist-e2e / dist-wechat。
         'next-run': 'next-run.html',
+        // PRP-M3：遭遇验证台（同一辆玩家车 × 三个既有正式 Encounter 的集中对照）。
+        // 仍是同一块可整块删除的实验产物，不进入 dist / dist-pages / dist-e2e / dist-wechat。
+        'encounter-lab': 'encounter-lab.html',
       },
     },
   },

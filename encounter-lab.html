@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>最强水果 — 遭遇验证台（PRP-M3）</title>
+    <!--
+      PRP-M3-ENCOUNTER-BATCH-01｜Encounter Validation Lab。
+
+      它验证的是**内容问题**：不同的敌人，是否真的让同一辆战车面临不同的战斗问题？
+      不是新玩法、不是新敌人、不是平衡调整 —— 只是把三个**已经存在**的正式 Encounter
+      摆到同一块舞台上，一个按钮切换一次（切到哪个就跑一场真实战斗，打完即停）。
+
+      与玩家页面（`run-page.html`）严格分离：
+        - 本页由 `npm run dev:encounter-lab` 打开，**不是** `npm run dev` 的落地页；
+        - 本页不参与 npm run build / build:pages / build:e2e / build:wechat 任一正式构建；
+        - 测试控件（三个对手 + Reset）只存在于本页，**不进入玩家正式 UI**：
+          玩家页面是纯画布页面，DOM 里连一个 <button> 都没有。
+
+      实验失败可直接删除本文件与 src/lab/portraitBattleLab/。
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: #06090e;
+        color: #e9eef7;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+      /* 唯一容器 = 整个视口；画布由 PlayerViewportTransform contain 缩放居中 */
+      #elab-root.elab-root {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+
+      /* 测试控件（页面外，不进入玩家 UI）：只允许三个对手 + Reset */
+      .elab-bar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+      .elab-btn {
+        font: inherit;
+        font-size: 13px;
+        padding: 7px 14px;
+        border-radius: 8px;
+        border: 1px solid #2b3550;
+        background: #141c28;
+        color: #cfe0ff;
+        cursor: pointer;
+      }
+      .elab-btn:hover { background: #1c2740; }
+      .elab-btn-active { background: #274267; border-color: #5c86c4; color: #ffffff; }
+      .elab-btn-reset { color: #ffb0a6; border-color: #4a2b2b; background: #1e1416; }
+      .elab-btn-reset:hover { background: #2c1c1e; }
+      .elab-btn:disabled { opacity: 0.45; cursor: default; }
+
+      /* 手机画面容器（与玩家入口同一套：桌面居中放大，窄屏铺满） */
+      .elab-stage {
+        position: relative;
+        overflow: hidden;
+        height: min(70vh, 760px);
+        width: calc(min(70vh, 760px) * 390 / 844);
+        background: #0b0e14;
+        border-radius: 10px;
+        box-shadow: 0 0 0 1px #1b2434, 0 24px 70px rgba(0, 0, 0, 0.6);
+      }
+      .elab-status { font-size: 12px; color: #8a93a5; text-align: center; }
+
+      @media (max-width: 640px), (max-height: 620px) {
+        .elab-root { gap: 6px; }
+        .elab-stage {
+          height: auto;
+          flex: 1 1 auto;
+          width: 100%;
+          border-radius: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="elab-root"></div>
+    <script type="module" src="/src/lab/portraitBattleLab/encounterLabMain.ts"></script>
+  </body>
+</html>

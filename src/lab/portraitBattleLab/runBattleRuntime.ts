@@ -514,6 +514,25 @@ export class RunBattleRuntime {
     return (this.snapshot().projectiles ?? []).filter((p) => p.team === side).length;
   }
 
+  /**
+   * PBL-M3-ENCOUNTER-BATCH｜**接触残留诊断**（只读，无副作用）。
+   *
+   * 口径 = 正式 `ContactRouter` 自己记录的最后一次接触 / 命中 / 伤害事实。
+   * 一个**刚建立**的战斗运行时必须三项全 `false` —— 这就是「上一场的接触没有留下来」
+   * 的机器判据（接触状态是运行时的私有事实，随 `dispose()` 一起消失）。
+   *
+   * ⚠️ 放在本文件而不是调用方：正式编排器只允许本文件引用（R22a-4 的单入口守卫），
+   *    验收入口因此只拿到这套极窄只读端口，而不是编排器实例。
+   */
+  contactResidue(): { contact: boolean; impact: boolean; damage: boolean } {
+    const d = this.orchestrator.router.debug;
+    return {
+      contact: d.lastContact !== null,
+      impact: d.lastImpact !== null,
+      damage: d.lastDamage !== null,
+    };
+  }
+
   dispose(): void {
     this.abilities.dispose();
     this.orchestrator.dispose();

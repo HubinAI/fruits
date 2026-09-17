@@ -233,3 +233,63 @@
 
 ⚠️ **重炮开局几乎濒死**（1.2%），战斗也更长 ⇒ 「三个种子难度不等价」是本轮待裁决项。
 **禁止**改第一层数值（已冻结）。另：`heavyShell` 的 `recoil 90`（基础 30）是首要怀疑对象。
+
+## H. PRP-M3 遭遇验证台（独立入口 `encounter-lab.html`，运行时细节）
+
+Content Batch：**只换对手，不换车、不换战场、不调数值**。
+
+### H.1 固定批次（唯一来源 `encounterValidation.ts`）
+
+`ENCOUNTER_BATCH_IDS = ['ProtoRusher', 'Chaser', 'RangedTurret']`；label / 正式模板 id /
+count **一律从 `testData.LAB_ENCOUNTERS` 读现成的条目**（不复制中文名、不新写 id）。
+
+| id | 正式模板 | 车身 | HP | drive | 验证目标 |
+|---|---|---|---|---|---|
+| `ProtoRusher` | `R1-RUSH-02` | `pineappleBody` | 1000 | forward | 快速接敌 / 近身压力 |
+| `Chaser` | `OPP-16` | `bananaBody` | 900 | forward | 持续追击 / 重型接触压力 |
+| `RangedTurret` | `OPP-03` | `watermelonBody` | 1100 | **stationary** | 远程输出 / 接近压力 |
+
+玩家恒为 `ENCOUNTER_LAB_LOADOUT_ID = RUN_DEMO_LOADOUT_ID`（= `WatermelonHeavyCannon`）。
+
+### H.2 一场战斗的建立（与 Run Page 同一条正式链路）
+
+`new RunBattleRuntime({ encounterId })` —— **不传 build / 不传 carriedHp** ⇒ 空 Build（无 Run
+Buff）+ 满耐久 + 正式 spawn。三套共用：world 1600×900 / groundY 700 / spawn 400·1200 / sep 800 /
+`playerHpMax 1100`。**窗口变化时只换 `encounterId`**，其余一个字不改。
+
+### H.3 ⚠️ 清理语义的真相（本项目最容易写错的一条）
+
+`PlanckBattleOrchestrator.dispose()` = **只丢弃引用**（`PlanckWorld` 无显式销毁）⇒
+被释放的实例在内存里**仍然可以被继续 `step`**（实测：dispose 后再 step，240 → 241 步）。
+因此「切换前一场必须完全 cleanup」**不靠对象变惰性**，靠**宿主生命周期**：
+`select()` 必须 `disposeRuntime()`（内部 `runtime.dispose()` + `runtime = null`）→ `new RunBattleRuntime(...)`；
+循环 `tick` 在 `this.runtime === null` 时立刻 `rafHandle = 0` 退出。
+E2E 判据 = **新实例的开局读数干净**（不是「旧实例不动了」）。
+
+### H.4 开局读数（残留判据的口径）
+
+在**任何物理推进之前**采集并固化（RAF 一启动就前进，页面上抓不到第二遍）：
+`steps 0 · timeMs 0 · projectiles 0 · contact/impact/damage 全 false · buildIds [] ·
+initialPlayerHp == playerHpMax · spawnAx 400 / spawnBx 1200 / sep 800 · gapWorld > 0`。
+`contact/impact/damage` 来自新增的只读 `RunBattleRuntime.contactResidue()`
+（= 正式 `ContactRouter.debug` 的三条 last* 是否非空）。
+
+### H.5 三套 Encounter 的实测结局（真机四视口，真实物理，同一玩家满耐久）
+
+| Encounter | 步数 | 时长 | 玩家耐久 | 敌耐久 | winner |
+|---|---|---|---|---|---|
+| `ProtoRusher` | 835 | 14.0s | **843 / 1100** | 0 / 1000 | A |
+| `Chaser` | 933 | 15.5s | **228 / 1100** | 0 / 900 | A |
+| `RangedTurret` | 481 | 8.0s | **0 / 1100** | 619 / 1100 | B |
+
+三条过程完全不同 ⇒ 三个敌人确实提出了三个不同的问题。
+⚠️ `RangedTurret` 打死玩家 = **既有平衡事实**（历史已记「对基础 Build 必杀」）；
+本 Queue **不做平衡**、**不改数值** —— 若将来要动，那是**新的设计假设**，单开 Queue。
+
+### H.6 探针（E2E 依赖）
+
+`window.__ENCOUNTERLAB__.probe()` → `title` / `lead` / `loadoutId` / `playerLabel` /
+`playerHpMax` / `batch[]` / `controls[]` / `active` / `phase`（`idle|running|done`）/
+`runtimeActive` / `runtimeSerial` / `disposedCount` / `resetCount` / `fresh` / `live` /
+`rounds[]` / `screen` / `camera` / `canvas` / `assets`。
+E2E 端口 **8158**（run-page 8156 / next-run 8157）。
