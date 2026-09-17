@@ -95,12 +95,17 @@ describe('PBL-F0｜目录完整性（Arena A/B · Loadout ×2 · Encounter ×3�
     expect(new Set(LAB_LOADOUTS.map((l) => l.id)).size).toBe(LAB_LOADOUTS.length);
   });
 
-  it('R5 Encounter 目录为四套规范项且 id 唯一（含 PRP Build Prototype Encounter）', () => {
+  it('R5 Encounter 目录为七套规范项且 id 唯一（含 PRP Build Prototype Encounter + PRP-RUN-02 压力阶梯）', () => {
     expect(LAB_ENCOUNTERS.map((e) => e.label)).toEqual([
       '追猎者',
       '远程炮台',
       '3 轻敌人',
       '菠萝冲刺车',
+      // PRP-RUN-02-FULL-RUN-VERTICAL-SLICE：四场战斗的压力阶梯 ①/②/④
+      // （三个都只是**既有正式对手模板**的引用，没有新增敌人）
+      '菠萝喷火车',
+      '菠萝圆锯车',
+      '香蕉推杆镭射车',
     ]);
     expect(new Set(LAB_ENCOUNTERS.map((e) => e.id)).size).toBe(LAB_ENCOUNTERS.length);
   });

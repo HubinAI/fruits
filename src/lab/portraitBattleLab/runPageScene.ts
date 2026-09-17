@@ -50,24 +50,27 @@ import {
 } from './runPageLayout';
 import {
   runActionEnabled,
-  runChoicePool,
+  runOverlayCards,
+  runOverlayOpen,
+  type RunEncounterInfo,
   type RunPageContext,
   type RunPageState,
 } from './runPageState';
+import { runScriptBattleNodes } from './runScript';
 
 /** 本 Queue 的固定演示装载（Debug 选择项不参与 Run Page）。 */
 export const RUN_DEMO_LOADOUT_ID = 'WatermelonHeavyCannon';
 /**
- * ⚠️ PRP-RUN-R1：演示遭遇从 `Chaser`（OPP-16，追猎者）换成 **`ProtoRusher`**
- * （正式模板 `R1-RUSH-02` 的单车版，菠萝冲刺车）——即 **Build Prototype Encounter**。
+ * 演示遭遇的**默认值**（IDLE 待机近景的构图参照 + `RunBattleRuntime` 省略 `encounterId` 时的兜底）。
  *
- * 原因：Run Page 的单局验证连打**三场**真实战斗、耐久**单一贯穿**（`HP <= 0` 即本局失败）。
- * 实测：`Chaser` 第一场就吃掉玩家 ~75% 耐久 → 第二场必败，三场验证在结构上跑不完；
- * `ProtoRusher` 在全部 9 种池内组合下三场连锁 **9/9 存活**（三条强联动路线终局余量
- * 32%~49%），同时**保留真实物理接敌**（会真实冲刺撞击，终局仍是对打而不是沙包）。
+ * ⚠️ PRP-RUN-R1：从 `Chaser`（OPP-16，追猎者）换成 **`ProtoRusher`**（正式模板 `R1-RUSH-02`
+ *   的单车版，菠萝冲刺车）。原因：Run Page 的单局连打多场真实战斗、耐久**单一贯穿**
+ *   （`HP <= 0` 即本局失败）。实测 `Chaser` 第一场就吃掉玩家 ~75% 耐久 → 第二场必败；
+ *   `ProtoRusher` 在池内组合下可存活，同时保留真实物理接敌（会真实冲刺撞击）。
  *
- * 没有新增敌人 / 没有改正式敌人定义 / 没有改任何数值 —— 只是**换用了另一套既有的
- * 正式对手模板**（完整选型依据与两轮普查数据见 `testData.ts` 该条目的注释）。
+ * ⚠️ PRP-RUN-02：本常量**不再**等于「本局唯一对手」——四场阶梯的对手来自 Run Script
+ *   各节点的 `encounterId`（见 `runScript.ts`）。它现在只是「默认遭遇」。
+ *   没有新增敌人 / 没有改正式敌人定义 / 没有改任何数值 —— 只是换用既有的正式对手模板。
  */
 export const RUN_DEMO_ENCOUNTER_ID = 'ProtoRusher';
 
@@ -75,24 +78,54 @@ export const RUN_DEMO_ENCOUNTER_ID = 'ProtoRusher';
 export const RUN_PLAYER_FACING = 1 as const;
 export const RUN_ENEMY_FACING = -1 as const;
 
-let cachedPlan: SpawnPlan | null = null;
+/**
+ * 按 Encounter id 缓存 spawn plan（纯数据，无副作用）。
+ *
+ * ⚠️ PRP-RUN-02：Run Script 里每个 BATTLE / FINAL 节点各自有一套对手 ⇒ 需要**多个** plan；
+ *    与 IDLE 待机近景共用一个缓存（同一份正式链路解析结果，不出现第二套口径）。
+ */
+const planCache = new Map<string, SpawnPlan>();
 
-/** F1 共享测试数据的固定演示组合（构建一次并缓存；纯数据，无副作用）。 */
-export function runDemoPlan(): SpawnPlan {
-  if (!cachedPlan) cachedPlan = buildSpawnPlan(RUN_DEMO_LOADOUT_ID, RUN_DEMO_ENCOUNTER_ID);
-  return cachedPlan;
+export function runPlanFor(encounterId: string): SpawnPlan {
+  let p = planCache.get(encounterId);
+  if (!p) {
+    p = buildSpawnPlan(RUN_DEMO_LOADOUT_ID, encounterId);
+    planCache.set(encounterId, p);
+  }
+  return p;
 }
 
-/** Run Page 的状态机上下文（展示名与耐久上限都来自共享数据，不手写）。 */
-export function runPageContext(plan: SpawnPlan = runDemoPlan()): RunPageContext {
+/** F1 共享测试数据的默认演示组合（IDLE 待机近景的构图参照）。 */
+export function runDemoPlan(): SpawnPlan {
+  return runPlanFor(RUN_DEMO_ENCOUNTER_ID);
+}
+
+/**
+ * Run Page 的状态机上下文（展示名与耐久上限都来自共享数据，不手写）。
+ *
+ * ⚠️ PRP-RUN-02：`encounters` 按 **Run Script 的 BATTLE / FINAL 节点 id** 提供 ——
+ *    状态机只按节点 id 取敌情，因此页面 / 状态机里**不需要**任何 `if (day === X)` 分支。
+ *    敌情（展示名 + 真实 HP 上限）全部来自**同一个** `buildSpawnPlan` 正式链路。
+ */
+export function runPageContext(): RunPageContext {
   const loadout = findLoadout(RUN_DEMO_LOADOUT_ID);
-  const encounter = findEncounter(RUN_DEMO_ENCOUNTER_ID);
-  const enemy = plan.enemies[0];
+  const player = runDemoPlan().player;
+  const encounters: Record<string, RunEncounterInfo> = {};
+  for (const node of runScriptBattleNodes()) {
+    const id = node.encounterId;
+    if (!id) continue;
+    const plan = runPlanFor(id);
+    const enemy = plan.enemies[0];
+    const encounter = findEncounter(id);
+    encounters[node.id] = {
+      label: encounter ? encounter.label : enemy.bodyName,
+      hpMax: enemy.hp,
+    };
+  }
   return {
-    vehicleLabel: loadout ? loadout.label : plan.player.bodyName,
-    encounterLabel: encounter ? encounter.label : enemy.bodyName,
-    playerHpMax: plan.player.hp,
-    enemyHpMax: enemy.hp,
+    vehicleLabel: loadout ? loadout.label : player.bodyName,
+    playerHpMax: player.hp,
+    encounters,
   };
 }
 
@@ -284,7 +317,8 @@ export function runStageLayers(view: RunStageView): RunLayeredRect[] {
  * 一整帧的「纯色几何层」（绘制与面积账本共用的唯一来源）。
  *
  * 语义 = **画面上确实带着调色板精确色的像素**：
- *   - CHOICE 打开时整页被遮罩合成为新颜色 → 底层几何不再带精确色，本帧只登记浮层自身；
+ *   - 浮层（CHOICE / DURABILITY）打开时整页被遮罩合成为新颜色 → 底层几何不再带精确色，
+ *     本帧只登记浮层自身；
  *   - **EVENT / BATTLE / RESULT**：舞台带被真实战斗世界（离屏位图）占据 →
  *     地线 / 路面**不存在**，本帧不登记这两层；
  *   - 车辆是 sprite，本身不是纯色 → 从不入账；
@@ -292,9 +326,10 @@ export function runStageLayers(view: RunStageView): RunLayeredRect[] {
  */
 export function runPageLayerShapes(state: RunPageState, view: RunStageView): RunLayeredRect[] {
   const out: RunLayeredRect[] = [];
+  const overlay = runOverlayOpen(state);
 
-  // 底部常驻层（CHOICE 遮罩下会被合成掉 → 不登记）
-  if (state.phase !== 'CHOICE') {
+  // 底部常驻层（浮层遮罩下会被合成掉 → 不登记）
+  if (!overlay) {
     // 待机近景的地线 / 路面只在 IDLE 真实可见（其余 phase 被真实战场覆盖）
     if (state.phase === 'IDLE') out.push(...runStageLayers(view));
 
@@ -313,10 +348,11 @@ export function runPageLayerShapes(state: RunPageState, view: RunStageView): Run
     if (runActionEnabled(state)) out.push({ layer: 'actionBar', rect: runActionBarRect() });
   }
 
-  // CHOICE 浮层：卡片顶部强调条（不含文字、不被描边 / 图标覆盖）
+  // 浮层（CHOICE 强化 / DURABILITY 耐久事件）：卡片顶部强调条（不含文字、不被描边 / 图标覆盖）
   // ⚠️ PRP-BUILD-01：卡片数量取自**当前候选池**（第一层 / 第二层条件池），不是写死的第一层三项。
-  if (state.phase === 'CHOICE') {
-    for (const card of runChoiceCardRects(runChoicePool(state).length)) {
+  // ⚠️ PRP-RUN-02：DURABILITY 复用同一套卡片几何（`cardBar` 层）⇒ **零布局改动**。
+  if (overlay) {
+    for (const card of runChoiceCardRects(runOverlayCards(state).length)) {
       out.push({ layer: 'cardBar', rect: runChoiceBarRect(card) });
     }
   }

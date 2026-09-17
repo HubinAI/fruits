@@ -13,9 +13,9 @@
 ## 1. Identity / 链尾
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。原型正式名 **PRP｜Portrait Run Prototype**。
-- **链尾**：`6ee7fea` BUILD-01-R4（删 strongRecoil）→ **`e088cb0` PRP-BUILD-01-CLOSEOUT-AND-FREEZE
-  （删 suppressionShot；快速装填第二层改通用转向池；BUILD-01 阶段收口）**；更早 SHA 查 `git log`。
-- 全链对 `src/core|physics|render|player|platform` diff **恒为空**；唯一正式 gameplay 改动 =
+- **链尾**：`e088cb0` PRP-BUILD-01-CLOSEOUT-AND-FREEZE → **`PRP-RUN-02-FULL-RUN-VERTICAL-SLICE`
+  （固定 Run Script 九节点 + 四场压力阶梯 + 耐久取舍事件 + `RUN COMPLETE`）**；更早 SHA 查 `git log`。
+- 全链对 `src/core|physics|render|player|platform|battle|ui` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，逐帧不变）。
 
 ## 2. Rules
@@ -35,8 +35,9 @@
 - ⚠️ `git commit -F <文件>` 必须用 **Windows 路径**（`/tmp` git 读不到）；**不要** `git commit -m @'…'@`。
 - Memory 并入功能 commit；**不单独提交 memory**（例外：纯 memory 补正可单独 commit）。
   ⚠️ memory 里**别引用补正 commit 自身的 SHA**（每写一次就失效）。
-- vitest：cwd 盘符必须**大写** `/D/…`；全量 `--pool=vmForks --maxWorkers=1`；过滤器用**子串**；
-  ⚠️ **必须独占机器**（与 E2E / 构建并发时**无关文件**会报 `Test timed out in 5000ms`）→ 先单独重跑复现。
+- vitest：全量 `--pool=vmForks --maxWorkers=1`；过滤器用**子串**；
+  ⚠️ **必须独占机器**（与 E2E / 构建并发时**无关文件**会报 `Test timed out in 5000ms`）→ 先单独重跑复现；
+  实测 cwd 盘符**大小写均可**（`/d/…` 与 `/D/…` 都通过）。
 - 本机 bash PATH 可能缺 `/usr/bin` → 命令前 `export PATH="/usr/bin:/bin:$PATH"`。
 - `交接文档_*.md` 是**本地件**，勿误提交；截图 / 日志落 `outputs/`（gitignored）。
 - ⚠️ **id 改名 = 全通道同步**：`src` + `tests/*.ts` + `tests/*.cjs`（E2E 侧有镜像字面量表）。
@@ -117,17 +118,39 @@
   槽位语义与另两池不同 —— 这是有意的收口结果。**不新增第四个第一层强化，不加长任何池。**
 - ⚠️ 物理侧的三条证伪结论（跨 R2~R4 累计）见 `REF_PRP_RUNTIME.md` §C，**别重犯**。
 
+### 5.6 RUN-02 整局竖切（`PRP-RUN-02-FULL-RUN-VERTICAL-SLICE`）
+- **唯一 RunScript 数据源** = `runScript.ts`（纯数据 + 纯查询，不 import 战斗/DOM）。
+  九节点：`d1-start(1) → d2-battle1(2) → d2-choice1(2) → d3-battle2(3) → d4-durability(4)`
+  →（repair）`d5-tend(5)` /（upgrade）`d5-choice2(5)` → `d6-battle3(6) → d7-final(7)`。
+- ⚠️ **进度锚点是 `nodeId`，不是「第几场 / 第几选」**；页面里**禁止** `if (day === X)`。
+  战斗节点是**两段式**：`IDLE →(按一次) EVENT →(再按) BATTLE` ⇒ 任何「点到开战」的驱动
+  都**不能写死点击次数**（新局还要先过 `d1-start`）。
+- 四场对手全部来自**脚本节点的 `encounterId`**（无写死的演示遭遇）；压力阶梯 =
+  FireBrute 181 / SawRusher 221 / ProtoRusher 257 / RodLaser 482 掉血（单调递增，零数值改动）。
+- **耐久事件**：`维修`（回耐久 · 放弃强化）/ `继续改装`（不回耐久 · 换第二次强化）；
+  维修量**按缺口截断** `min(275, 上限 − 当前)`，且补偿会被 `min(maxHp, ·)` 截断。
+- ⚠️ **`runCarriedPlayerHp` 的可读窗口**：`!s.battle.done` → `null` ⇒ **进 BATTLE 后读它恒为 `null`**，
+  宿主必须在 **EVENT 那一刻**读；进 BATTLE 后权威来源 = `s.battle.playerHp`。
+- ⚠️ **`projectileCount()` 是全场口径**（对手喷火器/镭射的弹丸也算）⇒ 反推开火节奏必须用
+  `battleWorld.playerProjectiles`（只数玩家 A 方），否则基线会被量成 25ms。
+- 四场真实物理耐久链（Node 冻结表）与浏览器实跑**逐项相等**（例：`twinCannon+tripleLoad`
+  改装分支 `[919, 907, 699, 217]`）；同一条 `heavyShell+kineticBurst` 维修 → 终局 618，
+  改装 → 终局**归零 FAILED**（「耐久改变下一步选择」的真实数值证据）。
+
 ## 6. Next action
-- **BUILD-01 阶段已收口**（`PRP-BUILD-01-CLOSEOUT-AND-FREEZE`，基线 `204d0b8`）。
-  **按指令停止，不自动开下一阶段。**
-- **当前有效 Build 池最终结构**：第一层 `[heavyShell, twinCannon, fastReload]`（固定三项，不新增）；
+- **RUN-02 阶段已完成并交付**（`PRP-RUN-02-FULL-RUN-VERTICAL-SLICE`）。
+  **按指令停止，不自动开下一阶段**（不自行进入永久奖励 / 下一局系统）。
+- **当前脚本与池结构**：九节点固定脚本（见 §5.6）；第一层 `[heavyShell, twinCannon, fastReload]`（固定三项）；
   第二层条件池 `heavyShell → [kineticBurst, emergencyRepair, fastReload]`、
   `twinCannon → [tripleLoad, emergencyRepair, heavyShell]`、
-  `fastReload → [heavyShell, twinCannon, emergencyRepair]`（**通用转向池，无专属联动**）。
+  `fastReload → [heavyShell, twinCannon, emergencyRepair]`。**不新增第四个第一层，不加长任何池。**
 - **已通过真人验收的冻结项**（一律**不得**再调）：重型弹头 `radius16/mass4/recoil90` /
   双联炮 `burst 2×100ms` / 快速装填 `650ms` / 动能爆发 `KINETIC_BURST_GAIN=28` + 真实命中点施力 /
   三连装填 `burst 3×100ms`。
-- ⚠️ **未裁决**：`FAILED` 失败终态页面观感；「先选择 → 再条件选择 → 最终战斗」是否让玩家看出**这辆车有方向**。
+- ⚠️ **未裁决**：`FAILED` 失败终态页面观感；「整局打完是否让人**想再开一局**」；
+  RUN-02 的真人验收（战斗与选择是否自然交替 / 耐久是否真的影响选择 / Build 是否局内成形）。
+- ⚠️ **RUN-02 已知边界**：浏览器 E2E **只跑「继续改装」分支**（维修分支由 Node 端真实物理冻结值覆盖）；
+  两条分支共用同一套浮层几何与绘制代码。
 - ⚠️ **遗留缺口**：PRP 选项图标的**盒内笔画**仍无 node 侧几何测试（E2E 选项序列覆盖不到全部选项）。
 - **PRP 各轮录屏回执未全部归档**（本分支唯一未闭环项）。
 - **PRP-R5 遗留裁决**（若真人仍嫌车小）：adapter 开局 69·84px / 峰值 172·190px 是否可感知。

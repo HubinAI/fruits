@@ -323,11 +323,28 @@ async function assertFullFlow(page, tag, dpr) {
 
   await clickRect(page, p0.actionRect);
   let p = await probeOf(page);
-  log(p.phase === 'EVENT', `[${tag}] F1 IDLE → EVENT（敌人从右侧出现）`, `phase=${p.phase} log=${p.logCount}`);
+  /*
+    ⚠️ PRP-RUN-02：状态机改成读**固定 Run Script 节点**推进后，第一个战斗节点是**两段式**
+    （`d1-start` IDLE --按一次--> `d2-battle1` IDLE --再按一次--> EVENT）→ 这里要点两次。
+    第一次点击的判据是「脚本节点真的换了」，不是「phase 变了」。
+  */
+  log(
+    p.phase === 'IDLE' && p.nodeId === 'd2-battle1' && p.day === 2,
+    `[${tag}] F1a 真实点击「继续」→ 脚本推进到 DAY 2 的第一个战斗节点（同一页面 · 零跳转）`,
+    `phase=${p.phase} node=${p.nodeId} day=${p.day} log=${p.logCount}`,
+  );
+  await clickRect(page, p.actionRect);
+  p = await probeOf(page);
+  log(
+    p.phase === 'EVENT' && p.nodeKind === 'BATTLE',
+    `[${tag}] F1 IDLE → EVENT（敌人从右侧出现）`,
+    `phase=${p.phase} node=${p.nodeId} log=${p.logCount}`,
+  );
   log(!!p.stage.enemy && p.stage.playerLeftOfEnemy === true, `[${tag}] F2 EVENT 敌人出现在玩家右侧`, `gap=${round2(p.stage.minGapPx)}`);
   /*
     PRP-F1 必改 1/2：一遭遇就切进**真实 Planck 战斗世界**（正式 1600×900），
-    而且两车之间是**明确的远程开局**（实测外廓间距 ≈ 564 世界 px）。
+    而且两车之间是**明确的远程开局**（外廓间距随**节点 ① 对手的真实车身宽度**变化：
+    PRP-RUN-02 起节点 ① = 喷火车，实测 ≈ 606 世界 px）。
   */
   log(
     !!p.battleWorld &&
@@ -341,8 +358,8 @@ async function assertFullFlow(page, tag, dpr) {
     !!p.battleWorld &&
       Math.round(p.battleWorld.world.spawnAx) === 400 &&
       Math.round(p.battleWorld.world.spawnBx) === 1200 &&
-      Math.round(p.battleWorld.world.initialGap) === 564,
-    `[${tag}] F2c 必改 2：正式出生点 400/1200，开局外廓间距 ≈ 564 世界 px（有纵深、不贴车）`,
+      Math.round(p.battleWorld.world.initialGap) === 606,
+    `[${tag}] F2c 必改 2：正式出生点 400/1200，开局外廓间距 ≈ 606 世界 px（有纵深、不贴车）`,
     p.battleWorld ? `spawn=${round2(p.battleWorld.world.spawnAx)}/${round2(p.battleWorld.world.spawnBx)} initialGap=${round2(p.battleWorld.world.initialGap)}` : '',
   );
 
@@ -492,9 +509,11 @@ async function assertFullFlow(page, tag, dpr) {
   p = await probeOf(page);
   log(p.phase === 'IDLE' && !p.choiceOpen, `[${tag}] F11 选择后回到 IDLE 原上下文`, `phase=${p.phase}`);
   log(
-    p.buffs.length === buffsBefore + 1 && p.logCount === before + 2 && /你为大炮加装了/.test(p.log[p.log.length - 2].text),
-    `[${tag}] F12 顶部 +1 强化图标 且 日志 +2 行（强化自然语言结果 + DAY N）`,
-    `buffs=${buffsBefore}→${p.buffs.length} tail=${p.log.slice(-2).map((l) => l.text).join(' ｜ ')}`,
+    p.buffs.length === buffsBefore + 1 &&
+      p.logCount === before + 3 &&
+      /你为大炮加装了/.test(p.log[p.log.length - 3].text),
+    `[${tag}] F12 顶部 +1 强化图标 且 日志 +3 行（强化结果 + DAY N + 行进节拍）`,
+    `buffs=${buffsBefore}→${p.buffs.length} tail=${p.log.slice(-3).map((l) => l.text).join(' ｜ ')}`,
   );
   log(page.url() === urlBefore && p.transitions > trailBefore, `[${tag}] F13 全程同一页面、URL 未变`, `url=${page.url()}`);
 

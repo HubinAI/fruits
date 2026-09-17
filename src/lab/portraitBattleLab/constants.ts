@@ -77,8 +77,22 @@ export type LabLoadoutId = 'WatermelonHeavyCannon' | 'BananaChargeHammer';
  * 中文展示名见 testData.ts（追猎者 / 远程炮台 / 3 轻敌人 / 菠萝冲刺车）。
  *
  * `ProtoRusher` = PRP-RUN-R1 的 **Build Prototype Encounter**（见 testData.ts 的说明）。
+ *
+ * ⚠️ PRP-RUN-02：新增三套**单敌** Encounter（`PineappleFireBrute` / `PineappleSawRusher` /
+ *    `BananaRodLaser`），全部只是**既有正式对手模板**的引用（OPP-29 / OPP-31 / OPP-20），
+ *    用来给固定 Run Script 组成四场压力阶梯 —— **没有新增敌人、没有改任何数值**。
+ *    为什么不复用既有的 `Chaser` / `RangedTurret` / `LightSwarm3`：见 testData.ts 的普查注释
+ *    （`Chaser` 在部分 Build 下会一击必杀、`RangedTurret` 对基础 Build 必杀、
+ *     `LightSwarm3` 的展示名写明「3 个敌人」而 Run Page 战斗只能容纳 1 个敌人）。
  */
-export type LabEncounterId = 'Chaser' | 'RangedTurret' | 'LightSwarm3' | 'ProtoRusher';
+export type LabEncounterId =
+  | 'Chaser'
+  | 'RangedTurret'
+  | 'LightSwarm3'
+  | 'ProtoRusher'
+  | 'PineappleFireBrute'
+  | 'PineappleSawRusher'
+  | 'BananaRodLaser';
 
 /** Lab 初始选择（实验台自身默认值；与正式玩法默认值无任何耦合）。 */
 export const LAB_DEFAULTS: {

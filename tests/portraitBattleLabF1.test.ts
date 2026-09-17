@@ -91,9 +91,13 @@ describe('PBL-F1｜共享 Test Loadout / Encounter 契约', () => {
       'RangedTurret',
       'LightSwarm3',
       'ProtoRusher',
+      // PRP-RUN-02：压力阶梯 ①/②/④（同样都只是既有正式模板的引用）
+      'PineappleFireBrute',
+      'PineappleSawRusher',
+      'BananaRodLaser',
     ]);
     expect(new Set(LAB_ENCOUNTERS.map((e) => e.id)).size).toBe(LAB_ENCOUNTERS.length);
-    expect(LAB_ENCOUNTERS.map((e) => e.count)).toEqual([1, 1, 3, 1]);
+    expect(LAB_ENCOUNTERS.map((e) => e.count)).toEqual([1, 1, 3, 1, 1, 1, 1]);
     // PRP-RUN-R1：`ProtoRusher` 不是新敌人 —— 它引用的是正式对手池里**既有**的模板。
     const rusher = LAB_ENCOUNTERS.find((e) => e.id === 'ProtoRusher')!;
     expect(OPPONENT_TEMPLATES.some((t) => t.id === rusher.templateId)).toBe(true);

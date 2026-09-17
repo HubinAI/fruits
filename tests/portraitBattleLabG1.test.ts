@@ -170,8 +170,10 @@ describe('PBL-G1｜允许差异注册表（集中、可枚举、防腐烂）', (
 describe('PBL-G1｜共享配置审计：无 Arena 专属平衡覆盖', () => {
   const audit = auditSharedCombatData();
 
-  it('G1-05 全部 8 个组合（2 Loadout × 4 Encounter）审计通过且零数值差异', () => {
-    expect(audit.combos).toHaveLength(8);
+  it('G1-05 全部 14 个组合（2 Loadout × 7 Encounter）审计通过且零数值差异', () => {
+    // ⚠️ 组合数随 Lab Encounter 目录增长：PRP-RUN-02 的压力阶梯新增 3 套（2×7=14）。
+    //    这条断言仍是「冻结清单」——目录再变就必须显式回到这里。
+    expect(audit.combos).toHaveLength(14);
     expect(audit.problems).toEqual([]);
     expect(audit.ok).toBe(true);
     for (const c of audit.combos) {

@@ -291,6 +291,15 @@ export interface RunBattleOptions {
   /** 单强化口径（等价于 `build: [modifier]`）。 */
   readonly modifier?: RunModifierId | null;
   readonly carriedHp?: number | null;
+  /**
+   * PRP-RUN-02：本场使用的**正式 Encounter**（`testData.LAB_ENCOUNTERS` 的 id；
+   * 每一项都只是「既有正式对手模板」的引用）。
+   * 省略 → 默认演示遭遇（`RUN_BATTLE_ENCOUNTER_ID`）→ 既有调用点行为逐字节不变。
+   *
+   * ⚠️ 只换「打谁」，**不改**世界 / 出生 / 玩家装配 / 任何数值 —— 四场压力阶梯
+   * 靠**不同既有 Encounter** 形成（Queue 必改 2 明令禁止加 HP / speed / damage / count）。
+   */
+  readonly encounterId?: string;
 }
 
 /**
@@ -306,6 +315,8 @@ export class RunBattleRuntime {
   readonly registry: ContentRegistry;
   /** 本场战斗生效的本局 Build（有序；空数组 = 基础状态）。 */
   readonly build: readonly RunModifierId[];
+  /** 本场使用的正式 Encounter id（默认 = 演示遭遇）。 */
+  readonly encounterId: string;
   /**
    * 本场战斗的 Run 能力（动能爆发）—— 事件驱动，见 `runBuildAbilities.ts`。
    * 空 Build（或只带不改武器的项）时它只是一个什么都不做的订阅者（零副作用）。
@@ -319,7 +330,8 @@ export class RunBattleRuntime {
 
   constructor(opts: boolean | RunBattleOptions = false) {
     const o: RunBattleOptions = typeof opts === 'boolean' ? { soloA: opts } : opts;
-    this.plan = buildSpawnPlan(RUN_BATTLE_LOADOUT_ID, RUN_BATTLE_ENCOUNTER_ID);
+    this.encounterId = o.encounterId ?? RUN_BATTLE_ENCOUNTER_ID;
+    this.plan = buildSpawnPlan(RUN_BATTLE_LOADOUT_ID, this.encounterId);
     this.build = normalizeBuild(o.build ?? o.modifier ?? null);
 
     // ① 本局 registry = 正式副本（+ Build overlay 部件）。正式 content 单例与 Cannon 基础定义零修改。
@@ -487,6 +499,19 @@ export class RunBattleRuntime {
   /** 当前存活弹丸（真实 projectile 渲染快照，非预测）。 */
   projectileCount(): number {
     return this.snapshot().projectiles?.length ?? 0;
+  }
+
+  /**
+   * **玩家（A 方）**当前存活弹丸数。
+   *
+   * ⚠️ 与 `projectileCount()` 分开的意义：`projectileCount()` 是**全场**存活弹丸，
+   * 对手自己的武器也会贡献（例如 `PineappleFireBrute` 的喷火器火焰颗粒 `visual: 'flame'`）。
+   * 但凡要用「在飞弹丸数增量」反推开火节奏（浏览器 E2E 的 `sampleFireCadence`），
+   * 就必须只看玩家这一侧 —— 否则对手的火焰颗粒会把间隔量到几十毫秒，测量直接失效。
+   */
+  playerProjectileCount(): number {
+    const side = this.orchestrator.vehicleA.team;
+    return (this.snapshot().projectiles ?? []).filter((p) => p.team === side).length;
   }
 
   dispose(): void {

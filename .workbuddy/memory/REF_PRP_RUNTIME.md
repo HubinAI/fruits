@@ -123,3 +123,56 @@
 - 冻结字面量（`tests/portraitRunPage.test.ts` RP-F2-14，三条路线的三场残血）：
   `heavyShell+kineticBurst = [843, 714, 430]` · `twinCannon+tripleLoad = [843, 678, 470]` ·
   `fastReload+twinCannon = [843, 622, 546]`。
+
+## F. PRP-RUN-02 整局竖切：脚本 / 状态机 / 事件（运行时细节）
+
+### F.1 固定脚本（`runScript.ts`）
+
+| 节点 | kind | DAY | Encounter（Lab 引用 → 正式模板） |
+|---|---|---|---|
+| `d1-start` | EVENT | 1 | — |
+| `d2-battle1` | BATTLE | 2 | `PineappleFireBrute` → OPP-29 |
+| `d2-choice1` | CHOICE | 2 | 第一层固定三选一 |
+| `d3-battle2` | BATTLE | 3 | `PineappleSawRusher` → OPP-31 |
+| `d4-durability` | DURABILITY | 4 | 维修 / 继续改装（`branch`） |
+| `d5-tend` \| `d5-choice2` | EVENT \| CHOICE | 5 | 互斥分支（维修 → EVENT / 改装 → 第二层池） |
+| `d6-battle3` | BATTLE | 6 | `ProtoRusher` → R1-RUSH-02 |
+| `d7-final` | FINAL | 7 | `BananaRodLaser` → OPP-20（`next: null`） |
+
+派生常量：`RUN_FIRST_DAY=1` / `RUN_TOTAL_DAYS=7` / `RUN_TOTAL_BATTLES=4` / `RUN_TOTAL_CHOICES=2`。
+查询：`runScriptNode`（未知 → `null`）/ `requireRunScriptNode`（未知 → **抛错**）/
+`runScriptBattleNodes` / `runScriptKindSequence` / `runDurabilityBranchNodeId`。
+`RUN_DURABILITY_EVENT` 携带标题 / 两个动作 / 两句分支叙事（**文案的唯一来源**）。
+
+### F.2 状态机（`runPageState.ts`）关键口径
+
+- 八态：`IDLE | EVENT | BATTLE | RESULT | CHOICE | DURABILITY | COMPLETE | FAILED`。
+- `nodeId` = 唯一进度锚点；`battle` 记录里 `playerHp` 是**本场开局耐久**的权威值。
+- 新局（`createRunPageState`）**不走 `goPhase`** ⇒ `phaseTrail=[phase]` / `transitions=0` / `revision=0`。
+  初始日志 = `DAY 1` + `d1-start.beat`（**3 行**）。
+- 每条日志行数（实测，E2E 冻结）：fresh 3 → `d2-battle1` IDLE 5 → EVENT 7 → RESULT 10 →
+  CHOICE 10 → 选完 13 → … → `COMPLETE` **38**。
+- **carry 语义**：`carriedHp` 只写 `hp`，不动 `maxHp`；`carried=0` 被忽略（画面上不会开出 0 血）；
+  `runCarriedPlayerHp` = `min(maxHp, max(0, playerHp) + max(0, repairBonus))`，**窗口见 §5.6 警告**。
+- 终局：`FINAL` 节点打完 → `COMPLETE`（4 行收束）；`playerHp <= 0` → `FAILED`（2 行，不经过 RESULT）。
+  两个终态下唯一动作 = 重新开始（`RUN_RESTART_LABEL`）/ 完成（`RUN_COMPLETE_LABEL='完成本次冒险'`）。
+
+### F.3 浮层（CHOICE 与 DURABILITY 共用）
+
+- 卡片几何 = `runChoiceCardRects(卡片数)`（**2 张也成立**：整体居中）；图标盒 = `runChoiceIconRect`；
+  卡面/描边**不入面积账本**，只有顶部强调条入账：`cardBar = 卡片数 × 1240`
+  （⇒ 掩码账本必须带**卡片数**，不能只传布尔）。
+- `drawOverlay` 是唯一绘制入口；标题走 `overlayTitle(state)`
+  （DURABILITY → `runDurabilityTitle()` = 「停下来，还是继续改装？」/ CHOICE → 「选择一项改装」）。
+- 图标色（8 个，两两互斥）：`heavyShell #ffb066` / `twinCannon #ffd166` / `fastReload #7fd6a0` /
+  `kineticBurst #c98cf0` / `tripleLoad #79c0ea` / `emergencyRepair #5fd0c0` /
+  `repair #e07a9a`（扳手）/ `upgrade #a8b45c`（齿轮）。
+- 主动作标签：`做个决定`（DURABILITY）/ `完成本次冒险`（COMPLETE）/ `重新开始冒险`（两终态）。
+
+### F.4 探针新增字段（E2E 依赖）
+
+- `nodeId` / `nodeKind` / `encounterId` / `battleTotal` / `complete` / `failed`；
+- `durabilityOpen` / `durabilityChosen` / `overlayOpen` / `overlayTitle` / `overlayOptions[]`（含 `rect` + `iconRect`）；
+- `battleWorld.playerProjectiles`（**只数玩家 A 方**；`projectiles` 是全场口径）。
+- **已删**的旧口径：`verificationComplete`（终局判据改由 `complete` / `failed` / `nodeId` 回答）。
+  `choiceOptions`（含 `rect` / `iconRect`）**保留** = CHOICE 候选池口径。

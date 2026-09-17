@@ -74,20 +74,30 @@ import {
   finishRunBattle,
   formatRunLog,
   pressRunAction,
+  resolveDurability,
   runActionEnabled,
   runActionLabel,
   runBuildIds,
   runCarriedPlayerHp,
   runChoiceOpen,
   runChoicePool,
+  runComplete,
+  runCurrentNode,
+  runDurabilityOpen,
+  runDurabilityTitle,
+  runFailed,
+  runNodeKind,
+  runOverlayCards,
+  runOverlayOpen,
   runStartsNewRun,
-  runVerificationComplete,
   syncRunBattle,
   visibleRunLog,
   type RunLogEntry,
+  type RunOverlayOption,
   type RunPageState,
   type RunPhase,
 } from './runPageState';
+import { RUN_TOTAL_BATTLES, type RunDurabilityChoiceId } from './runScript';
 import {
   buildRunStageView,
   runPageContext,
@@ -196,11 +206,14 @@ export const RUN_LEDGER_COLORS: Readonly<Record<string, string>> = {
 const CHOICE_MASK_COLOR = 'rgba(6,9,14,0.86)';
 
 /**
- * 每个强化选项的图标绘制色（矢量字形，非纯色块；不入面积账本）。
+ * 每个浮层选项的图标绘制色（矢量字形，非纯色块；不入面积账本）。
  *
  * ⚠️ PRP-BUILD-01：新增第二层四项。这七色**两两 RGB 精确互斥**，且与
  *    `RUN_LEDGER_COLORS` 全部入账色互斥 —— 浏览器端在图标盒内按**精确相等**统计
  *    该选项的专属图标色，并要求「它选项的图标色命中为 0」，任何同色歧义都会立刻污染断言。
+ *
+ * ⚠️ PRP-RUN-02：再新增耐久事件的两项（`repair` / `upgrade`）→ 共 **8 色**，
+ *    同样满足两两互斥 + 与入账色互斥。浏览器端维护同一张互斥表。
  */
 const CHOICE_ICON_COLOR: Readonly<Record<string, string>> = {
   heavyShell: '#ffb066',
@@ -209,6 +222,8 @@ const CHOICE_ICON_COLOR: Readonly<Record<string, string>> = {
   kineticBurst: '#c98cf0',
   tripleLoad: '#79c0ea',
   emergencyRepair: '#5fd0c0',
+  repair: '#e07a9a',
+  upgrade: '#a8b45c',
 };
 
 /** 顶部已获得图标的底色（按选项区分；芯片色统一 → `buffChip` 层可冻结）。 */
@@ -308,6 +323,12 @@ export interface RunProbeBattleWorld {
   readonly steps: number;
   /** 当前存活弹丸数（真实 projectile 渲染快照 → 可证「炮弹真的在飞」）。 */
   readonly projectiles: number;
+  /**
+   * 其中属于**玩家（A 方）**的存活弹丸数。
+   * ⚠️ 与 `projectiles` 分开：对手武器也会贡献弹丸（喷火器的火焰颗粒等），
+   * 「按弹丸增量反推开火节奏」这类测量必须只看玩家这一侧。
+   */
+  readonly playerProjectiles: number;
   /** 两车真实可见外廓的世界间距（>0 = 完全分离）。 */
   readonly gapWorld: number;
   /** 同上，换算到舞台带逻辑坐标（= gapWorld × 相机缩放）。 */
@@ -362,6 +383,18 @@ export interface RunPageProbe {
   readonly phaseTrail: readonly RunPhase[];
   readonly transitions: number;
   readonly actionCount: number;
+  /**
+   * PRP-RUN-02：**当前已呈现的 Run Script 节点**（本局唯一的进度锚点）。
+   * `nodeId` + `nodeKind` 一起回答了「现在轮到什么」——页面里没有任何 `if (day === X)`，
+   * 因此这两个字段就是「脚本驱动」这件事在浏览器端的可观测形式。
+   */
+  readonly nodeId: string;
+  /** 当前节点的类型（`EVENT` / `BATTLE` / `CHOICE` / `DURABILITY` / `FINAL`）。 */
+  readonly nodeKind: string;
+  /** 当前节点的 Encounter id（非 BATTLE / FINAL 节点为 null）。 */
+  readonly encounterId: string | null;
+  /** 本局真实战斗场数上限（来自 Run Script；本阶段固定 4）。 */
+  readonly battleTotal: number;
   readonly day: number;
   readonly dayTotal: number;
   /**
@@ -379,12 +412,14 @@ export interface RunPageProbe {
    */
   readonly repairBonus: number;
   /**
-   * PRP-BUILD-01：本局已打完的真实战斗场数（0/1/2/3）。
-   * `3` = 验证结束 → 主动作变成「重新开始验证」，且不可能再进 CHOICE。
+   * PRP-BUILD-01：本局已打完的真实战斗场数（0..4）。
+   * `4` = 四场全部打完。⚠️ 这只是**诊断值**：进度与终局判定由 `nodeId` / `phase` 决定。
    */
   readonly battlesCompleted: number;
-  /** PRP-BUILD-01：本次验证是否已结束（= `battlesCompleted >= 3`）。 */
-  readonly verificationComplete: boolean;
+  /** PRP-RUN-02：本局是否已 `COMPLETE`（终局战斗打完且仍然存活 → RUN COMPLETE 终态）。 */
+  readonly complete: boolean;
+  /** PRP-RUN-02：本局是否已 `FAILED`（某一场真实 Player HP 归零 → 失败终态）。 */
+  readonly failed: boolean;
   /**
    * PRP-RUN-R1 必改 3：按下主动作会不会**开一个全新 Run**
    * （`true` = 失败终态 / 三场打完的终局；`false` = 继续当前 Run → CHOICE）。
@@ -400,13 +435,28 @@ export interface RunPageProbe {
   readonly actionLabel: string;
   readonly actionEnabled: boolean;
   readonly actionRect: RunRect;
+  /** **强化**三选一浮层是否可见（严格 = `phase === 'CHOICE'`）。 */
   readonly choiceOpen: boolean;
   /**
    * PRP-BUILD-01：当前选择是第几层（1 = 第一层固定三选一 / 2 = 第二层条件池 / 0 = 当前不在 CHOICE）。
    * 用于证明「第二次选择不是同一套通用三选一」。
    */
   readonly choicePoolLayer: number;
+  /** 强化候选池的卡片（结构规则口径；DURABILITY 时为空 —— 那两项见 `overlayOptions`）。 */
   readonly choiceOptions: readonly { id: string; label: string; note: string; rect: RunRect; iconRect: RunRect }[];
+  /** PRP-RUN-02：耐久取舍浮层是否可见（严格 = `phase === 'DURABILITY'`）。 */
+  readonly durabilityOpen: boolean;
+  /** PRP-RUN-02：耐久事件已裁决的分支（`null` = 还没做过这个决定）。 */
+  readonly durabilityChosen: RunDurabilityChoiceId | null;
+  /** PRP-RUN-02：当前是否有**任何**浮层（CHOICE / DURABILITY）打开。 */
+  readonly overlayOpen: boolean;
+  /** PRP-RUN-02：浮层标题（无浮层为 `null`）—— 强化 = 固定文案，耐久 = 脚本数据。 */
+  readonly overlayTitle: string | null;
+  /**
+   * PRP-RUN-02：**本帧真正画出来的浮层卡片**（与绘制 / 命中区同源）。
+   * CHOICE → 强化候选池；DURABILITY → 维修 / 继续改装两项。
+   */
+  readonly overlayOptions: readonly (RunOverlayOption & { rect: RunRect; iconRect: RunRect })[];
   readonly bands: {
     top: RunRect;
     stage: RunRect;
@@ -556,19 +606,20 @@ export class RunPage {
 
   /**
    * 唯一输入入口：client(viewport CSS px) → 逻辑舞台坐标 → 命中布局矩形。
-   * BATTLE 时主动作不可用；CHOICE 时只有卡片可点（点遮罩其它位置无副作用）。
+   * BATTLE 时主动作不可用；浮层（CHOICE / DURABILITY）时只有卡片可点（点遮罩其它位置无副作用）。
    */
   private readonly onPointerDown = (ev: PointerEvent): void => {
     const rect = this.canvas.getBoundingClientRect();
     const p = this.vp.clientToLogical(ev.clientX, ev.clientY, rect);
-    if (runChoiceOpen(this.state)) {
-      // ⚠️ PRP-BUILD-01：卡片的**唯一来源 = 当前候选池**（第一层三选一 / 第二层条件池），
-      // 与绘制、命中区、账本四处同源 → 不可能出现「画的是池 A、点的是池 B」。
-      const pool = runChoicePool(this.state);
-      const cards = runChoiceCardRects(pool.length);
-      for (let i = 0; i < cards.length; i++) {
-        if (hit(cards[i], p)) {
-          this.apply(chooseRunBuff(this.state, pool[i].id));
+    if (runOverlayOpen(this.state)) {
+      // ⚠️ PRP-BUILD-01 / RUN-02：卡片的**唯一来源 = 当前浮层上真正画出来的卡片**
+      // （CHOICE = 当前候选池；DURABILITY = 耐久事件两项），与绘制、命中区、账本四处同源
+      // → 不可能出现「画的是池 A、点的是池 B」。卡片几何两者共用（`runChoiceCardRects`）。
+      const cards = runOverlayCards(this.state);
+      const rects = runChoiceCardRects(cards.length);
+      for (let i = 0; i < rects.length; i++) {
+        if (hit(rects[i], p)) {
+          this.chooseOverlayCard(cards[i].id);
           return;
         }
       }
@@ -579,6 +630,20 @@ export class RunPage {
       this.apply(pressRunAction(this.state, runPageContext()));
     }
   };
+
+  /**
+   * 浮层卡片被点中 → 落到**当前浮层类型**对应的动作（唯一分派点）。
+   *   - CHOICE（强化）→ `chooseRunBuff`（准入仍由状态机校验）；
+   *   - DURABILITY（维修 / 继续改装）→ `resolveDurability`。
+   */
+  private chooseOverlayCard(id: string): void {
+    const ctx = runPageContext();
+    if (runDurabilityOpen(this.state)) {
+      this.apply(resolveDurability(this.state, id as RunDurabilityChoiceId, ctx));
+      return;
+    }
+    this.apply(chooseRunBuff(this.state, id, ctx));
+  }
 
   /* ------------------------------------------------------- 状态与推进 */
 
@@ -602,17 +667,21 @@ export class RunPage {
   /**
    * 建立真实战斗运行时（正式 `PlanckBattleOrchestrator`，零 config 覆盖）。
    *
-   * PRP-BUILD-01：每次遭遇都**全新创建**，并把本局的两项 Run-local 状态注入进去：
+   * PRP-BUILD-01：每次遭遇都**全新创建**，并把本局的 Run-local 状态注入进去：
    *   - `build`      = 本局 Build（第一层 + 第二层，按选择顺序；overlay registry + 武器 defId 重映射，
    *                    能力类（动能爆发）由运行时订阅正式战斗事件驱动）；
    *   - `carriedHp`  = 上一场真实剩余耐久（+ 维修补偿；下一场从这里继续，不自动满血）。
    * 旧运行时在此前已被 `endBattle()` 释放 → 弹丸 / 接触 / 事件订阅不跨场残留。
+   *
+   * ⚠️ PRP-RUN-02：本场对手 = **当前脚本节点的 `encounterId`**（四场压力阶梯的唯一来源）。
+   *    页面里没有 `if (day === X)`：换对手只是「当前节点是谁」这**一个**事实的推论。
    */
   private beginBattle(): void {
     this.endBattle();
     const rt = new RunBattleRuntime({
       build: runBuildIds(this.state),
       carriedHp: runCarriedPlayerHp(this.state),
+      encounterId: runCurrentNode(this.state).encounterId,
     });
     this.battle = rt;
     // 实测开局外廓间距（不是写死数字）——「开局有明确距离」的证据
@@ -801,8 +870,10 @@ export class RunPage {
     // 5) 最底：唯一主动作按钮（填充承载文案 → 不入账；底部强调条入账）
     this.drawActionButton(ctx, s);
 
-    // 6) CHOICE 浮层（必改 4：整页重压暗 + 三张「图标 / 名称 / 一句结果」卡片）
-    if (runChoiceOpen(s)) this.drawChoice(ctx);
+    // 6) 浮层（必改 4：整页重压暗 + 「图标 / 名称 / 一句结果」卡片）
+    //    - CHOICE     = 三选一强化（第一层固定 / 第二层条件池）
+    //    - DURABILITY = 耐久取舍（维修 vs 继续改装）
+    if (runOverlayOpen(s)) this.drawOverlay(ctx, s);
   }
 
   /* ------------------------------------------ PRP-BUILD-01-R1 命中冲击环 */
@@ -1054,23 +1125,28 @@ export class RunPage {
     ctx.textAlign = 'left';
   }
 
-  /* ------------------------------------------------------ CHOICE 浮层 */
+  /* ------------------------------------------------------------ 浮层 */
 
-  private drawChoice(ctx: CanvasRenderingContext2D): void {
+  /**
+   * 浮层（CHOICE 强化 / DURABILITY 耐久事件）——**两者共用同一套卡片几何与绘制**，
+   * 因此「第二次选择不是同一套通用三选一」是靠**内容**（池 / 标题 / 选项数）区分的，
+   * 而不是靠第二套几何。⚠️ 零布局改动（`cardBar` 层被两者复用）。
+   */
+  private drawOverlay(ctx: CanvasRenderingContext2D, s: RunPageState): void {
     const mask = runChoiceMaskRect();
     ctx.fillStyle = CHOICE_MASK_COLOR;
     ctx.fillRect(mask.x, mask.y, mask.w, mask.h);
 
-    // ⚠️ 卡片 / 标题 / 图标全部取自**当前候选池**（第一层或第二层条件池）。
-    const pool = runChoicePool(this.state);
-    const cards = runChoiceCardRects(pool.length);
-    const title = runChoiceTitlePos(pool.length);
+    // ⚠️ 卡片 / 标题 / 图标全部取自**当前浮层真正画出来的卡片**（`runOverlayCards`）。
+    const cards = runOverlayCards(s);
+    const rects = runChoiceCardRects(cards.length);
+    const title = runChoiceTitlePos(cards.length);
     ctx.fillStyle = COLORS.textTitle;
     ctx.font = `bold 17px ${FONT_STACK}`;
-    ctx.fillText('选择一项改装', title.x, title.y);
+    ctx.fillText(this.overlayTitle(s), title.x, title.y);
 
-    cards.forEach((card, i) => {
-      const opt = pool[i];
+    rects.forEach((card, i) => {
+      const opt = cards[i];
       ctx.fillStyle = COLORS.cardBg;
       ctx.fillRect(card.x, card.y, card.w, card.h);
       ctx.strokeStyle = COLORS.cardEdge;
@@ -1093,6 +1169,11 @@ export class RunPage {
     });
   }
 
+  /** 浮层标题：强化 = 固定文案；耐久事件 = 脚本数据里的标题（唯一来源）。 */
+  private overlayTitle(s: RunPageState): string {
+    return runDurabilityOpen(s) ? runDurabilityTitle() : '选择一项改装';
+  }
+
   /**
    * 每个选项一个可辨识的矢量图标（不入面积账本，只按「盒内专属色面积」判定）。
    *
@@ -1102,6 +1183,8 @@ export class RunPage {
    *   kineticBurst    = 弹体 + 命中点向外扩散的三道冲击波
    *   tripleLoad      = 三根并排炮管（比双联多一根）+ 底横条
    *   emergencyRepair = 修理十字
+   *   repair          = 扳手（耐久事件：维修）
+   *   upgrade         = 齿轮（耐久事件：继续改装）
    */
   private drawChoiceIcon(ctx: CanvasRenderingContext2D, id: string, r: RunRect): void {
     const cx = r.x + r.w / 2;
@@ -1168,6 +1251,37 @@ export class RunPage {
       // 紧急维修：修理十字
       ctx.fillRect(cx - s * 0.12, cy - s * 0.44, s * 0.24, s * 0.88);
       ctx.fillRect(cx - s * 0.44, cy - s * 0.12, s * 0.88, s * 0.24);
+    } else if (id === 'repair') {
+      // 维修（耐久事件）：扳手 —— 斜杆 + 两端开口头（与「紧急维修十字」形状明显不同）
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(-Math.PI / 4);
+      ctx.fillRect(-s * 0.08, -s * 0.34, s * 0.16, s * 0.62);
+      ctx.beginPath();
+      ctx.arc(0, -s * 0.34, s * 0.17, Math.PI * 0.85, Math.PI * 2.15);
+      ctx.lineTo(0, -s * 0.34);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(-s * 0.2, s * 0.24, s * 0.4, s * 0.12);
+      ctx.restore();
+    } else if (id === 'upgrade') {
+      // 继续改装（耐久事件）：齿轮 —— 中心环 + 八颗齿（与全部强化图标形状互异）
+      ctx.beginPath();
+      ctx.arc(cx, cy, s * 0.22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = ctx.fillStyle;
+      ctx.lineWidth = Math.max(3, s * 0.1);
+      ctx.beginPath();
+      ctx.arc(cx, cy, s * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+      for (let i = 0; i < 8; i++) {
+        const a = (i * Math.PI) / 4;
+        ctx.save();
+        ctx.translate(cx + Math.cos(a) * s * 0.38, cy + Math.sin(a) * s * 0.38);
+        ctx.rotate(a);
+        ctx.fillRect(-s * 0.07, -s * 0.07, s * 0.14, s * 0.14);
+        ctx.restore();
+      }
     } else {
       // 快速装填：环形循环箭头（装填节奏变快）
       ctx.lineWidth = Math.max(2, s * 0.11);
@@ -1315,6 +1429,12 @@ export class RunPage {
         playerHpMax: rt.playerMaxHp,
         steps: rt.stepCount,
         projectiles: rt.projectileCount(),
+        /**
+         * ⚠️ 只看**玩家这一侧**的存活弹丸（`projectileCount()` 会被对手自己的武器污染：
+         * 例如 `PineappleFireBrute` 喷火器的火焰颗粒）→ 供「按弹丸数增量反推开火节奏」的
+         * 测量使用，避免把对手的火焰颗粒误计成玩家的开火。
+         */
+        playerProjectiles: rt.playerProjectileCount(),
         gapWorld,
         gapView: gapWorld * xf.scale,
         world: {
@@ -1356,6 +1476,7 @@ export class RunPage {
     rect: DOMRect,
     layers: Record<RunLayerId, number>,
   ): Omit<RunPageProbe, 'stage' | 'battleWorld' | 'battleAssets'> {
+    const ctxForNode = runCurrentNode(s);
     return {
       logicalW: PORTRAIT_LOGICAL_W,
       logicalH: PORTRAIT_LOGICAL_H,
@@ -1363,6 +1484,11 @@ export class RunPage {
       phaseTrail: s.phaseTrail,
       transitions: s.transitions,
       actionCount: s.actionCount,
+      /** PRP-RUN-02：进度锚点 = 当前脚本节点（不是「第几场 / 第几选」）。 */
+      nodeId: s.nodeId,
+      nodeKind: runNodeKind(s),
+      encounterId: ctxForNode.encounterId ?? null,
+      battleTotal: RUN_TOTAL_BATTLES,
       day: s.day,
       dayTotal: s.dayTotal,
       /** PRP-F2：本局第一层强化（本局临时，刷新即回 null）。完整 Build 见下两行。 */
@@ -1370,11 +1496,13 @@ export class RunPage {
       /** PRP-BUILD-01：本局完整 Build（按选择顺序）。 */
       build: runBuildIds(s),
       buildLabels: s.buffs.map((b) => b.label),
-      /** PRP-BUILD-01：紧急维修累计的耐久补偿（0 = 没拿过）。 */
+      /** PRP-BUILD-01：紧急维修 + 耐久事件「维修」累计的耐久补偿（0 = 没修过）。 */
       repairBonus: s.repairBonus,
-      /** PRP-BUILD-01：验证进度（0/1/2/3 场已打完）。 */
+      /** PRP-BUILD-01：已打完的真实战斗场数（诊断值；进度由 nodeId / phase 决定）。 */
       battlesCompleted: s.battlesCompleted,
-      verificationComplete: runVerificationComplete(s),
+      /** PRP-RUN-02：两个终态（失败 / 完成）的可观测判据。 */
+      complete: runComplete(s),
+      failed: runFailed(s),
       /** PRP-RUN-R1：「这一下会开新 Run」还是「继续当前 Run」。 */
       startsNewRun: runStartsNewRun(s),
       /** ⚠️ buffs 与 build 同源（`buffs` 是本局 Build 的唯一状态，probe 只是换了个形状暴露）。 */
@@ -1406,6 +1534,22 @@ export class RunPage {
          */
         iconRect: runChoiceIconRect(runChoiceCardRects(runChoicePool(s).length)[i]),
       })),
+      /** PRP-RUN-02：耐久事件浮层的可观测状态。 */
+      durabilityOpen: runDurabilityOpen(s),
+      durabilityChosen: s.durability,
+      overlayOpen: runOverlayOpen(s),
+      overlayTitle: runOverlayOpen(s) ? (runDurabilityOpen(s) ? runDurabilityTitle() : '选择一项改装') : null,
+      overlayOptions: (() => {
+        const cards = runOverlayCards(s);
+        const rects = runChoiceCardRects(cards.length);
+        return cards.map((o, i) => ({
+          id: o.id,
+          label: o.label,
+          note: o.note,
+          rect: rects[i],
+          iconRect: runChoiceIconRect(rects[i]),
+        }));
+      })(),
       bands: {
         top: RUN_TOP_BAND,
         stage: RUN_STAGE_BAND,

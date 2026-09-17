@@ -1,25 +1,41 @@
 /**
  * PRP-F0-RUN-PAGE-SHELL｜PRP-R3-CAPYBARA-UI-HIERARCHY-REBUILD
  * ｜PRP-F1-PORTRAIT-PLANCK-BATTLE-INTEGRATION
+ * ｜PRP-RUN-R1-DEATH-AND-DURABILITY-CONTINUITY
+ * ｜PRP-RUN-02-FULL-RUN-VERTICAL-SLICE
  * Portrait Run Prototype —— Run Page targeted 测试（纯 node，无 DOM）。
  *
- * 覆盖六层：
- *   A) 页面层级：竖屏 390×844 四条横带无缝无叠；PRP-R3 比例（顶 80 / 台 302 / 志 378 / 作 84）；
- *   B) 五状态机与固定演示流程：IDLE → EVENT → BATTLE → RESULT → CHOICE → IDLE（同一页面内）；
- *      ⚠️ PRP-F1：BATTLE 由**真实物理**推进（`RunBattleRuntime` → 正式 `PlanckBattleOrchestrator`），
- *      不再有 `RUN_BATTLE_SCRIPT` —— 本文件用与宿主同一条链（step → sync → finish）驱动。
- *   C) 中部舞台：IDLE 待机近景（PRP 构图）vs 真实战斗世界（正式世界尺度 + 固定远摄相机）；
- *   D) 面积账本：逐帧整页像素面积**精确冻结**（浏览器端再用真实 getImageData 交叉核对）；
- *   E) 源码守卫：Debug 与玩家界面分离、只经 runBattleRuntime 接正式战斗、不存在任何页面跳转；
- *   F) 信息层级：顶部无空槽 / IDLE 战斗主体是真实车辆 sprite / 日志是玩家叙事 / CHOICE 独占焦点。
+ * ## PRP-RUN-02：本文件的流程口径 = **固定 Run Script 的节点序列**
  *
- * 面积期望值是**冻结字面量**（不是就地重算）：任何布局改动都必须显式更新这里，
- * 从而让「像素确实变了」这件事无法悄悄发生（与 F1-R22 同一约定）。
+ * 状态机不再自己数「第几场 / 第几选」，而是读 `runScript.ts` 的节点序列：
+ *
+ *     d1-start(EVENT) → d2-battle1(BATTLE) → d2-choice1(CHOICE) → d3-battle2(BATTLE)
+ *       → d4-durability(DURABILITY) ─┬─ repair  → d5-tend(EVENT)   ─┐
+ *                                    └─ upgrade → d5-choice2(CHOICE) ┴→ d6-battle3(BATTLE)
+ *                                      → d7-final(FINAL) → COMPLETE / FAILED
+ *
+ * 因此本文件**不再**用「第 N 场 / 第 N 选」定位状态，而是用 `walk.at(nodeId, phase)`
+ * 按**脚本节点 id** 定位 —— 与产品代码同一套判据（页面里没有 `if (day === X)`，
+ * 测试里也不应该有）。
+ *
+ * 覆盖九层：
+ *   A) 页面层级：竖屏 390×844 四条横带无缝无叠；PRP-R3 比例（顶 80 / 台 302 / 志 378 / 作 84）；
+ *   B) 八状态机 + 脚本驱动流程（同一页面内，零跳转）；
+ *   C) 中部舞台：IDLE 待机近景 vs 真实 Planck 战斗世界；
+ *   D) 面积账本：**逐脚本节点**整页像素面积精确冻结（浏览器端再用真实 getImageData 交叉核对）；
+ *   E) 源码守卫：Debug 与玩家界面分离、只经 runBattleRuntime 接正式战斗、不存在任何页面跳转；
+ *   F) 信息层级：顶部无空槽 / IDLE 主体是真实车辆 sprite / 日志是玩家叙事 / 浮层独占焦点；
+ *   G) 两层 Cannon Build 闭环（四场真实战斗 + 两次强化 + 一次耐久取舍）；
+ *   H) **Run Script 数据源 + 耐久事件**（本 Queue 的核心新增面）；
+ *   I) 死亡即终局：单一耐久贯穿 Run、失败后只能重开。
+ *
+ * 面积 / 耐久期望值都是**冻结字面量**（不是就地重算）：任何影响流程或布局的改动都必须
+ * 显式更新这里，从而让「像素 / 流程悄悄变了」这件事无法发生。
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
 import { PORTRAIT_LOGICAL_H, PORTRAIT_LOGICAL_W } from '../src/lab/portraitBattleLab/constants';
 import { buildSpawnPlan } from '../src/lab/portraitBattleLab/entities';
@@ -66,33 +82,55 @@ import {
   type RunRect,
 } from '../src/lab/portraitBattleLab/runPageLayout';
 import {
+  RUN_BATTLES_TOTAL,
   RUN_CHOICE_OPTIONS,
-  RUN_INITIAL_DAY,
-  RUN_MAX_BATTLES,
+  RUN_COMPLETE_LABEL,
+  RUN_DAYS_TOTAL,
   RUN_MAX_CHOICES,
   RUN_PHASES,
   RUN_RESTART_LABEL,
-  RUN_TOTAL_DAYS,
   chooseRunBuff,
   createRunPageState,
   durabilityPercent,
   finishRunBattle,
   formatRunLog,
   pressRunAction,
+  resolveDurability,
   runActionEnabled,
   runActionLabel,
   runBuildIds,
   runCarriedPlayerHp,
   runChoiceOpen,
   runChoicePool,
+  runComplete,
+  runCurrentNode,
+  runDurabilityOpen,
+  runDurabilityOptions,
+  runDurabilityTitle,
   runFailed,
+  runNodeKind,
+  runOverlayCards,
+  runOverlayOpen,
   runStartsNewRun,
-  runVerificationComplete,
   syncRunBattle,
   visibleRunLog,
   type RunPageContext,
   type RunPageState,
+  type RunPhase,
 } from '../src/lab/portraitBattleLab/runPageState';
+import {
+  RUN_DURABILITY_EVENT,
+  RUN_FIRST_DAY,
+  RUN_SCRIPT,
+  RUN_SCRIPT_FIRST_ID,
+  RUN_SCRIPT_BATTLE_NODE_IDS,
+  requireRunScriptNode,
+  runDurabilityBranchNodeId,
+  runScriptBattleNodes,
+  runScriptKindSequence,
+  runScriptNode,
+  type RunDurabilityChoiceId,
+} from '../src/lab/portraitBattleLab/runScript';
 import {
   EMERGENCY_REPAIR_FRACTION,
   RUN_LAYER1_POOL,
@@ -100,8 +138,6 @@ import {
   runModifierById,
 } from '../src/lab/portraitBattleLab/runModifiers';
 import {
-  RUN_DEMO_ENCOUNTER_ID,
-  RUN_DEMO_LOADOUT_ID,
   buildRunStageView,
   entityVisualWidth,
   hasPlaceholderVisual,
@@ -123,6 +159,7 @@ const RUN_PAGE_FILES = [
   'runPageLayout.ts',
   'runPageState.ts',
   'runPageScene.ts',
+  'runScript.ts',
   'runPage.ts',
   'runMain.ts',
   'runVehicleAssets.ts',
@@ -154,10 +191,34 @@ function layersOf(s: RunPageState): readonly RunLayeredRect[] {
 
 const CTX: RunPageContext = runPageContext();
 
+/**
+ * 脚本节点 id 的**命名常量**（测试里不允许出现 `if (day === X)` 那样的位置猜测）。
+ * 与 `runScript.ts` 的 `RUN_SCRIPT` 一一对应；对不上会在 H 段被显式断言。
+ */
+const NODE = {
+  start: 'd1-start',
+  battle1: 'd2-battle1',
+  choice1: 'd2-choice1',
+  battle2: 'd3-battle2',
+  durability: 'd4-durability',
+  tend: 'd5-tend',
+  choice2: 'd5-choice2',
+  battle3: 'd6-battle3',
+  final: 'd7-final',
+} as const;
+
+/** 四场真实战斗的 Encounter（= 台阶 ①~④；全部只是既有正式对手模板的引用）。 */
+const LADDER = {
+  [NODE.battle1]: 'PineappleFireBrute',
+  [NODE.battle2]: 'PineappleSawRusher',
+  [NODE.battle3]: 'ProtoRusher',
+  [NODE.final]: 'BananaRodLaser',
+} as const;
+
 /* ---------------------------------------- 真实战斗驱动器（与宿主同一条链） */
 
 const FRAME_MS = 1000 / 60;
-/** 上限远大于实测结束时间（15.4s ≈ 920 帧）：只用于防止死循环，不参与断言。 */
+/** 上限远大于实测结束时间（≈16s ≈ 960 帧）：只用于防止死循环，不参与断言。 */
 const MAX_FRAMES = 4000;
 
 /** 推进 `frames` 帧真实物理，并同步 HP / 步数（**日志零追加**，与宿主一致）。 */
@@ -186,50 +247,209 @@ function driveToEnd(s: RunPageState, rt: RunBattleRuntime): RunPageState {
   return driveFrames(s, rt, MAX_FRAMES);
 }
 
-interface Flow {
-  readonly steps: RunPageState[];
-  readonly finale: RunPageState;
-  readonly runtime: RunBattleRuntime;
+/** 本场武器件的真实 `behaviorParams`（证明 Build 真的注入到运行时零件上）。 */
+function weaponParamsOf(rt: RunBattleRuntime): Record<string, unknown> {
+  const part = rt.orchestrator.vehicleA.parts.find((p) => p.def.category === 'weapon');
+  return { ...((part?.def.behaviorParams ?? {}) as Record<string, unknown>) };
 }
 
-let flowCache: Flow | null = null;
+/** 单步上限（远大于脚本节点数；只防死循环）。 */
+const WALK_GUARD = 40;
 
-/** 走完整条固定演示流程（真实物理，可能较慢 → 只跑一次并缓存；状态不可变，可安全共享）。 */
-function runFullFlow(): Flow {
-  if (flowCache) return flowCache;
-  const runtime = new RunBattleRuntime(false);
+/* ------------------------------------------------------- 单局脚本驱动器 */
+
+interface WalkOpts {
+  /** 耐久事件的分支（必选；两分支都是真实产品路径）。 */
+  readonly durability: RunDurabilityChoiceId;
+  /** 第一次强化（第一层三选一）。 */
+  readonly layer1: string;
+  /** 第二次强化（第二层条件池）；维修分支不会有第二次选择 → 该值被忽略。 */
+  readonly layer2: string;
+  /**
+   * 提供则用**合成战果**（不跑物理，毫秒级）——只服务状态机 / 账本结构断言；
+   * 不提供则跑**真实物理**（慢，按 (分支, 一层, 二层) 缓存）。
+   */
+  readonly syntheticHp?: readonly number[];
+}
+
+interface RunWalk {
+  /** 按 `${nodeId}:${phase}` 取「该节点第一次处于该 phase」的状态（不存在 → 抛错）。 */
+  at(nodeId: string, phase: RunPhase): RunPageState;
+  has(nodeId: string, phase: RunPhase): boolean;
+  /** 真实物理模式下的武器参数（按战斗顺序）；合成模式为空。 */
+  readonly weaponParams: readonly Record<string, unknown>[];
+  /** 真实物理模式下的能力结束态（按战斗顺序）；合成模式为空。 */
+  readonly abilityEnd: readonly { kineticBurst: boolean; kineticHits: number }[];
+  /** 每场战斗**开局**耐久（= 状态机注入的值；合成模式同样有效）。 */
+  readonly openingHp: readonly number[];
+  /** 每场战斗生效的 Build（按战斗顺序）。 */
+  readonly builds: readonly (readonly string[])[];
+  /** 走过的节点 id（按首次到达顺序）。 */
+  readonly nodeSeq: readonly string[];
+  /** 全部中间状态（含同一节点不同 phase）。 */
+  readonly trail: readonly RunPageState[];
+  readonly finalRuntime: RunBattleRuntime | null;
+}
+
+function walkRun(o: WalkOpts): RunWalk {
+  const states = new Map<string, RunPageState>();
+  const trail: RunPageState[] = [];
+  const nodeSeq: string[] = [];
+  const openingHp: number[] = [];
+  const builds: string[][] = [];
+  const weaponParams: Record<string, unknown>[] = [];
+  const abilityEnd: { kineticBurst: boolean; kineticHits: number }[] = [];
+
+  const record = (s: RunPageState): void => {
+    trail.push(s);
+    if (nodeSeq[nodeSeq.length - 1] !== s.nodeId) nodeSeq.push(s.nodeId);
+    const k = `${s.nodeId}:${s.phase}`;
+    if (!states.has(k)) states.set(k, s);
+  };
+
   let s = createRunPageState(CTX);
-  const steps: RunPageState[] = [s]; // IDLE
-  s = pressRunAction(s, CTX);
-  steps.push(s); // EVENT
-  s = pressRunAction(s, CTX);
-  steps.push(s); // BATTLE
-  s = driveToEnd(s, runtime);
-  steps.push(s); // RESULT
-  s = pressRunAction(s, CTX);
-  steps.push(s); // CHOICE
-  s = chooseRunBuff(s, RUN_CHOICE_OPTIONS[0].id);
-  steps.push(s); // IDLE
-  flowCache = { steps, finale: s, runtime };
-  return flowCache;
+  record(s);
+  /** ⚠️ carry 只在「上一场已结束、本场未建立」的窗口可读（见 `runCarriedPlayerHp` 文档）。 */
+  let carry: number | null = null;
+  let hpIdx = 0;
+  let prevRt: RunBattleRuntime | null = null;
+  let finalRuntime: RunBattleRuntime | null = null;
+
+  for (let guard = 0; guard < WALK_GUARD; guard++) {
+    if (s.phase === 'COMPLETE' || s.phase === 'FAILED') break;
+
+    if (s.phase === 'BATTLE') {
+      const node = runCurrentNode(s);
+      openingHp.push(s.battle!.playerHp);
+      builds.push([...runBuildIds(s)]);
+      if (o.syntheticHp) {
+        const hp = o.syntheticHp[Math.min(hpIdx, o.syntheticHp.length - 1)];
+        hpIdx += 1;
+        s = finishRunBattle(s, { winner: 'A', endReason: 'hp', playerHp: hp, enemyHp: 0, steps: 300 });
+        record(s);
+        continue;
+      }
+      const rt = new RunBattleRuntime({
+        build: runBuildIds(s),
+        carriedHp: carry,
+        encounterId: node.encounterId,
+      });
+      prevRt?.dispose();
+      prevRt = rt;
+      finalRuntime = rt;
+      weaponParams.push(weaponParamsOf(rt));
+      s = driveToEnd(s, rt);
+      const ab = rt.abilitySnapshot();
+      abilityEnd.push({ kineticBurst: ab.kineticBurst, kineticHits: ab.kineticHits });
+      record(s);
+      continue;
+    }
+
+    if (s.phase === 'CHOICE') {
+      const pick = runBuildIds(s).length === 0 ? o.layer1 : o.layer2;
+      s = chooseRunBuff(s, pick, CTX);
+      record(s);
+      continue;
+    }
+
+    if (s.phase === 'DURABILITY') {
+      s = resolveDurability(s, o.durability, CTX);
+      record(s);
+      continue;
+    }
+
+    if (s.phase === 'EVENT') carry = runCarriedPlayerHp(s);
+    s = pressRunAction(s, CTX);
+    record(s);
+  }
+
+  return {
+    at(nodeId, phase) {
+      const hit = states.get(`${nodeId}:${phase}`);
+      if (!hit) throw new Error(`[test] 本局没有走到 ${nodeId}:${phase}（节点序列：${nodeSeq.join(' → ')}）`);
+      return hit;
+    },
+    has: (nodeId, phase) => states.has(`${nodeId}:${phase}`),
+    weaponParams,
+    abilityEnd,
+    openingHp,
+    builds,
+    nodeSeq,
+    trail,
+    finalRuntime,
+  };
 }
 
-/** 建立战斗（EVENT → BATTLE）并返回新的运行时 + 状态。 */
-function startBattle(): { rt: RunBattleRuntime; bt: RunPageState } {
-  const rt = new RunBattleRuntime(false);
-  const bt = pressRunAction(pressRunAction(createRunPageState(CTX), CTX), CTX);
-  return { rt, bt };
+/**
+ * 合成驾驶：真实物理非常慢（四场 ≈ 3.5s / 路线），结构断言只需要「流程怎么走」，
+ * 因此用**合成战果**（`finishRunBattle` 直接喂数值）走完同一套真实脚本。
+ *
+ * 默认耐久序列 [900, 800, 850, 700]：全部远高于 0 → 全胜到 COMPLETE。
+ */
+function syntheticWalk(
+  durability: RunDurabilityChoiceId = 'upgrade',
+  layer1 = 'heavyShell',
+  layer2 = 'kineticBurst',
+  hp: readonly number[] = [900, 800, 850, 700],
+): RunWalk {
+  return walkRun({ durability, layer1, layer2, syntheticHp: hp });
 }
 
-/** 走到 RESULT（真实战斗已打完）。 */
-function reachResult(): RunPageState {
-  const { rt, bt } = startBattle();
-  return driveToEnd(bt, rt);
+const realCache = new Map<string, RunWalk>();
+
+function realWalk(durability: RunDurabilityChoiceId, layer1: string, layer2: string): RunWalk {
+  const key = `${durability}|${layer1}|${layer2}`;
+  const hit = realCache.get(key);
+  if (hit) return hit;
+  const w = walkRun({ durability, layer1, layer2 });
+  realCache.set(key, w);
+  return w;
 }
 
-/** 走到 CHOICE（改装机会浮层已打开）。 */
-function reachChoice(): RunPageState {
-  return pressRunAction(reachResult(), CTX);
+/** ⚠️ 真实路线只跑一次并缓存 → 运行时统一在文件结束时释放（不在单个用例里 dispose）。 */
+afterAll(() => {
+  for (const w of realCache.values()) w.finalRuntime?.dispose();
+  realCache.clear();
+});
+
+/* ---------------------------------------- 快捷定位（读起来就是产品叙事） */
+
+/** 开场（脚本第一个节点：DAY 1 的行进节拍）。 */
+function fresh(): RunPageState {
+  return createRunPageState(CTX);
+}
+
+/** 从开场连续按 n 次主动作（只用于边界 / 误触断言）。 */
+function pressTimes(s: RunPageState, n: number): RunPageState {
+  let cur = s;
+  for (let i = 0; i < n; i++) cur = pressRunAction(cur, CTX);
+  return cur;
+}
+
+/** 合成一份「刚打完一场」的状态（不跑物理）。 */
+function settle(s: RunPageState, playerHp: number, enemyHp = 0, winner: 'A' | 'B' = 'A'): RunPageState {
+  return finishRunBattle(s, { winner, endReason: 'hp', playerHp, enemyHp, steps: 300 });
+}
+
+/** 已经推进到第一个战斗节点的 BATTLE（= 三次主动作）。 */
+function atBattle1(): RunPageState {
+  return pressTimes(fresh(), 3);
+}
+
+/** 从开场推进到指定战斗节点的 BATTLE，并建立与宿主同口径的真实运行时。 */
+function startRealBattle(nodeId: string): { rt: RunBattleRuntime; bt: RunPageState } {
+  let s = fresh();
+  for (let i = 0; i < WALK_GUARD && (s.nodeId !== nodeId || s.phase !== 'BATTLE'); i++) {
+    s = pressRunAction(s, CTX);
+  }
+  expect(s.nodeId).toBe(nodeId);
+  expect(s.phase).toBe('BATTLE');
+  const rt = new RunBattleRuntime({
+    build: runBuildIds(s),
+    carriedHp: s.battle!.playerHp,
+    encounterId: runCurrentNode(s).encounterId,
+  });
+  return { rt, bt: s };
 }
 
 /* ======================================================= A. 页面层级 */
@@ -293,11 +513,11 @@ describe('PRP-F0｜A 页面层级：竖屏 390×844 四条横带', () => {
 
     // 顶部薄层必须装得下「DAY 行 + 已获得图标行」（图标底边不得越入舞台带）
     for (const icon of runBuffIconRects(RUN_BUFF_ICON_MAX)) expect(inside(icon, RUN_TOP_BAND)).toBe(true);
-    for (const n of runDayNodes(RUN_TOTAL_DAYS)) expect(inside(n, RUN_TOP_BAND)).toBe(true);
+    for (const n of runDayNodes(RUN_DAYS_TOTAL)) expect(inside(n, RUN_TOP_BAND)).toBe(true);
   });
 
   it('RP-02 顶部薄层：DAY 进度一行 + 已获得强化一行（右对齐节点 / 左对齐图标，互不重叠）', () => {
-    const nodes = runDayNodes(RUN_TOTAL_DAYS);
+    const nodes = runDayNodes(RUN_DAYS_TOTAL);
     expect(nodes.length).toBe(7);
     for (const n of nodes) expect(inside(n, RUN_TOP_BAND)).toBe(true);
     for (let i = 1; i < nodes.length; i++) expect(nodes[i].x).toBeGreaterThan(nodes[i - 1].x + nodes[i - 1].w);
@@ -367,192 +587,227 @@ describe('PRP-F0｜A 页面层级：竖屏 390×844 四条横带', () => {
     // 主动作不与日志区 / 舞台重叠
     expect(runRectsOverlap(btn, RUN_LOG_BAND)).toBe(false);
     expect(runRectsOverlap(btn, RUN_STAGE_BAND)).toBe(false);
-    // 强调条（入账的纯色块）完全落在按钮内
+    // 强调条（入账的纯色块）落在按钮内
     expect(inside(runActionBarRect(), btn)).toBe(true);
   });
 });
 
-/* ============================================ B. 五状态机 + 固定演示流程 */
+/* ======================================== B. 八状态机 + 脚本驱动流程 */
 
-describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', () => {
-  it('RP-06 初始为 IDLE、日志已可见且已是玩家叙事（无方括号前缀）', () => {
-    const s = createRunPageState(CTX);
+describe('PRP-RUN-02｜B 八状态机与固定 Run Script 流程（同一页面内）', () => {
+  it('RP-06 初始 = 脚本第一个节点（DAY 1 的行进节拍），日志已是玩家叙事', () => {
+    const s = fresh();
     expect(s.phase).toBe('IDLE');
     expect(RUN_PHASES).toContain(s.phase);
-    expect(s.log.length).toBe(2); // DAY 行 + 行进叙事
-    expect(visibleRunLog(s, RUN_LOG.maxLines).length).toBe(2);
+    expect(s.nodeId).toBe(RUN_SCRIPT_FIRST_ID);
+    expect(s.nodeId).toBe(NODE.start);
+    expect(runNodeKind(s)).toBe('EVENT');
+    expect(s.day).toBe(RUN_FIRST_DAY);
+    expect(s.day).toBe(1);
+    expect(s.dayTotal).toBe(RUN_DAYS_TOTAL);
+    expect(s.dayTotal).toBe(7);
+
+    // 日志 = DAY 行 + 该节点的 beat 叙事（占位符已用正式展示名替换）
+    const first = requireRunScriptNode(NODE.start);
+    expect(s.log.length).toBe(1 + first.beat.length);
     expect(s.log[0].kind).toBe('day');
-    expect(s.log[0].text).toBe(`DAY ${RUN_INITIAL_DAY}`);
+    expect(s.log[0].text).toBe('DAY 1');
     expect(s.log[1].kind).toBe('travel');
     expect(s.log[1].text).toContain(CTX.vehicleLabel);
+    expect(s.log.some((e) => e.text.includes('{'))).toBe(false); // 占位符已全部替换
     expect(runActionLabel(s)).toBe('继续');
     expect(runActionEnabled(s)).toBe(true);
     expect(s.buffs.length).toBe(0);
     expect(s.battle).toBeNull();
-    expect(s.day).toBe(RUN_INITIAL_DAY);
-    expect(s.dayTotal).toBe(RUN_TOTAL_DAYS);
+    // fresh 契约（构造不走 goPhase）
+    expect(s.phaseTrail).toEqual(['IDLE']);
+    expect(s.transitions).toBe(0);
+    expect(s.revision).toBe(0);
+    expect(s.actionCount).toBe(0);
   });
 
-  it('RP-07 一次完整操作连续走完 IDLE→EVENT→BATTLE→RESULT→CHOICE→IDLE', () => {
-    const { steps, finale } = runFullFlow();
-    expect(steps.map((s) => s.phase)).toEqual(['IDLE', 'EVENT', 'BATTLE', 'RESULT', 'CHOICE', 'IDLE']);
-    expect(finale.phaseTrail).toEqual(['IDLE', 'EVENT', 'BATTLE', 'RESULT', 'CHOICE', 'IDLE']);
-    expect(finale.transitions).toBe(5);
-    // revision 单调递增（每次状态变更都 +1，没有静默 no-op 混进来）
-    for (let i = 1; i < steps.length; i++) expect(steps[i].revision).toBeGreaterThan(steps[i - 1].revision);
+  it('RP-07 必改 1：状态机按脚本推进 —— nodeSeq 恰好是脚本节点顺序（两分支各一条）', () => {
+    for (const dur of ['repair', 'upgrade'] as const) {
+      const w = syntheticWalk(dur);
+      // 维修分支跳过 d5-choice2；改装分支跳过 d5-tend —— 其余顺序完全相同
+      const expected = RUN_SCRIPT.map((n) => n.id).filter((id) =>
+        dur === 'repair' ? id !== NODE.choice2 : id !== NODE.tend,
+      );
+      expect(w.nodeSeq).toEqual(expected);
+      expect(w.at(NODE.final, 'COMPLETE').phase).toBe('COMPLETE');
+    }
+    // 脚本里 BATTLE + FINAL 恰好四场
+    expect(runScriptBattleNodes().map((n) => n.id)).toEqual([NODE.battle1, NODE.battle2, NODE.battle3, NODE.final]);
+    expect(RUN_SCRIPT_BATTLE_NODE_IDS.length).toBe(RUN_BATTLES_TOTAL);
+    expect(RUN_BATTLES_TOTAL).toBe(4);
+    expect(runScriptKindSequence()).toEqual([
+      'EVENT',
+      'BATTLE',
+      'CHOICE',
+      'BATTLE',
+      'DURABILITY',
+      'EVENT',
+      'CHOICE',
+      'BATTLE',
+      'FINAL',
+    ]);
   });
 
-  it('RP-08 EVENT：页面不跳转（纯状态），日志追加 2 句敌情叙事，底部切为对应当前动作', () => {
-    const idle = createRunPageState(CTX);
-    const ev = pressRunAction(idle, CTX);
+  it('RP-08 战斗节点是**两段式**：IDLE →(按一次) EVENT 敌情 →(再按) BATTLE', () => {
+    const s1 = pressRunAction(fresh(), CTX); // DAY 1 节拍 → DAY 2 战斗节点
+    expect(s1.phase).toBe('IDLE');
+    expect(s1.nodeId).toBe(NODE.battle1);
+    expect(s1.day).toBe(2);
+    expect(runActionLabel(s1)).toBe('继续');
+
+    const ev = pressRunAction(s1, CTX);
     expect(ev.phase).toBe('EVENT');
-    expect(ev.log.length).toBe(idle.log.length + 2);
-    expect(ev.log[ev.log.length - 2].kind).toBe('event');
-    expect(ev.log[ev.log.length - 2].text).toBe('前方传来急促的引擎声。');
-    const last = ev.log[ev.log.length - 1];
-    expect(last.kind).toBe('event');
-    expect(last.text).toBe(`你遭遇了${CTX.encounterLabel}。`);
+    expect(ev.nodeId).toBe(NODE.battle1);
+    // 敌情叙事 = 该节点的 `encounter` 行，占位符换成正式展示名
+    const node = requireRunScriptNode(NODE.battle1);
+    expect(ev.log.length).toBe(s1.log.length + node.encounter!.length);
+    expect(ev.log[ev.log.length - 1].kind).toBe('event');
+    expect(ev.log[ev.log.length - 1].text).toContain(CTX.encounters[NODE.battle1].label);
+    expect(ev.log.some((e) => e.text.includes('{'))).toBe(false);
     expect(runActionLabel(ev)).toBe('遭遇敌人');
     expect(runActionEnabled(ev)).toBe(true);
-    // 原日志行一字不动（只追加）
-    expect(ev.log.slice(0, idle.log.length)).toEqual(idle.log);
-  });
+    // 原日志只追加、不重排
+    expect(ev.log.slice(0, s1.log.length)).toEqual(s1.log);
 
-  it('RP-09 BATTLE：底部切为「战斗中」并不可误触推进；入场不写日志；战斗数值=真实 HP', () => {
-    const { bt } = startBattle();
+    const bt = pressRunAction(ev, CTX);
     expect(bt.phase).toBe('BATTLE');
     expect(runActionLabel(bt)).toBe('战斗中');
     expect(runActionEnabled(bt)).toBe(false); // 禁触
+  });
+
+  it('RP-09 BATTLE：不可误触推进；入场不写日志；耐久上限来自共享数据；第一场满耐久', () => {
+    const w = syntheticWalk();
+    const bt = w.at(NODE.battle1, 'BATTLE');
     expect(pressRunAction(bt, CTX)).toBe(bt); // 同引用 = 真 no-op
-    expect(bt.log.length).toBe(4); // 入场不写日志（保持在 EVENT 的 4 行）
     expect(bt.battle).not.toBeNull();
+    expect(bt.battle!.playerHpMax).toBe(1100);
+    expect(bt.battle!.playerHp).toBe(1100); // 第一场：carry = null → 满耐久开幕
+    expect(runCarriedPlayerHp(fresh())).toBeNull();
+    // 敌情来自**该节点的 Encounter**（HP 上限是真实解析值，不是手写）
+    expect(bt.battle!.enemyHpMax).toBe(CTX.encounters[NODE.battle1].hpMax);
     expect(bt.battle!.enemyHp).toBe(bt.battle!.enemyHpMax);
-    expect(bt.battle!.playerHp).toBe(bt.battle!.playerHpMax);
     expect(bt.battle!.steps).toBe(0);
     expect(bt.battle!.done).toBe(false);
     expect(bt.battle!.winner).toBeNull();
-    // 耐久上限来自 F1 共享测试数据（正式 registry 解析，不是手写）
-    expect(bt.battle!.playerHpMax).toBe(1100);
-    expect(bt.battle!.enemyHpMax).toBe(1000); // PRP-RUN-R1：验证对手换为 ProtoRusher（菠萝 1000）
-    // 没有任何脚本参数残留（`totalSteps` 已随 RUN_BATTLE_SCRIPT 一并删除）
-    expect('totalSteps' in bt.battle!).toBe(false);
+    // BATTLE 是自动推进 → 入场那一下也不写日志
+    const ev = w.at(NODE.battle1, 'EVENT');
+    expect(bt.log).toEqual(ev.log);
+    expect('totalSteps' in bt.battle!).toBe(false); // 无脚本参数残留
   });
 
-  it('RP-10 BATTLE 期间不刷逐帧伤害日志；开局 41 帧内**零伤害**（远程阶段先于接敌）', () => {
-    const { rt, bt } = startBattle();
+  it('RP-10 BATTLE 期间不刷逐帧伤害日志；开局 41 帧内**零伤害**（先有距离、后有交火）', () => {
+    const { rt, bt } = startRealBattle(NODE.battle1);
     let cur = bt;
     for (const chunk of [1, 1, 1, 5, 13, 20]) {
       const next = driveFrames(cur, rt, chunk);
       expect(next.phase).toBe('BATTLE'); // 还没打完
       expect(next.log).toEqual(bt.log); // 日志零变化
-      expect(next.log.length).toBe(bt.log.length);
       cur = next;
     }
     expect(cur.battle!.steps).toBe(41);
-    // ⚠️ 实测：首次命中在 2.2s（≈131 帧）→ 41 帧时双方仍满血。
-    // 这正是「先有距离、后有交火」的机器证据（旧脚本版会在第 1 帧就开始掉血）。
+    // ⚠️ 实测：`PineappleFireBrute` 的**首次命中在 185 帧（≈3.1s）** —— 41 帧时双方仍满血
+    //    （「先有距离、后有交火」；这也是本节点作为**低压台阶**的可感知依据）。
     expect(cur.battle!.enemyHp).toBe(bt.battle!.enemyHp);
     expect(cur.battle!.playerHp).toBe(bt.battle!.playerHp);
-    // 继续推进到首次交火之后 → 敌方耐久真实下降，而日志依旧一字未动
-    const late = driveFrames(cur, rt, 120);
-    expect(late.battle!.steps).toBe(161);
+    // 继续推进到首次交火之后（41 + 220 = 261 帧 > 185）→ 敌方耐久真实下降，日志依旧一字未动
+    const late = driveFrames(cur, rt, 220);
+    expect(late.battle!.steps).toBe(261);
     expect(late.battle!.enemyHp).toBeLessThan(bt.battle!.enemyHp);
     expect(late.log).toEqual(bt.log);
     rt.dispose();
   });
 
-  it('RP-11 RESULT：一次性追加 3 行玩家叙事（胜负 + 耐久百分比 + 改装机会）', () => {
-    const { rt, bt } = startBattle();
-    let mid = bt;
-    // 推进到「还没结束」的最后一帧（不能写死帧数 → 用真实结束点反推）
-    for (let i = 0; i < MAX_FRAMES; i++) {
-      const next = driveFrames(mid, rt, 1);
-      if (next.phase !== 'BATTLE') break;
-      mid = next;
-    }
-    expect(mid.phase).toBe('BATTLE');
-    expect(mid.log.length).toBe(bt.log.length); // 结束前一帧仍不写日志
-
-    const res = driveFrames(mid, rt, 1);
-    expect(res.phase).toBe('RESULT');
-    expect(res.log.length).toBe(bt.log.length + 3); // 一次性只加三条
+  it('RP-11 RESULT：一次性追加 3 行玩家叙事（胜负 + 耐久百分比 + **该节点自己的** after）', () => {
+    const w = syntheticWalk();
+    const res = w.at(NODE.battle1, 'RESULT');
+    const ev = w.at(NODE.battle1, 'EVENT');
+    expect(res.log.length).toBe(ev.log.length + 3);
     const added = res.log.slice(-3);
     expect(added[0].kind).toBe('result');
     expect(added[0].text).toBe('战斗胜利。');
     expect(added[1].kind).toBe('durability');
     expect(added[1].text).toBe(`战车耐久剩余 ${durabilityPercent(res.battle!)}%。`);
     expect(added[2].kind).toBe('result');
-    expect(added[2].text).toBe('你发现了一次改装机会……');
+    // ⚠️ 第三行来自**脚本节点的 `after`** —— 页面里没有 `if (day === X)`
+    expect(added[2].text).toBe(requireRunScriptNode(NODE.battle1).after![0]);
     expect(res.battle!.done).toBe(true);
-    // 官方结果被原样带回（不是自算的胜负）
-    expect(res.battle!.winner).toBe('A');
-    expect(res.battle!.endReason).toBe('hp');
     expect(runActionLabel(res)).toBe('继续');
     expect(runActionEnabled(res)).toBe(true);
+    // 每个战斗节点的 after 各不相同（「接下来是什么」不是同一句话）
+    const afters = runScriptBattleNodes()
+      .filter((n) => n.after)
+      .map((n) => n.after![0]);
+    expect(new Set(afters).size).toBe(afters.length);
   });
 
-  it('RP-12 CHOICE：浮层打开、日志不变、原页面几何与位置一字不动', () => {
-    const res = reachResult();
+  it('RP-12 CHOICE：浮层打开、日志一字不动、战斗结论整体保留、遮罩恰覆盖整页', () => {
+    const res = syntheticWalk().at(NODE.battle1, 'RESULT');
     const ch = pressRunAction(res, CTX);
     expect(ch.phase).toBe('CHOICE');
+    expect(ch.nodeId).toBe(NODE.choice1);
     expect(runChoiceOpen(ch)).toBe(true);
-    expect(ch.log).toEqual(res.log); // 既不加也不减
+    expect(runOverlayOpen(ch)).toBe(true);
+    expect(ch.log).toEqual(res.log); // 既不加也不减（CHOICE 节点的 beat 是空数组）
     expect(ch.buffs).toEqual(res.buffs);
-    expect(ch.battle).toEqual(res.battle); // 战斗结论整体保留（浮层下面是同一个战场）
-    // 浮层出现其间「原页面整体变暗」= 遮罩恰好覆盖整个逻辑舞台（不多不少）
+    expect(ch.battle).toEqual(res.battle); // 浮层下面是同一个战场
+    expect(runOverlayCards(ch).map((o) => o.id)).toEqual(RUN_CHOICE_OPTIONS.map((o) => o.id));
     expect(runChoiceMaskRect()).toEqual({ x: 0, y: 0, w: RUN_PAGE_W, h: RUN_PAGE_H });
   });
 
-  it('RP-13 选择后回到 IDLE：顶部新增图标 + 日志追加自然语言结果 + 推进到下一 DAY + 历史完整', () => {
-    const { steps, finale } = runFullFlow();
-    const choice = steps[4];
-    expect(choice.phase).toBe('CHOICE');
-    expect(finale.phase).toBe('IDLE');
-    expect(finale.buffs.length).toBe(choice.buffs.length + 1);
-    expect(finale.buffs[0].id).toBe(RUN_CHOICE_OPTIONS[0].id);
-    expect(finale.buffs[0].label).toBe('重型弹头');
-    // PRP-F2 必改 3：选择后追加两行 —— ①强化记录（自然语言）②新的 DAY 行
-    expect(finale.log.length).toBe(choice.log.length + 2);
-    const last = finale.log[finale.log.length - 1];
-    const prev = finale.log[finale.log.length - 2];
-    expect(prev.kind).toBe('choice');
-    expect(prev.text).toBe('你为大炮装上了重型弹头。');
-    expect(last.kind).toBe('day');
-    expect(last.text).toBe(`DAY ${RUN_INITIAL_DAY + 1}`);
-    // 本局 Build 被记录（必改 3）；PRP-BUILD-01：`buffs` 就是 Build 的唯一来源
-    expect(runBuildIds(finale)).toEqual([RUN_CHOICE_OPTIONS[0].id]);
-    expect(finale.repairBonus).toBe(0); // 重型弹头不是维修项 → 无耐久补偿
+  it('RP-13 选择后**按脚本推进到下一个节点**：顶部新增图标 + 历史完整 + DAY 前进', () => {
+    const s1 = syntheticWalk().at(NODE.choice1, 'CHOICE');
+    const after = chooseRunBuff(s1, RUN_CHOICE_OPTIONS[0].id, CTX);
+    expect(after.phase).toBe('IDLE');
+    expect(after.nodeId).toBe(NODE.battle2); // 脚本 `next`
+    expect(after.day).toBe(3); // d3-battle2 的 day
+    expect(after.buffs.length).toBe(s1.buffs.length + 1);
+    expect(after.buffs[0].id).toBe(RUN_CHOICE_OPTIONS[0].id);
+    expect(after.buffs[0].label).toBe('重型弹头');
+    // 追加：① 强化记录（自然语言）② 新 DAY 行 ③ 新节点的 beat
+    const nextBeat = requireRunScriptNode(NODE.battle2).beat.length;
+    expect(after.log.length).toBe(s1.log.length + 2 + nextBeat);
+    expect(after.log[s1.log.length].kind).toBe('choice');
+    expect(after.log[s1.log.length].text).toBe('你为大炮装上了重型弹头。');
+    expect(after.log[s1.log.length + 1].text).toBe('DAY 3');
     // 历史完整：CHOICE 之前的全部行原样保留
-    expect(finale.log.slice(0, choice.log.length)).toEqual(choice.log);
-    // seq 连续单调
-    for (let i = 1; i < finale.log.length; i++) expect(finale.log[i].seq).toBe(finale.log[i - 1].seq + 1);
+    expect(after.log.slice(0, s1.log.length)).toEqual(s1.log);
+    for (let i = 1; i < after.log.length; i++) expect(after.log[i].seq).toBe(after.log[i - 1].seq + 1);
+    // 本局 Build 被记录；第一层不是维修项 → 无耐久补偿
+    expect(runBuildIds(after)).toEqual([RUN_CHOICE_OPTIONS[0].id]);
+    expect(after.repairBonus).toBe(0);
   });
 
   it('RP-13b 未选择之前本局没有任何强化（本局临时状态，新建 Run 回到空 Build）', () => {
-    const fresh = createRunPageState(CTX);
-    expect(runBuildIds(fresh)).toEqual([]);
-    const { steps } = runFullFlow();
-    expect(runBuildIds(steps[0])).toEqual([]); // IDLE
-    expect(runBuildIds(steps[4])).toEqual([]); // CHOICE（还没选）
+    const w = syntheticWalk();
+    expect(runBuildIds(fresh())).toEqual([]);
+    expect(runBuildIds(w.at(NODE.start, 'IDLE'))).toEqual([]);
+    expect(runBuildIds(w.at(NODE.choice1, 'CHOICE'))).toEqual([]);
   });
 
-  it('RP-14 误触保护：BATTLE / CHOICE 阶段按主动作 no-op；未知强化 id no-op', () => {
-    const { steps } = runFullFlow();
-    const bt = steps[2];
-    const res = steps[3];
+  it('RP-14 误触保护：BATTLE / CHOICE / DURABILITY 按主动作 no-op；未知强化 id no-op', () => {
+    const w = syntheticWalk();
+    const bt = w.at(NODE.battle1, 'BATTLE');
+    const res = w.at(NODE.battle1, 'RESULT');
+    const ch = w.at(NODE.choice1, 'CHOICE');
+    const dur = w.at(NODE.durability, 'DURABILITY');
     expect(pressRunAction(bt, CTX)).toBe(bt);
-    const choice = steps[4];
-    expect(pressRunAction(choice, CTX)).toBe(choice);
-    expect(chooseRunBuff(choice, 'not-a-buff')).toBe(choice);
-    expect(chooseRunBuff(res, RUN_CHOICE_OPTIONS[0].id)).toBe(res); // 非 CHOICE 不生效
-    // 非 BATTLE 状态不接受帧同步（真 no-op，同引用）
-    const { rt } = startBattle();
+    expect(pressRunAction(ch, CTX)).toBe(ch);
+    expect(pressRunAction(dur, CTX)).toBe(dur); // 耐久事件必须点卡片
+    expect(chooseRunBuff(ch, 'not-a-buff', CTX)).toBe(ch);
+    expect(chooseRunBuff(res, RUN_CHOICE_OPTIONS[0].id, CTX)).toBe(res); // 非 CHOICE 不生效
+    // 非 BATTLE 状态不接受帧同步 / 结束回报（真 no-op，同引用）
     expect(syncRunBattle(res, { playerHp: 1, enemyHp: 1, steps: 1 })).toBe(res);
     expect(finishRunBattle(res, { winner: 'A', endReason: 'hp', playerHp: 1, enemyHp: 0, steps: 1 })).toBe(res);
-    void rt;
+    // CHOICE 浮层上做耐久裁决也不生效（`resolveDurability` 只认 DURABILITY）
+    expect(resolveDurability(ch, 'repair', CTX)).toBe(ch);
   });
 
-  it('RP-15 三个强化选项固定且正是 Queue 点名的 Cannon 三选一（本局临时，不随机）', () => {
+  it('RP-15 第一层三选项固定且正是 Queue 点名的 Cannon 三选一（本局临时，不随机）', () => {
     expect(RUN_CHOICE_OPTIONS.length).toBe(3);
     expect(RUN_CHOICE_OPTIONS.map((o) => o.label)).toEqual(['重型弹头', '双联炮', '快速装填']);
     expect(RUN_CHOICE_OPTIONS.map((o) => o.note)).toEqual([
@@ -564,25 +819,25 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     expect(new Set(RUN_CHOICE_OPTIONS.map((o) => o.id)).size).toBe(3);
     for (const o of RUN_CHOICE_OPTIONS) {
       expect(o.note.length).toBeGreaterThan(0);
-      expect(o.note.includes('[')).toBe(false); // 不是内部字段 / 枚举
+      expect(o.note.includes('[')).toBe(false);
       expect(o.note.length).toBeLessThanOrEqual(16); // 一句结果，不是说明段
     }
-    // 两个不同选项给出可区分的顶部图标 / 日志结果（选择真的生效）
-    const a = chooseRunBuff(reachChoice(), RUN_CHOICE_OPTIONS[1].id);
-    const b = chooseRunBuff(reachChoice(), RUN_CHOICE_OPTIONS[2].id);
+    // 两个不同选项给出可区分的日志结果（选择真的生效）
+    const at = (): RunPageState => syntheticWalk().at(NODE.choice1, 'CHOICE');
+    const a = chooseRunBuff(at(), RUN_CHOICE_OPTIONS[1].id, CTX);
+    const b = chooseRunBuff(at(), RUN_CHOICE_OPTIONS[2].id, CTX);
     expect(a.buffs[0].id).toBe('twinCannon');
     expect(b.buffs[0].id).toBe('fastReload');
-    expect(a.buffs[0].id).not.toBe(b.buffs[0].id);
-    expect(a.log[a.log.length - 2].text).toBe('你为大炮加装了一门副炮。');
-    expect(b.log[b.log.length - 2].text).toBe('你改进了大炮的装填机构。');
+    // 强化记录行位于「下一个节点的 DAY 行」之前
+    const beat = requireRunScriptNode(NODE.battle2).beat.length;
+    expect(a.log[a.log.length - 2 - beat].text).toBe('你为大炮加装了一门副炮。');
+    expect(b.log[b.log.length - 2 - beat].text).toBe('你改进了大炮的装填机构。');
   });
 
   it('RP-16 真实战斗的帧同步是纯函数：同样的步数序列 → 同样的 HP / 结局', () => {
-    const { rt, bt } = startBattle();
+    const { rt, bt } = startRealBattle(NODE.battle1);
     const oneShot = driveToEnd(bt, rt);
     expect(oneShot.phase).toBe('RESULT');
-    // 同一个运行时不可能重放；这里验证「同步函数本身无隐藏状态」：
-    // 用结束时的真实 HP 再走一次 sync/finish，结果与 oneShot 完全相同。
     const replay = finishRunBattle(
       syncRunBattle(bt, {
         playerHp: oneShot.battle!.playerHp,
@@ -600,19 +855,27 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
     expect(replay.battle).toEqual(oneShot.battle);
     expect(replay.log).toEqual(oneShot.log);
     expect(replay.phase).toBe(oneShot.phase);
+    rt.dispose();
   });
 
-  it('RP-17 耐久上限来自 F1 共享测试数据（不手写数值）；日志文本不再被二次格式化', () => {
+  it('RP-17 状态机上下文按**节点 id** 提供敌情（展示名 / 耐久上限都来自共享数据）', () => {
     const plan = runDemoPlan();
     expect(CTX.playerHpMax).toBe(plan.player.hp);
-    expect(CTX.enemyHpMax).toBe(plan.enemies[0].hp);
     expect(CTX.playerHpMax).toBe(1100);
-    expect(CTX.enemyHpMax).toBe(1000); // ProtoRusher = 菠萝车身（正式模板 R1-RUSH-02）
     expect(CTX.vehicleLabel).toBe('西瓜重炮');
-    expect(CTX.encounterLabel).toBe('菠萝冲刺车');
-    expect(RUN_DEMO_LOADOUT_ID).toBe('WatermelonHeavyCannon');
-    expect(RUN_DEMO_ENCOUNTER_ID).toBe('ProtoRusher');
-    // PRP-R3 必改 3：formatRunLog 是恒等（**不再拼 `[耐久]` 之类前缀**）
+    // 每个 BATTLE / FINAL 节点都有敌情，且 hpMax 就是该 Encounter 的真实解析值
+    for (const node of runScriptBattleNodes()) {
+      const info = CTX.encounters[node.id];
+      expect(info, `${node.id} 必须有敌情`).toBeDefined();
+      expect(info.hpMax).toBeGreaterThan(0);
+      expect(info.label.length).toBeGreaterThan(0);
+      const enc = LAB_ENCOUNTERS.find((e) => e.id === node.encounterId)!;
+      expect(info.label).toBe(enc.label);
+    }
+    // 旧口径（单一 `encounterLabel` / `enemyHpMax`）已随四场阶梯一起移除
+    expect('encounterLabel' in CTX).toBe(false);
+    expect('enemyHpMax' in CTX).toBe(false);
+    // 日志文本不再被二次格式化
     expect(formatRunLog({ seq: 1, kind: 'durability', text: '战车耐久剩余 78%。' })).toBe('战车耐久剩余 78%。');
   });
 });
@@ -621,12 +884,11 @@ describe('PRP-F0｜B 五状态机与固定演示流程（同一页面内）', ()
 
 describe('PRP-F1｜C 中部舞台：IDLE 近景 + 真实战斗世界（正式世界尺度）', () => {
   it('RP-18 必改 1：战斗世界用正式 arena 尺度，不是「按舞台带宽生成的假 arena」', () => {
-    const { rt } = startBattle();
+    const { rt } = startRealBattle(NODE.battle1);
     expect(rt.arenaWidth).toBe(1600); // 正式 DEFAULT_ARENA_CONFIG.width
     expect(rt.arenaWidth).not.toBe(RUN_STAGE_BAND.w); // 且**不等于**舞台带宽 390
     expect(rt.arenaHeight).toBe(900);
     expect(rt.groundY).toBe(700);
-    // 出生点就是正式 spawnA / spawnB（构造后实测，不是写死）
     expect(Math.round(rt.spawnAx)).toBe(400);
     expect(Math.round(rt.spawnBx)).toBe(1200);
     expect(rt.spawnSeparation).toBeCloseTo(800, 0);
@@ -634,50 +896,42 @@ describe('PRP-F1｜C 中部舞台：IDLE 近景 + 真实战斗世界（正式世
   });
 
   it('RP-19 必改 2：开局有明确距离（实测两车外廓间距 > 400 世界 px）', () => {
-    const { rt } = startBattle();
+    const { rt } = startRealBattle(NODE.battle1);
     const gap = rt.gapWorld();
     expect(gap).toBeGreaterThan(400);
-    // 冻结实测值（探针 + 本测试同源口径：车身 + 轮 + 部件 + visual）
-    expect(Math.round(gap)).toBe(564); // PRP-RUN-R1：验证对手换为 ProtoRusher 后重测
-    // 外廓间距与世界宽同量级 → 绝不是「贴车开局」
+    // ⚠️ 冻结实测值（车身 + 轮 + 部件 + visual）。节点 ① 的对手 = `PineappleFireBrute`
+    //    （喷火器 + 锤的冲刺车，车身比 `ProtoRusher` 更小）⇒ 外廓间距比旧记录大。
+    expect(Math.round(gap)).toBe(606);
     expect(gap / rt.arenaWidth).toBeGreaterThan(0.25);
     rt.dispose();
   });
 
   it('RP-20 PRP-R5 必改 1/2：相机 = **正式 battle 相机链**，PRP 只做 viewport adapter', () => {
-    // ① PRP-F1 的「固定全世界远摄」被废除：没有固定相机函数、没有写死的地面占比
     const runtime = stripComments(read('runBattleRuntime.ts'));
     const view = stripComments(read('runBattleView.ts'));
     expect(runtime.includes('runBattleCamera')).toBe(false);
     expect(runtime.includes('RUN_BATTLE_GROUND_FRAC')).toBe(false);
-    // 不再出现「视图宽 / 世界宽」这种固定远摄公式
     expect(/viewW\s*\/\s*world/.test(runtime)).toBe(false);
 
-    // ② PRP 不再自算镜头：视图层**不得**直接写 renderer.transform
     expect(view.includes('this.renderer.transform =')).toBe(false);
     expect(view.includes('applyBattleFollow')).toBe(false);
-    // ③ 视图层**必须**调用正式 reframe(snap,'battle',{phase}) —— 这才是「复用正式相机」
     expect(view.includes('reframe(')).toBe(true);
     expect(/'battle'/.test(view)).toBe(true);
     expect(view.includes('const phase = runtime.phase;')).toBe(true);
     expect(/\{ phase \}/.test(view)).toBe(true);
-    // 节奏必须走**正式口径**判定函数（Active 每帧 + 阶段切换那一帧），不得自造规则
     expect(view.includes('shouldReframeBattleCamera(phase, this.lastPhase)')).toBe(true);
-    // ④ 每帧 reframe 之后必须 render()（正式 applyBattleFollow 在 render 内逐帧执行）
     expect(view.indexOf('reframe(')).toBeLessThan(view.indexOf('renderer.render('));
 
-    // ⑤ viewport adapter：离屏视口 = 舞台带 + 正式 inset（安全区恰好等于舞台带）
     expect(RUN_BATTLE_VIEW_INSET).toEqual({ x: 56, y: 28 });
     expect(RUN_BATTLE_VIEW_W).toBe(RUN_STAGE_BAND.w + 112);
     expect(RUN_BATTLE_VIEW_H).toBe(RUN_STAGE_BAND.h + 56);
     expect(view.includes('RUN_BATTLE_VIEW_W')).toBe(true);
     expect(view.includes('RUN_BATTLE_VIEW_H')).toBe(true);
-    // 合成时按 adapter 裁剪原点取源矩形（不再整画布 1:1 平铺）
     expect(view.includes('RUN_BATTLE_VIEW_INSET.x * this.dpr')).toBe(true);
     expect(view.includes('RUN_BATTLE_VIEW_INSET.y * this.dpr')).toBe(true);
   });
 
-  it('RP-21 IDLE 近景缩放公式对 5 种车体都成立（战斗相机不参与 IDLE 构图）', () => {
+  it('RP-21 IDLE 近景缩放公式对**全部** Lab 组合都成立（战斗相机不参与 IDLE 构图）', () => {
     const avail = RUN_PAGE_W - 2 * RUN_SIDE_VIEW.marginPx - RUN_SIDE_VIEW.gapPx;
     let checked = 0;
     for (const l of LAB_LOADOUTS) {
@@ -694,175 +948,146 @@ describe('PRP-F1｜C 中部舞台：IDLE 近景 + 真实战斗世界（正式世
         }
       }
     }
-    expect(checked).toBe(12); // 2 Loadout × (1 + 1 + 3 + 1) 敌人实例（PRP-RUN-R1 起含 ProtoRusher）
+    // 2 Loadout × (1+1+3+1 既有 + 3 新增单敌) = 18 个敌人实例
+    expect(checked).toBe(18);
   });
 });
 
 /* ============================================ D. 面积账本（像素精确） */
 
-describe('PRP-F0｜D 面积账本：逐帧整页像素面积精确冻结', () => {
-  it('RP-22 六个关键帧的整页分层面积 = 冻结字面量；真实战场完全覆盖待机近景', () => {
-    const { steps } = runFullFlow();
-    const [idle, event, , result, choice, finale] = steps;
+/** 一个常驻帧的账面（day + 已获得图标数）—— 避免重复写同样的字面量。 */
+function ledgerState(o: { day: number; icons: number }): Record<string, number> {
+  return {
+    ground: 780,
+    road: 19500,
+    nodeDone: o.day * 128,
+    nodeTodo: (7 - o.day) * 128,
+    buffIcon: 756 * o.icons,
+    buffChip: 144 * o.icons,
+    cardBar: 0,
+    actionBar: 990,
+  };
+}
 
-    /**
-     * 入账的只有「**不承载文字、不被描边、不被 sprite / 图标覆盖**的纯色平铺矩形」：
-     * 地线 / 路面 / 进度节点 / 主动作强调条 / 卡片强调条 / 已获得强化图标（底 + 高光块）。
-     *
-     * ⚠️ PRP-R3：车辆改用正式 sprite → 车身 / 部件**不再入账**（sprite 像素非纯色）。
-     * ⚠️ PRP-F1：`ground` / `road` 只是 **IDLE 待机近景** 的两层。
-     *    EVENT 起舞台带被真实 Planck 战斗世界（离屏位图）**整块覆盖** →
-     *    这两层在画面上不再带精确色 → 账面归 0（这不是「少画了」，而是「被真实战场替代了」）。
-     * 承载文字 / 描边 / 矢量图标的面（分带底色、按钮填充、卡片填充、图标字形）同样不入账。
-     */
-    const idleOnly = { ground: 780, road: 19500 };
-    const noStage = { ground: 0, road: 0 };
-    const base = { nodeDone: 384, nodeTodo: 512, buffIcon: 0, buffChip: 0, cardBar: 0 };
-    const on = { actionBar: 990 };
+/** 已进入真实战斗世界（EVENT 起）的常驻帧账面。 */
+function ledgerBattle(o: { day: number; icons: number; action: boolean }): Record<string, number> {
+  return { ...ledgerState(o), ground: 0, road: 0, actionBar: o.action ? 990 : 0 };
+}
 
-    // IDLE：待机近景（地线 + 路面）+ 顶部第二行**完全不存在**（不是五个空框）
-    expect(ledger(idle)).toEqual({ ...idleOnly, ...base, ...on });
-
-    // EVENT：真实战斗世界接管舞台带 → 待机近景的地线 / 路面消失（车辆是 sprite，不入账）
-    expect(ledger(event)).toEqual({ ...noStage, ...base, ...on });
-
-    // BATTLE：战斗不可误触 → 主动作强调条整条消失
-    const { rt, bt } = startBattle();
-    const mid = driveFrames(bt, rt, 45);
-    expect(mid.phase).toBe('BATTLE');
-    expect(ledger(mid)).toEqual({ ...noStage, ...base, actionBar: 0 });
-    // 战斗中段与开局账面完全一致（真实物理推进不改变任何入账面积）
-    expect(ledger(mid)).toEqual(ledger(bt));
-    rt.dispose();
-
-    // RESULT：主动作恢复（战场保持冻结可见）
-    expect(ledger(result)).toEqual({ ...noStage, ...base, ...on });
-
-    // CHOICE：整页被遮罩合成 → 底层不再带精确色，只登记浮层自身（3 张卡片 × 强调条 1240）
-    expect(ledger(choice)).toEqual({
-      ground: 0,
-      road: 0,
-      nodeDone: 0,
-      nodeTodo: 0,
-      buffIcon: 0,
-      buffChip: 0,
-      cardBar: 3 * 1240,
-      actionBar: 0,
-    });
-
-    // 回到 IDLE 且拿到 1 个强化 → 待机近景回来 + 顶部出现 1 个图标（底 900 − 高光块 144 = 756）
-    //
-    // ⚠️ PRP-F2：选择后 day 3→4 → 顶部进度节点整体前移一格（done 4×128 / todo 3×128）。
-    //    节点总量不变（896），只是「已完成 / 未完成」对调 → 与 day 推进同源，不是账本漂移。
-    const baseNextDay = { nodeDone: 512, nodeTodo: 384, buffIcon: 0, buffChip: 0, cardBar: 0 };
-    expect(ledger(finale)).toEqual({ ...idleOnly, ...baseNextDay, buffIcon: 756, buffChip: 144, ...on });
-    expect(ledger(finale).nodeDone + ledger(finale).nodeTodo).toBe(base.nodeDone + base.nodeTodo);
-    expect(ledger(finale).buffIcon + ledger(finale).buffChip).toBe(30 * 30);
+describe('PRP-RUN-02｜D 面积账本：逐脚本节点的整页像素面积精确冻结', () => {
+  /**
+   * 入账的只有「**不承载文字、不被描边、不被 sprite / 图标覆盖**的纯色平铺矩形」：
+   * 地线 / 路面 / 进度节点 / 主动作强调条 / 卡片强调条 / 已获得强化图标（底 + 高光块）。
+   *
+   * ⚠️ `ground` / `road` 只是 **IDLE 待机近景** 的两层。EVENT 起舞台带被真实 Planck
+   *    战斗世界（离屏位图）整块覆盖 → 这两层不再带精确色 → 账面归 0。
+   * ⚠️ 浮层（CHOICE / DURABILITY）遮罩把整页合成成新颜色 → 底层几何全部退出精确色，
+   *    本帧只登记浮层自己的卡片强调条（两者**复用同一套几何** → 零布局改动）。
+   */
+  const overlayLedger = (cards: number): Record<string, number> => ({
+    ground: 0,
+    road: 0,
+    nodeDone: 0,
+    nodeTodo: 0,
+    buffIcon: 0,
+    buffChip: 0,
+    cardBar: cards * 1240,
+    actionBar: 0,
   });
 
-  it('RP-22b PRP-BUILD-01：第二层 / 最终场的九个关键帧面积 = 冻结字面量（同源规则，非就地重算）', () => {
-    /*
-      三场两选的新流程里，同一 phase 会出现在**不同的 day**：
-        DAY 3（第一场）→ DAY 4（第二场，1 个强化）→ DAY 5（第三场，2 个强化）。
-      day 推进 → 顶部进度节点整体前移一格（done day×128 / todo (7−day)×128，**总量恒 896**）；
-      强化行只画**实际已获得的**（每个图标 30×30 = 900：底色 756 + 高光块 144）。
-      这里逐帧冻结，使「流程变长后账本悄悄漂移」不可能发生。
-    */
-    const idleOnly = { ground: 780, road: 19500 };
-    const noStage = { ground: 0, road: 0 };
-    const on = { actionBar: 990 };
-    const off = { actionBar: 0 };
-    const nodes = (day: number) => ({ nodeDone: day * 128, nodeTodo: (7 - day) * 128 });
-    const icons = (n: number) => ({ buffIcon: 756 * n, buffChip: 144 * n });
-    const choiceOnly = {
-      ground: 0,
-      road: 0,
-      nodeDone: 0,
-      nodeTodo: 0,
-      buffIcon: 0,
-      buffChip: 0,
-      cardBar: 3 * 1240,
-      actionBar: 0,
-    };
+  it('RP-22 改装分支：沿九个脚本节点的面积 = 冻结字面量', () => {
+    const w = syntheticWalk('upgrade', 'heavyShell', 'kineticBurst');
+    const at = (n: string, p: RunPhase): Record<string, number> => ledger(w.at(n, p));
 
-    // ---- DAY 3：第一场（基础）
-    let s = createRunPageState(CTX);
-    const d3 = { ...nodes(3), ...icons(0), cardBar: 0 };
-    expect(ledger(s)).toEqual({ ...idleOnly, ...d3, ...on });
-
-    // ---- DAY 4：第二场（第一层 Build）+ 第二层条件池
-    let s4 = pressRunAction(s, CTX); // EVENT
-    s4 = pressRunAction(s4, CTX); // BATTLE①
-    expect(ledger(s4)).toEqual({ ...noStage, ...d3, ...off });
-    s4 = finishRunBattle(s4, { winner: 'A', endReason: 'hp', playerHp: 900, enemyHp: 0, steps: 300 });
-    s4 = pressRunAction(s4, CTX); // CHOICE①
-    expect(ledger(s4)).toEqual(choiceOnly);
-
-    s4 = chooseRunBuff(s4, 'twinCannon');
-    expect(s4.phase).toBe('IDLE');
-    const d4 = { ...nodes(4), ...icons(1), cardBar: 0 };
-    expect(ledger(s4)).toEqual({ ...idleOnly, ...d4, ...on });
-    const b4 = pressRunAction(pressRunAction(s4, CTX), CTX); // EVENT → BATTLE②
-    expect(ledger(b4)).toEqual({ ...noStage, ...d4, ...off });
-    const r4 = finishRunBattle(b4, { winner: 'A', endReason: 'hp', playerHp: 800, enemyHp: 0, steps: 300 });
-    expect(ledger(r4)).toEqual({ ...noStage, ...d4, ...on });
-
-    // ---- DAY 5：第三场（两层 Build）→ 终局（不再进 CHOICE）
-    const c5 = pressRunAction(r4, CTX); // CHOICE②
-    expect(c5.phase).toBe('CHOICE');
-    expect(runChoicePool(c5).map((o) => o.id)).toEqual([...RUN_LAYER2_POOLS.twinCannon]);
-    expect(ledger(c5)).toEqual(choiceOnly);
-
-    const s5 = chooseRunBuff(c5, 'tripleLoad');
-    const d5 = { ...nodes(5), ...icons(2), cardBar: 0 };
-    expect(ledger(s5)).toEqual({ ...idleOnly, ...d5, ...on });
-    const b5 = pressRunAction(pressRunAction(s5, CTX), CTX);
-    expect(ledger(b5)).toEqual({ ...noStage, ...d5, ...off });
-    const r5 = finishRunBattle(b5, { winner: 'A', endReason: 'hp', playerHp: 700, enemyHp: 0, steps: 300 });
-    expect(ledger(r5)).toEqual({ ...noStage, ...d5, ...on });
-    // 终局：主动作变「重新开始验证」，但**不再有第二次 RESULT→CHOICE**
-    expect(runVerificationComplete(r5)).toBe(true);
-    expect(pressRunAction(r5, CTX).phase).toBe('IDLE'); // 直接是新 Run
-    expect(runBuildIds(pressRunAction(r5, CTX))).toEqual([]);
+    // ---- d1-start：DAY 1 节拍（待机近景 + 1 个进度节点）
+    expect(at(NODE.start, 'IDLE')).toEqual(ledgerState({ day: 1, icons: 0 }));
+    // ---- d2-battle1：IDLE → EVENT → BATTLE → RESULT
+    expect(at(NODE.battle1, 'IDLE')).toEqual(ledgerState({ day: 2, icons: 0 }));
+    expect(at(NODE.battle1, 'EVENT')).toEqual(ledgerBattle({ day: 2, icons: 0, action: true }));
+    expect(at(NODE.battle1, 'BATTLE')).toEqual(ledgerBattle({ day: 2, icons: 0, action: false }));
+    expect(at(NODE.battle1, 'RESULT')).toEqual(ledgerBattle({ day: 2, icons: 0, action: true }));
+    // ---- d2-choice1：三张卡片（仍在 DAY 2）
+    expect(at(NODE.choice1, 'CHOICE')).toEqual(overlayLedger(3));
+    // ---- d3-battle2：拿到第一层强化（DAY 3 + 1 个图标）
+    expect(at(NODE.battle2, 'IDLE')).toEqual(ledgerState({ day: 3, icons: 1 }));
+    expect(at(NODE.battle2, 'RESULT')).toEqual(ledgerBattle({ day: 3, icons: 1, action: true }));
+    // ---- d4-durability：**两张卡片**的耐久取舍浮层（DAY 4）
+    expect(at(NODE.durability, 'DURABILITY')).toEqual(overlayLedger(2));
+    // ---- d5-choice2：第二次三选一（DAY 5，仍是 1 个图标 —— 还没选）
+    expect(at(NODE.choice2, 'CHOICE')).toEqual(overlayLedger(3));
+    // ---- d6-battle3：拿到第二层（DAY 6 + 2 个图标）
+    expect(at(NODE.battle3, 'IDLE')).toEqual(ledgerState({ day: 6, icons: 2 }));
+    expect(at(NODE.battle3, 'BATTLE')).toEqual(ledgerBattle({ day: 6, icons: 2, action: false }));
+    expect(at(NODE.battle3, 'RESULT')).toEqual(ledgerBattle({ day: 6, icons: 2, action: true }));
+    // ---- d7-final + COMPLETE：DAY 7 全亮，两层 Build 都在；终态主动作可点
+    expect(at(NODE.final, 'IDLE')).toEqual(ledgerState({ day: 7, icons: 2 }));
+    expect(at(NODE.final, 'BATTLE')).toEqual(ledgerBattle({ day: 7, icons: 2, action: false }));
+    expect(at(NODE.final, 'COMPLETE')).toEqual(ledgerBattle({ day: 7, icons: 2, action: true }));
 
     // 跨 day 的不变量：节点总量恒 896（只是「已完成 / 未完成」前移）
-    for (const day of [3, 4, 5]) {
-      const n = nodes(day);
-      expect(n.nodeDone + n.nodeTodo).toBe(896);
+    for (const day of [1, 2, 3, 6, 7]) {
+      expect(ledgerState({ day, icons: 0 }).nodeDone + ledgerState({ day, icons: 0 }).nodeTodo).toBe(896);
     }
-    // 图标总量口径：每个 30×30（底色 756 + 高光块 144）；
-    // 顶部图标行**只画实际已获得的**（count 0 → 面积 0，不是五个空槽）
-    expect(ledger(createRunPageState(CTX)).buffIcon).toBe(0);
-    for (const n of [0, 1, 2]) {
-      expect(icons(n).buffIcon + icons(n).buffChip).toBe(900 * n);
+    // 图标总量口径：每个 30×30（底色 756 + 高光块 144）；0 个 → 面积 0（不是空槽）
+    expect(ledger(fresh()).buffIcon).toBe(0);
+    expect(ledger(fresh()).buffChip).toBe(0);
+    for (const n of [0, 1, 2]) expect(ledgerState({ day: 1, icons: n }).buffIcon + 144 * n).toBe(900 * n);
+  });
+
+  it('RP-22b 维修分支：DAY 5 走 EVENT 节点（跳过第二次选择），后续账面少一个图标', () => {
+    const up = syntheticWalk('upgrade');
+    const rep = syntheticWalk('repair');
+    // 维修分支：d5-tend 是一个 EVENT 节点（无浮层），DAY 5 只有 1 个图标
+    expect(ledger(rep.at(NODE.tend, 'IDLE'))).toEqual(ledgerState({ day: 5, icons: 1 }));
+    expect(rep.has(NODE.choice2, 'CHOICE')).toBe(false); // 结构上不会进入
+    expect(ledger(rep.at(NODE.battle3, 'IDLE'))).toEqual(ledgerState({ day: 6, icons: 1 }));
+    expect(ledger(rep.at(NODE.final, 'COMPLETE'))).toEqual(ledgerBattle({ day: 7, icons: 1, action: true }));
+    // 两分支在 d2 / d3 / d4 三个节点上账面**逐字段相同**（分支只影响后面）
+    for (const [n, p] of [
+      [NODE.battle1, 'RESULT'],
+      [NODE.choice1, 'CHOICE'],
+      [NODE.battle2, 'IDLE'],
+      [NODE.durability, 'DURABILITY'],
+    ] as const) {
+      expect(ledger(rep.at(n, p)), `${n}:${p}`).toEqual(ledger(up.at(n, p)));
     }
   });
 
-  it('RP-23 CHOICE 浮层：3 张互不重叠的卡片 + 全页遮罩；卡片面积与几何一致', () => {
-    const cards = runChoiceCardRects(RUN_CHOICE_OPTIONS.length);
-    expect(cards.length).toBe(3);
-    for (const c of cards) {
-      expect(c.w).toBe(RUN_CHOICE.cardW);
-      expect(c.h).toBe(RUN_CHOICE.cardH);
-      expect(inside(c, { x: 0, y: 0, w: RUN_PAGE_W, h: RUN_PAGE_H })).toBe(true);
+  it('RP-23 浮层几何：3 张强化卡 / 2 张耐久卡互不重叠、纵向居中、只有卡片层入账', () => {
+    for (const count of [3, 2]) {
+      const cards = runChoiceCardRects(count);
+      expect(cards.length).toBe(count);
+      for (const c of cards) {
+        expect(c.w).toBe(RUN_CHOICE.cardW);
+        expect(c.h).toBe(RUN_CHOICE.cardH);
+        expect(inside(c, { x: 0, y: 0, w: RUN_PAGE_W, h: RUN_PAGE_H })).toBe(true);
+      }
+      for (let i = 0; i < cards.length; i++) {
+        for (let j = i + 1; j < cards.length; j++) expect(runRectsOverlap(cards[i], cards[j])).toBe(false);
+      }
+      // 纵向居中
+      const top = cards[0].y;
+      const bottom = cards[cards.length - 1].y + cards[cards.length - 1].h;
+      expect(top).toBe(RUN_PAGE_H - bottom);
+      // 强调条避开 2px 描边、不承载文字 → 面积可精确冻结
+      const bar0 = runChoiceBarRect(cards[0]);
+      expect(bar0.y).toBeGreaterThanOrEqual(cards[0].y + 2);
+      expect(bar0.h * bar0.w).toBe(310 * 4);
+      expect(runChoiceTitlePos(count).y).toBeLessThan(cards[0].y);
     }
-    for (let i = 0; i < cards.length; i++) {
-      for (let j = i + 1; j < cards.length; j++) expect(runRectsOverlap(cards[i], cards[j])).toBe(false);
-    }
-    // 纵向居中
-    const top = cards[0].y;
-    const bottom = cards[cards.length - 1].y + cards[cards.length - 1].h;
-    expect(top).toBe(RUN_PAGE_H - bottom);
-    // 卡片强调条不含文字、不被描边覆盖 → 面积可精确冻结
-    const bar0 = runChoiceBarRect(cards[0]);
-    expect(bar0.y).toBeGreaterThanOrEqual(cards[0].y + 2); // 避开 2px 描边
-    expect(bar0.h * bar0.w).toBe(310 * 4);
     // 遮罩覆盖整个逻辑舞台（原页面整体变暗，位置不变）
     expect(runChoiceMaskRect()).toEqual({ x: 0, y: 0, w: RUN_PAGE_W, h: RUN_PAGE_H });
-    // 账面配色：每张卡片只入账「顶部强调条」一个纯色矩形
-    const shapes = layersOf(reachChoice());
-    expect(shapes.every((sh) => sh.layer === 'cardBar')).toBe(true);
-    expect(shapes.length).toBe(3);
+
+    // 账面：强化浮层只有 cardBar ×3；耐久浮层只有 cardBar ×2
+    const w = syntheticWalk();
+    const chShapes = layersOf(w.at(NODE.choice1, 'CHOICE'));
+    expect(chShapes.every((sh) => sh.layer === 'cardBar')).toBe(true);
+    expect(chShapes.length).toBe(3);
+    const durShapes = layersOf(w.at(NODE.durability, 'DURABILITY'));
+    expect(durShapes.every((sh) => sh.layer === 'cardBar')).toBe(true);
+    expect(durShapes.length).toBe(2);
+    // 两者共用**同一套**卡片几何（零布局改动）
+    expect(durShapes.map((sh) => sh.rect)).toEqual(runChoiceCardRects(2).map(runChoiceBarRect));
   });
 });
 
@@ -871,11 +1096,11 @@ describe('PRP-F0｜D 面积账本：逐帧整页像素面积精确冻结', () =>
 describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战斗 / 零跳转', () => {
   it('RP-24 Run Page 不得引用 Arena A/B、Gate、PBL Lab 控制器或俯视驱动', () => {
     const bannedTokens = [
-      'arenaA', // Arena A（俯视）
+      'arenaA',
       'arenaScene',
       'ArenaARuntime',
       'PlanckArenaRuntime',
-      'drivePlanckVehicle', // 俯视 Lab 驱动
+      'drivePlanckVehicle',
       "from './gate'",
       'auditSharedCombatData',
       "from './lab'",
@@ -892,14 +1117,11 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
   });
 
   it('RP-24b 正式 Planck 侧视战斗**只能**从 runBattleRuntime.ts 进入，且构造时零 config 覆盖', () => {
-    // 1) 其它 Run Page 文件一律不得直接摸正式战斗编排器（单一入口）
     for (const f of RUN_PAGE_FILES.filter((x) => x !== 'runBattleRuntime.ts')) {
       expect(stripComments(read(f)).includes('planckBattleOrchestrator'), `${f} 必须经 runBattleRuntime`).toBe(false);
     }
     const rt = stripComments(read('runBattleRuntime.ts'));
     expect(rt.includes("from '../../battle/planckBattleOrchestrator'")).toBe(true);
-    // 2) 构造参数里**没有** gameplay 覆盖：第 4 个实参必须是**字面空对象** `{}`
-    //    → 世界尺度 / 出生点 / 阶段 / 驱动 / 武器全部取正式默认值。
     const call = rt.match(/new PlanckBattleOrchestrator\(([\s\S]*?)\);/);
     expect(call, 'runBattleRuntime 必须构造正式 PlanckBattleOrchestrator').not.toBeNull();
     const args = call![1].split(',').map((x) => x.trim()).filter(Boolean);
@@ -908,20 +1130,17 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
     for (const t of ['autoDrive:', 'sideDrive:', 'arenaConfig:', 'closingSpeed:', 'phases:']) {
       expect(args[3].includes(t), `config 不得覆盖 "${t}"`).toBe(false);
     }
-    // 3) 世界尺度直接读正式配置（不是自己写 1600）；相机也不再需要自己拿 arena 宽
     expect(rt.includes('this.orchestrator.arena.config.width')).toBe(true);
     expect(rt.includes('this.orchestrator.arena.config.groundY')).toBe(true);
     expect(/=\s*1600\b/.test(rt)).toBe(false);
     expect(/=\s*900\b/.test(rt)).toBe(false);
-    // 真实的出生位置是**实测**（读 world.getPosition），不是写死数字
     expect(rt.includes('w.getPosition(this.orchestrator.vehicleA.body).x')).toBe(true);
     expect(/spawnAx = .*getPosition/.test(rt)).toBe(true);
-    // 4) PRP-R5：相机走正式 reframe（视图层只接线），但**不碰**正式相机内部状态
     const view = stripComments(read('runBattleView.ts'));
     expect(view.includes('reframe(')).toBe(true);
     expect(view.includes('battleCam')).toBe(false);
     expect(view.includes('this.renderer.transform =')).toBe(false);
-    // 5) 战斗剧本 / 演出位移彻底不存在（否则会重新引入「假战斗」）
+    // 战斗剧本 / 演出位移彻底不存在
     const state = stripComments(read('runPageState.ts'));
     for (const t of ['RUN_BATTLE_SCRIPT', 'advanceRunBattle', 'Math.sin']) {
       expect(state.includes(t), `runPageState 不得残留 "${t}"`).toBe(false);
@@ -972,12 +1191,17 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
   });
 
   it('RP-27 四个正式构建配置与正式入口 0 引用 Run Page（原型不得写入正式产物）', () => {
-    for (const t of ['index.html', 'vite.config.ts', 'vite.pages.config.ts', 'vite.e2e.config.ts', 'vite.wechat.config.ts']) {
+    for (const t of [
+      'index.html',
+      'vite.config.ts',
+      'vite.pages.config.ts',
+      'vite.e2e.config.ts',
+      'vite.wechat.config.ts',
+    ]) {
       const src = readFileSync(join(REPO_ROOT, t), 'utf8');
       expect(src.includes('run-page'), `${t} 不得引用 run-page`).toBe(false);
       expect(src.includes('runMain'), `${t} 不得引用 runMain`).toBe(false);
     }
-    // 唯一允许承载原型入口的构建配置就是 Lab 自己的那份
     const labCfg = readFileSync(join(REPO_ROOT, 'vite.portrait-lab.config.ts'), 'utf8');
     expect(labCfg.includes("'run-page': 'run-page.html'")).toBe(true);
     expect(labCfg.includes("'portrait-lab': 'portrait-lab.html'")).toBe(true);
@@ -985,11 +1209,9 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
 
   it('RP-28 玩家页面运行时不得出现开发控制（源码层已禁，另加运行时计数入口）', () => {
     const page = stripComments(read('runPage.ts'));
-    // DOM 只由 div + canvas 组成（不建 <button>、不建任何开发控制节点）
     expect(page.includes("createElement('div')")).toBe(true);
     expect(page.includes("createElement('canvas')")).toBe(true);
     expect(page.includes("createElement('button')")).toBe(false);
-    // 运行时诊断会如实数出「开发控制 = 0 / DOM 按钮 = 0」，供浏览器端断言
     expect(page.includes('button, [data-dev-control], [data-dev]')).toBe(true);
     expect(page.includes("querySelectorAll('button')")).toBe(true);
     expect(page.includes('debugControls')).toBe(true);
@@ -999,21 +1221,18 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
 
 /* ====================================== F. 信息层级（PRP-R3 + PRP-F1） */
 
-describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 / 选择独占焦点', () => {
+describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 / 浮层独占焦点', () => {
   it('RP-29 必改 1：顶部彻底减法 —— 无空槽、无「核心构建 X/5」、无预留格子', () => {
-    // 结构性证据：0 个强化 → 顶部第二行**一个矩形都没有**（不可能画出空框）
     expect(runBuffIconRects(0)).toEqual([]);
-    expect(layersOf(createRunPageState(CTX)).filter((l) => l.layer === 'buffIcon')).toEqual([]);
-    expect(layersOf(createRunPageState(CTX)).filter((l) => l.layer === 'buffChip')).toEqual([]);
-    // 有 N 个强化就恰好画 N 个（不是固定 5 个）
+    expect(layersOf(fresh()).filter((l) => l.layer === 'buffIcon')).toEqual([]);
+    expect(layersOf(fresh()).filter((l) => l.layer === 'buffChip')).toEqual([]);
     for (const n of [1, 2, 3, 5]) expect(runBuffIconRects(n).length).toBe(n);
-    // 上限约 5 个
     expect(RUN_BUFF_ICON_MAX).toBeLessThanOrEqual(5);
     expect(runBuffIconRects(9).length).toBe(RUN_BUFF_ICON_MAX);
     // 图标个数与已获得强化严格一致（1 个强化 → 1 个图标）
-    expect(layersOf(chooseRunBuff(reachChoice(), RUN_CHOICE_OPTIONS[0].id)).filter((l) => l.layer === 'buffIcon').length).toBe(1);
+    const after1 = syntheticWalk().at(NODE.battle2, 'IDLE');
+    expect(layersOf(after1).filter((l) => l.layer === 'buffIcon').length).toBe(1);
 
-    // 源码层：不得再出现「核心构建 X/5 / 空槽 / 占位格子」这类开发概念
     for (const f of RUN_PAGE_FILES) {
       const code = stripComments(read(f));
       for (const t of ['核心构建', 'CORE BUILD', '空槽', '预留', 'placeholderSlot', 'buildSlot']) {
@@ -1023,29 +1242,32 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
   });
 
   it('RP-30 必改 3：日志是玩家叙事 —— 全流程无方括号前缀 / 无 Runtime 状态 / 无逐帧伤害', () => {
-    const { steps, finale } = runFullFlow();
-    const allKinds = new Set<string>();
-    for (const s of steps) {
-      for (const e of s.log) {
-        allKinds.add(e.kind);
-        // 玩家可见文本里不得出现任何 Debug 前缀或内部记号
-        expect(e.text.includes('['), `日志不得含方括号前缀：${e.text}`).toBe(false);
-        expect(e.text.includes(']')).toBe(false);
-        expect(e.text.includes('{')).toBe(false);
-        expect(/^\[?(系统|事件|战斗|结果|耐久|强化)\]/.test(e.text), `日志不得以 Debug 标签开头：${e.text}`).toBe(false);
-        expect(e.text.trim().length).toBeGreaterThan(0);
-        expect(e.text.length).toBeLessThanOrEqual(40); // 一句叙事，不是状态 dump
+    for (const dur of ['repair', 'upgrade'] as const) {
+      const allKinds = new Set<string>();
+      for (const s of syntheticWalk(dur).trail) {
+        for (const e of s.log) {
+          allKinds.add(e.kind);
+          expect(e.text.includes('['), `日志不得含方括号前缀：${e.text}`).toBe(false);
+          expect(e.text.includes(']')).toBe(false);
+          expect(e.text.includes('{')).toBe(false);
+          expect(/^\[?(系统|事件|战斗|结果|耐久|强化)\]/.test(e.text), `日志不得以 Debug 标签开头：${e.text}`).toBe(
+            false,
+          );
+          expect(e.text.trim().length).toBeGreaterThan(0);
+          expect(e.text.length).toBeLessThanOrEqual(40); // 一句叙事，不是状态 dump
+        }
       }
+      // 使用的语义角色恰好是玩家叙事集（不含 system / battle 这类控制台角色）
+      expect([...allKinds].sort()).toEqual(['choice', 'day', 'durability', 'event', 'result', 'travel']);
     }
-    // 使用的语义角色恰好是玩家叙事集（不含 system / battle 这类控制台角色）
-    expect([...allKinds].sort()).toEqual(['choice', 'day', 'durability', 'event', 'result', 'travel']);
-    // 逐帧伤害绝不进日志：BATTLE 全程日志条数恒定（真实物理推进 89 帧）
-    const { rt, bt } = startBattle();
+    // 逐帧伤害绝不进日志
+    const { rt, bt } = startRealBattle(NODE.battle1);
     const after = driveFrames(bt, rt, 89);
     expect(after.phase).toBe('BATTLE');
     expect(after.log).toEqual(bt.log);
     rt.dispose();
-    // 最近事件才突出：可见行 ≤ maxLines，末 N 行视为「最近」
+    // 最近事件才突出
+    const finale = syntheticWalk().at(NODE.final, 'COMPLETE');
     expect(visibleRunLog(finale, 3).length).toBeLessThanOrEqual(3);
     expect(visibleRunLog(finale, 3)).toEqual(finale.log.slice(-3));
     expect(RUN_LOG.emphasis).toBeGreaterThanOrEqual(3);
@@ -1054,29 +1276,23 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
 
   it('RP-31 必改 2：IDLE 战斗主体是**真实车辆视觉**（正式 sprite + 正式 anchor/镜像）', () => {
     const plan = runDemoPlan();
-    // 1) 两个实体都不含「纯色矩形代表车辆」的降级件
     expect(hasPlaceholderVisual(plan.player)).toBe(false);
     expect(hasPlaceholderVisual(plan.enemies[0])).toBe(false);
 
     const view = buildRunStageView();
-    const all = [...view.player.visuals];
-    // 2) 非轮组可视件必须带正式 visualId（= 真实 sprite 外形）
-    for (const v of all) {
+    for (const v of view.player.visuals) {
       if (v.kind === 'wheel') continue;
       expect(v.visualId, `${v.kind} 必须有正式 visualId`).toBeTruthy();
     }
-    const ids = new Set(all.map((v) => v.visualId).filter(Boolean));
-    expect(ids.has('body_watermelon')).toBe(true); // 玩家车身（正式 BodyDef.visual）
-    expect(ids.has('part_cannon')).toBe(true); // 玩家武器（正式 FunctionalPartDef.visual）
-    // 3) 玩家车体朝右 → 不镜像（朝向语义来自正式 visual.mirrorWithFacing）
+    const ids = new Set(view.player.visuals.map((v) => v.visualId).filter(Boolean));
+    expect(ids.has('body_watermelon')).toBe(true);
+    expect(ids.has('part_cannon')).toBe(true);
     for (const v of view.player.visuals) expect(v.mirror).toBe(false);
 
-    // 4) 车辆**明显放大**：单体宽 ≥ 舞台宽的 40%，高 ≥ 舞台高的 1/6
     const pw = view.player.bounds.w;
     expect(pw).toBeGreaterThan(RUN_STAGE_BAND.w * 0.4);
     expect(view.player.bounds.h).toBeGreaterThan(RUN_STAGE_BAND.h / 6);
 
-    // 5) 资源层：只引用正式 PNG（与正式入口 main.ts 同一批文件），不复制美术
     expect(Object.keys(RUN_VISUAL_ASSETS).sort()).toEqual([
       'body_banana',
       'body_watermelon',
@@ -1087,15 +1303,12 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
     const assets = stripComments(read('runVehicleAssets.ts'));
     expect(assets.includes('../../../assets/visuals/')).toBe(true);
     expect(assets.includes('body_watermelon.png')).toBe(true);
-    // 不得绕过正式口径自造尺寸 / 自造美术
     for (const t of ['fillRect', 'arc(', 'drawImage(img, 0, 0']) {
       expect(assets.includes(t), `资源层不得自绘几何："${t}"`).toBe(false);
     }
 
-    // 6) 渲染层：不存在「无 sprite 就用纯色矩形」的降级路径
     const page = stripComments(read('runPage.ts'));
     expect(page.includes('partFallback')).toBe(false);
-    // 7) 战斗世界的车辆视觉走**正式 Renderer + 正式 VisualRegistry**（不是 PRP 自绘）
     const battleView = stripComments(read('runBattleView.ts'));
     expect(battleView.includes("from '../../render/renderer'")).toBe(true);
     expect(battleView.includes("from '../../render/visualRegistry'")).toBe(true);
@@ -1107,13 +1320,11 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
   it('RP-32 必改 2：IDLE 中部舞台有真实景物，不存在大片空场（山脊 / 雾带填满地平线以上）', () => {
     const hills = runStageHills();
     const view = buildRunStageView();
-    const hillBaseY = view.groundY - 6; // 与 runPage.drawBackdrop 同源
+    const hillBaseY = view.groundY - 6;
     const bandMid = RUN_STAGE_BAND.y + RUN_STAGE_BAND.h / 2;
 
-    // 1) 最高山脊必须越过舞台带正中线 —— 否则战车会浮在大片空场中央
     const tallest = Math.max(...hills.far.map((h) => h.h));
     expect(hillBaseY - tallest).toBeLessThan(bandMid);
-    // 2) 远山横向无缝铺满整个舞台宽（不留横向空档）
     const far = [...hills.far].sort((a, b) => a.x - b.x);
     let cursor = RUN_STAGE_BAND.x;
     for (const h of far) {
@@ -1121,581 +1332,638 @@ describe('PRP-R3｜F 信息层级：少状态 / 大战斗主体 / 可读叙事 /
       cursor = Math.max(cursor, h.x + h.w);
     }
     expect(cursor).toBeGreaterThanOrEqual(RUN_STAGE_BAND.x + RUN_STAGE_BAND.w);
-    // 3) 雾带要有厚度（不是一条细线），且完全落在地平线以上
     expect(RUN_STAGE_HAZE_H).toBeGreaterThanOrEqual(80);
     expect(view.groundY - RUN_STAGE_HAZE_H).toBeGreaterThan(RUN_STAGE_BAND.y);
-    // 4) 战车**视觉重心偏下**（压在较下的地平线上，而不是浮在带中央）
     expect(view.player.bounds.y + view.player.bounds.h).toBe(view.baselineY);
     expect(view.player.bounds.y + view.player.bounds.h / 2).toBeGreaterThan(bandMid);
   });
 
-  it('RP-33 必改 4：CHOICE 三选一 = 图标 + 名称 + 一句结果，且成为唯一视觉焦点', () => {
+  it('RP-33 浮层（强化 / 耐久）= 图标 + 名称 + 一句结果，且成为唯一视觉焦点', () => {
     const cards = runChoiceCardRects(RUN_CHOICE_OPTIONS.length);
-    // 卡片接近整屏宽 → 焦点独占
     expect(RUN_CHOICE.cardW).toBeGreaterThanOrEqual(RUN_PAGE_W * 0.8);
-    // 每张卡片：左侧图标绘制区（真实矢量图标，不承载文字）+ 右侧文本
     for (const c of cards) {
       const icon = runChoiceIconRect(c);
       expect(inside(icon, c)).toBe(true);
       expect(icon.w).toBe(RUN_CHOICE.iconSize);
       expect(icon.w).toBe(icon.h);
-      // 文本从图标右侧开始 → 图标 / 名称 / 一句结果三者位置不重叠
       expect(runChoiceTextX(c)).toBeGreaterThan(icon.x + icon.w);
       expect(runChoiceTextX(c)).toBeLessThan(c.x + c.w);
-      // 强调条与图标不重叠
       expect(runRectsOverlap(runChoiceBarRect(c), icon)).toBe(false);
     }
-    // 浮层标题在所有卡片之上（先读标题，再读选项）
     expect(runChoiceTitlePos(3).y).toBeLessThan(cards[0].y);
-    // 遮罩把整个页面压暗 → 其余信息自然退后（遮罩几何 = 整页）
     const mask = runChoiceMaskRect();
     expect(mask.w * mask.h).toBe(RUN_PAGE_W * RUN_PAGE_H);
     expect(stripComments(read('runPage.ts')).includes('rgba(')).toBe(true);
-    // 三个选项的名称 / 一句结果都是玩家可读文案（无内部字段 / 无数值表）
     for (const o of RUN_CHOICE_OPTIONS) {
       expect(/^[\u4e00-\u9fa5]{2,6}$/.test(o.label), `名称应为短中文：${o.label}`).toBe(true);
       expect(/[\d]/.test(o.note), `一句结果不应是数值表：${o.note}`).toBe(false);
     }
+    // 耐久事件的两项同样满足「短中文名 + 非数值 note」
+    for (const o of runDurabilityOptions()) {
+      expect(/^[\u4e00-\u9fa5]{2,6}$/.test(o.label), `名称应为短中文：${o.label}`).toBe(true);
+      expect(/[\d]/.test(o.note), `一句结果不应是数值表：${o.note}`).toBe(false);
+    }
     // 浮层出现时只有浮层入账（底层几何整体退出精确色 → 焦点唯一）
-    expect(layersOf(reachChoice()).map((l) => l.layer)).toEqual(['cardBar', 'cardBar', 'cardBar']);
+    expect(layersOf(syntheticWalk().at(NODE.choice1, 'CHOICE')).map((l) => l.layer)).toEqual([
+      'cardBar',
+      'cardBar',
+      'cardBar',
+    ]);
+    expect(layersOf(syntheticWalk().at(NODE.durability, 'DURABILITY')).map((l) => l.layer)).toEqual([
+      'cardBar',
+      'cardBar',
+    ]);
   });
 });
 
-/* ================================ G. PRP-BUILD-01 两层 Build 闭环 */
+/* ================================ G. 两层 Build 闭环（四场真实战斗） */
 
-describe('PRP-BUILD-01｜G 两层 Cannon Build：基础战斗 → 一层 → 强化战斗 → 二层条件池 → 最终战斗', () => {
+describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 二层条件池 → 终局', () => {
+  const ROUTES: readonly [string, string][] = [
+    ['heavyShell', 'kineticBurst'],
+    ['twinCannon', 'tripleLoad'],
+    ['fastReload', 'twinCannon'],
+  ];
+
   /**
-   * 走完**三场**真实战斗 + **两次**选择（全程同一个页面 / 同一个状态机）：
-   *   DAY 3 → 战斗①（基础）→ CHOICE① → 选择第一层 → DAY 4 → 战斗②（一层）
-   *   → CHOICE②（**由第一层决定的条件池**）→ 选择第二层 → DAY 5 → 战斗③（两层）→ 终局 RESULT
+   * **冻结实测值**（Node 端确定性真实物理）。
+   * 维修分支（三路线全部完成本局），表内 = [战斗①结束, ②结束, ③结束, 终局结束]。
    *
-   * ⚠️ 到第三次 RESULT **就停**（这正是新流程的终点）；
-   * 之后的「重新开始验证」由 RP-F2-08/09 断言。
-   * ⚠️ 真实物理 3 场很慢 → 按 (layer1, layer2) 缓存，同一组合只跑一次。
+   * ⚠️ 显式实测更新，不是就地重算：任何影响四场连锁的改动（对手 / 武器 / 物理）
+   *    都必须回到这里重新测量并写死，从而让「四场能不能跑完」无法悄悄变化。
    */
-  const loopCache = new Map<string, BuildLoop>();
-  interface BuildLoop {
-    readonly trail: RunPageState[];
-    readonly firstEnd: RunPageState;
-    readonly afterChoice1: RunPageState;
-    readonly choice2: RunPageState;
-    readonly afterChoice2: RunPageState;
-    /** 战斗②（第一层）开局时真正注入的耐久（= 规则算出的 carry）。 */
-    readonly secondInitialHp: number;
-    readonly finalRuntime: RunBattleRuntime;
-    readonly finale: RunPageState;
-  }
-  function runBuildLoop(layer1: string, layer2: string): BuildLoop {
-    const key = `${layer1}>${layer2}`;
-    const hit = loopCache.get(key);
-    if (hit) return hit;
-
-    const rt1 = new RunBattleRuntime();
-    let s = createRunPageState(CTX);
-    const trail: RunPageState[] = [s]; // IDLE(DAY3)
-    s = pressRunAction(s, CTX); // EVENT
-    s = pressRunAction(s, CTX); // BATTLE①
-    trail.push(s);
-    s = driveToEnd(s, rt1); // RESULT
-    trail.push(s);
-    const firstEnd = s;
-    rt1.dispose();
-
-    s = pressRunAction(s, CTX); // CHOICE①（第一层三选一）
-    trail.push(s);
-    s = chooseRunBuff(s, layer1); // → IDLE(DAY4)
-    trail.push(s);
-    const afterChoice1 = s;
-
-    const rt2 = new RunBattleRuntime({ build: runBuildIds(afterChoice1), carriedHp: runCarriedPlayerHp(afterChoice1) });
-    const secondInitialHp = rt2.initialPlayerHp;
-    s = pressRunAction(s, CTX); // EVENT
-    s = pressRunAction(s, CTX); // BATTLE②
-    trail.push(s);
-    s = driveToEnd(s, rt2); // RESULT
-    trail.push(s);
-    rt2.dispose();
-
-    s = pressRunAction(s, CTX); // CHOICE②（第二层条件池）
-    trail.push(s);
-    const choice2 = s;
-    s = chooseRunBuff(s, layer2); // → IDLE(DAY5)
-    trail.push(s);
-    const afterChoice2 = s;
-
-    const rt3 = new RunBattleRuntime({ build: runBuildIds(afterChoice2), carriedHp: runCarriedPlayerHp(afterChoice2) });
-    s = pressRunAction(s, CTX); // EVENT
-    s = pressRunAction(s, CTX); // BATTLE③
-    trail.push(s);
-    s = driveToEnd(s, rt3); // 终局 RESULT
-    trail.push(s);
-
-    const loop: BuildLoop = {
-      trail,
-      firstEnd,
-      afterChoice1,
-      choice2,
-      afterChoice2,
-      secondInitialHp,
-      finalRuntime: rt3,
-      finale: s,
-    };
-    loopCache.set(key, loop);
-    return loop;
-  }
-
+  const FROZEN_REPAIR: Record<string, readonly [number, number, number, number]> = {
+    'heavyShell+kineticBurst': [919, 688, 834, 618],
+    'twinCannon+tripleLoad': [919, 907, 935, 618],
+    'fastReload+twinCannon': [919, 908, 879, 590],
+  };
   /**
-   * 用**合成战果**快速推进到第 n 次 CHOICE（不跑真实物理）——只用于状态机结构断言。
-   * `layer1 === null` → 停在第 1 次 CHOICE；否则停在第 2 次 CHOICE。
+   * 改装分支（不回耐久，换一次强化）。表内 = [①结束, ②结束, ③结束, 终局结束]。
+   *
+   * ⚠️ **本 Queue 最关键的实测发现**：同一条重炮路线在「维修」下终局剩 618，
+   *    在「继续改装」下终局耐久**归零 → 本局 FAILED**。这说明耐久事件真的有效果，
+   *    而不是靠文案暗示 —— 它来自真实物理与真实数值链。
    */
-  function syntheticChoice(layer1: string | null): RunPageState {
-    let s = createRunPageState(CTX);
-    s = pressRunAction(s, CTX); // EVENT
-    s = pressRunAction(s, CTX); // BATTLE①
-    s = finishRunBattle(s, { winner: 'A', endReason: 'hp', playerHp: 900, enemyHp: 0, steps: 300 });
-    s = pressRunAction(s, CTX); // CHOICE①
-    if (layer1 === null) return s;
-    s = chooseRunBuff(s, layer1); // IDLE
-    s = pressRunAction(s, CTX); // EVENT
-    s = pressRunAction(s, CTX); // BATTLE②
-    s = finishRunBattle(s, { winner: 'A', endReason: 'hp', playerHp: 800, enemyHp: 0, steps: 300 });
-    s = pressRunAction(s, CTX); // CHOICE②
-    return s;
-  }
+  const FROZEN_UPGRADE: Record<string, readonly [number, number, number, number]> = {
+    'heavyShell+kineticBurst': [919, 688, 403, 0],
+    'twinCannon+tripleLoad': [919, 907, 699, 217],
+    'fastReload+twinCannon': [919, 908, 831, 509],
+  };
 
-  it('RP-F2-01 完整两层闭环走完，全程同一页面（三次战斗 / 两次选择）', () => {
-    const { trail } = runBuildLoop('heavyShell', 'kineticBurst');
-    // trail 里同一 phase 可能连续出现 → 先连续去重，得到「状态切换序列」。
-    const seq: string[] = [];
-    for (const t of trail) if (seq[seq.length - 1] !== t.phase) seq.push(t.phase);
-    expect(seq).toEqual([
-      'IDLE', 'BATTLE', 'RESULT', 'CHOICE', 'IDLE',
-      'BATTLE', 'RESULT', 'CHOICE', 'IDLE',
-      'BATTLE', 'RESULT',
+  it('RP-F2-01 改装分支走完四场真实战斗 + 两次选择 + 一次耐久取舍（全程同一页面）', () => {
+    const w = realWalk('upgrade', 'heavyShell', 'kineticBurst');
+    expect(w.nodeSeq).toEqual([
+      NODE.start,
+      NODE.battle1,
+      NODE.choice1,
+      NODE.battle2,
+      NODE.durability,
+      NODE.choice2,
+      NODE.battle3,
+      NODE.final,
     ]);
-    expect(seq.filter((p) => p === 'BATTLE').length).toBe(RUN_MAX_BATTLES);
-    expect(seq.filter((p) => p === 'CHOICE').length).toBe(RUN_MAX_CHOICES);
-    // transitions 单调递增（状态切换计数只增不减 → 同一页面内推进）
-    for (let i = 1; i < trail.length; i++) {
-      expect(trail[i].transitions).toBeGreaterThanOrEqual(trail[i - 1].transitions);
+    expect(w.builds.length).toBe(4);
+    expect(w.builds[0]).toEqual([]); // ① 基础
+    expect(w.builds[1]).toEqual(['heavyShell']); // ② 一层
+    expect(w.builds[2]).toEqual(['heavyShell', 'kineticBurst']); // ③ 两层
+    expect(w.builds[3]).toEqual(['heavyShell', 'kineticBurst']); // ④ 两层（不变）
+    // transitions 单调递增（同一页面内推进）
+    for (let i = 1; i < w.trail.length; i++) {
+      expect(w.trail[i].transitions).toBeGreaterThanOrEqual(w.trail[i - 1].transitions);
     }
-    // 第一场无任何强化；第二场带一层；第三场带两层
-    expect(trail[2].buffs.length).toBe(0);
-    expect(runBuildIds(trail[trail.length - 4])).toEqual(['heavyShell']);
-    expect(runBuildIds(trail[trail.length - 1])).toEqual(['heavyShell', 'kineticBurst']);
+    // ⚠️ 这条路线在改装分支下终局耐久归零 → 本局 FAILED（真实物理结果，不是合成输入）
+    const finale = w.at(NODE.final, 'FAILED');
+    expect(finale.battle!.playerHp).toBe(0);
+    expect(runFailed(finale)).toBe(true);
+    expect(runComplete(finale)).toBe(false);
   });
 
-  it('RP-F2-02 DAY 3 → 4 → 5，日志是玩家向自然语言 + 新 DAY 行', () => {
-    const { firstEnd, afterChoice1, afterChoice2 } = runBuildLoop('twinCannon', 'tripleLoad');
-    expect(firstEnd.day).toBe(RUN_INITIAL_DAY);
-    expect(afterChoice1.day).toBe(RUN_INITIAL_DAY + 1);
-    expect(afterChoice2.day).toBe(RUN_INITIAL_DAY + 2);
-    expect(afterChoice2.day).toBeLessThanOrEqual(afterChoice2.dayTotal); // 结构上不可能是 8/7
-    const texts = afterChoice2.log.map((e) => e.text);
-    expect(texts).toContain('你为大炮加装了一门副炮。');
-    expect(texts).toContain('你把副炮接进了主装填链。');
-    expect(texts).toContain('DAY 4');
-    expect(texts).toContain('DAY 5');
-    // 两次选择各追加 2 行（强化结果 + DAY 行）
-    expect(afterChoice1.log.length).toBe(firstEnd.log.length + 2);
-    // 日志仍是纯自然语言（结构上吐不出方括号前缀）
-    for (const e of afterChoice2.log) {
-      expect(formatRunLog(e)).toBe(e.text);
-      expect(/^\[/.test(e.text)).toBe(false);
-    }
-  });
-
-  it('RP-F2-03 必改 4：跨战斗耐久逐场按同一规则传递（不自动满血）', () => {
-    const { firstEnd, afterChoice1, afterChoice2, secondInitialHp, finalRuntime } = runBuildLoop(
-      'fastReload',
-      'twinCannon',
-    );
-    // 规则（PRP-RUN-R1 起，`runCarriedPlayerHp`）：carry = 上一场真实剩余 + 维修补偿，上限截断。
-    // ⚠️ 旧注释「<= 0 → null（满耐久开幕）」已作废：那正是被真人录屏抓到的 P0 缺陷。
-    //    现在「上一场已结束」**恒返回一个数**（死亡 → 0），`null` 只剩「本次遭遇还没打过」一个含义。
-    // ① 第一场：真实剩余确实低于上限
-    const hp1 = firstEnd.battle!.playerHp;
-    expect(hp1).toBeGreaterThan(0);
-    expect(hp1).toBeLessThan(firstEnd.battle!.playerHpMax);
-    expect(afterChoice1.repairBonus).toBe(0); // 第一层都不是维修项 → 无补偿
-    expect(runCarriedPlayerHp(afterChoice1)).toBe(hp1);
-
-    // ② 第二场**真的**以「第一场剩余」开局（这就是「不自动满血」的直接证据，
-    //    而不是只检查状态机里的数字）。
-    expect(secondInitialHp).toBe(hp1);
-    expect(secondInitialHp).toBeLessThan(finalRuntime.playerMaxHp);
-
-    // ③ 第二场 → 第三场沿用**同一条规则**（胜负由真实物理决定，不做任何数值调优）。
-    //
-    // ⚠️ PRP-RUN-R1 起这里**没有 else 分支**：若第二场 HP 归零，`finishRunBattle` 会直接
-    //    进 `FAILED`（终态），第三场根本不存在 —— 所以「能走到这里」本身就等于
-    //    「第二场存活」，这就是单一耐久真的续到第三场的直接证据。
-    //    修复前这里有一条「0 HP → carry = null → 终局满耐久开幕」的兜底分支，
-    //    正是被真人录屏抓到的那条错误路径。
-    expect(afterChoice2.phase).toBe('IDLE');
-    const hp2 = afterChoice2.battle!.playerHp;
-    expect(hp2).toBeGreaterThan(0);
-    const carry2 = runCarriedPlayerHp(afterChoice2);
-    expect(carry2).toBe(hp2); // 上一场已结束时恒为真实剩余（死亡 → 0，绝不返回 null）
-    expect(finalRuntime.initialPlayerHp).toBe(hp2);
-    expect(finalRuntime.initialPlayerHp).toBeLessThan(finalRuntime.playerMaxHp);
-
-    // 三场耐久**单调不增**：不存在任何隐藏回血（本路线没拿紧急维修 → repairBonus 全程 0）
-    expect(afterChoice1.repairBonus).toBe(0);
-    expect(afterChoice2.repairBonus).toBe(0);
-    expect(hp1).toBeLessThanOrEqual(afterChoice1.battle!.playerHpMax);
-    expect(hp2).toBeLessThanOrEqual(hp1);
-    expect(finalRuntime.initialPlayerHp).toBeLessThanOrEqual(hp2);
-    expect(finalRuntime.playerMaxHp).toBe(afterChoice2.battle!.playerHpMax);
-
-    // 演示遭遇余量（PRP-RUN-R1 换用 Build Prototype Encounter = `LightRusher` 之后的实测）：
-    // 第一场（无强化）只损约 1/6 耐久，而不是旧 `Chaser` 的 ~75% → 三场验证有稳定余量。
-    expect(hp1).toBeGreaterThan(afterChoice2.battle!.playerHpMax * 0.75);
-    finalRuntime.dispose();
-  });
-
-  it('RP-F2-04 必改 6：最终战斗的运行时**真的**同时携带两层（不是只写 state / 只画图标）', () => {
-    // 三条路线各跑一次；每条的第三场都必须同时带「一层 + 二层」
-    // ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：第三条从「快速装填 + 专属二层」改为
-    //    **通用转向池**里的真实组合（快速装填 → 双联炮）。
-    const routes: readonly [string, string][] = [
-      ['heavyShell', 'kineticBurst'],
-      ['twinCannon', 'tripleLoad'],
-      ['fastReload', 'twinCannon'],
-    ];
-    for (const [l1, l2] of routes) {
-      const { finalRuntime } = runBuildLoop(l1, l2);
-      expect(finalRuntime.build).toEqual([l1, l2]);
-      const params = finalRuntime.orchestrator.vehicleA.parts.find(
-        (p) => p.def.category === 'weapon',
-      )!.def.behaviorParams as Record<string, unknown>;
-      if (l1 === 'heavyShell') {
-        // 一层：重弹三项冻结值
-        expect(params.projectileRadius).toBe(16);
-        expect(params.projectileMass).toBe(4);
-        expect(params.recoilImpulse).toBe(90);
-        expect(params.cooldownMs).toBe(1000);
+  it('RP-F2-02 必改 3：单一耐久贯穿四场（每场开局 = 上一场结束 + 补偿，不自动满血）', () => {
+    for (const dur of ['repair', 'upgrade'] as const) {
+      for (const [l1, l2] of ROUTES) {
+        const w = realWalk(dur, l1, l2);
+        const key = `${dur} ${l1}+${l2}`;
+        // ① 第一场永远是满耐久开幕（carry = null 是本局唯一合法的满耐久来源）
+        expect(w.openingHp[0], key).toBe(1100);
+        // ② 场次结束耐久都低于上限且大于 0
+        const ends = [
+          w.at(NODE.battle1, 'RESULT').battle!.playerHp,
+          w.at(NODE.battle2, 'RESULT').battle!.playerHp,
+          w.at(NODE.battle3, 'RESULT').battle!.playerHp,
+        ];
+        for (const hp of ends) {
+          expect(hp, key).toBeLessThan(1100);
+          expect(hp, key).toBeGreaterThan(0);
+        }
+        // ③ 每场开局 = 上一场结束 + **该场之前已经发生过的补偿** —— 逐字节相等，不是「取整后相等」：
+        //    状态机全程保留真实小数耐久，任何中间取整都会让「同一份耐久」出现两条链。
+        //    ⚠️ 索引口径：`openingHp` = [①,②,③,终局] 的**开局**；耐久事件夹在 ② 与 ③ 之间
+        //    ⇒ ③ 的开局才是「补偿后」的第一个开局，终局的开局只含 ③ 的自然损耗。
+        const want = Math.round(1100 * EMERGENCY_REPAIR_FRACTION);
+        const bonus = dur === 'repair' ? Math.max(0, Math.min(want, 1100 - ends[1])) : 0;
+        expect(w.openingHp[1], `${key}: ② 开局`).toBe(ends[0]);
+        expect(w.openingHp[2], `${key}: ③ 开局`).toBe(Math.min(1100, ends[1] + bonus));
+        // ④ 上一场的战斗记录**从未被改写**（补偿单独记账）
+        expect(w.at(NODE.choice1, 'CHOICE').battle!.playerHp, `${key}: 战后记录`).toBe(ends[0]);
+        expect(w.at(NODE.durability, 'DURABILITY').battle!.playerHp, `${key}: 战后记录`).toBe(ends[1]);
+        expect(w.at(NODE.durability, 'DURABILITY').repairBonus, key).toBe(0);
+        // ⑤ 终局开局 = ③结束 + （仅维修分支的）补偿，且**被耐久上限截断**
+        expect(w.openingHp[3], `${key}: 终局开局`).toBe(Math.min(1100, ends[2] + bonus));
       }
-      if (l1 === 'twinCannon' && l2 === 'tripleLoad') {
-        // 二层：**在双联基础上**抬到三连（真实 burst，间隔不变）
-        expect(params.burstRounds).toBe(3);
-        expect(params.burstIntervalMs).toBe(100);
-        expect(params.fanAnglesDeg).toBeUndefined();
-      }
-      if (l1 === 'fastReload') {
-        // 两层浅合并：高频（650ms）与多发（burst 2）**同时**保留，其它字段沿用正式 Cannon
-        expect(params.cooldownMs).toBe(650);
-        expect(params.burstRounds).toBe(2);
-        expect(params.burstIntervalMs).toBe(100);
-        expect(params.projectileMass).toBe(1);
-      }
-      // 能力类第二层的真实运行状态随 Build 一起注入（只有重弹路线带能力）
-      const ab = finalRuntime.abilitySnapshot();
-      expect(ab.kineticBurst).toBe(l2 === 'kineticBurst');
-      finalRuntime.dispose();
     }
   });
 
-  it('RP-F2-05 必改 3：Build 只在本局 —— 新开 Run 立刻回到基础状态', () => {
-    const { afterChoice1, finalRuntime } = runBuildLoop('fastReload', 'twinCannon');
-    expect(runBuildIds(afterChoice1)).toEqual(['fastReload']);
-    finalRuntime.dispose();
-    const fresh = createRunPageState(CTX);
-    expect(runBuildIds(fresh)).toEqual([]);
-    expect(fresh.repairBonus).toBe(0);
-    expect(fresh.day).toBe(RUN_INITIAL_DAY);
-    expect(fresh.battlesCompleted).toBe(0);
-    expect(runVerificationComplete(fresh)).toBe(false);
+  it('RP-F2-03 必改 4：Build 只在本局 —— 新开 Run 立刻回到基础状态', () => {
+    const w = realWalk('upgrade', 'fastReload', 'twinCannon');
+    expect(runBuildIds(w.at(NODE.battle2, 'IDLE'))).toEqual(['fastReload']);
+    const freshState = createRunPageState(CTX);
+    expect(runBuildIds(freshState)).toEqual([]);
+    expect(freshState.repairBonus).toBe(0);
+    expect(freshState.day).toBe(RUN_FIRST_DAY);
+    expect(freshState.battlesCompleted).toBe(0);
+    expect(runComplete(freshState)).toBe(false);
+    expect(runFailed(freshState)).toBe(false);
     // 新局用基础运行时 → 武器回到正式定义，能力全关
-    const rt = new RunBattleRuntime();
+    const rt = new RunBattleRuntime({ encounterId: LADDER[NODE.battle1] });
     expect(rt.build).toEqual([]);
     expect(rt.modifier).toBeNull();
-    const params = rt.orchestrator.vehicleA.parts.find(
-      (p) => p.def.category === 'weapon',
-    )!.def.behaviorParams as Record<string, number>;
-    expect(params.cooldownMs).toBe(1000);
-    expect(params.projectileRadius).toBe(10);
-    const ab = rt.abilitySnapshot();
-    expect(ab.kineticBurst).toBe(false);
+    const p = weaponParamsOf(rt);
+    expect(p.cooldownMs).toBe(1000);
+    expect(p.projectileRadius).toBe(10);
+    expect(rt.abilitySnapshot().kineticBurst).toBe(false);
     rt.dispose();
   });
 
-  it('RP-F2-06 宿主把 build / carriedHp 真正注入每次新建的战斗', () => {
+  it('RP-F2-04 必改 4：每次遭遇都**真的**把本局 Build + 跨战斗耐久 + 本场对手注入运行时', () => {
     const src = stripComments(read('runPage.ts'));
     expect(src.includes('runCarriedPlayerHp')).toBe(true);
     expect(src.includes('runBuildIds')).toBe(true);
-    // beginBattle 必须同时传两项 Run-local 状态（缺一即「选了强化但下一场没生效」）
-    expect(/new RunBattleRuntime\(\{[\s\S]{0,220}build:\s*runBuildIds\(this\.state\)/.test(src)).toBe(true);
-    expect(/new RunBattleRuntime\(\{[\s\S]{0,260}carriedHp:\s*runCarriedPlayerHp\(this\.state\)/.test(src)).toBe(
-      true,
-    );
-    // 遭遇结束时释放旧运行时 → 弹丸 / 事件订阅 / 世界不跨场残留
+    expect(/new RunBattleRuntime\(\{[\s\S]{0,240}build:\s*runBuildIds\(this\.state\)/.test(src)).toBe(true);
+    expect(/new RunBattleRuntime\(\{[\s\S]{0,320}carriedHp:\s*runCarriedPlayerHp\(this\.state\)/.test(src)).toBe(true);
+    // ⚠️ PRP-RUN-02：对手来自**当前脚本节点**（不是写死的演示遭遇）
+    expect(
+      /new RunBattleRuntime\(\{[\s\S]{0,400}encounterId:\s*runCurrentNode\(this\.state\)\.encounterId/.test(src),
+    ).toBe(true);
     expect(src.includes('this.battle.dispose()')).toBe(true);
+
+    // 运行时层面：第三场真的带两层（不是只写 state / 只画图标）
+    const w = realWalk('upgrade', 'twinCannon', 'tripleLoad');
+    const third = w.weaponParams[2];
+    expect(third.burstRounds).toBe(3); // 二层：双联 → 三连（真实 burst，间隔不变）
+    expect(third.burstIntervalMs).toBe(100);
+    expect(third.fanAnglesDeg).toBeUndefined();
+    // 第二场只带一层（双联：burst 2）
+    expect(w.weaponParams[1].burstRounds).toBe(2);
+    expect(w.weaponParams[1].projectileMass).toBe(1);
+    // 第一场是基础状态
+    expect(w.weaponParams[0].projectileRadius).toBe(10);
+    expect(w.weaponParams[0].burstRounds).toBeUndefined();
+    // ⚠️ 本路线的第二层是 `tripleLoad`（武器类）⇒ 四场**能力全关**。
+    //    这一条是「注入」的负面证据：不能把「没生效」误读成「生效了」。
+    expect(w.abilityEnd.map((a) => a.kineticBurst)).toEqual([false, false, false, false]);
+    expect(w.abilityEnd.every((a) => a.kineticHits === 0)).toBe(true);
+    // 换成**能力类**第二层 → 真的从第三场起生效（前两场还没拿到第二层）
+    const k = realWalk('upgrade', 'heavyShell', 'kineticBurst');
+    expect(k.abilityEnd.map((a) => a.kineticBurst)).toEqual([false, false, true, true]);
+    expect(k.abilityEnd[2].kineticHits).toBeGreaterThan(0);
+    expect(k.abilityEnd.reduce((n, a) => n + a.kineticHits, 0)).toBeGreaterThan(w.abilityEnd.reduce((n, a) => n + a.kineticHits, 0));
   });
 
-  it('RP-F2-07 宿主入口仍是唯一画布点击源，且卡片来自**当前候选池**（无 DOM 按钮 / 无跳转）', () => {
-    const src = stripComments(read('runPage.ts'));
-    expect(src.includes('runChoiceCardRects(pool.length)')).toBe(true);
-    expect(src.includes('chooseRunBuff(this.state, pool[i].id)')).toBe(true);
-    expect(src.includes('const pool = runChoicePool(this.state)')).toBe(true);
-    expect(src.includes('location.href')).toBe(false);
-    expect(src.includes('window.open')).toBe(false);
+  it('RP-F2-05 必改 4：重型弹头的三项冻结值只在本局 overlay 上生效（正式定义零修改）', () => {
+    const w = realWalk('upgrade', 'heavyShell', 'kineticBurst');
+    const p = w.weaponParams[1]; // 第二场（一层 = 重型弹头）
+    expect(p.projectileRadius).toBe(16);
+    expect(p.projectileMass).toBe(4);
+    expect(p.recoilImpulse).toBe(90);
+    expect(p.cooldownMs).toBe(1000);
+    // 第三场（两层）保留一层的数值
+    const p3 = w.weaponParams[2];
+    expect(p3.projectileRadius).toBe(16);
+    expect(p3.projectileMass).toBe(4);
+    expect(p3.recoilImpulse).toBe(90);
+    // 正式 content 里的 Cannon 基础定义**没有**被改动
+    expect(runModifierById('heavyShell')).toBeDefined();
+    const rt0 = new RunBattleRuntime({ encounterId: LADDER[NODE.battle1] });
+    expect(weaponParamsOf(rt0).projectileRadius).toBe(10);
+    expect(weaponParamsOf(rt0).projectileMass).toBe(1);
+    rt0.dispose();
   });
 
-  it('RP-F2-08 第三场结束 = 验证结束：不再进 CHOICE、不再加 Day、主动作=重新开始验证', () => {
-    const { finale, afterChoice2, finalRuntime } = runBuildLoop('heavyShell', 'kineticBurst');
-    expect(finale.phase).toBe('RESULT');
-    expect(finale.battlesCompleted).toBe(RUN_MAX_BATTLES);
-    expect(runVerificationComplete(finale)).toBe(true);
-    // day 停在 DAY 5（**没有** DAY 6/7，更不可能是 8/7）
-    expect(finale.day).toBe(afterChoice2.day);
-    expect(finale.day).toBe(RUN_INITIAL_DAY + 2);
-    expect(runBuildIds(finale)).toEqual(['heavyShell', 'kineticBurst']); // 两层仍在，但没有第三层
-    expect(runActionLabel(finale)).toBe(RUN_RESTART_LABEL);
-    expect(runActionEnabled(finale)).toBe(true);
-    // 终局 RESULT 的第三行叙事改为「验证结束」，不再引导下一次改装
-    expect(finale.log[finale.log.length - 1].text).toBe('本次改装的验证到此结束。');
-    expect(finale.log.some((e) => e.text === '你发现了一次改装机会……')).toBe(true); // 前两场那两次仍在
-    finalRuntime.dispose();
+  it('RP-F2-06 必改 5：三条路线都能真的跑完（维修分支）', () => {
+    for (const [l1, l2] of ROUTES) {
+      const w = realWalk('repair', l1, l2);
+      const key = `${l1}+${l2}`;
+      expect(w.builds[1], key).toEqual([l1]);
+      expect(w.builds[3], key).toEqual([l1]); // 维修分支没有第二层
+      const finale = w.at(NODE.final, 'COMPLETE');
+      expect(runComplete(finale), key).toBe(true);
+      expect(finale.battle!.winner).toBe('A');
+      expect(finale.battle!.steps).toBeGreaterThan(0);
+    }
   });
 
-  it('RP-F2-09 重新开始验证 = 全新 Run（DAY 3 / Build 清零 / 耐久回初始）', () => {
-    const { finale, finalRuntime } = runBuildLoop('twinCannon', 'tripleLoad');
-    const restart = pressRunAction(finale, CTX);
-    finalRuntime.dispose();
-
-    expect(restart).not.toBe(finale); // 不是原地改状态，而是**新局**
-    expect(restart.phase).toBe('IDLE');
-    expect(restart.day).toBe(RUN_INITIAL_DAY);
-    expect(restart.dayTotal).toBe(RUN_TOTAL_DAYS);
-    expect(restart.buffs).toEqual([]);
-    expect(runBuildIds(restart)).toEqual([]);
-    expect(restart.repairBonus).toBe(0);
-    expect(restart.battlesCompleted).toBe(0);
-    expect(restart.battle).toBeNull();
-    expect(runCarriedPlayerHp(restart)).toBeNull(); // 新局第一场从满耐久开始
-    expect(restart.log.length).toBe(2);
-    expect(restart.log.map((e) => e.text)).toContain(`DAY ${RUN_INITIAL_DAY}`);
-    expect(restart.phaseTrail).toEqual(['IDLE']);
-    expect(runActionLabel(restart)).toBe('继续');
-    expect(runVerificationComplete(restart)).toBe(false);
-    // 新局第一场照样是第一层三选一（可换一条路线做同条件独立验证）
-    let s = pressRunAction(restart, CTX);
-    s = pressRunAction(s, CTX);
-    s = finishRunBattle(s, { winner: 'A', endReason: 'hp', playerHp: 600, enemyHp: 0, steps: 400 });
-    s = pressRunAction(s, CTX);
-    expect(s.phase).toBe('CHOICE');
-    expect(runChoicePool(s).map((o) => o.id)).toEqual(RUN_CHOICE_OPTIONS.map((o) => o.id));
-    const other = chooseRunBuff(s, 'fastReload');
-    expect(runBuildIds(other)).toEqual(['fastReload']);
-    expect(other.day).toBe(RUN_INITIAL_DAY + 1);
-  });
-
-  it('RP-F2-10 必改 1：第二次候选池由第一层决定（不是同一套通用三选一）', () => {
+  it('RP-F2-07 必改 1：第二次候选池由第一层决定（不是同一套通用三选一）', () => {
     for (const l1 of ['heavyShell', 'twinCannon', 'fastReload'] as const) {
-      const atChoice2 = syntheticChoice(l1);
-      expect(atChoice2.phase).toBe('CHOICE');
-      const pool = runChoicePool(atChoice2).map((o) => o.id);
+      const at = syntheticWalk('upgrade', l1, RUN_LAYER2_POOLS[l1][0]).at(NODE.choice2, 'CHOICE');
+      const pool = runChoicePool(at).map((o) => o.id);
       expect(pool).toEqual([...RUN_LAYER2_POOLS[l1]]);
       expect(pool.length).toBe(3);
-      expect(new Set(pool).size).toBe(3); // 无重复
-      expect(pool).not.toContain(l1); // 转向的是另一个方向，不原地打转
-      expect(pool).toContain('emergencyRepair'); // 安全通用项三池一致
+      expect(new Set(pool).size).toBe(3);
+      expect(pool).not.toContain(l1);
+      expect(pool).toContain('emergencyRepair');
       if (l1 === 'fastReload') {
-        // ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：快速装填的**专属**第二层（三条尝试全部真人未通过）
-        //    已整条废弃 → 它的池改为**通用转向池** = 三个已存在的方向（重炮 / 多发 / 生存）。
-        //    因此这一池**没有** role 'synergy' 的项，槽位语义与另两池不同（这是有意的收口结果）。
+        // ⚠️ CLOSEOUT-AND-FREEZE：快速装填的专属二层已整条废弃 → 通用转向池（无 synergy 槽位）
         expect(pool).toEqual(['heavyShell', 'twinCannon', 'emergencyRepair']);
         expect(pool.map((id) => runModifierById(id)!.role)).toEqual(['base', 'base', 'safe']);
       } else {
-        // 结构 = 强联动 / 安全通用 / 轻度转向（槽位语义；第三格复用第一层的定义 → role 'base'）
         expect(runModifierById(pool[0])!.role).toBe('synergy');
         expect(runModifierById(pool[1])!.role).toBe('safe');
         expect(RUN_LAYER1_POOL).toContain(pool[2]);
         expect(pool[2]).not.toBe(l1);
       }
-      // 第二次池与第一次池**不是同一套**通用三选一（至少有一项不在第一层池里）
       const l1Pool = RUN_CHOICE_OPTIONS.map((o) => o.id);
       expect(pool.some((id) => !l1Pool.includes(id))).toBe(true);
     }
-    // 仍在生效的两条强联动各不相同（两条已通过真人验收的 Build 方向）
     expect(RUN_LAYER2_POOLS.heavyShell[0]).toBe('kineticBurst');
     expect(RUN_LAYER2_POOLS.twinCannon[0]).toBe('tripleLoad');
-    // ⚠️ 快速装填不再有专属联动（废弃的三条已从定义表里消失）
     expect(RUN_LAYER2_POOLS.fastReload).toEqual(['heavyShell', 'twinCannon', 'emergencyRepair']);
     for (const gone of ['suppressionShot', 'strongRecoil', 'recoilCharge']) {
       expect(runModifierById(gone), `${gone} 必须已被删除`).toBeUndefined();
     }
   });
 
-  it('RP-F2-11 一局最多两次选择，且第二次只能从条件池里选（池外选项被拒）', () => {
-    const atChoice1 = syntheticChoice(null);
-    const chosen1 = chooseRunBuff(atChoice1, 'heavyShell');
+  it('RP-F2-08 一局最多两次选择，且第二次只能从条件池里选（池外选项被拒）', () => {
+    const at1 = syntheticWalk('upgrade').at(NODE.choice1, 'CHOICE');
+    const chosen1 = chooseRunBuff(at1, 'heavyShell', CTX);
     expect(runBuildIds(chosen1)).toEqual(['heavyShell']);
+    expect(chooseRunBuff(chosen1, 'kineticBurst', CTX)).toBe(chosen1); // 非 CHOICE → no-op
 
-    // 非 CHOICE 状态下再选 → no-op（同引用）
-    expect(chooseRunBuff(chosen1, 'kineticBurst')).toBe(chosen1);
-
-    const atChoice2 = syntheticChoice('heavyShell');
-    // 池外选项（第一层的另两项之一，且不在本池）→ 拒绝
-    expect(runChoicePool(atChoice2).map((o) => o.id)).toEqual(['kineticBurst', 'emergencyRepair', 'fastReload']);
-    expect(chooseRunBuff(atChoice2, 'twinCannon')).toBe(atChoice2);
-    // 池内选项 → 接受
-    const chosen2 = chooseRunBuff(atChoice2, 'kineticBurst');
+    const at2 = syntheticWalk('upgrade', 'heavyShell', 'kineticBurst').at(NODE.choice2, 'CHOICE');
+    expect(runChoicePool(at2).map((o) => o.id)).toEqual(['kineticBurst', 'emergencyRepair', 'fastReload']);
+    expect(chooseRunBuff(at2, 'twinCannon', CTX)).toBe(at2); // 池外 → 拒绝
+    const chosen2 = chooseRunBuff(at2, 'kineticBurst', CTX);
     expect(runBuildIds(chosen2)).toEqual(['heavyShell', 'kineticBurst']);
 
-    // 已选满两次 → 即使强行改回 CHOICE 也被拒（防第三层 / 多 Buff 累计）
-    const forced = { ...chosen2, phase: 'CHOICE' as const };
-    expect(chooseRunBuff(forced, 'fastReload')).toBe(forced);
+    // 已选满两次 → 即使强行改回 CHOICE 也被拒（防第三层）
+    const forced: RunPageState = { ...chosen2, phase: 'CHOICE' };
+    expect(chooseRunBuff(forced, 'fastReload', CTX)).toBe(forced);
     expect(forced.buffs.length).toBe(RUN_MAX_CHOICES);
   });
 
-  it('RP-F2-12 必改 5：两条强联动 + 一条通用转向都能完整执行（一层 → 二层 → 最终真实战斗）', () => {
-    // 前两条 = 已通过真人验收的强联动（第二层固定出现在**槽位 0**）；
-    // 第三条 = 快速装填的第二层。⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE 之后该池已改为
-    // **通用转向池**（不再有专属联动），所以这里只要求「选项来自该池」，不要求槽位 0。
-    const routes: readonly [string, string, string | null][] = [
-      ['heavyShell', 'kineticBurst', '动能爆发'],
-      ['twinCannon', 'tripleLoad', '三连装填'],
-      ['fastReload', 'twinCannon', null],
-    ];
-    for (const [l1, l2, label] of routes) {
-      const { choice2, afterChoice2, finale } = runBuildLoop(l1, l2);
-      const pool = runChoicePool(choice2);
-      // 第二次候选永远来自**由第一层决定**的那个池
-      const expectedPool = RUN_LAYER2_POOLS[l1 as keyof typeof RUN_LAYER2_POOLS];
-      expect(pool.map((o) => o.id)).toEqual([...expectedPool]);
-      expect(pool.map((o) => o.id)).toContain(l2);
-      if (label) {
-        // 强联动确实出现在**由第一层决定**的那一格
-        expect(pool[0].id).toBe(l2);
-        expect(pool[0].label).toBe(label);
-      }
-      expect(afterChoice2.log[afterChoice2.log.length - 2].text).toBe(runModifierById(l2)!.logText);
-      expect(runBuildIds(afterChoice2)).toEqual([l1, l2]);
-      // 最终战斗真的打完（不是卡死）
-      expect(finale.phase).toBe('RESULT');
-      expect(finale.battle!.steps).toBeGreaterThan(0);
-    }
-  });
-
-  it('RP-F2-13 紧急维修：真实耐久补偿，且不改写上一场的战斗记录', () => {
-    const atChoice2 = syntheticChoice('heavyShell');
-    const hpBefore = atChoice2.battle!.playerHp;
-    const maxHp = atChoice2.battle!.playerHpMax;
-    const healed = chooseRunBuff(atChoice2, 'emergencyRepair');
+  it('RP-F2-09 紧急维修：真实耐久补偿，且不改写上一场的战斗记录', () => {
+    const at2 = syntheticWalk('upgrade', 'heavyShell', 'emergencyRepair', [900, 700, 0, 0]).at(NODE.choice2, 'CHOICE');
+    const hpBefore = at2.battle!.playerHp;
+    const maxHp = at2.battle!.playerHpMax;
+    const healed = chooseRunBuff(at2, 'emergencyRepair', CTX);
     const expectHeal = Math.round(maxHp * EMERGENCY_REPAIR_FRACTION);
-    // 上一场的真实结果**原样保留**（不是把 battle.playerHp 改大）
-    expect(healed.battle!.playerHp).toBe(hpBefore);
+    expect(healed.battle!.playerHp).toBe(hpBefore); // 上一场真实结果原样保留
     expect(healed.repairBonus).toBe(expectHeal);
-    // 下一场开局耐久 = 真实剩余 + 补偿（且不超过上限）
     expect(runCarriedPlayerHp(healed)).toBe(Math.min(maxHp, hpBefore + expectHeal));
     expect(runCarriedPlayerHp(healed)!).toBeGreaterThan(hpBefore);
-    // 维修不改武器（本局武器仍是第一层那一项）
     expect(runBuildIds(healed)).toEqual(['heavyShell', 'emergencyRepair']);
-    // 真实注入：下一场的开局 HP 就是补偿后的数值
-    const rt = new RunBattleRuntime({ build: runBuildIds(healed), carriedHp: runCarriedPlayerHp(healed) });
+    // 真实注入：下一场的开局 HP 就是补偿后的数值（IDLE = d6-battle3）
+    const rt = new RunBattleRuntime({
+      build: runBuildIds(healed),
+      carriedHp: runCarriedPlayerHp(healed),
+      encounterId: LADDER[NODE.battle3],
+    });
     expect(rt.initialPlayerHp).toBe(Math.min(maxHp, hpBefore + expectHeal));
     expect(rt.playerMaxHp).toBe(maxHp);
     rt.dispose();
   });
 
-  it('RP-F2-14 单一耐久贯穿三场：每场开局 = 上一场结束，全程单调不增（无隐藏回血）', () => {
-    /**
-     * 三条路线的**冻结实测值**（PRP-RUN-R1｜ProtoRusher 下的真实物理结果，Node 端确定性）。
-     *
-     * ⚠️ 与 RP-19 / RP-22 同一纪律：这些是**冻结字面量**而不是就地重算 ——
-     *    任何影响三场连锁的改动（对手 / 武器 / 物理）都必须回到这里显式更新，
-     *    从而让「三场能不能跑完」这件事无法悄悄变化。
-     *    表内 = [第一场结束(=第二场开局), 第二场结束(=第三场开局), 第三场结束]。
-     */
-    const FROZEN: Record<string, readonly [number, number, number]> = {
-      // ⚠️ PRP-BUILD-01-R1：kineticBurst 的追加冲量从质心改到**真实命中点**（产生扭矩），
-      //    增益 12 → 28；实测第一/第二场开局不变，第三场残血 537 → 430（已按真实测量显式更新，
-      //    不是就地重算）。40% 余量仍在，三场连锁没有被"一次强化把末场打崩"。
-      'heavyShell+kineticBurst': [843, 714, 430],
-      'twinCannon+tripleLoad': [843, 678, 470],
-      // ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：第三项路线从「快速装填 + 压制作战」改为
-      //    通用转向池里的真实组合「快速装填 → 双联炮」（高频 650ms + 一次两发）。
-      //    前两场与第一层口径完全相同（第二层不参与第一/第二场），只有第三场是新的实测值。
-      //    **显式更新，不是就地重算。**
-      'fastReload+twinCannon': [843, 622, 546],
-    };
-    const routes: readonly [string, string][] = [
-      ['heavyShell', 'kineticBurst'],
-      ['twinCannon', 'tripleLoad'],
-      ['fastReload', 'twinCannon'],
-    ];
-    for (const [l1, l2] of routes) {
+  it('RP-F2-10 必改 5：真实四场耐久链 = 冻结实测值（维修分支：三路线全部完成本局）', () => {
+    for (const [l1, l2] of ROUTES) {
       const key = `${l1}+${l2}`;
-      const { finale, firstEnd, afterChoice1, afterChoice2, secondInitialHp, finalRuntime } = runBuildLoop(
-        l1,
-        l2,
-      );
-      const hp1 = firstEnd.battle!.playerHp;
-      const hp2 = afterChoice2.battle!.playerHp;
-      const hp3 = finale.battle!.playerHp;
+      const w = realWalk('repair', l1, l2);
+      const hp1 = w.at(NODE.battle1, 'RESULT').battle!.playerHp;
+      const hp2 = w.at(NODE.battle2, 'RESULT').battle!.playerHp;
+      const hp3 = w.at(NODE.battle3, 'RESULT').battle!.playerHp;
+      const hp4 = w.at(NODE.final, 'COMPLETE').battle!.playerHp;
+      expect(Math.round(hp1), `${key}: ①`).toBe(FROZEN_REPAIR[key][0]);
+      expect(Math.round(hp2), `${key}: ②`).toBe(FROZEN_REPAIR[key][1]);
+      expect(Math.round(hp3), `${key}: ③`).toBe(FROZEN_REPAIR[key][2]);
+      expect(Math.round(hp4), `${key}: ④`).toBe(FROZEN_REPAIR[key][3]);
+      // 维修分支：每场都活着，终局余量 > 50%
+      for (const hp of [hp1, hp2, hp3, hp4]) expect(hp, key).toBeGreaterThan(0);
+      expect(hp4, `${key}: 终局余量`).toBeGreaterThan(1100 * 0.5);
+      // 四场都真的打完
+      expect(w.at(NODE.final, 'COMPLETE').battle!.done).toBe(true);
+      expect(w.at(NODE.final, 'COMPLETE').battlesCompleted).toBe(RUN_BATTLES_TOTAL);
+      // 维修补偿只来自耐久事件那一次；且**按缺口截断** = min(275, 上限 − 当前)：
+      // 「维修」在不同路线上的真实价值不同（这正是「当前耐久状态影响决策」的机制本身）。
+      const want = Math.round(1100 * EMERGENCY_REPAIR_FRACTION);
+      const applied = Math.max(0, Math.min(want, 1100 - hp2));
+      expect(w.at(NODE.durability, 'DURABILITY').repairBonus, key).toBe(0);
+      expect(w.at(NODE.tend, 'IDLE').repairBonus, `${key}: 实修`).toBe(applied);
+      expect(applied, key).toBeLessThanOrEqual(want);
+    }
+  });
 
-      // ① 第一场确实掉过血，但远未致命（低压验证对手：1100 → 843，只损 257）
-      expect(hp1).toBeLessThan(firstEnd.battle!.playerHpMax);
-      expect(Math.round(hp1), key).toBe(FROZEN[key][0]);
+  it('RP-F2-11 必改 3：耐久取舍真的改变结局（同一路线：维修 → 完成；改装 → 失败）', () => {
+    const key = 'heavyShell+kineticBurst';
+    const rep = realWalk('repair', 'heavyShell', 'kineticBurst');
+    const upg = realWalk('upgrade', 'heavyShell', 'kineticBurst');
 
-      // ② 第二场开局**就是**第一场结束（不是重算、不是满耐久）
-      expect(secondInitialHp, `${key}: 第二场开局`).toBe(hp1);
-      expect(Math.round(hp2), key).toBe(FROZEN[key][1]);
+    // 两条分支在耐久事件之前**逐帧相同**（差异只来自那一个决定）
+    for (const [n, p] of [
+      [NODE.battle1, 'RESULT'],
+      [NODE.battle1, 'BATTLE'],
+      [NODE.choice1, 'CHOICE'],
+      [NODE.battle2, 'RESULT'],
+      [NODE.durability, 'DURABILITY'],
+    ] as const) {
+      expect(rep.at(n, p).battle, `${key}: ${n}:${p}`).toEqual(upg.at(n, p).battle);
+      expect(rep.at(n, p).log, `${key}: ${n}:${p}`).toEqual(upg.at(n, p).log);
+    }
 
-      // ③ 第三场开局**就是**第二场结束；终局真的打完（RESULT，不是 FAILED）
-      expect(finalRuntime.initialPlayerHp, `${key}: 第三场开局`).toBe(hp2);
-      expect(finale.phase, `${key}: 终局`).toBe('RESULT');
-      expect(Math.round(hp3), key).toBe(FROZEN[key][2]);
+    // 维修：不回强化，但终局活得下来（冻结值口径 = 真实小数四舍五入）
+    expect(Math.round(rep.at(NODE.final, 'COMPLETE').battle!.playerHp)).toBe(FROZEN_REPAIR[key][3]);
+    // ⚠️ 维修分支的 `d7-final` **开局**耐久 = ③结束 + 实修，且被耐久上限截断
+    //    （834.3 + 275 = 1109.3 → **1100**）：补偿不会把车修到满耐久之上。
+    const hp3 = rep.at(NODE.battle3, 'RESULT').battle!.playerHp;
+    const heal3 = rep.at(NODE.tend, 'IDLE').repairBonus;
+    expect(hp3 + heal3).toBeGreaterThan(1100);
+    expect(rep.openingHp[3]).toBe(1100);
+    expect(runBuildIds(rep.at(NODE.final, 'COMPLETE'))).toEqual(['heavyShell']);
+    expect(rep.has(NODE.choice2, 'CHOICE')).toBe(false);
 
-      // ④ 单调不增（三场都没拿紧急维修 → repairBonus 恒 0，carry 就是真实剩余）
-      expect(afterChoice1.repairBonus).toBe(0);
-      expect(afterChoice2.repairBonus).toBe(0);
-      expect(hp2, `${key}: hp2<=hp1`).toBeLessThanOrEqual(hp1);
-      expect(hp3, `${key}: hp3<=hp2`).toBeLessThanOrEqual(hp2);
+    // 改装：多拿一次强化，但**终局耐久归零 → RUN FAILED**
+    const failed = upg.at(NODE.final, 'FAILED');
+    expect(failed.battle!.playerHp).toBe(FROZEN_UPGRADE[key][3]);
+    expect(failed.battle!.playerHp).toBe(0);
+    expect(runFailed(failed)).toBe(true);
+    expect(runBuildIds(failed)).toEqual(['heavyShell', 'kineticBurst']);
+    // 失败终态**不经过 RESULT**：phaseTrail 尾部是 BATTLE → FAILED
+    expect(failed.phaseTrail.slice(-2)).toEqual(['BATTLE', 'FAILED']);
+    // 失败只追加两行，且没有任何「继续 / 改装机会」引导
+    const tail = failed.log.slice(-2).map((e) => e.text);
+    expect(tail[0]).toBe(`战车耐久耗尽，DAY ${failed.day} 的冒险到此结束。`);
+    expect(tail[1]).toBe('战车耐久剩余 0%。');
+    for (const line of tail) {
+      expect(line.includes('改装机会')).toBe(false);
+      expect(line.includes('继续')).toBe(false);
+    }
+    // 另外两条路线在改装分支下活着（失败来自「这条路线很吃耐久 + 没维修」，不是必死）
+    for (const [l1, l2] of ROUTES.filter(([a]) => a !== 'heavyShell')) {
+      const w = realWalk('upgrade', l1, l2);
+      expect(runComplete(w.at(NODE.final, 'COMPLETE')), `${l1}+${l2}`).toBe(true);
+      expect(Math.round(w.at(NODE.final, 'COMPLETE').battle!.playerHp)).toBe(FROZEN_UPGRADE[`${l1}+${l2}`][3]);
+    }
+  });
 
-      // ⑤ 三场都活着，且终局留下可观余量（39%~50%）—— 不是勉强擦线
-      expect(hp1, `${key}: 第一场存活`).toBeGreaterThan(0);
-      expect(hp2, `${key}: 第二场存活`).toBeGreaterThan(0);
-      expect(hp3, `${key}: 第三场存活`).toBeGreaterThan(0);
-      expect(hp3, `${key}: 末场余量`).toBeGreaterThan(finalRuntime.playerMaxHp * 0.3);
-      finalRuntime.dispose();
+  it('RP-F2-12 改装分支的逐场冻结值（含两条活下来的路线）', () => {
+    for (const [l1, l2] of ROUTES) {
+      const key = `${l1}+${l2}`;
+      const w = realWalk('upgrade', l1, l2);
+      expect(Math.round(w.at(NODE.battle1, 'RESULT').battle!.playerHp), `${key}: ①`).toBe(FROZEN_UPGRADE[key][0]);
+      expect(Math.round(w.at(NODE.battle2, 'RESULT').battle!.playerHp), `${key}: ②`).toBe(FROZEN_UPGRADE[key][1]);
+      expect(Math.round(w.at(NODE.battle3, 'RESULT').battle!.playerHp), `${key}: ③`).toBe(FROZEN_UPGRADE[key][2]);
+      // 改装分支：第二层真的生效（终局 Build 是两层）
+      expect(w.builds[3], `${key}: 终局 Build`).toEqual([l1, l2]);
+      expect(w.at(NODE.choice2, 'CHOICE').buffs.length).toBe(1); // 选择前只有一层
+    }
+  });
+
+  it('RP-F2-13 终局由**节点类型**决定（不是「第几场」）：页面与状态机都不含位置分支', () => {
+    const src = stripComments(read('runPageState.ts'));
+    expect(src.includes("runCurrentNode(s).kind === 'FINAL'")).toBe(true);
+    for (const t of ['day === 7', 'day===7', 'battlesCompleted >=', 'RUN_MAX_BATTLES']) {
+      expect(src.includes(t), `runPageState 不得再用位置判据 "${t}"`).toBe(false);
+    }
+    const page = stripComments(read('runPage.ts'));
+    for (const t of ['day ===', 'day===', 'if (day']) {
+      expect(page.includes(t), `runPage.ts 不得出现 "${t}"`).toBe(false);
+    }
+    for (const dur of ['repair', 'upgrade'] as const) {
+      const w = syntheticWalk(dur);
+      expect(w.builds.length).toBe(RUN_BATTLES_TOTAL);
+      expect(w.at(NODE.final, 'COMPLETE').battlesCompleted).toBe(RUN_BATTLES_TOTAL);
+    }
+  });
+
+  it('RP-F2-14 两个终态都只能「重新开始 / 完成本次冒险」→ 全新 Run（满耐久 / DAY 1 / Build 清零）', () => {
+    // ① COMPLETE 终态
+    const complete = syntheticWalk('repair').at(NODE.final, 'COMPLETE');
+    expect(runComplete(complete)).toBe(true);
+    expect(runStartsNewRun(complete)).toBe(true);
+    expect(runActionLabel(complete)).toBe(RUN_COMPLETE_LABEL);
+    expect(runActionEnabled(complete)).toBe(true);
+    const tail4 = complete.log.slice(-4).map((e) => e.text);
+    expect(tail4[0]).toBe('战斗胜利。');
+    expect(tail4[3]).toBe('这次冒险到此结束。');
+    expect(complete.log.some((e) => e.text === '你发现了一次改装机会……')).toBe(true); // 历史仍完整
+
+    // ② FAILED 终态
+    const failed = settle(atBattle1(), 0, 420, 'B');
+    expect(runFailed(failed)).toBe(true);
+    expect(runStartsNewRun(failed)).toBe(true);
+    expect(runActionLabel(failed)).toBe(RUN_RESTART_LABEL);
+
+    // ③ 两个终态的唯一下一步都是全新 Run
+    for (const end of [complete, failed]) {
+      const restart = pressRunAction(end, CTX);
+      expect(restart).not.toBe(end);
+      expect(restart.phase).toBe('IDLE');
+      expect(restart.nodeId).toBe(RUN_SCRIPT_FIRST_ID);
+      expect(restart.day).toBe(RUN_FIRST_DAY);
+      expect(restart.dayTotal).toBe(RUN_DAYS_TOTAL);
+      expect(runBuildIds(restart)).toEqual([]);
+      expect(restart.repairBonus).toBe(0);
+      expect(restart.battlesCompleted).toBe(0);
+      expect(restart.battle).toBeNull();
+      expect(restart.durability).toBeNull();
+      expect(restart.phaseTrail).toEqual(['IDLE']);
+      expect(restart.transitions).toBe(0);
+      expect(restart.revision).toBe(0);
+      expect(restart.actionCount).toBe(0);
+      expect(runCarriedPlayerHp(restart)).toBeNull(); // 唯一合法的满耐久来源
+      expect(runStartsNewRun(restart)).toBe(false);
+      expect(runActionLabel(restart)).toBe('继续');
     }
   });
 });
 
-/* ============ I. PRP-RUN-R1：「HP <= 0 = 本局立即失败」与耐久连续性修复 */
+/* ============================ H. Run Script 数据源 + 耐久事件（本 Queue 核心） */
+
+describe('PRP-RUN-02｜H 固定 Run Script 数据源与耐久取舍事件', () => {
+  it('RP-RUN-02-01 必改 1：Run Script 是纯数据（无副作用 / 不 import 战斗 · DOM · Canvas）', () => {
+    const src = stripComments(read('runScript.ts'));
+    for (const t of ['import ', 'Math.random', 'Date.now', 'performance.now', 'registry', 'window', 'document']) {
+      expect(src.includes(t), `runScript.ts 不得出现 "${t}"`).toBe(false);
+    }
+    // 每个节点都有 id / kind / day / beat / next；next 指向的节点真实存在（或 null）
+    const ids = new Set(RUN_SCRIPT.map((n) => n.id));
+    expect(ids.size).toBe(RUN_SCRIPT.length); // id 唯一
+    for (const n of RUN_SCRIPT) {
+      expect(n.id.length).toBeGreaterThan(0);
+      expect(n.day).toBeGreaterThanOrEqual(1);
+      expect(n.day).toBeLessThanOrEqual(RUN_DAYS_TOTAL);
+      if (n.next !== null) expect(ids.has(n.next), `${n.id}.next=${n.next} 必须存在`).toBe(true);
+      if (n.kind === 'BATTLE' || n.kind === 'FINAL') {
+        expect(n.encounterId, `${n.id} 必须有 Encounter`).toBeTruthy();
+        expect(n.encounter!.length).toBeGreaterThan(0);
+        expect(LAB_ENCOUNTERS.find((e) => e.id === n.encounterId), `${n.encounterId} 必须存在`).toBeDefined();
+      } else {
+        expect(n.encounterId).toBeUndefined();
+      }
+    }
+    // 唯一一条主线：每个节点最多被一个前驱指向（d6-battle3 被 tend / choice2 两条分支指向）
+    const targets = RUN_SCRIPT.map((n) => n.next).filter((x): x is string => x !== null);
+    expect(new Set(targets).size).toBe(targets.length - 1);
+    // 查询函数：未知 id **不静默回退**
+    expect(runScriptNode('nope')).toBeNull();
+    expect(() => requireRunScriptNode('nope')).toThrow();
+    expect(runScriptNode(NODE.final)!.kind).toBe('FINAL');
+  });
+
+  it('RP-RUN-02-02 必改 3：耐久事件是**真取舍**（维修放弃强化 / 改装不回耐久）', () => {
+    const opts = runDurabilityOptions();
+    expect(opts.map((o) => o.id)).toEqual(['repair', 'upgrade']);
+    expect(opts.map((o) => o.label)).toEqual(['维修', '继续改装']);
+    expect(runDurabilityTitle()).toBe(RUN_DURABILITY_EVENT.title);
+    expect(runDurabilityBranchNodeId('repair')).toBe(NODE.tend);
+    expect(runDurabilityBranchNodeId('upgrade')).toBe(NODE.choice2);
+
+    // 不增加货币 / 不增加新资源：整条事件只有这两个动作
+    // ⚠️ 拉丁关键词**必须带词边界**：裸 `'xp'` 会被 `export` 命中（假红）；
+    //    中文关键词可以裸匹配（不会被英文标识符命中）。
+    const src = stripComments(read('runScript.ts'));
+    for (const t of ['货币', '金币', '银两', '资源', '商店']) {
+      expect(src.includes(t), `耐久事件不得引入资源："${t}"`).toBe(false);
+    }
+    expect(
+      /\b(gold|coin|currency|money|score|xp|price|cost|shop|store|inventory|rewards?)\b/i.test(src),
+      '耐久事件不得引入货币 / 新资源 / 永久奖励',
+    ).toBe(false);
+
+    // 耐久事件时：真实剩余 700（合成喂入）→ 两条分支给出两个不同的下一场开局
+    const atDur = syntheticWalk('repair', 'heavyShell', 'kineticBurst', [900, 700, 900, 900]).at(
+      NODE.durability,
+      'DURABILITY',
+    );
+    expect(runDurabilityOpen(atDur)).toBe(true);
+    expect(runOverlayCards(atDur).map((o) => o.id)).toEqual(['repair', 'upgrade']);
+    expect(atDur.log.some((e) => e.text === RUN_DURABILITY_EVENT.repairLog)).toBe(false); // 还没裁决
+    expect(atDur.durability).toBeNull();
+
+    // A｜维修：恢复一段明确耐久 → 放弃这次强化机会
+    const want = Math.round(1100 * EMERGENCY_REPAIR_FRACTION);
+    const healed = resolveDurability(atDur, 'repair', CTX);
+    expect(healed.durability).toBe('repair');
+    expect(healed.repairBonus).toBe(want);
+    expect(runCarriedPlayerHp(healed)).toBe(700 + want);
+    expect(healed.nodeId).toBe(NODE.tend); // 直接跳过 d5-choice2
+    expect(healed.phase).toBe('IDLE');
+    expect(healed.log.some((e) => e.text === RUN_DURABILITY_EVENT.repairLog)).toBe(true);
+    expect(healed.log.some((e) => e.text.includes(`${want} 点耐久`))).toBe(true);
+    expect(runBuildIds(healed)).toEqual(['heavyShell']); // 没有第二次强化
+
+    // B｜继续改装：不回耐久 → 进入第二层条件池
+    const gamble = resolveDurability(atDur, 'upgrade', CTX);
+    expect(gamble.durability).toBe('upgrade');
+    expect(gamble.repairBonus).toBe(0);
+    expect(runCarriedPlayerHp(gamble)).toBe(700); // 不回血
+    expect(gamble.nodeId).toBe(NODE.choice2);
+    expect(gamble.phase).toBe('CHOICE');
+    expect(gamble.log.some((e) => e.text === RUN_DURABILITY_EVENT.upgradeLog)).toBe(true);
+
+    // 两条分支的耐久差 = 一个明确数值（玩家能看见「不修就是这么多」）
+    expect(runCarriedPlayerHp(healed)!).toBe(runCarriedPlayerHp(gamble)! + want);
+  });
+
+  it('RP-RUN-02-03 耐久事件的 no-op 与重复裁决保护', () => {
+    const atDur = syntheticWalk().at(NODE.durability, 'DURABILITY');
+    // 非耐久节点（没有 branch）→ no-op
+    const fake: RunPageState = { ...atDur, nodeId: NODE.battle1 };
+    expect(resolveDurability(fake, 'repair', CTX)).toBe(fake);
+    // 裁决后再调一次 → 已经不是 DURABILITY phase → no-op（同引用）
+    const done = resolveDurability(atDur, 'upgrade', CTX);
+    expect(resolveDurability(done, 'repair', CTX)).toBe(done);
+    expect(resolveDurability(done, 'upgrade', CTX)).toBe(done);
+    expect(done.durability).toBe('upgrade'); // 第一个决定生效，不会被改写
+  });
+
+  it('RP-RUN-02-04 必改 2：四场压力阶梯 —— 全部是既有正式模板的引用（零数值改动）', () => {
+    // ① 四个 Encounter 都在 Lab 数据里，且引用的正式模板真实存在、draft **逐字段等于**正式池
+    for (const node of runScriptBattleNodes()) {
+      const id = node.encounterId!;
+      const enc = LAB_ENCOUNTERS.find((e) => e.id === id)!;
+      const official = OPPONENT_TEMPLATES.find((t) => t.id === enc.templateId);
+      expect(official, `正式对手池必须有 ${enc.templateId}`).toBeDefined();
+      expect(enc.count, `${id} 必须是单敌（Run Page 战斗只容纳 1 敌）`).toBe(1);
+      expect(enc.draft, `没有修改正式敌人定义`).toEqual(official!.draft);
+    }
+    // ② 四场互不相同（不是同一台车打四遍）
+    const ids = runScriptBattleNodes().map((n) => n.encounterId);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    // ③ 基础 Build 的真实掉血阶梯：**单调递增**（低压 → 中低压 → 中压 → 较高压）
+    const loss: number[] = [];
+    for (const node of runScriptBattleNodes()) {
+      const rt = new RunBattleRuntime({ encounterId: node.encounterId });
+      const maxHp = rt.playerMaxHp;
+      let hp = maxHp;
+      for (let i = 0; i < MAX_FRAMES; i++) {
+        rt.step(FRAME_MS);
+        hp = rt.hp().a;
+        if (rt.result) break;
+      }
+      expect(rt.result, `${node.id} 必须分出胜负`).not.toBeNull();
+      expect(rt.result!.winner, `${node.id} 基础 Build 必须打得过`).toBe('A');
+      expect(hp, `${node.id} 必须掉血（真实接敌，不是沙包）`).toBeGreaterThan(0);
+      loss.push(Math.round(maxHp - hp));
+      rt.dispose();
+    }
+    // 冻结实测值（基础 Build 满耐久 1100 的四场掉血）
+    expect(loss).toEqual([181, 221, 257, 482]);
+    for (let i = 1; i < loss.length; i++) expect(loss[i], `第 ${i + 1} 场必须比第 ${i} 场更重`).toBeGreaterThan(loss[i - 1]);
+    // 终局明显更重（≥ 前一场的 1.5 倍），但不是「基础 Build 必死」
+    expect(loss[3]).toBeGreaterThan(loss[2] * 1.5);
+    expect(loss[3]).toBeLessThan(1100 * 0.5);
+  });
+
+  it('RP-RUN-02-05 宿主接线：浮层卡片唯一来源 + 耐久事件走独立动作', () => {
+    const src = stripComments(read('runPage.ts'));
+    // 绘制 / 命中 / 账本三处都读 `runOverlayCards`（CHOICE 与 DURABILITY 同源）
+    expect(src.includes('runOverlayCards(this.state)')).toBe(true);
+    expect(src.includes('runOverlayCards(s)')).toBe(true);
+    // 浮层分派：耐久事件走 `resolveDurability`，强化走 `chooseRunBuff`（都传 ctx）
+    expect(src.includes('resolveDurability(this.state, id as RunDurabilityChoiceId, ctx)')).toBe(true);
+    expect(src.includes('chooseRunBuff(this.state, id, ctx)')).toBe(true);
+    expect(src.includes('runDurabilityOpen(this.state)')).toBe(true);
+    // 宿主不再直接判断 `runChoiceOpen` 才处理点击（否则耐久浮层点不动）
+    expect(src.includes('if (runOverlayOpen(this.state))')).toBe(true);
+    // 页面层没有散落的位置分支
+    for (const t of ['RUN_INITIAL_DAY', 'RUN_MAX_BATTLES', 'runVerificationComplete']) {
+      expect(src.includes(t), `runPage.ts 不得残留旧口径 "${t}"`).toBe(false);
+    }
+  });
+});
+
+/* ============ I. PRP-RUN-R1：「HP <= 0 = 本局立即失败」与耐久连续性 */
 
 describe('PRP-RUN-R1｜I 死亡即终局：单一耐久贯穿 Run、失败后只能重开', () => {
-  /** 合成一份「刚打完一场真实战斗」的 BATTLE 状态（不跑物理，纯状态机）。 */
-  function atBattle(): RunPageState {
-    return pressRunAction(pressRunAction(createRunPageState(CTX), CTX), CTX);
-  }
-
-  it('RP-R1-01 任意一场 Player HP = 0 → 立即 FAILED（不经过 RESULT、Day 不推进）', () => {
-    // 先在 CHOICE 里拿一层，确保失败时**本局 Build 非空**（Build 必须原样保留给人看）
-    let s = atBattle();
-    s = finishRunBattle(s, { winner: 'A', endReason: 'hp', playerHp: 700, enemyHp: 0, steps: 300 });
+  it('RP-R1-01 任意一场 Player HP = 0 → 立即 FAILED（不经过 RESULT、DAY 不推进）', () => {
+    // 先在第一次选择里拿一层，确保失败时**本局 Build 非空**（Build 必须原样保留给人看）
+    let s = settle(atBattle1(), 700);
     expect(s.phase).toBe('RESULT');
-    s = pressRunAction(s, CTX); // CHOICE
-    s = chooseRunBuff(s, 'heavyShell'); // → IDLE(DAY 4)
-    expect(s.day).toBe(RUN_INITIAL_DAY + 1);
+    s = pressRunAction(s, CTX); // CHOICE（d2-choice1，仍在 DAY 2）
+    s = chooseRunBuff(s, 'heavyShell', CTX); // → IDLE（d3-battle2，DAY 3）
+    expect(s.day).toBe(3);
     const dayBeforeDeath = s.day;
 
-    s = pressRunAction(s, CTX); // EVENT
-    s = pressRunAction(s, CTX); // BATTLE②
+    s = pressTimes(s, 2); // EVENT → BATTLE②
+    expect(s.phase).toBe('BATTLE');
     const logBeforeDeath = s.log;
-    s = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp: 420, steps: 500 });
+    s = settle(s, 0, 420, 'B');
 
     // ① 直接进失败终态（**没有** RESULT 这一站）
     expect(s.phase).toBe('FAILED');
     expect(runFailed(s)).toBe(true);
     expect(s.phaseTrail[s.phaseTrail.length - 1]).toBe('FAILED');
-    // 这一场是 BATTLE → FAILED（第一场那次 RESULT 仍在历史里，但**之后**没再出现 RESULT）
     expect(s.phaseTrail.slice(-2)).toEqual(['BATTLE', 'FAILED']);
-    expect(s.phaseTrail.lastIndexOf('RESULT')).toBeLessThan(s.phaseTrail.length - 1);
-    // ② Day 不推进（失败不发生 Day 前进）
+    // ② DAY 不推进（失败不发生 DAY 前进）
     expect(s.day).toBe(dayBeforeDeath);
     // ③ 最终 Build 原样保留（失败页要展示它）
     expect(runBuildIds(s)).toEqual(['heavyShell']);
@@ -1703,91 +1971,88 @@ describe('PRP-RUN-R1｜I 死亡即终局：单一耐久贯穿 Run、失败后只
     expect(s.battle!.playerHp).toBe(0);
     expect(s.battle!.done).toBe(true);
     expect(s.battle!.endReason).toBe('hp');
-    // ⑤ 失败只追加**两行**（失败叙事 + 真实耐久），且这两行里没有任何「继续 / 改装机会」引导
+    // ⑤ 失败只追加**两行**，且这两行里没有任何「继续 / 改装机会」引导
     expect(s.log.length).toBe(logBeforeDeath.length + 2);
     const tail = s.log.slice(-2).map((e) => e.text);
-    expect(tail[0]).toBe(`战车耐久耗尽，DAY ${dayBeforeDeath} 的验证到此结束。`);
+    expect(tail[0]).toBe(`战车耐久耗尽，DAY ${dayBeforeDeath} 的冒险到此结束。`);
     expect(tail[1]).toBe('战车耐久剩余 0%。');
     for (const line of tail) {
       expect(line.includes('改装机会')).toBe(false);
       expect(line.includes('继续')).toBe(false);
     }
-    // 第一场那次「改装机会」仍在历史里（日志只追加、不清空）——只是不会再引出第二次
+    // 第一次那行「改装机会」仍在历史里（日志只追加、不清空）
     expect(logBeforeDeath.some((e) => e.text === '你发现了一次改装机会……')).toBe(true);
-    expect(s.log.slice(-2).some((e) => e.text === '你发现了一次改装机会……')).toBe(false);
     for (const e of s.log) expect(/^\[/.test(e.text)).toBe(false);
   });
 
-  it('RP-R1-02 FAILED 下结构上进不了 CHOICE：不推进 Day、不接受选卡、主动作=重新开始验证', () => {
-    let s = atBattle();
-    s = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp: 900, steps: 300 });
+  it('RP-R1-02 FAILED 下结构上进不了任何浮层：不接受选卡 / 不接受裁决 / 主动作=重新开始', () => {
+    let s = settle(atBattle1(), 0, 900, 'B');
     expect(s.phase).toBe('FAILED');
 
-    // 三选一浮层不打开
     expect(runChoiceOpen(s)).toBe(false);
-    // 主动作可用，但文案是「重新开始验证」（不是「继续」）
+    expect(runDurabilityOpen(s)).toBe(false);
+    expect(runOverlayOpen(s)).toBe(false);
+    expect(runOverlayCards(s)).toEqual([]);
     expect(runActionEnabled(s)).toBe(true);
     expect(runActionLabel(s)).toBe(RUN_RESTART_LABEL);
     expect(runStartsNewRun(s)).toBe(true);
-    // 直接调 chooseRunBuff 也不能改变任何东西（准入要求 phase === 'CHOICE'）
-    expect(chooseRunBuff(s, 'kineticBurst')).toBe(s);
-    expect(chooseRunBuff(s, 'heavyShell')).toBe(s);
-    expect(runBuildIds(chooseRunBuff(s, 'heavyShell'))).toEqual([]);
-    // Day / 战斗记录 / 阶段都没被这些尝试推动
-    expect(s.day).toBe(RUN_INITIAL_DAY);
+    // 直接调选择 / 裁决都不能改变任何东西
+    expect(chooseRunBuff(s, 'kineticBurst', CTX)).toBe(s);
+    expect(chooseRunBuff(s, 'heavyShell', CTX)).toBe(s);
+    expect(resolveDurability(s, 'repair', CTX)).toBe(s);
+    expect(runBuildIds(s)).toEqual([]);
+    expect(s.day).toBe(2);
+    expect(s.nodeId).toBe(NODE.battle1);
     expect(s.phase).toBe('FAILED');
 
-    // ⚠️ 关键回归：`runCarriedPlayerHp` 不再把死亡伪装成「满耐久开幕」。
-    //    修复前它返回 null，调用方 `carried ?? playerHpMax` 会开出满耐久下一场。
+    // ⚠️ 关键回归：`runCarriedPlayerHp` 不把死亡伪装成「满耐久开幕」
     expect(runCarriedPlayerHp(s)).toBe(0);
     expect(runCarriedPlayerHp(s)).not.toBeNull();
   });
 
-  it('RP-R1-03 失败后「重新开始验证」= 全新 Run（满耐久 / DAY 初始 / Build 与补偿清空）', () => {
-    let s = atBattle();
-    s = finishRunBattle(s, { winner: 'A', endReason: 'hp', playerHp: 600, enemyHp: 0, steps: 300 });
+  it('RP-R1-03 失败后「重新开始冒险」= 全新 Run（满耐久 / DAY 1 / Build 与补偿清空）', () => {
+    let s = settle(atBattle1(), 600);
     s = pressRunAction(s, CTX);
-    s = chooseRunBuff(s, 'twinCannon');
-    s = pressRunAction(s, CTX);
-    s = pressRunAction(s, CTX);
-    s = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp: 300, steps: 300 });
+    s = chooseRunBuff(s, 'twinCannon', CTX);
+    s = pressTimes(s, 2);
+    s = settle(s, 0, 300, 'B');
     expect(s.phase).toBe('FAILED');
     expect(runBuildIds(s)).toEqual(['twinCannon']);
 
     const restart = pressRunAction(s, CTX);
-    expect(restart).not.toBe(s); // 不是原地改状态，而是**新局**
+    expect(restart).not.toBe(s);
     expect(restart.phase).toBe('IDLE');
-    expect(restart.day).toBe(RUN_INITIAL_DAY);
-    expect(restart.dayTotal).toBe(RUN_TOTAL_DAYS);
+    expect(restart.day).toBe(RUN_FIRST_DAY);
+    expect(restart.dayTotal).toBe(RUN_DAYS_TOTAL);
     expect(restart.buffs).toEqual([]);
     expect(runBuildIds(restart)).toEqual([]);
     expect(restart.repairBonus).toBe(0);
     expect(restart.battlesCompleted).toBe(0);
     expect(restart.battle).toBeNull();
     expect(runFailed(restart)).toBe(false);
-    expect(runStartsNewRun(restart)).toBe(false); // 新局的「继续」是继续**当前** Run
+    expect(runStartsNewRun(restart)).toBe(false);
     expect(runActionLabel(restart)).toBe('继续');
-    expect(runCarriedPlayerHp(restart)).toBeNull(); // 唯一合法的「满耐久开幕」来源
+    expect(runCarriedPlayerHp(restart)).toBeNull();
     expect(restart.phaseTrail).toEqual(['IDLE']);
-    expect(restart.log.length).toBe(2);
+    expect(restart.log.length).toBe(1 + requireRunScriptNode(NODE.start).beat.length);
 
-    // ⚠️ 必改 3：两种「按主动作」必须可区分 ——
-    //    失败/终局的这一下**开新 Run**；RESULT（未打完）的那一下**继续当前 Run**。
-    let mid = pressRunAction(pressRunAction(restart, CTX), CTX); // EVENT → BATTLE
-    mid = finishRunBattle(mid, { winner: 'A', endReason: 'hp', playerHp: 800, enemyHp: 0, steps: 300 });
+    // ⚠️ 两种「按主动作」必须可区分：终态的这几下**开新 Run**；
+    //    RESULT（未打完）的那一下**继续当前 Run**。
+    let mid = pressTimes(restart, 3); // → BATTLE①
+    mid = settle(mid, 800);
     expect(mid.phase).toBe('RESULT');
     expect(runStartsNewRun(mid)).toBe(false);
     expect(runActionLabel(mid)).toBe('继续');
     const carried = pressRunAction(mid, CTX);
     expect(carried.phase).toBe('CHOICE'); // 继续**当前** Run
-    expect(carried.day).toBe(mid.day); // 未选择前 Day 不动
+    expect(carried.day).toBe(mid.day);
     expect(runBuildIds(carried)).toEqual([]);
   });
 
   it('RP-R1-04 真实物理确实能打出 HP = 0（死亡不是假设输入；状态机对真实战果生效）', () => {
     // 夹具用**既有 Lab encounter** `RangedTurret`（OPP-03，停驻重炮）——它在同一玩家装载下
-    // 第一场就打死玩家。这里只用它来**客观产生**一次真实死亡，不参与 PRP 的演示流程。
-    const plan = buildSpawnPlan(RUN_DEMO_LOADOUT_ID, 'RangedTurret');
+    // 第一场就打死玩家。这里只用它来**客观产生**一次真实死亡，不参与 PRP 的四场阶梯。
+    const plan = buildSpawnPlan(LAB_LOADOUTS[0].id, 'RangedTurret');
     const rt = new PlanckBattleOrchestrator(plan.player.snapshot, plan.enemies[0].snapshot, registry, {}, false);
     let frames = 0;
     while (rt.result === null && frames < MAX_FRAMES) {
@@ -1796,7 +2061,6 @@ describe('PRP-RUN-R1｜I 死亡即终局：单一耐久贯穿 Run、失败后只
     }
     const result = rt.result;
     expect(result, '夹具必须真的分出胜负').not.toBeNull();
-    // 真实物理死亡：HP 恰好归零、官方 winner = B、官方 endReason = hp
     expect(rt.vehicleA.hp).toBe(0);
     expect(result!.winner).toBe('B');
     expect(result!.endReason).toBe('hp');
@@ -1804,8 +2068,7 @@ describe('PRP-RUN-R1｜I 死亡即终局：单一耐久贯穿 Run、失败后只
     rt.dispose();
 
     // 把**真实战果**喂给状态机 → 必须进 FAILED
-    let s = atBattle();
-    s = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp, steps: frames });
+    const s = settle(atBattle1(), 0, enemyHp, 'B');
     expect(s.phase).toBe('FAILED');
     expect(s.battle!.playerHp).toBe(0);
     expect(s.battlesCompleted).toBe(1); // 这一场确实打完了（战败也计入）
@@ -1815,41 +2078,52 @@ describe('PRP-RUN-R1｜I 死亡即终局：单一耐久贯穿 Run、失败后只
 
   it('RP-R1-05 未死的战败（phase 结束）不误判为失败：判据是真实 HP，不是 winner', () => {
     // 构造「玩家落败但仍有耐久」的官方结果形态（endReason = 'phase'，HP > 0）
-    let s = atBattle();
-    s = finishRunBattle(s, { winner: 'B', endReason: 'phase', playerHp: 350, enemyHp: 800, steps: 900 });
+    const s = finishRunBattle(atBattle1(), {
+      winner: 'B',
+      endReason: 'phase',
+      playerHp: 350,
+      enemyHp: 800,
+      steps: 900,
+    });
     expect(s.phase).toBe('RESULT'); // 不是 FAILED
     expect(runFailed(s)).toBe(false);
     expect(runStartsNewRun(s)).toBe(false);
     expect(runCarriedPlayerHp(s)).toBe(350); // 血还在 → 可继续，且带着这 350 继续
     const next = pressRunAction(s, CTX);
     expect(next.phase).toBe('CHOICE');
+    expect(runCarriedPlayerHp(next)).toBe(350);
   });
 
-  it('RP-R1-06 Build Prototype Encounter 只是**引用**既有正式模板（零数值改动），且低压余量可量化', () => {
-    const rusher = LAB_ENCOUNTERS.find((e) => e.id === RUN_DEMO_ENCOUNTER_ID)!;
-    // ① 引用的模板 id 在正式对手池里真实存在（不是悬空 id）
-    const official = OPPONENT_TEMPLATES.find((t) => t.id === rusher.templateId);
-    expect(official, `正式对手池必须有 ${rusher.templateId}`).toBeDefined();
-    // ② 单体一车 + Draft **逐字段等于**正式池那一套 → 证明「没有修改正式敌人定义」
-    expect(rusher.count).toBe(1);
-    expect(rusher.draft).toEqual(official!.draft);
-    // ③ PRP 演示组合真的指向它（单车）
-    const plan = buildSpawnPlan(RUN_DEMO_LOADOUT_ID, RUN_DEMO_ENCOUNTER_ID);
-    expect(plan.encounterId).toBe(RUN_DEMO_ENCOUNTER_ID);
-    expect(plan.enemies.length).toBe(1);
-    // ④ 第一场（无强化）的真实余量：明显更低压，但**仍然真实接敌**（会掉血、敌人真的被打死）
-    let s = atBattle();
-    const rt = new RunBattleRuntime();
-    s = driveToEnd(s, rt);
-    const maxHp = s.battle!.playerHpMax;
-    const hp1 = s.battle!.playerHp;
-    expect(s.phase).toBe('RESULT'); // 第一场不死
-    expect(s.battle!.winner).toBe('A');
-    expect(s.battle!.endReason).toBe('hp');
-    expect(s.battle!.enemyHp).toBe(0); // 敌人真的被打死（不是放水 / 无接触）
-    expect(hp1).toBeGreaterThan(0);
-    expect(hp1).toBeGreaterThan(maxHp * 0.7); // 余量 > 70%（旧 Chaser 同一场只剩 24.5%）
-    expect(hp1).toBeLessThan(maxHp); // 但确实掉血了 —— 不是「无接敌」
+  it('RP-R1-06 跨战斗耐久在「下一场建立之后」仍以战斗记录为权威（口径陷阱回归）', () => {
+    // 「上一场已结束、本场未建立」窗口：carry = 上一场真实剩余
+    const res = settle(atBattle1(), 640);
+    expect(runCarriedPlayerHp(res)).toBe(640);
+    const choice = pressRunAction(res, CTX); // RESULT → d2-choice1（浮层打开，耐久仍可读）
+    expect(choice.phase).toBe('CHOICE');
+    expect(runCarriedPlayerHp(choice)).toBe(640);
+    // 裁决第一层强化 → 落到 d3-battle2 的 IDLE（**本场尚未建立** ⇒ 仍在可读窗口内）
+    const at2 = chooseRunBuff(choice, 'heavyShell', CTX);
+    expect(at2.nodeId).toBe(NODE.battle2);
+    expect(at2.phase).toBe('IDLE');
+    expect(runCarriedPlayerHp(at2)).toBe(640);
+    // 战斗节点是**两段式**：IDLE →(按一次) EVENT（carry 仍可读）→(再按) BATTLE（carry 关闭）
+    const ev2 = pressRunAction(at2, CTX);
+    expect(ev2.phase).toBe('EVENT');
+    expect(runCarriedPlayerHp(ev2)).toBe(640);
+    const bt2 = pressRunAction(ev2, CTX);
+    expect(bt2.phase).toBe('BATTLE');
+    // ⚠️ 进入 BATTLE 后 `s.battle` 已被本场战斗替换 → carry 不再可读（返回 null）；
+    //    本场开局耐久的**权威来源**是战斗记录 `playerHp`（状态机在 EVENT → BATTLE 时写入同一个数）。
+    expect(runCarriedPlayerHp(bt2)).toBeNull();
+    expect(bt2.battle!.playerHp).toBe(640);
+    // 真实运行时按宿主同口径注入 → 开局耐久确实是 640（不是满耐久）
+    const rt = new RunBattleRuntime({
+      build: runBuildIds(bt2),
+      carriedHp: bt2.battle!.playerHp,
+      encounterId: runCurrentNode(bt2).encounterId,
+    });
+    expect(rt.initialPlayerHp).toBe(640);
+    expect(rt.playerMaxHp).toBe(1100);
     rt.dispose();
   });
 });
