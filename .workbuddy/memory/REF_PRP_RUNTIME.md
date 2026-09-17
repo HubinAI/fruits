@@ -340,3 +340,86 @@ E2E 端口 **8159**（run-page 8156 / next-run 8157 / encounter-lab 8158）。
 `contactRouter` / `damageResolver` / `playerGameRuntime` / `canvasPlayerUIHost` /
 `webDomPlayerUIHost` / `renderer` / `visualRegistry` 符号；Hub 只加载自己的 chunk
 （+ Vite 的 `modulepreload-polyfill`），**不捎带任何战斗 chunk**（E2E I3/I4）。
+
+---
+
+## J. PRP-RUN-02-R1 维修分支修正（脚本数据接线，运行时细节）
+
+### J.1 缺陷与根因（file:line）
+
+真人完整 Run 录像：`DAY 4` 选「维修」→ `DAY 5` **只有叙事** → `DAY 6` Battle →
+`DAY 7` Final ⇒ 整局只有 1 个 Buff。
+
+根因**不在状态机**，在**脚本数据**：
+
+| 位置 | 修前 | 修后 |
+|---|---|---|
+| `runScript.ts` `d4-durability.branch` | `{ repair: 'd5-tend', upgrade: 'd5-choice2' }` | **不变** |
+| `runScript.ts` `d5-tend.next` | `'d6-battle3'` ← **缺陷** | `'d5-choice2'` |
+
+`runPageState.ts` 的 `resolveDurability` 与 `chooseRunBuff` **都是纯 `next` 驱动、
+零分支特判**（`presentNode(advanced, node.branch[choice], ctx)` / `node.next`）
+⇒ 修正 = **一行数据改动**，两分支在 `d5-choice2` 汇合。
+
+### J.2 修正后图结构
+
+```
+d4-durability ─┬─ repair  → d5-tend(EVENT · DAY 5 叙事) ──next──┐
+               └─ upgrade → d5-choice2(CHOICE · DAY 5) ←────────┴─ 汇合
+```
+
+节点数 **9**（`d1`…`d7`, 含 `d5-tend`）。**唯一分支节点 = `d4-durability`**，
+两条 `branch` 指向不同节点；`next` 链**互不重复**（汇合改由 `branch` 提供）。
+
+> ⚠️ 修前 `next` 目标集合 size = 长度 − 1（图里有一个汇合点）；
+> 修后断言必须改为 `size === targets.length` —— **这是收紧守卫，不是放宽**。
+
+### J.3 两条分支修后唯一差别 = 耐久
+
+维修分支不再「少一个 Buff」——它在 `d5-choice2` 拿到与「继续改装」**同一份**第二层。
+⇒ 机会成本被降为**只有那一段耐久**（实测重炮路线约 275 点）。
+**待裁决**：若 Queue 原意是「继续改装额外多拿一次强化」，须**新增节点** ⇒
+违反「不增加新事件／冻结两层结构」⇒ **单开 Queue，禁止顺手改**。
+
+### J.4 四条真实物理路线重测（Node 端确定性，口径 = 显式实测更新）
+
+| 第一层 + 第二层 | ① ② ③ ④ 终局耐久 | ③ ④ 开局耐久 |
+|---|---|---|
+| `heavyShell+kineticBurst` | 919 / 688 / 678 / 472 | 963 / 953 |
+| `twinCannon+tripleLoad` | 919 / 907 / 891 / 602 | 1100 / 1084 |
+| `fastReload+twinCannon` | 919 / 908 / 1023 / 778 | 1100 / 1100 |
+
+修前 ③④ 为 `834/618` · `935/618` · `879/590` —— **两值全变**（维修分支现在多打两场，
+且这两场带上两层）。三条路线**全部 COMPLETE**（无 FAILED）。
+`FROZEN_REPAIR` 是 `tests/portraitRunPage.test.ts` 里的冻结表，改接线**必须同步重测**。
+
+### J.5 门禁实测（本轮）
+
+| 项 | 结果 |
+|---|---|
+| `tsc --noEmit` | 0 错 |
+| `tests/portraitRunPage.test.ts` | **63/63 PASS**（10.84s） |
+| 全量 vitest | **206 文件 / 2015 用例 PASS** |
+| `_e2e_run_page.cjs` | **485/485 PASS** |
+| 其余五条 E2E | 47/47 · 47/47 · 148/148 · 42/42 · 79/79 |
+| 冻结区 `git diff --stat -- src/{core,physics,render,player,platform,battle,ui,game}` | **空** |
+
+### J.6 RP-F2-02 的 timeout（不是产品缺陷）
+
+一条用例跑 **6 条真实物理路线**（2 分支 × 3 路线 = 24 场），实测 **7.2s** > vitest 默认 5s。
+⇒ 显式 `}, 60000);`（与 `tests/portraitBattleLabA1.test.ts` 同口径）。
+**先确认不是并发污染**（本项目 vitest 必须独占机器，并发时无关文件也会报 5s 超时）。
+
+### J.7 E2E 新增段落的 page 归属纪律
+
+`_e2e_run_page.cjs` 的 `runViewport` 里的 `page` 会被后续 14 段（开火节奏）继续消费。
+**中途推进它 ⇒ 后续段用过期 rect 点击 ⇒ 90s `waitForFunction` 超时假红**。
+本轮 12b 段（维修分支）用 `browser.newContext()` 另开 `rpage`，段尾 `await rctx.close();`。
+⇒ 规则：E2E 里**重活一律独立 context/page**，不要借用序贯段落的主 `page`。
+
+### J.8 账本口径（本轮两处）
+
+- 卡片**强调条**在卡片顶部（`runChoiceBarRect`）、正文在 `card.y + 72`
+  ⇒ 改卡片 `note` 文案**不影响** `cardBar` 账面。
+- 浮层整页遮罩判据 = `ledgerExpect({ masked: N })`，`N` 是**卡片数**不是系数
+  （三张卡 ⇒ `masked: 3`），与既有 `R35` / `R52f` 同口径。

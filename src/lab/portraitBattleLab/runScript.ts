@@ -17,14 +17,27 @@
  *   | `d2-choice1`    | CHOICE     | 2 | 第一次三选一（第一层：重型弹头 / 双联炮 / 快速装填） |
  *   | `d3-battle2`    | BATTLE     | 3 | 中低压遭遇（阶梯 ②） |
  *   | `d4-durability` | DURABILITY | 4 | **耐久取舍事件**：维修 vs 继续改装 |
- *   | `d5-tend`       | EVENT      | 5 | 维修分支：这一天用来修车 |
- *   | `d5-choice2`    | CHOICE     | 5 | 改装分支：第二次条件三选一（第二层） |
+ *   | `d5-tend`       | EVENT      | 5 | 维修分支的当日叙事（焊补车体）→ 汇入 `d5-choice2` |
+ *   | `d5-choice2`    | CHOICE     | 5 | **第二次条件三选一（第二层）**——两条分支都会到达 |
  *   | `d6-battle3`    | BATTLE     | 6 | 中压遭遇（阶梯 ③） |
  *   | `d7-final`      | FINAL      | 7 | 终局遭遇（阶梯 ④）→ RUN COMPLETE / RUN FAILED |
  *
  * ⇒ **战斗与选择交替**，不存在「连续菜单」或「连续战斗」（Queue 目标结构）。
  *   DAY 是冒险阶段，不要求「一天只有一个节点」：`d5-tend` 与 `d5-choice2` 同为 DAY 5、
- *   互斥（维修分支 / 改装分支）。
+ *   是**同一分支上的先后两个节点**（先当日叙事、后第二次选择），不是互斥的两条边。
+ *
+ * ## ⚠️ PRP-RUN-02-R1（真人验收修正）：DAY 4 事件与 DAY 5 第二层选择是**两个独立节点**
+ *
+ *   维修的机会成本 = **放弃 DAY 4 这一次额外改装**，而**不是**「放弃整局第二层 Build」。
+ *
+ *     d4-durability ─┬─ repair  → d5-tend(EVENT · DAY 5 叙事) ──next──┐
+ *                    └─ upgrade → d5-choice2(CHOICE · DAY 5) ←────────┴─ 两条分支在此汇合
+ *
+ *   ⇒ **无论选维修还是继续改装，都会进入 DAY 5 的第二次条件三选一**；
+ *     第一层（DAY 2 的三选一）在任何分支下都**不被清除**，第二层也**不被阻止**。
+ *     两条分支唯一的差别 = **耐久**：维修拿回一段耐久但当日用来修车，继续改装不回耐久。
+ *   ⇒ 修正只落在本文件的**数据**里（`d5-tend.next` / 事件文案）；
+ *     `runPageState.ts` 的推进逻辑**零分支特判**（两条分支都只走 `branch[choice]` + `next`）。
  *
  * ## 四场战斗（必改 2：压力阶梯，全部引用**既有正式对手模板**）
  *
@@ -84,16 +97,18 @@ export interface RunScriptNode {
  * 耐久事件的文案与因果（**数据**，不是 UI 内散落的字符串）。
  *
  * A 维修         → 恢复一段明确耐久（沿用既有的 `EMERGENCY_REPAIR_FRACTION`，不新造数值）
- *                  → **放弃这次强化机会**（脚本分支直接跳过第二次 CHOICE）
+ *                  → **不获得这一次额外改装**（当日走 `d5-tend` 的焊车叙事）
+ *                  → ⚠️ **不跳过** DAY 5 的第二次条件三选一（PRP-RUN-02-R1 修正）
  * B 冒险改装     → 不回耐久 → 进入**现有条件池**的第二次三选一
  *
- * 不增加货币、不增加新资源 —— 唯一被权衡的就是「现在这点耐久」。
+ * 两条分支**都会**到达 DAY 5 的第二次条件三选一（第一层不清除、第二层不阻止）；
+ * 唯一的差别就是「现在这点耐久」—— 不增加货币、不增加新资源、不增加第三层。
  */
 export const RUN_DURABILITY_EVENT = {
   title: '停下来，还是继续改装？',
   options: [
-    { id: 'repair' as const, label: '维修', note: '修回一段耐久，但放弃这次改装' },
-    { id: 'upgrade' as const, label: '继续改装', note: '不回耐久，换一次强化机会' },
+    { id: 'repair' as const, label: '维修', note: '修回一段耐久，这一天用来修车' },
+    { id: 'upgrade' as const, label: '继续改装', note: '不回耐久，这一天继续改装' },
   ],
   /** 选「维修」写入冒险记录的叙事（耐久恢复量随后单独一行）。 */
   repairLog: '你花了一整天把车体焊补回去。',
@@ -143,6 +158,8 @@ export const RUN_SCRIPT: readonly RunScriptNode[] = [
     day: 4,
     beat: ['第四天，你在一处背风的坡下停了车。'],
     next: null,
+    // ⚠️ 两条分支**都会**走到 DAY 5 的第二次条件三选一：
+    //    repair 先经 `d5-tend`（当日焊车叙事）→ `d5-choice2`；upgrade 直达 `d5-choice2`。
     branch: { repair: 'd5-tend', upgrade: 'd5-choice2' },
   },
   {
@@ -150,12 +167,16 @@ export const RUN_SCRIPT: readonly RunScriptNode[] = [
     kind: 'EVENT',
     day: 5,
     beat: ['第五天，你一整天都在焊补车体。'],
-    next: 'd6-battle3',
+    // ⚠️ PRP-RUN-02-R1：**不是** `d6-battle3` —— 维修分支修完车**继续**进入 DAY 5 的
+    //    第二次条件三选一。维修的机会成本只是「这一次额外改装」，不是整局第二层 Build。
+    next: 'd5-choice2',
   },
   {
     id: 'd5-choice2',
     kind: 'CHOICE',
     day: 5,
+    // 到达方式有两条（repair 经 `d5-tend` / upgrade 直达），但**节点只有一个**。
+    // 候选池由第一层决定（`runChoicePool`），这里不写任何池内容。
     beat: [],
     next: 'd6-battle3',
   },

@@ -10,9 +10,13 @@
  * 状态机不再自己数「第几场 / 第几选」，而是读 `runScript.ts` 的节点序列：
  *
  *     d1-start(EVENT) → d2-battle1(BATTLE) → d2-choice1(CHOICE) → d3-battle2(BATTLE)
- *       → d4-durability(DURABILITY) ─┬─ repair  → d5-tend(EVENT)   ─┐
- *                                    └─ upgrade → d5-choice2(CHOICE) ┴→ d6-battle3(BATTLE)
- *                                      → d7-final(FINAL) → COMPLETE / FAILED
+ *       → d4-durability(DURABILITY) ─┬─ repair  → d5-tend(EVENT) ────┐
+ *                                    └─ upgrade → d5-choice2(CHOICE) ←┘ ← 两条分支汇合
+ *                                      → d6-battle3(BATTLE) → d7-final(FINAL) → COMPLETE / FAILED
+ *
+ * ⚠️ PRP-RUN-02-R1（真人验收修正）：`d4-durability` 与 `d5-choice2` 是**两个独立节点** ——
+ *    维修的机会成本只是「DAY 4 这一次额外改装」，**不是**「整局第二层 Build」。
+ *    两条分支都会到达 DAY 5 的第二次条件三选一（见 RP-RUN-02-R1-01 / RP-22b / RP-07）。
  *
  * 因此本文件**不再**用「第 N 场 / 第 N 选」定位状态，而是用 `walk.at(nodeId, phase)`
  * 按**脚本节点 id** 定位 —— 与产品代码同一套判据（页面里没有 `if (day === X)`，
@@ -263,7 +267,7 @@ interface WalkOpts {
   readonly durability: RunDurabilityChoiceId;
   /** 第一次强化（第一层三选一）。 */
   readonly layer1: string;
-  /** 第二次强化（第二层条件池）；维修分支不会有第二次选择 → 该值被忽略。 */
+  /** 第二次强化（第二层条件池）—— **两条分支都会**到达 `d5-choice2`（PRP-RUN-02-R1）。 */
   readonly layer2: string;
   /**
    * 提供则用**合成战果**（不跑物理，毫秒级）——只服务状态机 / 账本结构断言；
@@ -626,16 +630,22 @@ describe('PRP-RUN-02｜B 八状态机与固定 Run Script 流程（同一页面�
     expect(s.actionCount).toBe(0);
   });
 
-  it('RP-07 必改 1：状态机按脚本推进 —— nodeSeq 恰好是脚本节点顺序（两分支各一条）', () => {
-    for (const dur of ['repair', 'upgrade'] as const) {
-      const w = syntheticWalk(dur);
-      // 维修分支跳过 d5-choice2；改装分支跳过 d5-tend —— 其余顺序完全相同
-      const expected = RUN_SCRIPT.map((n) => n.id).filter((id) =>
-        dur === 'repair' ? id !== NODE.choice2 : id !== NODE.tend,
-      );
-      expect(w.nodeSeq).toEqual(expected);
-      expect(w.at(NODE.final, 'COMPLETE').phase).toBe('COMPLETE');
-    }
+  it('RP-07 必改 1：状态机按脚本推进 —— 两条分支都到达 DAY 5 第二次三选一', () => {
+    // ⚠️ PRP-RUN-02-R1（真人验收修正）：维修分支**不再**跳过 `d5-choice2`。
+    //    repair = 脚本的全部九个节点（DAY 4 事件 → `d5-tend` 当日叙事 → **仍然**到 `d5-choice2`）
+    const repair = syntheticWalk('repair');
+    expect(repair.nodeSeq).toEqual(RUN_SCRIPT.map((n) => n.id));
+    expect(repair.has(NODE.choice2, 'CHOICE')).toBe(true);
+    expect(repair.at(NODE.final, 'COMPLETE').phase).toBe('COMPLETE');
+    // 每个节点都**只被走到一次**（不会因为汇合而重复呈现）
+    expect(new Set(repair.nodeSeq).size).toBe(repair.nodeSeq.length);
+
+    //    upgrade = 只少 `d5-tend`（那一天用来改装，不修车）—— 第二层三选一同样到达
+    const upgrade = syntheticWalk('upgrade');
+    expect(upgrade.nodeSeq).toEqual(RUN_SCRIPT.map((n) => n.id).filter((id) => id !== NODE.tend));
+    expect(upgrade.has(NODE.choice2, 'CHOICE')).toBe(true);
+    expect(upgrade.at(NODE.final, 'COMPLETE').phase).toBe('COMPLETE');
+    expect(new Set(upgrade.nodeSeq).size).toBe(upgrade.nodeSeq.length);
     // 脚本里 BATTLE + FINAL 恰好四场
     expect(runScriptBattleNodes().map((n) => n.id)).toEqual([NODE.battle1, NODE.battle2, NODE.battle3, NODE.final]);
     expect(RUN_SCRIPT_BATTLE_NODE_IDS.length).toBe(RUN_BATTLES_TOTAL);
@@ -1034,15 +1044,18 @@ describe('PRP-RUN-02｜D 面积账本：逐脚本节点的整页像素面积精�
     for (const n of [0, 1, 2]) expect(ledgerState({ day: 1, icons: n }).buffIcon + 144 * n).toBe(900 * n);
   });
 
-  it('RP-22b 维修分支：DAY 5 走 EVENT 节点（跳过第二次选择），后续账面少一个图标', () => {
+  it('RP-22b 维修分支：DAY 5 先走 EVENT 当日叙事，**再**进入第二次条件三选一（PRP-RUN-02-R1）', () => {
     const up = syntheticWalk('upgrade');
     const rep = syntheticWalk('repair');
-    // 维修分支：d5-tend 是一个 EVENT 节点（无浮层），DAY 5 只有 1 个图标
+    // 维修分支：`d5-tend` 是 EVENT 节点（无浮层）→ 此刻 DAY 5 只有 1 个图标
     expect(ledger(rep.at(NODE.tend, 'IDLE'))).toEqual(ledgerState({ day: 5, icons: 1 }));
-    expect(rep.has(NODE.choice2, 'CHOICE')).toBe(false); // 结构上不会进入
-    expect(ledger(rep.at(NODE.battle3, 'IDLE'))).toEqual(ledgerState({ day: 6, icons: 1 }));
-    expect(ledger(rep.at(NODE.final, 'COMPLETE'))).toEqual(ledgerBattle({ day: 7, icons: 1, action: true }));
-    // 两分支在 d2 / d3 / d4 三个节点上账面**逐字段相同**（分支只影响后面）
+    // ⚠️ PRP-RUN-02-R1：维修**不吞掉**第二层 —— 当日叙事之后仍然打开 `d5-choice2` 的三张卡片
+    expect(rep.has(NODE.choice2, 'CHOICE')).toBe(true);
+    expect(ledger(rep.at(NODE.choice2, 'CHOICE'))).toEqual(overlayLedger(3));
+    // 选完第二层 → DAY 6 起 2 个图标（与 upgrade 分支**一致**，不再少一个）
+    expect(ledger(rep.at(NODE.battle3, 'IDLE'))).toEqual(ledgerState({ day: 6, icons: 2 }));
+    expect(ledger(rep.at(NODE.final, 'COMPLETE'))).toEqual(ledgerBattle({ day: 7, icons: 2, action: true }));
+    // 汇合**之前**（d2 / d3 / d4）两分支账面逐字段相同（耐久事件本身还没产生账面差异）
     for (const [n, p] of [
       [NODE.battle1, 'RESULT'],
       [NODE.choice1, 'CHOICE'],
@@ -1050,6 +1063,17 @@ describe('PRP-RUN-02｜D 面积账本：逐脚本节点的整页像素面积精�
       [NODE.durability, 'DURABILITY'],
     ] as const) {
       expect(ledger(rep.at(n, p)), `${n}:${p}`).toEqual(ledger(up.at(n, p)));
+    }
+    // `d5-choice2` 是**两条分支共用的同一个节点** → 账面也逐字段相同
+    expect(ledger(rep.at(NODE.choice2, 'CHOICE'))).toEqual(ledger(up.at(NODE.choice2, 'CHOICE')));
+    // 汇合**之后**（d6 / d7）：两分支账面同样逐字段相同 —— 第二层之后的进程完全一致
+    for (const [n, p] of [
+      [NODE.battle3, 'IDLE'],
+      [NODE.battle3, 'RESULT'],
+      [NODE.final, 'IDLE'],
+      [NODE.final, 'COMPLETE'],
+    ] as const) {
+      expect(ledger(rep.at(n, p)), `${n}:${p}（汇合后）`).toEqual(ledger(up.at(n, p)));
     }
   });
 
@@ -1391,18 +1415,22 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
    *
    * ⚠️ 显式实测更新，不是就地重算：任何影响四场连锁的改动（对手 / 武器 / 物理）
    *    都必须回到这里重新测量并写死，从而让「四场能不能跑完」无法悄悄变化。
+   * ⚠️ **PRP-RUN-02-R1 已重测**：修复前维修分支跳过第二层（两条老值是 834/618、935/618、
+   *    879/590）；修复后维修分支**同样**拿到第二层 → ③④ 两场重建（见下）。
    */
   const FROZEN_REPAIR: Record<string, readonly [number, number, number, number]> = {
-    'heavyShell+kineticBurst': [919, 688, 834, 618],
-    'twinCannon+tripleLoad': [919, 907, 935, 618],
-    'fastReload+twinCannon': [919, 908, 879, 590],
+    'heavyShell+kineticBurst': [919, 688, 678, 472],
+    'twinCannon+tripleLoad': [919, 907, 891, 602],
+    'fastReload+twinCannon': [919, 908, 1023, 778],
   };
   /**
-   * 改装分支（不回耐久，换一次强化）。表内 = [①结束, ②结束, ③结束, 终局结束]。
+   * 改装分支（不回耐久）。表内 = [①结束, ②结束, ③结束, 终局结束]。
    *
-   * ⚠️ **本 Queue 最关键的实测发现**：同一条重炮路线在「维修」下终局剩 618，
+   * ⚠️ **本 Queue 最关键的实测发现**：同一条重炮路线在「维修」下终局剩 472，
    *    在「继续改装」下终局耐久**归零 → 本局 FAILED**。这说明耐久事件真的有效果，
    *    而不是靠文案暗示 —— 它来自真实物理与真实数值链。
+   * ⚠️ PRP-RUN-02-R1 之后两条分支的 Build **完全相同**（都是两层）⇒ 这个对比比修复前更干净：
+   *    差别只剩「那 275 点耐久」本身。
    */
   const FROZEN_UPGRADE: Record<string, readonly [number, number, number, number]> = {
     'heavyShell+kineticBurst': [919, 688, 403, 0],
@@ -1471,7 +1499,10 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
         expect(w.openingHp[3], `${key}: 终局开局`).toBe(Math.min(1100, ends[2] + bonus));
       }
     }
-  });
+    // ⚠️ 本用例一次性跑 **6 条真实物理路线**（2 分支 × 3 路线 = 24 场真实战斗），
+    //    远超 vitest 默认 5s（PRP-RUN-02-R1 之后维修分支多了第二层的两场 → 实测 7.2s）。
+    //    这里给显式上限（与 tests/portraitBattleLabA1.test.ts 的重型用例同一口径）。
+  }, 60000);
 
   it('RP-F2-03 必改 4：Build 只在本局 —— 新开 Run 立刻回到基础状态', () => {
     const w = realWalk('upgrade', 'fastReload', 'twinCannon');
@@ -1549,16 +1580,21 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
     rt0.dispose();
   });
 
-  it('RP-F2-06 必改 5：三条路线都能真的跑完（维修分支）', () => {
+  it('RP-F2-06 必改 5：三条路线都能真的跑完（维修分支 **同样两层** · PRP-RUN-02-R1）', () => {
     for (const [l1, l2] of ROUTES) {
       const w = realWalk('repair', l1, l2);
       const key = `${l1}+${l2}`;
-      expect(w.builds[1], key).toEqual([l1]);
-      expect(w.builds[3], key).toEqual([l1]); // 维修分支没有第二层
+      expect(w.builds[0], key).toEqual([]); // 第一场：基础
+      expect(w.builds[1], key).toEqual([l1]); // 第二场：第一层
+      // ⚠️ PRP-RUN-02-R1：维修分支**不吞掉**第二层 —— ③④ 两场都是完整两层
+      expect(w.builds[2], `${key}: ③`).toEqual([l1, l2]);
+      expect(w.builds[3], `${key}: 终局`).toEqual([l1, l2]);
       const finale = w.at(NODE.final, 'COMPLETE');
       expect(runComplete(finale), key).toBe(true);
       expect(finale.battle!.winner).toBe('A');
       expect(finale.battle!.steps).toBeGreaterThan(0);
+      // 两层在状态里也成立（不只是「注入时不报错」）
+      expect(runBuildIds(finale), key).toEqual([l1, l2]);
     }
   });
 
@@ -1644,9 +1680,16 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
       expect(Math.round(hp2), `${key}: ②`).toBe(FROZEN_REPAIR[key][1]);
       expect(Math.round(hp3), `${key}: ③`).toBe(FROZEN_REPAIR[key][2]);
       expect(Math.round(hp4), `${key}: ④`).toBe(FROZEN_REPAIR[key][3]);
-      // 维修分支：每场都活着，终局余量 > 50%
+      // 维修分支：每场都活着；终局余量必须为正
+      //（⚠️ PRP-RUN-02-R1：维修分支现在同样带两层 ⇒ ③④ 的耐久重建，重炮路线实测 472 = 43%，
+      //   因此不再用 50% 硬线 —— 改用下面更强的结构性判据。）
       for (const hp of [hp1, hp2, hp3, hp4]) expect(hp, key).toBeGreaterThan(0);
-      expect(hp4, `${key}: 终局余量`).toBeGreaterThan(1100 * 0.5);
+      expect(hp4, `${key}: 终局余量`).toBeGreaterThan(0);
+      // ⚠️ 结构性判据：同一路线的**维修分支终局耐久必须高于改装分支**
+      //    —— 两条分支的 Build 现已完全相同 ⇒ 差值只可能来自那一次真实维修。
+      const upg = realWalk('upgrade', l1, l2);
+      const upgFinalState = upg.has(NODE.final, 'COMPLETE') ? upg.at(NODE.final, 'COMPLETE') : upg.at(NODE.final, 'FAILED');
+      expect(hp4, `${key}: 维修分支终局 > 改装分支终局`).toBeGreaterThan(upgFinalState.battle?.playerHp ?? 0);
       // 四场都真的打完
       expect(w.at(NODE.final, 'COMPLETE').battle!.done).toBe(true);
       expect(w.at(NODE.final, 'COMPLETE').battlesCompleted).toBe(RUN_BATTLES_TOTAL);
@@ -1660,12 +1703,14 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
     }
   });
 
-  it('RP-F2-11 必改 3：耐久取舍真的改变结局（同一路线：维修 → 完成；改装 → 失败）', () => {
+  it('RP-F2-11 必改 3：耐久取舍真的改变结局（同一路线 · 同一 Build：维修 → 完成；改装 → 失败）', () => {
     const key = 'heavyShell+kineticBurst';
     const rep = realWalk('repair', 'heavyShell', 'kineticBurst');
     const upg = realWalk('upgrade', 'heavyShell', 'kineticBurst');
 
     // 两条分支在耐久事件之前**逐帧相同**（差异只来自那一个决定）
+    // ⚠️ PRP-RUN-02-R1：修复之后两条分支连 **Build 都相同**（维修不再吞掉第二层）
+    //    ⇒ 这个对比只剩下「那 275 点耐久」这一个变量，是干净的 A/B。
     for (const [n, p] of [
       [NODE.battle1, 'RESULT'],
       [NODE.battle1, 'BATTLE'],
@@ -1677,18 +1722,22 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
       expect(rep.at(n, p).log, `${key}: ${n}:${p}`).toEqual(upg.at(n, p).log);
     }
 
-    // 维修：不回强化，但终局活得下来（冻结值口径 = 真实小数四舍五入）
+    // 维修：终局活得下来（冻结值口径 = 真实小数四舍五入）
     expect(Math.round(rep.at(NODE.final, 'COMPLETE').battle!.playerHp)).toBe(FROZEN_REPAIR[key][3]);
-    // ⚠️ 维修分支的 `d7-final` **开局**耐久 = ③结束 + 实修，且被耐久上限截断
-    //    （834.3 + 275 = 1109.3 → **1100**）：补偿不会把车修到满耐久之上。
+    // ⚠️ 维修分支的 `d7-final` **开局**耐久 = ③结束 + 实修，且**不超过耐久上限**
+    //    （PRP-RUN-02-R1 重测：678.4 + 275 = 953.4 → 953；不再像修复前那样被 1100 截断）
     const hp3 = rep.at(NODE.battle3, 'RESULT').battle!.playerHp;
     const heal3 = rep.at(NODE.tend, 'IDLE').repairBonus;
-    expect(hp3 + heal3).toBeGreaterThan(1100);
-    expect(rep.openingHp[3]).toBe(1100);
-    expect(runBuildIds(rep.at(NODE.final, 'COMPLETE'))).toEqual(['heavyShell']);
-    expect(rep.has(NODE.choice2, 'CHOICE')).toBe(false);
+    expect(Math.round(rep.openingHp[3])).toBe(Math.round(Math.min(1100, hp3 + heal3)));
+    expect(rep.openingHp[3]).toBeLessThanOrEqual(1100); // 补偿不会把车修到满耐久之上
+    // ⚠️ **PRP-RUN-02-R1 的核心修正**：维修分支**同样**形成两层 Build（不再吞掉第二层）
+    expect(runBuildIds(rep.at(NODE.final, 'COMPLETE'))).toEqual(['heavyShell', 'kineticBurst']);
+    expect(rep.has(NODE.choice2, 'CHOICE')).toBe(true);
+    expect(rep.nodeSeq).toContain(NODE.tend); // 先经当日叙事节点
+    // 两条分支的 Build **完全相同** ⇒ 结局差异只来自那一次维修（比修复前更干净的 A/B）
+    expect(runBuildIds(rep.at(NODE.final, 'COMPLETE'))).toEqual(runBuildIds(upg.at(NODE.final, 'FAILED')));
 
-    // 改装：多拿一次强化，但**终局耐久归零 → RUN FAILED**
+    // 改装：**没有**多拿强化（两层与维修分支相同）—— 但少了那 275 点耐久 → **终局归零 → RUN FAILED**
     const failed = upg.at(NODE.final, 'FAILED');
     expect(failed.battle!.playerHp).toBe(FROZEN_UPGRADE[key][3]);
     expect(failed.battle!.playerHp).toBe(0);
@@ -1710,6 +1759,43 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
       expect(runComplete(w.at(NODE.final, 'COMPLETE')), `${l1}+${l2}`).toBe(true);
       expect(Math.round(w.at(NODE.final, 'COMPLETE').battle!.playerHp)).toBe(FROZEN_UPGRADE[`${l1}+${l2}`][3]);
     }
+  });
+
+  it('RP-RUN-02-R1-01 必改 1/3：DAY 4 维修与 DAY 5 第二次三选一是**两个独立节点**（维修不吞第二层）', () => {
+    // ① 数据层：维修分支经当日叙事节点后**继续**汇入同一个 `d5-choice2`
+    expect(runDurabilityBranchNodeId('repair')).toBe(NODE.tend);
+    expect(runDurabilityBranchNodeId('upgrade')).toBe(NODE.choice2);
+    expect(requireRunScriptNode(NODE.tend).next).toBe(NODE.choice2);
+    expect(requireRunScriptNode(NODE.choice2).kind).toBe('CHOICE');
+    expect(requireRunScriptNode(NODE.choice2).day).toBe(5);
+
+    // ② 状态机层（合成走查）：两条分支都进入 `d5-choice2`，且**各只进入一次**
+    for (const dur of ['repair', 'upgrade'] as const) {
+      const w = syntheticWalk(dur, 'heavyShell', 'kineticBurst');
+      expect(w.has(NODE.choice2, 'CHOICE'), dur).toBe(true);
+      expect(w.nodeSeq.filter((id) => id === NODE.choice2).length, dur).toBe(1);
+      expect(w.nodeSeq.filter((id) => id === NODE.durability).length, dur).toBe(1);
+      // `d5-tend`（当日焊车叙事）只有维修分支经过，且同样只一次
+      expect(w.nodeSeq.filter((id) => id === NODE.tend).length, dur).toBe(dur === 'repair' ? 1 : 0);
+      // 两次选择的**选择前**层数：第一层时 0 层，第二次时 1 层（结构上限仍是两层）
+      expect(w.at(NODE.choice1, 'CHOICE').buffs.length, dur).toBe(0);
+      expect(w.at(NODE.choice2, 'CHOICE').buffs.length, dur).toBe(1);
+      // 两层 Build 都进入后半局（③④ 两场）
+      expect(w.builds[2], `${dur}: ③`).toEqual(['heavyShell', 'kineticBurst']);
+      expect(w.builds[3], `${dur}: 终局`).toEqual(['heavyShell', 'kineticBurst']);
+    }
+
+    // ③ 真实物理层：Queue 必改 3 点名的固定复验路线 = heavyShell → 维修 → kineticBurst
+    const w = realWalk('repair', 'heavyShell', 'kineticBurst');
+    expect(runComplete(w.at(NODE.final, 'COMPLETE'))).toBe(true);
+    expect(runBuildIds(w.at(NODE.final, 'COMPLETE'))).toEqual(['heavyShell', 'kineticBurst']);
+    // 维修真的兑现：第三场开局耐久 > 第二场结束耐久（回血没有被清掉）
+    expect(w.openingHp[2]).toBeGreaterThan(w.at(NODE.battle2, 'RESULT').battle!.playerHp);
+    expect(w.at(NODE.final, 'COMPLETE').battle!.playerHp).toBeGreaterThan(0);
+    // 第二层真的进了武器：重炮参数保持第一层冻结值（radius 16 / mass 4）
+    expect(w.weaponParams[1].projectileRadius).toBe(16);
+    expect(w.weaponParams[2].projectileRadius).toBe(16);
+    expect(w.weaponParams[2].projectileMass).toBe(4);
   });
 
   it('RP-F2-12 改装分支的逐场冻结值（含两条活下来的路线）', () => {
@@ -1808,16 +1894,27 @@ describe('PRP-RUN-02｜H 固定 Run Script 数据源与耐久取舍事件', () =
         expect(n.encounterId).toBeUndefined();
       }
     }
-    // 唯一一条主线：每个节点最多被一个前驱指向（d6-battle3 被 tend / choice2 两条分支指向）
+    // 唯一一条主线：`next` 链上每个节点**最多被一个前驱指向**（节点之间不重汇合）。
+    // ⚠️ PRP-RUN-02-R1：唯一的分支汇合点是 `d5-choice2` —— 一个前驱来自脚本 `next`
+    //    （维修分支的 `d5-tend`），另一个来自耐久事件的 `branch`（改装分支）。
+    //    因此 `next` 目标集合本身必须**互不重复**（这里不许再有第二个汇合点）。
     const targets = RUN_SCRIPT.map((n) => n.next).filter((x): x is string => x !== null);
-    expect(new Set(targets).size).toBe(targets.length - 1);
+    expect(new Set(targets).size).toBe(targets.length);
+    // 全脚本唯一的分支节点只有耐久事件；它必须**两个分支都存在**且指向不同节点
+    const branchNodes = RUN_SCRIPT.filter((n) => n.branch);
+    expect(branchNodes.map((n) => n.id)).toEqual([NODE.durability]);
+    expect(runDurabilityBranchNodeId('repair')).not.toBe(runDurabilityBranchNodeId('upgrade'));
+    // 两条分支**汇合到同一个** DAY 5 第二次三选一节点（PRP-RUN-02-R1 的核心结构）
+    expect(runDurabilityBranchNodeId('repair')).toBe(NODE.tend);
+    expect(runDurabilityBranchNodeId('upgrade')).toBe(NODE.choice2);
+    expect(requireRunScriptNode(NODE.tend).next).toBe(NODE.choice2);
     // 查询函数：未知 id **不静默回退**
     expect(runScriptNode('nope')).toBeNull();
     expect(() => requireRunScriptNode('nope')).toThrow();
     expect(runScriptNode(NODE.final)!.kind).toBe('FINAL');
   });
 
-  it('RP-RUN-02-02 必改 3：耐久事件是**真取舍**（维修放弃强化 / 改装不回耐久）', () => {
+  it('RP-RUN-02-02 必改 3：耐久事件是**真取舍**（维修不回改装 / 改装不回耐久）', () => {
     const opts = runDurabilityOptions();
     expect(opts.map((o) => o.id)).toEqual(['repair', 'upgrade']);
     expect(opts.map((o) => o.label)).toEqual(['维修', '继续改装']);
@@ -1837,7 +1934,7 @@ describe('PRP-RUN-02｜H 固定 Run Script 数据源与耐久取舍事件', () =
       '耐久事件不得引入货币 / 新资源 / 永久奖励',
     ).toBe(false);
 
-    // 耐久事件时：真实剩余 700（合成喂入）→ 两条分支给出两个不同的下一场开局
+    // 耐久事件时：真实剩余 700（合成喂入）→ 两条分支给出**两个不同的下一场开局**（只差耐久）
     const atDur = syntheticWalk('repair', 'heavyShell', 'kineticBurst', [900, 700, 900, 900]).at(
       NODE.durability,
       'DURABILITY',
@@ -1847,19 +1944,35 @@ describe('PRP-RUN-02｜H 固定 Run Script 数据源与耐久取舍事件', () =
     expect(atDur.log.some((e) => e.text === RUN_DURABILITY_EVENT.repairLog)).toBe(false); // 还没裁决
     expect(atDur.durability).toBeNull();
 
-    // A｜维修：恢复一段明确耐久 → 放弃这次强化机会
+    // A｜维修：恢复一段明确耐久 → **不获得这一次额外改装**（当日用来修车）
     const want = Math.round(1100 * EMERGENCY_REPAIR_FRACTION);
     const healed = resolveDurability(atDur, 'repair', CTX);
     expect(healed.durability).toBe('repair');
     expect(healed.repairBonus).toBe(want);
     expect(runCarriedPlayerHp(healed)).toBe(700 + want);
-    expect(healed.nodeId).toBe(NODE.tend); // 直接跳过 d5-choice2
+    expect(healed.nodeId).toBe(NODE.tend); // 先进入当日叙事节点
     expect(healed.phase).toBe('IDLE');
     expect(healed.log.some((e) => e.text === RUN_DURABILITY_EVENT.repairLog)).toBe(true);
     expect(healed.log.some((e) => e.text.includes(`${want} 点耐久`))).toBe(true);
-    expect(runBuildIds(healed)).toEqual(['heavyShell']); // 没有第二次强化
+    expect(runBuildIds(healed)).toEqual(['heavyShell']); // 此刻还没选第二层（不是「永远没有」）
 
-    // B｜继续改装：不回耐久 → 进入第二层条件池
+    // ⚠️ PRP-RUN-02-R1（本 Queue 的核心修正）：维修**不阻断**第二层 ——
+    //    当日叙事之后按一次「继续」，DAY 5 的条件三选一照样打开
+    const healedChoice2 = pressRunAction(healed, CTX);
+    expect(healedChoice2.nodeId).toBe(NODE.choice2);
+    expect(healedChoice2.phase).toBe('CHOICE');
+    expect(healedChoice2.day).toBe(5);
+    expect(runChoicePool(healedChoice2).map((o) => o.id)).toEqual(['kineticBurst', 'emergencyRepair', 'fastReload']);
+    // 选完第二层 → 两层 Build 一起进入 DAY 6 的下一场（第一层**没有被清除**）
+    const repBothLayers = chooseRunBuff(healedChoice2, 'kineticBurst', CTX);
+    expect(runBuildIds(repBothLayers)).toEqual(['heavyShell', 'kineticBurst']);
+    expect(repBothLayers.nodeId).toBe(NODE.battle3);
+    expect(repBothLayers.phase).toBe('IDLE');
+    expect(repBothLayers.day).toBe(6);
+    expect(repBothLayers.durability).toBe('repair'); // 维修裁决没有被覆盖
+    expect(repBothLayers.repairBonus).toBe(want); // 耐久补偿也没有被清掉
+
+    // B｜继续改装：不回耐久 → **直接**进入第二层条件池（与维修分支**同一个**节点）
     const gamble = resolveDurability(atDur, 'upgrade', CTX);
     expect(gamble.durability).toBe('upgrade');
     expect(gamble.repairBonus).toBe(0);
@@ -1867,9 +1980,17 @@ describe('PRP-RUN-02｜H 固定 Run Script 数据源与耐久取舍事件', () =
     expect(gamble.nodeId).toBe(NODE.choice2);
     expect(gamble.phase).toBe('CHOICE');
     expect(gamble.log.some((e) => e.text === RUN_DURABILITY_EVENT.upgradeLog)).toBe(true);
+    // 同一份候选池（由第一层决定）—— 两条分支拿到的第二层**完全一致**
+    expect(runChoicePool(gamble).map((o) => o.id)).toEqual(runChoicePool(healedChoice2).map((o) => o.id));
+    const upBothLayers = chooseRunBuff(gamble, 'kineticBurst', CTX);
+    expect(runBuildIds(upBothLayers)).toEqual(['heavyShell', 'kineticBurst']);
 
-    // 两条分支的耐久差 = 一个明确数值（玩家能看见「不修就是这么多」）
+    // 两条分支唯一的差别 = **耐久差**（一个明确数值，玩家能看见「不修就是这么多」）
     expect(runCarriedPlayerHp(healed)!).toBe(runCarriedPlayerHp(gamble)! + want);
+    // 汇合之后（除耐久外）两条分支完全一致：同一个 DAY / 同一个节点 / 同一个两层 Build
+    expect(healedChoice2.day).toBe(gamble.day);
+    expect(repBothLayers.nodeId).toBe(upBothLayers.nodeId);
+    expect(runBuildIds(repBothLayers)).toEqual(runBuildIds(upBothLayers));
   });
 
   it('RP-RUN-02-03 耐久事件的 no-op 与重复裁决保护', () => {

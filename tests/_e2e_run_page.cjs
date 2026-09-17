@@ -1163,12 +1163,14 @@ async function runViewport(browser, vp) {
     这一段是「Build 不是两个互不相关的 Buff」+「耐久真的参与决策」的机器侧证据：
       · 第二场打完**还不是终局**（`complete === false`），主动作仍是「继续」；
       · 脚本的下一站是 `d4-durability`（**耐久取舍**），不是第二次三选一；
-      · 选「继续改装」不回耐久 → 换来第二次强化机会，且候选池**由第一层决定**
-        （`choicePoolLayer === 2`，池 = 双联炮分支的三项）；选「维修」则直接跳到 `d5-tend`。
+      · 选「继续改装」不回耐久 → 直接进入第二次强化机会，且候选池**由第一层决定**
+        （`choicePoolLayer === 2`，池 = 双联炮分支的三项）；选「维修」则先到 `d5-tend`
+        （当日焊车叙事）—— ⚠️ **PRP-RUN-02-R1 之后它同样继续进入 `d5-choice2`**（见 12b 段）。
       · 池的槽位结构 = 强联动 / 安全通用 / 轻度转向（必改 5 的取舍）；
       · 选了强联动「三连装填」后 Build = [twinCannon, tripleLoad]（两层同时存在）。
-    ⚠️ 浏览器端只跑「继续改装」这一条分支（另一条分支在 Node 端用真实物理冻结值验证：
-       `tests/portraitRunPage.test.ts` 的 RP-F2-10 / RP-F2-11 / RP-RUN-02-02/03）。
+    ⚠️ 本段（11c）在浏览器端只跑「继续改装」这一条分支；**「维修」分支在 12b 段同样在浏览器里真跑一遍**
+       （PRP-RUN-02-R1：真人验收发现「选维修 → DAY 5 第二次三选一被一起跳过」，本 Queue 修正后
+        两条分支都必须进入 DAY 5 的条件三选一）。
   */
   await page.waitForFunction(
     () => {
@@ -1613,6 +1615,156 @@ async function runViewport(browser, vp) {
   );
 
   /*
+    ---------------- 12b) PRP-RUN-02-R1：**维修分支**同样进入 DAY 5 第二次条件三选一（真实浏览器）
+    真人验收录像暴露的缺陷：DAY 4 选「维修」后，DAY 5 的第二次条件 Build 选择被**一起跳过**，
+    最终整局只有一个 Buff、后半局不再成长。本 Queue 修正 = `d5-tend.next` 从 `d6-battle3`
+    改为 `d5-choice2`（两条分支汇合），因此这里用**真实鼠标点击**复验：
+
+      1) 真实点「维修」→ 落到 `d5-tend`（DAY 5 当日叙事 · 仍只有第一层 · 主动作「继续」）；
+      2) 真实点「继续」→ **`d5-choice2` 的条件三选一照常打开**（池 = 由第一层决定的重炮三项）；
+      3) 真实点「动能爆发」→ DAY 6 战斗开局就是 **heavyShell + kineticBurst 两层**（必改 3 的固定路线）。
+
+    ⚠️ **独立的干净页面**（与 13 段同构）：`page` 在本段之后还要被 14 段（开火节奏）继续使用，
+       所以这里另开一个 context / page，绝不扰动既有段的页面状态。
+    ⚠️ 只在首个视口跑（要连打两场 ≈ 30s；物理固定步进 → 其它视口没有信息增量）。
+  */
+  if (!repairBranchObserved) {
+    repairBranchObserved = true;
+
+    const rctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, deviceScaleFactor: vp.dpr });
+    const rpage = await rctx.newPage();
+    await rpage.goto(PAGE_URL, { waitUntil: 'load' });
+    await rpage.waitForFunction(
+      () => {
+        const c = document.querySelector('#run-canvas');
+        if (!window.__RUNPAGE__ || !c || c.width === 0) return false;
+        const p = window.__RUNPAGE__.probe();
+        return p.screen.width > 0 && p.assets.ready >= 5 && p.assets.failed.length === 0 && p.stage.player.allSprites;
+      },
+      null,
+      { timeout: 15000 },
+    );
+
+    /** 一路点到 BATTLE（新 Run 要先过 `d1-start` 节拍 → 不写死步数）。 */
+    const enterBattle = async () => {
+      for (let i = 0; i < 6; i += 1) {
+        const pr = await probeOf(rpage);
+        if (pr.phase === 'BATTLE') break;
+        await clickRect(rpage, pr.actionRect);
+      }
+      return await probeOf(rpage);
+    };
+    const waitResult = () =>
+      rpage.waitForFunction(() => window.__RUNPAGE__.probe().phase === 'RESULT', null, { timeout: 120000 });
+    /** 在浮层里按**候选 id** 点选（id 来自公开 probe，不靠硬编码序号）。 */
+    const chooseById = async (id) => {
+      const pr = await probeOf(rpage);
+      const o = pr.overlayOptions.find((x) => x.id === id);
+      if (!o) return null;
+      await clickRect(rpage, o.rect);
+      return { label: o.label, layer: pr.choicePoolLayer, kind: pr.nodeKind };
+    };
+
+    // 第一场（基础）→ 第一层三选一 → 第二场（重型弹头）
+    const r1 = await enterBattle();
+    await waitResult();
+    await clickRect(rpage, (await probeOf(rpage)).actionRect); // RESULT → CHOICE①
+    const pickShell = await chooseById('heavyShell');
+    const r2 = await enterBattle();
+    await waitResult();
+    await clickRect(rpage, (await probeOf(rpage)).actionRect); // RESULT → **耐久取舍**
+    const pDurR = await probeOf(rpage);
+    log(
+      pDurR.nodeId === 'd4-durability' &&
+        pDurR.durabilityOpen &&
+        pDurR.day === 4 &&
+        JSON.stringify(pDurR.overlayOptions.map((o) => o.id)) === JSON.stringify(['repair', 'upgrade']),
+      `[${tag}] R64 维修分支复验：第二场后仍是 DAY 4 耐久取舍（两个动作 · 不再是三选一）`,
+      `node=${pDurR.nodeId} day=${pDurR.day} options=${pDurR.overlayOptions.map((o) => o.id).join(',')}`,
+    );
+
+    // 真实点击「维修」→ DAY 5 当日叙事节点（**仍然只有第一层**）
+    const repPick = await chooseById('repair');
+    const pTend = await probeOf(rpage);
+    log(
+      pTend.nodeId === 'd5-tend' &&
+        pTend.phase === 'IDLE' &&
+        pTend.day === 5 &&
+        pTend.buffs.length === 1 &&
+        JSON.stringify(pTend.build) === JSON.stringify(['heavyShell']) &&
+        pTend.actionLabel === '继续' &&
+        !pTend.overlayOpen,
+      `[${tag}] R64b 真实点「维修」→ DAY 5 当日叙事（d5-tend · 第一层保留 · 无浮层 · 主动作「继续」）`,
+      `node=${pTend.nodeId} phase=${pTend.phase} day=${pTend.day} build=[${pTend.build.join(',')}] action="${pTend.actionLabel}"`,
+    );
+
+    // ⚠️ 本 Queue 的核心：再按一次「继续」→ **第二次条件三选一照常打开**
+    await clickRect(rpage, pTend.actionRect);
+    const pChoice2R = await probeOf(rpage);
+    log(
+      pChoice2R.phase === 'CHOICE' &&
+        pChoice2R.nodeId === 'd5-choice2' &&
+        pChoice2R.day === 5 &&
+        pChoice2R.choicePoolLayer === 2 &&
+        pChoice2R.buffs.length === 1 &&
+        JSON.stringify(pChoice2R.overlayOptions.map((o) => o.id)) ===
+          JSON.stringify(['kineticBurst', 'emergencyRepair', 'fastReload']),
+      `[${tag}] R64c 必改 1：维修**没有**吞掉第二层 —— DAY 5 条件三选一照常打开（池由第一层决定）`,
+      `node=${pChoice2R.nodeId} phase=${pChoice2R.phase} day=${pChoice2R.day} layer=${pChoice2R.choicePoolLayer} pool=${pChoice2R.overlayOptions.map((o) => o.id).join(',')}`,
+    );
+    log(
+      JSON.stringify(pChoice2R.overlayOptions.map((o) => o.label)) ===
+        JSON.stringify(['动能爆发', '紧急维修', '快速装填']),
+      `[${tag}] R64d 必改 2：DAY 5 用的就是**既有两层条件池**（未新增任何内容）`,
+      pChoice2R.overlayOptions.map((o) => o.label).join(' / '),
+    );
+    const sChoice2R = await pixelStats(rpage);
+    ledgerCheck(
+      tag,
+      'R64e 维修分支 DAY5 CHOICE②（三张卡 · 整页遮罩账本）',
+      sChoice2R,
+      ledgerExpect({ masked: 3 }),
+      vp.dpr,
+    );
+
+    // 真实点击「动能爆发」→ DAY 6 战斗开局 = 两层 Build
+    const pickKineticR = await chooseById('kineticBurst');
+    const pAfterR = await probeOf(rpage);
+    const trailR = pAfterR.phaseTrail;
+    log(
+      pAfterR.nodeId === 'd6-battle3' &&
+        pAfterR.day === 6 &&
+        pAfterR.phase === 'IDLE' &&
+        JSON.stringify(pAfterR.build) === JSON.stringify(['heavyShell', 'kineticBurst']) &&
+        JSON.stringify(pAfterR.buildLabels) === JSON.stringify(['重型弹头', '动能爆发']),
+      `[${tag}] R64f 必改 3：维修路线最终形成**两层 Build**（heavyShell + kineticBurst）并进入 DAY 6 战斗`,
+      `node=${pAfterR.nodeId} day=${pAfterR.day} build=${pAfterR.buildLabels.join('+')}`,
+    );
+    log(
+      trailR.filter((p) => p === 'DURABILITY').length === 1 &&
+        trailR.filter((p) => p === 'CHOICE').length === 2 &&
+        trailR.filter((p) => p === 'FAILED').length === 0,
+      `[${tag}] R64g 验收 3：耐久取舍只执行一次、两次强化各一次（结构上不可能重复执行）`,
+      trailR.join('→'),
+    );
+    const sD6R = await pixelStats(rpage);
+    ledgerCheck(
+      tag,
+      'R64h 维修分支 DAY6 IDLE (DAY6 · 2 强化)',
+      sD6R,
+      ledgerExpect({ day: 6, stage: 'idle', buffs: ['heavyShell', 'kineticBurst'] }),
+      vp.dpr,
+    );
+    // 反证：这一段**不**接受主动作推进之前的任何隐式跳步 —— 走过的节点序列完整且唯一
+    log(
+      !!r1.battleWorld && !!r2.battleWorld && !!pickShell && !!repPick && !!pickKineticR,
+      `[${tag}] R64i 两场真实战斗 + 第一层 + 耐久取舍 + 第二层 全部真实发生（无一处是脚本插值）`,
+      `①build=[${r1.battleWorld ? r1.battleWorld.build.join(',') : '?'}] ②build=[${r2.battleWorld ? r2.battleWorld.build.join(',') : '?'}] 维修=${repPick ? repPick.label : '?'} 第二层=${pickKineticR ? pickKineticR.label : '?'}`,
+    );
+    await rctx.close();
+  }
+
+  /*
     ------------------ 13) PRP-BUILD-01-R1：动能爆发的**真实感知链**（浏览器端 · 真实命中 → 真实冲击 → 真实位移）
     判据（Queue 必改 3「极简命中反馈」+ 必改 4「同条件 A/B」的浏览器侧）：
       · 环只在**真实重弹命中**的那一刻出现（每次出现都伴随 `abilities.kineticHits` 递增）；
@@ -1930,6 +2082,12 @@ let fireCadenceObserved = false;
  * （这条要连打三场 ≈ 50s，四视口各跑一遍没有信息增量）。
  */
 let kineticObserved = false;
+
+/**
+ * PRP-RUN-02-R1：**维修分支**的 DAY 5 第二次条件三选一与视口无关（物理固定步进），
+ * 但它要连打两场真实战斗 → 只在首个视口跑一次（与 `fireCadenceObserved` / `kineticObserved` 同口径）。
+ */
+let repairBranchObserved = false;
 
 function round2(v) {
   return Math.round(v * 100) / 100;

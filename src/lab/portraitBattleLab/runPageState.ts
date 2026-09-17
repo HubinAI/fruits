@@ -12,9 +12,10 @@
  * 本文件不再自己数「第几场 / 第几选」，而是读 `runScript.ts` 的**节点序列**：
  *
  *     d1-start(EVENT) → d2-battle1(BATTLE) → d2-choice1(CHOICE) → d3-battle2(BATTLE)
- *       → d4-durability(DURABILITY) ─┬─ repair  → d5-tend(EVENT)   ─┐
- *                                    └─ upgrade → d5-choice2(CHOICE) ┴→ d6-battle3(BATTLE)
- *                                      → d7-final(FINAL) → RUN COMPLETE / RUN FAILED
+ *       → d4-durability(DURABILITY) ─┬─ repair  → d5-tend(EVENT) ────┐
+ *                                    └─ upgrade → d5-choice2(CHOICE) ←┘ ← 两条分支在此汇合
+ *                                      → d6-battle3(BATTLE) → d7-final(FINAL)
+ *                                      → RUN COMPLETE / RUN FAILED
  *
  *   - 状态里唯一的进度锚点 = **`nodeId`**（当前已呈现的脚本节点）；推进只走
  *     `next` / `branch`，DAY 与叙事文本全部来自节点
@@ -44,8 +45,14 @@
  *   让「现在这点耐久」改变玩家的下一步选择。
  *
  *     A｜维修       → 恢复一段明确耐久（沿用 `EMERGENCY_REPAIR_FRACTION`，不新造数值）
- *                     → **放弃这次改装机会**（脚本分支直接跳过第二次 CHOICE）
- *     B｜继续改装   → 不回耐久 → 进入**现有条件池**的第二次三选一
+ *                     → **不获得这一次额外改装**（当日走 `d5-tend` 的焊车叙事）
+ *     B｜继续改装   → 不回耐久 → 直接进入**现有条件池**的第二次三选一
+ *
+ *   ⚠️ PRP-RUN-02-R1（真人验收修正）：`d4-durability` 与 `d5-choice2` 是**两个独立节点** ——
+ *      **两条分支都会**到达 DAY 5 的第二次条件三选一；维修的机会成本只是「这一次额外改装」，
+ *      不是「整局第二层 Build」。第一层在任何分支下都不被清除，第二层也不被阻止。
+ *      ⇒ 本文件的推进逻辑**不含任何分支特判**：repair / upgrade 都只把状态推进到
+ *        `node.branch[choice]`，之后按脚本自己的 `next` 继续（修正全部落在 `runScript.ts` 的数据里）。
  *
  *   没有货币、没有新资源；两者的文案与因果都在 `runScript.ts`（数据，不在 UI 里散落）。
  *
@@ -682,9 +689,12 @@ export function chooseRunBuff(s: RunPageState, optionId: string, ctx: RunPageCon
  * 耐久事件的裁决（本 Queue 唯一的耐久取舍点）。
  *
  *   `repair`  → 按 `EMERGENCY_REPAIR_FRACTION` 修回一段耐久（不超过上限，**如实记账**），
- *               然后走**维修分支**：脚本直接跳过第二次 CHOICE（= 放弃这次强化机会），
- *               中经「把这一天用在修车上」的节拍节点；
+ *               然后走**维修分支**：中经「把这一天用在修车上」的当日叙事节点（`d5-tend`），
+ *               **再继续**进入 DAY 5 的第二次条件三选一；
  *   `upgrade` → 不回耐久，走**改装分支**：立刻进入第二层条件池的三选一。
+ *
+ * ⚠️ PRP-RUN-02-R1：两条分支**都会**到达 `d5-choice2`（第二层）。本函数不做任何分支特判 ——
+ *    只把状态推进到 `node.branch[choice]`，后续由脚本自己的 `next` 决定。
  *
  * ⚠️ 修复量按「当前真实剩余耐久 + 本局累计补偿」计算缺口，避免日志报出一个实际没吃满的数字。
  */
