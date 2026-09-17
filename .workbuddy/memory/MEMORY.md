@@ -13,7 +13,7 @@
 ## 1. Identity / 链尾
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。原型正式名 **PRP｜Portrait Run Prototype**。
-- **链尾**：`54fbd6f` PRP-RUN-02-FULL-RUN-VERTICAL-SLICE → **`PRP-M2-NEXT-RUN-SEED-VALIDATION`
+- **链尾**：`54fbd6f` PRP-RUN-02-FULL-RUN-VERTICAL-SLICE → **`0cb1956` PRP-M2-NEXT-RUN-SEED-VALIDATION
   （独立验证入口 `next-run.html` + 三个起始种子 + `NEXT RUN VALIDATION COMPLETE`）**；更早 SHA 查 `git log`。
 - 全链对 `src/core|physics|render|player|platform|battle|ui` diff **恒为空**；唯一正式 gameplay 改动 =
   `src/battle/cannonBehavior.ts` 的**可选** `burstRounds`（默认 1，逐帧不变）。
@@ -160,7 +160,7 @@
   （第一场结束即停；种子选择浮层**复用 CHOICE 卡片几何**，零布局新增）。
 
 ## 6. Next action
-- **M2 阶段已交付**（`PRP-M2-NEXT-RUN-SEED-VALIDATION`）。**按指令停止，不自动开下一阶段。**
+- **M2 阶段已交付**（`0cb1956` PRP-M2-NEXT-RUN-SEED-VALIDATION）。**按指令停止，不自动开下一阶段。**
 - **下一步取决于真人裁决**：① 三个种子的**开局难度是否等价** —— 实测「重炮开局」第一场只活下
   **13/1100**（另两个 1009 / 919），战斗也更长（1018 步 vs 727/710）⇒ 这是「下一局起点不同」
   还是「选错就死」？⚠️ **禁止**顺手改第一层数值（已冻结），要改就是**新的设计假设**、单开 Queue。
