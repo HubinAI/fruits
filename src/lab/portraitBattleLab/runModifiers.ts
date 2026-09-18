@@ -58,6 +58,15 @@
  * 语义 = 「保留高频特征，同时向重炮 / 多发转型，或者选生存」。
  * ⇒ **本阶段不验证这些混合组合的平衡**，也不新增第四个第一层强化。
  *
+ * ## 横向改装（PRP-RUN-02-R2：让 DAY 4 的取舍成为真实取舍）
+ *
+ *   「继续改装」分支在 DAY 4 立刻多拿一次**横向改装**：候选 = 现有第一层之外的**另外两个**
+ *   一层强化（二选一），**不新增 Buff、不提供 `emergencyRepair`**。
+ *   ⇒ 它不引入任何新内容，只是让玩家**多拿一项已经存在的一层强化**——因此
+ *     「维修 = 生存优势 / 继续改装 = 构筑数量优势」这个取舍不需要新数值、不需要新强化。
+ *   ⚠️ 与第二层的区别：横向池**不看**第一层选了什么（恒为「另外两项一层」），
+ *      第二层池**由最初主路线决定**（`RUN_LAYER2_POOLS`）。两者都不重复给出已拥有的项。
+ *
  * 两种强联动的因果与实现：
  *
  *   - **动能爆发**：炮弹越重 / 撞击越强 → 命中追加越明显的冲击。追加冲量
@@ -194,6 +203,33 @@ export function runLayer2PoolDefs(layer1: string): readonly RunModifierDef[] {
   const pool = RUN_LAYER2_POOLS[layer1 as Layer1ModifierId];
   if (!pool) return [];
   return pool.map((id) => runModifierById(id)!);
+}
+
+/* --------------------------------------------------- 横向改装池（R2） */
+
+/** 某一项是不是**第一层**强化（`heavyShell` / `twinCannon` / `fastReload`）。 */
+export function isLayer1Modifier(id: string): id is Layer1ModifierId {
+  return (RUN_LAYER1_POOL as readonly string[]).includes(id);
+}
+
+/** 第一层的选项定义（按固定顺序）—— 与 `RUN_MODIFIERS` 同源，只是换了个形状。 */
+export function runLayer1PoolDefs(): readonly RunModifierDef[] {
+  return RUN_LAYER1_POOL.map((id) => runModifierById(id)!);
+}
+
+/**
+ * **横向改装池**（PRP-RUN-02-R2）：「继续改装」分支在 DAY 4 立刻多拿的那一次。
+ *
+ * 规则（Queue 必改 1，逐字落地）：
+ *   - **只复用现有第一层内容** → 候选恒为 `RUN_LAYER1_POOL` 的子集，**不新增 Buff**；
+ *   - 排除**当前已拥有**的一层强化 ⇒ 恰好剩下**另外两个**（二选一）；
+ *   - **不提供** `emergencyRepair`（它属于第二层，不在这个池里）。
+ *
+ * `owned` 传当前本局 Build 的全部 id（不只一层）——这样即使将来 Build 里出现别的项，
+ * 「已拥有的不重复出现」这条规则也不会被绕过。
+ */
+export function runLateralPoolDefs(owned: readonly RunModifierId[]): readonly RunModifierDef[] {
+  return runLayer1PoolDefs().filter((m) => !owned.includes(m.id));
 }
 
 /* ------------------------------------------------------- overlay 数值表 */

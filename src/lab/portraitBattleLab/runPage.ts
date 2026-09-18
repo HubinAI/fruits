@@ -81,6 +81,8 @@ import {
   runCarriedPlayerHp,
   runChoiceOpen,
   runChoicePool,
+  runChoicePoolKind,
+  runChoicePoolLayer,
   runComplete,
   runCurrentNode,
   runDurabilityOpen,
@@ -97,7 +99,7 @@ import {
   type RunPageState,
   type RunPhase,
 } from './runPageState';
-import { RUN_TOTAL_BATTLES, type RunDurabilityChoiceId } from './runScript';
+import { RUN_TOTAL_BATTLES, type RunChoicePoolKind, type RunDurabilityChoiceId } from './runScript';
 /**
  * PRP-M2-NEXT-RUN-SEED-VALIDATION：**验证专属**流程数据与构造器。
  *
@@ -483,10 +485,16 @@ export interface RunPageProbe {
   /** **强化**三选一浮层是否可见（严格 = `phase === 'CHOICE'`）。 */
   readonly choiceOpen: boolean;
   /**
-   * PRP-BUILD-01：当前选择是第几层（1 = 第一层固定三选一 / 2 = 第二层条件池 / 0 = 当前不在 CHOICE）。
-   * 用于证明「第二次选择不是同一套通用三选一」。
+   * 当前选择池的**内容层**（1 = 一层内容（含横向改装）/ 2 = 第二层条件池 / 0 = 当前不在 CHOICE）。
+   * ⚠️ PRP-RUN-02-R2：不再按「第几次选择」数数，而是读**当前脚本节点声明的池种类**
+   *    （`runChoicePoolLayer`）——「第几次选」与「哪一层内容」是两件独立的事。
    */
   readonly choicePoolLayer: number;
+  /**
+   * 当前脚本节点声明的池**种类**（`layer1` / `lateral` / `layer2`；不在 CHOICE 时为 `null`）。
+   * 逐字暴露数据层的值 → E2E 可以直接断言「这里是横向改装，不是第二层」。
+   */
+  readonly choicePoolKind: RunChoicePoolKind | null;
   /** 强化候选池的卡片（结构规则口径；DURABILITY 时为空 —— 那两项见 `overlayOptions`）。 */
   readonly choiceOptions: readonly { id: string; label: string; note: string; rect: RunRect; iconRect: RunRect }[];
   /** PRP-RUN-02：耐久取舍浮层是否可见（严格 = `phase === 'DURABILITY'`）。 */
@@ -1765,10 +1773,13 @@ export class RunPage {
       actionRect: runActionButtonRect(),
       choiceOpen: runChoiceOpen(s),
       /**
-       * ⚠️ PRP-BUILD-01：候选**来自当前池**（第一层三选一 / 第二层条件池），
-       * 与绘制、命中区、账本四处同源；`poolLayer` 标明这是第几层的选择（1 / 2 / 0=不适用）。
+       * ⚠️ PRP-BUILD-01 / R2：候选**来自当前脚本节点声明的池**（第一层三选一 / 横向改装二选一 /
+       * 第二层条件池），与绘制、命中区、账本四处同源；
+       * `choicePoolKind` = 数据层原值，`choicePoolLayer` = 该池内容属于哪一层
+       * （1 = 一层内容（含横向）/ 2 = 第二层 / 0 = 当前不在 CHOICE）。
        */
-      choicePoolLayer: s.phase === 'CHOICE' ? s.buffs.length + 1 : 0,
+      choicePoolLayer: runChoicePoolLayer(s),
+      choicePoolKind: runChoicePoolKind(s),
       choiceOptions: runChoicePool(s).map((o, i) => ({
         id: o.id,
         label: o.label,

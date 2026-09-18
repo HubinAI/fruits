@@ -121,21 +121,38 @@ export function nextRunSeedById(id: string): RunSeedOption | null {
 const PRIOR_RUN_DAMAGE: readonly number[] = [181, 221, 257, 300];
 
 /**
- * 快进时上一局走过的**强化路线**（第一层 → 第二层）。
+ * 快进时上一局走过的**强化路线**（第一层 → 第二层；按 CHOICE 节点的到达顺序取值）。
  *
  * ⚠️ 与路线内容无关的验证目标：本 Queue 只关心「上一局存在且已结束」。
  *    这里选 `heavyShell → kineticBurst` 是因为它是既有条件池里最直接的一条联动。
+ *
+ * ⚠️ PRP-RUN-02-R2：这个数组的长度必须**恰好等于上一局实际会经过的 CHOICE 节点数**。
+ *    因为上一局走**维修**分支（见 `PRIOR_RUN_DURABILITY`），它只经过 `d2-choice1` 与
+ *    `d5-choice2` 两个 CHOICE 节点 ⇒ 这里保持 **2 项**。
+ *    （「继续改装」分支会多经过 `d4-lateral`，需要第 3 项 —— 本脚手架刻意不走那条路。）
+ *    任一项若不在当时那个节点的候选池里，快进会**停下报错**而不是静默换成别的。
  */
 const PRIOR_RUN_CHOICES: readonly RunModifierId[] = ['heavyShell', 'kineticBurst'];
 
 /**
- * 快进时上一局在耐久事件上的选择：**继续改装**。
+ * 快进时上一局在耐久事件上的选择：**维修**。
  *
- * ⚠️ 刻意不选「维修」：`repair` 会累计 `repairBonus`，而 `runCarriedPlayerHp`
- *    会把 `repairBonus` 叠加到真实剩血上 —— 快进给的是「每场结束时的最终 HP」，
- *    若再叠一次补偿就会得到一个与表不符的数字。选 `upgrade` 让耐久链保持干净可预测。
+ * ⚠️ PRP-RUN-02-R2 改选 `repair`（原为 `upgrade`），原因与代价都记在这里：
+ *
+ *   - **原因**：R2 之后「继续改装」分支会**多经过一个节点**（`d4-lateral`，横向改装二选一）
+ *     ⇒ 快进会多拿一项改装，上一局的摘要 Build 从 2 项变成 3 项
+ *     ⇒ M2 已真人验收过的**可观测输出**（`priorRun.build` / `day` / `battlesCompleted` /
+ *       `durabilityPercent`）会变。走**维修**分支则路径与内容完全不变
+ *     （`d2-choice1` → 耐久事件 → `d5-tend` → `d5-choice2`），因此
+ *     `priorRunSummary` **逐字段保持原值**、页面与既有验收结论继续有效。
+ *   - **代价（如实记录）**：`repair` 会累计 `repairBonus`，而 `runCarriedPlayerHp`
+ *     会把 `repairBonus` 叠加到真实剩血上 ⇒ `runCarriedPlayerHp(prior)` 从此报告的是
+ *     「剩血 + 补偿」而不是裸剩血（实测 416 = 141 + 275）。
+ *     ⚠️ `priorRunSummary.durabilityPercent` **不受影响**（它读 `battle.playerHp`，是真实战果）；
+ *        现有断言也只要求它是「一个明显不是满耐久的数」，因此本代价目前**不改变任何结论**。
+ *     ⚠️ 若将来有人要断言 `runCarriedPlayerHp(prior) === prior.battle.playerHp`，会在这里踩坑。
  */
-const PRIOR_RUN_DURABILITY = 'upgrade' as const;
+const PRIOR_RUN_DURABILITY = 'repair' as const;
 
 /** 快进循环的硬上界（防脚本异常时死循环；正常一局远用不到）。 */
 const PRIOR_RUN_GUARD = 64;

@@ -17,14 +17,16 @@
  *   | `d2-choice1`    | CHOICE     | 2 | 第一次三选一（第一层：重型弹头 / 双联炮 / 快速装填） |
  *   | `d3-battle2`    | BATTLE     | 3 | 中低压遭遇（阶梯 ②） |
  *   | `d4-durability` | DURABILITY | 4 | **耐久取舍事件**：维修 vs 继续改装 |
+ *   | `d4-lateral`    | CHOICE     | 4 | **横向改装二选一**（只走「继续改装」分支）→ 汇入 `d5-choice2` |
  *   | `d5-tend`       | EVENT      | 5 | 维修分支的当日叙事（焊补车体）→ 汇入 `d5-choice2` |
  *   | `d5-choice2`    | CHOICE     | 5 | **第二次条件三选一（第二层）**——两条分支都会到达 |
  *   | `d6-battle3`    | BATTLE     | 6 | 中压遭遇（阶梯 ③） |
  *   | `d7-final`      | FINAL      | 7 | 终局遭遇（阶梯 ④）→ RUN COMPLETE / RUN FAILED |
  *
  * ⇒ **战斗与选择交替**，不存在「连续菜单」或「连续战斗」（Queue 目标结构）。
- *   DAY 是冒险阶段，不要求「一天只有一个节点」：`d5-tend` 与 `d5-choice2` 同为 DAY 5、
- *   是**同一分支上的先后两个节点**（先当日叙事、后第二次选择），不是互斥的两条边。
+ *   DAY 是冒险阶段，不要求「一天只有一个节点」：`d4-durability` 与 `d4-lateral` 同为 DAY 4、
+ *   `d5-tend` 与 `d5-choice2` 同为 DAY 5 —— 都是**同一分支上的先后两个节点**（先事件、后选择），
+ *   不是互斥的两条边。
  *
  * ## ⚠️ PRP-RUN-02-R1（真人验收修正）：DAY 4 事件与 DAY 5 第二层选择是**两个独立节点**
  *
@@ -38,6 +40,25 @@
  *     两条分支唯一的差别 = **耐久**：维修拿回一段耐久但当日用来修车，继续改装不回耐久。
  *   ⇒ 修正只落在本文件的**数据**里（`d5-tend.next` / 事件文案）；
  *     `runPageState.ts` 的推进逻辑**零分支特判**（两条分支都只走 `branch[choice]` + `next`）。
+ *
+ * ## ⚠️ PRP-RUN-02-R2（真人验收修正）：让「维修 vs 继续改装」成为**真实取舍**
+ *
+ *   修正前两条分支的差别**只剩耐久**（都拿到同一份第二层）⇒ 维修**严格支配**继续改装。
+ *   本 Queue 把「继续改装」换到另一种优势上：
+ *
+ *     d4-durability ─┬─ repair  → d5-tend(EVENT · DAY 5 焊车) ──────┐
+ *                    └─ upgrade → d4-lateral(CHOICE · DAY 4 横向) ─┴→ d5-choice2(CHOICE · DAY 5)
+ *
+ *   - **维修**     = 拿回一段耐久（**恢复值完全不动**），这一天用来修车 → **生存优势**；
+ *   - **继续改装** = 不回耐久 → **立即**多拿一项横向改装（现有第一层之外的另外两个一层强化，
+ *                    二选一，**不含** `emergencyRepair`）→ **构筑数量优势**。
+ *   ⇒ 两条分支**仍然都**进入 DAY 5 的第二次条件三选一，且第二层的条件池**仍由最初主路线决定**。
+ *   ⇒ 继续改装分支最终携带 **3 项**改装（一层 + 横向 + 二层），维修分支 **2 项**。
+ *
+ *   ⚠️ 「继续改装」的横向池**只复用既有第一层内容**：不新增 Buff、不提供 `emergencyRepair`、
+ *      不重复展示已拥有的那一项。
+ *   ⚠️ 候选池种类由 **CHOICE 节点自己声明**（`choicePool`）—— 状态机不按「第几选」数数，
+ *      因此将来增删节点不会悄悄改变池的语义。
  *
  * ## 四场战斗（必改 2：压力阶梯，全部引用**既有正式对手模板**）
  *
@@ -63,6 +84,21 @@ export type RunNodeKind = 'EVENT' | 'BATTLE' | 'DURABILITY' | 'CHOICE' | 'FINAL'
 
 /** 耐久事件的两个分支（唯一来源；UI / 状态机 / 测试都读这里）。 */
 export type RunDurabilityChoiceId = 'repair' | 'upgrade';
+
+/**
+ * **CHOICE 节点用哪一种候选池**（PRP-RUN-02-R2）。
+ *
+ * ⚠️ 这是「池的**种类**」，不是池的内容 —— 内容仍由 `runModifiers.ts` 独家提供，
+ *    节点只声明「我这里该用哪一种」。这样状态机就不需要按「第几选 / 第几天」数数：
+ *
+ *   - `layer1`  → 第一层三选一（`RUN_LAYER1_POOL`）
+ *   - `lateral` → **横向改装**：当前已拥有一层之外的另外两个一层强化（二选一，
+ *                 **不含** `emergencyRepair`）
+ *   - `layer2`  → 第二层**条件池**（由**最初主路线** = 第一个拿到的一层强化决定）
+ *
+ * ⚠️ 三种池都会**剔除已拥有的强化**（`runChoicePool` 的统一去重）→ 结构上不可能重复拿同一个。
+ */
+export type RunChoicePoolKind = 'layer1' | 'lateral' | 'layer2';
 
 export interface RunScriptNode {
   /** 脚本内唯一 id（状态机持有它 → 决定「现在轮到什么」）。 */
@@ -91,24 +127,32 @@ export interface RunScriptNode {
   readonly next: string | null;
   /** DURABILITY：两个分支各自的后继节点 id。 */
   readonly branch?: Readonly<Record<RunDurabilityChoiceId, string>>;
+  /**
+   * CHOICE：这个节点该用哪一种候选池（`layer1` / `lateral` / `layer2`）。
+   * ⚠️ 池的**内容**不在这里 —— 节点只声明种类，内容由 `runModifiers.ts` 提供。
+   */
+  readonly choicePool?: RunChoicePoolKind;
 }
 
 /**
  * 耐久事件的文案与因果（**数据**，不是 UI 内散落的字符串）。
  *
  * A 维修         → 恢复一段明确耐久（沿用既有的 `EMERGENCY_REPAIR_FRACTION`，不新造数值）
- *                  → **不获得这一次额外改装**（当日走 `d5-tend` 的焊车叙事）
- *                  → ⚠️ **不跳过** DAY 5 的第二次条件三选一（PRP-RUN-02-R1 修正）
- * B 冒险改装     → 不回耐久 → 进入**现有条件池**的第二次三选一
+ *                  → **不获得**这一天额外改装（当日走 `d5-tend` 的焊车叙事）
+ *                  → **不跳过** DAY 5 的第二次条件三选一（PRP-RUN-02-R1 修正）
+ * B 继续改装     → 不回耐久 → **立即获得一次横向改装机会**（`d4-lateral`：
+ *                  现有第一层之外的另外两个一层强化，二选一；PRP-RUN-02-R2）
+ *                  → **再正常进入** DAY 5 的第二次条件三选一
  *
- * 两条分支**都会**到达 DAY 5 的第二次条件三选一（第一层不清除、第二层不阻止）；
- * 唯一的差别就是「现在这点耐久」—— 不增加货币、不增加新资源、不增加第三层。
+ * ⚠️ PRP-RUN-02-R2：两条分支**都会**到达 DAY 5 的第二次条件三选一（第一层不清除、第二层不阻止），
+ *    差别是**两种不同的优势**：维修 = 生存（拿回一段耐久），继续改装 = 构筑数量（多一项横向改装）。
+ *    不增加货币、不增加新资源、不增加第四种强化。
  */
 export const RUN_DURABILITY_EVENT = {
   title: '停下来，还是继续改装？',
   options: [
     { id: 'repair' as const, label: '维修', note: '修回一段耐久，这一天用来修车' },
-    { id: 'upgrade' as const, label: '继续改装', note: '不回耐久，这一天继续改装' },
+    { id: 'upgrade' as const, label: '继续改装', note: '不回耐久，这一天再改一次装' },
   ],
   /** 选「维修」写入冒险记录的叙事（耐久恢复量随后单独一行）。 */
   repairLog: '你花了一整天把车体焊补回去。',
@@ -140,6 +184,8 @@ export const RUN_SCRIPT: readonly RunScriptNode[] = [
     kind: 'CHOICE',
     day: 2,
     beat: [],
+    // 第一层三选一（重炮 / 双联 / 快装）—— 池的种类由节点声明，内容由 `runModifiers` 提供。
+    choicePool: 'layer1',
     next: 'd3-battle2',
   },
   {
@@ -158,9 +204,22 @@ export const RUN_SCRIPT: readonly RunScriptNode[] = [
     day: 4,
     beat: ['第四天，你在一处背风的坡下停了车。'],
     next: null,
-    // ⚠️ 两条分支**都会**走到 DAY 5 的第二次条件三选一：
-    //    repair 先经 `d5-tend`（当日焊车叙事）→ `d5-choice2`；upgrade 直达 `d5-choice2`。
-    branch: { repair: 'd5-tend', upgrade: 'd5-choice2' },
+    // ⚠️ 两条分支**都会**走到 DAY 5 的第二次条件三选一，但**路径不同**：
+    //    repair  → `d5-tend`（当日焊车叙事）→ `d5-choice2`    ：拿回耐久，**放弃**这一天额外改装
+    //    upgrade → `d4-lateral`（横向改装二选一）→ `d5-choice2`：不回耐久，**换到**一次额外改装
+    //    两条分支的差别 = 「生存优势」vs「构筑数量优势」（PRP-RUN-02-R2）。
+    branch: { repair: 'd5-tend', upgrade: 'd4-lateral' },
+  },
+  {
+    id: 'd4-lateral',
+    kind: 'CHOICE',
+    day: 4,
+    // ⚠️ 与 `d4-durability` **同为 DAY 4** ⇒ 进入本节点不会追加 `DAY 4` 行（DAY 未变）；
+    //    下面的 `d5-choice2` 才是 DAY 5。
+    beat: ['第四天，你把这一天全用来改装，再挑一项装上。'],
+    // 横向改装：候选 = 现有第一层之外的**另外两个**一层强化（二选一，不含 `emergencyRepair`）。
+    choicePool: 'lateral',
+    next: 'd5-choice2',
   },
   {
     id: 'd5-tend',
@@ -175,8 +234,9 @@ export const RUN_SCRIPT: readonly RunScriptNode[] = [
     id: 'd5-choice2',
     kind: 'CHOICE',
     day: 5,
-    // 到达方式有两条（repair 经 `d5-tend` / upgrade 直达），但**节点只有一个**。
-    // 候选池由第一层决定（`runChoicePool`），这里不写任何池内容。
+    // 到达方式有两条（repair 经 `d5-tend` / upgrade 经 `d4-lateral`），但**节点只有一个**。
+    // 候选池种类由节点声明；池内容由**最初主路线**决定（`runChoicePool`）——这里不写任何池内容。
+    choicePool: 'layer2',
     beat: [],
     next: 'd6-battle3',
   },
@@ -213,7 +273,13 @@ export const RUN_TOTAL_DAYS = RUN_SCRIPT.reduce((max, n) => Math.max(max, n.day)
 /** 单局真实战斗场数（= 脚本里 BATTLE + FINAL 节点数；本阶段固定 4）。 */
 export const RUN_TOTAL_BATTLES = RUN_SCRIPT.filter((n) => n.kind === 'BATTLE' || n.kind === 'FINAL').length;
 
-/** 单局强化选择次数上限（脚本里 CHOICE 节点数；结构性上限，不靠运行期扫描）。 */
+/**
+ * 单局强化选择次数上限（脚本里 CHOICE 节点数；结构性上限，不靠运行期扫描）。
+ *
+ * ⚠️ PRP-RUN-02-R2：脚本现在有三个 CHOICE 节点（第一层 / 横向 / 第二层）⇒ 上限 **3**。
+ *    但**单条分支**拿不到 3 次：维修分支只经 `d2-choice1` + `d5-choice2`（2 次），
+ *    继续改装分支才经三个（3 次）—— 「构筑数量优势」正是这个差别的名字。
+ */
 export const RUN_TOTAL_CHOICES = RUN_SCRIPT.filter((n) => n.kind === 'CHOICE').length;
 
 /** 按 id 取节点（未知 id → `null`，绝不静默回退到别的节点）。 */

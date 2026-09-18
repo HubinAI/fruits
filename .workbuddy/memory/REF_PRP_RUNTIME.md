@@ -423,3 +423,171 @@ d4-durability ─┬─ repair  → d5-tend(EVENT · DAY 5 叙事) ──next─
   ⇒ 改卡片 `note` 文案**不影响** `cardBar` 账面。
 - 浮层整页遮罩判据 = `ledgerExpect({ masked: N })`，`N` 是**卡片数**不是系数
   （三张卡 ⇒ `masked: 3`），与既有 `R35` / `R52f` 同口径。
+  ⚠️ R2 之后 E2E 里的旧 `R52f` = 现在的 **`R52j`**（R52 家族的重编号见 §K.6）。
+
+---
+
+## K. PRP-RUN-02-R2 让「维修 vs 继续改装」成为真实取舍（脚本数据 + 池种类声明）
+
+### K.1 缺陷（真人验收，file:line 口径）
+
+`PRP-RUN-02-R1` 修正后两条分支**都**到达 `d5-choice2`（DAY 5 第二层）⇒ 当时
+`src/lab/portraitBattleLab/runScript.ts` 的 `d4-durability.branch = { repair: 'd5-tend',
+upgrade: 'd5-choice2' }` 意味着：
+
+| 分支 | 耐久 | 第二层 | 净结果 |
+|---|---|---|---|
+| repair | +275（按缺口截断） | 有 | 严格占优 |
+| upgrade | 不回 | 同一个 | **没有任何独有回报** |
+
+⇒ 「维修**严格支配**继续改装」，DAY 4 的取舍不是取舍。**根因不是数值**，是
+upgrade 分支在结构上**没有换到任何东西**。
+
+### K.2 设计定稿：池的**种类**由 CHOICE 节点声明（不是按次数数数）
+
+修正前的 `runChoicePool` 按 `s.buffs.length` 数数（0 → 一层 / 1 → 二层 / ≥2 → 空）。
+一旦加进「横向改装」这一选（`buffs.length === 1` 时发生），它会**必然**被误判成第二层。
+
+⇒ 唯一与项目哲学（节点驱动、零散落分支、禁 `if (day === X)`）一致的修法：
+**节点声明池种类**。
+
+- `runScript.ts`：`export type RunChoicePoolKind = 'layer1' | 'lateral' | 'layer2'`；
+  `RunScriptNode.choicePool?: RunChoicePoolKind`（`d2-choice1 = 'layer1'`、
+  `d4-lateral = 'lateral'`、`d5-choice2 = 'layer2'`）。
+- `runPageState.ts`：`runChoicePoolKind(s)` 读当前节点的声明（非 CHOICE → `null`）；
+  `runChoicePoolLayer(s)` = `kind === 'layer2' ? 2 : 1`（横向是**一层内容** ⇒ 1）。
+- `runPage.ts` 探针：`choicePoolLayer` 由 `s.buffs.length + 1` 改为读上面的函数，
+  并新增 `choicePoolKind`（数据层原值，E2E 直接断言「这里是横向，不是第二层」）。
+- ⇒ `runPageState.ts` 的**推进逻辑仍然零分支特判**：它不知道「现在第几选」，只知道
+  「当前节点要哪一种池」。
+
+### K.3 图结构（十节点）
+
+```
+d1-start(1) → d2-battle1(2) → d2-choice1(2 · layer1) → d3-battle2(3)
+  → d4-durability(4) ─┬─ repair  → d5-tend(EVENT · DAY5) ────────┐
+                      └─ upgrade → d4-lateral(CHOICE · DAY4 横向) ┴→ d5-choice2(5 · layer2)
+  → d6-battle3(6) → d7-final(7) → RUN COMPLETE / FAILED
+```
+
+- ⚠️ **`d4-lateral` 与 `d4-durability` 同为 DAY 4**：`presentNode` 只在 `node.day !== s.day`
+  时追加 `DAY n` 行 ⇒ 进入 `d4-lateral` **不会**多出一行 `DAY 4`（实测日志：`DAY 4` 一次，
+  紧跟耐久事件行、横向节点 beat、横向选项行，然后才是 `DAY 5`）。
+- 唯一汇合点仍是 `d5-choice2`，恰好两个前驱 `[d4-lateral, d5-tend]`。
+- ⚠️ `RUN_TOTAL_CHOICES` = CHOICE 节点数 = **3**；但**单条分支拿不满**：
+  维修分支 2 项、改装分支 3 项 —— 这就是「构筑数量优势」的结构口径。
+
+### K.4 横向池（必改 1 的逐字落地）
+
+`runModifiers.ts` 新增：`isLayer1Modifier(id)` / `runLayer1PoolDefs()` /
+`runLateralPoolDefs(owned)` = `RUN_LAYER1_POOL` 减去 `owned`（`owned` 传**全部** Build id）。
+
+- 当前 `twinCannon` → 候选 `['heavyShell', 'fastReload']`（二选一）；
+- **不提供** `emergencyRepair`（它属第二层，不在一层池里）；
+- **不重复**已拥有的一层；
+- ⇒ **不新增任何 Buff / 数值**（必改 1）。`RUN_LAYER2_POOLS` 一字未动（必改 2）。
+
+### K.5 全池统一去重（验收 4「无重复 Modifier」）与其代价
+
+`runChoicePool` 的三种池都 `dedupeOwned(defs, runBuildIds(s))`。副作用（**已接受，须上报**）：
+
+- 改装分支**先横拿**的那一项若落在第二层条件池里，第二层池会**自动少一项**
+  （例：双联路线横拿 `heavyShell` ⇒ 二层池 3 → 2 项）；
+- 本轮 E2E 主走查刻意横拿 `fastReload`（不落在双联的二层池里）⇒ 保持 **3 张卡**，
+  于是「第二次池 = 三项条件池」这条 R1 证据得以原样保留；去重本身由
+  `RP-F2-07`（池 = 声明池 − 已拥有）与 `R52i`（池里不含已拥有项）显式断言。
+
+### K.6 E2E 重编号（`tests/_e2e_run_page.cjs` 11c 段）
+
+R52 家族由「直接到第二层」改为「横向 → 第二层」两步：
+
+| 新标 | 内容 |
+|---|---|
+| `R52` | 点「继续改装」→ `d4-lateral`（DAY 4 · `choicePoolKind === 'lateral'`） |
+| `R52b` | 横向候选 = 另外两个一层（`['heavyShell','fastReload']`），不含 `emergencyRepair`、不含已拥有 |
+| `R52c` | 不回耐久（与第二场结束逐字节相同）+ 横向项尚未进 Build（`buffs.length === 1`） |
+| `R52d`/`R52e` | 横向浮层 **2 张卡**账本 + 卡片图标（复用同一套几何，**零 UI 改动** = 必改 4） |
+| `R52f`/`R52g` | 横向之后照样进入 `d5-choice2`（DAY 5 · `layer2`）+ 池由最初主路线决定 |
+| `R52h`/`R52i` | 双联条件池三项 + 池不含任何已拥有 Modifier |
+| `R52j`/`R52k` | 第二层浮层 **3 张卡**账本 + 图标（= 旧 `R52f`/`R52g`） |
+| `R58h`（新增） | 浏览器终局耐久与 Node 实测表**逐值相等**（357 = 32%） |
+
+下游按三层 Build 改写：`R53` / `R53b` / `R53c`（`chip = 144 × 3 = 432`）/ `R54b` /
+`R56b` / `R56c` / `R57c` / `R58c`（`logCount` 38 → **40**）/ `R58d` / `R58f` /
+`R58g`（轨迹多一个 `CHOICE`，21 项：`…DURABILITY→CHOICE→CHOICE→IDLE…`）。
+**12b 段（维修分支）零改动** —— 它本就不经 `d4-lateral`（`R64b` 落在 `d5-tend` 即证据）。
+
+### K.7 显式实测重测（口径 = 实测更新，不是就地重算）
+
+维修分支（`FROZEN_REPAIR`，**逐值不变** = 必改 3「恢复值完全不动」的机器证据）：
+
+| 路线 | ① ② ③ ④ | 终局 |
+|---|---|---|
+| heavyShell+kineticBurst | 919 / 688 / 678 / 472 | COMPLETE |
+| twinCannon+tripleLoad | 919 / 907 / 891 / 602 | COMPLETE |
+| fastReload+twinCannon | 919 / 908 / 1023 / 778 | COMPLETE |
+
+改装分支（`FROZEN_UPGRADE`，横向池第一项：重炮→双联 · 双联→重弹 · 快装→重弹）：
+
+| 路线 | ① ② ③ ④ | 终局 |
+|---|---|---|
+| heavyShell+kineticBurst | 919 / 688 / **489 / 167** | COMPLETE（R1 时代此路线是 FAILED） |
+| twinCannon+tripleLoad | 919 / 907 / **907 / 0** | **FAILED** |
+| fastReload+twinCannon | 919 / 908 / **170 / 0** | **FAILED** |
+
+E2E 主走查组合（`FROZEN_UPGRADE_E2E`，双联 + 横向**快装** + 三连装填）
+= `[919, 907, 839, 357]`，整局日志 **40** 行；浏览器实测 `357.43`（32%）⇒ 与 Node 一致。
+
+⚠️ **判据迁移**：R1 用「重炮路线：维修完成 / 改装失败」演示「耐久决定结局」；
+R2 给改装补了一项后该路线**活着**（167 = 15%）⇒ 这个对照改由**双联路线**承担
+（维修 602 完成 / 改装归零 FAILED）。判据强度不变，只是换了路线。
+
+### K.8 M2 脚手架的连带修正（`nextRunValidation.ts`，冻结项的最小跟随）
+
+`buildPriorCompletedRun` 是「确定性快进」脚手架（A 类，非真人路径）。
+若沿用 `PRIOR_RUN_DURABILITY = 'upgrade'`，R2 会让它多经 `d4-lateral` ⇒ 多拿一项
+⇒ `priorRunSummary.build` 由 2 项变 3 项 ⇒ M2 已验收的可观测输出变化、E2E 断言破裂。
+
+⇒ 改为 **`'repair'`**：路径与内容**完全不变**
+（`d2-choice1` → 耐久事件 → `d5-tend` → `d5-choice2`）⇒ `priorRunSummary` 逐字段保持原值、
+**M2 单测 16/16 零改动通过**。
+
+**代价（如实记录）**：`repair` 会累计 `repairBonus`，而 `runCarriedPlayerHp` 把它叠加到
+真实剩血上 ⇒ `runCarriedPlayerHp(prior)` 从此报告「剩血 + 275」（实测 416 = 141 + 275）。
+⚠️ `priorRunSummary.durabilityPercent` 读 `battle.playerHp`（真实战果）**不受影响**；
+现有断言只要求它是「一个明显不是满耐久的数」⇒ 当前**不改变任何结论**。
+⚠️ 将来若有人断言 `runCarriedPlayerHp(prior) === prior.battle.playerHp`，会在这里踩坑。
+
+### K.9 本轮改实现的两条守卫「收紧而非放宽」
+
+1. `RP-RUN-02-01`：R1 的「`next` 目标集合互不重复」在 R2 后必然失效（两条分支都经 `next`
+   汇入 `d5-choice2`）⇒ 收紧为**入度分析**：全脚本**唯一汇合点** = `d5-choice2`，
+   恰好两个前驱 `[d4-lateral, d5-tend]`，其余节点单前驱。
+2. `RP-22b`：R1 的「汇合后两分支账面逐字段相同」必然不成立（改装多一个图标）
+   ⇒ 收紧为「除 `buffIcon`/`buffChip` 外逐字段相同，且差额**恰好** 756 / 144」。
+
+### K.10 门禁实测（本轮）
+
+| 项 | 结果 |
+|---|---|
+| `npx tsc --noEmit` | **0 错** |
+| `tests/portraitRunPage.test.ts` | **66/66 PASS** |
+| `tests/portraitNextRunValidation.test.ts` | **16/16 PASS（零改动）** |
+| 全量 vitest（`--pool=vmForks --maxWorkers=1`） | **206 文件 / 2017 用例 PASS** |
+| `_e2e_run_page.cjs` | **503/503 PASS** |
+| `_e2e_next_run.cjs` | 47/47 |
+| `_e2e_portrait_battle_lab.cjs` | 148/148 |
+| `_e2e_encounter_lab.cjs` | 47/47 |
+| `_e2e_validation_hub.cjs` | 42/42 |
+| `_e2e_prp_default_entry.cjs` | 79/79 |
+| 冻结区 `git diff --stat` | **空** |
+
+⚠️ **首轮 run-page 4 FAIL（13 段）**：`_e2e_run_page.cjs` 的动能爆发感知链原本用
+`chooseById('upgrade') → chooseById('kineticBurst')`；R2 之后 `upgrade` 先落 `d4-lateral`，
+`kineticBurst` 不在横向池里 ⇒ `chooseById` 返回 `null` ⇒ R63/R64/R65/R66 四条 FAIL
+（实测 0 次命中 / 0 个环 / 0 位移）。**修法 = 该段改走维修分支**
+（同样到达 `d5-choice2`、第二层池一致 ⇒ Build 仍是 `[heavyShell, kineticBurst]`
+= `FROZEN_REPAIR` 那条路线，感知链阈值口径**一字不改**）。修后实测：
+11 次真实命中 · 有环帧 115 · 位置不符 0 · 年龄越界 0 · 环峰值 2 · 位移峰值 66.02px · 冲量 1310.72。
+⇒ 教训：**改分支图后，凡是用 `chooseById(id)` 按 id 选卡的段落都要重新核对「那一步现在落在哪个节点」**。
+

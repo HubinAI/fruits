@@ -1159,18 +1159,17 @@ async function runViewport(browser, vp) {
   }
 
   /*
-    -------------------- 11) PRP-RUN-02：第二场结束 → **耐久取舍** → 第二次选择（条件池）
+    -------------------- 11) PRP-RUN-02：第二场结束 → **耐久取舍** → 横向改装 / 第二次选择（条件池）
     这一段是「Build 不是两个互不相关的 Buff」+「耐久真的参与决策」的机器侧证据：
       · 第二场打完**还不是终局**（`complete === false`），主动作仍是「继续」；
       · 脚本的下一站是 `d4-durability`（**耐久取舍**），不是第二次三选一；
-      · 选「继续改装」不回耐久 → 直接进入第二次强化机会，且候选池**由第一层决定**
-        （`choicePoolLayer === 2`，池 = 双联炮分支的三项）；选「维修」则先到 `d5-tend`
-        （当日焊车叙事）—— ⚠️ **PRP-RUN-02-R1 之后它同样继续进入 `d5-choice2`**（见 12b 段）。
+      · 两条分支**都**继续进入 `d5-choice2`（DAY 5 第二次条件三选一，池由**最初主路线**决定）：
+        - 选「维修」→ 先到 `d5-tend`（当日焊车叙事，**不**获得额外强化）—— 12b 段真跑；
+        - 选「继续改装」→ 先到 `d4-lateral`（**横向改装二选一**，DAY 仍是 4，**不**回耐久）—— 11c 段真跑。
       · 池的槽位结构 = 强联动 / 安全通用 / 轻度转向（必改 5 的取舍）；
-      · 选了强联动「三连装填」后 Build = [twinCannon, tripleLoad]（两层同时存在）。
-    ⚠️ 本段（11c）在浏览器端只跑「继续改装」这一条分支；**「维修」分支在 12b 段同样在浏览器里真跑一遍**
-       （PRP-RUN-02-R1：真人验收发现「选维修 → DAY 5 第二次三选一被一起跳过」，本 Queue 修正后
-        两条分支都必须进入 DAY 5 的条件三选一）。
+      · 选了强联动「三连装填」后 Build = [twinCannon, fastReload, tripleLoad]（一层 + 横向 + 二层）。
+    ⚠️ 本段（11c）在浏览器端只跑「继续改装」分支；**「维修」分支在 12b 段同样在浏览器里真跑一遍**
+       ⇒ 第 4 天的取舍（生存优势 vs 构筑数量优势）两侧都有真实点击证据。
   */
   await page.waitForFunction(
     () => {
@@ -1244,83 +1243,134 @@ async function runViewport(browser, vp) {
     );
   }
 
-  /* ------------------ 11c) 真实点击「继续改装」→ CHOICE②（条件池；**不回耐久**） */
+  /*
+    ------------------ 11c) 真实点击「继续改装」→ **横向改装二选一**（DAY 4）→ CHOICE②（条件池 · DAY 5）
+    PRP-RUN-02-R2：DAY 4 的取舍现在是真的 ——
+      · A 维修 = 回一段耐久，**不**获得额外强化（12b 段在浏览器里真跑一遍）；
+      · B 继续改装 = 不回耐久，**当天立刻**换一次**横向改装二选一**（节点 `d4-lateral`，DAY 仍是 4），
+        候选 = 当前已拥有一层之外的**另外两个**一层强化（**不含**「紧急维修」、不重复已拥有）；
+        之后**照样**进入 DAY 5 的第二次条件三选一（池仍由**最初主路线**决定）。
+    本段（11c）在浏览器端只跑「继续改装」分支 ⇒ 最终 Build 是**三项**（一层 + 横向 + 二层），
+    所以下游 11d~11g 的 Build / 图标 / 账本 / 日志行数全部按三项写死。
+  */
   await clickRect(page, pDur.overlayOptions[1].rect); // 继续改装
+  const pLateral = await probeOf(page);
+  const lateralIds = pLateral.choiceOptions.map((o) => o.id);
+  log(
+    pLateral.phase === 'CHOICE' &&
+      pLateral.nodeId === 'd4-lateral' &&
+      pLateral.day === 4 &&
+      pLateral.choicePoolKind === 'lateral',
+    `[${tag}] R52 必改 1：选「继续改装」→ **当天立刻**换来一次横向改装二选一（节点 d4-lateral · DAY 仍是 4）`,
+    `phase=${pLateral.phase} node=${pLateral.nodeId}(${pLateral.nodeKind}) day=${pLateral.day} poolKind=${pLateral.choicePoolKind}`,
+  );
+  log(
+    JSON.stringify(lateralIds) === JSON.stringify(['heavyShell', 'fastReload']) &&
+      JSON.stringify(pLateral.choiceOptions.map((o) => o.label)) === JSON.stringify(['重型弹头', '快速装填']) &&
+      !lateralIds.includes('emergencyRepair') &&
+      !lateralIds.includes('twinCannon'),
+    `[${tag}] R52b 必改 1：横向候选 = 已拥有一层之外的**另外两个**一层强化（重弹 / 快装；**不含紧急维修**、不重复已拥有）`,
+    `已拥有=[twinCannon] 候选=${pLateral.choiceOptions.map((o) => `${o.label}(${o.id})`).join(' / ')}`,
+  );
+  log(
+    !!pLateral.battle &&
+      Math.abs(pLateral.battle.playerHp - pRes2.battle.playerHp) < 1e-6 &&
+      pLateral.buffs.length === 1 &&
+      JSON.stringify(pLateral.build) === JSON.stringify(['twinCannon']),
+    `[${tag}] R52c 必改 3：改装分支**不回耐久**（与第二场结束逐字节相同），且横向那一项此时还没进 Build`,
+    `hp=${round2(pLateral.battle ? pLateral.battle.playerHp : NaN)} build=[${pLateral.build.join(',')}] buffs=${pLateral.buffs.length}`,
+  );
+  const sLateral = await pixelStats(page);
+  ledgerCheck(tag, 'R52d 横向改装 CHOICE (DAY4 · 浮层 2 张卡)', sLateral, ledgerExpect({ masked: 2 }), vp.dpr);
+  if (vp.dpr === 1) {
+    const latIcons = await checkChoiceIcons(page, pLateral);
+    log(
+      latIcons.ok,
+      `[${tag}] R52e 横向卡片同样是真实矢量图标（盒内面积 + 八色精确互斥）—— 复用同一套浮层几何`,
+      latIcons.rows.map((r) => `${r.id}:${r.own}px/交叉${r.cross}`).join(' '),
+    );
+  }
+
+  /* ------------------ 11c-2) 选横向项「快速装填」→ CHOICE②（DAY 5 · 第二层条件池） */
+  await clickRect(page, pLateral.choiceOptions[1].rect); // 横向：快速装填
   const pChoice2 = await probeOf(page);
   const pool2Ids = pChoice2.choiceOptions.map((o) => o.id);
   log(
-    pChoice2.phase === 'CHOICE' && pChoice2.nodeId === 'd5-choice2' && pChoice2.day === 5,
-    `[${tag}] R52 必改 3：选「继续改装」→ **放弃回耐久，换来第二次强化机会**（脚本分支 d5-choice2 · DAY 5）`,
-    `phase=${pChoice2.phase} node=${pChoice2.nodeId} day=${pChoice2.day}`,
+    pChoice2.phase === 'CHOICE' &&
+      pChoice2.nodeId === 'd5-choice2' &&
+      pChoice2.day === 5 &&
+      pChoice2.choicePoolKind === 'layer2',
+    `[${tag}] R52f 必改 2：横向改装之后**照样**进入 DAY 5 第二次条件三选一（节点 d5-choice2）`,
+    `phase=${pChoice2.phase} node=${pChoice2.nodeId} day=${pChoice2.day} poolKind=${pChoice2.choicePoolKind}`,
   );
   log(
-    pChoice2.choicePoolLayer === 2,
-    `[${tag}] R52b 必改 1：第二次选择 = 第二层（choicePoolLayer=2，由第一层决定）`,
-    `layer=${pChoice2.choicePoolLayer}`,
+    pChoice2.choicePoolLayer === 2 &&
+      pChoice2.buffs.length === 2 &&
+      JSON.stringify(pChoice2.build) === JSON.stringify(['twinCannon', 'fastReload']) &&
+      Math.abs(pChoice2.battle.playerHp - pRes2.battle.playerHp) < 1e-6,
+    `[${tag}] R52g 必改 2/3：第二层池由**最初主路线**（双联炮）决定（不是被横向项改写）；耐久仍未被回补`,
+    `layer=${pChoice2.choicePoolLayer} build=[${pChoice2.build.join(',')}] hp=${round2(pChoice2.battle ? pChoice2.battle.playerHp : NaN)}`,
   );
   log(
     JSON.stringify(pool2Ids) === JSON.stringify(['tripleLoad', 'emergencyRepair', 'heavyShell']) &&
       JSON.stringify(pChoice2.choiceOptions.map((o) => o.label)) ===
         JSON.stringify(['三连装填', '紧急维修', '重型弹头']),
-    `[${tag}] R52c 必改 1/5：双联炮分支的条件池 = 强联动「三连装填」+ 安全项「紧急维修」+ 转向项「重型弹头」`,
+    `[${tag}] R52h 必改 2：双联炮分支的条件池 = 强联动「三连装填」+ 安全项「紧急维修」+ 转向项「重型弹头」`,
     `pool=${pChoice2.choiceOptions.map((o) => `${o.label}(${o.id})`).join(' / ')}`,
   );
   log(
     // 与第一次的固定池**不是同一套**（至少两项不同）→ 「第一次选择改变了后续能拿到的方向」
     pool2Ids.filter((id) => ['heavyShell', 'twinCannon', 'fastReload'].includes(id)).length <= 1 &&
-      pool2Ids[0] === 'tripleLoad',
-    `[${tag}] R52d 必改 1：第二次池 ≠ 第一次池（强联动占首位，不是通用三选一换个顺序）`,
-    `第一次池=[heavyShell,twinCannon,fastReload] 第二次池=[${pool2Ids.join(',')}]`,
-  );
-  // 「继续改装」不回耐久：浮层下面那份战斗记录的耐久与第二场结束时**逐字节相同**
-  log(
-    !!pChoice2.battle &&
-      Math.abs(pChoice2.battle.playerHp - pRes2.battle.playerHp) < 1e-6 &&
-      JSON.stringify(pChoice2.build) === JSON.stringify(['twinCannon']),
-    `[${tag}] R52e 必改 3：改装分支**不回耐久**（仍是第二场结束时的剩余），且此时还没拿到第二层`,
-    `hp=${round2(pChoice2.battle ? pChoice2.battle.playerHp : NaN)} build=[${pChoice2.build.join(',')}]`,
+      pool2Ids[0] === 'tripleLoad' &&
+      // 全池统一去重：已进 Build 的横向项不会再出现在第二层池里（验收 4「无重复 Modifier」）
+      !pool2Ids.includes('fastReload'),
+    `[${tag}] R52i 必改 1 + 验收 4：第二次池 ≠ 第一次池，且不含任何**已拥有**的 Modifier`,
+    `第一次池=[heavyShell,twinCannon,fastReload] 已横向=[fastReload] 第二次池=[${pool2Ids.join(',')}]`,
   );
   const sChoice2 = await pixelStats(page);
-  ledgerCheck(tag, 'R52f CHOICE② (DAY5)', sChoice2, ledgerExpect({ masked: 3 }), vp.dpr);
+  ledgerCheck(tag, 'R52j CHOICE② (DAY5 · 浮层 3 张卡)', sChoice2, ledgerExpect({ masked: 3 }), vp.dpr);
   if (vp.dpr === 1) {
     const icons2 = await checkChoiceIcons(page, pChoice2);
     log(
       icons2.ok,
-      `[${tag}] R52g 第二层卡片图标同样是真实矢量字形（盒内面积 + 八色精确互斥）`,
+      `[${tag}] R52k 第二层卡片图标同样是真实矢量字形（盒内面积 + 八色精确互斥）`,
       icons2.rows.map((r) => `${r.id}:${r.own}px/交叉${r.cross}`).join(' '),
     );
   }
 
-  /* ------------------ 11d) 选强联动「三连装填」→ IDLE(d6-battle3 · DAY 6)，顶部 2 个图标 */
+  /* ------------------ 11d) 选强联动「三连装填」→ IDLE(d6-battle3 · DAY 6)，顶部 3 个图标 */
   await clickRect(page, pChoice2.choiceOptions[0].rect); // 三连装填
   const pIdle5 = await probeOf(page);
   log(
     pIdle5.phase === 'IDLE' &&
       pIdle5.nodeId === 'd6-battle3' &&
       pIdle5.day === 6 &&
-      pIdle5.buffs.length === 2 &&
-      JSON.stringify(pIdle5.build) === JSON.stringify(['twinCannon', 'tripleLoad']) &&
+      pIdle5.buffs.length === 3 &&
+      JSON.stringify(pIdle5.build) === JSON.stringify(['twinCannon', 'fastReload', 'tripleLoad']) &&
       pIdle5.modifier === 'twinCannon',
-    `[${tag}] R53 必改 6：选择后 Build = [twinCannon, tripleLoad]（DAY 6 · 顶部 2 个图标，不是 1 个）`,
+    `[${tag}] R53 必改 6：选择后 Build = [twinCannon, fastReload, tripleLoad]（DAY 6 · 顶部 3 个图标 = 一层 + 横向 + 二层）`,
     `day=${pIdle5.day}/${pIdle5.dayTotal} node=${pIdle5.nodeId} build=${pIdle5.buildLabels.join('+')} buffIconCount=${pIdle5.buffIconCount}`,
   );
   const sIdle5 = await pixelStats(page);
   ledgerCheck(
     tag,
-    'R53b IDLE (DAY6 · 2 强化)',
+    'R53b IDLE (DAY6 · 3 强化)',
     sIdle5,
-    ledgerExpect({ day: 6, stage: 'idle', buffs: ['twinCannon', 'tripleLoad'] }),
+    ledgerExpect({ day: 6, stage: 'idle', buffs: ['twinCannon', 'fastReload', 'tripleLoad'] }),
     vp.dpr,
   );
   if (vp.dpr === 1) {
     log(
-      sIdle5.buffIconTwin === 756 && sIdle5.buffIconTriple === 756 && sIdle5.buffChip === 288,
-      `[${tag}] R53c 顶部 2 个真实图标 = 各自选项的底色（双联炮 + 三连装填），无空槽`,
-      `twin=${sIdle5.buffIconTwin} triple=${sIdle5.buffIconTriple} chip=${sIdle5.buffChip}`,
+      sIdle5.buffIconTwin === 756 &&
+        sIdle5.buffIconReload === 756 &&
+        sIdle5.buffIconTriple === 756 &&
+        sIdle5.buffChip === 432,
+      `[${tag}] R53c 顶部 3 个真实图标 = 各自选项的底色（双联炮 + 快速装填 + 三连装填），无空槽`,
+      `twin=${sIdle5.buffIconTwin} reload=${sIdle5.buffIconReload} triple=${sIdle5.buffIconTriple} chip=${sIdle5.buffChip}`,
     );
   }
 
-  /* ------------------ 11e) 第三场（DAY 6 · ProtoRusher · 两层 Build 同时真实生效） */
+  /* ------------------ 11e) 第三场（DAY 6 · ProtoRusher · 三层 Build 同时真实生效） */
   /*
     规则（PRP-RUN-R1 起）：carry = 上一场真实剩余；**耐久 <= 0 = 本局立即结束**（FAILED 终态），
     所以能走到最终战斗 ⇒ 上一场结束时 hp2 必然 > 0 —— 不存在「0 耐久 → 满耐久开幕」这条
@@ -1343,13 +1393,13 @@ async function runViewport(browser, vp) {
   log(
     !!w3 &&
       w3.modifier === 'twinCannon' &&
-      JSON.stringify(w3.build) === JSON.stringify(['twinCannon', 'tripleLoad']) &&
+      JSON.stringify(w3.build) === JSON.stringify(['twinCannon', 'fastReload', 'tripleLoad']) &&
       // ⚠️ 本路线的第二层是「三连装填」，所以**能力类**强化必须是关的；
       //    `kineticBurst === false` = 「动能爆发」不会被别的 Build 顺带打开（不串味）。
       //    ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：快速装填的专属二层（三条尝试全部未通过）
       //    已整条废弃，探针里的 suppression* 字段随之一并删除。
       w3.abilities.kineticBurst === false,
-    `[${tag}] R54b 必改 6：第三场**同时携带两层**（一层改武器 + 二层数值，运行时不串味）`,
+    `[${tag}] R54b 必改 6：第三场**同时携带三层**（一层改武器 + 横向 + 二层数值，运行时不串味）`,
     w3
       ? `build=[${w3.build.join(',')}] modifier=${w3.modifier} kinetic=${w3.abilities.kineticBurst}`
       : 'no battleWorld',
@@ -1447,18 +1497,18 @@ async function runViewport(browser, vp) {
   );
   log(
     pEnd3.day === 6 &&
-      pEnd3.buffs.length === 2 &&
-      JSON.stringify(pEnd3.build) === JSON.stringify(['twinCannon', 'tripleLoad']) &&
+      pEnd3.buffs.length === 3 &&
+      JSON.stringify(pEnd3.build) === JSON.stringify(['twinCannon', 'fastReload', 'tripleLoad']) &&
       pEnd3.log[pEnd3.log.length - 1].text === '再往前，就是这片荒原最深处的对手。',
-    `[${tag}] R56b 第三场 RESULT = DAY 6 + 两层 Build + **该节点的 after**（把玩家导向终局）`,
+    `[${tag}] R56b 第三场 RESULT = DAY 6 + 三层 Build + **该节点的 after**（把玩家导向终局）`,
     `day=${pEnd3.day}/${pEnd3.dayTotal} build=${pEnd3.buildLabels.join('+')} tail=${pEnd3.log[pEnd3.log.length - 1].text}`,
   );
   const sRes3 = await pixelStats(page);
   ledgerCheck(
     tag,
-    'R56c RESULT 第三场 (DAY6 · 2 强化)',
+    'R56c RESULT 第三场 (DAY6 · 3 强化)',
     sRes3,
-    ledgerExpect({ day: 6, stage: 'battle', buffs: ['twinCannon', 'tripleLoad'] }),
+    ledgerExpect({ day: 6, stage: 'battle', buffs: ['twinCannon', 'fastReload', 'tripleLoad'] }),
     vp.dpr,
   );
 
@@ -1488,8 +1538,8 @@ async function runViewport(browser, vp) {
     p4.phase === 'BATTLE' &&
       p4.day === 7 &&
       p4.battlesCompleted === 3 &&
-      JSON.stringify(p4.build) === JSON.stringify(['twinCannon', 'tripleLoad']),
-    `[${tag}] R57c 终局战斗开打（DAY 7 · 第 4/4 场 · 两层 Build）`,
+      JSON.stringify(p4.build) === JSON.stringify(['twinCannon', 'fastReload', 'tripleLoad']),
+    `[${tag}] R57c 终局战斗开打（DAY 7 · 第 4/4 场 · 三层 Build）`,
     `phase=${p4.phase} day=${p4.day} 第${p4.battlesCompleted + 1}/${p4.battleTotal}场`,
   );
   log(
@@ -1502,8 +1552,9 @@ async function runViewport(browser, vp) {
   const pDone = await probeOf(page);
   /*
     必改 5｜Run End：胜利 = `RUN COMPLETE`。本路线的结局是**确定性**的（`RunBattleRuntime` 无 RNG）
-    —— Node 端冻结表 `FROZEN_UPGRADE['twinCannon+tripleLoad'] = [919, 907, 699, 217]`
-    与浏览器实跑逐项相等，因此这里断言**精确终局**（不做「完成或失败都算过」的柔性判据）。
+    —— Node 端实测表 `FROZEN_UPGRADE_E2E`（改装分支 · 一层双联炮 + 横向快速装填 + 二层三连装填）
+    = [919, 907, 839, 357]，浏览器实跑逐项相等（终局耐久 357 = 32%），因此这里断言**精确终局**
+    （不做「完成或失败都算过」的柔性判据）。
   */
   log(
     pDone.phase === 'COMPLETE' &&
@@ -1522,7 +1573,7 @@ async function runViewport(browser, vp) {
   );
   const doneTail = pDone.log.slice(-4).map((l) => l.text);
   log(
-    pDone.logCount === 38 &&
+    pDone.logCount === 40 &&
       JSON.stringify(doneTail) ===
         JSON.stringify([
           '战斗胜利。',
@@ -1540,9 +1591,19 @@ async function runViewport(browser, vp) {
       pDone.battle.done === true &&
       pDone.battle.playerHp > 0 &&
       pDone.battle.durabilityPercent === Math.round((pDone.battle.playerHp / pDone.battle.playerHpMax) * 100) &&
-      JSON.stringify(pDone.buildLabels) === JSON.stringify(['双联炮', '三连装填']),
+      JSON.stringify(pDone.buildLabels) === JSON.stringify(['双联炮', '快速装填', '三连装填']),
     `[${tag}] R58d RUN COMPLETE 显示最低必要信息（最终 DAY / 最终耐久 / 最终 Build / 完成动作）`,
     `DAY ${pDone.day}/${pDone.dayTotal} · 耐久 ${round2(pDone.battle.playerHp)}/${pDone.battle.playerHpMax}（${pDone.battle.durabilityPercent}%）· Build=${pDone.buildLabels.join('+')} · 动作「${pDone.actionLabel}」`,
+  );
+  /*
+    PRP-RUN-02-R2：浏览器实跑的终局耐久必须与 Node 端**同一实测口径**逐值相等
+    （`FROZEN_UPGRADE_E2E` 的第四项 = 357）。这条把「浏览器真的按同一套确定性物理跑完」钉死，
+    而不是只断言「> 0」。
+  */
+  log(
+    Math.round(pDone.battle.playerHp) === 357 && pDone.battle.durabilityPercent === 32,
+    `[${tag}] R58h 终局耐久与 Node 端实测表逐值相等（改装分支三层 Build · 357 = 32%）`,
+    `浏览器 ${round2(pDone.battle.playerHp)}（${pDone.battle.durabilityPercent}%）· Node 357（32%）`,
   );
   // 冒险记录完整：DAY 1..DAY 7 全部出现过（七天的整局被完整记录）
   const doneTexts = pDone.log.map((l) => l.text);
@@ -1555,19 +1616,19 @@ async function runViewport(browser, vp) {
   const sDone = await pixelStats(page);
   ledgerCheck(
     tag,
-    'R58f RUN COMPLETE (DAY7 · 2 强化)',
+    'R58f RUN COMPLETE (DAY7 · 3 强化)',
     sDone,
-    ledgerExpect({ day: 7, stage: 'battle', buffs: ['twinCannon', 'tripleLoad'] }),
+    ledgerExpect({ day: 7, stage: 'battle', buffs: ['twinCannon', 'fastReload', 'tripleLoad'] }),
     vp.dpr,
   );
   log(
     JSON.stringify(pDone.phaseTrail) ===
       JSON.stringify([
         'IDLE', 'IDLE', 'EVENT', 'BATTLE', 'RESULT', 'CHOICE', 'IDLE',
-        'EVENT', 'BATTLE', 'RESULT', 'DURABILITY', 'CHOICE', 'IDLE',
+        'EVENT', 'BATTLE', 'RESULT', 'DURABILITY', 'CHOICE', 'CHOICE', 'IDLE',
         'EVENT', 'BATTLE', 'RESULT', 'IDLE', 'EVENT', 'BATTLE', 'COMPLETE',
       ]),
-    `[${tag}] R58g 完整整局轨迹（九个脚本节点）：四场真实战斗 + 两次强化 + 一次耐久取舍，全程同一状态机`,
+    `[${tag}] R58g 完整整局轨迹（十个脚本节点）：四场真实战斗 + 两次强化 + 一次横向改装 + 一次耐久取舍，全程同一状态机`,
     pDone.phaseTrail.join('→'),
   );
 
@@ -1771,8 +1832,12 @@ async function runViewport(browser, vp) {
       · 环画在**真实命中点**上 —— `kineticImpact.worldX/Y` 与 `abilities.lastKineticHit` **逐字段相等**；
       · 环是**短的** —— 寿命 `RUN_IMPACT_RING_MS`(280ms) 之外完全消失（`kineticImpact` 回到 null）；
       · **物理真的发生** —— 命中后短窗内敌车在舞台带内的真实位移 > 0（不是只有视觉环）。
-    做法：独立打开一个干净页面，走「基础 → 重型弹头 → 重型弹头+动能爆发」两层路线，
+    做法：独立打开一个干净页面，走「基础 → 重型弹头 → **维修** → 重型弹头+动能爆发」路线，
     在第三场用 25ms 轮询读**公开 probe**（不读配置、不走任何内部句柄）。
+    ⚠️ PRP-RUN-02-R2 把这里从「继续改装」换成「维修」：本段的判据（命中次数 / 环寿命 / 位移阈值）
+      都在**恰好两项**的 Build（`[heavyShell, kineticBurst]` = `FROZEN_REPAIR` 那条路线）上标定过，
+      而 R2 之后「继续改装」会多拿一项横向改装（三层 Build）。维修分支同样到达 `d5-choice2`
+      （第二层池完全一致）⇒ 感知链的口径**一字不改**，只有本局第三场开局耐久多了那 275 点。
     ⚠️ 只在第一个视口跑一次（连打三场 ≈ 50s）。
   */
   if (!kineticObserved) {
@@ -1832,7 +1897,13 @@ async function runViewport(browser, vp) {
     const k2 = await enterBattle();
     await waitResult();
     await clickRect(kpage, (await probeOf(kpage)).actionRect); // RESULT → **耐久取舍**
-    const durPick = await chooseById('upgrade'); // 继续改装（不回耐久，换第二次强化）
+    /*
+      ⚠️ PRP-RUN-02-R2：本段要的是**恰好两项**的 Build（重型弹头 + 动能爆发），
+      所以走**维修**分支 —— 它同样到达 `d5-choice2`（第二层池与改装分支完全一致），
+      但不多拿横向改装 ⇒ Build 仍是 [heavyShell, kineticBurst]。
+    */
+    const durPick = await chooseById('repair'); // 维修（不回耐久，拿回一段耐久）
+    await clickRect(kpage, (await probeOf(kpage)).actionRect); // d5-tend（DAY5 当日叙事）→ 继续 → CHOICE②
     const pickKinetic = await chooseById('kineticBurst');
     // 第三场：重型弹头 + 动能爆发 —— 感知链就在这一场观测
     const k3 = await enterBattle();

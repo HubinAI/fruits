@@ -12,10 +12,13 @@
  * 本文件不再自己数「第几场 / 第几选」，而是读 `runScript.ts` 的**节点序列**：
  *
  *     d1-start(EVENT) → d2-battle1(BATTLE) → d2-choice1(CHOICE) → d3-battle2(BATTLE)
- *       → d4-durability(DURABILITY) ─┬─ repair  → d5-tend(EVENT) ────┐
- *                                    └─ upgrade → d5-choice2(CHOICE) ←┘ ← 两条分支在此汇合
+ *       → d4-durability(DURABILITY) ─┬─ repair  → d5-tend(EVENT · DAY5 焊车) ───┐
+ *                                    └─ upgrade → d4-lateral(CHOICE · DAY4 横向) ┴→ d5-choice2(CHOICE · DAY5)
  *                                      → d6-battle3(BATTLE) → d7-final(FINAL)
  *                                      → RUN COMPLETE / RUN FAILED
+ *
+ *   ⚠️ PRP-RUN-02-R2：`d4-lateral`（继续改装分支的横向改装）与 `d5-tend`（维修分支的当日叙事）
+ *      是**两条分支各自的中间节点**，两条分支仍然汇合在同一个 `d5-choice2`。
  *
  *   - 状态里唯一的进度锚点 = **`nodeId`**（当前已呈现的脚本节点）；推进只走
  *     `next` / `branch`，DAY 与叙事文本全部来自节点
@@ -45,14 +48,22 @@
  *   让「现在这点耐久」改变玩家的下一步选择。
  *
  *     A｜维修       → 恢复一段明确耐久（沿用 `EMERGENCY_REPAIR_FRACTION`，不新造数值）
- *                     → **不获得这一次额外改装**（当日走 `d5-tend` 的焊车叙事）
- *     B｜继续改装   → 不回耐久 → 直接进入**现有条件池**的第二次三选一
+ *                     → **不获得**这一天额外改装（当日走 `d5-tend` 的焊车叙事）
+ *                     ⇒ **生存优势**
+ *     B｜继续改装   → 不回耐久 → **立即**多拿一项横向改装（`d4-lateral` 二选一）
+ *                     → **再**进入 DAY 5 的第二次条件三选一
+ *                     ⇒ **构筑数量优势**
  *
  *   ⚠️ PRP-RUN-02-R1（真人验收修正）：`d4-durability` 与 `d5-choice2` 是**两个独立节点** ——
- *      **两条分支都会**到达 DAY 5 的第二次条件三选一；维修的机会成本只是「这一次额外改装」，
+ *      **两条分支都会**到达 DAY 5 的第二次条件三选一；维修的机会成本只是「这一天额外改装」，
  *      不是「整局第二层 Build」。第一层在任何分支下都不被清除，第二层也不被阻止。
  *      ⇒ 本文件的推进逻辑**不含任何分支特判**：repair / upgrade 都只把状态推进到
  *        `node.branch[choice]`，之后按脚本自己的 `next` 继续（修正全部落在 `runScript.ts` 的数据里）。
+ *
+ *   ⚠️ PRP-RUN-02-R2（真人验收修正）：修正前两条分支的差别**只剩耐久** ⇒ 维修**严格支配**
+ *      继续改装。现在继续改装换到「多一项横向改装」，两条分支各拿到**不同的优势**。
+ *      候选池的种类由节点声明（`node.choicePool`），因此本文件依然**零分支特判**：
+ *      它不知道「现在是第几选」，只知道「当前节点要哪一种池」。
  *
  *   没有货币、没有新资源；两者的文案与因果都在 `runScript.ts`（数据，不在 UI 里散落）。
  *
@@ -63,7 +74,18 @@
  *   - 不新增第一层强化、不新增联动（沿用既有 Build 池）。
  */
 
-import { EMERGENCY_REPAIR_FRACTION, RUN_MODIFIERS, runLayer2PoolDefs, runModifierById, type RunModifierId } from './runModifiers';
+import {
+  EMERGENCY_REPAIR_FRACTION,
+  RUN_MODIFIERS,
+  isLayer1Modifier,
+  runLayer1PoolDefs,
+  runLayer2PoolDefs,
+  runLateralPoolDefs,
+  runModifierById,
+  type Layer1ModifierId,
+  type RunModifierDef,
+  type RunModifierId,
+} from './runModifiers';
 import {
   RUN_DURABILITY_EVENT,
   RUN_SCRIPT_FIRST_ID,
@@ -72,6 +94,7 @@ import {
   RUN_TOTAL_DAYS,
   requireRunScriptNode,
   runScriptNode,
+  type RunChoicePoolKind,
   type RunDurabilityChoiceId,
   type RunScriptNode,
 } from './runScript';
@@ -268,7 +291,14 @@ function goPhase(s: RunPageState, phase: RunPhase, patch: Partial<RunPageState>)
 /** 单局总天数 / 总战斗数 / 总选择次数 —— 唯一来源是 Run Script。 */
 export const RUN_DAYS_TOTAL = RUN_TOTAL_DAYS;
 export const RUN_BATTLES_TOTAL = RUN_TOTAL_BATTLES;
-/** 一局最多两次强化选择（第一层 + 第二层条件池）。 */
+/**
+ * 一局最多能拿几项强化（= 脚本里 CHOICE 节点数，结构性上限，不靠运行期扫描）。
+ *
+ * ⚠️ PRP-RUN-02-R2：脚本现在有三个 CHOICE 节点 ⇒ 上限 **3**。
+ *    但**单条分支**拿不满：维修分支只经 `d2-choice1` + `d5-choice2`（2 项），
+ *    继续改装分支才经三个（3 项）—— 「维修 = 生存优势 / 继续改装 = 构筑数量优势」
+ *    正是这个差别的名字，不是这里需要修正的错误。
+ */
 export const RUN_MAX_CHOICES = RUN_TOTAL_CHOICES;
 
 /** 终态动作文案（点击 = 新开一个干净 Run）。 */
@@ -415,19 +445,69 @@ export function runBuildIds(s: RunPageState): readonly RunModifierId[] {
 }
 
 /**
- * **当前应该出现的候选池**（结构规则，不随机）。
+ * 本局**最初的主路线** = 最早拿到的那一项一层强化（`heavyShell` / `twinCannon` / `fastReload`）。
  *
- *   - 还没选过（`buffs.length === 0`）→ 第一层固定三选一；
- *   - 已选一层（`buffs.length === 1`）→ **第二层条件池**（由第一层选择决定）；
- *   - 已选满（`RUN_MAX_CHOICES`）→ 空。
+ * ⚠️ PRP-RUN-02-R2：第二层的条件池**恒由它决定**，与中途多拿了多少项横向改装无关
+ *    （Queue 必改 2「DAY5 的条件池仍由最初主路线决定」）。
+ */
+export function runMainRouteId(s: RunPageState): Layer1ModifierId | null {
+  for (const b of s.buffs) if (isLayer1Modifier(b.id)) return b.id;
+  return null;
+}
+
+/** 剔除本局**已拥有**的强化 —— 验收 4「无重复 Modifier」的结构性保证（不是运行期补救）。 */
+function dedupeOwned(
+  defs: readonly RunModifierDef[],
+  owned: readonly RunModifierId[],
+): readonly RunModifierDef[] {
+  return defs.filter((d) => !owned.includes(d.id));
+}
+
+/**
+ * **当前 CHOICE 节点的候选池**（结构规则，不随机）。
  *
- * ⚠️ 与 phase 无关（这是**结构规则**，不是「屏幕上现在有什么」）；
- *    「屏幕上现在有什么」读 `runOverlayCards`。
+ * ⚠️ PRP-RUN-02-R2：池的**种类**由当前脚本节点声明（`node.choicePool`）——
+ *    不再按 `buffs.length` 数数，因此「第几次选」与「哪一层内容」是两件独立的事：
+ *
+ *   - `layer1`  → 第一层三项（`d2-choice1`）
+ *   - `lateral` → **横向改装**：现有第一层之外的另外两项（`d4-lateral`，二选一）
+ *   - `layer2`  → **第二层条件池**，由**最初主路线**决定（`d5-choice2`）
+ *
+ * ⚠️ 三种池统一剔除已拥有的项 ⇒ 「继续改装」先拿了 `fastReload` 时，
+ *    第二层池里的 `fastReload` 会自动消失，结构上不可能拿到重复项。
+ *
+ * ⚠️ 这是**结构规则**（当前节点「该给什么」），不是「屏幕上现在有什么」——
+ *    后者读 `runOverlayCards`（它只在本节点真的处于 CHOICE 时才取用本函数）。
  */
 export function runChoicePool(s: RunPageState): readonly RunChoiceOption[] {
-  if (s.buffs.length === 0) return RUN_CHOICE_OPTIONS;
-  if (s.buffs.length === 1) return toOptions(runLayer2PoolDefs(s.buffs[0].id));
-  return [];
+  const kind = runChoicePoolKind(s);
+  if (!kind) return [];
+  const owned = runBuildIds(s);
+  if (kind === 'layer1') return toOptions(dedupeOwned(runLayer1PoolDefs(), owned));
+  if (kind === 'lateral') return toOptions(runLateralPoolDefs(owned));
+  const main = runMainRouteId(s);
+  return main ? toOptions(dedupeOwned(runLayer2PoolDefs(main), owned)) : [];
+}
+
+/**
+ * 当前节点声明的池**种类**（`null` = 当前节点不是 CHOICE）。
+ * 未声明 `choicePool` 的 CHOICE 节点按第一层处理（脚本数据始终显式声明）。
+ */
+export function runChoicePoolKind(s: RunPageState): RunChoicePoolKind | null {
+  const node = runCurrentNode(s);
+  if (node.kind !== 'CHOICE') return null;
+  return node.choicePool ?? 'layer1';
+}
+
+/**
+ * 池的**内容层**：`1` = 一层内容（含横向改装）/ `2` = 第二层条件池 / `0` = 当前不适用。
+ * ⚠️ 它描述的是**池里的内容属于哪一层**，不是「第几次选择」——
+ *    因此横向改装（一层内容）报 1，两条分支走到 `d5-choice2` 时都报 2。
+ */
+export function runChoicePoolLayer(s: RunPageState): number {
+  const kind = runChoicePoolKind(s);
+  if (!kind) return 0;
+  return kind === 'layer2' ? 2 : 1;
 }
 
 /** 某个强化是否属于「当前候选池」（`chooseRunBuff` 的准入判据）。 */
@@ -664,6 +744,10 @@ export function durabilityPercent(b: RunBattleState): number {
  * 准入（结构性约束，不靠运行期扫描）：
  *   1) 必须是 CHOICE；2) 选择次数 < `RUN_MAX_CHOICES`；3) 选项必须在**当前候选池**里。
  * 不满足 → no-op（同引用）。
+ *
+ * ⚠️ PRP-RUN-02-R2「无重复 Modifier」不需要在这里再加一条检查 ——
+ *    当前候选池（`runChoicePool`）已经把本局**已拥有**的项剔除，
+ *    因此「重复选同一个」在结构上就不可能通过第 3 条。
  */
 export function chooseRunBuff(s: RunPageState, optionId: string, ctx: RunPageContext): RunPageState {
   if (!runChoiceOpen(s)) return s;
@@ -691,9 +775,10 @@ export function chooseRunBuff(s: RunPageState, optionId: string, ctx: RunPageCon
  *   `repair`  → 按 `EMERGENCY_REPAIR_FRACTION` 修回一段耐久（不超过上限，**如实记账**），
  *               然后走**维修分支**：中经「把这一天用在修车上」的当日叙事节点（`d5-tend`），
  *               **再继续**进入 DAY 5 的第二次条件三选一；
- *   `upgrade` → 不回耐久，走**改装分支**：立刻进入第二层条件池的三选一。
+ *   `upgrade` → 不回耐久，走**改装分支**：立刻进入**横向改装**二选一（`d4-lateral`），
+ *               选完**再继续**进入 DAY 5 的第二次条件三选一。
  *
- * ⚠️ PRP-RUN-02-R1：两条分支**都会**到达 `d5-choice2`（第二层）。本函数不做任何分支特判 ——
+ * ⚠️ PRP-RUN-02-R1 / R2：两条分支**都会**到达 `d5-choice2`（第二层）。本函数不做任何分支特判 ——
  *    只把状态推进到 `node.branch[choice]`，后续由脚本自己的 `next` 决定。
  *
  * ⚠️ 修复量按「当前真实剩余耐久 + 本局累计补偿」计算缺口，避免日志报出一个实际没吃满的数字。
