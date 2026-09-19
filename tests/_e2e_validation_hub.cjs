@@ -49,10 +49,12 @@ const EXPECT = [
   { id: 'fullRun', label: 'Full Run', pageFile: 'run-page.html', probe: '__RUNPAGE__' },
   { id: 'nextRun', label: 'Next Run', pageFile: 'next-run.html', probe: '__RUNPAGE__' },
   { id: 'encounterBatch', label: 'Encounter Batch', pageFile: 'encounter-lab.html', probe: '__ENCOUNTERLAB__' },
+  // PRP-M3-CONTENT-BATCH-01：第四个入口（内容批次验证台，**没有画布**）。
+  { id: 'contentBatch', label: 'Content Batch', pageFile: 'content-batch.html', probe: '__CONTENTBATCH__' },
 ];
 
-/** 三个入口页面（源文件）：任何一个出现 Hub 字面量都说明「Hub 往玩家画面伸手了」。 */
-const ENTRY_PAGES = ['run-page.html', 'next-run.html', 'encounter-lab.html'];
+/** 四个入口页面（源文件）：任何一个出现 Hub 字面量都说明「Hub 往玩家画面伸手了」。 */
+const ENTRY_PAGES = ['run-page.html', 'next-run.html', 'encounter-lab.html', 'content-batch.html'];
 const HUB_TOKENS = ['validation-hub', 'vhub', '__VALIDATIONHUB__'];
 
 /** 三套 Encounter 的正式期望（与 M3 同源，用于「新文档开局干净」判据）。 */
@@ -102,6 +104,8 @@ function startServer() {
 const hubProbe = (page) => page.evaluate(() => window.__VALIDATIONHUB__.probe());
 const runProbe = (page) => page.evaluate(() => window.__RUNPAGE__.probe());
 const elabProbe = (page) => page.evaluate(() => window.__ENCOUNTERLAB__.probe());
+/** PRP-M3-CONTENT-BATCH-01：内容批次验证台的只读探针（DOM 页面，无画布）。 */
+const cbatchProbe = (page) => page.evaluate(() => window.__CONTENTBATCH__.probe());
 const markerText = (page) =>
   page.evaluate(() => {
     const el = document.querySelector('.vhub-marker');
@@ -144,7 +148,7 @@ async function goHub(page) {
   await page.waitForFunction(
     () =>
       typeof window.__VALIDATIONHUB__ !== 'undefined' &&
-      document.querySelectorAll('a.vhub-card').length === 3,
+      document.querySelectorAll('a.vhub-card').length === 4,
     undefined,
     { timeout: 20000 },
   );
@@ -219,7 +223,7 @@ async function runFlow(browser) {
 
     /* ------------------------------------------- ⑤ Hub 没有画布 / 没有读数 */
     const p0 = await hubProbe(page);
-    log(p0.cardCount === 3 && p0.entries.length === 3, '[V2] Hub 上恰好三张入口卡片', `cards=${p0.cardCount}`);
+    log(p0.cardCount === 4 && p0.entries.length === 4, '[V2] Hub 上恰好四张入口卡片', `cards=${p0.cardCount}`);
     const domCounts = await page.evaluate(() => ({
       canvas: document.querySelectorAll('canvas').length,
       img: document.querySelectorAll('img').length,
@@ -242,11 +246,11 @@ async function runFlow(browser) {
     log(
       JSON.stringify(ids) === JSON.stringify(EXPECT.map((e) => e.id)) &&
         JSON.stringify(labels) === JSON.stringify(EXPECT.map((e) => e.label)),
-      '[V6] 三张卡的 id / 顺序 / label 与镜像表逐项一致',
+      '[V6] 四张卡的 id / 顺序 / label 与镜像表逐项一致',
       `${ids.join(',')} · ${labels.join(' / ')}`,
     );
     const hrefsOk = EXPECT.every((e) => p0.entries.find((x) => x.id === e.id).pageFile === e.pageFile);
-    log(hrefsOk, '[V7] 三张卡分别指向三个真实入口页面', EXPECT.map((e) => e.pageFile).join(' / '));
+    log(hrefsOk, '[V7] 四张卡分别指向四个真实入口页面', EXPECT.map((e) => e.pageFile).join(' / '));
 
     // —— 第 1 张：Full Run = 玩家正式页面本身，进去必须是「全新一局」
     await clickCard(page, 'fullRun');
@@ -317,7 +321,7 @@ async function runFlow(browser) {
     // 真实浏览器后退 → 回 Hub → 再进同一个入口（新文档）
     await goHub(page);
     const p3 = await hubProbe(page);
-    log(p3.lastEntry === 'encounterBatch' && p3.nextEntry === 'fullRun', '[V20] 回到 Hub：标记推进到 Encounter Batch（循环回 Full Run）', `last=${p3.lastEntry} next=${p3.nextEntry}`);
+    log(p3.lastEntry === 'encounterBatch' && p3.nextEntry === 'contentBatch', '[V20] 回到 Hub：标记推进到 Encounter Batch，下一项 Content Batch', `last=${p3.lastEntry} next=${p3.nextEntry}`);
 
     await clickCard(page, 'encounterBatch');
     const elab1 = await elabProbe(page);
@@ -339,13 +343,116 @@ async function runFlow(browser) {
     log(twoProblems.length === 0, '[V24b] 换对手后的开局读数同样干净', twoProblems.length ? twoProblems.join(' | ') : 'clean');
 
     await goHub(page);
+
+    /* ---------------- 第 4 张：Content Batch（PRP-M3-CONTENT-BATCH-01） ----------------
+     * 本段只读 `__CONTENTBATCH__.probe()` + 真实鼠标点击，判据全部是「状态迁移」：
+     *   · 三项内容的顺序与完工状态（第 1 项如实 BLOCK、两项事件 ready）；
+     *   · BLOCK 项**没有选项**（不伪造可运行），且带 file:line 证据；
+     *   · 两个事件各恰 2 个选项；选择真的改动「现有耐久 / 现有 Build」；
+     *   · Reset 后读数与**进入该项时**逐字段相同；
+     *   · 全页零画布（非战斗事件不需要世界 / 相机 / 物理）。
+     */
+    /** 真实鼠标点击一个内容批次控件（与 clickCard 同口径：先取真实矩形再点）。 */
+    const clickBatch = async (selector) => {
+      const box = await page.evaluate((sel) => {
+        const b = document.querySelector(sel);
+        if (!b) return null;
+        const r = b.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, disabled: b.disabled === true };
+      }, selector);
+      if (!box) throw new Error('内容批次控件不存在：' + selector);
+      if (box.disabled) throw new Error('内容批次控件被禁用：' + selector);
+      if (!(box.w > 0 && box.h > 0)) throw new Error('内容批次控件尺寸为 0：' + selector);
+      await page.mouse.click(box.x, box.y);
+      await page.waitForTimeout(60);
+    };
+
+    await clickCard(page, 'contentBatch');
+    const cb0 = await cbatchProbe(page);
     log(
-      (await page.evaluate(() => document.querySelectorAll('a.vhub-card').length)) === 3,
-      '[V25] 从第三个入口也能回到 Hub 并继续切换',
+      cb0.items.map((i) => i.id).join(',') === 'MultiUnitSwarm,RepairStation,RoadsideUpgrade',
+      '[V25a] Content Batch 进入的是那三项内容（顺序 = Queue 原文）',
+      cb0.items.map((i) => `${i.id}:${i.status}`).join(' | '),
+    );
+    log(
+      cb0.activeId === 'MultiUnitSwarm' && cb0.items[0].status === 'blocked' && cb0.items[1].status === 'ready' && cb0.items[2].status === 'ready',
+      '[V25b] 多单位项如实标记 BLOCK，两项非战斗事件 ready（该项前提不成立时不伪造）',
+      `active=${cb0.activeId} status=${cb0.items.map((i) => i.status).join(',')}`,
+    );
+    log(
+      cb0.optionIds.length === 0 && cb0.blockedEvidence >= 5,
+      '[V25c] BLOCK 项没有可选项（不可运行），并带 file:line 证据',
+      `options=${cb0.optionIds.length} evidence=${cb0.blockedEvidence}`,
+    );
+
+    // —— 事件 A：废弃修理站（二选一，只改现有耐久）
+    await clickBatch('[data-cbatch-item="RepairStation"]');
+    const rs0 = await cbatchProbe(page);
+    log(
+      rs0.hpCase === 'damaged' && rs0.hp < rs0.hpMax && rs0.optionIds.join(',') === 'repair,continue',
+      '[V25d] 废弃修理站：受损起点 + 固定二选一（临时维修 / 继续赶路）',
+      `hp=${rs0.hp}/${rs0.hpMax} options=${rs0.optionIds.join(',')}`,
+    );
+    await clickBatch('[data-cbatch-option="continue"]');
+    const rs1 = await cbatchProbe(page);
+    log(
+      rs1.chosenOptionId === 'continue' && rs1.hp === rs0.hp,
+      '[V25e] 选「继续赶路」：耐久一点没变（不回血 = 保持当前状态）',
+      `hp=${rs1.hp}（进入时 ${rs0.hp}）`,
+    );
+    await clickBatch('[data-cbatch-action="reset"]');
+    const rs2 = await cbatchProbe(page);
+    log(
+      rs2.chosenOptionId === null && rs2.hp === rs0.entryHp && rs2.logCount === 0,
+      '[V25f] Reset 后读数与进入本项时逐字段相同（可重复验证）',
+      `hp=${rs2.hp} entry=${rs0.entryHp} chosen=${rs2.chosenOptionId}`,
+    );
+    await clickBatch('[data-cbatch-option="repair"]');
+    const rs3 = await cbatchProbe(page);
+    // 维修量 = 正式维修量（EMERGENCY_REPAIR_FRACTION 0.25 × 上限），由上限派生，不写死 275。
+    const wantHp = Math.min(rs0.hpMax, rs0.hp + Math.round(rs0.hpMax * 0.25));
+    log(
+      rs3.chosenOptionId === 'repair' && rs3.hp === wantHp,
+      '[V25g] 选「临时维修」：按正式维修量（0.25 × 上限）恢复一段耐久，不超过上限',
+      `hp=${rs3.hp}（期望 ${wantHp}；进入时 ${rs0.hp}，上限 ${rs0.hpMax}）`,
+    );
+
+    // —— 事件 B：路边改装件（候选 = 未拥有的一层强化，选一个即改变 Build）
+    await clickBatch('[data-cbatch-item="RoadsideUpgrade"]');
+    const ru0 = await cbatchProbe(page);
+    log(
+      ru0.optionIds.length === 2 && ru0.optionIds.every((id) => ['heavyShell', 'twinCannon', 'fastReload'].includes(id)),
+      '[V25h] 路边改装件：候选恰两个，且都来自未拥有的第一层强化（复用现有池）',
+      `options=${ru0.optionIds.join(',')} owned=[${ru0.owned.join(',')}]`,
+    );
+    await clickBatch(`[data-cbatch-option="${ru0.optionIds[0]}"]`);
+    const ru1 = await cbatchProbe(page);
+    log(
+      ru1.owned.join(',') === [...ru0.owned, ru0.optionIds[0]].join(','),
+      '[V25i] 非战斗节点真的改变了战车 Build（写进现有 Modifier 状态，没有第二套容器）',
+      `owned=[${ru1.owned.join(',')}]`,
+    );
+    await clickBatch('[data-cbatch-action="reset"]');
+    const ru2 = await cbatchProbe(page);
+    log(
+      ru2.owned.join(',') === ru0.owned.join(','),
+      '[V25j] 改装事件 Reset 后 Build 回到进入时（Reset 不吞掉既有 Build）',
+      `owned=[${ru2.owned.join(',')}] entryOwned=[${ru0.owned.join(',')}]`,
+    );
+    log(
+      ru1.canvasCount === 0 && ru1.buttonCount > 0,
+      '[V25k] 本页零画布（非战斗事件没有世界 / 相机 / 物理）+ 控件是真实 DOM 按钮',
+      `canvas=${ru1.canvasCount} buttons=${ru1.buttonCount}`,
+    );
+
+    await goHub(page);
+    log(
+      (await page.evaluate(() => document.querySelectorAll('a.vhub-card').length)) === 4,
+      '[V25] 从第四个入口也能回到 Hub 并继续切换',
       `url=${page.url()}`,
     );
 
-    log(pageErrors.length === 0, '[V26] 全程（Hub + 三个入口 + 来回切换）无运行期异常', pageErrors.length ? pageErrors.join(' | ') : '0 errors');
+    log(pageErrors.length === 0, '[V26] 全程（Hub + 四个入口 + 来回切换）无运行期异常', pageErrors.length ? pageErrors.join(' | ') : '0 errors');
   } finally {
     await ctx.close();
   }
@@ -362,7 +469,7 @@ async function runStructural(browser) {
   try {
     await openHub(page);
     const p = await hubProbe(page);
-    log(p.cardCount === 3, `[${vp.tag}] S1 窄屏下三张卡都在`, `cards=${p.cardCount}`);
+    log(p.cardCount === 4, `[${vp.tag}] S1 窄屏下四张卡都在`, `cards=${p.cardCount}`);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     log(overflow <= 1, `[${vp.tag}] S2 无横向溢出（卡片不越界）`, `overflow=${overflow}px`);
     const noCanvas = await page.evaluate(() => document.querySelectorAll('canvas').length === 0);

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>最强水果 — M3 内容批次（PRP-M3-CONTENT-BATCH-01）</title>
+    <!--
+      PRP-M3-CONTENT-BATCH-01｜M3 Content Batch 验证台。
+
+      它验证的是**内容问题**，不是机制：
+        1) 多单位轻敌群 —— 数量（而不是单车强度）是否让单发重炮与多发 Build 产生不同价值；
+        2) 废弃修理站   —— 玩家当前耐久是否会让一个简单事件产生不同选择；
+        3) 路边改装件   —— 非战斗节点是否也可以改变战车 Build。
+
+      操作（Queue 原文）：切内容 → 验证 → Reset → 下一项。
+
+      边界：
+        - 本页由 `npm run dev:content-batch` 打开，**不是** `npm run dev` 的落地页；
+        - 本页不参与 npm run build / build:pages / build:e2e / build:wechat 任一正式构建；
+        - 控件只存在于本页，**不进入玩家正式 UI**（玩家页面 DOM 里连一个 <button> 都没有）；
+        - 本页**没有画布**：两项内容是纯非战斗事件，没有世界、没有相机、没有物理运行时；
+        - ⚠️ 第 1 项（多单位）当前为 **BLOCK**：正式战斗运行时硬编码两车，多单位需要新
+          Foundation（本 Queue 明令不开发）。本页只**如实展示** BLOCK 理由与 file:line 证据，
+          不伪造一场多单位战斗。
+
+      实验失败可直接删除本文件与 src/lab/portraitBattleLab/。
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { min-height: 100%; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: #06090e;
+        color: #e9eef7;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      #cbatch-root.cbatch-root {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 16px;
+        padding: 34px 20px 28px;
+      }
+
+      /* ---------------------------------------------------------------- 头部 */
+      .cbatch-head { width: 100%; max-width: 760px; }
+      .cbatch-title { font-size: 21px; font-weight: 700; letter-spacing: 0.02em; }
+      .cbatch-lead { margin-top: 6px; font-size: 13px; color: #8a93a5; }
+      .cbatch-scope { margin-top: 10px; font-size: 12px; color: #7b8697; line-height: 1.6; }
+
+      /* -------------------------------------------------------------- 控件条 */
+      .cbatch-switcher, .cbatch-controls, .cbatch-cases {
+        width: 100%; max-width: 760px;
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      }
+      .cbatch-case-label { font-size: 12px; color: #7f8b9e; margin-right: 2px; }
+      .cbatch-btn {
+        font: inherit; font-size: 13px;
+        padding: 7px 14px; border-radius: 8px;
+        border: 1px solid #2b3550; background: #141c28; color: #cfe0ff; cursor: pointer;
+      }
+      .cbatch-btn:hover { background: #1c2740; }
+      .cbatch-btn-active { background: #274267; border-color: #5c86c4; color: #ffffff; }
+      .cbatch-btn-reset { color: #ffb0a6; border-color: #4a2b2b; background: #1e1416; }
+      .cbatch-btn-reset:hover { background: #2c1c1e; }
+      .cbatch-btn:disabled { opacity: 0.45; cursor: default; }
+
+      /* ---------------------------------------------------------------- 舞台 */
+      .cbatch-stage {
+        width: 100%; max-width: 760px;
+        min-height: 260px;
+        display: flex; flex-direction: column; gap: 12px;
+        padding: 18px;
+        border-radius: 12px;
+        border: 1px solid #22304a;
+        background: #0c1119;
+      }
+      .cbatch-stage-title { font-size: 17px; font-weight: 650; }
+      .cbatch-stage-lead { font-size: 13px; color: #b9c4d4; line-height: 1.5; }
+
+      .cbatch-reading {
+        display: flex; flex-wrap: wrap; gap: 18px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px; color: #9fb0c8;
+      }
+      .cbatch-hp { color: #ffd8a8; }
+      .cbatch-owned { color: #a8e0c0; }
+
+      .cbatch-options { display: flex; flex-wrap: wrap; gap: 10px; }
+      .cbatch-option {
+        flex: 1 1 200px;
+        display: flex; flex-direction: column; gap: 6px;
+        padding: 14px 16px;
+        text-align: left;
+        border-radius: 10px;
+        border: 1px solid #2b3550; background: #131b28; color: inherit;
+        cursor: pointer; font: inherit;
+      }
+      .cbatch-option:hover:not(:disabled) { background: #1a2536; border-color: #34507c; }
+      .cbatch-option:disabled { opacity: 0.55; cursor: default; }
+      .cbatch-option-chosen { border-color: #5c86c4; box-shadow: inset 3px 0 0 #5c86c4; }
+      .cbatch-option-label { font-size: 15px; font-weight: 650; color: #eaf1fb; }
+      .cbatch-option-note { font-size: 12px; color: #93a1b6; line-height: 1.5; }
+
+      .cbatch-choice-note { font-size: 12px; color: #8fb4ea; }
+      .cbatch-log { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+      .cbatch-log li { font-size: 12px; color: #a7b4c6; line-height: 1.5; }
+      .cbatch-log li::before { content: '· '; color: #55637a; }
+
+      /* -------------------------------------------------------------- BLOCK */
+      .cbatch-blocked { display: flex; flex-direction: column; gap: 10px; }
+      .cbatch-blocked-reason { font-size: 13px; color: #ffc9a0; line-height: 1.6; }
+      .cbatch-evidence { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+      .cbatch-evidence li {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px; color: #8b98ab; line-height: 1.55; word-break: break-all;
+      }
+      .cbatch-blocked-needs { font-size: 12px; color: #c9b0ff; line-height: 1.6; }
+      .cbatch-blocked-note { font-size: 12px; color: #67717f; line-height: 1.6; }
+
+      .cbatch-goal { font-size: 12px; color: #8a93a5; line-height: 1.6; border-top: 1px solid #16202f; padding-top: 10px; }
+      .cbatch-problems { width: 100%; max-width: 760px; list-style: none; font-size: 12px; color: #ff9c8f; }
+      .cbatch-problems li { line-height: 1.6; }
+
+      @media (max-width: 640px) {
+        #cbatch-root.cbatch-root { padding: 20px 14px 18px; gap: 12px; }
+        .cbatch-title { font-size: 18px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="cbatch-root" class="cbatch-root"></div>
+    <script type="module" src="/src/lab/portraitBattleLab/contentBatchMain.ts"></script>
+  </body>
+</html>

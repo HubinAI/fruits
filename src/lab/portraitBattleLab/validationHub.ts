@@ -4,7 +4,7 @@
  * 问题（Queue 原文）：Prototype 已经出现多个独立验证入口。后续若继续
  * 「改一个机制 → 重新找 URL/命令 → 单独录像 → 再切另一个」，人工验收成本会持续上升。
  *
- * 本文件只做一件事：把「当前需要人工验收的三个验证入口」列成一张**可枚举的表**，
+ * 本文件只做一件事：把「当前需要人工验收的验证入口」列成一张**可枚举的表**，
  * 让页面壳（`validationHubMain.ts`）与守卫（`tests/portraitValidationHub.test.ts`）
  * 读同一份数据 —— 于是「Hub 上摆了什么」与「测试断言了什么」不可能分叉。
  *
@@ -25,7 +25,7 @@
  */
 
 /** 验证中心里的入口 id（数组顺序 = 页面顺序 = 建议的人工验收顺序）。 */
-export type ValidationHubEntryId = 'fullRun' | 'nextRun' | 'encounterBatch';
+export type ValidationHubEntryId = 'fullRun' | 'nextRun' | 'encounterBatch' | 'contentBatch';
 
 export interface ValidationHubEntry {
   readonly id: ValidationHubEntryId;
@@ -46,13 +46,16 @@ export interface ValidationHubEntry {
 }
 
 /**
- * 第一版**只放这三个**（Queue 必改 2 原文）。
+ * 四个入口（顺序 = 建议的人工验收顺序）。
  *
  * ⚠️ `fullRun` 的入口就是玩家正式页面**本身**：
  *    `npm run dev` 的落地页（根路径重写目标）也是 `run-page.html` —— 同一个文件。
  *    验证中心**不复制、不包裹、不改写**它，只提供一个入口。
  *    代价是它不会带着「返回验证中心」的按钮（那会改到正式页面），返回方式见
  *    `VALIDATION_HUB_BACK_HINT`。
+ *
+ * ⚠️ 第四个（`contentBatch`）是 PRP-M3-CONTENT-BATCH-01 新增的**内容批次验证台** ——
+ *    它只**新增一条导航**，Hub 的架构（纯导航 / 零画布 / 整页导航）一个字没动。
  */
 export const VALIDATION_HUB_ENTRIES: readonly ValidationHubEntry[] = [
   {
@@ -84,6 +87,16 @@ export const VALIDATION_HUB_ENTRIES: readonly ValidationHubEntry[] = [
     href: './encounter-lab.html',
     pageFile: 'encounter-lab.html',
     command: 'npm run dev:encounter-lab',
+  },
+  {
+    id: 'contentBatch',
+    label: 'Content Batch',
+    zhLabel: '内容批次',
+    queueId: 'PRP-M3-CONTENT-BATCH-01',
+    verifies: '一批 M3 内容（多单位 / 废弃修理站 / 路边改装件）能不能一次集中看完 —— 其中多单位项当前如实标记 BLOCK。',
+    href: './content-batch.html',
+    pageFile: 'content-batch.html',
+    command: 'npm run dev:content-batch',
   },
 ];
 

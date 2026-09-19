@@ -36,6 +36,9 @@ export default defineConfig({
         // PRP-VALIDATION-HUB-R1：验证中心（三个验证入口的导航壳，**没有画布**）。
         // 同上：仍是同一块可整块删除的实验产物，不进入任何正式产物。
         'validation-hub': 'validation-hub.html',
+        // PRP-M3-CONTENT-BATCH-01：M3 内容批次验证台（三项内容：多单位 / 废弃修理站 /
+        // 路边改装件；**没有画布**）。同上：仍是同一块可整块删除的实验产物。
+        'content-batch': 'content-batch.html',
       },
     },
   },

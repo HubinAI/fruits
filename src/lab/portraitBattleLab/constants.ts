@@ -29,20 +29,21 @@
  * 删除清单（整块移除本实验）：
  *   1) 本目录 src/lab/portraitBattleLab/（全部文件）
  *   2) 根目录 portrait-lab.html、run-page.html、next-run.html、encounter-lab.html、
- *      validation-hub.html
+ *      validation-hub.html、content-batch.html
  *   3) 根目录 vite.portrait-lab.config.ts
  *   4) tests/portraitBattleLab.test.ts、tests/portraitBattleLabF1.test.ts、
  *      tests/portraitBattleLabA1.test.ts、tests/portraitBattleLabG1.test.ts、
  *      tests/portraitRunPage.test.ts、tests/portraitRunBattle.test.ts、
  *      tests/portraitNextRunValidation.test.ts、tests/portraitEncounterLab.test.ts、
- *      tests/portraitValidationHub.test.ts、
+ *      tests/portraitValidationHub.test.ts、tests/portraitContentBatch.test.ts、
  *      tests/_e2e_portrait_battle_lab.cjs、tests/_e2e_run_page.cjs、
  *      tests/_e2e_next_run.cjs、tests/_e2e_encounter_lab.cjs、
  *      tests/_e2e_validation_hub.cjs、
  *      tests/_e2e_prp_default_entry.cjs
  *   5) package.json 中 dev:run-page / dev:next-run / dev:encounter-lab / dev:validation /
- *      dev:debug-lab / build:portrait-lab / e2e:portrait-lab / e2e:run-page / e2e:next-run /
- *      e2e:encounter-lab / e2e:validation-hub / e2e:default-entry 等 script
+ *      dev:content-batch / dev:debug-lab / build:portrait-lab / e2e:portrait-lab /
+ *      e2e:run-page / e2e:next-run / e2e:encounter-lab / e2e:validation-hub /
+ *      e2e:default-entry 等 script
  *   6) .gitignore 中 dist-portrait-lab/ 一行
  * 正式玩法 / 物理 / 数值 / Garage / Fusion / R4 / Meta / 存档 / 经济均不在删除影响面内。
  *
@@ -102,6 +103,15 @@ export type LabLoadoutId = 'WatermelonHeavyCannon' | 'BananaChargeHammer';
  *    **只做导航**：页面上没有画布、不显示任何运行期数据，也不向任何入口页面注入控件
  *    （切换 = 整页导航到入口页面本身，旧验证的一切随文档销毁）。
  *    ⚠️ 它**不**拥有新的战斗 / 物理 / 数值；删除本目录时它一起消失，不影响任何正式路径。
+ *
+ * ⚠️ PRP-M3-CONTENT-BATCH-01：新增**内容批次验证台**入口 `content-batch.html`
+ *    （`contentBatch.ts` = 纯逻辑层；`contentBatchMain.ts` = 页面壳，**没有画布**）。
+ *    三项内容：多单位轻敌群 / 废弃修理站 / 路边改装件。**不开发任何 Foundation**：
+ *    两项非战斗事件只改「现有耐久 / 现有 Build」（维修量沿用 `EMERGENCY_REPAIR_FRACTION`、
+ *    候选池沿用 `runLateralPoolDefs`）。
+ *    ⚠️ 第 1 项（多单位）如实标记 **BLOCK**：正式 `PlanckBattleOrchestrator` 硬编码两车
+ *    （`vehicleA` / `vehicleB`）、胜负只有 A / B 两方，而 `runBattleRuntime.ts` 只取
+ *    `plan.enemies[0]` —— 多单位进不了「真实 Battle Runtime」；本 Queue 不为此新建多车宿主。
  */
 export type LabEncounterId =
   | 'Chaser'

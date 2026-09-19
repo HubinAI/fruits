@@ -47,20 +47,26 @@ const HUB_LOGIC = `${LAB}/validationHub.ts`;
 const HUB_MAIN = `${LAB}/validationHubMain.ts`;
 const HUB_HTML = 'validation-hub.html';
 
-/** 三个验证入口的**页面文件**（Hub 只导航到它们，绝不包裹 / 改写 / 注入）。 */
-const ENTRY_PAGES = ['run-page.html', 'next-run.html', 'encounter-lab.html'];
+/** 验证入口的**页面文件**（Hub 只导航到它们，绝不包裹 / 改写 / 注入）。 */
+const ENTRY_PAGES = ['run-page.html', 'next-run.html', 'encounter-lab.html', 'content-batch.html'];
 
 /** Hub 相关字面量：任何一个出现在入口页面里都说明「Hub 往玩家画面伸手了」。 */
 const HUB_TOKENS = ['validation-hub', 'vhub', '__VALIDATIONHUB__', 'ValidationHub'];
 
-describe('PRP-VALIDATION-HUB-R1｜A. Hub 上摆的就是该摆的三个', () => {
-  it('H-01 恰好三个入口，id / 顺序 / label 与 Queue 原文逐一对应（不接历史 Lab）', () => {
-    expect(VALIDATION_HUB_ENTRIES).toHaveLength(3);
-    expect(VALIDATION_HUB_ENTRIES.map((e) => e.id)).toEqual(['fullRun', 'nextRun', 'encounterBatch']);
+describe('PRP-VALIDATION-HUB-R1｜A. Hub 上摆的就是该摆的四个', () => {
+  it('H-01 恰好四个入口，id / 顺序 / label 与各 Queue 原文逐一对应（不接历史 Lab）', () => {
+    expect(VALIDATION_HUB_ENTRIES).toHaveLength(4);
+    expect(VALIDATION_HUB_ENTRIES.map((e) => e.id)).toEqual([
+      'fullRun',
+      'nextRun',
+      'encounterBatch',
+      'contentBatch',
+    ]);
     expect(VALIDATION_HUB_ENTRIES.map((e) => e.label)).toEqual([
       'Full Run',
       'Next Run',
       'Encounter Batch',
+      'Content Batch',
     ]);
     // 调试页 / 历史 Lab 一律不进 Hub
     for (const e of VALIDATION_HUB_ENTRIES) {
@@ -68,9 +74,9 @@ describe('PRP-VALIDATION-HUB-R1｜A. Hub 上摆的就是该摆的三个', () => 
     }
   });
 
-  it('H-02 每个入口都指向一个真实存在的根目录 HTML，且三者互不相同', () => {
+  it('H-02 每个入口都指向一个真实存在的根目录 HTML，且四者互不相同', () => {
     const files = VALIDATION_HUB_ENTRIES.map((e) => e.pageFile);
-    expect(new Set(files).size).toBe(3);
+    expect(new Set(files).size).toBe(4);
     for (const e of VALIDATION_HUB_ENTRIES) {
       const abs = join(REPO_ROOT, e.pageFile);
       expect(existsSync(abs), `${e.pageFile} 不存在`).toBe(true);
@@ -95,12 +101,13 @@ describe('PRP-VALIDATION-HUB-R1｜A. Hub 上摆的就是该摆的三个', () => 
     }
   });
 
-  it('H-04 三个入口分别可追溯到已交付的三个 Queue，且后备命令真实可执行', () => {
+  it('H-04 四个入口分别可追溯到已交付的四个 Queue，且后备命令真实可执行', () => {
     const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> };
     const want: Record<string, string> = {
       fullRun: 'PRP-RUN-02-FULL-RUN-VERTICAL-SLICE',
       nextRun: 'PRP-M2-NEXT-RUN-SEED-VALIDATION',
       encounterBatch: 'PRP-M3-ENCOUNTER-BATCH-01',
+      contentBatch: 'PRP-M3-CONTENT-BATCH-01',
     };
     for (const e of VALIDATION_HUB_ENTRIES) {
       expect(e.queueId, `${e.id} 的 queueId 与交付不符`).toBe(want[e.id]);
@@ -113,9 +120,9 @@ describe('PRP-VALIDATION-HUB-R1｜A. Hub 上摆的就是该摆的三个', () => 
     }
   });
 
-  it('H-05 三个入口恰好覆盖三个验证页面（既不缺也不多）', () => {
+  it('H-05 四个入口恰好覆盖四个验证页面（既不缺也不多）', () => {
     expect(VALIDATION_HUB_ENTRIES.map((e) => e.pageFile).sort()).toEqual([...ENTRY_PAGES].sort());
-    // 根目录里新增的第四个验证页面不存在（Hub 不引入第四个）
+    // 根目录里不存在「不在 Hub 上、也不是 Debug 页 / 正式入口」的第五个验证页面
     const extras = readdirSync(REPO_ROOT)
       .filter((f) => f.endsWith('.html'))
       .filter((f) => !ENTRY_PAGES.includes(f) && f !== HUB_HTML && f !== 'index.html' && f !== 'portrait-lab.html');
@@ -236,7 +243,8 @@ describe('PRP-VALIDATION-HUB-R1｜D. 「上次进入」标记只指路、不判�
     expect(nextValidationHubEntry(null).id).toBe('fullRun');
     expect(nextValidationHubEntry('fullRun').id).toBe('nextRun');
     expect(nextValidationHubEntry('nextRun').id).toBe('encounterBatch');
-    expect(nextValidationHubEntry('encounterBatch').id).toBe('fullRun');
+    expect(nextValidationHubEntry('encounterBatch').id).toBe('contentBatch');
+    expect(nextValidationHubEntry('contentBatch').id).toBe('fullRun');
     // 历史残留 / 手改值 → 回到第一个，不崩
     expect(nextValidationHubEntry('who-knows').id).toBe('fullRun');
     expect(nextValidationHubEntry('portrait-lab').id).toBe('fullRun');

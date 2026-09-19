@@ -22,6 +22,7 @@
     "dev:next-run": "vite --open=/next-run.html",
     "dev:encounter-lab": "vite --open=/encounter-lab.html",
     "dev:validation": "vite --open=/validation-hub.html",
+    "dev:content-batch": "vite --open=/content-batch.html",
     "dev:legacy": "vite --open=/index.html",
     "dev:debug-lab": "vite --open=/portrait-lab.html",
     "build:portrait-lab": "vite build -c vite.portrait-lab.config.ts",
