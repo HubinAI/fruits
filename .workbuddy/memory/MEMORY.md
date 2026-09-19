@@ -14,8 +14,8 @@
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 工作分支 `prototype-portrait-battle-lab`
   （实验，可整块删）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`c0d2c5d`+`69c4d1e` R1-A（局外配车）→ `f1b87a2`(+`fb982be`) R1-B（永久部件奖励）→
-  `4f0be1a` R1-C（端到端主循环）→ **`c63408c` R1-D 失败结算 → 返回主界面**（收口；起点 `2609d46`）；
-  更早查 `git log`。
+  `4f0be1a` R1-C（端到端主循环）→ `c63408c` R1-D（失败结算 → 返回主界面）→
+  **`c40977a` R2-A 通关 3选1 → 数量累积**（永久成长 R2 起点；起点 `a0e9fba`）；更早查 `git log`。
 - 全链对 `src/{core,physics,render,player,platform,ui,game,presentation}` diff **恒为空**（已机器取证）。
 
 ## 2. 红线速查（全文 → REF_GUARDS §1–2）
@@ -31,9 +31,17 @@
 - ⚠️ **加根 html 同步 5 处（挂 Hub 7 处）**；加 Hub 入口 **4 处硬断言**（最易漏**顺序断言**）。
 - ⚠️ **跨轮复验 PRP 前必须先 build**（`emptyOutDir:false` ⇒ 陈旧 chunk ⇒ 假 FAIL）。
 - ⚠️ 改实现导致源码守卫失败 ⇒ **强化守卫，不放宽**。
-- ⚠️ **两个终态各有唯一出口、地址全由产品侧给**（R1-D）：`back`=领奖（COMPLETE）/ `home`=**纯首页**（FAILED）；
+- ⚠️ **两个终态各有唯一出口、地址全由产品侧给**（R1-D / R2-A）：
+  **COMPLETE 的出口 = 三张候选卡各自带的 `choices[].href`（`buildClaimHref`）**，
+  **`exitHref` 在 COMPLETE 恒 `null`、底栏按钮不可用**（3选1 不存在「默认那件」）；
+  `home` = **纯首页**（FAILED，`parsePendingClaim` 恒 null ⇒ 绝不入库）。
   Lab **不硬编码任何产品 URL**，失败**不接受任何隐式推进**（顺序最易写反 ⇒ `RP-D-06` 机器钉死）。
-  改动终态出口前必读 REF_GUARDS **§5**。
+  改动终态出口前必读 REF_GUARDS **§5 + §6**。
+- ⚠️ **R2-A 地址层契约**：R1-B 的「一个 `back`」已被 **`choices` 载荷**取代
+  （`{stack, choices:[{defId,star,countBefore,href}]}`）；三条 href **共用同一 run token**
+  ⇒ 幂等键是 token 不是地址（「换一件」也领不到）。库存数量**只能由产品侧传**（Lab 读不到正式存档）。
+- ⚠️ **像素阈值必须按面积推导**，不要凭印象：3×362×68 = 73848 px²，实测 `cardBg` 58822 ⇒ 取 55000。
+- ⚠️ **E2E 像素取证必须在「点那张卡之前」**：点中即整页导航 ⇒ `#run-canvas` 为 `null`。
 - ⚠️ **HTML 注释里禁止出现注释终止序列**（两个连字符紧跟一个右尖括号）⇒ 注释提前闭合、
   其后文本按真标签解析 ⇒ 真实鼠标点**任何位置**整页重载（R1-A 起埋 3 轮，`e2e:product-home` 的
   `B1` 根因）；**症状极具误导性**（渲染/`elementFromPoint`/`node.click()` 全正常，只有真实鼠标失效）。
@@ -45,18 +53,25 @@
 M3 遭遇台 §H · Hub §I · M2-R1 终点态出口 §L · PBL-RDC §M → `REF_PRP_RUNTIME.md`。
 ⚠️ **不在 REF、只看交接文档**：`PRP-M3-CONTENT-BATCH-01` · `PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1` ·
 `PRODUCT-LOOP-R1-A` · `PRODUCT-LOOP-R1-B` · `PRODUCT-LOOP-R1-C`（端到端主循环）·
-**`PRODUCT-LOOP-R1-D`（失败链 / 终态出口，契约见 REF_GUARDS §5）**。
+`PRODUCT-LOOP-R1-D`（失败链 / 终态出口，契约见 REF_GUARDS §5）·
+**`PRODUCT-LOOP-R2-A`（3选1 / 数量累积 / 成长模型，契约见 REF_GUARDS §6）**。
 启动两行：`cd D:\0818new\最强水果` → `npm run dev`（默认进**产品首页**；研发用 `dev:home` / `dev:next-run` /
 `dev:encounter-lab` / `dev:validation`）。
 
 ## 4. Next action
-- ✅ **产品主循环两侧都闭环了**：成功侧 R1-C（首页 → 调整战车 → 开始冒险 → 局内 → COMPLETE → 领永久部件 →
-  回 Garage 可见 → 装上 → 第二局第一场真的用它，E2E **41/41**）；失败侧 **R1-D**（失败 → 真终止 →
-  「冒险失败」结算 → 停住不重开 → 返回主界面 → 回首页 → 可调车 → 玩家主动再开，新 E2E **27/27**）。
-  门禁全绿（明细见当日 log / 交接文档）。
+- ✅ **永久成长 R2 的起点已落地（R2-A）**：通关 → **3选1** 真实武器 → 选中那件**进局外库存并累积数量** →
+  回车库看到 `★1 ×N`（满 5 显示 `5/5`）→ 装上 → 下一局真的用它。失败侧继续完全冻结（零 count 变化）。
+  新 E2E：`e2e:product-reward` **39/39**（本轮重写，含真实像素 A/B）、`e2e:product-loop` **48/48**；
+  全量 vitest **2213/2213**；`src/core/**` **一行未动**。门禁全绿（明细见当日 log / 交接文档）。
   ⚠️ 用户明令**停止继续扩 Validation / Lab / 局内内容**；Queue 完成即**停等**，不要自行开下一条 Queue。
+- ⚠️ **下一步（等用户下令）**：**Queue B = 合成动作**（5 件 → 升星）。当前已备好的接口：
+  `playerLoadout.weaponEntries()` 的 `threshold` / `stackText` / `reachesThreshold`（与卡片同源）、
+  core 既有 `canFuse(...).need = 5`（真源）。**不要**自行开工。
+- ⚠️ **待用户裁决（R2-A 新增 3 条，别自作主张改）**：① `openGrowthSession(draft)` **一参**签名
+  （把「先判 fresh 再取库存」的顺序收进函数内部，否则种子静默失效）；② 新账号起点 `cannon ×4`
+  是产品数值决策；③ 第二局验证**必须换回 cannon**（内容强度矩阵：只有远程炮能稳定通关）。
 - ⚠️ **待用户裁决（R1-D 新增 4 条，别自作主张改）**：① 路 A（页面级改道）而非改状态机
-  （`runStartsNewRun` 对 FAILED 的返回保持原样）；② 两个回程地址 `home` vs `back` 的新接口口径；
+  （`runStartsNewRun` 对 FAILED 的返回保持原样）；② 两个回程地址 `home` vs 候选地址的新接口口径；
   ③ 失败结算面板复用 COMPLETE 卡片槽位（零新常量）；④ E2E 失败路线取 `hammer`（第一场即死 ≈16s）。
 - ⚠️ **R1-C 遗留待裁决（4 条）**：① 装备交接口径 = 传整份 `BuildDraft`（href ≈1KB）；② Weapon A 定为 `cannon`；
   ③ 产品默认车 `front` 槽清空；④ 第二局只跑到「第一场」为止。

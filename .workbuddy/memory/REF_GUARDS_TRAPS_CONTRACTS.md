@@ -258,3 +258,87 @@ R1-D 门控时发现 `e2e:next-run` 已在 **7 个提交前**失效
 
 **处置**：只记录 + 上报，建议独立 Bug Queue；**不要**顺手修进当前 Queue 的单功能 commit。
 **修法建议**：断言值从**真实数据推导**（数 Hub 真实入口），不要写死条数。
+
+---
+
+## §6 通关奖励 = 3选1 + 数量累积（PRODUCT-LOOP-R2-A 固化契约）
+
+### §6a 地址层契约（**取代** R1-B 的单件 `back`）
+
+| 角色 | 参数 | 谁产出 | 说明 |
+|---|---|---|---|
+| 出发 | `choices`（JSON） | `runReward.buildRewardChoicePayload()` | `{stack, choices:[{defId,star,countBefore,href}]}`，`href = buildClaimHref(token, defId)` |
+| 出发 | `equipped` | `encodeRunLoadout(draft)` | 本局装备（R1-C，未改） |
+| 出发 | `home` | `HOME_HREF` | 失败回程（**纯首页**，R1-D，未改） |
+| 回程 | `run` + `reward` | 玩家在终点点中那一张卡 | `parsePendingClaim()` → 首页**幂等**入库（**R2-A 完全未改**） |
+
+- **幂等键是 `run` token，不是地址**：三条候选 href 共用同一个 token ⇒ 「同一局换一件」也落
+  `already-claimed`（`e2e:product-loop` 的 `G3` 机器钉死）。
+- **`countBefore` 也必须由产品侧给**：Lab 的 `ALLOWED_RELATIVE_IMPORTS` 是闭集，
+  读不到 `core/partInventory` / `core/buildPersistence` ⇒ 库存读数是**产品侧传进来的事实**。
+- **Lab 只做选择、不做拼装**：`runMain.ts` 里出现不了任何产品 URL 字面量（`RP-25b` 钉死）。
+- ⚠️ `buildClaimHref(token, defId)` 的 `defId` **必传**（R2-A 去掉了默认值）：
+  终点是三选一，再给默认值就等于「悄悄替玩家选了一件」⇒ 缺参数应当**编译不过**。
+
+### §6b 库存 = stack 模型，`src/core/**` 一行都不用动
+
+`PartInventory = { [defId]: { one, two } }` 就是 `(defId, star) → 副本数`（`star 1 → one`，
+`star ≥ 2 → two`），`addPart(inv, defId, star, n)` **已按 `(defId, star)` 归并**
+⇒ 「同一个 `partId + star` 归并为同一个 stack」这条 Queue 要求**在数据层早已成立**。
+
+R2-A 真正缺的两件事**全部补在产品侧** `src/product/playerGrowth.ts`：
+① 新账号成长起点（`FRESH_STACK_SEED`）；② 「Equipped 仍指向有效库存实例」的**只增不减**兜底
+（core `ensureInventory()` 的 `hasAnyOwned` 判据在「有库存但缺当前装备那件」时不生效）。
+
+⚠️ 库存 key `strongfruit.ownedParts.v2` 是**旧横屏游戏与竖屏产品共用**的 ⇒
+**不要**去改 core 的 `defaultInventory()`（那是旧游戏的新账号基线）。
+⚠️ `CURRENT_SAVE_VERSION` **刻意不动**（1）：升级会波及 `resetPlayerSave` 与 `tests/q27SaveVersion.test.ts`；
+需要迁移的现存形状只有「**无 `__v` 信封**的 inventory 对象」，读时按 v0 过 envelope ⇒ 天然兼容。
+
+### §6c ⚠️ `openGrowthSession(draft)` 必须只收 `draft`（一参）—— 顺序陷阱
+
+`isFreshProfile()` 读**磁盘**；而 `playerInventory()` → `ensureInventory()` **首次调用就落盘库存**。
+⇒ 若调用方「先取库存、再判 fresh、再把库存传进来」，`fresh` 恒 `false`、种子**静默失效**
+（现象与「一切正常」一模一样，只有读库存才发现是 `1` 而不是 `4`）。
+**顺序必须收进函数内部**（先 `isFreshProfile()`，再 `playerInventory()`）。
+
+### §6d 阈值 / 星级 / 名称的**唯一真源**
+
+| 概念 | 真源 | 禁止 |
+|---|---|---|
+| 满 stack = 5 | `core/partInventory.ts` 的 `canFuse(...).need`（`playerGrowth.FUSE_STACK` 是产品侧常量） | **Lab 自造一个 5** ⇒ 由 `payload.stack` 传入 |
+| 星级 | `playerLoadout.WEAPON_GROWTH_STAR = 1`（= `getCount(inv, id, 1)` 里的 `1`） | `playerLoadout` **不许** import `playerGrowth`（成模块环）⇒ 阈值改用 core `canFuse` |
+| 显示名 | `registry.functionals.get(id).name`（`rewardDisplayName`，未知 → `null`） | 页面另写一份字面量 |
+| `hasSprite` | `core/content.ts` 的真实值（`cannon/hammer = true`，`spear = false`） | 断言「三件都没有美术」（R2-A 曾因此假红一次） |
+
+### §6e ⚠️ 像素阈值必须**按面积推导**，不要凭印象
+
+R2-A 的 3选1 块：`3 × 362 × 68 = 73848 px²`；实测 `cardBg = 58822`（≈79.6%），
+`iconFrame = 4467`，`glyph = 918` ⇒ 阈值取 **55000 / 2000 / 600**。
+最初凭印象写 `> 60000` ⇒ 两个 E2E 同时假红（58822 vs 60000，只差 1178 px）。
+**做法**：先跑一次把真实读数打进 `detail`，再按面积比例（≈75%）定阈值并**把算术写进注释**。
+
+### §6f ⚠️ 像素取证必须在「点那张卡之前」
+
+点中候选卡 = **整页导航**回首页 ⇒ `document.querySelector('#run-canvas')` 变 `null`，
+`getImageData` 抛 `TypeError: Cannot read properties of null`。
+⇒ 采样点要放进「驱动到 COMPLETE」与「点卡」之间（R2-A 把采样挪进 `playOneRunAndClaim` 内）。
+
+### §6g ⚠️ 「第二局要真的打完」是一条**内容约束**
+
+主武器槽实测矩阵（`playerLoadout.ts` 的 `DEFAULT_CLEARED_SLOT` 注释）：
+`cannon`（远程炮）→ 稳定 COMPLETE；`spear` → 第 2 场僵持**跑不完**；`hammer` → 第 1 场即死。
+⇒ 任何「第二局必须走到 COMPLETE」的 E2E **必须在出发前换回 `cannon`**，
+否则会在 `BATTLE` 卡到驱动超时（R2-A 实测 240s 超时）。
+这是产品事实，**不要**用放宽 E2E / 加预算来绕过。
+
+### §6h 探针字段改名对照（维护时 grep 用）
+
+| 旧（R1-B/C） | 新（R2-A） |
+|---|---|
+| `rewardCard`（单件） | `rewardChoices`（数组，含逐条 `href` / `previewText` / `stackText`） |
+| `rewardCardRect` | `rewardChoiceRects` |
+| `rewardClaim` / `exitHref`（= 领奖地址） | `chosenDefId` / `rewardChoicesDropped`；**COMPLETE 的 `exitHref` 恒 `null`**（出口在卡片上，底栏 `actionEnabled === false`） |
+| `REWARD_WEAPON_ID` | `REWARD_CHOICE_IDS = ['cannon','spear','hammer']` |
+| `back` 参数 | `choices` 载荷 |
+| Garage 卡无数量 | `data-ph-star` / `data-ph-count` / `data-ph-stack-text` / `data-ph-stack-threshold` + `ph-card-full` |
