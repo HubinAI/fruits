@@ -200,6 +200,14 @@ const RUN_PAGE_FILES = [
     它是本 Queue 新加的唯一能「决定去哪」的地方，必须和最老的页面文件同一套纪律。
   */
   'runFailSettlement.ts',
+  /*
+    PRODUCT-LOOP-P0：Run 创建被拒绝时的视图模块加入本清单 ⇒ 自动受 RP-24 / RP-25 的
+    **全部**禁令约束（不得引用 Arena / Gate / 正式编排器、不得建 DOM 按钮、不得写
+    location / history、不得含地址字面量）。
+    ⚠️ 它存在的**原因**就是 RP-25b 对宿主更严（`runMain.ts` 不得出现 `createElement`）
+       ⇒ 拒绝态的 DOM 只能落在这里，因此这里必须与页面文件同一套纪律（收紧而非放宽）。
+  */
+  'runBlockedView.ts',
 ];
 
 function read(f: string): string {

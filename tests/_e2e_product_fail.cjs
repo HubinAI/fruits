@@ -7,7 +7,7 @@
  *
  * 本文件是该闭环的机器判据 —— 真实链路：
  *
- *   首页 → 调整战车（换一件打不过的武器）→ 开始冒险 → 战斗失败
+ *   首页 → 调整战车 → 开始冒险 → 战斗失败
  *        → 「冒险失败」结算出现 → **页面停住**（等待确认无自动重启，也不接受误触）
  *        → 点「返回主界面」→ 回到正式首页（不带任何领奖参数）
  *        → 三件套（Profile / Inventory / Equipped）一个都没被清空
@@ -21,10 +21,21 @@
  *   - 只读诊断句柄 `window.__PRODUCTHOME__` / `window.__RUNPAGE__`；
  *   - **真实 getImageData**：失败结算面板与底部 CTA 真的画在画布上。
  *
- * ⚠️ 失败路线是**确定性**的（`RunBattleRuntime` 无 RNG）：把主武器槽换成 `hammer`
- *    （近战锤，starter 已拥有）⇒ 第一场就被打死 ⇒ FAILED 🡒 DAY 2 / battles 1/4 / ≈16s。
- *    实测矩阵：`hammer` 第一场阵亡；`cannon` 走上「耐久事件选继续改装」的路线要到 DAY 7
- *    才归零（≈43s）。两条都真的失败，本文件取更短的那条（同时顺路验证车库换装真的生效）。
+ * ── ⚠️ PRODUCT-LOOP-P0-RUN-BUILD-LOADOUT-COMPATIBILITY：失败路线**已换**（契约变更）
+ *
+ * R1-D 当时的失败路线是「把主武器槽换成 `hammer` ⇒ 第一场就被打死（≈16s）」。
+ * P0 Queue 之后这条路线**在产品层已经不成立**：非 cannon 的装备在首页就进不去完整 Run
+ * （必改 2 / 必改 3 —— 不得进入 Run、不得偷偷换成 Cannon、不得创建半残 Run）。
+ * ⇒ 本文件改用 R1-D 同一次实测里的**另一条**确定性失败路线：
+ *
+ *   `cannon` + 耐久事件选「继续改装」（`upgrade`，不回耐久）⇒ 打到 DAY 7 终局耐久归零。
+ *
+ * 顺带得到一件 R1-D 当时拿不到的东西：这条路线会**真的走过** P0 的原始 repro 路径
+ * （DAY 2 选一层强化 → **DAY 3 第二场战斗创建**时 `applyRunModifiersToSnapshot()` 注入），
+ * 所以 C0 就在真实浏览器里取证这件事「现在通了，而且强化真的生效」。
+ *
+ * 同时新增 A4–A8：**守门本身的实证**（装 hammer/h 等非 cannon → 开始冒险不可执行 +
+ * 明确提示 + 可直接进调整战车 + 换回 cannon 后恢复可执行）。
  *
  * 用法：
  *   npm run build:portrait-lab
@@ -63,15 +74,36 @@ const RUN_PARAM = 'run';
 /** PRODUCT-LOOP-R2-A：3选1 候选载荷（三条候选**各自**的领奖地址）。 */
 const CHOICES_PARAM = 'choices';
 
-/** 打不过的武器：近战锤，第一场就被打死（实测）。 */
-const LOSE_WEAPON = 'hammer';
-const LOSE_WEAPON_NAME = '锤';
+/**
+ * 本局用的**主武器**：`cannon`（正式基准武器 = 唯一支持完整 Run 的武器）。
+ * ⚠️ P0 之前这里是 `hammer`；见文件头「失败路线已换」。
+ */
+const MAIN_WEAPON = 'cannon';
+const MAIN_WEAPON_NAME = '炮';
+/** 用来证明守门的非 cannon 武器（近战锤，starter 已拥有 ⇒ 车库点得到）。 */
+const BLOCKED_WEAPON = 'hammer';
+const BLOCKED_WEAPON_NAME = '锤';
+
+/** 首页提示文案（Queue 逐字给的两句；断言写死是为了防「提示被改成看不懂的话」）。 */
+const COMPAT_NOTICE = '当前原型仅支持加农炮进行完整冒险';
+const COMPAT_HINT = '请先调整战车';
+
+/**
+ * 失败路线的耐久取舍策略 = 「继续改装」。
+ *
+ * ⚠️ 必须是它（不是 `repair`）：`repair` 会拿回一段耐久 ⇒ 这一局能 COMPLETE（R1-C 实测 4/4），
+ *    只有「不回耐久」才让 DAY 7 的终局真的打到耐久归零。
+ * ⚠️ 找不到这个 id 时会回退到第一个选项（= 维修）⇒ 失败路线会静默变成通关路线，
+ *    C1 的 `phase === 'FAILED'` 会立刻红掉（这正是要的：路线错了必须响）。
+ */
+const DURABILITY_POLICY = 'upgrade';
+const FAIL_POLICY = { layer1: null, lateral: null, layer2: null, durability: DURABILITY_POLICY };
 
 /** 失败结算面板 + 底部 CTA 的**非入账**配色（与 `runPage.ts` 的 COLORS 同值）。 */
 const PANEL_BG = [0x1b, 0x24, 0x32]; // COLORS.cardBg
 const CTA_BAR = [0x33, 0x50, 0x7a]; // COLORS.actionBtn（启用态底部强调条）
 
-/** 驱动预算：失败路线实测 ≈16s，给足余量。 */
+/** 驱动预算：新路线实测要走到 DAY 7（R1-D 同一次实测 ≈43s），给足余量。 */
 const DRIVE_BUDGET_MS = 120000;
 
 const results = [];
@@ -158,6 +190,32 @@ function storageDump(page) {
   });
 }
 
+/** 首页「不可执行」提示块的**真实 DOM**（不是探针字段 —— 有提示 = 画在页面上）。 */
+const compatNoticeDom = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('[data-ph-compat]');
+    return el
+      ? {
+          value: el.getAttribute('data-ph-compat'),
+          reason: el.getAttribute('data-ph-compat-reason'),
+          text: el.textContent ?? '',
+        }
+      : null;
+  });
+
+/** 车库「完整冒险」状态块的**真实 DOM**（必改 3：车库必须可识别当前能不能冒险）。 */
+const runCompatDom = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('[data-ph-run-compat]');
+    return el
+      ? {
+          value: el.getAttribute('data-ph-run-compat'),
+          reason: el.getAttribute('data-ph-run-compat-reason'),
+          text: el.textContent ?? '',
+        }
+      : null;
+  });
+
 /** 在画布某矩形内按**精确 RGB 相等**统计像素数（真实 getImageData）。 */
 function countColorInRect(page, rect, target) {
   return page.evaluate(
@@ -218,6 +276,34 @@ const canon = (m) =>
       .map((k) => [k, m[k]]),
   );
 
+/**
+ * 在 Run 页面上走**一步**（真实鼠标点击）：优先处理当前打开的选择事件，否则按下主行动键。
+ * ⚠️ 抽成单步是为了让「驱到某一场」与「驱到终态」共用同一套点击策略 ——
+ *    两处若各写一份，「驱到第二场」会漏点选择事件而卡死在 CHOICE 上。
+ */
+async function runStep(page, policy, p) {
+  if (p.durabilityOpen && p.overlayOptions.length > 0) {
+    const opt = p.overlayOptions.find((o) => o.id === policy.durability) ?? p.overlayOptions[0];
+    await clickRect(page, opt.rect);
+    await sleep(160);
+    return;
+  }
+  if (p.choiceOpen && p.choiceOptions.length > 0) {
+    const want = policy[p.choicePoolKind] ?? null;
+    const opt = (want && p.choiceOptions.find((o) => o.id === want)) || p.choiceOptions[0];
+    await clickRect(page, opt.rect);
+    await sleep(160);
+    return;
+  }
+  if (p.overlayOpen && p.overlayOptions.length > 0) {
+    await clickRect(page, p.overlayOptions[0].rect);
+    await sleep(160);
+    return;
+  }
+  if (p.actionEnabled) await clickRect(page, p.actionRect);
+  await sleep(p.phase === 'BATTLE' ? 320 : 120);
+}
+
 /** 把一局 Run 驱到终态（真实鼠标点击；强化按池内 id 选，没指定就取第一项）。 */
 async function driveRunToEnd(page, policy, label) {
   const t0 = Date.now();
@@ -230,45 +316,39 @@ async function driveRunToEnd(page, policy, label) {
     if (p.phase === 'COMPLETE' || p.phase === 'FAILED') {
       return { probe: p, seen, ms: Date.now() - t0 };
     }
-    if (p.durabilityOpen && p.overlayOptions.length > 0) {
-      const opt = p.overlayOptions.find((o) => o.id === policy.durability) ?? p.overlayOptions[0];
-      await clickRect(page, opt.rect);
-      await sleep(160);
-      continue;
-    }
-    if (p.choiceOpen && p.choiceOptions.length > 0) {
-      const want = policy[p.choicePoolKind] ?? null;
-      const opt = (want && p.choiceOptions.find((o) => o.id === want)) || p.choiceOptions[0];
-      await clickRect(page, opt.rect);
-      await sleep(160);
-      continue;
-    }
-    if (p.overlayOpen && p.overlayOptions.length > 0) {
-      await clickRect(page, p.overlayOptions[0].rect);
-      await sleep(160);
-      continue;
-    }
-    if (p.actionEnabled) await clickRect(page, p.actionRect);
-    await sleep(p.phase === 'BATTLE' ? 320 : 120);
+    await runStep(page, policy, p);
   }
   throw new Error(`${label} 驱动超时（${DRIVE_BUDGET_MS}ms）· 最后 phase=${last ? last.phase : 'n/a'}`);
 }
 
-/** 驱动到**第一场真实战斗开打**（BATTLE 相位 + 战斗世界已建立），并返回该帧探针。 */
-async function driveUntilFirstBattle(page, label) {
+/**
+ * 驱动到**第 N+1 场真实战斗开打**（`battlesDone` = 开打前已完成的场数），并返回该帧探针。
+ *
+ *   - `battlesDone === 0` ⇒ 第一场（新局刚出发）；
+ *   - `battlesDone === 1` ⇒ **第二场** = PRODUCT-LOOP-P0 的原始 repro 点
+ *     （DAY 2 选完一层强化 → DAY 3 这一场创建时才会 `applyRunModifiersToSnapshot()`）。
+ */
+async function driveUntilBattle(page, battlesDone, policy, label) {
   const t0 = Date.now();
   let last = null;
   while (Date.now() - t0 < DRIVE_BUDGET_MS) {
     const p = await probeRun(page);
     last = p;
-    if (p.phase === 'BATTLE' && p.battleWorld) return { probe: p, ms: Date.now() - t0 };
+    if (p.phase === 'BATTLE' && p.battleWorld && p.battlesCompleted === battlesDone) return p;
     if (p.phase === 'FAILED' || p.phase === 'COMPLETE') {
-      throw new Error(`${label} 在进入第一场战斗前就结束了（phase=${p.phase}）`);
+      throw new Error(`${label} 在进入目标场次前就结束了（phase=${p.phase} DAY=${p.day}）`);
     }
-    if (p.actionEnabled) await clickRect(page, p.actionRect);
-    await sleep(140);
+    await runStep(page, policy, p);
   }
-  throw new Error(`${label} 未能进入第一场战斗 · 最后 phase=${last ? last.phase : 'n/a'}`);
+  throw new Error(
+    `${label} 未能进入第 ${battlesDone + 1} 场战斗 · 最后 phase=${last ? last.phase : 'n/a'} DAY=${last ? last.day : 'n/a'}`,
+  );
+}
+
+/** 取某一帧里玩家主武器槽的**真实定义读数**（behavior / damage / params 全取）。 */
+function weaponAt(probe, hardpointId) {
+  const list = (probe.battleWorld && probe.battleWorld.playerWeapons) || [];
+  return list.find((w) => w.hardpointId === hardpointId) ?? null;
 }
 
 /* ------------------------------------------------------------------- 主流程 */
@@ -333,26 +413,97 @@ async function main() {
       `home 参数解析：${homeQ.toString() === '' ? '(空 search)' : homeQ.toString()}`,
     );
 
-    // 车库真实换装：换成一件打不过的武器（顺路证明「调整战车」真的写存档）
+    /* ============ A4–A8：PRODUCT-LOOP-P0 守门（非 cannon 不得进入完整 Run） ============ */
+
+    // 车库真实换装：换成一件**非 cannon** 的武器（证明拥有 / 装备这条路仍然畅通 —— 必改 3）
     await clickSelector(page, '[data-ph-action="open-garage"]');
     const garage0 = await probeHome(page);
-    await clickSelector(page, `[data-ph-weapon="${LOSE_WEAPON}"]`);
+    await clickSelector(page, `[data-ph-weapon="${BLOCKED_WEAPON}"]`);
     await clickSelector(page, '[data-ph-action="equip"]');
     const stored1 = await storageDump(page);
+    const garageCompat = await runCompatDom(page);
     log(
       garage0.view === 'garage' &&
-        storedWeaponSlot(stored1) === LOSE_WEAPON &&
+        storedWeaponSlot(stored1) === BLOCKED_WEAPON &&
         storedWeaponSlot(stored1) !== storedWeaponSlot(stored0),
-      `A4 调整战车：真实点击装上「${LOSE_WEAPON_NAME}」→ **正式存档**的主武器槽真的变了（独立取证）`,
+      `A4 调整战车：真实点击装上「${BLOCKED_WEAPON_NAME}」→ **正式存档**的主武器槽真的变了（独立取证）`,
       `storage ${WEAPON_SLOT}: ${storedWeaponSlot(stored0)} → ${storedWeaponSlot(stored1)}`,
+    );
+    log(
+      !!garageCompat &&
+        garageCompat.value === 'unsupported' &&
+        garageCompat.reason === 'unsupported-weapon' &&
+        garageCompat.text.includes(COMPAT_NOTICE),
+      `A5 车库**可识别当前不可冒险**（必改 3）：状态块 = unsupported + 原因 + 明确提示；且「${BLOCKED_WEAPON_NAME}」仍留在库存里（没被删）`,
+      garageCompat ? `[data-ph-run-compat=${garageCompat.value}] ${garageCompat.text.replace(/\s+/g, ' ').trim()}` : 'n/a',
     );
     await clickSelector(page, '[data-ph-action="back-home"]');
     const home1 = await probeHome(page);
-    const loadoutBefore = decodeLoadoutFromHref(home1.startRunHref ?? '');
+    const noticeDom = await compatNoticeDom(page);
     log(
-      home1.view === 'home' && home1.equippedWeaponId === LOSE_WEAPON && !!loadoutBefore,
-      'A5 返回首页：装备已经是刚装的那件，且下一局链接里带的装备跟着变了',
-      `equipped=${home1.equippedWeaponId} 链接装备槽=${loadoutBefore ? loadoutBefore.functionalSelections[WEAPON_SLOT] : 'n/a'}`,
+      home1.view === 'home' &&
+        home1.startRunBlocked === true &&
+        home1.startRunHref === null &&
+        home1.runCompat.ok === false &&
+        home1.runCompat.reason === 'unsupported-weapon' &&
+        home1.runCompat.notice === COMPAT_NOTICE &&
+        home1.runCompat.hint === COMPAT_HINT,
+      'A6 返回首页：开始冒险进入**不可执行**状态 —— 没有 href（点了不可能创建 Run）、资格读数=不支持、且给出 Queue 逐字的两句提示',
+      `blocked=${home1.startRunBlocked} href=${home1.startRunHref} notice=${home1.runCompat.notice} hint=${home1.runCompat.hint}`,
+    );
+    log(
+      !!noticeDom &&
+        noticeDom.value === 'unsupported' &&
+        noticeDom.reason === 'unsupported-weapon' &&
+        noticeDom.text.includes(COMPAT_NOTICE) &&
+        noticeDom.text.includes(COMPAT_HINT),
+      'A7 提示**真的画在页面上**（不是只在探针里）：DOM 上有提示块，两句文案齐全（Prototype 限制用最小提示，不做弹窗）',
+      noticeDom ? `[data-ph-compat=${noticeDom.value}] ${noticeDom.text.replace(/\s+/g, ' ').trim()}` : 'n/a',
+    );
+
+    // 真鼠标点「不可执行的开始冒险」：必须**什么也不发生**（不导航 = 没有创建 Run 的可能）
+    const urlBeforeBlockedClick = await page.evaluate(() => location.pathname + location.search);
+    await clickSelector(page, '[data-ph-action="start-run"]');
+    await sleep(600);
+    const urlAfterBlockedClick = await page.evaluate(() => location.pathname + location.search);
+    const home1b = await probeHome(page);
+    log(
+      urlAfterBlockedClick === urlBeforeBlockedClick &&
+        urlAfterBlockedClick.startsWith('/home.html') &&
+        home1b.view === 'home' &&
+        home1b.startRunBlocked === true,
+      'A8 真鼠标点「开始冒险」：**完全没有导航**、仍停在首页 ⇒ 不支持时不可能进入 Run（不是「进去了再返回」）',
+      `url ${urlBeforeBlockedClick} → ${urlAfterBlockedClick}`,
+    );
+
+    // 「请先调整战车」那条提示是可以直接执行的：同一个入口能进车库（不做第二个入口）
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    const garageBlocked = await probeHome(page);
+    log(
+      garageBlocked.view === 'garage',
+      `A9 提示「${COMPAT_HINT}」可直接执行：真实点击进入调整战车（复用既有入口，没有新增第二个按钮）`,
+      `view=${garageBlocked.view}`,
+    );
+
+    // 换回 cannon：完整冒险资格必须恢复，且链接里带的装备跟着变
+    await clickSelector(page, `[data-ph-weapon="${MAIN_WEAPON}"]`);
+    await clickSelector(page, '[data-ph-action="equip"]');
+    const stored2 = await storageDump(page);
+    await clickSelector(page, '[data-ph-action="back-home"]');
+    const home2 = await probeHome(page);
+    const loadoutBefore = decodeLoadoutFromHref(home2.startRunHref ?? '');
+    log(
+      storedWeaponSlot(stored2) === MAIN_WEAPON &&
+        home2.view === 'home' &&
+        home2.equippedWeaponId === MAIN_WEAPON &&
+        home2.startRunBlocked === false &&
+        !!home2.startRunHref &&
+        home2.runCompat.ok === true &&
+        (await compatNoticeDom(page)) === null &&
+        !!loadoutBefore &&
+        loadoutBefore.functionalSelections[WEAPON_SLOT] === MAIN_WEAPON,
+      `A10 换回「${MAIN_WEAPON_NAME}」：守门恢复放行（有 href / 提示消失 / 资格=通过），且下一局链接里的装备就是它`,
+      `equipped=${home2.equippedWeaponId} blocked=${home2.startRunBlocked} href=${(home2.startRunHref ?? '').slice(0, 48)}… 链接装备槽=${loadoutBefore ? loadoutBefore.functionalSelections[WEAPON_SLOT] : 'n/a'}`,
     );
 
     /* ============================================================== B. 进局 */
@@ -367,7 +518,7 @@ async function main() {
     log(
       runStart.playerLoadout.source === 'profile' &&
         runStart.playerLoadout.fallback === 'none' &&
-        runStart.playerLoadout.functionalSelections[WEAPON_SLOT] === LOSE_WEAPON,
+        runStart.playerLoadout.functionalSelections[WEAPON_SLOT] === MAIN_WEAPON,
       'B1 真实整页导航进局：这一局用的就是**首页那份装备**（source=profile / 无回退 / 主武器槽相同）',
       `source=${runStart.playerLoadout.source} fallback=${runStart.playerLoadout.fallback} ${WEAPON_SLOT}=${runStart.playerLoadout.functionalSelections[WEAPON_SLOT]}`,
     );
@@ -384,9 +535,43 @@ async function main() {
       `home=${runSearch.get(HOME_PARAM)}`,
     );
 
+    /* ============================ C0. P0 原始 repro 路径（强化注入的那一场） */
+
+    const firstBattle = await driveUntilBattle(page, 0, FAIL_POLICY, '第一场');
+    const w1 = weaponAt(firstBattle, WEAPON_SLOT);
+    log(
+      !!w1 && firstBattle.build.length === 0,
+      'C0a 第一场（DAY 2）真实开打：本局还没有任何强化，主武器槽读到的就是**正式基准武器**本身',
+      w1 ? `build=${JSON.stringify(firstBattle.build)} ${WEAPON_SLOT}.defId=${w1.defId} behavior=${w1.behavior}` : 'n/a',
+    );
+
+    /*
+      ⚠️ 这一条就是 PRODUCT-LOOP-P0 的原始 repro 路径的**真实浏览器**取证：
+        「DAY2 选/进入一层强化 → DAY3 第二场战斗创建 → `applyRunModifiersToSnapshot()` 注入」。
+      ⚠️ 判据为什么看 `playerWeapons[].behavior/params` 而不看 `defId`：
+        overlay 部件是 `composeRunWeaponDef()` 用 `{...正式cannon}` 派生出来的 ⇒ 它的
+        `def.id` 字段**仍然是 `'cannon'`**（只有本局 registry 的**键**是 overlay id）。
+        真正「强化生效了」的可观测差别在 behavior / behaviorParams 上 —— 那也正是
+        Battle Runtime 实际使用的那份定义。
+    */
+    const secondBattle = await driveUntilBattle(page, 1, FAIL_POLICY, '第二场（强化注入场）');
+    const w2 = weaponAt(secondBattle, WEAPON_SLOT);
+    const w1Signature = w1 ? JSON.stringify([w1.behavior, w1.damage, w1.params]) : 'n/a';
+    const w2Signature = w2 ? JSON.stringify([w2.behavior, w2.damage, w2.params]) : 'n/a';
+    log(
+      !!w1 &&
+        !!w2 &&
+        secondBattle.build.length >= 1 &&
+        w2Signature !== w1Signature &&
+        secondBattle.phase === 'BATTLE' &&
+        secondBattle.battlesCompleted === 1,
+      'C0b（P0 回归）DAY 3 第二场**真的创建成功且强化真的生效**：Run 推进到第二场、本局 Build 非空、主武器槽的定义已不是基准炮（behavior/params 真的变了）',
+      `build=${JSON.stringify(secondBattle.build)} · 第二场 ${WEAPON_SLOT}: ${w2Signature}（第一场 ${w1Signature}）`,
+    );
+
     /* ============================================ C. 真打 → RUN FAILED 结算 */
 
-    const lose = await driveRunToEnd(page, { layer1: null, lateral: null, layer2: null, durability: 'repair' }, '失败路线');
+    const lose = await driveRunToEnd(page, FAIL_POLICY, '失败路线');
     const pFail = lose.probe;
     log(
       pFail.phase === 'FAILED' && pFail.failed === true && pFail.complete === false && pFail.battle,
@@ -405,9 +590,20 @@ async function main() {
       'C2 明确出现「冒险失败」结算：标题 + 失败 DAY + 最终 Build + 最终耐久（最低必要信息，必改 3）',
       fs1 ? `${fs1.title} · ${fs1.lines.join(' / ')}` : 'n/a',
     );
+    /*
+      ⚠️ 与更换失败路线前的那一版**故意不同**：旧路线第一场就死 ⇒ 本局零改装（断言「未做任何改装」）。
+      新路线打到 DAY 7 ⇒ 本局**真的拿过**强化。断言从「写死一句未改装」改成
+      「结算逐字复述本局真实拿到的那些改装」—— 这比原来更强，因为它锁住了
+      「结算内容 = 真实状态」这件事对一个**非空** Build 也成立。
+    */
     log(
-      !!fs1 && fs1.buildLabels.length === 0 && fs1.lines[1] === '最终改装：未做任何改装' && fs1.lines[2] === '战车耐久：已耗尽',
-      'C3 结算内容逐项来自真实状态：这一局没来得及改装 ⇒ 如实写「未做任何改装」；耐久 0 ⇒ 写「已耗尽」',
+      !!fs1 &&
+        fs1.buildLabels.length === pFail.build.length &&
+        pFail.build.length >= 2 &&
+        fs1.lines[1] === `最终改装：${fs1.buildLabels.join(' + ')}` &&
+        fs1.lines[1] !== '最终改装：未做任何改装' &&
+        fs1.lines[2] === '战车耐久：已耗尽',
+      'C3 结算内容逐项来自真实状态：列出的改装 = 本局真的拿到的那几项（逐字拼回），耐久 0 ⇒ 写「已耗尽」',
       fs1 ? `${fs1.lines[1]} · ${fs1.lines[2]}` : 'n/a',
     );
     log(
@@ -466,15 +662,23 @@ async function main() {
     await clickLogical(page, 20, 400);
     await sleep(400);
     const snap1 = await probeRun(page);
+    /*
+      ⚠️ 这里原来比的是 `revision` —— 但 `runPage.ts` 的 `baseProbe()` **没有这个字段**
+        （`snap.revision` 恒为 `undefined`）⇒ `undefined === undefined` 让这条断言
+        白拿了一半结论。改比**整份事件日志**（`log[].seq` 逐条），比一个计数器更强：
+        任何一次误触都会往日志里添一条，逐条比对骗不过去。
+    */
+    const log1 = JSON.stringify(snap1.log ?? []);
+    const log0 = JSON.stringify(snap0.log ?? []);
     log(
       snap1.phase === 'FAILED' &&
         snap1.day === snap0.day &&
         snap1.battlesCompleted === snap0.battlesCompleted &&
         snap1.nodeId === snap0.nodeId &&
-        snap1.revision === snap0.revision &&
-        snap1.logCount === snap0.logCount,
-      'D2 失败页面上点**任何非按钮位置**都零副作用（状态连一次 revision 都没递增 —— 必改 2「除非用户明确点击动作」）',
-      `phase=${snap1.phase} DAY=${snap1.day} battles=${snap1.battlesCompleted} revision=${snap1.revision} log=${snap1.logCount}（点前 ${snap0.phase}/${snap0.day}/${snap0.battlesCompleted}/rev${snap0.revision}/${snap0.logCount}）`,
+        snap1.logCount === snap0.logCount &&
+        log1 === log0,
+      'D2 失败页面上点**任何非按钮位置**都零副作用（相位 / DAY / 场数 / 节点 / 事件日志逐条全同 —— 必改 2「除非用户明确点击动作」）',
+      `phase=${snap1.phase} DAY=${snap1.day} battles=${snap1.battlesCompleted} log=${snap1.logCount} 条（逐条相同）`,
     );
 
     const storedAtFail = await storageDump(page);
@@ -500,15 +704,16 @@ async function main() {
       storedAfterReturn[BUILD_KEY] === storedAtFail[BUILD_KEY] &&
         storedAfterReturn[INV_KEY] === storedAtFail[INV_KEY] &&
         storedAfterReturn[CLAIMS_KEY] === storedAtFail[CLAIMS_KEY] &&
-        storedWeaponSlot(storedAfterReturn) === LOSE_WEAPON,
+        storedWeaponSlot(storedAfterReturn) === MAIN_WEAPON,
       'E2 三件套**逐字节不变**：Profile 没被清空、Inventory 没动、Equipped 还是那件（失败不发奖也不删档，必改 4）',
       `${WEAPON_SLOT}=${storedWeaponSlot(storedAfterReturn)} 账本=${storedAfterReturn[CLAIMS_KEY] ? '有' : '无'}`,
     );
     log(
       homeAfterFail.claim === null &&
         homeAfterFail.view === 'home' &&
-        homeAfterFail.equippedWeaponId === LOSE_WEAPON &&
-        !!homeAfterFail.startRunHref,
+        homeAfterFail.equippedWeaponId === MAIN_WEAPON &&
+        !!homeAfterFail.startRunHref &&
+        homeAfterFail.startRunBlocked === false,
       'E3 回到首页是一次**干净挂载**：没有领奖请求、停在首页视图、装备仍是那件、可以再次出发',
       `claim=${homeAfterFail.claim} view=${homeAfterFail.view} equipped=${homeAfterFail.equippedWeaponId}`,
     );
@@ -516,7 +721,7 @@ async function main() {
     await clickSelector(page, '[data-ph-action="open-garage"]');
     const garageAfterFail = await probeHome(page);
     log(
-      garageAfterFail.view === 'garage' && garageAfterFail.weaponIds.includes(LOSE_WEAPON),
+      garageAfterFail.view === 'garage' && garageAfterFail.weaponIds.includes(MAIN_WEAPON),
       'E4 回首页后**可以直接进入调整战车**（失败链的终点是「可调整配置」而不是死胡同）',
       `view=${garageAfterFail.view} 车库件数=${garageAfterFail.weaponIds.length}`,
     );
@@ -524,10 +729,10 @@ async function main() {
 
     /* ============================== F. 失败后的新 Run 只能由玩家主动出发 */
 
-    const home2 = await probeHome(page);
-    const loadout2 = decodeLoadoutFromHref(home2.startRunHref ?? '');
+    const home3 = await probeHome(page);
+    const loadout2 = decodeLoadoutFromHref(home3.startRunHref ?? '');
     log(
-      !!loadout2 && loadout2.functionalSelections[WEAPON_SLOT] === LOSE_WEAPON,
+      !!loadout2 && loadout2.functionalSelections[WEAPON_SLOT] === MAIN_WEAPON,
       'F1 玩家主动再点「开始冒险」：链接带的仍是当前 Equipped（新 Run 的入口只有首页这一个）',
       `${WEAPON_SLOT}=${loadout2 ? loadout2.functionalSelections[WEAPON_SLOT] : 'n/a'}`,
     );
@@ -549,8 +754,7 @@ async function main() {
       `DAY=${run2Start.day} battles=${run2Start.battlesCompleted} build=${JSON.stringify(run2Start.build)} 补偿=${run2Start.repairBonus} phase=${run2Start.phase}`,
     );
 
-    const firstBattle2 = await driveUntilFirstBattle(page, '第二局第一场');
-    const fb = firstBattle2.probe;
+    const fb = await driveUntilBattle(page, 0, FAIL_POLICY, '第二局第一场');
     log(
       fb.battle.playerHp === fb.battle.playerHpMax && fb.battle.steps >= 1,
       'F3 新 Run 第一场是**满耐久**开打（不是上一局剩下的血）',

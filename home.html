@@ -181,6 +181,32 @@
       .ph-card-tag { font-size: 10px; color: #8fe0ad; }
 
       /*
+        PRODUCT-LOOP-P0｜不支持完整 Run 时的最小提示，以及不可执行的「开始冒险」。
+
+        ⚠️ 不可执行形态是**没有 href 的 disabled 按钮**（不是「链接在但点了没用」）
+           ⇒ 这里只负责视觉上说得清楚，拦不拦得住由 DOM 结构保证。
+      */
+      .ph-compat {
+        display: flex; flex-direction: column; gap: 4px;
+        margin: 10px 0 0; padding: 10px 12px;
+        border: 1px solid #7a5a2a; border-radius: 10px; background: #241d12;
+      }
+      .ph-compat-lead { font-size: 13px; font-weight: 650; color: #ffd7a0; }
+      .ph-compat-hint { font-size: 12px; color: #c8b48f; }
+      .ph-btn-blocked { opacity: 0.45; cursor: not-allowed; }
+
+      /* 车库里的「当前可冒险状态」（Queue 必改 3：装完之后在这里就能看出来）。 */
+      .ph-run-status {
+        display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
+        margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; background: #1c2233;
+      }
+      .ph-run-status-label { font-size: 11px; color: #93a1b6; }
+      .ph-run-status-value { font-size: 13px; font-weight: 650; color: #eaf1fb; }
+      .ph-run-status-hint { font-size: 11px; color: #c8b48f; }
+      .ph-run-status[data-ph-run-compat='unsupported'] { background: #241d12; }
+      .ph-run-status[data-ph-run-compat='unsupported'] .ph-run-status-value { color: #ffd7a0; }
+
+      /*
         PRODUCT-LOOP-R2-B｜合成（最小动作）。
 
         ⚠️ 卡片本身是 <button>，而「合成」也是一个按钮 —— HTML 不允许 button 套 button，

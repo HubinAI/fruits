@@ -464,11 +464,39 @@ export function createRunRegistry(
 }
 
 /**
+ * PRODUCT-LOOP-P0-RUN-BUILD-LOADOUT-COMPATIBILITY｜**本局装载里有没有强化注入的目标**。
+ *
+ * = 「装载里是否含基准武器（正式 Cannon）的件」。这是 `applyRunModifiersToSnapshot`
+ * 那个 `throw` 的**同一判据**，刻意抽成单一函数：
+ *
+ *   - 注入路径（运行时）：不满足 ⇒ 继续**显式抛错**（invariant 一字不动，见下方）；
+ *   - 创建路径（Run 创建前的资格检查）：**同一个函数**回答「这局能不能跑」，
+ *     从而**没有第二套「什么算兼容」的定义** —— 两边不可能漂移。
+ *
+ * ⚠️ 刻意**不**按「某个固定槽位是不是 cannon」判断：装载里哪一件是主武器由
+ *    **真实装配结果**回答（`category === 'weapon'`），固定槽位推断一换车 / 一换槽就失效
+ *    —— 口径与 `runPlayerLoadout.ts` 头部「刻意不暴露 weaponDefId」那条纪律一致。
+ */
+export function snapshotHasRunBaseWeapon(snapshot: BuildSnapshot): boolean {
+  return snapshot.functionals.some((install) => install.defId === RUN_BASE_WEAPON_DEF_ID);
+}
+
+/**
  * 把本局 BuildSnapshot 里**基准武器**的 `defId` 重映射到本局 overlay 部件。
  *
  * 只动 `defId` 一个字段 → 挂点 / 星级 / 装配 / 其它部件全部原样；
  * 没有任何改武器的项 → 原样返回（本局武器就是正式 Cannon）；
  * 有改武器的项却找不到基准武器时**显式抛错**（不静默跳过，否则「选了强化但没生效」会变成静默失败）。
+ *
+ * ⚠️ PRODUCT-LOOP-P0｜这个 `throw` **是刻意保留的强 invariant**，不是待修的异常处理问题：
+ *    UI / Choice 层把不兼容的 Modifier 送进 Runtime **本身就是程序错误**。
+ *    ⇒ **禁止**把它改成 silently skip / `return snapshot` / try-catch 吞掉。
+ *    真正的修复发生在**两层资格**上：产品侧「开始冒险」守门（`src/product/runCompatibility.ts`）
+ *    + Lab 侧「Run 创建资格」（`runLoadoutCompat.ts` / `runPageScene.resolveRunPlayerLoadout`）
+ *    —— 于是这个分支在真实流程里**不可达**，而它一旦可达就仍然响亮地报错。
+ *
+ * ⚠️ 判据本体已抽到 `snapshotHasRunBaseWeapon()`（与创建期资格检查同源），
+ *    本函数只负责「按判据决定注入还是抛错」。
  */
 export function applyRunModifiersToSnapshot(
   snapshot: BuildSnapshot,
@@ -477,16 +505,13 @@ export function applyRunModifiersToSnapshot(
   const mods = normalizeBuild(build);
   const overlayId = runBuildDefId(mods);
   if (!overlayId) return snapshot;
-  let touched = false;
-  const functionals = snapshot.functionals.map((install) => {
-    if (install.defId !== RUN_BASE_WEAPON_DEF_ID) return install;
-    touched = true;
-    return { ...install, defId: overlayId };
-  });
-  if (!touched) {
+  if (!snapshotHasRunBaseWeapon(snapshot)) {
     throw new Error(
       `RunModifier: 本局装载里没有 "${RUN_BASE_WEAPON_DEF_ID}"，无法注入强化 [${mods.join(', ')}]`,
     );
   }
+  const functionals = snapshot.functionals.map((install) =>
+    install.defId === RUN_BASE_WEAPON_DEF_ID ? { ...install, defId: overlayId } : install,
+  );
   return { ...snapshot, functionals };
 }

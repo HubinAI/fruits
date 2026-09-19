@@ -438,6 +438,17 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../lab/buildEditorModel',
         './playerLoadout',
       ],
+      /*
+        PRODUCT-LOOP-P0：完整 Run 资格判断（产品层唯一一处）。
+          - 判据必须来自**真实 `BuildDraft` + 正式内容库的分类字段**（Queue 必改 1
+            明令「不要在 UI 里靠字符串判断」）⇒ 用 `../lab/buildEditorModel` 做纯解析、
+            用 `../core/content` 做只读分类；
+          - `../core/types` **只取 `FunctionalPartDef` 类型**（展示名要用它）；
+          - 刻意**不**依赖 `./playerLoadout`：那是「哪个槽是武器槽」的口径所在，
+            而资格判断问的是「装载里有没有受支持的武器」（存在性），两者刻意不同源，
+            否则两层判据会在「主武器换人、车上另有基准武器」时分叉。
+      */
+      'runCompatibility.ts': ['../core/content', '../core/types', '../lab/buildEditorModel'],
     };
     for (const [file, list] of Object.entries(allow)) {
       const specs = importSpecifiers(readProduct(file)).sort();
@@ -458,6 +469,8 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
           './playerProfile',
           // PRODUCT-LOOP-R2-A：成长的唯一入口（页面只调 `openGrowthSession` 一次）
           './playerGrowth',
+          // PRODUCT-LOOP-P0：「开始冒险」的资格判断（页面**不**自己判断武器支持性）
+          './runCompatibility',
         ],
         `homePage.ts 不得 import "${s}"`,
       ).toContain(s);

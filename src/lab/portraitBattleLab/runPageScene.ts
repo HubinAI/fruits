@@ -39,6 +39,8 @@ import {
   type SpawnedEntity,
 } from './entities';
 import { findEncounter, findLoadout } from './testData';
+// PRODUCT-LOOP-P0｜Run 创建资格：不兼容装载 ⇒ **拒绝创建**（理由结构化上报，不 throw）
+import { runLoadoutCompatOfDraft, type RunLoadoutCompatReason } from './runLoadoutCompat';
 import {
   hasRunLoadoutParam,
   parseRunPlayerLoadout,
@@ -124,21 +126,69 @@ export function demoRunPlayerLoadout(): RunPlayerLoadout {
  *   - `'invalid'`  —— **带了但坏了**（参数被改坏 / 存档组合非法）。
  *     ⚠️ 这一项一旦为 `'invalid'`，局内跑的就不是玩家身上那件 ⇒ 属真实异常，
  *        必须能被探针与测试看见，绝不静默降级（Queue 必改 2 的反面就是「首页显示 A、战斗跑 B」）。
+ *   - `'unsupported-loadout'` —— 装载**本身合法**，但**不满足完整 Run 的基础要求**
+ *     （PRODUCT-LOOP-P0：局外 Weapon 已支持 cannon / spear / hammer，而已验证的 Run Build
+ *      内容全部围绕 cannon 派生 ⇒ 非 cannon 装上后走到第一次强化注入时会 throw）。
+ *     ⚠️ 与 `'invalid'` 的区别：`'invalid'` 是「这份装备数据坏了」，本项是「装备数据是好的，
+ *        但当前原型的完整 Run 不支持它」—— 后者是**产品限制**，不是数据错误。
+ *
+ * ── `blocked`：Run 创建资格（Queue 必改 4 的第二层防线）────────────────────
+ * 真人 P0 复现链是「equipped = 非 cannon → 前几日正常 → DAY3 选 heavyShell → `beginBattle`
+ * → `applyRunModifiersToSnapshot()` 找不到 cannon → throw → Run 卡死」。
+ * 强化注入发生在**第二次战斗创建**时，所以第一场看不出来（R1-C 只验证了第一场）。
+ *
+ * ⇒ 绕过产品首页（旧 URL / 旧 Profile / stale href / 测试入口）进来时，
+ *   **必须在 Run 创建前**就明确失败 —— 也就是本标志：
+ *     - `blocked === true` ⇒ 宿主**不得创建 Run**，改为呈现结构化拒绝结果；
+ *     - 于是「DAY3 才 throw」那条路径在真实流程里**不可达**；
+ *     - 而 `applyRunModifiersToSnapshot()` 的强 invariant（找不到基准武器即 throw）
+ *       **一字未改** —— 它一旦可达就仍然响亮地报错（必改 5）。
  */
 export interface RunLoadoutResolution {
   readonly loadout: RunPlayerLoadout;
-  readonly fallback: 'none' | 'no-param' | 'invalid';
+  readonly fallback: 'none' | 'no-param' | 'invalid' | 'unsupported-loadout';
+  /** 该链接**不得创建 Run**（宿主必须拒绝并呈现结构化结果，不许照常开战）。 */
+  readonly blocked: boolean;
+  /** 被拒绝的原因（`blocked === false` ⇒ `null`）。 */
+  readonly blockedReason: RunLoadoutCompatReason | null;
 }
 
 /**
  * 从 `location.search` 形态的字符串解析本局玩家装载（**唯一入口**）。
  *
- * 非法 / 缺失一律回退到演示装载，并把原因写进 `fallback`（见上）。
+ * 非法 / 缺失一律回退到演示装载，并把原因写进 `fallback`（见上）；
+ * **合法但不支持完整 Run** ⇒ `blocked: true`（由宿主拒绝创建 Run，不走到战斗）。
+ *
+ * ⚠️ `blocked === true` 时的 `loadout` 取演示装载只是**类型上的占位**：
+ *    宿主在 `blocked` 时不会创建 `RunPage` ⇒ 这份占位值**绝不参与任何战斗**。
+ *    刻意**不**返回「玩家那份不兼容装载」—— 否则调用方一旦忽略 `blocked`，
+ *    就会退化成「照常开战然后在 DAY3 崩」，正是本 Queue 要根除的形态。
  */
 export function resolveRunPlayerLoadout(search: string): RunLoadoutResolution {
   const parsed = parseRunPlayerLoadout(search);
-  if (parsed) return { loadout: parsed, fallback: 'none' };
-  return { loadout: demoRunPlayerLoadout(), fallback: hasRunLoadoutParam(search) ? 'invalid' : 'no-param' };
+  if (!parsed) {
+    return {
+      loadout: demoRunPlayerLoadout(),
+      fallback: hasRunLoadoutParam(search) ? 'invalid' : 'no-param',
+      blocked: false,
+      blockedReason: null,
+    };
+  }
+  /**
+   * 产品侧交进来的装备已经过正式 `validateSnapshot`（数据合法）⇒ 这里只回答
+   * 「当前原型的完整 Run 支不支持它」，判据与运行时强化注入**同源**
+   * （`snapshotHasRunBaseWeapon`，见 `runLoadoutCompat.ts`）。
+   */
+  const compat = runLoadoutCompatOfDraft(parsed.draft);
+  if (!compat.ok) {
+    return {
+      loadout: demoRunPlayerLoadout(),
+      fallback: 'unsupported-loadout',
+      blocked: true,
+      blockedReason: compat.reason,
+    };
+  }
+  return { loadout: parsed, fallback: 'none', blocked: false, blockedReason: null };
 }
 
 /**

@@ -93,10 +93,21 @@ const WEAPON_PRE_NAME = '锤';
  * ⚠️ R2-A 之后它不再是「唯一奖励」：`REWARD_WEAPON_ID` 已随 3选1 一起被删掉，
  *    三张卡各自带一条领奖地址，玩家点谁由本文件的 `PICK_INDEX` 决定
  *    （= 玩家的选择，而不是产品写死的「奖励就是它」）。
- * ⚠️ 为什么选 **spear**（实测，不是随便挑的）：第二局只驱到「第一场真的打起来」为止，
- *    而主武器槽的实测矩阵（`src/product/playerLoadout.ts` 的 `DEFAULT_CLEARED_SLOT` 注释）是
- *    `spear` 能撑过第 1 场 / `hammer` 第 1 场即被打死 ⇒ `spear` 的取样窗口最稳。
  * ⚠️ 它与新账号的初始读数（`SEED_COUNTS.spear` = 1）不同 ⇒ 「领完变 2」是可观测的累积。
+ *
+ * ── ⚠️ PRODUCT-LOOP-P0-RUN-BUILD-LOADOUT-COMPATIBILITY：它的角色**缩小**了 ──────────
+ * P0 之前本文件让第二局**真的装上 Weapon B（spear）去打第一场**。P0 之后这条路不再合法：
+ * 非 cannon 的装备在首页就进不去完整 Run（产品裁决：Spear / Hammer 在有正式 Run Build
+ * 内容之前不得进入完整 Run）。⇒ `spear` 现在只承担**局外**角色：
+ *
+ *   ① 终点真的点中它 ⇒ 库存 1 → 2（R2-A 的累积证据，D1–D3 一字未动）；
+ *   ② 照样可以拥有 / 查看 / **装备**（必改 3：不许把它从 Inventory 删掉）⇒ D4 / D4b 一字未动；
+ *   ③ 但装上它之后「开始冒险」必须进**不可执行**状态（新段 E1 / E2），
+ *      换回 `cannon` 才恢复（新段 E3）—— 第二局因此用 `cannon` 打第一场。
+ *
+ * ⚠️ 于是本文件比 P0 之前**多**取证了一件事：守门在真实鼠标点击下真的成立（E1 真点不导航）。
+ *    代价是「第二局第一场用的是刚换上的那件新装备」不再由 `spear` 承担 ——
+ *    改由 F4b 的**逐槽对账**证明（战斗里真实装配的车 = 出发前存档里那份 Loadout）。
  */
 const WEAPON_B = 'spear';
 const WEAPON_B_NAME = '刺';
@@ -186,6 +197,22 @@ const waitRunReady = async (page) => {
 
 const probeHome = (page) => page.evaluate(() => window.__PRODUCTHOME__.probe());
 const probeRun = (page) => page.evaluate(() => window.__RUNPAGE__.probe());
+
+/**
+ * 首页「不可执行」提示块的**真实 DOM**（PRODUCT-LOOP-P0 必改 2）。
+ * 断言提示「画在页面上」而不是只在探针里 —— 探针字段对玩家不可见。
+ */
+const compatNoticeDom = (page) =>
+  page.evaluate(() => {
+    const el = document.querySelector('[data-ph-compat]');
+    return el
+      ? {
+          value: el.getAttribute('data-ph-compat'),
+          reason: el.getAttribute('data-ph-compat-reason'),
+          text: el.textContent ?? '',
+        }
+      : null;
+  });
 
 /** 真实鼠标点击：元素真实 CSS 矩形中心（不用 evaluate 直调 click）。 */
 async function clickSelector(page, sel) {
@@ -712,13 +739,68 @@ async function main() {
       `view=${home3.view} equipped=${home3.equippedWeaponId}`,
     );
 
-    const loadout2 = decodeLoadoutFromHref(home3.startRunHref ?? '');
-    const payload2 = choicesOf(home3.startRunHref ?? '');
-    const cardBAfter = home3.weapons.find((w) => w.defId === WEAPON_B);
+    /*
+      ⚠️ PRODUCT-LOOP-P0：这一段原先断言「第二次开始冒险的链接带的是 Weapon B」。
+      现在**装着 Weapon B 根本不该有链接** ⇒ 断言随之改写，并且加了三条更强的：
+        E1  不可执行（无 href + 资格=不支持 + 两句提示：探针与**真实 DOM** 双取证）
+        E2  真鼠标点它**不导航**（守门在真实点击下成立，不是「点了没反应」的装饰）
+        E2b 提示里的「调整战车」入口可直接执行
+        E3  换回 cannon 后恢复可执行，链接带的装备 = 当前 Equipped
+    */
+    const blockedNotice = await compatNoticeDom(page);
     log(
-      !!loadout2 && loadout2.functionalSelections[WEAPON_SLOT] === WEAPON_B,
-      'E1 第二次「开始冒险」的链接带的是**新**装备（车库换装 → 下一局就用它，无需刷新）',
-      loadout2 ? `${WEAPON_SLOT}=${loadout2.functionalSelections[WEAPON_SLOT]}` : 'n/a',
+      home3.startRunBlocked === true &&
+        home3.startRunHref === null &&
+        home3.runCompat.ok === false &&
+        home3.runCompat.reason === 'unsupported-weapon' &&
+        home3.runCompat.notice === '当前原型仅支持加农炮进行完整冒险' &&
+        home3.runCompat.hint === '请先调整战车' &&
+        !!blockedNotice &&
+        blockedNotice.value === 'unsupported' &&
+        blockedNotice.text.includes('当前原型仅支持加农炮进行完整冒险') &&
+        blockedNotice.text.includes('请先调整战车'),
+      `E1 装着 Weapon B（${WEAPON_B_NAME}）时「开始冒险」进入**不可执行**状态：没有 href + 资格=不支持 + 两句提示（探针与真实 DOM 都取证）`,
+      `blocked=${home3.startRunBlocked} href=${home3.startRunHref} notice=${home3.runCompat.notice} hint=${home3.runCompat.hint}`,
+    );
+
+    const blockedUrlBefore = await page.evaluate(() => location.pathname + location.search);
+    await clickSelector(page, '[data-ph-action="start-run"]');
+    await sleep(600);
+    const blockedUrlAfter = await page.evaluate(() => location.pathname + location.search);
+    log(
+      blockedUrlAfter === blockedUrlBefore &&
+        blockedUrlAfter.startsWith('/home.html') &&
+        (await probeHome(page)).startRunBlocked === true,
+      'E2 真鼠标点「开始冒险」：**完全没有导航**、仍停在首页 ⇒ 非 cannon 时不可能进入 Run（不是「进去了再返回」）',
+      `url ${blockedUrlBefore} → ${blockedUrlAfter}`,
+    );
+
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    const garageForBack = await probeHome(page);
+    log(
+      garageForBack.view === 'garage',
+      'E2b 提示「请先调整战车」可直接执行：真实点击进入调整战车（复用既有入口，没有新增第二个按钮）',
+      `view=${garageForBack.view}`,
+    );
+
+    await clickSelector(page, `[data-ph-weapon="${WEAPON_A}"]`);
+    await clickSelector(page, '[data-ph-action="equip"]');
+    const stored3b = await storageDump(page);
+    await clickSelector(page, '[data-ph-action="back-home"]');
+    const home4 = await probeHome(page);
+    const loadout2 = decodeLoadoutFromHref(home4.startRunHref ?? '');
+    const payload2 = choicesOf(home4.startRunHref ?? '');
+    const cardBAfter = home4.weapons.find((w) => w.defId === WEAPON_B);
+    log(
+      storedWeaponSlot(stored3b) === WEAPON_A &&
+        home4.view === 'home' &&
+        home4.equippedWeaponId === WEAPON_A &&
+        home4.startRunBlocked === false &&
+        !!loadout2 &&
+        loadout2.functionalSelections[WEAPON_SLOT] === WEAPON_A &&
+        (await compatNoticeDom(page)) === null,
+      `E3 换回 Weapon A（${WEAPON_A_NAME}）：守门恢复放行（有 href / 提示消失 / 资格=通过），且链接带的装备 = 当前 Equipped`,
+      `equipped=${home4.equippedWeaponId} blocked=${home4.startRunBlocked} 链接装备槽=${loadout2 ? loadout2.functionalSelections[WEAPON_SLOT] : 'n/a'}`,
     );
     log(
       !!payload2 &&
@@ -726,7 +808,7 @@ async function main() {
         cardBAfter.count === SEED_COUNTS[WEAPON_B] + 1 &&
         payload2.choices[PICK_INDEX].defId === WEAPON_B &&
         payload2.choices[PICK_INDEX].countBefore === SEED_COUNTS[WEAPON_B] + 1,
-      'E1b 第二次出发的载荷读的是**领奖之后**的库存（候选读数已累积到 2 ⇒ 预览 2 → 3，不是出发时那份旧快照）',
+      'E3b 第二次出发的载荷读的是**领奖之后**的库存（候选读数已累积到 2 ⇒ 预览 2 → 3，不是出发时那份旧快照）',
       payload2
         ? `载荷=${payload2.choices.map((c) => `${c.defId}:${c.countBefore}`).join(' ')} · 卡片=${cardBAfter ? cardBAfter.count : 'n/a'}`
         : 'n/a',
@@ -738,10 +820,11 @@ async function main() {
     const afterReload = await probeHome(page);
     const cardBReload = afterReload.weapons.find((w) => w.defId === WEAPON_B);
     log(
-      afterReload.equippedWeaponId === WEAPON_B &&
+      afterReload.equippedWeaponId === WEAPON_A &&
+        afterReload.startRunBlocked === false &&
         !!cardBReload &&
         cardBReload.count === SEED_COUNTS[WEAPON_B] + 1,
-      'D5 整页 reload：累积出来的数量（2/5）与「仍装着它」都来自真实持久化（不是页面内存）',
+      `D5 整页 reload：累积出来的数量（${SEED_COUNTS[WEAPON_B] + 1}/5）与「仍装着换回来的 ${WEAPON_A_NAME}」都来自真实持久化（不是页面内存）`,
       `equipped=${afterReload.equippedWeaponId} ${WEAPON_B}=${cardBReload ? cardBReload.count : 'n/a'}`,
     );
 
@@ -774,8 +857,8 @@ async function main() {
     log(
       runStart2.playerLoadout.source === 'profile' &&
         runStart2.playerLoadout.fallback === 'none' &&
-        runStart2.playerLoadout.functionalSelections[WEAPON_SLOT] === WEAPON_B,
-      'F2 第二局的装载来源仍是 profile，且主武器槽 = **Weapon B**（继承的是局外装备）',
+        runStart2.playerLoadout.functionalSelections[WEAPON_SLOT] === WEAPON_A,
+      `F2 第二局的装载来源仍是 profile，且主武器槽 = **Weapon A（${WEAPON_A_NAME}）**（继承的是局外装备；P0 起完整 Run 只支持它）`,
       `${WEAPON_SLOT}=${runStart2.playerLoadout.functionalSelections[WEAPON_SLOT]}`,
     );
 
@@ -788,11 +871,11 @@ async function main() {
       `phase=${p2.phase} steps=${p2.battle ? p2.battle.steps : 'n/a'}`,
     );
     log(
-      firstBattleWeapon(run2) === WEAPON_B,
-      `F4 **测试锁（第二局）**：Run 第一场实际 Weapon Def ID（${firstBattleWeapon(run2)}）= Profile Equipped Weapon ID（${profileEquippedWeapon(stored3)}）`,
+      firstBattleWeapon(run2) === WEAPON_A,
+      `F4 **测试锁（第二局）**：Run 第一场实际 Weapon Def ID（${firstBattleWeapon(run2)}）= Profile Equipped Weapon ID（${profileEquippedWeapon(stored3b)}）`,
       `battle=${JSON.stringify(p2.battleWorld.playerFunctionals)}`,
     );
-    const sel2 = JSON.parse(stored3[BUILD_KEY]).functionalSelections;
+    const sel2 = JSON.parse(stored3b[BUILD_KEY]).functionalSelections;
     log(
       canon(firstBattleMounted(run2)) === canon(mountedMap(sel2)),
       `F4b 第二局测试锁（逐槽）：战斗里真实装配的车 = 局外刚换上的那份 Loadout（挂点级对账）`,

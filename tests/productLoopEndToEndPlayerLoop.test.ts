@@ -238,7 +238,19 @@ describe('PRODUCT-LOOP-R1-C｜A. 局外装备的交接口径（唯一真源 + �
     // 装备参数一旦加上，链接与解析同时切换（不是「加了但没人读」）
     const withGear = adventureHref(token, equippedDraft(PROFILE_WEAPON));
     expect(withGear).toContain(`${LOADOUT_PARAM}=`);
-    expect(resolveRunPlayerLoadout(withGear.split('?')[1]).fallback).toBe('none');
+    /*
+      ⚠️ PRODUCT-LOOP-P0 的**契约变更**（不是回归）：`PROFILE_WEAPON = 'laser'` 仍然是
+      「合法、且不在 starter 里」的一件（本文件 EL-10 起继续用它证明装备通道真的被搬运），
+      但它**不是**当前原型支持完整 Run 的武器 ⇒ 现在的解析结果是 `'unsupported-loadout'`
+      （宿主据此拒绝创建 Run），而不是从前的 `'none'`。
+      两者都必须断言：**通道照旧搬运**（`parseRunPlayerLoadout` 仍解析得出）＋
+      **资格层另外把关**（`resolve` 把它拦在 Run 之外）—— 否则就成了「静默降级成能跑」。
+    */
+    expect(parseRunPlayerLoadout(withGear.split('?')[1])?.source, '通道本身不得受影响').toBe('profile');
+    expect(resolveRunPlayerLoadout(withGear.split('?')[1]).fallback).toBe('unsupported-loadout');
+    // 受支持的那一件（正式加农炮）经**同一条链路**产出 ⇒ `none`（正常产品闭环）
+    const withCannon = adventureHref(token, equippedDraft('cannon'));
+    expect(resolveRunPlayerLoadout(withCannon.split('?')[1]).fallback).toBe('none');
     /*
       领奖解析只认 `run` + `reward` 两个 top-level 参数 ⇒ **出发地址解析不出领奖请求**。
       这条在 R2-A 之后比 R1-B 更强：出发地址现在连一个 `reward=` 都没有，

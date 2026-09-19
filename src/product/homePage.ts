@@ -75,6 +75,10 @@ import {
   type FusionResult,
   type GrowthSession,
 } from './playerGrowth';
+// PRODUCT-LOOP-P0-RUN-BUILD-LOADOUT-COMPATIBILITY｜「开始冒险」的资格判断（产品层唯一一处）。
+// ⚠️ 页面**禁止**自己判断「这件武器支不支持完整 Run」（Queue 必改 1：不要在 UI 里靠字符串判断）
+//    —— 判据来自本模块对真实 `BuildDraft` 的读取，页面只负责按读数渲染。
+import { fullRunCompat, type FullRunCompat } from './runCompatibility';
 
 /** 正式 visualId → 正式资源 URL（与战斗 / Run Page 引用的是同一批 PNG 文件）。 */
 const SPRITE_URLS: Readonly<Record<string, string>> = {
@@ -197,6 +201,27 @@ export interface ProductProbe {
   readonly previewFallbackCount: number;
   readonly startRunHref: string | null;
   /**
+   * PRODUCT-LOOP-P0｜「开始冒险」当前是否**不可执行**（Queue 必改 2 / 必改 3）。
+   *
+   * ⚠️ 与 `startRunHref` 合起来读才是完整事实：
+   *   - 可执行：`startRunBlocked === false` 且 `startRunHref` 是一条真实地址；
+   *   - 不可执行：`startRunBlocked === true` 且 **`startRunHref === null`**
+   *     （没有链接 = 结构上无法创建 Run，而不是「链接在但点了没用」）。
+   */
+  readonly startRunBlocked: boolean;
+  /**
+   * PRODUCT-LOOP-P0｜完整 Run 资格读数（= `fullRunCompat(draft)` 原样）。
+   * ⚠️ 页面与探针取**同一次读取**，卡片上的提示文案也来自它 ⇒ 三者不可能分叉。
+   */
+  readonly runCompat: {
+    readonly ok: boolean;
+    readonly reason: string;
+    readonly equippedWeaponIds: readonly string[];
+    readonly supportedWeaponIds: readonly string[];
+    readonly notice: string | null;
+    readonly hint: string | null;
+  };
+  /**
    * PRODUCT-LOOP-R1-B｜本页**本局**的 token（幂等键）与它对应的冒险地址。
    * ⚠️ 每次挂载生成一次（= 一次新的「准备出发」）⇒ 同一 token 只可能领一次奖。
    */
@@ -249,6 +274,30 @@ function el<K extends keyof HTMLElementTagNameMap>(
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+/**
+ * PRODUCT-LOOP-P0｜不支持完整 Run 时的**最小明确反馈**（Queue 必改 2）。
+ *
+ * Queue 逐字要求两句：「当前原型仅支持加农炮进行完整冒险」+「请先调整战车」，
+ * 并明写「**不要做复杂弹窗**」⇒ 这里就是一个内联的普通块，紧贴在 `[调整战车]` 按钮上方。
+ *
+ * ⚠️ 文案**只来自** `runCompatibility`（`compat.notice` / `compat.hint`），
+ *    页面里不出现第二份字面量 ⇒ 改口径只改一处。
+ * ⚠️ 刻意**不在**这里再放一个「调整战车」按钮：入口是 `actions` 里那个既有的
+ *    `toGarage`（`data-ph-action="open-garage"`）。多一个同功能按钮会带来第二个
+ *    同值选择器（E2E 的 `clickSelector` 只取第一个），而玩家看到的仍是同一个入口。
+ * ⚠️ `data-ph-compat="unsupported"` 落在 DOM 上 ⇒ E2E 断言「有明确提示」不依赖文案匹配。
+ */
+function renderCompatNotice(compat: FullRunCompat): HTMLElement {
+  const box = el('div', 'ph-compat');
+  box.dataset['phCompat'] = 'unsupported';
+  box.dataset['phCompatReason'] = compat.reason;
+  box.append(
+    el('span', 'ph-compat-lead', compat.notice ?? ''),
+    el('span', 'ph-compat-hint', compat.hint ?? ''),
+  );
+  return box;
 }
 
 /** 把逻辑舞台缩放到容器（contain 语义：390×844 恒等比，只改 scale，不改布局口径）。 */
@@ -494,23 +543,64 @@ export function mountProductHome(
     }
     stage.append(list);
 
+    const goGarage = (): void => {
+      view = 'garage';
+      selected = null;
+      render();
+    };
     const actions = el('div', 'ph-actions');
     const toGarage = el('button', 'ph-btn ph-btn-primary', HOME_GARAGE_LABEL);
     toGarage.type = 'button';
     toGarage.dataset['phAction'] = 'open-garage';
-    toGarage.addEventListener('click', () => {
-      view = 'garage';
-      selected = null;
-      render();
-    });
-    // `开始冒险` 是同产物内的真实相对链接；地址由 `runReward.buildAdventureHref()` 产出
-    // （带本局 token / 奖励 id / **当前这份装备** / 回程地址）—— 「打完一局 → 领奖 → 回首页」
-    // 与「车库换装 → 下一局就用新装备」都靠同一个地址。
-    const start = el('a', 'ph-btn ph-btn-start', HOME_START_LABEL);
-    start.href = adventureHrefNow();
-    start.dataset['phAction'] = 'start-run';
-    start.dataset['phRunToken'] = runToken;
-    actions.append(toGarage, start);
+    toGarage.addEventListener('click', goGarage);
+    /**
+     * PRODUCT-LOOP-P0-RUN-BUILD-LOADOUT-COMPATIBILITY｜**「开始冒险」守门**（必改 2 / 必改 3）。
+     *
+     * 真人 P0：`equipped = 非 cannon` ⇒「前几日正常 → DAY3 选 heavyShell → `beginBattle`
+     * → `applyRunModifiersToSnapshot()` 找不到 cannon → throw → Run 卡死」。
+     * 根因是「没有开始完整 Run 的资格这一层」——局外已支持 spear / hammer，而已真人验证的
+     * Run Build 内容（heavyShell / twinCannon / fastReload / kineticBurst / tripleLoad）
+     * **全部**围绕 cannon 派生，且 R1-C 只验证了「非 cannon 的第一场 Battle」。
+     *
+     * 三条**不做**（Queue 逐字）：
+     *   ① 不得进入 Run；② **不得偷偷替换成 Cannon**；③ 不得创建半残 Run。
+     * ⇒ 因此这里**不是**「把 spear 换成 cannon 再放行」，而是**根本不给链接**：
+     *    可执行时是 `<a href>`（地址由 `runReward.buildAdventureHref()` 产出），
+     *    不可执行时是**没有 href 的 disabled 按钮** —— 「点了不会创建 Run」在结构上成立，
+     *    而不是靠事件处理里 return（后者一旦漏掉一处就变成静默放行）。
+     *
+     * ⚠️ 判据来自 `fullRunCompat(draft)`（真实 `BuildDraft` + 正式内容库分类字段），
+     *    **不是**页面里的字符串比较（必改 1）。
+     * ⚠️ 提示只给 Queue 给的两句文案 + 既有的「调整战车」入口（同一个 `toGarage`），
+     *    不新增第二个入口、不做弹窗。
+     */
+    const compat = fullRunCompat(draft);
+    if (compat.ok) {
+      // `开始冒险` 是同产物内的真实相对链接；地址由 `runReward.buildAdventureHref()` 产出
+      // （带本局 token / 奖励 id / **当前这份装备** / 回程地址）—— 「打完一局 → 领奖 → 回首页」
+      // 与「车库换装 → 下一局就用新装备」都靠同一个地址。
+      const start = el('a', 'ph-btn ph-btn-start', HOME_START_LABEL);
+      start.href = adventureHrefNow();
+      start.dataset['phAction'] = 'start-run';
+      start.dataset['phRunToken'] = runToken;
+      actions.append(toGarage, start);
+    } else {
+      /**
+       * 不可执行形态：**没有 href** ⇒ 无法导航、无法创建 Run（不是「点了没反应」）。
+       * ⚠️ 保留 `data-ph-action="start-run"` + `data-ph-run-token`：探针与 E2E 用同一个
+       *    选择器就能同时读「可执行」与「不可执行」两种形态，不需要第二套口径。
+       * ⚠️ `disabled` 同时挡住鼠标与键盘激活。
+       */
+      const blocked = el('button', 'ph-btn ph-btn-start ph-btn-blocked', HOME_START_LABEL);
+      blocked.type = 'button';
+      blocked.disabled = true;
+      blocked.dataset['phAction'] = 'start-run';
+      blocked.dataset['phStartBlocked'] = '1';
+      blocked.dataset['phStartBlockedReason'] = compat.reason;
+      blocked.dataset['phRunToken'] = runToken;
+      actions.append(toGarage, blocked);
+    }
+    if (!compat.ok) stage.append(renderCompatNotice(compat));
     stage.append(actions);
 
     stage.append(
@@ -555,6 +645,33 @@ export function mountProductHome(
       el('span', 'ph-current-name', r.equippedWeaponName),
     );
     stage.append(cur);
+
+    /**
+     * PRODUCT-LOOP-P0｜**Garage 必须能识别「当前可冒险状态」**（Queue 必改 3）。
+     *
+     * 必改 3 的三条边界，逐条落地：
+     *   - Spear / Hammer **仍然允许拥有 / 查看 / 装备**（本页一个字都没改装备流程，
+     *     也没有从库存里删任何东西 —— 卡照画、按钮照点、`equipWeapon` 照旧放行）；
+     *   - 但装完之后，玩家在**这里**就能看到「这辆车的当前装备跑不了完整冒险」，
+     *     不必等回到首页撞上不可用的按钮；
+     *   - 回到首页时「开始冒险」进入**不可执行**状态（见 `renderHome` 的守门），
+     *     并给出「需要更换支持完整 Run 的武器」的明确提示。
+     *
+     * ⚠️ 与首页守门**同一次判断来源**（`fullRunCompat(draft)`）⇒ 不会出现
+     *    「车库说可以、首页说不可以」这种自相矛盾的页面。
+     */
+    const garageCompat = fullRunCompat(draft);
+    const runStatus = el('div', 'ph-run-status');
+    runStatus.dataset['phRunCompat'] = garageCompat.ok ? 'ok' : 'unsupported';
+    runStatus.dataset['phRunCompatReason'] = garageCompat.reason;
+    runStatus.append(
+      el('span', 'ph-run-status-label', '完整冒险'),
+      el('span', 'ph-run-status-value', garageCompat.ok ? '当前装备可以出发' : '当前装备不支持'),
+    );
+    if (!garageCompat.ok) {
+      runStatus.append(el('span', 'ph-run-status-hint', garageCompat.notice ?? ''));
+    }
+    stage.append(runStatus);
 
     stage.append(el('h2', 'ph-sec', `拥有的 Weapon（${r.weapons.length}）`));
     if (r.weapons.length === 0) {
@@ -740,7 +857,15 @@ export function mountProductHome(
     probe: () => {
       const r = read();
       const layout = vehiclePreviewLayout(draft);
-      const start = stage.querySelector<HTMLAnchorElement>('[data-ph-action="start-run"]');
+      /**
+       * ⚠️ PRODUCT-LOOP-P0：这里**不再**只找 `<a>` ——「不可执行」形态是一个
+       *     **没有 href 的 `disabled <button>`**，它同样带 `data-ph-action="start-run"`
+       *     ⇒ 同一选择器覆盖两种形态，探针不需要第二套口径。
+       *     `getAttribute('href')` 对 button 恒为 `null` ⇒ `startRunHref === null`
+       *     **本身就是**「点击无法创建 Run」的机器证据（不是「链接在但点了没用」）。
+       */
+      const start = stage.querySelector<HTMLElement>('[data-ph-action="start-run"]');
+      const compat = fullRunCompat(draft);
       const equipBtn = stage.querySelector<HTMLButtonElement>('[data-ph-action="equip"]');
       return {
         view,
@@ -808,6 +933,17 @@ export function mountProductHome(
         previewSpriteCount: layout.items.filter((i) => !!i.visualId && !!SPRITE_URLS[i.visualId]).length,
         previewFallbackCount: layout.items.filter((i) => !i.visualId || !SPRITE_URLS[i.visualId]).length,
         startRunHref: start ? start.getAttribute('href') : null,
+        /** PRODUCT-LOOP-P0｜见 `ProductProbe.startRunBlocked`（不可执行 = 没有 href）。 */
+        startRunBlocked: start ? start.dataset['phStartBlocked'] === '1' : false,
+        /** PRODUCT-LOOP-P0｜完整 Run 资格读数（与页面提示、Garage 状态同一次读取）。 */
+        runCompat: {
+          ok: compat.ok,
+          reason: compat.reason,
+          equippedWeaponIds: compat.equippedWeaponIds,
+          supportedWeaponIds: compat.supportedWeaponIds,
+          notice: compat.notice,
+          hint: compat.hint,
+        },
         runToken,
         adventureHref: adventureHrefNow(),
         claim: claim

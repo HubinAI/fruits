@@ -49,6 +49,8 @@ import { RunPage } from './runPage';
 import { parseRunFailReturn, type RunFailReturn } from './runFailSettlement';
 import { parseRunRewardChoices, type RunProductClaim } from './runProductReward';
 import { resolveRunPlayerLoadout } from './runPageScene';
+// PRODUCT-LOOP-P0｜拒绝态的呈现单独成模块：宿主受 `RP-25b` 更严约束（不得 createElement）
+import { renderRunBlocked } from './runBlockedView';
 
 /** Run Page 专属只读诊断句柄（仅本原型页面存在；不进入任何正式构建产物）。 */
 interface RunPageDebugHandle {
@@ -90,6 +92,29 @@ function boot(): void {
        出现不了任何产品 URL 字面量（`RP-25b` 钉死）。
   */
   const failReturn = parseRunFailReturn(window.location.search);
+
+  /*
+    PRODUCT-LOOP-P0-RUN-BUILD-LOADOUT-COMPATIBILITY｜**Run 创建资格**（Queue 必改 4）。
+
+    真人 P0：`equipped = 非 cannon` ⇒「前几日正常 → DAY3 选/进入 heavyShell → `beginBattle`
+    → `applyRunModifiersToSnapshot()` 找不到 cannon → throw → Run 卡死」。
+    根因不是异常处理：已真人验证的 Run Build 内容（heavyShell / twinCannon / fastReload /
+    kineticBurst / tripleLoad）**全部**围绕正式基准武器派生，而 R1-C 只验证了
+    「非 cannon 的第一场 Battle」，**没覆盖**「非 cannon → 第一次强化 → 下一场 Battle」
+    （强化注入发生在**第二次**战斗创建时，所以第一场看不出来）。
+
+    产品首页已守门（`src/product/runCompatibility.ts`），但**旧 URL / 旧 Profile /
+    stale href / 测试入口**都可能绕过它 ⇒ 这里必须在**创建 Run 之前**明确拒绝：
+      - 不创建 `RunPage` ⇒ 不建战斗运行时、不进任何 DAY ⇒ 结构上到不了 DAY3；
+      - 呈现**结构化**拒绝结果（可被 E2E / 探针断言），而不是 crash，
+        也不是静默跑演示车（后者等于「首页显示 A、战斗跑 B」）。
+    ⚠️ `applyRunModifiersToSnapshot()` 的强 invariant（找不到基准武器即 throw）**一字未改**
+       （必改 5）—— 该分支在真实流程里因此**不可达**，而一旦可达仍会响亮报错。
+  */
+  if (playerLoadout.blocked) {
+    renderRunBlocked(root, playerLoadout, failReturn);
+    return;
+  }
 
   const page = new RunPage(root, {
     rewardChoices,

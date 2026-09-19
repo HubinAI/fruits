@@ -672,14 +672,17 @@ export interface RunPageProbe {
    * `source === 'profile'` + `fallback === 'none'` = 用的就是产品侧交进来的
    * 「当前 Player Profile Equipped」；其余取值都是**降级**，必须被测试看见：
    *   - `no-param` = 链接没带装备参数（研发入口 `/run-page.html` 的原行为，合法）；
-   *   - `invalid`  = **带了但坏了** ⇒ 这一局跑的不是玩家身上那件（真实异常）。
+   *   - `invalid`  = **带了但坏了** ⇒ 这一局跑的不是玩家身上那件（真实异常）；
+   *   - `unsupported-loadout` = 装备合法但**不满足完整 Run 的基础要求**（PRODUCT-LOOP-P0）。
+   *     ⚠️ 这个取值只在**宿主拒绝创建 Run 的那条路径**上被解析出来（不会随 RunPage 存在），
+   *        这里保留它是为了「先解析、后决定是否创建」的单一入口口径一致。
    *
    * ⚠️ 与「实际打了什么」分开报告：本字段是**输入**，`battleWorld.playerWeaponDefIds`
    *    是**真实装配结果**。两者都必须有，才能证明「输入 == 实际」（而不是各说各话）。
    */
   readonly playerLoadout: {
     source: 'profile' | 'demo';
-    fallback: 'none' | 'no-param' | 'invalid';
+    fallback: 'none' | 'no-param' | 'invalid' | 'unsupported-loadout';
     /** 装载标签（= spawn plan 的 `loadoutId` 证据字段）。 */
     tag: string;
     /** 展示名（日志里的 `{vehicle}`）。 */
@@ -952,9 +955,13 @@ export class RunPage {
     this.opts = opts;
     this.root = root;
     // PRODUCT-LOOP-R1-C：本局玩家装载（缺省 = 演示装载 ⇒ 既有入口行为逐项不变）。
+    // ⚠️ PRODUCT-LOOP-P0：`blocked: false` 是这里的**正常前提** —— 不兼容装载由宿主
+    //    （`runMain.ts`）在创建 RunPage **之前**拒绝，这条路径上不会出现 `blocked: true`。
     const resolution: RunLoadoutResolution = opts.playerLoadout ?? {
       loadout: demoRunPlayerLoadout(),
       fallback: 'no-param',
+      blocked: false,
+      blockedReason: null,
     };
     this.loadout = resolution.loadout;
     this.loadoutFallback = resolution.fallback;
