@@ -39,6 +39,14 @@ export default defineConfig({
         // PRP-M3-CONTENT-BATCH-01：M3 内容批次验证台（三项内容：多单位 / 废弃修理站 /
         // 路边改装件；**没有画布**）。同上：仍是同一块可整块删除的实验产物。
         'content-batch': 'content-batch.html',
+        // PRODUCT-LOOP-R1-A-HOME-GARAGE-INVENTORY：竖屏**正式产品**主循环第一段
+        // （首页 / 调整战车，局外配车）。
+        // ⚠️ 它不是验证页、不是 Lab 内容：页面在 `src/product/`（Lab 目录之外，
+        //    因此既不扩 Lab，也不受 Lab 的 import 白名单约束），复用的是正式存档
+        //    （Build / Inventory）与正式车辆美术。与 `run-page` 同产物 ⇒
+        //    首页上的「开始冒险」是**同产物内的相对链接**（`./run-page.html`）。
+        //    仍然不进入 dist / dist-pages / dist-e2e / dist-wechat 任一正式产物。
+        'home': 'home.html',
       },
     },
   },

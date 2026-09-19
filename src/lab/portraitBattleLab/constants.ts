@@ -30,6 +30,10 @@
  *   1) 本目录 src/lab/portraitBattleLab/（全部文件）
  *   2) 根目录 portrait-lab.html、run-page.html、next-run.html、encounter-lab.html、
  *      validation-hub.html、content-batch.html
+ *      ⚠️ PRODUCT-LOOP-R1-A 起，实验分支上又多了两个**产品**层面的文件，
+ *         它们**不在**本目录内，也不属于本实验台的删除范围（删的是实验台，
+ *         不是产品）：根目录 `home.html` + `src/product/` + `tests/productLoopHomeGarage.test.ts`
+ *         + `tests/_e2e_product_home.cjs`。它们只复用正式存档与正式美术，不引用本目录。
  *   3) 根目录 vite.portrait-lab.config.ts
  *   4) tests/portraitBattleLab.test.ts、tests/portraitBattleLabF1.test.ts、
  *      tests/portraitBattleLabA1.test.ts、tests/portraitBattleLabG1.test.ts、

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>最强水果 — 我的战车（首页 / 调整战车）</title>
+    <!--
+      PRODUCT-LOOP-R1-A-HOME-GARAGE-INVENTORY｜竖屏正式产品主循环第一段：**局外配车**。
+
+        `首页（看车 + 已装备） --[调整战车]--> 调整战车（选一件已拥有武器 → 装备） --[返回首页]--> 首页同步`
+
+      「首页」与「调整战车」是**同一页面的两个视图**（整页零跳转），与本分支既有玩家页面
+      「单页多状态」的产品结构一致；页面代码在 src/product/（**不在** debug lab 目录内）。
+
+      复用（不新建）：
+        - 当前 Build = 正式 core/buildPersistence.ts 的 strongfruit.playerBuild.v1
+          （与 game/playerGameRuntime.ts 读的是同一处 ⇒ 唯一数据源）；
+        - 库存 = 正式 core/partInventory.ts 的 ensureInventory（幂等，不重复生成）；
+        - 武器定义 = 正式 core/content.ts 的 registry.functionals（category === 'weapon'）；
+        - 车辆外形 = 正式 assets/visuals/*.png + 正式 BodyDef / FunctionalPartDef 的 visual 定义。
+
+      边界（Queue 冻结项）：
+        - 本页**不参与** npm run build / build:pages / build:e2e / build:wechat 任一正式构建；
+        - 不新建 Runtime、不改 Run / Battle Camera / Battle Physics / Buff / Encounter /
+          Validation Hub / Encounter Lab / Content Batch / Fusion / 星级 / Economy；
+        - `开始冒险` 只是同产物内的相对链接 —— 本轮 Run 仍用自己的固定 demo loadout，
+          把装备接进 Run 属下一段 Queue。
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; overflow: hidden; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: #06090e;
+        color: #e9eef7;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* 唯一容器 = 整视口；手机框按 390×844 contain 缩放居中（与 Run Page 同口径） */
+      #ph-root.ph-root { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+
+      .ph-frame {
+        position: relative;
+        overflow: hidden;
+        border-radius: 12px;
+        box-shadow: 0 0 0 1px #1b2434, 0 24px 70px rgba(0, 0, 0, 0.62);
+      }
+      /* 逻辑舞台恒 390×844；只缩放，不改布局口径 */
+      .ph-screen {
+        width: 390px;
+        height: 844px;
+        transform-origin: top left;
+        display: flex;
+        flex-direction: column;
+        background: linear-gradient(180deg, #0a0f18 0%, #0e1626 42%, #16243c 100%);
+        overflow: hidden;
+      }
+
+      /* ------------------------------------------------------------------ 顶栏 */
+      .ph-header {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        padding: 18px 16px 10px;
+        border-bottom: 1px solid rgba(63, 93, 130, 0.35);
+      }
+      .ph-title { font-size: 22px; font-weight: 700; letter-spacing: 0.02em; }
+      .ph-sub { font-size: 12px; color: #93a1b6; }
+
+      /* ------------------------------------------------------------------ 主体 */
+      .ph-main {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 12px 14px 18px;
+      }
+
+      /* 战车展示（DOM 合成；零画布） */
+      .ph-car-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 0 2px;
+        border-radius: 12px;
+        border: 1px solid rgba(34, 48, 74, 0.9);
+        background: radial-gradient(120% 90% at 50% 92%, rgba(63, 93, 130, 0.28), rgba(12, 17, 25, 0.9));
+      }
+      .ph-car-wrap-sm { padding: 2px 0 0; }
+      .ph-car { position: relative; width: 100%; }
+      .ph-car-item { position: absolute; display: block; object-fit: fill; }
+      .ph-car-fallback {
+        background: #8b96a8;
+        border: 1px solid #4c566a;
+        opacity: 0.9;
+      }
+      .ph-car-weapon { outline: 2px solid #ffd35a; outline-offset: 1px; border-radius: 3px; }
+
+      .ph-spec { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; padding: 0 4px 6px; }
+      .ph-body { font-size: 15px; font-weight: 650; color: #eaf1fb; }
+      .ph-stat {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px; color: #9fb0c8;
+      }
+
+      /* 装备摘要 */
+      .ph-sec { font-size: 13px; color: #93a1b6; letter-spacing: 0.04em; }
+      .ph-slots { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+      .ph-slot {
+        display: flex; align-items: center; gap: 10px;
+        padding: 9px 12px;
+        border-radius: 9px;
+        border: 1px solid #22304a;
+        background: #101823;
+        font-size: 13px;
+      }
+      .ph-slot-weapon { border-color: #7a5b00; background: #1a1607; }
+      .ph-slot-label { flex: 0 0 76px; color: #8a93a5; font-size: 12px; }
+      .ph-slot-name { flex: 1 1 auto; color: #e3ebf7; }
+      .ph-slot-tag {
+        flex: 0 0 auto;
+        font-size: 11px; padding: 2px 7px; border-radius: 999px;
+        color: #ffd35a; border: 1px solid #7a5b00; background: rgba(122, 91, 0, 0.25);
+      }
+
+      /* 当前 Weapon（调整战车） */
+      .ph-current {
+        display: flex; align-items: baseline; gap: 10px;
+        padding: 11px 13px;
+        border-radius: 10px;
+        border: 1px solid #7a5b00;
+        background: #1a1607;
+      }
+      .ph-current-label { font-size: 12px; color: #b99a3f; }
+      .ph-current-name { font-size: 17px; font-weight: 700; color: #ffe9a8; }
+
+      /* 库存武器 */
+      .ph-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .ph-card {
+        display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+        padding: 11px 12px; text-align: left; font: inherit;
+        border-radius: 10px; border: 1px solid #2b3550; background: #131b28; color: inherit;
+        cursor: pointer;
+      }
+      .ph-card:hover { background: #1a2536; border-color: #34507c; }
+      .ph-card-selected { border-color: #ffd35a; box-shadow: inset 3px 0 0 #ffd35a; background: #1c2233; }
+      .ph-card-equipped { border-color: #3f8f5a; }
+      .ph-card-name { font-size: 15px; font-weight: 650; color: #eaf1fb; }
+      .ph-card-meta { font-size: 11px; color: #93a1b6; }
+      .ph-card-tag { font-size: 10px; color: #8fe0ad; }
+
+      /* 动作 */
+      .ph-actions { display: flex; gap: 10px; margin-top: auto; padding-top: 12px; }
+      .ph-btn {
+        flex: 1 1 0;
+        display: flex; align-items: center; justify-content: center;
+        min-height: 46px; padding: 0 14px;
+        font: inherit; font-size: 16px; font-weight: 700;
+        border-radius: 11px; border: 1px solid #2b3550; background: #141c28; color: #cfe0ff;
+        cursor: pointer; text-decoration: none;
+      }
+      .ph-btn:hover { background: #1c2740; }
+      .ph-btn:disabled { opacity: 0.45; cursor: default; }
+      .ph-btn-primary { border-color: #3d6494; background: #1d3352; color: #dbe9ff; }
+      .ph-btn-primary:hover { background: #274267; }
+      .ph-btn-start {
+        border-color: #7a5b00; background: linear-gradient(180deg, #ffd35a, #e8a92c); color: #3a2600;
+      }
+      .ph-btn-start:hover { background: linear-gradient(180deg, #ffe07e, #f0b53c); }
+
+      .ph-note { font-size: 11px; color: #7b8697; line-height: 1.6; }
+      .ph-note-ok { color: #8fe0ad; }
+      .ph-note-bad { color: #ff9c8f; }
+    </style>
+  </head>
+  <body>
+    <div id="ph-root" class="ph-root"></div>
+    <script type="module" src="/src/product/homeMain.ts"></script>
+  </body>
+</html>

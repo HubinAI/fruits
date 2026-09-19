@@ -122,10 +122,14 @@ describe('PRP-VALIDATION-HUB-R1｜A. Hub 上摆的就是该摆的四个', () => 
 
   it('H-05 四个入口恰好覆盖四个验证页面（既不缺也不多）', () => {
     expect(VALIDATION_HUB_ENTRIES.map((e) => e.pageFile).sort()).toEqual([...ENTRY_PAGES].sort());
-    // 根目录里不存在「不在 Hub 上、也不是 Debug 页 / 正式入口」的第五个验证页面
+    // 根目录里不存在「不在 Hub 上、也不是 Debug 页 / 正式入口 / 产品页」的第五个验证页面。
+    // ⚠️ PRODUCT-LOOP-R1-A：`home.html` 是竖屏**正式产品**首页 / 调整战车 —— 它不是验证页，
+    //    因此**不进**验证中心（Hub 仍然只是「验证入口的导航壳」）。这里显式列为「非验证页」，
+    //    其余任何新增根 html 依旧会在此被判 FAIL（守卫强度不变）。
+    const NON_VALIDATION_PAGES = ['index.html', 'portrait-lab.html', 'home.html'];
     const extras = readdirSync(REPO_ROOT)
       .filter((f) => f.endsWith('.html'))
-      .filter((f) => !ENTRY_PAGES.includes(f) && f !== HUB_HTML && f !== 'index.html' && f !== 'portrait-lab.html');
+      .filter((f) => !ENTRY_PAGES.includes(f) && f !== HUB_HTML && !NON_VALIDATION_PAGES.includes(f));
     expect(extras).toEqual([]);
   });
 });
