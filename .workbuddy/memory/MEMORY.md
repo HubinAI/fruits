@@ -14,7 +14,8 @@
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`d334d0c` R1 验证中心 → `3d23091` RUN-02-R1 → `09ee631` RUN-02-R2 → `0ff259f` M2-R1 →
-  `d1a9d67` PBL-RDC 远程维持作战距离 → **`bab5f63` M3-CONTENT-BATCH-01**；更早查 `git log`。
+  `d1a9d67` PBL-RDC 远程维持作战距离 → `bab5f63` M3-CONTENT-BATCH-01 →
+  **PBL-M3-LIGHT-SWARM 体验验证入口（本 commit；纯 memory 补正紧随其后回填 SHA）**；更早查 `git log`。
 - 全链对 `src/{core,physics,render,player,platform,ui,game,presentation}` diff **恒为空**。正式 gameplay 改动仅：
   `cannonBehavior.ts` 可选 `burstRounds`（默认 1，逐帧不变）+ `battle/` 内**可选**驱动档（缺省逐帧不变）。
 
@@ -44,6 +45,15 @@
   （`H-01` `toHaveLength(N)` + id/label 数组、`H-02` `Set.size`、`H-04` `want` 表、`H-05` `ENTRY_PAGES`、
   **`H-14` 「下一个」循环**）· `tests/_e2e_validation_hub.cjs`（`EXPECT`、`ENTRY_PAGES`、**4 处 `a.vhub-card`
   计数**、**`V20` 顺序断言**、新页 probe 写进 `EXPECT[].probe`）。⚠️ **最容易漏的是「顺序断言」而不是「计数断言」**。
+- ⚠️ **「可选 A/B / 换一个玩家」类需求先查它是不是可装配件**：`twinCannon` / `heavyShell` / `fastReload`
+  是 **Run 的第一层强化**（`runModifiers.ts:95` 的 `Layer1ModifierId`；效果如 `burstRounds 1→2`），
+  **不是部件** ⇒ Lab 的 `LAB_LOADOUTS`（`BuildDraft` 部件级）装不出「双联炮」，`arenaA.ts` 也无 `burst` 通道。
+  凡「给 Lab 加一个带强化效果的玩家」= 给 Lab 新增 Modifier 层 = **新能力**（未授权不做，且要如实披露）。
+- ⚠️ **体验验证入口别接进 Validation Hub**：Hub = 玩家可用验证面；Arena A = DEBUG 面
+  （`constants.ts:13-19`）。混进去 = 让 DEBUG 结果看起来像正式验证 ⇒ 直接放 Lab 工具栏 + 常驻标记条幅。
+- ⚠️ **「已经在该组合里」的入口按钮必须先 `reset`**：否则 `setXxx` 同值 no-op + `start` 幂等
+  ⇒ 点了完全没反应（M2-R1 的 P0 形态）。先 `reset` 再配置 = 永远有真实动作（可反复重开），
+  且 `spawnSerial` 递增可证明是新批次。
 - ⚠️ **跨轮复验 PRP 前必须先 `npm run build:portrait-lab`**：E2E 读 `dist-portrait-lab/`，`emptyOutDir:false` 会留
   **陈旧 chunk** ⇒ 直接跑 = 假 FAIL。定位：`grep -rl "<新字段>" dist-portrait-lab/` 空 + 旧字段命中。
 - ⚠️ **E2E 新段落别推进 `runViewport` 的 `page`**（后续 14 段会继续消费 ⇒ 过期 rect 点击 ⇒ 90s 超时假红）；
@@ -92,14 +102,23 @@ RUN-02 脚本 / 状态机 §F · §J · §K · M2 种子 §G · M3 遭遇台 §H
 **PBL-RDC 远程维持距离 §M**。
 ⚠️ **M3-CONTENT-BATCH-01 不在 REF** ⇒ 看 `交接文档_2026-09-19_PRP-M3-CONTENT-BATCH-01.md`
 （Content A BLOCK 的六层证据 / B+C 复用口径 / Hub 第 4 入口）。
+⚠️ **PBL-M3-LIGHT-SWARM 也不在 REF** ⇒ 看 `交接文档_2026-09-19_PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1.md`
+（一键入口 / 两条如实上报 / `vehicleId` 只读通道 / L 段 E2E）。
 
 ## 6. Next action
-- ⚠️ **最高优先（M3-CB 已停等的用户裁决）**：Content A「多单位轻敌群」**如实 BLOCK** —— Foundation 在
-  （`contactRouter.ts` 的 `OwnerTag.vehicleId`、`arenaA.ts:814` 的 1vN 宿主）但**正式 Battle Runtime 装不下**
-  （`planckBattleOrchestrator.ts:217-218` 硬编码两车 + `battleContract.ts:96-98` 只有 A/B 胜负 +
-  `runBattleRuntime.ts:355` 只取 `enemies[0]`；唯一 1vN 宿主是 DEBUG 的 Arena A）。三选项：
-  甲 接受现状 / **乙 单开 New Foundation Queue（N 车正式编排 + N 方胜负 + 相机）** / 丙 降级到 Arena A 先看。
-  ⇒ 在用户裁决前**不得动 Content A**（`LightSwarm3` 零改动）。
+- ⚠️ **最高优先（等真人一条结论）**：LightSwarm 体验验证**已交付**（Lab 工具栏一键入口 `3 弱敌·体验验证`）。
+  真人只看 10~20s 并回答：**「面对 3 个弱敌，战斗问题是否明显从『打赢一辆车』变成『处理数量与拥挤』？」**
+  - 成立 ⇒ 下一轮**才**开正式 **1vN Foundation**（N 车正式编排 + N 方胜负 + 相机）；
+  - 不成立 ⇒ **LightSwarm 方向停止**，不为它开发 Foundation（`LightSwarm3` 继续零改动）。
+  ⚠️ 配套两条待裁决：① Queue 前提「单体明显弱」在 **HP 维度不成立**（`LightSwarm3` 单敌 900 =
+  `Chaser` 900；真实差异只有质量 105<120 + 武器 圆锯 vs 锤）—— 甲 接受 / 乙 另开数值 Queue / 丙 看录屏再定；
+  ② 可选 A/B（Twin Cannon）**未做**（`twinCannon` 是 Run 的强化而非可装配部件 ⇒ 要做得先开
+  「给 Lab 加 Modifier 层」的 Queue）。
+- ⚠️ **Content A 的正式宿主缺口没变**（未被本 Queue 触碰）：`planckBattleOrchestrator.ts:217-218` 硬编码两车 +
+  `battleContract.ts:96-98` 只有 A/B 胜负 + `runBattleRuntime.ts:355` 只取 `enemies[0]`；唯一 1vN 宿主是
+  DEBUG 的 Arena A（`arenaA.ts:814`）。⇒ 「要不要做正式 1vN Foundation」由上面那条体验结论决定。
+- ⚠️ **真人已裁决（M3-CB 收尾）**：路边改装件 ✅ **通过并保留**；废弃修理站 ❌ **假选择，不进正式内容池**；
+  详情见 `交接文档_2026-09-19_PRP-M3-CONTENT-BATCH-01.md`。
 - ⚠️ **本体**：PBL-RDC 把「敌人恒冲锋」修成三段距离档，但**实测暴露几何死结**——敌人会被玩家一路压到**右墙
   1600（终点栏杆）**，可用域宽仅 800px ⇒ 这正是 `PRP-P0-FOUNDATION-BEHAVIOR-EXIT-INTERRUPT-R1` 的对象。
 - ⚠️ **待用户裁决**（不得自行决定）：① 第二层池被统一去重砍成 2 项；② M2 脚手架 `PRIOR_RUN_DURABILITY`

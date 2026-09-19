@@ -49,6 +49,9 @@ const LEDGER = {
   'A/WatermelonHeavyCannon/RangedTurret': { arena: 25200, playerBody: 8360, playerPart: 800, enemyBody: 7797, enemyPart: 1363 },
   'A/BananaChargeHammer/RangedTurret': { arena: 25200, playerBody: 7618, playerPart: 1560, enemyBody: 7797, enemyPart: 1363 },
   'A/BananaChargeHammer/LightSwarm3': { arena: 25200, playerBody: 7618, playerPart: 1560, enemyBody: 22980, enemyPart: 2160 },
+  // PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1：体验验证组合（玩家固定西瓜重炮 × 3 轻敌人）。
+  // 期望值唯一来源 = tests/portraitBattleLabA1.test.ts 的 A1-24 账本（同一组 `A/WatermelonHeavyCannon/LightSwarm3`）。
+  'A/WatermelonHeavyCannon/LightSwarm3': { arena: 25200, playerBody: 8360, playerPart: 800, enemyBody: 22980, enemyPart: 2160 },
   'B/BananaChargeHammer/RangedTurret': { arena: 5480, playerBody: 7798, playerPart: 1560, enemyBody: 7790, enemyPart: 1370 },
   'B/BananaChargeHammer/LightSwarm3': { arena: 5480, playerBody: 7798, playerPart: 1560, enemyBody: 18060, enemyPart: 11568 },
 };
@@ -435,6 +438,147 @@ async function runViewport(browser, vp) {
       gAfterReset.liveProjectiles === 0,
     `[${tag}] G12 Reset 后门禁游标归零且无任何残留`,
     `cursor=${gAfterReset.gate.cursor} entities=${gAfterReset.liveEntities}`,
+  );
+
+  /* ==================================================================
+   * 13) PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1｜体验验证入口（一键 → 3 弱敌 → Reset）
+   *
+   * 真实鼠标点击（getByRole 真实坐标点击）+ 真实 getImageData 像素账本。
+   * ⚠️ 本段是 runViewport 的**最后一段**（紧邻 ctx.close()），因此不会推进后续任何段落
+   *    依赖的 page 状态；等待物理推进的重活全部在本段内部同一条 page 上完成。
+   * ⚠️ 本段只验证「体验能不能被看到」，不验证正式 Run Runtime（页面已明确标记非正式）。
+   * ================================================================== */
+  const evIdle = (await probeOf(page)).experienceValidation;
+  log(
+    !!evIdle &&
+      evIdle.queueId === 'PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1' &&
+      evIdle.active === false,
+    `[${tag}] L1 未进入时验证入口如实报「未进入」（判据由 state 派生，不是点击标记）`,
+    `queue=${evIdle && evIdle.queueId} active=${evIdle && evIdle.active}`,
+  );
+  log(
+    !!evIdle &&
+      evIdle.badgeTitle === 'EXPERIENCE VALIDATION ONLY' &&
+      evIdle.badgeSubtitle === '非正式 Run Runtime' &&
+      evIdle.isFormalRunRuntime === false,
+    `[${tag}] L2 页面明确标记 EXPERIENCE VALIDATION ONLY / 非正式 Run Runtime`,
+    `${evIdle && evIdle.badgeTitle} · ${evIdle && evIdle.badgeSubtitle}`,
+  );
+
+  // 13.1) 切到验证组合的 idle 态：核对真实渲染像素账本（t=0 快照，与 A1-24 交叉核对）
+  await clickBtn(page, '西瓜重炮');
+  await clickBtn(page, '3 轻敌人');
+  const pLse = await probeOf(page);
+  const sLse = await pixelSignature(page);
+  log(
+    pLse.encounter === 'LightSwarm3' &&
+      pLse.enemyBodies.length === 3 &&
+      pLse.enemyBodies.join(',') === 'bananaBody,bananaBody,bananaBody',
+    `[${tag}] L3 三个敌人同时在场（同一正式模板 × 3；idle 预览即 3 个实体）`,
+    `enemies=${pLse.enemyBodies.join('/')}`,
+  );
+  ledgerCheck(tag, 'L4 Arena A × 西瓜重炮 × 3 轻敌人 idle', sLse, 'A/WatermelonHeavyCannon/LightSwarm3', vp.dpr);
+
+  // 13.2) 真实点击「一键体验验证入口」→ 进入组合并开始真实物理推进
+  await clickBtn(page, '3 弱敌·体验验证');
+  await page.waitForTimeout(900);
+  const r0 = await probeOf(page);
+  const ev0 = r0.experienceValidation;
+  log(
+    !!ev0 &&
+      ev0.active === true &&
+      r0.arena === 'A' &&
+      r0.loadout === 'WatermelonHeavyCannon' &&
+      r0.encounter === 'LightSwarm3' &&
+      r0.phase === 'running' &&
+      !!r0.arenaA &&
+      r0.arenaA.live === true,
+    `[${tag}] L5 一键入口：真实点击即进入验证组合并开始真实物理推进`,
+    `active=${ev0 && ev0.active} phase=${r0.phase} live=${r0.arenaA && r0.arenaA.live}`,
+  );
+  log(
+    !!r0.arenaA &&
+      r0.arenaA.entities.length === 4 &&
+      ev0.declaredEnemyCount === 3 &&
+      ev0.liveEnemyCount === 3,
+    `[${tag}] L6 Arena A 真实出现 3 个敌方实体（+ 玩家 = 4）`,
+    `entities=${r0.arenaA && r0.arenaA.entities.length} declared=${ev0 && ev0.declaredEnemyCount} live=${ev0 && ev0.liveEnemyCount}`,
+  );
+
+  const evIds = r0.arenaA ? r0.arenaA.entities.map((e) => e.vehicleId) : [];
+  log(
+    evIds.length === 4 &&
+      evIds.every((v) => typeof v === 'string' && v.length > 0) &&
+      new Set(evIds).size === 4 &&
+      evIds.filter((v) => v.indexOf('LightSwarm3') >= 0).length === 3,
+    `[${tag}] L7 三者各自有独立 vehicleId（OwnerTag.vehicleId 的真实来源）`,
+    `vehicleIds=${evIds.join(' / ')}`,
+  );
+
+  // 13.3) 再推进一段时间：三敌 HP 各自独立读数（实例级伤害不串）
+  await page.waitForTimeout(1500);
+  const r1 = await probeOf(page);
+  const en = r1.arenaA ? r1.arenaA.entities.filter((e) => e.team !== 'A') : [];
+  const hps = en.map((e) => Math.round(e.hp));
+  log(
+    !!r1.arenaA && r1.arenaA.steps > r0.arenaA.steps && en.length === 3,
+    `[${tag}] L8 真实物理持续推进（步数增长）`,
+    `steps=${r0.arenaA && r0.arenaA.steps}→${r1.arenaA && r1.arenaA.steps}`,
+  );
+  log(
+    en.length === 3 && en.every((e) => e.hp <= e.maxHp && e.maxHp > 0) && new Set(hps).size > 1,
+    `[${tag}] L9 三敌各自独立 HP（读数互不相同 = 各自结算，不是共享一条血条）`,
+    `maxHp=${en.map((e) => e.maxHp).join('/')} hp=${hps.join('/')}`,
+  );
+  log(
+    !!r1.arenaA && r1.arenaA.worstEntityOverlapDepthPx <= 16,
+    `[${tag}] L10 敌↔敌 / 敌↔玩家真实碰撞无穿模（重叠在 PBL-A1 同一容差内）`,
+    `worstOverlap=${r1.arenaA && r1.arenaA.worstEntityOverlapDepthPx.toFixed(2)} minPair=${r1.arenaA && r1.arenaA.minPairDistancePx.toFixed(1)}`,
+  );
+
+  // 13.4) Reset → 零残留（实体 / 弹丸 / 物理计数 / 门禁残留）
+  await clickBtn(page, 'Reset');
+  const rZ = await probeOf(page);
+  const sZ2 = await pixelSignature(page);
+  log(
+    rZ.phase === 'idle' &&
+      rZ.liveEntities === 0 &&
+      rZ.liveProjectiles === 0 &&
+      !!rZ.arenaA &&
+      rZ.arenaA.live === false &&
+      rZ.arenaA.steps === 0 &&
+      rZ.gate.switchResidue.length === 0,
+    `[${tag}] L11 Reset 后无实体 / 无弹丸 / 无 contact 残留（Arena A 真实运行时已释放）`,
+    `phase=${rZ.phase} entities=${rZ.liveEntities} live=${rZ.arenaA && rZ.arenaA.live} steps=${rZ.arenaA && rZ.arenaA.steps} residue=${JSON.stringify(rZ.gate.switchResidue)}`,
+  );
+  log(
+    JSON.stringify(sZ2) === JSON.stringify(s0) && rZ.experienceValidation.active === false,
+    `[${tag}] L12 Reset 后像素签名回初始，且验证入口如实回到「未进入」`,
+    `active=${rZ.experienceValidation.active}`,
+  );
+
+  // 13.5) 再点一次：按钮必须**永远有真实动作**（干净重开），不是「已经在组合里就点了没反应」
+  const serialBefore = rZ.spawnSerial;
+  await clickBtn(page, '3 弱敌·体验验证');
+  await page.waitForTimeout(400);
+  const r2 = await probeOf(page);
+  log(
+    r2.phase === 'running' &&
+      r2.spawnSerial > serialBefore &&
+      r2.experienceValidation.active === true &&
+      !!r2.arenaA &&
+      r2.arenaA.steps > 0,
+    `[${tag}] L13 重复点击仍真实重开一场（新批次 spawnSerial 递增，不静默无响应）`,
+    `spawnSerial=${serialBefore}→${r2.spawnSerial} steps=${r2.arenaA && r2.arenaA.steps}`,
+  );
+
+  // 13.6) 收尾：回到干净 idle（本段已是最后一段，仍显式收尾）
+  await clickBtn(page, 'Reset');
+  const rEnd = await probeOf(page);
+  log(
+    rEnd.phase === 'idle' && rEnd.liveEntities === 0 && rEnd.liveProjectiles === 0,
+    `[${tag}] L14 本段收尾 Reset：回到干净 idle`,
+    `phase=${rEnd.phase} entities=${rEnd.liveEntities}`,
   );
 
   await ctx.close();

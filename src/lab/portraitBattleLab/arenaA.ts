@@ -382,6 +382,12 @@ export type ArenaAEntityRuntime = ArenaAAgent;
 
 export interface ArenaAEntityView {
   readonly entityId: string;
+  /**
+   * PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1：真实车辆实例身份 = `OwnerTag.vehicleId`。
+   * 多实体场景下每个实体各不相同（单敌场景也已如此），是本 Queue「三者各自有独立
+   * vehicleId」验收的**可观测通道**（以前只在物理内部存在，探针读不到）。
+   */
+  readonly vehicleId: string;
   readonly team: string;
   readonly role: ArenaARole;
   readonly bodyDefId: string;
@@ -1046,6 +1052,13 @@ export class ArenaARuntime {
       const bb = mergedBounds(this.world, a.vehicle);
       return {
         entityId: a.entity.entityId,
+        /**
+         * PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1：真实车辆实例身份
+         * = `OwnerTag.vehicleId`（`planckVehicleAssembly.ts:319` 取 `resolved.snapshot.id`
+         * ⇒ 就是 `entities.ts` 给每个实体生成的 snapshot id）。
+         * 三敌各自独立 ⇒ 同队多车可被 `ContactRouter` 精确区分（本 Queue 验收 2 的直接证据）。
+         */
+        vehicleId: a.entity.snapshot.id,
         team: a.vehicle.team,
         role: a.role,
         bodyDefId: a.entity.bodyDefId,

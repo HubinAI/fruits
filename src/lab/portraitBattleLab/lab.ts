@@ -14,6 +14,7 @@
 import { PlayerViewportTransform } from '../../platform/playerViewport';
 import {
   LAB_ARENAS,
+  PBL_LIGHT_SWARM_VALIDATION,
   PORTRAIT_LOGICAL_H,
   PORTRAIT_LOGICAL_W,
 } from './constants';
@@ -102,6 +103,8 @@ export interface PblProbe {
   readonly layers: Record<LabLayerId, number>;
   /** Arena A 真实运行诊断（当前不是 Arena A 时为 null）。 */
   readonly arenaA: PblArenaAProbe | null;
+  /** PBL-M3｜体验验证入口的当前状态（由 state 派生，非点击标记）。 */
+  readonly experienceValidation: PblExperienceValidationProbe;
   /** PBL-G1 对照门禁诊断（审计 + 6 步验证顺序 + 切场零残留）。 */
   readonly gate: PblGateProbe;
   readonly camera: { scale: number; offsetX: number; offsetY: number; dpr: number };
@@ -130,6 +133,8 @@ export interface PblArenaAProbe {
   } | null;
   readonly entities: readonly {
     entityId: string;
+    /** 真实车辆实例身份（`OwnerTag.vehicleId`）——多实体区分归属的直接证据。 */
+    vehicleId: string;
     team: string;
     role: string;
     bodyName: string;
@@ -146,6 +151,35 @@ export interface PblArenaAProbe {
   /** 任一对实体最深的真实碰撞几何重叠（≤0 = 无重叠；>0 = 真实重叠）。 */
   readonly worstEntityOverlapDepthPx: number;
   readonly minPairDistancePx: number;
+}
+
+/**
+ * PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1｜体验验证入口诊断。
+ *
+ * ⚠️ 全部由**当前 state 派生**（不是「点过按钮」留下的标记）⇒ Reset / 切配置后自动失效，
+ *    不会出现「显示已进入但实际已退出」的假状态。
+ */
+export interface PblExperienceValidationProbe {
+  readonly queueId: string;
+  /** 当前组合是否就是验证组合（Arena A + 西瓜重炮 + 3 轻敌人）。 */
+  readonly active: boolean;
+  readonly arena: string;
+  readonly loadout: string;
+  readonly encounter: string;
+  /** 由正式数据源声明（`LAB_ENCOUNTERS[].count`）的同场敌人数 —— 不按运行时实体数反推。 */
+  readonly declaredEnemyCount: number;
+  /** 运行期真实敌方实体数；只有与 declaredEnemyCount 相等才算「3 个都真的在场」。 */
+  readonly liveEnemyCount: number;
+  /** 真实车辆实例身份（`OwnerTag.vehicleId`），按实体顺序；非 Arena A 时为空数组。 */
+  readonly vehicleIds: readonly string[];
+  /** 本入口**不是**正式 Run Runtime（如实声明；正式运行时 = `runBattleRuntime.ts` 的适配对象）。 */
+  readonly isFormalRunRuntime: false;
+  /** 页面必须展示的标记与真人问题（唯一来源 = `constants.ts`）。 */
+  readonly badgeTitle: string;
+  readonly badgeSubtitle: string;
+  readonly question: string;
+  /** 可选 A/B 未做的如实披露。 */
+  readonly abNotDone: string;
 }
 
 /** PBL-G1 门禁诊断（全部来自 gate.ts 的真实审计结果，不做任何美化/兜底）。 */
@@ -216,6 +250,14 @@ export class PortraitBattleLab {
   private gatePanel: HTMLDivElement | null = null;
   private btnGateNext: HTMLButtonElement | null = null;
   private btnGateClear: HTMLButtonElement | null = null;
+  /**
+   * PBL-M3｜体验验证条幅 + 一键入口按钮。
+   * ⚠️ 条幅是**纯 DOM**（在 canvas 之外）⇒ 对像素分类零影响；
+   *    「是否已进入验证组合」由 state 派生（见 `isLightSwarmValidation`），不存标记。
+   */
+  private validationBanner: HTMLDivElement | null = null;
+  private validationStateEl: HTMLSpanElement | null = null;
+  private btnLightSwarm: HTMLButtonElement | null = null;
   /** 共享配置审计结果（惰性计算一次并缓存；配置目录是模块常量，无需失效）。 */
   private gateAudit: SharedCombatDataAudit | null = null;
   /** 已推进到的步数（Reset / Gate 清空后归零）。 */
@@ -309,7 +351,20 @@ export class PortraitBattleLab {
       this.btnGateNext = mkButton(host, 'Gate 下一步', () => this.gateNext());
       this.btnGateClear = mkButton(host, 'Gate 清空', () => this.gateClear());
     });
+    /**
+     * PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1｜**唯一**新增入口：
+     * 一键把 Lab 切到「Arena A + 西瓜重炮 + 3 轻敌人」并 Start。
+     * 全部走既有状态机（`setArena` → `setLoadout` → `setEncounter` → `start`），
+     * **不新建 Runtime、不新建页面**（复用 Arena A 已经存在的真实多实体能力）。
+     */
+    mkGroup('体验验证', (host) => {
+      this.btnLightSwarm = mkButton(host, PBL_LIGHT_SWARM_VALIDATION.label, () =>
+        this.applyLightSwarmValidation(),
+      );
+      this.btnLightSwarm.classList.add('pbl-btn-primary');
+    });
 
+    this.validationBanner = this.buildValidationBanner();
     this.statusEl.className = 'pbl-status';
     this.gatePanel = document.createElement('div');
     this.gatePanel.className = 'pbl-gate';
@@ -318,9 +373,49 @@ export class PortraitBattleLab {
     this.stageWrap.appendChild(this.canvas);
 
     this.root.appendChild(bar);
+    this.root.appendChild(this.validationBanner);
     this.root.appendChild(this.statusEl);
     this.root.appendChild(this.gatePanel);
     this.root.appendChild(this.stageWrap);
+  }
+
+  /**
+   * 体验验证条幅（Queue 必改 3：页面必须明确标记 EXPERIENCE VALIDATION ONLY / 非正式 Run Runtime）。
+   *
+   * 纯 DOM、位于 canvas 之外 ⇒ 不进入任何像素统计；文案唯一来源 = `constants.ts`。
+   */
+  private buildValidationBanner(): HTMLDivElement {
+    const v = PBL_LIGHT_SWARM_VALIDATION;
+    const el = document.createElement('div');
+    el.className = 'pbl-validation-banner';
+    el.dataset['queue'] = v.queueId;
+    el.dataset['active'] = 'false';
+
+    const title = document.createElement('span');
+    title.className = 'pbl-vb-title';
+    title.textContent = v.badgeTitle;
+
+    const sub = document.createElement('span');
+    sub.className = 'pbl-vb-sub';
+    sub.textContent = v.badgeSubtitle;
+
+    this.validationStateEl = document.createElement('span');
+    this.validationStateEl.className = 'pbl-vb-state';
+
+    const question = document.createElement('div');
+    question.className = 'pbl-vb-question';
+    question.textContent = `真人只回答：${v.question}`;
+
+    const note = document.createElement('div');
+    note.className = 'pbl-vb-note';
+    note.textContent = v.abNotDone;
+
+    el.appendChild(title);
+    el.appendChild(sub);
+    el.appendChild(this.validationStateEl);
+    el.appendChild(question);
+    el.appendChild(note);
+    return el;
   }
 
   private observeResize(): void {
@@ -483,6 +578,55 @@ export class PortraitBattleLab {
     this.render();
   }
 
+  /* -------------------- 体验验证（PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1） */
+
+  /**
+   * 当前组合是否就是体验验证组合。
+   * ⚠️ 由 state **派生**（三个既有 id 同时命中），不是点击留下的标记 ⇒ Reset / 切配置后自动失效。
+   */
+  private isLightSwarmValidation(): boolean {
+    const v = PBL_LIGHT_SWARM_VALIDATION;
+    return (
+      this.state.arena === v.arena &&
+      this.state.loadout === v.loadout &&
+      this.state.encounter === v.encounter
+    );
+  }
+
+  /**
+   * 一键进入体验验证组合：Arena A + 西瓜重炮 + 3 轻敌人 + Start。
+   *
+   * 全部走既有状态机（`reset` → `setArena` → `setLoadout` → `setEncounter` → `start`），
+   * 与 `gateNext` 同一套语义；不额外造状态、不改任何数值、不动任何正式 Runtime。
+   *
+   * ⚠️ 先 `reset` 再配置：**无论当前处于什么状态，点这个按钮都一定有真实动作**
+   *    （= 干净地重新开始这场验证，可反复重录），而不是「已经在组合里就完全没响应」
+   *    —— 后者正是 PRP-M2-R1 的 P0（按钮可见但点了没反应）。`spawnSerial` 不归零
+   *    （`clearRun` 保留），所以每次重开的批次号都能证明「这是新一批实体」。
+   */
+  private applyLightSwarmValidation(): void {
+    const v = PBL_LIGHT_SWARM_VALIDATION;
+    this.gateClear();
+    this.apply(reset(this.state));
+    this.apply(setArena(this.state, v.arena));
+    this.apply(setLoadout(this.state, v.loadout));
+    this.apply(setEncounter(this.state, v.encounter));
+    this.apply(start(this.state));
+  }
+
+  /** 同步条幅的「已进入 / 未进入」状态（纯展示；判据 = state 派生）。 */
+  private syncValidationBanner(): void {
+    const el = this.validationBanner;
+    if (!el) return;
+    const active = this.isLightSwarmValidation();
+    el.dataset['active'] = String(active);
+    if (this.validationStateEl) {
+      this.validationStateEl.textContent = active
+        ? `已进入 · Arena A + 西瓜重炮 + 3 轻敌人（${this.state.phase === 'running' ? '运行中' : '未运行'}）`
+        : `未进入（点「${PBL_LIGHT_SWARM_VALIDATION.label}」）`;
+    }
+  }
+
   private syncGatePanel(): void {
     const el = this.gatePanel;
     if (!el) return;
@@ -595,6 +739,7 @@ export class PortraitBattleLab {
       unavailable: sum.unavailable,
       layers: this.layerCounts(),
       arenaA: this.arenaAProbe(),
+      experienceValidation: this.experienceValidationProbe(),
       gate: this.gateProbe(),
       camera: {
         scale: this.vp.scale,
@@ -641,6 +786,7 @@ export class PortraitBattleLab {
       lastDamage: v.lastDamage ? { ...v.lastDamage } : null,
       entities: v.entities.map((e) => ({
         entityId: e.entityId,
+        vehicleId: e.vehicleId,
         team: e.team,
         role: e.role,
         bodyName: e.bodyName,
@@ -656,6 +802,36 @@ export class PortraitBattleLab {
       projectiles: v.projectiles.map((p) => ({ ...p })),
       worstEntityOverlapDepthPx: v.worstEntityOverlapDepthPx,
       minPairDistancePx: v.minPairDistancePx,
+    };
+  }
+
+  /**
+   * 体验验证入口诊断（PBL-M3）。
+   *
+   * 判据全部来自真实数据源，不做近似：
+   *   - `declaredEnemyCount` = `LAB_ENCOUNTERS[].count`（**声明**，不按运行时实体数反推）；
+   *   - `liveEnemyCount` = 真实运行期敌方实体数（Arena A 快照里 `team !== 'A'` 的实体）；
+   *   - `vehicleIds` = `OwnerTag.vehicleId`（真实车辆实例身份；非 Arena A 时为空）。
+   */
+  private experienceValidationProbe(): PblExperienceValidationProbe {
+    const v = PBL_LIGHT_SWARM_VALIDATION;
+    const encounter = findEncounter(this.state.encounter);
+    const view = this.state.arena === 'A' ? (this.arenaAView ?? this.previewArenaView()) : null;
+    const entities = view ? view.entities : [];
+    return {
+      queueId: v.queueId,
+      active: this.isLightSwarmValidation(),
+      arena: this.state.arena,
+      loadout: this.state.loadout,
+      encounter: this.state.encounter,
+      declaredEnemyCount: encounter ? encounter.count : 0,
+      liveEnemyCount: entities.filter((e) => e.team !== 'A').length,
+      vehicleIds: entities.map((e) => e.vehicleId),
+      isFormalRunRuntime: false,
+      badgeTitle: v.badgeTitle,
+      badgeSubtitle: v.badgeSubtitle,
+      question: v.question,
+      abNotDone: v.abNotDone,
     };
   }
 
@@ -714,6 +890,7 @@ export class PortraitBattleLab {
     this.syncStatus();
     this.syncControls();
     this.syncGatePanel();
+    this.syncValidationBanner();
   }
 
   private draw(ctx: CanvasRenderingContext2D): void {

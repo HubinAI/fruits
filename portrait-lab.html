@@ -67,6 +67,22 @@
         color: #ffd35a; background: rgba(22, 13, 0, 0.94);
         border: 1px solid #7a5b00;
       }
+      /*
+        PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1：体验验证条幅。
+        纯 DOM、位于 canvas 之外 ⇒ 完全不进入像素分类统计（与 .pbl-status / .pbl-gate 同约定）。
+        未进入 = 中性底；已进入 = 加深底色，两态都常驻显示 EXPERIENCE VALIDATION ONLY。
+      */
+      .pbl-validation-banner {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+        padding: 7px 12px; background: #1a1408; border-bottom: 1px solid #7a5b00;
+        font-size: 12px; line-height: 1.5;
+      }
+      .pbl-validation-banner[data-active='true'] { background: #241a00; }
+      .pbl-vb-title { font: 700 13px/1.4 monospace; letter-spacing: 0.6px; color: #ffd35a; }
+      .pbl-vb-sub { font: 700 12px/1.4 monospace; color: #ff9b3d; }
+      .pbl-vb-state { color: #b9c2d2; }
+      .pbl-vb-question { flex-basis: 100%; color: #e8e8f0; }
+      .pbl-vb-note { flex-basis: 100%; color: #8a93a5; font-size: 11px; }
     </style>
   </head>
   <body>

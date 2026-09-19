@@ -36,6 +36,7 @@
  *      tests/portraitRunPage.test.ts、tests/portraitRunBattle.test.ts、
  *      tests/portraitNextRunValidation.test.ts、tests/portraitEncounterLab.test.ts、
  *      tests/portraitValidationHub.test.ts、tests/portraitContentBatch.test.ts、
+ *      tests/portraitLightSwarmExperience.test.ts、
  *      tests/_e2e_portrait_battle_lab.cjs、tests/_e2e_run_page.cjs、
  *      tests/_e2e_next_run.cjs、tests/_e2e_encounter_lab.cjs、
  *      tests/_e2e_validation_hub.cjs、
@@ -112,6 +113,15 @@ export type LabLoadoutId = 'WatermelonHeavyCannon' | 'BananaChargeHammer';
  *    ⚠️ 第 1 项（多单位）如实标记 **BLOCK**：正式 `PlanckBattleOrchestrator` 硬编码两车
  *    （`vehicleA` / `vehicleB`）、胜负只有 A / B 两方，而 `runBattleRuntime.ts` 只取
  *    `plan.enemies[0]` —— 多单位进不了「真实 Battle Runtime」；本 Queue 不为此新建多车宿主。
+ *
+ * ⚠️ PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1：Content A 的 BLOCK 之后，真人裁决为
+ *    「先用**已经存在**的 Arena A 真实多实体能力验证体验是否值得正式开发」。
+ *    ⇒ 本目录**不新建 Runtime、不新建页面**，只在 Lab 工具栏加一个**一键验证入口**
+ *    （`PBL_LIGHT_SWARM_VALIDATION`，见文件末尾），复用的全部是既有能力：
+ *    `PlanckWorld` / `createPlanckVehicle(instance-exclusive)` / `ContactRouter` /
+ *    `DamageResolver` / 正式 `BehaviorRegistry` 武器行为 + 既有 `LightSwarm3`（`count: 3`）。
+ *    ⚠️ 页面标记 `EXPERIENCE VALIDATION ONLY` / 非正式 Run Runtime（见 `lab.ts` 的验证条幅）；
+ *    Lab 页面本来就是 DEBUG ONLY，本入口**不得**被当作正式 Run Runtime 的证据。
  */
 export type LabEncounterId =
   | 'Chaser'
@@ -131,4 +141,59 @@ export const LAB_DEFAULTS: {
   arena: 'A',
   loadout: 'WatermelonHeavyCannon',
   encounter: 'Chaser',
+};
+
+/* ==========================================================================
+ * PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1｜体验验证组合（**唯一数据源**）
+ *
+ * 目标只有一个：用 Arena A **已经存在**的真实多实体能力，验证「3 个弱敌同时出现」
+ * 这个体验是否值得正式开发 —— **不是**补正式 1vN 能力。
+ *
+ * 本 Queue 的硬边界（写进代码，避免以后被当成正式能力）：
+ *   - 页面 = DEBUG 的 `portrait-lab.html`（本文件上文已声明其非玩家入口身份）；
+ *   - 复用 `LightSwarm3`（`testData.ts`：正式模板 OPP-14 × 3，**不新增敌人、不改任何数值**）；
+ *   - 玩家固定 `WatermelonHeavyCannon`，**第一轮无 Buff**（Lab 无 Modifier 层 → 天然无强化）；
+ *   - 不修改 `planckBattleOrchestrator` / `runBattleRuntime`；不做 N 方正式胜负；
+ *     不做正式 Camera 适配；不接 Run；不新增 Foundation（Queue 原文禁止清单）。
+ *
+ * ⚠️ 可选 A/B（第二个玩家 `Twin Cannon`）**本轮未做** —— 如实披露，不静默省略：
+ *    `twinCannon` 是 Run 的**第一层强化**（`runModifiers.ts:95` 的 `Layer1ModifierId`，
+ *    效果 = `burstRounds 1→2` + `burstIntervalMs 0→100`），**不是可装配部件** ——
+ *    在正式内容库里查无此件（`src/core` / `src/player` / `src/game` / `src/ui` 全域 0 命中）。
+ *    Lab 的 `LAB_LOADOUTS` 是 `BuildDraft`（部件级），**没有 Modifier / Buff 层**；
+ *    要在 Arena A 复现「多发」只能给 Lab 新增 Modifier 覆盖入口 = 新增能力
+ *    （等于在 Lab 里重建一套 `runModifiers` 语义）⇒ 按 Queue 原文
+ *    「如果需要额外重构，则不要做，保持单玩家版本」。
+ * ========================================================================== */
+
+/** 体验验证入口的声明式配置（页面 / 测试 / E2E 都从这一处读，不各写一份）。 */
+export interface PblLightSwarmValidationDef {
+  /** 归属 Queue（页面如实展示，避免与正式 Run Runtime 混淆）。 */
+  readonly queueId: string;
+  /** 一键进入的组合（全部是 Lab 既有 id，不做任何特殊化）。 */
+  readonly arena: LabArenaId;
+  readonly loadout: LabLoadoutId;
+  readonly encounter: LabEncounterId;
+  /** 入口按钮文案。 */
+  readonly label: string;
+  /** 页面必须明确标记的两行（Queue 必改 3）。 */
+  readonly badgeTitle: string;
+  readonly badgeSubtitle: string;
+  /** 真人只回答这一个问题（Queue 原文）。 */
+  readonly question: string;
+  /** 可选 A/B 未做的如实披露（页面展示用；完整理由见上方注释）。 */
+  readonly abNotDone: string;
+}
+
+export const PBL_LIGHT_SWARM_VALIDATION: PblLightSwarmValidationDef = {
+  queueId: 'PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1',
+  arena: 'A',
+  loadout: 'WatermelonHeavyCannon',
+  encounter: 'LightSwarm3',
+  label: '3 弱敌·体验验证',
+  badgeTitle: 'EXPERIENCE VALIDATION ONLY',
+  badgeSubtitle: '非正式 Run Runtime',
+  question: '面对 3 个弱敌，战斗问题是否明显从「打赢一辆车」变成了「处理数量与拥挤」？',
+  abNotDone:
+    'A/B（Twin Cannon）未做：Lab 无 Modifier 层，twinCannon 是 Run 的第一层强化而非可装配部件 ⇒ 保持单玩家版本',
 };
