@@ -14,7 +14,7 @@
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 工作分支 `prototype-portrait-battle-lab`
   （实验，可整块删）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`c0d2c5d`+`69c4d1e` R1-A（局外配车）→ `f1b87a2`(+`fb982be`) R1-B（永久部件奖励）→
-  `fb982be` 起 **R1-C 端到端主循环**（本轮收口；SHA 见当日 log）；更早查 `git log`。
+  **`4f0be1a` R1-C 端到端主循环**（收口；起点 `fb982be`）；更早查 `git log`。
 - 全链对 `src/{core,physics,render,player,platform,ui,game,presentation}` diff **恒为空**（已机器取证）。
 
 ## 2. 红线速查（全文 → REF_GUARDS §1–2）
