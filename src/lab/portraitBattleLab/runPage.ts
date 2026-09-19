@@ -169,6 +169,12 @@ import {
   type RunStageView,
 } from './runPageScene';
 /**
+ * PRODUCT-LOOP-R2-C｜空槽判据常量（`BuildDraft.functionalSelections` 里没有装件时写的就是它）。
+ * ⚠️ 只用它做「这个挂点装没装东西」的判据，不引入任何产品侧语义 ——
+ *    `'../buildEditorModel'` 是 Lab 白名单里既有的纯模型模块。
+ */
+import { EMPTY_SLOT } from '../buildEditorModel';
+/**
  * PRODUCT-LOOP-R2-A｜RUN COMPLETE 的**3选1 产品奖励出口**（纯逻辑 / 纯几何）。
  *
  * ⚠️ 只在宿主提供 `RunPageOptions.rewardChoices` 时才产生任何出口
@@ -372,6 +378,36 @@ export interface RunProbeBattleWorld {
     readonly name: string;
     readonly category: string;
   }[];
+  /**
+   * PRODUCT-LOOP-R2-C｜本场**真实装配**里玩家的 weapon 件 + **Battle Runtime Weapon Star**
+   * + 战斗真正会用的伤害值 + 全部数值参数。
+   *
+   * 与 `playerFunctionals` 的关系：同一个来源（正式编排器里已经装出来的车），
+   * 只是**只报武器**、并把「星级」与「伤害」这两件 Queue 要锁的事显式报出来。
+   *   - `star`   = 真正交给编排器的那份 Build 里该挂点的星级（`?? 1`）；
+   *   - `damage` = `weaponMainDamage(part.def)`（= ContactRouter 结算时读的同一个字段，
+   *                def 已过正式 `resolveSnapshot` 的星级倍率层）；
+   *   - `params` = 该武器全部数值参数（用于证明「星级只改了伤害」）。
+   */
+  readonly playerWeapons: readonly {
+    readonly hardpointId: string;
+    readonly defId: string;
+    readonly name: string;
+    readonly star: number;
+    readonly damage: number;
+    readonly behavior: string;
+    readonly params: Readonly<Record<string, number>>;
+  }[];
+  /**
+   * PRODUCT-LOOP-R2-C｜本场**玩家武器命中的真实伤害**（按来源部件归组）。
+   *
+   * 口径 = 正式 `damage` 事件里 DamageResolver 真的从对手 HP 减掉的那个数
+   * （**不是**读 UI、不是读定义、不是自算）。Queue 必改 5「实际单次同条件 Damage ★2 > ★1」
+   * 就靠它取证。场上没有玩家武器命中时为 `{}`。
+   */
+  readonly playerWeaponHits: Readonly<
+    Record<string, { readonly count: number; readonly firstAtMs: number; readonly damages: readonly number[] }>
+  >;
   /**
    * PRP-BUILD-01：Run 能力的**真实运行状态**（事件驱动；全部是真实发生过的计数与量值）。
    *   - `kineticHits` / `lastKineticImpulse`：动能爆发真的触发了几次、最近一次多大；
@@ -651,6 +687,16 @@ export interface RunPageProbe {
     readonly bodyDefId: string;
     /** 装备里每个 Functional 槽的选择（hardpointId → defId），逐字来自交进来的 draft。 */
     readonly functionalSelections: Readonly<Record<string, string>>;
+    /**
+     * PRODUCT-LOOP-R2-C｜**Profile Equipped Star**：交进来的那份装备里每个挂点的星级
+     * （`BuildDraft.functionalStars`，缺省 = ★1 —— 与 `buildEditorModel` 的约定一致）。
+     *
+     * ⚠️ 与「实际打了什么」（`playerWeapons[].star`）**分开报告**：
+     *    前者是**输入**，后者是**真实装配结果**。两者都必须有，才能证明「输入 == 实际」，
+     *    而不是各说各话。这正是 Queue 必改 5「必须锁：Profile Equipped Star /
+     *    Battle Runtime Weapon Star」的机器形式。
+     */
+    readonly functionalStars: Readonly<Record<string, number>>;
   };
   /** **强化**三选一浮层是否可见（严格 = `phase === 'CHOICE'`）。 */
   readonly choiceOpen: boolean;
@@ -2258,6 +2304,17 @@ export class RunPage {
         build: rt.build,
         /** PRODUCT-LOOP-R1-C：本场**真实装配出来**的玩家 Functional 件（测试锁用）。 */
         playerFunctionals: rt.playerFunctionals(),
+        /**
+         * PRODUCT-LOOP-R2-C：本场玩家的 weapon 件 + 真实星级 + 真实伤害值 + 数值参数。
+         * ⚠️ 与 `playerFunctionals` 同源（都是正式编排器里**已经装出来的车**）。
+         */
+        playerWeapons: rt.playerWeapons().map((w) => ({ ...w, params: { ...w.params } })),
+        /**
+         * PRODUCT-LOOP-R2-C：本场玩家武器命中的**真实伤害**（正式 `damage` 事件的只读记录）。
+         */
+        playerWeaponHits: Object.fromEntries(
+          Object.entries(rt.playerWeaponHitSummary()).map(([k, v]) => [k, { ...v, damages: [...v.damages] }]),
+        ),
         /** PRP-BUILD-01：Run 能力真实运行状态。 */
         abilities: (() => {
           const a = rt.abilitySnapshot();
@@ -2482,6 +2539,16 @@ export class RunPage {
         label: this.loadout.label,
         bodyDefId: this.loadout.draft.bodyDefId,
         functionalSelections: { ...this.loadout.draft.functionalSelections },
+        /**
+         * PRODUCT-LOOP-R2-C：**Profile Equipped Star**（产品侧交进来的那份装备的星级）。
+         * 缺省 = ★1（`buildEditorModel` 的约定：1★ 不写字段）⇒ 这里补齐成显式的 1，
+         * 让 E2E 不必知道「缺省」这件事。
+         */
+        functionalStars: Object.fromEntries(
+          Object.entries(this.loadout.draft.functionalSelections)
+            .filter(([, v]) => v !== EMPTY_SLOT)
+            .map(([hp]) => [hp, this.loadout.draft.functionalStars?.[hp] ?? 1]),
+        ),
       },
       choiceOpen: runChoiceOpen(s),
       /**

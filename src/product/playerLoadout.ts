@@ -63,7 +63,13 @@ import {
 // PRODUCT-LOOP-R2-B｜单件能量的**星级倍率**真源（core 战斗侧同一函数）：
 // 卡片上要显示「装上它要花多少能量」，★2 的 33 必须与 Build 总能量用的 33 同源，
 // 否则卡片写 30、能量条按 33 算 ⇒ 玩家看到的数与实际不符。
-import { starTierEnergy } from '../core/buildSnapshot';
+//
+// PRODUCT-LOOP-R2-C｜同一纪律再加一条：**武器主伤害**也必须同源。
+// `weaponMainDamage(def)` 是「一件武器一次命中扣多少血」的唯一读取口径
+// （弹丸类读 `projectileDamage`、直击类读 `baseDamage` —— 与 ContactRouter 的两个分支一一对应），
+// `starTierDamage` 是星级伤害曲线的唯一实现。卡片上给玩家看的「攻击 80 → 100」
+// 与战斗里真实扣血的 100 必须是同一次计算 ⇒ 本模块**不允许**自己写 `×1.25` 这类常数。
+import { starTierDamage, starTierEnergy, weaponMainDamage } from '../core/buildSnapshot';
 import type { BodyDef, FunctionalPartDef } from '../core/types';
 
 /** 正式玩家车身（与 `playerGameRuntime` 的 starter 同一取值）。 */
@@ -107,6 +113,15 @@ export const WEAPON_GROWTH_STAR = 1;
 export function stackThreshold(inv: PartInventory, defId: string, star: number): number {
   return Math.max(1, canFuse(inv, defId, star, null).need);
 }
+
+/**
+ * PRODUCT-LOOP-R2-C（Queue 必改 4）｜武器主属性那一行字的前缀。
+ *
+ * 单独提出来是为了**可断言**：E2E 用真实 DOM 断言卡片上写着
+ * `攻击 80 → 100`，而不是断言页面 HTML 里恰好出现过这几个字
+ * （后者在别处也会命中，证明不了「这张卡上有这一行」）。
+ */
+export const DAMAGE_LABEL = '攻击';
 
 /**
  * MVP **唯一**打通的 Weapon 槽位 = 车身「前上挂点」（`frontMass`）。
@@ -170,6 +185,22 @@ export interface WeaponEntry {
   readonly fusable: boolean;
   /** 已达**星级上限**（★5，不可再合） */
   readonly maxStar: boolean;
+  /**
+   * PRODUCT-LOOP-R2-C（Queue 必改 4）｜**该星级的武器主伤害** —— 一次命中扣对手多少血。
+   *
+   * = `starTierDamage(weaponMainDamage(def), star)`，与战斗侧真实结算用的是
+   * 同一个 `behaviorParams` 字段与同一条星级曲线（★1 = 正式定义原值）。
+   */
+  readonly damage: number;
+  /**
+   * 升一星之后的伤害（`star + 1`）；已是 ★5 ⇒ `null`（没有「下一星」）。
+   *
+   * ⚠️ 无论当前是否凑满 5 件都会给出：Queue 必改 4 要的是「玩家在按下合成**前**就知道
+   *    升星会得到什么」，而不是「凑满 5 件才告诉他」。
+   */
+  readonly damageNext: number | null;
+  /** 卡片上的那一行字：`攻击 80 → 100`（★5 ⇒ `攻击 160`，不再画箭头）。 */
+  readonly damageText: string;
 }
 
 /** 一个 Functional 挂点的展示读数（只读；除 `WEAPON_SLOT` 外本轮不可改）。 */
@@ -300,11 +331,26 @@ function starInRange(star: number): number {
 export function weaponEntries(inv: PartInventory): readonly WeaponEntry[] {
   const out: WeaponEntry[] = [];
   for (const def of weaponDefs()) {
+    const baseDamage = weaponMainDamage(def);
+    /**
+     * ⚠️ 只有「主伤害写在 behaviorParams 顶层数值里」的武器，星级才**能**给出一个读数。
+     *
+     * 正式武器里只有 `saw` 不满足：它的伤害写在**嵌套**的 `behaviorParams.hitPolicy.damage`
+     * 里（走 contactTick 命中策略），星级倍率层只遍历顶层数值 ⇒ 对它是无定义的。
+     * 这种情况下**不给数字**（`攻击 0 → 0` 是句假话），卡片不画这一行。
+     *
+     * ⚠️ 后果面为零：`saw` 不在 `STARTER_PARTS`、也不在奖励候选池（`REWARD_CHOICE_IDS`）
+     * ⇒ 玩家的库存里永远不会出现它 ⇒ 这一分支在**当前产品里结构上不可达**，
+     * 但它被 `tests/productStarPowerR2C.test.ts` 的 SP-03b 直接覆盖（不是凭空的防御代码）。
+     */
+    const readable = baseDamage > 0;
     for (let star = 1; star <= INVENTORY_MAX_STAR; star++) {
       const count = getCount(inv, def.id, star);
       if (count <= 0) continue;
       const threshold = stackThreshold(inv, def.id, star);
       const maxStar = star >= INVENTORY_MAX_STAR;
+      const damage = readable ? starTierDamage(baseDamage, star) : 0;
+      const damageNext = readable && !maxStar ? starTierDamage(baseDamage, star + 1) : null;
       out.push({
         defId: def.id,
         name: def.name,
@@ -318,6 +364,14 @@ export function weaponEntries(inv: PartInventory): readonly WeaponEntry[] {
         reachesThreshold: count >= threshold,
         fusable: count >= threshold && !maxStar,
         maxStar,
+        damage,
+        damageNext,
+        // Queue 必改 4：`攻击 80 → 100`（★5 没有下一星 ⇒ 只写当前值）
+        damageText: !readable
+          ? ''
+          : damageNext === null
+            ? `${DAMAGE_LABEL} ${damage}`
+            : `${DAMAGE_LABEL} ${damage} → ${damageNext}`,
       });
     }
   }

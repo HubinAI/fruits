@@ -6,7 +6,7 @@
  *  A｜库存（v1→v2 迁移 / 默认 / starter / 旧 Build 装备迁移 / 夹紧负数）；
  *  B｜每场奖励（可重复、同场幂等、胜负都奖、排除 HOLD/EMPTY）；
  *  C｜5合1 合成（5×1★→1×随机2★、不足不可合成、已装备保留、产物合法）；
- *  D｜2★ 真实意义（统一倍率层：energy×1.10、damage×1.15，1★ 恒等）；
+ *  D｜2★ 真实意义（统一倍率层：energy×1.10、damage 按逐星曲线 1+0.25×(star−1)，1★ 恒等）；
  *  E｜闭环 + 不退化（刷新保持、装备守卫、36 对手全合法可实例化、Q15 主流程无 NaN）。
  */
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -246,7 +246,7 @@ describe('Q21→Q22 C｜最小 5合1 合成（F-GARAGE-INVENTORY-FUSION-P0：同
 });
 
 describe('Q21→Q22 D｜2★ 真实意义（统一倍率层）', () => {
-  it('D1. 2★ install 经 resolveSnapshot 得到倍率后 energy（×1.10 取整）与 damage（×1.15 取整）', () => {
+  it('D1. 2★ install 经 resolveSnapshot 得到倍率后 energy（×1.10 取整）与 damage（★2 = ×1.25 取整）', () => {
     const d: BuildDraft = {
       bodyDefId: 'watermelonBody',
       rearRadius: 20,
@@ -258,9 +258,23 @@ describe('Q21→Q22 D｜2★ 真实意义（统一倍率层）', () => {
     const snap = buildSnapshotFromDraft(d, registry, 'customA');
     const rs = resolveSnapshot(snap, registry);
     const f = rs.functionals.find((x) => x.install.hardpointId === 'front')!;
-    // cannon: energy 30 → round(33)；projectileDamage 80 → round(92)
+    /*
+      ⚠️ PRODUCT-LOOP-R2-C 改变了这条断言里的**一个数字**（Q22 的 `×1.15` 常数 → 逐星曲线）：
+      星级上限从 2★ 泛化到 ★5 之后，一个「≥2 都乘同一个常数」的倍率再也说不通
+      （★3 必须比 ★2 强）。现在星级伤害只有一个公式：`1 + 0.25 × (star − 1)`。
+      本断言**同时被强化**：旧版只看伤害这一个字段，新版把「其余 5 个参数逐字不变」
+      也钉在这里 —— 「升星只让武器打得更重」不再是口头承诺。
+    */
     expect(f.def.energy).toBe(Math.round(30 * 1.1));
-    expect((f.def.behaviorParams as Record<string, number>).projectileDamage).toBe(Math.round(80 * 1.15));
+    const bp = f.def.behaviorParams as Record<string, number>;
+    expect(bp.projectileDamage).toBe(Math.round(80 * 1.25));
+    expect(bp.projectileDamage).toBe(100);
+    // 其余 5 个基准参数 = 正式定义原值（星级**不许**碰节奏 / 几何 / 质量 / 后坐）
+    const official = registry.functionals.get('cannon')!;
+    const obp = official.behaviorParams as Record<string, number>;
+    for (const k of ['cooldownMs', 'muzzleSpeed', 'projectileRadius', 'projectileMass', 'recoilImpulse']) {
+      expect(bp[k], `${k} 必须逐字不变`).toBe(obp[k]);
+    }
   });
 
   it('D2. 1★ install 倍率层恒等（无强化）', () => {

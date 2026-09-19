@@ -156,6 +156,12 @@ export interface ProductProbe {
     readonly fusable: boolean;
     /** 已到 ★5 星级上限（不可再合） */
     readonly maxStar: boolean;
+    /** PRODUCT-LOOP-R2-C：该星级下一次命中扣对手多少血（= 战斗侧真实结算的那个数） */
+    readonly damage: number;
+    /** 升一星后的伤害；★5 ⇒ `null` */
+    readonly damageNext: number | null;
+    /** 卡片上那一行字：`攻击 80 → 100` */
+    readonly damageText: string;
   }[];
   /**
    * 本局 3选1 的三条候选读数（与 `开始冒险` 地址里 `choices` 载荷**同源**）。
@@ -588,9 +594,23 @@ export function mountProductHome(
       card.dataset['phStackThreshold'] = String(w.threshold);
       card.dataset['phFusable'] = String(w.fusable);
       card.dataset['phMaxStar'] = String(w.maxStar);
+      card.dataset['phDamage'] = String(w.damage);
+      card.dataset['phDamageNext'] = w.damageNext === null ? '' : String(w.damageNext);
+      card.dataset['phDamageText'] = w.damageText;
       if (w.reachesThreshold) card.classList.add('ph-card-full');
       card.append(
         el('span', 'ph-card-name', `${w.name} ★${w.star}`),
+        /**
+         * PRODUCT-LOOP-R2-C（Queue 必改 4）｜**最终主属性**：升星到底换来什么。
+         *
+         * `攻击 80 → 100` = 这一档一次命中扣多少血 → 升一星后扣多少血。
+         * 数字来自 `playerLoadout.weaponEntries()`（`starTierDamage` + `weaponMainDamage`），
+         * 与战斗里真实结算的伤害**同一次计算** ⇒ 卡片不会承诺一个打不出来的数。
+         * 只有这一行，不加属性面板（Queue 明令）。
+         * ⚠️ `damageText === ''`（该武器的伤害不在星级层的作用面上）= **不画这一行**，
+         *    而不是画一个 `攻击 0`。
+         */
+        ...(w.damageText === '' ? [] : [el('span', 'ph-card-damage', w.damageText)]),
         el('span', 'ph-card-meta', `能量 ${w.energyInUse} · ${w.stackText}`),
       );
       if (w.fusable) card.append(el('span', 'ph-card-badge', GARAGE_FUSE_READY_LABEL));
@@ -756,6 +776,9 @@ export function mountProductHome(
           energyInUse: w.energyInUse,
           fusable: w.fusable,
           maxStar: w.maxStar,
+          damage: w.damage,
+          damageNext: w.damageNext,
+          damageText: w.damageText,
         })),
         /** 与 `开始冒险` 地址里 `choices` 载荷**同源**（同一次 `rewardSpecsNow()` 读取）。 */
         rewardChoices: rewardSpecsNow(),

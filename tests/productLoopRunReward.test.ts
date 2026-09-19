@@ -862,4 +862,38 @@ describe('PRODUCT-LOOP-R2-A｜E. 源码守卫（本 Queue 的边界必须结构�
     expect(choiceAt, '候选分支必须先于通用推进').toBeLessThan(pressAt);
     expect(failAt, '失败分支必须先于通用推进').toBeLessThan(pressAt);
   });
+
+  it('PR-27 R2-C｜星级伤害只有一个真源：产品侧只许调 core，页面 / Lab 都不许自算', () => {
+    /*
+      Queue 必改 1 的**结构性**保证：星级 → 伤害这条关系只允许有**一个**实现
+      （`core/buildSnapshot.starDamageMultiplier` / `starTierDamage`）。
+      一旦产品侧或 Lab 侧自己写一个 ×1.25 之类的算法，卡面上承诺的数与战斗里打出的数
+      就会各说各话 —— 那是玩家绝对会发现的 bug，所以这里把它钉在源码层。
+    */
+    const loadout = strip(readProduct('playerLoadout.ts'));
+    expect(loadout.includes("from '../core/buildSnapshot'"), '产品侧必须从 core 取星级口径').toBe(true);
+    expect(loadout.includes('starTierDamage'), '卡面伤害必须经 core 的星级曲线').toBe(true);
+    expect(loadout.includes('weaponMainDamage'), '「主伤取哪个键」必须只有 core 一处').toBe(true);
+    for (const banned of ['STAR_DAMAGE_STEP', 'STAR_DAMAGE_MAX_STAR', 'starDamageMultiplier']) {
+      expect(loadout.includes(banned), `playerLoadout.ts 不得自建星级曲线：${banned}`).toBe(false);
+    }
+    // 页面：那一行只许来自 `weaponEntries()` 的字段（不许自己算）
+    const home = strip(readProduct('homePage.ts'));
+    expect(home.includes('w.damageText'), '卡面主属性必须来自 weaponEntries 的字段').toBe(true);
+    for (const banned of ['starTierDamage', 'weaponMainDamage', 'starDamageMultiplier']) {
+      expect(home.includes(banned), `homePage.ts 不得自己算伤害：${banned}`).toBe(false);
+    }
+    // Lab：本场武器的星级 / 伤害只许**回读真实装配**（RunBattleRuntime），不许 probe 自算
+    const page = strip(readLab('runPage.ts'));
+    expect(page.includes('playerWeapons'), 'probe 必须回读战斗运行时的真实武器读数').toBe(true);
+    for (const banned of ['starTierDamage', 'starDamageMultiplier', 'weaponMainDamage']) {
+      expect(page.includes(banned), `runPage.ts 不得自己算星级倍率：${banned}`).toBe(false);
+    }
+    // 正式战斗侧（ContactRouter）仍然只读 behaviorParams 的伤害字段：本 Queue 没碰它
+    const router = readFileSync(
+      join(REPO_ROOT, 'src', 'battle', 'contactRouter.ts'),
+      'utf8',
+    );
+    expect(router.includes("behaviorParams?.projectileDamage"), '弹丸伤害仍读顶层字段').toBe(true);
+  });
 });

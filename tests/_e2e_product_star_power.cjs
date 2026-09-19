@@ -1,0 +1,613 @@
+/**
+ * PRODUCT-LOOP-R2-C-STAR-POWER-END-TO-END｜
+ * 「星级不是 Garage 里的数字，而是真的改变下一局战斗」的**浏览器真实闭环 smoke**。
+ *
+ * 一条链走完（Queue 核心目标）：
+ *   fresh profile（cannon ★1 ×4）
+ *     → Run 1：打真一局（第一场真实战斗，实测炮的第一发命中 = 80）
+ *     → COMPLETE → 三选一选 cannon → 库存 5/5
+ *     → Garage 合成 → ★1 ×0 / ★2 ×1 / equipped 自动 ★2
+ *     → Run 2：新一局（Day / HP / Run Buff 全部重置）
+ *     → 第一场真实战斗真的用 ★2 炮：实测第一发命中 = 100（= round(80 × 1.25)）
+ *
+ * 手段（与 `_e2e_product_reward.cjs` 同一纪律，全部是真实行为取证）：
+ *   - 真实浏览器（playwright-core / msedge）+ 独立产物 `dist-portrait-lab/`；
+ *   - **真实鼠标点击**（`page.mouse.click`；Run 页按画布真实 CSS 矩形做逻辑→屏幕换算）；
+ *   - **真实整页导航**（`<a href>` 由浏览器执行，不做 evaluate 跳转）；
+ *   - **真实 localStorage 读取**（库存 / 正式 Build 存档都绕过页面探针独立对账）；
+ *   - 只读诊断句柄 `window.__PRODUCTHOME__` / `window.__RUNPAGE__`。
+ *
+ * ⚠️ 本文件**只**为了这一件事而存在，不重复 reward / loop / fail 三条 E2E 的既有覆盖：
+ *    奖励怎么发、数量怎么累积、失败怎么结算 —— 都在那三条里（本文件跑它们只为拼出链条）。
+ * ⚠️ 战斗伤害是**实测**的：`battleWorld.playerWeaponHits` 来自正式 `damage` 事件里
+ *    DamageResolver 真的从对手 HP 减掉的那个数，**不是**读卡面文字、不是读定义、不是自算。
+ *
+ * 用法：
+ *   npm run build:portrait-lab
+ *   node tests/_e2e_product_star_power.cjs   （或 npm run e2e:product-star-power）
+ */
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { chromium } = require('playwright-core');
+
+const ROOT = path.join(__dirname, '..', 'dist-portrait-lab');
+const PORT = 8169;
+const URL_BASE = `http://127.0.0.1:${PORT}`;
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2',
+};
+
+/** 三件候选（与 `runReward.REWARD_CHOICE_IDS` 同值）。 */
+const CHOICE_IDS = ['cannon', 'spear', 'hammer'];
+/** 满 stack 阈值（与 `playerGrowth.FUSE_STACK` 同值）。 */
+const FUSE_STACK = 5;
+/** 两个正式存档 key（独立取证，不经过页面探针）。 */
+const BUILD_KEY = 'strongfruit.playerBuild.v1';
+const INV_KEY = 'strongfruit.ownedParts.v2';
+/** 唯一打通的主武器槽。 */
+const WEAPON_SLOT = 'frontMass';
+/**
+ * 正式 cannon 的基准伤害（`core/content.ts` 的 `projectileDamage: 80`）。
+ * ⚠️ 这是本 Queue **冻结**的正式内容值：★1 的实测伤害必须**恰好**是它。
+ */
+const CANNON_BASE_DAMAGE = 80;
+/** ★2 的理论伤害 = round(80 × 1.25)。 */
+const CANNON_STAR2_DAMAGE = 100;
+
+/** 赢：耐久事件选「维修」→ 终局有耐久 → COMPLETE（与 reward E2E 同一条确定性路线）。 */
+const WIN_POLICY = { layer1: 'twinCannon', lateral: null, layer2: 'tripleLoad', durability: 'repair' };
+const DRIVE_BUDGET_MS = 240000;
+
+const results = [];
+function log(pass, name, detail = '') {
+  results.push({ pass, name, detail });
+  console.log((pass ? 'PASS ' : 'FAIL ') + name + (detail ? ' | ' + detail : ''));
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function startServer() {
+  const server = http.createServer((req, res) => {
+    let urlPath = decodeURIComponent(req.url.split('?')[0]);
+    if (urlPath === '/') urlPath = '/home.html';
+    const filePath = path.join(ROOT, path.normalize(urlPath));
+    if (!filePath.startsWith(ROOT)) {
+      res.writeHead(403);
+      res.end('forbidden');
+      return;
+    }
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream',
+      });
+      res.end(data);
+    });
+  });
+  return new Promise((resolve) => server.listen(PORT, '127.0.0.1', () => resolve(server)));
+}
+
+/* ------------------------------------------------------------------ 页面助手 */
+
+const waitHomeReady = (page) =>
+  page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 20000 });
+const waitRunReady = async (page) => {
+  await page.waitForFunction(
+    () => {
+      const c = document.querySelector('#run-canvas');
+      if (!window.__RUNPAGE__ || !c || c.width === 0) return false;
+      const p = window.__RUNPAGE__.probe();
+      return p.screen.width > 0 && p.assets.ready >= 5 && p.assets.failed.length === 0;
+    },
+    null,
+    { timeout: 25000 },
+  );
+  await sleep(250);
+};
+
+const probeHome = (page) => page.evaluate(() => window.__PRODUCTHOME__.probe());
+const probeRun = (page) => page.evaluate(() => window.__RUNPAGE__.probe());
+
+async function clickSelector(page, sel) {
+  const box = await page.locator(sel).first().boundingBox();
+  if (!box) throw new Error(`无法定位元素：${sel}`);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await sleep(100);
+}
+
+async function clickLogical(page, lx, ly) {
+  const screen = (await probeRun(page)).screen;
+  const cx = screen.left + (lx / 390) * screen.width;
+  const cy = screen.top + (ly / 844) * screen.height;
+  await page.mouse.click(cx, cy);
+}
+const clickRect = async (page, r) => clickLogical(page, r.x + r.w / 2, r.y + r.h / 2);
+
+/** 直接读浏览器真实 localStorage（不经过页面探针，独立取证）。 */
+function storageDump(page) {
+  return page.evaluate(() => {
+    const out = {};
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('strongfruit.')) out[k] = localStorage.getItem(k);
+    }
+    return out;
+  });
+}
+
+/**
+ * 从真实 storage dump 里读某个 `(defId, star)` stack 的副本数。
+ * ⚠️ 星级 → 字段名的映射在这里**独立写一份**（不 import 被测模块的映射：
+ *    引用被告的证词就证明不了「磁盘上真的是那样」）。
+ */
+const STAR_FIELDS = { 1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five' };
+function invCount(dump, defId, star = 1) {
+  const raw = dump[INV_KEY];
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw);
+    const e = o && o[defId];
+    if (!e) return 0;
+    const f = STAR_FIELDS[star];
+    if (!f) return null;
+    return Number(e[f] ?? 0);
+  } catch {
+    return null;
+  }
+}
+
+/** 从**正式 Build 存档**里读武器槽的星级（键缺省 ⇒ ★1，与 `buildEditorModel` 的约定一致）。 */
+function storedWeaponStar(dump) {
+  const raw = dump[BUILD_KEY];
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw);
+    const s = o && o.functionalStars && o.functionalStars[WEAPON_SLOT];
+    return typeof s === 'number' ? s : 1;
+  } catch {
+    return null;
+  }
+}
+
+/** 从出发链接里取产品侧交给 Run 的那份装备（URL 编码后的 BuildDraft）。 */
+function equippedOf(href) {
+  const raw = new URLSearchParams(href.split('?')[1] ?? '').get('equipped') ?? '';
+  return raw ? JSON.parse(raw) : null;
+}
+
+/** 读 Garage 里某张 Weapon 卡的真实 DOM 读数（含 R2-C 的 damage 三个 data-*）。 */
+function garageCard(page, defId, star = null) {
+  return page.evaluate(
+    ({ id, s }) => {
+      const all = [...document.querySelectorAll(`[data-ph-weapon="${id}"]`)];
+      const n = s === null ? all[0] : all.find((x) => x.getAttribute('data-ph-star') === String(s));
+      if (!n) return null;
+      const dmgLine = n.querySelector('.ph-card-damage');
+      return {
+        text: n.textContent,
+        star: n.getAttribute('data-ph-star'),
+        count: n.getAttribute('data-ph-count'),
+        stackText: n.getAttribute('data-ph-stack-text'),
+        equipped: n.getAttribute('data-ph-equipped'),
+        fusable: n.getAttribute('data-ph-fusable'),
+        damage: n.getAttribute('data-ph-damage'),
+        damageNext: n.getAttribute('data-ph-damage-next'),
+        damageText: n.getAttribute('data-ph-damage-text'),
+        /** 卡面上那一行的**真实文本**（`null` = 那一行根本没画） */
+        damageLineText: dmgLine ? dmgLine.textContent : null,
+        cards: all.length,
+      };
+    },
+    { id: defId, s: star },
+  );
+}
+
+/* ------------------------------------------------------------------ Run 驱动 */
+
+/**
+ * 把一局 Run 驱到终态（或「已经看到第一发主炮命中」），**同时**采集战斗侧的真实读数。
+ *
+ * 采集口径：每一帧都把 `battleWorld` 里的玩家武器读数 / 真实命中记录**照抄一份**存档 ——
+ * 因为战斗运行时在离开 battle 相位时会被释放（`endBattle()`），落到终态再去读就晚了。
+ *
+ * @param stopOnFirstCannonHit true ⇒ 采到第一发主炮命中就停（Run 2 只需要第一场）
+ */
+async function driveRun(page, policy, label, stopOnFirstCannonHit = false) {
+  const t0 = Date.now();
+  const samples = [];
+  const seen = [];
+  let last = null;
+  let stopped = 'timeout';
+  while (Date.now() - t0 < DRIVE_BUDGET_MS) {
+    const p = await probeRun(page);
+    if (!last || last.phase !== p.phase) seen.push(p.phase);
+    last = p;
+
+    const bw = p.battleWorld;
+    if (bw) {
+      const hitsRaw = bw.playerWeaponHits || {};
+      const hits = {};
+      for (const [k, v] of Object.entries(hitsRaw)) {
+        hits[k] = { count: v.count, firstAtMs: v.firstAtMs, damages: [...v.damages] };
+      }
+      samples.push({
+        phase: p.phase,
+        day: p.day,
+        nodeId: p.nodeId,
+        battlesCompleted: p.battlesCompleted,
+        build: [...p.build],
+        modifier: p.modifier,
+        profileStars: { ...p.playerLoadout.functionalStars },
+        weapons: bw.playerWeapons.map((w) => ({ ...w, params: { ...w.params } })),
+        hits,
+        hp: p.battle ? { a: p.battle.playerHp, aMax: p.battle.playerHpMax } : null,
+      });
+      if (stopOnFirstCannonHit && hits.cannon && hits.cannon.count >= 1) {
+        stopped = 'cannon-hit';
+        break;
+      }
+    }
+
+    if (p.phase === 'COMPLETE' || p.phase === 'FAILED') {
+      stopped = p.phase;
+      break;
+    }
+    if (p.durabilityOpen && p.overlayOptions.length > 0) {
+      const opt = p.overlayOptions.find((o) => o.id === policy.durability) ?? p.overlayOptions[0];
+      await clickRect(page, opt.rect);
+      await sleep(180);
+      continue;
+    }
+    if (p.choiceOpen && p.choiceOptions.length > 0) {
+      const want = policy[p.choicePoolKind] ?? null;
+      const opt = (want && p.choiceOptions.find((o) => o.id === want)) || p.choiceOptions[0];
+      await clickRect(page, opt.rect);
+      await sleep(180);
+      continue;
+    }
+    if (p.overlayOpen && p.overlayOptions.length > 0) {
+      await clickRect(page, p.overlayOptions[0].rect);
+      await sleep(180);
+      continue;
+    }
+    if (p.actionEnabled) await clickRect(page, p.actionRect);
+    await sleep(p.phase === 'BATTLE' ? 400 : 140);
+  }
+
+  const withCannon = samples.filter((s) => s.hits.cannon);
+  return {
+    label,
+    stopped,
+    ms: Date.now() - t0,
+    seen,
+    samples,
+    last,
+    /** 玩家车上的武器读数（最后一份） */
+    weapons: samples.length > 0 ? samples[samples.length - 1].weapons : [],
+    /** 采到过的**第一发主炮命中**（最早那一次采样里 cannon 的那条） */
+    firstCannonHit: withCannon.length > 0 ? withCannon[0].hits.cannon : null,
+    /** 采样里 cannon 命中次数最多的那一条（= 那一场的完整命中记录） */
+    fullestCannonHits:
+      withCannon.length > 0
+        ? withCannon.reduce((a, b) => (b.hits.cannon.count > a.hits.cannon.count ? b : a)).hits.cannon
+        : null,
+    /** 第一份 battleWorld 采样（用于读「本场开局」的客观事实） */
+    firstBattleSample: samples.length > 0 ? samples[0] : null,
+  };
+}
+
+/** 从首页出发 → 进 Run → 驱动到指定状态。 */
+async function enterRunAndDrive(page, policy, label, stopOnFirstCannonHit) {
+  const homeBefore = await probeHome(page);
+  const equipped = equippedOf(homeBefore.adventureHref);
+  await Promise.all([
+    page.waitForURL(/run-page\.html/, { timeout: 20000 }).catch(() => {}),
+    clickSelector(page, '[data-ph-action="start-run"]'),
+  ]);
+  await waitRunReady(page);
+  const runStart = await probeRun(page);
+  const detail = await driveRun(page, policy, label, stopOnFirstCannonHit);
+  return { homeBefore, equipped, runStart, detail };
+}
+
+/** 单场玩家武器读数里挑出主武器那件。 */
+function mainWeapon(weapons, defId = 'cannon') {
+  return weapons.find((w) => w.defId === defId && w.hardpointId === WEAPON_SLOT) ?? null;
+}
+
+async function main() {
+  console.log('=== PRODUCT-LOOP-R2-C｜星级 → 真实战斗伤害 端到端闭环 smoke ===\n');
+
+  for (const f of ['home.html', 'run-page.html']) {
+    if (!fs.existsSync(path.join(ROOT, f))) {
+      console.error(`未找到 ${path.join(ROOT, f)} —— 请先 npm run build:portrait-lab`);
+      process.exit(1);
+    }
+  }
+
+  const server = await startServer();
+  log(true, 'P0 静态产物就绪（dist-portrait-lab 内 home.html + run-page.html 真实存在）');
+
+  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
+  const page = await ctx.newPage();
+  const pageErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(String(e)));
+
+  try {
+    /* ==================================================================================
+       A｜起点：新账号 = cannon ★1 ×4，且卡面**在合成前**就告诉玩家升星会得到什么
+       ================================================================================== */
+    await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+    await waitHomeReady(page);
+    const home0 = await probeHome(page);
+    const stored0 = await storageDump(page);
+    log(
+      home0.growth.fresh === true &&
+        home0.growth.seeded === true &&
+        invCount(stored0, 'cannon', 1) === 4 &&
+        home0.equippedWeaponId === 'cannon' &&
+        home0.equippedWeaponStar === 1,
+      'A1 起点（Queue「fresh profile → cannon ★1 ×4」）：库存 ★1 = 4，且主武器槽装的正是 ★1 的炮',
+      `★1×${invCount(stored0, 'cannon', 1)} · equipped=${home0.equippedWeaponId} ★${home0.equippedWeaponStar}`,
+    );
+
+    /* ---- 打开「调整战车」读**真实 DOM 卡面**（Weapon 卡只画在车库视图里） ---- */
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    const c0card = await garageCard(page, 'cannon', 1);
+    log(
+      !!c0card &&
+        c0card.star === '1' &&
+        c0card.count === '4' &&
+        c0card.damage === String(CANNON_BASE_DAMAGE) &&
+        c0card.damageNext === String(CANNON_STAR2_DAMAGE) &&
+        c0card.damageText === `攻击 ${CANNON_BASE_DAMAGE} → ${CANNON_STAR2_DAMAGE}` &&
+        c0card.damageLineText === `攻击 ${CANNON_BASE_DAMAGE} → ${CANNON_STAR2_DAMAGE}`,
+      'A2 **Queue 必改 4**：Weapon 卡上**真的画出**了最终主属性那一行「攻击 80 → 100」' +
+        '（真实 DOM 文本，不是探针自述；此时还差一件没凑齐，玩家已经知道升星值多少）',
+      c0card ? `行文本="${c0card.damageLineText}" data=${c0card.damage}/${c0card.damageNext}` : 'n/a',
+    );
+    await clickSelector(page, '[data-ph-action="back-home"]');
+
+    /* ==================================================================================
+       B｜Run 1：★1 炮的第一场**真实**战斗（实测第一发命中 = 80）
+       ================================================================================== */
+    const run1 = await enterRunAndDrive(page, WIN_POLICY, 'Run 1', false);
+    const r1First = run1.detail.samples.length > 0 ? run1.detail.samples[0] : null;
+    const r1Main = mainWeapon(r1First ? r1First.weapons : []);
+    log(
+      run1.equipped !== null &&
+        run1.equipped.functionalStars === undefined,
+      'B1 **Profile Equipped Star**（输入）：产品侧交给 Run 的装备载荷里**没有** `functionalStars` 键 —— ' +
+        '这正是既有约定（★1 = 缺省，`buildEditorModel` 的 ★1 不写字段），因此这一局的输入就是 ★1',
+      run1.equipped ? `functionalStars=${JSON.stringify(run1.equipped.functionalStars ?? null)}` : 'n/a',
+    );
+    log(
+      run1.detail.firstCannonHit !== null &&
+        run1.detail.firstCannonHit.damages[0] === CANNON_BASE_DAMAGE,
+      'B2 Run 1 第一场真实命中：★1 炮扣对手 **80** 点血（正式 cannon 的基准值，本 Queue 未改内容）',
+      run1.detail.firstCannonHit
+        ? `首中 ${run1.detail.firstCannonHit.firstAtMs}ms · damages=[${run1.detail.firstCannonHit.damages.join(',')}]`
+        : 'n/a',
+    );
+    log(
+      !!r1Main && r1Main.star === 1 && r1Main.damage === CANNON_BASE_DAMAGE,
+      'B3 **Battle Runtime Weapon Star**（真实装配）：运行时读到的炮是 ★1、伤害 80',
+      r1Main ? `${r1Main.defId}@${r1Main.hardpointId} ★${r1Main.star} damage=${r1Main.damage}` : 'n/a',
+    );
+    log(
+      run1.detail.stopped === 'COMPLETE',
+      'B4 Run 1 打到 COMPLETE（★1 的确定性通关路线，与 reward E2E 基线一致）',
+      `stopped=${run1.detail.stopped} · ${(run1.detail.ms / 1000).toFixed(1)}s`,
+    );
+
+    /* ==================================================================================
+       C｜领奖：三选一选 cannon → 库存 5/5
+       ================================================================================== */
+    const pDone = run1.detail.last;
+    const pickIndex = CHOICE_IDS.indexOf('cannon');
+    const cardRect = pDone.rewardChoiceRects[pickIndex];
+    log(
+      pDone.phase === 'COMPLETE' && pDone.rewardChoiceRects.length === CHOICE_IDS.length,
+      'C1 COMPLETE 上真的画出了 3 张候选卡（与绘制同源的矩形）',
+      `phase=${pDone.phase} rects=${pDone.rewardChoiceRects.length}`,
+    );
+    await Promise.all([
+      page.waitForURL(/home\.html/, { timeout: 20000 }).catch(() => {}),
+      clickRect(page, cardRect),
+    ]);
+    await waitHomeReady(page);
+    const storedAfterClaim = await storageDump(page);
+    log(
+      invCount(storedAfterClaim, 'cannon', 1) === 5,
+      'C2 领到 cannon ⇒ 库存 ★1 = **5/5**（真实鼠标点击候选卡 + 真实整页导航回来）',
+      `★1×${invCount(storedAfterClaim, 'cannon', 1)}`,
+    );
+
+    /* ==================================================================================
+       D｜Garage：合成 5×★1 → 1×★2，装备自动升星；卡面换成 ★2 的下一星预览
+       ================================================================================== */
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    const g1 = await probeHome(page);
+    const g1c1 = await garageCard(page, 'cannon', 1);
+    log(
+      g1.weapons.find((w) => w.defId === 'cannon' && w.star === 1).fusable === true &&
+        g1c1.text.includes('可合成') &&
+        g1c1.damageLineText === `攻击 ${CANNON_BASE_DAMAGE} → ${CANNON_STAR2_DAMAGE}`,
+      'D1 5/5 的 ★1 炮：卡上同时写着「可合成」与「攻击 80 → 100」（按下合成前就知道结果）',
+      g1c1.text,
+    );
+
+    await clickSelector(page, `[data-ph-action="fuse"][data-ph-fuse-def="cannon"][data-ph-fuse-star="1"]`);
+    const g2 = await probeHome(page);
+    const storedAfterFuse = await storageDump(page);
+    log(
+      g2.lastFuse &&
+        g2.lastFuse.ok === true &&
+        g2.lastFuse.fromStar === 1 &&
+        g2.lastFuse.toStar === 2 &&
+        g2.lastFuse.countAfter === 0 &&
+        g2.lastFuse.productCount === 1 &&
+        g2.lastFuse.equippedUpgraded === true &&
+        invCount(storedAfterFuse, 'cannon', 1) === 0 &&
+        invCount(storedAfterFuse, 'cannon', 2) === 1 &&
+        verifiedEquipped(g2, storedAfterFuse),
+      'D2 合成一次：★1 归 0、★2 = 1、**equipped 自动升到 ★2**（页面读数 + 磁盘库存 + 正式 Build 存档三处一致）',
+      `★1×${invCount(storedAfterFuse, 'cannon', 1)} ★2×${invCount(storedAfterFuse, 'cannon', 2)} ` +
+        `equipped=${g2.equippedWeaponId}★${g2.equippedWeaponStar} 存档★${storedWeaponStar(storedAfterFuse)}`,
+    );
+
+    const g2c2 = await garageCard(page, 'cannon', 2);
+    log(
+      !!g2c2 &&
+        g2c2.equipped === 'true' &&
+        g2c2.damage === String(CANNON_STAR2_DAMAGE) &&
+        g2c2.damageNext === '120' &&
+        g2c2.damageLineText === '攻击 100 → 120',
+      'D3 ★2 卡面：现在写着「攻击 100 → 120」（下一星 = ★3 的真实值 120）—— 升星不是数字，是一个可预期的下一站',
+      g2c2 ? g2c2.damageLineText : 'n/a',
+    );
+
+    await clickSelector(page, '[data-ph-action="back-home"]');
+    const backHome = await probeHome(page);
+    const equipPayload = equippedOf(backHome.adventureHref);
+    log(
+      equipPayload &&
+        equipPayload.functionalStars &&
+        equipPayload.functionalStars[WEAPON_SLOT] === 2,
+      'D4 回首页后「开始冒险」地址里的装备载荷已经是 **functionalStars.frontMass = 2**（下一局一定带 ★2 出发）',
+      equipPayload ? JSON.stringify(equipPayload.functionalStars) : 'n/a',
+    );
+
+    /* ==================================================================================
+       E｜Run 2：新一局真的用 ★2 炮，且实测伤害 = 100 > 80
+       ================================================================================== */
+    const run2 = await enterRunAndDrive(page, WIN_POLICY, 'Run 2', true);
+    const r2First = run2.detail.samples.length > 0 ? run2.detail.samples[0] : null;
+    const r2Main = mainWeapon(r2First ? r2First.weapons : []);
+    log(
+      run2.equipped !== null &&
+        run2.equipped.functionalStars &&
+        run2.equipped.functionalStars[WEAPON_SLOT] === 2,
+      'E1 **Profile Equipped Star**（输入）：Run 2 的装备载荷里主武器槽星级 = 2',
+      run2.equipped ? JSON.stringify(run2.equipped.functionalStars) : 'n/a',
+    );
+    /*
+      「新 Run 真的重置了」的判据刻意**不写死 day === 1**（脚本的起始节点不等于「第 1 天」，
+      写死只会得到一个和产品无关的数字）：真正要证明的是
+        · 新一局从**和第一局完全相同的起点**开始（同 day / 同 nodeId），而不是接着上一局往下走；
+        · Run Buff 清空（build = [] / modifier = null）；
+        · 第一场开局的 HP = 满（上一局终局是带着战损的，若继续旧局就会是残血）。
+    */
+    const r2Hp =
+      (run2.detail.samples.find((s) => s.hp !== null) || {}).hp || null;
+    log(
+      r1First !== null &&
+        r2First !== null &&
+        r2First.day === r1First.day &&
+        r2First.nodeId === r1First.nodeId &&
+        r2First.build.length === 0 &&
+        r2First.modifier === null &&
+        r2Hp !== null &&
+        r2Hp.a === r2Hp.aMax,
+      'E2 新 Run 真的重置了：从**与第一局相同的起点**重新开始（同 day / 同 nodeId），Run Buff 清空，第一场开局 HP = 满',
+      `Run1 起点 day=${r1First ? r1First.day : '?'} node=${r1First ? r1First.nodeId : '?'} · ` +
+        `Run2 起点 day=${r2First ? r2First.day : '?'} node=${r2First ? r2First.nodeId : '?'} ` +
+        `build=[${r2First ? r2First.build.join(',') : '?'}] modifier=${r2First ? r2First.modifier : '?'} ` +
+        `hp=${r2Hp ? `${r2Hp.a}/${r2Hp.aMax}` : 'n/a'}`,
+    );
+    log(
+      !!r2Main && r2Main.star === 2 && r2Main.damage === CANNON_STAR2_DAMAGE,
+      'E3 **Battle Runtime Weapon Star**：这一局运行时读到的炮是 **★2**、伤害 100（不是页面内存、不是存档副本）',
+      r2Main ? `${r2Main.defId}@${r2Main.hardpointId} ★${r2Main.star} damage=${r2Main.damage}` : 'n/a',
+    );
+    log(
+      run2.detail.firstCannonHit !== null &&
+        run2.detail.firstCannonHit.damages[0] === CANNON_STAR2_DAMAGE &&
+        run2.detail.firstCannonHit.damages[0] > CANNON_BASE_DAMAGE &&
+        run2.detail.firstCannonHit.damages[0] ===
+          Math.round(CANNON_BASE_DAMAGE * 1.25),
+      'E4 **本 Queue 的核心结论（实测）**：同一门炮、只差星级，第一发真实命中 80 → **100**（= round(80 × 1.25)）—— 星级真的进了战斗',
+      run2.detail.firstCannonHit
+        ? `首中 ${run2.detail.firstCannonHit.firstAtMs}ms · damages=[${run2.detail.firstCannonHit.damages.join(',')}]`
+        : 'n/a',
+    );
+    log(
+      run1.detail.firstCannonHit &&
+        run2.detail.firstCannonHit &&
+        run1.detail.firstCannonHit.firstAtMs === run2.detail.firstCannonHit.firstAtMs,
+      'E5「同条件」的机器证据：两局第一发命中发生在**同一战斗时刻**（在它之前两场物理逐帧相同 —— 星级只改了伤害，不改节奏 / 几何 / 质量）',
+      `Run1 ${run1.detail.firstCannonHit ? run1.detail.firstCannonHit.firstAtMs : '?'}ms · Run2 ${run2.detail.firstCannonHit ? run2.detail.firstCannonHit.firstAtMs : '?'}ms`,
+    );
+    log(
+      onlyDamageDiffers(r1Main, r2Main),
+      'E6 **Queue 必改 1**：两局**第一场**（都还没有 Run-local 强化）的武器数值参数逐项比对，**只有伤害不同**（cd / 炮口速度 / 半径 / 质量 / 后坐全等）',
+      onlyDamageDetail(r1Main, r2Main),
+    );
+
+    log(pageErrors.length === 0, 'F1 全流程零运行时报错', pageErrors.slice(0, 2).join(' | ') || 'none');
+  } catch (err) {
+    log(false, 'F0 未捕获异常', String(err && err.stack ? err.stack.split('\n')[0] : err));
+    console.error(err);
+  } finally {
+    await browser.close();
+    server.close();
+  }
+
+  const failed = results.filter((r) => !r.pass);
+  console.log(`\n=== 结果：${results.length - failed.length}/${results.length} PASS ===`);
+  if (failed.length > 0) {
+    console.log('失败项：');
+    for (const f of failed) console.log(` - ${f.name} | ${f.detail}`);
+    process.exit(1);
+  }
+}
+
+/** D2 的「装备指向」三处一致判据。 */
+function verifiedEquipped(probe, dump) {
+  return (
+    probe.equippedWeaponId === 'cannon' &&
+    probe.equippedWeaponStar === 2 &&
+    storedWeaponStar(dump) === 2
+  );
+}
+
+/** E6：逐项比对两局的武器数值参数，只有伤害类不同。 */
+function onlyDamageDiffers(a, b) {
+  if (!a || !b) return false;
+  const ka = Object.keys(a.params).sort();
+  const kb = Object.keys(b.params).sort();
+  if (ka.join(',') !== kb.join(',')) return false;
+  let damageKeysSeen = 0;
+  for (const k of ka) {
+    if (/damage/i.test(k)) {
+      damageKeysSeen += 1;
+      if (!(b.params[k] > a.params[k])) return false;
+      continue;
+    }
+    if (a.params[k] !== b.params[k]) return false;
+  }
+  return damageKeysSeen > 0;
+}
+
+function onlyDamageDetail(a, b) {
+  if (!a || !b) return 'n/a';
+  const diff = Object.keys(a.params)
+    .filter((k) => a.params[k] !== b.params[k])
+    .map((k) => `${k}: ${a.params[k]} → ${b.params[k]}`);
+  const same = Object.keys(a.params).filter((k) => a.params[k] === b.params[k]).length;
+  return `变了 ${diff.join(' / ') || '（无）'} · 其余 ${same} 项逐字相同`;
+}
+
+main();

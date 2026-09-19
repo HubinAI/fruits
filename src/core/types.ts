@@ -157,7 +157,9 @@ export interface FunctionalInstall {
   /**
    * Q22｜星级（V0.5 部件成长）。1 = 基础；2 = 由 5×1★ 合成的高星。
    * 缺省 undefined = 1★（旧 Build / 对手 / 旧存档兼容）。
-   * 倍率层在 buildSnapshot.ts 的 applyStarTier 统一接入（damage ×1.15、energy ×1.10，取整），
+   * 倍率层在 buildSnapshot.ts 的 applyStarTier 统一接入（伤害按逐星曲线
+   * `1 + 0.25 × (star − 1)`、energy ×1.10，取整；PRODUCT-LOOP-R2-C 起伤害从
+   * 「≥2 一律 ×1.15」改为逐星曲线 ⇒ ★1..★5 各不相同），
    * 不在每个 Weapon 内单独打补丁。
    */
   star?: number;

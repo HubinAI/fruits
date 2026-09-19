@@ -75,7 +75,7 @@
  *      同时 `abilitySnapshot().lastKineticHit` 暴露该真实命中点 → 表现层的冲击环画在**同一个位置**。
  */
 
-import type { ContentRegistry } from '../../core/types';
+import type { BuildSnapshot, ContentRegistry } from '../../core/types';
 import { validateSnapshot } from '../../core/buildValidator';
 import type { BattleRenderSnapshot, BattleResult } from '../../battle/battleContract';
 import { ENEMY_KEEP_DISTANCE_BANDS } from '../../battle/battleContract';
@@ -91,10 +91,36 @@ import {
   normalizeBuild,
   type RunModifierId,
 } from './runModifiers';
+/*
+  PRODUCT-LOOP-R2-C｜两个 **core** 只读口径（本目录白名单已含 `../../core/buildSnapshot`）：
+  `weaponMainDamage` = 「这件武器一次命中扣多少血」的唯一读取口径（与 ContactRouter 的两个
+  伤害分支一一对应）；`weaponNumericParams` = 该武器全部数值参数（用于逐项证明「只有伤害变了」）。
+  ⚠️ 本文件**不自己算星级倍率**：星级在正式 `resolveSnapshot` 里已经作用到 def 上，
+     这里只如实回读「装配后的真实数值」——重算就是第二套口径。
+*/
+import { weaponMainDamage, weaponNumericParams } from '../../core/buildSnapshot';
 
 /** 本局演示组合（与 F1 共享测试数据同源；不改 Debug 选择项）。 */
 export const RUN_BATTLE_LOADOUT_ID = RUN_DEMO_LOADOUT_ID;
 export const RUN_BATTLE_ENCOUNTER_ID = RUN_DEMO_ENCOUNTER_ID;
+
+/**
+ * PRODUCT-LOOP-R2-C｜一场战斗里**玩家**打出的每一次武器伤害（真实 `damage` 事件的只读记录）。
+ *
+ * ⚠️ 只记事实、不改战斗：这条订阅不产生冲量、不写 HP、不参与判定（与 Run 能力订阅并列，
+ *    互不影响）——它的唯一用途是让「星级真的改变了伤害」可以被**实测**，而不是靠读 UI 文案。
+ */
+interface RunPlayerWeaponHit {
+  /** 真实扣血量（`DamageEvent.damage`，由 DamageResolver 落到对方 HP 上的那个数）。 */
+  readonly damage: number;
+  /** 来源部件 id（= `part.def.id`，如 `cannon`）。 */
+  readonly partId: string;
+  /** 来源 behavior（如 `cannon` / `hammer` / `ram`）。 */
+  readonly behavior: string;
+  /** 该次命中的战斗时刻（ms）——取记录时的 `orchestrator.timeMs`（事件自带的时间戳由
+   *  ContactRouter 传 0，不能用作时刻）。 */
+  readonly atMs: number;
+}
 
 /**
  * 本局**真实 projectile 质量**（动能爆发的强度来源）。
@@ -340,6 +366,21 @@ export class RunBattleRuntime {
    * 空 Build（或只带不改武器的项）时它只是一个什么都不做的订阅者（零副作用）。
    */
   readonly abilities: RunBuildAbilities;
+  /**
+   * PRODUCT-LOOP-R2-C｜**真正交给编排器的那一份** BuildSnapshot。
+   *
+   * = `plan` 里玩家那份 snapshot 经本局 Run-local overlay 重映射 `defId` **之后**的那一份
+   * （`applyRunModifiersToSnapshot` 只动 `defId`，挂点 / **星级** / 其它件原样）。
+   * 因此它同时是两件事的唯一事实来源：
+   *   - 「本场玩家装了什么」（决定 overlay 部件是否生效）；
+   *   - 「本场玩家那件是几星」（`functionals[].star`）→ `playerWeapons()` 的 `star` 直接读它。
+   * ⚠️ 刻意**不重算**星级：星级已经在正式 `resolveSnapshot` 里作用到 def 上（伤害/能量），
+   *    这里只是把「输入的星级」如实回读，供测试与产品侧对齐（两者必须相等）。
+   */
+  readonly playerSnapshot: BuildSnapshot;
+  /** 玩家方（A）武器命中记录（由正式 `damage` 事件驱动；只记事实，零战斗副作用）。 */
+  private readonly playerWeaponHits: RunPlayerWeaponHit[] = [];
+  private readonly unsubscribeHits: () => void;
   /** 真实出生中心 x（构造后实测，不是写死数字）。 */
   readonly spawnAx: number;
   readonly spawnBx: number;
@@ -360,6 +401,8 @@ export class RunBattleRuntime {
     this.registry = createRunRegistry(this.build);
     // ② 本局 BuildSnapshot：只把基准武器的 defId 指向本局 overlay 部件。
     const playerSnapshot = applyRunModifiersToSnapshot(this.plan.player.snapshot, this.build);
+    // PRODUCT-LOOP-R2-C：留住这一份（steering 之后、交给编排器之前）—— 见 `playerSnapshot` 注释。
+    this.playerSnapshot = playerSnapshot;
     // ③ overlay 也必须过正式 BuildValidator（overlay 部件确实存在于本局 registry）。
     const validation = validateSnapshot(playerSnapshot, this.registry);
     if (!validation.valid) {
@@ -425,6 +468,29 @@ export class RunBattleRuntime {
       },
       this.build,
     );
+
+    /*
+      PRODUCT-LOOP-R2-C（Queue 必改 5 的「不要只检查 UI 文字」）｜记录**玩家武器真实打出的伤害**。
+
+      ⚠️ 这是**只读订阅**：不改速度、不扣血、不干预判定（能力层用的是另一个订阅）。
+      ⚠️ 只记 `damageSource === 'weapon'`：撞击（impact）/ 地形（hazard）不是「武器伤害」，
+         混进来会让「★2 打得更重」这条结论被无关伤害稀释。
+      ⚠️ 来源判据用 `ev.source`（队伍）而不是 partId：玩家车上可能有**多件**武器
+         （starter 就同时带炮与锤），按 partId 过滤会漏掉「另一件也打中了」的事实；
+         分组留给读取方（`playerWeaponHitSummary()` 按 partId 归组）。
+    */
+    const playerTeam = this.orchestrator.vehicleA.team;
+    this.unsubscribeHits = this.orchestrator.onCombatEvent((ev) => {
+      if (ev.type !== 'damage') return;
+      if (ev.source !== playerTeam) return;
+      if (ev.damageSource !== 'weapon') return;
+      this.playerWeaponHits.push({
+        damage: ev.damage,
+        partId: ev.partId ?? '',
+        behavior: ev.behavior ?? '',
+        atMs: this.orchestrator.timeMs,
+      });
+    });
 
     const w = this.orchestrator.world;
     this.spawnAx = w.getPosition(this.orchestrator.vehicleA.body).x;
@@ -593,6 +659,76 @@ export class RunBattleRuntime {
   }
 
   /**
+   * PRODUCT-LOOP-R2-C｜本场**真实装配**里玩家的全部 **weapon** 件，逐件报告：
+   *
+   *   - `star`   —— **Battle Runtime Weapon Star**：读 `this.playerSnapshot.functionals[].star`
+   *                 （= 真正交给编排器的那份 Build 里、这个挂点上的星级；缺省 = 1★）。
+   *                 这是「战斗运行时用了几星」的机器口径，不是产品侧读数的复制品。
+   *   - `damage` —— **战斗真正会用的伤害值**：`weaponMainDamage(part.def)`，与
+   *                 `ContactRouter` 结算时读的是同一个 `behaviorParams` 字段
+   *                 （且 def 已过正式 `resolveSnapshot` 的星级倍率层）。
+   *   - `params` —— 该武器全部数值参数（只读快照）⇒ 测试可以逐项证明
+   *                 「星级只改了伤害、其余参数一字未动」（Queue 必改 1）。
+   *
+   * ⚠️ 口径与 `playerFunctionals()` 一致（都读正式编排器里已经装出来的车），差别只在
+   *    「只报武器 + 多报星级与伤害」。
+   */
+  playerWeapons(): readonly {
+    readonly hardpointId: string;
+    readonly defId: string;
+    readonly name: string;
+    readonly star: number;
+    readonly damage: number;
+    readonly behavior: string;
+    readonly params: Readonly<Record<string, number>>;
+  }[] {
+    const starAt = (hardpointId: string): number => {
+      const install = this.playerSnapshot.functionals.find((f) => f.hardpointId === hardpointId);
+      const raw = install?.star;
+      return typeof raw === 'number' && Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 1;
+    };
+    return this.orchestrator.vehicleA.parts
+      .filter((part) => part.def.category === 'weapon')
+      .map((part) => ({
+        hardpointId: part.id,
+        defId: part.def.id,
+        name: part.def.name,
+        star: starAt(part.id),
+        damage: weaponMainDamage(part.def),
+        behavior: part.def.behavior,
+        params: weaponNumericParams(part.def),
+      }));
+  }
+
+  /**
+   * PRODUCT-LOOP-R2-C｜本场**玩家武器命中的真实伤害**记录（按来源部件归组）。
+   *
+   * 口径 = 正式 `damage` 事件（`DamageResolver` 真的从对方 HP 减掉的那个数），
+   * 只收 `source = 玩家队` 且 `damageSource = 'weapon'` 的那些。
+   *
+   * 为什么必须按 partId 归组：玩家车上**不止一件**武器（starter 就有炮与锤），
+   * 「第一发炮命中打了多少」与「锤子蹭了一下打了多少」是两个不同的数。
+   * `damages` 按发生顺序原样保留（不去重、不四舍五入）⇒ 「同一门炮每一发都一样重」
+   * 这种结论也能被断言，而不是只能比一个平均数。
+   */
+  playerWeaponHitSummary(): Readonly<
+    Record<string, { readonly count: number; readonly firstAtMs: number; readonly damages: readonly number[] }>
+  > {
+    const out: Record<string, { count: number; firstAtMs: number; damages: number[] }> = {};
+    for (const h of this.playerWeaponHits) {
+      const key = h.partId === '' ? '(unknown)' : h.partId;
+      let e = out[key];
+      if (!e) {
+        e = { count: 0, firstAtMs: h.atMs, damages: [] };
+        out[key] = e;
+      }
+      e.count += 1;
+      e.damages.push(h.damage);
+    }
+    return out;
+  }
+
+  /**
    * PBL-M3-ENCOUNTER-BATCH｜**接触残留诊断**（只读，无副作用）。
    *
    * 口径 = 正式 `ContactRouter` 自己记录的最后一次接触 / 命中 / 伤害事实。
@@ -612,6 +748,8 @@ export class RunBattleRuntime {
   }
 
   dispose(): void {
+    // PRODUCT-LOOP-R2-C：命中记录订阅必须随运行时一起撤（否则旧场次的记录会跟着新场次活着）
+    this.unsubscribeHits();
     this.abilities.dispose();
     this.orchestrator.dispose();
   }
