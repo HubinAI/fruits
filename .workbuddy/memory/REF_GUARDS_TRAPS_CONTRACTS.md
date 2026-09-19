@@ -182,3 +182,79 @@
 `homePage` 的 `view` 在挂载时初始化为 `'home'` ⇒ **reload 之后不存在 `back-home` 按钮**
 （它只在 garage 视图）。在本页 E2E 里「reload 之后再点返回首页」必然 30s 超时。
 正确顺序：**先点返回首页（不刷新）→ 读链接 → 最后才 reload 验证持久化**。
+
+## §5 两个终态的唯一出口（PRODUCT-LOOP-R1-D 固化契约）
+
+### §5a 契约本身
+
+Run 有两个互斥终态，**各有唯一出口**；出口地址**全部由产品侧**通过 URL 给全，**Lab 侧不硬编码任何产品 URL**
+（`RP-25b` 机器钉死；唯一可导航文件 = `runMain.ts`，**两次**数据驱动整页导航，字符级钉死
+`location.assign(claim.href);` 与 `location.assign(action.href);`）。
+
+| 终态 | 出口参数 | 地址 | 回首页发生什么 |
+|---|---|---|---|
+| `COMPLETE` | `back` | `buildClaimHref()`（含 `run` + `reward`） | 幂等入库（**发奖**） |
+| `FAILED` | `home` | `HOME_HREF` = `./home.html`（**纯首页**） | **什么都不做**（`parsePendingClaim` 恒 `null`） |
+
+`buildAdventureHref()` **无条件**同时给两个出口（不按处境挑）⇒ 「失败也发奖」在**地址层**即不可能。
+
+### §5b ⚠️ 失败**必须**真正终止（最容易踩的坑）
+
+**别改状态机**：`runStartsNewRun(s) = phase==='FAILED' || 'COMPLETE'`，而 `pressRunAction()` 首位
+就是 `if (runStartsNewRun(s)) return createRunPageState(ctx);` ⇒
+**状态机层 FAILED 的终态动作 = 开一个全新 Run**（DAY 1 / 满耐久 / Buff 清空）。
+这是 **PRP-RUN-R1 冻结规则**（`RP-R1-02`/`RP-R1-03` 显式断言），**不许动**。
+
+⇒ 正确做法是**页面级路由改道**：在 `runPage.ts` 的 `onPointerDown` 里，失败结算分支必须
+**早于**通用推进分支，并且**直接 `return`**（不接受任何推进）。
+
+⚠️ **顺序最易在维护中写反**（写反 = 状态机的「开新局」把失败分支吃掉）⇒
+由 `RP-D-06` 机器钉死：`failIdx < guardIdx < pressIdx`（`indexOf` 比较），
+且 `page.slice(failIdx, guardIdx).includes('return;')` 必须为 true。文案 / 可用 / 绘制**四处同源**。
+
+### §5c 深度链必须一起改（否则「失败结算不出来」）
+
+`runFailSettlement.ts`（纯逻辑）→ `runPageLayout.ts`（面板几何，**复用** `runRewardCardRect()` 槽位）→
+`runPage.ts`（绘制 + 命中 + 探针 + `failSettlementNow()`）→ `runMain.ts`（解析 `home` + **唯一导航**）。
+`runFailSettlement.ts` 必须同时进 `tests/portraitRunPage.test.ts` 的 `RUN_PAGE_FILES`
+（否则它自动脱离 `RP-24` / `RP-25` 全部禁令）。
+
+### §5d ⚠️ 无参数入口下失败 CTA **没有出口**
+
+失败结算**照常呈现，但不画按钮**（`failSettlement.href === ''` ⇒ `actionEnabled === false`，
+`drawActionButton()` 直接短路）。这是「Lab 不硬编码产品 URL」的**必然结构性后果**，不是 bug。
+
+- **正式产品入口（首页）恒带 `home`** ⇒ 玩家永不会遇到无出口：由 `PR-07`（`home === HOME_HREF`）+
+  `e2e:product-home` 的 `A2`/`A4b`（地址两两不同、`home` 不含 `run`/`reward`）机器钉死。
+- 受影响的是**研发 / 验证入口**（`dev:run-page`、Validation Hub 的 `Full Run`）⇒ 用浏览器后退。
+- ⚠️ 写 E2E 时**不要**零参数打开 `run-page.html` 再断言失败 CTA 可点 ——
+  必须按**产品真实上下文**打开（`run`/`reward`/`back`/`home` 四个参数，`home` **从真实链接里取**）。
+  这样还更强：「领奖地址就摆在同一个页面上，失败依然拿不到它」。
+
+### §5e 像素 A/B 判据要选**专属**图形，不要选共用底色
+
+失败结算面板与 COMPLETE 奖励卡**复用同一块矩形**且都用 `cardBg` 打底 ⇒
+「这块矩形有没有卡片底色」**无法**区分两个终态（R1-D 中使 `e2e:product-reward` 的 `H4` 假红）。
+必须数**奖励卡专属**图形：图标框底 `pageBg`（`runPage.ts` 注释：卡片内唯一出现处）与图标本体 `wheelRim` ——
+COMPLETE 成片（实测 4287 / 800），FAILED 必须为 **0**。
+（全部取自**非入账**色 ⇒ 像素账本一个数字都不变。）
+
+### §5f 守卫编号别撞号
+
+`portraitRunPage.test.ts` 里 `RP-` 编号是**跨段落共享**的命名空间：R1-D 新增的 `RP-29`/`RP-30`
+与 PRP-R3 段**既有同名守卫**撞号（同文件两个 `RP-29`）。
+新增守卫请用**段落前缀**（如 `RP-D-06`/`RP-D-07`），并在改后跑
+`grep -o "it('RP-[A-Za-z0-9-]*" tests/portraitRunPage.test.ts | sort | uniq -d` 验空。
+
+### §5g 门控期发现的缺陷**不许混并 scope**
+
+R1-D 门控时发现 `e2e:next-run` 已在 **7 个提交前**失效
+（`tests/_e2e_next_run.cjs:619` 等 Hub 入口**恰好 3**个，而 `validationHub.ts` 现有 **4** 个 ——
+第 4 个 `contentBatch` 由 `bab5f63` 加入）。
+**判定方法（可复用）**：
+1. `git log --oneline -N -- <测试文件>` 与 `-- <被测源文件>` 对比**最后修改点**；
+2. `git merge-base --is-ancestor <可疑提交> HEAD` 确认它是否在链上；
+3. 若「测试最后修改」**早于**「新增被断言内容的提交」⇒ 陈旧断言，与当前 Queue 无关。
+
+**处置**：只记录 + 上报，建议独立 Bug Queue；**不要**顺手修进当前 Queue 的单功能 commit。
+**修法建议**：断言值从**真实数据推导**（数 Hub 真实入口），不要写死条数。

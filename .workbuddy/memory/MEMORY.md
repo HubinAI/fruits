@@ -14,7 +14,8 @@
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 工作分支 `prototype-portrait-battle-lab`
   （实验，可整块删）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`c0d2c5d`+`69c4d1e` R1-A（局外配车）→ `f1b87a2`(+`fb982be`) R1-B（永久部件奖励）→
-  **`4f0be1a` R1-C 端到端主循环**（收口；起点 `fb982be`）；更早查 `git log`。
+  `4f0be1a` R1-C（端到端主循环）→ **`c63408c` R1-D 失败结算 → 返回主界面**（收口；起点 `2609d46`）；
+  更早查 `git log`。
 - 全链对 `src/{core,physics,render,player,platform,ui,game,presentation}` diff **恒为空**（已机器取证）。
 
 ## 2. 红线速查（全文 → REF_GUARDS §1–2）
@@ -30,6 +31,9 @@
 - ⚠️ **加根 html 同步 5 处（挂 Hub 7 处）**；加 Hub 入口 **4 处硬断言**（最易漏**顺序断言**）。
 - ⚠️ **跨轮复验 PRP 前必须先 build**（`emptyOutDir:false` ⇒ 陈旧 chunk ⇒ 假 FAIL）。
 - ⚠️ 改实现导致源码守卫失败 ⇒ **强化守卫，不放宽**。
+- ⚠️ **两个终态各有唯一出口、地址全由产品侧给**（R1-D）：`back`=领奖（COMPLETE）/ `home`=**纯首页**（FAILED）；
+  Lab **不硬编码任何产品 URL**，失败**不接受任何隐式推进**（顺序最易写反 ⇒ `RP-D-06` 机器钉死）。
+  改动终态出口前必读 REF_GUARDS **§5**。
 - ⚠️ **HTML 注释里禁止出现注释终止序列**（两个连字符紧跟一个右尖括号）⇒ 注释提前闭合、
   其后文本按真标签解析 ⇒ 真实鼠标点**任何位置**整页重载（R1-A 起埋 3 轮，`e2e:product-home` 的
   `B1` 根因）；**症状极具误导性**（渲染/`elementFromPoint`/`node.click()` 全正常，只有真实鼠标失效）。
@@ -40,17 +44,26 @@
 战斗参数 §A · 相机 §B · 接缝与第一层冻结值 §C · RUN-R1 §D · BUILD-01 §E · RUN-02 §F/§J/§K · M2 种子 §G ·
 M3 遭遇台 §H · Hub §I · M2-R1 终点态出口 §L · PBL-RDC §M → `REF_PRP_RUNTIME.md`。
 ⚠️ **不在 REF、只看交接文档**：`PRP-M3-CONTENT-BATCH-01` · `PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1` ·
-`PRODUCT-LOOP-R1-A` · `PRODUCT-LOOP-R1-B` · **`PRODUCT-LOOP-R1-C`（端到端主循环）**。
+`PRODUCT-LOOP-R1-A` · `PRODUCT-LOOP-R1-B` · `PRODUCT-LOOP-R1-C`（端到端主循环）·
+**`PRODUCT-LOOP-R1-D`（失败链 / 终态出口，契约见 REF_GUARDS §5）**。
 启动两行：`cd D:\0818new\最强水果` → `npm run dev`（默认进**产品首页**；研发用 `dev:home` / `dev:next-run` /
 `dev:encounter-lab` / `dev:validation`）。
 
 ## 4. Next action
-- ✅ **产品主循环已打通并交付**（R1-C）：首页 → 调整战车 → 开始冒险 → 局内 → COMPLETE → 领永久部件 →
-  回 Garage 可见 → 装上 → 第二局第一场真的用它。闭环 E2E **41/41**；门禁全绿（明细见当日 log / 交接文档）。
-  ⚠️ 用户明令**停止继续扩 Validation / Lab / 局内内容**；Queue 完成即**停等**，不要自行开 Queue D。
-- ⚠️ **待用户裁决（4 条，别自作主张改）**：① 装备交接口径 = 传整份 `BuildDraft`（href ≈1KB）；
-  ② Weapon A 定为 `cannon`；③ 产品默认车 `front` 槽清空（主循环可达性处置，附实测矩阵）；
-  ④ 第二局只跑到「第一场」为止。
+- ✅ **产品主循环两侧都闭环了**：成功侧 R1-C（首页 → 调整战车 → 开始冒险 → 局内 → COMPLETE → 领永久部件 →
+  回 Garage 可见 → 装上 → 第二局第一场真的用它，E2E **41/41**）；失败侧 **R1-D**（失败 → 真终止 →
+  「冒险失败」结算 → 停住不重开 → 返回主界面 → 回首页 → 可调车 → 玩家主动再开，新 E2E **27/27**）。
+  门禁全绿（明细见当日 log / 交接文档）。
+  ⚠️ 用户明令**停止继续扩 Validation / Lab / 局内内容**；Queue 完成即**停等**，不要自行开下一条 Queue。
+- ⚠️ **待用户裁决（R1-D 新增 4 条，别自作主张改）**：① 路 A（页面级改道）而非改状态机
+  （`runStartsNewRun` 对 FAILED 的返回保持原样）；② 两个回程地址 `home` vs `back` 的新接口口径；
+  ③ 失败结算面板复用 COMPLETE 卡片槽位（零新常量）；④ E2E 失败路线取 `hammer`（第一场即死 ≈16s）。
+- ⚠️ **R1-C 遗留待裁决（4 条）**：① 装备交接口径 = 传整份 `BuildDraft`（href ≈1KB）；② Weapon A 定为 `cannon`；
+  ③ 产品默认车 `front` 槽清空；④ 第二局只跑到「第一场」为止。
+- ⚠️ **发现但未修（先前遗留，建议独立 Bug Queue）**：`e2e:next-run` 在 `N29` 后崩溃
+  （`tests/_e2e_next_run.cjs:619` 等 Hub 入口**恰好 3 个**，但 `validationHub.ts` 现有 **4** 个 ——
+  第 4 个 `contentBatch` 由 `bab5f63` 加入，早于 R1-D **7 个提交**，已 `merge-base --is-ancestor` 取证）。
+  按「门控缺陷拆独立 Queue、禁混并 scope」**只记录不修**。
 - ⚠️ **明确未做（只记录不改）**：Garage 观感 / 奖励动画 / 内容量 / Buff 平衡 / 挂点几何与推杆反推的深修
   （后者属独立 Queue）。
 - ⚠️ **后续段缺口**：`planckBattleOrchestrator.ts:217-218` 硬编码两车 + `battleContract.ts:96-98` 只有 A/B 胜负 +
