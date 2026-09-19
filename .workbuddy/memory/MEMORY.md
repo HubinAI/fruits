@@ -15,7 +15,7 @@
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`d334d0c` R1 验证中心 → `3d23091` RUN-02-R1 → `09ee631` RUN-02-R2 → `0ff259f` M2-R1 →
   `d1a9d67` PBL-RDC 远程维持作战距离 → `bab5f63` M3-CONTENT-BATCH-01 →
-  **PBL-M3-LIGHT-SWARM 体验验证入口（本 commit；纯 memory 补正紧随其后回填 SHA）**；更早查 `git log`。
+  **`092e376` PBL-M3-LIGHT-SWARM 体验验证入口**；更早查 `git log`。
 - 全链对 `src/{core,physics,render,player,platform,ui,game,presentation}` diff **恒为空**。正式 gameplay 改动仅：
   `cannonBehavior.ts` 可选 `burstRounds`（默认 1，逐帧不变）+ `battle/` 内**可选**驱动档（缺省逐帧不变）。
 
