@@ -11,14 +11,25 @@
  *   - 只读诊断句柄 `window.__PRODUCTHOME__` / `window.__RUNPAGE__`（只读，不能借它改状态）。
  *
  * 覆盖 R2-A 技术验收 1~8（第 9 条 = tsc / targeted / build 在门禁里跑）：
- *   ① fresh profile cannon = ★1 ×4      → A2 / A3
+ *   ① fresh profile cannon = ★1 4/5      → A2 / A3
  *   ② COMPLETE 出现 3 个真实 Weapon 奖励 → C3 / C6
- *   ③ 选择 cannon 后变成 ×5             → D4（第一局）
+ *   ③ 选择 cannon 后变成 5/5             → D4（第一局）
  *   ④ 选择其它 Weapon 只增加对应 stack   → H4（第二局选 hammer：1 → 2，cannon 仍 5）
  *   ⑤ 同一奖励只能领取一次               → E1/E2/E3（同 token **换一件**也领不到）
  *   ⑥ FAILED 数量完全不变                → I2 / I5
  *   ⑦ old Profile migration 不丢数据     → 由 `tests/playerGrowthR2A.test.ts` 的 PG-07~PG-10 离线钉死
  *   ⑧ Equipped 仍指向有效库存实例         → 同上（PG-11~PG-14）
+ *
+ * 叠加 PRODUCT-LOOP-R2-B 技术验收（K 段，放在所有跑局断言**之后** —— ★2 会改变 Build 能量，
+ * 插在中间会让「确定性通关路线」不再确定性）：
+ *   ① 不满 5 件不能合成   → K2（DOM 里连按钮都不存在）
+ *   ② 5/5 可以合成        → K1（「可合成」徽标 + 真实按钮）
+ *   ③ 5×★1 → 1×★2        → K3 / K4（★1 卡消失、★2 是新卡）
+ *   ⑥ 装备被合空自动升星    → K5（页面 + **正式 Build 存档**双取证）
+ *   ⑦ 无连锁升星（必改 5）  → K7（★2 只有 1 件 ⇒ 没有★3、没有可再点的按钮）
+ *   ⑧ reload 后三者保持     → K8 / K9（磁盘 ★1=0 / ★2=1 / 装的还是 ★2）
+ *   ⚠️ 「不同 Weapon / 不同 star 不能混合」是**规则**层面的（④⑤）→ `tests/productFusionR2B.test.ts`
+ *      的 FB-05 / FB-06 用库存对账钉死；E2E 侧无法在不造第二份满 stack 的前提下取证。
  *
  * ⚠️ 两条路线都是**确定性**的（`RunBattleRuntime` 无 RNG，`portraitRunPage.test.ts` 的
  *    `FROZEN_REPAIR` / `FROZEN_UPGRADE` 已冻结）：
@@ -181,14 +192,36 @@ function storageDump(page) {
   });
 }
 
-/** 从真实 storage dump 里读某个 ★1 stack 的副本数（0 = 副本数 0）。 */
-function invCount(dump, defId) {
+/**
+ * 从真实 storage dump 里读某个 `(defId, star)` stack 的副本数。
+ *
+ * ⚠️ 星级 → 字段名的映射在这里**独立写一份**（不从 `core/partInventory.ts` import）：
+ *    这条断言的目的是「**绕过产品代码**去核对磁盘」，引用被测模块的映射就等于用被告的证词。
+ */
+const STAR_FIELDS = { 1: 'one', 2: 'two', 3: 'three', 4: 'four', 5: 'five' };
+function invCount(dump, defId, star = 1) {
   const raw = dump[INV_KEY];
   if (!raw) return null;
   try {
     const o = JSON.parse(raw);
     const e = o && o[defId];
-    return e ? Number(e.one) : 0;
+    if (!e) return 0;
+    const f = STAR_FIELDS[star];
+    if (!f) return null;
+    return Number(e[f] ?? 0);
+  } catch {
+    return null;
+  }
+}
+
+/** 从**正式 Build 存档**里读武器槽的星级（键缺省 ⇒ ★1，与 `buildEditorModel` 的约定一致）。 */
+function storedWeaponStar(dump) {
+  const raw = dump[BUILD_KEY];
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw);
+    const s = o && o.functionalStars && o.functionalStars[WEAPON_SLOT];
+    return typeof s === 'number' ? s : 1;
   } catch {
     return null;
   }
@@ -251,19 +284,41 @@ function countColorInRect(page, rect, rgb) {
 }
 
 /** 读 Garage 里某张 Weapon 卡的真实 DOM 读数（star / count / stackText 都来自卡片自己的 data-*）。 */
-function garageCard(page, defId) {
-  return page.evaluate((id) => {
-    const n = document.querySelector(`[data-ph-weapon="${id}"]`);
-    if (!n) return null;
-    return {
-      text: n.textContent,
-      star: n.getAttribute('data-ph-star'),
-      count: n.getAttribute('data-ph-count'),
-      stackText: n.getAttribute('data-ph-stack-text'),
-      threshold: n.getAttribute('data-ph-stack-threshold'),
-      equipped: n.getAttribute('data-ph-equipped'),
-    };
-  }, defId);
+function garageCard(page, defId, star = null) {
+  return page.evaluate(
+    ({ id, s }) => {
+      /*
+        ⚠️ 一个 defId 现在可能对应**多张卡**（★1 的炮与 ★2 的炮是两个 stack ⇒ 两张卡）。
+        默认取第一张（★1 优先，`weaponEntries` 按星级升序遍历）；需要高星卡时显式传 star。
+      */
+      const all = [...document.querySelectorAll(`[data-ph-weapon="${id}"]`)];
+      const n = s === null ? all[0] : all.find((x) => x.getAttribute('data-ph-star') === String(s));
+      if (!n) return null;
+      return {
+        text: n.textContent,
+        star: n.getAttribute('data-ph-star'),
+        count: n.getAttribute('data-ph-count'),
+        stackText: n.getAttribute('data-ph-stack-text'),
+        threshold: n.getAttribute('data-ph-stack-threshold'),
+        equipped: n.getAttribute('data-ph-equipped'),
+        fusable: n.getAttribute('data-ph-fusable'),
+        maxStar: n.getAttribute('data-ph-maxstar'),
+        cards: all.length,
+      };
+    },
+    { id: defId, s: star },
+  );
+}
+
+/** 读某张卡的「合成」按钮是否真实存在（真实 DOM，不是探针自述）。 */
+function garageFuseButton(page, defId, star) {
+  return page.evaluate(
+    ({ id, s }) => {
+      const b = document.querySelector(`[data-ph-action="fuse"][data-ph-fuse-def="${id}"][data-ph-fuse-star="${s}"]`);
+      return b ? { text: b.textContent, disabled: b.disabled === true } : null;
+    },
+    { id: defId, s: star },
+  );
 }
 
 /**
@@ -441,16 +496,18 @@ async function main() {
         invCount(stored0, 'cannon') === 4 &&
         invCount(stored0, 'spear') === 1 &&
         invCount(stored0, 'hammer') === 1,
-      'A2 **新账号的成长起点**（验收 ①）：cannon ★1 ×4，另外两件候选各 ×1（种子只发这一次）',
+      'A2 **新账号的成长起点**（验收 ①）：cannon ★1 4/5，另外两件候选各 1/5（种子只发这一次）',
       `fresh=${home0.growth.fresh} seeded=${home0.growth.seeded} cannon=${invCount(stored0, 'cannon')} spear=${invCount(stored0, 'spear')} hammer=${invCount(stored0, 'hammer')}`,
     );
     log(
       home0.weapons.length === 3 &&
         home0.weapons.every((w) => w.star === 1 && w.threshold === FUSE_STACK) &&
         home0.weapons.find((w) => w.defId === 'cannon').count === 4 &&
-        home0.weapons.find((w) => w.defId === 'cannon').stackText === '×4' &&
-        home0.weapons.every((w) => w.reachesThreshold === false),
-      'A3 Garage 读数与库存同源：三张卡都是 ★1、分母 = 满 stack 阈值、次数 4/1/1（未满）',
+        home0.weapons.find((w) => w.defId === 'cannon').stackText === '4/5' &&
+        home0.weapons.every((w) => w.reachesThreshold === false) &&
+        home0.weapons.every((w) => w.fusable === false) &&
+        home0.weapons.every((w) => w.maxStar === false),
+      'A3 Garage 读数与库存同源：三张卡都是 ★1、分母 = 满 stack 阈值、次数 4/1/1（未满 ⇒ 不可合成）',
       home0.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
     );
 
@@ -616,8 +673,11 @@ async function main() {
     );
     log(
       r1.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText === '5/5' &&
-        r1.homeAfter.weapons.find((w) => w.defId === 'cannon').reachesThreshold === true,
-      'D4 领奖后的首页读数：cannon 达到满 stack ⇒ 显示 `5/5`（Queue「达到5件时只显示 5/5」；本 Queue **不做合成**）',
+        r1.homeAfter.weapons.find((w) => w.defId === 'cannon').reachesThreshold === true &&
+        // R2-B：满 stack 同时意味着**进入可合成态**（能否真的合，由末尾 K 段真实点击验证）
+        r1.homeAfter.weapons.find((w) => w.defId === 'cannon').fusable === true &&
+        r1.homeAfter.weapons.find((w) => w.defId === 'cannon').maxStar === false,
+      'D4 领奖后的首页读数：cannon 达到满 stack ⇒ 显示 `5/5` 且 `fusable=true`（★2 未到上限）',
       `cannon stackText=${r1.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText}`,
     );
 
@@ -671,8 +731,9 @@ async function main() {
         !!spearCard &&
         spearCard.star === '1' &&
         spearCard.count === '1' &&
-        spearCard.stackText === '×1',
-      'F2 调整战车：Weapon 卡**带星级与数量**（`炮 ★1 5/5` / `刺 ★1 ×1`），且与库存同源',
+        spearCard.stackText === '1/5' &&
+        spearCard.fusable === 'false',
+      'F2 调整战车：Weapon 卡**带星级与数量**（`炮 ★1 5/5` / `刺 ★1 1/5`），且与库存同源',
       `${cannonCard ? cannonCard.text : 'n/a'} ｜ ${spearCard ? spearCard.text : 'n/a'}`,
     );
 
@@ -771,9 +832,9 @@ async function main() {
     );
     log(
       r2.homeAfter.weapons.find((w) => w.defId === 'hammer').count === 2 &&
-        r2.homeAfter.weapons.find((w) => w.defId === 'hammer').stackText === '×2' &&
+        r2.homeAfter.weapons.find((w) => w.defId === 'hammer').stackText === '2/5' &&
         r2.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText === '5/5',
-      'H4 首页读数：hammer `★1 ×2`、cannon `★1 5/5`（同一份库存，两个 stack 各长各的）',
+      'H4 首页读数：hammer `★1 2/5`、cannon `★1 5/5`（同一份库存，两个 stack 各长各的）',
       r2.homeAfter.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
     );
 
@@ -844,6 +905,138 @@ async function main() {
     );
     log(failErrors.length === 0, 'I6 失败路线全程零运行时报错', failErrors.slice(0, 2).join(' | ') || 'none');
     await failPage.close();
+
+    /* ==========================================================================================
+       5) PRODUCT-LOOP-R2-B｜合成：5 × ★1 → 1 × ★2 + equipped 自动升星（验收 ①②③⑥⑦⑧ + 必改 3）
+
+       ⚠️ 本段刻意放在**所有「跑局」断言之后**：★2 的炮真实占用 33 能量（★1 = 30）⇒ 一旦插在
+          中间，后续几局的 Build 数值就变了，「确定性通关路线」不再确定性。放到最后 = 只动
+          「局外成长」这一件事，前面的战斗取证逐字不受影响。
+       ⚠️ 到这一步 page 停在首页（第 2 局领奖后回到 home.html），cannon 库存 = ★1 ×5。
+       ========================================================================================== */
+    const preK = await probeHome(page);
+    if (preK.view !== 'garage') await clickSelector(page, '[data-ph-action="open-garage"]');
+    const k0 = await probeHome(page);
+    const k0c1 = k0.weapons.find((w) => w.defId === 'cannon' && w.star === 1);
+    const k0c2 = k0.weapons.find((w) => w.defId === 'cannon' && w.star === 2);
+    const k0card = await garageCard(page, 'cannon', 1);
+    const k0fuse = await garageFuseButton(page, 'cannon', 1);
+    const k0spear = await garageCard(page, 'spear', 1);
+    const k0spearFuse = await garageFuseButton(page, 'spear', 1);
+    log(
+      !!k0c1 &&
+        k0c1.count === 5 &&
+        k0c1.stackText === '5/5' &&
+        k0c1.fusable === true &&
+        k0c1.maxStar === false &&
+        k0c2 === undefined &&
+        !!k0card &&
+        k0card.text.includes('可合成') &&
+        !!k0fuse &&
+        k0fuse.text === '合成' &&
+        k0fuse.disabled === false,
+      'K1 验收 ②「5/5 可以合成」：cannon ★1 = 5/5 ⇒ 卡片写「可合成」+ 真实「合成」按钮，且此刻**还没有** ★2 卡',
+      `★1=${k0c1 ? `${k0c1.count}/${k0c1.threshold} fusable=${k0c1.fusable}` : 'n/a'} · ★2=${k0c2 ? k0c2.count : '不存在'} · 卡=${k0card ? k0card.text : 'n/a'} · 按钮=${k0fuse ? k0fuse.text : '不存在'}`,
+    );
+    log(
+      !!k0spear &&
+        k0spear.stackText === '1/5' &&
+        k0spear.fusable === 'false' &&
+        k0spearFuse === null,
+      'K2 验收 ①「不满 5 件不能合成」：spear 1/5 ⇒ 卡片无「可合成」徽标，且合成按钮在 DOM 里**根本不存在**（不是置灰）',
+      `spear=${k0spear ? `${k0spear.stackText} fusable=${k0spear.fusable}` : 'n/a'} · 按钮=${k0spearFuse ? '存在' : '不存在'}`,
+    );
+
+    const energyBeforeFuse = k0.energy;
+    const equippedStarBefore = k0.equippedWeaponStar;
+
+    // ★ 真实鼠标点击「合成」（点的是按钮自己声明的 defId/star，不猜坐标、不调内部函数）
+    await clickSelector(
+      page,
+      `[data-ph-action="fuse"][data-ph-fuse-def="cannon"][data-ph-fuse-star="1"]`,
+    );
+    const k1 = await probeHome(page);
+    const storedK = await storageDump(page);
+    log(
+      !!k1.lastFuse &&
+        k1.lastFuse.ok === true &&
+        k1.lastFuse.reason === null &&
+        k1.lastFuse.partId === 'cannon' &&
+        k1.lastFuse.fromStar === 1 &&
+        k1.lastFuse.toStar === 2 &&
+        k1.lastFuse.countAfter === 0 &&
+        k1.lastFuse.productCount === 1 &&
+        k1.lastFuse.equippedUpgraded === true,
+      'K3 验收 ③「5 × ★1 → 1 × ★2」：**一次**点击后 ★1 归 0、★2 = 1（对账字段来自合成返回值）',
+      k1.lastFuse
+        ? `ok=${k1.lastFuse.ok} ★${k1.lastFuse.fromStar}→★${k1.lastFuse.toStar} countAfter=${k1.lastFuse.countAfter} product=${k1.lastFuse.productCount} upgraded=${k1.lastFuse.equippedUpgraded}`
+        : 'n/a',
+    );
+
+    const k1c1 = await garageCard(page, 'cannon', 1);
+    const k1c2 = await garageCard(page, 'cannon', 2);
+    const k1c3 = await garageCard(page, 'cannon', 3);
+    const k1fuse = await garageFuseButton(page, 'cannon', 2);
+    log(
+      k1c1 === null &&
+        !!k1c2 &&
+        k1c2.star === '2' &&
+        k1c2.count === '1' &&
+        k1c2.stackText === '1/5' &&
+        k1c2.equipped === 'true' &&
+        k1c2.fusable === 'false' &&
+        k1c3 === null,
+      'K4 星级真的进了数据模型（不是改文案）：★1 的炮**库存归零 ⇒ 卡消失**；★2 的炮是一张新卡（1/5、带「已装备」）；★3 不存在',
+      `★1=${k1c1 ? k1c1.text : '不存在'} ★2=${k1c2 ? k1c2.text : '不存在'} ★3=${k1c3 ? k1c3.text : '不存在'}`,
+    );
+    log(
+      k1.equippedWeaponId === 'cannon' &&
+        k1.equippedWeaponStar === 2 &&
+        storedWeaponStar(storedK) === 2,
+      'K5 **验收 ⑥**：装备那一档被合空 ⇒ Equipped 自动改指 ★2（玩家无需「卸下 → 合成 → 再装备」），且**正式 Build 存档**里也是 ★2',
+      `equipped=${k1.equippedWeaponId} ★${k1.equippedWeaponStar} · 存档 ★${storedWeaponStar(storedK)}（合成前 ★${equippedStarBefore}）`,
+    );
+
+    const entryStar2 = k1.weapons.find((w) => w.defId === 'cannon' && w.star === 2);
+    const entryStar1 = k0.weapons.find((w) => w.defId === 'cannon' && w.star === 1);
+    const starDelta = entryStar2 && entryStar1 ? entryStar2.energyInUse - entryStar1.energyInUse : null;
+    log(
+      starDelta !== null &&
+        starDelta > 0 &&
+        k1.energy === energyBeforeFuse + starDelta &&
+        k1.energyCapacity === k0.energyCapacity,
+      `K6 星级倍率真的作用到 Build 总能量：★2 单件占 ${entryStar2 ? entryStar2.energyInUse : '?'}（★1 占 ${entryStar1 ? entryStar1.energyInUse : '?'}）⇒ 总能量恰好 +${starDelta}`,
+      `能量 ${energyBeforeFuse} → ${k1.energy}（差 ${k1.energy - energyBeforeFuse} = 卡片 ${entryStar2 ? entryStar2.energyInUse : '?'} − ${entryStar1 ? entryStar1.energyInUse : '?'}）/ 容量 ${k1.energyCapacity}`,
+    );
+
+    // 必改 5（不连锁）：一次点击只有一次 5 合 1；★2 = 1 件 ⇒ 没有 ★3、也没有可再点的合成按钮
+    log(
+      k1fuse === null && k1c3 === null && !!k1c2 && k1c2.count === '1',
+      'K7 必改 5「一次点击只执行一次」：合成后 ★2 只有 1 件 ⇒ 没有★3、也**没有**可再点的合成按钮（不存在连锁升星）',
+      `★2=${k1c2 ? k1c2.count : 'n/a'} 按钮=${k1fuse ? k1fuse.text : '不存在'} ★3=${k1c3 ? '存在' : '不存在'}`,
+    );
+
+    /* ---- 验收 ⑧：整页 reload 后 star / count / equipped 三者都保持 ---- */
+    await page.reload({ waitUntil: 'load' });
+    await waitHomeReady(page);
+    const kReload = await probeHome(page);
+    const storedReload = await storageDump(page);
+    const kReloadC1 = await garageCard(page, 'cannon', 1);
+    log(
+      kReload.equippedWeaponId === 'cannon' &&
+        kReload.equippedWeaponStar === 2 &&
+        invCount(storedReload, 'cannon', 1) === 0 &&
+        invCount(storedReload, 'cannon', 2) === 1 &&
+        invCount(storedReload, 'cannon', 3) === 0 &&
+        storedWeaponStar(storedReload) === 2,
+      'K8 **验收 ⑧**：整页 reload 后 `star / count / equipped` 三者全部保持（★1=0、★2=1、装的还是 ★2）—— 全部来自真实持久化',
+      `equipped=${kReload.equippedWeaponId} ★${kReload.equippedWeaponStar} · 磁盘 ★1=${invCount(storedReload, 'cannon', 1)} ★2=${invCount(storedReload, 'cannon', 2)} ★3=${invCount(storedReload, 'cannon', 3)} · 存档星=${storedWeaponStar(storedReload)}`,
+    );
+    log(
+      kReloadC1 === null && kReload.equippedWeaponId === 'cannon',
+      'K9 reload 后 ★1 卡仍未回来（库存真的是 0，不是页面内存里少显示一张）',
+      `★1=${kReloadC1 ? kReloadC1.text : '不存在'}`,
+    );
 
     log(pageErrors.length === 0, 'J1 全流程零运行时报错', pageErrors.slice(0, 2).join(' | ') || 'none');
   } finally {

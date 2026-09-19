@@ -18,7 +18,7 @@ import { platform } from '../src/platform/index';
 import { createWebCore } from '../src/platform/web';
 import { createWechatCore } from '../src/platform/wechat';
 import { savePlayerBuild, loadPlayerBuild } from '../src/core/buildPersistence';
-import { saveInventory, loadInventoryRaw } from '../src/core/partInventory';
+import { saveInventory, loadInventoryRaw, getCount } from '../src/core/partInventory';
 import { saveProgress, loadProgressRaw } from '../src/core/playerProgress';
 import { makeStarterDraft } from '../src/lab/buildEditorModel';
 import { registry } from '../src/core/content';
@@ -107,7 +107,16 @@ describe('F-WX-2.1 Platform Binding', () => {
 
     expect(webStore.has(INV_KEY_V2)).toBe(false);
     expect(webStore.has(PROG_KEY)).toBe(false);
-    expect(loadInventoryRaw()?.cannon).toEqual({ one: 2, two: 1 });
+    /*
+      ⚠️ 这里**不能**写 `toEqual({ one: 2, two: 1 })`：`toEqual` 比较的是**键集**
+      （见 USER.md「断言书写坑」）。PRODUCT-LOOP-R2-B 起 `PartStack` 有 ★1..★5 五个桶，
+      读回来的对象必然是 `{one,two,three,four,five}` ⇒ 旧写法会把「多了三个 0」误判为不等。
+      改为按**星级取值**（`getCount` 是公开口径），并显式钉住高星桶确实是 0 —— 比原写法更强。
+    */
+    const inv = loadInventoryRaw();
+    expect(getCount(inv!, 'cannon', 1)).toBe(2);
+    expect(getCount(inv!, 'cannon', 2)).toBe(1);
+    for (const s of [3, 4, 5]) expect(getCount(inv!, 'cannon', s), `★${s}`).toBe(0);
     expect(loadProgressRaw()?.coin).toBe(7);
     expect(loadProgressRaw()?.rating).toBe(9);
   });

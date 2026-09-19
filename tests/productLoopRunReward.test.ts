@@ -698,9 +698,28 @@ describe('PRODUCT-LOOP-R2-A｜E. 源码守卫（本 Queue 的边界必须结构�
     }
     expect(growth.includes("from '../core/partInventory'")).toBe(true);
     expect(growth.includes('saveInventory'), '成长写入必须经 core 的 saveInventory').toBe(true);
-    // ⚠️ 成长**不做**合成：本模块不得出现任何消耗 / 升星的调用
-    for (const banned of ['consume(', 'fuseSameStar', 'fuseCategoryMaterials', 'grantAllNewMovements']) {
-      expect(growth.includes(banned), `playerGrowth.ts 不得做合成/消耗：${banned}`).toBe(false);
+    /*
+      ⚠️ PRODUCT-LOOP-R2-B｜R2-A 在这里断言过「成长**不做**合成：不得出现任何消耗 / 升星调用」。
+         本 Queue 的交付物恰恰就是合成 ⇒ 那条禁令**由 Queue 取代**，换成的不是「删掉守卫」，
+         而是四条**更具体**的约束（禁止面收窄、要求面变严）：
+    */
+    for (const banned of ['fuseSameStar', 'fuseCategoryMaterials', 'grantAllNewMovements']) {
+      expect(
+        growth.includes(banned),
+        `playerGrowth.ts 不得复用旧横屏的融合规则：${banned}（两边对「已装备副本」的语义相反）`,
+      ).toBe(false);
+    }
+    for (const banned of ['金币', 'gold', '手续费', '品质', 'rarity']) {
+      expect(growth.includes(banned), `playerGrowth.ts 不得出现经济项：${banned}`).toBe(false);
+    }
+    // 必改 5：一次调用只做**一次** 5 合 1（材料消耗只有一处 ⇒ 结构上做不出连锁 / 批量）
+    expect(
+      growth.split('consume(inv, partId, s, FUSE_STACK)').length - 1,
+      '材料消耗只有一处 ⇒ 不连锁、不批量',
+    ).toBe(1);
+    // 必改 1：合成对 partId **泛化** —— 源码里不得出现针对具体武器的相等判断
+    for (const id of ['cannon', 'spear', 'hammer', 'laser']) {
+      expect(growth.includes(`=== '${id}'`), `合成不得对 ${id} 写特例`).toBe(false);
     }
   });
 
@@ -791,22 +810,29 @@ describe('PRODUCT-LOOP-R2-A｜E. 源码守卫（本 Queue 的边界必须结构�
     expect(seed!.count, 'Queue 必改 3：fresh profile cannon = ★1 ×4').toBe(4);
   });
 
-  it('PR-25 本 Queue 的禁止清单：不做合成 / 不做经济 / 不新增 Weapon', () => {
-    // ① 成长与会话模块里没有任何升星动作（合成属 Queue B）
+  it('PR-25 R2-B 禁止清单：不做经济 / 不复用旧横屏融合 / 合成只有唯一入口 / Lab 侧无合成', () => {
+    // ① 经济 / 品质 / 手续费仍然一律不做（R2-B 一项都没解锁）
     for (const f of ['playerGrowth.ts', 'playerLoadout.ts', 'playerProfile.ts']) {
       const code = strip(readProduct(f));
-      for (const banned of ['升星', 'fusion', 'Fusion', '金币', 'gold', '品质', 'rarity', 'rarityTier']) {
+      for (const banned of ['金币', 'gold', '手续费', '品质', 'rarity', 'rarityTier']) {
         expect(code.includes(banned), `${f} 不得出现禁止项：${banned}`).toBe(false);
       }
     }
-    // ② 候选池恰好三件且都在正式内容库里（不新增 Weapon 定义）
+    // ② 候选池恰好三件且都在正式内容库里（不新增 Weapon 定义；R2-B 未改奖励）
     expect([...REWARD_CHOICE_IDS].sort()).toEqual(['cannon', 'hammer', 'spear']);
-    // ③ 满 stack 只**显示**：Garage 卡片上没有合成入口
+    /*
+      ③ PRODUCT-LOOP-R2-B｜合成动作**只能有一个入口**（`playerGrowth.fuseStack`），
+         规则（消耗 / 产出 / 落盘）不许洇进页面：页面必须**没有**任何直接改库存的调用。
+         ⚠️ R2-A 曾经在这里禁止页面出现 `fuse` / `合成`；本 Queue 的必改 3 要求
+            Garage 提供最小合成动作 ⇒ 守卫改成断言**分界线**（动作在、规则不在），
+            而不是否定整件事。
+    */
     const page = strip(readProduct('homePage.ts'));
-    for (const banned of ['fuse', 'Fuse', '合成']) {
-      expect(page.includes(banned), `homePage.ts 不得做合成：${banned}`).toBe(false);
+    expect(page.includes('fuseStack'), '页面的合成动作必须走唯一入口 playerGrowth.fuseStack').toBe(true);
+    for (const banned of ['consume(', 'addPart(', 'saveInventory', 'fuseSameStar', 'fuseCategoryMaterials']) {
+      expect(page.includes(banned), `homePage.ts 不得自己改库存：${banned}`).toBe(false);
     }
-    // ④ Run Page 侧同样不产生「合成」语义
+    // ④ Run / Lab 侧仍然不产生「合成」语义（R2-B 一行都没碰 Lab）
     const lab = strip(readLab('runProductReward.ts')) + strip(readLab('runPage.ts'));
     for (const banned of ['fuse', 'Fuse', '合成', '升星']) {
       expect(lab.includes(banned), `Lab 侧不得做合成：${banned}`).toBe(false);

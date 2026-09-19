@@ -9,6 +9,15 @@
  *   - 战斗奖励允许重复（每场随机 1★，可累积）；
  *   - 5×1★ → 1×随机 2★ 最小合成（已装备保留 1 个 1★ 不被消耗）。
  *
+ * V0.6（PRODUCT-LOOP-R2-B-FUSION-STAR）：**星级从 2 档泛化为 5 档**。
+ *   - `PartStack` 增加 `three` / `four` / `five`（可选，旧档缺省 = 0）⇒ 同一个
+ *     `(defId, star)` 的副本数在 ★1..★5 上**各占一档**，`starKey` 是唯一映射；
+ *   - 旧存档（只有 `one`/`two`）读入后逐字节等价、零迁移成本；
+ *   - `INVENTORY_MAX_STAR = 5`（数据模型上限）与 `MAX_STAR = 2`（**旧横屏融合规则**
+ *     的策略上限，冻结）是两件事，见各自注释；
+ *   - ⚠️ 本文件的**融合规则本身未变**：竖屏产品侧的「5 合 1」是 `product/playerGrowth.ts`
+ *     的 `fuseStack`（规则不同：装备中部件允许参与 + 自动升星装备）。
+ *
  * 设计约束（来自 Queue 冻结项）：
  * - 不引入实例 UID（库存只按 (defId, star) 计副本数，不记录每件实例）；
  * - 不新增 dependency；
@@ -39,9 +48,66 @@ export const OFFICIAL_PARTS: string[] = PART_OPTIONS.filter((o) => o.v !== EMPTY
  */
 export const OFFICIAL_MOVEMENTS: readonly string[] = ['smallWheel', 'largeWheel', 'heavyWheel'];
 
-/** 库存：每件正式部件按星级记录副本数（V0.5 仅 1/2 星；轮组复用 one 计数） */
-export interface PartInventory {
-  [defId: string]: { one: number; two: number };
+/**
+ * 库存：每件正式部件按**星级**记录副本数（`(defId, star) → 副本数`）。
+ *
+ * PRODUCT-LOOP-R2-B-FUSION-STAR｜从「只有 `one`(★1) / `two`(★2)」扩为 **★1..★5 五档**：
+ *   - `one` / `two` 仍是同一件事的前两档（★1 / ★2），读写路径与扩展前逐字节一致；
+ *   - `three` / `four` / `five` **可选**：旧存档 / 旧测试字面量（只有 `one`/`two`）
+ *     缺省一律读作 0 ⇒ 旧档零迁移成本、零行为变化。
+ *
+ * ⚠️ 为什么必须扩（不扩就是**静默腐烂**，而不是报错）：
+ *    扩展前的映射是 `star >= 2 ? two : one` ⇒ **★3 与 ★2 落进同一个桶**：
+ *    5×★2 合成出 ★3 会把 ★2 的计数一起抬上去，而 `getCount(inv, id, 3)` 读回来的
+ *    正是 ★2 的数量 —— 玩家看到「★2 ×2、没有 ★3」，数据已经错了却没有任何一处抛错。
+ *    又因为 `normalizeInventory()` 只搬运**已知字段**、其余一律丢弃 ⇒ 产品侧也**不可能**
+ *    绕过本模块在同一个 storage key 里另存高星档。⇒ 高星必须在数据模型里有一等表示。
+ *
+ * 轮组沿用同一结构（`one` = 拥有数，其余恒 0）。
+ */
+export interface PartStack {
+  one: number;
+  two: number;
+  /** ★3 副本数（旧档 / 未使用缺省 = 0） */
+  three?: number;
+  /** ★4 副本数（旧档 / 未使用缺省 = 0） */
+  four?: number;
+  /** ★5 副本数（旧档 / 未使用缺省 = 0） */
+  five?: number;
+}
+
+export type PartInventory = { [defId: string]: PartStack };
+
+/**
+ * 库存数据模型能表达的**星级档数**上限 = ★5。
+ *
+ * ⚠️ 与下面的 `MAX_STAR` 是**两件事**，不要互换、不要合并：
+ *   - `INVENTORY_MAX_STAR`（= 5）= **存储 / 读数结构**的上限（本文件的数据模型）；
+ *   - `MAX_STAR`（= 2）= **旧横屏 Garage 融合规则**的策略上限（Q22 起冻结在 2★，
+ *     本分支不动它的规则 / UI / 测试）。
+ * 竖屏产品侧的成长星级上限 = `product/playerGrowth.ts` 的 `GROWTH_MAX_STAR`（= 本常量）。
+ */
+export const INVENTORY_MAX_STAR = 5;
+
+/** 星级 → `PartStack` 字段名的**唯一映射**（★1..★5）。所有星级读写都必须经过它。 */
+const STAR_KEYS = ['one', 'two', 'three', 'four', 'five'] as const;
+
+type StarKey = (typeof STAR_KEYS)[number];
+
+/** 星级 → 字段名；越界 / 非数一律**夹**到 `1..INVENTORY_MAX_STAR`（不抛、不返回 undefined）。 */
+function starKey(star: number): StarKey {
+  const s = Math.min(INVENTORY_MAX_STAR, Math.max(1, Math.floor(Number(star) || 1)));
+  return STAR_KEYS[s - 1];
+}
+
+/** 读一档计数（字段缺省 / 脏数据 → 0，永不返回 NaN）。 */
+function readStarBucket(e: PartStack, key: StarKey): number {
+  return Math.max(0, Math.floor(Number(e[key]) || 0));
+}
+
+/** 全零的单个 stack（五档齐备；`emptyInventory` / `addPart` 共用，保证形状同源）。 */
+function emptyStack(): PartStack {
+  return { one: 0, two: 0, three: 0, four: 0, five: 0 };
 }
 
 const STORAGE_KEY_V1 = 'strongfruit.ownedParts.v1';
@@ -54,8 +120,8 @@ export function isOfficialPart(id: string): boolean {
 /** 全零库存（仅含正式部件键 + 正式轮组键） */
 function emptyInventory(): PartInventory {
   const inv: PartInventory = {};
-  for (const p of OFFICIAL_PARTS) inv[p] = { one: 0, two: 0 };
-  for (const m of OFFICIAL_MOVEMENTS) inv[m] = { one: 0, two: 0 };
+  for (const p of OFFICIAL_PARTS) inv[p] = emptyStack();
+  for (const m of OFFICIAL_MOVEMENTS) inv[m] = emptyStack();
   return inv;
 }
 
@@ -66,7 +132,10 @@ export function defaultInventory(): PartInventory {
   return inv;
 }
 
-/** 只保留正式部件 + 正式轮组、补齐缺失键、夹紧负数（防御脏数据） */
+/**
+ * 只保留正式部件 + 正式轮组、补齐缺失键、夹紧负数（防御脏数据）。
+ * PRODUCT-LOOP-R2-B｜逐档搬运 **★1..★5**：旧档只有 `one`/`two` ⇒ 后三档落 0（零迁移成本）。
+ */
 function normalizeInventory(data: Record<string, unknown>): PartInventory {
   const inv = emptyInventory();
   const allKeys = [...OFFICIAL_PARTS, ...OFFICIAL_MOVEMENTS];
@@ -74,8 +143,8 @@ function normalizeInventory(data: Record<string, unknown>): PartInventory {
     const e = data[p];
     if (e && typeof e === 'object') {
       const o = e as Record<string, unknown>;
-      inv[p].one = Math.max(0, Math.floor(Number(o.one) || 0));
-      inv[p].two = Math.max(0, Math.floor(Number(o.two) || 0));
+      const dst = inv[p];
+      for (const k of STAR_KEYS) dst[k] = Math.max(0, Math.floor(Number(o[k]) || 0));
     }
   }
   return inv;
@@ -123,27 +192,34 @@ export function getInventory(): PartInventory {
   return loadInventoryRaw() ?? defaultInventory();
 }
 
-/** 取某部件某星级的副本数 */
+/**
+ * 取某部件某星级的副本数。
+ *
+ * PRODUCT-LOOP-R2-B｜星级泛化：★1..★5 **各占一档**（经 `starKey` 的**唯一映射**）。
+ * ⚠️ 扩展前 `star >= 2` 恒读 `two`（★3 会读成 ★2）；现在每档独立。
+ *    `star` 越界 / 非数被**夹**到 1..`INVENTORY_MAX_STAR` ⇒ `star ∈ {1,2}` 的读数
+ *    与扩展前**逐字节一致**（横屏调用点零影响）。
+ */
 export function getCount(inv: PartInventory, defId: string, star: number): number {
   const e = inv[defId];
   if (!e) return 0;
-  return star >= 2 ? e.two : e.one;
+  return readStarBucket(e, starKey(star));
 }
 
 /** 永久入库：增加副本（非正式部件/轮组忽略） */
 export function addPart(inv: PartInventory, defId: string, star: number, n = 1): void {
   if (!isOfficialPart(defId) && !OFFICIAL_MOVEMENTS.includes(defId)) return;
-  if (!inv[defId]) inv[defId] = { one: 0, two: 0 };
-  if (star >= 2) inv[defId].two += n;
-  else inv[defId].one += n;
+  if (!inv[defId]) inv[defId] = emptyStack();
+  const key = starKey(star);
+  inv[defId][key] = readStarBucket(inv[defId], key) + n;
 }
 
 /** 从库存消耗副本（不校验；调用方先确保充足） */
 export function consume(inv: PartInventory, defId: string, star: number, n: number): void {
   const e = inv[defId];
   if (!e) return;
-  if (star >= 2) e.two = Math.max(0, e.two - n);
-  else e.one = Math.max(0, e.one - n);
+  const key = starKey(star);
+  e[key] = Math.max(0, readStarBucket(e, key) - n);
 }
 
 /** 某部件某星级是否已拥有（EMPTY_SLOT 视为永远可装备） */
@@ -336,9 +412,16 @@ export class BattleRewardSettler {
 }
 
 /**
- * F-GARAGE-INVENTORY-FUSION-P0｜合成数据模型与规则。
- * 库存仅支持 2 星（PartInventory.one/two）→ MAX_STAR 被数据模型钉为 2；
- * 合成只做 1★ → 2★ 单步跃迁（2★ 即满星，不可再合）。不引入第二套库存/星级系统。
+ * F-GARAGE-INVENTORY-FUSION-P0｜**旧横屏 Garage 融合规则**的星级上限（冻结 = 2★）。
+ *
+ * ⚠️ 这**不是**库存数据模型的星级上限 —— 那是 `INVENTORY_MAX_STAR = 5`（本文件上方）。
+ *    两者刻意分开、**不要合并**：
+ *      - **数据模型**（★1..★5 五档 + `starKey` 映射）在 PRODUCT-LOOP-R2-B 被泛化；
+ *      - 但本文件下面这条**横屏融合规则**（`fuseSameStar` / `fuseCategoryMaterials`）与
+ *        `canvasPlayerUIHost` 的星级 chip 行，自 Q22 起被钉在 2★：本分支**不改它的
+ *        规则 / UI / 测试**（`garageFusionUX_R2` 与 `garageFusionStarSelectionR3`
+ *        都把 `MAX_STAR === 2` 当域不变量断言）。
+ *    竖屏产品侧的星级上限见 `product/playerGrowth.ts` 的 `GROWTH_MAX_STAR`（= 5）。
  */
 export const MAX_STAR = 2;
 

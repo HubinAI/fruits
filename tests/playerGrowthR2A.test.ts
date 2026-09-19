@@ -340,20 +340,24 @@ describe('PRODUCT-LOOP-R2-A｜J. 读数：数量 / 预览 / 满 stack（Garage �
     expect(merged, '同一 stack 归并（Queue 必改 1）').toBe(4);
   });
 
-  it('PG-17 Garage 读数：`★{star}` + `×{count}`，满则 `5/5`，阈值来自 core 合成规则', () => {
+  it('PG-17 Garage 读数：星级 + 进度 `4/5`，满则 `5/5` 且可合成，阈值来自 core 合成规则', () => {
     const inv = freshSeedInventory();
     const cannon = weaponEntries(inv).find((w) => w.defId === 'cannon');
     expect(cannon).toBeTruthy();
     expect(cannon!.star).toBe(GROWTH_STAR);
     expect(cannon!.count).toBe(4);
     expect(cannon!.threshold).toBe(FUSE_STACK);
-    expect(cannon!.stackText, '未满：Queue 明写的 `×4` 形态').toBe('×4');
+    // PRODUCT-LOOP-R2-B：Queue 必改 3 的「数量 / 5」进度写法（R2-A 的 `×4` 已被取代）
+    expect(cannon!.stackText, '未满：Queue 必改 3 的进度写法').toBe('4/5');
     expect(cannon!.reachesThreshold).toBe(false);
-    // 满 stack → `5/5`
+    expect(cannon!.fusable, '4/5 不能合成（验收 1）').toBe(false);
+    expect(cannon!.maxStar, '★1 不是上限').toBe(false);
+    // 满 stack → `5/5` 且**可合成**（验收 2）
     addPart(inv, 'cannon', 1, 1); // 5
     const full = weaponEntries(inv).find((w) => w.defId === 'cannon')!;
     expect(full.stackText).toBe('5/5');
-    expect(full.reachesThreshold, 'Garage 只**显示**这一状态，不做合成').toBe(true);
+    expect(full.reachesThreshold).toBe(true);
+    expect(full.fusable, '5/5 可以合成（验收 2）').toBe(true);
     // 阈值真源校验：与 core 的 `canFuse().need` 一致
     expect(cannon!.threshold).toBe(stackThreshold(inv, 'cannon', GROWTH_STAR));
     // 同一个 stack **只有一条**读数（不生成多张卡）

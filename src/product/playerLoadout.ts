@@ -1,9 +1,13 @@
 /**
  * PRODUCT-LOOP-R1-A-HOME-GARAGE-INVENTORY｜正式玩家「局外装备状态」的**唯一数据源**（纯逻辑）。
  * PRODUCT-LOOP-R2-A｜`WeaponEntry` 从「是否拥有」升级为 **星级 + 数量**（Queue 必改 1 /
- * 「Garage 最小显示」）：`star` + `count` + `threshold` + `stackText`（`×4` / `5/5`）。
- * ⚠️ 本 Queue **不做合成**，本模块也不新增任何合成 / 升星动作（属 Queue B）；
- *    满 stack 只是一个**读数**。
+ * 「Garage 最小显示」）：`star` + `count` + `threshold` + `stackText`。
+ * PRODUCT-LOOP-R2-B-FUSION-STAR｜星级从「恒 ★1」变为**数据驱动**：列表逐 `(defId, star)`
+ * 列出 ★1..★5 的 stack（`stackText` 改为 Queue 必改 3 的进度写法 `4/5`、`5/5`），
+ * 并新增 `fusable` / `maxStar` 两个只读字段供 Garage 的「可合成」徽标与按钮使用；
+ * `equipWeapon` 增加**星级形参**并同步落盘 `functionalStars`。
+ * ⚠️ 本模块仍然**只读不写库存**：合成动作（消耗 5 → 产出 1）在 `playerGrowth.fuseStack()`
+ *    （产品侧成长的唯一写入口），本模块只负责把它算出来的事实摆出来。
  * ⚠️ 本模块**不再**被 `playerGrowth.ts` 反向依赖的代价：阈值从 core 的 `canFuse().need` 现读
  *    （见 `stackThreshold`），而不是从 `playerGrowth` import —— 那样会成模块环。
  *
@@ -49,39 +53,56 @@ import {
   makeStarterDraft,
   type BuildDraft,
 } from '../lab/buildEditorModel';
-import { canFuse, ensureInventory, getCount, type PartInventory } from '../core/partInventory';
+import {
+  INVENTORY_MAX_STAR,
+  canFuse,
+  ensureInventory,
+  getCount,
+  type PartInventory,
+} from '../core/partInventory';
+// PRODUCT-LOOP-R2-B｜单件能量的**星级倍率**真源（core 战斗侧同一函数）：
+// 卡片上要显示「装上它要花多少能量」，★2 的 33 必须与 Build 总能量用的 33 同源，
+// 否则卡片写 30、能量条按 33 算 ⇒ 玩家看到的数与实际不符。
+import { starTierEnergy } from '../core/buildSnapshot';
 import type { BodyDef, FunctionalPartDef } from '../core/types';
 
 /** 正式玩家车身（与 `playerGameRuntime` 的 starter 同一取值）。 */
 export const PLAYER_BODY_DEF_ID = 'watermelonBody';
 
 /**
- * 产品侧展示的成长星级 = **★1**（= 库存数据模型的 `one` 档）。
+ * 产品侧**默认**成长星级 = ★1（= 库存数据模型的第一档）。
  *
- * `PartInventory` 的形状是 `{ [defId]: { one, two } }`，即 `(star 1 → one)`、
- * `(star ≥2 → two)` —— ★1 就是这个数据模型的第一档，这里的 `1` 与 `getCount(inv, id, 1)`
- * 里已有的 `1` 是**同一件事**，不是本 Queue 新造的常量。
+ * `PartInventory` 的星级档位是 `one` / `two` / `three` / `four` / `five` = ★1..★5
+ * （`partInventory.starKey` 是唯一映射），★1 就是这个数据模型的第一档，这里的 `1`
+ * 与 `getCount(inv, id, 1)` 里已有的 `1` 是**同一件事**，不是本模块新造的常量。
  *
- * ⚠️ 为什么这里没有一个 `import { GROWTH_STAR } from './playerGrowth'`：
- *    `playerGrowth.ts` 已经 `import` 本模块（`isWeaponDefId` / `WEAPON_SLOT`），
+ * ⚠️ PRODUCT-LOOP-R2-B｜星级**不再是常量**。R2-A 时产品侧只有 ★1（「不做升星效果」），
+ *    现在星级是真实的成长维度（`playerGrowth.fuseStack` 产出 ★2..★5）⇒ 本常量降级为
+ *    「调用方没指定星级时的默认值」（`equipWeapon` 第 4 形参的默认值），
+ *    **不再是** `weaponEntries` 的展示口径 —— 列表改为逐 `(defId, star)` 列出。
+ *
+ * ⚠️ 为什么这里仍然没有一个 `import { GROWTH_STAR } from './playerGrowth'`：
+ *    `playerGrowth.ts` 已经 `import` 本模块（`isWeaponDefId` / `WEAPON_SLOT` / `equipWeapon`），
  *    反向 import 会形成模块环 —— 环在 ESM 下虽然常常能跑通，但 `const` 在环上的
  *    求值顺序会让「谁先被加载」决定成不成立，属**结构性隐患**而不是风格问题。
- *    Queue B 做合成、星级真正成为可变量时，这个字段改为由 `playerGrowth` 传入。
- * ⚠️ R2-A 只列 ★1 stack：本 Queue 没有任何路径能产出 ★2（「不做升星效果」），
- *    因此列表里出现 ★2 只可能是旧档残留；**不删、不动**，只是不在本轮展示范围内。
+ *    因此星级的**上限**真源取 core 的 `INVENTORY_MAX_STAR`（见 `weaponEntries`）；
+ *    `playerGrowth.GROWTH_MAX_STAR` 与它**同值**，由 `tests/productFusionR2B.test.ts` 断言钉死。
  */
 export const WEAPON_GROWTH_STAR = 1;
 
 /**
- * 满 stack 阈值（Garage 显示 `×4`、`5/5` 的分母）。
+ * 满 stack 阈值（Garage 显示 `4/5`、`5/5` 的分母）。
  *
  * ⚠️ **不写死 5**：取自 core 自己的合成规则 `canFuse().need` —— 那才是这个数字的
  *    **唯一真源**（`partInventory.ts` 里 `need: 5` 出现在 4 处）。产品侧再写一个 5
- *    就是第二份真源，Queue B 做合成时两处必然漂移。
+ *    就是第二份真源，产品合成与 core 规则两处必然漂移。
  *
  * ⚠️ 第 4 个形参传 `null` 是**刻意**的：`canFuse` 的 `build` 只影响 `available` / `ok`
  *    （扣除当前已装备的那几件），我们要读的只有 `need` —— 阈值与「这件装没装在车上」无关。
  *    `equippedSlots(null)` 首行 `if (!build) return []` ⇒ 传 null 安全，不抛。
+ * ⚠️ PRODUCT-LOOP-R2-B｜★3..★5 会走 `canFuse` 的 `maxStar` 分支（`star >= MAX_STAR`），
+ *    该分支返回的 `need` **仍然是 5** ⇒ 阈值对所有星级同源（横屏规则的 2★ 上限
+ *    只影响「能不能合」，不影响「几件合一」）。
  */
 export function stackThreshold(inv: PartInventory, defId: string, star: number): number {
   return Math.max(1, canFuse(inv, defId, star, null).need);
@@ -107,30 +128,48 @@ export const MVP_MIN_WEAPONS = 2;
  *
  * Queue 必改 1 要求的 `partId / star / count` 三元组在本结构里完整可表达
  * （`defId` = partId + `star` + `count`），且**同一 `(defId, star)` 只会出现一条**
- * —— `weaponEntries` 是遍历**定义**取 `getCount`，天然按 stack 归并，
+ * —— `weaponEntries` 是遍历**定义 × 星级**取 `getCount`，天然按 stack 归并，
  * 结构上不可能出现 5 张一模一样的库存卡。
+ *
+ * PRODUCT-LOOP-R2-B｜`star` 从「恒 1」变为**数据驱动**（★1..★5 逐个产出），
+ * 并增加合成相关的两个只读字段（`fusable` / `maxStar`）。
  */
 export interface WeaponEntry {
   readonly defId: string;
   readonly name: string;
-  /** 单件能量占用（1★ 基准，`FunctionalPartDef.energy`） */
+  /** 单件**基准**能量（`FunctionalPartDef.energy`，恒为 1★ 值） */
   readonly energy: number;
+  /**
+   * 单件**实际**能量占用 = `starTierEnergy(energy, star)`（★1 恒等）。
+   * ⚠️ 卡片上显示的是它，而不是 `energy`：★2 的炮真实占 33，
+   *    与 Build 总能量（`computeEnergy`）用的是同一个倍率函数。
+   */
+  readonly energyInUse: number;
   /** 拥有的副本数（= 该 `(defId, star)` stack 的计数） */
   readonly count: number;
-  /** 成长星级（R2-A 恒为 `WEAPON_GROWTH_STAR`） */
+  /** 成长星级（★1..★5；PRODUCT-LOOP-R2-B 起由数据驱动，不再恒为 1） */
   readonly star: number;
   /** 满 stack 阈值（来自 core 合成规则，见 `stackThreshold`） */
   readonly threshold: number;
   /**
-   * stack 展示文案 —— **就是 Queue 明给的那两种写法**：
-   *   - 未满：`'×4'`（「数量」）；
-   *   - 已满（`count >= threshold`）：`'5/5'`（Queue：「达到5件时可以只显示 `5/5`」）。
-   * ⚠️ 收敛成 `5/5` 而不是 `×5` 是**刻意的**：它同时表达了「已经到阈值」这件事，
-   *    而 Queue B 的合成动作正是从这里接上（`reachesThreshold` 与它同源）。
+   * stack 展示文案 = **Queue 必改 3 的「数量 / 5」写法**：`4/5`；已满为 `5/5`。
+   *
+   * ⚠️ 已满时收敛成 `5/5` 而不是 `6/5`（R2-A 的 Queue 原文：「达到5件时可以只显示
+   *    `5/5`」）。真实计数在探针的 `count` 字段里，展示不做暗示。
+   * ⚠️ R2-A 的 `×4` 写法在 R2-B 被替换为进度写法（Queue 必改 3 明写「数量 / 5」）
+   *    —— 这是**契约变更**，不是格式口味；`_e2e_product_*.cjs` 的断言同步更新。
    */
   readonly stackText: string;
-  /** 是否已达满 stack（Garage **只显示**；合成动作属 Queue B） */
+  /** 是否已达满 stack */
   readonly reachesThreshold: boolean;
+  /**
+   * 现在能不能对这张卡发起一次合成（`count >= threshold` 且 `star < INVENTORY_MAX_STAR`）。
+   * ⚠️ 与 `playerGrowth.canFuseStack()` **同判据**（Garage 的「可合成」徽标与合成按钮
+   *    都由它驱动）；合成动作本身仍走 `playerGrowth.fuseStack()` —— 本模块只读不写。
+   */
+  readonly fusable: boolean;
+  /** 已达**星级上限**（★5，不可再合） */
+  readonly maxStar: boolean;
 }
 
 /** 一个 Functional 挂点的展示读数（只读；除 `WEAPON_SLOT` 外本轮不可改）。 */
@@ -139,6 +178,8 @@ export interface SlotReading {
   readonly label: string;
   readonly defId: string;
   readonly name: string;
+  /** 该槽在 `BuildDraft.functionalStars` 上的星级（缺省 = ★1） */
+  readonly star: number;
   /** 'weapon' | 'gadget' | null（空槽） */
   readonly category: string | null;
   readonly occupied: boolean;
@@ -157,6 +198,12 @@ export interface LoadoutReading {
   readonly weaponSlotLabel: string;
   /** 当前装备的主武器 defId；空槽为 `EMPTY_SLOT` */
   readonly equippedWeaponId: string;
+  /**
+   * 当前装备的主武器**星级**（`functionalStars` 缺省 = ★1）。
+   * ⚠️「装备」= `(equippedWeaponId, equippedWeaponStar)` **这一对**：同一个 defId 的
+   *    ★1 与 ★2 是两个 stack，只报 defId 无法表达玩家装的是哪一档。
+   */
+  readonly equippedWeaponStar: number;
   readonly equippedWeaponName: string;
   readonly weapons: readonly WeaponEntry[];
   readonly slots: readonly SlotReading[];
@@ -231,31 +278,48 @@ export function weaponDefs(): readonly FunctionalPartDef[] {
 }
 
 /**
- * 可装备武器列表 = 正式武器定义 ∩ 库存 ★1 拥有。
+ * 把读数**夹**进合法星级区间（★1..★`INVENTORY_MAX_STAR`）。
+ * ⚠️ 只用于**展示 / 读数**路径（列表遍历、槽位读数）。装备**写**路径刻意不夹：
+ *    越界星级直接拒绝（`equipWeapon` 的 `bad-star`），不制造「点 ★9 装上了 ★5」的静默替换。
+ */
+function starInRange(star: number): number {
+  return Math.min(INVENTORY_MAX_STAR, Math.max(1, Math.floor(Number(star) || 1)));
+}
+
+/**
+ * 可装备武器列表 = 正式武器定义 × **★1..★5**，逐 `(defId, star)` 列出 `count > 0` 的 stack。
  * 无新增库存、无新增定义：拿到的就是玩家真实拥有的东西。
  *
- * ⚠️ 遍历的是**定义**而不是库存条目 ⇒ 同一个 `(defId, star)` 只会产生**一条**读数
- *    （「同一 stack 归并」在结构上成立，而不是靠去重）。
- * ⚠️ 只列 `count > 0` 的 stack：没有的东西不摆出来（「是否拥有」是列表的存在性，
- *    数量只是它的读数）。
+ * ⚠️ 遍历的是**定义 × 星级**而不是库存条目 ⇒ 同一个 `(defId, star)` 只会产生**一条**读数
+ *    （「同一 stack 归并」在结构上成立，而不是靠去重）。不同星级是**不同的卡**
+ *    （★2 的炮与 ★1 的炮是两个 stack），这正是 Queue「不同星级不能混合」在展示层的体现。
+ * ⚠️ 只列 `count > 0` 的 stack：没有的东西不摆出来（数量为 0 的档位不占位）。
+ * ⚠️ 星级上限取 core 的 `INVENTORY_MAX_STAR`（**不是** `playerGrowth.GROWTH_MAX_STAR`，
+ *    那是模块环）：两者同值，由 `tests/productFusionR2B.test.ts` 断言钉死。
  */
 export function weaponEntries(inv: PartInventory): readonly WeaponEntry[] {
-  const star = WEAPON_GROWTH_STAR;
   const out: WeaponEntry[] = [];
   for (const def of weaponDefs()) {
-    const count = getCount(inv, def.id, star);
-    if (count <= 0) continue;
-    const threshold = stackThreshold(inv, def.id, star);
-    out.push({
-      defId: def.id,
-      name: def.name,
-      energy: def.energy,
-      count,
-      star,
-      threshold,
-      stackText: count >= threshold ? `${threshold}/${threshold}` : `×${count}`,
-      reachesThreshold: count >= threshold,
-    });
+    for (let star = 1; star <= INVENTORY_MAX_STAR; star++) {
+      const count = getCount(inv, def.id, star);
+      if (count <= 0) continue;
+      const threshold = stackThreshold(inv, def.id, star);
+      const maxStar = star >= INVENTORY_MAX_STAR;
+      out.push({
+        defId: def.id,
+        name: def.name,
+        energy: def.energy,
+        energyInUse: starTierEnergy(def.energy, star),
+        count,
+        star,
+        threshold,
+        // Queue 必改 3「数量 / 5」：已满收敛为 `5/5`（真实计数在探针 count 里）
+        stackText: count >= threshold ? `${threshold}/${threshold}` : `${count}/${threshold}`,
+        reachesThreshold: count >= threshold,
+        fusable: count >= threshold && !maxStar,
+        maxStar,
+      });
+    }
   }
   return out;
 }
@@ -264,6 +328,16 @@ export function weaponEntries(inv: PartInventory): readonly WeaponEntry[] {
 export function equippedWeaponId(draft: BuildDraft): string {
   const v = draft.functionalSelections[WEAPON_SLOT];
   return v && v !== EMPTY_SLOT ? v : EMPTY_SLOT;
+}
+
+/**
+ * 当前 Weapon 槽位的**星级**（`BuildDraft.functionalStars` 缺省 = ★1）。
+ *
+ * ⚠️ 与 `getCount(inv, defId, star)` 同一口径 ⇒ 「装备指向的是哪个 stack」两侧一致
+ *    —— 这正是 Queue 必改 2「Equipped 不得指向不存在物品」的判据基石。
+ */
+export function equippedWeaponStar(draft: BuildDraft): number {
+  return starInRange(draft.functionalStars?.[WEAPON_SLOT] ?? WEAPON_GROWTH_STAR);
 }
 
 /** 车身 Functional 挂点的展示读数（顺序 = BodyDef 硬点顺序，空槽如实标「空」）。 */
@@ -279,6 +353,7 @@ export function slotReadings(draft: BuildDraft): readonly SlotReading[] {
       label: SLOT_LABELS[hp.id] ?? hp.id,
       defId,
       name: def ? def.name : '空',
+      star: starInRange(draft.functionalStars?.[hp.id] ?? WEAPON_GROWTH_STAR),
       category: def ? def.category : null,
       occupied,
       editable: hp.id === WEAPON_SLOT,
@@ -302,6 +377,7 @@ export function loadoutReading(draft: BuildDraft, inv: PartInventory): LoadoutRe
     weaponSlot: WEAPON_SLOT,
     weaponSlotLabel: SLOT_LABELS[WEAPON_SLOT] ?? WEAPON_SLOT,
     equippedWeaponId: eqId,
+    equippedWeaponStar: equippedWeaponStar(draft),
     equippedWeaponName: eqDef ? eqDef.name : '空',
     weapons: weaponEntries(inv),
     slots: slotReadings(draft),
@@ -309,7 +385,7 @@ export function loadoutReading(draft: BuildDraft, inv: PartInventory): LoadoutRe
 }
 
 /** 装备失败原因（页面如实展示，不静默成功）。 */
-export type EquipFailure = 'not-weapon' | 'not-owned' | 'invalid-build' | 'unknown-slot';
+export type EquipFailure = 'not-weapon' | 'not-owned' | 'invalid-build' | 'unknown-slot' | 'bad-star';
 
 export interface EquipOutcome {
   readonly ok: boolean;
@@ -320,35 +396,57 @@ export interface EquipOutcome {
 }
 
 /**
- * **唯一写入口**：把一件已拥有的正式武器装进 `WEAPON_SLOT` 并落盘。
+ * **唯一写入口**：把一件已拥有的正式武器（**指定星级**）装进 `WEAPON_SLOT` 并落盘。
  *
  * 校验顺序（任一不通过即拒绝，**零副作用**）：
  *   1. `not-weapon`     —— 不是正式武器（含 Run 强化名 heavyShell / twinCannon / fastReload）；
- *   2. `unknown-slot`   —— 车身没有该挂点（防 Body 变更后写入非法槽）；
- *   3. `not-owned`      —— 库存 1★ 副本为 0；
- *   4. `invalid-build`  —— 组合过不了正式 `validateSnapshot`（如超能量 / 无武器）。
+ *   2. `bad-star`       —— 星级不是 ★1..★`INVENTORY_MAX_STAR` 的整数
+ *                          （**不夹**：拒绝比「点 ★9 装上了 ★5」的静默替换诚实）；
+ *   3. `unknown-slot`   —— 车身没有该挂点（防 Body 变更后写入非法槽）；
+ *   4. `not-owned`      —— 库存里该 **(defId, star)** 副本为 0；
+ *   5. `invalid-build`  —— 组合过不了正式 `validateSnapshot`（如超能量 / 无武器）。
  * 通过后 `savePlayerBuild` 落盘 —— 与正式玩法读的是同一个 key，无需任何同步步骤。
+ *
+ * PRODUCT-LOOP-R2-B｜新增第 4 形参 `star`（缺省 ★1 ⇒ 既有调用点行为不变）：
+ *   - 库存判据从「★1 有货」改为「**该星级**有货」⇒ ★2 的炮与 ★1 的炮是两个 stack，
+ *     装备指向的必须是玩家点的那一个；
+ *   - 落盘时同步写 `BuildDraft.functionalStars[WEAPON_SLOT]`（★1 时**删掉该键**，
+ *     与 `buildEditorModel` 的既有约定一致：「缺省 = 全 ★1」，保持旧 Build 形状最简）。
+ *     ⇒ 这是 Queue 必改 2 的另一半：「装备指向的 stack」在**库存**与**Build**两侧同源。
  */
 export function equipWeapon(
   defId: string,
   draft: BuildDraft = loadEquippedDraft(),
   inv: PartInventory = playerInventory(draft),
+  star: number = WEAPON_GROWTH_STAR,
 ): EquipOutcome {
   if (!isWeaponDefId(defId)) {
     return { ok: false, reason: 'not-weapon', detail: `"${defId}" 不是正式武器（Run 强化不可作为永久装备）` };
+  }
+  if (!Number.isFinite(star) || !Number.isInteger(star) || star < 1 || star > INVENTORY_MAX_STAR) {
+    return {
+      ok: false,
+      reason: 'bad-star',
+      detail: `非法星级 ${String(star)}（合法区间 ★1..★${INVENTORY_MAX_STAR}）`,
+    };
   }
   const body = registry.bodies.get(draft.bodyDefId);
   const hasSlot = !!body && body.functionalHardpoints.some((h) => h.id === WEAPON_SLOT);
   if (!hasSlot) {
     return { ok: false, reason: 'unknown-slot', detail: `车身 "${draft.bodyDefId}" 没有挂点 "${WEAPON_SLOT}"` };
   }
-  if (getCount(inv, defId, 1) <= 0) {
-    return { ok: false, reason: 'not-owned', detail: `库存里没有 "${defId}" 的 1★ 副本` };
+  if (getCount(inv, defId, star) <= 0) {
+    return { ok: false, reason: 'not-owned', detail: `库存里没有 "${defId}" 的 ${star}★ 副本` };
   }
+  const stars: Record<string, number> = { ...(draft.functionalStars ?? {}) };
+  if (star > 1) stars[WEAPON_SLOT] = star;
+  else delete stars[WEAPON_SLOT];
   const next: BuildDraft = {
     ...draft,
     functionalSelections: { ...draft.functionalSelections, [WEAPON_SLOT]: defId },
   };
+  if (Object.keys(stars).length > 0) next.functionalStars = stars;
+  else delete next.functionalStars;
   const result = validateSnapshot(buildSnapshotFromDraft(next, registry), registry);
   if (!result.valid) {
     return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };

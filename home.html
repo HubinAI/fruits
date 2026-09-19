@@ -29,8 +29,13 @@
       边界（Queue 冻结项）：
         - 本页**不参与** npm run build / build:pages / build:e2e / build:wechat 任一正式构建；
         - 不新建 Runtime、不改 Run / Battle Camera / Battle Physics / Buff / Encounter /
-          Validation Hub / Encounter Lab / Content Batch / Fusion / 星级 / Economy；
-        - `开始冒险` 只是同产物内的相对链接（`<a href>`，本页不写 location）。
+          Validation Hub / Encounter Lab / Content Batch / Economy；
+        - PRODUCT-LOOP-R2-B｜「调整战车」多一个**合成**动作（点一次 = 一次 5 合 1，
+          规则在 src/product/playerGrowth.ts）；本页仍然：不碰任何存储 API、不做拖拽合成、
+          不做连锁/批量合成、不改任何战斗数值（星级带来的能量/伤害倍率是 core Q22 既有语义）。
+          ⚠️ 写本注释时注意：存储 API 的**名字**本身也是被守卫扫描的字符串（直接扫原文，不剥注释）。
+
+        `开始冒险` 只是同产物内的相对链接（`<a href>`，本页不写 location）。
 
       PRODUCT-LOOP-R1-C｜**本页是默认玩家入口**（`npm run dev` 的根路径由 build/branchDevEntry.ts
         在 dev 下重写到本页；所有研发 Validation 页面仍保留各自的显式地址）。
@@ -169,6 +174,28 @@
       .ph-card-name { font-size: 15px; font-weight: 650; color: #eaf1fb; }
       .ph-card-meta { font-size: 11px; color: #93a1b6; }
       .ph-card-tag { font-size: 10px; color: #8fe0ad; }
+
+      /*
+        PRODUCT-LOOP-R2-B｜合成（最小动作）。
+
+        ⚠️ 卡片本身是 <button>，而「合成」也是一个按钮 —— HTML 不允许 button 套 button，
+           所以合成按钮是卡片的**兄弟节点**，两者同放在 `.ph-card-cell` 里；合成按钮用绝对
+           定位压在卡片右上角，视觉上仍在卡内，但 DOM 上是平级 ⇒ 合法且点击不会互相吞掉。
+      */
+      .ph-card-cell { position: relative; display: flex; }
+      .ph-card-cell > .ph-card { flex: 1 1 auto; width: 100%; }
+      .ph-card-full { border-color: #7a5b00; background: #191604; }
+      .ph-card-badge { font-size: 10px; font-weight: 700; color: #ffd35a; }
+      .ph-card-badge-max { color: #93a1b6; }
+      .ph-card-fuse {
+        position: absolute; top: 6px; right: 6px;
+        font: inherit; font-size: 11px; font-weight: 700;
+        padding: 4px 9px; border-radius: 999px;
+        border: 1px solid #7a5b00;
+        background: linear-gradient(180deg, #ffd35a, #e8a92c); color: #3a2600;
+        cursor: pointer;
+      }
+      .ph-card-fuse:hover { background: linear-gradient(180deg, #ffe07e, #f0b53c); }
 
       /* 动作 */
       .ph-actions { display: flex; gap: 10px; margin-top: auto; padding-top: 12px; }

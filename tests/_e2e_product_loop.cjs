@@ -26,7 +26,7 @@
  *   5 Equipped Weapon 继承     → F2 / F4（第二局第一场真的装着 Weapon B）
  *   6 Reward 不重复领取        → G1 / G2 / G3（重开领奖 URL → 不重复发奖；**换一件也领不到**）
  *   7 Validation 入口仍独立可用 → H1
- *   ① 新账号成长起点 ★1 ×4     → A1（fresh seed，只发这一次）
+ *   ① 新账号成长起点 ★1 4/5   → A1（fresh seed，只发这一次）
  *   ② 终点三张真实 Weapon 卡    → C3 / C3b / C3c（含真实像素）
  *   ③ 选中那一件数量 +1         → D2（**独立取证**正式存档 key）
  *   ④ 其它 stack 不跟着涨       → D2（同一份 dump 里对照 cannon / hammer 保持不变）
@@ -83,7 +83,7 @@ const WEAPON_A_NAME = '炮';
  *
  * ⚠️ 刻意选 **hammer**（不是下面要领的 spear）：本文件里有三个不同的武器角色
  *    （出发装备 / 预装探针 / 本局奖励），让它们**互不重合** ⇒ 每一条断言都指向唯一一件，
- *    「读到 spear ×2」不可能来自别的步骤（否则「+1」是哪个动作造成的就说不清了）。
+ *    「读到 spear 2/5」不可能来自别的步骤（否则「+1」是哪个动作造成的就说不清了）。
  */
 const WEAPON_PRE = 'hammer';
 const WEAPON_PRE_NAME = '锤';
@@ -436,16 +436,18 @@ async function main() {
         invCount(stored0, WEAPON_B) === SEED_COUNTS[WEAPON_B] &&
         invCount(stored0, WEAPON_PRE) === SEED_COUNTS[WEAPON_PRE] &&
         !stored0[CLAIMS_KEY],
-      'A1 **新账号的成长起点**（R2-A 验收 ①）：cannon ★1 ×4、另两件候选各 ×1；没有领奖账本（后面的 +1 一定是本局产生的）',
+      'A1 **新账号的成长起点**（R2-A 验收 ①）：cannon ★1 4/5、另两件候选各 1/5；没有领奖账本（后面的 +1 一定是本局产生的）',
       `fresh=${home0.growth.fresh} seeded=${home0.growth.seeded} cannon=${invCount(stored0, 'cannon')} ${WEAPON_B}=${invCount(stored0, WEAPON_B)} ${WEAPON_PRE}=${invCount(stored0, WEAPON_PRE)}`,
     );
     log(
       home0.weapons.length === 3 &&
         home0.weapons.every((w) => w.star === 1 && w.threshold === FUSE_STACK) &&
         home0.weapons.find((w) => w.defId === 'cannon').count === 4 &&
-        home0.weapons.find((w) => w.defId === 'cannon').stackText === '×4' &&
-        home0.weapons.every((w) => w.reachesThreshold === false),
-      'A1b Garage 读数与库存同源：三张卡都是 ★1、分母 = 满 stack 阈值、次数 4/1/1（未满 ⇒ 本 Queue 不做合成）',
+        home0.weapons.find((w) => w.defId === 'cannon').stackText === '4/5' &&
+        home0.weapons.every((w) => w.reachesThreshold === false) &&
+        home0.weapons.every((w) => w.fusable === false) &&
+        home0.weapons.every((w) => w.maxStar === false),
+      'A1b Garage 读数与库存同源：三张卡都是 ★1、分母 = 满 stack 阈值、次数 4/1/1（未满 ⇒ 无合成入口；合成验收在 R2-B 的段里）',
       home0.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
     );
     log(
@@ -487,12 +489,12 @@ async function main() {
         !!cardBSeed &&
         cardASeed.star === '1' &&
         cardASeed.threshold === String(FUSE_STACK) &&
-        cardASeed.stackText === `×${SEED_COUNTS[WEAPON_A]}` &&
+        cardASeed.stackText === `${SEED_COUNTS[WEAPON_A]}/5` &&
         cardASeed.count === String(SEED_COUNTS[WEAPON_A]) &&
         cardBSeed.count === String(SEED_COUNTS[WEAPON_B]) &&
         cardASeed.text.includes(`★1`) &&
-        cardASeed.text.includes(`×${SEED_COUNTS[WEAPON_A]}`),
-      `A3b Garage 卡片真的写出「星级 + 数量」：${WEAPON_A_NAME} ★1 ×4（未满 stack ⇒ 只显示数量，不显示 5/5）`,
+        cardASeed.text.includes(`${SEED_COUNTS[WEAPON_A]}/5`),
+      `A3b Garage 卡片真的写出「星级 + 数量 / 5」：${WEAPON_A_NAME} ★1 ${SEED_COUNTS[WEAPON_A]}/5（未满 ⇒ 无「可合成」徽标、无合成按钮）`,
       cardASeed ? `[${WEAPON_A}] ${cardASeed.text} · data: star=${cardASeed.star} count=${cardASeed.count} stackText=${cardASeed.stackText}` : 'n/a',
     );
 
@@ -687,7 +689,7 @@ async function main() {
         cardB.text.includes(WEAPON_B_NAME) &&
         cardB.star === '1' &&
         cardB.count === String(cardBSeed0 + 1) &&
-        cardB.stackText === `×${cardBSeed0 + 1}` &&
+        cardB.stackText === `${cardBSeed0 + 1}/5` &&
         cardB.threshold === String(FUSE_STACK),
       `D3 调整战车：刚领到的那件**读数长了一格**（${cardBSeed0} → ${cardBSeed0 + 1}，同一份 Inventory 数据，不是另造一套）`,
       cardB ? `[${WEAPON_B}] ${cardB.text} · data: star=${cardB.star} count=${cardB.count} stackText=${cardB.stackText}` : 'n/a',
@@ -739,7 +741,7 @@ async function main() {
       afterReload.equippedWeaponId === WEAPON_B &&
         !!cardBReload &&
         cardBReload.count === SEED_COUNTS[WEAPON_B] + 1,
-      'D5 整页 reload：累积出来的数量（×2）与「仍装着它」都来自真实持久化（不是页面内存）',
+      'D5 整页 reload：累积出来的数量（2/5）与「仍装着它」都来自真实持久化（不是页面内存）',
       `equipped=${afterReload.equippedWeaponId} ${WEAPON_B}=${cardBReload ? cardBReload.count : 'n/a'}`,
     );
 

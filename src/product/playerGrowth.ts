@@ -33,10 +33,24 @@
  * ⚠️ 本模块**不是 UI**：不碰 DOM、不碰 `location`。持久化只经 core 的
  *    `loadInventoryRaw()` / `saveInventory()`（因此也不直接出现 `platform.storage`，
  *    与 `tests/productLoopRunReward.test.ts` 的 `PR-20` 守卫口径一致）。
+ *
+ * ── PRODUCT-LOOP-R2-B-FUSION-STAR 追加：泛化合成（★1..★5）───────────────────
+ * R2-A 的成长维度只有**数量**（「不做升星效果」）；R2-B 把**星级**接上：
+ *   5 × (同一 `partId` + 同一 `star`) → 1 × (同一 `partId` + `star + 1`)，上限 ★5。
+ *
+ * ⚠️ 这一层为什么不复用 core 的 `fuseSameStar` / `fuseCategoryMaterials`：
+ *    两条规则在「已装备副本」上取值**相反**，且上限不同：
+ *      - core（旧横屏）：已装备副本**受保护**（`available = owned - equipped`），装着的件不可作材料，
+ *        上限冻结在 2★；
+ *      - 本 Queue（必改 2）：装备中的部件**允许参与**，且合成把它合空时**自动升星装备**，
+ *        上限 ★5。
+ *    ⇒ 复用就等于同时改掉旧横屏的行为（§1b「无静默扩范围」）⇒ 产品侧独立一条规则。
  */
 import { loadPlayerBuild } from '../core/buildPersistence';
 import {
+  INVENTORY_MAX_STAR,
   addPart,
+  consume,
   defaultInventory,
   getCount,
   loadInventoryRaw,
@@ -44,7 +58,7 @@ import {
   type PartInventory,
 } from '../core/partInventory';
 import { EMPTY_SLOT, type BuildDraft } from '../lab/buildEditorModel';
-import { isWeaponDefId, playerInventory, WEAPON_SLOT } from './playerLoadout';
+import { equipWeapon, isWeaponDefId, playerInventory, WEAPON_SLOT } from './playerLoadout';
 
 /**
  * 本版成长只使用 **★1**。
@@ -285,4 +299,195 @@ export function freshSeedInventory(): PartInventory {
   const inv = defaultInventory();
   applyFreshSeed(inv);
   return inv;
+}
+
+/* ============================================================================
+ * PRODUCT-LOOP-R2-B-FUSION-STAR｜泛化合成（★1..★5）+「装备不得指向空 stack」
+ * ----------------------------------------------------------------------------
+ * 唯一合成规则（Queue 原文）：
+ *     5 × (同一 partId + 同一 star)  →  1 × (同一 partId + star + 1)
+ * 不同 Weapon 不能混合、不同星级不能混合、★5 为上限不可继续合成。
+ * ========================================================================== */
+
+/**
+ * 产品侧成长的**星级上限** = ★5（Queue：「5★为当前最高星级，不可继续合成」）。
+ *
+ * ⚠️ **不写死 5**：直接取 core 的 `INVENTORY_MAX_STAR`（库存数据模型的档数上限）
+ *    ⇒ 两处**同值**且**不可能漂移**（没有第二份真源，也不需要相等断言去兜）。
+ * ⚠️ 与 core 的 `MAX_STAR = 2` **不是**同一件事：那是**旧横屏融合规则**的策略上限（冻结）。
+ */
+export const GROWTH_MAX_STAR = INVENTORY_MAX_STAR;
+
+/** 合成预检读数（Garage 的「可合成」徽标与合成按钮都读它，不各自判一次）。 */
+export interface FusionGate {
+  /** 现在能不能合（`count >= need` 且 `star < 上限`） */
+  readonly ok: boolean;
+  /** 该 `(partId, star)` 当前的副本数 */
+  readonly count: number;
+  /** 一次合成消耗几件（= `FUSE_STACK`，真源是 core 的 `need`） */
+  readonly need: number;
+  /** 已达星级上限（★5），不可再合 */
+  readonly maxStar: boolean;
+  /** 是不是一件正式 Weapon（非 Weapon 不参与产品成长合成） */
+  readonly isWeapon: boolean;
+}
+
+/**
+ * 合成预检（**纯读**，一个字节都不写）。
+ *
+ * ⚠️ 与 core `canFuse()` 的**唯一差别**：这里**不扣除已装备副本**（必改 2「装备中的部件
+ *    允许参与」）⇒ 同一份库存，`canFuse` 可能说不行而这里说行 —— 这是**刻意的语义分歧**，
+ *    不是 bug（`tests/productFusionR2B.test.ts` 有一条断言把两者摆在一起钉死这个差异）。
+ * ⚠️ `star` 是必传参数（不给默认值）：合成是写操作，星级必须是调用方明确给的事实。
+ */
+export function canFuseStack(inv: PartInventory, partId: string, star: number): FusionGate {
+  if (!isWeaponDefId(partId)) {
+    return { ok: false, count: 0, need: FUSE_STACK, maxStar: false, isWeapon: false };
+  }
+  const s = Math.floor(Number(star) || 0);
+  const count = getCount(inv, partId, s);
+  const maxStar = s >= GROWTH_MAX_STAR;
+  return { ok: count >= FUSE_STACK && !maxStar, count, need: FUSE_STACK, maxStar, isWeapon: true };
+}
+
+/** 合成被拒的原因（页面如实展示，不静默失败、不假装成功）。 */
+export type FusionRefusal = 'not-weapon' | 'bad-star' | 'not-enough' | 'max-star' | 'equip-failed';
+
+/** 一次**成功**合成的完整读数（库存 / Build / 装备三侧的事实都在这一个结果里）。 */
+export interface FusionOutcome {
+  readonly ok: true;
+  readonly partId: string;
+  /** 被消耗的星级 */
+  readonly fromStar: number;
+  /** 产出的星级（= `fromStar + 1`） */
+  readonly toStar: number;
+  /** 消耗掉的件数（恒 = `FUSE_STACK`） */
+  readonly consumed: number;
+  /** 消耗**前** `fromStar` 这一档的计数 */
+  readonly countBefore: number;
+  /** 消耗**后** `fromStar` 这一档的计数（0 = 这一档被合空） */
+  readonly countAfter: number;
+  /** 产出的 `toStar` 那一档合成后的计数 */
+  readonly productCount: number;
+  /**
+   * 合成前 / 后，**这个 `partId`** 在装备槽（`WEAPON_SLOT`）上的星级。
+   * `null` = 这件没装在车上（那就不存在「装备指向」问题，装备一个字节都没动）。
+   */
+  readonly equippedBefore: number | null;
+  readonly equippedAfter: number | null;
+  /** 是否因为「装备的那一档被合空」而**自动升星**了装备（必改 2） */
+  readonly equippedUpgraded: boolean;
+  /** 落盘后的库存（与入参是**同一个对象**，调用方直接替换手里那份即可） */
+  readonly inventory: PartInventory;
+  /** 落盘后的 Build（未自动升星时与入参 `draft` 是**同一个对象**） */
+  readonly draft: BuildDraft;
+}
+
+export interface FusionFailure {
+  readonly ok: false;
+  readonly reason: FusionRefusal;
+  readonly detail: string;
+}
+
+export type FusionResult = FusionOutcome | FusionFailure;
+
+/**
+ * **唯一合成动作**（Queue 必改 1「Generic Fusion」）。
+ *
+ * 输入只有 `partId` + `star` —— 不对任何具体武器写特例（`cannon` 走的是与其它武器**完全
+ * 相同**的代码路径，源码里没有任何 `if (partId === 'cannon')`）。
+ *
+ * 执行顺序（**每一次调用只执行一次 5 合 1**，必改 5：不做连锁消耗）：
+ *   ① 预检（`canFuseStack`）：不是 Weapon / 星级非法 / 数量不够 / 已到 ★5 → 直接拒绝，零副作用；
+ *   ② 消耗 5 × `(partId, star)` → 产出 1 × `(partId, star + 1)`；
+ *   ③ 必改 2：若装备着的正是这个 `(partId, star)` 且它**已被合空**（`countAfter === 0`），
+ *      则把装备升到 `star + 1`（经 `playerLoadout.equipWeapon` → `validateSnapshot` +
+ *      `savePlayerBuild`）⇒ 玩家不需要「卸下 → 合成 → 再装备」；
+ *   ④ 若 ③ 的升星会让 Build **非法**（例如能量超限），把 ② 的库存改动**整体回滚**并返回
+ *      `equip-failed`。宁可这一次不合成，也**绝不**留下一个指向空 stack 的装备
+ *      —— 「Equipped 不得指向不存在物品」是硬要求，静默留一个悬空装备是更坏的结果。
+ *
+ * ⚠️ ③ 只在「装备那一档被合空」时才动装备：若消耗后那一档仍有剩件（例如 6 件里合掉 5 件），
+ *    装备仍然指向一个**有效** stack ⇒ **不动它**（玩家想在车库换成 ★2 那张卡，自己点即可）。
+ * ⚠️ 本函数**只处理 `WEAPON_SLOT`**（产品侧唯一打通的槽位，即「Equipped」的语义）。
+ *    其它挂点（`top`/`front`/…）在 R1-A 就只做**只读展示**、产品从不向其写入；若把它们的
+ *    星级也一并改写，会顺带改变那些槽位在战斗里的能量 / 伤害（Q22 星级倍率）——
+ *    那是禁止清单里的「Weapon Damage / Battle」改动，故**刻意不做**（见交接文档「未做项」）。
+ */
+export function fuseStack(
+  inv: PartInventory,
+  partId: string,
+  star: number,
+  draft: BuildDraft,
+): FusionResult {
+  const s = Math.floor(Number(star) || 0);
+  const gate = canFuseStack(inv, partId, star);
+  if (!gate.isWeapon) {
+    return { ok: false, reason: 'not-weapon', detail: `"${partId}" 不是正式武器，不参与成长合成` };
+  }
+  if (s < 1) {
+    return {
+      ok: false,
+      reason: 'bad-star',
+      detail: `非法星级 ${String(star)}（合法区间 ★1..★${GROWTH_MAX_STAR}）`,
+    };
+  }
+  if (gate.maxStar) {
+    return {
+      ok: false,
+      reason: 'max-star',
+      detail: `★${s} 已是星级上限（★${GROWTH_MAX_STAR}），不可继续合成`,
+    };
+  }
+  if (gate.count < FUSE_STACK) {
+    return {
+      ok: false,
+      reason: 'not-enough',
+      detail: `还差 ${FUSE_STACK - gate.count} 件（当前 ${gate.count}/${FUSE_STACK}）`,
+    };
+  }
+
+  // 装备读数（在改动之前取，供 ③ 判断与结果对账）
+  const key = equippedStackKey(draft);
+  const equippedBefore = key && key.partId === partId ? key.star : null;
+
+  // ② 材料 → 产物（一次调用只做一次，不连锁）
+  consume(inv, partId, s, FUSE_STACK);
+  addPart(inv, partId, s + 1, 1);
+
+  // ③ 装备那一档被合空 ⇒ 装备必须跟着升到 star+1（必改 2）
+  let nextDraft = draft;
+  let equippedUpgraded = false;
+  if (equippedBefore === s && getCount(inv, partId, s) === 0) {
+    const out = equipWeapon(partId, draft, inv, s + 1);
+    if (!out.ok || !out.draft) {
+      // ④ 回滚（原子）：绝不留悬空装备，也绝不留半成品库存
+      addPart(inv, partId, s, FUSE_STACK);
+      consume(inv, partId, s + 1, 1);
+      return {
+        ok: false,
+        reason: 'equip-failed',
+        detail: `合成后无法把装备升到 ★${s + 1}（${String(out.reason)}）：${out.detail ?? ''}`,
+      };
+    }
+    nextDraft = out.draft;
+    equippedUpgraded = true;
+  }
+
+  saveInventory(inv);
+  return {
+    ok: true,
+    partId,
+    fromStar: s,
+    toStar: s + 1,
+    consumed: FUSE_STACK,
+    countBefore: gate.count,
+    countAfter: getCount(inv, partId, s),
+    productCount: getCount(inv, partId, s + 1),
+    equippedBefore,
+    equippedAfter: equippedUpgraded ? s + 1 : equippedBefore,
+    equippedUpgraded,
+    inventory: inv,
+    draft: nextDraft,
+  };
 }

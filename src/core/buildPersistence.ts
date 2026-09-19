@@ -12,6 +12,10 @@ import type { BuildDraft } from '../lab/buildEditorModel';
 import { EMPTY_SLOT, buildSnapshotFromDraft, resolveDriveMode } from '../lab/buildEditorModel';
 import { registry } from './content';
 import { validateSnapshot } from './buildValidator';
+// PRODUCT-LOOP-R2-B｜`functionalStars` 的合法上界 = 库存数据模型的星级档数（★5）。
+// ⚠️ 不在这里写死一个 5：那是第二份真源，与 `partInventory` 的模型必然漂移。
+// 依赖方向：`buildPersistence → partInventory`（单向；`partInventory` 不依赖本模块，无环）。
+import { INVENTORY_MAX_STAR } from './partInventory';
 import { readJsonWithVersion, migrateLegacy, stampVersion, STAMP_KEY } from './saveVersion';
 import { platform } from '../platform';
 
@@ -72,12 +76,21 @@ function isBuildDraftShape(d: unknown): d is BuildDraft {
     if (typeof v !== 'string') return false;
     if (v !== EMPTY_SLOT && !KNOWN_FUNCTIONALS.has(v)) return false;
   }
-  // Q22：functionalStars 可选（各槽星级 1/2）；缺省视为全 1★
+  // Q22：functionalStars 可选（各槽星级）；缺省视为全 1★
+  // PRODUCT-LOOP-R2-B｜上界从「只接受 1|2」放宽到 **1..INVENTORY_MAX_STAR（★5）**：
+  //   数据模型（`partInventory.PartStack`）已泛化到 5 档，若这里仍只认 1|2，
+  //   玩家把 ★3 装上车后 `savePlayerBuild` 会写进去、而 `loadPlayerBuild` 判非法 → 返回 null
+  //   ⇒ **整份玩家 Build 静默回退 starter**（装备凭空消失，且没有一处报错）。
+  //   ⚠️ 零行为变化：战斗侧 `starTierEnergy` / `starTierDamage` 对**一切 star ≥ 2 用同一倍率**
+  //      （`buildSnapshot.ts:30-39`），且旧横屏只会写 1/2（`MAX_STAR = 2`）⇒ 放宽只影响
+  //      「本来会被静默丢弃」的高星 Build。
   if (o.functionalStars !== undefined) {
     if (typeof o.functionalStars !== 'object' || o.functionalStars === null) return false;
     const stars = o.functionalStars as Record<string, unknown>;
     for (const v of Object.values(stars)) {
-      if (typeof v !== 'number' || (v !== 1 && v !== 2)) return false;
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > INVENTORY_MAX_STAR) {
+        return false;
+      }
     }
   }
   return true;

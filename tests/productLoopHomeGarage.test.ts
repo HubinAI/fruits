@@ -397,6 +397,10 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../core/buildValidator',
         '../core/buildPersistence',
         '../core/partInventory',
+        // PRODUCT-LOOP-R2-B：卡片要显示该星级**实际**占用的能量 ⇒ 直接用 core 的星级
+        // 倍率函数（与 Build 总能量、与战斗侧是**同一个** `starTierEnergy`）。
+        // ⚠️ 这不是新的依赖方向：`../core/buildValidator` 本来就 import 它（原为传递依赖）。
+        '../core/buildSnapshot',
         '../core/types',
         '../lab/buildEditorModel',
       ],

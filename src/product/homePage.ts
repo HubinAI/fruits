@@ -49,6 +49,12 @@ import { vehiclePreviewLayout, type VehiclePreviewLayout } from './vehiclePrevie
  * PRODUCT-LOOP-R2-A｜额外两块：
  *   - `playerGrowth.ts`：永久成长的**唯一模型与写入口**（新账号种子 / Equipped stack 兜底）；
  *     本页只调 `openGrowthSession()` 一次，不自己拼装成长逻辑。
+ * PRODUCT-LOOP-R2-B｜本页多一个**写动作**：Garage 里对满 5 件的卡点一次「合成」。
+ *   - 合成规则与判定**一行都不在本页**：调 `playerGrowth.fuseStack()`（唯一合成动作），
+ *     本页只负责①把 `weaponEntries()` 给的 `fusable` 画成「可合成」徽标与按钮、
+ *     ②把 `fuseStack` 返回的**真实**结果重读到屏幕上（成功就换掉手里的库存与 Build）。
+ *   - ⚠️ 本页**不**做任何连锁 / 批量合成（一次点击 = 一次 5 合 1，Queue 必改 5），
+ *     也**不做**拖拽合成（Queue 必改 3：第一版只验证成长循环）。
  */
 import {
   REWARD_CHOICE_IDS,
@@ -63,8 +69,10 @@ import { claimRunReward, claimedRunCount, type ClaimOutcome } from './playerProf
 import {
   GROWTH_STAR,
   FUSE_STACK,
+  fuseStack,
   growthStacks,
   openGrowthSession,
+  type FusionResult,
   type GrowthSession,
 } from './playerGrowth';
 
@@ -83,6 +91,15 @@ export const HOME_START_LABEL = '开始冒险';
 export const GARAGE_TITLE = '调整战车';
 export const GARAGE_BACK_LABEL = '返回首页';
 export const GARAGE_EQUIP_LABEL = '装备';
+/**
+ * PRODUCT-LOOP-R2-B｜合成动作的文案（Queue 必改 3）。
+ *   - `可合成`：满 5 件且未到星级上限时**明确**显示的状态词（不是隐晦的进度数字）；
+ *   - `合成`：第一版唯一的合成入口 —— 点一次执行**一次** 5 合 1（必改 5：不连锁）；
+ *   - `已满星`：★5 的卡不再有合成入口（Queue：「5★为当前最高星级，不可继续合成」）。
+ */
+export const GARAGE_FUSE_LABEL = '合成';
+export const GARAGE_FUSE_READY_LABEL = '可合成';
+export const GARAGE_MAX_STAR_LABEL = '已满星';
 /**
  * `开始冒险` 的目的地：**不再是页面里的字面量**。
  *
@@ -117,10 +134,12 @@ export interface ProductProbe {
   readonly weaponIds: readonly string[];
   readonly weaponNames: readonly string[];
   /**
-   * PRODUCT-LOOP-R2-A｜每件武器的**成长读数**（星级 + 数量 + stack 进度）。
+   * PRODUCT-LOOP-R2-A｜每件武器的**成长读数**（逐 `(defId, star)` 一条）。
    *
    * ⚠️ 直接来自 `playerLoadout.weaponEntries()`（Garage 卡片画的**就是这些字段**，
-   *    不是探针另算一份）⇒ 「屏幕上写着 ×4」与「探针说 count=4」不可能分叉。
+   *    不是探针另算一份）⇒ 「屏幕上写着 `4/5`」与「探针说 count=4」不可能分叉。
+   * ⚠️ PRODUCT-LOOP-R2-B｜同一个 `defId` 现在可能出现**多条**（★1 与 ★2 是两个 stack）。
+   *    因此「取某件的读数」必须**同时**按 `defId` + `star` 定位，只按 defId 取会拿到第一条。
    */
   readonly weapons: readonly {
     readonly defId: string;
@@ -128,8 +147,15 @@ export interface ProductProbe {
     readonly star: number;
     readonly count: number;
     readonly threshold: number;
+    /** 卡片上的进度写法：`4/5`（满则 `5/5`） */
     readonly stackText: string;
     readonly reachesThreshold: boolean;
+    /** 该星级下**实际**占用的能量（★1 恒等于基准值） */
+    readonly energyInUse: number;
+    /** 现在能不能对这张卡发起一次合成（= Queue「可合成」徽标的判据） */
+    readonly fusable: boolean;
+    /** 已到 ★5 星级上限（不可再合） */
+    readonly maxStar: boolean;
   }[];
   /**
    * 本局 3选1 的三条候选读数（与 `开始冒险` 地址里 `choices` 载荷**同源**）。
@@ -149,9 +175,17 @@ export interface ProductProbe {
     readonly repairedEquipped: string | null;
     readonly stackThreshold: number;
   };
+  /**
+   * PRODUCT-LOOP-R2-B｜**当前装备的星级**（`BuildDraft.functionalStars` 缺省 = ★1）。
+   * ⚠️「装备」在产品侧 = `(equippedWeaponId, equippedWeaponStar)` **这一对**；
+   *    只报 defId 会让「★1 的炮」与「★2 的炮」看起来是同一件事。
+   */
+  readonly equippedWeaponStar: number;
   readonly selectedWeaponId: string | null;
+  /** 选中那张卡的星级（`null` = 没选）；与 `selectedWeaponId` 合起来才是完整选择。 */
+  readonly selectedWeaponStar: number | null;
   readonly equipEnabled: boolean;
-  readonly slots: readonly { readonly hardpointId: string; readonly defId: string; readonly name: string; readonly category: string | null; readonly editable: boolean }[];
+  readonly slots: readonly { readonly hardpointId: string; readonly defId: string; readonly name: string; readonly star: number; readonly category: string | null; readonly editable: boolean }[];
   readonly previewItems: readonly { readonly key: string; readonly defId: string; readonly visualId: string | null; readonly onWeaponSlot: boolean }[];
   readonly previewSpriteCount: number;
   readonly previewFallbackCount: number;
@@ -178,6 +212,21 @@ export interface ProductProbe {
   readonly canvasCount: number;
   readonly buttonCount: number;
   readonly lastEquip: { readonly ok: boolean; readonly reason: EquipFailure | null } | null;
+  /**
+   * PRODUCT-LOOP-R2-B｜本次挂载**最后一次**合成动作的**真实**结果（`null` = 还没点过）。
+   * ⚠️ 与 `lastEquip` 同一纪律：只陈述 `playerGrowth.fuseStack()` 的返回值，
+   *    页面不做乐观提示、不在失败时假装成功。
+   */
+  readonly lastFuse: {
+    readonly ok: boolean;
+    readonly reason: string | null;
+    readonly partId: string | null;
+    readonly fromStar: number | null;
+    readonly toStar: number | null;
+    readonly countAfter: number | null;
+    readonly productCount: number | null;
+    readonly equippedUpgraded: boolean;
+  } | null;
   readonly saveKey: string;
 }
 
@@ -273,8 +322,27 @@ export function mountProductHome(
   const growth: GrowthSession = openGrowthSession(draft);
   let inv: PartInventory = growth.inv;
   let view: ProductView = 'home';
-  let selectedWeaponId: string | null = null;
+  /**
+   * 选中的那张**库存卡** = `(defId, star)` **一对**，而不是只有一个 defId。
+   *
+   * ⚠️ PRODUCT-LOOP-R2-B 起同一个 defId 可以有多个星级档（★1 的炮与 ★2 的炮是两张卡、
+   *    两个 stack）⇒ 只记 defId，「点 ★2 那张」与「点 ★1 那张」就无法区分，
+   *    而「装备」要装的正是玩家点的那一档。
+   */
+  let selected: { defId: string; star: number } | null = null;
   let lastEquip: { ok: boolean; reason: EquipFailure | null; detail: string } | null = null;
+  /** 最近一次合成的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
+  let lastFuse: {
+    ok: boolean;
+    reason: string | null;
+    partId: string | null;
+    fromStar: number | null;
+    toStar: number | null;
+    countAfter: number | null;
+    productCount: number | null;
+    equippedUpgraded: boolean;
+    detail: string;
+  } | null = null;
   // 本局 token：**每次挂载一次**（刷新首页 = 准备新的一局，因此会换一个新 token）
   const runToken = newRunToken();
   /**
@@ -403,10 +471,17 @@ export function mountProductHome(
       if (s.hardpointId === WEAPON_SLOT) li.classList.add('ph-slot-weapon');
       li.dataset['phSlot'] = s.hardpointId;
       li.dataset['phSlotDef'] = s.defId;
+      li.dataset['phSlotStar'] = String(s.star);
       const cat = s.category === 'weapon' ? '武器' : s.category === 'gadget' ? '辅助' : '';
+      /**
+       * PRODUCT-LOOP-R2-B｜星级**由数据驱动**地画出来（`s.star` 来自 Build 的
+       * `functionalStars`）。⚠️ 刻意**不写** `star === 1 ? '★' : '★★'` 这类按档位分支的
+       * 写法：合成会把装备升到 ★2..★5，任何「只有 1★ / 2★ 两种形态」的硬编码
+       * 从 ★3 起就会静默画错（Queue 必改 4）。
+       */
       li.append(
         el('span', 'ph-slot-label', s.label),
-        el('span', 'ph-slot-name', cat ? `${s.name}（${cat}）` : s.name),
+        el('span', 'ph-slot-name', cat ? `${s.name} ★${s.star}（${cat}）` : `${s.name} ★${s.star}`),
       );
       if (s.hardpointId === WEAPON_SLOT) li.append(el('span', 'ph-slot-tag', '主武器'));
       list.append(li);
@@ -419,7 +494,7 @@ export function mountProductHome(
     toGarage.dataset['phAction'] = 'open-garage';
     toGarage.addEventListener('click', () => {
       view = 'garage';
-      selectedWeaponId = null;
+      selected = null;
       render();
     });
     // `开始冒险` 是同产物内的真实相对链接；地址由 `runReward.buildAdventureHref()` 产出
@@ -447,10 +522,14 @@ export function mountProductHome(
       ),
     );
     stage.append(
+      el('p', 'ph-note', '同一件部件可以累积数量（例如炮 4/5 → 5/5）。'),
+    );
+    stage.append(
       el(
         'p',
         'ph-note',
-        '同一件部件可以累积数量（例如炮 ×4 → ×5）。数量涨上去之后的事，本版还没有做。',
+        '凑满 5 件后在「调整战车」里可以合成下一星级：5 件 ★1 → 1 件 ★2。' +
+          '星级越高占的能量越多；★5 是目前的上限，到了就不能再合。',
       ),
     );
   }
@@ -477,37 +556,96 @@ export function mountProductHome(
     }
     const grid = el('div', 'ph-grid');
     for (const w of r.weapons) {
+      const equippedHere = w.defId === r.equippedWeaponId && w.star === r.equippedWeaponStar;
+      /**
+       * ⚠️ 卡片是 `<button>`，而「合成」也是一个按钮 ⇒ **不能嵌套**（HTML 不允许
+       *    button 里套 button）。因此合成按钮是卡片的**兄弟节点**，两者共同放在
+       *    `.ph-card-cell` 里（合成按钮绝对定位在右上角，视觉上仍在卡内）。
+       */
+      const cell = el('div', 'ph-card-cell');
       const card = el('button', 'ph-card');
       card.type = 'button';
       card.dataset['phWeapon'] = w.defId;
-      card.dataset['phEquipped'] = String(w.defId === r.equippedWeaponId);
-      /**
-       * PRODUCT-LOOP-R2-A｜Weapon 卡的**星级 + 数量**（Queue「Garage 最小显示」）。
-       *
-       *   - `★{star}` 与 `{stackText}` 都直接来自 `playerLoadout.weaponEntries()`
-       *     （唯一数据源）⇒ 卡片文案与探针读数不可能分叉；
-       *   - `stackText` 就是 Queue 明写的两种形态：未满 `×4` / 已满 `5/5`；
-       *   - ⚠️ 本 Queue **不做合成**：满 stack 只是**显示** `5/5`，卡片上没有、也不会有
-       *     合成按钮或「可合成」提示（合成动作属 Queue B）。
-       *   - 三个 `data-ph-*` 供 E2E 精确对账，不用去解析文案。
-       */
-      if (w.defId === r.equippedWeaponId) card.classList.add('ph-card-equipped');
-      if (w.defId === selectedWeaponId) card.classList.add('ph-card-selected');
       card.dataset['phStar'] = String(w.star);
+      card.dataset['phEquipped'] = String(equippedHere);
+      /**
+       * PRODUCT-LOOP-R2-B｜Weapon 卡的**名称 / 星级 / 数量 / 5**（Queue 必改 3）。
+       *
+       *   - 每张卡 = 一个 `(defId, star)` stack（★1 的炮与 ★2 的炮是**两张**卡）；
+       *   - `★{star}` 与 `{stackText}`（`4/5`）都直接来自 `playerLoadout.weaponEntries()`
+       *     （唯一数据源）⇒ 卡片文案与探针读数不可能分叉；
+       *   - 星级是**数据驱动**的纯数字：没有 `1★ / 2★` 的硬编码分支（必改 4），
+       *     结构上支持 ★1..★5（`INVENTORY_MAX_STAR`）；
+       *   - `fusable`（满 5 件且未到上限）→ 显示 `可合成` 徽标 + 右上角「合成」按钮；
+       *     到 ★5 → 显示 `已满星`，**没有**合成入口（必改 3 / 验收 7）。
+       */
+      if (equippedHere) card.classList.add('ph-card-equipped');
+      if (selected && selected.defId === w.defId && selected.star === w.star) {
+        card.classList.add('ph-card-selected');
+      }
       card.dataset['phCount'] = String(w.count);
       card.dataset['phStackText'] = w.stackText;
       card.dataset['phStackThreshold'] = String(w.threshold);
+      card.dataset['phFusable'] = String(w.fusable);
+      card.dataset['phMaxStar'] = String(w.maxStar);
       if (w.reachesThreshold) card.classList.add('ph-card-full');
       card.append(
         el('span', 'ph-card-name', `${w.name} ★${w.star}`),
-        el('span', 'ph-card-meta', `能量 ${w.energy} · ${w.stackText}`),
+        el('span', 'ph-card-meta', `能量 ${w.energyInUse} · ${w.stackText}`),
       );
-      if (w.defId === r.equippedWeaponId) card.append(el('span', 'ph-card-tag', '已装备'));
+      if (w.fusable) card.append(el('span', 'ph-card-badge', GARAGE_FUSE_READY_LABEL));
+      if (w.maxStar) card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_MAX_STAR_LABEL));
+      if (equippedHere) card.append(el('span', 'ph-card-tag', '已装备'));
       card.addEventListener('click', () => {
-        selectedWeaponId = w.defId;
+        selected = { defId: w.defId, star: w.star };
         render();
       });
-      grid.append(card);
+      cell.append(card);
+
+      if (w.fusable) {
+        // 第一版唯一的合成入口：点一次 = **执行一次** 5 合 1（必改 5：不连锁、不批量）
+        const fuse = el('button', 'ph-card-fuse', GARAGE_FUSE_LABEL);
+        fuse.type = 'button';
+        fuse.dataset['phAction'] = 'fuse';
+        fuse.dataset['phFuseDef'] = w.defId;
+        fuse.dataset['phFuseStar'] = String(w.star);
+        fuse.addEventListener('click', () => {
+          const res: FusionResult = fuseStack(inv, w.defId, w.star, draft);
+          lastFuse = res.ok
+            ? {
+                ok: true,
+                reason: null,
+                partId: res.partId,
+                fromStar: res.fromStar,
+                toStar: res.toStar,
+                countAfter: res.countAfter,
+                productCount: res.productCount,
+                equippedUpgraded: res.equippedUpgraded,
+                detail: '',
+              }
+            : {
+                ok: false,
+                reason: res.reason,
+                partId: w.defId,
+                fromStar: w.star,
+                toStar: null,
+                countAfter: null,
+                productCount: null,
+                equippedUpgraded: false,
+                detail: res.detail,
+              };
+          if (res.ok) {
+            // 合成**改变了两份正式存档**：库存（消耗+产出）与 Build（可能自动升星装备）
+            // ⇒ 手里这两份都要换成落盘后的那一份，页面读的才是真实状态。
+            inv = res.inventory;
+            draft = res.draft;
+          }
+          selected = null;
+          render();
+        });
+        cell.append(fuse);
+      }
+      grid.append(cell);
     }
     stage.append(grid);
 
@@ -515,17 +653,18 @@ export function mountProductHome(
     const equip = el('button', 'ph-btn ph-btn-primary', GARAGE_EQUIP_LABEL);
     equip.type = 'button';
     equip.dataset['phAction'] = 'equip';
-    equip.disabled = selectedWeaponId === null;
+    equip.disabled = selected === null;
     equip.addEventListener('click', () => {
-      if (selectedWeaponId === null) return;
-      const out = equipWeapon(selectedWeaponId, draft, inv);
+      if (selected === null) return;
+      // 装备的是**玩家点的那一档**（`selected.star`），不是 defId 的默认档
+      const out = equipWeapon(selected.defId, draft, inv, selected.star);
       lastEquip = { ok: out.ok, reason: out.reason ?? null, detail: out.detail ?? '' };
       if (out.ok && out.draft) {
         draft = out.draft;
         // 库存不因装备而消耗；重读仍走正式 ensureInventory（幂等 → 不重复生成库存）
         inv = playerInventory(draft);
       }
-      selectedWeaponId = null;
+      selected = null;
       render();
     });
 
@@ -534,11 +673,25 @@ export function mountProductHome(
     back.dataset['phAction'] = 'back-home';
     back.addEventListener('click', () => {
       view = 'home';
-      selectedWeaponId = null;
+      selected = null;
       render();
     });
     actions.append(equip, back);
     stage.append(actions);
+
+    if (lastFuse) {
+      const msg = el(
+        'p',
+        lastFuse.ok ? 'ph-note ph-note-ok' : 'ph-note ph-note-bad',
+        lastFuse.ok
+          ? `合成完成：5 件 ★${String(lastFuse.fromStar)} → 1 件 ★${String(lastFuse.toStar)}` +
+            (lastFuse.equippedUpgraded ? '（正在装备的那件已自动升到新星级）' : '') +
+            '。'
+          : `合成被拒绝（${String(lastFuse.reason)}）：${lastFuse.detail}`,
+      );
+      msg.dataset['phFuseMsg'] = lastFuse.ok ? 'ok' : 'fail';
+      stage.append(msg);
+    }
 
     if (lastEquip) {
       const msg = el(
@@ -578,12 +731,19 @@ export function mountProductHome(
         weaponSlot: r.weaponSlot,
         equippedWeaponId: r.equippedWeaponId,
         equippedWeaponName: r.equippedWeaponName,
+        /**
+         * PRODUCT-LOOP-R2-B｜装备的**星级**（与 `equippedWeaponId` 合起来才是完整的「装备」）。
+         * ⚠️ 取 `loadoutReading()` 的同一份读数（页面禁止自行推导，见本模块顶部职责边界）。
+         */
+        equippedWeaponStar: r.equippedWeaponStar,
         weaponIds: r.weapons.map((w) => w.defId),
         weaponNames: r.weapons.map((w) => w.name),
         /**
-         * PRODUCT-LOOP-R2-A｜成长读数（与 Garage 卡片上画的**是同一批字段**）。
+         * PRODUCT-LOOP-R2-A / R2-B｜成长读数（与 Garage 卡片上画的**是同一批字段**）。
          * ⚠️ 直接取 `r.weapons`（= `playerLoadout.weaponEntries()`）而不是另算一份：
-         *    探针与屏幕同源 ⇒ 「写着 ×4」与「探针说 count=4」不可能分叉。
+         *    探针与屏幕同源 ⇒ 「写着 4/5」与「探针说 count=4」不可能分叉。
+         * ⚠️ 同一个 `defId` 可能出现多条（★1 / ★2 是两个 stack）⇒ 定位某条读数必须
+         *    **同时**带 `star`。
          */
         weapons: r.weapons.map((w) => ({
           defId: w.defId,
@@ -593,6 +753,9 @@ export function mountProductHome(
           threshold: w.threshold,
           stackText: w.stackText,
           reachesThreshold: w.reachesThreshold,
+          energyInUse: w.energyInUse,
+          fusable: w.fusable,
+          maxStar: w.maxStar,
         })),
         /** 与 `开始冒险` 地址里 `choices` 载荷**同源**（同一次 `rewardSpecsNow()` 读取）。 */
         rewardChoices: rewardSpecsNow(),
@@ -602,12 +765,14 @@ export function mountProductHome(
           repairedEquipped: growth.repairedEquipped,
           stackThreshold: FUSE_STACK,
         },
-        selectedWeaponId,
+        selectedWeaponId: selected ? selected.defId : null,
+        selectedWeaponStar: selected ? selected.star : null,
         equipEnabled: !!equipBtn && !equipBtn.disabled,
         slots: r.slots.map((s) => ({
           hardpointId: s.hardpointId,
           defId: s.defId,
           name: s.name,
+          star: s.star,
           category: s.category,
           editable: s.editable,
         })),
@@ -635,6 +800,18 @@ export function mountProductHome(
         canvasCount: root.querySelectorAll('canvas').length,
         buttonCount: root.querySelectorAll('button').length,
         lastEquip: lastEquip ? { ok: lastEquip.ok, reason: lastEquip.reason } : null,
+        lastFuse: lastFuse
+          ? {
+              ok: lastFuse.ok,
+              reason: lastFuse.reason,
+              partId: lastFuse.partId,
+              fromStar: lastFuse.fromStar,
+              toStar: lastFuse.toStar,
+              countAfter: lastFuse.countAfter,
+              productCount: lastFuse.productCount,
+              equippedUpgraded: lastFuse.equippedUpgraded,
+            }
+          : null,
         saveKey: SAVE_KEY,
       };
     },
