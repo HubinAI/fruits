@@ -393,3 +393,96 @@ git 取证：前者自 `9ced1c7`（建文件）未改，后者由 `5133a1c`（Q2
 - ⚠️ 合成段放进 E2E 时**必须排在所有「跑局」断言之后**：★2 的炮真实占 33 能量（★1 = 30）
   ⇒ 插在中间会改变 Build 数值，让「确定性通关路线」不再确定性。
 - ⚠️ `stackText` 契约：未满 = **`4/5`**（不是 `×4`），满 = `5/5`（不写 `6/5`）。
+
+## §8 星级 = 真实战斗伤害（PRODUCT-LOOP-R2-C 固化契约）
+
+### §8a 曲线唯一真源（**取代** Q22 的旧常数）
+
+`src/core/buildSnapshot.starDamageMultiplier(star) = 1 + 0.25 × (star − 1)`
+⇒ ★1/★2/★3/★4/★5 = **1.00 / 1.25 / 1.50 / 1.75 / 2.00**。
+常量：`STAR_DAMAGE_STEP = 0.25` · `STAR_DAMAGE_MAX_STAR = 5` · `STAR_TIER_ENERGY_MULT = 1.1`。
+⚠️ **旧 `STAR_TIER_DAMAGE_MULT = 1.15` 已删除** —— 它是 Q22 两档时代的固定常数
+（`star >= 2` 一律 ×1.15），★3 与 ★2 会同伤害 ⇒ 语义崩坏。别再把它加回来。
+越界 / 非数一律**夹**进 `1..5`（不抛、不 NaN）。
+
+**两个上限刻意分开、同值但各自声明**：`STAR_DAMAGE_MAX_STAR`（伤害曲线定义域，`core`）
+与 `INVENTORY_MAX_STAR`（库存档数，`partInventory`）—— `core` 是最底层纯模块，
+**不能反向依赖库存模块**，由测试断言「两个 5 同值」钉死。
+`partInventory.MAX_STAR = 2` 是**旧横屏融合规则**的策略上限，**不动**。
+
+### §8b ⚠️ 为什么 R2-C 必须改 `src/core`（R2-A / R2-B 的「不动 core」不适用）
+
+R2-A / R2-B 的「`core` 一行不用动」成立，是因为**那两轮没碰战斗数值**。
+一旦要求「星级真的改变战斗」，伤害只有两个落点：改正式 def（违反「def 冻结」）
+或在**解析快照时按星级改** ⇒ 后者就是 `buildSnapshot`，即 `core`。
+放在产品侧算 = **第二个真源** ⇒ `PR-27` 在源码层禁止产品侧 / 页面 / Lab 自算
+（`playerLoadout` 只许 import `starTierDamage` / `weaponMainDamage`）。
+
+### §8c ⚠️ 作用面边界：正式武器里**只有 `saw`** 的伤害不在顶层
+
+`applyStarTier` 的 `isDamageKey = /damage/i.test(k)` **只遍历顶层** `behaviorParams`。
+正式 10 件武器实测：**恰好 `saw`** 走嵌套 `behaviorParams.hitPolicy.damage: 8`（contactTick）
+⇒ 星级倍率层**看不见它**。本轮**收紧而非放宽**：断言 `notScaled === ['saw']` /
+`scaled.length === 9`（SP-03）+ SP-03b 钉死。
+产品侧配套：无伤害读数 ⇒ `weaponMainDamage === 0` ⇒ `damageText === ''` ⇒
+**卡片不画那一行**（不是画「攻击 0」）。
+`saw` 不在 `STARTER_PARTS` / 不在 `REWARD_CHOICE_IDS` ⇒ 当前产品**结构上不可达**；
+将来若进奖励池需**单独决策**。
+
+### §8d `weaponMainDamage` 是「一次命中扣多少血」的唯一读取口径
+
+先 `behaviorParams.projectileDamage`（弹丸类 cannon/shotgun/machineGun/laser/flamethrower），
+再 `behaviorParams.baseDamage`（车身直击类 hammer/spear/ramHead/rammer），
+都没有 ⇒ `0`。与 `src/battle/contactRouter.ts` 的两个伤害分支（`:996` 弹丸 / `:705` 直击）
+**一一对应**；SP-04 用「先缩后读 == 先读后缩」把口径同源钉死。
+配套 `weaponNumericParams(def)` = 全部顶层数值的只读快照，用于逐项证明「只有伤害变了」。
+
+### §8e 层级顺序 = 永久装备 → 永久星级 → Run-local Buff（三者已就位）
+
+| 层 | 谁负责 | 关键事实 |
+|---|---|---|
+| 永久星级 | `resolveSnapshot`（`applyStarTier(def, install.star ?? 1)`） | ★1 ⇒ **def 零 clone**（`applyStarTier(def,1) === def`） |
+| Run-local overlay | `createRunRegistry` + `applyRunModifiersToSnapshot` | **只重映射 `defId`、保留 `star`** |
+| Runtime 真源 | `RunBattleRuntime.playerSnapshot`（= overlay 之后那份） | `star` 从这里读，`?? 1` 夹紧 |
+
+⚠️ `CannonBehavior` 构造时只读 `part.def.behaviorParams` ⇒ 两层对 damage 的叠加是
+**乘法交换**的（脚本按「先永久星级、再乘 run 倍率」记账，数值等价；SP-06 机器断言）。
+Run 结束只清 Run-local，**永久 star 保留**。
+
+### §8f ⚠️ 星级倍率**不是物理量** ⇒ 「同条件」可被机器证明
+
+它只改 `def.energy`（×1.1）与 `behaviorParams` 顶层 damage 类数值，**不进物理求解**。
+⇒ 「同一门炮的**第一发命中时刻**在两场之间逐帧相同」是「只差星级」的客观证据
+（实测两场都是 `3099.999999999994ms`）。E2E `E5` / SP-07 钉死。
+⚠️ `damage` 事件的 `timestamp` **恒为 0**（`ContactRouter` 传 `0`）⇒
+命中时刻必须由运行时自己用 `orchestrator.timeMs` 记（`playerWeaponHitSummary().firstAtMs`）。
+
+### §8g ⚠️ E2E 写法陷阱（R2-C 实测新增 5 条）
+
+1. **战斗运行时在离开 battle 相位时被 `dispose()`** ⇒ 必须**每帧**把 `battleWorld`
+   照抄一份存采样；落到终态再读就晚了（拿到的是已释放或首帧态）。
+2. **比武器参数要取两局的「第一份采样」**（= 第一场，都还没吃 Run-local overlay）。
+   取最后一份会拿到 Run 1 吃到 `twinCannon` / `tripleLoad` 之后的数（`burstRounds: 3`）
+   ⇒ 假红。
+3. **Garage 卡片只在 garage 视图渲染**（`renderGarage` / `view === 'garage'`）
+   ⇒ 读卡前必须先点 `[data-ph-action="open-garage"]`，读完点 `back-home` 回首页。
+4. **★1 不写 `functionalStars` 字段**是既有约定 ⇒ 「Profile Equipped Star = 1」的
+   可观测形式是**该键缺席**，不要断言 `=== 1`。
+5. **`RUN_TOTAL_BATTLES` 起始节点是 Day 2**（既有事实）⇒ 断言「新 Run 重置」时
+   要比「与第一局**同起点**」（逐项比 `day` / `nodeId`），**不要写死 `day === 1`**；
+   且第三帧才有 battle hp ⇒ 用 `samples.find(s => s.hp !== null)`。
+
+### §8h ⚠️ 已探明、**未修**（按纪律只记录，属独立 Bug Queue）
+
+- **能量容量会挡人**：★2 炮占 **33** 能量（★1 = 30）。`bananaBody` 容量 90 ⇒
+  ★1 三件炮恰好 90（合法），合成后 **93**（超容量）⇒ 玩家**可能装不上**。
+- **`validateSnapshot` 不含星级能量倍率**：`buildValidator.ts:114` 累加 `def.energy`（无倍率）
+  vs `:48` 的 `computeEnergy` 用 `starTierEnergy` ⇒ **Q22 漏改**（早于 R2-C）。
+  修它之前**别**让 `equipWeapon` 依赖该校验，否则 ★2 会被静默拒绝。
+
+### §8i `PR-27` 守卫（新增，改动星级链路前必读）
+
+源码层禁止四处自算星级伤害：`playerLoadout`（只许 import core）、`homePage`
+（只许用 `w.damageText`）、`runPage`（只许暴露 `playerWeapons`）、
+`contactRouter`（仍读 `behaviorParams?.projectileDamage`，R2-C 没碰）。
+新增任何「显示星级价值」的地方，一律接 `weaponEntries` 的字段，**不要自己乘**。
