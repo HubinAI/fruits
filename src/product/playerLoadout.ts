@@ -1,5 +1,11 @@
 /**
  * PRODUCT-LOOP-R1-A-HOME-GARAGE-INVENTORY｜正式玩家「局外装备状态」的**唯一数据源**（纯逻辑）。
+ * PRODUCT-LOOP-R2-A｜`WeaponEntry` 从「是否拥有」升级为 **星级 + 数量**（Queue 必改 1 /
+ * 「Garage 最小显示」）：`star` + `count` + `threshold` + `stackText`（`×4` / `5/5`）。
+ * ⚠️ 本 Queue **不做合成**，本模块也不新增任何合成 / 升星动作（属 Queue B）；
+ *    满 stack 只是一个**读数**。
+ * ⚠️ 本模块**不再**被 `playerGrowth.ts` 反向依赖的代价：阈值从 core 的 `canFuse().need` 现读
+ *    （见 `stackThreshold`），而不是从 `playerGrowth` import —— 那样会成模块环。
  *
  * 本模块只做一件事：把「玩家当前装备了什么主武器」接到**已经存在的正式存档链路**上，
  * 不新建存档、不新建库存、不新增任何武器定义。
@@ -43,11 +49,43 @@ import {
   makeStarterDraft,
   type BuildDraft,
 } from '../lab/buildEditorModel';
-import { ensureInventory, getCount, type PartInventory } from '../core/partInventory';
+import { canFuse, ensureInventory, getCount, type PartInventory } from '../core/partInventory';
 import type { BodyDef, FunctionalPartDef } from '../core/types';
 
 /** 正式玩家车身（与 `playerGameRuntime` 的 starter 同一取值）。 */
 export const PLAYER_BODY_DEF_ID = 'watermelonBody';
+
+/**
+ * 产品侧展示的成长星级 = **★1**（= 库存数据模型的 `one` 档）。
+ *
+ * `PartInventory` 的形状是 `{ [defId]: { one, two } }`，即 `(star 1 → one)`、
+ * `(star ≥2 → two)` —— ★1 就是这个数据模型的第一档，这里的 `1` 与 `getCount(inv, id, 1)`
+ * 里已有的 `1` 是**同一件事**，不是本 Queue 新造的常量。
+ *
+ * ⚠️ 为什么这里没有一个 `import { GROWTH_STAR } from './playerGrowth'`：
+ *    `playerGrowth.ts` 已经 `import` 本模块（`isWeaponDefId` / `WEAPON_SLOT`），
+ *    反向 import 会形成模块环 —— 环在 ESM 下虽然常常能跑通，但 `const` 在环上的
+ *    求值顺序会让「谁先被加载」决定成不成立，属**结构性隐患**而不是风格问题。
+ *    Queue B 做合成、星级真正成为可变量时，这个字段改为由 `playerGrowth` 传入。
+ * ⚠️ R2-A 只列 ★1 stack：本 Queue 没有任何路径能产出 ★2（「不做升星效果」），
+ *    因此列表里出现 ★2 只可能是旧档残留；**不删、不动**，只是不在本轮展示范围内。
+ */
+export const WEAPON_GROWTH_STAR = 1;
+
+/**
+ * 满 stack 阈值（Garage 显示 `×4`、`5/5` 的分母）。
+ *
+ * ⚠️ **不写死 5**：取自 core 自己的合成规则 `canFuse().need` —— 那才是这个数字的
+ *    **唯一真源**（`partInventory.ts` 里 `need: 5` 出现在 4 处）。产品侧再写一个 5
+ *    就是第二份真源，Queue B 做合成时两处必然漂移。
+ *
+ * ⚠️ 第 4 个形参传 `null` 是**刻意**的：`canFuse` 的 `build` 只影响 `available` / `ok`
+ *    （扣除当前已装备的那几件），我们要读的只有 `need` —— 阈值与「这件装没装在车上」无关。
+ *    `equippedSlots(null)` 首行 `if (!build) return []` ⇒ 传 null 安全，不抛。
+ */
+export function stackThreshold(inv: PartInventory, defId: string, star: number): number {
+  return Math.max(1, canFuse(inv, defId, star, null).need);
+}
 
 /**
  * MVP **唯一**打通的 Weapon 槽位 = 车身「前上挂点」（`frontMass`）。
@@ -64,14 +102,35 @@ export const WEAPON_SLOT = 'frontMass';
 /** MVP 要求的「至少 N 个可切换武器」——正式 starter 已天然满足（见 `weaponEntries`）。 */
 export const MVP_MIN_WEAPONS = 2;
 
-/** 一件可装备武器在库存里的当前读数。 */
+/**
+ * 一件可装备武器在库存里的当前读数（PRODUCT-LOOP-R2-A：**星级 + 数量**）。
+ *
+ * Queue 必改 1 要求的 `partId / star / count` 三元组在本结构里完整可表达
+ * （`defId` = partId + `star` + `count`），且**同一 `(defId, star)` 只会出现一条**
+ * —— `weaponEntries` 是遍历**定义**取 `getCount`，天然按 stack 归并，
+ * 结构上不可能出现 5 张一模一样的库存卡。
+ */
 export interface WeaponEntry {
   readonly defId: string;
   readonly name: string;
   /** 单件能量占用（1★ 基准，`FunctionalPartDef.energy`） */
   readonly energy: number;
-  /** 拥有的 1★ 副本数（本 Queue 只打通 1★ 档；星级 UI 属 Queue 禁止清单） */
+  /** 拥有的副本数（= 该 `(defId, star)` stack 的计数） */
   readonly count: number;
+  /** 成长星级（R2-A 恒为 `WEAPON_GROWTH_STAR`） */
+  readonly star: number;
+  /** 满 stack 阈值（来自 core 合成规则，见 `stackThreshold`） */
+  readonly threshold: number;
+  /**
+   * stack 展示文案 —— **就是 Queue 明给的那两种写法**：
+   *   - 未满：`'×4'`（「数量」）；
+   *   - 已满（`count >= threshold`）：`'5/5'`（Queue：「达到5件时可以只显示 `5/5`」）。
+   * ⚠️ 收敛成 `5/5` 而不是 `×5` 是**刻意的**：它同时表达了「已经到阈值」这件事，
+   *    而 Queue B 的合成动作正是从这里接上（`reachesThreshold` 与它同源）。
+   */
+  readonly stackText: string;
+  /** 是否已达满 stack（Garage **只显示**；合成动作属 Queue B） */
+  readonly reachesThreshold: boolean;
 }
 
 /** 一个 Functional 挂点的展示读数（只读；除 `WEAPON_SLOT` 外本轮不可改）。 */
@@ -172,14 +231,31 @@ export function weaponDefs(): readonly FunctionalPartDef[] {
 }
 
 /**
- * 可装备武器列表 = 正式武器定义 ∩ 库存 1★ 拥有。
+ * 可装备武器列表 = 正式武器定义 ∩ 库存 ★1 拥有。
  * 无新增库存、无新增定义：拿到的就是玩家真实拥有的东西。
+ *
+ * ⚠️ 遍历的是**定义**而不是库存条目 ⇒ 同一个 `(defId, star)` 只会产生**一条**读数
+ *    （「同一 stack 归并」在结构上成立，而不是靠去重）。
+ * ⚠️ 只列 `count > 0` 的 stack：没有的东西不摆出来（「是否拥有」是列表的存在性，
+ *    数量只是它的读数）。
  */
 export function weaponEntries(inv: PartInventory): readonly WeaponEntry[] {
+  const star = WEAPON_GROWTH_STAR;
   const out: WeaponEntry[] = [];
   for (const def of weaponDefs()) {
-    const count = getCount(inv, def.id, 1);
-    if (count > 0) out.push({ defId: def.id, name: def.name, energy: def.energy, count });
+    const count = getCount(inv, def.id, star);
+    if (count <= 0) continue;
+    const threshold = stackThreshold(inv, def.id, star);
+    out.push({
+      defId: def.id,
+      name: def.name,
+      energy: def.energy,
+      count,
+      star,
+      threshold,
+      stackText: count >= threshold ? `${threshold}/${threshold}` : `×${count}`,
+      reachesThreshold: count >= threshold,
+    });
   }
   return out;
 }

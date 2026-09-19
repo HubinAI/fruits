@@ -1,61 +1,87 @@
 /**
  * PRODUCT-LOOP-R1-B-RUN-REWARD-PERMANENT-INVENTORY｜RUN COMPLETE 的**产品奖励出口**。
+ * PRODUCT-LOOP-R2-A-REWARD-STACK-INVENTORY｜**改口径**：单件固定奖励 →「**3选1**」。
  *
  * 本模块只做三件事，全部是纯逻辑 / 纯几何（node 侧可直接断言）：
- *   ① 解析产品上下文（宿主从 URL 读到的 `run` / `reward` / `back` 三个参数）；
- *   ② 把「奖励部件 defId」解析成**可绘制的最小视觉**（正式内容库的真实 Collider 外接框）；
- *   ③ 判定「终点态是否真的存在奖励出口」——**唯一的真源**，按钮文案 / 点击行为 / 探针
- *      三处都从这里取（结构上不可能出现「有按钮但无 action」或「画了奖励但其实拿不到」）。
+ *   ① 解析产品上下文（宿主从 URL 读到的 `run` 与 `choices` 两个参数）；
+ *   ② 把每条「候选 + 库存读数」解析成**可绘制的最小视觉**（正式内容库的真实 Collider 外接框
+ *      + `★` + 当前数量 + 领取后数量预览）；
+ *   ③ 判定「终点态是否真的存在奖励出口」——**唯一的真源**，绘制 / 命中 / 文案 / 探针
+ *      四处都从这里取（结构上不可能出现「画了卡片但其实拿不到」或「选了一个没地址的选项」）。
  *
  * ── 硬边界（写进代码，避免以后被误用）─────────────────────────────────────────
  *   - **不写库存、不写存档**：Lab 源码守卫 `R22a` 的 `ALLOWED_RELATIVE_IMPORTS` 是闭集，
  *     里面**没有** `core/buildPersistence` / `core/partInventory` ⇒ 本目录**结构上**写不了
  *     正式存档。「奖励入库」由产品侧的 Profile Repository（`src/product/playerProfile.ts`）
  *     在玩家带着 `claim` 参数回到首页时执行 —— 单机产品里只有**一个**写入点。
- *   - **不导航**：整页导航只由宿主 `runMain.ts` 执行（`run-page.ts` 与正式玩家页面共用，
+ *   - **不导航**：整页导航只由宿主 `runMain.ts` 执行（`runPage.ts` 与正式玩家页面共用，
  *     `RP-25` 机器禁止本目录的页面文件写 `location` / `history`）。
- *   - **FAILED 结构上拿不到奖励**：`runProductClaimNow()` 第一件事就是查 `runComplete(state)`
- *     —— 「失败也发奖」在结构上不可能，不是靠页面上自律（Queue 必改 4）。
- *   - **奖励 id 只来自产品侧**：本模块不猜、不随机、不遍历候选池（Queue 必改 2：
- *     验证的是「获得一个新东西后想不想马上装上它」，不是随机掉落）。
+ *   - **FAILED 结构上拿不到奖励**：`runRewardChoiceViews()` 第一件事就是查 `runComplete(state)`
+ *     —— 「失败也发奖」在结构上不可能，不是靠页面上自律（Queue 必改 4 / R2-A 必改 5）。
+ *   - **候选与数量都只来自产品侧**：本模块不猜、不随机、不遍历候选池、**不读存档**
+ *     （Queue 必改 4：「第一版只使用已有 cannon / spear / hammer」，且禁止随机奖励）。
+ *   - **满 stack 阈值也由产品侧给**（`payload.stack`）：页面上写死一个 5 就是第二份真源，
+ *     Queue B 做合成时两处必然漂移。
  */
 import { registry } from '../../core/content';
 import type { ColliderDef } from '../../core/types';
 import { runComplete, type RunPageState } from './runPageState';
 
-/** 卡片标题（一句名词，不是状态描述）。 */
-export const RUN_REWARD_TITLE = '本局获得';
+/** 面板标题（一句名词，不是状态描述）。 */
+export const RUN_REWARD_TITLE = '选一件带回家';
 
 /**
- * 终点态的动作文案。
+ * 面板说明（**承诺**而不是已完成的状态）。
  *
- * ⚠️ 必须是**一句动作**：「领取并返回」= 领奖 + 整页导航回正式首页。
- *    PRP-M2-R1 的 P0 教训（按钮文案写成状态描述 ⇒ 真人连点无反应）在这里同样适用。
+ * ⚠️ 入库发生在玩家**选中之后**（由产品侧 Profile Repository 幂等执行）——
+ *    写成「已进入车库」就是假陈述。R1-B 的这条纪律在 3选1 下同样成立。
  */
-export const RUN_REWARD_CLAIM_LABEL = '领取并返回';
+export const RUN_REWARD_NOTE = '选中的那件会进入你的车库';
 
 /**
- * 卡片上说明「这件东西会去哪」的一行。
+ * 已选中标记（Queue 必改 4「当前 reward 被锁定」的可视形态）。
  *
- * ⚠️ 措辞必须是**承诺**而不是**已完成的状态**：入库发生在玩家点「领取并返回」之后
- *    （由产品侧 Profile Repository 幂等执行）——写成「已进入车库」就是假陈述。
+ * ⚠️ 它表达的是**不可撤销**：选中即锁定 —— 再点别的选项不接受、也不会改主意。
+ *    真正的幂等由产品侧账本保证（同一 Run 只入账一次），这里只负责「这一局已经定了」。
  */
-export const RUN_REWARD_NOTE = '领取后进入你的车库';
+export const RUN_REWARD_LOCKED_LABEL = '已选择';
+
+/** URL 参数名（与产品侧 `runReward.ts` 的唯一约定；Lab 侧只读，不产出 URL）。 */
+const RUN_PARAM = 'run';
+const CHOICES_PARAM = 'choices';
 
 /**
  * 产品上下文（由宿主 `runMain.ts` 从 URL 解析后注入，页面自身不读 URL）。
  *
- * ⚠️ 三个字段**都由产品侧提供**：Lab 不硬编码任何产品 URL
- *    （`backHref` 就是「领取并返回」的目标），因此 `runMain.ts` 里出现不了任何
+ * ⚠️ 两个字段**都由产品侧提供**：Lab 不硬编码任何产品 URL
+ *    （每条 `choice.href` 就是「选中它之后的去向」），因此 `runMain.ts` 里出现不了任何
  *    产品地址字面量 —— 这条由 `tests/portraitRunPage.test.ts` 的 `RP-25b` 机器钉死。
  */
-export interface RunProductReward {
-  /** 本局奖励的正式部件 defId（必须是内容库内 `category === 'weapon'` 的正式部件）。 */
-  readonly defId: string;
+export interface RunRewardChoiceSet {
   /** 本局唯一 token = 领奖幂等键（产品侧生成；同一 token 只能领一次）。 */
   readonly runToken: string;
-  /** 「领取并返回」的整页导航目标（产品侧给全，Lab 原样使用）。 */
-  readonly backHref: string;
+  /** 满 stack 阈值（读数的分母；产品侧 `playerGrowth.FUSE_STACK` 给全，Lab 不自造）。 */
+  readonly stack: number;
+  /** 候选（至少 1 条；`(partId, star)` 在三选一里互不相同）。 */
+  readonly choices: readonly RunRewardChoice[];
+  /**
+   * 解析时被**丢弃**的非法候选条数（0 = 产品侧给的载荷完全合法）。
+   *
+   * ⚠️ 刻意上报而不是静默吞掉：非法条目意味着产品侧出了 bug。丢弃是**兜底**
+   *    （保证玩家至少还有选项，不会因为一条坏数据就整份奖励消失），
+   *    但必须让这个事实可被看见 —— 探针与测试都会读它。
+   */
+  readonly dropped: number;
+}
+
+/** 一条候选（产品侧给的事实；`href` 是这一件自己的领奖地址）。 */
+export interface RunRewardChoice {
+  readonly defId: string;
+  readonly star: number;
+  /** 出发那一刻的库存数量（产品侧读的正式存档；Lab 读不到存档）。 */
+  readonly countBefore: number;
+  /** 选中这一件后落到的页面（产品侧给全，Lab 原样使用）。 */
+  readonly href: string;
 }
 
 /** 出口请求（交给宿主执行导航；页面自己不做任何跳转）。 */
@@ -65,12 +91,22 @@ export interface RunProductClaim {
   readonly href: string;
 }
 
-/** 「本局获得」卡片的内容（最小必要视觉 = 真实 Collider 外接框）。 */
-export interface RunRewardCard {
+/** 一条候选的**可绘制视图**（图标几何 + 文字读数，全部与绘制同源）。 */
+export interface RunRewardChoiceView {
   readonly defId: string;
   readonly name: string;
+  readonly star: number;
   /** 正式能量消耗（展示用；不是本 Queue 的数值系统）。 */
   readonly energy: number;
+  readonly countBefore: number;
+  /** 选中后的数量（= `countBefore + 1`）。 */
+  readonly countAfter: number;
+  /** 数量预览文案，例如 `'4 → 5'`（Queue 必改 4 明列的第四项）。 */
+  readonly previewText: string;
+  /** stack 进度文案：满则 `'5/5'`，否则 `'4/5'`。 */
+  readonly stackText: string;
+  /** 选中这一件后是否达到满 stack（玩家能体验第一次合成）。 */
+  readonly reachesThreshold: boolean;
   /** 外接框宽 / 高（车体本地单位）。 */
   readonly w: number;
   readonly h: number;
@@ -98,19 +134,44 @@ export function rewardColliderGeom(c: ColliderDef): { w: number; h: number; roun
   return { w: c.width ?? 0, h: c.height ?? 0, round: false };
 }
 
+/** 把外接框按 fit 缩放塞进图标方框（只缩不放；返回**屏幕像素**尺寸）。 */
+export function fitRewardIcon(
+  view: { w: number; h: number },
+  boxW: number,
+  boxH: number,
+): { w: number; h: number } {
+  const w = Math.max(1, view.w);
+  const h = Math.max(1, view.h);
+  const s = Math.min(boxW / w, boxH / h, 1);
+  return { w: Math.round(w * s), h: Math.round(h * s) };
+}
+
 /**
- * defId → 卡片内容。**未知 / 非 weapon / 非正式部件一律 `null`**（绝不静默回退到别的部件）。
- * 「正式」的判据 = 内容库里查得到 + `category === 'weapon'`（Queue 必改 2：只复用已有正式 Weapon）。
+ * 一条候选 → 可绘制视图。**未知 / 非 weapon / 读数非法一律 `null`**
+ * （绝不静默回退到别的部件；也绝不给一张读数说不清的卡）。
  */
-export function runRewardCard(defId: string | null | undefined): RunRewardCard | null {
-  if (typeof defId !== 'string' || defId === '') return null;
-  const def = registry.functionals.get(defId);
+export function rewardChoiceView(
+  choice: RunRewardChoice,
+  stack: number,
+): RunRewardChoiceView | null {
+  const def = registry.functionals.get(choice.defId);
   if (!def || def.category !== 'weapon') return null;
+  if (!Number.isFinite(choice.countBefore) || choice.countBefore < 0) return null;
+  if (!Number.isFinite(choice.star) || choice.star < 1) return null;
+  const limit = Math.max(1, Math.floor(Number.isFinite(stack) ? stack : 1));
+  const before = Math.floor(choice.countBefore);
+  const after = before + 1;
   const geom = rewardColliderGeom(def.collider);
   return {
     defId: def.id,
     name: def.name,
+    star: Math.floor(choice.star),
     energy: def.energy,
+    countBefore: before,
+    countAfter: after,
+    previewText: `${before} → ${after}`,
+    stackText: before >= limit ? `${limit}/${limit}` : `${before}/${limit}`,
+    reachesThreshold: after >= limit,
     w: geom.w,
     h: geom.h,
     round: geom.round,
@@ -118,25 +179,14 @@ export function runRewardCard(defId: string | null | undefined): RunRewardCard |
   };
 }
 
-/** 把外接框按 fit 缩放塞进图标方框（只缩不放；返回**屏幕像素**尺寸与偏移）。 */
-export function fitRewardIcon(
-  card: RunRewardCard,
-  boxW: number,
-  boxH: number,
-): { w: number; h: number } {
-  const w = Math.max(1, card.w);
-  const h = Math.max(1, card.h);
-  const s = Math.min(boxW / w, boxH / h, 1);
-  return { w: Math.round(w * s), h: Math.round(h * s) };
-}
-
 /**
  * 从 `location.search` 形态的字符串解析产品上下文。
  *
- * 三个参数**缺一不可**（缺 ⇒ `null` = 不进产品奖励模式，页面与既有路径逐像素相同）；
- * 并且 `reward` 必须能解析成一张真实卡片（未知 id ⇒ `null`，**不画假奖励**）。
+ * 两个参数**缺一不可**（缺 / 坏 ⇒ `null` = 不进产品奖励模式，页面与既有路径逐像素相同）；
+ * 并且候选必须**至少一条能解析成真实卡片**（全坏 ⇒ `null`，**不画假奖励**）。
+ * 部分坏 ⇒ 保留好的、把坏条数记进 `dropped`（见该字段注释）。
  */
-export function parseRunProductReward(search: string): RunProductReward | null {
+export function parseRunRewardChoices(search: string): RunRewardChoiceSet | null {
   if (typeof search !== 'string' || search === '') return null;
   let p: URLSearchParams;
   try {
@@ -144,28 +194,86 @@ export function parseRunProductReward(search: string): RunProductReward | null {
   } catch {
     return null;
   }
-  const runToken = p.get('run') ?? '';
-  const defId = p.get('reward') ?? '';
-  const backHref = p.get('back') ?? '';
-  if (runToken === '' || defId === '' || backHref === '') return null;
-  if (!runRewardCard(defId)) return null;
-  return { defId, runToken, backHref };
+  const runToken = p.get(RUN_PARAM) ?? '';
+  const raw = p.get(CHOICES_PARAM) ?? '';
+  if (runToken === '' || raw === '') return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const obj = parsed as Record<string, unknown>;
+  const stackRaw = Number(obj['stack']);
+  const listRaw = obj['choices'];
+  if (!Array.isArray(listRaw) || listRaw.length === 0) return null;
+
+  const stack = Number.isFinite(stackRaw) && stackRaw >= 1 ? Math.floor(stackRaw) : 0;
+  const choices: RunRewardChoice[] = [];
+  let dropped = 0;
+  for (const item of listRaw) {
+    if (!item || typeof item !== 'object') {
+      dropped += 1;
+      continue;
+    }
+    const o = item as Record<string, unknown>;
+    const defId = typeof o['defId'] === 'string' ? o['defId'] : '';
+    const href = typeof o['href'] === 'string' ? o['href'] : '';
+    const star = Number(o['star']);
+    const countBefore = Number(o['countBefore']);
+    const entry: RunRewardChoice = { defId, star, countBefore, href };
+    if (href === '' || !rewardChoiceView(entry, stack)) {
+      dropped += 1;
+      continue;
+    }
+    choices.push(entry);
+  }
+  if (choices.length === 0) return null;
+  return { runToken, stack, choices, dropped };
 }
 
 /**
- * 终点态的**唯一**奖励出口 —— 本 Queue 的中心判据。
+ * 终点态的**唯一**奖励出口集合 —— 本 Queue 的中心判据。
  *
- *   - 没有产品上下文（`reward === null`）→ `null`：既有验证 / 玩家路径行为**零变化**；
- *   - **不是 `COMPLETE`**（含 `FAILED`）→ `null`：失败终态**结构上**没有奖励出口；
- *   - 奖励 id 解析不出真实卡片 → `null`：不产生「画了按钮但拿不到东西」的分叉；
- *   - 齐备 → 出口（文案 + 幂等键 + 目标地址）。
+ *   - 没有产品上下文（`set === null`）→ `[]`：既有验证 / 玩家路径行为**零变化**；
+ *   - **不是 `COMPLETE`**（含 `FAILED`）→ `[]`：失败终态**结构上**没有奖励出口
+ *     （R2-A 必改 5：FAILED 无奖励选择 / 无 count 变化 / 无 Profile 增长）；
+ *   - 有任何一条解析不出真实卡片 → 它已经在 `parseRunRewardChoices` 被丢弃并计入 `dropped`，
+ *     这里再取一次视图（徽标与出口同源）；
+ *   - 齐备 → 可绘制视图列表（顺序 = 产品侧给的顺序）。
  */
-export function runProductClaimNow(
+export function runRewardChoiceViews(
   state: RunPageState,
-  reward: RunProductReward | null | undefined,
+  set: RunRewardChoiceSet | null | undefined,
+): readonly RunRewardChoiceView[] {
+  if (!set) return [];
+  if (!runComplete(state)) return [];
+  const out: RunRewardChoiceView[] = [];
+  for (const c of set.choices) {
+    const v = rewardChoiceView(c, set.stack);
+    if (v) out.push(v);
+  }
+  return out;
+}
+
+/**
+ * 玩家**选中某一件**之后的出口请求（Queue 必改 4 的动作面）。
+ *
+ * 三道闸门缺一不可（任一不满足 ⇒ `null`，页面不接受这次选择）：
+ *   ① 有产品上下文；
+ *   ② 是 `COMPLETE`（FAILED 结构上拿不到）；
+ *   ③ 被选中的 defId **就在这次给的候选里**（防「点了一个不在候选里的卡」这类接线 bug）。
+ */
+export function runSelectedClaim(
+  state: RunPageState,
+  set: RunRewardChoiceSet | null | undefined,
+  defId: string,
 ): RunProductClaim | null {
-  if (!reward) return null;
+  if (!set) return null;
   if (!runComplete(state)) return null;
-  if (!runRewardCard(reward.defId)) return null;
-  return { defId: reward.defId, runToken: reward.runToken, href: reward.backHref };
+  const hit = set.choices.find((c) => c.defId === defId);
+  if (!hit) return null;
+  return { defId: hit.defId, runToken: set.runToken, href: hit.href };
 }

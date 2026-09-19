@@ -45,15 +45,28 @@ import { vehiclePreviewLayout, type VehiclePreviewLayout } from './vehiclePrevie
  *
  * ⚠️ 本页自己**不碰** `localStorage` / `platform.storage`（必改 1：UI 不得直接读写 localStorage），
  *    这条由 `tests/productLoopRunReward.test.ts` 的 `PR-20` 源码守卫机器钉死。
+ *
+ * PRODUCT-LOOP-R2-A｜额外两块：
+ *   - `playerGrowth.ts`：永久成长的**唯一模型与写入口**（新账号种子 / Equipped stack 兜底）；
+ *     本页只调 `openGrowthSession()` 一次，不自己拼装成长逻辑。
  */
 import {
-  REWARD_WEAPON_ID,
+  REWARD_CHOICE_IDS,
   buildAdventureHref,
+  buildRewardChoicePayload,
   newRunToken,
   parsePendingClaim,
   type PendingClaim,
+  type RewardChoiceSpec,
 } from './runReward';
 import { claimRunReward, claimedRunCount, type ClaimOutcome } from './playerProfile';
+import {
+  GROWTH_STAR,
+  FUSE_STACK,
+  growthStacks,
+  openGrowthSession,
+  type GrowthSession,
+} from './playerGrowth';
 
 /** 正式 visualId → 正式资源 URL（与战斗 / Run Page 引用的是同一批 PNG 文件）。 */
 const SPRITE_URLS: Readonly<Record<string, string>> = {
@@ -103,6 +116,39 @@ export interface ProductProbe {
   readonly equippedWeaponName: string;
   readonly weaponIds: readonly string[];
   readonly weaponNames: readonly string[];
+  /**
+   * PRODUCT-LOOP-R2-A｜每件武器的**成长读数**（星级 + 数量 + stack 进度）。
+   *
+   * ⚠️ 直接来自 `playerLoadout.weaponEntries()`（Garage 卡片画的**就是这些字段**，
+   *    不是探针另算一份）⇒ 「屏幕上写着 ×4」与「探针说 count=4」不可能分叉。
+   */
+  readonly weapons: readonly {
+    readonly defId: string;
+    readonly name: string;
+    readonly star: number;
+    readonly count: number;
+    readonly threshold: number;
+    readonly stackText: string;
+    readonly reachesThreshold: boolean;
+  }[];
+  /**
+   * 本局 3选1 的三条候选读数（与 `开始冒险` 地址里 `choices` 载荷**同源**）。
+   *
+   * ⚠️ 这是「COMPLETE 会出现哪三件」在产品侧的**出发时快照**；真正的展示由 Run Page 读
+   *    地址里的 `choices` 决定。两边同源（都出自本页这一次 `specsNow()`）⇒ E2E 可以对账。
+   */
+  readonly rewardChoices: readonly RewardChoiceSpec[];
+  /**
+   * PRODUCT-LOOP-R2-A｜本次挂载的成长会话读数（新账号种子 / Equipped stack 兜底）。
+   * ⚠️ `fresh===true` 且 `seeded===true` ⇒ 这是**新账号的第一次挂载**，库存被抬到
+   *    `cannon ×4`；老档两者恒为 false（种子只发新账号，Queue 必改 3）。
+   */
+  readonly growth: {
+    readonly fresh: boolean;
+    readonly seeded: boolean;
+    readonly repairedEquipped: string | null;
+    readonly stackThreshold: number;
+  };
   readonly selectedWeaponId: string | null;
   readonly equipEnabled: boolean;
   readonly slots: readonly { readonly hardpointId: string; readonly defId: string; readonly name: string; readonly category: string | null; readonly editable: boolean }[];
@@ -213,24 +259,55 @@ export function mountProductHome(
   root: HTMLElement,
   opts?: { readonly search?: string },
 ): ProductDebugHandle {
-  // 唯一读入口：正式存档 → starter 回退；库存走正式 ensureInventory（幂等，不重复生成）
+  // 唯一读入口：正式存档 → starter 回退（⚠️ 回退值不落盘，见 `loadEquippedDraft`）
   let draft: BuildDraft = loadEquippedDraft();
-  let inv: PartInventory = playerInventory(draft);
+  /**
+   * PRODUCT-LOOP-R2-A｜成长会话：**必须在任何库存落盘之前**开始。
+   *
+   * ⚠️ 严格的先后（已收进 `openGrowthSession` 内部，这里不可能写反）：
+   *    ① 判 fresh 读的是**磁盘**（「既没有 Build 也没有库存记录」）；
+   *    ② `ensureInventory()` **首次调用就会把 starter 库存落盘**。
+   *    若这里先 `playerInventory(draft)` 再把结果传进去，① 永远为 false
+   *    ⇒ 新账号种子（`cannon ×4`）**静默失效**，而现象与「一切正常」一模一样。
+   */
+  const growth: GrowthSession = openGrowthSession(draft);
+  let inv: PartInventory = growth.inv;
   let view: ProductView = 'home';
   let selectedWeaponId: string | null = null;
   let lastEquip: { ok: boolean; reason: EquipFailure | null; detail: string } | null = null;
   // 本局 token：**每次挂载一次**（刷新首页 = 准备新的一局，因此会换一个新 token）
   const runToken = newRunToken();
   /**
-   * PRODUCT-LOOP-R1-C｜「开始冒险」的地址 = **当前这一份** `draft` 的实时投影。
+   * PRODUCT-LOOP-R2-A｜本局 **3选1** 的候选读数 = **出发那一刻**的库存快照。
+   *
+   * ⚠️ 三件候选固定来自 `REWARD_CHOICE_IDS`（产品策略，`runReward.ts` 是唯一真源），
+   *    数量读数来自**当前这份** `inv` ⇒ 与地址里 `choices` 载荷、与探针三者同源。
+   * ⚠️ 必须每次重算（与 `adventureHrefNow` 绑在一起）：玩家可以「进车库 → 换武器 →
+   *    回首页 → 直接点开始冒险」（**不刷新**），地址必须与屏幕上那辆车同一次读取产出。
+   *    数量同理 —— 领奖后本页会重读库存（见下方 `claim` 段），旧快照会显示成没领到货。
+   */
+  const rewardSpecsNow = (): readonly RewardChoiceSpec[] =>
+    growthStacks(inv, REWARD_CHOICE_IDS, GROWTH_STAR).map((s) => ({
+      defId: s.partId,
+      star: s.star,
+      countBefore: s.count,
+    }));
+  /**
+   * 「开始冒险」的地址 = **当前这一份** `draft` + **当前库存读数**的实时投影。
    *
    * ⚠️ 必须是函数而不是挂载时算一次的常量：首页与「调整战车」是同一页面的两个视图，
    *    玩家可以「进车库 → 换武器 → 回首页 → 直接点开始冒险」（**不刷新**）。
-   *    若沿用挂载时的旧地址，首页会显示新武器、而链接带的是旧装备
+   *    若沿用挂载时的旧地址，首页会显示新武器、而链接带的是旧装备 / 旧数量
    *    ⇒ 正是 Queue 必改 2 禁止的「首页显示 A，战斗实际跑 B」。
    *    ⇒ 每次 `render()` 都重算，地址与屏幕上显示的那辆车**同一次读取**产出。
    */
-  const adventureHrefNow = (): string => buildAdventureHref(runToken, REWARD_WEAPON_ID, draft);
+  const adventureHrefNow = (): string =>
+    buildAdventureHref(
+      runToken,
+      // 满 stack 阈值也由产品侧给（真源 = `playerGrowth.FUSE_STACK`），Lab 侧不自造这个数字
+      buildRewardChoicePayload(runToken, rewardSpecsNow(), FUSE_STACK),
+      draft,
+    );
   // 领奖请求：入口壳给的 `location.search` 原样解析（纯函数）→ **当场**交给 Repository 处理一次
   const pendingClaim: PendingClaim | null = parsePendingClaim(opts?.search ?? '');
   const claim: ClaimOutcome | null = pendingClaim ? claimRunReward(pendingClaim) : null;
@@ -366,7 +443,14 @@ export function mountProductHome(
       el(
         'p',
         'ph-note',
-        '打完一局（RUN COMPLETE）会获得一件永久部件；领回来后在「调整战车」里就能看到并装上。',
+        '打完一局（RUN COMPLETE）会获得一个三选一的机会：选中哪件就带哪件回家；领回来后在「调整战车」里就能看到并装上。',
+      ),
+    );
+    stage.append(
+      el(
+        'p',
+        'ph-note',
+        '同一件部件可以累积数量（例如炮 ×4 → ×5）。数量涨上去之后的事，本版还没有做。',
       ),
     );
   }
@@ -397,11 +481,26 @@ export function mountProductHome(
       card.type = 'button';
       card.dataset['phWeapon'] = w.defId;
       card.dataset['phEquipped'] = String(w.defId === r.equippedWeaponId);
+      /**
+       * PRODUCT-LOOP-R2-A｜Weapon 卡的**星级 + 数量**（Queue「Garage 最小显示」）。
+       *
+       *   - `★{star}` 与 `{stackText}` 都直接来自 `playerLoadout.weaponEntries()`
+       *     （唯一数据源）⇒ 卡片文案与探针读数不可能分叉；
+       *   - `stackText` 就是 Queue 明写的两种形态：未满 `×4` / 已满 `5/5`；
+       *   - ⚠️ 本 Queue **不做合成**：满 stack 只是**显示** `5/5`，卡片上没有、也不会有
+       *     合成按钮或「可合成」提示（合成动作属 Queue B）。
+       *   - 三个 `data-ph-*` 供 E2E 精确对账，不用去解析文案。
+       */
       if (w.defId === r.equippedWeaponId) card.classList.add('ph-card-equipped');
       if (w.defId === selectedWeaponId) card.classList.add('ph-card-selected');
+      card.dataset['phStar'] = String(w.star);
+      card.dataset['phCount'] = String(w.count);
+      card.dataset['phStackText'] = w.stackText;
+      card.dataset['phStackThreshold'] = String(w.threshold);
+      if (w.reachesThreshold) card.classList.add('ph-card-full');
       card.append(
-        el('span', 'ph-card-name', w.name),
-        el('span', 'ph-card-meta', `能量 ${w.energy} · 拥有 ×${w.count}`),
+        el('span', 'ph-card-name', `${w.name} ★${w.star}`),
+        el('span', 'ph-card-meta', `能量 ${w.energy} · ${w.stackText}`),
       );
       if (w.defId === r.equippedWeaponId) card.append(el('span', 'ph-card-tag', '已装备'));
       card.addEventListener('click', () => {
@@ -481,6 +580,28 @@ export function mountProductHome(
         equippedWeaponName: r.equippedWeaponName,
         weaponIds: r.weapons.map((w) => w.defId),
         weaponNames: r.weapons.map((w) => w.name),
+        /**
+         * PRODUCT-LOOP-R2-A｜成长读数（与 Garage 卡片上画的**是同一批字段**）。
+         * ⚠️ 直接取 `r.weapons`（= `playerLoadout.weaponEntries()`）而不是另算一份：
+         *    探针与屏幕同源 ⇒ 「写着 ×4」与「探针说 count=4」不可能分叉。
+         */
+        weapons: r.weapons.map((w) => ({
+          defId: w.defId,
+          name: w.name,
+          star: w.star,
+          count: w.count,
+          threshold: w.threshold,
+          stackText: w.stackText,
+          reachesThreshold: w.reachesThreshold,
+        })),
+        /** 与 `开始冒险` 地址里 `choices` 载荷**同源**（同一次 `rewardSpecsNow()` 读取）。 */
+        rewardChoices: rewardSpecsNow(),
+        growth: {
+          fresh: growth.freshProfile,
+          seeded: growth.seeded,
+          repairedEquipped: growth.repairedEquipped,
+          stackThreshold: FUSE_STACK,
+        },
         selectedWeaponId,
         equipEnabled: !!equipBtn && !equipBtn.disabled,
         slots: r.slots.map((s) => ({

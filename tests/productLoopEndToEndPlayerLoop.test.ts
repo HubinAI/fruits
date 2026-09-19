@@ -41,15 +41,18 @@ import {
   playerInventory,
 } from '../src/product/playerLoadout';
 import {
-  REWARD_WEAPON_ID,
   LOADOUT_PARAM,
-  BACK_PARAM,
   HOME_PARAM,
+  CHOICES_PARAM,
+  REWARD_CHOICE_IDS,
   buildAdventureHref,
+  buildRewardChoicePayload,
   encodeRunLoadout,
   newRunToken,
   parsePendingClaim,
+  type RewardChoicePayload,
 } from '../src/product/runReward';
+import { FUSE_STACK, GROWTH_STAR } from '../src/product/playerGrowth';
 import { PROFILE_CLAIMS_KEY, claimRunReward } from '../src/product/playerProfile';
 import {
   RUN_FAIL_PARAM,
@@ -116,7 +119,16 @@ beforeEach(() => {
 
 /* --------------------------------------------------------------- 夹具 */
 
-/** 「玩家身上那件装备」= 正式 starter + 把主武器槽换成指定武器（走正式链路校验）。 */
+/**
+ * 「玩家身上那件装备」= 正式 starter + 把主武器槽换成指定武器（走正式链路校验）。
+ *
+ * ⚠️ 本文件所有 EL-10 起的用例都用 `PROFILE_WEAPON`（**不在 starter 里**的一件）当装备：
+ *    只有「装上去的件**不是**默认那件」才能证明装备参数真的被搬运了。
+ *    R2-A 把**奖励候选**换成了 `cannon / spear / hammer`（都在 starter 里），
+ *    但这个工具常量与奖励候选无关 —— 它测的是装载通道，不是奖励池。
+ */
+const PROFILE_WEAPON = 'laser';
+
 function equippedDraft(weaponDefId: string): BuildDraft {
   // ⚠️ 用**产品侧真实产出**的默认车（`defaultPlayerDraft`）做底，而不是直接 `makeStarterDraft`：
   //    R1-C 起两者在 `front` 槽上不同（产品默认车把前置槽留给主武器），夹具必须跟着产品走，
@@ -131,9 +143,27 @@ function equippedDraft(weaponDefId: string): BuildDraft {
   return next;
 }
 
+/**
+ * 出发地址的夹具（**产品侧真实产出**，不手写参数）。
+ *
+ * R2-A 起终点是 3选1，产品侧交给 Run Page 的不再是「一个 back」而是「一份 choices 载荷」
+ * （三条候选各自的领奖地址 + 满 stack 阈值）。夹具按同一条链路产出它。
+ */
+function adventureHref(token: string, draft?: BuildDraft | null): string {
+  const specs = REWARD_CHOICE_IDS.map((defId) => ({ defId, star: GROWTH_STAR, countBefore: 0 }));
+  return buildAdventureHref(token, buildRewardChoicePayload(token, specs, FUSE_STACK), draft);
+}
+
+/** 从出发地址里取回那份候选载荷（产品侧给全的那一份）。 */
+function payloadOf(href: string): RewardChoicePayload {
+  const raw = new URLSearchParams(href.split('?')[1]).get(CHOICES_PARAM) ?? '';
+  expect(raw, '出发地址必须带 choices 载荷').not.toBe('');
+  return JSON.parse(raw) as RewardChoicePayload;
+}
+
 /** 「玩家从首页出发」的完整搜索串（产品侧真实产出，不手写参数）。 */
 function adventureSearch(draft: BuildDraft, token = newRunToken(1700000000000, 0.5)): string {
-  return buildAdventureHref(token, REWARD_WEAPON_ID, draft).split('?')[1] ?? '';
+  return adventureHref(token, draft).split('?')[1] ?? '';
 }
 
 /** 直接进 Run 的那一场战斗用的玩家 Functional 件，按挂点取。 */
@@ -147,7 +177,7 @@ function functionalAt(rt: RunBattleRuntime, hardpointId: string): string | null 
 
 describe('PRODUCT-LOOP-R1-C｜A. 局外装备的交接口径（唯一真源 + 往返一致）', () => {
   it('EL-01 产品侧编码 → Lab 侧解析：字段逐项一致（不丢字段、不改语义）', () => {
-    const draft = equippedDraft(REWARD_WEAPON_ID);
+    const draft = equippedDraft(PROFILE_WEAPON);
     const parsed = parseRunPlayerLoadout(`?${adventureSearch(draft)}`);
     expect(parsed).not.toBeNull();
     expect(parsed!.source).toBe('profile');
@@ -182,33 +212,47 @@ describe('PRODUCT-LOOP-R1-C｜A. 局外装备的交接口径（唯一真源 + �
     expect(RUN_LOADOUT_PARAM).toBe('equipped');
     expect(RUN_LOADOUT_PARAM).toBe(LOADOUT_PARAM);
     // 真实链接里用的就是它（不是「常量同值但代码里写的是别的字面量」）
-    const href = buildAdventureHref('run-t-s', REWARD_WEAPON_ID, equippedDraft('laser'));
+    const href = adventureHref('run-t-s', equippedDraft(PROFILE_WEAPON));
     expect(new URLSearchParams(href.split('?')[1]).get(LOADOUT_PARAM)).not.toBeNull();
   });
 
-  it('EL-03 不带装备的链接形态逐字节不变（研发入口 / 旧链接向后兼容）', () => {
+  it('EL-03 不带装备的链接形态：装备参数缺席，但**候选载荷与失败回程照给**', () => {
     const token = 'run-abc-00001';
-    const plain = buildAdventureHref(token, REWARD_WEAPON_ID);
+    const plain = adventureHref(token);
     expect(plain).not.toContain(`${LOADOUT_PARAM}=`);
     expect(plain).toContain('run=run-abc-00001');
-    expect(plain).toContain(`reward=${REWARD_WEAPON_ID}`);
+    /*
+      ⚠️ R2-A 的**契约变更**（不是回归）：出发地址里**不再有**裸的 `reward=` 参数。
+      终点从「领走那一件」变成 3选1 之后，三条候选的领奖地址被**整份**装进 `choices` 载荷
+      （每条自己的 href 里才带 `reward=<defId>`）。因此这里断言的是**载荷的形状**，
+      而不是某个 top-level 参数 —— 「三条各自的去向都真的在地址里」才是要钉死的东西。
+    */
+    expect(new URLSearchParams(plain.split('?')[1]).get('reward')).toBeNull();
+    const payload = payloadOf(plain);
+    expect(payload.stack).toBe(FUSE_STACK);
+    expect(payload.choices.map((c) => c.defId)).toEqual([...REWARD_CHOICE_IDS]);
     // 解析：**没有**「带了装备参数」⇒ Run 侧走演示装载（研发入口原行为）
     const res = resolveRunPlayerLoadout(plain.split('?')[1]);
     expect(res.loadout.source).toBe('demo');
     expect(res.fallback).toBe('no-param');
     // 装备参数一旦加上，链接与解析同时切换（不是「加了但没人读」）
-    const withGear = buildAdventureHref(token, REWARD_WEAPON_ID, equippedDraft('laser'));
+    const withGear = adventureHref(token, equippedDraft(PROFILE_WEAPON));
     expect(withGear).toContain(`${LOADOUT_PARAM}=`);
     expect(resolveRunPlayerLoadout(withGear.split('?')[1]).fallback).toBe('none');
-    // 领奖解析对多出来的 `equipped` **免疫**（领奖只认 run + reward）⇒ 加装备不会弄坏领奖链
-    expect(parsePendingClaim(plain.split('?')[1] ?? '')).toEqual({
-      runToken: token,
-      rewardDefId: REWARD_WEAPON_ID,
-    });
-    expect(parsePendingClaim(withGear.split('?')[1] ?? '')).toEqual({
-      runToken: token,
-      rewardDefId: REWARD_WEAPON_ID,
-    });
+    /*
+      领奖解析只认 `run` + `reward` 两个 top-level 参数 ⇒ **出发地址解析不出领奖请求**。
+      这条在 R2-A 之后比 R1-B 更强：出发地址现在连一个 `reward=` 都没有，
+      「拿出发地址回首页 = 白拿一件」在地址层上不可能。
+    */
+    expect(parsePendingClaim(plain.split('?')[1] ?? '')).toBeNull();
+    expect(parsePendingClaim(withGear.split('?')[1] ?? '')).toBeNull();
+    // 但**每条候选自己的 href** 才是真的领奖地址：逐条都能解析回来（往返闭合）
+    for (const c of payload.choices) {
+      expect(parsePendingClaim(c.href.slice(c.href.indexOf('?')))).toEqual({
+        runToken: token,
+        rewardDefId: c.defId,
+      });
+    }
   });
 
   it('EL-04 空 / null 形态的 search 一律 =「没带参数」（研发入口原行为）', () => {
@@ -275,7 +319,7 @@ describe('PRODUCT-LOOP-R1-C｜B. 非法装备输入：拒绝 + 可观测（`inva
     expect(resolveRunPlayerLoadout(unknownBody).fallback).toBe('invalid');
 
     // ② 形状通过但组合非法：参照「合法装备」把能量堆爆
-    const legal = equippedDraft(REWARD_WEAPON_ID);
+    const legal = equippedDraft(PROFILE_WEAPON);
     const overloaded: BuildDraft = {
       ...legal,
       functionalSelections: { ...legal.functionalSelections, top: 'laser', front: 'laser' },
@@ -586,24 +630,24 @@ describe('PRODUCT-LOOP-R1-C｜E. 源码守卫', () => {
   });
 
   it('EL-35 库存口径不变：Run 拿到的装备必须是玩家**真实拥有**的件', () => {
-    // EL-10/EL-12 用的激光是「初始不拥有」的奖励件 ⇒ 用真实库存链验证「先拥有才能装」
+    // EL-10/EL-12 用的那件是「初始不拥有」的件 ⇒ 用真实库存链验证「先拥有才能装」
     const before = loadEquippedDraft();
     const invBefore = playerInventory(before);
-    expect(getCount(invBefore, REWARD_WEAPON_ID, 1)).toBe(0);
-    expect(STARTER_PARTS).not.toContain(REWARD_WEAPON_ID);
+    expect(getCount(invBefore, PROFILE_WEAPON, 1)).toBe(0);
+    expect(STARTER_PARTS).not.toContain(PROFILE_WEAPON);
 
     // 走上正式装备链路（会写正式 playerBuild 存档）→ 之后才可能把它交进 Run
-    const outcome = equipWeapon(REWARD_WEAPON_ID, before, playerInventory(makeStarterDraft(PLAYER_BODY_DEF_ID, registry)));
+    const outcome = equipWeapon(PROFILE_WEAPON, before, playerInventory(makeStarterDraft(PLAYER_BODY_DEF_ID, registry)));
     // 没拥有 ⇒ 拒绝（`not-owned`）；拥有（EL-10 的夹具）才允许 —— 两条路径都不是「随便传什么都行」
     expect(outcome.ok).toBe(false);
     expect(outcome.reason).toBe('not-owned');
 
     // 真实拥有之后：`loadoutReading` 把它列为可装备，且能量读数真实变化
     const owned = playerInventory(makeStarterDraft(PLAYER_BODY_DEF_ID, registry));
-    addPart(owned, REWARD_WEAPON_ID, 1, 1); // 走正式入库函数（不是手改对象）
-    const reading = loadoutReading(equippedDraft(REWARD_WEAPON_ID), owned);
-    expect(reading.weapons.map((w) => w.defId)).toContain(REWARD_WEAPON_ID);
-    expect(reading.equippedWeaponId).toBe(REWARD_WEAPON_ID);
+    addPart(owned, PROFILE_WEAPON, 1, 1); // 走正式入库函数（不是手改对象）
+    const reading = loadoutReading(equippedDraft(PROFILE_WEAPON), owned);
+    expect(reading.weapons.map((w) => w.defId)).toContain(PROFILE_WEAPON);
+    expect(reading.equippedWeaponId).toBe(PROFILE_WEAPON);
     // 装上它之后能量读数真的变了（「装上它不一样」的机器判据）
     const withoutIt = loadoutReading(equippedDraft('cannon'), owned).energy;
     expect(reading.energy).not.toBe(withoutIt);
@@ -619,17 +663,29 @@ describe('PRODUCT-LOOP-R1-D｜G. 失败链：两个出口分离、不发奖、�
   const BUILD_KEY = 'strongfruit.playerBuild.v1';
   const INV_KEY = 'strongfruit.ownedParts.v2';
 
-  it('EL-40 出发链接同时给出「成功回哪儿」与「失败回哪儿」，且失败地址解析不出领奖请求', () => {
+  it('EL-40 出发链接同时给出「成功有哪几个去处」与「失败回哪儿」，且失败地址解析不出领奖请求', () => {
     const token = newRunToken(1700000000000, 0.5);
-    const href = buildAdventureHref(token, REWARD_WEAPON_ID, equippedDraft('cannon'));
+    const href = adventureHref(token, equippedDraft('cannon'));
     const q = new URLSearchParams(href.split('?')[1]);
-    const back = q.get(BACK_PARAM) ?? '';
+    const payload = payloadOf(href);
     const home = q.get(HOME_PARAM) ?? '';
-    expect(back, '成功出口（领奖地址）必须给全').not.toBe('');
+    /*
+      ⚠️ R2-A 的**契约变更**：成功侧不再是「一个 back」，而是 `choices` 里**每条候选各自的**
+      领奖地址（三条 defId 不同 ⇒ 目的地必然不同）。因此这里逐条钉死，而不是取一个 top-level 参数。
+    */
+    expect(payload.choices.length, '终点 3选1 ⇒ 必须有三条候选').toBe(3);
     expect(home, '失败出口（纯首页）必须给全').not.toBe('');
-    expect(back, '两个出口必须是两个地址').not.toBe(home);
-    // 成功出口 = 能解析出领奖请求（首页会执行一次幂等入库）
-    expect(parsePendingClaim(back.slice(back.indexOf('?')))).not.toBeNull();
+    for (const c of payload.choices) {
+      expect(c.href, `候选 ${c.defId} 的领奖地址必须给全`).not.toBe('');
+      // 每条都是一条**真的**领奖地址（首页会执行一次幂等入库）
+      expect(parsePendingClaim(c.href.slice(c.href.indexOf('?')))).toEqual({
+        runToken: token,
+        rewardDefId: c.defId,
+      });
+      // 三条互不相同（同一个地址发三遍 = 三选一是假的）
+      expect(c.href).not.toBe(home);
+    }
+    expect(new Set(payload.choices.map((c) => c.href)).size).toBe(3);
     // 失败出口 = 解析不出领奖请求（首页什么都不做）
     expect(parsePendingClaim(home.slice(home.indexOf('?')))).toBeNull();
     // Lab 侧两侧参数名同值（改单边 = 静默断链）
@@ -673,25 +729,39 @@ describe('PRODUCT-LOOP-R1-D｜G. 失败链：两个出口分离、不发奖、�
     };
 
     const token = newRunToken(1700000000000, 0.5);
-    const q = new URLSearchParams(buildAdventureHref(token).split('?')[1]);
-    const back = q.get(BACK_PARAM) ?? '';
+    const payload = payloadOf(adventureHref(token));
+    const q = new URLSearchParams(adventureHref(token).split('?')[1]);
     const home = q.get(HOME_PARAM) ?? '';
 
     // ② 玩家从**失败页**回首页：search 里只有 `home` ⇒ 解析不出领奖请求 ⇒ 页面不会入库
     const failClaim = parsePendingClaim(home.slice(home.indexOf('?')));
     expect(failClaim, '失败回程地址必须解析不出领奖请求').toBeNull();
-    // 三件套逐字节不变（一次写入都没有发生）
-    expect(store.getItem(BUILD_KEY)).toBe(baseline.build);
-    expect(store.getItem(INV_KEY)).toBe(baseline.inv);
-    expect(store.getItem(PROFILE_CLAIMS_KEY)).toBe(baseline.claims);
+    // ⚠️ R2-A：成功侧是 `choices` 载荷，**出发地址本身**也解析不出领奖请求
+    //    （裸 `reward=` 参数已经不存在）—— 白拿一件在地址层上不可能。
+    expect(parsePendingClaim(q.toString())).toBeNull();
 
-    // ③ 对照（证明 ② 不是空转）：真正带领奖参数时同一条链**会**入库
-    const okClaim = parsePendingClaim(back.slice(back.indexOf('?')));
-    expect(okClaim).toEqual({ runToken: token, rewardDefId: REWARD_WEAPON_ID });
+    /*
+      ③ 对照（证明 ② 不是空转）：玩家**真的在局内选了一件**（= 跳到那件自己的领奖地址）时，
+      同一条链会入库。R2-A 起「选哪件」是玩家的选择，因此这里逐个候选各验证一次
+      「它的地址真的能入库那件」——但不能都领（同一局只能领一次，见下一段）。
+    */
+    const first = payload.choices[0];
+    const okClaim = parsePendingClaim(first.href.slice(first.href.indexOf('?')) ?? '');
+    expect(okClaim).toEqual({ runToken: token, rewardDefId: first.defId });
     const out = claimRunReward(okClaim!);
     expect(out.ok).toBe(true);
     expect(store.getItem(INV_KEY), '成功链真的写了库存').not.toBe(baseline.inv);
     expect(store.getItem(PROFILE_CLAIMS_KEY), '成功链真的写了领奖账本').not.toBeNull();
+    // ④ **同一局只能领一次**：另外两条候选的地址现在一律落 `already-claimed` 且零副作用
+    const invAfterFirst = store.getItem(INV_KEY);
+    for (const other of payload.choices.slice(1)) {
+      const again = parsePendingClaim(other.href.slice(other.href.indexOf('?')) ?? '');
+      expect(again!.runToken, '三条候选必须共用同一个本局 token').toBe(token);
+      const rej = claimRunReward(again!);
+      expect(rej.ok, `候选 ${other.defId} 不得在同一局里再发一次`).toBe(false);
+      expect(rej.reason).toBe('already-claimed');
+      expect(store.getItem(INV_KEY), '被拒绝的领取不许改库存').toBe(invAfterFirst);
+    }
     // 装备没有被成功链顺手改掉（失败链更是没碰过）
     expect(loadEquippedDraft().functionalSelections[WEAPON_SLOT]).toBe(
       before.functionalSelections[WEAPON_SLOT],

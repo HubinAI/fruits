@@ -1,21 +1,23 @@
 /**
- * PRODUCT-LOOP-R1-B-RUN-REWARD-PERMANENT-INVENTORY｜targeted 测试。
+ * PRODUCT-LOOP-R2-A-REWARD-STACK-INVENTORY｜targeted 测试（纯 node，无浏览器）。
  *
- * 覆盖 Queue 的八条验收里可离线钉死的那些：
- *   1  COMPLETE 出现真实奖励      → PR-15/16（真实状态机造 COMPLETE，出口存在）
- *   2  领取一次后进入 Inventory   → PR-09（真实存储：库存 +1 且落在正式 key 上）
- *   3  重复领取不能重复发奖       → PR-10（同 token 第二次 = `already-claimed`，库存不动）
- *   4  FAILED 不获得奖励          → PR-14（真实状态机造 FAILED：出口恒 null）
- *   5  返回首页后状态存在         → PR-09 + PR-06（领奖 URL 的数据流）
- *   6  Garage 能看到新部件        → PR-12（库存里多出一件 ⇒ A 段的 `weaponEntries` 自动列出）
- *   7  Reload 后状态保持          → PR-09/PR-10（两次独立调用 = 两次独立读盘）
- *   8  targeted + tsc + smoke     → 本文件 + 门禁（smoke = `e2e:product-reward`）
+ * 覆盖 Queue 九条验收里**可离线钉死**的那些：
+ *   1  fresh profile cannon = ★1 ×4   → PG-01/02（`playerGrowthR2A.test.ts`）+ PC-01（本文件 C 段）
+ *   2  COMPLETE 出现 3 个真实 Weapon  → PR-15/PR-16（真实状态机造 COMPLETE，三张卡齐备）
+ *   3  选择 cannon 后变成 ×5          → PC-10（4 → 5，计数落在正式库存 key 上）
+ *   4  选择其它 Weapon 只加对应 stack → PC-13（逐条候选各领一次，只有它自己 +1）
+ *   5  同一奖励只能领取一次           → PC-11（同 token 换一件也落 `already-claimed`）
+ *   6  FAILED 数量完全不变            → PR-16（结构上拿不到候选）+ PC-14（账本/库存逐字节不变）
+ *   7  old Profile migration 不丢数据 → PG-05/06（`playerGrowthR2A.test.ts`）
+ *   8  Equipped 仍指向有效库存实例     → PG-07（同上）
+ *   9  targeted + tsc + product smoke  → 本文件 + 门禁（smoke = `e2e:product-reward`）
  *
  * 外加**结构守卫**（本 Queue 的边界必须能在源码层面被钉死）：
- *   - 奖励只复用已有正式 Weapon（不新增定义、不能是 Run Buff）；
- *   - UI 不得直接读写 localStorage（必改 1：必须封装在 Profile Repository 内）；
+ *   - 候选只复用已有正式 Weapon（cannon / spear / hammer ⇒ 不新增定义、不能是 Run Buff）；
+ *   - 同一 `(partId, star)` **归并成同一个 stack**（Queue 必改 1 的「不生成 5 张一样的卡」）；
+ *   - UI 不得直接读写 localStorage（R1-B 起：必须封装在 Profile Repository 内）；
  *   - 产品地址只有**一个**真源，且 Lab 侧一个都没有（Lab 白名单结构上也 import 不了产品模块）；
- *   - 卡片绘制不引入新的像素账本颜色（既有路径逐像素不变）。
+ *   - 3选1 绘制不引入新的像素账本颜色（既有路径逐像素不变）。
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -26,6 +28,8 @@ import { fileURLToPath } from 'node:url';
 import { registry } from '../src/core/content';
 import { computeEnergy, validateSnapshot } from '../src/core/buildValidator';
 import {
+  addPart,
+  canFuse,
   defaultInventory,
   getCount,
   isOfficialPart,
@@ -33,14 +37,31 @@ import {
   STARTER_PARTS,
 } from '../src/core/partInventory';
 import { buildSnapshotFromDraft, makeStarterDraft } from '../src/lab/buildEditorModel';
-import { PLAYER_BODY_DEF_ID, WEAPON_SLOT, loadEquippedDraft } from '../src/product/playerLoadout';
+import {
+  PLAYER_BODY_DEF_ID,
+  WEAPON_SLOT,
+  loadEquippedDraft,
+  stackThreshold,
+  weaponEntries,
+} from '../src/product/playerLoadout';
+import {
+  FUSE_STACK,
+  FRESH_STACK_SEED,
+  GROWTH_STAR,
+  openGrowthSession,
+} from '../src/product/playerGrowth';
 import {
   ADVENTURE_HREF,
+  CHOICES_PARAM,
   HOME_HREF,
   HOME_PARAM,
-  REWARD_WEAPON_ID,
+  REWARD_CHOICE_IDS,
+  REWARD_PARAM,
+  RUN_PARAM,
   buildAdventureHref,
   buildClaimHref,
+  buildRewardChoiceLinks,
+  buildRewardChoicePayload,
   newRunToken,
   parsePendingClaim,
   rewardDisplayName,
@@ -54,13 +75,15 @@ import {
   readClaimLedger,
 } from '../src/product/playerProfile';
 import {
-  RUN_REWARD_CLAIM_LABEL,
+  RUN_REWARD_LOCKED_LABEL,
+  RUN_REWARD_NOTE,
   RUN_REWARD_TITLE,
   fitRewardIcon,
-  parseRunProductReward,
+  parseRunRewardChoices,
+  rewardChoiceView,
   rewardColliderGeom,
-  runProductClaimNow,
-  runRewardCard,
+  runRewardChoiceViews,
+  runSelectedClaim,
 } from '../src/lab/portraitBattleLab/runProductReward';
 import {
   RUN_FAIL_PARAM,
@@ -91,7 +114,7 @@ function strip(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 }
 
-/** 内存版 localStorage（node 无原生；与 A 段测试同一模式）。 */
+/** 内存版 localStorage（node 无原生；与其它产品侧测试同一模式）。 */
 class MemStorage {
   private m = new Map<string, string>();
   getItem(k: string): string | null {
@@ -126,6 +149,8 @@ function allKeys(): string[] {
   return out.sort();
 }
 
+const INV_KEY = 'strongfruit.ownedParts.v2';
+
 /** 用**真实状态机**造一个 RUN COMPLETE（沿用验证脚手架的确定性快进，不伪造 phase）。 */
 function completedState(): RunPageState {
   const s = buildPriorCompletedRun(runPageContext());
@@ -150,73 +175,96 @@ function failedState(): RunPageState {
   return dead;
 }
 
-const REWARD_CTX = { defId: REWARD_WEAPON_ID, runToken: 'run-test-1', backHref: './home.html?x=1' };
+/** 三条候选读数（`countBefore` 由调用方给；三选一的载荷就是用它们组的）。 */
+function specs(countBefore = 0): Array<{ defId: string; star: number; countBefore: number }> {
+  return REWARD_CHOICE_IDS.map((defId) => ({ defId, star: GROWTH_STAR, countBefore }));
+}
+
+/** 一份「出发那一刻」的完整产品上下文（走真实产出链，不手写 URL）。 */
+function payloadOf(href: string): { stack: number; choices: Array<{ defId: string; star: number; countBefore: number; href: string }> } {
+  const raw = new URLSearchParams(href.split('?')[1]).get(CHOICES_PARAM) ?? '';
+  expect(raw, '出发地址必须带 choices 载荷').not.toBe('');
+  return JSON.parse(raw);
+}
+
+/**
+ * 把一个**手工构造的**候选载荷编成 search 串。
+ *
+ * ⚠️ 必须走 `URLSearchParams`：载荷是 JSON，里面天然含 `&` 与 `=`，
+ *    直接拼 `?run=x&choices={"a":1,...}` 会被 query 解析在 JSON 内部切断
+ *    ⇒ 测的就不是「坏候选」而是「坏 JSON」（本文件曾因此误判过一次）。
+ */
+function searchOf(runToken: string, payload: unknown): string {
+  return `?${new URLSearchParams({
+    [RUN_PARAM]: runToken,
+    [CHOICES_PARAM]: JSON.stringify(payload),
+  }).toString()}`;
+}
+
+const REWARD_CTX = parseRunRewardChoices(
+  `?${new URLSearchParams({
+    [RUN_PARAM]: 'run-test-1',
+    [CHOICES_PARAM]: JSON.stringify(buildRewardChoicePayload('run-test-1', specs(4), FUSE_STACK)),
+  }).toString()}`,
+)!;
 
 // ============================================================================
-describe('PRODUCT-LOOP-R1-B｜A. 奖励选择必须「实测」而不是「偏好」', () => {
-  it('PR-01 奖励是**正式**部件库里的**正式 Weapon**（不新增武器定义）', () => {
-    expect(isOfficialPart(REWARD_WEAPON_ID), '奖励必须在 PART_OPTIONS 正式池内').toBe(true);
-    const def = registry.functionals.get(REWARD_WEAPON_ID);
-    expect(def, '奖励必须存在于正式内容库').toBeTruthy();
-    expect(def!.category, '奖励必须是 Weapon（必改 2）').toBe('weapon');
-    expect(rewardDisplayName()).toBe(def!.name);
-  });
-
-  it('PR-02 初始 Profile **不拥有**它（第一局拿到的是真正的新东西）', () => {
-    const inv = defaultInventory();
-    expect(STARTER_PARTS.includes(REWARD_WEAPON_ID), 'starter 不含奖励').toBe(false);
-    expect(getCount(inv, REWARD_WEAPON_ID, 1), '默认库存计数必须为 0').toBe(0);
-    // 对照：starter 的 3 件武器确实是「已拥有」
-    for (const owned of ['cannon', 'hammer', 'spear']) {
-      expect(getCount(inv, owned, 1)).toBe(1);
+describe('PRODUCT-LOOP-R2-A｜A. 候选池必须「实测」而不是「偏好」', () => {
+  it('PR-01 三条候选都是**正式**部件库里的**正式 Weapon**（不新增武器定义）', () => {
+    expect(REWARD_CHOICE_IDS.length, '3选1 ⇒ 恰好三条').toBe(3);
+    for (const id of REWARD_CHOICE_IDS) {
+      expect(isOfficialPart(id), `${id} 必须在 PART_OPTIONS 正式池内`).toBe(true);
+      const def = registry.functionals.get(id);
+      expect(def, `${id} 必须存在于正式内容库`).toBeTruthy();
+      expect(def!.category, `${id} 必须是 Weapon`).toBe('weapon');
+      // 展示名来自正式内容库（不是第二份字面量）
+      expect(rewardDisplayName(id)).toBe(def!.name);
     }
+    // 未知 id → null（绝不静默回退到别的部件名）
+    expect(rewardDisplayName('doesNotExist')).toBeNull();
   });
 
-  it('PR-03 当前车辆**能合法装备**它（用正式校验器算，不是写死期望值）', () => {
-    expect(equippableOnCurrentVehicle(REWARD_WEAPON_ID)).toBe(true);
-    // 交叉核对：把奖励放进 WEAPON_SLOT 后过正式 validateSnapshot + computeEnergy
-    const draft = {
-      ...makeStarterDraft(PLAYER_BODY_DEF_ID, registry),
-      functionalSelections: {
-        ...makeStarterDraft(PLAYER_BODY_DEF_ID, registry).functionalSelections,
-        [WEAPON_SLOT]: REWARD_WEAPON_ID,
-      },
-    };
-    const snap = buildSnapshotFromDraft(draft, registry, 'pr03');
-    expect(validateSnapshot(snap, registry).valid).toBe(true);
-    const cap = registry.bodies.get(PLAYER_BODY_DEF_ID)!.energyCapacity;
-    const energy = computeEnergy(snap, registry).energy;
-    expect(energy).toBeLessThanOrEqual(cap);
-    // 「装上之后能量读数真的变了」→ 首页能看出变化（可感知性）
-    const before = computeEnergy(
-      buildSnapshotFromDraft(makeStarterDraft(PLAYER_BODY_DEF_ID, registry), registry, 'pr03b'),
-      registry,
-    ).energy;
-    expect(energy).not.toBe(before);
+  it('PR-02 候选**全部来自 STARTER_PARTS**（第一版只用已有 Weapon，不新增内容）', () => {
+    for (const id of REWARD_CHOICE_IDS) {
+      expect(STARTER_PARTS, `${id} 必须是玩家一开始就拥有的那几件`).toContain(id);
+    }
+    // 对照：R1-B 的单件固定奖励（laser）**不是**候选 —— 它不在 starter 里，
+    // 一旦它被写回候选池，本 Queue「只用已有 cannon / spear / hammer」就破了。
+    expect(REWARD_CHOICE_IDS).not.toContain('laser');
   });
 
-  it('PR-04 奖池非空且全部合法（换奖励只需改一个常量，但必须重跑本组）', () => {
+  /**
+   * PR-03｜Queue 必改 1 的中心判据：「同一个 `partId + star` 必须归并为同一个 stack」。
+   * 这里不靠「代码看起来对」，而是**真的加两次**再读计数。
+   */
+  it('PR-03 同一 (partId, star) 归并成**同一个** stack（不产生 5 张一样的库存卡）', () => {
     const inv = defaultInventory();
-    const candidates = [...registry.functionals.values()]
-      .filter((d) => d.category === 'weapon')
-      .filter((d) => isOfficialPart(d.id))
-      .filter((d) => getCount(inv, d.id, 1) === 0)
-      .filter((d) => equippableOnCurrentVehicle(d.id))
-      .map((d) => d.id)
-      .sort();
-    expect(candidates.length, '至少要有 2 件未拥有的合法 Weapon 可选').toBeGreaterThanOrEqual(2);
-    expect(candidates).toContain(REWARD_WEAPON_ID);
-    // 当前选定的奖励必须是其中能量最高的一件（差异最明显 → 「想不想马上装上」最容易判）
-    const energyOf = (id: string) => registry.functionals.get(id)!.energy;
-    const maxEnergy = Math.max(...candidates.map(energyOf));
-    expect(energyOf(REWARD_WEAPON_ID), `候选=${candidates.join(',')}`).toBe(maxEnergy);
+    const base = getCount(inv, 'cannon', 1);
+    addPart(inv, 'cannon', 1, 2);
+    addPart(inv, 'cannon', 1, 3); // 分两次加，必须落在同一个计数器上
+    expect(getCount(inv, 'cannon', 1), '两次加 = 一个 stack（base + 5）').toBe(base + 5);
+    expect(base + 5, '跨过满 stack 阈值 —— 合成阈值那条线也是同一个计数器').toBe(FUSE_STACK + base);
+    // 不同 star 是不同 stack（`(partId, star)` 才是键）
+    expect(getCount(inv, 'cannon', 2), '★1 与 ★2 不是同一个 stack').toBe(0);
+    // 而 `weaponEntries` 是遍历**定义**取计数 ⇒ 结构上只会产生**一条** cannon 读数
+    const entries = weaponEntries(inv);
+    expect(entries.filter((w) => w.defId === 'cannon').length, '同一个 stack 只能有一条读数').toBe(1);
+    expect(entries.find((w) => w.defId === 'cannon')!.count).toBe(base + 5);
   });
 
-  it('PR-05 Run 强化**结构上**不可能是永久奖励（不是正式部件 ⇒ 直接拒收）', () => {
+  it('PR-04 三条候选互不相同（「三选一」不能是三张同一个 id）', () => {
+    expect(new Set(REWARD_CHOICE_IDS).size).toBe(REWARD_CHOICE_IDS.length);
+    const links = buildRewardChoiceLinks('run-x', specs(1));
+    expect(new Set(links.map((l) => l.href)).size, '三条各自的领奖地址必须互不相同').toBe(3);
+    expect(new Set(links.map((l) => l.defId)).size).toBe(3);
+  });
+
+  it('PR-05 Run 强化**结构上**不可能是候选（不是正式部件 ⇒ 直接拒收）', () => {
     expect(allKeys()).toEqual([]);
     for (const buff of ['heavyShell', 'twinCannon', 'fastReload']) {
       expect(registry.functionals.get(buff), `${buff} 不是部件`).toBeUndefined();
       expect(isOfficialPart(buff)).toBe(false);
+      expect(REWARD_CHOICE_IDS).not.toContain(buff);
       const bad = claimRunReward({ runToken: `run-buff-${buff}`, rewardDefId: buff });
       expect(bad.ok).toBe(false);
       expect(bad.reason).toBe('not-official');
@@ -225,175 +273,305 @@ describe('PRODUCT-LOOP-R1-B｜A. 奖励选择必须「实测」而不是「偏�
     expect(allKeys()).toEqual([]);
   });
 
-  it('PR-06 奖励卡内容 = 正式定义的真实数据（名称 / 能量 / 真实 Collider 外接框）', () => {
-    const card = runRewardCard(REWARD_WEAPON_ID);
-    const def = registry.functionals.get(REWARD_WEAPON_ID)!;
-    expect(card).toBeTruthy();
-    expect(card!.name).toBe(def.name);
-    expect(card!.energy).toBe(def.energy);
+  it('PR-06 候选卡内容 = 正式定义的真实数据（名称 / 能量 / 外接框 / 数量预览）', () => {
+    const def = registry.functionals.get('cannon')!;
+    const view = rewardChoiceView({ defId: 'cannon', star: GROWTH_STAR, countBefore: 4, href: 'x' }, FUSE_STACK);
+    expect(view).toBeTruthy();
+    expect(view!.name).toBe(def.name);
+    expect(view!.energy).toBe(def.energy);
+    expect(view!.star).toBe(GROWTH_STAR);
     const geom = rewardColliderGeom(def.collider);
-    expect([card!.w, card!.h, card!.round]).toEqual([geom.w, geom.h, geom.round]);
-    expect(card!.w).toBeGreaterThan(0);
-    expect(card!.h).toBeGreaterThan(0);
-    // 未知 / 非武器 → 一律 null（不静默回退到别的部件）
-    expect(runRewardCard('doesNotExist')).toBeNull();
-    expect(runRewardCard('pushRod'), '推杆是 Gadget，不是 Weapon').toBeNull();
-    expect(runRewardCard('')).toBeNull();
+    expect([view!.w, view!.h, view!.round]).toEqual([geom.w, geom.h, geom.round]);
+    expect(view!.w).toBeGreaterThan(0);
+    expect(view!.h).toBeGreaterThan(0);
+    // 数量读数（Queue 必改 4 的第四项）：当前 → 领取后
+    expect(view!.countBefore).toBe(4);
+    expect(view!.countAfter).toBe(5);
+    expect(view!.previewText).toBe('4 → 5');
+    expect(view!.stackText).toBe('4/5');
+    expect(view!.reachesThreshold, '4 → 5 就摸到满 stack 了').toBe(true);
+    // 已满的读数收敛成 5/5（不写 6/5）
+    const full = rewardChoiceView({ defId: 'cannon', star: GROWTH_STAR, countBefore: 5, href: 'x' }, FUSE_STACK);
+    expect(full!.stackText).toBe('5/5');
+    expect(full!.countAfter).toBe(6);
+    // 未知 / 非武器 / 非法读数 → 一律 null（不静默回退到别的部件）
+    expect(rewardChoiceView({ defId: 'doesNotExist', star: 1, countBefore: 0, href: 'x' }, FUSE_STACK)).toBeNull();
+    expect(rewardChoiceView({ defId: 'pushRod', star: 1, countBefore: 0, href: 'x' }, FUSE_STACK), '推杆是 Gadget').toBeNull();
+    expect(rewardChoiceView({ defId: 'cannon', star: 1, countBefore: -1, href: 'x' }, FUSE_STACK)).toBeNull();
+    expect(rewardChoiceView({ defId: 'cannon', star: 0, countBefore: 0, href: 'x' }, FUSE_STACK)).toBeNull();
     // fit 只缩不放，且塞得进方框
-    const fit = fitRewardIcon(card!, 58, 58);
-    expect(fit.w).toBeLessThanOrEqual(58);
-    expect(fit.h).toBeLessThanOrEqual(58);
+    const fit = fitRewardIcon(view!, 34, 34);
+    expect(fit.w).toBeLessThanOrEqual(34);
+    expect(fit.h).toBeLessThanOrEqual(34);
     expect(fit.w).toBeGreaterThan(0);
+  });
+
+  /**
+   * PR-08b｜Queue 明令「第一版只使用已有 cannon / spear / hammer」的**可执行判据**：
+   * 用**真实校验器**逐件确认「三个选项都能真的发出去」，
+   * 而不是靠注释保证 —— 内容（能量 / 挂点）一变，这里立刻红灯。
+   */
+  it('PR-08b 三条候选在默认车上**逐件**都能合法装备（三选一里没有废选项）', () => {
+    const base = makeStarterDraft(PLAYER_BODY_DEF_ID, registry);
+    const cap = registry.bodies.get(PLAYER_BODY_DEF_ID)!.energyCapacity;
+    for (const id of REWARD_CHOICE_IDS) {
+      expect(equippableOnCurrentVehicle(id), `${id} 必须能装在当前车上`).toBe(true);
+      const draft = {
+        ...base,
+        functionalSelections: { ...base.functionalSelections, [WEAPON_SLOT]: id },
+      };
+      const snap = buildSnapshotFromDraft(draft, registry, `pr08b-${id}`);
+      const check = validateSnapshot(snap, registry);
+      expect(check.valid, `${id} → ${check.errors.join('；')}`).toBe(true);
+      const energy = computeEnergy(snap, registry).energy;
+      expect(energy, `${id} 必须在能量上限内`).toBeLessThanOrEqual(cap);
+    }
   });
 });
 
 // ============================================================================
-describe('PRODUCT-LOOP-R1-B｜B. 产品地址与参数：只有一个真源', () => {
-  it('PR-07 冒险地址四个参数齐备，且 `back` 与领奖地址完全一致（往返闭合）', () => {
+describe('PRODUCT-LOOP-R2-A｜B. 产品地址与参数：只有一个真源', () => {
+  it('PR-07 出发地址带 `run` + `choices` + `home`；三条候选各自往返闭合', () => {
     const token = newRunToken(1700000000000, 0.5);
-    const href = buildAdventureHref(token);
+    const href = buildAdventureHref(token, buildRewardChoicePayload(token, specs(4), FUSE_STACK));
     expect(href.startsWith(ADVENTURE_HREF)).toBe(true);
-    const parsed = parseRunProductReward(href.slice(href.indexOf('?')));
-    expect(parsed).toEqual({ defId: REWARD_WEAPON_ID, runToken: token, backHref: buildClaimHref(token) });
-    // 领奖地址本身：解析回来就是同一局（幂等键不丢）
-    const claimHref = buildClaimHref(token);
-    expect(claimHref.startsWith(HOME_HREF)).toBe(true);
-    expect(parsePendingClaim(claimHref.slice(claimHref.indexOf('?')))).toEqual({
-      runToken: token,
-      rewardDefId: REWARD_WEAPON_ID,
-    });
-    // PRODUCT-LOOP-R1-D：第四个参数 = 失败回程地址（**纯首页**，与领奖地址是两个出口）
-    expect(new URLSearchParams(href.slice(href.indexOf('?') + 1)).get(HOME_PARAM)).toBe(HOME_HREF);
+    const q = new URLSearchParams(href.split('?')[1]);
+    expect(q.get(RUN_PARAM)).toBe(token);
+
+    /*
+      ⚠️ R2-A 的**契约变更**（不是丢字段）：R1-B 的 top-level `back` 已不存在，
+      终点三条候选的领奖地址被整份装进 `choices`。
+      因此「往返闭合」要逐条验，而不是取一个参数。
+    */
+    const payload = payloadOf(href);
+    expect(payload.stack, '满 stack 阈值必须由产品侧给全（Lab 不自造 5）').toBe(FUSE_STACK);
+    expect(payload.choices.map((c) => c.defId)).toEqual([...REWARD_CHOICE_IDS]);
+    expect(q.get('reward'), '出发地址不得带裸 `reward=` 参数').toBeNull();
+    for (const c of payload.choices) {
+      expect(c.star).toBe(GROWTH_STAR);
+      expect(c.href).toBe(buildClaimHref(token, c.defId));
+      expect(c.href.startsWith(HOME_HREF)).toBe(true);
+      expect(parsePendingClaim(c.href.slice(c.href.indexOf('?')))).toEqual({
+        runToken: token,
+        rewardDefId: c.defId,
+      });
+    }
+    // PRODUCT-LOOP-R1-D：第三个参数 = 失败回程地址（**纯首页**，与候选地址是两类出口）
+    expect(q.get(HOME_PARAM)).toBe(HOME_HREF);
   });
 
   /**
-   * PRODUCT-LOOP-R1-D｜**两个回程地址必须真的是两个**。
-   *
-   * 这是「失败不发永久奖励」在地址层上的机器判据：失败出口拿到的地址一旦能被
-   * `parsePendingClaim` 解析出 `{runToken, rewardDefId}`，首页就会执行一次入库
-   * ⇒ 失败也发奖。因此这里逐条钉死：`home` 解析不出领奖请求。
+   * PR-07b｜「失败不发永久奖励」在地址层上的机器判据：失败出口拿到的地址一旦能被
+   * `parsePendingClaim` 解析出 `{runToken, rewardDefId}`，首页就会执行一次入库 ⇒ 失败也发奖。
    */
-  it('PR-07b 失败回程 ≠ 领奖地址：`home` 解析不出领奖请求（失败链结构性拿不到奖励）', () => {
+  it('PR-07b 失败回程 ≠ 候选地址：`home` 解析不出领奖请求（失败链结构性拿不到奖励）', () => {
     const token = newRunToken(1700000000000, 0.5);
-    const search = buildAdventureHref(token).split('?')[1] ?? '';
+    const search = buildAdventureHref(token, buildRewardChoicePayload(token, specs(4), FUSE_STACK)).split('?')[1] ?? '';
+    const payload = payloadOf(`?${search}`);
     // ① 两侧参数名同值（改单边 = 静默断链）
     expect(RUN_FAIL_PARAM).toBe('home');
     expect(RUN_FAIL_PARAM).toBe(HOME_PARAM);
     // ② Lab 侧解析出来的就是产品侧给的那个纯首页地址
     const ret = parseRunFailReturn(`?${search}`);
     expect(ret).toEqual({ href: HOME_HREF });
-    expect(ret!.href).not.toContain('reward=');
-    expect(ret!.href).not.toContain(`run=${token}`);
+    expect(ret!.href).not.toContain(`${REWARD_PARAM}=`);
+    expect(ret!.href).not.toContain(`${RUN_PARAM}=`);
     // ③ **关键**：拿这个地址回首页，首页**不会**入库（解析不出领奖请求）
     expect(parsePendingClaim(ret!.href.slice(ret!.href.indexOf('?')))).toBeNull();
     expect(parsePendingClaim('')).toBeNull();
-    // ④ 反过来：领奖地址也不能被当成失败出口（两个出口互不通用）
-    const claimSearch = buildClaimHref(token).split('?')[1] ?? '';
-    expect(parseRunFailReturn(`?${claimSearch}`)).toBeNull();
-    // ⑤ 同一条链接里两个地址都在，且确确实实不同
-    expect(claimSearch).not.toBe(search.slice(search.indexOf(`${HOME_PARAM}=`) + HOME_PARAM.length + 1));
+    // ④ 反过来：候选地址也不能被当成失败出口（两类出口互不通用）
+    for (const c of payload.choices) {
+      expect(parseRunFailReturn(`?${c.href.split('?')[1]}`)).toBeNull();
+    }
+    // ⑤ 同一条链接里两类地址都在，且确确实实不同
+    for (const c of payload.choices) expect(c.href).not.toBe(ret!.href);
   });
 
-  it('PR-07c 失败出口与奖励出口互斥：同一份产品上下文里只有 COMPLETE 拿得到奖励', () => {
+  it('PR-07c 候选出口与失败结算互斥：同一份产品上下文里只有 COMPLETE 拿得到候选', () => {
     const token = newRunToken(1700000000000, 0.5);
-    const search = buildAdventureHref(token).slice(buildAdventureHref(token).indexOf('?'));
-    const reward = parseRunProductReward(search)!;
+    const href = buildAdventureHref(token, buildRewardChoicePayload(token, specs(4), FUSE_STACK));
+    const search = href.slice(href.indexOf('?'));
+    const reward = parseRunRewardChoices(search)!;
     const ret = parseRunFailReturn(search)!;
     const ctx = runPageContext();
 
-    // ① COMPLETE：有奖励出口、**没有**失败结算
+    // ① COMPLETE：有三条候选、**没有**失败结算
     const done = buildPriorCompletedRun(ctx);
     expect(runComplete(done)).toBe(true);
-    expect(runProductClaimNow(done, reward)).not.toBeNull();
+    expect(runRewardChoiceViews(done, reward).length).toBe(3);
+    expect(runSelectedClaim(done, reward, REWARD_CHOICE_IDS[0])).not.toBeNull();
     expect(runFailSettlementNow(done, ret)).toBeNull();
 
-    // ② FAILED（真实推进到第一场战斗后被打死）：有失败结算、**没有**奖励出口
-    //    —— 即使这一局带着完整的产品奖励上下文
+    // ② FAILED（真实推进到第一场战斗后被打死）：有失败结算、**没有**候选
+    //    —— 即使这一局带着完整的产品奖励上下文（Queue 必改 5）
     let s = createRunPageState(ctx);
     for (let i = 0; i < 6 && s.phase !== 'BATTLE'; i++) s = pressRunAction(s, ctx);
     expect(s.phase).toBe('BATTLE');
     const failed = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp: 900, steps: 300 });
     expect(failed.phase).toBe('FAILED');
-    expect(runProductClaimNow(failed, reward)).toBeNull();
+    expect(runRewardChoiceViews(failed, reward)).toEqual([]);
+    for (const id of REWARD_CHOICE_IDS) expect(runSelectedClaim(failed, reward, id)).toBeNull();
     expect(runFailSettlementNow(failed, ret)!.href).toBe(HOME_HREF);
   });
 
-  it('PR-08 参数不全 / 未知奖励 ⇒ 不进产品模式（既有路径逐像素不变的结构前提）', () => {
+  it('PR-08 参数不全 / 候选全坏 ⇒ 不进产品模式（既有路径逐像素不变的结构前提）', () => {
     const token = newRunToken(1700000000000, 0.5);
     // parsePendingClaim（首页侧）
     expect(parsePendingClaim('')).toBeNull();
     expect(parsePendingClaim('?run=')).toBeNull();
     expect(parsePendingClaim(`?run=${token}`)).toBeNull();
-    expect(parsePendingClaim('?reward=laser')).toBeNull();
-    // parseRunProductReward（Run Page 侧）：缺 back / 未知奖励 → null
-    expect(parseRunProductReward('')).toBeNull();
-    expect(parseRunProductReward(`?run=${token}&reward=laser`)).toBeNull();
-    expect(parseRunProductReward(`?run=${token}&reward=laser&back=`)).toBeNull();
-    expect(parseRunProductReward(`?run=${token}&reward=nope&back=x`)).toBeNull();
-    expect(parseRunProductReward(`?run=${token}&reward=pushRod&back=x`), 'Gadget 不算奖励').toBeNull();
+    expect(parsePendingClaim(`?${REWARD_PARAM}=laser`)).toBeNull();
+    // parseRunRewardChoices（Run Page 侧）：缺一不可 / 坏载荷 → null
+    expect(parseRunRewardChoices('')).toBeNull();
+    expect(
+      parseRunRewardChoices(
+        `?${CHOICES_PARAM}=${encodeURIComponent(JSON.stringify(buildRewardChoicePayload(token, specs(1), FUSE_STACK)))}`,
+      ),
+      '缺 run',
+    ).toBeNull();
+    expect(parseRunRewardChoices(`?${RUN_PARAM}=${token}`), '缺 choices').toBeNull();
+    expect(parseRunRewardChoices(`?${RUN_PARAM}=${token}&${CHOICES_PARAM}=`)).toBeNull();
+    expect(parseRunRewardChoices(`?${RUN_PARAM}=${token}&${CHOICES_PARAM}=不是JSON`)).toBeNull();
+    expect(parseRunRewardChoices(searchOf(token, { stack: FUSE_STACK, choices: [] }))).toBeNull();
+    expect(parseRunRewardChoices(searchOf(token, { stack: FUSE_STACK })), '没有 choices 字段').toBeNull();
+    // 候选**全坏** → null（不画假奖励）
+    expect(
+      parseRunRewardChoices(
+        searchOf(token, {
+          stack: FUSE_STACK,
+          choices: [
+            { defId: 'nope', star: 1, countBefore: 0, href: './home.html?x=1' },
+            { defId: 'pushRod', star: 1, countBefore: 0, href: './home.html?x=1' },
+            { defId: 'cannon', star: 1, countBefore: 0, href: '' },
+          ],
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('PR-08c 部分坏 ⇒ 保留好的、坏条数**如实上报**（不静默吞掉产品侧的 bug）', () => {
+    const token = newRunToken(1700000000000, 0.5);
+    const set = parseRunRewardChoices(
+      searchOf(token, {
+        stack: FUSE_STACK,
+        choices: [
+          { defId: 'cannon', star: GROWTH_STAR, countBefore: 4, href: buildClaimHref(token, 'cannon') },
+          { defId: 'nope', star: GROWTH_STAR, countBefore: 0, href: buildClaimHref(token, 'cannon') },
+          { defId: 'spear', star: GROWTH_STAR, countBefore: 1, href: buildClaimHref(token, 'spear') },
+        ],
+      }),
+    );
+    expect(set).not.toBeNull();
+    expect(set!.choices.map((c) => c.defId)).toEqual(['cannon', 'spear']);
+    expect(set!.dropped, '坏了一条就必须被看见').toBe(1);
+    // 阈值非法 → 不再是「满 stack 阈值」，但仍保留候选（读数不会被编造）
+    const badStack = parseRunRewardChoices(
+      searchOf(token, {
+        stack: 0,
+        choices: [{ defId: 'cannon', star: 1, countBefore: 0, href: buildClaimHref(token, 'cannon') }],
+      }),
+    );
+    expect(badStack).not.toBeNull();
+    expect(badStack!.stack, '非法阈值落到 0（页面据此显示 0/0，不编造一个 5）').toBe(0);
   });
 
   it('PR-09 token 由首页每次挂载生成：确定 + 互不相同', () => {
     expect(newRunToken(1700000000000, 0.5)).toBe(newRunToken(1700000000000, 0.5));
     expect(newRunToken(1700000000000, 0.5)).not.toBe(newRunToken(1700000000001, 0.5));
     expect(newRunToken(1700000000000, 0.5)).not.toBe(newRunToken(1700000000000, 0.25));
+    // 三条候选共用同一个 token ⇒ 「本局只能领一次」在地址层就成立了
+    const links = buildRewardChoiceLinks('run-shared', specs(0));
+    expect(new Set(links.map((l) => parsePendingClaim(l.href.slice(l.href.indexOf('?')))!.runToken)).size).toBe(1);
   });
 });
 
 // ============================================================================
-describe('PRODUCT-LOOP-R1-B｜C. 领奖：一次、真入库、可重入', () => {
-  it('PR-10 第一次领取：库存 +1 落在**正式** key 上，且只新增一个 key', () => {
+describe('PRODUCT-LOOP-R2-A｜C. 领奖：一次、真入库、数量累积', () => {
+  it('PC-10 第一次领取：该 stack +1 落在**正式** key 上，且只新增一个 key（验收 ③）', () => {
     expect(allKeys()).toEqual([]);
     expect(isRunClaimed('run-test-1')).toBe(false);
 
-    const out = claimRunReward({ runToken: 'run-test-1', rewardDefId: REWARD_WEAPON_ID });
+    // 先建一份「新账号」的库存（cannon ×4），再模拟玩家选了 cannon
+    const draft = loadEquippedDraft();
+    const growth = openGrowthSession(draft);
+    expect(growth.freshProfile, '此刻磁盘上还什么都没有 ⇒ 新账号').toBe(true);
+    expect(getCount(growth.inv, 'cannon', GROWTH_STAR)).toBe(4);
+
+    const out = claimRunReward({ runToken: 'run-test-1', rewardDefId: 'cannon' });
     expect(out.ok).toBe(true);
     expect(out.reason).toBeNull();
-    expect(out.grant?.defId).toBe(REWARD_WEAPON_ID);
-    expect(out.grant?.countAfter).toBe(1);
+    expect(out.grant?.defId).toBe('cannon');
+    expect(out.grant?.countAfter, '4 → 5（Queue 验收 ③）').toBe(5);
 
-    // 真的写进了正式库存 key（不是页面自建的第二套库存）——验收 2
-    expect(allKeys()).toEqual(['strongfruit.ownedParts.v2', PROFILE_CLAIMS_KEY]);
+    // 真的写进了正式库存 key（不是页面自建的第二套库存）
+    expect(allKeys()).toEqual([INV_KEY, PROFILE_CLAIMS_KEY]);
     const inv = loadInventoryRaw();
     expect(inv, '库存必须真的落盘').toBeTruthy();
-    expect(getCount(inv!, REWARD_WEAPON_ID, 1)).toBe(1);
+    expect(getCount(inv!, 'cannon', GROWTH_STAR)).toBe(5);
     // 账本记录本局（幂等键）
     expect(isRunClaimed('run-test-1')).toBe(true);
     expect(claimedRunCount()).toBe(1);
     expect(readClaimLedger().grantedRunIds).toEqual(['run-test-1']);
   });
 
-  it('PR-11 重复领取（同 token）：拒绝且**零副作用** —— 验收 3', () => {
-    const first = claimRunReward({ runToken: 'run-test-1', rewardDefId: REWARD_WEAPON_ID });
+  it('PC-11 同一 Run **换一件也算重复领取**：拒绝且零副作用（验收 ⑤）', () => {
+    openGrowthSession(loadEquippedDraft());
+    const first = claimRunReward({ runToken: 'run-test-1', rewardDefId: 'cannon' });
     expect(first.ok).toBe(true);
-    const invAfterFirst = store.getItem('strongfruit.ownedParts.v2');
+    const invAfterFirst = store.getItem(INV_KEY);
     const ledgerAfterFirst = store.getItem(PROFILE_CLAIMS_KEY);
 
-    for (const attempt of [1, 2, 3]) {
-      const again = claimRunReward({ runToken: 'run-test-1', rewardDefId: REWARD_WEAPON_ID });
-      expect(again.ok, `第 ${attempt} 次重复领取必须被拒绝`).toBe(false);
+    // ① 同一件再领：拒
+    // ② **换一件**再领（玩家在终点改主意 / 两个标签页各选一件）：同样拒
+    for (const defId of ['cannon', 'spear', 'hammer']) {
+      const again = claimRunReward({ runToken: 'run-test-1', rewardDefId: defId });
+      expect(again.ok, `同 token 再领 ${defId} 必须被拒绝`).toBe(false);
       expect(again.reason).toBe('already-claimed');
       expect(again.grant).toBeNull();
     }
     // 库存与账本逐字节不变（既没加副本，也没多加一条记录）
-    expect(store.getItem('strongfruit.ownedParts.v2')).toBe(invAfterFirst);
+    expect(store.getItem(INV_KEY)).toBe(invAfterFirst);
     expect(store.getItem(PROFILE_CLAIMS_KEY)).toBe(ledgerAfterFirst);
-    expect(getCount(loadInventoryRaw()!, REWARD_WEAPON_ID, 1)).toBe(1);
+    expect(getCount(loadInventoryRaw()!, 'cannon', GROWTH_STAR)).toBe(5);
     expect(claimedRunCount()).toBe(1);
   });
 
-  it('PR-12 新的一局（新 token）才再发一次；重复获得累计副本数（既有库存语义）', () => {
-    claimRunReward({ runToken: 'run-1', rewardDefId: REWARD_WEAPON_ID });
-    const second = claimRunReward({ runToken: 'run-2', rewardDefId: REWARD_WEAPON_ID });
+  it('PC-12 新的一局（新 token）才再发一次；重复获得**累积数量**（Queue 必改 1 的目的）', () => {
+    openGrowthSession(loadEquippedDraft());
+    claimRunReward({ runToken: 'run-1', rewardDefId: 'cannon' });
+    const second = claimRunReward({ runToken: 'run-2', rewardDefId: 'cannon' });
     expect(second.ok).toBe(true);
-    expect(second.grant?.countAfter).toBe(2);
+    expect(second.grant?.countAfter).toBe(6);
     expect(claimedRunCount()).toBe(2);
-    expect(getCount(loadInventoryRaw()!, REWARD_WEAPON_ID, 1)).toBe(2);
+    expect(getCount(loadInventoryRaw()!, 'cannon', GROWTH_STAR)).toBe(6);
   });
 
-  it('PR-13 非法输入一律拒收且零副作用（含空 token / 未知部件 / Gadget）', () => {
+  it('PC-13 选择**其它** Weapon 只加对应 stack（验收 ④）', () => {
+    openGrowthSession(loadEquippedDraft());
+    const base = { cannon: 4, spear: 1, hammer: 1 };
+    const inv0 = loadInventoryRaw()!;
+    for (const [defId, before] of Object.entries(base)) {
+      expect(getCount(inv0, defId, GROWTH_STAR), `${defId} 的初始读数`).toBe(before);
+    }
+    // 第一局选 spear：只有 spear 变，其它两件一个字节都不动
+    const out = claimRunReward({ runToken: 'run-spear', rewardDefId: 'spear' });
+    expect(out.ok).toBe(true);
+    expect(out.grant?.countAfter).toBe(2);
+    const inv1 = loadInventoryRaw()!;
+    expect(getCount(inv1, 'cannon', GROWTH_STAR), '没选的件不许动').toBe(4);
+    expect(getCount(inv1, 'hammer', GROWTH_STAR), '没选的件不许动').toBe(1);
+    expect(getCount(inv1, 'spear', GROWTH_STAR)).toBe(2);
+    // 第二局选 hammer：同理
+    claimRunReward({ runToken: 'run-hammer', rewardDefId: 'hammer' });
+    const inv2 = loadInventoryRaw()!;
+    expect(getCount(inv2, 'hammer', GROWTH_STAR)).toBe(2);
+    expect(getCount(inv2, 'cannon', GROWTH_STAR)).toBe(4);
+    expect(getCount(inv2, 'spear', GROWTH_STAR)).toBe(2);
+  });
+
+  it('PC-14 非法输入一律拒收且零副作用（含空 token / 未知部件 / Gadget）', () => {
     expect(claimRunReward(null).reason).toBe('no-run-token');
-    expect(claimRunReward({ runToken: '', rewardDefId: REWARD_WEAPON_ID }).reason).toBe('no-run-token');
+    expect(claimRunReward({ runToken: '', rewardDefId: 'cannon' }).reason).toBe('no-run-token');
     expect(claimRunReward({ runToken: 'run-x', rewardDefId: 'nope' }).reason).toBe('not-official');
     expect(claimRunReward({ runToken: 'run-x', rewardDefId: 'pushRod' }).reason).toBe('not-weapon');
     expect(allKeys(), '全部失败路径都不许写盘').toEqual([]);
@@ -405,57 +583,96 @@ describe('PRODUCT-LOOP-R1-B｜C. 领奖：一次、真入库、可重入', () =>
     expect(equippableOnCurrentVehicle('doesNotExist'), '未知部件装不上').toBe(false);
   });
 
-  it('PR-14 重载即状态仍在：两次独立调用 = 两次独立读盘（验收 7）', () => {
-    claimRunReward({ runToken: 'run-persist', rewardDefId: REWARD_WEAPON_ID });
+  it('PC-15 重载即状态仍在：两次独立调用 = 两次独立读盘（验收 ⑦）', () => {
+    openGrowthSession(loadEquippedDraft());
+    claimRunReward({ runToken: 'run-persist', rewardDefId: 'cannon' });
     // 模拟 reload：不持有任何内存引用，重新从 store 读
     expect(isRunClaimed('run-persist')).toBe(true);
-    expect(getCount(loadInventoryRaw()!, REWARD_WEAPON_ID, 1)).toBe(1);
-    const again = claimRunReward({ runToken: 'run-persist', rewardDefId: REWARD_WEAPON_ID });
+    expect(getCount(loadInventoryRaw()!, 'cannon', GROWTH_STAR)).toBe(5);
+    const again = claimRunReward({ runToken: 'run-persist', rewardDefId: 'cannon' });
     expect(again.reason).toBe('already-claimed');
-    // 库里已经有这件武器 ⇒ 首页「已装备部件 / 拥有武器」列表会把它列出来（验收 6 的数据前提）
+    // 库里已经有这件武器 ⇒ Garage 列表（weaponEntries）会把它列出来并带上真实读数
     const draft = loadEquippedDraft();
     expect(draft.bodyDefId).toBe(PLAYER_BODY_DEF_ID);
+    const entry = weaponEntries(loadInventoryRaw()!).find((w) => w.defId === 'cannon');
+    expect(entry, 'Garage 必须能看到这件').toBeTruthy();
+    expect(entry!.count).toBe(5);
+    expect(entry!.stackText, '满 stack 显示 5/5（Queue「Garage 最小显示」）').toBe('5/5');
+  });
+
+  /**
+   * PC-16｜阈值真源：`playerGrowth.FUSE_STACK` 必须等于 **core 自己的合成规则**。
+   * 不靠注释：core 若改消耗量，这里立刻红灯（Queue B 做合成时两处必然漂移的那条隐患被钉死）。
+   */
+  it('PC-16 FUSE_STACK 就是 core 的合成消耗量（不是产品侧另写的一个 5）', () => {
+    const inv = defaultInventory();
+    expect(canFuse(inv, 'cannon', GROWTH_STAR, null).need).toBe(FUSE_STACK);
+    expect(stackThreshold(inv, 'cannon', GROWTH_STAR)).toBe(FUSE_STACK);
+    // 阈值与「这件装没装在车上」无关（`stackThreshold` 传 null build 的理由）
+    expect(stackThreshold(inv, 'spear', GROWTH_STAR)).toBe(FUSE_STACK);
+    expect(stackThreshold(inv, 'hammer', GROWTH_STAR)).toBe(FUSE_STACK);
   });
 });
 
 // ============================================================================
-describe('PRODUCT-LOOP-R1-B｜D. 终点态：只有 COMPLETE 才有奖励出口', () => {
-  it('PR-15 COMPLETE + 产品上下文 → 出口存在，文案是**动作**、地址来自产品数据', () => {
+describe('PRODUCT-LOOP-R2-A｜D. 终点态：只有 COMPLETE 才有 3选1', () => {
+  it('PR-15 COMPLETE + 产品载荷 → 三张卡齐备，且每张卡各自的出口都由产品数据给出', () => {
     const s = completedState();
     expect(runComplete(s)).toBe(true);
-    const claim = runProductClaimNow(s, REWARD_CTX);
+    const views = runRewardChoiceViews(s, REWARD_CTX);
+    expect(views.length).toBe(3);
+    expect(views.map((v) => v.defId)).toEqual([...REWARD_CHOICE_IDS]);
+    // 每张卡的读数来自产品侧给的那份载荷（`countBefore` = 4）
+    for (const v of views) {
+      expect(v.countBefore).toBe(4);
+      expect(v.previewText).toBe('4 → 5');
+      expect(v.reachesThreshold).toBe(true);
+    }
+    // 选中一件 → 出口是**那一件自己的**地址，且 token 是本局的
+    const claim = runSelectedClaim(s, REWARD_CTX, 'spear');
     expect(claim).toEqual({
-      defId: REWARD_WEAPON_ID,
+      defId: 'spear',
       runToken: 'run-test-1',
-      href: REWARD_CTX.backHref,
+      href: buildClaimHref('run-test-1', 'spear'),
     });
-    // 文案必须是动作，不是状态描述（PRP-M2-R1 的 P0 教训）
-    expect(RUN_REWARD_CLAIM_LABEL).toBe('领取并返回');
-    expect(RUN_REWARD_CLAIM_LABEL.includes('完成')).toBe(false);
-    expect(RUN_REWARD_TITLE).toBe('本局获得');
+    // 三件的出口互不相同（「选哪件」是真选择）
+    const hrefs = REWARD_CHOICE_IDS.map((id) => runSelectedClaim(s, REWARD_CTX, id)!.href);
+    expect(new Set(hrefs).size).toBe(3);
+    // 文案必须是**动作 / 承诺**，不是已完成的状态描述
+    expect(RUN_REWARD_TITLE).toBe('选一件带回家');
+    expect(RUN_REWARD_NOTE).toBe('选中的那件会进入你的车库');
+    expect(RUN_REWARD_LOCKED_LABEL).toBe('已选择');
+    for (const t of [RUN_REWARD_TITLE, RUN_REWARD_NOTE, RUN_REWARD_LOCKED_LABEL]) {
+      expect(t.includes('完成'), `${t} 不得是状态描述`).toBe(false);
+    }
   });
 
-  it('PR-16 FAILED **结构上**拿不到奖励出口（必改 4：第一版失败不发永久部件）', () => {
+  it('PR-16 FAILED **结构上**拿不到 3选1（必改 5：无奖励选择 / 无 count 变化 / 无 Profile 增长）', () => {
     const s = failedState();
     expect(runComplete(s)).toBe(false);
-    expect(runProductClaimNow(s, REWARD_CTX)).toBeNull();
-    // 失败终态仍然有它自己的既有出口（开新局），本 Queue 不动它
-    expect(registry.functionals.has(REWARD_WEAPON_ID)).toBe(true);
+    expect(runRewardChoiceViews(s, REWARD_CTX)).toEqual([]);
+    for (const id of REWARD_CHOICE_IDS) expect(runSelectedClaim(s, REWARD_CTX, id)).toBeNull();
+    // 动一下「点击」也不该写盘：候选恒空 ⇒ 页面结构上没有可点的东西
+    expect(allKeys()).toEqual([]);
+    expect(claimedRunCount()).toBe(0);
   });
 
-  it('PR-17 没有产品上下文 ⇒ 出口恒 null（既有验证 / 玩家路径零变化）', () => {
+  it('PR-17 没有产品载荷 ⇒ 恒空（既有验证 / 玩家路径零变化）', () => {
     const s = completedState();
-    expect(runProductClaimNow(s, null)).toBeNull();
-    expect(runProductClaimNow(s, undefined)).toBeNull();
-    // 未知奖励 id 同样不进产品模式（不产生「画了按钮但领不到」的分叉）
-    expect(runProductClaimNow(s, { ...REWARD_CTX, defId: 'nope' })).toBeNull();
-    expect(runProductClaimNow(s, { ...REWARD_CTX, defId: 'pushRod' })).toBeNull();
+    expect(runRewardChoiceViews(s, null)).toEqual([]);
+    expect(runRewardChoiceViews(s, undefined)).toEqual([]);
+    expect(runRewardChoiceViews(s, { runToken: 'r', stack: FUSE_STACK, choices: [], dropped: 0 })).toEqual([]);
+    expect(runSelectedClaim(s, null, 'cannon')).toBeNull();
+    // 「点了一个不在候选里的件」这类接线 bug：必须拒（不是顺手发一件）
+    expect(runSelectedClaim(s, REWARD_CTX, 'laser')).toBeNull();
+    expect(runSelectedClaim(s, REWARD_CTX, 'nope')).toBeNull();
+    expect(runSelectedClaim(s, REWARD_CTX, 'pushRod')).toBeNull();
   });
 });
 
 // ============================================================================
-describe('PRODUCT-LOOP-R1-B｜E. 源码守卫（本 Queue 的边界必须结构性成立）', () => {
-  it('PR-20 UI 不得直接读写 localStorage / platform.storage（必改 1）', () => {
+describe('PRODUCT-LOOP-R2-A｜E. 源码守卫（本 Queue 的边界必须结构性成立）', () => {
+  it('PR-20 UI 不得直接读写 localStorage / platform.storage', () => {
     for (const f of ['homePage.ts', 'homeMain.ts']) {
       const code = strip(readProduct(f));
       expect(code.includes('localStorage'), `${f} 不得直接碰 localStorage`).toBe(false);
@@ -471,6 +688,20 @@ describe('PRODUCT-LOOP-R1-B｜E. 源码守卫（本 Queue 的边界必须结构�
     expect(repo.includes('platform.storage')).toBe(true);
     expect(repo.includes("from '../core/partInventory'")).toBe(true);
     expect(repo.includes("from '../core/saveVersion'")).toBe(true);
+    /*
+      ⚠️ R2-A 新增的成长入口同样不许自己碰存储：它只能经 core 的
+      `loadInventoryRaw` / `saveInventory`（= 与旧横屏游戏共用同一份库存）。
+    */
+    const growth = strip(readProduct('playerGrowth.ts'));
+    for (const banned of ['localStorage', 'sessionStorage', 'platform.storage']) {
+      expect(growth.includes(banned), `playerGrowth.ts 不得直接碰 ${banned}`).toBe(false);
+    }
+    expect(growth.includes("from '../core/partInventory'")).toBe(true);
+    expect(growth.includes('saveInventory'), '成长写入必须经 core 的 saveInventory').toBe(true);
+    // ⚠️ 成长**不做**合成：本模块不得出现任何消耗 / 升星的调用
+    for (const banned of ['consume(', 'fuseSameStar', 'fuseCategoryMaterials', 'grantAllNewMovements']) {
+      expect(growth.includes(banned), `playerGrowth.ts 不得做合成/消耗：${banned}`).toBe(false);
+    }
   });
 
   it('PR-21 产品地址只有一个真源，Lab 侧一个都没有（Lab 也 import 不了产品模块）', () => {
@@ -489,37 +720,120 @@ describe('PRODUCT-LOOP-R1-B｜E. 源码守卫（本 Queue 的边界必须结构�
       expect(code.includes("'../product") && code.includes("'../product/"), `${f} 不得 import 产品模块`).toBe(false);
       expect(code.includes('buildPersistence'), `${f} 不得碰正式存档写入`).toBe(false);
       expect(code.includes('saveInventory'), `${f} 不得碰库存写入`).toBe(false);
+      // ⚠️ 满 stack 阈值也必须由产品侧经 URL 给全 —— Lab 里不许出现第二个 `5`
+      expect(code.includes('FUSE_STACK'), `${f} 不得引用产品侧阈值常量`).toBe(false);
     }
   });
 
-  it('PR-22 奖励卡绘制**不引入新的入账色**（既有像素账本不受影响）', () => {
+  it('PR-22 3选1 绘制**不引入新的入账色**，且绘制 / 命中 / 出口 / 探针**四处同源**', () => {
     const src = strip(readLab('runPage.ts'));
-    const start = src.indexOf('private drawRewardCard(');
-    expect(start, 'runPage.ts 必须有 drawRewardCard').toBeGreaterThan(0);
+    const start = src.indexOf('private drawRewardChoiceCards(');
+    expect(start, 'runPage.ts 必须有 drawRewardChoiceCards').toBeGreaterThan(0);
     const body = src.slice(start, src.indexOf('\n  private ', start + 10));
     // 只允许复用 COLORS.*，不许出现十六进制字面量 / rgba
-    expect(body.includes('#'), '奖励卡不得写死颜色（必须复用 COLORS）').toBe(false);
+    expect(body.includes('#'), '候选卡不得写死颜色（必须复用 COLORS）').toBe(false);
     expect(body.includes('rgba(')).toBe(false);
-    // 绘制 / 探针**同源**：`rewardCardNow()` 是唯一判据，且两处都用它
-    //（「画的是 A、探针报的是 B」结构上不可能 —— 这是本项目的四处同源铁律）
-    expect(src.split('private rewardCardNow(').length - 1).toBe(1);
-    expect(src.includes('const card = this.rewardCardNow();'), '绘制处必须经 rewardCardNow').toBe(true);
-    expect(src.includes('const rewardCard = this.rewardCardNow();'), '探针处必须经 rewardCardNow').toBe(true);
-    // 出口同理：文案 / 行为 / 探针 / 命中都经 `productClaimNow()`
-    expect(src.split('private productClaimNow(').length - 1).toBe(1);
-    expect(src.split('this.productClaimNow()').length - 1).toBeGreaterThanOrEqual(4);
+    /*
+      四处同源（本项目的铁律）：`rewardChoiceViewsNow()` 是**唯一**判据，
+      绘制 / 命中 / 底栏可用性 / 探针都经它 ⇒
+      「画的是 A、点的是 B」「探针说有三张、屏幕上没有」结构上不可能。
+    */
+    expect(src.split('private rewardChoiceViewsNow(').length - 1).toBe(1);
+    expect(
+      src.split('this.rewardChoiceViewsNow()').length - 1,
+      '至少 4 处同源调用（绘制 / 命中 / actionEnabled / 探针）',
+    ).toBeGreaterThanOrEqual(4);
+    expect(src.includes('this.drawRewardChoiceCards(ctx);'), '绘制入口必须存在').toBe(true);
+    expect(src.includes('const rects = runRewardChoiceRects(choiceViews.length);'), '命中也必须用同一份矩形').toBe(true);
+    // 出口同理：选中一件的唯一路径是 `runSelectedClaim()`
+    expect(src.includes('runSelectedClaim(this.state, this.opts.rewardChoices, choiceViews[i].defId)')).toBe(true);
+    // 旧单件出口**必须已经不存在**（否则就是两份真源并存）
+    for (const gone of ['productClaimNow', 'rewardCardNow', 'runRewardCardRect()']) {
+      expect(src.includes(gone), `runPage.ts 不得残留旧单件出口：${gone}`).toBe(false);
+    }
   });
 
-  it('PR-23 验收 5：奖励展示与 Garage 用的是**同一份**库存（不存在第二套数据）', () => {
-    // 领奖后：库存里读得到 ⇒ A 段的 Garage 列表（weaponEntries）自动包含它
-    claimRunReward({ runToken: 'run-garage', rewardDefId: REWARD_WEAPON_ID });
+  it('PR-23 验收 ⑨：奖励展示与 Garage 用的是**同一份**库存（不存在第二套数据）', () => {
+    openGrowthSession(loadEquippedDraft());
+    claimRunReward({ runToken: 'run-garage', rewardDefId: 'cannon' });
     const inv = loadInventoryRaw()!;
-    expect(getCount(inv, REWARD_WEAPON_ID, 1)).toBe(1);
-    // Garage 侧的唯一数据源就是这份库存（A 段的实现未被本 Queue 改动）
+    expect(getCount(inv, 'cannon', GROWTH_STAR)).toBe(5);
+    // Garage 侧的唯一数据源就是这份库存
     const a = strip(readProduct('playerLoadout.ts'));
     expect(a.includes("from '../core/partInventory'")).toBe(true);
-    // 页面侧不写死「本局获得」文案（标题来自 Lab 常量，名称来自内容库）
+    // 页面侧不写死候选 / 奖励 id（候选来自产品策略常量，名称来自内容库）
     const page = strip(readProduct('homePage.ts'));
-    expect(page.includes(REWARD_WEAPON_ID), '页面不得写死奖励 id').toBe(false);
+    for (const id of ['cannon', 'spear', 'hammer']) {
+      expect(page.includes(`'${id}'`), `页面不得写死候选 id：${id}`).toBe(false);
+    }
+    expect(page.includes('REWARD_CHOICE_IDS'), '候选必须来自策略常量').toBe(true);
+  });
+
+  it('PR-24 成长会话的顺序**结构性**正确：先判 fresh 再取库存（写反 = 种子静默失效）', () => {
+    const growth = strip(readProduct('playerGrowth.ts'));
+    const fn = growth.slice(growth.indexOf('export function openGrowthSession('));
+    const freshAt = fn.indexOf('isFreshProfile()');
+    const invAt = fn.indexOf('playerInventory(draft)');
+    expect(freshAt, 'openGrowthSession 必须先判 fresh').toBeGreaterThan(0);
+    expect(invAt, 'openGrowthSession 必须自己取库存').toBeGreaterThan(0);
+    expect(freshAt, '① 判 fresh 必须在 ② 取库存之前').toBeLessThan(invAt);
+    // 签名只有 draft（不再收一份现成的 inv —— 那正是让人能写反顺序的形状）
+    expect(/export function openGrowthSession\(draft: BuildDraft\)/.test(growth)).toBe(true);
+    // 页面侧不许自己先 `playerInventory(draft)` 再开会话
+    const page = strip(readProduct('homePage.ts'));
+    expect(page.includes('openGrowthSession(draft)'), '页面必须用唯一的成长入口').toBe(true);
+    // 页面侧**只**通过成长会话拿库存初始值（不再有一行裸的 playerInventory 初始化）
+    expect(page.includes('let inv: PartInventory = growth.inv;')).toBe(true);
+    // 种子只发新账号：已有存档的玩家不该被抬到 ×4；种子本身必须真的是「cannon ×4」
+    const seed = FRESH_STACK_SEED.find((s) => s.partId === 'cannon');
+    expect(seed, '新账号种子必须有 cannon').toBeTruthy();
+    expect(seed!.star).toBe(GROWTH_STAR);
+    expect(seed!.count, 'Queue 必改 3：fresh profile cannon = ★1 ×4').toBe(4);
+  });
+
+  it('PR-25 本 Queue 的禁止清单：不做合成 / 不做经济 / 不新增 Weapon', () => {
+    // ① 成长与会话模块里没有任何升星动作（合成属 Queue B）
+    for (const f of ['playerGrowth.ts', 'playerLoadout.ts', 'playerProfile.ts']) {
+      const code = strip(readProduct(f));
+      for (const banned of ['升星', 'fusion', 'Fusion', '金币', 'gold', '品质', 'rarity', 'rarityTier']) {
+        expect(code.includes(banned), `${f} 不得出现禁止项：${banned}`).toBe(false);
+      }
+    }
+    // ② 候选池恰好三件且都在正式内容库里（不新增 Weapon 定义）
+    expect([...REWARD_CHOICE_IDS].sort()).toEqual(['cannon', 'hammer', 'spear']);
+    // ③ 满 stack 只**显示**：Garage 卡片上没有合成入口
+    const page = strip(readProduct('homePage.ts'));
+    for (const banned of ['fuse', 'Fuse', '合成']) {
+      expect(page.includes(banned), `homePage.ts 不得做合成：${banned}`).toBe(false);
+    }
+    // ④ Run Page 侧同样不产生「合成」语义
+    const lab = strip(readLab('runProductReward.ts')) + strip(readLab('runPage.ts'));
+    for (const banned of ['fuse', 'Fuse', '合成', '升星']) {
+      expect(lab.includes(banned), `Lab 侧不得做合成：${banned}`).toBe(false);
+    }
+  });
+
+  it('PR-26 失败链仍然只有它自己的出口（R1-D 契约未被本 Queue 破坏）', () => {
+    // 失败结算模块没有奖励能力
+    const fail = strip(readLab('runFailSettlement.ts'));
+    for (const t of ['reward', 'rewardChoice', 'claim']) {
+      expect(fail.includes(t), `runFailSettlement.ts 不得涉及奖励：${t}`).toBe(false);
+    }
+    // 宿主里「产品出口」只有一个，且以 `rewardChoices` 为条件
+    const host = strip(readLab('runMain.ts'));
+    expect(host.split('onProductClaim:').length - 1).toBe(1);
+    expect(host.includes('rewardChoices')).toBe(true);
+    expect(host.split("location.assign(claim.href);").length - 1, '奖励导航只能有一次').toBe(1);
+    // 页面里 COMPLETE 的候选分支与 FAILED 的结算分支**都先于**通用推进
+    //（写反 = 点候选卡 / 点失败页 → 悄悄开新局，正是 R1-D 的 P0 根因）
+    const page = strip(readLab('runPage.ts'));
+    const choiceAt = page.indexOf('const choiceViews = this.rewardChoiceViewsNow();');
+    const failAt = page.indexOf('const fail = this.failSettlementNow();');
+    const pressAt = page.indexOf('this.apply(pressRunAction(');
+    expect(choiceAt, '候选分支必须存在').toBeGreaterThan(0);
+    expect(failAt, '失败分支必须存在').toBeGreaterThan(0);
+    expect(pressAt, '通用推进必须存在').toBeGreaterThan(0);
+    expect(choiceAt, '候选分支必须先于通用推进').toBeLessThan(pressAt);
+    expect(failAt, '失败分支必须先于通用推进').toBeLessThan(pressAt);
   });
 });

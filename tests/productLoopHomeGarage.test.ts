@@ -51,12 +51,17 @@ function readProduct(f: string): string {
 function strip(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 }
+// PRODUCT-LOOP-R2-A｜**强化**：先剥注释再扫描。
+// 原实现直接扫原文 ⇒ 一句形如「这里刻意没有 `import ... from './x'`」的**说明文字**
+// 会被当成一条真实 import（本 Queue 就踩到了：playerLoadout.ts 的注释里解释了不成环的理由）。
+// 边界守卫要管的是**代码**的依赖，不是散文；剥掉注释后误报消失，而真实 import 一个都跑不掉。
 function importSpecifiers(src: string): string[] {
   const out: string[] = [];
+  const code = strip(src);
   // 同时捕获 `import ... from 'x'` 与裸副作用 import（`import 'x'`）—— 边界守卫不得漏后者
   const re = /from\s+['"]([^'"]+)['"]|import\s+['"]([^'"]+)['"]/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(src)) !== null) out.push(m[1] ?? m[2]);
+  while ((m = re.exec(code)) !== null) out.push(m[1] ?? m[2]);
   return out;
 }
 
@@ -417,6 +422,18 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
       //   （type-only import），用于把「局外当前装备」原样编进「开始冒险」的地址；
       //   产品侧不解释这份装备的含义，因此不需要任何内容层之外的依赖。
       'runReward.ts': ['../core/content', '../lab/buildEditorModel'],
+      // PRODUCT-LOOP-R2-A：永久成长的**唯一模型与写入口**。
+      //   - 只经 core 的 `partInventory`（`addPart` / `loadInventoryRaw` / `saveInventory`）
+      //     与 `buildPersistence`（判 fresh）读写，**不新建第二套库存**；
+      //   - 只从 `playerLoadout` 借「哪个槽是武器槽 / 这件是不是正式武器」这两个**既有**口径，
+      //     不反向要求 `playerLoadout` import 自己（那会成模块环）；
+      //   - `../lab/buildEditorModel` **只取 `BuildDraft` 类型**（type-only）。
+      'playerGrowth.ts': [
+        '../core/buildPersistence',
+        '../core/partInventory',
+        '../lab/buildEditorModel',
+        './playerLoadout',
+      ],
     };
     for (const [file, list] of Object.entries(allow)) {
       const specs = importSpecifiers(readProduct(file)).sort();
@@ -435,6 +452,8 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
           './vehiclePreview',
           './runReward',
           './playerProfile',
+          // PRODUCT-LOOP-R2-A：成长的唯一入口（页面只调 `openGrowthSession` 一次）
+          './playerGrowth',
         ],
         `homePage.ts 不得 import "${s}"`,
       ).toContain(s);

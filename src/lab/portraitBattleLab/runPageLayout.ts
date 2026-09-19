@@ -635,10 +635,14 @@ export const RUN_FAIL_PANEL = { pad: 16, titleDy: 26, lineGap: 22 } as const;
  * 失败结算面板矩形。
  *
  * **刻意复用** `runRewardCardRect()`（终态面板槽位）：
- *   - COMPLETE（「本局获得」卡）与 FAILED（失败结算）是两个**互斥**终态
+ *   - COMPLETE（3选1 卡块）与 FAILED（失败结算）是两个**互斥**终态
  *     ⇒ 同槽位结构上不可能同时出现；
- *   - 「终态面板只有一个位置」因此不需要第二套几何常量，也不会多出一个入账口径；
- *   - 玩家看到的是同一套终态语言：舞台带底部的整宽内缩面板 + 底部唯一主 CTA。
+ *   - ⚠️ R2-A 起 COMPLETE 画的是**自底锚向上的三张卡**（`runRewardChoiceRects()`），
+ *     不再画 `runRewardCardRect()` 那一张 —— 但本函数仍挂在它上面，因为
+ *     「失败面板底边 = 3选1 块底边 = 舞台带底部内缩 12px」正是想要的**底部对齐**：
+ *     两个终态的面板在屏幕上同底，玩家看到的是同一套终态语言；
+ *   - ⚠️ **FAILED 的像素一个字节都没变**（失败链在 R1-D 已冻结）：`runFailPanelRect()`
+ *     的返回值与 R1-D 逐值相同 ⇒ `e2e:product-fail` 的 `C7` 像素取证继续成立。
  */
 export function runFailPanelRect(): RunRect {
   return runRewardCardRect();
@@ -648,4 +652,122 @@ export function runFailPanelRect(): RunRect {
 export function runFailPanelTextPos(): { x: number; y: number } {
   const r = runFailPanelRect();
   return { x: r.x + RUN_FAIL_PANEL.pad, y: r.y + RUN_FAIL_PANEL.titleDy };
+}
+
+/* -------------------------- RUN COMPLETE：3选1 永久武器部件（产品奖励，R2-A） */
+
+/**
+ * PRODUCT-LOOP-R2-A｜终点 3选1 的卡片几何（**唯一真源**：绘制与命中都用它）。
+ *
+ * ── 为什么是「三张竖排」而不是「三列并排」──────────────────────────────────
+ * 竖屏逻辑舞台宽 390、卡片内缩后可用宽 362。三列并排 ⇒ 每列 ≈ 114px，而每张卡要放
+ * `加农炮 ★1` + `拥有 ×4 → 领取后 ×5` 两行字（约 150px）⇒ 必然截断。
+ * 竖排每张 362×68 能完整放下两行，且顺序天然表达「这是同一组选择」。
+ *
+ * ── 位置：自**同一个底锚**往上排（关键决策）────────────────────────────────
+ * 底锚 = `RUN_STAGE_BAND` 底部内缩 12px，与 R1-B 的「本局获得」卡**完全一致**。
+ * 三张卡因此是**向上生长**的：最下面那张的位置 = 原来那张单卡的位置。
+ *   - 好处 ①：`runFailPanelRect()` 仍复用 `runRewardCardRect()`（失败面板在底锚处，
+ *     与 3选1 块**底部对齐**）⇒ 两个终态在屏幕上「面板底部同高」，视觉语言一致；
+ *   - 好处 ②：底锚不动 ⇒ 终态面板永远不会压到下方日志带 / 动作带。
+ * 预算（实测数值）：舞台带 y∈[80,382]，底锚 370，块高 3×68 + 2×8 = 220 ⇒ 顶 150，
+ * 标题 / 说明再往上两行（基线 106 / 126）⇒ 最早的字顶 ≈ 93 > 80，不出带。
+ *
+ * ⚠️ 只在产品奖励上下文存在**且** `COMPLETE` 时绘制 ⇒ 无参数打开 `run-page.html`
+ *    的既有路径（含全部像素账本）**一个像素都不变**。
+ * ⚠️ 配色刻意**避开**像素账本的调色板（地面 / 路面 / 节点 / 强化图标 / 强调条），
+ *    且 `runPaintedAreas()` 的账本是按**声明几何**算的 ⇒ 卡片不会把任何入账面积算错。
+ */
+export const RUN_REWARD_CHOICES = {
+  insetX: 14,
+  /** 单张卡高。 */
+  h: 68,
+  gap: 8,
+  /** 整块的底锚距离舞台带底部。 */
+  bottomInset: 12,
+  /** 卡内左侧「部件视觉」方框边长（真实 Collider 外接框按 fit 缩放后画在框心）。 */
+  iconBox: 46,
+  pad: 12,
+  /** 标题基线相对**块顶**的偏移（负数 = 在块上方）。 */
+  titleDy: -44,
+  /** 一行说明基线相对**块顶**的偏移。 */
+  noteDy: -24,
+  /** 卡内第一行（名称 + 星级）基线相对**卡顶**的偏移。 */
+  line1Dy: 30,
+  /** 卡内第二行（当前数量 + 领取后预览）基线相对**卡顶**的偏移。 */
+  line2Dy: 52,
+} as const;
+
+/** 本次候选数（默认 3）→ 块高（含卡间距）。 */
+export function runRewardChoicesBlockH(count: number = 3): number {
+  const n = Math.max(1, Math.floor(count));
+  return n * RUN_REWARD_CHOICES.h + (n - 1) * RUN_REWARD_CHOICES.gap;
+}
+
+/** 3选1 整块的顶部 y（自底锚往上生长）。 */
+export function runRewardChoicesTop(count: number = 3): number {
+  const anchor = RUN_STAGE_BAND.y + RUN_STAGE_BAND.h - RUN_REWARD_CHOICES.bottomInset;
+  return anchor - runRewardChoicesBlockH(count);
+}
+
+/**
+ * 三张候选卡的矩形（**绘制与命中共用** ⇒ 不存在「画在这里、点在那里」）。
+ * 返回顺序 = 展示顺序（自上而下），与产品侧给的候选顺序一致。
+ */
+export function runRewardChoiceRects(count: number = 3): RunRect[] {
+  const n = Math.max(1, Math.floor(count));
+  const top = runRewardChoicesTop(n);
+  const x = RUN_STAGE_BAND.x + RUN_REWARD_CHOICES.insetX;
+  const w = RUN_PAGE_W - 2 * RUN_REWARD_CHOICES.insetX;
+  return Array.from({ length: n }, (_, i) => ({
+    x,
+    y: top + i * (RUN_REWARD_CHOICES.h + RUN_REWARD_CHOICES.gap),
+    w,
+    h: RUN_REWARD_CHOICES.h,
+  }));
+}
+
+/** 第 `i` 张卡内左侧的「部件视觉」方框（框心画真实 Collider 外接框）。 */
+export function runRewardChoiceIconRect(i: number, count: number = 3): RunRect {
+  const rects = runRewardChoiceRects(count);
+  const card = rects[Math.max(0, Math.min(rects.length - 1, Math.floor(i)))];
+  const size = RUN_REWARD_CHOICES.iconBox;
+  return {
+    x: card.x + RUN_REWARD_CHOICES.pad,
+    y: card.y + Math.round((card.h - size) / 2),
+    w: size,
+    h: size,
+  };
+}
+
+/**
+ * 第 `i` 张卡右侧的文案锚点（两行，**绝对基线**）：
+ *   - 第一行（基线 `y1`）：名称 + 星级（`加农炮 ★1`）；
+ *   - 第二行（基线 `y2`）：当前数量 + 领取后预览（`拥有 ×4 → 领取后 ×5`）。
+ *
+ * ⚠️ 刻意返回**绝对 y** 而不是相对偏移：相对偏移会留下「挂块顶还是挂图标框」的歧义
+ *    （图标框是卡内垂直居中的，`icon.y = card.y + 11`），接错就是整行字错位 11px 而无人察觉。
+ */
+export function runRewardChoiceTextPos(
+  i: number,
+  count: number = 3,
+): { readonly x: number; readonly y1: number; readonly y2: number } {
+  const rects = runRewardChoiceRects(count);
+  const card = rects[Math.max(0, Math.min(rects.length - 1, Math.floor(i)))];
+  const icon = runRewardChoiceIconRect(i, count);
+  return {
+    x: icon.x + icon.w + RUN_REWARD_CHOICES.pad,
+    y1: card.y + RUN_REWARD_CHOICES.line1Dy,
+    y2: card.y + RUN_REWARD_CHOICES.line2Dy,
+  };
+}
+
+/** 3选1 块的标题锚点（块上方第一行）。 */
+export function runRewardChoiceTitlePos(count: number = 3): { x: number; y: number } {
+  return { x: RUN_STAGE_BAND.x + RUN_REWARD_CHOICES.insetX, y: runRewardChoicesTop(count) + RUN_REWARD_CHOICES.titleDy };
+}
+
+/** 3选1 块的一行说明锚点（块上方第二行）。 */
+export function runRewardChoiceNotePos(count: number = 3): { x: number; y: number } {
+  return { x: RUN_STAGE_BAND.x + RUN_REWARD_CHOICES.insetX, y: runRewardChoicesTop(count) + RUN_REWARD_CHOICES.noteDy };
 }

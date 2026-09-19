@@ -31,9 +31,10 @@
  *   本页面**只有** #run-root / .run-stage / #run-canvas 三层壳，不含任何
  *   Arena / Loadout / Encounter / Start / Reset / Gate 之类的开发控制。
  *
- * ── PRODUCT-LOOP-R1-D：两个终态各自的**唯一**出口（本文件是接线点）─────────────
+ * ── PRODUCT-LOOP-R2-A：两个终态各自的**唯一**出口（本文件是接线点）─────────────
  *
- *     COMPLETE → 「领取并返回」（`productClaimNow()`）→ 宿主整页导航到**领奖地址**
+ *     COMPLETE → **3选1 候选卡**（`rewardChoiceViewsNow()`）→ 点中哪件就走哪件的地址
+ *                （`runSelectedClaim()` → 宿主整页导航；**底栏没有按钮**）
  *     FAILED   → 「返回主界面」（`failSettlementNow()`）→ 宿主整页导航到**纯首页地址**
  *
  *   ⚠️ `FAILED` **不再**走状态机的「终态动作 = 开一个全新 Run」这条边
@@ -42,8 +43,11 @@
  *      ⇒ 「点一下失败 = 悄悄回到 DAY 1 继续跑」在结构上不可能发生（Queue 必改 2 / 必改 6）。
  *   ⚠️ 失败链**没有任何**能创建新 Run 的入口：结算面板只有信息，底部只有「返回主界面」；
  *      宿主没给回程地址时连按钮都不画。新 Run 只能由玩家回首页后重新点「开始冒险」创建。
- *   ⚠️ 失败**不发奖**：奖励出口的前提是 `runComplete(state)`，与失败终态互斥
- *      ⇒ 「失败也发奖」在结构上不可能（Queue 必改 5）。
+ *   ⚠️ 失败**不发奖**：奖励候选的前提是 `runComplete(state)`，与失败终态互斥
+ *      ⇒ 「失败也发奖」在结构上不可能（R2-A 必改 5：无奖励选择 / 无 count 变化 / 无 Profile 增长）。
+ *   ⚠️ COMPLETE 的候选**选中即锁定**（`chosenDefId` 非空后不再接受任何点击）：
+ *      「领一次之后再点别的卡改主意 / 重复发奖」在结构上不可能；
+ *      真正的幂等（同一 Run 只入账一次）由产品侧账本 `grantedRunIds` 保证。
  *
  * 删除本文件即移除 Run Page 核心；本目录可整块删除（清单见 constants.ts 头部）。
  */
@@ -78,9 +82,11 @@ import {
   runFailPanelTextPos,
   runLogLineRects,
   runPaintedAreas,
-  runRewardCardRect,
-  runRewardIconRect,
-  runRewardTextPos,
+  runRewardChoiceIconRect,
+  runRewardChoiceNotePos,
+  runRewardChoiceRects,
+  runRewardChoiceTextPos,
+  runRewardChoiceTitlePos,
   runStageHills,
   type RunLayerId,
   type RunLayeredRect,
@@ -163,21 +169,21 @@ import {
   type RunStageView,
 } from './runPageScene';
 /**
- * PRODUCT-LOOP-R1-B｜RUN COMPLETE 的**产品奖励出口**（纯逻辑 / 纯几何）。
+ * PRODUCT-LOOP-R2-A｜RUN COMPLETE 的**3选1 产品奖励出口**（纯逻辑 / 纯几何）。
  *
- * ⚠️ 只在宿主提供 `RunPageOptions.productReward` 时才产生任何出口
+ * ⚠️ 只在宿主提供 `RunPageOptions.rewardChoices` 时才产生任何出口
  *    ⇒ 无参数打开 `run-page.html` 的既有路径（含像素账本）**逐像素不变**。
  */
 import {
-  RUN_REWARD_CLAIM_LABEL,
+  RUN_REWARD_LOCKED_LABEL,
   RUN_REWARD_NOTE,
   RUN_REWARD_TITLE,
   fitRewardIcon,
-  runProductClaimNow,
-  runRewardCard,
+  runRewardChoiceViews,
+  runSelectedClaim,
   type RunProductClaim,
-  type RunProductReward,
-  type RunRewardCard,
+  type RunRewardChoiceSet,
+  type RunRewardChoiceView,
 } from './runProductReward';
 import {
   RUN_BATTLE_VIEW_H,
@@ -562,25 +568,44 @@ export interface RunPageProbe {
    */
   readonly exitHref: string | null;
   /**
-   * PRODUCT-LOOP-R1-B｜本帧**真正画出来的**「本局获得」卡片（`null` = 本帧没有这张卡）。
+   * PRODUCT-LOOP-R2-A｜本帧**真正画出来的**候选卡（`[]` = 本帧没有 3选1 块）。
    *
-   * ⚠️ 与绘制同源：`rewardCardNow()` 同时决定「画不画」与「探针报什么」，
-   *    因此不存在「探针说有奖励、屏幕上却没有」的分叉。
-   * ⚠️ **FAILED 恒为 `null`**：失败终态结构上没有奖励出口（`runProductClaimNow` 先查 `runComplete`），
-   *    这是 Queue 必改 4「第一版失败不发永久部件奖励」的机器可读证据。
-   * ⚠️ 无产品上下文（不传 `productReward`）时同样恒为 `null` ⇒ 既有入口零变化。
+   * ⚠️ 与绘制 / 命中 / 出口四处**同源**（都走 `rewardChoiceViewsNow()`）⇒ 不存在
+   *    「探针说有卡片、屏幕上却没有」或「画了卡但点了没反应」的分叉。
+   * ⚠️ **FAILED 恒为 `[]`**：失败终态结构上没有奖励出口（`runRewardChoiceViews` 先查
+   *    `runComplete`），这是 R2-A 必改 5「FAILED 无奖励选择 / 无 count 变化 / 无 Profile 增长」
+   *    的机器可读证据。
+   * ⚠️ 无产品上下文（不传 `rewardChoices`）时同样恒为 `[]` ⇒ 既有入口零变化。
    */
-  readonly rewardCard: {
+  readonly rewardChoices: readonly {
     defId: string;
     name: string;
+    star: number;
     energy: number;
-    label: string;
+    countBefore: number;
+    countAfter: number;
+    previewText: string;
+    stackText: string;
+    reachesThreshold: boolean;
     href: string;
-    /** 是否用了该部件的正式 sprite（`false` = 如实回退到真实 Collider 外接框）。 */
     hasSprite: boolean;
-  } | null;
-  /** 卡片矩形（与绘制同源；`null` 同上）。 */
-  readonly rewardCardRect: RunRect | null;
+  }[];
+  /** 三张候选卡的矩形（与绘制 / 命中共用同一个函数；`[]` 同上）。 */
+  readonly rewardChoiceRects: readonly RunRect[];
+  /**
+   * 玩家已经**锁定**的那一件（`null` = 还没选）。
+   *
+   * ⚠️ 这是 Queue 必改 4「当前 reward 被锁定」的可断言形态：一旦非 `null`，
+   *    再点任何别的卡都**不会**改主意（`onPointerDown` 直接 return）。
+   * ⚠️ 选中即整页导航离开 ⇒ 正常流程下探针几乎读不到它；它存在是为了让
+   *    「第二次选择必须 no-op」这条能**在 node 侧被断言**（也是真人误触的兜底）。
+   */
+  readonly chosenDefId: string | null;
+  /**
+   * 产品侧给的载荷里有几条候选被丢弃（`0` = 载荷完全合法）。
+   * ⚠️ 非 0 意味着产品侧出了 bug ⇒ 如实上报，不静默少一个选项。
+   */
+  readonly rewardChoicesDropped: number;
   /**
    * PRODUCT-LOOP-R1-D｜本帧真正画出来的**失败结算**（`null` = 当前不是 `FAILED`）。
    *
@@ -765,20 +790,22 @@ export interface RunPageOptions {
   /**
    * PRODUCT-LOOP-R1-B｜**产品奖励上下文**（省略 / `null` = 不进产品奖励模式）。
    *
-   * 提供后：`RUN COMPLETE` 终点态**多一张「本局获得」卡片**，并且主动作文案变为
-   * 「领取并返回」、点击行为变为「把出口请求交给宿主」。`FAILED` **不受影响**（无奖励、无出口）。
+   * 提供后：`RUN COMPLETE` 终点态**多一组 3选1 候选卡**（每张含名称 / `★1` / 当前数量 /
+   * 领取后数量预览），点击某一张 = 选中并锁定该件 → 把出口请求交给宿主。
+   * `FAILED` **不受影响**（无奖励、无出口）。
    *
    * ⚠️ 与 `exitHref` 一样只是**数据**：`RunPage` 不写 `location` / `history`，
    *    整页导航由宿主的 `onProductClaim` 执行（`RP-25` / `RP-27`）。
    * ⚠️ 这条链**不依赖** Next Run Validation（Queue 冻结项：正式产品闭环不依赖研发工具）。
    */
-  readonly productReward?: RunProductReward | null;
+  readonly rewardChoices?: RunRewardChoiceSet | null;
   /**
-   * PRODUCT-LOOP-R1-B｜「领取并返回」被点击时的处理 —— **由宿主实现**（整页导航回正式首页）。
+   * PRODUCT-LOOP-R1-B｜选中一件候选后的处理 —— **由宿主实现**（整页导航到该件自己的领奖地址）。
    *
-   * ⚠️ 与 `onExit` 同一纪律：`RunPage` 只在「COMPLETE + 有产品上下文 + 有本回调」三者齐备时调用它，
-   *    且**在调用之前**已经 `dispose()`（战斗循环 / 物理世界 / 弹丸 / 接触记录 / 事件订阅）。
-   * ⚠️ 未提供 ⇒ 终点态**不画奖励卡、不画出口按钮**（而不是画一个点了没反应的按钮）。
+   * ⚠️ 与 `onExit` 同一纪律：`RunPage` 只在「COMPLETE + 有产品上下文 + 有本回调」
+   *    三者齐备时**才画候选卡**，且**在调用之前**已经 `dispose()`
+   *    （战斗循环 / 物理世界 / 弹丸 / 接触记录 / 事件订阅）。
+   * ⚠️ 未提供 ⇒ 终点态**不画候选卡、不画出口按钮**（而不是画一张点了没反应的卡）。
    */
   readonly onProductClaim?: ((claim: RunProductClaim) => void) | null;
   /**
@@ -803,7 +830,7 @@ export interface RunPageOptions {
    *
    * ⚠️ 这里只是**数据**：本页面既不读存档、也不写存档、更不做整页导航
    *    （`RP-25` 机器禁止本文件写 `location` / `history`）。导航由宿主执行。
-   * ⚠️ 与 COMPLETE 的 `productReward` **结构上互斥**：失败链拿不到领奖地址
+   * ⚠️ 与 COMPLETE 的 `rewardChoices` **结构上互斥**：失败链拿不到领奖地址
    *    ⇒ 「失败也发奖」不可能发生（Queue 必改 5）。
    */
   readonly failReturn?: RunFailReturn | null;
@@ -850,6 +877,15 @@ export class RunPage {
   private seedChosen: string | null = null;
   /** PRP-M2：第一场结束即停止推进（`NEXT RUN VALIDATION COMPLETE`）。 */
   private validationDone = false;
+  /**
+   * PRODUCT-LOOP-R2-A｜终点 3选1 里已经**锁定**的那一件（`null` = 还没选）。
+   *
+   * ⚠️ 语义 = Queue 必改 4「当前 reward 被锁定」：一旦非 `null`，
+   *    `onPointerDown` 的候选分支立刻 return ⇒ 再点别的卡**不会改主意**。
+   * ⚠️ 与 `seedChosen` 分开：那是**研发验证**的种子选择，与产品奖励无关
+   *    （两者结构上互斥，宿主不同时给 `seedOptions` 与 `rewardChoices`）。
+   */
+  private chosenDefId: string | null = null;
   private rafHandle = 0;
   private lastFrameMs = 0;
   /** 当前遭遇的真实战斗运行时（EVENT 建立 → 回到 IDLE 时释放）。 */
@@ -984,15 +1020,25 @@ export class RunPage {
     }
 
     /*
-      PRODUCT-LOOP-R1-B｜RUN COMPLETE 的**产品奖励出口**。
-      ⚠️ 必须放在 `runActionEnabled(this.state)` **之前**：`COMPLETE` 在状态机里是 `true`
-         （默认唯一动作 = 开一个全新 Run），放过去就会变成「点「领取并返回」= 重开新局」
-         —— 那正是本 Queue 要避免的「奖励没进库存就悄悄开始下一局」。
-      ⚠️ 同样必须 `return`：终点态只接受**自己的唯一出口**，不接受任何推进。
+      PRODUCT-LOOP-R2-A｜RUN COMPLETE 的**产品 3选1 出口**。
+      ⚠️ 与 R1-B 同一条顺序纪律：必须放在 `runActionEnabled(this.state)` **之前**，且必须 `return`。
+         `COMPLETE` 在状态机里是 `true`（默认唯一动作 = 开一个全新 Run），放过去就会变成
+         「点候选卡 = 悄悄重开新局」。
+      ⚠️ **锁定**（Queue 必改 4「当前 reward 被锁定」）：选过之后本分支彻底不再接受任何点击
+         —— 第二次点别的卡**不会改主意**，也不会重复发奖。终点态不接受推进、也不接受改选。
+      ⚠️ 有候选卡时，`return` 掉所有落空点击：终点态上不存在「点空白 = 继续」这种隐式推进。
     */
-    const claim = this.productClaimNow();
-    if (claim) {
-      if (hit(runActionButtonRect(), p)) this.requestProductClaim(claim);
+    const choiceViews = this.rewardChoiceViewsNow();
+    if (choiceViews.length > 0) {
+      if (this.chosenDefId !== null) return; // 已锁定 ⇒ 不再接受任何选择
+      const rects = runRewardChoiceRects(choiceViews.length);
+      for (let i = 0; i < choiceViews.length; i++) {
+        if (hit(rects[i], p)) {
+          const claim = runSelectedClaim(this.state, this.opts.rewardChoices, choiceViews[i].defId);
+          if (claim) this.requestProductClaim(claim);
+          return;
+        }
+      }
       return;
     }
 
@@ -1110,25 +1156,13 @@ export class RunPage {
   }
 
   /**
-   * PRODUCT-LOOP-R1-B｜终点态的**产品奖励出口**（`COMPLETE` + 产品上下文 + 宿主回调三者齐备才有值）。
-   *
-   * **唯一真源**：按钮文案 / 点击行为 / 探针三处都从这一个方法取
-   * ⇒ 「画了奖励但领不到」「有按钮但无 action」在结构上都不可能。
-   * ⚠️ `FAILED` 恒为 `null`（`runProductClaimNow` 先查 `runComplete`）—— 必改 4 的结构保证。
-   */
-  private productClaimNow(): RunProductClaim | null {
-    if (!this.opts.onProductClaim) return null;
-    return runProductClaimNow(this.state, this.opts.productReward);
-  }
-
-  /**
    * PRODUCT-LOOP-R1-D｜失败终态的**唯一真源**（结算内容 + 唯一出口）。
    *
    * **唯一真源**：结算面板文案 / 主动作按钮文案 / 点击行为 / 探针四处都从这一个方法取
    * ⇒ 「画了结算但去不了首页」「有按钮但无 action」在结构上都不可能。
    *
    * ⚠️ 只有「`FAILED` + 宿主给了 `failReturn` + 宿主给了 `onFailReturn`」三者齐备时
-   *    `href` 才非空 ⇒ 按钮才画得出来（口径与 `exitHref`/`onExit`、`productReward`/`onProductClaim`
+   *    `href` 才非空 ⇒ 按钮才画得出来（口径与 `exitHref`/`onExit`、`rewardChoices`/`onProductClaim`
    *    完全一致）。三缺一时**结算照常呈现**，只是没有出口按钮。
    * ⚠️ 本方法**从不**包含「重开一局」这条边（Queue 必改 6）。
    */
@@ -1138,26 +1172,32 @@ export class RunPage {
   }
 
   /**
-   * 本帧要画的「本局获得」卡片（`null` = 不画）。
-   * ⚠️ 与 `productClaimNow()` **同源**：有出口才有卡片，没有出口就没有卡片。
-   * ⚠️ 卡片内容里的名称 / 能量 / 外接框全部来自正式内容库（`runRewardCard`），
-   *    未知 id 一律 `null`（不画假奖励）。
+   * 本帧要画的**候选卡视图**（`[]` = 不画那一组）。
+   *
+   * ⚠️ **唯一真源**：绘制 / 命中 / 探针 / 出口四处都走它
+   *    ⇒ 「画了卡片但选不了」「选了但没地址」在结构上都不可能。
+   * ⚠️ 与「有出口」同源：宿主没给 `onProductClaim` ⇒ 恒 `[]`（不画一张点了没反应的卡）。
+   * ⚠️ 卡片内容里的名称 / 能量 / 外接框全部来自正式内容库（`rewardChoiceView`），
+   *    未知 / 非 weapon / 读数非法的候选在解析时就被丢弃并计入 `dropped`（不画假奖励）。
    */
-  private rewardCardNow(): RunRewardCard | null {
-    if (!this.productClaimNow()) return null;
-    return runRewardCard(this.opts.productReward?.defId);
+  private rewardChoiceViewsNow(): readonly RunRewardChoiceView[] {
+    if (!this.opts.onProductClaim) return [];
+    return runRewardChoiceViews(this.state, this.opts.rewardChoices);
   }
 
   /**
    * 主动作是否可用。
    * ⚠️ 默认路径（`validationDone` 恒为 `false`）与 `runActionEnabled(state)` 完全等价。
-   * ⚠️ 终点态：有出口 ⇒ 可用（这是本状态下**唯一**可点的东西）；无出口 ⇒ 不可用（且不画）。
+   * ⚠️ PRODUCT-LOOP-R2-A：COMPLETE 的主动作**变成了三张候选卡本身**
+   *    （它们各自带 `href`，是真正的出口）⇒ 底部那条通用按钮**不再参与**终点态：
+   *    这里返回 `false`，`drawActionButton()` 会短路不画
+   *    ⇒ 结构上不存在「有按钮但点了没反应」（PRP-M2-R1 的 P0 教训）。
    * ⚠️ PRODUCT-LOOP-R1-D：`FAILED` **不再**走状态机的「终态动作 = 开新局」——
    *    它只认「返回主界面」这条出口；宿主没给地址 ⇒ 不可用（并且不画），
    *    因此失败后**没有任何**能创建新 Run 的入口（Queue 必改 6）。
    */
   private actionEnabledNow(): boolean {
-    if (this.productClaimNow()) return true;
+    if (this.rewardChoiceViewsNow().length > 0) return false; // 出口在卡片上，不在底栏
     const fail = this.failSettlementNow();
     if (fail) return fail.href !== '';
     if (this.validationDone) return this.finalActionNow() !== null;
@@ -1167,13 +1207,13 @@ export class RunPage {
   /**
    * 主动作文案。
    * ⚠️ 默认路径与 `runActionLabel(state)` 完全等价；终点态 = 出口动作的文案（不是状态描述）。
-   * ⚠️ 产品奖励出口优先于验证出口（两者结构上互斥：验证宿主不给 `productReward`，
-   *    产品宿主不给 `exitHref`/`onExit`；万一同时给出，产品闭环优先）。
+   * ⚠️ 产品 3选1 终态的主动作在卡片上 ⇒ 这里回退到状态机文案（真正决定玩家看到的
+   *    是那三张卡；底部按钮反正不画）。这样 `actionLabel` 在探针里也不会假装
+   *    底栏有一个「可领奖」的按钮。
    * ⚠️ PRODUCT-LOOP-R1-D：`FAILED` 的文案恒为「返回主界面」（**不是**状态机里的
    *    「重新开始冒险」）—— 失败页不提供重开。
    */
   private actionLabelNow(): string {
-    if (this.productClaimNow()) return RUN_REWARD_CLAIM_LABEL;
     if (this.failSettlementNow()) return RUN_FAIL_RETURN_LABEL;
     const exit = this.finalActionNow();
     return exit ? exit.label : runActionLabel(this.state);
@@ -1201,9 +1241,14 @@ export class RunPage {
   }
 
   /**
-   * PRODUCT-LOOP-R1-B｜「领取并返回」：清理本页运行期状态，然后把**奖励领取请求**交给宿主。
+   * PRODUCT-LOOP-R2-A｜**选中一件候选**：锁定 → 清理本页运行期状态 → 把**领取请求**交给宿主。
    *
-   * ⚠️ 与 `requestExit` 同一纪律 —— **先清理、再交给宿主**；导航是异步的，不能依赖它释放运行时。
+   * ⚠️ 与 `requestExit` / `requestFailReturn` 同一纪律 —— **先清理、再交给宿主**；
+   *    导航是异步的，不能依赖它释放运行时。
+   * ⚠️ **锁定先于一切**（Queue 必改 4「当前 reward 被锁定」）：`chosenDefId` 在
+   *    `dispose()` **之前**写入，因此即使宿主不导航（或导航被拦下），本页也已经
+   *    处于「已选定、不接受改选」的状态 —— 再点别的卡走 `onPointerDown` 的
+   *    `chosenDefId !== null` 早退分支，什么都不做。
    * ⚠️ **本页不写库存、不写存档**（Lab 白名单里没有 `core/buildPersistence` / `core/partInventory`），
    *    也不做整页导航（`RP-25`）。「入库」与「回首页」由产品侧完成：
    *    宿主把请求变成一次带 `run`/`reward` 参数的整页导航 → 产品首页的 Profile Repository
@@ -1211,6 +1256,7 @@ export class RunPage {
    * ⚠️ 幂等键 = `runToken`（产品侧生成）：重复点击 / 重复结算由产品侧仓库拦截，本页不做乐观发奖。
    */
   private requestProductClaim(claim: RunProductClaim): void {
+    this.chosenDefId = claim.defId;
     this.dispose();
     this.seedSelect = null;
     if (this.opts.onProductClaim) this.opts.onProductClaim(claim);
@@ -1496,13 +1542,13 @@ export class RunPage {
     // 5) 最底：唯一主动作按钮（填充承载文案 → 不入账；底部强调条入账）
     this.drawActionButton(ctx);
 
-    // 5b) PRODUCT-LOOP-R1-B：RUN COMPLETE 的「本局获得」卡片
-    //     ⚠️ 只在**产品奖励出口真的存在**时绘制（`rewardCardNow()` 与出口同源）
-    //        ⇒ 既有入口（不带产品上下文）一个像素都不变。
+    // 5b) PRODUCT-LOOP-R2-A：RUN COMPLETE 的**3选1**永久武器部件候选
+    //     ⚠️ 只在**产品奖励上下文真的存在且本局 COMPLETE** 时绘制
+    //        （`rewardChoiceViewsNow()` 与命中 / 出口同源）⇒ 既有入口一个像素都不变。
     //     ⚠️ 位置在**舞台带内、底部对齐**：不与日志带叙事 / 动作带按钮争位。
-    //     ⚠️ 复用**已有**的非入账配色（cardBg / cardEdge / dayAccent / text*），
-    //        不引入任何新色 ⇒ 与像素账本调色板天然互斥。
-    this.drawRewardCard(ctx);
+    //     ⚠️ 复用**已有**的非入账配色（cardBg / cardEdge / pageBg / dayAccent / text* / wheelRim），
+    //        不引入任何新色 ⇒ 与像素账本调色板天生互斥。
+    this.drawRewardChoiceCards(ctx);
 
     // 5c) PRODUCT-LOOP-R1-D：RUN FAILED 的**失败结算面板**
     //     ⚠️ 与 5b) 是**互斥**终态（COMPLETE / FAILED 不可能同时成立）⇒ 复用同一个槽位。
@@ -1778,73 +1824,116 @@ export class RunPage {
     ctx.textAlign = 'left';
   }
 
-  /* --------------------------------------------- RUN COMPLETE：本局获得卡片 */
+  /* --------------------------------------- RUN COMPLETE：3选1 奖励候选卡 */
 
   /**
-   * PRODUCT-LOOP-R1-B｜「本局获得」卡片（Queue 必改 3：RUN COMPLETE 从测试结算变成**产品结算**）。
+   * PRODUCT-LOOP-R2-A｜**3选1** 永久武器部件候选（Queue 必改 4）。
    *
-   * 这一张卡承担四件事，全部只陈述**真的发生了**的东西：
-   *   - 标题「本局获得」；
-   *   - 部件**名称**（来自正式内容库 `registry.functionals`，不是页面上另写一份字面量）；
-   *   - 「**最低必要视觉**」= 该部件真实 Collider 的外接框（`rewardColliderGeom`）；
-   *     该部件没有正式 sprite 时**明确标注**（`hasSprite === false`）—— 不假装用了真实美术；
-   *   - 一行说明「领取后进入你的车库」—— 是**承诺**（点击才发生），不是已完成的状态描述。
+   * 与 R1-B 的「单张本局获得卡」相比，只多了一件玩家真正在做决定时需要的事实：
+   *   - 三张卡 = 产品侧给的三条候选（`rewardChoiceViewsNow()`，顺序原样保留）；
+   *   - 每张卡第一行：部件**名称** + `★{star}`（都来自正式内容库，不是页面上另写一份字面量）；
+   *   - 每张卡第二行：**当前库存数量 → 领取后数量**（`拥有 ×4 · 领取后 ×5`）——
+   *     这是「相同部件可以累积数量」在玩家眼前唯一能看见的证据（Queue 必改 4 第四项）；
+   *   - 达到满 stack 的那张卡用 `dayAccent` 强调 + 显示 `5/5`（第一局选 cannon 就会看到）；
+   *   - 左侧仍是**最低必要视觉** = 该部件真实 Collider 的外接框（`rewardColliderGeom`），
+   *     没有正式 sprite 时如实标注（`hasSprite === false`）—— 不假装用了真实美术。
    *
-   * ⚠️ 卡片不做任何动画 / 稀有度 / 宝箱 / 多奖励（Queue 明令「不做」清单）。
-   * ⚠️ 数值只展示正式定义里的**能量**（`def.energy`），本 Queue 不新增任何数值系统。
-   * ⚠️ 绘制 / 探针同源：探针里的 `rewardCardRect` 直接来自 `runRewardCardRect()`。
+   * ⚠️ 选中即**锁定**：`chosenDefId` 非空后在被选中的卡上画「已选择」，其余卡不再响应
+   *    （见 `onPointerDown` 的早退分支）。锁定是**不可撤销**的，真正的幂等由产品侧账本保证。
+   * ⚠️ 块**自底锚向上生长**（`runRewardChoicesTop`）⇒ 与失败结算面板共用同一个底锚，
+   *    切换终态时第一行文字不会跳。
+   * ⚠️ 颜色全部取自既有**非入账**色（cardBg / cardEdge / pageBg / dayAccent / text* / wheelRim）
+   *    ⇒ 与像素账本调色板天然互斥，且账本按**声明几何**计算 ⇒ 这一块一个像素都不入账。
+   * ⚠️ 不做动画 / 稀有度 / 宝箱 / 概率 / 品质（Queue 明令「禁止」清单）。
    */
-  private drawRewardCard(ctx: CanvasRenderingContext2D): void {
-    const card = this.rewardCardNow();
-    if (!card) return;
+  private drawRewardChoiceCards(ctx: CanvasRenderingContext2D): void {
+    const views = this.rewardChoiceViewsNow();
+    if (views.length === 0) return;
 
-    const r = runRewardCardRect();
-    ctx.fillStyle = COLORS.cardBg;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.strokeStyle = COLORS.cardEdge;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+    const n = views.length;
+    const rects = runRewardChoiceRects(n);
 
-    // ① 左侧：真实 Collider 外接框（无 sprite 时如实标注，不画 sprite 冒充）
-    const box = runRewardIconRect();
-    ctx.fillStyle = COLORS.pageBg;
-    ctx.fillRect(box.x, box.y, box.w, box.h);
-    ctx.strokeStyle = COLORS.cardEdge;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
-    const fit = fitRewardIcon(card, box.w - 16, box.h - 16);
-    const shapeX = box.x + Math.round((box.w - fit.w) / 2);
-    const shapeY = box.y + Math.round((box.h - fit.h) / 2);
-    ctx.fillStyle = COLORS.wheelRim;
-    if (card.round) {
-      ctx.beginPath();
-      ctx.ellipse(shapeX + fit.w / 2, shapeY + fit.h / 2, fit.w / 2, fit.h / 2, 0, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.fillRect(shapeX, shapeY, fit.w, fit.h);
-    }
-
-    // ② 右侧：标题 / 名称 / 一行说明
-    const text = runRewardTextPos();
+    // 块上方：标题 + 一行承诺（承诺而非已完成 —— 入库发生在点中之后）
+    const title = runRewardChoiceTitlePos(n);
     ctx.fillStyle = COLORS.dayAccent;
     ctx.font = `13px ${FONT_STACK}`;
-    ctx.fillText(RUN_REWARD_TITLE, text.x, text.y);
+    ctx.fillText(RUN_REWARD_TITLE, title.x, title.y);
 
-    ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `bold 21px ${FONT_STACK}`;
-    ctx.fillText(card.name, text.x, text.y + 30);
-
+    const note = runRewardChoiceNotePos(n);
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `12px ${FONT_STACK}`;
-    const note = card.hasSprite
-      ? `能量 ${card.energy} · ${RUN_REWARD_NOTE}`
-      : `能量 ${card.energy} · ${RUN_REWARD_NOTE} · 暂无美术（按碰撞体显示）`;
-    ctx.fillText(this.ellipsize(ctx, note, r.x + r.w - text.x - 12), text.x, text.y + 52);
+    ctx.fillText(this.ellipsize(ctx, RUN_REWARD_NOTE, RUN_STAGE_BAND.w - 2 * 14), note.x, note.y);
 
-    // ③ 图标框右下角：部件 id（最小必要的技术标识，便于与工厂/测试对上）
-    ctx.fillStyle = COLORS.textFaint;
-    ctx.font = `10px ${FONT_STACK}`;
-    ctx.fillText(card.defId, box.x + 4, box.y + box.h - 5);
+    for (let i = 0; i < n; i++) {
+      const view = views[i];
+      const r = rects[i];
+      const locked = this.chosenDefId === view.defId;
+
+      // ① 卡片底 + 描边（被选中的那张：加一圈强调描边 = 锁定）
+      ctx.fillStyle = COLORS.cardBg;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = locked ? COLORS.dayAccent : COLORS.cardEdge;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+
+      // ② 左侧：真实 Collider 外接框（无 sprite 时如实标注，不画 sprite 冒充）
+      const box = runRewardChoiceIconRect(i, n);
+      ctx.fillStyle = COLORS.pageBg;
+      ctx.fillRect(box.x, box.y, box.w, box.h);
+      ctx.strokeStyle = COLORS.cardEdge;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+      const fit = fitRewardIcon(view, box.w - 12, box.h - 12);
+      const shapeX = box.x + Math.round((box.w - fit.w) / 2);
+      const shapeY = box.y + Math.round((box.h - fit.h) / 2);
+      ctx.fillStyle = COLORS.wheelRim;
+      if (view.round) {
+        ctx.beginPath();
+        ctx.ellipse(shapeX + fit.w / 2, shapeY + fit.h / 2, fit.w / 2, fit.h / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(shapeX, shapeY, fit.w, fit.h);
+      }
+
+      // ③ 图标框右下角：部件 id（最小必要的技术标识，便于与工厂/测试对上）
+      ctx.fillStyle = COLORS.textFaint;
+      ctx.font = `10px ${FONT_STACK}`;
+      ctx.fillText(view.defId, box.x + 4, box.y + box.h - 5);
+
+      // ④ 右侧两行：名称 + ★ / 当前数量 → 领取后数量
+      const text = runRewardChoiceTextPos(i, n);
+      const nameText = `${view.name} ★${view.star}`;
+      ctx.fillStyle = view.reachesThreshold ? COLORS.dayAccent : COLORS.textTitle;
+      ctx.font = `bold 19px ${FONT_STACK}`;
+      ctx.fillText(this.ellipsize(ctx, nameText, r.x + r.w - text.x - 12), text.x, text.y1);
+
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = `12px ${FONT_STACK}`;
+      /**
+       * PRODUCT-LOOP-R2-A：第二行**统一**是「当前数量 → 领取后数量」（Queue 必改 4 明列）。
+       * ⚠️ 刻意**不**在这里换写法：一张卡如果一会儿显示 `×4`、一会儿显示 `4/5`，
+       *    玩家就没法在三张卡之间横向比较（而横向比较正是「选哪件」的唯一依据）。
+       *    「这件选下去就满了」由**第一行的颜色**（`reachesThreshold` → `dayAccent`）承担。
+       */
+      const countText = `拥有 ×${view.countBefore} → 领取后 ×${view.countAfter}`;
+      ctx.fillText(this.ellipsize(ctx, countText, r.x + r.w - text.x - 12), text.x, text.y2);
+
+      // ⑤ 锁定标记（不可撤销）
+      if (locked) {
+        ctx.fillStyle = COLORS.dayAccent;
+        ctx.font = `13px ${FONT_STACK}`;
+        ctx.textAlign = 'right';
+        ctx.fillText(RUN_REWARD_LOCKED_LABEL, r.x + r.w - 12, r.y + 26);
+        ctx.textAlign = 'left';
+      }
+
+      // ⑥ 无正式美术时如实标注（不伪装成已用真实美术）
+      if (!view.hasSprite) {
+        ctx.fillStyle = COLORS.textFaint;
+        ctx.font = `10px ${FONT_STACK}`;
+        ctx.fillText('暂无美术', r.x + r.w - 58, r.y + r.h - 8);
+      }
+    }
   }
 
   /* ------------------------------------------ RUN FAILED：失败结算面板 */
@@ -2251,12 +2340,14 @@ export class RunPage {
   ): Omit<RunPageProbe, 'stage' | 'battleWorld' | 'battleAssets'> {
     const ctxForNode = runCurrentNode(s);
     /*
-      PRODUCT-LOOP-R1-B：本帧真正画出来的奖励卡 + 它的出口（与绘制同源：都走
-      `rewardCardNow()` / `productClaimNow()`）。放在这里是因为 `baseProbe` 就是
+      PRODUCT-LOOP-R2-A：本帧真正画出来的**3选1 候选**（与绘制 / 命中 / 出口同源：
+      四处都走 `rewardChoiceViewsNow()`）。放在这里是因为 `baseProbe` 就是
       「与 phase 无关的那部分诊断快照」的唯一装配点。
+      ⚠️ 刻意**不**再算一份「锁定后的出口」：锁定那一刻宿主就整页导航走了，
+         页面上不存在「锁定但还没走」的稳定帧；每条候选的去向在 `rewardChoices[].href`
+         里已经逐条可读（由产品侧给全，Lab 不产出）。
     */
-    const rewardCard = this.rewardCardNow();
-    const rewardClaim = this.productClaimNow();
+    const choiceViews = this.rewardChoiceViewsNow();
     /*
       PRODUCT-LOOP-R1-D：本帧真正画出来的**失败结算** + 它的唯一出口
       （与绘制 / 命中同源：三处都走 `failSettlementNow()`）。`null` = 当前不是 FAILED。
@@ -2332,27 +2423,40 @@ export class RunPage {
       actionRect: runActionButtonRect(),
       /**
        * ⚠️ PRP-M2-R1：与 `actionLabel` 同源 —— 终点态下「点了去哪」也是本帧的真实口径。
-       * PRODUCT-LOOP-R1-B 起同源口径扩到产品奖励出口（产品出口优先于验证出口；
-       * 两者结构上互斥 —— 验证宿主不给 `productReward`，产品宿主不给 `exitHref`）。
+       * PRODUCT-LOOP-R1-D 起含失败终态的唯一出口（`failExitHref`）。
+       * PRODUCT-LOOP-R2-A 起**不再含产品奖励**：3选1 的出口在**卡片上**，不在底栏
+       *   （`actionEnabledNow()` 有候选时恒 `false` ⇒ 底栏按钮不画）。
+       *   每条候选自己的去向见 `rewardChoices[].href`；选过之后见 `chosenDefId`。
+       *   ⇒ 本字段对 `COMPLETE` 通常为 `null`，这是**正确**读数而不是「出口丢了」。
        */
-      exitHref: rewardClaim?.href ?? failExitHref ?? this.finalActionNow()?.href ?? null,
+      exitHref: failExitHref ?? this.finalActionNow()?.href ?? null,
       /**
-       * PRODUCT-LOOP-R1-B｜本帧真正画出来的「本局获得」卡片（`null` = 本帧没有这张卡）。
-       * ⚠️ 与绘制同源（同一个 `rewardCardNow()`）；**FAILED 恒为 `null`**
-       *    （失败终态结构上没有奖励，Queue 必改 4）；不带产品上下文时同样恒为 `null`。
+       * PRODUCT-LOOP-R2-A｜本帧真正画出来的**3选1 候选**（`[]` = 本帧没有这一块）。
+       *
+       * ⚠️ 与绘制 / 命中 / 出口**同源**（都走 `rewardChoiceViewsNow()`）；
+       *    **FAILED 恒为 `[]`**、不带产品上下文同样恒为 `[]`。
+       * ⚠️ `href` 逐条来自产品侧给的那份载荷（Lab 不产出任何产品地址）——
+       *    这样「三张卡各自去哪」在 node 侧就是可断言的，不必真的点。
        */
-      rewardCard: rewardCard
-        ? {
-            defId: rewardCard.defId,
-            name: rewardCard.name,
-            energy: rewardCard.energy,
-            label: RUN_REWARD_CLAIM_LABEL,
-            href: rewardClaim?.href ?? '',
-            hasSprite: rewardCard.hasSprite,
-          }
-        : null,
-      /** 卡片矩形（与绘制同源；`null` 同上）。 */
-      rewardCardRect: rewardCard ? runRewardCardRect() : null,
+      rewardChoices: choiceViews.map((v) => ({
+        defId: v.defId,
+        name: v.name,
+        star: v.star,
+        energy: v.energy,
+        countBefore: v.countBefore,
+        countAfter: v.countAfter,
+        previewText: v.previewText,
+        stackText: v.stackText,
+        reachesThreshold: v.reachesThreshold,
+        href: this.opts.rewardChoices?.choices.find((c) => c.defId === v.defId)?.href ?? '',
+        hasSprite: v.hasSprite,
+      })),
+      /** 候选卡矩形（与绘制 / 命中共用同一个函数；`[]` 同上）。 */
+      rewardChoiceRects: choiceViews.length > 0 ? runRewardChoiceRects(choiceViews.length) : [],
+      /** 已锁定的那一件（`null` = 还没选）；锁定后本帧的出口见 `chosenClaim`。 */
+      chosenDefId: this.chosenDefId,
+      /** 解析时被丢弃的非法候选条数（`> 0` = 产品侧载荷有坏条目，需被看见）。 */
+      rewardChoicesDropped: this.opts.rewardChoices?.dropped ?? 0,
       /**
        * PRODUCT-LOOP-R1-D｜本帧真正画出来的失败结算（`null` = 当前不是 `FAILED`）。
        * ⚠️ 与绘制同源（同一个 `failSettlementNow()`）；`href === ''` = 没有出口按钮。

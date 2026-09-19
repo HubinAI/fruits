@@ -57,9 +57,11 @@ const CLAIMS_KEY = 'strongfruit.profileClaims.v1';
 const WEAPON_SLOT = 'frontMass';
 /** 失败回程地址的参数名（产品侧与 Lab 侧的唯一约定）。 */
 const HOME_PARAM = 'home';
-/** 领奖参数名（失败链**结构上**不该拿到）。 */
+/** 领奖参数名（失败链**结构上**不该拿到；R2-A 起它只出现在每条候选自己的 href 里）。 */
 const REWARD_PARAM = 'reward';
 const RUN_PARAM = 'run';
+/** PRODUCT-LOOP-R2-A：3选1 候选载荷（三条候选**各自**的领奖地址）。 */
+const CHOICES_PARAM = 'choices';
 
 /** 打不过的武器：近战锤，第一场就被打死（实测）。 */
 const LOSE_WEAPON = 'hammer';
@@ -304,16 +306,26 @@ async function main() {
       `equipped=${home0.equippedWeaponId} href=${(home0.startRunHref ?? '').slice(0, 60)}…`,
     );
 
-    // 产品侧必须把**两个**出口都给全：成功回哪儿（领奖地址）+ 失败回哪儿（纯首页）
+    // 产品侧必须把**两类**出口都给全：成功有哪几个去处（三条候选的领奖地址）+ 失败回哪儿（纯首页）
     const startHref = home0.startRunHref ?? '';
     const startQ = new URLSearchParams(startHref.split('?')[1] ?? '');
-    const backHref = startQ.get('back') ?? '';
+    /*
+      ⚠️ PRODUCT-LOOP-R2-A 的契约变更：成功侧不再是「一个 back」，而是 `choices` 载荷里
+      **每条候选各自的**领奖地址（三条 defId 不同 ⇒ 目的地必然不同）。
+    */
+    const choicesRaw = startQ.get(CHOICES_PARAM) ?? '';
+    const choices = choicesRaw ? JSON.parse(choicesRaw).choices ?? [] : [];
+    const claimHrefs = choices.map((c) => c.href);
     const homeHref = startQ.get(HOME_PARAM) ?? '';
     const homeQ = new URLSearchParams(homeHref.split('?')[1] ?? '');
     log(
-      backHref !== '' && homeHref !== '' && backHref !== homeHref,
-      'A2 出发链接同时带「成功回哪儿」与「失败回哪儿」，且两者是两个不同地址',
-      `back=${backHref} home=${homeHref}`,
+      claimHrefs.length === 3 &&
+        claimHrefs.every((h) => typeof h === 'string' && h !== '') &&
+        homeHref !== '' &&
+        claimHrefs.every((h) => h !== homeHref) &&
+        !startQ.has(REWARD_PARAM),
+      'A2 出发链接同时给全「成功有哪几个去处」（三条候选各自的领奖地址）与「失败回哪儿」，且成功侧**没有**裸 `reward=`',
+      `choices=${claimHrefs.map((h) => h.replace('./home.html?', '')).join(' ')} home=${homeHref}`,
     );
     log(
       !homeQ.has(RUN_PARAM) && !homeQ.has(REWARD_PARAM) && homeQ.toString() === '',
@@ -402,15 +414,18 @@ async function main() {
       pFail.actionLabel === '返回主界面' &&
         pFail.actionEnabled === true &&
         pFail.exitHref === homeHref &&
-        pFail.exitHref !== backHref &&
+        !claimHrefs.includes(pFail.exitHref) &&
         pFail.actionLabel !== '重新开始冒险',
-      'C4 底部**唯一**主 CTA =「返回主界面」，出口 = 产品侧给的**纯首页**地址（不是领奖地址、更不是「重新开始冒险」，必改 3 / 必改 6）',
-      `label=${pFail.actionLabel} enabled=${pFail.actionEnabled} exit=${pFail.exitHref}（领奖地址=${backHref}）`,
+      'C4 底部**唯一**主 CTA =「返回主界面」，出口 = 产品侧给的**纯首页**地址（不是三条领奖地址中的任何一条、更不是「重新开始冒险」，必改 3 / 必改 6）',
+      `label=${pFail.actionLabel} enabled=${pFail.actionEnabled} exit=${pFail.exitHref}（候选领奖地址=${claimHrefs.join(' ')}）`,
     );
     log(
-      pFail.rewardCard === null && pFail.rewardCardRect === null,
-      'C5 失败**不发永久奖励**：奖励卡 / 卡片矩形双双为空（必改 5）',
-      `rewardCard=${pFail.rewardCard} rewardCardRect=${pFail.rewardCardRect}`,
+      pFail.rewardChoices.length === 0 &&
+        pFail.rewardChoiceRects.length === 0 &&
+        pFail.chosenDefId === null &&
+        pFail.rewardChoicesDropped === 0,
+      'C5 失败**不发永久奖励**：3选1 候选 / 候选矩形 / 已选件三方皆为空（必改 5；载荷本身合法，不是靠「解析失败」才没有奖励）',
+      `choices=${pFail.rewardChoices.length} rects=${pFail.rewardChoiceRects.length} chosen=${pFail.chosenDefId} dropped=${pFail.rewardChoicesDropped}`,
     );
     const domButtons = await page.evaluate(() => window.__RUNPAGE__.probe().domButtons);
     log(

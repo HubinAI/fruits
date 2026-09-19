@@ -1,18 +1,24 @@
 /**
- * PRODUCT-LOOP-R1-B-RUN-REWARD-PERMANENT-INVENTORY｜
- * 「打完一局 → 获得永久部件 → 部件真正进入局外库存 → 回车库看到」的**浏览器真实闭环 smoke**。
+ * PRODUCT-LOOP-R2-A-REWARD-STACK-INVENTORY｜
+ * 「打完一局 → **三选一** → 选中那件进入局外库存 → 数量累积 → 回车库看到」的**浏览器真实闭环 smoke**。
  *
  * 手段（与 `_e2e_product_home.cjs` 同一纪律，全部是真实行为取证）：
  *   - 真实浏览器（playwright-core / msedge），打开独立产物 `dist-portrait-lab/`；
  *   - **真实鼠标点击**（`page.mouse.click`，逻辑坐标 → 画布真实 CSS 矩形换算；不 evaluate 直调）；
  *   - **真实整页导航**（`<a href>` / `location.assign` 都由浏览器执行，不做 evaluate 跳转）；
  *   - **真实 localStorage 读取**（证明入库写进的是**正式存档 key**，而不是页面内存）；
- *   - **真实 `getImageData` 像素取证**（证明「本局获得」卡片真的画在画布上，不是只有探针字段）；
+ *   - **真实 `getImageData` 像素取证**（证明三张候选卡真的画在画布上，不是只有探针字段）；
  *   - 只读诊断句柄 `window.__PRODUCTHOME__` / `window.__RUNPAGE__`（只读，不能借它改状态）。
  *
- * 覆盖 Queue 技术验收 1~7（第 8 条 = tsc / targeted / build 在门禁里跑）：
- *   ① RUN COMPLETE 出现真实奖励；② 领取一次后进入 Inventory；③ 重复领取不能重复发奖；
- *   ④ FAILED 不获得奖励；⑤ 返回首页后状态存在；⑥ Garage 能看到新部件；⑦ Reload 后状态保持。
+ * 覆盖 R2-A 技术验收 1~8（第 9 条 = tsc / targeted / build 在门禁里跑）：
+ *   ① fresh profile cannon = ★1 ×4      → A2 / A3
+ *   ② COMPLETE 出现 3 个真实 Weapon 奖励 → C3 / C6
+ *   ③ 选择 cannon 后变成 ×5             → D4（第一局）
+ *   ④ 选择其它 Weapon 只增加对应 stack   → H4（第二局选 hammer：1 → 2，cannon 仍 5）
+ *   ⑤ 同一奖励只能领取一次               → E1/E2/E3（同 token **换一件**也领不到）
+ *   ⑥ FAILED 数量完全不变                → I2 / I5
+ *   ⑦ old Profile migration 不丢数据     → 由 `tests/playerGrowthR2A.test.ts` 的 PG-07~PG-10 离线钉死
+ *   ⑧ Equipped 仍指向有效库存实例         → 同上（PG-11~PG-14）
  *
  * ⚠️ 两条路线都是**确定性**的（`RunBattleRuntime` 无 RNG，`portraitRunPage.test.ts` 的
  *    `FROZEN_REPAIR` / `FROZEN_UPGRADE` 已冻结）：
@@ -20,6 +26,10 @@
  *      失败：一层 `twinCannon` + 耐久事件选「继续改装」（多拿 `heavyShell`）+ 二层 `tripleLoad`
  *            → 终局耐久归零 → **FAILED（不经过 RESULT）**
  *    两条路线**只差一次点击**，因此「失败不发奖」是同一台机器上的真实对照，不是构造出来的状态。
+ *
+ * ⚠️ 为什么本文件要跑**两局成功**：R2-A 的核心是「数量会累积」，而「累积」只有在
+ *    **第二局的读数与第一局不同**时才是可观测的事实。一局只能证明「+1」，两局才能证明
+ *    「同一个 stack 会一直长，而别的 stack 不会跟着长」（验收 ③ 与 ④ 是同一台机器上的对照）。
  *
  * 用法：
  *   npm run build:portrait-lab
@@ -44,9 +54,23 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-/** 本 Queue 的固定奖励（与 `src/product/runReward.ts` 的 `REWARD_WEAPON_ID` 同值）。 */
-const REWARD_ID = 'laser';
-const REWARD_NAME = '镭射';
+/**
+ * 3选1 的三条候选（与 `src/product/runReward.ts` 的 `REWARD_CHOICE_IDS` 同值）。
+ * ⚠️ 全是**玩家一开始就拥有**的正式 Weapon ⇒ 本 Queue 不发新内容，
+ *    奖励的价值体现在**数量**上（4 → 5），而不是「从无到有」。
+ */
+const CHOICE_IDS = ['cannon', 'spear', 'hammer'];
+const NAMES = { cannon: '炮', spear: '刺', hammer: '锤' };
+/** 满 stack 阈值（与 `playerGrowth.FUSE_STACK` 同值；页面读数也必须是它）。 */
+const FUSE_STACK = 5;
+/**
+ * 新账号的成长起点读数（真源 = `src/product/playerGrowth.ts` 的 `FRESH_STACK_SEED`）。
+ * ⚠️ 刻意不写成「三件都是 4」：起点是 `cannon 4 / 另外两件各 1`，而这个不对称正是
+ *    「第一局领 cannon 就能凑满 5/5、领别的只是 +1」这条产品设计的事实依据。
+ */
+const SEED_COUNTS = { cannon: 4, spear: 1, hammer: 1 };
+/** 是否带正式 sprite（`core/content.ts` 的真实值；无 sprite 的件卡片必须如实标「暂无美术」）。 */
+const HAS_SPRITE = { cannon: true, spear: false, hammer: true };
 /** 三个正式存档 key（与 src 同值；E2E 独立取证，不经过页面探针）。 */
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
 const INV_KEY = 'strongfruit.ownedParts.v2';
@@ -55,7 +79,7 @@ const CLAIMS_KEY = 'strongfruit.profileClaims.v1';
 const WEAPON_SLOT = 'frontMass';
 
 /**
- * RUN COMPLETE「本局获得」卡片用到的三个**非入账**色（`runPage.ts` 的 `COLORS`）。
+ * 3选1 候选卡用到的三个**非入账**色（`runPage.ts` 的 `COLORS`）。
  * 它们刻意不在像素账本 `PALETTE` 里 ⇒ 卡片不会把任何入账面积算进 / 算错。
  */
 const CARD_BG = [0x1b, 0x24, 0x32]; // COLORS.cardBg —— 卡片底
@@ -157,7 +181,7 @@ function storageDump(page) {
   });
 }
 
-/** 从真实 storage dump 里读库存副本数（0 = 没这件 / 副本数 0）。 */
+/** 从真实 storage dump 里读某个 ★1 stack 的副本数（0 = 副本数 0）。 */
 function invCount(dump, defId) {
   const raw = dump[INV_KEY];
   if (!raw) return null;
@@ -195,6 +219,12 @@ function storedWeaponSlot(dump) {
   }
 }
 
+/** 从出发链接里取出产品侧给的那份 3选1 载荷（地址真源只有产品侧一个）。 */
+function choicesOf(href) {
+  const raw = new URLSearchParams(href.split('?')[1] ?? '').get('choices') ?? '';
+  return raw ? JSON.parse(raw) : null;
+}
+
 /**
  * 真实 `getImageData`：在**逻辑坐标矩形**内统计与给定 RGB 精确相等的像素数。
  * ⚠️ 只在 DPR = 1（且舞台 1:1）时有意义 —— 本 E2E 用 390×844 视口，画布 backing = 逻辑尺寸。
@@ -220,30 +250,52 @@ function countColorInRect(page, rect, rgb) {
   );
 }
 
+/** 读 Garage 里某张 Weapon 卡的真实 DOM 读数（star / count / stackText 都来自卡片自己的 data-*）。 */
+function garageCard(page, defId) {
+  return page.evaluate((id) => {
+    const n = document.querySelector(`[data-ph-weapon="${id}"]`);
+    if (!n) return null;
+    return {
+      text: n.textContent,
+      star: n.getAttribute('data-ph-star'),
+      count: n.getAttribute('data-ph-count'),
+      stackText: n.getAttribute('data-ph-stack-text'),
+      threshold: n.getAttribute('data-ph-stack-threshold'),
+      equipped: n.getAttribute('data-ph-equipped'),
+    };
+  }, defId);
+}
+
 /**
  * 把一局 Run 从 IDLE 驱到终态（COMPLETE / FAILED）。
  *
  * 全部用**真实鼠标点击**：耐久事件按 id 选、强化三选一按池种类选、其余推进一步。
  * 同时滚动记录两条不变量：
- *   · `cardInNonComplete` —— 在**非 COMPLETE** 相位上出现过奖励卡（必须恒为空）；
- *   · `cardPhases`       —— 真正出现过奖励卡的相位集合。
+ *   · `choicesInNonComplete` —— 在**非 COMPLETE** 相位上出现过 3选1 候选（必须恒为空）；
+ *   · `choicePhases`         —— 真正出现过候选的相位集合。
  */
 async function driveRunToEnd(page, policy, label) {
   const t0 = Date.now();
   const seen = [];
-  const cardInNonComplete = [];
-  const cardPhases = new Set();
+  const choicesInNonComplete = [];
+  const choicePhases = new Set();
   let last = null;
   while (Date.now() - t0 < DRIVE_BUDGET_MS) {
     const p = await probeRun(page);
     if (!last || last.phase !== p.phase) seen.push(p.phase);
     last = p;
-    if (p.rewardCard !== null || p.rewardCardRect !== null) {
-      cardPhases.add(p.phase);
-      if (p.phase !== 'COMPLETE') cardInNonComplete.push(p.phase);
+    if (p.rewardChoices.length > 0 || p.rewardChoiceRects.length > 0) {
+      choicePhases.add(p.phase);
+      if (p.phase !== 'COMPLETE') choicesInNonComplete.push(p.phase);
     }
     if (p.phase === 'COMPLETE' || p.phase === 'FAILED') {
-      return { probe: p, seen, cardInNonComplete, cardPhases: [...cardPhases], ms: Date.now() - t0 };
+      return {
+        probe: p,
+        seen,
+        choicesInNonComplete,
+        choicePhases: [...choicePhases],
+        ms: Date.now() - t0,
+      };
     }
     // 耐久事件：按 id 选（repair / upgrade）
     if (p.durabilityOpen && p.overlayOptions.length > 0) {
@@ -271,8 +323,85 @@ async function driveRunToEnd(page, policy, label) {
   throw new Error(`${label} 驱动超时（${DRIVE_BUDGET_MS}ms）· 最后 phase=${last ? last.phase : 'n/a'}`);
 }
 
+/**
+ * 「从首页出发 → 打完一局 → **真实鼠标点中某一张候选卡** → 回到首页」的完整一轮。
+ * 返回这一轮的全部取证（不在这里做断言，断言留给主流程的字母段落）。
+ */
+async function playOneRunAndClaim(page, pickDefId, policy, label) {
+  const homeBefore = await probeHome(page);
+  const token = homeBefore.runToken;
+  const cards = choicesOf(homeBefore.adventureHref);
+  const pickIndex = CHOICE_IDS.indexOf(pickDefId);
+  if (pickIndex < 0) throw new Error(`候选池里没有 ${pickDefId}`);
+  const pickHref = cards.choices[pickIndex].href;
+
+  const storedBefore = await storageDump(page);
+  const before = {};
+  for (const id of CHOICE_IDS) before[id] = invCount(storedBefore, id);
+
+  await Promise.all([
+    page.waitForURL(/run-page\.html/, { timeout: 20000 }).catch(() => {}),
+    clickSelector(page, '[data-ph-action="start-run"]'),
+  ]);
+  await waitRunReady(page);
+  const runStart = await probeRun(page);
+
+  const done = await driveRunToEnd(page, policy, label);
+  const pDone = done.probe;
+
+  /*
+    ⚠️ 像素取证必须在**点那张卡之前**做：点中即整页导航回首页 ⇒ `#run-canvas` 不复存在
+    （`countColorInRect` 会拿到 null）。这是真实踩过的坑，不是防御性代码。
+    A/B 基准矩形统一取 **最下面那张卡**（`rects[2]`，完整落在失败结算面板的槽位内）。
+  */
+  const rects = pDone.rewardChoiceRects;
+  const pixel = { cardBg: 0, iconFrame: 0, iconGlyph: 0 };
+  for (const r of rects) {
+    pixel.cardBg += await countColorInRect(page, r, CARD_BG);
+    pixel.iconFrame += await countColorInRect(page, r, ICON_FRAME_BG);
+    pixel.iconGlyph += await countColorInRect(page, r, ICON_GLYPH);
+  }
+  pixel.abCardBg = await countColorInRect(page, rects[2], CARD_BG);
+  pixel.abIconFrame = await countColorInRect(page, rects[2], ICON_FRAME_BG);
+  pixel.abIconGlyph = await countColorInRect(page, rects[2], ICON_GLYPH);
+
+  // **真实鼠标点击**选中的那张卡（坐标来自探针里与绘制同源的矩形）
+  const cardRect = pDone.rewardChoiceRects[pickIndex];
+  await Promise.all([
+    page.waitForURL(/home\.html/, { timeout: 20000 }).catch(() => {}),
+    clickRect(page, cardRect),
+  ]);
+  await waitHomeReady(page);
+  const urlAfter = await page.evaluate(() => location.pathname + location.search);
+  const homeAfter = await probeHome(page);
+  const storedAfter = await storageDump(page);
+  const after = {};
+  for (const id of CHOICE_IDS) after[id] = invCount(storedAfter, id);
+
+  return {
+    label,
+    token,
+    cards,
+    pickIndex,
+    pickDefId,
+    pickHref,
+    before,
+    after,
+    storedBefore,
+    storedAfter,
+    runStart,
+    done,
+    pDone,
+    homeAfter,
+    urlAfter,
+    cardRect,
+    rects,
+    pixel,
+  };
+}
+
 async function main() {
-  console.log('=== PRODUCT-LOOP-R1-B｜RUN COMPLETE → 永久部件 → 回车库 产品闭环 smoke ===\n');
+  console.log('=== PRODUCT-LOOP-R2-A｜3选1 → 数量累积 → 回车库 产品闭环 smoke ===\n');
 
   for (const f of ['home.html', 'run-page.html']) {
     if (!fs.existsSync(path.join(ROOT, f))) {
@@ -295,7 +424,7 @@ async function main() {
   page.on('pageerror', (e) => pageErrors.push(String(e)));
 
   try {
-    /* --------------------------------------- 1) 首页基线：新账号，没有这件东西 */
+    /* --------------------------------- 1) 首页基线：新账号的成长起点（验收 ①） */
     await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
     await waitHomeReady(page);
     const home0 = await probeHome(page);
@@ -306,325 +435,417 @@ async function main() {
       `claim=${home0.claim} claimed=${home0.claimedRunCount} token=${home0.runToken}`,
     );
     log(
-      invCount(stored0, REWARD_ID) === 0 && !stored0[CLAIMS_KEY],
-      'A2 基线：库存里还没有这件奖励，也还没有领奖账本（后面的 +1 一定是本局产生的）',
-      `${REWARD_ID}.one=${invCount(stored0, REWARD_ID)} keys=${Object.keys(stored0).sort().join(',')}`,
+      home0.growth.fresh === true &&
+        home0.growth.seeded === true &&
+        home0.growth.stackThreshold === FUSE_STACK &&
+        invCount(stored0, 'cannon') === 4 &&
+        invCount(stored0, 'spear') === 1 &&
+        invCount(stored0, 'hammer') === 1,
+      'A2 **新账号的成长起点**（验收 ①）：cannon ★1 ×4，另外两件候选各 ×1（种子只发这一次）',
+      `fresh=${home0.growth.fresh} seeded=${home0.growth.seeded} cannon=${invCount(stored0, 'cannon')} spear=${invCount(stored0, 'spear')} hammer=${invCount(stored0, 'hammer')}`,
     );
     log(
-      !home0.weaponIds.includes(REWARD_ID),
-      'A3 基线：车库可装备武器里也还没有它（不是「本来就有」）',
-      `weapons=${home0.weaponIds.join(',')}`,
+      home0.weapons.length === 3 &&
+        home0.weapons.every((w) => w.star === 1 && w.threshold === FUSE_STACK) &&
+        home0.weapons.find((w) => w.defId === 'cannon').count === 4 &&
+        home0.weapons.find((w) => w.defId === 'cannon').stackText === '×4' &&
+        home0.weapons.every((w) => w.reachesThreshold === false),
+      'A3 Garage 读数与库存同源：三张卡都是 ★1、分母 = 满 stack 阈值、次数 4/1/1（未满）',
+      home0.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
     );
 
-    const token = home0.runToken;
-    const claimHref = `./home.html?run=${token}&reward=${REWARD_ID}`;
-    const advQuery = new URLSearchParams(home0.adventureHref.split('?')[1] ?? '');
-    /*
-      PRODUCT-LOOP-R1-D｜出发链接现在带**两个**回程地址，且必须是两个不同地址：
-        `back` = 领奖地址（成功链）；`home` = **纯首页**（失败链；不带 run / reward
-        ⇒ 回首页不会触发任何入库）。
-      ⚠️ `home` 从**真实链接**里取（不在测试里另抄一份产品常量）—— 地址真源只有产品侧一个。
-    */
-    const homeHref = advQuery.get('home') ?? '';
+    const token0 = home0.runToken;
+    const adv0 = new URLSearchParams(home0.adventureHref.split('?')[1] ?? '');
+    const payload0 = choicesOf(home0.adventureHref);
+    const homeHref = adv0.get('home') ?? '';
+    const expectedClaims = CHOICE_IDS.map((id) => `./home.html?run=${token0}&reward=${id}`);
     log(
       home0.adventureHref.startsWith('./run-page.html?') &&
         home0.startRunHref === home0.adventureHref &&
-        advQuery.get('run') === token &&
-        advQuery.get('reward') === REWARD_ID &&
-        advQuery.get('back') === claimHref,
-      'A4「开始冒险」= 带本局 token / 奖励 id / 回程地址的同产物链接（页面不硬编码地址）',
+        adv0.get('run') === token0 &&
+        adv0.get('reward') === null &&
+        !!payload0 &&
+        payload0.stack === FUSE_STACK &&
+        payload0.choices.length === 3 &&
+        payload0.choices.every((c, i) => c.defId === CHOICE_IDS[i]) &&
+        payload0.choices.every((c, i) => c.href === expectedClaims[i]),
+      'A4「开始冒险」= 带本局 token + **一整份 3选1 载荷**（三条各自的领奖地址）的同产物链接；地址里**没有**裸 `reward=`',
       `href=${home0.startRunHref}`,
     );
     log(
-      homeHref !== '' && homeHref !== claimHref && !/[?&](run|reward)=/.test(homeHref),
-      'A4b 出发链接同时给全「成功回哪儿」与「失败回哪儿」，后者是**纯首页**（不带任何领奖参数）',
-      `back=${claimHref} home=${homeHref}`,
+      homeHref !== '' && !/[?&](run|reward)=/.test(homeHref),
+      'A4b 出发链接同时给全「失败回哪儿」：**纯首页**（不带任何领奖参数 ⇒ 回首页不会触发入库）',
+      `home=${homeHref}`,
     );
-
-    /* --------------------------------- 2) 出发 → Run Page 收到产品上下文（尚未结算） */
-    await Promise.all([
-      page.waitForURL(/run-page\.html/, { timeout: 20000 }).catch(() => {}),
-      clickSelector(page, '[data-ph-action="start-run"]'),
-    ]);
-    await waitRunReady(page);
-    const runStart = await probeRun(page);
     log(
-      runStart.phase !== 'COMPLETE' &&
-        runStart.rewardCard === null &&
-        runStart.rewardCardRect === null &&
-        runStart.exitHref === null,
-      'B1 刚进 Run（未结算）：没有任何奖励卡、也没有产品出口（只有真结算才出现）',
-      `phase=${runStart.phase} rewardCard=${runStart.rewardCard} exitHref=${runStart.exitHref}`,
+      home0.weapons.find((w) => w.defId === 'cannon').count === SEED_COUNTS.cannon &&
+        payload0.choices.every((c) => c.star === 1) &&
+        payload0.choices.every((c, i) => c.countBefore === SEED_COUNTS[CHOICE_IDS[i]]) &&
+        payload0.choices[0].countBefore === SEED_COUNTS.cannon,
+      'A5 载荷里的数量读数 = 出发那一刻的真实库存（4 / 1 / 1，逐件对账）；三条候选共用同一个本局 token ⇒ 只能领一次',
+      `载荷=${payload0.choices.map((c) => `${c.defId}:${c.countBefore}`).join(' ')}`,
     );
 
-    /* --------------------- 3) 真实打完一局（双联炮 + 维修 + 三连装填）→ COMPLETE */
-    const win = await driveRunToEnd(page, WIN_POLICY, '完成路线');
-    const pDone = win.probe;
+    /* ============================ 第一局：选 cannon（验收 ③） ============================ */
+    const r1 = await playOneRunAndClaim(page, 'cannon', WIN_POLICY, '第一局（完成路线）');
+    const pDone = r1.pDone;
+
+    log(
+      r1.runStart.phase !== 'COMPLETE' &&
+        r1.runStart.rewardChoices.length === 0 &&
+        r1.runStart.rewardChoiceRects.length === 0 &&
+        r1.runStart.exitHref === null,
+      'B1 刚进 Run（未结算）：**没有**任何候选卡、也没有产品出口（只有真结算才出现）',
+      `phase=${r1.runStart.phase} choices=${r1.runStart.rewardChoices.length} exitHref=${r1.runStart.exitHref}`,
+    );
+
     log(
       pDone.phase === 'COMPLETE' && pDone.complete === true && pDone.failed === false,
       'C1 四场打完 → RUN COMPLETE（同一条确定性路线）',
-      `phase=${pDone.phase} battles=${pDone.battlesCompleted}/${pDone.battleTotal} 用时 ${round2(win.ms / 1000)}s`,
+      `phase=${pDone.phase} battles=${pDone.battlesCompleted}/${pDone.battleTotal} 用时 ${round2(r1.done.ms / 1000)}s`,
     );
     log(
-      win.cardInNonComplete.length === 0 && win.cardPhases.includes('COMPLETE'),
-      'C2 奖励卡只在 COMPLETE 出现：全程所有其它相位都没有它（含 IDLE/EVENT/BATTLE/RESULT/CHOICE）',
-      `出现相位=${win.cardPhases.join(',')} · 非 COMPLETE 违规=${win.cardInNonComplete.length}`,
+      r1.done.choicesInNonComplete.length === 0 && r1.done.choicePhases.includes('COMPLETE'),
+      'C2 候选卡只在 COMPLETE 出现：全程所有其它相位都没有它（含 IDLE/EVENT/BATTLE/RESULT/CHOICE）',
+      `出现相位=${r1.done.choicePhases.join(',')} · 非 COMPLETE 违规=${r1.done.choicesInNonComplete.length}`,
     );
 
-    /* 必改 3：从「测试结算」变成「产品结算」——最终 Day / 耐久 / Build 都还在，**多**一张「本局获得」 */
-    const rc = pDone.rewardCard;
+    /* 必改 4：终点是**三张真实候选**（名称 / ★1 / 当前数量 / 领取后数量预览） */
+    const rc = pDone.rewardChoices;
     log(
       pDone.day === 7 &&
         pDone.battle.durabilityPercent > 0 &&
         pDone.buildLabels.length === 2 &&
-        !!rc &&
-        rc.defId === REWARD_ID &&
-        rc.name === REWARD_NAME &&
-        rc.energy === 45 &&
-        rc.label === '领取并返回' &&
-        rc.hasSprite === false,
-      'C3 RUN COMPLETE = 最终 DAY + 最终耐久 + 最终 Build + 「本局获得」一件**真实已有部件**',
-      `DAY ${pDone.day} · 耐久 ${pDone.battle.durabilityPercent}% · Build=${pDone.buildLabels.join('+')} · 获得=${rc ? `${rc.name}(${rc.defId}, E${rc.energy})` : 'n/a'}`,
+        rc.length === 3 &&
+        rc.every((c, i) => c.defId === CHOICE_IDS[i] && c.name === NAMES[CHOICE_IDS[i]]) &&
+        rc.every((c, i) => c.star === 1 && c.energy > 0 && c.hasSprite === HAS_SPRITE[CHOICE_IDS[i]]) &&
+        rc[0].countBefore === 4 &&
+        rc[0].countAfter === 5 &&
+        rc[0].previewText === '4 → 5' &&
+        rc[0].reachesThreshold === true &&
+        rc[1].countBefore === 1 &&
+        rc[1].countAfter === 2 &&
+        rc[1].previewText === '1 → 2' &&
+        rc[1].reachesThreshold === false,
+      'C3 RUN COMPLETE = 最终 DAY + 最终耐久 + 最终 Build + **三张真实 Weapon 候选**（名称 / ★1 / 数量 / 领取后预览）',
+      `DAY ${pDone.day} · 耐久 ${pDone.battle.durabilityPercent}% · Build=${pDone.buildLabels.join('+')} · 候选=${rc.map((c) => `${c.name}★${c.star} ${c.previewText}${c.reachesThreshold ? '(满)' : ''}`).join(' | ')}`,
     );
     log(
-      rc && rc.href === claimHref,
-      'C4 奖励卡的出口 = 产品侧给的领奖地址（Lab 侧不含任何产品 URL 字面量）',
-      `href=${rc ? rc.href : 'n/a'}`,
+      rc.every((c, i) => c.href === expectedClaims[i]) && pDone.rewardChoicesDropped === 0,
+      'C4 三张卡的出口 = 产品侧给的**各自**领奖地址（Lab 侧不含任何产品 URL 字面量），且三条载荷全部合法（丢弃 0 条）',
+      `dropped=${pDone.rewardChoicesDropped} hrefs=${rc.map((c) => c.href.replace('./home.html?', '')).join(' ')}`,
     );
     log(
-      pDone.actionLabel === '领取并返回' && pDone.actionEnabled === true && pDone.exitHref === claimHref,
-      'C5 完成态主动作文案 =「领取并返回」（动作，不是状态描述），且探针出口与卡片同源',
+      pDone.exitHref === null &&
+        pDone.actionEnabled === false &&
+        pDone.actionLabel !== '领取并返回',
+      'C5 出口**在卡片上**：底栏动作不可用、也没有「领取并返回」（3选1 不存在「默认那件」）',
       `label=${pDone.actionLabel} enabled=${pDone.actionEnabled} exit=${pDone.exitHref}`,
     );
 
-    /* 像素取证：卡片真的画在画布上（不是只有探针字段） */
-    const cardRect = pDone.rewardCardRect;
-    const cardBgPx = cardRect ? await countColorInRect(page, cardRect, CARD_BG) : 0;
-    const iconFramePx = cardRect ? await countColorInRect(page, cardRect, ICON_FRAME_BG) : 0;
-    const iconGlyphPx = cardRect ? await countColorInRect(page, cardRect, ICON_GLYPH) : 0;
+    /*
+      像素取证：三张卡真的画在画布上（不是只有探针字段）。
+      ⚠️ 读数是在 `playOneRunAndClaim` 里、**点那张卡之前**采的：点中即整页导航回首页
+      ⇒ `#run-canvas` 不复存在（`getImageData` 拿不到画布）。这是真实踩过的坑。
+    */
+    const rects = r1.rects;
+    const cardBgPx = r1.pixel.cardBg;
+    const iconFramePx = r1.pixel.iconFrame;
+    const iconGlyphPx = r1.pixel.iconGlyph;
+    /*
+      ⚠️ A/B 基准矩形 = **最下面那张卡**：它的矩形（y 302..370）完整落在失败结算面板的槽位
+      （`runFailPanelRect()` 的 y 266..370）内部 ⇒ 同一个矩形可以拿来做 COMPLETE / FAILED 对照。
+      上面两张卡与面板只部分重叠，不能用于对照。
+    */
+    const abRect = rects[2];
+    const abCardBgPx = r1.pixel.abCardBg;
+    const abIconFramePx = r1.pixel.abIconFrame;
+    const abIconGlyphPx = r1.pixel.abIconGlyph;
+    /*
+      阈值来源（不是拍的）：三个矩形总面积 = 3 × 362 × 68 = 73848 px²。
+      卡底之外的像素只有三类：① 2px 描边（cardEdge）；② 图标框内部（pageBg 实心填充）；
+      ③ 文字字形（名称 / ★ / 数量 / defId）。实测卡底 ≈ 58800（≈ 79.6% 面积）
+      ⇒ 取 **55000（≈ 74.5%）** 作为「成片」的下界：既排掉「只画了个边框」，
+      也给字体渲染 / 亚像素抗锯齿留足余量（不在阈值上做无意义的灵敏度竞赛）。
+    */
     log(
-      !!cardRect &&
-        cardRect.w === 362 &&
-        cardRect.h === 104 &&
-        cardBgPx > 20000 &&
-        iconFramePx > 3000 &&
-        iconGlyphPx > 500,
-      'C6「本局获得」卡片真的画出来（真实 getImageData：卡底成片 + 图标框 + 真实 Collider 外接框）',
-      `rect=${cardRect ? `${cardRect.x},${cardRect.y} ${cardRect.w}×${cardRect.h}` : 'n/a'} cardBg=${cardBgPx} iconFrame=${iconFramePx} glyph=${iconGlyphPx}`,
+      rects.length === 3 &&
+        rects.every((r) => r.w === 362 && r.h === 68) &&
+        cardBgPx > 55000 &&
+        iconFramePx > 2000 &&
+        iconGlyphPx > 600,
+      'C6 三张候选卡真的画出来（真实 getImageData：卡底成片 + 每张都有图标框 + 真实 Collider 外接框）',
+      `rects=${rects.map((r) => `${r.x},${r.y} ${r.w}×${r.h}`).join(' | ')} cardBg=${cardBgPx} iconFrame=${iconFramePx} glyph=${iconGlyphPx}`,
     );
 
-    /* ------------------------------------------- 4) 点「领取并返回」→ 真实领奖 */
-    await Promise.all([
-      page.waitForURL(/home\.html/, { timeout: 20000 }).catch(() => {}),
-      clickRect(page, pDone.actionRect),
-    ]);
-    await waitHomeReady(page);
-    const urlAfterClaim = await page.evaluate(() => location.pathname + location.search);
-    const home1 = await probeHome(page);
-    const stored1 = await storageDump(page);
-
     log(
-      urlAfterClaim === `/home.html?run=${token}&reward=${REWARD_ID}`,
-      'D1「领取并返回」= 真实整页导航回正式首页，并把本局 token / 奖励 id 带回产品侧',
-      `url=${urlAfterClaim}`,
-    );
-    log(
-      home1.claim !== null &&
-        home1.claim.ok === true &&
-        home1.claim.defId === REWARD_ID &&
-        home1.claim.name === REWARD_NAME &&
-        home1.claim.countAfter === 1,
-      'D2 产品侧 Profile Repository 完成入库（页面只展示 Repository 的真实结果）',
-      `ok=${home1.claim ? home1.claim.ok : 'n/a'} def=${home1.claim ? home1.claim.defId : 'n/a'} count=${home1.claim ? home1.claim.countAfter : 'n/a'}`,
+      r1.urlAfter === `/home.html?run=${token0}&reward=cannon`,
+      'D1 点中 **cannon 那张卡** = 真实整页导航到**它自己**的领奖地址（不是底栏按钮）',
+      `url=${r1.urlAfter}`,
     );
     const claimDom = await page.evaluate(() => {
       const n = document.querySelector('[data-ph-claim]');
-      return n ? { state: n.getAttribute('data-ph-claim'), def: n.getAttribute('data-ph-claim-def'), text: n.textContent } : null;
+      return n
+        ? {
+            state: n.getAttribute('data-ph-claim'),
+            def: n.getAttribute('data-ph-claim-def'),
+            text: n.textContent,
+          }
+        : null;
     });
     log(
-      !!claimDom && claimDom.state === 'ok' && claimDom.def === REWARD_ID && claimDom.text.includes(REWARD_NAME),
-      'D3 首页可见地告诉玩家拿到了什么（真实 DOM 提示，不是静默入库）',
-      claimDom ? `[${claimDom.state}] ${claimDom.text}` : 'n/a',
+      r1.homeAfter.claim !== null &&
+        r1.homeAfter.claim.ok === true &&
+        r1.homeAfter.claim.defId === 'cannon' &&
+        r1.homeAfter.claim.countAfter === 5 &&
+        !!claimDom &&
+        claimDom.state === 'ok' &&
+        claimDom.def === 'cannon' &&
+        claimDom.text.includes(NAMES.cannon),
+      'D2 产品侧 Profile Repository 完成入库并如实展示：cannon 4 → **5**（验收 ③）',
+      `ok=${r1.homeAfter.claim ? r1.homeAfter.claim.ok : 'n/a'} count=${r1.homeAfter.claim ? r1.homeAfter.claim.countAfter : 'n/a'} dom=${claimDom ? `[${claimDom.state}] ${claimDom.text}` : 'n/a'}`,
     );
     log(
-      invCount(stored1, REWARD_ID) === 1,
-      'D4 **独立取证**：正式库存 `ownedParts.v2` 里这件真的 +1 了（不是页面内存）',
-      `${REWARD_ID}.one=${invCount(stored1, REWARD_ID)}（领奖前 ${invCount(stored0, REWARD_ID)}）`,
+      r1.after.cannon === 5 &&
+        r1.after.spear === 1 &&
+        r1.after.hammer === 1 &&
+        ledgerTokens(r1.storedAfter).length === 1 &&
+        ledgerTokens(r1.storedAfter)[0] === token0,
+      'D3 **独立取证**（读浏览器真实 localStorage）：只有 cannon +1，另外两件一个数字都没动；账本记下本局 token',
+      `cannon ${r1.before.cannon}→${r1.after.cannon} · spear ${r1.before.spear}→${r1.after.spear} · hammer ${r1.before.hammer}→${r1.after.hammer} · 账本=${JSON.stringify(ledgerTokens(r1.storedAfter))}`,
     );
     log(
-      ledgerTokens(stored1).length === 1 && ledgerTokens(stored1)[0] === token,
-      'D5 **独立取证**：领奖账本记录了本局 token（reward claim 状态真实存在）',
-      `grantedRunIds=${JSON.stringify(ledgerTokens(stored1))}`,
+      r1.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText === '5/5' &&
+        r1.homeAfter.weapons.find((w) => w.defId === 'cannon').reachesThreshold === true,
+      'D4 领奖后的首页读数：cannon 达到满 stack ⇒ 显示 `5/5`（Queue「达到5件时只显示 5/5」；本 Queue **不做合成**）',
+      `cannon stackText=${r1.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText}`,
     );
 
-    /* ------------------------------------------- 5) 重复领取 → 绝不重复发奖 */
-    await page.goto(`${URL_BASE}/home.html?run=${token}&reward=${REWARD_ID}`, { waitUntil: 'load' });
+    /* --------------------------- 2) 同一 Run **换一件**再领 → 仍然领不到（验收 ⑤） */
+    await page.goto(`${URL_BASE}/home.html?run=${token0}&reward=spear`, { waitUntil: 'load' });
     await waitHomeReady(page);
-    const home2 = await probeHome(page);
-    const stored2 = await storageDump(page);
+    const homeDup = await probeHome(page);
+    const storedDup = await storageDump(page);
     const dupDom = await page.evaluate(() => {
       const n = document.querySelector('[data-ph-claim]');
       return n ? { state: n.getAttribute('data-ph-claim'), text: n.textContent } : null;
     });
     log(
-      home2.claim !== null && home2.claim.ok === false && home2.claim.reason === 'already-claimed',
-      'E1 重复打开同一领奖地址 → Repository 判「已领取」（不是静默成功）',
-      `ok=${home2.claim ? home2.claim.ok : 'n/a'} reason=${home2.claim ? home2.claim.reason : 'n/a'}`,
+      homeDup.claim !== null &&
+        homeDup.claim.ok === false &&
+        homeDup.claim.reason === 'already-claimed' &&
+        !!dupDom &&
+        dupDom.state === 'duplicate' &&
+        homeDup.claimedRunCount === 1,
+      'E1 拿着**同一个 token 但换一件**（spear）再回首页 → Repository 判「已领取」（换一件 = 换一个说法，不是新的一局）',
+      `ok=${homeDup.claim ? homeDup.claim.ok : 'n/a'} reason=${homeDup.claim ? homeDup.claim.reason : 'n/a'} dom=${dupDom ? `[${dupDom.state}] ${dupDom.text}` : 'n/a'}`,
     );
     log(
-      !!dupDom && dupDom.state === 'duplicate' && home2.claimedRunCount === 1,
-      'E2 页面如实说「已领取过」，账本仍只有 1 条（没有第二次记录）',
-      dupDom ? `[${dupDom.state}] ${dupDom.text} · 账本=${home2.claimedRunCount}` : 'n/a',
-    );
-    log(
-      invCount(stored2, REWARD_ID) === 1,
-      'E3 库存没有 +2：重复领取不会重复发奖（必改 4）',
-      `${REWARD_ID}.one=${invCount(stored2, REWARD_ID)}（仍 1）`,
+      invCount(storedDup, 'cannon') === 5 && invCount(storedDup, 'spear') === 1 && ledgerTokens(storedDup).length === 1,
+      'E2 库存逐项不变（cannon 仍 5 / spear 仍 1），账本仍只有 1 条（没有第二条记录）',
+      `cannon=${invCount(storedDup, 'cannon')} spear=${invCount(storedDup, 'spear')} 账本=${ledgerTokens(storedDup).length}`,
     );
 
-    /* ------------------------ 6) 返回首页 → Garage 真的看到刚获得的新部件 */
+    /* ------------------------------------- 3) 回车库：真的看到并装上刚长出来的那件 */
     await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
     await waitHomeReady(page);
     const home3 = await probeHome(page);
     log(
-      home3.claim === null && home3.weaponIds.includes(REWARD_ID) && home3.claimedRunCount === 1,
-      'F1 干净打开首页：不再有领奖请求，但新部件**已经在库存里**（来自持久化，不是这次导航带的）',
-      `weapons=${home3.weaponIds.join(',')} claimed=${home3.claimedRunCount}`,
+      home3.claim === null && home3.claimedRunCount === 1 && home3.growth.seeded === false,
+      'F1 干净打开首页：不再有领奖请求、账本是持久化的 1 条，且**种子不会再发一次**（只发新账号）',
+      `claim=${home3.claim} claimed=${home3.claimedRunCount} seeded=${home3.growth.seeded}`,
     );
 
     await clickSelector(page, '[data-ph-action="open-garage"]');
-    const garage1 = await probeHome(page);
-    const laserCard = await page.evaluate(() => {
-      const n = document.querySelector('[data-ph-weapon="laser"]');
-      return n ? { text: n.textContent, equipped: n.getAttribute('data-ph-equipped') } : null;
-    });
-    const energyBefore = garage1.energy;
+    const g1 = await probeHome(page);
+    const cannonCard = await garageCard(page, 'cannon');
+    const spearCard = await garageCard(page, 'spear');
     log(
-      garage1.view === 'garage' && !!laserCard && laserCard.text.includes(REWARD_NAME),
-      'F2 调整战车：新部件**出现了**，与已有部件同一份 Inventory 数据（同一张卡片组件）',
-      laserCard ? `[laser] ${laserCard.text}（equipped=${laserCard.equipped}）` : 'n/a',
+      g1.view === 'garage' &&
+        !!cannonCard &&
+        cannonCard.star === '1' &&
+        cannonCard.count === '5' &&
+        cannonCard.stackText === '5/5' &&
+        cannonCard.threshold === String(FUSE_STACK) &&
+        cannonCard.text.includes(NAMES.cannon) &&
+        !!spearCard &&
+        spearCard.star === '1' &&
+        spearCard.count === '1' &&
+        spearCard.stackText === '×1',
+      'F2 调整战车：Weapon 卡**带星级与数量**（`炮 ★1 5/5` / `刺 ★1 ×1`），且与库存同源',
+      `${cannonCard ? cannonCard.text : 'n/a'} ｜ ${spearCard ? spearCard.text : 'n/a'}`,
     );
 
-    await clickSelector(page, '[data-ph-weapon="laser"]');
-    const garage2 = await probeHome(page);
+    const energyBefore = g1.energy;
+    await clickSelector(page, '[data-ph-weapon="spear"]');
+    const g2 = await probeHome(page);
     log(
-      garage2.selectedWeaponId === REWARD_ID && garage2.equipEnabled === true,
-      'F3 点击新部件 → 明确选中，且「装备」可点（它是一件能装上的东西，不是废品）',
-      `selected=${garage2.selectedWeaponId} equipEnabled=${garage2.equipEnabled}`,
+      g2.selectedWeaponId === 'spear' && g2.equipEnabled === true,
+      'F3 点击 spear → 明确选中，且「装备」可点（它是一件能装上的东西）',
+      `selected=${g2.selectedWeaponId} equipEnabled=${g2.equipEnabled}`,
     );
 
     await clickSelector(page, '[data-ph-action="equip"]');
-    const garage3 = await probeHome(page);
+    const g3 = await probeHome(page);
     const stored3 = await storageDump(page);
     log(
-      garage3.equippedWeaponId === REWARD_ID && garage3.lastEquip && garage3.lastEquip.ok === true,
-      'F4 装上成功：首页/车库的当前主武器变成刚获得的那件',
-      `equipped=${garage3.equippedWeaponId} lastEquip=${garage3.lastEquip ? JSON.stringify(garage3.lastEquip) : 'n/a'}`,
+      g3.equippedWeaponId === 'spear' &&
+        g3.lastEquip &&
+        g3.lastEquip.ok === true &&
+        storedWeaponSlot(stored3) === 'spear',
+      'F4 装上成功：当前主武器变成 spear，且**正式 Build 存档**的武器槽也变了（唯一数据源）',
+      `equipped=${g3.equippedWeaponId} ${WEAPON_SLOT}=${storedWeaponSlot(stored3)}`,
     );
     log(
-      garage3.energy === energyBefore + 15 && garage3.energyCapacity === garage1.energyCapacity,
-      'F5「装上它真的不一样」：能量读数按两件正式武器的差额真实变化（不写死显示值）',
-      `能量 ${energyBefore} → ${garage3.energy} / 容量 ${garage3.energyCapacity}`,
-    );
-    log(
-      storedWeaponSlot(stored3) === REWARD_ID,
-      'F6 **独立取证**：正式玩家 Build 存档的武器槽 = 刚获得的部件（唯一数据源，不是页面状态）',
-      `${WEAPON_SLOT}=${storedWeaponSlot(stored3)}`,
+      g3.energy === energyBefore - 5 && g3.energyCapacity === g1.energyCapacity,
+      'F5「装上它真的不一样」：能量读数按两件正式武器的差额真实变化（炮 E30 → 刺 E25，不写死显示值）',
+      `能量 ${energyBefore} → ${g3.energy} / 容量 ${g3.energyCapacity}`,
     );
 
-    /* ------------------------------------------------- 7) Reload 后状态保持 */
+    /* --------------------------------------------- 4) Reload 后状态保持 */
     await page.reload({ waitUntil: 'load' });
     await waitHomeReady(page);
     const afterReload = await probeHome(page);
     const stored4 = await storageDump(page);
     log(
-      afterReload.equippedWeaponId === REWARD_ID &&
-        afterReload.weaponIds.includes(REWARD_ID) &&
+      afterReload.equippedWeaponId === 'spear' &&
+        afterReload.weaponIds.length === 3 &&
         afterReload.claimedRunCount === 1 &&
-        invCount(stored4, REWARD_ID) === 1,
-      'G1 整页 reload 后：新部件在库存里、还装着它、账本仍 1 条（状态来自真实持久化）',
-      `equipped=${afterReload.equippedWeaponId} weapons=${afterReload.weaponIds.length} claimed=${afterReload.claimedRunCount} ${REWARD_ID}.one=${invCount(stored4, REWARD_ID)}`,
+        invCount(stored4, 'cannon') === 5 &&
+        invCount(stored4, 'spear') === 1,
+      'G1 整页 reload 后：装备 / 数量 / 账本全部来自真实持久化（cannon 5 件仍是 5 件）',
+      `equipped=${afterReload.equippedWeaponId} weapons=${afterReload.weaponIds.length} claimed=${afterReload.claimedRunCount} cannon=${invCount(stored4, 'cannon')}`,
     );
 
-    /* --------------------- 8) FAILED 对照：同一条机器、只差一次点击 → 不发奖 */
+    /*
+      ⚠️ 第二局出发前**必须换回 cannon** —— 这不是「顺手点一下」，而是一条**实测约束**：
+      主武器槽的实测矩阵（`src/product/playerLoadout.ts` 的 `DEFAULT_CLEARED_SLOT` 注释）里，
+      只有 cannon（远程炮）能在默认车上稳定打完四场；spear 会在第 2 场僵持跑不完、
+      hammer 第 1 场就被打死（玩家弹丸峰值 0）。
+      本段要的是「第二局**真的打完**」（验收 ④ 需要 COMPLETE 才会出现候选卡），
+      所以必须让它带着**能赢的那件**出发 —— 这是产品事实，不是为了测试放水。
+      ⚠️ 顺带实证「装备是可逆的」：能量读数应当回到装 cannon 时的读数。
+    */
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    await clickSelector(page, '[data-ph-weapon="cannon"]');
+    await clickSelector(page, '[data-ph-action="equip"]');
+    const g4 = await probeHome(page);
+    const storedCannonBack = await storageDump(page);
+    log(
+      storedWeaponSlot(storedCannonBack) === 'cannon' &&
+        g4.equippedWeaponId === 'cannon' &&
+        g4.energy === energyBefore,
+      'G2 换回 cannon（第二局要真的打完四场 ⇒ 主武器必须是实测能赢的那件）：正式存档武器槽 = cannon，能量回到 55（装备可逆）',
+      `frontMass=${storedWeaponSlot(storedCannonBack)} 能量=${g4.energy}`,
+    );
+    await clickSelector(page, '[data-ph-action="back-home"]');
+
+    /* ==================== 第二局：选 hammer（验收 ④；也是「累积」的真正证明） ==================== */
+    const r2 = await playOneRunAndClaim(page, 'hammer', WIN_POLICY, '第二局（完成路线）');
+    log(
+      r2.token !== token0 && r2.pickHref !== r1.pickHref,
+      'H1 第二局的 token 与第一局不同（每挂载一次首页 = 一次新的「准备出发」）⇒ 领奖是**新的一局**，不是重复领',
+      `token1=${token0} token2=${r2.token}`,
+    );
+    log(
+      r2.runStart.playerLoadout.source === 'profile' &&
+        r2.runStart.playerLoadout.functionalSelections[WEAPON_SLOT] === 'cannon',
+      'H1b 第二局确实带着**刚换回的** cannon 出发（局外的装备动作真的作用到了下一局）',
+      `source=${r2.runStart.playerLoadout.source} ${WEAPON_SLOT}=${r2.runStart.playerLoadout.functionalSelections[WEAPON_SLOT]}`,
+    );
+    log(
+      r2.pDone.phase === 'COMPLETE' &&
+        r2.pDone.rewardChoices.length === 3 &&
+        r2.pDone.rewardChoices[0].countBefore === 5 &&
+        r2.pDone.rewardChoices[2].countBefore === 1,
+      'H2 第二局终点的候选读数 = **上一局结束时的库存**（cannon 5 / hammer 1）—— 数量真的在跨局累积',
+      `候选=${r2.pDone.rewardChoices.map((c) => `${c.defId}:${c.previewText}`).join(' ')}`,
+    );
+    log(
+      r2.after.hammer === 2 &&
+        r2.after.cannon === 5 &&
+        r2.after.spear === 1 &&
+        ledgerTokens(r2.storedAfter).length === 2,
+      'H3 **验收 ④**：选 hammer 只让 hammer 1 → 2；cannon 仍 5、spear 仍 1（不同 stack 各自独立）',
+      `cannon ${r2.before.cannon}→${r2.after.cannon} · spear ${r2.before.spear}→${r2.after.spear} · hammer ${r2.before.hammer}→${r2.after.hammer} · 账本=${ledgerTokens(r2.storedAfter).length}`,
+    );
+    log(
+      r2.homeAfter.weapons.find((w) => w.defId === 'hammer').count === 2 &&
+        r2.homeAfter.weapons.find((w) => w.defId === 'hammer').stackText === '×2' &&
+        r2.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText === '5/5',
+      'H4 首页读数：hammer `★1 ×2`、cannon `★1 5/5`（同一份库存，两个 stack 各长各的）',
+      r2.homeAfter.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
+    );
+
+    const storedFinal = await storageDump(page);
+    const finalCounts = { cannon: invCount(storedFinal, 'cannon'), spear: invCount(storedFinal, 'spear'), hammer: invCount(storedFinal, 'hammer') };
+
+    /* ------------------- 5) FAILED 对照：同一条机器、只差一次点击 → 数量零变化（验收 ⑥） */
     const failPage = await ctx.newPage();
     const failErrors = [];
     failPage.on('pageerror', (e) => failErrors.push(String(e)));
     /*
-      ⚠️ PRODUCT-LOOP-R1-D 修正：本段原先**零参数**打开 `run-page.html` —— 那一局既没有领奖
-         上下文、也没有失败回程地址。R1-D 之后失败出口地址由**产品侧**给全（Lab 侧不硬编码
-         任何产品 URL，`RP-25b` 机器钉死）⇒ 零参数下失败结算**照常呈现但没有出口按钮**，
-         而「失败玩家必须能主动回主界面」正是本 Queue 的 P0 ⇒ 本段必须按**产品真实上下文**打开。
-
-         参数 = 产品首页「开始冒险」链接里那四个（`run` / `reward` / `back` / `home`），
-         即**领奖上下文完全齐备**下再来一次失败 —— 这比原来更强：
-         「即使领奖地址就摆在同一个页面上，失败也拿不到它」（必改 5 的结构性反证）。
+      ⚠️ 按**产品真实上下文**打开（而不是零参数）：那一局必须和玩家真实出发的那一局
+         带一样的东西（`run` / `choices` / `home`）—— 这样「即使三条领奖地址就摆在同一个
+         页面上，失败也拿不到它们」才是结构性反证（验收 ⑥ 的最强形态）。
          ⚠️ 刻意**不带** `equipped`：保留 demo 装载 ⇒ `LOSE_POLICY` 的确定性（耐久归零路线）
          与 R1-C 逐字一致，本段只变「产品上下文」这一个自变量。
     */
-    const failQuery = new URLSearchParams({
-      run: token,
-      reward: REWARD_ID,
-      back: claimHref,
-      home: homeHref,
-    });
+    const homeForFail = await probeHome(page);
+    const failQuery = new URLSearchParams(homeForFail.adventureHref.split('?')[1] ?? '');
     await failPage.goto(`${URL_BASE}/run-page.html?${failQuery.toString()}`, { waitUntil: 'load' });
     await waitRunReady(failPage);
     const lose = await driveRunToEnd(failPage, LOSE_POLICY, '失败路线');
     const pFail = lose.probe;
     log(
       pFail.phase === 'FAILED' && pFail.failed === true && pFail.complete === false,
-      'H1 同路线改选「继续改装」→ 终局耐久归零 → RUN FAILED（真实浏览器对照，不是构造状态）',
+      'I1 同路线改选「继续改装」→ 终局耐久归零 → RUN FAILED（真实浏览器对照，不是构造状态）',
       `phase=${pFail.phase} failed=${pFail.failed} 用时 ${round2(lose.ms / 1000)}s`,
     );
     log(
-      pFail.rewardCard === null &&
-        pFail.rewardCardRect === null &&
-        pFail.exitHref === homeHref &&
-        pFail.exitHref !== claimHref,
-      'H2 领奖上下文**齐备**（run/reward/back 都在同一条 URL 上）时，FAILED 依然拿不到奖励出口：卡片 / 矩形为 null，出口是**纯首页**而不是领奖地址（必改 5）',
-      `rewardCard=${pFail.rewardCard} rewardCardRect=${pFail.rewardCardRect} exit=${pFail.exitHref}（领奖地址=${claimHref}）`,
+      pFail.rewardChoices.length === 0 &&
+        pFail.rewardChoiceRects.length === 0 &&
+        pFail.chosenDefId === null &&
+        lose.choicesInNonComplete.length === 0,
+      'I2 **验收 ⑥**：领奖上下文**齐备**（run/choices/home 都在同一条 URL 上）时，FAILED 依然拿不到任何候选（结构上没有奖励选择）',
+      `choices=${pFail.rewardChoices.length} rects=${pFail.rewardChoiceRects.length} chosen=${pFail.chosenDefId}`,
     );
     log(
-      pFail.actionEnabled === true &&
+      pFail.exitHref === homeHref &&
+        pFail.actionEnabled === true &&
         pFail.actionLabel === '返回主界面' &&
-        pFail.actionLabel !== '领取并返回' &&
         pFail.actionLabel !== '重新开始冒险',
-      'H3 FAILED 的主动作 =「返回主界面」（可点的真实出口，不是禁用死按钮），既不是领奖、也不是「重新开始冒险」（必改 3 / 必改 6）',
+      'I3 FAILED 的主动作 =「返回主界面」（可点的真实出口），出口是**纯首页**而不是任何领奖地址',
       `label=${pFail.actionLabel} enabled=${pFail.actionEnabled} exit=${pFail.exitHref}`,
     );
     /*
-      像素 A/B（**判据已随 R1-D 收紧**）：
-        旧判据是「同一块矩形里 COMPLETE 有成片卡片底色、FAILED 几乎没有」——它成立的前提是
-        「失败页面在这块矩形上什么都不画」。R1-D 之后**失败也有结算面板**（必改 3）且与奖励卡
-        互斥复用同一槽位 ⇒ 底色两边都有，旧判据已失效（这正是它 FAIL 的原因）。
-        新判据改为数**奖励卡专属图形**：图标框底 `pageBg`（`runPage.ts` 注释：卡片内唯一出现处）
-        与图标本体 `wheelRim` —— COMPLETE 成片，FAILED 必须为 **0**。
-        这比旧判据更强：不再只说「没有那么大片底色」，而是「那块矩形里**没有奖励卡的任何图形**」。
+      像素 A/B：**同一块矩形**（最下面那张候选卡的位置）上
+        COMPLETE = 三张候选卡之一 ⇒ 有卡片专属图形（图标框底 + Collider 本体）；
+        FAILED   = 结算面板复用同一槽位 ⇒ 卡片专属图形必须为 **0**。
+      这比「有没有底色」强：失败那块画的是结算面板，不是发奖。
     */
-    const failCardBgPx = cardRect ? await countColorInRect(failPage, cardRect, CARD_BG) : -1;
-    const failIconFramePx = cardRect ? await countColorInRect(failPage, cardRect, ICON_FRAME_BG) : -1;
-    const failIconGlyphPx = cardRect ? await countColorInRect(failPage, cardRect, ICON_GLYPH) : -1;
+    const failAbBg = await countColorInRect(failPage, abRect, CARD_BG);
+    const failAbFrame = await countColorInRect(failPage, abRect, ICON_FRAME_BG);
+    const failAbGlyph = await countColorInRect(failPage, abRect, ICON_GLYPH);
     log(
-      cardBgPx > 20000 &&
-        iconFramePx > 3000 &&
-        iconGlyphPx > 500 &&
-        failIconFramePx === 0 &&
-        failIconGlyphPx === 0 &&
-        failCardBgPx > 20000,
-      'H4 像素 A/B：同一块矩形上 COMPLETE 有奖励卡专属图形（图标框 + Collider 本体），FAILED **一个像素都没有**（失败那块画的是结算面板，不是发奖）',
-      `cardBg: COMPLETE=${cardBgPx} vs FAILED=${failCardBgPx} · 图标框: ${iconFramePx} vs ${failIconFramePx} · 图标本体: ${iconGlyphPx} vs ${failIconGlyphPx}`,
+      abIconFramePx > 600 && abIconGlyphPx > 200 && failAbFrame === 0 && failAbGlyph === 0 && failAbBg > 20000,
+      'I4 像素 A/B：同一块矩形上 COMPLETE 有候选卡专属图形（图标框 + Collider 本体），FAILED **一个像素都没有**',
+      `图标框: ${abIconFramePx} vs ${failAbFrame} · 图标本体: ${abIconGlyphPx} vs ${failAbGlyph} · 卡底: ${abCardBgPx} vs ${failAbBg}`,
     );
     const stored5 = await storageDump(failPage);
+    const failCounts = { cannon: invCount(stored5, 'cannon'), spear: invCount(stored5, 'spear'), hammer: invCount(stored5, 'hammer') };
     log(
-      invCount(stored5, REWARD_ID) === 1 && ledgerTokens(stored5).length === 1,
-      'H5 失败一局之后：库存与账本**一个数字都没动**（失败不补偿、不发奖）',
-      `${REWARD_ID}.one=${invCount(stored5, REWARD_ID)} 账本=${ledgerTokens(stored5).length}`,
+      failCounts.cannon === finalCounts.cannon &&
+        failCounts.spear === finalCounts.spear &&
+        failCounts.hammer === finalCounts.hammer &&
+        ledgerTokens(stored5).length === 2,
+      'I5 **验收 ⑥**：失败一局之后三件数量与账本**一个数字都没动**（失败不补偿、不发奖、不增长）',
+      `cannon ${finalCounts.cannon}→${failCounts.cannon} · spear ${finalCounts.spear}→${failCounts.spear} · hammer ${finalCounts.hammer}→${failCounts.hammer} · 账本=${ledgerTokens(stored5).length}`,
     );
-    log(failErrors.length === 0, 'H6 失败路线全程零运行时报错', failErrors.slice(0, 2).join(' | ') || 'none');
+    log(failErrors.length === 0, 'I6 失败路线全程零运行时报错', failErrors.slice(0, 2).join(' | ') || 'none');
     await failPage.close();
 
-    log(pageErrors.length === 0, 'I1 全流程零运行时报错', pageErrors.slice(0, 2).join(' | ') || 'none');
+    log(pageErrors.length === 0, 'J1 全流程零运行时报错', pageErrors.slice(0, 2).join(' | ') || 'none');
   } finally {
     await browser.close();
     server.close();

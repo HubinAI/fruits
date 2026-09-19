@@ -340,15 +340,16 @@ async function main() {
       `path=${runDom.path} search=${runDom.search} run-root=${runDom.hasRunRoot}`,
     );
 
-    /* --- G2 带奖励参数进来、但还没打完 ⇒ 不得出现奖励卡（既有路径逐帧不变） --- */
+    /* --- G2 带产品载荷进来、但还没打完 ⇒ 不得出现候选卡（既有路径逐帧不变） --- */
     const runIdle = await page.evaluate(() => window.__RUNPAGE__.probe());
     log(
-      runIdle.rewardCard === null &&
-        runIdle.rewardCardRect === null &&
+      runIdle.rewardChoices.length === 0 &&
+        runIdle.rewardChoiceRects.length === 0 &&
+        runIdle.chosenDefId === null &&
         runIdle.exitHref === null &&
         runIdle.phase !== 'COMPLETE',
-      'G2 带奖励参数进 Run：非 COMPLETE 状态不画奖励卡、也没有产品出口（只有真结算才出现）',
-      `phase=${runIdle.phase} rewardCard=${runIdle.rewardCard} exitHref=${runIdle.exitHref}`,
+      'G2 带产品载荷进 Run：非 COMPLETE 状态不画 3选1 候选、也没有产品出口（只有真结算才出现）',
+      `phase=${runIdle.phase} choices=${runIdle.rewardChoices.length} exitHref=${runIdle.exitHref}`,
     );
   } finally {
     await browser.close();
