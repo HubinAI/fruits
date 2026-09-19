@@ -14,7 +14,7 @@
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`d334d0c` R1 验证中心 → `3d23091` RUN-02-R1 → `09ee631` RUN-02-R2 → `0ff259f` M2-R1 →
-  **`d1a9d67` PBL-RDC 远程维持作战距离**；更早查 `git log`。
+  `d1a9d67` PBL-RDC 远程维持作战距离 → **`bab5f63` M3-CONTENT-BATCH-01**；更早查 `git log`。
 - 全链对 `src/{core,physics,render,player,platform,ui,game,presentation}` diff **恒为空**。正式 gameplay 改动仅：
   `cannonBehavior.ts` 可选 `burstRounds`（默认 1，逐帧不变）+ `battle/` 内**可选**驱动档（缺省逐帧不变）。
 
@@ -37,8 +37,13 @@
   `Test timed out in 5000ms`，先单独重跑复现）；重型用例显式 timeout。
 - 本机 bash 常缺 `/usr/bin` ⇒ 命令前 `export PATH="/usr/bin:/bin:$PATH"`。截图 / 日志落 `outputs/`（gitignored）。
 - ⚠️ **id 改名 = 全通道同步**：`src` + `tests/*.ts` + `tests/*.cjs`（E2E 侧有镜像字面量表）。
-- ⚠️ **每加一个根目录 html = 四处同步**：R2-03 不重写清单 / R2-10 完整清单（字典序）· `vite.portrait-lab.config.ts`
-  的 `input` · `constants.ts` 头部删除清单 · 新页面自己的守卫测试。
+- ⚠️ **每加一个根目录 html = 七处同步**（M3-CB 实测补两处）：R2-03 不重写清单 / R2-10 完整清单（字典序）·
+  `vite.portrait-lab.config.ts` 的 `input` · `constants.ts` 头部删除清单 · **`package.json` 的 `dev:*` script** ·
+  **`validationHub.ts` 入口表（若挂 Hub）** · 新页面自己的守卫测试。
+- ⚠️ **加一个 Hub 入口 = 4 处硬断言**：`validationHub.ts`（union + 表）· `tests/portraitValidationHub.test.ts`
+  （`H-01` `toHaveLength(N)` + id/label 数组、`H-02` `Set.size`、`H-04` `want` 表、`H-05` `ENTRY_PAGES`、
+  **`H-14` 「下一个」循环**）· `tests/_e2e_validation_hub.cjs`（`EXPECT`、`ENTRY_PAGES`、**4 处 `a.vhub-card`
+  计数**、**`V20` 顺序断言**、新页 probe 写进 `EXPECT[].probe`）。⚠️ **最容易漏的是「顺序断言」而不是「计数断言」**。
 - ⚠️ **跨轮复验 PRP 前必须先 `npm run build:portrait-lab`**：E2E 读 `dist-portrait-lab/`，`emptyOutDir:false` 会留
   **陈旧 chunk** ⇒ 直接跑 = 假 FAIL。定位：`grep -rl "<新字段>" dist-portrait-lab/` 空 + 旧字段命中。
 - ⚠️ **E2E 新段落别推进 `runViewport` 的 `page`**（后续 14 段会继续消费 ⇒ 过期 rect 点击 ⇒ 90s 超时假红）；
@@ -85,8 +90,16 @@
 战斗参数 / 耐久 §A · 相机 §B · 接缝与**第一层冻结值** §C · RUN-R1 §D · BUILD-01（含已废弃假设）§E ·
 RUN-02 脚本 / 状态机 §F · §J · §K · M2 种子 §G · M3 遭遇台 §H · Hub §I · M2-R1 终点态出口 §L ·
 **PBL-RDC 远程维持距离 §M**。
+⚠️ **M3-CONTENT-BATCH-01 不在 REF** ⇒ 看 `交接文档_2026-09-19_PRP-M3-CONTENT-BATCH-01.md`
+（Content A BLOCK 的六层证据 / B+C 复用口径 / Hub 第 4 入口）。
 
 ## 6. Next action
+- ⚠️ **最高优先（M3-CB 已停等的用户裁决）**：Content A「多单位轻敌群」**如实 BLOCK** —— Foundation 在
+  （`contactRouter.ts` 的 `OwnerTag.vehicleId`、`arenaA.ts:814` 的 1vN 宿主）但**正式 Battle Runtime 装不下**
+  （`planckBattleOrchestrator.ts:217-218` 硬编码两车 + `battleContract.ts:96-98` 只有 A/B 胜负 +
+  `runBattleRuntime.ts:355` 只取 `enemies[0]`；唯一 1vN 宿主是 DEBUG 的 Arena A）。三选项：
+  甲 接受现状 / **乙 单开 New Foundation Queue（N 车正式编排 + N 方胜负 + 相机）** / 丙 降级到 Arena A 先看。
+  ⇒ 在用户裁决前**不得动 Content A**（`LightSwarm3` 零改动）。
 - ⚠️ **本体**：PBL-RDC 把「敌人恒冲锋」修成三段距离档，但**实测暴露几何死结**——敌人会被玩家一路压到**右墙
   1600（终点栏杆）**，可用域宽仅 800px ⇒ 这正是 `PRP-P0-FOUNDATION-BEHAVIOR-EXIT-INTERRUPT-R1` 的对象。
 - ⚠️ **待用户裁决**（不得自行决定）：① 第二层池被统一去重砍成 2 项；② M2 脚手架 `PRIOR_RUN_DURABILITY`
