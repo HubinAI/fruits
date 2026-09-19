@@ -13,7 +13,14 @@
  *   ① 上一局 RUN COMPLETE → 种子三选一 → **全新 Run**（DAY 1 / 满耐久 / Build 只剩 seed）
  *      → 第一场真实 Battle（seed 真的进了 Runtime）→ `NEXT RUN VALIDATION COMPLETE`
  *   ② 三个种子**各自独立可跑**（重载页面即可重开验证流程）
- *   ③ 验证终点后**不再推进**（点主动作状态不变 → 结构上跑不到第二场）
+ *   ③ 验证终点 = **一个真实出口**（PRP-M2-R1）：点一次「返回验证中心」→ 整页导航回 Hub
+ *      → 验证 Runtime 不残留 → 可继续进入 Encounter Batch
+ *
+ * ⚠️ PRP-M2-R1-NEXT-RUN-VALIDATION-EXIT-BUG｜本文件曾经**把 P0 当成预期行为**：
+ *    旧 N20 断言 `actionLabel === '下一局验证完成' && actionEnabled === false`、
+ *    旧 N22 断言主动作强调条面积 `= 0`、旧 N23 断言「连点两次状态完全不变」。
+ *    三条全绿，而真人录屏里那个按钮**点了没有任何反应** —— 因为终点态根本没有 action。
+ *    现在这三条改判「终点态必须是一个**真实出口**」，并新增 ⑧ 段用真实鼠标点击闭环验证。
  *
  * ⚠️ 面积期望值与本文件内联的**布局规则**同源（卡片强调条 1240 / 进度节点 128 /
  *    强化图标 756+144 / 主动作强调条 990）—— 与 `tests/_e2e_run_page.cjs` 保持同一套口径。
@@ -32,6 +39,11 @@ const ROOT = path.join(__dirname, '..', 'dist-portrait-lab');
 const PORT = 8157;
 const URL_BASE = `http://127.0.0.1:${PORT}`;
 const PAGE_URL = `${URL_BASE}/next-run.html`;
+/** PRP-M2-R1：终点态的「返回验证中心」出口 —— 目标是 Hub 本身（整页导航）。 */
+const HUB_URL = `${URL_BASE}/validation-hub.html`;
+const ENCOUNTER_URL = `${URL_BASE}/encounter-lab.html`;
+const EXIT_LABEL = '返回验证中心';
+const EXIT_HREF = './validation-hub.html';
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -485,6 +497,7 @@ async function runFullFlow(browser, vp) {
         complete: done.validationComplete,
         label: done.actionLabel,
         enabled: done.actionEnabled,
+        href: done.exitHref,
       });
 
       if (s === 0) {
@@ -494,9 +507,15 @@ async function runFullFlow(browser, vp) {
           `phase=${done.phase} battles=${done.battlesCompleted} complete=${done.validationComplete}`,
         );
         log(
-          done.actionLabel === '下一局验证完成' && done.actionEnabled === false,
-          `[${tag}] N20 验证终点：唯一主动作改为终点标记且不可用`,
-          `label=${done.actionLabel} enabled=${done.actionEnabled}`,
+          // ⚠️ PRP-M2-R1：终点态的主动作必须是一个**真实出口**。
+          //    旧断言是 `actionLabel === '下一局验证完成' && actionEnabled === false`
+          //    —— 那条断言把「按钮可见但点了没反应」的 P0 **当成预期行为**钉死了
+          //    （E2E 全绿、真人一点就发现无响应）。现在改为「有按钮必有 action」。
+          done.actionLabel === EXIT_LABEL &&
+            done.actionEnabled === true &&
+            done.exitHref === EXIT_HREF,
+          `[${tag}] N20 验证终点：唯一主动作 = 「${EXIT_LABEL}」（文案与目标同源，可点）`,
+          `label=${done.actionLabel} enabled=${done.actionEnabled} href=${done.exitHref}`,
         );
         log(
           done.battle !== null && done.battle.done === true && done.battle.steps > 0,
@@ -509,23 +528,32 @@ async function runFullFlow(browser, vp) {
         if (vp.dpr === 1) {
           const pxDone = await pixelStats(page);
           log(
-            near(pxDone.actionBar, 0) && near(pxDone.cardBar, 0) && near(pxDone[BUFF_ICON_KEY[seedId]], BUFF_ICON),
-            `[${tag}] N22 终点账本：主动作强调条消失（按钮真的不可用），强化图标仍在`,
+            // ⚠️ PRP-M2-R1：终点态按钮**可用**（= 一个真实出口）→ 强调条照常入账。
+            //    旧断言 `near(pxDone.actionBar, 0)` 是「按钮被画成禁用色」的机器证据，
+            //    也就是 P0 的另一面：屏幕上有个按钮，但它不属于任何 action。
+            near(pxDone.actionBar, ACTION_BAR) &&
+              near(pxDone.cardBar, 0) &&
+              near(pxDone[BUFF_ICON_KEY[seedId]], BUFF_ICON),
+            `[${tag}] N22 终点账本：主动作强调条**在账**（按钮是一个可点的真出口），强化图标仍在`,
             `action=${pxDone.actionBar} card=${pxDone.cardBar} icon=${pxDone[BUFF_ICON_KEY[seedId]]}`,
           );
         }
 
-        /* ---------- ⑤ 终点之后不再推进（结构上跑不到第二场） ---------- */
-        await pressAction(page);
-        await pressAction(page);
-        const afterClicks = await probeOf(page);
+        /* ---------- ⑤ 终点态不再挂 Run 正式流程动作（结构上跑不到第二场） ---------- */
+        // ⚠️ 这里刻意**不点击**：本状态下按钮是「返回验证中心」出口，点一下就会导航离开
+        //    （真实点击验证在 ⑧ 段做）。这里只钉住静态事实：节点仍停在第一场、只打完 1 场、
+        //    唯一可点的动作**指向 Hub**（而不是 Run 的「继续」）、页面里不存在第二个按钮。
+        //    —— 旧版本的 N23 是「连点两次状态不变」，那条断言在出口做好之后不成立
+        //    （点一次就该回 Hub），而它之前之所以能过，正是因为按钮**没有 action**。
+        const atFinal = await probeOf(page);
         log(
-          afterClicks.phase === 'RESULT' &&
-            afterClicks.battlesCompleted === 1 &&
-            afterClicks.nodeId === 'd2-battle1' &&
-            afterClicks.actionEnabled === false,
-          `[${tag}] N23 终点后连点两次主动作：状态**完全不变**（不进入第二场、不刷新 Run）`,
-          `phase=${afterClicks.phase} battles=${afterClicks.battlesCompleted} nodeId=${afterClicks.nodeId}`,
+          atFinal.phase === 'RESULT' &&
+            atFinal.battlesCompleted === 1 &&
+            atFinal.nodeId === 'd2-battle1' &&
+            atFinal.exitHref === EXIT_HREF &&
+            atFinal.domButtons === 0,
+          `[${tag}] N23 终点态唯一的可点动作指向 Hub（不是 Run 的「继续」）⇒ 结构上跑不到第二场`,
+          `phase=${atFinal.phase} battles=${atFinal.battlesCompleted} nodeId=${atFinal.nodeId} exit=${atFinal.exitHref} domButtons=${atFinal.domButtons}`,
         );
       }
     }
@@ -538,15 +566,17 @@ async function runFullFlow(browser, vp) {
             o.complete === true &&
             o.battles === 1 &&
             (o.phase === 'RESULT' || o.phase === 'FAILED') &&
-            o.enabled === false &&
-            o.label === '下一局验证完成' &&
+            // ⚠️ PRP-M2-R1：三个种子的终点态都要有**同一个真实出口**（不再是禁用按钮）
+            o.enabled === true &&
+            o.label === EXIT_LABEL &&
+            o.href === EXIT_HREF &&
             o.steps > 0,
         ),
       `[${tag}] N24 三个种子**各自独立**跑完第一场，并在同一条件下停下（终点行为完全一致）`,
       outcomes.map((o) => `${o.seedId}:${o.phase} hp=${Math.round(o.hp)}/${o.hpMax} steps=${o.steps}`).join(' | '),
     );
 
-    /* ---------- ⑦ 页面无开发控制 / 无跳转 / 无运行期错误 ---------- */
+    /* ---------- ⑦ 页面无开发控制 / 无额外导航 / 无运行期错误 ---------- */
     const nav = await page.evaluate(() => performance.getEntriesByType('navigation').length);
     const last = await probeOf(page);
     log(
@@ -554,8 +584,63 @@ async function runFullFlow(browser, vp) {
       `[${tag}] N25 验证页面同样零开发控制（无 DOM 按钮、无 dev 控件）`,
       `debugControls=${last.debugControls} domButtons=${last.domButtons}`,
     );
-    log(nav >= 1, `[${tag}] N26 验证流程不产生额外导航（所有切换都在同一个页面内）`, `navigations=${nav}`);
+    // ⚠️ PRP-M2-R1：出口是一个**真实整页导航** ⇒ 「不产生额外导航」只能在**点击出口之前**成立。
+    //    这里收紧为 `=== 1`（只有初始加载那一次）：整局流程内所有切换都是同一页面内的状态切换。
+    log(nav === 1, `[${tag}] N26 点击出口之前，整局流程 0 次额外导航（所有切换都在同一文档内）`, `navigations=${nav}`);
     log(pageErrors.length === 0, `[${tag}] N27 页面无运行期异常`, pageErrors.length ? pageErrors.join(' | ') : '0 errors');
+
+    /*
+      ---------- ⑧ PRP-M2-R1：终点态的唯一出口（真人录屏 P0 的机器回归） ----------
+      真人录屏现象：底部按钮可见，连点**完全无响应**。根因 = 终点态既没有 action，
+      又把 Run 的正式流程 action 挡住 ⇒ 「有按钮但无 action」。
+      本段用**真实鼠标点击**证明它已经是一个真出口：点一次 → 立即回 Hub，
+      且回 Hub 后验证 Runtime **不残留**（文档销毁 ⇒ probe 句柄 / 画布都不存在），
+      并且可以**继续进入 Encounter Batch**（验收 4）。
+    */
+    const atExit = await probeOf(page);
+    log(
+      atExit.validationComplete === true &&
+        atExit.actionEnabled === true &&
+        atExit.actionLabel === EXIT_LABEL &&
+        atExit.exitHref === EXIT_HREF,
+      `[${tag}] N28 终点态唯一主动作 = 一个**真实出口**（文案与目标同源，不再是状态标记）`,
+      `label=${atExit.actionLabel} enabled=${atExit.actionEnabled} href=${atExit.exitHref}`,
+    );
+
+    const beforeUrl = page.url();
+    await clickRect(page, atExit.actionRect); // 真实鼠标点击底部按钮
+    await page.waitForURL(HUB_URL, { timeout: 15000 });
+    log(
+      beforeUrl === PAGE_URL && page.url() === HUB_URL,
+      `[${tag}] N29 点**一次**「${EXIT_LABEL}」→ 立即整页导航回验证中心（点击被吞的 P0 已消除）`,
+      `${beforeUrl.split('/').pop()} → ${page.url().split('/').pop()}`,
+    );
+
+    await page.waitForFunction(() => document.querySelectorAll('a[data-vhub-id]').length === 3, null, { timeout: 15000 });
+    const hub = await page.evaluate(() => ({
+      hasRunPage: typeof window.__RUNPAGE__ !== 'undefined',
+      canvas: document.querySelectorAll('canvas').length,
+      hubRoot: !!document.querySelector('#vhub-root'),
+      entries: [...document.querySelectorAll('a[data-vhub-id]')].map((a) => a.getAttribute('href')),
+    }));
+    log(
+      hub.hubRoot === true && hub.hasRunPage === false && hub.canvas === 0,
+      `[${tag}] N30 回 Hub 后验证 Runtime **不残留**：整页导航 ⇒ probe 句柄与画布随文档一起消失（无上一场 battle / projectile / timer）`,
+      `hubRoot=${hub.hubRoot} __RUNPAGE__=${hub.hasRunPage} canvas=${hub.canvas}`,
+    );
+    log(
+      JSON.stringify(hub.entries) === JSON.stringify(['./run-page.html', './next-run.html', './encounter-lab.html']),
+      `[${tag}] N31 返回后 Hub 三个入口都在（可以继续验收下一项）`,
+      hub.entries.join(' '),
+    );
+
+    await page.click('a[data-vhub-id="encounterBatch"]');
+    await page.waitForURL(ENCOUNTER_URL, { timeout: 15000 });
+    log(
+      page.url() === ENCOUNTER_URL,
+      `[${tag}] N32 返回 Hub 后**可以继续进入 Encounter Batch**（验收 4）`,
+      page.url().split('/').pop(),
+    );
   } finally {
     await ctx.close();
   }

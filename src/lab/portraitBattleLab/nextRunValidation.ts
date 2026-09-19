@@ -101,8 +101,60 @@ export const NEXT_RUN_SEEDS: readonly RunSeedOption[] = [
 export const NEXT_RUN_SEED_TITLE = '带走一项改装';
 /** 种子选择浮层的引导语（说明这是**下一局**，不是继续上一局）。 */
 export const NEXT_RUN_SEED_LEAD = '这次冒险结束了。选一项带进下一局。';
-/** 验证终点的可见标记（第一场结束后出现在唯一的主动作位置上）。 */
-export const NEXT_RUN_VALIDATION_LABEL = '下一局验证完成';
+/**
+ * 验证终点态的**唯一出口**文案（PRP-M2-R1-NEXT-RUN-VALIDATION-EXIT-BUG）。
+ *
+ * ⚠️ 这里必须是**一句动作**（「返回验证中心」），不是状态标记。
+ *    旧文案 `'下一局验证完成'` 是**状态描述**，却被画在唯一的主动作按钮上 ——
+ *    于是出现真人录屏里的 P0：「按钮可见、连点完全无反应」。
+ *    终点态的身份由 probe 的 `validationComplete === true` 承担，**不再占用按钮文案**。
+ */
+export const NEXT_RUN_VALIDATION_LABEL = '返回验证中心';
+
+/**
+ * PRP-M2-R1｜验证终点态的唯一出口**地址**（「返回验证中心」要去的那一页）。
+ *
+ * ⚠️ 刻意写在本模块里，而**不是**从 `validationHub.ts` import —— Hub 与入口是**单向**关系：
+ *    Hub 认识入口（它的入口表里有 `next-run.html`），入口不认识 Hub。
+ *    让入口去 import Hub 模块会把 `validationHub.ts` 变成**跨入口共享 chunk**，
+ *    把 Hub 从「叶子页面」变成「被依赖的模块」——
+ *    `tests/_e2e_validation_hub.cjs` 的 `I4`（Hub 只允许引用自己的 chunk）会直接抓到，
+ *    那是一条**结构守卫**，本轮的选择是「让结构回到单向」，不是放宽守卫。
+ *
+ * 代价：这个文件名在两处出现（本模块 + 根目录 HTML）。
+ * ⇒ 由 `tests/portraitNextRunValidation.test.ts` 的 `NR-19` 交叉核对钉死：
+ *    ① 该文件真实存在；② 那一页真的是**挂 Hub 脚本的验证中心**；
+ *    ③ Hub 的入口表里真的有 `next-run.html`（即「返回目标」与「我这页」互相认得）。
+ */
+export const NEXT_RUN_EXIT_HREF = './validation-hub.html';
+
+/**
+ * 验证终点态的主动作规格（PRP-M2-R1）。
+ *
+ * **本 Queue 的结构保证**：终点态的「按钮文案」与「点击后做什么」来自**同一个对象**
+ * ⇒ 结构上不可能再出现「有按钮但无 action」这种分叉。
+ *   - `validationComplete === false` → `null`（终点态之外不产生任何出口动作）；
+ *   - `exitHref` 缺失 / 空串（宿主没声明返回地址）→ `null` ⇒ 页面**根本不画按钮**
+ *     （而不是画一个点了没反应的按钮）。
+ */
+export interface NextRunFinalAction {
+  /** 按钮文案（= 一句动作，不是状态）。 */
+  readonly label: string;
+  /** 点击后的**整页导航**目标（与 Validation Hub 入口同一套相对路径口径）。 */
+  readonly href: string;
+}
+
+/**
+ * 计算终点态的主动作（纯函数 → node 侧可直接断言「有按钮必有 action」）。
+ */
+export function nextRunFinalAction(
+  validationComplete: boolean,
+  exitHref: string | null | undefined,
+): NextRunFinalAction | null {
+  if (!validationComplete) return null;
+  if (typeof exitHref !== 'string' || exitHref === '') return null;
+  return { label: NEXT_RUN_VALIDATION_LABEL, href: exitHref };
+}
 
 /** 按 id 取种子（未知 → `null`，绝不静默回退到别的种子）。 */
 export function nextRunSeedById(id: string): RunSeedOption | null {

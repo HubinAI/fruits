@@ -22,16 +22,19 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  NEXT_RUN_EXIT_HREF,
   NEXT_RUN_SEEDS,
   NEXT_RUN_SEED_LEAD,
   NEXT_RUN_SEED_TITLE,
   NEXT_RUN_VALIDATION_LABEL,
   buildPriorCompletedRun,
   createSeededNewRun,
+  nextRunFinalAction,
   nextRunSeedById,
   priorRunSummary,
   runSeedChoiceOption,
 } from '../src/lab/portraitBattleLab/nextRunValidation';
+import { VALIDATION_HUB_ENTRIES } from '../src/lab/portraitBattleLab/validationHub';
 import {
   RUN_CHOICE_OPTIONS,
   createRunPageState,
@@ -111,7 +114,9 @@ describe('PRP-M2｜A 三个固定起始种子', () => {
     }
     expect(NEXT_RUN_SEEDS.map((s) => s.title)).toEqual(['重炮开局', '双联开局', '快装开局']);
     expect(NEXT_RUN_SEED_TITLE).toBe('带走一项改装');
-    expect(NEXT_RUN_VALIDATION_LABEL).toBe('下一局验证完成');
+    // ⚠️ PRP-M2-R1：终点态按钮文案必须是**一句动作**（旧的 '下一局验证完成' 是状态描述，
+    //    被画在按钮上就产生了「按钮可见 + 点了没反应」的 P0）。
+    expect(NEXT_RUN_VALIDATION_LABEL).toBe('返回验证中心');
     // 引导语必须点明这是**下一局**（否则玩家会以为还在上一局）
     expect(NEXT_RUN_SEED_LEAD.includes('下一局')).toBe(true);
   });
@@ -417,5 +422,93 @@ describe('PRP-M2｜E 独立验证入口且不污染默认启动链', () => {
         }
       }
     }
+  });
+});
+
+/* ============ F. PRP-M2-R1｜NEXT_RUN_VALIDATION_COMPLETE 必须是一个真实出口 */
+
+/**
+ * 真人录屏 P0 的回归守卫（PRP-M2-R1-NEXT-RUN-VALIDATION-EXIT-BUG）。
+ *
+ * 旧实现的形态 = **有按钮但无 action**：
+ *   · 按钮文案是**状态描述**（`'下一局验证完成'`），却被画在唯一的主动作位置上；
+ *   · `onPointerDown` 在 hit test **之前**就 `return`（点击被吞，连 handler 都到不了）；
+ *   · `actionEnabledNow()` 恒 `false`；
+ *   · 没有任何 exit action / transition / 导航。
+ *
+ * 本组把「终点态必须是一个**真出口**」钉成机器判据：文案与目标**同源**，缺失即**不画按钮**。
+ */
+describe('PRP-M2-R1｜F 验证终点（NEXT_RUN_VALIDATION_COMPLETE）的唯一出口', () => {
+  it('NR-17 终点态的主动作 = 「返回验证中心」+ 一个真实 href（文案与行为同源）', () => {
+    const action = nextRunFinalAction(true, NEXT_RUN_EXIT_HREF);
+    expect(action).not.toBeNull();
+    expect(action && action.label).toBe(NEXT_RUN_VALIDATION_LABEL);
+    expect(action && action.href).toBe(NEXT_RUN_EXIT_HREF);
+    // 文案必须是一句**动作**，不能退回状态描述
+    expect(NEXT_RUN_VALIDATION_LABEL).toBe('返回验证中心');
+    expect(NEXT_RUN_VALIDATION_LABEL.includes('验证完成')).toBe(false);
+  });
+
+  it('NR-18 「有按钮但无 action」在结构上不可能出现', () => {
+    // ① 非终点态：不产生出口动作（那一步该走 Run 正式流程的 pressRunAction）
+    expect(nextRunFinalAction(false, NEXT_RUN_EXIT_HREF)).toBeNull();
+    // ② 终点态但宿主没声明出口：同样**不产生动作** ⇒ 页面据此一个按钮都不画
+    //    （而不是画一个点了没反应的按钮）
+    for (const missing of [null, undefined, ''] as const) {
+      expect(nextRunFinalAction(true, missing), `exitHref=${String(missing)}`).toBeNull();
+    }
+    // ③ 反过来：只要有动作，就一定同时带 label 与 href（不存在「有按钮没目标」）
+    const action = nextRunFinalAction(true, NEXT_RUN_EXIT_HREF);
+    expect(action && action.label.length).toBeGreaterThan(0);
+    expect(action && action.href.length).toBeGreaterThan(0);
+  });
+
+  it('NR-19 出口目标 = **认得这一页的那个**验证中心（交叉核对，不是自说自话）', () => {
+    // ① 目标是一个真实存在的根目录 HTML
+    expect(NEXT_RUN_EXIT_HREF).toMatch(/^\.\/[A-Za-z0-9._-]+\.html$/);
+    const file = NEXT_RUN_EXIT_HREF.replace(/^\.\//, '');
+    expect(existsSync(join(REPO_ROOT, file))).toBe(true);
+    const html = read(file);
+    // ② 那一页真的挂的是 Hub 自己的脚本（否则「返回验证中心」就返回到了别处）
+    expect(html.includes('/src/lab/portraitBattleLab/validationHubMain.ts')).toBe(true);
+    expect(html.includes('<div id="vhub-root"></div>')).toBe(true);
+    // ③ 闭环：Hub 的入口表里真的有本页（`next-run.html`）—— 即「我返回的目标」与
+    //    「它入口表里的我」互相认得，改任一处不同源都会在这里炸。
+    const self = VALIDATION_HUB_ENTRIES.filter((e) => e.pageFile === 'next-run.html');
+    expect(self.length).toBe(1);
+    expect(self[0].href).toBe('./next-run.html');
+    // ④ 方向守卫：入口页面**不得** import Hub 模块（Hub 与入口是单向关系；
+    //    反向依赖会把 `validationHub.ts` 拉成跨入口共享 chunk，`I4` 结构守卫会抓到）。
+    const main = stripComments(readLab('nextRunMain.ts'));
+    expect(main.includes("from './validationHub'")).toBe(false);
+  });
+
+  it('NR-20 出口是整页导航，但**导航动作不在 RunPage 里**（玩家页面结构上仍无法跳转）', () => {
+    const page = stripComments(readLab('runPage.ts'));
+    // ① RunPage 里**不得**出现 Hub 的页面文件名 —— 地址由宿主注入，不是页面硬编码
+    expect(page.includes('validation-hub')).toBe(false);
+    // ② 终点态的文案与点击行为都来自**同一个对象**
+    expect(page.includes('finalActionNow()')).toBe(true);
+    // ③ ⚠️ RunPage 与**正式玩家页面**（run-page.html）共用 ⇒ 必须仍然**不写 location / history**
+    //    （`tests/portraitRunPage.test.ts` 的 RP-25 机器禁止；整页导航只能由宿主做）
+    for (const t of [
+      'createElement(\'button\')',
+      'location.href',
+      'location.assign',
+      'location.replace',
+      'history.pushState',
+      'history.replaceState',
+      'window.open',
+    ]) {
+      expect(page.includes(t), `runPage.ts 不得出现 "${t}"`).toBe(false);
+    }
+    // ④ 出口经**宿主回调**发出：RunPage 只发请求，不执行导航
+    expect(page.includes('this.opts.onExit')).toBe(true);
+    // ⑤ 终点态仍然**不得**落到 Run 正式流程的 pressRunAction 上（结构上跑不到第二场）
+    expect(page.includes('if (this.validationDone)')).toBe(true);
+    // ⑥ 宿主：注入出口地址 + 执行整页导航（地址来自**本页自己的**数据源）
+    const main = stripComments(readLab('nextRunMain.ts'));
+    expect(main.includes('exitHref: NEXT_RUN_EXIT_HREF')).toBe(true);
+    expect(main.includes('window.location.assign(exit.href)')).toBe(true);
   });
 });

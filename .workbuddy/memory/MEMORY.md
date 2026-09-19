@@ -4,8 +4,8 @@
 
 | 要找什么 | 去哪 |
 |---|---|
-| 本轮 / 近日做了什么、实测数字 | `.workbuddy/memory/YYYY-MM-DD.md`（最新 `2026-09-18.md`） |
-| **PRP 运行时细节**（战斗参数 / 相机 / 接缝 / 三入口 / 各轮 Queue 的 file:line 与口径） | `.workbuddy/memory/REF_PRP_RUNTIME.md` §A–K |
+| 本轮 / 近日做了什么、实测数字 | `.workbuddy/memory/YYYY-MM-DD.md`（最新 `2026-09-19.md`） |
+| **PRP 运行时细节**（战斗参数 / 相机 / 接缝 / 三入口 / 各轮 Queue 的 file:line 与口径） | `.workbuddy/memory/REF_PRP_RUNTIME.md` §A–L |
 | 每个 Queue 的完整交付说明 | repo-root `交接文档_YYYY-MM-DD_<Queue>.md`（**本地件，不入库**） |
 | 更早的完整版 | `.workbuddy/memory/archive/MEMORY_FULL_*.md` |
 | 项目级共识与边界（最高权威） | `最强水果_项目核心共识与开发边界_WorkBuddy_Memory.md` |
@@ -13,7 +13,8 @@
 ## 1. Identity / 链尾
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 分支 `prototype-portrait-battle-lab`
   （实验分支，可整块删除）；主线 `foundation-02-wechat`。原型正式名 **PRP｜Portrait Run Prototype**。
-- **链尾**：`d334d0c` R1 验证中心 → `3d23091` RUN-02-R1 → **`09ee631` RUN-02-R2 耐久取舍做实**；更早查 `git log`。
+- **链尾**：`d334d0c` R1 验证中心 → `3d23091` RUN-02-R1 → `09ee631` RUN-02-R2 耐久取舍做实 →
+  **M2-R1 Next Run 终点态唯一出口**；更早查 `git log`。
 - 全链对 `src/core|physics|render|player|platform|battle|ui|game|presentation` diff **恒为空**；唯一正式
   gameplay 改动 = `src/battle/cannonBehavior.ts` 可选 `burstRounds`（默认 1，逐帧不变）。
 
@@ -70,6 +71,16 @@
   `<!-- -->`）；「不写战斗数值」类守卫用**正则**（`includes('damage:')` 会被 `damage: cr.damage` 误伤）。
 - ⚠️ 改实现导致源码守卫失败时**强化守卫，不放宽**（例：`runOverlayCards` 收紧为「唯一调用点 + 三处同源」；
   R2 把「`next` 目标互不重复」收紧为**入度分析**）。
+- ⚠️ **「有按钮 ⇒ 必有 action」**：断言「禁用 / 终点态」时**必须同时断言存在一个真实出口**。M2-R1 的 P0 就是
+  三条 E2E（`N20`/`N22`/`N23`）**把缺陷当成预期行为**钉死 ⇒ 47/47 全绿，而真人一点完全无响应。
+  ⚠️ 配套事实：`runActionEnabled()` 对 `RESULT` 是 `true` ⇒ 终点态**必须继续拦截**正式流程动作（否则推进下一场），
+  但拦截时要放行**自己的出口**；根因常是「按钮文案是**状态描述**而不是动作」。
+- ⚠️ **导航放哪由结构守卫决定**：`runPage.ts` 与**正式玩家页面**共用 ⇒ `RP-25` 禁写 `location`/`history`/
+  `window.open`/`createElement('button')` ⇒ 整页导航只能由**宿主**（`nextRunMain.ts` 的 `onExit`）执行；
+  `RunPage` 只发「出口请求」+ 文案，**不认识目标路径**。
+- ⚠️ **Hub 与入口是单向关系**：`I4` 要求 `validation-hub.html` 只引用**自己的 chunk + `modulepreload-polyfill-*`**
+  ⇒ 入口 `import './validationHub'` 会把 Hub 拉成**跨入口共享 chunk**（从叶子页面变成被依赖模块，守卫直接抓到）。
+  入口页要「返回验证中心」，地址写**自己**的数据源（`nextRunValidation.ts`），两端用交叉核对（`NR-19`）钉死。
 - ⚠️ **probe 字段名 ≠ 展示名**（`playerBodyName` 是中文车身名，正式 id 在 `loadoutId`）⇒ 先读接口再写断言。
 - ⚠️ **开火节奏只能按 `weaponFire` 事件量**（按弹丸数增量会漏计：命中与下一发常同步 → 净变化 0）。
 - ⚠️ 「整页压暗」判据不要用高绝对阈值（底色极暗）⇒ ~15 + **同点位前后对比**。
@@ -136,25 +147,35 @@
   上一局走真实状态机**确定性快进**。⚠️ `runPageState/runScript/runBattleRuntime` **不得含 seed 概念**（NR-15）。
   ⚠️ **R2 连带**：脚手架 `PRIOR_RUN_DURABILITY` 由 `'upgrade'` 改 `'repair'`（走横向节点会多拿一项 ⇒
   `priorRunSummary` 变 ⇒ M2 断言破裂）⇒ 摘要零变化、M2 单测零改动；**代价** = carry 含 275 补偿。
+- ⚠️ **M2-R1（终点态出口）**：第一场结束后唯一动作 = `返回验证中心`（`NEXT_RUN_EXIT_HREF`，
+  宿主 `nextRunMain.ts` 整页导航）。出口规格 = `nextRunFinalAction(validationComplete, exitHref)` →
+  `{label,href}|null`，`RunPage` 的**文案 / 可用性 / 命中 / 绘制四处同读**；缺 `exitHref` 或 `onExit`
+  ⇒ **一个按钮都不画**。⚠️ `requestExit()` = `dispose()` → 清浮层引用 → 交宿主；**不复位** `validationDone`
+  （导航若被拦下，页面仍停在安全终点态）。
 - **M3 `encounter-lab.html`**（端口 8158）：固定三套（唯一来源 `ENCOUNTER_BATCH_IDS`）。⚠️ **清理语义真相**：
   `dispose()` **只是丢弃引用** ⇒ 被释放实例**仍可 `step`**；cleanup 靠**宿主生命周期**；判据 = **新实例开局读数
   干净**（读数必须**构造时固化**）。
 - **R1 `validation-hub.html`**（端口 8159）：唯一数据源 = `validationHub.ts`（**零 import**）。⚠️ 切换 = **整页
-  导航**（真实 `<a href>`）⇒ 保真 + 销毁带走全部运行时/监听器；**代价** = 入口页无「返回」。⚠️ Hub **零画布**；
-  「上次进入」= `sessionStorage` + **`pageshow` 重读**（bfcache）。
+  导航**（真实 `<a href>`）⇒ 保真 + 销毁带走全部运行时/监听器；**代价** = 入口页默认无「返回」
+  （M2 例外：PRP-M2-R1 起 `next-run` 终点有真实出口；`run-page.html` 是玩家正式页面，**仍不加**）。
+  ⚠️ Hub **零画布**；「上次进入」= `sessionStorage` + **`pageshow` 重读**（bfcache）。
 
 ## 6. Next action
-- **RUN-02-R2 已交付**（DAY 4 取舍做实：维修 = 生存优势 · 继续改装 = 构筑数量优势）。**按指令停止，不继续其它
-  Run 内容。** 真人复验 = 录一段「DAY 4 选继续改装 → 二选一横向改装 → DAY 5 第二层 → DAY 6 两层」。
-- ⚠️ **本轮三条已接受副作用（须向用户明说）**：① 第二层池被去重砍成 2 项（横向项撞上条件池时）；② M2 脚手架
-  改走 `repair` ⇒ carry 含 275 补偿；③ `RUN_MAX_CHOICES` 2→3。
+- **M2-R1 已交付**（Next Run 终点态唯一出口：`返回验证中心` → 整页回 Hub）。**按指令停止，不继续其它内容。**
+  真人复验 = 录一段「Next Run → 第一场结束 → 点**一次**『返回验证中心』→ 回 Hub → 继续开 Encounter Batch」。
+- ⚠️ **本轮待用户裁决**：① 终点按钮文案 `返回验证中心` 是否够清楚（旧文案是状态描述）；② 「终点态拿不到出口地址
+  就**不画按钮**」这条防呆策略是否认可；③ 上一轮遗留三条副作用（第二层池去重 / M2 carry 含 275 补偿 /
+  `RUN_MAX_CHOICES` 2→3）。
+- **RUN-02-R2 已交付**（DAY 4 取舍做实：维修 = 生存优势 · 继续改装 = 构筑数量优势）。
+  真人复验 = 录一段「DAY 4 选继续改装 → 二选一横向改装 → DAY 5 第二层 → DAY 6 两层」。
 - **待裁决**：R2 后「继续改装」在装配上是真优势，但**终局耐久常更低甚至 FAILED**（三条路线里两条改装即失败）
   ⇒ 「是否补偿改装分支的生存」属**新设计假设**，须单开 Queue。
 - **M3 待裁决**（不做平衡）：三种敌人是否提出不同问题；`RangedTurret`(OPP-03) 对基础 Build **必输** ⇒ 改即新假设。
 - **M2 待裁决**：三种子开局难度是否等价；「下一局起点不同」是否真让人想再打一局。⚠️ 禁改已冻结的第一层数值。
-- **R1 待裁决**：Hub「整页导航 + 后退」够不够用（要单页切换 = 新假设）。
+- **R2 后新假设**：改装分支装配占优但**终局耐久常更低（三条路线两条 FAILED）** ⇒ 「是否补偿生存」须单开 Queue。
 - **未裁决挂起**：`FAILED` 终态观感；「整局打完是否想再开一局」；`WEAPON_CONTACT_THRESHOLD=0.5`
-  （`contactRouter.ts:694`）；PRP-R5 遗留（若仍嫌车小，**恢复旧模式，不发明新模式**）。
+  （`contactRouter.ts:694`）；PRP-R5 遗留（若仍嫌车小，**恢复旧模式，不发明新模式**）；Hub「整页导航 + 后退」够不够用
+  （要单页切换 = 新假设）。
 - ⚠️ 遗留缺口：PRP 选项图标**盒内笔画**无 node 侧几何测试；**PRP 各轮录屏回执未全部归档**（唯一未闭环项）。
 - Low-prio：`_e2e_portrait_battle_lab.cjs` 的 `[iso] I2` 用 `readdirSync().find()`；
   KNOWN-WX-COLD-BOOT-PREVIEW-SCALE-01；mobile drive slot（F-GARAGE-TOUCH-ASSEMBLY-R2）；strip-scroll no clamp。

@@ -3,7 +3,12 @@
  *
  * 这个页面**不是产品入口**：它只把本 Queue 要验证的那一件事摆出来 ——
  *
- *     RUN COMPLETE → 选一个「下一局起始改装」 → 全新 Run 第一场 → NEXT RUN VALIDATION COMPLETE
+ *     RUN COMPLETE → 选一个「下一局起始改装」 → 全新 Run 第一场
+ *     → NEXT RUN VALIDATION COMPLETE（唯一动作 = 返回验证中心 → 整页导航回 Hub）
+ *
+ * ⚠️ PRP-M2-R1：终点态**必须有真实出口**。整页导航 = 文档销毁 ⇒ 战斗运行时 / 弹丸 /
+ *    接触记录 / 计时器 / 监听器随文档一起消失（比「手动逐个 dispose」更强的清理保证），
+ *    回到 Hub 后可以立刻进入 Encounter Batch。
  *
  * 隔离（必改 4）：
  *   - 独立 HTML（`next-run.html`）+ 独立脚本，**不进入**任何正式构建
@@ -18,7 +23,7 @@
  *
  * 整块删除清单见本目录 constants.ts 头部注释。
  */
-import { NEXT_RUN_SEEDS, buildPriorCompletedRun } from './nextRunValidation';
+import { NEXT_RUN_EXIT_HREF, NEXT_RUN_SEEDS, buildPriorCompletedRun } from './nextRunValidation';
 import { RunPage } from './runPage';
 import { runPageContext } from './runPageScene';
 
@@ -41,6 +46,15 @@ function boot(): void {
     priorRun: prior,
     seedOptions: NEXT_RUN_SEEDS,
     stopAfterFirstBattle: true,
+    // ③ PRP-M2-R1：第一场结束后的**唯一出口** = 整页导航回验证中心。
+    //    地址来自**本页自己的**数据源（`NEXT_RUN_EXIT_HREF`）—— Hub 与入口是单向关系，
+    //    入口不 import Hub 模块（否则 Hub 会被拉成跨入口共享 chunk，见 I4 结构守卫）。
+    //    ⚠️ 导航动作由**宿主**执行 —— `runPage.ts` 与正式玩家页面共用，被 `RP-25`
+    //       机器禁止写 `location` / `history`（玩家页面必须结构上无法跳转）。
+    exitHref: NEXT_RUN_EXIT_HREF,
+    onExit: (exit) => {
+      window.location.assign(exit.href);
+    },
   });
   (globalThis as { __RUNPAGE__?: NextRunDebugHandle }).__RUNPAGE__ = { probe: () => page.probe() };
 }

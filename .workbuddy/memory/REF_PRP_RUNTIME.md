@@ -594,3 +594,81 @@ R2 给改装补了一项后该路线**活着**（167 = 15%）⇒ 这个对照改
 交付：`09ee631`（基线 `de5885e`，11 文件 / +1294 −303）；交接文档 =
 `交接文档_2026-09-18_PRP-RUN-02-R2-MAKE-DURABILITY-CHOICE-REAL.md`（本地件）。
 
+
+## L. PRP-M2-R1 验证终点态的唯一出口（Next Run「点了没反应」P0）
+
+### L.1 缺陷形态 = 「有按钮但无 action」（file:line，改前）
+
+真人录屏：Next Run 跑完第一场后底部按钮可见、连点无响应。三层同时断：
+
+| 层 | 事实 | 位置（改前） |
+|---|---|---|
+| 状态机 | `runActionEnabled(RESULT) === true` ⇒ 终点态**必须继续拦截**正式流程动作 | `runPageState.ts:424` |
+| 输入 | `onPointerDown` 在 hit test **之前** `if (this.validationDone) return;` | `runPage.ts:744` |
+| 绘制/probe | `actionEnabledNow()` 恒 `false`、`actionLabelNow()` 返回**状态描述** `'下一局验证完成'` | `runPage.ts:836/844` |
+
+⇒ 文案是状态、行为不存在 ⇒ 点击必然被吞。
+
+### L.2 出口数据流（**导航必须由宿主执行**）
+
+```
+nextRunValidation.ts  NEXT_RUN_EXIT_HREF = './validation-hub.html'
+        │                       + nextRunFinalAction(validationComplete, exitHref) → {label,href}|null
+        ▼
+nextRunMain.ts（宿主）  new RunPage(root, { exitHref: NEXT_RUN_EXIT_HREF,
+                                            onExit: (e) => window.location.assign(e.href) })
+        ▼
+runPage.ts（与正式玩家页面共用）  finalActionNow()  ← 唯一真源
+   ├─ onPointerDown         终点态：若 exit 命中 → requestExit(exit)（**仍 return**，不落 pressRunAction）
+   ├─ actionLabelNow        = exit.label（非终点态 = runActionLabel(state)，逐字不变）
+   ├─ actionEnabledNow      = exit !== null（非终点态 = runActionEnabled(state)，逐字不变）
+   ├─ drawActionButton      终点态且无 exit ⇒ **一个按钮都不画**
+   └─ requestExit(exit)     dispose() → seedSelect=null → opts.onExit(exit)
+```
+
+⚠️ **`RunPage` 绝不写 `location` / `history`**（`RP-25`）；整页导航是**宿主**的职责。
+⚠️ `requestExit` 刻意**不**复位 `validationDone`：它是「不得推进第二场」的守卫，
+万一导航被拦下，页面仍停在安全终点态（而不是退化成可推进的 `RESULT`）。
+⚠️ 非终点态路径与改前**逐字等价**（`finalActionNow()` 因 `validationDone === false` 直接返回 `null`）。
+
+### L.3 两条结构守卫决定了「导航放哪」（本轮真实返工）
+
+1. **`RP-25`**（`tests/portraitRunPage.test.ts`）：`RUN_PAGE_FILES`（= `runPageLayout/State/Scene/Script/Page/Main/VehicleAssets/BattleRuntime/BattleView`）
+   不得出现 `location.href|assign|replace` / `history.*` / `window.open` / `createElement('button')`。
+   ⇒ 第一版把导航写在 `runPage.ts` 直接 FAIL。**不放宽守卫**，改为宿主回调。
+2. **`I4`**（`tests/_e2e_validation_hub.cjs`）：`validation-hub.html` 只允许引用
+   **自己的 chunk（`validation-hub-*`）+ `modulepreload-polyfill-*`**。
+   ⇒ 第一版把返回地址定义在 `validationHub.ts` 并被 `nextRunMain.ts` import ⇒
+   `validationHub.ts` 变**跨入口共享模块** ⇒ Vite 拆出独立共享 chunk ⇒ Hub 页面多加载一个 chunk ⇒ I4 FAIL。
+   **含义 = 依赖方向被反转**（Hub 从叶子页面变成被依赖模块），与 `validationHub.ts` 头部设计意图冲突
+   （`VALIDATION_HUB_BACK_HINT` 存在的前提就是「入口不认识 Hub」）。
+   ⇒ 改法 = 地址写进 `nextRunValidation.ts`，`validationHub.ts` / 其测试**零 diff**。
+
+### L.4 `_e2e_next_run.cjs` 段号变更（⚠️ 三条旧断言曾给缺陷背书）
+
+| 段 | 改前 | 改后 |
+|---|---|---|
+| `N20` | `label === '下一局验证完成' && enabled === false` | `label === '返回验证中心' && enabled === true && exitHref === './validation-hub.html'` |
+| `N22` | `near(actionBar, 0)`（按钮禁用） | `near(actionBar, ACTION_BAR=990)`（按钮在账） |
+| `N23` | 连点两次「状态完全不变」 | **不点击**：`battles===1 && nodeId==='d2-battle1' && exitHref===EXIT_HREF && domButtons===0` |
+| `N24` | 三种子 `enabled===false` | 三种子 `enabled===true && label/href` 一致（`outcomes[].href` 新增） |
+| `N26` | `nav >= 1` | **`nav === 1`**（点击出口**之前**：整局 0 次额外导航） |
+| ⑧（新增） | — | `N28` 出口规格 · `N29` 真实鼠标**点一次** → `next-run.html → validation-hub.html` · `N30` `hubRoot=true / __RUNPAGE__=false / canvas=0` · `N31` 三入口都在 · `N32` 可继续进 Encounter Batch |
+
+⚠️ 所有「回到某页」的判据都用**整页 URL**（`page.waitForURL(HUB_URL)`），不写 `location.pathname`。
+
+### L.5 门禁实测（本轮）
+
+| 项 | 结果 |
+|---|---|
+| `npx tsc --noEmit` | **0 错** |
+| `tests/portraitNextRunValidation.test.ts` | **20/20**（16 → +4：`NR-17`…`NR-20`） |
+| `tests/portraitRunPage.test.ts` | **66/66**（`RP-25` 仍绿） |
+| `tests/portraitValidationHub.test.ts` | **16/16（零改动）** |
+| `tests/portraitBattleLab.test.ts` | **29/29** |
+| `_e2e_next_run.cjs` | **52/52**（47 → +5：⑧ 段五条） |
+| `_e2e_validation_hub.cjs` | **42/42**（首轮曾 41/42：`I4` 抓到共享 chunk，改回单向依赖后零改动恢复） |
+| `_e2e_run_page.cjs` | **503/503**（玩家页面回归，`runPage.ts` 共用） |
+| 全量 vitest（`--pool=vmForks --maxWorkers=1`） | **206 文件 / 2022 用例 PASS** |
+| 冻结区 `git diff --stat` | **空** |
+| `validationHub.ts` + `tests/portraitValidationHub.test.ts` | **零 diff** |

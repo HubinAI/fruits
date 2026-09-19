@@ -109,9 +109,10 @@ import { RUN_TOTAL_BATTLES, type RunChoicePoolKind, type RunDurabilityChoiceId }
 import {
   NEXT_RUN_SEED_LEAD,
   NEXT_RUN_SEED_TITLE,
-  NEXT_RUN_VALIDATION_LABEL,
   createSeededNewRun,
+  nextRunFinalAction,
   priorRunSummary,
+  type NextRunFinalAction,
   type PriorRunSummary,
   type RunSeedOption,
 } from './nextRunValidation';
@@ -482,6 +483,12 @@ export interface RunPageProbe {
   readonly actionLabel: string;
   readonly actionEnabled: boolean;
   readonly actionRect: RunRect;
+  /**
+   * PRP-M2-R1｜主动作**当前指向的出口地址**（`null` = 不是终点态，或终点态但宿主没给出口）。
+   * ⚠️ 与 `actionLabel` 同源（都来自 `finalActionNow()`）⇒ 「按钮文案」与「点了去哪」
+   *    在探针里也是**一个对象**，不存在两套口径。
+   */
+  readonly exitHref: string | null;
   /** **强化**三选一浮层是否可见（严格 = `phase === 'CHOICE'`）。 */
   readonly choiceOpen: boolean;
   /**
@@ -597,9 +604,26 @@ export interface RunPageOptions {
   readonly seedOptions?: readonly RunSeedOption[] | null;
   /**
    * 新 Run 的**第一场**真实战斗结束后停止验证
-   * （唯一主动作不可用 + 文案变为 `NEXT RUN VALIDATION COMPLETE`）。
+   * （唯一主动作变成 `NEXT_RUN_VALIDATION_LABEL` 的出口动作，见 `exitHref`）。
    */
   readonly stopAfterFirstBattle?: boolean;
+  /**
+   * PRP-M2-R1｜验证终点态的**唯一出口**地址（「返回验证中心」按钮要去的页面）。
+   *
+   * ⚠️ 这里只是**数据**：`href` 会随出口请求原样回传给宿主，供宿主（`nextRunMain.ts`）
+   *    执行整页导航。`RunPage` 自己**绝不**写 `location` / `history` ——
+   *    `tests/portraitRunPage.test.ts` 的 `RP-25` 机器禁止这件事，因为本文件与
+   *    **正式玩家页面**（`run-page.html`）共用，玩家页面必须结构上无法跳转。
+   * ⚠️ 未提供（或没给 `onExit`）⇒ 终点态**不画按钮**（而不是画一个点了没反应的按钮）。
+   */
+  readonly exitHref?: string | null;
+  /**
+   * PRP-M2-R1｜出口被点击时的处理 —— **由宿主实现**（本 Queue 里 = 整页导航回 Validation Hub）。
+   *
+   * ⚠️ `RunPage` 只在「终点态 + 有 `exitHref` + 有 `onExit`」三者齐备时调用它，
+   *    并且**在调用之前**已经 dispose 掉战斗运行时（计时器 / 物理世界 / 弹丸 / 接触 / 事件订阅）。
+   */
+  readonly onExit?: ((exit: NextRunFinalAction) => void) | null;
 }
 
 export class RunPage {
@@ -740,8 +764,18 @@ export class RunPage {
       return; // 遮罩其它区域：不关窗、不推进（必须显式选一个）
     }
 
-    // PRP-M2：第一场结束后的验证停止态 —— 不接受任何主动作（结构上跑不到第二场）。
-    if (this.validationDone) return;
+    /*
+      PRP-M2-R1｜第一场结束后的验证终点态。
+      ⚠️ 这里的 `return` **必须保留**：`RESULT` 在状态机里是 `runActionEnabled === true` 的，
+         放过去就会走 `pressRunAction` 推进到第二场 —— 那正是「结构上跑不到第二场」要防的事。
+      ⚠️ 但终点态必须接受**自己的唯一出口**（旧实现直接 return ⇒ 点击被吞掉，真人录屏 P0）。
+         出口的文案与行为来自**同一个对象**（`finalActionNow()`），结构上不可能分叉。
+    */
+    if (this.validationDone) {
+      const exit = this.finalActionNow();
+      if (exit && hit(runActionButtonRect(), p)) this.requestExit(exit);
+      return;
+    }
 
     if (!runActionEnabled(this.state)) return;
     if (hit(runActionButtonRect(), p)) {
@@ -830,19 +864,55 @@ export class RunPage {
   }
 
   /**
+   * PRP-M2-R1｜验证终点态的主动作（`返回验证中心`）—— **唯一真源**。
+   *
+   * 按钮文案与点击后的行为都从这里取 ⇒ 「有按钮但无 action」在结构上不可能出现。
+   *   - 非终点态 → `null`（走 Run 正式流程的 `pressRunAction`）；
+   *   - 宿主没给 `exitHref` **或**没给 `onExit` → `null` ⇒ **不画按钮**。
+   */
+  private finalActionNow(): NextRunFinalAction | null {
+    if (!this.opts.onExit) return null;
+    return nextRunFinalAction(this.validationDone, this.opts.exitHref);
+  }
+
+  /**
    * 主动作是否可用。
    * ⚠️ 默认路径（`validationDone` 恒为 `false`）与 `runActionEnabled(state)` 完全等价。
+   * ⚠️ 终点态：有出口 ⇒ 可用（这是本状态下**唯一**可点的东西）；无出口 ⇒ 不可用（且不画）。
    */
   private actionEnabledNow(): boolean {
-    return !this.validationDone && runActionEnabled(this.state);
+    if (this.validationDone) return this.finalActionNow() !== null;
+    return runActionEnabled(this.state);
   }
 
   /**
    * 主动作文案。
-   * ⚠️ 默认路径与 `runActionLabel(state)` 完全等价；验证停止态换成终点标记。
+   * ⚠️ 默认路径与 `runActionLabel(state)` 完全等价；终点态 = 出口动作的文案（不是状态描述）。
    */
   private actionLabelNow(): string {
-    return this.validationDone ? NEXT_RUN_VALIDATION_LABEL : runActionLabel(this.state);
+    const exit = this.finalActionNow();
+    return exit ? exit.label : runActionLabel(this.state);
+  }
+
+  /**
+   * PRP-M2-R1｜终点态的**唯一出口**：清理本页全部运行期状态，然后把出口请求交给**宿主**。
+   *
+   * 清理面（必改 2）：
+   *   - `dispose()` = 停战斗循环（计时器）+ 释放真实战斗运行时（物理世界 / 弹丸 / 接触记录 /
+   *     事件订阅）+ 释放视图宿主 + 摘掉 resize / pointer 监听 + 断开 ResizeObserver；
+   *   - 验证临时状态：种子浮层引用一并清空（不在本页留下悬挂引用）。
+   *
+   * ⚠️ **导航不在这里做**：本文件与正式玩家页面共用，`RP-25` 机器禁止 `RunPage` 写
+   *    `location` / `history`（玩家页面必须结构上无法跳转）。整页导航属于**宿主**的职责
+   *    （`nextRunMain.ts` 的 `onExit`），沿用 Validation Hub 既有口径 —— 不引入路由层。
+   * ⚠️ 顺序：**先清理、再交给宿主** —— 导航是异步的，不能依赖它来释放运行时。
+   * ⚠️ 刻意**不**复位 `validationDone`：它是「不得推进到第二场」的守卫，
+   *    万一导航被浏览器拦下，页面仍停在安全的终点态（而不是退化成可推进的 RESULT）。
+   */
+  private requestExit(action: NextRunFinalAction): void {
+    this.dispose();
+    this.seedSelect = null;
+    if (this.opts.onExit) this.opts.onExit(action);
   }
 
   /* ------------------------------------------------------- 状态与推进 */
@@ -1038,6 +1108,8 @@ export class RunPage {
     const shapes = runPageLayerShapes(this.state, this.stageView());
     // PRP-M2：验证停止态下唯一主动作不可用 → 底部强调条不入账（与实际绘制一致）。
     // ⚠️ 默认路径 `actionEnabledNow() === runActionEnabled(state)` → 与既有账本逐项相同。
+    // ⚠️ PRP-M2-R1：验证终点态下 `actionEnabledNow()` 为 `true`（有出口）⇒ `actionBar` 正常入账；
+    //    万一宿主没给出口（不画按钮），这里也同步不入账 —— 绘制与账本同源。
     return this.actionEnabledNow() ? shapes : shapes.filter((s) => s.layer !== 'actionBar');
   }
 
@@ -1328,9 +1400,12 @@ export class RunPage {
   /* ------------------------------------------------------- 主动作按钮 */
 
   private drawActionButton(ctx: CanvasRenderingContext2D): void {
+    // ⚠️ PRP-M2-R1（防无效按钮再次出现）：终点态**没有出口就一个按钮都不画**。
+    //    否则就会出现「可见但点了没反应」的按钮 —— 那正是本 Queue 要根除的形态。
+    if (this.validationDone && this.finalActionNow() === null) return;
     const btn = runActionButtonRect();
     // ⚠️ PRP-M2：这里读的是**本帧实际口径**（默认路径与 `runActionEnabled(s)` /
-    //    `runActionLabel(s)` 完全等价）—— 验证停止态下按钮不可用、文案为终点标记。
+    //    `runActionLabel(s)` 完全等价）—— 验证终点态下按钮**可用**，文案 = 「返回验证中心」。
     const enabled = this.actionEnabledNow();
     ctx.fillStyle = enabled ? COLORS.actionFill : COLORS.actionFillOff;
     ctx.fillRect(btn.x, btn.y, btn.w, btn.h);
@@ -1771,6 +1846,8 @@ export class RunPage {
       actionLabel: this.actionLabelNow(),
       actionEnabled: this.actionEnabledNow(),
       actionRect: runActionButtonRect(),
+      /** ⚠️ PRP-M2-R1：与 `actionLabel` 同源 —— 终点态下「点了去哪」也是本帧的真实口径。 */
+      exitHref: this.finalActionNow()?.href ?? null,
       choiceOpen: runChoiceOpen(s),
       /**
        * ⚠️ PRP-BUILD-01 / R2：候选**来自当前脚本节点声明的池**（第一层三选一 / 横向改装二选一 /
