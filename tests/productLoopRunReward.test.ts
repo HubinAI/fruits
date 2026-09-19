@@ -37,6 +37,7 @@ import { PLAYER_BODY_DEF_ID, WEAPON_SLOT, loadEquippedDraft } from '../src/produ
 import {
   ADVENTURE_HREF,
   HOME_HREF,
+  HOME_PARAM,
   REWARD_WEAPON_ID,
   buildAdventureHref,
   buildClaimHref,
@@ -61,6 +62,11 @@ import {
   runProductClaimNow,
   runRewardCard,
 } from '../src/lab/portraitBattleLab/runProductReward';
+import {
+  RUN_FAIL_PARAM,
+  parseRunFailReturn,
+  runFailSettlementNow,
+} from '../src/lab/portraitBattleLab/runFailSettlement';
 import {
   createRunPageState,
   finishRunBattle,
@@ -243,7 +249,7 @@ describe('PRODUCT-LOOP-R1-B｜A. 奖励选择必须「实测」而不是「偏�
 
 // ============================================================================
 describe('PRODUCT-LOOP-R1-B｜B. 产品地址与参数：只有一个真源', () => {
-  it('PR-07 冒险地址三个参数齐备，且 `back` 与领奖地址完全一致（往返闭合）', () => {
+  it('PR-07 冒险地址四个参数齐备，且 `back` 与领奖地址完全一致（往返闭合）', () => {
     const token = newRunToken(1700000000000, 0.5);
     const href = buildAdventureHref(token);
     expect(href.startsWith(ADVENTURE_HREF)).toBe(true);
@@ -256,6 +262,60 @@ describe('PRODUCT-LOOP-R1-B｜B. 产品地址与参数：只有一个真源', ()
       runToken: token,
       rewardDefId: REWARD_WEAPON_ID,
     });
+    // PRODUCT-LOOP-R1-D：第四个参数 = 失败回程地址（**纯首页**，与领奖地址是两个出口）
+    expect(new URLSearchParams(href.slice(href.indexOf('?') + 1)).get(HOME_PARAM)).toBe(HOME_HREF);
+  });
+
+  /**
+   * PRODUCT-LOOP-R1-D｜**两个回程地址必须真的是两个**。
+   *
+   * 这是「失败不发永久奖励」在地址层上的机器判据：失败出口拿到的地址一旦能被
+   * `parsePendingClaim` 解析出 `{runToken, rewardDefId}`，首页就会执行一次入库
+   * ⇒ 失败也发奖。因此这里逐条钉死：`home` 解析不出领奖请求。
+   */
+  it('PR-07b 失败回程 ≠ 领奖地址：`home` 解析不出领奖请求（失败链结构性拿不到奖励）', () => {
+    const token = newRunToken(1700000000000, 0.5);
+    const search = buildAdventureHref(token).split('?')[1] ?? '';
+    // ① 两侧参数名同值（改单边 = 静默断链）
+    expect(RUN_FAIL_PARAM).toBe('home');
+    expect(RUN_FAIL_PARAM).toBe(HOME_PARAM);
+    // ② Lab 侧解析出来的就是产品侧给的那个纯首页地址
+    const ret = parseRunFailReturn(`?${search}`);
+    expect(ret).toEqual({ href: HOME_HREF });
+    expect(ret!.href).not.toContain('reward=');
+    expect(ret!.href).not.toContain(`run=${token}`);
+    // ③ **关键**：拿这个地址回首页，首页**不会**入库（解析不出领奖请求）
+    expect(parsePendingClaim(ret!.href.slice(ret!.href.indexOf('?')))).toBeNull();
+    expect(parsePendingClaim('')).toBeNull();
+    // ④ 反过来：领奖地址也不能被当成失败出口（两个出口互不通用）
+    const claimSearch = buildClaimHref(token).split('?')[1] ?? '';
+    expect(parseRunFailReturn(`?${claimSearch}`)).toBeNull();
+    // ⑤ 同一条链接里两个地址都在，且确确实实不同
+    expect(claimSearch).not.toBe(search.slice(search.indexOf(`${HOME_PARAM}=`) + HOME_PARAM.length + 1));
+  });
+
+  it('PR-07c 失败出口与奖励出口互斥：同一份产品上下文里只有 COMPLETE 拿得到奖励', () => {
+    const token = newRunToken(1700000000000, 0.5);
+    const search = buildAdventureHref(token).slice(buildAdventureHref(token).indexOf('?'));
+    const reward = parseRunProductReward(search)!;
+    const ret = parseRunFailReturn(search)!;
+    const ctx = runPageContext();
+
+    // ① COMPLETE：有奖励出口、**没有**失败结算
+    const done = buildPriorCompletedRun(ctx);
+    expect(runComplete(done)).toBe(true);
+    expect(runProductClaimNow(done, reward)).not.toBeNull();
+    expect(runFailSettlementNow(done, ret)).toBeNull();
+
+    // ② FAILED（真实推进到第一场战斗后被打死）：有失败结算、**没有**奖励出口
+    //    —— 即使这一局带着完整的产品奖励上下文
+    let s = createRunPageState(ctx);
+    for (let i = 0; i < 6 && s.phase !== 'BATTLE'; i++) s = pressRunAction(s, ctx);
+    expect(s.phase).toBe('BATTLE');
+    const failed = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp: 900, steps: 300 });
+    expect(failed.phase).toBe('FAILED');
+    expect(runProductClaimNow(failed, reward)).toBeNull();
+    expect(runFailSettlementNow(failed, ret)!.href).toBe(HOME_HREF);
   });
 
   it('PR-08 参数不全 / 未知奖励 ⇒ 不进产品模式（既有路径逐像素不变的结构前提）', () => {

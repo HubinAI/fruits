@@ -622,3 +622,30 @@ export function runRewardTextPos(): { x: number; y: number } {
   const icon = runRewardIconRect();
   return { x: icon.x + icon.w + RUN_REWARD_CARD.pad, y: runRewardCardRect().y + 34 };
 }
+
+/**
+ * PRODUCT-LOOP-R1-D｜失败结算面板的**内部排版**（面板本体复用终态面板槽位）。
+ *
+ * ⚠️ 只管**文字**的位置（标题 dy / 行距 / 内缩）——文字不是纯色平铺矩形，
+ *    因此这些常量与像素面积账本**无关**，不会污染任何入账口径。
+ */
+export const RUN_FAIL_PANEL = { pad: 16, titleDy: 26, lineGap: 22 } as const;
+
+/**
+ * 失败结算面板矩形。
+ *
+ * **刻意复用** `runRewardCardRect()`（终态面板槽位）：
+ *   - COMPLETE（「本局获得」卡）与 FAILED（失败结算）是两个**互斥**终态
+ *     ⇒ 同槽位结构上不可能同时出现；
+ *   - 「终态面板只有一个位置」因此不需要第二套几何常量，也不会多出一个入账口径；
+ *   - 玩家看到的是同一套终态语言：舞台带底部的整宽内缩面板 + 底部唯一主 CTA。
+ */
+export function runFailPanelRect(): RunRect {
+  return runRewardCardRect();
+}
+
+/** 失败结算面板内的文字起点（面板内左上内缩；逐行按 `RUN_FAIL_PANEL.lineGap` 下移）。 */
+export function runFailPanelTextPos(): { x: number; y: number } {
+  const r = runFailPanelRect();
+  return { x: r.x + RUN_FAIL_PANEL.pad, y: r.y + RUN_FAIL_PANEL.titleDy };
+}

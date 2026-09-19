@@ -10,6 +10,11 @@
  *   6 Reward 不重复领取      → 由 B 段 `productLoopRunReward.test.ts` + `e2e:product-reward` 负责
  *   7 Validation 入口仍独立可用 → EL-30（七个研发入口一个没少，且都不在默认启动链上）
  *
+ * PRODUCT-LOOP-R1-D 追加（失败链）：
+ *   8 失败**不发奖**、不动 Profile / Inventory / Equipped → EL-40 / EL-41
+ *   9 失败**不隐式重开**（新 Run 只能由首页重新出发创建）  → EL-42（+ RP-D-06 的顺序守卫）
+ *  10 两个出口分离（成功 = 领奖地址 / 失败 = 纯首页）      → EL-40（+ PR-07b）
+ *
  * 三组结构守卫（本 Queue 的边界必须能在源码层面被钉死）：
  *   A) 装备交接口径**只有一处**：产品侧编码 ↔ Lab 侧解析，往返必须逐字段一致；
  *   B) 非法输入**必须被拒绝且可观测**（`fallback: 'invalid'`），绝不静默降级；
@@ -38,11 +43,19 @@ import {
 import {
   REWARD_WEAPON_ID,
   LOADOUT_PARAM,
+  BACK_PARAM,
+  HOME_PARAM,
   buildAdventureHref,
   encodeRunLoadout,
   newRunToken,
   parsePendingClaim,
 } from '../src/product/runReward';
+import { PROFILE_CLAIMS_KEY, claimRunReward } from '../src/product/playerProfile';
+import {
+  RUN_FAIL_PARAM,
+  parseRunFailReturn,
+  runFailSettlementNow,
+} from '../src/lab/portraitBattleLab/runFailSettlement';
 import {
   RUN_LOADOUT_PARAM,
   hasRunLoadoutParam,
@@ -59,6 +72,7 @@ import {
 import { RunBattleRuntime } from '../src/lab/portraitBattleLab/runBattleRuntime';
 import {
   createRunPageState,
+  finishRunBattle,
   pressRunAction,
   runCarriedPlayerHp,
   type RunPageState,
@@ -593,5 +607,116 @@ describe('PRODUCT-LOOP-R1-C｜E. 源码守卫', () => {
     // 装上它之后能量读数真的变了（「装上它不一样」的机器判据）
     const withoutIt = loadoutReading(equippedDraft('cannon'), owned).energy;
     expect(reading.energy).not.toBe(withoutIt);
+  });
+});
+
+/* ============================================================================
+   G. 失败链（PRODUCT-LOOP-R1-D）：不发奖 / 不动局外三件套 / 不隐式重开
+   ============================================================================ */
+
+describe('PRODUCT-LOOP-R1-D｜G. 失败链：两个出口分离、不发奖、不隐式重开', () => {
+  /** 三份正式存档 key（与 src 同值；E2E 侧另有一份不经过页面的独立取证）。 */
+  const BUILD_KEY = 'strongfruit.playerBuild.v1';
+  const INV_KEY = 'strongfruit.ownedParts.v2';
+
+  it('EL-40 出发链接同时给出「成功回哪儿」与「失败回哪儿」，且失败地址解析不出领奖请求', () => {
+    const token = newRunToken(1700000000000, 0.5);
+    const href = buildAdventureHref(token, REWARD_WEAPON_ID, equippedDraft('cannon'));
+    const q = new URLSearchParams(href.split('?')[1]);
+    const back = q.get(BACK_PARAM) ?? '';
+    const home = q.get(HOME_PARAM) ?? '';
+    expect(back, '成功出口（领奖地址）必须给全').not.toBe('');
+    expect(home, '失败出口（纯首页）必须给全').not.toBe('');
+    expect(back, '两个出口必须是两个地址').not.toBe(home);
+    // 成功出口 = 能解析出领奖请求（首页会执行一次幂等入库）
+    expect(parsePendingClaim(back.slice(back.indexOf('?')))).not.toBeNull();
+    // 失败出口 = 解析不出领奖请求（首页什么都不做）
+    expect(parsePendingClaim(home.slice(home.indexOf('?')))).toBeNull();
+    // Lab 侧两侧参数名同值（改单边 = 静默断链）
+    expect(RUN_FAIL_PARAM).toBe(HOME_PARAM);
+    expect(parseRunFailReturn(`?${q.toString()}`)).toEqual({ href: home });
+
+    /*
+      产品 → Lab 的完整接线（离线版）：拿**产品链接里那个失败地址**去喂一个**真实 FAILED 状态**，
+      结算给出的出口必须**逐字**就是这个地址（不是 Lab 自己编的第二个地址）。
+    */
+    const failReturn = parseRunFailReturn(`?${q.toString()}`)!;
+    const ctx = runPageContext(resolveRunPlayerLoadout(`?${q.toString()}`).loadout);
+    let s: RunPageState = createRunPageState(ctx);
+    for (let i = 0; i < 6 && s.phase !== 'BATTLE'; i++) s = pressRunAction(s, ctx);
+    expect(s.phase).toBe('BATTLE');
+    const failed = finishRunBattle(s, {
+      winner: 'B',
+      endReason: 'hp',
+      playerHp: 0,
+      enemyHp: 900,
+      steps: 300,
+    });
+    expect(failed.phase).toBe('FAILED');
+    expect(runFailSettlementNow(failed, failReturn)!.href).toBe(home);
+    // 宿主没给地址 ⇒ 结算照常出现，但没有出口（研发入口）
+    expect(runFailSettlementNow(failed, null)!.title.length).toBeGreaterThan(0);
+    expect(runFailSettlementNow(failed, null)!.href).toBe('');
+    // 非失败状态恒无结算（COMPLETE 也不该有）
+    const done = buildPriorCompletedRun(ctx);
+    expect(runFailSettlementNow(done, failReturn)).toBeNull();
+  });
+
+  it('EL-41 失败链**不发奖**：失败回首页的地址一个字节都改不了存档（成功链对照）', () => {
+    // ① 建一份真实存档基线（starter 库存 + 玩家 Build，都走正式入口）
+    const before = loadEquippedDraft();
+    playerInventory(before);
+    const baseline = {
+      build: store.getItem(BUILD_KEY),
+      inv: store.getItem(INV_KEY),
+      claims: store.getItem(PROFILE_CLAIMS_KEY),
+    };
+
+    const token = newRunToken(1700000000000, 0.5);
+    const q = new URLSearchParams(buildAdventureHref(token).split('?')[1]);
+    const back = q.get(BACK_PARAM) ?? '';
+    const home = q.get(HOME_PARAM) ?? '';
+
+    // ② 玩家从**失败页**回首页：search 里只有 `home` ⇒ 解析不出领奖请求 ⇒ 页面不会入库
+    const failClaim = parsePendingClaim(home.slice(home.indexOf('?')));
+    expect(failClaim, '失败回程地址必须解析不出领奖请求').toBeNull();
+    // 三件套逐字节不变（一次写入都没有发生）
+    expect(store.getItem(BUILD_KEY)).toBe(baseline.build);
+    expect(store.getItem(INV_KEY)).toBe(baseline.inv);
+    expect(store.getItem(PROFILE_CLAIMS_KEY)).toBe(baseline.claims);
+
+    // ③ 对照（证明 ② 不是空转）：真正带领奖参数时同一条链**会**入库
+    const okClaim = parsePendingClaim(back.slice(back.indexOf('?')));
+    expect(okClaim).toEqual({ runToken: token, rewardDefId: REWARD_WEAPON_ID });
+    const out = claimRunReward(okClaim!);
+    expect(out.ok).toBe(true);
+    expect(store.getItem(INV_KEY), '成功链真的写了库存').not.toBe(baseline.inv);
+    expect(store.getItem(PROFILE_CLAIMS_KEY), '成功链真的写了领奖账本').not.toBeNull();
+    // 装备没有被成功链顺手改掉（失败链更是没碰过）
+    expect(loadEquippedDraft().functionalSelections[WEAPON_SLOT]).toBe(
+      before.functionalSelections[WEAPON_SLOT],
+    );
+  });
+
+  it('EL-42 失败后**不隐式重开**：策略模块与页面都没有「开新局」这条边', () => {
+    // ① 策略模块结构上没有创建新 Run 的能力
+    const mod = strip(readLab('runFailSettlement.ts'));
+    for (const t of ['createRunPageState', 'pressRunAction', 'nextRun', 'restart']) {
+      expect(mod.includes(t), `runFailSettlement.ts 不得出现 ${t}`).toBe(false);
+    }
+    // ② 宿主：失败回路只有**一次**数据驱动的整页导航，没有第二条分支
+    const host = strip(readLab('runMain.ts'));
+    const failBranch = host.slice(host.indexOf('onFailReturn:'));
+    expect(failBranch.includes('location.assign(action.href);')).toBe(true);
+    expect(failBranch.split('location.assign(').length - 1, '失败回调里只能有一次导航').toBe(1);
+    // ③ 页面：失败终态不引用状态机的「重开」文案（失败页不提供重开入口）
+    const page = strip(readLab('runPage.ts'));
+    expect(page.includes('RUN_RESTART_LABEL')).toBe(false);
+    expect(page.includes('RUN_FAIL_RETURN_LABEL')).toBe(true);
+    expect(page.includes('this.failSettlementNow()')).toBe(true);
+    // ④ 唯一的「新 Run 起点」仍然是首页的开始冒险地址（产品侧唯一真源）
+    const homePage = strip(readProduct('homePage.ts'));
+    expect(homePage.includes('buildAdventureHref(')).toBe(true);
+    expect(homePage.includes('./run-page.html'), '页面不得自己造地址').toBe(false);
   });
 });

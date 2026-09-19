@@ -29,12 +29,23 @@
  * ⚠️ 本文件**不硬编码任何产品地址**：`back` 由产品侧通过 URL 给全（`RP-25b` 机器钉死），
  *    因此 Lab 侧不存在第二个产品 URL 真源。
  *
+ * ── PRODUCT-LOOP-R1-D：本文件同时是**失败出口**的宿主 ───────────────────────
+ * 链接里带 `home`（产品侧给的**纯首页地址**，不带任何领奖参数）时：
+ *   RUN FAILED → 页面呈现失败结算 + 唯一主 CTA「返回主界面」；
+ *   点击 → `RunPage` **先 dispose 运行期**，然后把出口请求交给本宿主 → 本宿主执行
+ *   **整页导航**到 `home`。
+ * ⚠️ 失败链**结构上拿不到** COMPLETE 的领奖地址（`back` / `reward` 对它没有作用）
+ *    ⇒ 「失败也发奖」不可能发生（Queue 必改 5）。
+ * ⚠️ 本宿主**没有**任何「失败后重开一局」的分支（Queue 必改 6）。
+ * ⚠️ 不带 `home`（研发入口）⇒ 失败结算照常呈现，但**不画按钮**。
+ *
  * 开发：`npm run dev:run-page` → http://127.0.0.1:5173/run-page.html
  * 构建：`npm run build:portrait-lab` → dist-portrait-lab/（含 run-page.html）
  *
  * 整块删除清单见本目录 constants.ts 头部注释。
  */
 import { RunPage } from './runPage';
+import { parseRunFailReturn, type RunFailReturn } from './runFailSettlement';
 import { parseRunProductReward, type RunProductClaim } from './runProductReward';
 import { resolveRunPlayerLoadout } from './runPageScene';
 
@@ -67,9 +78,22 @@ function boot(): void {
   */
   const playerLoadout = resolveRunPlayerLoadout(window.location.search);
 
+  /*
+    PRODUCT-LOOP-R1-D｜失败回程地址（可选）：
+      - 带 `home` → 本局失败时页面的唯一出口是「返回主界面」→ 本宿主执行整页导航回产品首页；
+      - 不带（研发入口 `/run-page.html`）→ `null` ⇒ 失败结算**照常呈现**，但不画按钮
+        （绝不画一个点了没反应的按钮）。
+    ⚠️ `home` 与 COMPLETE 的 `back` 是**两个不同的地址**：`back` 会触发入库，`home` 不会
+       —— 「失败不发永久奖励」在地址层上就是靠这条区分（失败链拿不到领奖地址）。
+    ⚠️ 目标地址来自**出口请求本身**（`action.href` = 产品侧给的全量地址），本文件里
+       出现不了任何产品 URL 字面量（`RP-25b` 钉死）。
+  */
+  const failReturn = parseRunFailReturn(window.location.search);
+
   const page = new RunPage(root, {
     productReward,
     playerLoadout,
+    failReturn,
     /*
       ⚠️ 整页导航 = **文档销毁** ⇒ 战斗运行时 / 弹丸 / 接触记录 / 计时器 / 监听器
          随文档一起消失（比手动逐个 dispose 更强的清理保证）。而 `RunPage` 在调用本回调
@@ -80,6 +104,17 @@ function boot(): void {
     onProductClaim: productReward
       ? (claim: RunProductClaim) => {
           window.location.assign(claim.href);
+        }
+      : null,
+    /*
+      PRODUCT-LOOP-R1-D｜失败终态的唯一出口：清理运行期（`RunPage.requestFailReturn`
+      里已 `dispose()`）之后，整页导航回正式首页 —— **不带任何领奖参数**。
+      ⚠️ 这里**没有**、也不会出现「重开一局」的分支（Queue 必改 6：新 Run 只能由玩家
+         回首页后重新点「开始冒险」创建）。
+    */
+    onFailReturn: failReturn
+      ? (action: RunFailReturn) => {
+          window.location.assign(action.href);
         }
       : null,
   });

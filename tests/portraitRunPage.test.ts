@@ -77,10 +77,14 @@ import {
   runChoiceTextX,
   runChoiceTitlePos,
   runDayNodes,
+  runFailPanelRect,
+  runFailPanelTextPos,
   runLogBottomY,
   runLogLineRects,
   runLogTopY,
   runPaintedAreas,
+  RUN_FAIL_PANEL,
+  runRewardCardRect,
   runStageHills,
   runRectsOverlap,
   runSideViewScale,
@@ -132,6 +136,15 @@ import {
   type RunPhase,
 } from '../src/lab/portraitBattleLab/runPageState';
 import {
+  RUN_FAIL_DURABILITY_ZERO,
+  RUN_FAIL_NO_BUILD,
+  RUN_FAIL_PARAM,
+  RUN_FAIL_RETURN_LABEL,
+  RUN_FAIL_TITLE,
+  parseRunFailReturn,
+  runFailSettlementNow,
+} from '../src/lab/portraitBattleLab/runFailSettlement';
+import {
   RUN_DURABILITY_EVENT,
   RUN_FIRST_DAY,
   RUN_SCRIPT,
@@ -180,6 +193,13 @@ const RUN_PAGE_FILES = [
   'runVehicleAssets.ts',
   'runBattleRuntime.ts',
   'runBattleView.ts',
+  /*
+    PRODUCT-LOOP-R1-D：失败结算策略模块加入本清单 ⇒ 它自动受 RP-24 / RP-25 的
+    **全部**禁令约束（不得引用 Arena / Gate / 正式编排器、不得建 DOM 按钮、不得写
+    location / history、不得含地址字面量）。新文件进清单是**收紧**而不是放宽：
+    它是本 Queue 新加的唯一能「决定去哪」的地方，必须和最老的页面文件同一套纪律。
+  */
+  'runFailSettlement.ts',
 ];
 
 function read(f: string): string {
@@ -1299,15 +1319,21 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
   });
 
   /**
-   * PRODUCT-LOOP-R1-B｜宿主是**唯一**导航点，且「点了去哪」必须来自出口请求的数据。
+   * PRODUCT-LOOP-R1-B / R1-D｜宿主是**唯一**导航点，且「点了去哪」必须来自出口请求的数据。
    *
    * 这条是 RP-25 的对偶：放宽了「哪个文件能导航」，就用**更精确**的断言把能力钉住 ——
-   * 宿主里一旦出现任何地址字面量，或者多出第二个导航 API，立刻 FAIL。
+   * 宿主里一旦出现任何地址字面量，或者多出第三个导航 API，立刻 FAIL。
+   *
+   * ⚠️ PRODUCT-LOOP-R1-D：导航次数 1 → **2**，同样不是「放宽」而是「把守卫改对」：
+   *    R1-D 要求失败终态有真实出口（Queue 必改 4「点击返回主界面 → 回到正式产品首页」），
+   *    而结论**只能由宿主执行**（页面文件写 `location` 仍被 RP-25 全面禁止）。
+   *    收紧方式：**两次**目标都必须**逐字**是出口请求的字段（`claim.href` / `action.href`），
+   *    且两次都必须是 `location.assign(...)` —— 字符级钉死，不允许多出第三个导航 API。
    */
-  it('RP-25b 宿主只允许一次数据驱动的整页导航，且文件内不含任何地址字面量', () => {
+  it('RP-25b 宿主只允许两次数据驱动的整页导航，且文件内不含任何地址字面量', () => {
     const host = stripComments(read('runMain.ts'));
-    // ① 恰好一次导航
-    expect(host.split('location.assign(').length - 1, 'runMain.ts 必须恰好有一次整页导航').toBe(1);
+    // ① 恰好两次导航（COMPLETE 的领奖出口 + FAILED 的返回主界面出口）
+    expect(host.split('location.assign(').length - 1, 'runMain.ts 必须恰好有两次整页导航').toBe(2);
     // ② 不得有任何其它导航 / 逃逸 API，也不得自己造 DOM 控件
     for (const t of [
       'location.href',
@@ -1319,10 +1345,14 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
     ]) {
       expect(host.includes(t), `runMain.ts 不得出现 "${t}"`).toBe(false);
     }
-    // ③ 目标必须**就是**出口请求的字段（不是写死的地址）
+    // ③ 两个目标必须**都是**出口请求的字段（不是写死的地址）—— 逐字断言，不靠人眼
     expect(
       host.includes('location.assign(claim.href);'),
-      '导航目标只能来自出口请求（`claim.href`）',
+      '领奖出口的导航目标只能是 `claim.href`',
+    ).toBe(true);
+    expect(
+      host.includes('location.assign(action.href);'),
+      '失败出口的导航目标只能是 `action.href`',
     ).toBe(true);
     for (const t of ['.html', 'http://', 'https://', 'location = ', 'window.location =']) {
       expect(host.includes(t), `runMain.ts 不得硬编码任何地址（"${t}"）`).toBe(false);
@@ -2634,5 +2664,144 @@ describe('PRP-RUN-R1｜I 死亡即终局：单一耐久贯穿 Run、失败后只
     expect(rt.initialPlayerHp).toBe(640);
     expect(rt.playerMaxHp).toBe(1100);
     rt.dispose();
+  });
+});
+
+/* ========================================================================
+   J. 失败结算 + 返回主界面（PRODUCT-LOOP-R1-D）
+   ======================================================================== */
+
+describe('PRODUCT-LOOP-R1-D｜J 失败终态：结算 + 返回主界面（不再「悄悄重开」）', () => {
+  /** 真实打出来的 FAILED 状态（沿用 I 段夹具：把真实战果喂给状态机）。 */
+  function failedState(): RunPageState {
+    const s = settle(atBattle1(), 0, 900, 'B');
+    expect(s.phase).toBe('FAILED');
+    return s;
+  }
+  const BACK = { href: './home.html' };
+
+  it('RP-D-01 解析失败回程地址：只认 `home`，领奖参数一概不参与（地址层的「失败不发奖」）', () => {
+    expect(RUN_FAIL_PARAM).toBe('home');
+    expect(parseRunFailReturn('')).toBeNull();
+    expect(parseRunFailReturn('?')).toBeNull();
+    expect(parseRunFailReturn('?home=')).toBeNull();
+    // ⚠️ 只有领奖参数（没有 home）⇒ 失败链拿不到任何出口
+    expect(parseRunFailReturn('?run=x&reward=laser&back=%2Fhome.html')).toBeNull();
+    // 研发入口（不带任何参数）⇒ 同样没有出口
+    expect(parseRunFailReturn('?equipped=%7B%7D')).toBeNull();
+    expect(parseRunFailReturn('?home=%2Fh.html')).toEqual({ href: '/h.html' });
+    // 混着产品参数也只认 home（失败链不读奖励 / 装备）
+    expect(parseRunFailReturn('?run=x&reward=laser&home=%2Fh.html')).toEqual({ href: '/h.html' });
+  });
+
+  it('RP-D-02 结算只在 FAILED 产生；七种其它相位一个字段都不多出来', () => {
+    // 开场（IDLE）
+    expect(runFailSettlementNow(fresh(), BACK)).toBeNull();
+    // RESULT（真实战败但耐久还在）
+    expect(runFailSettlementNow(settle(atBattle1(), 640), BACK)).toBeNull();
+    // COMPLETE（另一条真实路线走到底）
+    const done = syntheticWalk('repair').at(NODE.final, 'COMPLETE');
+    expect(runComplete(done)).toBe(true);
+    expect(runFailSettlementNow(done, BACK)).toBeNull();
+    // 浮层相位（CHOICE）
+    const choice = pressRunAction(settle(atBattle1(), 640), CTX);
+    expect(choice.phase).toBe('CHOICE');
+    expect(runFailSettlementNow(choice, BACK)).toBeNull();
+  });
+
+  it('RP-D-03 结算内容逐项来自真实状态：失败 DAY / 最终 Build / 最终耐久（0 = 已耗尽）', () => {
+    const s = failedState();
+    const fail = runFailSettlementNow(s, BACK)!;
+    expect(fail.title).toBe(RUN_FAIL_TITLE);
+    expect(fail.label).toBe(RUN_FAIL_RETURN_LABEL);
+    expect(fail.href).toBe(BACK.href);
+    expect(fail.day).toBe(s.day);
+    expect(fail.durabilityPercent).toBe(durabilityPercent(s.battle!));
+    expect(fail.durabilityPercent).toBe(0);
+    expect(fail.buildLabels).toEqual([]);
+    expect(fail.lines).toEqual([
+      `失败于 DAY ${s.day}`,
+      `最终改装：${RUN_FAIL_NO_BUILD}`,
+      `战车耐久：${RUN_FAIL_DURABILITY_ZERO}`,
+    ]);
+    // ⚠️ 宿主没给地址 ⇒ 结算**照常产生**（失败必须被明确呈现），只是没有出口按钮
+    const noExit = runFailSettlementNow(s, null)!;
+    expect(noExit.title).toBe(RUN_FAIL_TITLE);
+    expect(noExit.href).toBe('');
+    expect(runFailSettlementNow(s, undefined)!.href).toBe('');
+  });
+
+  it('RP-D-04 带 Build 的失败：面板上的「最终改装」就是本局真实拿到的那几项', () => {
+    let s = settle(atBattle1(), 600);
+    s = pressRunAction(s, CTX);
+    s = chooseRunBuff(s, 'twinCannon', CTX);
+    s = pressTimes(s, 2);
+    s = settle(s, 0, 300, 'B');
+    expect(s.phase).toBe('FAILED');
+    expect(runBuildIds(s)).toEqual(['twinCannon']);
+    const fail = runFailSettlementNow(s, BACK)!;
+    expect(fail.buildLabels).toEqual(['双联炮']);
+    expect(fail.lines[1]).toBe('最终改装：双联炮');
+    expect(fail.day).toBe(s.day);
+  });
+
+  it('RP-D-05 策略模块结构上没有「开新局」这条边，且 Run 节奏（状态机）一字未改', () => {
+    const mod = stripComments(read('runFailSettlement.ts'));
+    for (const t of ['createRunPageState', 'pressRunAction', 'newRunToken', 'localStorage']) {
+      expect(mod.includes(t), `runFailSettlement.ts 不得出现 ${t}`).toBe(false);
+    }
+    // 冻结面取证：状态机自己的「终态可开新局」规则**仍在**（本 Queue 没有改它）——
+    // 「失败不再重开」是**页面级**接线策略，由 RP-D-06 的顺序断言机器钉死。
+    const state = stripComments(read('runPageState.ts'));
+    expect(state.includes('createRunPageState')).toBe(true);
+    expect(state.includes('failSettlement')).toBe(false);
+    expect(state.includes('RUN_FAIL')).toBe(false);
+  });
+
+  it('RP-D-06 接线顺序：失败结算分支必须早于通用推进分支（顺序最易漏，机器钉死）', () => {
+    const page = stripComments(read('runPage.ts'));
+    const failIdx = page.indexOf('const fail = this.failSettlementNow();');
+    const guardIdx = page.indexOf('if (!runActionEnabled(this.state)) return;');
+    const pressIdx = page.indexOf('this.apply(pressRunAction(this.state, runPageContext(this.loadout)));');
+    expect(failIdx, 'runPage.ts 必须在输入分派里接入失败结算').toBeGreaterThan(-1);
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(pressIdx).toBeGreaterThan(guardIdx);
+    // ① 失败分支在通用推进**之前**（放在之后就会被状态机的终态开新局吃掉）
+    expect(failIdx, '失败结算必须在通用推进之前').toBeLessThan(guardIdx);
+    // ② 失败分支必须直接 return（不接受任何推进）
+    expect(page.slice(failIdx, guardIdx).includes('return;'), '失败分支必须 return').toBe(true);
+    // ③ 主动作文案：FAILED 走失败模块的文案，且早于通用回退
+    const labelFail = page.indexOf('if (this.failSettlementNow()) return RUN_FAIL_RETURN_LABEL;');
+    const labelFallback = page.indexOf('return exit ? exit.label : runActionLabel(this.state);');
+    expect(labelFail).toBeGreaterThan(-1);
+    expect(labelFail).toBeLessThan(labelFallback);
+    // ④ 可点判据同源：`actionEnabledNow` 内部同样先问失败结算
+    const enableFn = page.indexOf('private actionEnabledNow()');
+    expect(enableFn).toBeGreaterThan(-1);
+    expect(page.indexOf('if (fail) return fail.href ', enableFn)).toBeGreaterThan(enableFn);
+    // ⑤ 画按钮的守卫同样同源（没出口 ⇒ 一个按钮都不画）
+    const drawGuard = page.indexOf("if (fail && fail.href === '') return;");
+    const drawBtn = page.indexOf('const btn = runActionButtonRect();', drawGuard);
+    expect(drawGuard, 'drawActionButton 必须对「没有失败出口」短路').toBeGreaterThan(-1);
+    expect(drawBtn).toBeGreaterThan(drawGuard);
+    // ⑥ 失败终态**不再**经过状态机的「终态开新局」文案
+    expect(page.includes('RUN_RESTART_LABEL')).toBe(false);
+  });
+
+  it('RP-D-07 结算面板复用终态槽位，文字全部落在面板内（零布局 / 零入账口径的结构前提）', () => {
+    const panel = runFailPanelRect();
+    // 同一槽位：COMPLETE 的「本局获得」卡与 FAILED 的失败结算是互斥终态
+    expect(panel).toEqual(runRewardCardRect());
+    expect(panel.x).toBeGreaterThanOrEqual(RUN_STAGE_BAND.x);
+    expect(panel.y).toBeGreaterThanOrEqual(RUN_STAGE_BAND.y);
+    expect(panel.y + panel.h).toBeLessThanOrEqual(RUN_STAGE_BAND.y + RUN_STAGE_BAND.h);
+    expect(panel.x + panel.w).toBeLessThanOrEqual(RUN_PAGE_W);
+    // 标题 + 三行信息全部在面板内
+    const at = runFailPanelTextPos();
+    expect(at.x).toBeGreaterThan(panel.x);
+    expect(at.y).toBeGreaterThan(panel.y);
+    for (let i = 0; i < 3; i++) {
+      expect(at.y + RUN_FAIL_PANEL.lineGap * (i + 1)).toBeLessThan(panel.y + panel.h);
+    }
   });
 });

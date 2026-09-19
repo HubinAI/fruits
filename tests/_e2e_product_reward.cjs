@@ -319,6 +319,13 @@ async function main() {
     const token = home0.runToken;
     const claimHref = `./home.html?run=${token}&reward=${REWARD_ID}`;
     const advQuery = new URLSearchParams(home0.adventureHref.split('?')[1] ?? '');
+    /*
+      PRODUCT-LOOP-R1-D｜出发链接现在带**两个**回程地址，且必须是两个不同地址：
+        `back` = 领奖地址（成功链）；`home` = **纯首页**（失败链；不带 run / reward
+        ⇒ 回首页不会触发任何入库）。
+      ⚠️ `home` 从**真实链接**里取（不在测试里另抄一份产品常量）—— 地址真源只有产品侧一个。
+    */
+    const homeHref = advQuery.get('home') ?? '';
     log(
       home0.adventureHref.startsWith('./run-page.html?') &&
         home0.startRunHref === home0.adventureHref &&
@@ -327,6 +334,11 @@ async function main() {
         advQuery.get('back') === claimHref,
       'A4「开始冒险」= 带本局 token / 奖励 id / 回程地址的同产物链接（页面不硬编码地址）',
       `href=${home0.startRunHref}`,
+    );
+    log(
+      homeHref !== '' && homeHref !== claimHref && !/[?&](run|reward)=/.test(homeHref),
+      'A4b 出发链接同时给全「成功回哪儿」与「失败回哪儿」，后者是**纯首页**（不带任何领奖参数）',
+      `back=${claimHref} home=${homeHref}`,
     );
 
     /* --------------------------------- 2) 出发 → Run Page 收到产品上下文（尚未结算） */
@@ -538,7 +550,25 @@ async function main() {
     const failPage = await ctx.newPage();
     const failErrors = [];
     failPage.on('pageerror', (e) => failErrors.push(String(e)));
-    await failPage.goto(`${URL_BASE}/run-page.html`, { waitUntil: 'load' });
+    /*
+      ⚠️ PRODUCT-LOOP-R1-D 修正：本段原先**零参数**打开 `run-page.html` —— 那一局既没有领奖
+         上下文、也没有失败回程地址。R1-D 之后失败出口地址由**产品侧**给全（Lab 侧不硬编码
+         任何产品 URL，`RP-25b` 机器钉死）⇒ 零参数下失败结算**照常呈现但没有出口按钮**，
+         而「失败玩家必须能主动回主界面」正是本 Queue 的 P0 ⇒ 本段必须按**产品真实上下文**打开。
+
+         参数 = 产品首页「开始冒险」链接里那四个（`run` / `reward` / `back` / `home`），
+         即**领奖上下文完全齐备**下再来一次失败 —— 这比原来更强：
+         「即使领奖地址就摆在同一个页面上，失败也拿不到它」（必改 5 的结构性反证）。
+         ⚠️ 刻意**不带** `equipped`：保留 demo 装载 ⇒ `LOSE_POLICY` 的确定性（耐久归零路线）
+         与 R1-C 逐字一致，本段只变「产品上下文」这一个自变量。
+    */
+    const failQuery = new URLSearchParams({
+      run: token,
+      reward: REWARD_ID,
+      back: claimHref,
+      home: homeHref,
+    });
+    await failPage.goto(`${URL_BASE}/run-page.html?${failQuery.toString()}`, { waitUntil: 'load' });
     await waitRunReady(failPage);
     const lose = await driveRunToEnd(failPage, LOSE_POLICY, '失败路线');
     const pFail = lose.probe;
@@ -548,25 +578,42 @@ async function main() {
       `phase=${pFail.phase} failed=${pFail.failed} 用时 ${round2(lose.ms / 1000)}s`,
     );
     log(
-      pFail.rewardCard === null && pFail.rewardCardRect === null && pFail.exitHref === null,
-      'H2 FAILED 结构上没有奖励出口：卡片 / 矩形 / 出口三者全为 null（必改 4）',
-      `rewardCard=${pFail.rewardCard} exitHref=${pFail.exitHref}`,
+      pFail.rewardCard === null &&
+        pFail.rewardCardRect === null &&
+        pFail.exitHref === homeHref &&
+        pFail.exitHref !== claimHref,
+      'H2 领奖上下文**齐备**（run/reward/back 都在同一条 URL 上）时，FAILED 依然拿不到奖励出口：卡片 / 矩形为 null，出口是**纯首页**而不是领奖地址（必改 5）',
+      `rewardCard=${pFail.rewardCard} rewardCardRect=${pFail.rewardCardRect} exit=${pFail.exitHref}（领奖地址=${claimHref}）`,
     );
     log(
-      pFail.actionEnabled === true && pFail.actionLabel !== '领取并返回',
-      'H3 FAILED 的主动作仍是「开新局」这类真实出口（不是禁用死按钮），但**不是**领奖',
-      `label=${pFail.actionLabel} enabled=${pFail.actionEnabled}`,
+      pFail.actionEnabled === true &&
+        pFail.actionLabel === '返回主界面' &&
+        pFail.actionLabel !== '领取并返回' &&
+        pFail.actionLabel !== '重新开始冒险',
+      'H3 FAILED 的主动作 =「返回主界面」（可点的真实出口，不是禁用死按钮），既不是领奖、也不是「重新开始冒险」（必改 3 / 必改 6）',
+      `label=${pFail.actionLabel} enabled=${pFail.actionEnabled} exit=${pFail.exitHref}`,
     );
     /*
-      像素 A/B：用**同一份布局几何**（`runRewardCardRect()` 在两张页面上是同一个常量函数，
-      两个页面同为 390×844 / DPR 1）在同一块区域上数「卡片底色」：
-        COMPLETE = 成片；FAILED = 几乎没有。
+      像素 A/B（**判据已随 R1-D 收紧**）：
+        旧判据是「同一块矩形里 COMPLETE 有成片卡片底色、FAILED 几乎没有」——它成立的前提是
+        「失败页面在这块矩形上什么都不画」。R1-D 之后**失败也有结算面板**（必改 3）且与奖励卡
+        互斥复用同一槽位 ⇒ 底色两边都有，旧判据已失效（这正是它 FAIL 的原因）。
+        新判据改为数**奖励卡专属图形**：图标框底 `pageBg`（`runPage.ts` 注释：卡片内唯一出现处）
+        与图标本体 `wheelRim` —— COMPLETE 成片，FAILED 必须为 **0**。
+        这比旧判据更强：不再只说「没有那么大片底色」，而是「那块矩形里**没有奖励卡的任何图形**」。
     */
     const failCardBgPx = cardRect ? await countColorInRect(failPage, cardRect, CARD_BG) : -1;
+    const failIconFramePx = cardRect ? await countColorInRect(failPage, cardRect, ICON_FRAME_BG) : -1;
+    const failIconGlyphPx = cardRect ? await countColorInRect(failPage, cardRect, ICON_GLYPH) : -1;
     log(
-      cardBgPx > 20000 && failCardBgPx < 500,
-      'H4 像素 A/B：同一块区域在 COMPLETE 有成片卡片底色、在 FAILED 几乎没有（失败没有发奖的视觉）',
-      `cardBg: COMPLETE=${cardBgPx} vs FAILED=${failCardBgPx}`,
+      cardBgPx > 20000 &&
+        iconFramePx > 3000 &&
+        iconGlyphPx > 500 &&
+        failIconFramePx === 0 &&
+        failIconGlyphPx === 0 &&
+        failCardBgPx > 20000,
+      'H4 像素 A/B：同一块矩形上 COMPLETE 有奖励卡专属图形（图标框 + Collider 本体），FAILED **一个像素都没有**（失败那块画的是结算面板，不是发奖）',
+      `cardBg: COMPLETE=${cardBgPx} vs FAILED=${failCardBgPx} · 图标框: ${iconFramePx} vs ${failIconFramePx} · 图标本体: ${iconGlyphPx} vs ${failIconGlyphPx}`,
     );
     const stored5 = await storageDump(failPage);
     log(

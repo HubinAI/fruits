@@ -2,13 +2,15 @@
  * PRODUCT-LOOP-R1-B｜产品奖励的**策略与地址唯一真源**（纯逻辑，零 DOM、零存档）。
  * PRODUCT-LOOP-R1-C｜追加：**局外 Equipped Loadout 的交接口径**（同一处，不分第二个真源）。
  *
- * 这个模块回答四个问题，全部只在这里回答一次：
+ * 这个模块回答五个问题，全部只在这里回答一次：
  *   ① 「本局奖励是哪件部件」→ `REWARD_WEAPON_ID`（**固定**奖励：本 Queue 验证的是
  *      「获得一个新东西后想不想马上装上它」，不是随机掉落 —— Queue 必改 2 明令「甚至优先固定」）；
  *   ② 「怎么开始一局带奖励的冒险」→ `buildAdventureHref()`（唯一产出产品 URL 的地方）；
  *   ③ 「玩家带着什么参数回到首页」→ `buildClaimHref()` / `parsePendingClaim()`；
  *   ④ 「本局战斗用哪份装备」→ `encodeRunLoadout()`（把**当前 Player Profile Equipped 的
- *      同一份 `BuildDraft`** 原样编进 ② 的地址，不重算、不推导、不挑字段）。
+ *      同一份 `BuildDraft`** 原样编进 ② 的地址，不重算、不推导、不挑字段）；
+ *   ⑤ 「局内**失败**了回哪儿」→ `HOME_PARAM`（`home` = **纯首页地址**，与 ③ 的领奖地址
+ *      是两个不同的出口 ⇒ 失败链结构上拿不到领奖地址）。
  *
  * ── 为什么 URL 只由这里产出 ────────────────────────────────────────────────
  * 局内 Run Page 属于实验台（Lab）目录，它的源码白名单**不允许** import 产品模块
@@ -75,6 +77,19 @@ export const BACK_PARAM = 'back';
  *    这条通道**不需要任何改动**就自然带上新内容（不会退化成「只同步了武器」）。
  */
 export const LOADOUT_PARAM = 'equipped';
+/**
+ * PRODUCT-LOOP-R1-D｜**失败回程地址**参数（= 玩家在局内失败、点「返回主界面」后落到的页面）。
+ *
+ * ⚠️ 与 `BACK_PARAM` 是**两个不同的地址**，这是 Queue 必改 5 在地址层上的保证：
+ *   - `back` = `buildClaimHref()` = 领奖地址（首页收到它会执行一次幂等入库）→ 只给 COMPLETE；
+ *   - `home` = `HOME_HREF`（**纯首页，不带任何领奖参数**）→ 只给 FAILED。
+ *   因此局内的失败链**结构上拿不到**领奖地址 ⇒ 「失败也发奖」不可能发生。
+ *
+ * ⚠️ 刻意与 `back` 分开，而不是让 Lab 侧「把 reward 参数删掉」：
+ *    Lab 一旦开始解析 / 裁剪产品地址，就出现了第二份「产品 URL 长什么样」的知识
+ *    （正是本模块存在的理由所反对的）。这里给两个**不透明**地址，Lab 只需原样使用。
+ */
+export const HOME_PARAM = 'home';
 
 /**
  * 把一份 `BuildDraft` 编成 URL 可携带的 JSON 串。
@@ -128,6 +143,11 @@ export function buildClaimHref(runToken: string, defId: string = REWARD_WEAPON_I
  * ⚠️ `back` 就是 `buildClaimHref()` 的结果，**由产品侧给全** ⇒ Lab 侧不需要知道
  *    「首页叫什么」。嵌套的 `?` / `&` 由 `URLSearchParams` 负责转义。
  *
+ * ⚠️ PRODUCT-LOOP-R1-D：`home` 也必须给全（= 纯首页地址，不带领奖参数），
+ *    它才是玩家局内**失败**后「返回主界面」的落点。两个地址都**无条件**带上 ——
+ *    「这一局会不会失败」在出发时是不可知的，因此不能按处境挑一个：
+ *    页面拿到的是「成功回哪儿 / 失败回哪儿」这一对事实。
+ *
  * ⚠️ `equippedDraft` 省略 / `null` ⇒ **不加该参数**（旧链接形态逐字节不变）。
  *    这既是向后兼容，也让「不带装备的链接」在 Lab 侧退化成「固定演示装载」——
  *    研发入口（`dev:run-page`）因此完全不受本 Queue 影响。
@@ -142,6 +162,8 @@ export function buildAdventureHref(
   p.set(REWARD_PARAM, defId);
   if (equippedDraft) p.set(LOADOUT_PARAM, encodeRunLoadout(equippedDraft));
   p.set(BACK_PARAM, buildClaimHref(runToken, defId));
+  // 失败回程地址：纯首页（`parsePendingClaim` 会因缺 `reward` 而返回 null ⇒ 绝不入库）
+  p.set(HOME_PARAM, HOME_HREF);
   return `${ADVENTURE_HREF}?${p.toString()}`;
 }
 

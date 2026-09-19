@@ -31,6 +31,20 @@
  *   本页面**只有** #run-root / .run-stage / #run-canvas 三层壳，不含任何
  *   Arena / Loadout / Encounter / Start / Reset / Gate 之类的开发控制。
  *
+ * ── PRODUCT-LOOP-R1-D：两个终态各自的**唯一**出口（本文件是接线点）─────────────
+ *
+ *     COMPLETE → 「领取并返回」（`productClaimNow()`）→ 宿主整页导航到**领奖地址**
+ *     FAILED   → 「返回主界面」（`failSettlementNow()`）→ 宿主整页导航到**纯首页地址**
+ *
+ *   ⚠️ `FAILED` **不再**走状态机的「终态动作 = 开一个全新 Run」这条边
+ *      （`runPageState.ts` 一字未改 —— 它的冻结规则仍在，只是本页面**不再经过**它）：
+ *      在 `onPointerDown` 里失败结算分支**先于**通用推进分支并直接 `return`
+ *      ⇒ 「点一下失败 = 悄悄回到 DAY 1 继续跑」在结构上不可能发生（Queue 必改 2 / 必改 6）。
+ *   ⚠️ 失败链**没有任何**能创建新 Run 的入口：结算面板只有信息，底部只有「返回主界面」；
+ *      宿主没给回程地址时连按钮都不画。新 Run 只能由玩家回首页后重新点「开始冒险」创建。
+ *   ⚠️ 失败**不发奖**：奖励出口的前提是 `runComplete(state)`，与失败终态互斥
+ *      ⇒ 「失败也发奖」在结构上不可能（Queue 必改 5）。
+ *
  * 删除本文件即移除 Run Page 核心；本目录可整块删除（清单见 constants.ts 头部）。
  */
 
@@ -39,6 +53,7 @@ import { PORTRAIT_LOGICAL_H, PORTRAIT_LOGICAL_W } from './constants';
 import {
   RUN_ACTION_BAND,
   RUN_BANDS,
+  RUN_FAIL_PANEL,
   RUN_LOG,
   RUN_LOG_BAND,
   RUN_LOG_LABEL_POS,
@@ -59,6 +74,8 @@ import {
   runChoiceTextX,
   runChoiceTitlePos,
   runDayNodes,
+  runFailPanelRect,
+  runFailPanelTextPos,
   runLogLineRects,
   runPaintedAreas,
   runRewardCardRect,
@@ -103,6 +120,21 @@ import {
   type RunPhase,
 } from './runPageState';
 import { RUN_TOTAL_BATTLES, type RunChoicePoolKind, type RunDurabilityChoiceId } from './runScript';
+/**
+ * PRODUCT-LOOP-R1-D｜失败结算的**唯一真源**（纯逻辑）。
+ *
+ * ⚠️ 绘制（`drawFailPanel`）、命中区（`onPointerDown`）、探针（`failSettlement`）三处
+ *    都读 `this.failSettlementNow()` → 结构上不可能出现「画了按钮但点了没反应」
+ *    或「结算写 A、点了去 B」。
+ * ⚠️ 本文件**不**自己判断「FAILED 该去哪」（那属于策略）：策略在 `runFailSettlement.ts`，
+ *    导航在宿主 —— 本文件只负责把两者接起来。
+ */
+import {
+  RUN_FAIL_RETURN_LABEL,
+  runFailSettlementNow,
+  type RunFailReturn,
+  type RunFailSettlement,
+} from './runFailSettlement';
 /**
  * PRP-M2-NEXT-RUN-SEED-VALIDATION：**验证专属**流程数据与构造器。
  *
@@ -550,6 +582,30 @@ export interface RunPageProbe {
   /** 卡片矩形（与绘制同源；`null` 同上）。 */
   readonly rewardCardRect: RunRect | null;
   /**
+   * PRODUCT-LOOP-R1-D｜本帧真正画出来的**失败结算**（`null` = 当前不是 `FAILED`）。
+   *
+   * ⚠️ 与绘制 / 命中 / 主动作三处**同源**（都走 `failSettlementNow()`）⇒ 不存在
+   *    「探针说失败结算、屏幕上却没有」或「有按钮但点了没反应」的分叉。
+   * ⚠️ `href === ''` = 宿主没有给失败回程地址（研发入口）⇒ 结算照常呈现，但**没有按钮**
+   *    （`actionEnabled === false` 且 `exitHref === null`）。
+   * ⚠️ `lines` 是面板上那三行文本的**唯一**来源（失败 DAY / 最终 Build / 最终耐久），
+   *    因此 E2E 断言的是「画出来的那三行」，而不是另算一遍。
+   */
+  readonly failSettlement: {
+    title: string;
+    day: number;
+    buildLabels: readonly string[];
+    durabilityPercent: number;
+    lines: readonly string[];
+    label: string;
+    href: string;
+  } | null;
+  /**
+   * 失败结算面板的矩形（与绘制同源 = `runFailPanelRect()`；`null` = 本帧没有面板）。
+   * E2E 用它在**真实像素**上取证「结算确实画出来了」（而不是只有探针字段）。
+   */
+  readonly failPanelRect: RunRect | null;
+  /**
    * PRODUCT-LOOP-R1-C｜**本局到底用哪份装备**（Queue 必改 2 的可观测形式）。
    *
    * `source === 'profile'` + `fallback === 'none'` = 用的就是产品侧交进来的
@@ -738,6 +794,28 @@ export interface RunPageOptions {
    *    而那一份就是首页从 `strongfruit.playerBuild.v1` 读出来编进 URL 的那一份。
    */
   readonly playerLoadout?: RunLoadoutResolution | null;
+  /**
+   * PRODUCT-LOOP-R1-D｜**失败回程地址**（= 产品侧给的「纯首页」地址，不含任何领奖参数）。
+   *
+   * 由宿主（`runMain.ts`）用 `parseRunFailReturn(window.location.search)` 解析后注入。
+   * 省略 / `null` ⇒ 失败结算**照常呈现**，但**不画按钮**（研发入口 `/run-page.html`：
+   * 页面上没有任何「点一下就重开」的入口，玩家（研发）自己刷新页面即可）。
+   *
+   * ⚠️ 这里只是**数据**：本页面既不读存档、也不写存档、更不做整页导航
+   *    （`RP-25` 机器禁止本文件写 `location` / `history`）。导航由宿主执行。
+   * ⚠️ 与 COMPLETE 的 `productReward` **结构上互斥**：失败链拿不到领奖地址
+   *    ⇒ 「失败也发奖」不可能发生（Queue 必改 5）。
+   */
+  readonly failReturn?: RunFailReturn | null;
+  /**
+   * PRODUCT-LOOP-R1-D｜「返回主界面」被点击时的处理 —— **由宿主实现**（整页导航回正式首页）。
+   *
+   * ⚠️ 与 `onProductClaim` / `onExit` 同一纪律：`RunPage` 只在「`FAILED` + 有 `failReturn`
+   *    + 有本回调」三者齐备时才画按钮并接受点击，且**在调用之前**已经 `dispose()`
+   *    （战斗循环 / 物理世界 / 弹丸 / 接触记录 / 事件订阅 / resize·pointer 监听）。
+   * ⚠️ 未提供 ⇒ 失败终态**不画出口按钮**（而不是画一个点了没反应的按钮）。
+   */
+  readonly onFailReturn?: ((action: RunFailReturn) => void) | null;
 }
 
 export class RunPage {
@@ -918,6 +996,21 @@ export class RunPage {
       return;
     }
 
+    /*
+      PRODUCT-LOOP-R1-D｜RUN FAILED 的**唯一**出口（「返回主界面」）。
+      ⚠️ 必须放在 `runActionEnabled(this.state)` **之前**，且必须 `return`：
+         `FAILED` 在**状态机**里是「终态动作 = 开一个全新 Run」（PRP-RUN-R1 的冻结规则），
+         放过去就会变成「点失败结算 = 悄悄重开一局回到 DAY 1」—— 那正是本 Queue 的 P0。
+         ⚠️ 这是**顺序敏感**的修复：源码守卫 `RP-D-06` 机器钉死本分支必须早于通用推进分支。
+      ⚠️ 没有回程地址（研发入口）⇒ 结算照常画，但这一下不接受任何点击
+         （既不重开、也不做别的事 —— FAILED 后状态不得继续变化）。
+    */
+    const fail = this.failSettlementNow();
+    if (fail) {
+      if (fail.href !== '' && hit(runActionButtonRect(), p)) this.requestFailReturn(fail);
+      return;
+    }
+
     if (!runActionEnabled(this.state)) return;
     if (hit(runActionButtonRect(), p)) {
       // PRP-M2：验证流程里 RUN COMPLETE 的唯一主动作改写为「打开种子选择」，
@@ -1029,6 +1122,22 @@ export class RunPage {
   }
 
   /**
+   * PRODUCT-LOOP-R1-D｜失败终态的**唯一真源**（结算内容 + 唯一出口）。
+   *
+   * **唯一真源**：结算面板文案 / 主动作按钮文案 / 点击行为 / 探针四处都从这一个方法取
+   * ⇒ 「画了结算但去不了首页」「有按钮但无 action」在结构上都不可能。
+   *
+   * ⚠️ 只有「`FAILED` + 宿主给了 `failReturn` + 宿主给了 `onFailReturn`」三者齐备时
+   *    `href` 才非空 ⇒ 按钮才画得出来（口径与 `exitHref`/`onExit`、`productReward`/`onProductClaim`
+   *    完全一致）。三缺一时**结算照常呈现**，只是没有出口按钮。
+   * ⚠️ 本方法**从不**包含「重开一局」这条边（Queue 必改 6）。
+   */
+  private failSettlementNow(): RunFailSettlement | null {
+    const ret = this.opts.onFailReturn ? (this.opts.failReturn ?? null) : null;
+    return runFailSettlementNow(this.state, ret);
+  }
+
+  /**
    * 本帧要画的「本局获得」卡片（`null` = 不画）。
    * ⚠️ 与 `productClaimNow()` **同源**：有出口才有卡片，没有出口就没有卡片。
    * ⚠️ 卡片内容里的名称 / 能量 / 外接框全部来自正式内容库（`runRewardCard`），
@@ -1043,9 +1152,14 @@ export class RunPage {
    * 主动作是否可用。
    * ⚠️ 默认路径（`validationDone` 恒为 `false`）与 `runActionEnabled(state)` 完全等价。
    * ⚠️ 终点态：有出口 ⇒ 可用（这是本状态下**唯一**可点的东西）；无出口 ⇒ 不可用（且不画）。
+   * ⚠️ PRODUCT-LOOP-R1-D：`FAILED` **不再**走状态机的「终态动作 = 开新局」——
+   *    它只认「返回主界面」这条出口；宿主没给地址 ⇒ 不可用（并且不画），
+   *    因此失败后**没有任何**能创建新 Run 的入口（Queue 必改 6）。
    */
   private actionEnabledNow(): boolean {
     if (this.productClaimNow()) return true;
+    const fail = this.failSettlementNow();
+    if (fail) return fail.href !== '';
     if (this.validationDone) return this.finalActionNow() !== null;
     return runActionEnabled(this.state);
   }
@@ -1055,9 +1169,12 @@ export class RunPage {
    * ⚠️ 默认路径与 `runActionLabel(state)` 完全等价；终点态 = 出口动作的文案（不是状态描述）。
    * ⚠️ 产品奖励出口优先于验证出口（两者结构上互斥：验证宿主不给 `productReward`，
    *    产品宿主不给 `exitHref`/`onExit`；万一同时给出，产品闭环优先）。
+   * ⚠️ PRODUCT-LOOP-R1-D：`FAILED` 的文案恒为「返回主界面」（**不是**状态机里的
+   *    「重新开始冒险」）—— 失败页不提供重开。
    */
   private actionLabelNow(): string {
     if (this.productClaimNow()) return RUN_REWARD_CLAIM_LABEL;
+    if (this.failSettlementNow()) return RUN_FAIL_RETURN_LABEL;
     const exit = this.finalActionNow();
     return exit ? exit.label : runActionLabel(this.state);
   }
@@ -1097,6 +1214,34 @@ export class RunPage {
     this.dispose();
     this.seedSelect = null;
     if (this.opts.onProductClaim) this.opts.onProductClaim(claim);
+  }
+
+  /**
+   * PRODUCT-LOOP-R1-D｜「返回主界面」：清理本页**全部运行期状态**，然后把失败出口交给宿主。
+   *
+   * 清理面（Queue 必改 4 的 1–2 项，全部由 `dispose()` 一次做掉）：
+   *   - 战斗循环（`requestAnimationFrame` 计时器）停掉；
+   *   - 真实战斗运行时释放（`orchestrator.dispose()`：物理世界 / 弹丸 / 接触记录 / 事件订阅）；
+   *   - 战斗视图宿主释放；`resize` / `pointerdown` 监听摘掉；`ResizeObserver` 断开。
+   *   - 本局运行期引用（种子浮层）一并清空，不在本页留下悬挂引用。
+   *
+   * 3–4 项（本局 Run Buff / Day / RunScript state）由**整页导航**保证：本页的全部
+   * 局内状态（`this.state` 里的 buffs / repairBonus / day / nodeId / log）都只活在
+   * **当前这份文档**的内存里 —— 导航 = 文档销毁 ⇒ 它们随文档一起消失，且**绝不落盘**
+   * （Lab 白名单里没有持久化模块）。⚠️ 这里**刻意不**把状态重置成新 Run：
+   * 那正是 Queue 必改 6 禁止的「失败后隐式重开」。
+   *
+   * 5–7 项（Profile / Inventory / Equipped 不被清空）由**结构**保证：
+   * 本页面读不到也写不到正式存档（Lab 闭集白名单），因此失败链**没有能力**动它们。
+   *
+   * ⚠️ **顺序：先清理、再交给宿主** —— 导航是异步的，不能依赖它来释放运行时。
+   * ⚠️ 刻意**不**复位任何「可推进」的标记：万一导航被浏览器拦下，页面仍停在安全的
+   *    失败结算（而不是退化成可推进的状态）。
+   */
+  private requestFailReturn(action: RunFailSettlement): void {
+    this.dispose();
+    this.seedSelect = null;
+    if (this.opts.onFailReturn) this.opts.onFailReturn({ href: action.href });
   }
 
   /* ------------------------------------------------------- 状态与推进 */
@@ -1359,6 +1504,12 @@ export class RunPage {
     //        不引入任何新色 ⇒ 与像素账本调色板天然互斥。
     this.drawRewardCard(ctx);
 
+    // 5c) PRODUCT-LOOP-R1-D：RUN FAILED 的**失败结算面板**
+    //     ⚠️ 与 5b) 是**互斥**终态（COMPLETE / FAILED 不可能同时成立）⇒ 复用同一个槽位。
+    //     ⚠️ 复用**已有**的非入账配色（cardBg / cardEdge / text*），不引入任何新色
+    //        ⇒ 与像素账本调色板天然互斥，入账面积一个像素都不变。
+    this.drawFailPanel(ctx);
+
     // 6) 浮层（必改 4：整页重压暗 + 「图标 / 名称 / 一句结果」卡片）
     //    - CHOICE     = 三选一强化（第一层固定 / 第二层条件池）
     //    - DURABILITY = 耐久取舍（维修 vs 继续改装）
@@ -1600,6 +1751,14 @@ export class RunPage {
     // ⚠️ PRP-M2-R1（防无效按钮再次出现）：终点态**没有出口就一个按钮都不画**。
     //    否则就会出现「可见但点了没反应」的按钮 —— 那正是本 Queue 要根除的形态。
     if (this.validationDone && this.finalActionNow() === null) return;
+    /*
+      PRODUCT-LOOP-R1-D：失败终态同理 —— 宿主没给失败回程地址（研发入口）⇒ 一个按钮都不画。
+      ⚠️ 必须与 `actionEnabledNow()` / 命中分支**同源**：三处都读 `failSettlementNow()`，
+         因此「画出来的按钮」与「能点的区域」与「可用的判据」不可能分叉。
+      ⚠️ 顺带保证 `FAILED` 下屏幕上**不存在**任何「开新局」的入口（Queue 必改 6）。
+    */
+    const fail = this.failSettlementNow();
+    if (fail && fail.href === '') return;
     const btn = runActionButtonRect();
     // ⚠️ PRP-M2：这里读的是**本帧实际口径**（默认路径与 `runActionEnabled(s)` /
     //    `runActionLabel(s)` 完全等价）—— 验证终点态下按钮**可用**，文案 = 「返回验证中心」。
@@ -1686,6 +1845,49 @@ export class RunPage {
     ctx.fillStyle = COLORS.textFaint;
     ctx.font = `10px ${FONT_STACK}`;
     ctx.fillText(card.defId, box.x + 4, box.y + box.h - 5);
+  }
+
+  /* ------------------------------------------ RUN FAILED：失败结算面板 */
+
+  /**
+   * PRODUCT-LOOP-R1-D｜失败结算面板（Queue 必改 3 的「最小失败结算」）。
+   *
+   * 只做三件事，全部只陈述**真的发生了**的东西：
+   *   - 标题「冒险失败」—— 玩家一眼看到「这一局结束了」；
+   *   - 三行最低必要信息：**失败 DAY / 最终 Build / 最终耐久**（三行文本的**唯一**来源
+   *     是 `failSettlementNow()` 的 `lines`，本方法只负责画）；
+   *   - 底部唯一主 CTA「返回主界面」（动作按钮，几何 = 既有 `runActionButtonRect()`）。
+   *
+   * ⚠️ 本 Queue 明确**不做**：动画 / 宝箱 / 评价等级 / 统计面板 / 失败原因分析 / 美术重做
+   *    —— 面板只有底色 + 描边 + 四行文字，没有任何新图形。
+   * ⚠️ 与「本局获得」卡是**互斥**终态 ⇒ 复用同一个槽位（`runFailPanelRect()`）；
+   *    配色全部取自既有**非入账**色 ⇒ 像素账本一个数字都不变。
+   * ⚠️ 宿主没给回程地址时面板**照常画**（失败必须被明确呈现），只是没有出口按钮。
+   */
+  private drawFailPanel(ctx: CanvasRenderingContext2D): void {
+    const s = this.failSettlementNow();
+    if (!s) return;
+
+    const r = runFailPanelRect();
+    ctx.fillStyle = COLORS.cardBg;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = COLORS.cardEdge;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+
+    // ① 标题
+    const at = runFailPanelTextPos();
+    ctx.fillStyle = COLORS.textTitle;
+    ctx.font = `bold 20px ${FONT_STACK}`;
+    ctx.fillText(this.ellipsize(ctx, s.title, r.x + r.w - at.x - RUN_FAIL_PANEL.pad), at.x, at.y);
+
+    // ② 三行最低必要信息（失败 DAY / 最终 Build / 最终耐久）
+    ctx.font = `13px ${FONT_STACK}`;
+    s.lines.forEach((line, i) => {
+      ctx.fillStyle = i === 0 ? COLORS.textBody : COLORS.textDim;
+      const y = at.y + RUN_FAIL_PANEL.lineGap * (i + 1);
+      ctx.fillText(this.ellipsize(ctx, line, r.x + r.w - at.x - RUN_FAIL_PANEL.pad), at.x, y);
+    });
   }
 
   /* ------------------------------------------------------------ 浮层 */
@@ -2055,6 +2257,13 @@ export class RunPage {
     */
     const rewardCard = this.rewardCardNow();
     const rewardClaim = this.productClaimNow();
+    /*
+      PRODUCT-LOOP-R1-D：本帧真正画出来的**失败结算** + 它的唯一出口
+      （与绘制 / 命中同源：三处都走 `failSettlementNow()`）。`null` = 当前不是 FAILED。
+    */
+    const failSettlement = this.failSettlementNow();
+    /** 失败出口：只有「宿主给了地址」才是一个真实出口；否则是 `null`（页面上没有按钮）。 */
+    const failExitHref = failSettlement && failSettlement.href !== '' ? failSettlement.href : null;
     return {
       logicalW: PORTRAIT_LOGICAL_W,
       logicalH: PORTRAIT_LOGICAL_H,
@@ -2126,7 +2335,7 @@ export class RunPage {
        * PRODUCT-LOOP-R1-B 起同源口径扩到产品奖励出口（产品出口优先于验证出口；
        * 两者结构上互斥 —— 验证宿主不给 `productReward`，产品宿主不给 `exitHref`）。
        */
-      exitHref: rewardClaim?.href ?? this.finalActionNow()?.href ?? null,
+      exitHref: rewardClaim?.href ?? failExitHref ?? this.finalActionNow()?.href ?? null,
       /**
        * PRODUCT-LOOP-R1-B｜本帧真正画出来的「本局获得」卡片（`null` = 本帧没有这张卡）。
        * ⚠️ 与绘制同源（同一个 `rewardCardNow()`）；**FAILED 恒为 `null`**
@@ -2144,6 +2353,23 @@ export class RunPage {
         : null,
       /** 卡片矩形（与绘制同源；`null` 同上）。 */
       rewardCardRect: rewardCard ? runRewardCardRect() : null,
+      /**
+       * PRODUCT-LOOP-R1-D｜本帧真正画出来的失败结算（`null` = 当前不是 `FAILED`）。
+       * ⚠️ 与绘制同源（同一个 `failSettlementNow()`）；`href === ''` = 没有出口按钮。
+       */
+      failSettlement: failSettlement
+        ? {
+            title: failSettlement.title,
+            day: failSettlement.day,
+            buildLabels: failSettlement.buildLabels,
+            durabilityPercent: failSettlement.durabilityPercent,
+            lines: failSettlement.lines,
+            label: failSettlement.label,
+            href: failSettlement.href,
+          }
+        : null,
+      /** 面板矩形（与绘制同源；`null` 同上）。 */
+      failPanelRect: failSettlement ? runFailPanelRect() : null,
       /** PRODUCT-LOOP-R1-C：本局装备来源（与「实际打了什么」分开报告，见类型注释）。 */
       playerLoadout: {
         source: this.loadout.source,
