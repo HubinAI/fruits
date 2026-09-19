@@ -121,9 +121,12 @@ import {
 } from './nextRunValidation';
 import {
   buildRunStageView,
+  demoRunPlayerLoadout,
   runPageContext,
   runPageLayerShapes,
   runDemoEnemy,
+  type RunLoadoutResolution,
+  type RunPlayerLoadout,
   type RunStageEntityView,
   type RunStageView,
 } from './runPageScene';
@@ -314,6 +317,23 @@ export interface RunProbeBattleWorld {
   readonly modifier: string | null;
   /** PRP-BUILD-01：本场战斗真实拿到的完整 Build（按选择顺序；空数组 = 基础状态）。 */
   readonly build: readonly string[];
+  /**
+   * PRODUCT-LOOP-R1-C：本场**真实装配结果**里玩家（A 方）的全部 Functional 件，
+   * 按挂点 id 逐件报告（`hardpointId` 是正式 `PlanckPartRuntime.id`，不是序号）。
+   *
+   * 这是 Queue「测试锁」的另一半 —— 「Run 第一场实际 Weapon Def ID」。
+   * ⚠️ 读的是**已经装出来的车**（`orchestrator.vehicleA.parts`），不是输入参数：
+   *    因此「链接里写 A、战斗里装 B」这种错位会在这里立刻暴露，而不是只能靠人眼看画面。
+   * ⚠️ 按挂点报（不是只给一个「武器 id」）：一辆车可以有多件武器（starter 同时带
+   *    `frontMass` 炮与 `top` 锤），「本局用的是哪件」只有「哪个挂点上是哪件」才确定。
+   * ⚠️ 带 Run-local 武器侧强化时给的是本局 overlay 部件 id（真实生效的那个）。
+   */
+  readonly playerFunctionals: readonly {
+    readonly hardpointId: string;
+    readonly defId: string;
+    readonly name: string;
+    readonly category: string;
+  }[];
   /**
    * PRP-BUILD-01：Run 能力的**真实运行状态**（事件驱动；全部是真实发生过的计数与量值）。
    *   - `kineticHits` / `lastKineticImpulse`：动能爆发真的触发了几次、最近一次多大；
@@ -529,6 +549,28 @@ export interface RunPageProbe {
   } | null;
   /** 卡片矩形（与绘制同源；`null` 同上）。 */
   readonly rewardCardRect: RunRect | null;
+  /**
+   * PRODUCT-LOOP-R1-C｜**本局到底用哪份装备**（Queue 必改 2 的可观测形式）。
+   *
+   * `source === 'profile'` + `fallback === 'none'` = 用的就是产品侧交进来的
+   * 「当前 Player Profile Equipped」；其余取值都是**降级**，必须被测试看见：
+   *   - `no-param` = 链接没带装备参数（研发入口 `/run-page.html` 的原行为，合法）；
+   *   - `invalid`  = **带了但坏了** ⇒ 这一局跑的不是玩家身上那件（真实异常）。
+   *
+   * ⚠️ 与「实际打了什么」分开报告：本字段是**输入**，`battleWorld.playerWeaponDefIds`
+   *    是**真实装配结果**。两者都必须有，才能证明「输入 == 实际」（而不是各说各话）。
+   */
+  readonly playerLoadout: {
+    source: 'profile' | 'demo';
+    fallback: 'none' | 'no-param' | 'invalid';
+    /** 装载标签（= spawn plan 的 `loadoutId` 证据字段）。 */
+    tag: string;
+    /** 展示名（日志里的 `{vehicle}`）。 */
+    label: string;
+    readonly bodyDefId: string;
+    /** 装备里每个 Functional 槽的选择（hardpointId → defId），逐字来自交进来的 draft。 */
+    readonly functionalSelections: Readonly<Record<string, string>>;
+  };
   /** **强化**三选一浮层是否可见（严格 = `phase === 'CHOICE'`）。 */
   readonly choiceOpen: boolean;
   /**
@@ -683,6 +725,19 @@ export interface RunPageOptions {
    * ⚠️ 未提供 ⇒ 终点态**不画奖励卡、不画出口按钮**（而不是画一个点了没反应的按钮）。
    */
   readonly onProductClaim?: ((claim: RunProductClaim) => void) | null;
+  /**
+   * PRODUCT-LOOP-R1-C｜**本局玩家装载**（= 产品侧交进来的「当前 Player Profile Equipped」）。
+   *
+   * 由宿主（`runMain.ts`）用 `resolveRunPlayerLoadout(window.location.search)` 解析后注入。
+   * 省略 / `null` ⇒ 固定演示装载（`demoRunPlayerLoadout()`）⇒ 研发入口
+   * （`npm run dev:run-page` / `/run-page.html` 不带参数）**逐像素不变**。
+   *
+   * ⚠️ 这里只是**数据**：本页面既不读存档、也不写存档（Lab 源码白名单里没有
+   *    `core/buildPersistence` / `core/partInventory`）。「首页显示 A、战斗实际跑 B」
+   *    因此在本页结构上不可能发生 —— 它只可能跑「宿主交进来的那一份」，
+   *    而那一份就是首页从 `strongfruit.playerBuild.v1` 读出来编进 URL 的那一份。
+   */
+  readonly playerLoadout?: RunLoadoutResolution | null;
 }
 
 export class RunPage {
@@ -704,6 +759,13 @@ export class RunPage {
   private state: RunPageState;
   /** PRP-M2：验证构造项（默认 `{}` → 完整 Run 流程，零行为差异）。 */
   private readonly opts: RunPageOptions;
+  /**
+   * PRODUCT-LOOP-R1-C：本局玩家装载（**唯一来源**）。
+   * `opts.playerLoadout` 省略 ⇒ 演示装载 + `fallback: 'no-param'`（研发入口的原行为）。
+   */
+  private readonly loadout: RunPlayerLoadout;
+  /** 装载来源诊断（`'invalid'` = 链接带了装备参数但坏了 ⇒ 必须可观测）。 */
+  private readonly loadoutFallback: RunLoadoutResolution['fallback'];
   /** PRP-M2：种子选择浮层的选项（非 `null` = 浮层打开，盖过当前 state 的浮层）。 */
   private seedSelect: readonly RunSeedOption[] | null = null;
   /** PRP-M2：已经选定的种子 id（`null` = 还没选）。 */
@@ -729,8 +791,15 @@ export class RunPage {
   constructor(root: HTMLElement, opts: RunPageOptions = {}) {
     this.opts = opts;
     this.root = root;
+    // PRODUCT-LOOP-R1-C：本局玩家装载（缺省 = 演示装载 ⇒ 既有入口行为逐项不变）。
+    const resolution: RunLoadoutResolution = opts.playerLoadout ?? {
+      loadout: demoRunPlayerLoadout(),
+      fallback: 'no-param',
+    };
+    this.loadout = resolution.loadout;
+    this.loadoutFallback = resolution.fallback;
     // PRP-M2：验证入口注入「上一局终局」；默认入口 = 全新一局的 DAY 1（行为不变）。
-    this.state = opts.priorRun ?? createRunPageState(runPageContext());
+    this.state = opts.priorRun ?? createRunPageState(runPageContext(this.loadout));
     this.stageWrap = document.createElement('div');
     this.canvas = document.createElement('canvas');
     this.canvas.id = 'run-canvas';
@@ -857,7 +926,7 @@ export class RunPage {
         this.openSeedSelect();
         return;
       }
-      this.apply(pressRunAction(this.state, runPageContext()));
+      this.apply(pressRunAction(this.state, runPageContext(this.loadout)));
     }
   };
 
@@ -867,7 +936,7 @@ export class RunPage {
    *   - DURABILITY（维修 / 继续改装）→ `resolveDurability`。
    */
   private chooseOverlayCard(id: string): void {
-    const ctx = runPageContext();
+    const ctx = runPageContext(this.loadout);
     if (runDurabilityOpen(this.state)) {
       this.apply(resolveDurability(this.state, id as RunDurabilityChoiceId, ctx));
       return;
@@ -899,7 +968,7 @@ export class RunPage {
    *   - 未知种子 → 不进入新局，也**不**回退到「无 seed 新局」（绝不静默降级）。
    */
   private chooseSeed(id: string): void {
-    const next = createSeededNewRun(runPageContext(), id);
+    const next = createSeededNewRun(runPageContext(this.loadout), id);
     if (!next) return;
     this.endBattle();
     this.stopLoop();
@@ -1067,6 +1136,12 @@ export class RunPage {
       build: runBuildIds(this.state),
       carriedHp: runCarriedPlayerHp(this.state),
       encounterId: runCurrentNode(this.state).encounterId,
+      // PRODUCT-LOOP-R1-C：本场战斗的**玩家装配**来自本局装载（局外装备），
+      // 而不是 Lab 的固定演示装载。凡是「跑的不是玩家那辆车」的分岔都在这里被掐断。
+      // 每场遭遇都**新造一次**运行时 ⇒ 玩家中途无法改变本场装配；
+      // 新一局重开时 `this.loadout` 已是新的（页面本身也随导航重建）。
+      playerDraft: this.loadout.draft,
+      playerLoadoutTag: this.loadout.tag,
     });
     this.battle = rt;
     // 实测开局外廓间距（不是写死数字）——「开局有明确距离」的证据
@@ -1202,7 +1277,7 @@ export class RunPage {
 
   /** IDLE 待机近景（**只服务 IDLE**：战斗阶段由真实战斗世界接管舞台带）。 */
   private stageView(): RunStageView {
-    return buildRunStageView();
+    return buildRunStageView(this.loadout);
   }
 
   /**
@@ -1890,6 +1965,8 @@ export class RunPage {
         modifier: rt.modifier,
         /** PRP-BUILD-01：本场真实拿到的完整 Build（两层）。 */
         build: rt.build,
+        /** PRODUCT-LOOP-R1-C：本场**真实装配出来**的玩家 Functional 件（测试锁用）。 */
+        playerFunctionals: rt.playerFunctionals(),
         /** PRP-BUILD-01：Run 能力真实运行状态。 */
         abilities: (() => {
           const a = rt.abilitySnapshot();
@@ -2067,6 +2144,15 @@ export class RunPage {
         : null,
       /** 卡片矩形（与绘制同源；`null` 同上）。 */
       rewardCardRect: rewardCard ? runRewardCardRect() : null,
+      /** PRODUCT-LOOP-R1-C：本局装备来源（与「实际打了什么」分开报告，见类型注释）。 */
+      playerLoadout: {
+        source: this.loadout.source,
+        fallback: this.loadoutFallback,
+        tag: this.loadout.tag,
+        label: this.loadout.label,
+        bodyDefId: this.loadout.draft.bodyDefId,
+        functionalSelections: { ...this.loadout.draft.functionalSelections },
+      },
       choiceOpen: runChoiceOpen(s),
       /**
        * ⚠️ PRP-BUILD-01 / R2：候选**来自当前脚本节点声明的池**（第一层三选一 / 横向改装二选一 /

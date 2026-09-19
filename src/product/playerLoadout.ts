@@ -10,6 +10,12 @@
  *     与正式玩法运行时 `game/playerGameRuntime.ts` 的 `init()` 读的是**同一处**：
  *       `this.draftA = loadPlayerBuild() ?? makeStarterDraft('watermelonBody', registry)`
  *     ⇒ 首页 / 调整战车看到的 Build 就是正式玩法下一局要用的那一份（验收 6：唯一数据源）。
+ *
+ *     ⚠️ PRODUCT-LOOP-R1-C 的唯一例外：**没有存档时的 fallback**不再原封照抄
+ *       `makeStarterDraft`，而是把它返回的 draft 的 `front` 槽清空（见
+ *       `DEFAULT_CLEARED_SLOT` 的实测证据）。**读存档那一条路径一字未改** ——
+ *       有存档的玩家，首页与正式玩法读到的仍是同一条记录；只有「全新账号」的
+ *       默认车不同，且差别只在 `front` 一槽。
  *   - **库存** = `core/partInventory.ts` 的 `ensureInventory(draft)`（`strongfruit.ownedParts.v2`）。
  *     该函数**幂等**：已有可用库存直接返回，不重复生成（验收 5）。
  *   - **武器定义** = `core/content.ts` 的 `registry.functionals`，按正式分类字段
@@ -97,9 +103,45 @@ export interface LoadoutReading {
   readonly slots: readonly SlotReading[];
 }
 
-/** 空存档首次启动的合法 starter Build（与正式运行时同一条 fallback）。 */
+/**
+ * PRODUCT-LOOP-R1-C｜**默认车必须留空的前置槽**（= 车身「前端挂点」`front`）。
+ *
+ * 为什么产品侧的默认车要把这一槽留空 —— 这是**实测结论**，不是口味：
+ *
+ *   - 正式 starter（`makeStarterDraft`）在 `front` 装的是**推杆**（`pushRod`，
+ *     Prismatic 往复 gadget），而产品唯一打通的主武器槽是 `frontMass`（「前上挂点」，x=45）；
+ *   - 车身硬点几何上：`front`(x=78) 的占位覆盖 x∈[78,158]，而 `frontMass` 上任何主武器的
+ *     collider 都伸到 x≈85 ⇒ **两者重叠 7px**；更关键的是推杆每次伸出都以反作用力把
+ *     **自家车**向后推（`pushRodBehavior` 的 Q04-R1A 实测反推 ≈241px/周期）；
+ *   - 后果：`front` 挂着推杆时，车在整场战斗里被持续推离射程，**第一场就输**。
+ *     实测矩阵（竖屏 lab 构建产物里的真实 `run-page.html` + 同一驱动策略，每条至少 1 次）：
+ *       推杆@front + 炮@frontMass + 锤@top  → FAILED（战斗 1，2/2）
+ *       front 留空（其余不变）              → COMPLETE（4/4 场，4/4）
+ *       主武器挪到 front（front 不留推杆）  → COMPLETE（3/3）
+ *   - ⚠️ 玩家**无法自己修**：R1 只打通 1 个可写槽位（`WEAPON_SLOT`），Garage 换不掉
+ *     `front` 上的推杆 ⇒ 不处理这一条，新账号的「开始冒险 → 完整一局 → COMPLETE」
+ *     主循环**结构上不可达**（这正是本 Queue 必须补的**阻断主循环**问题）。
+ *
+ * ⚠️ 边界（本改动只动产品侧的**默认车**，不越线）：
+ *   - `makeStarterDraft`（正式 gameplay 的 starter）与 `src/{game,battle,…}` **一字未改**；
+ *   - 推杆仍在正式库存里（`STARTER_PARTS` 不变，`ensureInventory` 与 draft 槽位无关）
+ *     ⇒ 只是**不装在这一台默认车上**，不删内容、不造数值；
+ *   - 更深的修法（`front`/`frontMass` 挂点几何重叠、推杆反推）属**独立 Queue**，
+ *     本 Queue 只做「让主循环能走通」的最小产品侧处置。
+ */
+export const DEFAULT_CLEARED_SLOT = 'front';
+
+/** 空存档首次启动的合法 starter Build。 */
 export function defaultPlayerDraft(): BuildDraft {
-  return makeStarterDraft(PLAYER_BODY_DEF_ID, registry);
+  const starter = makeStarterDraft(PLAYER_BODY_DEF_ID, registry);
+  // 见上方 DEFAULT_CLEARED_SLOT：把前置槽留给主武器，默认车不挂推杆。
+  return {
+    ...starter,
+    functionalSelections: {
+      ...starter.functionalSelections,
+      [DEFAULT_CLEARED_SLOT]: EMPTY_SLOT,
+    },
+  };
 }
 
 /**

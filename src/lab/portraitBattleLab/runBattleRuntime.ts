@@ -80,7 +80,8 @@ import { validateSnapshot } from '../../core/buildValidator';
 import type { BattleRenderSnapshot, BattleResult } from '../../battle/battleContract';
 import { ENEMY_KEEP_DISTANCE_BANDS } from '../../battle/battleContract';
 import { PlanckBattleOrchestrator } from '../../battle/planckBattleOrchestrator';
-import { buildSpawnPlan, type SpawnPlan } from './entities';
+import type { BuildDraft } from '../buildEditorModel';
+import { buildSpawnPlan, buildSpawnPlanFromDraft, type SpawnPlan } from './entities';
 import { RUN_STAGE_BAND } from './runPageLayout';
 import { RUN_DEMO_ENCOUNTER_ID, RUN_DEMO_LOADOUT_ID } from './runPageScene';
 import { RunBuildAbilities, type RunAbilitySnapshot } from './runBuildAbilities';
@@ -301,6 +302,22 @@ export interface RunBattleOptions {
    * 靠**不同既有 Encounter** 形成（Queue 必改 2 明令禁止加 HP / speed / damage / count）。
    */
   readonly encounterId?: string;
+  /**
+   * PRODUCT-LOOP-R1-C｜本场**玩家装载**（= 产品侧交进来的「当前 Player Profile Equipped」）。
+   *
+   * 省略 / `null` ⇒ 走既有 Lab 演示装载（`RUN_BATTLE_LOADOUT_ID`）—— 既有调用点
+   * （`encounterLab.ts` / 全部 A1 测试）**逐字节不变**。
+   *
+   * ⚠️ 只替换「玩家那一侧的 `BuildDraft`」这一个输入：世界 / 出生 / 对手 / 装配 /
+   *    数值解析 / 校验仍是**同一条**正式链路（`buildSpawnPlanFromDraft` 内部与
+   *    `buildSpawnPlan` 共用 `resolveEntity`），不存在第二套战斗。
+   */
+  readonly playerDraft?: BuildDraft | null;
+  /**
+   * 该玩家装载的标签（写进 spawn plan 的 `loadoutId`，用于证据链 / 基础数据指纹）。
+   * 只在给了 `playerDraft` 时有意义；省略 ⇒ `'profile-equipped'`。
+   */
+  readonly playerLoadoutTag?: string | null;
 }
 
 /**
@@ -332,7 +349,11 @@ export class RunBattleRuntime {
   constructor(opts: boolean | RunBattleOptions = false) {
     const o: RunBattleOptions = typeof opts === 'boolean' ? { soloA: opts } : opts;
     this.encounterId = o.encounterId ?? RUN_BATTLE_ENCOUNTER_ID;
-    this.plan = buildSpawnPlan(RUN_BATTLE_LOADOUT_ID, this.encounterId);
+    // ⚠️ PRODUCT-LOOP-R1-C：玩家装载的来源在这里分岔，之后**共用同一条**装配 / 校验链路。
+    //    `playerDraft` 缺省 ⇒ 既有 Lab 演示装载（逐字节不变）。
+    this.plan = o.playerDraft
+      ? buildSpawnPlanFromDraft(o.playerDraft, o.playerLoadoutTag ?? 'profile-equipped', this.encounterId)
+      : buildSpawnPlan(RUN_BATTLE_LOADOUT_ID, this.encounterId);
     this.build = normalizeBuild(o.build ?? o.modifier ?? null);
 
     // ① 本局 registry = 正式副本（+ Build overlay 部件）。正式 content 单例与 Cannon 基础定义零修改。
@@ -537,6 +558,38 @@ export class RunBattleRuntime {
   playerProjectileCount(): number {
     const side = this.orchestrator.vehicleA.team;
     return (this.snapshot().projectiles ?? []).filter((p) => p.team === side).length;
+  }
+
+  /**
+   * PRODUCT-LOOP-R1-C｜本场**真实装配结果**里属于玩家（A 方）的全部 Functional 件，
+   * 按**挂点 id** 逐件报告（`PlanckPartRuntime.id` 就是 hardpoint id，不是序号）。
+   *
+   * 这是「本场真实用了哪件武器」的**唯一可信来源**：
+   *   - 读的是正式编排器里**已经装出来的车**（`orchestrator.vehicleA.parts`），
+   *     不是读输入参数、不是读 spawn plan、不是按固定槽位猜 ——
+   *     输入被改坏 / 装备被替换都会在这里如实暴露（否则「首页显示 A、战斗跑 B」
+   *     只能靠人眼看画面发现）。
+   *   - **按挂点报**（而不是只给一个「武器 id」）是因为一辆车可以有多件武器
+   *     （starter 就同时带 `frontMass` 炮与 `top` 锤）：「本局用的是哪件」只有
+   *     「哪个挂点上是哪件」才有确定含义。测试锁因此可以直接比
+   *     `frontMass` 上的 defId ↔ Profile Equipped Weapon ID。
+   *   - `defId` 是**本局实际生效**的 id：带 Run-local 武器侧强化时它是本局 overlay 部件
+   *      （与 `abilities.projectileMass` 同源口径），而不是原始武器 id。
+   *
+   * ⚠️ 放在本文件而不是调用方：正式编排器只允许本文件引用（R22a-4 的单入口守卫）。
+   */
+  playerFunctionals(): readonly {
+    readonly hardpointId: string;
+    readonly defId: string;
+    readonly name: string;
+    readonly category: string;
+  }[] {
+    return this.orchestrator.vehicleA.parts.map((part) => ({
+      hardpointId: part.id,
+      defId: part.def.id,
+      name: part.def.name,
+      category: part.def.category,
+    }));
   }
 
   /**

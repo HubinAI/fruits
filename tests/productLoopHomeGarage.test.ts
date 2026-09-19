@@ -300,11 +300,20 @@ describe('PRODUCT-LOOP-R1-A｜D. 战车预览几何（正式视觉定义，不�
     expect([...PREVIEW_SPRITE_IDS].sort()).toEqual(onDisk);
   });
 
-  it('PL-20 预览件 = 车身 + 两个轮 + 三个已装件；主武器槽恰一个（高亮唯一）', () => {
-    const layout = vehiclePreviewLayout(defaultPlayerDraft());
+  it('PL-20 预览件 = 车身 + 两个轮 + 已装件（与 Build 逐槽同源）；主武器槽恰一个（高亮唯一）', () => {
+    const draft = defaultPlayerDraft();
+    const layout = vehiclePreviewLayout(draft);
     expect(layout.items.filter((i) => i.kind === 'body')).toHaveLength(1);
     expect(layout.items.filter((i) => i.kind === 'wheel')).toHaveLength(2);
-    expect(layout.items.filter((i) => i.kind === 'part')).toHaveLength(3);
+    // ⚠️ 已装件数**从 draft 推导**（不是写死一个数字）：默认车改了哪一槽，
+    //    这条守卫自动跟着走，不会出现「改了默认车而守卫还在数旧数字」的静默漂移。
+    const mounted = Object.entries(draft.functionalSelections).filter(
+      ([, id]) => id && id !== EMPTY_SLOT,
+    );
+    expect(layout.items.filter((i) => i.kind === 'part')).toHaveLength(mounted.length);
+    // R1-C 起默认车的前置槽**明确留空**（主循环可行性处置，证据见 playerLoadout.ts）
+    expect(draft.functionalSelections['front']).toBe(EMPTY_SLOT);
+    expect(mounted).toHaveLength(2);
     const weaponItems = layout.items.filter((i) => i.onWeaponSlot);
     expect(weaponItems).toHaveLength(1);
     expect(weaponItems[0].defId).toBe('cannon');
@@ -404,7 +413,10 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         './runReward',
       ],
       // PRODUCT-LOOP-R1-B：奖励策略 + 产品地址唯一真源（只读内容库取展示名）
-      'runReward.ts': ['../core/content'],
+      // PRODUCT-LOOP-R1-C：追加 `../lab/buildEditorModel` —— **只取 `BuildDraft` 类型**
+      //   （type-only import），用于把「局外当前装备」原样编进「开始冒险」的地址；
+      //   产品侧不解释这份装备的含义，因此不需要任何内容层之外的依赖。
+      'runReward.ts': ['../core/content', '../lab/buildEditorModel'],
     };
     for (const [file, list] of Object.entries(allow)) {
       const specs = importSpecifiers(readProduct(file)).sort();
@@ -519,5 +531,41 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
     expect(html.includes('844px')).toBe(true);
     expect(html.includes('portraitBattleLab')).toBe(false);
     expect(html.includes('portrait-lab')).toBe(false);
+  });
+
+  /*
+    PRODUCT-LOOP-R1-C｜**结构性缺陷守卫（真实事故，不是假想）**。
+
+    `home.html` 头部注释里原先画了一条箭头图，其中包含了 HTML 注释的**终止序列**
+    （两个连字符紧跟一个右尖括号）。浏览器在该处**提前闭合注释** ⇒ 其后文本全部按真标签解析：
+    注释里那份用反引号包着的 anchor 示例变成**真锚点**且 href 为空（解析为当前 URL）。
+
+    症状具有极强的误导性：页面渲染完全正常、`document.elementFromPoint` 命中正确元素、
+    `element.click()` 也工作，但**真实鼠标点击页面上任何位置**都会触发整页重载 ⇒
+    「调整战车」视图永远打不开（同时打断 `e2e:product-home` 的 B1 与主循环 E2E）。
+
+    这里用「开始序列 / 终止序列必须一一配平」把它机器钉死：只要有人在注释里再写一次终止
+    序列，本断言立刻变红（行为侧由主循环 E2E 的真实鼠标点击兜底）。
+  */
+  it('PL-33 根 HTML 入口的注释必须完整闭合（注释体内不得出现注释终止序列）', () => {
+    const entries = [
+      'home.html',
+      'run-page.html',
+      'next-run.html',
+      'portrait-lab.html',
+      'encounter-lab.html',
+      'content-batch.html',
+      'validation-hub.html',
+    ];
+    for (const f of entries) {
+      const html = readFileSync(join(REPO_ROOT, f), 'utf8');
+      const opens = html.split('<!--').length - 1;
+      const closes = html.split('-->').length - 1;
+      expect(opens, `${f} 应当有一个头部注释`).toBeGreaterThan(0);
+      expect(closes, `${f} 的注释终止序列数量必须与开始序列一致（多出来的会被浏览器当成真标签）`).toBe(opens);
+      const firstOpen = html.indexOf('<!--');
+      const firstClose = html.indexOf('-->');
+      expect(firstClose, `${f} 第一个注释终止序列必须在注释开始之后`).toBeGreaterThan(firstOpen);
+    }
   });
 });

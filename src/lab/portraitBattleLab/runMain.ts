@@ -19,6 +19,13 @@
  *   `runPage.ts` 与正式玩家页面共用，`RP-25` 机器禁止它写 `location` / `history`
  *   ⇒ 页面结构上无法跳转；整页导航是**宿主**的职责（口径同 `nextRunMain.ts`）。
  *
+ * ── PRODUCT-LOOP-R1-C：本文件同时是**局外装备的交接口** ─────────────────────
+ * 链接里带 `equipped`（产品侧把当前 Player Profile Equipped 的整份 `BuildDraft`
+ * 编成 JSON 交进来）时，本宿主解析它并注入 `RunPage` ⇒ 本局战斗的玩家车辆**从这份
+ * Loadout 构建**（Queue 必改 2）。缺省（不带该参数）⇒ 既有演示装载，研发入口逐像素不变。
+ *
+ * ⚠️ 解析放在 Lab 侧的 `runPlayerLoadout.ts`（纯逻辑），导航 / URL 读取放在本宿主：
+ *    `runPage.ts` 与正式玩家页面共用，必须结构上无法跳转、也不读 URL。
  * ⚠️ 本文件**不硬编码任何产品地址**：`back` 由产品侧通过 URL 给全（`RP-25b` 机器钉死），
  *    因此 Lab 侧不存在第二个产品 URL 真源。
  *
@@ -29,6 +36,7 @@
  */
 import { RunPage } from './runPage';
 import { parseRunProductReward, type RunProductClaim } from './runProductReward';
+import { resolveRunPlayerLoadout } from './runPageScene';
 
 /** Run Page 专属只读诊断句柄（仅本原型页面存在；不进入任何正式构建产物）。 */
 interface RunPageDebugHandle {
@@ -49,9 +57,19 @@ function boot(): void {
       - 三个参数齐备 → 进入产品奖励模式（只在 RUN COMPLETE 生效）。
   */
   const productReward = parseRunProductReward(window.location.search);
+  /*
+    PRODUCT-LOOP-R1-C｜本局玩家装载（局外 Equipped）同样是**可选**的：
+      - 带 `equipped` 且能过正式校验 → `{ source:'profile', fallback:'none' }`
+        ⇒ 本局战斗的玩家车辆从**这份** Loadout 构建（Queue 必改 2）；
+      - 不带 → `{ source:'demo', fallback:'no-param' }`（研发入口原行为）；
+      - 带了但坏了 → `{ source:'demo', fallback:'invalid' }` —— **如实上报给探针**，
+        绝不静默当成正常（那一局跑的就不是玩家身上那件，属真实异常）。
+  */
+  const playerLoadout = resolveRunPlayerLoadout(window.location.search);
 
   const page = new RunPage(root, {
     productReward,
+    playerLoadout,
     /*
       ⚠️ 整页导航 = **文档销毁** ⇒ 战斗运行时 / 弹丸 / 接触记录 / 计时器 / 监听器
          随文档一起消失（比手动逐个 dispose 更强的清理保证）。而 `RunPage` 在调用本回调

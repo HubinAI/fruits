@@ -91,9 +91,18 @@ describe('PRP-VALIDATION-HUB-R1｜A. Hub 上摆的就是该摆的四个', () => 
   it('H-03 Full Run 的入口就是**玩家正式页面本身**（Hub 不复制 / 不包裹 / 不改写它）', () => {
     const full = validationHubEntryById('fullRun');
     if (full === null) throw new Error('Hub 缺少 fullRun 入口');
-    // 默认启动链的落地页（根路径重写目标）= 同一个文件 ⇒ Hub 里的 Full Run 就是玩家那一页
-    expect(BRANCH_DEFAULT_DEV_ENTRY).toBe('/run-page.html');
-    expect(full.pageFile).toBe(BRANCH_DEFAULT_DEV_ENTRY.replace(/^\//, ''));
+    /*
+      ⚠️ PRODUCT-LOOP-R1-C：这里原先是 `full.pageFile === BRANCH_DEFAULT_DEV_ENTRY` ——
+         在「默认入口就是 Run Page」的年代，两者恰好是同一个文件，所以那条断言成立。
+      Queue 必改 1 把默认落地页改成正式产品首页（`/home.html`）之后，这两件事**解耦**了：
+        · `BRANCH_DEFAULT_DEV_ENTRY` = 正常启动的**第一屏** = 产品首页；
+        · Hub 的 Full Run 入口      = **玩家 Run 页面本体**（研发入口，必须仍独立可用）。
+      因此本用例改为分别钉住两件事（比原来更强：原来只断言「同一个」，
+      现在同时钉住「默认落地页是谁」与「Hub 的 Full Run 指向玩家页本尊」）。
+    */
+    expect(BRANCH_DEFAULT_DEV_ENTRY).toBe('/home.html');
+    expect(resolveDevEntryRewrite('/')).toBe('/home.html');
+    expect(full.pageFile).toBe('run-page.html');
     // 反过来：玩家页面里不得留下任何 Hub 痕迹（没有返回按钮、没有注入的控件）
     const player = read('run-page.html');
     for (const t of HUB_TOKENS) {
@@ -209,11 +218,11 @@ describe('PRP-VALIDATION-HUB-R1｜C. 默认启动链零污染', () => {
     const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> };
     expect(pkg.scripts['dev']).toBe('vite --open');
     expect(pkg.scripts['dev:validation']).toBe('vite --open=/validation-hub.html');
-    // 根路径仍只重写到玩家入口；Hub 自己不被重写（它不是玩家入口）
+    // 根路径仍只重写到**一个**落地页（PRODUCT-LOOP-R1-C 起 = 正式产品首页）；Hub 自己不被重写
     expect(resolveDevEntryRewrite('/')).toBe(BRANCH_DEFAULT_DEV_ENTRY);
     expect(resolveDevEntryRewrite('/validation-hub.html')).toBeNull();
     // 相邻入口一个都没被顺手改
-    for (const p of ['/run-page.html', '/next-run.html', '/encounter-lab.html', '/portrait-lab.html', '/index.html']) {
+    for (const p of ['/home.html', '/run-page.html', '/next-run.html', '/encounter-lab.html', '/portrait-lab.html', '/index.html']) {
       expect(resolveDevEntryRewrite(p), `不应重写：${p}`).toBeNull();
     }
   });

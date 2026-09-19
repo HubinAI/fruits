@@ -1,18 +1,28 @@
 /**
  * PRP-R2-DEFAULT-EXPERIENCE-ENTRY｜启动链 smoke（真实 dev server + 真实浏览器）。
  *
- * 与 tests/_e2e_run_page.cjs 的分工：
- *   - _e2e_run_page.cjs 验证「页面本身画得对」（静态产物 + 精确像素账本）；
- *   - 本文件验证「**正常启动就落到这个页面**」——这正是前两轮真人验收失败的地方。
+ * ⚠️ PRODUCT-LOOP-R1-C 起**默认落地页变了**：根路径 `/` 不再重写到 Run Page，
+ *    而是重写到**产品首页** `home.html`。本文件据此分成四段，每一段都对应
+ *    Queue 必改 1 的一条可机器判定的含义：
  *
- * 严格纪律（对应 Acceptance 1~6）：
+ *   A. 启动链本身（关旧 server → 只跑 `npm run dev` → 端口/日志/HTTP 体）
+ *   B. **默认入口 = 产品首页**：只访问根路径 `/`，第一屏必须是首页，
+ *      且屏幕上不存在 Run Page / Portrait Lab / 旧横屏 Home 的容器与控制。
+ *   C. **玩家真实路径可用**：首页 `开始冒险`（真实 `<a href>` 整页导航）→ Run Page，
+ *      且这一局用的是**首页那份装备**（`source === 'profile'`）。
+ *   D. **研发入口一个都没少**：`/run-page.html` 仍可直接进入，且 Run Page 的完整
+ *      状态机（IDLE → EVENT → BATTLE → RESULT → CHOICE → IDLE）行为**逐项未变** ——
+ *      这一段是改动前就在跑的断言，一字未改（换成在新入口上复跑）。
+ *   E. 旧横屏正式游戏仍可经显式地址 `/index.html` 直达（保留，未删除）。
+ *
+ * 严格纪律：
  *   1) 先关闭所有旧 dev server（占用 5173 即强制结束）；
  *   2) 只执行真实启动命令 `npm run dev`（`BROWSER=none` 仅抑制自动化环境的系统弹窗，
  *      浏览器由 playwright 控制；命令本身与用户执行的完全一致）；
- *   3) 浏览器**只访问根路径 `/`** —— 禁止直接访问 /run-page.html 绕过启动链；
- *   4) 断言第一屏即 PRP Run Page，且不存在旧横屏 Home/Result、Arena A、Portrait Lab 开发控制；
- *   5) 不修改 URL 走完 IDLE → EVENT → BATTLE → RESULT → CHOICE → IDLE；
- *   6) 旧横屏正式游戏仍可经显式地址 /index.html 直达（保留，未删除）。
+ *   3) 浏览器**只访问根路径 `/`** 作为入口 —— 禁止直接访问 /home.html 绕过启动链
+ *      （C 段的 Run Page 由**真实点击**到达，E 段的 /index.html 是「保留性反证」）；
+ *   4) 两条研发入口（`/run-page.html`）用**独立 page** 访问，不污染 A/B/C 的上下文；
+ *   5) 断言里不出现「Run Page 是默认入口」这类已失效的推理。
  *
  * 用法：npm run e2e:default-entry
  */
@@ -27,6 +37,11 @@ const PORT = 5173;
 const ROOT_URL = `http://${HOST}:${PORT}/`;
 const LEGACY_URL = `${ROOT_URL}index.html`;
 const DEV_URL_SHOWN = `http://${HOST}:${PORT}/`;
+
+/** 产品首页的正式存档 key（首页显示的主武器必须来自这里）。 */
+const SAVE_KEY = 'strongfruit.playerBuild.v1';
+/** 装备参数（产品侧与 Run 侧的唯一约定；Run 侧解析见 runPlayerLoadout.ts）。 */
+const LOADOUT_PARAM = 'equipped';
 
 /**
  * Run Page 几何调色板（与 src/lab/portraitBattleLab/runPage.ts 的 COLORS 一一对应）。
@@ -141,17 +156,25 @@ async function waitForServer(timeoutMs) {
 
 /* ------------------------------------------------------------------ 页面助手 */
 
-const probeOf = (page) => page.evaluate(() => window.__RUNPAGE__.probe());
+const probeRun = (page) => page.evaluate(() => window.__RUNPAGE__.probe());
+const probeHome = (page) => page.evaluate(() => window.__PRODUCTHOME__.probe());
 
 /** 真实鼠标点击：逻辑坐标 → 屏幕坐标（用画布真实 CSS 矩形换算，不用 DPR-backed 尺寸）。 */
 async function clickLogical(page, lx, ly) {
-  const screen = (await probeOf(page)).screen;
+  const screen = (await probeRun(page)).screen;
   const cx = screen.left + (lx / 390) * screen.width;
   const cy = screen.top + (ly / 844) * screen.height;
   await page.mouse.click(cx, cy);
 }
 async function clickRect(page, r) {
   await clickLogical(page, r.x + r.w / 2, r.y + r.h / 2);
+}
+/** 真实鼠标点击 DOM 元素（首页是 DOM 页面，没有画布坐标可换算）。 */
+async function clickSelector(page, sel) {
+  const box = await page.locator(sel).first().boundingBox();
+  if (!box) throw new Error(`无法定位元素：${sel}`);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await sleep(150);
 }
 
 /** 真实 getImageData：按调色板精确 RGB 相等统计整页各层面积。 */
@@ -189,140 +212,233 @@ function countExact(page, rgb) {
   }, rgb);
 }
 
+/* ============================================================ B 段：默认入口 */
+
 /**
- * 「第一屏」联合断言：入口身份 + 三层结构 + 零 Debug。
+ * 「第一屏」联合断言：**默认入口身份** + 无 Debug / 无其它面 + 竖屏几何。
  * @param tag 视口标签
  */
-async function assertFirstScreen(page, tag, vp) {
-  const p = await probeOf(page);
+async function assertDefaultEntry(page, tag, vp) {
+  const p = await probeHome(page);
 
   // 1) 入口身份：URL 仍是根路径（服务端重写，用户不需要记任何 URL）
   const url = new URL(page.url());
   log(url.pathname === '/', `[${tag}] S1 URL 保持根路径（无重定向、无需手输）`, `pathname=${url.pathname}`);
 
-  // 2) 页面身份 = PRP Run Page，且旧横屏正式游戏的容器不存在
+  // 2) 页面身份 = **产品首页**，且其它三个面都不在
   const dom = await page.evaluate(() => ({
     title: document.title,
+    hasHomeRoot: !!document.getElementById('ph-root'),
     hasRunRoot: !!document.getElementById('run-root'),
     hasRunCanvas: !!document.getElementById('run-canvas'),
     hasLegacyApp: !!document.getElementById('app'),
     hasLabRoot: !!document.getElementById('pbl-root'),
     hasLabCanvas: !!document.getElementById('pbl-canvas'),
+    handleHome: typeof window.__PRODUCTHOME__,
     handleRun: typeof window.__RUNPAGE__,
     handleLab: typeof window.__PBL__,
     staticDbg: typeof window.__E2E_INTERNAL_HANDLE__,
+    // 产品页只有产品按钮：没有调试表单 / 调试控件
+    devNodes: document.querySelectorAll('[data-dev],[data-dev-control]').length,
+    formNodes: document.querySelectorAll('input,select,textarea').length,
+    stageW: (document.querySelector('.ph-screen') || {}).offsetWidth || 0,
+    stageH: (document.querySelector('.ph-screen') || {}).offsetHeight || 0,
   }));
   log(
-    dom.title.includes('Portrait Run Prototype') && dom.hasRunRoot && dom.hasRunCanvas,
-    `[${tag}] S2 第一屏就是 PRP Run Page`,
-    `title="${dom.title}" run-root=${dom.hasRunRoot} run-canvas=${dom.hasRunCanvas}`,
+    dom.title.includes('最强水果') && dom.title.includes('首页') && dom.hasHomeRoot && dom.handleHome === 'object',
+    `[${tag}] S2 第一屏就是**产品首页**（#ph-root + __PRODUCTHOME__ 只读句柄）`,
+    `title="${dom.title}" #ph-root=${dom.hasHomeRoot}`,
   );
   log(
-    !dom.hasLegacyApp && !dom.hasLabRoot && !dom.hasLabCanvas && dom.handleLab === 'undefined',
-    `[${tag}] S3 不存在旧横屏 Home 容器 / Portrait Lab 节点`,
-    `#app=${dom.hasLegacyApp} #pbl-root=${dom.hasLabRoot} #pbl-canvas=${dom.hasLabCanvas} __PBL__=${dom.handleLab}`,
+    !dom.hasRunRoot &&
+      !dom.hasRunCanvas &&
+      dom.handleRun === 'undefined' &&
+      !dom.hasLabRoot &&
+      !dom.hasLabCanvas &&
+      dom.handleLab === 'undefined' &&
+      !dom.hasLegacyApp,
+    `[${tag}] S3 首屏不存在 Run Page / Portrait Lab / 旧横屏 Home 的任何容器或句柄`,
+    `#run-root=${dom.hasRunRoot} __RUNPAGE__=${dom.handleRun} #pbl-root=${dom.hasLabRoot} __PBL__=${dom.handleLab} #app=${dom.hasLegacyApp}`,
   );
   log(
-    dom.handleRun === 'object' && dom.staticDbg === 'boolean',
-    `[${tag}] S4 只暴露 Run Page 只读句柄`,
-    `__RUNPAGE__=${dom.handleRun}`,
+    dom.devNodes === 0 && dom.formNodes === 0 && dom.staticDbg === 'boolean',
+    `[${tag}] S4 玩家页零开发控制（无调试节点 / 无调试表单）`,
+    `devNodes=${dom.devNodes} formNodes=${dom.formNodes}`,
+  );
+  log(
+    dom.stageW === 390 && dom.stageH === 844,
+    `[${tag}] S5 竖屏 390×844（逻辑舞台恒等比，只缩放不改布局口径）`,
+    `.ph-screen=${dom.stageW}×${dom.stageH}`,
   );
 
-  // 3) 零开发控制（Arena/Loadout/Encounter/FPS/runtime state/测试按钮…）
+  // 3) 首页显示的装备 = **正式存档**那一份（不是页面自己编的一份）
+  const weaponSlotOk = p.slots.some((s) => s.hardpointId === p.weaponSlot && s.defId);
   log(
-    p.debugControls === 0 && p.domButtons === 0,
-    `[${tag}] S5 玩家页面零开发控制`,
-    `debugControls=${p.debugControls} domButtons=${p.domButtons}`,
+    p.view === 'home' &&
+      p.saveKey === SAVE_KEY &&
+      !!p.equippedWeaponId &&
+      p.weaponIds.includes(p.equippedWeaponId) &&
+      weaponSlotOk,
+    `[${tag}] S6 首页展示的装备来自正式存档（key=${SAVE_KEY}）；主武器槽有真实 defId`,
+    `equipped=${p.equippedWeaponId} slot=${p.weaponSlot} 拥有=${p.weaponIds.length} 件`,
+  );
+  /*
+    车辆展示用**正式 sprite**，但「全部件都有图」不是事实、也不该被当成验收条件：
+    两份轮子/行走件在正式资源表里本来就没有 PNG（产品侧 `SPRITE_URLS` 只映射车体与武器），
+    它们**按真实 Collider 外接框画灰盒并带 `data-ph-nosprite` 如实标注**（设计如此，不伪造外形）。
+    所以这里断言的是**可证的强条件**：
+      - 探针说的 sprite 件数 === 页面里真实存在的 `<img>` 件数（同一来源，不是两套口径）；
+      - 每一张 `<img>` 都真的加载成功（`naturalWidth > 0`，没有碎图）；
+      - 没有图的件**必须**带 `data-ph-nosprite` 标注（不允许静默画一个灰盒冒充）；
+      - 每个预览件不是 `<img>` 就是带标注的灰盒（不丢件、不多件）。
+  */
+  const preview = await page.evaluate(() => {
+    const all = [...document.querySelectorAll('[data-ph-preview-item]')];
+    return {
+      items: all.length,
+      imgs: all.filter((n) => n.tagName === 'IMG').length,
+      broken: all.filter((n) => n.tagName === 'IMG' && n.naturalWidth === 0).length,
+      nosprite: all.filter((n) => n.hasAttribute('data-ph-nosprite')).length,
+      canvases: document.querySelectorAll('#ph-root canvas').length,
+    };
+  });
+  log(
+    preview.items > 0 &&
+      preview.imgs === p.previewSpriteCount &&
+      preview.nosprite === p.previewFallbackCount &&
+      preview.broken === 0 &&
+      preview.imgs + preview.nosprite === preview.items &&
+      preview.canvases === 0,
+    `[${tag}] S7 首页战车预览用正式 PNG 画（真实加载成功），无图的件按 Collider 外接框灰盒并如实标注`,
+    `items=${preview.items} img=${preview.imgs}(broken=${preview.broken}) nosprite=${preview.nosprite} canvas=${preview.canvases} · probe sprite=${p.previewSpriteCount} fallback=${p.previewFallbackCount}`,
   );
 
-  // 4) 竖屏 390×844
-  const ratio = p.screen.width / p.screen.height;
+  // 4) 「开始冒险」= 同产物内相对链接 + 本局 token + **本份存档装备**
+  const href = String(p.startRunHref ?? '');
+  const q = new URLSearchParams(href.split('?')[1] ?? '');
+  let equipped = null;
+  try {
+    equipped = q.get(LOADOUT_PARAM) ? JSON.parse(q.get(LOADOUT_PARAM)) : null;
+  } catch {
+    equipped = null;
+  }
   log(
-    Math.abs(ratio - 390 / 844) < 0.01 && p.logicalW === 390 && p.logicalH === 844,
-    `[${tag}] S6 竖屏 390×844`,
-    `screen=${round2(p.screen.width)}×${round2(p.screen.height)} ratio=${round2(ratio)}`,
+    href.includes('run-page.html') && !/^https?:/i.test(href) && q.get('run') === p.runToken,
+    `[${tag}] S8 「开始冒险」是同产物内的相对链接，且带**本局** token（幂等键与地址同源）`,
+    `href=${href.slice(0, 90)}…`,
+  );
+  log(
+    !!equipped && equipped.functionalSelections[p.weaponSlot] === p.equippedWeaponId,
+    `[${tag}] S9 「开始冒险」的链接带着**屏幕上显示的那件**装备（首页显示 A ⇒ 链接也是 A）`,
+    equipped ? `${p.weaponSlot}=${equipped.functionalSelections[p.weaponSlot]}` : 'n/a',
   );
 
-  // 5) 四带主结构：顶部薄 / 战斗主体够大 / 冒险记录可读 / 最底唯一动作（PRP-R3 新比例）
-  const b = p.bands;
-  const hSum = b.top.h + b.stage.h + b.log.h + b.action.h;
-  log(
-    hSum === p.logicalH &&
-      b.top.h / p.logicalH >= 0.08 &&
-      b.top.h / p.logicalH <= 0.1 &&
-      b.stage.h / p.logicalH >= 0.33 &&
-      b.stage.h / p.logicalH <= 0.36 &&
-      b.log.h / p.logicalH >= 0.4 &&
-      b.log.h / p.logicalH <= 0.45 &&
-      b.action.h / p.logicalH >= 0.08 &&
-      b.action.h / p.logicalH <= 0.1,
-    `[${tag}] S7 四带比例合规（顶 8~10% / 舞台 33~36% / 日志 40~45% / 动作 8~10%）`,
-    `top=${round2((b.top.h / p.logicalH) * 100)}% stage=${round2((b.stage.h / p.logicalH) * 100)}% log=${round2(
-      (b.log.h / p.logicalH) * 100,
-    )}% action=${round2((b.action.h / p.logicalH) * 100)}%`,
-  );
-
-  const L = p.layers;
-  log(
-    L.nodeTodo > 0 && L.road > 0 && L.actionBar > 0 && L.ground > 0 && L.cardBar === 0,
-    `[${tag}] S8 顶部进度 + 中部舞台路面 + 最底主动作都在场`,
-    `nodeTodo=${L.nodeTodo} road=${L.road} ground=${L.ground} actionBar=${L.actionBar}`,
-  );
-  // PRP-R3 必改 1：未获得强化时顶部第二行**不存在**（不是 5 个空槽 / 不是「核心构建 X/5」）
-  log(
-    p.buffIconCount === 0 && L.buffIcon === 0 && L.buffChip === 0,
-    `[${tag}] S8b 顶部无空槽、无「核心构建」计数（结构性：0 个强化 = 0 个图标矩形）`,
-    `buffIconCount=${p.buffIconCount} buffIcon=${L.buffIcon} buffChip=${L.buffChip}`,
-  );
-  // PRP-R3 必改 3：玩家可见日志是自然语言，不是控制台（无 [系统]/[事件]/[战斗] 前缀）
-  const texts = p.log.map((l) => l.text);
-  log(
-    texts.length > 0 && texts.every((t) => !t.includes('[') && !t.includes(']')),
-    `[${tag}] S8c 日志是玩家叙事（无方括号 Debug 前缀）`,
-    texts.join(' ｜ '),
-  );
-
-  // 第一屏必须是 IDLE：玩家单独在左，敌人未出现
-  log(
-    p.phase === 'IDLE' && p.stage.player && !p.stage.enemy && p.actionEnabled === true,
-    `[${tag}] S9 第一屏状态 = IDLE（玩家待机 + 底部可推进行动）`,
-    `phase=${p.phase} enemy=${p.stage.enemy ? 'present' : 'null'} action="${p.actionLabel}"`,
-  );
-
-  // 6) 精确像素反证（仅 dpr=1，重采样后精确色不再成立）
+  // 5) 结构性反证（仅 dpr=1，重采样后精确色不再成立）：首页是 **DOM 合成、零画布**
   if (vp.dpr === 1) {
-    const arenaYellow = await countExact(page, ARENA_DEBUG_YELLOW);
-    log(arenaYellow === 0, `[${tag}] S10 无 Arena A 黄色纵向竞技框`, `arenaYellow=${arenaYellow}px`);
-    const stats = await pixelStats(page);
+    /*
+      ⚠️ 旧横屏正式游戏是 canvas 驱动的（`#app` + canvas），产品首页**刻意相反**：
+      整页 DOM 合成、零画布（`tests/productLoopHomeGarage.test.ts` 的 `PL-29` 也钉死了这一点）。
+      所以这里的判据是 `canvas === 0` —— 写成 `>= 1` 是把旧横屏页面的口径带过来了。
+    */
     log(
-      stats.road > 0 && stats.ground > 0 && stats.actionBar > 0 && stats.nodeTodo > 0,
-      `[${tag}] S11 真实像素确认四带结构已绘制`,
-      `road=${stats.road} ground=${stats.ground} actionBar=${stats.actionBar} nodeTodo=${stats.nodeTodo}`,
-    );
-    const A = 390 * 844;
-    log(
-      stats.road + stats.ground + stats.actionBar + stats.nodeTodo < A,
-      `[${tag}] S12 画面不被单一层铺满（存在分带与留白）`,
-      `sum=${stats.road + stats.ground + stats.actionBar + stats.nodeTodo} < ${A}`,
-    );
-    // PRP-R3 必改 2：战斗主体是**正式车辆 sprite**（真实像素在场 → 纯色矩形不可能命中）
-    const melon = await countExact(page, SPRITE_COLORS.watermelonBody);
-    log(
-      melon > 200 && p.stage.player.allSprites === true,
-      `[${tag}] S12b 战斗主体是正式车辆视觉（西瓜重炮 sprite 真实像素）`,
-      `watermelonBody=${melon}px allSprites=${p.stage.player.allSprites}`,
+      p.canvasCount === 0 && preview.items > 0,
+      `[${tag}] S10 首页是 DOM 合成：零 canvas，预览件是真实 DOM 元素`,
+      `canvasCount=${p.canvasCount} previewItems=${preview.items}`,
     );
   }
 }
 
+/* ==================================================== C 段：玩家真实路径 */
+
+/**
+ * 首页 `开始冒险` → Run Page（真实整页导航），并确认这一局用的是**首页那份装备**。
+ * 这是 Queue 必改 2「禁止 Run Page 自己用固定 loadout」的端到端判据。
+ */
+async function assertProductEntryFlow(page, tag) {
+  const home = await probeHome(page);
+  const equippedId = home.equippedWeaponId;
+
+  await Promise.all([
+    page.waitForURL(/run-page\.html/, { timeout: 20000 }).catch(() => {}),
+    clickSelector(page, '[data-ph-action="start-run"]'),
+  ]);
+  await page.waitForFunction(
+    () => {
+      const c = document.querySelector('#run-canvas');
+      if (!window.__RUNPAGE__ || !c || c.width === 0) return false;
+      const p = window.__RUNPAGE__.probe();
+      return p.screen.width > 0 && p.assets.ready >= 5 && p.assets.failed.length === 0;
+    },
+    null,
+    { timeout: 25000 },
+  );
+  await sleep(300);
+
+  const dom = await page.evaluate(() => ({
+    hasRunRoot: !!document.getElementById('run-root'),
+    hasRunCanvas: !!document.getElementById('run-canvas'),
+    hasHomeRoot: !!document.getElementById('ph-root'),
+    handleRun: typeof window.__RUNPAGE__,
+  }));
+  const p = await probeRun(page);
+  log(
+    dom.hasRunRoot && dom.hasRunCanvas && dom.handleRun === 'object' && !dom.hasHomeRoot,
+    `[${tag}] C1 真实点击「开始冒险」→ **整页导航**到 Run Page（同一产物内，非 SPA 假跳转）`,
+    `url=${page.url()} #run-root=${dom.hasRunRoot} #ph-root=${dom.hasHomeRoot}`,
+  );
+  /*
+    ⚠️ 这里原先写的是 `p.playerLoadout.functionalSelections[p.weaponSlot]` —— 但 `p` 是 **Run 侧探针**，
+    `weaponSlot` 是**首页** `ProductProbe` 才有的字段 ⇒ 索引恒为 `undefined`，
+    报出来就是 `undefined=undefined`，断言实际上没在比任何东西。
+    改为**挂点级逐槽对账**：首页那份 Build（来自首页探针的 slots）vs Run 侧真正收到的 Loadout。
+  */
+  const mounted = (selections) =>
+    Object.entries(selections ?? {})
+      .filter(([, v]) => v && v !== 'none')
+      .map(([k, v]) => `${k}=${v}`)
+      .sort()
+      .join(',');
+  const homeMounted = mounted(Object.fromEntries(home.slots.map((s) => [s.hardpointId, s.defId])));
+  const runMounted = mounted(p.playerLoadout.functionalSelections);
+  log(
+    p.playerLoadout.source === 'profile' &&
+      p.playerLoadout.fallback === 'none' &&
+      p.playerLoadout.functionalSelections[home.weaponSlot] === equippedId &&
+      runMounted === homeMounted,
+    `[${tag}] C2 这一局用的是**首页那份装备**（source=profile / 无回退 / 挂点级逐槽相同）`,
+    `source=${p.playerLoadout.source} fallback=${p.playerLoadout.fallback} · 主武器 ${
+      p.playerLoadout.functionalSelections[home.weaponSlot]
+    }(首页=${equippedId}) · 逐槽[首页=${homeMounted} | 战斗=${runMounted}]`,
+  );
+  log(
+    p.phase === 'IDLE' && p.day === 1 && p.build.length === 0 && p.logicalW === 390 && p.logicalH === 844,
+    `[${tag}] C3 产品入口进 Run 的起点与四带舞台口径与研发入口一致（IDLE / DAY 1 / 空 Build / 390×844）`,
+    `phase=${p.phase} day=${p.day} ${p.logicalW}×${p.logicalH}`,
+  );
+  log(
+    p.debugControls === 0 && p.domButtons === 0,
+    `[${tag}] C4 Run Page 仍是玩家页面（零开发控制）`,
+    `debugControls=${p.debugControls} domButtons=${p.domButtons}`,
+  );
+  if (p.stage.player) {
+    log(
+      p.stage.player.allSprites === true,
+      `[${tag}] C5 产品入口这一局的玩家车也全部用正式 sprite（装备来自存档，视觉一致）`,
+      `allSprites=${p.stage.player.allSprites}`,
+    );
+  }
+}
+
+/* ==================================================== D 段：研发入口未变 */
+
 /** 完整流程：同一页面内 IDLE → EVENT → BATTLE → RESULT → CHOICE → IDLE（不修改 URL）。 */
 async function assertFullFlow(page, tag, dpr) {
-  const trailBefore = (await probeOf(page)).transitions;
-  const p0 = await probeOf(page);
+  const trailBefore = (await probeRun(page)).transitions;
+  const p0 = await probeRun(page);
   const urlBefore = page.url();
 
   await clickRect(page, p0.actionRect);
-  let p = await probeOf(page);
+  let p = await probeRun(page);
   /*
     ⚠️ PRP-RUN-02：状态机改成读**固定 Run Script 节点**推进后，第一个战斗节点是**两段式**
     （`d1-start` IDLE --按一次--> `d2-battle1` IDLE --再按一次--> EVENT）→ 这里要点两次。
@@ -334,7 +450,7 @@ async function assertFullFlow(page, tag, dpr) {
     `phase=${p.phase} node=${p.nodeId} day=${p.day} log=${p.logCount}`,
   );
   await clickRect(page, p.actionRect);
-  p = await probeOf(page);
+  p = await probeRun(page);
   log(
     p.phase === 'EVENT' && p.nodeKind === 'BATTLE',
     `[${tag}] F1 IDLE → EVENT（敌人从右侧出现）`,
@@ -364,7 +480,7 @@ async function assertFullFlow(page, tag, dpr) {
   );
 
   await clickRect(page, p.actionRect);
-  p = await probeOf(page);
+  p = await probeRun(page);
   log(p.phase === 'BATTLE' && p.battle, `[${tag}] F3 EVENT → BATTLE`, `phase=${p.phase} steps=${p.battle.steps}`);
   const logAtBattleStart = p.logCount;
   /*
@@ -424,7 +540,7 @@ async function assertFullFlow(page, tag, dpr) {
     }
     return acc;
   });
-  const pMid = await probeOf(page);
+  const pMid = await probeRun(page);
   log(
     win.phases.every((ph) => ph === 'BATTLE') && win.maxLogCount === logAtBattleStart,
     `[${tag}] F4 BATTLE 期间日志零追加（不刷逐帧伤害）`,
@@ -471,7 +587,7 @@ async function assertFullFlow(page, tag, dpr) {
 
   // 自动结束（真实 Planck 战斗实测约 15.4s）
   await page.waitForFunction("window.__RUNPAGE__.probe().phase === 'RESULT'", null, { timeout: 40000 });
-  p = await probeOf(page);
+  p = await probeRun(page);
   /*
     PRP-F1 必改 4：RESULT 不再表现为「敌人消失」，而是**真实战场冻结在画面上**：
     战斗世界仍在（stage.mode = battle）、双方都还在场地里，战斗结论来自官方判据。
@@ -488,7 +604,7 @@ async function assertFullFlow(page, tag, dpr) {
   );
 
   await clickRect(page, p.actionRect);
-  p = await probeOf(page);
+  p = await probeRun(page);
   log(p.phase === 'CHOICE' && p.choiceOpen && p.choiceOptions.length === 3, `[${tag}] F8 RESULT → CHOICE（三选一浮层）`, `phase=${p.phase}`);
   const chShapes = p.layers;
   log(
@@ -506,7 +622,7 @@ async function assertFullFlow(page, tag, dpr) {
   const before = p.logCount;
   const buffsBefore = p.buffs.length;
   await clickRect(page, p.choiceOptions[1].rect);
-  p = await probeOf(page);
+  p = await probeRun(page);
   log(p.phase === 'IDLE' && !p.choiceOpen, `[${tag}] F11 选择后回到 IDLE 原上下文`, `phase=${p.phase}`);
   log(
     p.buffs.length === buffsBefore + 1 &&
@@ -536,7 +652,7 @@ async function assertFullFlow(page, tag, dpr) {
 /* ------------------------------------------------------------------ 主流程 */
 
 async function main() {
-  console.log('=== PRP-R2 默认体验入口｜启动链 smoke ===\n');
+  console.log('=== PRP-R2 默认体验入口｜启动链 smoke（默认入口 = 产品首页）===\n');
 
   // Acceptance 1：从关闭所有旧 dev server 开始
   const killed = killPort(PORT);
@@ -549,7 +665,7 @@ async function main() {
   let first = await waitForServer(60000);
   log(!!first, 'A2 启动命令后 dev server 就绪', first ? `HTTP ${first.status}` : '超时未就绪');
 
-  // 启动日志：Vite 打印的 Local URL 必须是根路径（--open 打开的就是它 → 经重写即原型）
+  // 启动日志：Vite 打印的 Local URL 必须是根路径（--open 打开的就是它 → 经重写即默认入口）
   // 启动日志晚于 listening 到达（npm 多一层管道），轮询等待而不是靠短路通过。
   const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, '');
   let out = '';
@@ -568,19 +684,19 @@ async function main() {
   const headMatch = out.match(/HEAD\s+:\s+([0-9a-f]{40})/);
   log(!!headMatch, 'A4 启动日志含 Runtime HEAD SHA（可核对非 stale）', headMatch ? headMatch[1] : '(未捕获)');
 
-  // Acceptance 3/5（HTTP 层）：根路径返回的就是 PRP 页面
+  // Acceptance 3（HTTP 层）：根路径返回的就是**产品首页**
   log(
-    !!first && first.body.includes('Portrait Run Prototype') && first.body.includes('run-root'),
-    'A5 根路径 HTTP 响应体就是 PRP Run Page',
-    first ? `含 PRP 标题=${first.body.includes('Portrait Run Prototype')} 含 #run-root=${first.body.includes('run-root')}` : 'n/a',
+    !!first && first.body.includes('最强水果') && first.body.includes('ph-root'),
+    'A5 根路径 HTTP 响应体就是产品首页（含页面标题与 #ph-root 容器）',
+    first ? `含首页标题=${first.body.includes('最强水果')} 含 #ph-root=${first.body.includes('ph-root')}` : 'n/a',
   );
   log(
-    !!first && !first.body.includes('src/main.ts'),
-    'A6 根路径响应体不含旧横屏正式入口脚本',
-    first ? `含 /src/main.ts=${first.body.includes('src/main.ts')}` : 'n/a',
+    !!first && !first.body.includes('src/main.ts') && !first.body.includes('run-root'),
+    'A6 根路径响应体既不加载旧横屏正式入口脚本，也不是 Run Page',
+    first ? `含 /src/main.ts=${first.body.includes('src/main.ts')} 含 #run-root=${first.body.includes('run-root')}` : 'n/a',
   );
 
-  // Acceptance 3：真实浏览器，只访问根路径
+  // Acceptance 3/4：真实浏览器，只访问根路径
   const browser = await chromium.launch({ channel: 'msedge', headless: true });
   const viewports = [
     { w: 1920, h: 1080, dpr: 1, tag: '1920x1080@1' },
@@ -595,10 +711,23 @@ async function main() {
       const page = await ctx.newPage();
       const consoleErrors = [];
       page.on('pageerror', (e) => consoleErrors.push(String(e)));
-      // 只访问根路径 —— 不手输 /run-page.html
+      // 只访问根路径 —— 不手输 /home.html
       await page.goto(ROOT_URL, { waitUntil: 'load' });
-      // PRP-R3：等正式车辆 sprite 真的加载完成再做任何像素断言
-      await page.waitForFunction(
+      await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 20000 });
+      await sleep(400);
+
+      // B 段：默认入口身份
+      await assertDefaultEntry(page, vp.tag, vp);
+
+      // C 段：玩家真实路径（真点击 → 真导航 → 用存档那份装备）
+      await assertProductEntryFlow(page, `${vp.tag}/产品路径`);
+
+      // D 段：研发入口 /run-page.html 仍在，且完整状态机行为逐项未变
+      const devPage = await ctx.newPage();
+      const devErrors = [];
+      devPage.on('pageerror', (e) => devErrors.push(String(e)));
+      await devPage.goto(`${ROOT_URL}run-page.html`, { waitUntil: 'load' });
+      await devPage.waitForFunction(
         () => {
           if (!window.__RUNPAGE__) return false;
           const p = window.__RUNPAGE__.probe();
@@ -608,9 +737,17 @@ async function main() {
         { timeout: 15000 },
       );
       await sleep(400);
-      await assertFirstScreen(page, vp.tag, vp);
-      log(consoleErrors.length === 0, `[${vp.tag}] S13 首屏无运行时报错`, consoleErrors.slice(0, 2).join(' | ') || 'none');
-      await assertFullFlow(page, vp.tag, vp.dpr);
+      const devProbe = await probeRun(devPage);
+      log(
+        devProbe.playerLoadout.source === 'demo' && devProbe.playerLoadout.fallback === 'no-param',
+        `[${vp.tag}] D1 研发入口 /run-page.html 不带产品参数时行为不变（退回演示装载，非错误）`,
+        `source=${devProbe.playerLoadout.source} fallback=${devProbe.playerLoadout.fallback} tag=${devProbe.playerLoadout.tag}`,
+      );
+      await assertFullFlow(devPage, `${vp.tag}/run-page`, vp.dpr);
+      log(devErrors.length === 0, `[${vp.tag}] D2 研发入口整段流程零运行时报错`, devErrors.slice(0, 2).join(' | ') || 'none');
+      await devPage.close();
+
+      log(consoleErrors.length === 0, `[${vp.tag}] S11 默认入口全程无运行时报错`, consoleErrors.slice(0, 2).join(' | ') || 'none');
       await ctx.close();
     }
 
@@ -623,10 +760,14 @@ async function main() {
       title: document.title,
       hasApp: !!document.getElementById('app'),
       hasRunRoot: !!document.getElementById('run-root'),
+      hasHomeRoot: !!document.getElementById('ph-root'),
     }));
     log(
-      legacyDom.title.includes('Physics Lab') && legacyDom.hasApp && !legacyDom.hasRunRoot,
-      'A7 旧横屏正式游戏保留且仅在显式地址可达',
+      legacyDom.title.includes('Physics Lab') &&
+        legacyDom.hasApp &&
+        !legacyDom.hasRunRoot &&
+        !legacyDom.hasHomeRoot,
+      'E1 旧横屏正式游戏保留且仅在显式地址可达',
       `title="${legacyDom.title}" #app=${legacyDom.hasApp} #run-root=${legacyDom.hasRunRoot}`,
     );
     await ctxLegacy.close();

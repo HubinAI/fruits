@@ -46,7 +46,13 @@ import { vehiclePreviewLayout, type VehiclePreviewLayout } from './vehiclePrevie
  * ⚠️ 本页自己**不碰** `localStorage` / `platform.storage`（必改 1：UI 不得直接读写 localStorage），
  *    这条由 `tests/productLoopRunReward.test.ts` 的 `PR-20` 源码守卫机器钉死。
  */
-import { buildAdventureHref, newRunToken, parsePendingClaim, type PendingClaim } from './runReward';
+import {
+  REWARD_WEAPON_ID,
+  buildAdventureHref,
+  newRunToken,
+  parsePendingClaim,
+  type PendingClaim,
+} from './runReward';
 import { claimRunReward, claimedRunCount, type ClaimOutcome } from './playerProfile';
 
 /** 正式 visualId → 正式资源 URL（与战斗 / Run Page 引用的是同一批 PNG 文件）。 */
@@ -215,10 +221,36 @@ export function mountProductHome(
   let lastEquip: { ok: boolean; reason: EquipFailure | null; detail: string } | null = null;
   // 本局 token：**每次挂载一次**（刷新首页 = 准备新的一局，因此会换一个新 token）
   const runToken = newRunToken();
-  const adventureHref = buildAdventureHref(runToken);
+  /**
+   * PRODUCT-LOOP-R1-C｜「开始冒险」的地址 = **当前这一份** `draft` 的实时投影。
+   *
+   * ⚠️ 必须是函数而不是挂载时算一次的常量：首页与「调整战车」是同一页面的两个视图，
+   *    玩家可以「进车库 → 换武器 → 回首页 → 直接点开始冒险」（**不刷新**）。
+   *    若沿用挂载时的旧地址，首页会显示新武器、而链接带的是旧装备
+   *    ⇒ 正是 Queue 必改 2 禁止的「首页显示 A，战斗实际跑 B」。
+   *    ⇒ 每次 `render()` 都重算，地址与屏幕上显示的那辆车**同一次读取**产出。
+   */
+  const adventureHrefNow = (): string => buildAdventureHref(runToken, REWARD_WEAPON_ID, draft);
   // 领奖请求：入口壳给的 `location.search` 原样解析（纯函数）→ **当场**交给 Repository 处理一次
   const pendingClaim: PendingClaim | null = parsePendingClaim(opts?.search ?? '');
   const claim: ClaimOutcome | null = pendingClaim ? claimRunReward(pendingClaim) : null;
+  /**
+   * ⚠️ PRODUCT-LOOP-R1-C｜**领奖之后必须重读局外状态**。
+   *
+   * 上面的 `draft` / `inv` 是在**领奖之前**读的；而领奖会往正式库存里写入新部件
+   * （`playerProfile.claimRunReward` → `partInventory.addPart`）。若不重读，本次挂载
+   * 手里的库存就是**领奖前的旧快照** ⇒ 玩家从 COMPLETE 点「领取并返回」落回本页后，
+   * 「调整战车」里**看不到刚拿到的那件部件**，必须先手动刷新一次才行
+   * —— 那正是 Queue 必改 4 要求打通的「领取 → 首页 → Garage 新奖励可见 → 装备」链路，
+   * 所以这里不是优化而是**主循环阻断缺陷**的修复。
+   *
+   * 重读走的是同两个正式入口（`loadEquippedDraft` / `playerInventory`），**不新增数据源**；
+   * `ensureInventory` 幂等 ⇒ 没有领到新部件时（`already-claimed` / 校验失败）重读是无副作用的空操作。
+   */
+  if (claim) {
+    draft = loadEquippedDraft();
+    inv = playerInventory(draft);
+  }
 
   /* -------------------------------------------------------------- 骨架 */
 
@@ -314,9 +346,10 @@ export function mountProductHome(
       render();
     });
     // `开始冒险` 是同产物内的真实相对链接；地址由 `runReward.buildAdventureHref()` 产出
-    // （带本局 token / 奖励 id / 回程地址）—— 「打完一局 → 领奖 → 回首页」的闭环入口。
+    // （带本局 token / 奖励 id / **当前这份装备** / 回程地址）—— 「打完一局 → 领奖 → 回首页」
+    // 与「车库换装 → 下一局就用新装备」都靠同一个地址。
     const start = el('a', 'ph-btn ph-btn-start', HOME_START_LABEL);
-    start.href = adventureHref;
+    start.href = adventureHrefNow();
     start.dataset['phAction'] = 'start-run';
     start.dataset['phRunToken'] = runToken;
     actions.append(toGarage, start);
@@ -326,7 +359,7 @@ export function mountProductHome(
       el(
         'p',
         'ph-note',
-        '首页显示的主武器 = 下一局准备使用的装备（写入正式玩家 Build 存档；Run 仍用固定 demo loadout，尚未读这份存档）。',
+        '首页显示的主武器 = 下一局战斗里实际使用的装备（同一份正式玩家 Build 存档，随「开始冒险」交给 Run）。',
       ),
     );
     stage.append(
@@ -467,7 +500,7 @@ export function mountProductHome(
         previewFallbackCount: layout.items.filter((i) => !i.visualId || !SPRITE_URLS[i.visualId]).length,
         startRunHref: start ? start.getAttribute('href') : null,
         runToken,
-        adventureHref,
+        adventureHref: adventureHrefNow(),
         claim: claim
           ? {
               ok: claim.ok,

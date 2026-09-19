@@ -133,3 +133,52 @@
 - **sprite 绘制约定**（与 `renderer.ts:1854` `drawVisual` 逐字一致）：`translate(position) · scale(-1,1)[mirror]
   · rotate(rotation)`，sprite 以 `(0,0)` 为中心、尺寸 = `visual.size`；`position = physPos + anchor`
   （`battleContract.ts:245` `visualWorldTransform`）。
+
+---
+
+## §4 页面 / E2E 书写陷阱（PRODUCT-LOOP-R1-C 实测新增）
+
+### §4a HTML 注释里禁止出现注释终止序列（**真实事故**）
+
+**禁止在 HTML 注释里出现注释终止序列**（两个连字符紧跟一个右尖括号，下文记作 TERM）。
+浏览器遇到 TERM 就**提前闭合注释**，其后内容全部按**真标签**解析。
+
+- 事故现场：`home.html` 头部注释里画了箭头图，箭头用 TERM 收尾 ⇒ 注释在第 10 行就结束。
+  注释里那份用反引号包着的 **anchor 示例**因此变成**真锚点**，且 `href` 为空 ⇒ 解析为**当前 URL**。
+  结果：**真实鼠标点击页面上任何位置都触发整页重载**（Garage 视图永远打不开）。
+- ⚠️ **症状极具误导性**（这条最贵）：
+  - 页面渲染完全正常；
+  - `document.elementFromPoint(x, y)` 命中**正确**元素（`isSame: true`）；
+  - JS 里 `node.click()` **有效**；
+  - 只有 `page.mouse.click()` / `locator().click()` **无效** —— 因为它们派发**真实**鼠标事件。
+- **排查顺序**（照抄即可）：
+  1. **控制实验**：起一个极简空白页（只有一个铺满视口的 `div`），点同一坐标。
+     空白页不重载、目标页重载 ⇒ **是页面，不是测试装置**。
+  2. **跨 reload 事件日志**：用 `page.addInitScript` 注册**捕获阶段**监听并把事件写进
+     **`sessionStorage`**（⚠️ **不要**在 init 里清空它，否则新文档会把证据擦掉；
+     用 `page.evaluate(() => sessionStorage.setItem('__EV','[]'))` 在 `goto` 之后手动清零）。
+     若看到「点了某个纯文本元素 → 紧跟 `BEFOREUNLOAD` → 新文档」，即确诊为整页导航。
+  3. **数终止序列**：`grep -F -- '-->' *.html` —— 正常入口页应为 `<!-- ×1 / --> ×1`。
+- **守卫**：`PL-33`（`tests/productLoopHomeGarage.test.ts`）要求 7 个根 HTML 入口的
+  注释开始 / 终止序列**一一配平**；行为侧由主循环 E2E 的**真实鼠标点击**兜底。
+
+### §4b 断言「件数」一律从数据推导，不写死数字
+
+产品默认车（是否挂推杆）一变，所有写死 `6` 的断言立刻假红（`PL-20` 与 `e2e:product-home` 的 `F1`
+双双中招）。写 `=== <从 Build/draft 推导出来的件数>`，语义反而更强（顺带证明「同源」）。
+⚠️ 同理：**`previewFallbackCount === 0`** 从来不是可达状态 —— 轮组 PNG 不存在（见 §3），
+轮子**必然**走灰盒回退；正确的强断言是「探针件数 === 真实 `<img>` 数、每张图 `naturalWidth > 0`、
+无图件**必须**带 `data-ph-nosprite` 标注」。
+
+### §4c 探针字段不能跨页串用
+
+`weaponSlot` 是**首页** `ProductProbe` 的字段；**Run 探针没有它**。
+写成 `p.playerLoadout.functionalSelections[p.weaponSlot]` 会恒为 `undefined`
+⇒ 断言静默退化成「不比较任何东西」（日志里表现为 `undefined=undefined`）。
+跨页对账要显式取**首页探针**的字段（或改用挂点级逐槽比较）。
+
+### §4d `page.reload()` 之后视图回到默认态
+
+`homePage` 的 `view` 在挂载时初始化为 `'home'` ⇒ **reload 之后不存在 `back-home` 按钮**
+（它只在 garage 视图）。在本页 E2E 里「reload 之后再点返回首页」必然 30s 超时。
+正确顺序：**先点返回首页（不刷新）→ 读链接 → 最后才 reload 验证持久化**。

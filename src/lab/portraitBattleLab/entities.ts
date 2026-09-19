@@ -17,7 +17,7 @@ import { resolveSnapshot, type ResolvedMovement, type ResolvedFunctional } from 
 import { validateSnapshot } from '../../core/buildValidator';
 import type { BodyDef, BuildSnapshot, FunctionalPartDef } from '../../core/types';
 import { findEncounter, findLoadout } from './testData';
-import type { LabEncounterId, LabLoadoutId } from './constants';
+import type { LabEncounterId } from './constants';
 
 /* ------------------------------------------------------------ 类型定义 */
 
@@ -92,7 +92,16 @@ export interface SpawnedEntity {
 }
 
 export interface SpawnPlan {
-  readonly loadoutId: LabLoadoutId;
+  /**
+   * 本计划的**装载标签**（证据链口径）。
+   *
+   * ⚠️ PRODUCT-LOOP-R1-C：从 `LabLoadoutId`（两个字面量）放宽为 `string` ——
+   *    因为局内 Run 的玩家装载现在可以来自**产品侧的正式存档装备**
+   *    （标签 `'profile-equipped'`，见 `runPlayerLoadout.ts`），它不可能是一个 Lab 目录内的
+   *    测试装载 id。放宽的是**类型宽度**，不是任何校验：目录内的装载仍由
+   *    `findLoadout()` 显式解析（未知 id 照样抛错）。
+   */
+  readonly loadoutId: string;
   readonly encounterId: LabEncounterId;
   readonly player: SpawnedEntity;
   readonly enemies: readonly SpawnedEntity[];
@@ -216,7 +225,18 @@ function resolveEntity(
 }
 
 /** 指纹只取「基础战斗数据」，刻意不含 team / entityId / 序号 → A/B 必须完全相同。 */
-function entityBaseKey(e: SpawnedEntity): string {
+/**
+ * 一个实体的**内容指纹**：只由它真实解析出来的装备数值 / 装配决定。
+ *
+ * 两个用途（同一口径，不出现第二套「实体身份」）：
+ *   1) `SpawnPlan.baseKey` 的 A / B 对照（「两边读到的是同一套基础数据」）；
+ *   2) PRODUCT-LOOP-R1-C：**视觉盒缓存键**（`runPageScene.boxesOf`）。
+ *      ⚠️ 用它而不是 `entityId` / `snapshot.id`：后两者对「同一个挂点上的不同装备」
+ *      是**同一个值**（玩家在车库换了武器但车身不变）⇒ 按它们做缓存会拿到上一份装备的
+ *      旧外观（实测：换上无 sprite 的激光后仍画出旧的 `part_cannon`）。
+ *      内容指纹天然随装备变化 ⇒ 换装备必然换键。
+ */
+export function entityBaseKey(e: SpawnedEntity): string {
   return JSON.stringify({
     body: e.bodyDefId,
     hp: e.hp,
@@ -244,13 +264,27 @@ function entityBaseKey(e: SpawnedEntity): string {
  * 生成 SpawnPlan。**入参不含 arena**——A / B 唯一共用同一套测试数据。
  * `LightSwarm3` 只把同一套正式轻型 Build 复制 count 份，数值零改动。
  */
-export function buildSpawnPlan(loadoutId: string, encounterId: string): SpawnPlan {
-  const loadout = findLoadout(loadoutId);
-  if (!loadout) throw new Error(`[PBL-F1] 未知 Test Loadout "${loadoutId}"`);
+/**
+ * 用一份**显式给出的玩家 BuildDraft** 生成计划。
+ *
+ * ⚠️ PRODUCT-LOOP-R1-C：这是「局内 Run 使用产品侧正式存档装备」的唯一接入口。
+ *    它与 `buildSpawnPlan` 的差别**只有玩家 draft 的来源**：
+ *      - `buildSpawnPlan`        = draft 来自 Lab 目录内的测试装载（`findLoadout`）；
+ *      - 本函数                  = draft 由调用方给出（局内 = 产品侧交进来的 `RunPlayerLoadout`）。
+ *    敌人生成 / 指纹 / 校验 / 装配链路**完全同一条**（不是第二套）。
+ *
+ * ⚠️ `loadoutTag` 参与玩家实体的 snapshot id（`lab-loadout-<tag>`）与 `baseKey`：
+ *    不同装备必须得到不同指纹 —— 否则「第二局换了武器」会被误判成同一份基础数据。
+ */
+export function buildSpawnPlanFromDraft(
+  playerDraft: BuildDraft,
+  loadoutTag: string,
+  encounterId: string,
+): SpawnPlan {
   const encounter = findEncounter(encounterId);
   if (!encounter) throw new Error(`[PBL-F1] 未知 Encounter "${encounterId}"`);
 
-  const player = resolveEntity(loadout.draft, 'player', 'player', 0, `lab-loadout-${loadout.id}`);
+  const player = resolveEntity(playerDraft, 'player', 'player', 0, `lab-loadout-${loadoutTag}`);
   const enemies: SpawnedEntity[] = [];
   for (let i = 0; i < encounter.count; i++) {
     enemies.push(
@@ -266,7 +300,7 @@ export function buildSpawnPlan(loadoutId: string, encounterId: string): SpawnPla
   }
 
   const baseKey = JSON.stringify({
-    loadout: loadout.id,
+    loadout: loadoutTag,
     encounter: encounter.id,
     player: entityBaseKey(player),
     enemy: entityBaseKey(enemies[0]),
@@ -274,7 +308,7 @@ export function buildSpawnPlan(loadoutId: string, encounterId: string): SpawnPla
   });
 
   return {
-    loadoutId: loadout.id,
+    loadoutId: loadoutTag,
     encounterId: encounter.id,
     player,
     enemies,
@@ -283,6 +317,13 @@ export function buildSpawnPlan(loadoutId: string, encounterId: string): SpawnPla
     // PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：只**原样透传**数据源里的声明。
     enemyDrive: encounter.enemyDrive,
   };
+}
+
+/** 按 Lab 目录内测试装载 id 生成计划（既有入口；未知 id 显式抛错）。 */
+export function buildSpawnPlan(loadoutId: string, encounterId: string): SpawnPlan {
+  const loadout = findLoadout(loadoutId);
+  if (!loadout) throw new Error(`[PBL-F1] 未知 Test Loadout "${loadoutId}"`);
+  return buildSpawnPlanFromDraft(loadout.draft, loadout.id, encounterId);
 }
 
 /* --------------------------------------------------- 运行时数据容器 */

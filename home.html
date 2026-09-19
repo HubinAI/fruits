@@ -7,7 +7,14 @@
     <!--
       PRODUCT-LOOP-R1-A-HOME-GARAGE-INVENTORY｜竖屏正式产品主循环第一段：**局外配车**。
 
-        `首页（看车 + 已装备） --[调整战车]--> 调整战车（选一件已拥有武器 → 装备） --[返回首页]--> 首页同步`
+        `首页（看车 + 已装备） --[调整战车]→ 调整战车（选一件已拥有武器 → 装备） --[返回首页]→ 首页同步`
+
+      ✅ 本注释内**禁止出现 HTML 注释终止序列**（两个连字符紧跟一个右尖括号）。
+         本行原先把它写进了箭头图里 ⇒ 浏览器在第 10 行就**提前闭合注释**，其后文本全部
+         按真标签解析：第 26 行那份用反引号包着的 anchor 示例被解析成**真锚点**（空 href
+         ⇒ 解析为当前 URL）⇒ 真实鼠标点击**任何位置**都会触发整页重载，Garage 视图
+         永远打不开（PRODUCT-LOOP-R1-C 定位并修复；`tests/productLoopHomeGarage.test.ts`
+         的 `PL-33` 机器守卫防止回归）。
 
       「首页」与「调整战车」是**同一页面的两个视图**（整页零跳转），与本分支既有玩家页面
       「单页多状态」的产品结构一致；页面代码在 src/product/（**不在** debug lab 目录内）。
@@ -23,8 +30,17 @@
         - 本页**不参与** npm run build / build:pages / build:e2e / build:wechat 任一正式构建；
         - 不新建 Runtime、不改 Run / Battle Camera / Battle Physics / Buff / Encounter /
           Validation Hub / Encounter Lab / Content Batch / Fusion / 星级 / Economy；
-        - `开始冒险` 只是同产物内的相对链接 —— 本轮 Run 仍用自己的固定 demo loadout，
-          把装备接进 Run 属下一段 Queue。
+        - `开始冒险` 只是同产物内的相对链接（`<a href>`，本页不写 location）。
+
+      PRODUCT-LOOP-R1-C｜**本页是默认玩家入口**（`npm run dev` 的根路径由 build/branchDevEntry.ts
+        在 dev 下重写到本页；所有研发 Validation 页面仍保留各自的显式地址）。
+
+        `开始冒险` 的链接**带两样东西**：
+          - `run=<本局 token>`：领奖幂等键（PRODUCT-LOOP-R1-B）；
+          - `equipped=<本份 Build 存档的 JSON>`：本页当前装备的**完整 BuildDraft**。
+        两者都在 `src/product/runReward.ts` 生成（**地址由产品侧独占**，Run 侧只解析）。
+        Run 侧据此把「玩家车怎么装」这件事交给正式编排器 —— 于是「首页显示的主武器」
+        与「下一局战斗里实际用的武器」是同一份数据，不存在第二套 loadout 语义。
     -->
     <style>
       :root { color-scheme: dark; }

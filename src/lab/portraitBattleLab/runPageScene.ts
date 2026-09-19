@@ -14,8 +14,13 @@
  *   1) 车辆外形**全部**来自正式定义：车身 / 轮组 / 部件的 `visual`（visualId + size +
  *      anchor + mirrorWithFacing），世界变换走正式纯函数 `visualWorldTransform`
  *      （与正式战斗 `planckBattleOrchestrator.buildVehicleSnapshot` **同一函数**）；
- *   2) 装载 / 遭遇是**固定**的一套演示数据（`RUN_DEMO_*`），指向 F1 共享测试数据，
+ *   2) **对手**遭遇是**固定**的一套演示数据（`RUN_DEMO_*`），指向 F1 共享测试数据，
  *      不新增数值、不随机、不接 Debug 选择项；
+ *      ⚠️ PRODUCT-LOOP-R1-C 起，**玩家**那一侧不再固定：局内 Run 的玩家装载来自
+ *      产品侧交进来的「当前 Player Profile Equipped」（`RunPlayerLoadout`，见
+ *      `runPlayerLoadout.ts`）。缺省（研发入口 / 不带参数）仍是上面那套演示装载，
+ *      因此既有入口的行为与像素**逐项不变**。玩家装载只替换 `BuildDraft` 这一个输入，
+ *      装配 / 数值解析 / 校验全部仍走同一条正式链路（`resolveEntity`）；
  *   3) 未提供 `visual` 的件（无 sprite 的部件）**整件不画**（见 `boxesOf`），
  *      绝不用纯色矩形冒充车辆外观。
  *
@@ -26,8 +31,25 @@ import { registry } from '../../core/content';
 import { resolveSnapshot } from '../../core/buildSnapshot';
 import { visualWorldTransform } from '../../battle/battleContract';
 import { bodyOffsetBoxes } from './scene';
-import { buildSpawnPlan, type SpawnPlan, type SpawnedEntity } from './entities';
+import {
+  buildSpawnPlan,
+  buildSpawnPlanFromDraft,
+  entityBaseKey,
+  type SpawnPlan,
+  type SpawnedEntity,
+} from './entities';
 import { findEncounter, findLoadout } from './testData';
+import {
+  hasRunLoadoutParam,
+  parseRunPlayerLoadout,
+  type RunPlayerLoadout,
+} from './runPlayerLoadout';
+
+/**
+ * 本局玩家装载类型从本模块**再导出**（`runPage.ts` 等页面侧统一只从 `runPageScene`
+ * 取场景口径，避免出现第二个「场景数据入口」）。
+ */
+export type { RunPlayerLoadout };
 import {
   placeSideViewVisuals,
   runActionBarRect,
@@ -78,19 +100,69 @@ export const RUN_DEMO_ENCOUNTER_ID = 'ProtoRusher';
 export const RUN_PLAYER_FACING = 1 as const;
 export const RUN_ENEMY_FACING = -1 as const;
 
+/* --------------------------------------------- 本局玩家装载（PRODUCT-LOOP-R1-C） */
+
+/** 缺省玩家装载 = Lab 目录内那套固定演示装载（`RUN_DEMO_LOADOUT_ID`）。 */
+export function demoRunPlayerLoadout(): RunPlayerLoadout {
+  const loadout = findLoadout(RUN_DEMO_LOADOUT_ID);
+  if (!loadout) throw new Error(`[PRP-F0] 未知测试装载 "${RUN_DEMO_LOADOUT_ID}"`);
+  return {
+    source: 'demo',
+    label: loadout.label,
+    draft: loadout.draft,
+    tag: loadout.id,
+    key: `demo:${loadout.id}`,
+  };
+}
+
+/**
+ * 本局玩家装载的解析结果。
+ *
+ * `fallback` 是**必须可观测**的诊断值：
+ *   - `'none'`     —— 用的就是产品侧交进来的装备（正式闭环的正常形态）；
+ *   - `'no-param'` —— 链接里本来就没带装备（研发入口 `/run-page.html` 的原行为）；
+ *   - `'invalid'`  —— **带了但坏了**（参数被改坏 / 存档组合非法）。
+ *     ⚠️ 这一项一旦为 `'invalid'`，局内跑的就不是玩家身上那件 ⇒ 属真实异常，
+ *        必须能被探针与测试看见，绝不静默降级（Queue 必改 2 的反面就是「首页显示 A、战斗跑 B」）。
+ */
+export interface RunLoadoutResolution {
+  readonly loadout: RunPlayerLoadout;
+  readonly fallback: 'none' | 'no-param' | 'invalid';
+}
+
+/**
+ * 从 `location.search` 形态的字符串解析本局玩家装载（**唯一入口**）。
+ *
+ * 非法 / 缺失一律回退到演示装载，并把原因写进 `fallback`（见上）。
+ */
+export function resolveRunPlayerLoadout(search: string): RunLoadoutResolution {
+  const parsed = parseRunPlayerLoadout(search);
+  if (parsed) return { loadout: parsed, fallback: 'none' };
+  return { loadout: demoRunPlayerLoadout(), fallback: hasRunLoadoutParam(search) ? 'invalid' : 'no-param' };
+}
+
 /**
  * 按 Encounter id 缓存 spawn plan（纯数据，无副作用）。
  *
  * ⚠️ PRP-RUN-02：Run Script 里每个 BATTLE / FINAL 节点各自有一套对手 ⇒ 需要**多个** plan；
  *    与 IDLE 待机近景共用一个缓存（同一份正式链路解析结果，不出现第二套口径）。
+ * ⚠️ PRODUCT-LOOP-R1-C：缓存键加入**玩家装载身份**（`loadout.key`）——
+ *    玩家局外换了武器之后，同一个 Encounter 必须是**另一份**计划（否则第二局会沿用第一局的装配）。
  */
 const planCache = new Map<string, SpawnPlan>();
 
-export function runPlanFor(encounterId: string): SpawnPlan {
-  let p = planCache.get(encounterId);
+export function runPlanFor(
+  encounterId: string,
+  loadout: RunPlayerLoadout = demoRunPlayerLoadout(),
+): SpawnPlan {
+  const cacheKey = `${loadout.key}|${encounterId}`;
+  let p = planCache.get(cacheKey);
   if (!p) {
-    p = buildSpawnPlan(RUN_DEMO_LOADOUT_ID, encounterId);
-    planCache.set(encounterId, p);
+    p =
+      loadout.source === 'demo'
+        ? buildSpawnPlan(loadout.tag, encounterId)
+        : buildSpawnPlanFromDraft(loadout.draft, loadout.tag, encounterId);
+    planCache.set(cacheKey, p);
   }
   return p;
 }
@@ -106,15 +178,16 @@ export function runDemoPlan(): SpawnPlan {
  * ⚠️ PRP-RUN-02：`encounters` 按 **Run Script 的 BATTLE / FINAL 节点 id** 提供 ——
  *    状态机只按节点 id 取敌情，因此页面 / 状态机里**不需要**任何 `if (day === X)` 分支。
  *    敌情（展示名 + 真实 HP 上限）全部来自**同一个** `buildSpawnPlan` 正式链路。
+ * ⚠️ PRODUCT-LOOP-R1-C：玩家展示名与耐久上限改为读**本局装载**（局外装备）⇒
+ *    「首页显示的车」与「战斗里跑的车」在结构上是同一份 draft 的两个投影。
  */
-export function runPageContext(): RunPageContext {
-  const loadout = findLoadout(RUN_DEMO_LOADOUT_ID);
-  const player = runDemoPlan().player;
+export function runPageContext(loadout: RunPlayerLoadout = demoRunPlayerLoadout()): RunPageContext {
+  const player = runPlanFor(RUN_DEMO_ENCOUNTER_ID, loadout).player;
   const encounters: Record<string, RunEncounterInfo> = {};
   for (const node of runScriptBattleNodes()) {
     const id = node.encounterId;
     if (!id) continue;
-    const plan = runPlanFor(id);
+    const plan = runPlanFor(id, loadout);
     const enemy = plan.enemies[0];
     const encounter = findEncounter(id);
     encounters[node.id] = {
@@ -123,7 +196,7 @@ export function runPageContext(): RunPageContext {
     };
   }
   return {
-    vehicleLabel: loadout ? loadout.label : player.bodyName,
+    vehicleLabel: loadout.label,
     playerHpMax: player.hp,
     encounters,
   };
@@ -141,7 +214,15 @@ interface EntityVisuals {
 const visualCache = new Map<string, EntityVisuals>();
 
 function boxesOf(e: SpawnedEntity): EntityVisuals {
-  const key = `${e.entityId}:${e.bodyDefId}`;
+  /*
+    ⚠️ 缓存键 = **实体内容指纹**（`entityBaseKey`），不是 `entityId` / `snapshot.id`：
+    PRODUCT-LOOP-R1-C 之后，同一个 `entityId`（'player'）与同一个装载标签可以对应**不同装备**
+    （玩家在车库换了武器 → 同一具车身、不同的 Functional 件，装载标签仍是 `profile-equipped`）。
+    按 `entityId:snapshot.id` 缓存时实测确实踩到：换上**无 sprite**的激光后，
+    待机近景仍画出上一局的 `part_cannon` —— 那正是「首页显示 A、画面里是 B」的可见形态。
+    内容指纹覆盖功能件的 defId / 质量 / 能量 / 武器数值 ⇒ 换装备必然换键。
+  */
+  const key = `${e.entityId}:${entityBaseKey(e)}`;
   const hit = visualCache.get(key);
   if (hit) return hit;
 
@@ -257,22 +338,24 @@ interface BasePlacements {
   readonly player: RunPlacedGroup;
 }
 
-let cachedBase: BasePlacements | null = null;
+const baseCache = new Map<string, BasePlacements>();
 
-/** 基础摆位（只依赖固定演示数据 → 只算一次）。 */
-function basePlacements(): BasePlacements {
-  if (cachedBase) return cachedBase;
-  const plan = runDemoPlan();
+/** 基础摆位（只依赖本局装载 → 按装载身份缓存，换装备自动重算）。 */
+function basePlacements(loadout: RunPlayerLoadout): BasePlacements {
+  const hit = baseCache.get(loadout.key);
+  if (hit) return hit;
+  const plan = runPlanFor(RUN_DEMO_ENCOUNTER_ID, loadout);
   const enemyEntity = plan.enemies[0];
   const scale = runSideViewScale(entityVisualWidth(plan.player), entityVisualWidth(enemyEntity));
   const baselineY = runStageBaselineY();
   const p = boxesOf(plan.player);
-  cachedBase = {
+  const out: BasePlacements = {
     scale,
     baselineY,
     player: placeSideViewVisuals(p.boxes, 'left', scale, baselineY, p.mirrors),
   };
-  return cachedBase;
+  baseCache.set(loadout.key, out);
+  return out;
 }
 
 function toEntityView(g: RunPlacedGroup): RunStageEntityView {
@@ -284,9 +367,12 @@ function toEntityView(g: RunPlacedGroup): RunStageEntityView {
  *
  * ⚠️ PRP-F1：**只用于 IDLE**。EVENT / BATTLE / RESULT 的舞台带是真实战斗世界
  * （见 `runBattleView`），本函数在这些 phase 不参与绘制。
+ * ⚠️ PRODUCT-LOOP-R1-C：玩家那辆车来自**本局装载**（省略 = 演示装载，既有行为逐像素不变）。
  */
-export function buildRunStageView(): RunStageView {
-  const base = basePlacements();
+export function buildRunStageView(
+  loadout: RunPlayerLoadout = demoRunPlayerLoadout(),
+): RunStageView {
+  const base = basePlacements(loadout);
   return {
     scale: base.scale,
     groundY: runStageGroundY(),
@@ -298,8 +384,8 @@ export function buildRunStageView(): RunStageView {
 }
 
 /** 演示用的敌人实体（probe / 测试需要知道「遭遇的是谁」）。 */
-export function runDemoEnemy(): SpawnedEntity {
-  return runDemoPlan().enemies[0];
+export function runDemoEnemy(loadout: RunPlayerLoadout = demoRunPlayerLoadout()): SpawnedEntity {
+  return runPlanFor(RUN_DEMO_ENCOUNTER_ID, loadout).enemies[0];
 }
 
 /**

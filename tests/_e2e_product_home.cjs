@@ -298,10 +298,22 @@ async function main() {
       buttons: document.querySelectorAll('#ph-root button').length,
       canvases: document.querySelectorAll('#ph-root canvas').length,
     }));
+    /*
+      ⚠️ 件数**从当前 Build 推导**，不写死数字：
+      PRODUCT-LOOP-R1-C 起产品默认车把「前端挂点」留给主武器（不再挂推杆），
+      因此真实挂载件数不再是固定的 6 —— 写死 6 会让断言去测一辆产品永远不会发出的车。
+      这里改为「DOM 件数 === 页面按这份 Build 推出的件数」，语义反而更强：
+      预览必须与 Build 同源（既不是固定值，也不是另造一套）。
+    */
+    const expectedItems = p.previewItems.length;
     log(
-      domCounts.items === 6 && domCounts.imgs === 6 && domCounts.canvases === 0 && domCounts.buttons > 0,
-      'F1 预览是真实 DOM 元素（非 canvas），控件是真实 <button>',
-      `items=${domCounts.items} imgs=${domCounts.imgs} buttons=${domCounts.buttons} canvas=${domCounts.canvases}`,
+      expectedItems > 0 &&
+        domCounts.items === expectedItems &&
+        domCounts.imgs === expectedItems &&
+        domCounts.canvases === 0 &&
+        domCounts.buttons > 0,
+      'F1 预览是真实 DOM 元素（非 canvas），控件是真实 <button>（件数 = 当前 Build 真实挂载件）',
+      `items=${domCounts.items}/${expectedItems} imgs=${domCounts.imgs} buttons=${domCounts.buttons} canvas=${domCounts.canvases}`,
     );
     log(consoleErrors.length === 0, 'F2 全程零运行时报错', consoleErrors.slice(0, 2).join(' | ') || 'none');
 

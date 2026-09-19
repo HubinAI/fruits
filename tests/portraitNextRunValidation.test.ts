@@ -369,17 +369,29 @@ describe('PRP-M2｜E 独立验证入口且不污染默认启动链', () => {
     expect(main.includes('stopAfterFirstBattle: true')).toBe(true);
   });
 
-  it('NR-14 默认启动链与正式构建 0 污染（`npm run dev` 仍是玩家页面）', () => {
+  it('NR-14 默认启动链与正式构建 0 污染（`npm run dev` 仍是唯一正常启动命令）', () => {
     const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> };
     // 默认 dev 一个字节都没改
     expect(pkg.scripts.dev).toBe('vite --open');
     // 验证入口是**显式**的第二条命令
     expect(pkg.scripts['dev:next-run']).toBe('vite --open=/next-run.html');
     expect(pkg.scripts['dev:run-page']).toBe('vite --open=/run-page.html');
-    // 根路径重写规则未动（默认 dev 落地页仍是玩家页面）
+    /*
+      ⚠️ PRODUCT-LOOP-R1-C：这里原先断言 `branch.includes("'/run-page.html'")` ——
+         在「默认落地页 = Run Page」的年代，那条断言证明的是「默认链确实指向玩家页」。
+      Queue 必改 1 把落地页改成产品首页之后，本用例（NR 系列的职责 = 「验证入口不污染
+      默认链」）改为钉住**本 Queue 真正关心的事**：
+         · 根路径重写目标**不是**任何验证入口；
+         · 验证入口 `next-run.html` 不出现在重写插件里（原断言的实质）。
+      默认落地页到底是谁，由 `tests/portraitDefaultEntry.test.ts` 的 R2-01/R2-11 专责钉死。
+    */
     const branch = stripComments(read('build/branchDevEntry.ts'));
-    expect(branch.includes("'/run-page.html'")).toBe(true);
+    expect(branch.includes('/home.html')).toBe(true);
     expect(branch.includes('next-run')).toBe(false);
+    expect(branch.includes('validation-hub')).toBe(false);
+    for (const banned of ['run-page', 'runMain', 'portrait-lab', 'portraitBattleLab']) {
+      expect(branch.includes(banned), `重写插件不得引用 ${banned}`).toBe(false);
+    }
     // 四个正式构建配置 + 正式入口仍 0 引用原型字面量
     for (const t of ['index.html', 'vite.config.ts', 'vite.pages.config.ts', 'vite.e2e.config.ts', 'vite.wechat.config.ts']) {
       const code = stripComments(read(t));
@@ -402,8 +414,11 @@ describe('PRP-M2｜E 独立验证入口且不污染默认启动链', () => {
       }
     }
     // 默认路径的 Run 起点仍然是 `createRunPageState`（新 Run 的构造是附加函数）
+    // ⚠️ PRODUCT-LOOP-R1-C：起始上下文多了一个参数（`runPageContext(this.loadout)` =
+    //    本局玩家装载），但**结构未变**：仍是 `opts.priorRun ?? createRunPageState(...)`，
+    //    仍只有这一处构造点，验证流程仍不参与默认起点。
     const page = stripComments(readLab('runPage.ts'));
-    expect(page.includes('opts.priorRun ?? createRunPageState(runPageContext())')).toBe(true);
+    expect(page.includes('opts.priorRun ?? createRunPageState(runPageContext(this.loadout))')).toBe(true);
     // 页面对验证项的读取全部经 `this.opts.*`（不存在全局单例 / 隐式开关）
     expect(page.includes('this.opts.seedOptions')).toBe(true);
     expect(page.includes('this.opts.stopAfterFirstBattle')).toBe(true);
