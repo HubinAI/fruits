@@ -38,6 +38,16 @@ import {
   type LoadoutReading,
 } from './playerLoadout';
 import { vehiclePreviewLayout, type VehiclePreviewLayout } from './vehiclePreview';
+/**
+ * PRODUCT-LOOP-R1-B｜领奖闭环的两块产品侧拼图：
+ *   - `runReward.ts`：奖励策略 + **产品地址唯一真源**（`开始冒险` 的 href 由它产出）；
+ *   - `playerProfile.ts`：**Profile Repository** —— 本页**唯一**允许触碰持久化状态的地方。
+ *
+ * ⚠️ 本页自己**不碰** `localStorage` / `platform.storage`（必改 1：UI 不得直接读写 localStorage），
+ *    这条由 `tests/productLoopRunReward.test.ts` 的 `PR-20` 源码守卫机器钉死。
+ */
+import { buildAdventureHref, newRunToken, parsePendingClaim, type PendingClaim } from './runReward';
+import { claimRunReward, claimedRunCount, type ClaimOutcome } from './playerProfile';
 
 /** 正式 visualId → 正式资源 URL（与战斗 / Run Page 引用的是同一批 PNG 文件）。 */
 const SPRITE_URLS: Readonly<Record<string, string>> = {
@@ -54,8 +64,17 @@ export const HOME_START_LABEL = '开始冒险';
 export const GARAGE_TITLE = '调整战车';
 export const GARAGE_BACK_LABEL = '返回首页';
 export const GARAGE_EQUIP_LABEL = '装备';
-/** `开始冒险` 的目的地：同一构建产物内的既有玩家 Run 入口（相对路径，产物内可搬移）。 */
-export const START_RUN_HREF = './run-page.html';
+/**
+ * `开始冒险` 的目的地：**不再是页面里的字面量**。
+ *
+ * PRODUCT-LOOP-R1-B 起该地址由 `runReward.ts` 的 `buildAdventureHref()` 产出
+ * （带本局 token / 奖励 id / 回程地址），产品 URL 只在那一个模块里出现一次
+ * （`tests/productLoopRunReward.test.ts` 的 `PR-21` 机器钉死）。
+ */
+/** 领奖提示文案（本页只展示 Repository 的**真实**结果，不做乐观提示）。 */
+export const CLAIM_OK_LEAD = '已获得';
+export const CLAIM_DUPLICATE_TEXT = '本局奖励已领取过（不会重复发放）。';
+export const CLAIM_FAIL_TEXT = '本局奖励未能入库';
 /** 正式逻辑舞台（与 Run Page 同口径）。 */
 export const PRODUCT_STAGE_W = 390;
 export const PRODUCT_STAGE_H = 844;
@@ -85,6 +104,25 @@ export interface ProductProbe {
   readonly previewSpriteCount: number;
   readonly previewFallbackCount: number;
   readonly startRunHref: string | null;
+  /**
+   * PRODUCT-LOOP-R1-B｜本页**本局**的 token（幂等键）与它对应的冒险地址。
+   * ⚠️ 每次挂载生成一次（= 一次新的「准备出发」）⇒ 同一 token 只可能领一次奖。
+   */
+  readonly runToken: string;
+  readonly adventureHref: string;
+  /**
+   * 本次挂载是否处理了一次**领奖请求**（`null` = 玩家是正常打开首页，不是带着奖励回来的）。
+   * ⚠️ 直接来自 Profile Repository 的**真实**结果 —— 页面不猜、不乐观提示。
+   */
+  readonly claim: {
+    readonly ok: boolean;
+    readonly reason: string | null;
+    readonly defId: string | null;
+    readonly name: string | null;
+    readonly countAfter: number | null;
+  } | null;
+  /** 账本里已领取的局数（只读；用于 E2E 断言「重复领取没有新增记录」）。 */
+  readonly claimedRunCount: number;
   readonly canvasCount: number;
   readonly buttonCount: number;
   readonly lastEquip: { readonly ok: boolean; readonly reason: EquipFailure | null } | null;
@@ -153,14 +191,34 @@ function renderPreview(layout: VehiclePreviewLayout): HTMLElement {
   return box;
 }
 
-/** 页面唯一入口（由 `home.html` 用 `<script type="module">` 加载）。 */
-export function mountProductHome(root: HTMLElement): ProductDebugHandle {
+/**
+ * 页面唯一入口（由 `home.html` 用 `<script type="module">` 加载）。
+ *
+ * PRODUCT-LOOP-R1-B 起多一个**可选**入参 `opts.search`：玩家从 Run 的「领取并返回」
+ * 带着 `?run=…&reward=…` 回到本页时，入口壳把 `location.search` **原样**传进来，
+ * 由本模块的纯函数 `parsePendingClaim` 解析 —— 因此本模块**不读 `location`**
+ * （保持可在 node 下单测、保持零跳转逻辑）。
+ *
+ * ⚠️ 领奖在**挂载时同步执行一次**（`claimRunReward`），结果只展示、不重试、不排队：
+ *    重复进入同一个领奖 URL ⇒ Repository 返回 `already-claimed` ⇒ 页面如实说「已领取过」，
+ *    库存**不会**再 +1（必改 4：重复点击 / 重复结算不允许重复发奖）。
+ */
+export function mountProductHome(
+  root: HTMLElement,
+  opts?: { readonly search?: string },
+): ProductDebugHandle {
   // 唯一读入口：正式存档 → starter 回退；库存走正式 ensureInventory（幂等，不重复生成）
   let draft: BuildDraft = loadEquippedDraft();
   let inv: PartInventory = playerInventory(draft);
   let view: ProductView = 'home';
   let selectedWeaponId: string | null = null;
   let lastEquip: { ok: boolean; reason: EquipFailure | null; detail: string } | null = null;
+  // 本局 token：**每次挂载一次**（刷新首页 = 准备新的一局，因此会换一个新 token）
+  const runToken = newRunToken();
+  const adventureHref = buildAdventureHref(runToken);
+  // 领奖请求：入口壳给的 `location.search` 原样解析（纯函数）→ **当场**交给 Repository 处理一次
+  const pendingClaim: PendingClaim | null = parsePendingClaim(opts?.search ?? '');
+  const claim: ClaimOutcome | null = pendingClaim ? claimRunReward(pendingClaim) : null;
 
   /* -------------------------------------------------------------- 骨架 */
 
@@ -183,8 +241,40 @@ export function mountProductHome(root: HTMLElement): ProductDebugHandle {
     return loadoutReading(draft, inv);
   }
 
+  /**
+   * PRODUCT-LOOP-R1-B｜领奖提示（**只陈述 Repository 的真实结果**）。
+   *
+   *   - 成功 → 「已获得：<正式部件名>（已进入车库）」，带 `data-ph-claim-def` 供 E2E 对账；
+   *   - 重复 → 如实说「已领取过，不会重复发放」（不是静默忽略，也不是假装成功）；
+   *   - 失败 → 带上 Repository 给出的**具体原因**（`not-weapon` / `not-equippable` / …）。
+   */
+  function claimNotice(): HTMLElement | null {
+    if (!claim) return null;
+    if (claim.ok && claim.grant) {
+      const n = el('div', 'ph-claim ph-claim-ok', `${CLAIM_OK_LEAD}：${claim.grant.name}（已进入车库）`);
+      n.dataset['phClaim'] = 'ok';
+      n.dataset['phClaimDef'] = claim.grant.defId;
+      return n;
+    }
+    if (claim.reason === 'already-claimed') {
+      const n = el('div', 'ph-claim ph-claim-dim', CLAIM_DUPLICATE_TEXT);
+      n.dataset['phClaim'] = 'duplicate';
+      return n;
+    }
+    const n = el('div', 'ph-claim ph-claim-bad', `${CLAIM_FAIL_TEXT}（${String(claim.reason)}）`);
+    n.dataset['phClaim'] = 'fail';
+    return n;
+  }
+
+  /** 页头（两个视图共用）：标题 + 领奖提示（有才有）。 */
+  function renderHeader(title: string): void {
+    header.replaceChildren(el('h1', 'ph-title', title));
+    const notice = claimNotice();
+    if (notice) header.append(notice);
+  }
+
   function renderHome(r: LoadoutReading): void {
-    header.replaceChildren(el('h1', 'ph-title', HOME_TITLE));
+    renderHeader(HOME_TITLE);
 
     const car = el('div', 'ph-car-wrap');
     car.append(renderPreview(vehiclePreviewLayout(draft)));
@@ -223,10 +313,12 @@ export function mountProductHome(root: HTMLElement): ProductDebugHandle {
       selectedWeaponId = null;
       render();
     });
-    // `开始冒险` 是同产物内的真实相对链接；本轮不改 Run（Run 仍用自己的固定 demo loadout）
+    // `开始冒险` 是同产物内的真实相对链接；地址由 `runReward.buildAdventureHref()` 产出
+    // （带本局 token / 奖励 id / 回程地址）—— 「打完一局 → 领奖 → 回首页」的闭环入口。
     const start = el('a', 'ph-btn ph-btn-start', HOME_START_LABEL);
-    start.href = START_RUN_HREF;
+    start.href = adventureHref;
     start.dataset['phAction'] = 'start-run';
+    start.dataset['phRunToken'] = runToken;
     actions.append(toGarage, start);
     stage.append(actions);
 
@@ -234,16 +326,21 @@ export function mountProductHome(root: HTMLElement): ProductDebugHandle {
       el(
         'p',
         'ph-note',
-        '首页显示的主武器 = 下一局准备使用的装备（写入正式玩家 Build 存档；本 Queue 尚未把它接进 Run）。',
+        '首页显示的主武器 = 下一局准备使用的装备（写入正式玩家 Build 存档；Run 仍用固定 demo loadout，尚未读这份存档）。',
+      ),
+    );
+    stage.append(
+      el(
+        'p',
+        'ph-note',
+        '打完一局（RUN COMPLETE）会获得一件永久部件；领回来后在「调整战车」里就能看到并装上。',
       ),
     );
   }
 
   function renderGarage(r: LoadoutReading): void {
-    header.replaceChildren(
-      el('h1', 'ph-title', GARAGE_TITLE),
-      el('span', 'ph-sub', `${r.weaponSlotLabel} · 当前主武器`),
-    );
+    renderHeader(GARAGE_TITLE);
+    header.append(el('span', 'ph-sub', `${r.weaponSlotLabel} · 当前主武器`));
 
     const car = el('div', 'ph-car-wrap ph-car-wrap-sm');
     car.append(renderPreview(vehiclePreviewLayout(draft)));
@@ -369,6 +466,18 @@ export function mountProductHome(root: HTMLElement): ProductDebugHandle {
         previewSpriteCount: layout.items.filter((i) => !!i.visualId && !!SPRITE_URLS[i.visualId]).length,
         previewFallbackCount: layout.items.filter((i) => !i.visualId || !SPRITE_URLS[i.visualId]).length,
         startRunHref: start ? start.getAttribute('href') : null,
+        runToken,
+        adventureHref,
+        claim: claim
+          ? {
+              ok: claim.ok,
+              reason: claim.reason,
+              defId: claim.grant?.defId ?? null,
+              name: claim.grant?.name ?? null,
+              countAfter: claim.grant?.countAfter ?? null,
+            }
+          : null,
+        claimedRunCount: claimedRunCount(),
         canvasCount: root.querySelectorAll('canvas').length,
         buttonCount: root.querySelectorAll('button').length,
         lastEquip: lastEquip ? { ok: lastEquip.ok, reason: lastEquip.reason } : null,

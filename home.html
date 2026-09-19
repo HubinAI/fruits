@@ -176,6 +176,25 @@
       .ph-note { font-size: 11px; color: #7b8697; line-height: 1.6; }
       .ph-note-ok { color: #8fe0ad; }
       .ph-note-bad { color: #ff9c8f; }
+
+      /*
+        PRODUCT-LOOP-R1-B｜领奖提示（玩家从 RUN COMPLETE 的「领取并返回」回到本页时出现）。
+        三种形态与 Profile Repository 的真实结果一一对应：
+          ok（已获得·入库成功）/ duplicate（本局已领取过）/ fail（校验未通过）。
+      */
+      .ph-claim {
+        margin-top: 8px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        font-size: 12px;
+        line-height: 1.5;
+        border: 1px solid #2b3850;
+        background: #121a26;
+        color: #c7d0df;
+      }
+      .ph-claim-ok { border-color: #3f6b52; background: #12211a; color: #8fe0ad; }
+      .ph-claim-dim { color: #93a1b6; }
+      .ph-claim-bad { border-color: #6b3f3f; background: #211414; color: #ff9c8f; }
     </style>
   </head>
   <body>

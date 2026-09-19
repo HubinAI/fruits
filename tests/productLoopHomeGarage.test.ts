@@ -392,6 +392,19 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../lab/buildEditorModel',
         './playerLoadout',
       ],
+      // PRODUCT-LOOP-R1-B：Profile Repository（唯一写持久化状态的地方）
+      'playerProfile.ts': [
+        '../core/buildValidator',
+        '../core/content',
+        '../core/partInventory',
+        '../core/saveVersion',
+        '../lab/buildEditorModel',
+        '../platform',
+        './playerLoadout',
+        './runReward',
+      ],
+      // PRODUCT-LOOP-R1-B：奖励策略 + 产品地址唯一真源（只读内容库取展示名）
+      'runReward.ts': ['../core/content'],
     };
     for (const [file, list] of Object.entries(allow)) {
       const specs = importSpecifiers(readProduct(file)).sort();
@@ -402,7 +415,15 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
     for (const s of pageSpecs) {
       if (s.startsWith('../../assets/visuals/')) continue;
       expect(
-        ['../platform/bootstrap', '../lab/buildEditorModel', '../core/partInventory', './playerLoadout', './vehiclePreview'],
+        [
+          '../platform/bootstrap',
+          '../lab/buildEditorModel',
+          '../core/partInventory',
+          './playerLoadout',
+          './vehiclePreview',
+          './runReward',
+          './playerProfile',
+        ],
         `homePage.ts 不得 import "${s}"`,
       ).toContain(s);
     }
@@ -447,7 +468,17 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
     for (const banned of ['location.href', 'window.open', 'history.pushState', 'location.assign']) {
       expect(code.includes(banned), `不得使用 ${banned}`).toBe(false);
     }
-    expect(code.includes("'./run-page.html'")).toBe(true);
+    /*
+      PRODUCT-LOOP-R1-B：`开始冒险` 的地址**不再是页面里的字面量** ——
+      它由 `runReward.ts` 的 `buildAdventureHref()` 产出（带本局 token / 奖励 / 回程地址），
+      产品 URL 只在那一个模块里出现一次。这里是「单一真源」的双向断言：
+      页面**不含**地址字面量，且页面**真的**用了那个构造函数。
+    */
+    expect(code.includes("'./run-page.html'"), '地址真源必须只在 runReward.ts').toBe(false);
+    expect(code.includes('buildAdventureHref(')).toBe(true);
+    const reward = strip(readProduct('runReward.ts'));
+    expect(reward.includes("'./run-page.html'")).toBe(true);
+    expect(reward.split("'./run-page.html'").length - 1, '产品地址在真源里只能出现一次').toBe(1);
   });
 
   it('PL-30 首页 / 调整战车是同一页面的两个视图（零跳转，与既有玩家页面结构一致）', () => {
@@ -470,6 +501,8 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
     };
     expect(pkg.scripts['dev:home']).toBe('vite --open=/home.html');
     expect(pkg.scripts['e2e:product-home']).toBe('node tests/_e2e_product_home.cjs');
+    // PRODUCT-LOOP-R1-B：领奖闭环的浏览器端 E2E（同一份竖屏产物，无新增页面 / 无新增构建配置）
+    expect(pkg.scripts['e2e:product-reward']).toBe('node tests/_e2e_product_reward.cjs');
 
     for (const t of ['index.html', 'vite.config.ts', 'vite.pages.config.ts', 'vite.e2e.config.ts', 'vite.wechat.config.ts']) {
       const src = strip(readFileSync(join(REPO_ROOT, t), 'utf8'));

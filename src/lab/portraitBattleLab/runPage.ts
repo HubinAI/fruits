@@ -61,6 +61,9 @@ import {
   runDayNodes,
   runLogLineRects,
   runPaintedAreas,
+  runRewardCardRect,
+  runRewardIconRect,
+  runRewardTextPos,
   runStageHills,
   type RunLayerId,
   type RunLayeredRect,
@@ -124,6 +127,23 @@ import {
   type RunStageEntityView,
   type RunStageView,
 } from './runPageScene';
+/**
+ * PRODUCT-LOOP-R1-B｜RUN COMPLETE 的**产品奖励出口**（纯逻辑 / 纯几何）。
+ *
+ * ⚠️ 只在宿主提供 `RunPageOptions.productReward` 时才产生任何出口
+ *    ⇒ 无参数打开 `run-page.html` 的既有路径（含像素账本）**逐像素不变**。
+ */
+import {
+  RUN_REWARD_CLAIM_LABEL,
+  RUN_REWARD_NOTE,
+  RUN_REWARD_TITLE,
+  fitRewardIcon,
+  runProductClaimNow,
+  runRewardCard,
+  type RunProductClaim,
+  type RunProductReward,
+  type RunRewardCard,
+} from './runProductReward';
 import {
   RUN_BATTLE_VIEW_H,
   RUN_BATTLE_VIEW_W,
@@ -489,6 +509,26 @@ export interface RunPageProbe {
    *    在探针里也是**一个对象**，不存在两套口径。
    */
   readonly exitHref: string | null;
+  /**
+   * PRODUCT-LOOP-R1-B｜本帧**真正画出来的**「本局获得」卡片（`null` = 本帧没有这张卡）。
+   *
+   * ⚠️ 与绘制同源：`rewardCardNow()` 同时决定「画不画」与「探针报什么」，
+   *    因此不存在「探针说有奖励、屏幕上却没有」的分叉。
+   * ⚠️ **FAILED 恒为 `null`**：失败终态结构上没有奖励出口（`runProductClaimNow` 先查 `runComplete`），
+   *    这是 Queue 必改 4「第一版失败不发永久部件奖励」的机器可读证据。
+   * ⚠️ 无产品上下文（不传 `productReward`）时同样恒为 `null` ⇒ 既有入口零变化。
+   */
+  readonly rewardCard: {
+    defId: string;
+    name: string;
+    energy: number;
+    label: string;
+    href: string;
+    /** 是否用了该部件的正式 sprite（`false` = 如实回退到真实 Collider 外接框）。 */
+    hasSprite: boolean;
+  } | null;
+  /** 卡片矩形（与绘制同源；`null` 同上）。 */
+  readonly rewardCardRect: RunRect | null;
   /** **强化**三选一浮层是否可见（严格 = `phase === 'CHOICE'`）。 */
   readonly choiceOpen: boolean;
   /**
@@ -624,6 +664,25 @@ export interface RunPageOptions {
    *    并且**在调用之前**已经 dispose 掉战斗运行时（计时器 / 物理世界 / 弹丸 / 接触 / 事件订阅）。
    */
   readonly onExit?: ((exit: NextRunFinalAction) => void) | null;
+  /**
+   * PRODUCT-LOOP-R1-B｜**产品奖励上下文**（省略 / `null` = 不进产品奖励模式）。
+   *
+   * 提供后：`RUN COMPLETE` 终点态**多一张「本局获得」卡片**，并且主动作文案变为
+   * 「领取并返回」、点击行为变为「把出口请求交给宿主」。`FAILED` **不受影响**（无奖励、无出口）。
+   *
+   * ⚠️ 与 `exitHref` 一样只是**数据**：`RunPage` 不写 `location` / `history`，
+   *    整页导航由宿主的 `onProductClaim` 执行（`RP-25` / `RP-27`）。
+   * ⚠️ 这条链**不依赖** Next Run Validation（Queue 冻结项：正式产品闭环不依赖研发工具）。
+   */
+  readonly productReward?: RunProductReward | null;
+  /**
+   * PRODUCT-LOOP-R1-B｜「领取并返回」被点击时的处理 —— **由宿主实现**（整页导航回正式首页）。
+   *
+   * ⚠️ 与 `onExit` 同一纪律：`RunPage` 只在「COMPLETE + 有产品上下文 + 有本回调」三者齐备时调用它，
+   *    且**在调用之前**已经 `dispose()`（战斗循环 / 物理世界 / 弹丸 / 接触记录 / 事件订阅）。
+   * ⚠️ 未提供 ⇒ 终点态**不画奖励卡、不画出口按钮**（而不是画一个点了没反应的按钮）。
+   */
+  readonly onProductClaim?: ((claim: RunProductClaim) => void) | null;
 }
 
 export class RunPage {
@@ -777,6 +836,19 @@ export class RunPage {
       return;
     }
 
+    /*
+      PRODUCT-LOOP-R1-B｜RUN COMPLETE 的**产品奖励出口**。
+      ⚠️ 必须放在 `runActionEnabled(this.state)` **之前**：`COMPLETE` 在状态机里是 `true`
+         （默认唯一动作 = 开一个全新 Run），放过去就会变成「点「领取并返回」= 重开新局」
+         —— 那正是本 Queue 要避免的「奖励没进库存就悄悄开始下一局」。
+      ⚠️ 同样必须 `return`：终点态只接受**自己的唯一出口**，不接受任何推进。
+    */
+    const claim = this.productClaimNow();
+    if (claim) {
+      if (hit(runActionButtonRect(), p)) this.requestProductClaim(claim);
+      return;
+    }
+
     if (!runActionEnabled(this.state)) return;
     if (hit(runActionButtonRect(), p)) {
       // PRP-M2：验证流程里 RUN COMPLETE 的唯一主动作改写为「打开种子选择」，
@@ -876,11 +948,35 @@ export class RunPage {
   }
 
   /**
+   * PRODUCT-LOOP-R1-B｜终点态的**产品奖励出口**（`COMPLETE` + 产品上下文 + 宿主回调三者齐备才有值）。
+   *
+   * **唯一真源**：按钮文案 / 点击行为 / 探针三处都从这一个方法取
+   * ⇒ 「画了奖励但领不到」「有按钮但无 action」在结构上都不可能。
+   * ⚠️ `FAILED` 恒为 `null`（`runProductClaimNow` 先查 `runComplete`）—— 必改 4 的结构保证。
+   */
+  private productClaimNow(): RunProductClaim | null {
+    if (!this.opts.onProductClaim) return null;
+    return runProductClaimNow(this.state, this.opts.productReward);
+  }
+
+  /**
+   * 本帧要画的「本局获得」卡片（`null` = 不画）。
+   * ⚠️ 与 `productClaimNow()` **同源**：有出口才有卡片，没有出口就没有卡片。
+   * ⚠️ 卡片内容里的名称 / 能量 / 外接框全部来自正式内容库（`runRewardCard`），
+   *    未知 id 一律 `null`（不画假奖励）。
+   */
+  private rewardCardNow(): RunRewardCard | null {
+    if (!this.productClaimNow()) return null;
+    return runRewardCard(this.opts.productReward?.defId);
+  }
+
+  /**
    * 主动作是否可用。
    * ⚠️ 默认路径（`validationDone` 恒为 `false`）与 `runActionEnabled(state)` 完全等价。
    * ⚠️ 终点态：有出口 ⇒ 可用（这是本状态下**唯一**可点的东西）；无出口 ⇒ 不可用（且不画）。
    */
   private actionEnabledNow(): boolean {
+    if (this.productClaimNow()) return true;
     if (this.validationDone) return this.finalActionNow() !== null;
     return runActionEnabled(this.state);
   }
@@ -888,8 +984,11 @@ export class RunPage {
   /**
    * 主动作文案。
    * ⚠️ 默认路径与 `runActionLabel(state)` 完全等价；终点态 = 出口动作的文案（不是状态描述）。
+   * ⚠️ 产品奖励出口优先于验证出口（两者结构上互斥：验证宿主不给 `productReward`，
+   *    产品宿主不给 `exitHref`/`onExit`；万一同时给出，产品闭环优先）。
    */
   private actionLabelNow(): string {
+    if (this.productClaimNow()) return RUN_REWARD_CLAIM_LABEL;
     const exit = this.finalActionNow();
     return exit ? exit.label : runActionLabel(this.state);
   }
@@ -913,6 +1012,22 @@ export class RunPage {
     this.dispose();
     this.seedSelect = null;
     if (this.opts.onExit) this.opts.onExit(action);
+  }
+
+  /**
+   * PRODUCT-LOOP-R1-B｜「领取并返回」：清理本页运行期状态，然后把**奖励领取请求**交给宿主。
+   *
+   * ⚠️ 与 `requestExit` 同一纪律 —— **先清理、再交给宿主**；导航是异步的，不能依赖它释放运行时。
+   * ⚠️ **本页不写库存、不写存档**（Lab 白名单里没有 `core/buildPersistence` / `core/partInventory`），
+   *    也不做整页导航（`RP-25`）。「入库」与「回首页」由产品侧完成：
+   *    宿主把请求变成一次带 `run`/`reward` 参数的整页导航 → 产品首页的 Profile Repository
+   *    执行**幂等**入库。因此「奖励写入」在单机产品里只有**一个**写入点。
+   * ⚠️ 幂等键 = `runToken`（产品侧生成）：重复点击 / 重复结算由产品侧仓库拦截，本页不做乐观发奖。
+   */
+  private requestProductClaim(claim: RunProductClaim): void {
+    this.dispose();
+    this.seedSelect = null;
+    if (this.opts.onProductClaim) this.opts.onProductClaim(claim);
   }
 
   /* ------------------------------------------------------- 状态与推进 */
@@ -1161,6 +1276,14 @@ export class RunPage {
     // 5) 最底：唯一主动作按钮（填充承载文案 → 不入账；底部强调条入账）
     this.drawActionButton(ctx);
 
+    // 5b) PRODUCT-LOOP-R1-B：RUN COMPLETE 的「本局获得」卡片
+    //     ⚠️ 只在**产品奖励出口真的存在**时绘制（`rewardCardNow()` 与出口同源）
+    //        ⇒ 既有入口（不带产品上下文）一个像素都不变。
+    //     ⚠️ 位置在**舞台带内、底部对齐**：不与日志带叙事 / 动作带按钮争位。
+    //     ⚠️ 复用**已有**的非入账配色（cardBg / cardEdge / dayAccent / text*），
+    //        不引入任何新色 ⇒ 与像素账本调色板天然互斥。
+    this.drawRewardCard(ctx);
+
     // 6) 浮层（必改 4：整页重压暗 + 「图标 / 名称 / 一句结果」卡片）
     //    - CHOICE     = 三选一强化（第一层固定 / 第二层条件池）
     //    - DURABILITY = 耐久取舍（维修 vs 继续改装）
@@ -1398,7 +1521,6 @@ export class RunPage {
   }
 
   /* ------------------------------------------------------- 主动作按钮 */
-
   private drawActionButton(ctx: CanvasRenderingContext2D): void {
     // ⚠️ PRP-M2-R1（防无效按钮再次出现）：终点态**没有出口就一个按钮都不画**。
     //    否则就会出现「可见但点了没反应」的按钮 —— 那正是本 Queue 要根除的形态。
@@ -1420,6 +1542,75 @@ export class RunPage {
     ctx.textAlign = 'center';
     ctx.fillText(this.actionLabelNow(), btn.x + btn.w / 2, btn.y + 32);
     ctx.textAlign = 'left';
+  }
+
+  /* --------------------------------------------- RUN COMPLETE：本局获得卡片 */
+
+  /**
+   * PRODUCT-LOOP-R1-B｜「本局获得」卡片（Queue 必改 3：RUN COMPLETE 从测试结算变成**产品结算**）。
+   *
+   * 这一张卡承担四件事，全部只陈述**真的发生了**的东西：
+   *   - 标题「本局获得」；
+   *   - 部件**名称**（来自正式内容库 `registry.functionals`，不是页面上另写一份字面量）；
+   *   - 「**最低必要视觉**」= 该部件真实 Collider 的外接框（`rewardColliderGeom`）；
+   *     该部件没有正式 sprite 时**明确标注**（`hasSprite === false`）—— 不假装用了真实美术；
+   *   - 一行说明「领取后进入你的车库」—— 是**承诺**（点击才发生），不是已完成的状态描述。
+   *
+   * ⚠️ 卡片不做任何动画 / 稀有度 / 宝箱 / 多奖励（Queue 明令「不做」清单）。
+   * ⚠️ 数值只展示正式定义里的**能量**（`def.energy`），本 Queue 不新增任何数值系统。
+   * ⚠️ 绘制 / 探针同源：探针里的 `rewardCardRect` 直接来自 `runRewardCardRect()`。
+   */
+  private drawRewardCard(ctx: CanvasRenderingContext2D): void {
+    const card = this.rewardCardNow();
+    if (!card) return;
+
+    const r = runRewardCardRect();
+    ctx.fillStyle = COLORS.cardBg;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.strokeStyle = COLORS.cardEdge;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
+
+    // ① 左侧：真实 Collider 外接框（无 sprite 时如实标注，不画 sprite 冒充）
+    const box = runRewardIconRect();
+    ctx.fillStyle = COLORS.pageBg;
+    ctx.fillRect(box.x, box.y, box.w, box.h);
+    ctx.strokeStyle = COLORS.cardEdge;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+    const fit = fitRewardIcon(card, box.w - 16, box.h - 16);
+    const shapeX = box.x + Math.round((box.w - fit.w) / 2);
+    const shapeY = box.y + Math.round((box.h - fit.h) / 2);
+    ctx.fillStyle = COLORS.wheelRim;
+    if (card.round) {
+      ctx.beginPath();
+      ctx.ellipse(shapeX + fit.w / 2, shapeY + fit.h / 2, fit.w / 2, fit.h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillRect(shapeX, shapeY, fit.w, fit.h);
+    }
+
+    // ② 右侧：标题 / 名称 / 一行说明
+    const text = runRewardTextPos();
+    ctx.fillStyle = COLORS.dayAccent;
+    ctx.font = `13px ${FONT_STACK}`;
+    ctx.fillText(RUN_REWARD_TITLE, text.x, text.y);
+
+    ctx.fillStyle = COLORS.textTitle;
+    ctx.font = `bold 21px ${FONT_STACK}`;
+    ctx.fillText(card.name, text.x, text.y + 30);
+
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = `12px ${FONT_STACK}`;
+    const note = card.hasSprite
+      ? `能量 ${card.energy} · ${RUN_REWARD_NOTE}`
+      : `能量 ${card.energy} · ${RUN_REWARD_NOTE} · 暂无美术（按碰撞体显示）`;
+    ctx.fillText(this.ellipsize(ctx, note, r.x + r.w - text.x - 12), text.x, text.y + 52);
+
+    // ③ 图标框右下角：部件 id（最小必要的技术标识，便于与工厂/测试对上）
+    ctx.fillStyle = COLORS.textFaint;
+    ctx.font = `10px ${FONT_STACK}`;
+    ctx.fillText(card.defId, box.x + 4, box.y + box.h - 5);
   }
 
   /* ------------------------------------------------------------ 浮层 */
@@ -1780,6 +1971,13 @@ export class RunPage {
     layers: Record<RunLayerId, number>,
   ): Omit<RunPageProbe, 'stage' | 'battleWorld' | 'battleAssets'> {
     const ctxForNode = runCurrentNode(s);
+    /*
+      PRODUCT-LOOP-R1-B：本帧真正画出来的奖励卡 + 它的出口（与绘制同源：都走
+      `rewardCardNow()` / `productClaimNow()`）。放在这里是因为 `baseProbe` 就是
+      「与 phase 无关的那部分诊断快照」的唯一装配点。
+    */
+    const rewardCard = this.rewardCardNow();
+    const rewardClaim = this.productClaimNow();
     return {
       logicalW: PORTRAIT_LOGICAL_W,
       logicalH: PORTRAIT_LOGICAL_H,
@@ -1846,8 +2044,29 @@ export class RunPage {
       actionLabel: this.actionLabelNow(),
       actionEnabled: this.actionEnabledNow(),
       actionRect: runActionButtonRect(),
-      /** ⚠️ PRP-M2-R1：与 `actionLabel` 同源 —— 终点态下「点了去哪」也是本帧的真实口径。 */
-      exitHref: this.finalActionNow()?.href ?? null,
+      /**
+       * ⚠️ PRP-M2-R1：与 `actionLabel` 同源 —— 终点态下「点了去哪」也是本帧的真实口径。
+       * PRODUCT-LOOP-R1-B 起同源口径扩到产品奖励出口（产品出口优先于验证出口；
+       * 两者结构上互斥 —— 验证宿主不给 `productReward`，产品宿主不给 `exitHref`）。
+       */
+      exitHref: rewardClaim?.href ?? this.finalActionNow()?.href ?? null,
+      /**
+       * PRODUCT-LOOP-R1-B｜本帧真正画出来的「本局获得」卡片（`null` = 本帧没有这张卡）。
+       * ⚠️ 与绘制同源（同一个 `rewardCardNow()`）；**FAILED 恒为 `null`**
+       *    （失败终态结构上没有奖励，Queue 必改 4）；不带产品上下文时同样恒为 `null`。
+       */
+      rewardCard: rewardCard
+        ? {
+            defId: rewardCard.defId,
+            name: rewardCard.name,
+            energy: rewardCard.energy,
+            label: RUN_REWARD_CLAIM_LABEL,
+            href: rewardClaim?.href ?? '',
+            hasSprite: rewardCard.hasSprite,
+          }
+        : null,
+      /** 卡片矩形（与绘制同源；`null` 同上）。 */
+      rewardCardRect: rewardCard ? runRewardCardRect() : null,
       choiceOpen: runChoiceOpen(s),
       /**
        * ⚠️ PRP-BUILD-01 / R2：候选**来自当前脚本节点声明的池**（第一层三选一 / 横向改装二选一 /

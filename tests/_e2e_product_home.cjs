@@ -167,9 +167,12 @@ async function main() {
       `sprites=${p.previewSpriteCount} fallbacks=${p.previewFallbackCount} items=${p.previewItems.length}`,
     );
     log(
-      p.startRunHref === './run-page.html',
-      'A7「开始冒险」是同产物内的相对链接（本轮不改 Run）',
-      `href=${p.startRunHref}`,
+      typeof p.startRunHref === 'string' &&
+        p.startRunHref === p.adventureHref &&
+        p.startRunHref.startsWith('./run-page.html?run=') &&
+        p.startRunHref.includes(`run=${p.runToken}`),
+      'A7「开始冒险」= 同产物内相对链接，且 = 本页产物地址（带本局 token，PRODUCT-LOOP-R1-B 起）',
+      `href=${p.startRunHref} token=${p.runToken}`,
     );
 
     const stored0 = await storageDump(page);
@@ -304,20 +307,36 @@ async function main() {
 
     /* --------------------------------- 7) 「开始冒险」真的落到玩家 Run 入口 */
     await clickSelector(page, '[data-ph-action="back-home"]');
+    const homeP = await probeOf(page);
     await Promise.all([
       page.waitForURL(/run-page\.html/, { timeout: 20000 }).catch(() => {}),
       clickSelector(page, '[data-ph-action="start-run"]'),
     ]);
     await sleep(600);
     const runDom = await page.evaluate(() => ({
-      url: location.pathname,
+      path: location.pathname,
+      search: location.search,
       hasRunRoot: !!document.getElementById('run-root'),
       hasHomeRoot: !!document.getElementById('ph-root'),
     }));
     log(
-      /run-page\.html$/.test(runDom.url) && runDom.hasRunRoot && !runDom.hasHomeRoot,
-      'G1 首页「开始冒险」→ 落到既有玩家 Run 入口（同产物相对链接，整页导航）',
-      `path=${runDom.url} run-root=${runDom.hasRunRoot}`,
+      runDom.path === '/run-page.html' &&
+        runDom.hasRunRoot &&
+        !runDom.hasHomeRoot &&
+        runDom.search.includes(`run=${homeP.runToken}`),
+      'G1 首页「开始冒险」→ 落到既有玩家 Run 入口（整页导航，且把本局 token 带进 Run）',
+      `path=${runDom.path} search=${runDom.search} run-root=${runDom.hasRunRoot}`,
+    );
+
+    /* --- G2 带奖励参数进来、但还没打完 ⇒ 不得出现奖励卡（既有路径逐帧不变） --- */
+    const runIdle = await page.evaluate(() => window.__RUNPAGE__.probe());
+    log(
+      runIdle.rewardCard === null &&
+        runIdle.rewardCardRect === null &&
+        runIdle.exitHref === null &&
+        runIdle.phase !== 'COMPLETE',
+      'G2 带奖励参数进 Run：非 COMPLETE 状态不画奖励卡、也没有产品出口（只有真结算才出现）',
+      `phase=${runIdle.phase} rewardCard=${runIdle.rewardCard} exitHref=${runIdle.exitHref}`,
     );
   } finally {
     await browser.close();

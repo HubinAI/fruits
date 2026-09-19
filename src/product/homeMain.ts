@@ -1,17 +1,19 @@
 /**
- * PRODUCT-LOOP-R1-A-HOME-GARAGE-INVENTORY｜竖屏产品页面（首页 / 调整战车）的**入口壳**。
+ * PRODUCT-LOOP-R1-A/B｜产品首页入口壳（`home.html` 的 `<script type="module">`）。
  *
- * 为什么单独一个文件（与 `runMain.ts` / `contentBatchMain.boot()` 同一分工）：
- *   - `homePage.ts` 只导出 `mountProductHome(root)`，模块级不碰 DOM ⇒ 可在 node 下
- *     直接 import 做单测；
- *   - 浏览器侧由本文件负责「找容器 → 挂载」（找不到容器明确报错，不静默白屏）。
+ * 分工（与 `runPage.ts` / `runMain.ts` 同一套路）：
+ *   - `homePage.ts`  = 页面逻辑（**模块级零 DOM**，可在 node 下直接 import 做单测）；
+ *   - `homeMain.ts`  = 入口壳：找容器 → 读 URL → 挂载。**只有壳能读 `location`**。
  *
- * 与 `src/main.ts` 完全隔离：不 import PlayerGameRuntime / Renderer / 任何正式玩法 Runtime，
- * 也不 import 任何 DEBUG 实验台模块（本页面源码在 `src/product/`，不在实验目录内）。
+ * PRODUCT-LOOP-R1-B｜为什么读 URL 放在壳里：
+ *   玩家点 Run 的「领取并返回」后会落回 `./home.html?run=<token>&reward=<defId>`。
+ *   读 `location.search` 需要 DOM 全局 —— 放进页面逻辑会让「页面可在 node 下 import」
+ *   这条不变量失效（本项目的页面模块级零 DOM 铁律）。
  *
- * 开发：`npm run dev:home` → http://127.0.0.1:5173/home.html
- * 构建：竖屏产品构建脚本（见 package.json 的 `build:*`，与 `run-page.html` 同一产物）
- *       → 产物目录内含 home.html。
+ * ⚠️ 壳只把 URL **原样**交给页面（一个字符串），自己**解析都不做**：
+ *    解析是纯函数（`parsePendingClaim`），属于产品逻辑层 ⇒ 壳的 import 清单保持
+ *    「只 import 页面模块本身」不变（A 段的 `PL-26c` 守卫因此**不需要放宽**）。
+ * ⚠️ 壳不做任何业务判断：不校验奖励是否合法、不决定发不发奖 —— 那由 Profile Repository 判。
  */
 import { mountProductHome } from './homePage';
 
@@ -21,7 +23,8 @@ function boot(): void {
     // 页面缺失容器：明确报错（不静默白屏）
     throw new Error('[PRODUCT-LOOP] 未找到 #ph-root 容器');
   }
-  mountProductHome(root);
+  // 无参数 → 空串 ⇒ 页面按「正常打开首页」处理（与 A 段行为完全一致）
+  mountProductHome(root, { search: window.location.search });
 }
 
 if (document.readyState === 'loading') {

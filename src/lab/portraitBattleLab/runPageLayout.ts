@@ -579,3 +579,46 @@ export function runPaintedAreas(shapes: readonly RunLayeredRect[]): Record<RunLa
   }
   return out;
 }
+
+/* ------------------------------------- RUN COMPLETE：本局获得（产品奖励）卡片 */
+
+/**
+ * PRODUCT-LOOP-R1-B｜RUN COMPLETE 的「本局获得」卡片几何（**唯一真源**）。
+ *
+ * 位置选择：**舞台带底部**、整宽内缩 —— 不与「日志带叙事（底部对齐、新行顶入）」和
+ * 「动作带唯一按钮」争位；COMPLETE 时舞台上是**冻结静止**的战斗画面，压一张卡不丢信息。
+ *
+ * ⚠️ 卡片**只在产品奖励上下文存在时**绘制（`RunPageOptions.productReward`）⇒
+ *    无参数打开 `run-page.html` 的既有路径**一个像素都不变**（既有像素账本不受影响）。
+ * ⚠️ 卡片配色刻意**避开**像素账本的调色板（地面 / 路面 / 节点 / 强化图标 / 强调条），
+ *    因此它不会把任何入账面积算进或算错。
+ */
+export const RUN_REWARD_CARD = { insetX: 14, h: 104, bottomInset: 12, iconBox: 74, pad: 14 } as const;
+
+/** 「本局获得」卡片矩形（舞台带内、底部对齐）。 */
+export function runRewardCardRect(): RunRect {
+  return {
+    x: RUN_STAGE_BAND.x + RUN_REWARD_CARD.insetX,
+    y: RUN_STAGE_BAND.y + RUN_STAGE_BAND.h - RUN_REWARD_CARD.h - RUN_REWARD_CARD.bottomInset,
+    w: RUN_PAGE_W - 2 * RUN_REWARD_CARD.insetX,
+    h: RUN_REWARD_CARD.h,
+  };
+}
+
+/** 卡片内左侧「部件视觉」方框（真实 Collider 外接框按 fit 缩放后画在框心）。 */
+export function runRewardIconRect(): RunRect {
+  const card = runRewardCardRect();
+  const size = RUN_REWARD_CARD.iconBox;
+  return {
+    x: card.x + RUN_REWARD_CARD.pad,
+    y: card.y + Math.round((card.h - size) / 2),
+    w: size,
+    h: size,
+  };
+}
+
+/** 卡片内右侧文案起点。 */
+export function runRewardTextPos(): { x: number; y: number } {
+  const icon = runRewardIconRect();
+  return { x: icon.x + icon.w + RUN_REWARD_CARD.pad, y: runRewardCardRect().y + 34 };
+}

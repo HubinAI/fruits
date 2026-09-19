@@ -34,6 +34,7 @@
     "e2e:validation-hub": "node tests/_e2e_validation_hub.cjs",
     "e2e:default-entry": "node tests/_e2e_prp_default_entry.cjs",
     "e2e:product-home": "node tests/_e2e_product_home.cjs",
+    "e2e:product-reward": "node tests/_e2e_product_reward.cjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

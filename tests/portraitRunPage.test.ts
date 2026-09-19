@@ -1258,8 +1258,26 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
     }
   });
 
+  /**
+   * PRODUCT-LOOP-R1-B：**可导航的唯一文件** = 入口壳 `runMain.ts`。
+   *
+   * ⚠️ 这次是「把守卫改对」而不是「放宽守卫」，理由与代价都写在这里：
+   *   - 旧写法把 `runMain.ts` 和页面文件混在一个清单里「一律禁止**一切**导航」，
+   *     这与它自己的文档口径**矛盾** —— `runPage.ts` 的注释明确写着
+   *     「整页导航属于**宿主**的职责（`nextRunMain.ts` 的 `onExit`）」。
+   *     而 `nextRunMain.ts` 恰好不在本清单里，所以旧清单从来没有真正禁止过「宿主导航」，
+   *     只是把**玩家那颗宿主的**也顺手禁了。
+   *   - 产品主循环要求 RUN COMPLETE 有真实出口（Queue 必改 3「领取并返回」）
+   *     ⇒ 玩家入口的宿主必须能导航一次。
+   *   - 代价与对冲：`runMain.ts` 被**单独**放行，但新加 `RP-25b` 对它下更严的断言
+   *     （只允许一次 `location.assign`、禁止任何其它导航 API、目标必须是出口请求的字段、
+   *      文件里不得出现任何地址字面量）。页面文件 / 纯模块的禁令**一条都没动**。
+   */
+  const RUN_NAVIGABLE_FILES = ['runMain.ts'];
+  const RUN_PAGE_FILES_NO_HOST = RUN_PAGE_FILES.filter((f) => !RUN_NAVIGABLE_FILES.includes(f));
+
   it('RP-25 Run Page 不创建任何 DOM 按钮、不写 location / history（结构上无法跳转）', () => {
-    for (const f of RUN_PAGE_FILES) {
+    for (const f of RUN_PAGE_FILES_NO_HOST) {
       const code = stripComments(read(f));
       for (const t of [
         "createElement('button')",
@@ -1278,6 +1296,51 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
     expect(page.includes('run-root')).toBe(true);
     expect(page.includes('run-canvas')).toBe(true);
     expect(page.includes('run-stage')).toBe(true);
+  });
+
+  /**
+   * PRODUCT-LOOP-R1-B｜宿主是**唯一**导航点，且「点了去哪」必须来自出口请求的数据。
+   *
+   * 这条是 RP-25 的对偶：放宽了「哪个文件能导航」，就用**更精确**的断言把能力钉住 ——
+   * 宿主里一旦出现任何地址字面量，或者多出第二个导航 API，立刻 FAIL。
+   */
+  it('RP-25b 宿主只允许一次数据驱动的整页导航，且文件内不含任何地址字面量', () => {
+    const host = stripComments(read('runMain.ts'));
+    // ① 恰好一次导航
+    expect(host.split('location.assign(').length - 1, 'runMain.ts 必须恰好有一次整页导航').toBe(1);
+    // ② 不得有任何其它导航 / 逃逸 API，也不得自己造 DOM 控件
+    for (const t of [
+      'location.href',
+      'location.replace',
+      'history.pushState',
+      'history.replaceState',
+      'window.open',
+      'createElement',
+    ]) {
+      expect(host.includes(t), `runMain.ts 不得出现 "${t}"`).toBe(false);
+    }
+    // ③ 目标必须**就是**出口请求的字段（不是写死的地址）
+    expect(
+      host.includes('location.assign(claim.href);'),
+      '导航目标只能来自出口请求（`claim.href`）',
+    ).toBe(true);
+    for (const t of ['.html', 'http://', 'https://', 'location = ', 'window.location =']) {
+      expect(host.includes(t), `runMain.ts 不得硬编码任何地址（"${t}"）`).toBe(false);
+    }
+    // ④ 页面 / 纯模块的禁令一条都不动（本 Queue 未放宽任何页面能力）
+    for (const f of RUN_PAGE_FILES_NO_HOST) {
+      const code = stripComments(read(f));
+      for (const t of [
+        'location.href',
+        'location.assign',
+        'location.replace',
+        'history.pushState',
+        'history.replaceState',
+        'window.open',
+      ]) {
+        expect(code.includes(t), `${f} 不得出现 "${t}"`).toBe(false);
+      }
+    }
   });
 
   it('RP-26 run-page.html 只挂 runMain.ts，且不含任何 PBL 开发控制标记', () => {
