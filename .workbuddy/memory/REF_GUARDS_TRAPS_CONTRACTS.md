@@ -282,6 +282,8 @@ R1-D 门控时发现 `e2e:next-run` 已在 **7 个提交前**失效
 
 ### §6b 库存 = stack 模型，`src/core/**` 一行都不用动
 
+> ⚠️ **R2-B 起本条只在 ★1/★2 两档内成立**（要求 ★3..★5 时存储层必须泛化，见 §7a）。
+
 `PartInventory = { [defId]: { one, two } }` 就是 `(defId, star) → 副本数`（`star 1 → one`，
 `star ≥ 2 → two`），`addPart(inv, defId, star, n)` **已按 `(defId, star)` 归并**
 ⇒ 「同一个 `partId + star` 归并为同一个 stack」这条 Queue 要求**在数据层早已成立**。
@@ -342,3 +344,52 @@ R2-A 的 3选1 块：`3 × 362 × 68 = 73848 px²`；实测 `cardBg = 58822`（�
 | `REWARD_WEAPON_ID` | `REWARD_CHOICE_IDS = ['cannon','spear','hammer']` |
 | `back` 参数 | `choices` 载荷 |
 | Garage 卡无数量 | `data-ph-star` / `data-ph-count` / `data-ph-stack-text` / `data-ph-stack-threshold` + `ph-card-full` |
+
+---
+
+## §7 合成 = 5 合 1 → 下一星级（PRODUCT-LOOP-R2-B 固化契约）
+
+### §7a ⚠️ 高星**必须**泛化存储层，否则是**静默腐烂**（不是报错）
+
+扩展前 `PartInventory = {defId: {one, two}}` + 映射 `star >= 2 ? two : one`
+⇒ **★3 与 ★2 落进同一个桶**：`5 × ★2` 合成出 ★3 会把 ★2 的计数一起抬上去，
+而 `getCount(inv, id, 3)` 读回来正是 ★2 的数量 —— 数据已经错了，**没有一处抛错**。
+`normalizeInventory()` 只搬运已知字段 ⇒ 产品侧**不可能**绕过 core 另存高星档。
+
+| 概念 | 值 | 含义 |
+|---|---|---|
+| `INVENTORY_MAX_STAR`（`core/partInventory`） | **5** | **存储 / 读数结构**的档数上限 |
+| `MAX_STAR`（`core/partInventory`） | **2** | **旧横屏融合规则**的策略上限（Q22 冻结，**不要动**） |
+
+`STAR_KEYS = ['one','two','three','four','five']` + `starKey()` 是「星级 → 字段名」的**唯一映射**
+（越界 / 非数**夹**到 1..5，不抛）；`three/four/five` **可选** ⇒ 旧档零迁移成本。
+⚠️ 「★6 读作 0」是**错的期望**：`starKey(6)` 夹回 ★5 ⇒ 要断言「★6 不存在」只能看**桶名**。
+
+### §7b 产品侧合成**不复用** core 的融合规则（两者语义相反）
+
+| | core `fuseSameStar` / `fuseCategoryMaterials` | 产品 `playerGrowth.fuseStack` |
+|---|---|---|
+| 已装备副本 | **保护**（`available = owned - equipped`） | **允许参与**（Queue 必改 2） |
+| 上限 | `MAX_STAR = 2` | `INVENTORY_MAX_STAR = 5` |
+| 装备 | 不管 | 该档被合空 ⇒ **自动升星**，失败**整体回滚** |
+
+⇒ 两份规则**故意并存**；`canFuseStack` / `fuseStack` 是产品侧唯一入口。
+模块方向：`playerGrowth → playerLoadout` 单向，`playerLoadout` **不**反向 import
+（星级上限改取 core 的 `INVENTORY_MAX_STAR`，「两个 5 同值」由 FB-13 钉死）。
+
+### §7c ⚠️ `validateSnapshot` **不含**星级倍率（已探明，**未修**）
+
+`buildValidator.ts:114` 累加 `def.energy`（无倍率）vs `:48` 的 `computeEnergy` 用 `starTierEnergy`。
+git 取证：前者自 `9ced1c7`（建文件）未改，后者由 `5133a1c`（Q22）加入 ⇒ **Q22 漏改**。
+⇒ 合成升星**不会**被能量校验挡住 ⇒ `fuseStack` 的回滚分支当前只能由 `unknown-slot` 触达
+（构造：`wedgeBody` 无 `frontMass` 挂点）。FB-11b 把该事实机器钉死；修它属独立 Bug Queue。
+
+### §7d 页面 / E2E 写法
+
+- ⚠️ **HTML 不允许 `button` 嵌 `button`** ⇒ 合成按钮是卡片的**兄弟节点**（`.ph-card-cell` + 绝对定位）。
+- ⚠️ 一个 `defId` 现在**可能有两张卡**（★1 / ★2 各一）⇒ 取卡必须**同时**按 `defId` + `star` 定位；
+  `weaponEntries` 按星级升序遍历 ⇒ `querySelector` 默认拿到 ★1 那张。
+- ⚠️ E2E 里核对磁盘的星级字段映射要**独立复刻**（不 import 被测模块），否则等于用被告的证词。
+- ⚠️ 合成段放进 E2E 时**必须排在所有「跑局」断言之后**：★2 的炮真实占 33 能量（★1 = 30）
+  ⇒ 插在中间会改变 Build 数值，让「确定性通关路线」不再确定性。
+- ⚠️ `stackText` 契约：未满 = **`4/5`**（不是 `×4`），满 = `5/5`（不写 `6/5`）。

@@ -15,8 +15,12 @@
   （实验，可整块删）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`c0d2c5d`+`69c4d1e` R1-A（局外配车）→ `f1b87a2`(+`fb982be`) R1-B（永久部件奖励）→
   `4f0be1a` R1-C（端到端主循环）→ `c63408c` R1-D（失败结算 → 返回主界面）→
-  **`c40977a` R2-A 通关 3选1 → 数量累积**（永久成长 R2 起点；起点 `a0e9fba`）；更早查 `git log`。
-- 全链对 `src/{core,physics,render,player,platform,ui,game,presentation}` diff **恒为空**（已机器取证）。
+  `c40977a` R2-A（通关 3选1 → 数量累积）→
+  **`16a221f` R2-B（5 合 1 → 下一星级 ★1..★5）**（起点 `52f3f6d`）；更早查 `git log`。
+- ⚠️ **不变量在 R2-B 起被有意打破一处**：`src/{physics,render,player,platform,ui,game,presentation,lab}` diff
+  仍**恒为空**，但 **`src/core` 不再是空 diff** —— R2-B 泛化库存存储层（`partInventory.ts` +119/−20、
+  `buildPersistence.ts` +17/−3），**必改**，理由见 REF_GUARDS **§7a**（不改 = ★3 与 ★2 同桶的静默腐烂）。
+  除这两处外 core 零改动（Battle / 伤害 / 物理 / 经济未触碰）。
 
 ## 2. 红线速查（全文 → REF_GUARDS §1–2）
 - 环境：禁 `git stash`；四路 SHA 前先 `git fetch`；`git commit -F` 传 **Windows 路径**；排除 `交接文档_*.md` 用
@@ -40,6 +44,16 @@
 - ⚠️ **R2-A 地址层契约**：R1-B 的「一个 `back`」已被 **`choices` 载荷**取代
   （`{stack, choices:[{defId,star,countBefore,href}]}`）；三条 href **共用同一 run token**
   ⇒ 幂等键是 token 不是地址（「换一件」也领不到）。库存数量**只能由产品侧传**（Lab 读不到正式存档）。
+- ⚠️ **R2-B 星级/合成红线（全文 → REF_GUARDS §7）**：
+  ① 两个「上限」是**两件事**：`INVENTORY_MAX_STAR = 5`（存储结构，新）vs `MAX_STAR = 2`
+  （**旧横屏融合规则**，冻结 ⇒ 横屏测试当域不变量断言它，**不许动**）；
+  ② 产品合成**不复用** core 的 `fuseSameStar`（语义相反：core 保护已装备副本 + 上限 2★）；
+  ③ `stackText` 未满 = **`4/5`**（不是 `×4`）；
+  ④ 一个 `defId` 现在**可能有两张卡** ⇒ 取卡必须同时按 `defId` **+ `star`** 定位；
+  ⑤ 合成按钮是卡片的**兄弟节点**（HTML 不许 `button` 嵌 `button`）；
+  ⑥ E2E 合成段**必须排在所有跑局断言之后**（★2 真实占 33 能量 ⇒ 插中间会毁掉「确定性通关」）；
+  ⑦ ⚠️ **`validateSnapshot` 不含星级倍率**（`computeEnergy` 含）⇒ 升星**不会**被能量挡住，
+  合成回滚分支只能由 `unknown-slot` 触达（已探明，**未修**，独立 Bug Queue）。
 - ⚠️ **像素阈值必须按面积推导**，不要凭印象：3×362×68 = 73848 px²，实测 `cardBg` 58822 ⇒ 取 55000。
 - ⚠️ **E2E 像素取证必须在「点那张卡之前」**：点中即整页导航 ⇒ `#run-canvas` 为 `null`。
 - ⚠️ **HTML 注释里禁止出现注释终止序列**（两个连字符紧跟一个右尖括号）⇒ 注释提前闭合、
@@ -54,19 +68,28 @@ M3 遭遇台 §H · Hub §I · M2-R1 终点态出口 §L · PBL-RDC §M → `REF
 ⚠️ **不在 REF、只看交接文档**：`PRP-M3-CONTENT-BATCH-01` · `PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1` ·
 `PRODUCT-LOOP-R1-A` · `PRODUCT-LOOP-R1-B` · `PRODUCT-LOOP-R1-C`（端到端主循环）·
 `PRODUCT-LOOP-R1-D`（失败链 / 终态出口，契约见 REF_GUARDS §5）·
-**`PRODUCT-LOOP-R2-A`（3选1 / 数量累积 / 成长模型，契约见 REF_GUARDS §6）**。
+**`PRODUCT-LOOP-R2-A`（3选1 / 数量累积 / 成长模型，契约见 REF_GUARDS §6）** ·
+**`PRODUCT-LOOP-R2-B`（5 合 1 → 下一星级 ★1..★5，契约见 REF_GUARDS §7）**。
 启动两行：`cd D:\0818new\最强水果` → `npm run dev`（默认进**产品首页**；研发用 `dev:home` / `dev:next-run` /
 `dev:encounter-lab` / `dev:validation`）。
 
 ## 4. Next action
-- ✅ **永久成长 R2 的起点已落地（R2-A）**：通关 → **3选1** 真实武器 → 选中那件**进局外库存并累积数量** →
-  回车库看到 `★1 ×N`（满 5 显示 `5/5`）→ 装上 → 下一局真的用它。失败侧继续完全冻结（零 count 变化）。
-  新 E2E：`e2e:product-reward` **39/39**（本轮重写，含真实像素 A/B）、`e2e:product-loop` **48/48**；
-  全量 vitest **2213/2213**；`src/core/**` **一行未动**。门禁全绿（明细见当日 log / 交接文档）。
+- ✅ **R2-B 合成已落地**：`5 × 同 partId + 同 star → 1 × star+1`（通用，非 cannon 专用）；
+  装备中的那件被合空 ⇒ **自动升星**（页面 + 正式 Build 存档双取证）；★5 上限；一次点击只合一次。
+  E2E `product-reward` **48/48**（+K1..K9）、其余 8 个 E2E 与 R2-A 基线**逐条相同**（零回归）；
+  全量 vitest **215 files / 2245 tests**；4 个 build 全绿（⚠️ 微信 `game.js` 1,413.81 kB，+2.05 kB）。
   ⚠️ 用户明令**停止继续扩 Validation / Lab / 局内内容**；Queue 完成即**停等**，不要自行开下一条 Queue。
-- ⚠️ **下一步（等用户下令）**：**Queue B = 合成动作**（5 件 → 升星）。当前已备好的接口：
-  `playerLoadout.weaponEntries()` 的 `threshold` / `stackText` / `reachesThreshold`（与卡片同源）、
-  core 既有 `canFuse(...).need = 5`（真源）。**不要**自行开工。
+- ⚠️ **下一步（等用户下令）**：Queue C（明细未下）。**不要**自行开工。
+- ⚠️ **待用户裁决（R2-B 新增 4 条，别自作主张改）**：① ★2 会让「三件炮」型 Build 超容量
+  （`bananaBody` 90：★1 三件恰好 90 合法、★2 变 93）⇒ 合成后可能「装不上」，属产品事实需上报；
+  ② 只升 `WEAPON_SLOT` 的星、其它挂点不跟（一并改星会动 Battle 数值 ⇒ 刻意不做）；
+  ③ 「10 件需点两次」是必改 5 的明确定义；④ `validateSnapshot` 星级盲是否现在开独立 Bug Queue 修。
+- ⚠️ **发现但未修（R2-B 新增，建议独立 Bug Queue）**：`buildValidator.validateSnapshot` **不含星级倍率**
+  （`:114` 累加 `def.energy`，而 `:48` 的 `computeEnergy` 用 `starTierEnergy`）。
+  git 取证：前者自 `9ced1c7`（建文件）未改、后者由 `5133a1c`（Q22）加入 ⇒ **Q22 漏改**，早于本 Queue。
+  已由 `productFusionR2B` 的 FB-11b 机器钉死；按「门控缺陷拆独立 Queue、禁混并 scope」**只记录不修**。
+- ✅ R2-A 已完成：通关 → 3选1 真实武器 → 进局外库存并累积数量 → 车库看到 `4/5` → 装上 → 下一局真的用它；
+  失败侧完全冻结（零 count 变化）。E2E `product-reward` 39/39（R2-B 后 48/48）、`product-loop` 48/48。
 - ⚠️ **待用户裁决（R2-A 新增 3 条，别自作主张改）**：① `openGrowthSession(draft)` **一参**签名
   （把「先判 fresh 再取库存」的顺序收进函数内部，否则种子静默失效）；② 新账号起点 `cannon ×4`
   是产品数值决策；③ 第二局验证**必须换回 cannon**（内容强度矩阵：只有远程炮能稳定通关）。
