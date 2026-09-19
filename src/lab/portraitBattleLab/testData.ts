@@ -182,6 +182,22 @@ export interface LabTestEncounter {
   readonly count: number;
   /** 正式对手模板 Draft（同一模板复制 count 份，不新增任何数值）。 */
   readonly draft: BuildDraft;
+  /**
+   * PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1｜这一套 Encounter 要求对手使用的
+   * **Movement 姿态**（缺口径）。
+   *
+   * - `'keep-distance'` = 「维持作战距离」：远 → 接近 / 合理射程 → 不主动接近 / 近 → 后撤。
+   *   由正式 Movement Foundation（`battleContract` → `enemyDrive.ts`）执行，仍然是
+   *   wheel motor + 真实 grip，不是位置修正。
+   * - 缺省（`undefined`）⇒ **对手驱动与既有完全相同**（恒朝玩家全速），
+   *   即 ProtoRusher / Chaser 以及 Run Script 的四场对手**逐帧不变**。
+   *
+   * ⚠️ 这是**声明**，不是按 id / 计数推断：只有明确声明的 Encounter 才会换档。
+   *    「远程身份需要距离维持」是这一套 Encounter 的**验证目标**，
+   *    而不是所有「有弹丸武器的敌人」的自动推断 —— 那会把 Run 的第四场
+   *    （`BananaRodLaser`，forward）一起卷进来。
+   */
+  readonly enemyDrive?: 'keep-distance';
 }
 
 /**
@@ -203,10 +219,21 @@ export const LAB_ENCOUNTERS: readonly LabTestEncounter[] = [
   {
     id: 'RangedTurret',
     label: '远程炮台',
-    note: '单个远程敌人（正式模板 OPP-03：西瓜 + 炮 + 机枪 · 停驻）',
+    note: '单个远程敌人（正式模板 OPP-03：西瓜 + 炮 + 机枪）· 声明「维持作战距离」（PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1）',
     templateId: 'OPP-03',
     count: 1,
     draft: formalOpponentDraft('OPP-03'),
+    /**
+     * ⚠️ PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：**唯一**声明距离维持的 Encounter。
+     *
+     * 真人验收失败原因（Queue 原文）：「远距离阶段远程射击身份非常清楚，数秒后双方迅速
+     * 贴脸，后续基本退化成普通近战碰撞」—— 缺口不是射击可见性，而是**远程敌人缺少
+     * 「维持合理作战距离」的 Movement 能力**。
+     *
+     * 实测（本 Queue 必改 1 的证据）：不加此声明时，本套 Encounter 的外廓间距在约 300 步
+     * （≈5s）内从 489 掉到 2.6（= 贴脸），且是**敌人主动**从 1200 一路开到 885。
+     */
+    enemyDrive: 'keep-distance',
   },
   {
     id: 'LightSwarm3',

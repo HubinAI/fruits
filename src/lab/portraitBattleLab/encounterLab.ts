@@ -32,6 +32,7 @@
  */
 
 import { PlayerViewportTransform } from '../../platform/playerViewport';
+import { ENEMY_KEEP_DISTANCE_BANDS } from '../../battle/battleContract';
 import { PORTRAIT_LOGICAL_H, PORTRAIT_LOGICAL_W } from './constants';
 import {
   ENCOUNTER_BATCH,
@@ -125,6 +126,13 @@ export interface LiveBattleReading {
   readonly impact: boolean;
   readonly damage: boolean;
   readonly cameraScale: number;
+  /**
+   * PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1｜对手上一步实际生效的**距离档**
+   * （`near` / `hold` / `far`；本套 Encounter 未声明 `enemyDrive` ⇒ `null`）。
+   */
+  readonly enemyDriveBand: 'near' | 'hold' | 'far' | null;
+  /** 该决策真正读到的**core 间距**（Body + Wheels，与相机取景同源；无决策 ⇒ `null`）。 */
+  readonly enemyDriveGap: number | null;
 }
 
 /** 一场跑完的战斗（用于「三种 Encounter 都能稳定进入 / 战斗 / 清理 / 重开」）。 */
@@ -370,6 +378,8 @@ export class EncounterLab {
   private readLive(rt: RunBattleRuntime): LiveBattleReading {
     const hp = rt.hp();
     const cr = rt.contactResidue();
+    // PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：只读回读正式编排器的上一步决策
+    const drive = rt.enemyDriveState();
     return {
       encounterId: rt.encounterId,
       arenaPhase: rt.phase,
@@ -385,6 +395,8 @@ export class EncounterLab {
       impact: cr.impact,
       damage: cr.damage,
       cameraScale: this.battleView.viewTransform().scale,
+      enemyDriveBand: drive ? drive.band : null,
+      enemyDriveGap: drive ? drive.gap : null,
     };
   }
 
@@ -573,6 +585,14 @@ export class EncounterLab {
     } else {
       line(`阶段 ${live.arenaPhase} · 步数 ${live.steps} · ${(live.timeMs / 1000).toFixed(2)}s · 存活弹丸 ${live.projectiles}`);
       line(`玩家 ${live.playerHp}/${live.playerHpMax} · 敌 ${live.enemyHp}/${live.enemyHpMax} · 外廓间距 ${live.gapWorld.toFixed(1)}px`);
+      // PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：对手「维持作战距离」的实时档位
+      line(
+        live.enemyDriveBand === null
+          ? '对手距离档 无（本套 Encounter 未声明 enemyDrive ⇒ 既有恒定驱动）'
+          : `对手距离档 ${live.enemyDriveBand} · core 间距 ${(live.enemyDriveGap ?? 0).toFixed(0)}px` +
+            `（近=${ENEMY_KEEP_DISTANCE_BANDS.near} 远=${ENEMY_KEEP_DISTANCE_BANDS.far}）`,
+        live.enemyDriveBand === null ? COLORS.idle : COLORS.accent,
+      );
       line(`相机 scale ${live.cameraScale.toFixed(3)}（正式 battle 相机链）`);
     }
 

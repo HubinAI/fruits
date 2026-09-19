@@ -672,3 +672,87 @@ runPage.ts（与正式玩家页面共用）  finalActionNow()  ← 唯一真源
 | 全量 vitest（`--pool=vmForks --maxWorkers=1`） | **206 文件 / 2022 用例 PASS** |
 | 冻结区 `git diff --stat` | **空** |
 | `validationHub.ts` + `tests/portraitValidationHub.test.ts` | **零 diff** |
+
+## M. PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1（远程敌人的「维持作战距离」）
+
+### M.1 缺口 = 正式编排器里没有「往哪开」这一层
+
+| 环节 | 改前 |
+|---|---|
+| Enemy AI / Movement decision | **不存在** |
+| target distance | **不存在** |
+| desired movement | **不存在** |
+| motor / wheel | 有（`planckMovement.drivePlanckVehicle`） |
+| 接线 | `drivePlanckVehicle(B, {enabled:true, worldDirection:-1, targetSpeed:1.5})` — **硬编码恒朝玩家**（`planckBattleOrchestrator.ts:359`） |
+
+⚠️ 正式对手池 `OPP-03`（RangedTurret 模板）**声明了 `drive:'stationary'`**，但
+`SpawnedEntity.drive` **只被 `arenaA.ts` 消费** ⇒ 在 `RunBattleRuntime → PlanckBattleOrchestrator`
+这条链上「算出来就丢掉」。**数据说停驻，运行时说冲锋。**
+
+### M.2 三段档（唯一真源 = `src/battle/enemyDrive.ts`）
+
+| 档 | 条件 | 下发 |
+|---|---|---|
+| `far` | `coreGap > 480` | `enabled:true` · 朝对手 · 1.5（= 既有 autoDrive） |
+| `hold` | `240 ≤ coreGap ≤ 480` | `enabled:false` |
+| `near` | `coreGap < 240` | `enabled:true` · **反向** · 2.6 |
+
+- 粗档推导：正式 cannon `muzzleSpeed 8 × 一轮冷却 60 步 = 480px` ⇒ `far = 1×`、`near = 0.5×`（`RDC-05` 机器钉死）。
+- `retreatSpeed 2.6 > 1.5`：**必须快过对手正常推进**，否则相机跟中点 ⇒ 屏幕净位移 ≈ 0（§5.2 头号陷阱）。
+- `gap` 口径 = **core（Body + Wheels，不含 parts）**，与相机 `renderer.ts` 的 `gapWorld` **同源**
+  ⇒ 换档与三段取景由同一个量驱动。⚠️ 与 `RunBattleRuntime.gapWorld()`（**含 parts**）**不能互相代入**。
+
+### M.3 接线（全部可选：缺省零变化）
+
+```
+testData.ts   LabTestEncounter.enemyDrive?: 'keep-distance'   ← 只给 RangedTurret 声明
+      │（原样透传，不推断）
+entities.ts   SpawnPlan.enemyDrive
+      ▼
+runBattleRuntime.ts   plan.enemyDrive === 'keep-distance' ? {enemyDrive: BANDS} : {}
+      ▼
+battleContract.BattleConfig.enemyDrive?(EnemyDriveBands)   ← 正式契约唯一入口
+      ▼
+planckBattleOrchestrator.step  onBeforeStep：
+   if (bands) { decideEnemyDrive(enemyDriveContext(), bands, AUTO_DRIVE_TARGET_SPEED) }
+   else       { <改前那条 drivePlanckVehicle(…,-1,1.5) 逐字保留> }
+```
+
+⚠️ **门控必须是「数据声明」**：若按 `roleOf === 'ranged'`（有弹丸武器）推断，会把 Run 第四场
+`BananaRodLaser`（OPP-20，`forward`）卷进来 ⇒ 破坏 Run 冻结表。
+**Run 四场对手 `OPP-29 / OPP-31 / R1-RUSH-02 / OPP-20` 全部 `forward`。**
+
+### M.4 实测（`RunBattleRuntime({encounterId:'RangedTurret'})`）
+
+| | 档位序列 | 贴脸时刻 | 全程最小外廓间距 | 敌人掉血 |
+|---|---|---|---|---|
+| 改前 | 无（恒冲锋） | **5.0s** | 2.6 | 481 |
+| 改后 | `far → hold → near → hold → near` | **≈9.5s**（被追到右墙才贴） | 6.3 | 80 |
+
+改后逐秒：`t=1s far/558` → `t=2s hold/391` → `t=3s near/234`（dir=+1 spd=2.6）→
+`t=4s near/166` → `t=5s near/224` → `t=6s hold/297` → `t=7s hold/385`（外廓 321）→ `t=10s near/127`。
+`near` 之后外廓 **159 → 319px** = 真的拉开；玩家仍能压到 **6.3px** 接触并让对手掉血。
+
+### M.5 三条守卫的真实返工（**强化，不放宽**）
+
+1. **`R22b`**（`src/` 内除 Lab 外不得出现实验名）：我把 `tests/portraitBattleLab.test.ts`
+   写进 `battleContract.ts` 的**注释** ⇒ FAIL。守卫正确（正式栈不该提实验）⇒ 删引用。
+2. **`R22a-4` / `RP-24b`**（第 4 实参必须是字面 `{}`）：改为**两形态白名单** + 更强断言
+   （config 实参**不得出现任何数字**、不得出现 `encounterId`、档位常量必须从正式契约转出）。
+
+### M.6 门禁实测
+
+| 项 | 结果 |
+|---|---|
+| `tsc --noEmit` | 0 错 |
+| `pblRangedDistanceControl.test.ts`（新增 24 条） | **24/24** |
+| `portraitEncounterLab.test.ts` | **19/19（零改动）** |
+| `portraitBattleLab.test.ts` | **29/29** |
+| `portraitRunPage.test.ts` | **66/66**（Run 冻结表逐值不变） |
+| `e2e:encounter-lab` | **54/54**（47 → +7：`F1`×2 / `F2`–`F6`） |
+| `e2e:run-page` / `e2e:next-run` / `e2e:portrait-lab` | 见 `outputs/e2e-*-rdc.log` |
+| `src/{core,physics,render,player,platform,ui,game,presentation}` | **零 diff** |
+| `src/battle/` | 2 改 1 新增（**本 Queue 交付本体**） |
+
+E2E `F2`–`F5` 真实读数：`bands=far,hold,near`（97 样本，637 步）· `97/97 样本自洽` ·
+`首次 near 于第 27 样本 · 外廓 159px → 峰值 319px` · `最小外廓间距 6.3px · 敌 1020/1100`。

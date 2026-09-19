@@ -355,6 +355,116 @@ async function runFullFlow(browser) {
   }
 }
 
+/* ========== F. PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1（远程敌人的距离维持） ==========
+ *
+ * 本段用**真实浏览器 + 真实物理**验证「远程炮台在维持作战距离」这件事在页面上真的发生：
+ *   F1 未声明 `enemyDrive` 的两套（ProtoRusher / Chaser）全程**没有**距离档 ⇒ 零变化；
+ *   F2 RangedTurret 一局里 near / hold / far 三档**全部出现**（分段是活的）；
+ *   F3 每档真实读到的 core 间距与档位契约一致（页面显示的就是决策本身）；
+ *   F4 near 之后间距真的重新变大（「主动后撤拉开」是事实）；
+ *   F5 仍然可以被追上（间距压到接触级）。
+ *
+ * ⚠️ 下面的 240 / 480 是 `src/battle/enemyDrive.ts` 的**粗档声明值**在浏览器侧的镜像
+ *    （由正式 cannon 的 muzzleSpeed 8 × 一轮冷却 60 步 = 480 推出，near = 半个行程）。
+ *    与本文件既有的「面积期望值内联」同口径：E2E 不 import src，只独立复核。
+ */
+const ENEMY_NEAR = 240;
+const ENEMY_FAR = 480;
+
+async function runDistanceFoundation(browser) {
+  const tag = 'RDC';
+  const { ctx, page, pageErrors } = await openPage(browser, { w: 390, h: 844, dpr: 1 });
+  try {
+    /* ---- F1：未声明的两套全程无距离档 ---- */
+    for (const id of ['ProtoRusher', 'Chaser']) {
+      await clickControl(page, id);
+      const seen = new Set();
+      let samples = 0;
+      for (let i = 0; i < 14; i++) {
+        const p = await probeOf(page);
+        if (p.phase === 'done') break;
+        if (p.live) {
+          seen.add(String(p.live.enemyDriveBand));
+          samples += 1;
+        }
+        await page.waitForTimeout(120);
+      }
+      log(
+        samples > 0 && seen.size === 1 && seen.has('null'),
+        `[${tag}] F1 ${id} 未声明 enemyDrive：全程无距离档（对手驱动与改前逐帧相同）`,
+        `samples=${samples} bands=${[...seen].join(',')}`,
+      );
+      await clickControl(page, 'reset');
+    }
+
+    /* ---- F2~F5：RangedTurret 一局的档位轨迹 ---- */
+    await clickControl(page, 'RangedTurret');
+    const samples = [];
+    const t0 = Date.now();
+    for (;;) {
+      const p = await probeOf(page);
+      if (p.phase === 'done') break;
+      if (p.live) {
+        samples.push({
+          band: p.live.enemyDriveBand,
+          coreGap: p.live.enemyDriveGap,
+          gap: p.live.gapWorld,
+          steps: p.live.steps,
+        });
+      }
+      if (Date.now() - t0 > 90000) break;
+      await page.waitForTimeout(100);
+    }
+    const done = await probeOf(page);
+
+    const bands = [...new Set(samples.map((s) => String(s.band)))];
+    log(
+      samples.length > 20 && bands.length === 3 && ['far', 'hold', 'near'].every((b) => bands.includes(b)),
+      `[${tag}] F2 RangedTurret 一局内 near / hold / far 三档全部真实出现`,
+      `samples=${samples.length} bands=${bands.join(',')} 步数=${samples[samples.length - 1] && samples[samples.length - 1].steps}`,
+    );
+
+    // F3：逐样本核对「页面显示的档位」与「它读到的 core 间距」是否自洽
+    const violations = samples.filter((s) => {
+      if (s.coreGap === null) return true;
+      if (s.band === 'near') return !(s.coreGap < ENEMY_NEAR);
+      if (s.band === 'far') return !(s.coreGap > ENEMY_FAR);
+      return !(s.coreGap >= ENEMY_NEAR && s.coreGap <= ENEMY_FAR);
+    });
+    log(
+      violations.length === 0,
+      `[${tag}] F3 每个样本的档位都与真实 core 间距自洽（page 显示的就是决策本身）`,
+      violations.length
+        ? violations.slice(0, 3).map((v) => `${v.band}/${v.coreGap}`).join(' ')
+        : `${samples.length} 个样本全部自洽`,
+    );
+
+    // F4：near 之后间距必须重新变大
+    const firstNear = samples.findIndex((s) => s.band === 'near');
+    const gapAtNear = firstNear >= 0 ? samples[firstNear].gap : NaN;
+    const afterNear = firstNear >= 0 ? samples.slice(firstNear).map((s) => s.gap) : [];
+    const peakAfter = afterNear.length ? Math.max(...afterNear) : NaN;
+    log(
+      firstNear > 0 && peakAfter > gapAtNear + 40,
+      `[${tag}] F4 玩家接近 → 对手主动后撤 → 双方重新拉开（Queue 的核心可读行为）`,
+      `首次 near 于第 ${firstNear} 个样本 · 外廓间距 ${Number(gapAtNear).toFixed(0)}px → 峰值 ${Number(peakAfter).toFixed(0)}px`,
+    );
+
+    // F5：仍然可以被追上（无硬隔离）
+    const minGap = samples.length ? Math.min(...samples.map((s) => s.gap)) : NaN;
+    const rec = done.rounds[done.rounds.length - 1];
+    log(
+      minGap < 20 && rec.enemyHp < rec.enemyHpMax,
+      `[${tag}] F5 可以被玩家追上：间距压到接触级，且对手真的掉血（无硬隔离 / 无无敌）`,
+      `最小外廓间距=${Number(minGap).toFixed(1)}px 敌耐久=${rec.enemyHp}/${rec.enemyHpMax} 步数=${rec.steps}`,
+    );
+
+    log(pageErrors.length === 0, `[${tag}] F6 本段无运行期异常`, pageErrors.length ? pageErrors.join(' | ') : '0 errors');
+  } finally {
+    await ctx.close();
+  }
+}
+
 /* ============================================ 视口 2：非 1 DPR 结构验证 */
 
 async function runStructural(browser) {
@@ -399,6 +509,7 @@ async function runStructural(browser) {
     }
 
     await runFullFlow(browser);
+    await runDistanceFoundation(browser);
     await runStructural(browser);
 
     // 隔离：独立产物内不含正式入口；测试控件不进入玩家页面

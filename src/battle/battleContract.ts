@@ -11,6 +11,23 @@ import type { ArenaConfig } from './arenaConfig';
 import type { ImpactConfig } from './contactRouter';
 import type { BattlePhase, TeamId, BuildSnapshot, VisualDef } from '../core/types';
 import type { BattleEvent } from './combatEvents';
+import type { EnemyDriveBands } from './enemyDrive';
+
+/**
+ * PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1｜对手「维持作战距离」Movement Foundation。
+ *
+ * 从这里**转出**（而不是让调用方直接认识 `enemyDrive` 模块）是刻意的：正式战斗栈对外
+ * 只暴露一个契约入口，调用方不必知道驱动决策被拆到了哪个文件。
+ * ⚠️ 数值与规则都定义在正式侧（`enemyDrive.ts` 的推导），调用方只允许**引用**，
+ *    不允许自己写一份（世界尺度 / 出生点 / 驱动开关等正式 config 仍然零覆盖）。
+ */
+export { decideEnemyDrive, ENEMY_KEEP_DISTANCE_BANDS } from './enemyDrive';
+export type {
+  EnemyDriveBand,
+  EnemyDriveBands,
+  EnemyDriveContext,
+  EnemyDriveDecision,
+} from './enemyDrive';
 
 /** Battle 配置（字段与 battleOrchestrator.BattleConfig 完全一致） */
 export interface BattleConfig {
@@ -25,6 +42,17 @@ export interface BattleConfig {
    * 复用 drivePlanckVehicle 既有 enabled:false 语义，不新增 Movement 系统 / AI / 锁位置 / setVelocity。
    */
   sideDrive?: { a?: boolean; b?: boolean };
+  /**
+   * PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1｜B 侧（对手）的**距离维持**驱动档
+   * （可选；缺省 undefined ⇒ B 侧驱动与既有**逐帧完全相同**：`enabled: true` /
+   * `worldDirection: -1` / 既有目标速度）。
+   *
+   * 给出后，B 侧每步的「往哪开、开多快」改由 `decideEnemyDrive` 按**真实外廓间距**决定
+   * （远 → 接近 / 合理射程 → 不主动接近 / 近 → 后撤），执行仍然是既有
+   * `drivePlanckVehicle`（wheel motor，非位置修正）。
+   * 数值口径与相机取景同源（core gap），见 `enemyDrive.ts`。
+   */
+  enemyDrive?: EnemyDriveBands;
   /**
    * 出生后是否把整车下沉到「最低点接触地面」（无下落弹跳）。
    * 消除「从空中落下→弹跳→混沌分叉」的 Reset 非确定性。空中出生场景（D-air）设 false。

@@ -1220,9 +1220,18 @@ describe('PRP-F1｜E 源码守卫：Debug 分离 / 只经 runtime 接正式战�
     expect(call, 'runBattleRuntime 必须构造正式 PlanckBattleOrchestrator').not.toBeNull();
     const args = call![1].split(',').map((x) => x.trim()).filter(Boolean);
     expect(args.length).toBe(5); // A 快照 / B 快照 / registry / config / soloA
-    expect(args[3]).toBe('{}');
+    const cfg = args[3].replace(/\s+/g, ' ');
+    // PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：config 实参只允许两种合法形态 ——
+    // 字面 `{}`，或**按 Encounter 声明**透出的正式 Movement Foundation 距离档（唯一例外）。
+    // ⚠️ 收紧而非放宽：白名单只有这一条，且额外钉死「无数字」「不按 encounterId 判断」。
+    expect([
+      '{}',
+      "this.plan.enemyDrive === 'keep-distance' ? { enemyDrive: ENEMY_KEEP_DISTANCE_BANDS } : {}",
+    ]).toContain(cfg);
+    expect(/[0-9]/.test(cfg), 'config 实参不得出现任何数字（数值只能来自正式模块）').toBe(false);
+    expect(cfg.includes('encounterId')).toBe(false);
     for (const t of ['autoDrive:', 'sideDrive:', 'arenaConfig:', 'closingSpeed:', 'phases:']) {
-      expect(args[3].includes(t), `config 不得覆盖 "${t}"`).toBe(false);
+      expect(cfg.includes(t), `config 不得覆盖 "${t}"`).toBe(false);
     }
     expect(rt.includes('this.orchestrator.arena.config.width')).toBe(true);
     expect(rt.includes('this.orchestrator.arena.config.groundY')).toBe(true);

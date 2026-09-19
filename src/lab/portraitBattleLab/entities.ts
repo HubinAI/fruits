@@ -103,6 +103,13 @@ export interface SpawnPlan {
   readonly baseKey: string;
   /** 场上全部实体（player 在首位）。 */
   readonly entities: readonly SpawnedEntity[];
+  /**
+   * PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1｜本套 Encounter 声明的对手 Movement 姿态。
+   *
+   * ⚠️ 由 `LAB_ENCOUNTERS[].enemyDrive` **原样透传**（不推断、不按 id 判断）。
+   *    缺省 `undefined` ⇒ 战斗运行时不给对手装距离档 ⇒ 驱动行为逐帧不变。
+   */
+  readonly enemyDrive?: 'keep-distance';
 }
 
 /** 弹丸记录容器（本 Queue 不发射；A1/B1 接入，Reset 必须清空）。 */
@@ -273,6 +280,8 @@ export function buildSpawnPlan(loadoutId: string, encounterId: string): SpawnPla
     enemies,
     baseKey,
     entities: [player, ...enemies],
+    // PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：只**原样透传**数据源里的声明。
+    enemyDrive: encounter.enemyDrive,
   };
 }
 

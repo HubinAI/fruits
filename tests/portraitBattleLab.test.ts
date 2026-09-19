@@ -469,16 +469,36 @@ describe('PBL-F0/F1｜隔离守卫（单向：实验不得写入正式玩法路�
     const importers = files.filter((f) => importSpecifiers(readFileSync(join(LAB_DIR, f), 'utf8')).includes('../../battle/planckBattleOrchestrator'));
     expect(importers).toEqual(['runBattleRuntime.ts']);
 
-    // 2) 唯一调用点必须是 `new PlanckBattleOrchestrator(A, B, registry, {}, soloA)`
-    //    —— 第 4 个实参是**字面空对象**：世界尺度 / 出生点 / 阶段 / 驱动 / 武器全取正式默认。
+    // 2) 唯一调用点必须是 `new PlanckBattleOrchestrator(A, B, registry, <config>, soloA)`
+    //    —— 第 4 个实参只允许**两种合法形态**：
+    //      a) 字面空对象 `{}`（世界尺度 / 出生点 / 阶段 / 驱动 / 武器全取正式默认）；
+    //      b) PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1 的**唯一例外**：按 Encounter 的
+    //         **声明**（`plan.enemyDrive`）透出正式 Movement Foundation 的距离档。
+    //    ⚠️ 这里**收紧**（不是放宽）：白名单只有这一条，且额外钉死「不得出现任何数字」与
+    //       「不得按 encounterId 判断」——「PRP 不写战斗数值」的约束比改前更强。
     const rt = stripper('runBattleRuntime.ts');
     const calls = [...rt.matchAll(/new PlanckBattleOrchestrator\(/g)];
     expect(calls.length).toBe(1);
     const call = rt.match(/new PlanckBattleOrchestrator\(([\s\S]*?)\);/);
     expect(call).not.toBeNull();
     const args = call![1].split(',').map((x) => x.trim()).filter(Boolean);
-    expect(args[3]).toBe('{}');
+    const cfg = args[3].replace(/\s+/g, ' ');
     expect(args.length).toBe(5);
+    const LEGAL_CONFIGS = [
+      '{}',
+      "this.plan.enemyDrive === 'keep-distance' ? { enemyDrive: ENEMY_KEEP_DISTANCE_BANDS } : {}",
+    ];
+    expect(LEGAL_CONFIGS).toContain(cfg);
+    // 白名单只有这一条非空形态（防止将来悄悄多出第二条）
+    expect(LEGAL_CONFIGS.filter((c) => c !== '{}')).toHaveLength(1);
+    // 2a) 数值不得出现在 config 实参里 —— 档位值必须来自正式模块
+    expect(/[0-9]/.test(cfg), 'config 实参不得出现任何数字（数值只能来自正式模块）').toBe(false);
+    // 2b) 例外必须由**数据声明**触发，不得按 Encounter id / 名字判断
+    expect(cfg.includes('encounterId')).toBe(false);
+    expect(cfg.includes('RangedTurret')).toBe(false);
+    // 2c) 档位常量必须从正式契约转出（Lab 不自己写一份）
+    expect(rt.includes("from '../../battle/battleContract'")).toBe(true);
+    expect(rt.includes('ENEMY_KEEP_DISTANCE_BANDS')).toBe(true);
 
     // 3) 世界尺度必须来自正式 orchestrator 的 arena 配置（不是自己写 1600 / 700）
     expect(rt.includes('arena.config.width')).toBe(true);

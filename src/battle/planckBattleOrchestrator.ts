@@ -16,7 +16,7 @@
  */
 import type { BuildSnapshot, ContentRegistry, ColliderDef } from '../core/types';
 import { resolveSnapshot } from '../core/buildSnapshot';
-import { PlanckWorld } from '../physics/planckWorld';
+import { PlanckWorld, type BodyHandle } from '../physics/planckWorld';
 import { PHYSICS_HZ } from '../physics/units';
 import {
   createPlanckVehicle,
@@ -26,6 +26,7 @@ import {
   type PlanckVehicle,
 } from './planckVehicleAssembly';
 import { drivePlanckVehicle } from './planckMovement';
+import { decideEnemyDrive, type EnemyDriveContext, type EnemyDriveDecision } from './enemyDrive';
 import type { PartBehaviorRuntime } from './behaviorRuntime';
 import { getBehaviorFactory } from './behaviorRegistry';
 import { ContactRouter, DEFAULT_IMPACT_CONFIG } from './contactRouter';
@@ -226,6 +227,18 @@ export class PlanckBattleOrchestrator {
   private readonly behaviors: PartBehaviorRuntime[] = [];
 
   private _result: BattleResult | null = null;
+
+  /**
+   * PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1｜B 侧**上一步实际生效**的驱动决策
+   * （`null` = 本场未装 `config.enemyDrive`，即既有恒定驱动）。
+   * 只读诊断，不参与任何决策 / 绘制 / 伤害；`gap` 是决策真正读到的那个量（core 口径）。
+   */
+  private enemyDriveStateNow: EnemyDriveDecision & { readonly gap: number } | null = null;
+
+  /** 上一步的对手距离档 + 真实间距 + 实际下发的驱动量（验收三段行为的机器判据）。 */
+  get enemyDriveState(): Readonly<(EnemyDriveDecision & { readonly gap: number }) | null> {
+    return this.enemyDriveStateNow;
+  }
   private time = 0;
 
   constructor(
@@ -341,6 +354,40 @@ export class PlanckBattleOrchestrator {
    *   不按渲染帧 realDtMs 直接累计。
    * - A 朝 +X、B 朝 -X（各自 worldDirection），由 autoDrive 语义门控。
    */
+  /**
+   * PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：B 侧距离决策的**实时**上下文。
+   *
+   * 口径与正式相机取景同源（core = Body + Wheels、**不含** Functional Parts），
+   * 于是「换档」与「相机三段取景」由同一个量驱动。
+   * ⚠️ 每步实时读取真实 transform（`world.getBounds`），不使用装配期静态缓存、
+   *    不读取旧 broadphase AABB、不写任何物理状态。
+   */
+  private enemyDriveContext(): EnemyDriveContext {
+    const a = this.world.getPosition(this.vehicleA.body);
+    const b = this.world.getPosition(this.vehicleB.body);
+    const boxA = this.coreBoundsX(this.vehicleA);
+    const boxB = this.coreBoundsX(this.vehicleB);
+    // gap > 0 = 完全分离；两车重叠时为负（决策只看符号与档位，不做截断）
+    const gap = Math.max(boxA.minX, boxB.minX) - Math.min(boxA.maxX, boxB.maxX);
+    // 「对手在**自车（B）**的哪一侧」——由真实位置决定，不假定出生朝向。
+    // ⚠️ 参考系必须是 B（决策的被执行者），不是 A：A 在 B 左侧 ⇒ 从 B 看对手在 -x 侧。
+    const targetSide: 1 | -1 = a.x >= b.x ? 1 : -1;
+    return { gap, targetSide };
+  }
+
+  /** 车辆 core（chassis + wheels）的真实世界 x 范围（几何边界，与 renderer 的 coreBounds 同口径）。 */
+  private coreBoundsX(vehicle: PlanckVehicle): { minX: number; maxX: number } {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    const acc = (body: BodyHandle): void => {
+      const b = this.world.getBounds(body);
+      if (b.minX < minX) minX = b.minX;
+      if (b.maxX > maxX) maxX = b.maxX;
+    };
+    acc(vehicle.body);
+    for (const w of vehicle.wheels) acc(w.body);
+    return { minX, maxX };
+  }
   step(realDtMs: number, timeScale = 1): void {
     if (this._result) return;
 
@@ -357,11 +404,28 @@ export class PlanckBattleOrchestrator {
         });
       }
       if (drive.b) {
-        drivePlanckVehicle(this.world, this.vehicleB, {
-          enabled: true,
-          worldDirection: -1,
-          targetSpeedPxPerStep: AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
-        });
+        // PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：B 侧可选「维持作战距离」档。
+        // ⚠️ `config.enemyDrive` 缺省（含正式玩家路径与既有全部 Lab 路径）⇒ 走下面的
+        //    else 分支，与改前**逐指令相同**（enabled: true / worldDirection: -1 / 同目标速度）。
+        //    给出后也只改变「决策」（往哪开、开多快），执行仍是 drivePlanckVehicle。
+        const bands = this.config.enemyDrive;
+        if (bands) {
+          const ctx = this.enemyDriveContext();
+          const d = decideEnemyDrive(ctx, bands, AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP);
+          // 诊断：本步实际生效的决策（含决策真正读到的 core 间距）。
+          this.enemyDriveStateNow = { ...d, gap: ctx.gap };
+          drivePlanckVehicle(this.world, this.vehicleB, {
+            enabled: d.enabled,
+            worldDirection: d.worldDirection,
+            targetSpeedPxPerStep: d.targetSpeedPxPerStep,
+          });
+        } else {
+          drivePlanckVehicle(this.world, this.vehicleB, {
+            enabled: true,
+            worldDirection: -1,
+            targetSpeedPxPerStep: AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
+          });
+        }
       }
       // 正式 Behavior 插入口（W1-BH-1）：统一 beforePhysicsStep 驱动（Cannon 发射/冷却、
       // Hammer 摆锤循环、Push Rod 伸缩循环；均 motor + limit）。不新增第二套 step/render

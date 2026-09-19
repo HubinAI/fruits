@@ -78,6 +78,7 @@
 import type { ContentRegistry } from '../../core/types';
 import { validateSnapshot } from '../../core/buildValidator';
 import type { BattleRenderSnapshot, BattleResult } from '../../battle/battleContract';
+import { ENEMY_KEEP_DISTANCE_BANDS } from '../../battle/battleContract';
 import { PlanckBattleOrchestrator } from '../../battle/planckBattleOrchestrator';
 import { buildSpawnPlan, type SpawnPlan } from './entities';
 import { RUN_STAGE_BAND } from './runPageLayout';
@@ -345,11 +346,17 @@ export class RunBattleRuntime {
     }
 
     // ⚠️ 空 config：世界尺度 / 出生点 / 阶段全部取正式默认值（PRP 零覆盖）。
+    //    ⚠️ PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：**唯一**的例外是「对手 Movement 姿态」，
+    //    且它只在**数据源明确声明**时才出现（`LAB_ENCOUNTERS[].enemyDrive === 'keep-distance'`）。
+    //    未声明的 Encounter（ProtoRusher / Chaser / Run Script 四场）⇒ 这里仍是 `{}`，
+    //    对手驱动与改前**逐帧完全相同**。
     this.orchestrator = new PlanckBattleOrchestrator(
       playerSnapshot,
       this.plan.enemies[0].snapshot,
       this.registry,
-      {},
+      this.plan.enemyDrive === 'keep-distance'
+        ? { enemyDrive: ENEMY_KEEP_DISTANCE_BANDS }
+        : {},
       o.soloA ?? false,
     );
 
@@ -489,6 +496,24 @@ export class RunBattleRuntime {
     const a = this.vehicleBox('A');
     const b = this.vehicleBox('B');
     return b.minX - a.maxX;
+  }
+
+  /**
+   * PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1｜对手「维持作战距离」的**真实运行状态**。
+   *
+   * - `null` = 本场对手没装距离档（本套 Encounter 未声明 `enemyDrive`）⇒ 驱动与既有完全相同；
+   * - 非 null = 上一步实际生效的决策：`band`（`near` / `hold` / `far`）、决策读到的 `gap`
+   *   （**core 口径** = Body + Wheels，与相机取景同源）、以及真正下发给 wheel motor 的
+   *   `enabled` / `worldDirection` / `targetSpeedPxPerStep`。
+   *
+   * ⚠️ 这是**只读回读**（从正式编排器读上一步的决策记录），不重算、不另存一份口径。
+   * ⚠️ 注意 `gap` 与 `gapWorld()` 口径不同：后者含 Functional Parts（武器伸出），
+   *    前者是相机取景用的 core 口径 —— 两者**不能互相代入**。
+   */
+  enemyDriveState(): Readonly<
+    { band: 'near' | 'hold' | 'far'; gap: number; enabled: boolean; worldDirection: 1 | -1; targetSpeedPxPerStep: number } | null
+  > {
+    return this.orchestrator.enemyDriveState;
   }
 
   hp(): RunBattleHp {
