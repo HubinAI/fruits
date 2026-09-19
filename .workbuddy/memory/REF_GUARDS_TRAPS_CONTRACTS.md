@@ -486,3 +486,93 @@ Run 结束只清 Run-local，**永久 star 保留**。
 （只许用 `w.damageText`）、`runPage`（只许暴露 `playerWeapons`）、
 `contactRouter`（仍读 `behaviorParams?.projectileDamage`，R2-C 没碰）。
 新增任何「显示星级价值」的地方，一律接 `weaponEntries` 的字段，**不要自己乘**。
+
+---
+
+## §9 完整 Run 的**装载资格**（PRODUCT-LOOP-P0 固化契约，改动入口 / RunModifier 前必读）
+
+真人 P0 原形：`equipped = 非 cannon` → Run 前几日正常 → DAY3 选/进入 `heavyShell` →
+`beginBattle` → `applyRunModifiersToSnapshot()` 找不到 cannon → throw → **Run 卡死**。
+
+### §9a 判据 = **存在性**，不是槽位，而且**两层同源**
+
+`snapshotHasRunBaseWeapon(snapshot)` = `snapshot.functionals.some(i => i.defId === RUN_BASE_WEAPON_DEF_ID)`。
+
+- 局内真正决定注入成败的就是这个存在性判断 ⇒ 创建期资格必须用**同一个函数**
+  （`runLoadoutCompat.runLoadoutCompatOfDraft`），杜绝第二套「什么算兼容」的定义；
+- **不要**改成「主武器槽是不是 cannon」：那样两层会在
+  「主武器槽是别的、但车上另有 cannon」时分叉（一处放行、一处 throw）。
+- 两层都走**正式 `buildSnapshotFromDraft`**，不自己拼 snapshot。
+
+### §9b 拒绝必须发生在 **Run 创建之前**（位置要求，不是文案要求）
+
+- 产品层：`src/product/runCompatibility.ts` 是**唯一**判断（`canStartFullRun` /
+  `fullRunCompat`）。页面**不许**出现武器 id 字面量或支持清单（`LC-20` 逐武器 id 钉死）；
+  刻意**不**断言「不许出现 `category === 'weapon'`」——那是展示用途，两个问题。
+- Lab 层：`runMain.ts` 必须在 `new RunPage(` **之前**判定 `playerLoadout.blocked` 并 `return`
+  ⇒ 不创建 RunPage ⇒ 无战斗运行时、无 DAY、无 canvas ⇒ **结构上到不了 DAY3**（`LC-21`）。
+- `RunLoadoutResolution` 新增 `fallback: 'unsupported-loadout'`（≠ `'invalid'`：后者是
+  「数据坏了」，前者是「数据合法但完整 Run 不支持」）+ `blocked` + `blockedReason`。
+
+### §9c ⚠️「**不给 href**」而不是「点了 return」
+
+可执行 = `<a href>`；不可执行 = **没有 href 的 disabled `<button>`**（`data-ph-start-blocked="1"`）。
+「点了不会创建 Run」因此在**结构上**成立，而不是靠事件处理里 return（漏一处就变成静默放行）。
+⚠️ 同一选择器 `[data-ph-action="start-run"]` 覆盖两种形态 ⇒ 探针与 E2E **不需要第二套口径**
+（探针侧把 `HTMLAnchorElement` 放宽成 `HTMLElement`，用 `getAttribute('href')` 取；对 button 恒为 `null`，
+**`startRunHref === null` 本身就是**「点击无法创建 Run」的机器证据）。
+
+### §9d ⚠️ 拒绝时**必须**返回演示装载占位，不许返回玩家那份
+
+若返回玩家那份，调用方一旦漏看 `blocked`，就退化成「照常开战、然后在 DAY3 崩」——正是要根除的形态
+（`LC-06` 钉死 `loadout.source === 'demo'` 且主武器槽 ≠ 玩家那件）。
+
+### §9e ⚠️ 两个常量必然各写一份，一致性只能靠断言
+
+产品侧 `FULL_RUN_SUPPORTED_WEAPON_IDS` 与 Lab 侧 `RUN_BASE_WEAPON_DEF_ID` **同值但各自声明**：
+
+- 依赖方向单向：`core` / `lab` 不许反向依赖 `src/product/`；
+- 产品侧也**不许** import 那个实验原型目录（`R22b`：`src/` 里不得出现该目录名，
+  **含注释与 import 路径**——本轮又在 `runCompatibility.ts` 的注释里踩过一次）。
+⇒ 一致性由 `LC-01` 机器钉死（与 `STAR_DAMAGE_MAX_STAR` / `INVENTORY_MAX_STAR` 同型）。
+
+### §9f ⚠️ 拒绝态的**视图**必须独立成模块
+
+`RP-25b` 对**宿主**有更严约束：`runMain.ts` 必须恰好两次 `location.assign(`，
+且**不得出现 `createElement`**。⇒ 拒绝态 DOM 抽到 `runBlockedView.ts`，并登记进
+`tests/portraitRunPage.test.ts` 的 `RUN_PAGE_FILES`（与 R1-D 的 `runFailSettlement.ts` 同处置）。
+注意 `runBlockedView.ts` 用 `import type { … }` 可避免被 `portraitRunPage.test.ts` 的
+import specifier 正则（`/from\s+['"]([^'"]+)['"]/g`）计入（`type` 插在中间不匹配）。
+
+### §9g ⚠️ 产品契约变更会**作废既有 E2E 的路线** —— 处置纪律
+
+本轮「非 cannon 不得进入完整 Run」直接作废了 `e2e:product-fail`（hammer 第一场阵亡）与
+`e2e:product-loop`（第二局用 spear）两条路线。处置方式**固定为**：
+
+> **换合法路线 + 新增守门断言**，**不许删断言**，并在文件头注释里写明为什么换、代价是什么。
+
+- 替代失败路线（已验证）：`cannon` + 耐久事件选「继续改装」（`upgrade`，不回耐久）
+  → DAY 7 终局耐久归零（≈41.6s）。耐久选项 id = `repair` / `upgrade`
+  （找不到指定 id 会回退第一个选项 ⇒ 失败路线会**静默变成通关路线**，务必让断言先红）。
+- 「推杆`@front`」那条 R1-C 实测路线**在车库走不通**：车库只能装备**武器**到 `frontMass`，
+  没有任何入口往 `front` 槽装 gadget（路线只能靠存档预热，不采用）。
+- ⚠️ **两条排查陷阱**（都会让人误判成产品缺陷）：
+  1. 把实现里的函数**抽模块**之后，源码守卫里 `indexOf('function X(')` 会返回 `-1`
+     ⇒ 是**测试没跟着实现走**，先查这个再怀疑实现；
+  2. 真浏览器 E2E 的崩溃头是 `SMOKE 异常：`（各文件不同），用 `grep 'E2E 运行失败'`
+     过滤日志会**整条漏掉**崩溃 ⇒ 统计脚本别只匹配固定串。
+
+### §9h 新守卫编号
+
+`LC-01`…`LC-23`（`tests/productRunBuildLoadoutCompat.test.ts`，15 用例）。
+⚠️ 编号别撞号：`LC-*` 是 R1-C 的（`productLoopEndToEndPlayerLoop.test.ts` 用 `EL-*`）；
+取新前缀前先 grep 全量测试文件。
+
+### §9i ⚠️ 已探明、**未修**（只记录，属独立清理）
+
+`runPage.ts` 的 `playerFunctionals` 注释与 `runBattleRuntime.ts` 的 `playerFunctionals()`
+注释都写「带 Run-local 武器侧强化时给的是本局 overlay 部件 id」——**实测不是**：
+overlay 由 `composeRunWeaponDef()` 用 `{...正式cannon}` 浅拷贝派生 ⇒ `part.def.id`
+**仍是 `'cannon'`**（只有本局 registry 的**键**是 overlay id）。
+正确口径 = `runtime.playerSnapshot.functionals[].defId`（或浏览器侧比
+`battleWorld.playerWeapons[].params/behavior` —— overlay 真的改了 behaviorParams）。
