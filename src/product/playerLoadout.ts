@@ -268,6 +268,19 @@ export interface LoadoutReading {
  */
 export const DEFAULT_CLEARED_SLOT = 'front';
 
+/**
+ * 本模块的**唯一落盘点**（`tests/productLoopHomeGarage.test.ts` 的 `PL-03` 钉死：
+ * `savePlayerBuild(` 在本文件只允许出现一次 —— 该点位的存在意义就是「本模块只有一个写入口」）。
+ *
+ * 目前有两条语义都经过它，二者都必须过正式 `validateSnapshot` 之后才调用：
+ *   ① **玩家动作** —— `equipWeapon()`（换装并落盘）；
+ *   ② **加载期一次性归一化** —— `loadEquippedDraft()` 里的旧 starter 迁移
+ *      （PRODUCT-LOOP-P0，见 `migrateLegacyStarterProfile`）。
+ */
+function persistPlayerBuild(draft: BuildDraft): void {
+  savePlayerBuild(draft);
+}
+
 /** 空存档首次启动的合法 starter Build。 */
 export function defaultPlayerDraft(): BuildDraft {
   const starter = makeStarterDraft(PLAYER_BODY_DEF_ID, registry);
@@ -282,11 +295,97 @@ export function defaultPlayerDraft(): BuildDraft {
 }
 
 /**
+ * PRODUCT-LOOP-P0-LEGACY-PROFILE-MIGRATION-AND-RUN-REACHABILITY｜旧 starter profile 的**一次性迁移**。
+ *
+ * ## 为什么需要它
+ * 旧 starter（Q26 `makeStarterDraft`，Lab 侧至今原样保留）在车身「前置挂点」（`front`）装的是
+ * **推杆**（`pushRod`），而 R1-C 实测：`front` 挂着推杆时它每个周期都把**自家车**向后推
+ * （≈241px / 周期）⇒ 车被持续推离射程 ⇒ **完整 Run 的第一场（DAY2）稳定失败**
+ * ⇒ 产品主循环对这类旧存档**结构上不可达**。
+ * 产品侧的新账号默认车（`defaultPlayerDraft`）从 R1-C 起已把这一槽留空，但**已经落盘的旧存档**
+ * 不会自动变 —— 本函数补上这一步。
+ *
+ * ## 迁移形状（Queue 必改 1）
+ * ```
+ *   旧：front = 旧 starter 的前置件（pushRod）   frontMass = 旧 starter 的主武器（cannon）
+ *   新：front = EMPTY_SLOT                      frontMass **不动**
+ * ```
+ * **其它数据一字不动**：inventory / 星级 / 数量 / 已装备武器 / 领奖 / 进度**全部保留** ——
+ * 本函数只改这一份 BuildDraft 的**一个槽**，而库存（`strongfruit.ownedParts.v2`）与进度
+ * （`strongfruit.playerProgress.v1`）是**独立的** localStorage key，本模块根本不碰。
+ * 明确**禁止** reset 整个 Profile。
+ *
+ * ## ⚠️ 判别式为什么要收紧（这是本迁移唯一的风险点）
+ * 「`front` 是不是推杆」**本身不足以判定**这是旧 starter：旧横屏正式游戏的**正常玩家车库**
+ * 开放了**全部** functional 硬点（`ui/webDomPlayerUIHost.ts:429` 用的就是
+ * `editableSlots(body)` = 全部硬点；`main.ts` 的装配页同），而推杆在候选池里
+ * （`core/partOptions.ts`）⇒ 玩家可以**主动**把推杆装在 `front`，并落进**同一个**存档 key
+ * （`playerGameRuntime` 的 `savePlayerBuild`）。**所以不能「见到推杆就删」。**
+ *
+ * 判定要求两个条件**同时**成立：
+ *   ① **结构与旧 starter 一致**：`front` / `frontMass` 两槽等于 `makeStarterDraft` 的取值。
+ *      签名**直接取自那个真源函数**，不在本模块抄一份常量表 —— 否则就是第二份真源。
+ *   ② **该槽没有玩家侧写入留下的星级印记**（`functionalStars[front]` 不存在）。
+ *      这是可靠信号：**所有**面向玩家的槽位写入路径都会**同时**盖星级印记
+ *      （`main.ts`、`playerGameRuntime.applyBuildEdit`、`canvasUIHost` 的装备分支），
+ *      而 `makeStarterDraft` **完全不写** `functionalStars`。
+ *      ⚠️ 已知边界（已上报，不是静默假设）：Q22（引入星级概念）**之前**的存档无法被这一条区分。
+ * 任一条件不成立 ⇒ **原样返回、一个字节都不改**（宁可不迁移，也不粗暴删玩家的推杆）。
+ *
+ * ## 为什么「读入口」会落盘
+ * 迁移必须**落盘**才能算完成：Home 与 Run 读的都是**已存储**的那份 profile，
+ * 只做读时投影会让「旧存档永远停在旧形态」。而落盘天然**只可能发生一次** ——
+ * 迁移后 `front` 已是空槽，签名不再成立（见下方 `loadEquippedDraft`）。
+ */
+export interface LegacyProfileMigration {
+  readonly migrated: boolean;
+  readonly reason: 'legacy-starter' | 'not-legacy-shape' | 'player-chosen' | 'invalid' | 'no-profile';
+  /** 迁移后的 Draft（未迁移时 = 入参本身，逐字节相同） */
+  readonly draft: BuildDraft;
+  /** 迁移后的槽位选择（未迁移时 = 入参那份）；便于调用方直接比对，不必自己展开 */
+  readonly selections: Readonly<Record<string, string>>;
+}
+
+/** 纯判定 + 纯变换：**不落盘**（落盘只发生在 `loadEquippedDraft` 的唯一一处）。 */
+export function migrateLegacyStarterProfile(draft: BuildDraft): LegacyProfileMigration {
+  const sel: Record<string, string> = draft.functionalSelections ?? {};
+  const keep = (reason: LegacyProfileMigration['reason']): LegacyProfileMigration => ({
+    migrated: false,
+    reason,
+    draft,
+    selections: sel,
+  });
+  // 该车身必须真有这一槽，否则谈不上迁移（防 Body 变更后对不存在的槽做文章）
+  const body: BodyDef | undefined = registry.bodies.get(draft.bodyDefId);
+  if (!body || !body.functionalHardpoints.some((h) => h.id === DEFAULT_CLEARED_SLOT)) {
+    return keep('not-legacy-shape');
+  }
+  // ① 结构签名取自旧 starter 真源（不是本模块自建的常量表）
+  const legacy = makeStarterDraft(draft.bodyDefId, registry).functionalSelections;
+  if (sel[DEFAULT_CLEARED_SLOT] !== legacy[DEFAULT_CLEARED_SLOT]) return keep('not-legacy-shape');
+  if (sel[WEAPON_SLOT] !== legacy[WEAPON_SLOT]) return keep('not-legacy-shape');
+  // ② 玩家侧从未写过这一槽（写了必留星级印记）
+  if (draft.functionalStars?.[DEFAULT_CLEARED_SLOT] !== undefined) return keep('player-chosen');
+  const selections: Record<string, string> = { ...sel, [DEFAULT_CLEARED_SLOT]: EMPTY_SLOT };
+  const next: BuildDraft = { ...draft, functionalSelections: selections };
+  // 写入前必须过正式 validateSnapshot（与 `equipWeapon` 同一纪律）：不合法就不动它
+  if (!validateSnapshot(buildSnapshotFromDraft(next, registry), registry).valid) return keep('invalid');
+  return { migrated: true, reason: 'legacy-starter', draft: next, selections };
+}
+
+/**
  * 读取玩家当前 Build。**唯一读入口**：先读正式存档，无存档才回退 starter。
  * ⚠️ 回退值**不落盘** —— 保持 `core/onboarding.ts` 的「全新账号」判定（`loadPlayerBuild() === null`）语义不变。
+ * ⚠️ PRODUCT-LOOP-P0 起：**有存档**时本函数会顺带完成一次旧 starter → 当前 starter 的迁移
+ *    （`migrateLegacyStarterProfile`），命中时**落盘一次**。这是「归一化」而不是「玩家动作」，
+ *    且**结构上一次为限**：迁移后 `front` 已是空槽 ⇒ 签名不再成立 ⇒ 下次读不再写。
  */
 export function loadEquippedDraft(): BuildDraft {
-  return loadPlayerBuild() ?? defaultPlayerDraft();
+  const stored = loadPlayerBuild();
+  if (!stored) return defaultPlayerDraft();
+  const migrated = migrateLegacyStarterProfile(stored);
+  if (migrated.migrated) persistPlayerBuild(migrated.draft);
+  return migrated.draft;
 }
 
 /**
@@ -505,6 +604,6 @@ export function equipWeapon(
   if (!result.valid) {
     return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
   }
-  savePlayerBuild(next);
+  persistPlayerBuild(next);
   return { ok: true, draft: next };
 }

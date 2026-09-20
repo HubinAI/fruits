@@ -9,7 +9,9 @@
  * 视图层职责边界（与既有页面同一套路）：
  *   - **不推导任何数据**：车身 / 耐久 / 能量 / 槽位 / 可装备武器 / 当前主武器，
  *     全部来自 `playerLoadout.ts`（唯一数据源）与 `vehiclePreview.ts`（纯几何）；
- *   - **不写存档**：写只发生在 `equipWeapon()` 内部（含 `validateSnapshot` 与 `savePlayerBuild`）；
+ *   - **本页自身零写盘调用**：写只发生在 `equipWeapon()` 内部，以及 `loadEquippedDraft()`
+ *     内那一次**旧 starter profile 迁移**（PRODUCT-LOOP-P0，见 `migrateLegacyStarterProfile`：
+ *     归一化性质的**一次为限**落盘，不是玩家动作）；两者都含 `validateSnapshot` 与 `savePlayerBuild`；
  *   - **不新建 Runtime**：本页没有物理、没有战斗、没有相机、没有 Gameplay 状态机
  *     （`开始冒险` 只是同产物内的相对链接，本轮不改 Run —— 见 Queue 冻结项）。
  *
@@ -363,7 +365,8 @@ export function mountProductHome(
   root: HTMLElement,
   opts?: { readonly search?: string },
 ): ProductDebugHandle {
-  // 唯一读入口：正式存档 → starter 回退（⚠️ 回退值不落盘，见 `loadEquippedDraft`）
+  // 唯一读入口：正式存档 → starter 回退（⚠️ 回退值不落盘；有存档时本入口会顺带完成
+  // PRODUCT-LOOP-P0 的一次性旧 starter profile 迁移，见 `loadEquippedDraft` / `migrateLegacyStarterProfile`）
   let draft: BuildDraft = loadEquippedDraft();
   /**
    * PRODUCT-LOOP-R2-A｜成长会话：**必须在任何库存落盘之前**开始。
