@@ -576,3 +576,115 @@ overlay 由 `composeRunWeaponDef()` 用 `{...正式cannon}` 浅拷贝派生 ⇒ 
 **仍是 `'cannon'`**（只有本局 registry 的**键**是 overlay id）。
 正确口径 = `runtime.playerSnapshot.functionals[].defId`（或浏览器侧比
 `battleWorld.playerWeapons[].params/behavior` —— overlay 真的改了 behaviorParams）。
+
+---
+
+## §10 旧 profile 迁移（PRODUCT-LOOP-P0-LEGACY 固化契约，改动 starter / 读入口前必读）
+
+### §10a 症状与真实成因
+
+| 项 | 值 |
+|---|---|
+| 症状 | 旧存档打完整 Run ⇒ **第一场（DAY2）稳定失败**，进不了第一次局内强化 ⇒ 主循环结构上不可达 |
+| 成因 | 旧 starter 在车身**前置挂点** `front` 装了**推杆**（`pushRod`） |
+| 机制 | `pushRodBehavior` 每周期以反作用力把**自家车**向后推（R1-C 实测 **≈241px/周期**）⇒ 车被持续推离射程 |
+| 为什么会失败而不是「勉强能打」 | 同车 `front`(x=78) 占位覆盖 x∈[78,158]，而 `frontMass`(x=45) 上任何主武器的 collider 都伸到 x≈85 ⇒ **两槽几何重叠 7px** |
+
+### §10b ⚠️ 这不是存档 schema 问题（**别去动 core**）
+
+```
+localStorage['strongfruit.playerBuild.v1']
+ → readJsonWithVersion()        core/saveVersion.ts:51
+ → migrateLegacy('build', …)    core/saveVersion.ts:74
+     ⚠️ 对 build 是 **no-op**（:98-102 只注释「形状不变，仅补 __v」）
+     CURRENT_SAVE_VERSION = 1 ⇒ **今天没有任何 build 迁移步骤**
+ → isBuildDraftShape() / drive 归一 / validateSnapshot   core/buildPersistence.ts:63 / :44 / :47
+```
+
+**⇒ `front = pushRod` 是内容语义，core 里没有任何一层会碰它。** 迁移只能在产品侧做
+（本 Queue **core 零改动**已取证）。旧 starter 真源 = `makeStarterDraft()`
+（`src/lab/buildEditorModel.ts:182-203`，Q26，**Lab 侧至今未改**）。
+
+### §10c ⚠️⚠️ 「见到推杆就删」是**错的**（本契约最重要的一条）
+
+Queue 给的前提「如果历史正式产品从未开放 front 槽给玩家编辑」**不成立**：
+
+1. `editableSlots(body)`（`lab/buildEditorModel.ts:91-93`）返回**全部** functional hardpoint（含 `front`）。
+2. **面向正常玩家的车库**就用它 —— `ui/webDomPlayerUIHost.ts:429`；`src/main.ts:4` 明写
+   「正常玩家 UI 已抽到唯一 PlayerUIHost 边界（WebDomPlayerUIHost / CanvasPlayerUIHost）」⇒ **不是 debug 面板**。
+   `canvasPlayerUIHost` 同构；旧横屏装配页同（`main.ts:678`）。
+3. `playerGameRuntime.applyBuildEdit` 对**任意** `slotKey`（含 `front`）写
+   `functionalSelections[slotKey]` + `functionalStars[slotKey]`（`:299-305`），并经
+   `savePlayerBuild(this.draftA)`（`:651`）落到**与当前产品同一个 key**。
+4. `pushRod ∈ OFFICIAL_PARTS`（`core/partOptions.ts:24`）且 `∈ STARTER_PARTS`（`partInventory.ts:36`）
+   ⇒ `canEquipPart('pushRod', 1)` **恒真** ⇒ 玩家能主动装上/卸下。
+5. 入口身份：`build/branchDevEntry.ts:6,30` —— `index.html` =「**旧横屏正式游戏**」，且 **R1-C 之前根路径 `/` 指向它**
+   ⇒ 真人 profile 极可能出自该时代。
+
+**⇒ 纪律：分辨不出「旧默认」与「玩家主动装备」时，按 Queue 明写规则停下上报，不允许粗暴批量删。**
+
+### §10d 判别式（用户裁决「收紧」后的固化版本）
+
+**两个条件同时成立**才迁移：
+
+| # | 条件 | 为什么可靠 |
+|---|---|---|
+| ① | `sel['front']` **且** `sel[WEAPON_SLOT]` == `makeStarterDraft(body, registry).functionalSelections` 的同名字段 | 签名**直接取自真源函数**，不在产品侧抄常量表 ⇒ **不产生第二份真源** |
+| ② | `draft.functionalStars?.['front'] === undefined` | **所有**玩家侧槽位写入路径都**同时**盖星级印记（`main.ts:757-758` · `playerGameRuntime.ts:303-304` · `canvasPlayerUIHost.ts:1291-1292`），而 `makeStarterDraft` **完全不写** `functionalStars` |
+
+任一不成立 ⇒ **原样返回、一个字节不改**（宁可不迁移）。
+**⚠️ 已知缺口（已上报）**：Q22（引入星级）**之前**的存档无法被条件 ② 区分。
+
+迁移形状：`front = EMPTY_SLOT`，`frontMass` **不动**；inventory / 星级 / 数量 / 已装备武器 / 领奖 / 进度
+**一字不动**（它们是**独立 localStorage key**，本模块根本不碰）。**禁止 reset 整个 Profile。**
+
+### §10e 落点与「一次为限」
+
+- `migrateLegacyStarterProfile(draft)`（`playerLoadout.ts:350`）—— **纯判定 + 纯变换，不落盘、不改入参**，
+  返回 `LegacyProfileMigration { migrated, reason: 'legacy-starter'|'not-legacy-shape'|'player-chosen'|'invalid'|'no-profile', draft, selections }`。
+  写入前必须过正式 `validateSnapshot`（与 `equipWeapon` **同一纪律**）：不合法 ⇒ `'invalid'` ⇒ 不动它。
+- `loadEquippedDraft()`（`:383`）—— **唯一挂载点**。有存档 ⇒ 迁移 + 命中时**落盘一次**；
+  **无存档 ⇒ 仍 `return defaultPlayerDraft()` 且不写盘**（保住 `core/onboarding.ts` 的 `loadPlayerBuild() === null` 语义）。
+- **为什么落盘**：Home 与 Run 读的都是**已存储**那份 ⇒ 只做读时投影 = 旧存档永远停在旧形态。
+- **为什么不需要「已迁移」标记位**：迁移后 `front` 已是空槽 ⇒ 条件 ① 不再成立 ⇒ **结构上一次为限**。
+
+### §10f ⚠️ 落盘点纪律（`PL-03`）：**强化实现，不放宽守卫**
+
+本 Queue 让本模块出现了**第二个语义写入时机**（加载期归一化），而
+`tests/productLoopHomeGarage.test.ts` 的 `PL-03` 原样断言「本文件 `savePlayerBuild(` 只准出现 **1** 次」。
+**处置 = 新增私有 `persistPlayerBuild(draft)`（`:280`）把两条语义收进一处**，守卫**一字未改、原样通过**；
+`PL-02` 三个禁词（`localStorage` / `platform` / `STORAGE_KEY`）全 false。
+
+### §10g ⚠️ 实测陷阱（本轮新发现，**会毁掉你的夹具**）
+
+**`drive` / 轮径 / 轮组真的会改变战斗结果。**
+第一版 E2E 把 `drive:'stationary'` + 非默认轮径塞进**战斗夹具** ⇒ 直接 `phase=FAILED pool=null battles=1/4`。
+⇒ **拆夹具**：① **战斗夹具**（用默认/合法驱动，只证可达性）② **保留性夹具**（放各种玩家自有字段，**不跑战斗**）。
+
+**产品含义（需上报）**：迁移**不碰**这些字段（必改 1 明令保留）⇒ **`drive` 被自改成 `stationary` 的旧存档，
+即便迁移清空了 `front`，第一场仍可能失败**。Reachability Gate 管的是「**标准 Cannon 产品基线**」，
+不是「任意用户自改配置」。
+
+### §10h E2E 书写坑（`tests/_e2e_product_legacy_profile.cjs` 实测）
+
+- 探针 `ProductProbe` 只有 `slots[]`（**无** `occupied`）⇒ 判空槽要
+  `slots.find(s => s.hardpointId === FRONT_SLOT).defId === 'none'`。
+- 「第一次局内强化」的**数据层判据** = `choiceOpen && choicePoolKind === 'layer1'`
+  （**不要**按「第几选」数数）。
+- 断言「迁移不丢玩家数据」用**键序无关规范化比较**（`canon(stripStamp(x))`），别手搓期望对象。
+- 断言「迁移落盘」用**正式读路径** `loadPlayerBuild()`，不要自己在测试里 `JSON.parse` localStorage。
+- 「不重复修改」要断言 **write 计数不增**（`LM-14`）或 reload 后形态不变（`L7`），二者都写更硬。
+
+### §10i 守门清单
+
+| 守卫 / 用例 | 钉什么 |
+|---|---|
+| `PL-03` | 本模块 `savePlayerBuild(` **恰好 1 次**（落盘点唯一） |
+| `PL-02` | 本模块不含 `localStorage` / `platform` / `STORAGE_KEY` |
+| `LM-20` | 迁移不引入 `removeItem` / `resetPlayerSave`，且**确实**用 `makeStarterDraft(` |
+| `LM-21` | 明文冻结的 `LEGACY_FIXTURE` 仍与 `makeStarterDraft` 一致（**旧 starter 漂移报警**） |
+| `LM-30` | Reachability：第一场 `resolved` + `phase === 'CHOICE'` + `runChoicePoolKind === 'layer1'` |
+| `LM-41` | Spear/Hammer 仍被完整 Run 入口守门（`unsupported-loadout` / `startRunHref === null`） |
+| `LM-42` | `applyRunModifiersToSnapshot` 的 `throw` **未被动过** |
+| `e2e:product-legacy` | 真实浏览器 + 真实 localStorage + 真实鼠标，17 条 |
+

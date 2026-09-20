@@ -14,13 +14,14 @@
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 工作分支 `prototype-portrait-battle-lab`
   （实验，可整块删）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。
 - **链尾**：`c0d2c5d`+`69c4d1e` R1-A → `f1b87a2`(+`fb982be`) R1-B → `4f0be1a` R1-C → `c63408c` R1-D →
-  `c40977a` R2-A → `16a221f` R2-B（起点 `52f3f6d`）→ **`9e4e88c` R2-C**（起点 `2209263`）→
-  **`9841274` P0**（完整 Run 装载资格：非 cannon 不再「前几日正常、DAY3 卡死」，起点 `c0429c1`）；
+  `c40977a` R2-A → `16a221f` R2-B（起点 `52f3f6d`）→ `9e4e88c` R2-C（起点 `2209263`）→
+  `9841274` P0（完整 Run 装载资格：非 cannon 不再「前几日正常、DAY3 卡死」，起点 `c0429c1`）→
+  **`9078cc5` PLP0-LEGACY**（旧 profile 迁移 + Run Reachability Gate，见 §2d，起点 `f8effbc`）；
   更早查 `git log`。
 - ⚠️ **不变量在 R2-B 起被有意打破**：`src/{physics,render,player,platform,ui,game,presentation,lab}` diff
   恒为空；**`src/core` 不再空** —— R2-B（`partInventory.ts`/`buildPersistence.ts`，见 §7a）、
   R2-C（`buildSnapshot.ts` 星级曲线唯一真源 / `types.ts` 注释，见 §8b）两处**必改**。
-  **P0 core 零改动**：全落 `src/product/` + `src/lab/portraitBattleLab/` + `home.html` + tests
+  **P0 / PLP0-LEGACY core 零改动**：全落 `src/product/`（P0 另含 `src/lab/portraitBattleLab/` + `home.html`）+ tests
   （冻结目录 `git diff` 为空，`content.ts` / `contactRouter.ts` 零改动）。
 
 ## 2. 红线速查（全文 → REF_GUARDS §1–2）
@@ -86,16 +87,49 @@
   耐久事件选 `upgrade`（不回耐久）→ DAY7 归零（≈41.6s）；「推杆`@front`」路线**车库走不通**
   （车库只能往 `frontMass` 装武器）。详见 §9g。
 
+### 2d 旧 profile 迁移（PLP0-LEGACY → §10）
+- 症状：旧 starter（`makeStarterDraft` ⇒ `front='pushRod'`，`lab/buildEditorModel.ts:182`，**至今未改**）
+  的 `front` 推杆每周期反推**自家车** ≈241px ⇒ 完整 Run 第一场（DAY2）**稳定失败** ⇒ 主循环结构上不可达。
+- ⚠️ **`migrateLegacy('build',…)` 对 build 是 no-op**（`core/saveVersion.ts:98-102`，`CURRENT_SAVE_VERSION=1`）
+  ⇒ 这不是 schema 问题，**core 里没有任何一层会碰它** ⇒ 只能产品侧做语义迁移（本 Queue **未动 core**）。
+- ⚠️ **「见推杆就删」是错的**：`editableSlots(body)` 返回**全部**硬点（含 `front`，`:91-93`），
+  **正常玩家车库**就用它（`ui/webDomPlayerUIHost.ts:429`，`main.ts:4` 明写「唯一 PlayerUIHost 边界」），
+  `playerGameRuntime.applyBuildEdit` 对**任意** slotKey 写入并落**同一个** key ⇒ **无法靠结构分辨玩家主动装备**。
+- **判别式（用户裁决「收紧」）**：**同时**满足 ①`front`/`frontMass` == `makeStarterDraft()` 取值
+  （**签名取自真源函数，不抄常量表**）②`functionalStars?.front === undefined`
+  （**所有**玩家侧写入都盖星级印记：`main.ts:757-758` · `playerGameRuntime.ts:303-304` ·
+  `canvasPlayerUIHost.ts:1291-1292`；`makeStarterDraft` 完全不写）。任一不成立 ⇒ **一字节不改**。
+  ⚠️ **已知缺口**：Q22 之前的旧存档无法被 ② 区分（已上报，未处理）。
+- 落点：`migrateLegacyStarterProfile()`（`playerLoadout.ts:350`，**纯函数不落盘**）+ `loadEquippedDraft()`（`:383`，
+  命中落盘一次）。**无存档仍不写盘**（保 `core/onboarding.ts` 的 `=== null` 语义）。
+  **结构上一次为限**（迁移后签名不成立）⇒ 无需「已迁移」标记位。只清 `front`，**库存/星级/进度一字不动、禁 reset**。
+- ⚠️ **落盘点收口**：`PL-03` 钉「本模块 `savePlayerBuild(` 只准 1 次」⇒ 新增私有 `persistPlayerBuild()`
+  收进两条语义（玩家动作 + 加载期归一化）。**纪律：守卫红了就强化实现，不放宽守卫。**
+- ⚠️ **实测：`drive` / 轮径 / 轮组真的会改变战斗结果**（`stationary` 战斗夹具 ⇒ 第一场必 FAILED）。
+  迁移**不碰**它们（必改 1）⇒ `drive` 被自改成 `stationary` 的旧存档**迁移后仍可能失败**。
+  Reachability Gate 管的是「**标准 Cannon 基线**」，不是「任意用户自改配置」。
+- **必改 4（换低压 Encounter）未触发**：标准基线**真的**打到 `d2-choice1` / `layer1`
+  ⇒ 不做 Encounter 替换、不做任何数值扫描（这是 Queue 明令的「不许」）。
+
 ## 3. 各功能面 → 细节在 REF / 交接文档
 战斗参数 §A · 相机 §B · 接缝与第一层冻结值 §C · RUN-R1 §D · BUILD-01 §E · RUN-02 §F/§J/§K · M2 种子 §G ·
 M3 遭遇台 §H · Hub §I · M2-R1 终点态出口 §L · PBL-RDC §M → `REF_PRP_RUNTIME.md`。
 ⚠️ **不在 REF、只看交接文档**：`PRP-M3-CONTENT-BATCH-01` · `PBL-M3-LIGHT-SWARM-EXPERIENCE-VALIDATION-R1` ·
 `PRODUCT-LOOP-R1-A/B/C` · `R1-D`（§5）· `R2-A`（§6）· `R2-B`（§7）· `R2-C-STAR-POWER-END-TO-END`（§8）·
-**`P0-RUN-BUILD-LOADOUT-COMPATIBILITY`（§9）**。
+**`P0-RUN-BUILD-LOADOUT-COMPATIBILITY`（§9）** · **`P0-LEGACY-PROFILE-MIGRATION-AND-RUN-REACHABILITY`（§10）**。
 启动两行：`cd D:\0818new\最强水果` → `npm run dev`（默认进**产品首页**；研发用 `dev:home` / `dev:next-run` /
 `dev:encounter-lab` / `dev:validation`）。
 
 ## 4. Next action
+- ✅ **PLP0-LEGACY 已收口**（`9078cc5`，5 files +1034/−5）：×1 迁移 + Run Reachability Gate；
+  `tsc` 零错 · 新单测 **15/15** · 受影响 10 套件 280/280 · R22b+产品守卫 62/62 · 新 E2E `e2e:product-legacy`
+  **17/17** · 回归 home 30/30 / loop 51/51 / fail 34/34 / star-power 20/20 / reward 48/48 / default-entry 86/86 ·
+  全量 vitest **218 files / 2287 tests** · 4 build 全绿（wechat `game.js` 1,415.83 kB 与 P0 持平）。
+  **必改 4 未触发**（标准基线真的打到 `d2-choice1` / `layer1`）。详见 §2d + 交接文档 PLP0-LEGACY §10。
+- ⚠️ **待用户裁决（PLP0-LEGACY 4 条）**：① 判别式条件 ②（星级印记）**是否接受为长期契约**（Q22 之前的旧存档
+  仍无法区分 ⇒ 保守不迁移、主循环仍不可达）；② 是否**为 `drive='stationary'` 自改导致第一场失败**开独立 Queue
+  （实测它真是失败来源，且必改 1 不许迁移碰它）；③ 迁移是否要在首页给玩家一句提示（本轮做到**静默**）；
+  ④ P0 那 4 条**仍然有效**。详见 `交接文档_2026-09-20_PRODUCT-LOOP-P0-LEGACY-*.md` §10。
 - ✅ **P0 已收口**（`9841274`，15 files +1389/−106）：两层守门 + 拒绝态独立视图 + Case A–E；
   `product-fail` **34/34** · `product-loop` **51/51** · home 30/30 · reward 48/48 · star-power 20/20 ·
   default-entry 86/86 · 全量 vitest **217 files / 2272 tests** · 4 个 build 全绿（wechat `game.js` 1,415.83 kB，
