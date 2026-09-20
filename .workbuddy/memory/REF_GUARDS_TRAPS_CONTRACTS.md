@@ -699,3 +699,83 @@ Queue 给的前提「如果历史正式产品从未开放 front 槽给玩家编�
 | `LM-42` | `applyRunModifiersToSnapshot` 的 `throw` **未被动过** |
 | `e2e:product-legacy` | 真实浏览器 + 真实 localStorage + 真实鼠标，17 条 |
 
+---
+
+## §11 Run 侧基线伤害 + R2 onboarding 迁移（PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY 固化契约；改动伤害 / 候选池 / 首页成长前必读）
+
+### §11a 为什么是「Run 侧基线」而不是改正式 Cannon
+真人反馈「成长闭环走不完」⇒ 要抬的是**产品 Run 里玩家那门炮**的基线，**不是**全局 Cannon。
+正式 `src/core/content.ts` 的 `cannon.projectileDamage = 80` 被**三处共享**：
+① 旧横屏正式玩法 ② `Validation` 场景 ③ **敌方 `RangedTurret` 自己装的 cannon**。
+直接改它会顺带 buff 敌人，并让 RDC（真实追上 `RangedTurret`）/ 四场掉血压力阶梯等结构守卫失效。
+> 用户裁决（2026-09-20）：**不改全局**，改为 Run 侧玩家基线；**不放宽任何现有结构守卫**。
+
+### §11b 接缝（真源与闸门）
+- 值：`PRODUCT_RUN_CANNON_BASE_DAMAGE = 120`（`src/lab/portraitBattleLab/runModifiers.ts:139`）。
+- id：`RUN_PLAYER_BASE_TOKEN = '@base'`（**不是**任何 `RunModifierId` ⇒ 永不撞车）；
+  `runPlayerWeaponDefId(build, playerBaseline)` —— `false` ⇒ 与旧 `runBuildDefId()` **逐字相同**；
+  `true` ⇒ **恒有 id**（哪怕一个 Modifier 都没选），因为「玩家侧 120」必须由一件**独立部件**承载。
+- 合成：`composePlayerRunWeaponDef()` = 正式 Cannon → **基线 overlay（只写 `projectileDamage`）**
+  → Run-local Modifier 浅合并。冷却 / 弹速 / 半径 / 质量 / 后坐**全部沿用正式值** ⇒ 手感零变化。
+- 闸门：`createRunRegistry(build, playerBaseline = false)`。
+  **默认 `false`** ⇒ Lab / Validation / RDC / 四场掉血阶梯调用点**逐字段不变**；
+  **只有产品 Run 页**（`runPage.ts` 的 `beginBattle`）传 `true`。
+- 曲线：`starTierDamage = round(base × (1 + 0.25 × (star − 1)))` ⇒ 玩家 ★1 = **120** / ★2 = **150**；
+  正式 & 敌方 = **80 / 100**。
+
+### §11c 结构性不可外溢（不是靠自觉）
+- 只**重映射玩家 profile 里那一件基准武器**；本局 registry 里正式的 `cannon` 键**逐字段不变**
+  ⇒ 敌方 `RangedTurret` 读到的仍是 **80**。
+- `applyRunModifiersToSnapshot()` 的 **`throw`（找不到基准武器）是刻意保留的强 invariant**，未动。
+- ⚠️ **不许**再回头去改 `content.ts` 的 80（会被 §11h 的守卫当场拦下）。
+
+### §11d 候选池收窄为一件（必改 2）
+- `REWARD_CHOICE_IDS = ['cannon']`（`src/product/runReward.ts:93`）。
+- **新不变式（本 Queue 立）**：`REWARD_CHOICE_IDS ⊆ FULL_RUN_SUPPORTED_WEAPON_IDS`
+  ⇒「终点只发玩家这一局真的用得上的东西」**结构性成立**，不靠人工核对。
+- `spear` / `hammer` **保留在 Inventory**（可展示 / 可装备 / 仍被完整 Run 守门拦住），只是**暂时退出奖励池**
+  ⇒ 它们将来回池是**内容完成度**问题，**不是**把定义删掉。
+- 结算卡第二行 = `progressText`（`当前 4/5 → 领取后 5/5`，真实计数、**两侧都不 clamp**：
+  夹成「5/5 → 5/5」等于告诉玩家「领取没有变化」，那才是伪造）。
+- `runRewardChoiceRects(count)` 是 `Math.max(1, …)` ⇒ **N=1 与 N=3 走同一条代码路径**（不存在「默认那件」）。
+
+### §11e E2E 必须解耦的两个 id（本轮实测踩过）
+`CLAIM_ID`（cannon = 终点领到的那件）与 `WEAPON_B`（spear = 局外守门演示）**必须分开**：
+`CHOICE_IDS.indexOf(WEAPON_B)` 现在 = **−1** ⇒ 点「第 −1 张卡」拿到 `undefined` 并在 `clickRect` 里崩。
+另一条：候选池只剩一件 ⇒ 旧「换一件也领不到」的取证**换靶**为**产品根本不会发出的地址** + 同一 token
+⇒ 仍必须落 `already-claimed`（顺带钉死 `claimRunReward` 的**幂等检查先于部件校验**，`playerProfile.ts:149`）。
+⚠️ 「同一 token 换一件」这条**只能换靶、不能删**——它是「幂等键 = token 而不是地址」的唯一证据。
+
+### §11f onboarding 迁移（必改 1）
+历史 Profile **不是 fresh** ⇒ 种子不发 ⇒ 真人永远停在 `cannon ★1 ×1`，「4/5 → 打一局 → 5/5 → 合成」
+在真人机器上**不可达**。落点 `src/product/r2Onboarding.ts`（key = `strongfruit.r2Onboarding.v1`）：
+- 判据 = **无任何 ★≥2 成长** 且 `cannon ★1 < 4` ⇒ 补到 **4**（「还差 1 件」才是验证起点）。
+- ⚠️ **写盘顺序是硬要求**：`plan → raise → saveInventory → markR2Onboarding`。
+  **标记必须晚于库存落盘** ⇒ 配额写失败只退化成「下次重试」，而不是「标记说做过了、库存却没补上」永久卡死。
+- 唯一写入口 = `playerGrowth.openGrowthSession()`；`GrowthSession.onboarding` 把判定**原样报出**
+  （页面 / 探针不各自再判一次）。
+
+### §11g 首页成长表达（必改 4/5/6）
+- 卡片：`成长 N/5` 升为**主体信息** + 未满时「还差 1 个即可升星」；满 ⇒ 主按钮 **`合成升星`**。
+- 首页：一行最小成长状态 `炮 ★1 成长 5/5 可升星`（**纯读数、无新入口**）。
+- 领奖后：`已可升星 → 点「调整战车」合成`（**只指路、绝不自动合成**；此刻 ★2 必须**不存在**）。
+
+### §11h 守门清单
+
+| 守卫 / 用例 | 钉什么 |
+|---|---|
+| `SP-11`（`productStarPowerR2C.test.ts`） | **双侧锁**：玩家侧 120 / 正式 `cannon` 仍 80 |
+| `FROZEN_UPGRADE_E2E = [919,916,847,366]` | 120 下的真实战斗终局（`portraitRunPage.test.ts`） |
+| `FROZEN_REPAIR` / `FROZEN_UPGRADE` | 三条终局路线；`upgrade\|twinCannon+tripleLoad` **仍 0/FAILED** |
+| `e2e:product-reward` **D4b / D4c** | 必改 5 成长行 + 必改 6 领奖引导（探针 + 真实 DOM 双证，★2 不存在） |
+| `e2e:product-loop` **G3** | 幂等键 = token（非候选池地址也落 `already-claimed`）。**不删断言** |
+| `git diff --exit-code -- src/core/content.ts src/battle/contactRouter.ts` | 正式内容库 / 接触路由**字节零改动** |
+
+### §11i 陷阱（本轮实测）
+- 120 使**旧 FAILED 路线失效**：`heavyShell + kineticBurst` 变成 COMPLETE（HP 364）⇒
+  fail E2E 的 `FAIL_POLICY` 换成 **`twinCannon + tripleLoad`**（终局 0 / FAILED）。
+  ⚠️ 纪律 = **换合法路线 + 新增守门断言，不删断言**。
+- 合成按钮文案已从 `合成` 改为 **`合成升星`** ⇒ 任何按旧字面量断言的用例都要同步。
+- 候选卡数量断言用 `rects.length === CHOICE_IDS.length`（= 1），**不要**再写死 `3`；像素阈值按**面积**推导
+  ⇒ 一件候选的卡底面积是 `1 × 362 × 68`（更宽但只有一行，实测阈值取 **18000**），不是三件的 55000。
+

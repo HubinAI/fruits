@@ -14,7 +14,7 @@
 - Repo `git@github.com:HubinAI/fruits.git` | dir `D:\0818new\最强水果` | 工作分支 `prototype-portrait-battle-lab`
   （实验，可整块删）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。舞台 844×390。
 - **链尾**：R1-A `c0d2c5d`+`69c4d1e` → R1-B `f1b87a2` → R1-C `4f0be1a` → R1-D `c63408c` → R2-A `c40977a` →
-  R2-B `16a221f` → R2-C `9e4e88c` → P0 `9841274` → PLP0-LEGACY `9078cc5` → 复核 doc
+  R2-B `16a221f` → R2-C `9e4e88c` → P0 `9841274` → PLP0-LEGACY `9078cc5` → R2-RECOVERY `8770c98` → 复核 doc
   `1a9f4a0`/`5d47d98`/`115fe52`/`a3ea779`；更早查 `git log`。
 - ⚠️ **不变量在 R2-B 起被有意打破**：`src/{physics,render,player,platform,ui,game,presentation,lab}` diff 恒为空；
   **`src/core` 不再空** —— 仅两处**必改**：R2-B（`partInventory.ts` / `buildPersistence.ts`）、R2-C
@@ -77,21 +77,37 @@ Lab **不硬编码产品 URL**、失败**不接受隐式推进**（`RP-D-06`）�
 ⚠️ **实测：`drive` / 轮径 / 轮组真的会改变战斗结果** ⇒ 迁移不碰它们 ⇒ `drive='stationary'` 旧存档**迁移后仍可能
 失败**；Reachability Gate 只管「**标准 Cannon 基线**」。
 
+### 2e Run 侧基线伤害 + R2 onboarding（R2-RECOVERY §11）→ REF_GUARDS §11 全文
+**正式 `content.ts` 的 cannon 恒为 80**（本轮**字节零改动**）。玩家侧基线走
+**`PRODUCT_RUN_CANNON_BASE_DAMAGE = 120`**（`runModifiers.ts:139`），**只重映射玩家 profile 里那一件基准武器**
+⇒ 玩家 ★1 = **120** / ★2 = **150**；**敌方 `RangedTurret` / RDC 追上判据 / 四场掉血阶梯 / laser 2× 全不受影响**
+（本局 registry 的正式 `cannon` 键逐字段不变 ⇒ 结构性，不靠自觉）。
+闸门 = `createRunRegistry(build, playerBaseline = false)` —— **默认 false** ⇒ Lab / Validation / RDC / 四场阶梯
+调用点**逐字段不变**；**只有产品 Run 页 `runPage.ts:beginBattle` 传 `true`**。强 invariant
+（`applyRunModifiersToSnapshot` 找不到基准武器即 `throw`）**保留**。
+⚠️ 候选池已收窄为 `['cannon']`（新不变式 `REWARD_CHOICE_IDS ⊆ FULL_RUN_SUPPORTED_WEAPON_IDS`）；E2E 里
+`CLAIM_ID`(cannon) 与 `WEAPON_B`(spear＝守门演示) **必须解耦**（`CHOICE_IDS.indexOf(WEAPON_B)` = **−1** ⇒ 点第 −1 张卡崩）。
+⚠️ onboarding 迁移顺序硬要求 = `plan → raise → saveInventory → markR2Onboarding`（**标记必须最后**）。
+
 ## 3. 各功能面 → 细节在 REF / 交接文档
 `REF_PRP_RUNTIME.md`：战斗参数 §A · 相机 §B · 接缝与第一层冻结值 §C · RUN-R1 §D · BUILD-01 §E · RUN-02
 §F/§J/§K · M2 种子 §G · M3 遭遇台 §H · Hub §I · M2-R1 终点态出口 §L · PBL-RDC §M。
-⚠️ **只在交接文档**：`R1-A/B/C` · `R1-D`(§5) · `R2-A`(§6) · `R2-B`(§7) · `R2-C`(§8) · `P0`(§9) · `PLP0-LEGACY`(§10)。
+⚠️ **只在交接文档**：`R1-A/B/C` · `R1-D`(§5) · `R2-A`(§6) · `R2-B`(§7) · `R2-C`(§8) · `P0`(§9) ·
+`PLP0-LEGACY`(§10) · `R2-RECOVERY`(§11)。
 启动：`cd D:\0818new\最强水果` → `npm run dev`（默认**产品首页**；研发 `dev:home` / `dev:next-run` /
 `dev:encounter-lab` / `dev:validation`）。
 
 ## 4. Next action
-**R2 milestone（A/B/C）已复核收口**，无功能缺口、无 BLOCK。门禁基线：`tsc` 零错 · 全量 vitest **218 files /
-2287 tests** · `build` / `build:pages` / `build:wechat`（`game.js` 1,415.83 kB）· star-power **21/21** · reward 48/48 ·
-loop 51/51 · fail 34/34 · home 30/30 · legacy 17/17 · default-entry 86/86。
+**R2 milestone（A/B/C）+ R2-RECOVERY 均已复核收口**，无功能缺口、无 BLOCK。门禁基线：`tsc` 零错 · 全量 vitest
+**218 files / 2297 tests** · `build` / `build:pages` / `build:wechat`（`game.js` 1,415.83 kB）· star-power **21/21** ·
+reward **50/50** · loop **51/51** · fail **34/34** · home **30/30** · legacy **17/17** · run-page **503/503** ·
+default-entry **86/86**。⚠️ `e2e:next-run` 仍崩（`_e2e_next_run.cjs:619` 等 Hub 入口**恰好 3 个**而现有 **4** 个）
+= **既有缺陷**（SESSION-HANDOFF §7-2），非回归。
 **下一步 = 等用户裁决下表任一项，或下发新 Queue；用户已明令「不自行进入 R3」。**
 
 | Queue | 未决项 |
 |---|---|
+| **R2-RECOVERY**（本队列 4） | ① 玩家侧 **120**（Run 侧基线）是否接受为**长期契约** ② 候选池收窄为 `['cannon']` 后 `spear`/`hammer` 何时回池（= 内容完成度）③ 历史 Profile 的 onboarding 迁移是**静默**的，首页是否给提示 ④ 首页成长行「纯读数、无入口」是否够 |
 | **R2-C**（4） | ① `validateSnapshot` 星级能量盲开 Bug Queue ② ★2 炮 33 能量超 `bananaBody` 90 是否加提示 ③ `saw` 边界是否提前处理 ④ 是否开 Body/Gadget 成长 |
 | **PLP0-LEGACY**（4） | ① 判别式是否接受为**长期契约**（Q22 前旧档仍不可区分）② `drive='stationary'` 自改致败是否开独立 Queue ③ 首页是否给迁移提示（本轮**静默**）④ P0 4 条仍有效 |
 | **P0**（4） | ① 两条 E2E 路线替换是否接受 ② 支持清单粒度 `['cannon']` ③ 拒绝态文案落点 ④ `runBlockedView` 出口口径 |
