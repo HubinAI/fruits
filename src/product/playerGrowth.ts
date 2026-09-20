@@ -59,6 +59,23 @@ import {
 } from '../core/partInventory';
 import { EMPTY_SLOT, type BuildDraft } from '../lab/buildEditorModel';
 import { equipWeapon, isWeaponDefId, playerInventory, WEAPON_SLOT } from './playerLoadout';
+/**
+ * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）｜**一次性 R2 onboarding 迁移**。
+ *
+ * 历史 Profile 不是 fresh ⇒ 种子不发 ⇒ 真人 Garage 永远停在 `cannon ★1 ×1`，
+ * 「4/5 → 打一局 → 5/5 → 合成」这条验证链在真人机器上**不可达**。
+ * 本模块把「补到 4 / 只补一次 / 已成长不动」这三条收在一个地方（`r2Onboarding.ts`），
+ * `openGrowthSession` 只负责**按正确顺序**调它：
+ *     判定 → （补件）→ 落盘库存 → **最后**打标记。
+ * ⚠️ 顺序写反的后果是静默的：标记先落盘而库存落盘失败（配额 / 隐私模式）⇒
+ *    「标记说做过了、库存却没补上」⇒ 玩家永远拿不到那 3 件。
+ */
+import {
+  markR2Onboarding,
+  planR2Onboarding,
+  raiseR2OnboardingCannon,
+  type R2OnboardingPlan,
+} from './r2Onboarding';
 
 /**
  * 本版成长只使用 **★1**。
@@ -220,6 +237,14 @@ export interface GrowthSession {
   readonly repairedEquipped: string | null;
   /** 读的时候是不是一个全新账号（此刻磁盘上既没有 Build 也没有库存）。 */
   readonly freshProfile: boolean;
+  /**
+   * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）｜本次挂载的
+   * **一次性 onboarding 迁移**读数（判定结果原样报出，页面与探针不各自再判一次）。
+   *
+   * ⚠️ `applied === true` ⇒ 这一次真的把历史 Profile 补到了「还差 1 件」的起点；
+   *    `already-marked` ⇒ 曾经执行过（reload 走到这里时就是它）。
+   */
+  readonly onboarding: R2OnboardingPlan;
 }
 
 /**
@@ -242,6 +267,19 @@ export interface GrowthSession {
  *
  * ⚠️ 已有存档的玩家（旧 Profile）**不会**被抬到 `cannon ×4` —— 种子只发给新账号。
  *    他们唯一可能的改动是「Equipped stack 缺件」被补 1（且只在真的缺件时）。
+ *
+ * ── PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）追加 ─────────────────
+ * 上面那条「种子只发给新账号」正是真人反馈 ② 的根因：真人用的是**历史 Profile**
+ * ⇒ 永远停在 `cannon ★1 ×1` ⇒ 验证起点不存在。因此本函数在种子之后、落盘之前
+ * 再走一次**一次性 onboarding 迁移**（`planR2Onboarding` → `raiseR2OnboardingCannon`）。
+ *
+ * ⚠️ **落盘顺序是硬要求**（三段各自都可能改盘）：
+ *     ① 先算 `plan`（纯读）；
+ *     ② 按 plan 改内存库存（+ 已有的种子 / Equipped 兜底）；
+ *     ③ `saveInventory` 落盘库存；
+ *     ④ **最后**才 `markR2Onboarding()` 落版本标记。
+ *   ④ 排在 ③ 之后，是为了让「配额写失败」只退化成「下次重试」，
+ *   而不是「标记说做过了、库存却没补上」这种永久卡死。
  */
 export function openGrowthSession(draft: BuildDraft): GrowthSession {
   const freshProfile = isFreshProfile();
@@ -253,11 +291,19 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
     seeded = applyFreshSeed(inv);
     changed = changed || seeded;
   }
+  // 必改 1：历史 Profile 的一次性 onboarding（判据 / 补件量全在 `r2Onboarding.ts`）
+  const onboarding = planR2Onboarding(inv);
+  if (onboarding.applied) {
+    raiseR2OnboardingCannon(inv, onboarding);
+    changed = true;
+  }
   const repairedEquipped = repairEquippedStack(inv, draft);
   changed = changed || repairedEquipped !== null;
 
   if (changed) saveInventory(inv);
-  return { inv, seeded, repairedEquipped, freshProfile };
+  // ④ 标记**必须**晚于库存落盘（见上方顺序说明）
+  if (onboarding.needsMark) markR2Onboarding();
+  return { inv, seeded, repairedEquipped, freshProfile, onboarding };
 }
 
 /**

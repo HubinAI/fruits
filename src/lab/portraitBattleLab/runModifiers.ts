@@ -109,6 +109,38 @@ export type RunModifierRole = 'base' | 'synergy' | 'safe' | 'pivot';
 /** overlay 的**基准部件** = 正式 Cannon。本 Queue 不改动它，只以它为基准派生本局变体。 */
 export const RUN_BASE_WEAPON_DEF_ID = 'cannon';
 
+/**
+ * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY｜**产品 Run 玩家侧基线伤害**。
+ *
+ * ── 为什么需要它，而不是改正式 Cannon 的伤害 ──────────────────────────────
+ * 真人在当前 R2 原型里要连续多局才能偶尔赢一次 ⇒ 成长闭环（4/5 → 跑一局 → 5/5 → 合 ★2）
+ * 实际上走不完。要调的因此是**「产品 Run 里玩家那门炮」的基线**，不是全局 Cannon。
+ * 正式 `content.ts` 的 Cannon 被三处共享：旧横屏正式玩法、`Validation` 场景、
+ * 以及**敌方 `RangedTurret` 自己装的 cannon** —— 直接改它会顺带把敌人一起 buff，
+ * 并让 RDC（真实追上 RangedTurret）/ 四场掉血压力阶梯等结构守卫失效。
+ * 因此本值**只在玩家侧**生效。
+ *
+ * ── 作用链（顺序即语义，勿调换）──────────────────────────────────────────
+ *   正式 Cannon Def（`projectileDamage` = 80，冻结不动）
+ *     → 本基线 overlay（120）  ← 只重映射**玩家装载**里那一件基准武器
+ *       → 永久 Star multiplier（`1 + 0.25 × (star − 1)`）⇒ ★1 = 120 / ★2 = **150**
+ *         → Run-local Modifier overlay（`composeRunWeaponDef`）
+ *           → Battle Runtime
+ *
+ * ⇒ 玩家侧 ★1 = 120、★2 = 150；**敌方 cannon 与正式 cannon 一律仍是 80**。
+ *
+ * ⚠️ 只改 `projectileDamage` 一项 —— 冷却 / 弹速 / 半径 / 质量 / 后坐全部沿用正式值，
+ *    因此「Cannon 的手感与节奏」零变化。
+ * ⚠️ 这是**基线**，不是 Modifier：它不进 `RUN_MODIFIER_OVERLAY`、不参与
+ *    `applyRunModifiersToSnapshot()` 那条「找不到基准武器即 throw」的强 invariant。
+ * ⚠️ 只对**玩家侧装载**生效：本局 registry 的正式 `cannon` 键**逐字段不变**，
+ *    敌方快照也从不重映射 ⇒ 「Enemy Cannon 完全不变」是结构性的，不是靠自觉。
+ */
+export const PRODUCT_RUN_CANNON_BASE_DAMAGE = 120;
+
+/** 玩家侧基线在 overlay 部件 id 里的标记段（不是任何 ModifierId ⇒ 永不撞车）。 */
+const RUN_PLAYER_BASE_TOKEN = '@base';
+
 export interface RunModifierDef {
   readonly id: RunModifierId;
   readonly label: string;
@@ -423,6 +455,25 @@ export function runBuildDefId(build: readonly RunModifierId[]): string | null {
 }
 
 /**
+ * 本局**玩家侧**武器部件 id（= 玩家基线 + 改武器的项，确定性拼接）。
+ *
+ * - `playerBaseline = false` ⇒ 与旧口径 `runBuildDefId()` **逐字相同**
+ *   （未选「改武器」项时仍是 `null` ⇒ 本局武器就是正式 Cannon，零重映射）。
+ * - `playerBaseline = true` ⇒ **恒有 id**（哪怕一个 Modifier 都没选）：因为「玩家侧 120」
+ *   必须由一件**独立部件**承载 —— 正式 `cannon` 键在任何情况下都得保持 80。
+ *
+ * ⇒ 两条路径的 id 互不冲突（基线那段用 `@base` 标记，它不是任何 `RunModifierId`）。
+ */
+export function runPlayerWeaponDefId(
+  build: readonly RunModifierId[],
+  playerBaseline: boolean,
+): string | null {
+  if (!playerBaseline) return runBuildDefId(build);
+  const mods = weaponOverlayMods(build);
+  return `run.mod.${[RUN_PLAYER_BASE_TOKEN, ...mods].join('+')}`;
+}
+
+/**
  * 以正式 Cannon 为基准派生本局变体：把改武器的项按顺序**浅合并** `behaviorParams`
  * （未声明字段一律保留正式值 → 例如三连装填只是把 `burstRounds` 从 2 抬到 3，
  *   伤害 / 半径 / 质量 / 弹速 / 冷却全部沿用）。
@@ -442,24 +493,56 @@ export function composeRunWeaponDef(
 }
 
 /**
+ * 玩家侧本局武器 = 正式 Cannon → **玩家基线**（可选）→ Run-local Modifier（浅合并）。
+ *
+ * 顺序与 `PRODUCT_RUN_CANNON_BASE_DAMAGE` 的文档一致：基线先写进 `behaviorParams`，
+ * Modifier 再覆盖自己声明的那几项 ⇒ 「基线只抬伤害」「Modifier 只改自己那几项」
+ * 两者不会互相吞掉，也不会让 Modifier 的既有语义发生漂移。
+ *
+ * `playerBaseline = false` ⇒ 与改前**逐字段相同**（正式 Cannon + Modifier 浅合并）。
+ */
+export function composePlayerRunWeaponDef(
+  base: FunctionalPartDef,
+  build: readonly RunModifierId[],
+  playerBaseline: boolean,
+): FunctionalPartDef {
+  const baselined: FunctionalPartDef = playerBaseline
+    ? {
+        ...base,
+        behaviorParams: {
+          ...(base.behaviorParams ?? {}),
+          projectileDamage: PRODUCT_RUN_CANNON_BASE_DAMAGE,
+        },
+      }
+    : base;
+  return composeRunWeaponDef(baselined, build);
+}
+
+/**
  * 造一份**本局专用 registry**（正式 `createRegistry()` 的独立副本）。
  *
- * - 没有改武器的项（未选 / 只选了能力类）→ 直接返回正式副本，行为与基础状态完全一致；
- * - 有改武器的项 → 额外注册一个本局合成的 overlay 部件，**正式 `cannon` 键仍在副本里保持原值**
- *   （因此可以逐字段对拍「正式定义未被改写」）。
+ * - 没有改武器的项、且未开玩家基线（未选 / 只选了能力类）→ 直接返回正式副本，
+ *   行为与基础状态完全一致；
+ * - 有改武器的项 或 开了玩家基线 → 额外注册一个本局合成的 overlay 部件，
+ *   **正式 `cannon` 键仍在副本里保持原值**（因此可以逐字段对拍「正式定义未被改写」，
+ *   也正因如此**敌方 `RangedTurret` 的 cannon 不受玩家基线影响**）。
+ *
+ * ⚠️ `playerBaseline` 只影响**多注册出来的那一件 overlay 部件**；正式键集合与其它部件
+ *    一字不动。默认 `false` ⇒ 既有 Lab / Validation / RDC 调用点逐字段不变。
  */
 export function createRunRegistry(
   build: RunModifierId | readonly RunModifierId[] | null | undefined,
+  playerBaseline = false,
 ): ContentRegistry {
   const mods = normalizeBuild(build);
   const reg = createRegistry();
-  const defId = runBuildDefId(mods);
+  const defId = runPlayerWeaponDefId(mods, playerBaseline);
   if (!defId) return reg;
   const base = reg.functionals.get(RUN_BASE_WEAPON_DEF_ID);
   if (!base) {
     throw new Error(`RunModifier: 正式 registry 缺少基准武器 "${RUN_BASE_WEAPON_DEF_ID}"`);
   }
-  reg.functionals.set(defId, composeRunWeaponDef(base, mods));
+  reg.functionals.set(defId, composePlayerRunWeaponDef(base, mods, playerBaseline));
   return reg;
 }
 
@@ -497,15 +580,24 @@ export function snapshotHasRunBaseWeapon(snapshot: BuildSnapshot): boolean {
  *
  * ⚠️ 判据本体已抽到 `snapshotHasRunBaseWeapon()`（与创建期资格检查同源），
  *    本函数只负责「按判据决定注入还是抛错」。
+ *
+ * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY：新增 `playerBaseline`（默认 `false`）。
+ *    `false` ⇒ 本函数逐字节等同于改前；`true` ⇒ 额外把基准武器指向「玩家基线 overlay」
+ *    （承载玩家侧 120）。**强 invariant 一字未动**：只要真的有 Modifier 要注入却找不到
+ *    基准武器，照样 throw —— 新增的只是「纯基线、又没装 Cannon ⇒ 原样返回」这一条
+ *    **非错误**分支（那局用的不是 Cannon，本基线不适用，无副作用）。
  */
 export function applyRunModifiersToSnapshot(
   snapshot: BuildSnapshot,
   build: RunModifierId | readonly RunModifierId[] | null | undefined,
+  playerBaseline = false,
 ): BuildSnapshot {
   const mods = normalizeBuild(build);
-  const overlayId = runBuildDefId(mods);
+  const overlayId = runPlayerWeaponDefId(mods, playerBaseline);
   if (!overlayId) return snapshot;
   if (!snapshotHasRunBaseWeapon(snapshot)) {
+    // 纯基线 + 没装 Cannon ⇒ 本基线不适用，原样返回（不是异常）。
+    if (weaponOverlayMods(mods).length === 0) return snapshot;
     throw new Error(
       `RunModifier: 本局装载里没有 "${RUN_BASE_WEAPON_DEF_ID}"，无法注入强化 [${mods.join(', ')}]`,
     );

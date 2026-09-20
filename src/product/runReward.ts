@@ -1,12 +1,14 @@
 /**
  * PRODUCT-LOOP-R1-B｜产品奖励的**策略与地址唯一真源**（纯逻辑，零 DOM、零存档）。
  * PRODUCT-LOOP-R1-C｜追加：**局外 Equipped Loadout 的交接口径**（同一处，不分第二个真源）。
- * PRODUCT-LOOP-R2-A｜**改口径**：单件固定奖励 →「**3选1**」（`choices`，见 `REWARD_CHOICE_IDS`）。
+ * PRODUCT-LOOP-R2-A｜**改口径**：单件固定奖励 →「**候选列表**」（`choices`，见 `REWARD_CHOICE_IDS`）。
+ * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）｜候选池**收窄为一件**
+ * （`['cannon']`）—— 见 `REWARD_CHOICE_IDS` 的定义头注释（「只发这一局真的用得上的东西」）。
  *
  * 这个模块回答五个问题，全部只在这里回答一次：
- *   ① 「本局能给玩家哪几件部件」→ `REWARD_CHOICE_IDS`（**固定三件已有正式 Weapon**：
- *      炮 / 刺 / 锤。Queue 必改 4 明令「第一版只使用已有 cannon / spear / hammer」、
- *      「禁止新增 Weapon」、「不做随机奖励」）；
+ *   ① 「本局能给玩家哪几件部件」→ `REWARD_CHOICE_IDS`（**当前固定一件正式 Weapon**：
+ *      `cannon`。Queue 必改 2 明令「COMPLETE 不再做三选一，改为固定获得 cannon ★1 ×1」，
+ *      原因是当前只有它同时具备完整 Run compatibility / 已验证 Run Buff / Star 成长链）；
  *   ② 「怎么开始一局带奖励的冒险」→ `buildAdventureHref()`（唯一产出产品 URL 的地方）；
  *   ③ 「玩家带着什么参数回到首页」→ `buildClaimHref()` / `parsePendingClaim()`
  *      （⚠️ R2-A **完全未改**：玩家选中哪一件，回首页的 URL 就是
@@ -62,19 +64,33 @@ import { registry } from '../core/content';
 import type { BuildDraft } from '../lab/buildEditorModel';
 
 /**
- * R2-A｜终点 3选1 的**候选池** = 三件**已有正式 Weapon**（炮 / 刺 / 锤）。
+ * R2-A｜终点候选池（**本 Queue 收窄为 1 件**）。
  *
- * ⚠️ 全部取自 `STARTER_PARTS`（玩家一开始就拥有），且三件都实测能在默认车的
- *    `WEAPON_SLOT`（`frontMass`）上过正式 `validateSnapshot`（能量 30/25/25 ≤ 110）
- *    ⇒ 三个选项**都能真的发出去**（`claimRunReward` 的 `not-equippable` 分支不会静默吃掉一个选项）。
+ * ── PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）为什么从三件收成一件 ──
+ * 真人反馈 ③：胜利后拿到 `spear`，而**当前完整 Run 明确不支持 spear**
+ * ⇒ 系统奖励了一个「当前不能真正使用的东西」。当前 R2 阶段真正同时具备
+ *   ① 完整 Run compatibility、② 已真人验证的 Run Buff、③ 永久 Star 成长链
+ *   的 Weapon **只有 `cannon`**（`FULL_RUN_SUPPORTED_WEAPON_IDS = ['cannon']`）。
+ * ⇒ 本阶段 COMPLETE **固定**发 `cannon ★1 ×1`；`spear` / `hammer` **保留在 Inventory**
+ *   （可展示 / 可装备 / 仍被完整 Run 守门拦住），但**暂时退出奖励池**。
+ *   它们将来有完整 Run Build 内容后再重新入池 —— 那是**内容完成度**问题，
+ *   不是「物品不存在」，更不是把它们的定义删掉（Queue 明文「不要删除」）。
+ *
+ * ⚠️ 新不变式（本 Queue 立、由 E2E 机器钉死）：
+ *      `REWARD_CHOICE_IDS` ⊆ `FULL_RUN_SUPPORTED_WEAPON_IDS`
+ *    ⇒「终点只能发玩家这一局真的用得上的东西」不再靠人工核对，而是结构性成立。
+ *
+ * ⚠️ 全部取自 `STARTER_PARTS`（玩家一开始就拥有），且实测能在默认车的
+ *    `WEAPON_SLOT`（`frontMass`）上过正式 `validateSnapshot`（能量 30 ≤ 110）
+ *    ⇒ 候选**真能发出去**（`claimRunReward` 的 `not-equippable` 分支不会静默吃掉一个选项）。
  *    `tests/productLoopRunReward.test.ts` 的 `PR-08b` 用**真实校验器**逐件钉死这条，
- *    内容（能量 / 挂点）一变动测试立刻报警，不会静默退化成「三选一里有一个是废选项」。
- * ⚠️ 顺序 = 界面上的展示顺序（第一个也就是 Garage 里最顺手的那件），刻意不排序 ——
- *    顺序本身是产品决策，不是数据推导。
- * ⚠️ 不引入 `laser`（R1-B 的单件固定奖励）等「玩家初始不拥有」的部件：
- *    Queue 要求 first-version 只用 `cannon` / `spear` / `hammer`，且禁止新增 Weapon。
+ *    内容（能量 / 挂点）一变动测试立刻报警。
+ * ⚠️ 顺序 = 界面上的展示顺序；本阶段只有一条，顺序本身无歧义。
+ * ⚠️ 不引入 `laser`（R1-B 的单件固定奖励）等「玩家初始不拥有」的部件，
+ *    也不新增 machine gun（Queue 明令：新增 Weapon 会一次性重开 Run compatibility /
+ *    Run Modifier / Reward / Star / Fusion / Balance 五个面）。
  */
-export const REWARD_CHOICE_IDS: readonly string[] = ['cannon', 'spear', 'hammer'];
+export const REWARD_CHOICE_IDS: readonly string[] = ['cannon'];
 
 /** 冒险入口（与 `home.html` 同一竖屏产物内的相对地址）。 */
 export const ADVENTURE_HREF = './run-page.html';

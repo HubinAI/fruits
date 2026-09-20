@@ -13,6 +13,22 @@
  *   - 幂等：第二次挂载零写入；
  *   - 只增不减：既不删条目也不归零；
  *   - 库存 key 仍是 `strongfruit.ownedParts.v2`（不新建第二套库存）。
+ *
+ * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）**修订了下面这一条契约**。
+ *
+ *     R2-A 当时的口径是「老档一个字节都不动」。真人反馈 ② 证明它带来一个致命副作用：
+ *     真人用的就是历史 Profile ⇒ 永远停在 `cannon ★1 ×1` ⇒ 「4/5 → 打一局 → 5/5 → 合成」
+ *     这条验证链在真人机器上**不可达**。因此本 Queue 新增一条**独立、版本化、一次性**的
+ *     onboarding 迁移（`src/product/r2Onboarding.ts`），把老档的 `cannon ★1` 补到 4。
+ *
+ *     ⇒ 本文件的相关用例**不是被删掉，而是被改写成更精确的契约**（三层同时断言）：
+ *       ① 旧口径仍然成立的部分：**种子**（`FRESH_STACK_SEED`）依然只发新账号；
+ *       ② 新口径：**未成长**的老档会被 onboarding 一次性补到 4（且只补 cannon、只补一次）；
+ *       ③ 新的更严约束：**已成长**的老档（存在 ★≥2 的 Weapon）**一个字节都不动**；
+ *          老档的**其它 stack**（spear / hammer / 非武器）也**一个字节都不动**。
+ *     需要「单独验 R2-A 的原有路径」（种子 / Equipped 兜底）时，用例会先把 onboarding
+ *     的标记**预置**好（`markR2Onboarding()`），把这条新变量隔离出去 —— 这是**隔离变量**，
+ *     不是放宽断言。
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -54,6 +70,12 @@ import {
   repairEquippedStack,
   stackProgress,
 } from '../src/product/playerGrowth';
+import {
+  R2_ONBOARDING_KEY,
+  R2_ONBOARDING_TARGET_COUNT,
+  markR2Onboarding,
+  planR2Onboarding,
+} from '../src/product/r2Onboarding';
 
 const INV_KEY = 'strongfruit.ownedParts.v2';
 const INV_KEY_V1 = 'strongfruit.ownedParts.v1';
@@ -135,8 +157,85 @@ describe('PRODUCT-LOOP-R2-A｜G. 新账号的成长起点（Queue 必改 3 / 验
     const g = openGrowthSession(loadEquippedDraft());
     expect(g.freshProfile, '磁盘上有记录 ⇒ 不是新账号').toBe(false);
     expect(g.seeded, '种子绝不能发给老账号').toBe(false);
-    expect(getCount(g.inv, 'cannon', WEAPON_GROWTH_STAR), '老档的 2 件必须原样保留').toBe(2);
+    /*
+      ⚠️ R2-RECOVERY（必改 1）**改写了这一条期望**：老档的 2 件不再「原样保留」，
+         而是被**一次性的 onboarding 迁移**补到 4（这正是本 Queue 的目的：
+         让历史 Profile 也真实处于「还差 1 件」的验证起点）。
+         ⚠️ 但补的动作**不是种子**（`seeded` 仍是 false）—— 两条路径必须可区分，
+         否则「种子只发新账号」这条不变量就会在无声中被吃掉。
+    */
+    expect(g.onboarding.applied, '未成长的老档必须被 onboarding 补件').toBe(true);
+    expect(g.onboarding.reason).toBe('raised');
+    expect(g.onboarding.raised, '2 → 4 只补 2 件').toBe(2);
+    expect(getCount(g.inv, 'cannon', WEAPON_GROWTH_STAR), '补到目标 4').toBe(R2_ONBOARDING_TARGET_COUNT);
+    // 其它 stack 一个字节都不动（补件只针对 cannon ★1）
     expect(getCount(g.inv, 'spear', WEAPON_GROWTH_STAR)).toBe(1);
+    expect(getCount(g.inv, 'hammer', WEAPON_GROWTH_STAR)).toBe(1);
+    expect(getCount(g.inv, 'pushRod', 1), '非武器一件都不动').toBe(1);
+    expect(getCount(g.inv, 'cannon', 2), '★2 那一档不被无中生有').toBe(0);
+  });
+
+  it('PG-02b 已成长的老档（存在 ★≥2 的 Weapon）⇒ onboarding **完全不改库存**', () => {
+    seedBuild();
+    const grown = defaultInventory();
+    grown['cannon'].one = 1;
+    grown['cannon'].two = 1; // 玩家已经合出过 ★2 的炮 ⇒ 「已经发生过成长」
+    seedDisk(grown as unknown as Record<string, unknown>);
+    const cannonBefore = store.getItem(INV_KEY);
+
+    const g = openGrowthSession(loadEquippedDraft());
+    expect(g.onboarding.applied, '已成长的账号不被 onboarding 干涉').toBe(false);
+    expect(g.onboarding.reason).toBe('already-grown');
+    expect(g.onboarding.raised).toBe(0);
+    expect(getCount(g.inv, 'cannon', WEAPON_GROWTH_STAR), '★1 的 1 件保持 1 件').toBe(1);
+    expect(getCount(g.inv, 'cannon', 2), '★2 保持 1 件').toBe(1);
+    expect(store.getItem(INV_KEY), '库存一个字节都不该被改写').toBe(cannonBefore);
+    // 但仍然打了标记：下一次不会再判一次（判定被「钉住」而不是每轮重算）
+    expect(store.getItem(R2_ONBOARDING_KEY), '已成长只打标记、不改库存').not.toBeNull();
+  });
+
+  it('PG-02c 只执行一次：打了标记之后 reload **不会再补**（否则每次进首页 +3）', () => {
+    seedBuild();
+    const old = defaultInventory();
+    old['cannon'].one = 1;
+    seedDisk(old as unknown as Record<string, unknown>);
+
+    const first = openGrowthSession(loadEquippedDraft());
+    expect(first.onboarding.applied).toBe(true);
+    expect(getCount(first.inv, 'cannon', 1)).toBe(R2_ONBOARDING_TARGET_COUNT);
+    const invAfterFirst = store.getItem(INV_KEY);
+
+    // 模拟 reload：重新开会话（磁盘上已有标记）
+    const second = openGrowthSession(loadEquippedDraft());
+    expect(second.onboarding.applied, '第二次绝不能再补').toBe(false);
+    expect(second.onboarding.reason).toBe('already-marked');
+    expect(getCount(second.inv, 'cannon', 1), '仍然是 4，不是 7').toBe(R2_ONBOARDING_TARGET_COUNT);
+    expect(store.getItem(INV_KEY), '没有改动就不该有库存写入').toBe(invAfterFirst);
+  });
+
+  it('PG-02d 已达 4 件的老档：只打标记、库存不动（不把 4 抬到更高，也不降回来）', () => {
+    seedBuild();
+    const enough = defaultInventory();
+    enough['cannon'].one = 6;
+    seedDisk(enough as unknown as Record<string, unknown>);
+    const before = store.getItem(INV_KEY);
+
+    const g = openGrowthSession(loadEquippedDraft());
+    expect(g.onboarding.applied).toBe(false);
+    expect(g.onboarding.reason).toBe('already-enough');
+    expect(getCount(g.inv, 'cannon', 1), '多于 4 件不被「抬」也不被削减').toBe(6);
+    expect(store.getItem(INV_KEY)).toBe(before);
+  });
+
+  it('PG-02e `planR2Onboarding` 是**纯判定**（不落盘、不改库存、不打标记）', () => {
+    const inv = defaultInventory();
+    inv['cannon'].one = 1;
+    const before = JSON.stringify(inv);
+    const plan = planR2Onboarding(inv);
+    expect(plan.applied).toBe(true);
+    expect(plan.raised).toBe(3);
+    expect(JSON.stringify(inv), '判定不许改库存').toBe(before);
+    expect(store.getItem(R2_ONBOARDING_KEY), '判定不许打标记').toBeNull();
   });
 
   it('PG-03 幂等：第二次挂载是**零写入**（不重复生成、不覆盖）', () => {
@@ -209,8 +308,16 @@ describe('PRODUCT-LOOP-R2-A｜H. old Profile migration 不丢数据（验收 ⑦
     seedBuild();
     const g = openGrowthSession(loadEquippedDraft());
     expect(g.freshProfile).toBe(false);
-    expect(getCount(g.inv, 'cannon', 1), '旧档的 3 件必须原样保留').toBe(3);
-    expect(getCount(g.inv, 'spear', 1)).toBe(2);
+    /*
+      ⚠️ R2-RECOVERY（必改 1）：cannon 的 3 件被 onboarding 补到 4（本 Queue 的目的）。
+         但「不清空、不打回 starter」这条才是本用例真正在守的东西 ⇒ 它由下面三条断言守住：
+         ① spear 的 2 件**逐条保留**；② 缺失的 hammer 仍是 0（不是补 starter 的 1）；
+         ③ 补件只发生在 cannon ★1 上。
+    */
+    expect(g.onboarding.applied, '3 → 4：未成长的老档被补一件').toBe(true);
+    expect(g.onboarding.raised).toBe(1);
+    expect(getCount(g.inv, 'cannon', 1), '3 → 4（只补到目标，不多补）').toBe(R2_ONBOARDING_TARGET_COUNT);
+    expect(getCount(g.inv, 'spear', 1), '另一件的计数逐条保留').toBe(2);
     // 缺失的条目补 0（不是补 starter）
     expect(getCount(g.inv, 'hammer', 1)).toBe(0);
   });
@@ -239,7 +346,15 @@ describe('PRODUCT-LOOP-R2-A｜H. old Profile migration 不丢数据（验收 ⑦
       const k = store.key(i);
       if (k) keys.push(k);
     }
-    expect(keys.sort(), '成长只允许写正式库存 key').toEqual([INV_KEY]);
+    /*
+      ⚠️ R2-RECOVERY（必改 1）在这里**加了一个 key**：一次性 onboarding 的版本标记
+         `strongfruit.r2Onboarding.v1`。断言仍然是**闭集**（不是「至少包含」）——
+         多写任何一个 key 都会红，这一点没有放宽。
+      ⚠️ 库存本体仍然只有 `ownedParts.v2` 一处（旧横屏游戏与竖屏产品共用那一份）。
+    */
+    expect(keys.sort(), '成长只允许写「正式库存 key + 一次性 onboarding 标记」').toEqual(
+      [INV_KEY, R2_ONBOARDING_KEY].sort(),
+    );
     // 再跑一次「手动加一件」的正式写入路径，key 集合不变
     const inv = loadInventoryRaw()!;
     addPart(inv, 'cannon', 1, 1);
@@ -251,6 +366,15 @@ describe('PRODUCT-LOOP-R2-A｜H. old Profile migration 不丢数据（验收 ⑦
 // ============================================================================
 describe('PRODUCT-LOOP-R2-A｜I. Equipped 必须指向有效库存实例（验收 ⑧）', () => {
   it('PG-11 存档**有**库存但缺当前装备那件 ⇒ 只补 1（core 的 `hasAnyOwned` 缺口）', () => {
+    /*
+      ⚠️ R2-RECOVERY（必改 1）｜**隔离变量**：本用例守的是 R2-A 的 `repairEquippedStack`
+         路径（「装备指向一个 count = 0 的 stack」）。而新的 onboarding 恰好也会给 cannon
+         补件 ⇒ 两条路径会**同时**命中同一个 stack，让「到底是谁补的」不可区分。
+         因此这里先把 onboarding 的标记预置好（= 「这条迁移对这个账号不适用」），
+         让被测路径成为唯一自变量。这不是放宽断言：所有断言逐字保留，且**新增**了
+         「onboarding 没参与」的显式确认（`g.onboarding.reason === 'already-marked'`）。
+    */
+    markR2Onboarding();
     // 老档：有 hammer / pushRod，没有 cannon；而当前装备是 cannon
     seedDisk({ hammer: { one: 1, two: 0 }, pushRod: { one: 1, two: 0 } });
     seedBuild();
@@ -260,6 +384,9 @@ describe('PRODUCT-LOOP-R2-A｜I. Equipped 必须指向有效库存实例（验�
     expect(getCount(playerInventory(draft), 'cannon', 1), '这就是 R2-A 要兜底的那个缺口').toBe(0);
 
     const g = openGrowthSession(draft);
+    expect(g.onboarding.reason, 'onboarding 已预置为已执行 ⇒ 补件只能来自 repairEquippedStack').toBe(
+      'already-marked',
+    );
     expect(g.repairedEquipped, '必须报告修了哪一件').toBe('cannon');
     expect(getCount(g.inv, 'cannon', 1)).toBe(1);
     expect(getCount(loadInventoryRaw()!, 'cannon', 1), '修复必须落盘').toBe(1);
@@ -268,7 +395,26 @@ describe('PRODUCT-LOOP-R2-A｜I. Equipped 必须指向有效库存实例（验�
     expect(getCount(g.inv, 'pushRod', 1)).toBe(1);
   });
 
+  it('PG-11b 不预置 onboarding 时，「Equipped 不得指向空 stack」这条不变量**仍然成立**', () => {
+    // 与 PG-11 同一份老档，但**不**预置标记 ⇒ 被新的 onboarding 路径覆盖
+    seedDisk({ hammer: { one: 1, two: 0 }, pushRod: { one: 1, two: 0 } });
+    seedBuild();
+    const draft = loadEquippedDraft();
+    expect(draft.functionalSelections[WEAPON_SLOT]).toBe('cannon');
+
+    const g = openGrowthSession(draft);
+    // 不变量本身（本用例真正在守的东西）：装备指向的 stack 在库存里**有货**
+    expect(getCount(g.inv, 'cannon', 1), '无论哪条路径补的，装备都必须指向有效 stack').toBeGreaterThan(0);
+    expect(getCount(loadInventoryRaw()!, 'cannon', 1), '且已落盘').toBeGreaterThan(0);
+    // 两条路径的**分工**在这里被显式钉住：onboarding 先补到目标 ⇒ 兜底路径无事可做
+    expect(g.onboarding.reason).toBe('raised');
+    expect(g.repairedEquipped, 'onboarding 已把它补到 4 ⇒ 兜底路径无需再补').toBeNull();
+    expect(getCount(g.inv, 'hammer', 1)).toBe(1);
+  });
+
   it('PG-12 装备那件**已经在**库存里 ⇒ 一个字节都不动（只增不减的另一半）', () => {
+    // ⚠️ 同 PG-11：预置 onboarding 标记，把「新的补件路径」隔离出去，单验 R2-A 的兜底路径
+    markR2Onboarding();
     seedDisk({ cannon: { one: 2, two: 0 } });
     seedBuild();
     const before = store.getItem(INV_KEY);

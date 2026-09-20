@@ -683,9 +683,14 @@ describe('PRODUCT-LOOP-R1-D｜G. 失败链：两个出口分离、不发奖、�
     const home = q.get(HOME_PARAM) ?? '';
     /*
       ⚠️ R2-A 的**契约变更**：成功侧不再是「一个 back」，而是 `choices` 里**每条候选各自的**
-      领奖地址（三条 defId 不同 ⇒ 目的地必然不同）。因此这里逐条钉死，而不是取一个 top-level 参数。
+      领奖地址（defId 不同 ⇒ 目的地必然不同）。因此这里逐条钉死，而不是取一个 top-level 参数。
+      ⚠️ PRODUCT-LOOP-R2-RECOVERY 再收窄一次候选池（3 → 1）⇒ **条数**按真源现算，
+         不再写死 3；但「每条都必须给全、都必须是一条真的领奖地址、都互不相同」这几条
+         一个字都没有放宽。
     */
-    expect(payload.choices.length, '终点 3选1 ⇒ 必须有三条候选').toBe(3);
+    expect(payload.choices.length, '候选条数 = 产品策略真源（不能是空集）').toBe(REWARD_CHOICE_IDS.length);
+    expect(payload.choices.length).toBeGreaterThan(0);
+    expect(payload.choices.map((c) => c.defId)).toEqual([...REWARD_CHOICE_IDS]);
     expect(home, '失败出口（纯首页）必须给全').not.toBe('');
     for (const c of payload.choices) {
       expect(c.href, `候选 ${c.defId} 的领奖地址必须给全`).not.toBe('');
@@ -694,10 +699,10 @@ describe('PRODUCT-LOOP-R1-D｜G. 失败链：两个出口分离、不发奖、�
         runToken: token,
         rewardDefId: c.defId,
       });
-      // 三条互不相同（同一个地址发三遍 = 三选一是假的）
+      // 每条都**不是**失败出口（同一个地址两用 = 两个出口没分离）
       expect(c.href).not.toBe(home);
     }
-    expect(new Set(payload.choices.map((c) => c.href)).size).toBe(3);
+    expect(new Set(payload.choices.map((c) => c.href)).size).toBe(payload.choices.length);
     // 失败出口 = 解析不出领奖请求（首页什么都不做）
     expect(parsePendingClaim(home.slice(home.indexOf('?')))).toBeNull();
     // Lab 侧两侧参数名同值（改单边 = 静默断链）

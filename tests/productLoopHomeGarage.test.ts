@@ -432,10 +432,28 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
       //   - 只从 `playerLoadout` 借「哪个槽是武器槽 / 这件是不是正式武器」这两个**既有**口径，
       //     不反向要求 `playerLoadout` import 自己（那会成模块环）；
       //   - `../lab/buildEditorModel` **只取 `BuildDraft` 类型**（type-only）。
+      // PRODUCT-LOOP-R2-RECOVERY（必改 1）：追加 `./r2Onboarding` —— 一次性 onboarding
+      // 迁移的判定与执行都在那个模块里，本模块只按正确顺序调它（判定 → 补件 → 落盘 → 打标记）。
       'playerGrowth.ts': [
         '../core/buildPersistence',
         '../core/partInventory',
         '../lab/buildEditorModel',
+        './playerLoadout',
+        './r2Onboarding',
+      ],
+      /*
+        PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）｜**一次性 onboarding 迁移**。
+          - 它需要**自己的持久化 key**（迁移版本标记）⇒ 只依赖 `../platform`
+            （与 `playerProfile.ts` 这个 Repository 同一条纪律：只有产品侧的持久化模块碰存储）；
+          - 信封复用 `../core/saveVersion`（不新造第二套版本机制，也**不动**全局版本号）；
+          - 库存读写仍走 `../core/partInventory`（不新建第二套库存）；
+          - 「有没有 ★≥2 的 Weapon 成长」这个判据取自 `./playerLoadout` 的 `weaponEntries()`
+            （唯一武器读数），不自己展开库存形状。
+      */
+      'r2Onboarding.ts': [
+        '../core/partInventory',
+        '../core/saveVersion',
+        '../platform',
         './playerLoadout',
       ],
       /*

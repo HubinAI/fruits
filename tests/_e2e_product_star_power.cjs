@@ -4,11 +4,20 @@
  *
  * 一条链走完（Queue 核心目标）：
  *   fresh profile（cannon ★1 ×4）
- *     → Run 1：打真一局（第一场真实战斗，实测炮的第一发命中 = 80）
- *     → COMPLETE → 三选一选 cannon → 库存 5/5
+ *     → Run 1：打真一局（第一场真实战斗，实测炮的第一发命中 = 120）
+ *     → COMPLETE → 领 cannon（本 Queue 起候选只有它一件）→ 库存 5/5
  *     → Garage 合成 → ★1 ×0 / ★2 ×1 / equipped 自动 ★2
  *     → Run 2：新一局（Day / HP / Run Buff 全部重置）
- *     → 第一场真实战斗真的用 ★2 炮：实测第一发命中 = 100（= round(80 × 1.25)）
+ *     → 第一场真实战斗真的用 ★2 炮：实测第一发命中 = 150（= round(120 × 1.25)）
+ *
+ * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY 两处口径变更（本文件的数字随之重测）：
+ *   ① 必改 2：终点候选从「三选一」收窄为**固定 cannon 一件**（`REWARD_CHOICE_IDS = ['cannon']`）；
+ *   ② 必改 3（用户裁决）：本局 Run 的**玩家侧**炮基线 = `PRODUCT_RUN_CANNON_BASE_DAMAGE = 120`
+ *      ⇒ 战斗内实测 ★1 = 120 / ★2 = 150。正式 `cannon` 仍是 80（敌方 RangedTurret /
+ *      Validation / 旧横屏全部不受影响，`src/core/content.ts` 零改动）。
+ *      ⚠️ 本文件因此同时存在**两套**伤害读数，刻意不合并（它们是不同层的读数）：
+ *        · **卡面文本**（A2 / D1 / D3）= 正式曲线 `80 → 100 → 120`（PR-27：产品侧只读 core，不自算）；
+ *        · **战斗内实测**（B2 / B3 / E3 / E4）= 本局口径 `120 → 150`。
  *
  * 手段（与 `_e2e_product_reward.cjs` 同一纪律，全部是真实行为取证）：
  *   - 真实浏览器（playwright-core / msedge）+ 独立产物 `dist-portrait-lab/`；
@@ -45,8 +54,17 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
-/** 三件候选（与 `runReward.REWARD_CHOICE_IDS` 同值）。 */
-const CHOICE_IDS = ['cannon', 'spear', 'hammer'];
+/**
+ * 终点候选（与 `runReward.REWARD_CHOICE_IDS` 同值）。
+ *
+ * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：从 `['cannon','spear','hammer']`
+ *    **收窄为 `['cannon']`** —— 当前只有它同时具备完整 Run compatibility / 已验证 Run Buff /
+ *    永久 Star 成长链（`FULL_RUN_SUPPORTED_WEAPON_IDS = ['cannon']`），
+ *    发 spear 等于奖励玩家「这一局用不上的东西」（真人反馈 ③）。
+ *    ⇒ C1 的 `rects.length === CHOICE_IDS.length` 与 `pickIndex` 都随之自动落到 1 张卡 / 下标 0，
+ *      无需另写一份长度常量（候选池只有一个真源：这里）。
+ */
+const CHOICE_IDS = ['cannon'];
 /** 满 stack 阈值（与 `playerGrowth.FUSE_STACK` 同值）。 */
 const FUSE_STACK = 5;
 /** 两个正式存档 key（独立取证，不经过页面探针）。 */
@@ -55,12 +73,27 @@ const INV_KEY = 'strongfruit.ownedParts.v2';
 /** 唯一打通的主武器槽。 */
 const WEAPON_SLOT = 'frontMass';
 /**
- * 正式 cannon 的基准伤害（`core/content.ts` 的 `projectileDamage: 80`）。
- * ⚠️ 这是本 Queue **冻结**的正式内容值：★1 的实测伤害必须**恰好**是它。
+ * **正式** cannon 的基准伤害（`core/content.ts` 的 `projectileDamage: 80`）。
+ * ⚠️ 这是正式内容值，本 Queue **一字节未改**（`git diff --exit-code -- src/core/content.ts` 为空）。
+ *    产品首页 / Garage 卡面读的就是它（PR-27：产品侧不许自算星级伤害，只许读 core）。
  */
 const CANNON_BASE_DAMAGE = 80;
-/** ★2 的理论伤害 = round(80 × 1.25)。 */
+/** ★2 的**正式**理论伤害 = round(80 × 1.25)（同上；A2 / D1 / D3 的卡面文本用它）。 */
 const CANNON_STAR2_DAMAGE = 100;
+
+/**
+ * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 3，按用户裁决）｜
+ * **本局 Run 内玩家侧**的炮基线伤害（= `runModifiers.PRODUCT_RUN_CANNON_BASE_DAMAGE`）。
+ *
+ * 作用顺序：正式 Cannon Def（80）→ **本局玩家基线 overlay（120）** → 永久 Star 乘子 → Run Modifier。
+ * ⚠️ 它**不是**正式内容：正式 `cannon` 键（敌方 `RangedTurret` / Validation / 旧横屏）
+ *    在任何情况下都恒为 80；本常量只承载「本局玩家那一件」的 overlay 值。
+ * ⇒ 因此 B2 / B3 / E3 / E4 的**战斗内实测**用下面这两个，
+ *    而 A2 / D1 / D3 的**卡面文本**仍用上面的正式 80 / 100 —— 两层读数刻意分开。
+ */
+const RUN_CANNON_BASE_DAMAGE = 120;
+/** ★2 的**本局实测**伤害 = round(120 × 1.25) = 150。 */
+const RUN_CANNON_STAR2_DAMAGE = 150;
 
 /** 赢：耐久事件选「维修」→ 终局有耐久 → COMPLETE（与 reward E2E 同一条确定性路线）。 */
 const WIN_POLICY = { layer1: 'twinCannon', lateral: null, layer2: 'tripleLoad', durability: 'repair' };
@@ -390,7 +423,7 @@ async function main() {
     await clickSelector(page, '[data-ph-action="back-home"]');
 
     /* ==================================================================================
-       B｜Run 1：★1 炮的第一场**真实**战斗（实测第一发命中 = 80）
+       B｜Run 1：★1 炮的第一场**真实**战斗（本局口径：实测第一发命中 = 120）
        ================================================================================== */
     const run1 = await enterRunAndDrive(page, WIN_POLICY, 'Run 1', false);
     const r1First = run1.detail.samples.length > 0 ? run1.detail.samples[0] : null;
@@ -404,15 +437,16 @@ async function main() {
     );
     log(
       run1.detail.firstCannonHit !== null &&
-        run1.detail.firstCannonHit.damages[0] === CANNON_BASE_DAMAGE,
-      'B2 Run 1 第一场真实命中：★1 炮扣对手 **80** 点血（正式 cannon 的基准值，本 Queue 未改内容）',
+        run1.detail.firstCannonHit.damages[0] === RUN_CANNON_BASE_DAMAGE,
+      'B2 Run 1 第一场真实命中：★1 炮扣对手 **120** 点血（本局玩家侧基线 ' +
+        '`PRODUCT_RUN_CANNON_BASE_DAMAGE = 120`；正式 `cannon` 仍是 80）',
       run1.detail.firstCannonHit
         ? `首中 ${run1.detail.firstCannonHit.firstAtMs}ms · damages=[${run1.detail.firstCannonHit.damages.join(',')}]`
         : 'n/a',
     );
     log(
-      !!r1Main && r1Main.star === 1 && r1Main.damage === CANNON_BASE_DAMAGE,
-      'B3 **Battle Runtime Weapon Star**（真实装配）：运行时读到的炮是 ★1、伤害 80',
+      !!r1Main && r1Main.star === 1 && r1Main.damage === RUN_CANNON_BASE_DAMAGE,
+      'B3 **Battle Runtime Weapon Star**（真实装配）：运行时读到的炮是 ★1、伤害 120（本局口径）',
       r1Main ? `${r1Main.defId}@${r1Main.hardpointId} ★${r1Main.star} damage=${r1Main.damage}` : 'n/a',
     );
     log(
@@ -422,14 +456,14 @@ async function main() {
     );
 
     /* ==================================================================================
-       C｜领奖：三选一选 cannon → 库存 5/5
+       C｜领奖：点 cannon 那张卡（必改 2 起候选只有它一件）→ 库存 5/5
        ================================================================================== */
     const pDone = run1.detail.last;
     const pickIndex = CHOICE_IDS.indexOf('cannon');
     const cardRect = pDone.rewardChoiceRects[pickIndex];
     log(
       pDone.phase === 'COMPLETE' && pDone.rewardChoiceRects.length === CHOICE_IDS.length,
-      'C1 COMPLETE 上真的画出了 3 张候选卡（与绘制同源的矩形）',
+      'C1 COMPLETE 上真的画出了候选卡（与绘制同源的矩形；条数 = 产品候选池长度）',
       `phase=${pDone.phase} rects=${pDone.rewardChoiceRects.length}`,
     );
     await Promise.all([
@@ -500,7 +534,7 @@ async function main() {
     );
 
     /* ==================================================================================
-       E｜Run 2：新一局真的用 ★2 炮，且实测伤害 = 100 > 80
+       E｜Run 2：新一局真的用 ★2 炮，且实测伤害 = 150 > 120
        ================================================================================== */
     const run2 = await enterRunAndDrive(page, WIN_POLICY, 'Run 2', true);
     const r2First = run2.detail.samples.length > 0 ? run2.detail.samples[0] : null;
@@ -556,17 +590,17 @@ async function main() {
         `hp=${r2Hp ? `${r2Hp.a}/${r2Hp.aMax}` : 'n/a'}`,
     );
     log(
-      !!r2Main && r2Main.star === 2 && r2Main.damage === CANNON_STAR2_DAMAGE,
-      'E3 **Battle Runtime Weapon Star**：这一局运行时读到的炮是 **★2**、伤害 100（不是页面内存、不是存档副本）',
+      !!r2Main && r2Main.star === 2 && r2Main.damage === RUN_CANNON_STAR2_DAMAGE,
+      'E3 **Battle Runtime Weapon Star**：这一局运行时读到的炮是 **★2**、伤害 150（不是页面内存、不是存档副本）',
       r2Main ? `${r2Main.defId}@${r2Main.hardpointId} ★${r2Main.star} damage=${r2Main.damage}` : 'n/a',
     );
     log(
       run2.detail.firstCannonHit !== null &&
-        run2.detail.firstCannonHit.damages[0] === CANNON_STAR2_DAMAGE &&
-        run2.detail.firstCannonHit.damages[0] > CANNON_BASE_DAMAGE &&
+        run2.detail.firstCannonHit.damages[0] === RUN_CANNON_STAR2_DAMAGE &&
+        run2.detail.firstCannonHit.damages[0] > RUN_CANNON_BASE_DAMAGE &&
         run2.detail.firstCannonHit.damages[0] ===
-          Math.round(CANNON_BASE_DAMAGE * 1.25),
-      'E4 **本 Queue 的核心结论（实测）**：同一门炮、只差星级，第一发真实命中 80 → **100**（= round(80 × 1.25)）—— 星级真的进了战斗',
+          Math.round(RUN_CANNON_BASE_DAMAGE * 1.25),
+      'E4 **本 Queue 的核心结论（实测）**：同一门炮、只差星级，第一发真实命中 120 → **150**（= round(120 × 1.25)）—— 星级真的进了战斗',
       run2.detail.firstCannonHit
         ? `首中 ${run2.detail.firstCannonHit.firstAtMs}ms · damages=[${run2.detail.firstCannonHit.damages.join(',')}]`
         : 'n/a',

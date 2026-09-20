@@ -387,6 +387,11 @@ function walkRun(o: WalkOpts): RunWalk {
         build: runBuildIds(s),
         carriedHp: carry,
         encounterId: node.encounterId,
+        // ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY：必须与 `runPage.beginBattle()`
+        //    的构造**同口径**（那边恒传 `playerBaseline: true`）。否则这里冻结的终局耐久
+        //    就不再是浏览器 E2E（`_e2e_run_page.cjs` 的 R58h）的同源实测值，
+        //    RP-F2-12b 的存在理由（Node 端同口径来源）会静默失效。
+        playerBaseline: true,
       });
       prevRt?.dispose();
       prevRt = rt;
@@ -1599,11 +1604,18 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
    *    879/590）；修复后维修分支**同样**拿到第二层 → ③④ 两场重建（见下）。
    * ⚠️ **PRP-RUN-02-R2 复测：逐值不变** —— 维修分支不经过 `d4-lateral`、恢复值也未被改动
    *    （Queue 必改 3：「维修量完全不动」）⇒ 这张表就是「维修路线保持现状」的机器证据。
+   *
+   * ⚠️ **PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY 已重测（本表第二次重建）**：
+   *    产品 Run 的**玩家侧基线**从正式 80 抬到 `PRODUCT_RUN_CANNON_BASE_DAMAGE` = 120
+   *    ⇒ 敌人更早被打死、玩家少挨打，②③④ 普遍变高（① 恒 919：第一场在任何改动生效前
+   *    就已分胜负，逐帧一致）。
+   *    ⚠️ 本表的**结构结论一条都没变**：三路线全部 COMPLETE、终局余量为正、
+   *    且「同一路线上 维修终局 > 改装终局」仍成立。
    */
   const FROZEN_REPAIR: Record<string, readonly [number, number, number, number]> = {
-    'heavyShell+kineticBurst': [919, 688, 678, 472],
-    'twinCannon+tripleLoad': [919, 907, 891, 602],
-    'fastReload+twinCannon': [919, 908, 1023, 778],
+    'heavyShell+kineticBurst': [919, 866, 1099, 619],
+    'twinCannon+tripleLoad': [919, 916, 923, 779],
+    'fastReload+twinCannon': [919, 908, 1023, 939],
   };
   /**
    * 改装分支（不回耐久，**并且**多拿一项横向改装）。
@@ -1613,23 +1625,33 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
    *    ⇒ ③④ 两场带着**三项**改装重打，三个值全变（旧值 403 / 699 / 831）。
    *    横向改装取「横向池第一项」= 另外两项未拥有一层里的第一个：
    *      重炮路线 → 双联炮 ｜ 双联路线 → 重型弹头 ｜ 快装路线 → 重型弹头。
-   * ⚠️ 重炮路线在 R1 时代是「改装 → 归零 FAILED」；R2 补上双联炮之后**活到了终局**（167 = 15%）。
+   * ⚠️ 重炮路线在 R1 时代是「改装 → 归零 FAILED」；R2 补上双联炮之后**活到了终局**（422 = 38%）。
    *    这不是回归，而是本轮引入的新变量（多一项改装）的**真实物理后果**；
    *    「耐久取舍改变结局」的证据因此改由下面两条路线承担（见 RP-F2-11）。
+   *
+   * ⚠️ **PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY 已重测（本表第二次重建）**：
+   *    玩家侧基线 80 → 120（`PRODUCT_RUN_CANNON_BASE_DAMAGE`）⇒ ②③ 普遍变高。
+   *    ⚠️ 关键：**失败路径没有被吃掉** —— `twinCannon+tripleLoad` 与 `fastReload+twinCannon`
+   *    两条的改装分支终局**仍是 0 / FAILED**，所以 RP-F2-11 那条「同路线、同一次耐久事件、
+   *    结局相反」的判据依旧成立（不是放宽出来的，是实测仍然如此）。
    */
   const FROZEN_UPGRADE: Record<string, readonly [number, number, number, number]> = {
-    'heavyShell+kineticBurst': [919, 688, 489, 167],
-    'twinCannon+tripleLoad': [919, 907, 907, 0],
-    'fastReload+twinCannon': [919, 908, 170, 0],
+    'heavyShell+kineticBurst': [919, 866, 744, 422],
+    'twinCannon+tripleLoad': [919, 916, 916, 0],
+    'fastReload+twinCannon': [919, 908, 679, 0],
   };
   /**
    * ⚠️ **PRP-RUN-02-R2 的 E2E 主走查组合**（与 `tests/_e2e_run_page.cjs` 的 11c~11g 段同源）：
    * 一层**双联炮** → 横向**快速装填** → 二层**三连装填**，表内 = [①结束, ②结束, ③结束, 终局结束]。
-   * 浏览器段用它做**精确终局**判据（`R58h`：357 = 32%），所以浏览器实测值必须与这张表逐值相等。
+   * 浏览器段用它做**精确终局**判据（`R58h`：366 = 33%），所以浏览器实测值必须与这张表逐值相等。
    * 与 `FROZEN_UPGRADE` 的差别只在横向那一项（那张表固定取「横向池第一项」= 重型弹头 ⇒ 终局归零）。
    * 附带钉住整局日志行数（`R58c` 的 `logCount`）：横向改装比维修分支多 2 行（节点 beat + 选项行）。
+   *
+   * ⚠️ **PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY 已重测**：玩家侧基线 80 → 120
+   *    ⇒ 终局 357 → **366**（`R58h` 的浏览器断言必须同步改，否则 Node / 浏览器两端口径漂移，
+   *    本表「同口径来源」的存在理由就没了）。日志行数 **40 未变** —— 基线只改数值，不改流程节点数。
    */
-  const FROZEN_UPGRADE_E2E = [919, 907, 839, 357] as const;
+  const FROZEN_UPGRADE_E2E = [919, 916, 847, 366] as const;
   const E2E_WALK_LOG_COUNT = 40;
 
   it('RP-F2-01 改装分支走完四场真实战斗 + 两次选择 + 一次横向改装 + 一次耐久取舍（全程同一页面）', () => {
@@ -1656,8 +1678,9 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
     }
     /*
       ⚠️ PRP-RUN-02-R2 重测：R1 时代这条路线在改装分支下终局归零 → FAILED；
-      R2 让改装分支多拿一项横向改装（这里补上双联炮）⇒ 它以 167（15%）走到 RUN COMPLETE。
+      R2 让改装分支多拿一项横向改装（这里补上双联炮）⇒ 它以 422（38%）走到 RUN COMPLETE。
       这是「继续改装 = 构筑数量优势」在真实物理上的直接后果，不是判据放宽。
+      ⚠️ R2-RECOVERY 重测（玩家侧基线 80 → 120）：本条件仍是 COMPLETE，值 167 → 422。
     */
     const finale = w.at(NODE.final, 'COMPLETE');
     expect(runComplete(finale)).toBe(true);
@@ -1918,7 +1941,8 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
       expect(Math.round(hp3), `${key}: ③`).toBe(FROZEN_REPAIR[key][2]);
       expect(Math.round(hp4), `${key}: ④`).toBe(FROZEN_REPAIR[key][3]);
       // 维修分支：每场都活着；终局余量必须为正
-      //（⚠️ PRP-RUN-02-R1：维修分支现在同样带两层 ⇒ ③④ 的耐久重建，重炮路线实测 472 = 43%，
+      //（⚠️ PRP-RUN-02-R1：维修分支现在同样带两层 ⇒ ③④ 的耐久重建；R2-RECOVERY 重测后
+      //   重炮路线维修终局 = 619 = 56%），
       //   因此不再用 50% 硬线 —— 改用下面更强的结构性判据。）
       for (const hp of [hp1, hp2, hp3, hp4]) expect(hp, key).toBeGreaterThan(0);
       expect(hp4, `${key}: 终局余量`).toBeGreaterThan(0);
@@ -1945,8 +1969,8 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
   it('RP-F2-11 必改 3：耐久取舍真的改变结局（双联路线：维修 → 完成；改装 → 失败）', () => {
     /*
       ⚠️ PRP-RUN-02-R2 换了对照路线：R1 时代用重炮路线演示「维修完成 / 改装失败」，
-      但 R2 给改装分支补了一项横向改装之后，重炮路线在改装下也能活到终局（167 = 15%）
-      ⇒ 这个对照改由**双联路线**承担（改装分支终局归零，维修分支剩 602 = 55%）。
+      但 R2 给改装分支补了一项横向改装之后，重炮路线在改装下也能活到终局（422 = 38%）
+      ⇒ 这个对照改由**双联路线**承担（改装分支终局**仍然归零**，维修分支剩 779 = 71%）。
       **判据强度不变**（仍然是「同一条路线、同一个耐久事件、结局相反」），只是换了一条路线。
     */
     const key = 'twinCannon+tripleLoad';
@@ -2029,8 +2053,8 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
     const keyH = 'heavyShell+kineticBurst';
     const repH = realWalk('repair', 'heavyShell', 'kineticBurst').at(NODE.final, 'COMPLETE').battle!.playerHp;
     const upgH = realWalk('upgrade', 'heavyShell', 'kineticBurst').at(NODE.final, 'COMPLETE').battle!.playerHp;
-    expect(Math.round(repH)).toBe(FROZEN_REPAIR[keyH][3]); // 472 = 43%
-    expect(Math.round(upgH)).toBe(FROZEN_UPGRADE[keyH][3]); // 167 = 15%
+    expect(Math.round(repH)).toBe(FROZEN_REPAIR[keyH][3]); // 619 = 56%
+    expect(Math.round(upgH)).toBe(FROZEN_UPGRADE[keyH][3]); // 422 = 38%
     expect(repH).toBeGreaterThan(upgH);
   });
 
@@ -2102,7 +2126,7 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
   it('RP-F2-12b E2E 主走查组合的冻结值（一层双联炮 + 横向快速装填 + 二层三连装填）', () => {
     /*
       这一条存在的唯一理由：`tests/_e2e_run_page.cjs` 的整局走查断言**精确终局耐久**
-      （`R58h` = 357 / 32%）与**整局日志行数**（`R58c` = 40），所以这两个数必须有 Node 端
+      （`R58h` = 366 / 33%）与**整局日志行数**（`R58c` = 40），所以这两个数必须有 Node 端
       同口径实测来源，不能只在浏览器里「见过一次就写死」。
     */
     const w = realWalk('upgrade', 'twinCannon', 'tripleLoad', 'fastReload');

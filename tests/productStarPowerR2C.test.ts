@@ -40,6 +40,7 @@ import {
   DAMAGE_LABEL,
 } from '../src/product/playerLoadout';
 import {
+  PRODUCT_RUN_CANNON_BASE_DAMAGE,
   applyRunModifiersToSnapshot,
   createRunRegistry,
 } from '../src/lab/portraitBattleLab/runModifiers';
@@ -483,5 +484,97 @@ describe('PRODUCT-LOOP-R2-C｜D. 真实战斗里 ★2 真的打得更重（不�
     expect(h5.damageText).not.toContain('→');
     // 空槽常量仍在（`EMPTY_SLOT` 是「这个挂点没装东西」的唯一判据）
     expect(typeof EMPTY_SLOT).toBe('string');
+  });
+});
+
+/* ============================================================================
+   E. 玩家侧基线（PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY 必改 3）
+   —— **两侧同时钉住**：玩家 Product Run cannon = 120、正式 cannon（敌方 RangedTurret
+      装的就是它）恒 80。刻意用两条互不掩盖的判据，禁止「改一边顺手改另一边」。
+   ============================================================================ */
+
+describe('SP-11｜玩家 Product Run 基线只作用玩家侧：正式 cannon 与敌方仍 80', () => {
+  /** 玩家侧基线 overlay 的部件 id（与 `runModifiers.ts` 的基线标记段同源）。 */
+  const PLAYER_DEF_ID = 'run.mod.@base';
+
+  const paramsOf = (reg: ContentRegistry, defId: string): Record<string, number> => {
+    const def = reg.functionals.get(defId);
+    expect(def, `本局 registry 必须有 "${defId}"`).toBeDefined();
+    return (def!.behaviorParams ?? {}) as Record<string, number>;
+  };
+
+  /**
+   * ⚠️ `BuildSnapshot.functionals` 是**裸装件**（`FunctionalInstall { hardpointId, defId, star }`），
+   *    没有 `{ install, def }` 外壳 —— 那个形状属于 `ResolvedSnapshot`。
+   */
+  const weaponDefIdOf = (rt: RunBattleRuntime): string =>
+    rt.playerSnapshot.functionals.find((x) => x.hardpointId === WEAPON_SLOT)!.defId;
+
+  it('SP-11a 正式 cannon 定义恒为 80：本局 registry 的正式键不被基线改写', () => {
+    expect(paramsOf(registry, 'cannon').projectileDamage).toBe(80);
+    // 开了基线之后，**正式 `cannon` 键**仍逐字段等于正式单例
+    // ⇒ 敌方 `RangedTurret` 装的就是这个键
+    //   （其 80 另有独立守卫：`portraitEncounterLab` M3-03 指纹、RDC-15 / RDC-17）
+    expect(paramsOf(createRunRegistry([], true), 'cannon')).toEqual(paramsOf(registry, 'cannon'));
+  });
+
+  it('SP-11b 玩家侧 overlay = 120，且只改伤害一项（手感 / 节奏零变化）', () => {
+    const official = paramsOf(registry, 'cannon');
+    const player = paramsOf(createRunRegistry([], true), PLAYER_DEF_ID);
+    expect(PRODUCT_RUN_CANNON_BASE_DAMAGE).toBe(120);
+    expect(player.projectileDamage).toBe(120);
+    for (const k of ['cooldownMs', 'muzzleSpeed', 'projectileRadius', 'projectileMass', 'recoilImpulse']) {
+      expect(player[k], `${k} 必须沿用正式值`).toBe(official[k]);
+    }
+  });
+
+  it('SP-11c 不开基线 ⇒ 玩家侧仍是正式 cannon（Lab / RDC / 四场压力阶梯逐字段不变）', () => {
+    const off = createRunRegistry([], false);
+    expect(off.functionals.get(PLAYER_DEF_ID)).toBeUndefined();
+    expect(paramsOf(off, 'cannon')).toEqual(paramsOf(registry, 'cannon'));
+  });
+
+  it('SP-11d ★2 基于玩家基线 120 ⇒ ★1 = 120 / ★2 = 150（对照：不开基线 80 / 100）', () => {
+    const damageOf = (draft: BuildDraft, reg: ContentRegistry, baseline: boolean): number => {
+      const snap = applyRunModifiersToSnapshot(buildSnapshotFromDraft(draft, reg, 'sp-r2c'), [], baseline);
+      const v = validateSnapshot(snap, reg);
+      expect(v.valid, `夹具必须合法：${v.errors.join('；')}`).toBe(true);
+      const rs = resolveSnapshot(snap, reg);
+      const f = rs.functionals.find((x) => x.install.hardpointId === WEAPON_SLOT)!;
+      return (f.def.behaviorParams as Record<string, number>).projectileDamage;
+    };
+    const on = createRunRegistry([], true);
+    expect(damageOf(playerDraft(1), on, true), '玩家 ★1').toBe(120);
+    expect(damageOf(playerDraft(2), on, true), '玩家 ★2').toBe(150);
+    expect(damageOf(playerDraft(2), on, true) / damageOf(playerDraft(1), on, true)).toBeCloseTo(1.25, 6);
+    // 对照：同一条链路**不开基线** ⇒ 正式曲线仍 80 / 100
+    expect(damageOf(playerDraft(1), registry, false), '正式 ★1').toBe(80);
+    expect(damageOf(playerDraft(2), registry, false), '正式 ★2').toBe(100);
+  });
+
+  it('SP-11e 真实运行时的两只炮：玩家那件 120，同一 registry 的正式键仍 80', () => {
+    const mk = (baseline: boolean): RunBattleRuntime =>
+      new RunBattleRuntime({
+        encounterId: 'ProtoRusher',
+        playerDraft: playerDraft(1),
+        playerLoadoutTag: 'profile-equipped',
+        playerBaseline: baseline,
+      });
+    const on = mk(true);
+    const off = mk(false);
+    try {
+      // 开基线：玩家那件指向基线 overlay（120）；正式 cannon 键仍 80
+      expect(weaponDefIdOf(on)).toBe(PLAYER_DEF_ID);
+      expect(paramsOf(on.registry, weaponDefIdOf(on)).projectileDamage).toBe(120);
+      expect(paramsOf(on.registry, 'cannon').projectileDamage).toBe(80);
+      expect(on.playerBaseline).toBe(true);
+      // 关基线：玩家那件就是正式 cannon（80）—— Lab / RDC / 压力阶梯走的正是这条
+      expect(weaponDefIdOf(off)).toBe('cannon');
+      expect(paramsOf(off.registry, 'cannon').projectileDamage).toBe(80);
+      expect(off.playerBaseline).toBe(false);
+    } finally {
+      on.dispose();
+      off.dispose();
+    }
   });
 });

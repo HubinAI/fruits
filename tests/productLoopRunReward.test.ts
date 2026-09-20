@@ -85,6 +85,10 @@ import {
   runRewardChoiceViews,
   runSelectedClaim,
 } from '../src/lab/portraitBattleLab/runProductReward';
+// PRODUCT-LOOP-R2-RECOVERY（必改 2）：奖励池的**新不变式**要拿完整 Run 支持清单来对账。
+import { FULL_RUN_SUPPORTED_WEAPON_IDS, supportsFullRun } from '../src/product/runCompatibility';
+// PRODUCT-LOOP-R2-RECOVERY（必改 1）：一次性 onboarding 的版本标记 key（断言写入面用）。
+import { R2_ONBOARDING_KEY } from '../src/product/r2Onboarding';
 import {
   RUN_FAIL_PARAM,
   parseRunFailReturn,
@@ -210,8 +214,16 @@ const REWARD_CTX = parseRunRewardChoices(
 
 // ============================================================================
 describe('PRODUCT-LOOP-R2-A｜A. 候选池必须「实测」而不是「偏好」', () => {
-  it('PR-01 三条候选都是**正式**部件库里的**正式 Weapon**（不新增武器定义）', () => {
-    expect(REWARD_CHOICE_IDS.length, '3选1 ⇒ 恰好三条').toBe(3);
+  it('PR-01 候选**全部**是正式部件库里的正式 Weapon，且**全部**支持完整 Run（本 Queue 新立的不变式）', () => {
+    /*
+      ⚠️ PRODUCT-LOOP-R2-RECOVERY（必改 2）**改写了这一条**：
+         R2-A 断言的是「3选1 ⇒ 恰好三条」。真人反馈 ③ 证明「三条」本身就是一个缺陷
+         （发了一件当前完整 Run 不支持的 Weapon ⇒ 奖励了一件用不上的东西）
+         ⇒ 本 Queue 把口径从**条数**换成**可用性**：候选池可以只有一条，但**每一条**
+         都必须是这一局真的用得上的东西（`REWARD_CHOICE_IDS ⊆ FULL_RUN_SUPPORTED_WEAPON_IDS`）。
+         断言数量没放松（下面仍然要求非空），而且**加了一条 R2-A 没有的守门**。
+    */
+    expect(REWARD_CHOICE_IDS.length, '候选池不能是空集（否则 COMPLETE 就没有出口）').toBeGreaterThan(0);
     for (const id of REWARD_CHOICE_IDS) {
       expect(isOfficialPart(id), `${id} 必须在 PART_OPTIONS 正式池内`).toBe(true);
       const def = registry.functionals.get(id);
@@ -219,6 +231,11 @@ describe('PRODUCT-LOOP-R2-A｜A. 候选池必须「实测」而不是「偏好�
       expect(def!.category, `${id} 必须是 Weapon`).toBe('weapon');
       // 展示名来自正式内容库（不是第二份字面量）
       expect(rewardDisplayName(id)).toBe(def!.name);
+      // ★ 新不变式：奖励池里不能出现「当前完整 Run 不支持」的 Weapon
+      expect(
+        supportsFullRun(id),
+        `${id} 不支持完整 Run ⇒ 发出去就是「奖励一个用不上的东西」（真人反馈 ③）`,
+      ).toBe(true);
     }
     // 未知 id → null（绝不静默回退到别的部件名）
     expect(rewardDisplayName('doesNotExist')).toBeNull();
@@ -252,11 +269,13 @@ describe('PRODUCT-LOOP-R2-A｜A. 候选池必须「实测」而不是「偏好�
     expect(entries.find((w) => w.defId === 'cannon')!.count).toBe(base + 5);
   });
 
-  it('PR-04 三条候选互不相同（「三选一」不能是三张同一个 id）', () => {
+  it('PR-04 候选池内互不相同（不会出现两张指向同一个 stack 的卡）', () => {
     expect(new Set(REWARD_CHOICE_IDS).size).toBe(REWARD_CHOICE_IDS.length);
     const links = buildRewardChoiceLinks('run-x', specs(1));
-    expect(new Set(links.map((l) => l.href)).size, '三条各自的领奖地址必须互不相同').toBe(3);
-    expect(new Set(links.map((l) => l.defId)).size).toBe(3);
+    // ⚠️ 断言按 `links.length` 现算（不是写死 3）：候选池的**条数**是产品决策，
+    //    「每条的地址 / 件号互不相同」才是本用例守的不变量。
+    expect(new Set(links.map((l) => l.href)).size, '每个候选的领奖地址必须互不相同').toBe(links.length);
+    expect(new Set(links.map((l) => l.defId)).size).toBe(links.length);
   });
 
   it('PR-05 Run 强化**结构上**不可能是候选（不是正式部件 ⇒ 直接拒收）', () => {
@@ -395,10 +414,10 @@ describe('PRODUCT-LOOP-R2-A｜B. 产品地址与参数：只有一个真源', ()
     const ret = parseRunFailReturn(search)!;
     const ctx = runPageContext();
 
-    // ① COMPLETE：有三条候选、**没有**失败结算
+    // ① COMPLETE：候选齐备、**没有**失败结算
     const done = buildPriorCompletedRun(ctx);
     expect(runComplete(done)).toBe(true);
-    expect(runRewardChoiceViews(done, reward).length).toBe(3);
+    expect(runRewardChoiceViews(done, reward).length).toBe(REWARD_CHOICE_IDS.length);
     expect(runSelectedClaim(done, reward, REWARD_CHOICE_IDS[0])).not.toBeNull();
     expect(runFailSettlementNow(done, ret)).toBeNull();
 
@@ -504,7 +523,12 @@ describe('PRODUCT-LOOP-R2-A｜C. 领奖：一次、真入库、数量累积', ()
     expect(out.grant?.countAfter, '4 → 5（Queue 验收 ③）').toBe(5);
 
     // 真的写进了正式库存 key（不是页面自建的第二套库存）
-    expect(allKeys()).toEqual([INV_KEY, PROFILE_CLAIMS_KEY]);
+    /*
+      ⚠️ PRODUCT-LOOP-R2-RECOVERY（必改 1）在这里**加了一个 key**：一次性 onboarding
+         的版本标记 `strongfruit.r2Onboarding.v1`（上面那次 `openGrowthSession` 会落它）。
+         断言仍是**闭集**（不是「包含」）⇒ 多写任何一个 key 都会红，没有放宽。
+    */
+    expect(allKeys()).toEqual([INV_KEY, PROFILE_CLAIMS_KEY, R2_ONBOARDING_KEY].sort());
     const inv = loadInventoryRaw();
     expect(inv, '库存必须真的落盘').toBeTruthy();
     expect(getCount(inv!, 'cannon', GROWTH_STAR)).toBe(5);
@@ -615,29 +639,41 @@ describe('PRODUCT-LOOP-R2-A｜C. 领奖：一次、真入库、数量累积', ()
 });
 
 // ============================================================================
-describe('PRODUCT-LOOP-R2-A｜D. 终点态：只有 COMPLETE 才有 3选1', () => {
-  it('PR-15 COMPLETE + 产品载荷 → 三张卡齐备，且每张卡各自的出口都由产品数据给出', () => {
+describe('PRODUCT-LOOP-R2-A｜D. 终点态：只有 COMPLETE 才有候选', () => {
+  it('PR-15 COMPLETE + 产品载荷 → 候选齐备，且每张卡各自的出口都由产品数据给出', () => {
     const s = completedState();
     expect(runComplete(s)).toBe(true);
     const views = runRewardChoiceViews(s, REWARD_CTX);
-    expect(views.length).toBe(3);
+    expect(views.length).toBe(REWARD_CHOICE_IDS.length);
     expect(views.map((v) => v.defId)).toEqual([...REWARD_CHOICE_IDS]);
     // 每张卡的读数来自产品侧给的那份载荷（`countBefore` = 4）
     for (const v of views) {
       expect(v.countBefore).toBe(4);
       expect(v.previewText).toBe('4 → 5');
       expect(v.reachesThreshold).toBe(true);
+      /*
+        ★ PRODUCT-LOOP-R2-RECOVERY（必改 2）｜第二行 = **成长口径**。
+          R2-A 时这一行是「库存多了一个」（`×4 → ×5`），真人反馈 ④ 判明它让人
+          「完全找不到 4/5 / 5/5 的真实成长过程」⇒ 本 Queue 授权改成成长口径。
+          两侧都用**原始计数**（不夹到阈值），阈值来自产品侧给的 `stack`。
+      */
+      expect(v.progressText, '必改 2：当前 X/5 → 领取后 Y/5').toBe('当前 4/5 → 领取后 5/5');
+      expect(v.stackLimit, '阈值的真源是产品侧给的 stack').toBe(FUSE_STACK);
     }
-    // 选中一件 → 出口是**那一件自己的**地址，且 token 是本局的
-    const claim = runSelectedClaim(s, REWARD_CTX, 'spear');
+    // 选中那一条 → 出口是**它自己的**地址，且 token 是本局的
+    const pick = REWARD_CHOICE_IDS[0];
+    const claim = runSelectedClaim(s, REWARD_CTX, pick);
     expect(claim).toEqual({
-      defId: 'spear',
+      defId: pick,
       runToken: 'run-test-1',
-      href: buildClaimHref('run-test-1', 'spear'),
+      href: buildClaimHref('run-test-1', pick),
     });
-    // 三件的出口互不相同（「选哪件」是真选择）
+    // 每条候选的出口互不相同（「选哪条」是真选择；条数由产品决策给）
     const hrefs = REWARD_CHOICE_IDS.map((id) => runSelectedClaim(s, REWARD_CTX, id)!.href);
-    expect(new Set(hrefs).size).toBe(3);
+    expect(new Set(hrefs).size).toBe(REWARD_CHOICE_IDS.length);
+    // 不在候选里的件（spear / hammer：仍有库存、仍可装备，但**当前不进奖励池**）
+    expect(runSelectedClaim(s, REWARD_CTX, 'spear'), '未入池的件拿不到出口').toBeNull();
+    expect(runSelectedClaim(s, REWARD_CTX, 'hammer'), '未入池的件拿不到出口').toBeNull();
     // 文案必须是**动作 / 承诺**，不是已完成的状态描述
     expect(RUN_REWARD_TITLE).toBe('选一件带回家');
     expect(RUN_REWARD_NOTE).toBe('选中的那件会进入你的车库');
@@ -818,8 +854,23 @@ describe('PRODUCT-LOOP-R2-A｜E. 源码守卫（本 Queue 的边界必须结构�
         expect(code.includes(banned), `${f} 不得出现禁止项：${banned}`).toBe(false);
       }
     }
-    // ② 候选池恰好三件且都在正式内容库里（不新增 Weapon 定义；R2-B 未改奖励）
-    expect([...REWARD_CHOICE_IDS].sort()).toEqual(['cannon', 'hammer', 'spear']);
+    /*
+      ⚠️ PRODUCT-LOOP-R2-RECOVERY（必改 2）**收窄**了候选池（3 → 1）。
+         R2-A 这里断言「恰好三件且都在正式内容库里」；现在改成：
+         ① 候选池**非空**；② 候选池是 `FULL_RUN_SUPPORTED_WEAPON_IDS` 的**子集**
+            （= 只发这一局真的用得上的东西）；③ 未入池的件仍在正式内容库里
+            （**保留内容、只是暂时不发**，不是删定义）。
+    */
+    expect(REWARD_CHOICE_IDS.length, '候选池不能为空').toBeGreaterThan(0);
+    for (const id of REWARD_CHOICE_IDS) {
+      expect(FULL_RUN_SUPPORTED_WEAPON_IDS, `${id} 必须在完整 Run 支持清单里`).toContain(id);
+      expect(registry.functionals.get(id), `${id} 仍是正式内容`).toBeTruthy();
+    }
+    for (const id of ['spear', 'hammer']) {
+      expect(REWARD_CHOICE_IDS, `${id} 当前退出奖励池`).not.toContain(id);
+      expect(registry.functionals.get(id), `${id} 的定义**不许被删**（内容未完成 ≠ 物品不存在）`).toBeTruthy();
+      expect(isOfficialPart(id), `${id} 仍在正式部件池里`).toBe(true);
+    }
     /*
       ③ PRODUCT-LOOP-R2-B｜合成动作**只能有一个入口**（`playerGrowth.fuseStack`），
          规则（消耗 / 产出 / 落盘）不许洇进页面：页面必须**没有**任何直接改库存的调用。

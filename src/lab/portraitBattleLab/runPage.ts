@@ -622,6 +622,14 @@ export interface RunPageProbe {
     countAfter: number;
     previewText: string;
     stackText: string;
+    /**
+     * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）｜卡片第二行**真正画出来**的字：
+     * `当前 4/5 → 领取后 5/5`。与绘制同源（`RunRewardChoiceView.progressText`）
+     * ⇒ E2E 断言「屏幕上写的是成长口径」不必做 canvas OCR。
+     */
+    progressText: string;
+    /** 读数的分母（= 产品侧给的满 stack 阈值）。 */
+    stackLimit: number;
     reachesThreshold: boolean;
     href: string;
     hasSprite: boolean;
@@ -1386,6 +1394,11 @@ export class RunPage {
       // 新一局重开时 `this.loadout` 已是新的（页面本身也随导航重建）。
       playerDraft: this.loadout.draft,
       playerLoadoutTag: this.loadout.tag,
+      // PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 3）：产品 Run 的**玩家侧基线伤害**。
+      // 真人在当前 R2 里要连续多局才能偶尔赢一次 ⇒ 成长闭环实际走不完。要调的是「玩家那门炮」
+      // 的基线（`PRODUCT_RUN_CANNON_BASE_DAMAGE` = 120），**不是**全局正式 Cannon（仍 80）——
+      // 因此旧横屏正式玩法 / Validation / 敌方 RangedTurret 的 cannon 全部不受影响。
+      playerBaseline: true,
     });
     this.battle = rt;
     // 实测开局外廓间距（不是写死数字）——「开局有明确距离」的证据
@@ -1880,14 +1893,16 @@ export class RunPage {
   /* --------------------------------------- RUN COMPLETE：3选1 奖励候选卡 */
 
   /**
-   * PRODUCT-LOOP-R2-A｜**3选1** 永久武器部件候选（Queue 必改 4）。
+   * PRODUCT-LOOP-R2-A｜**候选卡**（Queue 必改 4）。候选**条数由产品侧给**：
+   * R2-RECOVERY 起当前是 1 条，本方法对 N=1 / N=3 一视同仁（布局走 `runRewardChoiceRects(n)`）。
    *
    * 与 R1-B 的「单张本局获得卡」相比，只多了一件玩家真正在做决定时需要的事实：
-   *   - 三张卡 = 产品侧给的三条候选（`rewardChoiceViewsNow()`，顺序原样保留）；
+   *   - N 张卡 = 产品侧给的 N 条候选（`rewardChoiceViewsNow()`，顺序原样保留）；
    *   - 每张卡第一行：部件**名称** + `★{star}`（都来自正式内容库，不是页面上另写一份字面量）；
-   *   - 每张卡第二行：**当前库存数量 → 领取后数量**（`拥有 ×4 · 领取后 ×5`）——
-   *     这是「相同部件可以累积数量」在玩家眼前唯一能看见的证据（Queue 必改 4 第四项）；
-   *   - 达到满 stack 的那张卡用 `dayAccent` 强调 + 显示 `5/5`（第一局选 cannon 就会看到）；
+   *   - 每张卡第二行：**成长口径** `当前 4/5 → 领取后 5/5`（`progressText`）——
+   *     这是「还差 1 个 → 到 5/5 → 可以升星」在玩家眼前唯一能看见的证据
+   *     （PRODUCT-LOOP-R2-RECOVERY 必改 2 由真人反馈 ④ 推翻 R2-A 的「×4 → ×5」写法）；
+   *   - 达到满 stack 的那张卡用 `dayAccent` 强调（`reachesThreshold`）；
    *   - 左侧仍是**最低必要视觉** = 该部件真实 Collider 的外接框（`rewardColliderGeom`），
    *     没有正式 sprite 时如实标注（`hasSprite === false`）—— 不假装用了真实美术。
    *
@@ -1963,12 +1978,18 @@ export class RunPage {
       ctx.fillStyle = COLORS.textDim;
       ctx.font = `12px ${FONT_STACK}`;
       /**
-       * PRODUCT-LOOP-R2-A：第二行**统一**是「当前数量 → 领取后数量」（Queue 必改 4 明列）。
-       * ⚠️ 刻意**不**在这里换写法：一张卡如果一会儿显示 `×4`、一会儿显示 `4/5`，
-       *    玩家就没法在三张卡之间横向比较（而横向比较正是「选哪件」的唯一依据）。
-       *    「这件选下去就满了」由**第一行的颜色**（`reachesThreshold` → `dayAccent`）承担。
+       * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）｜第二行 = **成长口径**。
+       *
+       * 值 = `当前 4/5 → 领取后 5/5`（`RunRewardChoiceView.progressText`，数量动态、不写死）。
+       *
+       * ⚠️ R2-A 曾在**这一行**上有一条相反的决策注释（「刻意不在这里换成 `4/5`，因为三张卡
+       *    要横向比较」）。本 Queue 由真人反馈 ④ 明确推翻它：玩家完全找不到 `4/5` / `5/5`
+       *    这条真实成长过程，而候选池已收窄为**一件**（必改 2）⇒ 「横向比较」这个理由本身
+       *    也不存在了。这是**产品口径变更**，不是格式口味。
+       * ⚠️ 只改这一行**信息表达**：Layout（`runRewardChoiceTextPos`）/ 命中 / 出口 /
+       *    奖励行为**一个字都没动**。
        */
-      const countText = `拥有 ×${view.countBefore} → 领取后 ×${view.countAfter}`;
+      const countText = view.progressText;
       ctx.fillText(this.ellipsize(ctx, countText, r.x + r.w - text.x - 12), text.x, text.y2);
 
       // ⑤ 锁定标记（不可撤销）
@@ -2511,6 +2532,8 @@ export class RunPage {
         countAfter: v.countAfter,
         previewText: v.previewText,
         stackText: v.stackText,
+        progressText: v.progressText,
+        stackLimit: v.stackLimit,
         reachesThreshold: v.reachesThreshold,
         href: this.opts.rewardChoices?.choices.find((c) => c.defId === v.defId)?.href ?? '',
         hasSprite: v.hasSprite,

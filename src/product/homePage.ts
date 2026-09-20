@@ -98,14 +98,40 @@ export const GARAGE_TITLE = '调整战车';
 export const GARAGE_BACK_LABEL = '返回首页';
 export const GARAGE_EQUIP_LABEL = '装备';
 /**
- * PRODUCT-LOOP-R2-B｜合成动作的文案（Queue 必改 3）。
+ * PRODUCT-LOOP-R2-B｜合成动作的文案。
  *   - `可合成`：满 5 件且未到星级上限时**明确**显示的状态词（不是隐晦的进度数字）；
- *   - `合成`：第一版唯一的合成入口 —— 点一次执行**一次** 5 合 1（必改 5：不连锁）；
+ *   - `合成升星`：第一版唯一的合成入口按钮 —— 点一次执行**一次** 5 合 1（必改 5：不连锁）。
+ *     ⚠️ PRODUCT-LOOP-R2-RECOVERY（必改 4）把按钮从 `合成` 改成 `合成升星`：Queue 要求
+ *        「必须出现明确主按钮：合成升星」，且明令「不能要求玩家猜卡片可点 / 看页面底部教程」。
  *   - `已满星`：★5 的卡不再有合成入口（Queue：「5★为当前最高星级，不可继续合成」）。
  */
-export const GARAGE_FUSE_LABEL = '合成';
+export const GARAGE_FUSE_LABEL = '合成升星';
 export const GARAGE_FUSE_READY_LABEL = '可合成';
 export const GARAGE_MAX_STAR_LABEL = '已满星';
+/**
+ * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 4）｜**成长信息必须是卡片主体**。
+ *
+ * 真人反馈 ④：页面底部虽然有合成说明，但真人**完全找不到** `4/5` / `5/5` / 可合成的
+ * 真实成长过程 —— 因为成长信息当时只是卡片 meta 行尾的一小段（`能量 30 · 4/5`）。
+ * ⇒ 本 Queue 把它提升成卡片上的**独立主信息行**：`成长 4/5`；离满还差 1 件时再补一行
+ * 「还差 1 个即可升星」。两行文案都是常量（页面里不出现第二份字面量）。
+ */
+export const GARAGE_GROWTH_LABEL = '成长';
+export const GARAGE_NEAR_FULL_LABEL = '还差 1 个即可升星';
+/**
+ * 首页那一行最小成长状态的收尾词（Queue 必改 5：达到 5/5 时显示「可升星」）。
+ * ⚠️ 与 Garage 的 `可合成` 刻意**不是**同一个词：首页只回答「你现在能不能升级」，
+ *    真正的动作词（`合成升星`）只出现在真正能点它的那张卡上。
+ */
+export const HOME_GROWTH_READY_LABEL = '可升星';
+/**
+ * PRODUCT-LOOP-R2-RECOVERY（必改 6）｜领奖之后、且这件刚好凑满时的**下一步引导**。
+ *
+ * Queue 原文：领取 Cannon 后返回首页，如果已达 5/5 → 首页显示「加农炮可升星」，
+ * 然后玩家点「调整战车」进入 Garage。⚠️ **禁止自动替玩家合成** —— 这里只提示 + 指向
+ * 那个既有入口，成长动作必须由玩家自己在 Garage 里按下（本页不新增任何自动动作）。
+ */
+export const CLAIM_UPGRADABLE_HINT = '已可升星 → 点「调整战车」合成';
 /**
  * `开始冒险` 的目的地：**不再是页面里的字面量**。
  *
@@ -186,7 +212,34 @@ export interface ProductProbe {
     readonly seeded: boolean;
     readonly repairedEquipped: string | null;
     readonly stackThreshold: number;
+    /**
+     * PRODUCT-LOOP-R2-RECOVERY（必改 1）｜一次性 R2 onboarding 迁移的读数（判定结果原样报出）。
+     *   - `onboardingApplied === true` ⇒ 这一次真的把历史 Profile 补到了起点；
+     *   - `onboardingReason === 'already-marked'` ⇒ 曾经执行过（reload 后的形态）。
+     */
+    readonly onboardingApplied: boolean;
+    readonly onboardingReason: string;
+    readonly onboardingRaised: number;
+    readonly onboardingCannon: number;
   };
+  /**
+   * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页那一行最小成长状态的真实读数
+   * （`null` = 没画这一行：空槽 / 查无此 stack）。与页面上那几个 `data-ph-home-growth-*` 同源。
+   */
+  readonly homeGrowth: {
+    readonly defId: string;
+    readonly name: string;
+    readonly star: number;
+    readonly count: number;
+    readonly threshold: number;
+    readonly stackText: string;
+    readonly ready: boolean;
+  } | null;
+  /**
+   * PRODUCT-LOOP-R2-RECOVERY（必改 6）｜领奖提示里是否出现了「已可升星」引导
+   * （只在**领到的这件刚好凑满**时为 true；不是「页面某处出现过这几个字」）。
+   */
+  readonly claimUpgradableHint: boolean;
   /**
    * PRODUCT-LOOP-R2-B｜**当前装备的星级**（`BuildDraft.functionalStars` 缺省 = ★1）。
    * ⚠️「装备」在产品侧 = `(equippedWeaponId, equippedWeaponStar)` **这一对**；
@@ -477,6 +530,20 @@ export function mountProductHome(
   }
 
   /**
+   * 当前**装备的那一件**在库存里的成长读数。
+   *
+   * ⚠️ 必须 `(defId, star)` **一起**定位：R2-B 起同一个 defId 可以有多个星级档
+   *    （★1 的炮与 ★2 的炮是两张卡、两个 stack），只按 defId 取会拿到第一条。
+   * `null` = 空槽（`EMPTY_SLOT`）或库存里查无此 stack —— 两种情况都**不画**成长行，
+   * 而不是画一行 `0/5` 的假读数。
+   */
+  function equippedGrowth(r: LoadoutReading): LoadoutReading['weapons'][number] | null {
+    return (
+      r.weapons.find((w) => w.defId === r.equippedWeaponId && w.star === r.equippedWeaponStar) ?? null
+    );
+  }
+
+  /**
    * PRODUCT-LOOP-R1-B｜领奖提示（**只陈述 Repository 的真实结果**）。
    *
    *   - 成功 → 「已获得：<正式部件名>（已进入车库）」，带 `data-ph-claim-def` 供 E2E 对账；
@@ -486,9 +553,28 @@ export function mountProductHome(
   function claimNotice(): HTMLElement | null {
     if (!claim) return null;
     if (claim.ok && claim.grant) {
-      const n = el('div', 'ph-claim ph-claim-ok', `${CLAIM_OK_LEAD}：${claim.grant.name}（已进入车库）`);
+      const grant = claim.grant;
+      const n = el('div', 'ph-claim ph-claim-ok', `${CLAIM_OK_LEAD}：${grant.name}（已进入车库）`);
       n.dataset['phClaim'] = 'ok';
-      n.dataset['phClaimDef'] = claim.grant.defId;
+      n.dataset['phClaimDef'] = grant.defId;
+      /**
+       * PRODUCT-LOOP-R2-RECOVERY（必改 6）｜**领取之后必须自然引导到成长动作**。
+       *
+       * Queue 原文：领取后返回首页，如果当前已 5/5 ⇒ 首页显示「可升星」，然后玩家点
+       * 「调整战车」进 Garage 合成。本段就是那一步提示 —— 只在**这一件真的凑满了**
+       * 的时候出现（`fusable`），并且**只提示、不代劳**：
+       * ⚠️ 页面**不做**任何自动合成（Queue 明令「禁止自动替玩家合成。成长必须是玩家主动
+       *    确认的一步」）—— 这里连 `fuseStack` 都不会被调用，提示里的动作词指向的是
+       *    既有的 `[调整战车]` 入口。
+       * ⚠️ 读数取自**领奖之后**重读的那份库存（见上方 `if (claim)` 的重读段）⇒ 显示的是
+       *    「现在」的真实状态，不是出发时的旧快照。
+       */
+      const granted = read().weapons.find((w) => w.defId === grant.defId && w.star === GROWTH_STAR);
+      if (granted && granted.fusable) {
+        const hint = el('span', 'ph-claim-hint', `${granted.name} ${CLAIM_UPGRADABLE_HINT}`);
+        hint.dataset['phClaimHint'] = 'upgradable';
+        n.append(hint);
+      }
       return n;
     }
     if (claim.reason === 'already-claimed') {
@@ -545,6 +631,33 @@ export function mountProductHome(
       list.append(li);
     }
     stage.append(list);
+
+    /**
+     * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页的**一行最小成长状态**。
+     *
+     * Queue 原文：首页当前 Weapon 展示区增加一行最小状态（`加农炮 ★ 4/5`；
+     * 达到 5/5 ⇒ `可升星`），并且**不要新增复杂按钮** —— 点了走既有的「调整战车」，
+     * 合成在 Garage 里做。目的：玩家打完一局回首页时第一眼就知道「我现在能升级了」。
+     *
+     * 三条边界：
+     *   - 数字全部来自 `weaponEntries()`（`(defId, star)` 一起定位），**不新造读数**；
+     *   - 空槽 / 查无此 stack ⇒ **不画**这一行（而不是画 `0/5`）；
+     *   - 只画 `<span>`，**零新按钮**、零新跳转 ⇒ 「调整战车」仍是唯一进门方式。
+     */
+    const eq = equippedGrowth(r);
+    if (eq) {
+      const grow = el('div', 'ph-home-growth');
+      grow.dataset['phHomeGrowth'] = eq.defId;
+      grow.dataset['phHomeGrowthStar'] = String(eq.star);
+      grow.dataset['phHomeGrowthStack'] = eq.stackText;
+      grow.dataset['phHomeGrowthReady'] = String(eq.fusable);
+      grow.append(
+        el('span', 'ph-home-growth-name', `${eq.name} ★${eq.star}`),
+        el('span', 'ph-home-growth-value', `${GARAGE_GROWTH_LABEL} ${eq.stackText}`),
+      );
+      if (eq.fusable) grow.append(el('span', 'ph-home-growth-ready', HOME_GROWTH_READY_LABEL));
+      stage.append(grow);
+    }
 
     const goGarage = (): void => {
       view = 'garage';
@@ -617,17 +730,17 @@ export function mountProductHome(
       el(
         'p',
         'ph-note',
-        '打完一局（RUN COMPLETE）会获得一个三选一的机会：选中哪件就带哪件回家；领回来后在「调整战车」里就能看到并装上。',
+        '打完一局（RUN COMPLETE）会获得「加农炮 ★1 ×1」：卡片上写着当前进度与领取后的进度（例如 4/5 → 5/5）；领回来后在「调整战车」里就能看到并装上。',
       ),
     );
     stage.append(
-      el('p', 'ph-note', '同一件部件可以累积数量（例如炮 4/5 → 5/5）。'),
+      el('p', 'ph-note', '同一件部件可以累积数量：凑满 5 件后，那张卡会变成「可合成」并出现「合成升星」。'),
     );
     stage.append(
       el(
         'p',
         'ph-note',
-        '凑满 5 件后在「调整战车」里可以合成下一星级：5 件 ★1 → 1 件 ★2。' +
+        '合成规则：5 件 ★1 → 1 件 ★2。' +
           '星级越高占的能量越多；★5 是目前的上限，到了就不能再合。',
       ),
     );
@@ -717,13 +830,32 @@ export function mountProductHome(
       card.dataset['phDamage'] = String(w.damage);
       card.dataset['phDamageNext'] = w.damageNext === null ? '' : String(w.damageNext);
       card.dataset['phDamageText'] = w.damageText;
+      /**
+       * PRODUCT-LOOP-R2-RECOVERY（必改 4）｜**离满还差 1 件**。
+       *
+       * `threshold - count === 1`（且未满）正是 Queue 明写要出现的那一行
+       * 「还差 1 个即可升星」。⚠️ 只在这一种情况提示：差 2 件时说「还差 1 个」是假话，
+       * 差 0 件时它已经是可合成态（那时该看到的是 `可合成` + `合成升星` 按钮）。
+       */
+      const nearFull = !w.reachesThreshold && w.threshold - w.count === 1;
+      card.dataset['phNearFull'] = String(nearFull);
       if (w.reachesThreshold) card.classList.add('ph-card-full');
       card.append(
         el('span', 'ph-card-name', `${w.name} ★${w.star}`),
         /**
+         * PRODUCT-LOOP-R2-RECOVERY（必改 4）｜**成长 = 卡片主体信息**。
+         *
+         * 值 = `成长 4/5`（`w.stackText` 来自 `weaponEntries()`，与探针 / 库存在同一份读数上）。
+         * ⚠️ R2-B 时这一段挂在 meta 行尾（`能量 30 · 4/5`）⇒ 真人反馈「完全找不到」。
+         *    本 Queue 把它提成独立一行，且**仍在卡片上**（不是页面底部说明）。
+         */
+        el('span', 'ph-card-growth', `${GARAGE_GROWTH_LABEL} ${w.stackText}`),
+        // 4/5 时明确说出「还差多少」——玩家不需要自己做减法
+        ...(nearFull ? [el('span', 'ph-card-hint', GARAGE_NEAR_FULL_LABEL)] : []),
+        /**
          * PRODUCT-LOOP-R2-C（Queue 必改 4）｜**最终主属性**：升星到底换来什么。
          *
-         * `攻击 80 → 100` = 这一档一次命中扣多少血 → 升一星后扣多少血。
+         * `攻击 120 → 150` = 这一档一次命中扣多少血 → 升一星后扣多少血。
          * 数字来自 `playerLoadout.weaponEntries()`（`starTierDamage` + `weaponMainDamage`），
          * 与战斗里真实结算的伤害**同一次计算** ⇒ 卡片不会承诺一个打不出来的数。
          * 只有这一行，不加属性面板（Queue 明令）。
@@ -731,7 +863,8 @@ export function mountProductHome(
          *    而不是画一个 `攻击 0`。
          */
         ...(w.damageText === '' ? [] : [el('span', 'ph-card-damage', w.damageText)]),
-        el('span', 'ph-card-meta', `能量 ${w.energyInUse} · ${w.stackText}`),
+        // 能量是**独立**读数（成长进度已经上移到 `ph-card-growth`，这里不再重复它）
+        el('span', 'ph-card-meta', `能量 ${w.energyInUse}`),
       );
       if (w.fusable) card.append(el('span', 'ph-card-badge', GARAGE_FUSE_READY_LABEL));
       if (w.maxStar) card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_MAX_STAR_LABEL));
@@ -915,7 +1048,40 @@ export function mountProductHome(
           seeded: growth.seeded,
           repairedEquipped: growth.repairedEquipped,
           stackThreshold: FUSE_STACK,
+          /**
+           * PRODUCT-LOOP-R2-RECOVERY（必改 1）｜本次挂载的一次性 onboarding 迁移读数。
+           *
+           * ⚠️ 直接取成长会话的判定结果（页面 / 探针不各自再判一次），
+           *    因此 E2E 可以断言「历史 Profile 第一次进来被补到 4/5」与
+           *    「reload 之后 `already-marked` ⇒ 没有再补」这两条**互斥**的事实。
+           */
+          onboardingApplied: growth.onboarding.applied,
+          onboardingReason: growth.onboarding.reason,
+          onboardingRaised: growth.onboarding.raised,
+          onboardingCannon: growth.onboarding.cannonAfter,
         },
+        /**
+         * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页那一行成长状态的真实读数
+         * （`null` = 当前没有装备武器 / 查无此 stack ⇒ 那一行没画）。
+         */
+        homeGrowth: (() => {
+          const eq = equippedGrowth(r);
+          return eq
+            ? {
+                defId: eq.defId,
+                name: eq.name,
+                star: eq.star,
+                count: eq.count,
+                threshold: eq.threshold,
+                stackText: eq.stackText,
+                ready: eq.fusable,
+              }
+            : null;
+        })(),
+        /**
+         * PRODUCT-LOOP-R2-RECOVERY（必改 6）｜领奖提示里那条「已可升星」引导是否出现。
+         */
+        claimUpgradableHint: !!header.querySelector('[data-ph-claim-hint="upgradable"]'),
         selectedWeaponId: selected ? selected.defId : null,
         selectedWeaponStar: selected ? selected.star : null,
         equipEnabled: !!equipBtn && !equipBtn.disabled,

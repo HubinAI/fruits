@@ -88,19 +88,25 @@ const WEAPON_A_NAME = '炮';
 const WEAPON_PRE = 'hammer';
 const WEAPON_PRE_NAME = '锤';
 /**
- * Weapon B = 本局在终点**三张候选卡里真的点中**的那一件。
+ * Weapon B = 局外**守门演示**用的那一件非 cannon（装备它 ⇒ 「开始冒险」必须不可执行）。
  *
- * ⚠️ R2-A 之后它不再是「唯一奖励」：`REWARD_WEAPON_ID` 已随 3选1 一起被删掉，
- *    三张卡各自带一条领奖地址，玩家点谁由本文件的 `PICK_INDEX` 决定
- *    （= 玩家的选择，而不是产品写死的「奖励就是它」）。
- * ⚠️ 它与新账号的初始读数（`SEED_COUNTS.spear` = 1）不同 ⇒ 「领完变 2」是可观测的累积。
+ * ⚠️ R2-A 之后它不再是「唯一奖励」：`REWARD_WEAPON_ID` 已随候选池一起被删掉，
+ *    每条候选各自带一条领奖地址。
+ * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：候选池收窄为 1 件
+ *    ⇒ 「终点被点中的那件」**不再等于** Weapon B，两者的角色已经拆开：
+ *    · 领奖那件 = `CLAIM_ID`（cannon，见下）；
+ *    · 本常量只负责 E1/E2 的守门演示（必须有个非 cannon 可装）。
+ * ⚠️ 它与新账号的初始读数（`SEED_COUNTS.spear` = 1）不同 ⇒ 「领完变 2」曾是可观测的累积；
+ *    现在这条累积证据由 `CLAIM_ID` 的 4 → 5 承担。
  *
  * ── ⚠️ PRODUCT-LOOP-P0-RUN-BUILD-LOADOUT-COMPATIBILITY：它的角色**缩小**了 ──────────
  * P0 之前本文件让第二局**真的装上 Weapon B（spear）去打第一场**。P0 之后这条路不再合法：
  * 非 cannon 的装备在首页就进不去完整 Run（产品裁决：Spear / Hammer 在有正式 Run Build
  * 内容之前不得进入完整 Run）。⇒ `spear` 现在只承担**局外**角色：
  *
- *   ① 终点真的点中它 ⇒ 库存 1 → 2（R2-A 的累积证据，D1–D3 一字未动）；
+ *   ① ⚠️ **必改 2 之后它不再是「终点被点中的那件」**（候选池只剩 cannon）⇒
+ *      R2-A 那条「库存 1 → 2」的累积证据已由 `CLAIM_ID` 的 **4 → 5** 承担（D1–D3 / F8）；
+ *      它自己只剩 G3 一条：拿它当「同 token 换一件」的**换靶**（见 G3 旁注释）；
  *   ② 照样可以拥有 / 查看 / **装备**（必改 3：不许把它从 Inventory 删掉）⇒ D4 / D4b 一字未动；
  *   ③ 但装上它之后「开始冒险」必须进**不可执行**状态（新段 E1 / E2），
  *      换回 `cannon` 才恢复（新段 E3）—— 第二局因此用 `cannon` 打第一场。
@@ -112,13 +118,29 @@ const WEAPON_PRE_NAME = '锤';
 const WEAPON_B = 'spear';
 const WEAPON_B_NAME = '刺';
 /**
- * 终点三张候选（与 `src/product/runReward.ts` 的 `REWARD_CHOICE_IDS` 同值）。
- * ⚠️ 顺序 = 界面上**从上到下**的展示顺序 ⇒ `PICK_INDEX` 同时就是「点第几张卡」。
+ * 终点候选（与 `src/product/runReward.ts` 的 `REWARD_CHOICE_IDS` 同值）。
+ *
+ * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：从 `['cannon','spear','hammer']`
+ *    **收窄为 `['cannon']`** —— 当前只有它同时具备完整 Run compatibility / 已验证 Run Buff /
+ *    永久 Star 成长链（`FULL_RUN_SUPPORTED_WEAPON_IDS = ['cannon']`）。
+ *    顺序仍 = 界面上**从上到下**的展示顺序 ⇒ `CLAIM_INDEX` 同时就是「点第几张卡」。
  */
-const CHOICE_IDS = ['cannon', 'spear', 'hammer'];
+const CHOICE_IDS = ['cannon'];
 const CHOICE_NAMES = { cannon: '炮', spear: '刺', hammer: '锤' };
-/** 本文件要选中第几张卡（= `WEAPON_B` 在候选池里的下标；与卡片矩形一一对应）。 */
-const PICK_INDEX = CHOICE_IDS.indexOf(WEAPON_B);
+/**
+ * 本文件**领奖那件** = 候选池里唯一的那件（cannon）。
+ *
+ * ⚠️ 为什么必须从 `WEAPON_B` 里分出来：本文件有**两件**武器各自承担一件事 ——
+ *    · `CLAIM_ID`（cannon）= 终点**领到**的那件（候选池收窄后只剩它）；
+ *    · `WEAPON_B`（spear）= 局外**守门演示**用的非 cannon（E1/E2 必须装一件非 cannon 才触发守门）。
+ *    收窄之前这两件事恰好由同一件承担（spear 既在候选池、又能触发守门）；
+ *    收窄之后**必须解耦** —— 否则 `CHOICE_IDS.indexOf(WEAPON_B)` 会得到 **-1**，
+ *    「点第 -1 张卡」会拿到 `undefined` 并在 `clickRect` 里炸掉（上一轮实测就是这条）。
+ */
+const CLAIM_ID = 'cannon';
+const CLAIM_NAME = CHOICE_NAMES[CLAIM_ID];
+/** 本文件要点第几张卡（= `CLAIM_ID` 在候选池里的下标；与卡片矩形一一对应）。 */
+const CLAIM_INDEX = CHOICE_IDS.indexOf(CLAIM_ID);
 /**
  * 新账号成长起点（Queue 必改 3；真源 = `src/product/playerGrowth.ts` 的 `FRESH_STACK_SEED`）。
  * ⚠️ 这不是 core 的 `defaultInventory()`（那边 starter 各 1）—— 起点是**产品侧**为
@@ -562,7 +584,9 @@ async function main() {
       'A7 「开始冒险」的链接里带着**存档里那份**装备（解码后主武器槽 = Weapon A；车身一致）',
       loadoutInHref ? `${WEAPON_SLOT}=${loadoutInHref.functionalSelections[WEAPON_SLOT]}` : 'n/a',
     );
-    // R2-A 的地址层契约：出发链接必须**同时**给全三张候选各自的领奖地址（Lab 不许自己拼）
+    // R2-A 的地址层契约：出发链接必须**同时**给全候选各自的领奖地址（Lab 不许自己拼）
+    // ⚠️ 必改 2 起候选池只有 1 件 ⇒ 这里的条数断言写**字面 1**（不是「≥1」），
+    //    候选池再变动的第一天就必须响。
     const payloadInHref = choicesOf(home1.startRunHref ?? '');
     const ownClaims = CHOICE_IDS.map(
       (id) => `./home.html?run=${home0.runToken}&reward=${id}`,
@@ -570,14 +594,14 @@ async function main() {
     log(
       !!payloadInHref &&
         payloadInHref.stack === FUSE_STACK &&
-        payloadInHref.choices.length === 3 &&
+        payloadInHref.choices.length === 1 &&
         payloadInHref.choices.every((c, i) => c.defId === CHOICE_IDS[i]) &&
         payloadInHref.choices.every((c) => c.star === 1) &&
         payloadInHref.choices.every((c, i) => c.countBefore === SEED_COUNTS[CHOICE_IDS[i]]) &&
         payloadInHref.choices.every((c, i) => c.href === ownClaims[i]) &&
-        home1.rewardChoices.length === 3 &&
+        home1.rewardChoices.length === 1 &&
         new URLSearchParams((home1.startRunHref ?? '').split('?')[1] ?? '').get('reward') === null,
-      'A8 出发链接带**一整份 3选1 载荷**（三条各自的领奖地址 + 满 stack 阈值 + 出发那一刻的库存读数），且地址里**没有**裸 `reward=`',
+      'A8 出发链接带**一整份候选载荷**（候选池 1 条领奖地址 + 满 stack 阈值 + 出发那一刻的库存读数），且地址里**没有**裸 `reward=`',
       payloadInHref
         ? `stack=${payloadInHref.stack} · ${payloadInHref.choices.map((c) => `${c.defId}★${c.star}(${c.countBefore}→${c.countBefore + 1})`).join(' / ')}`
         : 'n/a',
@@ -642,35 +666,41 @@ async function main() {
       'C2 本局确实攒下了 Run Buff 与进度（第二局要证明它们**不继承**，这里先证明第一局真的有）',
       `DAY ${p1.day} · Build=[${p1.build.join(',')}] (${p1.buildLabels.join('+')})`,
     );
-    /* --------- C3：R2-A 验收 ②｜终点是**三张真实 Weapon 卡**（不是单件固定奖励） --------- */
+    /* --------- C3：R2-A 验收 ②｜终点是**真实 Weapon 卡**（不是单件固定奖励） --------- */
     const rc = p1.rewardChoices;
     log(
-      rc.length === 3 &&
+      rc.length === 1 &&
         rc.every((c, i) => c.defId === CHOICE_IDS[i] && c.name === CHOICE_NAMES[CHOICE_IDS[i]]) &&
         rc.every((c) => c.star === 1 && c.energy > 0) &&
         rc.every((c, i) => c.countBefore === SEED_COUNTS[CHOICE_IDS[i]]) &&
         rc.every((c) => c.countAfter === c.countBefore + 1) &&
-        rc[PICK_INDEX].previewText === `${SEED_COUNTS[WEAPON_B]} → ${SEED_COUNTS[WEAPON_B] + 1}` &&
-        rc[PICK_INDEX].reachesThreshold === false &&
+        rc[CLAIM_INDEX].previewText === `${SEED_COUNTS[CLAIM_ID]} → ${SEED_COUNTS[CLAIM_ID] + 1}` &&
+        /*
+          ⚠️ 必改 2 的**直接后果**：候选池只剩 cannon，而它的种子起点是 4/5
+          ⇒ 在终点领下这一件**必然跨过满 stack 阈值**（旧值 `false` 是因为当时领的是 spear 1→2）。
+          这条断言的字面值跟着契约变，语义没变：它仍在问「这一件的领取后数量有没有到阈值」。
+        */
+        rc[CLAIM_INDEX].reachesThreshold === true &&
         p1.rewardChoicesDropped === 0,
-      'C3 COMPLETE 出现**三张真实 Weapon 候选卡**（R2-A 验收 ②）：名称 / ★1 / 当前数量 → 领取后数量预览，且载荷零条被丢弃',
-      `候选=${rc.map((c) => `${c.name}★${c.star} ${c.previewText}`).join(' | ')} dropped=${p1.rewardChoicesDropped}`,
+      'C3 COMPLETE 出现**真实 Weapon 候选卡**（候选池只有 1 件）：名称 / ★1 / 当前数量 → 领取后数量预览（本件跨过 5/5），且载荷零条被丢弃',
+      `候选=${rc.map((c) => `${c.name}★${c.star} ${c.previewText}${c.reachesThreshold ? '(满)' : ''}`).join(' | ')} dropped=${p1.rewardChoicesDropped}`,
     );
     log(
       p1.exitHref === null && p1.actionEnabled === false,
-      'C3b 出口**在卡片上**：底栏那条通用按钮在终点态不可用、也没有产品出口（3选1 不存在「默认那件」）',
+      'C3b 出口**在卡片上**：底栏那条通用按钮在终点态不可用、也没有产品出口（候选池不存在「默认那件」）',
       `label=${p1.actionLabel} enabled=${p1.actionEnabled} exit=${p1.exitHref}`,
     );
-    // 真实像素取证：三张卡真的画在画布上（不是只有探针字段）
+    // 真实像素取证：候选卡真的画在画布上（不是只有探针字段）
     // ⚠️ 必须在**点卡之前**采：点中即整页导航 ⇒ `#run-canvas` 不复存在。
-    // 阈值来源：三个矩形总面积 3 × 362 × 68 = 73848 px²，实测卡底 ≈ 58800（约 79.6%）
-    // ⇒ 取 55000（约 74.5%）作为「成片」下界：排掉「只画了边框」，也给字体抗锯齿留余量。
+    // 阈值来源（必改 2 后按**实际卡数**重推）：候选 1 张 ⇒ 矩形总面积 1 × 362 × 68 = 24616 px²，
+    // 卡底实测 ≈ 19664（约 79.9%）⇒ 取 18000（约 73.1%）作为「成片」下界：
+    // 排掉「只画了边框」，也给字体抗锯齿留余量（旧值 55000 是 3 张卡的面积口径，不能沿用）。
     const choiceRects = p1.rewardChoiceRects;
     let cardBgPx = 0;
     for (const r of choiceRects) cardBgPx += await countColorInRect(page, r, CARD_BG);
     log(
-      choiceRects.length === 3 && choiceRects.every((r) => r.w === 362 && r.h === 68) && cardBgPx > 55000,
-      'C3c 三张候选卡真的画出来（真实 `getImageData`：三个矩形里都是成片的卡底像素）',
+      choiceRects.length === 1 && choiceRects.every((r) => r.w === 362 && r.h === 68) && cardBgPx > 18000,
+      'C3c 候选卡真的画出来（真实 `getImageData`：矩形里都是成片的卡底像素）',
       `rects=${choiceRects.map((r) => `${r.x},${r.y} ${r.w}×${r.h}`).join(' | ')} cardBg=${cardBgPx}`,
     );
     // 本局的幂等键：第一局出发时首页生成的那个 token（领奖与「重复领取」都对着它）
@@ -680,46 +710,46 @@ async function main() {
       rc.every((c, i) => c.href.includes(`run=${token1}`) && c.href.includes(`reward=${CHOICE_IDS[i]}`)) &&
         rc.every((c, i) => c.href === ownClaims1[i]) &&
         token1 === home0.runToken,
-      'C4 三张卡的出口带的是**本局** token + **各自**的奖励 id（三条地址共用同一幂等键 ⇒ 谁先到谁入账，第二个必然落空）',
+      'C4 候选卡的出口带的是**本局** token + **各自**的奖励 id（候选池共用同一幂等键 ⇒ 谁先到谁入账，第二个必然落空）',
       `token=${token1} · ${rc.map((c) => c.href.replace('./home.html?', '')).join('  ')}`,
     );
 
-    /* ---- 6) 点中 **Weapon B 那张卡** → 回首页入库（真实鼠标，不是底栏按钮） ---- */
+    /* ---- 6) 点中**领奖那张卡**（cannon）→ 回首页入库（真实鼠标，不是底栏按钮） ---- */
     await Promise.all([
       page.waitForURL(/home\.html/, { timeout: 20000 }).catch(() => {}),
-      clickRect(page, choiceRects[PICK_INDEX]),
+      clickRect(page, choiceRects[CLAIM_INDEX]),
     ]);
     await waitHomeReady(page);
     const home2 = await probeHome(page);
     const stored2 = await storageDump(page);
     log(
-      home2.claim !== null && home2.claim.ok === true && home2.claim.defId === WEAPON_B,
+      home2.claim !== null && home2.claim.ok === true && home2.claim.defId === CLAIM_ID,
       'D1 领奖在**产品侧**完成（页面只展示 Profile Repository 的真实结果）',
       `ok=${home2.claim ? home2.claim.ok : 'n/a'} def=${home2.claim ? home2.claim.defId : 'n/a'}`,
     );
     log(
-      invCount(stored2, WEAPON_B) === SEED_COUNTS[WEAPON_B] + 1 &&
-        invCount(stored2, WEAPON_A) === SEED_COUNTS[WEAPON_A] &&
+      invCount(stored2, CLAIM_ID) === SEED_COUNTS[CLAIM_ID] + 1 &&
+        invCount(stored2, WEAPON_B) === SEED_COUNTS[WEAPON_B] &&
         invCount(stored2, WEAPON_PRE) === SEED_COUNTS[WEAPON_PRE] &&
         ledgerTokens(stored2).length === 1 &&
         ledgerTokens(stored2)[0] === token1,
-      `D2 **独立取证**（浏览器真实 localStorage）：只有 ${WEAPON_B} 从 ${SEED_COUNTS[WEAPON_B]} → ${SEED_COUNTS[WEAPON_B] + 1}（R2-A 验收 ③④），另两件一个数字都没动；账本记下本局 token`,
-      `${WEAPON_A}=${invCount(stored2, WEAPON_A)} ${WEAPON_B}=${invCount(stored2, WEAPON_B)} ${WEAPON_PRE}=${invCount(stored2, WEAPON_PRE)} 账本=${JSON.stringify(ledgerTokens(stored2))}`,
+      `D2 **独立取证**（浏览器真实 localStorage）：只有领到的 ${CLAIM_ID} 从 ${SEED_COUNTS[CLAIM_ID]} → ${SEED_COUNTS[CLAIM_ID] + 1}（R2-A 验收 ③④），另两件一个数字都没动；账本记下本局 token`,
+      `${CLAIM_ID}=${invCount(stored2, CLAIM_ID)} ${WEAPON_B}=${invCount(stored2, WEAPON_B)} ${WEAPON_PRE}=${invCount(stored2, WEAPON_PRE)} 账本=${JSON.stringify(ledgerTokens(stored2))}`,
     );
 
-    /* ---- 7) 局外：Garage 看到 Weapon B 的**数量**长了 → 装备它 ---- */
+    /* ---- 7) 局外：Garage 看到**领到的那件**数量长了（4 → 5，跨过阈值） ---- */
     await clickSelector(page, '[data-ph-action="open-garage"]');
-    const cardB = await weaponCard(page, WEAPON_B);
-    const cardBSeed0 = SEED_COUNTS[WEAPON_B];
+    const cardB = await weaponCard(page, CLAIM_ID);
+    const cardBSeed0 = SEED_COUNTS[CLAIM_ID];
     log(
       !!cardB &&
-        cardB.text.includes(WEAPON_B_NAME) &&
+        cardB.text.includes(CLAIM_NAME) &&
         cardB.star === '1' &&
         cardB.count === String(cardBSeed0 + 1) &&
         cardB.stackText === `${cardBSeed0 + 1}/5` &&
         cardB.threshold === String(FUSE_STACK),
-      `D3 调整战车：刚领到的那件**读数长了一格**（${cardBSeed0} → ${cardBSeed0 + 1}，同一份 Inventory 数据，不是另造一套）`,
-      cardB ? `[${WEAPON_B}] ${cardB.text} · data: star=${cardB.star} count=${cardB.count} stackText=${cardB.stackText}` : 'n/a',
+      `D3 调整战车：刚领到的那件**读数长了一格并跨过阈值**（${cardBSeed0} → ${cardBSeed0 + 1}，同一份 Inventory 数据，不是另造一套）`,
+      cardB ? `[${CLAIM_ID}] ${cardB.text} · data: star=${cardB.star} count=${cardB.count} stackText=${cardB.stackText}` : 'n/a',
     );
     await clickSelector(page, `[data-ph-weapon="${WEAPON_B}"]`);
     await clickSelector(page, '[data-ph-action="equip"]');
@@ -790,7 +820,7 @@ async function main() {
     const home4 = await probeHome(page);
     const loadout2 = decodeLoadoutFromHref(home4.startRunHref ?? '');
     const payload2 = choicesOf(home4.startRunHref ?? '');
-    const cardBAfter = home4.weapons.find((w) => w.defId === WEAPON_B);
+    const cardBAfter = home4.weapons.find((w) => w.defId === CLAIM_ID);
     log(
       storedWeaponSlot(stored3b) === WEAPON_A &&
         home4.view === 'home' &&
@@ -805,10 +835,10 @@ async function main() {
     log(
       !!payload2 &&
         !!cardBAfter &&
-        cardBAfter.count === SEED_COUNTS[WEAPON_B] + 1 &&
-        payload2.choices[PICK_INDEX].defId === WEAPON_B &&
-        payload2.choices[PICK_INDEX].countBefore === SEED_COUNTS[WEAPON_B] + 1,
-      'E3b 第二次出发的载荷读的是**领奖之后**的库存（候选读数已累积到 2 ⇒ 预览 2 → 3，不是出发时那份旧快照）',
+        cardBAfter.count === SEED_COUNTS[CLAIM_ID] + 1 &&
+        payload2.choices[CLAIM_INDEX].defId === CLAIM_ID &&
+        payload2.choices[CLAIM_INDEX].countBefore === SEED_COUNTS[CLAIM_ID] + 1,
+      `E3b 第二次出发的载荷读的是**领奖之后**的库存（${CLAIM_ID} 读数已累积到 ${SEED_COUNTS[CLAIM_ID] + 1} ⇒ 预览 ${SEED_COUNTS[CLAIM_ID] + 1} → ${SEED_COUNTS[CLAIM_ID] + 2}，不是出发时那份旧快照）`,
       payload2
         ? `载荷=${payload2.choices.map((c) => `${c.defId}:${c.countBefore}`).join(' ')} · 卡片=${cardBAfter ? cardBAfter.count : 'n/a'}`
         : 'n/a',
@@ -818,14 +848,14 @@ async function main() {
     await page.reload({ waitUntil: 'load' });
     await waitHomeReady(page);
     const afterReload = await probeHome(page);
-    const cardBReload = afterReload.weapons.find((w) => w.defId === WEAPON_B);
+    const cardBReload = afterReload.weapons.find((w) => w.defId === CLAIM_ID);
     log(
       afterReload.equippedWeaponId === WEAPON_A &&
         afterReload.startRunBlocked === false &&
         !!cardBReload &&
-        cardBReload.count === SEED_COUNTS[WEAPON_B] + 1,
-      `D5 整页 reload：累积出来的数量（${SEED_COUNTS[WEAPON_B] + 1}/5）与「仍装着换回来的 ${WEAPON_A_NAME}」都来自真实持久化（不是页面内存）`,
-      `equipped=${afterReload.equippedWeaponId} ${WEAPON_B}=${cardBReload ? cardBReload.count : 'n/a'}`,
+        cardBReload.count === SEED_COUNTS[CLAIM_ID] + 1,
+      `D5 整页 reload：累积出来的数量（${SEED_COUNTS[CLAIM_ID] + 1}/5）与「仍装着换回来的 ${WEAPON_A_NAME}」都来自真实持久化（不是页面内存）`,
+      `equipped=${afterReload.equippedWeaponId} ${CLAIM_ID}=${cardBReload ? cardBReload.count : 'n/a'}`,
     );
 
     /* ============================================================ 第二局 */
@@ -907,11 +937,11 @@ async function main() {
     /* ---- 证明 4：Permanent Inventory 继承（R2-A：继承的是**数量**） ---- */
     const stored4 = await storageDump(page);
     log(
-      invCount(stored4, WEAPON_B) === SEED_COUNTS[WEAPON_B] + 1 &&
-        invCount(stored4, WEAPON_A) === SEED_COUNTS[WEAPON_A] &&
+      invCount(stored4, CLAIM_ID) === SEED_COUNTS[CLAIM_ID] + 1 &&
+        invCount(stored4, WEAPON_B) === SEED_COUNTS[WEAPON_B] &&
         invCount(stored4, WEAPON_PRE) === SEED_COUNTS[WEAPON_PRE],
-      `F8 证明 4｜Permanent Inventory 继承：第一局领到的那件数量已累积（${SEED_COUNTS[WEAPON_B]} → ${SEED_COUNTS[WEAPON_B] + 1}），另两件保持不动`,
-      `${WEAPON_A}=${invCount(stored4, WEAPON_A)} ${WEAPON_B}=${invCount(stored4, WEAPON_B)} ${WEAPON_PRE}=${invCount(stored4, WEAPON_PRE)}`,
+      `F8 证明 4｜Permanent Inventory 继承：第一局领到的那件数量已累积（${SEED_COUNTS[CLAIM_ID]} → ${SEED_COUNTS[CLAIM_ID] + 1}），另两件保持不动`,
+      `${CLAIM_ID}=${invCount(stored4, CLAIM_ID)} ${WEAPON_B}=${invCount(stored4, WEAPON_B)} ${WEAPON_PRE}=${invCount(stored4, WEAPON_PRE)}`,
     );
 
     /* ---- 证明 6：Reward 不重复领取 ---- */
@@ -919,7 +949,7 @@ async function main() {
     //    home3 是 reload 之后的新挂载，它会生成一个**全新**的 token ⇒ 拿它当幂等键只会
     //    领到第二件奖励（库存再 +1），测出来的是「新 token 能领奖」而不是「同一个 token 不能重复领」。
     const dupPage = await ctx.newPage();
-    await dupPage.goto(`${URL_BASE}/home.html?run=${token1}&reward=${WEAPON_B}`, {
+    await dupPage.goto(`${URL_BASE}/home.html?run=${token1}&reward=${CLAIM_ID}`, {
       waitUntil: 'load',
     });
     await waitHomeReady(dupPage);
@@ -931,20 +961,29 @@ async function main() {
       `ok=${dup.claim ? dup.claim.ok : 'n/a'} reason=${dup.claim ? dup.claim.reason : 'n/a'}`,
     );
     log(
-      invCount(dupStored, WEAPON_B) === SEED_COUNTS[WEAPON_B] + 1 && ledgerTokens(dupStored).length === 1,
-      'G2 库存没有再 +1、账本没有 +1（重复领取不重复发奖）',
-      `${WEAPON_B}=${invCount(dupStored, WEAPON_B)} 账本=${ledgerTokens(dupStored).length}`,
+      invCount(dupStored, CLAIM_ID) === SEED_COUNTS[CLAIM_ID] + 1 &&
+        ledgerTokens(dupStored).length === 1,
+      `G2 库存没有再 +1、账本没有 +1（重复领取不重复发奖）：${CLAIM_ID} 停在第一次领取后的读数 ${SEED_COUNTS[CLAIM_ID] + 1}`,
+      `${CLAIM_ID}=${invCount(dupStored, CLAIM_ID)} 账本=${ledgerTokens(dupStored).length}`,
     );
     await dupPage.close();
 
     /*
-      ⚠️ R2-A 新增的一条：**同一个 token 换一件**也领不到。
-      3选1 之后「三个不同的领奖地址」是产品侧真的会发出去的（三张卡各一条），
+      ⚠️ R2-A 立、必改 2 收窄后**换靶**的一条：**同一个 token 换一件**也领不到。
+      R2-A 时候选池是三件 ⇒「三个不同的领奖地址」是产品侧真的会发出去的（三张卡各一条），
       因此必须证明幂等键绑的是 **run token** 而不是「地址」——
       否则玩家点开另一张卡的地址就能把同一局再领一次。
+      ⚠️ 必改 2 把候选池收窄成**一件**之后，「另一张卡」已经不存在了：
+        · 候选池里唯一的地址 = G1 已经测过的那条（同一地址重复开）；
+        · 因此这一条改为拿**一条产品根本不会发出的地址**（`WEAPON_B`，已退出候选池）
+          带着**同一个 token** 去领 —— 它**比原来更强**：不仅证明「换个件名也领不到」，
+          还顺带钉死校验顺序（`src/product/playerProfile.ts` 的 `claimRunReward`）：
+          ② `already-claimed` 必须在 ③ `not-official` **之前**返回。
+          哪天有人把幂等检查挪到部件校验之后，`reason` 会变成 `not-official`，这条立刻红。
+        · 库存侧同样要证：`WEAPON_B` 一个数字都没动（它本来就不该被发出去）。
     */
     const dup2Page = await ctx.newPage();
-    await dup2Page.goto(`${URL_BASE}/home.html?run=${token1}&reward=${CHOICE_IDS[0]}`, {
+    await dup2Page.goto(`${URL_BASE}/home.html?run=${token1}&reward=${WEAPON_B}`, {
       waitUntil: 'load',
     });
     await waitHomeReady(dup2Page);
@@ -954,10 +993,10 @@ async function main() {
       dup2.claim !== null &&
         dup2.claim.ok === false &&
         dup2.claim.reason === 'already-claimed' &&
-        invCount(dup2Stored, CHOICE_IDS[0]) === SEED_COUNTS[CHOICE_IDS[0]] &&
+        invCount(dup2Stored, WEAPON_B) === SEED_COUNTS[WEAPON_B] &&
         ledgerTokens(dup2Stored).length === 1,
-      `G3 同一 token **换一件**（${CHOICE_IDS[0]}）也领不到 ⇒ 幂等键绑的是 Run token，不是地址（三条候选地址共用它）`,
-      `reason=${dup2.claim ? dup2.claim.reason : 'n/a'} ${CHOICE_IDS[0]}=${invCount(dup2Stored, CHOICE_IDS[0])} 账本=${ledgerTokens(dup2Stored).length}`,
+      `G3 同一 token **换一件**（${WEAPON_B}，且它已不在候选池里）也领不到、理由是 already-claimed ⇒ 幂等键绑的是 Run token 而不是地址，且幂等检查先于部件校验`,
+      `reason=${dup2.claim ? dup2.claim.reason : 'n/a'} ${WEAPON_B}=${invCount(dup2Stored, WEAPON_B)} 账本=${ledgerTokens(dup2Stored).length}`,
     );
     await dup2Page.close();
 

@@ -7,7 +7,7 @@
  *   - **真实鼠标点击**（`page.mouse.click`，逻辑坐标 → 画布真实 CSS 矩形换算；不 evaluate 直调）；
  *   - **真实整页导航**（`<a href>` / `location.assign` 都由浏览器执行，不做 evaluate 跳转）；
  *   - **真实 localStorage 读取**（证明入库写进的是**正式存档 key**，而不是页面内存）；
- *   - **真实 `getImageData` 像素取证**（证明三张候选卡真的画在画布上，不是只有探针字段）；
+ *   - **真实 `getImageData` 像素取证**（证明候选卡真的画在画布上，不是只有探针字段）；
  *   - 只读诊断句柄 `window.__PRODUCTHOME__` / `window.__RUNPAGE__`（只读，不能借它改状态）。
  *
  * 覆盖 R2-A 技术验收 1~8（第 9 条 = tsc / targeted / build 在门禁里跑）：
@@ -33,7 +33,9 @@
  *
  * ⚠️ 两条路线都是**确定性**的（`RunBattleRuntime` 无 RNG，`portraitRunPage.test.ts` 的
  *    `FROZEN_REPAIR` / `FROZEN_UPGRADE` 已冻结）：
- *      完成：一层 `twinCannon` + 耐久事件选「维修」+ 二层 `tripleLoad` → 终局 602 耐久 → COMPLETE
+ *      完成：一层 `twinCannon` + 耐久事件选「维修」+ 二层 `tripleLoad` → 终局 779 耐久 → COMPLETE
+ *        （⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY：玩家侧基线 80 → 120 后
+ *         终局耐久 602 → 779，与 `portraitRunPage.test.ts` 的 `FROZEN_REPAIR` 同源）
  *      失败：一层 `twinCannon` + 耐久事件选「继续改装」（多拿 `heavyShell`）+ 二层 `tripleLoad`
  *            → 终局耐久归零 → **FAILED（不经过 RESULT）**
  *    两条路线**只差一次点击**，因此「失败不发奖」是同一台机器上的真实对照，不是构造出来的状态。
@@ -66,11 +68,17 @@ const MIME = {
 };
 
 /**
- * 3选1 的三条候选（与 `src/product/runReward.ts` 的 `REWARD_CHOICE_IDS` 同值）。
+ * 终点候选（与 `src/product/runReward.ts` 的 `REWARD_CHOICE_IDS` 同值）。
  * ⚠️ 全是**玩家一开始就拥有**的正式 Weapon ⇒ 本 Queue 不发新内容，
  *    奖励的价值体现在**数量**上（4 → 5），而不是「从无到有」。
+ *
+ * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：从 `['cannon','spear','hammer']`
+ *    **收窄为 `['cannon']`**（真源 `REWARD_CHOICE_IDS` 同值）—— 当前只有它同时具备
+ *    ① 完整 Run compatibility、② 已真人验证的 Run Buff、③ 永久 Star 成长链。
+ *    发 spear / hammer 等于奖励玩家「这一局用不上的东西」（真人反馈 ③）。
+ *    ⇒ 本文件里所有「候选条数」的断言随之改为**字面 1**（不是「≥1」）。
  */
-const CHOICE_IDS = ['cannon', 'spear', 'hammer'];
+const CHOICE_IDS = ['cannon'];
 const NAMES = { cannon: '炮', spear: '刺', hammer: '锤' };
 /** 满 stack 阈值（与 `playerGrowth.FUSE_STACK` 同值；页面读数也必须是它）。 */
 const FUSE_STACK = 5;
@@ -252,7 +260,7 @@ function storedWeaponSlot(dump) {
   }
 }
 
-/** 从出发链接里取出产品侧给的那份 3选1 载荷（地址真源只有产品侧一个）。 */
+/** 从出发链接里取出产品侧给的那份候选载荷（地址真源只有产品侧一个）。 */
 function choicesOf(href) {
   const raw = new URLSearchParams(href.split('?')[1] ?? '').get('choices') ?? '';
   return raw ? JSON.parse(raw) : null;
@@ -326,7 +334,7 @@ function garageFuseButton(page, defId, star) {
  *
  * 全部用**真实鼠标点击**：耐久事件按 id 选、强化三选一按池种类选、其余推进一步。
  * 同时滚动记录两条不变量：
- *   · `choicesInNonComplete` —— 在**非 COMPLETE** 相位上出现过 3选1 候选（必须恒为空）；
+ *   · `choicesInNonComplete` —— 在**非 COMPLETE** 相位上出现过候选（必须恒为空）；
  *   · `choicePhases`         —— 真正出现过候选的相位集合。
  */
 async function driveRunToEnd(page, policy, label) {
@@ -407,18 +415,28 @@ async function playOneRunAndClaim(page, pickDefId, policy, label) {
   /*
     ⚠️ 像素取证必须在**点那张卡之前**做：点中即整页导航回首页 ⇒ `#run-canvas` 不复存在
     （`countColorInRect` 会拿到 null）。这是真实踩过的坑，不是防御性代码。
-    A/B 基准矩形统一取 **最下面那张卡**（`rects[2]`，完整落在失败结算面板的槽位内）。
+    A/B 基准矩形一律取**最后一张卡**（不写死下标）。
+    ⚠️ 必改 2 之前候选是 3 张，`rects[2]` = 最下面那张，恰好完整落在失败结算面板的槽位内；
+       现在候选只有 1 张，而它**仍然**画在同一个槽位上（`runRewardChoiceRects(N)` 对 N=1
+       保留同一几何）⇒「取最后一张」在新旧契约下指向**同一个矩形**，A/B 对照的意义不变。
+    ⚠️ 顺手把「候选条数变了 ⇒ 下标越界」这道坑变成一句人话：上一轮它表现为
+       `page.evaluate: TypeError: Cannot read properties of undefined (reading 'x')`，
+       崩在浏览器上下文里极难定位。
   */
   const rects = pDone.rewardChoiceRects;
+  if (rects.length === 0) {
+    throw new Error(`${label}: COMPLETE 相位上没有任何候选矩形（探针 rewardChoiceRects 为空）`);
+  }
+  const abRect = rects[rects.length - 1];
   const pixel = { cardBg: 0, iconFrame: 0, iconGlyph: 0 };
   for (const r of rects) {
     pixel.cardBg += await countColorInRect(page, r, CARD_BG);
     pixel.iconFrame += await countColorInRect(page, r, ICON_FRAME_BG);
     pixel.iconGlyph += await countColorInRect(page, r, ICON_GLYPH);
   }
-  pixel.abCardBg = await countColorInRect(page, rects[2], CARD_BG);
-  pixel.abIconFrame = await countColorInRect(page, rects[2], ICON_FRAME_BG);
-  pixel.abIconGlyph = await countColorInRect(page, rects[2], ICON_GLYPH);
+  pixel.abCardBg = await countColorInRect(page, abRect, CARD_BG);
+  pixel.abIconFrame = await countColorInRect(page, abRect, ICON_FRAME_BG);
+  pixel.abIconGlyph = await countColorInRect(page, abRect, ICON_GLYPH);
 
   // **真实鼠标点击**选中的那张卡（坐标来自探针里与绘制同源的矩形）
   const cardRect = pDone.rewardChoiceRects[pickIndex];
@@ -456,7 +474,7 @@ async function playOneRunAndClaim(page, pickDefId, policy, label) {
 }
 
 async function main() {
-  console.log('=== PRODUCT-LOOP-R2-A｜3选1 → 数量累积 → 回车库 产品闭环 smoke ===\n');
+  console.log('=== PRODUCT-LOOP-R2-A｜候选 → 数量累积 → 回车库 产品闭环 smoke ===\n');
 
   for (const f of ['home.html', 'run-page.html']) {
     if (!fs.existsSync(path.join(ROOT, f))) {
@@ -523,10 +541,10 @@ async function main() {
         adv0.get('reward') === null &&
         !!payload0 &&
         payload0.stack === FUSE_STACK &&
-        payload0.choices.length === 3 &&
+        payload0.choices.length === 1 &&
         payload0.choices.every((c, i) => c.defId === CHOICE_IDS[i]) &&
         payload0.choices.every((c, i) => c.href === expectedClaims[i]),
-      'A4「开始冒险」= 带本局 token + **一整份 3选1 载荷**（三条各自的领奖地址）的同产物链接；地址里**没有**裸 `reward=`',
+      'A4「开始冒险」= 带本局 token + **一整份候选载荷**（候选池 1 条领奖地址）的同产物链接；地址里**没有**裸 `reward=`',
       `href=${home0.startRunHref}`,
     );
     log(
@@ -539,7 +557,7 @@ async function main() {
         payload0.choices.every((c) => c.star === 1) &&
         payload0.choices.every((c, i) => c.countBefore === SEED_COUNTS[CHOICE_IDS[i]]) &&
         payload0.choices[0].countBefore === SEED_COUNTS.cannon,
-      'A5 载荷里的数量读数 = 出发那一刻的真实库存（4 / 1 / 1，逐件对账）；三条候选共用同一个本局 token ⇒ 只能领一次',
+      'A5 载荷里的数量读数 = 出发那一刻的真实库存（4 / 1 / 1，逐件对账）；候选共用同一个本局 token ⇒ 只能领一次',
       `载荷=${payload0.choices.map((c) => `${c.defId}:${c.countBefore}`).join(' ')}`,
     );
 
@@ -567,41 +585,45 @@ async function main() {
       `出现相位=${r1.done.choicePhases.join(',')} · 非 COMPLETE 违规=${r1.done.choicesInNonComplete.length}`,
     );
 
-    /* 必改 4：终点是**三张真实候选**（名称 / ★1 / 当前数量 / 领取后数量预览） */
+    /* 必改 2＋4：终点是**真实候选**（名称 / ★1 / 当前数量 / 领取后数量预览 / 成长口径那一行） */
     const rc = pDone.rewardChoices;
     log(
       pDone.day === 7 &&
         pDone.battle.durabilityPercent > 0 &&
         pDone.buildLabels.length === 2 &&
-        rc.length === 3 &&
+        rc.length === 1 &&
         rc.every((c, i) => c.defId === CHOICE_IDS[i] && c.name === NAMES[CHOICE_IDS[i]]) &&
         rc.every((c, i) => c.star === 1 && c.energy > 0 && c.hasSprite === HAS_SPRITE[CHOICE_IDS[i]]) &&
         rc[0].countBefore === 4 &&
         rc[0].countAfter === 5 &&
         rc[0].previewText === '4 → 5' &&
         rc[0].reachesThreshold === true &&
-        rc[1].countBefore === 1 &&
-        rc[1].countAfter === 2 &&
-        rc[1].previewText === '1 → 2' &&
-        rc[1].reachesThreshold === false,
-      'C3 RUN COMPLETE = 最终 DAY + 最终耐久 + 最终 Build + **三张真实 Weapon 候选**（名称 / ★1 / 数量 / 领取后预览）',
-      `DAY ${pDone.day} · 耐久 ${pDone.battle.durabilityPercent}% · Build=${pDone.buildLabels.join('+')} · 候选=${rc.map((c) => `${c.name}★${c.star} ${c.previewText}${c.reachesThreshold ? '(满)' : ''}`).join(' | ')}`,
+        /*
+          ⚠️ 本条是 PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）**新增**的守门断言：
+          结算卡第二行从「库存多了一个」改成**成长口径**（`当前 4/5 → 领取后 5/5`），
+          对应 `RunRewardChoiceView.progressText`（`runPage.ts` 的探针同源字段，非页面自算）。
+          它钉的是「玩家在这一屏就能看到自己离升星还差多少」这件事**真的画出来了**。
+        */
+        rc[0].progressText === `当前 4/${FUSE_STACK} → 领取后 5/${FUSE_STACK}` &&
+        rc[0].stackLimit === FUSE_STACK,
+      'C3 RUN COMPLETE = 最终 DAY + 最终耐久 + 最终 Build + **真实 Weapon 候选卡**（名称 / ★1 / 数量 / 领取后预览 / 成长口径一行）',
+      `DAY ${pDone.day} · 耐久 ${pDone.battle.durabilityPercent}% · Build=${pDone.buildLabels.join('+')} · 候选=${rc.map((c) => `${c.name}★${c.star} ${c.previewText}${c.reachesThreshold ? '(满)' : ''} 「${c.progressText}」`).join(' | ')}`,
     );
     log(
       rc.every((c, i) => c.href === expectedClaims[i]) && pDone.rewardChoicesDropped === 0,
-      'C4 三张卡的出口 = 产品侧给的**各自**领奖地址（Lab 侧不含任何产品 URL 字面量），且三条载荷全部合法（丢弃 0 条）',
+      'C4 候选卡的出口 = 产品侧给的**各自**领奖地址（Lab 侧不含任何产品 URL 字面量），且载荷全部合法（丢弃 0 条）',
       `dropped=${pDone.rewardChoicesDropped} hrefs=${rc.map((c) => c.href.replace('./home.html?', '')).join(' ')}`,
     );
     log(
       pDone.exitHref === null &&
         pDone.actionEnabled === false &&
         pDone.actionLabel !== '领取并返回',
-      'C5 出口**在卡片上**：底栏动作不可用、也没有「领取并返回」（3选1 不存在「默认那件」）',
+      'C5 出口**在卡片上**：底栏动作不可用、也没有「领取并返回」（候选池不存在「默认那件」）',
       `label=${pDone.actionLabel} enabled=${pDone.actionEnabled} exit=${pDone.exitHref}`,
     );
 
     /*
-      像素取证：三张卡真的画在画布上（不是只有探针字段）。
+      像素取证：候选卡真的画在画布上（不是只有探针字段）。
       ⚠️ 读数是在 `playOneRunAndClaim` 里、**点那张卡之前**采的：点中即整页导航回首页
       ⇒ `#run-canvas` 不复存在（`getImageData` 拿不到画布）。这是真实踩过的坑。
     */
@@ -610,28 +632,32 @@ async function main() {
     const iconFramePx = r1.pixel.iconFrame;
     const iconGlyphPx = r1.pixel.iconGlyph;
     /*
-      ⚠️ A/B 基准矩形 = **最下面那张卡**：它的矩形（y 302..370）完整落在失败结算面板的槽位
-      （`runFailPanelRect()` 的 y 266..370）内部 ⇒ 同一个矩形可以拿来做 COMPLETE / FAILED 对照。
-      上面两张卡与面板只部分重叠，不能用于对照。
+      ⚠️ A/B 基准矩形 = **最后一张卡**（必改 2 之前它恰好是 `rects[2]`，即最下面那张）：
+      它的矩形（y 302..370）完整落在失败结算面板的槽位（`runFailPanelRect()` 的 y 266..370）
+      内部 ⇒ 同一个矩形可以拿来做 COMPLETE / FAILED 对照。
+      候选收窄为 1 张后，这一张**仍**画在同一个槽位上 ⇒ 对照关系一字未变。
     */
-    const abRect = rects[2];
+    const abRect = rects[rects.length - 1];
     const abCardBgPx = r1.pixel.abCardBg;
     const abIconFramePx = r1.pixel.abIconFrame;
     const abIconGlyphPx = r1.pixel.abIconGlyph;
     /*
-      阈值来源（不是拍的）：三个矩形总面积 = 3 × 362 × 68 = 73848 px²。
+      阈值来源（不是拍的，**按实际卡数重推**）：
+      候选 1 张 ⇒ 矩形面积 = 1 × 362 × 68 = 24616 px²。
       卡底之外的像素只有三类：① 2px 描边（cardEdge）；② 图标框内部（pageBg 实心填充）；
-      ③ 文字字形（名称 / ★ / 数量 / defId）。实测卡底 ≈ 58800（≈ 79.6% 面积）
-      ⇒ 取 **55000（≈ 74.5%）** 作为「成片」的下界：既排掉「只画了个边框」，
+      ③ 文字字形（名称 / ★ / 数量 / defId）。实测卡底 ≈ 19664（≈ 79.9% 面积）
+      ⇒ 取 **18000（≈ 73.1%）** 作为「成片」的下界：既排掉「只画了个边框」，
       也给字体渲染 / 亚像素抗锯齿留足余量（不在阈值上做无意义的灵敏度竞赛）。
+      图标框 / 字形两项是**逐卡**入账的 ⇒ 按每卡折算（旧值 2000 / 600 是 3 张卡的合计口径，
+      单卡下界取 1/3 = 600 / 180）。
     */
     log(
-      rects.length === 3 &&
+      rects.length === 1 &&
         rects.every((r) => r.w === 362 && r.h === 68) &&
-        cardBgPx > 55000 &&
-        iconFramePx > 2000 &&
-        iconGlyphPx > 600,
-      'C6 三张候选卡真的画出来（真实 getImageData：卡底成片 + 每张都有图标框 + 真实 Collider 外接框）',
+        cardBgPx > 18000 &&
+        iconFramePx > 600 &&
+        iconGlyphPx > 180,
+      'C6 候选卡真的画出来（真实 getImageData：卡底成片 + 图标框 + 真实 Collider 外接框）',
       `rects=${rects.map((r) => `${r.x},${r.y} ${r.w}×${r.h}`).join(' | ')} cardBg=${cardBgPx} iconFrame=${iconFramePx} glyph=${iconGlyphPx}`,
     );
 
@@ -663,13 +689,14 @@ async function main() {
       `ok=${r1.homeAfter.claim ? r1.homeAfter.claim.ok : 'n/a'} count=${r1.homeAfter.claim ? r1.homeAfter.claim.countAfter : 'n/a'} dom=${claimDom ? `[${claimDom.state}] ${claimDom.text}` : 'n/a'}`,
     );
     log(
-      r1.after.cannon === 5 &&
-        r1.after.spear === 1 &&
-        r1.after.hammer === 1 &&
+      invCount(r1.storedBefore, 'cannon') === 4 &&
+        invCount(r1.storedAfter, 'cannon') === 5 &&
+        invCount(r1.storedAfter, 'spear') === 1 &&
+        invCount(r1.storedAfter, 'hammer') === 1 &&
         ledgerTokens(r1.storedAfter).length === 1 &&
         ledgerTokens(r1.storedAfter)[0] === token0,
       'D3 **独立取证**（读浏览器真实 localStorage）：只有 cannon +1，另外两件一个数字都没动；账本记下本局 token',
-      `cannon ${r1.before.cannon}→${r1.after.cannon} · spear ${r1.before.spear}→${r1.after.spear} · hammer ${r1.before.hammer}→${r1.after.hammer} · 账本=${JSON.stringify(ledgerTokens(r1.storedAfter))}`,
+      `cannon ${invCount(r1.storedBefore, 'cannon')}→${invCount(r1.storedAfter, 'cannon')} · spear ${invCount(r1.storedAfter, 'spear')} · hammer ${invCount(r1.storedAfter, 'hammer')} · 账本=${JSON.stringify(ledgerTokens(r1.storedAfter))}`,
     );
     log(
       r1.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText === '5/5' &&
@@ -679,6 +706,51 @@ async function main() {
         r1.homeAfter.weapons.find((w) => w.defId === 'cannon').maxStar === false,
       'D4 领奖后的首页读数：cannon 达到满 stack ⇒ 显示 `5/5` 且 `fusable=true`（★2 未到上限）',
       `cannon stackText=${r1.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText}`,
+    );
+
+    /*
+      ⚠️ D4b / D4c 是本 Queue 补的**两条守门断言** —— 必改 5（首页一行最小成长状态）与
+      必改 6（领奖之后的下一步引导）此前**只有探针字段、整个门禁里没有任何一条 E2E 校验过**。
+      取证走**真实 DOM**（不只是探针自述）+ 探针双证；文案逐字写死，防「引导被摘掉 /
+      被改成看不懂的话」。同时把「页面**不代劳**合成」这条纪律一并钉住：此刻 ★2 必须不存在。
+    */
+    const growthDom = await page.evaluate(() => {
+      const row = document.querySelector('[data-ph-home-growth]');
+      const readyLabel = document.querySelector('.ph-home-growth-ready');
+      const hint = document.querySelector('[data-ph-claim-hint]');
+      return {
+        stack: row ? row.getAttribute('data-ph-home-growth-stack') : null,
+        ready: row ? row.getAttribute('data-ph-home-growth-ready') : null,
+        text: row ? row.textContent : null,
+        readyLabel: readyLabel ? readyLabel.textContent : null,
+        hintState: hint ? hint.getAttribute('data-ph-claim-hint') : null,
+        hintText: hint ? hint.textContent : null,
+      };
+    });
+    log(
+      !!r1.homeAfter.homeGrowth &&
+        r1.homeAfter.homeGrowth.defId === 'cannon' &&
+        r1.homeAfter.homeGrowth.star === 1 &&
+        r1.homeAfter.homeGrowth.count === 5 &&
+        r1.homeAfter.homeGrowth.threshold === FUSE_STACK &&
+        r1.homeAfter.homeGrowth.stackText === '5/5' &&
+        r1.homeAfter.homeGrowth.ready === true &&
+        growthDom.stack === '5/5' &&
+        growthDom.ready === 'true' &&
+        growthDom.text.includes('成长 5/5') &&
+        growthDom.readyLabel === '可升星',
+      'D4b **必改 5**：首页真的画出一行最小成长状态（`炮 ★1 成长 5/5 可升星`），读数与库存同源（探针与真实 DOM 双证）',
+      `探针=${JSON.stringify(r1.homeAfter.homeGrowth)} · DOM=${growthDom.text}`,
+    );
+    log(
+      r1.homeAfter.claimUpgradableHint === true &&
+        growthDom.hintState === 'upgradable' &&
+        !!growthDom.hintText &&
+        growthDom.hintText.includes('已可升星') &&
+        growthDom.hintText.includes('调整战车') &&
+        invCount(r1.storedAfter, 'cannon', 2) === 0,
+      'D4c **必改 6**：领奖提示**自然引导到下一步**（`已可升星 → 点「调整战车」合成`），且此刻 ★2 **还不存在** ⇒ 页面绝不代替玩家合成',
+      `hint=${growthDom.hintState} 「${growthDom.hintText}」 · ★2=${invCount(r1.storedAfter, 'cannon', 2)}`,
     );
 
     /* --------------------------- 2) 同一 Run **换一件**再领 → 仍然领不到（验收 ⑤） */
@@ -801,42 +873,18 @@ async function main() {
     );
     await clickSelector(page, '[data-ph-action="back-home"]');
 
-    /* ==================== 第二局：选 hammer（验收 ④；也是「累积」的真正证明） ==================== */
-    const r2 = await playOneRunAndClaim(page, 'hammer', WIN_POLICY, '第二局（完成路线）');
-    log(
-      r2.token !== token0 && r2.pickHref !== r1.pickHref,
-      'H1 第二局的 token 与第一局不同（每挂载一次首页 = 一次新的「准备出发」）⇒ 领奖是**新的一局**，不是重复领',
-      `token1=${token0} token2=${r2.token}`,
-    );
-    log(
-      r2.runStart.playerLoadout.source === 'profile' &&
-        r2.runStart.playerLoadout.functionalSelections[WEAPON_SLOT] === 'cannon',
-      'H1b 第二局确实带着**刚换回的** cannon 出发（局外的装备动作真的作用到了下一局）',
-      `source=${r2.runStart.playerLoadout.source} ${WEAPON_SLOT}=${r2.runStart.playerLoadout.functionalSelections[WEAPON_SLOT]}`,
-    );
-    log(
-      r2.pDone.phase === 'COMPLETE' &&
-        r2.pDone.rewardChoices.length === 3 &&
-        r2.pDone.rewardChoices[0].countBefore === 5 &&
-        r2.pDone.rewardChoices[2].countBefore === 1,
-      'H2 第二局终点的候选读数 = **上一局结束时的库存**（cannon 5 / hammer 1）—— 数量真的在跨局累积',
-      `候选=${r2.pDone.rewardChoices.map((c) => `${c.defId}:${c.previewText}`).join(' ')}`,
-    );
-    log(
-      r2.after.hammer === 2 &&
-        r2.after.cannon === 5 &&
-        r2.after.spear === 1 &&
-        ledgerTokens(r2.storedAfter).length === 2,
-      'H3 **验收 ④**：选 hammer 只让 hammer 1 → 2；cannon 仍 5、spear 仍 1（不同 stack 各自独立）',
-      `cannon ${r2.before.cannon}→${r2.after.cannon} · spear ${r2.before.spear}→${r2.after.spear} · hammer ${r2.before.hammer}→${r2.after.hammer} · 账本=${ledgerTokens(r2.storedAfter).length}`,
-    );
-    log(
-      r2.homeAfter.weapons.find((w) => w.defId === 'hammer').count === 2 &&
-        r2.homeAfter.weapons.find((w) => w.defId === 'hammer').stackText === '2/5' &&
-        r2.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText === '5/5',
-      'H4 首页读数：hammer `★1 2/5`、cannon `★1 5/5`（同一份库存，两个 stack 各长各的）',
-      r2.homeAfter.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
-    );
+    /*
+      ============ 第二局（H 段）**已挪到 K 段（合成）之后** ============
+
+      ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）的两条硬约束把这一段逼到了后面：
+      ① 候选池收窄为 `['cannon']` ⇒ 玩家在终点**只能**点 cannon 那张卡。
+         旧写法 `playOneRunAndClaim(page, 'hammer', …)` 会在候选池里找不到 hammer
+         （`CHOICE_IDS.indexOf('hammer')` = **-1**）⇒ `cards.choices[-1]` 直接越界。
+      ② 但它**不能**在合并之前领 cannon：合成（K 段）的前提是 `cannon ★1` **恰好 5 件**
+         （`5 × ★1 → 1 × ★2` 之后 ★1 必须归 0）。若先领到 6 件，一次合成只会留下 1 件 ★1，
+         K3 / K4 / K8 那几条「★1 归零 ⇒ 卡消失」的判据就全部失真。
+      ⇒ 顺序改为「**先合成（K）→ 再开第二局领 ★1（H）**」，H 段见 `J1` 之前。
+    */
 
     const storedFinal = await storageDump(page);
     const finalCounts = { cannon: invCount(storedFinal, 'cannon'), spear: invCount(storedFinal, 'spear'), hammer: invCount(storedFinal, 'hammer') };
@@ -899,9 +947,16 @@ async function main() {
       failCounts.cannon === finalCounts.cannon &&
         failCounts.spear === finalCounts.spear &&
         failCounts.hammer === finalCounts.hammer &&
-        ledgerTokens(stored5).length === 2,
+        /*
+          ⚠️ 账本这里改成**与失败前的快照相比「没有 +1」**，而不是写死条数：
+          本 Queue 把第二局（H 段）挪到了合成之后 ⇒ 走到 I 段时只领过 1 次。
+          写死 2 会把「顺序调整」误报成「失败发了奖」——那是两件事。
+          「失败不新增账本条目」这条判据本身一字未变，只是换成了不依赖轮次的口径。
+        */
+        ledgerTokens(stored5).length === ledgerTokens(storedFinal).length &&
+        ledgerTokens(stored5).length >= 1,
       'I5 **验收 ⑥**：失败一局之后三件数量与账本**一个数字都没动**（失败不补偿、不发奖、不增长）',
-      `cannon ${finalCounts.cannon}→${failCounts.cannon} · spear ${finalCounts.spear}→${failCounts.spear} · hammer ${finalCounts.hammer}→${failCounts.hammer} · 账本=${ledgerTokens(stored5).length}`,
+      `cannon ${finalCounts.cannon}→${failCounts.cannon} · spear ${finalCounts.spear}→${failCounts.spear} · hammer ${finalCounts.hammer}→${failCounts.hammer} · 账本=${ledgerTokens(storedFinal).length}→${ledgerTokens(stored5).length}`,
     );
     log(failErrors.length === 0, 'I6 失败路线全程零运行时报错', failErrors.slice(0, 2).join(' | ') || 'none');
     await failPage.close();
@@ -933,9 +988,14 @@ async function main() {
         !!k0card &&
         k0card.text.includes('可合成') &&
         !!k0fuse &&
-        k0fuse.text === '合成' &&
+        /*
+          ⚠️ PRODUCT-LOOP-R2-RECOVERY（必改 4）把 Garage 的合成按钮文案从「合成」改成
+          **「合成升星」**（Queue 要求把「合成 = 升星」这层因果写在按钮上）。
+          这里跟着改成新文案 —— 旧值「合成」是本轮之前就残留的陈旧断言（上一轮门禁没跑到这一段）。
+        */
+        k0fuse.text === '合成升星' &&
         k0fuse.disabled === false,
-      'K1 验收 ②「5/5 可以合成」：cannon ★1 = 5/5 ⇒ 卡片写「可合成」+ 真实「合成」按钮，且此刻**还没有** ★2 卡',
+      'K1 验收 ②「5/5 可以合成」：cannon ★1 = 5/5 ⇒ 卡片写「可合成」+ 真实「合成升星」按钮，且此刻**还没有** ★2 卡',
       `★1=${k0c1 ? `${k0c1.count}/${k0c1.threshold} fusable=${k0c1.fusable}` : 'n/a'} · ★2=${k0c2 ? k0c2.count : '不存在'} · 卡=${k0card ? k0card.text : 'n/a'} · 按钮=${k0fuse ? k0fuse.text : '不存在'}`,
     );
     log(
@@ -1036,6 +1096,51 @@ async function main() {
       kReloadC1 === null && kReload.equippedWeaponId === 'cannon',
       'K9 reload 后 ★1 卡仍未回来（库存真的是 0，不是页面内存里少显示一张）',
       `★1=${kReloadC1 ? kReloadC1.text : '不存在'}`,
+    );
+
+    /* ============ H｜第二局：再领一次 ★1 cannon（验收 ④「跨局累积」） ============
+       ⚠️ 为什么在本段（K 段合成**之后**）：见上面 `storedFinal` 之前的说明。
+          合成把 `cannon ★1` 合空（5 → 0）⇒ 第二局的候选读数就是 **0 → 1**。
+       ⚠️ 断言一条都没删，只是重新基线到新的真实状态；而且因为此时 ★2 同时存在，
+          「★1 与 ★2 是两条互不干扰的 stack」也被顺带钉住了。
+    */
+    const r2 = await playOneRunAndClaim(page, CHOICE_IDS[0], WIN_POLICY, '第二局（完成路线）');
+    log(
+      r2.token !== token0 && r2.pickHref !== r1.pickHref,
+      'H1 第二局的 token 与第一局不同（每挂载一次首页 = 一次新的「准备出发」）⇒ 领奖是**新的一局**，不是重复领',
+      `token1=${token0} token2=${r2.token}`,
+    );
+    log(
+      r2.runStart.playerLoadout.source === 'profile' &&
+        r2.runStart.playerLoadout.functionalSelections[WEAPON_SLOT] === 'cannon',
+      'H1b 第二局确实带着**当前装备**的 cannon 出发（局外的装备动作真的作用到了下一局）',
+      `source=${r2.runStart.playerLoadout.source} ${WEAPON_SLOT}=${r2.runStart.playerLoadout.functionalSelections[WEAPON_SLOT]}`,
+    );
+    log(
+      r2.pDone.phase === 'COMPLETE' &&
+        r2.pDone.rewardChoices.length === 1 &&
+        r2.pDone.rewardChoices[0].defId === CHOICE_IDS[0] &&
+        r2.pDone.rewardChoices[0].countBefore === 0 &&
+        r2.pDone.rewardChoices[0].countAfter === 1,
+      'H2 第二局终点的候选读数 = **当前真实库存**（合成之后 ★1 = 0 ⇒ 预览 0 → 1）—— 载荷读的是活库存，不是出发时那份旧快照',
+      `候选=${r2.pDone.rewardChoices.map((c) => `${c.defId}:${c.previewText}`).join(' ')}`,
+    );
+    log(
+      invCount(r2.storedBefore, 'cannon') === 0 &&
+        invCount(r2.storedAfter, 'cannon') === 1 &&
+        invCount(r2.storedAfter, 'cannon', 2) === 1 &&
+        invCount(r2.storedAfter, 'spear') === 1 &&
+        invCount(r2.storedAfter, 'hammer') === 1 &&
+        ledgerTokens(r2.storedAfter).length === 2,
+      'H3 **验收 ④**：领这一件只让 cannon **★1** 0 → 1；★2 仍 1、spear 仍 1、hammer 仍 1（★1 与 ★2 是两条独立 stack）',
+      `cannon★1 ${invCount(r2.storedBefore, 'cannon')}→${invCount(r2.storedAfter, 'cannon')} · cannon★2=${invCount(r2.storedAfter, 'cannon', 2)} · spear ${invCount(r2.storedAfter, 'spear')} · hammer ${invCount(r2.storedAfter, 'hammer')} · 账本=${ledgerTokens(r2.storedAfter).length}`,
+    );
+    log(
+      r2.homeAfter.weapons.find((w) => w.defId === 'cannon' && w.star === 2).stackText === '1/5' &&
+        r2.homeAfter.weapons.find((w) => w.defId === 'cannon' && w.star === 1).stackText === '1/5' &&
+        r2.homeAfter.weapons.find((w) => w.defId === 'hammer').stackText === '1/5',
+      'H4 首页读数：cannon 同时有 ★1 `1/5` 与 ★2 `1/5` 两张卡、hammer `1/5`（同一份库存，各 stack 各长各的）',
+      r2.homeAfter.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
     );
 
     log(pageErrors.length === 0, 'J1 全流程零运行时报错', pageErrors.slice(0, 2).join(' | ') || 'none');

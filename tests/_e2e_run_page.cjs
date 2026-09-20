@@ -1553,8 +1553,11 @@ async function runViewport(browser, vp) {
   /*
     必改 5｜Run End：胜利 = `RUN COMPLETE`。本路线的结局是**确定性**的（`RunBattleRuntime` 无 RNG）
     —— Node 端实测表 `FROZEN_UPGRADE_E2E`（改装分支 · 一层双联炮 + 横向快速装填 + 二层三连装填）
-    = [919, 907, 839, 357]，浏览器实跑逐项相等（终局耐久 357 = 32%），因此这里断言**精确终局**
+    = [919, 916, 847, 366]，浏览器实跑逐项相等（终局耐久 366 = 33%），因此这里断言**精确终局**
     （不做「完成或失败都算过」的柔性判据）。
+    ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY：玩家侧基线 80 → 120 后本表第二次重建
+    （原 [919, 907, 839, 357] ⇒ 终局 357 → 366）；Node 端同源表见 `portraitRunPage.test.ts`
+    的 `FROZEN_UPGRADE_E2E`，两边必须逐值相等。
   */
   log(
     pDone.phase === 'COMPLETE' &&
@@ -1597,13 +1600,13 @@ async function runViewport(browser, vp) {
   );
   /*
     PRP-RUN-02-R2：浏览器实跑的终局耐久必须与 Node 端**同一实测口径**逐值相等
-    （`FROZEN_UPGRADE_E2E` 的第四项 = 357）。这条把「浏览器真的按同一套确定性物理跑完」钉死，
-    而不是只断言「> 0」。
+    （`FROZEN_UPGRADE_E2E` 的第四项 = 366；R2-RECOVERY 玩家侧基线后由 357 重建）。
+    这条把「浏览器真的按同一套确定性物理跑完」钉死，而不是只断言「> 0」。
   */
   log(
-    Math.round(pDone.battle.playerHp) === 357 && pDone.battle.durabilityPercent === 32,
-    `[${tag}] R58h 终局耐久与 Node 端实测表逐值相等（改装分支三层 Build · 357 = 32%）`,
-    `浏览器 ${round2(pDone.battle.playerHp)}（${pDone.battle.durabilityPercent}%）· Node 357（32%）`,
+    Math.round(pDone.battle.playerHp) === 366 && pDone.battle.durabilityPercent === 33,
+    `[${tag}] R58h 终局耐久与 Node 端实测表逐值相等（改装分支三层 Build · 366 = 33%）`,
+    `浏览器 ${round2(pDone.battle.playerHp)}（${pDone.battle.durabilityPercent}%）· Node 366（33%）`,
   );
   // 冒险记录完整：DAY 1..DAY 7 全部出现过（七天的整局被完整记录）
   const doneTexts = pDone.log.map((l) => l.text);

@@ -173,12 +173,35 @@
       .ph-card-equipped { border-color: #3f8f5a; }
       .ph-card-name { font-size: 15px; font-weight: 650; color: #eaf1fb; }
       /*
-        PRODUCT-LOOP-R2-C｜最终主属性那一行（`攻击 80 → 100`）。
+        PRODUCT-LOOP-R2-C｜最终主属性那一行（`攻击 120 → 150`）。
         刻意只有这一行，不加属性面板（Queue 必改 4 明令）。
+        ⚠️ 具体的伤害数字**只来自** `weaponEntries().damageText`（页面不写死、不自算）。
       */
       .ph-card-damage { font-size: 12px; font-weight: 600; color: #ffd7a0; letter-spacing: 0.02em; }
+      /*
+        PRODUCT-LOOP-R2-RECOVERY（必改 4）｜**成长 = 卡片主体信息**（不是卡片 meta 的行尾）。
+
+        真人反馈 ④：底部说明里有合成写法，但真人完全找不到 `4/5` / `5/5` 的真实成长过程。
+        ⇒ 这两行被提升成独立、醒目、与名称同视觉层级的主体信息：
+          `成长 4/5`（进行中）/ `还差 1 个即可升星`（离满差 1 时的下一步）。
+      */
+      .ph-card-growth { font-size: 13px; font-weight: 700; color: #cfe0ff; letter-spacing: 0.02em; }
+      .ph-card-hint { font-size: 11px; font-weight: 600; color: #8fe0ad; }
       .ph-card-meta { font-size: 11px; color: #93a1b6; }
       .ph-card-tag { font-size: 10px; color: #8fe0ad; }
+      /*
+        PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页的一行最小成长状态。
+        ⚠️ 只是一行**读数**，没有按钮、没有新入口：点「调整战车」去 Garage 合成。
+      */
+      .ph-home-growth {
+        display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
+        margin: 8px 0 0; padding: 8px 12px; border-radius: 10px;
+        border: 1px solid #2b3550; background: #141c28;
+      }
+      .ph-home-growth-name { font-size: 12px; color: #93a1b6; }
+      .ph-home-growth-value { font-size: 14px; font-weight: 700; color: #eaf1fb; }
+      .ph-home-growth-ready { font-size: 12px; font-weight: 700; color: #ffd35a; }
+      .ph-home-growth[data-ph-home-growth-ready='true'] { border-color: #7a5b00; background: #191604; }
 
       /*
         PRODUCT-LOOP-P0｜不支持完整 Run 时的最小提示，以及不可执行的「开始冒险」。
@@ -269,6 +292,11 @@
       .ph-claim-ok { border-color: #3f6b52; background: #12211a; color: #8fe0ad; }
       .ph-claim-dim { color: #93a1b6; }
       .ph-claim-bad { border-color: #6b3f3f; background: #211414; color: #ff9c8f; }
+      /*
+        PRODUCT-LOOP-R2-RECOVERY（必改 6）｜领奖之后、刚好凑满时的那条下一步引导。
+        ⚠️ 只提示「去哪儿做」，**不代劳**：合成必须由玩家在 Garage 里主动按下。
+      */
+      .ph-claim-hint { display: block; margin-top: 4px; font-weight: 700; color: #ffd35a; }
     </style>
   </head>
   <body>

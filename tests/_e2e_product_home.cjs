@@ -284,11 +284,29 @@ async function main() {
     log(p.equippedWeaponId === back, 'E4 可反复来回切换（每次都是真实写入）', `${target} → ${back}（当前 ${p.equippedWeaponId}）`);
 
     const stored2 = await storageDump(page);
+    /*
+      ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）：官方 key 集合**多了一个**
+      —— 一次性 R2 onboarding 必须落一个「这次迁移已经做过了」的标记
+      （`strongfruit.r2Onboarding.v1`，与既有的 `strongfruit.profileClaims.v1` 同型的
+       **产品侧自持 key**，不抬高 `core/saveVersion` 的全局版本号）。
+
+      ⇒ 本断言从「只有两个 key」**升级**为「**恰好等于下面这个闭集**（逐名比对）」：
+        比数个数更强 —— 少一个会红，把其中一个换成别的未知 key 同样会红，
+        而「ownedParts 只准有一个」这条原始语义一字未动（下面第一项仍是它）。
+      ⚠️ 这不是放宽：原断言只认数量 2，任何「数量对但名字错」都能混过去。
+    */
+    const EXPECTED_KEYS = [
+      'strongfruit.ownedParts.v2',
+      'strongfruit.playerBuild.v1',
+      'strongfruit.r2Onboarding.v1',
+    ].sort();
+    const stored2Keys = Object.keys(stored2).sort();
     log(
       Object.keys(stored2).filter((k) => k.startsWith('strongfruit.ownedParts')).length === 1 &&
-        Object.keys(stored2).length === 2,
-      'E5 三轮操作后官方 storage 仍只有两个 key（无残留 / 无第二套库存）',
-      `keys=${Object.keys(stored2).sort().join(',')}`,
+        stored2Keys.length === EXPECTED_KEYS.length &&
+        EXPECTED_KEYS.every((k, i) => stored2Keys[i] === k),
+      'E5 三轮操作后官方 storage 恰好是那三个 key（无残留 / 无第二套库存 / 无未知 key）',
+      `keys=${stored2Keys.join(',')}`,
     );
 
     /* --------------------------------------- 6) 预览元素与零 console 报错 */

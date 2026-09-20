@@ -1,6 +1,10 @@
 /**
  * PRODUCT-LOOP-R1-B-RUN-REWARD-PERMANENT-INVENTORY｜RUN COMPLETE 的**产品奖励出口**。
- * PRODUCT-LOOP-R2-A-REWARD-STACK-INVENTORY｜**改口径**：单件固定奖励 →「**3选1**」。
+ * PRODUCT-LOOP-R2-A-REWARD-STACK-INVENTORY｜**改口径**：单件固定奖励 →「**候选列表**」。
+ * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）｜候选**当前只有 1 条**，
+ * 卡片第二行改为**成长口径**（`当前 4/5 → 领取后 5/5`，见 `RunRewardChoiceView.progressText`）。
+ * ⚠️ 本模块对候选**条数无假设**：N=1 与 N=3 走同一条代码路径
+ *    （`runRewardChoiceRects(count)` 是 `Math.max(1, …)` ⇒ N=1 就是一张全宽卡）。
  *
  * 本模块只做三件事，全部是纯逻辑 / 纯几何（node 侧可直接断言）：
  *   ① 解析产品上下文（宿主从 URL 读到的 `run` 与 `choices` 两个参数）；
@@ -105,6 +109,25 @@ export interface RunRewardChoiceView {
   readonly previewText: string;
   /** stack 进度文案：满则 `'5/5'`，否则 `'4/5'`。 */
   readonly stackText: string;
+  /**
+   * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）｜**成长口径的完整一行**。
+   *
+   * 值 = `当前 4/5 → 领取后 5/5`（阈值来自产品侧的 `stack`，数量是**真实计数**）。
+   *
+   * ── 为什么从 `拥有 ×4 → 领取后 ×5` 换成它 ────────────────────────────────
+   * 真人反馈 ④：玩家完全找不到 `4/5` / `5/5` 这条真实成长过程 —— 三张卡的第二行写的是
+   * 「库存多了一个」，而这一局真正要建立的认知是「**还差 1 个 → 到 5/5 → 可以升星**」。
+   * ⇒ 本 Queue 授权打开这一行文案（只改**信息表达**，不改 Layout / 不改奖励行为）。
+   *
+   * ⚠️ 数字**动态**取真实计数，不写死 `4/5`（Queue 明令「不要伪造」）。
+   * ⚠️ 两侧都用**原始计数**（不夹到阈值）：`stackText` 会在 ≥ 阈值时收敛成 `5/5`
+   *    （那是 Garage「进度读数」那条 Queue 规则的写法），但这一行的语义是
+   *    「现在有几件 → 领完有几件」，把它夹成「5/5 → 5/5」等于告诉玩家「领取没有变化」，
+   *    那才是伪造。超过阈值的真实读数（`6/5`）在这里是**如实**的。
+   */
+  readonly progressText: string;
+  /** 读数的分母（= 产品侧给的满 stack 阈值；区间 `4/5` 里的那个 5）。 */
+  readonly stackLimit: number;
   /** 选中这一件后是否达到满 stack（玩家能体验第一次合成）。 */
   readonly reachesThreshold: boolean;
   /** 外接框宽 / 高（车体本地单位）。 */
@@ -171,6 +194,9 @@ export function rewardChoiceView(
     countAfter: after,
     previewText: `${before} → ${after}`,
     stackText: before >= limit ? `${limit}/${limit}` : `${before}/${limit}`,
+    // 必改 2：成长口径那一行（真实计数，两侧都不夹 —— 见字段注释）
+    progressText: `当前 ${before}/${limit} → 领取后 ${after}/${limit}`,
+    stackLimit: limit,
     reachesThreshold: after >= limit,
     w: geom.w,
     h: geom.h,

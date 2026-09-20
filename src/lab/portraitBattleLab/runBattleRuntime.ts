@@ -344,6 +344,17 @@ export interface RunBattleOptions {
    * 只在给了 `playerDraft` 时有意义；省略 ⇒ `'profile-equipped'`。
    */
   readonly playerLoadoutTag?: string | null;
+  /**
+   * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY｜是否启用**玩家侧基线伤害**
+   * （`PRODUCT_RUN_CANNON_BASE_DAMAGE`，见 `runModifiers.ts`）。
+   *
+   * 这是「产品 Run 玩家那门炮」的基线，**不是** Modifier：它只重映射**玩家装载**里那一件
+   * 基准武器，正式 `cannon` 键与敌方快照都不受影响 ⇒ 敌方 `RangedTurret` 的 cannon 恒为 80。
+   *
+   * ⚠️ 默认 `false`：`encounterLab.ts` / RDC（`pblRangedDistanceControl`）/ 四场掉血压力阶梯 /
+   *    全部既有 Lab 调用点的玩家侧仍是正式 80 ⇒ **逐字段不变**。
+   */
+  readonly playerBaseline?: boolean;
 }
 
 /**
@@ -359,6 +370,11 @@ export class RunBattleRuntime {
   readonly registry: ContentRegistry;
   /** 本场战斗生效的本局 Build（有序；空数组 = 基础状态）。 */
   readonly build: readonly RunModifierId[];
+  /**
+   * 本场是否启用**玩家侧基线伤害**（见 `RunBattleOptions.playerBaseline`）。
+   * 开 ⇒ 玩家那门炮的基线是 `PRODUCT_RUN_CANNON_BASE_DAMAGE`；关 ⇒ 正式 80。
+   */
+  readonly playerBaseline: boolean;
   /** 本场使用的正式 Encounter id（默认 = 演示遭遇）。 */
   readonly encounterId: string;
   /**
@@ -396,11 +412,18 @@ export class RunBattleRuntime {
       ? buildSpawnPlanFromDraft(o.playerDraft, o.playerLoadoutTag ?? 'profile-equipped', this.encounterId)
       : buildSpawnPlan(RUN_BATTLE_LOADOUT_ID, this.encounterId);
     this.build = normalizeBuild(o.build ?? o.modifier ?? null);
+    // ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY：玩家侧基线（默认关；见 RunBattleOptions）。
+    this.playerBaseline = o.playerBaseline === true;
 
-    // ① 本局 registry = 正式副本（+ Build overlay 部件）。正式 content 单例与 Cannon 基础定义零修改。
-    this.registry = createRunRegistry(this.build);
-    // ② 本局 BuildSnapshot：只把基准武器的 defId 指向本局 overlay 部件。
-    const playerSnapshot = applyRunModifiersToSnapshot(this.plan.player.snapshot, this.build);
+    // ① 本局 registry = 正式副本（+ Build overlay 部件 + 可选的**玩家侧基线**部件）。
+    //    正式 content 单例、正式 `cannon` 键、敌方部件**全部零修改**。
+    this.registry = createRunRegistry(this.build, this.playerBaseline);
+    // ② 本局 BuildSnapshot：只把**玩家装载**里基准武器的 defId 指向本局 overlay 部件。
+    const playerSnapshot = applyRunModifiersToSnapshot(
+      this.plan.player.snapshot,
+      this.build,
+      this.playerBaseline,
+    );
     // PRODUCT-LOOP-R2-C：留住这一份（steering 之后、交给编排器之前）—— 见 `playerSnapshot` 注释。
     this.playerSnapshot = playerSnapshot;
     // ③ overlay 也必须过正式 BuildValidator（overlay 部件确实存在于本局 registry）。

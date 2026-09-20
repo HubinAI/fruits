@@ -37,6 +37,15 @@
  * 同时新增 A4–A8：**守门本身的实证**（装 hammer/h 等非 cannon → 开始冒险不可执行 +
  * 明确提示 + 可直接进调整战车 + 换回 cannon 后恢复可执行）。
  *
+ * ── ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY：失败路线**第二次**换（见 `FAIL_POLICY`）
+ *
+ * P0 那条路线（重炮 + 动能爆发 + 横向双联炮 + 不回耐久）在旧的玩家侧基线 80 下归零；
+ * 本 Queue 把本局玩家侧炮基线抬到 `PRODUCT_RUN_CANNON_BASE_DAMAGE = 120`（用户裁决）后，
+ * 同一条路线实测变成 **COMPLETE**（4/4 · DAY 7 · 终局 HP ≈ 364）⇒ 它不再是失败路线。
+ * ⇒ 按「产品契约变更作废既有 E2E 路线 ⇒ **换合法路线 + 保留全部守门断言**，不删断言」，
+ *    改用 Node 冻结表在 120 下**仍然归零**的组合：`twinCannon + tripleLoad`（= `FAIL_POLICY`）。
+ *    C1~D2 的每一条 FAILED 判据**一字未改** —— 这一轮改的是「怎么输」，不是「输了要看到什么」。
+ *
  * 用法：
  *   npm run build:portrait-lab
  *   node tests/_e2e_product_fail.cjs   （或 npm run e2e:product-fail）
@@ -89,7 +98,7 @@ const COMPAT_NOTICE = '当前原型仅支持加农炮进行完整冒险';
 const COMPAT_HINT = '请先调整战车';
 
 /**
- * 失败路线的耐久取舍策略 = 「继续改装」。
+ * 失败路线的耐久取舍策略 = 「继续改装」（`upgrade`：不回耐久，并且多拿一项横向改装）。
  *
  * ⚠️ 必须是它（不是 `repair`）：`repair` 会拿回一段耐久 ⇒ 这一局能 COMPLETE（R1-C 实测 4/4），
  *    只有「不回耐久」才让 DAY 7 的终局真的打到耐久归零。
@@ -97,7 +106,31 @@ const COMPAT_HINT = '请先调整战车';
  *    C1 的 `phase === 'FAILED'` 会立刻红掉（这正是要的：路线错了必须响）。
  */
 const DURABILITY_POLICY = 'upgrade';
-const FAIL_POLICY = { layer1: null, lateral: null, layer2: null, durability: DURABILITY_POLICY };
+
+/**
+ * ⚠️ **PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY：失败路线**再次**换了（第二个变量变了）**
+ *
+ * 上一版（P0 起）用的是 `layer1 = 重炮(heavyShell)`、`layer2 = 动能爆发(kineticBurst)`、
+ * `lateral = 池内第一项`（= 双联炮）—— 那条组合在**旧的玩家侧基线 80** 下恰好归零 FAILED。
+ * 本 Queue 把本局**玩家侧**炮基线抬到 `PRODUCT_RUN_CANNON_BASE_DAMAGE = 120`（用户裁决）后，
+ * 同一组合实测变成 **COMPLETE**（battles 4/4 · DAY 7 · 终局 HP ≈ 364）
+ * ⇒ 这条路线在产品层**已经不再是失败路线**了。
+ *
+ * 新路线不是猜的，来自 Node 侧同一口径的冻结表（`tests/portraitRunPage.test.ts` 的
+ * `FROZEN_UPGRADE`，120 下重测）：
+ *   - `heavyShell+kineticBurst` → 终局 **422**（通关 ⇒ 不能再用来验失败）；
+ *   - **`twinCannon+tripleLoad` → 终局 0 / FAILED**  ← 本文件改用的就是它；
+ *   - **`fastReload+twinCannon`  → 终局 0 / FAILED**  （备选）。
+ * ⇒ 失败路径**没有被 120 吃掉**（`RP-F2-11` 的「同路线、同一次耐久事件、结局相反」判据
+ *    仍在 Node 侧成立），只是浏览器这条走查要**换一条同样合法的失败路线**。
+ *    这不是放宽断言：C1~D2 的每一条 FAILED 判据一字未改，改的只是「怎么输」。
+ *
+ * ⚠️ `lateral` 仍取 `null`（= 池内第一项）。Node 表同样按「横向池第一项」取值
+ *    （双联路线 → 重型弹头），两侧口径一致 —— 这是本文件与冻结表能逐值对上账的前提。
+ * ⚠️ `layer1` / `layer2` 从此**显式指定**，不再依赖「池内第一项」的隐式顺序：
+ *    组合本身是失败路线的定义，让它隐式依赖选项顺序会让路线在内容重排时悄悄漂移。
+ */
+const FAIL_POLICY = { layer1: 'twinCannon', lateral: null, layer2: 'tripleLoad', durability: DURABILITY_POLICY };
 
 /** 失败结算面板 + 底部 CTA 的**非入账**配色（与 `runPage.ts` 的 COLORS 同值）。 */
 const PANEL_BG = [0x1b, 0x24, 0x32]; // COLORS.cardBg
@@ -386,12 +419,15 @@ async function main() {
       `equipped=${home0.equippedWeaponId} href=${(home0.startRunHref ?? '').slice(0, 60)}…`,
     );
 
-    // 产品侧必须把**两类**出口都给全：成功有哪几个去处（三条候选的领奖地址）+ 失败回哪儿（纯首页）
+    // 产品侧必须把**两类**出口都给全：成功有哪几个去处（候选的领奖地址）+ 失败回哪儿（纯首页）
     const startHref = home0.startRunHref ?? '';
     const startQ = new URLSearchParams(startHref.split('?')[1] ?? '');
     /*
       ⚠️ PRODUCT-LOOP-R2-A 的契约变更：成功侧不再是「一个 back」，而是 `choices` 载荷里
-      **每条候选各自的**领奖地址（三条 defId 不同 ⇒ 目的地必然不同）。
+      **每条候选各自的**领奖地址。
+      ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：候选池收窄为 `REWARD_CHOICE_IDS
+      = ['cannon']` ⇒ 成功侧**只有一条**去处（只发玩家这一局真的用得上的东西）。
+      这里断**字面 1** 而不是「≥ 1」：候选池再变动的第一天，本断言就必须响。
     */
     const choicesRaw = startQ.get(CHOICES_PARAM) ?? '';
     const choices = choicesRaw ? JSON.parse(choicesRaw).choices ?? [] : [];
@@ -399,12 +435,12 @@ async function main() {
     const homeHref = startQ.get(HOME_PARAM) ?? '';
     const homeQ = new URLSearchParams(homeHref.split('?')[1] ?? '');
     log(
-      claimHrefs.length === 3 &&
+      claimHrefs.length === 1 &&
         claimHrefs.every((h) => typeof h === 'string' && h !== '') &&
         homeHref !== '' &&
         claimHrefs.every((h) => h !== homeHref) &&
         !startQ.has(REWARD_PARAM),
-      'A2 出发链接同时给全「成功有哪几个去处」（三条候选各自的领奖地址）与「失败回哪儿」，且成功侧**没有**裸 `reward=`',
+      'A2 出发链接同时给全「成功有哪几个去处」（候选池 1 条领奖地址）与「失败回哪儿」，且成功侧**没有**裸 `reward=`',
       `choices=${claimHrefs.map((h) => h.replace('./home.html?', '')).join(' ')} home=${homeHref}`,
     );
     log(
