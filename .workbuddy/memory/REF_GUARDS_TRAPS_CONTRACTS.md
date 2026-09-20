@@ -457,7 +457,7 @@ Run 结束只清 Run-local，**永久 star 保留**。
 ⚠️ `damage` 事件的 `timestamp` **恒为 0**（`ContactRouter` 传 `0`）⇒
 命中时刻必须由运行时自己用 `orchestrator.timeMs` 记（`playerWeaponHitSummary().firstAtMs`）。
 
-### §8g ⚠️ E2E 写法陷阱（R2-C 实测新增 5 条）
+### §8g ⚠️ E2E 写法陷阱（R2-C 实测新增 5 条 + 2026-09-20 复核补第 6 条）
 
 1. **战斗运行时在离开 battle 相位时被 `dispose()`** ⇒ 必须**每帧**把 `battleWorld`
    照抄一份存采样；落到终态再读就晚了（拿到的是已释放或首帧态）。
@@ -468,9 +468,20 @@ Run 结束只清 Run-local，**永久 star 保留**。
    ⇒ 读卡前必须先点 `[data-ph-action="open-garage"]`，读完点 `back-home` 回首页。
 4. **★1 不写 `functionalStars` 字段**是既有约定 ⇒ 「Profile Equipped Star = 1」的
    可观测形式是**该键缺席**，不要断言 `=== 1`。
-5. **`RUN_TOTAL_BATTLES` 起始节点是 Day 2**（既有事实）⇒ 断言「新 Run 重置」时
-   要比「与第一局**同起点**」（逐项比 `day` / `nodeId`），**不要写死 `day === 1`**；
+5. **第一场战斗的节点是 `d2-battle1`，其 `day` 字段 = `2`**（既有事实）⇒ 用**战斗采样**断
+   「新 Run 重置」时，要比「与第一局**同起点**」（逐项比 `day` / `nodeId`），
+   **不要**在那里写死 `day === 1`（会假红）；
    且第三帧才有 battle hp ⇒ 用 `samples.find(s => s.hp !== null)`。
+   ⚠️ **但「新局起点 = DAY 1」本身是必须断言的**——见第 6 条，别把这条当通则。
+6. ⚠️（2026-09-20 修订补入）**「DAY = 1」要用「进入 Run 的瞬间」的探针断，而不是战斗采样**。
+   `enterRunAndDrive()` 的 `runStart = await probeRun(page)`（`waitRunReady` 之后、`driveRun` 之前）
+   就是那个瞬间 ⇒ 应断言 `runStart.day === 1 && runStart.battlesCompleted === 0 &&
+   runStart.build.length === 0 && runStart.modifier === null`。
+   Queue 必改 5 STEP 6 逐字要求「必须确认 DAY = 1 / HP = 满 / Run Buff = []」；
+   只用「同 day」是**代理判据**（脚本起点若漂到第 3 天，同 day 仍成立）。
+   `RUN_FIRST_DAY = RUN_SCRIPT[0].day = 1`（`runScript.ts:168`）；单测 `portraitRunPage` RP-06
+   已有 `expect(s.day).toBe(RUN_FIRST_DAY)` + `.toBe(1)`。E2E 那份字面量**刻意独立声明**
+   （黑盒验收不引用被测方常量）。R2-C 复核新增 `E1b` 即此条，star-power E2E 20/20 → 21/21。
 
 ### §8h ⚠️ 已探明、**未修**（按纪律只记录，属独立 Bug Queue）
 

@@ -66,6 +66,15 @@ const CANNON_STAR2_DAMAGE = 100;
 const WIN_POLICY = { layer1: 'twinCannon', lateral: null, layer2: 'tripleLoad', durability: 'repair' };
 const DRIVE_BUDGET_MS = 240000;
 
+/**
+ * 产品**新一局的起点是第 1 天**（Queue 必改 5 STEP 6 逐字要求「必须确认 DAY = 1」）。
+ *
+ * ⚠️ 这里独立写一份字面量，**不** import `src/lab/portraitBattleLab/runScript.ts` 的
+ *    `RUN_FIRST_DAY`：E2E 是黑盒验收，引用被测方的常量就等于用被告的证词证明被告清白。
+ *    两侧同值由各自的断言分别钉住（单测 `portraitRunPage` RP-06 断 `RUN_FIRST_DAY === 1`）。
+ */
+const RUN_FIRST_DAY = 1;
+
 const results = [];
 function log(pass, name, detail = '') {
   results.push({ pass, name, detail });
@@ -504,11 +513,30 @@ async function main() {
       run2.equipped ? JSON.stringify(run2.equipped.functionalStars) : 'n/a',
     );
     /*
-      「新 Run 真的重置了」的判据刻意**不写死 day === 1**（脚本的起始节点不等于「第 1 天」，
-      写死只会得到一个和产品无关的数字）：真正要证明的是
-        · 新一局从**和第一局完全相同的起点**开始（同 day / 同 nodeId），而不是接着上一局往下走；
-        · Run Buff 清空（build = [] / modifier = null）；
-        · 第一场开局的 HP = 满（上一局终局是带着战损的，若继续旧局就会是残血）。
+      E1b｜Queue 必改 5 STEP 6 的**逐字**落地：「返回首页 → 开始第二局。必须确认 DAY = 1 /
+      HP = 满 / Run Buff = []」。
+      ⚠️ 判据必须取**进入 Run 的那一瞬间**的探针（`runStart`），不能用第一场战斗的采样：
+         第一场战斗的节点是 `d2-battle1`（脚本里它的 `day` 字段 = 2），拿它当「新局起点」
+         既证不出 DAY = 1、也读不到「还没打过任何一场」。
+      ⚠️ 这里断的是**字面 1**，不是「两局相同」—— 后者只能证明「重置了」，证明不了
+         「重置到的是第 1 天」（若脚本起点漂移到第 3 天，同 day 仍然成立）。
+    */
+    log(
+      run2.runStart.day === RUN_FIRST_DAY &&
+        run2.runStart.battlesCompleted === 0 &&
+        run2.runStart.build.length === 0 &&
+        run2.runStart.modifier === null,
+      'E1b **Queue 必改 5 STEP 6**：第二局**进入的瞬间**就是 DAY = 1 / 一场都没打过 / Run Buff = [] ' +
+        '（字面断 1，不是「与第一局相同」的代理判据）',
+      `DAY=${run2.runStart.day} battles=${run2.runStart.battlesCompleted} ` +
+        `build=[${run2.runStart.build.join(',')}] modifier=${run2.runStart.modifier}`,
+    );
+    /*
+      E2｜「新 Run 真的重置了」的**第二层**证据（与 E1b 互补，两条各证一面）：
+        · E1b 证「起点 = DAY 1 的干净状态」（进入瞬间）；
+        · E2 证「第一场开局与第一局**逐帧同源**」—— 同 day / 同 nodeId（第一场 = `d2-battle1`
+          ⇒ 这里的 day 是 **2**，正是上面提到的那个陷阱）、Run Buff 清空、第一场开局 HP = 满
+          （上一局终局是带着战损的，若继续旧局就会是残血）。
     */
     const r2Hp =
       (run2.detail.samples.find((s) => s.hp !== null) || {}).hp || null;
