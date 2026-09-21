@@ -779,3 +779,97 @@ Queue 给的前提「如果历史正式产品从未开放 front 槽给玩家编�
 - 候选卡数量断言用 `rects.length === CHOICE_IDS.length`（= 1），**不要**再写死 `3`；像素阈值按**面积**推导
   ⇒ 一件候选的卡底面积是 `1 × 362 × 68`（更宽但只有一行，实测阈值取 **18000**），不是三件的 55000。
 
+---
+
+## §12 结算 CTA → 首页 的「延迟」（PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY 固化契约；改动 `drawActionButton` / 候选命中 / 结算绘制前必读）
+
+### §12a ⚠️ 症状是「5 秒静止」，根因是**死按钮**，不是延迟
+
+真人录屏：点底部「完成本次冒险」→ 约 5 秒完全静止 → 才跳首页。
+
+**真实链路墙钟**（跨文档 `sessionStorage` + `PerformanceObserver('longtask')`，产物版 3 次中位数）：
+`T4−T0 点击→导航发起 = 4.7 ms` · `T5fcp−T4 导航→首页可见 = 52 ms` · **longtask = 0 条**。
+⇒ **代码链里没有 5 秒**。
+
+**真正成因（两处合起来才成立）**：
+
+1. `runPage.ts` 的 `drawActionButton()` 只覆盖两支守卫 —— 「验证终点态无出口」「FAILED 无回程地址」——
+   **漏了第三支**：有候选卡的 `COMPLETE`。此时 `actionEnabledNow()` 恒 `false`
+   （`:1307` 有候选即 `false`，出口在卡片上），但函数继续往下用**禁用态色**画出按钮。
+2. `onPointerDown` 对有候选的终态**任何非卡片点击直接 `return;`**（`:1149`）
+   ⇒ 那条按钮的命中路径**不可达** ⇒ 点它**永远没有反馈** ⇒ 被读成「卡死」。
+
+玩家最终点到**真卡**（`rewardChoiceRects[0]`）时导航是瞬时的。**修复 = 拆掉假入口 + 给真入口即时反馈。**
+
+### §12b ⚠️ T0–T5 口径，以及「为什么不可能藏一个同步 5 秒」
+
+- `T0` = run-page 捕获阶段 `pointerdown`（`Date.now()`）→ 跨文档存 `sessionStorage`
+- `T4` = home 文档 `performance.timeOrigin + navigation.startTime`
+- `T5` = `timeOrigin + first-contentful-paint`
+- ⚠️ **T1/T2/T3（动作处理 / 领奖 / 落盘 / `dispose` / 发起导航）不可分别观测** ——
+  它们在**同一个任务**里同步执行。**这不是取证缺口**：一个同步 5 秒等待会**同时**表现为
+  `T4−T0 ≈ 5000` **与** `longtask` 里一条 5000 ms 记录；实测二者分别是 4.7 ms / 空数组
+  ⇒ **结构性排除**，不需要逐段插桩。
+- ⚠️ **落盘发生在导航之后**：`parsePendingClaim` → `claimRunReward` 在**首页挂载**时执行
+  ⇒ **导航从不等待落盘**。「必须完成的」只有写在领奖 URL 上的抗重 token（导航本身携带它）。
+
+### §12c 改动（两处，都在**绘制 / 输入闸**层；数据字段一个字没动）
+
+**(1) 补第三支守卫** —— `drawActionButton()` 开头：
+`if (runComplete(this.state) && !this.actionEnabledNow()) return;`
+
+- ⚠️ **账本零影响**：`layeredShapes()` 在 `actionEnabledNow() === false` 时**本来就** `filter`
+  掉 `actionBar` 层 ⇒ 修复前是「**账本说没有、画面却有**」，不画之后两者才真正一致。
+- ⚠️ 默认路径（无产品候选）的 `COMPLETE`，`actionEnabledNow()` 恒 `true`
+  ⇒ 那条路线**逐像素不变**（`R58b` 仍钉它必须可用）。
+
+**(2) 候选命中 = 同一帧进入「不可重复点击的处理中状态」** —— `beginClaim()` / `finishClaim()` / `deferPastNextPaint()`：
+
+| 顺序 | 动作 | 为什么 |
+|---|---|---|
+| ① | `this.claiming = true;`（同帧） | 点击后**立刻**不可重复点；`onPointerDown` 的候选分支先过 `if (this.claiming \|\| this.chosenDefId !== null) return;` |
+| ② | `this.render();`（**必须显式**） | 终态战斗循环**已自停**（`startLoop` 的 tick 在 `rt.result` 非空那帧 `rafHandle = 0`）⇒ **没有下一帧**会自动把「领取中…」画出来 |
+| ③ | `deferPastNextPaint(() => this.finishClaim(claim))` | `requestAnimationFrame` 回调在**绘制之前**运行；在回调里立刻整页导航会**取消**这一帧合成 ⇒ 刚画的「领取中…」**根本没上屏** |
+| ④ | `finishClaim` = `this.dispose()` → `this.opts.onProductClaim(claim)` | 与 `requestExit` / `requestFailReturn` **同一纪律**（先清理、再交宿主），责任与顺序完全没变 |
+
+- ⚠️ **两帧**而不是一帧：第二帧开始时上一帧已完成合成 ⇒ 处理中状态**一定**被看见过。
+- ⚠️ 代价（诚实披露）：`T4−T0` 由 ≈1.1 ms 升到 ≈4.7 ms（headless；真实 60 Hz ≈ **+33 ms**）。
+  用「有界的 ~2 帧」换「点击必有可见反馈」—— 相对被消除的**感知 5000 ms**，净收益巨大。
+- ⚠️ 依赖 `requestAnimationFrame` **存在**（缺失则同步执行，宁可少一帧反馈也不让领奖不发生）。
+  **这与本页既有假设一致**：战斗循环本身就靠 rAF 驱动。
+
+### §12d ⚠️ 零定时器不变量（必改 3）
+
+`src/lab/portraitBattleLab/` **整个目录 0 处** `setTimeout` / `setInterval`（实测）。
+本轮把它从「事实」升级为**不变量**（`PL-P0-01`）⇒ 拦住「用 `setTimeout(...,5000)` 兜底」。
+
+### §12e 守门清单
+
+| 位置 | 断言 |
+|---|---|
+| `portraitRunPage.test.ts` **PL-P0-01** | `runPage.ts` 不得出现 `setTimeout` / `setInterval`（**剥注释后**匹配） |
+| `portraitRunPage.test.ts` **PL-P0-02** | 第三支守卫存在且**早于** `const btn = runActionButtonRect();`；`claiming` 闸在候选命中前；`beginClaim` 顺序 = 置位 → 重绘 → 推迟；`finishClaim` 先 `dispose()` 再交宿主 |
+| `e2e:product-reward` **C7** | COMPLETE+候选卡：`actionRect` 内 `actionFillOff`(#232b38) 与 `actionFill`(#28405f) 像素**都为 0**（真实 `getImageData`） |
+| `e2e:product-reward` **D5 / H5** | 点击→URL 变首页的墙钟 `< CTA_HOME_BUDGET_MS = 4000`，**两局**都成立 |
+| `git diff --exit-code -- src/core/content.ts src/battle/contactRouter.ts` | 正式内容库 / 接触路由**字节零改动** |
+
+### §12f 陷阱（本轮实测，会毁掉你的守门）
+
+- ⚠️ **探针字段 `actionRect` 是布局常量**，修复前后都非 null ⇒ **不能**拿它当「按钮存在」的证据。
+  修复前也正是「`actionEnabled === false` + `actionRect` 非空」这个读数
+  ⇒ `e2e:product-reward` 的 **`C5` 不是死按钮的守卫**（它修前修后都 PASS），必须靠**像素**（`C7`）。
+- ⚠️ **像素守门选色必须在 `#run-canvas` 内独占**：`#232b38`(`actionFillOff`) 在全仓**别处**也出现
+  （`src/main.ts:141/239/286`、`src/ui/canvasPlayerUIHost.ts` 多处的 HUD 能量条）；
+  `countColorInRect` 只读 `#run-canvas` ⇒ 断言才成立。`#28405f`(`actionFill`) 全仓唯一。
+  两者都**不入账本**（`PALETTE` 口径早于本轮）⇒ 改绘制不动像素账本。
+- ⚠️ **负向对照必须做**：把新守卫临时改成 `false &&` 并注入 `setTimeout(...,5000)`
+  ⇒ 两条 `PL-P0` **都 FAIL**，证明守卫非永真；做完**立刻还原 + `grep` 复核**。
+- ⚠️ 处理中状态只改**绘制**（第二行文案换 `RUN_CLAIMING_LABEL`、加重、换非入账色），
+  **不改数据**（`view.progressText` 原值保留）⇒ 既有 reward 断言零影响。
+
+### §12g 基线
+
+`e2e:product-reward` **53/53**（原 50/50，+`C7`/`D5`/`H5`）· `e2e:product-loop` **51/51**（零回归）·
+全量 vitest **218 files / 2299 tests**（+2 条 `PL-P0`）。
+
+
