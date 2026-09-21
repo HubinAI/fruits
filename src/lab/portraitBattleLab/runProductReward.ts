@@ -50,6 +50,18 @@ export const RUN_REWARD_NOTE = '选中的那件会进入你的车库';
  */
 export const RUN_REWARD_LOCKED_LABEL = '已选择';
 
+/**
+ * PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 2）｜**处理中**文案 = 点击后的即时反馈。
+ *
+ * ⚠️ 为什么需要它：真人录屏 P0 里「点完结算 CTA → 画面静止数秒 → 才跳回首页」，
+ *    被直接读成「卡死」。**立即**出现的这一行把「无反馈的等待」变成「明确在处理」。
+ * ⚠️ 它**只表达状态，不承诺结果**：入库仍发生在导航之后（产品侧幂等执行），
+ *    因此文案刻意写「领取中…」而不是「已领取」。
+ * ⚠️ 它**不掩盖**任何真实阻塞 —— 清理与导航并没有被推迟到更晚，
+ *    只是「先让这一帧上屏」（见 `runPage.ts` 的 `deferPastNextPaint`）。
+ */
+export const RUN_CLAIMING_LABEL = '领取中…';
+
 /** URL 参数名（与产品侧 `runReward.ts` 的唯一约定；Lab 侧只读，不产出 URL）。 */
 const RUN_PARAM = 'run';
 const CHOICES_PARAM = 'choices';

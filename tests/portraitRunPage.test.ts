@@ -2836,4 +2836,65 @@ describe('PRODUCT-LOOP-R1-D｜J 失败终态：结算 + 返回主界面（不再
       expect(at.y + RUN_FAIL_PANEL.lineGap * (i + 1)).toBeLessThan(panel.y + panel.h);
     }
   });
+
+  /*
+    ══════════════════════════════════════════════════════════════════════════════
+    PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（Queue 必改 3 / 7）
+    「结算 CTA → 领奖 → 清理 Run → 返回首页」这条链上，两件事从本轮起由机器钉死，
+    不再只靠人记得：
+      ① 链上**没有任何定时器**（不存在「固定数秒等待」这种实现可能）；
+      ② 不存在**画着却点不动**的按钮（真人录屏 P0 的结构根因）。
+    行为侧的真实点击时延 + 真实 getImageData 像素取证在 `_e2e_product_reward.cjs`
+    的 C7 / D5 / H5 三条守门断言里（那里才有真浏览器）。
+    ══════════════════════════════════════════════════════════════════════════════
+  */
+
+  it('PL-P0-01 结算链零定时器：runPage.ts 不得出现 setTimeout / setInterval（必改 3）', () => {
+    const page = stripComments(read('runPage.ts'));
+    /*
+      ⚠️ 「本页没有任何 timer」是它从落地起的事实（实测 `src/lab/portraitBattleLab/`
+         整个目录 0 处 `setTimeout` / `setInterval`）。本断言把这个事实上升为**不变量**：
+         直接拦住「用 `setTimeout(..., 5000)` 兜底」这类把 5 秒静止塞回来的回归。
+      ⚠️ 匹配前先剥注释 ⇒ 讨论 timer 的注释不会自指触发失败。
+    */
+    expect(page.includes('setTimeout'), 'runPage.ts 不得引入 setTimeout').toBe(false);
+    expect(page.includes('setInterval'), 'runPage.ts 不得引入 setInterval').toBe(false);
+  });
+
+  it('PL-P0-02 死按钮根因机器钉死：COMPLETE + 底栏不可用时必须短路不画（必改 1 / 2）', () => {
+    const page = stripComments(read('runPage.ts'));
+    const drawFn = page.indexOf('private drawActionButton(');
+    expect(drawFn, 'drawActionButton 必须存在').toBeGreaterThan(-1);
+    /*
+      真人录屏 P0 的**结构根因**：`COMPLETE` + 有候选卡时 `actionEnabledNow()` 为 `false`
+      （出口在卡片上），而输入分派对有候选的终态直接 `return` ⇒ 底栏那条
+      「完成本次冒险」按钮**画着、却永远点不动**。绘制侧必须补上这**第三支**守卫。
+    */
+    const third = page.indexOf('if (runComplete(this.state) && !this.actionEnabledNow()) return;', drawFn);
+    expect(third, 'drawActionButton 必须补齐「COMPLETE 且底栏不可用」这一支').toBeGreaterThan(drawFn);
+    // 必须在取按钮矩形 / 开始绘制**之前**短路 —— 放在后面等于没修。
+    const btn = page.indexOf('const btn = runActionButtonRect();', drawFn);
+    expect(btn, 'drawActionButton 必须在取矩形前短路').toBeGreaterThan(third);
+
+    // 必改 2：候选人命中前必须先过「处理中 / 已锁定」这道闸（处理中不接受任何点击）。
+    const claimGate = page.indexOf('if (this.claiming || this.chosenDefId !== null) return;');
+    expect(claimGate, '候选命中前必须先过「处理中 / 已锁定」闸').toBeGreaterThan(-1);
+
+    const begin = page.indexOf('private beginClaim(claim: RunProductClaim): void {');
+    const finish = page.indexOf('private finishClaim(claim: RunProductClaim): void {');
+    expect(begin).toBeGreaterThan(-1);
+    expect(finish).toBeGreaterThan(begin);
+    // `beginClaim` 顺序硬要求：先置位 → 再重绘一帧（终态循环已自停，不显式重绘就看不见）→ 再推迟交接。
+    const setFlag = page.indexOf('this.claiming = true;', begin);
+    const redraw = page.indexOf('this.render();', setFlag);
+    const defer = page.indexOf('deferPastNextPaint(() => this.finishClaim(claim));', redraw);
+    expect(setFlag).toBeGreaterThan(begin);
+    expect(redraw).toBeGreaterThan(setFlag);
+    expect(defer).toBeGreaterThan(redraw);
+    // 清理与交接仍然**只**在 `finishClaim` 里发生，且顺序不变（先清理、再交宿主）。
+    const disposed = page.indexOf('this.dispose();', finish);
+    const handed = page.indexOf('if (this.opts.onProductClaim) this.opts.onProductClaim(claim);', disposed);
+    expect(disposed).toBeGreaterThan(finish);
+    expect(handed).toBeGreaterThan(disposed);
+  });
 });

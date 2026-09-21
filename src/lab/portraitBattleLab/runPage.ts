@@ -181,6 +181,7 @@ import { EMPTY_SLOT } from '../buildEditorModel';
  *    ⇒ 无参数打开 `run-page.html` 的既有路径（含像素账本）**逐像素不变**。
  */
 import {
+  RUN_CLAIMING_LABEL,
   RUN_REWARD_LOCKED_LABEL,
   RUN_REWARD_NOTE,
   RUN_REWARD_TITLE,
@@ -902,6 +903,33 @@ export interface RunPageOptions {
   readonly onFailReturn?: ((action: RunFailReturn) => void) | null;
 }
 
+/**
+ * 把回调推迟到「刚画的那一帧**确实已经上屏**」之后（PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY 必改 2）。
+ *
+ * ── 为什么是**两帧**而不是一帧 ─────────────────────────────────────────────
+ * `requestAnimationFrame` 的回调运行在该帧**绘制之前**：若在回调里立刻整页导航，
+ * 这一帧的合成会被取消 ⇒ 刚画出来的「领取中…」根本不会出现在屏幕上（等于没做）。
+ * 第二帧开始时，上一帧已经完成合成 ⇒ 处理中状态一定被玩家看见过。
+ *
+ * ⚠️ 无 `requestAnimationFrame` 的环境（node 侧纯函数测试 / 极端降级）⇒ **同步执行**：
+ *    宁可少一帧可见反馈，也绝不能让「领奖」这件事不再发生。
+ * ⚠️ 本助手**不引入等待语义**：它只负责「让已经画好的东西被看见」，
+ *    不等待任何动画 / 结算 / 计时器（与 Queue 必改 3 不冲突）。
+ */
+function deferPastNextPaint(run: () => void): void {
+  const g = globalThis as { requestAnimationFrame?: (cb: () => void) => number };
+  const raf = g.requestAnimationFrame;
+  if (typeof raf !== 'function') {
+    run();
+    return;
+  }
+  raf.call(g, () => {
+    const raf2 = g.requestAnimationFrame;
+    if (typeof raf2 === 'function') raf2.call(g, run);
+    else run();
+  });
+}
+
 export class RunPage {
   private readonly root: HTMLElement;
   private readonly stageWrap: HTMLDivElement;
@@ -943,6 +971,18 @@ export class RunPage {
    *    （两者结构上互斥，宿主不同时给 `seedOptions` 与 `rewardChoices`）。
    */
   private chosenDefId: string | null = null;
+  /**
+   * PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 2）｜结算 CTA 已被点中、正在交接。
+   *
+   * ⚠️ 它回答的是**感知**问题，不是性能问题：真人录屏 P0 里「点完之后画面静止数秒才跳走」
+   *    会被读成「卡死」。本状态保证**点击后同一帧**屏幕上就出现「领取中…」，
+   *    且这期间不接受任何再次点击（`onPointerDown` 的候选分支直接 return）。
+   * ⚠️ 它**不掩盖**任何真实阻塞：清理与导航只是被推到「处理中状态确实画过一帧之后」，
+   *    总时长没有任何增加意义上的人为等待（见 `beginClaim` 的两帧说明）。
+   * ⚠️ 与 `chosenDefId` 的区别：`chosenDefId` = 「选了哪一件」（不可改选），
+   *    `claiming` = 「这件正在交接」（不可重复点击）。两者都在最前面就置位。
+   */
+  private claiming = false;
   private rafHandle = 0;
   private lastFrameMs = 0;
   /** 当前遭遇的真实战斗运行时（EVENT 建立 → 回到 IDLE 时释放）。 */
@@ -1091,12 +1131,18 @@ export class RunPage {
     */
     const choiceViews = this.rewardChoiceViewsNow();
     if (choiceViews.length > 0) {
-      if (this.chosenDefId !== null) return; // 已锁定 ⇒ 不再接受任何选择
+      /*
+        PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 2）：**处理中不接受任何点击**。
+        原来只有 `chosenDefId` 一道锁，而锁定发生在「清理 + 导航」**同一帧内**——
+        真人根本来不及产生第二次点击，所以「防重复点击」在观感上是空的。
+        现在 `claiming` 在**同一帧**置位并**先画一帧**「领取中…」，玩家看得见锁。
+      */
+      if (this.claiming || this.chosenDefId !== null) return; // 已锁定 / 交接中 ⇒ 不再接受任何选择
       const rects = runRewardChoiceRects(choiceViews.length);
       for (let i = 0; i < choiceViews.length; i++) {
         if (hit(rects[i], p)) {
           const claim = runSelectedClaim(this.state, this.opts.rewardChoices, choiceViews[i].defId);
-          if (claim) this.requestProductClaim(claim);
+          if (claim) this.beginClaim(claim);
           return;
         }
       }
@@ -1316,10 +1362,31 @@ export class RunPage {
    *    执行**幂等**入库。因此「奖励写入」在单机产品里只有**一个**写入点。
    * ⚠️ 幂等键 = `runToken`（产品侧生成）：重复点击 / 重复结算由产品侧仓库拦截，本页不做乐观发奖。
    */
-  private requestProductClaim(claim: RunProductClaim): void {
+  private beginClaim(claim: RunProductClaim): void {
     this.chosenDefId = claim.defId;
-    this.dispose();
+    this.claiming = true;
     this.seedSelect = null;
+    /*
+      ⚠️ **必须显式 `render()` 一次**：终态（RESULT / COMPLETE）的战斗循环**已经自己停了**
+         （`startLoop` 的 tick 在 `rt.result` 非空那一帧 `rafHandle = 0`）⇒ 不会再有下一帧
+         自动把「领取中…」画出来。不显式重绘的话，处理中状态只存在于内存里，屏幕上依然是旧帧。
+    */
+    this.render();
+    deferPastNextPaint(() => this.finishClaim(claim));
+  }
+
+  /**
+   * 处理中状态**确实画过一帧之后**才做清理与交接（`beginClaim` 的第二步）。
+   *
+   * ⚠️ 与 `requestExit` / `requestFailReturn` 同一纪律 —— **先清理、再交给宿主**
+   *    （导航是异步的，不能依赖它释放运行时）。这里只是把这一步推迟了**两帧**，
+   *    顺序与责任完全没变。
+   * ⚠️ 推迟**不增加**任何「等动画 / 等结算 / 等计时器」的人为等待：
+   *    被推迟的只有本函数里的同步清理（实测 ≈ 1 ms 量级），
+   *    两帧的代价换来的是「点击一定有可见反馈」这件事在**任何**环境下都成立。
+   */
+  private finishClaim(claim: RunProductClaim): void {
+    this.dispose();
     if (this.opts.onProductClaim) this.opts.onProductClaim(claim);
   }
 
@@ -1871,6 +1938,24 @@ export class RunPage {
     */
     const fail = this.failSettlementNow();
     if (fail && fail.href === '') return;
+    /*
+      PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY｜**补上漏掉的第三支：`COMPLETE` + 产品候选。**
+
+      上面两条已经把「验证终点态没有出口」「失败终态没有回程地址」这两种情况处理掉了，
+      但**有候选卡的 `COMPLETE`** 漏了：此时 `actionEnabledNow()` 为 `false`
+      （出口在卡片上，底栏不参与），而命中分支对「有候选的终态」直接 `return`
+      ⇒ 屏幕上存在一个**画着、却永远点不动**的「完成本次冒险」按钮。
+
+      真人录屏 P0：玩家点它 → 没有任何反馈（永远不会有）→ 被读成「卡死」。
+      本函数开头那句注释声称要根除的正是这个形态 —— 这里把漏掉的一支补齐。
+
+      ⚠️ **零账本影响**：`layeredShapes()` 在 `actionEnabledNow() === false` 时
+         **本来就不登记** `actionBar` 层 ⇒ 不画之后「账本」与「画面」才真正一致
+         （在此之前是「账本说没有、画面却有」）。
+      ⚠️ 默认路径（无产品候选）`COMPLETE` 的 `actionEnabledNow()` 恒为 `true`
+         （唯一动作 = 开新一局）⇒ 那条路线**逐像素不变**（`R58b` 钉死它必须是可用的）。
+    */
+    if (runComplete(this.state) && !this.actionEnabledNow()) return;
     const btn = runActionButtonRect();
     // ⚠️ PRP-M2：这里读的是**本帧实际口径**（默认路径与 `runActionEnabled(s)` /
     //    `runActionLabel(s)` 完全等价）—— 验证终点态下按钮**可用**，文案 = 「返回验证中心」。
@@ -1936,6 +2021,8 @@ export class RunPage {
       const view = views[i];
       const r = rects[i];
       const locked = this.chosenDefId === view.defId;
+      /** 必改 2：这一张正在交接（点击后的同一帧起为真）⇒ 第二行改为「领取中…」。 */
+      const claiming = this.claiming && locked;
 
       // ① 卡片底 + 描边（被选中的那张：加一圈强调描边 = 锁定）
       ctx.fillStyle = COLORS.cardBg;
@@ -1989,7 +2076,16 @@ export class RunPage {
        * ⚠️ 只改这一行**信息表达**：Layout（`runRewardChoiceTextPos`）/ 命中 / 出口 /
        *    奖励行为**一个字都没动**。
        */
-      const countText = view.progressText;
+      const countText = claiming ? RUN_CLAIMING_LABEL : view.progressText;
+      /*
+        PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 2）：处理中这一行改为「领取中…」，
+        并临时加重（强调色 + 粗体 + 大 1px）⇒ 玩家**点下去的那一行**立刻变了。
+
+        ⚠️ 只改**绘制**，不改数据：`view.progressText`（探针 / 断言读的字段）**一个字都没改**
+           ⇒ 既有奖励断言全部不受影响；颜色取自既有非入账色 ⇒ 像素账本同样一个数字不变。
+      */
+      ctx.fillStyle = claiming ? COLORS.dayAccent : COLORS.textDim;
+      ctx.font = claiming ? `bold 13px ${FONT_STACK}` : `12px ${FONT_STACK}`;
       ctx.fillText(this.ellipsize(ctx, countText, r.x + r.w - text.x - 12), text.x, text.y2);
 
       // ⑤ 锁定标记（不可撤销）

@@ -105,6 +105,31 @@ const CARD_BG = [0x1b, 0x24, 0x32]; // COLORS.cardBg —— 卡片底
 const ICON_FRAME_BG = [0x0b, 0x0e, 0x14]; // COLORS.pageBg —— 图标框底（卡片内唯一出现处）
 const ICON_GLYPH = [0x9a, 0xa2, 0xb2]; // COLORS.wheelRim —— 图标本体（真实 Collider 外接框）
 
+/*
+  ══════════════════════════════════════════════════════════════════════════════
+  PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（Queue 必改 7）｜结算 CTA 两条守门的数据源
+  ══════════════════════════════════════════════════════════════════════════════
+*/
+
+/**
+ * 「结算 CTA → 首页」的墙钟**宽上界**。
+ * ⚠️ 这不是性能基线，是**量级哨兵**：拦住「有人又往结算链里塞一个固定数秒等待」。
+ *    实测（产物版 3 次中位数）：点击→导航发起 ≈ 4.7 ms、导航→首页可见 = 52 ms，
+ *    合计 ≈ 57 ms ⇒ 4000 ms 有 ~70× 余量，机器抖动 / CI 负载都不可能把它顶穿。
+ * ⚠️ 刻意不设严格数字（不拿它考核机器），只拦结构性回归。
+ */
+const CTA_HOME_BUDGET_MS = 4000;
+
+/**
+ * `COLORS.actionFillOff`（`#232b38`）—— 主动作按钮**禁用态**填充色。
+ * ⚠️ 在 `#run-canvas` 内**独占**：全仓同色只在**别的画布**出现
+ *    （`src/main.ts` / `src/ui/canvasPlayerUIHost.ts` 的 HUD 能量条）
+ *    ⇒ 在 Run 画布的动作按钮矩形里数到它，只可能来自那条被画出来的按钮本身。
+ */
+const ACTION_FILL_OFF = [0x23, 0x2b, 0x38];
+/** `COLORS.actionFill`（`#28405f`）—— 主动作按钮**可用态**填充色（全仓独占）。 */
+const ACTION_FILL_ON = [0x28, 0x40, 0x5f];
+
 /** 赢：耐久事件选「维修」→ 终局有耐久 → COMPLETE。 */
 const WIN_POLICY = { layer1: 'twinCannon', lateral: null, layer2: 'tripleLoad', durability: 'repair' };
 /** 输：同路线但耐久事件选「继续改装」（多拿一件横向改装）→ 终局耐久归零 → FAILED。 */
@@ -438,12 +463,31 @@ async function playOneRunAndClaim(page, pickDefId, policy, label) {
   pixel.abIconFrame = await countColorInRect(page, abRect, ICON_FRAME_BG);
   pixel.abIconGlyph = await countColorInRect(page, abRect, ICON_GLYPH);
 
+  /*
+    PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 7）｜**死按钮像素取证**（必须在点之前采）。
+    COMPLETE + 有候选卡时，底栏那条「完成本次冒险」按钮**不得**被画出来：
+    它的命中分支不可达（`onPointerDown` 对有候选的终态直接 `return`）
+    ⇒ 画出来就是一个「点了永远没有反馈」的假入口 = 真人录屏里被读成「卡死」的观感来源。
+    ⚠️ 真实 `getImageData`（不走命中区 / 探针捷径）：分别数禁用态色与可用态色。
+       两者都为 0 ⇒ 这个矩形里确实什么都没画。
+  */
+  const deadBtnOff = await countColorInRect(page, pDone.actionRect, ACTION_FILL_OFF);
+  const deadBtnOn = await countColorInRect(page, pDone.actionRect, ACTION_FILL_ON);
+
   // **真实鼠标点击**选中的那张卡（坐标来自探针里与绘制同源的矩形）
   const cardRect = pDone.rewardChoiceRects[pickIndex];
+  /*
+    ⚠️ 刻意**不**用 `Promise.all` 把点击与导航绑在一起量：这里要在「按下」与
+       「URL 真的变成首页」之间取一段独立的墙钟 —— 覆盖
+       事件派发 + 处理中置位 + 两帧可见反馈 + `dispose()` 清理 + 整页导航 + 首页装载。
+    ⚠️ `waitForURL` 仍带 catch：超时不让整段挂死，断言侧会因为我们自己的上界而失败。
+  */
+  const navT0 = Date.now();
   await Promise.all([
     page.waitForURL(/home\.html/, { timeout: 20000 }).catch(() => {}),
     clickRect(page, cardRect),
   ]);
+  const navMs = Date.now() - navT0;
   await waitHomeReady(page);
   const urlAfter = await page.evaluate(() => location.pathname + location.search);
   const homeAfter = await probeHome(page);
@@ -470,6 +514,9 @@ async function playOneRunAndClaim(page, pickDefId, policy, label) {
     cardRect,
     rects,
     pixel,
+    navMs,
+    deadBtnOff,
+    deadBtnOn,
   };
 }
 
@@ -661,6 +708,21 @@ async function main() {
       `rects=${rects.map((r) => `${r.x},${r.y} ${r.w}×${r.h}`).join(' | ')} cardBg=${cardBgPx} iconFrame=${iconFramePx} glyph=${iconGlyphPx}`,
     );
 
+    /*
+      PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 7）｜**死按钮不得回归**。
+      取值在 `playOneRunAndClaim` 内、**点那张卡之前**（点中即整页导航 ⇒ `#run-canvas` 消失）。
+      ⚠️ 这是真人录屏 P0 的**结构根因**守卫：`C5` 已经断言「底栏动作不可用」
+        （探针口径），但探针那条口径在修复前**就是**不可用的 —— 屏幕上却依然画着按钮。
+        本断言补上「**真的没画**」这一层，两者合起来才等价于「不存在假入口」。
+      ⚠️ 真实 `getImageData`：禁用态色与可用态色**都**必须为 0 ——
+        既不能有「画着却点不动」的死按钮，也不能有「画着却点不动」的活按钮。
+    */
+    log(
+      r1.deadBtnOff === 0 && r1.deadBtnOn === 0,
+      'C7 **必改 7**｜COMPLETE+候选卡时底栏按钮**没有被画出来**（真实 getImageData 双色取证；死按钮不得回归）',
+      `actionRect=${JSON.stringify(pDone.actionRect)} 禁用态像素=${r1.deadBtnOff} 可用态像素=${r1.deadBtnOn}`,
+    );
+
     log(
       r1.urlAfter === `/home.html?run=${token0}&reward=cannon`,
       'D1 点中 **cannon 那张卡** = 真实整页导航到**它自己**的领奖地址（不是底栏按钮）',
@@ -706,6 +768,17 @@ async function main() {
         r1.homeAfter.weapons.find((w) => w.defId === 'cannon').maxStar === false,
       'D4 领奖后的首页读数：cannon 达到满 stack ⇒ 显示 `5/5` 且 `fusable=true`（★2 未到上限）',
       `cannon stackText=${r1.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText}`,
+    );
+    /*
+      PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 7）｜**时延守门**。
+      真实鼠标点击那张候选卡 → URL 真的变成首页，全程墙钟必须 < `CTA_HOME_BUDGET_MS`。
+      ⚠️ 它拦的是**量级**回归（把「固定数秒等待」塞回来），不是性能基线：
+        实测 ≈ 57 ms vs 上界 4000 ms ⇒ ~70× 余量，机器抖动不会误伤。
+    */
+    log(
+      r1.navMs < CTA_HOME_BUDGET_MS,
+      'D5 **必改 7**｜结算 CTA → 首页的墙钟时延在宽上界内（防「固定数秒静止」回归）',
+      `第一局 navMs=${r1.navMs} ms（上界 ${CTA_HOME_BUDGET_MS} ms）`,
     );
 
     /*
@@ -1141,6 +1214,16 @@ async function main() {
         r2.homeAfter.weapons.find((w) => w.defId === 'hammer').stackText === '1/5',
       'H4 首页读数：cannon 同时有 ★1 `1/5` 与 ★2 `1/5` 两张卡、hammer `1/5`（同一份库存，各 stack 各长各的）',
       r2.homeAfter.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
+    );
+    /*
+      PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 7）：时延上界不是「只对第一局成立」。
+      第二局的候选数量 / 库存状态都不同（★1 合成后为 0）⇒ 再证一次，防止
+      「某条分支才慢」这种回归溜过单点取样。
+    */
+    log(
+      r1.navMs < CTA_HOME_BUDGET_MS && r2.navMs < CTA_HOME_BUDGET_MS,
+      'H5 **必改 7**｜两局都满足同一时延上界（不是只对第一局成立）',
+      `r1=${r1.navMs} ms · r2=${r2.navMs} ms（上界 ${CTA_HOME_BUDGET_MS} ms）`,
     );
 
     log(pageErrors.length === 0, 'J1 全流程零运行时报错', pageErrors.slice(0, 2).join(' | ') || 'none');
