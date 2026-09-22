@@ -33,8 +33,8 @@
  *
  * ── PRODUCT-LOOP-R2-A：两个终态各自的**唯一**出口（本文件是接线点）─────────────
  *
- *     COMPLETE → **3选1 候选卡**（`rewardChoiceViewsNow()`）→ 点中哪件就走哪件的地址
- *                （`runSelectedClaim()` → 宿主整页导航；**底栏没有按钮**）
+ *     COMPLETE → **奖励卡（纯展示）** + 底栏**唯一主 CTA「领取并返回」**
+ *                （`runSingleRewardClaim()` → 宿主整页导航到那件的领奖地址）
  *     FAILED   → 「返回主界面」（`failSettlementNow()`）→ 宿主整页导航到**纯首页地址**
  *
  *   ⚠️ `FAILED` **不再**走状态机的「终态动作 = 开一个全新 Run」这条边
@@ -45,9 +45,12 @@
  *      宿主没给回程地址时连按钮都不画。新 Run 只能由玩家回首页后重新点「开始冒险」创建。
  *   ⚠️ 失败**不发奖**：奖励候选的前提是 `runComplete(state)`，与失败终态互斥
  *      ⇒ 「失败也发奖」在结构上不可能（R2-A 必改 5：无奖励选择 / 无 count 变化 / 无 Profile 增长）。
- *   ⚠️ COMPLETE 的候选**选中即锁定**（`chosenDefId` 非空后不再接受任何点击）：
- *      「领一次之后再点别的卡改主意 / 重复发奖」在结构上不可能；
+ *   ⚠️ COMPLETE 的**唯一入口是底栏那个按钮**（PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE
+ *      必改 1 / 2 / 6）：奖励卡只展示，**点卡片不导航**；按下 CTA 后同一帧置位 `claiming`
+ *      （按钮文案变「领取中…」）且不再接受任何点击 ⇒「领一次之后再点一下重复发奖」结构上不可能；
  *      真正的幂等（同一 Run 只入账一次）由产品侧账本 `grantedRunIds` 保证。
+ *   ⚠️ 战斗音频的生命周期与本页析构**解耦**（必改 3 / 4）：终态判定那一帧就停战斗音频
+ *      （`battleView.stopBattleAudio()`），不等页面 `dispose()`；stop 幂等，后续 dispose 再调不报错。
  *
  * 删除本文件即移除 Run Page 核心；本目录可整块删除（清单见 constants.ts 头部）。
  */
@@ -175,19 +178,21 @@ import {
  */
 import { EMPTY_SLOT } from '../buildEditorModel';
 /**
- * PRODUCT-LOOP-R2-A｜RUN COMPLETE 的**3选1 产品奖励出口**（纯逻辑 / 纯几何）。
+ * PRODUCT-LOOP-R2-A｜RUN COMPLETE 的**产品奖励出口**（纯逻辑 / 纯几何）。
+ * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2 / 6）｜
+ *   出口从「点奖励卡」收敛为**底栏唯一主 CTA**「领取并返回」；奖励卡纯展示。
  *
  * ⚠️ 只在宿主提供 `RunPageOptions.rewardChoices` 时才产生任何出口
  *    ⇒ 无参数打开 `run-page.html` 的既有路径（含像素账本）**逐像素不变**。
  */
 import {
+  RUN_CLAIM_AND_RETURN_LABEL,
   RUN_CLAIMING_LABEL,
-  RUN_REWARD_LOCKED_LABEL,
   RUN_REWARD_NOTE,
   RUN_REWARD_TITLE,
   fitRewardIcon,
   runRewardChoiceViews,
-  runSelectedClaim,
+  runSingleRewardClaim,
   type RunProductClaim,
   type RunRewardChoiceSet,
   type RunRewardChoiceView,
@@ -202,7 +207,7 @@ import {
   battleVisibleWorld,
   type RunBattleBox,
 } from './runBattleRuntime';
-import { RunBattleView } from './runBattleView';
+import { RunBattleView, type RunBattleAudioProbe } from './runBattleView';
 import { RUN_IMPACT_RING_MS, runImpactCoreShape, runImpactRingShapes } from './runImpactVfx';
 import { RunVisualStore, type RunAssetStats } from './runVehicleAssets';
 
@@ -602,13 +607,19 @@ export interface RunPageProbe {
    * PRP-M2-R1｜主动作**当前指向的出口地址**（`null` = 不是终点态，或终点态但宿主没给出口）。
    * ⚠️ 与 `actionLabel` 同源（都来自 `finalActionNow()`）⇒ 「按钮文案」与「点了去哪」
    *    在探针里也是**一个对象**，不存在两套口径。
+   * ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 2）：结算页那条
+   *    唯一 CTA **不是**一次 `href` 跳转（它走 `runSingleRewardClaim()` → 宿主导航）
+   *    ⇒ 本字段在 `COMPLETE` 上恒为 `null`，判「有没有 CTA」要看 `actionEnabled` + `actionLabel`。
    */
   readonly exitHref: string | null;
   /**
-   * PRODUCT-LOOP-R2-A｜本帧**真正画出来的**候选卡（`[]` = 本帧没有 3选1 块）。
+   * PRODUCT-LOOP-R2-A｜本帧**真正画出来的**奖励卡（`[]` = 本帧没有这一块）。
    *
-   * ⚠️ 与绘制 / 命中 / 出口四处**同源**（都走 `rewardChoiceViewsNow()`）⇒ 不存在
-   *    「探针说有卡片、屏幕上却没有」或「画了卡但点了没反应」的分叉。
+   * ⚠️ 与绘制 / 出口**同源**（都走 `rewardChoiceViewsNow()`）⇒ 不存在
+   *    「探针说有卡片、屏幕上却没有」的分叉。
+   * ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1）：这一块
+   *    **纯展示**（不再参与命中）⇒ 「画了卡但点了没反应」已经不是一个缺陷形态：
+   *    点了本来就不该有反应，出口在底栏那条 CTA 上。
    * ⚠️ **FAILED 恒为 `[]`**：失败终态结构上没有奖励出口（`runRewardChoiceViews` 先查
    *    `runComplete`），这是 R2-A 必改 5「FAILED 无奖励选择 / 无 count 变化 / 无 Profile 增长」
    *    的机器可读证据。
@@ -635,17 +646,36 @@ export interface RunPageProbe {
     href: string;
     hasSprite: boolean;
   }[];
-  /** 三张候选卡的矩形（与绘制 / 命中共用同一个函数；`[]` 同上）。 */
+  /**
+   * 奖励卡的矩形（与**绘制**共用同一个函数；`[]` 同上）。
+   * ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1）之后
+   *    它**不再参与命中** —— 这一块纯展示；保留在探针里只为让 E2E 仍能对它做像素取证。
+   */
   readonly rewardChoiceRects: readonly RunRect[];
   /**
-   * 玩家已经**锁定**的那一件（`null` = 还没选）。
+   * 玩家已经**领走**的那一件（`null` = 还没领）。
    *
    * ⚠️ 这是 Queue 必改 4「当前 reward 被锁定」的可断言形态：一旦非 `null`，
-   *    再点任何别的卡都**不会**改主意（`onPointerDown` 直接 return）。
-   * ⚠️ 选中即整页导航离开 ⇒ 正常流程下探针几乎读不到它；它存在是为了让
-   *    「第二次选择必须 no-op」这条能**在 node 侧被断言**（也是真人误触的兜底）。
+   *    底栏 CTA 与任何点击都**不会**再产生第二次领取（`onPointerDown` 直接 return）。
+   * ⚠️ 必改 1 之后它的写入点只有一处：底栏唯一 CTA 被按下那一帧（`beginClaim`）；
+   *    卡片不再参与 ⇒ 正常流程下探针几乎读不到它。它存在是为了让
+   *    「第二次领取必须 no-op」这条能**在 node 侧被断言**（也是真人误触的兜底）。
    */
   readonly chosenDefId: string | null;
+  /**
+   * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 2 / 7）｜
+   * 底栏唯一 CTA 的**处理中**状态（`false` = 还没按下 / `true` = 已按下、正在交接）。
+   * ⚠️ 与 `actionLabel` 同源：`true` ⇒ `actionLabel === '领取中…'`。
+   */
+  readonly claiming: boolean;
+  /** 必改 7：本页累计「开始领取」次数（只读；重复点击不会让它增加）。 */
+  readonly claimStarts: number;
+  /**
+   * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 3 / 4 / 8）｜
+   * 战斗音频生命周期读数（与 `RunBattleView` 持有的真实 `SfxAudioService` 同源）。
+   * ⚠️ 终态上 `activeBgmSources` 必须恒为 `0`（必改 3）；`stops >= 1` 证明确实停过。
+   */
+  readonly battleAudio: RunBattleAudioProbe;
   /**
    * 产品侧给的载荷里有几条候选被丢弃（`0` = 载荷完全合法）。
    * ⚠️ 非 0 意味着产品侧出了 bug ⇒ 如实上报，不静默少一个选项。
@@ -963,26 +993,40 @@ export class RunPage {
   /** PRP-M2：第一场结束即停止推进（`NEXT RUN VALIDATION COMPLETE`）。 */
   private validationDone = false;
   /**
-   * PRODUCT-LOOP-R2-A｜终点 3选1 里已经**锁定**的那一件（`null` = 还没选）。
+   * PRODUCT-LOOP-R2-A｜本局**奖励已经被领走的那一件**（`null` = 还没领）。
    *
    * ⚠️ 语义 = Queue 必改 4「当前 reward 被锁定」：一旦非 `null`，
-   *    `onPointerDown` 的候选分支立刻 return ⇒ 再点别的卡**不会改主意**。
+   *    `onPointerDown` 的奖励分支立刻 `return` ⇒ 之后**不可能**再产生第二次领取。
+   * ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1）之后，
+   *    它的写入点只有一处：**底栏唯一 CTA 被按下**那一帧（`beginClaim`）。
+   *    奖励卡不再参与 ⇒ 卡片上不再画「已选择」（那份渲染随口径一起删除）。
    * ⚠️ 与 `seedChosen` 分开：那是**研发验证**的种子选择，与产品奖励无关
    *    （两者结构上互斥，宿主不同时给 `seedOptions` 与 `rewardChoices`）。
    */
   private chosenDefId: string | null = null;
   /**
-   * PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 2）｜结算 CTA 已被点中、正在交接。
+   * PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 2）｜结算 CTA 已被按下、正在交接。
    *
-   * ⚠️ 它回答的是**感知**问题，不是性能问题：真人录屏 P0 里「点完之后画面静止数秒才跳走」
-   *    会被读成「卡死」。本状态保证**点击后同一帧**屏幕上就出现「领取中…」，
-   *    且这期间不接受任何再次点击（`onPointerDown` 的候选分支直接 return）。
+   * ⚠️ 它回答的是**感知**问题，不是性能问题：按下之后必须**同一帧**出现可见反馈，
+   *    否则真人会把「没有反馈」读成「卡死」。本状态保证按下的同一帧底栏 CTA 的文案
+   *    变成「领取中…」并**先画一帧**上屏。
+   * ⚠️ 它同时是**防重复点击**的闸（必改 2「并禁止重复点击」）：`onPointerDown` 的
+   *    奖励分支第一件事就是查它 ⇒ 第二次点击什么都不做（即使 `dispose()` 还没执行）。
    * ⚠️ 它**不掩盖**任何真实阻塞：清理与导航只是被推到「处理中状态确实画过一帧之后」，
    *    总时长没有任何增加意义上的人为等待（见 `beginClaim` 的两帧说明）。
-   * ⚠️ 与 `chosenDefId` 的区别：`chosenDefId` = 「选了哪一件」（不可改选），
-   *    `claiming` = 「这件正在交接」（不可重复点击）。两者都在最前面就置位。
+   * ⚠️ 与 `chosenDefId` 的区别：`chosenDefId` = 「领的是哪一件」（不可再领），
+   *    `claiming` = 「正在交接」（不可重复点击）。两者都在最前面就置位。
    */
   private claiming = false;
+  /**
+   * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 7）｜
+   * 「开始领取」的累计次数（只读诊断，恒定 0 或 1）。
+   *
+   * ⚠️ 它存在的唯一理由是让「**不能重复触发**」变成一条**可取证的事实**：E2E 在
+   *    导航被挂起的窗口里连点几次，读回它必须仍为 1（0 次 = 根本没点中，>1 = 有重复入口）。
+   * ⚠️ 它不参与任何 Gameplay 规则，也不替代产品侧账本（真正的幂等键是 `runToken`）。
+   */
+  private claimStarts = 0;
   private rafHandle = 0;
   private lastFrameMs = 0;
   /** 当前遭遇的真实战斗运行时（EVENT 建立 → 回到 IDLE 时释放）。 */
@@ -1121,30 +1165,32 @@ export class RunPage {
     }
 
     /*
-      PRODUCT-LOOP-R2-A｜RUN COMPLETE 的**产品 3选1 出口**。
-      ⚠️ 与 R1-B 同一条顺序纪律：必须放在 `runActionEnabled(this.state)` **之前**，且必须 `return`。
-         `COMPLETE` 在状态机里是 `true`（默认唯一动作 = 开一个全新 Run），放过去就会变成
-         「点候选卡 = 悄悄重开新局」。
-      ⚠️ **锁定**（Queue 必改 4「当前 reward 被锁定」）：选过之后本分支彻底不再接受任何点击
-         —— 第二次点别的卡**不会改主意**，也不会重复发奖。终点态不接受推进、也不接受改选。
-      ⚠️ 有候选卡时，`return` 掉所有落空点击：终点态上不存在「点空白 = 继续」这种隐式推进。
+      PRODUCT-LOOP-R2-A｜RUN COMPLETE 的**产品奖励出口**。
+      PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2 / 6）｜
+        **出口从卡片收敛为底栏唯一 CTA。**
+        旧实现里这一支是「卡片命中 → 领那一件」，而在底栏不画按钮之后，
+        它同时变成了「这一屏唯一还能点的东西」—— 真人验收看到的就是
+        「只有一张卡、底部没有主 CTA，玩家必须猜卡片能不能点」。本 Queue 把这条
+        **card-only claim assumption** 连同它的分支一起删掉：奖励卡只展示（必改 1），
+        唯一入口是底栏那个按钮（必改 2）。
+
+      ⚠️ 与 R1-B / R2-A 同一条顺序纪律：必须放在 `runActionEnabled(this.state)` **之前**，
+         且必须 `return`。`COMPLETE` 在状态机里是 `true`（默认唯一动作 = 开一个全新 Run），
+         放过去就会变成「点结算屏 = 悄悄重开新局」。
+      ⚠️ **处理中 / 已锁定 ⇒ 不接受任何点击**：`claiming` 在与本分支同一帧置位
+         （`beginClaim` 里先置位、再显式重绘一帧「领取中…」）⇒ 第二次点击落在
+         `claiming === true` 上被吞掉；即使页面已被 `dispose()`（监听已摘），
+         也不存在第二条领取路径。
+      ⚠️ 有固定奖励时，`return` 掉所有落空点击：终点态上不存在「点空白 = 继续」这种隐式推进，
+         **点奖励卡也不做任何事**（它是纯展示）。
     */
     const choiceViews = this.rewardChoiceViewsNow();
     if (choiceViews.length > 0) {
-      /*
-        PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 2）：**处理中不接受任何点击**。
-        原来只有 `chosenDefId` 一道锁，而锁定发生在「清理 + 导航」**同一帧内**——
-        真人根本来不及产生第二次点击，所以「防重复点击」在观感上是空的。
-        现在 `claiming` 在**同一帧**置位并**先画一帧**「领取中…」，玩家看得见锁。
-      */
       if (this.claiming || this.chosenDefId !== null) return; // 已锁定 / 交接中 ⇒ 不再接受任何选择
-      const rects = runRewardChoiceRects(choiceViews.length);
-      for (let i = 0; i < choiceViews.length; i++) {
-        if (hit(rects[i], p)) {
-          const claim = runSelectedClaim(this.state, this.opts.rewardChoices, choiceViews[i].defId);
-          if (claim) this.beginClaim(claim);
-          return;
-        }
+      // 唯一入口：底栏 CTA。命中的**判据与矩形**都和绘制同源（`runActionButtonRect()`）。
+      if (hit(runActionButtonRect(), p)) {
+        const claim = runSingleRewardClaim(this.state, this.opts.rewardChoices);
+        if (claim) this.beginClaim(claim);
       }
       return;
     }
@@ -1295,16 +1341,20 @@ export class RunPage {
   /**
    * 主动作是否可用。
    * ⚠️ 默认路径（`validationDone` 恒为 `false`）与 `runActionEnabled(state)` 完全等价。
-   * ⚠️ PRODUCT-LOOP-R2-A：COMPLETE 的主动作**变成了三张候选卡本身**
-   *    （它们各自带 `href`，是真正的出口）⇒ 底部那条通用按钮**不再参与**终点态：
-   *    这里返回 `false`，`drawActionButton()` 会短路不画
-   *    ⇒ 结构上不存在「有按钮但点了没反应」（PRP-M2-R1 的 P0 教训）。
+   * ⚠️ PRODUCT-LOOP-R2-A：COMPLETE 的出口**曾经**在候选卡上 ⇒ 底栏按钮不参与终点态。
+   *    **PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 2）推翻它**：
+   *    奖励卡改为纯展示（必改 1），出口收敛为底栏**唯一主 CTA「领取并返回」**
+   *    ⇒ 有固定奖励的 COMPLETE 上，这里必须为 `true`（否则又回到「没有主 CTA」的真人 P0）。
+   *    ⚠️ 判据与出口**同源**：`runSingleRewardClaim()` 拿不到请求（不是 COMPLETE / 没有载荷）
+   *       时，`rewardChoiceViewsNow()` 本来就是 `[]`，走不到这一支。
+   *    ⚠️ 账本随之自洽：`layeredShapes()` 在 `actionEnabledNow() === true` 时**登记**
+   *       `actionBar` 层 ⇒「画了按钮」与「账本说有按钮」第一次真正一致。
    * ⚠️ PRODUCT-LOOP-R1-D：`FAILED` **不再**走状态机的「终态动作 = 开新局」——
    *    它只认「返回主界面」这条出口；宿主没给地址 ⇒ 不可用（并且不画），
    *    因此失败后**没有任何**能创建新 Run 的入口（Queue 必改 6）。
    */
   private actionEnabledNow(): boolean {
-    if (this.rewardChoiceViewsNow().length > 0) return false; // 出口在卡片上，不在底栏
+    if (this.rewardChoiceViewsNow().length > 0) return true; // 唯一出口 = 底栏「领取并返回」
     const fail = this.failSettlementNow();
     if (fail) return fail.href !== '';
     if (this.validationDone) return this.finalActionNow() !== null;
@@ -1314,13 +1364,16 @@ export class RunPage {
   /**
    * 主动作文案。
    * ⚠️ 默认路径与 `runActionLabel(state)` 完全等价；终点态 = 出口动作的文案（不是状态描述）。
-   * ⚠️ 产品 3选1 终态的主动作在卡片上 ⇒ 这里回退到状态机文案（真正决定玩家看到的
-   *    是那三张卡；底部按钮反正不画）。这样 `actionLabel` 在探针里也不会假装
-   *    底栏有一个「可领奖」的按钮。
+   * ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 2）：
+   *    有固定奖励的 COMPLETE 上这条 CTA 就是「领取并返回」；按下之后**同一帧**变
+   *    「领取中…」（所以 `claiming` 必须**先于**奖励分支判 —— 否则按钮文案不会变，
+   *    玩家看到的就是「按下去了但什么也没发生」）。
    * ⚠️ PRODUCT-LOOP-R1-D：`FAILED` 的文案恒为「返回主界面」（**不是**状态机里的
    *    「重新开始冒险」）—— 失败页不提供重开。
    */
   private actionLabelNow(): string {
+    if (this.claiming) return RUN_CLAIMING_LABEL;
+    if (this.rewardChoiceViewsNow().length > 0) return RUN_CLAIM_AND_RETURN_LABEL;
     if (this.failSettlementNow()) return RUN_FAIL_RETURN_LABEL;
     const exit = this.finalActionNow();
     return exit ? exit.label : runActionLabel(this.state);
@@ -1348,14 +1401,16 @@ export class RunPage {
   }
 
   /**
-   * PRODUCT-LOOP-R2-A｜**选中一件候选**：锁定 → 清理本页运行期状态 → 把**领取请求**交给宿主。
+   * PRODUCT-LOOP-R2-A｜**领取本局奖励**：锁定 → 清理本页运行期状态 → 把**领取请求**交给宿主。
+   *
+   * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2）之后，
+   * 它的**唯一**触发点是底栏主 CTA「领取并返回」被按下（`onPointerDown` 的奖励分支）。
    *
    * ⚠️ 与 `requestExit` / `requestFailReturn` 同一纪律 —— **先清理、再交给宿主**；
    *    导航是异步的，不能依赖它释放运行时。
-   * ⚠️ **锁定先于一切**（Queue 必改 4「当前 reward 被锁定」）：`chosenDefId` 在
-   *    `dispose()` **之前**写入，因此即使宿主不导航（或导航被拦下），本页也已经
-   *    处于「已选定、不接受改选」的状态 —— 再点别的卡走 `onPointerDown` 的
-   *    `chosenDefId !== null` 早退分支，什么都不做。
+   * ⚠️ **锁定与处理中先于一切**：`chosenDefId` / `claiming` 都在 `dispose()` **之前**写入
+   *    ⇒ 即使宿主不导航（或导航被拦下），本页也已经处于「已领取、不接受任何点击」的状态
+   *    —— 再点走 `onPointerDown` 的 `claiming || chosenDefId !== null` 早退分支，什么都不做。
    * ⚠️ **本页不写库存、不写存档**（Lab 白名单里没有 `core/buildPersistence` / `core/partInventory`），
    *    也不做整页导航（`RP-25`）。「入库」与「回首页」由产品侧完成：
    *    宿主把请求变成一次带 `run`/`reward` 参数的整页导航 → 产品首页的 Profile Repository
@@ -1365,11 +1420,14 @@ export class RunPage {
   private beginClaim(claim: RunProductClaim): void {
     this.chosenDefId = claim.defId;
     this.claiming = true;
+    /** 必改 7 探针：本帧确实发生了一次「开始领取」（重复点击不会让它增加）。 */
+    this.claimStarts += 1;
     this.seedSelect = null;
     /*
       ⚠️ **必须显式 `render()` 一次**：终态（RESULT / COMPLETE）的战斗循环**已经自己停了**
          （`startLoop` 的 tick 在 `rt.result` 非空那一帧 `rafHandle = 0`）⇒ 不会再有下一帧
-         自动把「领取中…」画出来。不显式重绘的话，处理中状态只存在于内存里，屏幕上依然是旧帧。
+         自动把「领取中…」画出来。不显式重绘的话，处理中状态只存在于内存里，
+         屏幕上依然是**按下之前**那一帧 —— 那就等于「按了没有任何反馈」。
     */
     this.render();
     deferPastNextPaint(() => this.finishClaim(claim));
@@ -1383,7 +1441,10 @@ export class RunPage {
    *    顺序与责任完全没变。
    * ⚠️ 推迟**不增加**任何「等动画 / 等结算 / 等计时器」的人为等待：
    *    被推迟的只有本函数里的同步清理（实测 ≈ 1 ms 量级），
-   *    两帧的代价换来的是「点击一定有可见反馈」这件事在**任何**环境下都成立。
+   *    两帧的代价换来的是「按下一定有可见反馈」这件事在**任何**环境下都成立。
+   * ⚠️ `dispose()` 里已经包含**战斗音频停止**（`battleView.dispose()` → `stopBattleAudio()`）；
+   *    但音频**不依赖**这一步 —— 终态判定那一帧就已经停过了（必改 3 / 4），
+   *    这里再停一次是幂等 no-op，不是「等页面析构才静音」。
    */
   private finishClaim(claim: RunProductClaim): void {
     this.dispose();
@@ -1434,6 +1495,15 @@ export class RunPage {
     } else {
       this.stopLoop();
     }
+    /*
+      PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 3 / 4）｜
+      终态结算的**第二道**音频闸（与 `startLoop` 里那一处同一个幂等调用）。
+
+      ⚠️ 主路径（真实战斗打完）走的是 tick 里那一次；这里覆盖**不经战斗循环**而进入
+         终态的其余入口 ⇒ 无论从哪条路进结算，战斗音频都不可能跟进去。
+      ⚠️ 幂等 ⇒ 两道闸不会互相打架（第二次是 no-op，不会重复计数、不会报错，见必改 4）。
+    */
+    if (next.phase === 'COMPLETE' || next.phase === 'FAILED') this.battleView.stopBattleAudio();
     this.render();
   }
 
@@ -1556,6 +1626,24 @@ export class RunPage {
           enemyHp: hp.b,
           steps: rt.stepCount,
         });
+        /*
+          PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 3 / 4）｜
+          **胜负确定的那一帧就把战斗音频停掉。**
+
+          ⚠️ 这一帧正是「Battle Active → Battle Result / 终态结算」的分界点
+             （`finishRunBattle` 之后 `phase` 已经是 RESULT / COMPLETE / FAILED）——
+             因此「终局战斗直接进 COMPLETE / FAILED」与「中途战斗进 RESULT」在这里被
+             **同一个调用点**覆盖，不存在只堵一条路的可能。
+          ⚠️ **不依赖页面析构**：真人录屏里「结算页仍持续播放战斗噪音」的成因是旧实现
+             只用 `presentation.stop()`（它**只解绑事件订阅、不停音源**）且只在 `dispose()`
+             里执行 ⇒ 结算页与战斗音源的存活期重叠。现在停音**先于**玩家按 CTA，
+             也先于 `dispose()`。
+          ⚠️ 幂等：`stopBattleAudio()` 内部对每个音源 `fadeOutAndStop` 且带 `stopped` 闸，
+             重复调用是 no-op；`finishClaim` 里的 `dispose()` 再调一次不会报错（必改 4）。
+          ⚠️ 视觉不受影响：它只停音源 + 解绑事件消费，冻结的战场帧照样复用
+             （`RunBattleView.render` 的 `frozenFrame` 分支）。
+        */
+        this.battleView.stopBattleAudio();
         // PRP-M2：验证流程在第一场真实战斗结束后**停止**。
         // 判据取状态机回报的**真实完成场数**（不是「点了第几下」）→
         // 结构上不可能出现「第一场还没打完就宣布验证完成」。
@@ -1939,23 +2027,23 @@ export class RunPage {
     const fail = this.failSettlementNow();
     if (fail && fail.href === '') return;
     /*
-      PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY｜**补上漏掉的第三支：`COMPLETE` + 产品候选。**
+      PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 6）｜
+      **上一轮在这里补的第三支守卫已被删除** —— 它是为「卡片是唯一入口」那个口径服务的
+      （`COMPLETE` + 有候选 ⇒ `actionEnabledNow()` 为 `false` ⇒ 不许画底栏按钮）。
 
-      上面两条已经把「验证终点态没有出口」「失败终态没有回程地址」这两种情况处理掉了，
-      但**有候选卡的 `COMPLETE`** 漏了：此时 `actionEnabledNow()` 为 `false`
-      （出口在卡片上，底栏不参与），而命中分支对「有候选的终态」直接 `return`
-      ⇒ 屏幕上存在一个**画着、却永远点不动**的「完成本次冒险」按钮。
+      本 Queue 把口径反过来了：有固定奖励的 `COMPLETE` 上 `actionEnabledNow()` **恒为 `true`**
+      （出口就是这条 CTA）⇒ 那一支在新契约下**不可达**。按必改 6「删除为隐藏底栏建立的
+      相关特殊分支」把它删掉，而不是留一条永远不成立的分支假装还在防守。
 
-      真人录屏 P0：玩家点它 → 没有任何反馈（永远不会有）→ 被读成「卡死」。
-      本函数开头那句注释声称要根除的正是这个形态 —— 这里把漏掉的一支补齐。
-
-      ⚠️ **零账本影响**：`layeredShapes()` 在 `actionEnabledNow() === false` 时
-         **本来就不登记** `actionBar` 层 ⇒ 不画之后「账本」与「画面」才真正一致
-         （在此之前是「账本说没有、画面却有」）。
-      ⚠️ 默认路径（无产品候选）`COMPLETE` 的 `actionEnabledNow()` 恒为 `true`
-         （唯一动作 = 开新一局）⇒ 那条路线**逐像素不变**（`R58b` 钉死它必须是可用的）。
+      ⚠️ 真正的结构性保证是**同源**，不是这条守卫：绘制取 `runActionButtonRect()`、
+         命中取 `runActionButtonRect()`、可用性取 `actionEnabledNow()`、
+         账本登记取 `actionEnabledNow()` —— 四处同源 ⇒「画出来却点不动」不成立。
+      ⚠️ 「COMPLETE 有固定奖励」这条路径上**必然**画按钮：`actionEnabledNow()` 为
+         `true` ⇒ 用可用态色画、`layeredShapes()` 同步登记 `actionBar` 层
+         ⇒ 画出来的按钮与账本、与能点的区域三者一致（必改 2 的 enabled / hit 判据要求）。
+      ⚠️ 默认路径（无产品候选）`COMPLETE` 同样 `actionEnabledNow() === true`
+         （唯一动作 = 开新一局）⇒ 那条路线**逐像素不变**。
     */
-    if (runComplete(this.state) && !this.actionEnabledNow()) return;
     const btn = runActionButtonRect();
     // ⚠️ PRP-M2：这里读的是**本帧实际口径**（默认路径与 `runActionEnabled(s)` /
     //    `runActionLabel(s)` 完全等价）—— 验证终点态下按钮**可用**，文案 = 「返回验证中心」。
@@ -1978,11 +2066,11 @@ export class RunPage {
   /* --------------------------------------- RUN COMPLETE：3选1 奖励候选卡 */
 
   /**
-   * PRODUCT-LOOP-R2-A｜**候选卡**（Queue 必改 4）。候选**条数由产品侧给**：
+   * PRODUCT-LOOP-R2-A｜**奖励卡**（Queue 必改 4）。卡片**条数由产品侧给**：
    * R2-RECOVERY 起当前是 1 条，本方法对 N=1 / N=3 一视同仁（布局走 `runRewardChoiceRects(n)`）。
    *
-   * 与 R1-B 的「单张本局获得卡」相比，只多了一件玩家真正在做决定时需要的事实：
-   *   - N 张卡 = 产品侧给的 N 条候选（`rewardChoiceViewsNow()`，顺序原样保留）；
+   * ── PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1）：纯展示 ──
+   *   卡片**不作为点击入口、不承担导航**，只陈述这一局带回来的事实：
    *   - 每张卡第一行：部件**名称** + `★{star}`（都来自正式内容库，不是页面上另写一份字面量）；
    *   - 每张卡第二行：**成长口径** `当前 4/5 → 领取后 5/5`（`progressText`）——
    *     这是「还差 1 个 → 到 5/5 → 可以升星」在玩家眼前唯一能看见的证据
@@ -1990,14 +2078,15 @@ export class RunPage {
    *   - 达到满 stack 的那张卡用 `dayAccent` 强调（`reachesThreshold`）；
    *   - 左侧仍是**最低必要视觉** = 该部件真实 Collider 的外接框（`rewardColliderGeom`），
    *     没有正式 sprite 时如实标注（`hasSprite === false`）—— 不假装用了真实美术。
-   *
-   * ⚠️ 选中即**锁定**：`chosenDefId` 非空后在被选中的卡上画「已选择」，其余卡不再响应
-   *    （见 `onPointerDown` 的早退分支）。锁定是**不可撤销**的，真正的幂等由产品侧账本保证。
-   * ⚠️ 块**自底锚向上生长**（`runRewardChoicesTop`）⇒ 与失败结算面板共用同一个底锚，
-   *    切换终态时第一行文字不会跳。
-   * ⚠️ 颜色全部取自既有**非入账**色（cardBg / cardEdge / pageBg / dayAccent / text* / wheelRim）
-   *    ⇒ 与像素账本调色板天然互斥，且账本按**声明几何**计算 ⇒ 这一块一个像素都不入账。
-   * ⚠️ 不做动画 / 稀有度 / 宝箱 / 概率 / 品质（Queue 明令「禁止」清单）。
+   *   ⚠️ 上一轮在这块上加的「已选择」锁定标记与「领取中…」第二行替换**已删除**（必改 6）：
+   *      它们服务的是「卡片是唯一入口」那个口径。领取中的反馈现在在底栏那条 CTA 上。
+   *   ⚠️ 块**自底锚向上生长**（`runRewardChoicesTop`）⇒ 与失败结算面板共用同一个底锚，
+   *      切换终态时第一行文字不会跳。
+   *   ⚠️ **点击这一块什么都不会发生**：`onPointerDown` 的奖励分支只认底栏矩形，
+   *      其余落空点击一律 `return`（终点态不接受隐式推进）。
+   *   ⚠️ 颜色全部取自既有**非入账**色（cardBg / cardEdge / pageBg / dayAccent / text* / wheelRim）
+   *      ⇒ 与像素账本调色板天然互斥，且账本按**声明几何**计算 ⇒ 这一块一个像素都不入账。
+   *   ⚠️ 不做动画 / 稀有度 / 宝箱 / 概率 / 品质（Queue 明令「禁止」清单）。
    */
   private drawRewardChoiceCards(ctx: CanvasRenderingContext2D): void {
     const views = this.rewardChoiceViewsNow();
@@ -2020,14 +2109,23 @@ export class RunPage {
     for (let i = 0; i < n; i++) {
       const view = views[i];
       const r = rects[i];
-      const locked = this.chosenDefId === view.defId;
-      /** 必改 2：这一张正在交接（点击后的同一帧起为真）⇒ 第二行改为「领取中…」。 */
-      const claiming = this.claiming && locked;
+      /*
+        PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 6）｜
+        **这一块是纯展示。**
 
-      // ① 卡片底 + 描边（被选中的那张：加一圈强调描边 = 锁定）
+        旧实现里这里有「已选择」（锁定标记）与「领取中…」（第二行替换）两种**状态渲染**——
+        它们都是为「卡片是唯一入口」服务的。本 Queue 把入口收敛到底栏之后，
+        卡片不再承担任何交互，这两种状态渲染随之删除：留在屏幕上只会让玩家
+        继续以为「这张卡是有状态的、可能要再点一下」。
+        ⚠️ 领取中状态并没有消失，只是**搬到了它应该在的地方** —— 底栏那条 CTA
+           （`actionLabelNow()` 在 `claiming` 时返回 `RUN_CLAIMING_LABEL`）。
+        ⚠️ 只删绘制：`view.progressText`（探针 / 断言读的字段）与数据链**一字未改**。
+      */
+
+      // ① 卡片底 + 描边
       ctx.fillStyle = COLORS.cardBg;
       ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = locked ? COLORS.dayAccent : COLORS.cardEdge;
+      ctx.strokeStyle = COLORS.cardEdge;
       ctx.lineWidth = 2;
       ctx.strokeRect(r.x + 1, r.y + 1, r.w - 2, r.h - 2);
 
@@ -2076,28 +2174,17 @@ export class RunPage {
        * ⚠️ 只改这一行**信息表达**：Layout（`runRewardChoiceTextPos`）/ 命中 / 出口 /
        *    奖励行为**一个字都没动**。
        */
-      const countText = claiming ? RUN_CLAIMING_LABEL : view.progressText;
       /*
-        PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 2）：处理中这一行改为「领取中…」，
-        并临时加重（强调色 + 粗体 + 大 1px）⇒ 玩家**点下去的那一行**立刻变了。
-
-        ⚠️ 只改**绘制**，不改数据：`view.progressText`（探针 / 断言读的字段）**一个字都没改**
-           ⇒ 既有奖励断言全部不受影响；颜色取自既有非入账色 ⇒ 像素账本同样一个数字不变。
+        ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1）：
+           这一行恒为 `view.progressText`（`本局奖励`卡的固定内容之一）。
+           上一轮在这里做的「处理中 ⇒ 改画『领取中…』」已删除 —— 那一行反馈现在
+           出现在底栏那条 **唯一 CTA** 上（玩家真的按下去的那个东西）。
       */
-      ctx.fillStyle = claiming ? COLORS.dayAccent : COLORS.textDim;
-      ctx.font = claiming ? `bold 13px ${FONT_STACK}` : `12px ${FONT_STACK}`;
-      ctx.fillText(this.ellipsize(ctx, countText, r.x + r.w - text.x - 12), text.x, text.y2);
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = `12px ${FONT_STACK}`;
+      ctx.fillText(this.ellipsize(ctx, view.progressText, r.x + r.w - text.x - 12), text.x, text.y2);
 
-      // ⑤ 锁定标记（不可撤销）
-      if (locked) {
-        ctx.fillStyle = COLORS.dayAccent;
-        ctx.font = `13px ${FONT_STACK}`;
-        ctx.textAlign = 'right';
-        ctx.fillText(RUN_REWARD_LOCKED_LABEL, r.x + r.w - 12, r.y + 26);
-        ctx.textAlign = 'left';
-      }
-
-      // ⑥ 无正式美术时如实标注（不伪装成已用真实美术）
+      // ⑤ 无正式美术时如实标注（不伪装成已用真实美术）
       if (!view.hasSprite) {
         ctx.fillStyle = COLORS.textFaint;
         ctx.font = `10px ${FONT_STACK}`;
@@ -2605,19 +2692,42 @@ export class RunPage {
       /**
        * ⚠️ PRP-M2-R1：与 `actionLabel` 同源 —— 终点态下「点了去哪」也是本帧的真实口径。
        * PRODUCT-LOOP-R1-D 起含失败终态的唯一出口（`failExitHref`）。
-       * PRODUCT-LOOP-R2-A 起**不再含产品奖励**：3选1 的出口在**卡片上**，不在底栏
-       *   （`actionEnabledNow()` 有候选时恒 `false` ⇒ 底栏按钮不画）。
-       *   每条候选自己的去向见 `rewardChoices[].href`；选过之后见 `chosenDefId`。
-       *   ⇒ 本字段对 `COMPLETE` 通常为 `null`，这是**正确**读数而不是「出口丢了」。
+       * PRODUCT-LOOP-R2-A 起**不再含产品奖励**：奖励的去向是产品侧给的领奖地址
+       *   （`rewardChoices[].href`），底栏那条动作**不是**一次 `href` 跳转
+       *   —— 它走 `runSingleRewardClaim()` → 宿主导航。
+       *   ⇒ 本字段对 `COMPLETE` 恒为 `null`，这是**正确**读数而不是「出口丢了」。
+       * ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE 之后，
+       *   底栏在 `COMPLETE` + 固定奖励上**是可用且唯一**的入口 ——
+       *   判据看 `actionEnabled === true` 且 `actionLabel === '领取并返回'`，
+       *   而不是本字段（它表达的是「有没有一个可跳转的 href」）。
        */
       exitHref: failExitHref ?? this.finalActionNow()?.href ?? null,
       /**
-       * PRODUCT-LOOP-R2-A｜本帧真正画出来的**3选1 候选**（`[]` = 本帧没有这一块）。
+       * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 2 / 7）｜
+       * 底栏唯一 CTA 的处理中状态（`false` = 还没按下 / `true` = 已按下、正在交接）。
+       * ⚠️ 与 `actionLabel` 同源：它为 `true` 时 `actionLabel` 必为「领取中…」。
+       */
+      claiming: this.claiming,
+      /** 必改 7：本页累计「开始领取」次数（只读；重复点击不会让它增加）。 */
+      claimStarts: this.claimStarts,
+      /**
+       * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 3 / 4 / 8）｜
+       * 战斗音频生命周期读数（与 `RunBattleView` 里那个真实 `SfxAudioService` 同源）。
        *
-       * ⚠️ 与绘制 / 命中 / 出口**同源**（都走 `rewardChoiceViewsNow()`）；
+       * ⚠️ 终态（`COMPLETE` / `FAILED`）上 `activeBgmSources` 必须恒为 `0` ——
+       *    这条链在终态判定那一帧就停过了，**不等**页面 `dispose()`。
+       * ⚠️ `stops` = 本次页面生命周期内调用过几次停止（幂等；用于证明「确实停过」）。
+       */
+      battleAudio: this.battleView.audioProbe(),
+      /**
+       * PRODUCT-LOOP-R2-A｜本帧真正画出来的**奖励卡**（`[]` = 本帧没有这一块）。
+       *
+       * ⚠️ 与绘制 / 出口**同源**（都走 `rewardChoiceViewsNow()`）；
        *    **FAILED 恒为 `[]`**、不带产品上下文同样恒为 `[]`。
        * ⚠️ `href` 逐条来自产品侧给的那份载荷（Lab 不产出任何产品地址）——
-       *    这样「三张卡各自去哪」在 node 侧就是可断言的，不必真的点。
+       *    这样「这一件去哪」在 node 侧就是可断言的，不必真的点。
+       * ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1）：
+       *    这一块**纯展示**，命中分支不再读它的矩形（唯一入口是底栏 CTA）。
        */
       rewardChoices: choiceViews.map((v) => ({
         defId: v.defId,
@@ -2634,9 +2744,16 @@ export class RunPage {
         href: this.opts.rewardChoices?.choices.find((c) => c.defId === v.defId)?.href ?? '',
         hasSprite: v.hasSprite,
       })),
-      /** 候选卡矩形（与绘制 / 命中共用同一个函数；`[]` 同上）。 */
+      /**
+       * 奖励卡矩形（与**绘制**共用同一个函数；`[]` 同上）。
+       * ⚠️ 必改 1 之后它**不再参与命中** —— 这一块纯展示，点它什么都不会发生。
+       *    保留在探针里是为了让 E2E 仍能对卡片做像素取证（真实 `getImageData`）。
+       */
       rewardChoiceRects: choiceViews.length > 0 ? runRewardChoiceRects(choiceViews.length) : [],
-      /** 已锁定的那一件（`null` = 还没选）；锁定后本帧的出口见 `chosenClaim`。 */
+      /**
+       * 已经被领走的那一件（`null` = 还没领）。
+       * ⚠️ 必改 1 之后它的**唯一**写入点是底栏 CTA 被按下那一帧；卡片不再参与。
+       */
       chosenDefId: this.chosenDefId,
       /** 解析时被丢弃的非法候选条数（`> 0` = 产品侧载荷有坏条目，需被看见）。 */
       rewardChoicesDropped: this.opts.rewardChoices?.dropped ?? 0,

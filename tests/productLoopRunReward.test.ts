@@ -75,7 +75,8 @@ import {
   readClaimLedger,
 } from '../src/product/playerProfile';
 import {
-  RUN_REWARD_LOCKED_LABEL,
+  RUN_CLAIM_AND_RETURN_LABEL,
+  RUN_CLAIMING_LABEL,
   RUN_REWARD_NOTE,
   RUN_REWARD_TITLE,
   fitRewardIcon,
@@ -84,6 +85,7 @@ import {
   rewardColliderGeom,
   runRewardChoiceViews,
   runSelectedClaim,
+  runSingleRewardClaim,
 } from '../src/lab/portraitBattleLab/runProductReward';
 // PRODUCT-LOOP-R2-RECOVERY（必改 2）：奖励池的**新不变式**要拿完整 Run 支持清单来对账。
 import { FULL_RUN_SUPPORTED_WEAPON_IDS, supportsFullRun } from '../src/product/runCompatibility';
@@ -668,19 +670,48 @@ describe('PRODUCT-LOOP-R2-A｜D. 终点态：只有 COMPLETE 才有候选', () =
       runToken: 'run-test-1',
       href: buildClaimHref('run-test-1', pick),
     });
+    /*
+      ★ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2）｜
+        底栏唯一 CTA 的出口**与上面那个对象完全一致** —— 出口换了触发方式（按按钮而不是
+        点卡片），但**没有**换规则：同一个候选表、同一个 token、同一条 `href`。
+    */
+    expect(runSingleRewardClaim(s, REWARD_CTX)).toEqual(claim);
     // 每条候选的出口互不相同（「选哪条」是真选择；条数由产品决策给）
     const hrefs = REWARD_CHOICE_IDS.map((id) => runSelectedClaim(s, REWARD_CTX, id)!.href);
     expect(new Set(hrefs).size).toBe(REWARD_CHOICE_IDS.length);
     // 不在候选里的件（spear / hammer：仍有库存、仍可装备，但**当前不进奖励池**）
     expect(runSelectedClaim(s, REWARD_CTX, 'spear'), '未入池的件拿不到出口').toBeNull();
     expect(runSelectedClaim(s, REWARD_CTX, 'hammer'), '未入池的件拿不到出口').toBeNull();
-    // 文案必须是**动作 / 承诺**，不是已完成的状态描述
-    expect(RUN_REWARD_TITLE).toBe('选一件带回家');
-    expect(RUN_REWARD_NOTE).toBe('选中的那件会进入你的车库');
-    expect(RUN_REWARD_LOCKED_LABEL).toBe('已选择');
-    for (const t of [RUN_REWARD_TITLE, RUN_REWARD_NOTE, RUN_REWARD_LOCKED_LABEL]) {
+    /*
+      文案必须是**动作 / 承诺**，不是已完成的状态描述。
+      ⚠️ 必改 1：卡片纯展示 ⇒ 标题/说明不能再暗示「选一件 / 选中的那件」，
+         否则就是「引导玩家去做一个这一屏上不存在的动作」。
+      ⚠️ 必改 2：底栏唯一 CTA 的文案 = 「领取并返回」，且它**是动作**；处理中的
+         「领取中…」只表达状态，不承诺结果（入库仍发生在导航之后）。
+    */
+    expect(RUN_REWARD_TITLE).toBe('本局奖励');
+    expect(RUN_REWARD_NOTE).toBe('领取后进入你的车库');
+    for (const t of [RUN_REWARD_TITLE, RUN_REWARD_NOTE]) {
       expect(t.includes('完成'), `${t} 不得是状态描述`).toBe(false);
+      expect(t.includes('选'), `${t} 不得暗示「选择」（本屏没有可选项、卡片纯展示）`).toBe(false);
     }
+    expect(RUN_CLAIM_AND_RETURN_LABEL).toBe('领取并返回');
+    expect(RUN_CLAIMING_LABEL).toBe('领取中…');
+  });
+
+  it('PR-15b 必改 1｜奖励卡**不再是入口**：卡片纯展示，底栏 CTA 是唯一出口', () => {
+    const s = completedState();
+    // 同一份载荷 ⇒ 底栏 CTA 拿到的就是「那件固定奖励」的请求（页面里没有第二个真源）
+    const viaCta = runSingleRewardClaim(s, REWARD_CTX);
+    expect(viaCta).toEqual(runSelectedClaim(s, REWARD_CTX, REWARD_CHOICE_IDS[0]));
+    // 三道闸门与 `runSelectedClaim` 一致：没有载荷 / 不是 COMPLETE ⇒ 拿不到请求
+    expect(runSingleRewardClaim(s, null)).toBeNull();
+    expect(runSingleRewardClaim(s, undefined)).toBeNull();
+    expect(runSingleRewardClaim(failedState(), REWARD_CTX), 'FAILED 结构上拿不到').toBeNull();
+    // 载荷里一条候选都没有（理论上解析阶段就已 `null`）⇒ 同样拿不到，不会「点了没反应」
+    expect(
+      runSingleRewardClaim(s, { runToken: 'r', stack: FUSE_STACK, choices: [], dropped: 0 }),
+    ).toBeNull();
   });
 
   it('PR-16 FAILED **结构上**拿不到 3选1（必改 5：无奖励选择 / 无 count 变化 / 无 Profile 增长）', () => {
@@ -780,28 +811,53 @@ describe('PRODUCT-LOOP-R2-A｜E. 源码守卫（本 Queue 的边界必须结构�
     }
   });
 
-  it('PR-22 3选1 绘制**不引入新的入账色**，且绘制 / 命中 / 出口 / 探针**四处同源**', () => {
+  it('PR-22 奖励卡绘制**不引入新的入账色**，且绘制 / 命中 / 出口 / 探针**四处同源**', () => {
     const src = strip(readLab('runPage.ts'));
     const start = src.indexOf('private drawRewardChoiceCards(');
     expect(start, 'runPage.ts 必须有 drawRewardChoiceCards').toBeGreaterThan(0);
     const body = src.slice(start, src.indexOf('\n  private ', start + 10));
     // 只允许复用 COLORS.*，不许出现十六进制字面量 / rgba
-    expect(body.includes('#'), '候选卡不得写死颜色（必须复用 COLORS）').toBe(false);
+    expect(body.includes('#'), '奖励卡不得写死颜色（必须复用 COLORS）').toBe(false);
     expect(body.includes('rgba(')).toBe(false);
     /*
       四处同源（本项目的铁律）：`rewardChoiceViewsNow()` 是**唯一**判据，
-      绘制 / 命中 / 底栏可用性 / 探针都经它 ⇒
-      「画的是 A、点的是 B」「探针说有三张、屏幕上没有」结构上不可能。
+      绘制 / 底栏可用性 / 底栏文案 / 命中 / 探针都经它 ⇒
+      「画的是 A、领的是 B」「探针说有卡、屏幕上没有」结构上不可能。
+      ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1）之后
+         **卡片不再参与命中** ⇒ 同源调用点里不再有「卡片命中」这一路。
     */
     expect(src.split('private rewardChoiceViewsNow(').length - 1).toBe(1);
     expect(
       src.split('this.rewardChoiceViewsNow()').length - 1,
-      '至少 4 处同源调用（绘制 / 命中 / actionEnabled / 探针）',
+      '至少 4 处同源调用（绘制 / 命中 / actionEnabled / actionLabel / 探针）',
     ).toBeGreaterThanOrEqual(4);
     expect(src.includes('this.drawRewardChoiceCards(ctx);'), '绘制入口必须存在').toBe(true);
-    expect(src.includes('const rects = runRewardChoiceRects(choiceViews.length);'), '命中也必须用同一份矩形').toBe(true);
-    // 出口同理：选中一件的唯一路径是 `runSelectedClaim()`
-    expect(src.includes('runSelectedClaim(this.state, this.opts.rewardChoices, choiceViews[i].defId)')).toBe(true);
+    /*
+      ★ 必改 2「hit rect 与绘制完全一致」的机器证据：**同一个函数**。
+        绘制在 `drawActionButton()` 里取 `runActionButtonRect()`，命中在奖励分支里取**同一个**；
+        并且卡片矩形**不再**出现在命中路径上（卡片纯展示）。
+    */
+    const drawFn = src.indexOf('private drawActionButton(');
+    expect(drawFn, 'drawActionButton 必须存在').toBeGreaterThan(-1);
+    expect(
+      src.indexOf('const btn = runActionButtonRect();', drawFn),
+      '绘制必须取 `runActionButtonRect()`',
+    ).toBeGreaterThan(drawFn);
+    expect(
+      src.includes('if (hit(runActionButtonRect(), p)) {'),
+      '命中必须取**同一个** `runActionButtonRect()`（hit rect 与绘制一致）',
+    ).toBe(true);
+    // 卡片纯展示 ⇒ 命中路径里不得再出现卡片矩形
+    expect(
+      src.includes('const rects = runRewardChoiceRects(choiceViews.length);'),
+      '卡片命中分支必须已删除（必改 1 / 6：卡片纯展示）',
+    ).toBe(false);
+    // 出口同理：唯一路径是 `runSingleRewardClaim()`（底栏 CTA），不再是「点了哪张卡」
+    expect(src.includes('runSingleRewardClaim(this.state, this.opts.rewardChoices)')).toBe(true);
+    expect(
+      src.includes('runSelectedClaim(this.state, this.opts.rewardChoices, choiceViews[i].defId)'),
+      'card-only claim assumption 必须已删除（必改 6）',
+    ).toBe(false);
     // 旧单件出口**必须已经不存在**（否则就是两份真源并存）
     for (const gone of ['productClaimNow', 'rewardCardNow', 'runRewardCardRect()']) {
       expect(src.includes(gone), `runPage.ts 不得残留旧单件出口：${gone}`).toBe(false);

@@ -3,6 +3,10 @@
  * PRODUCT-LOOP-R2-A-REWARD-STACK-INVENTORY｜**改口径**：单件固定奖励 →「**候选列表**」。
  * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）｜候选**当前只有 1 条**，
  * 卡片第二行改为**成长口径**（`当前 4/5 → 领取后 5/5`，见 `RunRewardChoiceView.progressText`）。
+ * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2 / 6）｜
+ * **交互口径再改一次**：奖励卡是**纯展示**（不承担点击、不承担导航），出口收敛为
+ * 底栏**唯一主 CTA**「领取并返回」（`runSingleRewardClaim()`）。旧实现里
+ * 「玩家必须点某张卡才能继续」这条**假设**连同它的分支一起被删除。
  * ⚠️ 本模块对候选**条数无假设**：N=1 与 N=3 走同一条代码路径
  *    （`runRewardChoiceRects(count)` 是 `Math.max(1, …)` ⇒ N=1 就是一张全宽卡）。
  *
@@ -11,7 +15,7 @@
  *   ② 把每条「候选 + 库存读数」解析成**可绘制的最小视觉**（正式内容库的真实 Collider 外接框
  *      + `★` + 当前数量 + 领取后数量预览）；
  *   ③ 判定「终点态是否真的存在奖励出口」——**唯一的真源**，绘制 / 命中 / 文案 / 探针
- *      四处都从这里取（结构上不可能出现「画了卡片但其实拿不到」或「选了一个没地址的选项」）。
+ *      四处都从这里取（结构上不可能出现「画了卡片但其实拿不到」或「按了按钮却没有地址」）。
  *
  * ── 硬边界（写进代码，避免以后被误用）─────────────────────────────────────────
  *   - **不写库存、不写存档**：Lab 源码守卫 `R22a` 的 `ALLOWED_RELATIVE_IMPORTS` 是闭集，
@@ -31,24 +35,35 @@ import { registry } from '../../core/content';
 import type { ColliderDef } from '../../core/types';
 import { runComplete, type RunPageState } from './runPageState';
 
-/** 面板标题（一句名词，不是状态描述）。 */
-export const RUN_REWARD_TITLE = '选一件带回家';
+/**
+ * 面板标题（一句名词，不是状态描述）。
+ *
+ * ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1）｜从
+ *    「选一件带回家」改为「本局奖励」：当前产品前提是**固定在结算时给 `cannon ★1 ×1`**，
+ *    奖励卡**只展示、不承担选择**（入口是底栏唯一 CTA）。旧标题里的「选一件」
+ *    会把玩家引向一个此屏上并不存在的动作 —— 这正是真人验收判不通过的那类误导。
+ *    ⚠️ 若将来恢复多候选，**再单独设计多选交互**（Queue 明令），不拿这一屏将就。
+ */
+export const RUN_REWARD_TITLE = '本局奖励';
 
 /**
  * 面板说明（**承诺**而不是已完成的状态）。
  *
- * ⚠️ 入库发生在玩家**选中之后**（由产品侧 Profile Repository 幂等执行）——
- *    写成「已进入车库」就是假陈述。R1-B 的这条纪律在 3选1 下同样成立。
+ * ⚠️ 入库发生在玩家**按下底栏 CTA 之后**（由产品侧 Profile Repository 幂等执行）——
+ *    写成「已进入车库」就是假陈述。
+ * ⚠️ 旧文案「选中的那件会进入你的车库」里的「选中」在本屏已不存在（必改 1：卡片纯展示）
+ *    ⇒ 改为「领取后进入你的车库」：陈述的是**按下唯一 CTA 之后的**结果。
  */
-export const RUN_REWARD_NOTE = '选中的那件会进入你的车库';
+export const RUN_REWARD_NOTE = '领取后进入你的车库';
 
 /**
- * 已选中标记（Queue 必改 4「当前 reward 被锁定」的可视形态）。
+ * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 2）｜**底栏唯一主 CTA**。
  *
- * ⚠️ 它表达的是**不可撤销**：选中即锁定 —— 再点别的选项不接受、也不会改主意。
- *    真正的幂等由产品侧账本保证（同一 Run 只入账一次），这里只负责「这一局已经定了」。
+ * ⚠️ 它是这一屏**唯一**的点击入口：奖励卡只展示（必改 1），底栏不再有「完成本次冒险」，
+ *    也不再出现「假禁用按钮 / 空白底栏 / 必须点奖励卡」三种形态（必改 2 明列的禁止清单）。
+ * ⚠️ 文案是**动作**（领取 + 返回），不是状态描述 —— 玩家不需要猜「现在能做什么」。
  */
-export const RUN_REWARD_LOCKED_LABEL = '已选择';
+export const RUN_CLAIM_AND_RETURN_LABEL = '领取并返回';
 
 /**
  * PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 2）｜**处理中**文案 = 点击后的即时反馈。
@@ -314,4 +329,33 @@ export function runSelectedClaim(
   const hit = set.choices.find((c) => c.defId === defId);
   if (!hit) return null;
   return { defId: hit.defId, runToken: set.runToken, href: hit.href };
+}
+
+/**
+ * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2）｜
+ * 底栏唯一 CTA「领取并返回」的**出口真源**（页面侧只有一个调用点）。
+ *
+ * ── 为什么要有它（而不是让底栏去点某张卡）────────────────────────────────────
+ * 当前产品前提 = 结算固定只给 `cannon ★1 ×1`。既然奖励**没有可选项**，
+ * 「玩家要先点卡片才能继续」就只是一个实现细节泄漏到体验里的产物：
+ * 真人验收看到的正是「上方一张卡、底部没有主 CTA，玩家必须猜卡片能不能点」。
+ * ⇒ 出口从「点某一张卡」改为「按底栏那一个按钮」，本函数就是那一下的判据。
+ *
+ * ⚠️ 它**不是**第二套规则：内部仍走 `runSelectedClaim()`（同一张候选表、同一个 token、
+ *    同一条 `href`）⇒ 「画的是 A、领的是 B」在结构上依然不可能。
+ * ⚠️ **唯一的输入差异**：defId 不再来自「点了哪张卡」，而来自**产品侧给的候选表的第一条**
+ *    （`set.choices[0]`）—— 在 N=1 的产品前提下这就是「那件固定奖励」，页面里没有第二个真源。
+ * ⚠️ 三条闸门与 `runSelectedClaim` 完全一致：有产品上下文、必须是 `COMPLETE`（FAILED 结构上
+ *    拿不到）、候选表非空。任一不满足 ⇒ `null` ⇒ 页面不接受这次点击（也不会画一个点了没反应的按钮）。
+ * ⚠️ N>1 时本函数只会领取**第一条** —— 多候选必须**单独设计**多选交互（Queue 明令），
+ *    不在这一屏将就；`REWARD_CHOICE_IDS ⊆ ['cannon']` 使这条路径当前不可达。
+ */
+export function runSingleRewardClaim(
+  state: RunPageState,
+  set: RunRewardChoiceSet | null | undefined,
+): RunProductClaim | null {
+  if (!set) return null;
+  const only = set.choices[0];
+  if (!only) return null;
+  return runSelectedClaim(state, set, only.defId);
 }

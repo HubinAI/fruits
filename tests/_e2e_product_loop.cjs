@@ -151,6 +151,16 @@ const SEED_COUNTS = { cannon: 4, spear: 1, hammer: 1 };
 const FUSE_STACK = 5;
 /** 候选卡底色（`runPage.ts` 的 `COLORS.cardBg`）—— 用于证明卡片真的画在画布上。 */
 const CARD_BG = [0x1b, 0x24, 0x32];
+/**
+ * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 2 / 7）｜
+ * 底栏唯一 CTA 的**可用态填充色**（`COLORS.actionFill` = `#28405f`）。
+ * ⚠️ 与「禁用态色必须为 0」配对使用：前者证明入口真的在，后者证明不存在假按钮。
+ */
+const CTA_FILL_ON = [0x28, 0x40, 0x5f];
+/** 底栏唯一 CTA 的**禁用态**填充色（`COLORS.actionFillOff` = `#232b38`）。 */
+const CTA_FILL_OFF = [0x23, 0x2b, 0x38];
+/** 「CTA 成片可用态填充」下界（342×54 去掉描边与字形后 ≈16000+；取 65% 留渲染余量）。 */
+const CTA_FILL_MIN_PX = 12000;
 
 /** 正式存档 key（与 src 同值；E2E 独立取证，不经过页面探针）。 */
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
@@ -685,13 +695,29 @@ async function main() {
       'C3 COMPLETE 出现**真实 Weapon 候选卡**（候选池只有 1 件）：名称 / ★1 / 当前数量 → 领取后数量预览（本件跨过 5/5），且载荷零条被丢弃',
       `候选=${rc.map((c) => `${c.name}★${c.star} ${c.previewText}${c.reachesThreshold ? '(满)' : ''}`).join(' | ')} dropped=${p1.rewardChoicesDropped}`,
     );
+    /*
+      ★ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2 / 3）｜
+      终点态的入口从「点卡片」收敛为底栏**唯一主 CTA**「领取并返回」，卡片纯展示。
+      这里同时验证两件事：**唯一入口真实可用** + **战斗音频已停**（结算页是安静的终态）。
+    */
     log(
-      p1.exitHref === null && p1.actionEnabled === false,
-      'C3b 出口**在卡片上**：底栏那条通用按钮在终点态不可用、也没有产品出口（候选池不存在「默认那件」）',
-      `label=${p1.actionLabel} enabled=${p1.actionEnabled} exit=${p1.exitHref}`,
+      p1.exitHref === null &&
+        p1.actionEnabled === true &&
+        p1.actionLabel === '领取并返回' &&
+        p1.claiming === false &&
+        p1.claimStarts === 0,
+      'C3b 终点态有**唯一主 CTA**「领取并返回」且可用（卡片纯展示 ⇒ 出口不在卡片上）',
+      `label=${p1.actionLabel} enabled=${p1.actionEnabled} claiming=${p1.claiming} exit=${p1.exitHref}`,
     );
-    // 真实像素取证：候选卡真的画在画布上（不是只有探针字段）
-    // ⚠️ 必须在**点卡之前**采：点中即整页导航 ⇒ `#run-canvas` 不复存在。
+    log(
+      p1.battleAudio.activeBgmSources === 0 &&
+        p1.battleAudio.battleSession === null &&
+        p1.battleAudio.stops >= 1,
+      'C3d **必改 3 / 4**：进入 COMPLETE 时战斗音频已停（活跃循环音源 0；停止不依赖页面 dispose）',
+      `state=${p1.battleAudio.state} 活跃音源=${p1.battleAudio.activeBgmSources} stops=${p1.battleAudio.stops}`,
+    );
+    // 真实像素取证：奖励卡真的画在画布上（不是只有探针字段）
+    // ⚠️ 必须在**按下 CTA 之前**采：导航一旦提交 ⇒ `#run-canvas` 不复存在。
     // 阈值来源（必改 2 后按**实际卡数**重推）：候选 1 张 ⇒ 矩形总面积 1 × 362 × 68 = 24616 px²，
     // 卡底实测 ≈ 19664（约 79.9%）⇒ 取 18000（约 73.1%）作为「成片」下界：
     // 排掉「只画了边框」，也给字体抗锯齿留余量（旧值 55000 是 3 张卡的面积口径，不能沿用）。
@@ -700,8 +726,20 @@ async function main() {
     for (const r of choiceRects) cardBgPx += await countColorInRect(page, r, CARD_BG);
     log(
       choiceRects.length === 1 && choiceRects.every((r) => r.w === 362 && r.h === 68) && cardBgPx > 18000,
-      'C3c 候选卡真的画出来（真实 `getImageData`：矩形里都是成片的卡底像素）',
+      'C3c 奖励卡真的画出来（真实 `getImageData`：矩形里都是成片的卡底像素）',
       `rects=${choiceRects.map((r) => `${r.x},${r.y} ${r.w}×${r.h}`).join(' | ')} cardBg=${cardBgPx}`,
+    );
+    /*
+      ★ 必改 7｜**唯一主按钮真实存在且真实可点击**（真实 `getImageData` 双色取证）。
+      ⚠️ 上一轮同类取证守的是「底栏禁用态像素 = 0」（那一屏不许有按钮）；契约反转后
+         判读方向也反转：可用态必须**成片**、禁用态必须为 0。
+    */
+    const ctaFillOn = await countColorInRect(page, p1.actionRect, CTA_FILL_ON);
+    const ctaFillOff = await countColorInRect(page, p1.actionRect, CTA_FILL_OFF);
+    log(
+      ctaFillOn >= CTA_FILL_MIN_PX && ctaFillOff === 0,
+      'C3e **必改 7**｜底栏唯一 CTA 真的画成可用态（可用态成片 + 禁用态 0）',
+      `actionRect=${JSON.stringify(p1.actionRect)} 可用态像素=${ctaFillOn}(≥${CTA_FILL_MIN_PX}) 禁用态像素=${ctaFillOff}`,
     );
     // 本局的幂等键：第一局出发时首页生成的那个 token（领奖与「重复领取」都对着它）
     const token1 = home0.runToken;
@@ -714,10 +752,15 @@ async function main() {
       `token=${token1} · ${rc.map((c) => c.href.replace('./home.html?', '')).join('  ')}`,
     );
 
-    /* ---- 6) 点中**领奖那张卡**（cannon）→ 回首页入库（真实鼠标，不是底栏按钮） ---- */
+    /* ---- 6) 按下**底栏唯一 CTA** → 回首页入库（真实鼠标；必改 1：卡片纯展示，不承担导航） ---- */
+    /*
+      ⚠️ `waitForURL` 用 **pathname 谓词**，不能用子串正则 `/home\.html/`：
+         Run 页地址自带 `home=.%2Fhome.html` 这个**参数取值** ⇒ 子串正则当场匹配自己、
+         根本不等待导航（实测 `navMs = 23 ms`，挂起与路由也因此被提前撤销）。
+    */
     await Promise.all([
-      page.waitForURL(/home\.html/, { timeout: 20000 }).catch(() => {}),
-      clickRect(page, choiceRects[CLAIM_INDEX]),
+      page.waitForURL((u) => u.pathname === '/home.html', { timeout: 20000 }).catch(() => {}),
+      clickRect(page, p1.actionRect),
     ]);
     await waitHomeReady(page);
     const home2 = await probeHome(page);

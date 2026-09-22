@@ -459,22 +459,33 @@ async function main() {
        C｜领奖：点 cannon 那张卡（必改 2 起候选只有它一件）→ 库存 5/5
        ================================================================================== */
     const pDone = run1.detail.last;
-    const pickIndex = CHOICE_IDS.indexOf('cannon');
-    const cardRect = pDone.rewardChoiceRects[pickIndex];
     log(
       pDone.phase === 'COMPLETE' && pDone.rewardChoiceRects.length === CHOICE_IDS.length,
       'C1 COMPLETE 上真的画出了候选卡（与绘制同源的矩形；条数 = 产品候选池长度）',
       `phase=${pDone.phase} rects=${pDone.rewardChoiceRects.length}`,
     );
+    /*
+      ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2）之后，
+         出口从「候选卡」收敛为**底栏唯一主 CTA**：卡片纯展示，点它**什么都不发生**。
+         本段路线据此改写为「按下底栏 CTA」，**断言一条不删、只加一条守门**
+         （REF §9：产品契约变更作废既有 E2E 路线 ⇒ 换合法路线 + 新增守门断言）。
+      ⚠️ `waitForURL` 必须用 **pathname 谓词**：Run 页地址自带 `home=.%2Fhome.html`
+         这个参数取值，子串正则 `/home\.html/` 会**当场匹配自己**、根本不等待导航。
+    */
+    log(
+      pDone.actionEnabled === true && pDone.actionLabel === '领取并返回',
+      'C1b **必改 2**｜终点的唯一出口是底栏 CTA「领取并返回」且可用（卡片不是入口）',
+      `label=${pDone.actionLabel} enabled=${pDone.actionEnabled}`,
+    );
     await Promise.all([
-      page.waitForURL(/home\.html/, { timeout: 20000 }).catch(() => {}),
-      clickRect(page, cardRect),
+      page.waitForURL((u) => u.pathname === '/home.html', { timeout: 20000 }).catch(() => {}),
+      clickRect(page, pDone.actionRect),
     ]);
     await waitHomeReady(page);
     const storedAfterClaim = await storageDump(page);
     log(
       invCount(storedAfterClaim, 'cannon', 1) === 5,
-      'C2 领到 cannon ⇒ 库存 ★1 = **5/5**（真实鼠标点击候选卡 + 真实整页导航回来）',
+      'C2 领到 cannon ⇒ 库存 ★1 = **5/5**（真实鼠标按下底栏 CTA + 真实整页导航回来）',
       `★1×${invCount(storedAfterClaim, 'cannon', 1)}`,
     );
 

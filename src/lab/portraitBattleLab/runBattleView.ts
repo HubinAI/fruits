@@ -34,7 +34,7 @@
 
 import { Renderer } from '../../render/renderer';
 import { VisualRegistry } from '../../render/visualRegistry';
-import { SfxAudioService } from '../../presentation/audioService';
+import { SfxAudioService, type AudioProbeState } from '../../presentation/audioService';
 import { createPlayerPresentation } from '../../presentation/playerPresentation';
 import { RUN_STAGE_BAND, type RunRect } from './runPageLayout';
 import {
@@ -47,10 +47,35 @@ import {
 } from './runBattleRuntime';
 import { RUN_VISUAL_ASSETS } from './runVehicleAssets';
 
+/**
+ * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 3）｜
+ * 终态停止战斗音频时的**淡出时长**（毫秒）。
+ *
+ * ⚠️ 上限是 Queue 明写的 **200 ms**（「允许短淡出：<= 200ms」）。取 180 而不是共享实现
+ *    默认的 220：这里**只需**满足结算页「立刻安静」这条体验要求，不必改动
+ *    `SfxAudioService` 既有调用点（主玩法路径）的既定值。
+ */
+const RUN_BATTLE_AUDIO_FADE_MS = 180;
+
 export interface RunBattleViewAssetStats {
   readonly registered: number;
   readonly ready: number;
   readonly failed: readonly string[];
+}
+
+/**
+ * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 3 / 4 / 8）｜
+ * 战斗音频的生命周期读数（探针 / E2E 用；不参与任何战斗规则）。
+ *
+ * - `stopped`：本宿主上**是否调过**停止（幂等；`false` = 从没停过）；
+ * - `stops`  ：停止被调用的次数（含 `dispose()` 里那一次）——
+ *              用来证明「终态确实停过」，而**不是**用来要求某个精确次数（幂等 ⇒ 多少次都等价）；
+ * - 其余字段直通 `SfxAudioService.getAudioProbe()`
+ *   （`activeBgmSources` = 当前仍在循环发声的战斗音源数，终态必须为 `0`）。
+ */
+export interface RunBattleAudioProbe extends AudioProbeState {
+  readonly stopped: boolean;
+  readonly stops: number;
 }
 
 /**
@@ -64,7 +89,16 @@ export class RunBattleView {
   private readonly canvas: HTMLCanvasElement;
   private readonly registry = new VisualRegistry();
   private readonly renderer: Renderer;
+  /**
+   * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 3 / 4）｜
+   * 音频服务实例**必须自己持有**（旧实现直接 `new SfxAudioService()` 塞进表现层，
+   * 于是「停战斗音」这件事在宿主里**根本没有把手**，只能等到 `dispose()` 里那句
+   * `presentation.stop()` —— 而它只解绑事件订阅、**不停音源**）。
+   */
+  private readonly sfx: SfxAudioService;
   private readonly presentation;
+  /** 本宿主的音频停止次数（幂等 ⇒ 仅供探针证明「停过」，不参与任何判断）。 */
+  private audioStops = 0;
   /** 注入 Renderer 的视口抽象（**可变**：DPR 变化时同步，避免与画布 backing 失配）。 */
   private readonly surface: { width: number; height: number; devicePixelRatio: number; now(): number };
   private readonly urls = new Map<string, string>();
@@ -95,7 +129,8 @@ export class RunBattleView {
     };
     this.renderer = new Renderer(this.canvas, this.registry, this.surface);
     this.renderer.setBattleBackdrop(true);
-    this.presentation = createPlayerPresentation(this.renderer, new SfxAudioService());
+    this.sfx = new SfxAudioService();
+    this.presentation = createPlayerPresentation(this.renderer, this.sfx);
     this.loadAssets(() => this.onAssetReadyCb?.());
   }
 
@@ -200,8 +235,36 @@ export class RunBattleView {
     );
   }
 
-  dispose(): void {
+  /**
+   * PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 3 / 4）｜
+   * **停止战斗音频**（终态结算专用入口；与页面析构解耦）。
+   *
+   * 做两件事，缺一不可：
+   *   ① `presentation.stop()` —— 解开战斗事件订阅，终态上不再产生任何**新的**战斗音；
+   *   ② `sfx.stopBattleAudio(fadeMs)` —— 把**已经在循环**的音源在 ≤200ms 内淡出并停止。
+   *
+   * ⚠️ 为什么 ② 不能省：`presentation.stop()` 只解绑，**一个音源都不会停**。
+   *    实测（`tests/settlementAudioLifecycle.test.ts`）蓄能循环音源在解绑后
+   *    `activeBgmSources` 仍为 1 —— 真人录屏里「结算页仍持续播放战斗噪音」正是它。
+   * ⚠️ **幂等**：重复调用安全（同一音源带 `stopped` 闸；空集时是 no-op），
+   *    因此「终态停一次 + `dispose()` 再停一次」不会报错、也不会重复发声（必改 4）。
+   * ⚠️ 不做任何**画面**副作用：冻结的战场帧仍由 `render()` 的 `frozenFrame` 分支复用。
+   */
+  stopBattleAudio(): void {
+    this.audioStops += 1;
     this.presentation.stop();
+    this.sfx.stopBattleAudio(RUN_BATTLE_AUDIO_FADE_MS);
+  }
+
+  /** 战斗音频生命周期读数（必改 8：探针 / E2E 只锁 `ACTIVE → STOPPED`，不测音量数值）。 */
+  audioProbe(): RunBattleAudioProbe {
+    return { ...this.sfx.getAudioProbe(), stopped: this.audioStops > 0, stops: this.audioStops };
+  }
+
+  dispose(): void {
+    // ⚠️ 必改 4：析构**复用**同一个幂等停止入口 —— 页面销毁不需要重新发明一套静音逻辑，
+    //    也不会因为「终态已经停过」而产生第二次异常。
+    this.stopBattleAudio();
     this.boundTo = null;
   }
 

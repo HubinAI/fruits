@@ -1,24 +1,28 @@
 /**
  * PRODUCT-LOOP-R2-A-REWARD-STACK-INVENTORY｜
- * 「打完一局 → **三选一** → 选中那件进入局外库存 → 数量累积 → 回车库看到」的**浏览器真实闭环 smoke**。
+ * 「打完一局 → **按下底栏唯一 CTA「领取并返回」** → 那件进入局外库存 → 数量累积 →
+ *  回车库看到」的**浏览器真实闭环 smoke**。
+ *
+ * ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2）改变了入口：
+ *    奖励卡是**纯展示**（点它什么都不发生，见 C8），唯一入口是底栏那条 CTA（见 C5 / C7 / C9）。
  *
  * 手段（与 `_e2e_product_home.cjs` 同一纪律，全部是真实行为取证）：
  *   - 真实浏览器（playwright-core / msedge），打开独立产物 `dist-portrait-lab/`；
  *   - **真实鼠标点击**（`page.mouse.click`，逻辑坐标 → 画布真实 CSS 矩形换算；不 evaluate 直调）；
  *   - **真实整页导航**（`<a href>` / `location.assign` 都由浏览器执行，不做 evaluate 跳转）；
  *   - **真实 localStorage 读取**（证明入库写进的是**正式存档 key**，而不是页面内存）；
- *   - **真实 `getImageData` 像素取证**（证明候选卡真的画在画布上，不是只有探针字段）；
+ *   - **真实 `getImageData` 像素取证**（证明卡片与 CTA 真的画在画布上，不是只有探针字段）；
  *   - 只读诊断句柄 `window.__PRODUCTHOME__` / `window.__RUNPAGE__`（只读，不能借它改状态）。
  *
  * 覆盖 R2-A 技术验收 1~8（第 9 条 = tsc / targeted / build 在门禁里跑）：
  *   ① fresh profile cannon = ★1 4/5      → A2 / A3
- *   ② COMPLETE 出现 3 个真实 Weapon 奖励 → C3 / C6
- *   ③ 选择 cannon 后变成 5/5             → D4（第一局）
- *   ④ 选择其它 Weapon 只增加对应 stack   → H4（第二局选 hammer：1 → 2，cannon 仍 5）
- *   ⑤ 同一奖励只能领取一次               → E1/E2/E3（同 token **换一件**也领不到）
- *   ⑥ FAILED 数量完全不变                → I2 / I5
- *   ⑦ old Profile migration 不丢数据     → 由 `tests/playerGrowthR2A.test.ts` 的 PG-07~PG-10 离线钉死
- *   ⑧ Equipped 仍指向有效库存实例         → 同上（PG-11~PG-14）
+ *   ② COMPLETE 出现真实 Weapon 奖励卡      → C3 / C6
+ *   ③ 领取 cannon 后变成 5/5              → D4（第一局）
+ *   ④ 领取只增加对应 stack                → H3 / H4（第二局）
+ *   ⑤ 同一奖励只能领取一次                → E1/E2（同 token 重复导航也领不到）
+ *   ⑥ FAILED 数量完全不变                 → I2 / I5
+ *   ⑦ old Profile migration 不丢数据      → 由 `tests/playerGrowthR2A.test.ts` 的 PG-07~PG-10 离线钉死
+ *   ⑧ Equipped 仍指向有效库存实例          → 同上（PG-11~PG-14）
  *
  * 叠加 PRODUCT-LOOP-R2-B 技术验收（K 段，放在所有跑局断言**之后** —— ★2 会改变 Build 能量，
  * 插在中间会让「确定性通关路线」不再确定性）：
@@ -107,8 +111,13 @@ const ICON_GLYPH = [0x9a, 0xa2, 0xb2]; // COLORS.wheelRim —— 图标本体（
 
 /*
   ══════════════════════════════════════════════════════════════════════════════
-  PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（Queue 必改 7）｜结算 CTA 两条守门的数据源
+  PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（Queue 必改 7 / 8）
+  ｜结算页「唯一主 CTA + 声音生命周期」守门的数据源
   ══════════════════════════════════════════════════════════════════════════════
+
+  ⚠️ 上一轮守的是「禁用按钮像素 = 0」（**底栏不许有按钮**）；本 Queue 把契约反过来了：
+     真正要守的是「**唯一主按钮真实存在且真实可点击**」。因此同一组像素取证换了判读方向，
+     而不是把断言删掉 —— 后者会让「结算页根本没有主 CTA」这个真人 P0 再次无人防守。
 */
 
 /**
@@ -121,6 +130,33 @@ const ICON_GLYPH = [0x9a, 0xa2, 0xb2]; // COLORS.wheelRim —— 图标本体（
 const CTA_HOME_BUDGET_MS = 4000;
 
 /**
+ * 「领取中…」取证窗口 —— **不再人为挂起导航**，窗口是**天然的**。
+ *
+ * 实测结论（三轮，全部有数）：
+ *   · 自然窗口 = 按下 → 两帧可见反馈 → `dispose()` + 整页导航，**真导航 ≈ 125 ms**；
+ *     而窗口读数（一次钉住上下文的 CDP 求值）只需要 **十几 ms** ⇒ 天然来得及。
+ *   · 反过来，**人为挂起导航会把窗口毁掉**：导航一旦在途，渲染进程对旧文档的
+ *     CDP 求值**要等到新文档装载完才回**（实测 `elapsedMs = 1577 ms` 且
+ *     `Cannot find context with specified id`）⇒ 旧文档那一帧反而读不到了。
+ *     而且挂起会让 `navMsNet = navMs − 挂起` 变成负数，把 D5 打红。
+ *   · 曾经用 `page.route` 拦也**一次都没拦到**；追根因时发现
+ *     `page.waitForURL(/home\.html/)` 会**当场匹配 Run 页自己的地址**
+ *     （它带 `home=.%2Fhome.html` 参数）⇒ 挂起/路由被提前撤销（详见那里）。
+ * ⇒ 结论：**不挂起**。`navMs` 就是产品的真实墙钟（不再有要扣掉的东西）。
+ */
+
+/**
+ * 「领取中…」窗口内**额外**补发的真实鼠标点击次数（必改 2「禁止重复点击」）。
+ *
+ * ⚠️ 这几次点击必须在**同一个窗口内、且尽量靠近第一次按下**发出去：两帧之后
+ *    `finishClaim()` 会 `dispose()` 并请求整页导航 ⇒ 再去读页面就晚了
+ *    （见 `playOneRunAndClaim` 里那段「坐标预先算好」的说明）。
+ * ⚠️ 落在哪里都算合格：撞在 `claiming` 闸上被吞、或落在已经摘掉监听的画布上，
+ *    两种都**不能**让 `claimStarts` 从 1 变成 >1。
+ */
+const EXTRA_CLAIM_CLICKS = 3;
+
+/**
  * `COLORS.actionFillOff`（`#232b38`）—— 主动作按钮**禁用态**填充色。
  * ⚠️ 在 `#run-canvas` 内**独占**：全仓同色只在**别的画布**出现
  *    （`src/main.ts` / `src/ui/canvasPlayerUIHost.ts` 的 HUD 能量条）
@@ -129,6 +165,19 @@ const CTA_HOME_BUDGET_MS = 4000;
 const ACTION_FILL_OFF = [0x23, 0x2b, 0x38];
 /** `COLORS.actionFill`（`#28405f`）—— 主动作按钮**可用态**填充色（全仓独占）。 */
 const ACTION_FILL_ON = [0x28, 0x40, 0x5f];
+/**
+ * `COLORS.textTitle`（`#e9eef7`）—— 主动作按钮**可用态文案**色。
+ * ⚠️ 在 `actionRect` 里只有一个来源 = 那条 CTA 的文案本身（卡片名虽同色但在别的矩形里）
+ *    ⇒ 「按钮里真的有字」这件事可以被像素级取证，而不是只信探针的 `actionLabel`。
+ */
+const CTA_LABEL = [0xe9, 0xee, 0xf7];
+/**
+ * 「CTA 真的被画成一片可用态填充」的下界（像素数）。
+ * ⚠️ 按**面积**推导：按钮 342×54 = 18468 px²，扣掉 2px 描边（≈1584）与文案字形（≈数百）
+ *    ⇒ 成片填充 ≈ 16000+。取 **12000（≈65%）** 作为「不是只画了个边」的下界，
+ *    给字体渲染 / 亚像素抗锯齿留足余量（不在阈值上做无意义的灵敏度竞赛）。
+ */
+const CTA_FILL_MIN_PX = 12000;
 
 /** 赢：耐久事件选「维修」→ 终局有耐久 → COMPLETE。 */
 const WIN_POLICY = { layer1: 'twinCannon', lateral: null, layer2: 'tripleLoad', durability: 'repair' };
@@ -146,6 +195,13 @@ function log(pass, name, detail = '') {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const round2 = (v) => Math.round(v * 100) / 100;
 
+/**
+ * 静态服务器 —— **不做任何响应挂起**（曾经的 `page.route` / 服务器侧延迟都撤掉了，
+ * 理由见 `EXTRA_CLAIM_CLICKS` 上方那段「取证窗口是天然的」）。
+ *
+ * ⚠️ 本块注释里**不许**出现 `*` 后面紧跟 `/` 的序列（会把注释提前闭合 —— 与 MEMORY
+ *    §2 里那条 HTML 注释陷阱同一类；实测就是它让本文件 `node --check` 直接报错）。
+ */
 function startServer() {
   const server = http.createServer((req, res) => {
     let urlPath = decodeURIComponent(req.url.split('?')[0]);
@@ -191,6 +247,77 @@ const waitRunReady = async (page) => {
 
 const probeHome = (page) => page.evaluate(() => window.__PRODUCTHOME__.probe());
 const probeRun = (page) => page.evaluate(() => window.__RUNPAGE__.probe());
+
+/**
+ * 「领取中…」窗口读取器 —— 读 Run 页**旧文档**的执行上下文，**不等**新文档。
+ *
+ * ⚠️ 两条结论都是**量出来的**，不是推测（C9 连续三轮 `n/a` 的那场排查）：
+ *   ① 导航一旦被请求，`page.evaluate` 与**不指定 `contextId` 的裸 CDP `Runtime.evaluate`**
+ *      **都会去等新文档**：实测 `elapsedMs = 1608 ms`（≈ 测试自己挂起的那 1500 ms + 装载）、
+ *      `hasRunPage = false` ⇒ 读到的是**新文档**（没有 `__RUNPAGE__`）。
+ *   ② **连点不是嫌疑人**：3 次 `page.mouse.click` **同批发出**实测只花 **5 ms**。
+ * ⇒ 唯一稳的读法 = 先 `Runtime.enable` 抓住**按下之前**那个默认上下文（`isDefault`）的 `id`，
+ *   之后用 `contextId` **显式钉住它**求值 —— 不再参与「等新文档」。
+ *   （旧文档要到导航真正提交才销毁 —— 窗口就是「按下 → 两帧」那一段自然时间。）
+ * ⚠️ 只读、不注入（`returnByValue` 回一个 JSON 串）⇒ 不改变被测行为。
+ * ⚠️ 失败时返回 `null`，并把**失败原因**记进 `PROBE_NOW_DIAG`（供 C9 打印，避免再猜）。
+ */
+let PROBE_NOW_DIAG = null;
+
+async function probeRunIn(cdp, contextId, note) {
+  const diag = { note, at: Date.now(), elapsedMs: null, contextId, error: null, hasRunPage: null };
+  try {
+    const res = await cdp.send('Runtime.evaluate', {
+      expression:
+        'JSON.stringify({ has: !!window.__RUNPAGE__, v: window.__RUNPAGE__ ? window.__RUNPAGE__.probe() : null })',
+      contextId,
+      returnByValue: true,
+      awaitPromise: false,
+    });
+    diag.elapsedMs = Date.now() - diag.at;
+    if (res.exceptionDetails) {
+      diag.error = `exceptionDetails: ${
+        res.exceptionDetails.text ||
+        (res.exceptionDetails.exception && res.exceptionDetails.exception.description) ||
+        'yes'
+      }`;
+      return null;
+    }
+    const raw = res.result && res.result.value;
+    if (typeof raw !== 'string') {
+      diag.error = `unexpected CDP result type=${res.result && res.result.type}`;
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    diag.hasRunPage = parsed.has;
+    return parsed.v;
+  } catch (e) {
+    diag.elapsedMs = Date.now() - diag.at;
+    diag.error = String((e && e.message) || e);
+    return null;
+  } finally {
+    PROBE_NOW_DIAG = diag;
+  }
+}
+
+/**
+ * 开一条会话并**钉住旧文档的默认执行上下文**（必须在按下之前调用）。
+ * ⚠️ `Runtime.enable` 会把**已存在**的上下文以事件形式回放 ⇒ 不必等下一次创建。
+ * ⚠️ 不返回 `ctxId` 就说明拿不到上下文 ⇒ 直接抛，别让 C9 静默变成 `n/a`。
+ */
+async function pinRunPageContext(page) {
+  const cdp = await page.context().newCDPSession(page);
+  let ctxId = null;
+  cdp.on('Runtime.executionContextCreated', (e) => {
+    if (e.context && e.context.auxData && e.context.auxData.isDefault) ctxId = e.context.id;
+  });
+  await cdp.send('Runtime.enable');
+  if (ctxId === null) {
+    await cdp.detach().catch(() => {});
+    throw new Error('未捕获到 Run 页的默认执行上下文（Runtime.enable 未回放 isDefault 上下文）');
+  }
+  return { cdp, ctxId };
+}
 
 /** 真实鼠标点击：元素真实 CSS 矩形中心（不用 evaluate 直调 click）。 */
 async function clickSelector(page, sel) {
@@ -412,8 +539,15 @@ async function driveRunToEnd(page, policy, label) {
 }
 
 /**
- * 「从首页出发 → 打完一局 → **真实鼠标点中某一张候选卡** → 回到首页」的完整一轮。
+ * 「从首页出发 → 打完一局 → **真实鼠标按下底栏唯一 CTA「领取并返回」** → 回到首页」的完整一轮。
  * 返回这一轮的全部取证（不在这里做断言，断言留给主流程的字母段落）。
+ *
+ * ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2）之后
+ *    入口**不再**是奖励卡：卡片纯展示。本函数因此额外取证三件事：
+ *      ① 点奖励卡**什么都不发生**（真实鼠标，不是「看一眼代码」）；
+ *      ② 底栏 CTA 真的画出来、真的可用、真的能点（像素 + 探针双证）；
+ *      ③ 按下之后**同一帧**进入「领取中…」，且窗口内连点 3 次不再触发第二次
+ *         （窗口是**天然的** ≈ 两帧，不人为挂起导航 —— 理由见上面那个常量块）。
  */
 async function playOneRunAndClaim(page, pickDefId, policy, label) {
   const homeBefore = await probeHome(page);
@@ -438,8 +572,10 @@ async function playOneRunAndClaim(page, pickDefId, policy, label) {
   const pDone = done.probe;
 
   /*
-    ⚠️ 像素取证必须在**点那张卡之前**做：点中即整页导航回首页 ⇒ `#run-canvas` 不复存在
+    ⚠️ 像素取证必须在**离开这一屏之前**做：整页导航一旦提交，`#run-canvas` 就不复存在
     （`countColorInRect` 会拿到 null）。这是真实踩过的坑，不是防御性代码。
+    ⚠️ 必改 1 之后「点奖励卡」已经**不会**导航（卡片纯展示），所以顺带在这一屏上
+       多做两件事：点卡取证（证明它不是入口）+ 停留取证（证明终态声音不重启）。
     A/B 基准矩形一律取**最后一张卡**（不写死下标）。
     ⚠️ 必改 2 之前候选是 3 张，`rects[2]` = 最下面那张，恰好完整落在失败结算面板的槽位内；
        现在候选只有 1 张，而它**仍然**画在同一个槽位上（`runRewardChoiceRects(N)` 对 N=1
@@ -464,29 +600,108 @@ async function playOneRunAndClaim(page, pickDefId, policy, label) {
   pixel.abIconGlyph = await countColorInRect(page, abRect, ICON_GLYPH);
 
   /*
-    PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 7）｜**死按钮像素取证**（必须在点之前采）。
-    COMPLETE + 有候选卡时，底栏那条「完成本次冒险」按钮**不得**被画出来：
-    它的命中分支不可达（`onPointerDown` 对有候选的终态直接 `return`）
-    ⇒ 画出来就是一个「点了永远没有反馈」的假入口 = 真人录屏里被读成「卡死」的观感来源。
-    ⚠️ 真实 `getImageData`（不走命中区 / 探针捷径）：分别数禁用态色与可用态色。
-       两者都为 0 ⇒ 这个矩形里确实什么都没画。
-  */
-  const deadBtnOff = await countColorInRect(page, pDone.actionRect, ACTION_FILL_OFF);
-  const deadBtnOn = await countColorInRect(page, pDone.actionRect, ACTION_FILL_ON);
+    ══ 必改 7｜底栏**唯一主 CTA** 的真实存在 / 真实可用取证（必须在按下之前采）══
 
-  // **真实鼠标点击**选中的那张卡（坐标来自探针里与绘制同源的矩形）
+    ⚠️ 判读方向与上一轮**相反**：上一轮守「禁用按钮像素 = 0」（底栏不许有按钮），
+       本 Queue 守「唯一主按钮真实存在且真实可点击」。同一组像素取证，两件事都要能证。
+    ⚠️ 真实 `getImageData`（不走命中区 / 探针捷径）：
+         · 可用态填充必须成片（`>= CTA_FILL_MIN_PX`）；
+         · 禁用态填充必须为 **0**（屏幕上不存在「画着却点不动」的那一条）；
+         · 文案色像素必须 > 0（按钮里真的有字，而不是只有一个空框）。
+  */
+  const ctaFillOn = await countColorInRect(page, pDone.actionRect, ACTION_FILL_ON);
+  const ctaFillOff = await countColorInRect(page, pDone.actionRect, ACTION_FILL_OFF);
+  const ctaLabelPx = await countColorInRect(page, pDone.actionRect, CTA_LABEL);
+
   const cardRect = pDone.rewardChoiceRects[pickIndex];
+
   /*
+    ══ 必改 1｜奖励卡**不是入口**（真实行为取证，不是读代码）══
+
+    用**真实鼠标**点那张卡，然后等一段明显长于任何渲染周期的时间：
+       · URL 必须仍在 `run-page.html`（卡片**不承担导航**）；
+       · 相位必须仍是 `COMPLETE`、**没有开始领取**（`claimStarts` 仍为 0）。
+    旧实现里这一下会直接领奖并跳回首页 ⇒ 本条断言正是「玩家必须猜卡片能不能点」
+    那个 P0 的反面证据。
+  */
+  await clickRect(page, cardRect);
+  await sleep(600);
+  const afterCardClick = await probeRun(page);
+  const urlAtCardClick = await page.evaluate(() => location.pathname);
+
+  /*
+    ══ 必改 8｜**在结算页停留若干秒，声音不得重新启动** ══
+
+    ⚠️ 必须在这一屏还活着的时候读（按下 CTA 之后整页就换掉了）。
+       「停留」本身也是断言的一部分：终态音频不仅要在进入时停，还要**停住不动**。
+  */
+  await sleep(1500);
+  const stayProbe = await probeRun(page);
+
+  /*
+    ══ 必改 7｜真实按下底栏唯一 CTA ══
     ⚠️ 刻意**不**用 `Promise.all` 把点击与导航绑在一起量：这里要在「按下」与
        「URL 真的变成首页」之间取一段独立的墙钟 —— 覆盖
        事件派发 + 处理中置位 + 两帧可见反馈 + `dispose()` 清理 + 整页导航 + 首页装载。
-    ⚠️ `waitForURL` 仍带 catch：超时不让整段挂死，断言侧会因为我们自己的上界而失败。
+    ⚠️ 不人为挂起导航（那会把窗口读毁掉，见上面常量块）。`waitForURL` 仍带 catch：
+       超时不让整段挂死，断言侧会因为我们自己的上界而失败。
   */
+  /*
+    ⚠️ 屏幕坐标**在按下之前**从 `pDone.screen` 算好 —— 下面的连点路径里**不许**再碰探针。
+       旧写法用 `clickRect()`（它内部先 `probeRun()` 取 `screen`）去连点，而
+       「按下 → 两帧 → `dispose()` + `location.assign`」会在 ≈32 ms 内换掉**执行上下文**
+       ⇒ 第 2 / 3 次连点**根本没发出去**。真实踩过的坑，不是防御性代码。
+  */
+  const scr = pDone.screen;
+  const ctaCx = scr.left + ((pDone.actionRect.x + pDone.actionRect.w / 2) / 390) * scr.width;
+  const ctaCy = scr.top + ((pDone.actionRect.y + pDone.actionRect.h / 2) / 844) * scr.height;
+  /*
+    「领取中…」窗口取证（必改 2「禁止重复点击」）。
+    ⚠️ 窗口是**天然的**（≈ 两帧），预算很小，所以每一处开销都是量过才留的：
+       · CDP 会话与上下文**必须在按下之前**开好（`newCDPSession` + `Runtime.enable`
+         与一次求值同量级，放窗口里会把预算花光）；
+       · 读**必须**钉住旧文档的 `contextId`：不指定上下文时，`page.evaluate` 与裸 CDP
+         都会去**等新文档**（实测 `elapsedMs = 1608 ms`、`hasRunPage = false`）；
+         而**一旦导航在途，连钉住上下文的读也会被拖到新文档装载完**
+         （实测 `elapsedMs = 1577 ms` + `Cannot find context with specified id`）
+         ⇒ 这正是「不人为挂起」的原因：挂了反而读不到。
+       · 连点**同批发出**（不 await 中间每一次）⇒ 实测 7~18 ms，串行 await 要数十 ms。
+    结构 = **4 次真实鼠标点击一次性发出**（第 1 次真正领取，其后 3 次撞 `claiming` 闸 /
+    落在已摘监听的画布上），**之后只读一次**：同一次读数同时证到
+      · `claiming === true` + 文案「领取中…」 ⇒ 按下**同一帧**就有可见反馈；
+      · `claimStarts === 1`                      ⇒ 连点**没有**产生第二次领取。
+  */
+  const { cdp, ctxId } = await pinRunPageContext(page);
   const navT0 = Date.now();
-  await Promise.all([
-    page.waitForURL(/home\.html/, { timeout: 20000 }).catch(() => {}),
-    clickRect(page, cardRect),
-  ]);
+  /** 按下之前那一帧的 URL（诊断用）。 */
+  const urlAtNavT0 = page.url();
+  /*
+    ⚠️⚠️ **必须用 URL 谓词，不能用 `/home\.html/` 这种子串正则。**
+       Run 页自己的地址是
+         `/run-page.html?run=…&home=.%2Fhome.html&equipped=…`
+       —— 里面**天然含有 `home.html` 这个子串**（`home=` 参数的取值）。
+       于是 `page.waitForURL(/home\.html/)` 的「先看当前 URL」这一步**当场就匹配**
+       ⇒ 它**立刻返回**、根本没等真导航：实测 `navMs = 23 ms`。
+       （旧版本之所以看起来正常，是**巧合**：那一次窗口探针读完要 1608 ms，
+         `navMs` 被它顺带撑到 1571 ms，正好落在上界内 ⇒ 假绿。）
+       谓词按 `pathname` 精确判定 ⇒ 子串再像也不会误命中。
+  */
+  const navPromise = page
+    .waitForURL((u) => u.pathname === '/home.html', { timeout: 20000 })
+    .catch(() => {});
+  let claimWindow = null;
+  try {
+    const clickT0 = Date.now();
+    await Promise.all(
+      Array.from({ length: EXTRA_CLAIM_CLICKS + 1 }, () => page.mouse.click(ctaCx, ctaCy)),
+    );
+    const clickMs = Date.now() - clickT0;
+    const after = await probeRunIn(cdp, ctxId, 'afterPressAndExtraClicks');
+    claimWindow = { afterPressAndExtra: after, clicks: EXTRA_CLAIM_CLICKS + 1, clickMs };
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
+  await navPromise;
   const navMs = Date.now() - navT0;
   await waitHomeReady(page);
   const urlAfter = await page.evaluate(() => location.pathname + location.search);
@@ -515,8 +730,16 @@ async function playOneRunAndClaim(page, pickDefId, policy, label) {
     rects,
     pixel,
     navMs,
-    deadBtnOff,
-    deadBtnOn,
+    /** 产品侧真实墙钟（**没有任何需要扣掉的测试挂起**，见 `EXTRA_CLAIM_CLICKS` 上方）。 */
+    navMsNet: navMs,
+    urlAtNavT0,
+    ctaFillOn,
+    ctaFillOff,
+    ctaLabelPx,
+    afterCardClick,
+    urlAtCardClick,
+    stayProbe,
+    claimWindow,
   };
 }
 
@@ -608,7 +831,7 @@ async function main() {
       `载荷=${payload0.choices.map((c) => `${c.defId}:${c.countBefore}`).join(' ')}`,
     );
 
-    /* ============================ 第一局：选 cannon（验收 ③） ============================ */
+    /* ============================ 第一局：按底栏 CTA 领取（验收 ③） ============================ */
     const r1 = await playOneRunAndClaim(page, 'cannon', WIN_POLICY, '第一局（完成路线）');
     const pDone = r1.pDone;
 
@@ -661,18 +884,28 @@ async function main() {
       'C4 候选卡的出口 = 产品侧给的**各自**领奖地址（Lab 侧不含任何产品 URL 字面量），且载荷全部合法（丢弃 0 条）',
       `dropped=${pDone.rewardChoicesDropped} hrefs=${rc.map((c) => c.href.replace('./home.html?', '')).join(' ')}`,
     );
+    /*
+      ★ 必改 1 / 2（本 Queue 把契约反过来了）｜**唯一出口 = 底栏那条 CTA**。
+      上一轮这条断言问的是「底栏不可用、出口在卡片上」；现在问的是它的反面：
+      底栏**可用**、文案就是「领取并返回」、并且**还没按下**（`claiming === false`）。
+      奖励卡退化为纯展示 ⇒ 它自己的 `href` 仍在（那是产品侧给的数据），
+      但**屏幕上的入口只有底栏那一个**。
+    */
     log(
       pDone.exitHref === null &&
-        pDone.actionEnabled === false &&
-        pDone.actionLabel !== '领取并返回',
-      'C5 出口**在卡片上**：底栏动作不可用、也没有「领取并返回」（候选池不存在「默认那件」）',
-      `label=${pDone.actionLabel} enabled=${pDone.actionEnabled} exit=${pDone.exitHref}`,
+        pDone.actionEnabled === true &&
+        pDone.actionLabel === '领取并返回' &&
+        pDone.claiming === false &&
+        pDone.claimStarts === 0 &&
+        pDone.chosenDefId === null,
+      'C5 **必改 2**｜终点态有**唯一主 CTA**「领取并返回」且可用（尚未按下：claiming=false / claimStarts=0）',
+      `label=${pDone.actionLabel} enabled=${pDone.actionEnabled} claiming=${pDone.claiming} starts=${pDone.claimStarts} exit=${pDone.exitHref}`,
     );
 
     /*
-      像素取证：候选卡真的画在画布上（不是只有探针字段）。
-      ⚠️ 读数是在 `playOneRunAndClaim` 里、**点那张卡之前**采的：点中即整页导航回首页
-      ⇒ `#run-canvas` 不复存在（`getImageData` 拿不到画布）。这是真实踩过的坑。
+      像素取证：奖励卡真的画在画布上（不是只有探针字段）。
+      ⚠️ 读数是在 `playOneRunAndClaim` 里、**离开这一屏之前**采的：整页导航一旦提交，
+      `#run-canvas` 就不复存在（`getImageData` 拿不到画布）。这是真实踩过的坑。
     */
     const rects = r1.rects;
     const cardBgPx = r1.pixel.cardBg;
@@ -709,23 +942,90 @@ async function main() {
     );
 
     /*
-      PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 7）｜**死按钮不得回归**。
-      取值在 `playOneRunAndClaim` 内、**点那张卡之前**（点中即整页导航 ⇒ `#run-canvas` 消失）。
-      ⚠️ 这是真人录屏 P0 的**结构根因**守卫：`C5` 已经断言「底栏动作不可用」
-        （探针口径），但探针那条口径在修复前**就是**不可用的 —— 屏幕上却依然画着按钮。
-        本断言补上「**真的没画**」这一层，两者合起来才等价于「不存在假入口」。
-      ⚠️ 真实 `getImageData`：禁用态色与可用态色**都**必须为 0 ——
-        既不能有「画着却点不动」的死按钮，也不能有「画着却点不动」的活按钮。
+      ★ 必改 7｜**唯一主按钮真实存在且真实可点击**（本 Queue 真正要守的东西）。
+
+      取值在 `playOneRunAndClaim` 内、**按下 CTA 之前**（按下之后整页就换掉了）。
+      ⚠️ 上一轮这条是「禁用态与可用态像素**都**为 0」（底栏不许有按钮）；判读方向反转，
+         但**取证手段一模一样**（真实 `getImageData`）—— 只是现在要证「它在」：
+           · 可用态填充成片（`>= CTA_FILL_MIN_PX`）⇒ 不是只画了个边框；
+           · 禁用态填充为 0 ⇒ 不存在「画着却点不动」的假按钮；
+           · 文案色像素 > 0 ⇒ 按钮里真的有字。
+      ⚠️ 为什么不能只信探针：探针字段在上一轮的修复**之前**就已经是「不可用」了，
+         而屏幕上照样画着一条按钮 —— 探针口径与屏幕不一致，正是那次 P0 的形态。
     */
     log(
-      r1.deadBtnOff === 0 && r1.deadBtnOn === 0,
-      'C7 **必改 7**｜COMPLETE+候选卡时底栏按钮**没有被画出来**（真实 getImageData 双色取证；死按钮不得回归）',
-      `actionRect=${JSON.stringify(pDone.actionRect)} 禁用态像素=${r1.deadBtnOff} 可用态像素=${r1.deadBtnOn}`,
+      r1.ctaFillOn >= CTA_FILL_MIN_PX &&
+        r1.ctaFillOff === 0 &&
+        r1.ctaLabelPx > 0,
+      'C7 **必改 7**｜底栏唯一 CTA **真的画出来且是可用态**（真实 getImageData：可用态成片 + 禁用态 0 + 有文案像素）',
+      `actionRect=${JSON.stringify(pDone.actionRect)} 可用态像素=${r1.ctaFillOn}(≥${CTA_FILL_MIN_PX}) 禁用态像素=${r1.ctaFillOff} 文案像素=${r1.ctaLabelPx}`,
+    );
+
+    /*
+      ★ 必改 1｜奖励卡**不是入口** —— 用真实鼠标点它，什么都**不能**发生。
+      ⚠️ 这是「玩家必须猜卡片能不能点」那个 P0 的反面证据：
+         旧实现里这一下会直接领奖并跳回首页；现在 URL 仍在 run-page、相位仍是 COMPLETE、
+         而且**一次领取都没开始**（`claimStarts === 0`）。
+    */
+    log(
+      r1.urlAtCardClick === '/run-page.html' &&
+        r1.afterCardClick.phase === 'COMPLETE' &&
+        r1.afterCardClick.claimStarts === 0 &&
+        r1.afterCardClick.chosenDefId === null &&
+        r1.afterCardClick.actionLabel === '领取并返回',
+      'C8 **必改 1**｜点奖励卡**什么都不发生**（真实鼠标点击后仍在 run-page、仍 COMPLETE、未开始领取）',
+      `url=${r1.urlAtCardClick} phase=${r1.afterCardClick.phase} starts=${r1.afterCardClick.claimStarts} chosen=${r1.afterCardClick.chosenDefId}`,
+    );
+
+    /*
+      ★ 必改 2｜按下 CTA 之后**同一帧**进入「领取中…」，且**不能再触发第二次**。
+      ⚠️ 取证窗口是**天然的**「按下 → 两帧」（≈33 ms），**不人为挂起导航**
+         （挂了反而读不到：导航在途会把旧文档上的 CDP 求值拖到新文档装载完）。
+      ⚠️ 这一次读数是在**4 次真实鼠标点击全部发完之后**取的（见 `playOneRunAndClaim`）：
+         `claiming` 仍为 `true` 且文案仍是「领取中…」⇒ 按下确实**同一帧**就有可见反馈；
+         `claimStarts` 仍为 **1** ⇒ 连点没有产生第二次领取。
+         两条拦法都合格：撞在 `claiming` 闸上被吞、或落在已经摘掉监听的画布上。
+    */
+    const cw = r1.claimWindow;
+    const after = cw ? cw.afterPressAndExtra : null;
+    log(
+      !!cw &&
+        !!after &&
+        after.claiming === true &&
+        after.actionLabel === '领取中…' &&
+        after.claimStarts === 1 &&
+        cw.clicks === EXTRA_CLAIM_CLICKS + 1,
+      'C9 **必改 2**｜按下 CTA 后同一帧变「领取中…」，且窗口内连点 3 次**不会**触发第二次领取',
+      after
+        ? `${after.actionLabel}｜连点 ${cw.clicks} 次真实鼠标（耗时 ${cw.clickMs} ms）后：label=「${after.actionLabel}」claiming=${after.claiming} starts=${after.claimStarts}（必须为 1）`
+        : `窗口取证为 n/a · diag=${JSON.stringify(PROBE_NOW_DIAG)}`,
+    );
+
+    /*
+      ★ 必改 3 / 4 / 8｜**战斗声音生命周期**：终态立即停、停留不重启。
+      ⚠️ 只锁生命周期（`activeBgmSources` / `battleSession`），不测音量数值（Queue 明令）。
+      ⚠️ 实测根因见 `tests/settlementAudioLifecycle.test.ts`：旧实现只做「解绑事件订阅」
+        （`presentation.stop()`），**一个循环音源都不会停**；终局对手是激光车，
+        它死在蓄能途中时那声循环音就一直响着 —— 这就是录屏里结算页的战斗噪音。
+    */
+    log(
+      pDone.battleAudio.activeBgmSources === 0 &&
+        pDone.battleAudio.battleSession === null &&
+        pDone.battleAudio.stops >= 1,
+      'C10 **必改 3 / 4**｜进入 COMPLETE 时战斗音频**已停**（活跃音源 0 / 会话已清 / 停止确被调用过）',
+      `state=${pDone.battleAudio.state} 活跃音源=${pDone.battleAudio.activeBgmSources} session=${pDone.battleAudio.battleSession} stops=${pDone.battleAudio.stops}`,
+    );
+    log(
+      r1.stayProbe.battleAudio.activeBgmSources === 0 &&
+        r1.stayProbe.battleAudio.state === 'idle' &&
+        r1.stayProbe.phase === 'COMPLETE',
+      'C10b **必改 8**｜在结算页**停留 1.5s 后声音没有重新启动**（终态是静态、安静的终态）',
+      `停留后：state=${r1.stayProbe.battleAudio.state} 活跃音源=${r1.stayProbe.battleAudio.activeBgmSources} pendingTimers=${r1.stayProbe.battleAudio.pendingAudioTimers}`,
     );
 
     log(
       r1.urlAfter === `/home.html?run=${token0}&reward=cannon`,
-      'D1 点中 **cannon 那张卡** = 真实整页导航到**它自己**的领奖地址（不是底栏按钮）',
+      'D1 按下**底栏唯一 CTA** = 真实整页导航到那件奖励自己的领奖地址（与卡片无关）',
       `url=${r1.urlAfter}`,
     );
     const claimDom = await page.evaluate(() => {
@@ -770,15 +1070,20 @@ async function main() {
       `cannon stackText=${r1.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText}`,
     );
     /*
-      PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 7）｜**时延守门**。
-      真实鼠标点击那张候选卡 → URL 真的变成首页，全程墙钟必须 < `CTA_HOME_BUDGET_MS`。
+      PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 7）｜**时延守门**（本 Queue 沿用）。
+      真实鼠标按下底栏 CTA → URL 真的变成首页，全程墙钟必须 < `CTA_HOME_BUDGET_MS`。
       ⚠️ 它拦的是**量级**回归（把「固定数秒等待」塞回来），不是性能基线：
-        实测 ≈ 57 ms vs 上界 4000 ms ⇒ ~70× 余量，机器抖动不会误伤。
+        实测 ≈ 30~150 ms vs 上界 4000 ms ⇒ 几十倍余量，机器抖动不会误伤。
+      ⚠️ 现在**没有任何需要扣掉的东西**：取证窗口是天然的，测试不再挂起导航
+        ⇒ `navMsNet === navMs`（这一点本身也是本 Queue 修掉的一个假绿：
+         旧写法把子串正则当导航等待，`navMs` 其实量的是**探针读数的耗时**）。
+      ⚠️ `waitForURL` 必须按 `pathname` 判（见 `playOneRunAndClaim` 里那段说明），
+        否则它会当场匹配 Run 页自己的 `home=` 参数、根本不等待。
     */
     log(
-      r1.navMs < CTA_HOME_BUDGET_MS,
+      r1.navMsNet < CTA_HOME_BUDGET_MS && r1.navMsNet > 0,
       'D5 **必改 7**｜结算 CTA → 首页的墙钟时延在宽上界内（防「固定数秒静止」回归）',
-      `第一局 navMs=${r1.navMs} ms（上界 ${CTA_HOME_BUDGET_MS} ms）`,
+      `第一局 navMs=${r1.navMs} ms（上界 ${CTA_HOME_BUDGET_MS} ms；无测试挂起，无需扣除）`,
     );
 
     /*
@@ -1221,9 +1526,9 @@ async function main() {
       「某条分支才慢」这种回归溜过单点取样。
     */
     log(
-      r1.navMs < CTA_HOME_BUDGET_MS && r2.navMs < CTA_HOME_BUDGET_MS,
+      r1.navMsNet < CTA_HOME_BUDGET_MS && r2.navMsNet < CTA_HOME_BUDGET_MS,
       'H5 **必改 7**｜两局都满足同一时延上界（不是只对第一局成立）',
-      `r1=${r1.navMs} ms · r2=${r2.navMs} ms（上界 ${CTA_HOME_BUDGET_MS} ms）`,
+      `r1=${r1.navMsNet} ms · r2=${r2.navMsNet} ms（上界 ${CTA_HOME_BUDGET_MS} ms；两局均为产品真实墙钟，无测试挂起）`,
     );
 
     log(pageErrors.length === 0, 'J1 全流程零运行时报错', pageErrors.slice(0, 2).join(' | ') || 'none');

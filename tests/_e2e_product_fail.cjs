@@ -722,7 +722,9 @@ async function main() {
     /* ====================================================== E. 返回主界面 */
 
     await Promise.all([
-      page.waitForURL(/home\.html/, { timeout: 20000 }).catch(() => {}),
+      /* ⚠️ pathname 谓词：Run 页地址自带 `home=.%2Fhome.html` ⇒ 子串正则 `/home\.html/`
+         会当场匹配自己、根本不等待导航。 */
+      page.waitForURL((u) => u.pathname === '/home.html', { timeout: 20000 }).catch(() => {}),
       clickRect(page, pFail.actionRect),
     ]);
     await waitHomeReady(page);

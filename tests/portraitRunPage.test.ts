@@ -2861,24 +2861,60 @@ describe('PRODUCT-LOOP-R1-D｜J 失败终态：结算 + 返回主界面（不再
     expect(page.includes('setInterval'), 'runPage.ts 不得引入 setInterval').toBe(false);
   });
 
-  it('PL-P0-02 死按钮根因机器钉死：COMPLETE + 底栏不可用时必须短路不画（必改 1 / 2）', () => {
+  it('PL-P0-02 结算唯一 CTA 机器钉死：底栏可用 + 文案正确 + 处理中闸（必改 1 / 2 / 6）', () => {
     const page = stripComments(read('runPage.ts'));
     const drawFn = page.indexOf('private drawActionButton(');
     expect(drawFn, 'drawActionButton 必须存在').toBeGreaterThan(-1);
-    /*
-      真人录屏 P0 的**结构根因**：`COMPLETE` + 有候选卡时 `actionEnabledNow()` 为 `false`
-      （出口在卡片上），而输入分派对有候选的终态直接 `return` ⇒ 底栏那条
-      「完成本次冒险」按钮**画着、却永远点不动**。绘制侧必须补上这**第三支**守卫。
-    */
-    const third = page.indexOf('if (runComplete(this.state) && !this.actionEnabledNow()) return;', drawFn);
-    expect(third, 'drawActionButton 必须补齐「COMPLETE 且底栏不可用」这一支').toBeGreaterThan(drawFn);
-    // 必须在取按钮矩形 / 开始绘制**之前**短路 —— 放在后面等于没修。
-    const btn = page.indexOf('const btn = runActionButtonRect();', drawFn);
-    expect(btn, 'drawActionButton 必须在取矩形前短路').toBeGreaterThan(third);
 
-    // 必改 2：候选人命中前必须先过「处理中 / 已锁定」这道闸（处理中不接受任何点击）。
+    /*
+      PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 6）｜
+      上一轮为了「有候选卡的 COMPLETE 不画底栏按钮」补的第三支守卫**必须已经删除**：
+      它是为「卡片是唯一入口」那个口径服务的；本 Queue 把口径反过来了
+      （有固定奖励的 COMPLETE 上底栏 CTA **必须**画且可用），留着它只会让真人再次
+      看到「结算页没有主 CTA、必须猜卡片能不能点」这个 P0。
+    */
+    expect(
+      page.includes('if (runComplete(this.state) && !this.actionEnabledNow()) return;'),
+      '为隐藏底栏建立的特殊分支必须已删除（必改 6）',
+    ).toBe(false);
+    // 绘制仍取同一个矩形函数（与命中 / 账本同源）
+    const btn = page.indexOf('const btn = runActionButtonRect();', drawFn);
+    expect(btn, 'drawActionButton 仍必须取 runActionButtonRect()').toBeGreaterThan(drawFn);
+
+    // 必改 2：有固定奖励的 COMPLETE 上底栏**必须可用**（出口就是这条 CTA）
+    const enableFn = page.indexOf('private actionEnabledNow()');
+    expect(enableFn).toBeGreaterThan(-1);
+    expect(
+      page.indexOf('if (this.rewardChoiceViewsNow().length > 0) return true;', enableFn),
+      '必改 2：固定奖励的 COMPLETE ⇒ 底栏 CTA 可用',
+    ).toBeGreaterThan(enableFn);
+
+    /*
+      必改 2：**文案顺序**——`claiming` 必须先于奖励分支判。
+      判反了的话，按下去之后按钮文案不会变成「领取中…」，
+      玩家看到的就是「按了但什么也没发生」（上一轮的真人观感）。
+    */
+    const labelFn = page.indexOf('private actionLabelNow()');
+    expect(labelFn).toBeGreaterThan(-1);
+    const claimingFirst = page.indexOf('if (this.claiming) return RUN_CLAIMING_LABEL;', labelFn);
+    const claimAndReturn = page.indexOf(
+      'if (this.rewardChoiceViewsNow().length > 0) return RUN_CLAIM_AND_RETURN_LABEL;',
+      labelFn,
+    );
+    const failLabel = page.indexOf('if (this.failSettlementNow()) return RUN_FAIL_RETURN_LABEL;', labelFn);
+    expect(claimingFirst, '处理中必须最先判').toBeGreaterThan(labelFn);
+    expect(claimAndReturn, '固定奖励 ⇒ 「领取并返回」').toBeGreaterThan(claimingFirst);
+    expect(failLabel, '失败终态文案仍在').toBeGreaterThan(claimAndReturn);
+
+    // 必改 2：唯一入口 + 处理中不接受任何点击（顺序：闸在前、命中在后）
     const claimGate = page.indexOf('if (this.claiming || this.chosenDefId !== null) return;');
-    expect(claimGate, '候选命中前必须先过「处理中 / 已锁定」闸').toBeGreaterThan(-1);
+    expect(claimGate, '底栏命中前必须先过「处理中 / 已领取」闸').toBeGreaterThan(-1);
+    const ctaHit = page.indexOf('if (hit(runActionButtonRect(), p)) {', claimGate);
+    expect(ctaHit, '唯一入口 = 底栏矩形').toBeGreaterThan(claimGate);
+    expect(
+      page.indexOf('runSingleRewardClaim(this.state, this.opts.rewardChoices)', ctaHit),
+      '出口真源 = runSingleRewardClaim（不是「点了哪张卡」）',
+    ).toBeGreaterThan(ctaHit);
 
     const begin = page.indexOf('private beginClaim(claim: RunProductClaim): void {');
     const finish = page.indexOf('private finishClaim(claim: RunProductClaim): void {');
@@ -2896,5 +2932,61 @@ describe('PRODUCT-LOOP-R1-D｜J 失败终态：结算 + 返回主界面（不再
     const handed = page.indexOf('if (this.opts.onProductClaim) this.opts.onProductClaim(claim);', disposed);
     expect(disposed).toBeGreaterThan(finish);
     expect(handed).toBeGreaterThan(disposed);
+  });
+
+  it('PL-P0-03 必改 1 / 6｜奖励卡纯展示：绘制无锁定态、命中不经卡片矩形', () => {
+    const page = stripComments(read('runPage.ts'));
+    const drawFn = page.indexOf('private drawRewardChoiceCards(');
+    expect(drawFn).toBeGreaterThan(-1);
+    const drawEnd = page.indexOf('\n  private ', drawFn + 10);
+    const body = page.slice(drawFn, drawEnd);
+    // 上一轮加在卡片上的两种状态渲染必须已经删除（它们服务「卡片是唯一入口」）
+    expect(body.includes('RUN_REWARD_LOCKED_LABEL'), '卡片不得再画「已选择」').toBe(false);
+    expect(body.includes('RUN_CLAIMING_LABEL'), '卡片不得再画「领取中…」（反馈在底栏 CTA 上）').toBe(false);
+    expect(body.includes('this.claiming'), '卡片绘制不得读 claiming').toBe(false);
+    expect(body.includes('const locked'), '卡片绘制不得再有锁定态').toBe(false);
+    // 纯展示 ⇒ 不得读写任何入口逻辑
+    expect(body.includes('beginClaim'), '卡片不得触发领取').toBe(false);
+    expect(body.includes('location'), '卡片不得导航（RP-25）').toBe(false);
+  });
+
+  it('PL-P0-04 必改 3 / 4｜战斗音频在终态停止，且与页面 dispose 解耦', () => {
+    const page = stripComments(read('runPage.ts'));
+    // ① 终态判定那一帧就停（在 finishRunBattle 之后、render 之前）
+    const finishBattle = page.indexOf('this.state = finishRunBattle(this.state, {');
+    const stopAtResult = page.indexOf('this.battleView.stopBattleAudio();', finishBattle);
+    const rafStop = page.indexOf('this.rafHandle = 0;', stopAtResult);
+    expect(finishBattle, '战斗结束分支必须存在').toBeGreaterThan(-1);
+    expect(stopAtResult, '必改 3：胜负确定那一帧必须停战斗音频').toBeGreaterThan(finishBattle);
+    expect(stopAtResult, '停音必须发生在收尾之前').toBeLessThan(rafStop);
+    // ② 第二道闸：不经战斗循环进入终态同样停
+    expect(
+      page.includes('if (next.phase === COMPLETE || next.phase === FAILED)') ||
+        page.includes("if (next.phase === 'COMPLETE' || next.phase === 'FAILED')"),
+      '必改 3：终态结算的第二道音频闸必须存在',
+    ).toBe(true);
+    // ③ `dispose()` **不得**是唯一停音点（必改 4：不等页面销毁）
+    const disposeFn = page.indexOf('  dispose(): void {');
+    const disposeStop = page.indexOf('this.battleView.dispose();', disposeFn);
+    expect(disposeStop, 'dispose 里经 battleView 释放').toBeGreaterThan(disposeFn);
+
+    // ④ 宿主侧：stop 幂等入口 + dispose 复用它（不得各自发明一套）
+    const view = stripComments(read('runBattleView.ts'));
+    const stopFn = view.indexOf('stopBattleAudio(): void {');
+    expect(stopFn, 'RunBattleView 必须暴露 stopBattleAudio').toBeGreaterThan(-1);
+    expect(view.indexOf('this.presentation.stop();', stopFn), '解绑事件订阅').toBeGreaterThan(stopFn);
+    expect(
+      view.indexOf('this.sfx.stopBattleAudio(', stopFn),
+      '必须真的停音源（presentation.stop 只解绑、不停音）',
+    ).toBeGreaterThan(stopFn);
+    const viewDispose = view.indexOf('  dispose(): void {');
+    expect(
+      view.indexOf('this.stopBattleAudio();', viewDispose),
+      '必改 4：dispose 复用同一个幂等停止入口',
+    ).toBeGreaterThan(viewDispose);
+    // 淡出时长必须 ≤ 200ms（必改 3 明写的上限）
+    const fade = /const RUN_BATTLE_AUDIO_FADE_MS = (\d+);/.exec(view);
+    expect(fade, '淡出时长必须是具名常量').toBeTruthy();
+    expect(Number(fade![1]), '必改 3：短淡出 ≤ 200ms').toBeLessThanOrEqual(200);
   });
 });

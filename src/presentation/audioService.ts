@@ -27,8 +27,10 @@ export interface SfxService {
   stopLaserCharge(): void;
   /** F-AUDIO-RESULT-LIFECYCLE-P0：战斗音频会话开始（幂等；新会话先清理上一局泄漏的循环音源） */
   startBattleAudio(sessionId: string): void;
-  /** F-AUDIO-RESULT-LIFECYCLE-P0：胜负确定后停止全部循环战斗音源（淡出 150~300ms + stop + disconnect） */
-  stopBattleAudio(): void;
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：胜负确定后停止全部循环战斗音源（淡出 + stop + disconnect）。
+   *  ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE｜`fadeMs` 可覆盖：
+   *     缺省 = 既有主玩法路径的既定值（220ms，逐字节不变）；结算页那条链传 ≤200ms。 */
+  stopBattleAudio(fadeMs?: number): void;
   /** F-AUDIO-RESULT-LIFECYCLE-P0：测试探针——当前音频状态 / 活跃循环音源数 / 当前会话 / 待执行计时器 */
   getAudioProbe(): AudioProbeState;
 }
@@ -58,6 +60,12 @@ interface LoopingBattleSource {
   /** 淡出后断开节点的计时器（null = 已清理） */
   fadeTimer: ReturnType<typeof setTimeout> | null;
 }
+
+/**
+ * F-AUDIO-RESULT-LIFECYCLE-P0｜`stopBattleAudio()` 的**缺省**淡出时长（ms）。
+ * ⚠️ 220 是主玩法路径（`playerGameRuntime`）的既定值 —— 保持默认即保持那条路径逐字节不变。
+ */
+const BATTLE_AUDIO_STOP_FADE_MS = 220;
 
 /** Web Audio 占位音色参数：id → 频率 / 时长 / 音量 */
 const BEEP_PARAMS: Record<SfxId, { freq: number; endFreq: number; dur: number; gain: number }> = {
@@ -312,9 +320,15 @@ export class SfxAudioService implements SfxService {
     this.battleSessionId = sessionId;
   }
 
-  /** F-AUDIO-RESULT-LIFECYCLE-P0：胜负确定后停止全部循环战斗音源（150~300ms 内淡出+stop+disconnect）。 */
-  stopBattleAudio(): void {
-    for (const s of [...this.battleLoops]) this.fadeOutAndStop(s, 220);
+  /** F-AUDIO-RESULT-LIFECYCLE-P0：胜负确定后停止全部循环战斗音源（淡出 + stop + disconnect）。
+   *  ⚠️ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE｜`fadeMs` 可选覆盖：
+   *     缺省 `BATTLE_AUDIO_STOP_FADE_MS`（220）与旧行为**逐字节相同** ⇒ 既有调用点零回归；
+   *     非法值（NaN / 负数）回落到缺省，避免把 NaN 传进 `exponentialRampToValueAtTime`。
+   *  ⚠️ **幂等**：音源已在停止排程中时（`stopped`）或活跃集为空时是纯 no-op，
+   *     因此「终态停一次 + 页面析构再停一次」安全（必改 4）。 */
+  stopBattleAudio(fadeMs: number = BATTLE_AUDIO_STOP_FADE_MS): void {
+    const ms = Number.isFinite(fadeMs) && fadeMs >= 0 ? fadeMs : BATTLE_AUDIO_STOP_FADE_MS;
+    for (const s of [...this.battleLoops]) this.fadeOutAndStop(s, ms);
     this.chargeSource = null;
     this.battleSessionId = null;
   }
