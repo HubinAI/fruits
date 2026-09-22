@@ -873,3 +873,101 @@ Queue 给的前提「如果历史正式产品从未开放 front 槽给玩家编�
 全量 vitest **218 files / 2299 tests**（+2 条 `PL-P0`）。
 
 
+---
+
+## §A 未决项台账（各 Queue 待用户裁决项；`MEMORY.md` 只留指针）
+
+**本轮 P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（4）**
+① 卡片纯展示 + 底栏唯一 CTA ⇒ 是否还需一句**显式引导**（「点下方按钮领取」）防玩家误以为卡可点
+② 战斗音淡出 **180 ms**（Queue 允许 ≤200 ms）是否够，还是要硬切
+③ 底栏 CTA 在 COMPLETE / FAILED **共用同一按钮**（仅文案不同）⇒ 是否需要在视觉上区分主 / 次
+④ `stopBattleAudio(fadeMs?)` 的**可选形参**是否接受为长期 API（vs 新增一个独立方法）
+
+**P0-SETTLEMENT-CTA-LATENCY（4）**
+① 候选卡成为唯一入口后是否需要显式引导 —— **已被本轮取代**（卡片不再是入口）
+② 两帧「领取中…」的可见反馈是否够 —— 本轮再次确认：**同帧置位 + 显式 `render()`**
+③ `deferPastNextPaint` 依赖 rAF 是否需要降级保险（本页战斗循环本就依赖 rAF）
+④ 时延上界 **4000 ms** 是否接受为长期守门值（本轮实测 46~51 ms）
+
+**R2-RECOVERY（4）** ① 玩家侧 **120** 是否接受为长期契约 ② 候选池收窄为 `['cannon']` 后
+`spear`/`hammer` 何时回池 ③ 历史 Profile 的 onboarding 迁移是**静默**的，首页是否给提示
+④ 首页成长行「纯读数、无入口」是否够
+
+**R2-C（4）** ① `validateSnapshot` 星级能量**盲开 Bug Queue** ② ★2 炮 33 能量超 `bananaBody` 90 是否加提示
+③ `saw` 边界 ④ 是否开 Body/Gadget 成长
+
+**PLP0-LEGACY（4）** ① 判别式是否接受为长期契约 ② `drive='stationary'` 自改致败是否开独立 Queue
+③ 首页是否给迁移提示 ④ P0 4 条仍有效
+
+**P0（4）** ① 两条 E2E 路线替换是否接受 ② 支持清单粒度 `['cannon']` ③ 拒绝态文案落点
+④ `runBlockedView` 出口口径
+
+**R2-A（1）**「**必须**增加 schema version」= **唯一真实字面缺口**。⚠️ **硬冲突**：`saveVersion.ts:20`
+明写「下次**破坏性**变更才 +1」，而 R2-A/B 都是**非破坏性扩展** ⇒ **已上报，未改**。
+
+**R2-B（1）**「禁止再出现 `MAX_STAR = 2`」冲突：仍在 `core/partInventory.ts:426`（旧横屏，Q22 冻结）；
+产品侧**完全不依赖** ⇒ 删它 = Q22 全红 ⇒ **已上报，未改**。
+
+
+---
+
+## §13 结算「唯一 CTA」+ 战斗音频生命周期（PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE 固化契约；改动结算绘制 / 输入分发 / 音频停止前必读）
+
+### §13a 出口契约（**取代 §5 的 COMPLETE 出口**）
+
+- 产品前提已变：R2 的 COMPLETE 奖励**固定为 `cannon ★1 ×1`**（不再 3 选 1）⇒「点卡选一件」不再需要。
+- **奖励卡 = 纯展示**：`drawRewardChoiceCards` 不再画锁定 / 处理中态；`onPointerDown` 的**候选命中分支删除**
+  ⇒ 点卡片什么都不发生（`C8` 真实鼠标取证）。
+- **底栏「领取并返回」= 唯一入口**：`runSingleRewardClaim(state, set)` 取 `choices[0]`。
+- `actionEnabledNow()`：**有候选视图时恒 `true`**；`actionLabelNow()` 优先级 =
+  `claiming`（「领取中…」）→ 奖励（「领取并返回」）→ 失败 → 终态出口。
+- ⚠️ **上一轮那条「COMPLETE + 有候选 ⇒ 逼隐藏底栏按钮」的第三支守卫已删除**（必改 6）—— 别加回来。
+- ⚠️ `exitHref` 在 `COMPLETE` 恒 `null`（那条按钮**不是** `href` 跳转：走 `runSingleRewardClaim()` → 宿主导航）。
+  判「有没有 CTA」看 `actionEnabled === true` + `actionLabel`，**不是** `exitHref`。
+- 文案契约：`RUN_REWARD_TITLE='本局奖励'`、`RUN_REWARD_NOTE='领取后进入你的车库'`、
+  `RUN_CLAIM_AND_RETURN_LABEL='领取并返回'`；`RUN_REWARD_LOCKED_LABEL` **已删**。
+
+### §13b 战斗音频生命周期（必改 3 / 4 / 8）
+
+- **根因**：`RunBattleView.dispose()` 旧实现只调 `presentation.stop()`，而它**只解绑事件订阅、一个音源都不停**；
+  终局对手 `BananaRodLaser` 死在蓄能途中 ⇒ 那声**循环蓄能音源**一直响。真凶 =
+  `SfxAudioService.stopBattleAudio()` **在 Lab 从未被调用**。
+- **修复**：`RunBattleView` 自己持有 `sfx = new SfxAudioService()`，并暴露
+  `stopBattleAudio()` = `presentation.stop()` **且** `sfx.stopBattleAudio(180)`（`RUN_BATTLE_AUDIO_FADE_MS`）。
+  调用点**两处** = ① 终态判定那一帧（`startLoop` tick 里 `finishRunBattle` 之后）② `dispose()`
+  —— 两处**复用同一个幂等入口**（`fadeOutAndStop` 的 `stopped` 闸）。
+- `SfxAudioService.stopBattleAudio(fadeMs?)` 形参**可选**，缺省 `220`（既有主玩法路径**逐字节不变**）；
+  非法值（NaN / 负数）回落缺省，避免把 NaN 传进 `exponentialRampToValueAtTime`。
+- ⚠️ 音频停止**与页面析构解耦**：终态就停，**不等** `dispose()`；`dispose()` 再停一次是安全 no-op。
+- ⚠️ 只锁生命周期 `ACTIVE → STOPPED`（`activeBgmSources` / `battleSession`），**不测音量数值**。
+
+### §13c E2E「领取中…」窗口取证 —— 窗口是**天然的**（三条反直觉结论，全都量过）
+
+1. ⚠️⚠️ **`page.waitForURL(/home\.html/)` 会被 Run 页自身地址当场匹配** —— Run 页 URL 带
+   `home=.%2Fhome.html` 这个**参数取值**（`home=` 的值里天然含 `home.html` 子串）⇒ 它的
+   「先看当前 URL」这一步当场成立、**立即返回、根本没等导航**：实测 `navMs = 23 ms`。
+   **旧版本看起来正常纯属巧合**（那一次窗口探针读数要 1608 ms，把 `navMs` 顺带撑到 1571 ms 落进上界）。
+   ⇒ **必须用 pathname 谓词** `(u) => u.pathname === '/home.html'`。同款缺陷已在
+   `_e2e_product_reward / loop / fail / star_power` 四处一并修掉。
+2. ⚠️ **人为挂起导航 = 把窗口读毁掉**：导航一旦在途，旧文档上的 CDP 求值会被**拖到新文档装载完**
+   （实测 `elapsedMs = 1577 ms` + `Cannot find context with specified id`）。⇒ **不挂起**；
+   `navMsNet === navMs`（实测 46~51 ms，上界 4000 ms）。
+3. ⚠️ **读必须钉住旧文档的 `contextId`**：不指定上下文时 `page.evaluate` 与**裸 CDP** 都会去**等新文档**
+   （实测 `elapsedMs = 1608 ms`、`hasRunPage = false`）。做法 = 按下**之前** `Runtime.enable` 抓住
+   `isDefault` 上下文的 `id`；3 次连点**同批发出**（`Promise.all`，实测 4~18 ms），**读只做一次**。
+4. ⚠️ **JS 块注释里不许出现 `*` 紧跟 `/`** —— `page.route('**/home.html*')` 这种字面量会把注释**提前闭合**；
+   实测就是它让 `node --check` 直接报错。与 §4 那条 HTML 注释陷阱同类。
+
+### §13d 产品契约变更 ⇒ 换合法路线，**不删断言**
+
+`_e2e_product_star_power.cjs` 原「点候选卡领奖」路线随本契约**作废** ⇒ 改为「按下底栏 CTA」，
+断言**一条不删**并**新增守门 `C1b`**（终点唯一出口 = 底栏 CTA 且可用）⇒ 21/21 → 22/22。
+同 §9 的纪律：**换合法路线 + 新增守门断言，不删断言**。
+
+### §13e 基线
+
+`e2e:product-reward` **57/57**（原 53/53，+`C8`/`C9`/`C10`/`C10b`）· `e2e:product-loop` **53/53**（原 51/51）·
+`e2e:product-star-power` **22/22**（原 21/21）· fail 34/34 · legacy 17/17 · home 30/30 · default-entry 86/86 ·
+全量 vitest **219 files / 2309 tests**（+1 file / +10）· `build:wechat` `game.js` **1,416.73 kB**（+0.90）。
+
+
