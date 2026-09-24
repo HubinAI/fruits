@@ -71,6 +71,14 @@ probe('WORK ', fs.readFileSync('<file>','utf8'));
 
 ## 3. 四路构建 + bundle-clean
 
+> ⚠️ **先分清 Queue 类型，基线不一样**：
+> - **F-WX-\* / 部署 / RC 类** ⇒ 下面这套完整四路构建 + bundle-clean + `build:wechat:rc`（§7）。
+> - **PRODUCT-LOOP-\* / PBL-\* / PRP-\* 这类产品侧逻辑 Queue** ⇒ 门禁基线更轻：
+>   `tsc --noEmit` + 全量 vitest + **三路** `build` / `build:pages` / `build:wechat`
+>   （不跑 `build:e2e`，也不跑 RC —— 那会覆盖 `dist-wechat` 并牵出 §7 那一串补跑）+ 产品 8 条 E2E：
+>   `e2e:product-home` / `-reward` / `-star-power` / `-loop` / `-fail` / `-legacy` / `-reseed` / `e2e:default-entry`。
+>   实证：R2-A `c40977a` … SINGLE-CTA+AUDIO `c2c1e2c` 连续 6 轮都是这个形状。
+
 ```bash
 npm run build && npm run build:pages && npm run build:e2e && npm run build:wechat
 ```
@@ -128,10 +136,24 @@ E2E 硬约束：禁 hitArea/`__h`/`__probe`/getImageData 捷径当验收结论�
 
 ## 6. Commit / Push
 
-只 stage 业务文件。`.workbuddy/`、`dist*`、`outputs/`、`HANDOFF_`、`交接文档`、`_verify`、`最强水果*` 均在 RC IGNORED_PREFIXES，**不要混进业务 commit**。
+只 stage 业务文件。`.workbuddy/`、`dist*`、`outputs/`、`HANDOFF_`、`交接文档`、`新窗口交接指令`、`_verify`、`最强水果*` 均在 RC IGNORED_PREFIXES，**不要混进业务 commit**。
 
-> ⚠️ **例外（易踩）**：`.workbuddy/memory/YYYY-MM-DD.md` 与 `.workbuddy/memory/MEMORY.md` **要随功能 commit 一起提交**（项目铁律「Memory merges into feature commit；禁 standalone memory commit」）。
-> 实证：`6aa8238`(PBL-F1)、`2ab32bb`(PBL-F2) 均含这两个文件。别把 memory 当 dist*/outputs/ 一起排除掉。
+> ⚠️ **仓库实际约定 = 功能 commit + **紧随其后的一个** memory commit（两次提交）**。
+> `git log` 实证（2026-09-24 核对）：近 60 个 commit 里有 9 个 `memory: <QUEUE> 收口记录（…）`，
+> 最近**连续 6 轮** Queue 全是这个形状 ——
+> `c40977a`+`52f3f6d`（R2-A）· `16a221f`+`2209263`（R2-B）· `9e4e88c`+`c0429c1`（R2-C）·
+> `9841274`+`f8effbc`（P0）· `1931a71`+`223a79d`（CTA-LATENCY）· `c2c1e2c`+`c55a285`（SINGLE-CTA+AUDIO）。
+>
+> - **memory 文件要提交**（这一点不变）—— 别把 memory 当 `dist*` / `outputs/` 一起排除掉；
+> - 功能 commit 清单 = `src/** tests/** package.json …`；
+>   memory commit 清单 = `.workbuddy/memory/**`（当天 `YYYY-MM-DD.md` + `MEMORY.md` + `REF_*` +
+>   `archive/MEMORY_FULL_*.md`），主题用 `memory: <QUEUE> 收口记录（<一句话>）`。
+> - `交接文档_*.md` 与 `新窗口交接指令_*.md` 两个都**只在工作区、不入库**（中文名在 `git status`
+>   里是八进制转义 ⇒ **必须显式列路径 `git add`**，或用 `git add .` 后 `git reset` 掉它们）。
+>
+> ⚠️ **本文件旧版写的是「Memory merges into feature commit；禁 standalone memory commit」——
+> 与仓库事实相反，已于 2026-09-24 更正。** 那个说法只对更早的 `6aa8238`(PBL-F1) / `2ab32bb`(PBL-F2)
+> 成立；R1-A 之后约定就改成两次提交了。
 
 受控前缀（dirty 即拒 RC）：`src/ tests/ scripts/ wechat/ package.json package-lock.json vite. tsconfig`。
 
@@ -174,7 +196,10 @@ RC 会覆盖 `dist-wechat` → **之后补跑一次 bundle-clean + 依赖该产�
 
 1. 追加 `.workbuddy/memory/YYYY-MM-DD.md`（**append-only**）：根因 + 门禁数字 + 诚实边界。
 2. 长期约定进 `.workbuddy/memory/MEMORY.md`。
-3. 交付报告 `outputs/<Queue名>-交付报告.md`，含：RCA 表 / commit SHA / diff stats (+X/-Y) / 四路 SHA / 验收矩阵 / **未达成项诚实披露**。
+3. 交付报告 = 仓库根的 `交接文档_<日期>_<Queue名>.md`（**本地件，不入库**；`新窗口交接指令_*.md` 同）。
+   含：RCA 表 / commit SHA / diff stats (+X/-Y) / 四路 SHA / 验收矩阵 / **未达成项诚实披露**。
+   ⚠️ 本文件旧版写的是 `outputs/<Queue名>-交付报告.md` —— 与当前实际约定不符（仓库根没有 `outputs/`；
+   `.workbuddy/memory/MEMORY.md` 的索引里明确写「各轮交付细节**只在同名交接文档**」）。已于 2026-09-24 更正。
 4. `present_files` 呈现报告 + 关键日志。
 5. 报告结论必须**分层**：①页面可达 ②数据逻辑 ③浏览器真实闭环 ④**iOS 真机真人体验待验**。
 6. 停下等真机回执，不开下一条。
@@ -183,3 +208,27 @@ RC 会覆盖 `dist-wechat` → **之后补跑一次 bundle-clean + 依赖该产�
 
 Queue 含「微信/iOS/真机/Canvas/DPR/Surface/viewport/点击错位/闪退/前后台/resize」时，**开始前完整读** `.workbuddy/memory/F-WX-IOS-REALDEVICE-DEBUG-PLAYBOOK.md`。
 硬规则：DPR 只在 logical→backing 最终绘制时应用**一次**；微信视口同步唯一入口 = `src/platform/wechat/viewportSync.ts` 的 `syncWechatViewport(reason)`，禁任何路径独立改 canvas backing 或调 `runtime.doResize`。
+
+## 10. ★ 新增一个**持久化 key** 时的必查清单（踩过两次）
+
+项目里有一批「**闭集**」守卫钉着「官方 storage 恰好是这几个 key」（语义 = 多一个 / 少一个 / 换个名字都红）。
+新增任何一个产品侧 key，**定向用例全绿也一定漏**（那些用例不走这条路径）——必须靠**全量门禁**抓。
+
+实证两次：
+- R2-RECOVERY 加 `strongfruit.r2Onboarding.v1` ⇒ 命中 `PG-10` / `PC-10` / `e2e:product-home` 的 `E5`；
+- R2-RESEED 加 `strongfruit.r2Reseed.v1` ⇒ **同样命中这三处**（`playerGrowthR2A.test.ts`、
+  `productLoopRunReward.test.ts`、`_e2e_product_home.cjs` 的 `EXPECTED_KEYS`）。
+
+改之前先全部 grep 一遍，别只改报错的那一处：
+```bash
+grep -rn "R2_ONBOARDING_KEY\|allKeys()\|EXPECTED_KEYS" tests/ | grep -v node_modules
+```
+
+⚠️ **处置纪律：把白名单 +1，绝不放宽成「至少包含」**。断言必须是
+「`length` 相等 **且** 逐位相等」（或 `toEqual([...].sort())`），并在注释里写清
+「这是第 N 个 key、闭集语义一字未改、将来再来一个 key 这一条照样红」。
+**改成 `toContain` / 删掉 `length` 判断 = 把守卫变成摆设** —— 那是本仓明令禁止的「放宽守卫」。
+
+⚠️ 同理：新增 key 后**「它是不是每次挂载都写」**也要一起想清楚。若某个 key 会被**每次**挂载写入，
+「首次打开恰好 N 个 key」这类断言的时间点就会漂移 ⇒ 用 `decided` 式的「只判一次」语义把它钉成一次性
+（见 `REF_GUARDS_TRAPS_CONTRACTS.md` §14g 那个真实丢档 bug）。
