@@ -29,7 +29,7 @@ home **30/30** · default-entry **86/86** · repo-health **9/9**。
   （实验，可整块删）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。舞台 844×390。
 - **链尾**：R2-A `c40977a` → R2-B `16a221f` → R2-C `9e4e88c` → P0 `9841274` → PLP0-LEGACY `9078cc5` →
   R2-RECOVERY `8770c98`+`e50b95c` → SETTLEMENT-CTA-LATENCY `1931a71` → SINGLE-CTA+AUDIO `c2c1e2c`+`c55a285` →
-  **R2-VALIDATION-STATE-RESEED `88288b4`+`<memory commit 落定后回填>`**；更早（R1-A..R1-D）查 `git log`。
+  **R2-VALIDATION-STATE-RESEED `88288b4`+`7dacd47`**；更早（R1-A..R1-D）查 `git log`。
 - ⚠️ `src/{physics,render,player,platform,ui,game,presentation,lab}` diff 恒为空（R2-B 起有意打破）；`src/core` 只许
   R2-B（`partInventory.ts`/`buildPersistence.ts`）+ R2-C（`buildSnapshot.ts` 星级**唯一真源** + `types.ts`）两处必改，
   **此后再无 core 改动**（含 R2-RESEED 轮）。
