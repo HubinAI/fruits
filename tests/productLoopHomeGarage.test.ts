@@ -484,6 +484,28 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         './r2Onboarding',
       ],
       /*
+        PRODUCT-LOOP-R3-MOVEMENT-CANONICAL-INVENTORY｜当前正式 Movement / Drive 的 canonical
+        mapping（只读事实清单，零副作用；产品侧不新增任何 Movement 内容）。
+          - Movement 内容真源 = `../core/content` 的 `registry.movements`（**遍历**它，
+            不在这里维护第二张表）；
+          - 「哪些轮组需要库存」真源 = `../core/partInventory` 的 `OFFICIAL_MOVEMENTS`
+            （不自己判断 wheelStd 是不是特例）；
+          - Runtime 数值真源 = `../core/buildSnapshot` 的 `resolveSnapshot`
+            （与战斗装配同一个函数，**不自己**合并 overrides）；
+          - `../lab/buildEditorModel` 取 `buildSnapshotFromDraft` / `makeStarterDraft` /
+            `resolveDriveMode` / `EMPTY_SLOT` + 两个类型 —— 「缺省轮组 / 缺省 Drive」
+            一律由**正式函数**回答，模块里不写这两条字面量；
+          - `./playerLoadout` **只取** `PLAYER_BODY_DEF_ID`（正式玩家车身这个字符串
+            只有那一处真源）。
+      */
+      'runMovementCanonical.ts': [
+        '../core/buildSnapshot',
+        '../core/content',
+        '../core/partInventory',
+        '../lab/buildEditorModel',
+        './playerLoadout',
+      ],
+      /*
         PRODUCT-LOOP-P0：完整 Run 资格判断（产品层唯一一处）。
           - 判据必须来自**真实 `BuildDraft` + 正式内容库的分类字段**（Queue 必改 1
             明令「不要在 UI 里靠字符串判断」）⇒ 用 `../lab/buildEditorModel` 做纯解析、
