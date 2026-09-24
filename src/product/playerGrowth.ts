@@ -91,6 +91,22 @@ import {
   planR2Reseed,
   type R2ReseedOutcome,
 } from './r2Reseed';
+/**
+ * PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY｜**永久成长里的 Movement 维度**。
+ *
+ * `playerGrowth` 从 R2-A 起只管 Weapon（种子 / 合成 / 装备兜底），Movement 的**拥有状态**
+ * 此前在产品侧**没有任何一层**在读、也没有任何不变式在守
+ * ⇒ 「车上装着一件并不拥有的轮组」这种状态可以静默存在。
+ * 本模块把 Movement 的 owned / equipped 读数与「装着就必须拥有」这条保证收在一处
+ * （`./movementInventory`），本模块只负责**按正确顺序**调它：
+ *     判定 → （补件）→ 与其它改动共用**同一次** `saveInventory`。
+ * ⚠️ 它**只增不减**、且**不碰 draft** ⇒ 战斗行为一个字节都不变。
+ */
+import {
+  ensureMovementOwnership,
+  movementOwnership,
+  type MovementOwnershipReading,
+} from './movementInventory';
 
 /**
  * 本版成长只使用 **★1**。
@@ -281,6 +297,22 @@ export interface GrowthSession {
    * ⚠️ 只有 `equip-failed` 是 `decided === false`（可重试，下次挂载重新判）。
    */
   readonly reseed: R2ReseedOutcome;
+  /**
+   * PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY｜本次挂载的 **Movement 拥有读数**
+   * （owned / equipped / persisted 三侧的唯一口径，见 `./movementInventory`）。
+   *
+   * ⚠️ 它是**补件之后**的读数（`ensureMovementOwnership` 已经跑完）⇒
+   *    `legal === false` 在新代码里**不可达**，除非连补件都失败。
+   */
+  readonly movements: MovementOwnershipReading;
+  /**
+   * 本次挂载为「装着却不拥有」的 Movement 补了几件（空数组 = 一个字节都没动）。
+   *
+   * ⚠️ 新账号 / 正常账号恒为空数组（缺省轮恒默认拥有 ⇒ 无需补）；
+   *    非空只可能出现在「存档里装着某件需要库存的轮组、但库存里没有它」的形态
+   *    （旧档 / 手工档 / 跨版本残留），与 `repairedEquipped` 是同一类修复。
+   */
+  readonly movementGrants: readonly string[];
 }
 
 /**
@@ -326,6 +358,14 @@ export interface GrowthSession {
  *   - 它把**换过装的** Build 回传（`reseed.draft`）⇒ 下面所有步骤与调用方都用这一份，
  *     否则会出现「屏幕显示 ★2、磁盘是 ★1」的分叉；
  *   - 装备被拒时它**零副作用**（内存改动被回滚）⇒ 判据下次挂载仍成立，可重试。
+ *
+ * ── PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY 追加 ──────────────────────
+ * Movement 的拥有状态此前在产品侧没有任何一层在读 —— 本函数在 Equipped 兜底之**后**、
+ * 落盘之**前**再走一次 `ensureMovementOwnership`（判据 / 只增不减的纪律全在
+ * `./movementInventory`）：**车上装着的 Movement 必须合法拥有**。
+ * 新账号的形态（缺省轮恒默认拥有）走的是**空操作**那一条 ⇒ 一个字节都不写；
+ * 非空只可能出现在「装着某件需要库存的轮组、库存里却没有它」的旧档 / 手工档上。
+ * ⚠️ 它**不碰** `draft` ⇒ Run Snapshot / Runtime 数值与调用前逐字节相同（不改变战斗行为）。
  */
 export function openGrowthSession(draft: BuildDraft): GrowthSession {
   const freshProfile = isFreshProfile();
@@ -356,6 +396,19 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
   const nextDraft: BuildDraft = reseed.draft;
   const repairedEquipped = repairEquippedStack(inv, nextDraft);
   changed = changed || repairedEquipped !== null;
+  /*
+    PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY｜Movement 的同一个不变式：
+    「车上装着的 Movement 必须合法拥有」（Queue 必改 2 / 必改 3）。
+    ⚠️ 位置是刻意的：排在 reseed **之后**（reseed 会改写 Build，必须按最终那份 draft 判），
+       与 `repairEquippedStack` **并列**（两者都只改内存库存，共用下面那一次落盘）。
+       它**不碰** draft ⇒ 战斗行为与调用前逐字节相同。
+    ⚠️ 与 weapon 的那次修复同一条纪律：**只增不减**，且对「本来就合法」的账号是空操作
+       —— 新账号的形态（缺省轮恒默认拥有）走的就是空操作那一条。
+  */
+  const movementGrants = ensureMovementOwnership(inv, nextDraft);
+  changed = changed || movementGrants.length > 0;
+  /** 补件之后才取读数 ⇒ 报出的 owned / legal 就是**本次挂载结束**时的真实形态。 */
+  const movements = movementOwnership(inv, nextDraft);
 
   if (changed) saveInventory(inv);
   // ④ 标记**必须**晚于库存落盘（见上方顺序说明）
@@ -370,7 +423,17 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
     顺序同样排在它自己的落盘（`applyR2Reseed` 内部那一次）之后。
   */
   if (reseed.decided) markR2Reseed();
-  return { inv, draft: nextDraft, seeded, repairedEquipped, freshProfile, onboarding, reseed };
+  return {
+    inv,
+    draft: nextDraft,
+    seeded,
+    repairedEquipped,
+    freshProfile,
+    onboarding,
+    reseed,
+    movements,
+    movementGrants,
+  };
 }
 
 /**

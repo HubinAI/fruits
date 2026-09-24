@@ -235,6 +235,30 @@ export interface ProductProbe {
     readonly reseedReason: string;
     readonly reseedCleared: number;
     readonly reseedCannon: number;
+    /**
+     * PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY｜本次挂载的 **Movement 拥有读数**。
+     *
+     * ⚠️ 直接来自 `playerGrowth.openGrowthSession()` 的 `movementGrants` / `movements`
+     *    （页面与探针**不各自再判一次**）⇒ 「屏幕上 / 探针里说拥有」与「库存里真的有几件」
+     *    不可能分叉。
+     *   - `movementRepaired` = 本次为「装着却不拥有」的 Movement 补的件（空数组 = 一个字节都没动）；
+     *   - `movementLegal` = 「每一条装着的 Movement 都合法拥有」这条不变式（补件后恒为 `true`）；
+     *   - `movements` = 全部正式 Movement 的 owned / equipped / persisted 逐条读数
+     *     （**含**不进库存的缺省轮：它是 `implicit: true` 而不是「查无此件」）。
+     */
+    readonly movementRepaired: readonly string[];
+    readonly movementLegal: boolean;
+    readonly movements: readonly {
+      readonly defId: string;
+      readonly name: string;
+      readonly kind: string;
+      readonly needsInventory: boolean;
+      readonly count: number;
+      readonly owned: boolean;
+      readonly implicit: boolean;
+      readonly equipped: boolean;
+      readonly hardpoints: readonly string[];
+    }[];
   };
   /**
    * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页那一行最小成长状态的真实读数
@@ -1093,6 +1117,26 @@ export function mountProductHome(
           reseedReason: growth.reseed.reason,
           reseedCleared: growth.reseed.cleared,
           reseedCannon: growth.reseed.cannonAfter,
+          /**
+           * PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY｜本队列的 **Movement 拥有读数**
+           * （owned / equipped / persisted 三侧同一口径，直接取成长会话，页面不自行推导）。
+           *
+           * ⚠️ `movementRepaired` = 本次挂载为「装着却不拥有」的 Movement 补的件（空 = 没动）；
+           *    `movementLegal` = 「每一条装着的 Movement 都合法拥有」这条不变式。
+           */
+          movementRepaired: growth.movementGrants,
+          movementLegal: growth.movements.legal,
+          movements: growth.movements.entries.map((m) => ({
+            defId: m.defId,
+            name: m.name,
+            kind: m.kind,
+            needsInventory: m.needsInventory,
+            count: m.count,
+            owned: m.owned,
+            implicit: m.implicit,
+            equipped: m.equipped,
+            hardpoints: m.hardpoints,
+          })),
         },
         /**
          * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页那一行成长状态的真实读数

@@ -441,6 +441,7 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../core/buildPersistence',
         '../core/partInventory',
         '../lab/buildEditorModel',
+        './movementInventory',
         './playerLoadout',
         './r2Onboarding',
         './r2Reseed',
@@ -504,6 +505,22 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../core/partInventory',
         '../lab/buildEditorModel',
         './playerLoadout',
+      ],
+      /*
+        PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY｜永久成长里的 **Movement 维度**
+        （owned / equipped / persisted 的唯一读数 + 唯一保证）。
+          - 库存读写只走 `../core/partInventory`（`getCount` / `addPart`）——
+            与 Weapon **共用** `strongfruit.ownedParts.v2`，**不新建**第二套库存 /
+            第二个拥有记录 / 新的 storage key；
+          - Movement 内容 / 缺省轮 / 「哪些需要库存」/ 「装着什么」全部取自
+            `./runMovementCanonical`（上一轮固化的 canonical 事实清单）——
+            本模块**不复制**任何一条 Movement 数据，也不自己解释 `BuildDraft`；
+          - `../lab/buildEditorModel` **只取 `BuildDraft` / `DriveMode` 两个类型**（type-only）。
+      */
+      'movementInventory.ts': [
+        '../core/partInventory',
+        '../lab/buildEditorModel',
+        './runMovementCanonical',
       ],
       /*
         PRODUCT-LOOP-P0：完整 Run 资格判断（产品层唯一一处）。

@@ -6,7 +6,7 @@
  *      localStorage，打开 `home.html`（正式产品入口）后，
  *      —— 存档里的 `front` 变成空槽、`frontMass` 仍是 cannon；
  *      —— **旁路玩家数据原样保留**（车身 / 轮径 / 轮组 / 驱动 / 其它槽 / 其它槽星级）；
- *      —— 库存与进度 key **逐字节不变**；
+ *      —— **Weapon 行与进度 key 逐条 / 逐字节不变**（见下方 L3c 的契约变更说明）；
  *      —— 再 reload 一次**不再改写**（迁移结构上一次为限）。
  *   ② **产品基线可达性**（Queue 必改 3）：迁移后的装载**真的**能打完第一场、
  *      并走到**第一次局内强化**（第一层三选一）—— 用真实鼠标点击驱到那个节点。
@@ -55,6 +55,13 @@ const MIME = {
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
 const INV_KEY = 'strongfruit.ownedParts.v2';
 const PROGRESS_KEY = 'strongfruit.playerProgress.v1';
+
+/**
+ * 正式轮组里**需要库存拥有**的那三件（明文写死，与上方夹具同一纪律：本文件描述
+ * 「当年落盘的数据」，刻意不 import src）。
+ * ⚠️ 缺省轮（`wheelStd`）**不在**这里 —— 它不进库存、恒默认拥有。
+ */
+const MOVEMENT_IDS = ['smallWheel', 'largeWheel', 'heavyWheel'];
 
 const FRONT_SLOT = 'front';
 const WEAPON_SLOT = 'frontMass';
@@ -321,10 +328,50 @@ async function main() {
       'L3b **玩家数据一字未改**：车身 / 轮径 / 轮组 / 驱动 / 其它槽星级原样，且**键集不变**（唯一变化就是 front 这一个槽；不是「重置成默认车」）',
       `body=${migratedA.bodyDefId} r=${migratedA.rearRadius}/${migratedA.frontRadius} wheels=${migratedA.rearWheelDefId}/${migratedA.frontWheelDefId} drive=${migratedA.drive} stars=${JSON.stringify(migratedA.functionalStars)} keysSame=${keysSame}`,
     );
+    /*
+      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY｜**本行是一条签下的契约变更，
+      不是被放宽的断言**。原口径是「库存 key 与迁移前**逐字节相同**」，它建立在
+      「库存里装着的东西必然已经被拥有」这个前提上。新契约把这条前提补全：
+      **车上装着的 Movement 必须合法拥有** —— 而路线 A 的夹具恰恰装着
+      `smallWheel` / `largeWheel`，库存里却没有它们（手工档 / 跨版本残留的形态）
+      ⇒ 首页挂载会把这两件各补 1（只增不减，且**不碰** Build / 进度 / 任何 Weapon）。
+      于是这里拆成**覆盖面更宽**的两条断言（原来只比一个字符串）：
+        ① `L3c`  进度 key **逐字节不变** + 全部 **Weapon 行逐条不变**；
+        ② `L3c2` 库存的**唯一**变化就是那两件 Movement 的 `one` 档各 +1，
+                 且**任何条目、任何星级都没有减少**（只增不减）。
+    */
+    const invA = stripStamp(JSON.parse(afterA[INV_KEY]));
+    const invSeedA = stripStamp(JSON.parse(seededA[INV_KEY]));
+    const weaponIds = Object.keys(invSeedA).filter((id) => !MOVEMENT_IDS.includes(id));
+    const weaponsKept = weaponIds.every((id) => canon(invA[id]) === canon(invSeedA[id]));
     log(
-      afterA[INV_KEY] === seededA[INV_KEY] && afterA[PROGRESS_KEY] === seededA[PROGRESS_KEY],
-      'L3c **永久数据不丢**：库存与进度 key 与迁移前**逐字节相同**（迁移只动 Build 的那一个槽）',
-      `inv=${afterA[INV_KEY] === seededA[INV_KEY]} progress=${afterA[PROGRESS_KEY] === seededA[PROGRESS_KEY]}`,
+      afterA[PROGRESS_KEY] === seededA[PROGRESS_KEY] && weaponsKept,
+      'L3c **永久数据不丢**：进度 key 逐字节不变 + **全部 Weapon 行逐条不变**（迁移只动 Build 的那一个槽）',
+      `progress=${afterA[PROGRESS_KEY] === seededA[PROGRESS_KEY]} weapons=${weaponsKept}(${weaponIds.length} 行)`,
+    );
+
+    const STARS = ['one', 'two', 'three', 'four', 'five'];
+    const grew = [];
+    const shrunk = [];
+    for (const id of Object.keys(invSeedA)) {
+      for (const k of STARS) {
+        const b = Number((invSeedA[id] || {})[k] || 0);
+        const a = Number((invA[id] || {})[k] || 0);
+        if (a > b) grew.push(`${id}.${k}:${b}->${a}`);
+        if (a < b) shrunk.push(`${id}.${k}:${b}->${a}`);
+      }
+    }
+    /** 要补的恰好就是这份夹具**装着**的那两件（直接从夹具取值 ⇒ 夹具改了断言跟着走）。 */
+    const expectedGrants = [
+      LEGACY_WITH_PLAYERDATA.rearWheelDefId,
+      LEGACY_WITH_PLAYERDATA.frontWheelDefId,
+    ];
+    log(
+      shrunk.length === 0 &&
+        grew.length === expectedGrants.length &&
+        expectedGrants.every((m) => grew.some((s) => s.startsWith(`${m}.one:`))),
+      `L3c2 **新契约（车上装着的 Movement 必须合法拥有）**：库存唯一变化 = 路线 A 装着却不拥有的 ${expectedGrants.join(' / ')} 各补 1 件，且**没有任何条目减少**`,
+      `grew=[${grew.join(' ')}] shrunk=[${shrunk.join(' ')}]`,
     );
     const pushRodOwned = (() => {
       try {

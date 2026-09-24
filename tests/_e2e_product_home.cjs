@@ -18,6 +18,14 @@
  * 用法：
  *   npm run build:portrait-lab
  *   node tests/_e2e_product_home.cjs   （或 npm run e2e:product-home）
+ *
+ * ── PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY 追加 ───────────────────────
+ * 上面三件事之外，本文件还取证「永久成长里的 Movement 维度」（三个新断言）：
+ *   - `A9`  新账号默认 Movement 拥有状态**合法**：缺省轮恒默认拥有（进不了库存靠
+ *           `implicit`）、装在两挂点，不变式 `movementLegal` 为真；
+ *   - `A9b` 三档需要库存的轮组默认**未拥有**，但已经在正式库存里**占位**（3 行计数 0），
+ *           且本次挂载没有为 Movement 补任何东西（不白送内容）；
+ *   - `E1b` 整页 reload 之后 owned / equipped 读数**逐字段不变**、**不再补件**（只写一次）。
  */
 const http = require('http');
 const fs = require('fs');
@@ -42,6 +50,11 @@ const MIME = {
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
 /** 被本 Queue 端到端打通的唯一槽位（车身前上挂点） */
 const WEAPON_SLOT = 'frontMass';
+/**
+ * 正式库存 key（PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY 起，Movement 的拥有状态
+ * 也在这一份里 —— 与 Weapon 共用，**没有**第二套拥有记录）。
+ */
+const INV_KEY = 'strongfruit.ownedParts.v2';
 
 const results = [];
 function log(pass, name, detail = '') {
@@ -182,6 +195,45 @@ async function main() {
       `keys=${Object.keys(stored0).sort().join(',')}`,
     );
 
+    /*
+      PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY（必改 1 / 必改 2）｜
+      **新账号的默认 Movement 拥有状态**。探针读数直接来自成长会话（页面不另算一份），
+      这一段同时证三件事：
+        ① 缺省轮 = **恒默认拥有**（`implicit`：不进库存 ⇒ `count === 0` 却 `owned === true`）
+           且真的装在那两个挂点上；
+        ② 三档**需要库存**的轮组默认**未拥有**（不白送内容），但已经在正式库存里**占位**
+           （有行、计数 0 ⇒ 「已经在永久库存里」不是一个概念，而是真的落了盘）；
+        ③ 「每一条装着的 Movement 都合法拥有」这条不变式成立，且本次挂载**没有**为它补件。
+    */
+    const mv = p.growth.movements || [];
+    const dflt = mv.find((m) => m.implicit);
+    log(
+      p.growth.movementLegal === true &&
+        !!dflt &&
+        dflt.owned === true &&
+        dflt.count === 0 &&
+        dflt.equipped === true &&
+        dflt.hardpoints.length === 2,
+      'A9 新账号默认 Movement 拥有状态**合法**：缺省轮恒默认拥有（进不了库存靠 `implicit`）、装在两挂点，不变式成立',
+      `legal=${p.growth.movementLegal} default=${dflt && dflt.defId} owned=${dflt && dflt.owned} count=${dflt && dflt.count} hp=${dflt && dflt.hardpoints.join('+')}`,
+    );
+    const needInv = mv.filter((m) => m.needsInventory);
+    let persistedRows = 0;
+    try {
+      const inv0 = JSON.parse(stored0[INV_KEY] || '{}');
+      persistedRows = needInv.filter((m) => inv0[m.defId] && Number(inv0[m.defId].one) === 0).length;
+    } catch {
+      persistedRows = -1;
+    }
+    log(
+      needInv.length === 3 &&
+        needInv.every((m) => m.owned === false && m.count === 0 && m.equipped === false) &&
+        persistedRows === 3 &&
+        (p.growth.movementRepaired || []).length === 0,
+      'A9b 三档需要库存的轮组默认**未拥有**，但**已经在正式库存里占位**（3 行计数 0）；本次挂载没有为 Movement 补任何东西',
+      `movements=${needInv.map((m) => `${m.defId}:owned=${m.owned}`).join(' ')} persistedRows=${persistedRows} repaired=[${(p.growth.movementRepaired || []).join(',')}]`,
+    );
+
     /* ------------------------------------------------- 2) 进调整战车并切换武器 */
     await clickSelector(page, '[data-ph-action="open-garage"]');
     p = await probeOf(page);
@@ -260,6 +312,20 @@ async function main() {
       p.view === 'home' && p.equippedWeaponId === target,
       'E1 reload 后仍是该武器（状态来自正式存档，不是内存巧合）',
       `equipped=${p.equippedWeaponId}`,
+    );
+
+    /*
+      PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY（必改 3）｜整页 reload 之后
+      Movement 的 **owned / equipped 读数逐字段不变**，且**没有再补件**
+      （「reload 后不丢失 / 不重复写」都是在真实存储上取的证）。
+    */
+    const mvAfter = p.growth.movements || [];
+    log(
+      p.growth.movementLegal === true &&
+        (p.growth.movementRepaired || []).length === 0 &&
+        JSON.stringify(mvAfter) === JSON.stringify(mv),
+      'E1b reload 后 Movement 的 owned / equipped 读数**逐字段不变**，且**不再补件**（只写一次）',
+      `legal=${p.growth.movementLegal} repaired=[${(p.growth.movementRepaired || []).join(',')}] same=${JSON.stringify(mvAfter) === JSON.stringify(mv)}`,
     );
 
     // 再进 Garage：状态仍一致（验收 4）
