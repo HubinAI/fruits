@@ -91,6 +91,9 @@ import {
 import { FULL_RUN_SUPPORTED_WEAPON_IDS, supportsFullRun } from '../src/product/runCompatibility';
 // PRODUCT-LOOP-R2-RECOVERY（必改 1）：一次性 onboarding 的版本标记 key（断言写入面用）。
 import { R2_ONBOARDING_KEY } from '../src/product/r2Onboarding';
+// PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1：**第二个**一次性迁移标记 key
+// （`openGrowthSession` 现在会同时写它 ⇒ `PC-10` 的闭集断言要把白名单 +1）。
+import { R2_RESEED_KEY } from '../src/product/r2Reseed';
 import {
   RUN_FAIL_PARAM,
   parseRunFailReturn,
@@ -529,8 +532,11 @@ describe('PRODUCT-LOOP-R2-A｜C. 领奖：一次、真入库、数量累积', ()
       ⚠️ PRODUCT-LOOP-R2-RECOVERY（必改 1）在这里**加了一个 key**：一次性 onboarding
          的版本标记 `strongfruit.r2Onboarding.v1`（上面那次 `openGrowthSession` 会落它）。
          断言仍是**闭集**（不是「包含」）⇒ 多写任何一个 key 都会红，没有放宽。
+      ⚠️ PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1 又加了**第二个**：版本化一次性 reseed 的
+         标记 `strongfruit.r2Reseed.v1`。**仍然只是白名单 +1，闭集语义一字未改** ——
+         第三个 key 出现时这一条照样红。
     */
-    expect(allKeys()).toEqual([INV_KEY, PROFILE_CLAIMS_KEY, R2_ONBOARDING_KEY].sort());
+    expect(allKeys()).toEqual([INV_KEY, PROFILE_CLAIMS_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY].sort());
     const inv = loadInventoryRaw();
     expect(inv, '库存必须真的落盘').toBeTruthy();
     expect(getCount(inv!, 'cannon', GROWTH_STAR)).toBe(5);

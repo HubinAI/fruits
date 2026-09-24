@@ -221,6 +221,20 @@ export interface ProductProbe {
     readonly onboardingReason: string;
     readonly onboardingRaised: number;
     readonly onboardingCannon: number;
+    /**
+     * PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜本次挂载的**版本化一次性 reseed** 读数。
+     *
+     * ⚠️ 与 onboarding 那四个字段**并列但不混同**（两份 key / 两个版本）：
+     *   - `reseedApplied === true` ⇒ 这一次真的把「上一轮验证已消费的起点」恢复成
+     *     `cannon ★1 = 4/5` + 装备 ★1（`reseedCleared` = 清掉的 ★≥2 件数）；
+     *   - `reseedReason === 'already-marked'` ⇒ 曾经执行过（reload 后的形态，库存不再被改）；
+     *   - `'not-consumed'` / `'start-intact'` / `'not-prototype'` / `'equip-failed'`
+     *     ⇒ **一个字节都没动**（各自的原因见 `r2Reseed` 的 reason 说明）。
+     */
+    readonly reseedApplied: boolean;
+    readonly reseedReason: string;
+    readonly reseedCleared: number;
+    readonly reseedCannon: number;
   };
   /**
    * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页那一行最小成长状态的真实读数
@@ -431,6 +445,15 @@ export function mountProductHome(
    *    ⇒ 新账号种子（`cannon ×4`）**静默失效**，而现象与「一切正常」一模一样。
    */
   const growth: GrowthSession = openGrowthSession(draft);
+  /**
+   * ⚠️ PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜**必须把会话归一化后的 Build 收回来**。
+   *
+   * 成长会话里有一类改动会写 `playerBuild.v1`：版本化一次性 reseed 会把主武器槽换回
+   * `cannon ★1`（上一轮验证把起点消费掉了）。若本页继续用挂载前那份 `draft`，就会出现
+   * 「屏幕/车库显示 ★2、磁盘与下一局其实是 ★1」——R1-B 起产品侧反复吃亏的两处读数分叉。
+   * 没有任何改动时 `growth.draft` 与入参是**同一个对象**（逐字节相同）。
+   */
+  draft = growth.draft;
   let inv: PartInventory = growth.inv;
   let view: ProductView = 'home';
   /**
@@ -1059,6 +1082,17 @@ export function mountProductHome(
           onboardingReason: growth.onboarding.reason,
           onboardingRaised: growth.onboarding.raised,
           onboardingCannon: growth.onboarding.cannonAfter,
+          /**
+           * PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜本队列的**版本化一次性 reseed** 读数。
+           *
+           * ⚠️ 同样直接取成长会话的判定结果（页面 / 探针不各自再判一次）⇒ E2E 能断言
+           *    「已消费起点的账号第一次进来被恢复成 4/5 + 装备 ★1」与「reload 之后
+           *    `already-marked` ⇒ 没有再改库存」这两条**互斥**的事实。
+           */
+          reseedApplied: growth.reseed.applied,
+          reseedReason: growth.reseed.reason,
+          reseedCleared: growth.reseed.cleared,
+          reseedCannon: growth.reseed.cannonAfter,
         },
         /**
          * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页那一行成长状态的真实读数

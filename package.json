@@ -44,7 +44,8 @@
     "test:e2e-gate": "npm run build:e2e && node tests/_serve_pages.cjs & node tests/_e2e_gate.cjs",
     "build:e2e": "vite build -c vite.e2e.config.ts",
     "e2e:product-fail": "node tests/_e2e_product_fail.cjs",
-    "e2e:product-legacy": "node tests/_e2e_product_legacy_profile.cjs"
+    "e2e:product-legacy": "node tests/_e2e_product_legacy_profile.cjs",
+    "e2e:product-reseed": "node tests/_e2e_product_reseed.cjs"
   },
   "devDependencies": {
     "@types/matter-js": "^0.20.2",

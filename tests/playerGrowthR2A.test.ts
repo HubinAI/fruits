@@ -76,6 +76,11 @@ import {
   markR2Onboarding,
   planR2Onboarding,
 } from '../src/product/r2Onboarding';
+/**
+ * PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜`openGrowthSession` 现在还会写**第二个**一次性标记。
+ * 只取它的 key（`PG-10` 的闭集断言要把这个新 key 收进白名单，而不是把闭集放宽成「至少包含」）。
+ */
+import { R2_RESEED_KEY } from '../src/product/r2Reseed';
 
 const INV_KEY = 'strongfruit.ownedParts.v2';
 const INV_KEY_V1 = 'strongfruit.ownedParts.v1';
@@ -350,10 +355,15 @@ describe('PRODUCT-LOOP-R2-A｜H. old Profile migration 不丢数据（验收 ⑦
       ⚠️ R2-RECOVERY（必改 1）在这里**加了一个 key**：一次性 onboarding 的版本标记
          `strongfruit.r2Onboarding.v1`。断言仍然是**闭集**（不是「至少包含」）——
          多写任何一个 key 都会红，这一点没有放宽。
+      ⚠️ R2-VALIDATION-STATE-RESEED-R1 又**加了第二个**：版本化一次性 reseed 的标记
+         `strongfruit.r2Reseed.v1`。**同样只是把白名单 +1，闭集语义原样保留** ——
+         将来若再冒出第三个 key，这一条仍然会红（这正是它存在的意义）。
+         两份迁移各用各的 key 是**刻意的**：它们的写语义相反（一个只增不减，一个必须删 ★≥2），
+         共用一个 key 会让两边的不变量都无法审计。
       ⚠️ 库存本体仍然只有 `ownedParts.v2` 一处（旧横屏游戏与竖屏产品共用那一份）。
     */
-    expect(keys.sort(), '成长只允许写「正式库存 key + 一次性 onboarding 标记」').toEqual(
-      [INV_KEY, R2_ONBOARDING_KEY].sort(),
+    expect(keys.sort(), '成长只允许写「正式库存 key + 两个一次性迁移标记」').toEqual(
+      [INV_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY].sort(),
     );
     // 再跑一次「手动加一件」的正式写入路径，key 集合不变
     const inv = loadInventoryRaw()!;

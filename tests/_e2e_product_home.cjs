@@ -294,18 +294,22 @@ async function main() {
         比数个数更强 —— 少一个会红，把其中一个换成别的未知 key 同样会红，
         而「ownedParts 只准有一个」这条原始语义一字未动（下面第一项仍是它）。
       ⚠️ 这不是放宽：原断言只认数量 2，任何「数量对但名字错」都能混过去。
+      ⚠️ PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1：再 +1（`strongfruit.r2Reseed.v1`）——
+         版本化一次性 reseed 的标记，首次打开首页时会落它。
+         **仍然只是白名单 +1**：`length` 相等 + 逐位相等两条都在，少一个 / 多一个 / 换名都红。
     */
     const EXPECTED_KEYS = [
       'strongfruit.ownedParts.v2',
       'strongfruit.playerBuild.v1',
       'strongfruit.r2Onboarding.v1',
+      'strongfruit.r2Reseed.v1',
     ].sort();
     const stored2Keys = Object.keys(stored2).sort();
     log(
       Object.keys(stored2).filter((k) => k.startsWith('strongfruit.ownedParts')).length === 1 &&
         stored2Keys.length === EXPECTED_KEYS.length &&
         EXPECTED_KEYS.every((k, i) => stored2Keys[i] === k),
-      'E5 三轮操作后官方 storage 恰好是那三个 key（无残留 / 无第二套库存 / 无未知 key）',
+      'E5 三轮操作后官方 storage 恰好是那四个 key（无残留 / 无第二套库存 / 无未知 key）',
       `keys=${stored2Keys.join(',')}`,
     );
 

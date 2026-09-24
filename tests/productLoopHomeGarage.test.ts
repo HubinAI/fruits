@@ -434,12 +434,16 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
       //   - `../lab/buildEditorModel` **只取 `BuildDraft` 类型**（type-only）。
       // PRODUCT-LOOP-R2-RECOVERY（必改 1）：追加 `./r2Onboarding` —— 一次性 onboarding
       // 迁移的判定与执行都在那个模块里，本模块只按正确顺序调它（判定 → 补件 → 落盘 → 打标记）。
+      // PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1：再追加 `./r2Reseed` —— **版本化**一次性
+      // reseed（上一轮验证已消费起点 ⇒ 恢复成 ★1 = 4/5 + 装备 ★1）。同样是「判定 → 执行 →
+      // 落盘 → 打标记」的四段，顺序仍收在本模块内部；两份迁移各自一个 key。
       'playerGrowth.ts': [
         '../core/buildPersistence',
         '../core/partInventory',
         '../lab/buildEditorModel',
         './playerLoadout',
         './r2Onboarding',
+        './r2Reseed',
       ],
       /*
         PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）｜**一次性 onboarding 迁移**。
@@ -455,6 +459,29 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../core/saveVersion',
         '../platform',
         './playerLoadout',
+      ],
+      /*
+        PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜**版本化一次性 reseed**（上一轮验证
+        已经把起点消费掉：`cannon ★2` 已合成且装备着）。
+          - 自己的持久化 key（`strongfruit.r2Reseed.v1`）⇒ 只依赖 `../platform`
+            （与 `playerProfile.ts` / `r2Onboarding.ts` 同一条纪律：只有产品侧的持久化模块碰存储）；
+          - 信封复用 `../core/saveVersion`（不新造第二套版本机制，也**不动**全局版本号）；
+          - 库存读写走 `../core/partInventory`（`addPart` / `consume` / `getCount` / `saveInventory`）
+            —— 清星用的是 core 既有的 `consume`，**没有**第二个库存写入口；
+          - 换装走 `./playerLoadout` 的 `equipWeapon`（**唯一**写 Build 的入口，过
+            `validateSnapshot`）⇒ 产品侧仍然只有那一处 `savePlayerBuild(`；
+          - 判别式要用旧标记 ⇒ `./r2Onboarding`；要用「有没有领过奖」⇒ `./playerProfile`
+            的 `readClaimLedger()`（账本解析口径只有那一处，本模块不复制）；
+          - `../lab/buildEditorModel` **只取 `BuildDraft` 类型**（type-only）。
+      */
+      'r2Reseed.ts': [
+        '../core/partInventory',
+        '../core/saveVersion',
+        '../lab/buildEditorModel',
+        '../platform',
+        './playerLoadout',
+        './playerProfile',
+        './r2Onboarding',
       ],
       /*
         PRODUCT-LOOP-P0：完整 Run 资格判断（产品层唯一一处）。

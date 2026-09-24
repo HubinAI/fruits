@@ -76,6 +76,21 @@ import {
   raiseR2OnboardingCannon,
   type R2OnboardingPlan,
 } from './r2Onboarding';
+/**
+ * PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜**版本化一次性 reseed**。
+ *
+ * 上一轮 R2 验证**已经消费掉起点**（合成了 `cannon ★2` 并且装备着它，新领的 ★1 只剩 1 件）
+ * ⇒ 「4/5 → 领奖 → 5/5 → 合成 → ★2」这条链再也走不了。`r2Onboarding` 救不了它：
+ * 它判据 ② 恰恰是「存在 ★≥2 的 Weapon 就一个字节都不动」（那是它当初的保护逻辑）。
+ * 因此另起一份**新 key / 新版本**的一次性迁移（`./r2Reseed`），把它拉回 pre-fusion 起点。
+ * ⚠️ 与 onboarding 的分工写在 `./r2Reseed` 的模块头：那边**只增不减**，这边**必须删除** ★≥2。
+ */
+import {
+  applyR2Reseed,
+  markR2Reseed,
+  planR2Reseed,
+  type R2ReseedOutcome,
+} from './r2Reseed';
 
 /**
  * 本版成长只使用 **★1**。
@@ -231,6 +246,16 @@ export function repairEquippedStack(inv: PartInventory, draft: BuildDraft): stri
 /** 本次挂载的成长会话读数（供探针 / 测试观察「这一趟到底改了什么」）。 */
 export interface GrowthSession {
   readonly inv: PartInventory;
+  /**
+   * 本次挂载结束时**归一化过的** Build（`strongfruit.playerBuild.v1` 里那一份的投影）。
+   *
+   * ⚠️ 为什么必须由会话回传（而不是让调用方继续用自己手里那份）：本会话里有一类改动会
+   *    写 Build —— 一次性 reseed 会把主武器槽换成 `cannon ★1`。若页面仍用挂载前的
+   *    `draft`，就会出现「屏幕显示 ★2、磁盘其实是 ★1」这种**两处读数分叉**
+   *    （R1-B 起产品侧反复吃亏的那一类缺陷）。⇒ 调用方必须 `draft = growth.draft`。
+   * ⚠️ 没有任何改动时它与入参是**同一个对象**（逐字节相同，不是副本）。
+   */
+  readonly draft: BuildDraft;
   /** 本次挂载是否应用了新账号种子（仅 fresh profile 会为 true）。 */
   readonly seeded: boolean;
   /** 本次挂载为「Equipped 指向有效 stack」补了几件（`null` = 没动）。 */
@@ -245,6 +270,17 @@ export interface GrowthSession {
    *    `already-marked` ⇒ 曾经执行过（reload 走到这里时就是它）。
    */
   readonly onboarding: R2OnboardingPlan;
+  /**
+   * PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜本次挂载的**版本化一次性 reseed** 读数。
+   *
+   * ⚠️ `applied === true` ⇒ 这一个账号的「上一轮验证起点」刚被恢复成
+   *    `cannon ★1 = 4/5` + 装备 ★1（`reseed.cleared` 是清掉的 ★≥2 件数）；
+   *    `already-marked` ⇒ 首入判定早就做出过（reload 后就是它）。
+   * ⚠️ `decided === true` ⇒ **本次是新版本首入**，标记已落盘（**含**那四个「一个字节都不动」
+   *    的出口 —— 判定只做一次是这个迁移的正确性要求，不是优化）。
+   * ⚠️ 只有 `equip-failed` 是 `decided === false`（可重试，下次挂载重新判）。
+   */
+  readonly reseed: R2ReseedOutcome;
 }
 
 /**
@@ -280,6 +316,16 @@ export interface GrowthSession {
  *     ④ **最后**才 `markR2Onboarding()` 落版本标记。
  *   ④ 排在 ③ 之后，是为了让「配额写失败」只退化成「下次重试」，
  *   而不是「标记说做过了、库存却没补上」这种永久卡死。
+ *
+ * ── PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1 追加 ──────────────────────────
+ * 上一轮真人验证**已经把起点消费掉**（合成了 `cannon ★2` 且装上了它），旧 onboarding 的
+ * 判据 ② 又禁止它再动这份存档 ⇒ 验证链再次不可达。本函数在 onboarding 之后、Equipped 兜底
+ * **之前**再走一次**版本化一次性 reseed**（`planR2Reseed` → `applyR2Reseed`）：
+ *   - 它自己按严格顺序落盘（补 ★1 → 装备 ★1 → 清 ★≥2 → 一次 `saveInventory`），
+ *     见 `./r2Reseed` 的落盘顺序说明；
+ *   - 它把**换过装的** Build 回传（`reseed.draft`）⇒ 下面所有步骤与调用方都用这一份，
+ *     否则会出现「屏幕显示 ★2、磁盘是 ★1」的分叉；
+ *   - 装备被拒时它**零副作用**（内存改动被回滚）⇒ 判据下次挂载仍成立，可重试。
  */
 export function openGrowthSession(draft: BuildDraft): GrowthSession {
   const freshProfile = isFreshProfile();
@@ -297,13 +343,34 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
     raiseR2OnboardingCannon(inv, onboarding);
     changed = true;
   }
-  const repairedEquipped = repairEquippedStack(inv, draft);
+  /*
+    PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜版本化一次性 reseed（判据 / 顺序全在
+    `r2Reseed.ts`）。⚠️ 位置是刻意的：排在 onboarding **之后**（起点先由 onboarding / 种子
+    安排妥当，再看它是不是已经被消费掉），排在 Equipped 兜底**之前**（兜底要按 reseed 之后的
+    装备读数判断，否则它会去补一个刚刚被清掉的 ★2）。
+  */
+  const reseedPlan = planR2Reseed(inv, draft);
+  const reseed = applyR2Reseed(inv, draft, reseedPlan);
+  if (reseed.applied) changed = true;
+  /** reseed 可能换过装 ⇒ 后续一切（含调用方）都用这一份 Build。 */
+  const nextDraft: BuildDraft = reseed.draft;
+  const repairedEquipped = repairEquippedStack(inv, nextDraft);
   changed = changed || repairedEquipped !== null;
 
   if (changed) saveInventory(inv);
   // ④ 标记**必须**晚于库存落盘（见上方顺序说明）
   if (onboarding.needsMark) markR2Onboarding();
-  return { inv, seeded, repairedEquipped, freshProfile, onboarding };
+  /*
+    ⑤ reseed 的标记：判据是 `decided`（**首入决策已做出**），**不是** `applied`（动作已执行）。
+    那四个「一个字节都不动」的出口（not-prototype / no-claim / not-consumed / start-intact）
+    同样要落标记 —— 否则存在一条**真实丢档路径**：新账号首入时还没领过奖（`no-claim`），
+    之后自己打一局、领奖、合成 ★2，再次挂载时五条判据全部成立 ⇒ 玩家**自己刚合出来的** ★2
+    会被当成「上一轮的产物」清掉。（本轮由 `e2e:product-reward` 在门禁里抓出来。）
+    唯一**不**落标记的是 `equip-failed`：那是可重试的瞬时失败。
+    顺序同样排在它自己的落盘（`applyR2Reseed` 内部那一次）之后。
+  */
+  if (reseed.decided) markR2Reseed();
+  return { inv, draft: nextDraft, seeded, repairedEquipped, freshProfile, onboarding, reseed };
 }
 
 /**
