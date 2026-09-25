@@ -361,6 +361,14 @@ export interface ProductProbe {
       readonly defId: string;
       readonly name: string;
       readonly kind: string;
+      /**
+       * PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜卡片上那一行刻度的**三个真实数值**
+       * + 成品文案。全部现读自 canonical Movement Def（页面不自行推导）。
+       */
+      readonly radius: number;
+      readonly mass: number;
+      readonly energy: number;
+      readonly statsText: string;
       readonly needsInventory: boolean;
       readonly count: number;
       readonly owned: boolean;
@@ -1010,6 +1018,16 @@ export function mountProductHome(
         card.dataset['phMovementImplicit'] = String(c.implicit);
         card.dataset['phMovementCount'] = String(c.count);
         card.dataset['phMovementNeedsInventory'] = String(c.needsInventory);
+        /*
+          PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜这一行是**玩家能直接读**的轮组差异
+          （`轮径 12 · 质量 6 · 能耗 5`），取自 canonical Movement Def。
+          ⚠️ 单独再挂一个 `data-ph-movement-stats` 是为了让 E2E 能把**屏幕上那一串**
+             （而不是探针里的另一个字段）与 canonical 值逐字对账 —— 探针与 DOM 各自取证。
+        */
+        card.dataset['phMovementStats'] = c.statsText;
+        card.dataset['phMovementRadius'] = String(c.radius);
+        card.dataset['phMovementMass'] = String(c.mass);
+        card.dataset['phMovementEnergy'] = String(c.energy);
 
         const effectiveHere = slot.effectiveDefId === c.defId;
         card.dataset['phMovementEquipped'] = String(effectiveHere);
@@ -1018,6 +1036,20 @@ export function mountProductHome(
           card.classList.add('ph-card-selected');
         }
         card.append(el('span', 'ph-card-name', c.name));
+        /*
+          PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜**卡片刻度行**（轮径 / 质量 / 能耗）。
+
+          为什么必须有：Movement 选择种子之后玩家**已经拥有四档轮组**，但卡片此前只能
+          识别「名称 + 拥有状态」⇒ 缺少最基础的比较依据（「它们到底有什么不同？」）。
+          这一行就是那个依据，且全部是**真实配置数据**（canonical `WheelDef` 的
+          `radius` / `mass` / `energy`），不是推导出来的效果描述。
+
+          ⚠️ 四档（含缺省轮）**同一套规则**：`c.statsText` 对所有卡都是同一个函数生成的，
+             页面里没有「这件特殊、那件不特殊」的分支。
+          ⚠️ 只加这一行，不加 tooltip、不加属性面板、不加星级 / 品质（Queue 禁止清单）。
+          ⚠️ 它是**纯展示**：不影响 card 的 click / disabled / 选中态 / equip / scroll。
+        */
+        card.append(el('span', 'ph-card-stats', c.statsText));
         if (c.implicit) card.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_DEFAULT_LABEL));
         if (effectiveHere) card.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_EQUIPPED_LABEL));
         // 未拥有 ⇒ 明确标注，并且**不可点**（结构上装不上，而不是点了给个错误提示）
@@ -1515,6 +1547,10 @@ export function mountProductHome(
             defId: c.defId,
             name: c.name,
             kind: c.kind,
+            radius: c.radius,
+            mass: c.mass,
+            energy: c.energy,
+            statsText: c.statsText,
             needsInventory: c.needsInventory,
             count: c.count,
             owned: c.owned,

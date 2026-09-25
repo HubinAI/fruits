@@ -207,6 +207,15 @@
       /* 轮组卡比武器卡矮一点：一行要放「缺省轮 / 三档 / 未装载」共 5 项 */
       .ph-card-mv { padding: 8px 9px; gap: 2px; }
       .ph-card-mv .ph-card-name { font-size: 13px; }
+      /*
+        PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜轮组卡的**刻度量行**（`轮径 12 · 质量 6 · 能耗 5`）。
+
+        ⚠️ 与武器卡的 `.ph-card-damage`（主属性那一行）同一个视觉层级、同一种灰调：
+           它是**读数**（玩家用来比较），不是标签也不是提示语 —— 所以不做成 tag 的绿色、
+           也不做成 badge 的强调色（那会让它看起来像状态而不是数值）。
+        ⚠️ 只在 `.ph-card-mv` 内生效：武器卡不该出现这一行。
+      */
+      .ph-card-mv .ph-card-stats { font-size: 11px; color: #b8c6da; letter-spacing: 0.01em; }
       .ph-mv-actions { margin-top: 8px; }
       /*
         PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页的一行最小成长状态。

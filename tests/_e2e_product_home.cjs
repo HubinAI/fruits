@@ -27,6 +27,19 @@
  *           缺省轮仍不进库存（**PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 起的新契约**：
  *           一次性种子让「比较 → 选择 → 改配置」这一步可达；旧契约是「默认未拥有」）；
  *   - `E1b` 整页 reload 之后 owned / equipped 读数**逐字段不变**、**不再补件**（只写一次）。
+ *
+ * ── PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY 追加 ────────────────────────────
+ * Movement 选择种子之后玩家**已拥有四档轮组**，但卡片此前只能识别「名称 + 拥有状态」
+ * ⇒ 缺少最基础的比较依据。本文件新增取证据点：卡片上真实渲染出的**刻度量行**
+ * （`轮径 12 · 质量 6 · 能耗 5`，取自 canonical Movement Def）：
+ *   - `MC1` 四档（含缺省轮）卡片都在 DOM 上可见，每个挂点行各一份（2×4 = 8 张）；
+ *   - `MC2` 每张卡上**渲染出**刻度行（不是只有 data 属性）；
+ *   - `MC3` 可见文本与 `data-ph-movement-stats` 逐字相同；
+ *   - `MC4` / `MC4b` 三个数值 === canonical Def，且同一件在两个挂点行上完全一致；
+ *   - `MC5` 本段前提（四档都拥有）；`MC5b` **未拥有**的卡照样展示刻度（不可点 ≠ 不可读）；
+ *   - `MC6` 真实 DOM 文本里**没有**推导型属性 / 星级 / 品质（禁止清单）。
+ * ⚠️ 为什么必须在浏览器里取证：负控制实测 —— 把渲染那一行删掉，vitest 的读数层守卫
+ *    **全绿**（读数里有 `statsText`）而屏幕上什么都不显示 ⇒「读数正确」≠「玩家看得见」。
  */
 const http = require('http');
 const fs = require('fs');
@@ -511,6 +524,122 @@ async function main() {
       `default=${mvBefore.defaultDefId} stored=${(mvBefore.slots || []).map((s) => `${s.hardpointId}:${s.storedDefId}`).join(' ')}`,
     );
 
+    /*
+      ══════════════════════════════════════════════════════════════════════════
+      PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜**轮组卡片的刻度量行**
+      ══════════════════════════════════════════════════════════════════════════
+
+      验收 1「四种现有 Movement 卡片均展示真实数据」+ 验收 2「数值与 canonical Def 一致」
+      + 验收 3「当前装备 / 拥有状态不退化」。
+
+      为什么必须在**浏览器 DOM** 上取证（而不是只在 vitest 里读 `movementReading()`）：
+      负控制实测发现 —— 把 `card.append(el('span','ph-card-stats', ...))` 整行删掉，
+      vitest 的读数层守卫**全绿**（读数里有 `statsText`），但**屏幕上什么都不显示**。
+      「读数正确」与「玩家看得见」是两件事 ⇒ 这一条读的是**真实渲染出来的卡片的
+      `textContent`**，并与正式内容库的值逐件对账。
+
+      ⚠️ 数据来源是页面自己写进 DOM 的 `data-ph-movement-*` + 卡片可见文本；
+         期望值来自 `window.__PRODUCTHOME__.movement.cards`（= 页面读数）。
+         两者都由页面提供 ⇒ 若页面自己算错，两边会同错 —— 所以下面**额外**把
+         期望值钉在「正式内容库的真实字段」上（`A9b` 已证四档都在），
+         并把可见文本与三个 data 值**互相**对账（自洽 + 与读数一致，双重）。
+    */
+    const mvCards = await page.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll('[data-ph-movement]')) {
+        const defId = el.getAttribute('data-ph-movement');
+        if (defId === 'none') continue; // 「未装载」不是一件 Movement，不参与刻度量断言
+        const statsEl = el.querySelector('.ph-card-stats');
+        out.push({
+          defId,
+          hardpoint: el.getAttribute('data-ph-movement-hardpoint'),
+          owned: el.getAttribute('data-ph-movement-owned') === 'true',
+          disabled: el.disabled === true,
+          radius: el.getAttribute('data-ph-movement-radius'),
+          mass: el.getAttribute('data-ph-movement-mass'),
+          energy: el.getAttribute('data-ph-movement-energy'),
+          statsAttr: el.getAttribute('data-ph-movement-stats'),
+          statsVisible: statsEl ? (statsEl.textContent || '').trim() : null,
+        });
+      }
+      return out;
+    });
+    const cardsByDef = new Map();
+    for (const c of mvCards) {
+      if (!cardsByDef.has(c.defId)) cardsByDef.set(c.defId, []);
+      cardsByDef.get(c.defId).push(c);
+    }
+    const uniqueCards = [...cardsByDef.keys()];
+    log(
+      uniqueCards.length === 4 && uniqueCards.every((d) => cardsByDef.get(d).length === 2),
+      'MC1 四档轮组卡片都在 DOM 上**可见**（1 缺省 + 3 需库存；且每个挂点行各一份 ⇒ 2×4 = 8 张）',
+      `defs=[${uniqueCards.join(',')}] rows=${uniqueCards.map((d) => `${d}:${cardsByDef.get(d).length}`).join(' ')}`,
+    );
+
+    const statsOf = (d, k) => cardsByDef.get(d).map((c) => c[k]);
+    const allSame = (arr) => arr.every((v) => v === arr[0]);
+    // ① 卡片上真的有那一行可见文本（不是只有 data 属性）
+    log(
+      uniqueCards.every((d) => statsOf(d, 'statsVisible').every((t) => t && /轮径\s*\d+/.test(t) && /质量\s*\d+/.test(t) && /能耗\s*\d+/.test(t))),
+      'MC2 每张轮组卡上**渲染出**刻度行（`轮径 N · 质量 N · 能耗 N`；验收 1）',
+      uniqueCards.map((d) => `${d}:"${statsOf(d, 'statsVisible')[0]}"`).join('  '),
+    );
+    // ② 刻度行文本 === data 属性的那一串（页面对自己写的东西自洽）
+    log(
+      uniqueCards.every((d) => statsOf(d, 'statsVisible').every((t, i) => t === statsOf(d, 'statsAttr')[i])),
+      'MC3 卡片可见文本与它的 `data-ph-movement-stats` **逐字相同**（不是两处各画一份）',
+      `ok=${uniqueCards.length}`,
+    );
+    // ③ 三个数值 === 探针读数里的 canonical 值（**与正式内容库同源**）
+    const probeCards = p.movement.cards || [];
+    const canonicalOk = uniqueCards.every((d) => {
+      const pc = probeCards.find((c) => c.defId === d);
+      return (
+        !!pc &&
+        statsOf(d, 'radius').every((v) => v === String(pc.radius)) &&
+        statsOf(d, 'mass').every((v) => v === String(pc.mass)) &&
+        statsOf(d, 'energy').every((v) => v === String(pc.energy))
+      );
+    });
+    log(
+      canonicalOk,
+      'MC4 四档的轮径 / 质量 / 能耗 === canonical Movement Def（页面读数，非 UI 自造常量；验收 2）',
+      uniqueCards
+        .map((d) => {
+          const pc = probeCards.find((c) => c.defId === d);
+          return pc ? `${d}:r${pc.radius}/m${pc.mass}/e${pc.energy}` : `${d}:?`;
+        })
+        .join(' '),
+    );
+    // ④ 同一件在两个挂点行上的刻度**必须一致**（同一件轮组没有两套数）
+    log(
+      uniqueCards.every((d) => allSame(statsOf(d, 'radius')) && allSame(statsOf(d, 'mass')) && allSame(statsOf(d, 'energy'))),
+      'MC4b 同一件轮组在 rear / front 两行上的刻度量**完全相同**（不存在两套数）',
+      `ok=${uniqueCards.length}`,
+    );
+    /*
+      ⑤ 验收 2 的**独立性**：刻度行不得把「未拥有」压成「看得见但没数据」。
+         本段进来时四档都拥有（A9b 已证）⇒ 这里只能证「拥有时都有刻度」。
+         未拥有形态在 M2b 那一段（临时归零）之后**顺带**取证 —— 见 MC5b。
+    */
+    log(
+      uniqueCards.every((d) => statsOf(d, 'owned').every((v) => v === true)),
+      'MC5 本段前提：四档都**已拥有**（PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 之后的真实形态）',
+      uniqueCards.map((d) => `${d}:owned=${statsOf(d, 'owned')[0]}`).join(' '),
+    );
+    /*
+      ⑥ 表达纪律：卡片上不出现推导型属性 / 星级 / 品质（Queue 禁止清单）。
+         在**真实渲染文本**上扫一遍，而不是只扫源码。
+    */
+    const allCardText = mvCards.map((c) => `${c.statsVisible || ''} ${c.statsAttr || ''}`).join(' | ');
+    const banned = ['%', '★', '☆', '速度', '稳定', '稀有', '史诗', '传说', '品质'];
+    const hitBanned = banned.filter((b) => allCardText.includes(b));
+    log(
+      hitBanned.length === 0,
+      'MC6 刻度行里**没有**推导型属性 / 星级 / 品质（真实 DOM 文本上扫描；禁止清单）',
+      hitBanned.length ? `命中=${hitBanned.join(',')}` : `扫描 ${mvCards.length} 张卡`,
+    );
+
     /* 给这个浏览器会话补一件**真实 owned** 的轮组（写正式库存 key，不经页面） */
     const GRANT = 'largeWheel';
     await page.evaluate(
@@ -581,6 +710,42 @@ async function main() {
         lockedCards.some((c) => c.defId === ZEROED),
       'M2b 未拥有的轮组卡在 DOM 上是**真 `disabled`**（真实鼠标点不动；不是「点了才报错」的软校验）',
       `locked=[${lockedCards.map((c) => `${c.defId}:disabled=${c.disabled}`).join(' ')}] zeroed=${ZEROED}`,
+    );
+
+    /*
+      MC5b｜**未拥有形态下刻度照样可见**（PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY）。
+
+      为什么单列一条：MC2–MC4 都是在「四档都拥有」的前提下取的证 ⇒ 若不补这一条，
+      「失去拥有状态之后还看得见数值吗」就没人验证过。而玩家**正是靠这些数值**
+      判断自己要不要去搞到这件轮组 ⇒ 未拥有时必须照样有数据。
+      取样条件就在上面：`ZEROED`（heavyWheel）此刻计数为 0 = 真实未拥有。
+    */
+    const zeroedStats = await page.evaluate((defId) => {
+      const el = document.querySelector(`[data-ph-movement="${defId}"]`);
+      if (!el) return null;
+      const statsEl = el.querySelector('.ph-card-stats');
+      return {
+        owned: el.getAttribute('data-ph-movement-owned') === 'true',
+        disabled: el.disabled === true,
+        text: statsEl ? (statsEl.textContent || '').trim() : null,
+        radius: el.getAttribute('data-ph-movement-radius'),
+        mass: el.getAttribute('data-ph-movement-mass'),
+        energy: el.getAttribute('data-ph-movement-energy'),
+      };
+    }, ZEROED);
+    log(
+      !!zeroedStats &&
+        zeroedStats.owned === false &&
+        zeroedStats.disabled === true &&
+        !!zeroedStats.text &&
+        /轮径\s*\d+/.test(zeroedStats.text) &&
+        /质量\s*\d+/.test(zeroedStats.text) &&
+        /能耗\s*\d+/.test(zeroedStats.text) &&
+        zeroedStats.text === `轮径 ${zeroedStats.radius} · 质量 ${zeroedStats.mass} · 能耗 ${zeroedStats.energy}`,
+      'MC5b **未拥有**的轮组卡照样展示真实刻度（不可点 ≠ 不可读；验收 1 + 3）',
+      zeroedStats
+        ? `${ZEROED}: owned=${zeroedStats.owned} disabled=${zeroedStats.disabled} text="${zeroedStats.text}"`
+        : `${ZEROED}: 卡片缺失`,
     );
 
     /* 恢复被归零的那一件（判定已落盘 ⇒ 种子**不会**再补，故这里手工写回，保持后续前提） */

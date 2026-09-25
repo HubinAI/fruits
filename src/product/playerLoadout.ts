@@ -277,6 +277,9 @@ export interface LoadoutReading {
  *     ⇒ 与 Run 侧看到的**必然**是同一份。
  *   - 库存里的星级档取 `movementInventory.MOVEMENT_STAR`（恒 ★1；本轮不做 Movement
  *     的 Fusion / Star）。
+ *   - 卡片刻度（轮径 / 质量 / 能耗）取 `movementInventory.MovementEntry` 上的
+ *     `radius` / `mass` / `energy`（真源仍是 canonical `registry.movements`）
+ *     —— PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY 起，卡片与探针共用这一份。
  */
 
 /** 一个 Movement 挂点在 Garage 里的展示读数（只读；页面禁止自行推导）。 */
@@ -297,8 +300,43 @@ export interface MovementSlotReading {
   readonly unmounted: boolean;
 }
 
+/**
+ * PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜卡片刻度那三个标签。
+ *
+ * ⚠️ 与 `core/content.ts` 里 `WheelDef` 字段的**一一对应**：
+ *    `radius` → 轮径 · `mass` → 质量 · `energy` → 能耗。
+ *    刻意只用这三个词（Queue 指定的玩家语言），不引入「抓地 / 转速 / 扭矩」等
+ *    额外字段 —— 那会把卡片变成属性面板（Queue 禁止清单：不做整体重设计）。
+ */
+export const MOVEMENT_STAT_LABELS: Readonly<Record<'radius' | 'mass' | 'energy', string>> = {
+  radius: '轮径',
+  mass: '质量',
+  energy: '能耗',
+};
+
+/**
+ * 把一件 Movement 的 canonical 数值排布成卡片那一行（`轮径 12 · 质量 6 · 能耗 5`）。
+ *
+ * ⚠️ 输入是 `MovementEntry`（其 `radius` / `mass` / `energy` 原样来自
+ *    `canonicalMovements()`）⇒ 这里**不出现任何数字字面量**，页面也不自行拼串。
+ * ⚠️ 没有推导、没有换算、没有评级：`radius` 是 26 就写 26（不写成「大」或「+30%」）。
+ */
+export function movementStatsText(m: Pick<MovementEntry, 'radius' | 'mass' | 'energy'>): string {
+  return `${MOVEMENT_STAT_LABELS.radius} ${m.radius} · ${MOVEMENT_STAT_LABELS.mass} ${m.mass} · ${MOVEMENT_STAT_LABELS.energy} ${m.energy}`;
+}
+
 /** 一件 Movement 在 Garage 卡片上的读数（= 可否装备的**唯一判据**来源）。 */
 export interface MovementCardReading extends MovementEntry {
+  /**
+   * PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜卡片上那行「轮径 · 质量 · 能耗」的**成品文案**。
+   *
+   * ⚠️ 为什么文案在这里生成、而不是在页面里拼：页面若自己 `${c.radius}` 拼串，就会
+   *    出现「页面知道字段名」这层耦合 —— 将来卡片刻度换一批，页面得跟着改。
+   *    放这里 ⇒ 页面只 append 一个字符串，**数字的唯一来源**始终是 `MovementEntry`
+   *    （→ `canonicalMovements()`），`MVR-*` 把它与 canonical Def 逐件钉死。
+   * ⚠️ 只是**数字的排布**，不含任何推导 / 评级 / 百分比（Queue 禁止清单）。
+   */
+  readonly statsText: string;
   /** 当前这件正装在哪几个挂点上（`[]` = 没装）。 */
   readonly hardpoints: readonly string[];
 }
@@ -348,6 +386,8 @@ export function movementReading(draft: BuildDraft, inv: PartInventory): Movement
   const nameOf = new Map(canonicalMovements().map((m) => [m.defId, m.name]));
   const cards: MovementCardReading[] = ownership.entries.map((e) => ({
     ...e,
+    // 数字全部来自 `e`（= canonical Movement Def 的透出值），这里只做「标签 + 数字」的排布。
+    statsText: movementStatsText(e),
     hardpoints: [...e.hardpoints],
   }));
   return {

@@ -10,6 +10,8 @@
  *
  * ── 唯一的真源（本模块**不复制**任何一条数据）──────────────────────────────
  *   - Movement 内容 / 缺省轮 / 挂点   → `./runMovementCanonical`（上一轮固化的 canonical 事实清单）；
+ *   - Movement 卡片刻度（轮径 / 质量 / 能耗）→ 同上（`canonicalMovements()`，
+ *     真源 = `core/content.ts` 的 `registry.movements`）—— **原样透出，不写第二套数字**；
  *   - 「哪些 Movement 需要库存才拥有」→ 同上（`needsInventory`，真源 = core `OFFICIAL_MOVEMENTS`）；
  *   - 拥有数量                        → core `partInventory.getCount()`（**同一个**
  *     `strongfruit.ownedParts.v2`，与 Weapon 共用一份库存）；
@@ -51,6 +53,18 @@ export interface MovementEntry {
   readonly defId: string;
   readonly name: string;
   readonly kind: string;
+  /**
+   * PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜**卡片刻度**（轮径 / 质量 / 能耗）。
+   *
+   * ⚠️ 这三个数**不是**本模块新造的维度，也不是第二套 UI 常量：它们与 `name` / `kind`
+   *    一样是从 `canonicalMovements()`（真源 = `core/content.ts` 的 `registry.movements`）
+   *    原样透出来的。卡片刻的与 Run 侧真正进物理的是**同一次读取**的结果。
+   * ⚠️ 刻意**只透这三个**：它们是 canonical `WheelDef` 上真实存在、玩家能据此比较的字段。
+   *    派生的「速度 +20% / 稳定 +30%」这类推导值一律不做（那是 UI 自己发明事实）。
+   */
+  readonly radius: number;
+  readonly mass: number;
+  readonly energy: number;
   /**
    * 是否**需要库存拥有**才能装备（真源 = core `OFFICIAL_MOVEMENTS`，经 `./runMovementCanonical`）。
    * `false` ⇒ 这件是**不进库存、恒默认拥有**的缺省轮。
@@ -124,6 +138,10 @@ export function movementEntries(inv: PartInventory, draft: BuildDraft): readonly
       defId: m.defId,
       name: m.name,
       kind: m.kind,
+      // 卡片刻度：与 Run 侧读的**同一份** canonical 值（见 `MovementEntry` 上的说明）。
+      radius: m.radius,
+      mass: m.mass,
+      energy: m.energy,
       needsInventory: m.needsInventory,
       count: implicit ? 0 : count,
       owned: implicit || count > 0,
