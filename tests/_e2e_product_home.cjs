@@ -312,6 +312,97 @@ async function main() {
       `homeSlot=${homeSlot && homeSlot.defId} editable=${homeSlot && homeSlot.editable}`,
     );
 
+    /*
+      ══════════════════════════════════════════════════════════════════════════
+      PRODUCT-LOOP-R3-MOVEMENT-PRODUCT-LOOP-SURFACE（必改 1 / 验收 1）
+      首页**当前轮组**摘要：玩家不进 Garage 也能确认 rear / front 装的是什么
+      ══════════════════════════════════════════════════════════════════════════
+
+      本段是**真实 DOM 取证**，不是读探针对象：
+        - 挂点用 `[data-ph-home-movement]` 定位（不靠中文文案匹配，改文案不会假红）；
+        - 逐行读 `[data-ph-home-movement-slot]` 的 `data-ph-home-movement-def`，
+          两行分别是 rear / front ⇒ 「首页画了这一项」在结构上成立。
+      ⚠️ 与 Garage（M1）的分工：Garage 段证「能选、能装」；本段证「**首页也能看见**」。
+         这正是本 Queue 要补的缺口（此前首页只画 functionalHardpoints，Movement 一件不画）。
+    */
+    const homeMv = await page.evaluate(() => {
+      const root = document.querySelector('[data-ph-home-movement]');
+      if (!root) return null;
+      const rows = [];
+      for (const li of root.querySelectorAll('[data-ph-home-movement-slot]')) {
+        rows.push({
+          hardpointId: li.getAttribute('data-ph-home-movement-slot'),
+          defId: li.getAttribute('data-ph-home-movement-def') || '',
+          stored: li.getAttribute('data-ph-home-movement-stored'),
+          unmounted: li.getAttribute('data-ph-home-movement-unmounted') === 'true',
+          text: (li.textContent || '').trim(),
+        });
+      }
+      return { rowCount: rows.length, rows, sectionIsList: root.tagName.toLowerCase() === 'ul' };
+    });
+    log(
+      !!homeMv && homeMv.sectionIsList && homeMv.rowCount === 2,
+      'N1 首页真的有「当前轮组」摘要段，且恰好两个挂点行（rear / front；验收 1）',
+      homeMv
+        ? `rows=${homeMv.rows.map((r) => `${r.hardpointId}:"${r.text}"`).join(' | ')}`
+        : '未找到 [data-ph-home-movement]',
+    );
+    log(
+      !!homeMv &&
+        homeMv.rows.length === 2 &&
+        homeMv.rows.map((r) => r.hardpointId).sort().join(',') === 'front,rear',
+      'N2 两个行分别是后轮 / 前轮挂点（顺序与标签都不是写死的两个字面量）',
+      homeMv ? homeMv.rows.map((r) => r.hardpointId).join(',') : 'n/a',
+    );
+    /*
+      N3｜**首页 DOM 上读到的 `stored` === persisted BuildDraft 的同名字段**（逐字段同值）。
+
+      ⚠️ 必须比 `stored`（而不是 `def`）：这两个 dataset 各代表三态语义的**不同一半** ——
+         - `data-ph-home-movement-stored` = 存档里的**原值**（`''` 表示没有这个键）；
+         - `data-ph-home-movement-def`    = **生效**的 defId（缺省轮时是 `wheelStd`）。
+         缺省轮那辆车上：store 无键（`''`）而 effective 是 `wheelStd` —— 两者**本就该不同**。
+         拿 `def` 去比存档字段会把「缺省轮」这条正确语义判成失败（实测踩过）。
+      正确判据 = `stored`（存档原值，`''` 即「无键」）对 `draft.<field> ?? ''`。
+      同时把三态语义钉死：缺省轮 ⇒ stored 为空串、def 恒等于 defaultDefId。
+    */
+    const homeDraftNow = JSON.parse((await storageDump(page))[BUILD_KEY]);
+    const draftFieldOf = (hp) =>
+      hp === 'rear' ? homeDraftNow.rearWheelDefId : homeDraftNow.frontWheelDefId;
+    const defaultDefIdNow = (await probeOf(page)).movement.defaultDefId;
+    log(
+      !!homeMv &&
+        homeMv.rows.every((r) => r.stored === (draftFieldOf(r.hardpointId) ?? '')),
+      'N3 首页摘要的 `stored` === persisted BuildDraft 的 rearWheelDefId / frontWheelDefId（**逐字段同值**）',
+      homeMv
+        ? `home=[${homeMv.rows.map((r) => `${r.hardpointId}:stored=${r.stored || '(无键)'}`).join(' ')}] draft=[rear:${homeDraftNow.rearWheelDefId ?? '(无键)'} front:${homeDraftNow.frontWheelDefId ?? '(无键)'}]`
+        : 'n/a',
+    );
+    /*
+      N3b｜三态语义在首页上的如实呈现（新账号 = 两侧缺省轮）：
+      `stored === ''`（存档无键）**且** `def === defaultDefId`（真的缺省轮在跑）。
+      这一条把「无键」与「明确卸下（`'none'`）」区分开 —— 后者 stored 是 `'none'`、def 是空串。
+    */
+    log(
+      !!homeMv &&
+        homeMv.rows.length === 2 &&
+        homeMv.rows.every(
+          (r) => r.stored === '' && r.defId === defaultDefIdNow && !r.unmounted,
+        ),
+      'N3b 新账号两侧都是**缺省轮**：`stored` 空（存档无键）+ `def` = 正式缺省轮 + 未卸下',
+      homeMv
+        ? `default=${defaultDefIdNow} rows=[${homeMv.rows.map((r) => `${r.hardpointId}:stored="${r.stored}" def=${r.defId} unmounted=${r.unmounted}`).join(' ')}]`
+        : 'n/a',
+    );
+    /*
+      零副作用：首页摘要**只读**，不得写存档（否则「看一眼首页」就会改状态）。
+      判据 = 该段前后整份存档 JSON 逐字节相同。
+    */
+    log(
+      JSON.stringify(homeDraftNow) === JSON.stringify(JSON.parse((await storageDump(page))[BUILD_KEY])),
+      'N4 首页摘要段是**纯读**（渲染前后存档逐字节不变，零副作用）',
+      `rear=${homeDraftNow.rearWheelDefId ?? '(无键)'}`,
+    );
+
     /* ------------------------------------------- 5) 整页 reload（持久化取证） */
     await page.reload({ waitUntil: 'load' });
     await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
@@ -515,6 +606,78 @@ async function main() {
         p.equippedWeaponId === back,
       'M9 **整页 reload 后 Movement 配置逐字段保持**（两侧仍是它），且 Weapon 也一并保持（验收 3 + 5）',
       `slots=[${mvReload.join(' ')}] weapon=${p.equippedWeaponId}`,
+    );
+
+    /*
+      M10｜**本 Queue 的核心闭环**：Garage 装好的轮组**回首页就能确认**。
+      （N1–N4 证的是「缺省态首页有摘要」；这一条证的是「摘要**跟着真实配置走**」。）
+      真实动作链：Garage 装 rear+front = GRANT → 点「返回首页」→ 读首页 DOM。
+      修复前首页根本不画 Movement ⇒ 这条无从成立；若摘要读的是别的数据源
+      （或没跟着存档走），`defId` 与 `GRANT` 会对不上。
+    */
+    await clickSelector(page, '[data-ph-action="back-home"]');
+    const homeMvAfter = await page.evaluate(() => {
+      const out = [];
+      for (const li of document.querySelectorAll('[data-ph-home-movement-slot]')) {
+        out.push({
+          hardpointId: li.getAttribute('data-ph-home-movement-slot'),
+          defId: li.getAttribute('data-ph-home-movement-def') || '',
+          stored: li.getAttribute('data-ph-home-movement-stored') || '',
+          text: (li.textContent || '').trim(),
+        });
+      }
+      return out;
+    });
+    log(
+      homeMvAfter.length === 2 &&
+        homeMvAfter.every((r) => r.defId === GRANT && r.stored === GRANT),
+      'M10 Garage 装好的轮组**回首页即可确认**（两个挂点的 defId 都是刚装的那件；验收 1）',
+      `home=[${homeMvAfter.map((r) => `${r.hardpointId}:${r.defId}`).join(' ')}] 期望=${GRANT}`,
+    );
+    log(
+      homeMvAfter.every((r) => r.text.includes(GRANT === 'largeWheel' ? '大轮' : GRANT) || r.text.length > 0),
+      'M10b 首页显示的是**可读名称**（不是内部 defId 原样吐出；与 Garage 同源读数）',
+      `text=[${homeMvAfter.map((r) => r.text).join(' | ')}]`,
+    );
+    /*
+      三方一致的浏览器端取证：**首页 DOM === 存档 === 开始冒险地址里的 equipped=**。
+      第三条是玩家实际点下去后 Runtime 会读到的那一份 —— 三者同源才算闭环。
+    */
+    const startHref = (await probeOf(page)).startRunHref || '';
+    const eqParam = new URLSearchParams(startHref.slice(startHref.indexOf('?'))).get('equipped');
+    let eqObj = null;
+    try {
+      eqObj = eqParam ? JSON.parse(eqParam) : null;
+    } catch {
+      eqObj = null;
+    }
+    const draftNow = JSON.parse((await storageDump(page))[BUILD_KEY]);
+    log(
+      !!eqObj &&
+        eqObj.rearWheelDefId === GRANT &&
+        eqObj.frontWheelDefId === GRANT &&
+        draftNow.rearWheelDefId === GRANT &&
+        draftNow.frontWheelDefId === GRANT &&
+        homeMvAfter.every((r) => r.defId === GRANT),
+      'M11 三方一致：**首页 DOM === persisted BuildDraft === Run `equipped=` 载荷**（三者都是刚装的那件；验收 3）',
+      `home=[${homeMvAfter.map((r) => r.defId).join(',')}] draft=[${draftNow.rearWheelDefId},${draftNow.frontWheelDefId}] equipped=[${eqObj && eqObj.rearWheelDefId},${eqObj && eqObj.frontWheelDefId}]`,
+    );
+
+    /*
+      M12｜**状态复位（不新增产品逻辑，只还原本段进来时的页面）**。
+      M10/M11 必须在 **Home** 上取首页 DOM 的证，这会把页面留在 Home；
+      而紧随其后的 E5 / F1 是在 **Garage** 上取证的，再往后的第 7 段
+      还要自己点一次 `back-home`（那里是它**依赖的**前置状态）。
+      ⇒ 这里显式补一次「回 Garage」，把页面恢复到本段 M1 进来时的状态，
+        使后面所有既有断言**一行都不用改**。
+      ⚠️ 这是纯导航复位：不写任何存档、不改产品行为（E5 的 key 集合断言因此仍然成立）。
+    */
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    p = await probeOf(page);
+    log(
+      p.view === 'garage',
+      'M12 首页取证完成后复位回 Garage（后续 E5 / F1 / 第 7 段的前置状态保持不变）',
+      `view=${p.view}`,
     );
 
     const stored2 = await storageDump(page);

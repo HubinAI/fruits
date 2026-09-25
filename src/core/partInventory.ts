@@ -283,9 +283,19 @@ export function seedInventoryFromStarterAndBuild(build: BuildDraft | null): Part
   return inv;
 }
 
-/** 是否含任意拥有副本 */
+/**
+ * 是否含任意拥有副本（用于「存档是否已初始化」判据）。
+ *
+ * ⚠️ 必须**同时**扫 `OFFICIAL_PARTS` 与 `OFFICIAL_MOVEMENTS`。
+ *    只扫功能件（旧写法）会导致：一个「功能件全为 0、但拥有轮组」的存档被判为
+ *    「未初始化」⇒ `ensureInventory` 走种子分支并**落盘覆写**，把玩家的轮组静默清空
+ *    （实测可复现：`smallWheel.one` 授予后经一次 `ensureInventory` 归零）。
+ *    `normalizeInventory`（:141）与 `emptyInventory`（:123）本就把两类键
+ *    视为同一个库存的两半，这里的判据必须与之对齐。
+ */
 function hasAnyOwned(inv: PartInventory): boolean {
-  return OFFICIAL_PARTS.some((p) => inv[p].one > 0 || inv[p].two > 0);
+  const anyOwned = (p: string): boolean => inv[p].one > 0 || inv[p].two > 0;
+  return OFFICIAL_PARTS.some(anyOwned) || OFFICIAL_MOVEMENTS.some(anyOwned);
 }
 
 /**

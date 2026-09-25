@@ -176,6 +176,22 @@ export const GARAGE_MOVEMENT_OFF_LABEL = '未装载';
 /** 缺省轮在卡片上的说明（它不进库存，但恒可装备）。 */
 export const GARAGE_MOVEMENT_DEFAULT_LABEL = '默认';
 /**
+ * PRODUCT-LOOP-R3-MOVEMENT-PRODUCT-LOOP-SURFACE｜首页「当前轮组」摘要。
+ *
+ * Queue 必改 1 的**判定**：Garage 的 `renderMovementSection()` 已经足够清楚地展示
+ * 当前 rear / front（分行 + 逐卡「使用中」）⇒ **不再为 Garage 增加第二套 UI**。
+ * 缺的是**首页**：`loadoutReading().slots` 只映射 `body.functionalHardpoints`，
+ * Movement 一个都不在 ⇒ 玩家在首页看不到自己车上装的是什么轮子。
+ * 这里只补首页这一处，且**沿用 Garage 已有词汇**（后轮 / 前轮 / 未装载），
+ * 不引入第二套说法。
+ */
+export const HOME_MOVEMENT_SECTION_LABEL = '当前轮组';
+/** 挂点显示名（与 Garage 的 `renderMovementSection` 逐字一致，同一套词）。 */
+export const MOVEMENT_HARDPOINT_LABELS: Readonly<Record<string, string>> = {
+  rear: '后轮',
+  front: '前轮',
+};
+/**
  * Movement 装备动作的结果文案。
  * ⚠️ 与 Weapon 侧**刻意用不同的词**：两套动作写的是两个不同的正式字段
  * （`rearWheelDefId` / `frontWheelDefId` vs `functionalSelections[frontMass]`），
@@ -805,6 +821,58 @@ export function mountProductHome(
       stage.append(grow);
     }
 
+    /**
+     * PRODUCT-LOOP-R3-MOVEMENT-PRODUCT-LOOP-SURFACE（必改 1 / 验收 1）｜
+     * 首页的**当前轮组**摘要：后轮 / 前轮各一行，显示各自正在使用的 Movement 名称。
+     *
+     * ── 为什么这里必须有（而不是「Garage 有就够了」）─────────────────────────────
+     * Movement 已是**第一等配置维度**：它有自己的永久库存、能在 Garage 独立装备、
+     * 会被写进 persisted BuildDraft、并随 `equipped=` 一起进 Run Runtime。
+     * 但首页的「已装备部件」（上面那个 `r.slots`）只映射 `body.functionalHardpoints`
+     * —— Movement 一条都不在 ⇒ 玩家在首页**看不到**车上装的什么轮子，
+     * 只能进 Garage 才知道。本段只补这一处缺口。
+     *
+     * ── 数据真源（零新造读数）───────────────────────────────────────────────────
+     * 只读 `movementReading(draft, playerInventory(draft))` 的 `slots`
+     * —— 与 Garage 的 `readMovement()` 是**同一个函数、同一份读数**，
+     * 所以「首页显示」与「Garage 显示」结构上不可能分叉（验收 1 + 验收 2）。
+     *
+     * ── 挂点顺序与标签 ─────────────────────────────────────────────────────────
+     * 顺序**现读自正式 BodyDef**（`slots` 已是 `movementHardpoints` 顺序），
+     * 不写死 rear 在前；标签取自 `MOVEMENT_HARDPOINT_LABELS`（与 Garage 同一套词）。
+     *
+     * ── 三个硬边界 ─────────────────────────────────────────────────────────────
+     *   ① 只画 `<span>` / `<li>`，**零新按钮、零新跳转** —— 改配置仍只有「调整战车」一条路；
+     *   ② 不新增第二个 Garage 式的卡阵（Queue：不要重复增加第二套 UI）；
+     *   ③ 与 Weapon 区一样带稳定挂点（`data-ph-home-movement`），供 E2E / 探针定位，
+     *      **不依赖文案匹配**。
+     */
+    const movement = movementReading(draft, playerInventory(draft));
+    if (movement.slots.length > 0) {
+      stage.append(el('h2', 'ph-sec', HOME_MOVEMENT_SECTION_LABEL));
+      const mvList = el('ul', 'ph-slots ph-home-movement');
+      mvList.dataset['phHomeMovement'] = '1';
+      for (const slot of movement.slots) {
+        const li = el('li', 'ph-slot ph-home-movement-slot');
+        li.dataset['phHomeMovementSlot'] = slot.hardpointId;
+        // 「明确卸下」（storedDefId === 'none'）与「缺省轮在跑」（storedDefId === null）
+        // 是**两种不同状态**，读数层已经用 `unmounted` 分开 ⇒ 这里如实画出，不合并。
+        li.dataset['phHomeMovementStored'] = slot.storedDefId === null ? '' : slot.storedDefId;
+        li.dataset['phHomeMovementDef'] = slot.effectiveDefId ?? '';
+        li.dataset['phHomeMovementUnmounted'] = String(slot.unmounted);
+        li.append(
+          el('span', 'ph-slot-label', MOVEMENT_HARDPOINT_LABELS[slot.hardpointId] ?? slot.hardpointId),
+          el(
+            'span',
+            'ph-slot-name',
+            slot.unmounted ? GARAGE_MOVEMENT_OFF_LABEL : slot.name,
+          ),
+        );
+        mvList.append(li);
+      }
+      stage.append(mvList);
+    }
+
     const goGarage = (): void => {
       view = 'garage';
       selected = null;
@@ -927,7 +995,7 @@ export function mountProductHome(
       row.dataset['phMovementEffective'] = slot.effectiveDefId ?? '';
       row.dataset['phMovementUnmounted'] = String(slot.unmounted);
       row.append(
-        el('span', 'ph-mv-label', slot.hardpointId === 'rear' ? '后轮' : '前轮'),
+        el('span', 'ph-mv-label', MOVEMENT_HARDPOINT_LABELS[slot.hardpointId] ?? slot.hardpointId),
         el('span', 'ph-mv-current', slot.unmounted ? GARAGE_MOVEMENT_OFF_LABEL : slot.name),
       );
 
