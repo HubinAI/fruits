@@ -107,6 +107,20 @@ import {
   movementOwnership,
   type MovementOwnershipReading,
 } from './movementInventory';
+/**
+ * PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED｜**一次性 Movement 可选方案种子**。
+ *
+ * Movement 的 Foundation 已经技术贯通，但真人账号三档需要库存的轮组**一件都没有**
+ * ⇒ 只能「感知存在」，无法「比较 → 选择 → 改配置」。本模块一次性把三档各补到 ≥1 件
+ * （判据 / 只增不减的纪律 / 硬边界全在 `./r3MovementChoiceSeed`），
+ * 本函数只负责**按正确顺序**调它：改内存 → 落盘 → **最后**打标记。
+ * ⚠️ 它**不碰** draft ⇒ 战斗行为一个字节都不变。
+ */
+import {
+  applyR3MovementChoiceSeed,
+  markR3MovementSeed,
+  type R3MovementSeedOutcome,
+} from './r3MovementChoiceSeed';
 
 /**
  * 本版成长只使用 **★1**。
@@ -313,6 +327,17 @@ export interface GrowthSession {
    *    （旧档 / 手工档 / 跨版本残留），与 `repairedEquipped` 是同一类修复。
    */
   readonly movementGrants: readonly string[];
+  /**
+   * PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED｜本次挂载的**一次性 Movement 种子**读数。
+   *
+   * ⚠️ `applied === true` ⇒ 这一次真的把三档需要库存的 Movement 补到了至少 1 件
+   * （`movementSeed.entries` 是逐件的 `countBefore → countAfter`）；
+   * `already-marked` ⇒ 首入判定早就做出过（reload 后就是它）；
+   * `already-owned` ⇒ 三档本来就有（**一个字节都没动**，但仍然落了标记）。
+   * ⚠️ `decided === true` ⇒ **本次是新版本首入**，标记已落盘（**含** `already-owned`
+   * 那一个「一个字节不动」的出口 —— 判定只做一次是正确性要求，不是优化）。
+   */
+  readonly movementSeed: R3MovementSeedOutcome;
 }
 
 /**
@@ -366,6 +391,14 @@ export interface GrowthSession {
  * 新账号的形态（缺省轮恒默认拥有）走的是**空操作**那一条 ⇒ 一个字节都不写；
  * 非空只可能出现在「装着某件需要库存的轮组、库存里却没有它」的旧档 / 手工档上。
  * ⚠️ 它**不碰** `draft` ⇒ Run Snapshot / Runtime 数值与调用前逐字节相同（不改变战斗行为）。
+ *
+ * ── PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 追加 ───────────────────────────────
+ * Movement 的 Foundation 技术贯通之后，真人账号仍然只有缺省标准轮可用
+ * ⇒ 这条维度只能「感知存在」，无法「比较 → 选择 → 改配置」。
+ * 本函数在 Movement ownership 兜底之**后**、落盘之**前**再走一次
+ * `applyR3MovementChoiceSeed`（判据 / 只增不减的纪律全在 `./r3MovementChoiceSeed`）：
+ * 一次性把三档需要库存的 Movement 各补到 **至少 1 件**，让「选择」这一步在真人机器上
+ * 可达。**只碰 Movement 库存、绝不碰 Build**。
  */
 export function openGrowthSession(draft: BuildDraft): GrowthSession {
   const freshProfile = isFreshProfile();
@@ -407,6 +440,18 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
   */
   const movementGrants = ensureMovementOwnership(inv, nextDraft);
   changed = changed || movementGrants.length > 0;
+  /*
+    PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED｜一次性 Movement 可选方案种子。
+    判据 / 补件量 / 只增不减的纪律全在 `./r3MovementChoiceSeed`。
+
+    ⚠️ 位置是刻意的：排在 `ensureMovementOwnership` **之后**（先保证「装着的必须拥有」
+       这条不变式成立，再看「有没有可比较的选择」），排在下面那唯一一次 `saveInventory`
+       **之前** ⇒ 它只改内存，落盘与「标记晚于落盘」的顺序与其它三段完全一致。
+    ⚠️ 它**不碰** `nextDraft` ⇒ Run Snapshot / Runtime 数值与调用前逐字节相同
+       （「不自动替玩家装备新轮子」「不重置当前 rear / front」是结构性成立的）。
+  */
+  const movementSeed = applyR3MovementChoiceSeed(inv);
+  if (movementSeed.applied) changed = true;
   /** 补件之后才取读数 ⇒ 报出的 owned / legal 就是**本次挂载结束**时的真实形态。 */
   const movements = movementOwnership(inv, nextDraft);
 
@@ -423,6 +468,14 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
     顺序同样排在它自己的落盘（`applyR2Reseed` 内部那一次）之后。
   */
   if (reseed.decided) markR2Reseed();
+  /*
+    ⑥ Movement 种子的标记：判据同样是 `decided`（**首入决策已做出**），**不是** `applied`。
+    `already-owned` 那一个「一个字节都不动」的出口也必须落标记 —— 否则玩家自己之后把
+    某一件轮组用掉时，下一次挂载判据会重新成立、把玩家自己消耗掉的东西再发一遍。
+    本模块没有 `equip-failed` 那一类可重试的瞬时失败（它不写 Build），故 `decided === false`
+    只在 `already-marked` 时出现。顺序同样排在它自己的落盘之后（共用上面那一次 `saveInventory`）。
+  */
+  if (movementSeed.decided) markR3MovementSeed();
   return {
     inv,
     draft: nextDraft,
@@ -433,6 +486,7 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
     reseed,
     movements,
     movementGrants,
+    movementSeed,
   };
 }
 

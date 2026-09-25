@@ -54,6 +54,8 @@ import {
   readR2Reseed,
 } from '../src/product/r2Reseed';
 import { saveClaimLedger } from '../src/product/playerProfile';
+// PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：第三份一次性迁移的标记（隔离变量用）
+import { markR3MovementSeed } from '../src/product/r3MovementChoiceSeed';
 
 const INV_KEY = 'strongfruit.ownedParts.v2';
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
@@ -137,11 +139,20 @@ function consumedBuild(extra: Partial<BuildDraft> = {}): BuildDraft {
   };
 }
 
-/** 把「已消费起点」的账号整体写进磁盘（库存 + Build + 旧标记 + 领奖账本 + 一份可辨认的进度）。 */
+/**
+ * 把「已消费起点」的账号整体写进磁盘（库存 + Build + 旧标记 + 领奖账本 + 一份可辨认的进度）。
+ *
+ * ⚠️ PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED｜这里**追加预置第三份一次性迁移的标记**：
+ *    那份种子（Movement 可选方案，三档各补到 ≥1）同样会写库存 ⇒ 若不预置，
+ *    本文件里所有「`r2Reseed` 一个字节都不动库存」的逐字节断言都会被它触发的合法写入打破。
+ *    预置标记 = **隔离变量**（把第三份迁移变成「对这个账号不适用」），不是放宽断言：
+ *    所有断言逐字保留，且 `r2Reseed` 的契约由本文件单独覆盖。
+ */
 function seedConsumedProfile(build: BuildDraft = consumedBuild()): void {
   seedDisk(CONSUMED_INV);
   savePlayerBuild(build);
   markR2Onboarding();
+  markR3MovementSeed();
   saveClaimLedger({ grantedRunIds: ['run-r2-validation'] });
   store.setItem(PROGRESS_KEY, JSON.stringify({ cleared: 3, best: 7 }));
 }
@@ -294,6 +305,8 @@ describe('PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜B. 幂等：只执行一�
     seedDisk({ cannon: { one: 4, two: 1 } });
     savePlayerBuild(consumedBuild());
     markR2Onboarding();
+    // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 预置其标记
+    markR3MovementSeed();
     saveClaimLedger({ grantedRunIds: ['run-x'] });
     const invBefore = store.getItem(INV_KEY);
 
@@ -363,6 +376,8 @@ describe('PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜C. 四个「一个字节�
   it('VR-08 `not-prototype`：没打开过产品首页（旧 R2 onboarding 标记不存在）⇒ 不清 ★2', () => {
     seedDisk({ cannon: { one: 1, two: 1 } });
     savePlayerBuild(consumedBuild());
+    // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 预置其标记
+    markR3MovementSeed();
     saveClaimLedger({ grantedRunIds: ['run-x'] }); // 有领奖记录，但没跑过 onboarding
     const invBefore = store.getItem(INV_KEY);
 
@@ -380,6 +395,8 @@ describe('PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜C. 四个「一个字节�
     seedDisk({ cannon: { one: 1, two: 1 } });
     savePlayerBuild(consumedBuild());
     markR2Onboarding(); // 有旧标记，但一次奖都没领过
+    // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 预置其标记
+    markR3MovementSeed();
     expect(hasPrototypeClaim()).toBe(false);
     const invBefore = store.getItem(INV_KEY);
 
@@ -397,6 +414,8 @@ describe('PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜C. 四个「一个字节�
     seedDisk({ cannon: { one: 1, two: 0 }, spear: { one: 2, two: 0 } });
     savePlayerBuild(defaultPlayerDraft());
     markR2Onboarding();
+    // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 预置其标记
+    markR3MovementSeed();
     saveClaimLedger({ grantedRunIds: ['run-x'] });
     const invBefore = store.getItem(INV_KEY);
 
@@ -465,6 +484,8 @@ describe('PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜D. 装备被拒 ⇒ 原�
     seedDisk(CONSUMED_INV);
     savePlayerBuild(OVERFLOW_BUILD);
     markR2Onboarding();
+    // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 预置其标记
+    markR3MovementSeed();
     saveClaimLedger({ grantedRunIds: ['run-x'] });
     const invBefore = store.getItem(INV_KEY);
     const buildBefore = store.getItem(BUILD_KEY);

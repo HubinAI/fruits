@@ -20,11 +20,12 @@
  *   node tests/_e2e_product_home.cjs   （或 npm run e2e:product-home）
  *
  * ── PRODUCT-LOOP-R3-MOVEMENT-PERSISTENT-INVENTORY 追加 ───────────────────────
- * 上面三件事之外，本文件还取证「永久成长里的 Movement 维度」（三个新断言）：
+ * 上面三件事之外，本文件还取证「永久成长里的 Movement 维度」（三个断言）：
  *   - `A9`  新账号默认 Movement 拥有状态**合法**：缺省轮恒默认拥有（进不了库存靠
  *           `implicit`）、装在两挂点，不变式 `movementLegal` 为真；
- *   - `A9b` 三档需要库存的轮组默认**未拥有**，但已经在正式库存里**占位**（3 行计数 0），
- *           且本次挂载没有为 Movement 补任何东西（不白送内容）；
+ *   - `A9b` 三档需要库存的轮组**各至少 1 件且已落盘**、一件都没被自动装上，
+ *           缺省轮仍不进库存（**PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 起的新契约**：
+ *           一次性种子让「比较 → 选择 → 改配置」这一步可达；旧契约是「默认未拥有」）；
  *   - `E1b` 整页 reload 之后 owned / equipped 读数**逐字段不变**、**不再补件**（只写一次）。
  */
 const http = require('http');
@@ -210,9 +211,11 @@ async function main() {
       这一段同时证三件事：
         ① 缺省轮 = **恒默认拥有**（`implicit`：不进库存 ⇒ `count === 0` 却 `owned === true`）
            且真的装在那两个挂点上；
-        ② 三档**需要库存**的轮组默认**未拥有**（不白送内容），但已经在正式库存里**占位**
-           （有行、计数 0 ⇒ 「已经在永久库存里」不是一个概念，而是真的落了盘）；
-        ③ 「每一条装着的 Movement 都合法拥有」这条不变式成立，且本次挂载**没有**为它补件。
+        ② 三档**需要库存**的轮组**各至少 1 件**（PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 起，
+           一次性种子让「比较 → 选择 → 改配置」可达；**旧契约是「默认未拥有」**），
+           且**一件都没被自动装上**；
+        ③ 「每一条装着的 Movement 都合法拥有」这条不变式成立，且本次挂载**没有**为它补件
+           （种子走的是它自己那条字段 `movementSeed`，与 `movementRepaired` 不混）。
     */
     const mv = p.growth.movements || [];
     const dflt = mv.find((m) => m.implicit);
@@ -226,21 +229,47 @@ async function main() {
       'A9 新账号默认 Movement 拥有状态**合法**：缺省轮恒默认拥有（进不了库存靠 `implicit`）、装在两挂点，不变式成立',
       `legal=${p.growth.movementLegal} default=${dflt && dflt.defId} owned=${dflt && dflt.owned} count=${dflt && dflt.count} hp=${dflt && dflt.hardpoints.join('+')}`,
     );
+    /*
+      PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED｜A9b 的语义在本次 Queue **发生了契约变更**：
+        旧契约：三档需要库存的轮组默认**未拥有**（计数 0）⇒ 玩家只能「感知存在」，
+                无法「比较 → 选择 → 改配置」（真人的第五条反馈）。
+        新契约：一次性种子在**首入**时把三档各补到 **至少 1 件**；缺省轮**保持**
+                implicit / default 语义（不进库存）。
+      ⇒ 这条断言**不是被删掉或放宽**，而是按新契约**改写并在原地加强**：它现在同时钉住
+        ① 三档都真的落盘了（每行 ≥ 1，且 `count === persisted`）；
+        ② `needsInventory` 三件一件不多一件不少；
+        ③ 缺省轮**仍然不在**库存里（种子结构上碰不到它）；
+        ④ 三档**一件都没被自动装上**（`equipped === false`）—— 「不自动替玩家装备」。
+      ⚠️ 「种子只发一次」由 E1b（reload 逐字段不变）与 E6（key 闭集）在别处覆盖。
+    */
     const needInv = mv.filter((m) => m.needsInventory);
-    let persistedRows = 0;
+    let persistedMin = -1;
+    let persistedMax = -1;
+    let defaultRowPresent = null;
     try {
       const inv0 = JSON.parse(stored0[INV_KEY] || '{}');
-      persistedRows = needInv.filter((m) => inv0[m.defId] && Number(inv0[m.defId].one) === 0).length;
+      const rows = needInv.map((m) => (inv0[m.defId] ? Number(inv0[m.defId].one) : -1));
+      persistedMin = rows.length ? Math.min(...rows) : -1;
+      persistedMax = rows.length ? Math.max(...rows) : -1;
+      defaultRowPresent = !!(dflt && inv0[dflt.defId]);
     } catch {
-      persistedRows = -1;
+      persistedMin = -1;
     }
     log(
       needInv.length === 3 &&
-        needInv.every((m) => m.owned === false && m.count === 0 && m.equipped === false) &&
-        persistedRows === 3 &&
+        needInv.every((m) => m.owned === true && m.count >= 1 && m.equipped === false) &&
+        persistedMin >= 1 &&
+        defaultRowPresent === false &&
         (p.growth.movementRepaired || []).length === 0,
-      'A9b 三档需要库存的轮组默认**未拥有**，但**已经在正式库存里占位**（3 行计数 0）；本次挂载没有为 Movement 补任何东西',
-      `movements=${needInv.map((m) => `${m.defId}:owned=${m.owned}`).join(' ')} persistedRows=${persistedRows} repaired=[${(p.growth.movementRepaired || []).join(',')}]`,
+      'A9b 一次性 Movement 种子生效：三档需要库存的轮组**各至少 1 件且已落盘**、一件都没被自动装上；缺省轮仍不进库存',
+      `movements=${needInv.map((m) => `${m.defId}:owned=${m.owned},count=${m.count},eq=${m.equipped}`).join(' ')} persisted=${persistedMin}..${persistedMax} defaultRow=${defaultRowPresent} repaired=[${(p.growth.movementRepaired || []).join(',')}]`,
+    );
+    // A9c：三档在首页读数里就是**已拥有**的 ⇒「比较 → 选择 → 改配置」这一步在真人机器上可达
+    // （真正的可装备集合由 Garage 的 `p.movement.available` 在 M2 处单独覆盖）
+    log(
+      needInv.every((m) => m.owned === true && m.count >= 1),
+      'A9c 「比较 → 选择 → 改配置」可达：三档全部进入已拥有集合（不再是全部锁死）',
+      `needInv=${needInv.map((m) => `${m.defId}:owned=${m.owned},count=${m.count}`).join(' ')}`,
     );
 
     /* ------------------------------------------------- 2) 进调整战车并切换武器 */
@@ -461,11 +490,10 @@ async function main() {
         - 真实读 localStorage（`strongfruit.playerBuild.v1`）证明**写的是正式字段**；
         - 真实 `page.reload()` 证明「保持」来自持久化而不是内存。
 
-      ⚠️ 前置：默认账号**未拥有**三档需要库存的轮组（A9b 已证）⇒ 这一段必须先经
-         `window.__PRODUCTHOME__` 之外的正规途径拿到一件。这里用的是**同一个浏览器会话里
-         已有的正式库存 key**（`strongfruit.ownedParts.v2`）—— 直接补一行库存计数，
-         相当于「玩家已经拥有它」。这不是给页面开后门：页面仍然要过 `not-owned` 校验，
-         库存里没有就是装不上（下面 F2 会用一次负控制证明这一点）。
+      ⚠️ 前置（PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 起已变）：一次性 Movement 种子让
+         默认账号**三档全部拥有**（A9b 已证）⇒ 这一段原本「先拿一件」的必要性消失，
+         但下面的真实装备流程**一字不改**地继续跑（用的仍是正式库存 + 真实点击）。
+         种子的存在也让 M2b 的「未拥有样本」需要临时制造（见那一段的说明）。
     */
     const mvBefore = p.movement;
     log(
@@ -512,7 +540,32 @@ async function main() {
       「只允许装备真实 owned 的 Movement」这条约束就只是**页面自己说了算**。
       这里在浏览器里直接查 DOM 属性：`disabled === true` ⇒ 真实鼠标点不动
       （不是「点了给个错误提示」这种可绕过的软约束）。
+
+      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED｜本条的**取样方式**发生了变化（非放宽）：
+      该 Queue 的一次性种子让新账号**三档全部拥有** ⇒ 「未拥有」样本不再天然存在，
+      `locked` 会退化成空集（本轮门禁实测 `locked=[]`），断言就会变成空转。
+      ⇒ 处置 = 在同一浏览器会话里**临时把一件轮组计数归零**（仍写正式库存 key，
+        不经页面），制造一个**真实的**「未拥有」样本；取证完**立刻恢复**，
+        使后续步骤（`GRANT='largeWheel'` 那一串）的前提一字不变。
+      ⚠️ 这不是「删掉断言」，而是让它重新**有样本可测**：`disabled === true` 仍是硬断言。
     */
+    const ZEROED = 'heavyWheel';
+    await page.evaluate(
+      ([invKey, defId, keep]) => {
+        const inv = JSON.parse(localStorage.getItem(invKey) || '{}');
+        inv[defId] = { one: 0 };
+        localStorage.setItem(invKey, JSON.stringify(inv));
+        // 记号：证明我们确实动过盘（下面恢复后要断言它回来了）
+        localStorage.setItem('__e2e_zeroed__', defId);
+        return keep;
+      },
+      [INV_KEY, ZEROED, GRANT],
+    );
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
+    await sleep(200);
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+
     const lockedCards = await page.evaluate(() => {
       const out = [];
       for (const el of document.querySelectorAll('[data-ph-movement]')) {
@@ -523,9 +576,38 @@ async function main() {
       return out;
     });
     log(
-      lockedCards.length >= 1 && lockedCards.every((c) => c.disabled),
+      lockedCards.length >= 1 &&
+        lockedCards.every((c) => c.disabled) &&
+        lockedCards.some((c) => c.defId === ZEROED),
       'M2b 未拥有的轮组卡在 DOM 上是**真 `disabled`**（真实鼠标点不动；不是「点了才报错」的软校验）',
-      `locked=[${lockedCards.map((c) => `${c.defId}:disabled=${c.disabled}`).join(' ')}]`,
+      `locked=[${lockedCards.map((c) => `${c.defId}:disabled=${c.disabled}`).join(' ')}] zeroed=${ZEROED}`,
+    );
+
+    /* 恢复被归零的那一件（判定已落盘 ⇒ 种子**不会**再补，故这里手工写回，保持后续前提） */
+    await page.evaluate(
+      ([invKey, defId]) => {
+        const inv = JSON.parse(localStorage.getItem(invKey) || '{}');
+        inv[defId] = { one: 1 };
+        localStorage.setItem(invKey, JSON.stringify(inv));
+        localStorage.removeItem('__e2e_zeroed__');
+      },
+      [INV_KEY, ZEROED],
+    );
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
+    await sleep(200);
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    const restored = await page.evaluate(
+      ([invKey, defId]) => {
+        const inv = JSON.parse(localStorage.getItem(invKey) || '{}');
+        return { one: inv[defId] ? Number(inv[defId].one) : -1, marker: localStorage.getItem('__e2e_zeroed__') };
+      },
+      [INV_KEY, ZEROED],
+    );
+    log(
+      restored.one === 1 && restored.marker === null,
+      'M2b2 负控制取样已恢复原状（后续步骤前提不变：三档都仍是 ≥1）',
+      `restored=${ZEROED}:${restored.one} marker=${restored.marker}`,
     );
 
     /* ---- 只装 rear：证明「两个挂点独立」 ---- */
@@ -694,19 +776,23 @@ async function main() {
       ⚠️ PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1：再 +1（`strongfruit.r2Reseed.v1`）——
          版本化一次性 reseed 的标记，首次打开首页时会落它。
          **仍然只是白名单 +1**：`length` 相等 + 逐位相等两条都在，少一个 / 多一个 / 换名都红。
+      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：再 +1（`strongfruit.r3MovementChoiceSeed.v1`）——
+         一次性 Movement 可选方案种子的标记，首次打开首页时会落它。
+         **同样只是白名单 +1，闭集语义一字未改** —— 第五个 key 出现时这一条照样红。
     */
     const EXPECTED_KEYS = [
       'strongfruit.ownedParts.v2',
       'strongfruit.playerBuild.v1',
       'strongfruit.r2Onboarding.v1',
       'strongfruit.r2Reseed.v1',
+      'strongfruit.r3MovementChoiceSeed.v1',
     ].sort();
     const stored2Keys = Object.keys(stored2).sort();
     log(
       Object.keys(stored2).filter((k) => k.startsWith('strongfruit.ownedParts')).length === 1 &&
         stored2Keys.length === EXPECTED_KEYS.length &&
         EXPECTED_KEYS.every((k, i) => stored2Keys[i] === k),
-      'E5 三轮操作后官方 storage 恰好是那四个 key（无残留 / 无第二套库存 / 无未知 key）',
+      'E5 三轮操作后官方 storage 恰好是那五个 key（无残留 / 无第二套库存 / 无未知 key）',
       `keys=${stored2Keys.join(',')}`,
     );
 

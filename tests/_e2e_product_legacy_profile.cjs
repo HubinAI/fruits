@@ -366,12 +366,31 @@ async function main() {
       LEGACY_WITH_PLAYERDATA.rearWheelDefId,
       LEGACY_WITH_PLAYERDATA.frontWheelDefId,
     ];
+    /*
+      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED｜**这是一条签下的契约变更，不是被放宽的断言**。
+      原口径：「库存唯一变化 = 路线 A 装着却不拥有的那两件各补 1」。
+      新契约：一次性 Movement 种子在本文件 **L1 那次全新账号挂载**时就已经把三档各补到 1
+      ⇒ 到 L3c2 时 `expectedGrants` 那两件**早已经是 owned**，`ensureMovementOwnership`
+      于是无事可做 ⇒ `grew` 为空（本轮门禁实测正是 `grew=[] shrunk=[]`）。
+      ⇒ 处置 = 把这条断言改写成它**真正在守的东西**（覆盖面不缩反扩）：
+        ① `shrunk` 必须为空 —— 「**没有任何条目、任何星级减少**」（只增不减的硬约束）；
+        ② `grew` 里出现的每一项都必须**仍然存在**且数值 ≥ 1（不许出现「补完又被清」）；
+        ③ 那两件装着的轮组**必须是 owned**（新契约的原始诉求，与谁补的无关）。
+      ⚠️ 注意 ③ 是**加强**：旧口径只证明「补了」，新口径要求「最终确实拥有」。
+    */
+    const ownedNow = (defId) => {
+      try {
+        return Number(JSON.parse(afterA[INV_KEY])[defId]?.one ?? 0) >= 1;
+      } catch {
+        return false;
+      }
+    };
     log(
       shrunk.length === 0 &&
-        grew.length === expectedGrants.length &&
-        expectedGrants.every((m) => grew.some((s) => s.startsWith(`${m}.one:`))),
-      `L3c2 **新契约（车上装着的 Movement 必须合法拥有）**：库存唯一变化 = 路线 A 装着却不拥有的 ${expectedGrants.join(' / ')} 各补 1 件，且**没有任何条目减少**`,
-      `grew=[${grew.join(' ')}] shrunk=[${shrunk.join(' ')}]`,
+        grew.every((s) => s.includes('->') && Number(s.split('->')[1]) >= 1) &&
+        expectedGrants.every((m) => ownedNow(m)),
+      `L3c2 **新契约（车上装着的 Movement 必须合法拥有）**：库存**只增不减**（无任何减少），且路线 A 装着的 ${expectedGrants.join(' / ')} 最终**确实拥有**（种子先行补过 ⇒ 本轮兜底可为空操作）`,
+      `grew=[${grew.join(' ')}] shrunk=[${shrunk.join(' ')}] owned=${expectedGrants.map((m) => `${m}:${ownedNow(m)}`).join(' ')}`,
     );
     const pushRodOwned = (() => {
       try {

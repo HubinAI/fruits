@@ -453,6 +453,9 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
       // PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1：再追加 `./r2Reseed` —— **版本化**一次性
       // reseed（上一轮验证已消费起点 ⇒ 恢复成 ★1 = 4/5 + 装备 ★1）。同样是「判定 → 执行 →
       // 落盘 → 打标记」的四段，顺序仍收在本模块内部；两份迁移各自一个 key。
+      // PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：再追加 `./r3MovementChoiceSeed` —— **第三份**
+      // 一次性迁移（Movement 可选方案种子，三档各补到 ≥1），同样「判定 → 补件 → 落盘 → 打标记」，
+      // 仍然是**自己的 key**；它只增不减、且**不碰 Build**。
       'playerGrowth.ts': [
         '../core/buildPersistence',
         '../core/partInventory',
@@ -461,6 +464,7 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         './playerLoadout',
         './r2Onboarding',
         './r2Reseed',
+        './r3MovementChoiceSeed',
       ],
       /*
         PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）｜**一次性 onboarding 迁移**。
@@ -499,6 +503,26 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         './playerLoadout',
         './playerProfile',
         './r2Onboarding',
+      ],
+      /*
+        PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED｜**一次性 Movement 可选方案种子**。
+          - 自己的持久化 key（`strongfruit.r3MovementChoiceSeed.v1`）⇒ 只依赖 `../platform`
+            （与 `playerProfile.ts` / `r2Onboarding.ts` / `r2Reseed.ts` 同一条纪律：
+            只有产品侧的持久化模块碰存储）；
+          - 信封复用 `../core/saveVersion`（不新造第二套版本机制，也**不动**全局版本号）；
+          - 库存读写走 `../core/partInventory`（`OFFICIAL_MOVEMENTS` 是「哪些轮组需要库存」
+            的**唯一真源**，`addPart` / `getCount` 是**唯一**的写 / 读入口）——
+            与 Weapon **共用** `strongfruit.ownedParts.v2`，**不新建**第二套库存；
+          - `./movementInventory` **只取 `MOVEMENT_STAR`**（轮组在库存里占的星级档；
+            它借 `./runMovementCanonical` 的 canonic 事实，本模块不自己写 `1`）；
+          - 刻意**不依赖** `../lab/buildEditorModel`：本种子**一个字节都不写 Build**
+            ⇒ 连 `BuildDraft` 类型都不需要（「不自动装备」是结构性成立的）。
+      */
+      'r3MovementChoiceSeed.ts': [
+        '../core/partInventory',
+        '../core/saveVersion',
+        '../platform',
+        './movementInventory',
       ],
       /*
         PRODUCT-LOOP-R3-MOVEMENT-CANONICAL-INVENTORY｜当前正式 Movement / Drive 的 canonical

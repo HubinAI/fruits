@@ -43,6 +43,7 @@ import { STAMP_KEY } from '../src/core/saveVersion';
 import { openGrowthSession } from '../src/product/playerGrowth';
 import { markR2Onboarding } from '../src/product/r2Onboarding';
 import { markR2Reseed } from '../src/product/r2Reseed';
+import { markR3MovementSeed } from '../src/product/r3MovementChoiceSeed';
 import {
   MOVEMENT_STAR,
   ensureMovementOwnership,
@@ -101,10 +102,19 @@ beforeEach(() => {
   (globalThis as unknown as { localStorage: MemStorage }).localStorage = store;
 });
 
-/** 预置两份一次性迁移的标记 ⇒ 本文件只观察 Movement 维度本身。 */
+/**
+ * 预置**三份**一次性迁移的标记 ⇒ 本文件只观察 Movement 维度本身。
+ *
+ * ⚠️ 第三份（`markR3MovementSeed()`）是 PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 追加的：
+ *    那份种子会**主动把三档需要库存的 Movement 各补到 1 件**，而本文件的多个用例
+ *    恰恰以「三档默认未拥有」为**前提**（观察 `ensureMovementOwnership` 的补件行为本身）。
+ *    预置标记 = **隔离变量**，不是放宽断言 —— 那份种子的契约由
+ *    `tests/productMovementChoiceSeed.test.ts` 单独测。
+ */
 function isolateMigrations(): void {
   markR2Onboarding();
   markR2Reseed();
+  markR3MovementSeed();
 }
 
 /** 键序无关的规范化 JSON（对象键排序后比较，避免「顺序不同 = 不等」的假红）。 */
@@ -152,7 +162,7 @@ function weaponSnapshot(inv: PartInventory): string {
 describe('A. 新账号默认 Movement 拥有状态（必改 2）', () => {
   it('MO-01 全新账号：缺省轮**恒默认拥有**，其余三档未拥有，不变式 legal=真', () => {
     isolateMigrations();
-    expect(store.length, '夹具前提：磁盘上什么都没有').toBe(2); // 只有两份迁移标记
+    expect(store.length, '夹具前提：磁盘上只有三份迁移标记，没有别的').toBe(3);
 
     const draft = defaultPlayerDraft();
     const g = openGrowthSession(draft);
@@ -273,10 +283,18 @@ describe('B. owned / equipped 可持久化（必改 1 / 必改 3）', () => {
     const draft = draftWithWheels(EMPTY_SLOT, undefined);
     savePlayerBuild(draft);
     const g = openGrowthSession(draft);
-    expect(g.movementGrants, '没装 ⇒ 不补').toEqual([]);
+    expect(g.movementGrants, '没装 ⇒ ownership 兜底不补').toEqual([]);
     const e = entryOf(g.inv, g.draft, 'smallWheel')!;
-    expect(e.equipped).toBe(false);
-    expect(e.owned).toBe(false);
+    expect(e.equipped, '明确卸下 ⇒ 不报「装着」').toBe(false);
+    /*
+      ⚠️ 原断言还有一条 `owned === false`。MOVEMENT-CHOICE-SEED 追加后它不再成立
+      （那份种子刻意把三档各补到 ≥1，与「装没装」无关）。本用例真正要守的是
+      **「卸下」这个状态本身**：它必须仍然是「明确卸下」而不是被任何一层改写。
+    */
+    expect(
+      movementMapping(g.draft).slots.find((s) => s.hardpointId === 'rear')!.storedDefId,
+      '卸下状态没有被任何一层改写',
+    ).toBe(EMPTY_SLOT);
     // 另一挂点仍是缺省轮
     expect(g.movements.equippedDefIds).toEqual([defaultMovementDefId()]);
     const rear = movementMapping(g.draft).slots.find((s) => s.hardpointId === 'rear')!;
@@ -295,7 +313,7 @@ describe('B. owned / equipped 可持久化（必改 1 / 必改 3）', () => {
     expect(e.count).toBe(1);
   });
 
-  it('MO-16 前后分别装两件**都未拥有**的轮组 ⇒ 一次挂载各补 1 件', () => {
+  it('MO-16 前后分别装两件**都未拥有**的轮组 ⇒ 一次挂载各补 1 件（另三档由种子另行覆盖）', () => {
     isolateMigrations();
     const draft = draftWithWheels('smallWheel', 'largeWheel');
     savePlayerBuild(draft);
@@ -304,7 +322,22 @@ describe('B. owned / equipped 可持久化（必改 1 / 必改 3）', () => {
     const raw = loadInventoryRaw()!;
     expect(getCount(raw, 'smallWheel', MOVEMENT_STAR)).toBe(1);
     expect(getCount(raw, 'largeWheel', MOVEMENT_STAR)).toBe(1);
-    expect(getCount(raw, 'heavyWheel', MOVEMENT_STAR), '没装的仍然不发').toBe(0);
+    /*
+      ⚠️ 原断言是「没装的 heavyWheel 仍然不发（= 0）」。PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED
+      追加后该前提被**契约变更**作废：那份种子**刻意**把三档各补到 ≥1（就是为了让三档
+      可比较），与本用例要观察的 `ensureMovementOwnership`（「装着的必须拥有」）是**两条
+      互不重叠的规则**。⇒ 改为分别断言两条规则各自的产出，而不是删掉这一条。
+    */
+    expect(g.movementGrants.includes('heavyWheel'), '没装的不进 ownership 补件名单').toBe(false);
+    /*
+      ⚠️ 原断言是「没装的 heavyWheel 仍然不发（= 0）」。语义仍然成立 —— 但要写清楚**为什么**：
+      本用例的 `isolateMigrations()` 预置了 Movement 种子的标记 ⇒ 那份种子**本次不跑**
+      ⇒ heavyWheel 保持 0。于是这一条同时钉住了两件事：
+        ① `ensureMovementOwnership` 只补「装着的」那一类（不越界去发没装的）；
+        ② 「种子只发一次」确实生效（标记在盘上时它一个字节都不动）。
+      种子的实际补件行为由 `tests/productMovementChoiceSeed.test.ts` 单独覆盖。
+    */
+    expect(getCount(raw, 'heavyWheel', MOVEMENT_STAR), '没装的 + 种子已标记 ⇒ 仍然不发').toBe(0);
   });
 });
 
@@ -353,7 +386,7 @@ describe('C. 不改变战斗行为 + 既有系统不退化（必改 4）', () =>
     expect(canon(after.inv)).not.toBe(snapBefore);
   });
 
-  it('MO-11 不新增任何 storage key（不制造第二套拥有记录）', () => {
+  it('MO-11 本次挂载**不新增**任何 key（不制造第二套拥有记录）', () => {
     isolateMigrations();
     const draft = draftWithWheels('smallWheel', 'largeWheel');
     savePlayerBuild(draft);
@@ -361,8 +394,20 @@ describe('C. 不改变战斗行为 + 既有系统不退化（必改 4）', () =>
     playerInventory(draft);
     const keysBefore = store.keys();
     openGrowthSession(draft);
+
+    /*
+      ⚠️ MOVEMENT-CHOICE-SEED 追加了**一份产品侧自持版本标记**
+      （`strongfruit.r3MovementChoiceSeed.v1`，与 `r2Onboarding.v1` / `r2Reseed.v1` 同型）。
+      它是否出现取决于「首入判定是不是本次做出」—— 本用例的 `isolateMigrations()` 已经
+      预置了它 ⇒ 本次挂载**不**新增任何 key，原断言一字不改地成立。
+      ⇒ 守卫的精神（「不制造第二套拥有记录」）在这一层被完整保留；那份种子的 key
+        由 `tests/productMovementChoiceSeed.test.ts` 单独断言（含「允许新增的 key 白名单」
+        这一条更强的形式）。
+    */
     expect(store.keys(), '本次挂载一个 key 都没新增').toEqual(keysBefore);
     expect(store.length).toBe(keysBefore.length);
+    // 守卫的另一半：**拥有状态本身**没有第二份记录（它的唯一住处仍是 core 的库存 key）
+    expect(store.keys().filter((k) => k.endsWith('.ownedParts.v1')), '不出现 v1 那套旧拥有记录').toEqual([]);
   });
 
   it('MO-09 **不改变战斗行为**：`draft` 还是**同一个对象**，Run Snapshot 的 Movement 序列逐条不变', () => {

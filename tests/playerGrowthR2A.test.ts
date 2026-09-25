@@ -81,6 +81,8 @@ import {
  * 只取它的 key（`PG-10` 的闭集断言要把这个新 key 收进白名单，而不是把闭集放宽成「至少包含」）。
  */
 import { R2_RESEED_KEY } from '../src/product/r2Reseed';
+// PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：第三份一次性迁移的标记（隔离变量用）
+import { markR3MovementSeed, R3_MOVEMENT_SEED_KEY } from '../src/product/r3MovementChoiceSeed';
 
 const INV_KEY = 'strongfruit.ownedParts.v2';
 const INV_KEY_V1 = 'strongfruit.ownedParts.v1';
@@ -181,6 +183,8 @@ describe('PRODUCT-LOOP-R2-A｜G. 新账号的成长起点（Queue 必改 3 / 验
   });
 
   it('PG-02b 已成长的老档（存在 ★≥2 的 Weapon）⇒ onboarding **完全不改库存**', () => {
+    // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 先预置它的标记
+    markR3MovementSeed();
     seedBuild();
     const grown = defaultInventory();
     grown['cannon'].one = 1;
@@ -219,6 +223,8 @@ describe('PRODUCT-LOOP-R2-A｜G. 新账号的成长起点（Queue 必改 3 / 验
   });
 
   it('PG-02d 已达 4 件的老档：只打标记、库存不动（不把 4 抬到更高，也不降回来）', () => {
+    // ⚠️ 隔离变量：同 PG-02b（第三份一次性迁移也会写库存）
+    markR3MovementSeed();
     seedBuild();
     const enough = defaultInventory();
     enough['cannon'].one = 6;
@@ -361,9 +367,15 @@ describe('PRODUCT-LOOP-R2-A｜H. old Profile migration 不丢数据（验收 ⑦
          两份迁移各用各的 key 是**刻意的**：它们的写语义相反（一个只增不减，一个必须删 ★≥2），
          共用一个 key 会让两边的不变量都无法审计。
       ⚠️ 库存本体仍然只有 `ownedParts.v2` 一处（旧横屏游戏与竖屏产品共用那一份）。
+      ⚠️ R3-MOVEMENT-CHOICE-SEED 又**加了第三个**：一次性 Movement 可选方案种子的标记
+         `strongfruit.r3MovementChoiceSeed.v1`。**同样只是把白名单 +1，闭集语义原样保留** ——
+         将来若再冒出第四个 key，这一条仍然会红（这正是它存在的意义）。
+         三份迁移各有各的 key 是**刻意的**：它们的写语义各不相同
+         （onboarding 只增不减 / reseed 必须删 ★≥2 / choice-seed 只增不减但有目标件数），
+         共用一个 key 会让三边的不变量都无法审计。
     */
-    expect(keys.sort(), '成长只允许写「正式库存 key + 两个一次性迁移标记」').toEqual(
-      [INV_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY].sort(),
+    expect(keys.sort(), '成长只允许写「正式库存 key + 三个一次性迁移标记」').toEqual(
+      [INV_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY, R3_MOVEMENT_SEED_KEY].sort(),
     );
     // 再跑一次「手动加一件」的正式写入路径，key 集合不变
     const inv = loadInventoryRaw()!;
@@ -385,6 +397,13 @@ describe('PRODUCT-LOOP-R2-A｜I. Equipped 必须指向有效库存实例（验�
          「onboarding 没参与」的显式确认（`g.onboarding.reason === 'already-marked'`）。
     */
     markR2Onboarding();
+    /*
+      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED｜同一手法的**追加隔离**：第三份一次性迁移
+      （Movement 可选方案种子）也会写库存（三档轮组各补到 ≥1）⇒ 若不预置它的标记，
+      「无需修复就不该有写入」这条断言会被它触发的合法写入打破。预置标记 = 把这条
+      新变量隔离出去，让被测路径成为唯一自变量；所有断言逐字保留。
+    */
+    markR3MovementSeed();
     // 老档：有 hammer / pushRod，没有 cannon；而当前装备是 cannon
     seedDisk({ hammer: { one: 1, two: 0 }, pushRod: { one: 1, two: 0 } });
     seedBuild();
@@ -425,6 +444,8 @@ describe('PRODUCT-LOOP-R2-A｜I. Equipped 必须指向有效库存实例（验�
   it('PG-12 装备那件**已经在**库存里 ⇒ 一个字节都不动（只增不减的另一半）', () => {
     // ⚠️ 同 PG-11：预置 onboarding 标记，把「新的补件路径」隔离出去，单验 R2-A 的兜底路径
     markR2Onboarding();
+    // ⚠️ 并同 PG-11 预置 Movement 种子标记（第三份一次性迁移，也会写库存）
+    markR3MovementSeed();
     seedDisk({ cannon: { one: 2, two: 0 } });
     seedBuild();
     const before = store.getItem(INV_KEY);

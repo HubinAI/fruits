@@ -66,6 +66,8 @@ const CLAIMS_KEY = 'strongfruit.profileClaims.v1';
 const ONBOARDING_KEY = 'strongfruit.r2Onboarding.v1';
 /** 本 Queue 的**新**标记 key（独立写死：报文写的就是它）。 */
 const RESEED_KEY = 'strongfruit.r2Reseed.v1';
+// PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：第三份一次性迁移的标记（key 闭集白名单用）
+const MOVEMENT_SEED_KEY = 'strongfruit.r3MovementChoiceSeed.v1';
 
 const WEAPON_SLOT = 'frontMass';
 const EMPTY = 'none';
@@ -447,10 +449,18 @@ async function main() {
       `progress=${afterReseed[PROGRESS_KEY] === seeded[PROGRESS_KEY]} claims=${afterReseed[CLAIMS_KEY] === seeded[CLAIMS_KEY]}`,
     );
     const keysAfter = Object.keys(afterReseed).sort();
+    /*
+      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 追加了**第 7 个** key
+      （`strongfruit.r3MovementChoiceSeed.v1`，一次性 Movement 可选方案种子的标记）——
+      它在本场景里由注入的「历史账号」首入时落下。
+      **仍然只是白名单 +1，闭集语义一字未改**：多出任何别的 key 这一条照样红。
+    */
     log(
       JSON.stringify(keysAfter) ===
-        JSON.stringify([CLAIMS_KEY, INV_KEY, ONBOARDING_KEY, PROGRESS_KEY, RESEED_KEY, BUILD_KEY].sort()),
-      'R2g key 集合 = 注入的 5 个 + 本队列**自己的** 1 个新标记（没有凭空多出别的写入）',
+        JSON.stringify(
+          [CLAIMS_KEY, INV_KEY, ONBOARDING_KEY, PROGRESS_KEY, RESEED_KEY, BUILD_KEY, MOVEMENT_SEED_KEY].sort(),
+        ),
+      'R2g key 集合 = 注入的 5 个 + 本队列自己的 1 个新标记 + Movement 种子标记（没有凭空多出别的写入）',
       keysAfter.join(' · '),
     );
 
