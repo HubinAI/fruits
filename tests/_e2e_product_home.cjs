@@ -927,6 +927,270 @@ async function main() {
       `view=${p.view}`,
     );
 
+    /*
+      ══════════════════════════════════════════════════════════════════════════
+      PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW｜**换轮子 → 战车预览的轮子真的变大变小**
+      ══════════════════════════════════════════════════════════════════════════
+
+      验收 1「标准 / 小 / 大 / 重轮切换时预览真实更新」+ 验收 2「rear/front 可以显示不同
+      轮径」+ 验收 3「reload 后预览与 persisted BuildDraft 一致」+ 验收 4「Preview 与
+      Product Run 使用同一 Movement 数据源」。
+
+      为什么必须在**浏览器 DOM** 上量真实像素宽（而不是只在 vitest 里读布局对象）：
+      负控制实测 —— 把 `vehiclePreview` 的轮径读回 `draft.rearRadius`（修复前口径），
+      vitest 的 14 条里有 3 条**会红**（MV-08/08b/09），说明读数层确实守得住；
+      但「守卫红」只证明**读数**错，不证明**玩家看得见的东西**跟着变。
+      ⇒ 这里量的是**页面上那个 div 的 `style.width`**（真实渲染值），
+        并与正式 Movement Def 的 `radius × 2 × scale` 对账。
+
+      ⚠️ 期望值不写死：`scale` 每次按当前整车的包围盒算（换大轮会同时改变包围盒），
+         所以断言写成「**预览宽高之比** 与 **def 半径之比** 一致」+「同挂点切换前后
+         宽高确实变化」，不依赖任何固定像素数。
+      ⚠️ 也**不**用 `data-ph-def-id` 单独当证据：那是「装了什么」，本段要证的是
+         「画出来多大」——两者在缺陷里会**分叉**（defId 对、尺寸错），正是要抓的形态。
+    */
+    const wheelPreview = () =>
+      page.evaluate(() => {
+        const box = document.querySelector('.ph-car');
+        if (!box) return null;
+        const scale = box.dataset.phScale ? Number(box.dataset.phScale) : null;
+        const out = [];
+        for (const node of box.querySelectorAll('[data-ph-preview-item]')) {
+          const key = node.dataset.phPreviewItem || '';
+          if (!key.startsWith('wheel:')) continue;
+          out.push({
+            key,
+            hardpointId: key.slice('wheel:'.length),
+            defId: node.dataset.phDefId || '',
+            w: parseFloat(node.style.width) || 0,
+            h: parseFloat(node.style.height) || 0,
+            round: node.style.borderRadius === '50%',
+          });
+        }
+        return { scale, stageH: Number(box.dataset.phStageH), items: out };
+      });
+
+    /* 真实动作：把某一侧的轮组换成指定 defId（点卡片 → 点装备），然后读预览 */
+    const equipWheel = async (hardpointId, defId) => {
+      await clickSelector(page, `[data-ph-movement="${defId}"][data-ph-movement-hardpoint="${hardpointId}"]`);
+      await clickSelector(page, '[data-ph-action="equip-movement"]');
+      const r = await probeOf(page);
+      if (!r.lastMovementEquip || r.lastMovementEquip.ok !== true) {
+        throw new Error(`装备失败 ${hardpointId}=${defId}: ${JSON.stringify(r.lastMovementEquip)}`);
+      }
+      return wheelPreview();
+    };
+
+    /*
+      四组合覆盖（必改 3 的核心）：标准/标准 · small/large · large/small · heavy/heavy。
+      每一组都从**真实点击**得到，不是直接改存档。
+    */
+    const COMBOS = [
+      { rear: 'wheelStd', front: 'wheelStd', label: '标准/标准' },
+      { rear: 'smallWheel', front: 'largeWheel', label: 'small/large' },
+      { rear: 'largeWheel', front: 'smallWheel', label: 'large/small' },
+      { rear: 'heavyWheel', front: 'heavyWheel', label: 'heavy/heavy' },
+    ];
+    /** defId → radius 的**期望**来自页面读数（卡片 data 属性），与正式内容库同源。 */
+    const radiusOf = (defId) => {
+      const c = (p.movement.cards || []).find((x) => x.defId === defId);
+      return c ? Number(c.radius) : -1;
+    };
+
+    const comboSamples = [];
+    for (const combo of COMBOS) {
+      await equipWheel('rear', combo.rear);
+      const snap = await equipWheel('front', combo.front);
+      const rearIt = snap.items.find((i) => i.hardpointId === 'rear') || null;
+      const frontIt = snap.items.find((i) => i.hardpointId === 'front') || null;
+      comboSamples.push({ combo, snap, rearIt, frontIt });
+    }
+
+    // MV-1：四组合每一组的「画出来的直径」都等于 def 半径 × 2 × 当前 scale，且 defId 也对
+    const mv1Ok = comboSamples.every(({ combo, snap, rearIt, frontIt }) => {
+      const rr = radiusOf(combo.rear);
+      const fr = radiusOf(combo.front);
+      const expRear = rr * 2 * snap.scale;
+      const expFront = fr * 2 * snap.scale;
+      const near = (a, b) => Math.abs(a - b) < 0.5;
+      return (
+        !!rearIt &&
+        !!frontIt &&
+        rearIt.defId === combo.rear &&
+        frontIt.defId === combo.front &&
+        near(rearIt.w, expRear) &&
+        near(rearIt.h, expRear) &&
+        near(frontIt.w, expFront) &&
+        near(frontIt.h, expFront) &&
+        rearIt.round &&
+        frontIt.round
+      );
+    });
+    log(
+      mv1Ok,
+      'MV-1 四组合（标准/标准 · small/large · large/small · heavy/heavy）预览里两个轮子**画出来的直径 === def 半径×2×scale**，且圆形（验收 1 + 4）',
+      comboSamples
+        .map(
+          ({ combo, snap, rearIt, frontIt }) =>
+            `${combo.label}: r=${rearIt ? rearIt.defId : '×'}:${rearIt ? rearIt.w.toFixed(2) : '-'} f=${frontIt ? frontIt.defId : '×'}:${frontIt ? frontIt.w.toFixed(2) : '-'} scale=${snap.scale.toFixed(4)}`,
+        )
+        .join('  '),
+    );
+
+    // MV-2：**前后轮尺寸可以不同**（必改 3 的直接取证）：small/large 与 large/small 两组
+    const asym = comboSamples.filter(({ combo }) => radiusOf(combo.rear) !== radiusOf(combo.front));
+    const mv2Ok =
+      asym.length === 2 &&
+      asym.every(({ combo, rearIt, frontIt }) => {
+        const rearBigger = radiusOf(combo.rear) > radiusOf(combo.front);
+        if (!rearIt || !frontIt || rearIt.w === frontIt.w) return false;
+        // 方向必须对：后轮大 ⇒ 预览里后轮确实更大（不是「反正不一样」）
+        return rearBigger ? rearIt.w > frontIt.w : rearIt.w < frontIt.w;
+      });
+    log(
+      mv2Ok,
+      'MV-2 rear / front **在预览里独立体现**：小后轮大前轮 ⇒ 后轮更小，大后轮小前轮 ⇒ 后轮更大（方向正确；必改 3 / 验收 2）',
+      asym
+        .map(({ combo, rearIt, frontIt }) => `${combo.label}: rear=${rearIt.w.toFixed(2)} front=${frontIt.w.toFixed(2)}`)
+        .join('  '),
+    );
+
+    // MV-3：**同一挂点换轮 → 尺寸真的变了**（不是所有轮组画一样大）
+    const stdSample = comboSamples.find((s) => s.combo.label === '标准/标准');
+    const smallSample = comboSamples.find((s) => s.combo.label === 'small/large');
+    const heavySample = comboSamples.find((s) => s.combo.label === 'heavy/heavy');
+    const mv3Ok =
+      !!stdSample &&
+      !!smallSample &&
+      !!heavySample &&
+      // 都在同一 scale 下比较：只在「整车包围盒相同」的组合间直接比像素；
+      // heavy/heavy 与标准/标准半径相同（20 vs 20）⇒ 直径应当**相等**
+      Math.abs(stdSample.rearIt.w - heavySample.rearIt.w) < 0.5 &&
+      smallSample.rearIt.w < stdSample.rearIt.w;
+    log(
+      mv3Ok,
+      'MV-3 换轮组后预览尺寸**真实变化**：小轮后轮 < 标准后轮；而重轮（半径同为 20）与标准轮直径相等 ⇒ 变的是「半径」不是「随便变一下」（验收 1）',
+      `std.rear=${stdSample && stdSample.rearIt.w.toFixed(2)} small.rear=${smallSample && smallSample.rearIt.w.toFixed(2)} heavy.rear=${heavySample && heavySample.rearIt.w.toFixed(2)}`,
+    );
+
+    /*
+      MV-4｜**回归守卫**（本 Queue 修的那个缺陷的浏览器端对应物）：
+      真实路径 —— 先装 smallWheel，再**切回缺省轮**。修复前 `rearRadius` 会残留 12
+      ⇒ 预览把标准轮画成 24（而不是 40）。这里真实点回缺省轮，断言画出来的是
+      **缺省轮的真实直径**（用 def 自身半径算，而不是读 `draft.rearRadius`）。
+    */
+    await equipWheel('rear', 'smallWheel');
+    const afterSmall = await wheelPreview();
+    const backToDefault = await equipWheel('rear', 'wheelStd');
+    const mv4Ok =
+      afterSmall.items.find((i) => i.hardpointId === 'rear') !== undefined &&
+      !!backToDefault.items.find((i) => i.hardpointId === 'rear') &&
+      backToDefault.items.find((i) => i.hardpointId === 'rear').defId === 'wheelStd' &&
+      Math.abs(
+        backToDefault.items.find((i) => i.hardpointId === 'rear').w -
+          radiusOf('wheelStd') * 2 * backToDefault.scale,
+      ) < 0.5 &&
+      // 反向对照：**不能**等于刚才那件小轮的直径
+      Math.abs(
+        backToDefault.items.find((i) => i.hardpointId === 'rear').w -
+          radiusOf('smallWheel') * 2 * backToDefault.scale,
+      ) > 1;
+    log(
+      mv4Ok,
+      'MV-4 **切回缺省轮后预览画的是缺省轮真实直径**（不是残留的上一件小轮尺寸；本 Queue 修复的缺陷的浏览器端守卫）',
+      `afterSmall.rear=${afterSmall.items.filter((i) => i.hardpointId === 'rear').map((i) => `${i.defId}:${i.w.toFixed(2)}`).join('')} backToDefault.rear=${backToDefault.items.filter((i) => i.hardpointId === 'rear').map((i) => `${i.defId}:${i.w.toFixed(2)}`).join('')} std期望=${(radiusOf('wheelStd') * 2 * backToDefault.scale).toFixed(2)}`,
+    );
+
+    /*
+      MV-5｜**reload 后预览与 persisted BuildDraft 一致**（验收 3）。
+      真实 `page.reload()`：读存档里的 rear/front defId + 预览 DOM 的 defId/尺寸三处对齐。
+    */
+    await equipWheel('rear', 'largeWheel');
+    await equipWheel('front', 'smallWheel');
+    const beforeReload = await wheelPreview();
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
+    await sleep(200);
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    const afterReload = await wheelPreview();
+    const draftAfter = JSON.parse((await storageDump(page))[BUILD_KEY]);
+    const sameSize = (a, b) => !!a && !!b && a.defId === b.defId && Math.abs(a.w - b.w) < 0.5 && Math.abs(a.h - b.h) < 0.5;
+    const bRear = beforeReload.items.find((i) => i.hardpointId === 'rear');
+    const bFront = beforeReload.items.find((i) => i.hardpointId === 'front');
+    const aRear = afterReload.items.find((i) => i.hardpointId === 'rear');
+    const aFront = afterReload.items.find((i) => i.hardpointId === 'front');
+    log(
+      sameSize(bRear, aRear) &&
+        sameSize(bFront, aFront) &&
+        aRear.defId === draftAfter.rearWheelDefId &&
+        aFront.defId === draftAfter.frontWheelDefId,
+      'MV-5 **整页 reload 后预览逐项不变**，且与 persisted BuildDraft 的 rear/front 字段一致（验收 3）',
+      `before=[${bRear && bRear.defId}:${bRear && bRear.w.toFixed(2)} ${bFront && bFront.defId}:${bFront && bFront.w.toFixed(2)}] after=[${aRear && aRear.defId}:${aRear && aRear.w.toFixed(2)} ${aFront && aFront.defId}:${aFront && aFront.w.toFixed(2)}] draft=[${draftAfter.rearWheelDefId},${draftAfter.frontWheelDefId}]`,
+    );
+
+    /*
+      MV-6｜**预览与 Product Run 同源**（验收 4）。
+      预览圆的半径必须与「Run 真正会读到的那份载荷」推导出的半径一致。
+      载荷来源 = `开始冒险` 的 href 里的 `equipped=`（玩家点下去 Runtime 就读它）。
+      ⚠️ 载荷**不含** radius（`rearRadius` 是另一个可能陈旧的数值字段）⇒ 这里证的是
+         「预览读的是 **def**」：把载荷里的 defId 经正式读数换算成半径，与预览实测直径对齐。
+    */
+    await clickSelector(page, '[data-ph-action="back-home"]');
+    await sleep(150);
+    const mvStartHref = (await probeOf(page)).startRunHref || '';
+    const mvEqParam = new URLSearchParams(mvStartHref.slice(mvStartHref.indexOf('?'))).get('equipped');
+    let mvEq = null;
+    try {
+      mvEq = mvEqParam ? JSON.parse(mvEqParam) : null;
+    } catch {
+      mvEq = null;
+    }
+    const homeWheelSnap = await wheelPreview();
+    const posParam = new URLSearchParams(mvStartHref.slice(mvStartHref.indexOf('?')));
+    const runRearDef = mvEq ? mvEq.rearWheelDefId : null;
+    const runFrontDef = mvEq ? mvEq.frontWheelDefId : null;
+    const hRear = homeWheelSnap.items.find((i) => i.hardpointId === 'rear');
+    const hFront = homeWheelSnap.items.find((i) => i.hardpointId === 'front');
+    log(
+      !!mvEq &&
+        !!runRearDef &&
+        !!runFrontDef &&
+        !!hRear &&
+        !!hFront &&
+        hRear.defId === runRearDef &&
+        hFront.defId === runFrontDef &&
+        Math.abs(hRear.w - radiusOf(runRearDef) * 2 * homeWheelSnap.scale) < 0.5 &&
+        Math.abs(hFront.w - radiusOf(runFrontDef) * 2 * homeWheelSnap.scale) < 0.5 &&
+        posParam.get('run') !== null,
+      'MV-6 预览与 Product Run **同一数据源**：首页预览的轮径 === `equipped=` 载荷里的 defId 经正式读数换算的直径（验收 4）',
+      `home=[${hRear && hRear.defId}:${hRear && hRear.w.toFixed(2)} ${hFront && hFront.defId}:${hFront && hFront.w.toFixed(2)}] equipped=[${runRearDef},${runFrontDef}]（载荷不含 radius，故按 def 换算）`,
+    );
+
+    /*
+      MV-7｜**三态之「卸下」**：该挂点没有轮子时**预览里根本没有那个元素**
+      （不是画一个 0 半径 / 猜一个半径）。真实点「未装载」卡 → 装备。
+    */
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    await clickSelector(page, '[data-ph-movement="none"][data-ph-movement-hardpoint="rear"]');
+    await clickSelector(page, '[data-ph-action="equip-movement"]');
+    const noneSnap = await wheelPreview();
+    const noneHasRear = noneSnap.items.some((i) => i.hardpointId === 'rear');
+    log(
+      !noneHasRear && noneSnap.items.some((i) => i.hardpointId === 'front'),
+      'MV-7 卸下 rear 后预览里**没有 rear 轮元素**（不是 0 半径的假轮），而 front 仍然在（三态之 `none`；必改 4）',
+      `items=[${noneSnap.items.map((i) => `${i.hardpointId}:${i.defId}:${i.w.toFixed(2)}`).join(' ')}]`,
+    );
+
+    /* ---- 复位：把两侧都装回 GRANT，恢复本段进来时的状态（E5 / F1 前提不变） ---- */
+    await equipWheel('rear', GRANT);
+    await equipWheel('front', GRANT);
+    const restoredSnap = await wheelPreview();
+    log(
+      restoredSnap.items.length === 2 && restoredSnap.items.every((i) => i.defId === GRANT),
+      'MV-8 MV 段取证完成后状态复位（两侧都回到 `largeWheel`，与 M8 之后相同；后续 E5 / F1 前提不变）',
+      `items=[${restoredSnap.items.map((i) => `${i.hardpointId}:${i.defId}`).join(' ')}]`,
+    );
+
     const stored2 = await storageDump(page);
     /*
       ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）：官方 key 集合**多了一个**

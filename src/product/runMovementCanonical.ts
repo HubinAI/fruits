@@ -102,6 +102,48 @@ export function isCanonicalMovement(defId: string): boolean {
 }
 
 /**
+ * PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW｜某个挂点上**真正生效那一件 Movement 的标准化半径**。
+ *
+ * ── 为什么需要这个读数（它修的是一个真实缺陷）────────────────────────────────
+ * `BuildDraft` 上「装了什么」与「半径是多少」是**两个各自独立的字段**
+ * （`rearWheelDefId` / `rearRadius`）。正常装备路径会把两者同步，但存在一条真实路径
+ * 使它们分叉：**切回缺省轮时只删 defId 键、保留 radius**（见
+ * `playerLoadout.equipMovement` 的缺省轮分支）⇒ `rearRadius` 残留上一件轮组的半径。
+ *
+ * 实测（基线 `cb3275d` 上同样复现，**不是**某个 Queue 引入的）：
+ * ```
+ *   装 smallWheel 到 rear   → rearRadius = 12 → 预览 24×24  ✅
+ *   再切回缺省轮（删键）     → rearWheelDefId 已删、rearRadius 仍 = 12
+ *                             → 预览 24×24（应为标准轮 40×40）❌
+ * ```
+ * 更根本的是：`rearRadius` 会被 `buildSnapshotFromDraft` 当作
+ * **`overrides.radius`** 一路带进 `resolveSnapshot` ⇒ 陈旧值会**覆盖** def 自己的半径。
+ *
+ * ⇒ 因此「一个挂点上轮子多大」这个问题**只有一个正确出处**：该挂点生效 Movement def
+ * 自身的 `radius`。本函数就是那个读数，且与 `radius`/`mass`/`energy` 同源
+ * （`registry.movements`）—— 不读 `BuildDraft` 的数值字段，也不看 `overrides`。
+ *
+ * ⚠️ **不改变任何战斗 / Run 行为**：本函数是纯读数，不改 `BuildDraft`、不改 Snapshot、
+ *    不动 `overrides` 的既有合并语义（那条路径是 Lab 轮径试验的正式能力，本轮一字未动）。
+ *
+ * @returns 生效 Movement 的 defId + 其标准半径；该挂点未装 Movement（`'none'` 或车身
+ *          没有这个挂点）⇒ `null`（调用方据此**不画轮子**，而不是猜一个半径）。
+ */
+export function effectiveMovementRadius(
+  draft: BuildDraft,
+  hardpointId: string,
+): { readonly defId: string; readonly radius: number } | null {
+  const slot = movementMapping(draft).slots.find((s) => s.hardpointId === hardpointId);
+  const defId = slot?.effectiveDefId ?? null;
+  if (defId === null) return null;
+  const def = registry.movements.get(defId);
+  if (!def) return null;
+  // 半径取 **def 自身**（不是 `runtimeNumbers.radius`：后者含 `overrides`，
+  // 正是上面那条陈旧值传播路径）。缺省轮在这里天然得到标准轮半径。
+  return { defId: def.id, radius: def.radius };
+}
+
+/**
  * **缺省 Movement defId** —— 「draft 里没有轮组选择」时，正式 Snapshot 会填哪一个。
  *
  * ⚠️ 刻意**不**返回一个字面量：这里真的去调正式 `buildSnapshotFromDraft`

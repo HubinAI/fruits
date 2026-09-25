@@ -514,6 +514,13 @@ function fitStage(frame: HTMLElement, screen: HTMLElement): void {
 function renderPreview(layout: VehiclePreviewLayout): HTMLElement {
   const box = el('div', 'ph-car');
   box.dataset['phStageH'] = String(layout.stageH);
+  /*
+    PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW｜把本次布局的 `scale` 如实写到 DOM 上。
+    E2E 要证「换轮子 → 画出来的轮子真的变大变小」，就必须知道**本次**的本地 px → 预览 px
+    换算率（`scale` 随整车包围盒变化，换大轮会同时改包围盒 ⇒ 不能写死、也不能事后复算）。
+    纯只读标注：不参与任何渲染分支，也不改任何产品行为。
+  */
+  box.dataset['phScale'] = String(layout.scale);
   box.style.height = `${layout.stageH}px`;
   const bx = (layout.minX + layout.maxX) / 2;
   const by = (layout.minY + layout.maxY) / 2;

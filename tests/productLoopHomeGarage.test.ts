@@ -425,6 +425,24 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../core/types',
         '../lab/buildEditorModel',
         './playerLoadout',
+        /*
+          PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW｜显式 +1（**登记，不是放宽**）。
+
+          为什么预览必须读它：轮子画多大只有一个正确出处 —— 该挂点**生效 Movement def
+          自身的 `radius`**。此前预览优先信任 `BuildDraft.rearRadius` / `frontRadius`，
+          而这两个数值字段会与 defId **各自漂移**（切回缺省轮时 `equipMovement` 只删
+          defId 键、保留 radius；陈旧值又经 `overrides.radius` 覆盖 def 半径）
+          ⇒ 实测把「标准轮」画成了小轮尺寸（24 而非 40）。基线 `cb3275d` 上同签名复现，
+          非本 Queue 引入。
+
+          ⚠️ 依赖方向仍然单向、不成环：
+             `vehiclePreview → runMovementCanonical → {core/content, core/partInventory,
+              core/buildSnapshot, lab/buildEditorModel, ./playerLoadout}`
+             —— `runMovementCanonical` 不反向 import 本模块（它的白名单里没有本文件）。
+          ⚠️ 这同时让「验收 4：Preview 与 Product Run 使用同一 Movement 数据源」**结构性成立**：
+             两边读的是同一个 `registry.movements`。
+        */
+        './runMovementCanonical',
       ],
       // PRODUCT-LOOP-R1-B：Profile Repository（唯一写持久化状态的地方）
       'playerProfile.ts': [

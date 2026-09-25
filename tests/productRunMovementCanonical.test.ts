@@ -563,19 +563,43 @@ describe('MC-10｜源码守卫：产品链路里不得出现 canonical 集合之
       }
     }
     expect(offenders, '产品链路出现了正式内容库之外的轮组 id').toEqual([]);
-    // 反向对照：本守卫确实扫到了东西（不是「一个都没匹配上」的假绿）
-    expect(strip(readProduct('vehiclePreview.ts'))).toMatch(/'wheelStd'/);
+    /*
+      反向对照：本守卫确实扫到了东西（不是「一个都没匹配上」的假绿）。
+
+      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW 起对照对象**换成了一条恒定成立的探针**：
+         原先这里钉的是 `vehiclePreview.ts` 里的 `?? 'wheelStd'` 字面量 —— 那正是本
+         Queue 修掉的缺陷载体（把「没有 defId ⇒ 当作缺省轮」写成硬编码口径，并让轮径
+         优先取陈旧的 `draft.*Radius`）。现在预览改读 `effectiveMovementRadius()`
+         （缺省轮由正式链路给出）⇒ 该字面量已不存在，继续钉它只会变成假警报。
+         同理，`playerLoadout.ts` 的 `'wheelStd'` 也已只剩注释里的文字（本守卫先剥注释 ⇒
+         扫不到）。⚠️ 换句话说：**产品侧现在只剩 `'wheel'` / 字段名两类字面量**，
+         「用一个真实 defId 字面量当反向对照」这条路已经没有了。
+         ⇒ 改用 `'wheel'`（`MovementDef.kind` 的判别值，且已被 `NOT_A_DEF_ID` 排除）
+            作为探针：它**恒定**存在于 `vehiclePreview.ts`，能证明正则真的在匹配
+            （不是「一个都没扫到」的假绿），同时不引入任何对具体轮组 id 的依赖。
+    */
+    expect(strip(readProduct('vehiclePreview.ts'))).toMatch(/'wheel'/);
   });
 
   it('MC-10b 缺省轮的既有 fallback 字面量 == 正式缺省（钉死重复，不改实现）', () => {
     const fallback = defaultMovementDefId();
+    /*
+      ⚠️ 本条**按契约变更收窄**（不是放宽）：原先还钉一处
+         「`vehiclePreview.ts` 里的 `?? '<缺省轮>'`」，但那处字面量已随
+         PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW 的修复**消失**（预览改为经正式链路
+         读缺省轮，不再自己写 fallback）⇒ 该断言的对象不复存在。
+         本守卫**真正的意图**——「谁在代码里重复了缺省轮这个事实，就必须与正式缺省同值」
+         —— 一字未改：仍然逐处枚举，只是不再枚举一处已经没有 fallback 的文件；
+         并**同时**断言预览已不再持有该 fallback（否则将来有人加回来会无人察觉）。
+    */
     const fallbackLiteral = /\?\? '([^']*[Ww]heel[^']*)'/;
     // `buildSnapshotFromDraft`：draft 没有轮组选择时填哪个 defId
     const snap = fallbackLiteral.exec(strip(readLab('buildEditorModel.ts')));
     expect(snap?.[1], 'buildEditorModel 的缺省轮 fallback 必须与正式缺省同值').toBe(fallback);
-    // 首页整车预览同一处口径
-    const prev = fallbackLiteral.exec(strip(readProduct('vehiclePreview.ts')));
-    expect(prev?.[1], 'vehiclePreview 的缺省轮 fallback 必须与正式缺省同值').toBe(fallback);
+    // 预览**不再**自己写缺省轮 fallback（缺省轮由 `effectiveMovementRadius` 给出）
+    const prevCode = strip(readProduct('vehiclePreview.ts'));
+    expect(fallbackLiteral.exec(prevCode), 'vehiclePreview 不该再有缺省轮 fallback 字面量').toBeNull();
+    expect(prevCode, 'vehiclePreview 必须走正式链路取生效轮径').toContain('effectiveMovementRadius');
   });
 
   it('MC-10c 局内解析器对轮组字段是「原样搬运」，不做第二套解释', () => {

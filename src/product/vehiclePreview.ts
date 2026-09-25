@@ -19,11 +19,28 @@
  * ⚠️ 坐标口径：本模块返回**车体本地坐标**（y **向上**，与物理一致）。
  *    页面 DOM 的 y 向下，翻转由视图层做（`top = cy - localY*scale`），
  *    本模块不做任何屏幕坐标换算 —— 避免出现第二套坐标语义。
+ *
+ * ── PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW｜轮径的**唯一正确出处** ─────────────
+ * 轮子在预览里画多大，取的是**该挂点生效 Movement def 自身的 `radius`**
+ * （`runMovementCanonical.effectiveMovementRadius`，真源 = `registry.movements`）。
+ *
+ * ⚠️ **刻意不读** `BuildDraft.rearRadius` / `frontRadius`，也**不读** `runtimeNumbers.radius`：
+ *    前者会残留上一件轮组的数值（切回缺省轮时 `equipMovement` 只删 defId 键、保留 radius），
+ *    后者含 `overrides` —— 而陈旧 `radius` 正是经 `overrides.radius` 覆盖 def 半径传下来的。
+ *    两者都会让「标准轮」被画成小轮尺寸。实测与修复见
+ *    `tests/productMovementEquipPreview.test.ts` 的 MV-08 / MV-08b / MV-09。
+ *
+ * ⇒ 由此「换轮子 → 轮子外观尺寸直接变化」由**数据**保证，不需要任何 UI 补偿；
+ *   前后轮各读各的 def ⇒ 天然可以尺寸不同（必改 3）；
+ *   三态由链路天然给出：`undefined` → 缺省轮 def（缺省轮视觉）·
+ *   `'none'` → 该槽 `effectiveDefId === null` ⇒ **不画轮子** · `defId` → 该 def 真实轮径。
  */
 
 import { registry } from '../core/content';
 import { EMPTY_SLOT, type BuildDraft } from '../lab/buildEditorModel';
 import { WEAPON_SLOT } from './playerLoadout';
+// PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW｜轮径走**正式链路**读数（与 Product Run 同源）。
+import { effectiveMovementRadius, movementMapping } from './runMovementCanonical';
 import type { BodyDef, ColliderDef } from '../core/types';
 
 /**
@@ -148,14 +165,52 @@ export function vehiclePreviewLayout(draft: BuildDraft): VehiclePreviewLayout {
     });
   }
 
-  // ② 轮子：center = movementHardpoint.localPosition；半径取 Build 真实轮径（缺省用轮组 radius）
+  // ② 轮子：center = movementHardpoint.localPosition；半径取**真实生效轮径**
+  /*
+    ⚠️ PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW｜轮径必须来自**真实生效的那一件 Movement**，
+       不能优先信任 `draft.rearRadius` / `frontRadius` 这两个数值字段。
+
+    为什么（本 Queue 实测出来的真实缺陷）：`rearRadius` / `frontRadius` 是 Build 的**数值**
+    字段，与 `rearWheelDefId` / `frontWheelDefId` 是**两个可以各自漂移的字段**。
+    `equipMovement()` 正常路径会把两者同步（52 vs 24 能正确显示），但存在一条真实路径
+    使它们分叉：**切回缺省轮时只删键、保留 radius**（`playerLoadout.equipMovement`
+    的缺省轮分支）⇒ `rearRadius` 残留上一件轮组的半径。实测（本轮探针）：
+
+        [T4] rear=smallWheel   → rearRadius=12 → 预览 wheel:rear = 24x24  ✅
+        [T5] 切回缺省轮         → rearWheelDefId 已删除，rearRadius 仍 = 12
+                                 预览 wheel:rear = 24x24  ❌ 标准轮应为 40x40
+
+    ⇒ 玩家看到「标准轮」却是小轮尺寸。修复口径 = **以 Movement def 为准**：
+    半径取自 `effectiveMovementRadius(draft, hp.id)`（真源 = `registry.movements` 的
+    `def.radius`）—— 与卡片刻度、Run Snapshot 的 `movements[].defId` 同一个真源
+    ⇒ 预览与 **Product Run 消费的是同一份数据**（验收 4），
+    且「前后轮尺寸不同」由各自 def 独立决定（必改 3）。
+
+    ⚠️ **不要**把这里改回 `runtimeNumbers.radius`：`buildSnapshotFromDraft` 会把
+    `BuildDraft.rearRadius` / `frontRadius` 作为 `overrides.radius` 写进 movements，
+    `applyMovementOverrides` 再做 `{ ...def, ...overrides }` ⇒ 陈旧 radius 会**覆盖**
+    def 自身半径（这正是本轮缺陷的第二级传播）。`effectiveMovementRadius` 刻意只读
+    `def.radius` 就是为了斩断这条链路（实测：改回 `runtimeNumbers` 时 MV-08 红）。
+
+    三态由既有链路天然给出（必改 4）：
+      `undefined` → 缺省轮（def = wheelStd）⇒ 缺省轮视觉；
+      `'none'`    → `movementMapping` 的该槽 `effectiveDefId === null` ⇒ 该挂点无轮；
+      `defId`     → 该 def 的真实 radius。
+  */
+  const mapping = movementMapping(draft);
   for (const hp of body.movementHardpoints) {
-    const wheelDefId =
-      (hp.id === 'rear' ? draft.rearWheelDefId : draft.frontWheelDefId) ?? 'wheelStd';
+    const slot = mapping.slots.find((s) => s.hardpointId === hp.id);
+    const wheelDefId = slot?.effectiveDefId ?? null;
+    // 该槽明确卸下 / 没有装载 Movement ⇒ **不画轮子**（不是画一个 0 半径或猜一个半径）
+    if (wheelDefId === null) continue;
     const wheel = registry.movements.get(wheelDefId);
-    const r =
-      (hp.id === 'rear' ? draft.rearRadius : draft.frontRadius) || wheel?.radius || 0;
     if (!wheel) continue;
+    /*
+      生效半径取 **def 自身**（`effectiveMovementRadius`），**不**读 `draft.rearRadius`、
+      也不读 `runtimeNumbers.radius` —— 后两者都会带上可能陈旧的 `overrides`。
+      详见 `runMovementCanonical.effectiveMovementRadius` 上的实测说明。
+    */
+    const r = effectiveMovementRadius(draft, hp.id)?.radius ?? wheel.radius;
     items.push({
       key: `wheel:${hp.id}`,
       kind: 'wheel',
