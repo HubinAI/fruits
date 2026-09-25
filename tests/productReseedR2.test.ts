@@ -56,6 +56,8 @@ import {
 import { saveClaimLedger } from '../src/product/playerProfile';
 // PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：第三份一次性迁移的标记（隔离变量用）
 import { markR3MovementSeed } from '../src/product/r3MovementChoiceSeed';
+// PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：第四份一次性迁移的标记（隔离变量用）
+import { markR4BodySeed } from '../src/product/r4BodyChoiceSeed';
 
 const INV_KEY = 'strongfruit.ownedParts.v2';
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
@@ -147,12 +149,17 @@ function consumedBuild(extra: Partial<BuildDraft> = {}): BuildDraft {
  *    本文件里所有「`r2Reseed` 一个字节都不动库存」的逐字节断言都会被它触发的合法写入打破。
  *    预置标记 = **隔离变量**（把第三份迁移变成「对这个账号不适用」），不是放宽断言：
  *    所有断言逐字保留，且 `r2Reseed` 的契约由本文件单独覆盖。
+ * ⚠️ PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜再预置**第四份**（`markR4BodySeed()`）：
+ *    Body 种子首入会解锁 MVP 车身，并落 `r4BodyChoiceSeed.v1` + `ownedBodies.v1` **两个** key
+ *    ⇒ 若不预置，VR-03 那条「只多出 `r2Reseed` 自己的一个标记」的**闭集**键集断言就会被打破。
+ *    同样是**隔离变量，不是放宽**：闭集语义逐字保留（多写任何别的 key 照样红）。
  */
 function seedConsumedProfile(build: BuildDraft = consumedBuild()): void {
   seedDisk(CONSUMED_INV);
   savePlayerBuild(build);
   markR2Onboarding();
   markR3MovementSeed();
+  markR4BodySeed();
   saveClaimLedger({ grantedRunIds: ['run-r2-validation'] });
   store.setItem(PROGRESS_KEY, JSON.stringify({ cleared: 3, best: 7 }));
 }

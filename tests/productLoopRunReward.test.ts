@@ -96,6 +96,8 @@ import { R2_ONBOARDING_KEY } from '../src/product/r2Onboarding';
 import { R2_RESEED_KEY } from '../src/product/r2Reseed';
 // PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：第三份一次性迁移的标记
 import { R3_MOVEMENT_SEED_KEY } from '../src/product/r3MovementChoiceSeed';
+// PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：Body 种子的标记 + 车身拥有集合（key 闭集白名单用）
+import { R4_BODY_SEED_KEY } from '../src/product/r4BodyChoiceSeed';
 import {
   RUN_FAIL_PARAM,
   parseRunFailReturn,
@@ -161,6 +163,7 @@ function allKeys(): string[] {
 }
 
 const INV_KEY = 'strongfruit.ownedParts.v2';
+const OWNED_BODIES_KEY = 'strongfruit.ownedBodies.v1';
 
 /** 用**真实状态机**造一个 RUN COMPLETE（沿用验证脚手架的确定性快进，不伪造 phase）。 */
 function completedState(): RunPageState {
@@ -540,9 +543,12 @@ describe('PRODUCT-LOOP-R2-A｜C. 领奖：一次、真入库、数量累积', ()
       ⚠️ PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 又加了**第三个**：一次性 Movement 可选方案
          种子的标记 `strongfruit.r3MovementChoiceSeed.v1`（上面那次 `openGrowthSession` 会落它）。
          **同样只是白名单 +1，闭集语义原样保留** —— 第四个 key 出现时这一条照样红。
+      ⚠️ PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP 又加了**两个**：Body 种子的标记
+         `strongfruit.r4BodyChoiceSeed.v1` + 车身拥有集合 `strongfruit.ownedBodies.v1`
+         （上面那次 `openGrowthSession` 会落它俩）。**同样只是白名单 +2，闭集语义原样保留**。
     */
     expect(allKeys()).toEqual(
-      [INV_KEY, PROFILE_CLAIMS_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY, R3_MOVEMENT_SEED_KEY].sort(),
+      [INV_KEY, PROFILE_CLAIMS_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY, R3_MOVEMENT_SEED_KEY, R4_BODY_SEED_KEY, OWNED_BODIES_KEY].sort(),
     );
     const inv = loadInventoryRaw();
     expect(inv, '库存必须真的落盘').toBeTruthy();

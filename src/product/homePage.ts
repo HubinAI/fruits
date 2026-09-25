@@ -201,8 +201,9 @@ export const MOVEMENT_HARDPOINT_LABELS: Readonly<Record<string, string>> = {
  * ⚠️ 全部是常量（页面里不出现第二份字面量）—— 与 Movement / Weapon 区那批同一条纪律。
  */
 export const GARAGE_BODY_SECTION_LABEL = '车身（Body）';
-/** 首页「当前车身」摘要标题（与 Garage 同一套词）。 */
-export const HOME_BODY_SECTION_LABEL = '当前车身';
+/* ⚠️ PRODUCT-LOOP-R4-CONFIGURATION-BATCH-GATE：原先这里还有一个 `HOME_BODY_SECTION_LABEL`
+   （首页「当前车身」摘要标题）。该摘要在真实高内容态下把首页 actions 推出舞台 → 已整块删除，
+   常量随之移除（首页车身读数由既有的 `.ph-spec` 行承担）。 */
 /**
  * Movement 装备动作的结果文案。
  * ⚠️ 与 Weapon 侧**刻意用不同的词**：两套动作写的是两个不同的正式字段
@@ -985,42 +986,28 @@ export function mountProductHome(
     }
 
     /**
-     * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜首页的**当前车身**摘要。
+     * ⚠️ PRODUCT-LOOP-R4-CONFIGURATION-BATCH-GATE｜**首页不再画「当前车身」独立区块**（回归修复）。
      *
-     * ── 数据真源（零新造读数）───────────────────────────────────────────────────
-     * 只读 `bodyReading(draft)` 的 `cards` —— 与 Garage 的 `readBody()` 是**同一个函数、
-     * 同一份读数**，所以「首页显示」与「Garage 显示」结构上不可能分叉。
+     * 本 Batch 曾在首页这里追加过一段 `ph-home-body` 摘要（`<h2>` + 一条 `<ul>`）。它把
+     * 首页 actions 行**整体下推 91px**，于是在**真实的高内容态**下（URL 带 `run=`/`reward=`
+     * ⇒ 头部多一块领奖提示；再叠加「不可冒险」兼容提示）两个主行动按钮
+     * （「调整战车」`open-garage` / 「开始冒险」）被推到舞台 844 之下，而
+     * `documentElement.scrollHeight` 仍等于 844（舞台不可滚）⇒ **按钮既看不见也点不到**。
+     * 实测（E2E 真实鼠标点击 + `elementFromPoint` 取证）：
+     *   基线 `448e929`：`open-garage` box.y = 760（视口 844）⇒ 命中并生效；
+     *   本 Batch：box.y = **851**，`elementFromPoint` 返回 null ⇒ 点击落空。
+     * `product_loop` E2b / `product_fail` A9 两条断言因此红（基线两处全绿）。
      *
-     * ── 硬边界 ─────────────────────────────────────────────────────────────────
-     *   ① 只画 `<li>`，**零新按钮、零新跳转** —— 改配置仍只有「调整战车」一条路；
-     *   ② 如实展示当前车身上 canonical 的三个核心数值（耐久 / 质量 / 能量容量）；
-     *   ③ 带稳定 `data-ph-home-body`，供 E2E / 探针定位，**不依赖文案匹配**。
+     * 修法 = **删掉这段冗余摘要**（不是放宽断言、不是改测试）：
+     * 首页 `.ph-spec` 行**本来就已展示**当前车身名 + 耐久 + 能量，「当前车身」独立区块
+     * 是同一份信息的第二处表达 ⇒ 删掉不丢任何读数，且首页高度逐像素回到 R4 之前。
+     * 改配置仍**只有「调整战车」一条路**（下面那个 `toGarage`）。
+     *
+     * ⚠️ Garage 里的 Body 配置区（`renderBodySection`，本 Queue 的正式交付）**原样保留** ——
+     *    它才是「Body 成为一个可配置维度」的入口。
      */
-    const body = bodyReading(draft);
-    if (body.cards.length > 0) {
-      stage.append(el('h2', 'ph-sec', HOME_BODY_SECTION_LABEL));
-      const bodyList = el('ul', 'ph-slots ph-home-body');
-      bodyList.dataset['phHomeBody'] = '1';
-      for (const card of body.cards) {
-        const isEquipped = body.bodyDefId === card.defId;
-        if (!isEquipped) continue; // 只展示当前装备的那一台（与「已装备部件」同一密度）
-        const li = el('li', 'ph-slot ph-home-body-slot');
-        li.dataset['phHomeBodyDef'] = card.defId;
-        li.dataset['phHomeBodyHp'] = String(card.hp);
-        li.dataset['phHomeBodyMass'] = String(card.baseMass);
-        li.dataset['phHomeBodyEnergy'] = String(card.energyCapacity);
-        li.append(
-          el('span', 'ph-slot-label', '车身'),
-          el('span', 'ph-slot-name', card.name),
-          el('span', 'ph-slot-stat', card.statsText),
-        );
-        bodyList.append(li);
-      }
-      stage.append(bodyList);
-    }
 
     const goGarage = (): void => {
-      view = 'garage';
       view = 'garage';
       selected = null;
       render();

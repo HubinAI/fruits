@@ -44,6 +44,7 @@ import { openGrowthSession } from '../src/product/playerGrowth';
 import { markR2Onboarding } from '../src/product/r2Onboarding';
 import { markR2Reseed } from '../src/product/r2Reseed';
 import { markR3MovementSeed } from '../src/product/r3MovementChoiceSeed';
+import { markR4BodySeed } from '../src/product/r4BodyChoiceSeed';
 import {
   MOVEMENT_STAR,
   ensureMovementOwnership,
@@ -103,18 +104,23 @@ beforeEach(() => {
 });
 
 /**
- * 预置**三份**一次性迁移的标记 ⇒ 本文件只观察 Movement 维度本身。
+ * 预置**四份**一次性迁移的标记 ⇒ 本文件只观察 Movement 维度本身。
  *
  * ⚠️ 第三份（`markR3MovementSeed()`）是 PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 追加的：
  *    那份种子会**主动把三档需要库存的 Movement 各补到 1 件**，而本文件的多个用例
  *    恰恰以「三档默认未拥有」为**前提**（观察 `ensureMovementOwnership` 的补件行为本身）。
  *    预置标记 = **隔离变量**，不是放宽断言 —— 那份种子的契约由
  *    `tests/productMovementChoiceSeed.test.ts` 单独测。
+ * ⚠️ 第四份（`markR4BodySeed()`）是 PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP 追加的：
+ *    Body 种子会在首入时解锁 MVP 车身并落 `r4BodyChoiceSeed.v1` + `ownedBodies.v1` 两个 key，
+ *    而本文件的 MO-11 恰恰断言「本次挂载不新增任何 key」⇒ 必须预置 Body 种子标记，
+ *    让它走 `already-marked` 出口（不新增 key）。这同样是**隔离变量，不是放宽**。
  */
 function isolateMigrations(): void {
   markR2Onboarding();
   markR2Reseed();
   markR3MovementSeed();
+  markR4BodySeed();
 }
 
 /** 键序无关的规范化 JSON（对象键排序后比较，避免「顺序不同 = 不等」的假红）。 */
@@ -162,7 +168,11 @@ function weaponSnapshot(inv: PartInventory): string {
 describe('A. 新账号默认 Movement 拥有状态（必改 2）', () => {
   it('MO-01 全新账号：缺省轮**恒默认拥有**，其余三档未拥有，不变式 legal=真', () => {
     isolateMigrations();
-    expect(store.length, '夹具前提：磁盘上只有三份迁移标记，没有别的').toBe(3);
+    // ⚠️ PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：`isolateMigrations()` 现在预置**四份**
+    //    一次性迁移标记（R2 onboarding / R2 reseed / R3 Movement seed / R4 Body seed）。
+    //    本断言只是夹具前提（「磁盘上只有迁移标记，没有别的」）⇒ 数字随预置份数同步，
+    //    **闭集语义一字未改**：多出任何别的 key 这一条照样红。
+    expect(store.length, '夹具前提：磁盘上只有四份迁移标记，没有别的').toBe(4);
 
     const draft = defaultPlayerDraft();
     const g = openGrowthSession(draft);

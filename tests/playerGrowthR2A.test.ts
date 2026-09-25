@@ -83,10 +83,13 @@ import {
 import { R2_RESEED_KEY } from '../src/product/r2Reseed';
 // PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：第三份一次性迁移的标记（隔离变量用）
 import { markR3MovementSeed, R3_MOVEMENT_SEED_KEY } from '../src/product/r3MovementChoiceSeed';
+// PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：Body 种子的标记 + 车身拥有集合（key 闭集白名单用）
+import { R4_BODY_SEED_KEY } from '../src/product/r4BodyChoiceSeed';
 
 const INV_KEY = 'strongfruit.ownedParts.v2';
 const INV_KEY_V1 = 'strongfruit.ownedParts.v1';
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
+const OWNED_BODIES_KEY = 'strongfruit.ownedBodies.v1';
 
 /** 内存版 localStorage（node 无原生；与其它产品侧测试同一模式）。 */
 class MemStorage {
@@ -373,9 +376,14 @@ describe('PRODUCT-LOOP-R2-A｜H. old Profile migration 不丢数据（验收 ⑦
          三份迁移各有各的 key 是**刻意的**：它们的写语义各不相同
          （onboarding 只增不减 / reseed 必须删 ★≥2 / choice-seed 只增不减但有目标件数），
          共用一个 key 会让三边的不变量都无法审计。
+      ⚠️ R4-BODY-CANONICAL-AND-GARAGE-MVP 又**加了两个**：Body 种子的标记
+         `strongfruit.r4BodyChoiceSeed.v1` + 车身拥有集合 `strongfruit.ownedBodies.v1`。
+         **同样只是把白名单 +2，闭集语义原样保留** —— Body 种子解锁 MVP 车身时
+         `grantBody` 落到独立的 `ownedBodies.v1`（与 ownedParts 库存分离），并落
+         「Body 选择起点已经安排过了」的 `r4BodyChoiceSeed.v1` 标记。
     */
-    expect(keys.sort(), '成长只允许写「正式库存 key + 三个一次性迁移标记」').toEqual(
-      [INV_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY, R3_MOVEMENT_SEED_KEY].sort(),
+    expect(keys.sort(), '成长只允许写「正式库存 key + 一次性迁移标记 + Body 拥有集合」').toEqual(
+      [INV_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY, R3_MOVEMENT_SEED_KEY, R4_BODY_SEED_KEY, OWNED_BODIES_KEY].sort(),
     );
     // 再跑一次「手动加一件」的正式写入路径，key 集合不变
     const inv = loadInventoryRaw()!;

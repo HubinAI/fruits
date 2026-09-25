@@ -52,6 +52,9 @@ import {
   isR3MovementSeedDone,
   readR3MovementSeed,
 } from '../src/product/r3MovementChoiceSeed';
+// PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：Body 种子的标记 + 车身拥有集合
+// （`openGrowthSession` 会顺带跑 Body 种子 ⇒ key 闭集白名单要把它俩一并纳入）
+import { R4_BODY_SEED_KEY } from '../src/product/r4BodyChoiceSeed';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SRC_DIR = join(REPO_ROOT, 'src');
@@ -419,7 +422,16 @@ describe('D. 结构守卫', () => {
     openGrowthSession(draft);
 
     const added = store.keys().filter((k) => !keysBefore.includes(k));
-    expect(added, '新增的 key 白名单只有一条').toEqual([R3_MOVEMENT_SEED_KEY]);
+    /*
+      ⚠️ PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：`openGrowthSession` 会**顺带**跑
+         Body 种子（`applyR4BodyChoiceSeed`），它落 `r4BodyChoiceSeed.v1` 标记 + `ownedBodies.v1`
+         拥有集合。因此「本次挂载新增的 key」从「只有 Movement 种子自己一条」变成
+         「Movement 种子 + Body 种子 + Body 拥有集合」三条。**仍然只是白名单 +2，闭集语义
+         原样保留** —— 多出任何别的 key 照样红。
+    */
+    expect(added.sort(), '新增的 key 白名单 = Movement 种子 + Body 种子&拥有集合').toEqual(
+      [R3_MOVEMENT_SEED_KEY, R4_BODY_SEED_KEY, 'strongfruit.ownedBodies.v1'].sort(),
+    );
     // 信封里有既有 `saveVersion` 的戳（不新造第二套版本机制）
     const raw = store.getItem(R3_MOVEMENT_SEED_KEY)!;
     const parsed = JSON.parse(raw) as Record<string, unknown>;

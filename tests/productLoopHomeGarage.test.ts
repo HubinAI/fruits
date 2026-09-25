@@ -419,6 +419,22 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         */
         './movementInventory',
         './runMovementCanonical',
+        /*
+          PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜Body 维度的**两个只读真源**
+          （与 Movement 同一套纪律：本模块只是多了一个 `equipBody` 写入口）。
+
+          ⚠️ 为什么必须走它们、而不是就地展开 `BuildDraft.bodyDefId`：
+             - 「有哪些正式 Body」+「owned 判据」= `./bodyInventory`
+               （它再指向 `../core/bodyOwnership` 的 `OFFICIAL_BODIES` / `canEquipBody`）；
+             - 「局外存档 → Snapshot → Runtime 的三段映射」= `./runBodyCanonical`
+               （与 Run 侧同一个 `buildSnapshotFromDraft` + `resolveSnapshot`）。
+             就地重写这两件事就是**第二份真源**：产品侧显示 A、Run 侧装载 B 时会静默分叉。
+
+          ⚠️ 依赖方向是 `playerLoadout → bodyInventory → core/bodyOwnership`，
+             三者都不反向 import 本模块 ⇒ **不成环**。
+        */
+        '../core/bodyOwnership',
+        './bodyInventory',
       ],
       'vehiclePreview.ts': [
         '../core/content',
@@ -474,6 +490,9 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
       // PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：再追加 `./r3MovementChoiceSeed` —— **第三份**
       // 一次性迁移（Movement 可选方案种子，三档各补到 ≥1），同样「判定 → 补件 → 落盘 → 打标记」，
       // 仍然是**自己的 key**；它只增不减、且**不碰 Build**。
+      // PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：再追加 `./r4BodyChoiceSeed` —— **第四份**
+      // 一次性迁移（Body 可选方案种子，MVP 2 台各永久解锁），同样「判定 → 补件 → 落盘 → 打标记」，
+      // 仍然是**自己的 key**；它只碰 `core/bodyOwnership` 的拥有状态、**不碰 Build**。
       'playerGrowth.ts': [
         '../core/buildPersistence',
         '../core/partInventory',
@@ -483,6 +502,7 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         './r2Onboarding',
         './r2Reseed',
         './r3MovementChoiceSeed',
+        './r4BodyChoiceSeed',
       ],
       /*
         PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）｜**一次性 onboarding 迁移**。
@@ -591,6 +611,37 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
             否则两层判据会在「主武器换人、车上另有基准武器」时分叉。
       */
       'runCompatibility.ts': ['../core/content', '../core/types', '../lab/buildEditorModel'],
+      /*
+        PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜Body 维度的三个新模块。
+          - `bodyInventory.ts`：Body 拥有 / 装备的**只读真源**。id / name / hp / baseMass /
+            energyCapacity 全部现读 `../core/content` 的 `registry.bodies`（**遍历 OFFICIAL_BODIES**，
+            不复制第二张表）；「哪些是正式车身 / 是否拥有」取自 `../core/bodyOwnership`；
+            `../lab/buildEditorModel` **只取 `BuildDraft` 类型**（type-only）。
+          - `runBodyCanonical.ts`：局外 → Snapshot → Runtime 的 canonical mapping（纯只读）。
+            走正式 `../core/buildSnapshot` 的 `resolveSnapshot` + `../lab/buildEditorModel` 的
+            `buildSnapshotFromDraft`（与 Run 侧同源）；id 现读 `../core/bodyOwnership` 的
+            `OFFICIAL_BODIES`；`../core/content` 取 `registry.bodies`。
+          - `r4BodyChoiceSeed.ts`：一次性 Body 可选方案种子。自己的 key ⇒ 只依赖 `../platform`；
+            信封复用 `../core/saveVersion`；拥有状态经 `../core/bodyOwnership` 的 `grantBody` /
+            `isBodyOwned`（不新建第二套拥有记录、不碰 Build）。
+      */
+      'bodyInventory.ts': [
+        '../core/bodyOwnership',
+        '../core/content',
+        '../lab/buildEditorModel',
+      ],
+      'runBodyCanonical.ts': [
+        '../core/content',
+        '../core/bodyOwnership',
+        '../core/buildSnapshot',
+        '../lab/buildEditorModel',
+        '../lab/buildEditorModel',
+      ],
+      'r4BodyChoiceSeed.ts': [
+        '../core/bodyOwnership',
+        '../core/saveVersion',
+        '../platform',
+      ],
     };
     for (const [file, list] of Object.entries(allow)) {
       const specs = importSpecifiers(readProduct(file)).sort();
