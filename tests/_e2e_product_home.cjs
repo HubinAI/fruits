@@ -95,7 +95,16 @@ const probeOf = (page) => page.evaluate(() => window.__PRODUCTHOME__.probe());
 
 /** 真实鼠标点击：取元素真实 CSS 矩形 → 点其中心（不用 evaluate 直调 click）。 */
 async function clickSelector(page, sel) {
-  const box = await page.locator(sel).first().boundingBox();
+  const loc = page.locator(sel).first();
+  /*
+    ⚠️ PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Garage 现在比一屏高（新增 Movement 区），
+       真实鼠标点击**必须先滚到视野内** —— `boundingBox()` 返回的是滚动后的视口坐标，
+       而 `mouse.click` 不会替你滚动（点在视口外等于点空，实测 `elementFromPoint` 返回
+       `null`）。这里用 Playwright 自带的 `scrollIntoViewIfNeeded()`，它只滚动容器，
+       **不**替我们触发任何事件 ⇒ 仍然是真实鼠标点击，没有走捷径。
+  */
+  await loc.scrollIntoViewIfNeeded();
+  const box = await loc.boundingBox();
   if (!box) throw new Error(`无法定位元素：${sel}`);
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await sleep(80);
@@ -349,6 +358,165 @@ async function main() {
     p = await probeOf(page);
     log(p.equippedWeaponId === back, 'E4 可反复来回切换（每次都是真实写入）', `${target} → ${back}（当前 ${p.equippedWeaponId}）`);
 
+    /*
+      ══════════════════════════════════════════════════════════════════════════
+      PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP-RECOVERY｜Garage 里**真实装备 Movement**
+      ══════════════════════════════════════════════════════════════════════════
+
+      验收 2「rear / front 可独立装备」+ 验收 3「reload 后保持」的浏览器端取证。
+
+      手段全是真实动作，没有一处走 `evaluate` 直调页面函数：
+        - 真实鼠标点击挂点行里的轮组卡 + 「装备」按钮；
+        - 真实读 localStorage（`strongfruit.playerBuild.v1`）证明**写的是正式字段**；
+        - 真实 `page.reload()` 证明「保持」来自持久化而不是内存。
+
+      ⚠️ 前置：默认账号**未拥有**三档需要库存的轮组（A9b 已证）⇒ 这一段必须先经
+         `window.__PRODUCTHOME__` 之外的正规途径拿到一件。这里用的是**同一个浏览器会话里
+         已有的正式库存 key**（`strongfruit.ownedParts.v2`）—— 直接补一行库存计数，
+         相当于「玩家已经拥有它」。这不是给页面开后门：页面仍然要过 `not-owned` 校验，
+         库存里没有就是装不上（下面 F2 会用一次负控制证明这一点）。
+    */
+    const mvBefore = p.movement;
+    log(
+      !!mvBefore &&
+        Array.isArray(mvBefore.cards) &&
+        mvBefore.cards.length >= 1 &&
+        (mvBefore.slots || []).length === 2,
+      'M1 Garage 里**能看到**当前拥有的 Movement（两个挂点 + 卡阵；验收 1）',
+      `slots=${(mvBefore.slots || []).map((s) => `${s.hardpointId}=${s.effectiveDefId}${s.unmounted ? '(卸下)' : ''}`).join(' ')} cards=${(mvBefore.cards || []).map((c) => `${c.defId}:owned=${c.owned}`).join(' ')}`,
+    );
+    log(
+      (mvBefore.slots || []).every((s) => s.storedDefId === null) &&
+        !!mvBefore.defaultDefId,
+      'M1b 新账号两个挂点都是**缺省轮**（`storedDefId === null` ⇒ 存档里根本没这两个键），而不是被写成了别的值',
+      `default=${mvBefore.defaultDefId} stored=${(mvBefore.slots || []).map((s) => `${s.hardpointId}:${s.storedDefId}`).join(' ')}`,
+    );
+
+    /* 给这个浏览器会话补一件**真实 owned** 的轮组（写正式库存 key，不经页面） */
+    const GRANT = 'largeWheel';
+    await page.evaluate(
+      ([invKey, defId]) => {
+        const inv = JSON.parse(localStorage.getItem(invKey) || '{}');
+        inv[defId] = { one: 1 };
+        localStorage.setItem(invKey, JSON.stringify(inv));
+      },
+      [INV_KEY, GRANT],
+    );
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
+    await sleep(200);
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    p = await probeOf(page);
+    const granted = (p.movement.cards || []).find((c) => c.defId === GRANT);
+    log(
+      !!granted && granted.owned === true && p.movement.available.includes(GRANT),
+      'M2 被真实拥有的轮组出现在「可装备」集合里（owned 判据来自正式库存，不是页面自算）',
+      `granted=${GRANT} owned=${granted && granted.owned} available=[${p.movement.available.join(',')}]`,
+    );
+
+    /*
+      M2b｜**负控制**：没拥有的那几档轮组在 DOM 上是 `disabled` 的真实按钮。
+
+      为什么要有这一条：M2 只证明了「拥有的那件能装」。若不证明「没拥有的装不上」，
+      「只允许装备真实 owned 的 Movement」这条约束就只是**页面自己说了算**。
+      这里在浏览器里直接查 DOM 属性：`disabled === true` ⇒ 真实鼠标点不动
+      （不是「点了给个错误提示」这种可绕过的软约束）。
+    */
+    const lockedCards = await page.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll('[data-ph-movement]')) {
+        const defId = el.getAttribute('data-ph-movement');
+        const owned = el.getAttribute('data-ph-movement-owned') === 'true';
+        if (defId !== 'none' && !owned) out.push({ defId, disabled: el.disabled === true });
+      }
+      return out;
+    });
+    log(
+      lockedCards.length >= 1 && lockedCards.every((c) => c.disabled),
+      'M2b 未拥有的轮组卡在 DOM 上是**真 `disabled`**（真实鼠标点不动；不是「点了才报错」的软校验）',
+      `locked=[${lockedCards.map((c) => `${c.defId}:disabled=${c.disabled}`).join(' ')}]`,
+    );
+
+    /* ---- 只装 rear：证明「两个挂点独立」 ---- */
+    await clickSelector(page, `[data-ph-movement="${GRANT}"][data-ph-movement-hardpoint="rear"]`);
+    p = await probeOf(page);
+    log(
+      !!p.selectedMovement &&
+        p.selectedMovement.hardpointId === 'rear' &&
+        p.selectedMovement.defId === GRANT &&
+        p.movementEquipEnabled === true,
+      'M3 点 rear 那一侧的轮组卡 → 明确选中该挂点（选择带挂点身份，不是全局一个选择）',
+      `selected=${JSON.stringify(p.selectedMovement)} enabled=${p.movementEquipEnabled}`,
+    );
+    await clickSelector(page, '[data-ph-action="equip-movement"]');
+    p = await probeOf(page);
+    log(
+      p.lastMovementEquip && p.lastMovementEquip.ok === true,
+      'M4 点「装备」→ Movement 写入口返回成功',
+      `lastMovementEquip=${JSON.stringify(p.lastMovementEquip)}`,
+    );
+    const slotsAfterRear = (p.movement.slots || []).find((s) => s.hardpointId === 'rear');
+    const frontAfterRear = (p.movement.slots || []).find((s) => s.hardpointId === 'front');
+    log(
+      slotsAfterRear &&
+        slotsAfterRear.storedDefId === GRANT &&
+        slotsAfterRear.effectiveDefId === GRANT &&
+        frontAfterRear &&
+        frontAfterRear.storedDefId === null,
+      'M5 **rear 独立生效而 front 一字未动**（front 仍是 `storedDefId === null` = 缺省轮；验收 2）',
+      `rear=${slotsAfterRear && slotsAfterRear.storedDefId} front=${frontAfterRear && frontAfterRear.storedDefId}`,
+    );
+
+    /* ---- 真实读存档：必须是**正式字段**，不是别的地方 ---- */
+    const storedMv = await storageDump(page);
+    let mvDraft = null;
+    try {
+      mvDraft = JSON.parse(storedMv[BUILD_KEY]);
+    } catch {
+      mvDraft = null;
+    }
+    log(
+      !!mvDraft && mvDraft.rearWheelDefId === GRANT && !('frontWheelDefId' in mvDraft),
+      'M6 存档里**恰好**写了 `rearWheelDefId`，且**没有**凭空多出 `frontWheelDefId`（front 仍走「缺省 = 无键」语义）',
+      `rearWheelDefId=${mvDraft && mvDraft.rearWheelDefId} hasFront=${!!mvDraft && 'frontWheelDefId' in mvDraft}`,
+    );
+    log(
+      !!mvDraft && mvDraft.functionalSelections && mvDraft.functionalSelections[WEAPON_SLOT] === back,
+      'M7 装 Movement **没有覆盖 Weapon 配置**（同一个存档对象里武器槽仍是刚切的那件；验收 5）',
+      `functionalSelections.${WEAPON_SLOT}=${mvDraft && mvDraft.functionalSelections && mvDraft.functionalSelections[WEAPON_SLOT]}`,
+    );
+
+    /* ---- 再装 front：证明另一侧也能独立生效 ---- */
+    await clickSelector(page, `[data-ph-movement="${GRANT}"][data-ph-movement-hardpoint="front"]`);
+    await clickSelector(page, '[data-ph-action="equip-movement"]');
+    p = await probeOf(page);
+    const storedMv2 = await storageDump(page);
+    let mvDraft2 = null;
+    try {
+      mvDraft2 = JSON.parse(storedMv2[BUILD_KEY]);
+    } catch {
+      mvDraft2 = null;
+    }
+    log(
+      !!mvDraft2 && mvDraft2.rearWheelDefId === GRANT && mvDraft2.frontWheelDefId === GRANT,
+      'M8 同一件轮组装到 front 之后，**两个字段同时存在**且都是它（rear 未被覆盖）',
+      `rear=${mvDraft2 && mvDraft2.rearWheelDefId} front=${mvDraft2 && mvDraft2.frontWheelDefId}`,
+    );
+
+    /* ---- reload：验收 3「装备必须 reload 后保持」 ---- */
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
+    await sleep(200);
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    p = await probeOf(page);
+    const mvReload = (p.movement.slots || []).map((s) => `${s.hardpointId}:${s.storedDefId}`).sort();
+    log(
+      JSON.stringify(mvReload) === JSON.stringify([`front:${GRANT}`, `rear:${GRANT}`]) &&
+        p.equippedWeaponId === back,
+      'M9 **整页 reload 后 Movement 配置逐字段保持**（两侧仍是它），且 Weapon 也一并保持（验收 3 + 5）',
+      `slots=[${mvReload.join(' ')}] weapon=${p.equippedWeaponId}`,
+    );
+
     const stored2 = await storageDump(page);
     /*
       ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）：官方 key 集合**多了一个**
@@ -438,6 +606,53 @@ async function main() {
         runIdle.phase !== 'COMPLETE',
       'G2 带产品载荷进 Run：非 COMPLETE 状态不画 3选1 候选、也没有产品出口（只有真结算才出现）',
       `phase=${runIdle.phase} choices=${runIdle.rewardChoices.length} exitHref=${runIdle.exitHref}`,
+    );
+
+    /*
+      ══════════════════════════════════════════════════════════════════════════
+      G3 / G4｜「Product Run Snapshot 与 Garage 配置一致」（验收 4）
+      ══════════════════════════════════════════════════════════════════════════
+
+      取证手段 = **解码真实导航 URL 上那个 `equipped=` 参数**。
+
+      为什么是它：产品侧把本局装备交给 Lab 的**唯一**通道就是
+      `runReward.encodeRunLoadout()` → URL 查询串（Lab 的模块白名单是闭集，
+      **结构上读不到正式存档**）⇒ 这个参数**就是** Product Run Snapshot 的装配来源。
+      把它解出来与 Garage 读数逐字段比对，比读 Run 页内部状态更接近「契约层」：
+      它同时钉住「Garage 写的字段」与「Run 收到的字段」是同一份。
+
+      ⚠️ 刻意**不改** `runPage.ts`（Lab 冻结面）去多暴露一个探针字段：
+         URL 上的载荷已经是权威事实，加探针属于「为测试改产品代码」。
+      ⚠️ `encodeRunLoadout` **只在字段有定义时才写**（`!== undefined`）⇒
+         `rearWheelDefId` 缺省时 URL 里根本没有这个键 —— 「缺省 = 无键」这条语义
+         在**线路上**也成立，下面的断言按这个口径写。
+    */
+    const equippedRaw = new URLSearchParams(runDom.search).get('equipped');
+    let equippedDraft = null;
+    try {
+      equippedDraft = JSON.parse(equippedRaw);
+    } catch {
+      equippedDraft = null;
+    }
+    const garageSlots = (homeP.movement && homeP.movement.slots) || [];
+    const garageByHp = Object.fromEntries(garageSlots.map((s) => [s.hardpointId, s]));
+    log(
+      !!equippedDraft &&
+        equippedDraft.rearWheelDefId === GRANT &&
+        equippedDraft.frontWheelDefId === GRANT &&
+        garageByHp.rear &&
+        garageByHp.rear.effectiveDefId === GRANT &&
+        garageByHp.front &&
+        garageByHp.front.effectiveDefId === GRANT,
+      'G3 **Run Snapshot 与 Garage 配置一致**：URL 载荷里 rear / front 都是刚装的那件，与 Garage 读数逐挂点相同（验收 4）',
+      `url.rear=${equippedDraft && equippedDraft.rearWheelDefId} url.front=${equippedDraft && equippedDraft.frontWheelDefId} garage.rear=${garageByHp.rear && garageByHp.rear.effectiveDefId} garage.front=${garageByHp.front && garageByHp.front.effectiveDefId}`,
+    );
+    log(
+      !!equippedDraft &&
+        equippedDraft.functionalSelections &&
+        equippedDraft.functionalSelections[WEAPON_SLOT] === back,
+      'G4 Run 载荷里 Weapon 槽仍是 Garage 里那一件 ⇒ 「装 Movement 之后 Run 用的武器没被顶掉」（验收 5 的 Run 侧取证）',
+      `url.functionalSelections.${WEAPON_SLOT}=${equippedDraft && equippedDraft.functionalSelections && equippedDraft.functionalSelections[WEAPON_SLOT]}`,
     );
   } finally {
     await browser.close();

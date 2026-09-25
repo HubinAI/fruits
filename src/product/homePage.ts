@@ -29,15 +29,20 @@ import partHammerUrl from '../../assets/visuals/part_hammer.png';
 import partPushRodUrl from '../../assets/visuals/part_pushRod.png';
 
 import type { BuildDraft } from '../lab/buildEditorModel';
+import { EMPTY_SLOT } from '../lab/buildEditorModel';
 import type { PartInventory } from '../core/partInventory';
 import {
   WEAPON_SLOT,
+  equipMovement,
   equipWeapon,
   loadEquippedDraft,
   loadoutReading,
+  movementReading,
   playerInventory,
   type EquipFailure,
   type LoadoutReading,
+  type MovementEquipFailure,
+  type MovementReading,
 } from './playerLoadout';
 import { vehiclePreviewLayout, type VehiclePreviewLayout } from './vehiclePreview';
 /**
@@ -151,6 +156,32 @@ export const PRODUCT_STAGE_H = 844;
  * 写只发生在 `core/buildPersistence.ts` 内）。E2E 用它证明「装备写进了正式存档」。
  */
 export const SAVE_KEY = 'strongfruit.playerBuild.v1';
+
+/**
+ * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 配置区的文案。
+ *
+ * ⚠️ 全部是常量（页面里不出现第二份字面量）—— 与 Weapon 区那批同一条纪律。
+ */
+export const GARAGE_MOVEMENT_SECTION_LABEL = '轮组（Movement）';
+/** 每个挂点的选择按钮文案（点了只是「选中」，真正的写入在 `装备` 那一下）。 */
+export const GARAGE_MOVEMENT_PICK_LABEL = '选择';
+/** 选中的那一个的标记（与 Weapon 卡的 `已装备` 刻意分开：这两个词是两件事）。 */
+export const GARAGE_MOVEMENT_PICKED_LABEL = '已选择';
+/** 当前生效的那一个（= 正式 Snapshot 里真的装上的）。 */
+export const GARAGE_MOVEMENT_EQUIPPED_LABEL = '使用中';
+/** 需要库存但玩家没拥有 ⇒ 如实标注（**不**提供解锁 / 购买 / 进度）。 */
+export const GARAGE_MOVEMENT_LOCKED_LABEL = '未拥有';
+/** 该挂点当前**明确卸下**（`'none'`，与「缺省轮」不同）。 */
+export const GARAGE_MOVEMENT_OFF_LABEL = '未装载';
+/** 缺省轮在卡片上的说明（它不进库存，但恒可装备）。 */
+export const GARAGE_MOVEMENT_DEFAULT_LABEL = '默认';
+/**
+ * Movement 装备动作的结果文案。
+ * ⚠️ 与 Weapon 侧**刻意用不同的词**：两套动作写的是两个不同的正式字段
+ * （`rearWheelDefId` / `frontWheelDefId` vs `functionalSelections[frontMass]`），
+ * 提示里混用会让玩家以为「装轮组」和「换武器」是同一件事。
+ */
+export const GARAGE_MOVEMENT_EQUIP_PLACEHOLDER = '轮组';
 
 export type ProductView = 'home' | 'garage';
 
@@ -288,6 +319,54 @@ export interface ProductProbe {
   /** 选中那张卡的星级（`null` = 没选）；与 `selectedWeaponId` 合起来才是完整选择。 */
   readonly selectedWeaponStar: number | null;
   readonly equipEnabled: boolean;
+  /**
+   * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜**Movement 维度的全量读数**
+   * （直接来自 `playerLoadout.movementReading()`，页面画的**就是这些字段**）。
+   *
+   * ⚠️ 与 Weapon 区同一条纪律：探针不另算一份 ⇒「屏幕上写着某轮组在用」与
+   *    「探针说 `equippedDefIds` 含它」不可能分叉。
+   *   - `slots[]` —— 逐**挂点**（rear / front）的三态读数：
+   *       `storedDefId: null` = 存档里没有这个键（= 缺省轮在跑，**不是**空）；
+   *       `'none'` = 明确卸下；其它 = 正式 defId。
+   *     `unmounted` 只在 `'none'` 时为真（这两件事在物理上不同）。
+   *   - `cards[]` —— 逐件 canonical Movement 的 owned / implicit / equipped 读数；
+   *   - `available[]` —— **可装备**的 defId（= `owned === true` 的那些）
+   *     ⇒ Queue「只允许装备真实 owned / implicit canonical Movement」的可断言形式。
+   */
+  readonly movement: {
+    readonly slots: readonly {
+      readonly hardpointId: string;
+      readonly storedDefId: string | null;
+      readonly effectiveDefId: string | null;
+      readonly name: string;
+      readonly unmounted: boolean;
+    }[];
+    readonly cards: readonly {
+      readonly defId: string;
+      readonly name: string;
+      readonly kind: string;
+      readonly needsInventory: boolean;
+      readonly count: number;
+      readonly owned: boolean;
+      readonly implicit: boolean;
+      readonly hardpoints: readonly string[];
+    }[];
+    readonly available: readonly string[];
+    readonly ownedDefIds: readonly string[];
+    readonly equippedDefIds: readonly string[];
+    readonly legal: boolean;
+    readonly defaultDefId: string;
+  };
+  /**
+   * Movement 区当前**选中的** `(hardpointId, defId)`（`null` = 没选）。
+   * ⚠️ 与 `selectedWeaponId` **并列但独立**：Weapon 卡与 Movement 卡是两个动作，
+   *    互相不得串（点轮组卡不会让「装备」按钮去写 Weapon 槽，反之亦然）。
+   */
+  readonly selectedMovement: { readonly hardpointId: string; readonly defId: string } | null;
+  /** Movement 的「装备」按钮是否可点（没选中时不可点，与 Weapon 侧同一条纪律）。 */
+  readonly movementEquipEnabled: boolean;
+  /** 本次挂载**最后一次** Movement 装备动作的**真实**结果（`null` = 还没点过）。 */
+  readonly lastMovementEquip: { readonly ok: boolean; readonly reason: MovementEquipFailure | null } | null;
   readonly slots: readonly { readonly hardpointId: string; readonly defId: string; readonly name: string; readonly star: number; readonly category: string | null; readonly editable: boolean }[];
   readonly previewItems: readonly { readonly key: string; readonly defId: string; readonly visualId: string | null; readonly onWeaponSlot: boolean }[];
   readonly previewSpriteCount: number;
@@ -489,6 +568,16 @@ export function mountProductHome(
    */
   let selected: { defId: string; star: number } | null = null;
   let lastEquip: { ok: boolean; reason: EquipFailure | null; detail: string } | null = null;
+  /**
+   * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 区的**独立**选中态。
+   *
+   * ⚠️ 与 `selected`（Weapon 卡）刻意**分成两个变量**，不是「一个 selector 加个 kind 标记」：
+   *    rear / front 是两个**独立正式字段**，选择必须同时记住「哪个挂点 + 哪件轮组」；
+   *    而两者共用一个变量会让「点轮组卡」与「点武器卡」互相清掉对方的选择。
+   */
+  let selectedMovement: { hardpointId: string; defId: string } | null = null;
+  /** 最近一次 Movement 装备动作的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
+  let lastMovementEquip: { ok: boolean; reason: MovementEquipFailure | null; detail: string } | null = null;
   /** 最近一次合成的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
   let lastFuse: {
     ok: boolean;
@@ -574,6 +663,16 @@ export function mountProductHome(
 
   function read(): LoadoutReading {
     return loadoutReading(draft, inv);
+  }
+
+  /**
+   * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 维度的**唯一读取口径**。
+   *
+   * ⚠️ 页面（卡片）与探针都只调它 ⇒ 与 Weapon 区同一条「不各自算一份」的纪律。
+   * ⚠️ 它**零副作用**：写只发生在 `equipMovement()`（`playerLoadout` 的唯一写入口）。
+   */
+  function readMovement(): MovementReading {
+    return movementReading(draft, inv);
   }
 
   /**
@@ -793,6 +892,160 @@ export function mountProductHome(
     );
   }
 
+  /**
+   * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜**Garage 里的 Movement 配置区**。
+   *
+   * ── 它接进的是既有的哪一套（Queue 必改 1「不重新设计整个 Garage」）────────────
+   * 布局 / 卡片 / 选中态 / 装备交互**全部复用 Weapon 区那一套**：
+   *   - 区内按挂点分行，每行一个 `<span>` 标签 + 一条 `.ph-grid` 卡阵（与武器区同一个类）；
+   *   - 每张卡是 `.ph-card`（同一个类、同一套选中态 `ph-card-selected`）+ `data-ph-action="pick-movement"`；
+   *   - 区的底部是**一个** `data-ph-action="equip-movement"` 按钮（与武器区同一条纪律：
+   *     先选后装备，没选中就不可点 —— 不做静默默认选择）。
+   * 没有新增页面、没有新增视图、没有换布局语言。
+   *
+   * ── 三个「只画什么」的硬边界 ────────────────────────────────────────────────
+   *   ① **只画 canonical Movement**（`readMovement().cards` 来自 `registry.movements`），
+   *      不新增任何轮组类型；
+   *   ② 未拥有（`owned === false`）的卡**如实画出但不可点**、标 `未拥有`
+   *      —— **不提供**解锁 / 购买 / 进度 / 经济（Queue 禁止清单）；
+   *   ③ 缺省轮（`implicit`）**照常展示、照常可装备**（它不进库存但恒拥有）。
+   *
+   * ── 为什么「卸下」这一项在卡阵里 ────────────────────────────────────────────
+   * `rear` = `'none'`（明确卸下）与 `rear` = 没有这个键（缺省轮在跑）在**物理上不同**，
+   * 而后者有它自己的一张卡（缺省轮那张）。若不给出一个显式的「卸下」项，
+   * 玩家就永远无法表达前一种状态 ⇒ 三态里少一态。故每个挂点行尾补一个
+   * `未装载` 项（唯一 defId 取 `EMPTY_SLOT`，真源在 `buildEditorModel`）。
+   */
+  function renderMovementSection(): void {
+    const m = readMovement();
+    stage.append(el('h2', 'ph-sec', GARAGE_MOVEMENT_SECTION_LABEL));
+
+    for (const slot of m.slots) {
+      const row = el('div', 'ph-mv-row');
+      row.dataset['phMovementRow'] = slot.hardpointId;
+      row.dataset['phMovementStored'] = slot.storedDefId === null ? '' : slot.storedDefId;
+      row.dataset['phMovementEffective'] = slot.effectiveDefId ?? '';
+      row.dataset['phMovementUnmounted'] = String(slot.unmounted);
+      row.append(
+        el('span', 'ph-mv-label', slot.hardpointId === 'rear' ? '后轮' : '前轮'),
+        el('span', 'ph-mv-current', slot.unmounted ? GARAGE_MOVEMENT_OFF_LABEL : slot.name),
+      );
+
+      const grid = el('div', 'ph-grid ph-mv-grid');
+      for (const c of m.cards) {
+        const cell = el('div', 'ph-card-cell');
+        const card = el('button', 'ph-card ph-card-mv');
+        card.type = 'button';
+        card.dataset['phMovement'] = c.defId;
+        card.dataset['phMovementHardpoint'] = slot.hardpointId;
+        card.dataset['phMovementOwned'] = String(c.owned);
+        card.dataset['phMovementImplicit'] = String(c.implicit);
+        card.dataset['phMovementCount'] = String(c.count);
+        card.dataset['phMovementNeedsInventory'] = String(c.needsInventory);
+
+        const effectiveHere = slot.effectiveDefId === c.defId;
+        card.dataset['phMovementEquipped'] = String(effectiveHere);
+        if (effectiveHere) card.classList.add('ph-card-equipped');
+        if (selectedMovement && selectedMovement.hardpointId === slot.hardpointId && selectedMovement.defId === c.defId) {
+          card.classList.add('ph-card-selected');
+        }
+        card.append(el('span', 'ph-card-name', c.name));
+        if (c.implicit) card.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_DEFAULT_LABEL));
+        if (effectiveHere) card.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_EQUIPPED_LABEL));
+        // 未拥有 ⇒ 明确标注，并且**不可点**（结构上装不上，而不是点了给个错误提示）
+        if (!c.owned) {
+          card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_MOVEMENT_LOCKED_LABEL));
+          card.disabled = true;
+        } else {
+          card.addEventListener('click', () => {
+            selectedMovement = { hardpointId: slot.hardpointId, defId: c.defId };
+            render();
+          });
+        }
+        cell.append(card);
+        grid.append(cell);
+      }
+
+      /*
+        「卸下」项：与卡阵同一套外观，唯一区别是它的 defId = `EMPTY_SLOT`。
+        ⚠️ 只对**需要库存之外**的状态有意义 —— 卸下一件事对任何挂点都成立，
+           所以这一项恒在（与「缺省轮」那张卡并存：一个是「标准轮在跑」，一个是「没轮」）。
+      */
+      const offCell = el('div', 'ph-card-cell');
+      const offCard = el('button', 'ph-card ph-card-mv');
+      offCard.type = 'button';
+      offCard.dataset['phMovement'] = EMPTY_SLOT;
+      offCard.dataset['phMovementHardpoint'] = slot.hardpointId;
+      offCard.dataset['phMovementOwned'] = 'true';
+      offCard.dataset['phMovementImplicit'] = 'false';
+      offCard.dataset['phMovementCount'] = '0';
+      offCard.dataset['phMovementNeedsInventory'] = 'false';
+      offCard.dataset['phMovementEquipped'] = String(slot.unmounted);
+      offCard.dataset['phMovementOff'] = '1';
+      if (slot.unmounted) {
+        offCard.classList.add('ph-card-equipped');
+      }
+      if (selectedMovement && selectedMovement.hardpointId === slot.hardpointId && selectedMovement.defId === EMPTY_SLOT) {
+        offCard.classList.add('ph-card-selected');
+      }
+      offCard.append(el('span', 'ph-card-name', GARAGE_MOVEMENT_OFF_LABEL));
+      if (slot.unmounted) offCard.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_EQUIPPED_LABEL));
+      offCard.addEventListener('click', () => {
+        selectedMovement = { hardpointId: slot.hardpointId, defId: EMPTY_SLOT };
+        render();
+      });
+      offCell.append(offCard);
+      grid.append(offCell);
+
+      row.append(grid);
+      stage.append(row);
+    }
+
+    const mvActions = el('div', 'ph-actions ph-mv-actions');
+    const mvEquip = el('button', 'ph-btn ph-btn-primary', GARAGE_EQUIP_LABEL);
+    mvEquip.type = 'button';
+    mvEquip.dataset['phAction'] = 'equip-movement';
+    // 与武器区同一条纪律：没选中就不可点（不做静默默认选择）
+    mvEquip.disabled = selectedMovement === null;
+    mvEquip.addEventListener('click', () => {
+      if (selectedMovement === null) return;
+      /*
+        ⚠️ 唯一写动作：`playerLoadout.equipMovement()` —— 它内部过正式 `validateSnapshot`
+           并只经那**唯一一处** `persistPlayerBuild` 落盘（PL-03 / MG-14 钉死）。
+           本页不碰 `savePlayerBuild`、不碰 `localStorage`、不自己赋值 rearWheelDefId。
+        ⚠️ 写的是**玩家点的那一对**（挂点 + 轮组），不是「当前挂点 + 某件」的推断。
+      */
+      const out = equipMovement(
+        selectedMovement.hardpointId,
+        selectedMovement.defId,
+        draft,
+        inv,
+      );
+      lastMovementEquip = { ok: out.ok, reason: out.reason ?? null, detail: out.detail ?? '' };
+      if (out.ok && out.draft) {
+        draft = out.draft;
+        // 库存不因装备而消耗（装备是引用，不是消耗）；重读仍走正式 ensureInventory（幂等）
+        inv = playerInventory(draft);
+      }
+      selectedMovement = null;
+      render();
+    });
+    mvActions.append(mvEquip);
+    stage.append(mvActions);
+
+    if (lastMovementEquip) {
+      const msg = el(
+        'p',
+        lastMovementEquip.ok ? 'ph-note ph-note-ok' : 'ph-note ph-note-bad',
+        lastMovementEquip.ok
+          ? '已装备轮组并写入正式玩家 Build 存档。'
+          : `轮组装备被拒绝（${String(lastMovementEquip.reason)}）：${lastMovementEquip.detail}`,
+      );
+      msg.dataset['phMovementMsg'] = lastMovementEquip.ok ? 'ok' : 'fail';
+      stage.append(msg);
+    }
+  }
+
   function renderGarage(r: LoadoutReading): void {
     renderHeader(GARAGE_TITLE);
     header.append(el('span', 'ph-sub', `${r.weaponSlotLabel} · 当前主武器`));
@@ -999,6 +1252,19 @@ export function mountProductHome(
     actions.append(equip, back);
     stage.append(actions);
 
+    /*
+      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 区**必须放在武器那一组之后**。
+
+      起初它被插在「武器卡阵」与「装备 / 返回」按钮之间，实测后果是：
+      武器「装备」按钮被推到 `y=1034`，而视口只有 720 高 ⇒ **主操作落到屏幕外**
+      （`elementFromPoint(center)` 返回 `null`，真实鼠标点不到）。
+      这不只是 E2E 取不到坐标的问题 —— 玩家也点不到，是一处真实可用性回归。
+
+      放到武器组之后，语义也更干净：**每组配置 = 卡阵 + 它自己的动作条**，
+      中间不夹另一组的内容（武器组不再被 Movement 区截断）。
+    */
+    renderMovementSection();
+
     if (lastFuse) {
       const msg = el(
         'p',
@@ -1050,6 +1316,8 @@ export function mountProductHome(
       const start = stage.querySelector<HTMLElement>('[data-ph-action="start-run"]');
       const compat = fullRunCompat(draft);
       const equipBtn = stage.querySelector<HTMLButtonElement>('[data-ph-action="equip"]');
+      const movementEquipBtn = stage.querySelector<HTMLButtonElement>('[data-ph-action="equip-movement"]');
+      const mv = readMovement();
       return {
         view,
         bodyName: r.bodyName,
@@ -1163,6 +1431,41 @@ export function mountProductHome(
         selectedWeaponId: selected ? selected.defId : null,
         selectedWeaponStar: selected ? selected.star : null,
         equipEnabled: !!equipBtn && !equipBtn.disabled,
+        /**
+         * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 维度读数
+         * （与 Garage 里那一片卡画的**是同一份**，页面禁止自行推导）。
+         */
+        movement: {
+          slots: mv.slots.map((s) => ({
+            hardpointId: s.hardpointId,
+            storedDefId: s.storedDefId,
+            effectiveDefId: s.effectiveDefId,
+            name: s.name,
+            unmounted: s.unmounted,
+          })),
+          cards: mv.cards.map((c) => ({
+            defId: c.defId,
+            name: c.name,
+            kind: c.kind,
+            needsInventory: c.needsInventory,
+            count: c.count,
+            owned: c.owned,
+            implicit: c.implicit,
+            hardpoints: [...c.hardpoints],
+          })),
+          available: [...mv.available],
+          ownedDefIds: [...mv.ownedDefIds],
+          equippedDefIds: [...mv.equippedDefIds],
+          legal: mv.legal,
+          defaultDefId: mv.defaultDefId,
+        },
+        selectedMovement: selectedMovement
+          ? { hardpointId: selectedMovement.hardpointId, defId: selectedMovement.defId }
+          : null,
+        movementEquipEnabled: !!movementEquipBtn && !movementEquipBtn.disabled,
+        lastMovementEquip: lastMovementEquip
+          ? { ok: lastMovementEquip.ok, reason: lastMovementEquip.reason }
+          : null,
         slots: r.slots.map((s) => ({
           hardpointId: s.hardpointId,
           defId: s.defId,

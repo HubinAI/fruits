@@ -403,6 +403,22 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../core/buildSnapshot',
         '../core/types',
         '../lab/buildEditorModel',
+        /*
+          PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 维度的**两个只读真源**
+          （本模块到这里只是多了一个**写入口**，读数口径一个字都没变）。
+
+          ⚠️ 为什么必须走它们、而不是就地展开 `BuildDraft.rearWheelDefId`：
+             - 「有哪些正式 Movement」+「ownership 判据」= `./movementInventory`
+               （上一轮固化；它自己再指向 `./runMovementCanonical` → core `OFFICIAL_MOVEMENTS`）；
+             - 「局外存档 → Snapshot → Runtime 的三段映射」= `./runMovementCanonical`
+               （与 Run 侧同一个 `buildSnapshotFromDraft` + `resolveSnapshot`）。
+             就地重写这两件事就是**第二份真源**：产品侧显示 A、Run 侧装载 B 时会静默分叉。
+
+          ⚠️ 依赖方向是 `playerLoadout → movementInventory → runMovementCanonical`，
+             三者都不反向 import 本模块 ⇒ **不成环**（这本是 R3 canonical 轮次刻意留好的方向）。
+        */
+        './movementInventory',
+        './runMovementCanonical',
       ],
       'vehiclePreview.ts': [
         '../core/content',
@@ -555,6 +571,11 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
           './playerGrowth',
           // PRODUCT-LOOP-P0：「开始冒险」的资格判断（页面**不**自己判断武器支持性）
           './runCompatibility',
+          // PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP：Movement 配置区的**唯一读写口径**
+          //   —— 页面只调 `movementReading()`（读数）与 `equipMovement()`（写），
+          //   自己不赋值 `rearWheelDefId` / `frontWheelDefId`，也不自建第二份 ownership 判据。
+          './movementInventory',
+          './runMovementCanonical',
         ],
         `homePage.ts 不得 import "${s}"`,
       ).toContain(s);

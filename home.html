@@ -190,6 +190,25 @@
       .ph-card-meta { font-size: 11px; color: #93a1b6; }
       .ph-card-tag { font-size: 10px; color: #8fe0ad; }
       /*
+        PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Garage 的 **Movement（轮组）配置区**。
+
+        ⚠️ 与武器区**同一套视觉语言**（同一个 `.ph-grid` / `.ph-card` / `.ph-card-cell`
+           / `.ph-actions`）：这里只补「按挂点分行」需要的三个容器类，不引入第二套卡片。
+        ⚠️ 为什么必须有样式：区里的结构类（`ph-mv-row` 等）若不定义，会退化成无间距的
+           裸块 —— 功能虽在，但玩家看不出「这是 rear 那一行、那是 front 那一行」。
+           这不是新设计，只是把既有卡片摆成两行。
+      */
+      .ph-mv-row { display: flex; flex-direction: column; gap: 6px; }
+      .ph-mv-row + .ph-mv-row { margin-top: 10px; }
+      .ph-mv-label {
+        font-size: 12px; font-weight: 700; color: #9fb3cc; letter-spacing: 0.04em;
+      }
+      .ph-mv-current { font-size: 11px; color: #93a1b6; margin-left: 8px; font-weight: 500; }
+      /* 轮组卡比武器卡矮一点：一行要放「缺省轮 / 三档 / 未装载」共 5 项 */
+      .ph-card-mv { padding: 8px 9px; gap: 2px; }
+      .ph-card-mv .ph-card-name { font-size: 13px; }
+      .ph-mv-actions { margin-top: 8px; }
+      /*
         PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页的一行最小成长状态。
         ⚠️ 只是一行**读数**，没有按钮、没有新入口：点「调整战车」去 Garage 合成。
       */

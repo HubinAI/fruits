@@ -40,6 +40,7 @@ import {
   PLAYER_BODY_DEF_ID,
   WEAPON_SLOT,
   defaultPlayerDraft,
+  equipMovement,
   equipWeapon,
   playerInventory,
 } from '../src/product/playerLoadout';
@@ -308,13 +309,155 @@ describe('MC-07｜产品 Garage 的写入口**结构上碰不到** Movement / Dr
     expect(movementMapping(next)).toEqual(before);
   });
 
-  it('MC-07b 源码层面：playerLoadout.ts 的**代码**里没有任何 Movement / Drive 字段名', () => {
+  it('MC-07b 源码层面：Movement / Drive 的写入只在**唯一那一处**（`equipMovement`）', () => {
     const code = strip(readProduct('playerLoadout.ts'));
-    expect(code).not.toMatch(/rearWheelDefId|frontWheelDefId/);
+    /*
+      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜**契约变更**（强化，不是放宽）。
+
+      上一轮（R3-CANONICAL）这条断言是「`playerLoadout.ts` 的代码里根本不许出现
+      `rearWheelDefId` / `frontWheelDefId`」—— 当时它成立，因为产品侧**没有** Movement
+      写入口，那两个字段只能由 Lab / 旧横屏游戏写。
+
+      本 Queue 的**目标**正是补上那个写入口 ⇒ 原断言与目标直接冲突。
+      原断言真正要守的是「**产品侧不允许有两处**写 Movement」这件事，因此改为：
+        ① 字段名**只允许出现一个函数体**里 —— 即 `MOVEMENT_DRAFT_KEY` 那张表与
+           `equipMovement()`；用「赋值的出现次数」把它变成**可数**的机器判据；
+        ② `equipWeapon()`（另一个写入口）**必须**仍然碰不到 Movement / Drive ——
+           这条由 `MC-07` 用真实返回值逐项证明，不靠字符串。
+      ⚠️ 刻意**不删**任何一条断言：原断言的两半（代码里不许有字段名 / 注释里必须写明边界）
+        都保留下来变成「有且仅有这一处」的形式。
+    */
+    /*
+      ① 结构性判据（**不是**魔法上界数字）：把「出现位置」而不是「出现次数」变成机器判据。
+
+      实测（剥注释后）两个字段名一共出现 **5** 次，逐处是：
+        - 470 类型注解 `Readonly<Record<string, 'rearWheelDefId' | 'frontWheelDefId'>>` …… **2 次**
+          （⚠️ 同一行两个 token —— 早先按「行」数会误记成 1 次，这是本断言第一次算错的根因）
+        - 471 `rear:  'rearWheelDefId'`  …… 1 次
+        - 472 `front: 'frontWheelDefId'` …… 1 次
+        - 517 `if (key === 'rearWheelDefId')` …… 1 次（**比较**，不是赋值）
+      ⇒ 全部落在 **`MOVEMENT_DRAFT_KEY` 的声明 + 唯一那次查表比较** 里。
+
+      所以要守的两件事分别是：
+        ⓐ 总数恰好落在这 4 行上（多一行 = 别处又写了 Movement；少一行 = 表被拆/改成硬编码）；
+        ⓑ **没有任何一处是「字面量当左值」的字段赋值** —— 真正的写入必须恒为 `next[key] = …`。
+    */
+    const movementTokenLines = code
+      .split('\n')
+      .map((line, i) => (/(rearWheelDefId|frontWheelDefId)/.test(line) ? i + 1 : 0))
+      .filter(Boolean);
+    const movementTokens = code.match(/rearWheelDefId|frontWheelDefId/g) ?? [];
+    // 标识符按**行**去重后必须恰好 4 行；按 token 计必须恰好 5 个
+    expect(
+      movementTokenLines.length,
+      `Movement 字段名只允许出现在 4 行里（MOVEMENT_DRAFT_KEY 声明 3 行 + key 比较 1 行；实测 ${movementTokenLines.length} 行 @ ${movementTokenLines.join(',')}）`,
+    ).toBe(4);
+    expect(
+      movementTokens.length,
+      `Movement 字段名 token 总数（类型注解 2 + 表值 2 + 比较 1；实测 ${movementTokens.length}）`,
+    ).toBe(5);
+    // 那 4 行**必须**彼此相邻且落在同一段声明/判断里（不许散落到文件别的角落）
+    expect(
+      movementTokenLines[3] - movementTokenLines[0],
+      `4 处必须彼此邻近（同一声明/判断块内），实测跨度 ${movementTokenLines[3] - movementTokenLines[0]} 行`,
+    ).toBeLessThanOrEqual(50);
+    /*
+      ⓑ 最强的那一条：**字面量绝不允许出现在赋值左值**。
+         `next['rearWheelDefId'] = …` / `draft.frontWheelDefId = …` 这类写法会立刻变红。
+         真正的写入只能经由 `MOVEMENT_DRAFT_KEY[hardpointId]` 取键后的 `next[key] = …`。
+    */
+    expect(
+      code,
+      '不得出现「把 Movement 字段名直接当左值」的赋值（写入必须经由 MOVEMENT_DRAFT_KEY 取键）',
+    ).not.toMatch(/(?:['"]?(?:rearWheelDefId|frontWheelDefId)['"]?)\s*=[^=]/);
+    // ② 唯一的写入动作是间接的 `next[key] = …`（key 来自那张表，不是散落的字面量）
+    expect(code).toMatch(/MOVEMENT_DRAFT_KEY/);
+    // ②b 目标挂点只可能来自那张表的查表结果（不是从入参硬拼字符串）
+    expect(code).toMatch(/MOVEMENT_DRAFT_KEY\[hardpointId\]/);
+    // ③ Drive 仍然**没有任何**产品侧写入（本 Queue 不碰驱动模式）
     expect(code).not.toMatch(/\.drive\b|\bdrive:/);
-    // 反向对照：注释里**必须**明确写着这条边界（否则下一个人会以为只是漏了）
+    // ④ 反向对照：注释里**必须**明确写着这条边界（否则下一个人会以为只是漏了）
     const raw = readProduct('playerLoadout.ts');
     expect(raw).toMatch(/Body \/ Movement \/ 其它 Gadget/);
+  });
+
+  /*
+    PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜两个写入口的**互不越界**契约。
+
+    `MC-07` 已经证明「equipWeapon 碰不到 Movement」；下面这条是反方向：
+    「equipMovement 碰不到 Weapon / Functional / Drive / Body」。
+    两条合起来才是「两个动作各写各的字段」—— 这正是 Queue 必改 1 / 验收 5 要的
+    「不覆盖 Weapon 配置」在**行为层**（不是字符串层）的可断言形式。
+  */
+  it('MC-07c equipMovement 只改目标挂点的轮组与轮径：Weapon / Functional / Drive / Body 逐项不变', () => {
+    const draft = defaultPlayerDraft();
+    const inv = playerInventory(draft);
+    // 发一件真轮组（走正式库存写入；未拥有会被 `not-owned` 拒绝）
+    addPart(inv, OFFICIAL_MOVEMENTS[0], 1, 1);
+
+    const weaponSlotBefore = draft.functionalSelections[WEAPON_SLOT];
+    const selectionsBefore = JSON.stringify(draft.functionalSelections);
+    const starsBefore = JSON.stringify(draft.functionalStars ?? null);
+    const driveBefore = draft.drive;
+
+    const out = equipMovement('rear', OFFICIAL_MOVEMENTS[0], draft, inv);
+    expect(out.ok, `装轮组应成功（detail: ${out.detail ?? '–'}）`).toBe(true);
+    const next = out.draft as BuildDraft;
+
+    // ① 目标挂点真的换了
+    expect(next.rearWheelDefId).toBe(OFFICIAL_MOVEMENTS[0]);
+    // ② 另一个挂点一字未动（rear / front 是两个独立正式字段）
+    expect(next.frontWheelDefId).toBe(draft.frontWheelDefId);
+    expect(next.frontRadius).toBe(draft.frontRadius);
+    // ③ Weapon / Functional 选择整份不变
+    expect(next.functionalSelections[WEAPON_SLOT]).toBe(weaponSlotBefore);
+    expect(JSON.stringify(next.functionalSelections)).toBe(selectionsBefore);
+    expect(JSON.stringify(next.functionalStars ?? null)).toBe(starsBefore);
+    // ④ Drive / Body 不变（本 Queue 不碰驱动模式与车身）
+    expect(next.drive).toBe(driveBefore);
+    expect(next.bodyDefId).toBe(draft.bodyDefId);
+    // ⑤ 入参本身没被改写（纯函数语义）
+    expect(draft.rearWheelDefId).toBeUndefined();
+  });
+
+  /*
+    PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜**本 Queue 的核心映射契约**。
+
+    与 `MC-05`（局外 draft → 真实产品地址 → 局内解析 → 真实 Runtime 计划）**同一台机器**，
+    唯一区别是这里的 draft 是**经产品 Garage 写入口真的装过轮组**的那一份。
+    于是「Garage 装上的」与「Run 真正装载的」在**同一条真实链路**上被逐项对上 ——
+    这正是 Queue 验收 4「Product Run Snapshot 与 Garage 配置一致」的机器形式。
+  */
+  it('MC-07d Garage 装上的轮组经真实地址 → 真实解析 → 真实 Runtime 计划后逐项一致', () => {
+    const draft = defaultPlayerDraft();
+    const inv = playerInventory(draft);
+    for (const m of OFFICIAL_MOVEMENTS) addPart(inv, m, 1, 1);
+
+    // ① 经**产品写入口**真的装上（rear 与 front 各一件，证明两侧独立）
+    const a = equipMovement('rear', OFFICIAL_MOVEMENTS[0], draft, inv);
+    expect(a.ok).toBe(true);
+    const b = equipMovement('front', OFFICIAL_MOVEMENTS[1], a.draft as BuildDraft, inv);
+    expect(b.ok).toBe(true);
+    const equipped = b.draft as BuildDraft;
+
+    // ② 局外读数（Garage 画的那一份）
+    const garage = movementMapping(equipped);
+    expect(garage.slots.map((s) => s.effectiveDefId)).toEqual([
+      OFFICIAL_MOVEMENTS[0],
+      OFFICIAL_MOVEMENTS[1],
+    ]);
+
+    // ③ 走真实产品地址 → 真实解析器 → 真实 Runtime 计划
+    const run = runSide(equipped);
+    // ④ 「Garage 显示的轮组」== 「Run 真实装载的轮组」，逐条 defId 相等
+    expect(run.entity.movements.map((m) => m.defId)).toEqual(
+      garage.slots.map((s) => s.effectiveDefId),
+    );
+    // ⑤ 半径也一致（overrides 合并语义在两侧同源）
+    for (const m of run.entity.movements) {
+      const slot = garage.slots.find((s) => s.hardpointId === m.hardpointId)!;
+      expect(m.radius).toBe(slot.runtimeNumbers!.radius);
+    }
   });
 });
 

@@ -53,6 +53,22 @@ import {
   makeStarterDraft,
   type BuildDraft,
 } from '../lab/buildEditorModel';
+// PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 维度的**两个只读真源**。
+//
+// ⚠️ 本模块**不自己展开** `BuildDraft.rearWheelDefId` / `frontWheelDefId` 的语义，
+//    也不自己维护一张「有哪些轮组」的表 —— 那两件事分别由上一轮固化的
+//    `movementInventory`（canonical 集合 + owned/implicit 判据）与
+//    `runMovementCanonical`（局外存档 → Snapshot → Runtime 的三段映射）回答。
+//    本模块到这里只是**多了一个写入口**，读数口径一个字都没变。
+// ⚠️ 依赖方向是 `playerLoadout → movementInventory → runMovementCanonical`，
+//    三者都不反向 import 本模块之外的新东西 ⇒ 不成环（见 PL-26 白名单）。
+import { MOVEMENT_STAR, movementOwnership, type MovementEntry } from './movementInventory';
+import {
+  canonicalMovements,
+  movementHardpointIds,
+  movementMapping,
+  type CanonicalMovement,
+} from './runMovementCanonical';
 import {
   INVENTORY_MAX_STAR,
   canFuse,
@@ -238,6 +254,126 @@ export interface LoadoutReading {
   readonly equippedWeaponName: string;
   readonly weapons: readonly WeaponEntry[];
   readonly slots: readonly SlotReading[];
+}
+
+/* ══════════════════ PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 维度 ══════════════════
+ *
+ * ── 这个维度为什么能直接接进来（不是「顺手加的一层」）────────────────────────
+ * 已确认的两个事实（`PRODUCT-LOOP-R3-MOVEMENT-CANONICAL-INVENTORY` 的产物）：
+ *   ① rear / front **本来就是两个独立正式字段**（`BuildDraft.rearWheelDefId` /
+ *      `frontWheelDefId`），`undefined` = 缺省标准轮、`'none'` = 明确卸下；
+ *   ② 该字段**已经被真实链路消费**：`buildSnapshotFromDraft`（→ `movements[]`）→
+ *      `resolveSnapshot`（含 `overrides.radius`）→ `planckVehicleAssembly` 真建轮体
+ *      （radius / mass / grip 进物理），并经 `arenaA.topdownCapabilityOf` 折算
+ *      `driveTorque` / `maxRPM`。
+ * ⇒ 因此本 Queue **不创造新的 Movement 槽模型**，只是给这两个既有字段补一个
+ *   「玩家能按」的写入口（此前它们只能被 Lab / 旧横屏游戏写入，产品 Garage 写不到）。
+ *
+ * ── 读数口径（与上一轮逐字一致，本模块不复制任何一条判据）────────────────────
+ *   - 「拥有」= `movementInventory.movementEntries()` 的 `owned` —— 真源是
+ *     `runMovementCanonical.needsInventory`（→ core `OFFICIAL_MOVEMENTS`）+ 库存计数；
+ *     缺省轮不进库存、恒 `implicit: true` ⇒ 恒可装备。
+ *   - 「装着什么」= `runMovementCanonical.movementMapping()`（走正式 Snapshot + `resolveSnapshot`）
+ *     ⇒ 与 Run 侧看到的**必然**是同一份。
+ *   - 库存里的星级档取 `movementInventory.MOVEMENT_STAR`（恒 ★1；本轮不做 Movement
+ *     的 Fusion / Star）。
+ */
+
+/** 一个 Movement 挂点在 Garage 里的展示读数（只读；页面禁止自行推导）。 */
+export interface MovementSlotReading {
+  readonly hardpointId: string;
+  /**
+   * 局外**原样存着**的那个值（`runMovementCanonical.MovementSlotMapping.storedDefId`）：
+   *   - `null`   = 存档里没有这个键（= 缺省标准轮，不是「空」）；
+   *   - `'none'` = 明确卸下（`EMPTY_SLOT`）；
+   *   - 其它     = 正式 Movement defId。
+   */
+  readonly storedDefId: string | null;
+  /** 当前**生效**的 defId（= 正式 Snapshot 里该槽真正装载的那件）；未装 ⇒ `null`。 */
+  readonly effectiveDefId: string | null;
+  /** 生效件的展示名（未装 ⇒ `'空'`）。 */
+  readonly name: string;
+  /** 该槽是否**明确卸下**（`storedDefId === 'none'`）。与「缺省」刻意分开。 */
+  readonly unmounted: boolean;
+}
+
+/** 一件 Movement 在 Garage 卡片上的读数（= 可否装备的**唯一判据**来源）。 */
+export interface MovementCardReading extends MovementEntry {
+  /** 当前这件正装在哪几个挂点上（`[]` = 没装）。 */
+  readonly hardpoints: readonly string[];
+}
+
+/**
+ * Garage / 探针共同读取的 **Movement 维度全量读数**（单一来源，页面不自行推导）。
+ *
+ * ⚠️ `available` 是「**只允许装备真实拥有（含隐式拥有）的 canonical Movement**」这条
+ *    Queue 硬约束的**可断言形式**：它的成员由 `owned === true` 过滤而来，
+ *    而 `owned` 的真源在 `movementInventory` —— 页面只会画 `available` 里的卡，
+ *    结构上不存在「把没拥有的轮组装上车」的按钮。
+ */
+export interface MovementReading {
+  readonly bodyDefId: string;
+  /** Garage 两个（或更多）Movement 挂点的读数，顺序 = 正式 `BodyDef.movementHardpoints`。 */
+  readonly slots: readonly MovementSlotReading[];
+  /** **全部** canonical Movement 的 owned / equipped 读数（含未拥有的，供如实展示）。 */
+  readonly cards: readonly MovementCardReading[];
+  /** **可装备**的 defId 集合（= `cards.filter(c => c.owned)`），顺序 = canonical 顺序。 */
+  readonly available: readonly string[];
+  /** 已拥有的 defId（含恒默认拥有的缺省轮）。 */
+  readonly ownedDefIds: readonly string[];
+  /** 车上正装着的 defId（去重，顺序 = canonical 顺序）。 */
+  readonly equippedDefIds: readonly string[];
+  /**
+   * **不变式**：每一条装着的 Movement 都合法拥有。
+   * ⚠️ 与 `movementInventory.movementOwnership().legal` 同源（同一个真源，不是第二份判据）。
+   */
+  readonly legal: boolean;
+  /** 正式缺省 Movement defId（现读自正式 Snapshot 构造器，不是本模块写的字面量）。 */
+  readonly defaultDefId: string;
+}
+
+/**
+ * 一次性读出 Movement 维度的全部读数（Garage 卡片与探针都只取这一份）。
+ *
+ * ⚠️ 本函数**零副作用**：它不写 draft、不写库存、不落盘。
+ *    写只发生在 `equipMovement()`（唯一写入口，见下）。
+ */
+export function movementReading(draft: BuildDraft, inv: PartInventory): MovementReading {
+  const ownership = movementOwnership(inv, draft);
+  const mapping = movementMapping(draft);
+  // 挂点顺序**现读自正式 BodyDef**（不是本模块写死 'rear' / 'front' 两个字面量）：
+  // 车身加一个 Movement 硬点时，这里自动多一条读数。
+  const hardpoints = movementHardpointIds(draft.bodyDefId);
+  const byHardpoint = new Map(mapping.slots.map((s) => [s.hardpointId, s]));
+  const nameOf = new Map(canonicalMovements().map((m) => [m.defId, m.name]));
+  const cards: MovementCardReading[] = ownership.entries.map((e) => ({
+    ...e,
+    hardpoints: [...e.hardpoints],
+  }));
+  return {
+    bodyDefId: ownership.bodyDefId,
+    slots: hardpoints.map((hardpointId) => {
+      const slot = byHardpoint.get(hardpointId);
+      const storedDefId = slot ? slot.storedDefId : null;
+      const effectiveDefId = slot ? slot.effectiveDefId : null;
+      return {
+        hardpointId,
+        storedDefId,
+        effectiveDefId,
+        name: effectiveDefId ? nameOf.get(effectiveDefId) ?? effectiveDefId : '空',
+        // ⚠️「明确卸下」只能由 `'none'` 表达；`null`（存档里没有这个键）是**缺省轮**在装。
+        //    两者在物理上**不同**（缺省轮有 wheelStd 的半径 / 质量 / 抓地），
+        //    所以这里绝不把 `null` 也算成卸下（那会让页面把「标准轮在跑」说成「没轮」）。
+        unmounted: storedDefId === EMPTY_SLOT,
+      };
+    }),
+    cards,
+    available: cards.filter((c) => c.owned).map((c) => c.defId),
+    ownedDefIds: [...ownership.ownedDefIds],
+    equippedDefIds: [...ownership.equippedDefIds],
+    legal: ownership.legal,
+    defaultDefId: ownership.defaultDefId,
+  };
 }
 
 /**
@@ -600,6 +736,125 @@ export function equipWeapon(
   };
   if (Object.keys(stars).length > 0) next.functionalStars = stars;
   else delete next.functionalStars;
+  const result = validateSnapshot(buildSnapshotFromDraft(next, registry), registry);
+  if (!result.valid) {
+    return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
+  }
+  persistPlayerBuild(next);
+  return { ok: true, draft: next };
+}
+
+/* ══════════════════ PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 唯一写入口 ══════════════════ */
+
+/** Movement 装备失败原因（与 Weapon 侧刻意**分开**两个联合类型，避免互相污染取值域）。 */
+export type MovementEquipFailure =
+  /** 车身没有这个 Movement 挂点（防 Body 变更后写入非法槽） */
+  | 'unknown-slot'
+  /** 不是正式 Movement（`registry.movements` 不认识它） */
+  | 'not-movement'
+  /** 这件需要库存拥有，而玩家没有 */
+  | 'not-owned'
+  /** 组合过不了正式 `validateSnapshot`（例如装上后能量超载） */
+  | 'invalid-build';
+
+export interface MovementEquipOutcome {
+  readonly ok: boolean;
+  readonly reason?: MovementEquipFailure;
+  readonly detail?: string;
+  /** 成功时为落盘后的新 Build；失败时**不返回**（调用方不得用它覆盖当前态）。 */
+  readonly draft?: BuildDraft;
+}
+
+/** 该挂点在 `BuildDraft` 上对应哪个**正式字段**（`runMovementCanonical` 里读的那两个键）。 */
+const MOVEMENT_DRAFT_KEY: Readonly<Record<string, 'rearWheelDefId' | 'frontWheelDefId'>> = {
+  rear: 'rearWheelDefId',
+  front: 'frontWheelDefId',
+};
+
+/**
+ * **Movement 的唯一写入口**：把 `hardpointId` 这个挂点上的轮组写成 `defId` 并落盘。
+ *
+ * ── 写的是哪两个字段（Queue 必改 1 / 必改 4）────────────────────────────────
+ * rear / front **本来就是两个独立正式字段** ⇒ 本函数**按挂点分别写**：
+ *   `rear`  → `BuildDraft.rearWheelDefId`
+ *   `front` → `BuildDraft.frontWheelDefId`
+ * 不引入统一的 Movement 槽模型、不新增抽象层、不做「一套轮组同时管两处」的合成写法
+ * —— 那是本 Queue 明令禁止的「自行创造新的 Movement 槽位模型」。
+ *
+ * ── 三个取值的语义（三态，不是两态）─────────────────────────────────────────
+ *   `defId === EMPTY_SLOT`（`'none'`）→ 写 **`'none'`**：**明确卸下**该槽
+ *       （`buildSnapshotFromDraft` 会把该槽从 `movements[]` 里过滤掉 ⇒ 该槽没有轮）。
+ *   `defId === 缺省轮`（`movementReading().defaultDefId`，当前 = `wheelStd`）→ **删除该键**：
+ *       回到「存档里没有这个键」的形态，= 缺省轮 + 保留 `rearRadius` / `frontRadius` 数值
+ *       （旧存档兼容口径；写 `'wheelStd'` 字面量也等价，但会让旧 Build 形状变复杂）。
+ *   其它正式 defId → 写该 defId，并**同步把该槽的 radius 数值置为该轮组的默认半径**
+ *       （与 `buildEditorModel` 的既有约定一致：选中轮组卡时 `rearRadius/frontRadius`
+ *        置为该轮组默认 radius，下游数值链路零改动）。
+ *       ⚠️ `radius` 也会被 Snapshot 作为 `overrides.radius` 带下去（`resolveSnapshot`
+ *          合并语义），所以它**必须**一起改；只改 defId 会让新轮组带着旧半径跑。
+ *
+ * ── 校验顺序（任一不通过即拒绝，**零副作用**）──────────────────────────────
+ *   1. `unknown-slot`  —— 车身没有该 Movement 挂点，或该挂点在 `BuildDraft` 上没有对应字段；
+ *   2. `not-movement`  —— 既不是正式 Movement，也不是 `EMPTY_SLOT`（明确卸下是合法输入）；
+ *   3. `not-owned`     —— 这件需要库存拥有、而 `inv` 里计数为 0（缺省轮恒豁免）；
+ *   4. `invalid-build` —— 组合过不了正式 `validateSnapshot`（与 Weapon 侧同一判据、同一函数）。
+ * 通过后 `persistPlayerBuild` 落盘 —— 与正式玩法读的是同一个 key（`strongfruit.playerBuild.v1`），
+ * 也**就是**「开始冒险」地址里 `equipped=` 参数携带的那一份 ⇒ Run Snapshot / Runtime
+ * 读到的 rear / front 与 Garage 屏幕上显示的**不可能**分叉。
+ *
+ * ── 明确不做（Queue 禁止清单）──────────────────────────────────────────────
+ *   - 不消耗库存：轮组装上**不扣**副本（与 `equipWeapon` 同一条纪律 —— 装备是引用，
+ *     不是消耗）；也因此不需要任何「卸下时退回」的逻辑。
+ *   - 不新增 Movement 类型 / 不新增数值：本函数只写「玩家选了哪一件」，
+ *     `radius` / `mass` / `grip` / `energy` / `maxRPM` 全部取自正式 def，一个都没改。
+ *   - 不做解锁 / 购买 / 经济：`not-owned` 只如实拒绝，不提供任何获取途径。
+ */
+export function equipMovement(
+  hardpointId: string,
+  defId: string,
+  draft: BuildDraft = loadEquippedDraft(),
+  inv: PartInventory = playerInventory(draft),
+): MovementEquipOutcome {
+  const key = MOVEMENT_DRAFT_KEY[hardpointId];
+  if (!key || !movementHardpointIds(draft.bodyDefId).includes(hardpointId)) {
+    return {
+      ok: false,
+      reason: 'unknown-slot',
+      detail: `车身 "${draft.bodyDefId}" 没有 Movement 挂点 "${hardpointId}"`,
+    };
+  }
+  const unmount = defId === EMPTY_SLOT;
+  const canonical: CanonicalMovement | undefined = canonicalMovements().find((m) => m.defId === defId);
+  if (!unmount && !canonical) {
+    return { ok: false, reason: 'not-movement', detail: `"${defId}" 不是正式 Movement` };
+  }
+  if (canonical && canonical.needsInventory) {
+    // ⚠️ 判据与 `movementInventory` 的 `owned` **同源**（`needsInventory` + 计数），
+    //    但这里刻意**不看 implicit**：走到这一支就说明这件需要库存，直接查计数。
+    if (getCount(inv, defId, MOVEMENT_STAR) <= 0) {
+      return {
+        ok: false,
+        reason: 'not-owned',
+        detail: `库存里没有 "${defId}"（该 Movement 需要先拥有）`,
+      };
+    }
+  }
+
+  const next: BuildDraft = { ...draft };
+  if (unmount) {
+    next[key] = EMPTY_SLOT;
+  } else if (canonical && canonical.defId === movementReading(draft, inv).defaultDefId) {
+    // 缺省轮 ⇒ 回到「存档里没有这个键」的形态（保留 radius 数值）
+    delete next[key];
+  } else {
+    next[key] = defId;
+    // 半径随轮组一起写（口径同 `buildEditorModel`：选中轮组卡即写入该轮组默认半径）
+    if (canonical) {
+      if (key === 'rearWheelDefId') next.rearRadius = canonical.radius;
+      else next.frontRadius = canonical.radius;
+    }
+  }
+
   const result = validateSnapshot(buildSnapshotFromDraft(next, registry), registry);
   if (!result.valid) {
     return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
