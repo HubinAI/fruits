@@ -1195,6 +1195,11 @@ async function main() {
       ⚠️ PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：再 +1（`strongfruit.r3MovementChoiceSeed.v1`）——
          一次性 Movement 可选方案种子的标记，首次打开首页时会落它。
          **同样只是白名单 +1，闭集语义一字未改** —— 第五个 key 出现时这一条照样红。
+      ⚠️ PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：再 +2（`strongfruit.r4BodyChoiceSeed.v1`
+         种子标记 + `strongfruit.ownedBodies.v1` 车身拥有集合）—— Body 种子解锁 MVP 车身时，
+         `grantBody` 会把拥有状态落到独立的 `ownedBodies.v1` key（与 ownedParts 库存分离），
+         并落下「Body 选择起点已经安排过了」的 `r4BodyChoiceSeed.v1` 标记。
+         **同样只是白名单 +2，闭集语义一字未改** —— 第七个 key 出现时这一条照样红。
     */
     const EXPECTED_KEYS = [
       'strongfruit.ownedParts.v2',
@@ -1202,13 +1207,15 @@ async function main() {
       'strongfruit.r2Onboarding.v1',
       'strongfruit.r2Reseed.v1',
       'strongfruit.r3MovementChoiceSeed.v1',
+      'strongfruit.r4BodyChoiceSeed.v1',
+      'strongfruit.ownedBodies.v1',
     ].sort();
     const stored2Keys = Object.keys(stored2).sort();
     log(
       Object.keys(stored2).filter((k) => k.startsWith('strongfruit.ownedParts')).length === 1 &&
         stored2Keys.length === EXPECTED_KEYS.length &&
         EXPECTED_KEYS.every((k, i) => stored2Keys[i] === k),
-      'E5 三轮操作后官方 storage 恰好是那五个 key（无残留 / 无第二套库存 / 无未知 key）',
+      'E5 三轮操作后官方 storage 恰好是那七个 key（无残留 / 无第二套库存 / 无未知 key）',
       `keys=${stored2Keys.join(',')}`,
     );
 

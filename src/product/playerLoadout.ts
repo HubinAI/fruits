@@ -46,6 +46,7 @@
 import { registry } from '../core/content';
 import { computeEnergy, validateSnapshot } from '../core/buildValidator';
 import { loadPlayerBuild, savePlayerBuild } from '../core/buildPersistence';
+import { OFFICIAL_BODIES, canEquipBody } from '../core/bodyOwnership';
 import {
   EMPTY_SLOT,
   SLOT_LABELS,
@@ -63,6 +64,15 @@ import {
 // ⚠️ 依赖方向是 `playerLoadout → movementInventory → runMovementCanonical`，
 //    三者都不反向 import 本模块之外的新东西 ⇒ 不成环（见 PL-26 白名单）。
 import { MOVEMENT_STAR, movementOwnership, type MovementEntry } from './movementInventory';
+// PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜Body 维度的**两个只读真源**。
+//
+// ⚠️ 本模块**不自己展开** `BuildDraft.bodyDefId` 的语义，也不自己维护一张「有哪些车身」的表
+//    —— 那两件事分别由本 Queue 固化的 `bodyInventory`（canonical 集合 + owned 判据）与
+//    `runBodyCanonical`（局外存档 → Snapshot → Runtime 的映射）回答。
+//    本模块到这里只是**多了一个写入口**，读数口径一个字都没变。
+// ⚠️ 依赖方向是 `playerLoadout → bodyInventory → core/bodyOwnership`，
+//    三者都不反向 import 本模块之外的新东西 ⇒ 不成环。
+import { bodyOwnership, type BodyEntry } from './bodyInventory';
 import {
   canonicalMovements,
   defaultMovementRadius,
@@ -918,6 +928,181 @@ export function equipMovement(
     }
   }
 
+  const result = validateSnapshot(buildSnapshotFromDraft(next, registry), registry);
+  if (!result.valid) {
+    return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
+  }
+  persistPlayerBuild(next);
+  return { ok: true, draft: next };
+}
+
+/* ══════════════════ PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜Body 维度 ══════════════════
+ *
+ * ── 这个维度为什么能直接接进来（不是「顺手加的一层」）────────────────────────
+ * 已确认的两个事实（`PRODUCT-LOOP-R4-BODY-CANONICAL` 的产物）：
+ *   ① `BuildDraft.bodyDefId` **本来就是一个正式单一字段**，Product Run 已经真消费它
+ *      （`buildSnapshotFromDraft` → `resolveSnapshot(body = registry.bodies.get(...))` →
+ *       `planckVehicleAssembly` 建车体，hp / baseMass / colliders / hardpoints 进物理与战斗）；
+ *   ② 拥有模型已存在（`core/bodyOwnership.ts` 的 `OFFICIAL_BODIES` / `canEquipBody` /
+ *      `grantAllNewBodies`），debug「全部件×1」已经调过它。
+ * ⇒ 因此本 Queue **不创造新的 Body 槽模型**，只是给这个既有字段补一个
+ *   「玩家能按」的写入口（此前它只能被 Lab / 旧横屏游戏写入，产品 Garage 写不到）。
+ *
+ * ── 读数口径（与上一轮逐字一致，本模块不复制任何一条判据）────────────────────
+ *   - 「拥有」= `bodyInventory.bodyEntries()` 的 `owned` —— 真源是 `core/bodyOwnership`
+ *     （独立持久化 key `strongfruit.ownedBodies.v1`），与 Weapon / Movement 库存分离；
+ *   - 「装着什么」= `BuildDraft.bodyDefId`（直接就是正式字段）；
+ *   - 卡片刻度（耐久 / 质量 / 能量容量）= `BodyEntry` 上的 `hp` / `baseMass` /
+ *     `energyCapacity`（真源 = `registry.bodies`）—— 与 Run 侧进物理的同一份。
+ *
+ * ── 明确不做（Queue 禁止清单）──────────────────────────────────────────────
+ *   - 不新增 Body 类型 / 不改 Body 数值：本模块只写「玩家选了哪一台」，hp / mass /
+ *     energyCapacity / colliders / hardpoints 全部取自正式 def，一个都没改；
+ *   - 不消耗任何东西：换车身是引用，不是消耗（与 `equipWeapon` / `equipMovement` 同纪律）；
+ *   - 不覆盖 Weapon / rear·front Movement：`bodyDefId` 是**独立字段**，结构上不可能
+ *     碰到 `functionalSelections` / `rearWheelDefId` / `frontWheelDefId`（必改 6 的兜底）。
+ */
+
+/** 一张 Body 卡片上的展示读数（= 可否装备的**唯一判据**来源）。 */
+export interface BodyCardReading extends BodyEntry {
+  /**
+   * PRODUCT-LOOP-R4-BODY-CARD-READABILITY｜卡片上那行「耐久 · 质量 · 能量容量」的**成品文案**。
+   *
+   * ⚠️ 为什么文案在这里生成、而不是在页面里拼：页面若自己 `${b.hp}` 拼串，就会出现
+   *    「页面知道字段名」这层耦合 —— 将来卡片刻度换一批，页面得跟着改。
+   *    放这里 ⇒ 页面只 append 一个字符串，**数字的唯一来源**始终是 `BodyEntry`
+   *    （→ `registry.bodies`），`BG-*` 把它与 canonical Def 逐件钉死。
+   * ⚠️ 只是**数字的排布**，不含任何推导 / 评级 / 百分比（Queue 禁止清单）。
+   */
+  readonly statsText: string;
+}
+
+/** Garage / 探针共同读取的 **Body 维度全量读数**（单一来源，页面不自行推导）。 */
+export interface BodyReading {
+  readonly bodyDefId: string;
+  /** 全部 OFFICIAL_BODIES 的 owned / equipped 读数。 */
+  readonly cards: readonly BodyCardReading[];
+  /** **可装备**的 defId 集合（= `cards.filter(c => c.owned)`）。 */
+  readonly available: readonly string[];
+  /** 已拥有的 defId。 */
+  readonly ownedDefIds: readonly string[];
+  /** 车上正装着的 defId（正常只有 1 台）。 */
+  readonly equippedDefIds: readonly string[];
+  /**
+   * **不变式**：车上装着的车身都合法拥有（= `bodyInventory.bodyOwnership().legal` 同源）。
+   */
+  readonly legal: boolean;
+}
+
+/**
+ * PRODUCT-LOOP-R4-BODY-CARD-READABILITY｜卡片刻度那三个标签。
+ *
+ * ⚠️ 与 `core/content.ts` 里 `BodyDef` 字段的**一一对应**：
+ *    `hp` → 耐久 · `baseMass` → 质量 · `energyCapacity` → 能量容量。
+ *    刻意只用这三个词（Queue 指定的玩家语言），不引入「防御 / 续航 / 抓地」等
+ *    额外字段 —— 那会把卡片变成属性面板（Queue 禁止清单：不做整体重设计）。
+ */
+export const BODY_STAT_LABELS: Readonly<Record<'hp' | 'baseMass' | 'energyCapacity', string>> = {
+  hp: '耐久',
+  baseMass: '质量',
+  energyCapacity: '能量容量',
+};
+
+/**
+ * 把一台 Body 的 canonical 数值排布成卡片那一行（`耐久 1100 · 质量 120 · 能量容量 110`）。
+ *
+ * ⚠️ 输入是 `BodyEntry`（其 `hp` / `baseMass` / `energyCapacity` 原样来自 `registry.bodies`）
+ *    ⇒ 这里**不出现任何数字字面量**，页面也不自行拼串。
+ * ⚠️ 没有推导、没有换算、没有评级：`hp` 是 1100 就写 1100（不写成「高」或「+30%」）。
+ */
+export function bodyStatsText(b: Pick<BodyEntry, 'hp' | 'baseMass' | 'energyCapacity'>): string {
+  return `${BODY_STAT_LABELS.hp} ${b.hp} · ${BODY_STAT_LABELS.baseMass} ${b.baseMass} · ${BODY_STAT_LABELS.energyCapacity} ${b.energyCapacity}`;
+}
+
+/**
+ * 一次性读出 Body 维度的全部读数（Garage 卡片与探针都只取这一份）。
+ *
+ * ⚠️ 本函数**零副作用**：它不写 draft、不写拥有状态、不落盘。
+ *    写只发生在 `equipBody()`（唯一写入口，见下）。
+ */
+export function bodyReading(draft: BuildDraft): BodyReading {
+  const ownership = bodyOwnership(draft);
+  const cards: BodyCardReading[] = ownership.entries.map((e) => ({
+    ...e,
+    // 数字全部来自 `e`（= canonical Body Def 的透出值），这里只做「标签 + 数字」的排布。
+    statsText: bodyStatsText(e),
+  }));
+  return {
+    bodyDefId: ownership.bodyDefId,
+    cards,
+    available: cards.filter((c) => c.owned).map((c) => c.defId),
+    ownedDefIds: [...ownership.ownedDefIds],
+    equippedDefIds: [...ownership.equippedDefIds],
+    legal: ownership.legal,
+  };
+}
+
+/** Body 装备失败原因（与 Weapon / Movement 侧刻意**分开**三个联合类型，避免互相污染取值域）。 */
+export type BodyEquipFailure =
+  /** 不在 `registry.bodies` 里（既不是正式车身，也不是任何已知 id） */
+  | 'unknown-body'
+  /** 不在正式玩家车身目录（`OFFICIAL_BODIES` 之外，含 Lab / 对手池车身） */
+  | 'not-official'
+  /** 这件需要拥有、而玩家没有 */
+  | 'not-owned'
+  /** 组合过不了正式 `validateSnapshot`（例如换成小能量容量车身后能量超载） */
+  | 'invalid-build';
+
+export interface BodyEquipOutcome {
+  readonly ok: boolean;
+  readonly reason?: BodyEquipFailure;
+  readonly detail?: string;
+  /** 成功时为落盘后的新 Build；失败时**不返回**（调用方不得用它覆盖当前态）。 */
+  readonly draft?: BuildDraft;
+}
+
+/**
+ * **Body 的唯一写入口**：把 `draft.bodyDefId` 写成 `defId` 并落盘。
+ *
+ * ── 写的是哪个字段（Queue 必改 1 / 必改 5）────────────────────────────────
+ * `BuildDraft.bodyDefId` 是**正式既有的单一字段** ⇒ 本函数**只改这一个字段**，
+ * 不引入 Body 的「子槽位」「变体」等任何新抽象（那是本 Queue 明令禁止的
+ * 「自行创造新的 Body 槽位模型」）。
+ *
+ * ── 校验顺序（任一不通过即拒绝，**零副作用**）──────────────────────────────
+ *   1. `unknown-body`  —— 不是 `registry.bodies` 认识的任何车身；
+ *   2. `not-official`  —— 不在 `OFFICIAL_BODIES`（Lab / 对手池车身 `wedgeBody` 等不可装备）；
+ *   3. `not-owned`     —— 玩家未拥有这台（`canEquipBody` 为 false）；
+ *   4. `invalid-build` —— 组合过不了正式 `validateSnapshot`（与 Weapon / Movement 同判据、同函数）。
+ * 通过后 `persistPlayerBuild` 落盘 —— 与正式玩法读的是同一个 key（`strongfruit.playerBuild.v1`），
+ * 也**就是**「开始冒险」地址里 `equipped=` 参数携带的那一份 ⇒ Run Snapshot / Runtime
+ * 读到的 bodyDefId 与 Garage 屏幕上显示的**不可能**分叉。
+ *
+ * ── 明确不做（Queue 禁止清单）──────────────────────────────────────────────
+ *   - 不消耗任何东西：换车身是引用，不是消耗；
+ *   - 不新增 Body 类型 / 不新增数值：本函数只写「玩家选了哪一台」，
+ *     hp / baseMass / colliders / hardpoints 全部取自正式 def，一个都没改；
+ *   - **不覆盖 Weapon / rear·front Movement**：`bodyDefId` 是独立字段，
+ *     本函数**绝不碰** `functionalSelections` / `rearWheelDefId` / `frontWheelDefId`。
+ */
+export function equipBody(
+  defId: string,
+  draft: BuildDraft = loadEquippedDraft(),
+): BodyEquipOutcome {
+  // ① 未知车身：`registry.bodies` 不认识它（比「非官方」更前置，排除一切悬空 id）
+  if (!registry.bodies.has(defId)) {
+    return { ok: false, reason: 'unknown-body', detail: `"${defId}" 不是正式车身（registry.bodies 不认识它）` };
+  }
+  // ② 非官方车身：Lab / 对手池用的 `wedgeBody` / `boxBody` / `tallBody` / `heavyBox` 不可装备
+  if (!OFFICIAL_BODIES.includes(defId)) {
+    return { ok: false, reason: 'not-official', detail: `"${defId}" 不在正式玩家车身目录（OFFICIAL_BODIES）` };
+  }
+  // ③ 未拥有：拥有状态由 `core/bodyOwnership` 独立持久化，与 `canEquipBody` 同一判据
+  if (!canEquipBody(defId)) {
+    return { ok: false, reason: 'not-owned', detail: `未拥有车身 "${defId}"` };
+  }
+
+  const next: BuildDraft = { ...draft, bodyDefId: defId };
   const result = validateSnapshot(buildSnapshotFromDraft(next, registry), registry);
   if (!result.valid) {
     return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };

@@ -68,6 +68,9 @@ const ONBOARDING_KEY = 'strongfruit.r2Onboarding.v1';
 const RESEED_KEY = 'strongfruit.r2Reseed.v1';
 // PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：第三份一次性迁移的标记（key 闭集白名单用）
 const MOVEMENT_SEED_KEY = 'strongfruit.r3MovementChoiceSeed.v1';
+// PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：Body 种子的标记 + 车身拥有集合（key 闭集白名单用）
+const BODY_SEED_KEY = 'strongfruit.r4BodyChoiceSeed.v1';
+const OWNED_BODIES_KEY = 'strongfruit.ownedBodies.v1';
 
 const WEAPON_SLOT = 'frontMass';
 const EMPTY = 'none';
@@ -453,14 +456,28 @@ async function main() {
       ⚠️ PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED 追加了**第 7 个** key
       （`strongfruit.r3MovementChoiceSeed.v1`，一次性 Movement 可选方案种子的标记）——
       它在本场景里由注入的「历史账号」首入时落下。
-      **仍然只是白名单 +1，闭集语义一字未改**：多出任何别的 key 这一条照样红。
+      ⚠️ PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP 追加了**第 8、9 个** key
+      （`strongfruit.r4BodyChoiceSeed.v1` Body 种子标记 + `strongfruit.ownedBodies.v1`
+      车身拥有集合）—— Body 种子解锁 MVP 车身时 `grantBody` 落 `ownedBodies.v1`，
+      并落「Body 选择起点已经安排过了」的 `r4BodyChoiceSeed.v1` 标记。
+      **仍然只是白名单 +2，闭集语义一字未改**：多出任何别的 key 这一条照样红。
     */
     log(
       JSON.stringify(keysAfter) ===
         JSON.stringify(
-          [CLAIMS_KEY, INV_KEY, ONBOARDING_KEY, PROGRESS_KEY, RESEED_KEY, BUILD_KEY, MOVEMENT_SEED_KEY].sort(),
+          [
+            CLAIMS_KEY,
+            INV_KEY,
+            ONBOARDING_KEY,
+            PROGRESS_KEY,
+            RESEED_KEY,
+            BUILD_KEY,
+            MOVEMENT_SEED_KEY,
+            BODY_SEED_KEY,
+            OWNED_BODIES_KEY,
+          ].sort(),
         ),
-      'R2g key 集合 = 注入的 5 个 + 本队列自己的 1 个新标记 + Movement 种子标记（没有凭空多出别的写入）',
+      'R2g key 集合 = 注入的 5 个 + 本队列 1 个 + Movement 种子 + Body 种子&拥有集合（没有凭空多出别的写入）',
       keysAfter.join(' · '),
     );
 

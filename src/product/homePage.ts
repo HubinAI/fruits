@@ -33,12 +33,16 @@ import { EMPTY_SLOT } from '../lab/buildEditorModel';
 import type { PartInventory } from '../core/partInventory';
 import {
   WEAPON_SLOT,
+  bodyReading,
+  equipBody,
   equipMovement,
   equipWeapon,
   loadEquippedDraft,
   loadoutReading,
   movementReading,
   playerInventory,
+  type BodyEquipFailure,
+  type BodyReading,
   type EquipFailure,
   type LoadoutReading,
   type MovementEquipFailure,
@@ -192,6 +196,14 @@ export const MOVEMENT_HARDPOINT_LABELS: Readonly<Record<string, string>> = {
   front: '前轮',
 };
 /**
+ * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜Body 配置区的文案。
+ *
+ * ⚠️ 全部是常量（页面里不出现第二份字面量）—— 与 Movement / Weapon 区那批同一条纪律。
+ */
+export const GARAGE_BODY_SECTION_LABEL = '车身（Body）';
+/** 首页「当前车身」摘要标题（与 Garage 同一套词）。 */
+export const HOME_BODY_SECTION_LABEL = '当前车身';
+/**
  * Movement 装备动作的结果文案。
  * ⚠️ 与 Weapon 侧**刻意用不同的词**：两套动作写的是两个不同的正式字段
  * （`rearWheelDefId` / `frontWheelDefId` vs `functionalSelections[frontMass]`），
@@ -306,6 +318,17 @@ export interface ProductProbe {
       readonly equipped: boolean;
       readonly hardpoints: readonly string[];
     }[];
+    /**
+     * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜本次挂载的 **Body 种子读数**。
+     *
+     * ⚠️ 直接来自 `playerGrowth.openGrowthSession()` 的 `bodySeed`
+     *    （页面与探针**不各自再判一次**）⇒ E2E 可以断言「第一次进来被解锁 4 台新增车身」
+     *    与「reload 之后 `already-marked` ⇒ 没有再发」这两条**互斥**的事实。
+     */
+    readonly bodySeedApplied: boolean;
+    readonly bodySeedReason: string;
+    readonly bodySeedDecided: boolean;
+    readonly bodySeedRaised: number;
   };
   /**
    * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页那一行最小成长状态的真实读数
@@ -382,6 +405,34 @@ export interface ProductProbe {
     readonly defaultDefId: string;
   };
   /**
+   * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜**Body 维度的全量读数**
+   * （直接来自 `playerLoadout.bodyReading()`，页面画的**就是这些字段**）。
+   *
+   * ⚠️ 与 Weapon / Movement 区同一条纪律：探针不另算一份 ⇒「屏幕上写着某车身在用」与
+   *    「探针说 `equippedDefIds` 含它」不可能分叉。
+   *   - `cards[]` —— 逐台 canonical 正式车身的 owned / implicit / equipped 读数 + 三个核心数值；
+   *   - `available[]` —— **可装备**的 defId（= `owned === true` 的那些）
+   *     ⇒ Queue「只允许装备真实拥有的 canonical Body」的可断言形式。
+   */
+  readonly body: {
+    readonly bodyDefId: string;
+    readonly cards: readonly {
+      readonly defId: string;
+      readonly name: string;
+      readonly hp: number;
+      readonly baseMass: number;
+      readonly energyCapacity: number;
+      readonly statsText: string;
+      readonly owned: boolean;
+      readonly implicit: boolean;
+      readonly equipped: boolean;
+    }[];
+    readonly available: readonly string[];
+    readonly ownedDefIds: readonly string[];
+    readonly equippedDefIds: readonly string[];
+    readonly legal: boolean;
+  };
+  /**
    * ⚠️ PRODUCT-LOOP-R3-MOVEMENT-DIRECT-EQUIP｜Movement 区**没有**二次确认：
    *    点已拥有卡即直接装备（rear 卡装 rear、front 卡装 front），不再有「选中态」、
    *    也不再有任何独立的「装备」按钮。`selectedMovement` / `movementEquipEnabled`
@@ -389,6 +440,8 @@ export interface ProductProbe {
    */
   /** 本次挂载**最后一次** Movement 装备动作的**真实**结果（`null` = 还没点过）。 */
   readonly lastMovementEquip: { readonly ok: boolean; readonly reason: MovementEquipFailure | null } | null;
+  /** 本次挂载**最后一次** Body 装备动作的**真实**结果（`null` = 还没点过）。 */
+  readonly lastBodyEquip: { readonly ok: boolean; readonly reason: BodyEquipFailure | null } | null;
   readonly slots: readonly { readonly hardpointId: string; readonly defId: string; readonly name: string; readonly star: number; readonly category: string | null; readonly editable: boolean }[];
   readonly previewItems: readonly { readonly key: string; readonly defId: string; readonly visualId: string | null; readonly onWeaponSlot: boolean }[];
   readonly previewSpriteCount: number;
@@ -599,6 +652,8 @@ export function mountProductHome(
   let lastEquip: { ok: boolean; reason: EquipFailure | null; detail: string } | null = null;
   /** 最近一次 Movement 装备动作的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
   let lastMovementEquip: { ok: boolean; reason: MovementEquipFailure | null; detail: string } | null = null;
+  /** 最近一次 Body 装备动作的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
+  let lastBodyEquip: { ok: boolean; reason: BodyEquipFailure | null; detail: string } | null = null;
   /** 最近一次合成的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
   let lastFuse: {
     ok: boolean;
@@ -697,6 +752,16 @@ export function mountProductHome(
   }
 
   /**
+   * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜Body 维度的**唯一读取口径**。
+   *
+   * ⚠️ 页面（卡片）与探针都只调它 ⇒ 与 Weapon / Movement 区同一条「不各自算一份」的纪律。
+   * ⚠️ 它**零副作用**：写只发生在 `equipBody()`（`playerLoadout` 的唯一写入口）。
+   */
+  function readBody(): BodyReading {
+    return bodyReading(draft);
+  }
+
+  /**
    * PRODUCT-LOOP-R3-MOVEMENT-DIRECT-EQUIP｜**直接装备**（无二次确认）。
    *
    * 点 rear 卡 ⇒ 装 rear；点 front 卡 ⇒ 装 front；点「未装载」卡 ⇒ 卸下该挂点。
@@ -710,6 +775,28 @@ export function mountProductHome(
     if (out.ok && out.draft) {
       draft = out.draft;
       // 库存不因装备而消耗（装备是引用，不是消耗）；重读仍走正式 ensureInventory（幂等）
+      inv = playerInventory(draft);
+    }
+    render();
+  }
+
+  /**
+   * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜**直接装备车身**（无二次确认）。
+   *
+   * 点车身卡 ⇒ 装那台车身。写只发生在 `playerLoadout.equipBody()`（唯一写入口，内部过
+   * 正式 `validateSnapshot` 并只经那**唯一一处** `persistPlayerBuild` 落盘），本页不碰
+   * `savePlayerBuild` / `localStorage`、不自己赋值 `bodyDefId`。
+   *
+   * ⚠️ Body 是**单一字段**：`equipBody` 只写 `draft.bodyDefId`，**绝不碰** Weapon 槽
+   *    （`functionalSelections`）与 rear / front Movement（`rearWheelDefId` /
+   *    `frontWheelDefId`）⇒ 换车身结构上不可能覆盖它们（Queue 必改 6）。
+   */
+  function equipBodyAndRender(defId: string): void {
+    const out = equipBody(defId, draft);
+    lastBodyEquip = { ok: out.ok, reason: out.reason ?? null, detail: out.detail ?? '' };
+    if (out.ok && out.draft) {
+      draft = out.draft;
+      // 换车身不消耗任何东西（装备是引用）；库存与 Weapon / Movement 读数不受影响
       inv = playerInventory(draft);
     }
     render();
@@ -897,7 +984,43 @@ export function mountProductHome(
       stage.append(mvList);
     }
 
+    /**
+     * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜首页的**当前车身**摘要。
+     *
+     * ── 数据真源（零新造读数）───────────────────────────────────────────────────
+     * 只读 `bodyReading(draft)` 的 `cards` —— 与 Garage 的 `readBody()` 是**同一个函数、
+     * 同一份读数**，所以「首页显示」与「Garage 显示」结构上不可能分叉。
+     *
+     * ── 硬边界 ─────────────────────────────────────────────────────────────────
+     *   ① 只画 `<li>`，**零新按钮、零新跳转** —— 改配置仍只有「调整战车」一条路；
+     *   ② 如实展示当前车身上 canonical 的三个核心数值（耐久 / 质量 / 能量容量）；
+     *   ③ 带稳定 `data-ph-home-body`，供 E2E / 探针定位，**不依赖文案匹配**。
+     */
+    const body = bodyReading(draft);
+    if (body.cards.length > 0) {
+      stage.append(el('h2', 'ph-sec', HOME_BODY_SECTION_LABEL));
+      const bodyList = el('ul', 'ph-slots ph-home-body');
+      bodyList.dataset['phHomeBody'] = '1';
+      for (const card of body.cards) {
+        const isEquipped = body.bodyDefId === card.defId;
+        if (!isEquipped) continue; // 只展示当前装备的那一台（与「已装备部件」同一密度）
+        const li = el('li', 'ph-slot ph-home-body-slot');
+        li.dataset['phHomeBodyDef'] = card.defId;
+        li.dataset['phHomeBodyHp'] = String(card.hp);
+        li.dataset['phHomeBodyMass'] = String(card.baseMass);
+        li.dataset['phHomeBodyEnergy'] = String(card.energyCapacity);
+        li.append(
+          el('span', 'ph-slot-label', '车身'),
+          el('span', 'ph-slot-name', card.name),
+          el('span', 'ph-slot-stat', card.statsText),
+        );
+        bodyList.append(li);
+      }
+      stage.append(bodyList);
+    }
+
     const goGarage = (): void => {
+      view = 'garage';
       view = 'garage';
       selected = null;
       render();
@@ -1116,6 +1239,91 @@ export function mountProductHome(
           : `轮组装备被拒绝（${String(lastMovementEquip.reason)}）：${lastMovementEquip.detail}`,
       );
       msg.dataset['phMovementMsg'] = lastMovementEquip.ok ? 'ok' : 'fail';
+      stage.append(msg);
+    }
+  }
+
+  /**
+   * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜**Garage 里的 Body 配置区**。
+   *
+   * ── 它接进的是既有的哪一套 ────────────────────────────────────────────────
+   * 布局 / 卡片 / 装备交互**复用 Movement 区那一套**，但**更简单**（Body 是单一字段，
+   * 不需要按挂点分行）：一个 `<span>` 标题 + 一条 `.ph-grid` 卡阵（与轮组区同一个类）。
+   * 每张**已拥有**卡是 `.ph-card`，**点击即直接装备**（无二次确认、无独立「装备」按钮）。
+   * 没有新增页面、没有新增视图、没有换布局语言。
+   *
+   * ── 三个「只画什么」的硬边界 ───────────────────────────────────────────────
+   *   ① **只画 canonical Body**（`readBody().cards` 来自 `OFFICIAL_BODIES` ∩ `registry.bodies`），
+   *      不新增任何车身类型；
+   *   ② 未拥有（`owned === false`）的卡**如实画出但不可点**、标 `未拥有`
+   *      —— **不提供**解锁 / 购买 / 进度 / 经济（Queue 禁止清单）；
+   *   ③ 旧 4 台恒默认拥有（`implicit`）**照常展示、照常可装备**。
+   *
+   * ── 卡片上只展示真实 canonical 核心属性（必改 4）──────────────────────────
+   *   耐久 / 质量 / 能量容量 三个数全部现读自 `BodyEntry`（→ `registry.bodies`），
+   *   不编造任何推导 / 评级 / 百分比标签。
+   */
+  function renderBodySection(): void {
+    const b = readBody();
+    stage.append(el('h2', 'ph-sec', GARAGE_BODY_SECTION_LABEL));
+
+    const grid = el('div', 'ph-grid ph-body-grid');
+    for (const c of b.cards) {
+      const cell = el('div', 'ph-card-cell');
+      const card = el('button', 'ph-card ph-card-body');
+      card.type = 'button';
+      card.dataset['phBody'] = c.defId;
+      card.dataset['phBodyOwned'] = String(c.owned);
+      card.dataset['phBodyImplicit'] = String(c.implicit);
+      card.dataset['phBodyHp'] = String(c.hp);
+      card.dataset['phBodyMass'] = String(c.baseMass);
+      card.dataset['phBodyEnergy'] = String(c.energyCapacity);
+      /*
+        PRODUCT-LOOP-R4-BODY-CARD-READABILITY｜这一行是**玩家能直接读**的车身差异
+        （`耐久 1100 · 质量 120 · 能量容量 110`），取自 canonical Body Def。
+        ⚠️ 单独再挂一个 `data-ph-body-stats` 是为了让 E2E 能把**屏幕上那一串**
+           （而不是探针里的另一个字段）与 canonical 值逐字对账 —— 探针与 DOM 各自取证。
+      */
+      card.dataset['phBodyStats'] = c.statsText;
+
+      const equippedHere = b.bodyDefId === c.defId;
+      card.dataset['phBodyEquipped'] = String(equippedHere);
+      if (equippedHere) card.classList.add('ph-card-equipped');
+      card.append(el('span', 'ph-card-name', c.name));
+      /*
+        PRODUCT-LOOP-R4-BODY-CARD-READABILITY｜**卡片刻度行**（耐久 / 质量 / 能量容量）。
+        全部是**真实配置数据**（canonical `BodyDef` 的 `hp` / `baseMass` / `energyCapacity`），
+        不是推导出来的效果描述。
+        ⚠️ 所有卡（含恒默认拥有的旧 4 台）**同一套规则**：`c.statsText` 对所有卡都是同一个
+           函数生成的，页面里没有「这台特殊、那台不特殊」的分支。
+        ⚠️ 只加这一行，不加 tooltip、不加属性面板、不加星级 / 品质（Queue 禁止清单）。
+        ⚠️ 它是**纯展示**：不影响 card 的 click / disabled / 选中态 / equip。
+      */
+      card.append(el('span', 'ph-card-stats', c.statsText));
+      if (c.implicit) card.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_DEFAULT_LABEL));
+      if (equippedHere) card.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_EQUIPPED_LABEL));
+      // 未拥有 ⇒ 明确标注，并且**不可点**（结构上装不上，而不是点了给个错误提示）
+      if (!c.owned) {
+        card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_MOVEMENT_LOCKED_LABEL));
+        card.disabled = true;
+      } else {
+        // PRODUCT-LOOP-R4-BODY-CANONICAL｜点已拥有卡即直接装备（无二次确认）
+        card.addEventListener('click', () => equipBodyAndRender(c.defId));
+      }
+      cell.append(card);
+      grid.append(cell);
+    }
+    stage.append(grid);
+
+    if (lastBodyEquip) {
+      const msg = el(
+        'p',
+        lastBodyEquip.ok ? 'ph-note ph-note-ok' : 'ph-note ph-note-bad',
+        lastBodyEquip.ok
+          ? '已装备车身并写入正式玩家 Build 存档。'
+          : `车身装备被拒绝（${String(lastBodyEquip.reason)}）：${lastBodyEquip.detail}`,
+      );
+      msg.dataset['phBodyMsg'] = lastBodyEquip.ok ? 'ok' : 'fail';
       stage.append(msg);
     }
   }
@@ -1339,6 +1547,14 @@ export function mountProductHome(
     */
     renderMovementSection();
 
+    /**
+     * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜Body 配置区。
+     *
+     * Body 是独立配置维度（单一 `bodyDefId` 字段），不与 Movement 共用挂点行；
+     * 它在 Movement 区之后单独成段，复用同一套卡片外观与「点卡即装」交互。
+     */
+    renderBodySection();
+
     if (lastFuse) {
       const msg = el(
         'p',
@@ -1478,6 +1694,14 @@ export function mountProductHome(
             equipped: m.equipped,
             hardpoints: m.hardpoints,
           })),
+          /**
+           * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜本次挂载的**一次性 Body 种子**读数。
+           * 直接取成长会话的判定结果（页面 / 探针不各自再判一次）。
+           */
+          bodySeedApplied: growth.bodySeed.applied,
+          bodySeedReason: growth.bodySeed.reason,
+          bodySeedDecided: growth.bodySeed.decided,
+          bodySeedRaised: growth.bodySeed.raised,
         },
         /**
          * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页那一行成长状态的真实读数
@@ -1536,8 +1760,36 @@ export function mountProductHome(
           legal: mv.legal,
           defaultDefId: mv.defaultDefId,
         },
+        /**
+         * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜Body 维度读数（与 Garage 卡片同源）。
+         * 直接取 `readBody()`（= `playerLoadout.bodyReading(draft)`），页面不自行推导。
+         */
+        body: (() => {
+          const b = readBody();
+          return {
+            bodyDefId: b.bodyDefId,
+            cards: b.cards.map((c) => ({
+              defId: c.defId,
+              name: c.name,
+              hp: c.hp,
+              baseMass: c.baseMass,
+              energyCapacity: c.energyCapacity,
+              statsText: c.statsText,
+              owned: c.owned,
+              implicit: c.implicit,
+              equipped: c.equipped,
+            })),
+            available: [...b.available],
+            ownedDefIds: [...b.ownedDefIds],
+            equippedDefIds: [...b.equippedDefIds],
+            legal: b.legal,
+          };
+        })(),
         lastMovementEquip: lastMovementEquip
           ? { ok: lastMovementEquip.ok, reason: lastMovementEquip.reason }
+          : null,
+        lastBodyEquip: lastBodyEquip
+          ? { ok: lastBodyEquip.ok, reason: lastBodyEquip.reason }
           : null,
         slots: r.slots.map((s) => ({
           hardpointId: s.hardpointId,

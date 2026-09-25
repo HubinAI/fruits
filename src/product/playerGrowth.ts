@@ -121,6 +121,20 @@ import {
   markR3MovementSeed,
   type R3MovementSeedOutcome,
 } from './r3MovementChoiceSeed';
+/**
+ * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜**一次性 Body 可选方案种子**。
+ *
+ * Body 的 Foundation 已经技术贯通，但真人账号 4 台新增正式车身**全部未拥有**
+ * ⇒ 只能「感知存在」，无法「比较 → 选择 → 改配置」。本模块一次性把 4 台新增正式车身
+ * 全部永久解锁（判据 / 只增不减的纪律 / 硬边界全在 `./r4BodyChoiceSeed`），
+ * 本函数只负责**按正确顺序**调它：改拥有状态 → 落盘 → **最后**打标记。
+ * ⚠️ 它**不碰** draft ⇒ 战斗行为一个字节都不变（不覆盖 Weapon / rear·front Movement）。
+ */
+import {
+  applyR4BodyChoiceSeed,
+  markR4BodySeed,
+  type R4BodySeedOutcome,
+} from './r4BodyChoiceSeed';
 
 /**
  * 本版成长只使用 **★1**。
@@ -338,6 +352,17 @@ export interface GrowthSession {
    * 那一个「一个字节不动」的出口 —— 判定只做一次是正确性要求，不是优化）。
    */
   readonly movementSeed: R3MovementSeedOutcome;
+  /**
+   * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜本次挂载的**一次性 Body 种子**读数。
+   *
+   * ⚠️ `applied === true` ⇒ 这一次真的把 **MVP 最小验证集合**（2 台新增正式车身）
+   *    永久解锁了（`bodySeed.entries` 是逐台的 `ownedBefore → ownedAfter`）；
+   * `already-marked` ⇒ 首入判定早就做出过（reload 后就是它）；
+   * `already-owned` ⇒ MVP 车身本来就已拥有（**一个字节都没动**，但仍然落了标记）。
+   * ⚠️ `decided === true` ⇒ **本次是新版本首入**，标记已落盘（**含** `already-owned`
+   *    那一个「一个字节不动」的出口 —— 判定只做一次是正确性要求，不是优化）。
+   */
+  readonly bodySeed: R4BodySeedOutcome;
 }
 
 /**
@@ -452,6 +477,19 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
   */
   const movementSeed = applyR3MovementChoiceSeed(inv);
   if (movementSeed.applied) changed = true;
+  /*
+    PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜一次性 Body 可选方案种子。
+    判据 / 只增不减的纪律全在 `./r4BodyChoiceSeed`。
+
+    ⚠️ 位置是刻意的：排在 `applyR3MovementChoiceSeed` **之后**（Movement 种子只改库存，
+        Body 种子只改独立拥有状态，两者互不干扰），且 Body 种子**不碰** `nextDraft`
+       ⇒ Run Snapshot / Runtime 数值与调用前逐字节相同（不覆盖 Weapon / rear·front Movement）。
+    ⚠️ 标记同样是 `decided`（**首入决策已做出**），**不是** `applied`：
+         `already-owned` 那条「一个字节都不动」的出口也必须落标记 —— 否则玩家自己之后在
+         debug 里取消某台车身的拥有时，下一次挂载判据会重新成立、把玩家自己取消的拥有再发一遍。
+  */
+  const bodySeed = applyR4BodyChoiceSeed();
+  if (bodySeed.decided) markR4BodySeed();
   /** 补件之后才取读数 ⇒ 报出的 owned / legal 就是**本次挂载结束**时的真实形态。 */
   const movements = movementOwnership(inv, nextDraft);
 
@@ -487,6 +525,7 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
     movements,
     movementGrants,
     movementSeed,
+    bodySeed,
   };
 }
 
