@@ -144,6 +144,42 @@ export function effectiveMovementRadius(
 }
 
 /**
+ * PRODUCT-LOOP-P0-MOVEMENT-RADIUS-SOURCE-OF-TRUTH｜**缺省轮的 canonical 半径**。
+ *
+ * ── 为什么需要它（与 `effectiveMovementRadius` 是同一缺陷的两半）──────────────
+ * 上面那条读数解决了「**读**的时候以谁为准」。本函数解决「**写**的时候该写什么」：
+ * `equipMovement` 切回缺省轮时只 `delete` defId 键，`rearRadius` / `frontRadius`
+ * 会残留上一件轮组的数值。而该数值经 `overrides.radius` 会**覆盖**缺省轮 def 的半径
+ * ⇒ Run Snapshot / Runtime 真的用小轮半径跑（本 Queue 探针实测：切回 wheelStd 后
+ * `snapshot def.radius = 12`，而 Preview 显示 20）——**屏幕与行为分叉**。
+ *
+ * ⇒ 因此写入口需要一个「缺省轮应该写多少」的真源。这里**不写字面量**：
+ *   走与 `defaultMovementDefId()` 完全相同的推导路径（正式 `buildSnapshotFromDraft`
+ *   喂 `makeStarterDraft`），只是把半径一并读回来 ⇒ 缺省轮换了、半径自然跟着换。
+ *
+ * ⚠️ 纯读数：不改 draft、不写存档、不动 `overrides` 合并语义。
+ * @returns 缺省 Movement 的 defId + 其标准半径；内容库异常时抛错（与 `defaultMovementDefId` 同口径）。
+ */
+export function defaultMovementRadius(): { readonly defId: string; readonly radius: number } {
+  const probe = makeStarterDraft(PLAYER_BODY_DEF_ID, registry);
+  const snap = buildSnapshotFromDraft(probe, registry, 'movement-canonical-default-radius');
+  const first = snap.movements[0];
+  if (!first) {
+    // 与 `defaultMovementDefId()` 同一判据：正式 Snapshot 对「无轮组选择」的 draft
+    // 必然产出 rear/front 两条；到这里说明内容库坏了，如实抛错而不是猜一个半径。
+    throw new Error('movementCanonical: 正式缺省轮组无法从 buildSnapshotFromDraft 读出');
+  }
+  const def = registry.movements.get(first.defId);
+  if (!def) {
+    throw new Error(`movementCanonical: 缺省轮 "${first.defId}" 不在 registry.movements 里`);
+  }
+  // 半径取 **def 自身**，刻意不读 `first.overrides.radius`：
+  // 那条 overrides 正是 `makeStarterDraft` 里可能存在的**旧档数值**，
+  // 以它为准就等于把陈旧值再传一轮（本 Queue 修的就是这条链）。
+  return { defId: def.id, radius: def.radius };
+}
+
+/**
  * **缺省 Movement defId** —— 「draft 里没有轮组选择」时，正式 Snapshot 会填哪一个。
  *
  * ⚠️ 刻意**不**返回一个字面量：这里真的去调正式 `buildSnapshotFromDraft`

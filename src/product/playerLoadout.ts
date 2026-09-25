@@ -65,6 +65,7 @@ import {
 import { MOVEMENT_STAR, movementOwnership, type MovementEntry } from './movementInventory';
 import {
   canonicalMovements,
+  defaultMovementRadius,
   movementHardpointIds,
   movementMapping,
   type CanonicalMovement,
@@ -884,8 +885,30 @@ export function equipMovement(
   if (unmount) {
     next[key] = EMPTY_SLOT;
   } else if (canonical && canonical.defId === movementReading(draft, inv).defaultDefId) {
-    // 缺省轮 ⇒ 回到「存档里没有这个键」的形态（保留 radius 数值）
+    /*
+      缺省轮 ⇒ 回到「存档里没有这个键」的形态。
+      ⚠️ PRODUCT-LOOP-P0-MOVEMENT-RADIUS-SOURCE-OF-TRUTH｜**radius 必须一起复位**。
+
+      为什么（本 Queue 实测出来的真实缺陷）：只 `delete next[key]` 会留下**上一个**轮组
+      的 radius（例如装过 smallWheel 后残留 12）。而 `buildSnapshotFromDraft` 会把
+      `draft.rearRadius` / `frontRadius` 当作 **`overrides.radius`** 写进 movements，
+      `applyMovementOverrides` 再做 `{ ...def, ...overrides }`（`core/buildSnapshot.ts`）
+      ⇒ 残留值**覆盖**缺省轮 def 自身的 20。实测（本 Queue 探针，逐字复现）：
+
+          equipMovement('rear','smallWheel') → 切回 wheelStd
+          persisted.rearRadius = 12   （残留）
+          Run Snapshot def.radius = 12  ← ❌ 玩家用的是小轮半径
+          而 Preview = 20（上一 Queue 已改读 def，所以显示是对的）
+
+      ⇒ 即「屏幕上是标准轮、真正跑起来却是小轮」——**显示与行为分叉**，比原来更危险。
+      修复 = 把该槽 radius 显式写回缺省轮的 canonical radius（与下面 explicit 分支同一口径：
+      `radius` 与 `defId` 永远同步写）。这不引入新架构，只是把「早已存在的约定」
+      （见本函数上方第 830–834 行：defId 变 ⇒ radius 一起变）补齐到缺省轮这一支。
+    */
     delete next[key];
+    const defaultRadius = defaultMovementRadius().radius;
+    if (key === 'rearWheelDefId') next.rearRadius = defaultRadius;
+    else next.frontRadius = defaultRadius;
   } else {
     next[key] = defId;
     // 半径随轮组一起写（口径同 `buildEditorModel`：选中轮组卡即写入该轮组默认半径）

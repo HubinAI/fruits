@@ -22,6 +22,13 @@
  * ⇒ 修复口径 = 预览半径取 **canonical Movement def 自身的 `radius`**
  *   （`runMovementCanonical.effectiveMovementRadius`），不读 `draft.*Radius`、
  *   不读含 `overrides` 的 `runtimeNumbers`。MV-08 / MV-09 是这条的回归守卫。
+ *
+ * ── 后续 Queue（PRODUCT-LOOP-P0-MOVEMENT-RADIUS-SOURCE-OF-TRUTH）补的硬约束 ──
+ * 光 Preview 读 def 不够：切回缺省轮时 `rearRadius` 残留旧值会经 `overrides.radius`
+ * 一路带进 Run Snapshot / Runtime ⇒ 屏幕是标准轮、真正跑起来却是小轮（行为分叉）。
+ * 修复 = `equipMovement` 缺省轮 / explicit 两分支都把 radius 与 defId 同步写回
+ * canonical 值。MV-08 / MV-08c 现在是「persisted / Preview / Run 三方同值」的回归守卫
+ * （旧版依赖缺陷残留的 MV-08 已作废）。
  */
 
 import { readFileSync } from 'node:fs';
@@ -327,29 +334,69 @@ describe('PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW｜D. 与 Product Run 同一数�
 
 // ============================================================================
 describe('PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW｜E. 回归守卫（陈旧 radius 不得影响预览）', () => {
-  it('MV-08 **回归**：切回缺省轮后，即使 draft.rearRadius 残留旧值，预览仍是缺省轮的真实直径', () => {
+  it('MV-08 **修复后契约**：smallWheel → default wheelStd，persisted / Preview / Run Snapshot 三方 radius 都等于 canonical wheelStd radius（防止 stale radius 再出现）', () => {
     /*
-      ⚠️ 这一条就是本 Queue 修的那个真实缺陷的**可断言形式**。
-      复现路径（全程真实写入口）：
-        装 smallWheel（rearRadius → 12）→ 切回缺省轮（**只删 defId 键、保留 radius 12**）
-      修复前：预览 wheel:rear = 24×24（把标准轮画成了小轮）❌
-      修复后：预览 wheel:rear = 缺省轮真实直径 ✔
+      ⚠️ PRODUCT-LOOP-P0-MOVEMENT-RADIUS-SOURCE-OF-TRUTH｜本 Queue 修好后的**正式契约**。
+      旧版本（依赖缺陷：draft.rearRadius 残留 12）已作废。现在要证明的是
+      「屏幕上是标准轮、真正跑起来也是标准轮」—— 三方同值，且 persisted 不再残留旧值。
     */
     const base = defaultPlayerDraft();
     grantAll();
+    const std = registry.movements.get(defaultMovementDefId());
+    expect(std, '缺省轮必须在正式内容库里').toBeTruthy();
+
     const draft = equipChain(base, [
       ['rear', 'smallWheel'],
       ['rear', defaultMovementDefId()],
     ]);
 
-    // 前提取证：旧数值字段**确实残留**（否则这条守卫就空转了）
-    expect(draft.rearRadius).toBe(12);
-    expect('rearWheelDefId' in draft).toBe(false);
-    // 而预览必须按 def 走
-    const std = registry.movements.get(defaultMovementDefId());
+    // ① persisted：defId 已删、radius 已复位为 canonical wheelStd radius（不再残留 12）
+    expect('rearWheelDefId' in draft, 'rearWheelDefId 应回到 undefined 形态').toBe(false);
+    expect(
+      draft.rearRadius,
+      'persisted rearRadius 必须等于 canonical wheelStd radius（不再残留 12）',
+    ).toBe(std?.radius);
+
+    // ② Preview = canonical wheelStd radius
     expect(wheelAt(draft, 'rear')?.defId).toBe(defaultMovementDefId());
-    expect(wheelAt(draft, 'rear')?.w).toBe((std?.radius ?? 0) * 2);
-    expect(wheelAt(draft, 'rear')?.w).not.toBe(24);
+    expect(wheelAt(draft, 'rear')?.w, 'Preview 直径').toBe((std?.radius ?? 0) * 2);
+
+    // ③ Product Run Snapshot / Runtime 半径 = canonical wheelStd radius（不再是小轮 12）
+    const resolved = resolveSnapshot(buildSnapshotFromDraft(draft, registry, 'mv08'), registry);
+    const snap = resolved.movements.find((r) => r.install.hardpointId === 'rear');
+    expect(snap?.def.id, 'Run 用的是缺省轮').toBe(defaultMovementDefId());
+    expect(snap?.def.radius, 'Run Snapshot/Runtime 半径 = canonical wheelStd radius').toBe(std?.radius);
+    expect(snap?.def.radius).not.toBe(12);
+  });
+
+  it('MV-08c rear/front 独立：rear large + front small → rear 切回缺省，front 不被污染', () => {
+    const base = defaultPlayerDraft();
+    grantAll();
+    const std = registry.movements.get(defaultMovementDefId());
+
+    const draft = equipChain(base, [
+      ['rear', 'largeWheel'],
+      ['front', 'smallWheel'],
+      ['rear', defaultMovementDefId()],
+    ]);
+
+    // rear 切回缺省 ⇒ canonical wheelStd radius（不被之前 large 的 26 污染）
+    expect('rearWheelDefId' in draft).toBe(false);
+    expect(draft.rearRadius, 'rear persisted radius = canonical wheelStd radius').toBe(std?.radius);
+    expect(wheelAt(draft, 'rear')?.w, 'rear Preview 直径').toBe((std?.radius ?? 0) * 2);
+    const rearSnap = resolveSnapshot(buildSnapshotFromDraft(draft, registry, 'mv08c'), registry)
+      .movements.find((r) => r.install.hardpointId === 'rear');
+    expect(rearSnap?.def.id).toBe(defaultMovementDefId());
+    expect(rearSnap?.def.radius, 'rear Run 半径 = canonical wheelStd radius').toBe(std?.radius);
+
+    // front 继续 = smallWheel ⇒ 不被 rear 的动作污染
+    expect(draft.frontWheelDefId).toBe('smallWheel');
+    expect(draft.frontRadius, 'front persisted radius = canonical smallWheel radius').toBe(12);
+    expect(wheelAt(draft, 'front')?.w, 'front Preview 直径').toBe(24);
+    const frontSnap = resolveSnapshot(buildSnapshotFromDraft(draft, registry, 'mv08c'), registry)
+      .movements.find((r) => r.install.hardpointId === 'front');
+    expect(frontSnap?.def.id).toBe('smallWheel');
+    expect(frontSnap?.def.radius, 'front Run 半径 = canonical smallWheel radius').toBe(12);
   });
 
   it('MV-08b 构造一份「radius 与 def 严重不符」的 draft ⇒ 预览仍以 def 为准', () => {

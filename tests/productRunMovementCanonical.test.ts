@@ -309,75 +309,98 @@ describe('MC-07｜产品 Garage 的写入口**结构上碰不到** Movement / Dr
     expect(movementMapping(next)).toEqual(before);
   });
 
-  it('MC-07b 源码层面：Movement / Drive 的写入只在**唯一那一处**（`equipMovement`）', () => {
-    const code = strip(readProduct('playerLoadout.ts'));
+  it('MC-07b 源码层面：Movement 写入口结构（defId 间接写 + radius 只经 equip 路径、用真源、不带裸数字、与 hardpoint 同侧）', () => {
+    const raw = readProduct('playerLoadout.ts');
+    const code = strip(raw);
     /*
-      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜**契约变更**（强化，不是放宽）。
+      ⚠️ PRODUCT-LOOP-P0-MOVEMENT-RADIUS-SOURCE-OF-TRUTH｜**结构守卫（强化，不是魔法计数）**。
 
-      上一轮（R3-CANONICAL）这条断言是「`playerLoadout.ts` 的代码里根本不许出现
-      `rearWheelDefId` / `frontWheelDefId`」—— 当时它成立，因为产品侧**没有** Movement
-      写入口，那两个字段只能由 Lab / 旧横屏游戏写。
+      上一版这条断言用「`rearWheelDefId` / `frontWheelDefId` 出现 4 行 / 5 token」的魔法计数，
+      本 Queue 合法新增了缺省轮复位 + explicit 两个分支的 radius 同步写（各含一次
+      `key === 'rearWheelDefId'` 判等）⇒ 计数必然变红。**按用户指令不把 4→5 简单放大**，
+      改成**结构守卫**：只认「位置与形态」，不认「次数」。
 
-      本 Queue 的**目标**正是补上那个写入口 ⇒ 原断言与目标直接冲突。
-      原断言真正要守的是「**产品侧不允许有两处**写 Movement」这件事，因此改为：
-        ① 字段名**只允许出现一个函数体**里 —— 即 `MOVEMENT_DRAFT_KEY` 那张表与
-           `equipMovement()`；用「赋值的出现次数」把它变成**可数**的机器判据；
-        ② `equipWeapon()`（另一个写入口）**必须**仍然碰不到 Movement / Drive ——
-           这条由 `MC-07` 用真实返回值逐项证明，不靠字符串。
-      ⚠️ 刻意**不删**任何一条断言：原断言的两半（代码里不许有字段名 / 注释里必须写明边界）
-        都保留下来变成「有且仅有这一处」的形式。
+      要守的结构：
+        Ⓐ Movement defId 字段名只允许出现在两类地方 —— ① `MOVEMENT_DRAFT_KEY` 的声明
+           （类型注解 + 表值）；② `equipMovement` 内 `key === 'rearWheelDefId'` /
+           `key === 'frontWheelDefId'` 的 hardpoint 判等（用于 radius 同侧 gating）。
+           任何其它出现（尤其直接左值赋值）一律红。
+        Ⓑ `rearRadius` / `frontRadius` 的产品写入**只能**在 `equipMovement` 内：
+           - 缺省轮分支写 `defaultMovementRadius().radius`（canonical default）；
+           - explicit 分支写 `canonical.radius`（对应 def 的 canonical radius）；
+           - RHS 不得是裸数字；
+           - rear 的赋值必须与 `rearWheelDefId` 同侧、front 与 `frontWheelDefId` 同侧。
+        Ⓒ 不得把 radius 写成裸数字；Drive 仍无任何产品侧写入。
     */
-    /*
-      ① 结构性判据（**不是**魔法上界数字）：把「出现位置」而不是「出现次数」变成机器判据。
-
-      实测（剥注释后）两个字段名一共出现 **5** 次，逐处是：
-        - 470 类型注解 `Readonly<Record<string, 'rearWheelDefId' | 'frontWheelDefId'>>` …… **2 次**
-          （⚠️ 同一行两个 token —— 早先按「行」数会误记成 1 次，这是本断言第一次算错的根因）
-        - 471 `rear:  'rearWheelDefId'`  …… 1 次
-        - 472 `front: 'frontWheelDefId'` …… 1 次
-        - 517 `if (key === 'rearWheelDefId')` …… 1 次（**比较**，不是赋值）
-      ⇒ 全部落在 **`MOVEMENT_DRAFT_KEY` 的声明 + 唯一那次查表比较** 里。
-
-      所以要守的两件事分别是：
-        ⓐ 总数恰好落在这 4 行上（多一行 = 别处又写了 Movement；少一行 = 表被拆/改成硬编码）；
-        ⓑ **没有任何一处是「字面量当左值」的字段赋值** —— 真正的写入必须恒为 `next[key] = …`。
-    */
-    const movementTokenLines = code
-      .split('\n')
-      .map((line, i) => (/(rearWheelDefId|frontWheelDefId)/.test(line) ? i + 1 : 0))
-      .filter(Boolean);
-    const movementTokens = code.match(/rearWheelDefId|frontWheelDefId/g) ?? [];
-    // 标识符按**行**去重后必须恰好 4 行；按 token 计必须恰好 5 个
-    expect(
-      movementTokenLines.length,
-      `Movement 字段名只允许出现在 4 行里（MOVEMENT_DRAFT_KEY 声明 3 行 + key 比较 1 行；实测 ${movementTokenLines.length} 行 @ ${movementTokenLines.join(',')}）`,
-    ).toBe(4);
-    expect(
-      movementTokens.length,
-      `Movement 字段名 token 总数（类型注解 2 + 表值 2 + 比较 1；实测 ${movementTokens.length}）`,
-    ).toBe(5);
-    // 那 4 行**必须**彼此相邻且落在同一段声明/判断里（不许散落到文件别的角落）
-    expect(
-      movementTokenLines[3] - movementTokenLines[0],
-      `4 处必须彼此邻近（同一声明/判断块内），实测跨度 ${movementTokenLines[3] - movementTokenLines[0]} 行`,
-    ).toBeLessThanOrEqual(50);
-    /*
-      ⓑ 最强的那一条：**字面量绝不允许出现在赋值左值**。
-         `next['rearWheelDefId'] = …` / `draft.frontWheelDefId = …` 这类写法会立刻变红。
-         真正的写入只能经由 `MOVEMENT_DRAFT_KEY[hardpointId]` 取键后的 `next[key] = …`。
-    */
+    // Ⓐ defId 字段名的每一处出现都必须是「表声明」或「hardpoint 判等」，不得散落
+    const defIdUsages = [...code.matchAll(/(rearWheelDefId|frontWheelDefId)/g)];
+    expect(defIdUsages.length, '应至少出现（表声明 3 + hardpoint 判等 2）').toBeGreaterThanOrEqual(5);
+    for (const m of defIdUsages) {
+      const idx = m.index ?? 0;
+      const start = code.lastIndexOf('\n', idx) + 1;
+      const end = code.indexOf('\n', idx);
+      const line = code.slice(start, end);
+      const isTableDecl =
+        /Readonly<Record<string, 'rearWheelDefId' \| 'frontWheelDefId'>>/.test(line) ||
+        /^\s*(?:rear|front):\s*'(?:rear|front)WheelDefId',?$/.test(line);
+      const isHardpointCompare = /key\s*===\s*'(?:rear|front)WheelDefId'/.test(line);
+      expect(
+        isTableDecl || isHardpointCompare,
+        `Movement 字段名只能出现在表声明或 hardpoint 判等，不能散落：${line.trim()}`,
+      ).toBe(true);
+    }
+    // Ⓐb 绝不允许把字段名当左值直接赋值（写入必须经由 `next[key]`）
     expect(
       code,
       '不得出现「把 Movement 字段名直接当左值」的赋值（写入必须经由 MOVEMENT_DRAFT_KEY 取键）',
-    ).not.toMatch(/(?:['"]?(?:rearWheelDefId|frontWheelDefId)['"]?)\s*=[^=]/);
-    // ② 唯一的写入动作是间接的 `next[key] = …`（key 来自那张表，不是散落的字面量）
-    expect(code).toMatch(/MOVEMENT_DRAFT_KEY/);
-    // ②b 目标挂点只可能来自那张表的查表结果（不是从入参硬拼字符串）
+    ).not.toMatch(/(?:['"]?(?:rear|front)WheelDefId['"]?)\s*=[^=]/);
+    // Ⓐc 间接写入仍然成立
     expect(code).toMatch(/MOVEMENT_DRAFT_KEY\[hardpointId\]/);
-    // ③ Drive 仍然**没有任何**产品侧写入（本 Queue 不碰驱动模式）
+    expect(code).toMatch(/next\[key\]\s*=/);
+
+    // Ⓑ radius 只经 equip 路径写：取出全部 `next.rearRadius` / `next.frontRadius` 赋值
+    const radiusWrites = [...code.matchAll(/next\.(rear|front)Radius\s*=\s*([^;]+);/g)];
+    // 2 侧（rear / front）× 2 分支（缺省轮复位 / explicit）= 4 处，且只能有这 4 处
+    expect(radiusWrites.length, 'radius 赋值应恰好 2 侧 × 2 分支 = 4 处').toBe(4);
+    for (const m of radiusWrites) {
+      const side = m[1];
+      const rhs = m[2].trim();
+      // RHS 必须是变量/函数调用，**不得是裸数字**
+      expect(/^\d+(\.\d+)?$/.test(rhs), `radius RHS 不得是裸数字：${side} = ${rhs}`).toBe(false);
+      // 取该行完整语句，判断 gating 是否与 side 一致（rear↔rearWheelDefId，front↔frontWheelDefId）
+      const idx = m.index ?? 0;
+      const start = code.lastIndexOf('\n', idx) + 1;
+      const end = code.indexOf('\n', idx);
+      const stmt = code.slice(start, end);
+      if (side === 'rear') {
+        expect(stmt, 'rearRadius 必须与 rear 挂点同侧（rearWheelDefId）').toContain('rearWheelDefId');
+      } else {
+        // front 一侧：要么显式 `frontWheelDefId` 判等，要么是 `rear` 判等的 `else` 穷尽分支
+        // （Movement 只有 rear / front 两个挂点，else 即 front，仍与 hardpoint 一致）
+        const explicitFront = stmt.includes('frontWheelDefId');
+        const isElseCounterpart = /^\s*else\b/.test(stmt);
+        expect(
+          explicitFront || isElseCounterpart,
+          `frontRadius 必须与 front 挂点同侧（frontWheelDefId 判等，或 rear 判等的 else 穷尽分支）：${stmt.trim()}`,
+        ).toBe(true);
+      }
+    }
+    // Ⓑb 缺省轮分支：复位为 canonical default radius 真源（不写字面量）
+    expect(code, '缺省轮分支必须复位为 canonical default radius 真源').toMatch(/defaultMovementRadius\(\)\.radius/);
+    // Ⓑc explicit 分支：写对应 canonical def.radius
+    expect(code, 'explicit 分支必须写对应 canonical def.radius').toMatch(/canonical\.radius/);
+    // Ⓑd 整个文件不得出现「radius = 裸数字」的字面量写法
+    expect(code, 'playerLoadout.ts 禁止把 radius 写成裸数字').not.toMatch(/(?:rear|front)Radius\s*[:=]\s*\d+/);
+    // Ⓑe 这些 radius 赋值都落在 equipMovement 函数体内（不是别的写入路径）
+    const fnStart = code.indexOf('export function equipMovement');
+    const fnEnd = code.indexOf('export function ', fnStart + 1);
+    const fnBody = code.slice(fnStart, fnEnd > 0 ? fnEnd : code.length);
+    const writesInEquip = [...fnBody.matchAll(/next\.(?:rear|front)Radius\s*=/g)].length;
+    expect(writesInEquip, '全部 radius 赋值都必须落在 equipMovement 内').toBe(radiusWrites.length);
+
+    // Ⓒ Drive 仍然**没有任何**产品侧写入（本 Queue 不碰驱动模式）
     expect(code).not.toMatch(/\.drive\b|\bdrive:/);
-    // ④ 反向对照：注释里**必须**明确写着这条边界（否则下一个人会以为只是漏了）
-    const raw = readProduct('playerLoadout.ts');
+    // Ⓓ 反向对照：注释里**必须**明确写着这条边界（否则下一个人会以为只是漏了）
     expect(raw).toMatch(/Body \/ Movement \/ 其它 Gadget/);
   });
 
