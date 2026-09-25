@@ -382,13 +382,11 @@ export interface ProductProbe {
     readonly defaultDefId: string;
   };
   /**
-   * Movement 区当前**选中的** `(hardpointId, defId)`（`null` = 没选）。
-   * ⚠️ 与 `selectedWeaponId` **并列但独立**：Weapon 卡与 Movement 卡是两个动作，
-   *    互相不得串（点轮组卡不会让「装备」按钮去写 Weapon 槽，反之亦然）。
+   * ⚠️ PRODUCT-LOOP-R3-MOVEMENT-DIRECT-EQUIP｜Movement 区**没有**二次确认：
+   *    点已拥有卡即直接装备（rear 卡装 rear、front 卡装 front），不再有「选中态」、
+   *    也不再有任何独立的「装备」按钮。`selectedMovement` / `movementEquipEnabled`
+   *    这两个探针字段已在本次删除（见本文件 git 历史）。
    */
-  readonly selectedMovement: { readonly hardpointId: string; readonly defId: string } | null;
-  /** Movement 的「装备」按钮是否可点（没选中时不可点，与 Weapon 侧同一条纪律）。 */
-  readonly movementEquipEnabled: boolean;
   /** 本次挂载**最后一次** Movement 装备动作的**真实**结果（`null` = 还没点过）。 */
   readonly lastMovementEquip: { readonly ok: boolean; readonly reason: MovementEquipFailure | null } | null;
   readonly slots: readonly { readonly hardpointId: string; readonly defId: string; readonly name: string; readonly star: number; readonly category: string | null; readonly editable: boolean }[];
@@ -599,14 +597,6 @@ export function mountProductHome(
    */
   let selected: { defId: string; star: number } | null = null;
   let lastEquip: { ok: boolean; reason: EquipFailure | null; detail: string } | null = null;
-  /**
-   * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 区的**独立**选中态。
-   *
-   * ⚠️ 与 `selected`（Weapon 卡）刻意**分成两个变量**，不是「一个 selector 加个 kind 标记」：
-   *    rear / front 是两个**独立正式字段**，选择必须同时记住「哪个挂点 + 哪件轮组」；
-   *    而两者共用一个变量会让「点轮组卡」与「点武器卡」互相清掉对方的选择。
-   */
-  let selectedMovement: { hardpointId: string; defId: string } | null = null;
   /** 最近一次 Movement 装备动作的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
   let lastMovementEquip: { ok: boolean; reason: MovementEquipFailure | null; detail: string } | null = null;
   /** 最近一次合成的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
@@ -704,6 +694,25 @@ export function mountProductHome(
    */
   function readMovement(): MovementReading {
     return movementReading(draft, inv);
+  }
+
+  /**
+   * PRODUCT-LOOP-R3-MOVEMENT-DIRECT-EQUIP｜**直接装备**（无二次确认）。
+   *
+   * 点 rear 卡 ⇒ 装 rear；点 front 卡 ⇒ 装 front；点「未装载」卡 ⇒ 卸下该挂点。
+   * 写只发生在 `playerLoadout.equipMovement()`（唯一写入口，内部过正式 `validateSnapshot`
+   * 并只经那**唯一一处** `persistPlayerBuild` 落盘），本页不碰 `savePlayerBuild` /
+   * `localStorage`、不自己赋值 `rearWheelDefId` / `frontWheelDefId`。
+   */
+  function equipMovementAndRender(hardpointId: string, defId: string): void {
+    const out = equipMovement(hardpointId, defId, draft, inv);
+    lastMovementEquip = { ok: out.ok, reason: out.reason ?? null, detail: out.detail ?? '' };
+    if (out.ok && out.draft) {
+      draft = out.draft;
+      // 库存不因装备而消耗（装备是引用，不是消耗）；重读仍走正式 ensureInventory（幂等）
+      inv = playerInventory(draft);
+    }
+    render();
   }
 
   /**
@@ -979,12 +988,12 @@ export function mountProductHome(
    * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜**Garage 里的 Movement 配置区**。
    *
    * ── 它接进的是既有的哪一套（Queue 必改 1「不重新设计整个 Garage」）────────────
-   * 布局 / 卡片 / 选中态 / 装备交互**全部复用 Weapon 区那一套**：
+   * 布局 / 卡片 / 装备交互**复用 Weapon 区那一套**，但**去掉二次确认**：
    *   - 区内按挂点分行，每行一个 `<span>` 标签 + 一条 `.ph-grid` 卡阵（与武器区同一个类）；
-   *   - 每张卡是 `.ph-card`（同一个类、同一套选中态 `ph-card-selected`）+ `data-ph-action="pick-movement"`；
-   *   - 区的底部是**一个** `data-ph-action="equip-movement"` 按钮（与武器区同一条纪律：
-   *     先选后装备，没选中就不可点 —— 不做静默默认选择）。
-   * 没有新增页面、没有新增视图、没有换布局语言。
+   *   - 每张**已拥有**卡是 `.ph-card`，**点击即直接装备到它所在的挂点**（rear 卡装 rear、
+   *     front 卡装 front），不需要先选中再点「装备」；
+   *   - 「未装载」项（`EMPTY_SLOT`）点击即卸下对应挂点 —— 同样没有独立按钮。
+   * 没有新增页面、没有新增视图、没有换布局语言；Weapon 区的「先选后装备」流程**原样保留**。
    *
    * ── 三个「只画什么」的硬边界 ────────────────────────────────────────────────
    *   ① **只画 canonical Movement**（`readMovement().cards` 来自 `registry.movements`），
@@ -1039,9 +1048,6 @@ export function mountProductHome(
         const effectiveHere = slot.effectiveDefId === c.defId;
         card.dataset['phMovementEquipped'] = String(effectiveHere);
         if (effectiveHere) card.classList.add('ph-card-equipped');
-        if (selectedMovement && selectedMovement.hardpointId === slot.hardpointId && selectedMovement.defId === c.defId) {
-          card.classList.add('ph-card-selected');
-        }
         card.append(el('span', 'ph-card-name', c.name));
         /*
           PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜**卡片刻度行**（轮径 / 质量 / 能耗）。
@@ -1064,10 +1070,8 @@ export function mountProductHome(
           card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_MOVEMENT_LOCKED_LABEL));
           card.disabled = true;
         } else {
-          card.addEventListener('click', () => {
-            selectedMovement = { hardpointId: slot.hardpointId, defId: c.defId };
-            render();
-          });
+          // PRODUCT-LOOP-R3-MOVEMENT-DIRECT-EQUIP｜点已拥有卡即直接装备到本挂点（无二次确认）
+          card.addEventListener('click', () => equipMovementAndRender(slot.hardpointId, c.defId));
         }
         cell.append(card);
         grid.append(cell);
@@ -1092,53 +1096,16 @@ export function mountProductHome(
       if (slot.unmounted) {
         offCard.classList.add('ph-card-equipped');
       }
-      if (selectedMovement && selectedMovement.hardpointId === slot.hardpointId && selectedMovement.defId === EMPTY_SLOT) {
-        offCard.classList.add('ph-card-selected');
-      }
       offCard.append(el('span', 'ph-card-name', GARAGE_MOVEMENT_OFF_LABEL));
       if (slot.unmounted) offCard.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_EQUIPPED_LABEL));
-      offCard.addEventListener('click', () => {
-        selectedMovement = { hardpointId: slot.hardpointId, defId: EMPTY_SLOT };
-        render();
-      });
+      // PRODUCT-LOOP-R3-MOVEMENT-DIRECT-EQUIP｜点「未装载」即卸下本挂点（无二次确认）
+      offCard.addEventListener('click', () => equipMovementAndRender(slot.hardpointId, EMPTY_SLOT));
       offCell.append(offCard);
       grid.append(offCell);
 
       row.append(grid);
       stage.append(row);
     }
-
-    const mvActions = el('div', 'ph-actions ph-mv-actions');
-    const mvEquip = el('button', 'ph-btn ph-btn-primary', GARAGE_EQUIP_LABEL);
-    mvEquip.type = 'button';
-    mvEquip.dataset['phAction'] = 'equip-movement';
-    // 与武器区同一条纪律：没选中就不可点（不做静默默认选择）
-    mvEquip.disabled = selectedMovement === null;
-    mvEquip.addEventListener('click', () => {
-      if (selectedMovement === null) return;
-      /*
-        ⚠️ 唯一写动作：`playerLoadout.equipMovement()` —— 它内部过正式 `validateSnapshot`
-           并只经那**唯一一处** `persistPlayerBuild` 落盘（PL-03 / MG-14 钉死）。
-           本页不碰 `savePlayerBuild`、不碰 `localStorage`、不自己赋值 rearWheelDefId。
-        ⚠️ 写的是**玩家点的那一对**（挂点 + 轮组），不是「当前挂点 + 某件」的推断。
-      */
-      const out = equipMovement(
-        selectedMovement.hardpointId,
-        selectedMovement.defId,
-        draft,
-        inv,
-      );
-      lastMovementEquip = { ok: out.ok, reason: out.reason ?? null, detail: out.detail ?? '' };
-      if (out.ok && out.draft) {
-        draft = out.draft;
-        // 库存不因装备而消耗（装备是引用，不是消耗）；重读仍走正式 ensureInventory（幂等）
-        inv = playerInventory(draft);
-      }
-      selectedMovement = null;
-      render();
-    });
-    mvActions.append(mvEquip);
-    stage.append(mvActions);
 
     if (lastMovementEquip) {
       const msg = el(
@@ -1423,7 +1390,6 @@ export function mountProductHome(
       const start = stage.querySelector<HTMLElement>('[data-ph-action="start-run"]');
       const compat = fullRunCompat(draft);
       const equipBtn = stage.querySelector<HTMLButtonElement>('[data-ph-action="equip"]');
-      const movementEquipBtn = stage.querySelector<HTMLButtonElement>('[data-ph-action="equip-movement"]');
       const mv = readMovement();
       return {
         view,
@@ -1570,10 +1536,6 @@ export function mountProductHome(
           legal: mv.legal,
           defaultDefId: mv.defaultDefId,
         },
-        selectedMovement: selectedMovement
-          ? { hardpointId: selectedMovement.hardpointId, defId: selectedMovement.defId }
-          : null,
-        movementEquipEnabled: !!movementEquipBtn && !movementEquipBtn.disabled,
         lastMovementEquip: lastMovementEquip
           ? { ok: lastMovementEquip.ok, reason: lastMovementEquip.reason }
           : null,

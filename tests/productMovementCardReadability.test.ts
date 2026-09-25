@@ -357,9 +357,16 @@ describe('PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜D. 表达纪律（源码�
     expect(entriesSrc).toContain('energy: m.energy');
   });
 
-  it('MVR-14 Garage 的 Movement 区仍然只走同一个 equip 写入口（本 Queue 未新增写动作）', () => {
-    // 加刻度量**不许**顺手加出第二个写入口 / 消费动作。
-    expect(home).toContain("dataset['phAction'] = 'equip-movement'");
+  it('MVR-14 Garage 的 Movement 区只走同一个 equip 写入口，且**不再有二次确认**（本 Queue 删除选中态与独立装备按钮）', () => {
+    // 直接装备：点已拥有卡即调用 `equipMovement(...)`，不再有 `selectedMovement` 选中态、
+    // 也不再有 `data-ph-action="equip-movement"` 这种二次确认按钮。
+    expect(home).not.toContain('selectedMovement');
+    expect(home).not.toContain("data-ph-action=\"equip-movement\"");
+    expect(home).not.toContain("'equip-movement'");
+    // 写入口仍然唯一且是同一个 `equipMovement(...)`（卡片点击直接它）。
+    expect(home).toContain('equipMovementAndRender');
+    expect(home).toContain('equipMovement(');
+    // 本页仍然不碰落盘 / 存档。
     expect(home).not.toContain('savePlayerBuild(');
     expect(home).not.toContain("localStorage.setItem");
     // 刻度行是纯展示：没有独立的点击 / 开关。

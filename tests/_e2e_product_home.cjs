@@ -775,22 +775,12 @@ async function main() {
       `restored=${ZEROED}:${restored.one} marker=${restored.marker}`,
     );
 
-    /* ---- 只装 rear：证明「两个挂点独立」 ---- */
+    /* ---- 只装 rear：点 rear 卡即**直接装备**，证明「两个挂点独立」 ---- */
     await clickSelector(page, `[data-ph-movement="${GRANT}"][data-ph-movement-hardpoint="rear"]`);
     p = await probeOf(page);
     log(
-      !!p.selectedMovement &&
-        p.selectedMovement.hardpointId === 'rear' &&
-        p.selectedMovement.defId === GRANT &&
-        p.movementEquipEnabled === true,
-      'M3 点 rear 那一侧的轮组卡 → 明确选中该挂点（选择带挂点身份，不是全局一个选择）',
-      `selected=${JSON.stringify(p.selectedMovement)} enabled=${p.movementEquipEnabled}`,
-    );
-    await clickSelector(page, '[data-ph-action="equip-movement"]');
-    p = await probeOf(page);
-    log(
       p.lastMovementEquip && p.lastMovementEquip.ok === true,
-      'M4 点「装备」→ Movement 写入口返回成功',
+      'M3 点 rear 那一侧的轮组卡 → **直接装备**（无二次确认；写入口返回成功）',
       `lastMovementEquip=${JSON.stringify(p.lastMovementEquip)}`,
     );
     const slotsAfterRear = (p.movement.slots || []).find((s) => s.hardpointId === 'rear');
@@ -824,9 +814,8 @@ async function main() {
       `functionalSelections.${WEAPON_SLOT}=${mvDraft && mvDraft.functionalSelections && mvDraft.functionalSelections[WEAPON_SLOT]}`,
     );
 
-    /* ---- 再装 front：证明另一侧也能独立生效 ---- */
+    /* ---- 再装 front：点 front 卡即**直接装备**，证明另一侧也能独立生效 ---- */
     await clickSelector(page, `[data-ph-movement="${GRANT}"][data-ph-movement-hardpoint="front"]`);
-    await clickSelector(page, '[data-ph-action="equip-movement"]');
     p = await probeOf(page);
     const storedMv2 = await storageDump(page);
     let mvDraft2 = null;
@@ -970,10 +959,9 @@ async function main() {
         return { scale, stageH: Number(box.dataset.phStageH), items: out };
       });
 
-    /* 真实动作：把某一侧的轮组换成指定 defId（点卡片 → 点装备），然后读预览 */
+    /* 真实动作：点某一侧的轮组卡即**直接装备**（无二次确认），然后读预览 */
     const equipWheel = async (hardpointId, defId) => {
       await clickSelector(page, `[data-ph-movement="${defId}"][data-ph-movement-hardpoint="${hardpointId}"]`);
-      await clickSelector(page, '[data-ph-action="equip-movement"]');
       const r = await probeOf(page);
       if (!r.lastMovementEquip || r.lastMovementEquip.ok !== true) {
         throw new Error(`装备失败 ${hardpointId}=${defId}: ${JSON.stringify(r.lastMovementEquip)}`);
@@ -1172,7 +1160,6 @@ async function main() {
     */
     await clickSelector(page, '[data-ph-action="open-garage"]');
     await clickSelector(page, '[data-ph-movement="none"][data-ph-movement-hardpoint="rear"]');
-    await clickSelector(page, '[data-ph-action="equip-movement"]');
     const noneSnap = await wheelPreview();
     const noneHasRear = noneSnap.items.some((i) => i.hardpointId === 'rear');
     log(
