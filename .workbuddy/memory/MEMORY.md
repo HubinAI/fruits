@@ -13,7 +13,15 @@
 ## 0. 现状 / 下一步（**新窗口先读这段**）
 **R2（A/B/C）+ R2-RECOVERY + SETTLEMENT-CTA-LATENCY + SINGLE-CTA/音频 + R2-RESEED + R4（Body canonical/MVP）
 + R3（四同构槽）+ R5（正式内容池）均已收口**，无功能缺口、无 BLOCK。
-**下一步 = 等用户下发新 Queue（本轮 Queue 末尾提到「Q2」，但其正文未随 Queue 到达 ⇒ 未开工）。**
+**下一步 = 等用户下发新 Queue**（连续两轮 Queue 末尾都写「直接继续 Q2 / Q3」，但**正文均未到达** ⇒ 未开工）。
+⚠️ **`R5-SPEAR-FULL-RUN-R1` 判定 STOP（只调查、零改码、无 commit，HEAD 仍 `a06f2a4`）**：
+spear 的**攻击链完整且真实**（canonical def + collider + `contactRouter` 直击 `baseDamage:60` + 通用星级倍率），
+但它**没有 behavior runtime**（`FACTORIES` 无 `'ram'`；编排器 `:295` 只跳过 runtime、part/collider 照建）。
+**真阻塞点在 Run 的强化注入接缝**：完整 Run 唯一路径有 **3 个必选 CHOICE**（`d2-choice1`/`d4-lateral`/`d5-choice2`），
+池里 `affectsWeapon:true` 项**全是 cannon 派生 overlay**，判据 = 「装载里有没有正式 cannon」⇒ 不放宽就 DAY3 `throw`。
+⚠️ **`composeRunWeaponDef` 会把 `behavior` 一并改成 overlay 的 behavior** ⇒ 套到 spear = `ram`→`cannon`（把刺变成炮），
+即 Queue 明令禁止的「临时套用 Cannon modifier」。⚠️ **强化不是可选装饰**：实测无强化时**连 cannon 都打不完第四场**。
+详见 `.workbuddy/memory/2026-09-26.md` 末节。既有守卫 `LC-11` 已钉死「spear + heavyShell 必须响亮抛错」。
 门禁基线（R5 实测）：`tsc` **零错** · R5 targeted **40 files / 671 tests** 全绿 ·
 product E2E：**home 98/98 · loop 53/53 · reward 57/57 · reseed 21/21 · fail 34/34 · star-power 22/22 ·
 legacy-profile 18/18**。⚠️ **R5 起「新账号内容基线」变了**（见 §2h）⇒ 任何写死「3 件武器」的断言都会红。
