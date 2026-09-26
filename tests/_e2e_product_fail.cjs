@@ -46,6 +46,19 @@
  *    改用 Node 冻结表在 120 下**仍然归零**的组合：`twinCannon + tripleLoad`（= `FAIL_POLICY`）。
  *    C1~D2 的每一条 FAILED 判据**一字未改** —— 这一轮改的是「怎么输」，不是「输了要看到什么」。
  *
+ * ── ⚠️ PRODUCT-LOOP-R5-MULTI-WEAPON-PRODUCT-COMPAT-R1：守门取证从**一件**扩到**逐件** ──
+ *
+ * 内容池种子（`PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1`）把验证账号的武器库存从 3 件扩到 9 件，
+ * 而 A4–A10 只用 `hammer` 一件取证「非 cannon 进不去完整 Run」。⇒ 新增 **A4b**：
+ * 按 `BLOCKED_WEAPON_MATRIX`（= canonical 武器全表 − 支持清单，**真源驱动**）**逐件**过同一组判据
+ * （真实点击 → 存档独立取证 → 车库状态块 → 首页无 href → **装备仍是它**）。
+ *
+ * ⚠️ 两处**不是**放宽、而是必须的加固：
+ *   ① `clickSelector` 补 `scrollIntoViewIfNeeded()`：9 张卡后排在后面的卡落到滚动区下方，
+ *      `boundingBox()` 仍给矩形但真实鼠标点在视口外（与 loop / reward 两个脚本同一处置）；
+ *   ② 新增 A4b-0 / A4b-9 两条**汇总**断言（库存 = canonical 全表 / 8 件无一件被静默放行）。
+ *   既有 A1–A10、B~D 全部判据**一字未改**。
+ *
  * 用法：
  *   npm run build:portrait-lab
  *   node tests/_e2e_product_fail.cjs   （或 npm run e2e:product-fail）
@@ -92,6 +105,30 @@ const MAIN_WEAPON_NAME = '炮';
 /** 用来证明守门的非 cannon 武器（近战锤，starter 已拥有 ⇒ 车库点得到）。 */
 const BLOCKED_WEAPON = 'hammer';
 const BLOCKED_WEAPON_NAME = '锤';
+
+/**
+ * PRODUCT-LOOP-R5-MULTI-WEAPON-PRODUCT-COMPAT-R1｜**本批次验证账号的武器全表**（9 件）。
+ *
+ * ⚠️ 与 `_e2e_product_loop.cjs` / `_e2e_product_reward.cjs` 的 `CANONICAL_WEAPON_IDS` 同源
+ *    （三处同名常量 = 同一份 canonical 武器集合的独立取证，不 import 源码）。
+ * ⚠️ `ramHead`（冲撞头）不在这张表里：它有武器定义但**不在** `OFFICIAL_PARTS`
+ *    ⇒ 玩家拿不到 ⇒ 不进库存（`tests/productMultiWeaponCompatR5.test.ts` MW-01 钉死）。
+ */
+const CANONICAL_WEAPON_IDS = [
+  'cannon',
+  'flamethrower',
+  'hammer',
+  'laser',
+  'machineGun',
+  'rammer',
+  'saw',
+  'shotgun',
+  'spear',
+];
+/** 唯一被支持「完整 Run」的武器（= `runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS`）。 */
+const SUPPORTED_WEAPON_IDS = ['cannon'];
+/** 逐件审核矩阵 = 全部 − 支持（**不手写**：内容变了这张表跟着变）。 */
+const BLOCKED_WEAPON_MATRIX = CANONICAL_WEAPON_IDS.filter((id) => !SUPPORTED_WEAPON_IDS.includes(id));
 
 /** 首页提示文案（Queue 逐字给的两句；断言写死是为了防「提示被改成看不懂的话」）。 */
 const COMPAT_NOTICE = '当前原型仅支持加农炮进行完整冒险';
@@ -194,7 +231,16 @@ const probeRun = (page) => page.evaluate(() => window.__RUNPAGE__.probe());
 
 /** 真实鼠标点击：元素真实 CSS 矩形中心（不用 evaluate 直调 click）。 */
 async function clickSelector(page, sel) {
-  const box = await page.locator(sel).first().boundingBox();
+  /*
+    ⚠️ PRODUCT-LOOP-R5-MULTI-WEAPON-PRODUCT-COMPAT-R1｜必须先 `scrollIntoViewIfNeeded()`（与
+    `_e2e_product_loop.cjs` / `_e2e_product_reward.cjs` 同一处置）。内容池种子把武器槽从
+    3 张卡变成 9 张卡（本段 A4b 还要逐件点 8 件），排在后面的卡会落到 `.ph-garage-body`
+    的滚动区下方 ⇒ `boundingBox()` 仍给出矩形，但真实鼠标点的是**视口外**的坐标，
+    点击落在别的元素上。⚠️ 这不是放宽断言：本文件所有判据一字未改。
+  */
+  const loc = page.locator(sel).first();
+  await loc.scrollIntoViewIfNeeded();
+  const box = await loc.boundingBox();
   if (!box) throw new Error(`无法定位元素：${sel}`);
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await sleep(120);
@@ -538,6 +584,83 @@ async function main() {
         loadoutBefore.functionalSelections[WEAPON_SLOT] === MAIN_WEAPON,
       `A10 换回「${MAIN_WEAPON_NAME}」：守门恢复放行（有 href / 提示消失 / 资格=通过），且下一局链接里的装备就是它`,
       `equipped=${home2.equippedWeaponId} blocked=${home2.startRunBlocked} href=${(home2.startRunHref ?? '').slice(0, 48)}… 链接装备槽=${loadoutBefore ? loadoutBefore.functionalSelections[WEAPON_SLOT] : 'n/a'}`,
+    );
+
+    /* ============ A4b：**逐件**守门矩阵（本批次全部非支持武器，不只 hammer） ============ */
+
+    /*
+      A4–A10 用 `hammer` 一件把守门链路走全（真实点击 + 存档独立取证 + 真鼠标点不可执行按钮）。
+      A4b 换成**真源驱动**：把验证账号库存里**每一件**非支持武器都过一遍同一组判据 ——
+      「未支持武器明确阻止 / 禁止 silent fallback 到 Cannon / 禁止自动替玩家换 Cannon」。
+
+      ⚠️ 判据与 A4–A10 **完全同一组**（不新增第二套口径）：
+        ① 真实点击这张卡 ⇒ 正式存档的主武器槽真的变成它（**独立**读 localStorage，不读探针）；
+        ② 车库状态块 = unsupported + 原因 + 明确提示；
+        ③ 回首页：`startRunBlocked === true` 且 `startRunHref === null`（**结构上**无法创建 Run）；
+        ④ 首页提示块真的画在页面上，且 `equippedWeaponId` **仍然是它**（没被偷偷换回 cannon）。
+    */
+    const invWeaponIds = [...new Set((home2.weapons ?? []).map((w) => w.defId))].sort();
+    const weaponNameOf = new Map((home2.weapons ?? []).map((w) => [w.defId, w.name]));
+    log(
+      invWeaponIds.join(',') === CANONICAL_WEAPON_IDS.join(','),
+      'A4b-0 验证账号的武器库存 = canonical 全表（9 件，**逐 id 相等**）⇒ 下面的矩阵覆盖全部非支持武器',
+      invWeaponIds.join(','),
+    );
+
+    const matrixBad = [];
+    for (const wid of BLOCKED_WEAPON_MATRIX) {
+      await clickSelector(page, '[data-ph-action="open-garage"]');
+      await clickSelector(page, `[data-ph-weapon="${wid}"]`);
+      const storedW = await storageDump(page);
+      const garageW = await runCompatDom(page);
+      await clickSelector(page, '[data-ph-action="back-home"]');
+      const homeW = await probeHome(page);
+      const noticeW = await compatNoticeDom(page);
+      const slotW = storedWeaponSlot(storedW);
+      const ok =
+        slotW === wid &&
+        !!garageW &&
+        garageW.value === 'unsupported' &&
+        garageW.reason === 'unsupported-weapon' &&
+        garageW.text.includes(COMPAT_NOTICE) &&
+        homeW.view === 'home' &&
+        homeW.equippedWeaponId === wid && // ⇐ 没有自动换炮
+        homeW.startRunBlocked === true &&
+        homeW.startRunHref === null && // ⇐ 结构上无法创建 Run
+        homeW.runCompat.ok === false &&
+        homeW.runCompat.reason === 'unsupported-weapon' &&
+        !!noticeW &&
+        noticeW.text.includes(COMPAT_NOTICE) &&
+        noticeW.text.includes(COMPAT_HINT);
+      if (!ok) {
+        matrixBad.push(
+          `${wid}(slot=${slotW} garage=${garageW ? garageW.value : 'n/a'} blocked=${homeW.startRunBlocked} href=${homeW.startRunHref} equipped=${homeW.equippedWeaponId})`,
+        );
+      }
+      log(
+        ok,
+        `A4b 逐件守门：「${weaponNameOf.get(wid) ?? wid}」(${wid}) ⇒ 车库 unsupported + 首页无 href + 装备仍是它（**不自动换炮**）`,
+        `slot=${slotW} equipped=${homeW.equippedWeaponId} href=${homeW.startRunHref}`,
+      );
+    }
+    log(
+      matrixBad.length === 0 && BLOCKED_WEAPON_MATRIX.length === 8,
+      `A4b-9 **汇总**：${BLOCKED_WEAPON_MATRIX.length} 件非支持武器逐件审核全部通过（没有任何一件被静默放行）`,
+      matrixBad.length === 0 ? '全部通过' : `失败：${matrixBad.join(' | ')}`,
+    );
+
+    // 矩阵跑完后把装备放回 cannon —— B 段要真的进局
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    await clickSelector(page, `[data-ph-weapon="${MAIN_WEAPON}"]`);
+    await clickSelector(page, '[data-ph-action="back-home"]');
+    const homeAfterMatrix = await probeHome(page);
+    log(
+      homeAfterMatrix.view === 'home' &&
+        homeAfterMatrix.equippedWeaponId === MAIN_WEAPON &&
+        homeAfterMatrix.startRunBlocked === false &&
+        !!homeAfterMatrix.startRunHref,
+      `A4b-10 矩阵结束后换回「${MAIN_WEAPON_NAME}」：守门恢复放行（有 href）⇒ 后续 B 段可正常进局`,
+      `equipped=${homeAfterMatrix.equippedWeaponId} href=${(homeAfterMatrix.startRunHref ?? '').slice(0, 40)}…`,
     );
 
     /* ============================================================== B. 进局 */
