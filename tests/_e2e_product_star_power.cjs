@@ -58,9 +58,12 @@ const MIME = {
  * 终点候选（与 `runReward.REWARD_CHOICE_IDS` 同值）。
  *
  * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：从 `['cannon','spear','hammer']`
- *    **收窄为 `['cannon']`** —— 当前只有它同时具备完整 Run compatibility / 已验证 Run Buff /
- *    永久 Star 成长链（`FULL_RUN_SUPPORTED_WEAPON_IDS = ['cannon']`），
- *    发 spear 等于奖励玩家「这一局用不上的东西」（真人反馈 ③）。
+ *    **收窄为 `['cannon']`** —— 奖励只发**这一局真的用得上**的东西：终点固定给 `cannon ★1 ×1`
+ *    （它有完整的 R2 强化体系与永久 Star 成长链），发 spear 等于奖励玩家「这一局用不上的东西」
+ *    （真人反馈 ③）。
+ *    ⚠️ PRODUCT-LOOP-R6：这张候选表**不再**与「支持完整 Run 的武器表」同值 ——
+ *    R6 起后者是 8 件显式能力登记（`runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS`），
+ *    候选池仍只有 cannon 是**奖励设计**的决定（本文件不需要改）。
  *    ⇒ C1 的 `rects.length === CHOICE_IDS.length` 与 `pickIndex` 都随之自动落到 1 张卡 / 下标 0，
  *      无需另写一份长度常量（候选池只有一个真源：这里）。
  */

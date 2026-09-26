@@ -38,7 +38,7 @@ import { validateSnapshot } from '../src/core/buildValidator';
 import { registry } from '../src/core/content';
 import { INVENTORY_MAX_STAR, OFFICIAL_PARTS, addPart, getCount, isOfficialPart } from '../src/core/partInventory';
 import { buildSnapshotFromDraft, type BuildDraft } from '../src/lab/buildEditorModel';
-import { snapshotHasRunBaseWeapon, RUN_BASE_WEAPON_DEF_ID } from '../src/lab/portraitBattleLab/runModifiers';
+import { RUN_BASE_WEAPON_DEF_ID } from '../src/lab/portraitBattleLab/runModifiers';
 import { runLoadoutCompatOfDraft } from '../src/lab/portraitBattleLab/runLoadoutCompat';
 import { resolveRunPlayerLoadout } from '../src/lab/portraitBattleLab/runPageScene';
 import {
@@ -199,17 +199,25 @@ describe('R5-MULTI-WEAPON｜A. canonical 武器集合', () => {
     // ④ 支持清单必须是**拿得到的东西**（支持一件永远发不出来的武器 = 幽灵条目）
     for (const id of FULL_RUN_SUPPORTED_WEAPON_IDS) expect(OWNED_WEAPONS).toContain(id);
 
-    // ⑤ 不受支持集合由差集推出（不手写）：registry 10 − 支持 1 = 9（**含** ramHead）
-    expect(UNSUPPORTED_WEAPONS.length).toBe(9);
+    // ⑤ 不受支持集合由差集推出（不手写）：registry 10 − 支持 8 = 2（spear + ramHead）
+    expect(UNSUPPORTED_WEAPONS.slice().sort()).toEqual(['ramHead', 'spear']);
     expect(UNSUPPORTED_WEAPONS).not.toContain('cannon');
     expect(UNSUPPORTED_WEAPONS).toContain('ramHead');
-    // 其中「玩家真的可能装上」的只有 8 件（ramHead 拿不到 ⇒ 装不上）
-    expect(OWNED_WEAPONS.filter((id) => !supportsFullRun(id)).length).toBe(8);
+    // 其中「玩家真的可能装上、但跑不了完整 Run」的**恰好 1 件** = spear
+    //   （Runtime 不完整：`behavior === 'ram'` 在 FACTORIES 里没有工厂；ramHead 拿不到 ⇒ 装不上）
+    expect(OWNED_WEAPONS.filter((id) => !supportsFullRun(id))).toEqual(['spear']);
   });
 
-  it('MW-02 支持清单唯一真源、与局内基准武器同值；奖励池 ⊆ 支持清单', () => {
-    expect(FULL_RUN_SUPPORTED_WEAPON_IDS).toEqual([RUN_BASE_WEAPON_DEF_ID]);
+  it('MW-02 支持清单唯一真源、是**显式能力登记**；奖励池 ⊆ 支持清单', () => {
+    /*
+      PRODUCT-LOOP-R6 起清单**不再**等于 `[RUN_BASE_WEAPON_DEF_ID]` —— 那是「Run 硬绑的那一件」
+      的旧语义。现在它是**显式能力登记**（登记门槛见 `runCompatibility` 头部 5 条）。
+      ⇒ 断言换成三条更贴语义的：cannon 必须在列、ramHead 不在（拿不到）、spear 不在（Runtime 不完整）。
+    */
+    expect(FULL_RUN_SUPPORTED_WEAPON_IDS).toContain(RUN_BASE_WEAPON_DEF_ID);
     expect(RUN_BASE_WEAPON_DEF_ID).toBe('cannon');
+    expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('ramHead');
+    expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('spear');
     // 奖励只发「这一局真的用得上的东西」⇒ 必须落在支持清单里
     for (const id of REWARD_CHOICE_IDS) expect(supportsFullRun(id)).toBe(true);
     // 全 `src/` 只有一处**声明**（注释剥掉后）⇒ 不可能存在第二份清单
@@ -242,12 +250,21 @@ describe('R5-MULTI-WEAPON｜B. 逐件矩阵', () => {
     }
     expect(rows.length).toBe(REGISTRY_WEAPONS.length);
     /*
-      ⚠️ 这一条**刻意写死「恰好一件放行」**（虽然 `FULL_RUN_SUPPORTED_WEAPON_IDS` 已由 LC-01 钉成
-      `[RUN_BASE_WEAPON_DEF_ID]`）：它让**矩阵本身**（而不只是那个常量）对「白名单被放宽」失败。
-      没有它的话，把白名单改成 `['cannon','spear']` 时矩阵会**自洽地**变绿
-      （`ok` 与 `supportsFullRun` 一起翻），矩阵就不再是守卫。
+      ⚠️ 这一条**刻意把放行序列写死**（而不是「等于 `FULL_RUN_SUPPORTED_WEAPON_IDS`」）：
+      与真源比对会让**矩阵本身自洽** —— 白名单被悄悄放宽时 `ok` 与 `supportsFullRun`
+      会一起翻，矩阵照绿，就不再是守卫。写死之后任何一次「多放行一件」都在这一行炸出。
+      （PRODUCT-LOOP-R6：放行集合从 1 件扩到 8 件是**契约变更**，但这行的守卫强度不变。）
     */
-    expect(rows.filter((r) => r.endsWith('放行'))).toEqual(['cannon:放行']);
+    expect(rows.filter((r) => r.endsWith('放行'))).toEqual([
+      'cannon:放行',
+      'flamethrower:放行',
+      'hammer:放行',
+      'laser:放行',
+      'machineGun:放行',
+      'rammer:放行',
+      'saw:放行',
+      'shotgun:放行',
+    ]);
   });
 
   it('MW-04 **逐件** Run 创建资格：支持 ⇒ 交回玩家那份真实装载；不支持 ⇒ blocked + 演示占位', () => {
@@ -264,15 +281,18 @@ describe('R5-MULTI-WEAPON｜B. 逐件矩阵', () => {
       } else {
         expect(res.blocked, `${defId} 必须在**创建 Run 之前**被拒绝`).toBe(true);
         expect(res.fallback).toBe('unsupported-loadout');
-        expect(res.blockedReason).toBe('no-base-weapon');
+        /*
+          PRODUCT-LOOP-R6：拒绝理由已从「车上没有 cannon」变成**能力** ——
+          这两件不受支持的武器都是「Runtime 不完整」：`ramHead` 是 prototype/hold、
+          `spear` 的 `behavior === 'ram'` 在 `FACTORIES` 里没有工厂。
+        */
+        expect(res.blockedReason).toBe('no-weapon-runtime');
         // 被拒绝时**绝不**把玩家那份不兼容装载交回去（防「忽略 blocked ⇒ 照常开战」）
         expect(res.loadout.source).toBe('demo');
         expect(res.loadout.draft.functionalSelections[WEAPON_SLOT]).not.toBe(defId);
       }
       // 两层判据同源（产品侧 / 局内侧不可能一处放行、另一处拒绝）
-      expect(runLoadoutCompatOfDraft(draft).ok).toBe(
-        snapshotHasRunBaseWeapon(buildSnapshotFromDraft(draft, registry)),
-      );
+      expect(runLoadoutCompatOfDraft(draft).ok).toBe(supportsFullRun(defId));
     }
   });
 
@@ -293,29 +313,34 @@ describe('R5-MULTI-WEAPON｜B. 逐件矩阵', () => {
     expect(storageSnapshot(), '审核路径一个字节都不该写').toBe(before);
   });
 
-  it('MW-06 判据 = **存在性**（不是主武器槽）：不支持武器占主武器槽 + cannon 在别的挂点 ⇒ 仍放行且不改写', () => {
-    for (const w of UNSUPPORTED_WEAPONS) {
-      // ① 混合装载：主武器槽 = 不支持的那件，cannon 挂在别处 ⇒ 必须放行
-      const mixed = draftWithSelections({ [WEAPON_SLOT]: w, top: 'cannon' });
-      const compat = fullRunCompat(mixed);
-      expect(compat.ok, `${w} 占主武器槽、cannon 在 top ⇒ 必须放行（存在性判据）`).toBe(true);
-      expect(compat.equippedWeaponIds).toContain('cannon');
-      expect(compat.equippedWeaponIds).toContain(w);
-      // 放行 ≠ 换炮：装载逐字节没动
-      expect(mixed.functionalSelections[WEAPON_SLOT]).toBe(w);
-      const res = resolveRunPlayerLoadout(searchOf(mixed));
-      expect(res.blocked).toBe(false);
-      expect(res.loadout.source).toBe('profile');
-      expect(res.loadout.draft.functionalSelections[WEAPON_SLOT]).toBe(w);
-      expect(res.loadout.draft.functionalSelections['top']).toBe('cannon');
+  it('MW-06 判据 = **装配顺序第一件武器**（不是「车上存在受支持武器」）', () => {
+    /*
+      PRODUCT-LOOP-R6 把判据从「存在性」改成「**第一件**」：Run 的基准武器现在就是装配顺序
+      第一件武器（`resolveRunBaseWeaponDefId`）。若仍只要求「车上存在受支持武器」，就会出现
+      「首页按 top 的 cannon 放行、局内却按 frontMass 的武器跑」——那正是本模块要根除的两层分叉。
+    */
+    // ① cannon 在前、不支持武器在后 ⇒ base = cannon ⇒ 放行（后者只是车上的另一件）
+    const cannonFirst = draftWithSelections({ [WEAPON_SLOT]: 'cannon', top: 'spear' });
+    const c1 = fullRunCompat(cannonFirst);
+    expect(c1.ok, 'cannon 在前 ⇒ 必须放行').toBe(true);
+    expect(c1.baseWeaponDefId).toBe('cannon');
+    expect(c1.equippedWeaponIds).toEqual(['cannon', 'spear']);
+    // 放行 ≠ 换炮：装载逐字节没动
+    expect(cannonFirst.functionalSelections[WEAPON_SLOT]).toBe('cannon');
 
-      // ② 对照组：同一件武器，但车上没有 cannon ⇒ 必须拒绝
-      const only = draftWithSelections({ [WEAPON_SLOT]: w, top: 'pushRod' });
-      const onlyCompat = fullRunCompat(only);
-      expect(onlyCompat.ok, `${w} 单独在车上 ⇒ 必须拒绝`).toBe(false);
-      expect(onlyCompat.reason).toBe('unsupported-weapon');
-      expect(onlyCompat.equippedWeaponIds).toEqual([w]);
-    }
+    // ② 不支持武器在前、cannon 在后 ⇒ base = 前者 ⇒ **拒绝**（与改前的「存在性判据」正相反）
+    const spearFirst = draftWithSelections({ [WEAPON_SLOT]: 'spear', top: 'cannon' });
+    const c2 = fullRunCompat(spearFirst);
+    expect(c2.ok, 'spear 在前 ⇒ 必须拒绝（它才是本局的基准武器）').toBe(false);
+    expect(c2.reason).toBe('unsupported-weapon');
+    expect(c2.baseWeaponDefId).toBe('spear');
+    expect(c2.equippedWeaponIds).toEqual(['spear', 'cannon']);
+
+    // ③ 两层一致：局内资格也拒绝它（不出现「产品拒绝 / 局内放行」）
+    expect(runLoadoutCompatOfDraft(spearFirst).ok).toBe(false);
+    const res = resolveRunPlayerLoadout(searchOf(spearFirst));
+    expect(res.blocked).toBe(true);
+    expect(res.fallback).toBe('unsupported-loadout');
   });
 
   it('MW-07 「没有武器」在产品侧发不出来：辅助件-only 被正式校验拒绝 ⇒ 该原因只走「手改 / 旧参数」路径', () => {

@@ -239,15 +239,19 @@ describe('PRODUCT-LOOP-R1-C｜A. 局外装备的交接口径（唯一真源 + �
     const withGear = adventureHref(token, equippedDraft(PROFILE_WEAPON));
     expect(withGear).toContain(`${LOADOUT_PARAM}=`);
     /*
-      ⚠️ PRODUCT-LOOP-P0 的**契约变更**（不是回归）：`PROFILE_WEAPON = 'laser'` 仍然是
-      「合法、且不在 starter 里」的一件（本文件 EL-10 起继续用它证明装备通道真的被搬运），
-      但它**不是**当前原型支持完整 Run 的武器 ⇒ 现在的解析结果是 `'unsupported-loadout'`
-      （宿主据此拒绝创建 Run），而不是从前的 `'none'`。
-      两者都必须断言：**通道照旧搬运**（`parseRunPlayerLoadout` 仍解析得出）＋
-      **资格层另外把关**（`resolve` 把它拦在 Run 之外）—— 否则就成了「静默降级成能跑」。
+      ⚠️ PRODUCT-LOOP-R6 的**契约变更**（不是回归）：`PROFILE_WEAPON = 'laser'` 有完整的
+      `laserBehavior`，而 Run 已不再把基准武器硬绑 cannon（它以装备的武器自己的 canonical
+      Def 跑）⇒ 它现在**放行**（`'none'`）。
+      「通道照旧搬运 + 资格层另外把关」这两件事仍然都要断言，只是把关对象换成
+      **Runtime 不完整**的那件（`spear`：`behavior === 'ram'` 没有工厂）——
+      否则就成了「静默降级成能跑」。
     */
     expect(parseRunPlayerLoadout(withGear.split('?')[1])?.source, '通道本身不得受影响').toBe('profile');
-    expect(resolveRunPlayerLoadout(withGear.split('?')[1]).fallback).toBe('unsupported-loadout');
+    expect(resolveRunPlayerLoadout(withGear.split('?')[1]).fallback).toBe('none');
+    // 资格层仍然把关：同一通道搬运的 spear（Runtime 不完整）被拦在 Run 之外
+    const withSpear = adventureHref(token, equippedDraft('spear'));
+    expect(parseRunPlayerLoadout(withSpear.split('?')[1])?.source, '通道本身不得受影响').toBe('profile');
+    expect(resolveRunPlayerLoadout(withSpear.split('?')[1]).fallback).toBe('unsupported-loadout');
     // 受支持的那一件（正式加农炮）经**同一条链路**产出 ⇒ `none`（正常产品闭环）
     const withCannon = adventureHref(token, equippedDraft('cannon'));
     expect(resolveRunPlayerLoadout(withCannon.split('?')[1]).fallback).toBe('none');

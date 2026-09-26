@@ -89,6 +89,7 @@ import {
   applyRunModifiersToSnapshot,
   createRunRegistry,
   normalizeBuild,
+  resolveRunBaseWeaponDefId,
   type RunModifierId,
 } from './runModifiers';
 /*
@@ -375,6 +376,15 @@ export class RunBattleRuntime {
    * 开 ⇒ 玩家那门炮的基线是 `PRODUCT_RUN_CANNON_BASE_DAMAGE`；关 ⇒ 正式 80。
    */
   readonly playerBaseline: boolean;
+  /**
+   * PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH｜**本局 Run 的基准武器** = 玩家实际装备里
+   * 按装配顺序第一件 `category === 'weapon'` 的 defId（不是写死的 cannon）。
+   *
+   * ⚠️ 它是本场一切「基准」的唯一来源：本局 registry 以**该武器自己的 canonical Def**
+   *    派生 overlay 部件，snapshot 重映射的也是**它自己**那一件。
+   *    `null` = 车上没有武器（资格层会先拒绝创建 Run，走到这里说明是研发入口的演示装载）。
+   */
+  readonly runBaseWeaponDefId: string | null;
   /** 本场使用的正式 Encounter id（默认 = 演示遭遇）。 */
   readonly encounterId: string;
   /**
@@ -415,18 +425,25 @@ export class RunBattleRuntime {
     // ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY：玩家侧基线（默认关；见 RunBattleOptions）。
     this.playerBaseline = o.playerBaseline === true;
 
-    // ① 本局 registry = 正式副本（+ Build overlay 部件 + 可选的**玩家侧基线**部件）。
-    //    正式 content 单例、正式 `cannon` 键、敌方部件**全部零修改**。
-    this.registry = createRunRegistry(this.build, this.playerBaseline);
-    // ② 本局 BuildSnapshot：只把**玩家装载**里基准武器的 defId 指向本局 overlay 部件。
+    // ① 本局基准武器 = **玩家实际装备的那一件**（PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH）。
+    //    它不再是写死的 cannon：装备 hammer ⇒ 基准就是正式 hammer，registry 以 hammer 的
+    //    canonical Def 为 base、snapshot 重映射的也是 hammer 那一件。
+    //    车上没有武器 ⇒ null（资格层已拒绝创建 Run；这里如实取 null，绝不静默替换成某件武器）。
+    this.runBaseWeaponDefId = resolveRunBaseWeaponDefId(this.plan.player.snapshot);
+
+    // ② 本局 registry = 正式副本（+ Build overlay 部件 + 可选的**玩家侧基线**部件）。
+    //    正式 content 单例、正式武器键、敌方部件**全部零修改**。
+    this.registry = createRunRegistry(this.build, this.playerBaseline, this.runBaseWeaponDefId);
+    // ③ 本局 BuildSnapshot：只把**玩家装载**里基准武器的 defId 指向本局 overlay 部件。
     const playerSnapshot = applyRunModifiersToSnapshot(
       this.plan.player.snapshot,
       this.build,
       this.playerBaseline,
+      this.runBaseWeaponDefId,
     );
     // PRODUCT-LOOP-R2-C：留住这一份（steering 之后、交给编排器之前）—— 见 `playerSnapshot` 注释。
     this.playerSnapshot = playerSnapshot;
-    // ③ overlay 也必须过正式 BuildValidator（overlay 部件确实存在于本局 registry）。
+    // ④ overlay 也必须过正式 BuildValidator（overlay 部件确实存在于本局 registry）。
     const validation = validateSnapshot(playerSnapshot, this.registry);
     if (!validation.valid) {
       throw new Error(`[PRP-F2] 强化后的 Build 非法：${validation.errors.join('；')}`);

@@ -106,7 +106,21 @@ export type RunModifierId = Layer1ModifierId | Layer2ModifierId;
 /** 每个强化在池子里扮演的角色（用于测试断言「三选一 = 联动 + 通用 + 转向」）。 */
 export type RunModifierRole = 'base' | 'synergy' | 'safe' | 'pivot';
 
-/** overlay 的**基准部件** = 正式 Cannon。本 Queue 不改动它，只以它为基准派生本局变体。 */
+/**
+ * **R2 武器强化体系**的归属武器 = 正式 Cannon。
+ *
+ * ⚠️ PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH：这个常量**不再是**「本局 Run 的基准武器」。
+ *    本局 Run 的基准武器由 `resolveRunBaseWeaponDefId()` 从**玩家实际装备**解析（必改 1），
+ *    可以是任何正式武器。本常量现在只回答一个问题：
+ *    **下面这张 overlay 数值表属于谁** —— 答案是 Cannon：`heavyShell` / `twinCannon` /
+ *    `fastReload` / `tripleLoad` 的 `behavior` 全是 `'cannon'`，改的字段名
+ *    （`projectileRadius` / `projectileMass` / `recoilImpulse` / `burstRounds` /
+ *    `burstIntervalMs` / `cooldownMs`）也全是 Cannon 自己的 `behaviorParams` 键。
+ *    ⇒ 装备不是 Cannon 时这些项**一项都不适用**（见 `weaponOverlayMods`），
+ *      而**不是**把它们套到别的武器上 —— 那正是 Queue 明令禁止的
+ *      「把 Cannon 的 damage base / behavior / projectile / reload / recoil 套给其它武器」。
+ *    ⇒ 同理，`PRODUCT_RUN_CANNON_BASE_DAMAGE`（玩家侧 120）也只作用于它（见 `composePlayerRunWeaponDef`）。
+ */
 export const RUN_BASE_WEAPON_DEF_ID = 'cannon';
 
 /**
@@ -435,8 +449,50 @@ export function normalizeBuild(
   return typeof build === 'string' ? [build] : [...build];
 }
 
-/** Build 里**真正改武器数值**的那些项（按选择顺序 → 后选的覆盖先选的）。 */
-export function weaponOverlayMods(build: readonly RunModifierId[]): readonly RunModifierId[] {
+/**
+ * PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH｜**本局 Run 的基准武器**（唯一规则，必改 1）。
+ *
+ * 规则只有一句话：
+ *
+ *     玩家装备什么正式武器，Product Run 就以**该武器自己的 canonical Def** 作为运行 base。
+ *
+ * 判据 = 玩家装载 `BuildSnapshot` 里**按装配顺序第一件** `category === 'weapon'` 的件
+ * （`snapshot.functionals` 的顺序就是挂点装配顺序 —— 与 `runCompatibility` /
+ * `playerLoadout.weaponEntries` 读的是同一份序列，不再有第二套「哪件是主武器」的定义）。
+ *
+ * ⚠️ **刻意不返回「默认 / 兜底武器」**：车上没有武器 ⇒ `null`。
+ *    「没有武器」是资格层要**拒绝创建 Run** 的情形（`runLoadoutCompat` / `runCompatibility`），
+ *    不是底层可以静默替换成某件武器（必改 E：禁止 silent fallback）。
+ *
+ * ⚠️ 为什么需要 `reg`：`snapshot.functionals` 只有 `defId`，「哪件是武器」由**正式内容库的
+ *    `category` 分类字段**回答（与 `product/playerLoadout.isWeaponDefId` 同源）。
+ *    默认参数取一份正式 `createRegistry()` 副本；调用点已有 registry 时应显式传入。
+ */
+export function resolveRunBaseWeaponDefId(
+  snapshot: BuildSnapshot,
+  reg: ContentRegistry = createRegistry(),
+): string | null {
+  for (const install of snapshot.functionals) {
+    if (reg.functionals.get(install.defId)?.category === 'weapon') return install.defId;
+  }
+  return null;
+}
+
+/**
+ * Build 里**真正改武器数值**、且**对本局基准武器适用**的那些项（按选择顺序 → 后选的覆盖先选的）。
+ *
+ * ⚠️ PRODUCT-LOOP-R6（必改 2）：overlay 数值表全是 Cannon 自己的 `behavior` 与字段名，
+ *    因此**只有基准武器就是 Cannon 时它们才适用**。基准武器是别的武器时返回 `[]` ——
+ *    该武器用它自己的 canonical Def 打，既不改 damage base、也不套 Cannon 的 behavior /
+ *    projectile / reload / recoil。这是**不适用**，不是「回退成 Cannon」（必改 E）。
+ *
+ * ⚠️ 默认参数 `RUN_BASE_WEAPON_DEF_ID` ⇒ 只传 `build` 的旧调用点**逐字节不变**。
+ */
+export function weaponOverlayMods(
+  build: readonly RunModifierId[],
+  baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
+): readonly RunModifierId[] {
+  if (baseWeaponDefId !== RUN_BASE_WEAPON_DEF_ID) return [];
   return build.filter((m) => RUN_MODIFIER_OVERLAY[m]?.affectsWeapon === true);
 }
 
@@ -449,8 +505,11 @@ export function runOverlayDefId(mod: RunModifierId): string {
  * 本局 Build 对应的 overlay 部件 id（**确定性**：由改武器的项按顺序拼接）。
  * 没有任何改武器的项 → `null`（本局武器就是正式 Cannon，无需重映射）。
  */
-export function runBuildDefId(build: readonly RunModifierId[]): string | null {
-  const mods = weaponOverlayMods(build);
+export function runBuildDefId(
+  build: readonly RunModifierId[],
+  baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
+): string | null {
+  const mods = weaponOverlayMods(build, baseWeaponDefId);
   return mods.length === 0 ? null : `run.mod.${mods.join('+')}`;
 }
 
@@ -458,18 +517,26 @@ export function runBuildDefId(build: readonly RunModifierId[]): string | null {
  * 本局**玩家侧**武器部件 id（= 玩家基线 + 改武器的项，确定性拼接）。
  *
  * - `playerBaseline = false` ⇒ 与旧口径 `runBuildDefId()` **逐字相同**
- *   （未选「改武器」项时仍是 `null` ⇒ 本局武器就是正式 Cannon，零重映射）。
- * - `playerBaseline = true` ⇒ **恒有 id**（哪怕一个 Modifier 都没选）：因为「玩家侧 120」
- *   必须由一件**独立部件**承载 —— 正式 `cannon` 键在任何情况下都得保持 80。
+ *   （未选「改武器」项时仍是 `null` ⇒ 本局武器就是它自己的正式 Def，零重映射）。
+ * - `playerBaseline = true` ⇒ 基准武器是 Cannon 时**恒有 id**（哪怕一个 Modifier 都没选）：
+ *   因为「玩家侧 120」必须由一件**独立部件**承载 —— 正式 `cannon` 键在任何情况下都得保持 80。
  *
- * ⇒ 两条路径的 id 互不冲突（基线那段用 `@base` 标记，它不是任何 `RunModifierId`）。
+ * ⚠️ PRODUCT-LOOP-R6（必改 2）：`playerBaseline` 是 **Cannon 专属基线**（`PRODUCT_RUN_CANNON_BASE_DAMAGE`
+ *    写的是 Cannon 的 `projectileDamage`）。基准武器不是 Cannon 时它**不适用** ——
+ *    既不加 `@base` 段，也不把 120 写进别的武器（否则就是把 Cannon 的 damage base 套给其它武器）。
+ *    ⇒ 此时本函数退化成 `runBuildDefId()`，而非 Cannon 武器的武器项本来也不适用 ⇒ 返回 `null`。
+ *
+ * ⇒ 各条路径的 id 互不冲突（基线那段用 `@base` 标记，它不是任何 `RunModifierId`）。
  */
 export function runPlayerWeaponDefId(
   build: readonly RunModifierId[],
   playerBaseline: boolean,
+  baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): string | null {
-  if (!playerBaseline) return runBuildDefId(build);
-  const mods = weaponOverlayMods(build);
+  if (!(playerBaseline && baseWeaponDefId === RUN_BASE_WEAPON_DEF_ID)) {
+    return runBuildDefId(build, baseWeaponDefId);
+  }
+  const mods = weaponOverlayMods(build, baseWeaponDefId);
   return `run.mod.${[RUN_PLAYER_BASE_TOKEN, ...mods].join('+')}`;
 }
 
@@ -481,10 +548,11 @@ export function runPlayerWeaponDefId(
 export function composeRunWeaponDef(
   base: FunctionalPartDef,
   build: readonly RunModifierId[],
+  baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): FunctionalPartDef {
   let behavior = base.behavior;
   let params: Record<string, unknown> = { ...(base.behaviorParams ?? {}) };
-  for (const m of weaponOverlayMods(build)) {
+  for (const m of weaponOverlayMods(build, baseWeaponDefId)) {
     const o = RUN_MODIFIER_OVERLAY[m];
     behavior = o.behavior;
     params = { ...params, ...o.behaviorParams };
@@ -505,8 +573,12 @@ export function composePlayerRunWeaponDef(
   base: FunctionalPartDef,
   build: readonly RunModifierId[],
   playerBaseline: boolean,
+  baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): FunctionalPartDef {
-  const baselined: FunctionalPartDef = playerBaseline
+  // ⚠️ PRODUCT-LOOP-R6（必改 2）：基线 = `PRODUCT_RUN_CANNON_BASE_DAMAGE`（Cannon 的
+  //    `projectileDamage`）⇒ **只对 Cannon 生效**。基准武器是别的武器时不得写它。
+  const baselineApplies = playerBaseline && baseWeaponDefId === RUN_BASE_WEAPON_DEF_ID;
+  const baselined: FunctionalPartDef = baselineApplies
     ? {
         ...base,
         behaviorParams: {
@@ -515,7 +587,7 @@ export function composePlayerRunWeaponDef(
         },
       }
     : base;
-  return composeRunWeaponDef(baselined, build);
+  return composeRunWeaponDef(baselined, build, baseWeaponDefId);
 }
 
 /**
@@ -529,39 +601,62 @@ export function composePlayerRunWeaponDef(
  *
  * ⚠️ `playerBaseline` 只影响**多注册出来的那一件 overlay 部件**；正式键集合与其它部件
  *    一字不动。默认 `false` ⇒ 既有 Lab / Validation / RDC 调用点逐字段不变。
+ *
+ * ⚠️ PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH：新增 `baseWeaponDefId`（默认 = 旧口径 `'cannon'`）。
+ *
+ * - 默认值 ⇒ **改前逐字节相同**（既有 Lab / Validation / RDC / 全部旧测试调用点）；
+ * - 传入**玩家实际装备**的武器（`resolveRunBaseWeaponDefId`）⇒ overlay 以**该武器自己的
+ *   canonical Def** 为 base 派生：装备 hammer ⇒ base 就是正式 hammer，不再「先拿 cannon 再套壳」；
+ * - 装备不是 Cannon 时：武器项 overlay 一项都不适用、玩家基线不适用 ⇒ `runPlayerWeaponDefId`
+ *   返回 `null` ⇒ **直接返回正式副本**（玩家用它自己的 canonical Def 打）；
+ * - `baseWeaponDefId = null`（车上没有武器）⇒ 同上去掉基线，返回正式副本；
+ *   资格层在此之前就会拒绝创建 Run（不在这里静默替换成某件武器）。
  */
 export function createRunRegistry(
   build: RunModifierId | readonly RunModifierId[] | null | undefined,
   playerBaseline = false,
+  baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): ContentRegistry {
   const mods = normalizeBuild(build);
   const reg = createRegistry();
-  const defId = runPlayerWeaponDefId(mods, playerBaseline);
+  const defId = runPlayerWeaponDefId(mods, playerBaseline, baseWeaponDefId);
   if (!defId) return reg;
-  const base = reg.functionals.get(RUN_BASE_WEAPON_DEF_ID);
+  const base = baseWeaponDefId ? reg.functionals.get(baseWeaponDefId) : undefined;
   if (!base) {
-    throw new Error(`RunModifier: 正式 registry 缺少基准武器 "${RUN_BASE_WEAPON_DEF_ID}"`);
+    throw new Error(`RunModifier: 正式 registry 缺少基准武器 "${baseWeaponDefId ?? 'null'}"`);
   }
-  reg.functionals.set(defId, composePlayerRunWeaponDef(base, mods, playerBaseline));
+  reg.functionals.set(
+    defId,
+    composePlayerRunWeaponDef(base, mods, playerBaseline, baseWeaponDefId),
+  );
   return reg;
 }
 
 /**
- * PRODUCT-LOOP-P0-RUN-BUILD-LOADOUT-COMPATIBILITY｜**本局装载里有没有强化注入的目标**。
+ * PRODUCT-LOOP-P0-RUN-BUILD-LOADOUT-COMPATIBILITY｜**本局装载里有没有可运行的基准武器**。
  *
- * = 「装载里是否含基准武器（正式 Cannon）的件」。这是 `applyRunModifiersToSnapshot`
- * 那个 `throw` 的**同一判据**，刻意抽成单一函数：
+ * = 「装载里是否存在一件正式武器」（= `resolveRunBaseWeaponDefId()` 非 `null`）。
+ * 这是 `applyRunModifiersToSnapshot` 那个 `throw` 的**同一判据**，刻意抽成单一函数：
  *
  *   - 注入路径（运行时）：不满足 ⇒ 继续**显式抛错**（invariant 一字不动，见下方）；
  *   - 创建路径（Run 创建前的资格检查）：**同一个函数**回答「这局能不能跑」，
  *     从而**没有第二套「什么算兼容」的定义** —— 两边不可能漂移。
  *
- * ⚠️ 刻意**不**按「某个固定槽位是不是 cannon」判断：装载里哪一件是主武器由
+ * ⚠️ PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH｜**语义已参数化，不是「有没有 cannon」**：
+ *    改前它写死 `install.defId === RUN_BASE_WEAPON_DEF_ID`（cannon），于是「装备不是 Cannon
+ *    的合法装载」被判成「没有基准武器」并在 DAY3 注入时 throw（`runCompatibility` 头部记录的
+ *    那条真人复现）。现在判据 = 「这份装载里解析得出一件正式武器」——装备 hammer 就是 hammer，
+ *    装备 laser 就是 laser，**不再要求车上有 cannon**。
+ *
+ * ⚠️ 刻意**不**按「某个固定槽位是不是武器」判断：装载里哪一件是武器由
  *    **真实装配结果**回答（`category === 'weapon'`），固定槽位推断一换车 / 一换槽就失效
  *    —— 口径与 `runPlayerLoadout.ts` 头部「刻意不暴露 weaponDefId」那条纪律一致。
  */
-export function snapshotHasRunBaseWeapon(snapshot: BuildSnapshot): boolean {
-  return snapshot.functionals.some((install) => install.defId === RUN_BASE_WEAPON_DEF_ID);
+export function snapshotHasRunBaseWeapon(
+  snapshot: BuildSnapshot,
+  reg: ContentRegistry = createRegistry(),
+): boolean {
+  return resolveRunBaseWeaponDefId(snapshot, reg) !== null;
 }
 
 /**
@@ -586,24 +681,37 @@ export function snapshotHasRunBaseWeapon(snapshot: BuildSnapshot): boolean {
  *    （承载玩家侧 120）。**强 invariant 一字未动**：只要真的有 Modifier 要注入却找不到
  *    基准武器，照样 throw —— 新增的只是「纯基线、又没装 Cannon ⇒ 原样返回」这一条
  *    **非错误**分支（那局用的不是 Cannon，本基线不适用，无副作用）。
+ *
+ * ⚠️ PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH：新增 `baseWeaponDefId`（默认 = 旧口径 `'cannon'`）。
+ *    「基准武器」从**写死的 cannon** 变成**调用方传入的、玩家实际装备的那件**
+ *    （`resolveRunBaseWeaponDefId`，见 `RunBattleRuntime`）。
+ *    重映射的对象随之变成**那件武器自己**：装备 hammer ⇒ 重映射的是 hammer 的件，
+ *    `defId` 指向以**正式 hammer** 为 base 派生的本局部件 —— 不再有「先拿 cannon 再套壳」。
+ *    ⇒ 必改 C：装备非 Cannon 的**合法装载**（车上有武器）不再因为「Snapshot 没有 cannon」throw；
+ *      必改 E：base 只会是装配里真实存在的武器，**任何路径都不会静默换成 cannon**。
+ *    强 invariant 保留在它真正该在的地方：**有适用项要注入、却找不到 base 件**才 throw。
  */
 export function applyRunModifiersToSnapshot(
   snapshot: BuildSnapshot,
   build: RunModifierId | readonly RunModifierId[] | null | undefined,
   playerBaseline = false,
+  baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): BuildSnapshot {
   const mods = normalizeBuild(build);
-  const overlayId = runPlayerWeaponDefId(mods, playerBaseline);
+  const overlayId = runPlayerWeaponDefId(mods, playerBaseline, baseWeaponDefId);
   if (!overlayId) return snapshot;
-  if (!snapshotHasRunBaseWeapon(snapshot)) {
-    // 纯基线 + 没装 Cannon ⇒ 本基线不适用，原样返回（不是异常）。
-    if (weaponOverlayMods(mods).length === 0) return snapshot;
+  const hasBase = baseWeaponDefId
+    ? snapshot.functionals.some((install) => install.defId === baseWeaponDefId)
+    : false;
+  if (!hasBase) {
+    // 纯基线 / 无适用武器项 ⇒ 本局没有要注入的东西，原样返回（不是异常）。
+    if (weaponOverlayMods(mods, baseWeaponDefId).length === 0) return snapshot;
     throw new Error(
-      `RunModifier: 本局装载里没有 "${RUN_BASE_WEAPON_DEF_ID}"，无法注入强化 [${mods.join(', ')}]`,
+      `RunModifier: 本局装载里没有 "${baseWeaponDefId ?? 'null'}"，无法注入强化 [${mods.join(', ')}]`,
     );
   }
   const functionals = snapshot.functionals.map((install) =>
-    install.defId === RUN_BASE_WEAPON_DEF_ID ? { ...install, defId: overlayId } : install,
+    install.defId === baseWeaponDefId ? { ...install, defId: overlayId } : install,
   );
   return { ...snapshot, functionals };
 }

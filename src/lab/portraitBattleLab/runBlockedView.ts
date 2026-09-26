@@ -21,12 +21,15 @@
  *   ③ **可被机器观测**：`data-run-blocked` 落在 DOM 上，同一份事实也放进只读句柄
  *      `__RUNBLOCKED__` ⇒ E2E 不需要靠文案断言。
  *
- * ⚠️ 文案里的「基准武器」从真源（`RUN_BASE_WEAPON_DEF_ID`）现读，不硬编码武器 id。
+ * ⚠️ PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH：拒绝的**理由**已经变了 ——
+ *    不再是「你装的不是 Cannon」（Run 现在以玩家实际装备的那件武器为自己的运行 base），
+ *    而是「车上**没有**任何正式武器」。因此这里**不再点名任何武器 id**
+ *    （改前从 `RUN_BASE_WEAPON_DEF_ID` 现读 cannon 拼进文案；现在那个常量是
+ *    「R2 武器强化体系的归属武器」，与资格无关，再引用它就是把两件事混起来）。
  */
 
 import type { RunLoadoutResolution } from './runPageScene';
 import type { RunFailReturn } from './runFailSettlement';
-import { RUN_BASE_WEAPON_DEF_ID } from './runModifiers';
 
 /** 拒绝态的只读诊断句柄（仅供本原型页面 / E2E 断言；不进入任何正式构建产物）。 */
 export interface RunBlockedHandle {
@@ -63,13 +66,16 @@ export function renderRunBlocked(
   title.style.cssText = 'margin:0;font-size:20px;font-weight:700;';
 
   const lead = document.createElement('p');
+  // ⚠️ PRODUCT-LOOP-R6：两种拒绝理由分开说 —— 「车上没有武器」与「这件武器还没有
+  //    完整的战斗 Runtime」是不同的事，混成一句会让玩家找不到原因。
   lead.textContent =
-    `当前原型的完整冒险只支持正式基准武器（${RUN_BASE_WEAPON_DEF_ID}）；` +
-    '你车上的装备不满足这个前提。';
+    reason === 'no-weapon-runtime'
+      ? '当前原型的完整冒险还用不了这件武器 —— 它还没有完整的战斗 Runtime。'
+      : '当前原型的完整冒险要求车上装有一件正式武器；你的车目前没有可运行的武器。';
   lead.style.cssText = 'margin:0;font-size:14px;line-height:1.6;color:#c8d3e4;';
 
   const hint = document.createElement('p');
-  hint.textContent = '请返回主界面更换主武器后再出发 —— 这一局没有开始，也没有进入任何一天。';
+  hint.textContent = '请返回主界面更换战车装备后再出发 —— 这一局没有开始，也没有进入任何一天。';
   hint.style.cssText = 'margin:0;font-size:14px;line-height:1.6;color:#c8d3e4;';
 
   box.append(title, lead, hint);

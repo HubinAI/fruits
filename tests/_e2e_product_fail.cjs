@@ -59,6 +59,32 @@
  *   ② 新增 A4b-0 / A4b-9 两条**汇总**断言（库存 = canonical 全表 / 8 件无一件被静默放行）。
  *   既有 A1–A10、B~D 全部判据**一字未改**。
  *
+ * ── ⚠️ PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH：守门口径**第三次**变（矩阵随之变成两段）──
+ *
+ * R6 把 Run 的**基准武器**从「写死 cannon」改成「玩家实际装备里装配顺序第一件正式武器」，
+ * 于是「哪件武器能进完整 Run」的判据不再是「是不是 Cannon」，而是
+ * **「那件武器自己的 behavior Runtime 存不存在」**（显式能力登记 8 件 + 1 件明确拒绝）。
+ *
+ * ⇒ 本文件里凡是依赖旧口径的东西都必须跟着改，按「契约变更作废既有 E2E 路线 ⇒
+ *    **换合法路线 + 新增守门断言，不删断言**」执行：
+ *
+ *   ① `BLOCKED_WEAPON`（A4–A10 用来取证的被拒武器）：`hammer` → **`spear`**。
+ *      原因不是「换一件更弱的」，而是**判据真的变了** —— `hammer` 现在**属于放行集**
+ *      （它有 `hammer` factory），全 9 件库存里被拒的**恰好只剩** `spear`
+ *      （`behavior === 'ram'`，`behaviorRegistry.FACTORIES` 没注册它）。
+ *   ② 主轴提示文案：`'当前原型仅支持加农炮进行完整冒险'` →
+ *      `'当前原型尚不支持这件武器进行完整冒险'`（理由变了：不是「不是炮」，是「还没有 Runtime」）。
+ *      `COMPAT_HINT`（下一步提示）**一字未改**。
+ *   ③ A4b 从「8 件被拒」改为**两段真源驱动矩阵**：
+ *        - **被拒矩阵**（`BLOCKED_WEAPON_MATRIX`，恰好 `['spear']`）——
+ *          判据与 A4–A10 **完全同一组**（一字未改）；
+ *        - **放行矩阵**（`SUPPORTED_WEAPON_MATRIX`，8 件）—— **R6 新契约的正向取证**：
+ *          每件登记武器装上去之后都**真的**能出发（有 href），装备不会被偷偷换掉，
+ *          而且出发链接里的装载载荷**真的**是它（不是被换成 cannon）。
+ *
+ * ⚠️ A1–A10、B~D 的既有判据除上面 ① ② 两处**取值**外一字未改；
+ *    `FAIL_POLICY`（怎么输）与 `MAIN_WEAPON`（cannon，因为它有完整的 R2 强化体系）都不变。
+ *
  * 用法：
  *   npm run build:portrait-lab
  *   node tests/_e2e_product_fail.cjs   （或 npm run e2e:product-fail）
@@ -97,14 +123,30 @@ const RUN_PARAM = 'run';
 const CHOICES_PARAM = 'choices';
 
 /**
- * 本局用的**主武器**：`cannon`（正式基准武器 = 唯一支持完整 Run 的武器）。
+ * 本局用的**主武器**：`cannon`。
+ *
+ * ⚠️ PRODUCT-LOOP-R6：这里曾经写「正式基准武器 = **唯一**支持完整 Run 的武器」——
+ *    那句话在 R6 之后**不再成立**（支持清单是 8 件显式登记，见 `SUPPORTED_WEAPON_IDS`）。
+ *    cannon 仍然是本局武器的理由变成了另一条：**只有它有完整的 R2 强化体系**
+ *    （`FAIL_POLICY` 用的 `twinCannon` / `tripleLoad` 都是 Cannon 专属 overlay）
+ *    ⇒ 这条失败路线必须以它为主武器，否则路线本身不成立。
  * ⚠️ P0 之前这里是 `hammer`；见文件头「失败路线已换」。
  */
 const MAIN_WEAPON = 'cannon';
 const MAIN_WEAPON_NAME = '炮';
-/** 用来证明守门的非 cannon 武器（近战锤，starter 已拥有 ⇒ 车库点得到）。 */
-const BLOCKED_WEAPON = 'hammer';
-const BLOCKED_WEAPON_NAME = '锤';
+/**
+ * 用来证明守门的**被拒**武器 —— R6 起不再是 `hammer`。
+ *
+ * ⚠️ R6 换件的原因（不是放宽，是**判据真的变了**）：改前「非 cannon 一律拒绝」，
+ *    所以随便挑一件非 cannon 都能取证；R6 起拒绝的理由**只剩一条** ——
+ *    **那件武器的 behavior Runtime 不存在**。全 9 件库存里**恰好只有** `spear`
+ *    满足这条（`behavior === 'ram'`，`behaviorRegistry.FACTORIES` 没注册它）
+ *    ⇒ 它同时在下面的 `BLOCKED_WEAPON_MATRIX` 里被逐件审核。
+ *    `hammer` 现在**属于放行集**（它有自己的 hammer factory）—— 它出现在
+ *    下面的 `SUPPORTED_WEAPON_MATRIX` 里，不再是这里的 `BLOCKED_WEAPON`。
+ */
+const BLOCKED_WEAPON = 'spear';
+const BLOCKED_WEAPON_NAME = '刺';
 
 /**
  * PRODUCT-LOOP-R5-MULTI-WEAPON-PRODUCT-COMPAT-R1｜**本批次验证账号的武器全表**（9 件）。
@@ -125,13 +167,45 @@ const CANONICAL_WEAPON_IDS = [
   'shotgun',
   'spear',
 ];
-/** 唯一被支持「完整 Run」的武器（= `runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS`）。 */
-const SUPPORTED_WEAPON_IDS = ['cannon'];
-/** 逐件审核矩阵 = 全部 − 支持（**不手写**：内容变了这张表跟着变）。 */
+/**
+ * 支持「完整 Run」的武器（= `runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS` 的**独立取证**）。
+ *
+ * ⚠️ PRODUCT-LOOP-R6：这张表从 `['cannon']` 扩为 **8 件显式能力登记**。改前 Run 底层把
+ *    运行武器硬绑 cannon ⇒ 只有 cannon 能进完整 Run；R6 把 base 改为「玩家装备里
+ *    装配顺序第一件正式武器」⇒ 只要那件武器**自己的** Runtime 完整，它就能进完整 Run
+ *    （用**它自己**的 canonical Def 跑，不套 Cannon 的数值 / 行为 / 弹道）。
+ *
+ * ⚠️ 本文件**不 import 源码**：这是同一份裁决结果的独立抄写，两边漂移由
+ *    `tests/productRunWeaponSourceOfTruthR6.test.ts`（R6-09 逐条门槛 + R6-11 真实物理 smoke）
+ *    机器钉死。登记门槛 5 条（① 正式可拥有 ② Snapshot 可解析 ③ behavior Runtime 存在
+ *    ④ Collision/Damage/Result 链成立 ⑤ 不需要新增玩法规则）逐条写在
+ *    `src/product/runCompatibility.ts` 模块头。
+ */
+const SUPPORTED_WEAPON_IDS = [
+  'cannon',
+  'flamethrower',
+  'hammer',
+  'laser',
+  'machineGun',
+  'rammer',
+  'saw',
+  'shotgun',
+];
+/** 逐件审核矩阵 = 全部 − 支持（**不手写**：内容变了这张表跟着变）⇒ R6 起恰好 = `['spear']`。 */
 const BLOCKED_WEAPON_MATRIX = CANONICAL_WEAPON_IDS.filter((id) => !SUPPORTED_WEAPON_IDS.includes(id));
+/** 放行矩阵 = 全部 − 被拒（同样真源驱动）⇒ R6 起 8 件（R6 新契约的正向取证）。 */
+const SUPPORTED_WEAPON_MATRIX = CANONICAL_WEAPON_IDS.filter((id) => SUPPORTED_WEAPON_IDS.includes(id));
 
-/** 首页提示文案（Queue 逐字给的两句；断言写死是为了防「提示被改成看不懂的话」）。 */
-const COMPAT_NOTICE = '当前原型仅支持加农炮进行完整冒险';
+/**
+ * 首页 / 车库提示文案（`runCompatibility` 里的两句；断言写死是为了防「提示被改成看不懂的话」）。
+ *
+ * ⚠️ PRODUCT-LOOP-R6：主轴提示从「当前原型**仅支持加农炮**进行完整冒险」改为
+ *    「当前原型**尚不支持这件武器**进行完整冒险」—— 被拒的理由不再是「不是 Cannon」，
+ *    而是「这件武器还没有完整的战斗 Runtime」⇒ 文案必须跟着换口径，
+ *    否则会出现「提示说只支持炮，但实际 8 件武器都能出发」这种**自相矛盾**的页面。
+ * ⚠️ `COMPAT_HINT`（下一步）**一字未改**。
+ */
+const COMPAT_NOTICE = '当前原型尚不支持这件武器进行完整冒险';
 const COMPAT_HINT = '请先调整战车';
 
 /**
@@ -234,8 +308,8 @@ async function clickSelector(page, sel) {
   /*
     ⚠️ PRODUCT-LOOP-R5-MULTI-WEAPON-PRODUCT-COMPAT-R1｜必须先 `scrollIntoViewIfNeeded()`（与
     `_e2e_product_loop.cjs` / `_e2e_product_reward.cjs` 同一处置）。内容池种子把武器槽从
-    3 张卡变成 9 张卡（本段 A4b 还要逐件点 8 件），排在后面的卡会落到 `.ph-garage-body`
-    的滚动区下方 ⇒ `boundingBox()` 仍给出矩形，但真实鼠标点的是**视口外**的坐标，
+    3 张卡变成 9 张卡（本段 A4b 两段矩阵合起来要把 9 件**每件都点一次**），排在后面的卡会落到
+    `.ph-garage-body` 的滚动区下方 ⇒ `boundingBox()` 仍给出矩形，但真实鼠标点的是**视口外**的坐标，
     点击落在别的元素上。⚠️ 这不是放宽断言：本文件所有判据一字未改。
   */
   const loc = page.locator(sel).first();
@@ -586,27 +660,42 @@ async function main() {
       `equipped=${home2.equippedWeaponId} blocked=${home2.startRunBlocked} href=${(home2.startRunHref ?? '').slice(0, 48)}… 链接装备槽=${loadoutBefore ? loadoutBefore.functionalSelections[WEAPON_SLOT] : 'n/a'}`,
     );
 
-    /* ============ A4b：**逐件**守门矩阵（本批次全部非支持武器，不只 hammer） ============ */
+    /* ============ A4b：**两段**真源驱动矩阵（被拒的 1 件 + 放行的 8 件） ============ */
 
     /*
-      A4–A10 用 `hammer` 一件把守门链路走全（真实点击 + 存档独立取证 + 真鼠标点不可执行按钮）。
-      A4b 换成**真源驱动**：把验证账号库存里**每一件**非支持武器都过一遍同一组判据 ——
-      「未支持武器明确阻止 / 禁止 silent fallback 到 Cannon / 禁止自动替玩家换 Cannon」。
+      A4–A10 用 `spear` 一件把**被拒**链条走全（真实点击 + 存档独立取证 + 真鼠标点不可执行按钮）。
+      A4b 换成**真源驱动**的两段矩阵 —— 因为 R6 之后「非 cannon 一律拒绝」这条口径已经没有了：
 
-      ⚠️ 判据与 A4–A10 **完全同一组**（不新增第二套口径）：
-        ① 真实点击这张卡 ⇒ 正式存档的主武器槽真的变成它（**独立**读 localStorage，不读探针）；
-        ② 车库状态块 = unsupported + 原因 + 明确提示；
-        ③ 回首页：`startRunBlocked === true` 且 `startRunHref === null`（**结构上**无法创建 Run）；
-        ④ 首页提示块真的画在页面上，且 `equippedWeaponId` **仍然是它**（没被偷偷换回 cannon）。
+        ① **被拒矩阵** `BLOCKED_WEAPON_MATRIX`（= 全部 − 支持，R6 起恰好 `['spear']`）——
+           仍过 A4–A10 的**同一组**判据（一字未改）：
+           「未支持武器明确阻止 / 禁止 silent fallback 到 Cannon / 禁止自动替玩家换 Cannon」。
+        ② **放行矩阵** `SUPPORTED_WEAPON_MATRIX`（= 全部 − 被拒，R6 起 8 件）——
+           **R6 新契约的正向取证**：每件登记武器装上去之后都**真的**能出发（有 href），
+           装备**不会被偷偷换掉**，而且出发链接里的装载载荷**真的**是它。
+
+      ⚠️ 两段都不 import 源码：矩阵由 `CANONICAL_WEAPON_IDS` 与 `SUPPORTED_WEAPON_IDS`
+         两张独立抄写的常量推导 ⇒ 源码侧清单一漂移，这里必须响。
+      ⚠️ 两段合起来覆盖全部 9 件（1 件被拒 + 8 件放行），没有一件武器落空。
     */
     const invWeaponIds = [...new Set((home2.weapons ?? []).map((w) => w.defId))].sort();
     const weaponNameOf = new Map((home2.weapons ?? []).map((w) => [w.defId, w.name]));
     log(
       invWeaponIds.join(',') === CANONICAL_WEAPON_IDS.join(','),
-      'A4b-0 验证账号的武器库存 = canonical 全表（9 件，**逐 id 相等**）⇒ 下面的矩阵覆盖全部非支持武器',
+      'A4b-0 验证账号的武器库存 = canonical 全表（9 件，**逐 id 相等**）⇒ 下面两段矩阵合起来覆盖全部 9 件',
       invWeaponIds.join(','),
     );
+    /*
+      ⚠️ 先钉一次**两段之和 = 全表**（互斥且完备）：若将来某件武器既不在放行集、
+         也不在想拒集（比如常量改错），这条会立刻响 —— 否则它会被「两段各自都通过」掩盖。
+    */
+    log(
+      BLOCKED_WEAPON_MATRIX.length + SUPPORTED_WEAPON_MATRIX.length === CANONICAL_WEAPON_IDS.length &&
+        BLOCKED_WEAPON_MATRIX.every((id) => !SUPPORTED_WEAPON_MATRIX.includes(id)),
+      `A4b-1 两段矩阵互斥且完备：被拒 ${BLOCKED_WEAPON_MATRIX.length} 件 + 放行 ${SUPPORTED_WEAPON_MATRIX.length} 件 = 全表 ${CANONICAL_WEAPON_IDS.length} 件`,
+      `被拒=[${BLOCKED_WEAPON_MATRIX.join(',')}] 放行=[${SUPPORTED_WEAPON_MATRIX.join(',')}]`,
+    );
 
+    /* ---- ① 被拒矩阵：明确阻止 / 不许静默回退 / 不许自动换炮 ---- */
     const matrixBad = [];
     for (const wid of BLOCKED_WEAPON_MATRIX) {
       await clickSelector(page, '[data-ph-action="open-garage"]');
@@ -639,14 +728,68 @@ async function main() {
       }
       log(
         ok,
-        `A4b 逐件守门：「${weaponNameOf.get(wid) ?? wid}」(${wid}) ⇒ 车库 unsupported + 首页无 href + 装备仍是它（**不自动换炮**）`,
+        `A4b 被拒：「${weaponNameOf.get(wid) ?? wid}」(${wid}) ⇒ 车库 unsupported + 首页无 href + 装备仍是它（**不自动换炮**）`,
         `slot=${slotW} equipped=${homeW.equippedWeaponId} href=${homeW.startRunHref}`,
       );
     }
     log(
-      matrixBad.length === 0 && BLOCKED_WEAPON_MATRIX.length === 8,
-      `A4b-9 **汇总**：${BLOCKED_WEAPON_MATRIX.length} 件非支持武器逐件审核全部通过（没有任何一件被静默放行）`,
+      matrixBad.length === 0 && BLOCKED_WEAPON_MATRIX.join(',') === 'spear',
+      `A4b-9 **被拒汇总**：${BLOCKED_WEAPON_MATRIX.length} 件 Runtime 不完整的武器逐件审核全部通过（没有任何一件被静默放行）· 矩阵 = [${BLOCKED_WEAPON_MATRIX.join(',')}]`,
       matrixBad.length === 0 ? '全部通过' : `失败：${matrixBad.join(' | ')}`,
+    );
+
+    /* ---- ② 放行矩阵：R6 新契约的正向取证（每件登记武器**真的**能出发） ---- */
+    const supportedBad = [];
+    for (const wid of SUPPORTED_WEAPON_MATRIX) {
+      await clickSelector(page, '[data-ph-action="open-garage"]');
+      await clickSelector(page, `[data-ph-weapon="${wid}"]`);
+      const storedW = await storageDump(page);
+      const garageW = await runCompatDom(page);
+      await clickSelector(page, '[data-ph-action="back-home"]');
+      const homeW = await probeHome(page);
+      const noticeW = await compatNoticeDom(page);
+      const slotW = storedWeaponSlot(storedW);
+      const loadoutW = decodeLoadoutFromHref(homeW.startRunHref ?? '');
+      const ok =
+        slotW === wid && // ① 正式存档真的换成了它（**独立**读 localStorage）
+        !!garageW &&
+        garageW.value === 'ok' && // ② 车库说「当前装备可以出发」（不再 unsupported）
+        homeW.view === 'home' &&
+        homeW.equippedWeaponId === wid && // ③ 装备仍是它（没有被换成别的）
+        homeW.startRunBlocked === false &&
+        !!homeW.startRunHref && // ④ **结构上真的能**创建 Run
+        homeW.runCompat.ok === true &&
+        homeW.runCompat.reason === 'ok' &&
+        /*
+          ⑤ 本局 base = 它自己。`baseWeaponDefId` 的定义就是 `equippedWeaponIds[0]`
+             （探针没单独报 base，这里按定义读同一个读数）。
+
+          ⚠️ 刻意**不**写 `equippedWeaponIds.length === 1`：默认车在 `top` 槽也装着 `hammer`
+             （同一份 profile 的既有事实，`equipped=` 载荷里能看到）⇒ 车上本来就可以有
+             **多件**武器。R6 的规则是「**装配顺序第一件**正式武器 = Run base」，
+             所以这里要钉的是「第一件就是刚点上的这件」，而不是「车上只有一件」。
+        */
+        homeW.runCompat.equippedWeaponIds[0] === wid &&
+        homeW.runCompat.equippedWeaponIds.includes(wid) &&
+        // ⑥ 出发链接真的带的是它（不是被静默换成 cannon）
+        !!loadoutW &&
+        loadoutW.functionalSelections[WEAPON_SLOT] === wid &&
+        noticeW === null; // ⑦ 没有残留的「不可执行」提示块
+      if (!ok) {
+        supportedBad.push(
+          `${wid}(view=${homeW.view} slot=${slotW} garage=${garageW ? garageW.value : 'n/a'} blocked=${homeW.startRunBlocked} href=${homeW.startRunHref} ok=${homeW.runCompat.ok} reason=${homeW.runCompat.reason} base=${(homeW.runCompat.equippedWeaponIds ?? [])[0]} 链接=${loadoutW ? loadoutW.functionalSelections[WEAPON_SLOT] : 'n/a'} notice=${noticeW ? noticeW.value : 'null'})`,
+        );
+      }
+      log(
+        ok,
+        `A4b 放行（R6 新契约）：「${weaponNameOf.get(wid) ?? wid}」(${wid}) ⇒ 车库 ok + 首页有 href + base 就是它自己（**不注入 Cannon**）`,
+        `slot=${slotW} base=${(homeW.runCompat.equippedWeaponIds ?? [])[0]} href=${(homeW.startRunHref ?? '').slice(0, 40)}…`,
+      );
+    }
+    log(
+      supportedBad.length === 0 && SUPPORTED_WEAPON_MATRIX.length === 8,
+      `A4b-11 **放行汇总**：${SUPPORTED_WEAPON_MATRIX.length} 件登记武器逐件审核全部通过（每件都真的能出发，且本局 base = 它自己）`,
+      supportedBad.length === 0 ? '全部通过' : `失败：${supportedBad.join(' | ')}`,
     );
 
     // 矩阵跑完后把装备放回 cannon —— B 段要真的进局

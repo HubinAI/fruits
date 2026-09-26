@@ -697,8 +697,14 @@ function el<K extends keyof HTMLElementTagNameMap>(
 /**
  * PRODUCT-LOOP-P0｜不支持完整 Run 时的**最小明确反馈**（Queue 必改 2）。
  *
- * Queue 逐字要求两句：「当前原型仅支持加农炮进行完整冒险」+「请先调整战车」，
+ * Queue 逐字要求两句（主轴提示 + 「请先调整战车」），
  * 并明写「**不要做复杂弹窗**」⇒ 这里就是一个内联的普通块，紧贴在 `[调整战车]` 按钮上方。
+ *
+ * ⚠️ PRODUCT-LOOP-R6：主轴提示的**口径已随能力登记一起改**（本文件一字未改文案）——
+ *    改前是「当前原型**仅支持加农炮**进行完整冒险」（因为 Run 底层把武器硬绑 cannon），
+ *    R6 起 Run 以「玩家装备的第一件正式武器」为 base ⇒ 被拒的理由只剩
+ *    「这件武器还没有完整的战斗 Runtime」⇒ 文案变成
+ *    「当前原型**尚不支持这件武器**进行完整冒险」（真源仍在 `runCompatibility`）。
  *
  * ⚠️ 文案**只来自** `runCompatibility`（`compat.notice` / `compat.hint`），
  *    页面里不出现第二份字面量 ⇒ 改口径只改一处。
@@ -1243,16 +1249,24 @@ export function mountProductHome(
      * Run Build 内容（heavyShell / twinCannon / fastReload / kineticBurst / tripleLoad）
      * **全部**围绕 cannon 派生，且 R1-C 只验证了「非 cannon 的第一场 Battle」。
      *
-     * 三条**不做**（Queue 逐字）：
-     *   ① 不得进入 Run；② **不得偷偷替换成 Cannon**；③ 不得创建半残 Run。
-     * ⇒ 因此这里**不是**「把 spear 换成 cannon 再放行」，而是**根本不给链接**：
+     * 三条**不做**（Queue 逐字）：① 不得进入 Run；② **不得偷偷替换成 Cannon**；
+     * ③ 不得创建半残 Run。
+     * ⇒ 因此这里**不是**「把不支持的武器换成 cannon 再放行」，而是**根本不给链接**：
      *    可执行时是 `<a href>`（地址由 `runReward.buildAdventureHref()` 产出），
      *    不可执行时是**没有 href 的 disabled 按钮** —— 「点了不会创建 Run」在结构上成立，
      *    而不是靠事件处理里 return（后者一旦漏掉一处就变成静默放行）。
      *
+     * ⚠️ PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH：上面的 P0 根因（硬绑 cannon）已从
+     *    **底层**修掉 —— Run 以「玩家装备里装配顺序第一件正式武器」为 base。因此「不可执行」
+     *    这个分支的**触发条件随之收窄**：不再是「不是 cannon」，而是
+     *    「车上没有武器」或「那件武器自己的 behavior Runtime 不存在」（例：`spear`）。
+     *    本段逻辑（`<a href>` ⇄ 无 href 的 disabled 按钮）**一字未改** —— 它本来就是
+     *    「按资格读数决定给不给链接」，与「什么算有资格」是两个问题（后者在
+     *    `runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS`）。
+     *
      * ⚠️ 判据来自 `fullRunCompat(draft)`（真实 `BuildDraft` + 正式内容库分类字段），
      *    **不是**页面里的字符串比较（必改 1）。
-     * ⚠️ 提示只给 Queue 给的两句文案 + 既有的「调整战车」入口（同一个 `toGarage`），
+     * ⚠️ 提示只给 `runCompatibility` 的两句文案 + 既有的「调整战车」入口（同一个 `toGarage`），
      *    不新增第二个入口、不做弹窗。
      */
     const compat = fullRunCompat(draft);
@@ -1616,12 +1630,18 @@ export function mountProductHome(
      * PRODUCT-LOOP-P0｜**Garage 必须能识别「当前可冒险状态」**（Queue 必改 3）。
      *
      * 必改 3 的三条边界，逐条落地：
-     *   - Spear / Hammer **仍然允许拥有 / 查看 / 装备**（本页一个字都没改装备流程，
+     *   - **所有**武器**仍然允许拥有 / 查看 / 装备**（本页一个字都没改装备流程，
      *     也没有从库存里删任何东西 —— 卡照画、按钮照点、`equipWeapon` 照旧放行）；
      *   - 但装完之后，玩家在**这里**就能看到「这辆车的当前装备跑不了完整冒险」，
      *     不必等回到首页撞上不可用的按钮；
      *   - 回到首页时「开始冒险」进入**不可执行**状态（见 `renderHome` 的守门），
      *     并给出「需要更换支持完整 Run 的武器」的明确提示。
+     *
+     * ⚠️ PRODUCT-LOOP-R6：上面第二 / 第三条**只在真的不支持时**成立。改前判据是
+     *    「不是 cannon ⇒ 不支持」，所以 `Spear / Hammer` 恒落在这一支；R6 起判据是
+     *    「第一件武器的 behavior Runtime 存不存在」⇒ 8 件登记武器（含 Hammer）在这里
+     *    读到的是 `ok` / 「当前装备可以出发」，只有 `spear` 这一类还落在不支持支。
+     *    本段**只看 `fullRunCompat`**，没有自己的第二套口径。
      *
      * ⚠️ 与首页守门**同一次判断来源**（`fullRunCompat(draft)`）⇒ 不会出现
      *    「车库说可以、首页说不可以」这种自相矛盾的页面。

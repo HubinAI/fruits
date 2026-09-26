@@ -121,8 +121,12 @@ const WEAPON_B_NAME = '刺';
  * 终点候选（与 `src/product/runReward.ts` 的 `REWARD_CHOICE_IDS` 同值）。
  *
  * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：从 `['cannon','spear','hammer']`
- *    **收窄为 `['cannon']`** —— 当前只有它同时具备完整 Run compatibility / 已验证 Run Buff /
- *    永久 Star 成长链（`FULL_RUN_SUPPORTED_WEAPON_IDS = ['cannon']`）。
+ *    **收窄为 `['cannon']`** —— 奖励只发**这一局真的用得上**的东西：终点奖励固定为
+ *    `cannon ★1 ×1`（它有完整的 R2 强化体系，是唯一有「打完一局就能强化」这条成长线的武器）。
+ *    ⚠️ PRODUCT-LOOP-R6：这张候选表**不再等于**「支持完整 Run 的武器表」——
+ *    R6 起后者是 8 件显式能力登记（`runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS`），
+ *    `spear` 仍被拒（它的 `behavior === 'ram'` 没有注册 Runtime）。
+ *    候选池仍然只有 cannon 是**奖励设计**的决定，与守门清单是两件事。
  *    顺序仍 = 界面上**从上到下**的展示顺序 ⇒ `CLAIM_INDEX` 同时就是「点第几张卡」。
  */
 const CHOICE_IDS = ['cannon'];
@@ -139,6 +143,18 @@ const CHOICE_NAMES = { cannon: '炮', spear: '刺', hammer: '锤' };
  */
 const CLAIM_ID = 'cannon';
 const CLAIM_NAME = CHOICE_NAMES[CLAIM_ID];
+/**
+ * 守门提示两句（= `runCompatibility` 的 `FULL_RUN_UNSUPPORTED_LEAD` / `FULL_RUN_UNSUPPORTED_HINT`）。
+ *
+ * ⚠️ PRODUCT-LOOP-R6：主轴提示从「当前原型**仅支持加农炮**进行完整冒险」改为
+ *    「当前原型**尚不支持这件武器**进行完整冒险」—— 被拒的理由不再是「不是 Cannon」，
+ *    而是「这件武器还没有完整的战斗 Runtime」（本文件 E1/E2 装的 `spear` 正是这一类）。
+ *    `HINT`（下一步提示）**一字未改**。
+ * ⚠️ 抽成常量而不是继续写两遍字面量：本文件里同一句话被断言**两次**（探针 + 真实 DOM），
+ *    两处写死同一条字符串时改一处忘一处就会静默漏掉一半取证。
+ */
+const UNSUPPORTED_NOTICE = '当前原型尚不支持这件武器进行完整冒险';
+const UNSUPPORTED_HINT = '请先调整战车';
 /** 本文件要点第几张卡（= `CLAIM_ID` 在候选池里的下标；与卡片矩形一一对应）。 */
 const CLAIM_INDEX = CHOICE_IDS.indexOf(CLAIM_ID);
 /**
@@ -870,12 +886,12 @@ async function main() {
         home3.startRunHref === null &&
         home3.runCompat.ok === false &&
         home3.runCompat.reason === 'unsupported-weapon' &&
-        home3.runCompat.notice === '当前原型仅支持加农炮进行完整冒险' &&
-        home3.runCompat.hint === '请先调整战车' &&
+        home3.runCompat.notice === UNSUPPORTED_NOTICE &&
+        home3.runCompat.hint === UNSUPPORTED_HINT &&
         !!blockedNotice &&
         blockedNotice.value === 'unsupported' &&
-        blockedNotice.text.includes('当前原型仅支持加农炮进行完整冒险') &&
-        blockedNotice.text.includes('请先调整战车'),
+        blockedNotice.text.includes(UNSUPPORTED_NOTICE) &&
+        blockedNotice.text.includes(UNSUPPORTED_HINT),
       `E1 装着 Weapon B（${WEAPON_B_NAME}）时「开始冒险」进入**不可执行**状态：没有 href + 资格=不支持 + 两句提示（探针与真实 DOM 都取证）`,
       `blocked=${home3.startRunBlocked} href=${home3.startRunHref} notice=${home3.runCompat.notice} hint=${home3.runCompat.hint}`,
     );

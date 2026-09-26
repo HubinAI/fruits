@@ -333,11 +333,15 @@ describe('B. 首入 ⇒ 内容池铺满（验收 ② / ④）', () => {
     expect(getCount(g.inv, 'thruster', 1), 'thruster ★1 可用').toBeGreaterThanOrEqual(1);
   });
 
-  it('CP-05b **不放宽**「完整 Run 只支持 cannon」：本种子不改产品裁决', () => {
+  it('CP-05b **不放宽**「完整 Run 支持清单」：本种子不改产品裁决', () => {
     seedExistingAccount();
     openGrowthSession(defaultPlayerDraft());
-    // 裁决本身原样（内容池是「已拥有」，不是「Run 兼容」）
-    expect([...FULL_RUN_SUPPORTED_WEAPON_IDS]).toEqual(['cannon']);
+    /*
+      PRODUCT-LOOP-R6 起这里**不再**断言「清单 = ['cannon']」（那是旧契约，清单已扩为显式能力登记）。
+      本用例真正要钉的是**边界**：内容池种子（「已拥有」）与完整 Run 兼容（「能不能跑」）是两件事
+      ⇒ 断言换成「清单仍以 cannon 为原生武器」+ 下面两条源码守卫（那才是真守卫）。
+    */
+    expect(FULL_RUN_SUPPORTED_WEAPON_IDS).toContain('cannon');
     // 源码守卫：本种子模块**不**引用 runCompatibility / 不改那条清单
     const src = strip(readSource('product/r5ContentPoolSeed.ts'));
     expect(src.includes('runCompatibility'), '不得引用 runCompatibility').toBe(false);

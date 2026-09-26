@@ -444,27 +444,35 @@ describe('PRODUCT-LOOP-P0-LEGACY｜B. 产品基线可达性（必改 3 / 必改 
    ============================================================================ */
 
 describe('PRODUCT-LOOP-P0-LEGACY｜C. 兼容性 P0 保持（必改 5）', () => {
-  it('LM-40 cannon 仍可进入完整 Run；spear / hammer 仍被完整 Run 入口守门', () => {
+  it('LM-40 cannon 仍可进入完整 Run；Runtime 不完整的武器仍被入口守门（必改 D）', () => {
     expect(canStartFullRun(equippedDraft('cannon'))).toBe(true);
-    for (const defId of ['spear', 'hammer']) {
-      expect(canStartFullRun(equippedDraft(defId)), defId).toBe(false);
-    }
+    // PRODUCT-LOOP-R6（契约变更）：hammer 现在**可以**进 —— 它有完整的 `hammerBehavior`，
+    // 且 Run 已不再把基准武器硬绑 cannon（它以 hammer 自己的 canonical Def 跑）。
+    expect(canStartFullRun(equippedDraft('hammer')), 'hammer 有完整 Runtime ⇒ 放行').toBe(true);
+    // 守门对象换成「Runtime 不完整」的那件：spear 的 `behavior === 'ram'` 没有工厂
+    expect(canStartFullRun(equippedDraft('spear')), 'spear').toBe(false);
   });
 
-  it('LM-41 **Case F**：spear / hammer 的出发地址在 Run 侧仍被判 `unsupported-loadout`（第二层防线未失效）', () => {
-    for (const defId of ['spear', 'hammer']) {
+  it('LM-41 **Case F**：Runtime 不完整武器的出发地址在 Run 侧仍被判 `unsupported-loadout`（第二层防线未失效）', () => {
+    for (const defId of ['spear']) {
       const r = resolveRunPlayerLoadout(searchOf(equippedDraft(defId)));
       expect(r.blocked, defId).toBe(true);
       expect(r.fallback, defId).toBe('unsupported-loadout');
     }
+    // R6：hammer 的地址现在走得通（第二层防线放行「有完整 Runtime」的武器）
+    const hammer = resolveRunPlayerLoadout(searchOf(equippedDraft('hammer')));
+    expect(hammer.blocked).toBe(false);
+    expect(hammer.fallback).toBe('none');
     const ok = resolveRunPlayerLoadout(searchOf(equippedDraft('cannon')));
     expect(ok.blocked).toBe(false);
     expect(ok.fallback).toBe('none');
   });
 
-  it('LM-42 迁移**不产生**新的兼容性口径：RunModifier 的强 invariant 一字未动', () => {
+  it('LM-42 迁移**不产生**新的兼容性口径：RunModifier 的强 invariant 仍在（判据已参数化）', () => {
     const code = strip(readFileSync(join(REPO_ROOT, 'src', 'lab', 'portraitBattleLab', 'runModifiers.ts'), 'utf8'));
     expect(code.includes('snapshotHasRunBaseWeapon')).toBe(true);
+    // PRODUCT-LOOP-R6：基准武器改为**从装备解析**（参数化），不是新增第二套兼容口径
+    expect(code.includes('resolveRunBaseWeaponDefId')).toBe(true);
     expect(code.includes('throw new Error')).toBe(true);
     expect(code.includes('catch')).toBe(false);
   });

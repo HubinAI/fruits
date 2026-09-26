@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { registry } from '../src/core/content';
+import { OFFICIAL_PARTS } from '../src/core/partInventory';
 import { buildSnapshotFromDraft, type BuildDraft } from '../src/lab/buildEditorModel';
 import { validateSnapshot } from '../src/core/buildValidator';
 import {
@@ -37,6 +38,7 @@ import {
   RUN_MODIFIERS,
   RUN_MODIFIER_OVERLAY,
   applyRunModifiersToSnapshot,
+  resolveRunBaseWeaponDefId,
   runOverlayDefId,
   snapshotHasRunBaseWeapon,
 } from '../src/lab/portraitBattleLab/runModifiers';
@@ -44,6 +46,7 @@ import { runLoadoutCompatOfDraft } from '../src/lab/portraitBattleLab/runLoadout
 import { resolveRunPlayerLoadout } from '../src/lab/portraitBattleLab/runPageScene';
 import { RunBattleRuntime } from '../src/lab/portraitBattleLab/runBattleRuntime';
 import {
+  FULL_RUN_NO_WEAPON_LEAD,
   FULL_RUN_SUPPORTED_WEAPON_IDS,
   FULL_RUN_UNSUPPORTED_HINT,
   FULL_RUN_UNSUPPORTED_LEAD,
@@ -71,9 +74,15 @@ const strip = (src: string): string =>
 
 /* --------------------------------------------------------------- 夹具 */
 
-/** 受支持的那一件 / 不受支持的那两件（都由正式奖励池给出，不是凭空写的 id）。 */
+/**
+ * PRODUCT-LOOP-R6 之后夹具的划分变了（契约变更，不是放宽）：
+ *   - `SUPPORTED` = 能力登记表里的任一件（下面从真源现读，不再写死 cannon）；
+ *   - `UNSUPPORTED` = **Runtime 不完整**的武器（`spear` 的 `behavior === 'ram'`
+ *     在 `behaviorRegistry.FACTORIES` 里没有工厂）—— 它仍然是**合法武器**，
+ *     只是跑不了完整 Run（必改 D）。改前 hammer 也在这一组，现在它在登记表里。
+ */
 const SUPPORTED = 'cannon';
-const UNSUPPORTED: readonly string[] = ['spear', 'hammer'];
+const UNSUPPORTED: readonly string[] = ['spear'];
 
 /**
  * 「玩家身上那件装备」= 产品侧真实默认车 + 主武器槽换成指定武器。
@@ -107,36 +116,41 @@ const searchOf = (draft?: BuildDraft | null): string => adventureHref(draft).spl
    ============================================================================ */
 
 describe('PRODUCT-LOOP-P0｜A. 产品层单一判断 canStartFullRun（必改 1）', () => {
-  it('LC-01 支持清单 = 正式基准武器，且与 Lab 侧真源**同值**（两边各自声明、机器钉死）', () => {
+  it('LC-01 支持清单 = **显式能力登记**（不是全部正式部件），且每项都必须是正式武器', () => {
     /*
-      为什么是「各自声明 + 测试钉死」而不是「一处 import 另一处」：
-        依赖方向是单向的 —— `core` / `lab` 不许反向依赖 `src/product/`；
-        而产品侧也不许 import `lab/portraitBattleLab/*`（`R22b`：`src/` 里不得出现
-        `portraitBattleLab` 字样，**含 import 路径**）。
-      ⇒ 两个常量必然各写一份，一致性只能靠断言（与 `STAR_DAMAGE_MAX_STAR` /
-        `INVENTORY_MAX_STAR` 的既有做法同型）。
+      PRODUCT-LOOP-R6 起这里**不再**断言「清单 = [RUN_BASE_WEAPON_DEF_ID]」——
+      那是契约变更：清单的语义已从「Run 硬绑的那一件」变成「**经过能力登记、可以跑完整 Run
+      的武器**」，而 `RUN_BASE_WEAPON_DEF_ID` 现在的语义是「R2 武器强化体系的归属武器」（= cannon）。
+      ⇒ 换成两条**更强**的断言：① 每项都是正式武器；② 清单 ≠ 全部正式部件（必改 3 明令）。
     */
-    expect(FULL_RUN_SUPPORTED_WEAPON_IDS).toEqual([RUN_BASE_WEAPON_DEF_ID]);
-    expect(RUN_BASE_WEAPON_DEF_ID).toBe('cannon');
-    // 清单里的每一项都必须是**正式武器**（否则「支持完整 Run」支持了一个不存在的件）
     for (const defId of FULL_RUN_SUPPORTED_WEAPON_IDS) {
       expect(registry.functionals.get(defId)?.category, `${defId} 必须是正式武器`).toBe('weapon');
+      expect(OFFICIAL_PARTS, `${defId} 必须在正式可拥有部件里`).toContain(defId);
     }
+    // 必改 3：**明确禁止**「= 所有 OFFICIAL_PARTS」（那是含 Gadget 的 11 件）
+    expect(FULL_RUN_SUPPORTED_WEAPON_IDS.length).toBeLessThan(OFFICIAL_PARTS.length);
+    // cannon 必须仍在其列（R2 强化体系的原生武器，现有产品闭环依赖它）
+    expect(FULL_RUN_SUPPORTED_WEAPON_IDS).toContain(RUN_BASE_WEAPON_DEF_ID);
   });
 
-  it('LC-02 **Case B / Case C**：非 cannon 一律不支持（spear / hammer / laser / saw）', () => {
+  it('LC-02 **Case B / Case C**：Runtime 不完整的武器一律不支持；登记表内的武器全部放行', () => {
     expect(canStartFullRun(equippedDraft(SUPPORTED)), 'cannon 必须可以开始完整 Run').toBe(true);
-    for (const defId of [...UNSUPPORTED, 'laser', 'saw']) {
+    for (const defId of UNSUPPORTED) {
       const compat = fullRunCompat(equippedDraft(defId));
       expect(compat.ok, `${defId} 不得被判定为支持完整 Run`).toBe(false);
       expect(compat.reason, `${defId} 的拒绝原因`).toBe('unsupported-weapon');
       // 不受支持 ≠ 非法：装备本身仍然过正式校验、仍然可以拥有 / 装备（必改 3）
       expect(supportsFullRun(defId)).toBe(false);
       expect(registry.functionals.get(defId)?.category).toBe('weapon');
+      expect(OFFICIAL_PARTS, `${defId} 是正式可拥有武器，只是跑不了完整 Run`).toContain(defId);
     }
     // 反向：清单里有的就必须放行（防止「一律拒绝」也能让上面的断言通过）
     for (const defId of FULL_RUN_SUPPORTED_WEAPON_IDS) {
-      expect(canStartFullRun(equippedDraft(defId))).toBe(true);
+      expect(canStartFullRun(equippedDraft(defId)), `${defId} 必须放行`).toBe(true);
+    }
+    // 契约变更的**正面取证**：改前被拒、现在放行的那几件（各自用自己的 canonical Def 跑）
+    for (const defId of ['hammer', 'laser', 'saw']) {
+      expect(canStartFullRun(equippedDraft(defId)), `${defId} 现在必须放行`).toBe(true);
     }
   });
 
@@ -156,12 +170,20 @@ describe('PRODUCT-LOOP-P0｜A. 产品层单一判断 canStartFullRun（必改 1�
     expect(bare.equippedWeaponIds).toEqual([]);
   });
 
-  it('LC-04 提示文案 = Queue 逐字两句；可执行时两条都为 null（不画多余提示）', () => {
-    const bad = fullRunCompat(equippedDraft('hammer'));
-    expect(bad.notice).toBe('当前原型仅支持加农炮进行完整冒险');
-    expect(bad.notice).toBe(FULL_RUN_UNSUPPORTED_LEAD);
-    expect(bad.hint).toBe('请先调整战车');
-    expect(bad.hint).toBe(FULL_RUN_UNSUPPORTED_HINT);
+  it('LC-04 提示文案：三种 reason 各自对应；可执行时两条都为 null（不画多余提示）', () => {
+    // ① 有武器、但这件武器 Runtime 不完整（spear）⇒ 「不支持这件武器」
+    const unsupported = fullRunCompat(equippedDraft('spear'));
+    expect(unsupported.notice).toBe('当前原型尚不支持这件武器进行完整冒险');
+    expect(unsupported.notice).toBe(FULL_RUN_UNSUPPORTED_LEAD);
+    expect(unsupported.hint).toBe('请先调整战车');
+    expect(unsupported.hint).toBe(FULL_RUN_UNSUPPORTED_HINT);
+    // ② 车上**没有武器** ⇒ 与 ① 分开说（文案必须不同，否则玩家找不到原因）
+    const bare = fullRunCompat({ ...defaultPlayerDraft(), functionalSelections: {} });
+    expect(bare.reason).toBe('no-weapon');
+    expect(bare.notice).toBe('车上还没有武器，无法开始完整冒险');
+    expect(bare.notice).toBe(FULL_RUN_NO_WEAPON_LEAD);
+    expect(bare.notice).not.toBe(FULL_RUN_UNSUPPORTED_LEAD);
+    // ③ 可执行 ⇒ 两条都是 null
     const good = fullRunCompat(equippedDraft('cannon'));
     expect(good.notice).toBeNull();
     expect(good.hint).toBeNull();
@@ -178,7 +200,8 @@ describe('PRODUCT-LOOP-P0｜B. Run 创建资格（必改 4）', () => {
       const res = resolveRunPlayerLoadout(searchOf(equippedDraft(defId)));
       expect(res.blocked, `${defId} 必须禁止创建 Run`).toBe(true);
       expect(res.fallback).toBe('unsupported-loadout');
-      expect(res.blockedReason).toBe('no-base-weapon');
+      // 拒绝理由 = **Runtime 不完整**（不是「不是 cannon」，也不是「没有武器」）—— 必改 D
+      expect(res.blockedReason).toBe('no-weapon-runtime');
     }
     // Case D 的原形：旧 URL / stale href 里手工塞一份不兼容装载 —— 与「产品侧产出」无关，
     // 只要 search 里是它就必须被拒绝（这正是「测试入口 / 旧 Profile」那条路径）。
@@ -270,40 +293,62 @@ describe('PRODUCT-LOOP-P0｜C. 真实战斗创建（必改 6 的 Case A / Case E
     }
   });
 
-  it('LC-11 **Case E（结构性守卫）**：不存在「heavyShell + no cannon」进入真实 Battle Runtime', () => {
+  it('LC-11 **Case E（结构性守卫）**：Cannon 的武器强化不会被注入到别的武器上', () => {
     /*
-      Case E 要求的是「**不存在**」这种进入 —— 因此这里钉死它的**反面**：
-      这种组合在构造战斗运行时**必须响亮失败**，而不是被静默跳过 / 原样返回。
-      ⚠️ 这正是必改 5：UI / Choice 层把不兼容 Modifier 送进 Runtime 本身就是程序错误，
-         所以这条例外**不该**被处理掉，只该在创建资格那一层被提前拦住（LC-05）。
+      PRODUCT-LOOP-R6 起这条断言的**对象变了**：改前它钉的是「heavyShell + 没有 cannon ⇒ throw」
+      （那时基准武器硬绑 cannon）；现在基准武器 = 装备本身，所以真正要钉的是**必改 2**：
+      `heavyShell` 这套 overlay 属于 Cannon（behavior / 字段名全是 Cannon 的），
+      装备 Hammer 时它**一项都不适用** —— 不得把 Cannon 的 behavior / projectile / recoil
+      套到 Hammer 上，也不得把 Hammer 的件改写成 Cannon 的 overlay。
     */
-    const bad = equippedDraft('spear');
-    expect(() =>
-      new RunBattleRuntime({
-        build: ['heavyShell'],
-        carriedHp: null,
-        encounterId: 'ProtoRusher',
-        playerDraft: bad,
-        playerLoadoutTag: 'profile-equipped',
-      }),
-    ).toThrow(/本局装载里没有 "cannon"/);
+    const rt = new RunBattleRuntime({
+      build: ['heavyShell'],
+      carriedHp: null,
+      encounterId: 'ProtoRusher',
+      playerDraft: equippedDraft('hammer'),
+      playerLoadoutTag: 'profile-equipped',
+    });
+    try {
+      const slot = rt.playerSnapshot.functionals.find((f) => f.hardpointId === WEAPON_SLOT);
+      expect(slot?.defId, 'Hammer 必须用它自己的 canonical Def').toBe('hammer');
+      expect(slot?.defId, '不得被重映射到 Cannon 的 overlay 件').not.toBe(
+        runOverlayDefId('heavyShell'),
+      );
+      expect(slot?.defId).not.toBe(RUN_BASE_WEAPON_DEF_ID);
+      // 战斗世界真的建起来了（不是「没抛错就算过」）
+      expect(rt.playerWeapons().length).toBeGreaterThan(0);
+    } finally {
+      rt.dispose();
+    }
   });
 
   it('LC-12 创建期资格与运行时判据**同源**（不可能一处放行、另一处拒绝）', () => {
-    // 同一个判据函数被两边使用：存在基准武器 ⇔ 注入可成功
-    for (const defId of [SUPPORTED, ...UNSUPPORTED]) {
+    /*
+      同源现在有两层含义，两层都必须成立：
+        ① 「基准武器」两侧解析的是**同一件事**（装配顺序第一件正式武器）；
+        ② 「放行」在局内资格与产品登记表之间一致（都由 Runtime 存在性决定）。
+      ⚠️ 创建期资格不再与「注入会不会 throw」互为反面 —— 非 Cannon 装备的合法装载
+         **既不 throw 也不放行到别的武器**（武器项不适用），这与「拒绝创建」是两件事。
+    */
+    for (const defId of ['cannon', 'hammer', 'laser', 'saw', ...UNSUPPORTED]) {
       const draft = equippedDraft(defId);
       const snap = buildSnapshotFromDraft(draft, registry, 'lc');
-      const hasBase = snapshotHasRunBaseWeapon(snap);
-      expect(runLoadoutCompatOfDraft(draft).ok, `${defId}：两处判据必须一致`).toBe(hasBase);
-      if (hasBase) {
-        expect(() => applyRunModifiersToSnapshot(snap, 'heavyShell')).not.toThrow();
-      } else {
-        expect(() => applyRunModifiersToSnapshot(snap, 'heavyShell')).toThrow();
-      }
+      // ① 基准武器 = 装备的那一件；装载里有可运行武器
+      const base = resolveRunBaseWeaponDefId(snap, registry);
+      expect(base, `${defId}：基准武器必须解析出来`).toBe(defId);
+      expect(snapshotHasRunBaseWeapon(snap, registry), `${defId}：装载里有正式武器`).toBe(true);
+      // ② 注入路径永不 throw（没有『找不到 cannon』这条理由了）+ 放行 ⇔ 登记表
+      expect(() => applyRunModifiersToSnapshot(snap, 'heavyShell', false, base)).not.toThrow();
+      const ok = runLoadoutCompatOfDraft(draft).ok;
+      expect(ok, `${defId}：局内资格必须与产品登记表一致`).toBe(supportsFullRun(defId));
     }
-    // 相机 / 辅助件不构成「有基准武器」（存在性判据只看武器的那一件）
-    expect(snapshotHasRunBaseWeapon(buildSnapshotFromDraft(equippedDraft('cannon'), registry, 'lc'))).toBe(true);
+    // 相机 / 辅助件不构成「有基准武器」（判据只看武器的那一件）
+    expect(
+      snapshotHasRunBaseWeapon(
+        buildSnapshotFromDraft(equippedDraft('cannon'), registry, 'lc'),
+        registry,
+      ),
+    ).toBe(true);
   });
 });
 
@@ -363,9 +408,17 @@ describe('PRODUCT-LOOP-P0｜D. 源码守卫', () => {
     const body = code.slice(fnAt, code.indexOf('\n}', fnAt));
     expect(body, '必须仍然显式抛错').toContain('throw new Error');
     expect(body, '不许 try/catch').not.toContain('catch');
-    // 判据本体被抽成共享函数（创建期资格用的是**同一个**）—— 不是第二套定义
-    expect(body).toContain('snapshotHasRunBaseWeapon');
+    /*
+      PRODUCT-LOOP-R6：判据从「有没有 cannon」变成「有没有**参数传进来的**基准武器」——
+      因此守卫跟着换成两条更强的：
+        ① 基准武器只能来自参数（不许写死某件武器）；
+        ② 注入路径里**不得再出现** `'cannon'` 字面量（否则「装备什么就跑什么」就可能被写死的东西劫持）。
+      「装载里有没有基准武器」这个**判据本体**仍然存在且共享（创建期资格用的是同一份解析）。
+    */
+    expect(body, '基准武器必须来自参数').toContain('baseWeaponDefId');
+    expect(body.includes("'cannon'"), '注入路径不得出现写死的 cannon 字面量').toBe(false);
     expect(code).toContain('export function snapshotHasRunBaseWeapon(');
+    expect(code).toContain('export function resolveRunBaseWeaponDefId(');
   });
 
   it('LC-23 冻结项：没有新 Spear / Hammer Buff，既有 Run 强化一字未改', () => {
@@ -379,10 +432,14 @@ describe('PRODUCT-LOOP-P0｜D. 源码守卫', () => {
     for (const id of Object.keys(RUN_MODIFIER_OVERLAY)) {
       expect(/spear|hammer|pike|lance/i.test(id), `${id} 看起来像新武器专属 Buff`).toBe(false);
     }
-    // 基准武器仍是 cannon（不许给非 cannon 偷偷补一个基准武器）
+    // R2 强化体系的**归属武器**仍是 cannon（不许给别的武器偷偷补一套强化）
     expect(RUN_BASE_WEAPON_DEF_ID).toBe('cannon');
-    // 产品侧也没有把 spear / hammer 塞进支持清单
+    // 每一个「改武器数值」的 overlay 仍然只声明 Cannon 的 behavior ⇒ 不会渗到别的武器上
+    for (const id of Object.keys(RUN_MODIFIER_OVERLAY) as (keyof typeof RUN_MODIFIER_OVERLAY)[]) {
+      const overlay = RUN_MODIFIER_OVERLAY[id];
+      if (overlay.affectsWeapon) expect(overlay.behavior).toBe('cannon');
+    }
+    // spear 仍被明确拒绝 —— 但**理由已从「不是 cannon」变成「Runtime 不完整」**（必改 D）
     expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('spear');
-    expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('hammer');
   });
 });
