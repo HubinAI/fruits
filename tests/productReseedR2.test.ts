@@ -58,6 +58,7 @@ import { saveClaimLedger } from '../src/product/playerProfile';
 import { markR3MovementSeed } from '../src/product/r3MovementChoiceSeed';
 // PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：第四份一次性迁移的标记（隔离变量用）
 import { markR4BodySeed } from '../src/product/r4BodyChoiceSeed';
+import { markR5ContentPoolSeed } from '../src/product/r5ContentPoolSeed';
 
 const INV_KEY = 'strongfruit.ownedParts.v2';
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
@@ -160,6 +161,10 @@ function seedConsumedProfile(build: BuildDraft = consumedBuild()): void {
   markR2Onboarding();
   markR3MovementSeed();
   markR4BodySeed();
+  // ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜第五份（`markR5ContentPoolSeed()`）：
+  //    R5 内容池种子**同样会写库存**（给全部 `OFFICIAL_PARTS` 补 ★1 ×1）⇒ 同一条隔离纪律
+  //    （与第三 / 第四份逐条同源）。这是隔离变量，不是放宽断言。
+  markR5ContentPoolSeed();
   saveClaimLedger({ grantedRunIds: ['run-r2-validation'] });
   store.setItem(PROGRESS_KEY, JSON.stringify({ cleared: 3, best: 7 }));
 }
@@ -314,6 +319,12 @@ describe('PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜B. 幂等：只执行一�
     markR2Onboarding();
     // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 预置其标记
     markR3MovementSeed();
+    // ⚠️ 隔离变量：第五份一次性迁移（R5 内容池种子）**同样会写库存**
+    //    （给全部 `OFFICIAL_PARTS` 补 ★1 ×1）⇒ 预置其标记；否则本文件所有
+    //    「库存零写入 / 逐字节不变」的断言都会被它的**合法**写入打破。
+    //    这是隔离变量，不是放宽断言 —— 那份种子的契约由
+    //    `tests/productContentPoolSeed.test.ts` 单独覆盖。
+    markR5ContentPoolSeed();
     saveClaimLedger({ grantedRunIds: ['run-x'] });
     const invBefore = store.getItem(INV_KEY);
 
@@ -385,6 +396,12 @@ describe('PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜C. 四个「一个字节�
     savePlayerBuild(consumedBuild());
     // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 预置其标记
     markR3MovementSeed();
+    // ⚠️ 隔离变量：第五份一次性迁移（R5 内容池种子）**同样会写库存**
+    //    （给全部 `OFFICIAL_PARTS` 补 ★1 ×1）⇒ 预置其标记；否则本文件所有
+    //    「库存零写入 / 逐字节不变」的断言都会被它的**合法**写入打破。
+    //    这是隔离变量，不是放宽断言 —— 那份种子的契约由
+    //    `tests/productContentPoolSeed.test.ts` 单独覆盖。
+    markR5ContentPoolSeed();
     saveClaimLedger({ grantedRunIds: ['run-x'] }); // 有领奖记录，但没跑过 onboarding
     const invBefore = store.getItem(INV_KEY);
 
@@ -404,6 +421,12 @@ describe('PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜C. 四个「一个字节�
     markR2Onboarding(); // 有旧标记，但一次奖都没领过
     // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 预置其标记
     markR3MovementSeed();
+    // ⚠️ 隔离变量：第五份一次性迁移（R5 内容池种子）**同样会写库存**
+    //    （给全部 `OFFICIAL_PARTS` 补 ★1 ×1）⇒ 预置其标记；否则本文件所有
+    //    「库存零写入 / 逐字节不变」的断言都会被它的**合法**写入打破。
+    //    这是隔离变量，不是放宽断言 —— 那份种子的契约由
+    //    `tests/productContentPoolSeed.test.ts` 单独覆盖。
+    markR5ContentPoolSeed();
     expect(hasPrototypeClaim()).toBe(false);
     const invBefore = store.getItem(INV_KEY);
 
@@ -423,6 +446,12 @@ describe('PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜C. 四个「一个字节�
     markR2Onboarding();
     // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 预置其标记
     markR3MovementSeed();
+    // ⚠️ 隔离变量：第五份一次性迁移（R5 内容池种子）**同样会写库存**
+    //    （给全部 `OFFICIAL_PARTS` 补 ★1 ×1）⇒ 预置其标记；否则本文件所有
+    //    「库存零写入 / 逐字节不变」的断言都会被它的**合法**写入打破。
+    //    这是隔离变量，不是放宽断言 —— 那份种子的契约由
+    //    `tests/productContentPoolSeed.test.ts` 单独覆盖。
+    markR5ContentPoolSeed();
     saveClaimLedger({ grantedRunIds: ['run-x'] });
     const invBefore = store.getItem(INV_KEY);
 
@@ -493,6 +522,12 @@ describe('PRODUCT-LOOP-R2-VALIDATION-STATE-RESEED-R1｜D. 装备被拒 ⇒ 原�
     markR2Onboarding();
     // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 预置其标记
     markR3MovementSeed();
+    // ⚠️ 隔离变量：第五份一次性迁移（R5 内容池种子）**同样会写库存**
+    //    （给全部 `OFFICIAL_PARTS` 补 ★1 ×1）⇒ 预置其标记；否则本文件所有
+    //    「库存零写入 / 逐字节不变」的断言都会被它的**合法**写入打破。
+    //    这是隔离变量，不是放宽断言 —— 那份种子的契约由
+    //    `tests/productContentPoolSeed.test.ts` 单独覆盖。
+    markR5ContentPoolSeed();
     saveClaimLedger({ grantedRunIds: ['run-x'] });
     const invBefore = store.getItem(INV_KEY);
     const buildBefore = store.getItem(BUILD_KEY);

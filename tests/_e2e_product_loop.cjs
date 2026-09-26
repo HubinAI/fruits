@@ -147,6 +147,27 @@ const CLAIM_INDEX = CHOICE_IDS.indexOf(CLAIM_ID);
  *    「第一局胜利就能凑满 5/5」刻意抬起来的，因此必须在这里独立取证。
  */
 const SEED_COUNTS = { cannon: 4, spear: 1, hammer: 1 };
+/**
+ * PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜新账号**已拥有的全部正式武器**（`category === 'weapon'`）。
+ *
+ * ⚠️ 真源 = `src/core/partOptions.ts` 的 `PART_OPTIONS` 去 `EMPTY` 后再按 `registry.functionals`
+ *    的 `category === 'weapon'` 过滤，并按 id 字典序排列（= `playerLoadout.weaponDefs()` 的顺序，
+ *    也 = Garage 卡片从上到下的顺序）。
+ * ⚠️ 内容池种子把 11 件正式功能件全部补到 ★1 ⇒ 武器槽从 3 张变 9 张。
+ *    `pushRod` / `thruster` 是 **gadget**、不在本表里（它们是功能件但不是武器）。
+ * ⚠️ 不写死「9」这个数字：A1b 用它做**逐 id 相等**断言 —— 少一张 / 多一张 / 换 id 都红。
+ */
+const CANONICAL_WEAPON_IDS = [
+  'cannon',
+  'flamethrower',
+  'hammer',
+  'laser',
+  'machineGun',
+  'rammer',
+  'saw',
+  'shotgun',
+  'spear',
+];
 /** 满 stack 阈值（与 `playerGrowth.FUSE_STACK` 同值；让断言能钉死「4/5」这个读数）。 */
 const FUSE_STACK = 5;
 /** 候选卡底色（`runPage.ts` 的 `COLORS.cardBg`）—— 用于证明卡片真的画在画布上。 */
@@ -515,15 +536,24 @@ async function main() {
       'A1 **新账号的成长起点**（R2-A 验收 ①）：cannon ★1 4/5、另两件候选各 1/5；没有领奖账本（后面的 +1 一定是本局产生的）',
       `fresh=${home0.growth.fresh} seeded=${home0.growth.seeded} cannon=${invCount(stored0, 'cannon')} ${WEAPON_B}=${invCount(stored0, WEAPON_B)} ${WEAPON_PRE}=${invCount(stored0, WEAPON_PRE)}`,
     );
+    /*
+      ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜武器卡**数量基线**变了（非放宽）：
+      一次性「正式内容池」种子把 `OFFICIAL_PARTS` 十一件功能件全部补到 ★1 ≥1 件
+      （其中 `category === 'weapon'` 的 9 件）⇒ 武器槽卡片从 3 张变为 9 张。
+      ⚠️ 分母 / 次数 / 「未满 ⇒ 无合成入口」三条判据**一字未改**，只是把「三张卡」这一条
+         换成「`CANONICAL_WEAPON_IDS` **逐 id 全部在列**」—— 比原来的固定数字**更强**：
+         少一张 / 多一张 / 换 id 都红（而不是只数个数）。
+    */
+    const canonWeaponIds = home0.weapons.map((w) => w.defId).slice().sort();
     log(
-      home0.weapons.length === 3 &&
+      canonWeaponIds.join(',') === CANONICAL_WEAPON_IDS.join(',') &&
         home0.weapons.every((w) => w.star === 1 && w.threshold === FUSE_STACK) &&
         home0.weapons.find((w) => w.defId === 'cannon').count === 4 &&
         home0.weapons.find((w) => w.defId === 'cannon').stackText === '4/5' &&
         home0.weapons.every((w) => w.reachesThreshold === false) &&
         home0.weapons.every((w) => w.fusable === false) &&
         home0.weapons.every((w) => w.maxStar === false),
-      'A1b Garage 读数与库存同源：三张卡都是 ★1、分母 = 满 stack 阈值、次数 4/1/1（未满 ⇒ 无合成入口；合成验收在 R2-B 的段里）',
+      'A1b Garage 读数与库存同源：**全部 9 件正式武器逐 id 在列**、每张都是 ★1、分母 = 满 stack 阈值、cannon 次数 4/5 其余 1/5（未满 ⇒ 无合成入口；合成验收在 R2-B 的段里）',
       home0.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
     );
     log(

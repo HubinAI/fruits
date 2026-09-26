@@ -92,6 +92,27 @@ const FUSE_STACK = 5;
  *    「第一局领 cannon 就能凑满 5/5、领别的只是 +1」这条产品设计的事实依据。
  */
 const SEED_COUNTS = { cannon: 4, spear: 1, hammer: 1 };
+/**
+ * PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜新账号**已拥有的全部正式武器**（`category === 'weapon'`）。
+ *
+ * ⚠️ 真源 = `src/core/partOptions.ts` 的 `PART_OPTIONS` 去 `EMPTY` 后按
+ *    `registry.functionals` 的 `category === 'weapon'` 过滤，并按 id 字典序
+ *    （= `playerLoadout.weaponDefs()` 的顺序 = Garage 卡片从上到下的顺序）。
+ * ⚠️ 内容池种子把 11 件正式功能件全部补到 ★1 ⇒ 武器槽从 3 张变 9 张；
+ *    `pushRod` / `thruster` 是 **gadget**、不在本表里。
+ * ⚠️ A3 / G1 用它做**逐 id 相等**断言，而不是只数「9」这个数字。
+ */
+const CANONICAL_WEAPON_IDS = [
+  'cannon',
+  'flamethrower',
+  'hammer',
+  'laser',
+  'machineGun',
+  'rammer',
+  'saw',
+  'shotgun',
+  'spear',
+];
 /** 是否带正式 sprite（`core/content.ts` 的真实值；无 sprite 的件卡片必须如实标「暂无美术」）。 */
 const HAS_SPRITE = { cannon: true, spear: false, hammer: true };
 /** 三个正式存档 key（与 src 同值；E2E 独立取证，不经过页面探针）。 */
@@ -321,10 +342,20 @@ async function pinRunPageContext(page) {
 
 /** 真实鼠标点击：元素真实 CSS 矩形中心（不用 evaluate 直调 click）。 */
 async function clickSelector(page, sel) {
-  const box = await page.locator(sel).first().boundingBox();
+  /*
+    ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜必须先 `scrollIntoViewIfNeeded()`（与
+    `_e2e_product_loop.cjs` 同一处置）。内容池种子把武器槽从 3 张卡变成 9 张卡，
+    `[data-ph-weapon="spear"]` 由「可见的第 3 张」变成「滚动区下方的第 9 张」⇒
+    `boundingBox()` 仍会给出一个矩形，但真实鼠标点的是**视口外**的坐标，
+    点击落在别的元素上（实测 `lastEquip=null`、`equipped` 不变）。
+    ⚠️ 这不是放宽断言：F3/F4/F5 的判据（一次点击即装备 / 存档同步 / 能量差额）一字未改。
+  */
+  const loc = page.locator(sel).first();
+  await loc.scrollIntoViewIfNeeded();
+  const box = await loc.boundingBox();
   if (!box) throw new Error(`无法定位元素：${sel}`);
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await sleep(100);
+  await sleep(120);
 }
 
 /** 真实鼠标点击 Run 画布：逻辑坐标 → 屏幕坐标（用画布真实 CSS 矩形换算，不用 DPR-backed 尺寸）。 */
@@ -787,15 +818,22 @@ async function main() {
       'A2 **新账号的成长起点**（验收 ①）：cannon ★1 4/5，另外两件候选各 1/5（种子只发这一次）',
       `fresh=${home0.growth.fresh} seeded=${home0.growth.seeded} cannon=${invCount(stored0, 'cannon')} spear=${invCount(stored0, 'spear')} hammer=${invCount(stored0, 'hammer')}`,
     );
+    /*
+      ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜武器卡**数量基线**变了（非放宽）：
+      内容池种子把 `OFFICIAL_PARTS` 全部补到 ★1 ⇒ `category === 'weapon'` 的 9 件全在库存里
+      ⇒ 武器槽卡片从 3 张变 9 张。「三张卡」这一条换成「`CANONICAL_WEAPON_IDS` **逐 id 全部在列**」，
+      其余判据（★1 / 分母 / cannon 4/5 / 未满不可合成）**一字未改**。
+    */
+    const canonWeaponIds = home0.weapons.map((w) => w.defId).slice().sort();
     log(
-      home0.weapons.length === 3 &&
+      canonWeaponIds.join(',') === CANONICAL_WEAPON_IDS.join(',') &&
         home0.weapons.every((w) => w.star === 1 && w.threshold === FUSE_STACK) &&
         home0.weapons.find((w) => w.defId === 'cannon').count === 4 &&
         home0.weapons.find((w) => w.defId === 'cannon').stackText === '4/5' &&
         home0.weapons.every((w) => w.reachesThreshold === false) &&
         home0.weapons.every((w) => w.fusable === false) &&
         home0.weapons.every((w) => w.maxStar === false),
-      'A3 Garage 读数与库存同源：三张卡都是 ★1、分母 = 满 stack 阈值、次数 4/1/1（未满 ⇒ 不可合成）',
+      'A3 Garage 读数与库存同源：**全部 9 件正式武器逐 id 在列**、每张都是 ★1、分母 = 满 stack 阈值、cannon 4/5 其余 1/5（未满 ⇒ 不可合成）',
       home0.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
     );
 
@@ -1226,14 +1264,20 @@ async function main() {
     await waitHomeReady(page);
     const afterReload = await probeHome(page);
     const stored4 = await storageDump(page);
+    /*
+      ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜`weaponIds.length === 3` → **逐 id 等于全部 9 件**
+      （内容池种子把正式武器全部补到 ★1 ⇒ 新账号就有 9 件；见 `CANONICAL_WEAPON_IDS` 的说明）。
+      其余判据（装的是 spear / 账本 = 1 / cannon 5 件 / spear 1 件）**一字未改**。
+    */
+    const reloadedWeaponIds = afterReload.weaponIds.slice().sort();
     log(
       afterReload.equippedWeaponId === 'spear' &&
-        afterReload.weaponIds.length === 3 &&
+        reloadedWeaponIds.join(',') === CANONICAL_WEAPON_IDS.join(',') &&
         afterReload.claimedRunCount === 1 &&
         invCount(stored4, 'cannon') === 5 &&
         invCount(stored4, 'spear') === 1,
       'G1 整页 reload 后：装备 / 数量 / 账本全部来自真实持久化（cannon 5 件仍是 5 件）',
-      `equipped=${afterReload.equippedWeaponId} weapons=${afterReload.weaponIds.length} claimed=${afterReload.claimedRunCount} cannon=${invCount(stored4, 'cannon')}`,
+      `equipped=${afterReload.equippedWeaponId} weapons=${afterReload.weaponIds.length}(${reloadedWeaponIds.join(',')}) claimed=${afterReload.claimedRunCount} cannon=${invCount(stored4, 'cannon')}`,
     );
 
     /*

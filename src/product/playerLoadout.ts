@@ -625,9 +625,12 @@ export function weaponEntries(inv: PartInventory): readonly WeaponEntry[] {
      * 里（走 contactTick 命中策略），星级倍率层只遍历顶层数值 ⇒ 对它是无定义的。
      * 这种情况下**不给数字**（`攻击 0 → 0` 是句假话），卡片不画这一行。
      *
-     * ⚠️ 后果面为零：`saw` 不在 `STARTER_PARTS`、也不在奖励候选池（`REWARD_CHOICE_IDS`）
-     * ⇒ 玩家的库存里永远不会出现它 ⇒ 这一分支在**当前产品里结构上不可达**，
-     * 但它被 `tests/productStarPowerR2C.test.ts` 的 SP-03b 直接覆盖（不是凭空的防御代码）。
+     * ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜这条分支**已经可达了**（原注释「当前产品里结构上不可达」
+     *    已作废）：一次性「正式内容池」种子按 `OFFICIAL_PARTS` 发放，因此验证账号的库存里
+     *    **现在就有 `saw`** ⇒ 武器槽在 id 字典序里第 7 张卡走的就是这条「不给数字」的路径。
+     *    ⚠️ 行为本身**未改**（仍然不画伤害行 —— `攻击 0 → 0` 是句假话），也**没有**为它新增
+     *       任何数值 / 星级规则；这里只是把一句已经过期的判断改成事实。
+     *    该分支由 `tests/productStarPowerR2C.test.ts` 的 SP-03b 直接覆盖（不是凭空的防御代码）。
      */
     const readable = baseDamage > 0;
     for (let star = 1; star <= INVENTORY_MAX_STAR; star++) {

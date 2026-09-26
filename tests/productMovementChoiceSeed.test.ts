@@ -41,6 +41,7 @@ import { STAMP_KEY } from '../src/core/saveVersion';
 import { openGrowthSession } from '../src/product/playerGrowth';
 import { markR2Onboarding } from '../src/product/r2Onboarding';
 import { markR2Reseed } from '../src/product/r2Reseed';
+import { markR5ContentPoolSeed } from '../src/product/r5ContentPoolSeed';
 import { MOVEMENT_STAR, movementEntries } from '../src/product/movementInventory';
 import { defaultMovementDefId, movementMapping } from '../src/product/runMovementCanonical';
 import { defaultPlayerDraft, playerInventory } from '../src/product/playerLoadout';
@@ -98,13 +99,23 @@ beforeEach(() => {
 });
 
 /**
- * 预置 **R2 那两份**迁移的标记 ⇒ 本文件只观察 Movement 种子本身。
+ * 预置 **R2 那两份 + R5 内容池**迁移的标记 ⇒ 本文件只观察 Movement 种子本身。
  *
  * ⚠️ 刻意**不**预置 `markR3MovementSeed()`：那份种子是被测对象。
+ *
+ * ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜**必须**把 R5 的内容池种子也预置掉：
+ *    它排在 R3 **之后**、会给全部 `OFFICIAL_PARTS` 补 ★1 ×1（即**会写同一份库存**）
+ *    ⇒ 不预置的话，下面「只影响 Movement：Weapon / Body / Gadget 五档逐条不变」
+ *    「`already-owned` 出口一个字节都不动」「本次挂载只新增白名单里那几个 key」
+ *    这三条都会**被 R5 的库存副作用污染**（读到两份种子叠加后的形态）。
+ *    这是**隔离被测对象**（与预置 R2 完全同一条纪律），不是放宽断言。
+ * ⚠️ 刻意**不**预置 `markR4BodySeed()`：R4 只写车身拥有状态、**不碰库存**
+ *    ⇒ 它对本文件观察的库存读数零影响（CS-10 的白名单里已把它的两个 key 登记上）。
  */
 function isolateR2Migrations(): void {
   markR2Onboarding();
   markR2Reseed();
+  markR5ContentPoolSeed();
 }
 
 /** 键序无关的规范化 JSON（对象键排序后比较，避免「顺序不同 = 不等」的假红）。 */

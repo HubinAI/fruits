@@ -613,6 +613,12 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
       // PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：再追加 `./r4BodyChoiceSeed` —— **第四份**
       // 一次性迁移（Body 可选方案种子，MVP 2 台各永久解锁），同样「判定 → 补件 → 落盘 → 打标记」，
       // 仍然是**自己的 key**；它只碰 `core/bodyOwnership` 的拥有状态、**不碰 Build**。
+      // PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1：再追加 `./r5ContentPoolSeed` —— **第五份**
+      // 一次性投放（正式内容池：全部 NEW_OFFICIAL_BODIES 车身 + 全部 OFFICIAL_PARTS 各 ★1 ×1），
+      // 同样「判定 → 补件 → 落盘 → 打标记」，仍然是**自己的 key**；
+      // 它有两个写面（车身经 `grantBody` 自己落盘、功能件靠本模块那一次 `saveInventory`），
+      // 因此本模块用 `inventoryChanged`（不是 `applied`）决定要不要落盘。
+      // ⚠️ 它**不**依赖 `runCompatibility` ⇒ 「完整 Run 只支持 cannon」那条产品裁决刻意不变。
       'playerGrowth.ts': [
         '../core/buildPersistence',
         '../core/partInventory',
@@ -623,6 +629,7 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         './r2Reseed',
         './r3MovementChoiceSeed',
         './r4BodyChoiceSeed',
+        './r5ContentPoolSeed',
       ],
       /*
         PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 1）｜**一次性 onboarding 迁移**。
@@ -759,6 +766,29 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
       ],
       'r4BodyChoiceSeed.ts': [
         '../core/bodyOwnership',
+        '../core/saveVersion',
+        '../platform',
+      ],
+      /*
+        PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜**一次性「正式内容池」种子**。
+          - 自己的持久化 key（`strongfruit.r5ContentPoolSeed.v1`）⇒ 只依赖 `../platform`
+            （与 `playerProfile.ts` / `r2Onboarding.ts` / `r2Reseed.ts` / `r3` / `r4` 同一条
+            纪律：只有产品侧的持久化模块碰存储）；
+          - 信封复用 `../core/saveVersion`（不新造第二套版本机制，也**不动**全局版本号）；
+          - 车身那一半经 `../core/bodyOwnership` 的 `grantBody` / `isBodyOwned`
+            （**唯一**一份拥有记录，不新建第二套）；
+          - 功能件那一半经 `../core/partInventory` 的 `OFFICIAL_PARTS`（「正式 Functional
+            全集」的唯一真源）+ `addPart` / `getCount`（**唯一**读写入口）——
+            与 Weapon / Movement **共用** `strongfruit.ownedParts.v2`，**不新建**第二套库存；
+          - 刻意**不依赖** `../lab/buildEditorModel`：本种子**一个字节都不写 Build**
+            ⇒ 连 `BuildDraft` 类型都不需要（「不自动装备 / 不改当前配置」是结构性成立的）；
+          - 刻意**不依赖** `./runCompatibility`：它**不**放宽 `FULL_RUN_SUPPORTED_WEAPON_IDS`
+            ⇒ 「完整 Run 只支持 cannon」这条产品裁决原样不变（新发的武器只是
+            「已拥有、可装备、可进单场 Battle」，能不能进完整 Run 仍由那一处裁决）。
+      */
+      'r5ContentPoolSeed.ts': [
+        '../core/bodyOwnership',
+        '../core/partInventory',
         '../core/saveVersion',
         '../platform',
       ],

@@ -135,6 +135,24 @@ import {
   markR4BodySeed,
   type R4BodySeedOutcome,
 } from './r4BodyChoiceSeed';
+/**
+ * PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜**一次性「正式内容池」种子**。
+ *
+ * 前三轮各补一条维度（R3 = Movement 三档、R4 = Body 的两台 MVP），但正式内容库里
+ * **已经存在、Runtime 已经真实跑得通**的内容仍有一大批未拥有：新增 4 台车身只发了 2 台、
+ * 11 件正式 Functional 只有 starter 的 4 件。⇒ 开发阶段转入「先铺基础内容」，
+ * 本模块一次性把「已经存在的正式内容」整理成可验证内容池
+ * （判据 / 只增不减的纪律 / 硬边界 / 各件 Runtime 取证全在 `./r5ContentPoolSeed`）。
+ * 本函数只负责**按正确顺序**调它：改内存 → 落盘 → **最后**打标记。
+ * ⚠️ 它**不碰** draft ⇒ 战斗行为一个字节都不变（不覆盖 Weapon / rear·front Movement）；
+ *    它也**不**放宽 `runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS`
+ *    ⇒ 「完整 Run 只支持 cannon」这条产品裁决原样不变。
+ */
+import {
+  applyR5ContentPoolSeed,
+  markR5ContentPoolSeed,
+  type R5ContentPoolOutcome,
+} from './r5ContentPoolSeed';
 
 /**
  * 本版成长只使用 **★1**。
@@ -363,6 +381,20 @@ export interface GrowthSession {
    *    那一个「一个字节不动」的出口 —— 判定只做一次是正确性要求，不是优化）。
    */
   readonly bodySeed: R4BodySeedOutcome;
+  /**
+   * PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜本次挂载的**一次性「正式内容池」种子**读数。
+   *
+   * ⚠️ `applied === true` ⇒ 这一次真的把**正式内容池**里缺的那些补齐了
+   *    （全部 `NEW_OFFICIAL_BODIES` 车身 + 全部 `OFFICIAL_PARTS` 功能件各 ★1 ×1；
+   *     `contentPoolSeed.bodies` / `.parts` 是逐件的 `before → after` 读数）；
+   * `already-marked`   ⇒ 首入判定早就做出过（reload 后就是它）；
+   * `already-complete` ⇒ 内容池本来就齐（**一个字节都没动**，但仍然落了标记）。
+   * ⚠️ `decided === true` ⇒ **本次是新版本首入**，标记已落盘（**含**
+   *    `already-complete` 那一个「一个字节不动」的出口 —— 判定只做一次是正确性要求）。
+   * ⚠️ `inventoryChanged` 与 `applied` 刻意分开：只有它才决定要不要 `saveInventory`
+   *    （车身那一半经 `grantBody` 自己落盘）。
+   */
+  readonly contentPoolSeed: R5ContentPoolOutcome;
 }
 
 /**
@@ -490,6 +522,32 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
   */
   const bodySeed = applyR4BodyChoiceSeed();
   if (bodySeed.decided) markR4BodySeed();
+  /*
+    PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜一次性「正式内容池」种子。
+    判据 / 只增不减的纪律 / 各件 Runtime 取证全在 `./r5ContentPoolSeed`。
+
+    ⚠️ 位置是刻意的：排在 `applyR4BodyChoiceSeed` **之后**（Body 种子只发 MVP 那 2 台，
+        这里把剩余的新车身一并补齐 —— 两个集合不同、各写各的标记，互不覆盖），
+        排在下面那唯一一次 `saveInventory` **之前** ⇒ 它的功能件那一半只改内存，
+        与其它几段共用同一次落盘。
+
+    ⚠️ **它与前三段的一个结构性差异**：它有**两个**写面 ——
+        车身那一半经 `grantBody` **自己落盘**（core 的 `ownedBodies.v1`），
+        功能件那一半只改内存 `inv`、要靠下面那次 `saveInventory`。
+        因此这里必须用 `inventoryChanged`（**不是** `applied`）去置 `changed`：
+        「车身补了但库存没变」的挂载若也置 `changed`，就会产生一次无谓的落盘写。
+
+    ⚠️ 标记同样是 `decided`（**首入决策已做出**），**不是** `applied`：
+        `already-complete` 那条「一个字节都不动」的出口也必须落标记 —— 否则玩家自己之后
+        把某件武器合成掉 / 在 debug 里取消某台车身时，下一次挂载判据会重新成立、
+        把玩家自己消耗掉的东西再发一遍。
+    ⚠️ 它**不碰** `nextDraft` ⇒ Run Snapshot / Runtime 数值与调用前逐字节相同
+        （不覆盖 Weapon / rear·front Movement）；它也**不**放宽
+        `runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS` ⇒ 「完整 Run 只支持 cannon」
+        这条产品裁决原样不变（新发的武器只是「已拥有、可装备、可进单场 Battle」）。
+  */
+  const contentPoolSeed = applyR5ContentPoolSeed(inv);
+  if (contentPoolSeed.inventoryChanged) changed = true;
   /** 补件之后才取读数 ⇒ 报出的 owned / legal 就是**本次挂载结束**时的真实形态。 */
   const movements = movementOwnership(inv, nextDraft);
 
@@ -514,6 +572,18 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
     只在 `already-marked` 时出现。顺序同样排在它自己的落盘之后（共用上面那一次 `saveInventory`）。
   */
   if (movementSeed.decided) markR3MovementSeed();
+  /*
+    ⑦ 内容池种子的标记：判据同样是 `decided`（**首入决策已做出**），**不是** `applied`。
+    `already-complete` 那一个「一个字节都不动」的出口也必须落标记 —— 否则玩家自己之后
+    把某件武器合成掉、或在 debug 里取消某台车身的拥有时，下一次挂载判据会重新成立、
+    把玩家自己消耗掉的东西再发一遍。
+    本模块没有 `equip-failed` 那一类可重试的瞬时失败（它不写 Build），故 `decided === false`
+    只在 `already-marked` 时出现。
+    ⚠️ 顺序**必须**排在 `saveInventory` 之后：本种子的**功能件那一半**只改内存，
+        靠上面那次落盘，标记先落会让「配额写失败」退化成「标记说发过了、件却没补上」
+        ⇒ 玩家永远拿不到那几件。（车身那一半经 `grantBody` 自己落盘，不受这一步影响。）
+  */
+  if (contentPoolSeed.decided) markR5ContentPoolSeed();
   return {
     inv,
     draft: nextDraft,
@@ -526,6 +596,7 @@ export function openGrowthSession(draft: BuildDraft): GrowthSession {
     movementGrants,
     movementSeed,
     bodySeed,
+    contentPoolSeed,
   };
 }
 

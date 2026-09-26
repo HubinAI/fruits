@@ -64,6 +64,17 @@
  *     未拥有内容降级到 `<details>` 折叠区 / **合成入口持续可见且**`disabled === false`（GS7）/
  *     有 5/5 时的明确提示（GS7b）/ **点入口无条件进入 Fusion 并看到真实 `5/5`**（GS7c）/
  *     **Preview 朝向与正式 Run 同向**（GS11）/ 返回首页可达 / 零报错。
+ *
+ * ── PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1（本 Queue）──────────────────────────
+ * 新增一次性「正式内容池」种子（全部 `NEW_OFFICIAL_BODIES` 车身 + 全部 `OFFICIAL_PARTS`
+ * 功能件各补到 ★1 ≥1 件）⇒ 新账号的**内容基线变了**（GS5 实测：武器槽 9 张卡 / 车身槽 8 张 /
+ * 后轮与前轮各 5 张，四个槽 `locked=0`）。本文件随之：
+ *   - **E5**：storage 闭集白名单 **+1**（`strongfruit.r5ContentPoolSeed.v1`），
+ *     由七 key 变八 key；闭集语义（数量相等 + 逐位相等）**一字未改**；
+ *   - **GS6**：旧的「全新账号在 Body 槽天然有未拥有样本」前提**被内容池作废**
+ *     ⇒ 取样方式改为**临时写正式 `ownedBodies.v1` 制造一个真实的未拥有样本**
+ *     （与 M2b 同一手法），取证完立刻恢复；断言四条硬判据一字未改，并新增 GS6b 证明已复原。
+ * ⚠️ 本文件**不**新增内容、**不**放宽任何断言；只是把「取样从天然样本改为受控样本」。
  */
 const http = require('http');
 const fs = require('fs');
@@ -93,6 +104,12 @@ const WEAPON_SLOT = 'frontMass';
  * 也在这一份里 —— 与 Weapon 共用，**没有**第二套拥有记录）。
  */
 const INV_KEY = 'strongfruit.ownedParts.v2';
+/**
+ * 车身拥有集合 key（`bodyOwnership.ts` 的 `STORAGE_KEY`：**只**记录 4 台新正式车身的拥有项，
+ * 旧 4 台恒默认拥有、不在此集合语义内；形状 = 纯 JSON 字符串数组）。
+ * ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜GS6 用它临时去掉一台新车身来制造未拥有样本。
+ */
+const BODIES_KEY = 'strongfruit.ownedBodies.v1';
 
 const results = [];
 function log(pass, name, detail = '') {
@@ -1369,6 +1386,12 @@ async function main() {
          `grantBody` 会把拥有状态落到独立的 `ownedBodies.v1` key（与 ownedParts 库存分离），
          并落下「Body 选择起点已经安排过了」的 `r4BodyChoiceSeed.v1` 标记。
          **同样只是白名单 +2，闭集语义一字未改** —— 第七个 key 出现时这一条照样红。
+      ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1：再 +1（`strongfruit.r5ContentPoolSeed.v1`）——
+         「正式内容池」一次性种子的标记（把全部 `NEW_OFFICIAL_BODIES` 车身 + 全部
+         `OFFICIAL_PARTS` 功能件各补到 ★1 ≥1 件），首次打开首页时会落它。
+         ⚠️ 车身那一半仍走既有的 `ownedBodies.v1`、功能件那一半仍走既有的 `ownedParts.v2`
+            ⇒ 本 Queue **没有**引入第二套库存 / 第二套拥有集合，只多了一个标记 key。
+         **同样只是白名单 +1，闭集语义一字未改** —— 第九个 key 出现时这一条照样红。
     */
     const EXPECTED_KEYS = [
       'strongfruit.ownedParts.v2',
@@ -1378,13 +1401,14 @@ async function main() {
       'strongfruit.r3MovementChoiceSeed.v1',
       'strongfruit.r4BodyChoiceSeed.v1',
       'strongfruit.ownedBodies.v1',
+      'strongfruit.r5ContentPoolSeed.v1',
     ].sort();
     const stored2Keys = Object.keys(stored2).sort();
     log(
       Object.keys(stored2).filter((k) => k.startsWith('strongfruit.ownedParts')).length === 1 &&
         stored2Keys.length === EXPECTED_KEYS.length &&
         EXPECTED_KEYS.every((k, i) => stored2Keys[i] === k),
-      'E5 三轮操作后官方 storage 恰好是那七个 key（无残留 / 无第二套库存 / 无未知 key）',
+      'E5 三轮操作后官方 storage 恰好是那八个 key（无残留 / 无第二套库存 / 无未知 key）',
       `keys=${stored2Keys.join(',')}`,
     );
 
@@ -1755,9 +1779,34 @@ async function main() {
 
       /*
         GS6｜**未拥有内容降级**（必改 1 的降级要求）：可用卡进主卡阵，未拥有卡进原生 `<details>` 折叠区。
-        全新账号（新 context = 新 localStorage）在 Body 槽天然有「未拥有」样本
-        （一次性 Body 种子只解锁 MVP 2 台）⇒ 用它取证。
+
+        ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜本条的**取样方式**发生了变化（非放宽）：
+        旧前提是「全新账号在 Body 槽天然有『未拥有』样本（一次性 Body 种子只解锁 MVP 2 台）」。
+        R5 的「正式内容池」种子把 4 台 `NEW_OFFICIAL_BODIES` **全部**补到已拥有、
+        11 件 `OFFICIAL_PARTS` **全部**补到 ★1（本文件 GS5 实测四个槽 `locked=0`）
+        ⇒ 「未拥有」样本不再天然存在，`<details>` 会退化成**不渲染**（断言变成空转）。
+        ⇒ 处置 = 与 M2b 完全同一手法：在同一浏览器会话里**临时把一台新车身的拥有标记去掉**
+          （仍写正式 `ownedBodies.v1` key、不经页面），制造一个**真实的**未拥有样本；
+          取证完**立刻恢复**并 reload，使后续步骤（GS8 的 mangoBody 等）前提一字不变。
+        ⚠️ 这不是「删掉断言」：`hasDetails` / `lockedCount >= 1` / 未拥有卡确实落在折叠区里 /
+          折叠区默认闭合，四条仍是硬断言。
       */
+      const UNOWNED_BODY = 'durianBody';
+      await mp.evaluate(
+        ([bodiesKey, defId]) => {
+          const arr = JSON.parse(localStorage.getItem(bodiesKey) || '[]');
+          localStorage.setItem(
+            bodiesKey,
+            JSON.stringify(arr.filter((v) => v !== defId)),
+          );
+          // 记号：证明我们确实动过盘（下面恢复后要断言它回来了）
+          localStorage.setItem('__e2e_unowned__', defId);
+        },
+        [BODIES_KEY, UNOWNED_BODY],
+      );
+      await mp.reload({ waitUntil: 'load' });
+      await mp.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
+      await sleep(200);
       await gotoGarageSlot(mp, 'body');
       const bodyTab = await mp.evaluate(() => {
         const b = document.querySelector('.ph-garage-body');
@@ -1774,6 +1823,9 @@ async function main() {
           usable,
           lockedInDetails,
           detailsOpen: det ? det.hasAttribute('open') : null,
+          lockedDisabled: det
+            ? [...det.querySelectorAll('[data-ph-body]')].every((c) => c.disabled === true)
+            : false,
         };
       });
       log(
@@ -1781,9 +1833,37 @@ async function main() {
           bodyTab.lockedCount >= 1 &&
           bodyTab.lockedInDetails === bodyTab.lockedCount &&
           bodyTab.usable >= 1 &&
-          bodyTab.detailsOpen === false,
+          bodyTab.detailsOpen === false &&
+          bodyTab.lockedDisabled === true,
         'GS6 未拥有内容**降级到原生 `<details>` 折叠区**（默认闭合），可用卡留在主卡阵 ⇒ 未拥有内容不淹没当前可使用内容',
-        `details=${bodyTab.hasDetails} locked=${bodyTab.lockedCount} inDetails=${bodyTab.lockedInDetails} usable=${bodyTab.usable} open=${bodyTab.detailsOpen}`,
+        `details=${bodyTab.hasDetails} locked=${bodyTab.lockedCount} inDetails=${bodyTab.lockedInDetails} usable=${bodyTab.usable} open=${bodyTab.detailsOpen} lockedDisabled=${bodyTab.lockedDisabled}`,
+      );
+
+      /* 恢复被去掉的那一台（判定已落盘 ⇒ 种子**不会**再补，故这里手工写回，保持后续前提） */
+      await mp.evaluate(
+        ([bodiesKey, defId]) => {
+          const arr = JSON.parse(localStorage.getItem(bodiesKey) || '[]');
+          if (!arr.includes(defId)) arr.push(defId);
+          localStorage.setItem(bodiesKey, JSON.stringify(arr));
+          localStorage.removeItem('__e2e_unowned__');
+        },
+        [BODIES_KEY, UNOWNED_BODY],
+      );
+      await mp.reload({ waitUntil: 'load' });
+      await mp.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
+      await sleep(200);
+      await gotoGarageSlot(mp, 'body');
+      const bodiesRestored = await mp.evaluate(
+        ([bodiesKey, defId]) => {
+          const arr = JSON.parse(localStorage.getItem(bodiesKey) || '[]');
+          return { owned: arr.includes(defId), marker: localStorage.getItem('__e2e_unowned__') };
+        },
+        [BODIES_KEY, UNOWNED_BODY],
+      );
+      log(
+        bodiesRestored.owned === true && bodiesRestored.marker === null,
+        'GS6b 负控制取样已恢复原状（后续步骤前提不变：4 台新正式车身仍全部已拥有）',
+        `restored=${UNOWNED_BODY}:${bodiesRestored.owned} marker=${bodiesRestored.marker}`,
       );
 
       /*

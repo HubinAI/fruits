@@ -98,6 +98,7 @@ import { R2_RESEED_KEY } from '../src/product/r2Reseed';
 import { R3_MOVEMENT_SEED_KEY } from '../src/product/r3MovementChoiceSeed';
 // PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：Body 种子的标记 + 车身拥有集合（key 闭集白名单用）
 import { R4_BODY_SEED_KEY } from '../src/product/r4BodyChoiceSeed';
+import { R5_CONTENT_POOL_KEY } from '../src/product/r5ContentPoolSeed';
 import {
   RUN_FAIL_PARAM,
   parseRunFailReturn,
@@ -546,9 +547,12 @@ describe('PRODUCT-LOOP-R2-A｜C. 领奖：一次、真入库、数量累积', ()
       ⚠️ PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP 又加了**两个**：Body 种子的标记
          `strongfruit.r4BodyChoiceSeed.v1` + 车身拥有集合 `strongfruit.ownedBodies.v1`
          （上面那次 `openGrowthSession` 会落它俩）。**同样只是白名单 +2，闭集语义原样保留**。
+      ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1 又加了**一个**：正式内容池种子的标记
+         `strongfruit.r5ContentPoolSeed.v1`（上面那次 `openGrowthSession` 会落它）。
+         **同样只是白名单 +1，闭集语义原样保留** —— 再多出任何一个 key 这一条照样红。
     */
     expect(allKeys()).toEqual(
-      [INV_KEY, PROFILE_CLAIMS_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY, R3_MOVEMENT_SEED_KEY, R4_BODY_SEED_KEY, OWNED_BODIES_KEY].sort(),
+      [INV_KEY, PROFILE_CLAIMS_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY, R3_MOVEMENT_SEED_KEY, R4_BODY_SEED_KEY, OWNED_BODIES_KEY, R5_CONTENT_POOL_KEY].sort(),
     );
     const inv = loadInventoryRaw();
     expect(inv, '库存必须真的落盘').toBeTruthy();

@@ -46,6 +46,7 @@ import { openGrowthSession } from '../src/product/playerGrowth';
 import { markR2Onboarding } from '../src/product/r2Onboarding';
 import { markR2Reseed } from '../src/product/r2Reseed';
 import { markR3MovementSeed } from '../src/product/r3MovementChoiceSeed';
+import { markR5ContentPoolSeed } from '../src/product/r5ContentPoolSeed';
 import { bodyOwnership } from '../src/product/bodyInventory';
 import { defaultPlayerDraft, playerInventory } from '../src/product/playerLoadout';
 import {
@@ -99,14 +100,22 @@ beforeEach(() => {
 });
 
 /**
- * 预置 **R2 + R3** 那几份标记 ⇒ 本文件只观察 Body 种子本身。
+ * 预置 **R2 + R3 + R5** 那几份标记 ⇒ 本文件只观察 Body 种子本身。
  *
  * ⚠️ 刻意**不**预置 `markR4BodySeed()`：那份种子是被测对象。
+ *
+ * ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜**必须**把 R5 的内容池种子也预置掉：
+ *    它排在 R4 **之后**、会把 R4 之外的 2 台车身（pear / orange）一并解锁、并给全部
+ *    `OFFICIAL_PARTS` 补 ★1 ×1 ⇒ 不预置的话，下面「MVP 之外的其余新车身不被 seed」
+ *    「Body 种子只碰拥有状态、Weapon 库存一个字节都不动」这两条会**被 R5 的副作用污染**，
+ *    读到的是两份种子叠加后的形态，而不是 R4 自己的行为。
+ *    这是**隔离被测对象**（与预置 R2 / R3 完全同一条纪律），不是放宽断言。
  */
 function isolatePriorMigrations(): void {
   markR2Onboarding();
   markR2Reseed();
   markR3MovementSeed();
+  markR5ContentPoolSeed();
 }
 
 /** 键序无关的规范化 JSON（对象键排序后比较，避免「顺序不同 = 不等」的假红）。 */

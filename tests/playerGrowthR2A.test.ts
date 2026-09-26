@@ -83,6 +83,7 @@ import {
 import { R2_RESEED_KEY } from '../src/product/r2Reseed';
 // PRODUCT-LOOP-R3-MOVEMENT-CHOICE-SEED：第三份一次性迁移的标记（隔离变量用）
 import { markR3MovementSeed, R3_MOVEMENT_SEED_KEY } from '../src/product/r3MovementChoiceSeed';
+import { R5_CONTENT_POOL_KEY, markR5ContentPoolSeed } from '../src/product/r5ContentPoolSeed';
 // PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP：Body 种子的标记 + 车身拥有集合（key 闭集白名单用）
 import { R4_BODY_SEED_KEY } from '../src/product/r4BodyChoiceSeed';
 
@@ -188,6 +189,11 @@ describe('PRODUCT-LOOP-R2-A｜G. 新账号的成长起点（Queue 必改 3 / 验
   it('PG-02b 已成长的老档（存在 ★≥2 的 Weapon）⇒ onboarding **完全不改库存**', () => {
     // ⚠️ 隔离变量：第三份一次性迁移（Movement 种子）也会写库存 ⇒ 先预置它的标记
     markR3MovementSeed();
+    // ⚠️ 第五份（R5 内容池种子，PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1）**同样会写库存**
+    //    （给全部 `OFFICIAL_PARTS` 补 ★1 ×1）⇒ 同一条隔离纪律：不预置它，
+    //    「库存零写入 / 一字节未被改写」这类断言会被它的**合法**写入打破。
+    //    这是隔离变量，不是放宽断言。
+    markR5ContentPoolSeed();
     seedBuild();
     const grown = defaultInventory();
     grown['cannon'].one = 1;
@@ -228,6 +234,11 @@ describe('PRODUCT-LOOP-R2-A｜G. 新账号的成长起点（Queue 必改 3 / 验
   it('PG-02d 已达 4 件的老档：只打标记、库存不动（不把 4 抬到更高，也不降回来）', () => {
     // ⚠️ 隔离变量：同 PG-02b（第三份一次性迁移也会写库存）
     markR3MovementSeed();
+    // ⚠️ 第五份（R5 内容池种子，PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1）**同样会写库存**
+    //    （给全部 `OFFICIAL_PARTS` 补 ★1 ×1）⇒ 同一条隔离纪律：不预置它，
+    //    「库存零写入 / 一字节未被改写」这类断言会被它的**合法**写入打破。
+    //    这是隔离变量，不是放宽断言。
+    markR5ContentPoolSeed();
     seedBuild();
     const enough = defaultInventory();
     enough['cannon'].one = 6;
@@ -320,6 +331,15 @@ describe('PRODUCT-LOOP-R2-A｜H. old Profile migration 不丢数据（验收 ⑦
     // 模拟旧产品写下的「有 cannon ×3、有 spear ×2」但**没有** __v 信封
     seedDisk({ cannon: { one: 3, two: 0 }, spear: { one: 2, two: 0 } }, INV_KEY, false);
     seedBuild();
+    /*
+      ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜**必须**预置第五份一次性迁移（R5 内容池种子）
+        的标记：那份种子**有意**把「当前缺少的正式件」补到 ★1 ×1 —— 它会把本用例里
+        本来缺失的 `hammer` 补成 1 件。若不隔离，下面「缺失的条目补 0（不是补 starter）」
+        这条断言会与 R5 的**合法**行为混淆，读到的就不再是「R2-A 老档迁移」的形态。
+        预置标记 = 让**被测路径（R2-A 的旧 Profile 迁移）成为唯一自变量**；
+        所有断言逐字保留。R5 自己的契约由 `tests/productContentPoolSeed.test.ts` 覆盖。
+    */
+    markR5ContentPoolSeed();
     const g = openGrowthSession(loadEquippedDraft());
     expect(g.freshProfile).toBe(false);
     /*
@@ -381,9 +401,18 @@ describe('PRODUCT-LOOP-R2-A｜H. old Profile migration 不丢数据（验收 ⑦
          **同样只是把白名单 +2，闭集语义原样保留** —— Body 种子解锁 MVP 车身时
          `grantBody` 落到独立的 `ownedBodies.v1`（与 ownedParts 库存分离），并落
          「Body 选择起点已经安排过了」的 `r4BodyChoiceSeed.v1` 标记。
+      ⚠️ R5-BASIC-CONTENT-POOL-R1 又**加了一个**：正式内容池种子的标记
+         `strongfruit.r5ContentPoolSeed.v1`。**同样只是把白名单 +1，闭集语义原样保留** ——
+         将来若再冒出第八个 key，这一条仍然会红（这正是它存在的意义）。
+         五份迁移各有各的 key 是**刻意的**：它们的写语义与作用面各不相同
+         （onboarding 只增不减 / reseed 必须删 ★≥2 / Movement 种子补轮组 /
+           Body 种子解锁车身拥有 / R5 内容池补全部正式车身 + 全部正式功能件 ★1 ×1），
+         共用一个 key 会让各自的不变量都无法审计。
+         ⚠️ 库存本体仍然只有 `ownedParts.v2` 一处 —— R5 的功能件那一半也写在这一份里，
+            **没有**新开第二个库存 key。
     */
     expect(keys.sort(), '成长只允许写「正式库存 key + 一次性迁移标记 + Body 拥有集合」').toEqual(
-      [INV_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY, R3_MOVEMENT_SEED_KEY, R4_BODY_SEED_KEY, OWNED_BODIES_KEY].sort(),
+      [INV_KEY, R2_ONBOARDING_KEY, R2_RESEED_KEY, R3_MOVEMENT_SEED_KEY, R4_BODY_SEED_KEY, OWNED_BODIES_KEY, R5_CONTENT_POOL_KEY].sort(),
     );
     // 再跑一次「手动加一件」的正式写入路径，key 集合不变
     const inv = loadInventoryRaw()!;
@@ -412,6 +441,11 @@ describe('PRODUCT-LOOP-R2-A｜I. Equipped 必须指向有效库存实例（验�
       新变量隔离出去，让被测路径成为唯一自变量；所有断言逐字保留。
     */
     markR3MovementSeed();
+    // ⚠️ 第五份（R5 内容池种子，PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1）**同样会写库存**
+    //    （给全部 `OFFICIAL_PARTS` 补 ★1 ×1）⇒ 同一条隔离纪律：不预置它，
+    //    「库存零写入 / 一字节未被改写」这类断言会被它的**合法**写入打破。
+    //    这是隔离变量，不是放宽断言。
+    markR5ContentPoolSeed();
     // 老档：有 hammer / pushRod，没有 cannon；而当前装备是 cannon
     seedDisk({ hammer: { one: 1, two: 0 }, pushRod: { one: 1, two: 0 } });
     seedBuild();
@@ -454,6 +488,11 @@ describe('PRODUCT-LOOP-R2-A｜I. Equipped 必须指向有效库存实例（验�
     markR2Onboarding();
     // ⚠️ 并同 PG-11 预置 Movement 种子标记（第三份一次性迁移，也会写库存）
     markR3MovementSeed();
+    // ⚠️ 第五份（R5 内容池种子，PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1）**同样会写库存**
+    //    （给全部 `OFFICIAL_PARTS` 补 ★1 ×1）⇒ 同一条隔离纪律：不预置它，
+    //    「库存零写入 / 一字节未被改写」这类断言会被它的**合法**写入打破。
+    //    这是隔离变量，不是放宽断言。
+    markR5ContentPoolSeed();
     seedDisk({ cannon: { one: 2, two: 0 } });
     seedBuild();
     const before = store.getItem(INV_KEY);

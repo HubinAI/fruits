@@ -444,6 +444,20 @@ export interface ProductProbe {
     readonly bodySeedReason: string;
     readonly bodySeedDecided: boolean;
     readonly bodySeedRaised: number;
+    /**
+     * PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜本次挂载的 **正式内容池种子读数**。
+     *
+     * ⚠️ 直接来自 `playerGrowth.openGrowthSession()` 的 `contentPoolSeed`
+     *    （页面与探针**不各自再判一次**）⇒ E2E 可以断言「第一次进来内容池被铺满」
+     *    与「reload 之后 `already-marked` ⇒ 没有再发」这两条**互斥**的事实。
+     */
+    readonly contentPoolSeedApplied: boolean;
+    readonly contentPoolSeedReason: string;
+    readonly contentPoolSeedDecided: boolean;
+    /** 本次为内容池新解锁的车身台数（`NEW_OFFICIAL_BODIES` 那一半的 `raised` 求和）。 */
+    readonly contentPoolSeedRaisedBodies: number;
+    /** 本次为内容池新补的功能件件数（`OFFICIAL_PARTS` 那一半的 `raised` 求和）。 */
+    readonly contentPoolSeedRaisedParts: number;
   };
   /**
    * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页那一行最小成长状态的真实读数
@@ -2126,6 +2140,15 @@ export function mountProductHome(
           bodySeedReason: growth.bodySeed.reason,
           bodySeedDecided: growth.bodySeed.decided,
           bodySeedRaised: growth.bodySeed.raised,
+          /*
+           * PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜本次挂载的**一次性正式内容池种子**读数。
+           * 直接取成长会话的判定结果（页面 / 探针不各自再判一次）。
+           */
+          contentPoolSeedApplied: growth.contentPoolSeed.applied,
+          contentPoolSeedReason: growth.contentPoolSeed.reason,
+          contentPoolSeedDecided: growth.contentPoolSeed.decided,
+          contentPoolSeedRaisedBodies: growth.contentPoolSeed.raisedBodies,
+          contentPoolSeedRaisedParts: growth.contentPoolSeed.raisedParts,
         },
         /**
          * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页那一行成长状态的真实读数
