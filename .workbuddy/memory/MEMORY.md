@@ -4,24 +4,29 @@
 
 | 要找什么 | 去哪 |
 |---|---|
-| 本轮做了什么、实测数字 | `.workbuddy/memory/YYYY-MM-DD.md`（最新 `2026-09-24.md`） |
+| 本轮做了什么、实测数字 | `.workbuddy/memory/YYYY-MM-DD.md`（最新 `2026-09-26.md`） |
 | **改动前必读**：守卫 / 环境陷阱 / Stable contracts / §1–§14 契约全文 / **未决项台账 §A** | `.workbuddy/memory/REF_GUARDS_TRAPS_CONTRACTS.md` |
 | PRP 运行时细节（战斗参数 / 相机 / 接缝 / 入口 / file:line） | `.workbuddy/memory/REF_PRP_RUNTIME.md` §A–M |
 | **跨窗口续接（先读）** / 各 Queue 交付说明 / 已知未修清单 | `交接文档_<日期>_<Queue>.md`（**本地件，不入库**） |
 | 更早完整版（最高权威） | `.workbuddy/memory/archive/` |
 
 ## 0. 现状 / 下一步（**新窗口先读这段**）
-**R2（A/B/C）+ R2-RECOVERY + SETTLEMENT-CTA-LATENCY + SINGLE-CTA/音频 + R2-RESEED 均已收口**，无功能缺口、无 BLOCK。
-**下一步 = 等用户裁决 REF §A 台账任一项，或下发新 Queue；用户已明令「不自行进入 R3」。**
-门禁基线：`tsc` 零错 · vitest **220 files / 2329 tests** · `build`/`build:pages`/`build:wechat` ·
-**product-reseed 21/21** · reward **57/57** · loop **53/53** · star-power **22/22** · fail **34/34** · legacy **17/17** ·
-home **30/30** · default-entry **86/86** · repo-health **9/9**。
-⚠️ **全量 vitest 有负载抖动**：`vmForks + maxWorkers=1` 全量跑时个别重型文件会偶发 5s 超时（实测一轮 4 files/12 tests
-红、隔离重跑只剩 2 个真失败）。**判定三步**：单跑该文件 → 查 import 面有无引用 → 全量重跑；三步齐了才叫「非回归」。
+**R2（A/B/C）+ R2-RECOVERY + SETTLEMENT-CTA-LATENCY + SINGLE-CTA/音频 + R2-RESEED + R4（Body canonical/MVP）
++ R3（四同构槽）+ R5（正式内容池）均已收口**，无功能缺口、无 BLOCK。
+**下一步 = 等用户下发新 Queue（本轮 Queue 末尾提到「Q2」，但其正文未随 Queue 到达 ⇒ 未开工）。**
+门禁基线（R5 实测）：`tsc` **零错** · R5 targeted **40 files / 671 tests** 全绿 ·
+product E2E：**home 98/98 · loop 53/53 · reward 57/57 · reseed 21/21 · fail 34/34 · star-power 22/22 ·
+legacy-profile 18/18**。⚠️ **R5 起「新账号内容基线」变了**（见 §2h）⇒ 任何写死「3 件武器」的断言都会红。
+⚠️ **全量 vitest 有负载抖动**：`vmForks + maxWorkers=1` 全量跑时个别重型文件会偶发 5s 超时。**判定三步**：
+单跑该文件 → 查 import 面有无引用 → **同一批次在干净 HEAD worktree 上再跑一次**；
+⚠️ **R5 实测新判据**：`一整个批次红出来的文件集合在两次运行之间会变` ⇒ 那批红就是抖动。
 ⚠️ **`e2e:next-run` 仍崩**（`_e2e_next_run.cjs:619` 等 Hub 入口**恰好 3 个**而现有 **4** 个）= **既有缺陷**，非回归。
 ⚠️ **发现但未修 → 独立 Bug Queue，禁顺手并改**：① `validateSnapshot` 不含星级倍率（`:114` `def.energy` vs `:48`
-`starTierEnergy`）⇒ Q22 漏改 ② `e2e:next-run` 崩溃 ③ Lab `playerFunctionals()` 注释与实际不符。
-**明确未做**：Garage 观感 / 奖励动画 / 内容量 / Buff 平衡 / 挂点几何。**均未归档**：LightSwarm 真人结论 / 各轮录屏回执；
+`starTierEnergy`）⇒ Q22 漏改 ② `e2e:next-run` 崩溃 ③ Lab `playerFunctionals()` 注释与实际不符
+④ **`e2e:product-reward` 的 C9 偶发红**（CDP `Cannot find context with specified id`，CTA 按下即导航导致
+上下文失效；实测一轮 56/57、复跑 57/57）。
+**明确未做**：Garage 观感 / 奖励动画 / 内容量 / Buff 平衡 / 挂点几何 / 为武器补正式 Run Build 内容
+（R5 **故意不放宽** `FULL_RUN_SUPPORTED_WEAPON_IDS`）。**均未归档**：LightSwarm 真人结论 / 各轮录屏回执；
 1vN 宿主 = DEBUG `arenaA.ts:814`。
 
 ## 1. Identity / 链尾
@@ -29,10 +34,14 @@ home **30/30** · default-entry **86/86** · repo-health **9/9**。
   （实验，可整块删）；主线 `foundation-02-wechat`。正式名 **PRP｜Portrait Run Prototype**。舞台 844×390。
 - **链尾**：R2-A `c40977a` → R2-B `16a221f` → R2-C `9e4e88c` → P0 `9841274` → PLP0-LEGACY `9078cc5` →
   R2-RECOVERY `8770c98`+`e50b95c` → SETTLEMENT-CTA-LATENCY `1931a71` → SINGLE-CTA+AUDIO `c2c1e2c`+`c55a285` →
-  **R2-VALIDATION-STATE-RESEED `88288b4`+`7dacd47`**；更早（R1-A..R1-D）查 `git log`。
+  R2-VALIDATION-STATE-RESEED `88288b4`+`7dacd47` → R4 `3e48b16` → R4-GATE `8887ad6` →
+  GARAGE-MOBILE `f357383` → GARAGE-SLOT-R2 `a51de9b` → `edd8f78` → `c76f1a2` → R3 `06e44de` →
+  **R5 `5baff53`（当前 HEAD）**；更早（R1-A..R1-D）查 `git log`。
 - ⚠️ `src/{physics,render,player,platform,ui,game,presentation,lab}` diff 恒为空（R2-B 起有意打破）；`src/core` 只许
   R2-B（`partInventory.ts`/`buildPersistence.ts`）+ R2-C（`buildSnapshot.ts` 星级**唯一真源** + `types.ts`）两处必改，
-  **此后再无 core 改动**（含 R2-RESEED 轮）。
+  **此后再无 core 改动**（含 R2-RESEED / R3 / R4 / R5 轮 —— 全部零改动）。R3–R5 只动 `src/product/`。
+  ⚠️ **R5 新增 1 个 `src/product/` 模块**（`r5ContentPoolSeed.ts`）；`PL-26` 的 import 白名单是**闭集**，
+  新模块必须在 `tests/productLoopHomeGarage.test.ts` 的 PL-26 里**登记**（登记，不是放宽）。
 - 每轮必交边界取证：`git diff --stat -- src/{core,battle,physics,render,player,platform,game,presentation,ui}` +
   `git diff --exit-code -- src/core/content.ts src/battle/contactRouter.ts`。
 
@@ -41,6 +50,13 @@ home **30/30** · default-entry **86/86** · repo-health **9/9**。
   `交接文档_*.md` 用**显式路径** `git add` · 禁 `git stash` · `refs/remotes/origin/` 可能**整个为空** ⇒ 四路核对用
   **`git ls-remote`** 顶替 · vitest `--pool=vmForks --maxWorkers=1` 且**必须独占机器**，否则**无关文件**报 5s 超时）
   —— **全文在用户级 `~/.workbuddy/MEMORY.md`**。
+- ⚠️ **本宿主 `child_process.spawnSync` 被无条件拒绝**（R5 实测）：返回 `status:null` +
+  `error: spawnSync … EBUSY`。spawn `node.exe` / `cmd.exe` 全 EBUSY；从 vitest worker 内、从普通 node 进程、
+  **沙箱外**都一致；**异步 `spawn` 正常**。受影响**恰好 2 个**文件：`tests/rcBundleCleanP0.test.ts`（6/9 红）、
+  `tests/rcFusionTestEntryP0.test.ts`（T16 红）。**二者在干净 HEAD 上同样红 ⇒ 环境假失败，不是回归**
+  —— 判定这类红**不要**去改被测逻辑。
+- ⚠️ **`e2e:product-reward` 单跑约 2m09s > Bash 工具默认 120s** ⇒ 会被 SIGTERM 掐掉、且**不打印
+  `=== 结果`**（日志停在最后一条 `PASS …`）。**必须后台跑**再取日志，否则会把「跑完但被掐」误读成失败。
 - ⚠️ **入口唯一性**：根路径 `/` 由 dev-only `build/branchDevEntry.ts` 重写（**R1-C 起 = `/home.html`**）；该逻辑不许进
   `vite.config.ts`。研发入口（`run-page.html` / Hub / Lab / `index.html`）**一个都没删**。
 - ⚠️ **`R22b`**：`src/`（Lab 之外）0 处 `portrait-lab`/`portraitBattleLab` 字样（注释 / import 路径 / 产物名也不行）。
@@ -81,8 +97,34 @@ home **30/30** · default-entry **86/86** · repo-health **9/9**。
   —— 门禁真实丢档，REF §14f-2/§14g）；唯一不落标记的是可重试的 `equip-failed`。
   ⚠️ 写语义相反的两件事**不共用一个 key / 模块**。
 
+### 2h R5 起：**新账号内容基线 + 内容池种子契约**（写任何内容相关断言前必读）
+- **一次性的第五份种子** `src/product/r5ContentPoolSeed.ts`（R5），key `strongfruit.r5ContentPoolSeed.v1`，
+  版本 `R5_CONTENT_POOL_VERSION = 1`。与 R2/R3/R4 三份**逐条同构**：判定（纯读）→ 变更 → 落盘 → **最后**落标记；
+  标记语义 = **`decided`（决策已做出）**⇒ `already-complete` 出口**也必须落标记**（否则玩家自己消耗一件会被重发）。
+- **它发什么**：`R5_POOL_BODY_IDS = NEW_OFFICIAL_BODIES`（4 台全解锁）+ `R5_POOL_PART_IDS = OFFICIAL_PARTS`
+  （11 件各补到 ★1 ≥1）。**只补缺的**；唯一写动作 `grantBody` + `addPart(inv,id,1,n)` ⇒ **只增不减、不发 ★2+**。
+- ⚠️ **新账号内容基线（照这个写断言）**：Garage 武器槽 **9 张卡**（3 → 9）、车身槽 **8 张**、后轮/前轮各 **5 张**，
+  四个槽 **`locked = 0`**。`weapons` = `playerLoadout.weaponEntries()` = 仅 `category === 'weapon'`，
+  按 id 字典序：`cannon, flamethrower, hammer, laser, machineGun, rammer, saw, shotgun, spear`（9 件；
+  `pushRod`/`thruster` 是 **gadget**、不在其中）。
+- ⚠️ **storage key 闭集 七 → 八**（+`r5ContentPoolSeed.v1`）。既有两处闭集断言已 +1：
+  `_e2e_product_home.cjs` 的 **E5**、`_e2e_product_reseed.cjs` 的 **R2g**（另 product-loop **A1b** /
+  product-reward **A3、G1** 已改为「9 件逐 id 相等」）。
+- ⚠️ **内容化之后会「失效」的既有前提**：`product-home` 的 **GS6** 原靠「Body 槽天然有未拥有样本」——
+  已被内容池作废 ⇒ 现改为**受控样本**（同会话内临时写正式 `ownedBodies.v1` 去掉一台，取证后恢复，
+  新增 **GS6b** 证明复原）。**手法与 M2b 一致**；**契约变更作废 E2E 路线时，换合法路线 + 加守门断言，不删断言**。
+- ⚠️ **卡片表变长 ⇒ 真实鼠标点击必须先 `scrollIntoViewIfNeeded()`**：9 张卡后
+  `[data-ph-weapon="spear"]` 落在滚动区外，`boundingBox()` 仍给矩形但点空（实测 `lastEquip=null`）。
+  `product-reward` 的 `clickSelector` 已按 `product-loop` 同法补齐。
+- **canonical 内容事实（沿 Runtime 查过，别重查）**：`contactRouter.ts` 弹丸读 `projectileDamage`(:996)、
+  直击读 `baseDamage`(:688)，**grep `'cannon'` 为空** ⇒ 伤害链共用、**无 cannon 专属 modifier**；
+  `behaviorRegistry.FACTORIES` **11 项已注册**、**`'ram'` 未注册** ⇒ `spear` 靠 collider 直击、无 behavior runtime；
+  `buildSnapshotFromDraft` **无 behavior/category 过滤** ⇒ 11 件全部可进 Snapshot。
+- ⚠️ **仍未放宽** `runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS = ['cannon']`（与
+  `runModifiers.RUN_BASE_WEAPON_DEF_ID` 同值但**各自声明**）。为武器补正式 Run Build 内容是**另一条 Queue**。
+
 ## 3. 指向
 `REF_PRP_RUNTIME.md` §A 战斗参数 · §B 相机 · §C 接缝/第一层冻结值 · §D RUN-R1 · §E BUILD-01 · §F/§J/§K RUN-02 ·
 §G M2 种子 · §H M3 遭遇台 · §I Hub · §L M2-R1 终点态出口 · §M PBL-RDC。各轮交付细节**只在同名交接文档**
-（§5 `R1-D` … §14 `R2-RESEED-R1`）。启动：`npm run dev`（默认**产品首页**；研发 `dev:home` / `dev:next-run` /
+（§5 `R1-D` … §14 `R2-RESEED-R1`，§15 `R5`）。启动：`npm run dev`（默认**产品首页**；研发 `dev:home` / `dev:next-run` /
 `dev:encounter-lab` / `dev:validation`）。
