@@ -12,10 +12,19 @@
 
 ## 0. 现状 / 下一步（**新窗口先读这段**）
 **R2（A/B/C）+ R2-RECOVERY + SETTLEMENT-CTA-LATENCY + SINGLE-CTA/音频 + R2-RESEED + R4（Body canonical/MVP）
-+ R3（四同构槽）+ R5（正式内容池）均已收口**，无功能缺口、无 BLOCK。
-**下一步 = 等用户下发新 Queue**（连续三轮 Queue 末尾都写「直接继续 Q2 / Q3 / Q4」，但**正文均未到达** ⇒ 未开工）。
++ R3（四同构槽）+ R5（正式内容池）+ **R5-MULTI-WEAPON-PRODUCT-COMPAT（统一检查，源码零改动）** 均已收口**，
+无功能缺口、无 BLOCK。
+**下一步 = 等用户下发新 Queue**（连续四轮 Queue 末尾都写「直接继续 Q2 / Q3 / Q4 / Q5…Q6」，但**正文均未到达** ⇒ 未开工）。
+⚠️ **Q5「多武器统一检查」的结论 = 唯一支持完整 Run 的武器仍是 `cannon`（本批次无变化）**，
+交付物是两条**机器守卫**（`tests/productMultiWeaponCompatR5.test.ts` 11 条 + `_e2e_product_fail.cjs` 新增
+A4b 逐件守门矩阵），**不是**功能改动。详见下一条与当日日志。
+⚠️⚠️ **本轮最重要的事实修正**：**`weaponDefs()` 的武器是 10 件，不是 9 件** —— 含 **`ramHead`（冲撞头）**
+（`category:'weapon'` / energy 20 / behavior `ram`），但它**不在 `OFFICIAL_PARTS`** ⇒ `isOfficialPart('ramHead') === false`
+⇒ **玩家永远拿不到、不进任何库存**。「本批次可接入的武器」= `OFFICIAL_PARTS.filter(isWeaponDefId)` = **9 件**。
+写「武器全表」断言**必须**用后者，差集恰 `['ramHead']`。同理：**注册了 behavior 的 11 件 ≠ 可拥有的 11 件**。
 ⚠️ **「非 cannon 武器进完整 Run」这条线已连判两次 STOP**（`R5-SPEAR-FULL-RUN-R1` + `R5-HAMMER-FULL-RUN-R1`，
-两轮均**只调查、零改码、零源码 commit**）。**根因是同一个、且是产品侧明文裁决过的**：
+两轮均**只调查、零改码、零源码 commit**），并由 **Q5 统一收口**（判定不变、把结论变成机器守卫）。
+**根因是同一个、且是产品侧明文裁决过的**：
 - **阻塞点 = Run 的强化注入接缝只认 cannon**：完整 Run 唯一线性路径上 `d2-choice1`(layer1) 是**必选** CHOICE，
   池里 3 项**全是 cannon 派生**；`RUN_BASE_WEAPON_DEF_ID='cannon'`，判据 = 「装载里有没有正式 cannon」
   ⇒ 非 cannon 装载在 battle2（DAY3）创建时 **throw**（实测：`本局装载里没有 "cannon"…`）＝**P0 「Run 卡死」的形状**。
@@ -30,10 +39,21 @@
   ⇒ **hammer 记的是「内容实现缺口」：攻击实现不缺，缺的是它的正式 Run Build 内容（强化）+ 与之匹配的可行性**。
 - ⚠️ **hammer 的第二条独立证据（实测）**：产品可达形状 = **双锤**（`equipWeapon('hammer')` 只写 `WEAPON_SLOT`，
   而 starter 固定在 `top` 的那把锤仍在）⇒ **第一场就落败（0/4）**；单锤 2/4；**锤+炮 4/4**（说明 hammer 本身能打）。
-- ⚠️ **强化不是可选装饰**：实测无强化时**连 cannon 都打不完第四场**（3/4）。详见 `.workbuddy/memory/2026-09-26.md` 末两节。
-门禁基线（R5 实测）：`tsc` **零错** · R5 targeted **40 files / 671 tests** 全绿 ·
-product E2E：**home 98/98 · loop 53/53 · reward 57/57 · reseed 21/21 · fail 34/34 · star-power 22/22 ·
+- ⚠️ **强化不是可选装饰**：实测无强化时**连 cannon 都打不完第四场**（3/4）。详见 `.workbuddy/memory/2026-09-26.md` 末三节。
+- **Q5 把这个结论变成了机器守卫**（`9dcbf7b`，`src/` 零改动）：`tests/productMultiWeaponCompatR5.test.ts`
+  （11 条，**真源驱动**逐件矩阵 —— 集合从 `weaponDefs()` / `OFFICIAL_PARTS` **现读** ⇒ 新增武器自动进入；
+  其中 **MW-03「恰好一件放行」不可省**：否则把白名单改成 `['cannon','spear']` 时 `ok` 与 `supportsFullRun`
+  会**一起翻**、矩阵自洽变绿，守卫就失效了）+ `_e2e_product_fail.cjs` 的 **A4b 逐件守门矩阵**
+  （8 件非支持武器各走一遍：真实点击 → **独立读 localStorage** → 车库 unsupported → 首页 `startRunHref === null`
+  → **`equippedWeaponId` 仍是它**＝不自动换炮）。
+  ⚠️ Q5 三条负控制（白名单放宽 / 读路径注入写盘 / `FUSE_STACK=1`）分别打红 **4 / 2 / 2** 条 —— 守卫**真的会红**。
+门禁基线（Q5 实测）：`tsc` **零错** · targeted **41 files / 682 tests** 全绿 ·
+product E2E：**home 98/98 · loop 53/53 · reward 57/57 · reseed 21/21 · fail 45/45 · star-power 22/22 ·
 legacy-profile 18/18**。⚠️ **R5 起「新账号内容基线」变了**（见 §2h）⇒ 任何写死「3 件武器」的断言都会红。
+⚠️ **本宿主 `child_process.spawnSync` 被无条件拒绝**（`status:null` + `error: … EBUSY`）：spawn `node.exe` /
+`cmd.exe` 全 EBUSY，从 vitest worker、普通 node 进程、**沙箱外**都一致（**异步 `spawn` 正常**）。
+受影响**恰好 2 个**文件 —— `tests/rcBundleCleanP0.test.ts`（6/9 红）、`tests/rcFusionTestEntryP0.test.ts`（T16 红），
+**在干净 HEAD worktree 上同样红 ⇒ 环境假失败，非回归**。⇒ 绿批次**不纳入**这两个文件，但须在回执里披露。
 ⚠️ **全量 vitest 有负载抖动**：`vmForks + maxWorkers=1` 全量跑时个别重型文件会偶发 5s 超时。**判定三步**：
 单跑该文件 → 查 import 面有无引用 → **同一批次在干净 HEAD worktree 上再跑一次**；
 ⚠️ **R5 实测新判据**：`一整个批次红出来的文件集合在两次运行之间会变` ⇒ 那批红就是抖动。
@@ -53,8 +73,9 @@ legacy-profile 18/18**。⚠️ **R5 起「新账号内容基线」变了**（�
   R2-RECOVERY `8770c98`+`e50b95c` → SETTLEMENT-CTA-LATENCY `1931a71` → SINGLE-CTA+AUDIO `c2c1e2c`+`c55a285` →
   R2-VALIDATION-STATE-RESEED `88288b4`+`7dacd47` → R4 `3e48b16` → R4-GATE `8887ad6` →
   GARAGE-MOBILE `f357383` → GARAGE-SLOT-R2 `a51de9b` → `edd8f78` → `c76f1a2` → R3 `06e44de` →
-  **R5 `5baff53`（最后一笔源码改动）** → `a06f2a4` / `cf16cb9` / 本轮 `chore(memory)`
-  （**三笔均只记录判定，零源码改动**）；更早（R1-A..R1-D）查 `git log`。
+  **R5 `5baff53`（最后一次 `src/` 改动）** → `a06f2a4` / `cf16cb9` / `99a094c`（chore(memory)）
+  → **Q5 `9dcbf7b`（新增测试与 E2E 守卫，`src/` 零改动）** → 本轮 `chore(memory)`；
+  更早（R1-A..R1-D）查 `git log`。
 - ⚠️ `src/{physics,render,player,platform,ui,game,presentation,lab}` diff 恒为空（R2-B 起有意打破）；`src/core` 只许
   R2-B（`partInventory.ts`/`buildPersistence.ts`）+ R2-C（`buildSnapshot.ts` 星级**唯一真源** + `types.ts`）两处必改，
   **此后再无 core 改动**（含 R2-RESEED / R3 / R4 / R5 轮 —— 全部零改动）。R3–R5 只动 `src/product/`。
