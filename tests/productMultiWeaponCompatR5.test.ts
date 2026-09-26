@@ -199,25 +199,29 @@ describe('R5-MULTI-WEAPON｜A. canonical 武器集合', () => {
     // ④ 支持清单必须是**拿得到的东西**（支持一件永远发不出来的武器 = 幽灵条目）
     for (const id of FULL_RUN_SUPPORTED_WEAPON_IDS) expect(OWNED_WEAPONS).toContain(id);
 
-    // ⑤ 不受支持集合由差集推出（不手写）：registry 10 − 支持 8 = 2（spear + ramHead）
-    expect(UNSUPPORTED_WEAPONS.slice().sort()).toEqual(['ramHead', 'spear']);
+    // ⑤ 不受支持集合由差集推出（不手写）：registry 10 − 支持 7 = 3（spear + saw + ramHead）
+    expect(UNSUPPORTED_WEAPONS.slice().sort()).toEqual(['ramHead', 'saw', 'spear']);
     expect(UNSUPPORTED_WEAPONS).not.toContain('cannon');
     expect(UNSUPPORTED_WEAPONS).toContain('ramHead');
-    // 其中「玩家真的可能装上、但跑不了完整 Run」的**恰好 1 件** = spear
-    //   （Runtime 不完整：`behavior === 'ram'` 在 FACTORIES 里没有工厂；ramHead 拿不到 ⇒ 装不上）
-    expect(OWNED_WEAPONS.filter((id) => !supportsFullRun(id))).toEqual(['spear']);
+    // 其中「玩家真的可能装上、但跑不了完整 Run」的**恰好 2 件** = spear + saw，且理由不同：
+    //   - spear：③ Runtime 不完整（`behavior === 'ram'` 在 FACTORIES 里没有工厂）
+    //   - saw  ：④/⑤ 产品主武器槽打不到人（圆锯 collider 整体落在车身内，见 runCompatibility 头部）
+    //   （ramHead 拿不到 ⇒ 装不上，不在此列）
+    expect(OWNED_WEAPONS.filter((id) => !supportsFullRun(id))).toEqual(['spear', 'saw']);
   });
 
   it('MW-02 支持清单唯一真源、是**显式能力登记**；奖励池 ⊆ 支持清单', () => {
     /*
       PRODUCT-LOOP-R6 起清单**不再**等于 `[RUN_BASE_WEAPON_DEF_ID]` —— 那是「Run 硬绑的那一件」
       的旧语义。现在它是**显式能力登记**（登记门槛见 `runCompatibility` 头部 5 条）。
-      ⇒ 断言换成三条更贴语义的：cannon 必须在列、ramHead 不在（拿不到）、spear 不在（Runtime 不完整）。
+      ⇒ 断言换成三条更贴语义的：cannon 必须在列、ramHead 不在（拿不到）、
+        spear 不在（③ Runtime 不完整）、saw 不在（④/⑤ 产品槽打不到人）。
     */
     expect(FULL_RUN_SUPPORTED_WEAPON_IDS).toContain(RUN_BASE_WEAPON_DEF_ID);
     expect(RUN_BASE_WEAPON_DEF_ID).toBe('cannon');
     expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('ramHead');
     expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('spear');
+    expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('saw');
     // 奖励只发「这一局真的用得上的东西」⇒ 必须落在支持清单里
     for (const id of REWARD_CHOICE_IDS) expect(supportsFullRun(id)).toBe(true);
     // 全 `src/` 只有一处**声明**（注释剥掉后）⇒ 不可能存在第二份清单
@@ -253,7 +257,8 @@ describe('R5-MULTI-WEAPON｜B. 逐件矩阵', () => {
       ⚠️ 这一条**刻意把放行序列写死**（而不是「等于 `FULL_RUN_SUPPORTED_WEAPON_IDS`」）：
       与真源比对会让**矩阵本身自洽** —— 白名单被悄悄放宽时 `ok` 与 `supportsFullRun`
       会一起翻，矩阵照绿，就不再是守卫。写死之后任何一次「多放行一件」都在这一行炸出。
-      （PRODUCT-LOOP-R6：放行集合从 1 件扩到 8 件是**契约变更**，但这行的守卫强度不变。）
+      （PRODUCT-LOOP-R6：放行集合从 1 件扩到 8 件；PRODUCT-LOOP-R6-BATCH：逐件实测后
+        把 `saw` 收回 ⇒ 7 件。两次都是**契约变更**，但这行的守卫强度不变。）
     */
     expect(rows.filter((r) => r.endsWith('放行'))).toEqual([
       'cannon:放行',
@@ -262,38 +267,64 @@ describe('R5-MULTI-WEAPON｜B. 逐件矩阵', () => {
       'laser:放行',
       'machineGun:放行',
       'rammer:放行',
-      'saw:放行',
       'shotgun:放行',
     ]);
   });
 
-  it('MW-04 **逐件** Run 创建资格：支持 ⇒ 交回玩家那份真实装载；不支持 ⇒ blocked + 演示占位', () => {
+  it('MW-04 **逐件** Run 创建资格：产品放行 ⇒ 交回玩家那份真实装载；拒绝 ⇒ 两类分开断言', () => {
     for (const defId of REGISTRY_WEAPONS) {
       const draft = draftWithWeapon(defId);
       const res = resolveRunPlayerLoadout(searchOf(draft));
+      const localOk = runLoadoutCompatOfDraft(draft).ok;
       if (supportsFullRun(defId)) {
+        // 登记表内 ⇒ **两层都必须放行**（产品侧不发 href 是致命缺陷）
+        expect(localOk, `${defId}：登记表内 ⇒ 局内资格也必须放行`).toBe(true);
         // 「Product Run 使用真实武器」：交回去的就是玩家那份（source=profile、槽位相同）
         expect(res.blocked, `${defId} 不得被拦住`).toBe(false);
         expect(res.blockedReason).toBeNull();
         expect(res.fallback).toBe('none');
         expect(res.loadout.source).toBe('profile');
         expect(res.loadout.draft.functionalSelections[WEAPON_SLOT]).toBe(defId);
-      } else {
+        continue;
+      }
+      /*
+        ⚠️ 被**产品**拒绝的武器有两类，判据不同 ⇒ **必须分开断言**（混成一条会让
+        「到底是谁拒的」失去意义）。PRODUCT-LOOP-R6 已文档化：②（局内 Runtime 事实）
+        ⇏ ①（产品裁决），`saw` 就是那个差集。
+      */
+      if (!localOk) {
+        /* A 类 = **Runtime 事实**不成立（`ramHead` / `spear`：`behavior === 'ram'` 没有工厂）
+           ⇒ 走宿主那一层，在**创建 Run 之前**被拒绝。 */
         expect(res.blocked, `${defId} 必须在**创建 Run 之前**被拒绝`).toBe(true);
         expect(res.fallback).toBe('unsupported-loadout');
-        /*
-          PRODUCT-LOOP-R6：拒绝理由已从「车上没有 cannon」变成**能力** ——
-          这两件不受支持的武器都是「Runtime 不完整」：`ramHead` 是 prototype/hold、
-          `spear` 的 `behavior === 'ram'` 在 `FACTORIES` 里没有工厂。
-        */
         expect(res.blockedReason).toBe('no-weapon-runtime');
         // 被拒绝时**绝不**把玩家那份不兼容装载交回去（防「忽略 blocked ⇒ 照常开战」）
         expect(res.loadout.source).toBe('demo');
         expect(res.loadout.draft.functionalSelections[WEAPON_SLOT]).not.toBe(defId);
+      } else {
+        /* B 类 = **产品裁决**未登记，但 Runtime 事实成立（当前唯一一件 = `saw`）：
+           产品侧**根本不发 href**（`fullRunCompat.ok === false` ⇒ 没有出发链接），
+           因此正常路径上到不了这里；局内资格层**按设计**只回答
+           「这份装载有没有可运行的武器」⇒ 它不拦（见 MW-04b 的精确划分）。 */
+        expect(res.blocked, `${defId}：Runtime 齐 ⇒ 局内资格层不拦（产品侧不出 href）`).toBe(false);
+        expect(res.loadout.source).toBe('profile');
       }
-      // 两层判据同源（产品侧 / 局内侧不可能一处放行、另一处拒绝）
-      expect(runLoadoutCompatOfDraft(draft).ok).toBe(supportsFullRun(defId));
     }
+  });
+
+  it('MW-04b **两层关系精确划分**（全枚举，比「两层同源」更强）：差集必须恰好 = [saw]', () => {
+    const localRejected = REGISTRY_WEAPONS.filter(
+      (id) => !runLoadoutCompatOfDraft(draftWithWeapon(id)).ok,
+    );
+    const productRejected = REGISTRY_WEAPONS.filter((id) => !supportsFullRun(id));
+    // ① **Runtime 事实**层拒绝的恰好 2 件：`behavior === 'ram'` 没有工厂（拿不到的 ramHead 也在内）
+    expect(localRejected.slice().sort()).toEqual(['ramHead', 'spear']);
+    // ② **产品裁决**层拒绝的恰好 3 件
+    expect(productRejected.slice().sort()).toEqual(['ramHead', 'saw', 'spear']);
+    // ③ 结构性关系：局内拒绝 ⊆ 产品拒绝（**不可能**「局内拒绝却产品放行」—— 那才是真分叉）
+    for (const id of localRejected) expect(productRejected).toContain(id);
+    // ④ 且差集**恰好**是 saw（Runtime 齐、产品裁决不通过）—— 多一件或少一件都在这一行炸出
+    expect(productRejected.filter((id) => !localRejected.includes(id))).toEqual(['saw']);
   });
 
   it('MW-05 **读取路径零副作用**：审核 10 件武器不写盘、不改 draft ⇐「禁止自动换炮」的机器证据', () => {

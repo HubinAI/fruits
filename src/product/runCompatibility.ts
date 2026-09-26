@@ -35,12 +35,23 @@
  *   ① 正式可拥有 Weapon —— 在 `OFFICIAL_PARTS` 里且 `registry` 的 `category === 'weapon'`
  *   ② Snapshot 能解析 —— 该 defId 在正式 `registry.functionals` 里
  *   ③ 对应 behavior Runtime 真存在 —— `getBehaviorFactory(def.behavior)` 非 `undefined`
- *   ④ Collision / Damage / Result 链成立 —— 该武器有真实伤害路径，且能跑完一场真实战斗
+ *   ④ Collision / Damage / Result 链成立 —— 该武器**在产品主武器槽**（`WEAPON_SLOT` =
+ *      `frontMass`）上真的能造成伤害，且能跑完一场真实战斗
  *   ⑤ 不需要新增玩法规则 —— 它用**自己的 canonical Def** 就能跑，不依赖为该武器新写的
- *      强化 / Buff / 专属机制
+ *      强化 / Buff / 专属机制，也**不需要改它的几何 / 挂点**才能打得到人
  *
- * ⚠️ ①②③ 由 `tests/productRunWeaponSourceOfTruthR6.test.ts` 逐条机器钉死；④ 由同一测试里的
- *    **真实物理 smoke**（每件登记武器真的打一场）钉死；⑤ 是人工裁决，逐条写在下面的备注里。
+ * ⚠️ ①②③ 由 `tests/productRunWeaponSourceOfTruthR6.test.ts` 逐条机器钉死；④ 由
+ *    `tests/productRunWeaponRuntimeBatchR7.test.ts`（R6-BATCH 同轮新增）沿真实链**逐件实测伤害**
+ *    钉死 —— 口径是 `RunBattleRuntime.playerWeaponHitSummary()` 按 partId 归组的**真实**
+ *    `damage` 事件（不是读参数表、不是「跑得起来不崩」）；⑤ 是人工裁决，逐条写在下面备注里。
+ *
+ * ⚠️ **PRODUCT-LOOP-R6-RUNTIME-COMPLETE-WEAPON-BATCH（下称 R6-BATCH）对 ④ 的实测补强**：
+ *    改前 ④ 只用「跑得起来、不崩」的 smoke 判定 ⇒ 一件**完全打不到对手**的武器也会通过。
+ *    R6-BATCH 逐件沿真实链（canonical Def → behavior → factory → entity → attack →
+ *    collision / projectile → damage → result）复核并**实测伤害**，据此把 `saw` 移出登记表
+ *    （见下面「明确被拒」第 3 条）。判据现在要求的是「**产品槽位上真的打得出伤害**」，
+ *    而不是「registry 里有一件定义」。
+ *
  * ⚠️ 本文件**刻意不 import** `battle/behaviorRegistry`（那会把整个战斗运行时拖进产品首屏
  *    bundle）—— ③ 的校验放在测试里，产品侧只持**裁决结果**。
  *
@@ -52,6 +63,36 @@
  *    都是 **Cannon 专属**（字段名与 behavior 都是 Cannon 的）。装备非 Cannon 时这些项
  *    **不适用**（`runModifiers.weaponOverlayMods` 返回空），该武器用它自己的 canonical Def 打。
  *    ⇒ 「非 Cannon 的强化内容」是一条独立的 Run 内容设计 Queue，本 Queue 不设计、不新增。
+ *
+ * ⚠️ 承接上一条的**实测后果（R6-BATCH 记录，非本 Queue 修复项）**：因为整条 Run 的
+ *    成长内容都是 Cannon 专属，非 Cannon 装备在本局**拿不到任何伤害成长**
+ *    （三个第一层项与横向改装对它全是空操作，唯一真实收益是 `emergencyRepair` 的两次回耐久）。
+ *
+ *    实测口径（★1 / 零 Build / `playerBaseline: true` / **归因夹具** = 车上只留这一件武器，
+ *    `top` 槽的锤也清掉 —— 否则测的是「那一套装配」而不是「这件武器」）：
+ *
+ *      | 武器            | 下界（跨场不修）      | 真实路线（DAY4 维修 + DAY5 紧急维修） |
+ *      |---|---|---|
+ *      | `cannon`        | ✅ COMPLETE（234.8） | ✅ COMPLETE（377.0） |
+ *      | `flamethrower`  | ✅ COMPLETE（222.2） | ✅ COMPLETE（437.2） |
+ *      | `machineGun`    | ✅ COMPLETE（580.9） | ✅ COMPLETE（657.1） |
+ *      | `shotgun`       | ❌ 第 4 场阵亡       | ✅ COMPLETE（16.8，余量极薄） |
+ *      | `hammer`        | ❌ 第 3 场阵亡       | ❌ 第 4 场阵亡 |
+ *      | `rammer`        | ❌ 第 2 场阵亡       | ❌ 第 2 场阵亡 |
+ *      | `laser`         | ❌ 第 1 场阵亡       | ❌ 第 1 场阵亡 |
+ *
+ *    ⚠️ 两笔维修都发生在 **DAY4 / DAY5**（都在第 3 场之前）；维修量 = 正式
+ *       `EMERGENCY_REPAIR_FRACTION` × 上限、按缺口截断（与 `runPageState` 同一公式）。
+ *    ⚠️ 归因夹具与**产品默认车**回答的是两个不同问题，不要混：产品默认车在 `top` 槽还挂着
+ *       一把锤，实测 cannon 那台车的下界是**第 4 场阵亡**（含两次维修才 COMPLETE，36.3）
+ *       ⇒ 「那台车的装配还有一条平衡留白」也是事实，但它的对象是**那台车**，不是「cannon 链」。
+ *    ⚠️ 机器钉死：`R7-04b`（下界）/ `R7-04c`（真实路线）/ `R7-10`（cannon 全链不退化）。
+ *
+ *    这是**平衡 / 内容完成度**事实，不是 Runtime 缺口：这些武器都满足登记 5 条门槛
+ *    （打得出真实伤害、用它自己的 canonical Def、不需要新规则）⇒ 本 Queue 按 Queue
+ *    明文把它们**一并登记**（Queue：「Runtime 已完整、不需要新增规则」的武器一次性登记），
+ *    「非 Cannon 的局内强化 / 平衡」留给独立内容 Queue。**不要把这条误读成放行标准放宽**
+ *    —— `saw` 正是被 ④ / ⑤ 挡下的那一件（Runtime 齐、产品槽上打不到人）。
  */
 
 import { registry } from '../core/content';
@@ -61,26 +102,49 @@ import type { FunctionalPartDef } from '../core/types';
 /**
  * 支持「完整 Run」的武器 defId（**显式能力登记**，不是「全部正式部件」）。
  *
- * 逐条登记理由（都满足 5 条门槛；① ② ③ 由测试机器钉死，④ 由真实物理 smoke 钉死）：
+ * 逐条登记理由（都满足 5 条门槛；① ② ③ 由测试机器钉死，④ 由**实测伤害**钉死）：
  *
- *   | defId | behavior | ③ runtime | ④ 真实伤害路径 | ⑤ 无需新玩法规则 |
+ *   | defId | behavior | ③ runtime | ④ 真实伤害路径（产品槽实测 / 第 1 场） | ⑤ 无需新玩法规则 |
  *   |---|---|---|---|---|
- *   | `cannon`        | cannon        | ✅ | projectileDamage 80            | ✅ 现有 R2 强化体系的原生武器 |
- *   | `flamethrower`  | flamethrower  | ✅ | projectileDamage 8（短命火流）  | ✅ 用自身 canonical Def |
- *   | `hammer`        | hammer        | ✅ | baseDamage 90（Revolute 真实物理弧） | ✅ 用自身 canonical Def |
- *   | `laser`         | laser         | ✅ | projectileDamage 160           | ✅ 用自身 canonical Def |
- *   | `machineGun`    | machineGun    | ✅ | projectileDamage 20（burst 7 发） | ✅ 用自身 canonical Def |
- *   | `rammer`        | rammer        | ✅ | baseDamage 70（Prismatic 伸出撞击） | ✅ 用自身 canonical Def |
- *   | `saw`           | saw           | ✅ | hitPolicy.damage 8（contactTick 持续切割） | ✅ 用自身 canonical Def |
- *   | `shotgun`       | shotgun       | ✅ | projectileDamage 30（5 发固定扇形） | ✅ 用自身 canonical Def |
+ *   | `cannon`        | cannon        | ✅ | projectileDamage 80（**正式键**；玩家侧基线独立为 120 — **实测 1080 / 9 命中**） | ✅ 现有 R2 强化体系的原生武器 |
+ *   | `flamethrower`  | flamethrower  | ✅ | projectileDamage 8（短命火流） — **实测 1000 / 125 命中** | ✅ 用自身 canonical Def |
+ *   | `hammer`        | hammer        | ✅ | baseDamage 90（Revolute 真实物理弧） — **实测 1080 / 12 命中** | ✅ 用自身 canonical Def |
+ *   | `laser`         | laser         | ✅ | projectileDamage 160 — **实测 800 / 5 命中** | ✅ 用自身 canonical Def |
+ *   | `machineGun`    | machineGun    | ✅ | projectileDamage 20（burst 7 发） — **实测 1000 / 50 命中** | ✅ 用自身 canonical Def |
+ *   | `rammer`        | rammer        | ✅ | baseDamage 70（Prismatic 伸出撞击） — **实测 910 / 13 命中** | ✅ 用自身 canonical Def |
+ *   | `shotgun`       | shotgun       | ✅ | projectileDamage 30（5 发固定扇形） — **实测 1140 / 38 命中** | ✅ 用自身 canonical Def |
+ *
+ * ⚠️ 「实测」口径 = `RunBattleRuntime.playerWeaponHitSummary()` 里来源部件 = 该武器 defId 的
+ *    真实 `damage` 事件之和（`DamageResolver` 真的从对方 HP 减掉的那个数），不是读 UI、
+ *    不是读参数表。夹具 = 产品默认车 + 主武器槽换成该武器、车上**只留它一件**
+ *    （避免 `top` 槽的 hammer 混入归因）、`playerBaseline: true`（产品真实路径）。
  *
  * **明确被拒的武器**：
  *   - `spear` 刺 —— ③ 不满足：它的 `behavior` 是 `'ram'`，而 `behaviorRegistry.FACTORIES`
  *     **没有注册 `'ram'`**（`planckBattleOrchestrator` 遇 `!factory` 会跳过该 part 的运行时，
  *     只有 collider 与 contact 伤害链路存在）⇒ **Runtime 不完整，不登记**。
- *     ⚠️ 本 Queue **禁止**为它补 behavior（「不补 Spear ram」是 Queue 明文禁止项）。
+ *     ⚠️ R6-BATCH 已在**真实代码**里逐处穷尽核对过「是否有一份写了但没接上的正式 ram
+ *     behavior」：`src/battle/` 下**没有** `ramBehavior.ts`，`behavior: 'ram'` 只出现在
+ *     `content.ts` 的两处 def 与 `combatEvents.ts` 的一句注释里
+ *     ⇒ Queue 的例外条件（「除非真实代码中找到已经存在但此前漏接的正式 ram behavior」）
+ *     **不成立** ⇒ 保持 BLOCK，本 Queue **不补** behavior。
+ *     ⚠️ 如实记录：`spear` **确实**能通过 `contactOnce` 路径打出伤害（实测 600~1020）
+ *     —— 但这正是 Queue 点名不许据以判完整的情形（「碰撞已经能造成伤害」≠ Runtime 完整）。
  *   - `ramHead` 冲撞头 —— ① 不满足：它是 `prototype/hold`，**不在 `OFFICIAL_PARTS`**
  *     （玩家永远拿不到），连登记资格都没有。
+ *   - `saw` 圆锯 —— **④ / ⑤ 不满足**（R6-BATCH 实测发现，R6 误登记后纠正）：
+ *     它的 behavior Runtime 与 `contactTick` 伤害链**都存在**（挂在 `front` 槽实测
+ *     25 命中 × 8 = 200 真实伤害），但挂在**产品主武器槽** `frontMass` 上时**打不到人** ——
+ *     原因完全在几何：圆锯 collider = 半径 28 的圆、圆心 = part 原点 = `frontMass` 挂点
+ *     （`watermelonBody.functionalHardpoints.frontMass = {x: 45}`）⇒ 圆锯前沿本地 x = 73，
+ *     而车身 collider 前沿 x = 85（`width: 170`）⇒ **正面接敌永远由车身先接触**，
+ *     圆锯被包在车身里，`contactTick` 结构上无从登记。
+ *     实测：4 场 Run 的第 1 场 **0 命中 / 0 伤害**；穷尽全部 7 套 Lab Encounter，
+ *     只有 2 套偶发 1~2 次接触（合计 8~16 点伤害，对 1000+ HP 的对手不构成伤害能力）。
+ *     ⚠️ 既有 saw 测试**全部**把它挂在 `front`（本地 x = 78 ⇒ 前沿 x = 106 > 85，能打出车身）
+ *     ⇒ 这个缺口此前从未被测到 —— 「挂点换了，武器的有效接触面就失效」是设计缺口，
+ *     让它生效必须改**挂点或几何** = 新增规则（⑤ 不成立）⇒ **保持 BLOCK，记录缺口**，
+ *     本 Queue 不改它的 collider / 数值 / 挂点。
  *   - `pushRod` / `lifter` / `thruster` —— ① 不满足（`category === 'gadget'`，不是武器）。
  */
 export const FULL_RUN_SUPPORTED_WEAPON_IDS: readonly string[] = [
@@ -90,7 +154,6 @@ export const FULL_RUN_SUPPORTED_WEAPON_IDS: readonly string[] = [
   'laser',
   'machineGun',
   'rammer',
-  'saw',
   'shotgun',
 ];
 

@@ -28,6 +28,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { getBehaviorFactory } from '../src/battle/behaviorRegistry';
 import { registry } from '../src/core/content';
 import { OFFICIAL_PARTS } from '../src/core/partInventory';
 import { buildSnapshotFromDraft, type BuildDraft } from '../src/lab/buildEditorModel';
@@ -77,12 +78,35 @@ const strip = (src: string): string =>
 /**
  * PRODUCT-LOOP-R6 之后夹具的划分变了（契约变更，不是放宽）：
  *   - `SUPPORTED` = 能力登记表里的任一件（下面从真源现读，不再写死 cannon）；
- *   - `UNSUPPORTED` = **Runtime 不完整**的武器（`spear` 的 `behavior === 'ram'`
- *     在 `behaviorRegistry.FACTORIES` 里没有工厂）—— 它仍然是**合法武器**，
- *     只是跑不了完整 Run（必改 D）。改前 hammer 也在这一组，现在它在登记表里。
+ *   - `UNSUPPORTED` = **产品侧拒绝**的武器，两类理由不同（PRODUCT-LOOP-R6-BATCH 之后）：
+ *       ① `spear` —— ③ Runtime **不完整**（`behavior === 'ram'` 在 `behaviorRegistry.FACTORIES`
+ *          里没有工厂）⇒ 局内资格层也会拒绝（`no-weapon-runtime`）；
+ *       ② `saw`   —— ④/⑤ 不满足：Runtime 齐（`sawBehavior` + `contactTick` 链都在），
+ *          但挂在**产品主武器槽** `frontMass` 上时圆锯 collider 整体落在车身内 ⇒ 实测
+ *          0 命中 / 0 伤害 ⇒ **产品裁决不登记**（局内资格层按设计更宽松，见 MW-04b）。
+ *   ⚠️ 两件都仍然是**合法武器**（可拥有 / 可装备 / 过正式校验），只是跑不了完整 Run。
  */
 const SUPPORTED = 'cannon';
-const UNSUPPORTED: readonly string[] = ['spear'];
+const UNSUPPORTED: readonly string[] = ['spear', 'saw'];
+
+/**
+ * 上面那一组里，**局内资格层也会拒绝**的子集（PRODUCT-LOOP-R6-BATCH 起恰好 `['spear']`）。
+ *
+ * ⚠️ 为什么必须拆成两张表：两层判据**不是同一件事**，而且**只在一个方向上守恒** ——
+ *   - **局内层**（`resolveRunPlayerLoadout` → `runLoadoutCompatOfDraft`）判的是
+ *     **Runtime 事实**：「基准武器的 `behavior` 在 `behaviorRegistry.FACTORIES` 里有工厂吗」；
+ *   - **产品层**（`fullRunCompat`）判的是**产品裁决**：登记表（5 条门槛，含 ④ 产品主武器槽上
+ *     真的能造成伤害）。
+ *   实测结论：`局内拒绝 ⊆ 产品拒绝`（不存在「局内拒、产品却放行」= 结构性漏洞），
+ *   但反向**不成立** —— `saw` 局内放行、产品拒绝。这不是漏配：产品层根本不会给它 href，
+ *   所以局内那一层**永远看不到**它（`saw` 的拒绝理由 ④/⑤ 是「挂在产品槽上打不到人」，
+ *   而不是「Runtime 不存在」）⇒ 硬把它塞进局内拒绝集反而会让两层判据混成一份。
+ *
+ * ⚠️ 判据**现读真源**（与 `runLoadoutCompat.ts` 自己用的那条同一个函数），不手写 id 表。
+ */
+const RUN_PAGE_BLOCKED: readonly string[] = UNSUPPORTED.filter(
+  (id) => getBehaviorFactory(registry.functionals.get(id)!.behavior) === undefined,
+);
 
 /**
  * 「玩家身上那件装备」= 产品侧真实默认车 + 主武器槽换成指定武器。
@@ -148,8 +172,9 @@ describe('PRODUCT-LOOP-P0｜A. 产品层单一判断 canStartFullRun（必改 1�
     for (const defId of FULL_RUN_SUPPORTED_WEAPON_IDS) {
       expect(canStartFullRun(equippedDraft(defId)), `${defId} 必须放行`).toBe(true);
     }
-    // 契约变更的**正面取证**：改前被拒、现在放行的那几件（各自用自己的 canonical Def 跑）
-    for (const defId of ['hammer', 'laser', 'saw']) {
+    // 契约变更的**正面取证**：改前被拒、现在放行的那几件（各自用自己的 canonical Def 跑）。
+    // ⚠️ 刻意**写死**这六件（而不是从真源 filter 出来）：否则清单被悄悄放宽时这一行照绿。
+    for (const defId of ['hammer', 'laser', 'machineGun', 'rammer', 'shotgun', 'flamethrower']) {
       expect(canStartFullRun(equippedDraft(defId)), `${defId} 现在必须放行`).toBe(true);
     }
   });
@@ -196,13 +221,27 @@ describe('PRODUCT-LOOP-P0｜A. 产品层单一判断 canStartFullRun（必改 1�
 
 describe('PRODUCT-LOOP-P0｜B. Run 创建资格（必改 4）', () => {
   it('LC-05 **Case B / C / D**：不兼容装载在 **Run 创建前** 被拒绝，且结果结构化', () => {
-    for (const defId of UNSUPPORTED) {
+    // 夹具自检：这一层拒的恰好是「Runtime 不存在」的那些（R6-BATCH 起 = `['spear']`）
+    expect(RUN_PAGE_BLOCKED).toEqual(['spear']);
+    for (const defId of RUN_PAGE_BLOCKED) {
       const res = resolveRunPlayerLoadout(searchOf(equippedDraft(defId)));
       expect(res.blocked, `${defId} 必须禁止创建 Run`).toBe(true);
       expect(res.fallback).toBe('unsupported-loadout');
       // 拒绝理由 = **Runtime 不完整**（不是「不是 cannon」，也不是「没有武器」）—— 必改 D
       expect(res.blockedReason).toBe('no-weapon-runtime');
     }
+    /*
+      ⚠️ 另一件被产品层拒绝的 `saw`（理由 ④/⑤）在本层**按设计放行** —— 这是两层关系
+      （`局内拒绝 ⊆ 产品拒绝`，反向宽松）的可执行证据，不是「漏了一片」。
+      它能被玩家碰到吗？**结构上不能**：产品首页在 `fullRunCompat` 拒绝时**不给 href**
+      （见 A 段 `startRunBlocked` / E2E A4b 被拒矩阵）⇒ 局内这一层永远看不到它。
+    */
+    const sawRes = resolveRunPlayerLoadout(searchOf(equippedDraft('saw')));
+    expect(sawRes.blocked, 'saw 的拒绝发生在产品层，不在这一层').toBe(false);
+    expect(sawRes.blockedReason).toBeNull();
+    expect(sawRes.fallback).toBe('none');
+    // 但它**确实**被产品层拦住 —— 两层各司其职，没有一层漏掉它
+    expect(fullRunCompat(equippedDraft('saw')).ok).toBe(false);
     // Case D 的原形：旧 URL / stale href 里手工塞一份不兼容装载 —— 与「产品侧产出」无关，
     // 只要 search 里是它就必须被拒绝（这正是「测试入口 / 旧 Profile」那条路径）。
     const stale = `?equipped=${encodeURIComponent(
@@ -225,11 +264,16 @@ describe('PRODUCT-LOOP-P0｜B. Run 创建资格（必改 4）', () => {
       调用方一旦漏看 `blocked`，就会退化成「照常开战，然后在 DAY3 崩」——
       正是要根除的形态。因此这里断言返回的是演示装载（占位），且它与玩家那份**不同**。
     */
-    for (const defId of UNSUPPORTED) {
+    for (const defId of RUN_PAGE_BLOCKED) {
       const res = resolveRunPlayerLoadout(searchOf(equippedDraft(defId)));
       expect(res.loadout.source).toBe('demo');
       expect(res.loadout.draft.functionalSelections[WEAPON_SLOT]).not.toBe(defId);
     }
+    /*
+      `saw` 那一侧不存在这条风险（本层不拒它）⇒ 它的「不许照常开战」由**产品层**承担：
+      没有 href 就进不了 Run 页（E2E A4b 被拒矩阵逐件取证）。
+    */
+    expect(RUN_PAGE_BLOCKED).not.toContain('saw');
   });
 
   it('LC-07 cannon 的正常闭环不受影响（既不 blocked、也不降级）', () => {
@@ -322,26 +366,52 @@ describe('PRODUCT-LOOP-P0｜C. 真实战斗创建（必改 6 的 Case A / Case E
     }
   });
 
-  it('LC-12 创建期资格与运行时判据**同源**（不可能一处放行、另一处拒绝）', () => {
+  it('LC-12 创建期资格与运行时判据**同源**（两层关系精确划分，不是「一律同值」）', () => {
     /*
       同源现在有两层含义，两层都必须成立：
         ① 「基准武器」两侧解析的是**同一件事**（装配顺序第一件正式武器）；
-        ② 「放行」在局内资格与产品登记表之间一致（都由 Runtime 存在性决定）。
+        ② 两层**不会分叉**：局内资格拒绝 ⇒ 产品侧必然拒绝（不可能一处拒、一处放行）。
+      ⚠️ PRODUCT-LOOP-R6-BATCH 把「一致」精确化为**包含关系**而不是「逐件同值」——
+         `saw` 正是那个差集（Runtime 事实成立、产品裁决不登记）。若写成逐件同值，
+         这条守卫会把**已文档化的设计**（局内层只回答「有没有可运行的武器」）判成错误。
       ⚠️ 创建期资格不再与「注入会不会 throw」互为反面 —— 非 Cannon 装备的合法装载
          **既不 throw 也不放行到别的武器**（武器项不适用），这与「拒绝创建」是两件事。
     */
-    for (const defId of ['cannon', 'hammer', 'laser', 'saw', ...UNSUPPORTED]) {
+    const registryWeapons = [...registry.functionals.values()]
+      .filter((d) => d.category === 'weapon')
+      .map((d) => d.id);
+    expect(registryWeapons.length, 'registry 里恰 10 件武器').toBe(10);
+    const localRejected: string[] = [];
+    for (const defId of registryWeapons) {
       const draft = equippedDraft(defId);
       const snap = buildSnapshotFromDraft(draft, registry, 'lc');
       // ① 基准武器 = 装备的那一件；装载里有可运行武器
       const base = resolveRunBaseWeaponDefId(snap, registry);
       expect(base, `${defId}：基准武器必须解析出来`).toBe(defId);
       expect(snapshotHasRunBaseWeapon(snap, registry), `${defId}：装载里有正式武器`).toBe(true);
-      // ② 注入路径永不 throw（没有『找不到 cannon』这条理由了）+ 放行 ⇔ 登记表
+      // ② 注入路径永不 throw（没有『找不到 cannon』这条理由了）
       expect(() => applyRunModifiersToSnapshot(snap, 'heavyShell', false, base)).not.toThrow();
-      const ok = runLoadoutCompatOfDraft(draft).ok;
-      expect(ok, `${defId}：局内资格必须与产品登记表一致`).toBe(supportsFullRun(defId));
+      /*
+        ③ 关系（**单方向**）：局内拒绝 ⇒ 产品层必然也拒绝。
+           反向**不成立**，而且**不许**成立为「逐件同值」：`saw` 局内放行、产品拒绝
+           （它挂在产品槽上打不到人 = 产品裁决，不是 Runtime 事实）。写死反向会把这个
+           已文档化的设计判成错误 —— 两层各回答一个问题。
+      */
+      const localOk = runLoadoutCompatOfDraft(draft).ok;
+      if (!localOk) {
+        localRejected.push(defId);
+        expect(
+          supportsFullRun(defId),
+          `${defId}：局内拒绝 ⇒ 产品层也必须拒绝（不允许「局内拒、产品放行」）`,
+        ).toBe(false);
+      }
     }
+    // ④ 精确划分：Runtime 事实层拒绝的恰好 = ramHead + spear；产品层多拒的恰好 = saw
+    expect(localRejected.slice().sort()).toEqual(['ramHead', 'spear']);
+    expect(
+      registryWeapons.filter((id) => !supportsFullRun(id) && !localRejected.includes(id)),
+      '产品层比 Runtime 事实层多拒的恰好是 saw（Runtime 齐、产品主武器槽打不到人）',
+    ).toEqual(['saw']);
     // 相机 / 辅助件不构成「有基准武器」（判据只看武器的那一件）
     expect(
       snapshotHasRunBaseWeapon(
@@ -439,7 +509,9 @@ describe('PRODUCT-LOOP-P0｜D. 源码守卫', () => {
       const overlay = RUN_MODIFIER_OVERLAY[id];
       if (overlay.affectsWeapon) expect(overlay.behavior).toBe('cannon');
     }
-    // spear 仍被明确拒绝 —— 但**理由已从「不是 cannon」变成「Runtime 不完整」**（必改 D）
+    // spear 仍被明确拒绝 —— 理由 = 「Runtime 不完整」（没有 `ram` 工厂）（必改 D）
     expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('spear');
+    // saw 也被明确拒绝 —— 理由不同：Runtime 齐，但产品主武器槽上打不到人（R6-BATCH 实测）
+    expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('saw');
   });
 });

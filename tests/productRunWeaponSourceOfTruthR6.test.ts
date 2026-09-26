@@ -348,13 +348,23 @@ describe('R6-RUN-WEAPON-SOURCE-OF-TRUTH｜E. 登记门槛与禁 fallback', () =>
     }
     // 必改 3 明令：不许写成「全部 OFFICIAL_PARTS」
     expect(FULL_RUN_SUPPORTED_WEAPON_IDS.length).toBeLessThan(OFFICIAL_PARTS.length);
-    // 反例必须真的存在（否则上面的门槛是空转）：玩家可拥有但**未被登记**的恰好 = spear
+    /*
+      反例必须真的存在（否则上面的门槛是空转）：玩家可拥有但**未被登记**的恰好 2 件 ——
+        - `spear`：③ 不满足（`behavior === 'ram'` 没有工厂）；
+        - `saw`：④/⑤ 不满足（R6-BATCH 实测：产品主武器槽 `frontMass` 上圆锯 collider
+          整体落在车身内 ⇒ 0 命中 / 0 伤害；既有测试全部挂 `front` 所以此前没被发现）。
+      ⇒ 这两件的拒绝理由**都**在下面的 `R6-BATCH` 逐条测试里机器钉死。
+    */
     const rejected = OFFICIAL_PARTS.filter(
       (p) => isWeaponDefId(p) && !FULL_RUN_SUPPORTED_WEAPON_IDS.includes(p),
     );
-    expect(rejected).toEqual(['spear']);
-    // 且它被拒的理由正是 ③
+    expect(rejected).toEqual(['spear', 'saw']);
+    // 且它们被拒的理由分别是 ③ / ④
     expect(getBehaviorFactory(registry.functionals.get('spear')!.behavior)).toBeUndefined();
+    expect(
+      FULL_RUN_SUPPORTED_WEAPON_IDS.includes('saw'),
+      'saw 的 Runtime 齐但产品槽打不到人 ⇒ 必须保持不登记',
+    ).toBe(false);
   });
 
   it('R6-10 **验收 E**｜禁止 silent fallback：base 只能来自装备，两层判据都不许退回某件武器', () => {

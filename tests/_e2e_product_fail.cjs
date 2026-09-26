@@ -56,14 +56,15 @@
  * ⚠️ 两处**不是**放宽、而是必须的加固：
  *   ① `clickSelector` 补 `scrollIntoViewIfNeeded()`：9 张卡后排在后面的卡落到滚动区下方，
  *      `boundingBox()` 仍给矩形但真实鼠标点在视口外（与 loop / reward 两个脚本同一处置）；
- *   ② 新增 A4b-0 / A4b-9 两条**汇总**断言（库存 = canonical 全表 / 8 件无一件被静默放行）。
+ *   ② 新增 A4b-0 / A4b-9 两条**汇总**断言（库存 = canonical 全表 / 被拒矩阵逐件无一件被静默放行）。
  *   既有 A1–A10、B~D 全部判据**一字未改**。
  *
  * ── ⚠️ PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH：守门口径**第三次**变（矩阵随之变成两段）──
  *
  * R6 把 Run 的**基准武器**从「写死 cannon」改成「玩家实际装备里装配顺序第一件正式武器」，
  * 于是「哪件武器能进完整 Run」的判据不再是「是不是 Cannon」，而是
- * **「那件武器自己的 behavior Runtime 存不存在」**（显式能力登记 8 件 + 1 件明确拒绝）。
+ * **「那件武器自己的 behavior Runtime 存不存在」**（显式能力登记 8 件 + 1 件明确拒绝；
+ *  ⚠️ R6-BATCH 起改为 **7 件登记 + 2 件被拒**，见本文件下方 R6-BATCH 段）。
  *
  * ⇒ 本文件里凡是依赖旧口径的东西都必须跟着改，按「契约变更作废既有 E2E 路线 ⇒
  *    **换合法路线 + 新增守门断言，不删断言**」执行：
@@ -78,12 +79,24 @@
  *   ③ A4b 从「8 件被拒」改为**两段真源驱动矩阵**：
  *        - **被拒矩阵**（`BLOCKED_WEAPON_MATRIX`，恰好 `['spear']`）——
  *          判据与 A4–A10 **完全同一组**（一字未改）；
- *        - **放行矩阵**（`SUPPORTED_WEAPON_MATRIX`，8 件）—— **R6 新契约的正向取证**：
+ *        - **放行矩阵**（`SUPPORTED_WEAPON_MATRIX`，R6 时 8 件 → R6-BATCH 起 7 件）
+ *          —— **R6 新契约的正向取证**：
  *          每件登记武器装上去之后都**真的**能出发（有 href），装备不会被偷偷换掉，
  *          而且出发链接里的装载载荷**真的**是它（不是被换成 cannon）。
  *
  * ⚠️ A1–A10、B~D 的既有判据除上面 ① ② 两处**取值**外一字未改；
  *    `FAIL_POLICY`（怎么输）与 `MAIN_WEAPON`（cannon，因为它有完整的 R2 强化体系）都不变。
+ *
+ * ── ⚠️ PRODUCT-LOOP-R6-BATCH-RUNTIME-COMPLETE-WEAPON-BATCH：被拒矩阵 1 件 → **2 件** ──
+ *
+ * R6-BATCH 逐件沿真实链实测伤害后，把 `saw` 从登记表**收回**：
+ *   它有 `sawBehavior` + `contactTick` 链，但挂在**产品主武器槽** `frontMass` 上时
+ *   圆锯 collider 整体落在西瓜车身内 ⇒ 实测 **0 命中 / 0 伤害**（详见 `SUPPORTED_WEAPON_IDS` 头注释）。
+ * ⇒ 「被拒」不再是**一条**理由（Runtime 不存在），而是**两条不同**的理由：
+ *       `spear` = ③ 没有 `ram` 工厂；`saw` = ④/⑤ 产品槽打不到人。
+ *   本脚本**不需要**分理由（玩家侧的合法表现必须完全一致）⇒ A4b 被拒矩阵仍是**同一组**
+ *   判据一字未改，只是从 1 件变成 2 件、放行矩阵从 8 件变成 7 件；
+ *   A4b-9 汇总断言里的写死值同步改为 `'saw,spear'`（`CANONICAL_WEAPON_IDS` 的顺序）。
  *
  * 用法：
  *   npm run build:portrait-lab
@@ -126,7 +139,8 @@ const CHOICES_PARAM = 'choices';
  * 本局用的**主武器**：`cannon`。
  *
  * ⚠️ PRODUCT-LOOP-R6：这里曾经写「正式基准武器 = **唯一**支持完整 Run 的武器」——
- *    那句话在 R6 之后**不再成立**（支持清单是 8 件显式登记，见 `SUPPORTED_WEAPON_IDS`）。
+ *    那句话在 R6 之后**不再成立**（支持清单是显式能力登记，见 `SUPPORTED_WEAPON_IDS`；
+ *    R6-BATCH 之后 7 件）。
  *    cannon 仍然是本局武器的理由变成了另一条：**只有它有完整的 R2 强化体系**
  *    （`FAIL_POLICY` 用的 `twinCannon` / `tripleLoad` 都是 Cannon 专属 overlay）
  *    ⇒ 这条失败路线必须以它为主武器，否则路线本身不成立。
@@ -135,15 +149,15 @@ const CHOICES_PARAM = 'choices';
 const MAIN_WEAPON = 'cannon';
 const MAIN_WEAPON_NAME = '炮';
 /**
- * 用来证明守门的**被拒**武器 —— R6 起不再是 `hammer`。
+ * 用来证明守门的**被拒**武器（A4–A10 单件走全链路用）。
  *
- * ⚠️ R6 换件的原因（不是放宽，是**判据真的变了**）：改前「非 cannon 一律拒绝」，
- *    所以随便挑一件非 cannon 都能取证；R6 起拒绝的理由**只剩一条** ——
- *    **那件武器的 behavior Runtime 不存在**。全 9 件库存里**恰好只有** `spear`
- *    满足这条（`behavior === 'ram'`，`behaviorRegistry.FACTORIES` 没注册它）
- *    ⇒ 它同时在下面的 `BLOCKED_WEAPON_MATRIX` 里被逐件审核。
- *    `hammer` 现在**属于放行集**（它有自己的 hammer factory）—— 它出现在
- *    下面的 `SUPPORTED_WEAPON_MATRIX` 里，不再是这里的 `BLOCKED_WEAPON`。
+ * ⚠️ R6 起不再是 `hammer`（不是放宽，是**判据真的变了**）：改前「非 cannon 一律拒绝」，
+ *    所以随便挑一件非 cannon 都能取证；R6 起拒绝的理由不再是「不是炮」。
+ *    R6-BATCH 之后共有**两件**被拒（`spear` = 没有 `ram` 工厂；`saw` = 产品槽打不到人），
+ *    本常量取 `spear` —— 它是**唯一**能让局内资格层也拒绝的那件（`no-weapon-runtime`），
+ *    因此 A4–A10 里「宿主在创建 Run 之前就被拦住」这条判据仍然成立。
+ *    ⚠️ `saw` 走的是**另一条**路径（产品侧不发 href、但局内资格层按设计放行）
+ *    ⇒ 它只在下面的 `BLOCKED_WEAPON_MATRIX` 里被逐件审核，**不当** A4–A10 的取样件。
  */
 const BLOCKED_WEAPON = 'spear';
 const BLOCKED_WEAPON_NAME = '刺';
@@ -175,11 +189,19 @@ const CANONICAL_WEAPON_IDS = [
  *    装配顺序第一件正式武器」⇒ 只要那件武器**自己的** Runtime 完整，它就能进完整 Run
  *    （用**它自己**的 canonical Def 跑，不套 Cannon 的数值 / 行为 / 弹道）。
  *
+ * ⚠️ PRODUCT-LOOP-R6-BATCH：逐件沿**真实链**实测伤害后，`saw` 被**收回**（8 → 7 件）：
+ *    它的 behavior Runtime 与 `contactTick` 链都存在，但挂在**产品主武器槽** `frontMass`
+ *    上时圆锯 collider（半径 28、圆心 = 挂点 x=45）完全落在西瓜车身内（车身 collider 前沿
+ *    x=85）⇒ 正面接敌永远由车身先接触 ⇒ 实测 **0 命中 / 0 伤害**
+ *    （既有 saw 测试全部挂 `front`，所以此前从未被发现）。要让它生效必须改挂点 / 几何
+ *    = 新增规则 ⇒ 保持 BLOCK，与 `spear`（无 `ram` 工厂）一起进被拒矩阵。
+ *
  * ⚠️ 本文件**不 import 源码**：这是同一份裁决结果的独立抄写，两边漂移由
  *    `tests/productRunWeaponSourceOfTruthR6.test.ts`（R6-09 逐条门槛 + R6-11 真实物理 smoke）
- *    机器钉死。登记门槛 5 条（① 正式可拥有 ② Snapshot 可解析 ③ behavior Runtime 存在
- *    ④ Collision/Damage/Result 链成立 ⑤ 不需要新增玩法规则）逐条写在
- *    `src/product/runCompatibility.ts` 模块头。
+ *    与 `tests/productRunWeaponRuntimeBatchR7.test.ts`（R7 逐件真实链 + 实测伤害）机器钉死。
+ *    登记门槛 5 条（① 正式可拥有 ② Snapshot 可解析 ③ behavior Runtime 存在
+ *    ④ Collision/Damage/Result 链在**产品主武器槽**上成立 ⑤ 不需要新增玩法规则）
+ *    逐条写在 `src/product/runCompatibility.ts` 模块头。
  */
 const SUPPORTED_WEAPON_IDS = [
   'cannon',
@@ -188,12 +210,11 @@ const SUPPORTED_WEAPON_IDS = [
   'laser',
   'machineGun',
   'rammer',
-  'saw',
   'shotgun',
 ];
-/** 逐件审核矩阵 = 全部 − 支持（**不手写**：内容变了这张表跟着变）⇒ R6 起恰好 = `['spear']`。 */
+/** 逐件审核矩阵 = 全部 − 支持（**不手写**：内容变了这张表跟着走）⇒ R6-BATCH 起 = `['saw','spear']`。 */
 const BLOCKED_WEAPON_MATRIX = CANONICAL_WEAPON_IDS.filter((id) => !SUPPORTED_WEAPON_IDS.includes(id));
-/** 放行矩阵 = 全部 − 被拒（同样真源驱动）⇒ R6 起 8 件（R6 新契约的正向取证）。 */
+/** 放行矩阵 = 全部 − 被拒（同样真源驱动）⇒ R6-BATCH 起 7 件。 */
 const SUPPORTED_WEAPON_MATRIX = CANONICAL_WEAPON_IDS.filter((id) => SUPPORTED_WEAPON_IDS.includes(id));
 
 /**
@@ -660,22 +681,24 @@ async function main() {
       `equipped=${home2.equippedWeaponId} blocked=${home2.startRunBlocked} href=${(home2.startRunHref ?? '').slice(0, 48)}… 链接装备槽=${loadoutBefore ? loadoutBefore.functionalSelections[WEAPON_SLOT] : 'n/a'}`,
     );
 
-    /* ============ A4b：**两段**真源驱动矩阵（被拒的 1 件 + 放行的 8 件） ============ */
+    /* ============ A4b：**两段**真源驱动矩阵（被拒的 2 件 + 放行的 7 件） ============ */
 
     /*
       A4–A10 用 `spear` 一件把**被拒**链条走全（真实点击 + 存档独立取证 + 真鼠标点不可执行按钮）。
       A4b 换成**真源驱动**的两段矩阵 —— 因为 R6 之后「非 cannon 一律拒绝」这条口径已经没有了：
 
-        ① **被拒矩阵** `BLOCKED_WEAPON_MATRIX`（= 全部 − 支持，R6 起恰好 `['spear']`）——
-           仍过 A4–A10 的**同一组**判据（一字未改）：
+        ① **被拒矩阵** `BLOCKED_WEAPON_MATRIX`（= 全部 − 支持，R6-BATCH 起恰好 `['saw','spear']`）
+           —— 仍过 A4–A10 的**同一组**判据（一字未改）：
            「未支持武器明确阻止 / 禁止 silent fallback 到 Cannon / 禁止自动替玩家换 Cannon」。
-        ② **放行矩阵** `SUPPORTED_WEAPON_MATRIX`（= 全部 − 被拒，R6 起 8 件）——
+           两件的拒绝理由**不同**（spear：没有 `ram` 工厂；saw：产品槽上圆锯打不到人），
+           但**产品侧表现必须完全一致** —— 玩家看到的是同一件事「这件武器跑不了完整冒险」。
+        ② **放行矩阵** `SUPPORTED_WEAPON_MATRIX`（= 全部 − 被拒，R6-BATCH 起 7 件）——
            **R6 新契约的正向取证**：每件登记武器装上去之后都**真的**能出发（有 href），
            装备**不会被偷偷换掉**，而且出发链接里的装载载荷**真的**是它。
 
       ⚠️ 两段都不 import 源码：矩阵由 `CANONICAL_WEAPON_IDS` 与 `SUPPORTED_WEAPON_IDS`
          两张独立抄写的常量推导 ⇒ 源码侧清单一漂移，这里必须响。
-      ⚠️ 两段合起来覆盖全部 9 件（1 件被拒 + 8 件放行），没有一件武器落空。
+      ⚠️ 两段合起来覆盖全部 9 件（2 件被拒 + 7 件放行），没有一件武器落空。
     */
     const invWeaponIds = [...new Set((home2.weapons ?? []).map((w) => w.defId))].sort();
     const weaponNameOf = new Map((home2.weapons ?? []).map((w) => [w.defId, w.name]));
@@ -733,8 +756,8 @@ async function main() {
       );
     }
     log(
-      matrixBad.length === 0 && BLOCKED_WEAPON_MATRIX.join(',') === 'spear',
-      `A4b-9 **被拒汇总**：${BLOCKED_WEAPON_MATRIX.length} 件 Runtime 不完整的武器逐件审核全部通过（没有任何一件被静默放行）· 矩阵 = [${BLOCKED_WEAPON_MATRIX.join(',')}]`,
+      matrixBad.length === 0 && BLOCKED_WEAPON_MATRIX.join(',') === 'saw,spear',
+      `A4b-9 **被拒汇总**：${BLOCKED_WEAPON_MATRIX.length} 件跑不了完整 Run 的武器逐件审核全部通过（没有任何一件被静默放行；两件理由不同但**产品表现必须一致**）· 矩阵 = [${BLOCKED_WEAPON_MATRIX.join(',')}]`,
       matrixBad.length === 0 ? '全部通过' : `失败：${matrixBad.join(' | ')}`,
     );
 
@@ -787,7 +810,7 @@ async function main() {
       );
     }
     log(
-      supportedBad.length === 0 && SUPPORTED_WEAPON_MATRIX.length === 8,
+      supportedBad.length === 0 && SUPPORTED_WEAPON_MATRIX.length === 7,
       `A4b-11 **放行汇总**：${SUPPORTED_WEAPON_MATRIX.length} 件登记武器逐件审核全部通过（每件都真的能出发，且本局 base = 它自己）`,
       supportedBad.length === 0 ? '全部通过' : `失败：${supportedBad.join(' | ')}`,
     );

@@ -124,8 +124,9 @@ const WEAPON_B_NAME = '刺';
  *    **收窄为 `['cannon']`** —— 奖励只发**这一局真的用得上**的东西：终点奖励固定为
  *    `cannon ★1 ×1`（它有完整的 R2 强化体系，是唯一有「打完一局就能强化」这条成长线的武器）。
  *    ⚠️ PRODUCT-LOOP-R6：这张候选表**不再等于**「支持完整 Run 的武器表」——
- *    R6 起后者是 8 件显式能力登记（`runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS`），
- *    `spear` 仍被拒（它的 `behavior === 'ram'` 没有注册 Runtime）。
+ *    R6 起后者是显式能力登记（`runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS`；
+ *    R6-BATCH 之后 7 件），`spear` 与 `saw` 仍被拒（理由不同：前者没有 `ram` Runtime，
+ *    后者在产品主武器槽上打不到人）。
  *    候选池仍然只有 cannon 是**奖励设计**的决定，与守门清单是两件事。
  *    顺序仍 = 界面上**从上到下**的展示顺序 ⇒ `CLAIM_INDEX` 同时就是「点第几张卡」。
  */
