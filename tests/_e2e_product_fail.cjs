@@ -455,7 +455,6 @@ async function main() {
     await clickSelector(page, '[data-ph-action="open-garage"]');
     const garage0 = await probeHome(page);
     await clickSelector(page, `[data-ph-weapon="${BLOCKED_WEAPON}"]`);
-    await clickSelector(page, '[data-ph-action="equip"]');
     const stored1 = await storageDump(page);
     const garageCompat = await runCompatDom(page);
     log(
@@ -523,7 +522,6 @@ async function main() {
 
     // 换回 cannon：完整冒险资格必须恢复，且链接里带的装备跟着变
     await clickSelector(page, `[data-ph-weapon="${MAIN_WEAPON}"]`);
-    await clickSelector(page, '[data-ph-action="equip"]');
     const stored2 = await storageDump(page);
     await clickSelector(page, '[data-ph-action="back-home"]');
     const home2 = await probeHome(page);

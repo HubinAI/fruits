@@ -40,6 +40,18 @@
  *   - `MC6` 真实 DOM 文本里**没有**推导型属性 / 星级 / 品质（禁止清单）。
  * ⚠️ 为什么必须在浏览器里取证：负控制实测 —— 把渲染那一行删掉，vitest 的读数层守卫
  *    **全绿**（读数里有 `statsText`）而屏幕上什么都不显示 ⇒「读数正确」≠「玩家看得见」。
+ *
+ * ── PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1（本 Queue）─────────────────────
+ * 真人手机录屏反馈把 Garage 从「长列表库存页」改造成「移动端单分类配车页」，本文件随之：
+ *   - **B 段**：Weapon 不再「先选中 → 再点装备」两步 ⇒ 改为**点已拥有卡即装备**，
+ *     并新增结构断言「页面上不存在独立 `装备` 二次按钮」（`garageEquipButtonCount === 0`，
+ *     运行时数 DOM）与「四个分类 Tab 都在且恰好一个当前分类」；
+ *   - **Movement 段（M / MC / MV）**：新 Garage 一次只渲染**一个**分类 ⇒
+ *     所有轮组 DOM 取证前用**真实点击分类 Tab**（`gotoGarageTab`）切到对应挂点；
+ *     「四档 × 两挂点 = 8 张」改为**两个分类各采一遍再合并**（断言一字未改）；
+ *   - **GM1–GM8**（新增，独立 **390×844 手机视口** context）：布局层取证 ——
+ *     无整页长滚动 / Preview·Tab·返回在固定区 / 只有卡片区内部滚动 / 4 Tab + 0 二次按钮 /
+ *     依次切换 武器→车身→前轮→后轮 / 未拥有内容降级到 `<details>` 折叠区 / 返回首页可达 / 零报错。
  */
 const http = require('http');
 const fs = require('fs');
@@ -122,6 +134,31 @@ async function clickSelector(page, sel) {
   if (!box) throw new Error(`无法定位元素：${sel}`);
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await sleep(80);
+}
+
+/**
+ * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**Garage 分类 Tab 导航**（本 Queue 的新交互）。
+ *
+ * 旧 Garage 把四个配置维度纵向铺开 ⇒ 所有卡片同屏共存，点谁都不需要导航。
+ * 新 Garage 是**单分类配车页**（任一时刻只渲染一个分类的卡片区）⇒ 要操作某个分类的卡片，
+ * 必须先用**真实鼠标点击**把页面切到那个分类。本 helper 就是那一次点击，并且**幂等**：
+ * 已在 Garage 时不重复进页；已在该分类时不重复点。
+ *
+ * ⚠️ 分类名与挂点名**刻意同名**（`rear` / `front`）—— 见 homePage.ts 的两处等价说明
+ *    （`garageTabToHardpoint` / `MOVEMENT_HARDPOINT_LABELS`）⇒ 这里不需要第二张映射表。
+ * ⚠️ 切分类是**纯视图切换**（homePage.ts 里 `garageTab = tab; render();`
+ *    不写任何存档、不碰 draft / inv）⇒ 本 helper 不会改变被测状态，可安全夹在任意两步之间。
+ */
+async function gotoGarageTab(page, tab) {
+  let p = await probeOf(page);
+  if (p.view !== 'garage') {
+    await clickSelector(page, '[data-ph-action="open-garage"]');
+    p = await probeOf(page);
+  }
+  if (p.garageTab !== tab) {
+    await clickSelector(page, `[data-ph-tab="${tab}"]`);
+  }
+  return probeOf(page);
 }
 
 /** 直接读浏览器真实 localStorage（不经过页面探针，独立取证）。 */
@@ -290,33 +327,44 @@ async function main() {
     p = await probeOf(page);
     log(p.view === 'garage' && p.equippedWeaponId === 'cannon', 'B1 首页 →「调整战车」（验收 1）', `view=${p.view}`);
     log(
-      p.selectedWeaponId === null && p.equipEnabled === false,
-      'B2 刚进入时未选中任何件 →「装备」不可点（不做静默默认选择）',
-      `selected=${p.selectedWeaponId} equipEnabled=${p.equipEnabled}`,
+      p.garageTab === 'weapon' && p.garageEquipButtonCount === 0,
+      'B2 进 Garage 默认停在「武器」分类，且页面上**不存在**独立「装备」二次按钮（必改 2：无「已选择未装备」中间态）',
+      `tab=${p.garageTab} equipButtons=${p.garageEquipButtonCount}`,
     );
 
     // 选一件与当前不同的武器（hammer）
     const target = p.weaponIds.includes('hammer') ? 'hammer' : p.weaponIds.find((w) => w !== 'cannon');
     log(!!target && target !== 'cannon', 'B3 存在一件与当前不同的可切换武器', `target=${target}`);
+    // 点卡**之前**读预览：必须仍是当前装备那件（证明下面的变化确实由这次点击引起）
+    const previewBefore = p.previewItems.find((i) => i.onWeaponSlot);
+    log(previewBefore && previewBefore.defId === 'cannon', 'B5 点卡之前预览的主武器槽仍是炮（变化点的基线）', `slotPreview=${previewBefore && previewBefore.defId}`);
+
     await clickSelector(page, `[data-ph-weapon="${target}"]`);
     p = await probeOf(page);
     log(
-      p.selectedWeaponId === target && p.equipEnabled === true,
-      'B4 点击库存卡 → 明确选中，且「装备」变为可点（验收 2）',
-      `selected=${p.selectedWeaponId} equipEnabled=${p.equipEnabled}`,
-    );
-    const previewBefore = p.previewItems.find((i) => i.onWeaponSlot);
-    log(previewBefore && previewBefore.defId === 'cannon', 'B5 装备前预览的主武器槽仍是炮', `slotPreview=${previewBefore && previewBefore.defId}`);
-
-    await clickSelector(page, '[data-ph-action="equip"]');
-    p = await probeOf(page);
-    log(
       p.lastEquip && p.lastEquip.ok === true && p.equippedWeaponId === target,
-      'B6 点击「装备」→ 槽位真实更新（页面读数）',
-      `equipped=${p.equippedWeaponId} lastEquip=${JSON.stringify(p.lastEquip)}`,
+      'B4 **一次点击**完成真实装备：点库存卡 → 槽位真实更新（必改 2；不再有二次确认按钮）',
+      `equipped=${p.equippedWeaponId} lastEquip=${JSON.stringify(p.lastEquip)} equipButtons=${p.garageEquipButtonCount}`,
     );
     const previewAfter = (await probeOf(page)).previewItems.find((i) => i.onWeaponSlot);
-    log(previewAfter && previewAfter.defId === target, 'B7 战车预览同步换件（车身显示 = 真实装备）', `slotPreview=${previewAfter && previewAfter.defId}`);
+    log(previewAfter && previewAfter.defId === target, 'B6 战车预览**同次**同步换件 ⇒ Preview 在当前屏幕立即可见（必改 1 + 必改 2）', `slotPreview=${previewAfter && previewAfter.defId}`);
+
+    /*
+      B7｜**必改 1 的结构证据**（分类 Tab 与配置字段一一对应）。
+      新 Garage 的四个分类 Tab 是「一个分类一个配置维度」的入口，不是装饰：
+      这里确认四个 Tab 都在 DOM 上、且**恰好一个**处于 active（默认武器）。
+    */
+    const tabsNow = await page.evaluate(() => ({
+      all: [...document.querySelectorAll('[data-ph-tab]')].map((b) => b.getAttribute('data-ph-tab')),
+      active: [...document.querySelectorAll('[data-ph-tab]')]
+        .filter((b) => b.getAttribute('data-ph-tab-active') === 'true')
+        .map((b) => b.getAttribute('data-ph-tab')),
+    }));
+    log(
+      tabsNow.all.join(',') === 'weapon,body,front,rear' && tabsNow.active.length === 1 && tabsNow.active[0] === 'weapon',
+      'B7 四个配置分类 Tab（武器 / 车身 / 前轮 / 后轮）都在 DOM 上，且恰好一个处于「当前分类」（必改 1）',
+      `tabs=[${tabsNow.all.join(',')}] active=[${tabsNow.active.join(',')}]`,
+    );
 
     /* ---------------------------------------------------- 3) 唯一数据源取证 */
     const stored1 = await storageDump(page);
@@ -474,22 +522,21 @@ async function main() {
     await clickSelector(page, '[data-ph-action="open-garage"]');
     p = await probeOf(page);
     log(
-      p.view === 'garage' && p.equippedWeaponId === target && p.selectedWeaponId === null,
-      'E2 返回 Garage 后状态仍一致（验收 4）：当前 Weapon 是它、且未预选',
-      `equipped=${p.equippedWeaponId} selected=${p.selectedWeaponId}`,
+      p.view === 'garage' && p.equippedWeaponId === target,
+      'E2 返回 Garage 后状态仍一致（验收 4）：当前 Weapon 仍是它（进页默认武器分类）',
+      `equipped=${p.equippedWeaponId} tab=${p.garageTab}`,
     );
     const marked = await page.evaluate(
       (t) => document.querySelectorAll(`[data-ph-weapon="${t}"][data-ph-equipped="true"]`).length,
       target,
     );
-    log(marked === 1, 'E3 库存卡上「已装备」标记唯一且落在正确的那张卡上', `markedCards=${marked}`);
+    log(marked === 1, 'E3 库存卡上「使用中」标记唯一且落在正确的那张卡上', `markedCards=${marked}`);
 
-    // 再装回另一件，确认可反复切换
+    // 再装回另一件，确认可反复切换（点卡即装，无二次按钮）
     const back = p.weaponIds.find((w) => w !== target);
     await clickSelector(page, `[data-ph-weapon="${back}"]`);
-    await clickSelector(page, '[data-ph-action="equip"]');
     p = await probeOf(page);
-    log(p.equippedWeaponId === back, 'E4 可反复来回切换（每次都是真实写入）', `${target} → ${back}（当前 ${p.equippedWeaponId}）`);
+    log(p.equippedWeaponId === back, 'E4 可反复来回切换（每次都是真实写入；点卡即装）', `${target} → ${back}（当前 ${p.equippedWeaponId}）`);
 
     /*
       ══════════════════════════════════════════════════════════════════════════
@@ -544,26 +591,40 @@ async function main() {
          期望值钉在「正式内容库的真实字段」上（`A9b` 已证四档都在），
          并把可见文本与三个 data 值**互相**对账（自洽 + 与读数一致，双重）。
     */
-    const mvCards = await page.evaluate(() => {
-      const out = [];
-      for (const el of document.querySelectorAll('[data-ph-movement]')) {
-        const defId = el.getAttribute('data-ph-movement');
-        if (defId === 'none') continue; // 「未装载」不是一件 Movement，不参与刻度量断言
-        const statsEl = el.querySelector('.ph-card-stats');
-        out.push({
-          defId,
-          hardpoint: el.getAttribute('data-ph-movement-hardpoint'),
-          owned: el.getAttribute('data-ph-movement-owned') === 'true',
-          disabled: el.disabled === true,
-          radius: el.getAttribute('data-ph-movement-radius'),
-          mass: el.getAttribute('data-ph-movement-mass'),
-          energy: el.getAttribute('data-ph-movement-energy'),
-          statsAttr: el.getAttribute('data-ph-movement-stats'),
-          statsVisible: statsEl ? (statsEl.textContent || '').trim() : null,
-        });
-      }
-      return out;
-    });
+    /*
+      ⚠️ PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**采集方式随「单分类配车页」调整**（非放宽）。
+
+      旧 Garage 把两个挂点行纵向铺开 ⇒ 一次 `querySelectorAll` 就能抓到 2 挂点 × 4 档 = 8 张。
+      新 Garage 一次只渲染**一个**分类（= 一个挂点行）⇒ 必须用**真实点击分类 Tab**
+      在 rear / front 两个分类各采一遍再合并。合并后 `mvCards` 仍是 8 条 ⇒
+      下游 MC1–MC6 的断言**一字不改**（仍要求「每档恰好两次」= 两个挂点各一份）。
+    */
+    const collectMvCards = () =>
+      page.evaluate(() => {
+        const out = [];
+        for (const el of document.querySelectorAll('[data-ph-movement]')) {
+          const defId = el.getAttribute('data-ph-movement');
+          if (defId === 'none') continue; // 「未装载」不是一件 Movement，不参与刻度量断言
+          const statsEl = el.querySelector('.ph-card-stats');
+          out.push({
+            defId,
+            hardpoint: el.getAttribute('data-ph-movement-hardpoint'),
+            owned: el.getAttribute('data-ph-movement-owned') === 'true',
+            disabled: el.disabled === true,
+            radius: el.getAttribute('data-ph-movement-radius'),
+            mass: el.getAttribute('data-ph-movement-mass'),
+            energy: el.getAttribute('data-ph-movement-energy'),
+            statsAttr: el.getAttribute('data-ph-movement-stats'),
+            statsVisible: statsEl ? (statsEl.textContent || '').trim() : null,
+          });
+        }
+        return out;
+      });
+    await gotoGarageTab(page, 'rear');
+    const mvCardsRear = await collectMvCards();
+    await gotoGarageTab(page, 'front');
+    const mvCardsFront = await collectMvCards();
+    const mvCards = [...mvCardsRear, ...mvCardsFront];
     const cardsByDef = new Map();
     for (const c of mvCards) {
       if (!cardsByDef.has(c.defId)) cardsByDef.set(c.defId, []);
@@ -694,6 +755,9 @@ async function main() {
     await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
     await sleep(200);
     await clickSelector(page, '[data-ph-action="open-garage"]');
+    // PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1：新 Garage 一次只渲染一个分类
+    // ⇒ 轮组的 DOM 取证必须在 Movement 分类里做（这里选 rear）。
+    await gotoGarageTab(page, 'rear');
 
     const lockedCards = await page.evaluate(() => {
       const out = [];
@@ -776,6 +840,7 @@ async function main() {
     );
 
     /* ---- 只装 rear：点 rear 卡即**直接装备**，证明「两个挂点独立」 ---- */
+    await gotoGarageTab(page, 'rear');
     await clickSelector(page, `[data-ph-movement="${GRANT}"][data-ph-movement-hardpoint="rear"]`);
     p = await probeOf(page);
     log(
@@ -815,6 +880,7 @@ async function main() {
     );
 
     /* ---- 再装 front：点 front 卡即**直接装备**，证明另一侧也能独立生效 ---- */
+    await gotoGarageTab(page, 'front');
     await clickSelector(page, `[data-ph-movement="${GRANT}"][data-ph-movement-hardpoint="front"]`);
     p = await probeOf(page);
     const storedMv2 = await storageDump(page);
@@ -961,6 +1027,8 @@ async function main() {
 
     /* 真实动作：点某一侧的轮组卡即**直接装备**（无二次确认），然后读预览 */
     const equipWheel = async (hardpointId, defId) => {
+      // 新 Garage 一次只渲染当前分类 ⇒ 先切到该挂点所属的分类（分类名与挂点名刻意同名）
+      await gotoGarageTab(page, hardpointId);
       await clickSelector(page, `[data-ph-movement="${defId}"][data-ph-movement-hardpoint="${hardpointId}"]`);
       const r = await probeOf(page);
       if (!r.lastMovementEquip || r.lastMovementEquip.ok !== true) {
@@ -1159,6 +1227,7 @@ async function main() {
       （不是画一个 0 半径 / 猜一个半径）。真实点「未装载」卡 → 装备。
     */
     await clickSelector(page, '[data-ph-action="open-garage"]');
+    await gotoGarageTab(page, 'rear');
     await clickSelector(page, '[data-ph-movement="none"][data-ph-movement-hardpoint="rear"]');
     const noneSnap = await wheelPreview();
     const noneHasRear = noneSnap.items.some((i) => i.hardpointId === 'rear');
@@ -1326,6 +1395,203 @@ async function main() {
       'G4 Run 载荷里 Weapon 槽仍是 Garage 里那一件 ⇒ 「装 Movement 之后 Run 用的武器没被顶掉」（验收 5 的 Run 侧取证）',
       `url.functionalSelections.${WEAPON_SLOT}=${equippedDraft && equippedDraft.functionalSelections && equippedDraft.functionalSelections[WEAPON_SLOT]}`,
     );
+
+    /*
+      ══════════════════════════════════════════════════════════════════════════
+      PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**390×844 手机视口的布局取证**
+      ══════════════════════════════════════════════════════════════════════════
+
+      验收 1 / 6 的**布局层**取证（前面各段证的是行为与数据；这一段证「结构与几何」）。
+
+      为什么必须单开一个 **390×844 手机视口**的 context：上面整条流程跑在 1280×720 桌面上，
+      `.ph-screen` 被 `fitStage` 缩放（scale ≈ 0.85）⇒ 量出来的 CSS 像素不是手机上的像素。
+      这里用**真实手机视口**（390×844，DPR 2）打开同一份产物，此时 scale = 1，
+      量到的 CSS 像素**就是**逻辑像素（`.ph-screen` 恒 390×844）。
+
+      取证各条（对应必改 1 的四点结构要求 + 验收 6）：
+        - GM1 手机视口下页面**没有整页长滚动**；
+        - GM2 Preview + Tab（上）与**返回首页**（下）都在**固定区**（不在滚动容器内），
+              竖向顺序 Preview → Tab → 卡片区 → 返回；
+        - GM3 **只有**卡片区是可滚动容器（`.ph-garage-body` = `auto`；骨架 / 舞台 = `hidden`）；
+        - GM4 手机视口下同样是「4 个分类 Tab + 0 个二次装备按钮」；
+        - GM5 依次真实点击 **武器 → 车身 → 前轮 → 后轮** 都能切换（验收 1 逐字）；
+        - GM6 未拥有内容降级到原生 `<details>` 折叠区（默认闭合）而可用卡留在主卡阵（必改 4）；
+        - GM7 任意分类下「返回首页」都真实可达（验收 6）；
+        - GM8 整段零运行时报错。
+    */
+    const mobileCtx = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      deviceScaleFactor: 2,
+    });
+    try {
+      const mp = await mobileCtx.newPage();
+      const mobileErrors = [];
+      mp.on('pageerror', (e) => mobileErrors.push(String(e)));
+      await mp.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+      await mp.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
+      await sleep(250);
+      await clickSelector(mp, '[data-ph-action="open-garage"]');
+      await sleep(120);
+
+      const measure = () =>
+        mp.evaluate(() => {
+          const r = (sel) => {
+            const n = document.querySelector(sel);
+            if (!n) return null;
+            const b = n.getBoundingClientRect();
+            return { top: b.top, bottom: b.bottom, left: b.left, right: b.right, h: b.height, w: b.width };
+          };
+          const body = document.querySelector('.ph-garage-body');
+          const main = document.querySelector('.ph-main');
+          const screenEl = document.querySelector('.ph-screen');
+          return {
+            screen: r('.ph-screen'),
+            main: r('.ph-main'),
+            car: r('.ph-car-wrap'),
+            tabs: r('.ph-tabs'),
+            body: r('.ph-garage-body'),
+            actions: r('.ph-actions'),
+            view: screenEl ? screenEl.getAttribute('data-ph-view') : null,
+            tabCount: document.querySelectorAll('[data-ph-tab]').length,
+            activeTab: [...document.querySelectorAll('[data-ph-tab]')]
+              .filter((b) => b.getAttribute('data-ph-tab-active') === 'true')
+              .map((b) => b.getAttribute('data-ph-tab')),
+            equipButtons: document.querySelectorAll('[data-ph-action="equip"]').length,
+            bodyOverflowY: body ? getComputedStyle(body).overflowY : null,
+            mainOverflowY: main ? getComputedStyle(main).overflowY : null,
+            screenOverflowY: screenEl ? getComputedStyle(screenEl).overflowY : null,
+            bodyClientH: body ? body.clientHeight : -1,
+            bodyScrollH: body ? body.scrollHeight : -1,
+            docScrollH: document.documentElement.scrollHeight,
+            winH: window.innerHeight,
+          };
+        });
+
+      const L = await measure();
+      log(
+        !!L.screen &&
+          Math.abs(L.screen.w - 390) < 1 &&
+          Math.abs(L.screen.h - 844) < 1 &&
+          L.docScrollH <= L.winH + 1,
+        'GM1 390×844 手机视口：舞台恰为 390×844，且页面**没有整页长滚动**（验收 1 的布局前提）',
+        `screen=${L.screen && `${round2(L.screen.w)}×${round2(L.screen.h)}`} docScrollH=${L.docScrollH} winH=${L.winH}`,
+      );
+
+      const inBody = (b) => !!b && !!L.body && b.top >= L.body.top - 0.5 && b.bottom <= L.body.bottom + 0.5;
+      log(
+        !!L.car &&
+          !!L.tabs &&
+          !!L.actions &&
+          !inBody(L.car) &&
+          !inBody(L.tabs) &&
+          !inBody(L.actions) &&
+          L.car.bottom <= L.tabs.top + 0.5 &&
+          L.tabs.bottom <= L.body.top + 0.5 &&
+          L.body.bottom <= L.actions.top + 0.5 &&
+          L.actions.bottom <= L.screen.bottom + 0.5,
+        'GM2 Preview + 分类 Tab（上）与**返回首页**（下）都在固定区（不在滚动容器内）⇒ 不会被滚出视野；竖向顺序 Preview→Tab→卡片区→返回（必改 1 / 验收 6）',
+        `car=[${L.car && round2(L.car.top)}..${L.car && round2(L.car.bottom)}] tabs=[${L.tabs && round2(L.tabs.top)}..${L.tabs && round2(L.tabs.bottom)}] body=[${L.body && round2(L.body.top)}..${L.body && round2(L.body.bottom)}] actions=[${L.actions && round2(L.actions.top)}..${L.actions && round2(L.actions.bottom)}] screen.bottom=${L.screen && round2(L.screen.bottom)}`,
+      );
+
+      log(
+        L.bodyOverflowY === 'auto' &&
+          L.mainOverflowY === 'hidden' &&
+          L.screenOverflowY === 'hidden' &&
+          L.bodyClientH > 0,
+        'GM3 **只有**卡片区是可滚动容器（`.ph-garage-body` = `auto`；骨架 / 舞台 = `hidden`）⇒「只有部件卡片区域内部滚动」（必改 1）',
+        `body=${L.bodyOverflowY} main=${L.mainOverflowY} screen=${L.screenOverflowY} bodyClientH=${L.bodyClientH} bodyScrollH=${L.bodyScrollH}`,
+      );
+
+      log(
+        L.equipButtons === 0 && L.tabCount === 4 && L.activeTab.length === 1,
+        'GM4 手机视口下同样是「四个分类 Tab + 零个二次装备按钮」，且恰好一个当前分类',
+        `tabs=${L.tabCount} active=[${L.activeTab.join(',')}] equipButtons=${L.equipButtons}`,
+      );
+
+      /*
+        GM5｜**「依次切换 武器 → 车身 → 前轮 → 后轮」**（验收 1 逐字）。
+        四次**真实鼠标点击**，每次断言：① 该 Tab 成为唯一当前分类；
+        ② 卡片区属主（`data-ph-garage-body`）随之切换；③ 卡片区里真的有当前分类的卡片（不是空屏）。
+      */
+      const tabProbe = [];
+      for (const tab of ['weapon', 'body', 'front', 'rear']) {
+        await gotoGarageTab(mp, tab);
+        const s = await mp.evaluate(() => {
+          const b = document.querySelector('.ph-garage-body');
+          return {
+            owner: b ? b.getAttribute('data-ph-garage-body') : null,
+            active: [...document.querySelectorAll('[data-ph-tab]')]
+              .filter((x) => x.getAttribute('data-ph-tab-active') === 'true')
+              .map((x) => x.getAttribute('data-ph-tab')),
+            cards: b ? b.querySelectorAll('[data-ph-weapon],[data-ph-body],[data-ph-movement]').length : -1,
+            locked: b ? b.querySelectorAll('[data-ph-locked]').length : -1,
+          };
+        });
+        tabProbe.push({ tab, ...s });
+      }
+      log(
+        tabProbe.every(
+          (t) => t.owner === t.tab && t.active.length === 1 && t.active[0] === t.tab && t.cards >= 1,
+        ),
+        'GM5 依次真实点击 **武器 → 车身 → 前轮 → 后轮**：每次该 Tab 成为唯一当前分类、卡片区属主随之切换、且都有可操作卡片（验收 1）',
+        tabProbe.map((t) => `${t.tab}:owner=${t.owner},cards=${t.cards},locked=${t.locked}`).join(' '),
+      );
+
+      /*
+        GM6｜**未拥有内容降级**（必改 4）：可用卡进主卡阵，未拥有卡进原生 `<details>` 折叠区。
+        全新账号（新 context = 新 localStorage）在 Body 分类天然有「未拥有」样本
+        （一次性 Body 种子只解锁 MVP 2 台）⇒ 用它取证。
+      */
+      await gotoGarageTab(mp, 'body');
+      const bodyTab = await mp.evaluate(() => {
+        const b = document.querySelector('.ph-garage-body');
+        const det = b ? b.querySelector('[data-ph-locked]') : null;
+        let usable = 0;
+        let lockedInDetails = 0;
+        for (const c of b ? b.querySelectorAll('[data-ph-body]') : []) {
+          if (c.closest('[data-ph-locked]')) lockedInDetails += 1;
+          else usable += 1;
+        }
+        return {
+          hasDetails: det ? det.tagName.toLowerCase() === 'details' : false,
+          lockedCount: det ? Number(det.getAttribute('data-ph-locked')) : 0,
+          usable,
+          lockedInDetails,
+          detailsOpen: det ? det.hasAttribute('open') : null,
+        };
+      });
+      log(
+        bodyTab.hasDetails &&
+          bodyTab.lockedCount >= 1 &&
+          bodyTab.lockedInDetails === bodyTab.lockedCount &&
+          bodyTab.usable >= 1 &&
+          bodyTab.detailsOpen === false,
+        'GM6 未拥有内容**降级到原生 `<details>` 折叠区**（默认闭合），可用卡留在主卡阵 ⇒ 未拥有内容不淹没当前可使用内容（必改 4）',
+        `details=${bodyTab.hasDetails} locked=${bodyTab.lockedCount} inDetails=${bodyTab.lockedInDetails} usable=${bodyTab.usable} open=${bodyTab.detailsOpen}`,
+      );
+
+      /*
+        GM7｜**返回首页始终可达**（验收 6）：在**非默认分类**（rear）下真实点击固定区的返回按钮。
+      */
+      await gotoGarageTab(mp, 'rear');
+      await clickSelector(mp, '[data-ph-action="back-home"]');
+      const backView = await mp.evaluate(() =>
+        document.querySelector('.ph-screen').getAttribute('data-ph-view'),
+      );
+      log(
+        backView === 'home',
+        'GM7 在任意分类下「返回首页」都**真实可达**（点一次即回首页；验收 6）',
+        `view=${backView}`,
+      );
+
+      log(
+        mobileErrors.length === 0,
+        'GM8 手机视口整段零运行时报错',
+        mobileErrors.slice(0, 2).join(' | ') || 'none',
+      );
+    } finally {
+      await mobileCtx.close();
+    }
   } finally {
     await browser.close();
     server.close();

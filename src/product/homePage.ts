@@ -105,7 +105,43 @@ export const HOME_GARAGE_LABEL = '调整战车';
 export const HOME_START_LABEL = '开始冒险';
 export const GARAGE_TITLE = '调整战车';
 export const GARAGE_BACK_LABEL = '返回首页';
-export const GARAGE_EQUIP_LABEL = '装备';
+/**
+ * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**Garage = 移动端「单分类配车页」**。
+ *
+ * 真人手机录屏（本 Queue 的问题陈述）：四个维度纵向堆成一个超长页 ⇒ ① 点卡装备时
+ * 战车 Preview 已滚出屏幕（装了却看不见结果）；② Weapon 两步 / Movement·Body 一步，
+ * 规则不统一；③ 未拥有内容与可用内容混排。
+ *
+ * ⇒ 页面结构改为**三段固定骨架**（唯一允许滚动的是中间的卡片区）：
+ *   A 顶部 战车 Preview（固定）
+ *   B 中部 配置分类 Tab（固定）—— 就是下面这 4 个，顺序由 Queue 逐字给定
+ *   C 下部 **仅当前 Tab 的**部件卡片区（唯一滚动容器）
+ *   D 返回首页（固定，恒可达）
+ *
+ * ⚠️ 维度只有这 4 个，**不允许**再加第 5 个分类（Queue 冻结：不新增 Weapon / Movement / Body）。
+ */
+export const GARAGE_TAB_ORDER: readonly GarageTab[] = ['weapon', 'body', 'front', 'rear'];
+/** 分类的中文名（页面里不出现第二份字面量）。 */
+export const GARAGE_TAB_LABELS: Readonly<Record<GarageTab, string>> = {
+  weapon: '武器',
+  body: '车身',
+  front: '前轮',
+  rear: '后轮',
+};
+/**
+ * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**配置页最核心的三种状态**。
+ *
+ * Queue 必改 3 逐字要求：配置页只需要「使用中 / 可使用 / 未拥有」三种语义，
+ * **不要**同时出现「默认 / 选中 / 已选择 / 已装备」等多套状态互相竞争。
+ * ⇒ 本页四类卡片共用下面两个常量；「可使用」= 什么都不标（默认就是可点）。
+ *   - `使用中`：当前真正生效的那一件（Weapon / Body / rear / front 各自唯一）；
+ *   - `未拥有`：需要库存但没有 ⇒ 降级区里的不可点卡；
+ *   - 「缺省轮」的 `implicit` 语义**保留在读数层**（`MovementEntry.implicit` 照旧可断言），
+ *     但**不再**在卡片上画「默认」标签去跟「使用中」抢注意力。
+ */
+export const GARAGE_IN_USE_LABEL = '使用中';
+/** 未拥有部件在卡片上的标注，也是降级区标题（同一个词，不留第二套说法）。 */
+export const GARAGE_LOCKED_LABEL = '未拥有';
 /**
  * PRODUCT-LOOP-R2-B｜合成动作的文案。
  *   - `可合成`：满 5 件且未到星级上限时**明确**显示的状态词（不是隐晦的进度数字）；
@@ -165,32 +201,30 @@ export const SAVE_KEY = 'strongfruit.playerBuild.v1';
  * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 配置区的文案。
  *
  * ⚠️ 全部是常量（页面里不出现第二份字面量）—— 与 Weapon 区那批同一条纪律。
+ * ⚠️ PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1 删除了这里的四个常量
+ *    （`GARAGE_MOVEMENT_PICK_LABEL` / `GARAGE_MOVEMENT_PICKED_LABEL` /
+ *     `GARAGE_MOVEMENT_EQUIPPED_LABEL` / `GARAGE_MOVEMENT_DEFAULT_LABEL`）：
+ *    「选择 / 已选择 / 已装备 / 默认」是四套互相竞争的状态语义，而本 Queue 必改 3
+ *    要求配置页只保留 `使用中` / `可使用` / `未拥有` 三种 ⇒ 统一到
+ *    `GARAGE_IN_USE_LABEL` + `GARAGE_LOCKED_LABEL`（文件顶部的产品状态常量）。
+ * ⚠️ 同时删除了 `GARAGE_MOVEMENT_SECTION_LABEL` / `GARAGE_BODY_SECTION_LABEL`：
+ *    分类 Tab（后轮 / 前轮 / 车身）**就是**这两块区域的标题 ⇒ 再画一个页内 `<h2>`
+ *    只是重复一层，且要占掉固定骨架里的高度预算。
  */
-export const GARAGE_MOVEMENT_SECTION_LABEL = '轮组（Movement）';
-/** 每个挂点的选择按钮文案（点了只是「选中」，真正的写入在 `装备` 那一下）。 */
-export const GARAGE_MOVEMENT_PICK_LABEL = '选择';
-/** 选中的那一个的标记（与 Weapon 卡的 `已装备` 刻意分开：这两个词是两件事）。 */
-export const GARAGE_MOVEMENT_PICKED_LABEL = '已选择';
-/** 当前生效的那一个（= 正式 Snapshot 里真的装上的）。 */
-export const GARAGE_MOVEMENT_EQUIPPED_LABEL = '使用中';
-/** 需要库存但玩家没拥有 ⇒ 如实标注（**不**提供解锁 / 购买 / 进度）。 */
-export const GARAGE_MOVEMENT_LOCKED_LABEL = '未拥有';
 /** 该挂点当前**明确卸下**（`'none'`，与「缺省轮」不同）。 */
 export const GARAGE_MOVEMENT_OFF_LABEL = '未装载';
-/** 缺省轮在卡片上的说明（它不进库存，但恒可装备）。 */
-export const GARAGE_MOVEMENT_DEFAULT_LABEL = '默认';
 /**
  * PRODUCT-LOOP-R3-MOVEMENT-PRODUCT-LOOP-SURFACE｜首页「当前轮组」摘要。
  *
- * Queue 必改 1 的**判定**：Garage 的 `renderMovementSection()` 已经足够清楚地展示
- * 当前 rear / front（分行 + 逐卡「使用中」）⇒ **不再为 Garage 增加第二套 UI**。
+ * Queue 必改 1 的**判定**：Garage 的 Movement 配置区已经足够清楚地展示
+ * 当前 rear / front（逐卡「使用中」）⇒ **不再为 Garage 增加第二套 UI**。
  * 缺的是**首页**：`loadoutReading().slots` 只映射 `body.functionalHardpoints`，
  * Movement 一个都不在 ⇒ 玩家在首页看不到自己车上装的是什么轮子。
  * 这里只补首页这一处，且**沿用 Garage 已有词汇**（后轮 / 前轮 / 未装载），
  * 不引入第二套说法。
  */
 export const HOME_MOVEMENT_SECTION_LABEL = '当前轮组';
-/** 挂点显示名（与 Garage 的 `renderMovementSection` 逐字一致，同一套词）。 */
+/** 挂点显示名（与 Garage 的分类标签逐字一致，同一套词）。 */
 export const MOVEMENT_HARDPOINT_LABELS: Readonly<Record<string, string>> = {
   rear: '后轮',
   front: '前轮',
@@ -199,8 +233,11 @@ export const MOVEMENT_HARDPOINT_LABELS: Readonly<Record<string, string>> = {
  * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜Body 配置区的文案。
  *
  * ⚠️ 全部是常量（页面里不出现第二份字面量）—— 与 Movement / Weapon 区那批同一条纪律。
+ * ⚠️ PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1 删除了 `GARAGE_BODY_SECTION_LABEL`
+ *    （`车身（Body）`）：Body 现在是分类 Tab 之一，Tab 标签 `车身` 就是它的标题。
  */
-export const GARAGE_BODY_SECTION_LABEL = '车身（Body）';
+/** Garage 里「当前使用中」那一行（四类分类共用同一句话术）。 */
+export const GARAGE_IN_USE_LEAD = '当前使用中';
 /* ⚠️ PRODUCT-LOOP-R4-CONFIGURATION-BATCH-GATE：原先这里还有一个 `HOME_BODY_SECTION_LABEL`
    （首页「当前车身」摘要标题）。该摘要在真实高内容态下把首页 actions 推出舞台 → 已整块删除，
    常量随之移除（首页车身读数由既有的 `.ph-spec` 行承担）。 */
@@ -213,6 +250,18 @@ export const GARAGE_BODY_SECTION_LABEL = '车身（Body）';
 export const GARAGE_MOVEMENT_EQUIP_PLACEHOLDER = '轮组';
 
 export type ProductView = 'home' | 'garage';
+/**
+ * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜Garage 的**配置分类**。
+ *
+ * ⚠️ 四个维度**一一对应四类真实配置**，不是 UI 分组：
+ *   - `weapon` → `draft.functionalSelections[WEAPON_SLOT]`（+ `functionalStars`）；
+ *   - `body`   → `draft.bodyDefId`（单一字段）；
+ *   - `front`  → `draft.frontWheelDefId`；
+ *   - `rear`   → `draft.rearWheelDefId`。
+ * 名称与 `MOVEMENT_HARDPOINT_LABELS` 的键**刻意同名**（`front` / `rear`），
+ * 这样「分类 → 挂点」不需要第二张映射表（`garageTabToHardpoint` 直接等价）。
+ */
+export type GarageTab = 'weapon' | 'body' | 'front' | 'rear';
 
 export interface ProductProbe {
   readonly view: ProductView;
@@ -355,10 +404,18 @@ export interface ProductProbe {
    *    只报 defId 会让「★1 的炮」与「★2 的炮」看起来是同一件事。
    */
   readonly equippedWeaponStar: number;
-  readonly selectedWeaponId: string | null;
-  /** 选中那张卡的星级（`null` = 没选）；与 `selectedWeaponId` 合起来才是完整选择。 */
-  readonly selectedWeaponStar: number | null;
-  readonly equipEnabled: boolean;
+  /**
+   * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜Garage 当前正在看的**配置分类**。
+   * ⚠️ 原先的 `selectedWeaponId` / `selectedWeaponStar` / `equipEnabled` 三个字段
+   *    随「先选 → 再点`装备`」两步流程一并删除（本 Queue 必改 2：四个维度统一为点卡即装备，
+   *    「卡片已选择但还没真正装备」这种中间态在结构上不再存在）。
+   */
+  readonly garageTab: GarageTab;
+  /**
+   * 页面上 `[data-ph-action="equip"]` 的**运行时**数量（本 Queue 之后恒为 0）。
+   * ⚠️ 这是「二次装备按钮已删除」的运行时硬证据，不是源码里「没写」的推断。
+   */
+  readonly garageEquipButtonCount: number;
   /**
    * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜**Movement 维度的全量读数**
    * （直接来自 `playerLoadout.movementReading()`，页面画的**就是这些字段**）。
@@ -643,13 +700,13 @@ export function mountProductHome(
   let inv: PartInventory = growth.inv;
   let view: ProductView = 'home';
   /**
-   * 选中的那张**库存卡** = `(defId, star)` **一对**，而不是只有一个 defId。
+   * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜当前正在看的**配置分类**。
    *
-   * ⚠️ PRODUCT-LOOP-R2-B 起同一个 defId 可以有多个星级档（★1 的炮与 ★2 的炮是两张卡、
-   *    两个 stack）⇒ 只记 defId，「点 ★2 那张」与「点 ★1 那张」就无法区分，
-   *    而「装备」要装的正是玩家点的那一档。
+   * ⚠️ 替换掉了 R2-B 起那个 `selected: {defId,star} | null`（「先选后装备」的中间态）。
+   *    本 Queue 必改 2 要求四个维度**统一为点卡即装备** ⇒ 「已选择但还没装备」这种状态
+   *    在结构上不允许存在，`selected` 这个变量随之删除（探针字段一并移除）。
    */
-  let selected: { defId: string; star: number } | null = null;
+  let garageTab: GarageTab = 'weapon';
   let lastEquip: { ok: boolean; reason: EquipFailure | null; detail: string } | null = null;
   /** 最近一次 Movement 装备动作的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
   let lastMovementEquip: { ok: boolean; reason: MovementEquipFailure | null; detail: string } | null = null;
@@ -760,6 +817,29 @@ export function mountProductHome(
    */
   function readBody(): BodyReading {
     return bodyReading(draft);
+  }
+
+  /**
+   * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**直接装备武器**（与 Movement / Body 同规则）。
+   *
+   * 点库存里的某一张武器卡 ⇒ 装**玩家点的那一档**（`(defId, star)` 一起给，
+   * ★1 的炮与 ★2 的炮是两张卡）⇒ 立即落盘 + 同次重渲（Preview 一起刷新）。
+   *
+   * ⚠️ 本 Queue 必改 2 删除了「先选中 → 再点`装备`」这条两步流程：四个配置维度现在
+   *    **同一条规则**（点卡即装备）。「卡片已选择但还没真正装备」这种中间态不再存在。
+   * ⚠️ 写只发生在 `playerLoadout.equipWeapon()`（唯一写入口，内部过正式 `validateSnapshot`
+   *    并只经那**唯一一处** `persistPlayerBuild` 落盘），本页不碰 `savePlayerBuild` /
+   *    `localStorage`、不自己赋值 `functionalSelections`。
+   */
+  function equipWeaponAndRender(defId: string, star: number): void {
+    const out = equipWeapon(defId, draft, inv, star);
+    lastEquip = { ok: out.ok, reason: out.reason ?? null, detail: out.detail ?? '' };
+    if (out.ok && out.draft) {
+      draft = out.draft;
+      // 库存不因装备而消耗；重读仍走正式 ensureInventory（幂等 → 不重复生成库存）
+      inv = playerInventory(draft);
+    }
+    render();
   }
 
   /**
@@ -1009,7 +1089,6 @@ export function mountProductHome(
 
     const goGarage = (): void => {
       view = 'garage';
-      selected = null;
       render();
     };
     const actions = el('div', 'ph-actions');
@@ -1118,13 +1197,17 @@ export function mountProductHome(
    * 玩家就永远无法表达前一种状态 ⇒ 三态里少一态。故每个挂点行尾补一个
    * `未装载` 项（唯一 defId 取 `EMPTY_SLOT`，真源在 `buildEditorModel`）。
    */
-  function renderMovementSection(): void {
+  function renderMovementSection(box: HTMLElement, hardpointId: string): void {
     const m = readMovement();
-    stage.append(el('h2', 'ph-sec', GARAGE_MOVEMENT_SECTION_LABEL));
 
     for (const slot of m.slots) {
+      // PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**只渲染当前分类那一个挂点**
+      // （分类 Tab 就是 `front` / `rear`，与 `movementHardpoints[].id` 同名 ⇒ 无需映射表）
+      if (slot.hardpointId !== hardpointId) continue;
       const row = el('div', 'ph-mv-row');
       row.dataset['phMovementRow'] = slot.hardpointId;
+      row.dataset['phGarageCurrent'] = slot.hardpointId;
+      row.dataset['phGarageCurrentDef'] = slot.storedDefId === null ? '' : slot.storedDefId;
       row.dataset['phMovementStored'] = slot.storedDefId === null ? '' : slot.storedDefId;
       row.dataset['phMovementEffective'] = slot.effectiveDefId ?? '';
       row.dataset['phMovementUnmounted'] = String(slot.unmounted);
@@ -1134,6 +1217,9 @@ export function mountProductHome(
       );
 
       const grid = el('div', 'ph-grid ph-mv-grid');
+      /** 未拥有内容的目的地（Queue 必改 4 的降级区）。 */
+      const lockedGrid = el('div', 'ph-grid ph-mv-grid ph-locked-grid');
+      let lockedCount = 0;
       for (const c of m.cards) {
         const cell = el('div', 'ph-card-cell');
         const card = el('button', 'ph-card ph-card-mv');
@@ -1173,18 +1259,30 @@ export function mountProductHome(
           ⚠️ 它是**纯展示**：不影响 card 的 click / disabled / 选中态 / equip / scroll。
         */
         card.append(el('span', 'ph-card-stats', c.statsText));
-        if (c.implicit) card.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_DEFAULT_LABEL));
-        if (effectiveHere) card.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_EQUIPPED_LABEL));
-        // 未拥有 ⇒ 明确标注，并且**不可点**（结构上装不上，而不是点了给个错误提示）
+        /*
+          ⚠️ PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1（必改 3）：卡片上**只保留一种**
+             与「使用中」竞争的状态词。原先这里还会给缺省轮画一个「默认」标签 ——
+             它正是 Queue 点名要清掉的多套状态语义之一（配置页只保留
+             使用中 / 可使用 / 未拥有）。缺省轮语义**完整保留在读数层**
+             （`MovementEntry.implicit`，探针照旧可断言），只是不再画到卡面上。
+        */
+        if (effectiveHere) card.append(el('span', 'ph-card-tag', GARAGE_IN_USE_LABEL));
+        // 未拥有 ⇒ 标 `未拥有` 且**不可点**（结构上装不上，而不是点了给个错误提示）
         if (!c.owned) {
-          card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_MOVEMENT_LOCKED_LABEL));
+          card.classList.add('ph-card-locked');
+          card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_LOCKED_LABEL));
           card.disabled = true;
         } else {
           // PRODUCT-LOOP-R3-MOVEMENT-DIRECT-EQUIP｜点已拥有卡即直接装备到本挂点（无二次确认）
           card.addEventListener('click', () => equipMovementAndRender(slot.hardpointId, c.defId));
         }
         cell.append(card);
-        grid.append(cell);
+        // 必改 4：**可用内容进主卡阵，未拥有内容进降级区**（不与可用内容同权重）
+        if (c.owned) grid.append(cell);
+        else {
+          lockedGrid.append(cell);
+          lockedCount += 1;
+        }
       }
 
       /*
@@ -1207,14 +1305,15 @@ export function mountProductHome(
         offCard.classList.add('ph-card-equipped');
       }
       offCard.append(el('span', 'ph-card-name', GARAGE_MOVEMENT_OFF_LABEL));
-      if (slot.unmounted) offCard.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_EQUIPPED_LABEL));
+      if (slot.unmounted) offCard.append(el('span', 'ph-card-tag', GARAGE_IN_USE_LABEL));
       // PRODUCT-LOOP-R3-MOVEMENT-DIRECT-EQUIP｜点「未装载」即卸下本挂点（无二次确认）
       offCard.addEventListener('click', () => equipMovementAndRender(slot.hardpointId, EMPTY_SLOT));
       offCell.append(offCard);
       grid.append(offCell);
 
       row.append(grid);
-      stage.append(row);
+      if (lockedCount > 0) row.append(lockedSection(lockedGrid, lockedCount));
+      box.append(row);
     }
 
     if (lastMovementEquip) {
@@ -1226,7 +1325,7 @@ export function mountProductHome(
           : `轮组装备被拒绝（${String(lastMovementEquip.reason)}）：${lastMovementEquip.detail}`,
       );
       msg.dataset['phMovementMsg'] = lastMovementEquip.ok ? 'ok' : 'fail';
-      stage.append(msg);
+      box.append(msg);
     }
   }
 
@@ -1250,11 +1349,24 @@ export function mountProductHome(
    *   耐久 / 质量 / 能量容量 三个数全部现读自 `BodyEntry`（→ `registry.bodies`），
    *   不编造任何推导 / 评级 / 百分比标签。
    */
-  function renderBodySection(): void {
+  function renderBodySection(box: HTMLElement): void {
     const b = readBody();
-    stage.append(el('h2', 'ph-sec', GARAGE_BODY_SECTION_LABEL));
+
+    // 「当前使用中」一行（必改 3：当前状态一眼可见，四类分类共用同一句话术）
+    const cur = el('div', 'ph-current ph-garage-current');
+    cur.dataset['phGarageCurrent'] = 'body';
+    cur.dataset['phGarageCurrentDef'] = b.bodyDefId;
+    const inUse = b.cards.find((c) => c.defId === b.bodyDefId);
+    cur.append(
+      el('span', 'ph-current-label', GARAGE_IN_USE_LEAD),
+      el('span', 'ph-current-name', inUse ? inUse.name : b.bodyDefId),
+    );
+    box.append(cur);
 
     const grid = el('div', 'ph-grid ph-body-grid');
+    /** 未拥有内容的目的地（Queue 必改 4 的降级区）。 */
+    const lockedGrid = el('div', 'ph-grid ph-body-grid ph-locked-grid');
+    let lockedCount = 0;
     for (const c of b.cards) {
       const cell = el('div', 'ph-card-cell');
       const card = el('button', 'ph-card ph-card-body');
@@ -1287,20 +1399,31 @@ export function mountProductHome(
         ⚠️ 它是**纯展示**：不影响 card 的 click / disabled / 选中态 / equip。
       */
       card.append(el('span', 'ph-card-stats', c.statsText));
-      if (c.implicit) card.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_DEFAULT_LABEL));
-      if (equippedHere) card.append(el('span', 'ph-card-tag', GARAGE_MOVEMENT_EQUIPPED_LABEL));
-      // 未拥有 ⇒ 明确标注，并且**不可点**（结构上装不上，而不是点了给个错误提示）
+      /*
+        ⚠️ PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1（必改 3）：与 Movement 卡同一条纪律 ——
+           卡片上只出现一种与「使用中」竞争的状态词。`implicit`（旧 4 台恒默认拥有）
+           语义仍保留在读数层与 `data-ph-body-implicit` 上，只是不再画「默认」标签。
+      */
+      if (equippedHere) card.append(el('span', 'ph-card-tag', GARAGE_IN_USE_LABEL));
+      // 未拥有 ⇒ 标 `未拥有` 且**不可点**（结构上装不上，而不是点了给个错误提示）
       if (!c.owned) {
-        card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_MOVEMENT_LOCKED_LABEL));
+        card.classList.add('ph-card-locked');
+        card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_LOCKED_LABEL));
         card.disabled = true;
       } else {
         // PRODUCT-LOOP-R4-BODY-CANONICAL｜点已拥有卡即直接装备（无二次确认）
         card.addEventListener('click', () => equipBodyAndRender(c.defId));
       }
       cell.append(card);
-      grid.append(cell);
+      // 必改 4：**可用内容进主卡阵，未拥有内容进降级区**（不与可用内容同权重）
+      if (c.owned) grid.append(cell);
+      else {
+        lockedGrid.append(cell);
+        lockedCount += 1;
+      }
     }
-    stage.append(grid);
+    box.append(grid);
+    if (lockedCount > 0) box.append(lockedSection(lockedGrid, lockedCount));
 
     if (lastBodyEquip) {
       const msg = el(
@@ -1311,25 +1434,45 @@ export function mountProductHome(
           : `车身装备被拒绝（${String(lastBodyEquip.reason)}）：${lastBodyEquip.detail}`,
       );
       msg.dataset['phBodyMsg'] = lastBodyEquip.ok ? 'ok' : 'fail';
-      stage.append(msg);
+      box.append(msg);
     }
   }
 
-  function renderGarage(r: LoadoutReading): void {
-    renderHeader(GARAGE_TITLE);
-    header.append(el('span', 'ph-sub', `${r.weaponSlotLabel} · 当前主武器`));
+  /**
+   * 未拥有内容的**降级区**（Queue 必改 4：折叠 / 降级，不与可用内容同权重）。
+   *
+   * 用原生 `<details>`：零 JS 交互、零新入口、零商城 / 解锁 / 经济系统。
+   * ⚠️ 折叠**只是视觉降级**：卡片仍在 DOM 里（只是不可见）⇒ 未拥有卡的
+   *    `data-ph-*-owned="false"` 与 `disabled` 属性照旧可被读（探针 / E2E 不受影响）。
+   */
+  function lockedSection(grid: HTMLElement, count: number): HTMLElement {
+    const det = el('details', 'ph-locked');
+    det.dataset['phLocked'] = String(count);
+    det.append(
+      el('summary', 'ph-locked-summary', `${GARAGE_LOCKED_LABEL} · ${count}`),
+      grid,
+    );
+    return det;
+  }
 
-    const car = el('div', 'ph-car-wrap ph-car-wrap-sm');
-    car.append(renderPreview(vehiclePreviewLayout(draft)));
-    stage.append(car);
-
-    const cur = el('div', 'ph-current');
+  /**
+   * Weapon 分类（Queue 必改 2）｜**点已拥有卡即装备**。
+   *
+   * ⚠️ 这里删掉了 R2-B 起的「先选中一张卡 → 再点底部`装备`按钮」两步流程：
+   *    四个配置维度现在**同一条规则**，而「卡片已选择但还没真正装备」这种中间态
+   *    在结构上不再存在（`selected` 状态与 `[data-ph-action="equip"]` 按钮一并移除）。
+   *    装备的是**玩家点的那一档**（`(defId, star)`，★1 的炮与 ★2 的炮是两张卡）。
+   */
+  function renderWeaponTab(box: HTMLElement, r: LoadoutReading): void {
+    const cur = el('div', 'ph-current ph-garage-current');
     cur.dataset['phCurrent'] = r.equippedWeaponId;
+    cur.dataset['phGarageCurrent'] = 'weapon';
+    cur.dataset['phGarageCurrentDef'] = r.equippedWeaponId;
     cur.append(
-      el('span', 'ph-current-label', '当前 Weapon'),
+      el('span', 'ph-current-label', GARAGE_IN_USE_LEAD),
       el('span', 'ph-current-name', r.equippedWeaponName),
     );
-    stage.append(cur);
+    box.append(cur);
 
     /**
      * PRODUCT-LOOP-P0｜**Garage 必须能识别「当前可冒险状态」**（Queue 必改 3）。
@@ -1356,11 +1499,11 @@ export function mountProductHome(
     if (!garageCompat.ok) {
       runStatus.append(el('span', 'ph-run-status-hint', garageCompat.notice ?? ''));
     }
-    stage.append(runStatus);
+    box.append(runStatus);
 
-    stage.append(el('h2', 'ph-sec', `拥有的 Weapon（${r.weapons.length}）`));
+    box.append(el('h2', 'ph-sec', `拥有的 Weapon（${r.weapons.length}）`));
     if (r.weapons.length === 0) {
-      stage.append(el('p', 'ph-note', '库存里没有可装备的武器。'));
+      box.append(el('p', 'ph-note', '库存里没有可装备的武器。'));
     }
     const grid = el('div', 'ph-grid');
     for (const w of r.weapons) {
@@ -1388,9 +1531,6 @@ export function mountProductHome(
        *     到 ★5 → 显示 `已满星`，**没有**合成入口（必改 3 / 验收 7）。
        */
       if (equippedHere) card.classList.add('ph-card-equipped');
-      if (selected && selected.defId === w.defId && selected.star === w.star) {
-        card.classList.add('ph-card-selected');
-      }
       card.dataset['phCount'] = String(w.count);
       card.dataset['phStackText'] = w.stackText;
       card.dataset['phStackThreshold'] = String(w.threshold);
@@ -1437,11 +1577,9 @@ export function mountProductHome(
       );
       if (w.fusable) card.append(el('span', 'ph-card-badge', GARAGE_FUSE_READY_LABEL));
       if (w.maxStar) card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_MAX_STAR_LABEL));
-      if (equippedHere) card.append(el('span', 'ph-card-tag', '已装备'));
-      card.addEventListener('click', () => {
-        selected = { defId: w.defId, star: w.star };
-        render();
-      });
+      if (equippedHere) card.append(el('span', 'ph-card-tag', GARAGE_IN_USE_LABEL));
+      // PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜点卡即装备（无「已选择」中间态）
+      card.addEventListener('click', () => equipWeaponAndRender(w.defId, w.star));
       cell.append(card);
 
       if (w.fusable) {
@@ -1482,65 +1620,13 @@ export function mountProductHome(
             inv = res.inventory;
             draft = res.draft;
           }
-          selected = null;
           render();
         });
         cell.append(fuse);
       }
       grid.append(cell);
     }
-    stage.append(grid);
-
-    const actions = el('div', 'ph-actions');
-    const equip = el('button', 'ph-btn ph-btn-primary', GARAGE_EQUIP_LABEL);
-    equip.type = 'button';
-    equip.dataset['phAction'] = 'equip';
-    equip.disabled = selected === null;
-    equip.addEventListener('click', () => {
-      if (selected === null) return;
-      // 装备的是**玩家点的那一档**（`selected.star`），不是 defId 的默认档
-      const out = equipWeapon(selected.defId, draft, inv, selected.star);
-      lastEquip = { ok: out.ok, reason: out.reason ?? null, detail: out.detail ?? '' };
-      if (out.ok && out.draft) {
-        draft = out.draft;
-        // 库存不因装备而消耗；重读仍走正式 ensureInventory（幂等 → 不重复生成库存）
-        inv = playerInventory(draft);
-      }
-      selected = null;
-      render();
-    });
-
-    const back = el('button', 'ph-btn', GARAGE_BACK_LABEL);
-    back.type = 'button';
-    back.dataset['phAction'] = 'back-home';
-    back.addEventListener('click', () => {
-      view = 'home';
-      selected = null;
-      render();
-    });
-    actions.append(equip, back);
-    stage.append(actions);
-
-    /*
-      ⚠️ PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 区**必须放在武器那一组之后**。
-
-      起初它被插在「武器卡阵」与「装备 / 返回」按钮之间，实测后果是：
-      武器「装备」按钮被推到 `y=1034`，而视口只有 720 高 ⇒ **主操作落到屏幕外**
-      （`elementFromPoint(center)` 返回 `null`，真实鼠标点不到）。
-      这不只是 E2E 取不到坐标的问题 —— 玩家也点不到，是一处真实可用性回归。
-
-      放到武器组之后，语义也更干净：**每组配置 = 卡阵 + 它自己的动作条**，
-      中间不夹另一组的内容（武器组不再被 Movement 区截断）。
-    */
-    renderMovementSection();
-
-    /**
-     * PRODUCT-LOOP-R4-BODY-CANONICAL-AND-GARAGE-MVP｜Body 配置区。
-     *
-     * Body 是独立配置维度（单一 `bodyDefId` 字段），不与 Movement 共用挂点行；
-     * 它在 Movement 区之后单独成段，复用同一套卡片外观与「点卡即装」交互。
-     */
-    renderBodySection();
+    box.append(grid);
 
     if (lastFuse) {
       const msg = el(
@@ -1553,7 +1639,7 @@ export function mountProductHome(
           : `合成被拒绝（${String(lastFuse.reason)}）：${lastFuse.detail}`,
       );
       msg.dataset['phFuseMsg'] = lastFuse.ok ? 'ok' : 'fail';
-      stage.append(msg);
+      box.append(msg);
     }
 
     if (lastEquip) {
@@ -1563,12 +1649,106 @@ export function mountProductHome(
         lastEquip.ok ? '已装备并写入正式玩家 Build 存档。' : `装备被拒绝（${lastEquip.reason}）：${lastEquip.detail}`,
       );
       msg.dataset['phEquipMsg'] = lastEquip.ok ? 'ok' : 'fail';
-      stage.append(msg);
+      box.append(msg);
     }
+  }
+
+  /**
+   * ══════════════════════════════════════════════════════════════════════════════
+   * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**Garage = 移动端「单分类配车页」**
+   * ══════════════════════════════════════════════════════════════════════════════
+   *
+   * 真人手机录屏的四条问题（Queue 逐字）与对应的结构决定：
+   *
+   * | # | 问题 | 本页的处置 |
+   * |---|---|---|
+   * | 1 | 四个维度纵向堆成超长页 | 拆成 4 个分类 Tab，**任一时刻只渲染一个分类的卡片** |
+   * | 2 | 操作时 Preview 已滚出屏幕 | Preview 移入**固定区**（与 Tab 一起），只有卡片区滚动 |
+   * | 3 | Weapon 两步 / Movement·Body 一步，规则不统一 | 四维统一为**点卡即装备**（删掉二次按钮） |
+   * | 4 | 未拥有与可用内容混排 | 可用进主卡阵，未拥有进 **`<details>` 降级区**（折叠） |
+   *
+   * ── 三段式骨架（DOM 层就固定住）──────────────────────────────────────────────
+   * ```
+   * .ph-main.ph-main-garage        ← 整页 overflow:hidden（本页整体不滚）
+   *   .ph-garage-top               ← 固定：A 战车 Preview + B 分类 Tab
+   *   .ph-garage-body              ← **唯一**滚动容器：C 当前分类的部件卡阵
+   *   .ph-actions                  ← 固定：D 返回首页（恒可达）
+   * ```
+   * ⚠️ 固定是**结构保证**（三个兄弟节点 + 只有中间那个 `overflow-y:auto`），
+   *    不是「滚回去看一眼」⇒ 「点卡 → Preview 同次变化」这件事在**当前屏幕内**成立。
+   *
+   * ── 分类 → 配置字段（一一对应，没有第二张映射表）─────────────────────────────
+   *   `weapon` → `functionalSelections[WEAPON_SLOT]` / `body` → `bodyDefId` /
+   *   `front` → `frontWheelDefId` / `rear` → `rearWheelDefId`。
+   *   四者各自有**唯一写入口**（`equipWeapon` / `equipBody` / `equipMovement`）
+   *   ⇒ 「换一个分类不会覆盖另一个分类」是结构性的，不靠人工核对。
+   *
+   * ── 硬边界（Queue 禁止清单）────────────────────────────────────────────────
+   *   不新增第 5 个分类、不改任何数值、不新增部件、不做商城 / 解锁 / 经济 /
+   *   教学 / 推荐 / 属性评分 / 红绿对比箭头；**只有部件卡片区内部滚动**。
+   */
+  function renderGarage(r: LoadoutReading): void {
+    renderHeader(GARAGE_TITLE);
+    header.append(el('span', 'ph-sub', `${r.weaponSlotLabel} · 当前主武器`));
+
+    /* ---- A + B（固定）：战车 Preview + 分类 Tab ---- */
+    const top = el('div', 'ph-garage-top');
+    top.dataset['phGarageTop'] = '1';
+
+    const car = el('div', 'ph-car-wrap ph-car-wrap-sm');
+    car.append(renderPreview(vehiclePreviewLayout(draft)));
+    top.append(car);
+
+    const tabs = el('div', 'ph-tabs');
+    tabs.dataset['phTabs'] = '1';
+    for (const tab of GARAGE_TAB_ORDER) {
+      const btn = el('button', 'ph-tab');
+      btn.type = 'button';
+      btn.dataset['phTab'] = tab;
+      const active = tab === garageTab;
+      btn.dataset['phTabActive'] = String(active);
+      if (active) btn.classList.add('ph-tab-active');
+      btn.textContent = GARAGE_TAB_LABELS[tab];
+      btn.addEventListener('click', () => {
+        if (garageTab === tab) return;
+        // 纯视图切换：不写任何存档、不碰 draft / inv ⇒ 切分类不可能改变配置
+        garageTab = tab;
+        render();
+      });
+      tabs.append(btn);
+    }
+    top.append(tabs);
+    stage.append(top);
+
+    /* ---- C（唯一滚动）：当前分类的部件卡片区 ---- */
+    const body = el('div', 'ph-garage-body');
+    body.dataset['phGarageBody'] = garageTab;
+    if (garageTab === 'weapon') renderWeaponTab(body, r);
+    else if (garageTab === 'body') renderBodySection(body);
+    else renderMovementSection(body, garageTab);
+    stage.append(body);
+
+    /* ---- D（固定）：返回首页恒可达 ---- */
+    const actions = el('div', 'ph-actions');
+    const back = el('button', 'ph-btn', GARAGE_BACK_LABEL);
+    back.type = 'button';
+    back.dataset['phAction'] = 'back-home';
+    back.addEventListener('click', () => {
+      view = 'home';
+      render();
+    });
+    actions.append(back);
+    stage.append(actions);
   }
 
   function render(): void {
     screen.dataset['phView'] = view;
+    /**
+     * ⚠️ PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜Garage 用**另一套滚动契约**：
+     * 首页是「整页滚动」，Garage 是「固定骨架 + 只有卡片区内部滚动」（`overflow:hidden`）。
+     * 这个类就是两者唯一的开关 —— 结构与样式都挂在它上面，不靠行内样式。
+     */
+    stage.classList.toggle('ph-main-garage', view === 'garage');
     stage.replaceChildren();
     const r = read();
     if (view === 'home') renderHome(r);
@@ -1592,7 +1772,6 @@ export function mountProductHome(
        */
       const start = stage.querySelector<HTMLElement>('[data-ph-action="start-run"]');
       const compat = fullRunCompat(draft);
-      const equipBtn = stage.querySelector<HTMLButtonElement>('[data-ph-action="equip"]');
       const mv = readMovement();
       return {
         view,
@@ -1712,9 +1891,17 @@ export function mountProductHome(
          * PRODUCT-LOOP-R2-RECOVERY（必改 6）｜领奖提示里那条「已可升星」引导是否出现。
          */
         claimUpgradableHint: !!header.querySelector('[data-ph-claim-hint="upgradable"]'),
-        selectedWeaponId: selected ? selected.defId : null,
-        selectedWeaponStar: selected ? selected.star : null,
-        equipEnabled: !!equipBtn && !equipBtn.disabled,
+        /**
+         * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜Garage 的**当前配置分类**。
+         * ⚠️ 原来这里的 `selectedWeaponId` / `selectedWeaponStar` / `equipEnabled`
+         *    三个字段已随「先选后装备」两步流程一并删除（必改 2）。
+         */
+        garageTab,
+        /**
+         * ⚠️ 硬证据：页面上**不存在**独立的「装备」二次确认按钮。
+         *    探针直接数 DOM ⇒ 「已删除」不是靠源码里没写，而是**运行时真的数不到**。
+         */
+        garageEquipButtonCount: stage.querySelectorAll('[data-ph-action="equip"]').length,
         /**
          * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 维度读数
          * （与 Garage 里那一片卡画的**是同一份**，页面禁止自行推导）。

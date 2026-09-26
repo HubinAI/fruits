@@ -325,6 +325,84 @@
         ⚠️ 只提示「去哪儿做」，**不代劳**：合成必须由玩家在 Garage 里主动按下。
       */
       .ph-claim-hint { display: block; margin-top: 4px; font-weight: 700; color: #ffd35a; }
+
+      /*
+        ══════════════════════════════════════════════════════════════════════════
+        PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜Garage = **单分类配车页**
+        ══════════════════════════════════════════════════════════════════════════
+
+        真人手机录屏：四个维度（Weapon / Body / rear / front）纵向堆成一个超长页 ⇒
+        玩家操作 Body / Movement 时战车 Preview **已经滚出屏幕** ——
+        「点卡立即装备」技术上生效了，玩家却看不到结果。
+
+        结构改成三段式（DOM 层就固定，不靠滚动位置）：
+
+          .ph-main-garage    整页 overflow:hidden（**本页整体不滚**）
+            .ph-garage-top   固定：A 战车 Preview + B 分类 Tab
+            .ph-garage-body  **唯一**滚动容器：C 当前分类的部件卡阵
+            .ph-actions      固定：D 返回首页（恒可达）
+
+        ⚠️ 「固定」是**结构保证**（三个兄弟节点里只有中间那个 overflow-y:auto），
+           不是「滚回去看一眼」⇒ 「点卡 → Preview 同次变化」在**当前屏幕内**成立。
+        ⚠️ 不使用缩字号 / 压 gap 的方式维持旧信息架构（Queue 明令禁止）：
+           这里改的是**信息架构**（分类隔离 + 固定预览 + 未拥有降级），
+           卡片本身的字号 / 间距一个都没动。
+      */
+      .ph-main-garage { overflow: hidden; gap: 0; padding: 0; }
+
+      .ph-garage-top {
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 8px 12px 6px;
+      }
+      .ph-garage-top .ph-car-wrap { border-radius: 10px; }
+
+      /* 分类 Tab：4 等分；当前分类的高亮唯一（`data-ph-tab-active="true"`） */
+      .ph-tabs { display: flex; gap: 6px; }
+      .ph-tab {
+        flex: 1 1 0;
+        min-height: 36px;
+        font: inherit; font-size: 13px; font-weight: 650;
+        border-radius: 9px;
+        border: 1px solid #2b3550; background: #131b28; color: #9fb3cc;
+        cursor: pointer;
+      }
+      .ph-tab:hover { background: #1a2536; border-color: #34507c; }
+      .ph-tab-active { border-color: #3d6494; background: #1d3352; color: #dbe9ff; }
+
+      /* **唯一**滚动容器：只有部件卡片区内部滚动 */
+      .ph-garage-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 6px 12px 10px;
+      }
+      .ph-main-garage > .ph-actions { margin-top: 0; padding: 8px 12px 12px; }
+
+      /* 「当前使用中」一行（四类分类共用同一套外观；必改 3：当前状态一眼可见） */
+      .ph-garage-current { margin-top: 0; }
+
+      /*
+        未拥有内容的**降级区**（Queue 必改 4：折叠 / 降级，不与可用内容同权重）。
+        原生 <details> ⇒ 零 JS 交互、零新入口、零商城 / 解锁 / 经济系统。
+      */
+      .ph-locked { border-top: 1px dashed #2b3550; padding-top: 8px; }
+      .ph-locked-summary {
+        font-size: 12px; font-weight: 650; color: #7b8697; cursor: pointer;
+        padding: 2px 0 6px; list-style: none;
+      }
+      .ph-locked-summary::-webkit-details-marker { display: none; }
+      .ph-locked-summary::before { content: '▸ '; }
+      .ph-locked[open] .ph-locked-summary::before { content: '▾ '; }
+      .ph-locked-grid { margin-top: 8px; }
+      /* 未拥有卡：整体压暗（数值仍可读，但明确不可操作） */
+      .ph-card-locked { opacity: 0.55; cursor: not-allowed; }
     </style>
   </head>
   <body>

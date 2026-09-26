@@ -1190,13 +1190,21 @@ async function main() {
     const energyBefore = g1.energy;
     await clickSelector(page, '[data-ph-weapon="spear"]');
     const g2 = await probeHome(page);
+    /*
+      ⚠️ PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜本断言的语义随**统一直接装备**改写：
+      旧交互是「点卡 → 明确选中（`selectedWeaponId`）→ 底部`装备`按钮变为可点」两步；
+      新交互四个维度统一为「点已拥有卡 → 立即装备」⇒ 这里断言**一次点击就已经真的装上**，
+      并以「页面上数不到任何 `[data-ph-action="equip"]` 按钮」作为中间态已被删除的运行时证据。
+    */
     log(
-      g2.selectedWeaponId === 'spear' && g2.equipEnabled === true,
-      'F3 点击 spear → 明确选中，且「装备」可点（它是一件能装上的东西）',
-      `selected=${g2.selectedWeaponId} equipEnabled=${g2.equipEnabled}`,
+      g2.equippedWeaponId === 'spear' &&
+        g2.lastEquip &&
+        g2.lastEquip.ok === true &&
+        g2.garageEquipButtonCount === 0,
+      'F3 点击 spear → **一次点击**直接装备（不再有「已选中未装备」中间态；页面上 0 个二次装备按钮）',
+      `equipped=${g2.equippedWeaponId} lastEquip=${JSON.stringify(g2.lastEquip)} equipButtons=${g2.garageEquipButtonCount}`,
     );
 
-    await clickSelector(page, '[data-ph-action="equip"]');
     const g3 = await probeHome(page);
     const stored3 = await storageDump(page);
     log(
@@ -1239,7 +1247,6 @@ async function main() {
     */
     await clickSelector(page, '[data-ph-action="open-garage"]');
     await clickSelector(page, '[data-ph-weapon="cannon"]');
-    await clickSelector(page, '[data-ph-action="equip"]');
     const g4 = await probeHome(page);
     const storedCannonBack = await storageDump(page);
     log(
