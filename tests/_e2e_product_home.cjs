@@ -1454,7 +1454,8 @@ async function main() {
         - GS4 手机视口下「4 个装备槽 + 0 个二次装备按钮 + 0 个可拖拽元素」，且恰好一个当前槽（验收 5）；
         - GS5 依次真实点击 **武器 → 车身 → 前轮 → 后轮** 都能切换（验收 2 / 3 的入口）；
         - GS6 未拥有内容降级到原生 `<details>` 折叠区（默认闭合）而可用卡留在主卡阵；
-        - GS7 底部合成入口**持续可见**（真实矩形面积 > 0、未被样式隐藏；验收 7）；
+        - GS7 底部合成入口**持续可见**（真实矩形面积 > 0、未被样式隐藏；验收 7 前半句）；
+        - GS7b 存在 5/5 可合成项时入口给出**明确提示**（「可合成 1」+ `ready=true` + 可点；验收 7 后半句）；
         - GS8 **验收 3 逐字**：点 Body 槽 → 点 mangoBody → 车身立即变化（一次点击，无二次按钮）；
         - GS9 **验收 2 逐字**：点 Front 槽 → 点 smallWheel → 前轮立即变化（一次点击，无二次按钮）；
         - GS10 **验收 8**：reload 后 Weapon / Body / rear / front 逐项保持且**互不覆盖**；
@@ -1667,12 +1668,57 @@ async function main() {
       );
 
       /*
+        GS7b｜**验收 7 后半句**：存在 5/5 可合成项时，入口必须给出**明确提示**。
+        ⚠️ GS7 是在「没有可合成组」的全新账号上取证的（入口仍在 ⇒ 持续可见）。这里补另一半：
+           把 cannon ★1 补到 5/5（**直接写正式库存 key**，不经页面 —— 与 M2b 负控制同一手法），
+           reload 后入口应从「暂无可合成 / disabled」变成「可合成 1 / ready / 可点」。
+        ⚠️ 不改任何合成规则、也不假点合成：只把库存摆到 5/5，然后**读**入口的样子。
+      */
+      await mp.evaluate((invKey) => {
+        const inv = JSON.parse(localStorage.getItem(invKey) || '{}');
+        inv.cannon = { one: 5 };
+        localStorage.setItem(invKey, JSON.stringify(inv));
+      }, INV_KEY);
+      await mp.reload({ waitUntil: 'load' });
+      await mp.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
+      await sleep(200);
+      await clickSelector(mp, '[data-ph-action="open-garage"]');
+      const fuseReady = await mp.evaluate(() => {
+        const el = document.querySelector('[data-ph-action="fuse-entry"]');
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        return {
+          text: (el.textContent || '').trim(),
+          ready: el.getAttribute('data-ph-fuse-entry-ready'),
+          count: el.getAttribute('data-ph-fuse-ready-count'),
+          disabled: el.disabled === true,
+          visible: b.width > 0 && b.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden',
+        };
+      });
+      log(
+        !!fuseReady &&
+          fuseReady.visible &&
+          fuseReady.ready === 'true' &&
+          fuseReady.count === '1' &&
+          fuseReady.disabled === false &&
+          fuseReady.text.includes('可合成') &&
+          fuseReady.text.includes('1'),
+        'GS7b **验收 7 后半句**：存在 5/5 可合成项时，底部持续可见的「合成」入口给出**明确提示**（「可合成 1」+ `ready=true` + 可点），不是把入口藏起来或只字不提',
+        fuseReady
+          ? `text="${fuseReady.text}" ready=${fuseReady.ready} count=${fuseReady.count} disabled=${fuseReady.disabled} visible=${fuseReady.visible}`
+          : '入口缺失',
+      );
+
+      /*
         GS8｜**验收 3 逐字**：点 Body 槽 → 点 mangoBody → Body 立即变化。
         ⚠️ 前提 `mangoBody` 在本账号**已拥有**，走的是正式一次性 Body 种子
            （`r4BodyChoiceSeed.MVP_BODY_CHOICE_IDS` = durianBody + mangoBody）——
            这里**不**新增解锁入口、不放宽断言；种子本身的契约由 `productBodyChoiceSeed` 单测钉。
-        当前视口已经在 body 槽（上一条 GS6 停在这里）。
+        当前视口在 GS6 停在 body 槽，但 GS7b 中间 reload 过一次 ⇒ 这里**显式**切回去，
+        不依赖「上一次留下的槽位」。
       */
+      await gotoGarageSlot(mp, 'body');
       const bodyBase = await probeOf(mp);
       log(
         bodyBase.body.bodyDefId !== 'mangoBody',
