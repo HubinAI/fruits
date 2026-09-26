@@ -48,7 +48,12 @@ import {
   type MovementEquipFailure,
   type MovementReading,
 } from './playerLoadout';
-import { vehiclePreviewLayout, type VehiclePreviewLayout } from './vehiclePreview';
+import {
+  vehiclePreviewLayout,
+  vehicleSlotAnchors,
+  type VehiclePreviewLayout,
+  type VehicleSlotId,
+} from './vehiclePreview';
 /**
  * PRODUCT-LOOP-R1-B｜领奖闭环的两块产品侧拼图：
  *   - `runReward.ts`：奖励策略 + **产品地址唯一真源**（`开始冒险` 的 href 由它产出）；
@@ -106,32 +111,74 @@ export const HOME_START_LABEL = '开始冒险';
 export const GARAGE_TITLE = '调整战车';
 export const GARAGE_BACK_LABEL = '返回首页';
 /**
- * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**Garage = 移动端「单分类配车页」**。
+ * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜**Garage = 移动端「槽位式配车页」**。
  *
- * 真人手机录屏（本 Queue 的问题陈述）：四个维度纵向堆成一个超长页 ⇒ ① 点卡装备时
- * 战车 Preview 已滚出屏幕（装了却看不见结果）；② Weapon 两步 / Movement·Body 一步，
- * 规则不统一；③ 未拥有内容与可用内容混排。
+ * 真人手机录屏（本 Queue 的问题陈述）：
+ *   ① 玩家不知道装备该「拖动」还是「点击」；
+ *   ② 战车 Preview 朝向与正式战斗相反 ⇒ 前轮 / 后轮认知反转；
+ *   ③ 玩家不知道从哪里进入合成。
  *
- * ⇒ 页面结构改为**三段固定骨架**（唯一允许滚动的是中间的卡片区）：
- *   A 顶部 战车 Preview（固定）
- *   B 中部 配置分类 Tab（固定）—— 就是下面这 4 个，顺序由 Queue 逐字给定
- *   C 下部 **仅当前 Tab 的**部件卡片区（唯一滚动容器）
- *   D 返回首页（固定，恒可达）
+ * ⇒ 页面结构改为「**战车 + 4 个真实装备槽 + 当前槽的我的装备 + 合成入口**」：
+ * ```
+ * .ph-main.ph-main-garage        ← 整页 overflow:hidden（本页整体不滚）
+ *   .ph-header                   ← 标题 / 返回首页（返回恒可达）
+ *   .ph-garage-stage             ← 战车 Preview + 4 个装备槽（**固定**，不随列表滚出）
+ *   .ph-my-parts                 ← 「我的装备 · <当前槽>」标题（固定）
+ *   .ph-garage-body              ← **唯一**滚动容器：当前槽的部件卡阵
+ *   .ph-garage-foot              ← 合成入口（**持续可见**）
+ * ```
  *
- * ⚠️ 维度只有这 4 个，**不允许**再加第 5 个分类（Queue 冻结：不新增 Weapon / Movement / Body）。
+ * ── 槽位 → 配置字段（一一对应，没有第二张映射表）─────────────────────────────
+ *   `weapon` → `functionalSelections[WEAPON_SLOT]` / `body` → `bodyDefId` /
+ *   `front` → `frontWheelDefId` / `rear` → `rearWheelDefId`。
+ *   后三者的槽位名与 `movementHardpoints[].id` **刻意同名** ⇒ 不需要映射表。
+ *
+ * ⚠️ 槽位只有这 4 个真实存在的（Queue 冻结：**不得**增加未来 Gadget 等空槽）。
+ * ⚠️ 唯一装备交互 = **点槽位 → 点已拥有部件 → 立即装备**；**不提供拖拽装备**
+ *    （源码守卫「零 drag 事件」+ 运行时守卫 `garageDraggableCount === 0` 双证）。
  */
-export const GARAGE_TAB_ORDER: readonly GarageTab[] = ['weapon', 'body', 'front', 'rear'];
-/** 分类的中文名（页面里不出现第二份字面量）。 */
-export const GARAGE_TAB_LABELS: Readonly<Record<GarageTab, string>> = {
+export type GarageSlot = VehicleSlotId;
+export const GARAGE_SLOT_ORDER: readonly GarageSlot[] = ['weapon', 'body', 'front', 'rear'];
+/** 槽位的中文名（页面里不出现第二份字面量；也是「我的装备」标题的一部分）。 */
+export const GARAGE_SLOT_LABELS: Readonly<Record<GarageSlot, string>> = {
   weapon: '武器',
   body: '车身',
   front: '前轮',
   rear: '后轮',
 };
 /**
- * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**配置页最核心的三种状态**。
+ * 「我的装备」区块标题（Queue 逐字要求的中下区标题）。
+ *   完整标题 = `我的装备 · <槽位名>`。
+ */
+export const GARAGE_MY_PARTS_LABEL = '我的装备';
+/**
+ * 槽位横向偏移的**夹取上限**（预览 px）。
  *
- * Queue 必改 3 逐字要求：配置页只需要「使用中 / 可使用 / 未拥有」三种语义，
+ * 槽位横向位置 = 该部件的真实挂点 x（见 `garageSlotAnchor`）。极端车身可能把挂点推到
+ * 舞台边缘，而舞台是 `overflow:hidden` ⇒ 槽位会被直接切掉。夹到 ±130 后，
+ * 配合 CSS 的 `max-width`，最坏情况仍在 390 宽的舞台内（(390/2 − 12 内边距) ≈ 183）。
+ * ⚠️ 只影响**槽位标签**的排版，**不**参与任何配置 / 数值 / 存档逻辑。
+ */
+export const GARAGE_SLOT_MAX_DX = 130;
+/**
+ * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2（必改 4）｜**持续可见的合成入口**。
+ *
+ * Queue 逐字：底部提供持续可见的「合成」入口，**不得**要求玩家通过拖动 / 长按 /
+ * 猜测卡片行为发现合成；有可合成组时给一个最小可感知状态（红点 **或** 可合成数量）；
+ * 点击 → **进入现有正式 Fusion 流程**（本 Queue 不重做 Fusion 页面）。
+ *
+ * ⇒ 落地：底部固定一个 `合成` 按钮（`data-ph-action="fuse-entry"`），
+ *   有可合成组时显示 `可合成 N`（N = `weaponEntries().fusable` 的组数）+ `data-ph-fuse-ready`；
+ *   点击 = 切到 **武器槽** 并把第一张可合成卡滚入视野 + 聚焦 —— 那里就是既有的
+ *   `合成升星` 按钮（`fuseStack()` 的**唯一**调用点，本 Queue 一行规则都没改）。
+ */
+export const GARAGE_FUSE_ENTRY_LABEL = '合成';
+export const GARAGE_FUSE_ENTRY_READY_LABEL = '可合成';
+export const GARAGE_FUSE_ENTRY_NONE_LABEL = '暂无可合成';
+/**
+ * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R1｜**配置页最核心的三种状态**。
+ *
+ * Queue 逐字要求：配置页只需要「使用中 / 可使用 / 未拥有」三种语义，
  * **不要**同时出现「默认 / 选中 / 已选择 / 已装备」等多套状态互相竞争。
  * ⇒ 本页四类卡片共用下面两个常量；「可使用」= 什么都不标（默认就是可点）。
  *   - `使用中`：当前真正生效的那一件（Weapon / Body / rear / front 各自唯一）；
@@ -250,18 +297,6 @@ export const GARAGE_IN_USE_LEAD = '当前使用中';
 export const GARAGE_MOVEMENT_EQUIP_PLACEHOLDER = '轮组';
 
 export type ProductView = 'home' | 'garage';
-/**
- * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜Garage 的**配置分类**。
- *
- * ⚠️ 四个维度**一一对应四类真实配置**，不是 UI 分组：
- *   - `weapon` → `draft.functionalSelections[WEAPON_SLOT]`（+ `functionalStars`）；
- *   - `body`   → `draft.bodyDefId`（单一字段）；
- *   - `front`  → `draft.frontWheelDefId`；
- *   - `rear`   → `draft.rearWheelDefId`。
- * 名称与 `MOVEMENT_HARDPOINT_LABELS` 的键**刻意同名**（`front` / `rear`），
- * 这样「分类 → 挂点」不需要第二张映射表（`garageTabToHardpoint` 直接等价）。
- */
-export type GarageTab = 'weapon' | 'body' | 'front' | 'rear';
 
 export interface ProductProbe {
   readonly view: ProductView;
@@ -405,17 +440,37 @@ export interface ProductProbe {
    */
   readonly equippedWeaponStar: number;
   /**
-   * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜Garage 当前正在看的**配置分类**。
-   * ⚠️ 原先的 `selectedWeaponId` / `selectedWeaponStar` / `equipEnabled` 三个字段
-   *    随「先选 → 再点`装备`」两步流程一并删除（本 Queue 必改 2：四个维度统一为点卡即装备，
+   * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜Garage 当前**高亮的装备槽**。
+   * ⚠️ 原先的 `selectedWeaponId` / `selectedWeaponStar` / `equipEnabled` 三个字段随
+   *    R1「先选 → 再点`装备`」两步流程一并删除（四维统一为点卡即装备，
    *    「卡片已选择但还没真正装备」这种中间态在结构上不再存在）。
    */
-  readonly garageTab: GarageTab;
+  readonly garageSlot: GarageSlot;
+  /**
+   * 页面上真实渲染出来的装备槽数量（本 Queue 之后恒为 **4**）。
+   * ⚠️ 运行时读数（`querySelectorAll('[data-ph-slot]').length`），不是源码推断
+   *    ⇒ 「4 个槽都画出来了」与「没有第 5 个未来空槽」都能被直接断言。
+   */
+  readonly garageSlotCount: number;
   /**
    * 页面上 `[data-ph-action="equip"]` 的**运行时**数量（本 Queue 之后恒为 0）。
    * ⚠️ 这是「二次装备按钮已删除」的运行时硬证据，不是源码里「没写」的推断。
    */
   readonly garageEquipButtonCount: number;
+  /**
+   * 页面上**可拖拽元素**的运行时数量（`[draggable="true"]`，恒为 0）。
+   * ⚠️ 必改 2 明令「不得实现拖拽装备」⇒ 这是运行时硬证据（源码守卫另有一条）。
+   */
+  readonly garageDraggableCount: number;
+  /**
+   * 底部「合成」入口是否**可见**（必改 4：持续可见，恒为 true）。
+   * 判据 = 元素存在且 `getBoundingClientRect()` 有非零面积且未被样式隐藏。
+   */
+  readonly garageFuseEntryVisible: boolean;
+  /** 当前**可合成组数**（`weaponEntries().fusable` 的条数）——底部入口的最小状态提示。 */
+  readonly garageFuseReadyCount: number;
+  /** 底部合成入口是否处于「可感知」态（有可合成组时 = true）。 */
+  readonly garageFuseEntryReady: boolean;
   /**
    * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜**Movement 维度的全量读数**
    * （直接来自 `playerLoadout.movementReading()`，页面画的**就是这些字段**）。
@@ -614,11 +669,29 @@ function fitStage(frame: HTMLElement, screen: HTMLElement): void {
 }
 
 /**
+ * 预览件本地坐标 → 「以 `.ph-car` 盒心为原点」的预览 px 偏移（**唯一**一套换算）。
+ *
+ * ⚠️ PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2：本地 y 与屏幕 y **同向**（都向下）
+ *    ⇒ 这里是 `dy = (cy - by) * scale`，**不取反**。
+ *    真实链路依据：Battle 世界 `gravity.y = +10` / `visualWorldTransform` 的
+ *    `position.y = physPos.y + anchor.y` / Run 舞台 `placeSideViewVisuals` 直接拿
+ *    `cy` 当屏幕 y —— 三处同口径，详见 `vehiclePreview.ts` 文件头「坐标口径」。
+ *    ⚠️ R1 之前这里多取了一次反 ⇒ 整车上下镜像（轮子在车身之上、武器挂在车底）。
+ *    本函数同时服务 `renderPreview` 与「装备槽定位」⇒ 预览件 / 装备槽坐标不可能漂移。
+ */
+function previewOffset(layout: VehiclePreviewLayout, cx: number, cy: number): { dx: number; dy: number } {
+  const bx = (layout.minX + layout.maxX) / 2;
+  const by = (layout.minY + layout.maxY) / 2;
+  return { dx: (cx - bx) * layout.scale, dy: (cy - by) * layout.scale };
+}
+
+/**
  * 车辆预览（纯 DOM，零画布）：每个 item 一个绝对定位元素；
  * 有正式 sprite → `<img>`，无 → 按真实 Collider 外接框画灰盒并带 `data-ph-nosprite` 标注。
  *
- * 定位口径：元素以 `.ph-car` **盒心**为原点（`calc(50% + Δpx)`），Δ 由车体本地坐标 × `scale`
- * 得出（y 翻转：本地 y 向上、DOM y 向下）。盒子宽度与布局无关 ⇒ 不会被父级内边距挤偏。
+ * 定位口径：元素以 `.ph-car` **盒心**为原点（`calc(50% + Δpx)`），Δ 由
+ * `previewOffset()` 给出（本地 y 与屏幕 y 同向 ⇒ **不翻转**）。
+ * 盒子宽度与布局无关 ⇒ 不会被父级内边距挤偏。
  */
 function renderPreview(layout: VehiclePreviewLayout): HTMLElement {
   const box = el('div', 'ph-car');
@@ -631,16 +704,15 @@ function renderPreview(layout: VehiclePreviewLayout): HTMLElement {
   */
   box.dataset['phScale'] = String(layout.scale);
   box.style.height = `${layout.stageH}px`;
-  const bx = (layout.minX + layout.maxX) / 2;
-  const by = (layout.minY + layout.maxY) / 2;
   const ordered = [...layout.items].sort((a, b) => a.layer - b.layer);
   for (const it of ordered) {
     const url = it.visualId ? SPRITE_URLS[it.visualId] : undefined;
     const node = url ? el('img', 'ph-car-item') : el('div', 'ph-car-item ph-car-fallback');
     const w = it.w * layout.scale;
     const h = it.h * layout.scale;
-    node.style.left = `calc(50% + ${(it.cx - bx) * layout.scale - w / 2}px)`;
-    node.style.top = `calc(50% + ${-(it.cy - by) * layout.scale - h / 2}px)`;
+    const { dx, dy } = previewOffset(layout, it.cx, it.cy);
+    node.style.left = `calc(50% + ${dx - w / 2}px)`;
+    node.style.top = `calc(50% + ${dy - h / 2}px)`;
     node.style.width = `${w}px`;
     node.style.height = `${h}px`;
     if (it.round) node.style.borderRadius = '50%';
@@ -700,13 +772,21 @@ export function mountProductHome(
   let inv: PartInventory = growth.inv;
   let view: ProductView = 'home';
   /**
-   * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜当前正在看的**配置分类**。
+   * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜当前**高亮的装备槽**。
    *
-   * ⚠️ 替换掉了 R2-B 起那个 `selected: {defId,star} | null`（「先选后装备」的中间态）。
-   *    本 Queue 必改 2 要求四个维度**统一为点卡即装备** ⇒ 「已选择但还没装备」这种状态
-   *    在结构上不允许存在，`selected` 这个变量随之删除（探针字段一并移除）。
+   * 槽位 = 真实的配置维度（`weapon` / `body` / `front` / `rear`），不是 UI 分组：
+   * 点某个槽 ⇒ 该槽高亮 ⇒ 中下区「我的装备」只列**该槽兼容**的部件。
+   *
+   * ⚠️ 替换掉了 R2-B 起那个 `selected: {defId,star} | null`（「先选后装备」的中间态）：
+   *    「已选择但还没装备」这种状态在结构上不允许存在，`selected` 变量随之删除。
    */
-  let garageTab: GarageTab = 'weapon';
+  let garageSlot: GarageSlot = 'weapon';
+  /**
+   * 点过底部「合成」之后 → 下一次渲染把第一张**可合成**卡滚入视野并聚焦。
+   * ⚠️ 只是**视图提示**：不改任何数据、不代玩家合成（合成动作仍然只有卡上那个
+   *    `合成升星` 按钮会调 `fuseStack()`）。
+   */
+  let fuseFocusPending = false;
   let lastEquip: { ok: boolean; reason: EquipFailure | null; detail: string } | null = null;
   /** 最近一次 Movement 装备动作的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
   let lastMovementEquip: { ok: boolean; reason: MovementEquipFailure | null; detail: string } | null = null;
@@ -1506,6 +1586,11 @@ export function mountProductHome(
       box.append(el('p', 'ph-note', '库存里没有可装备的武器。'));
     }
     const grid = el('div', 'ph-grid');
+    /**
+     * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2（必改 4）｜底部「合成」入口点过之后，
+     * 把**第一张可合成卡**标出来 ⇒ `renderGarage` 末尾据此把它滚入视野 + 聚焦。
+     */
+    let fuseFocusMarked = false;
     for (const w of r.weapons) {
       const equippedHere = w.defId === r.equippedWeaponId && w.star === r.equippedWeaponStar;
       /**
@@ -1514,6 +1599,10 @@ export function mountProductHome(
        *    `.ph-card-cell` 里（合成按钮绝对定位在右上角，视觉上仍在卡内）。
        */
       const cell = el('div', 'ph-card-cell');
+      if (fuseFocusPending && w.fusable && !fuseFocusMarked) {
+        fuseFocusMarked = true;
+        cell.dataset['phFuseFocus'] = '1';
+      }
       const card = el('button', 'ph-card');
       card.type = 'button';
       card.dataset['phWeapon'] = w.defId;
@@ -1655,90 +1744,211 @@ export function mountProductHome(
 
   /**
    * ══════════════════════════════════════════════════════════════════════════════
-   * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜**Garage = 移动端「单分类配车页」**
+   * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜**Garage = 移动端「槽位式配车页」**
    * ══════════════════════════════════════════════════════════════════════════════
    *
-   * 真人手机录屏的四条问题（Queue 逐字）与对应的结构决定：
+   * 真人手机录屏的三个 P0 问题（Queue 逐字）与对应的结构决定：
    *
    * | # | 问题 | 本页的处置 |
    * |---|---|---|
-   * | 1 | 四个维度纵向堆成超长页 | 拆成 4 个分类 Tab，**任一时刻只渲染一个分类的卡片** |
-   * | 2 | 操作时 Preview 已滚出屏幕 | Preview 移入**固定区**（与 Tab 一起），只有卡片区滚动 |
-   * | 3 | Weapon 两步 / Movement·Body 一步，规则不统一 | 四维统一为**点卡即装备**（删掉二次按钮） |
-   * | 4 | 未拥有与可用内容混排 | 可用进主卡阵，未拥有进 **`<details>` 降级区**（折叠） |
+   * | 1 | 不知道装备该「拖动」还是「点击」 | **只有点**：点槽位 → 点已拥有部件 → 立即装备；零拖拽 |
+   * | 2 | Preview 朝向与正式战斗相反 | 修 `vehiclePreview` 的坐标口径（见 `previewOffset`）+ 4 个槽**贴真实挂点** |
+   * | 3 | 不知道从哪里进入合成 | 底部**持续可见**的「合成」入口（有可合成组时带数量提示） |
    *
-   * ── 三段式骨架（DOM 层就固定住）──────────────────────────────────────────────
+   * ── 结构骨架（DOM 层就固定住）────────────────────────────────────────────────
    * ```
    * .ph-main.ph-main-garage        ← 整页 overflow:hidden（本页整体不滚）
-   *   .ph-garage-top               ← 固定：A 战车 Preview + B 分类 Tab
-   *   .ph-garage-body              ← **唯一**滚动容器：C 当前分类的部件卡阵
-   *   .ph-actions                  ← 固定：D 返回首页（恒可达）
+   *   .ph-header                   ← 标题 / 返回首页（返回恒可达）
+   *   .ph-garage-stage             ← 战车 Preview + 4 个装备槽（**固定**，不随列表滚出）
+   *   .ph-my-parts                 ← 「我的装备 · <槽位名>」（固定）
+   *   .ph-garage-body              ← **唯一**滚动容器：当前槽的部件卡阵
+   *   .ph-garage-foot              ← 合成入口（持续可见）
    * ```
-   * ⚠️ 固定是**结构保证**（三个兄弟节点 + 只有中间那个 `overflow-y:auto`），
-   *    不是「滚回去看一眼」⇒ 「点卡 → Preview 同次变化」这件事在**当前屏幕内**成立。
+   * ⚠️ 「固定」是**结构保证**（兄弟节点 + 只有中间那个 `overflow-y:auto`），
+   *    不是「滚回去看一眼」⇒ 「点卡 → Preview 同次变化」在**当前屏幕内**成立。
    *
-   * ── 分类 → 配置字段（一一对应，没有第二张映射表）─────────────────────────────
+   * ── 槽位 → 配置字段（一一对应，没有第二张映射表）─────────────────────────────
    *   `weapon` → `functionalSelections[WEAPON_SLOT]` / `body` → `bodyDefId` /
    *   `front` → `frontWheelDefId` / `rear` → `rearWheelDefId`。
    *   四者各自有**唯一写入口**（`equipWeapon` / `equipBody` / `equipMovement`）
-   *   ⇒ 「换一个分类不会覆盖另一个分类」是结构性的，不靠人工核对。
+   *   ⇒ 「换一个槽位不会覆盖另一个槽位」是结构性的，不靠人工核对。
    *
-   * ── 硬边界（Queue 禁止清单）────────────────────────────────────────────────
-   *   不新增第 5 个分类、不改任何数值、不新增部件、不做商城 / 解锁 / 经济 /
-   *   教学 / 推荐 / 属性评分 / 红绿对比箭头；**只有部件卡片区内部滚动**。
+   * ── 槽位的位置 = **真实挂点**（不是排版凑出来的）─────────────────────────────
+   *   每个槽的横坐标 = 该部件在**正式 `BodyDef` 挂点**上的本地 x（经 `previewOffset`
+   *   换算成预览 px）；武器在车体上方（`frontMass` 挂点就在上面）、两个轮子在车体下方
+   *   （`movementHardpoints` 的 y 为正 = 向下）⇒ 玩家一眼能看出「这个东西装在这里」。
+   *   ⚠️ 槽位的纵向位置刻意抬到车体轮廓之外（上下各留一段），否则会盖住它指向的部件。
+   *
+   * ── 硬边界（Queue 冻结清单）────────────────────────────────────────────────
+   *   不新增第 5 个槽（**没有** Gadget 等未来空槽）、不改任何数值 / 部件 / 库存 / Seed /
+   *   Reward / Fusion 规则 / Star 规则 / Battle / Physics / Camera / Product Run / Economy、
+   *   不做商城 / 教程 / 属性评分 / 推荐、不做拖拽；**只有部件卡阵内部滚动**。
    */
   function renderGarage(r: LoadoutReading): void {
     renderHeader(GARAGE_TITLE);
-    header.append(el('span', 'ph-sub', `${r.weaponSlotLabel} · 当前主武器`));
-
-    /* ---- A + B（固定）：战车 Preview + 分类 Tab ---- */
-    const top = el('div', 'ph-garage-top');
-    top.dataset['phGarageTop'] = '1';
-
-    const car = el('div', 'ph-car-wrap ph-car-wrap-sm');
-    car.append(renderPreview(vehiclePreviewLayout(draft)));
-    top.append(car);
-
-    const tabs = el('div', 'ph-tabs');
-    tabs.dataset['phTabs'] = '1';
-    for (const tab of GARAGE_TAB_ORDER) {
-      const btn = el('button', 'ph-tab');
-      btn.type = 'button';
-      btn.dataset['phTab'] = tab;
-      const active = tab === garageTab;
-      btn.dataset['phTabActive'] = String(active);
-      if (active) btn.classList.add('ph-tab-active');
-      btn.textContent = GARAGE_TAB_LABELS[tab];
-      btn.addEventListener('click', () => {
-        if (garageTab === tab) return;
-        // 纯视图切换：不写任何存档、不碰 draft / inv ⇒ 切分类不可能改变配置
-        garageTab = tab;
-        render();
-      });
-      tabs.append(btn);
-    }
-    top.append(tabs);
-    stage.append(top);
-
-    /* ---- C（唯一滚动）：当前分类的部件卡片区 ---- */
-    const body = el('div', 'ph-garage-body');
-    body.dataset['phGarageBody'] = garageTab;
-    if (garageTab === 'weapon') renderWeaponTab(body, r);
-    else if (garageTab === 'body') renderBodySection(body);
-    else renderMovementSection(body, garageTab);
-    stage.append(body);
-
-    /* ---- D（固定）：返回首页恒可达 ---- */
-    const actions = el('div', 'ph-actions');
-    const back = el('button', 'ph-btn', GARAGE_BACK_LABEL);
+    /* ---- 顶部：返回（恒可达）。Queue 结构 = 「顶部：标题 / 返回」 ---- */
+    const back = el('button', 'ph-back', GARAGE_BACK_LABEL);
     back.type = 'button';
     back.dataset['phAction'] = 'back-home';
     back.addEventListener('click', () => {
       view = 'home';
       render();
     });
-    actions.append(back);
-    stage.append(actions);
+    header.append(back);
+
+    /* ---- 中上（固定）：战车 Preview + 4 个装备槽 ---- */
+    const stageBox = el('div', 'ph-garage-stage');
+    stageBox.dataset['phGarageStage'] = '1';
+    const layout = vehiclePreviewLayout(draft);
+    const car = el('div', 'ph-car-wrap ph-car-wrap-sm');
+    /*
+      ⚠️ 槽位节点是 **`.ph-car` 的子节点**（不是 stage 的）：它们的 `left` 与
+         `top: calc(100% + …)` 都以**车体本身**为基准 ⇒「横向贴挂点、纵向跳出车体轮廓」
+         才成立。挂到 stage 上会让 `100%` 变成整段高度，槽位直接落到「我的装备」上。
+    */
+    const previewBox = renderPreview(layout);
+    car.append(previewBox);
+    stageBox.append(car);
+
+    /*
+      ⚠️ 槽位锚点由 `vehicleSlotAnchors(draft)` 给出 —— 它读的是**正式内容库**里该部件的
+         挂点 `localPosition`（`BodyDef.movementHardpoints` / `functionalHardpoints`）。
+         页面**不**自己 import `../core/content`：锚点计算留在 `vehiclePreview`（同一个模块
+         已经在读 registry），本页的 import 白名单仍是闭集（`PL-26`）。
+    */
+    const anchors = vehicleSlotAnchors(draft);
+    const mv = readMovement();
+    for (const slot of GARAGE_SLOT_ORDER) {
+      const anchor = anchors[slot];
+      const off = previewOffset(layout, anchor.cx, anchor.cy);
+      /*
+        ⚠️ 横向 = 该部件的**真实挂点 x**（换算成预览 px）；不夹取会跑出舞台
+          （`overflow:hidden` 直接切掉）⇒ 夹到 ±`GARAGE_SLOT_MAX_DX`，
+          同时 CSS 里给槽位 `max-width` 限宽，最坏情况仍在 390 宽的舞台内。
+        ⚠️ 纵向**刻意不用挂点的真实 dy**：那会把标签压在它指向的部件上。
+          武器统一挂到车体**上方**、其余三个挂到车体**下方**（CSS 的两个 modifier），
+          横坐标仍严格跟着挂点 ⇒「前轮在右、后轮在左、武器在挂点那一侧」照旧成立。
+      */
+      const dx = Math.max(-GARAGE_SLOT_MAX_DX, Math.min(GARAGE_SLOT_MAX_DX, off.dx));
+      const btn = el('button', 'ph-slotnode');
+      btn.type = 'button';
+      btn.dataset['phSlot'] = slot;
+      btn.dataset['phSlotActive'] = String(slot === garageSlot);
+      btn.dataset['phSlotDx'] = String(Math.round(dx));
+      btn.dataset['phSlotDef'] = garageSlotDefId(slot, r, mv);
+      /*
+        ⚠️ 槽位纵向：**武器挂在车体上方**（`frontMass` 挂点 y = −8 ⇒ 本来就在车体上半部），
+           **车身 / 前轮 / 后轮挂在车体下方**（轮子挂点 y = +25 = 向下，物理上就在车体下方；
+           车身标签放下方是为了和武器错开，横坐标正对车体）。
+           纵向**必须跳出车体轮廓**，否则标签会盖住它指向的那个部件。
+      */
+      const above = slot === 'weapon';
+      btn.classList.add(above ? 'ph-slotnode-above' : 'ph-slotnode-below');
+      if (slot === garageSlot) btn.classList.add('ph-slotnode-active');
+      btn.style.left = `calc(50% + ${dx}px)`;
+      btn.append(
+        el('span', 'ph-slotnode-label', GARAGE_SLOT_LABELS[slot]),
+        el('span', 'ph-slotnode-value', garageSlotValue(slot, r, mv)),
+      );
+      btn.addEventListener('click', () => {
+        if (garageSlot === slot) return;
+        // 纯视图切换：不写任何存档、不碰 draft / inv ⇒ 切槽位不可能改变配置
+        garageSlot = slot;
+        render();
+      });
+      previewBox.append(btn);
+    }
+    stage.append(stageBox);
+
+    /* ---- 中下：「我的装备」—— 只列**当前槽**兼容的部件（标题固定，卡片阵滚动） ---- */
+    const myParts = el('div', 'ph-my-parts');
+    myParts.dataset['phMyParts'] = garageSlot;
+    myParts.append(
+      el('span', 'ph-my-parts-label', GARAGE_MY_PARTS_LABEL),
+      el('span', 'ph-my-parts-slot', GARAGE_SLOT_LABELS[garageSlot]),
+    );
+    stage.append(myParts);
+
+    const body = el('div', 'ph-garage-body');
+    body.dataset['phGarageBody'] = garageSlot;
+    if (garageSlot === 'weapon') renderWeaponTab(body, r);
+    else if (garageSlot === 'body') renderBodySection(body);
+    else renderMovementSection(body, garageSlot);
+    stage.append(body);
+
+    /* ---- 底部：合成入口（持续可见；必改 4） ---- */
+    stage.append(garageFuseEntry(r));
+
+    /*
+      点过底部「合成」⇒ 把第一张可合成卡滚入视野并聚焦。
+      ⚠️ 必须**等 body 已在 DOM 里**（上面刚 append）再滚，否则 scrollIntoView 无效。
+      ⚠️ 只做视图动作：不改数据、不代玩家合成。
+    */
+    if (fuseFocusPending) {
+      fuseFocusPending = false;
+      const target = body.querySelector<HTMLElement>(`[data-ph-fuse-focus="1"]`);
+      if (target) {
+        target.scrollIntoView({ block: 'center' });
+        target.focus();
+      }
+    }
+  }
+
+  /** 槽位上「当前装的是哪一件」的 defId（`''` = 该槽没有可读 defId）。 */
+  function garageSlotDefId(slot: GarageSlot, r: LoadoutReading, mv: MovementReading): string {
+    if (slot === 'weapon') return r.equippedWeaponId;
+    if (slot === 'body') return r.bodyDefId;
+    const s = mv.slots.find((x) => x.hardpointId === slot);
+    return s ? (s.effectiveDefId ?? '') : '';
+  }
+
+  /** 槽位上显示的**当前装备名**（读数层给的，页面不自己拼）。 */
+  function garageSlotValue(slot: GarageSlot, r: LoadoutReading, mv: MovementReading): string {
+    if (slot === 'weapon') return r.equippedWeaponId === EMPTY_SLOT ? GARAGE_MOVEMENT_OFF_LABEL : r.equippedWeaponName;
+    if (slot === 'body') return r.bodyName;
+    const s = mv.slots.find((x) => x.hardpointId === slot);
+    if (!s) return GARAGE_MOVEMENT_OFF_LABEL;
+    return s.unmounted ? GARAGE_MOVEMENT_OFF_LABEL : s.name;
+  }
+
+  /**
+   * 底部**持续可见**的「合成」入口（Queue 必改 4）。
+   *
+   *   - 有可合成组 ⇒ 显示 `可合成 N`（N = `weaponEntries().fusable` 的组数）+ 高亮态；
+   *   - 没有 ⇒ 仍然画出来（持续可见，不是消失），只是禁用 + 如实说「暂无可合成」；
+   *   - 点击 ⇒ 切到**武器槽**并把第一张可合成卡滚入视野 + 聚焦 ⇒ 那里就是既有的
+   *     `合成升星` 按钮（`fuseStack()` 的**唯一**调用点）。
+   *
+   * ⚠️ 本入口**不执行**合成：Queue 明令「不要在本 Queue 重新设计整个 Fusion 页面」，
+   *    所以它只负责把玩家送到**既有正式流程**上，规则一行都没改。
+   */
+  function garageFuseEntry(r: LoadoutReading): HTMLElement {
+    const ready = r.weapons.filter((w) => w.fusable).length;
+    const foot = el('div', 'ph-garage-foot');
+    foot.dataset['phGarageFoot'] = '1';
+    const entry = el('button', 'ph-fuse-entry');
+    entry.type = 'button';
+    entry.dataset['phAction'] = 'fuse-entry';
+    entry.dataset['phFuseReadyCount'] = String(ready);
+    entry.dataset['phFuseEntryReady'] = String(ready > 0);
+    if (ready > 0) entry.classList.add('ph-fuse-entry-ready');
+    else entry.disabled = true;
+    entry.append(
+      el('span', 'ph-fuse-entry-label', GARAGE_FUSE_ENTRY_LABEL),
+      el(
+        'span',
+        'ph-fuse-entry-state',
+        ready > 0 ? `${GARAGE_FUSE_ENTRY_READY_LABEL} ${ready}` : GARAGE_FUSE_ENTRY_NONE_LABEL,
+      ),
+    );
+    entry.addEventListener('click', () => {
+      if (ready === 0) return;
+      fuseFocusPending = true;
+      garageSlot = 'weapon';
+      render();
+    });
+    foot.append(entry);
+    return foot;
   }
 
   function render(): void {
@@ -1758,6 +1968,19 @@ export function mountProductHome(
   render();
 
   /* -------------------------------------------------------------- 句柄 */
+
+  /**
+   * 底部「合成」入口是否**真的可见**（必改 4：持续可见）。
+   * 判据三条同时成立：元素存在 + 真实布局面积 > 0 + 未被 `display` / `visibility` 藏掉
+   * ⇒ 「可见」不是靠源码里写了这个元素，而是浏览器现场量出来的。
+   */
+  function fuseEntryVisibleNow(): boolean {
+    const n = stage.querySelector<HTMLElement>('[data-ph-action="fuse-entry"]');
+    if (!n) return false;
+    const rect = n.getBoundingClientRect();
+    const cs = window.getComputedStyle(n);
+    return rect.width > 0 && rect.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden';
+  }
 
   const handle: ProductDebugHandle = {
     probe: () => {
@@ -1892,16 +2115,33 @@ export function mountProductHome(
          */
         claimUpgradableHint: !!header.querySelector('[data-ph-claim-hint="upgradable"]'),
         /**
-         * PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜Garage 的**当前配置分类**。
+         * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜Garage 的**当前高亮装备槽**。
          * ⚠️ 原来这里的 `selectedWeaponId` / `selectedWeaponStar` / `equipEnabled`
          *    三个字段已随「先选后装备」两步流程一并删除（必改 2）。
          */
-        garageTab,
+        garageSlot,
+        /**
+         * ⚠️ 运行时读数：页面上**真的画出来**几个装备槽（恒 4）。
+         * 与固定顺序常量一起构成「4 个真实槽、没有第 5 个空槽」的双证。
+         */
+        garageSlotCount: stage.querySelectorAll('[data-ph-slot]').length,
         /**
          * ⚠️ 硬证据：页面上**不存在**独立的「装备」二次确认按钮。
          *    探针直接数 DOM ⇒ 「已删除」不是靠源码里没写，而是**运行时真的数不到**。
          */
         garageEquipButtonCount: stage.querySelectorAll('[data-ph-action="equip"]').length,
+        /**
+         * ⚠️ 必改 2 的运行时硬证据：整个 Garage 里**没有任何可拖拽元素**
+         *    （`[draggable="true"]` 恒 0）⇒ 「不提供拖拽装备」可被直接断言。
+         */
+        garageDraggableCount: stage.querySelectorAll('[draggable="true"]').length,
+        /**
+         * 必改 4 的三条读数（同一份 DOM）：入口是否可见 / 可合成组数 / 是否处于可感知态。
+         */
+        garageFuseEntryVisible: fuseEntryVisibleNow(),
+        garageFuseReadyCount: r.weapons.filter((w) => w.fusable).length,
+        garageFuseEntryReady:
+          stage.querySelector('[data-ph-action="fuse-entry"]')?.getAttribute('data-ph-fuse-entry-ready') === 'true',
         /**
          * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 维度读数
          * （与 Garage 里那一片卡画的**是同一份**，页面禁止自行推导）。

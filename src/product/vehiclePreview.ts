@@ -16,9 +16,24 @@
  *   `visualWorldTransform`）。本模块只算 `position`（facing=1、angle=0 的静态展示姿态），
  *   把 `anchor` 烘焙进中心点 ⇒ 与战斗里画出来的车**同一套 anchor 语义**。
  *
- * ⚠️ 坐标口径：本模块返回**车体本地坐标**（y **向上**，与物理一致）。
- *    页面 DOM 的 y 向下，翻转由视图层做（`top = cy - localY*scale`），
- *    本模块不做任何屏幕坐标换算 —— 避免出现第二套坐标语义。
+ * ⚠️ 坐标口径（PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2 **修正**）────────────
+ *    本模块返回**车体本地坐标，y 与正式链路同为「向下」**：`cy` 直接就是屏幕 y 方向的
+ *    偏移量，视图层**不做任何翻转**（`top = cy * scale`）。
+ *
+ *    为什么是「向下」（本轮沿真实渲染链逐段核对的结果，三处同口径，不是约定俗成）：
+ *      ① Battle 世界：`ARENA_A_GRAVITY = {x:0, y:10}` / `groundY=700`（arena 高 900）
+ *         ⇒ 世界 y **向下**；`createPlanckVehicle` 用 `y: hardpoint.localPosition.y`
+ *         直接落到刚体上（轮子因此落在车身**下方**）。
+ *      ② 正式纯函数 `battleContract.visualWorldTransform`：`position.y = physPos.y + anchor.y`
+ *         （angle=0 时）⇒ `anchor.y` 与世界 y **同号**，不取反。
+ *      ③ Run 舞台 `runPageLayout.placeSideViewVisuals`：`y0 = s(b.cy - b.h/2)` 直接当屏幕
+ *         y 用 ⇒ 同样不取反。Run 页面高倍截图（战斗带 / 待机近景）实测：轮子在车身下方、
+ *         武器在车身上方。
+ *
+ *    ⚠️ R1 之前本文件写的是「y 向上，与物理一致」，视图层据此做了一次**多余取反**
+ *       ⇒ 预览整体**上下镜像**（轮子跑到车身上方、武器挂到车底），与正式 Product Run
+ *       的朝向相反。守卫 `PL-24` 已改为拿正式纯函数 `visualWorldTransform` 逐件交叉核对，
+ *       不再只钉字面量。
  *
  * ── PRODUCT-LOOP-R3-MOVEMENT-EQUIP-PREVIEW｜轮径的**唯一正确出处** ─────────────
  * 轮子在预览里画多大，取的是**该挂点生效 Movement def 自身的 `radius`**
@@ -56,8 +71,7 @@ export const PREVIEW_SPRITE_IDS: readonly string[] = [
 ];
 
 /** 预览舞台的默认逻辑尺寸（与竖屏产品舞台同宽 390）。 */
-export const PREVIEW_STAGE_W = 390;
-/** 车身横向占舞台的目标宽度（逻辑 px）——车"看得清"但不越界。 */
+export const PREVIEW_STAGE_W = 390;/** 车身横向占舞台的目标宽度（逻辑 px）——车"看得清"但不越界。 */
 export const PREVIEW_FIT_W = 300;
 /** 预览区最大高度（逻辑 px）——竖屏首页给车留的主体空间。 */
 export const PREVIEW_MAX_H = 170;
@@ -70,7 +84,10 @@ export interface PreviewItem {
   readonly name: string;
   /** 正式视觉 id；无视觉定义的件为 null（视图按外接框画灰盒，不伪造外形）。 */
   readonly visualId: string | null;
-  /** 车体本地中心（px，y 向上）。 */
+  /**
+   * 车体本地中心（px，**y 向下** —— 与正式 Battle 世界 / Run 舞台同一口径，
+   * 视图层直接当屏幕 y 偏移用，**不取反**）。见文件头「坐标口径」。
+   */
   readonly cx: number;
   readonly cy: number;
   /** 未缩放尺寸（px，同 visual.size / Collider 外接框）。 */
@@ -287,4 +304,70 @@ export function vehiclePreviewLayout(draft: BuildDraft): VehiclePreviewLayout {
   const stageH = Math.round(nativeH * scale) + 24;
 
   return { items, minX, minY, maxX, maxY, scale, stageW: PREVIEW_STAGE_W, stageH, bodyName: body.name };
+}
+
+/* ══════════════════ PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜装备槽锚点 ══════════════════
+ *
+ * Garage 的 4 个装备槽画在哪里，取的是**该部件在正式 `BodyDef` 上的挂点**
+ * （`functionalHardpoints[WEAPON_SLOT]` / `movementHardpoints[front|rear]`）——
+ * 不是排版常量、也不是页面自己记的一份坐标。
+ *
+ * ⚠️ 为什么这段在**本模块**而不是 `homePage.ts`：本模块已经在读 `registry`
+ *    （`vehiclePreviewLayout` 逐件取正式视觉 / 挂点），再读一次不增加任何依赖方向；
+ *    而 `homePage.ts` 的 import 白名单是**闭集**（`tests/productLoopHomeGarage.test.ts`
+ *    的 `PL-26`）⇒ 槽位锚点是纯几何，天然属于预览模块。
+ *
+ * ⚠️ 坐标系与 `PreviewItem.cx / cy` **完全一致**（车体本地坐标，**y 向下**）⇒
+ *    页面对两者用同一个 `previewOffset()` 换算，不会出现「槽位与预览件各算一套」。
+ *
+ * ⚠️ 缺挂点时如实回退到车体中心（不猜、不伪造一个位置）；未知车身 → 全部回退。
+ */
+
+/** 预览上**真实存在**的 4 个部件位置（与 Garage 的 4 个装备槽一一对应）。 */
+export type VehicleSlotId = 'weapon' | 'body' | 'front' | 'rear';
+
+export interface VehicleSlotAnchor {
+  /** 车体本地坐标（px，**y 向下**，与 `PreviewItem.cx / cy` 同口径）。 */
+  readonly cx: number;
+  readonly cy: number;
+  /** 这个位置是**怎么来的**（取证用：真实挂点 / 已装部件 / 车体中心回退）。 */
+  readonly from: 'hardpoint' | 'mounted-part' | 'body-origin';
+}
+
+const ORIGIN_ANCHOR: VehicleSlotAnchor = { cx: 0, cy: 0, from: 'body-origin' };
+
+/**
+ * 由 Build 算出 4 个装备槽的**锚点**（纯函数：无副作用、不读存档、可直接单测）。
+ *
+ * 语义（与 `vehiclePreviewLayout` 的挂点口径**逐条同源**）：
+ *   - `body`   → 车体原点 `(0,0)`（车身就是整台车）；
+ *   - `weapon` → `functionalHardpoints[WEAPON_SLOT]`；该车身没有这个挂点时，
+ *                回退到预览里**真正装着的**那件（`onWeaponSlot`），再回退到原点；
+ *   - `front` / `rear` → `movementHardpoints[id]`（与 Run 侧 `facing * localPosition.x`
+ *                用的是同一组挂点 ⇒ Garage 与 Product Run 的前 / 后语义不可能分叉）。
+ */
+export function vehicleSlotAnchors(draft: BuildDraft): Readonly<Record<VehicleSlotId, VehicleSlotAnchor>> {
+  const body: BodyDef | undefined = registry.bodies.get(draft.bodyDefId);
+  const out: Record<VehicleSlotId, VehicleSlotAnchor> = {
+    weapon: ORIGIN_ANCHOR,
+    body: ORIGIN_ANCHOR,
+    front: ORIGIN_ANCHOR,
+    rear: ORIGIN_ANCHOR,
+  };
+  if (!body) return out;
+
+  const wHp = body.functionalHardpoints.find((h) => h.id === WEAPON_SLOT);
+  if (wHp) out.weapon = { cx: wHp.localPosition.x, cy: wHp.localPosition.y, from: 'hardpoint' };
+  else {
+    const mounted = vehiclePreviewLayout(draft).items.find((i) => i.onWeaponSlot);
+    out.weapon = mounted
+      ? { cx: mounted.cx, cy: mounted.cy, from: 'mounted-part' }
+      : ORIGIN_ANCHOR;
+  }
+
+  for (const id of ['front', 'rear'] as const) {
+    const hp = body.movementHardpoints.find((h) => h.id === id);
+    if (hp) out[id] = { cx: hp.localPosition.x, cy: hp.localPosition.y, from: 'hardpoint' };
+  }
+  return out;
 }

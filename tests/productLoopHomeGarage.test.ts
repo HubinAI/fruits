@@ -37,7 +37,11 @@ import {
   PREVIEW_MAX_H,
   PREVIEW_SPRITE_IDS,
   vehiclePreviewLayout,
+  vehicleSlotAnchors,
 } from '../src/product/vehiclePreview';
+// PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜正式共享纯函数（Battle / Run 双向都走它）
+// —— 预览的坐标口径现在**逐件与它交叉核对**，而不是只钉一个字面量。
+import { visualWorldTransform } from '../src/battle/battleContract';
 import { SAVE_KEY as PAGE_SAVE_KEY } from '../src/product/homePage';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -370,16 +374,125 @@ describe('PRODUCT-LOOP-R1-A｜D. 战车预览几何（正式视觉定义，不�
     }
   });
 
-  it('PL-24 坐标口径 = 车体本地坐标（y 向上，与物理一致）；翻转只发生在视图层', () => {
-    const layout = vehiclePreviewLayout(defaultPlayerDraft());
-    // 轮子中心直接用 movementHardpoint.localPosition → 西瓜车身 y = +25（向上为正）
-    for (const wheelItem of layout.items.filter((i) => i.kind === 'wheel')) {
-      expect(wheelItem.cy).toBe(25);
+  it('PL-24（R2 修正）预览坐标口径 = **与正式链路同口径（y 向下）**，视图层**不翻转**', () => {
+    const draft = defaultPlayerDraft();
+    const layout = vehiclePreviewLayout(draft);
+    const body = registry.bodies.get(draft.bodyDefId)!;
+
+    /*
+      ⚠️ PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜本守卫在 R1 之前钉的是
+         「y 向上、翻转在视图层」—— 那个口径**是错的**，而且正是本次要修的缺陷：
+           - Battle 世界 `gravity.y = +10`、`groundY=700`（arena 高 900）⇒ 世界 y **向下**；
+           - 正式纯函数 `visualWorldTransform`：`position.y = physPos.y + anchor.y`（不取反）；
+           - Run 舞台 `placeSideViewVisuals`：直接拿 `cy` 当屏幕 y（不取反）。
+         预览当时多做了一次取反 ⇒ **整车上下镜像**（轮子跑到车身之上、武器挂到车底），
+         真人录屏看到的「朝向与正式战斗相反」就是它。
+         现在改为**逐件与正式纯函数 / 正式挂点交叉核对**（不再只钉字面量）。
+    */
+    for (const it of layout.items) {
+      if (it.kind === 'body') {
+        expect(body.visual, '默认车身必须有正式 visual').toBeTruthy();
+        // 正式共享纯函数（Battle / Run 双向都走它）在 physPos=(0,0)、angle=0 的取值
+        const v = visualWorldTransform(body.visual!, 1, { x: 0, y: 0 }, 0);
+        expect(it.cx).toBe(v.position.x);
+        expect(it.cy).toBe(v.position.y);
+      }
+      if (it.kind === 'part' && it.visualId !== null) {
+        const hp = body.functionalHardpoints.find((h) => h.id === it.key.replace(/^part:/, ''))!;
+        const v = visualWorldTransform(
+          registry.functionals.get(it.defId)!.visual!,
+          1,
+          { x: hp.localPosition.x, y: hp.localPosition.y },
+          0,
+        );
+        expect(it.cx, `${it.key} 横向 = 正式挂点 + 正式 anchor`).toBe(v.position.x);
+        expect(it.cy, `${it.key} 纵向 = 正式挂点 + 正式 anchor（不取反）`).toBe(v.position.y);
+      }
     }
-    // 视图层负责 DOM 的 y 翻转（本模块不做屏幕换算）
+
+    /*
+      轮子：预览取 `movementHardpoints[].localPosition`；Run 侧取
+      `visualWorldTransform(def.visual, facing, {x: facing*hp.x, y: hp.y}, 0)`。
+      ⚠️ 两者**逐字相同**的前提是「正式 Movement 都没有 `visual`」（轮组由程序化圆形绘制）
+      —— 下面第 3 段把这个前提也钉住：将来给 Movement 加了带 anchor 的 visual，这里会红。
+    */
+    for (const hp of body.movementHardpoints) {
+      const w = layout.items.find((i) => i.key === `wheel:${hp.id}`);
+      expect(w, `${hp.id} 轮必须画出来`).toBeTruthy();
+      expect(w!.cx).toBe(hp.localPosition.x);
+      expect(w!.cy).toBe(hp.localPosition.y);
+    }
+
+    // 西瓜车身：轮子挂点 y = **+25 = 向下**（不是 -25）；武器挂点在车体**上方**（y 为负）
+    expect(layout.items.filter((i) => i.kind === 'wheel').map((i) => i.cy)).toEqual([25, 25]);
+    const wHp = body.functionalHardpoints.find((h) => h.id === WEAPON_SLOT)!;
+    expect(wHp.localPosition.y).toBeLessThan(0);
+    expect(layout.items.find((i) => i.onWeaponSlot)!.cy).toBeLessThan(0);
+
+    // 正式 Movement 一律没有 visual（轮组 = 真实半径的程序化圆，不是 sprite）
+    for (const m of registry.movements.values()) {
+      expect(m.visual, `Movement ${m.id} 不应有 visual（有的话预览与 Run 的挂点口径会分叉）`).toBeUndefined();
+    }
+
+    // 视图层**不翻转**（R2 修正后就不该再出现取反）
     const code = strip(readProduct('homePage.ts'));
-    expect(code.includes('-(it.cy - by)')).toBe(true);
-    expect(strip(readProduct('vehiclePreview.ts')).includes('innerHeight')).toBe(false);
+    expect(code).toContain('dy: (cy - by) * layout.scale');
+    expect(code).not.toContain('-(it.cy');
+    expect(code).not.toContain('-(cy - by)');
+  });
+
+  it('PL-27（R2）front / rear / weapon 语义与**正式 Product Run** 同源同向', () => {
+    const draft = defaultPlayerDraft();
+    const layout = vehiclePreviewLayout(draft);
+    const body = registry.bodies.get(draft.bodyDefId)!;
+    const xOf = (key: string): number => layout.items.find((i) => i.key === key)!.cx;
+
+    // ① 车体本地：front 在 +x、rear 在 -x（正式 BodyDef 挂点的真实取值）
+    const frontHp = body.movementHardpoints.find((h) => h.id === 'front')!;
+    const rearHp = body.movementHardpoints.find((h) => h.id === 'rear')!;
+    expect(frontHp.localPosition.x).toBeGreaterThan(rearHp.localPosition.x);
+    // ② 预览里 front 轮就在 rear 轮的**右边**（同一侧、同一顺序）
+    expect(xOf('wheel:front')).toBeGreaterThan(xOf('wheel:rear'));
+    // ③ 武器挂点在车体前半球（frontMass 的 x > 0）⇒ 预览里也在右半边
+    expect(body.functionalHardpoints.find((h) => h.id === WEAPON_SLOT)!.localPosition.x).toBeGreaterThan(0);
+    expect(layout.items.find((i) => i.onWeaponSlot)!.cx).toBeGreaterThan(0);
+
+    /*
+      ④ 官方玩家车的朝向 = **facing 1（朝 +x）** —— 写死在两个正式编排器的默认出生点里
+         （Matter 与 Planck 两套实现同值）。Run 舞台摆位用 `facing * hp.x`，facing=1 时
+         与预览的 `hp.x` **完全一致** ⇒ 「Garage 的前 / 后 = Run 的前 / 后」结构性成立。
+    */
+    for (const f of ['battleOrchestrator.ts', 'planckBattleOrchestrator.ts']) {
+      const src = readFileSync(join(REPO_ROOT, 'src', 'battle', f), 'utf8');
+      expect(src, `${f} 的官方玩家出生朝向必须仍是 facing: 1`).toContain(
+        'config.spawnA ?? { x: 400, y: 640, facing: 1 }',
+      );
+    }
+  });
+
+  it('PL-28（R2）装备槽锚点 = 正式挂点（纯函数，与预览同口径）', () => {
+    const draft = defaultPlayerDraft();
+    const body = registry.bodies.get(draft.bodyDefId)!;
+    const anchors = vehicleSlotAnchors(draft);
+
+    expect(anchors.body).toEqual({ cx: 0, cy: 0, from: 'body-origin' });
+    for (const id of ['front', 'rear'] as const) {
+      const hp = body.movementHardpoints.find((h) => h.id === id)!;
+      expect(anchors[id]).toEqual({ cx: hp.localPosition.x, cy: hp.localPosition.y, from: 'hardpoint' });
+    }
+    const wHp = body.functionalHardpoints.find((h) => h.id === WEAPON_SLOT)!;
+    expect(anchors.weapon).toEqual({ cx: wHp.localPosition.x, cy: wHp.localPosition.y, from: 'hardpoint' });
+
+    // 槽位锚点与预览件坐标**同一套口径** ⇒ 页面用同一个 `previewOffset()` 即可对齐
+    const layout = vehiclePreviewLayout(draft);
+    expect(anchors.front.cx).toBe(layout.items.find((i) => i.key === 'wheel:front')!.cx);
+    expect(anchors.rear.cy).toBe(layout.items.find((i) => i.key === 'wheel:rear')!.cy);
+
+    // 未知车身 → 全部如实回退到车体原点（不猜、不伪造位置）
+    const bad = vehicleSlotAnchors({ ...draft, bodyDefId: 'noSuchBody' });
+    for (const id of ['weapon', 'body', 'front', 'rear'] as const) {
+      expect(bad[id]).toEqual({ cx: 0, cy: 0, from: 'body-origin' });
+    }
   });
 
   it('PL-25 未知车身 → 空布局（不崩、不伪造）', () => {
