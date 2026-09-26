@@ -13,15 +13,24 @@
 ## 0. 现状 / 下一步（**新窗口先读这段**）
 **R2（A/B/C）+ R2-RECOVERY + SETTLEMENT-CTA-LATENCY + SINGLE-CTA/音频 + R2-RESEED + R4（Body canonical/MVP）
 + R3（四同构槽）+ R5（正式内容池）均已收口**，无功能缺口、无 BLOCK。
-**下一步 = 等用户下发新 Queue**（连续两轮 Queue 末尾都写「直接继续 Q2 / Q3」，但**正文均未到达** ⇒ 未开工）。
-⚠️ **`R5-SPEAR-FULL-RUN-R1` 判定 STOP（只调查、零改码、无 commit，HEAD 仍 `a06f2a4`）**：
-spear 的**攻击链完整且真实**（canonical def + collider + `contactRouter` 直击 `baseDamage:60` + 通用星级倍率），
-但它**没有 behavior runtime**（`FACTORIES` 无 `'ram'`；编排器 `:295` 只跳过 runtime、part/collider 照建）。
-**真阻塞点在 Run 的强化注入接缝**：完整 Run 唯一路径有 **3 个必选 CHOICE**（`d2-choice1`/`d4-lateral`/`d5-choice2`），
-池里 `affectsWeapon:true` 项**全是 cannon 派生 overlay**，判据 = 「装载里有没有正式 cannon」⇒ 不放宽就 DAY3 `throw`。
-⚠️ **`composeRunWeaponDef` 会把 `behavior` 一并改成 overlay 的 behavior** ⇒ 套到 spear = `ram`→`cannon`（把刺变成炮），
-即 Queue 明令禁止的「临时套用 Cannon modifier」。⚠️ **强化不是可选装饰**：实测无强化时**连 cannon 都打不完第四场**。
-详见 `.workbuddy/memory/2026-09-26.md` 末节。既有守卫 `LC-11` 已钉死「spear + heavyShell 必须响亮抛错」。
+**下一步 = 等用户下发新 Queue**（连续三轮 Queue 末尾都写「直接继续 Q2 / Q3 / Q4」，但**正文均未到达** ⇒ 未开工）。
+⚠️ **「非 cannon 武器进完整 Run」这条线已连判两次 STOP**（`R5-SPEAR-FULL-RUN-R1` + `R5-HAMMER-FULL-RUN-R1`，
+两轮均**只调查、零改码、零源码 commit**）。**根因是同一个、且是产品侧明文裁决过的**：
+- **阻塞点 = Run 的强化注入接缝只认 cannon**：完整 Run 唯一线性路径上 `d2-choice1`(layer1) 是**必选** CHOICE，
+  池里 3 项**全是 cannon 派生**；`RUN_BASE_WEAPON_DEF_ID='cannon'`，判据 = 「装载里有没有正式 cannon」
+  ⇒ 非 cannon 装载在 battle2（DAY3）创建时 **throw**（实测：`本局装载里没有 "cannon"…`）＝**P0 「Run 卡死」的形状**。
+- **三条出口全禁**：① 新增该武器专属强化（新设计，且冲 `LC-23`「没有新 Spear/Hammer Buff」）
+  ② 让该装载跳过强化（第二套 Run 流程 / 新增特殊资格状态）③ 套用 cannon overlay
+  （`composeRunWeaponDef:481-493` **会把 `behavior` 一并改成 overlay 的** ⇒ 实测 `hammer`→`cannon`／`ram`→`cannon`）。
+- ⚠️ **`product/runCompatibility.ts:20-23` 已逐字裁决**：「在 Spear / Hammer 有正式 Run Build 内容之前：它们不得进入完整 Run」；
+  `FULL_RUN_SUPPORTED_WEAPON_IDS = ['cannon']`（:58）。机器钉死：`LC-02` / `LC-11` / `LC-23`
+  （`tests/productRunBuildLoadoutCompat.test.ts`）。
+- **两件的差别**：spear **没有 behavior runtime**（`FACTORIES` 无 `'ram'`，靠 collider 直击 `baseDamage:60`）；
+  hammer **攻击 Runtime 完整**（`FACTORIES.hammer` + 专属 `hammerBehavior.ts` 真实 Revolute motor+limit）。
+  ⇒ **hammer 记的是「内容实现缺口」：攻击实现不缺，缺的是它的正式 Run Build 内容（强化）+ 与之匹配的可行性**。
+- ⚠️ **hammer 的第二条独立证据（实测）**：产品可达形状 = **双锤**（`equipWeapon('hammer')` 只写 `WEAPON_SLOT`，
+  而 starter 固定在 `top` 的那把锤仍在）⇒ **第一场就落败（0/4）**；单锤 2/4；**锤+炮 4/4**（说明 hammer 本身能打）。
+- ⚠️ **强化不是可选装饰**：实测无强化时**连 cannon 都打不完第四场**（3/4）。详见 `.workbuddy/memory/2026-09-26.md` 末两节。
 门禁基线（R5 实测）：`tsc` **零错** · R5 targeted **40 files / 671 tests** 全绿 ·
 product E2E：**home 98/98 · loop 53/53 · reward 57/57 · reseed 21/21 · fail 34/34 · star-power 22/22 ·
 legacy-profile 18/18**。⚠️ **R5 起「新账号内容基线」变了**（见 §2h）⇒ 任何写死「3 件武器」的断言都会红。
@@ -44,7 +53,8 @@ legacy-profile 18/18**。⚠️ **R5 起「新账号内容基线」变了**（�
   R2-RECOVERY `8770c98`+`e50b95c` → SETTLEMENT-CTA-LATENCY `1931a71` → SINGLE-CTA+AUDIO `c2c1e2c`+`c55a285` →
   R2-VALIDATION-STATE-RESEED `88288b4`+`7dacd47` → R4 `3e48b16` → R4-GATE `8887ad6` →
   GARAGE-MOBILE `f357383` → GARAGE-SLOT-R2 `a51de9b` → `edd8f78` → `c76f1a2` → R3 `06e44de` →
-  **R5 `5baff53`（当前 HEAD）**；更早（R1-A..R1-D）查 `git log`。
+  **R5 `5baff53`（最后一笔源码改动）** → `a06f2a4` / `cf16cb9` / 本轮 `chore(memory)`
+  （**三笔均只记录判定，零源码改动**）；更早（R1-A..R1-D）查 `git log`。
 - ⚠️ `src/{physics,render,player,platform,ui,game,presentation,lab}` diff 恒为空（R2-B 起有意打破）；`src/core` 只许
   R2-B（`partInventory.ts`/`buildPersistence.ts`）+ R2-C（`buildSnapshot.ts` 星级**唯一真源** + `types.ts`）两处必改，
   **此后再无 core 改动**（含 R2-RESEED / R3 / R4 / R5 轮 —— 全部零改动）。R3–R5 只动 `src/product/`。
