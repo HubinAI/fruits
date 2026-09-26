@@ -328,25 +328,32 @@
 
       /*
         ══════════════════════════════════════════════════════════════════════════
-        PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜Garage = **槽位式配车页**
+        PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜Garage = **四个同构装备槽**
         ══════════════════════════════════════════════════════════════════════════
 
-        真人手机录屏的三个 P0：① 不知道装备该拖动还是点击；② Preview 朝向与正式战斗
-        相反（前轮 / 后轮认知反转）；③ 不知道从哪里进入合成。
+        真人手机录屏：上一版把「槽位贴到车辆真实挂点上」，结果玩家看到的是
+        「上面一个独立的武器悬浮块 + 下面 3 个像页签的按钮」⇒ 认知成了
+        「3 个页签 + 1 个不知道是什么的武器块」。**该设计假设判定失败**，本轮删掉。
 
         结构（DOM 层就固定，不靠滚动位置）：
 
-          .ph-main-garage    整页 overflow:hidden（**本页整体不滚**）
-            .ph-header       标题 / 返回首页（返回恒可达）
-            .ph-garage-stage 战车 Preview + 4 个装备槽（**固定**，不随列表滚出）
-            .ph-my-parts     「我的装备 · <槽位名>」（固定）
-            .ph-garage-body  **唯一**滚动容器：当前槽的部件卡阵
-            .ph-garage-foot  合成入口（**持续可见**）
+          .ph-main-garage     整页 overflow:hidden（**本页整体不滚**）
+            .ph-header        标题 / 返回首页（返回恒可达）
+            .ph-garage-stage  战车 Preview（**固定**）
+            .ph-garage-current「当前装备」+ 2×2 装备槽（**固定**）
+            .ph-my-parts      「选择〈槽位名〉装备」（固定）
+            .ph-garage-body   **唯一**滚动容器：当前槽的部件卡阵
+            .ph-garage-foot   合成入口（**持续可见且恒可点**）
 
-        ⚠️ 「固定」是**结构保证**（兄弟节点里只有中间那个 overflow-y:auto），
-           不是「滚回去看一眼」⇒ 「点卡 → Preview 同次变化」在**当前屏幕内**成立。
+        2×2 版面（DOM 顺序就是 `GARAGE_SLOT_ORDER`）：
+
+          [ 武器 ] [ 车身 ]
+          [ 后轮 ] [ 前轮 ]
+
+        ⚠️ 「四个槽同规格」= **布局保证**：同一个 grid + 同一个 `.ph-slotnode` 规则，
+           没有任何槽带专属 modifier / 专属宽高 / 绝对定位。
         ⚠️ 不使用缩字号 / 压 gap 维持旧信息架构（Queue 明令禁止）：这里改的是信息架构
-           （槽位化 + 固定预览 + 未拥有降级 + 合成入口），卡片字号 / 间距一个都没动。
+           （2×2 同构槽 + 明确标题 + 未拥有降级 + 恒可点的合成入口），卡片字号 / 间距没动。
       */
       .ph-main-garage { overflow: hidden; gap: 0; padding: 0; }
 
@@ -362,58 +369,78 @@
       .ph-back:hover { background: #1a2536; border-color: #34507c; }
 
       /*
-        战车 + 4 个装备槽（固定区）。
-        ⚠️ `.ph-car-wrap` 的上下 padding 是**给槽位标签预留的**：槽位相对 `.ph-car`
-           （车体本身）定位，武器挂在车体上方、两个轮子挂在车体下方，纵向都**要跳出
-           车体轮廓**才不会盖住它指向的部件。
+        战车 Preview（固定区）。
+        ⚠️ R3：`padding` **退回首页同款**（`2px 0 0`）。R2 曾给预览框加 50/54 的留白，
+           那是「槽位标签要跳出车体轮廓」的排版代价 —— 槽位已不再定位在车体上，
+           留白随之删除（不是靠压 gap，而是删掉一个已无必要的内边距）。
       */
       .ph-garage-stage {
         flex: 0 0 auto;
-        padding: 6px 12px 4px;
-        position: relative;
+        padding: 6px 12px 0;
       }
       .ph-garage-stage .ph-car-wrap {
         border-radius: 10px;
-        padding: 50px 0 54px;
+        padding: 2px 0 0;
       }
 
-      /* 装备槽：位置 = 该部件在**正式挂点**上的横向位置（行内 left 由页面给） */
+      /* 「当前装备」小节标题（2×2 装备槽之上的唯一标题） */
+      .ph-garage-current {
+        flex: 0 0 auto;
+        display: flex; flex-direction: column; gap: 6px;
+        padding: 8px 14px 4px;
+      }
+      .ph-garage-current-label { font-size: 12px; color: #7f8ca0; letter-spacing: 0.08em; }
+
+      /*
+        4 个**完全同构**的装备槽：固定 2×2（`1fr 1fr`）。
+        ⚠️ 同尺寸来自「同一个 grid 的两列等宽」+「同一个 min-height」；
+           同结构 / 同交互 / 同选中态来自「同一个 `.ph-slotnode` 规则」。
+      */
+      .ph-garage-slots {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
       .ph-slotnode {
-        position: absolute;
-        display: flex; flex-direction: column; align-items: center; gap: 1px;
-        max-width: 96px;
-        padding: 4px 9px;
-        font: inherit; text-align: center;
-        border-radius: 9px;
+        display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+        width: 100%;
+        min-height: 54px;
+        padding: 8px 10px;
+        font: inherit; text-align: left;
+        border-radius: 10px;
         border: 1px solid #2b3550; background: #131b28; color: #9fb3cc;
         cursor: pointer;
       }
       .ph-slotnode:hover { background: #1a2536; border-color: #34507c; }
-      .ph-slotnode-label { font-size: 10px; color: #7f8ca0; letter-spacing: 0.04em; }
+      .ph-slotnode-label { font-size: 11px; color: #7f8ca0; letter-spacing: 0.04em; }
       .ph-slotnode-value {
-        font-size: 12px; font-weight: 700; color: #dbe6f7;
-        max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 14px; font-weight: 700; color: #dbe6f7;
+        max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
-      /* 当前槽高亮**唯一**：`data-ph-slot-active="true"` 与 `.ph-slotnode-active` 同源 */
-      .ph-slotnode-active { border-color: #ffd35a; background: #1c2233; }
+      /*
+        当前槽高亮**唯一**：`data-ph-slot-active="true"` 与 `.ph-slotnode-active` 同源。
+        ⚠️ 只用**不影响布局**的属性（border-color / background / color / box-shadow）⇒
+           高亮前后四个槽的尺寸逐像素相同（「同规格」不被高亮破坏）。
+      */
+      .ph-slotnode-active {
+        border-color: #ffd35a;
+        background: #1c2233;
+        box-shadow: 0 0 0 1px rgba(255, 211, 90, 0.5), 0 0 12px rgba(255, 211, 90, 0.16);
+      }
       .ph-slotnode-active .ph-slotnode-label { color: #b99a3f; }
       .ph-slotnode-active .ph-slotnode-value { color: #ffe9a8; }
-      /*
-        武器槽挂在车体**上方**；车身 / 前轮 / 后轮挂在车体**下方**（见页面注释）。
-        ⚠️ 纵向用 `top` 贴 `.ph-car` 的**轮廓边**（不是挂点的 dy）—— 否则标签会盖住
-           它指向的那个部件；横向的 `left` 才是挂点位置（行内样式给出）。
-      */
-      .ph-slotnode-above { top: -6px; transform: translate(-50%, -100%); }
-      .ph-slotnode-below { top: calc(100% + 6px); transform: translate(-50%, 0); }
 
-      /* 「我的装备 · <槽位名>」：固定标题（只有下面的卡片阵滚动） */
+      /*
+        「选择〈槽位名〉装备」标题（固定区）。
+        ⚠️ Queue 明令**不得**只写模糊的「我的装备」——玩家必须无需记忆就知道
+           「我现在点下面的东西，会换哪个部位」。
+      */
       .ph-my-parts {
         flex: 0 0 auto;
         display: flex; align-items: baseline; gap: 8px;
-        padding: 2px 14px 6px;
+        padding: 8px 14px 6px;
       }
-      .ph-my-parts-label { font-size: 13px; color: #93a1b6; letter-spacing: 0.04em; }
-      .ph-my-parts-slot { font-size: 13px; font-weight: 700; color: #dbe9ff; }
+      .ph-my-parts-title { font-size: 14px; font-weight: 700; color: #dbe9ff; }
 
       /* **唯一**滚动容器：只有部件卡片阵内部滚动 */
       .ph-garage-body {
@@ -427,7 +454,7 @@
         padding: 4px 12px 10px;
       }
 
-      /* 底部：**持续可见**的合成入口（必改 4） */
+      /* 底部：**持续可见且恒可点**的合成入口 */
       .ph-garage-foot {
         flex: 0 0 auto;
         padding: 8px 12px 14px;
@@ -442,8 +469,8 @@
         border: 1px solid #2b3550; background: #131b28; color: #9fb3cc;
         cursor: pointer;
       }
-      .ph-fuse-entry:disabled { opacity: 0.6; cursor: not-allowed; }
-      /* 有可合成组：红点 + 高亮（Queue 允许的最小可感知状态） */
+      .ph-fuse-entry:hover { background: #1a2536; border-color: #34507c; }
+      /* 有可合成组：红点 + 数量（Queue 允许的最小可感知状态；入口**始终可点**） */
       .ph-fuse-entry-ready { border-color: #8a3b3b; background: #241417; color: #ffd7d0; }
       .ph-fuse-entry-label { display: inline-flex; align-items: center; gap: 6px; }
       .ph-fuse-entry-ready .ph-fuse-entry-label::before {
@@ -452,10 +479,6 @@
         background: #ff5a3c;
       }
       .ph-fuse-entry-state { font-size: 12px; font-weight: 650; color: #ffd35a; }
-      .ph-fuse-entry:disabled .ph-fuse-entry-state { color: #7b8697; }
-
-      /* 「当前使用中」一行（四类分类共用同一套外观；必改 3：当前状态一眼可见） */
-      .ph-garage-current { margin-top: 0; }
 
       /*
         未拥有内容的**降级区**（Queue 必改 4：折叠 / 降级，不与可用内容同权重）。

@@ -306,24 +306,32 @@ export function vehiclePreviewLayout(draft: BuildDraft): VehiclePreviewLayout {
   return { items, minX, minY, maxX, maxY, scale, stageW: PREVIEW_STAGE_W, stageH, bodyName: body.name };
 }
 
-/* ══════════════════ PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜装备槽锚点 ══════════════════
+/* ══════════ PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜装备槽锚点（**已废弃**）══════════════
  *
- * Garage 的 4 个装备槽画在哪里，取的是**该部件在正式 `BodyDef` 上的挂点**
- * （`functionalHardpoints[WEAPON_SLOT]` / `movementHardpoints[front|rear]`）——
- * 不是排版常量、也不是页面自己记的一份坐标。
+ * ⚠️⚠️ PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜**Garage UI 已不再消费本节**。
  *
- * ⚠️ 为什么这段在**本模块**而不是 `homePage.ts`：本模块已经在读 `registry`
- *    （`vehiclePreviewLayout` 逐件取正式视觉 / 挂点），再读一次不增加任何依赖方向；
- *    而 `homePage.ts` 的 import 白名单是**闭集**（`tests/productLoopHomeGarage.test.ts`
- *    的 `PL-26`）⇒ 槽位锚点是纯几何，天然属于预览模块。
+ * R2 曾让 Garage 的 4 个装备槽**贴到该部件在正式 `BodyDef` 上的挂点**
+ * （`functionalHardpoints[WEAPON_SLOT]` / `movementHardpoints[front|rear]`）。
+ * 真人录屏判定**该设计假设失败**：玩家看到的是「一个独立的武器悬浮块 +
+ * 3 个像页签的按钮」，而不是「4 个同等级装备槽」。
+ * ⇒ R3 把槽位收敛为固定的 **2×2 同构 grid**（版面由 CSS grid 决定），
+ *   本节的几何**不再驱动任何 UI**。
  *
- * ⚠️ 坐标系与 `PreviewItem.cx / cy` **完全一致**（车体本地坐标，**y 向下**）⇒
- *    页面对两者用同一个 `previewOffset()` 换算，不会出现「槽位与预览件各算一套」。
+ * 为什么**保留**这个纯函数（而不是就地删掉）：
+ *   - Queue 逐字：「如果 `vehicleSlotAnchors` 还被其它正式功能使用：保留底层函数；
+ *     但 Garage UI 不再消费。**不要为了清理而扩大重构范围**」；
+ *   - 它是「槽位名 ↔ 正式挂点」的唯一只读访问器（`front` 在 +x、`weapon` 在车体上方…），
+ *     是 `PL-27/PL-28` 那组「Garage 的前 / 后 = Product Run 的前 / 后」取证的数据来源
+ *     —— 而这组取证在 R3 仍是**冻结项**（Queue 必改 4：不得重改 Battle / Physics /
+ *     Runtime 的 front/rear 定义）。
+ *   - 「UI 不再消费」由**机器守卫**钉住：`tests/productGarageMobileInteraction.test.ts`
+ *     的 `GS-R3-…` 直接断言 `homePage.ts` 里**没有** `vehicleSlotAnchors` 字样。
  *
+ * ⚠️ 坐标系与 `PreviewItem.cx / cy` **完全一致**（车体本地坐标，**y 向下**）。
  * ⚠️ 缺挂点时如实回退到车体中心（不猜、不伪造一个位置）；未知车身 → 全部回退。
  */
 
-/** 预览上**真实存在**的 4 个部件位置（与 Garage 的 4 个装备槽一一对应）。 */
+/** 预览上**真实存在**的 4 个部件位置（= Garage 的 4 个装备槽的 id 集合）。 */
 export type VehicleSlotId = 'weapon' | 'body' | 'front' | 'rear';
 
 export interface VehicleSlotAnchor {
@@ -337,7 +345,10 @@ export interface VehicleSlotAnchor {
 const ORIGIN_ANCHOR: VehicleSlotAnchor = { cx: 0, cy: 0, from: 'body-origin' };
 
 /**
- * 由 Build 算出 4 个装备槽的**锚点**（纯函数：无副作用、不读存档、可直接单测）。
+ * 由 Build 算出 4 个装备槽在**正式挂点**上的位置（纯函数：无副作用、不读存档、可直接单测）。
+ *
+ * ⚠️ R3 起 **Garage UI 不再消费**（理由见本节顶部说明）；保留它是为了钉住
+ *    「front / rear / weapon 在正式 `BodyDef` 上的真实语义」，供 `PL-27 / PL-28` 取证。
  *
  * 语义（与 `vehiclePreviewLayout` 的挂点口径**逐条同源**）：
  *   - `body`   → 车体原点 `(0,0)`（车身就是整台车）；

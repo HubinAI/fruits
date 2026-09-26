@@ -246,9 +246,26 @@ const compatNoticeDom = (page) =>
       : null;
   });
 
-/** 真实鼠标点击：元素真实 CSS 矩形中心（不用 evaluate 直调 click）。 */
+/**
+ * 真实鼠标点击：元素真实 CSS 矩形中心（不用 evaluate 直调 click）。
+ *
+ * ⚠️ PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜**必须先滚到视野内**。
+ *
+ * Garage 的部件卡阵是**唯一**的滚动容器（Queue：只允许这里滚动），卡片区高度 =
+ * 屏高 − 标题/返回 − 战车预览 − 「当前装备」+ 2×2 装备槽 − 「选择〈槽名〉装备」− 合成入口。
+ * R3 新增「当前装备 + 2×2 槽」后卡片区从 420px 收到 **368px**（头部带领奖提示时 **314px**），
+ * 于是**第 3 张武器卡的中心落到了可视区之外**。此时 `boundingBox()` 仍返回元素的布局矩形，
+ * `mouse.click` 却点在**被裁掉的那一段**上 —— 实测点到的是底部的 `[合成]` 按钮，
+ * 装备没有发生（D4 一度变为假红）。**这不是产品缺陷**（列表本来就该滚），
+ * 而是本文件缺少「滚动 → 再点」这一步：真实玩家也是先滚动再点。
+ *
+ * ⚠️ 同一坑在 `tests/_e2e_product_home.cjs` 早已修过并写在注释里（R3 Movement 区那次），
+ *    这里是**同一处理**的补齐，**不改变任何断言**（断言仍是「点了之后落盘的那一件」）。
+ */
 async function clickSelector(page, sel) {
-  const box = await page.locator(sel).first().boundingBox();
+  const loc = page.locator(sel).first();
+  await loc.scrollIntoViewIfNeeded();
+  const box = await loc.boundingBox();
   if (!box) throw new Error(`无法定位元素：${sel}`);
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await sleep(120);

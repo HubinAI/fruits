@@ -41,21 +41,29 @@
  * ⚠️ 为什么必须在浏览器里取证：负控制实测 —— 把渲染那一行删掉，vitest 的读数层守卫
  *    **全绿**（读数里有 `statsText`）而屏幕上什么都不显示 ⇒「读数正确」≠「玩家看得见」。
  *
- * ── PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2（本 Queue）─────────────────────
+ * ── PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2（槽位式）───────────────────────
  * 真人手机录屏又暴露三个 P0（不知道拖动还是点击 / Preview 与战斗反向 / 找不到合成），
  * Garage 从「单分类配车页」升级为「**槽位式配车页**」，本文件随之：
  *   - **B 段**：结构断言从「四个分类 Tab」改为「**四个真实装备槽**」——
  *     `garageSlotCount === 4` 且恰好一个当前槽，并新增 `garageDraggableCount === 0`
- *     （运行时数 DOM ⇒「整个产品不提供拖拽装备」被直接断言）；再补 B7b / B7c：
- *     每个槽如实显示当前装备、槽位横坐标 = 真实挂点 x（前轮在右、后轮在左）；
+ *     （运行时数 DOM ⇒「整个产品不提供拖拽装备」被直接断言）；
  *   - **Movement 段（M / MC / MV）**：槽位式下一页仍只渲染**一个**槽的卡片 ⇒
  *     所有轮组 DOM 取证前用**真实点击装备槽**（`gotoGarageSlot`）切到对应挂点；
- *     「四档 × 两挂点 = 8 张」改为**两个槽各采一遍再合并**（断言一字未改）；
- *   - **GS1–GS10**（独立 **390×844 手机视口** context）：布局层取证 ——
- *     无整页长滚动 / 战车+4 槽·「我的装备」·卡片区·合成入口四段固定且互不重叠 /
- *     只有卡片区内部滚动 / 4 槽 + 0 二次按钮 + 0 可拖拽 / 依次切换四个槽 /
- *     未拥有内容降级到 `<details>` 折叠区 / **合成入口持续可见** /
- *     **Preview 朝向与正式 Run 同向（前轮在右、后轮在左、武器在两轮上方）** / 返回首页可达 / 零报错。
+ *     「四档 × 两挂点 = 8 张」改为**两个槽各采一遍再合并**（断言一字未改）。
+ *
+ * ── PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3（本 Queue）────────────────────
+ * 真人录屏判定 R2 的「槽位贴真实挂点」**假设失败**：玩家看到的是「一个独立的武器悬浮块
+ * + 3 个像页签的按钮」，认知成了「3 个页签 + 1 个不知道是什么的武器块」。
+ * 本文件随之（R3 = **删挂点定位 + 四槽同构**）：
+ *   - **B 段**：B7 的顺序断言改为 2×2 版面顺序 `weapon,body,rear,front`；
+ *     B7c 从「槽位 dx 跟挂点」改成「**2×2 同构几何**」（恰两行两列 + 四槽同宽同高）；
+ *     新增 B7d「默认武器槽 → 标题 = `选择武器装备`」；
+ *   - **GS1–GS13**（独立 **390×844 手机视口** context）：布局层取证 ——
+ *     无整页长滚动 / 五段固定且互不重叠 / 只有卡片区内部滚动 / 4 槽 + 0 二次按钮 + 0 可拖拽 /
+ *     依次切换四个槽 / **当前槽 → 标题逐字对应**（GS5b）/ **四槽 2×2 同构几何**（GS5c）/
+ *     未拥有内容降级到 `<details>` 折叠区 / **合成入口持续可见且**`disabled === false`（GS7）/
+ *     有 5/5 时的明确提示（GS7b）/ **点入口无条件进入 Fusion 并看到真实 `5/5`**（GS7c）/
+ *     **Preview 朝向与正式 Run 同向**（GS11）/ 返回首页可达 / 零报错。
  */
 const http = require('http');
 const fs = require('fs');
@@ -141,12 +149,18 @@ async function clickSelector(page, sel) {
 }
 
 /**
- * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜**Garage 装备槽导航**（本 Queue 的新交互）。
+ * PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜**Garage 装备槽导航**（本 Queue 的交互）。
  *
- * R1 是「单分类配车页」（分类 Tab 决定卡片区）；R2 把它换成**槽位式**：
- * 战车 Preview 周围 4 个真实装备槽（`weapon` / `body` / `front` / `rear`），
- * 点槽位 ⇒ 下方「我的装备」只列该槽兼容部件。本 helper 就是那一次**真实鼠标点击**，
- * 并且**幂等**：已在 Garage 时不重复进页；已在该槽时不重复点。
+ * R1 是「单分类配车页」（分类 Tab 决定卡片区）；R2 换成**槽位式**（4 个槽在战车周围，
+ * 但槽位坐标跟着车辆真实挂点走）；R3 删掉挂点定位，收敛成最普通的
+ * **固定 2×2 同构槽**：
+ * ```
+ * [ 武器 ] [ 车身 ]
+ * [ 后轮 ] [ 前轮 ]
+ * ```
+ * 点槽位 ⇒ 下方标题变成「选择〈槽位名〉装备」+ 只列该槽兼容部件。
+ * 本 helper 就是那一次**真实鼠标点击**，并且**幂等**：
+ * 已在 Garage 时不重复进页；已在该槽时不重复点。
  *
  * ⚠️ 槽位名与挂点名**刻意同名**（`rear` / `front`）—— 见 homePage.ts 的等价说明
  *    （`GARAGE_SLOT_LABELS` 与 `MOVEMENT_HARDPOINT_LABELS`）⇒ 这里不需要第二张映射表。
@@ -163,6 +177,32 @@ async function gotoGarageSlot(page, slot) {
     await clickSelector(page, `[data-ph-slot="${slot}"]`);
   }
   return probeOf(page);
+}
+
+/**
+ * PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜读**某一个装备槽**的 UI 三件事
+ * （真实 DOM 文本，不是重算：`data-ph-slot-def` / 槽上显示的**当前装备名** / 下方标题）。
+ *
+ * 用来证 Queue 的两条逐字要求：
+ *   - 必改 2：点槽后下方标题**直接变成**「选择〈槽位名〉装备」；
+ *   - 验收 4：装备完成后**上方槽位名称同步变化**（例：Front 槽 → 「小轮」）。
+ */
+function slotUiOf(page, slot) {
+  return page.evaluate((s) => {
+    const node = document.querySelector(`[data-ph-slot="${s}"]`);
+    const all = [...document.querySelectorAll('[data-ph-slot]')];
+    const activeSlots = all
+      .filter((b) => b.getAttribute('data-ph-slot-active') === 'true')
+      .map((b) => b.getAttribute('data-ph-slot'));
+    return {
+      exists: !!node,
+      def: node ? node.getAttribute('data-ph-slot-def') : null,
+      value: node ? ((node.querySelector('.ph-slotnode-value') || {}).textContent || null) : null,
+      label: node ? ((node.querySelector('.ph-slotnode-label') || {}).textContent || null) : null,
+      active: activeSlots.length === 1 ? activeSlots[0] : `[${activeSlots.join(',')}]`,
+      title: (document.querySelector('.ph-my-parts-title') || {}).textContent || null,
+    };
+  }, slot);
 }
 
 /** 直接读浏览器真实 localStorage（不经过页面探针，独立取证）。 */
@@ -357,35 +397,32 @@ async function main() {
     log(previewAfter && previewAfter.defId === target, 'B6 战车预览**同次**同步换件 ⇒ Preview 在当前屏幕立即可见（必改 1 + 必改 2）', `slotPreview=${previewAfter && previewAfter.defId}`);
 
     /*
-      B7｜**必改 1 的结构证据**（4 个装备槽与配置字段一一对应）。
-      新 Garage 的四个装备槽是「一个槽位一个配置维度」的入口，不是装饰：
-      这里确认四个槽都在 DOM 上、且**恰好一个**处于 active（默认武器），
-      同时量出槽位的真实横向偏移（`data-ph-slot-dx`）—— 它是**挂点 x** 经预览换算后的值，
-      用来证「前轮槽在右、后轮槽在左」与正式战斗同向（必改 3 的布局层证据）。
+      B7｜**必改 1 的结构证据**（4 个装备槽与配置字段一一对应 + 2×2 同构）。
+      R3 的四个槽是**固定 2×2**（版面由 CSS grid 决定，不跟挂点）：
+      DOM 顺序 = `武器, 车身, 后轮, 前轮`；几何上**恰有两行两列**、四个槽**同宽同高**。
     */
-    const slotsNow = await page.evaluate(() => ({
-      all: [...document.querySelectorAll('[data-ph-slot]')].map((b) => b.getAttribute('data-ph-slot')),
-      active: [...document.querySelectorAll('[data-ph-slot]')]
-        .filter((b) => b.getAttribute('data-ph-slot-active') === 'true')
-        .map((b) => b.getAttribute('data-ph-slot')),
-      dx: Object.fromEntries(
-        [...document.querySelectorAll('[data-ph-slot]')].map((b) => [
-          b.getAttribute('data-ph-slot'),
-          Number(b.getAttribute('data-ph-slot-dx')),
-        ]),
-      ),
-      def: Object.fromEntries(
-        [...document.querySelectorAll('[data-ph-slot]')].map((b) => [
-          b.getAttribute('data-ph-slot'),
-          b.getAttribute('data-ph-slot-def'),
-        ]),
-      ),
-    }));
+    const slotsNow = await page.evaluate(() => {
+      const nodes = [...document.querySelectorAll('[data-ph-slot]')];
+      return {
+        all: nodes.map((b) => b.getAttribute('data-ph-slot')),
+        active: nodes
+          .filter((b) => b.getAttribute('data-ph-slot-active') === 'true')
+          .map((b) => b.getAttribute('data-ph-slot')),
+        rects: nodes.map((b) => {
+          const r = b.getBoundingClientRect();
+          return { slot: b.getAttribute('data-ph-slot'), left: r.left, top: r.top, w: r.width, h: r.height };
+        }),
+        title: (document.querySelector('.ph-my-parts-title') || {}).textContent || null,
+        def: Object.fromEntries(
+          nodes.map((b) => [b.getAttribute('data-ph-slot'), b.getAttribute('data-ph-slot-def')]),
+        ),
+      };
+    });
     log(
-      slotsNow.all.join(',') === 'weapon,body,front,rear' &&
+      slotsNow.all.join(',') === 'weapon,body,rear,front' &&
         slotsNow.active.length === 1 &&
         slotsNow.active[0] === 'weapon',
-      'B7 四个真实装备槽（武器 / 车身 / 前轮 / 后轮）都在 DOM 上，且恰好一个处于「当前槽」（必改 1）',
+      'B7 四个真实装备槽（武器 / 车身 / 后轮 / 前轮）都在 DOM 上、DOM 顺序 = 2×2 版面顺序，且恰好一个处于「当前槽」（必改 1）',
       `slots=[${slotsNow.all.join(',')}] active=[${slotsNow.active.join(',')}]`,
     );
     log(
@@ -398,10 +435,35 @@ async function main() {
       'B7b 每个槽都如实显示**当前装的是哪一件**（武器槽 = 刚点上的那件；车身槽 = 该车车身；两个轮组槽 = 该挂点生效件）：「一眼看到当前配置」是数据保证（必改 1）',
       `defs=${JSON.stringify(slotsNow.def)}`,
     );
+    /*
+      B7c｜**2×2 同构的几何层证据**（R3 取代 R2 的「槽位贴挂点 dx」断言）。
+      判据四条同时成立：① 恰有两行（top 去重后 = 2）；② 恰有两列（left 去重后 = 2）；
+      ③ 四个槽**同宽同高**；④ 同一行的两个槽 top 相同、同一列的两个槽 left 相同。
+      ⚠️ 这一段跑在 1280×720 的桌面上（`.ph-screen` 被缩放）⇒ 量到的是**缩放后**的像素，
+         但「同行同 top / 同列同 left / 同宽同高」是**相对关系**，不随缩放变化。
+    */
+    const round1 = (n) => Math.round(n * 10) / 10;
+    const lefts = [...new Set(slotsNow.rects.map((s) => round1(s.left)))];
+    const tops = [...new Set(slotsNow.rects.map((s) => round1(s.top)))];
+    const widths = [...new Set(slotsNow.rects.map((s) => round1(s.w)))];
+    const heights = [...new Set(slotsNow.rects.map((s) => round1(s.h)))];
+    const bySlot = Object.fromEntries(slotsNow.rects.map((s) => [s.slot, s]));
     log(
-      slotsNow.dx['front'] > 0 && slotsNow.dx['rear'] < 0 && slotsNow.dx['front'] > slotsNow.dx['rear'],
-      'B7c 槽位横向 = **真实挂点 x**：前轮槽在右（dx>0）、后轮槽在左（dx<0）⇒ 与正式 Product Run 的 front/rear 同向（必改 3 的布局层证据）',
-      `dx=${JSON.stringify(slotsNow.dx)}`,
+      lefts.length === 2 &&
+        tops.length === 2 &&
+        widths.length === 1 &&
+        heights.length === 1 &&
+        round1(bySlot['weapon'].top) === round1(bySlot['body'].top) &&
+        round1(bySlot['rear'].top) === round1(bySlot['front'].top) &&
+        round1(bySlot['weapon'].left) === round1(bySlot['rear'].left) &&
+        round1(bySlot['body'].left) === round1(bySlot['front'].left),
+      'B7c **四个槽完全同构的几何证据**：恰好 2 行 × 2 列、四个槽**同宽同高**、同行 top 相同 / 同列 left 相同（必改 1：「不能再出现只有 3 个页签的视觉结果」）',
+      `rects=${slotsNow.rects.map((s) => `${s.slot}@${round1(s.left)},${round1(s.top)} ${round1(s.w)}×${round1(s.h)}`).join(' ')}`,
+    );
+    log(
+      slotsNow.title === '选择武器装备',
+      'B7d 进 Garage 默认选中**武器**槽，下方标题随之是「选择武器装备」（必改 2：玩家无需记忆就知道下面点的是哪个部位）',
+      `title="${slotsNow.title}" active=[${slotsNow.active.join(',')}]`,
     );
 
     /* ---------------------------------------------------- 3) 唯一数据源取证 */
@@ -1436,33 +1498,38 @@ async function main() {
 
     /*
       ══════════════════════════════════════════════════════════════════════════
-      PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜**390×844 手机视口的布局取证**
+      PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜**390×844 手机视口的布局取证**
       ══════════════════════════════════════════════════════════════════════════
 
-      验收 1 / 5 / 6 / 7 的**布局层**取证（前面各段证的是行为与数据；这一段证「结构与几何」）。
+      验收 1 / 2 / 3 / 8 / 9 / 10 的**布局与几何**取证（前面各段证的是行为与数据）。
 
       为什么必须单开一个 **390×844 手机视口**的 context：上面整条流程跑在 1280×720 桌面上，
       `.ph-screen` 被 `fitStage` 缩放（scale ≈ 0.85）⇒ 量出来的 CSS 像素不是手机上的像素。
       这里用**真实手机视口**（390×844，DPR 2）打开同一份产物，此时 scale = 1，
       量到的 CSS 像素**就是**逻辑像素（`.ph-screen` 恒 390×844）。
 
-      取证各条（对应必改 1–4 + 验收 1 / 2 / 3 / 5 / 6 / 7 / 8）：
+      取证各条（对应必改 1–5 + 验收 1 / 2 / 3 / 8 / 9 / 10）：
         - GS1 手机视口下页面**没有整页长滚动**（首屏就是全部，验收 1 的布局前提）；
-        - GS2 Preview + 4 个装备槽（上）→「我的装备」标题 → 卡片区 → 合成入口（下）
+        - GS2 战车 → 「当前装备」+ 4 槽 → 「选择〈槽名〉装备」→ 卡片区 → 合成入口（下）
               全部在**固定区**，竖向顺序正确，互不重叠，整条链落在屏幕内；
         - GS3 **只有**卡片区是可滚动容器（`.ph-garage-body` = `auto`；骨架 / 舞台 = `hidden`）；
-        - GS4 手机视口下「4 个装备槽 + 0 个二次装备按钮 + 0 个可拖拽元素」，且恰好一个当前槽（验收 5）；
-        - GS5 依次真实点击 **武器 → 车身 → 前轮 → 后轮** 都能切换（验收 2 / 3 的入口）；
+        - GS4 手机视口下「4 个装备槽 + 0 个二次装备按钮 + 0 个可拖拽元素 + 入口未禁用」，且恰好一个当前槽；
+        - GS5 依次真实点击 **武器 → 车身 → 后轮 → 前轮** 都能切换（验收 2 / 3 的入口）；
+        - GS5b **当前槽 → 下方标题逐字对应**（`选择前轮装备` 等，验收 3）；
+        - GS5c **四个槽完全同构的几何证据**：恰 2 行 × 2 列、同宽同高（验收 1）；
         - GS6 未拥有内容降级到原生 `<details>` 折叠区（默认闭合）而可用卡留在主卡阵；
-        - GS7 底部合成入口**持续可见**（真实矩形面积 > 0、未被样式隐藏；验收 7 前半句）；
-        - GS7b 存在 5/5 可合成项时入口给出**明确提示**（「可合成 1」+ `ready=true` + 可点；验收 7 后半句）；
+        - GS7 底部合成入口**持续可见且未被禁用**（`disabled === false`；验收 8）；
+        - GS7b 存在 5/5 可合成项时入口给出**明确提示**（「合成 1」= 红点 + 数量）；
+        - GS7c **验收 9**：点入口**无条件进入**既有正式 Fusion 流程，并在那里看到真实 `5/5` 进度；
         - GS8 **验收 3 逐字**：点 Body 槽 → 点 mangoBody → 车身立即变化（一次点击，无二次按钮）；
         - GS9 **验收 2 逐字**：点 Front 槽 → 点 smallWheel → 前轮立即变化（一次点击，无二次按钮）；
-        - GS10 **验收 8**：reload 后 Weapon / Body / rear / front 逐项保持且**互不覆盖**；
-        - GS11 **Preview 朝向**取证：把预览件与槽位的**真实屏幕矩形**量出来 ——
-              前轮在右、后轮在左、武器在两轮**上方** ⇒ 与正式 Product Run 同向（必改 3 / 验收 6）；
+        - GS10 **验收 10**：reload 后 Weapon / Body / rear / front 逐项保持且**互不覆盖**；
+        - GS11 **Preview 朝向**取证：把预览件的**真实屏幕矩形**量出来 ——
+              前轮在右、后轮在左、武器在两轮**上方** ⇒ 与正式 Product Run 同向（必改 4 的冻结项）；
         - GS12 任意槽位下「返回首页」都真实可达；
         - GS13 整段零运行时报错。
+      ⚠️ R3 按 Queue 明令**删掉**了「槽位横坐标要贴着自己那个轮子」那一半断言 ——
+         偏 Front / Rear 的认知现由**明确槽名**（`选择前轮装备`）+ Preview 实际变化建立。
     */
     const mobileCtx = await browser.newContext({
       viewport: { width: 390, height: 844 },
@@ -1488,8 +1555,10 @@ async function main() {
           };
           /*
             ⚠️ 预览件 / 槽位的**真实屏幕矩形**（`getBoundingClientRect`）——
-               本段的 GS8 靠它们证「前轮在右、后轮在左、武器在两轮上方」，
+               本段的 GS11 靠它们证「前轮在右、后轮在左、武器在两轮上方」，
                而不是读源码里的数字（那只能证明「写了什么」，证明不了「画在哪」）。
+            ⚠️ R3：槽位**不再**贴在车体挂点上 ⇒ 这里不再量「槽位 vs 轮子」的横坐标距离；
+               四个槽改由 **2×2 同构几何**（GS5b）验证：同宽同高、恰两行两列。
           */
           const center = (sel) => {
             const n = document.querySelector(sel);
@@ -1507,6 +1576,7 @@ async function main() {
             header: r('.ph-header'),
             stage: r('.ph-garage-stage'),
             car: r('.ph-car-wrap'),
+            current: r('.ph-garage-current'),
             myParts: r('.ph-my-parts'),
             body: r('.ph-garage-body'),
             foot: r('.ph-garage-foot'),
@@ -1517,14 +1587,24 @@ async function main() {
             activeSlot: [...document.querySelectorAll('[data-ph-slot]')]
               .filter((b) => b.getAttribute('data-ph-slot-active') === 'true')
               .map((b) => b.getAttribute('data-ph-slot')),
+            /* R3｜四个槽的真实矩形（2×2 同构几何取证用）。 */
+            slotRects: [...document.querySelectorAll('[data-ph-slot]')].map((b) => {
+              const q = b.getBoundingClientRect();
+              return {
+                slot: b.getAttribute('data-ph-slot'),
+                left: q.left,
+                top: q.top,
+                w: q.width,
+                h: q.height,
+              };
+            }),
+            /* R3｜当前槽 → 下方标题（读页面真实画出来的节点）。 */
+            slotTitle: (document.querySelector('.ph-my-parts-title') || {}).textContent || null,
             equipButtons: document.querySelectorAll('[data-ph-action="equip"]').length,
             draggables: document.querySelectorAll('[draggable="true"]').length,
             wheelFront: center('[data-ph-preview-item="wheel:front"]'),
             wheelRear: center('[data-ph-preview-item="wheel:rear"]'),
             weaponPart: center('[data-ph-preview-item="part:frontMass"]'),
-            slotFront: center('[data-ph-slot="front"]'),
-            slotRear: center('[data-ph-slot="rear"]'),
-            slotWeapon: center('[data-ph-slot="weapon"]'),
             fuseVisible: fuse
               ? fuse.getBoundingClientRect().width > 0 &&
                 fuse.getBoundingClientRect().height > 0 &&
@@ -1533,6 +1613,7 @@ async function main() {
               : false,
             fuseReadyCount: fuse ? Number(fuse.getAttribute('data-ph-fuse-ready-count')) : -1,
             fuseEntryReady: fuse ? fuse.getAttribute('data-ph-fuse-entry-ready') : null,
+            fuseDisabled: fuse ? fuse.disabled === true : null,
             bodyOverflowY: body ? getComputedStyle(body).overflowY : null,
             mainOverflowY: main ? getComputedStyle(main).overflowY : null,
             screenOverflowY: screenEl ? getComputedStyle(screenEl).overflowY : null,
@@ -1556,21 +1637,25 @@ async function main() {
       const inBody = (b) => !!b && !!L.body && b.top >= L.body.top - 0.5 && b.bottom <= L.body.bottom + 0.5;
       const ordered =
         !!L.car &&
+        !!L.current &&
         !!L.myParts &&
         !!L.foot &&
         !inBody(L.car) &&
+        !inBody(L.current) &&
         !inBody(L.myParts) &&
         !inBody(L.foot) &&
-        L.stage.bottom <= L.myParts.top + 0.5 &&
+        L.stage.bottom <= L.current.top + 0.5 &&
+        L.current.bottom <= L.myParts.top + 0.5 &&
         L.myParts.bottom <= L.body.top + 0.5 &&
         L.body.bottom <= L.foot.top + 0.5 &&
         L.foot.bottom <= L.screen.bottom + 0.5 &&
-        // Preview 与槽位在同一个固定区里，且**不重叠**「我的装备」标题。
-        L.car.bottom <= L.myParts.top + 0.5;
+        // 战车预览与「当前装备」槽区在同一个固定区里，且**不重叠**「选择〈槽名〉装备」标题。
+        L.car.bottom <= L.current.top + 0.5 &&
+        L.current.bottom <= L.myParts.top + 0.5;
       log(
         ordered,
-        'GS2 竖向顺序 = 战车 + 4 装备槽 →「我的装备」→ 卡片区 → 合成入口，四段互不重叠且全部落在 390×844 屏幕内、都不在滚动容器里（验收 1：首屏能同时理解四件事）',
-        `stage=[${L.stage && round2(L.stage.top)}..${L.stage && round2(L.stage.bottom)}] car=[${L.car && round2(L.car.top)}..${L.car && round2(L.car.bottom)}] myParts=[${L.myParts && round2(L.myParts.top)}..${L.myParts && round2(L.myParts.bottom)}] body=[${L.body && round2(L.body.top)}..${L.body && round2(L.body.bottom)}] foot=[${L.foot && round2(L.foot.top)}..${L.foot && round2(L.foot.bottom)}] screen.bottom=${L.screen && round2(L.screen.bottom)}`,
+        'GS2 竖向顺序 = 战车 → 当前装备 + 4 个同构槽 →「选择〈槽名〉装备」→ 卡片区 → 合成入口，五段互不重叠且全部落在 390×844 屏幕内、都不在滚动容器里（验收 1：首屏能同时理解五件事）',
+        `stage=[${L.stage && round2(L.stage.top)}..${L.stage && round2(L.stage.bottom)}] car=[${L.car && round2(L.car.top)}..${L.car && round2(L.car.bottom)}] current=[${L.current && round2(L.current.top)}..${L.current && round2(L.current.bottom)}] myParts=[${L.myParts && round2(L.myParts.top)}..${L.myParts && round2(L.myParts.bottom)}] body=[${L.body && round2(L.body.top)}..${L.body && round2(L.body.bottom)}] foot=[${L.foot && round2(L.foot.top)}..${L.foot && round2(L.foot.bottom)}] screen.bottom=${L.screen && round2(L.screen.bottom)}`,
       );
 
       log(
@@ -1578,33 +1663,44 @@ async function main() {
           L.mainOverflowY === 'hidden' &&
           L.screenOverflowY === 'hidden' &&
           L.bodyClientH > 0,
-        'GS3 **只有**卡片区是可滚动容器（`.ph-garage-body` = `auto`；骨架 / 舞台 = `hidden`）⇒「只允许『我的装备』区域滚动」（必改 1）',
+        'GS3 **只有**卡片区是可滚动容器（`.ph-garage-body` = `auto`；骨架 / 舞台 = `hidden`）⇒「只允许部件卡片区域滚动」（必改 1）',
         `body=${L.bodyOverflowY} main=${L.mainOverflowY} screen=${L.screenOverflowY} bodyClientH=${L.bodyClientH} bodyScrollH=${L.bodyScrollH}`,
       );
 
       log(
-        L.slotCount === 4 && L.activeSlot.length === 1 && L.equipButtons === 0 && L.draggables === 0,
-        'GS4 手机视口下「4 个真实装备槽 + 0 个二次装备按钮 + 0 个可拖拽元素」，且恰好一个当前槽（必改 1 + 必改 2 + 验收 5）',
-        `slots=${L.slotCount} active=[${L.activeSlot.join(',')}] equipButtons=${L.equipButtons} draggables=${L.draggables}`,
+        L.slotCount === 4 &&
+          L.activeSlot.length === 1 &&
+          L.equipButtons === 0 &&
+          L.draggables === 0 &&
+          L.fuseDisabled === false,
+        'GS4 手机视口下「4 个真实装备槽 + 0 个二次装备按钮 + 0 个可拖拽元素 + 合成入口未被禁用」，且恰好一个当前槽（必改 1 · 必改 3 · 必改 5）',
+        `slots=${L.slotCount} active=[${L.activeSlot.join(',')}] equipButtons=${L.equipButtons} draggables=${L.draggables} fuseDisabled=${L.fuseDisabled}`,
       );
 
       /*
-        GS5｜**「依次切换 武器 → 车身 → 前轮 → 后轮」**（验收 2 / 3 的入口）。
+        GS5｜**「依次切换 武器 → 车身 → 后轮 → 前轮」**（验收 2 / 3 的入口）＋ **当前槽 → 标题**对应。
         四次**真实鼠标点击**，每次断言：① 该槽成为唯一当前槽；
-        ② 卡片区属主（`data-ph-garage-body`）随之切换；③ 卡片区里真的有当前槽的卡片（不是空屏）。
+        ② 卡片区属主（`data-ph-garage-body`）随之切换；③ 卡片区里真的有当前槽的卡片（不是空屏）；
+        ④ 下方标题**逐字**变成「选择〈槽位名〉装备」（必改 2：玩家无需记忆）。
       */
+      const SLOT_TITLES = {
+        weapon: '选择武器装备',
+        body: '选择车身装备',
+        rear: '选择后轮装备',
+        front: '选择前轮装备',
+      };
       const slotProbe = [];
-      for (const slot of ['weapon', 'body', 'front', 'rear']) {
+      for (const slot of ['weapon', 'body', 'rear', 'front']) {
         await gotoGarageSlot(mp, slot);
         const s = await mp.evaluate(() => {
           const b = document.querySelector('.ph-garage-body');
-          const t = document.querySelector('.ph-my-parts-slot');
+          const t = document.querySelector('.ph-my-parts-title');
           return {
             owner: b ? b.getAttribute('data-ph-garage-body') : null,
             active: [...document.querySelectorAll('[data-ph-slot]')]
               .filter((x) => x.getAttribute('data-ph-slot-active') === 'true')
               .map((x) => x.getAttribute('data-ph-slot')),
-            myPartsSlot: t ? t.textContent : null,
+            title: t ? t.textContent : null,
             cards: b ? b.querySelectorAll('[data-ph-weapon],[data-ph-body],[data-ph-movement]').length : -1,
             locked: b ? b.querySelectorAll('[data-ph-locked]').length : -1,
           };
@@ -1615,8 +1711,46 @@ async function main() {
         slotProbe.every(
           (t) => t.owner === t.slot && t.active.length === 1 && t.active[0] === t.slot && t.cards >= 1,
         ),
-        'GS5 依次真实点击 **武器 → 车身 → 前轮 → 后轮**：每次该槽成为唯一当前槽、卡片区属主随之切换、且都有可操作卡片（验收 2 / 3 的入口）',
-        slotProbe.map((t) => `${t.slot}:owner=${t.owner},myParts=${t.myPartsSlot},cards=${t.cards},locked=${t.locked}`).join(' '),
+        'GS5 依次真实点击 **武器 → 车身 → 后轮 → 前轮**：每次该槽成为唯一当前槽、卡片区属主随之切换、且都有可操作卡片（验收 2 / 3 的入口）',
+        slotProbe.map((t) => `${t.slot}:owner=${t.owner},title="${t.title}",cards=${t.cards},locked=${t.locked}`).join(' '),
+      );
+      log(
+        slotProbe.every((t) => t.title === SLOT_TITLES[t.slot]),
+        'GS5b **当前槽 → 下方标题逐字对应**：武器/车身/后轮/前轮 四个槽分别产出「选择武器装备 / 选择车身装备 / 选择后轮装备 / 选择前轮装备」（必改 2：不得只写模糊的「我的装备」）',
+        slotProbe.map((t) => `${t.slot}→"${t.title}"`).join(' '),
+      );
+
+      /*
+        GS5c｜**四个槽完全同构的几何证据**（R3 的核心 / 验收 1）。
+        站在 390×844 真实手机视口上量四个槽的**真实矩形**，判据：
+          ① 恰好 2 行（top 去重 = 2）· ② 恰好 2 列（left 去重 = 2）；
+          ③ 四个槽**同宽同高**（去重后各只有 1 个值）；
+          ④ 第 1 行 = 武器 + 车身、第 2 行 = 后轮 + 前轮（DOM 顺序 = 版面顺序）。
+        ⚠️ 这条是「不能再出现只有 3 个页签的视觉结果」的**机器证据** ——
+           只要有一个槽尺寸 / 行位不同，去重后的数组长度就会变。
+      */
+      const Lg = await measure();
+      const g1 = (n) => Math.round(n * 10) / 10;
+      const gLefts = [...new Set(Lg.slotRects.map((s) => g1(s.left)))].sort((a, b) => a - b);
+      const gTops = [...new Set(Lg.slotRects.map((s) => g1(s.top)))].sort((a, b) => a - b);
+      const gWs = [...new Set(Lg.slotRects.map((s) => g1(s.w)))];
+      const gHs = [...new Set(Lg.slotRects.map((s) => g1(s.h)))];
+      const gBy = Object.fromEntries(Lg.slotRects.map((s) => [s.slot, s]));
+      log(
+        Lg.slotRects.length === 4 &&
+          gLefts.length === 2 &&
+          gTops.length === 2 &&
+          gWs.length === 1 &&
+          gHs.length === 1 &&
+          g1(gBy['weapon'].top) === g1(gBy['body'].top) &&
+          g1(gBy['rear'].top) === g1(gBy['front'].top) &&
+          g1(gBy['weapon'].top) < g1(gBy['rear'].top) &&
+          g1(gBy['weapon'].left) === g1(gBy['rear'].left) &&
+          g1(gBy['body'].left) === g1(gBy['front'].left) &&
+          g1(gBy['weapon'].left) < g1(gBy['body'].left),
+        'GS5c **四个槽完全同构**：恰好 2 行 × 2 列、四个槽**同宽同高**；第 1 行 = 武器 + 车身、第 2 行 = 后轮 + 前轮（验收 1：第一眼就是 4 个同规格装备槽）',
+        Lg.slotRects.map((s) => `${s.slot}@${g1(s.left)},${g1(s.top)} ${g1(s.w)}×${g1(s.h)}`).join(' ') +
+          ` | w=${JSON.stringify(gWs)} h=${JSON.stringify(gHs)}`,
       );
 
       /*
@@ -1653,25 +1787,29 @@ async function main() {
       );
 
       /*
-        GS7｜**底部「合成」入口持续可见**（必改 4 / 验收 7）。
-        判据三条同时成立：元素存在 + 真实矩形有面积 + 未被 `display` / `visibility` 藏掉。
-        ⚠️ 这里**故意**在「没有可合成组」的全新账号上取值 —— 入口**不是**有货才出现。
+        GS7｜**底部「合成」入口持续可见且恒可点**（必改 5 / 验收 8）。
+        判据四条同时成立：元素存在 + 真实矩形有面积 + 未被 `display` / `visibility` 藏掉
+        + **`disabled === false`**。
+        ⚠️ 这里**故意**在「没有可合成组」的全新账号上取值 —— 入口**不是**有货才出现，
+           也**不是**没有 5/5 就关掉（Queue 逐字：不要因为当前没有 5/5 就 disable 整个入口）。
+        ⚠️ 用 `Lg`（切换过槽位之后**重新量**的那一份）而不是第一份 `L`：快照不复用。
       */
       log(
-        L.fuseVisible === true &&
-          !!L.fuse &&
-          L.fuse.h > 0 &&
-          L.fuseReadyCount >= 0 &&
-          L.fuseEntryReady === 'false',
-        'GS7 底部「合成」入口**持续可见**（真实矩形有面积、未被样式隐藏）：即使当前没有可合成组（`ready=false`）也照旧画出来（必改 4 / 验收 7）',
-        `rect=${L.fuse && `${round2(L.fuse.left)},${round2(L.fuse.top)} ${round2(L.fuse.w)}×${round2(L.fuse.h)}`} visible=${L.fuseVisible} readyCount=${L.fuseReadyCount} ready=${L.fuseEntryReady}`,
+        Lg.fuseVisible === true &&
+          !!Lg.fuse &&
+          Lg.fuse.h > 0 &&
+          Lg.fuseReadyCount === 0 &&
+          Lg.fuseEntryReady === 'false' &&
+          Lg.fuseDisabled === false,
+        'GS7 底部「合成」入口**持续可见**（真实矩形有面积、未被样式隐藏）且**未被禁用**：即使当前没有可合成组（`readyCount=0`）也照旧画出**普通「合成」**并保持可点（必改 5 / 验收 8）',
+        `rect=${Lg.fuse && `${round2(Lg.fuse.left)},${round2(Lg.fuse.top)} ${round2(Lg.fuse.w)}×${round2(Lg.fuse.h)}`} visible=${Lg.fuseVisible} readyCount=${Lg.fuseReadyCount} ready=${Lg.fuseEntryReady} disabled=${Lg.fuseDisabled}`,
       );
 
       /*
-        GS7b｜**验收 7 后半句**：存在 5/5 可合成项时，入口必须给出**明确提示**。
-        ⚠️ GS7 是在「没有可合成组」的全新账号上取证的（入口仍在 ⇒ 持续可见）。这里补另一半：
+        GS7b｜**有 5/5 可合成项时的明确提示**（必改 5：`合成 ●` 或 `合成 1`）。
+        ⚠️ GS7 是在「没有可合成组」的全新账号上取证的（入口仍在且可点）。这里补另一半：
            把 cannon ★1 补到 5/5（**直接写正式库存 key**，不经页面 —— 与 M2b 负控制同一手法），
-           reload 后入口应从「暂无可合成 / disabled」变成「可合成 1 / ready / 可点」。
+           reload 后入口应变成「合成 + 红点 + 数量 1」且**仍然可点**。
         ⚠️ 不改任何合成规则、也不假点合成：只把库存摆到 5/5，然后**读**入口的样子。
       */
       await mp.evaluate((invKey) => {
@@ -1702,50 +1840,101 @@ async function main() {
           fuseReady.ready === 'true' &&
           fuseReady.count === '1' &&
           fuseReady.disabled === false &&
-          fuseReady.text.includes('可合成') &&
+          fuseReady.text.includes('合成') &&
           fuseReady.text.includes('1'),
-        'GS7b **验收 7 后半句**：存在 5/5 可合成项时，底部持续可见的「合成」入口给出**明确提示**（「可合成 1」+ `ready=true` + 可点），不是把入口藏起来或只字不提',
+        'GS7b **必改 5 前半句**：存在 5/5 可合成项时，底部持续可见的「合成」入口给出**明确提示**（文案「合成 1」= 红点 + 数量，`ready=true`，且**仍可点**）',
         fuseReady
           ? `text="${fuseReady.text}" ready=${fuseReady.ready} count=${fuseReady.count} disabled=${fuseReady.disabled} visible=${fuseReady.visible}`
           : '入口缺失',
       );
 
       /*
-        GS8｜**验收 3 逐字**：点 Body 槽 → 点 mangoBody → Body 立即变化。
+        GS7c｜**验收 9｜点进去能看到真实的 N/5 进度**。
+        真实鼠标点击底部「合成」⇒ 页面切到**武器槽**（那里就是既有正式 Fusion 流程：
+        每张卡带 `成长 N/5` 进度行 + 满 5 件时的「合成升星」按钮）。
+        断言：当前槽 = weapon、卡片区属主 = weapon、且**刚摆到 5/5 的那件**在卡片上
+        读到 `5/5`（`data-ph-stack-text`，与库存读数同源）。
+        ⚠️ 这里**不点**「合成升星」：本 Queue 只证「入口进得去 + 进度看得见」，不改合成规则。
+      */
+      await clickSelector(mp, '[data-ph-action="fuse-entry"]');
+      const afterFuseEntry = await mp.evaluate(() => {
+        const b = document.querySelector('.ph-garage-body');
+        const card = document.querySelector('[data-ph-weapon="cannon"]');
+        return {
+          slot: window.__PRODUCTHOME__.probe().garageSlot,
+          title: (document.querySelector('.ph-my-parts-title') || {}).textContent || null,
+          owner: b ? b.getAttribute('data-ph-garage-body') : null,
+          cannonStack: card ? card.getAttribute('data-ph-stack-text') : null,
+          cannonFusable: card ? card.getAttribute('data-ph-fusable') : null,
+          fuseButton: document.querySelectorAll('[data-ph-action="fuse"]').length,
+          growthText: card
+            ? (card.querySelector('.ph-card-growth') || {}).textContent || null
+            : null,
+        };
+      });
+      log(
+        afterFuseEntry.slot === 'weapon' &&
+          afterFuseEntry.title === '选择武器装备' &&
+          afterFuseEntry.owner === 'weapon' &&
+          afterFuseEntry.cannonStack === '5/5' &&
+          afterFuseEntry.cannonFusable === 'true' &&
+          afterFuseEntry.fuseButton === 1 &&
+          (afterFuseEntry.growthText || '').includes('5/5'),
+        'GS7c **验收 9**：点底部「合成」**无条件进入**既有正式 Fusion 流程（切到武器槽），并在那里看到**真实的 5/5 进度**（卡片 `成长 5/5` + `可合成` + 「合成升星」按钮）',
+        `slot=${afterFuseEntry.slot} title="${afterFuseEntry.title}" body=${afterFuseEntry.owner} cannonStack=${afterFuseEntry.cannonStack} fusable=${afterFuseEntry.cannonFusable} fuseButtons=${afterFuseEntry.fuseButton} growth="${afterFuseEntry.growthText}"`,
+      );
+
+      /*
+        GS8｜**验收 5 逐字**：点 Body 槽 → 下方明确显示「选择车身装备」→ 点 mangoBody → 立即装备。
         ⚠️ 前提 `mangoBody` 在本账号**已拥有**，走的是正式一次性 Body 种子
            （`r4BodyChoiceSeed.MVP_BODY_CHOICE_IDS` = durianBody + mangoBody）——
            这里**不**新增解锁入口、不放宽断言；种子本身的契约由 `productBodyChoiceSeed` 单测钉。
-        当前视口在 GS6 停在 body 槽，但 GS7b 中间 reload 过一次 ⇒ 这里**显式**切回去，
+        当前视口在 GS6 停在 body 槽，但 GS7b/GS7c 中间 reload + 点过入口 ⇒ 这里**显式**切回去，
         不依赖「上一次留下的槽位」。
       */
       await gotoGarageSlot(mp, 'body');
+      const bodySlotUi = await slotUiOf(mp, 'body');
       const bodyBase = await probeOf(mp);
       log(
         bodyBase.body.bodyDefId !== 'mangoBody',
         'GS8 基线：当前车身**不是** mangoBody（否则「点了就变」无从观察）',
         `body=${bodyBase.body.bodyDefId}`,
       );
+      log(
+        bodySlotUi.title === '选择车身装备' && bodySlotUi.active === 'body',
+        'GS8a **验收 5 前半句**：真实点击 Body 槽后，该槽明显高亮、且下方标题**直接变成「选择车身装备」**（必改 2：玩家无需记忆就知道下面点的是哪个部位）',
+        `active=${bodySlotUi.active} title="${bodySlotUi.title}"`,
+      );
       await clickSelector(mp, '[data-ph-body="mangoBody"]');
       const bodyAfter = await probeOf(mp);
+      const bodySlotAfter = await slotUiOf(mp, 'body');
       const bodyPreviewDef = (bodyAfter.previewItems.find((i) => i.key === 'body') || {}).defId;
       log(
         bodyAfter.body.bodyDefId === 'mangoBody' &&
           bodyPreviewDef === 'mangoBody' &&
-          bodyAfter.garageEquipButtonCount === 0,
-        'GS8 **验收 3 逐字**：点 Body 槽 → 点 mangoBody → **一次点击**车身立即变化（卡片区与战车预览同次更新，全程无二次确认按钮）',
-        `body ${bodyBase.body.bodyDefId} → ${bodyAfter.body.bodyDefId} preview=${bodyPreviewDef} equipButtons=${bodyAfter.garageEquipButtonCount}`,
+          bodyAfter.garageEquipButtonCount === 0 &&
+          bodySlotAfter.def === 'mangoBody',
+        'GS8 **验收 5 逐字**：点 Body 槽 → 点 mangoBody → **一次点击**车身立即变化（上方 Body 槽同步、卡片区与战车预览同次更新，全程无二次确认按钮）',
+        `body ${bodyBase.body.bodyDefId} → ${bodyAfter.body.bodyDefId} preview=${bodyPreviewDef} slotDef=${bodySlotAfter.def} equipButtons=${bodyAfter.garageEquipButtonCount}`,
       );
 
       /*
-        GS9｜**验收 2 逐字**：点 Front 槽 → 点 smallWheel → 前轮立即变化。
+        GS9｜**验收 3 + 4 逐字**：点 Front 槽 → 下方明确显示「选择前轮装备」→ 点 smallWheel →
+        一次点击立即装备；**上方 Front 槽同步变成「小轮」**；Preview 同时变化。
         ⚠️ `smallWheel` 属 `OFFICIAL_MOVEMENTS` ⇒ 由正式一次性 Movement 种子发放，本账号已拥有。
       */
       await gotoGarageSlot(mp, 'front');
+      const frontSlotUi = await slotUiOf(mp, 'front');
       const frontBaseP = await probeOf(mp);
       const frontBase = (frontBaseP.movement.slots.find((s) => s.hardpointId === 'front') || {})
         .effectiveDefId;
       const rearBase = (frontBaseP.movement.slots.find((s) => s.hardpointId === 'rear') || {})
         .effectiveDefId;
+      log(
+        frontSlotUi.title === '选择前轮装备' && frontSlotUi.active === 'front',
+        'GS9a **验收 3 逐字**：真实点击 Front 槽后，该槽明显高亮、且下方标题**直接变成「选择前轮装备」**',
+        `active=${frontSlotUi.active} title="${frontSlotUi.title}"`,
+      );
       log(
         frontBase !== 'smallWheel',
         'GS9 基线：前轮当前**不是** smallWheel（否则「点了就变」无从观察）',
@@ -1753,20 +1942,36 @@ async function main() {
       );
       await clickSelector(mp, '[data-ph-movement="smallWheel"][data-ph-movement-hardpoint="front"]');
       const frontAfterP = await probeOf(mp);
+      const frontSlotAfter = await slotUiOf(mp, 'front');
       const frontAfter = (frontAfterP.movement.slots.find((s) => s.hardpointId === 'front') || {})
         .effectiveDefId;
       const frontPreviewDef = (frontAfterP.previewItems.find((i) => i.key === 'wheel:front') || {})
         .defId;
+      /*
+        ⚠️ 槽上显示的**当前装备名**必须取自**官方读数**（`movementReading().slots[].name`），
+           而不是 Queue 举例时用的口语名：Queue 验收 4 写的是「上部 Front 槽同步变成『小轮』」，
+           而正式内容库里这件叫「**小轮组**」。断言方式 = 「槽文案 === 官方读数名」+
+           「相对装备前**确实变了**」⇒ 既钉住「同步变化」，又不假造一个产品里没有的名字。
+      */
+      const frontNameBefore = (frontBaseP.movement.slots.find((s) => s.hardpointId === 'front') || {})
+        .name;
+      const frontNameAfter = (frontAfterP.movement.slots.find((s) => s.hardpointId === 'front') || {})
+        .name;
       log(
         frontAfter === 'smallWheel' &&
           frontPreviewDef === 'smallWheel' &&
-          frontAfterP.garageEquipButtonCount === 0,
-        'GS9 **验收 2 逐字**：点 Front 槽 → 点 smallWheel → **一次点击**前轮立即变化（卡片区与战车预览同次更新，全程无二次确认按钮）',
-        `front ${frontBase} → ${frontAfter} preview=${frontPreviewDef} equipButtons=${frontAfterP.garageEquipButtonCount}`,
+          frontAfterP.garageEquipButtonCount === 0 &&
+          frontSlotAfter.def === 'smallWheel' &&
+          frontSlotAfter.value === frontNameAfter &&
+          frontSlotAfter.value !== frontNameBefore &&
+          frontSlotAfter.label === '前轮',
+        'GS9 **验收 4 逐字**：点 Front 槽 → 点 smallWheel → **一次点击**立即装备；**上方 Front 槽的「前轮」行同步显示官方读数名「小轮组」**（装备前是另一个名字）；Preview 同时变化（全程无二次确认按钮）',
+        `front ${frontBase} → ${frontAfter} preview=${frontPreviewDef} slot="前轮/${frontSlotAfter.value}"（装备前="${frontNameBefore}"）equipButtons=${frontAfterP.garageEquipButtonCount}`,
       );
 
       /*
-        GS10｜**验收 8**：reload 后配置保持；Weapon / Body / rear / front **不互相覆盖**。
+        GS10｜**验收 10**：reload 后四个槽状态保持；Weapon / Body / rear / front **不互相覆盖**；
+        且 **Run Snapshot 不退化**（Movement 合法性仍为 true、预览仍按同一份配置重建）。
         ⚠️ 这一段刻意在**当前高亮槽位是 front** 时 reload —— 若页面把「当前槽」误当成写入口，
            reload 后另外三维就会被 front 那次装备带走（这正是要排除的失败模式）。
       */
@@ -1779,46 +1984,57 @@ async function main() {
         .effectiveDefId;
       const rRear = (reloaded.movement.slots.find((s) => s.hardpointId === 'rear') || {})
         .effectiveDefId;
+      const rSlotFront = await slotUiOf(mp, 'front');
+      const rSlotBody = await slotUiOf(mp, 'body');
+      const rSlotWeapon = await slotUiOf(mp, 'weapon');
       log(
         reloaded.equippedWeaponId === frontAfterP.equippedWeaponId &&
           reloaded.body.bodyDefId === 'mangoBody' &&
           rFront === 'smallWheel' &&
           rRear === rearBase &&
           rRear !== 'smallWheel',
-        'GS10 **验收 8**：reload 后配置逐项保持 —— Weapon / Body / 前轮各自还是刚才那件，且**后轮仍是原来的**（没有任何一维被另一维带走）',
+        'GS10 **验收 10 前半句**：reload 后配置逐项保持 —— Weapon / Body / 前轮各自还是刚才那件，且**后轮仍是原来的**（没有任何一维被另一维带走）',
         `weapon=${reloaded.equippedWeaponId} body=${reloaded.body.bodyDefId} front=${rFront} rear=${rRear}（基线 rear=${rearBase}）`,
+      );
+      log(
+        reloaded.movement.legal === true &&
+          rSlotFront.def === 'smallWheel' &&
+          rSlotBody.def === 'mangoBody' &&
+          rSlotWeapon.def === frontAfterP.equippedWeaponId &&
+          rSlotWeapon.def.length > 0 &&
+          (reloaded.previewItems.find((i) => i.key === 'wheel:front') || {}).defId === 'smallWheel' &&
+          (reloaded.previewItems.find((i) => i.key === 'body') || {}).defId === 'mangoBody',
+        'GS10b **验收 10 后半句｜Run Snapshot 不退化**：reload 后 Movement 合法性仍为 `true`，四个槽的 `data-ph-slot-def` 与卡片区/预览**逐项对上**（Garage 与 Run 读的是同一份配置，没有一格退化）',
+        `legal=${reloaded.movement.legal} slotDefs=${rSlotWeapon.def}/${rSlotBody.def}/${rSlotFront.def} previewFront=${(reloaded.previewItems.find((i) => i.key === 'wheel:front') || {}).defId} previewBody=${(reloaded.previewItems.find((i) => i.key === 'body') || {}).defId}`,
       );
 
       /*
-        GS11｜**Preview 朝向取证**（必改 3 / 验收 6）：量与正式 Run 的三条同向关系。
+        GS11｜**Preview 朝向取证**（必改 4 的冻结项：保留已修正的朝向）：量与正式 Run 的两条同向关系。
         ⚠️ 这里用的是**真实屏幕矩形**（`getBoundingClientRect`），不是源码里的数字：
-           ① 前轮在右、后轮在左；② 武器在两轮**上方**；③ 槽位横坐标与所指向的轮子同侧。
-        ⚠️ 必须**重新量一次**（`L2`）而不是复用页面刚打开时的 `L`：GS8 / GS9 换过车身与前轮、
-           GS10 又 reload 过一次 ⇒ `L` 是旧 DOM 的快照，拿它断言等于没量。
+           ① 前轮在右、后轮在左；② 武器在两轮**上方**。
+        ⚠️ R3 按 Queue 明令**删掉**了「槽位横坐标要贴着自己那个轮子」那一半 ——
+           偏 Front / Rear 的认知现由**明确槽名**（`选择前轮装备`）+ Preview 实际变化建立，
+           不再由「槽位贴挂点」承担。
+        ⚠️ 必须**重新量一次**（`L2`）而不是复用早先的快照：GS8 / GS9 换过车身与前轮、
+           GS10 又 reload 过一次 ⇒ 旧快照是旧 DOM，拿它断言等于没量。
       */
       const L2 = await measure();
       const orient =
         !!L2.wheelFront &&
         !!L2.wheelRear &&
         !!L2.weaponPart &&
-        !!L2.slotFront &&
-        !!L2.slotRear &&
-        !!L2.slotWeapon &&
         L2.wheelFront.cx > L2.wheelRear.cx &&
         L2.weaponPart.cy < L2.wheelFront.cy &&
-        L2.weaponPart.cy < L2.wheelRear.cy &&
-        L2.slotFront.cx > L2.slotRear.cx &&
-        Math.abs(L2.slotFront.cx - L2.wheelFront.cx) < 40 &&
-        Math.abs(L2.slotRear.cx - L2.wheelRear.cx) < 40 &&
-        L2.slotWeapon.cy < L2.slotFront.cy;
+        L2.weaponPart.cy < L2.wheelRear.cy;
       log(
         orient,
-        'GS11 **Preview 朝向与正式 Product Run 同向**：前轮画在右侧、后轮画在左侧、武器在两轮**上方**，且前/后槽的横坐标各自贴着自己那个轮子（必改 3 / 验收 6）',
-        `wheelF=${L2.wheelFront && round2(L2.wheelFront.cx)},${L2.wheelFront && round2(L2.wheelFront.cy)} wheelR=${L2.wheelRear && round2(L2.wheelRear.cx)},${L2.wheelRear && round2(L2.wheelRear.cy)} weapon=${L2.weaponPart && round2(L2.weaponPart.cx)},${L2.weaponPart && round2(L2.weaponPart.cy)} slotF=${L2.slotFront && round2(L2.slotFront.cx)} slotR=${L2.slotRear && round2(L2.slotRear.cx)} slotW.cy=${L2.slotWeapon && round2(L2.slotWeapon.cy)}`,
+        'GS11 **Preview 朝向与正式 Product Run 同向**：前轮画在右侧、后轮画在左侧、武器在两轮**上方**（必改 4 的冻结项：保留已修正的朝向）',
+        `wheelF=${L2.wheelFront && round2(L2.wheelFront.cx)},${L2.wheelFront && round2(L2.wheelFront.cy)} wheelR=${L2.wheelRear && round2(L2.wheelRear.cx)},${L2.wheelRear && round2(L2.wheelRear.cy)} weapon=${L2.weaponPart && round2(L2.weaponPart.cx)},${L2.weaponPart && round2(L2.weaponPart.cy)}`,
       );
 
       /*
-        GS12｜**返回首页始终可达**（验收 6）：在**非默认槽位**（rear）下真实点击顶部的返回按钮。
+        GS12｜**顶部「返回」始终可达**（Queue 目标结构：标题 / 返回）：
+        在**非默认槽位**（rear）下真实点击顶部返回按钮。
       */
       await gotoGarageSlot(mp, 'rear');
       await clickSelector(mp, '[data-ph-action="back-home"]');
@@ -1827,7 +2043,7 @@ async function main() {
       );
       log(
         backView === 'home',
-        'GS12 在任意槽位下「返回首页」都**真实可达**（点一次即回首页；验收 6）',
+        'GS12 在任意槽位下「返回首页」都**真实可达**（点一次即回首页；Queue 目标结构：顶部 = 标题 / 返回）',
         `view=${backView}`,
       );
 

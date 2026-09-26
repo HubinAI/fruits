@@ -470,7 +470,7 @@ describe('PRODUCT-LOOP-R1-A｜D. 战车预览几何（正式视觉定义，不�
     }
   });
 
-  it('PL-28（R2）装备槽锚点 = 正式挂点（纯函数，与预览同口径）', () => {
+  it('PL-28（R2，R3 起 UI 不再消费）装备槽锚点 = 正式挂点（纯函数）', () => {
     const draft = defaultPlayerDraft();
     const body = registry.bodies.get(draft.bodyDefId)!;
     const anchors = vehicleSlotAnchors(draft);
@@ -483,7 +483,14 @@ describe('PRODUCT-LOOP-R1-A｜D. 战车预览几何（正式视觉定义，不�
     const wHp = body.functionalHardpoints.find((h) => h.id === WEAPON_SLOT)!;
     expect(anchors.weapon).toEqual({ cx: wHp.localPosition.x, cy: wHp.localPosition.y, from: 'hardpoint' });
 
-    // 槽位锚点与预览件坐标**同一套口径** ⇒ 页面用同一个 `previewOffset()` 即可对齐
+    /*
+      ⚠️ PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜本函数**已不再驱动 Garage UI**
+         （R2 的「槽位贴挂点」被真人录屏判定失败，改为固定 2×2 同构槽）。
+         这里只证它与预览件坐标**同一套口径**（同一份车体本地几何）——
+         「Garage 的前 / 后 = Product Run 的前 / 后」这个**冻结项**的证据链不断。
+         「页面不再消费它」由 `productGarageMobileInteraction.test.ts` 的
+         `GS-R3-02` 反向守卫钉住。
+    */
     const layout = vehiclePreviewLayout(draft);
     expect(anchors.front.cx).toBe(layout.items.find((i) => i.key === 'wheel:front')!.cx);
     expect(anchors.rear.cy).toBe(layout.items.find((i) => i.key === 'wheel:rear')!.cy);

@@ -50,7 +50,6 @@ import {
 } from './playerLoadout';
 import {
   vehiclePreviewLayout,
-  vehicleSlotAnchors,
   type VehiclePreviewLayout,
   type VehicleSlotId,
 } from './vehiclePreview';
@@ -111,70 +110,101 @@ export const HOME_START_LABEL = '开始冒险';
 export const GARAGE_TITLE = '调整战车';
 export const GARAGE_BACK_LABEL = '返回首页';
 /**
- * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜**Garage = 移动端「槽位式配车页」**。
+ * ══════════════════════════════════════════════════════════════════════════════
+ * PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜**Garage = 四个同构装备槽的配车页**
+ * ══════════════════════════════════════════════════════════════════════════════
  *
- * 真人手机录屏（本 Queue 的问题陈述）：
- *   ① 玩家不知道装备该「拖动」还是「点击」；
- *   ② 战车 Preview 朝向与正式战斗相反 ⇒ 前轮 / 后轮认知反转；
- *   ③ 玩家不知道从哪里进入合成。
+ * 真人手机录屏（本 Queue 的问题陈述，逐字）：
+ *   代码里确实有 4 个槽，但玩家实际看到的却是「上面一个独立的武器悬浮块 + 下面 3 个
+ *   像页签的「后轮 / 车身 / 前轮」按钮」⇒ 视觉认知变成「3 个页签 + 1 个不知道是什么的
+ *   武器块」，而不是「4 个同等级装备槽」。
  *
- * ⇒ 页面结构改为「**战车 + 4 个真实装备槽 + 当前槽的我的装备 + 合成入口**」：
+ * ⇒ **上一版「槽位跟随真实挂点坐标」的设计假设判定失败**（Queue 逐字），不再围绕
+ *   anchor / 挂点位置微调。收敛成最普通、最清楚的一条链：
  * ```
  * .ph-main.ph-main-garage        ← 整页 overflow:hidden（本页整体不滚）
  *   .ph-header                   ← 标题 / 返回首页（返回恒可达）
- *   .ph-garage-stage             ← 战车 Preview + 4 个装备槽（**固定**，不随列表滚出）
- *   .ph-my-parts                 ← 「我的装备 · <当前槽>」标题（固定）
+ *   .ph-garage-stage             ← 战车 Preview（**固定**）
+ *   .ph-garage-current           ← 「当前装备」+ 4 个**完全同构**的装备槽（固定，2×2）
+ *   .ph-my-parts                 ← 「选择〈槽位名〉装备」标题（固定）
  *   .ph-garage-body              ← **唯一**滚动容器：当前槽的部件卡阵
- *   .ph-garage-foot              ← 合成入口（**持续可见**）
+ *   .ph-garage-foot              ← 合成入口（**持续可见且恒可点**）
  * ```
+ * 2×2 的**展示顺序**（= `GARAGE_SLOT_ORDER` 的取值顺序，就是 DOM 顺序）：
+ * ```
+ * [ 武器 ] [ 车身 ]
+ * [ 后轮 ] [ 前轮 ]
+ * ```
+ *
+ * ── 四个槽「完全同构」的四条（Queue 必改 1 逐字）─────────────────────────────
+ *   ① 同尺寸 · ② 同结构 · ③ 同交互 · ④ 同选中态 ——
+ *   落地方式 = **只有一个** `.ph-slotnode` 构造分支 + 一个 `1fr 1fr` 的 grid；
+ *   没有任何槽拥有专属 modifier / 专属宽高 / 绝对定位 / 悬浮块。
+ *   ⚠️ 槽位**不再**读挂点坐标（`vehicleSlotAnchors` 已从本页移除，见 `GS-R3-02` 守卫），
+ *      预览只负责「我换了东西以后车发生了什么变化」（Queue 必改 4）。
  *
  * ── 槽位 → 配置字段（一一对应，没有第二张映射表）─────────────────────────────
  *   `weapon` → `functionalSelections[WEAPON_SLOT]` / `body` → `bodyDefId` /
  *   `front` → `frontWheelDefId` / `rear` → `rearWheelDefId`。
- *   后三者的槽位名与 `movementHardpoints[].id` **刻意同名** ⇒ 不需要映射表。
+ *   后两者的槽位名与 `movementHardpoints[].id` **刻意同名** ⇒ 不需要映射表。
  *
  * ⚠️ 槽位只有这 4 个真实存在的（Queue 冻结：**不得**增加未来 Gadget 等空槽）。
  * ⚠️ 唯一装备交互 = **点槽位 → 点已拥有部件 → 立即装备**；**不提供拖拽装备**
  *    （源码守卫「零 drag 事件」+ 运行时守卫 `garageDraggableCount === 0` 双证）。
  */
 export type GarageSlot = VehicleSlotId;
-export const GARAGE_SLOT_ORDER: readonly GarageSlot[] = ['weapon', 'body', 'front', 'rear'];
-/** 槽位的中文名（页面里不出现第二份字面量；也是「我的装备」标题的一部分）。 */
+/**
+ * 2×2 装备槽的**展示顺序**（= DOM 顺序，也就是玩家读到的顺序）：
+ * ```
+ * [ 武器 ] [ 车身 ]
+ * [ 后轮 ] [ 前轮 ]
+ * ```
+ * ⚠️ 这不是「维度顺序」而是**版面顺序**：`1fr 1fr` 的 grid 按此顺序两两换行。
+ */
+export const GARAGE_SLOT_ORDER: readonly GarageSlot[] = ['weapon', 'body', 'rear', 'front'];
+/** 槽位的中文名（页面里不出现第二份字面量；也是「选择〈槽位名〉装备」标题的一部分）。 */
 export const GARAGE_SLOT_LABELS: Readonly<Record<GarageSlot, string>> = {
   weapon: '武器',
   body: '车身',
   front: '前轮',
   rear: '后轮',
 };
+/** 「当前装备」小节标题 = 四个装备槽之上的唯一标题。 */
+export const GARAGE_CURRENT_LABEL = '当前装备';
 /**
- * 「我的装备」区块标题（Queue 逐字要求的中下区标题）。
- *   完整标题 = `我的装备 · <槽位名>`。
- */
-export const GARAGE_MY_PARTS_LABEL = '我的装备';
-/**
- * 槽位横向偏移的**夹取上限**（预览 px）。
+ * 当前槽 → 下方卡片区标题（Queue 必改 2 逐字）。
  *
- * 槽位横向位置 = 该部件的真实挂点 x（见 `garageSlotAnchor`）。极端车身可能把挂点推到
- * 舞台边缘，而舞台是 `overflow:hidden` ⇒ 槽位会被直接切掉。夹到 ±130 后，
- * 配合 CSS 的 `max-width`，最坏情况仍在 390 宽的舞台内（(390/2 − 12 内边距) ≈ 183）。
- * ⚠️ 只影响**槽位标签**的排版，**不**参与任何配置 / 数值 / 存档逻辑。
- */
-export const GARAGE_SLOT_MAX_DX = 130;
-/**
- * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2（必改 4）｜**持续可见的合成入口**。
+ * Queue 明令：点任意槽后标题**必须直接变为**「选择武器装备 / 选择车身装备 /
+ * 选择后轮装备 / 选择前轮装备」，**不得**只写模糊的「我的装备」——
+ * 玩家必须**无需记忆**就知道「我现在点下面的东西，会换哪个部位」。
  *
- * Queue 逐字：底部提供持续可见的「合成」入口，**不得**要求玩家通过拖动 / 长按 /
- * 猜测卡片行为发现合成；有可合成组时给一个最小可感知状态（红点 **或** 可合成数量）；
- * 点击 → **进入现有正式 Fusion 流程**（本 Queue 不重做 Fusion 页面）。
+ * ⚠️ 前缀 / 后缀 + `GARAGE_SLOT_LABELS` 拼装 ⇒ 标题与槽位名不可能分叉
+ *    （不写第二份「选择前轮装备」这样的字面量表）。
+ */
+export const GARAGE_PICK_TITLE_PREFIX = '选择';
+export const GARAGE_PICK_TITLE_SUFFIX = '装备';
+/** `选择` + 槽位名 + `装备`（例：`选择前轮装备`）。 */
+export function garageSlotTitle(slot: GarageSlot): string {
+  return `${GARAGE_PICK_TITLE_PREFIX}${GARAGE_SLOT_LABELS[slot]}${GARAGE_PICK_TITLE_SUFFIX}`;
+}
+/**
+ * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2（必改 4）+ R3（必改 5）｜**合成入口**。
+ *
+ * Queue 逐字（R2）：底部提供持续可见的「合成」入口，**不得**要求玩家通过拖动 / 长按 /
+ * 猜测卡片行为发现合成；有可合成组时给一个最小可感知状态（红点 **或** 数量）；
+ * 点击 → **进入现有正式 Fusion 流程**（不重做 Fusion 页面）。
+ *
+ * Queue 逐字（R3 必改 5）：入口**始终保持可点击** —— 不要因为当前没有 5/5 就 disable
+ * 整个入口；有可合成项显示 `合成 ●` 或 `合成 1`，没有则**仍显示普通「合成」**；
+ * 点进去后在正式 Fusion 流程里看到真实的 `2/5 · 4/5 · 5/5`，让玩家自己理解规则。
  *
  * ⇒ 落地：底部固定一个 `合成` 按钮（`data-ph-action="fuse-entry"`），
- *   有可合成组时显示 `可合成 N`（N = `weaponEntries().fusable` 的组数）+ `data-ph-fuse-ready`；
- *   点击 = 切到 **武器槽** 并把第一张可合成卡滚入视野 + 聚焦 —— 那里就是既有的
- *   `合成升星` 按钮（`fuseStack()` 的**唯一**调用点，本 Queue 一行规则都没改）。
+ *   **从不 disabled**；有可合成组时加 `ph-fuse-entry-ready`（红点 `::before`）+ 数量；
+ *   点击 = 切到**武器槽**并把第一张可合成卡滚入视野 + 聚焦 —— 那里就是既有的
+ *   `合成升星` 按钮（`fuseStack()` 的**唯一**调用点）与每张卡的 `成长 N/5` 进度行。
+ * ⚠️ 本入口**不执行**合成、不碰库存 / 存档；规则一行都没改。
  */
 export const GARAGE_FUSE_ENTRY_LABEL = '合成';
-export const GARAGE_FUSE_ENTRY_READY_LABEL = '可合成';
-export const GARAGE_FUSE_ENTRY_NONE_LABEL = '暂无可合成';
 /**
  * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R1｜**配置页最核心的三种状态**。
  *
@@ -440,12 +470,20 @@ export interface ProductProbe {
    */
   readonly equippedWeaponStar: number;
   /**
-   * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜Garage 当前**高亮的装备槽**。
+   * ══════════════════════════════════════════════════════════════════════════════
+   * PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜Garage 当前**高亮的装备槽**。
    * ⚠️ 原先的 `selectedWeaponId` / `selectedWeaponStar` / `equipEnabled` 三个字段随
    *    R1「先选 → 再点`装备`」两步流程一并删除（四维统一为点卡即装备，
    *    「卡片已选择但还没真正装备」这种中间态在结构上不再存在）。
+   * ══════════════════════════════════════════════════════════════════════════════
    */
   readonly garageSlot: GarageSlot;
+  /**
+   * R3 验收 3｜**当前槽 → 下方卡片区标题**的对应关系（页面真实画出来的那个字符串，
+   * 例：`garageSlot === 'front'` ⇒ `'选择前轮装备'`）。
+   * ⚠️ 与 `garageSlot` **同一次渲染**读出来 ⇒ 二者分叉即红（不靠人眼核对）。
+   */
+  readonly garageSlotTitle: string;
   /**
    * 页面上真实渲染出来的装备槽数量（本 Queue 之后恒为 **4**）。
    * ⚠️ 运行时读数（`querySelectorAll('[data-ph-slot]').length`），不是源码推断
@@ -471,6 +509,12 @@ export interface ProductProbe {
   readonly garageFuseReadyCount: number;
   /** 底部合成入口是否处于「可感知」态（有可合成组时 = true）。 */
   readonly garageFuseEntryReady: boolean;
+  /**
+   * R3 验收 8｜底部合成入口是否**被禁用**（恒为 `false`）。
+   * ⚠️ Queue 必改 5 明令「不要因为当前没有 5/5 就 disable 整个入口」⇒ 这条读数是
+   *    「无条件可进入」的运行时硬证据（`el.disabled === true`，不是源码推断）。
+   */
+  readonly garageFuseEntryDisabled: boolean;
   /**
    * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜**Movement 维度的全量读数**
    * （直接来自 `playerLoadout.movementReading()`，页面画的**就是这些字段**）。
@@ -1744,28 +1788,34 @@ export function mountProductHome(
 
   /**
    * ══════════════════════════════════════════════════════════════════════════════
-   * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜**Garage = 移动端「槽位式配车页」**
+   * PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜**四个同构装备槽的配车页**
    * ══════════════════════════════════════════════════════════════════════════════
    *
-   * 真人手机录屏的三个 P0 问题（Queue 逐字）与对应的结构决定：
-   *
-   * | # | 问题 | 本页的处置 |
-   * |---|---|---|
-   * | 1 | 不知道装备该「拖动」还是「点击」 | **只有点**：点槽位 → 点已拥有部件 → 立即装备；零拖拽 |
-   * | 2 | Preview 朝向与正式战斗相反 | 修 `vehiclePreview` 的坐标口径（见 `previewOffset`）+ 4 个槽**贴真实挂点** |
-   * | 3 | 不知道从哪里进入合成 | 底部**持续可见**的「合成」入口（有可合成组时带数量提示） |
+   * 本轮的真人录屏结论（Queue 逐字）：代码里有 4 个槽，但玩家看到的是
+   * **「上面一个独立的 Weapon 悬浮块 + 下面 3 个像页签的「后轮 / 车身 / 前轮」按钮」**
+   * ⇒ 认知变成「3 个页签 + 1 个不知道是什么的武器块」，而不是「4 个同等级装备槽」。
+   * **上一版「槽位跟随真实挂点坐标」的设计假设判定失败**，不再围绕 anchor 微调。
    *
    * ── 结构骨架（DOM 层就固定住）────────────────────────────────────────────────
    * ```
    * .ph-main.ph-main-garage        ← 整页 overflow:hidden（本页整体不滚）
    *   .ph-header                   ← 标题 / 返回首页（返回恒可达）
-   *   .ph-garage-stage             ← 战车 Preview + 4 个装备槽（**固定**，不随列表滚出）
-   *   .ph-my-parts                 ← 「我的装备 · <槽位名>」（固定）
+   *   .ph-garage-stage             ← 战车 Preview（**固定**）
+   *   .ph-garage-current           ← 「当前装备」+ 2×2 装备槽（**固定**）
+   *   .ph-my-parts                 ← 「选择〈槽位名〉装备」（固定）
    *   .ph-garage-body              ← **唯一**滚动容器：当前槽的部件卡阵
-   *   .ph-garage-foot              ← 合成入口（持续可见）
+   *   .ph-garage-foot              ← 合成入口（持续可见 + **恒可点**）
    * ```
-   * ⚠️ 「固定」是**结构保证**（兄弟节点 + 只有中间那个 `overflow-y:auto`），
+   * ⚠️ 「固定」是**结构保证**（兄弟节点里只有中间那个 `overflow-y:auto`），
    *    不是「滚回去看一眼」⇒ 「点卡 → Preview 同次变化」在**当前屏幕内**成立。
+   *
+   * ── 2×2 版面（`GARAGE_SLOT_ORDER` 就是 DOM 顺序）─────────────────────────────
+   * ```
+   * [ 武器 ] [ 车身 ]
+   * [ 后轮 ] [ 前轮 ]
+   * ```
+   *   四个槽走**同一个** `.ph-slotnode` 构造分支、同一个 `1fr 1fr` grid
+   *   ⇒ 同尺寸 / 同结构 / 同交互 / 同选中态是**版面保证**（不是靠人工对齐）。
    *
    * ── 槽位 → 配置字段（一一对应，没有第二张映射表）─────────────────────────────
    *   `weapon` → `functionalSelections[WEAPON_SLOT]` / `body` → `bodyDefId` /
@@ -1773,16 +1823,16 @@ export function mountProductHome(
    *   四者各自有**唯一写入口**（`equipWeapon` / `equipBody` / `equipMovement`）
    *   ⇒ 「换一个槽位不会覆盖另一个槽位」是结构性的，不靠人工核对。
    *
-   * ── 槽位的位置 = **真实挂点**（不是排版凑出来的）─────────────────────────────
-   *   每个槽的横坐标 = 该部件在**正式 `BodyDef` 挂点**上的本地 x（经 `previewOffset`
-   *   换算成预览 px）；武器在车体上方（`frontMass` 挂点就在上面）、两个轮子在车体下方
-   *   （`movementHardpoints` 的 y 为正 = 向下）⇒ 玩家一眼能看出「这个东西装在这里」。
-   *   ⚠️ 槽位的纵向位置刻意抬到车体轮廓之外（上下各留一段），否则会盖住它指向的部件。
+   * ── 预览的职责被收敛（Queue 必改 4）──────────────────────────────────────────
+   *   Preview **只**回答「我换了东西以后，车发生了什么变化」。
+   *   Front / Rear 的认知由**明确槽名**（`选择前轮装备`）+ **Preview 实际变化**共同建立，
+   *   ⚠️ **不再**由「槽位贴到挂点坐标上」承担 ⇒ 本函数已不再读 `vehicleSlotAnchors()`，
+   *      也不再把槽位绝对定位到车体上（R2 的 `data-ph-slot-dx` / `GARAGE_SLOT_MAX_DX` 全删）。
    *
    * ── 硬边界（Queue 冻结清单）────────────────────────────────────────────────
    *   不新增第 5 个槽（**没有** Gadget 等未来空槽）、不改任何数值 / 部件 / 库存 / Seed /
    *   Reward / Fusion 规则 / Star 规则 / Battle / Physics / Camera / Product Run / Economy、
-   *   不做商城 / 教程 / 属性评分 / 推荐、不做拖拽；**只有部件卡阵内部滚动**。
+   *   不做商城 / 教程 / 属性评分 / 推荐 / 红绿对比、不做拖拽；**只有部件卡阵内部滚动**。
    */
   function renderGarage(r: LoadoutReading): void {
     renderHeader(GARAGE_TITLE);
@@ -1796,56 +1846,35 @@ export function mountProductHome(
     });
     header.append(back);
 
-    /* ---- 中上（固定）：战车 Preview + 4 个装备槽 ---- */
+    /* ---- 中上（固定）：战车 Preview。⚠️ 槽位**已经不在它里面**（R3 删除挂点定位） ---- */
     const stageBox = el('div', 'ph-garage-stage');
     stageBox.dataset['phGarageStage'] = '1';
-    const layout = vehiclePreviewLayout(draft);
     const car = el('div', 'ph-car-wrap ph-car-wrap-sm');
-    /*
-      ⚠️ 槽位节点是 **`.ph-car` 的子节点**（不是 stage 的）：它们的 `left` 与
-         `top: calc(100% + …)` 都以**车体本身**为基准 ⇒「横向贴挂点、纵向跳出车体轮廓」
-         才成立。挂到 stage 上会让 `100%` 变成整段高度，槽位直接落到「我的装备」上。
-    */
-    const previewBox = renderPreview(layout);
-    car.append(previewBox);
+    car.append(renderPreview(vehiclePreviewLayout(draft)));
     stageBox.append(car);
+    stage.append(stageBox);
 
-    /*
-      ⚠️ 槽位锚点由 `vehicleSlotAnchors(draft)` 给出 —— 它读的是**正式内容库**里该部件的
-         挂点 `localPosition`（`BodyDef.movementHardpoints` / `functionalHardpoints`）。
-         页面**不**自己 import `../core/content`：锚点计算留在 `vehiclePreview`（同一个模块
-         已经在读 registry），本页的 import 白名单仍是闭集（`PL-26`）。
-    */
-    const anchors = vehicleSlotAnchors(draft);
+    /* ---- 中上（固定）：「当前装备」+ 4 个**完全同构**的装备槽（2×2） ---- */
+    const current = el('div', 'ph-garage-current');
+    current.dataset['phGarageCurrent'] = '1';
+    current.append(el('span', 'ph-garage-current-label', GARAGE_CURRENT_LABEL));
+    const slots = el('div', 'ph-garage-slots');
+    slots.dataset['phGarageSlots'] = '1';
     const mv = readMovement();
+    /*
+      ⚠️ 四个槽走**同一个**构造分支：没有 `if (slot === 'weapon')` 这种分支，
+         也没有 `-above` / `-below` 之类的专属 modifier ⇒ 「同尺寸 / 同结构 / 同交互 /
+         同选中态」是版面保证，而不是四个各自排版后再人工对齐。
+      ⚠️ 槽位坐标由 **CSS grid** 决定；这里**不**写任何 `style.left` / `style.top`
+         （R2 的挂点定位已按 Queue 删除）。
+    */
     for (const slot of GARAGE_SLOT_ORDER) {
-      const anchor = anchors[slot];
-      const off = previewOffset(layout, anchor.cx, anchor.cy);
-      /*
-        ⚠️ 横向 = 该部件的**真实挂点 x**（换算成预览 px）；不夹取会跑出舞台
-          （`overflow:hidden` 直接切掉）⇒ 夹到 ±`GARAGE_SLOT_MAX_DX`，
-          同时 CSS 里给槽位 `max-width` 限宽，最坏情况仍在 390 宽的舞台内。
-        ⚠️ 纵向**刻意不用挂点的真实 dy**：那会把标签压在它指向的部件上。
-          武器统一挂到车体**上方**、其余三个挂到车体**下方**（CSS 的两个 modifier），
-          横坐标仍严格跟着挂点 ⇒「前轮在右、后轮在左、武器在挂点那一侧」照旧成立。
-      */
-      const dx = Math.max(-GARAGE_SLOT_MAX_DX, Math.min(GARAGE_SLOT_MAX_DX, off.dx));
       const btn = el('button', 'ph-slotnode');
       btn.type = 'button';
       btn.dataset['phSlot'] = slot;
       btn.dataset['phSlotActive'] = String(slot === garageSlot);
-      btn.dataset['phSlotDx'] = String(Math.round(dx));
       btn.dataset['phSlotDef'] = garageSlotDefId(slot, r, mv);
-      /*
-        ⚠️ 槽位纵向：**武器挂在车体上方**（`frontMass` 挂点 y = −8 ⇒ 本来就在车体上半部），
-           **车身 / 前轮 / 后轮挂在车体下方**（轮子挂点 y = +25 = 向下，物理上就在车体下方；
-           车身标签放下方是为了和武器错开，横坐标正对车体）。
-           纵向**必须跳出车体轮廓**，否则标签会盖住它指向的那个部件。
-      */
-      const above = slot === 'weapon';
-      btn.classList.add(above ? 'ph-slotnode-above' : 'ph-slotnode-below');
       if (slot === garageSlot) btn.classList.add('ph-slotnode-active');
-      btn.style.left = `calc(50% + ${dx}px)`;
       btn.append(
         el('span', 'ph-slotnode-label', GARAGE_SLOT_LABELS[slot]),
         el('span', 'ph-slotnode-value', garageSlotValue(slot, r, mv)),
@@ -1856,17 +1885,15 @@ export function mountProductHome(
         garageSlot = slot;
         render();
       });
-      previewBox.append(btn);
+      slots.append(btn);
     }
-    stage.append(stageBox);
+    current.append(slots);
+    stage.append(current);
 
-    /* ---- 中下：「我的装备」—— 只列**当前槽**兼容的部件（标题固定，卡片阵滚动） ---- */
+    /* ---- 中下：「选择〈槽位名〉装备」—— 只列**当前槽**兼容的部件（标题固定，卡片阵滚动） ---- */
     const myParts = el('div', 'ph-my-parts');
     myParts.dataset['phMyParts'] = garageSlot;
-    myParts.append(
-      el('span', 'ph-my-parts-label', GARAGE_MY_PARTS_LABEL),
-      el('span', 'ph-my-parts-slot', GARAGE_SLOT_LABELS[garageSlot]),
-    );
+    myParts.append(el('span', 'ph-my-parts-title', garageSlotTitle(garageSlot)));
     stage.append(myParts);
 
     const body = el('div', 'ph-garage-body');
@@ -1912,12 +1939,15 @@ export function mountProductHome(
   }
 
   /**
-   * 底部**持续可见**的「合成」入口（Queue 必改 4）。
+   * 底部**持续可见且恒可点**的「合成」入口（R2 必改 4 + R3 必改 5）。
    *
-   *   - 有可合成组 ⇒ 显示 `可合成 N`（N = `weaponEntries().fusable` 的组数）+ 高亮态；
-   *   - 没有 ⇒ 仍然画出来（持续可见，不是消失），只是禁用 + 如实说「暂无可合成」；
-   *   - 点击 ⇒ 切到**武器槽**并把第一张可合成卡滚入视野 + 聚焦 ⇒ 那里就是既有的
-   *     `合成升星` 按钮（`fuseStack()` 的**唯一**调用点）。
+   *   - **从不 `disabled`**：Queue 逐字「不要因为当前没有 5/5 就 disable 整个入口」；
+   *   - 有可合成组 ⇒ `合成` + 红点（`ph-fuse-entry-ready` 的 `::before`）+ 数量（`合成 1`）；
+   *   - 没有 ⇒ **仍显示普通「合成」**（不加数量、不加红点），照旧可点；
+   *   - 点击 ⇒ 切到**武器槽**并把第一张可合成卡滚入视野 + 聚焦 —— 那里就是既有的
+   *     `合成升星` 按钮（`fuseStack()` 的**唯一**调用点）与每张卡的 `成长 N/5` 进度行。
+   *     没有可合成组时仍然切到武器槽 ⇒ 玩家在那里看到真实的 `2/5 · 4/5 · 5/5` 进度，
+   *     自己理解「同 partId + 同 star，5 个 → 1 个 star+1」这条规则（Queue 验收 9）。
    *
    * ⚠️ 本入口**不执行**合成：Queue 明令「不要在本 Queue 重新设计整个 Fusion 页面」，
    *    所以它只负责把玩家送到**既有正式流程**上，规则一行都没改。
@@ -1932,17 +1962,11 @@ export function mountProductHome(
     entry.dataset['phFuseReadyCount'] = String(ready);
     entry.dataset['phFuseEntryReady'] = String(ready > 0);
     if (ready > 0) entry.classList.add('ph-fuse-entry-ready');
-    else entry.disabled = true;
-    entry.append(
-      el('span', 'ph-fuse-entry-label', GARAGE_FUSE_ENTRY_LABEL),
-      el(
-        'span',
-        'ph-fuse-entry-state',
-        ready > 0 ? `${GARAGE_FUSE_ENTRY_READY_LABEL} ${ready}` : GARAGE_FUSE_ENTRY_NONE_LABEL,
-      ),
-    );
+    entry.append(el('span', 'ph-fuse-entry-label', GARAGE_FUSE_ENTRY_LABEL));
+    // 数量是**可选**的加强信息：没有可合成组时**不加**任何文字（Queue：仍显示普通「合成」）
+    if (ready > 0) entry.append(el('span', 'ph-fuse-entry-state', String(ready)));
     entry.addEventListener('click', () => {
-      if (ready === 0) return;
+      // ⚠️ 无条件带路（不再 `if (ready === 0) return;`）⇒ 入口在任何状态下都真的进入合成流程
       fuseFocusPending = true;
       garageSlot = 'weapon';
       render();
@@ -1980,6 +2004,17 @@ export function mountProductHome(
     const rect = n.getBoundingClientRect();
     const cs = window.getComputedStyle(n);
     return rect.width > 0 && rect.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden';
+  }
+
+  /**
+   * R3 验收 8｜底部「合成」入口是否**被禁用**（恒为 `false`）。
+   * ⚠️ 「无条件可进入」必须是**查得到的事实**：这里读的是元素自身的 `disabled` 属性
+   *    （`HTMLButtonElement.disabled`），不是「源码里没写 `disabled`」这种推断。
+   *    没有元素也按「不可进入」处理（返回 `true`）⇒ 入口被删掉不会假绿。
+   */
+  function fuseEntryDisabledNow(): boolean {
+    const n = stage.querySelector<HTMLButtonElement>('[data-ph-action="fuse-entry"]');
+    return n ? n.disabled === true : true;
   }
 
   const handle: ProductDebugHandle = {
@@ -2115,11 +2150,19 @@ export function mountProductHome(
          */
         claimUpgradableHint: !!header.querySelector('[data-ph-claim-hint="upgradable"]'),
         /**
-         * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜Garage 的**当前高亮装备槽**。
+         * ══════════════════════════════════════════════════════════════════════
+         * PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜Garage 的**当前高亮装备槽**。
          * ⚠️ 原来这里的 `selectedWeaponId` / `selectedWeaponStar` / `equipEnabled`
-         *    三个字段已随「先选后装备」两步流程一并删除（必改 2）。
+         *    三个字段已随「先选后装备」两步流程一并删除。
+         * ══════════════════════════════════════════════════════════════════════
          */
         garageSlot,
+        /**
+         * R3 验收 3｜当前槽 → 卡片区标题（**读页面真实画出来的那个节点**，
+         * 不是重算一遍函数）⇒ 「槽位高亮」与「下方标题」不可能各说各话。
+         */
+        garageSlotTitle:
+          stage.querySelector('.ph-my-parts-title')?.textContent ?? '',
         /**
          * ⚠️ 运行时读数：页面上**真的画出来**几个装备槽（恒 4）。
          * 与固定顺序常量一起构成「4 个真实槽、没有第 5 个空槽」的双证。
@@ -2142,6 +2185,10 @@ export function mountProductHome(
         garageFuseReadyCount: r.weapons.filter((w) => w.fusable).length,
         garageFuseEntryReady:
           stage.querySelector('[data-ph-action="fuse-entry"]')?.getAttribute('data-ph-fuse-entry-ready') === 'true',
+        /**
+         * R3 验收 8｜入口**从未** disabled（Queue 必改 5：无条件可进入）。
+         */
+        garageFuseEntryDisabled: fuseEntryDisabledNow(),
         /**
          * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 维度读数
          * （与 Garage 里那一片卡画的**是同一份**，页面禁止自行推导）。
