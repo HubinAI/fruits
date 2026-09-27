@@ -1078,3 +1078,143 @@ reseed **会改写 Build**（把主武器槽换成 `cannon ★1`）⇒ `openGrow
    - `start-intact` 的账号现在也会被标记 ⇒ 此后即使真的把起点消费掉**也不会**再被恢复。
      这是**故意的**：`★1 ≥ 4` 说明起点没被消耗，他不是本迁移的目标账号，而「只判一次」优先。
 
+## §15 R5 内容池种子 + 新账号内容基线（PRODUCT-LOOP-R5-CONTENT-POOL-01 / R5-MULTI-WEAPON-PRODUCT-COMPAT 固化；写任何内容相关断言前必读）
+
+**一次性的第五份种子** `src/product/r5ContentPoolSeed.ts`，storage key
+`strongfruit.r5ContentPoolSeed.v1`，版本 `R5_CONTENT_POOL_VERSION = 1`。
+与 R2 / R3 / R4 三份**逐条同构**：判定（纯读）→ 变更 → `saveInventory` → **最后**落标记；
+标记语义 = **`decided`（决策已做出）** ⇒ **`already-complete` 出口也必须落标记**
+（否则玩家自己消耗一件会被下一次挂载重发）。
+
+**它发什么**：`R5_POOL_BODY_IDS = NEW_OFFICIAL_BODIES`（4 台车身全解锁）+
+`R5_POOL_PART_IDS = OFFICIAL_PARTS`（11 件各补到 ★1 ≥ 1）。**只补缺的**；
+唯一写动作 = `grantBody` + `addPart(inv, id, 1, n)` ⇒ **只增不减、不发 ★2 及以上**。
+
+### 15a 新账号内容基线（照这个写断言）
+- Garage 武器槽 **9 张卡**（R5 前是 3 张）、车身槽 **8 张**、后轮 / 前轮各 **5 张**；四槽 `locked = 0`。
+- `weapons` = `playerLoadout.weaponEntries()` = **仅 `category === 'weapon'`**，按 id 字典序：
+  `cannon, flamethrower, hammer, laser, machineGun, rammer, saw, shotgun, spear`（**9 件**；
+  `pushRod` / `thruster` 是 **gadget**、不在其中）。
+- ⚠️ 任何写死「3 件武器」的断言 R5 起都会红。
+
+### 15b storage key 闭集：七 → 八（+ `strongfruit.r5ContentPoolSeed.v1`）
+既有两处闭集断言已 +1：`_e2e_product_home.cjs` 的 **E5**、`_e2e_product_reseed.cjs` 的 **R2g**；
+另 product-loop 的 **A1b** 与 product-reward 的 **A3 / G1** 已改为「9 件逐 id 相等」。
+
+### 15c 内容化之后「失效」的既有前提（**换合法路线 + 加守门断言，不删断言**）
+`product-home` 的 **GS6** 原靠「Body 槽天然有未拥有样本」⇒ 被内容池作废 ⇒
+现改为**受控样本**（同会话内临时写正式 `ownedBodies.v1` 去掉一台车身，取证后恢复），
+新增 **GS6b** 证明复原。手法与 **M2b** 一致。
+
+### 15d 卡片表变长 ⇒ 真实鼠标点击前**必须先** `scrollIntoViewIfNeeded()`
+9 张卡之后 `[data-ph-weapon="spear"]` 落在滚动区外：`boundingBox()` 仍给矩形但**点空**
+（实测 `lastEquip=null`）。`_e2e_product_reward.cjs` 的 `clickSelector` 已按
+`_e2e_product_loop.cjs` 同法补齐。
+
+### 15e canonical 内容事实（沿 Runtime 查过，别重查）
+- `contactRouter.ts`：弹丸读 `projectileDamage`(:996)、直击读 `baseDamage`(:688)，
+  **grep `'cannon'` 为空** ⇒ 伤害链共用、**无 cannon 专属 modifier**。
+- `behaviorRegistry.FACTORIES` **11 项已注册**、**`'ram'` 未注册** ⇒ `spear` 靠 collider 直击、
+  无 behavior runtime。
+- ⚠️⚠️ **注册了 behavior 的 11 件 ≠ 玩家可拥有的 11 件**：`weaponDefs()` 是 **10 件**
+  （含 **`ramHead`** 冲撞头），但 `ramHead` **不在 `OFFICIAL_PARTS`** ⇒
+  `isOfficialPart('ramHead') === false` ⇒ 玩家永远拿不到、不进任何库存。
+  「本批次可接入武器」= `OFFICIAL_PARTS.filter(isWeaponDefId)` = **9 件**，差集恰 `['ramHead']`。
+- `buildSnapshotFromDraft` **无 behavior / category 过滤** ⇒ 11 件全部可进 Snapshot。
+
+### 15f 仍**未放宽**的裁决
+`runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS = ['cannon']`（与
+`runModifiers.RUN_BASE_WEAPON_DEF_ID` **同值但各自声明**）。
+为武器补正式 Run Build 内容 = **另一条 Queue**（见 §16）。
+
+## §16 「非 cannon 武器进完整 Run」两次 STOP + Q5 收口（R5-SPEAR/HAMMER-FULL-RUN-R1 → Q5 固化）
+
+**结论（本批次无变化）：唯一支持完整 Run 的武器仍是 `cannon`。**
+两次调查（`R5-SPEAR-FULL-RUN-R1` + `R5-HAMMER-FULL-RUN-R1`）均**只调查、零改码、零源码 commit**，
+由 Q5 统一收口 —— 判定不变，把结论变成**机器守卫**（`src/` 零改动）。
+
+**阻塞点 = Run 的强化注入接缝只认 cannon**：
+- 完整 Run 唯一线性路径上 `d2-choice1`(layer1) 是**必选** CHOICE，池里 3 项**全是 cannon 派生**；
+- `RUN_BASE_WEAPON_DEF_ID = 'cannon'`，判据 =「装载里有没有正式 cannon」
+  ⇒ 非 cannon 装载在 battle2（DAY 3）创建时 **throw**（实测 `本局装载里没有 "cannon"…`）
+  = **P0「Run 卡死」的形状**。
+
+**三条出口全禁**：① 为该武器新增专属强化（新设计，且冲 `LC-23`「没有新 Spear/Hammer Buff」）
+② 让该装载跳过强化（第二套 Run 流程 / 新增特殊资格状态）
+③ 套用 cannon overlay（`composeRunWeaponDef:481-493` **会把 `behavior` 一并改成 overlay 的**
+⇒ 实测 `hammer`→`cannon`、`ram`→`cannon`）。
+
+**产品侧明文裁决**：`product/runCompatibility.ts:20-23` 逐字——「在 Spear / Hammer 有正式 Run Build
+内容之前：它们不得进入完整 Run」；`FULL_RUN_SUPPORTED_WEAPON_IDS = ['cannon']`（:58）。
+机器钉死：`LC-02` / `LC-11` / `LC-23`（`tests/productRunBuildLoadoutCompat.test.ts`）。
+
+**spear vs hammer 的差别**：
+- `spear` **没有 behavior runtime**（`FACTORIES` 无 `'ram'`，靠 collider 直击 `baseDamage: 60`）；
+- `hammer` **攻击 Runtime 完整**（`FACTORIES.hammer` + 专属 `hammerBehavior.ts`，真实 Revolute
+  motor + limit）⇒ **hammer 记的是「内容实现缺口」**：攻击实现不缺，缺的是它的正式 Run Build 内容
+  （强化）+ 与之匹配的可行性。
+- ⚠️ **hammer 第二条独立证据（实测）**：产品可达形状 = **双锤**（`equipWeapon('hammer')` 只写
+  `WEAPON_SLOT`，而 starter 固定在 `top` 的那把锤仍在）⇒ **第一场就落败（0/4）**；单锤 2/4；
+  **锤 + 炮 4/4**（说明 hammer 本身能打）。
+- ⚠️ **强化不是可选装饰**：实测无强化时**连 cannon 都打不完旧四场阶梯**（3/4）。
+
+**Q5 交付物（`9dcbf7b`，`src/` 零改动）**：
+- `tests/productMultiWeaponCompatR5.test.ts`（11 条，**真源驱动**逐件矩阵 —— 集合从
+  `weaponDefs()` / `OFFICIAL_PARTS` **现读** ⇒ 新增武器自动进入）；
+  ⚠️ **MW-03「恰好一件放行」不可省**：否则把白名单改成 `['cannon','spear']` 时 `ok` 与
+  `supportsFullRun` 会**一起翻**、矩阵自洽变绿，守卫就失效了。
+- `_e2e_product_fail.cjs` 的 **A4b 逐件守门矩阵**（8 件非支持武器各走一遍：真实点击 →
+  **独立读 localStorage** → 车库 unsupported → 首页 `startRunHref === null` →
+  **`equippedWeaponId` 仍是它** = 不自动换炮）。
+- ⚠️ Q5 三条负控制（白名单放宽 / 读路径注入写盘 / `FUSE_STACK=1`）分别打红 **4 / 2 / 2** 条
+  —— 守卫**真的会红**。
+
+## §17 三段 Encounter Sequence + 「如实降级」口径（PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（Q3）固化；改 Run 脚本 / 写产品 E2E 终态断言前必读）
+
+### 17a 脚本形状（唯一真源 `src/lab/portraitBattleLab/runScript.ts`，10 节点）
+```
+d1-start(EVENT,1) → d2-battle1(BATTLE,2) → d2-choice1(CHOICE,2) → d3-battle2(BATTLE,3)
+→ d4-durability(DURABILITY,4) → d4-lateral(CHOICE,4) / d5-tend(EVENT,5)
+→ d5-choice2(CHOICE,5) → d6-travel(EVENT,6) → d7-final(FINAL,7)
+```
+- 三段对手：`d2-battle1` = **ProtoRusher**（`R1-RUSH-02`）· `d3-battle2` = **Chaser**（`OPP-16`）·
+  **`d7-final` = RangedTurret（`OPP-03`）** —— 第 3 段落位**终局**（FINAL ⇒ 直接判终态，
+  **没有 `RESULT` 相位**）。
+- `RUN_TOTAL_BATTLES = 3`；`RUN_TOTAL_CHOICES = 3`；`d6-travel` 是**纯叙事**（无对手 / 无候选池 /
+  零数值改动），它的存在只为补上删掉 `d6-battle3` 之后的 DAY 6 叙事断口。
+- 阶段切换沿用既有 `beginBattle` **重建战斗世界**（上一 Encounter 实体随之释放）；
+  Validation / Lab 特殊入口**未**接进正式 Run。
+
+### 17b ⚠️ 为什么产品侧**必然** FAILED（根因，别重查）
+- `RangedTurret` 是全项目**唯一**声明 `enemyDrive:'keep-distance'` 的对手（`testData.ts:238`；
+  透传到 `ENEMY_KEEP_DISTANCE_BANDS` near=240 / far=480）⇒ **炮类弹丸在控距下零命中**。
+- 产品可达装配 = **主武器槽 `frontMass` 一门炮**（Garage UI 只能改这个槽）⇒
+  三段全打但终局败：实测 `phase=FAILED` / `failed=true` / `complete=false` /
+  `battlesCompleted=3/3` / `day=7` / 耐久 0% / **第三段敌方耐久全程 1100**。
+- 能通关三段的装配是**弹丸堆叠**（`machineGun×3` 零 Build 即 COMPLETE；
+  `front:cannon + top/rear:machineGun`）—— **产品 UI 到不了**。
+- ⇒ 这是**能力下降**，不是回归。**不要**为了让 E2E 变绿去放宽
+  `FULL_RUN_SUPPORTED_WEAPON_IDS` 或改对手数值。
+
+### 17c 「如实降级」的机器口径（**写新 E2E 时照抄**）
+- 依赖 COMPLETE 的判据**不删**：改记 `BLOCKED` —— `results.push({ pass: null, blocked: true, … })`，
+  summary **三桶**计数（`pass === true` / `pass === false` / `blocked === true`），
+  **退出码只由 FAIL 决定**（`process.exit(fail === 0 ? 0 : 1)`）。
+- ✅ **判据不删，只换相位**：把「打到 COMPLETE」改成「打到 FAILED」，并**补一条守门**
+  （FAILED 终点没有候选卡 / 没有领奖动作 / `claiming === false` 且 `claimStarts === 0` /
+  唯一动作是「返回主界面」）。
+- ✅ **能独立执行的分段要保住**：用 `if (completed) { …原逻辑… } else { …blocked 列表… }` 门控，
+  不要把整段都 BLOCK；**独立段**（失败路线本身、受控样本注入段、进 Run 瞬间的状态断言）必须留在门外。
+- ⚠️ **门控点必须在「会产生副作用」的那一步之前**：否则 `clickSelector` 会去找不存在的按钮，
+  以 `locator.boundingBox: Timeout 30000ms` 的形式炸掉整个文件（实测）。
+- ⚠️ **降级路径要显式把页面带回首页**：整页导航是「按下成功态 CTA」的副作用，早期返回时**不会发生**
+  ⇒ 后面读产品首页探针会 `Cannot read properties of undefined (reading 'probe')`（实测）。
+- ⚠️ 依赖「领过奖」的弱前提（如「账本 ≥ 1 条」）要按实际情形换口径，并在断言名里标 `（如实降级）`。
+
+### 17d 本批次各 E2E 的口径（实测）
+`run-page 499/499` · `home 98/98` · `fail 48/48` · `legacy 18/18` ·
+`loop 29/0/20 BLOCKED` · `reward 17/59/0/42` · `star-power 9/23/0/14` · `reseed 17/22/0/5`
+—— 八个批次**全部 EXIT=0**。COMPLETE 落链的**模型侧**覆盖：
+`tests/productRunEncounterSequenceQ3.test.ts`（Q3-05）/ `productLoopRunReward` /
+`productLoopEndToEndPlayerLoop` / `productFusionR2B` / `productStarPowerR2C` / `productReseedR2`。
+
