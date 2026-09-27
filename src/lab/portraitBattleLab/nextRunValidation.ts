@@ -24,7 +24,7 @@
  *
  * ## 为什么「上一局」是**快进**出来的
  *
- *   Queue 允许「模拟/进入 RUN COMPLETE」。真打完一局要走四场真实战斗，而本 Queue 的
+ *   Queue 允许「模拟/进入 RUN COMPLETE」。真打完一局要走三段真实战斗，而本 Queue 的
  *   验证目标是**第一场**；因此这里用 `buildPriorCompletedRun` 走**完全相同的状态机 API**
  *   （`pressRunAction` / `chooseRunBuff` / `resolveDurability` / `finishRunBattle`）
  *   把上一局推到 `COMPLETE`，只有「每场结束时剩多少耐久」取自固定表。
@@ -166,11 +166,14 @@ export function nextRunSeedById(id: string): RunSeedOption | null {
 /**
  * 快进用的**每场掉血**（脚手架固定值，非平衡结论）。
  *
- * 前三个取自 PRP-RUN-02 实测的「基础 Build 满耐久 1100」压力阶梯
- * （低压 181 / 中低压 221 / 中压 257），第四场取 300 使上一局在第 7 天**仍然存活**
+ * 取自 PRP-RUN-02 实测的「基础 Build 满耐久 1100」压力阶梯
+ * （低压 181 / 中低压 221 / 中压 257）—— 三段打完仍剩 441 ⇒ 上一局在第 7 天**仍然存活**
  * —— 本验证需要上一局以 `RUN COMPLETE` 结束（`FAILED` 不是本流程的入口）。
+ *
+ * ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：Run 从**四场**收成**三段**
+ *    ⇒ 这个数组的长度随 `RUN_TOTAL_BATTLES` 走，多余项不会被读到（`battleIndex` 只走到 2）。
  */
-const PRIOR_RUN_DAMAGE: readonly number[] = [181, 221, 257, 300];
+const PRIOR_RUN_DAMAGE: readonly number[] = [181, 221, 257];
 
 /**
  * 快进时上一局走过的**强化路线**（第一层 → 第二层；按 CHOICE 节点的到达顺序取值）。

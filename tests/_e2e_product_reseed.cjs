@@ -8,6 +8,7 @@
  *   ③ **验收 ③**：恢复之后**真的**能走完完整数据链 ——
  *      `4/5 → 打一局真实战斗 → COMPLETE → 领奖 → 5/5 → Garage 合成 → ★2 → 自动装备 ★2`
  *      →（回首页）下一局地址里的装备载荷已经是 ★2；
+ *      ⚠️ **R6 起这一条不可达**，见下方裁决披露段（`R4b ~ R4g` 记 `BLOCKED`）。
  *   ④ **必改 2 / 验收 ④**：其他 Weapon / Movement / 进度**一个字节都不动**（逐条对账，不是抽样）；
  *   ⑤ **回归（门禁抓出的真实丢档路径）**：首入判定**只做一次** —— 新账号首入时判据还不成立，
  *      但标记照样落盘；玩家之后**自己**合成出来的 ★2 绝不会在下一次挂载被当成「上一轮的产物」清掉
@@ -17,6 +18,29 @@
  *    它**不重复** star_power / loop / reward / fail 的既有覆盖（奖励怎么发、合成怎么算、
  *    伤害怎么变都在那几条里）；这里只证明「上一轮验证把起点消费掉的账号能被拉回起点，
  *    并且拉回去之后那条链**真的**能再走一遍」。
+ *
+ * ══════════════════════════════════════════════════════════════════════════════════════
+ * ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）
+ *
+ * 产品 Run 已收成**三段问题序列**（`ProtoRusher` → `Chaser` → `RangedTurret`），第 3 段落位
+ * **终局** `d7-final`。`RangedTurret` 是全项目**唯一**声明 `enemyDrive:'keep-distance'` 的对手
+ * ⇒ 本文件那条「cannon 确定性通关路线」在控距下**零命中** ⇒ **那一局必然 `RUN FAILED`**
+ * （实测 `phase=FAILED battles=3/3 耐久=0%`；Node 同源证据见
+ * `tests/productRunEncounterSequenceQ3.test.ts` Q3-07）。
+ *
+ * ⇒ 如实降级（**判据不删，只换相位 + 记账**）：
+ *    · `R1 ~ R4`（迁移本身 / 一次性 / 恢复后的起点读数）**照常** —— 它们与终态无关；
+ *    · `R4b` 改为**如实**断 `RUN FAILED`，并新增 `R4b2`：FAILED 终点没有候选卡 / 没有领奖动作 /
+ *      唯一动作是「返回主界面」（探针级；像素级对照见 `_e2e_product_loop.cjs` C3e）；
+ *    · `R4c ~ R4g`（领奖 → 5/5 → 合成 ★2 → 自动装备 → 下一局载荷）**不可达** ⇒ 逐条 `BLOCKED`
+ *      （**既不计 PASS 也不计 FAIL**）；
+ *    · `R5a ~ R5c`（门禁抓出的丢档路径回归）**照常** —— 它们用**受控样本**直接注入正式存档 key，
+ *      不依赖任何一局 Run 的终态（这正是「契约变更作废路线 ⇒ 换合法路线」的既有手法）。
+ *
+ * **诚实披露**：「恢复后的账号能再走完整条链（COMPLETE → 领奖 → 合成）」这条**浏览器端**能力
+ * 在本批次无证据（能力下降，不是回归）；模型侧覆盖仍在 `tests/productReseedR2.test.ts` /
+ * `tests/productFusionR2B.test.ts`。根因已记入未决台账 + 独立 Bug Queue。
+ * ══════════════════════════════════════════════════════════════════════════════════════
  *
  * 手段（与既有产品 E2E 同一纪律，全部真实行为取证）：
  *   - 真实浏览器（playwright-core / msedge）+ 独立产物 `dist-portrait-lab/`；
@@ -130,6 +154,15 @@ const results = [];
 function log(pass, name, detail = '') {
   results.push({ pass, name, detail });
   console.log((pass ? 'PASS ' : 'FAIL ') + name + (detail ? ' | ' + detail : ''));
+}
+/**
+ * ⚠️ R6 如实降级：依赖「那一局 COMPLETE → 领奖 → 合成」的判据在本批次没有观测对象
+ * （第 3 段控距下那一局恒 FAILED，见文件头披露）。⇒ 单独记 `BLOCKED`：既不通过
+ * （**绝不伪造成 PASS**）也不失败（不是回归），summary 单独计数、**退出码不受影响**。
+ */
+function blocked(name, detail = '') {
+  results.push({ pass: null, blocked: true, name, detail });
+  console.log('BLOCKED ' + name + (detail ? ' | ' + detail : ''));
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -531,11 +564,41 @@ async function main() {
     await waitRunReady(page);
     const run = await driveRun(page, WIN_POLICY, '恢复后的一局');
     const pDone = run.last;
+    /*
+      ⚠️ R6 如实降级：原判据 =「恢复后的这一局**真的**能走到 COMPLETE」。三段序列的第 3 段
+      （终局 `RangedTurret`）在控距下让本装载零命中 ⇒ 如实改为断 FAILED（**判据不删，只换相位**），
+      并补 `R4b2` 守门（FAILED 终点不发奖、唯一动作是「返回主界面」）。
+    */
     log(
-      run.stopped === 'COMPLETE' && !!pDone,
-      'R4b 恢复后的这一局**真的**能走到 COMPLETE（真实战斗，真实鼠标）',
-      `stopped=${run.stopped} ms=${run.ms} phases=${run.seen.join('→')}`,
+      run.stopped === 'FAILED' && !!pDone && pDone.failed === true && pDone.complete === false,
+      'R4b（如实降级）恢复后的这一局三段全打到终局 → RUN FAILED（第 3 段控距下零命中）',
+      `stopped=${run.stopped} ms=${run.ms} ` +
+        `battles=${pDone ? `${pDone.battlesCompleted}/${pDone.battleTotal}` : 'n/a'} phases=${run.seen.join('→')}`,
     );
+    log(
+      !!pDone &&
+        pDone.rewardChoices.length === 0 &&
+        pDone.rewardChoiceRects.length === 0 &&
+        pDone.claiming === false &&
+        pDone.claimStarts === 0 &&
+        pDone.actionLabel === '返回主界面' &&
+        pDone.actionEnabled === true,
+      'R4b2（如实降级）FAILED 终点**没有**候选卡、**没有**领奖动作；唯一动作是「返回主界面」且可用',
+      `候选=${pDone ? pDone.rewardChoices.length : 'n/a'} claiming=${pDone ? pDone.claiming : 'n/a'} ` +
+        `starts=${pDone ? pDone.claimStarts : 'n/a'} label=${pDone ? pDone.actionLabel : 'n/a'}`,
+    );
+
+    /*
+      ⚠️ R6 如实降级：`R4c ~ R4g`（领奖 → 5/5 → 合成 ★2 → 自动装备 → 下一局载荷）不可达 ⇒ BLOCKED。
+      ⚠️ 降级路径下页面**停在 run-page**（那次整页导航没有发生）⇒ 先显式回首页，让后面的 `R5a`
+         （受控样本注入 + `page.goto`）在一个可继续执行的状态上跑。
+    */
+    const runCompleted = run.stopped === 'COMPLETE';
+    if (!runCompleted) {
+      await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+      await waitHomeReady(page);
+    }
+    if (runCompleted) {
 
     /* ---- 原点：底栏唯一 CTA「领取并返回」（卡片纯展示） ---- */
     log(
@@ -595,6 +658,20 @@ async function main() {
       'R4g **「下一局更强」的输入**：上一局出发时是 ★1（无 `functionalStars` 键），现在「开始冒险」地址里的装备载荷已是 ★2',
       `before=${JSON.stringify((equipPayload0 || {}).functionalStars ?? null)} after=${JSON.stringify((equipPayload1 || {}).functionalStars ?? null)}`,
     );
+
+    } else {
+      /* ⚠️ R6 如实降级：`R4c ~ R4g` 的前提是「那一局 COMPLETE 后领奖」⇒ 本批次不可达。 */
+      const why = '不可达：那一局恒 RUN FAILED（第 3 段 RangedTurret 控距下零命中）⇒ 没有 COMPLETE、没有领奖';
+      for (const n of [
+        'R4c 终点的唯一出口是底栏 CTA「领取并返回」且可用',
+        'R4d 领到 cannon ⇒ 库存 5/5',
+        'R4e 5/5 的 ★1 炮：卡上「可合成」亮起',
+        'R4f 一次真实点击合成：★1 归 0、★2 = 1、equipped 自动升到 ★2',
+        'R4g 「下一局更强」的输入：装备载荷已是 ★2',
+      ]) {
+        blocked(n, why);
+      }
+    } /* ← if (runCompleted) 结束：R4c ~ R4g（领奖 → 合成 → 下一局载荷）到此为止 */
 
     /* ==================================================================================
        R5a..R5c｜**门禁抓出的真实丢档路径（回归）**：首入判定只做一次
@@ -669,13 +746,21 @@ async function main() {
     server.close();
   }
 
-  const failed = results.filter((r) => !r.pass);
-  console.log(`\n=== 结果：${results.length - failed.length}/${results.length} PASS ===`);
+  const pass = results.filter((r) => r.pass === true).length;
+  const blockedN = results.filter((r) => r.blocked === true).length;
+  const failed = results.filter((r) => r.pass === false);
+  console.log(
+    `\n=== 结果：${pass}/${results.length} PASS，${failed.length} FAIL，${blockedN} BLOCKED（本批次不可达 · 如实登记） ===`,
+  );
   if (failed.length > 0) {
     console.log('失败项：');
     for (const f of failed) console.log(` - ${f.name} | ${f.detail}`);
-    process.exit(1);
   }
+  if (blockedN > 0) {
+    console.log('\n本批次不可达（**既不计 PASS 也不计 FAIL**；根因见文件头裁决披露）：');
+    for (const b of results.filter((r) => r.blocked === true)) console.log(` - ${b.name} | ${b.detail}`);
+  }
+  if (failed.length > 0) process.exit(1);
 }
 
 main();

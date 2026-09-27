@@ -325,8 +325,8 @@ export interface RunBattleOptions {
    * 每一项都只是「既有正式对手模板」的引用）。
    * 省略 → 默认演示遭遇（`RUN_BATTLE_ENCOUNTER_ID`）→ 既有调用点行为逐字节不变。
    *
-   * ⚠️ 只换「打谁」，**不改**世界 / 出生 / 玩家装配 / 任何数值 —— 四场压力阶梯
-   * 靠**不同既有 Encounter** 形成（Queue 必改 2 明令禁止加 HP / speed / damage / count）。
+   * ⚠️ 只换「打谁」，**不改**世界 / 出生 / 玩家装配 / 任何数值 —— 三段问题序列
+   * 靠**不同既有 Encounter** 形成（Queue 必令禁止加 HP / speed / damage / count）。
    */
   readonly encounterId?: string;
   /**
@@ -352,7 +352,7 @@ export interface RunBattleOptions {
    * 这是「产品 Run 玩家那门炮」的基线，**不是** Modifier：它只重映射**玩家装载**里那一件
    * 基准武器，正式 `cannon` 键与敌方快照都不受影响 ⇒ 敌方 `RangedTurret` 的 cannon 恒为 80。
    *
-   * ⚠️ 默认 `false`：`encounterLab.ts` / RDC（`pblRangedDistanceControl`）/ 四场掉血压力阶梯 /
+   * ⚠️ 默认 `false`：`encounterLab.ts` / RDC（`pblRangedDistanceControl`）/ 三段序列 /
    *    全部既有 Lab 调用点的玩家侧仍是正式 80 ⇒ **逐字段不变**。
    */
   readonly playerBaseline?: boolean;
@@ -452,8 +452,9 @@ export class RunBattleRuntime {
     // ⚠️ 空 config：世界尺度 / 出生点 / 阶段全部取正式默认值（PRP 零覆盖）。
     //    ⚠️ PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：**唯一**的例外是「对手 Movement 姿态」，
     //    且它只在**数据源明确声明**时才出现（`LAB_ENCOUNTERS[].enemyDrive === 'keep-distance'`）。
-    //    未声明的 Encounter（ProtoRusher / Chaser / Run Script 四场）⇒ 这里仍是 `{}`，
-    //    对手驱动与改前**逐帧完全相同**。
+    //    未声明的 Encounter（`Chaser` / `ProtoRusher` 等）⇒ 这里仍是 `{}`，
+    //    对手驱动与改前**逐帧完全相同**（⚠️ `RangedTurret` **声明了** keep-distance，
+    //    它因此是本项目唯一会走这条分支的 Run 对手 —— 三段序列的第 3 段用它）。
     this.orchestrator = new PlanckBattleOrchestrator(
       playerSnapshot,
       this.plan.enemies[0].snapshot,

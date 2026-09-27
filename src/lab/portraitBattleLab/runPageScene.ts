@@ -92,7 +92,7 @@ export const RUN_DEMO_LOADOUT_ID = 'WatermelonHeavyCannon';
  *   （`HP <= 0` 即本局失败）。实测 `Chaser` 第一场就吃掉玩家 ~75% 耐久 → 第二场必败；
  *   `ProtoRusher` 在池内组合下可存活，同时保留真实物理接敌（会真实冲刺撞击）。
  *
- * ⚠️ PRP-RUN-02：本常量**不再**等于「本局唯一对手」——四场阶梯的对手来自 Run Script
+ * ⚠️ PRP-RUN-02：本常量**不再**等于「本局唯一对手」——三段序列的对手来自 Run Script
  *   各节点的 `encounterId`（见 `runScript.ts`）。它现在只是「默认遭遇」。
  *   没有新增敌人 / 没有改正式敌人定义 / 没有改任何数值 —— 只是换用既有的正式对手模板。
  */

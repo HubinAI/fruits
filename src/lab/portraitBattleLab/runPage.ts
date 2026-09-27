@@ -550,8 +550,10 @@ export interface RunPageProbe {
    */
   readonly repairBonus: number;
   /**
-   * PRP-BUILD-01：本局已打完的真实战斗场数（0..4）。
-   * `4` = 四场全部打完。⚠️ 这只是**诊断值**：进度与终局判定由 `nodeId` / `phase` 决定。
+   * PRP-BUILD-01：本局已打完的真实战斗场数（`0..RUN_TOTAL_BATTLES`）。
+   * `RUN_TOTAL_BATTLES` = **三段**全部打完
+   * （⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：四场 → 三段）。
+   * ⚠️ 这只是**诊断值**：进度与终局判定由 `nodeId` / `phase` 决定。
    */
   readonly battlesCompleted: number;
   /** PRP-RUN-02：本局是否已 `COMPLETE`（终局战斗打完且仍然存活 → RUN COMPLETE 终态）。 */
@@ -836,7 +838,7 @@ export interface RunPageProbe {
  * PRP-M2-NEXT-RUN-SEED-VALIDATION｜Run Page 的**可选**构造项。
  *
  * ⚠️ 全部可省略 —— `new RunPage(root)` 的行为与 PRP-RUN-02 **逐字节相同**
- *    （默认完整 Run 流程：DAY 1 开场 → 四场战斗 → RUN COMPLETE / RUN FAILED）。
+ *    （默认完整 Run 流程：DAY 1 开场 → 三段战斗 → RUN COMPLETE / RUN FAILED）。
  *    只有独立验证入口 `/next-run.html` 会带上这些选项（`npm run dev:next-run`）。
  *
  * ⚠️ 本 Queue **不修改** RUN-02 的默认完整 Run 结构：默认路径上没有新增 phase、
@@ -1516,7 +1518,7 @@ export class RunPage {
    *   - `carriedHp`  = 上一场真实剩余耐久（+ 维修补偿；下一场从这里继续，不自动满血）。
    * 旧运行时在此前已被 `endBattle()` 释放 → 弹丸 / 接触 / 事件订阅不跨场残留。
    *
-   * ⚠️ PRP-RUN-02：本场对手 = **当前脚本节点的 `encounterId`**（四场压力阶梯的唯一来源）。
+   * ⚠️ PRP-RUN-02：本场对手 = **当前脚本节点的 `encounterId`**（三段问题序列的唯一来源）。
    *    页面里没有 `if (day === X)`：换对手只是「当前节点是谁」这**一个**事实的推论。
    */
   private beginBattle(): void {

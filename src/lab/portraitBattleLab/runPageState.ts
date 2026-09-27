@@ -14,8 +14,12 @@
  *     d1-start(EVENT) → d2-battle1(BATTLE) → d2-choice1(CHOICE) → d3-battle2(BATTLE)
  *       → d4-durability(DURABILITY) ─┬─ repair  → d5-tend(EVENT · DAY5 焊车) ───┐
  *                                    └─ upgrade → d4-lateral(CHOICE · DAY4 横向) ┴→ d5-choice2(CHOICE · DAY5)
- *                                      → d6-battle3(BATTLE) → d7-final(FINAL)
+ *                                      → d7-final(FINAL · 第 3 段)
  *                                      → RUN COMPLETE / RUN FAILED
+ *
+ *   ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：Run Script 从**四场**收成**三段问题序列**
+ *      ⇒ `d6-battle3` 已删除，第 3 段就是终局 `d7-final`（`kind: 'FINAL'`）；
+ *      终局打完直接进 COMPLETE，**没有 RESULT 相位**（见 `finishRunBattle` 的 ② 分支）。
  *
  *   ⚠️ PRP-RUN-02-R2：`d4-lateral`（继续改装分支的横向改装）与 `d5-tend`（维修分支的当日叙事）
  *      是**两条分支各自的中间节点**，两条分支仍然汇合在同一个 `d5-choice2`。

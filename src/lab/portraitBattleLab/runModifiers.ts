@@ -131,7 +131,7 @@ export const RUN_BASE_WEAPON_DEF_ID = 'cannon';
  * 实际上走不完。要调的因此是**「产品 Run 里玩家那门炮」的基线**，不是全局 Cannon。
  * 正式 `content.ts` 的 Cannon 被三处共享：旧横屏正式玩法、`Validation` 场景、
  * 以及**敌方 `RangedTurret` 自己装的 cannon** —— 直接改它会顺带把敌人一起 buff，
- * 并让 RDC（真实追上 RangedTurret）/ 四场掉血压力阶梯等结构守卫失效。
+ * 并让 RDC（真实追上 RangedTurret）/ 三段序列等结构守卫失效。
  * 因此本值**只在玩家侧**生效。
  *
  * ── 作用链（顺序即语义，勿调换）──────────────────────────────────────────

@@ -13,20 +13,25 @@
  *   | 节点 | 类型 | DAY | 内容 |
  *   |---|---|---|---|
  *   | `d1-start`      | EVENT      | 1 | 冒险开始：开车上路 |
- *   | `d2-battle1`    | BATTLE     | 2 | 低压遭遇（阶梯 ①） |
+ *   | `d2-battle1`    | BATTLE     | 2 | **第 1 段**：基础近身碰撞压力（`ProtoRusher`） |
  *   | `d2-choice1`    | CHOICE     | 2 | 第一次三选一（第一层：重型弹头 / 双联炮 / 快速装填） |
- *   | `d3-battle2`    | BATTLE     | 3 | 中低压遭遇（阶梯 ②） |
+ *   | `d3-battle2`    | BATTLE     | 3 | **第 2 段**：追击 / 接触节奏（`Chaser`） |
  *   | `d4-durability` | DURABILITY | 4 | **耐久取舍事件**：维修 vs 继续改装 |
  *   | `d4-lateral`    | CHOICE     | 4 | **横向改装二选一**（只走「继续改装」分支）→ 汇入 `d5-choice2` |
  *   | `d5-tend`       | EVENT      | 5 | 维修分支的当日叙事（焊补车体）→ 汇入 `d5-choice2` |
  *   | `d5-choice2`    | CHOICE     | 5 | **第二次条件三选一（第二层）**——两条分支都会到达 |
- *   | `d6-battle3`    | BATTLE     | 6 | 中压遭遇（阶梯 ③） |
- *   | `d7-final`      | FINAL      | 7 | 终局遭遇（阶梯 ④）→ RUN COMPLETE / RUN FAILED |
+ *   | `d6-travel`     | EVENT      | 6 | 纯叙事节拍（补 DAY 6 的叙事连续性，见下） |
+ *   | `d7-final`      | FINAL      | 7 | **第 3 段**：第一次要求处理远程控距（`RangedTurret`）→ RUN COMPLETE / RUN FAILED |
  *
  * ⇒ **战斗与选择交替**，不存在「连续菜单」或「连续战斗」（Queue 目标结构）。
  *   DAY 是冒险阶段，不要求「一天只有一个节点」：`d4-durability` 与 `d4-lateral` 同为 DAY 4、
  *   `d5-tend` 与 `d5-choice2` 同为 DAY 5 —— 都是**同一分支上的先后两个节点**（先事件、后选择），
  *   不是互斥的两条边。
+ *   ⚠️ `d6-travel` 是**纯叙事 EVENT**（无对手 / 无候选池 / 无战斗）：`d6-battle3` 删除后
+ *     DAY 6 一度没有节点 ⇒ 日志会从 `DAY 5` 直接跳到 `DAY 7`（`presentNode` 只在 day 变化时
+ *     追加 `DAY n` 行），而顶部进度条仍是 7 天 —— 那是**可见的叙事断口**。
+ *     补这一个节拍节点后 **DAY 1~7 每天都有叙事**，`RUN_TOTAL_BATTLES` 仍 = 3、
+ *     `RUN_TOTAL_CHOICES` 仍 = 3，任何数值都不动。
  *
  * ## ⚠️ PRP-RUN-02-R1（真人验收修正）：DAY 4 事件与 DAY 5 第二层选择是**两个独立节点**
  *
@@ -60,18 +65,45 @@
  *   ⚠️ 候选池种类由 **CHOICE 节点自己声明**（`choicePool`）—— 状态机不按「第几选」数数，
  *      因此将来增删节点不会悄悄改变池的语义。
  *
- * ## 四场战斗（必改 2：压力阶梯，全部引用**既有正式对手模板**）
+ * ## ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：四场阶梯 → **三段问题序列**
  *
- *   | 场次 | 节点 | Encounter（Lab 引用） | 正式模板 | 玩家**基础 Build** 实测掉血 |
+ *   Queue 目标不是正式关卡设计，而是「**让不同配置至少遇到不同战斗问题**」。
+ *   改前四场里三场是同一类冲锋对手（`OPP-29 / OPP-31 / R1-RUSH-02`，见 `testData.ts`
+ *   的 rush/rush/rush/control 标注）⇒ 四场只反复问同一个问题。
+ *
+ *   现在按**固定顺序**摆三段，每段一个明确的战斗问题（全部引用**既有正式对手模板**，
+ *   零新增敌人、零数值改动）：
+ *
+ *   | 段 | 节点 | Encounter（Lab 引用） | 正式模板 | 这一段问的问题 |
  *   |---|---|---|---|---|
- *   | ① 低压   | `d2-battle1` | `PineappleFireBrute`  | `OPP-29`     | 181 |
- *   | ② 中低压 | `d3-battle2` | `PineappleSawRusher` | `OPP-31`     | 221 |
- *   | ③ 中压   | `d6-battle3` | `ProtoRusher`        | `R1-RUSH-02` | 257 |
- *   | ④ 较高压 | `d7-final`   | `BananaRodLaser`     | `OPP-20`     | 482 |
+ *   | ① | `d2-battle1` | `ProtoRusher`  | `R1-RUSH-02` | 基础近身碰撞压力（能不能扛住冲撞） |
+ *   | ② | `d3-battle2` | `Chaser`       | `OPP-16`     | 追击 / 接触节奏（对手跑得更快、咬得更紧） |
+ *   | ③ | `d7-final`   | `RangedTurret` | `OPP-03`     | 第一次要求处理**远程控距**（对手主动维持作战距离） |
  *
- *   **没有新增敌人、没有改 HP / speed / damage / enemyCount**：四场只是「打谁」不同，
- *   世界 / 出生点 / 玩家装配 / 全部数值都是正式默认。选型依据见 `testData.ts`
- *   对应条目的普查注释（49 套正式模板 × 10 种真实 Build 的实测矩阵）。
+ *   ⚠️ 三段只是「打谁」不同：世界 / 出生点 / 玩家装配 / 全部数值都是正式默认。
+ *      `d6-battle3` 已删除（DAY 6 改由纯叙事 `d6-travel` 占据）—— 三段之间仍然是
+ *      **选择 / 事件交替**，不是连续战斗。
+ *
+ *   ⚠️ **`RangedTurret` 是全项目唯一声明 `enemyDrive: 'keep-distance'` 的 Encounter**
+ *      （`testData.ts`）。它在这一条链上**真的生效**：`entities.ts` 原样透传 →
+ *      `runBattleRuntime` 把 `ENEMY_KEEP_DISTANCE_BANDS` 交给正式契约
+ *      （见 `REF_PRP_RUNTIME.md` §M）。⇒ 第 3 段与前两段的**战斗问题确实不同**。
+ *      ⚠️ 由此产生的**难度事实（如实记录，本 Queue 不调数值）**：产品默认车
+ *      （`frontMass=cannon` + `top=hammer`）**打不过第 3 段** —— 控距会否掉接触伤害，
+ *      实测终局敌剩 980/1100；要通关需要**多武器装配**（同一份实测里
+ *      `machineGun ×3` 零 Build 即可 COMPLETE，终局 727.3；
+ *      `machineGun ×2 + hammer` 268.5；`cannon + machineGun ×2` 206.5）。
+ *      这些件玩家**结构上拥有**（`product/r5ContentPoolSeed.ts` 一次性把全部
+ *      `OFFICIAL_PARTS` 补给账号）⇒ 「三段序列可通关」成立，但**不是默认装配**。
+ *      详见 `tests/productRunEncounterSequenceQ3.test.ts` 的机器记录。
+ *
+ *   ## 关于「上一段清场后才进入下一段」/「Enemy 不串场」
+ *
+ *   两件事都是**结构性的**，不靠人工核对：
+ *     - 每场战斗由宿主 `runPage.beginBattle()` **新建一份** `RunBattleRuntime`
+ *       （构造项 `encounterId` 现读自当前脚本节点），战斗结束后 `dispose()`；
+ *     - 推进只走脚本的 `next` ⇒ **上一段没出结果就不会创建下一段的运行时**。
+ *   ⇒ 战斗实体不跨段复用、上一段的敌人不可能出现在下一段。
  *
  * ## ⚠️ 关于文本里的 `{enemy}` / `{vehicle}`
  *
@@ -174,9 +206,10 @@ export const RUN_SCRIPT: readonly RunScriptNode[] = [
     kind: 'BATTLE',
     day: 2,
     beat: ['第二天，车辙把你带到一片碎石地。'],
+    // 第 1 段：先把「近身碰撞」这个最基本的问题摆出来（`ProtoRusher` 会真的冲撞上来）。
     encounter: ['前方传来引擎的轰鸣。', '你遭遇了{enemy}。'],
     after: ['你发现了一次改装机会……'],
-    encounterId: 'PineappleFireBrute',
+    encounterId: 'ProtoRusher',
     next: 'd2-choice1',
   },
   {
@@ -193,9 +226,10 @@ export const RUN_SCRIPT: readonly RunScriptNode[] = [
     kind: 'BATTLE',
     day: 3,
     beat: ['第三天，路变得开阔起来。'],
-    encounter: ['一台顶着圆锯的车从侧面冲过来。', '你遭遇了{enemy}。'],
+    // 第 2 段：换的是**节奏** —— `Chaser` 跑得更快、咬得更紧（不是更硬）。
+    encounter: ['一台车从侧后方咬了上来，速度比你快。', '你遭遇了{enemy}。'],
     after: ['车体伤得不轻，前面有一处能停下的地方。'],
-    encounterId: 'PineappleSawRusher',
+    encounterId: 'Chaser',
     next: 'd4-durability',
   },
   {
@@ -238,25 +272,36 @@ export const RUN_SCRIPT: readonly RunScriptNode[] = [
     // 候选池种类由节点声明；池内容由**最初主路线**决定（`runChoicePool`）——这里不写任何池内容。
     choicePool: 'layer2',
     beat: [],
-    next: 'd6-battle3',
+    next: 'd6-travel',
   },
   {
-    id: 'd6-battle3',
-    kind: 'BATTLE',
+    /*
+      ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：本节点存在的原因是**叙事连续性**，不是战斗。
+
+      改前 DAY 6 由 `d6-battle3` 占据；三段序列把第 3 段放进终局 `d7-final`（DAY 7）之后，
+      DAY 6 就**没有任何节点** ⇒ `presentNode` 只在「节点 day ≠ 当前 day」时追加 `DAY n` 行，
+      日志会从 `DAY 5` 直接跳到 `DAY 7`，而顶部进度条仍然是 7 天 —— 这是一处**可见的叙事断口**。
+
+      因此补一个**纯叙事 EVENT 节拍**（`kind: 'EVENT'`，无对手、无候选池、无战斗）：
+      `RUN_TOTAL_BATTLES` 仍 = 3、`RUN_TOTAL_CHOICES` 仍 = 3、任何数值都不动
+      （Queue 冻结项：Enemy / AI / Battle / Physics / Camera / Reward / Garage / Weapon /
+      Body / Movement 全部零改动）。
+    */
+    id: 'd6-travel',
+    kind: 'EVENT',
     day: 6,
-    beat: ['第六天，远处已经是这片荒原的边界。'],
-    encounter: ['一台高重心的冲刺车迎面撞了上来。', '你遭遇了{enemy}。'],
-    after: ['再往前，就是这片荒原最深处的对手。'],
-    encounterId: 'ProtoRusher',
+    beat: ['第六天，路上没有遇到对手，你把车开到了荒原的边界。'],
     next: 'd7-final',
   },
   {
     id: 'd7-final',
     kind: 'FINAL',
     day: 7,
+    // 第 3 段：唯一一段**对手主动维持作战距离**的战斗
+    // （`RangedTurret` 声明 `enemyDrive: 'keep-distance'`，理由与实测见文件头）。
     beat: ['第七天，最后一段路。'],
-    encounter: ['一台挂着长杆的重车挡在路中央。', '你遭遇了{enemy}。'],
-    encounterId: 'BananaRodLaser',
+    encounter: ['一台炮塔车停在开阔地上，在很远处就锁定了你。', '你遭遇了{enemy}。'],
+    encounterId: 'RangedTurret',
     next: null,
   },
 ];
@@ -270,7 +315,11 @@ export const RUN_FIRST_DAY = RUN_SCRIPT[0].day;
 /** 单局总天数（= 脚本覆盖的最后一天；顶部进度节点按它画）。 */
 export const RUN_TOTAL_DAYS = RUN_SCRIPT.reduce((max, n) => Math.max(max, n.day), 1);
 
-/** 单局真实战斗场数（= 脚本里 BATTLE + FINAL 节点数；本阶段固定 4）。 */
+/**
+ * 单局真实战斗场数（= 脚本里 BATTLE + FINAL 节点数）。
+ *
+ * ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：**4 → 3**（三段问题序列，见文件头）。
+ */
 export const RUN_TOTAL_BATTLES = RUN_SCRIPT.filter((n) => n.kind === 'BATTLE' || n.kind === 'FINAL').length;
 
 /**

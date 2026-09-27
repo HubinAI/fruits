@@ -93,9 +93,21 @@ export type LabLoadoutId = 'WatermelonHeavyCannon' | 'BananaChargeHammer';
  * ⚠️ PRP-RUN-02：新增三套**单敌** Encounter（`PineappleFireBrute` / `PineappleSawRusher` /
  *    `BananaRodLaser`），全部只是**既有正式对手模板**的引用（OPP-29 / OPP-31 / OPP-20），
  *    用来给固定 Run Script 组成四场压力阶梯 —— **没有新增敌人、没有改任何数值**。
- *    为什么不复用既有的 `Chaser` / `RangedTurret` / `LightSwarm3`：见 testData.ts 的普查注释
- *    （`Chaser` 在部分 Build 下会一击必杀、`RangedTurret` 对基础 Build 必杀、
- *     `LightSwarm3` 的展示名写明「3 个敌人」而 Run Page 战斗只能容纳 1 个敌人）。
+ *    为什么不复用既有的 `Chaser` / `RangedTurret`：当时实测 `Chaser` 在部分 Build 下会一击必杀、
+ *    `RangedTurret` 对基础 Build 必杀（`LightSwarm3` 的展示名写明「3 个敌人」而 Run Page 战斗
+ *    只能容纳 1 个敌人 ⇒ 结构性不可用）。
+ *
+ * ⚠️ **PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（本 Queue 的裁决与后果，如实记录）**：
+ *    四场阶梯里 **3 场是同一类冲锋对手**（rush / rush / rush / control）⇒ 只反复问同一个问题。
+ *    因此 Run Script 改成**三段问题序列**：`ProtoRusher`(近身碰撞压力) → `Chaser`(追击节奏)
+ *    → `RangedTurret`(远程控距) —— **于是上面那两件被重新放回 Run**，代价是
+ *    `RangedTurret` 的 `enemyDrive: 'keep-distance'` 让**基础 Build / 产品默认车都打不过第 3 段**
+ *    （实测：产品默认车死在 ③）。这是**已知代价**，如实钉死并记入未决台账，
+ *    不是 Runtime 缺口（三段的链路都完整）。三套旧 Encounter 作为 **Lab 数据**保留
+ *    （`testData.ts` 的普查矩阵仍在用），只是不再被 Run Script 引用。
+ *    ⚠️ 验收口径因此按**结构**定：三段按顺序推进、清场、不串场、任意段死亡走正式 FAILED、
+ *    第三段完成走正式 COMPLETE、全部已登记武器都能进入并造成真实伤害
+ *    （见 `tests/productRunEncounterSequenceQ3.test.ts`）。
  *
  * ⚠️ PRP-M3：新增**遭遇验证台**入口 `encounter-lab.html`（`encounterLab*.ts`），
  *    它从下表里固定挑三套做集中对照（`ProtoRusher` / `Chaser` / `RangedTurret`，

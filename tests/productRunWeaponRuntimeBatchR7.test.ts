@@ -35,6 +35,15 @@
  *   | saw          | ⚠️ 齐（contactTick 链存在）        | ❌ **收回** | ④/⑤：产品槽 `frontMass` 上圆锯 collider 整体落在车身内（圆锯前沿 x=73 < 车身前沿 x=85）⇒ 实测 **0 命中 / 0 伤害**；挂 `front` 时同一份 Runtime 打出 25 命中 / 200 伤害 ⇒ 要生效必须改挂点或几何 = 新规则 |
  *   | spear        | ❌ `behavior === 'ram'` 无 factory | ❌ 保持 BLOCK | ③：Runtime 不存在（穷尽核对：`src/battle/` 下没有任何漏接的正式 ram behavior） |
  *
+ * ⚠️ R6 起「产品 Run 的**脚本结构**」变了，本文件的夹具**故意不跟**（记录，不是漏改）：
+ *    `src/lab/portraitBattleLab/runScript.ts` 已由**四场压力阶梯**收成**三段问题序列**
+ *    （`ProtoRusher` → `Chaser` → `RangedTurret`，第 3 段落位**终局** `d7-final`）。
+ *    本文件的 `RUN_ENCOUNTERS` 是**运行时级夹具**：自建一条 4 连场链、直接调 `runBattleToEnd`
+ *    ⇒ 它验的是「Runtime 能跑 N 连场且每场都到终态 + 逐件武器的真实伤害」，
+ *    **不读产品脚本**，所以**保留 4 场是刻意的**（多一场 ⇒ 多一次跨场耐久压力，判据更严）。
+ *    产品脚本自身的真实形状（三段固定顺序 / 阶段清场 / Enemy 不串场 / 两条终态出口）由
+ *    `tests/productRunEncounterSequenceQ3.test.ts` 负责，两者不重复。
+ *
  * ── ⚠️ 两条「终局」路线，口径必须分清（R7-04b / R7-04c）──────────────────────
  *
  * 两路线都用**归因夹具**：车上**只留这一件**武器（`top` 槽的锤也清掉）⇒ 伤害只能来自它。

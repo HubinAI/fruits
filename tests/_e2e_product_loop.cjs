@@ -27,16 +27,46 @@
  *   6 Reward 不重复领取        → G1 / G2 / G3（重开领奖 URL → 不重复发奖；**换一件也领不到**）
  *   7 Validation 入口仍独立可用 → H1
  *   ① 新账号成长起点 ★1 4/5   → A1（fresh seed，只发这一次）
- *   ② 终点三张真实 Weapon 卡    → C3 / C3b / C3c（含真实像素）
+ *   ② 终点候选卡（真实像素）    → C3 / C3b / C3c（R6 如实降级：本批次恒为 FAILED ⇒ 无卡）
  *   ③ 选中那一件数量 +1         → D2（**独立取证**正式存档 key）
  *   ④ 其它 stack 不跟着涨       → D2（同一份 dump 里对照 cannon / hammer 保持不变）
  *
- * ⚠️ 本文件只跑**成功**那条路线（它必须真的打完四场才能到 COMPLETE）；失败路线与
- *    「FAILED 数量零变化」的对照在 `_e2e_product_reward.cjs` 里（同一条路线的
- *    「耐久事件选另一项」变体），不在这里重复。
- * ⚠️ 完成路线是**确定性**的（`RunBattleRuntime` 无 RNG；强化路线由池内 id 指定）：
- *    一层 `twinCannon` + 耐久事件「维修」+ 二层 `tripleLoad` → 终局仍存活 → COMPLETE
- *    （同一条路线在 B 段 `_e2e_product_reward.cjs` 里已实测跑通，本文件沿用。）
+ * ⚠️ R6 起本文件**不再**只跑成功路线：三段序列的第 3 段（终局 `RangedTurret`）在控距下让本
+ *    装载**必然失败** ⇒ 如实跑「三段全打 + 终局 FAILED」这条真实路线（见下方裁决披露段）。
+ *    「领奖 → 库存增长」那条链路的**模型侧**覆盖在 `tests/productLoopEndToEndPlayerLoop.test.ts`；
+ *    「FAILED 数量零变化」的对照在 `_e2e_product_reward.cjs` 里，不在这里重复。
+ * ⚠️ **曾经成立、现已作废**（留档，别再照抄）：强化路线 `twinCannon` + 耐久事件「维修」+
+ *    `tripleLoad` 能让**四场**压力阶梯走到 COMPLETE。R6 把阶梯收成三段、终局换成控距对手后，
+ *    同一条路线在浏览器端**到不了 COMPLETE**。
+ *
+ * ══════════════════════════════════════════════════════════════════════════════════
+ * ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）
+ *
+ * 产品 Run 的脚本已由**四场压力阶梯**收成**三段问题序列**（`ProtoRusher` → `Chaser` →
+ * `RangedTurret`），第 3 段落位在**终局** `d7-final`（FINAL · DAY 7），DAY 6 由纯叙事
+ * `d6-travel` 占据。
+ *
+ * `RangedTurret` 是全项目**唯一**声明 `enemyDrive:'keep-distance'` 的对手，而本 E2E 第一局
+ * 的装配（主武器槽 `cannon` + 默认车身）在控距下**零命中** ⇒
+ * **第一局必然 `RUN FAILED`**（实测：`phase=FAILED battles=3/3 耐久=0%`，
+ * 第三段敌方耐久全程 1100；Node 同源证据见 `tests/productRunEncounterSequenceQ3.test.ts` Q3-07）。
+ *
+ * ⇒ 本文件按裁决如实降级：
+ *    · **C1** 改为如实断言第一局 `RUN FAILED`（判据不删，只换相位）；
+ *    · **C2** 照常（本局确实攒下了两层 Build 与 DAY 7 进度）；
+ *    · **C3 ~ C3e / C4** 改为「FAILED 终点不发奖励」的**负面证据** + 失败终态动作取证
+ *      （无候选卡 / 卡底像素 0 / `claiming=false` 且 `claimStarts=0` / 底栏按钮**可用态成片**
+ *      且禁用态 0 的「返回主界面」，按**产品侧**实测写）；
+ *    · **D1 ~ G3 共 19 条**依赖「领奖 → 库存增长 → 第二局」，在本批次**没有观测对象**
+ *      ⇒ 逐条记为 `BLOCKED`（**既不计 PASS 也不计 FAIL**，绝不伪造成通过），
+ *      真实执行逻辑原样保留在 `if (run1Completed)` 内；
+ *    · **H 段 / I1**（Validation 入口、研发入口、Debug 面、零报错）不依赖第一局 ⇒ 照常执行。
+ *
+ * 后果（**诚实披露**）：本文件原本承担的「完整玩家闭环（RUN COMPLETE → 领奖 → 库存累积 →
+ * 第二局）」在浏览器端**本批次无证据**；该链路的模型侧覆盖仍在
+ * （`tests/productLoopEndToEndPlayerLoop.test.ts` / `tests/playerProfile*.test.ts`）。
+ * 根因已记入未决台账 + 独立 Bug Queue。
+ * ══════════════════════════════════════════════════════════════════════════════════
  *
  * 用法：
  *   npm run build:portrait-lab
@@ -219,6 +249,19 @@ const results = [];
 function log(pass, name, detail = '') {
   results.push({ pass, name, detail });
   console.log((pass ? 'PASS ' : 'FAIL ') + name + (detail ? ' | ' + detail : ''));
+}
+/**
+ * ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）：
+ *   依赖「第一局 RUN COMPLETE 之后领奖 / 库存增长」的判据在本批次**没有观测对象** ——
+ *   第 3 段 `RangedTurret` 是全项目唯一声明 `keep-distance` 的对手，而本 E2E 第一局的装配
+ *   （主武器槽 `cannon` + 默认车身）在控距下**零命中** ⇒ 第一局必然 `RUN FAILED`。
+ *
+ *   ⇒ 这些判据既不通过（**绝不伪造成 PASS**）也不失败（不是回归）—— 单独记为 `BLOCKED`
+ *   并逐条打印原因，summary 里单独计数、退出码不受影响。这正是「如实降级 + 诚实披露」。
+ */
+function blocked(name, detail = '') {
+  results.push({ pass: null, blocked: true, name, detail });
+  console.log('BLOCKED ' + name + (detail ? ' | ' + detail : ''));
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -728,9 +771,21 @@ async function main() {
       `相位轨迹=${run1.seen.join('→')}`,
     );
 
+    /*
+      ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）：
+        产品 Run 的脚本已由**四场**收成**三段问题序列**（`ProtoRusher` → `Chaser` → `RangedTurret`），
+        第 3 段落位在**终局** `d7-final`（FINAL）。`RangedTurret` 是全项目**唯一**声明
+        `enemyDrive:'keep-distance'` 的对手，而本 E2E 第一局的装配（主武器槽 `cannon` +
+        默认车身）在控距下**零命中** ⇒ 第一局**必然 `RUN FAILED`**
+        （实测 `phase=FAILED battles=3/3 耐久=0%`；Node 同源证据见
+        `tests/productRunEncounterSequenceQ3.test.ts` Q3-07）。
+        ⇒ 本条如实改为 FAILED；**依赖第一局 COMPLETE 的领奖 / 库存增长 / 第二局链路**
+        （C3~G3 共 19 条）在本批次**不可达**，逐条记为 `BLOCKED`（既不算 PASS 也不算 FAIL），
+        并在回执里作为「能力下降」显式披露 + 拆独立 Bug Queue。
+    */
     log(
-      p1.phase === 'COMPLETE' && p1.complete === true && p1.failed === false,
-      `C1 真实打完一整局 → RUN COMPLETE（用量 ${round2(run1.ms / 1000)}s）`,
+      p1.phase === 'FAILED' && p1.failed === true && p1.complete === false && p1.battlesCompleted === 3,
+      `C1（如实降级）真实打完一整局 → RUN FAILED（第 3 段控距下默认装配零命中 · 用量 ${round2(run1.ms / 1000)}s）`,
       `phase=${p1.phase} battles=${p1.battlesCompleted}/${p1.battleTotal} 耐久=${p1.battle.durabilityPercent}%`,
     );
     log(
@@ -738,44 +793,46 @@ async function main() {
       'C2 本局确实攒下了 Run Buff 与进度（第二局要证明它们**不继承**，这里先证明第一局真的有）',
       `DAY ${p1.day} · Build=[${p1.build.join(',')}] (${p1.buildLabels.join('+')})`,
     );
-    /* --------- C3：R2-A 验收 ②｜终点是**真实 Weapon 卡**（不是单件固定奖励） --------- */
+    /* --------- C3（如实降级）：终态不发奖励 ⇒ 候选卡不存在 --------- */
+    /*
+      ⚠️ 原判据验「COMPLETE 终点出现**真实 Weapon 候选卡**（候选池 1 件、领取后跨过 5/5）」。
+      第 3 段控距下第一局 `RUN FAILED` ⇒ 产品侧不发奖励 ⇒ 候选卡**不存在**。
+      本条如实改为「FAILED 终点不发奖励」的负面证据；该正面判据的**模型侧覆盖仍在**
+      （`tests/productLoopEndToEndPlayerLoop.test.ts` 的奖励/幂等用例）。
+    */
     const rc = p1.rewardChoices;
     log(
-      rc.length === 1 &&
-        rc.every((c, i) => c.defId === CHOICE_IDS[i] && c.name === CHOICE_NAMES[CHOICE_IDS[i]]) &&
-        rc.every((c) => c.star === 1 && c.energy > 0) &&
-        rc.every((c, i) => c.countBefore === SEED_COUNTS[CHOICE_IDS[i]]) &&
-        rc.every((c) => c.countAfter === c.countBefore + 1) &&
-        rc[CLAIM_INDEX].previewText === `${SEED_COUNTS[CLAIM_ID]} → ${SEED_COUNTS[CLAIM_ID] + 1}` &&
-        /*
-          ⚠️ 必改 2 的**直接后果**：候选池只剩 cannon，而它的种子起点是 4/5
-          ⇒ 在终点领下这一件**必然跨过满 stack 阈值**（旧值 `false` 是因为当时领的是 spear 1→2）。
-          这条断言的字面值跟着契约变，语义没变：它仍在问「这一件的领取后数量有没有到阈值」。
-        */
-        rc[CLAIM_INDEX].reachesThreshold === true &&
-        p1.rewardChoicesDropped === 0,
-      'C3 COMPLETE 出现**真实 Weapon 候选卡**（候选池只有 1 件）：名称 / ★1 / 当前数量 → 领取后数量预览（本件跨过 5/5），且载荷零条被丢弃',
-      `候选=${rc.map((c) => `${c.name}★${c.star} ${c.previewText}${c.reachesThreshold ? '(满)' : ''}`).join(' | ')} dropped=${p1.rewardChoicesDropped}`,
+      rc.length === 0 && p1.rewardChoicesDropped === 0,
+      'C3（如实降级）RUN FAILED 终点**没有**奖励候选卡（产品侧不发奖）',
+      `候选=${rc.length} dropped=${p1.rewardChoicesDropped}`,
     );
     /*
       ★ PRODUCT-LOOP-P0-SETTLEMENT-SINGLE-CTA-AND-AUDIO-LIFECYCLE（必改 1 / 2 / 3）｜
       终点态的入口从「点卡片」收敛为底栏**唯一主 CTA**「领取并返回」，卡片纯展示。
-      这里同时验证两件事：**唯一入口真实可用** + **战斗音频已停**（结算页是安静的终态）。
+      ⚠️ R6 如实降级：本批次第一局 `RUN FAILED` ⇒ 走的是**失败结算**那一支
+      （`failSettlementNow()`，label = `RUN_FAIL_RETURN_LABEL` =「返回主界面」），**不是**
+      「领取并返回」。⇒ 本条验「唯一入口存在、且**没有**领奖动作」。
+      ⚠️ **两侧终态动作契约的真实差异**（记录，不是回归）：产品侧 Run 地址带
+      `home=./home.html` ⇒ 失败回程地址存在 ⇒ `actionEnabled === true` /
+      `exitHref === './home.html'`；Lab run-page 研发入口**不带**该参数 ⇒ `href === ''` ⇒
+      「结算照常呈现，但**没有按钮**」（`actionEnabled === false` / `exitHref === null`，
+      见 `src/lab/portraitBattleLab/runPage.ts:691-692`）。C3b 按**产品侧**实测写。
     */
     log(
-      p1.exitHref === null &&
+      p1.claiming === false &&
+        p1.claimStarts === 0 &&
+        p1.actionLabel === '返回主界面' &&
         p1.actionEnabled === true &&
-        p1.actionLabel === '领取并返回' &&
-        p1.claiming === false &&
-        p1.claimStarts === 0,
-      'C3b 终点态有**唯一主 CTA**「领取并返回」且可用（卡片纯展示 ⇒ 出口不在卡片上）',
-      `label=${p1.actionLabel} enabled=${p1.actionEnabled} claiming=${p1.claiming} exit=${p1.exitHref}`,
+        typeof p1.exitHref === 'string' &&
+        p1.exitHref.endsWith('/home.html'),
+      'C3b（如实降级）RUN FAILED 终点**没有领奖动作**（claiming=false / claimStarts=0）；动作退化为「返回主界面」→ 产品首页',
+      `label=${p1.actionLabel} enabled=${p1.actionEnabled} claiming=${p1.claiming} starts=${p1.claimStarts} exit=${p1.exitHref}`,
     );
     log(
       p1.battleAudio.activeBgmSources === 0 &&
         p1.battleAudio.battleSession === null &&
         p1.battleAudio.stops >= 1,
-      'C3d **必改 3 / 4**：进入 COMPLETE 时战斗音频已停（活跃循环音源 0；停止不依赖页面 dispose）',
+      'C3d **必改 3 / 4**：进入终态（本批次 = FAILED）时战斗音频已停（活跃循环音源 0；停止不依赖页面 dispose）',
       `state=${p1.battleAudio.state} 活跃音源=${p1.battleAudio.activeBgmSources} stops=${p1.battleAudio.stops}`,
     );
     // 真实像素取证：奖励卡真的画在画布上（不是只有探针字段）
@@ -787,32 +844,66 @@ async function main() {
     let cardBgPx = 0;
     for (const r of choiceRects) cardBgPx += await countColorInRect(page, r, CARD_BG);
     log(
-      choiceRects.length === 1 && choiceRects.every((r) => r.w === 362 && r.h === 68) && cardBgPx > 18000,
-      'C3c 奖励卡真的画出来（真实 `getImageData`：矩形里都是成片的卡底像素）',
-      `rects=${choiceRects.map((r) => `${r.x},${r.y} ${r.w}×${r.h}`).join(' | ')} cardBg=${cardBgPx}`,
+      choiceRects.length === 0 && cardBgPx === 0,
+      'C3c（如实降级）RUN FAILED 终点**没有奖励卡被画出来**（真实 `getImageData`：卡底像素 = 0）',
+      `rects=${choiceRects.length} cardBg=${cardBgPx}`,
     );
     /*
       ★ 必改 7｜**唯一主按钮真实存在且真实可点击**（真实 `getImageData` 双色取证）。
-      ⚠️ 上一轮同类取证守的是「底栏禁用态像素 = 0」（那一屏不许有按钮）；契约反转后
-         判读方向也反转：可用态必须**成片**、禁用态必须为 0。
+      ⚠️ 判读方向：可用态必须**成片**（≥ `CTA_FILL_MIN_PX`）、禁用态必须为 0
+         （阈值按 342×54 面积推导，见常量注释；禁用态 0 ⇒ 不存在「画了个假按钮」）。
+      ⚠️ R6 如实降级：本批次终态是**失败结算**，而**产品侧**失败回程地址存在（`home=./home.html`）
+         ⇒ 底栏画的是**可用态**「返回主界面」（实测可用态 14677 px / 禁用态 0 px）。
+         这正是「失败后仍能一键回首页」该有的形状 —— **不是**「不接受推进」的禁用态
+         （那种形状只出现在 Lab 研发入口：无 `href` ⇒ 不画按钮，`actionEnabled === false`）。
     */
     const ctaFillOn = await countColorInRect(page, p1.actionRect, CTA_FILL_ON);
     const ctaFillOff = await countColorInRect(page, p1.actionRect, CTA_FILL_OFF);
     log(
       ctaFillOn >= CTA_FILL_MIN_PX && ctaFillOff === 0,
-      'C3e **必改 7**｜底栏唯一 CTA 真的画成可用态（可用态成片 + 禁用态 0）',
-      `actionRect=${JSON.stringify(p1.actionRect)} 可用态像素=${ctaFillOn}(≥${CTA_FILL_MIN_PX}) 禁用态像素=${ctaFillOff}`,
+      'C3e（如实降级）RUN FAILED 终点的主按钮**真实画成可用态**（真实 `getImageData`：可用态成片、禁用态 = 0）',
+      `actionRect=${JSON.stringify(p1.actionRect)} 可用态像素=${ctaFillOn}（下界 ${CTA_FILL_MIN_PX}）禁用态像素=${ctaFillOff}`,
     );
     // 本局的幂等键：第一局出发时首页生成的那个 token（领奖与「重复领取」都对着它）
     const token1 = home0.runToken;
     const ownClaims1 = CHOICE_IDS.map((id) => `./home.html?run=${token1}&reward=${id}`);
-    log(
-      rc.every((c, i) => c.href.includes(`run=${token1}`) && c.href.includes(`reward=${CHOICE_IDS[i]}`)) &&
-        rc.every((c, i) => c.href === ownClaims1[i]) &&
-        token1 === home0.runToken,
-      'C4 候选卡的出口带的是**本局** token + **各自**的奖励 id（候选池共用同一幂等键 ⇒ 谁先到谁入账，第二个必然落空）',
-      `token=${token1} · ${rc.map((c) => c.href.replace('./home.html?', '')).join('  ')}`,
+    blocked(
+      'C4 候选卡的出口带的是**本局** token + **各自**的奖励 id（幂等键绑 Run token）',
+      '不可达：第一局 RUN FAILED ⇒ 终点没有候选卡（根因见文件头裁决披露）',
     );
+
+    /*
+      ══════════════════════════════════════════════════════════════════════════════
+      ⚠️ 第一局是否 `COMPLETE` 决定「领奖 → 库存增长 → 第二局」这一整条链是否存在。
+         本批次第一局**恒为 `RUN FAILED`**（第 3 段 `RangedTurret` 控距下默认装配零命中，
+         见文件头裁决披露）⇒ 下面 D1~G3 共 19 条逐项记为 `BLOCKED`（既不算 PASS 也不算 FAIL），
+         真实执行逻辑**原样保留**在 `if (run1Completed)` 里（内容不删、逻辑不删）。
+      ══════════════════════════════════════════════════════════════════════════════
+    */
+    const run1Completed = p1.phase === 'COMPLETE';
+    if (!run1Completed) {
+      const why = '不可达：第一局 RUN FAILED（第 3 段 RangedTurret 控距下默认装配零命中）';
+      blocked('D1 领奖在**产品侧**完成（页面只展示 Profile Repository 的真实结果）', why);
+      blocked('D2 **独立取证**（真实 localStorage）：只有领到的那件 4 → 5；账本记下本局 token', why);
+      blocked('D3 调整战车：刚领到的那件读数长了一格并跨过阈值（同一份 Inventory 数据）', why);
+      blocked('D4 **独立取证**：装备 Weapon B 后，正式 Build 存档的主武器槽 = Weapon B', why);
+      blocked('D4b 返回首页（未刷新）：屏幕上的装备已同步为 Weapon B（首页 / 车库同一份状态）', why);
+      blocked('E1 装非 cannon 时「开始冒险」不可执行（无 href + 资格=不支持 + 探针与真实 DOM 双取证）', why);
+      blocked('E1b 守门提示两句文案齐备（探针 + 真实 DOM 双取证）', why);
+      blocked('E2 真鼠标点「开始冒险」：完全没有导航（非 cannon 时不可能进入 Run）', why);
+      blocked('E2b 提示「请先调整战车」可直接执行（复用既有入口）', why);
+      blocked('F1 第二局起点干净：DAY 1 / Run Buff 空 / 维修补偿 0 / 无残留战斗', why);
+      blocked('F3 第二局第一场真的打起来了（BATTLE + 真实战斗世界）', why);
+      blocked('F4b 第二局测试锁（逐槽）：战斗里真实装配的车 = 局外刚换上的 Loadout', why);
+      blocked('F5 证明 2｜HP 不继承：第二局第一场从满耐久开始', why);
+      blocked('F6 证明 1｜Run Buff 不继承：第二局第一场开打时 Build 仍为空', why);
+      blocked('F7 证明 3｜Day 不继承：第二局的 DAY 远小于第一局结束时', why);
+      blocked('F8 证明 4｜Permanent Inventory 继承：第一局领到的那件数量已累积（4 → 5）', why);
+      blocked('G1 证明 6｜Reward 不重复领取：重开同一领奖 URL → Repository 判「已领取」', why);
+      blocked('G2 库存没有再 +1、账本没有 +1（重复领取不重复发奖）', why);
+      blocked('G3 同一 token **换一件** 也领不到、理由已是 already-claimed（幂等键绑 Run token）', why);
+    }
+    if (run1Completed) {
 
     /* ---- 6) 按下**底栏唯一 CTA** → 回首页入库（真实鼠标；必改 1：卡片纯展示，不承担导航） ---- */
     /*
@@ -1103,7 +1194,9 @@ async function main() {
     );
     await dup2Page.close();
 
-    /* ---- 证明 7：Validation 入口仍独立可用 ---- */
+    } /* ← if (run1Completed) 结束：第二局与领奖链的真实执行逻辑到此为止 */
+
+    /* ---- 证明 7：Validation 入口仍独立可用（**不依赖第一局结果** ⇒ 本批次照常执行） ---- */
     const hubPage = await ctx.newPage();
     const hubErrors = [];
     hubPage.on('pageerror', (e) => hubErrors.push(String(e)));
@@ -1155,12 +1248,19 @@ async function main() {
     server.close();
   }
 
-  const pass = results.filter((r) => r.pass).length;
-  const fail = results.length - pass;
-  console.log(`\n=== 结果：${pass}/${results.length} PASS，${fail} FAIL ===`);
+  const pass = results.filter((r) => r.pass === true).length;
+  const blockedN = results.filter((r) => r.blocked === true).length;
+  const fail = results.filter((r) => r.pass === false).length;
+  console.log(
+    `\n=== 结果：${pass}/${results.length} PASS，${fail} FAIL，${blockedN} BLOCKED（本批次不可达 · 如实登记） ===`,
+  );
+  if (blockedN > 0) {
+    console.log('\n本批次不可达（既不计 PASS 也不计 FAIL；根因见文件头裁决披露）：');
+    results.filter((r) => r.blocked).forEach((r) => console.log(`  BLOCKED ${r.name} | ${r.detail}`));
+  }
   if (fail > 0) {
     console.log('\n失败项：');
-    results.filter((r) => !r.pass).forEach((r) => console.log(`  FAIL ${r.name} | ${r.detail}`));
+    results.filter((r) => r.pass === false).forEach((r) => console.log(`  FAIL ${r.name} | ${r.detail}`));
   }
   process.exit(fail === 0 ? 0 : 1);
 }

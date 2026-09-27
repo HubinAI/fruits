@@ -190,12 +190,14 @@ export interface LabTestEncounter {
    *   由正式 Movement Foundation（`battleContract` → `enemyDrive.ts`）执行，仍然是
    *   wheel motor + 真实 grip，不是位置修正。
    * - 缺省（`undefined`）⇒ **对手驱动与既有完全相同**（恒朝玩家全速），
-   *   即 ProtoRusher / Chaser 以及 Run Script 的四场对手**逐帧不变**。
+   *   即 ProtoRusher / Chaser 以及三段序列里的其它对手**逐帧不变**。
    *
    * ⚠️ 这是**声明**，不是按 id / 计数推断：只有明确声明的 Encounter 才会换档。
    *    「远程身份需要距离维持」是这一套 Encounter 的**验证目标**，
-   *    而不是所有「有弹丸武器的敌人」的自动推断 —— 那会把 Run 的第四场
-   *    （`BananaRodLaser`，forward）一起卷进来。
+   *    而不是所有「有弹丸武器的敌人」的自动推断。
+   * ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：三段序列的**第 3 段就是这一套**
+   *    ⇒ 它现在是**唯一**会在产品 Run 里走这条分支的对手（实测后果见 `constants.ts`
+   *    与 `tests/productRunEncounterSequenceQ3.test.ts` 的文件头）。
    */
   readonly enemyDrive?: 'keep-distance';
 }
@@ -280,22 +282,30 @@ export const LAB_ENCOUNTERS: readonly LabTestEncounter[] = [
     draft: formalOpponentDraft('R1-RUSH-02'),
   },
   /* ====================================================================
-   * PRP-RUN-02-FULL-RUN-VERTICAL-SLICE｜四场压力阶梯的三套新 Encounter
+   * PRP-RUN-02-FULL-RUN-VERTICAL-SLICE｜**曾**用于「四场压力阶梯」的三套 Encounter
+   *
+   * ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE 起，Run Script **不再引用这三套**
+   *    （改为**三段问题序列**：`ProtoRusher` → `Chaser` → `RangedTurret`）。
+   *    它们作为 **Lab 数据保留**（下面的普查矩阵、Lab 验证台、F1 测试仍在用），
+   *    但不属于产品 Run 的对手序列。
    *
    * 全部只是**既有正式对手模板的引用**（`count: 1`）：没有新增敌人，
    * 没有改 HP / speed / damage / enemyCount，没有碰正式对手池。
    *
-   * 为什么必须新增（而不是复用已有的四套）：固定 Run Script 要**四场真实战斗**
+   * 为什么当时必须新增（而不是复用已有的四套）：固定 Run Script 要**四场真实战斗**
    * 共享同一条耐久，且每一场都必须「任何一层 Build 选择都能活着走完」。
    * 实测普查（走生产同构链路：正式编排器 + overlay registry + 零 config；
    * 49 套正式模板 × 10 种真实 Build = 490 场，见 `交接文档_2026-09-17_PRP-RUN-02.md`）：
-   *   - `Chaser`（OPP-16）基础掉血 830，在 `双联炮+重型弹头` 下会 **1100（必死）** → 不能进阶梯；
-   *   - `RangedTurret`（OPP-03）对基础 Build **必死**（掉 1100）→ 不能进阶梯；
+   *   - `Chaser`（OPP-16）基础掉血 830，在 `双联炮+重型弹头` 下会 **1100（必死）**；
+   *   - `RangedTurret`（OPP-03）对基础 Build **必死**（掉 1100）；
    *   - `LightSwarm3` 是 OPP-14 复制 3 份（`count: 3`），而 Run Page 的战斗运行时
    *     只容纳 1 个敌人 → 展示名「3 轻敌人」与画面不符，不作为 Run Script 的一环；
    *   - 因此阶梯只能从「既有正式模板」里另选三套（本文件新增的引用）。
    *
-   * 四场阶梯（玩家**基础 Build** 实测掉血；括号内 = 该模板在 10 种 Build 下的掉血范围）：
+   * ⚠️ **上面那两条实测事实在 R6 三段序列里被重新接受**（`Chaser` 进第 2 段、
+   *    `RangedTurret` 进第 3 段）—— 这是本 Queue 的**已知代价**，如实记录：
+   *    产品默认车与 Lab 演示装载都打不过第 3 段（控距否掉接触伤害）。
+   *    原四场阶梯（玩家**基础 Build** 实测掉血；括号内 = 该模板在 10 种 Build 下的掉血范围）：
    *
    *   | 场次 | Encounter | 正式模板 | 定位 | 基础掉血 | 范围 |
    *   |---|---|---|---|---|---|
@@ -303,14 +313,6 @@ export const LAB_ENCOUNTERS: readonly LabTestEncounter[] = [
    *   | ② 中低压 | `PineappleSawRusher`  | OPP-31 (rush)    | 菠萝 + 圆锯 + 推进器 | 221 | 3~231 |
    *   | ③ 中压   | `ProtoRusher`（既有） | R1-RUSH-02 (rush)| 菠萝 + 圆锯 + 刺 + 推进器 | 257 | 60~257 |
    *   | ④ 较高压 | `BananaRodLaser`      | OPP-20 (control) | 香蕉 + 推杆 + 镭射（前进） | 482 | 322~482 |
-   *
-   * ⚠️ 为什么选这一组而不是「基础掉血最大」的：`OPP-04` / `OPP-33` / `OPP-22` / `R1-CTRL-01`
-   *    的基础掉血更高（962 / 1053 / 726 / 573），但它们的掉血**随 Build 剧烈摆动**
-   *    （例如 `OPP-22` 在 `三连装填` 下只要 162、在 `重型弹头` 下要 724）——
-   *    放进阶梯会让某条 Build 路线在第六天直接阵亡。本组是实测**全部 12 条真实路线
-   *    （3 个第一层 × {维修分支, 条件池 3 项}）终局都存活**的唯一四条既有模板组合之一。
-   *    实测最差路线余量 = **78/1100（7%）**，出现在 `重型弹头 → 动能爆发`（不回耐久那条）；
-   *    其余路线余量 200~530。这是**已记录的平衡事实**（本 Queue 不做数值调整）。
    * ==================================================================== */
   {
     id: 'PineappleFireBrute',

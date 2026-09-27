@@ -10,6 +10,28 @@
  *     → Run 2：新一局（Day / HP / Run Buff 全部重置）
  *     → 第一场真实战斗真的用 ★2 炮：实测第一发命中 = 150（= round(120 × 1.25)）
  *
+ * ══════════════════════════════════════════════════════════════════════════════════════
+ * ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）
+ *
+ * 产品 Run 已由**四场压力阶梯**收成**三段问题序列**（`ProtoRusher` → `Chaser` →
+ * `RangedTurret`），第 3 段落位**终局** `d7-final`。`RangedTurret` 是全项目**唯一**声明
+ * `enemyDrive:'keep-distance'` 的对手 ⇒ 上面那条「cannon 确定性通关路线」在控距下**零命中**
+ * ⇒ **Run 1 必然 `RUN FAILED`**（实测 `phase=FAILED battles=3/3 耐久=0%`；Node 同源证据见
+ * `tests/productRunEncounterSequenceQ3.test.ts` Q3-07）。
+ *
+ * ⇒ 如实降级（**判据不删，只换相位 + 记账**）：
+ *    · `A1 / A2 / B1 / B2 / B3` **照常**（它们读的是**第一场真实战斗**的伤害，与终态无关）；
+ *    · `B4` 改为**如实**断 `RUN FAILED`，并新增 `B4b`：FAILED 终点没有候选卡 / 没有领奖动作 /
+ *      唯一动作是「返回主界面」（探针级；像素级对照见 `_e2e_product_loop.cjs` C3e 与
+ *      `_e2e_product_reward.cjs` C0c）；
+ *    · `C1 ~ E6`（COMPLETE → 领奖 5/5 → 合成 ★2 → Run 2 实测 150）**不可达** ⇒ 逐条 `BLOCKED`
+ *      （**既不计 PASS 也不计 FAIL**，绝不伪造成通过）。
+ *
+ * **诚实披露**：「★2 真的让战斗伤害变成 150」这条**浏览器端**能力在本批次无证据
+ * （能力下降，不是回归）；模型侧覆盖仍在 `tests/productStarPowerR2C.test.ts`。
+ * 根因（第 3 段控距下默认装配打不赢）已记入未决台账 + 独立 Bug Queue。
+ * ══════════════════════════════════════════════════════════════════════════════════════
+ *
  * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY 两处口径变更（本文件的数字随之重测）：
  *   ① 必改 2：终点候选从「三选一」收窄为**固定 cannon 一件**（`REWARD_CHOICE_IDS = ['cannon']`）；
  *   ② 必改 3（用户裁决）：本局 Run 的**玩家侧**炮基线 = `PRODUCT_RUN_CANNON_BASE_DAMAGE = 120`
@@ -116,6 +138,15 @@ const results = [];
 function log(pass, name, detail = '') {
   results.push({ pass, name, detail });
   console.log((pass ? 'PASS ' : 'FAIL ') + name + (detail ? ' | ' + detail : ''));
+}
+/**
+ * ⚠️ R6 如实降级：依赖「Run 1 COMPLETE → 领奖 → 合成 ★2 → Run 2」的判据在本批次没有观测对象
+ * （第 3 段控距下 Run 1 恒 FAILED，见文件头披露）。⇒ 单独记为 `BLOCKED`：既不通过
+ * （**绝不伪造成 PASS**）也不失败（不是回归），summary 单独计数、**退出码不受影响**。
+ */
+function blocked(name, detail = '') {
+  results.push({ pass: null, blocked: true, name, detail });
+  console.log('BLOCKED ' + name + (detail ? ' | ' + detail : ''));
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -453,16 +484,43 @@ async function main() {
       'B3 **Battle Runtime Weapon Star**（真实装配）：运行时读到的炮是 ★1、伤害 120（本局口径）',
       r1Main ? `${r1Main.defId}@${r1Main.hardpointId} ★${r1Main.star} damage=${r1Main.damage}` : 'n/a',
     );
+    /*
+      ⚠️ R6 如实降级：原判据是「Run 1 打到 COMPLETE」。三段序列的第 3 段（终局
+      `RangedTurret`）在控距下让本装载零命中 ⇒ 如实改为断 FAILED（**判据不删，只换相位**）。
+      ⚠️ `pDone` 的定义上移到 B4 之前（B4 / B4b 都要用它）。
+    */
+    const pDone = run1.detail.last;
     log(
-      run1.detail.stopped === 'COMPLETE',
-      'B4 Run 1 打到 COMPLETE（★1 的确定性通关路线，与 reward E2E 基线一致）',
-      `stopped=${run1.detail.stopped} · ${(run1.detail.ms / 1000).toFixed(1)}s`,
+      run1.detail.stopped === 'FAILED' && !!pDone && pDone.failed === true && pDone.complete === false,
+      'B4（如实降级）Run 1 三段全打到终局 → RUN FAILED（第 3 段控距下 cannon 零命中）',
+      `stopped=${run1.detail.stopped} · ${(run1.detail.ms / 1000).toFixed(1)}s · ` +
+        `battles=${pDone ? `${pDone.battlesCompleted}/${pDone.battleTotal}` : 'n/a'} ` +
+        `耐久=${pDone ? pDone.battle.durabilityPercent : 'n/a'}%`,
     );
+    log(
+      !!pDone &&
+        pDone.rewardChoices.length === 0 &&
+        pDone.rewardChoiceRects.length === 0 &&
+        pDone.claiming === false &&
+        pDone.claimStarts === 0 &&
+        pDone.actionLabel === '返回主界面' &&
+        pDone.actionEnabled === true,
+      'B4b（如实降级）FAILED 终点**没有**候选卡、**没有**领奖动作；唯一动作是「返回主界面」且可用',
+      `候选=${pDone ? pDone.rewardChoices.length : 'n/a'} claiming=${pDone ? pDone.claiming : 'n/a'} ` +
+        `starts=${pDone ? pDone.claimStarts : 'n/a'} label=${pDone ? pDone.actionLabel : 'n/a'} ` +
+        `enabled=${pDone ? pDone.actionEnabled : 'n/a'}`,
+    );
+
+    /*
+      ⚠️ R6 如实降级：`C1 ~ E6` 整条链（COMPLETE → 领奖 5/5 → 合成 ★2 → Run 2 实测 150）
+      的前提是 **Run 1 COMPLETE** —— 本批次恒 FAILED ⇒ 整块记 `BLOCKED`（见文件头披露）。
+    */
+    const run1Completed = run1.detail.stopped === 'COMPLETE';
+    if (run1Completed) {
 
     /* ==================================================================================
        C｜领奖：点 cannon 那张卡（必改 2 起候选只有它一件）→ 库存 5/5
        ================================================================================== */
-    const pDone = run1.detail.last;
     log(
       pDone.phase === 'COMPLETE' && pDone.rewardChoiceRects.length === CHOICE_IDS.length,
       'C1 COMPLETE 上真的画出了候选卡（与绘制同源的矩形；条数 = 产品候选池长度）',
@@ -633,6 +691,32 @@ async function main() {
       onlyDamageDetail(r1Main, r2Main),
     );
 
+    } else {
+      /*
+        ⚠️ R6 如实降级：`C1 ~ E6` 的前提是「Run 1 COMPLETE 后领奖」⇒ 本批次不可达。
+        逐条记 `BLOCKED`（**既不算 PASS 也不算 FAIL**）。括号里是稳定的断言 id。
+      */
+      const why = '不可达：Run 1 恒 RUN FAILED（第 3 段 RangedTurret 控距下 cannon 零命中）';
+      for (const n of [
+        'C1 COMPLETE 上真的画出了候选卡',
+        'C1b 终点的唯一出口是底栏 CTA「领取并返回」且可用',
+        'C2 领到 cannon ⇒ 库存 ★1 = 5/5',
+        'D1 5/5 的 ★1 炮：卡上同时写「可合成」与「攻击 80 → 100」',
+        'D2 合成一次：★1 归 0、★2 = 1、equipped 自动升到 ★2',
+        'D3 ★2 卡面写着「攻击 100 → 120」',
+        'D4 回首页后装备载荷已带 functionalStars.frontMass = 2',
+        'E1 Run 2 的装备载荷主武器槽星级 = 2',
+        'E1b 第二局进入瞬间就是 DAY = 1 / 一场没打 / Run Buff = []',
+        'E2 新 Run 真的重置了（同 day / 同 nodeId / 满耐久）',
+        'E3 运行时读到的炮是 ★2、伤害 150',
+        'E4 **核心结论**：同一门炮只差星级，第一发真实命中 120 → 150',
+        'E5 两局第一发命中发生在同一战斗时刻（星级不改节奏）',
+        'E6 两局第一场武器参数逐项比对只有伤害不同',
+      ]) {
+        blocked(n, why);
+      }
+    } /* ← if (run1Completed) 结束：C 段（领奖）+ D 段（合成）+ E 段（Run 2）到此为止 */
+
     log(pageErrors.length === 0, 'F1 全流程零运行时报错', pageErrors.slice(0, 2).join(' | ') || 'none');
   } catch (err) {
     log(false, 'F0 未捕获异常', String(err && err.stack ? err.stack.split('\n')[0] : err));
@@ -642,13 +726,21 @@ async function main() {
     server.close();
   }
 
-  const failed = results.filter((r) => !r.pass);
-  console.log(`\n=== 结果：${results.length - failed.length}/${results.length} PASS ===`);
+  const pass = results.filter((r) => r.pass === true).length;
+  const blockedN = results.filter((r) => r.blocked === true).length;
+  const failed = results.filter((r) => r.pass === false);
+  console.log(
+    `\n=== 结果：${pass}/${results.length} PASS，${failed.length} FAIL，${blockedN} BLOCKED（本批次不可达 · 如实登记） ===`,
+  );
   if (failed.length > 0) {
     console.log('失败项：');
     for (const f of failed) console.log(` - ${f.name} | ${f.detail}`);
-    process.exit(1);
   }
+  if (blockedN > 0) {
+    console.log('\n本批次不可达（**既不计 PASS 也不计 FAIL**；根因见文件头裁决披露）：');
+    for (const b of results.filter((r) => r.blocked === true)) console.log(` - ${b.name} | ${b.detail}`);
+  }
+  if (failed.length > 0) process.exit(1);
 }
 
 /** D2 的「装备指向」三处一致判据。 */

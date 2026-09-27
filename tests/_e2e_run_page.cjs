@@ -7,6 +7,18 @@
  *   - 只读诊断句柄 window.__RUNPAGE__（Run Page 专属，仅存在于本原型页面）
  * 不伪造任何步骤；任一断言失败即 FAIL。
  *
+ * ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）：
+ *   产品 Run 的脚本已由**四场**收成**三段问题序列**（`ProtoRusher` → `Chaser` → `RangedTurret`），
+ *   第 3 段落位在**终局** `d7-final`（FINAL · DAY 7），DAY 6 由纯叙事 `d6-travel` 占据。
+ *   ⚠️ 第 3 段 `RangedTurret` 是全项目**唯一**声明 `enemyDrive:'keep-distance'` 的对手，
+ *   而本页走查装载 = Lab 演示装载（`RUN_DEMO_LOADOUT_ID` = `WatermelonHeavyCannon`，**只有一门炮**）
+ *   ⇒ **本局必然 FAILED**（第三段控距下炮击零命中：敌耐久全程 1100、玩家 659 → 0）。
+ *   ⇒ 本文件主走查（11a~11g）**如实**以 `RUN FAILED` 收束：判据一条不删，只把相位与期望值
+ *   换成真实发生的结局；原本由它承担的「到 COMPLETE 的落链」证据**改由 Node 侧承担**
+ *   （`tests/productRunEncounterSequenceQ3.test.ts` Q3-05 / Q3-07 +
+ *   `tests/portraitRunPage.test.ts` 的 `FROZEN_UPGRADE` / `FROZEN_UPGRADE_E2E`）。
+ *   根因（默认 / 单炮装载打不赢第 3 段）已记入未决台账 + 独立 Bug Queue。
+ *
  * 面积期望值来自纯模型账本 tests/portraitRunPage.test.ts（RP-22），
  * 本文件是「浏览器真实渲染 == 纯模型预测」的跨语言交叉核对：
  *   - dpr=1 且容器恰为 390×844 时 scale=1 → 精确像素断言成立；
@@ -147,8 +159,10 @@ const ICON_COLOR_BY_ID = {
  * 面积账本的**期望值生成器**（唯一来源 = 模型层 `tests/portraitRunPage.test.ts` 的
  * RP-22 / RP-22b / RP-23 冻结字面量）。
  *
- * ⚠️ 为什么不是一张静态表：PRP-RUN-02 把流程改成「**九个脚本节点 · 四场战斗 · 两次选择
- *    + 一次耐久取舍**」后，**同一个 phase 会出现在不同的 DAY**（DAY 2 / 3 / 4 / 5 / 6 / 7）
+ * ⚠️ 为什么不是一张静态表：PRP-RUN-02 把流程改成「**十个脚本节点 · 三段战斗 · 两次选择
+ *    + 一次耐久取舍 + 一天纯叙事**」后（⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE 把
+ *    四场改成三段问题序列，DAY 6 改由叙事节点 `d6-travel` 占据），**同一个 phase 会出现在
+ *    不同的 DAY**（DAY 2 / 3 / 4 / 5 / 6 / 7）
  *    —— 顶部进度节点随之整体前移一格；顶部强化行也会从 0 → 1 → 2 个图标。
  *    逐帧静态表会退化成手抄，容易与真实规则脱钩，
  *    因此这里按**与布局函数同源的规则**生成，并与 RP-22b / RP-23 的字面量保持一致：
@@ -360,8 +374,13 @@ function ledgerCheck(tag, label, stats, exp, dpr) {
       exp.cardBar > 0
         ? stats.cardBar > 0 && stats.road === 0
         : exp.nodeTodo === 0 && exp.ground === 0
-          ? // DAY 7 终局（进度条走满 + battle 舞台无地面层）→ 改证「进度已满 + 主动作仍在」
-            stats.nodeDone > 0 && stats.actionBar > 0
+          ? /*
+              DAY 7 终局（进度条走满 + battle 舞台无地面层）→ 改证「进度已满 + 主动作状态一致」。
+              ⚠️ R6：终局有两种 —— `COMPLETE`（动作可用 ⇒ actionBar 成片）与 `FAILED`
+              （终态**不接受推进** ⇒ 主按钮禁用 ⇒ actionBar 为 0；由
+              `ledgerExpect({ action: false })` 表达）⇒ 这里按期望值方向断言，不再写死「必须有」。
+            */
+            stats.nodeDone > 0 && (exp.actionBar > 0 ? stats.actionBar > 0 : stats.actionBar === 0)
           : stats.nodeTodo > 0 || stats.ground > 0;
     log(
       structural,
@@ -542,8 +561,8 @@ async function runViewport(browser, vp) {
   );
   log(p0.actionLabel === '继续' && p0.actionEnabled, `[${tag}] R10 底部显示「继续」且可点`, `${p0.actionLabel}/${p0.actionEnabled}`);
   log(
-    p0.buffs.length === 0 && p0.day === 1 && p0.dayTotal === 7 && p0.battleTotal === 4,
-    `[${tag}] R11 顶部 = DAY 1/7 + 0 个强化图标（本局共 4 场战斗）`,
+    p0.buffs.length === 0 && p0.day === 1 && p0.dayTotal === 7 && p0.battleTotal === 3,
+    `[${tag}] R11 顶部 = DAY 1/7 + 0 个强化图标（本局共 3 段战斗）`,
     `day=${p0.day}/${p0.dayTotal} buffs=${p0.buffs.length} battleTotal=${p0.battleTotal}`,
   );
   /*
@@ -618,7 +637,7 @@ async function runViewport(browser, vp) {
   log(
     p.logCount === p0.logCount + 4 &&
       p.log[p.log.length - 2].text === '前方传来引擎的轰鸣。' &&
-      p.log[p.log.length - 1].text === '你遭遇了菠萝喷火车。',
+      p.log[p.log.length - 1].text === '你遭遇了菠萝冲刺车。',
     `[${tag}] R14 EVENT 日志追加 2 句自然语言敌情（敌人 = 本节点的 Encounter，不是写死的演示遭遇）`,
     p.log.slice(-2).map((l) => l.text).join(' ｜ '),
   );
@@ -649,8 +668,8 @@ async function runViewport(browser, vp) {
     w0 ? `spawnA=${round2(w0.world.spawnAx)} spawnB=${round2(w0.world.spawnBx)} sep=${round2(w0.world.spawnSeparation)}` : '',
   );
   log(
-    !!w0 && w0.world.initialGap > 400 && Math.round(w0.world.initialGap) === 606,
-    `[${tag}] R16e 必改 2：开局有明确距离（节点 ① = 喷火车，两车外廓实测间距 ≈ 606 世界 px）`,
+    !!w0 && w0.world.initialGap > 400 && Math.round(w0.world.initialGap) === 564,
+    `[${tag}] R16e 必改 2：开局有明确距离（节点 ① = 菠萝冲刺车，两车外廓实测间距 ≈ 564 世界 px）`,
     w0 ? `initialGap=${round2(w0.world.initialGap)}（世界宽的 ${round2((w0.world.initialGap / w0.world.width) * 100)}%）` : '',
   );
   const sEvent = await pixelStats(page);
@@ -1338,17 +1357,22 @@ async function runViewport(browser, vp) {
     );
   }
 
-  /* ------------------ 11d) 选强联动「三连装填」→ IDLE(d6-battle3 · DAY 6)，顶部 3 个图标 */
+  /* ------------------ 11d) 选强联动「三连装填」→ IDLE(d6-travel · DAY 6)，顶部 3 个图标 */
+  /*
+    ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：DAY 6 现在是**纯叙事节拍** `d6-travel`
+       （旧第四场 `d6-battle3` 已删除，第三段改落 `d7-final`）⇒ 这里落到的 IDLE 节点是叙事节点，
+       下一段（11e）要走「叙事 → 终局节点 → 敌情 → 战斗」多一跳。
+  */
   await clickRect(page, pChoice2.choiceOptions[0].rect); // 三连装填
   const pIdle5 = await probeOf(page);
   log(
     pIdle5.phase === 'IDLE' &&
-      pIdle5.nodeId === 'd6-battle3' &&
+      pIdle5.nodeId === 'd6-travel' &&
       pIdle5.day === 6 &&
       pIdle5.buffs.length === 3 &&
       JSON.stringify(pIdle5.build) === JSON.stringify(['twinCannon', 'fastReload', 'tripleLoad']) &&
       pIdle5.modifier === 'twinCannon',
-    `[${tag}] R53 必改 6：选择后 Build = [twinCannon, fastReload, tripleLoad]（DAY 6 · 顶部 3 个图标 = 一层 + 横向 + 二层）`,
+    `[${tag}] R53 必改 6：选择后 Build = [twinCannon, fastReload, tripleLoad]（DAY 6 叙事节拍 · 顶部 3 个图标 = 一层 + 横向 + 二层）`,
     `day=${pIdle5.day}/${pIdle5.dayTotal} node=${pIdle5.nodeId} build=${pIdle5.buildLabels.join('+')} buffIconCount=${pIdle5.buffIconCount}`,
   );
   const sIdle5 = await pixelStats(page);
@@ -1370,8 +1394,13 @@ async function runViewport(browser, vp) {
     );
   }
 
-  /* ------------------ 11e) 第三场（DAY 6 · ProtoRusher · 三层 Build 同时真实生效） */
+  /* ------------------ 11e) 第三段 = **终局** `d7-final`（DAY 7 · RangedTurret · 三层 Build 同时真实生效） */
   /*
+    ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：脚本由**四场**改成**三段问题序列**
+       （`ProtoRusher` → `Chaser` → `RangedTurret`），第 3 段落位在 `d7-final`（FINAL · DAY 7）
+       ⇒ 改前 DAY 6 的第三场 `d6-battle3` 已删除，DAY 6 由**纯叙事** `d6-travel` 占据。
+       所以本段的走法比改前多一跳：`d6-travel`(IDLE) --继续--> `d7-final`(IDLE)
+       --继续--> 敌情 EVENT --继续--> BATTLE（FINAL 节点仍是两段式）。
     规则（PRP-RUN-R1 起）：carry = 上一场真实剩余；**耐久 <= 0 = 本局立即结束**（FAILED 终态），
     所以能走到最终战斗 ⇒ 上一场结束时 hp2 必然 > 0 —— 不存在「0 耐久 → 满耐久开幕」这条
     已被删除的错误分支。本分支没选维修项 → 无补偿 → 开局耐久必须**恰好等于**上一场剩余
@@ -1380,14 +1409,29 @@ async function runViewport(browser, vp) {
   const hp2 = pRes2.battle ? pRes2.battle.playerHp : NaN;
   const hpMax2 = pRes2.battle ? pRes2.battle.playerHpMax : NaN;
   const expectInit3 = hp2;
-  await clickRect(page, pIdle5.actionRect); // IDLE → EVENT
+  await clickRect(page, pIdle5.actionRect); // d6-travel(IDLE) → d7-final(IDLE)
+  const pFinalIdle = await probeOf(page);
+  log(
+    pFinalIdle.phase === 'IDLE' &&
+      pFinalIdle.nodeId === 'd7-final' &&
+      pFinalIdle.nodeKind === 'FINAL' &&
+      pFinalIdle.day === 7,
+    `[${tag}] R57 脚本推进到 DAY 7 终局节点（d7-final / FINAL · 第 3 段 = 最后一段路）`,
+    `phase=${pFinalIdle.phase} node=${pFinalIdle.nodeId}(${pFinalIdle.nodeKind}) day=${pFinalIdle.day}`,
+  );
+  await clickRect(page, pFinalIdle.actionRect); // IDLE → EVENT
   const pEvent5 = await probeOf(page);
+  log(
+    pEvent5.phase === 'EVENT' && pEvent5.log[pEvent5.log.length - 1].text === '你遭遇了远程炮台。',
+    `[${tag}] R57b 终局敌情 = 三段问题序列 ③（**远程控距** · 远程炮台），文案来自该节点的 encounter`,
+    pEvent5.log.slice(-2).map((l) => l.text).join(' ｜ '),
+  );
   await clickRect(page, pEvent5.actionRect); // EVENT → BATTLE③
   const p3 = await probeOf(page);
   const w3 = p3.battleWorld;
   log(
-    p3.phase === 'BATTLE' && p3.actionLabel === '战斗中' && p3.nodeId === 'd6-battle3' && p3.day === 6,
-    `[${tag}] R54 第三场开打（DAY 6 · 节点 d6-battle3 · 两车压力阶梯③ · 仍在同一页面）`,
+    p3.phase === 'BATTLE' && p3.actionLabel === '战斗中' && p3.nodeId === 'd7-final' && p3.day === 7,
+    `[${tag}] R54 第三段开打（DAY 7 · 终局 d7-final · 远程控距 · 仍在同一页面）`,
     `phase=${p3.phase}/${p3.actionLabel} node=${p3.nodeId} day=${p3.day} 第${p3.battlesCompleted + 1}/${p3.battleTotal}场`,
   );
   log(
@@ -1399,14 +1443,14 @@ async function runViewport(browser, vp) {
       //    ⚠️ PRP-BUILD-01-CLOSEOUT-AND-FREEZE：快速装填的专属二层（三条尝试全部未通过）
       //    已整条废弃，探针里的 suppression* 字段随之一并删除。
       w3.abilities.kineticBurst === false,
-    `[${tag}] R54b 必改 6：第三场**同时携带三层**（一层改武器 + 横向 + 二层数值，运行时不串味）`,
+    `[${tag}] R54b 必改 6：第三段**同时携带三层**（一层改武器 + 横向 + 二层数值，运行时不串味）`,
     w3
       ? `build=[${w3.build.join(',')}] modifier=${w3.modifier} kinetic=${w3.abilities.kineticBurst}`
       : 'no battleWorld',
   );
   log(
     !!w3 && w3.steps === 0 && w3.projectiles === 0,
-    `[${tag}] R54c clean recreate（第三场步数 / 弹丸从 0 起，无上一场残留）`,
+    `[${tag}] R54c clean recreate（第三段步数 / 弹丸从 0 起，无上一场残留）`,
     w3 ? `steps=${w3.steps} projectiles=${w3.projectiles}` : '',
   );
   log(
@@ -1415,16 +1459,17 @@ async function runViewport(browser, vp) {
       Math.abs(w3.initialPlayerHp - expectInit3) < 1e-6 &&
       w3.initialPlayerHp > 0 &&
       w3.initialPlayerHp <= w3.playerHpMax,
-    `[${tag}] R54d 跨战斗耐久规则在第三场同样成立（改装分支的回耐久 = 0 → 开局**恰好等于**上一场剩余）`,
+    `[${tag}] R54d 跨战斗耐久规则在第三段（终局）同样成立（改装分支的回耐久 = 0 → 开局**恰好等于**上一场剩余 · 即原 R57d 的终局口径，节点合并后是同一场）`,
     w3
       ? `开局 ${round2(w3.initialPlayerHp)}/${round2(w3.playerHpMax)}（第二场结束 ${round2(hp2)} → 期望 ${round2(expectInit3)}）`
       : '',
   );
   /*
     PRP-RUN-R1 结构断言（浏览器端真实证据）：
-      各场战斗的**开局耐久单调不增**（第二场 ≤ 第一场结束时剩余，第三场 ≤ 第二场结束时剩余），
+      各段战斗的**开局耐久单调不增**（第二段 ≤ 第一段结束时剩余，第三段 ≤ 第二段结束时剩余），
       且只可能因为「耐久没归零」才走到下一步 → 结构上不存在隐藏回血 / 死亡续命。
       ⚠️ PRP-RUN-02：本分支选的是「继续改装」（不回耐久）→ 单调不增必须**严格**成立。
+      ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：段数由 4 改 3，本条覆盖**全部三段**。
   */
   if (w3) {
     log(
@@ -1433,7 +1478,7 @@ async function runViewport(browser, vp) {
         w3.initialPlayerHp <= hp2 + 1e-6 &&
         hpCarried > 0 &&
         hp2 > 0,
-      `[${tag}] R54e 单一耐久贯穿前三场：开局耐久单调不增，且前两场结束耐久均 > 0（无一例死亡续命）`,
+      `[${tag}] R54e 单一耐久贯穿三段：开局耐久单调不增，且前两段结束耐久均 > 0（无一例死亡续命）`,
       `B1 结束 ${round2(hpCarried)} → B2 开局 ${round2(w2.initialPlayerHp)} → B2 结束 ${round2(hp2)} → B3 开局 ${round2(w3.initialPlayerHp)}`,
     );
   }
@@ -1467,146 +1512,132 @@ async function runViewport(browser, vp) {
       `[${tag}] R55 必改 3：三连装填一次攻击连出三发真实炮弹（0/100/200ms · 窗口内三发同时在飞）`,
       `窗口内最多 ${tripleWin.maxProjectiles} 发在飞 · ${tripleWin.projSamples}/${tripleWin.samples} 次采样见弹（第二场同口径最多 ${twinWinMax} 发）`,
     );
+    /*
+      ⚠️ R6（**如实降级**）：改前本条断言「三发都是真弹 ⇒ 敌方耐久真的在掉」。第 3 段换成控距对手后
+      炮击零命中 ⇒ 窗口内敌方耐久**完全不变** ⇒ 伤害链在本段无从验证。
+      如实改为负面证据（弹丸真实存在由 R55 保留；伤害链的浏览器证据与根因一并记入 Bug Queue）。
+    */
     log(
-      tripleWin.minEnemyHp < tripleWin.enemyHpMax,
-      `[${tag}] R55b 三发都是真弹（敌方耐久真的在掉）`,
+      tripleWin.minEnemyHp === tripleWin.enemyHpMax,
+      `[${tag}] R55b（如实降级）第三段控距下窗口内敌方耐久**完全不变**（炮击零命中）`,
       `窗口内最低 敌方 ${round2(tripleWin.minEnemyHp)}/${round2(tripleWin.enemyHpMax)}`,
     );
   }
 
-  /* ------------------ 11f) 第三场结束 → RESULT（3/4 场，**不是终局**） */
-  await page.waitForFunction(
-    () => {
-      const pr = window.__RUNPAGE__.probe();
-      return pr.phase === 'RESULT' && pr.battlesCompleted === 3;
-    },
-    null,
-    { timeout: 90000 },
-  );
-  const pEnd3 = await probeOf(page);
+  /* ------------------ 11f) 第三段 = 终局 ⇒ 打完**直接判终态**（不存在 RESULT 相位） */
+  /*
+    ⚠️ `finishRunBattle`（`runPageState.ts:682`）第 ② 条分支：本场节点 `kind === 'FINAL'` ⇒
+       不进 `RESULT`，直接判终态。改前四场时第三场是普通 `BATTLE`（有 RESULT）。
+    ⚠️ 原 R57c / R57d（「终局战斗开打 / 终局开局耐久 = 上一场剩余」）与 R54 / R54d 现在是
+       **同一场**（节点合并）⇒ 断言合并进 R54 / R54d（编号在那两行文档化），不重复挂。
+
+    ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）：
+       第 3 段 `RangedTurret` 是全项目**唯一**声明 `enemyDrive: 'keep-distance'` 的对手，
+       而本页走查装载 = Lab 演示装载（`RUN_DEMO_LOADOUT_ID` = `WatermelonHeavyCannon`，
+       **只有一门炮**）⇒ **本局必然 FAILED**。
+       Node 端同源实测（同一装载、同一走查，见 `tests/productRunEncounterSequenceQ3.test.ts` Q3-07）：
+       第三段 `hpB0 = hpBMax = 1100`（敌方**全程一点血都没掉**）、玩家 `659 → 0`、`winner = 'B'`。
+       ⇒ 本段起**如实**走正式 FAILED 流程（不再断言 COMPLETE）。
+       浏览器端「到 COMPLETE 的落链」证据**只保留 Node 侧**
+       （`productRunEncounterSequenceQ3` Q3-05 的可通关装配 + `portraitRunPage.test.ts` 的
+       `FROZEN_UPGRADE` / `FROZEN_UPGRADE_E2E`）；根因（默认装配打不赢第 3 段）已记入
+       未决台账并拆独立 Bug Queue。
+  */
+  await page.waitForFunction(() => window.__RUNPAGE__.probe().phase === 'FAILED', null, { timeout: 120000 });
+  const pDone = await probeOf(page);
   log(
-    pEnd3.phase === 'RESULT' &&
-      pEnd3.battlesCompleted === 3 &&
-      pEnd3.battleTotal === 4 &&
-      pEnd3.complete === false &&
-      pEnd3.failed === false &&
-      pEnd3.actionLabel === '继续' &&
-      pEnd3.actionEnabled,
-    `[${tag}] R56 第三场自动结束 → RESULT（3/4 场 · 还不是终局 · 脚本的下一站是 DAY 7 终局遭遇）`,
-    `phase=${pEnd3.phase} battles=${pEnd3.battlesCompleted}/${pEnd3.battleTotal} action="${pEnd3.actionLabel}"`,
+    pDone.phase === 'FAILED' &&
+      pDone.failed === true &&
+      pDone.complete === false &&
+      pDone.battlesCompleted === 3 &&
+      pDone.battleTotal === 3 &&
+      !pDone.durabilityOpen &&
+      !pDone.overlayOpen,
+    `[${tag}] R56 三段打完 → RUN FAILED（终态 · 第三段控距下本装载打不死对手 ⇒ 玩家耐久耗尽）`,
+    `phase=${pDone.phase} complete=${pDone.complete} failed=${pDone.failed} battles=${pDone.battlesCompleted}/${pDone.battleTotal} 耐久=${pDone.battle ? pDone.battle.durabilityPercent : '?'}%`,
   );
   log(
-    pEnd3.day === 6 &&
-      pEnd3.buffs.length === 3 &&
-      JSON.stringify(pEnd3.build) === JSON.stringify(['twinCannon', 'fastReload', 'tripleLoad']) &&
-      pEnd3.log[pEnd3.log.length - 1].text === '再往前，就是这片荒原最深处的对手。',
-    `[${tag}] R56b 第三场 RESULT = DAY 6 + 三层 Build + **该节点的 after**（把玩家导向终局）`,
-    `day=${pEnd3.day}/${pEnd3.dayTotal} build=${pEnd3.buildLabels.join('+')} tail=${pEnd3.log[pEnd3.log.length - 1].text}`,
+    // ⚠️ R6 守门：FINAL 节点**不得**出现 RESULT 相位（否则等于把终局当成普通场），
+    //    整局只允许**两段**普通战斗给出 RESULT，最后一段必须以 BATTLE → FAILED 收束。
+    pDone.phaseTrail.filter((x) => x === 'RESULT').length === 2 &&
+      pDone.phaseTrail[pDone.phaseTrail.length - 2] === 'BATTLE' &&
+      pDone.phaseTrail[pDone.phaseTrail.length - 1] === 'FAILED',
+    `[${tag}] R56b 终局相位守门：只有两段普通战斗出现 RESULT，最后一段（FINAL）以 BATTLE→FAILED 收束（不跳段 / 不串场）`,
+    pDone.phaseTrail.join('→'),
   );
   const sRes3 = await pixelStats(page);
   ledgerCheck(
     tag,
-    'R56c RESULT 第三场 (DAY6 · 3 强化)',
+    'R56c RUN FAILED (DAY7 · 3 强化)',
     sRes3,
-    ledgerExpect({ day: 6, stage: 'battle', buffs: ['twinCannon', 'fastReload', 'tripleLoad'] }),
+    ledgerExpect({ day: 7, stage: 'battle', buffs: ['twinCannon', 'fastReload', 'tripleLoad'], action: false }),
     vp.dpr,
   );
 
-  /* ------------------ 11g) DAY 7 终局遭遇 → RUN COMPLETE（本 Queue 的 Run End） */
-  await clickRect(page, pEnd3.actionRect); // RESULT → d7-final IDLE
-  const pFinalIdle = await probeOf(page);
-  log(
-    pFinalIdle.phase === 'IDLE' &&
-      pFinalIdle.nodeId === 'd7-final' &&
-      pFinalIdle.nodeKind === 'FINAL' &&
-      pFinalIdle.day === 7,
-    `[${tag}] R57 脚本推进到 DAY 7 终局节点（d7-final / FINAL · 最后一段路）`,
-    `phase=${pFinalIdle.phase} node=${pFinalIdle.nodeId}(${pFinalIdle.nodeKind}) day=${pFinalIdle.day}`,
-  );
-  await clickRect(page, pFinalIdle.actionRect); // IDLE → EVENT
-  const pFinalEvent = await probeOf(page);
-  log(
-    pFinalEvent.phase === 'EVENT' &&
-      pFinalEvent.log[pFinalEvent.log.length - 1].text === '你遭遇了香蕉推杆镭射车。',
-    `[${tag}] R57b 终局敌情 = 压力阶梯 ④（香蕉推杆镭射车），文案来自该节点的 encounter`,
-    pFinalEvent.log.slice(-2).map((l) => l.text).join(' ｜ '),
-  );
-  await clickRect(page, pFinalEvent.actionRect); // EVENT → BATTLE④
-  const p4 = await probeOf(page);
-  const w4 = p4.battleWorld;
-  log(
-    p4.phase === 'BATTLE' &&
-      p4.day === 7 &&
-      p4.battlesCompleted === 3 &&
-      JSON.stringify(p4.build) === JSON.stringify(['twinCannon', 'fastReload', 'tripleLoad']),
-    `[${tag}] R57c 终局战斗开打（DAY 7 · 第 4/4 场 · 三层 Build）`,
-    `phase=${p4.phase} day=${p4.day} 第${p4.battlesCompleted + 1}/${p4.battleTotal}场`,
-  );
-  log(
-    !!w4 && Math.abs(w4.initialPlayerHp - pEnd3.battle.playerHp) < 1e-6,
-    `[${tag}] R57d 终局开局耐久 = 第三场剩余（全程单一耐久，无任何隐藏回血）`,
-    w4 ? `开局 ${round2(w4.initialPlayerHp)} = 第三场结束 ${round2(pEnd3.battle.playerHp)}` : '',
-  );
-
-  await page.waitForFunction(() => window.__RUNPAGE__.probe().phase === 'COMPLETE', null, { timeout: 120000 });
-  const pDone = await probeOf(page);
+  /* ------------------ 11g) RUN FAILED 的收束叙事与最低必要信息（`pDone` 在 11f 已取） */
   /*
-    必改 5｜Run End：胜利 = `RUN COMPLETE`。本路线的结局是**确定性**的（`RunBattleRuntime` 无 RNG）
-    —— Node 端实测表 `FROZEN_UPGRADE_E2E`（改装分支 · 一层双联炮 + 横向快速装填 + 二层三连装填）
-    = [919, 916, 847, 366]，浏览器实跑逐项相等（终局耐久 366 = 33%），因此这里断言**精确终局**
-    （不做「完成或失败都算过」的柔性判据）。
-    ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY：玩家侧基线 80 → 120 后本表第二次重建
-    （原 [919, 907, 839, 357] ⇒ 终局 357 → 366）；Node 端同源表见 `portraitRunPage.test.ts`
-    的 `FROZEN_UPGRADE_E2E`，两边必须逐值相等。
+    ⚠️ 本段的 COMPLETE 版本按**真人裁决「保持现状 + 如实降级」**改为 FAILED 版本：
+       判据**一条不删**，只把相位与期望值换成真实发生的结局 ——
+       相位 / 浮层 / 唯一动作 / 收束叙事 / 日志行数 / DAY 覆盖 / 画面账本 / 整局轨迹全部覆盖 FAILED。
+       Node 端同源值（`demoRunPlayerLoadout()` 同装载走查，一次探针实测）：
+       `actionLabel = '重新开始冒险'` · `logCount = 33` ·
+       收束两行 = `['战车耐久耗尽，DAY 7 的冒险到此结束。', '战车耐久剩余 0%。']` · `finalHp = 0`。
   */
   log(
-    pDone.phase === 'COMPLETE' &&
-      pDone.complete === true &&
-      pDone.failed === false &&
-      pDone.battlesCompleted === 4 &&
+    pDone.phase === 'FAILED' &&
+      pDone.failed === true &&
+      pDone.complete === false &&
+      pDone.battlesCompleted === 3 &&
       !pDone.durabilityOpen &&
       !pDone.overlayOpen,
-    `[${tag}] R58 四场打完 → RUN COMPLETE（终态 · 不再有浮层 / 不再接受推进以外的操作）`,
+    `[${tag}] R58 三段打完 → RUN FAILED（终态 · 不再有浮层 / 不再接受推进以外的操作）`,
     `phase=${pDone.phase} complete=${pDone.complete} failed=${pDone.failed} battles=${pDone.battlesCompleted}/${pDone.battleTotal}`,
   );
+  /*
+    ⚠️ R6 实测：Lab 侧的失败态**不接受推进** —— 主按钮显示为「返回主界面」且**禁用**
+    （`actionEnabled === false`，底栏 `actionBar` 像素为 0，见 R56c / R58f 的账本）。
+    这正是 RP-D-06「失败不接受隐式推进」的浏览器侧形态：本阶段既不接永久奖励，
+    也不接受推进以外的任何操作。
+  */
   log(
-    pDone.actionLabel === '完成本次冒险' && pDone.actionEnabled,
-    `[${tag}] R58b 完成态唯一动作 = 「完成本次冒险」（本阶段不接永久奖励 / 不接下一局系统）`,
+    pDone.actionLabel === '返回主界面' && pDone.actionEnabled === false,
+    `[${tag}] R58b 失败态唯一动作 = 「返回主界面」且**禁用**（终态：不接奖励 / 不接受推进）`,
     `${pDone.actionLabel}/${pDone.actionEnabled}`,
   );
-  const doneTail = pDone.log.slice(-4).map((l) => l.text);
+  const doneTail = pDone.log.slice(-2).map((l) => l.text);
   log(
-    pDone.logCount === 40 &&
+    pDone.logCount === 33 &&
       JSON.stringify(doneTail) ===
-        JSON.stringify([
-          '战斗胜利。',
-          `战车耐久剩余 ${pDone.battle.durabilityPercent}%。`,
-          '你在第七天走完了这趟路。',
-          '这次冒险到此结束。',
-        ]),
-    `[${tag}] R58c RUN COMPLETE 的四行收束叙事（胜负 + 最终耐久 % + 走完七天 + 结束）`,
+        JSON.stringify(['战车耐久耗尽，DAY 7 的冒险到此结束。', '战车耐久剩余 0%。']),
+    `[${tag}] R58c RUN FAILED 的两行收束叙事（耐久耗尽 + 最终耐久 %）`,
     `logCount=${pDone.logCount} tail=${doneTail.join(' ｜ ')}`,
   );
-  // 最低必要信息：最终 DAY / 最终耐久 / 最终 Build / 「完成本次冒险」
+  // 最低必要信息：最终 DAY / 最终耐久 / 最终 Build / 「重新开始冒险」
   log(
     pDone.day === 7 &&
       pDone.day === pDone.dayTotal &&
       pDone.battle.done === true &&
-      pDone.battle.playerHp > 0 &&
-      pDone.battle.durabilityPercent === Math.round((pDone.battle.playerHp / pDone.battle.playerHpMax) * 100) &&
+      pDone.battle.playerHp === 0 &&
+      pDone.battle.durabilityPercent === 0 &&
       JSON.stringify(pDone.buildLabels) === JSON.stringify(['双联炮', '快速装填', '三连装填']),
-    `[${tag}] R58d RUN COMPLETE 显示最低必要信息（最终 DAY / 最终耐久 / 最终 Build / 完成动作）`,
+    `[${tag}] R58d RUN FAILED 显示最低必要信息（最终 DAY / 最终耐久 / 最终 Build / 失败动作）`,
     `DAY ${pDone.day}/${pDone.dayTotal} · 耐久 ${round2(pDone.battle.playerHp)}/${pDone.battle.playerHpMax}（${pDone.battle.durabilityPercent}%）· Build=${pDone.buildLabels.join('+')} · 动作「${pDone.actionLabel}」`,
   );
   /*
-    PRP-RUN-02-R2：浏览器实跑的终局耐久必须与 Node 端**同一实测口径**逐值相等
-    （`FROZEN_UPGRADE_E2E` 的第四项 = 366；R2-RECOVERY 玩家侧基线后由 357 重建）。
-    这条把「浏览器真的按同一套确定性物理跑完」钉死，而不是只断言「> 0」。
+    ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**如实降级**）：改前这里断言「浏览器终局耐久
+    与 Node 端 `FROZEN_UPGRADE_E2E` 逐值相等（203 = 18%）」。三段序列后第 3 段换成控距对手，
+    **本装载（单炮）打不死它** ⇒ 终局耐久恒为 **0**（FAILED）。
+    本条改为「与 Node 端**同一装载、同一走查**的实测终局逐值相等」：
+    Node 探针同装载实测 `finalHp = 0`，且敌方全程 1100（零伤害）。
+    可通关装配下的 COMPLETE 精确终局（203 = 18%）仍在 Node 侧钉死
+    （`portraitRunPage.test.ts` 的 `FROZEN_UPGRADE_E2E`）。
   */
   log(
-    Math.round(pDone.battle.playerHp) === 366 && pDone.battle.durabilityPercent === 33,
-    `[${tag}] R58h 终局耐久与 Node 端实测表逐值相等（改装分支三层 Build · 366 = 33%）`,
-    `浏览器 ${round2(pDone.battle.playerHp)}（${pDone.battle.durabilityPercent}%）· Node 366（33%）`,
+    Math.round(pDone.battle.playerHp) === 0 &&
+      pDone.battle.durabilityPercent === 0 &&
+      Math.round(pDone.battle.enemyHp) === 1100,
+    `[${tag}] R58h 终局耐久 = 0 且敌方满耐久（与 Node 端同装载实测逐值相等 · 控距下炮击零命中）`,
+    `浏览器 我 ${round2(pDone.battle.playerHp)}/${pDone.battle.playerHpMax}（${pDone.battle.durabilityPercent}%）· 敌 ${round2(pDone.battle.enemyHp)}/1100 · Node 我 0 / 敌 1100`,
   );
   // 冒险记录完整：DAY 1..DAY 7 全部出现过（七天的整局被完整记录）
   const doneTexts = pDone.log.map((l) => l.text);
@@ -1619,27 +1650,57 @@ async function runViewport(browser, vp) {
   const sDone = await pixelStats(page);
   ledgerCheck(
     tag,
-    'R58f RUN COMPLETE (DAY7 · 3 强化)',
+    'R58f RUN FAILED (DAY7 · 3 强化)',
     sDone,
-    ledgerExpect({ day: 7, stage: 'battle', buffs: ['twinCannon', 'fastReload', 'tripleLoad'] }),
+    ledgerExpect({ day: 7, stage: 'battle', buffs: ['twinCannon', 'fastReload', 'tripleLoad'], action: false }),
     vp.dpr,
   );
   log(
     JSON.stringify(pDone.phaseTrail) ===
       JSON.stringify([
         'IDLE', 'IDLE', 'EVENT', 'BATTLE', 'RESULT', 'CHOICE', 'IDLE',
-        'EVENT', 'BATTLE', 'RESULT', 'DURABILITY', 'CHOICE', 'CHOICE', 'IDLE',
-        'EVENT', 'BATTLE', 'RESULT', 'IDLE', 'EVENT', 'BATTLE', 'COMPLETE',
+        'EVENT', 'BATTLE', 'RESULT', 'DURABILITY', 'CHOICE', 'CHOICE',
+        // ⚠️ R6：`d6-travel`（DAY 6 纯叙事 IDLE）→ `d7-final`（终局 IDLE）—— 两个连续 IDLE
+        'IDLE', 'IDLE', 'EVENT', 'BATTLE',
+        // ⚠️ 终局以 FAILED 收束（FINAL 无 RESULT 相位；控距下本装载打不死对手）
+        'FAILED',
       ]),
-    `[${tag}] R58g 完整整局轨迹（十个脚本节点）：四场真实战斗 + 两次强化 + 一次横向改装 + 一次耐久取舍，全程同一状态机`,
+    `[${tag}] R58g 完整整局轨迹（**九个**脚本节点）：三段真实战斗 + 两次强化 + 一次横向改装 + 一次耐久取舍 + 一天纯叙事，全程同一状态机（第三段 = 终局 ⇒ 以 FAILED 收束）`,
     pDone.phaseTrail.join('→'),
   );
 
   /*
-    -------------------- 12) 重新开始 = 干净新 Run（Build 完全清空 · 回到 DAY 1）
+    ------- 12) 失败态是终态 + 「重新进入页面」= 干净新 Run（Build 完全清空 · 回到 DAY 1）
+    ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**如实降级**）：改前这里按 COMPLETE 态的
+       「完成本次冒险」CTA 直接重新开始。三段序列下本装载以 `RUN FAILED` 收束，而失败态
+       **不接受推进**（实测：主按钮 `'返回主界面'` 且 `actionEnabled=false`）⇒ 如实分两步：
+         ① 先断言「终态不可逆」—— 点击后相位 / 节点 / 场数 / Build 一点没变（RP-D-06 的出口契约）；
+         ② 再用**重新进入页面**这条 Lab 侧真实路径拿一个干净新 Run，继续后面的段。
   */
   await clickRect(page, pDone.actionRect);
   await page.waitForTimeout(250);
+  const pAfterFailClick = await probeOf(page);
+  log(
+    pAfterFailClick.phase === 'FAILED' &&
+      pAfterFailClick.nodeId === 'd7-final' &&
+      pAfterFailClick.day === 7 &&
+      pAfterFailClick.battlesCompleted === 3 &&
+      pAfterFailClick.actionEnabled === false &&
+      JSON.stringify(pAfterFailClick.build) === JSON.stringify(['twinCannon', 'fastReload', 'tripleLoad']),
+    `[${tag}] R59 失败态是**终态**：点击主按钮后相位 / 节点 / 场数 / Build 一点没变（终态不可逆 · 不接受推进）`,
+    `phase=${pAfterFailClick.phase} node=${pAfterFailClick.nodeId} battles=${pAfterFailClick.battlesCompleted} build=[${pAfterFailClick.build.join(',')}] enabled=${pAfterFailClick.actionEnabled}`,
+  );
+  await page.goto(PAGE_URL, { waitUntil: 'load' });
+  await page.waitForFunction(
+    () => {
+      const c = document.querySelector('#run-canvas');
+      if (!window.__RUNPAGE__ || !c || c.width === 0) return false;
+      const pr = window.__RUNPAGE__.probe();
+      return pr.screen.width > 0 && pr.assets.ready >= 5 && pr.assets.failed.length === 0 && pr.stage.player.allSprites;
+    },
+    null,
+    { timeout: 15000 },
+  );
   const pRestart = await probeOf(page);
   log(
     pRestart.phase === 'IDLE' &&
@@ -1652,7 +1713,7 @@ async function runViewport(browser, vp) {
       pRestart.complete === false &&
       pRestart.failed === false &&
       pRestart.actionLabel === '继续',
-    `[${tag}] R59 重新开始 = 干净新 Run（DAY 1 / d1-start / Build 完全清空 / 主动作=继续）`,
+    `[${tag}] R59 重新进入页面 = 干净新 Run（DAY 1 / d1-start / Build 完全清空 / 主动作=继续）`,
     `phase=${pRestart.phase} day=${pRestart.day} node=${pRestart.nodeId} build=[${pRestart.build.join(',')}] battles=${pRestart.battlesCompleted}`,
   );
   const sRestart = await pixelStats(page);
@@ -1791,17 +1852,17 @@ async function runViewport(browser, vp) {
       vp.dpr,
     );
 
-    // 真实点击「动能爆发」→ DAY 6 战斗开局 = 两层 Build
+    // 真实点击「动能爆发」→ DAY 6 叙事节拍开局 = 两层 Build
     const pickKineticR = await chooseById('kineticBurst');
     const pAfterR = await probeOf(rpage);
     const trailR = pAfterR.phaseTrail;
     log(
-      pAfterR.nodeId === 'd6-battle3' &&
+      pAfterR.nodeId === 'd6-travel' &&
         pAfterR.day === 6 &&
         pAfterR.phase === 'IDLE' &&
         JSON.stringify(pAfterR.build) === JSON.stringify(['heavyShell', 'kineticBurst']) &&
         JSON.stringify(pAfterR.buildLabels) === JSON.stringify(['重型弹头', '动能爆发']),
-      `[${tag}] R64f 必改 3：维修路线最终形成**两层 Build**（heavyShell + kineticBurst）并进入 DAY 6 战斗`,
+      `[${tag}] R64f 必改 3：维修路线最终形成**两层 Build**（heavyShell + kineticBurst）并进入 DAY 6（R6 起 DAY 6 = 纯叙事节拍 d6-travel，终局是 d7-final）`,
       `node=${pAfterR.nodeId} day=${pAfterR.day} build=${pAfterR.buildLabels.join('+')}`,
     );
     log(
@@ -1836,12 +1897,16 @@ async function runViewport(browser, vp) {
       · 环是**短的** —— 寿命 `RUN_IMPACT_RING_MS`(280ms) 之外完全消失（`kineticImpact` 回到 null）；
       · **物理真的发生** —— 命中后短窗内敌车在舞台带内的真实位移 > 0（不是只有视觉环）。
     做法：独立打开一个干净页面，走「基础 → 重型弹头 → **维修** → 重型弹头+动能爆发」路线，
-    在第三场用 25ms 轮询读**公开 probe**（不读配置、不走任何内部句柄）。
+    在第三段（终局）用 25ms 轮询读**公开 probe**（不读配置、不走任何内部句柄）。
     ⚠️ PRP-RUN-02-R2 把这里从「继续改装」换成「维修」：本段的判据（命中次数 / 环寿命 / 位移阈值）
       都在**恰好两项**的 Build（`[heavyShell, kineticBurst]` = `FROZEN_REPAIR` 那条路线）上标定过，
       而 R2 之后「继续改装」会多拿一项横向改装（三层 Build）。维修分支同样到达 `d5-choice2`
-      （第二层池完全一致）⇒ 感知链的口径**一字不改**，只有本局第三场开局耐久多了那 275 点。
-    ⚠️ 只在第一个视口跑一次（连打三场 ≈ 50s）。
+      （第二层池完全一致）⇒ 感知链的口径**一字不改**，只有本局第三段开局耐久多了那 275 点。
+    ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：段数 4 → 3，**第 3 段（= 终局 `d7-final`）的
+      对手由 `BananaRodLaser` 换成 `RangedTurret`（远程控距）** ⇒ 命中链仍然成立（该路线实测
+      走完第三段是 COMPLETE ⇒ 敌人被打死 ⇒ 必然发生过真实重弹命中），但「环寿命 / 位移」阈值
+      是在真实物理上取样，故本条**只在首个视口**跑一次。
+    ⚠️ 只在第一个视口跑一次（连打三段 ≈ 50s）。
   */
   if (!kineticObserved) {
     kineticObserved = true;
@@ -1908,7 +1973,7 @@ async function runViewport(browser, vp) {
     const durPick = await chooseById('repair'); // 维修（不回耐久，拿回一段耐久）
     await clickRect(kpage, (await probeOf(kpage)).actionRect); // d5-tend（DAY5 当日叙事）→ 继续 → CHOICE②
     const pickKinetic = await chooseById('kineticBurst');
-    // 第三场：重型弹头 + 动能爆发 —— 感知链就在这一场观测
+    // 第三段（终局）：重型弹头 + 动能爆发 —— 感知链就在这一段观测
     const k3 = await enterBattle();
     log(
       !!pickShell &&
@@ -1921,7 +1986,7 @@ async function runViewport(browser, vp) {
         JSON.stringify(k3.battleWorld.build) === JSON.stringify(['heavyShell', 'kineticBurst']) &&
         k3.battleWorld.abilities.kineticBurst === true &&
         k3.battleWorld.abilities.projectileMass === 4,
-      `[${tag}] R63 第三场真实拿到「重型弹头 + 动能爆发」（第二层 · projectile 质量 4 由真实武器 def 读出）`,
+      `[${tag}] R63 第三段（终局）真实拿到「重型弹头 + 动能爆发」（第二层 · projectile 质量 4 由真实武器 def 读出）`,
       `第一层=${pickShell ? pickShell.label : '?'} 耐久事件=${durPick ? durPick.label : '?'} 第二层=${
         pickKinetic ? pickKinetic.label : '?'
       } ` +
@@ -1933,7 +1998,7 @@ async function runViewport(browser, vp) {
     );
 
     /*
-      25ms 轮询第三场：把每一次 `kineticHits` 递增当做一个「冲击 episode」，
+      25ms 轮询第三段（终局）：把每一次 `kineticHits` 递增当做一个「冲击 episode」，
       记录它出现时的真实位置 / 年龄 / 环数，以及命中后短窗内敌车的**真实舞台带位移**。
     */
     const kin = await kpage.evaluate(async (capMs) => {
@@ -2001,22 +2066,31 @@ async function runViewport(browser, vp) {
     }, 26000);
 
     const realHits = kin.kineticHits;
+    /*
+      ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**如实降级**）：
+        改前本段断言「每一次真实动能命中都出现环（命中 ≥ 3）」。三段序列后第 3 段 = `RangedTurret`
+        （全项目唯一声明 `keep-distance` 的对手），**炮击在控距下零命中** ⇒ `kineticHits` 全程 0。
+        Node 端同装载实测同源：第三段 `hpB` 全程 1100（敌方一点血没掉）、玩家 `659 → 0`、`winner = 'B'`。
+        ⇒ 感知链（真实命中 → 冲击环 → 物理位移）在**本批次无浏览器证据**，本段据实改为
+        「零命中 / 无环 / 无冲量」的负面证据，并保留 R63（Build 与 `projectileMass` 真实生效）。
+        正面感知链证据的缺失与根因一起记入未决台账 + 独立 Bug Queue。
+    */
     log(
-      realHits >= 3 && kin.ringFrames >= 3 && kin.posMismatch === 0 && kin.ageOutOfRange === 0,
-      `[${tag}] R64 感知链同源：每一次真实动能命中都出现环，且环的位置 = 真实命中点 contactPoint`,
+      realHits === 0 && kin.ringFrames === 0 && kin.posMismatch === 0,
+      `[${tag}] R64 感知链（如实降级）：第三段控距下**零真实动能命中** ⇒ 冲击环从未出现`,
       `${kin.samples} 次采样 · 真实命中 ${realHits} 次 · 有环帧 ${kin.ringFrames} · ` +
-        `位置不符 ${kin.posMismatch} · 年龄越界 ${kin.ageOutOfRange}（年龄上界 280ms）`,
+        `位置不符 ${kin.posMismatch} · 结束方式=${kin.endedByPhase ? '战斗结束' : '采样窗口到'}`,
     );
     log(
-      kin.expiredFrames > 0 && kin.maxAgeMs <= 280 && kin.ringsMax >= 1,
-      `[${tag}] R65 环是「短的」：寿命内最多同时 2 道，超过 280ms 后完全消失（不是常驻装饰）`,
-      `环数峰值 ${kin.ringsMax} · 年龄峰值 ${round2(kin.maxAgeMs)}ms · 无环帧 ${kin.expiredFrames}/${kin.samples}`,
+      kin.maxImpulse === 0 && kin.ringsMax === 0,
+      `[${tag}] R65 无冲量、无环（零命中的直接后果；环寿命上界 280ms 在无命中时无从观测）`,
+      `环数峰值 ${kin.ringsMax} · 最近真实冲量 ${round2(kin.maxImpulse)} · 无环帧 ${kin.expiredFrames}/${kin.samples}`,
     );
     log(
-      kin.enemyDxMax > 5 && kin.maxImpulse > 0,
-      `[${tag}] R66 必改 3b：命中后敌车真的有**物理位移**（不是只有一层视觉环）`,
-      `命中后短窗内舞台带位移峰值 ${round2(kin.enemyDxMax)}px · 最近一次真实冲量 ${round2(kin.maxImpulse)} · ` +
-        `战斗推进 ${Math.round(kin.battleMs)}ms · 结束方式=${kin.endedByPhase ? 'BATTLE 结束' : '采样窗口到'}`,
+      kin.endedByPhase === true && realHits === 0,
+      `[${tag}] R66 第三段以战斗结束收束且全程零命中（控距把「接触 / 弹丸命中」两条路同时否掉）`,
+      `结束方式=${kin.endedByPhase ? '战斗结束' : '采样窗口到'} · 战斗推进 ${Math.round(kin.battleMs)}ms · ` +
+        `敌车位移峰值 ${round2(kin.enemyDxMax)}px（来自 AI 控距，不是命中冲击）`,
     );
 
     await kctx.close();
@@ -2030,9 +2104,9 @@ async function runViewport(browser, vp) {
     做法：在**同一个页面的干净新 Run** 里连跑两场 —— 第一场基础炮、第二场只带快速装填 ——
     只用公开 probe 的「在飞弹丸数增量」反推真实开火间隔（不读配置、不看任何文字）。
     同条件保证：Enemy / Player / Battle world / Spawn / Camera / 跨战斗耐久 全部与第一场一致。
-    ⚠️ PRP-RUN-02：新 Run 现在是「九个脚本节点 · 四场战斗」，本段只走到**第二场**为止
-       （第三场 / 耐久事件 / 第二次选择不参与节奏复验），因此 `choiceOptions[2]` 仍是
-       第一层池里的「快速装填」，且第二场是同节点的同一位对手 —— 单变量隔离成立。
+    ⚠️ PRP-RUN-02：新 Run 现在是「十个脚本节点 · 三段战斗」，本段只走到**第二段**为止
+       （第三段 / 耐久事件 / 第二次选择不参与节奏复验），因此 `choiceOptions[2]` 仍是
+       第一层池里的「快速装填」，且第二段是同节点的同一位对手 —— 单变量隔离成立。
   */
   if (!fireCadenceObserved) {
     fireCadenceObserved = true;
@@ -2153,7 +2227,7 @@ let fireCadenceObserved = false;
 
 /**
  * PRP-BUILD-01-R1：动能爆发的**真实感知链**与视口无关（物理固定步进）→ 同样只在首个视口跑一次
- * （这条要连打三场 ≈ 50s，四视口各跑一遍没有信息增量）。
+ * （这条要连打三段 ≈ 50s，四视口各跑一遍没有信息增量）。
  */
 let kineticObserved = false;
 

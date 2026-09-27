@@ -47,7 +47,7 @@ import {
   type RunPageState,
 } from '../src/lab/portraitBattleLab/runPageState';
 import { RUN_MODIFIERS } from '../src/lab/portraitBattleLab/runModifiers';
-import { RUN_SCRIPT_FIRST_ID } from '../src/lab/portraitBattleLab/runScript';
+import { RUN_SCRIPT_FIRST_ID, RUN_TOTAL_BATTLES, runScriptBattleNodes } from '../src/lab/portraitBattleLab/runScript';
 import { runPageContext } from '../src/lab/portraitBattleLab/runPageScene';
 import { RunBattleRuntime } from '../src/lab/portraitBattleLab/runBattleRuntime';
 
@@ -154,12 +154,13 @@ function suspiciousModifierIds(src: string): string[] {
 /* ==================================== B. 上一局（RUN COMPLETE，快进） */
 
 describe('PRP-M2｜B 上一局：真实状态机的确定性快进', () => {
-  it('NR-04 快进产出一个**真实的 RUN COMPLETE 上一局**（DAY 7 / 4 场 / 走完两层 Build）', () => {
+  it('NR-04 快进产出一个**真实的 RUN COMPLETE 上一局**（DAY 7 / 三段 / 走完两层 Build）', () => {
     const prior = buildPriorCompletedRun(CTX);
     expect(runComplete(prior)).toBe(true);
     expect(prior.phase).toBe('COMPLETE');
     expect(prior.day).toBe(7);
-    expect(prior.battlesCompleted).toBe(4);
+    // ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：四场 → 三段 ⇒ 场数取脚本真源，不写字面量。
+    expect(prior.battlesCompleted).toBe(RUN_TOTAL_BATTLES);
     expect(prior.nodeId).toBe('d7-final');
     // 上一局真的走完了一条两层路线（不是空 Build 直接结算）
     expect(runBuildIds(prior)).toEqual(['heavyShell', 'kineticBurst']);
@@ -169,10 +170,10 @@ describe('PRP-M2｜B 上一局：真实状态机的确定性快进', () => {
     expect(sum.durabilityPercent).toBeGreaterThan(0);
     expect(sum.durabilityPercent).toBeLessThan(100);
     expect(sum.build).toEqual(['heavyShell', 'kineticBurst']);
-    expect(sum.battlesCompleted).toBe(4);
-    // 快进走的是真实终局叙事（四场战报 + 收束）
+    expect(sum.battlesCompleted).toBe(RUN_TOTAL_BATTLES);
+    // 快进走的是真实终局叙事（逐段战报 + 收束）
     const texts = prior.log.map((e) => e.text);
-    expect(texts.filter((t) => t === '战斗胜利。')).toHaveLength(4);
+    expect(texts.filter((t) => t === '战斗胜利。')).toHaveLength(RUN_TOTAL_BATTLES);
     expect(texts.includes('这次冒险到此结束。')).toBe(true);
   });
 
@@ -277,7 +278,9 @@ describe('PRP-M2｜C 新 Run：必须是「下一局」，不是上一局继续'
       expect(state.phase).toBe('BATTLE');
       expect(state.battlesCompleted).toBe(0);
       // 对手来自**当前脚本节点**（与页面同一条链）
-      expect(rt.encounterId).toBe('PineappleFireBrute');
+      // ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：第一段对手已从 `PineappleFireBrute`
+      //    换成 `ProtoRusher` ⇒ 这里取自脚本真源，不再写死对手名。
+      expect(rt.encounterId).toBe(runScriptBattleNodes()[0].encounterId);
       // 本局 Build 在运行时层就是这一个 seed
       expect(rt.build).toEqual(['twinCannon']);
       expect(rt.modifier).toBe('twinCannon');
