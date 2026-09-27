@@ -1129,7 +1129,15 @@ reseed **会改写 Build**（把主武器槽换成 `cannon ★1`）⇒ `openGrow
 
 ## §16 「非 cannon 武器进完整 Run」两次 STOP + Q5 收口（R5-SPEAR/HAMMER-FULL-RUN-R1 → Q5 固化）
 
-**结论（本批次无变化）：唯一支持完整 Run 的武器仍是 `cannon`。**
+> ⚠️⚠️ **【已被取代 · 2026-09-27 BATCH-GATE 加注】本节是 Q5 期的历史记录，其结论已成为过去式。**
+> 后续 `PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH`（`fb6c922`）从**底层**修掉了「强化注入接缝
+> 只认 cannon」的硬绑（base 改为「装配顺序第一件正式武器」），`R6-RUNTIME-COMPLETE-WEAPON-BATCH`
+> （`ef601b0`）据此**一次性登记 6 件非 cannon 武器**。
+> ⇒ **当前真源 = §18**（登记 7 件 / BLOCK 2 件）。**不要**再引用本节的「只有 cannon」当现行裁决。
+> 本节保留的原因：它记录了**为什么**曾经只有 cannon（根因、三条被禁的出口、`LC-23` 冻结项），
+> 以及 `spear` / `hammer` 当年各自卡在哪 —— 改 §18 之前值得先读这段历史。
+
+**结论（**Q5 期**；已被 R6 取代，见上方横幅）：唯一支持完整 Run 的武器仍是 `cannon`。**
 两次调查（`R5-SPEAR-FULL-RUN-R1` + `R5-HAMMER-FULL-RUN-R1`）均**只调查、零改码、零源码 commit**，
 由 Q5 统一收口 —— 判定不变，把结论变成**机器守卫**（`src/` 零改动）。
 
@@ -1217,4 +1225,80 @@ d1-start(EVENT,1) → d2-battle1(BATTLE,2) → d2-choice1(CHOICE,2) → d3-battl
 —— 八个批次**全部 EXIT=0**。COMPLETE 落链的**模型侧**覆盖：
 `tests/productRunEncounterSequenceQ3.test.ts`（Q3-05）/ `productLoopRunReward` /
 `productLoopEndToEndPlayerLoop` / `productFusionR2B` / `productStarPowerR2C` / `productReseedR2`。
+
+## §18 **Full Run Weapon 能力登记表（当前真源）** + R6 / R6-BATCH + BATCH-GATE 门禁（2026-09-27 固化；查「哪件武器能进完整 Run」只看这一节）
+
+**真源** = `src/product/runCompatibility.ts` 的 `FULL_RUN_SUPPORTED_WEAPON_IDS`（**显式字面量**，
+不是「全部正式部件」）。判定链：`supportsFullRun(defId)` / `fullRunCompat(draft)` / `canStartFullRun(draft)`。
+⚠️ **判据是「装配顺序第一件正式武器」**（= 局内 `runModifiers.resolveRunBaseWeaponDefId()` 的同一件事），
+**不是**「车上存在受支持武器」—— 两侧各自声明，同值由 `tests/productRunWeaponSourceOfTruthR6.test.ts` 钉死。
+
+### 18a 放行清单（**7 件**）—— 登记 5 条门槛缺一不可
+门槛：① 在 `OFFICIAL_PARTS` 且 `category==='weapon'` ② 正式 `registry.functionals` 能解析
+③ `getBehaviorFactory(def.behavior)` 存在 ④ 在**产品主武器槽** `frontMass` 上真的打得出伤害
+⑤ 用**自己的 canonical Def** 就能跑，不需要新玩法规则。①②③ 由 R6 测试钉，④ 由 R7 实测伤害钉。
+
+| defId | behavior | canvas 主伤害 | 第 1 场实测（Q3-06 夹具，第 1 段 `ProtoRusher`） |
+|---|---|---|---|
+| `cannon` | cannon | 120（玩家侧 overlay）／正式键 80 | 1080 |
+| `flamethrower` | flamethrower | 8（短命火流） | 1000 |
+| `hammer` | hammer | 90（Revolute 真实弧） | 1080 |
+| `laser` | laser | 160 | 800 |
+| `machineGun` | machineGun | 20（burst 7 发） | 1000 |
+| `rammer` | rammer | 70（Prismatic 伸出撞击） | 770 |
+| `shotgun` | shotgun | 30（5 发固定扇形） | 1140 |
+
+⚠️ 「实测」= `RunBattleRuntime.playerWeaponHitSummary()` 按 partId 归组的**真实 `damage` 事件之和**
+（`DamageResolver` 真的从对方 HP 减掉的那个数），不是读参数表、不是「跑得起来不崩」。
+⚠️ `rammer` 的 770（本题 Q3-06 夹具 = 第 1 段 `ProtoRusher`）与 `runCompatibility.ts` 文件头注释里的
+910（R7 夹具 = 旧 `RUN_ENCOUNTERS[0]`）**不矛盾**：对手不同 ⇒ 命中次数不同。
+
+### 18b BLOCK 清单（**真实原因**，别重查）
+
+| 武器 | 卡在哪一条门槛 | 真实原因 |
+|---|---|---|
+| `spear` 刺 | **③** | `behavior === 'ram'`，而 `behaviorRegistry.FACTORIES` **没有注册 `'ram'`** ⇒ Runtime 不完整。⚠️ 穷尽核对：`src/battle/` 下只有 `rammerBehavior.ts`（那是 `rammer`，不是 `ram`）；全 registry 里「behavior 无 factory」的恰 = `ramHead:ram` + `spear:ram` ⇒ **不存在「漏接的正式 ram behavior」**。⚠️ 它**确实**能靠 `contactOnce` 打出伤害（实测 600~1020）—— 但「碰撞能造成伤害」**不等于** Runtime 完整，这正是被点名不许据以放行的情形。 |
+| `saw` 圆锯 | **④ / ⑤** | Runtime 与 `contactTick` 伤害链**都完整**（挂 `front` 槽实测 25 命中 × 8 = 200），但挂**产品主武器槽 `frontMass`** 时**打不到人**：圆锯 collider 半径 28、圆心 = 挂点（`watermelonBody.functionalHardpoints.frontMass={x:45}`）⇒ 前沿 x=73 < 车身前沿 x=85 ⇒ **正面接敌永远由车身先接触**。测：第 1 场 0 命中 / 0 伤害。让它生效必须改**挂点或几何** = 新增规则（⑤ 不成立）⇒ 保持 BLOCK。⚠️ 既有 saw 测试**全部**挂 `front`（前沿 x=106 > 85）⇒ 这个缺口此前从未被测到。 |
+| `ramHead` 冲撞头 | **①** | `prototype/hold`，**不在 `OFFICIAL_PARTS`** ⇒ 玩家永远拿不到，连登记资格都没有。 |
+| `pushRod` / `lifter` / `thruster` | **①** | `category === 'gadget'`，**不是武器**。 |
+
+⚠️ **`saw` / `spear` 仍然是合法武器**（过正式校验、可拥有 / 可装备）；被拒的是**「完整 Run」这件事**，
+不是「这件东西」。产品表现必须一致：不放行 + 如实报出 base + `reason === 'unsupported-weapon'`。
+
+### 18c 机器守卫（改这四条任意一处前必读）
+- `tests/productRunWeaponSourceOfTruthR6.test.ts` —— ①②③ 逐件钉 + Cannon 路径不变（R6-01~R6-11）。
+- `tests/productRunWeaponRuntimeBatchR7.test.ts` —— ④ 逐件**真实伤害**（R7-01~R7-04）；
+  两条终局路线机器记录 `R7-04b`（下界）/ `R7-04c`（含 DAY4/DAY5 两次维修）；`R7-05` 结算后装备保持；
+  `R7-06`/`R7-07`/`R7-08` BLOCK 三件；`R7-09`/`R7-09b`/`R7-10` Cannon 不退化。
+- `tests/productMultiWeaponCompatR5.test.ts` —— 真源驱动矩阵（MW-01~MW-09）；
+  `UNSUPPORTED_WEAPONS`（registry 级 10 件）恰 = `['ramHead','saw','spear']`。
+- `tests/_e2e_product_fail.cjs` **A4b** —— 浏览器侧两段矩阵：**被拒 2 件**（车库 `unsupported-weapon` +
+  首页无 href + 装备仍是它 = **不自动换炮**）／**放行 7 件**（车库 `ok` + 有 href + base = 它自己）。
+  ⚠️ A4b-9 写死值 = `'saw,spear'`；A4b-11 要求放行数 = **7**。
+
+### 18d ⚠️ 覆盖边界（如实披露，别当成缺口）
+浏览器侧对**非 cannon** 的取证**止于「能出发」**（A4b：装备 → 首页放行 → `startRunHref` 结构存在 →
+base = 它自己）。真正的 **Run → Attack → Result** 对 6 件新武器是 **Node 侧**证据：
+`R7-01`（Run parse）/ `R7-02`（Runtime entity）/ `R7-03`（Attack/Damage 逐发 = canonical）/
+`R7-04`（终态）/ `R7-05`（结算后装备保持 + 下一局 base 仍是它）+ `Q3-06`（跑三段产品序列并造成真实伤害）。
+浏览器侧「进局 → 打完 → 结算」目前只对**默认 `cannon` 车**做（`run-page` / `product-loop`）。
+
+### 18e 内容层事实（**不是** Runtime 缺口）
+整条 Run 的成长内容（`heavyShell` / `twinCannon` / `fastReload` / `tripleLoad` + 玩家侧基线 120）
+都是 **Cannon 专属** ⇒ 非 cannon 在本局**拿不到任何伤害成长**，唯一真实收益是
+`emergencyRepair` 的两次回耐久。终点矩阵（Q3-07，单件归因夹具，带本局 Build 真实走查）：
+`cannon/flamethrower/machineGun → FAILED@RangedTurret` · `hammer/shotgun → FAILED@Chaser` ·
+`laser/rammer → FAILED@ProtoRusher`。**没有任何一件单件武器能靠一件通关**。
+
+### 18f `PRODUCT-LOOP-R6-CONTENT-FOUNDATION-BATCH-GATE` 门禁记录（2026-09-27 · **零改码零 commit**）
+`HEAD = e38cb01`；`tsc` 零错；全量 vitest **237 files / 2652 tests 全绿**（本轮无 EBUSY / 无 LSE-09 抖动）；
+`npm run build` / `build:portrait-lab` / `build:wechat` 三构建 EXIT=0；
+bundle-clean（**直接调脚本**绕开 `wechat-rc.js` 的 `spawnSync`）= `✅ PASS (rc)`；
+repo-health 9 项全 `ok:true`（顺带三路 SHA：`HEAD = refs/heads = origin = e38cb0132b560e4e2b0e4dcc5b79096b04ca2d2e`）；
+正式 E2E 八批全 EXIT=0 —— `run-page 499/499` · `home 98/98` · `fail 48/48` · `legacy 18/18` ·
+`loop 29/0/20` · `reward 17/59/0/42` · `star-power 9/23/0/14` · `reseed 17/22/0/5`。
+
+> ⚠️ **`wechat-rc.js` 在本机不可用**：它用 `child_process.spawnSync` 调 bundle-clean，而本宿主
+> `spawnSync` 无条件 EBUSY ⇒ 跑 `npm run build:wechat:rc` 会失败。**照跑 bundle-clean 的正确姿势**：
+> `node scripts/build…`（先 `npm run build:wechat`）→ 再 `node scripts/check-wechat-bundle-clean.js dist-wechat/game.js rc`。
 

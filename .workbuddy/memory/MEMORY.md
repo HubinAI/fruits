@@ -5,43 +5,41 @@
 | 要找什么 | 去哪 |
 |---|---|
 | 本轮做了什么、实测数字 | `.workbuddy/memory/YYYY-MM-DD.md`（最新 `2026-09-27.md`） |
-| **改动前必读**：守卫 / 环境陷阱 / **§1–§16 契约全文** / **未决项台账 §A** | `.workbuddy/memory/REF_GUARDS_TRAPS_CONTRACTS.md` |
+| **改动前必读**：守卫 / 环境陷阱 / **§1–§18 契约全文** / **未决项台账 §A** | `.workbuddy/memory/REF_GUARDS_TRAPS_CONTRACTS.md` |
 | PRP 运行时细节（战斗参数 / 相机 / 接缝 / 入口 / file:line） | `.workbuddy/memory/REF_PRP_RUNTIME.md` §A–M |
 | **跨窗口续接（先读）** / 各 Queue 交付说明 / 已知未修清单 | `交接文档_<日期>_<Queue>.md`（**本地件，不入库**） |
 | 更早完整版（最高权威） | `.workbuddy/memory/archive/` |
 
 ## 0. 现状 / 下一步（**新窗口先读这段**）
 R2(A/B/C)、R2-RECOVERY、SETTLEMENT-CTA-LATENCY、SINGLE-CTA+音频、R2-RESEED、R4、R3、R5、Q5、
-R6（武器真源 / Runtime 批次）**均已收口**；**`PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE`（Q3）
-本轮交付（`341f2fb`）**：产品 Run 已是**三段问题序列**（`ProtoRusher` → `Chaser` → **终局
-`RangedTurret`**）+ DAY 6 纯叙事 `d6-travel`，`RUN_TOTAL_BATTLES = 3`。
-**全文 → REF §17**；本轮实测与踩坑 → 当日日志 `2026-09-27.md`。
+R6（武器真源 / Runtime 批次）、**Q3 三段 Encounter 序列**均已收口；
+**最新一轮 = `PRODUCT-LOOP-R6-CONTENT-FOUNDATION-BATCH-GATE`（2026-09-27 · 纯门禁：零改码零 commit，
+八批 E2E 全 EXIT=0）**，链尾 `e38cb01`；口径与数字 → REF §18f。
 
 - ⚠️⚠️ **Q3 的能力边界（新窗口最容易误判的一条）**：第 3 段 `RangedTurret` 是全项目**唯一**
   `enemyDrive:'keep-distance'` 的对手，而产品可达装配只有「主武器槽一门炮」⇒ **产品侧三段序列
-  必然以 `RUN FAILED` 收尾**（`battles=3/3 耐久=0%`）。这是**能力下降，不是回归**；
-  ⇒ 产品 E2E 的「到 COMPLETE 的落链」判据**不删**，改成如实 FAILED + 其余记 **`BLOCKED`**
-  （`pass:null`，三桶 summary，退出码只看 FAIL）。**八条产品 E2E 现全部 EXIT=0**（数字见 REF §17d）。
-  ⚠️ **不要**为让它变绿去放宽 `FULL_RUN_SUPPORTED_WEAPON_IDS` 或改对手数值。
-- **不能重查的既有裁决**：唯一支持完整 Run 的武器仍是 **`cannon`**
-  （「非 cannon 武器进完整 Run」已连判两次 STOP，根因 = 强化注入接缝只认 cannon）。
-  **全文 → REF §16**；机器守卫 `tests/productMultiWeaponCompatR5.test.ts` +
-  `_e2e_product_fail.cjs` A4b。
-- **写内容相关断言前必读 → REF §15**：新账号内容基线（武器槽 **9 张卡**、`weapons` 恰 9 件）、
-  `weaponDefs()` **10 件 ≠ 可拥有 9 件**（`ramHead` 不在 `OFFICIAL_PARTS`）、storage key 闭集 **八**、
-  卡片表变长后点击前必须 `scrollIntoViewIfNeeded()`。
-- **下一步 = 等用户下发新 Queue**（连续多轮 Queue 末尾都写「直接继续 Q4 / Q5 / Q6…」，但**正文均未
-  到达** ⇒ 未开工）。
+  必然 `RUN FAILED`**（`battles=3/3 耐久=0%`）。**能力下降，不是回归** ⇒ 产品 E2E 的「到 COMPLETE」
+  判据**不删**，改成如实 FAILED + 其余记 **`BLOCKED`**（`pass:null`，三桶、退出码只看 FAIL）。
+  ⚠️ **不要**为让它变绿去放宽 `FULL_RUN_SUPPORTED_WEAPON_IDS` 或改对手数值。**全文 → REF §17**。
+- **Full Run Weapon 登记（当前真源）→ REF §18**：**放行 7 件**（`cannon` / `flamethrower` /
+  `hammer` / `laser` / `machineGun` / `rammer` / `shotgun`）· **BLOCK 2 件**：`spear`
+  （`behavior:'ram'` 无 factory ⇒ Runtime 不完整）、`saw`（挂 `frontMass` 时被车身挡住 ⇒ 打不到人）；
+  另有 `ramHead` 不在 `OFFICIAL_PARTS` + `pushRod`/`lifter`/`thruster` 是 gadget。
+  ⚠️ **Q5 期「唯一支持完整 Run 的是 cannon」已被 R6 / R6-BATCH 取代**（REF §16 开头有取代横幅）；
+  判据 = 「**装配顺序第一件**正式武器」。
+- **写内容相关断言前必读 → REF §15**：新账号基线（武器槽 **9 张卡**、`weapons` 恰 9 件）、
+  `weaponDefs()` **10 件 ≠ 可拥有 9 件**、storage key 闭集 **八**、卡片表变长后点击前必须
+  `scrollIntoViewIfNeeded()`。
+- **下一步 = 等用户下发新 Queue**（尚未开工）。
 - ⚠️ **未修 → 独立 Bug Queue，禁顺手并改**：① `validateSnapshot` 不含星级倍率
-  （`runPageState.ts:114` 读 `def.energy` vs `:48` `starTierEnergy`）② `e2e:next-run` 崩
-  （`_e2e_next_run.cjs:619`：Hub 入口期望 3 个、现有 4 个）③ Lab `playerFunctionals()` 注释与实际不符
-  ④ **Q3 能力缺口（本轮真人裁决 = 如实降级，拆独立 Bug Queue）**：
-    (a) **产品可达装配打不赢终局** —— 第 3 段 `RangedTurret` 控距下炮类零命中 ⇒ 浏览器端
-        **没有任何「到 COMPLETE」的路径**（能通关的装配都是弹丸堆叠，产品 UI 到不了）；
-    (b) 由此**浏览器端完整玩家闭环无证据**（loop 20 + reward 42 + star-power 14 + reseed 5 条 BLOCKED）；
-    (c) 旧记的 `e2e:product-reward` C9 偶发红随降级一并变为 `BLOCKED`（不再观测）。
+  （`runPageState.ts:114` vs `:48`）② `e2e:next-run` 崩（`_e2e_next_run.cjs:619`：
+  Hub 入口期望 3 个、现有 4 个）③ Lab `playerFunctionals()` 注释与实际不符 ④ **Q3 能力缺口**
+  （真人裁决 = 如实降级）：(a) 产品可达装配打不赢终局 ⇒ 浏览器端**没有**「到 COMPLETE」的路径
+  (b) 由此浏览器端完整玩家闭环无证据（loop 20 + reward 42 + star-power 14 + reseed 5 条 BLOCKED）
+  (c) 旧 C9 偶发红随降级变 `BLOCKED`（不再观测）。
 - **明确未做**（别再ask）：Garage 观感 / 奖励动画 / 内容量 / Buff 平衡 / 挂点几何 /
-  为武器补正式 Run Build 内容（R5 起**故意不放宽** `FULL_RUN_SUPPORTED_WEAPON_IDS`）。
+  为武器补**非 Cannon 的**正式 Run Build 内容（局内成长内容仍是 Cannon 专属 ⇒ 非 cannon 拿不到伤害
+  成长，见 REF §18e；`saw` 的挂点 / 几何缺口**不动**，见 §18b）。
   **均未归档**：LightSwarm 真人结论 / 各轮录屏回执；1vN 宿主 = DEBUG `arenaA.ts:814`。
 
 ## 1. Identity / 链尾
@@ -131,8 +129,10 @@ R6（武器真源 / Runtime 批次）**均已收口**；**`PRODUCT-LOOP-R6-BASIC
 
 ## 3. 指向
 `REF_GUARDS_TRAPS_CONTRACTS.md`：§1–§4 环境 / 契约 / 存档链 / E2E 书写陷阱 · §5–§14 各轮固化契约 ·
-**§15 R5 内容池种子 + 新账号内容基线** · **§16 非 cannon 武器两次 STOP + Q5 收口** ·
-**§17 三段 Encounter Sequence + 「如实降级」口径（含 `BLOCKED` 写法与门控陷阱）** · §A 未决项台账。
+**§15 R5 内容池种子 + 新账号内容基线** · **§16 非 cannon 武器两次 STOP（Q5 期历史，已被取代）** ·
+**§17 三段 Encounter Sequence + 「如实降级」口径（含 `BLOCKED` 写法与门控陷阱）** ·
+**§18 Full Run Weapon 能力登记表（当前真源：放行 7 / BLOCK 2）+ R6-BATCH + BATCH-GATE 门禁** ·
+§A 未决项台账。
 `REF_PRP_RUNTIME.md` §A 战斗参数 · §B 相机 · §C 接缝 / 第一层冻结值 · §D RUN-R1 · §E BUILD-01 ·
 §F / §J / §K RUN-02 · §G M2 种子 · §H M3 遭遇台 · §I Hub · §L M2-R1 终点态出口 · §M PBL-RDC。
 各轮交付细节**只在同名交接文档**（§5 `R1-D` … §14 `R2-RESEED-R1`，§15 `R5`）。
