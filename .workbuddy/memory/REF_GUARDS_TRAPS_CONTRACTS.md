@@ -1302,3 +1302,93 @@ repo-health 9 项全 `ok:true`（顺带三路 SHA：`HEAD = refs/heads = origin 
 > `spawnSync` 无条件 EBUSY ⇒ 跑 `npm run build:wechat:rc` 会失败。**照跑 bundle-clean 的正确姿势**：
 > `node scripts/build…`（先 `npm run build:wechat`）→ 再 `node scripts/check-wechat-bundle-clean.js dist-wechat/game.js rc`。
 
+
+## §19 通用基础成长（PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT，2026-09-28 固化；改 `runModifiers` / `runPageState` / 候选池前必读）
+
+**解决了什么**：R6 让 7 件武器都能「进 Run 并打出自己的伤害」，但**局内成长内容仍全是 Cannon 专属**
+（§18e）—— 非 cannon 局选完三选一，武器**一个数字都没变**（真人可见形态 = 选了强化没反应）。
+本节 = 补**最小骨架**：两条只改**该武器自己数值**、**绝不动 `behavior`** 的成长。
+
+### 19a Q1 Capability Matrix 的结论（本节的派生源；结论已由 GR-01/GR-02 **从真源重新钉死**）
+- **伤害维度是唯一真共通**：`behaviorParams` 里「顶层 + 数值 + 键名含 `damage`」的**唯一**键，7 件各恰一个
+  —— 5 件 `projectileDamage`（`cannon` 80 / `flamethrower` 8 / `laser` 160 / `machineGun` 20 / `shotgun` 30）
+  + `hammer.baseDamage` 90 + `rammer.baseDamage` 70。与 `src/core/buildSnapshot.ts` 的 `isDamageKey` 同规则。
+- **节奏键不是一个字段**（⇒ 逐件取它自己的键，**不强行统一**）：5 件 `cooldownMs`
+  （cannon 1000 / flamethrower 600 / laser 1800 / machineGun 1100 / shotgun 1300）+
+  `rammer.restSteps` = **24（在 canonical 里）** + `hammer.windupPauseSteps` = **20
+  （只在 `src/battle/hammerBehavior.ts` 的 `HAMMER_DEFAULT_PARAMS`，canonical 的 hammer 只有 `baseDamage`）**。
+  ⚠️ `rammer.restSteps` 与 `hammer.windupPauseSteps` 的**基准值来源不同**，别照抄。
+
+### 19b 两条成长 + 唯一接缝
+- `damageUp` 伤害提升（×1.25，四舍五入）· `rateUp` 攻击加快（×0.75，下限 1）·
+  `RUN_GENERIC_CHOICE_POOL = ['damageUp','rateUp','emergencyRepair']`（第 3 项**复用**既有内容把池撑到 3 张）。
+- **类型并集**：`RunBuildId = RunModifierId | GenericGrowthId`。通用成长**不在** `RunModifierId` 闭集里
+  ⇒ `RUN_MODIFIERS` / `RUN_BUILD_MODIFIERS` / `RUN_LAYER2_POOLS` / `RUN_ALL_MODIFIER_IDS` /
+  `RUN_CHOICE_OPTIONS` / `RUN_MODIFIER_OVERLAY` **一字未动**（Cannon 冻结的结构性保证）。
+- **`weaponOverlayMods(build, baseWeaponDefId)` 两条互斥支路**（真源）：
+  `baseWeaponDefId === 'cannon'` ⇒ 只放行 Cannon 的 overlay 项 + **显式排除通用成长**；
+  否则（非 cannon / `null`）⇒ **只放行通用成长**。
+  ⚠️ 旧行为（R6 期）是 `if (base !== 'cannon') return []` ⇒ 那正是「非 cannon 拿不到任何成长」的根因。
+- **防行为污染是结构性的**：`composeRunWeaponDef` 的通用成长支路**只浅合并 `behaviorParams`**，
+  支路里**根本没有代码可以改写 `behavior`** ⇒ 「hammer 选成长变成 cannon」在结构上不可能。
+- **`genericGrowthParamsOf` 顺序敏感**：每步从**上一步结果**读当前值 ⇒ 同项出现两次会**复合**
+  （`×1.25 → ×1.5625`）。本批池不去重开重复项，但语义是结构性的，不靠池子自觉。
+- **`HAMMER_WINDUP_PAUSE_BASE = 20`** 与 `HAMMER_DEFAULT_PARAMS.windupPauseSteps` 的**同源**由
+  `GR-02b` 读行为真源钉死（Lab 导入白名单**不含** `hammerBehavior` ⇒ 不能直接 import）。
+
+### 19c 状态机 / UI 接线（唯一新增的 context 字段）
+- `RunPageContext.baseWeaponDefId?: string | null`（**可选，缺省 `'cannon'`** ⇒ 既有全部调用点逐字节不变）；
+  `RunPageState.baseWeaponDefId` 在 `createRunPageState` 时冻结。
+- `runChoicePoolFamily(s)` = `'cannon' | 'generic'`；`runChoicePool` 顶部：generic ⇒
+  `toOptions(runGenericChoiceDefs(owned))`（**先于** layer1/lateral/layer2 分支）。
+  ⚠️ 通用池是 3 项固定集 + 逐节点 `dedupeOwned` ⇒ **任何节点都不可能为空**（最紧一支
+  `d2-choice1 → d4-lateral → d5-choice2` 已选 2 项 ⇒ 恰剩 1 项）。
+- `chooseRunBuff` 的解析入口从 `runModifierById` 换成 **`runBuildOptionById`**（Cannon 强化 ∪ 通用成长）；
+  ⚠️ 「能出现在池里的 id」与「能落地成 buff 的 id」必须是同一闭集，否则会「画得出来但选了没反应」。
+- 宿主注入点 = `runPageScene.runPageContext()` ← **`runLoadoutCompatOfDraft(draft).baseWeaponDefId`**
+  —— 与运行时 overlay 注入（`runBattleRuntime.resolveRunBaseWeaponDefId`）、与 Run 创建资格
+  **同一个函数链** ⇒ 三处不可能漂移。
+- 图标：`COLORS.iconDamageUp '#9c2f2f'` / `iconRateUp '#1f7f8f'`；`CHOICE_ICON_COLOR` **8 → 10 色**
+  （`damageUp '#ef5350'` / `rateUp '#57d1e0'`，与前 8 色及全部入账色 RGB 精确互斥）；
+  `BUFF_ICON_COLOR` **6 → 8 色**；`drawChoiceIcon` 两个新字形（三根递增竖条+基座 / 快进双三角+前沿短条）。
+  ⚠️ 浏览器侧镜像 `tests/_e2e_run_page.cjs` 的 `SAMPLE_COLORS` / `ICON_COLOR_BY_ID` **未同步**（只服务
+  Cannon 局，本轮没跑 E2E）—— 若将来有非 cannon 的浏览器 E2E，**必须先补这两个映射**。
+
+### 19d ⚠️ `nextRunValidation.buildPriorCompletedRun` 的快进路线按**池族**分支（踩过）
+R7 之前的快进用一张写死的 Cannon 路线表（`PRIOR_RUN_CHOICES = ['heavyShell','kineticBurst']`）。
+非 cannon 局里这些 id **一项都不在池中** ⇒ 快进当场停住（实测 `EL-22` 传 `laser` ⇒ 停在 `CHOICE`，
+拿不到 `COMPLETE`）。处置：**Cannon 族继续走声明路线**（逐字节不变）；**通用族不由该文件命名任何 id**
+（平铺池没有层级语义），改为按池**自己的声明顺序**取首项。两支路都保留「取不到就 `break`」。
+⚠️ 刻意不在该文件写死通用 id：那里有一条源码守卫（`NR-03`）禁止出现未注册的强化 id 字面量。
+
+### 19e 机器守卫（改这四处任意一处前必读）
+- `tests/productRunWeaponBasicBuildR7.test.ts`（**本轮新建，11 条**）：`GR-01` 伤害键 7/7 + 边界
+  （空 / 无 damage / 嵌套 `hitPolicy.damage` / 两个候选全 null）；`GR-02` 节奏键逐件 + `GR-02b` hammer 同源；
+  `GR-03` 合成语义（6 件成长 / **Cannon 零变化** / 其余字段逐字段不变）；`GR-04` Cannon 冻结
+  （两支路 + overlay 表 + 三池逐字节）；`GR-05` canonical 未被改写；`GR-06` **7 件真战斗逐发伤害**
+  （cannon 分支断言**完全不变**）；`GR-06b` 机枪 `rateUp` 下**下一轮 burst 真的更早**（弹丸出生步号）；
+  `GR-07` ctx 携带真实 base + 通用池 + **逐节点非空** + 无重复；`GR-07b` `runOverlayCards` 与池同源 +
+  选中落地 + 非池 id no-op；`GR-08` 三段逐发伤害 `[20] → [25]`（同一局内端到端因果）。
+- `tests/portraitRunPage.test.ts`（78）· `tests/portraitRunModifier.test.ts`（24）·
+  `tests/portraitNextRunValidation.test.ts`（20，含 `NR-03` 源码守卫）· `tests/portraitBattleLab.test.ts`（29，
+  Lab 导入白名单闭集）· `tests/productRunWeaponRuntimeBatchR7.test.ts`（14）等。
+- **负控制已做（2026-09-28 实测）**：故意在 `composeRunWeaponDef` 的通用成长支路注入 `behavior = 'cannon'`
+  ⇒ `GR-03` / `GR-04` / `GR-06` **当场红**，报 `成长污染了 behavior: expected 'cannon' to be 'flamethrower'` /
+  `expected 'cannon' to be 'hammer'`；干净回退后 `grep NEGATIVE-CONTROL` 零残留、11/11 复绿。
+
+### 19f 覆盖边界与**未做**（如实披露）
+- 本轮**未跑**浏览器 E2E（Queue 只要求 targeted + 必要 Run tests + tsc，且明言「无需真人录屏」）。
+  Cannon 不变性由 `GR-04` / `GR-06`（真实 Runtime）+ `portraitRunPage`（78 条，E2E 的模型层孪生）钉住。
+- **未做**：「带走一项改装」（`NEXT_RUN_SEEDS`）**仍然只复用 Cannon 第一层三项**，且 `seedOptions`
+  只由 `dev:next-run`（`nextRunMain.ts`）注入 ⇒ **产品页不提供**，`buildPriorCompletedRun` 也恒用默认
+  cannon 上下文 ⇒ **本轮不引入产品侧缺口**。非 cannon 局的「下一局种子」**没有**做（Queue 未要求）。
+- **未做**：非 cannon 的第二层专属内容 / 更多成长方向 / 各武器差异化数值（Queue 明言「本批只建立最基础骨架」）。
+- **仍显红的历史项**：`e2e:next-run` 崩（`_e2e_next_run.cjs:619`，Hub 入口期望 3 个、现有 4 个）——
+  独立未修 Bug Queue，与本轮无关。
+
+### 19g 本轮门禁（2026-09-28 实测）
+起点 `cd4fc5e`。`tsc --noEmit` **EXIT=0**；全量 vitest（`--pool=vmForks --maxWorkers=1`）
+**238 files / 2663 tests 全绿，EXIT=0**（R6 期为 237/2652 ⇒ +1 file / +11 tests = 本轮新建的 GR 组）；
+`npm run build` **EXIT=0**。冻结 8 目录（`src/{core,battle,physics,render,player,platform,game,presentation,ui}`）
+`git diff --stat` **全空**；`src/core/content.ts` / `src/battle/contactRouter.ts` **逐字节一致**；
+`src/product/` **零 diff**。改动面 = `src/lab/portraitBattleLab/` **7 文件** + `tests/` **1 新建**。

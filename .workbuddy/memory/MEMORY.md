@@ -4,23 +4,32 @@
 
 | 要找什么 | 去哪 |
 |---|---|
-| 本轮做了什么、实测数字 | `.workbuddy/memory/YYYY-MM-DD.md`（最新 `2026-09-27.md`） |
-| **改动前必读**：守卫 / 环境陷阱 / **§1–§18 契约全文** / **未决项台账 §A** | `.workbuddy/memory/REF_GUARDS_TRAPS_CONTRACTS.md` |
+| 本轮做了什么、实测数字 | `.workbuddy/memory/YYYY-MM-DD.md`（最新 `2026-09-28.md`） |
+| **改动前必读**：守卫 / 环境陷阱 / **§1–§19 契约全文** / **未决项台账 §A** | `.workbuddy/memory/REF_GUARDS_TRAPS_CONTRACTS.md` |
 | PRP 运行时细节（战斗参数 / 相机 / 接缝 / 入口 / file:line） | `.workbuddy/memory/REF_PRP_RUNTIME.md` §A–M |
 | **跨窗口续接（先读）** / 各 Queue 交付说明 / 已知未修清单 | `交接文档_<日期>_<Queue>.md`（**本地件，不入库**） |
 | 更早完整版（最高权威） | `.workbuddy/memory/archive/` |
 
 ## 0. 现状 / 下一步（**新窗口先读这段**）
 R2(A/B/C)、R2-RECOVERY、SETTLEMENT-CTA-LATENCY、SINGLE-CTA+音频、R2-RESEED、R4、R3、R5、Q5、
-R6（武器真源 / Runtime 批次）、**Q3 三段 Encounter 序列**均已收口；
-**最新一轮 = `PRODUCT-LOOP-R6-CONTENT-FOUNDATION-BATCH-GATE`（2026-09-27 · 纯门禁：零改码零 commit，
-八批 E2E 全 EXIT=0）**，链尾 `e38cb01`；口径与数字 → REF §18f。
+R6（武器真源 / Runtime 批次）、Q3 三段 Encounter 序列、BATCH-GATE 均已收口；
+**最新一轮 = `PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT`（2026-09-28 · 7 件武器的通用基础成长
+`damageUp` / `rateUp`）**，口径与数字 → REF §19。
 
-- ⚠️⚠️ **Q3 的能力边界（新窗口最容易误判的一条）**：第 3 段 `RangedTurret` 是全项目**唯一**
-  `enemyDrive:'keep-distance'` 的对手，而产品可达装配只有「主武器槽一门炮」⇒ **产品侧三段序列
-  必然 `RUN FAILED`**（`battles=3/3 耐久=0%`）。**能力下降，不是回归** ⇒ 产品 E2E 的「到 COMPLETE」
-  判据**不删**，改成如实 FAILED + 其余记 **`BLOCKED`**（`pass:null`，三桶、退出码只看 FAIL）。
-  ⚠️ **不要**为让它变绿去放宽 `FULL_RUN_SUPPORTED_WEAPON_IDS` 或改对手数值。**全文 → REF §17**。
+- ⚠️⚠️ **R7 的核心结论（新窗口最容易误判的一条）**：7 件 Full Run Weapon 之间**真的共通的成长维度
+  只有「伤害」**；「攻击节奏键」**不是同一个字段**（5 件 `cooldownMs` / `rammer.restSteps` /
+  `hammer.windupPauseSteps`，最后一个只在行为默认里）⇒ 通用成长按**该武器自己的键**落地，
+  **不强行统一成同一字段名**。全文 → REF §19a / §19b。
+- ⚠️ **非 cannon 局现在给的是「通用池」而不是 Cannon 三池**：`RunPageContext.baseWeaponDefId`
+  （**可选，缺省 `'cannon'`**）决定池族（`runChoicePoolFamily`）。**既有调用点逐字节不变**；
+  产品真实路径由 `runPageScene.runPageContext()` 从 `runLoadoutCompatOfDraft` 注入，
+  与运行时 overlay 注入、Run 创建资格**同一函数链**。→ REF §19c。
+- ⚠️ **Cannon 的 5 项内容与三池一字未动**（通用成长走 `RunBuildId` 并集，**不在** `RunModifierId`
+  闭集里）⇒ 见 `GR-04`。**不要**为了「统一 7 件」去改 `RUN_MODIFIERS` / overlay 表。
+- ⚠️ **「hammer 选成长变成 cannon」是结构性不可能**：通用成长支路只浅合并 `behaviorParams`，
+  支路里没有代码可以改写 `behavior`（负控制实测：注入后 `GR-03/04/06` 当场红）。→ REF §19b / §19e。
+- ⚠️ **改 `nextRunValidation.buildPriorCompletedRun` 前必读 → REF §19d**：快进路线按**池族**分支，
+  通用族**不得**在该文件写死 id（那里有 `NR-03` 源码守卫）。
 - **Full Run Weapon 登记（当前真源）→ REF §18**：**放行 7 件**（`cannon` / `flamethrower` /
   `hammer` / `laser` / `machineGun` / `rammer` / `shotgun`）· **BLOCK 2 件**：`spear`
   （`behavior:'ram'` 无 factory ⇒ Runtime 不完整）、`saw`（挂 `frontMass` 时被车身挡住 ⇒ 打不到人）；
@@ -52,7 +61,8 @@ R6（武器真源 / Runtime 批次）、**Q3 三段 Encounter 序列**均已收�
   → GARAGE-MOBILE `f357383` → GARAGE-SLOT-R2 `a51de9b` → `edd8f78` → `c76f1a2` → R3 `06e44de` →
   R5 `5baff53` → `a06f2a4` / `cf16cb9` / `99a094c`（chore(memory)） → Q5 `9dcbf7b` →
   `1b92670`（chore(memory) Q5） → R6-RUN-WEAPON-SOURCE-OF-TRUTH `fb6c922` →
-  R6-RUNTIME-COMPLETE-WEAPON-BATCH `ef601b0` → **Q3 `341f2fb`**；更早查 `git log`。
+  R6-RUNTIME-COMPLETE-WEAPON-BATCH `ef601b0` → **Q3 `341f2fb`** → `e38cb01` / `cd4fc5e`（chore(memory)）
+  → **R7-WEAPON-BASIC-BUILD-CONTENT `f6d046d`**；更早查 `git log`。
 - ⚠️ `src/{physics,render,player,platform,ui,game,presentation,lab}` diff 自 R2-B 起**有意打破**
   （Q3 改了 `src/lab/portraitBattleLab/runScript.ts`）；`src/core` 只许 R2-B（`partInventory.ts` /
   `buildPersistence.ts`）+ R2-C（`buildSnapshot.ts` 星级**唯一真源** + `types.ts`）两处必改，
@@ -132,9 +142,10 @@ R6（武器真源 / Runtime 批次）、**Q3 三段 Encounter 序列**均已收�
 **§15 R5 内容池种子 + 新账号内容基线** · **§16 非 cannon 武器两次 STOP（Q5 期历史，已被取代）** ·
 **§17 三段 Encounter Sequence + 「如实降级」口径（含 `BLOCKED` 写法与门控陷阱）** ·
 **§18 Full Run Weapon 能力登记表（当前真源：放行 7 / BLOCK 2）+ R6-BATCH + BATCH-GATE 门禁** ·
+**§19 通用基础成长（R7：`damageUp` / `rateUp` + 池族 + 防行为污染 + `NR-03` 陷阱）** ·
 §A 未决项台账。
 `REF_PRP_RUNTIME.md` §A 战斗参数 · §B 相机 · §C 接缝 / 第一层冻结值 · §D RUN-R1 · §E BUILD-01 ·
 §F / §J / §K RUN-02 · §G M2 种子 · §H M3 遭遇台 · §I Hub · §L M2-R1 终点态出口 · §M PBL-RDC。
-各轮交付细节**只在同名交接文档**（§5 `R1-D` … §14 `R2-RESEED-R1`，§15 `R5`）。
+各轮交付细节**只在同名交接文档**（§5 `R1-D` … §14 `R2-RESEED-R1`，§15 `R5`，§19 `R7`）。
 启动：`npm run dev`（默认**产品首页**；研发 `dev:home` / `dev:next-run` / `dev:encounter-lab` /
 `dev:validation`）。
