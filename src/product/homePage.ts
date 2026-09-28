@@ -72,11 +72,12 @@ import {
  *     也**不做**拖拽合成（Queue 必改 3：第一版只验证成长循环）。
  */
 import {
-  REWARD_CHOICE_IDS,
   buildAdventureHref,
   buildRewardChoicePayload,
   newRunToken,
   parsePendingClaim,
+  rewardChoiceIdsFor,
+  rewardDisplayName,
   type PendingClaim,
   type RewardChoiceSpec,
 } from './runReward';
@@ -872,15 +873,19 @@ export function mountProductHome(
   const runToken = newRunToken();
   /**
    * PRODUCT-LOOP-R2-A｜本局 **3选1** 的候选读数 = **出发那一刻**的库存快照。
+   * PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1｜候选池改由 **`draft` 自己**回答
+   * （`rewardChoiceIdsFor(draft)` = 本局的基准武器；车上没武器 / 那件武器不能跑完整 Run
+   * ⇒ 空池），不再是一个固定常量。
    *
-   * ⚠️ 三件候选固定来自 `REWARD_CHOICE_IDS`（产品策略，`runReward.ts` 是唯一真源），
-   *    数量读数来自**当前这份** `inv` ⇒ 与地址里 `choices` 载荷、与探针三者同源。
+   * ⚠️ 数量读数来自**当前这份** `inv` ⇒ 与地址里 `choices` 载荷、与探针三者同源。
    * ⚠️ 必须每次重算（与 `adventureHrefNow` 绑在一起）：玩家可以「进车库 → 换武器 →
-   *    回首页 → 直接点开始冒险」（**不刷新**），地址必须与屏幕上那辆车同一次读取产出。
+   *    回首页 → 直接点开始冒险」（**不刷新**），地址必须与屏幕上那辆车**同一次读取**产出。
    *    数量同理 —— 领奖后本页会重读库存（见下方 `claim` 段），旧快照会显示成没领到货。
+   * ⚠️ **奖励池与出发装备读的是同一个 `draft`**（`adventureHrefNow()` 把它编码进
+   *    `equipped`）⇒「本局用哪件武器打赢 ⇒ 发哪一件」在结构上成立，而不是靠两处协调。
    */
   const rewardSpecsNow = (): readonly RewardChoiceSpec[] =>
-    growthStacks(inv, REWARD_CHOICE_IDS, GROWTH_STAR).map((s) => ({
+    growthStacks(inv, rewardChoiceIdsFor(draft), GROWTH_STAR).map((s) => ({
       defId: s.partId,
       star: s.star,
       countBefore: s.count,
@@ -1305,11 +1310,27 @@ export function mountProductHome(
         '首页显示的主武器 = 下一局战斗里实际使用的装备（同一份正式玩家 Build 存档，随「开始冒险」交给 Run）。',
       ),
     );
+    /*
+      PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1｜这一行必须**跟着这台车**走。
+
+      ⚠️ 改前它是写死的「加农炮 ★1 ×1」—— 多武器玩法上线后那就是一句**假陈述**
+         （装备机枪打赢却被告知会拿到炮）。名称现读正式内容库（`rewardDisplayName`），
+         与结算卡上的 `RunRewardChoiceView.name`（Lab 侧 `registry.functionals` 现读）
+         是**同一份**内容真源，不是第二份字面量。
+      ⚠️ 空池（车上没武器 / 那件武器不能跑完整 Run）⇒ 这一行**不承诺任何奖励**：
+         那种车本来就没有出发链接（上面的 `compat.ok === false`），承诺奖励是误导。
+      ⚠️ 它读的 `draft` 与 `adventureHrefNow()` 编进 `equipped` 的**是同一份** ⇒
+         屏幕上的承诺与局内真实武器、与终点真正发的奖励三者同源。
+    */
+    const rewardPoolNow = rewardChoiceIdsFor(draft);
+    const rewardNameNow = rewardPoolNow.length > 0 ? rewardDisplayName(rewardPoolNow[0]!) : null;
     stage.append(
       el(
         'p',
         'ph-note',
-        '打完一局（RUN COMPLETE）会获得「加农炮 ★1 ×1」：卡片上写着当前进度与领取后的进度（例如 4/5 → 5/5）；领回来后在「调整战车」里就能看到并装上。',
+        rewardNameNow === null
+          ? '完整冒险需要车上装一件能跑完整 Run 的主武器；打完一局（RUN COMPLETE）就能把这件主武器带回家。'
+          : `打完一局（RUN COMPLETE）会获得「${rewardNameNow} ★1 ×1」：卡片上写着当前进度与领取后的进度（例如 4/5 → 5/5）；领回来后在「调整战车」里就能看到并装上。`,
       ),
     );
     stage.append(

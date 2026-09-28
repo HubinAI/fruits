@@ -57,9 +57,9 @@ import {
 } from '../src/product/runCompatibility';
 import { PLAYER_BODY_DEF_ID, WEAPON_SLOT, defaultPlayerDraft } from '../src/product/playerLoadout';
 import {
-  REWARD_CHOICE_IDS,
   buildAdventureHref,
   buildRewardChoicePayload,
+  rewardChoiceIdsFor,
 } from '../src/product/runReward';
 import { FUSE_STACK, GROWTH_STAR } from '../src/product/playerGrowth';
 
@@ -129,7 +129,11 @@ function equippedDraft(weaponDefId: string): BuildDraft {
 
 /** 产品侧真实产出的出发地址（不手写参数）。 */
 function adventureHref(draft?: BuildDraft | null, token = 'run-p0-00001'): string {
-  const specs = REWARD_CHOICE_IDS.map((defId) => ({ defId, star: GROWTH_STAR, countBefore: 0 }));
+  const specs = rewardChoiceIdsFor(draft ?? defaultPlayerDraft()).map((defId) => ({
+    defId,
+    star: GROWTH_STAR,
+    countBefore: 0,
+  }));
   return buildAdventureHref(token, buildRewardChoicePayload(token, specs, FUSE_STACK), draft);
 }
 

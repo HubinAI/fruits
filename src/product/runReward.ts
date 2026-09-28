@@ -1,14 +1,18 @@
 /**
  * PRODUCT-LOOP-R1-B｜产品奖励的**策略与地址唯一真源**（纯逻辑，零 DOM、零存档）。
  * PRODUCT-LOOP-R1-C｜追加：**局外 Equipped Loadout 的交接口径**（同一处，不分第二个真源）。
- * PRODUCT-LOOP-R2-A｜**改口径**：单件固定奖励 →「**候选列表**」（`choices`，见 `REWARD_CHOICE_IDS`）。
- * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）｜候选池**收窄为一件**
- * （`['cannon']`）—— 见 `REWARD_CHOICE_IDS` 的定义头注释（「只发这一局真的用得上的东西」）。
+ * PRODUCT-LOOP-R2-A｜**改口径**：单件固定奖励 →「**候选列表**」（`choices`）。
+ * PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）｜候选池**收窄为一件**。
+ * PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1｜**奖励源再改一次（本轮）**：候选池不再是
+ * 固定 `['cannon']`，而是**本局 Run Snapshot 实际装备的主武器**（见 `rewardChoiceIdsFor()`）
+ * —— 用哪件 Full Run 主武器打完这一局，就发哪一件 ★1 ×1（`machineGun` Run ⇒ ★1 machineGun）。
  *
  * 这个模块回答五个问题，全部只在这里回答一次：
- *   ① 「本局能给玩家哪几件部件」→ `REWARD_CHOICE_IDS`（**当前固定一件正式 Weapon**：
- *      `cannon`。Queue 必改 2 明令「COMPLETE 不再做三选一，改为固定获得 cannon ★1 ×1」，
- *      原因是当前只有它同时具备完整 Run compatibility / 已验证 Run Buff / Star 成长链）；
+ *   ① 「本局能给玩家哪几件部件」→ `rewardChoiceIdsFor(draft)`（**恒 0 条或 1 条**）：
+ *      本局的**基准武器**（= 装配顺序第一件正式武器，与局内 `resolveRunBaseWeaponDefId()`
+ *      同一件事）。车上没有武器、或那件武器**不能跑完整 Run** ⇒ **空池**
+ *      —— 与「首页根本不给出发链接」用的是**同一条判据**（`fullRunCompat`），
+ *      因此「发了一件这一局根本没用上的东西」在结构上不可能；
  *   ② 「怎么开始一局带奖励的冒险」→ `buildAdventureHref()`（唯一产出产品 URL 的地方）；
  *   ③ 「玩家带着什么参数回到首页」→ `buildClaimHref()` / `parsePendingClaim()`
  *      （⚠️ R2-A **完全未改**：玩家选中哪一件，回首页的 URL 就是
@@ -62,35 +66,64 @@
  */
 import { registry } from '../core/content';
 import type { BuildDraft } from '../lab/buildEditorModel';
+/**
+ * PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1｜奖励源要用「这份装备能不能跑完整 Run」
+ * 的**同一条判据**（`fullRunCompat`）来取本局的主武器。
+ *
+ * ⚠️ 为什么必须走它、而不是在奖励侧另立一条「哪件算主武器 / 哪件算能用」的规则：
+ *    - 「本局的基准武器」这件事已经有唯一真源（`runCompatibility.fullRunCompat()` →
+ *      局内 `resolveRunBaseWeaponDefId()`），首页守门 / Run 池族 / 局内 base **三处同源**。
+ *      奖励若是自己再解析一次 draft，就会出现「打的是 A、发的是 B」这种两层分叉。
+ *    - 依赖方向单向、不成环：`runReward → runCompatibility → {core/content,
+ *      lab/buildEditorModel}`，后者**不**反向 import 本模块（见 PL-26 闭集白名单）。
+ */
+import { fullRunCompat } from './runCompatibility';
 
 /**
- * R2-A｜终点候选池（**本 Queue 收窄为 1 件**）。
+ * PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1｜**本局奖励池 = 本次正式 Run 的实际主武器**。
  *
- * ── PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）为什么从三件收成一件 ──
- * 真人反馈 ③：胜利后拿到 `spear`，而**当前完整 Run 明确不支持 spear**
- * ⇒ 系统奖励了一个「当前不能真正使用的东西」。当前 R2 阶段真正同时具备
- *   ① 完整 Run compatibility、② 已真人验证的 Run Buff、③ 永久 Star 成长链
- *   的 Weapon **只有 `cannon`**（`FULL_RUN_SUPPORTED_WEAPON_IDS = ['cannon']`）。
- * ⇒ 本阶段 COMPLETE **固定**发 `cannon ★1 ×1`；`spear` / `hammer` **保留在 Inventory**
- *   （可展示 / 可装备 / 仍被完整 Run 守门拦住），但**暂时退出奖励池**。
- *   它们将来有完整 Run Build 内容后再重新入池 —— 那是**内容完成度**问题，
- *   不是「物品不存在」，更不是把它们的定义删掉（Queue 明文「不要删除」）。
+ * 规则（MVP 最自然的那条）：**本局用哪件 Full Run 主武器打赢，就获得该武器 ★1 ×1。**
+ *      装备 `machineGun` 跑完 ⇒ `machineGun ★1 ×1`；装备 `hammer` ⇒ `hammer ★1 ×1`。
  *
- * ⚠️ 新不变式（本 Queue 立、由 E2E 机器钉死）：
- *      `REWARD_CHOICE_IDS` ⊆ `FULL_RUN_SUPPORTED_WEAPON_IDS`
- *    ⇒「终点只能发玩家这一局真的用得上的东西」不再靠人工核对，而是结构性成立。
+ * ── 输入为什么必须是 `draft`（= 即将交给 Run 的那一份 Run Snapshot）──────────
+ * 「本局用哪件武器」这件事**只有**装备本身能回答，而且必须与**同一份**被编进出发地址
+ * `equipped` 参数的 Build 一致：
+ *   - ❌ 「当前 Garage 的后来状态」：玩家打完一局、回车库换了炮，再回头点领取
+ *      —— 那时读到的 draft 已经不是这一局的。（本模块不受影响：领奖地址是**出发那一刻**
+ *      就密封在 `choices` 载荷里的不透明地址，见下方 `buildAdventureHref`。）
+ *   - ❌ 「默认 Cannon」：那正是本 Queue 修掉的缺陷（多武器玩法与局外成长脱节）。
+ *   - ❌ 「UI 临时选择 / 随机池」：本函数是**纯函数**，没有随机、没有第二个输入。
+ *   ⇒ `homePage` 里**同一个** `draft` 既进 `rewardChoiceIdsFor()`、又进
+ *     `buildAdventureHref(..., draft)` ⇒ 「打的是 A、发的是 B」在结构上不可能。
+ *     `tests/productEquippedWeaponRewardR8.test.ts` 的 `ER-02` 把这条钉在机器上
+ *     （奖励 id === Lab 侧从同一地址解析出的装载的基准武器）。
  *
- * ⚠️ 全部取自 `STARTER_PARTS`（玩家一开始就拥有），且实测能在默认车的
- *    `WEAPON_SLOT`（`frontMass`）上过正式 `validateSnapshot`（能量 30 ≤ 110）
- *    ⇒ 候选**真能发出去**（`claimRunReward` 的 `not-equippable` 分支不会静默吃掉一个选项）。
- *    `tests/productLoopRunReward.test.ts` 的 `PR-08b` 用**真实校验器**逐件钉死这条，
- *    内容（能量 / 挂点）一变动测试立刻报警。
- * ⚠️ 顺序 = 界面上的展示顺序；本阶段只有一条，顺序本身无歧义。
- * ⚠️ 不引入 `laser`（R1-B 的单件固定奖励）等「玩家初始不拥有」的部件，
- *    也不新增 machine gun（Queue 明令：新增 Weapon 会一次性重开 Run compatibility /
- *    Run Modifier / Reward / Star / Fusion / Balance 五个面）。
+ * ── 判据 = `fullRunCompat()`，且**恒 0 或 1 条** ─────────────────────────────
+ *   - 车上没有武器 / 那件武器不能跑完整 Run ⇒ **空池**（`[]`）。
+ *     这与「首页根本不给出发链接」用的是**同一条判据**，因此「奖励了一件这一局
+ *     根本用不上的东西」在结构上不可能 —— 而不是靠人工维护一张池子清单。
+ *   - 反过来，只要这一局真的能开始，池子里就**恰好**是那一件基准武器
+ *     ⇒ 「候选池」这个概念在本阶段退化为「一件」，`choices` 仍然是**列表**
+ *     （多候选的交互另设计，本 Queue 不做）。
+ *
+ * ⚠️ 与 `REWARD_CHOICE_IDS`（R2-RECOVERY 期的固定 `['cannon']`）的关系：
+ *    那个常量**已被本函数取代并删除**。保留一个「默认发炮」的常量就是本 Queue
+ *    要根除的缺陷本身（第二份真源；且它会让「非 Cannon 局」静默退化）。
+ *    默认车（`defaultPlayerDraft()`：`frontMass→cannon` + `top→hammer`）的基准武器
+ *    仍然是 `cannon` ⇒ **R2 的 Cannon 路径逐条不变**（`cannon ★1 ×1`、4/5 → 5/5 → ★2）。
+ * ⚠️ 全部取自正式内容库（`registry.functionals` 的 `category === 'weapon'`），
+ *    且实测能在默认车的 `WEAPON_SLOT`（`frontMass`）上过正式 `validateSnapshot`
+ *    ⇒ 候选**真能发出去**（`claimRunReward` 的 `not-equippable` 分支不会静默吃掉它）。
+ *    `tests/productLoopRunReward.test.ts` 的 `PR-08b` 用**真实校验器**逐件钉死这条。
+ * ⚠️ 不新增任何 Weapon 定义、不改任何 Weapon 数值（Queue 禁止清单）。
  */
-export const REWARD_CHOICE_IDS: readonly string[] = ['cannon'];
+export function rewardChoiceIdsFor(draft: BuildDraft): readonly string[] {
+  const compat = fullRunCompat(draft);
+  if (!compat.ok) return [];
+  // `compat.ok ⇒ baseWeaponDefId !== null`（见 `runCompatibility.fullRunCompat`），
+  // 这里只是把那个事实显式化，不做第二次判断。
+  return compat.baseWeaponDefId === null ? [] : [compat.baseWeaponDefId];
+}
 
 /** 冒险入口（与 `home.html` 同一竖屏产物内的相对地址）。 */
 export const ADVENTURE_HREF = './run-page.html';

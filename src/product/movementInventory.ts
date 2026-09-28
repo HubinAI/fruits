@@ -29,7 +29,7 @@
  *     （与 `playerGrowth` / `playerLoadout` 同一条纪律）⇒ 不制造第二套库存，
  *     也不产生第二套 Movement 拥有记录；
  *   - **不新增 Movement 类型 / 不新增数值 / 不给奖励池加东西**：本模块只描述并对齐
- *     「已经正式存在」的那几件 Movement（`REWARD_CHOICE_IDS` / `OFFICIAL_MOVEMENTS` 一字未动）；
+ *     「已经正式存在」的那几件 Movement（`OFFICIAL_MOVEMENTS` 一字未动）；
  *   - **不改战斗**：本模块**一个字节都不写** `BuildDraft` ⇒ Run Snapshot / Runtime 数值
  *     与调用前完全相同（「不改变其战斗行为」是结构性成立的，不靠人工核对）；
  *   - **只增不减**：唯一的写动作是 `addPart(..., +1)` —— 没有 `consume`、不删除、不归零、

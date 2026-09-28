@@ -148,16 +148,19 @@ const WEAPON_PRE_NAME = '锤';
 const WEAPON_B = 'spear';
 const WEAPON_B_NAME = '刺';
 /**
- * 终点候选（与 `src/product/runReward.ts` 的 `REWARD_CHOICE_IDS` 同值）。
+ * 终点候选（= **本局装备的那件主武器**）。
+ *
+ * ⚠️ PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1：池子**不再是一个固定常量** ——
+ *    它由本局装备现算（`runReward.rewardChoiceIdsFor(draft)`）。本文件驱的是产品默认车
+ *    ⇒ 读数恒为 `['cannon']`（与 R2-RECOVERY 期的固定值逐字相同）。
  *
  * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：从 `['cannon','spear','hammer']`
- *    **收窄为 `['cannon']`** —— 奖励只发**这一局真的用得上**的东西：终点奖励固定为
- *    `cannon ★1 ×1`（它有完整的 R2 强化体系，是唯一有「打完一局就能强化」这条成长线的武器）。
- *    ⚠️ PRODUCT-LOOP-R6：这张候选表**不再等于**「支持完整 Run 的武器表」——
+ *    **收窄为一件** —— 奖励只发**这一局真的用得上**的东西（默认车那件就是 cannon，
+ *    它有完整的 R2 强化体系，是唯一有「打完一局就能强化」这条成长线的武器）。
+ *    ⚠️ PRODUCT-LOOP-R6 / R8：这张候选表**不再等于**「支持完整 Run 的武器表」——
  *    R6 起后者是显式能力登记（`runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS`；
  *    R6-BATCH 之后 7 件），`spear` 与 `saw` 仍被拒（理由不同：前者没有 `ram` Runtime，
- *    后者在产品主武器槽上打不到人）。
- *    候选池仍然只有 cannon 是**奖励设计**的决定，与守门清单是两件事。
+ *    后者在产品主武器槽上打不到人）；R8 起奖励池 = 装备的主武器，仍只发这一件。
  *    顺序仍 = 界面上**从上到下**的展示顺序 ⇒ `CLAIM_INDEX` 同时就是「点第几张卡」。
  */
 const CHOICE_IDS = ['cannon'];

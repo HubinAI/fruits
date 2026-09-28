@@ -47,7 +47,10 @@ import {
 import { RunBattleRuntime } from '../src/lab/portraitBattleLab/runBattleRuntime';
 import type { ContentRegistry, FunctionalPartDef } from '../src/core/types';
 
-/** Queue 必改 5 的三件奖励武器（与 `runReward.REWARD_CHOICE_IDS` 同值）。 */
+/**
+ * Queue 必改 5 的三件奖励武器（R2 期的候选池读数；PRODUCT-LOOP-R8 起奖励池 =
+ * 本局装备的主武器，本文件只用它们做「逐武器星级倍率」的夹具，与池子无关）。
+ */
 const REWARD_WEAPONS = ['cannon', 'spear', 'hammer'] as const;
 
 /** 逐星伤害倍率表（Queue 必改 1 的逐字落地）。 */

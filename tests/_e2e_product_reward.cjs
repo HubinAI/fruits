@@ -105,14 +105,20 @@ const MIME = {
 };
 
 /**
- * 终点候选（与 `src/product/runReward.ts` 的 `REWARD_CHOICE_IDS` 同值）。
- * ⚠️ 全是**玩家一开始就拥有**的正式 Weapon ⇒ 本 Queue 不发新内容，
+ * 终点候选（= **本局装备的那件主武器**）。
+ *
+ * ⚠️ PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1：池子**不再是一个固定常量** ——
+ *    它由本局装备现算（`src/product/runReward.ts` 的 `rewardChoiceIdsFor(draft)`
+ *    = 本局的基准主武器；用哪件打赢就发哪件）。
+ *    本文件驱的是**产品默认车**（`frontMass→cannon`）⇒ 读数恒为 `['cannon']`，
+ *    与 R2-RECOVERY 期的固定值**逐字相同**（Cannon 的 R2 路径不退化）。
+ *
+ * ⚠️ 全是**玩家一开始就拥有**的正式 Weapon ⇒ 不新增内容，
  *    奖励的价值体现在**数量**上（4 → 5），而不是「从无到有」。
  *
  * ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：从 `['cannon','spear','hammer']`
- *    **收窄为 `['cannon']`**（真源 `REWARD_CHOICE_IDS` 同值）—— 当前只有它同时具备
- *    ① 完整 Run compatibility、② 已真人验证的 Run Buff、③ 永久 Star 成长链。
- *    发 spear / hammer 等于奖励玩家「这一局用不上的东西」（真人反馈 ③）。
+ *    **收窄为一件** —— 奖励只发**这一局真的用得上**的东西（发 spear / hammer 等于奖励
+ *    玩家「这一局用不上的东西」，真人反馈 ③）。
  *    ⇒ 本文件里所有「候选条数」的断言随之改为**字面 1**（不是「≥1」）。
  */
 const CHOICE_IDS = ['cannon'];

@@ -55,7 +55,7 @@ import {
   weaponDefs,
   weaponEntries,
 } from '../src/product/playerLoadout';
-import { REWARD_CHOICE_IDS, buildAdventureHref, buildRewardChoicePayload } from '../src/product/runReward';
+import { buildAdventureHref, buildRewardChoicePayload, rewardChoiceIdsFor } from '../src/product/runReward';
 import {
   FUSE_STACK,
   GROWTH_MAX_STAR,
@@ -163,7 +163,7 @@ function draftWithSelections(sel: Record<string, string>): BuildDraft {
 /** 产品侧真实产出的出发地址（不手写参数）。 */
 function searchOf(draft: BuildDraft): string {
   const token = 'run-mw-00001';
-  const specs = REWARD_CHOICE_IDS.map((defId) => ({ defId, star: GROWTH_STAR, countBefore: 0 }));
+  const specs = rewardChoiceIdsFor(draft).map((defId) => ({ defId, star: GROWTH_STAR, countBefore: 0 }));
   return buildAdventureHref(token, buildRewardChoicePayload(token, specs, FUSE_STACK), draft).split('?')[1] ?? '';
 }
 
@@ -222,8 +222,20 @@ describe('R5-MULTI-WEAPON｜A. canonical 武器集合', () => {
     expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('ramHead');
     expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('spear');
     expect(FULL_RUN_SUPPORTED_WEAPON_IDS).not.toContain('saw');
-    // 奖励只发「这一局真的用得上的东西」⇒ 必须落在支持清单里
-    for (const id of REWARD_CHOICE_IDS) expect(supportsFullRun(id)).toBe(true);
+    // 奖励只发「这一局真的用得上的东西」⇒ 池子必然落在支持清单里（R8 起是**结构性**成立）
+    for (const id of FULL_RUN_SUPPORTED_WEAPON_IDS) {
+      expect(rewardChoiceIdsFor(draftWithWeapon(id)), `装备 ${id} 打完 ⇒ 发它自己`).toEqual([id]);
+    }
+    // 反面：没有完整 Run 资格的武器**结构上**发不出奖励（定义仍在内容库里，不是删内容）
+    for (const id of ['spear', 'saw']) {
+      const base = defaultPlayerDraft();
+      const draft: BuildDraft = {
+        ...base,
+        functionalSelections: { ...base.functionalSelections, [WEAPON_SLOT]: id },
+      };
+      expect(supportsFullRun(id), `${id} 没有完整 Run 资格`).toBe(false);
+      expect(rewardChoiceIdsFor(draft), `${id} 不可领取（空池）`).toEqual([]);
+    }
     // 全 `src/` 只有一处**声明**（注释剥掉后）⇒ 不可能存在第二份清单
     expect(declarationCount('FULL_RUN_SUPPORTED_WEAPON_IDS')).toBe(1);
   });

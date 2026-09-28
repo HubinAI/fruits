@@ -348,7 +348,8 @@ export function runSelectedClaim(
  * ⚠️ 三条闸门与 `runSelectedClaim` 完全一致：有产品上下文、必须是 `COMPLETE`（FAILED 结构上
  *    拿不到）、候选表非空。任一不满足 ⇒ `null` ⇒ 页面不接受这次点击（也不会画一个点了没反应的按钮）。
  * ⚠️ N>1 时本函数只会领取**第一条** —— 多候选必须**单独设计**多选交互（Queue 明令），
- *    不在这一屏将就；`REWARD_CHOICE_IDS ⊆ ['cannon']` 使这条路径当前不可达。
+ *    不在这一屏将就；产品侧当前**恒只给 1 条候选**（R8 起 = 本局的基准主武器，
+ *    `runReward.rewardChoiceIdsFor()`），使这条路径当前不可达。
  */
 export function runSingleRewardClaim(
   state: RunPageState,

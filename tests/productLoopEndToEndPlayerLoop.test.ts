@@ -44,7 +44,7 @@ import {
   LOADOUT_PARAM,
   HOME_PARAM,
   CHOICES_PARAM,
-  REWARD_CHOICE_IDS,
+  rewardChoiceIdsFor,
   buildAdventureHref,
   buildRewardChoicePayload,
   encodeRunLoadout,
@@ -150,7 +150,11 @@ function equippedDraft(weaponDefId: string): BuildDraft {
  * （三条候选各自的领奖地址 + 满 stack 阈值）。夹具按同一条链路产出它。
  */
 function adventureHref(token: string, draft?: BuildDraft | null): string {
-  const specs = REWARD_CHOICE_IDS.map((defId) => ({ defId, star: GROWTH_STAR, countBefore: 0 }));
+  const specs = rewardChoiceIdsFor(draft ?? defaultPlayerDraft()).map((defId) => ({
+    defId,
+    star: GROWTH_STAR,
+    countBefore: 0,
+  }));
   return buildAdventureHref(token, buildRewardChoicePayload(token, specs, FUSE_STACK), draft);
 }
 
@@ -230,7 +234,7 @@ describe('PRODUCT-LOOP-R1-C｜A. 局外装备的交接口径（唯一真源 + �
     expect(new URLSearchParams(plain.split('?')[1]).get('reward')).toBeNull();
     const payload = payloadOf(plain);
     expect(payload.stack).toBe(FUSE_STACK);
-    expect(payload.choices.map((c) => c.defId)).toEqual([...REWARD_CHOICE_IDS]);
+    expect(payload.choices.map((c) => c.defId)).toEqual([...rewardChoiceIdsFor(defaultPlayerDraft())]);
     // 解析：**没有**「带了装备参数」⇒ Run 侧走演示装载（研发入口原行为）
     const res = resolveRunPlayerLoadout(plain.split('?')[1]);
     expect(res.loadout.source).toBe('demo');
@@ -692,9 +696,9 @@ describe('PRODUCT-LOOP-R1-D｜G. 失败链：两个出口分离、不发奖、�
          不再写死 3；但「每条都必须给全、都必须是一条真的领奖地址、都互不相同」这几条
          一个字都没有放宽。
     */
-    expect(payload.choices.length, '候选条数 = 产品策略真源（不能是空集）').toBe(REWARD_CHOICE_IDS.length);
+    expect(payload.choices.length, '候选条数 = 产品策略真源（不能是空集）').toBe(rewardChoiceIdsFor(defaultPlayerDraft()).length);
     expect(payload.choices.length).toBeGreaterThan(0);
-    expect(payload.choices.map((c) => c.defId)).toEqual([...REWARD_CHOICE_IDS]);
+    expect(payload.choices.map((c) => c.defId)).toEqual([...rewardChoiceIdsFor(defaultPlayerDraft())]);
     expect(home, '失败出口（纯首页）必须给全').not.toBe('');
     for (const c of payload.choices) {
       expect(c.href, `候选 ${c.defId} 的领奖地址必须给全`).not.toBe('');

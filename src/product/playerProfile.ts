@@ -35,6 +35,21 @@ import { buildSnapshotFromDraft } from '../lab/buildEditorModel';
 import { platform } from '../platform';
 import { WEAPON_SLOT, isWeaponDefId, loadEquippedDraft, playerInventory } from './playerLoadout';
 import type { PendingClaim } from './runReward';
+/**
+ * PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1｜领取侧的**反伪造闸门**。
+ *
+ * 奖励的语义从本轮起是「**你用哪件 Full Run 主武器打赢了这一局**」。一件**不能完成
+ * 完整 Run** 的武器（`spear`：`behavior === 'ram'` 没有 Runtime；`saw`：产品主武器槽上
+ * 打不到人）**不可能是**任何一局真实 Run 的产物 ⇒ 它的领奖 URL 只可能来自**伪造 /
+ * 手改的数据**，必须拒绝（Queue 必改 5：「不得通过伪造 Run 数据领取奖励」）。
+ *
+ * ⚠️ 判据复用**产品裁决的那一处**（`runCompatibility.supportsFullRun`），不另立白名单：
+ *    奖励池（`runReward.rewardChoiceIdsFor`）与这个闸门因此是**同一条判据的两侧**
+ *    ——「发得出来」与「收得下」永远一致。
+ * ⚠️ 它**不**放宽 `validateSnapshot`、不改任何数值、不新增经济项：只是在既有四道闸门
+ *    之后多问一句「这件武器有没有跑完整 Run 的资格」。
+ */
+import { supportsFullRun } from './runCompatibility';
 
 /** 领奖账本 key（本 Queue 唯一新增的持久化记录）。 */
 export const PROFILE_CLAIMS_KEY = 'strongfruit.profileClaims.v1';
@@ -91,6 +106,11 @@ export type ClaimFailure =
   | 'already-claimed'
   | 'not-official'
   | 'not-weapon'
+  /**
+   * PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1｜该武器**没有跑完整 Run 的资格**
+   * （`spear` / `saw` 类）⇒ 它不可能来自任何一局真实 Run ⇒ 伪造 / 手改的领奖请求。
+   */
+  | 'not-full-run-supported'
   | 'not-equippable';
 
 /** 成功入库的结果（供页面展示「本局获得」）。 */
@@ -132,11 +152,16 @@ export function equippableOnCurrentVehicle(defId: string): boolean {
  *   ② **本局 token 未领过**（重复点击 / 重复结算 / 刷新领奖 URL 全部落在这里）；
  *   ③ 是**正式部件**（`PART_OPTIONS` 内）；
  *   ④ 是**正式 Weapon**（`category === 'weapon'`，Run Buff 结构上不满足 —— 必改 2）；
+ *   ④b **有跑完整 Run 的资格**（`supportsFullRun`）—— PRODUCT-LOOP-R8 / 必改 5：
+ *       `spear` / `saw` 类武器不可能是任何一局真实 Run 的产物 ⇒ 伪造数据一律拒收；
  *   ⑤ **当前车辆能合法装备**（正式 `validateSnapshot`）。
  *
  * 成功路径只有三处写入，顺序固定：库存 +1 → 落盘库存 → 记 token（幂等键最后写）。
  * ⚠️ 入账用既有 `addPart` / `saveInventory`（**不新建第二套库存**，必改 5）；
  *    重复获得同一件会累计副本数（与既有奖励系统语义一致，不是「失败」）。
+ * ⚠️ PRODUCT-LOOP-R8：入账**只有一件** = `PendingClaim.rewardDefId`（由产品侧在**出发
+ *    那一刻**按本局主武器密封进 `choices[i].href`）。本函数**不读当前装备**去猜奖励
+ *    ——「打的是 A、发的是 B」在结构上不可能；领取**不改变当前装备**（只有 `addPart`）。
  */
 export function claimRunReward(input: PendingClaim | null | undefined): ClaimOutcome {
   const fail = (reason: ClaimFailure): ClaimOutcome => ({ ok: false, reason, grant: null });
@@ -151,6 +176,8 @@ export function claimRunReward(input: PendingClaim | null | undefined): ClaimOut
   // ③④ 只复用正式部件里的正式 Weapon
   if (!isOfficialPart(defId)) return fail('not-official');
   if (!isWeaponDefId(defId)) return fail('not-weapon');
+  // ④b 没有完整 Run 资格的武器不可能来自真实 Run ⇒ 伪造 / 手改数据（必改 5）
+  if (!supportsFullRun(defId)) return fail('not-full-run-supported');
 
   // ⑤ 「拿到就能装上」必须在结构上成立，否则奖励就是一件废品
   if (!equippableOnCurrentVehicle(defId)) return fail('not-equippable');

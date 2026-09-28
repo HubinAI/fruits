@@ -581,6 +581,10 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         './runMovementCanonical',
       ],
       // PRODUCT-LOOP-R1-B：Profile Repository（唯一写持久化状态的地方）
+      // PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1：**登记 +1**（不是放宽）——
+      //   `./runCompatibility`。领取侧的**反伪造闸门**要问「这件武器有没有跑完整 Run
+      //   的资格」（`spear` / `saw` 不可能来自任何一局真实 Run）⇒ 必须复用产品裁决的
+      //   同一处判据，而不是在这里另抄一张武器名单。
       'playerProfile.ts': [
         '../core/buildValidator',
         '../core/content',
@@ -589,13 +593,19 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../lab/buildEditorModel',
         '../platform',
         './playerLoadout',
+        './runCompatibility',
         './runReward',
       ],
       // PRODUCT-LOOP-R1-B：奖励策略 + 产品地址唯一真源（只读内容库取展示名）
       // PRODUCT-LOOP-R1-C：追加 `../lab/buildEditorModel` —— **只取 `BuildDraft` 类型**
       //   （type-only import），用于把「局外当前装备」原样编进「开始冒险」的地址；
       //   产品侧不解释这份装备的含义，因此不需要任何内容层之外的依赖。
-      'runReward.ts': ['../core/content', '../lab/buildEditorModel'],
+      // PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1：**登记 +1**（不是放宽）——
+      //   `./runCompatibility`。奖励池从固定 `['cannon']` 改为「本局装备的主武器」，
+      //   判据必须复用**产品裁决那一处**（`fullRunCompat` → `baseWeaponDefId` / 是否支持
+      //   完整 Run），否则奖励侧会自己解析一次 draft ⇒ 「打的是 A、发的是 B」的两层分叉。
+      //   ⚠️ 方向单向不成环：`runCompatibility` 的白名单里没有本模块，也不会 import 它。
+      'runReward.ts': ['../core/content', '../lab/buildEditorModel', './runCompatibility'],
       // PRODUCT-LOOP-R2-A：永久成长的**唯一模型与写入口**。
       //   - 只经 core 的 `partInventory`（`addPart` / `loadInventoryRaw` / `saveInventory`）
       //     与 `buildPersistence`（判 fresh）读写，**不新建第二套库存**；

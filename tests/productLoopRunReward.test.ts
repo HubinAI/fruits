@@ -36,10 +36,11 @@ import {
   loadInventoryRaw,
   STARTER_PARTS,
 } from '../src/core/partInventory';
-import { buildSnapshotFromDraft, makeStarterDraft } from '../src/lab/buildEditorModel';
+import { buildSnapshotFromDraft, makeStarterDraft, type BuildDraft } from '../src/lab/buildEditorModel';
 import {
   PLAYER_BODY_DEF_ID,
   WEAPON_SLOT,
+  defaultPlayerDraft,
   loadEquippedDraft,
   stackThreshold,
   weaponEntries,
@@ -55,7 +56,6 @@ import {
   CHOICES_PARAM,
   HOME_HREF,
   HOME_PARAM,
-  REWARD_CHOICE_IDS,
   REWARD_PARAM,
   RUN_PARAM,
   buildAdventureHref,
@@ -64,6 +64,7 @@ import {
   buildRewardChoicePayload,
   newRunToken,
   parsePendingClaim,
+  rewardChoiceIdsFor,
   rewardDisplayName,
 } from '../src/product/runReward';
 import {
@@ -190,9 +191,20 @@ function failedState(): RunPageState {
   return dead;
 }
 
+/**
+ * 本文件测的是**默认车**（`defaultPlayerDraft()`：`frontMass→cannon` + `top→hammer`）
+ * 那条 R2 路径 ⇒ 奖励池恰好是 `['cannon']`。
+ *
+ * ⚠️ PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1：池子不再是产品里的常量 ——
+ *    它由 `rewardChoiceIdsFor(draft)` **现算**（= 本局的基准主武器）。
+ *    这里只是把「默认车那一份」取出来当夹具；**逐武器 / 非默认车 / 空池**的参数化覆盖
+ *    在 `tests/productEquippedWeaponRewardR8.test.ts`。
+ */
+const REWARD_POOL: readonly string[] = rewardChoiceIdsFor(defaultPlayerDraft());
+
 /** 三条候选读数（`countBefore` 由调用方给；三选一的载荷就是用它们组的）。 */
 function specs(countBefore = 0): Array<{ defId: string; star: number; countBefore: number }> {
-  return REWARD_CHOICE_IDS.map((defId) => ({ defId, star: GROWTH_STAR, countBefore }));
+  return REWARD_POOL.map((defId) => ({ defId, star: GROWTH_STAR, countBefore }));
 }
 
 /** 一份「出发那一刻」的完整产品上下文（走真实产出链，不手写 URL）。 */
@@ -231,11 +243,14 @@ describe('PRODUCT-LOOP-R2-A｜A. 候选池必须「实测」而不是「偏好�
          R2-A 断言的是「3选1 ⇒ 恰好三条」。真人反馈 ③ 证明「三条」本身就是一个缺陷
          （发了一件当前完整 Run 不支持的 Weapon ⇒ 奖励了一件用不上的东西）
          ⇒ 本 Queue 把口径从**条数**换成**可用性**：候选池可以只有一条，但**每一条**
-         都必须是这一局真的用得上的东西（`REWARD_CHOICE_IDS ⊆ FULL_RUN_SUPPORTED_WEAPON_IDS`）。
+         都必须是这一局真的用得上的东西（`REWARD_POOL ⊆ FULL_RUN_SUPPORTED_WEAPON_IDS`）。
          断言数量没放松（下面仍然要求非空），而且**加了一条 R2-A 没有的守门**。
+      ⚠️ PRODUCT-LOOP-R8 **再改一次**：池子由 `rewardChoiceIdsFor(draft)` 现算
+         （本局基准主武器）⇒ 这条不变式在本文件里是「默认车那一份」的读数，
+         逐武器的枚举在 `productEquippedWeaponRewardR8.test.ts`（ER-01 / ER-03）。
     */
-    expect(REWARD_CHOICE_IDS.length, '候选池不能是空集（否则 COMPLETE 就没有出口）').toBeGreaterThan(0);
-    for (const id of REWARD_CHOICE_IDS) {
+    expect(REWARD_POOL.length, '候选池不能是空集（否则 COMPLETE 就没有出口）').toBeGreaterThan(0);
+    for (const id of REWARD_POOL) {
       expect(isOfficialPart(id), `${id} 必须在 PART_OPTIONS 正式池内`).toBe(true);
       const def = registry.functionals.get(id);
       expect(def, `${id} 必须存在于正式内容库`).toBeTruthy();
@@ -252,13 +267,23 @@ describe('PRODUCT-LOOP-R2-A｜A. 候选池必须「实测」而不是「偏好�
     expect(rewardDisplayName('doesNotExist')).toBeNull();
   });
 
-  it('PR-02 候选**全部来自 STARTER_PARTS**（第一版只用已有 Weapon，不新增内容）', () => {
-    for (const id of REWARD_CHOICE_IDS) {
-      expect(STARTER_PARTS, `${id} 必须是玩家一开始就拥有的那几件`).toContain(id);
-    }
-    // 对照：R1-B 的单件固定奖励（laser）**不是**候选 —— 它不在 starter 里，
-    // 一旦它被写回候选池，本 Queue「只用已有 cannon / spear / hammer」就破了。
-    expect(REWARD_CHOICE_IDS).not.toContain('laser');
+  it('PR-02 候选池**现算**：默认车 = 它的基准武器；车上没武器 = 空池（不存在固定常量）', () => {
+    /*
+      R2-RECOVERY 期这里断言的是「候选全部来自 STARTER_PARTS」（当时池子是固定 `['cannon']`）。
+      PRODUCT-LOOP-R8 把池子改成**由 draft 现算**之后，那条约束本身已经不成立也不再需要：
+      玩家可以拥有并装备 starter 之外的正式武器（R5 内容池），而它**就是**那一局的主武器
+      ⇒ 奖励它才是对的。留下的不变式是更强的两条：
+        ① 池子的**唯一输入**是 draft（没有第二份清单、没有随机、没有默认 Cannon）；
+        ② 池子里的每一条都是正式 Weapon（PR-01）。
+    */
+    expect(REWARD_POOL, '默认车（frontMass→cannon）的池 = 它的基准武器').toEqual(['cannon']);
+    expect(
+      rewardChoiceIdsFor({ ...defaultPlayerDraft(), functionalSelections: {} }),
+      '车上没有武器 ⇒ 空池（与「首页不给出发链接」同一条判据）',
+    ).toEqual([]);
+    for (const id of REWARD_POOL) expect(isOfficialPart(id), `${id} 是正式部件`).toBe(true);
+    // starter 只是「默认车恰好用哪一件」的事实，不再是池子的边界
+    expect(STARTER_PARTS, '默认车用的那件本来就在 starter 里（对照读数）').toContain(REWARD_POOL[0]);
   });
 
   /**
@@ -281,7 +306,7 @@ describe('PRODUCT-LOOP-R2-A｜A. 候选池必须「实测」而不是「偏好�
   });
 
   it('PR-04 候选池内互不相同（不会出现两张指向同一个 stack 的卡）', () => {
-    expect(new Set(REWARD_CHOICE_IDS).size).toBe(REWARD_CHOICE_IDS.length);
+    expect(new Set(REWARD_POOL).size).toBe(REWARD_POOL.length);
     const links = buildRewardChoiceLinks('run-x', specs(1));
     // ⚠️ 断言按 `links.length` 现算（不是写死 3）：候选池的**条数**是产品决策，
     //    「每条的地址 / 件号互不相同」才是本用例守的不变量。
@@ -294,7 +319,7 @@ describe('PRODUCT-LOOP-R2-A｜A. 候选池必须「实测」而不是「偏好�
     for (const buff of ['heavyShell', 'twinCannon', 'fastReload']) {
       expect(registry.functionals.get(buff), `${buff} 不是部件`).toBeUndefined();
       expect(isOfficialPart(buff)).toBe(false);
-      expect(REWARD_CHOICE_IDS).not.toContain(buff);
+      expect(REWARD_POOL).not.toContain(buff);
       const bad = claimRunReward({ runToken: `run-buff-${buff}`, rewardDefId: buff });
       expect(bad.ok).toBe(false);
       expect(bad.reason).toBe('not-official');
@@ -344,7 +369,7 @@ describe('PRODUCT-LOOP-R2-A｜A. 候选池必须「实测」而不是「偏好�
   it('PR-08b 三条候选在默认车上**逐件**都能合法装备（三选一里没有废选项）', () => {
     const base = makeStarterDraft(PLAYER_BODY_DEF_ID, registry);
     const cap = registry.bodies.get(PLAYER_BODY_DEF_ID)!.energyCapacity;
-    for (const id of REWARD_CHOICE_IDS) {
+    for (const id of REWARD_POOL) {
       expect(equippableOnCurrentVehicle(id), `${id} 必须能装在当前车上`).toBe(true);
       const draft = {
         ...base,
@@ -375,7 +400,7 @@ describe('PRODUCT-LOOP-R2-A｜B. 产品地址与参数：只有一个真源', ()
     */
     const payload = payloadOf(href);
     expect(payload.stack, '满 stack 阈值必须由产品侧给全（Lab 不自造 5）').toBe(FUSE_STACK);
-    expect(payload.choices.map((c) => c.defId)).toEqual([...REWARD_CHOICE_IDS]);
+    expect(payload.choices.map((c) => c.defId)).toEqual([...REWARD_POOL]);
     expect(q.get('reward'), '出发地址不得带裸 `reward=` 参数').toBeNull();
     for (const c of payload.choices) {
       expect(c.star).toBe(GROWTH_STAR);
@@ -428,8 +453,8 @@ describe('PRODUCT-LOOP-R2-A｜B. 产品地址与参数：只有一个真源', ()
     // ① COMPLETE：候选齐备、**没有**失败结算
     const done = buildPriorCompletedRun(ctx);
     expect(runComplete(done)).toBe(true);
-    expect(runRewardChoiceViews(done, reward).length).toBe(REWARD_CHOICE_IDS.length);
-    expect(runSelectedClaim(done, reward, REWARD_CHOICE_IDS[0])).not.toBeNull();
+    expect(runRewardChoiceViews(done, reward).length).toBe(REWARD_POOL.length);
+    expect(runSelectedClaim(done, reward, REWARD_POOL[0])).not.toBeNull();
     expect(runFailSettlementNow(done, ret)).toBeNull();
 
     // ② FAILED（真实推进到第一场战斗后被打死）：有失败结算、**没有**候选
@@ -440,7 +465,7 @@ describe('PRODUCT-LOOP-R2-A｜B. 产品地址与参数：只有一个真源', ()
     const failed = finishRunBattle(s, { winner: 'B', endReason: 'hp', playerHp: 0, enemyHp: 900, steps: 300 });
     expect(failed.phase).toBe('FAILED');
     expect(runRewardChoiceViews(failed, reward)).toEqual([]);
-    for (const id of REWARD_CHOICE_IDS) expect(runSelectedClaim(failed, reward, id)).toBeNull();
+    for (const id of REWARD_POOL) expect(runSelectedClaim(failed, reward, id)).toBeNull();
     expect(runFailSettlementNow(failed, ret)!.href).toBe(HOME_HREF);
   });
 
@@ -595,27 +620,38 @@ describe('PRODUCT-LOOP-R2-A｜C. 领奖：一次、真入库、数量累积', ()
     expect(getCount(loadInventoryRaw()!, 'cannon', GROWTH_STAR)).toBe(6);
   });
 
-  it('PC-13 选择**其它** Weapon 只加对应 stack（验收 ④）', () => {
+  it('PC-13 领到的永远是**这一局那一件**：只有它自己 +1，其它 stack 一个字节不动（验收 ④）', () => {
     openGrowthSession(loadEquippedDraft());
-    const base = { cannon: 4, spear: 1, hammer: 1 };
+    const base: Record<string, number> = { cannon: 4, spear: 1, hammer: 1 };
     const inv0 = loadInventoryRaw()!;
     for (const [defId, before] of Object.entries(base)) {
       expect(getCount(inv0, defId, GROWTH_STAR), `${defId} 的初始读数`).toBe(before);
     }
-    // 第一局选 spear：只有 spear 变，其它两件一个字节都不动
-    const out = claimRunReward({ runToken: 'run-spear', rewardDefId: 'spear' });
+    /*
+      ⚠️ PRODUCT-LOOP-R8｜本条原本用 `spear` 当「另一件」—— 那在 R8 之后**已经不可达**：
+         没有完整 Run 资格的武器结构上发不出奖励、也收不下（`not-full-run-supported`）。
+         ⇒ 换成两件**都支持完整 Run** 的武器（`hammer` / `machineGun`），
+         断言的语义反而更贴本 Queue：**打哪件就发哪件**，别的 stack 一动不动。
+    */
+    const out = claimRunReward({ runToken: 'run-hammer', rewardDefId: 'hammer' });
     expect(out.ok).toBe(true);
+    expect(out.grant?.defId).toBe('hammer');
     expect(out.grant?.countAfter).toBe(2);
     const inv1 = loadInventoryRaw()!;
-    expect(getCount(inv1, 'cannon', GROWTH_STAR), '没选的件不许动').toBe(4);
-    expect(getCount(inv1, 'hammer', GROWTH_STAR), '没选的件不许动').toBe(1);
-    expect(getCount(inv1, 'spear', GROWTH_STAR)).toBe(2);
-    // 第二局选 hammer：同理
-    claimRunReward({ runToken: 'run-hammer', rewardDefId: 'hammer' });
+    expect(getCount(inv1, 'cannon', GROWTH_STAR), '没领的件不许动').toBe(4);
+    expect(getCount(inv1, 'spear', GROWTH_STAR), '没领的件不许动').toBe(1);
+    expect(getCount(inv1, 'hammer', GROWTH_STAR)).toBe(2);
+
+    // 第二局装备另一件（machineGun，R5 内容池已拥有）⇒ 只发它自己，且是「读数 +1」而不是写死值
+    const beforeMg = getCount(inv1, 'machineGun', GROWTH_STAR);
+    const out2 = claimRunReward({ runToken: 'run-mg', rewardDefId: 'machineGun' });
+    expect(out2.ok).toBe(true);
+    expect(out2.grant?.countAfter, '只加它自己那一档').toBe(beforeMg + 1);
     const inv2 = loadInventoryRaw()!;
-    expect(getCount(inv2, 'hammer', GROWTH_STAR)).toBe(2);
+    expect(getCount(inv2, 'machineGun', GROWTH_STAR)).toBe(beforeMg + 1);
+    expect(getCount(inv2, 'hammer', GROWTH_STAR), '上一局那件不许再动').toBe(2);
     expect(getCount(inv2, 'cannon', GROWTH_STAR)).toBe(4);
-    expect(getCount(inv2, 'spear', GROWTH_STAR)).toBe(2);
+    expect(getCount(inv2, 'spear', GROWTH_STAR)).toBe(1);
   });
 
   it('PC-14 非法输入一律拒收且零副作用（含空 token / 未知部件 / Gadget）', () => {
@@ -669,8 +705,8 @@ describe('PRODUCT-LOOP-R2-A｜D. 终点态：只有 COMPLETE 才有候选', () =
     const s = completedState();
     expect(runComplete(s)).toBe(true);
     const views = runRewardChoiceViews(s, REWARD_CTX);
-    expect(views.length).toBe(REWARD_CHOICE_IDS.length);
-    expect(views.map((v) => v.defId)).toEqual([...REWARD_CHOICE_IDS]);
+    expect(views.length).toBe(REWARD_POOL.length);
+    expect(views.map((v) => v.defId)).toEqual([...REWARD_POOL]);
     // 每张卡的读数来自产品侧给的那份载荷（`countBefore` = 4）
     for (const v of views) {
       expect(v.countBefore).toBe(4);
@@ -686,7 +722,7 @@ describe('PRODUCT-LOOP-R2-A｜D. 终点态：只有 COMPLETE 才有候选', () =
       expect(v.stackLimit, '阈值的真源是产品侧给的 stack').toBe(FUSE_STACK);
     }
     // 选中那一条 → 出口是**它自己的**地址，且 token 是本局的
-    const pick = REWARD_CHOICE_IDS[0];
+    const pick = REWARD_POOL[0];
     const claim = runSelectedClaim(s, REWARD_CTX, pick);
     expect(claim).toEqual({
       defId: pick,
@@ -700,8 +736,8 @@ describe('PRODUCT-LOOP-R2-A｜D. 终点态：只有 COMPLETE 才有候选', () =
     */
     expect(runSingleRewardClaim(s, REWARD_CTX)).toEqual(claim);
     // 每条候选的出口互不相同（「选哪条」是真选择；条数由产品决策给）
-    const hrefs = REWARD_CHOICE_IDS.map((id) => runSelectedClaim(s, REWARD_CTX, id)!.href);
-    expect(new Set(hrefs).size).toBe(REWARD_CHOICE_IDS.length);
+    const hrefs = REWARD_POOL.map((id) => runSelectedClaim(s, REWARD_CTX, id)!.href);
+    expect(new Set(hrefs).size).toBe(REWARD_POOL.length);
     // 不在候选里的件（spear / hammer：仍有库存、仍可装备，但**当前不进奖励池**）
     expect(runSelectedClaim(s, REWARD_CTX, 'spear'), '未入池的件拿不到出口').toBeNull();
     expect(runSelectedClaim(s, REWARD_CTX, 'hammer'), '未入池的件拿不到出口').toBeNull();
@@ -726,7 +762,7 @@ describe('PRODUCT-LOOP-R2-A｜D. 终点态：只有 COMPLETE 才有候选', () =
     const s = completedState();
     // 同一份载荷 ⇒ 底栏 CTA 拿到的就是「那件固定奖励」的请求（页面里没有第二个真源）
     const viaCta = runSingleRewardClaim(s, REWARD_CTX);
-    expect(viaCta).toEqual(runSelectedClaim(s, REWARD_CTX, REWARD_CHOICE_IDS[0]));
+    expect(viaCta).toEqual(runSelectedClaim(s, REWARD_CTX, REWARD_POOL[0]));
     // 三道闸门与 `runSelectedClaim` 一致：没有载荷 / 不是 COMPLETE ⇒ 拿不到请求
     expect(runSingleRewardClaim(s, null)).toBeNull();
     expect(runSingleRewardClaim(s, undefined)).toBeNull();
@@ -741,7 +777,7 @@ describe('PRODUCT-LOOP-R2-A｜D. 终点态：只有 COMPLETE 才有候选', () =
     const s = failedState();
     expect(runComplete(s)).toBe(false);
     expect(runRewardChoiceViews(s, REWARD_CTX)).toEqual([]);
-    for (const id of REWARD_CHOICE_IDS) expect(runSelectedClaim(s, REWARD_CTX, id)).toBeNull();
+    for (const id of REWARD_POOL) expect(runSelectedClaim(s, REWARD_CTX, id)).toBeNull();
     // 动一下「点击」也不该写盘：候选恒空 ⇒ 页面结构上没有可点的东西
     expect(allKeys()).toEqual([]);
     expect(claimedRunCount()).toBe(0);
@@ -895,12 +931,17 @@ describe('PRODUCT-LOOP-R2-A｜E. 源码守卫（本 Queue 的边界必须结构�
     // Garage 侧的唯一数据源就是这份库存
     const a = strip(readProduct('playerLoadout.ts'));
     expect(a.includes("from '../core/partInventory'")).toBe(true);
-    // 页面侧不写死候选 / 奖励 id（候选来自产品策略常量，名称来自内容库）
+    // 页面侧不写死候选 / 奖励 id（候选由本局装备现算，名称来自内容库）
     const page = strip(readProduct('homePage.ts'));
     for (const id of ['cannon', 'spear', 'hammer']) {
       expect(page.includes(`'${id}'`), `页面不得写死候选 id：${id}`).toBe(false);
     }
-    expect(page.includes('REWARD_CHOICE_IDS'), '候选必须来自策略常量').toBe(true);
+    expect(page.includes('rewardChoiceIdsFor(draft)'), '候选必须由本局装备现算（唯一真源）').toBe(true);
+    // 且产品里**不再**存在「默认发炮」的固定池常量（那正是 R8 修掉的缺陷）
+    const rewardSrc = strip(readProduct('runReward.ts'));
+    expect(page.includes('REWARD_CHOICE_IDS'), '页面不得引用已删除的固定池常量').toBe(false);
+    expect(rewardSrc.includes('REWARD_CHOICE_IDS'), '奖励模块里不得残留固定池常量').toBe(false);
+    expect(rewardSrc.includes('rewardChoiceIdsFor'), '奖励模块必须只留现算入口').toBe(true);
   });
 
   it('PR-24 成长会话的顺序**结构性**正确：先判 fresh 再取库存（写反 = 种子静默失效）', () => {
@@ -938,15 +979,23 @@ describe('PRODUCT-LOOP-R2-A｜E. 源码守卫（本 Queue 的边界必须结构�
          R2-A 这里断言「恰好三件且都在正式内容库里」；现在改成：
          ① 候选池**非空**；② 候选池是 `FULL_RUN_SUPPORTED_WEAPON_IDS` 的**子集**
             （= 只发这一局真的用得上的东西）；③ 未入池的件仍在正式内容库里
-            （**保留内容、只是暂时不发**，不是删定义）。
+            （**保留内容**，不是删定义）。
+      ⚠️ PRODUCT-LOOP-R8 **再收一次口径**：池子由 draft 现算（= 本局基准主武器），
+         因此 ③ 的那条「暂时不发」变成了**永久的结构性事实**：一件不能跑完整 Run 的武器
+         （`spear` / `saw`）**永远**不可能出现在奖励池里 —— 它不可能来自任何一局真实 Run。
     */
-    expect(REWARD_CHOICE_IDS.length, '候选池不能为空').toBeGreaterThan(0);
-    for (const id of REWARD_CHOICE_IDS) {
+    expect(REWARD_POOL.length, '候选池不能为空').toBeGreaterThan(0);
+    for (const id of REWARD_POOL) {
       expect(FULL_RUN_SUPPORTED_WEAPON_IDS, `${id} 必须在完整 Run 支持清单里`).toContain(id);
       expect(registry.functionals.get(id), `${id} 仍是正式内容`).toBeTruthy();
     }
-    for (const id of ['spear', 'hammer']) {
-      expect(REWARD_CHOICE_IDS, `${id} 当前退出奖励池`).not.toContain(id);
+    const withWeapon = (defId: string): BuildDraft => ({
+      ...defaultPlayerDraft(),
+      functionalSelections: { ...defaultPlayerDraft().functionalSelections, [WEAPON_SLOT]: defId },
+    });
+    for (const id of ['spear', 'saw']) {
+      expect(supportsFullRun(id), `${id} 没有完整 Run 资格`).toBe(false);
+      expect(rewardChoiceIdsFor(withWeapon(id)), `${id} 装在车上也发不出奖励（空池）`).toEqual([]);
       expect(registry.functionals.get(id), `${id} 的定义**不许被删**（内容未完成 ≠ 物品不存在）`).toBeTruthy();
       expect(isOfficialPart(id), `${id} 仍在正式部件池里`).toBe(true);
     }

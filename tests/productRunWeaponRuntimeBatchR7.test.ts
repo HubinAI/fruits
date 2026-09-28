@@ -81,7 +81,7 @@ import {
   EMERGENCY_REPAIR_FRACTION,
   resolveRunBaseWeaponDefId,
 } from '../src/lab/portraitBattleLab/runModifiers';
-import { REWARD_CHOICE_IDS } from '../src/product/runReward';
+import { rewardChoiceIdsFor } from '../src/product/runReward';
 import {
   FULL_RUN_SUPPORTED_WEAPON_IDS,
   fullRunCompat,
@@ -809,8 +809,19 @@ describe('R6-BATCH｜D. Cannon 全链不退化', () => {
     }
   });
 
-  it('R7-09b 奖励池不变式仍在：`REWARD_CHOICE_IDS` ⊆ 登记表，且本 Queue 没动奖励池', () => {
-    expect(REWARD_CHOICE_IDS).toEqual(['cannon']);
-    for (const id of REWARD_CHOICE_IDS) expect(supportsFullRun(id)).toBe(true);
+  it('R7-09b 奖励池**逐件**随装备走，且必然 ⊆ 登记表（本 Queue 没动奖励池）', () => {
+    /*
+      ⚠️ PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1｜这个不变量被**加强**了：
+         池子不再是固定常量，而是由 draft 现算（`rewardChoiceIdsFor(draft)` = 本局的基准武器）
+         ⇒「奖励 ⊆ 登记表」不再是「人工维护的池子恰好是子集」，而是**结构性**成立
+         （`fullRunCompat.ok` 本身就要求 `supportsFullRun(baseWeaponDefId)`）。
+         默认车的读数**逐字未变**：仍然是 `['cannon']`（R2 的 Cannon 路径不退化）。
+    */
+    expect(rewardChoiceIdsFor(defaultPlayerDraft()), '默认车 = cannon 局（R2 路径不变）').toEqual(['cannon']);
+    for (const id of FULL_RUN_SUPPORTED_WEAPON_IDS) {
+      const pool = rewardChoiceIdsFor(equippedDraft(id));
+      expect(pool, `装备 ${id} 打完 ⇒ 发它自己`).toEqual([id]);
+      for (const got of pool) expect(supportsFullRun(got)).toBe(true);
+    }
   });
 });

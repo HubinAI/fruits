@@ -52,7 +52,7 @@ import {
   syncRunBattle,
   type RunPageState,
 } from '../src/lab/portraitBattleLab/runPageState';
-import { REWARD_CHOICE_IDS, buildAdventureHref, buildRewardChoicePayload } from '../src/product/runReward';
+import { buildAdventureHref, buildRewardChoicePayload, rewardChoiceIdsFor } from '../src/product/runReward';
 import { FUSE_STACK, GROWTH_STAR } from '../src/product/playerGrowth';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -151,7 +151,7 @@ function seedLegacyProfile(): LegacySeed {
 
 /** 产品侧真实产出的出发地址（不手写参数）。 */
 function searchOf(draft: BuildDraft): string {
-  const specs = REWARD_CHOICE_IDS.map((defId) => ({ defId, star: GROWTH_STAR, countBefore: 0 }));
+  const specs = rewardChoiceIdsFor(draft).map((defId) => ({ defId, star: GROWTH_STAR, countBefore: 0 }));
   return buildAdventureHref('run-legacy-0001', buildRewardChoicePayload('run-legacy-0001', specs, FUSE_STACK), draft).split(
     '?',
   )[1] as string;

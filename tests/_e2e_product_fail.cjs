@@ -566,8 +566,10 @@ async function main() {
     /*
       ⚠️ PRODUCT-LOOP-R2-A 的契约变更：成功侧不再是「一个 back」，而是 `choices` 载荷里
       **每条候选各自的**领奖地址。
-      ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：候选池收窄为 `REWARD_CHOICE_IDS
-      = ['cannon']` ⇒ 成功侧**只有一条**去处（只发玩家这一局真的用得上的东西）。
+      ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）：候选池收窄为**一件**
+      （R2 期是固定 `['cannon']`；PRODUCT-LOOP-R8 起 = **本局装备的主武器**，
+      本文件驱的是产品默认车 ⇒ 读数仍是 `['cannon']`）⇒ 成功侧**只有一条**去处
+      （只发玩家这一局真的用得上的东西）。
       这里断**字面 1** 而不是「≥ 1」：候选池再变动的第一天，本断言就必须响。
     */
     const choicesRaw = startQ.get(CHOICES_PARAM) ?? '';
