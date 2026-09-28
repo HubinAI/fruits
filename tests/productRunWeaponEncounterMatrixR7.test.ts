@@ -63,14 +63,35 @@
  *
  *   | 组 | 武器 | 实测事实 | 问题的性质 |
  *   |---|---|---|---|
- *   | ① 0 命中（**从未接触**） | `rammer` | `minGap = +7 > 0`，全程最近距离都没到 0 | **真·够不着**：控距（`near 240 / far 480`，后撤 2.6 px/step > 玩家推进 ~1.5）把它挡在接触之外 |
- *   | ② 0 命中（**接触过但没登记命中**） | `hammer` | `minGap = −23`（深度重叠）、接触残留含 `impact`，武器命中仍 0 | **不是够不着**：车体撞上了，锤子的**武器**命中没登记（机制不在本 Queue 展开） |
+ *   | ① 0 命中，且 L2 外显也未贴到 | `rammer` | `minGap = +7 > 0`，全程外显外框都没碰上 | **真·够不着**：控距（`near 240 / far 480`，后撤 2.6 px/step > 玩家推进 ~1.5）把它挡在接触之外 |
+ *   | ② 0 命中，但 L2 外显曾重叠 | `hammer` | `minGap = −23`（**外显外框在 X 上叠了 23px**）、接触残留含 `impact`，武器命中仍 0 | ⚠️ **已定性（见下）**：锤头**从未与敌车发生物理接触**；`−23` 是 **L2 度量假象**，那条 `impact` 是**玩家车体 × 敌方外伸炮管** |
  *   | ③ 有伤害但打不过 | `cannon`(1 命中/120) · `flamethrower`(66/528) · `laser`(4/640) · `machineGun`(47/940) · `shotgun`(20/600) | 都打出真实伤害，都被反杀 | **交换比**：够得着，打不赢（最接近的 `machineGun` 让对手剩 159.8） |
  *
  * ⇒ 回答「是不是所有 Weapon 都失败」：**是** —— 零 Build 单件下 **7/7 落败**。
  *   回答「还是只有某些配置无法处理控距」：**接触族 2 件（`rammer` / `hammer`）**在这一列拿不到
- *   任何伤害，但**两者机制不同**（一个从未接触、一个接触了却没登记命中）；其余 **5 件能打到**
- *   （有真实伤害），只是打不过。**三种不同的下一轮设计动作**。
+ *   任何伤害；其余 **5 件能打到**（有真实伤害），只是打不过。
+ *
+ * ⚠️⚠️ **本文件曾把 ② 组读成「接触了却没登记命中」—— 那是错的。** 更正来自
+ *   `PRODUCT-LOOP-P0-HAMMER-RANGED-TURRET-HIT-REGISTRATION`，口径如下：
+ *
+ *   `minGap` 由 `rt.gapWorld()` 给出 = `b.minX − a.maxX`，作用在 `vehicleWorldBox()` 上，
+ *   而那个盒子**含 `visual` 贴图外框**（`runBattleRuntime.ts:282-297` 明确 `accShape` + `accVisual`）。
+ *   ⇒ **贴图外框的 X 投影重叠 ≠ 物理接触。** 本文件因此**不再**用 `minGap` 作「是否接触」的判据，
+ *     只把它当**外显度量的观测值**（负值 = 外框在 X 上重叠）。
+ *
+ *   真实接触判据 = **引擎自身的 contact 事件流**（权威）。同参数实测（`hammer@frontMass`）：
+ *
+ *   | vs `RangedTurret`（真实出生几何） | 读数 |
+ *   |---|---|
+ *   | 车辆↔车辆接触（`begin`） | **1 条**：`s718 A/body ↔ B/part:front rel=1.33`（**玩家车体 × 敌方炮管**） |
+ *   | 锤头（`A/part:frontMass`）接触 | **0**（全程零接触；与敌各 collider 最近 SAT 间距 9.6px） |
+ *   | 武器命中 | **0**（`baseDamage=90` / `WEAPON_CONTACT_THRESHOLD=0.5` 两道闸门从未被触及） |
+ *
+ *   ⇒ ② 组的性质 = **锤头没碰到**（与 ① 同类），**不是**「碰到了却没登记」。命中链无缺陷：
+ *     hammer 对 `Chaser` / `ProtoRusher` 的 11 / 16 次锤头真实接触里，`rel ≥ 0.5` 的 **10 / 12** 次
+ *     全部按正式规则登记 `90`，未登记的那几次全部 `rel < 0.5`（按设计正确）。
+ *     ⇒ **这两件都不是命中登记缺陷，不得靠加范围 / 加伤害去「修」。**
+ *     完整取证（含受控几何下的验收）→ `tests/productHammerHitRegistrationP0.test.ts`（PH-01…PH-05）。
  */
 
 import { readFileSync } from 'node:fs';
@@ -162,7 +183,15 @@ interface Cell {
   readonly windowSurvived: boolean;
   /** 本场玩家**实际装出来的武器**（`挂点:defId`，证明归因夹具成立）。 */
   readonly slots: readonly string[];
-  /** 全程两车外廓间距的**最小值**（诊断「够不够得着」；负 = 曾重叠）。 */
+  /**
+   * 全程两车 `vehicleWorldBox()` 的 X 投影间距**最小值**。
+   *
+   * ⚠️ 这是 **L2 外显度量**，**不是**接触判据：
+   *    `vehicleWorldBox` **含 `visual` 贴图外框**（`runBattleRuntime.ts:282-297`），
+   *    所以「负值」= **贴图外框在 X 上重叠**，与「两个 collider 是否接触」是两件事。
+   *    要判「有没有真接触」必须读**引擎 contact 事件流** →
+   *    `tests/productHammerHitRegistrationP0.test.ts`（PH-01 起）。
+   */
   readonly minGap: number;
   /** 第 `WINDOW_FRAMES` 步时的间距（`null` = 没活到窗口）。 */
   readonly gapAtWindow: number | null;
@@ -522,13 +551,17 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
       expect(c.hpB, `${c.label}：对手基本满血`).toBeGreaterThan(c.hpBMax - 1);
     }
 
-    // ③ ⚠️ 但两件的**机制不同**（实测最近距离，这是本 Queue 最重要的分辨）：
-    //    `rammer`：`minGap = +7 > 0` ⇒ **全程从未接触**（控距真把它挡在接触之外）；
-    //    `hammer`：`minGap = −23 < 0` ⇒ **深度接触过**却仍 0 武器命中（不是够不着）。
+    // ③ ⚠️ 两件在 **L2 外显度量**上确实不同 —— 但**都**不是「命中了却没登记」：
+    //    `rammer`：`minGap = +7 > 0` ⇒ 外显外框全程没贴到（控距真把它挡在接触之外）；
+    //    `hammer`：`minGap = −23 < 0` ⇒ **只是外显外框在 X 上叠了 23px**（`vehicleWorldBox`
+    //              含 `visual` 贴图外框，见 `Cell.minGap` 文档）。真实读数是 **锤头零接触**，
+    //              那唯一一条 `impact` 是 `A/body ↔ B/part:front`（玩家车体撞敌方炮管）。
+    //    ⛔ 不许再把 `minGap < 0` 读成「深度接触」。定性取证 →
+    //       `tests/productHammerHitRegistrationP0.test.ts` PH-01（判据 = 引擎 contact 事件流）。
     const rammer = cell('rammer', 'RangedTurret');
     const hammer = cell('hammer', 'RangedTurret');
-    expect(rammer.minGap, 'rammer：全程最近距离仍 > 0（从未接触）').toBeGreaterThan(0);
-    expect(hammer.minGap, 'hammer：最近距离为负（曾深度重叠）').toBeLessThan(0);
+    expect(rammer.minGap, 'rammer：L2 外显外框全程未贴到').toBeGreaterThan(0);
+    expect(hammer.minGap, 'hammer：L2 外显外框曾重叠（≠ 物理接触，见 Cell.minGap）').toBeLessThan(0);
 
     // ④ 有伤害的 5 件（这一族的问题**不是**够不着，而是交换比）
     const landed = col.filter((c) => c.hits > 0);
