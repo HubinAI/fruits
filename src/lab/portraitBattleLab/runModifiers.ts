@@ -84,6 +84,55 @@
  *     `DamageEvent`（`combatEvents.ts:36`，含 `source`/`target`/`damageSource`/`behavior`/
  *     `relativeVelocity`）都是正式既有事件；`world.applyLinearImpulse` 亦是公开 API。
  *     因此**不需要**给正式 Movement / recoil 加任何 hook，也没有 PRP 特例进正式模块。
+ *
+ * ## PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT｜**通用基础成长**（非 cannon 基准武器）
+ *
+ * 背景（Q1 Capability Matrix 的实测结论）：R6 / R6-BATCH 之后，产品 Run 的 base weapon =
+ * 玩家实际装备的那件（放行 7 件），但**局内成长内容仍然全是 Cannon 专属** ——
+ * `RUN_MODIFIER_OVERLAY` 的字段名（`projectileRadius` / `burstRounds` / `cooldownMs` …）与
+ * `behavior`（`'cannon'`）都只对 Cannon 成立，`weaponOverlayMods()` 在 base ≠ cannon 时
+ * **整表不适用**。⇒ 装备 `hammer` 的玩家选完三选一，武器**一个数字都没变**
+ * （唯一真实收益是 `emergencyRepair` 的回耐久）。
+ *
+ * 本 Queue 按 Q1 的真实读数补**最小骨架**：两条只改**该武器自己的** `behaviorParams` 数值、
+ * **绝不动 `behavior`** 的通用成长：
+ *
+ *   | id | 词条 | 自然因果 | 写哪个字段 |
+ *   |---|---|---|---|
+ *   | `damageUp` | 伤害提升 | 命中更疼 | 该武器**自己的**顶层伤害键（键名含 `damage`） |
+ *   | `rateUp`   | 攻击加快 | 两次攻击之间的间隔变短 | 该武器**自己的**节奏键（见下） |
+ *
+ * ── 字段是**派生**的，不是第二张武器数值表（Q1 明文：矩阵必须从 canonical / behavior 派生）
+ *
+ *   - **伤害键** = `behaviorParams` 里「顶层 + 数值 + 键名含 `damage`」的**唯一**键
+ *     （与 `src/core/buildSnapshot.ts` 的 `isDamageKey` 同一规则）。实测 7 件**各恰一个**：
+ *     5 件 `projectileDamage`（`cannon` / `flamethrower` / `laser` / `machineGun` / `shotgun`）
+ *     + `hammer` / `rammer` 的 `baseDamage` ⇒ **7/7 真实共通**。
+ *   - **节奏键**（按 Q1 真源，逐件取自**它自己**的 canonical，不强行统一成一个字段名）：
+ *       ① canonical 真有 `cooldownMs` ⇒ 用它（5 件：`cannon` / `flamethrower` / `laser` /
+ *          `machineGun` / `shotgun`）；
+ *       ② 否则用该 behavior **自己的**「前摇 / 间隔步数」键 —— `rammer.restSteps`
+ *          （canonical 里就是 24）；
+ *       ③ `hammer` 的 `windupPauseSteps` **只在行为代码默认里**（canonical 的 `behaviorParams`
+ *          只有 `baseDamage`）⇒ 用 `HAMMER_WINDUP_PAUSE_BASE`，而它的值由 targeted 测试与
+ *          `HAMMER_DEFAULT_PARAMS.windupPauseSteps` **钉成同源**（第二处真源由机器守住）。
+ *     ⇒ 6/6 非 Cannon 武器都有**自己的**节奏键；`hammer` 走的不是「forced 统一」，而是它自己的键。
+ *
+ * ── Cannon 为什么一个字节都不动（Queue 明文：Cannon 保持原逻辑）
+ *
+ *   `weaponOverlayMods(build, 'cannon')` **显式排除**通用成长 id ⇒ Cannon 继续只用它那 5 项
+ *   冻结内容（`heavyShell` / `twinCannon` / `fastReload` / `kineticBurst` / `tripleLoad`），
+ *   池子仍是 `RUN_LAYER1_POOL` / `RUN_LAYER2_POOLS`；通用成长只对 **base ≠ cannon** 生效。
+ *   ⇒ 「新的共通成长与 Cannon 现有 Build 冲突时，Cannon 保持原逻辑」在**结构上**成立。
+ *
+ * ── 不新增的东西（Queue 禁止项逐条）
+ *
+ *   没有元素 / Combo / 暴击 / 穿透 / 分裂 / 弹射 / 额外 projectile；没有新 projectile；
+ *   没有特殊资格 / 隐藏状态 / 复杂触发条件 —— 两个成长各自只写**一个数值字段**，
+ *   且写的都是**该武器自己已经在读的**字段（行为侧的 `num(key, default)` 逐键读取）。
+ *
+ * ⚠️ 重映射仍然只经「本局 registry 的独立副本」这一条既有接缝（见上）：
+ *    正式 `content.ts` 的 7 件武器定义**逐字节不变**（targeted 测试逐字段对拍）。
  */
 
 import { createRegistry } from '../../core/content';
@@ -102,6 +151,24 @@ export type Layer1ModifierId = 'heavyShell' | 'twinCannon' | 'fastReload';
 export type Layer2ModifierId = 'kineticBurst' | 'tripleLoad' | 'emergencyRepair';
 
 export type RunModifierId = Layer1ModifierId | Layer2ModifierId;
+
+/**
+ * **通用基础成长**的 id（PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT）。
+ *
+ * ⚠️ 刻意**不并进** `RunModifierId`：Cannon 的 `RUN_MODIFIER_OVERLAY` / `RUN_ALL_MODIFIER_IDS` /
+ *    `RUN_MODIFIERS` / `RUN_LAYER2_POOLS` 都是**冻结内容**，把它们做成「多两个键」会改动
+ *    Cannon 侧的既有 id 闭集（会污染既有断言与池结构）。两者只共用**同一个** overlay 合成接缝
+ *    （`weaponOverlayMods` + `composeRunWeaponDef`），互不进入对方的池子。
+ */
+export type GenericGrowthId = 'damageUp' | 'rateUp';
+
+/**
+ * **本局 Build 的合法 id 全集** —— Cannon 的既有 6 项 + 通用基础成长 2 项。
+ *
+ * 状态机 / UI / 注入链一律按这个并集工作；「某一项对**这一局**适不适用」由
+ * `weaponOverlayMods(build, baseWeaponDefId)` 回答（唯一判据，不另立规则）。
+ */
+export type RunBuildId = RunModifierId | GenericGrowthId;
 
 /** 每个强化在池子里扮演的角色（用于测试断言「三选一 = 联动 + 通用 + 转向」）。 */
 export type RunModifierRole = 'base' | 'synergy' | 'safe' | 'pivot';
@@ -274,7 +341,7 @@ export function runLayer1PoolDefs(): readonly RunModifierDef[] {
  * `owned` 传当前本局 Build 的全部 id（不只一层）——这样即使将来 Build 里出现别的项，
  * 「已拥有的不重复出现」这条规则也不会被绕过。
  */
-export function runLateralPoolDefs(owned: readonly RunModifierId[]): readonly RunModifierDef[] {
+export function runLateralPoolDefs(owned: readonly RunBuildId[]): readonly RunModifierDef[] {
   return runLayer1PoolDefs().filter((m) => !owned.includes(m.id));
 }
 
@@ -434,8 +501,218 @@ export const KINETIC_BURST_GAIN = 28;
 /** **紧急维修**：选择时修回的耐久比例（相对上限；不超过上限）。 */
 export const EMERGENCY_REPAIR_FRACTION = 0.25;
 
+/* --------------------------------------------- 通用基础成长（非 cannon 基准武器） */
+
+/**
+ * 一条通用基础成长的定义。**只描述语义**，不含任何数值 —— 数值在运行时从
+ * **该武器自己的 canonical Def** 派生（见 `genericGrowthParamsOf`）。
+ */
+export interface RunGrowthDef {
+  readonly id: GenericGrowthId;
+  readonly label: string;
+  readonly note: string;
+  /** 选择后写入冒险日志的自然语言。 */
+  readonly logText: string;
+  /** 与 Cannon 的第一层强化同角色：只改武器数值的一级基础成长。 */
+  readonly role: 'base';
+  /** 它写的**字段角色**（damage / cadence）—— 供测试与文档引用，不参与运行时。 */
+  readonly paramRole: 'damage' | 'cadence';
+}
+
+/** 通用基础成长两项（Queue 明文：词条名称保持直白，不做包装型复杂命名）。 */
+export const RUN_GENERIC_GROWTH: readonly RunGrowthDef[] = [
+  {
+    id: 'damageUp',
+    label: '伤害提升',
+    note: '每次命中打得更重',
+    logText: '你把武器的打击部件换成了更狠的一档。',
+    role: 'base',
+    paramRole: 'damage',
+  },
+  {
+    id: 'rateUp',
+    label: '攻击加快',
+    note: '两次攻击之间的间隔变短',
+    logText: '你缩短了武器的攻击间隔。',
+    role: 'base',
+    paramRole: 'cadence',
+  },
+];
+
+export const RUN_GENERIC_GROWTH_IDS: readonly GenericGrowthId[] = RUN_GENERIC_GROWTH.map((g) => g.id);
+
+export function isGenericGrowth(id: string): id is GenericGrowthId {
+  return (RUN_GENERIC_GROWTH_IDS as readonly string[]).includes(id);
+}
+
+export function genericGrowthById(id: string): RunGrowthDef | undefined {
+  return RUN_GENERIC_GROWTH.find((g) => g.id === id);
+}
+
+/**
+ * **伤害提升**的倍率：`伤害键 × 1.25`（与星级同一条曲线形状 `1 + 0.25 × (n − 1)` 的 n=2 档，
+ * 但这里是 **Run-local 一次性**，不是永久星级 —— 两者互不写入对方）。
+ */
+export const GENERIC_GROWTH_DAMAGE_MULT = 1.25;
+
+/**
+ * **攻击加快**的倍率：`节奏键 × 0.75`（间隔缩短 ⇒ 单位时间攻击次数 ≈ ×1.33）。
+ * 与 `heavyShell` 的 `fastReload`（`cooldownMs 1000 → 650`，≈0.65×）同一量级、
+ * **略保守** —— 它是给 6 件武器共用的骨架值，不做逐武器调参。
+ */
+export const GENERIC_GROWTH_CADENCE_MULT = 0.75;
+
+/**
+ * `hammer` 的节奏键 `windupPauseSteps` 的**基准值**（= 行为代码默认）。
+ *
+ * ⚠️ 为什么不能在 canonical 里读：正式 `content.ts` 的 hammer **只声明了 `baseDamage`**，
+ *    它的挥击节奏参数（`windupPauseSteps` / `swingSpeedRadPerStep` …）**只存在于
+ *    `src/battle/hammerBehavior.ts` 的 `HAMMER_DEFAULT_PARAMS`**（Q1 矩阵已记录这一事实）。
+ *    `readHammerParams` 是 `num(key, DEFAULT)` 逐键读取 ⇒ 本局 overlay **写进去就生效**；
+ *    这里只需要「从哪个基准值往下缩」。
+ * ⚠️ 该值与 `HAMMER_DEFAULT_PARAMS.windupPauseSteps` **同源**这件事由 targeted 测试
+ *    （`productRunWeaponBasicBuildR7` 的 G-02b）**读行为真源逐值钉死** —— 不改 `src/battle/`。
+ */
+export const HAMMER_WINDUP_PAUSE_BASE = 20;
+
+/** 非零有限数（读 canonical 参数用）。 */
+function numOf(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * 该武器**自己的**伤害键：`behaviorParams` 里「顶层 + 数值 + 键名含 `damage`」的**唯一**键。
+ *
+ * ⚠️ 与 `src/core/buildSnapshot.ts` 的 `isDamageKey` 同一规则（顶层键名含 `damage`）。
+ * ⚠️ **恰一个**才返回；0 个或多个 ⇒ `null`（不猜）。
+ *    实测 7 件各恰一个（`projectileDamage` ×3 + `projectileDamage`(fire/laser/mg/sg) /
+ *    `baseDamage` ×2）；嵌套的 `saw.hitPolicy.damage` 不是顶层键 ⇒ 不参与（`saw` 本就被 BLOCK）。
+ */
+export function damageParamKeyOf(params: Readonly<Record<string, unknown>>): string | null {
+  const hits = Object.keys(params).filter((k) => /damage/i.test(k) && numOf(params[k]) !== null);
+  return hits.length === 1 ? hits[0]! : null;
+}
+
+export function weaponDamageParamKey(def: FunctionalPartDef): string | null {
+  return damageParamKeyOf((def.behaviorParams ?? {}) as Record<string, unknown>);
+}
+
+/**
+ * 该武器**自己的**节奏键与**基准值**（Q1 真源；见本文件头「节奏键」三条）。
+ *
+ * 判据顺序就是语义顺序：
+ *   ① canonical 有 `cooldownMs` ⇒ `{cooldownMs}`（两次攻击之间的真实冷却）；
+ *   ② 否则取该 behavior **自己的**接触 / 前摇间隔键（`restSteps`）；
+ *   ③ 该键**只在行为默认里**（`hammer.windupPauseSteps`）⇒ 用文档化基准
+ *      `HAMMER_WINDUP_PAUSE_BASE`。
+ * 都取不到 ⇒ `null`（**不强行统一**，该项对这件武器就不提供）。
+ */
+const CONTACT_CADENCE_KEYS: Readonly<Record<string, string>> = {
+  hammer: 'windupPauseSteps',
+  rammer: 'restSteps',
+};
+
+export function cadenceGrowthOf(
+  behavior: string,
+  params: Readonly<Record<string, unknown>>,
+): { readonly key: string; readonly base: number } | null {
+  const cooldown = numOf(params['cooldownMs']);
+  if (cooldown !== null) return { key: 'cooldownMs', base: cooldown };
+  const key = CONTACT_CADENCE_KEYS[behavior];
+  if (!key) return null;
+  const inContent = numOf(params[key]);
+  if (inContent !== null) return { key, base: inContent };
+  if (key === 'windupPauseSteps') return { key, base: HAMMER_WINDUP_PAUSE_BASE };
+  return null;
+}
+
+export function weaponCadenceGrowth(
+  def: FunctionalPartDef,
+): { readonly key: string; readonly base: number } | null {
+  return cadenceGrowthOf(def.behavior, (def.behaviorParams ?? {}) as Record<string, unknown>);
+}
+
+/**
+ * 把一批通用成长**依次**作用到当前参数上，返回**要合并进 `behaviorParams` 的字段**。
+ *
+ * ⚠️ 顺序敏感：每一步都从**上一步的结果**读当前值 ⇒ 同一项出现两次会**复合**
+ *    （`×1.25 → ×1.5625`），而不是每次都从 canonical 重算。本批的池子不开重复项，
+ *    但这条语义让「读当前值」成为结构性事实，而不是靠池子自觉。
+ * ⚠️ 只读/只写**该武器自己已经在读的键** ⇒ 不新增任何字段语义、不改 behavior。
+ */
+export function genericGrowthParamsOf(
+  behavior: string,
+  params: Readonly<Record<string, unknown>>,
+  ids: readonly GenericGrowthId[],
+): Record<string, number> {
+  let current: Record<string, unknown> = { ...params };
+  const out: Record<string, number> = {};
+  for (const id of ids) {
+    if (id === 'damageUp') {
+      const key = damageParamKeyOf(current);
+      const base = key ? numOf(current[key]) : null;
+      if (!key || base === null) continue;
+      const next = Math.round(base * GENERIC_GROWTH_DAMAGE_MULT);
+      out[key] = next;
+      current = { ...current, [key]: next };
+      continue;
+    }
+    const cadence = cadenceGrowthOf(behavior, current);
+    if (!cadence) continue;
+    const next = Math.max(1, Math.round(cadence.base * GENERIC_GROWTH_CADENCE_MULT));
+    out[cadence.key] = next;
+    current = { ...current, [cadence.key]: next };
+  }
+  return out;
+}
+
+/**
+ * 非 cannon 局的**通用候选池**（3 项，与 Cannon 第一层池同形状）。
+ *
+ * ⚠️ 第 3 项 `emergencyRepair` 是**复用**既有内容（`affectsWeapon: false`，对任何武器都成立）
+ *    —— 它把池子撑到 3 张，让「继续改装」分支走到第三次选择时**永不为空**
+ *    （非 Cannon 路径没有第二层专属内容，这是骨架期的结构性保底，不是新增品项）。
+ * ⚠️ 「某件武器适不适用某一项」不由本函数回答：`rateUp` 对取不到节奏键的武器是**空操作**
+ *    （`weaponOverlayMods` + `genericGrowthParamsOf` 都不写任何字段），本批实测 6/6 都有键。
+ */
+export const RUN_GENERIC_CHOICE_POOL: readonly RunBuildId[] = ['damageUp', 'rateUp', 'emergencyRepair'];
+
+/** 通用候选池的选项定义（剔除本局**已拥有**的项 —— 与 Cannon 三池同一去重纪律）。 */
+export function runGenericChoiceDefs(
+  owned: readonly RunBuildId[],
+): readonly { id: RunBuildId; label: string; note: string }[] {
+  const out: { id: RunBuildId; label: string; note: string }[] = [];
+  for (const id of RUN_GENERIC_CHOICE_POOL) {
+    if (owned.includes(id)) continue;
+    const growth = isGenericGrowth(id) ? genericGrowthById(id) : undefined;
+    const mod = growth ? undefined : runModifierById(id);
+    const def = growth ?? mod;
+    if (!def) continue;
+    out.push({ id: def.id as RunBuildId, label: def.label, note: def.note });
+  }
+  return out;
+}
+
+/** 本局 Build 的某一项（Cannon 强化 **或** 通用成长；`chooseRunBuff` 的统一解析入口）。 */
+export interface RunBuildOption {
+  readonly id: RunBuildId;
+  readonly label: string;
+  readonly note: string;
+  /** 选择后写入冒险日志的自然语言。 */
+  readonly logText: string;
+}
+
+export function runBuildOptionById(id: string): RunBuildOption | undefined {
+  const growth = genericGrowthById(id);
+  if (growth) {
+    return { id: growth.id, label: growth.label, note: growth.note, logText: growth.logText };
+  }
+  const mod = runModifierById(id);
+  return mod ? { id: mod.id, label: mod.label, note: mod.note, logText: mod.logText } : undefined;
+}
+
 /** 本局 Build 是否包含某一项（运行时按能力分派）。 */
-export function buildHas(build: readonly RunModifierId[], id: RunModifierId): boolean {
+export function buildHas(build: readonly RunBuildId[], id: RunBuildId): boolean {
   return build.includes(id);
 }
 
@@ -443,8 +720,8 @@ export function buildHas(build: readonly RunModifierId[], id: RunModifierId): bo
 
 /** 把「单个 id / id 数组 / null」统一成数组（兼容旧调用点）。 */
 export function normalizeBuild(
-  build: RunModifierId | readonly RunModifierId[] | null | undefined,
-): readonly RunModifierId[] {
+  build: RunBuildId | readonly RunBuildId[] | null | undefined,
+): readonly RunBuildId[] {
   if (build == null) return [];
   return typeof build === 'string' ? [build] : [...build];
 }
@@ -481,32 +758,46 @@ export function resolveRunBaseWeaponDefId(
 /**
  * Build 里**真正改武器数值**、且**对本局基准武器适用**的那些项（按选择顺序 → 后选的覆盖先选的）。
  *
- * ⚠️ PRODUCT-LOOP-R6（必改 2）：overlay 数值表全是 Cannon 自己的 `behavior` 与字段名，
- *    因此**只有基准武器就是 Cannon 时它们才适用**。基准武器是别的武器时返回 `[]` ——
- *    该武器用它自己的 canonical Def 打，既不改 damage base、也不套 Cannon 的 behavior /
- *    projectile / reload / recoil。这是**不适用**，不是「回退成 Cannon」（必改 E）。
+ * ⚠️ PRODUCT-LOOP-R6（必改 2）：Cannon 的 overlay 数值表全是 Cannon 自己的 `behavior`
+ *    与字段名，因此**只有基准武器就是 Cannon 时它们才适用**。基准武器是别的武器时
+ *    **不套** Cannon 的 behavior / projectile / reload / recoil（必改 E：不适用 ≠ 回退成 Cannon）。
+ *
+ * ⚠️ PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT：本函数现在是**两条互斥支路**：
+ *
+ *   - `baseWeaponDefId === 'cannon'` ⇒ **Cannon 冻结内容**（`heavyShell` / `twinCannon` /
+ *     `fastReload` / `tripleLoad`），**显式排除**通用成长 ⇒ Cannon 一个字节都不动；
+ *   - 否则（非 Cannon 基准武器 / `null`）⇒ **只放行通用成长**（`damageUp` / `rateUp`），
+ *     Cannon 的那 5 项一律不适用。
+ *
+ *   `null`（车上没有武器）也走第二支 —— 它本来就不该存在（资格层会拒绝创建 Run），
+ *   走到这里也只是拿到「对该武器自己的字段生效」的项，不会有任何 Cannon 特例泄漏。
  *
  * ⚠️ 默认参数 `RUN_BASE_WEAPON_DEF_ID` ⇒ 只传 `build` 的旧调用点**逐字节不变**。
  */
 export function weaponOverlayMods(
-  build: readonly RunModifierId[],
+  build: readonly RunBuildId[],
   baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
-): readonly RunModifierId[] {
-  if (baseWeaponDefId !== RUN_BASE_WEAPON_DEF_ID) return [];
-  return build.filter((m) => RUN_MODIFIER_OVERLAY[m]?.affectsWeapon === true);
+): readonly RunBuildId[] {
+  if (!baseWeaponDefId) return [];
+  if (baseWeaponDefId === RUN_BASE_WEAPON_DEF_ID) {
+    return build.filter(
+      (m) => !isGenericGrowth(m) && RUN_MODIFIER_OVERLAY[m]?.affectsWeapon === true,
+    );
+  }
+  return build.filter((m) => isGenericGrowth(m));
 }
 
 /** 本局专用部件 id（带前缀 → 不会撞上任何正式 defId）。单项时与旧口径 `run.mod.<id>` 一致。 */
-export function runOverlayDefId(mod: RunModifierId): string {
+export function runOverlayDefId(mod: RunBuildId): string {
   return `run.mod.${mod}`;
 }
 
 /**
  * 本局 Build 对应的 overlay 部件 id（**确定性**：由改武器的项按顺序拼接）。
- * 没有任何改武器的项 → `null`（本局武器就是正式 Cannon，无需重映射）。
+ * 没有任何改武器的项 → `null`（本局武器就是它自己的正式 Def，无需重映射）。
  */
 export function runBuildDefId(
-  build: readonly RunModifierId[],
+  build: readonly RunBuildId[],
   baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): string | null {
   const mods = weaponOverlayMods(build, baseWeaponDefId);
@@ -529,7 +820,7 @@ export function runBuildDefId(
  * ⇒ 各条路径的 id 互不冲突（基线那段用 `@base` 标记，它不是任何 `RunModifierId`）。
  */
 export function runPlayerWeaponDefId(
-  build: readonly RunModifierId[],
+  build: readonly RunBuildId[],
   playerBaseline: boolean,
   baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): string | null {
@@ -541,18 +832,31 @@ export function runPlayerWeaponDefId(
 }
 
 /**
- * 以正式 Cannon 为基准派生本局变体：把改武器的项按顺序**浅合并** `behaviorParams`
- * （未声明字段一律保留正式值 → 例如三连装填只是把 `burstRounds` 从 2 抬到 3，
- *   伤害 / 半径 / 质量 / 弹速 / 冷却全部沿用）。
+ * 以本局**基准武器自己的 canonical Def** 为基准派生本局变体：把改武器的项按顺序
+ * **浅合并** `behaviorParams`（未声明字段一律保留正式值 → 例如三连装填只是把
+ * `burstRounds` 从 2 抬到 3，伤害 / 半径 / 质量 / 弹速 / 冷却全部沿用）。
+ *
+ * ⚠️ PRODUCT-LOOP-R7：`weaponOverlayMods` 现在会返回两类项，合成方式**刻意不同**：
+ *
+ *   - **Cannon 冻结项**（`heavyShell` … `tripleLoad`）⇒ 沿用旧逻辑：`behavior` 与
+ *     `behaviorParams` 都取 overlay 表（表里 `behavior` 恒为 `'cannon'` = base 自己的
+ *     ⇒ 对 Cannon 而言与改前**逐字段相同**）；
+ *   - **通用成长**（`damageUp` / `rateUp`）⇒ **只合并数值**，`behavior` 保持 `base.behavior`
+ *     —— 这是「hammer 选了成长仍然是 hammer」这条验收的**结构性**保证：本支路里根本没有
+ *     任何代码可以改写 `behavior`。
  */
 export function composeRunWeaponDef(
   base: FunctionalPartDef,
-  build: readonly RunModifierId[],
+  build: readonly RunBuildId[],
   baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): FunctionalPartDef {
   let behavior = base.behavior;
   let params: Record<string, unknown> = { ...(base.behaviorParams ?? {}) };
   for (const m of weaponOverlayMods(build, baseWeaponDefId)) {
+    if (isGenericGrowth(m)) {
+      params = { ...params, ...genericGrowthParamsOf(behavior, params, [m]) };
+      continue;
+    }
     const o = RUN_MODIFIER_OVERLAY[m];
     behavior = o.behavior;
     params = { ...params, ...o.behaviorParams };
@@ -571,7 +875,7 @@ export function composeRunWeaponDef(
  */
 export function composePlayerRunWeaponDef(
   base: FunctionalPartDef,
-  build: readonly RunModifierId[],
+  build: readonly RunBuildId[],
   playerBaseline: boolean,
   baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): FunctionalPartDef {
@@ -607,13 +911,16 @@ export function composePlayerRunWeaponDef(
  * - 默认值 ⇒ **改前逐字节相同**（既有 Lab / Validation / RDC / 全部旧测试调用点）；
  * - 传入**玩家实际装备**的武器（`resolveRunBaseWeaponDefId`）⇒ overlay 以**该武器自己的
  *   canonical Def** 为 base 派生：装备 hammer ⇒ base 就是正式 hammer，不再「先拿 cannon 再套壳」；
- * - 装备不是 Cannon 时：武器项 overlay 一项都不适用、玩家基线不适用 ⇒ `runPlayerWeaponDefId`
- *   返回 `null` ⇒ **直接返回正式副本**（玩家用它自己的 canonical Def 打）；
+ * - 装备不是 Cannon 时：Cannon 的武器项 overlay 一项都不适用、玩家基线不适用；
+ *   ⚠️ **但通用成长（`damageUp` / `rateUp`）适用**（PRODUCT-LOOP-R7）⇒ 选了它就会注册一件
+ *   以**该武器自己**为 base 派生、`behavior` 不变的本局部件；
+ *   一个通用成长都没选 ⇒ `runPlayerWeaponDefId` 返回 `null` ⇒ **直接返回正式副本**
+ *   （玩家用它自己的 canonical Def 打）；
  * - `baseWeaponDefId = null`（车上没有武器）⇒ 同上去掉基线，返回正式副本；
  *   资格层在此之前就会拒绝创建 Run（不在这里静默替换成某件武器）。
  */
 export function createRunRegistry(
-  build: RunModifierId | readonly RunModifierId[] | null | undefined,
+  build: RunBuildId | readonly RunBuildId[] | null | undefined,
   playerBaseline = false,
   baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): ContentRegistry {
@@ -690,10 +997,14 @@ export function snapshotHasRunBaseWeapon(
  *    ⇒ 必改 C：装备非 Cannon 的**合法装载**（车上有武器）不再因为「Snapshot 没有 cannon」throw；
  *      必改 E：base 只会是装配里真实存在的武器，**任何路径都不会静默换成 cannon**。
  *    强 invariant 保留在它真正该在的地方：**有适用项要注入、却找不到 base 件**才 throw。
+ *
+ * ⚠️ PRODUCT-LOOP-R7：非 Cannon 局现在**也可能**真的有适用项（通用成长）⇒ 本函数会正常
+ *    重映射那件武器自己的 `defId`。`throw` 判据一字未改（仍按 `weaponOverlayMods(...).length`），
+ *    因此「选了通用成长但车上那件武器不见了」照样响亮报错，不静默跳过。
  */
 export function applyRunModifiersToSnapshot(
   snapshot: BuildSnapshot,
-  build: RunModifierId | readonly RunModifierId[] | null | undefined,
+  build: RunBuildId | readonly RunBuildId[] | null | undefined,
   playerBaseline = false,
   baseWeaponDefId: string | null = RUN_BASE_WEAPON_DEF_ID,
 ): BuildSnapshot {

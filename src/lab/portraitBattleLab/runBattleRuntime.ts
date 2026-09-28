@@ -90,7 +90,7 @@ import {
   createRunRegistry,
   normalizeBuild,
   resolveRunBaseWeaponDefId,
-  type RunModifierId,
+  type RunBuildId,
 } from './runModifiers';
 /*
   PRODUCT-LOOP-R2-C｜两个 **core** 只读口径（本目录白名单已含 `../../core/buildSnapshot`）：
@@ -315,10 +315,15 @@ export interface RunBattleHp {
  */
 export interface RunBattleOptions {
   readonly soloA?: boolean;
-  /** PRP-BUILD-01：本局完整 Build（按选择顺序，最多两层）。 */
-  readonly build?: readonly RunModifierId[];
+  /**
+   * PRP-BUILD-01：本局完整 Build（按选择顺序，最多两层）。
+   *
+   * ⚠️ PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT：类型拓宽为 `RunBuildId`（Cannon 强化
+   *    ∪ 通用基础成长）—— 非 Cannon 基准武器现在也有真实可注入的内容，不再是空操作。
+   */
+  readonly build?: readonly RunBuildId[];
   /** 单强化口径（等价于 `build: [modifier]`）。 */
-  readonly modifier?: RunModifierId | null;
+  readonly modifier?: RunBuildId | null;
   readonly carriedHp?: number | null;
   /**
    * PRP-RUN-02：本场使用的**正式 Encounter**（`testData.LAB_ENCOUNTERS` 的 id；
@@ -370,7 +375,7 @@ export class RunBattleRuntime {
   /** 本局**专用** registry（正式副本 + 可选的 Build overlay 部件；不污染正式单例）。 */
   readonly registry: ContentRegistry;
   /** 本场战斗生效的本局 Build（有序；空数组 = 基础状态）。 */
-  readonly build: readonly RunModifierId[];
+  readonly build: readonly RunBuildId[];
   /**
    * 本场是否启用**玩家侧基线伤害**（见 `RunBattleOptions.playerBaseline`）。
    * 开 ⇒ 玩家那门炮的基线是 `PRODUCT_RUN_CANNON_BASE_DAMAGE`；关 ⇒ 正式 80。
@@ -542,10 +547,11 @@ export class RunBattleRuntime {
   readonly initialPlayerHp: number;
 
   /**
-   * 第一层强化（= `build[0]`；单强化口径的兼容访问器，供逐项独立验证断言使用）。
+   * 第一项强化（= `build[0]`；单强化口径的兼容访问器，供逐项独立验证断言使用）。
    * 完整 Build 请读 `this.build`。
+   * ⚠️ PRODUCT-LOOP-R7：类型拓宽为 `RunBuildId`（非 Cannon 局的第一项可能是通用成长）。
    */
-  get modifier(): RunModifierId | null {
+  get modifier(): RunBuildId | null {
     return this.build[0] ?? null;
   }
 

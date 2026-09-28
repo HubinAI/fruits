@@ -64,7 +64,7 @@
  */
 
 import type { BattleEvent } from '../../battle/combatEvents';
-import { KINETIC_BURST_GAIN, buildHas, type RunModifierId } from './runModifiers';
+import { KINETIC_BURST_GAIN, buildHas, type RunBuildId } from './runModifiers';
 
 /** 队伍 id（正式 `TeamId` 的 PRP 投影；与 Arena 无关）。 */
 export type RunTeamId = 'A' | 'B';
@@ -157,7 +157,7 @@ export class RunBuildAbilities {
   private hasFireDir = false;
   private readonly pending: PendingImpulse[] = [];
 
-  constructor(ports: RunAbilityPorts, build: readonly RunModifierId[]) {
+  constructor(ports: RunAbilityPorts, build: readonly RunBuildId[]) {
     this.ports = ports;
     this.hasKinetic = buildHas(build, 'kineticBurst');
     this.projectileMass = ports.projectileMass();

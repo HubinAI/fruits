@@ -48,6 +48,8 @@ import {
   finishRunBattle,
   pressRunAction,
   resolveDurability,
+  runChoicePool,
+  runChoicePoolFamily,
   type RunChoiceOption,
   type RunPageContext,
   type RunPageState,
@@ -186,6 +188,18 @@ const PRIOR_RUN_DAMAGE: readonly number[] = [181, 221, 257];
  *    `d5-choice2` 两个 CHOICE 节点 ⇒ 这里保持 **2 项**。
  *    （「继续改装」分支会多经过 `d4-lateral`，需要第 3 项 —— 本脚手架刻意不走那条路。）
  *    任一项若不在当时那个节点的候选池里，快进会**停下报错**而不是静默换成别的。
+ *
+ * ⚠️ PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT：候选池**按本局基准武器分成两族**
+ *    （Cannon 三池 / 非 Cannon 的通用基础成长池，见 `runChoicePoolFamily`）——
+ *    上面这张 Cannon 路线表在**非 Cannon 局里一项都不在池中**，快进会当场停住
+ *    （实测：`EL-22` 用 `laser` 上下文时停在 `CHOICE`，拿不到 `COMPLETE`）。
+ *    ⇒ 处置：**本脚手架只为自己拥有的那一族命名** ——
+ *      · Cannon 族继续走上面这条声明路线（逐字节不变）；
+ *      · 通用成长族**不由本文件命名任何 id**（它是一个**平铺的 3 项池**，没有「层级路线」
+ *        语义，也不该在这里发明一条），而是按池**自己的声明顺序**取首项。
+ *    两条支路都保留「取不到就 `break`」，**依然没有静默替换**。
+ *    ⚠️ 刻意不在这里写死通用 id：本文件有一条源码守卫（`NR-03`）禁止出现未注册的强化 id
+ *       字面量，且「通用池有哪些项」的真源只有 `runModifiers.RUN_GENERIC_CHOICE_POOL` 一处。
  */
 const PRIOR_RUN_CHOICES: readonly RunModifierId[] = ['heavyShell', 'kineticBurst'];
 
@@ -249,7 +263,12 @@ export function buildPriorCompletedRun(ctx: RunPageContext): RunPageState {
     }
 
     if (s.phase === 'CHOICE') {
-      const pick = PRIOR_RUN_CHOICES[s.buffs.length];
+      // ⚠️ PRODUCT-LOOP-R7：两族各有自己的「取哪个」规则（见 `PRIOR_RUN_CHOICES` 的注释）——
+      //    Cannon 族 = 本脚手架声明的路线；通用成长族 = 池自己的声明顺序取首项。
+      const pick =
+        runChoicePoolFamily(s) === 'generic'
+          ? runChoicePool(s)[0]?.id
+          : PRIOR_RUN_CHOICES[s.buffs.length];
       if (!pick) break;
       const picked = chooseRunBuff(s, pick, ctx);
       if (picked === s) break; // 该去向不在当前候选池 → 停止（不静默换一个）

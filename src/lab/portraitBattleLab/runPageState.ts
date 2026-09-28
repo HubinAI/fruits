@@ -80,15 +80,17 @@
 
 import {
   EMERGENCY_REPAIR_FRACTION,
+  RUN_BASE_WEAPON_DEF_ID,
   RUN_MODIFIERS,
   isLayer1Modifier,
+  runBuildOptionById,
+  runGenericChoiceDefs,
   runLayer1PoolDefs,
   runLayer2PoolDefs,
   runLateralPoolDefs,
-  runModifierById,
   type Layer1ModifierId,
+  type RunBuildId,
   type RunModifierDef,
-  type RunModifierId,
 } from './runModifiers';
 import {
   RUN_DURABILITY_EVENT,
@@ -146,7 +148,7 @@ export const RUN_LOG_MAX = 240;
 
 /**
  * 一张浮层卡片（本局强化 或 耐久事件选项）——两者共用同一套「图标 / 名称 / 一句结果」绘制。
- * `id` 是字符串：强化用 `RunModifierId`，耐久事件用 `repair` / `upgrade`。
+ * `id` 是字符串：强化用 `RunModifierId` 或通用基础的 `GenericGrowthId`，耐久事件用 `repair` / `upgrade`。
  */
 export interface RunOverlayOption {
   readonly id: string;
@@ -156,7 +158,7 @@ export interface RunOverlayOption {
 
 /** 一个强化选项（不随机、不进任何正式强化池）。 */
 export interface RunChoiceOption extends RunOverlayOption {
-  readonly id: RunModifierId;
+  readonly id: RunBuildId;
 }
 
 /** 第一层三选一（固定演示选项）。 */
@@ -167,7 +169,7 @@ export const RUN_CHOICE_OPTIONS: readonly RunChoiceOption[] = RUN_MODIFIERS.map(
 }));
 
 /** 把 `runModifiers` 的池定义转成状态机 / UI 用的选项数组。 */
-function toOptions(defs: readonly { id: RunModifierId; label: string; note: string }[]): RunChoiceOption[] {
+function toOptions(defs: readonly { id: RunBuildId; label: string; note: string }[]): RunChoiceOption[] {
   return defs.map((m) => ({ id: m.id, label: m.label, note: m.note }));
 }
 
@@ -190,6 +192,18 @@ export interface RunPageContext {
   readonly playerHpMax: number;
   /** 每个 BATTLE / FINAL 节点的敌情（节点 id → 展示名 / 真实 HP 上限）。 */
   readonly encounters: Readonly<Record<string, RunEncounterInfo>>;
+  /**
+   * 本局 Run 的**基准武器** defId（= 玩家实际装载里装配顺序第一件正式武器）。
+   *
+   * ⚠️ PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT：它决定**候选池给哪一套内容** ——
+   *    `'cannon'` ⇒ Cannon 的既有三池（冻结）；其它武器 ⇒ **通用基础成长池**。
+   *    在它出现之前，状态机不知道玩家装的是什么，于是非 Cannon 局只能拿到对武器
+   *    **完全空操作**的 Cannon 强化（真人可见的形态 = 选了强化但武器一个数字都没变）。
+   *
+   * ⚠️ **可选**且缺省 = `'cannon'`：既有全部调用点（Lab 研发入口 / 各测试夹具）**逐字节不变**；
+   *    产品真实路径由宿主显式传入（`runPageScene.runPageContext` ← `runLoadoutCompatOfDraft`）。
+   */
+  readonly baseWeaponDefId?: string | null;
 }
 
 /**
@@ -233,6 +247,14 @@ export interface RunPageState {
    * 也是「第一层选择决定第二层池」与「下一场战斗注入什么」的**唯一来源**。
    */
   readonly buffs: readonly RunChoiceOption[];
+  /**
+   * 本局**基准武器** defId（只读镜像自 `RunPageContext`；`createRunPageState` 时冻结）。
+   *
+   * ⚠️ PRODUCT-LOOP-R7：`runChoicePool` 用它决定「给 Cannon 的三池 还是 通用成长池」——
+   *    状态机因此不需要在任何地方再问一次「玩家装的是什么」。
+   *    `null` = 车上没有武器（正常流程不可达：资格层会拒绝创建 Run）。
+   */
+  readonly baseWeaponDefId: string | null;
   /**
    * 本局累计的**额外耐久**（紧急维修 + 耐久事件「维修」）。
    *
@@ -357,6 +379,7 @@ export function createRunPageState(ctx: RunPageContext): RunPageState {
     day: first.day,
     dayTotal: RUN_TOTAL_DAYS,
     buffs: [],
+    baseWeaponDefId: ctx.baseWeaponDefId ?? RUN_BASE_WEAPON_DEF_ID,
     repairBonus: 0,
     battlesCompleted: 0,
     log: pushLogs([], entries),
@@ -444,7 +467,7 @@ export function runOverlayOpen(s: RunPageState): boolean {
 }
 
 /** 本局 Build 的 id 序列（有序 = 选择顺序）。 */
-export function runBuildIds(s: RunPageState): readonly RunModifierId[] {
+export function runBuildIds(s: RunPageState): readonly RunBuildId[] {
   return s.buffs.map((b) => b.id);
 }
 
@@ -453,6 +476,7 @@ export function runBuildIds(s: RunPageState): readonly RunModifierId[] {
  *
  * ⚠️ PRP-RUN-02-R2：第二层的条件池**恒由它决定**，与中途多拿了多少项横向改装无关
  *    （Queue 必改 2「DAY5 的条件池仍由最初主路线决定」）。
+ * ⚠️ 通用成长不是一层强化 ⇒ 非 Cannon 局恒为 `null`（它的第二层池不看主路线，见下）。
  */
 export function runMainRouteId(s: RunPageState): Layer1ModifierId | null {
   for (const b of s.buffs) if (isLayer1Modifier(b.id)) return b.id;
@@ -462,9 +486,19 @@ export function runMainRouteId(s: RunPageState): Layer1ModifierId | null {
 /** 剔除本局**已拥有**的强化 —— 验收 4「无重复 Modifier」的结构性保证（不是运行期补救）。 */
 function dedupeOwned(
   defs: readonly RunModifierDef[],
-  owned: readonly RunModifierId[],
+  owned: readonly RunBuildId[],
 ): readonly RunModifierDef[] {
   return defs.filter((d) => !owned.includes(d.id));
+}
+
+/**
+ * 本局走的是**哪一套候选池**：`'cannon'` = Cannon 的既有三池；否则 = 通用基础成长池。
+ *
+ * ⚠️ 判据只有一个：`s.baseWeaponDefId`（= `RunPageContext.baseWeaponDefId`，缺省 `'cannon'`）。
+ *    刻意不做「按 buffs 内容猜」这类推断 —— 池内容必须由**本局基准武器**决定，不能靠已选内容反推。
+ */
+export function runChoicePoolFamily(s: RunPageState): 'cannon' | 'generic' {
+  return s.baseWeaponDefId === RUN_BASE_WEAPON_DEF_ID ? 'cannon' : 'generic';
 }
 
 /**
@@ -480,6 +514,13 @@ function dedupeOwned(
  * ⚠️ 三种池统一剔除已拥有的项 ⇒ 「继续改装」先拿了 `fastReload` 时，
  *    第二层池里的 `fastReload` 会自动消失，结构上不可能拿到重复项。
  *
+ * ⚠️ PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT：**基准武器不是 Cannon 时**，三个节点统一给
+ *    **通用基础成长池**（`damageUp` / `rateUp` + 复用既有通用项 `emergencyRepair`）——
+ *    因为 Cannon 的三池（字段名与 `behavior` 都是 Cannon 自己的）对别的武器**整表不适用**，
+ *    照原样发给玩家 = 「选了强化但武器一个数字都没变」。通用池同样**逐节点剔除已拥有项**，
+ *    且因为它是 3 项固定集，**任何节点都不可能为空**（最紧的一支 = 「继续改装」分支的
+ *    `d5-choice2`，此前已选 2 项 ⇒ 恰剩 1 项）。
+ *
  * ⚠️ 这是**结构规则**（当前节点「该给什么」），不是「屏幕上现在有什么」——
  *    后者读 `runOverlayCards`（它只在本节点真的处于 CHOICE 时才取用本函数）。
  */
@@ -487,6 +528,7 @@ export function runChoicePool(s: RunPageState): readonly RunChoiceOption[] {
   const kind = runChoicePoolKind(s);
   if (!kind) return [];
   const owned = runBuildIds(s);
+  if (runChoicePoolFamily(s) === 'generic') return toOptions(runGenericChoiceDefs(owned));
   if (kind === 'layer1') return toOptions(dedupeOwned(runLayer1PoolDefs(), owned));
   if (kind === 'lateral') return toOptions(runLateralPoolDefs(owned));
   const main = runMainRouteId(s);
@@ -742,8 +784,12 @@ export function durabilityPercent(b: RunBattleState): number {
  * 在 CHOICE 浮层里选中一个强化：
  *   - 记录到**本局 Build** `buffs`（下一场战斗会真正注入；顶部出现对应图标）；
  *   - 浮层关闭 → **按脚本推进到下一个节点**（节拍叙事随之写入记录；DAY 可能前进）；
- *   - 日志追加「你为大炮装上了 XXX。」；
+ *   - 日志追加该选项自己的 `logText`（Cannon 强化说「大炮」，通用成长说武器 —— 文案在数据里）；
  *   - 紧急维修额外累计耐久补偿（不改写上一场的真实战斗记录）。
+ *
+ * ⚠️ 选项定义走 `runBuildOptionById`（**Cannon 强化 ∪ 通用成长**的统一解析入口）——
+ *    它保证「能出现在池里的 id」与「能落地成 buff 的 id」是同一闭集，不会出现
+ *    「画得出来但选了没反应」。
  *
  * 准入（结构性约束，不靠运行期扫描）：
  *   1) 必须是 CHOICE；2) 选择次数 < `RUN_MAX_CHOICES`；3) 选项必须在**当前候选池**里。
@@ -757,7 +803,7 @@ export function chooseRunBuff(s: RunPageState, optionId: string, ctx: RunPageCon
   if (!runChoiceOpen(s)) return s;
   if (s.buffs.length >= RUN_MAX_CHOICES) return s;
   if (!runChoicePoolHas(s, optionId)) return s;
-  const mod = runModifierById(optionId);
+  const mod = runBuildOptionById(optionId);
   if (!mod) return s;
 
   const opt: RunChoiceOption = { id: mod.id, label: mod.label, note: mod.note };

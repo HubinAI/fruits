@@ -262,6 +262,9 @@ const COLORS = {
   iconKinetic: '#8e44c0',
   iconTriple: '#2f8fc4',
   iconRepair: '#4fc4a8',
+  /* ---- PRODUCT-LOOP-R7：通用基础成长（非 Cannon 基准武器）图标底色 ---- */
+  iconDamageUp: '#9c2f2f',
+  iconRateUp: '#1f7f8f',
   /* ---- PRP-BUILD-01-R1：动能爆发命中冲击环（不入账 — 有透明度、非平涂矩形） ---- */
   /**
    * 冲击环描边色。刻意选**亮紫**：与 `kineticBurst` 图标色同色族，玩家能把
@@ -305,6 +308,8 @@ const CHOICE_MASK_COLOR = 'rgba(6,9,14,0.86)';
  *
  * ⚠️ PRP-RUN-02：再新增耐久事件的两项（`repair` / `upgrade`）→ 共 **8 色**，
  *    同样满足两两互斥 + 与入账色互斥。浏览器端维护同一张互斥表。
+ * ⚠️ PRODUCT-LOOP-R7：再新增通用基础成长的两项（`damageUp` / `rateUp`）→ 共 **10 色**，
+ *    同纪律（红 / 青，与前 8 色及全部入账色 RGB 精确互斥）。
  */
 const CHOICE_ICON_COLOR: Readonly<Record<string, string>> = {
   heavyShell: '#ffb066',
@@ -315,6 +320,8 @@ const CHOICE_ICON_COLOR: Readonly<Record<string, string>> = {
   emergencyRepair: '#5fd0c0',
   repair: '#e07a9a',
   upgrade: '#a8b45c',
+  damageUp: '#ef5350',
+  rateUp: '#57d1e0',
 };
 
 /** 顶部已获得图标的底色（按选项区分；芯片色统一 → `buffChip` 层可冻结）。 */
@@ -325,6 +332,8 @@ const BUFF_ICON_COLOR: Readonly<Record<string, string>> = {
   kineticBurst: COLORS.iconKinetic,
   tripleLoad: COLORS.iconTriple,
   emergencyRepair: COLORS.iconRepair,
+  damageUp: COLORS.iconDamageUp,
+  rateUp: COLORS.iconRateUp,
 };
 
 export interface RunPageScreenProbe {
@@ -2304,6 +2313,8 @@ export class RunPage {
    *   emergencyRepair = 修理十字
    *   repair          = 扳手（耐久事件：维修）
    *   upgrade         = 齿轮（耐久事件：继续改装）
+   *   damageUp        = 三根递增竖条 + 基座（PRODUCT-LOOP-R7：通用基础成长「伤害提升」）
+   *   rateUp          = 快进双三角 + 前沿短条（PRODUCT-LOOP-R7：通用基础成长「攻击加快」）
    */
   private drawChoiceIcon(ctx: CanvasRenderingContext2D, id: string, r: RunRect): void {
     const cx = r.x + r.w / 2;
@@ -2401,6 +2412,26 @@ export class RunPage {
         ctx.fillRect(-s * 0.07, -s * 0.07, s * 0.14, s * 0.14);
         ctx.restore();
       }
+    } else if (id === 'damageUp') {
+      // 伤害提升（通用基础成长）：三根**递增高度**的竖条 + 等宽基座（「更狠的一档」）
+      const bw = s * 0.2;
+      const baseY = cy + s * 0.4;
+      for (let i = 0; i < 3; i++) {
+        const h = s * (0.26 + i * 0.2);
+        ctx.fillRect(cx - s * 0.33 + i * (bw + s * 0.08), baseY - h, bw, h);
+      }
+      ctx.fillRect(cx - s * 0.4, baseY, s * 0.8, s * 0.1);
+    } else if (id === 'rateUp') {
+      // 攻击加快（通用基础成长）：快进双三角 + 前沿短条（「两次攻击之间更短」）
+      for (const dx of [-s * 0.38, -s * 0.06]) {
+        ctx.beginPath();
+        ctx.moveTo(cx + dx, cy - s * 0.32);
+        ctx.lineTo(cx + dx + s * 0.3, cy);
+        ctx.lineTo(cx + dx, cy + s * 0.32);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.fillRect(cx + s * 0.3, cy - s * 0.32, s * 0.12, s * 0.64);
     } else {
       // 快速装填：环形循环箭头（装填节奏变快）
       ctx.lineWidth = Math.max(2, s * 0.11);

@@ -249,6 +249,11 @@ export function runPageContext(loadout: RunPlayerLoadout = demoRunPlayerLoadout(
     vehicleLabel: loadout.label,
     playerHpMax: player.hp,
     encounters,
+    // ⚠️ PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT：把**本局基准武器**交给状态机，
+    //    它据此决定候选池给哪一套内容（Cannon 三池 vs 通用基础成长池）。
+    //    判据与运行时强化注入、与 Run 创建资格**同一个函数**（`runLoadoutCompatOfDraft`
+    //    → `resolveRunBaseWeaponDefId`）⇒ 三处不可能漂移：装备 hammer 就是 'hammer'。
+    baseWeaponDefId: runLoadoutCompatOfDraft(loadout.draft).baseWeaponDefId,
   };
 }
 
