@@ -1392,3 +1392,92 @@ R7 之前的快进用一张写死的 Cannon 路线表（`PRIOR_RUN_CHOICES = ['h
 `npm run build` **EXIT=0**。冻结 8 目录（`src/{core,battle,physics,render,player,platform,game,presentation,ui}`）
 `git diff --stat` **全空**；`src/core/content.ts` / `src/battle/contactRouter.ts` **逐字节一致**；
 `src/product/` **零 diff**。改动面 = `src/lab/portraitBattleLab/` **7 文件** + `tests/` **1 新建**。
+
+## §20 Weapon × Encounter 确定性矩阵（PRODUCT-LOOP-R7-WEAPON-ENCOUNTER-MATRIX，2026-09-28 固化；改 `tests/productRunWeaponEncounterMatrixR7.test.ts` 或任何战斗数值前必读）
+
+**交付性质**：**test-only**（`2a5021a`，base `4f2bbf9`）。零产品改动 —— 冻结 8 目录 `git diff --stat`
+全空、`content.ts` / `contactRouter.ts` 逐字节一致、`src/product/` 零 diff。**未改任何战斗参数**。
+
+### 20a 它回答什么 / 与 `Q3-07` 的分工
+- `Q3-07`（`productRunEncounterSequenceQ3`）= **三段链**终局（混入**跨段耐久累积**）。
+- §20 = **单场隔离**矩阵：`onlyDraft`（车上只这一件）+ 满耐久 + 零 Build + `playerBaseline:true`。
+  ⇒ 回答「这件武器**单独**面对这个 Encounter 是什么结果」。**两张表不能互相代入。**
+- **零 Build** 是刻意的：R7 通用成长（`damageUp`/`rateUp`）由 GR 组单独钉，两者**故意分开**。
+
+### 20b 取证口径（改前必读）
+- 固定窗口 = **前 600 步 = 10 s = `DEFAULT_ARENA_CONFIG.phases.activeMs` / `FRAME_MS`**
+  （**锚在既有常量上**；`MX-01` 钉 `WINDOW_FRAMES === 600`）。窗口外命中**不**计入窗口值。
+- 上限 `MAX_FRAMES = 4000`；⚠️ 竞技场 Active 10 s + Warning 3 s + Closing 5 s ⇒ **约 1080 步必进 `End`**
+  ⇒「无限拖延」**结构上不可能**。`BattleResult.winner` 恒 `'A'|'B'`（**无 draw/null**），
+  进 `End` 强制比 HP（`endReason='arenaEnd'`）。⇒ 「无解」的可观测形态 = **`hits === 0`**。
+- 窗口读数在**第 `WINDOW_FRAMES` 步那一帧**取（summary 只给累计 + 首发时刻，无逐发时间戳）；
+  战斗在窗口前终结 ⇒ `windowSurvived=false` 且**窗口值 = 全场值**（如实披露，不是漏测）。
+- **`gapWorld()` / `playerProjectileCount()` 每帧调用已验证为纯读**（`getRenderSnapshot` 无副作用）：
+  逐帧读间距**不改变**任何物理结果（21 格读数与不读时逐字节一致）。
+
+### 20c 冻结矩阵（21 格，改任何数值都会在 `MX-06` 炸出来）
+`[terminal, winner, endReason, hits, damage, firstHitStep(-1=无), windowDamage, hpA, hpB]`：
+
+| 格 | 值 |
+|---|---|
+| `cannon|ProtoRusher` | `T A hp 9 1080 129 960 859.2 0` |
+| `cannon|Chaser` | `T A hp 8 960 132 960 189.9 0` |
+| `cannon|RangedTurret` | `T B hp 1 120 606 0 0 980` |
+| `flamethrower|ProtoRusher` | `T A hp 125 1000 110 1000 919.6 0` |
+| `flamethrower|Chaser` | `T A hp 113 904 114 904 552.4 0` |
+| `flamethrower|RangedTurret` | `T B hp 66 528 171 456 0 572` |
+| `hammer|ProtoRusher` | `T A hp 12 1080 152 450 414.2 0` |
+| `hammer|Chaser` | `T A hp 10 900 187 720 5.5 0` |
+| `hammer|RangedTurret` | `T B hp 0 0 -1 0 0 1099.9` |
+| `laser|ProtoRusher` | `T B hp 5 800 94 480 0 199.3` |
+| `laser|Chaser` | `T B hp 4 640 94 480 0 247.7` |
+| `laser|RangedTurret` | `T B hp 4 640 97 480 0 460` |
+| `machineGun|ProtoRusher` | `T A hp 50 1000 42 840 979.5 0` |
+| `machineGun|Chaser` | `T A hp 45 900 43 840 278.3 0` |
+| `machineGun|RangedTurret` | `T B hp 47 940 48 840 0 159.8` |
+| `rammer|ProtoRusher` | `T B hp 11 770 139 420 0 170.6` |
+| `rammer|Chaser` | `T A hp 13 910 140 560 0 0`（**双方归零 ⇒ tiebreak 判 A**） |
+| `rammer|RangedTurret` | `T B hp 0 0 -1 0 0 1100` |
+| `shotgun|ProtoRusher` | `T A hp 38 1140 95 990 499.3 0` |
+| `shotgun|Chaser` | `T A hp 31 930 96 930 280.7 0` |
+| `shotgun|RangedTurret` | `T B hp 20 600 175 330 0 500` |
+
+附加行（**非**矩阵，`MX-10`）：产品默认车 `ProtoRusher` `T A hp 9 1080 131 960 679.1 0` ·
+`Chaser` `T A hp 9 930 134 930 735 0` · `RangedTurret` `T B hp 2 240 609 0 0 859.9`；
+逐来源部件 = `{ cannon: { count: 2, damage: 240 } }`（`top` 槽那件**零贡献**）。
+
+### 20d ⚠️⚠️ `RangedTurret` 的结论（本 Queue 的核心产出）
+- **7/7 单件全部落败**（零 Build），但**分成三组，病灶不同**：
+  1. **真·够不着**：`rammer` —— `minGap = +7 > 0`，**全程从未接触**。
+  2. **接触过但未登记武器命中**：`hammer` —— `minGap = −23`（深度重叠）、残留含 `impact`、武器命中 0。
+  3. **够得着但打不过**：`cannon`/`flamethrower`/`laser`/`machineGun`/`shotgun`（最接近 `machineGun`：敌剩 159.8）。
+- ⚠️ **不要用 `finalGap` 单独判「够不够得着」**：`hammer` 的 `finalGap = −23` 却 0 命中，
+  `rammer` 的 `finalGap = +61`。⇒ 判据必须是 **`minGap`（全程最小间距）**，不是终态间距。
+- 控距确在生效：7/7 在第 600 步（Active 末）`gapAtWindow > 0`。
+- `cannon` 唯一那次命中在窗口**之外**（步 606 > 600）⇒ 它的「窗口内 0 伤害」是如实的。
+- **`RangedTurret` 保持现状**（未替换 / 未削弱 / 未改数值）。
+
+### 20e 机器守卫与**本轮踩到的坑**
+- 本文件 12 条：`MX-01` 常量与形状 + 全终态 · `MX-02` 单场隔离 + 正式默认世界 · `MX-03` 归因夹具
+  （+ 逐部件来源 ≤1 且必须是它自己）· `MX-04` 行为归属 · `MX-05` 有效伤害 + 首发双口径互校 ·
+  `MX-06` **21 格冻结矩阵** · `MX-07` 人类形状矩阵 · `MX-08` `RangedTurret` 三组分辨 ·
+  `MX-09` 窗口语义自洽 · `MX-10` 附加行 + 逐部件明细 · `MX-11` canonical 冻结 · `MX-12` import 闭集守卫。
+- ⚠️ **`onlyDraft` 的 TS1117**：`WEAPON_SLOT === 'frontMass'`（字面量类型）⇒ 对象字面量里
+  `frontMass:` 与 `[WEAPON_SLOT]:` 同时出现 = 重复键。修法 = 形参写 `slot: string = WEAPON_SLOT`。
+- ⚠️ **源码守卫的「自指陷阱」第 3 次踩到**（REF §2 已预警两处）：`MX-12` 的禁用词表
+  `['.hp = ', 'applyLinearImpulse', …]` **自己就会被 `src.includes(token)` 匹配到**（守卫永远红）。
+  修法 = **拼接构造**：`'.' + 'hp = '` / `'apply' + 'LinearImpulse'`。**任何「本文件不得出现 X」
+  的守卫都必须这样写**，不能把 X 原样写进断言里。
+- ⚠️ **哨兵值不能与合法取值撞车**：`gapAtWindow` 初值原写 `-1`，但间距**合法值可以是负数**
+  （重叠时 −23）⇒ 改用 `null`。
+- ⚠️ **`vitest --reporter=basic` 在 vitest 4 不存在**（会被当模块名去 load ⇒ `ERR_LOAD_URL`、
+  EXIT=1 但**没有**测试失败）。要「只看结论」用默认 reporter + `sed 's/\x1b\[[0-9;]*m//g'` 去 ANSI。
+- ⚠️ **期望值不要「抄相邻行」**：`MX-10` 的默认车 vs `RangedTurret` 我第一版直接抄了「只装 cannon」
+  那一行（1 命中 / 120），实测是 **2 命中 / 240**。⇒ 任何期望值必须**来自实测**，
+  抄写看似等价的隔壁单元格会伪装成「物理变了」。
+
+### 20f 门禁（2026-09-28 实测）
+起点 `4f2bbf9`。`tsc --noEmit` **EXIT=0**；全量 vitest（`--pool=vmForks --maxWorkers=1`）
+**239 files / 2675 tests 全绿 EXIT=0**（R7 通用成长期 238/2663 ⇒ +1 file / +12 tests）；
+本文件单独两遍均 12/12（仅耗时不同）；21 格逐字段**逐字节可复现**。
+四路 SHA：HEAD = 本地 ref = `ls-remote` = `FETCH_HEAD` = `2a5021a65b4244632178662219bb6923f8d2eb3b`。

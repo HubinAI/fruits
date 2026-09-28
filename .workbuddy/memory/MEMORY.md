@@ -5,7 +5,7 @@
 | 要找什么 | 去哪 |
 |---|---|
 | 本轮做了什么、实测数字 | `.workbuddy/memory/YYYY-MM-DD.md`（最新 `2026-09-28.md`） |
-| **改动前必读**：守卫 / 环境陷阱 / **§1–§19 契约全文** / **未决项台账 §A** | `.workbuddy/memory/REF_GUARDS_TRAPS_CONTRACTS.md` |
+| **改动前必读**：守卫 / 环境陷阱 / **§1–§20 契约全文** / **未决项台账 §A** | `.workbuddy/memory/REF_GUARDS_TRAPS_CONTRACTS.md` |
 | PRP 运行时细节（战斗参数 / 相机 / 接缝 / 入口 / file:line） | `.workbuddy/memory/REF_PRP_RUNTIME.md` §A–M |
 | **跨窗口续接（先读）** / 各 Queue 交付说明 / 已知未修清单 | `交接文档_<日期>_<Queue>.md`（**本地件，不入库**） |
 | 更早完整版（最高权威） | `.workbuddy/memory/archive/` |
@@ -13,10 +13,19 @@
 ## 0. 现状 / 下一步（**新窗口先读这段**）
 R2(A/B/C)、R2-RECOVERY、SETTLEMENT-CTA-LATENCY、SINGLE-CTA+音频、R2-RESEED、R4、R3、R5、Q5、
 R6（武器真源 / Runtime 批次）、Q3 三段 Encounter 序列、BATCH-GATE 均已收口；
-**最新一轮 = `PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT`（2026-09-28 · 7 件武器的通用基础成长
-`damageUp` / `rateUp`）**，口径与数字 → REF §19。
+**最新一轮 = `PRODUCT-LOOP-R7-WEAPON-ENCOUNTER-MATRIX`（2026-09-28 · **test-only**：
+7 Weapon × 3 Encounter = 21 格确定性矩阵，零产品改动）**，口径与数字 → REF §20；
+上一轮 `PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT`（通用基础成长 `damageUp` / `rateUp`）→ REF §19。
 
-- ⚠️⚠️ **R7 的核心结论（新窗口最容易误判的一条）**：7 件 Full Run Weapon 之间**真的共通的成长维度
+- ⚠️⚠️ **R7-ENCOUNTER-MATRIX 的核心结论（新窗口最容易误判的一条）**：`RangedTurret` 列
+  **7/7 单件全部落败**，但**不是同一个病灶** —— ① 真·「无法处理控距（够不着）」**只有 `rammer`**
+  （`minGap = +7 > 0`，全程从未接触）；② `hammer` **深度接触过**（`minGap = −23`）却 0 武器命中；
+  ③ 其余 5 件**能打到**（有真实伤害）只是打不过（`machineGun` 最接近：敌剩 159.8）。
+  ⚠️ 判「够不够得着」**必须用 `minGap`**，`finalGap` 会骗人（`hammer` 终态 −23 却 0 命中）。
+  **`RangedTurret` 保持现状**（未替换 / 未削弱 / 未改数值）。全文 → REF §20d。
+- ⚠️ **R7-ENCOUNTER-MATRIX 的口径与 `Q3-07` 不同**：本矩阵 = **单场隔离**（`onlyDraft` / 满耐久 /
+  **零 Build**）；`Q3-07` = **三段链**（混入跨段耐久累积）。**两表不能互相代入** → REF §20a。
+- ⚠️⚠️ **R7-BASIC-BUILD 的核心结论**：7 件 Full Run Weapon 之间**真的共通的成长维度
   只有「伤害」**；「攻击节奏键」**不是同一个字段**（5 件 `cooldownMs` / `rammer.restSteps` /
   `hammer.windupPauseSteps`，最后一个只在行为默认里）⇒ 通用成长按**该武器自己的键**落地，
   **不强行统一成同一字段名**。全文 → REF §19a / §19b。
@@ -47,8 +56,11 @@ R6（武器真源 / Runtime 批次）、Q3 三段 Encounter 序列、BATCH-GATE 
   (b) 由此浏览器端完整玩家闭环无证据（loop 20 + reward 42 + star-power 14 + reseed 5 条 BLOCKED）
   (c) 旧 C9 偶发红随降级变 `BLOCKED`（不再观测）。
 - **明确未做**（别再ask）：Garage 观感 / 奖励动画 / 内容量 / Buff 平衡 / 挂点几何 /
-  为武器补**非 Cannon 的**正式 Run Build 内容（局内成长内容仍是 Cannon 专属 ⇒ 非 cannon 拿不到伤害
-  成长，见 REF §18e；`saw` 的挂点 / 几何缺口**不动**，见 §18b）。
+  **逐武器差异化 / 第二层专属内容 / 更多成长方向**（R7 只建了**最小骨架**：7 件共通
+  `damageUp` / `rateUp`，见 REF §19 —— §18e 的「非 cannon 拿不到伤害成长」**已被 §19 取代**）；
+  `saw` 的挂点 / 几何缺口**不动**，见 §18b。
+  ⚠️ **R7-MATRIX 只取证、不设计**：`RangedTurret` 的三组病灶（见 §0 顶部）**待下一轮裁决**，
+  本 Queue **未**做任何平衡调整。
   **均未归档**：LightSwarm 真人结论 / 各轮录屏回执；1vN 宿主 = DEBUG `arenaA.ts:814`。
 
 ## 1. Identity / 链尾
@@ -62,7 +74,8 @@ R6（武器真源 / Runtime 批次）、Q3 三段 Encounter 序列、BATCH-GATE 
   R5 `5baff53` → `a06f2a4` / `cf16cb9` / `99a094c`（chore(memory)） → Q5 `9dcbf7b` →
   `1b92670`（chore(memory) Q5） → R6-RUN-WEAPON-SOURCE-OF-TRUTH `fb6c922` →
   R6-RUNTIME-COMPLETE-WEAPON-BATCH `ef601b0` → **Q3 `341f2fb`** → `e38cb01` / `cd4fc5e`（chore(memory)）
-  → **R7-WEAPON-BASIC-BUILD-CONTENT `f6d046d`**；更早查 `git log`。
+  → **R7-WEAPON-BASIC-BUILD-CONTENT `f6d046d`** → **R7-WEAPON-ENCOUNTER-MATRIX `2a5021a`
+  （test-only）**；更早查 `git log`。
 - ⚠️ `src/{physics,render,player,platform,ui,game,presentation,lab}` diff 自 R2-B 起**有意打破**
   （Q3 改了 `src/lab/portraitBattleLab/runScript.ts`）；`src/core` 只许 R2-B（`partInventory.ts` /
   `buildPersistence.ts`）+ R2-C（`buildSnapshot.ts` 星级**唯一真源** + `types.ts`）两处必改，
@@ -143,9 +156,10 @@ R6（武器真源 / Runtime 批次）、Q3 三段 Encounter 序列、BATCH-GATE 
 **§17 三段 Encounter Sequence + 「如实降级」口径（含 `BLOCKED` 写法与门控陷阱）** ·
 **§18 Full Run Weapon 能力登记表（当前真源：放行 7 / BLOCK 2）+ R6-BATCH + BATCH-GATE 门禁** ·
 **§19 通用基础成长（R7：`damageUp` / `rateUp` + 池族 + 防行为污染 + `NR-03` 陷阱）** ·
+**§20 Weapon × Encounter 21 格确定性矩阵（R7：单场隔离口径 + `RangedTurret` 三组病灶 + `minGap` 判据）** ·
 §A 未决项台账。
 `REF_PRP_RUNTIME.md` §A 战斗参数 · §B 相机 · §C 接缝 / 第一层冻结值 · §D RUN-R1 · §E BUILD-01 ·
 §F / §J / §K RUN-02 · §G M2 种子 · §H M3 遭遇台 · §I Hub · §L M2-R1 终点态出口 · §M PBL-RDC。
-各轮交付细节**只在同名交接文档**（§5 `R1-D` … §14 `R2-RESEED-R1`，§15 `R5`，§19 `R7`）。
+各轮交付细节**只在同名交接文档**（§5 `R1-D` … §14 `R2-RESEED-R1`，§15 `R5`，§19 `R7`，§20 `R7-MATRIX`）。
 启动：`npm run dev`（默认**产品首页**；研发 `dev:home` / `dev:next-run` / `dev:encounter-lab` /
 `dev:validation`）。
