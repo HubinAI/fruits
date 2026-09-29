@@ -135,7 +135,7 @@
  *    正式 `content.ts` 的 7 件武器定义**逐字节不变**（targeted 测试逐字段对拍）。
  */
 
-import { createRegistry } from '../../core/content';
+import { createRegistry, registry } from '../../core/content';
 import type { BuildSnapshot, ContentRegistry, FunctionalPartDef } from '../../core/types';
 
 /* ------------------------------------------------------------- 标识 */
@@ -667,22 +667,79 @@ export function genericGrowthParamsOf(
 }
 
 /**
- * 非 cannon 局的**通用候选池**（3 项，与 Cannon 第一层池同形状）。
+ * 非 cannon 局的**通用候选池的超集**（3 项，与 Cannon 第一层池同形状）。
  *
- * ⚠️ 第 3 项 `emergencyRepair` 是**复用**既有内容（`affectsWeapon: false`，对任何武器都成立）
- *    —— 它把池子撑到 3 张，让「继续改装」分支走到第三次选择时**永不为空**
- *    （非 Cannon 路径没有第二层专属内容，这是骨架期的结构性保底，不是新增品项）。
- * ⚠️ 「某件武器适不适用某一项」不由本函数回答：`rateUp` 对取不到节奏键的武器是**空操作**
- *    （`weaponOverlayMods` + `genericGrowthParamsOf` 都不写任何字段），本批实测 6/6 都有键。
+ * ⚠️ PRODUCT-LOOP-R9-BUILD-CHOICE-CONTENT-SANITY：本常量现在是**超集**，不是「本局真正
+ *    会出现的池」—— 真正的池 = `genericGrowthPoolFor(基准武器)`，它在这三项上**逐项过能力
+ *    矩阵**（见 `genericGrowthApplies`）。本常量保留为「这些项**可能**出现的全集」，
+ *    有两条结构性用途：① 池成员永远是这个集合的子集（不新增词条，Queue 明令）；
+ *    ② 测试可以断言「过滤只做减法，不做加法」。
+ *
+ * ⚠️ 第 3 项 `emergencyRepair` 是**复用**既有内容（`affectsWeapon: false` —— 它修的是玩家
+ *    车体耐久，与武器无关）⇒ 它对**任何**武器都成立，是池的**地板**：过滤永远不可能把池清空
+ *    （玩家不可能卡在 CHOICE）。
  */
 export const RUN_GENERIC_CHOICE_POOL: readonly RunBuildId[] = ['damageUp', 'rateUp', 'emergencyRepair'];
 
-/** 通用候选池的选项定义（剔除本局**已拥有**的项 —— 与 Cannon 三池同一去重纪律）。 */
+/**
+ * **真实 Capability Matrix** 的单格判据：这一项通用成长落到**这件武器**上，
+ * 是否真的会改变它自己的数值（= 是不是一个有效选择）。
+ *
+ * 判据**不是**「有没有这个字段」，也不是第二张「武器 × 词条」表，而是把**运行时同一段派生**
+ * （`genericGrowthParamsOf` —— `composeRunWeaponDef` 用的就是它）在**这件武器的 canonical Def**
+ * 上跑一遍，然后逐字段比对：
+ *
+ *   - 派生结果为空 ⇒ 该武器没有这个维度（例如取不到节奏键）；
+ *   - 派生结果与基准值**逐字段相同** ⇒ 选了也一个数字都不会变（例如倍率取整后撞回原值）。
+ *
+ * 两种情形都 ⇒ `false` ⇒ 该项**不该出现在这件武器的候选池里**。
+ * ⇒ 「池里画得出来的项」与「选了真的会改数字的项」是**同一个集合**，不靠人工核对。
+ */
+export function genericGrowthApplies(def: FunctionalPartDef, id: GenericGrowthId): boolean {
+  const params = (def.behaviorParams ?? {}) as Record<string, unknown>;
+  const delta = genericGrowthParamsOf(def.behavior, params, [id]);
+  return Object.entries(delta).some(([key, next]) => params[key] !== next);
+}
+
+/**
+ * **池的纯函数本体**：给一件武器的 canonical Def，返回它**真正可用**的通用候选池。
+ *
+ * ⚠️ 抽出来是为了让「池 = 矩阵过滤结果」这条**成为可被机器打的单一事实**：
+ *    `genericGrowthPoolFor` 只是「查 registry 拿到 def」+ 调本函数；
+ *    测试因此可以用**人造退化 Def** 直接打这一层（真实 7 件今天都到不了那些格子）。
+ *    若哪天有人把过滤「放宽」成无条件返回超集，退化用例会立刻红。
+ */
+export function genericGrowthPoolForDef(def: FunctionalPartDef | undefined): readonly RunBuildId[] {
+  return RUN_GENERIC_CHOICE_POOL.filter((id) =>
+    isGenericGrowth(id) ? def !== undefined && genericGrowthApplies(def, id) : true,
+  );
+}
+
+/**
+ * 本局基准武器**真正可用**的通用候选池（= 能力矩阵过滤后的结果，`RUN_GENERIC_CHOICE_POOL` 的子集）。
+ *
+ * - `damageUp` / `rateUp` 逐项过 `genericGrowthApplies`（用**该武器自己的 canonical Def**）；
+ * - `emergencyRepair` **恒在**（与武器无关；它是池的地板，保证**永不为空**）；
+ * - ⚠️ **基准武器解析不出来**（`null` / 未登记的 id）⇒ 两项武器侧成长**一律不给**：
+ *     无法证明它对这件武器有效，就不提供（而不是靠 UI 统一强行给）。正常产品路径不可达
+ *     —— 资格层在此之前就会拒绝创建 Run（`runCompatibility` / `runLoadoutCompat`）。
+ */
+export function genericGrowthPoolFor(baseWeaponDefId: string | null): readonly RunBuildId[] {
+  return genericGrowthPoolForDef(baseWeaponDefId ? registry.functionals.get(baseWeaponDefId) : undefined);
+}
+
+/**
+ * 通用候选池的选项定义（能力矩阵过滤 + 剔除本局**已拥有**的项 —— 与 Cannon 三池同一去重纪律）。
+ *
+ * ⚠️ `baseWeaponDefId` **必传**（无缺省值）：池的内容由「哪件武器」决定，给缺省值等于让
+ *    调用点悄悄拿一个不成立的池。唯一生产调用点是 `runPageState.runChoicePool`。
+ */
 export function runGenericChoiceDefs(
   owned: readonly RunBuildId[],
+  baseWeaponDefId: string | null,
 ): readonly { id: RunBuildId; label: string; note: string }[] {
   const out: { id: RunBuildId; label: string; note: string }[] = [];
-  for (const id of RUN_GENERIC_CHOICE_POOL) {
+  for (const id of genericGrowthPoolFor(baseWeaponDefId)) {
     if (owned.includes(id)) continue;
     const growth = isGenericGrowth(id) ? genericGrowthById(id) : undefined;
     const mod = growth ? undefined : runModifierById(id);

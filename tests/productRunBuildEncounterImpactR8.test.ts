@@ -202,7 +202,10 @@ function stateFor(weaponDefId: string) {
  */
 function offeredBy(weaponDefId: string, id: RunBuildId): boolean {
   if (runChoicePoolFamily(stateFor(weaponDefId)) !== 'generic') return false;
-  return runGenericChoiceDefs([]).some((d) => d.id === id);
+  // ⚠️ PRODUCT-LOOP-R9：`baseWeaponDefId` 现在是**必传**（池内容由基准武器决定）。
+  //    这里补上它，本函数的语义反而更准了：判据从「通用池有没有这项」变成
+  //    「**这件武器**的通用池有没有这项」——与 `runChoicePool()` 逐字同源。
+  return runGenericChoiceDefs([], weaponDefId).some((d) => d.id === id);
 }
 
 /** **效果面**：这一项落到该武器上**会不会真的改数字**。 */

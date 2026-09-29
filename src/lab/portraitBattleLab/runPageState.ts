@@ -520,6 +520,13 @@ export function runChoicePoolFamily(s: RunPageState): 'cannon' | 'generic' {
  *    照原样发给玩家 = 「选了强化但武器一个数字都没变」。通用池同样**逐节点剔除已拥有项**，
  *    且因为它是 3 项固定集、本局只有 2 次选择 ⇒ **两次都拿得到选项、任何节点都不可能为空**。
  *
+ * ⚠️ PRODUCT-LOOP-R9-BUILD-CHOICE-CONTENT-SANITY：通用池在**发给玩家之前**还要过一遍
+ *    **真实能力矩阵**（`genericGrowthPoolFor(基准武器)`，见 `runModifiers.ts`）：
+ *    逐项用**这件武器自己的 canonical Def** 跑一遍运行时同一段派生，只有「选了真的会改数字」
+ *    的项才会出现。⇒ 池里画得出来的项 = 选得动的项，**不靠 UI 统一强行给**。
+ *    过滤是**纯减法**（成员恒为 `RUN_GENERIC_CHOICE_POOL` 子集），且 `emergencyRepair`
+ *    与武器无关、**恒在** ⇒ 池的地板非空，过滤不可能把节点清空（玩家不可能卡在 CHOICE）。
+ *
  * ⚠️ 这是**结构规则**（当前节点「该给什么」），不是「屏幕上现在有什么」——
  *    后者读 `runOverlayCards`（它只在本节点真的处于 CHOICE 时才取用本函数）。
  */
@@ -527,7 +534,9 @@ export function runChoicePool(s: RunPageState): readonly RunChoiceOption[] {
   const kind = runChoicePoolKind(s);
   if (!kind) return [];
   const owned = runBuildIds(s);
-  if (runChoicePoolFamily(s) === 'generic') return toOptions(runGenericChoiceDefs(owned));
+  if (runChoicePoolFamily(s) === 'generic') {
+    return toOptions(runGenericChoiceDefs(owned, s.baseWeaponDefId));
+  }
   if (kind === 'layer1') return toOptions(dedupeOwned(runLayer1PoolDefs(), owned));
   if (kind === 'lateral') return toOptions(runLateralPoolDefs(owned));
   const main = runMainRouteId(s);
