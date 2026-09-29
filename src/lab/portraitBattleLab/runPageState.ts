@@ -11,21 +11,25 @@
  *
  * 本文件不再自己数「第几场 / 第几选」，而是读 `runScript.ts` 的**节点序列**：
  *
- *     d1-start(EVENT) → d2-battle1(BATTLE) → d2-choice1(CHOICE) → d3-battle2(BATTLE)
- *       → d4-durability(DURABILITY) ─┬─ repair  → d5-tend(EVENT · DAY5 焊车) ───┐
- *                                    └─ upgrade → d4-lateral(CHOICE · DAY4 横向) ┴→ d5-choice2(CHOICE · DAY5)
- *                                      → d7-final(FINAL · 第 3 段)
- *                                      → RUN COMPLETE / RUN FAILED
+ *     d1-start(EVENT) → d2-battle1(BATTLE · 遭遇 1) → d2-choice1(CHOICE · layer1)
+ *       → d3-battle2(BATTLE · 遭遇 2) → d3-choice2(CHOICE · layer2)
+ *       → d4-final(FINAL · 遭遇 3)
+ *       → RUN COMPLETE / RUN FAILED
  *
- *   ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：Run Script 从**四场**收成**三段问题序列**
- *      ⇒ `d6-battle3` 已删除，第 3 段就是终局 `d7-final`（`kind: 'FINAL'`）；
- *      终局打完直接进 COMPLETE，**没有 RESULT 相位**（见 `finishRunBattle` 的 ② 分支）。
+ *   ⚠️ PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：脚本是**严格三段节奏**
+ *      （遭遇 1 → Build Choice → 遭遇 2 → Build Choice → 遭遇 3），
+ *      且**是线性链**（没有任何节点有多个前驱 / `branch`）。
+ *      遭遇 3 = 终局 `d4-final`（`kind: 'FINAL'`）；终局打完直接进 COMPLETE，
+ *      **没有 RESULT 相位**（见 `finishRunBattle` 的 ② 分支）。
  *
- *   ⚠️ PRP-RUN-02-R2：`d4-lateral`（继续改装分支的横向改装）与 `d5-tend`（维修分支的当日叙事）
- *      是**两条分支各自的中间节点**，两条分支仍然汇合在同一个 `d5-choice2`。
+ *   ⚠️ PRODUCT-LOOP-R9：`DURABILITY` 相位与耐久浮层是**保留的能力**（不是当前路径）——
+ *      R9 之前的那条分支链（`d4-durability` / `d4-lateral` / `d5-tend` / `d5-choice2` /
+ *      `d6-travel`）已整体退役，脚本数据里不再有 DURABILITY 节点 ⇒ `phaseForNode` 就**不会**
+ *      产出这个相位。本文件对它的处置（`runDurabilityOpen` 恒 `false`、`resolveDurability`
+ *      no-op）**一字未改**：恢复只需在脚本里重新声明节点，状态机不需要改代码。
  *
  *   - 状态里唯一的进度锚点 = **`nodeId`**（当前已呈现的脚本节点）；推进只走
- *     `next` / `branch`，DAY 与叙事文本全部来自节点
+ *     `next`（与退役的 `branch`），DAY 与叙事文本全部来自节点
  *     ⇒ 页面里**没有** `if (day === X)` 这类散落分支；
  *   - 呈现一个节点的节拍 = 「若 DAY 变化则追加 `DAY n` 行」+ 该节点的 `beat` 叙事，
  *     然后按节点类型决定落在哪个 phase：
@@ -46,30 +50,27 @@
  *   4) 冒险记录是**玩家叙事**（无 `[系统]` / `[事件]` 前缀、无 Runtime 枚举、无逐帧伤害），
  *      `kind` 只用于渲染分级。
  *
- * ## PRP-RUN-02 必改 3：耐久事件（维修 vs 继续改装）
+ * ## 耐久事件（维修 vs 继续改装）—— **已从产品节奏退役，能力保留**
  *
- *   `DURABILITY` 是本 Queue 新增的**唯一**决策点，只做一件事：
- *   让「现在这点耐久」改变玩家的下一步选择。
+ *   PRP-RUN-02 曾把 `DURABILITY` 作为这条链上**唯一**的耐久取舍决策点：
+ *   让「现在这点耐久」改变玩家的下一步选择（维修 = 生存优势 / 继续改装 = 构筑数量优势）。
  *
- *     A｜维修       → 恢复一段明确耐久（沿用 `EMERGENCY_REPAIR_FRACTION`，不新造数值）
- *                     → **不获得**这一天额外改装（当日走 `d5-tend` 的焊车叙事）
- *                     ⇒ **生存优势**
- *     B｜继续改装   → 不回耐久 → **立即**多拿一项横向改装（`d4-lateral` 二选一）
- *                     → **再**进入 DAY 5 的第二次条件三选一
- *                     ⇒ **构筑数量优势**
+ *   ⚠️ PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：那个节点（连同横向改装与两段叙事节拍）
+ *      与 Queue 要求的严格三段链冲突（遭遇 2 之后必须先经过它才能到第 2 次 Build Choice），
+ *      因此已**整段退役**。本文件里它的全部处置（相位、浮层卡、裁决函数、`branch` 缺失即 no-op）
+ *      **一字未改**，只是**当前没有节点会产出这个相位**：
  *
- *   ⚠️ PRP-RUN-02-R1（真人验收修正）：`d4-durability` 与 `d5-choice2` 是**两个独立节点** ——
- *      **两条分支都会**到达 DAY 5 的第二次条件三选一；维修的机会成本只是「这一天额外改装」，
- *      不是「整局第二层 Build」。第一层在任何分支下都不被清除，第二层也不被阻止。
- *      ⇒ 本文件的推进逻辑**不含任何分支特判**：repair / upgrade 都只把状态推进到
- *        `node.branch[choice]`，之后按脚本自己的 `next` 继续（修正全部落在 `runScript.ts` 的数据里）。
+ *     - `DURABILITY` 仍在 `RunPhase` / `RUN_PHASES` 里（能力，不是数据）；
+ *     - `runDurabilityOpen` 的判据仍是 `phase === 'DURABILITY'` ⇒ 当前恒 `false`；
+ *     - `resolveDurability` 在非 DURABILITY 相位 / 节点无 `branch` 时**返回原状态**（no-op），
+ *       这正是当前脚本下它的走法；
+ *     - `runDurabilityOptions` / `runDurabilityTitle` 读的文案仍在 `runScript.RUN_DURABILITY_EVENT`。
  *
- *   ⚠️ PRP-RUN-02-R2（真人验收修正）：修正前两条分支的差别**只剩耐久** ⇒ 维修**严格支配**
- *      继续改装。现在继续改装换到「多一项横向改装」，两条分支各拿到**不同的优势**。
- *      候选池的种类由节点声明（`node.choicePool`），因此本文件依然**零分支特判**：
+ *   ⇒ 恢复这个事件**只需要在 `runScript.ts` 重新声明一个 DURABILITY 节点**（含 `branch`），
+ *     本文件不需要改代码。文案与因果依然全部在 `runScript.ts`（数据，不在 UI 里散落）。
+ *
+ *   ⚠️ 候选池的种类由节点声明（`node.choicePool`），因此本文件依然**零分支特判**：
  *      它不知道「现在是第几选」，只知道「当前节点要哪一种池」。
- *
- *   没有货币、没有新资源；两者的文案与因果都在 `runScript.ts`（数据，不在 UI 里散落）。
  *
  * ## 本 Queue 明确不做
  *
@@ -320,10 +321,9 @@ export const RUN_BATTLES_TOTAL = RUN_TOTAL_BATTLES;
 /**
  * 一局最多能拿几项强化（= 脚本里 CHOICE 节点数，结构性上限，不靠运行期扫描）。
  *
- * ⚠️ PRP-RUN-02-R2：脚本现在有三个 CHOICE 节点 ⇒ 上限 **3**。
- *    但**单条分支**拿不满：维修分支只经 `d2-choice1` + `d5-choice2`（2 项），
- *    继续改装分支才经三个（3 项）—— 「维修 = 生存优势 / 继续改装 = 构筑数量优势」
- *    正是这个差别的名字，不是这里需要修正的错误。
+ * ⚠️ PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：脚本现在有**两个** CHOICE 节点
+ *    ⇒ 上限 **2**，且脚本是线性链 ⇒ **任何一局都恰好拿 2 项**（不再有「维修分支 2 项 /
+ *    继续改装分支 3 项」那两种数目）。
  */
 export const RUN_MAX_CHOICES = RUN_TOTAL_CHOICES;
 
@@ -504,22 +504,21 @@ export function runChoicePoolFamily(s: RunPageState): 'cannon' | 'generic' {
 /**
  * **当前 CHOICE 节点的候选池**（结构规则，不随机）。
  *
- * ⚠️ PRP-RUN-02-R2：池的**种类**由当前脚本节点声明（`node.choicePool`）——
- *    不再按 `buffs.length` 数数，因此「第几次选」与「哪一层内容」是两件独立的事：
+ * ⚠️ 池的**种类**由当前脚本节点声明（`node.choicePool`）——
+ *    不按 `buffs.length` 数数，因此「第几次选」与「哪一层内容」是两件独立的事：
  *
  *   - `layer1`  → 第一层三项（`d2-choice1`）
- *   - `lateral` → **横向改装**：现有第一层之外的另外两项（`d4-lateral`，二选一）
- *   - `layer2`  → **第二层条件池**，由**最初主路线**决定（`d5-choice2`）
+ *   - `lateral` → **横向改装**：现有第一层之外的另外两项（二选一）
+ *                 ⚠️ PRODUCT-LOOP-R9：`d4-lateral` 已退役 ⇒ 当前无节点声明它。
+ *   - `layer2`  → **第二层条件池**，由**最初主路线**决定（`d3-choice2`）
  *
- * ⚠️ 三种池统一剔除已拥有的项 ⇒ 「继续改装」先拿了 `fastReload` 时，
- *    第二层池里的 `fastReload` 会自动消失，结构上不可能拿到重复项。
+ * ⚠️ 三种池统一剔除已拥有的项 ⇒ 结构上不可能拿到重复项。
  *
  * ⚠️ PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT：**基准武器不是 Cannon 时**，三个节点统一给
  *    **通用基础成长池**（`damageUp` / `rateUp` + 复用既有通用项 `emergencyRepair`）——
  *    因为 Cannon 的三池（字段名与 `behavior` 都是 Cannon 自己的）对别的武器**整表不适用**，
  *    照原样发给玩家 = 「选了强化但武器一个数字都没变」。通用池同样**逐节点剔除已拥有项**，
- *    且因为它是 3 项固定集，**任何节点都不可能为空**（最紧的一支 = 「继续改装」分支的
- *    `d5-choice2`，此前已选 2 项 ⇒ 恰剩 1 项）。
+ *    且因为它是 3 项固定集、本局只有 2 次选择 ⇒ **两次都拿得到选项、任何节点都不可能为空**。
  *
  * ⚠️ 这是**结构规则**（当前节点「该给什么」），不是「屏幕上现在有什么」——
  *    后者读 `runOverlayCards`（它只在本节点真的处于 CHOICE 时才取用本函数）。
@@ -548,7 +547,7 @@ export function runChoicePoolKind(s: RunPageState): RunChoicePoolKind | null {
 /**
  * 池的**内容层**：`1` = 一层内容（含横向改装）/ `2` = 第二层条件池 / `0` = 当前不适用。
  * ⚠️ 它描述的是**池里的内容属于哪一层**，不是「第几次选择」——
- *    因此横向改装（一层内容）报 1，两条分支走到 `d5-choice2` 时都报 2。
+ *    因此横向改装（一层内容）报 1，`d3-choice2` 报 2。
  */
 export function runChoicePoolLayer(s: RunPageState): number {
   const kind = runChoicePoolKind(s);
@@ -757,7 +756,7 @@ export function finishRunBattle(s: RunPageState, outcome: RunBattleOutcome): Run
       log: pushLogs(s.log, [
         { kind: 'result', text: outcomeLine },
         { kind: 'durability', text: `战车耐久剩余 ${durabilityPercent(b)}%。` },
-        { kind: 'result', text: `你在第七天走完了这趟路。` },
+        { kind: 'result', text: `你在第 ${RUN_TOTAL_DAYS} 天走完了这趟路。` },
         { kind: 'result', text: '这次冒险到此结束。' },
       ]),
     });
@@ -820,16 +819,20 @@ export function chooseRunBuff(s: RunPageState, optionId: string, ctx: RunPageCon
 }
 
 /**
- * 耐久事件的裁决（本 Queue 唯一的耐久取舍点）。
+ * 耐久事件的裁决（PRP-RUN-02 期唯一的耐久取舍点；**当前不在产品节奏里**，见文件头）。
  *
  *   `repair`  → 按 `EMERGENCY_REPAIR_FRACTION` 修回一段耐久（不超过上限，**如实记账**），
- *               然后走**维修分支**：中经「把这一天用在修车上」的当日叙事节点（`d5-tend`），
- *               **再继续**进入 DAY 5 的第二次条件三选一；
- *   `upgrade` → 不回耐久，走**改装分支**：立刻进入**横向改装**二选一（`d4-lateral`），
- *               选完**再继续**进入 DAY 5 的第二次条件三选一。
+ *               然后走**维修分支**：中经「把这一天用在修车上」的当日叙事节点，
+ *               **再继续**进入第二次条件三选一；
+ *   `upgrade` → 不回耐久，走**改装分支**：立刻进入**横向改装**二选一，
+ *               选完**再继续**进入第二次条件三选一。
  *
- * ⚠️ PRP-RUN-02-R1 / R2：两条分支**都会**到达 `d5-choice2`（第二层）。本函数不做任何分支特判 ——
+ * ⚠️ 两条分支**都会**到达第二层。本函数不做任何分支特判 ——
  *    只把状态推进到 `node.branch[choice]`，后续由脚本自己的 `next` 决定。
+ *
+ * ⚠️ PRODUCT-LOOP-R9：当前脚本**没有** DURABILITY 节点 ⇒ 第一个守卫
+ *    （`runDurabilityOpen` 为假）就返回原状态，本函数是**能力保留**而非当前路径。
+ *    它在「节点存在但没有 `branch`」时同样是 no-op（第二个守卫）—— 这条路径一字未改。
  *
  * ⚠️ 修复量按「当前真实剩余耐久 + 本局累计补偿」计算缺口，避免日志报出一个实际没吃满的数字。
  */

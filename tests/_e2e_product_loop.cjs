@@ -43,8 +43,11 @@
  * ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）
  *
  * 产品 Run 的脚本已由**四场压力阶梯**收成**三段问题序列**（`ProtoRusher` → `Chaser` →
- * `RangedTurret`），第 3 段落位在**终局** `d7-final`（FINAL · DAY 7），DAY 6 由纯叙事
- * `d6-travel` 占据。
+ * `RangedTurret`），第 3 段落位在**终局** `d4-final`（FINAL）。
+ * ⚠️ PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：脚本进一步收敛为**严格六节点链**
+ *    （`RUN_TOTAL_DAYS` 7 → **4**、`RUN_TOTAL_CHOICES` 3 → **2**；遭遇与 Build Choice 严格交替，
+ *    中间不再有耐久取舍 / 横向改装 / 纯叙事节拍）⇒ 本文件里所有「DAY 7 / `d7-final` /
+ *    `d6-travel`」的旧描述都已按新链更新。
  *
  * `RangedTurret` 是全项目**唯一**声明 `enemyDrive:'keep-distance'` 的对手，而本 E2E 第一局
  * 的装配（主武器槽 `cannon` + 默认车身）在控距下**零命中** ⇒
@@ -53,7 +56,7 @@
  *
  * ⇒ 本文件按裁决如实降级：
  *    · **C1** 改为如实断言第一局 `RUN FAILED`（判据不删，只换相位）；
- *    · **C2** 照常（本局确实攒下了两层 Build 与 DAY 7 进度）；
+ *    · **C2** 照常（本局确实攒下了两层 Build 与 DAY 4 进度）；
  *    · **C3 ~ C3e / C4** 改为「FAILED 终点不发奖励」的**负面证据** + 失败终态动作取证
  *      （无候选卡 / 卡底像素 0 / `claiming=false` 且 `claimStarts=0` / 底栏按钮**可用态成片**
  *      且禁用态 0 的「返回主界面」，按**产品侧**实测写）；
@@ -98,10 +101,12 @@ const MIME = {
  *
  * ⚠️ 为什么是 **cannon**（实测，不是随便挑的）：本 smoke 的第一局必须**真的打完**
  *    （Queue 原文「真实完成 Run → COMPLETE → 领取 Weapon B」），而实测只有主武器
- *    在中远距离造成伤害时才能稳定打完这四场：
+ *    在中远距离造成伤害时才能稳定打完这几场（当时是**四场**阶梯）：
  *       spear@主武器槽（近战刺）→ 第 2 场僵持，跑不完
  *       hammer@主武器槽（近战锤）→ 第 1 场即被打死（玩家弹丸峰值 = 0）
  *       cannon@主武器槽（远程炮）→ COMPLETE（4/4 场，复跑同结果）
+ *    ⚠️ PRODUCT-LOOP-R9：脚本收敛为**严格六节点 · 三段战斗**（终局 = 远程控距 `RangedTurret`）
+ *       之后，产品侧第一局（`cannon` + 默认车身）**恒 FAILED** ⇒ 本文件按「如实降级」记账。
  *    （完整矩阵见 `src/product/playerLoadout.ts` 的 `DEFAULT_CLEARED_SLOT` 注释。）
  */
 const WEAPON_A = 'cannon';
@@ -242,10 +247,15 @@ const WEAPON_SLOT = 'frontMass';
 /** 装备参数名（产品侧与 Lab 侧的唯一约定）。 */
 const LOADOUT_PARAM = 'equipped';
 
-/** 稳定取胜路线（与 B 段同一条；锚在池内 id 上，不靠随机）。 */
+/**
+ * 稳定取胜路线（与 B 段同一条；锚在池内 id 上，不靠随机）。
+ * ⚠️ PRODUCT-LOOP-R9：`lateral` / `durability` 两个键**已失效**（横向改装与耐久取舍两个节点
+ *    已从脚本退役）⇒ 驱动器不会再遇到它们对应的浮层；留着只为记录当时的路线形状。
+ *    实际生效的只有 `layer1`（第 1 次 Choice）与 `layer2`（第 2 次 Choice，池由 layer1 决定）。
+ */
 const WIN_POLICY = { layer1: 'twinCannon', lateral: null, layer2: 'tripleLoad', durability: 'repair' };
 
-/** 单次完整 Run 的驱动预算（四场真实物理战斗）。 */
+/** 单次完整 Run 的驱动预算（三段真实物理战斗；R9 前是四场，故预算仍有余量）。 */
 const DRIVE_BUDGET_MS = 240000;
 
 const results = [];
@@ -777,7 +787,8 @@ async function main() {
     /*
       ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）：
         产品 Run 的脚本已由**四场**收成**三段问题序列**（`ProtoRusher` → `Chaser` → `RangedTurret`），
-        第 3 段落位在**终局** `d7-final`（FINAL）。`RangedTurret` 是全项目**唯一**声明
+        第 3 段落位在**终局** `d4-final`（FINAL；PRODUCT-LOOP-R9 把链收敛为严格六节点、
+        `RUN_TOTAL_DAYS` = **4**）。`RangedTurret` 是全项目**唯一**声明
         `enemyDrive:'keep-distance'` 的对手，而本 E2E 第一局的装配（主武器槽 `cannon` +
         默认车身）在控距下**零命中** ⇒ 第一局**必然 `RUN FAILED`**
         （实测 `phase=FAILED battles=3/3 耐久=0%`；Node 同源证据见
@@ -1120,7 +1131,7 @@ async function main() {
     );
     /*
       ⚠️ 采样点是「第二局第一场**战斗进行中**」⇒ 此刻的 DAY 已经不是起点的 DAY 1
-      （本局的 Day 在开打时会走一格，第一局从 DAY 1 一路涨到 DAY 7）。
+      （本局的 Day 在开打时会走一格，第一局从 DAY 1 一路涨到 DAY 4）。
       所以这里**不能用 `day === 1` 当判据**（那是 F1 判据，采样时机不同）；
       正确的证法是：第二局的 DAY 必须**远小于**第一局结束时的 DAY，
       且已完成的战斗数归零 —— 这才叫「没有继承」。起点 DAY 1 由 F1 独立证明。

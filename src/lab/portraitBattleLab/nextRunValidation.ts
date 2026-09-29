@@ -169,7 +169,7 @@ export function nextRunSeedById(id: string): RunSeedOption | null {
  * 快进用的**每场掉血**（脚手架固定值，非平衡结论）。
  *
  * 取自 PRP-RUN-02 实测的「基础 Build 满耐久 1100」压力阶梯
- * （低压 181 / 中低压 221 / 中压 257）—— 三段打完仍剩 441 ⇒ 上一局在第 7 天**仍然存活**
+ * （低压 181 / 中低压 221 / 中压 257）—— 三段打完仍剩 441 ⇒ 上一局在最后一天**仍然存活**
  * —— 本验证需要上一局以 `RUN COMPLETE` 结束（`FAILED` 不是本流程的入口）。
  *
  * ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：Run 从**四场**收成**三段**
@@ -183,10 +183,9 @@ const PRIOR_RUN_DAMAGE: readonly number[] = [181, 221, 257];
  * ⚠️ 与路线内容无关的验证目标：本 Queue 只关心「上一局存在且已结束」。
  *    这里选 `heavyShell → kineticBurst` 是因为它是既有条件池里最直接的一条联动。
  *
- * ⚠️ PRP-RUN-02-R2：这个数组的长度必须**恰好等于上一局实际会经过的 CHOICE 节点数**。
- *    因为上一局走**维修**分支（见 `PRIOR_RUN_DURABILITY`），它只经过 `d2-choice1` 与
- *    `d5-choice2` 两个 CHOICE 节点 ⇒ 这里保持 **2 项**。
- *    （「继续改装」分支会多经过 `d4-lateral`，需要第 3 项 —— 本脚手架刻意不走那条路。）
+ * ⚠️ 这个数组的长度必须**恰好等于上一局实际会经过的 CHOICE 节点数**。
+ *    PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：脚本是严格线性三段链，
+ *    恰好 `d2-choice1`（第一层）与 `d3-choice2`（第二层）两个 CHOICE 节点 ⇒ 这里保持 **2 项**。
  *    任一项若不在当时那个节点的候选池里，快进会**停下报错**而不是静默换成别的。
  *
  * ⚠️ PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT：候选池**按本局基准武器分成两族**
@@ -204,22 +203,16 @@ const PRIOR_RUN_DAMAGE: readonly number[] = [181, 221, 257];
 const PRIOR_RUN_CHOICES: readonly RunModifierId[] = ['heavyShell', 'kineticBurst'];
 
 /**
- * 快进时上一局在耐久事件上的选择：**维修**。
+ * 快进时上一局在**耐久事件**上的选择。
  *
- * ⚠️ PRP-RUN-02-R2 改选 `repair`（原为 `upgrade`），原因与代价都记在这里：
+ * ⚠️ PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：脚本里已**没有** DURABILITY 节点
+ *    ⇒ 下面那个分支当前不会被走到，这个常量是**保留的能力参数**（与状态机侧的
+ *    `resolveDurability` 一起保留，脚本恢复该节点时立刻生效），不是当前路径的一部分。
  *
- *   - **原因**：R2 之后「继续改装」分支会**多经过一个节点**（`d4-lateral`，横向改装二选一）
- *     ⇒ 快进会多拿一项改装，上一局的摘要 Build 从 2 项变成 3 项
- *     ⇒ M2 已真人验收过的**可观测输出**（`priorRun.build` / `day` / `battlesCompleted` /
- *       `durabilityPercent`）会变。走**维修**分支则路径与内容完全不变
- *     （`d2-choice1` → 耐久事件 → `d5-tend` → `d5-choice2`），因此
- *     `priorRunSummary` **逐字段保持原值**、页面与既有验收结论继续有效。
- *   - **代价（如实记录）**：`repair` 会累计 `repairBonus`，而 `runCarriedPlayerHp`
- *     会把 `repairBonus` 叠加到真实剩血上 ⇒ `runCarriedPlayerHp(prior)` 从此报告的是
- *     「剩血 + 补偿」而不是裸剩血（实测 416 = 141 + 275）。
- *     ⚠️ `priorRunSummary.durabilityPercent` **不受影响**（它读 `battle.playerHp`，是真实战果）；
- *        现有断言也只要求它是「一个明显不是满耐久的数」，因此本代价目前**不改变任何结论**。
- *     ⚠️ 若将来有人要断言 `runCarriedPlayerHp(prior) === prior.battle.playerHp`，会在这里踩坑。
+ *   ⚠️ 由此带来的口径变化（如实记录）：`repair` 分支过去会累计 `repairBonus`，
+ *      而 `runCarriedPlayerHp` 会把 `repairBonus` 叠加到真实剩血上。现在这一步不再发生
+ *      ⇒ `runCarriedPlayerHp(prior)` 报告的就是**裸剩血**（441），不再掺杂补偿。
+ *      `priorRunSummary.durabilityPercent` 一直读 `battle.playerHp`（真实战果），**不受影响**。
  */
 const PRIOR_RUN_DURABILITY = 'repair' as const;
 
@@ -277,6 +270,8 @@ export function buildPriorCompletedRun(ctx: RunPageContext): RunPageState {
     }
 
     if (s.phase === 'DURABILITY') {
+      // ⚠️ PRODUCT-LOOP-R9：脚本里已没有 DURABILITY 节点 ⇒ 当前走不到这里。
+      //    保留这一支是为了「脚本恢复该节点时快进也不失配」。
       const resolved = resolveDurability(s, PRIOR_RUN_DURABILITY, ctx);
       if (resolved === s) break;
       s = resolved;
@@ -294,7 +289,7 @@ export function buildPriorCompletedRun(ctx: RunPageContext): RunPageState {
 
 /** 上一局的摘要（页面 / probe 用；全部从真实状态读出，不手写）。 */
 export interface PriorRunSummary {
-  /** 上一局结束时停在哪个脚本节点（FINAL = 走完了七天）。 */
+  /** 上一局结束时停在哪个脚本节点（FINAL = 走完了全程）。 */
   readonly nodeId: string;
   readonly day: number;
   readonly battlesCompleted: number;

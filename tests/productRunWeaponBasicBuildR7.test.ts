@@ -182,7 +182,11 @@ interface WalkFact {
 
 /**
  * 从 DAY 1 走到底，**真实战斗驱动**（与宿主同口径），记录每个 CHOICE 节点的候选池、
- * 每段真实逐发伤害、最终 Build。耐久取舍恒选 `upgrade` ⇒ 走**最紧的一支**（3 个 CHOICE 全过）。
+ * 每段真实逐发伤害、最终 Build。
+ *
+ * ⚠️ PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：脚本是严格三段链 ⇒ 只有 **2 个** CHOICE 节点
+ *    （`d2-choice1` / `d3-choice2`），且没有分支 ⇒ `upgrade` 这个旧耐久选项已走不到
+ *    （保留这一支只为「脚本恢复该节点时走查也不失配」）。
  */
 function walk(weaponDefId: string, pick: (pool: readonly string[]) => string): WalkFact {
   const ctx = ctxFor(weaponDefId, `walk-${weaponDefId}`);
@@ -482,11 +486,13 @@ describe('PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT', () => {
     // 非 Cannon 局：逐节点给通用池，且**任何节点都不为空**（玩家不可能卡住）
     const fact = machineGunWalk();
     expect(fact.pools[0]!.ids).toEqual([...RUN_GENERIC_CHOICE_POOL]);
-    expect(fact.pools.map((p) => p.kind)).toEqual(['layer1', 'lateral', 'layer2']);
+    expect(fact.pools.map((p) => p.kind)).toEqual(['layer1', 'layer2']);
     for (const p of fact.pools) {
       expect(p.ids.length, `${p.nodeId} 的候选池为空 ⇒ 玩家会卡住`).toBeGreaterThan(0);
     }
-    expect(fact.buffs).toEqual(['damageUp', 'rateUp', 'emergencyRepair']);
+    // PRODUCT-LOOP-R9：脚本收成严格三段链 ⇒ 本局**恰好 2 次** Build Choice。
+    expect(fact.pools.length).toBe(2);
+    expect(fact.buffs).toEqual(['damageUp', 'rateUp']);
     expect(new Set(fact.buffs).size, '不得重复领同一个').toBe(fact.buffs.length);
     expect(fact.pools[1]!.ids).not.toContain('damageUp');
   });

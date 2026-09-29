@@ -37,7 +37,8 @@
  *
  * ⚠️ R6 起「产品 Run 的**脚本结构**」变了，本文件的夹具**故意不跟**（记录，不是漏改）：
  *    `src/lab/portraitBattleLab/runScript.ts` 已由**四场压力阶梯**收成**三段问题序列**
- *    （`ProtoRusher` → `Chaser` → `RangedTurret`，第 3 段落位**终局** `d7-final`）。
+ *    （`ProtoRusher` → `Chaser` → `RangedTurret`，第 3 段落位**终局** `d4-final`；
+ *    ⚠️ PRODUCT-LOOP-R9 把脚本进一步收敛为**严格六节点链**，`RUN_TOTAL_DAYS` = 4）。
  *    本文件的 `RUN_ENCOUNTERS` 是**运行时级夹具**：自建一条 4 连场链、直接调 `runBattleToEnd`
  *    ⇒ 它验的是「Runtime 能跑 N 连场且每场都到终态 + 逐件武器的真实伤害」，
  *    **不读产品脚本**，所以**保留 4 场是刻意的**（多一场 ⇒ 多一次跨场耐久压力，判据更严）。

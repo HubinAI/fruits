@@ -37,6 +37,7 @@ import {
 import { VALIDATION_HUB_ENTRIES } from '../src/lab/portraitBattleLab/validationHub';
 import {
   RUN_CHOICE_OPTIONS,
+  RUN_DAYS_TOTAL,
   createRunPageState,
   pressRunAction,
   runBuildIds,
@@ -154,14 +155,16 @@ function suspiciousModifierIds(src: string): string[] {
 /* ==================================== B. 上一局（RUN COMPLETE，快进） */
 
 describe('PRP-M2｜B 上一局：真实状态机的确定性快进', () => {
-  it('NR-04 快进产出一个**真实的 RUN COMPLETE 上一局**（DAY 7 / 三段 / 走完两层 Build）', () => {
+  it('NR-04 快进产出一个**真实的 RUN COMPLETE 上一局**（DAY 4 / 三段 / 走完两层 Build）', () => {
     const prior = buildPriorCompletedRun(CTX);
     expect(runComplete(prior)).toBe(true);
     expect(prior.phase).toBe('COMPLETE');
-    expect(prior.day).toBe(7);
+    // PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：脚本收成三段线性链 ⇒ 最后一天 = DAY 4。
+    expect(prior.day).toBe(RUN_DAYS_TOTAL);
+    expect(prior.day).toBe(4);
     // ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE：四场 → 三段 ⇒ 场数取脚本真源，不写字面量。
     expect(prior.battlesCompleted).toBe(RUN_TOTAL_BATTLES);
-    expect(prior.nodeId).toBe('d7-final');
+    expect(prior.nodeId).toBe('d4-final');
     // 上一局真的走完了一条两层路线（不是空 Build 直接结算）
     expect(runBuildIds(prior)).toEqual(['heavyShell', 'kineticBurst']);
     // 上一局的耐久**不是满的** —— 这正是「新局要把耐久重置」这件事的前提
@@ -197,7 +200,8 @@ describe('PRP-M2｜C 新 Run：必须是「下一局」，不是上一局继续'
       // ① DAY 回到脚本第一个节点
       expect(s.nodeId, seed.id).toBe(RUN_SCRIPT_FIRST_ID);
       expect(s.day, seed.id).toBe(1);
-      expect(s.dayTotal, seed.id).toBe(7);
+      expect(s.dayTotal, seed.id).toBe(RUN_DAYS_TOTAL);
+      expect(s.dayTotal, seed.id).toBe(4);
       // ② 战斗运行时清空、场数归零、无耐久补偿
       expect(s.battle, seed.id).toBeNull();
       expect(s.battlesCompleted, seed.id).toBe(0);

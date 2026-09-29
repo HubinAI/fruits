@@ -28,7 +28,12 @@
  * （必改 2 / 必改 3 —— 不得进入 Run、不得偷偷换成 Cannon、不得创建半残 Run）。
  * ⇒ 本文件改用 R1-D 同一次实测里的**另一条**确定性失败路线：
  *
- *   `cannon` + 耐久事件选「继续改装」（`upgrade`，不回耐久）⇒ 打到 DAY 7 终局耐久归零。
+ *   `cannon` + 耐久事件选「继续改装」（`upgrade`，不回耐久）⇒ 打到终局耐久归零。
+ *
+ *   ⚠️ PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：**耐久取舍节点（`d4-durability`）已从脚本退役**
+ *      ⇒ 这条「靠不回耐久来把终局打到归零」的路线描述**已过时**。R9 之后链条是严格六节点
+ *      （三段战斗 + 两次 Build Choice），**没有任何回耐久项** ⇒ 失败路线只由两次选择决定
+ *      （见 `FAIL_POLICY`：`twinCannon` + `tripleLoad`）。C1~D2 的 FAILED 判据一字未改。
  *
  * 顺带得到一件 R1-D 当时拿不到的东西：这条路线会**真的走过** P0 的原始 repro 路径
  * （DAY 2 选一层强化 → **DAY 3 第二场战斗创建**时 `applyRunModifiersToSnapshot()` 注入），
@@ -230,12 +235,14 @@ const COMPAT_NOTICE = '当前原型尚不支持这件武器进行完整冒险';
 const COMPAT_HINT = '请先调整战车';
 
 /**
- * 失败路线的耐久取舍策略 = 「继续改装」（`upgrade`：不回耐久，并且多拿一项横向改装）。
+ * 失败路线的耐久取舍策略 = 「继续改装」（`upgrade`）。
  *
- * ⚠️ 必须是它（不是 `repair`）：`repair` 会拿回一段耐久 ⇒ 这一局能 COMPLETE（R1-C 实测 4/4），
- *    只有「不回耐久」才让 DAY 7 的终局真的打到耐久归零。
- * ⚠️ 找不到这个 id 时会回退到第一个选项（= 维修）⇒ 失败路线会静默变成通关路线，
- *    C1 的 `phase === 'FAILED'` 会立刻红掉（这正是要的：路线错了必须响）。
+ * ⚠️ PRODUCT-LOOP-R9：**这个键已经失效** —— `d4-durability` 节点已从脚本退役，
+ *    驱动器不会再遇到耐久浮层（`p.durabilityOpen` 恒 false）。留着只为记录当时的路线形状，
+ *    并保证 `FAIL_POLICY` 的键集不变（改路线时不需要动结构）。
+ * ⚠️ 历史判据（R9 前）：必须是「继续改装」而不是 `repair` —— `repair` 会拿回一段耐久 ⇒
+ *    那一局能 COMPLETE；只有「不回耐久」才让终局真的打到耐久归零。R9 之后链上没有回耐久项，
+ *    这一层因果由**结构**保证（比「选对选项」更强）。
  */
 const DURABILITY_POLICY = 'upgrade';
 
@@ -245,7 +252,7 @@ const DURABILITY_POLICY = 'upgrade';
  * 上一版（P0 起）用的是 `layer1 = 重炮(heavyShell)`、`layer2 = 动能爆发(kineticBurst)`、
  * `lateral = 池内第一项`（= 双联炮）—— 那条组合在**旧的玩家侧基线 80** 下恰好归零 FAILED。
  * 本 Queue 把本局**玩家侧**炮基线抬到 `PRODUCT_RUN_CANNON_BASE_DAMAGE = 120`（用户裁决）后，
- * 同一组合实测变成 **COMPLETE**（battles 4/4 · DAY 7 · 终局 HP ≈ 364）
+ * 同一组合实测变成 **COMPLETE**（battles 4/4 · DAY 7 · 终局 HP ≈ 364；R9 前是四场阶梯）
  * ⇒ 这条路线在产品层**已经不再是失败路线**了。
  *
  * 新路线不是猜的，来自 Node 侧同一口径的冻结表（`tests/portraitRunPage.test.ts` 的
@@ -257,9 +264,10 @@ const DURABILITY_POLICY = 'upgrade';
  *    仍在 Node 侧成立），只是浏览器这条走查要**换一条同样合法的失败路线**。
  *    这不是放宽断言：C1~D2 的每一条 FAILED 判据一字未改，改的只是「怎么输」。
  *
- * ⚠️ `lateral` 仍取 `null`（= 池内第一项）。Node 表同样按「横向池第一项」取值
- *    （双联路线 → 重型弹头），两侧口径一致 —— 这是本文件与冻结表能逐值对上账的前提。
- * ⚠️ `layer1` / `layer2` 从此**显式指定**，不再依赖「池内第一项」的隐式顺序：
+ * ⚠️ `lateral` 仍取 `null`、`durability` 取 `DURABILITY_POLICY` —— 但 **PRODUCT-LOOP-R9 起
+ *    这两个键都已失效**（横向改装 / 耐久取舍两个节点已退役，驱动器不会再遇到对应浮层）。
+ *    真正决定本局失败的是 `layer1 = twinCannon` + `layer2 = tripleLoad` 这两次选择。
+ * ⚠️ `layer1` / `layer2` 从一开始就**显式指定**，不依赖「池内第一项」的隐式顺序：
  *    组合本身是失败路线的定义，让它隐式依赖选项顺序会让路线在内容重排时悄悄漂移。
  */
 const FAIL_POLICY = { layer1: 'twinCannon', lateral: null, layer2: 'tripleLoad', durability: DURABILITY_POLICY };
@@ -268,7 +276,7 @@ const FAIL_POLICY = { layer1: 'twinCannon', lateral: null, layer2: 'tripleLoad',
 const PANEL_BG = [0x1b, 0x24, 0x32]; // COLORS.cardBg
 const CTA_BAR = [0x33, 0x50, 0x7a]; // COLORS.actionBtn（启用态底部强调条）
 
-/** 驱动预算：新路线实测要走到 DAY 7（R1-D 同一次实测 ≈43s），给足余量。 */
+/** 驱动预算：新路线要走到终局（三段战斗 · R9 前是四场/DAY 7；R1-D 同一次实测 ≈43s），给足余量。 */
 const DRIVE_BUDGET_MS = 120000;
 
 const results = [];
@@ -917,7 +925,8 @@ async function main() {
     );
     /*
       ⚠️ 与更换失败路线前的那一版**故意不同**：旧路线第一场就死 ⇒ 本局零改装（断言「未做任何改装」）。
-      新路线打到 DAY 7 ⇒ 本局**真的拿过**强化。断言从「写死一句未改装」改成
+      新路线打到终局 ⇒ 本局**真的拿过**强化（写这句时是 DAY 7；R9 起总天数 = 4，
+      「打到终局 ⇒ Build 非空」这层事实不变）。断言从「写死一句未改装」改成
       「结算逐字复述本局真实拿到的那些改装」—— 这比原来更强，因为它锁住了
       「结算内容 = 真实状态」这件事对一个**非空** Build 也成立。
     */

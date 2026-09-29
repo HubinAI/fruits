@@ -10,7 +10,8 @@
  * ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）
  *
  * 产品 Run 的脚本已由**四场压力阶梯**收成**三段问题序列**（`ProtoRusher` → `Chaser` →
- * `RangedTurret`），第 3 段落位在**终局** `d7-final`（FINAL · DAY 7）；`RangedTurret` 是全项目
+ * `RangedTurret`），第 3 段落位在**终局** `d4-final`（FINAL；⚠️ PRODUCT-LOOP-R9 收敛为
+ * **严格六节点链** · `RUN_TOTAL_DAYS` = **4**）；`RangedTurret` 是全项目
  * **唯一**声明 `enemyDrive:'keep-distance'` 的对手，而本文件那条「确定性通关路线」（主武器槽
  * `cannon` + 默认车身）在控距下**零命中** ⇒ **第一局必然 `RUN FAILED`**
  * （实测 `phase=FAILED battles=3/3 耐久=0%`；Node 同源证据见
@@ -674,7 +675,7 @@ async function playOneRunAndClaim(page, pickDefId, policy, label) {
   /*
     ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）
       旧写法在「COMPLETE 上候选矩形为空」时**直接 throw**。R6 把产品 Run 收成**三段问题序列**
-      （`ProtoRusher` → `Chaser` → `RangedTurret`）、第 3 段落位**终局** `d7-final`，而
+      （`ProtoRusher` → `Chaser` → `RangedTurret`）、第 3 段落位**终局** `d4-final`，而
       `RangedTurret` 是全项目**唯一**声明 `enemyDrive:'keep-distance'` 的对手 ⇒
       本 E2E 那条「确定性通关路线」（主武器槽 cannon）在控距下**零命中** ⇒
       第一局**必然 `RUN FAILED`**（实测 `phase=FAILED battles=3/3 耐久=0%`；
@@ -1039,7 +1040,7 @@ async function main() {
 
     log(
       pDone.phase === 'COMPLETE' && pDone.complete === true && pDone.failed === false,
-      'C1 四场打完 → RUN COMPLETE（同一条确定性路线）',
+      'C1 三段打完 → RUN COMPLETE（同一条确定性路线）',
       `phase=${pDone.phase} battles=${pDone.battlesCompleted}/${pDone.battleTotal} 用时 ${round2(r1.done.ms / 1000)}s`,
     );
     log(
@@ -1051,7 +1052,7 @@ async function main() {
     /* 必改 2＋4：终点是**真实候选**（名称 / ★1 / 当前数量 / 领取后数量预览 / 成长口径那一行） */
     const rc = pDone.rewardChoices;
     log(
-      pDone.day === 7 &&
+      pDone.day === 4 &&
         pDone.battle.durabilityPercent > 0 &&
         pDone.buildLabels.length === 2 &&
         rc.length === 1 &&

@@ -23,7 +23,8 @@
  * ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）
  *
  * 产品 Run 已收成**三段问题序列**（`ProtoRusher` → `Chaser` → `RangedTurret`），第 3 段落位
- * **终局** `d7-final`。`RangedTurret` 是全项目**唯一**声明 `enemyDrive:'keep-distance'` 的对手
+ * **终局** `d4-final`（⚠️ PRODUCT-LOOP-R9 把脚本收敛为**严格六节点链** · `RUN_TOTAL_DAYS` = 4）。
+ * `RangedTurret` 是全项目**唯一**声明 `enemyDrive:'keep-distance'` 的对手
  * ⇒ 本文件那条「cannon 确定性通关路线」在控距下**零命中** ⇒ **那一局必然 `RUN FAILED`**
  * （实测 `phase=FAILED battles=3/3 耐久=0%`；Node 同源证据见
  * `tests/productRunEncounterSequenceQ3.test.ts` Q3-07）。

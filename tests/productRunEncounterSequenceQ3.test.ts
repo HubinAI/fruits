@@ -10,7 +10,7 @@
  *   |---|---|---|---|---|---|
  *   | ① | `d2-battle1` | `ProtoRusher`  | `R1-RUSH-02` | 菠萝冲刺车 | 基础近身碰撞压力 |
  *   | ② | `d3-battle2` | `Chaser`       | `OPP-16`     | 追猎者     | 追击 / 接触节奏 |
- *   | ③ | `d7-final`   | `RangedTurret` | `OPP-03`     | 远程炮台   | 第一次要求玩家处理**远程控距** |
+ *   | ③ | `d4-final`   | `RangedTurret` | `OPP-03`     | 远程炮台   | 第一次要求玩家处理**远程控距** |
  *
  * ## 与 `portraitRunPage.test.ts` 的分工
  *
@@ -287,10 +287,12 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
   it('Q3-01 脚本 = 三段固定顺序，全部是既有正式对手模板的引用（零数值改动）', () => {
     const nodes = runScriptBattleNodes();
     // ① 三段、固定顺序、固定节点 id / kind / day
-    expect(nodes.map((n) => n.id)).toEqual(['d2-battle1', 'd3-battle2', 'd7-final']);
+    //    ⚠️ PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：脚本收成三段线性链 ⇒
+    //       第 3 段 = 终局节点现在叫 `d4-final`（DAY 4）。
+    expect(nodes.map((n) => n.id)).toEqual(['d2-battle1', 'd3-battle2', 'd4-final']);
     expect(nodes.map((n) => n.encounterId)).toEqual([...SEQ]);
     expect(nodes.map((n) => n.kind)).toEqual(['BATTLE', 'BATTLE', 'FINAL']);
-    expect(nodes.map((n) => n.day)).toEqual([2, 3, 7]);
+    expect(nodes.map((n) => n.day)).toEqual([2, 3, 4]);
     expect(RUN_TOTAL_BATTLES, '单局真实战斗场数 = 3').toBe(3);
     // ② 第一段与终局之间**只有一个** BATTLE（改前的 `d6-battle3` 已删除）
     expect(nodes.filter((n) => n.kind === 'BATTLE').length).toBe(2);
@@ -337,7 +339,7 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
     const ch = runChain(winnableDraft());
     // ① 每段的对手 = 该节点声明的 Encounter
     expect(ch.segments.map((s) => s.encounterId)).toEqual([...SEQ]);
-    expect(ch.segments.map((s) => s.nodeId)).toEqual(['d2-battle1', 'd3-battle2', 'd7-final']);
+    expect(ch.segments.map((s) => s.nodeId)).toEqual(['d2-battle1', 'd3-battle2', 'd4-final']);
     // ② 三段的敌 HP 上限互不相同（换人 = 换敌人的硬证据）
     const maxes = ch.segments.map((s) => s.hpBMax);
     expect(maxes).toEqual([1000, 900, 1100]);
@@ -394,8 +396,8 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
     expect(ch.finalHp).toBeGreaterThan(0);
     expect(ch.battlesCompleted, '三段都计入战果').toBe(RUN_TOTAL_BATTLES);
     expect(ch.logTail.join(' / ')).toContain('这次冒险到此结束。');
-    // 走完三段才进终态：`d7-final` 是序列里的**最后**一个节点
-    expect(ch.nodeSeq[ch.nodeSeq.length - 1]).toBe('d7-final');
+    // 走完三段才进终态：`d4-final` 是序列里的**最后**一个节点
+    expect(ch.nodeSeq[ch.nodeSeq.length - 1]).toBe('d4-final');
   });
 
   it('Q3-06 当前**全部** Full Run Weapon 都能跑该序列（资格层 + 进入并造成真实伤害）', () => {
@@ -438,9 +440,9 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
       也**不是** Runtime 缺口（每件的 Runtime 链路都完整、第 1 段都能打出真实伤害）。
       它的用途：让「非 Cannon 拿不到局内伤害成长 + 第 3 段控距」这两个**内容层**事实
       变成机器可见、不可悄悄变化的东西。
-      ⚠️ 口径 = **带本局 Build 的真实走查**（`upgrade` 分支 ⇒ 第 2 段 `heavyShell`、
-      第 3 段 `heavyShell + twinCannon + kineticBurst`）。这些强化**只作用于基准武器
-      （`cannon`）**，对其它 6 件是空操作 ⇒ 只有 `cannon` 那一行会被它们改善
+      ⚠️ 口径 = **带本局 Build 的真实走查**（PRODUCT-LOOP-R9：脚本是严格三段链，
+      第 2 段带 `heavyShell`、第 3 段带 `heavyShell + kineticBurst`）。这些强化
+      **只作用于基准武器（`cannon`）**，对其它 6 件是空操作 ⇒ 只有 `cannon` 那一行会被它们改善
       （裸装实测死在 ②，带上两层强化后撑到 ③）。
       ⚠️ 对比：**产品默认车**（`frontMass: cannon` + `top: hammer`）也跑不完三段
       （实测死在 ③）—— 这同样是内容层事实，见 `portraitRunPage.test.ts` RP-RUN-02-04。
@@ -472,39 +474,26 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
 
   it('Q3-08 序列不引入「连续战斗 / 连续菜单」：战斗与选择仍然交替', () => {
     const kinds = RUN_SCRIPT.map((n) => n.kind);
-    expect(kinds).toEqual([
-      'EVENT',
-      'BATTLE',
-      'CHOICE',
-      'BATTLE',
-      'DURABILITY',
-      'CHOICE',
-      'EVENT',
-      'CHOICE',
-      // `d6-travel`（DAY 6 纯叙事节拍）：旧第四场删除后补齐 DAY 6，不引入战斗
-      'EVENT',
-      'FINAL',
-    ]);
+    // PRODUCT-LOOP-R9-THREE-STAGE-BUILD-PACING：**严格三段节奏**
+    //   EVENT → BATTLE(遭遇1) → CHOICE → BATTLE(遭遇2) → CHOICE → FINAL(遭遇3)
+    //   ⇒ 两段之间**恰好一个** CHOICE，脚本是一条线性链。
+    expect(kinds).toEqual(['EVENT', 'BATTLE', 'CHOICE', 'BATTLE', 'CHOICE', 'FINAL']);
     // 没有任何两个相邻的 BATTLE / FINAL（不存在「连打两场没有间歇」）
     for (let i = 1; i < kinds.length; i++) {
       const bothBattle = (k: string) => k === 'BATTLE' || k === 'FINAL';
       expect(bothBattle(kinds[i]) && bothBattle(kinds[i - 1]), `节点 ${i - 1}/${i} 不得连续战斗`).toBe(false);
     }
-    // 走查里也能看到：三段之间有 CHOICE / DURABILITY 隔开
+    // 走查里也能看到：每两段之间**只有一个节点**（那就是 Build Choice），没有别的节拍
     const ch = runChain(winnableDraft());
     expect(ch.nodeSeq).toEqual([
       'd1-start',
       'd2-battle1',
       'd2-choice1',
       'd3-battle2',
-      'd4-durability',
-      'd4-lateral',
-      'd5-choice2',
-      // DAY 6 纯叙事（无对手 / 无候选池）—— 三段之间仍然被 CAP 隔开
-      'd6-travel',
-      'd7-final',
+      'd3-choice2',
+      'd4-final',
     ]);
     // 三段战斗只发生在三个 BATTLE/FINAL 节点上（没有额外的战斗节点）
-    expect(ch.segments.map((s) => s.nodeId)).toEqual(['d2-battle1', 'd3-battle2', 'd7-final']);
+    expect(ch.segments.map((s) => s.nodeId)).toEqual(['d2-battle1', 'd3-battle2', 'd4-final']);
   });
 });
