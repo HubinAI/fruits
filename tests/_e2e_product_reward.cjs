@@ -7,33 +7,33 @@
  *    奖励卡是**纯展示**（点它什么都不发生，见 C8），唯一入口是底栏那条 CTA（见 C5 / C7 / C9）。
  *
  * ══════════════════════════════════════════════════════════════════════════════════════════════
- * ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）
+ * ✅ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1｜**COMPLETE 链已在浏览器里真实打通**（本文件当前口径）
  *
- * 产品 Run 的脚本已由**四场压力阶梯**收成**三段问题序列**（`ProtoRusher` → `Chaser` →
- * `RangedTurret`），第 3 段落位在**终局** `d4-final`（FINAL；⚠️ PRODUCT-LOOP-R9 收敛为
- * **严格六节点链** · `RUN_TOTAL_DAYS` = **4**）；`RangedTurret` 是全项目
- * **唯一**声明 `enemyDrive:'keep-distance'` 的对手，而本文件那条「确定性通关路线」（主武器槽
- * `cannon` + 默认车身）在控距下**零命中** ⇒ **第一局必然 `RUN FAILED`**
- * （实测 `phase=FAILED battles=3/3 耐久=0%`；Node 同源证据见
- * `tests/productRunEncounterSequenceQ3.test.ts` Q3-07）。
+ * R6 ~ R9 期间本文件整条「COMPLETE → 领奖 → 5/5 → 合成」链是 `BLOCKED` 的，当时归因为
+ * 「产品默认车（`frontMass→cannon` + 默认车身 / 缺省轮）在第 3 段 `RangedTurret` 控距下打不赢」。
+ * 本 Queue 的调查结论是：**根因属于 B（E2E 没做玩家本应做的操作），不是产品链缺环** ——
+ *   ① 玩家可以在 Garage 里**换车身与前后轮**（`[data-ph-slot="body"|"rear"]`），本文件此前一直用默认车；
+ *   ② 非 Cannon 局的候选池是**通用基础成长池** `['damageUp','rateUp','emergencyRepair']`，
+ *      而**第 1 项选 `damageUp` 会在第 2 段阵亡** ⇒ 真实可通关的顺序是 `emergencyRepair` 优先。
+ * ⇒ 本文件现在**按真实玩家操作**走第一局：
+ *      · 夹具：`machineGun ★1 = 4/5`（本 Queue 明令允许的初始夹具，只改进库存计数一个数字）；
+ *      · 装配：`coconutBody` + 前 `wheelStd`（缺省）/ 后 `heavyWheel` + 主武器 `machineGun`
+ *        —— **全部经真实 Garage UI 点击**（`setUpWinningLoadout`），不是 probe 写 build；
+ *      · 行程：Choice 1 点 `emergencyRepair` → Choice 2 点 `damageUp` ⇒ **E3 真实 COMPLETE**
+ *        （实测 `ProtoRusher:A/my860 Chaser:A/my916 RangedTurret:A/my40`）。
  *
- * ⇒ 本文件按裁决如实降级（**判据不删，只换相位 + 记账**）：
- *    · `A*`（起点 / 载荷）与 `B1`（进 Run 瞬间的干净状态）**照常**（与终态无关）；
- *    · **新增 `C0a / C0b / C0c`**：如实降级后的**正面取证** —— 三段全打到终局 ⇒ FAILED、
- *      FAILED 终点没有候选卡 / 没有领奖动作、唯一动作是「返回主界面」且底栏按钮真实画成可用态
- *      （真实 `getImageData` 三色取证）；
- *    · `C1 ~ G2`（28 条）整块记 **`BLOCKED`**：它们的前提是「第一局 COMPLETE 后领奖」，
- *      本批次**没有观测对象**；`blocked()` 既**不计 PASS**也不计 FAIL，逐条打印原因；
- *    · `I` 段**照常**（它验的是失败路线本身）：`I1 / I2 / I3 / I5 / I6` 真实执行；
- *      **`I4` 记 `BLOCKED`**（它是 COMPLETE ↔ FAILED 的像素 A/B，A 侧基准不存在）；
- *    · `K` 段（合成）+ `H` 段（第二局）整块记 **`BLOCKED`**：前提 `cannon ★1 ×5` 来自第一局领奖。
- *
- * **后果（诚实披露）**：本文件原本承担的「浏览器端完整闭环（COMPLETE → 领奖 → 库存累积 →
- * 装回 → 第二局）」在本批次**无证据**（不是回归，是**能力下降**）。该链路的模型侧覆盖仍在：
- *   `tests/productLoopRunReward.test.ts` / `tests/productLoopEndToEndPlayerLoop.test.ts` /
- *   `tests/productFusionR2B.test.ts` / `tests/productStarPowerR2C.test.ts`；
- *   「FAILED 终点不写库」的浏览器证据仍在 `_e2e_product_fail.cjs`（48/48）。
- * 根因（第 3 段控距下默认装配打不赢）已记入未决台账 + 独立 Bug Queue。
+ * ⚠️ 这是**确定性取证路线**，不是产品推荐方案：产品侧玩家照旧三选一，没有任何一处被写死。
+ * ⚠️ 奖励对象因此从 `cannon` 换成 **`machineGun`**（R8 起奖励 = 本局真的用上的那件主武器）
+ *    —— 这不是放宽判据，而是把「被观测的那件武器」换成**能走完整条链**的那一件。
+ *    Cannon 的对照路径没有被删：`_e2e_product_fail.cjs`（48/48）仍然全程驱 `cannon`，
+ *    证明「失败不发奖 / 不发档 / 底栏唯一动作」这些判据在 cannon 上照旧成立。
+ * ⚠️ `C0a / C0b / C0c`（FAILED 降级正面取证）与 `else` 分支的 `BLOCKED` 记账都**保留**：
+ *    它们是**安全网** —— 万一第一局又变回 FAILED，整条链仍然被诚实记账为 `BLOCKED`
+ *    而不是静默跳过。
+ * ⚠️ 两条路线仍只差**真实选择**：
+ *      完成：Choice 1 `emergencyRepair` + Choice 2 `damageUp` → 终局 `RangedTurret` 被击败 → COMPLETE
+ *      失败：Choice 1 `damageUp` + Choice 2 `rateUp` → 终局耐久归零 → **FAILED（不经过 RESULT）**
+ *    两条路线**只差两次点击**，因此「失败不发奖」是同一台机器上的真实对照，不是构造出来的状态。
  * ══════════════════════════════════════════════════════════════════════════════════════════════
  *
  * 手段（与 `_e2e_product_home.cjs` 同一纪律，全部是真实行为取证）：
@@ -45,21 +45,19 @@
  *   - 只读诊断句柄 `window.__PRODUCTHOME__` / `window.__RUNPAGE__`（只读，不能借它改状态）。
  *
  * 覆盖 R2-A 技术验收 1~8（第 9 条 = tsc / targeted / build 在门禁里跑）：
- *   ⚠️ **R6 起 ②③④ 在本文件不可达**（第一局恒 FAILED ⇒ 没有 COMPLETE、没有领奖）⇒ 记 BLOCKED；
- *      它们的模型侧对应见上方披露段。
+ *   ✅ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1：②③④⑤ **已从 `BLOCKED` 转正**（第一局真的 COMPLETE 了）
  *   ① fresh profile cannon = ★1 4/5      → A2 / A3
- *   ② COMPLETE 出现真实 Weapon 奖励卡      → C3 / C6（**BLOCKED**）
- *   ③ 领取 cannon 后变成 5/5              → D4（**BLOCKED**）
- *   ④ 领取只增加对应 stack                → H3 / H4（**BLOCKED**）
- *   ⑤ 同一奖励只能领取一次                → E1/E2（**BLOCKED**；模型侧 `productLoopRunReward`）
- *   ⑥ FAILED 数量完全不变                 → I2 / I5（**照常**，本批次唯一可执行的一支）
+ *   ② COMPLETE 出现真实 Weapon 奖励卡      → C3 / C6
+ *   ③ 领取 cannon 后变成 5/5              → D4
+ *   ④ 领取只增加对应 stack                → H3 / H4
+ *   ⑤ 同一奖励只能领取一次                → E1/E2（模型侧 `productLoopRunReward`）
+ *   ⑥ FAILED 数量完全不变                 → I2 / I5（本批次仍可与 COMPLETE 正面对照）
  *   ⑦ old Profile migration 不丢数据      → 由 `tests/playerGrowthR2A.test.ts` 的 PG-07~PG-10 离线钉死
  *   ⑧ Equipped 仍指向有效库存实例          → 同上（PG-11~PG-14）
  *
  * 叠加 PRODUCT-LOOP-R2-B 技术验收（K 段，放在所有跑局断言**之后** —— ★2 会改变 Build 能量，
  * 插在中间会让「确定性通关路线」不再确定性）：
- *   ⚠️ **R6 起 K 段整块不可达**（前提 `cannon ★1 ×5` 来自领奖）⇒ ①②③⑥⑦⑧ 全记 BLOCKED，
- *      模型侧对应 = `tests/productFusionR2B.test.ts`。
+ *   ✅ R1：K 段前提（`machineGun ★1 ×5`，来自第一局领奖）**本批次成立** ⇒ ①②③⑥⑦⑧ 全部真实执行。
  *   ① 不满 5 件不能合成   → K2（DOM 里连按钮都不存在）
  *   ② 5/5 可以合成        → K1（「可合成」徽标 + 真实按钮）
  *   ③ 5×★1 → 1×★2        → K3 / K4（★1 卡消失、★2 是新卡）
@@ -71,12 +69,14 @@
  *
  * ⚠️ 两条路线都是**确定性**的（`RunBattleRuntime` 无 RNG，`portraitRunPage.test.ts` 的
  *    `FROZEN_REPAIR` / `FROZEN_UPGRADE` 已冻结）：
- *      完成：一层 `twinCannon` + 耐久事件选「维修」+ 二层 `tripleLoad` → 终局 779 耐久 → COMPLETE
- *        （⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY：玩家侧基线 80 → 120 后
- *         终局耐久 602 → 779，与 `portraitRunPage.test.ts` 的 `FROZEN_REPAIR` 同源）
- *      失败：一层 `twinCannon` + 耐久事件选「继续改装」（多拿 `heavyShell`）+ 二层 `tripleLoad`
- *            → 终局耐久归零 → **FAILED（不经过 RESULT）**
- *    两条路线**只差一次点击**，因此「失败不发奖」是同一台机器上的真实对照，不是构造出来的状态。
+ *      ⚠️ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1 起，两条路线都跑在**获胜装配**
+ *         （`coconutBody` + 后 `heavyWheel` + `machineGun`）上，只差**两次选择**：
+ *      完成：Choice 1 `emergencyRepair` + Choice 2 `damageUp` → 终局击败 `RangedTurret` → COMPLETE
+ *      失败：Choice 1 `damageUp` + Choice 2 `rateUp` → 终局耐久归零 → **FAILED（不经过 RESULT）**
+ *    （两条路线在 Node 侧的同源读数见 `tests/productRunRewardPacingR9.test.ts`；
+ *      本 Queue 的第一步调查探针读数：`emergencyRepair>{damageUp|rateUp}` 均 COMPLETE、
+ *      `{damageUp|rateUp}>*` 均在 `RangedTurret` FAILED。）
+ *    两条路线**只差两次点击**，因此「失败不发奖」是同一台机器上的真实对照，不是构造出来的状态。
  *
  * ⚠️ 为什么本文件要跑**两局成功**：R2-A 的核心是「数量会累积」，而「累积」只有在
  *    **第二局的读数与第一局不同**时才是可观测的事实。一局只能证明「+1」，两局才能证明
@@ -111,8 +111,23 @@ const MIME = {
  * ⚠️ PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1：池子**不再是一个固定常量** ——
  *    它由本局装备现算（`src/product/runReward.ts` 的 `rewardChoiceIdsFor(draft)`
  *    = 本局的基准主武器；用哪件打赢就发哪件）。
- *    本文件驱的是**产品默认车**（`frontMass→cannon`）⇒ 读数恒为 `['cannon']`，
- *    与 R2-RECOVERY 期的固定值**逐字相同**（Cannon 的 R2 路径不退化）。
+ *
+ * ⚠️⚠️ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1（**本文件当前口径**）：
+ *    R6 起本文件整条「COMPLETE → 领奖 → 5/5 → 合成」链是 **BLOCKED** 的，根因是
+ *    「产品默认车（`frontMass→cannon` + 默认车身 / 缺省轮）在第 3 段 `RangedTurret`
+ *    控距下打不赢」。**根因已定位为「E2E 没做玩家本应做的操作」**（不是产品链缺环）：
+ *      ① 玩家可以在 Garage 里换**车身**与**前后轮**（本文件此前一直用默认车）；
+ *      ② 通用成长池的第 1 项如果是 `damageUp`，玩家在第 2 段就会阵亡 ⇒
+ *         **`emergencyRepair` 优先**才是能走完三段的真实选择顺序。
+ *    ⇒ 本文件现在**按真实玩家操作**配置第一局：`coconutBody` + 前 `wheelStd` / 后 `heavyWheel`
+ *      + 主武器 `machineGun`（全部经**真实 Garage UI 点击**，不是 probe 写 build），
+ *      并在行程里点 `emergencyRepair` → `damageUp` ⇒ **E3 真实 COMPLETE**（机器读数见
+ *      `tests/productRunRewardPacingR9.test.ts` 与矩阵 `tests/productRunFullRunPathMatrixR9F.test.ts`）。
+ *
+ * ⚠️ 奖励对象因此从 `cannon` 换成 **`machineGun`**（奖励 = 本局真的用上的那件主武器）——
+ *    这不是放宽判据，而是把「被观测的那件武器」换成**能走完整条链**的那一件。
+ *    Cannon 的对照路径没有被删：`_e2e_product_fail.cjs`（48/48）仍然全程驱 `cannon`，
+ *    证明「失败不发奖 / 不发档 / 底栏唯一动作」这些判据在 cannon 上照旧成立。
  *
  * ⚠️ 全是**玩家一开始就拥有**的正式 Weapon ⇒ 不新增内容，
  *    奖励的价值体现在**数量**上（4 → 5），而不是「从无到有」。
@@ -122,16 +137,21 @@ const MIME = {
  *    玩家「这一局用不上的东西」，真人反馈 ③）。
  *    ⇒ 本文件里所有「候选条数」的断言随之改为**字面 1**（不是「≥1」）。
  */
-const CHOICE_IDS = ['cannon'];
-const NAMES = { cannon: '炮', spear: '刺', hammer: '锤' };
+const CHOICE_IDS = ['machineGun'];
+const NAMES = { cannon: '炮', spear: '刺', hammer: '锤', machineGun: '机枪' };
 /** 满 stack 阈值（与 `playerGrowth.FUSE_STACK` 同值；页面读数也必须是它）。 */
 const FUSE_STACK = 5;
 /**
  * 新账号的成长起点读数（真源 = `src/product/playerGrowth.ts` 的 `FRESH_STACK_SEED`）。
  * ⚠️ 刻意不写成「三件都是 4」：起点是 `cannon 4 / 另外两件各 1`，而这个不对称正是
  *    「第一局领 cannon 就能凑满 5/5、领别的只是 +1」这条产品设计的事实依据。
+ *
+ * ⚠️ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1：被观测的武器换成 `machineGun`，而它在
+ *    新账号起点只有 ★1 ×1（`R5` 内容池种子的保底）⇒ 本文件按 Queue 明令
+ *    「**允许测试初始夹具准备：machineGun ★1 = 4/5**」把它的 ★1 档预置成 **4**
+ *    （只改库存计数这一个数字，见 `seedMachineGunStack`；**不碰 Build / 不碰任何数值**）。
  */
-const SEED_COUNTS = { cannon: 4, spear: 1, hammer: 1 };
+const SEED_COUNTS = { cannon: 4, spear: 1, hammer: 1, machineGun: 4 };
 /**
  * PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜新账号**已拥有的全部正式武器**（`category === 'weapon'`）。
  *
@@ -153,8 +173,15 @@ const CANONICAL_WEAPON_IDS = [
   'shotgun',
   'spear',
 ];
-/** 是否带正式 sprite（`core/content.ts` 的真实值；无 sprite 的件卡片必须如实标「暂无美术」）。 */
-const HAS_SPRITE = { cannon: true, spear: false, hammer: true };
+/**
+ * 是否带正式 sprite（`core/content.ts` 的真实值；无 sprite 的件卡片必须如实标「暂无美术」）。
+ * ⚠️ 判据真源 = `FunctionalPartDef.visual` 是否存在（`runProductReward.ts:231` 的
+ *    `hasSprite: !!def.visual`）。`content.ts` 里只有 `hammer` / `cannon` / `pushRod` 三件
+ *    声明了 `visual` ⇒ 其余（含 `machineGun` / `spear`）都是 `false`。
+ * ⚠️ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1：被观测的武器换成 `machineGun` ⇒ 补它的真值
+ *    （**它是 `false`，卡片会如实画「暂无美术」**）—— 这一条没有放宽，只是把新对象登记进来。
+ */
+const HAS_SPRITE = { cannon: true, spear: false, hammer: true, machineGun: false };
 /** 三个正式存档 key（与 src 同值；E2E 独立取证，不经过页面探针）。 */
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
 const INV_KEY = 'strongfruit.ownedParts.v2';
@@ -240,10 +267,36 @@ const CTA_LABEL = [0xe9, 0xee, 0xf7];
  */
 const CTA_FILL_MIN_PX = 12000;
 
-/** 赢：耐久事件选「维修」→ 终局有耐久 → COMPLETE。 */
-const WIN_POLICY = { layer1: 'twinCannon', lateral: null, layer2: 'tripleLoad', durability: 'repair' };
-/** 输：同路线但耐久事件选「继续改装」（多拿一件横向改装）→ 终局耐久归零 → FAILED。 */
-const LOSE_POLICY = { layer1: 'twinCannon', lateral: 'heavyShell', layer2: 'tripleLoad', durability: 'upgrade' };
+/**
+ * **赢**：本文件的「确定性通关路线」。
+ *
+ * ⚠️ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1 重定口径：这条路线原来写的是
+ *    Cannon 专属池（`twinCannon` / `tripleLoad`）—— 那在 **R9 三段链**下**恒 FAILED**
+ *    （cannon 在第 3 段控距下零命中，见 `_e2e_product_fail.cjs` 的同源读数）。
+ *    现在它驱的是**真实可达的过关组合**（装配见 `setUpWinningLoadout`）：
+ *      · `layer1` → **`emergencyRepair`**（通用池第 3 项；先回耐久才能撑到第 3 段 ——
+ *        实测「`damageUp` 优先」在第 2 段就会阵亡）；
+ *      · `layer2` → **`damageUp`**（第 2 次选择落在输出提升上，刚好打穿终局）。
+ *    ⚠️ 两项都是**池里真的画出来的正式候选**，由真实鼠标点击选中（不是注入）。
+ *    ⚠️ `lateral` / `durability` 两个字段保留（R9 后脚本里已无对应节点 ⇒ 空转），
+ *       不删除是因为它们仍在 `_e2e_product_fail.cjs` 的失败路线里被用到。
+ */
+const WIN_POLICY = { layer1: 'emergencyRepair', lateral: null, layer2: 'damageUp', durability: 'repair' };
+/**
+ * **输**：**同一台车、同一份装备**，只把两次选择换成「先输出后输出」⇒ R9 三段链下真实 FAILED。
+ *
+ * ⚠️ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1 重定口径：原来是 Cannon 专属池
+ *    （`twinCannon` / `tripleLoad`），那是 R6 之前默认装配下的写法。现在整条 E2E（含 I 段失败
+ *    对照）跑的都是**获胜装配 + 通用池**（见 `setUpWinningLoadout` / `CHOICE_IDS`）⇒
+ *    必须点**池里真的存在**的两项，否则 `twinCannon` / `tripleLoad` 不在通用池里、
+ *    会被 `driveRunToEnd` 回落到池首项 ⇒ 那就不再是「玩家点的那条路线」了。
+ *    · `layer1` → **`damageUp`**（通用池首项；实测「先输出」在第 2 段就打掉约 184 耐久，
+ *      撑不到终局）；
+ *    · `layer2` → **`rateUp`**（第 2 次仍然选输出）。
+ *    实测 `RangedTurret:B/my0/en225` ⇒ **FAILED**（同装配下成功/失败只差这两次点击）。
+ * ⚠️ `lateral` / `durability` 两个字段保留（R9 后脚本里已无对应节点 ⇒ 空转）。
+ */
+const LOSE_POLICY = { layer1: 'damageUp', lateral: null, layer2: 'rateUp', durability: 'upgrade' };
 
 /** 单次完整 Run 的驱动预算（四场真实物理战斗）。 */
 const DRIVE_BUDGET_MS = 240000;
@@ -254,12 +307,12 @@ function log(pass, name, detail = '') {
   console.log((pass ? 'PASS ' : 'FAIL ') + name + (detail ? ' | ' + detail : ''));
 }
 /**
- * ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）：
- *   依赖「第一局 RUN COMPLETE → 领奖 → 库存 5/5 → 合成 ★2 → 第二局」这一整条链的判据，
- *   在本批次**没有观测对象**（第 3 段 `RangedTurret` 控距下本装载零命中 ⇒ 第一局恒 FAILED，
- *   见文件头裁决披露）。
+ * ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（真人裁决：如实降级）→
+ *   ✅ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1：**本批次已不再触发**（第一局真的 COMPLETE 了）。
  *
- *   ⇒ 这些判据既不通过（**绝不伪造成 PASS**）也不失败（不是回归）—— 单独记为 `BLOCKED`，
+ *   它现在是**安全网**：依赖「第一局 RUN COMPLETE → 领奖 → 库存 5/5 → 合成 ★2 → 第二局」
+ *   这一整条链的判据，若第一局又变回 `RUN FAILED`（例如有人改坏了获胜装配 / 选择路线），
+ *   就整块记 `BLOCKED` —— 既不通过（**绝不伪造成 PASS**）也不失败（不是回归），
  *   逐条打印原因；summary 单独计数、**退出码不受影响**。
  *   ⚠️「失败路线」本身的覆盖**没有丢**：`_e2e_product_fail.cjs`（48/48）与
  *     `tests/productLoopRunReward.test.ts` / `tests/productLoopEndToEndPlayerLoop.test.ts`
@@ -625,6 +678,66 @@ async function driveRunToEnd(page, policy, label) {
   throw new Error(`${label} 驱动超时（${DRIVE_BUDGET_MS}ms）· 最后 phase=${last ? last.phase : 'n/a'}`);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1｜两条 **真实玩家操作** helper
+
+   —— 它们的唯一目的：让第一局真的走到 `COMPLETE`（此前恒 `FAILED` ⇒ 整条
+   「领奖 / 5-5 / 合成 / 第二局」链 BLOCKED）。两者都是「真实点击 / 真实存档」，
+   没有一处绕过产品 UI、没有一处注入 Build。
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 夹具预置：把 `machineGun ★1` 的库存计数设成 `n`
+ * （本 Queue 明令允许的「**测试初始夹具准备：machineGun ★1 = 4/5**」）。
+ *
+ * ⚠️ 只改**库存计数**这一个数字（`ownedParts.v2` → `machineGun.one`）：
+ *    · **不碰 Build** —— 装备一律走真实 Garage UI（见 `setUpWinningLoadout`）；
+ *    · 不碰任何武器 / 敌人 / 车身 / 轮组数值，不新增内容；
+ *    ⇒ 不构成「测试专用 Buff」，只是把玩家的库存起点摆到 Queue 指定的位置。
+ * ⚠️ 写法刻意是「读出现有 JSON → 只覆盖那**一个**键 → 写回」：这样版本信封（`__v`）
+ *    与其它每一件部件都**逐字节不变**，不会因为手写格式而把存档写坏。
+ */
+async function seedMachineGunStack(page, n) {
+  const before = await page.evaluate((count) => {
+    const KEY = 'strongfruit.ownedParts.v2';
+    const raw = localStorage.getItem(KEY);
+    if (!raw) throw new Error('夹具预置前提不成立：新账号种子还没跑 ⇒ 库存存档不存在');
+    const obj = JSON.parse(raw);
+    const prev = obj['machineGun'] && typeof obj['machineGun'] === 'object' ? obj['machineGun'] : {};
+    obj['machineGun'] = { ...prev, one: count };
+    localStorage.setItem(KEY, JSON.stringify(obj));
+    return prev['one'] ?? 0;
+  }, n);
+  await page.reload({ waitUntil: 'load' });
+  await waitHomeReady(page);
+  return before;
+}
+
+/**
+ * 通过 **真实 Garage UI** 把车配成「本文件那条可过关的装配」。
+ *
+ * 每一步都是产品上真实存在的交互（点槽 → 点**已拥有**的卡 ⇒ 立即装备，无二次确认按钮）：
+ *   · 车身   → `coconutBody`（默认拥有的正式车身）
+ *   · 后轮   → `heavyWheel`（R3 轮组种子已发放 ⇒ 拥有；前轮保持缺省 `wheelStd`）
+ *   · 主武器 → `machineGun`（本局被观测的那件）
+ *
+ * ⚠️ 为什么是这三项：它们是**机器实测出来的最小可行组合**（产品可达空间穷举见
+ *    `tests/productRunRewardPacingR9.test.ts` 的 RP9-05 与本 Queue 的探针读数）。
+ *    用默认车身 / 缺省轮 ⇒ 第 2 段就会阵亡（本文件改造前的真实读数）。
+ * ⚠️ 这里**没有**任何 `localStorage` 直写装备 —— Build 只经产品自己的装备入口落盘。
+ */
+async function setUpWinningLoadout(page) {
+  await clickSelector(page, '[data-ph-action="open-garage"]');
+  await clickSelector(page, '[data-ph-slot="body"]');
+  await clickSelector(page, '[data-ph-body="coconutBody"]');
+  await clickSelector(page, '[data-ph-slot="rear"]');
+  await clickSelector(page, '[data-ph-movement="heavyWheel"]');
+  await clickSelector(page, '[data-ph-slot="weapon"]');
+  await clickSelector(page, '[data-ph-weapon="machineGun"]');
+  await clickSelector(page, '[data-ph-action="back-home"]');
+  await waitHomeReady(page);
+}
+
 /**
  * 「从首页出发 → 打完一局 → **真实鼠标按下底栏唯一 CTA「领取并返回」** → 回到首页」的完整一轮。
  * 返回这一轮的全部取证（不在这里做断言，断言留给主流程的字母段落）。
@@ -673,16 +786,13 @@ async function playOneRunAndClaim(page, pickDefId, policy, label) {
   */
   const rects = pDone.rewardChoiceRects;
   /*
-    ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）
-      旧写法在「COMPLETE 上候选矩形为空」时**直接 throw**。R6 把产品 Run 收成**三段问题序列**
-      （`ProtoRusher` → `Chaser` → `RangedTurret`）、第 3 段落位**终局** `d4-final`，而
-      `RangedTurret` 是全项目**唯一**声明 `enemyDrive:'keep-distance'` 的对手 ⇒
-      本 E2E 那条「确定性通关路线」（主武器槽 cannon）在控距下**零命中** ⇒
-      第一局**必然 `RUN FAILED`**（实测 `phase=FAILED battles=3/3 耐久=0%`；
-      Node 同源证据见 `tests/productRunEncounterSequenceQ3.test.ts` Q3-07）。
-      ⇒ 这里不再抛错、也不再按下 CTA：**早期返回**一份「本局没有走到 COMPLETE」的降级结果
-      （`notComplete: true`），把后续「领奖 / 库存增长 / 合成 / 第二局」整条链交给 main() 记账为
-      `BLOCKED`（既不算 PASS 也不算 FAIL，见文件头裁决披露）。
+    ⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE 的降级分支 →
+       ✅ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1：本批次第一局走的是**真实可 COMPLETE** 的
+          装配 + 选择路线（见文件头 / `setUpWinningLoadout` / `WIN_POLICY`）⇒ 这个分支不触发。
+      它被**保留**为安全网：旧写法在「COMPLETE 上候选矩形为空」时**直接 throw**；R6 起改成
+      **早期返回**一份「本局没有走到 COMPLETE」的降级结果（`notComplete: true`），
+      把后续「领奖 / 库存增长 / 合成 / 第二局」整条链交给 main() 记账为 `BLOCKED`
+      （既不算 PASS 也不算 FAIL）。若有人改坏了获胜装配 / 选择路线，这里仍然诚实记账。
       ⚠️ 仍然是**真实物理 + 真实鼠标**跑完的一局，不是构造状态 —— 降级的只是「这条链不可达」。
   */
   const notComplete = pDone.phase !== 'COMPLETE' || rects.length === 0;
@@ -917,9 +1027,16 @@ async function main() {
         home0.growth.stackThreshold === FUSE_STACK &&
         invCount(stored0, 'cannon') === 4 &&
         invCount(stored0, 'spear') === 1 &&
-        invCount(stored0, 'hammer') === 1,
-      'A2 **新账号的成长起点**（验收 ①）：cannon ★1 4/5，另外两件候选各 1/5（种子只发这一次）',
-      `fresh=${home0.growth.fresh} seeded=${home0.growth.seeded} cannon=${invCount(stored0, 'cannon')} spear=${invCount(stored0, 'spear')} hammer=${invCount(stored0, 'hammer')}`,
+        invCount(stored0, 'hammer') === 1 &&
+        /*
+          ⚠️ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1：本 Queue 观测的武器换成了 `machineGun`
+          ⇒ 顺手把它的**新账号原值**一并钉住（R5 内容池种子的保底 1 件）—— 这一条读的是
+          **夹具预置之前**的 fresh 挂载，所以它同时是「种子只发一次」与「夹具确实只改了那一个数字」
+          两件事的基线。
+        */
+        invCount(stored0, 'machineGun') === 1,
+      'A2 **新账号的成长起点**（验收 ①）：cannon ★1 4/5，另外两件各 1/5（种子只发这一次）；machineGun 保底 ★1 ×1（夹具预置前）',
+      `fresh=${home0.growth.fresh} seeded=${home0.growth.seeded} cannon=${invCount(stored0, 'cannon')} spear=${invCount(stored0, 'spear')} hammer=${invCount(stored0, 'hammer')} machineGun=${invCount(stored0, 'machineGun')}`,
     );
     /*
       ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜武器卡**数量基线**变了（非放宽）：
@@ -940,14 +1057,81 @@ async function main() {
       home0.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
     );
 
-    const token0 = home0.runToken;
-    const adv0 = new URLSearchParams(home0.adventureHref.split('?')[1] ?? '');
-    const payload0 = choicesOf(home0.adventureHref);
+    /*
+      ══════════════════════════════════════════════════════════════════════════════════════════
+      PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1｜**夹具准备（Queue 明令允许）+ 真实 Garage 装配**
+
+      ⚠️ 这两步是本 Queue 唯一「不是玩家操作」的部分，必须逐条说清楚它改了什么、没改什么：
+        ① `seedMachineGunStack(page, 4)` —— **只写库存计数** `ownedParts.v2 → machineGun.one = 4`
+           （Queue 原文：「允许测试初始夹具准备 `machineGun ★1 = 4/5`」）。**不碰 Build、
+           不碰任何武器 / 敌人 / 车身 / 轮组数值、不新增内容、不加任何测试专用 Buff**。
+        ② `setUpWinningLoadout(page)` —— **全程走真实 Garage UI**（点槽 → 点已拥有的卡 ⇒ 立即装备）：
+           `coconutBody` + 后 `heavyWheel` + 主武器 `machineGun`。**没有任何 localStorage 直写装备**。
+
+      ⚠️ 为什么必须换这三项（机器实测，不是猜测）：
+         · 默认车（默认车身 / 缺省轮）在第 2 段 `Chaser` 就会阵亡；
+         · 换成本装配后，`emergencyRepair` 优先的两次选择可以真的打穿终局 `RangedTurret`。
+        两者合起来才是「玩家用现有合法配置、现有正式 Build 真的走得通」的那条路。
+      ══════════════════════════════════════════════════════════════════════════════════════════
+    */
+    const mgBeforeFixture = await seedMachineGunStack(page, SEED_COUNTS.machineGun);
+    await setUpWinningLoadout(page);
+    const home0s = await probeHome(page);
+    const stored0s = await storageDump(page);
+    const mgCard0 = home0s.weapons.find((w) => w.defId === 'machineGun');
+    log(
+      mgBeforeFixture === 1 &&
+        invCount(stored0s, 'machineGun') === SEED_COUNTS.machineGun &&
+        !!mgCard0 &&
+        mgCard0.star === 1 &&
+        mgCard0.count === SEED_COUNTS.machineGun &&
+        mgCard0.stackText === `4/${FUSE_STACK}` &&
+        mgCard0.reachesThreshold === false &&
+        invCount(stored0s, 'cannon') === 4 &&
+        invCount(stored0s, 'spear') === 1 &&
+        invCount(stored0s, 'hammer') === 1,
+      'A6 夹具准备（**本 Queue 明令允许**）：machineGun ★1 由种子的 1 → **4/5**（库存 + Garage 卡读数双证），其余每一件一个数字都没动',
+      `machineGun ★1: ${mgBeforeFixture} → ${invCount(stored0s, 'machineGun')}（卡 ${mgCard0 ? mgCard0.stackText : 'n/a'} fusable=${mgCard0 ? mgCard0.fusable : 'n/a'}）· cannon=${invCount(stored0s, 'cannon')} spear=${invCount(stored0s, 'spear')} hammer=${invCount(stored0s, 'hammer')}`,
+    );
+    /*
+      ⚠️ `storedBuild*` 是本文件第一次读**正式 Build 存档**；这里只读三个真正被点过的槽：
+      主武器（`frontMass`）/ 后轮（`rearWheelDefId`）/ 车身（`bodyDefId`）。
+      ⚠️ **不写 helper 复用 `probeHome` 的 `equippedWeaponId`** —— 这一条的取证目的正是
+        「渲染层自述」与「磁盘存档」两处独立读出来必须一致。
+    */
+    const storedBuild1 = (() => {
+      const raw = stored0s[BUILD_KEY];
+      if (!raw) return null;
+      try {
+        const o = JSON.parse(raw);
+        return {
+          weapon: o?.functionalSelections?.[WEAPON_SLOT] ?? null,
+          body: o?.bodyDefId ?? null,
+          rear: o?.rearWheelDefId ?? null,
+        };
+      } catch {
+        return null;
+      }
+    })();
+    log(
+      !!storedBuild1 &&
+        storedBuild1.weapon === 'machineGun' &&
+        storedBuild1.body === 'coconutBody' &&
+        storedBuild1.rear === 'heavyWheel' &&
+        home0s.equippedWeaponId === 'machineGun' &&
+        home0s.view === 'home',
+      'A7 获胜装配**真的经产品 Garage UI 落盘**：正式 Build 存档里 主武器=machineGun / 车身=coconutBody / 后轮=heavyWheel（磁盘与渲染层双证）',
+      `存档 ${JSON.stringify(storedBuild1)} · 页面 equipped=${home0s.equippedWeaponId} view=${home0s.view}`,
+    );
+
+    const token0 = home0s.runToken;
+    const adv0 = new URLSearchParams(home0s.adventureHref.split('?')[1] ?? '');
+    const payload0 = choicesOf(home0s.adventureHref);
     const homeHref = adv0.get('home') ?? '';
     const expectedClaims = CHOICE_IDS.map((id) => `./home.html?run=${token0}&reward=${id}`);
     log(
-      home0.adventureHref.startsWith('./run-page.html?') &&
-        home0.startRunHref === home0.adventureHref &&
+      home0s.adventureHref.startsWith('./run-page.html?') &&
+        home0s.startRunHref === home0s.adventureHref &&
         adv0.get('run') === token0 &&
         adv0.get('reward') === null &&
         !!payload0 &&
@@ -956,7 +1140,7 @@ async function main() {
         payload0.choices.every((c, i) => c.defId === CHOICE_IDS[i]) &&
         payload0.choices.every((c, i) => c.href === expectedClaims[i]),
       'A4「开始冒险」= 带本局 token + **一整份候选载荷**（候选池 1 条领奖地址）的同产物链接；地址里**没有**裸 `reward=`',
-      `href=${home0.startRunHref}`,
+      `href=${home0s.startRunHref}`,
     );
     log(
       homeHref !== '' && !/[?&](run|reward)=/.test(homeHref),
@@ -964,16 +1148,16 @@ async function main() {
       `home=${homeHref}`,
     );
     log(
-      home0.weapons.find((w) => w.defId === 'cannon').count === SEED_COUNTS.cannon &&
+      home0s.weapons.find((w) => w.defId === 'machineGun').count === SEED_COUNTS.machineGun &&
         payload0.choices.every((c) => c.star === 1) &&
         payload0.choices.every((c, i) => c.countBefore === SEED_COUNTS[CHOICE_IDS[i]]) &&
-        payload0.choices[0].countBefore === SEED_COUNTS.cannon,
-      'A5 载荷里的数量读数 = 出发那一刻的真实库存（4 / 1 / 1，逐件对账）；候选共用同一个本局 token ⇒ 只能领一次',
+        payload0.choices[0].countBefore === SEED_COUNTS.machineGun,
+      'A5 载荷里的数量读数 = 出发那一刻的真实库存（machineGun 夹具 4/5，逐件对账）；候选共用同一个本局 token ⇒ 只能领一次',
       `载荷=${payload0.choices.map((c) => `${c.defId}:${c.countBefore}`).join(' ')}`,
     );
 
     /* ============================ 第一局：按底栏 CTA 领取（验收 ③） ============================ */
-    const r1 = await playOneRunAndClaim(page, 'cannon', WIN_POLICY, '第一局（完成路线）');
+    const r1 = await playOneRunAndClaim(page, 'machineGun', WIN_POLICY, '第一局（完成路线）');
     const pDone = r1.pDone;
 
     log(
@@ -986,23 +1170,23 @@ async function main() {
     );
 
     /*
-      ⚠️⚠️ PRODUCT-LOOP-R6-BASIC-ENCOUNTER-SEQUENCE（**真人裁决：保持现状 + 如实降级**）
-      第一局在三段序列的**第 3 段**（终局 `RangedTurret`，唯一声明 `keep-distance` 的对手）必然
-      `FAILED`（见文件头披露段）。⇒ 下面 `C1 ~ G2` 共 28 条「COMPLETE → 领奖 → 库存 5/5 →
-      装回 cannon」的判据**本批次没有观测对象**，逐条记 `BLOCKED`（不计 PASS、不计 FAIL）；
-      同时补三条**如实降级后的正面取证**（`C0a/C0b/C0c`，仍然全部是真实物理 + 真实
-      `getImageData`，不构造状态）。
+      ⚠️ **安全网分支**（PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1 起**不触发**）：
+      第一局现在走的是真实可 COMPLETE 的装配 + 选择路线（见文件头 `A6/A7` 与本段上面的说明）。
+      若它又变回 `FAILED`（有人改坏装配 / 选择路线），下面 `C1 ~ G2` 共 28 条
+      「COMPLETE → 领奖 → 库存 5/5 → 装回 machineGun」的判据就**没有观测对象**，
+      逐条记 `BLOCKED`（不计 PASS、不计 FAIL）；同时补三条**如实降级后的正面取证**
+      （`C0a/C0b/C0c`，仍然全部是真实物理 + 真实 `getImageData`，不构造状态）。
       ⚠️ `B1` 留在门外：它验的是**进入 Run 那一刻**的干净状态，与终态无关。
     */
     const r1Completed = r1.notComplete !== true;
     if (!r1Completed) {
-      const whyFail = '不可达：第一局 RUN FAILED（第 3 段 RangedTurret 控距下 cannon 组合零命中）';
+      const whyFail = '不可达：安全网分支 —— 第一局没有走到 COMPLETE（应走 A6/A7 的获胜装配 + WIN_POLICY）';
       log(
         pDone.phase === 'FAILED' &&
           pDone.failed === true &&
           pDone.complete === false &&
           pDone.battlesCompleted === 3,
-        'C0a（如实降级）第一局真实打完一整局 → RUN FAILED（三段全打到终局，第 3 段控距下零命中）',
+        'C0a（安全网）第一局真实打完一整局 → RUN FAILED（三段全打到终局）',
         `phase=${pDone.phase} battles=${pDone.battlesCompleted}/${pDone.battleTotal} 耐久=${pDone.battle.durabilityPercent}% DAY=${pDone.day} 用时 ${round2(r1.done.ms / 1000)}s`,
       );
       log(
@@ -1013,7 +1197,7 @@ async function main() {
           r1.pixel.iconGlyph === 0 &&
           pDone.claiming === false &&
           pDone.claimStarts === 0,
-        'C0b（如实降级）FAILED 终点**没有**候选卡、也**没有**领奖动作（真实 getImageData：卡底 / 图标框 / 字形像素全 0）',
+        'C0b（安全网）FAILED 终点**没有**候选卡、也**没有**领奖动作（真实 getImageData：卡底 / 图标框 / 字形像素全 0）',
         `候选=${pDone.rewardChoices.length} rects=${pDone.rewardChoiceRects.length} claiming=${pDone.claiming} starts=${pDone.claimStarts}`,
       );
       log(
@@ -1024,7 +1208,7 @@ async function main() {
           r1.ctaFillOn >= CTA_FILL_MIN_PX &&
           r1.ctaFillOff === 0 &&
           r1.ctaLabelPx > 0,
-        'C0c（如实降级）FAILED 的**唯一动作**是「返回主界面」→ 产品首页，且底栏按钮真实画成可用态（可用态成片 / 禁用态 0 / 有文案像素）',
+        'C0c（安全网）FAILED 的**唯一动作**是「返回主界面」→ 产品首页，且底栏按钮真实画成可用态（可用态成片 / 禁用态 0 / 有文案像素）',
         `label=${pDone.actionLabel} enabled=${pDone.actionEnabled} exit=${pDone.exitHref} 可用态=${r1.ctaFillOn}(≥${CTA_FILL_MIN_PX}) 禁用态=${r1.ctaFillOff} 文案=${r1.ctaLabelPx}`,
       );
       /*
@@ -1036,6 +1220,16 @@ async function main() {
       await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
       await waitHomeReady(page);
     }
+    /*
+      ⚠️ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1｜I4 的 **A 侧像素基准** 必须在**这一层**声明：
+      它们本来是 `const`（在下面那个 `if (r1Completed) {` 块里），而 I4 在**块外**读它们
+      ⇒ R6~R9 之所以没炸，只是因为 `r1Completed` 恒为 false、I4 分支从来没执行过（潜伏作用域 bug）。
+      本 Queue 起第一局真的 COMPLETE ⇒ I4 会执行 ⇒ 必须提到外层（`let` + 分支内赋值）。
+    */
+    let abRect = null;
+    let abCardBgPx = 0;
+    let abIconFramePx = 0;
+    let abIconGlyphPx = 0;
     if (r1Completed) {
 
     log(
@@ -1111,10 +1305,10 @@ async function main() {
       内部 ⇒ 同一个矩形可以拿来做 COMPLETE / FAILED 对照。
       候选收窄为 1 张后，这一张**仍**画在同一个槽位上 ⇒ 对照关系一字未变。
     */
-    const abRect = rects[rects.length - 1];
-    const abCardBgPx = r1.pixel.abCardBg;
-    const abIconFramePx = r1.pixel.abIconFrame;
-    const abIconGlyphPx = r1.pixel.abIconGlyph;
+    abRect = rects[rects.length - 1];
+    abCardBgPx = r1.pixel.abCardBg;
+    abIconFramePx = r1.pixel.abIconFrame;
+    abIconGlyphPx = r1.pixel.abIconGlyph;
     /*
       阈值来源（不是拍的，**按实际卡数重推**）：
       候选 1 张 ⇒ 矩形面积 = 1 × 362 × 68 = 24616 px²。
@@ -1218,7 +1412,7 @@ async function main() {
     );
 
     log(
-      r1.urlAfter === `/home.html?run=${token0}&reward=cannon`,
+      r1.urlAfter === `/home.html?run=${token0}&reward=machineGun`,
       'D1 按下**底栏唯一 CTA** = 真实整页导航到那件奖励自己的领奖地址（与卡片无关）',
       `url=${r1.urlAfter}`,
     );
@@ -1235,33 +1429,34 @@ async function main() {
     log(
       r1.homeAfter.claim !== null &&
         r1.homeAfter.claim.ok === true &&
-        r1.homeAfter.claim.defId === 'cannon' &&
+        r1.homeAfter.claim.defId === 'machineGun' &&
         r1.homeAfter.claim.countAfter === 5 &&
         !!claimDom &&
         claimDom.state === 'ok' &&
-        claimDom.def === 'cannon' &&
-        claimDom.text.includes(NAMES.cannon),
-      'D2 产品侧 Profile Repository 完成入库并如实展示：cannon 4 → **5**（验收 ③）',
+        claimDom.def === 'machineGun' &&
+        claimDom.text.includes(NAMES.machineGun),
+      'D2 产品侧 Profile Repository 完成入库并如实展示：machineGun 4 → **5**（验收 ③）',
       `ok=${r1.homeAfter.claim ? r1.homeAfter.claim.ok : 'n/a'} count=${r1.homeAfter.claim ? r1.homeAfter.claim.countAfter : 'n/a'} dom=${claimDom ? `[${claimDom.state}] ${claimDom.text}` : 'n/a'}`,
     );
     log(
-      invCount(r1.storedBefore, 'cannon') === 4 &&
-        invCount(r1.storedAfter, 'cannon') === 5 &&
+      invCount(r1.storedBefore, 'machineGun') === 4 &&
+        invCount(r1.storedAfter, 'machineGun') === 5 &&
+        invCount(r1.storedAfter, 'cannon') === 4 &&
         invCount(r1.storedAfter, 'spear') === 1 &&
         invCount(r1.storedAfter, 'hammer') === 1 &&
         ledgerTokens(r1.storedAfter).length === 1 &&
         ledgerTokens(r1.storedAfter)[0] === token0,
-      'D3 **独立取证**（读浏览器真实 localStorage）：只有 cannon +1，另外两件一个数字都没动；账本记下本局 token',
-      `cannon ${invCount(r1.storedBefore, 'cannon')}→${invCount(r1.storedAfter, 'cannon')} · spear ${invCount(r1.storedAfter, 'spear')} · hammer ${invCount(r1.storedAfter, 'hammer')} · 账本=${JSON.stringify(ledgerTokens(r1.storedAfter))}`,
+      'D3 **独立取证**（读浏览器真实 localStorage）：只有 machineGun +1，另外三件一个数字都没动；账本记下本局 token',
+      `machineGun ${invCount(r1.storedBefore, 'machineGun')}→${invCount(r1.storedAfter, 'machineGun')} · cannon ${invCount(r1.storedAfter, 'cannon')} · spear ${invCount(r1.storedAfter, 'spear')} · hammer ${invCount(r1.storedAfter, 'hammer')} · 账本=${JSON.stringify(ledgerTokens(r1.storedAfter))}`,
     );
     log(
-      r1.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText === '5/5' &&
-        r1.homeAfter.weapons.find((w) => w.defId === 'cannon').reachesThreshold === true &&
+      r1.homeAfter.weapons.find((w) => w.defId === 'machineGun').stackText === '5/5' &&
+        r1.homeAfter.weapons.find((w) => w.defId === 'machineGun').reachesThreshold === true &&
         // R2-B：满 stack 同时意味着**进入可合成态**（能否真的合，由末尾 K 段真实点击验证）
-        r1.homeAfter.weapons.find((w) => w.defId === 'cannon').fusable === true &&
-        r1.homeAfter.weapons.find((w) => w.defId === 'cannon').maxStar === false,
-      'D4 领奖后的首页读数：cannon 达到满 stack ⇒ 显示 `5/5` 且 `fusable=true`（★2 未到上限）',
-      `cannon stackText=${r1.homeAfter.weapons.find((w) => w.defId === 'cannon').stackText}`,
+        r1.homeAfter.weapons.find((w) => w.defId === 'machineGun').fusable === true &&
+        r1.homeAfter.weapons.find((w) => w.defId === 'machineGun').maxStar === false,
+      'D4 领奖后的首页读数：machineGun 达到满 stack ⇒ 显示 `5/5` 且 `fusable=true`（★2 未到上限）',
+      `machineGun stackText=${r1.homeAfter.weapons.find((w) => w.defId === 'machineGun').stackText}`,
     );
     /*
       PRODUCT-LOOP-P0-SETTLEMENT-CTA-LATENCY（必改 7）｜**时延守门**（本 Queue 沿用）。
@@ -1301,7 +1496,7 @@ async function main() {
     });
     log(
       !!r1.homeAfter.homeGrowth &&
-        r1.homeAfter.homeGrowth.defId === 'cannon' &&
+        r1.homeAfter.homeGrowth.defId === 'machineGun' &&
         r1.homeAfter.homeGrowth.star === 1 &&
         r1.homeAfter.homeGrowth.count === 5 &&
         r1.homeAfter.homeGrowth.threshold === FUSE_STACK &&
@@ -1311,7 +1506,7 @@ async function main() {
         growthDom.ready === 'true' &&
         growthDom.text.includes('成长 5/5') &&
         growthDom.readyLabel === '可升星',
-      'D4b **必改 5**：首页真的画出一行最小成长状态（`炮 ★1 成长 5/5 可升星`），读数与库存同源（探针与真实 DOM 双证）',
+      'D4b **必改 5**：首页真的画出一行最小成长状态（`机枪 ★1 成长 5/5 可升星`），读数与库存同源（探针与真实 DOM 双证）',
       `探针=${JSON.stringify(r1.homeAfter.homeGrowth)} · DOM=${growthDom.text}`,
     );
     log(
@@ -1320,9 +1515,9 @@ async function main() {
         !!growthDom.hintText &&
         growthDom.hintText.includes('已可升星') &&
         growthDom.hintText.includes('调整战车') &&
-        invCount(r1.storedAfter, 'cannon', 2) === 0,
+        invCount(r1.storedAfter, 'machineGun', 2) === 0,
       'D4c **必改 6**：领奖提示**自然引导到下一步**（`已可升星 → 点「调整战车」合成`），且此刻 ★2 **还不存在** ⇒ 页面绝不代替玩家合成',
-      `hint=${growthDom.hintState} 「${growthDom.hintText}」 · ★2=${invCount(r1.storedAfter, 'cannon', 2)}`,
+      `hint=${growthDom.hintState} 「${growthDom.hintText}」 · ★2=${invCount(r1.storedAfter, 'machineGun', 2)}`,
     );
 
     /* --------------------------- 2) 同一 Run **换一件**再领 → 仍然领不到（验收 ⑤） */
@@ -1345,9 +1540,9 @@ async function main() {
       `ok=${homeDup.claim ? homeDup.claim.ok : 'n/a'} reason=${homeDup.claim ? homeDup.claim.reason : 'n/a'} dom=${dupDom ? `[${dupDom.state}] ${dupDom.text}` : 'n/a'}`,
     );
     log(
-      invCount(storedDup, 'cannon') === 5 && invCount(storedDup, 'spear') === 1 && ledgerTokens(storedDup).length === 1,
-      'E2 库存逐项不变（cannon 仍 5 / spear 仍 1），账本仍只有 1 条（没有第二条记录）',
-      `cannon=${invCount(storedDup, 'cannon')} spear=${invCount(storedDup, 'spear')} 账本=${ledgerTokens(storedDup).length}`,
+      invCount(storedDup, 'machineGun') === 5 && invCount(storedDup, 'cannon') === 4 && invCount(storedDup, 'spear') === 1 && ledgerTokens(storedDup).length === 1,
+      'E2 库存逐项不变（machineGun 仍 5 / cannon 仍 4 / spear 仍 1），账本仍只有 1 条（没有第二条记录）',
+      `machineGun=${invCount(storedDup, 'machineGun')} cannon=${invCount(storedDup, 'cannon')} spear=${invCount(storedDup, 'spear')} 账本=${ledgerTokens(storedDup).length}`,
     );
 
     /* ------------------------------------- 3) 回车库：真的看到并装上刚长出来的那件 */
@@ -1362,23 +1557,23 @@ async function main() {
 
     await clickSelector(page, '[data-ph-action="open-garage"]');
     const g1 = await probeHome(page);
-    const cannonCard = await garageCard(page, 'cannon');
+    const mgCard1 = await garageCard(page, 'machineGun');
     const spearCard = await garageCard(page, 'spear');
     log(
       g1.view === 'garage' &&
-        !!cannonCard &&
-        cannonCard.star === '1' &&
-        cannonCard.count === '5' &&
-        cannonCard.stackText === '5/5' &&
-        cannonCard.threshold === String(FUSE_STACK) &&
-        cannonCard.text.includes(NAMES.cannon) &&
+        !!mgCard1 &&
+        mgCard1.star === '1' &&
+        mgCard1.count === '5' &&
+        mgCard1.stackText === '5/5' &&
+        mgCard1.threshold === String(FUSE_STACK) &&
+        mgCard1.text.includes(NAMES.machineGun) &&
         !!spearCard &&
         spearCard.star === '1' &&
         spearCard.count === '1' &&
         spearCard.stackText === '1/5' &&
         spearCard.fusable === 'false',
-      'F2 调整战车：Weapon 卡**带星级与数量**（`炮 ★1 5/5` / `刺 ★1 1/5`），且与库存同源',
-      `${cannonCard ? cannonCard.text : 'n/a'} ｜ ${spearCard ? spearCard.text : 'n/a'}`,
+      'F2 调整战车：Weapon 卡**带星级与数量**（`机枪 ★1 5/5` / `刺 ★1 1/5`），且与库存同源',
+      `${mgCard1 ? mgCard1.text : 'n/a'} ｜ ${spearCard ? spearCard.text : 'n/a'}`,
     );
 
     const energyBefore = g1.energy;
@@ -1411,7 +1606,7 @@ async function main() {
     );
     log(
       g3.energy === energyBefore - 5 && g3.energyCapacity === g1.energyCapacity,
-      'F5「装上它真的不一样」：能量读数按两件正式武器的差额真实变化（炮 E30 → 刺 E25，不写死显示值）',
+      'F5「装上它真的不一样」：能量读数按两件正式武器的差额真实变化（机枪 E30 → 刺 E25，不写死显示值）',
       `能量 ${energyBefore} → ${g3.energy} / 容量 ${g3.energyCapacity}`,
     );
 
@@ -1423,38 +1618,37 @@ async function main() {
     /*
       ⚠️ PRODUCT-LOOP-R5-BASIC-CONTENT-POOL-R1｜`weaponIds.length === 3` → **逐 id 等于全部 9 件**
       （内容池种子把正式武器全部补到 ★1 ⇒ 新账号就有 9 件；见 `CANONICAL_WEAPON_IDS` 的说明）。
-      其余判据（装的是 spear / 账本 = 1 / cannon 5 件 / spear 1 件）**一字未改**。
+      其余判据（装的是 spear / 账本 = 1 / machineGun 5 件 / spear 1 件）**一字未改**。
     */
     const reloadedWeaponIds = afterReload.weaponIds.slice().sort();
     log(
       afterReload.equippedWeaponId === 'spear' &&
         reloadedWeaponIds.join(',') === CANONICAL_WEAPON_IDS.join(',') &&
         afterReload.claimedRunCount === 1 &&
-        invCount(stored4, 'cannon') === 5 &&
+        invCount(stored4, 'machineGun') === 5 &&
         invCount(stored4, 'spear') === 1,
-      'G1 整页 reload 后：装备 / 数量 / 账本全部来自真实持久化（cannon 5 件仍是 5 件）',
-      `equipped=${afterReload.equippedWeaponId} weapons=${afterReload.weaponIds.length}(${reloadedWeaponIds.join(',')}) claimed=${afterReload.claimedRunCount} cannon=${invCount(stored4, 'cannon')}`,
+      'G1 整页 reload 后：装备 / 数量 / 账本全部来自真实持久化（machineGun 5 件仍是 5 件）',
+      `equipped=${afterReload.equippedWeaponId} weapons=${afterReload.weaponIds.length}(${reloadedWeaponIds.join(',')}) claimed=${afterReload.claimedRunCount} machineGun=${invCount(stored4, 'machineGun')}`,
     );
 
     /*
-      ⚠️ 第二局出发前**必须换回 cannon** —— 这不是「顺手点一下」，而是一条**实测约束**：
-      主武器槽的实测矩阵（`src/product/playerLoadout.ts` 的 `DEFAULT_CLEARED_SLOT` 注释）里，
-      只有 cannon（远程炮）能在默认车上稳定打完四场；spear 会在第 2 场僵持跑不完、
-      hammer 第 1 场就被打死（玩家弹丸峰值 0）。
-      本段要的是「第二局**真的打完**」（验收 ④ 需要 COMPLETE 才会出现候选卡），
-      所以必须让它带着**能赢的那件**出发 —— 这是产品事实，不是为了测试放水。
-      ⚠️ 顺带实证「装备是可逆的」：能量读数应当回到装 cannon 时的读数。
+      ⚠️ 第二局出发前**必须换回 machineGun** —— 这不是「顺手点一下」，而是一条**本 Queue 的实测约束**：
+      本文件第二局要的是「**真的打完**」（验收 ④ 需要 COMPLETE 才会出现候选卡），因此主武器必须是
+      本 Queue 实测能通关的那一件：**`machineGun` + `coconutBody` + 后 `heavyWheel`**
+      （`emergencyRepair` → `damageUp`；实测 `ProtoRusher:A/my860 Chaser:A/my916 RangedTurret:A/my40`）。
+      ⚠️ 顺带实证「装备是可逆的」：能量读数应当回到装 machineGun 时的读数
+      （`machineGun.energy === cannon.energy === 30` ⇒ 与旧的 cannon 口径读数**同值**）。
     */
     await clickSelector(page, '[data-ph-action="open-garage"]');
-    await clickSelector(page, '[data-ph-weapon="cannon"]');
+    await clickSelector(page, '[data-ph-weapon="machineGun"]');
     const g4 = await probeHome(page);
-    const storedCannonBack = await storageDump(page);
+    const storedWeaponBack = await storageDump(page);
     log(
-      storedWeaponSlot(storedCannonBack) === 'cannon' &&
-        g4.equippedWeaponId === 'cannon' &&
+      storedWeaponSlot(storedWeaponBack) === 'machineGun' &&
+        g4.equippedWeaponId === 'machineGun' &&
         g4.energy === energyBefore,
-      'G2 换回 cannon（第二局要真的打完四场 ⇒ 主武器必须是实测能赢的那件）：正式存档武器槽 = cannon，能量回到 55（装备可逆）',
-      `frontMass=${storedWeaponSlot(storedCannonBack)} 能量=${g4.energy}`,
+      'G2 换回 machineGun（第二局要真的打完 ⇒ 主武器必须是本 Queue 实测能通关的那件）：正式存档武器槽 = machineGun，能量回到装它时的读数（装备可逆）',
+      `frontMass=${storedWeaponSlot(storedWeaponBack)} 能量=${g4.energy}`,
     );
     await clickSelector(page, '[data-ph-action="back-home"]');
 
@@ -1462,10 +1656,10 @@ async function main() {
       ============ 第二局（H 段）**已挪到 K 段（合成）之后** ============
 
       ⚠️ PRODUCT-LOOP-R2-RECOVERY-ONBOARDING-CLARITY（必改 2）的两条硬约束把这一段逼到了后面：
-      ① 候选池收窄为 `['cannon']` ⇒ 玩家在终点**只能**点 cannon 那张卡。
+      ① 候选池收窄为 `['machineGun']` ⇒ 玩家在终点**只能**点 machineGun 那张卡。
          旧写法 `playOneRunAndClaim(page, 'hammer', …)` 会在候选池里找不到 hammer
          （`CHOICE_IDS.indexOf('hammer')` = **-1**）⇒ `cards.choices[-1]` 直接越界。
-      ② 但它**不能**在合并之前领 cannon：合成（K 段）的前提是 `cannon ★1` **恰好 5 件**
+      ② 但它**不能**在合并之前领 machineGun：合成（K 段）的前提是 `machineGun ★1` **恰好 5 件**
          （`5 × ★1 → 1 × ★2` 之后 ★1 必须归 0）。若先领到 6 件，一次合成只会留下 1 件 ★1，
          K3 / K4 / K8 那几条「★1 归零 ⇒ 卡消失」的判据就全部失真。
       ⇒ 顺序改为「**先合成（K）→ 再开第二局领 ★1（H）**」，H 段见 `J1` 之前。
@@ -1473,11 +1667,12 @@ async function main() {
 
     } else {
       /*
-        ⚠️ R6 如实降级：`C1 ~ G2` 整条「COMPLETE → 领奖 → 库存 → 装回」链**不可达**
-        ⇒ 逐条记 `BLOCKED`（**既不算 PASS 也不算 FAIL**，绝不伪造成通过）。
+        ⚠️ **安全网**（PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1 起不触发）：`C1 ~ G2` 整条
+        「COMPLETE → 领奖 → 库存 → 装回」链在没有观测对象时逐条记 `BLOCKED`
+        （**既不算 PASS 也不算 FAIL**，绝不伪造成通过）。
         括号里是**稳定的断言 id**（描述按当轮口径缩短，便于回执对账）。
       */
-      const why = '不可达：第一局 RUN FAILED（第 3 段 RangedTurret 控距下 cannon 组合零命中）';
+      const why = '安全网：第一局没有走到 COMPLETE（应走 A6/A7 的获胜装配 + WIN_POLICY）';
       for (const n of [
         'C1 → RUN COMPLETE（同一条确定性路线）',
         'C2 候选卡只在 COMPLETE 出现（其它相位都没有）',
@@ -1491,9 +1686,9 @@ async function main() {
         'C10 进入 COMPLETE 时战斗音频已停（活跃音源 0 / 停止过）',
         'C10b 结算页停留 1.5s 后声音没有重新启动',
         'D1 按下底栏 CTA = 整页导航到那件奖励自己的领奖地址',
-        'D2 产品侧 Profile Repository 完成入库：cannon 4 → 5',
-        'D3 独立取证（真实 localStorage）：只有 cannon +1',
-        'D4 领奖后首页读数：cannon 满 stack ⇒ 5/5 且 fusable',
+        'D2 产品侧 Profile Repository 完成入库：machineGun 4 → 5',
+        'D3 独立取证（真实 localStorage）：只有 machineGun +1',
+        'D4 领奖后首页读数：machineGun 满 stack ⇒ 5/5 且 fusable',
         'D5 结算 CTA → 首页的墙钟时延在上界内',
         'D4b 首页真的画出一行最小成长状态（与库存同源）',
         'D4c 领奖提示自然引导到下一步（已可升星 → 调整战车）',
@@ -1505,14 +1700,19 @@ async function main() {
         'F4 装上成功：正式 Build 存档的武器槽也变了',
         'F5 装上它真的不一样：能量读数按两件武器的差额变化',
         'G1 整页 reload 后装备 / 数量 / 账本全部来自真实持久化',
-        'G2 换回 cannon：正式存档武器槽 = cannon，能量回到 55',
+        'G2 换回 machineGun：正式存档武器槽 = machineGun，能量回到装它时的读数',
       ]) {
         blocked(n, why);
       }
     } /* ← if (r1Completed) 结束：B1 之后的 COMPLETE / 领奖链到此为止 */
 
     const storedFinal = await storageDump(page);
-    const finalCounts = { cannon: invCount(storedFinal, 'cannon'), spear: invCount(storedFinal, 'spear'), hammer: invCount(storedFinal, 'hammer') };
+    const finalCounts = {
+      cannon: invCount(storedFinal, 'cannon'),
+      machineGun: invCount(storedFinal, 'machineGun'),
+      spear: invCount(storedFinal, 'spear'),
+      hammer: invCount(storedFinal, 'hammer'),
+    };
 
     /* ------------------- 5) FAILED 对照：同一条机器、只差一次点击 → 数量零变化（验收 ⑥） */
     const failPage = await ctx.newPage();
@@ -1520,10 +1720,14 @@ async function main() {
     failPage.on('pageerror', (e) => failErrors.push(String(e)));
     /*
       ⚠️ 按**产品真实上下文**打开（而不是零参数）：那一局必须和玩家真实出发的那一局
-         带一样的东西（`run` / `choices` / `home`）—— 这样「即使三条领奖地址就摆在同一个
-         页面上，失败也拿不到它们」才是结构性反证（验收 ⑥ 的最强形态）。
-         ⚠️ 刻意**不带** `equipped`：保留 demo 装载 ⇒ `LOSE_POLICY` 的确定性（耐久归零路线）
-         与 R1-C 逐字一致，本段只变「产品上下文」这一个自变量。
+         带一样的东西（`run` / `choices` / `home` / **`equipped`**）—— 这样「即使领奖地址
+         就摆在同一个页面上，失败也拿不到它」才是结构性反证（验收 ⑥ 的最强形态）。
+      ⚠️ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1 勘误：旧注释写「刻意**不带** `equipped`，
+         保留 demo 装载」——那是**错的**。`adventureHref` 由产品侧 `buildAdventureHref()` 生成，
+         它**本来就含 `equipped=`**（R1-C 起装备就是走 URL 通道进的 Run，见 `runReward.ts` 的
+         模块头注释）⇒ 这一段一直以来跑的都是**与出发时同一份**装备。本 Queue 把它改对：
+         失败路线 = **同一台车、同一份装备**，只差两次选择（`WIN_POLICY` vs `LOSE_POLICY`），
+         这比旧注释描述的对照更强 —— 「失败不发奖」不再是「换了辆车」的解释。
     */
     const homeForFail = await probeHome(page);
     const failQuery = new URLSearchParams(homeForFail.adventureHref.split('?')[1] ?? '');
@@ -1533,7 +1737,7 @@ async function main() {
     const pFail = lose.probe;
     log(
       pFail.phase === 'FAILED' && pFail.failed === true && pFail.complete === false,
-      'I1 同路线改选「继续改装」→ 终局耐久归零 → RUN FAILED（真实浏览器对照，不是构造状态）',
+      'I1 同一条真实路线、同一份「产品上下文」（含 `equipped`）改选「先输出后输出」→ 终局耐久归零 → RUN FAILED（真实浏览器对照，不是构造状态）',
       `phase=${pFail.phase} failed=${pFail.failed} 用时 ${round2(lose.ms / 1000)}s`,
     );
     log(
@@ -1553,15 +1757,17 @@ async function main() {
       `label=${pFail.actionLabel} enabled=${pFail.actionEnabled} exit=${pFail.exitHref}`,
     );
     /*
-      像素 A/B：**同一块矩形**（最下面那张候选卡的位置）上
-        COMPLETE = 三张候选卡之一 ⇒ 有卡片专属图形（图标框底 + Collider 本体）；
+     像素 A/B：**同一块矩形**（最后那张候选卡的位置）上
+        COMPLETE = 那张候选卡 ⇒ 有卡片专属图形（图标框底 + Collider 本体）；
         FAILED   = 结算面板复用同一槽位 ⇒ 卡片专属图形必须为 **0**。
       这比「有没有底色」强：失败那块画的是结算面板，不是发奖。
     */
     /*
-      ⚠️ R6 如实降级：I4 是 **COMPLETE ↔ FAILED 的像素 A/B**，A 侧基准来自第一局的 COMPLETE 屏
-      （`abRect` / `abIconFramePx` / `abIconGlyphPx`）。本批次第一局恒 FAILED ⇒ A 侧不存在
-      ⇒ 记 `BLOCKED`（`abRect` 此时为 `undefined`，**必须**先挡在外面，否则浏览器侧取 `.x` 会炸）。
+      ⚠️ I4 是 **COMPLETE ↔ FAILED 的像素 A/B**，A 侧基准来自第一局的 COMPLETE 屏
+      （`abRect` / `abIconFramePx` / `abIconGlyphPx`）。PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1
+      起第一局真的 COMPLETE ⇒ A 侧基准**存在**，本条照常执行。
+      ⚠️ 下面的 `else` 是**安全网**：若第一局变回 FAILED（A 侧不存在，`abRect` 为 `undefined`，
+      必须先挡在外面，否则浏览器侧取 `.x` 会炸）⇒ 记 `BLOCKED`。
       ⚠️ I1 / I2 / I3 / I5 / I6 与终态无关（它们验的是失败路线本身）⇒ 照常执行。
     */
     if (r1Completed) {
@@ -1576,13 +1782,19 @@ async function main() {
     } else {
       blocked(
         'I4 像素 A/B：同一块矩形上 COMPLETE 有候选卡专属图形，FAILED 一个像素都没有',
-        '不可达：本批次没有 COMPLETE 屏（第 3 段控距下第一局恒 FAILED）⇒ A 侧基准不存在',
+        '安全网：第一局没有走到 COMPLETE ⇒ A 侧基准不存在',
       );
     }
     const stored5 = await storageDump(failPage);
-    const failCounts = { cannon: invCount(stored5, 'cannon'), spear: invCount(stored5, 'spear'), hammer: invCount(stored5, 'hammer') };
+    const failCounts = {
+      cannon: invCount(stored5, 'cannon'),
+      machineGun: invCount(stored5, 'machineGun'),
+      spear: invCount(stored5, 'spear'),
+      hammer: invCount(stored5, 'hammer'),
+    };
     log(
       failCounts.cannon === finalCounts.cannon &&
+        failCounts.machineGun === finalCounts.machineGun &&
         failCounts.spear === finalCounts.spear &&
         failCounts.hammer === finalCounts.hammer &&
         /*
@@ -1593,16 +1805,16 @@ async function main() {
         */
         ledgerTokens(stored5).length === ledgerTokens(storedFinal).length &&
         /*
-          ⚠️ R6 如实降级：`>= 1` 那条原本证「**领过之后**再失败也不增」，前提是第一局领过奖。
-          本批次第一局恒 FAILED ⇒ 账本本来就是 **0**（一次都没领过）⇒ 改成按实际情形选口径：
-             · 领过（`r1Completed`）⇒ 仍要求 `>= 1`（对照才有意义）；
-             · 没领过 ⇒ 要求 `=== 0`，本条只证「失败**不写入**任何账本条目」（弱一档，如实标注）。
+          ⚠️ `>= 1` 那条证的是「**领过之后**再失败也不增」：只有在第一局真的领过奖时才成立。
+          `r1Completed` 在本 Queue 恒为真 ⇒ 走 `>= 1` 这一档（对照才有意义）；
+          若安全网触发（第一局没 COMPLETE、账本本来就是 0）⇒ 要求 `=== 0`，
+          只证「失败**不写入**任何账本条目」（弱一档）。
         */
         (r1Completed ? ledgerTokens(stored5).length >= 1 : ledgerTokens(stored5).length === 0),
       r1Completed
         ? 'I5 **验收 ⑥**：失败一局之后三件数量与账本**一个数字都没动**（失败不补偿、不发奖、不增长）'
-        : 'I5（如实降级）失败一局之后三件数量与账本**一个数字都没动**（本批次账本恒 0 —— 一次奖都没领过 ⇒ 只证「失败不写入」，不含「领过之后失败不增」那一档对照）',
-      `cannon ${finalCounts.cannon}→${failCounts.cannon} · spear ${finalCounts.spear}→${failCounts.spear} · hammer ${finalCounts.hammer}→${failCounts.hammer} · 账本=${ledgerTokens(storedFinal).length}→${ledgerTokens(stored5).length}`,
+        : 'I5（安全网）失败一局之后三件数量与账本**一个数字都没动**（账本恒 0 ⇒ 只证「失败不写入」，不含「领过之后失败不增」那一档对照）',
+      `cannon ${finalCounts.cannon}→${failCounts.cannon} · machineGun ${finalCounts.machineGun}→${failCounts.machineGun} · spear ${finalCounts.spear}→${failCounts.spear} · hammer ${finalCounts.hammer}→${failCounts.hammer} · 账本=${ledgerTokens(storedFinal).length}→${ledgerTokens(stored5).length}`,
     );
     log(failErrors.length === 0, 'I6 失败路线全程零运行时报错', failErrors.slice(0, 2).join(' | ') || 'none');
     await failPage.close();
@@ -1610,22 +1822,22 @@ async function main() {
     /* ==========================================================================================
        5) PRODUCT-LOOP-R2-B｜合成：5 × ★1 → 1 × ★2 + equipped 自动升星（验收 ①②③⑥⑦⑧ + 必改 3）
 
-       ⚠️ 本段刻意放在**所有「跑局」断言之后**：★2 的炮真实占用 33 能量（★1 = 30）⇒ 一旦插在
+       ⚠️ 本段刻意放在**所有「跑局」断言之后**：★2 的武器真实占用更多能量（★1 = 30）⇒ 一旦插在
           中间，后续几局的 Build 数值就变了，「确定性通关路线」不再确定性。放到最后 = 只动
           「局外成长」这一件事，前面的战斗取证逐字不受影响。
-       ⚠️ 到这一步 page 停在首页（第 2 局领奖后回到 home.html），cannon 库存 = ★1 ×5。
-       ⚠️ R6 如实降级：这个前提（`cannon ★1 ×5`）来自**第一局的领奖** ⇒ 本批次**不成立**
-          （第一局恒 FAILED、一次奖都没领过）⇒ K 段（合成）与 H 段（第二局）整块记 `BLOCKED`。
+       ⚠️ 到这一步 page 停在首页（第一局领奖后回到 home.html），machineGun 库存 = ★1 ×5。
+       ✅ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1：这个前提（`machineGun ★1 ×5`，来自第一局的
+          真实领奖 4 → 5）**本批次成立** ⇒ K 段（合成）与 H 段（第二局）**真实执行**。
           模型侧覆盖仍在：`tests/productFusionR2B.test.ts` / `tests/productStarPowerR2C.test.ts`。
        ========================================================================================== */
     if (r1Completed) {
     const preK = await probeHome(page);
     if (preK.view !== 'garage') await clickSelector(page, '[data-ph-action="open-garage"]');
     const k0 = await probeHome(page);
-    const k0c1 = k0.weapons.find((w) => w.defId === 'cannon' && w.star === 1);
-    const k0c2 = k0.weapons.find((w) => w.defId === 'cannon' && w.star === 2);
-    const k0card = await garageCard(page, 'cannon', 1);
-    const k0fuse = await garageFuseButton(page, 'cannon', 1);
+    const k0c1 = k0.weapons.find((w) => w.defId === 'machineGun' && w.star === 1);
+    const k0c2 = k0.weapons.find((w) => w.defId === 'machineGun' && w.star === 2);
+    const k0card = await garageCard(page, 'machineGun', 1);
+    const k0fuse = await garageFuseButton(page, 'machineGun', 1);
     const k0spear = await garageCard(page, 'spear', 1);
     const k0spearFuse = await garageFuseButton(page, 'spear', 1);
     log(
@@ -1645,7 +1857,7 @@ async function main() {
         */
         k0fuse.text === '合成升星' &&
         k0fuse.disabled === false,
-      'K1 验收 ②「5/5 可以合成」：cannon ★1 = 5/5 ⇒ 卡片写「可合成」+ 真实「合成升星」按钮，且此刻**还没有** ★2 卡',
+      'K1 验收 ②「5/5 可以合成」：machineGun ★1 = 5/5 ⇒ 卡片写「可合成」+ 真实「合成升星」按钮，且此刻**还没有** ★2 卡',
       `★1=${k0c1 ? `${k0c1.count}/${k0c1.threshold} fusable=${k0c1.fusable}` : 'n/a'} · ★2=${k0c2 ? k0c2.count : '不存在'} · 卡=${k0card ? k0card.text : 'n/a'} · 按钮=${k0fuse ? k0fuse.text : '不存在'}`,
     );
     log(
@@ -1663,7 +1875,7 @@ async function main() {
     // ★ 真实鼠标点击「合成」（点的是按钮自己声明的 defId/star，不猜坐标、不调内部函数）
     await clickSelector(
       page,
-      `[data-ph-action="fuse"][data-ph-fuse-def="cannon"][data-ph-fuse-star="1"]`,
+      `[data-ph-action="fuse"][data-ph-fuse-def="machineGun"][data-ph-fuse-star="1"]`,
     );
     const k1 = await probeHome(page);
     const storedK = await storageDump(page);
@@ -1671,7 +1883,7 @@ async function main() {
       !!k1.lastFuse &&
         k1.lastFuse.ok === true &&
         k1.lastFuse.reason === null &&
-        k1.lastFuse.partId === 'cannon' &&
+        k1.lastFuse.partId === 'machineGun' &&
         k1.lastFuse.fromStar === 1 &&
         k1.lastFuse.toStar === 2 &&
         k1.lastFuse.countAfter === 0 &&
@@ -1683,10 +1895,10 @@ async function main() {
         : 'n/a',
     );
 
-    const k1c1 = await garageCard(page, 'cannon', 1);
-    const k1c2 = await garageCard(page, 'cannon', 2);
-    const k1c3 = await garageCard(page, 'cannon', 3);
-    const k1fuse = await garageFuseButton(page, 'cannon', 2);
+    const k1c1 = await garageCard(page, 'machineGun', 1);
+    const k1c2 = await garageCard(page, 'machineGun', 2);
+    const k1c3 = await garageCard(page, 'machineGun', 3);
+    const k1fuse = await garageFuseButton(page, 'machineGun', 2);
     log(
       k1c1 === null &&
         !!k1c2 &&
@@ -1696,19 +1908,19 @@ async function main() {
         k1c2.equipped === 'true' &&
         k1c2.fusable === 'false' &&
         k1c3 === null,
-      'K4 星级真的进了数据模型（不是改文案）：★1 的炮**库存归零 ⇒ 卡消失**；★2 的炮是一张新卡（1/5、带「已装备」）；★3 不存在',
+      'K4 星级真的进了数据模型（不是改文案）：★1 的机枪**库存归零 ⇒ 卡消失**；★2 的机枪是一张新卡（1/5、带「已装备」）；★3 不存在',
       `★1=${k1c1 ? k1c1.text : '不存在'} ★2=${k1c2 ? k1c2.text : '不存在'} ★3=${k1c3 ? k1c3.text : '不存在'}`,
     );
     log(
-      k1.equippedWeaponId === 'cannon' &&
+      k1.equippedWeaponId === 'machineGun' &&
         k1.equippedWeaponStar === 2 &&
         storedWeaponStar(storedK) === 2,
       'K5 **验收 ⑥**：装备那一档被合空 ⇒ Equipped 自动改指 ★2（玩家无需「卸下 → 合成 → 再装备」），且**正式 Build 存档**里也是 ★2',
       `equipped=${k1.equippedWeaponId} ★${k1.equippedWeaponStar} · 存档 ★${storedWeaponStar(storedK)}（合成前 ★${equippedStarBefore}）`,
     );
 
-    const entryStar2 = k1.weapons.find((w) => w.defId === 'cannon' && w.star === 2);
-    const entryStar1 = k0.weapons.find((w) => w.defId === 'cannon' && w.star === 1);
+    const entryStar2 = k1.weapons.find((w) => w.defId === 'machineGun' && w.star === 2);
+    const entryStar1 = k0.weapons.find((w) => w.defId === 'machineGun' && w.star === 1);
     const starDelta = entryStar2 && entryStar1 ? entryStar2.energyInUse - entryStar1.energyInUse : null;
     log(
       starDelta !== null &&
@@ -1731,28 +1943,31 @@ async function main() {
     await waitHomeReady(page);
     const kReload = await probeHome(page);
     const storedReload = await storageDump(page);
-    const kReloadC1 = await garageCard(page, 'cannon', 1);
+    const kReloadC1 = await garageCard(page, 'machineGun', 1);
     log(
-      kReload.equippedWeaponId === 'cannon' &&
+      kReload.equippedWeaponId === 'machineGun' &&
         kReload.equippedWeaponStar === 2 &&
-        invCount(storedReload, 'cannon', 1) === 0 &&
-        invCount(storedReload, 'cannon', 2) === 1 &&
-        invCount(storedReload, 'cannon', 3) === 0 &&
+        invCount(storedReload, 'machineGun', 1) === 0 &&
+        invCount(storedReload, 'machineGun', 2) === 1 &&
+        invCount(storedReload, 'machineGun', 3) === 0 &&
         storedWeaponStar(storedReload) === 2,
       'K8 **验收 ⑧**：整页 reload 后 `star / count / equipped` 三者全部保持（★1=0、★2=1、装的还是 ★2）—— 全部来自真实持久化',
-      `equipped=${kReload.equippedWeaponId} ★${kReload.equippedWeaponStar} · 磁盘 ★1=${invCount(storedReload, 'cannon', 1)} ★2=${invCount(storedReload, 'cannon', 2)} ★3=${invCount(storedReload, 'cannon', 3)} · 存档星=${storedWeaponStar(storedReload)}`,
+      `equipped=${kReload.equippedWeaponId} ★${kReload.equippedWeaponStar} · 磁盘 ★1=${invCount(storedReload, 'machineGun', 1)} ★2=${invCount(storedReload, 'machineGun', 2)} ★3=${invCount(storedReload, 'machineGun', 3)} · 存档星=${storedWeaponStar(storedReload)}`,
     );
     log(
-      kReloadC1 === null && kReload.equippedWeaponId === 'cannon',
+      kReloadC1 === null && kReload.equippedWeaponId === 'machineGun',
       'K9 reload 后 ★1 卡仍未回来（库存真的是 0，不是页面内存里少显示一张）',
       `★1=${kReloadC1 ? kReloadC1.text : '不存在'}`,
     );
 
-    /* ============ H｜第二局：再领一次 ★1 cannon（验收 ④「跨局累积」） ============
+    /* ============ H｜第二局：再领一次 ★1 machineGun（验收 ④「跨局累积」） ============
        ⚠️ 为什么在本段（K 段合成**之后**）：见上面 `storedFinal` 之前的说明。
-          合成把 `cannon ★1` 合空（5 → 0）⇒ 第二局的候选读数就是 **0 → 1**。
+          合成把 `machineGun ★1` 合空（5 → 0）⇒ 第二局的候选读数就是 **0 → 1**。
        ⚠️ 断言一条都没删，只是重新基线到新的真实状态；而且因为此时 ★2 同时存在，
           「★1 与 ★2 是两条互不干扰的 stack」也被顺带钉住了。
+       ⚠️ 第二局的装配是 **★2 machineGun**（K5 把装备自动升到 ★2）+ 同一台车 ⇒
+          `WIN_POLICY`（`emergencyRepair` → `damageUp`）在 ★2 下**同样 COMPLETE**
+          （实测 `ProtoRusher:A/my980 Chaser:A/my916 RangedTurret:A/my280`）。
     */
     const r2 = await playOneRunAndClaim(page, CHOICE_IDS[0], WIN_POLICY, '第二局（完成路线）');
     log(
@@ -1762,8 +1977,8 @@ async function main() {
     );
     log(
       r2.runStart.playerLoadout.source === 'profile' &&
-        r2.runStart.playerLoadout.functionalSelections[WEAPON_SLOT] === 'cannon',
-      'H1b 第二局确实带着**当前装备**的 cannon 出发（局外的装备动作真的作用到了下一局）',
+        r2.runStart.playerLoadout.functionalSelections[WEAPON_SLOT] === 'machineGun',
+      'H1b 第二局确实带着**当前装备**的 machineGun 出发（局外的装备动作真的作用到了下一局）',
       `source=${r2.runStart.playerLoadout.source} ${WEAPON_SLOT}=${r2.runStart.playerLoadout.functionalSelections[WEAPON_SLOT]}`,
     );
     log(
@@ -1776,20 +1991,20 @@ async function main() {
       `候选=${r2.pDone.rewardChoices.map((c) => `${c.defId}:${c.previewText}`).join(' ')}`,
     );
     log(
-      invCount(r2.storedBefore, 'cannon') === 0 &&
-        invCount(r2.storedAfter, 'cannon') === 1 &&
-        invCount(r2.storedAfter, 'cannon', 2) === 1 &&
+      invCount(r2.storedBefore, 'machineGun') === 0 &&
+        invCount(r2.storedAfter, 'machineGun') === 1 &&
+        invCount(r2.storedAfter, 'machineGun', 2) === 1 &&
         invCount(r2.storedAfter, 'spear') === 1 &&
         invCount(r2.storedAfter, 'hammer') === 1 &&
         ledgerTokens(r2.storedAfter).length === 2,
-      'H3 **验收 ④**：领这一件只让 cannon **★1** 0 → 1；★2 仍 1、spear 仍 1、hammer 仍 1（★1 与 ★2 是两条独立 stack）',
-      `cannon★1 ${invCount(r2.storedBefore, 'cannon')}→${invCount(r2.storedAfter, 'cannon')} · cannon★2=${invCount(r2.storedAfter, 'cannon', 2)} · spear ${invCount(r2.storedAfter, 'spear')} · hammer ${invCount(r2.storedAfter, 'hammer')} · 账本=${ledgerTokens(r2.storedAfter).length}`,
+      'H3 **验收 ④**：领这一件只让 machineGun **★1** 0 → 1；★2 仍 1、spear 仍 1、hammer 仍 1（★1 与 ★2 是两条独立 stack）',
+      `machineGun★1 ${invCount(r2.storedBefore, 'machineGun')}→${invCount(r2.storedAfter, 'machineGun')} · machineGun★2=${invCount(r2.storedAfter, 'machineGun', 2)} · spear ${invCount(r2.storedAfter, 'spear')} · hammer ${invCount(r2.storedAfter, 'hammer')} · 账本=${ledgerTokens(r2.storedAfter).length}`,
     );
     log(
-      r2.homeAfter.weapons.find((w) => w.defId === 'cannon' && w.star === 2).stackText === '1/5' &&
-        r2.homeAfter.weapons.find((w) => w.defId === 'cannon' && w.star === 1).stackText === '1/5' &&
+      r2.homeAfter.weapons.find((w) => w.defId === 'machineGun' && w.star === 2).stackText === '1/5' &&
+        r2.homeAfter.weapons.find((w) => w.defId === 'machineGun' && w.star === 1).stackText === '1/5' &&
         r2.homeAfter.weapons.find((w) => w.defId === 'hammer').stackText === '1/5',
-      'H4 首页读数：cannon 同时有 ★1 `1/5` 与 ★2 `1/5` 两张卡、hammer `1/5`（同一份库存，各 stack 各长各的）',
+      'H4 首页读数：machineGun 同时有 ★1 `1/5` 与 ★2 `1/5` 两张卡、hammer `1/5`（同一份库存，各 stack 各长各的）',
       r2.homeAfter.weapons.map((w) => `${w.name}★${w.star}${w.stackText}`).join(' · '),
     );
     /*
@@ -1804,8 +2019,8 @@ async function main() {
     );
 
     } else {
-      /* ⚠️ R6 如实降级：K 段（合成）与 H 段（第二局）整块不可达 ⇒ 逐条记 `BLOCKED`。 */
-      const why = '不可达：前提 `cannon ★1 ×5` 来自第一局领奖，而第一局恒 RUN FAILED（第 3 段控距）';
+      /* ⚠️ **安全网**（本 Queue 起不触发）：K 段（合成）与 H 段（第二局）在前提不成立时逐条记 `BLOCKED`。 */
+      const why = '安全网：前提 `machineGun ★1 ×5`（来自第一局真实领奖）不成立';
       for (const n of [
         'K1 5/5 可以合成（卡片写「可合成」+ 真实「合成升星」按钮）',
         'K2 不满 5 件不能合成（spear 1/5：无徽标、按钮在 DOM 里不存在）',
@@ -1816,10 +2031,10 @@ async function main() {
         'K8 整页 reload 后 star / count / equipped 三者保持',
         'K9 reload 后 ★1 卡仍不回（库存真的是 0）',
         'H1 第二局的 token 与第一局不同',
-        'H1b 第二局确实带着当前装备的 cannon 出发',
+        'H1b 第二局确实带着当前装备的 machineGun 出发',
         'H2 第二局终点的候选读数 = 当前真实库存',
-        'H3 领这一件只让 cannon ★1 0 → 1（★2 / spear / hammer 不动）',
-        'H4 首页读数：cannon 同时有 ★1 1/5 与 ★2 1/5 两张卡',
+        'H3 领这一件只让 machineGun ★1 0 → 1（★2 / spear / hammer 不动）',
+        'H4 首页读数：machineGun 同时有 ★1 1/5 与 ★2 1/5 两张卡',
         'H5 两局都满足同一时延上界（不是只对第一局成立）',
       ]) {
         blocked(n, why);
@@ -1836,14 +2051,14 @@ async function main() {
   const blockedN = results.filter((r) => r.blocked === true).length;
   const fail = results.filter((r) => r.pass === false).length;
   console.log(
-    `\n=== 结果：${pass}/${results.length} PASS，${fail} FAIL，${blockedN} BLOCKED（本批次不可达 · 如实登记） ===`,
+    `\n=== 结果：${pass}/${results.length} PASS，${fail} FAIL，${blockedN} BLOCKED（安全网分支触发时才会出现 · 如实登记） ===`,
   );
   if (fail > 0) {
     console.log('\n失败项：');
     results.filter((r) => r.pass === false).forEach((r) => console.log(`  FAIL ${r.name} | ${r.detail}`));
   }
   if (blockedN > 0) {
-    console.log('\n本批次不可达（**既不计 PASS 也不计 FAIL**；根因见文件头裁决披露）：');
+    console.log('\n安全网分支登记的不可达项（**既不计 PASS 也不计 FAIL**；根因见文件头披露）：');
     results.filter((r) => r.blocked === true).forEach((r) => console.log(`  BLOCKED ${r.name} | ${r.detail}`));
   }
   process.exit(fail === 0 ? 0 : 1);
