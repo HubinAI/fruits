@@ -8,18 +8,19 @@
  *   - 真实鼠标点击 / 真实整页导航 / 真实 localStorage 读取 / 只读诊断句柄；
  *   - 战斗伤害是**实测**的（`battleWorld.playerWeaponHits` 来自正式 `damage` 事件）。
  *
- * ── 覆盖两条浏览器路径（PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL 之前，产品真实可达空间里
- *    **唯一**能 COMPLETE 的两条组合；移除隐藏锤后这两条**也**打不赢）──────────
- *   来自 `tests/productRunContinuityWinningSearch.test.ts` 的权威侦察矩阵（8 车身 × 7 武器 ×
- *   5 后轮 = 280 组合，在**产品真实可达**空间里扫）：
- *     · **移除隐藏锤之前**：仅 2 个 COMPLETE 组合（machineGun：coconutBody+heavyWheel；
- *       shotgun：pineappleBody+smallWheel），其余 5 件零 COMPLETE。
- *     · **移除隐藏锤之后（本 Queue 当前状态）**：**全部 7 件零 COMPLETE**（矩阵 `productDraft`
- *       已同步清空 top ⇒ 重扫结论）—— 即 Q3 能力缺口 (a) 被本 Queue 坐实为**产品整体不可赢**，
- *       属真实 Blocker（平衡缺口，非回归）。
- *   本 E2E 仍跑这两条路径，但目的变为：**用真实浏览器证明 Runtime 只读到 frontMass 一件武器
- *   （无隐藏锤）、零运行时报错**，并把 COMPLETE/Continuity 记为真实 Blocker（不计 FAIL/PASS），
- *   不污染验收计数、也不伪造「能赢」。
+ * ── 覆盖两条浏览器路径（见 `tests/productRunFullReachableSpaceR10.test.ts` 权威矩阵）──────
+ *   权威矩阵（8 车身 × 7 武器 × 前/后轮各 5 档 × 全 Build 枚举，★1 单星）结论：
+ *     · **COMPLETE = 26 条**，涉及 **4 件武器**：cannon 6 / flamethrower 2 / machineGun 11 / shotgun 7；
+ *       hammer / laser / rammer = **0 COMPLETE**（真实失败模式分布见矩阵 D 节）。
+ *     · 代表性获胜装配均为 **body=mangoBody + front=smallWheel + rear=smallWheel**
+ *       （machineGun：emergencyRepair→damageUp；shotgun：emergencyRepair→rateUp 等）。
+ *   ⚠️ 本 E2E 仍跑旧 R10 的两条 (body,rear) 路径（machineGun：coconutBody+heavyWheel；
+ *      shotgun：pineappleBody+smallWheel）——经权威矩阵特别核对，这两条**当前不再 COMPLETE**
+ *      （无隐藏锤时打不赢），即旧 R10「两条获胜组合」有锤依赖。**但这不等于两件武器不可赢**：
+ *      矩阵已证明它们在 **front=smallWheel** 下可 COMPLETE；旧（单前轮）矩阵的「全 0」是
+ *      **未变动前轮导致的覆盖缺口**，非「产品整体不可赢」（见矩阵「共同子集对照」小节）。
+ *   故本 E2E 把 COMPLETE/Continuity 记为真实 Blocker（不计 FAIL/PASS），只用真实浏览器证明
+ *   **Runtime 只读到 frontMass 一件武器（无隐藏锤）、零运行时报错**，不伪造「能赢」。
  *
  * ── 每条路径的获胜装配 ──────────────────────────────────────────────────────
  *   侦察矩阵给定 `(body, rear)`，主武器 = 该路径的 weapon；车身 / 后轮经**真实 Garage UI**
@@ -71,10 +72,14 @@ const WEAPON_SLOT = 'frontMass';
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
 const INV_KEY = 'strongfruit.ownedParts.v2';
 
-// ⚠️ **PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL 之后**：产品真实可达空间（仅 frontMass 一件武器）
-//   **全部 7 件零 COMPLETE**（权威侦察矩阵 280 组合重扫结论）—— Q3 能力缺口 (a) 坐实。
-//   这两条路径仍跑，目的：**真实浏览器取证** Runtime 只读到 frontMass 一件武器（无隐藏锤）+ 零报错，
-//   并把 COMPLETE/Continuity 记为真实 Blocker（不计 FAIL/PASS）。本 Queue 明令**不修**此缺口。
+// ⚠️ **本 E2E 的两条旧路径**（machineGun+coconutBody+heavyWheel / shotgun+pineappleBody+smallWheel）
+//   在 `PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL` 之后**打不赢**（原依赖隐藏锤伤害）。
+//   ⚠️ 但这**不是**「产品真实可达空间零 COMPLETE」：权威矩阵
+//   `tests/productRunFullReachableSpaceR10.test.ts`（全 Build 枚举）证得 **26 条 COMPLETE / 4 件武器**
+//   （cannon 6 / flamethrower 2 / machineGun 11 / shotgun 7），代表装配 body=mangoBody + front=smallWheel
+//   + rear=smallWheel。旧「全 0」结论源自**未变动前轮**的覆盖缺口（见矩阵「共同子集对照」）。
+//   本 E2E 仍跑旧两条路径，目的：**真实浏览器取证** Runtime 只读到 frontMass 一件武器（无隐藏锤）+ 零报错，
+//   并把 COMPLETE/Continuity 记为真实 Blocker（不计 FAIL/PASS）。本 Queue 不修此缺口。
 const WEAPON_PATHS = [
   { weapon: 'machineGun', body: 'coconutBody', rear: 'heavyWheel', policy: { layer1: 'emergencyRepair', lateral: null, layer2: 'damageUp', durability: 'repair' } },
   { weapon: 'shotgun', body: 'pineappleBody', rear: 'smallWheel', policy: { layer1: 'emergencyRepair', lateral: null, layer2: 'damageUp', durability: 'repair' } },
@@ -470,14 +475,15 @@ async function runPath(page, path) {
       `候选=${pDone ? pDone.rewardChoices.length : '?'} defId=${pDone && pDone.rewardChoices[0] ? pDone.rewardChoices[0].defId : '?'} label=${pDone ? pDone.actionLabel : '?'}`,
     );
   } else {
-    // ⚠️ PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL｜Q3 能力缺口 (a) 坐实：移除隐藏锤后，
-    //    产品真实可达空间（仅 frontMass 一件武器）**零 COMPLETE 组合**（权威侦察矩阵 280 组合重扫结论）。
-    //    原本靠隐藏锤伤害才能赢的两条浏览器路径现在打不赢 —— 属**真实 Blocker**（平衡缺口，非回归），
-    //    本 Queue 明令**不修** ⇒ 记为真实 Blocker（不计 FAIL/PASS），不污染验收计数、也不伪造「能赢」。
+    // ⚠️ 本路径装配（该 body + front=默认 + 该 rear）在当前无隐藏锤版本下打不赢。
+    //    ⚠️ 注意：**不**等于「产品真实可达空间零 COMPLETE」——权威矩阵
+    //    `tests/productRunFullReachableSpaceR10.test.ts`（全 Build 枚举）证得 **26 条 COMPLETE / 4 件武器**
+    //    （cannon 6 / flamethrower 2 / machineGun 11 / shotgun 7；代表装配 body=mangoBody + front=smallWheel
+    //    + rear=smallWheel）。本 E2E 保持旧 R10 路径（未采用矩阵获胜配置）⇒ 记真实 Blocker（不计 FAIL/PASS）。
     //    B1/B2/B3 已用真实浏览器证明：Runtime 只读到 frontMass 一件武器（无隐藏锤）、零运行时报错。
-    blocked(`${tag} B4 Run 1 → COMPLETE`, `Q3 能力缺口 (a) 坐实：移除隐藏锤后产品真实可达空间零 COMPLETE（本 Queue 不修）`);
-    blocked(`${tag} B4b COMPLETE 终点候选`, `Run 1 未 COMPLETE ⇒ 无候选/无 CTA（Q3 缺口 (a)）`);
-    blocked(`${tag} C~E 链路`, `Run 1 没有 COMPLETE（Q3 缺口 (a) 坐实：真实可达空间零 COMPLETE）`);
+    blocked(`${tag} B4 Run 1 → COMPLETE`, `本路径装配无隐藏锤下打不赢（本 E2E 沿用旧 R10 路径，未采用矩阵获胜配置）`);
+    blocked(`${tag} B4b COMPLETE 终点候选`, `Run 1 未 COMPLETE ⇒ 无候选/无 CTA`);
+    blocked(`${tag} C~E 链路`, `Run 1 没有 COMPLETE（本路径装配打不赢；矩阵已证该武器在其它 front 配置可 COMPLETE）`);
     console.log(`  [${tag}] 探针核对：stopped=${run1.detail.stopped} · 装备=仅 ${weapon}@frontMass · 无隐藏锤`);
     return;
   }
