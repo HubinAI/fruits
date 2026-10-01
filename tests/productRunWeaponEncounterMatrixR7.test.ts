@@ -63,13 +63,13 @@
  *
  *   | 组 | 武器 | 实测事实 | 问题的性质 |
  *   |---|---|---|---|
- *   | ① 0 命中，且 L2 外显也未贴到 | **（R11-RAMMER 后本组已空）** | 原为 `rammer`：`minGap = +7 > 0`，全程外显外框都没碰上 | **真·够不着**：控距（`near 240 / far 480`，后撤 2.6 px/step > 玩家推进 ~1.5）把它挡在接触之外。⚠️ `PRODUCT-LOOP-R11-RAMMER-REST-R1` 把 `rammer.restSteps` 24 → 12 之后它**真的够得着**了（2 命中 / 140 伤害，对手残 952）⇒ 本组**不再有任何武器** |
+ *   | ① 0 命中，且 L2 外显也未贴到 | `rammer` | `minGap = +7 > 0`，全程外显外框都没碰上 | **真·够不着**：控距（`near 240 / far 480`，后撤 2.6 px/step > 玩家推进 ~1.5）把它挡在接触之外 |
  *   | ② 0 命中，但 L2 外显曾重叠 | `hammer` | `minGap = −23`（**外显外框在 X 上叠了 23px**）、接触残留含 `impact`，武器命中仍 0 | ⚠️ **已定性（见下）**：锤头**从未与敌车发生物理接触**；`−23` 是 **L2 度量假象**，那条 `impact` 是**玩家车体 × 敌方外伸炮管** |
- *   | ③ 有伤害但打不过 | `cannon`(1 命中/120) · `flamethrower`(66/528) · `laser`(6/960) · `machineGun`(47/940) · **`rammer`(2/140)** · `shotgun`(20/600) | 都打出真实伤害，都被反杀 | **交换比**：够得着，打不赢（R11 后最接近的 `laser` 让对手剩 **140**，此前是 `machineGun` 的 159.8） |
+ *   | ③ 有伤害但打不过 | `cannon`(1 命中/120) · `flamethrower`(66/528) · `laser`(6/960) · `machineGun`(47/940) · `shotgun`(20/600) | 都打出真实伤害，都被反杀 | **交换比**：够得着，打不赢（R11 后最接近的 `laser` 让对手剩 **140**，此前是 `machineGun` 的 159.8） |
  *
  * ⇒ 回答「是不是所有 Weapon 都失败」：**是** —— 零 Build 单件下 **7/7 落败**。
- *   回答「还是只有某些配置无法处理控距」：R11-RAMMER 之后**只剩 `hammer` 一件**在这一列拿不到
- *   任何伤害（`rammer` 已被「缩短恢复节奏」推进到打得到）；其余 **6 件能打到**，只是打不过。
+ *   回答「还是只有某些配置无法处理控距」：**接触族 2 件（`rammer` / `hammer`）**在这一列拿不到
+ *   任何伤害；其余 **5 件能打到**（有真实伤害），只是打不过。
  *
  * ⚠️⚠️ **本文件曾把 ② 组读成「接触了却没登记命中」—— 那是错的。** 更正来自
  *   `PRODUCT-LOOP-P0-HAMMER-RANGED-TURRET-HIT-REGISTRATION`，口径如下：
@@ -510,14 +510,10 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
       'machineGun|Chaser': ['T', 'A', 'hp', 45, 900, 43, 840, 278.3, 0],
       'machineGun|RangedTurret': ['T', 'B', 'hp', 47, 940, 48, 840, 0, 159.8],
 
-      // PRODUCT-LOOP-R11-RAMMER-REST-R1：rammer 的 `restSteps` 24 → 12（**只动「攻击后的恢复节奏」**）
-      //   ⇒ 下一发更早到来、接触交换更快结束：近身两段由 LOSS 翻成 WIN，且**不再双亡**
-      //   （`Chaser` 从「同归于尽判 A」变成「我方剩 92.2 真赢」）。
-      //   `RangedTurret` 也从「0 命中」变成「够得着、但仍换不过」（2 命中 / 140 伤害，对手残 952）。
-      //   ⚠️ 上表其余 18 格一字未动（其余 6 件武器本轮零改动）。
-      'rammer|ProtoRusher': ['T', 'A', 'hp', 12, 840, 118, 420, 538.4, 0],
-      'rammer|Chaser': ['T', 'A', 'hp', 13, 910, 135, 630, 92.2, 0],
-      'rammer|RangedTurret': ['T', 'B', 'hp', 2, 140, 210, 70, 0, 952],
+      'rammer|ProtoRusher': ['T', 'B', 'hp', 11, 770, 139, 420, 0, 170.6],
+      // 同归于尽（双方归零）⇒ 正式 tiebreak 判 A（如实记录，不是「赢」的通词）
+      'rammer|Chaser': ['T', 'A', 'hp', 13, 910, 140, 560, 0, 0],
+      'rammer|RangedTurret': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
 
       'shotgun|ProtoRusher': ['T', 'A', 'hp', 38, 1140, 95, 990, 499.3, 0],
       'shotgun|Chaser': ['T', 'A', 'hp', 31, 930, 96, 930, 280.7, 0],
@@ -535,8 +531,7 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
       // R11：laser 的近身两段由 LOSS 翻成 WIN（`RangedTurret` 列仍是 LOSS ⇒ ② 依然成立）
       laser: ['WIN', 'WIN', 'LOSS'],
       machineGun: ['WIN', 'WIN', 'LOSS'],
-      // R11-RAMMER：rammer 的 `restSteps` 24 → 12 ⇒ 近身两段翻成 WIN（`Chaser` 也**不再双亡**）
-      rammer: ['WIN', 'WIN', 'LOSS'],
+      rammer: ['LOSS', 'WIN·双亡', 'LOSS·0hit'],
       shotgun: ['WIN', 'WIN', 'LOSS'],
     });
     // ① 没有任何一格是「无限拖延」
@@ -545,7 +540,7 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
     for (const w of WEAPONS) expect(matrix[w][2], `${w} 在 RangedTurret 上必须落败`).toContain('LOSS');
   });
 
-  it('MX-08 RangedTurret 专项：7/7 单件全败；「0 命中」只剩 1 件（`hammer`）', () => {
+  it('MX-08 RangedTurret 专项：7/7 单件全败；「0 命中」只有 2 件，且二者**机制不同**', () => {
     const col = WEAPONS.map((w) => cell(w, 'RangedTurret'));
 
     // ① 全部落败（零 Build 单件下 7/7 都输）
@@ -555,40 +550,34 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
       expect(c.hpA, `${c.label}：玩家耐久归零`).toBe(0);
     }
 
-    // ② 0 命中 = **只剩 `hammer` 一件**，且拿不到任何伤害、对手基本满血。
-    //    ⚠️ PRODUCT-LOOP-R11-RAMMER-REST-R1：rammer 的 `restSteps` 24 → 12 之后，它在这一列
-    //       **不再是 0 命中**（实测 2 命中 / 140 伤害，对手残 952）⇒ 它从「够不着」变成
-    //       「够得着、但换不过」。⇒「打不到控距对手」的接触族**如实收窄到 1 件**（不放宽断言）。
+    // ② 0 命中 = 恰好 2 件（接触族），且都拿不到任何伤害、对手基本满血
     const zeroHit = col.filter((c) => c.hits === 0);
-    expect(zeroHit.map((c) => c.label), '0 命中的那一族').toEqual(['hammer']);
+    expect(zeroHit.map((c) => c.label), '0 命中的那一族').toEqual(['hammer', 'rammer']);
     for (const c of zeroHit) {
       expect(c.damage, `${c.label}：0 命中 ⇒ 0 伤害`).toBe(0);
       expect(Object.keys(c.perPart), `${c.label}：0 命中 ⇒ 无来源部件`).toEqual([]);
       expect(c.hpB, `${c.label}：对手基本满血`).toBeGreaterThan(c.hpBMax - 1);
     }
 
-    // ③ ⚠️ R11-RAMMER 之后这一列只剩 `hammer` 一件是「零接触」，两件事必须分开读：
-    //    `hammer`：`minGap < 0` ⇒ **只是外显外框在 X 上叠了**（`vehicleWorldBox` 含 `visual`
-    //              贴图外框，见 `Cell.minGap` 文档）。真实读数是 **锤头零接触**，那唯一一条
-    //              `impact` 是 `A/body ↔ B/part:front`（玩家车体撞敌方炮管）。
-    //    `rammer`：R11 之后它**真的够得着**（2 命中）⇒ 真接触必然伴随外显外框重叠（`minGap < 0`）。
-    //    ⛔ 单看 `minGap < 0` **区分不了**这两件事 —— 判「有没有真接触」必须读**命中数** /
-    //       引擎 contact 事件流（`tests/productHammerHitRegistrationP0.test.ts` PH-01）。
+    // ③ ⚠️ 两件在 **L2 外显度量**上确实不同 —— 但**都**不是「命中了却没登记」：
+    //    `rammer`：`minGap = +7 > 0` ⇒ 外显外框全程没贴到（控距真把它挡在接触之外）；
+    //    `hammer`：`minGap = −23 < 0` ⇒ **只是外显外框在 X 上叠了 23px**（`vehicleWorldBox`
+    //              含 `visual` 贴图外框，见 `Cell.minGap` 文档）。真实读数是 **锤头零接触**，
+    //              那唯一一条 `impact` 是 `A/body ↔ B/part:front`（玩家车体撞敌方炮管）。
+    //    ⛔ 不许再把 `minGap < 0` 读成「深度接触」。定性取证 →
+    //       `tests/productHammerHitRegistrationP0.test.ts` PH-01（判据 = 引擎 contact 事件流）。
     const rammer = cell('rammer', 'RangedTurret');
     const hammer = cell('hammer', 'RangedTurret');
-    expect(rammer.minGap, 'rammer：R11 后真的够得着 ⇒ 外显外框必然重叠').toBeLessThan(0);
-    expect(rammer.hits, 'rammer：确实打到了（这才是「真接触」的判据）').toBeGreaterThan(0);
-    expect(hammer.minGap, 'hammer：外显外框曾重叠（≠ 物理接触，见 Cell.minGap）').toBeLessThan(0);
-    expect(hammer.hits, 'hammer：外框重叠了，但真接触为零').toBe(0);
+    expect(rammer.minGap, 'rammer：L2 外显外框全程未贴到').toBeGreaterThan(0);
+    expect(hammer.minGap, 'hammer：L2 外显外框曾重叠（≠ 物理接触，见 Cell.minGap）').toBeLessThan(0);
 
-    // ④ 有伤害的 **6 件**（R11 之后 rammer 也进来了）—— 这一族的问题**不是**够不着，而是交换比
+    // ④ 有伤害的 5 件（这一族的问题**不是**够不着，而是交换比）
     const landed = col.filter((c) => c.hits > 0);
     expect(landed.map((c) => c.label)).toEqual([
       'cannon',
       'flamethrower',
       'laser',
       'machineGun',
-      'rammer',
       'shotgun',
     ]);
     for (const c of landed) {
@@ -597,9 +586,8 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
     }
 
     // ⑤ 最接近的一件（对手剩余最少）—— 如实记录，不做评级
-    //    ⚠️ R11-LASER：laser（`cooldownMs` 1800 → 600）在 `RangedTurret` 上把对手打到剩 **140**
+    //    ⚠️ R11：laser（`cooldownMs` 1800 → 600）在 `RangedTurret` 上把对手打到剩 **140**
     //       < machineGun 的 159.8 ⇒ 「最接近」由 `machineGun` 变为 `laser`（如实更新，不是评级）。
-    //    ⚠️ R11-RAMMER：rammer 现在也进了 `landed`，但它只把对手打到剩 **952** ⇒ 不影响「最接近」。
     const closest = landed.reduce((a, b) => (a.hpB <= b.hpB ? a : b));
     expect(closest.label, '对手剩余最少的单件').toBe('laser');
     expect(r1(closest.hpB), '最接近的一格：对手残血').toBe(140);

@@ -347,13 +347,6 @@ describe('PRODUCT-LOOP-R10-STRATEGY-SPACE-CAUSAL-AUDIT-R1｜策略空间因果�
         '（只动攻击间隔）⇒ 本次审计当时「laser = 0-COMPLETE / 根因 timing」的结论**已被修掉**，' +
         'laser 不再是 0-COMPLETE 武器（见 `productRunLaserCadenceR11`）。下面的读数按**当前**参数现算。',
     );
-    lines.push(
-      '⚠️ PRODUCT-LOOP-R11-RAMMER-REST-R1 之后的更新：rammer 的 `restSteps` 24 → 12' +
-        '（只动「攻击后的恢复节奏」）⇒ 本次审计当时「rammer 的根因 = 交换效率 / 到 E2 已无余力」' +
-        '**已被修掉**：本文件里它的结局由「第 ① 段阵亡（段数 1）」推进到「打进 ② 段（段数 2~3）」，' +
-        '第 ① 段剩余 HP 明显抬高（见 `productRunRammerRestR11` 的 RR-01b / RR-02a / RR-02c）。' +
-        '⚠️ 它**仍是 0-COMPLETE**（第 3 段 `RangedTurret` 控距 ⇒ 接触类打不着），缺口未被掩盖。',
-    );
     lines.push('════════════════════════════════════════════════════════════════════');
     const BL = ['emergencyRepair', 'damageUp'] as const;
     const weapons = ['hammer', 'laser', 'rammer'] as const;

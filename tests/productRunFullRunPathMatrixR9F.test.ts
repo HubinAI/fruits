@@ -58,16 +58,11 @@
  *   ② **Build 只从第 2 段起生效**（`R9F-02`）：同一 (形态, 武器) 下所有路线的**第 1 段读数
  *      逐字节相同**（第 1 段是零 Build 段）—— 这条不变量同时**解释了**下面 ③。
  *
- *   ③ **「零 Build 第 1 段就截断」的路线现已为零**：`rammer` 曾是唯一一件单件撑不过第 1 段的武器，
- *      但两轮 R11 先后把它的前一段补上了 —— `laser`（`cooldownMs` 1800 → 600）与
- *      `rammer`（`restSteps` 24 → 12，**只动攻击后的恢复节奏**）。
- *      ⇒ 17 条 `only` 路线里**没有任何一条**还在满耐久零 Build 的第 1 段阵亡
- *        （`R9F-04` ⑤ 把它钉成「集合必须为空」）。
- *      `rammer` 现在**能**撑过第 1 段（`ProtoRusher:A/538.4/0/1033`，命中 11 → 12），
- *      第 ② 段仍败（`Chaser`：接触类打控距对手）⇒ `R9F-06` 的 `only` 表里它
- *      从 `FAILED@ProtoRusher` 改成 **`FAILED@Chaser`**；`R9F-08` 那两行同步改。
- *      ⚠️ 同一轮里 `walk` 形态的 `rammer` **反向退化**（`D1`/`D2` 由 COMPLETE 变 FAILED，差 11.7 血）
- *        ⇒ 「7 件全部 COMPLETE」降级为「6 件 COMPLETE」（`R9F-06` 反向表）。两条都如实冻结。
+ *   ③ **`only` 形态下 `rammer` 的两次选择拿到同一份读数**：它在零 Build 的
+ *      第 1 段就阵亡（`pools=[]`，两次 Build 根本没机会上战场）。这不是「Build 无效」，
+ *      而是这件武器单件撑不过第 1 段的既有内容缺口（`R9F-06` 与 R9-06 ② 独立互证）。
+ *      ⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1：`laser`（`cooldownMs` 1800 → 600）**已不在**
+ *         这个集合里 —— 它现在能撑过第 1 段（`D1` 打进终局、`D2` 死在第 2 段）。
  *
  *   ④ **Queue 的 C 臂「完全不产生核心输出提升」在结构上不可能存在于一局之内**
  *      （`R9F-05` 给出机器证明）：通用池 3 项里只有 `emergencyRepair` 不是输出项，
@@ -433,15 +428,8 @@ const FROZEN_RESULT: Readonly<Record<string, string>> = {
   'walk/machineGun/B': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/989.7/0/190 | RangedTurret:A/869.7/0/191',
   'walk/machineGun/C1': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/918.1/0/220 | RangedTurret:A/900/0/220',
   'walk/machineGun/C2': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/918.1/0/220 | RangedTurret:A/980/0/212',
-  // PRODUCT-LOOP-R11-RAMMER-REST-R1：rammer `restSteps` 24 → 12。
-  //   ⚠️ **R11 的代价（如实冻结，不掩盖）**：`walk` 形态这两条 `damageUp`/`rateUp` 组合由 COMPLETE 翻成 FAILED。
-  //      唯一胜方判定的终点 = 第 3 段（`RangedTurret` 控距）差 11.7 血。
-  //      机制：`walk` 车上主输出是上下位 2 件 `machineGun`，rammer 在 346 步里只轮到 2~3 发；
-  //      缩短 rest ⇒ 伸出相位整体前移 ⇒ 第 ① 段反而多挨 88.5 → 211.8 点，把这点余量一路带到终局。
-  //      ⇒ 两条口径方向相反（`only` 变好 / `walk` 变差）已由 `productRunRammerRestR11` 的 `RR-02c` 双形态对照钉住。
-  //      `walk/rammer` 的 `emergencyRepair` 相关 4 条组合仍为 COMPLETE（6 → 4）。
-  'walk/rammer/D1': 'FAILED | ProtoRusher:A/888.2/0/319 | Chaser:A/525.8/0/205 | RangedTurret:B/0/11.7/363',
-  'walk/rammer/D2': 'FAILED | ProtoRusher:A/888.2/0/319 | Chaser:A/346.4/0/200 | RangedTurret:B/0/411.7/229',
+  'walk/rammer/D1': 'COMPLETE | ProtoRusher:A/1011.5/0/346 | Chaser:A/1002.7/0/246 | RangedTurret:A/458.3/0/386',
+  'walk/rammer/D2': 'COMPLETE | ProtoRusher:A/1011.5/0/346 | Chaser:A/645.7/0/222 | RangedTurret:A/101.2/0/386',
   'walk/shotgun/D1': 'COMPLETE | ProtoRusher:A/971.8/0/235 | Chaser:A/879/0/238 | RangedTurret:A/459/0/307',
   'walk/shotgun/D2': 'COMPLETE | ProtoRusher:A/971.8/0/235 | Chaser:A/698.7/0/233 | RangedTurret:A/278.7/0/307',
 
@@ -462,11 +450,8 @@ const FROZEN_RESULT: Readonly<Record<string, string>> = {
   'only/machineGun/B': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/250.4/0/529 | RangedTurret:B/0/750/154',
   'only/machineGun/C1': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/278.3/0/626 | RangedTurret:B/0/400/368',
   'only/machineGun/C2': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/278.3/0/626 | RangedTurret:B/0/520/369',
-  // PRODUCT-LOOP-R11-RAMMER-REST-R1：rammer `restSteps` 24 → 12（**只动「攻击后的恢复节奏」**）。
-  //   ⇒ `only` 形态不再「零 Build 的第 ① 段就阵亡」，改成**打进第 ② 段**才阵亡（这正是本 Queue 的收益：
-  //      `ProtoRusher` 段剩余 HP 0 → 538.4，命中 11 → 12）。第 ② 段仍败（接触类打控距对手）。
-  'only/rammer/D1': 'FAILED | ProtoRusher:A/538.4/0/1033 | Chaser:B/0/273.9/524',
-  'only/rammer/D2': 'FAILED | ProtoRusher:A/538.4/0/1033 | Chaser:B/0/402/480',
+  'only/rammer/D1': 'FAILED | ProtoRusher:B/0/170.6/1033',
+  'only/rammer/D2': 'FAILED | ProtoRusher:B/0/170.6/1033',
   'only/shotgun/D1': 'FAILED | ProtoRusher:A/499.3/0/625 | Chaser:B/0/210.5/339',
   'only/shotgun/D2': 'FAILED | ProtoRusher:A/499.3/0/625 | Chaser:B/0/143.3/355',
 };
@@ -488,8 +473,8 @@ const FROZEN_DAMAGE: Readonly<Record<string, string>> = {
   'walk/machineGun/B': 'machineGun:20x51 ; machineGun:20x46 ; machineGun:25x44',
   'walk/machineGun/C1': 'machineGun:20x51 ; machineGun:20x45 ; machineGun:25x44',
   'walk/machineGun/C2': 'machineGun:20x51 ; machineGun:20x45 ; machineGun:20x55',
-  'walk/rammer/D1': 'machineGun:20x42 rammer:70x3 ; machineGun:20x28 rammer:88x4 ; machineGun:20x50 rammer:88x1',
-  'walk/rammer/D2': 'machineGun:20x42 rammer:70x3 ; machineGun:20x28 rammer:70x5 ; machineGun:20x30 rammer:88x1',
+  'walk/rammer/D1': 'machineGun:20x43 rammer:70x2 ; machineGun:20x36 rammer:88x2 ; machineGun:20x51 rammer:88x1',
+  'walk/rammer/D2': 'machineGun:20x43 rammer:70x2 ; machineGun:20x29 rammer:70x5 ; machineGun:20x51 rammer:88x1',
   'walk/shotgun/D1': 'machineGun:20x35 shotgun:30x13 ; machineGun:20x34 shotgun:38x8 ; machineGun:20x42 shotgun:38x7',
   'walk/shotgun/D2': 'machineGun:20x35 shotgun:30x13 ; machineGun:20x32 shotgun:30x9 ; machineGun:20x42 shotgun:38x7',
   'only/cannon/F1': 'cannon:120x9 ; cannon:120x8 ; -',
@@ -505,9 +490,8 @@ const FROZEN_DAMAGE: Readonly<Record<string, string>> = {
   'only/machineGun/B': 'machineGun:20x50 ; machineGun:20x45 ; machineGun:25x14',
   'only/machineGun/C1': 'machineGun:20x50 ; machineGun:20x45 ; machineGun:25x28',
   'only/machineGun/C2': 'machineGun:20x50 ; machineGun:20x45 ; machineGun:20x29',
-  // R11：`only/rammer` 的**单发值不变**（仍 70 / `damageUp` 后 88），变的只是「轮到了几发」（11 → 12 / 进 ② 段）。
-  'only/rammer/D1': 'rammer:70x12 ; rammer:88x7',
-  'only/rammer/D2': 'rammer:70x12 ; rammer:70x7',
+  'only/rammer/D1': 'rammer:70x11',
+  'only/rammer/D2': 'rammer:70x11',
   'only/shotgun/D1': 'shotgun:30x38 ; shotgun:38x18',
   'only/shotgun/D2': 'shotgun:30x38 ; shotgun:30x25',
 };
@@ -744,15 +728,8 @@ describe('PRODUCT-LOOP-R9-FULL-RUN-PATH-MATRIX｜B. 本 Queue 的判断标准', 
     //    ⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser 的 `cooldownMs` 1800 → 600 后，
     //       `only/laser/D1` 与 `D2` **不再**在第 1 段截断（D1 打进终局、D2 死在第 2 段，
     //       见 `FROZEN_RESULT`）⇒ 它们已不再属于这个「零 Build 截断」集合。
-    //
-    //    ⚠️ **本组现已空**（PRODUCT-LOOP-R11-RAMMER-REST-R1）：`rammer` 的 `restSteps` 24 → 12 后，
-    //       `only/rammer/D1|D2` 第 ① 段**赢了**（`ProtoRusher:A/538.4/0/1033`），改成打进第 ② 段才阵亡
-    //       ⇒ 17 条 `only` 路线里**已经没有任何一条**死在满耐久零 Build 的第 1 段。
-    //       断言因此改为「必须为空」——它是**更强**的结论（比「恰好剩 rammer 两条」更强），不是放宽。
-    expect(
-      zeroBuildTruncated.sort(),
-      'R11 之后不应再有「零 Build 第 1 段就截断」的路线',
-    ).toEqual([]);
+    //       剩下的真实截断路线 = `rammer`（唯一一件仍死在满耐久零 Build 第 1 段的武器）。
+    expect(zeroBuildTruncated.sort()).toEqual(['only/rammer/D1', 'only/rammer/D2'].sort());
   });
 
   it('R9F-05 Queue 的 C 臂：**第 2 段零输出提升**可证；「整局都不投输出」结构上不可能', () => {
@@ -838,15 +815,11 @@ describe('PRODUCT-LOOP-R9-FULL-RUN-PATH-MATRIX｜B. 本 Queue 的判断标准', 
       hammer: 'FAILED@Chaser',
       laser: 'FAILED@RangedTurret', // R11：与 R9-06 ② 独立互证（两处都测到同一段）
       machineGun: 'FAILED@RangedTurret',
-      rammer: 'FAILED@Chaser', // R11-RAMMER：`restSteps` 24 → 12 ⇒ 第 ① 段不再阵亡，改为死在 ② 段
+      rammer: 'FAILED@ProtoRusher',
       shotgun: 'FAILED@Chaser',
     });
 
-    // 反向：多槽形态（walk）同样口径下 7 件里 **6 件** COMPLETE —— 与 R9-03 / R9-07 的结论同向
-    //   ⚠️ PRODUCT-LOOP-R11-RAMMER-REST-R1：rammer `restSteps` 24 → 12 后，它的 `D1`（`damageUp`→`rateUp`）
-    //      由 COMPLETE 翻成 FAILED（终局差 11.7 血）⇒ 本表从「7 件全部 COMPLETE」降级为「6 件 COMPLETE」。
-    //      这是 R11 的**真实代价**，如实冻结（`FROZEN_RESULT` 的 `walk/rammer/D1|D2` 同步改）。
-    //      机制与双形态对照见 `productRunRammerRestR11` 的 `RR-02c`。
+    // 反向：多槽形态（walk）同样口径下 7 件全部 COMPLETE —— 与 R9-03 / R9-07 的结论同向
     const walkTable: Record<string, string> = {};
     for (const weapon of FULL_RUN_SUPPORTED_WEAPON_IDS) {
       const f = FACTS.get(`walk/${weapon}/${firstRouteId(weapon)}`)!;
@@ -858,13 +831,9 @@ describe('PRODUCT-LOOP-R9-FULL-RUN-PATH-MATRIX｜B. 本 Queue 的判断标准', 
       hammer: 'COMPLETE',
       laser: 'COMPLETE',
       machineGun: 'COMPLETE',
-      rammer: 'FAILED@RangedTurret', // R11-RAMMER：唯一一件由 COMPLETE 退化者（差 11.7 血）
+      rammer: 'COMPLETE',
       shotgun: 'COMPLETE',
     });
-    expect(
-      Object.values(walkTable).filter((v) => v === 'COMPLETE'),
-      'walk 形态仍必须有 6 件能通关（退化只允许发生在 rammer 这一件上）',
-    ).toHaveLength(6);
   });
 });
 

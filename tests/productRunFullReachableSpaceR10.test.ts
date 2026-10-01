@@ -56,6 +56,11 @@
  *   输出 H 节：A~F 逐项对比 + hammer/laser/rammer 的「0 门槛」判断（跨过 ⇒ 可行；仍 0 ⇒ 如实 BLOCK）。
  *   R10 基线冻结值 = `R10_BASELINE_*`；基线复现失败 ⇒ 直接红（分母不可信 / 探针无效）。
  *
+ *   ⚠️ **PRODUCT-LOOP-R11-RAMMER-REST-ROLLBACK 之后的语义变化**：`rammer.restSteps` 已整块回退
+ *      成 24（= 基线值）⇒ 探针里那一步 rammer 还原变成 **no-op**，两遍扫描的差分**只来自
+ *      `laser.cooldownMs`**。下面 `R11_CURRENT_*` 的 28 / 11 两个读数**未变** —— 因为 rammer
+ *      在基线与 R11 态下**都是 0 条 COMPLETE**，差分本来就不含它（回退前已由集合恒等式核对过）。
+ *
  * ⚠️ 本文件不修改任何 `src/**`；纯测量。全在 Node 单线程跑（vitest 要求 `--pool=vmForks --maxWorkers=1`），
  *   故单测超时给足（见 `it` 第三参）。
  */
@@ -309,8 +314,8 @@ interface ChassisAgg {
  * 本 Queue 只做一件事：用**本文件这一套权威口径**（严格分层全枚举，无代表路线）重跑一次，
  * 与 R10 建矩阵时的读数逐项对比。为了「对比」本身也可核对（不是拿记忆里的数字当分母），
  * 同一次运行里**把 R10 期的参数用 in-memory 探针还原后重扫一遍**：
- *   · laser.cooldownMs = 1800（R11-LASER-CADENCE 改成 600）
- *   · rammer.restSteps = 24（R11-RAMMER-REST 改成 12）
+ *   · laser.cooldownMs = 1800（R11-LASER-CADENCE 改成 600，**保留**）
+ *   · rammer.restSteps = 24（R11-RAMMER-REST 曾改成 12，**已整块回退 ⇒ 本探针这步现为 no-op**）
  * 两次扫描共用同一批 `baseCombos` / ctx / 分层口径 ⇒ 差值只可能来自这两个字段。
  * 探针在 `finally` 无条件还原共享 def，canonical **一字节不改**（纯测量，与 LC / RR 同款手法）。
  */
@@ -331,7 +336,9 @@ const R10_BASELINE_WEAPON_CHASSIS: Readonly<Record<string, number>> = {
 };
 
 /**
- * R11-RECHECK 时的**当前**读数（R11-LASER-CADENCE `cooldownMs 600` + R11-RAMMER-REST `restSteps 12`）。
+ * R11-RECHECK 时的**当前**读数。⚠️ R11-RAMMER-REST 已**整块回退** ⇒ 当前 canonical
+ * = 基线 rammer（24）+ **保留的** `laser.cooldownMs 600`。因为 rammer 在两种状态下都是
+ * 0 条 COMPLETE，下面这两个总数与逐武器表**未变**（差分 100% 来自 laser）。
  * ⚠️ 首次填入由实测给；之后若这两个数变了，必须先查清是谁改的，**不许直接放行**。
  */
 const R11_CURRENT_COMPLETE_PATHS = 28;
@@ -793,7 +800,8 @@ describe('PRODUCT-LOOP-R10-FULL-REACHABLE-SPACE-R2｜完整产品可达空间侦
       /* ── R11-STRICT-SPACE-RECHECK 冻结断言 ─────────────────────────────────
        * ① 基线可复现 ⇒ 说明「R10 读数」这个分母不是记忆值，而是现算出来的；
        *    同时验证 in-memory 探针真的改了行为（若参数被烘焙进缓存 plan，① 会红）。
-       * ② 当前值冻结 ⇒ R11（laser.cooldownMs 600 / rammer.restSteps 12）落地后的权威读数。
+       * ② 当前值冻结 ⇒ 保留 `laser.cooldownMs 600`、且 `rammer.restSteps` 已回退成 24 之后的权威读数
+       *    （rammer 回退后这两个总数与逐武器表**未变**：它在两种状态下都是 0 条 COMPLETE）。
        * ③ 核心判断：只问 hammer / laser / rammer 是否跨过 0 门槛。 */
       expect(
         baselinePaths.length,

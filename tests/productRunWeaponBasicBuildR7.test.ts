@@ -294,8 +294,7 @@ describe('PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT', () => {
     expect(weaponCadenceGrowth(defOf('machineGun'))).toEqual({ key: 'cooldownMs', base: 1100 });
     expect(weaponCadenceGrowth(defOf('shotgun'))).toEqual({ key: 'cooldownMs', base: 1300 });
     // 接触类：canonical 里真有该键（rammer）就直接读它
-    // R11-RAMMER：`restSteps` 24 → 12（这里读的是 canonical ⇒ 必须同步）
-    expect(weaponCadenceGrowth(defOf('rammer'))).toEqual({ key: 'restSteps', base: 12 });
+    expect(weaponCadenceGrowth(defOf('rammer'))).toEqual({ key: 'restSteps', base: 24 });
     // hammer：该键只在行为代码默认里 ⇒ 用文档化基准（同源由 GR-02b 钉）
     expect(weaponCadenceGrowth(defOf('hammer'))).toEqual({
       key: 'windupPauseSteps',

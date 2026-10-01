@@ -3,27 +3,32 @@
  *
  * ── 本文件存在的理由 ───────────────────────────────────────────────────────
  *
- * R11 是**三条单变量**叠加成的一个批次：
+ * R11 是**三条单变量**。本文件断言的是它们的**终态**：
  *
- *   | 轮次 | 武器 | 唯一改动的键 | 落地 |
+ *   | 轮次 | 武器 | 唯一改动的键 | 终态 |
  *   |---|---|---|---|
  *   | `de9be13` R11-HAMMER-REACH | hammer | （reach 类） | **未落地**（负结果，零参数改动） |
- *   | `a046e92` R11-LASER-CADENCE | laser | `cooldownMs` | 1800 → **600** |
- *   | `9f59ec7` R11-RAMMER-REST   | rammer | `restSteps` | 24 → **12** |
+ *   | `a046e92` R11-LASER-CADENCE | laser | `cooldownMs` | 1800 → **600**（保留） |
+ *   | `9f59ec7` R11-RAMMER-REST   | rammer | `restSteps` | 24 → 12 → **24（已回退）** |
  *
- * 每条单变量各自有专属守卫（`productRunHammerReachProbeR11` / `productRunLaserCadenceR11` /
- * `productRunRammerRestR11`），但**「批次级」的两个契约没有机械守卫**：
+ * ⚠️ **PRODUCT-LOOP-R11-RAMMER-REST-ROLLBACK**：rammer 的单变量假设**失败**（唯一 COMPLETE
+ *    chassis 仍为 0，且把既有 `walk` 族 COMPLETE 由 6 条压到 4 条 ⇒ 真实路线退化）⇒ 整块回退
+ *    （连同原 `productRunRammerRestR11` 取证文件一并撤销）。⇒ 本批次**最终落地的差异只剩 1 条**：
+ *    `laser.cooldownMs`；hammer（负结果）与 rammer（已回退）都回到 R10 基线。
  *
- *   ① **「只改一个变量」的字面证明** —— 断言激光/冲锤的**其余每一个字段**（含键集）都等于 R10 基线；
- *   ② **「其它 4 件武器零退化」** —— 断言 `cannon / flamethrower / machineGun / shotgun`
- *      的 `mass / energy / collider / behaviorParams` **逐字段逐值**等于 R10 基线。
+ * 专属守卫：`productRunHammerReachProbeR11` / `productRunLaserCadenceR11`。而**「批次级」的两个
+ * 契约没有别的机械守卫**：
+ *
+ *   ① **「只改一个变量」的字面证明** —— 断言激光的**其余每一个字段**（含键集）都等于 R10 基线；
+ *   ② **「其它 6 件武器零退化」** —— 断言 `cannon / flamethrower / hammer / machineGun / rammer /
+ *      shotgun` 的 `mass / energy / collider / behaviorParams` **逐字段逐值**等于 R10 基线。
  *
  * 在这份守卫之前，②只有「`git diff` 只显示 2 行改动」这种**一次性人工取证**；人一多、窗口一换
  * 就失效。本文件把它变成**每次全量 vitest 都会跑的机器断言**。
  *
  * ── 快照怎么来的 ───────────────────────────────────────────────────────────
  * `R10_BASELINE` = `1f3df13`（R10 收口点，R11 三条单变量全部尚未落地）时的 canonical 值。
- * `R11_DELTA` = 本批次的**全部**允许差异（恰好两条：`rammer.restSteps` / `laser.cooldownMs`）。
+ * `R11_DELTA` = 本批次**最终**允许的全部差异（回退后恰好 1 条：`laser.cooldownMs`）。
  * ⇒ 断言形态 `实际 == (基线 ⊕ 白名单)`：任何**未被白名单允许**的新差异（哪怕只差 1）都会红。
  *
  * ⚠️ 本文件**不写任何战斗读数**（那是各轮专属守卫的事）；读的全是正式 `registry` canonical 与
@@ -125,7 +130,7 @@ const R10_BASELINE: Record<string, WeaponSnap> = {
       extendPx: 160,
       strikeSpeedPxPerStep: 20,
       retractSpeedPxPerStep: 3,
-      restSteps: 24, // ← R11 唯一改动点（白名单里改成 12）
+      restSteps: 24, // ← R11-RAMMER-REST 曾改成 12；ROLLBACK 已还原 ⇒ 不在白名单里（必须仍是 24）
       holdSteps: 8,
       maxForceN: 1200,
       baseDamage: 70,
@@ -148,8 +153,9 @@ const R10_BASELINE: Record<string, WeaponSnap> = {
 };
 
 /**
- * **本批次允许的全部差异**（恰好 2 条）。
+ * **本批次最终允许的全部差异**（回退后恰好 1 条）。
  * ⚠️ 这个表就是「只允许调整一个变量」的机器表达：表外的任何字段变化都会让 BG-01/BG-05 变红。
+ * ⚠️ R11-RAMMER-REST-ROLLBACK 之后 `rammer` **必须不在**表内 —— 它的 canonical 等于 R10 基线。
  */
 const R11_DELTA: Record<string, { readonly field: string; readonly before: number; readonly after: number; readonly reason: string }> = {
   laser: {
@@ -157,12 +163,6 @@ const R11_DELTA: Record<string, { readonly field: string; readonly before: numbe
     before: 1800,
     after: 600,
     reason: '攻击周期 = chargeMs + cooldownMs = 3300ms ⇒ ~1000 步战斗只装得下 5 发；缩短冷却让激光装得下足够多的射击（前摇不动）。',
-  },
-  rammer: {
-    field: 'restSteps',
-    before: 24,
-    after: 12,
-    reason: '接触类武器没有 cooldownMs，唯一属于「恢复节奏」的键；缩短 rest 缩短暴露时间、改善第 1 段交换效率。',
   },
 };
 
@@ -213,13 +213,12 @@ function defBlock(code: string, varName: string): string {
 
 describe('PRODUCT-LOOP-R11-WEAPON-BALANCE-BATCH-GATE｜批次技术收口', () => {
   /* ============================================================ BG-00 */
-  it('BG-00｜白名单即全部差异：本批次只允许 rammer.restSteps 与 laser.cooldownMs 两个键变化', () => {
-    expect(Object.keys(R11_DELTA).sort(), 'R11 批次的差异条目（增删都要显式改这里）').toEqual([
-      'laser',
-      'rammer',
-    ]);
-    // 白名单必须与「三个单变量的裁决」逐条对应：hammer 是负结果 ⇒ **不在**白名单
+  it('BG-00｜白名单即全部差异：回退后本批次只允许 laser.cooldownMs 一个键变化', () => {
+    expect(Object.keys(R11_DELTA).sort(), 'R11 批次的差异条目（增删都要显式改这里）').toEqual(['laser']);
+    // 白名单必须与「三个单变量的裁决」逐条对应：
+    //   hammer = 负结果 ⇒ **不在**白名单；rammer = 假设失败已整块回退 ⇒ **同样不在**白名单
     expect(Object.keys(R11_DELTA)).not.toContain('hammer');
+    expect(Object.keys(R11_DELTA)).not.toContain('rammer');
     // 且白名单字段确实落在该武器的 canonical 键集里（防写错键名后守卫永真）
     for (const [defId, d] of Object.entries(R11_DELTA)) {
       const base = R10_BASELINE[defId]!;
@@ -285,17 +284,19 @@ describe('PRODUCT-LOOP-R11-WEAPON-BALANCE-BATCH-GATE｜批次技术收口', () =
   });
 
   /* ============================================================ BG-04 */
-  it('BG-04｜rammer：只动 restSteps —— 行程 / 伸出速度 / 停顿 / 回收速度 / 力矩 / 伤害全部冻结', () => {
+  it('BG-04｜rammer：R11-RAMMER-REST 已**整块回退** —— 全部字段（含 restSteps）逐值等于 R10 基线', () => {
     const got = snapOf('rammer').bp;
+    const base = R10_BASELINE['rammer']!;
     expect(got['extendPx'], '行程不动').toBe(160);
     expect(got['strikeSpeedPxPerStep'], '伸出速度不动').toBe(20);
     expect(got['holdSteps'], '到位停顿不动').toBe(8);
     expect(got['retractSpeedPxPerStep'], '回收速度不动').toBe(3);
     expect(got['maxForceN'], 'motor 力矩不动').toBe(1200);
     expect(got['baseDamage'], '伤害不动（伤害只走 ContactRouter 读 canonical baseDamage）').toBe(70);
-    expect(got['restSteps'], '落地值').toBe(12);
-    expect(got['restSteps'], '必须仍有恢复停顿（不是归零的连打）').toBeGreaterThan(0);
-    expect(got['restSteps']).toBeLessThan(24);
+    // ★ 回退的核心断言：restSteps 必须**回到 24**（= R10 基线值），不是 12、也不是任何其它档位
+    expect(got['restSteps'], 'restSteps 必须已回退到 R10 基线 24').toBe(24);
+    expect(got['restSteps'], '回退后必须与 R10 基线逐值一致').toBe(base.bp['restSteps']);
+    expect(got, 'rammer 整份快照（键集 + 逐字段）必须等于 R10 基线').toEqual(base.bp);
     // 接触类武器**没有** cooldownMs —— 防止有人为「统一节奏键」给它加一个
     expect(Object.keys(got)).not.toContain('cooldownMs');
   });
@@ -330,22 +331,23 @@ describe('PRODUCT-LOOP-R11-WEAPON-BALANCE-BATCH-GATE｜批次技术收口', () =
   });
 
   /* ============================================================ BG-07 */
-  it('BG-07｜源码守卫：两个落地键各自**在定义块里只出现一次**（防止再加第二个节奏键）', () => {
+  it('BG-07｜源码守卫：落地键在定义块里只出现一次；rammer 已回退（24，无 12 残留）', () => {
     const code = strippedContentSource();
 
+    // rammer：`restSteps` 仍恰 1 处，且值必须是**回退后**的 24（不是 12）
     const rammerBlock = defBlock(code, 'rammer');
     expect(
       rammerBlock.match(/restSteps\s*:/g)?.length,
       'rammer 定义块里 restSteps 恰 1 处',
     ).toBe(1);
-    expect(rammerBlock.match(/restSteps\s*:\s*12\b/g)?.length, 'rammer 落地值恰 1 处').toBe(1);
+    expect(rammerBlock.match(/restSteps\s*:\s*24\b/g)?.length, 'rammer 回退值恰 1 处').toBe(1);
+    expect(rammerBlock.match(/restSteps\s*:\s*12\b/g), 'rammer 定义块里不得残留 12').toBeNull();
 
     const laserBlock = defBlock(code, 'laser');
     expect(laserBlock.match(/cooldownMs\s*:/g)?.length, 'laser 定义块里 cooldownMs 恰 1 处').toBe(1);
     expect(laserBlock.match(/cooldownMs\s*:\s*600\b/g)?.length, 'laser 落地值恰 1 处').toBe(1);
     expect(laserBlock.match(/chargeMs\s*:\s*1500\b/g)?.length, 'laser 前摇恰 1 处').toBe(1);
 
-    // 三个落地键都必须在**放行 7 件**里，且**都不在** BLOCK 2 件里
     for (const w of FULL_RUN_WEAPONS) {
       expect(code.includes(`id: '${w}'`), `${w} 应在 content.ts 里`).toBe(true);
     }
