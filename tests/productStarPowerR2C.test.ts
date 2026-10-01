@@ -434,8 +434,14 @@ describe('PRODUCT-LOOP-R2-C｜D. 真实战斗里 ★2 真的打得更重（不�
   }, 60000);
 
   it('SP-09 星级只作用在它自己那个挂点上：另一件武器的伤害两场完全相同', () => {
-    const r1 = realBattle(playerDraft(1));
-    const r2 = realBattle(playerDraft(2));
+    // 本 Queue 已移除产品默认车的隐藏顶部武器 ⇒ 默认车现在只有一件武器；
+    // 为保持「星级只影响自己挂点」可被证伪，这里显式给测试装载再加一件 `top` 武器。
+    const mk = (star: number): BuildDraft => {
+      const base = playerDraft(star);
+      return { ...base, functionalSelections: { ...base.functionalSelections, top: 'hammer' } };
+    };
+    const r1 = realBattle(mk(1));
+    const r2 = realBattle(mk(2));
     const taken1 = r1.weapons.map((w) => `${w.defId}@${w.hardpointId}★${w.star}:${w.damage}`);
     const taken2 = r2.weapons.map((w) => `${w.defId}@${w.hardpointId}★${w.star}:${w.damage}`);
     expect(taken1.length, '本场不止一件武器（否则「只影响一件」无法被证伪）').toBeGreaterThan(1);

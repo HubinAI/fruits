@@ -322,7 +322,8 @@ describe('PRODUCT-LOOP-R1-A｜D. 战车预览几何（正式视觉定义，不�
     expect(layout.items.filter((i) => i.kind === 'part')).toHaveLength(mounted.length);
     // R1-C 起默认车的前置槽**明确留空**（主循环可行性处置，证据见 playerLoadout.ts）
     expect(draft.functionalSelections['front']).toBe(EMPTY_SLOT);
-    expect(mounted).toHaveLength(2);
+    // 本 Queue 移除了隐藏顶部武器 ⇒ 默认车现在只有「一件」已装部件（frontMass=cannon）
+    expect(mounted).toHaveLength(1);
     const weaponItems = layout.items.filter((i) => i.onWeaponSlot);
     expect(weaponItems).toHaveLength(1);
     expect(weaponItems[0].defId).toBe('cannon');

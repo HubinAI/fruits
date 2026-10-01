@@ -391,7 +391,8 @@ describe('PRODUCT-LOOP-R1-C｜C. 本局战斗真实使用「局外 Equipped」',
       expect(functionalAt(rt, WEAPON_SLOT)).toBe('laser');
       // 正式 resolved 快照也一致（不是只有一份 Lab 侧的口径）
       const weapons = rt.playerFunctionals().filter((f) => f.category === 'weapon');
-      expect(weapons.map((w) => w.defId).sort()).toEqual(['hammer', 'laser']);
+      // 本 Queue 已移除产品默认车的隐藏顶部武器 ⇒ 默认车现在只装玩家能看见/配置的那一件
+      expect(weapons.map((w) => w.defId).sort()).toEqual(['laser']);
       expect(weapons.every((w) => isOfficialPart(w.defId))).toBe(true);
     } finally {
       rt.dispose();
@@ -422,9 +423,12 @@ describe('PRODUCT-LOOP-R1-C｜C. 本局战斗真实使用「局外 Equipped」',
     // ⚠️ 冻结面：正式 gameplay 的 starter（`makeStarterDraft`）在 `front` 上仍然是推杆
     const starter = makeStarterDraft(PLAYER_BODY_DEF_ID, registry);
     expect(starter.functionalSelections['front']).toBe('pushRod');
-    // 除 `front` 一槽外，默认车与正式 starter 逐槽相同
+    // ⚠️ PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL｜`top` 被本 Queue 从产品默认车**主动清掉**
+    //   （隐藏锤移除：玩家在 Garage 永远看不到、也配不到 top，故产品默认车不再带锤）
+    expect(d.functionalSelections['top']).toBe(EMPTY_SLOT);
+    // 除 `front` 与 `top` 两槽外，默认车与正式 starter 逐槽相同
     for (const [hp, id] of Object.entries(starter.functionalSelections)) {
-      if (hp === 'front') continue;
+      if (hp === 'front' || hp === 'top') continue;
       expect(d.functionalSelections[hp], `槽 ${hp} 不应被改动`).toBe(id);
     }
   });

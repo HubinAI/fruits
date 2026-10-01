@@ -627,15 +627,15 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
       ];
     }
     expect(rows).toEqual({
-      ProtoRusher: ['T', 'A', 'hp', 9, 1080, 131, 960, 679.1, 0],
-      Chaser: ['T', 'A', 'hp', 9, 930, 134, 930, 735, 0],
-      RangedTurret: ['T', 'B', 'hp', 2, 240, 609, 0, 0, 859.9],
+      ProtoRusher: ['T', 'A', 'hp', 9, 1080, 129, 960, 859.2, 0],
+      Chaser: ['T', 'A', 'hp', 8, 960, 132, 960, 189.9, 0],
+      RangedTurret: ['T', 'B', 'hp', 1, 120, 606, 0, 0, 980],
     });
-    // 逐**来源部件**明细（默认车有 `frontMass` 与 `top` 两件武器 ⇒ 来源必须如实分开报告）：
-    // 实测 = **2 次命中全部来自 `cannon`**（2 × 120 玩家基线），`top` 槽那件**零贡献**。
-    // ⚠️ 这与「只装 cannon」的 1 次命中不同 —— 差异来自车体（多挂一件 ⇒ 质量 / 几何不同
-    //    ⇒ 轨迹不同），**不是** `top` 那件打中了。两者都不是本 Queue 的结论范围，只记录事实。
-    expect(auxCell('RangedTurret').perPart).toEqual({ cannon: { count: 2, damage: 240 } });
+    // 逐**来源部件**明细：本 Queue 已移除隐藏顶部武器，默认车现在只有 `frontMass` 一件武器
+    //   ⇒ 全部命中都来自 `cannon`（1 × 120 玩家基线），`top` 槽不再挂任何件。
+    // ⚠️ 数值相对旧快照的变化全部来自「车体少了顶部一件」⇒ 质量 / 几何不同 ⇒ 轨迹不同，
+    //   并非哪一发打得更重；两者都不是本 Queue 的结论范围，只如实记录新事实。
+    expect(auxCell('RangedTurret').perPart).toEqual({ cannon: { count: 1, damage: 120 } });
   });
 
   it('MX-11 未改 canonical：7 件武器主伤害 + 3 个 Encounter 的对手定义逐字段冻结', () => {

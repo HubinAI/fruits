@@ -191,8 +191,9 @@ const FIRST_ENCOUNTER_ID = RUN_SCRIPT.find((n) => /battle/.test(n.id))!.encounte
 /**
  * **产品可达装载**：产品默认车只换武器槽。
  *
- * ⚠️ `top` 落的是产品默认的 `hammer` —— 自 R1-A 起 `top` 是**只读展示槽**，产品 UI 从不写它，
- *    因此「装备 `W` 打赢一局」在真实产品里的形状**就是**这一条。
+ * ⚠️ `top` 在产品默认车（`defaultPlayerDraft()`）里**已被本 Queue 清空**（`PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL`），
+ *    因此「装备 `W` 一键可达」在真实产品里的形状**就是** `frontMass=W` + `top=EMPTY` 这一条
+ *    —— 玩家看见并配置什么，Runtime 就只使用什么，不存在第二把隐藏武器。
  */
 function prodDraft(weapon: string): BuildDraft {
   const base = defaultPlayerDraft();
@@ -487,7 +488,7 @@ describe('PRODUCT-LOOP-R9-RUN-REWARD-PACING-CHECK｜B. COMPLETE 出口与 FAILED
     expect(runSingleRewardClaim(prod.state, set), 'FAILED ⇒ 无 CTA').toBeNull();
   }, SLOW_MS);
 
-  it('RP9-05 **如实记录**：产品「一键可达」装载（frontMass=W + 默认 top=hammer）7 件在真实三段 Run 下全部 FAILED', () => {
+  it('RP9-05 **如实记录**：产品「一键可达」装载（frontMass=W，隐藏 top 已被本 Queue 清空）7 件在真实三段 Run 下全部 FAILED', () => {
     const table: Record<string, string> = {};
     const detail: Record<string, string> = {};
     for (const w of FULL_RUN_SUPPORTED_WEAPON_IDS) {
@@ -505,14 +506,18 @@ describe('PRODUCT-LOOP-R9-RUN-REWARD-PACING-CHECK｜B. COMPLETE 出口与 FAILED
     // ⚠️ 本表是**如实记录**，不是期望值：7 件全 FAILED 与已登记的 **Q3 能力缺口 (a)** 同一件事。
     //    本 Queue 明令**不修**（不调敌人 / 不改参数 / 不隐藏失败）⇒ 只把它变成机器读数。
     //    ⚠️ 若将来这条能力缺口被修掉，本断言会变红 —— 那是**正确的**信号（改这张表并更新交接文档）。
+    // ⚠️ 下列值是**移除隐藏顶部锤之后的实测读数**（车体少了一件武器 ⇒ 质量 / 几何变化，
+    //    因此失败 Encounter 与旧表不同：hammer 从 RangedTurret→Chaser、machineGun 从 Chaser→RangedTurret、
+    //    rammer 从 Chaser→ProtoRusher、shotgun 从 RangedTurret→Chaser）。
+    //    本 Queue 不修 Q3 能力缺口 (a)（一键可达装配仍打不赢终局），故 7 件仍全 FAILED。
     expect(table).toEqual({
       cannon: 'FAILED@RangedTurret',
       flamethrower: 'FAILED@RangedTurret',
-      hammer: 'FAILED@RangedTurret',
+      hammer: 'FAILED@Chaser',
       laser: 'FAILED@ProtoRusher',
-      machineGun: 'FAILED@Chaser',
-      rammer: 'FAILED@Chaser',
-      shotgun: 'FAILED@RangedTurret',
+      machineGun: 'FAILED@RangedTurret',
+      rammer: 'FAILED@ProtoRusher',
+      shotgun: 'FAILED@Chaser',
     });
   }, SLOW_MS);
 });

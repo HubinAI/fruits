@@ -132,8 +132,11 @@ function seedLegacyProfile(): LegacySeed {
     frontWheelDefId: 'largeWheel',
     drive: 'stationary',
     functionalSelections: { ...LEGACY_FIXTURE },
-    // 玩家**没有**碰过 front（否则会有 front 的印记），但别的槽有星级
-    functionalStars: { top: 2 },
+    // 玩家**没有**碰过 front（否则会有 front 的印记），但别的槽有星级（用来证明确实「其它数据全部保留」）。
+    // ⚠️ 刻意**不**把星级放在 `top` 上：本 Queue 已把 `top` 视为「玩家无法操作的隐藏武器」，
+    //    只有「无星级印记」的旧 starter top 才会被清理；放 `frontMass` 既能演示「旁路星级保留」、
+    //    又不干扰 top 的隐藏武器清理判定。
+    functionalStars: { frontMass: 2 },
   };
   expect(validateSnapshot(buildSnapshotFromDraft(legacy, registry), registry).valid, '旧 starter 夹具本身必须合法').toBe(true);
   savePlayerBuild(legacy);
@@ -189,8 +192,10 @@ describe('PRODUCT-LOOP-P0-LEGACY｜A. 旧 starter profile 迁移（必改 1）',
     expect(loaded.rearWheelDefId).toBe('smallWheel');
     expect(loaded.frontWheelDefId).toBe('largeWheel');
     expect(loaded.drive).toBe('stationary');
-    expect(loaded.functionalStars).toEqual({ top: 2 });
-    expect(loaded.functionalSelections['top']).toBe('hammer');
+    // ③ 旁路星级保留（frontMass 上的 ★2 是玩家数据，迁移一个字节都不动）
+    expect(loaded.functionalStars).toEqual({ frontMass:2 });
+    // ④ 隐藏顶部武器被清除：玩家在 Garage 永远看不到、也配不到的 `top=hammer` 已置空
+    expect(loaded.functionalSelections['top']).toBe(EMPTY_SLOT);
     expect(loaded.bodyDefId).toBe(PLAYER_BODY_DEF_ID);
     // ③ 迁移结果仍然合法（`playerProfile` 依赖这条不变量）
     expect(validateSnapshot(buildSnapshotFromDraft(loaded, registry), registry).valid).toBe(true);
@@ -221,15 +226,19 @@ describe('PRODUCT-LOOP-P0-LEGACY｜A. 旧 starter profile 迁移（必改 1）',
       functionalStars: { [DEFAULT_CLEARED_SLOT]: 1 },
     };
     savePlayerBuild(chosen);
-    const raw = store.getItem(BUILD_KEY) as string;
 
     const out = migrateLegacyStarterProfile(chosen);
     expect(out.migrated).toBe(false);
     expect(out.reason).toBe('player-chosen');
     expect(out.draft).toBe(chosen); // 同一个对象，连拷贝都没有
-    // 读入口同样不动它
+    // 读入口同样不动 front（玩家选择优先）：front 仍是玩家装的推杆
     expect(loadEquippedDraft().functionalSelections[DEFAULT_CLEARED_SLOT]).toBe(LEGACY_FIXTURE[DEFAULT_CLEARED_SLOT]);
-    expect(store.getItem(BUILD_KEY)).toBe(raw); // 一个字节都没改
+    // ⚠️ 但玩家从没碰过的隐藏 top 锤（无星级印记）仍被本 Queue 的隐藏武器清理清空 —— 与 front 的
+    //    「玩家选择保护」是两件独立的事：front 不动、top 被清，存档因此不再是原样（仅 top 一槽变化）。
+    expect(loadEquippedDraft().functionalSelections['top']).toBe(EMPTY_SLOT);
+    const after = JSON.parse(store.getItem(BUILD_KEY) as string) as BuildDraft;
+    expect(after.functionalSelections[DEFAULT_CLEARED_SLOT]).toBe(LEGACY_FIXTURE[DEFAULT_CLEARED_SLOT]);
+    expect(after.functionalSelections['top']).toBe(EMPTY_SLOT);
   });
 
   it('LM-13 **Case B/C**：fresh profile ⇒ no-op；其它形状（非推杆 / 非 cannon / 无此槽）⇒ 不误改', () => {
@@ -308,11 +317,11 @@ describe('PRODUCT-LOOP-P0-LEGACY｜A. 旧 starter profile 迁移（必改 1）',
   });
 
   it('LM-22 旧 profiling 的 `front` 挂推杆确实是可达性问题（R1-C 实测形状的机器复述）', () => {
-    // 迁移后的车与 fresh starter 在「功能槽」上完全一致 ⇒ 迁移不是「另一套 starter」
-    const migrated = migrateLegacyStarterProfile({
-      ...(makeStarterDraft(PLAYER_BODY_DEF_ID, registry) as BuildDraft),
-    }).draft;
+    // 旧 starter（front=推杆 + top=锤）落盘，经真正的读入口（front 迁移 + 隐藏 top 清理）归一化
+    savePlayerBuild(makeStarterDraft(PLAYER_BODY_DEF_ID, registry) as BuildDraft);
+    const migrated = loadEquippedDraft();
     const fresh = defaultPlayerDraft();
+    // 归一化后，功能槽这一层与 fresh starter 逐槽相同（front 与 top 都被清掉）⇒ 迁移不是「另一套 starter」
     expect(migrated.functionalSelections).toEqual(fresh.functionalSelections);
   });
 });

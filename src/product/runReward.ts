@@ -109,8 +109,8 @@ import { fullRunCompat } from './runCompatibility';
  * ⚠️ 与 `REWARD_CHOICE_IDS`（R2-RECOVERY 期的固定 `['cannon']`）的关系：
  *    那个常量**已被本函数取代并删除**。保留一个「默认发炮」的常量就是本 Queue
  *    要根除的缺陷本身（第二份真源；且它会让「非 Cannon 局」静默退化）。
- *    默认车（`defaultPlayerDraft()`：`frontMass→cannon` + `top→hammer`）的基准武器
- *    仍然是 `cannon` ⇒ **R2 的 Cannon 路径逐条不变**（`cannon ★1 ×1`、4/5 → 5/5 → ★2）。
+ *    默认车（`defaultPlayerDraft()`：`frontMass→cannon`，`top` 已被本 Queue 清空、不再携带隐藏锤）
+ *    的基准武器仍然是 `cannon` ⇒ **R2 的 Cannon 路径逐条不变**（`cannon ★1 ×1`、4/5 → 5/5 → ★2）。
  * ⚠️ 全部取自正式内容库（`registry.functionals` 的 `category === 'weapon'`），
  *    且实测能在默认车的 `WEAPON_SLOT`（`frontMass`）上过正式 `validateSnapshot`
  *    ⇒ 候选**真能发出去**（`claimRunReward` 的 `not-equippable` 分支不会静默吃掉它）。

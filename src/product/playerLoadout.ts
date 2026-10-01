@@ -158,7 +158,10 @@ export const DAMAGE_LABEL = '攻击';
  *     ⇒ 首屏零额外假设就有一个**真实主武器**，首页不会出现「当前武器 = 辅助」的语义错位；
  *   - 车身的 `front` 槽在 starter 里装的是 **推杆**（`pushRod`，`category='gadget'`）——
  *     那是辅助位，不是武器位；
- *   - 车身的 `top` 槽（锤）本轮保持**只读展示**，避免为了「多武器槽」扩大范围。
+ *   - 车身的 `top` 槽（锤）在**产品默认车**里已被清空（见 `defaultPlayerDraft` 与
+ *     `clearHiddenTopWeapon`）：它是玩家在 Garage 永远看不到、也永远配不到的「隐藏武器」，
+ *     PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL 已把它从产品链路移除；Lab / Validation /
+ *     legacy fixture 仍保留 `top=hammer`（验收要求 Lab 不退化）。
  */
 export const WEAPON_SLOT = 'frontMass';
 
@@ -468,17 +471,32 @@ function persistPlayerBuild(draft: BuildDraft): void {
   savePlayerBuild(draft);
 }
 
-/** 空存档首次启动的合法 starter Build。 */
+/**
+ * 空存档首次启动的合法 starter Build（**产品侧**）。
+ *
+ * ⚠️ PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL｜只改产品默认车，不碰全局 Lab starter：
+ * 起手仍是 `makeStarterDraft`，但**多清一个槽** —— 把顶部挂点的 `hammer` 一并置空。
+ *
+ * 为什么必须清（`top` 不是「另一件武器槽」，是**玩家永远看不到、也永远配不到的隐藏武器**）：
+ *   - 正式 Product Garage **从不暴露** `top` 槽（MVP 只打通 `frontMass` 武器槽 + Body + 双 Movement）；
+ *   - 但 `buildSnapshotFromDraft` 会把**所有**非空 `functionalSelections` 都塞进
+ *     `Snapshot.functionals` → 进战斗、贡献伤害（`runCompatibility` 还直接拿它当「已装备武器」）；
+ *   - 于是 `top=hammer` 被默认车一路带进持久化存档、再随 `equipped=` 进 Run Runtime，
+ *     玩家却完全不知道它存在、也永远配不到它 ⇒ 正是 Queue 描述的
+ *     「看见的配置 ≠ Runtime 真用的配置」。
+ *   本函数**只清这一个槽**（不动 `frontMass` 主武器、不动 Body / Movement / inventory），
+ *   且刻意**不改** `makeStarterDraft` —— 后者仍属 Lab / Validation / legacy fixture，验收要求不退化。
+ */
 export function defaultPlayerDraft(): BuildDraft {
   const starter = makeStarterDraft(PLAYER_BODY_DEF_ID, registry);
-  // 见上方 DEFAULT_CLEARED_SLOT：把前置槽留给主武器，默认车不挂推杆。
-  return {
-    ...starter,
-    functionalSelections: {
-      ...starter.functionalSelections,
-      [DEFAULT_CLEARED_SLOT]: EMPTY_SLOT,
-    },
+  const selections: Record<string, string> = {
+    ...starter.functionalSelections,
+    // 见上方 DEFAULT_CLEARED_SLOT：把前置槽（front）留给主武器，默认车不挂推杆。
+    [DEFAULT_CLEARED_SLOT]: EMPTY_SLOT,
   };
+  // PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL｜清空顶部挂点的隐藏锤（仅当本车身确有该槽、且旧 starter 真装了锤）。
+  if (selections.top !== undefined) selections.top = EMPTY_SLOT;
+  return { ...starter, functionalSelections: selections };
 }
 
 /**
@@ -561,18 +579,76 @@ export function migrateLegacyStarterProfile(draft: BuildDraft): LegacyProfileMig
 }
 
 /**
+ * PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL｜必改 2｜清理正式产品中「玩家无法操作的隐藏顶部武器」。
+ *
+ * 背景：旧 starter（`makeStarterDraft`）在 `top` 槽装了 `hammer`，而正式 Product Garage **从不暴露**
+ * `top` 槽（MVP 只打通 `frontMass` 武器槽 + Body + 双 Movement）。于是 `top=hammer` 被默认车一路带进
+ * 持久化存档、再随 `equipped=` 进 Run Runtime，玩家却完全不知道它存在、也永远配不到它 ⇒ 这就是
+ * Queue 描述的「看见的配置 ≠ Runtime 真用的配置」。
+ *
+ * 判别（与既有 `migrateLegacyStarterProfile` 的 `front` 同一套可靠信号，且**互不阻塞**——`front`
+ * 签名不成立时本清理仍可独立命中）：
+ *   ① 该车身**有** `top` 硬点、且当前 `top` 等于旧 starter 的 `top`（= `hammer`）；
+ *   ② 该槽**没有**玩家侧写入留下的星级印记（`functionalStars.top` 不存在）。
+ *      —— 正式 starter 完全不写 `functionalStars`；所有面向玩家的写入口都会同时盖星级印记；
+ *         因此「无印记」=「玩家从没碰过这个槽」= 可以安全清除。
+ *   任一不成立（玩家在旧横屏游戏里主动把 `hammer` 装上 `top` 并落了星）⇒ 原样返回、一个字节都不改。
+ *
+ * 只改这一个槽：`frontMass` / Body / rear·front Movement / inventory / 进度**全部不动**。
+ * reload 幂等：清掉后 `sel.top === EMPTY_SLOT !== legacy.top`（hammer），判别式不再成立。
+ */
+export interface HiddenTopCleanup {
+  readonly cleaned: boolean;
+  readonly reason: 'hidden-top' | 'not-legacy-top' | 'player-chosen' | 'no-top-hardpoint' | 'invalid';
+  /** 清理后的 Draft（未清理时 = 入参本身，逐字节相同） */
+  readonly draft: BuildDraft;
+}
+
+/** 纯判定 + 纯变换：**不落盘**（落盘只发生在 `loadEquippedDraft` 的唯一一处）。 */
+export function clearHiddenTopWeapon(draft: BuildDraft): HiddenTopCleanup {
+  const sel: Record<string, string> = draft.functionalSelections ?? {};
+  const body: BodyDef | undefined = registry.bodies.get(draft.bodyDefId);
+  // 车身没有 top 硬点 ⇒ 谈不上清理（也避免往 functionalSelections 里塞一个不存在的键）
+  if (!body || !body.functionalHardpoints.some((h) => h.id === 'top')) {
+    return { cleaned: false, reason: 'no-top-hardpoint', draft };
+  }
+  const legacy = makeStarterDraft(draft.bodyDefId, registry).functionalSelections;
+  // ① 当前 top 必须等于旧 starter 的 top（= hammer）
+  if (legacy.top === undefined || sel.top !== legacy.top) {
+    return { cleaned: false, reason: 'not-legacy-top', draft };
+  }
+  // ② 玩家从没碰过这个槽（无星级印记）—— 否则是玩家的主动选择，不碰
+  if (draft.functionalStars?.top !== undefined) {
+    return { cleaned: false, reason: 'player-chosen', draft };
+  }
+  const selections: Record<string, string> = { ...sel, top: EMPTY_SLOT };
+  const next: BuildDraft = { ...draft, functionalSelections: selections };
+  // 写入前必须过正式 validateSnapshot（与其它迁移同一纪律）：不合法就不动它
+  if (!validateSnapshot(buildSnapshotFromDraft(next, registry), registry).valid) {
+    return { cleaned: false, reason: 'invalid', draft };
+  }
+  return { cleaned: true, reason: 'hidden-top', draft: next };
+}
+
+/**
  * 读取玩家当前 Build。**唯一读入口**：先读正式存档，无存档才回退 starter。
  * ⚠️ 回退值**不落盘** —— 保持 `core/onboarding.ts` 的「全新账号」判定（`loadPlayerBuild() === null`）语义不变。
- * ⚠️ PRODUCT-LOOP-P0 起：**有存档**时本函数会顺带完成一次旧 starter → 当前 starter 的迁移
- *    （`migrateLegacyStarterProfile`），命中时**落盘一次**。这是「归一化」而不是「玩家动作」，
- *    且**结构上一次为限**：迁移后 `front` 已是空槽 ⇒ 签名不再成立 ⇒ 下次读不再写。
+ * ⚠️ PRODUCT-LOOP-P0 起：**有存档**时本函数会顺带完成两类一次性归一化（命中时**各落盘一次**）：
+ *    - `migrateLegacyStarterProfile`：旧 starter 的 `front` 推杆 → 清空；
+ *    - `clearHiddenTopWeapon`：本 Queue 新增 —— 旧 starter 的隐藏 `top` 锤 → 清空。
+ *    两者都是「归一化」而不是「玩家动作」，且**结构上一次为限**：清理后 `top` 已是空槽 ⇒
+ *    签名不再成立 ⇒ 下次读不再写。
  */
 export function loadEquippedDraft(): BuildDraft {
   const stored = loadPlayerBuild();
   if (!stored) return defaultPlayerDraft();
   const migrated = migrateLegacyStarterProfile(stored);
-  if (migrated.migrated) persistPlayerBuild(migrated.draft);
-  return migrated.draft;
+  let draft = migrated.draft;
+  const topCleanup = clearHiddenTopWeapon(draft);
+  if (topCleanup.cleaned) draft = topCleanup.draft;
+  // PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL｜隐藏顶部武器清理命中也需落盘一次（与 front 迁移同纪律）。
+  if (migrated.migrated || topCleanup.cleaned) persistPlayerBuild(draft);
+  return draft;
 }
 
 /**
