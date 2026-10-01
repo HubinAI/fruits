@@ -118,6 +118,42 @@ function onlyDraft(weaponDefId: string): BuildDraft {
   return draft;
 }
 
+/** 轮组半径（从 `registry` 现读；与 `playerLoadout` / `productRunLaserCadenceR11` 同源口径）。 */
+const WHEEL_RADIUS: Readonly<Record<string, number>> = (() => {
+  const m: Record<string, number> = { none: 20 };
+  for (const def of registry.movements.values()) m[def.id] = def.radius ?? 20;
+  return m;
+})();
+
+/**
+ * 「**① 段阵亡**」的载体（`PRODUCT-LOOP-R11-RAMMER-REST-R1` 之后更换的那一条真实路线）。
+ *
+ * ⚠️ **为什么必须换**：R11-RAMMER 把 `rammer` 的 `restSteps` 24 → 12（**只动「攻击后的恢复
+ *    节奏」**）之后，`rammer` 单件**不再死在第 ① 段**（实测推进到第 ② 段 `Chaser`），
+ *    而 `Q3-07` 的矩阵显示**其余 6 件本来就能过第 ① 段** ⇒ 「① 段阵亡」在**单件归因夹具**
+ *    下**已无任何真实载体**。
+ * ⚠️ 换成的是一条**真实**会死在第 ① 段的**产品可达底盘**（依据 = `productRunRammerRestR11`
+ *    的 `RR-02b` 输面清单：`watermelonBody/wheelStd/largeWheel` 在落地值下确实打不过 `ProtoRusher`）。
+ * ⚠️ 这**不是放宽断言**：①/②/③ 三段的**覆盖位置一字不变**，只是 ① 段换了一条真实路线；
+ *    「任意段阵亡 ⇒ 走正式 FAILED 流程」的判据强度完全保留。
+ */
+function protoLoserDraft(): BuildDraft {
+  return {
+    ...defaultPlayerDraft(),
+    bodyDefId: 'watermelonBody',
+    frontWheelDefId: 'wheelStd',
+    rearWheelDefId: 'largeWheel',
+    frontRadius: WHEEL_RADIUS['wheelStd'] ?? 20,
+    rearRadius: WHEEL_RADIUS['largeWheel'] ?? 20,
+    functionalSelections: {
+      front: EMPTY_SLOT,
+      frontMass: 'rammer',
+      top: EMPTY_SLOT,
+      rear: EMPTY_SLOT,
+    },
+  };
+}
+
 /**
  * **能通关三段的真实装配**（证据见文件头）：
  * 三个槽都放**弹丸武器** ⇒ 在 `RangedTurret` 的控距下仍然有命中通道。
@@ -165,9 +201,26 @@ interface ChainFact {
 
 const cache = new Map<string, ChainFact>();
 
+/**
+ * 走查缓存 key。
+ *
+ * ⚠️ `PRODUCT-LOOP-R11-RAMMER-REST-R1` 修正：原 key **只由 `functionalSelections` 构成**，
+ *    而 `protoLoserDraft()`（`Q3-04` 的「① 段阵亡」载体）与 `onlyDraft('rammer')` 的**功能槽
+ *    完全相同**（只有车身 / 轮组不同）⇒ 两者会**共用同一份缓存**，后跑的那个会读到前者的结果
+ *    （实测：`Q3-06` 的 rammer 第 1 段伤害被污染成 560，而真实值是 840）。
+ *    ⇒ key 必须包含**车身与轮组**，才真正等于「唯一标识一份 Draft」。
+ */
 function draftKey(d: BuildDraft): string {
   const f = d.functionalSelections;
-  return [f.front, f.frontMass, f.top, f.rear].join('|');
+  return [
+    d.bodyDefId ?? '',
+    d.frontWheelDefId ?? '',
+    d.rearWheelDefId ?? '',
+    f.front,
+    f.frontMass,
+    f.top,
+    f.rear,
+  ].join('|');
 }
 
 /**
@@ -356,36 +409,37 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
 
   it('Q3-04 任意一段阵亡 ⇒ 走**正式 FAILED 流程**（三段各用一条真实物理路线钉死）', () => {
     /*
-      三条**真实**路线，分别在 ① / ② / ③ 段阵亡（单件归因夹具，实测见 Q3-07）：
-        - `rammer` 单件       → ① `ProtoRusher` 就顶不住；
-        - `hammer` 单件       → 撑过 ①，死在 ② `Chaser`；
-        - `flamethrower` 单件 → 撑过 ①②，死在 ③ `RangedTurret`。
+      三条**真实**路线，分别在 ① / ② / ③ 段阵亡：
+        - `rammer`（装在一条真实输面底盘上）→ ① `ProtoRusher` 就顶不住；
+        - `hammer` 单件                     → 撑过 ①，死在 ② `Chaser`；
+        - `flamethrower` 单件               → 撑过 ①②，死在 ③ `RangedTurret`。
       三条都不是「构造出来的假死」，而是真实物理结果 ⇒ 「任意段死亡」被真实覆盖。
 
-      ⚠️ **PRODUCT-LOOP-R11-LASER-CADENCE-R1 的路线替换（不是删断言）**：本用例原先用 `laser`
-         钉「① 段阵亡」。R11 把 laser 的 `cooldownMs` 1800 → 600（只动攻击间隔）之后，
-         laser 单件**不再**死在第 ① 段（实测推进到 ③ `RangedTurret`，见 Q3-07 / RP9-05）⇒
-         它已**不再是一条「① 段阵亡」的真实路线**。
-         替换为**同一口径下真实死在第 ① 段的 `rammer`**（三件覆盖的三段位置一字不变：
-         ① `rammer` / ② `hammer` / ③ `flamethrower`）—— **断言形状与覆盖强度均未放宽**。
-         laser 的新事实由 Q3-06 / Q3-07 单独如实记录。
+      ⚠️ **本用例的两轮路线替换（都是替换，不是删断言）**：
+        ① `PRODUCT-LOOP-R11-LASER-CADENCE-R1`：原先用 `laser` 钉「① 段阵亡」；laser 的
+           `cooldownMs` 1800 → 600 之后它推进到 ③ 段 ⇒ 换成当时的 `rammer`。
+        ② `PRODUCT-LOOP-R11-RAMMER-REST-R1`：`rammer` 的 `restSteps` 24 → 12 之后它**也**推进到
+           ② 段（见 `Q3-07`），而其余 6 件本来就能过 ① 段 ⇒ **「① 段阵亡」在单件归因夹具下
+           已无任何真实载体**。因此 ① 段改由 `protoLoserDraft()`（一条**真实**会输在第 ① 段的
+           产品可达底盘，依据见该函数文档）承担。
+        两轮替换之后，三段覆盖位置**始终是 ① / ② / ③ 各一条**，断言形状与覆盖强度均未放宽。
     */
-    const cases: readonly [string, string][] = [
-      ['rammer', 'ProtoRusher'],
-      ['hammer', 'Chaser'],
-      ['flamethrower', 'RangedTurret'],
+    const cases: readonly [string, BuildDraft, string][] = [
+      ['rammer@watermelonBody+wheelStd/largeWheel', protoLoserDraft(), 'ProtoRusher'],
+      ['hammer', onlyDraft('hammer'), 'Chaser'],
+      ['flamethrower', onlyDraft('flamethrower'), 'RangedTurret'],
     ];
-    for (const [weapon, deadAt] of cases) {
-      const ch = runChain(onlyDraft(weapon));
+    for (const [label, draft, deadAt] of cases) {
+      const ch = runChain(draft);
       // ① 终态 = 正式 FAILED（不是崩溃、不是卡死、不是 COMPLETE）
-      expect(ch.phase, `${weapon} 必须走 FAILED`).toBe('FAILED');
-      expect(runFailed(ch.finalState), `${weapon}: 正式 FAILED 谓词`).toBe(true);
-      expect(runComplete(ch.finalState), `${weapon}: 不是 COMPLETE`).toBe(false);
+      expect(ch.phase, `${label} 必须走 FAILED`).toBe('FAILED');
+      expect(runFailed(ch.finalState), `${label}: 正式 FAILED 谓词`).toBe(true);
+      expect(runComplete(ch.finalState), `${label}: 不是 COMPLETE`).toBe(false);
       // ② 死在**预期的那一段**，且该段之前各段都真的打完了
-      expect(lastSeg(ch).encounterId, `${weapon} 死在哪一段`).toBe(deadAt);
-      expect(lastSeg(ch).winner, `${weapon}: 该段败北`).toBe('B');
-      expect(lastSeg(ch).hpA, `${weapon}: 该段我方耐久归零`).toBe(0);
-      expect(ch.segments.length, `${weapon}: 阵亡段是按顺序推进到的`).toBe(SEQ.indexOf(deadAt as (typeof SEQ)[number]) + 1);
+      expect(lastSeg(ch).encounterId, `${label} 死在哪一段`).toBe(deadAt);
+      expect(lastSeg(ch).winner, `${label}: 该段败北`).toBe('B');
+      expect(lastSeg(ch).hpA, `${label}: 该段我方耐久归零`).toBe(0);
+      expect(ch.segments.length, `${label}: 阵亡段是按顺序推进到的`).toBe(SEQ.indexOf(deadAt as (typeof SEQ)[number]) + 1);
       // ③ 正式 FAILED 文案（与 `finishRunBattle` 的失败分支逐字一致）
       expect(ch.logTail[0]).toBe(`战车耐久耗尽，DAY ${ch.finalDay} 的冒险到此结束。`);
       expect(ch.logTail[1]).toBe('战车耐久剩余 0%。');
@@ -437,7 +491,8 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
       // R11：cooldownMs 1800 → 600 ⇒ 第 1 段（`ProtoRusher`）发射 5 → 7 发（800 → 1120）。
       laser: 1120,
       machineGun: 1000,
-      rammer: 770,
+      // R11-RAMMER：`restSteps` 24 → 12 ⇒ 第 1 段（`ProtoRusher`）命中 11 → 12 次（770 → 840）
+      rammer: 840,
       shotgun: 1140,
     });
   });
@@ -468,7 +523,8 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
       // R11：laser 从「① 段就阵亡」推进到「打进终局才阵亡」（仍未通关 ⇒ 缺口语义不变）
       laser: 'FAILED@RangedTurret',
       machineGun: 'FAILED@RangedTurret',
-      rammer: 'FAILED@ProtoRusher',
+      // R11-RAMMER：rammer 从「① 段就阵亡」推进到「撑过 ①，死在 ② `Chaser`」
+      rammer: 'FAILED@Chaser',
       shotgun: 'FAILED@Chaser',
     });
     // 反面：**没有任何一件单件武器**能靠一件通关（这解释了为什么必须带第二件武器）

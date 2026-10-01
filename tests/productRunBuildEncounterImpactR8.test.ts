@@ -81,10 +81,12 @@
  *   | 分类 | 武器 | 实测 |
  *   |---|---|---|
  *   | **FLIP**（结果翻转） | `laser` · `machineGun` | `laser`：Zero `LOSS`（敌剩 **140**）→ `damageUp` **`WIN`**（我剩 120）/ `rateUp` 仍 LOSS（敌剩 140）；`machineGun`：Zero `LOSS`（敌剩 **159.8**）→ `damageUp` **`WIN`**（我剩 80）/ `rateUp` **`WIN`**（我剩 40） |
- *   | **CONTACT**（从打不到到打得到） | `rammer` | Zero / `damageUp` **0 命中** → `rateUp` **2 命中 / 140 伤害** |
- *   | **OUTPUT**（输出显著变大，结果不变） | `flamethrower` · `shotgun` | 伤害 528→660 / 600→760（+25% / +27%），**仍 LOSS** |
+ *   | **OUTPUT**（输出显著变大，结果不变） | `flamethrower` · `rammer` · `shotgun` | 伤害 528→660 / **140→176** / 600→760（+25% / **+26%** / +27%），**仍 LOSS** |
  *   | **NONE**（Build 对结果与输出都零影响） | `hammer` | Zero / `damageUp` **逐字段完全相同**（0 命中、敌剩 1099.9） |
  *   | **N/A**（官方不提供 B / C） | `cannon` | 池族 = `'cannon'` ⇒ 通用成长不提供；附加行 `heavyShell` / `fastReload` 把它从 1 命中抬到 2，**仍 LOSS** |
+ *
+ *   ⚠️ `CONTACT`（从打不到到打得到）这一分类在当前数据上**已空** —— 它此前唯一的载体是
+ *      `rammer`，R11-RAMMER 之后 `rammer` 的 `zero` 档已经打得到（见下）。**枚举保留、数据退役**。
  *
  * ⇒ 直接回答 Queue 的两个举例：
  *   - `machineGun`：**确实**是「Zero Build FAILED（敌剩 159.8）→ Damage Build COMPLETE」——
@@ -98,10 +100,14 @@
  *     `baseDamage 90→113`、`windupPauseSteps 20→15` 都真实生效）⇒ 问题**不在数值**，
  *     而在**接触 / 攻击结构**。
  *
- * ⚠️ 新增发现（R7 表结构上看不到的）：`rammer` 在 R7 里是「真·够不着」（`minGap = +7`、
- *    全程零接触）；加 `rateUp`（`restSteps 24→18`）后它**打到了 2 次**（`minGap = −2.2`）。
- *    ⇒ 「够不着」对 `rammer` 而言是 **Build 条件性**的，不是纯几何不变量。
- *    ⚠️ `minGap` 仍只作外显观测值，不当接触判据使用（见上）。
+ * ⚠️ **PRODUCT-LOOP-R11-RAMMER-REST-R1 之后的重写**：rammer 的 `restSteps` 24 → 12（**只动
+ *    「攻击后的恢复节奏」**）把上面旧结论「够不着对 rammer 是 Build 条件性的」**反转**了：
+ *      · `zero`（`restSteps = 12`）现在**打得到**（2 命中 / 140，`minGap < 0`）；
+ *      · `damageUp` 命中数不变、单发更重（140 → 176）⇒ 分类升为 `OUTPUT`；
+ *      · `rateUp`（12 → 9）反而**一发都打不到**（`minGap = −5.4 < 0`，即外框重叠却零接触）—— 相位被错开。
+ *    ⇒ 「接触型攻击打不打得到」**同时**取决于几何与节奏相位，「节奏越短越好」**不成立**
+ *      （RR-02a 的整轴扫描也是非单调的）。`CONTACT` 分类因此在当前数据上已空。
+ *    ⚠️ `minGap` 仍只作外显观测值，不当接触判据使用（见上；`BI-09` 现在两侧都有命中数互证）。
  */
 
 import { readFileSync } from 'node:fs';
@@ -650,8 +656,9 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       'laser|Chaser': ['T', 'A', 'hp', 6, 960, 94, 800, 548.6, 0],
       'machineGun|ProtoRusher': ['T', 'A', 'hp', 50, 1000, 42, 840, 979.5, 0],
       'machineGun|Chaser': ['T', 'A', 'hp', 45, 900, 43, 840, 278.3, 0],
-      'rammer|ProtoRusher': ['T', 'B', 'hp', 11, 770, 139, 420, 0, 170.6],
-      'rammer|Chaser': ['T', 'A', 'hp', 13, 910, 140, 560, 0, 0],
+      // ⚠️ R11-RAMMER：rammer 的 `restSteps` 24 → 12 ⇒ 近身两段翻成 WIN（`Chaser` 不再双亡）
+      'rammer|ProtoRusher': ['T', 'A', 'hp', 12, 840, 118, 420, 538.4, 0],
+      'rammer|Chaser': ['T', 'A', 'hp', 13, 910, 135, 630, 92.2, 0],
       'shotgun|ProtoRusher': ['T', 'A', 'hp', 38, 1140, 95, 990, 499.3, 0],
       'shotgun|Chaser': ['T', 'A', 'hp', 31, 930, 96, 930, 280.7, 0],
     });
@@ -682,9 +689,13 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       'machineGun|damageUp': ['T', 'A', 'hp', 44, 1100, 48, 1050, 80, 0],
       'machineGun|rateUp': ['T', 'A', 'hp', 55, 1100, 48, 980, 40, 0],
 
-      'rammer|zero': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
-      'rammer|damageUp': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
-      'rammer|rateUp': ['T', 'B', 'hp', 2, 140, 230, 70, 0, 955.7],
+      // ⚠️ R11-RAMMER（`restSteps` 24 → 12）把这一族**反转**了：
+      //    `zero` 从「0 命中」变成**能打到**（2 命中 / 140）；`damageUp` 命中数不变、单发更重（176）；
+      //    而 `rateUp`（12 → 9）反而**一发都打不到**（0 命中）—— 接触相位敏感，
+      //    「节奏更快」并不单调等于「更容易打中」。
+      'rammer|zero': ['T', 'B', 'hp', 2, 140, 210, 70, 0, 952],
+      'rammer|damageUp': ['T', 'B', 'hp', 2, 176, 210, 88, 0, 916],
+      'rammer|rateUp': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
 
       'shotgun|zero': ['T', 'B', 'hp', 20, 600, 175, 330, 0, 500],
       'shotgun|damageUp': ['T', 'B', 'hp', 20, 760, 175, 418, 0, 340],
@@ -715,7 +726,8 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       hammer: ['LOSS·0hit', 'LOSS·0hit', 'LOSS·0hit'],
       laser: ['LOSS', 'WIN', 'LOSS'], // R11：damageUp 档翻成 WIN
       machineGun: ['LOSS', 'WIN', 'WIN'],
-      rammer: ['LOSS·0hit', 'LOSS·0hit', 'LOSS'],
+      // R11-RAMMER：`zero` / `damageUp` 已能命中 ⇒ 只有 `rateUp` 仍是 0 命中（相位错开）
+      rammer: ['LOSS', 'LOSS', 'LOSS·0hit'],
       shotgun: ['LOSS', 'LOSS', 'LOSS'],
     });
 
@@ -728,7 +740,9 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       hammer: 'NONE',
       laser: 'FLIP', // R11：damageUp 档翻成 WIN ⇒ 从 OUTPUT 升为 FLIP
       machineGun: 'FLIP',
-      rammer: 'CONTACT',
+      // R11-RAMMER：`zero` 已能命中 ⇒ 不再有「从 0 命中到命中」的 `CONTACT`；
+      //   `damageUp` 把伤害 140 → 176（≥ ×1.1）⇒ 升为 `OUTPUT`；`rateUp` 反而 0 命中。
+      rammer: 'OUTPUT',
       shotgun: 'OUTPUT',
     });
 
@@ -780,14 +794,19 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       expect(mainCell('hammer', l).hits, `hammer + ${l}：仍一发都打不中`).toBe(0);
     }
 
-    // ② rammer：damageUp 同样逐字段相同；rateUp 改了 `restSteps` 且**第一次打到了**
+    // ② rammer：`rateUp` 改的是 `restSteps`（12 → 9），`damageUp` 改的是 `baseDamage`（70 → 88）。
+    //    ⚠️ R11-RAMMER 之后这一段的因果**反转**：`zero` 已经打得到（2 命中 / 140）；
+    //       `damageUp` 是「命中数不变、单发更重」；`rateUp` 反而把它推离接触（0 命中）。
     const rRate = createRunRegistry(['rateUp'], true, 'rammer').functionals.get('run.mod.rateUp')!;
-    expect(rRate.behaviorParams!.restSteps, 'rateUp 改了冲锤的接触节奏键').toBe(Math.round(24 * 0.75));
-    expect(rowOf(mainCell('rammer', 'damageUp')), 'rammer：damageUp 对结果零影响').toEqual(
-      rowOf(mainCell('rammer', 'zero')),
+    expect(rRate.behaviorParams!.restSteps, 'rateUp 改了冲锤的接触节奏键').toBe(Math.round(12 * 0.75));
+    expect(mainCell('rammer', 'damageUp').hits, 'rammer：damageUp 不改命中数').toBe(
+      mainCell('rammer', 'zero').hits,
     );
-    expect(mainCell('rammer', 'zero').hits).toBe(0);
-    expect(mainCell('rammer', 'rateUp').hits, 'rammer：rateUp 让它第一次打中').toBeGreaterThan(0);
+    expect(mainCell('rammer', 'damageUp').damage, 'rammer：damageUp 让单发更重').toBeGreaterThan(
+      mainCell('rammer', 'zero').damage,
+    );
+    expect(mainCell('rammer', 'zero').hits, 'rammer：zero Build 已能打到').toBeGreaterThan(0);
+    expect(mainCell('rammer', 'rateUp').hits, 'rammer：rateUp 反而打不到（相位错开）').toBe(0);
 
     // ③ 每个「合法支持」的档都**确实**改了它自己那个键（逐件对拍 canonical ⇒ 不是空操作）
     for (const w of WEAPONS) {
@@ -845,22 +864,29 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
   });
 
   /* ================================================================ BI-09 */
-  it('BI-09 `rammer` 新发现复查：加 `rateUp` 后它**真的打到了**（确定性 + 因果一致）', () => {
+  it('BI-09 `rammer` 复查：R11-RAMMER 之后因果**反转** —— `zero` 能打到，`rateUp` 反而打不到', () => {
     const zero = mainCell('rammer', 'zero');
     const fast = mainCell('rammer', 'rateUp');
     // ① 确定性：同一格重新跑一次逐字段一致（排除偶发）
     const again = fight('rammer', 'rateUp', BUILD_OF.rateUp, FOCUS);
     expect({ ...again, build: [...again.build] }).toEqual({ ...fast, build: [...fast.build] });
-    // ② 因果一致：节奏键确实被改了（BI-07 已钉 24→18），本处只钉「结果随之一变」
-    expect(zero.hits).toBe(0);
-    expect(fast.hits).toBe(2);
-    expect(fast.damage).toBe(140);
-    expect(fast.firstHitStep, 'rateUp 下首次命中发生在战斗中段').toBe(230);
-    // ③ 外显度量的同向变化（⚠️ 只作观测值，不作接触判据 —— 见文件头告示）
-    expect(zero.minGap, 'rammer 零 Build：外显外框全程未贴到').toBeGreaterThan(0);
-    expect(fast.minGap, 'rammer + rateUp：外显外框曾重叠').toBeLessThan(0);
-    // ④ 但它仍然落败 ⇒ 「够不着」被解除，不等于「打得过」
+    // ② 因果一致：节奏键确实被改了（BI-07 已钉 12 → 9），本处只钉「结果随之一变」。
+    //    ⚠️ 方向在 R11-RAMMER 之后**反转**：`zero`（`restSteps = 12`）已经打得到；
+    //       而 `rateUp`（12 → 9）反而把它推离接触 ⇒「缩短恢复节奏」**不是**单调有利的。
+    expect(zero.hits, 'zero Build：「恢复节奏」缩短后它已经打得到').toBe(2);
+    expect(zero.damage).toBe(140);
+    expect(zero.firstHitStep, 'zero Build 下首次命中发生的步号').toBe(210);
+    expect(fast.hits, 'rateUp（restSteps 12 → 9）反而一发都打不中').toBe(0);
+    expect(fast.damage).toBe(0);
+    // ③ 外显度量的读数（⚠️ 只作观测值，**不作接触判据** —— 见文件头告示）：
+    //    两档的 `minGap` **都** < 0（`zero` 真命中 2 次、`rateUp` 零命中）⇒ 这个度量在两者之间
+    //    **没有区分力**。`rateUp` 是「外显外框重叠 ≠ 物理接触」的**第二个实例**（首个是 `hammer`）。
+    expect(zero.minGap, 'rammer 零 Build：外显外框曾重叠（真接触的伴随现象）').toBeLessThan(0);
+    expect(fast.minGap, 'rammer + rateUp：外显外框也重叠，但真接触为零').toBeLessThan(0);
+    // ④ 两档**都**仍然落败 ⇒「够得着」不等于「打得过」（这一条两轮都没变）
+    expect(zero.winner).toBe('B');
     expect(fast.winner).toBe('B');
+    expect(zero.hpB, '对手仍剩大部分血').toBeGreaterThan(900);
     expect(fast.hpB, '对手仍剩大部分血').toBeGreaterThan(900);
   });
 

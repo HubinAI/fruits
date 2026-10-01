@@ -671,7 +671,48 @@ const rammer: FunctionalPartDef = {
     extendPx: 160, // 行程明显高于推杆 90
     strikeSpeedPxPerStep: 20, // Q12-C-R1：快速打出——实测 160px ≈ 12 步 ≈ 0.20s（目标 0.18~0.25s）；比推杆 2 的 10×
     retractSpeedPxPerStep: 3, // 回收清楚（较慢，完整动作）
-    restSteps: 24, // Q12-C-R1：回收位短暂停顿（~0.4s，比原 0.67s 更利落）→ 快速打出 → 回收
+    /**
+     * PRODUCT-LOOP-R11-RAMMER-REST-R1：**24 → 12**。只改「攻击后的恢复节奏」，其余一律不动。
+     *
+     * 冲锤是接触类武器，没有 `cooldownMs`；它的攻击周期 = rest + strike + hold + retract
+     * （`rammerBehavior.ts` 状态机）。canonical 里唯一属于「恢复节奏」的参数就是本字段 ——
+     * `strikeSpeedPxPerStep` / `holdSteps` / `retractSpeedPxPerStep` 描述的是**动作本身**
+     * （伸出多快 / 到位停多久 / 回收多快），不是「等多久再打下一次」。
+     *
+     * 为什么：基线（24）下第 1 段（`ProtoRusher`）是「打得动、但换不过」—— 真实接触、两位数量级
+     * 命中，但承伤满额 ⇒ 到第 2 段时已无余力。缩短 rest 让下一次有效攻击更早到来、更快结束
+     * 接触交换，从而改善 E1 后的剩余耐久。
+     *
+     * 探针（body×front×rear = 200 chassis，满耐久 / 零 Build，严格读真实 Runtime）：
+     *   · 24 ⇒ 赢 E1 **98/200**，赢面剩余 HP 合计 33845（平均 345.4）
+     *   · 16 ⇒ 赢 E1 **128/200**，赢面剩余 HP 合计 53291（平均 416.3）
+     *   · 12 ⇒ 赢 E1 **132/200**，赢面剩余 HP 合计 56575（平均 428.6）   ← 落地
+     *   ·  8 ⇒ 赢 E1 **117/200**，赢面剩余 HP 合计 46295（平均 395.7）
+     *   ·  4 ⇒ 赢 E1 **128/200**，赢面剩余 HP 合计 44965（平均 351.3）
+     * ⚠️ **非单调**：冲锤的命中窗口取决于「伸出瞬间两车的相对位置」，`restSteps` 一改整个 strike
+     *    相位就整体平移 ⇒ 接触几何重排（8 档反而比 16 / 12 差）。12 是整条轴上的最好点。
+     *
+     * 跨段口径（**严格分层全枚举**，非代表路线）：赢 E1&E2 = 24→12、16→12、**12→23**、8→13、4→17
+     *   ⇒ 12 也是唯一把「打进第 3 段的面」显著扩大的档位。
+     *
+     * ★1 产品可达 COMPLETE：**成立，但相对基线收窄**（两种装配族读数不同，必须分开看）
+     *   · `productDraft` 族（武器挂 `frontMass`、车上无副武器）：整条轴 COMPLETE **恒为 0**。
+     *     瓶颈在第 3 段 `RangedTurret` 的控距 —— 接触类贴不上去，实测第 3 段「0 命中」占多数
+     *     （31/36、24/28、49/70、38/38、58/58）。这是**几何 / 控距**问题，与 R7 `MX-06` /
+     *     R8 `BI-06` 同源，**不在「只调 restSteps」的可达范围内**。
+     *   · `walk` 族（武器挂 `front` + 上下位各一件 machineGun）：**能**通关，但 COMPLETE 组合
+     *     由 **6 条收窄为 4 条**（`damageUp→rateUp` / `rateUp→damageUp` 两条翻成 FAILED，终局差 11.7 血）。
+     *
+     * ⚠️ **本 Queue 的真实代价（如实冻结，不掩盖）**：`walk` 形态第 1 段承伤 88.5 → 211.8
+     *    （该族主输出是 2 件 machineGun，rammer 在 346 步里只轮到 2~3 发；缩短 rest 让伸出相位整体
+     *    前移 ⇒ 多挨的这点余量被一路带到终局）。
+     *    ⇒ 双形态方向相反已钉进 `productRunRammerRestR11` 的 `RR-02c`，
+     *      并同步进 `productRunFullRunPathMatrixR9F` 的 `FROZEN_RESULT`（`walk/rammer/D1|D2`）。
+     *
+     * 代价（如实）：周期 94 → 82 步（rest 占比 25.5% → 14.6%），前摇依旧可辨（≈0.2s）；
+     *    `rateUp` 在 rammer 上的落点（`restSteps × 0.75`）由 18 变为 9，仍是有效成长（非空操作）。
+     */
+    restSteps: 12,
     holdSteps: 8, // 伸出到位短停顿（命中瞬间清楚）
     maxForceN: 1200, // Q12-C-R1：提高到 500→1200（~2.4×）才突破 motor 力瓶颈达到 0.20s 快打；推开被顶住的对手（推杆 30 的 40×）
     baseDamage: 70,

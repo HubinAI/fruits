@@ -831,13 +831,17 @@ describe('PRODUCT-LOOP-R9｜三段节奏 + 两次 Build 的真实作用（机器
       const w = walkRun(weaponOnly(weapon), [p1, p2]);
       only[weapon] = w.phase === 'COMPLETE' ? 'COMPLETE' : `FAILED@${lastSeg(w).encounterId}`;
     }
+    // ⚠️ PRODUCT-LOOP-R11-RAMMER-REST-R1：rammer 的 `restSteps` 24 → 12（**只动攻击后的恢复节奏**）
+    //    ⇒ 第 ① 段不再阵亡（`ProtoRusher:A/538.4/0/1033`，命中 11 → 12），改为打进 ② 段才败在 `Chaser`。
+    //    ⚠️ **仍是 FAILED** ⇒ 「单件形态没有任何一件能通关」的事实未被本 Queue 掩盖。
+    //    同轮 `productRunFullRunPathMatrixR9F` 的 `R9F-06` 独立互证到同一段（两处口径各测一次）。
     expect(only).toEqual({
       cannon: 'FAILED@RangedTurret',
       flamethrower: 'FAILED@RangedTurret',
       hammer: 'FAILED@Chaser',
       laser: 'FAILED@RangedTurret', // R11：与 Q3-07 独立互证（两处口径都测到同一段）
       machineGun: 'FAILED@RangedTurret',
-      rammer: 'FAILED@ProtoRusher',
+      rammer: 'FAILED@Chaser', // R11-RAMMER：① 段不再阵亡，改为死在 ② 段
       shotgun: 'FAILED@Chaser',
     });
 

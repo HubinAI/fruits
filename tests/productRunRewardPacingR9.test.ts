@@ -513,15 +513,20 @@ describe('PRODUCT-LOOP-R9-RUN-REWARD-PACING-CHECK｜B. COMPLETE 出口与 FAILED
     // ⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser 的 `cooldownMs` 1800 → 600（只动攻击间隔）
     //    ⇒ 它的失败 Encounter 从 `ProtoRusher`（第 1 段就阵亡）推进到 `RangedTurret`（打进终局）。
     //    ⚠️ **仍然是 FAILED** ⇒ Q3 能力缺口 (a) 未被本 Queue 掩盖；7 件全 FAILED 的事实不变。
+    // ⚠️ PRODUCT-LOOP-R11-RAMMER-REST-R1：rammer 的 `restSteps` 24 → 12（只动「攻击后的恢复节奏」）
+    //    ⇒ 它的失败 Encounter 从 `ProtoRusher`（第 1 段就阵亡）推进到 `Chaser`（打进第 2 段）。
+    //    ⚠️ **仍然是 FAILED** ⇒ Q3 能力缺口 (a) 未被本 Queue 掩盖；7 件全 FAILED 的事实不变。
     expect(table).toEqual({
       cannon: 'FAILED@RangedTurret',
       flamethrower: 'FAILED@RangedTurret',
       hammer: 'FAILED@Chaser',
       laser: 'FAILED@RangedTurret',
       machineGun: 'FAILED@RangedTurret',
-      rammer: 'FAILED@ProtoRusher',
+      rammer: 'FAILED@Chaser',
       shotgun: 'FAILED@Chaser',
     });
+    // 缺口 (a) 的机器读数：一件都不能通关（不只是「多数失败」）。
+    expect(Object.values(table).filter((v) => v === 'COMPLETE')).toHaveLength(0);
   }, SLOW_MS);
 });
 
