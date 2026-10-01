@@ -49,6 +49,13 @@
  *   在移除隐藏锤后是否仍 COMPLETE。若不再 COMPLETE ⇒ 旧矩阵被隐藏 Hammer 污染的证据（如实记录，不当回归）。
  *   ⚠️ 本核对也走**全 Build 枚举**（不靠代表路线）。
  *
+ * ── PRODUCT-LOOP-R11-STRICT-SPACE-RECHECK（本文件同时充当那一轮的权威工具）────────────
+ *   同一套口径**跑两遍**：① 当前（canonical）；② R10 基线（in-memory 探针把
+ *   `laser.cooldownMs` 还原成 1800、`rammer.restSteps` 还原成 24 —— R11 之前的值）。
+ *   两次共用同一批 `baseCombo` / ctx / 分层口径 ⇒ 差分只可能来自这两个字段。
+ *   输出 H 节：A~F 逐项对比 + hammer/laser/rammer 的「0 门槛」判断（跨过 ⇒ 可行；仍 0 ⇒ 如实 BLOCK）。
+ *   R10 基线冻结值 = `R10_BASELINE_*`；基线复现失败 ⇒ 直接红（分母不可信 / 探针无效）。
+ *
  * ⚠️ 本文件不修改任何 `src/**`；纯测量。全在 Node 单线程跑（vitest 要求 `--pool=vmForks --maxWorkers=1`），
  *   故单测超时给足（见 `it` 第三参）。
  */
@@ -296,6 +303,67 @@ interface ChassisAgg {
   bestLeaf: SimOutcome; // 最深 stage、再最高 HP
 }
 
+/* ==========================================================================================
+ * PRODUCT-LOOP-R11-STRICT-SPACE-RECHECK｜R10 基线的**冻结值**与复现探针
+ * ==========================================================================================
+ * 本 Queue 只做一件事：用**本文件这一套权威口径**（严格分层全枚举，无代表路线）重跑一次，
+ * 与 R10 建矩阵时的读数逐项对比。为了「对比」本身也可核对（不是拿记忆里的数字当分母），
+ * 同一次运行里**把 R10 期的参数用 in-memory 探针还原后重扫一遍**：
+ *   · laser.cooldownMs = 1800（R11-LASER-CADENCE 改成 600）
+ *   · rammer.restSteps = 24（R11-RAMMER-REST 改成 12）
+ * 两次扫描共用同一批 `baseCombos` / ctx / 分层口径 ⇒ 差值只可能来自这两个字段。
+ * 探针在 `finally` 无条件还原共享 def，canonical **一字节不改**（纯测量，与 LC / RR 同款手法）。
+ */
+const R10_BASELINE_LASER_COOLDOWN_MS = 1800;
+const R10_BASELINE_RAMMER_REST_STEPS = 24;
+
+/** R10 建矩阵时的冻结读数（本 Queue 的比较基线；缺失即失败）。 */
+const R10_BASELINE_COMPLETE_PATHS = 26;
+const R10_BASELINE_UNIQUE_CHASSIS = 10;
+const R10_BASELINE_WEAPON_CHASSIS: Readonly<Record<string, number>> = {
+  cannon: 1,
+  flamethrower: 1,
+  machineGun: 4,
+  shotgun: 4,
+  hammer: 0,
+  laser: 0,
+  rammer: 0,
+};
+
+/**
+ * R11-RECHECK 时的**当前**读数（R11-LASER-CADENCE `cooldownMs 600` + R11-RAMMER-REST `restSteps 12`）。
+ * ⚠️ 首次填入由实测给；之后若这两个数变了，必须先查清是谁改的，**不许直接放行**。
+ */
+const R11_CURRENT_COMPLETE_PATHS = 28;
+const R11_CURRENT_UNIQUE_CHASSIS = 11;
+const R11_CURRENT_WEAPON_CHASSIS: Readonly<Record<string, number>> = {
+  cannon: 1,
+  flamethrower: 1,
+  machineGun: 4,
+  shotgun: 4,
+  hammer: 0,
+  laser: 1,
+  rammer: 0,
+};
+
+function withR10BaselineParams<T>(fn: () => T): T {
+  const laser = registry.functionals.get('laser');
+  const rammer = registry.functionals.get('rammer');
+  if (!laser || !rammer) throw new Error('laser / rammer 必须在正式内容库');
+  const lb = laser.behaviorParams as Record<string, unknown>;
+  const rb = rammer.behaviorParams as Record<string, unknown>;
+  const prevLaser = lb.cooldownMs;
+  const prevRammer = rb.restSteps;
+  lb.cooldownMs = R10_BASELINE_LASER_COOLDOWN_MS;
+  rb.restSteps = R10_BASELINE_RAMMER_REST_STEPS;
+  try {
+    return fn();
+  } finally {
+    lb.cooldownMs = prevLaser;
+    rb.restSteps = prevRammer;
+  }
+}
+
 describe('PRODUCT-LOOP-R10-FULL-REACHABLE-SPACE-R2｜完整产品可达空间侦察矩阵', () => {
   /* ── P0 真实落地核验：产品 Draft / Run Snapshot 的 top 必须 EMPTY（不能只在 fixture 里手动禁）── */
   it('P0 真实落地核验：真实产品链路下 top 恒 EMPTY、Run Snapshot 无隐藏锤', () => {
@@ -358,27 +426,39 @@ describe('PRODUCT-LOOP-R10-FULL-REACHABLE-SPACE-R2｜完整产品可达空间侦
       expect(baseCombos.length, '基础组合数 = 8×7×5×5').toBe(BASE_TOTAL);
 
       // ── 严格分层：每台 chassis 跑全 Build 枚举（无代表路线淘汰）────────────
-      const aggs: ChassisAgg[] = [];
-      let totalLeafPaths = 0;
-      for (const combo of baseCombos) {
-        const leaves = simulate(combo.draft, combo.ctx);
-        totalLeafPaths += leaves.length;
-        let maxStage = 0;
-        let hasComplete = false;
-        let bestLeaf: SimOutcome = leaves[0] ?? { builds: [], phase: 'INVALID', stages: 0, finalHpA: 0 };
-        for (const lf of leaves) {
-          if (lf.phase === 'COMPLETE') hasComplete = true;
-          if (lf.stages > maxStage) maxStage = lf.stages;
-          // 选「最深 stage、再最高 HP」的代表叶子
-          if (
-            lf.stages > bestLeaf.stages ||
-            (lf.stages === bestLeaf.stages && lf.finalHpA > bestLeaf.finalHpA)
-          ) {
-            bestLeaf = lf;
+      /* ⚠️ R11-STRICT-SPACE-RECHECK：同一权威扫描**跑两遍** ——
+       *   「当前（canonical）」与「R10 基线（探针）」，搜索空间 / 分层口径 / ctx 完全一致
+       *   ⇒ 差值只可能来自 R11 两轮落地的 `laser.cooldownMs` 与 `rammer.restSteps`。
+       *   双跑自身也是「探针真的生效」的验证：若两次读数完全相同 ⇒ 说明参数被烘焙进了
+       *   缓存 plan（探针无效），下面的基线断言会立刻红。 */
+      const runScan = (): { aggs: ChassisAgg[]; totalLeafPaths: number } => {
+        const out: ChassisAgg[] = [];
+        let leafTotal = 0;
+        for (const combo of baseCombos) {
+          const leaves = simulate(combo.draft, combo.ctx);
+          leafTotal += leaves.length;
+          let maxStage = 0;
+          let hasComplete = false;
+          let bestLeaf: SimOutcome = leaves[0] ?? { builds: [], phase: 'INVALID', stages: 0, finalHpA: 0 };
+          for (const lf of leaves) {
+            if (lf.phase === 'COMPLETE') hasComplete = true;
+            if (lf.stages > maxStage) maxStage = lf.stages;
+            // 选「最深 stage、再最高 HP」的代表叶子
+            if (
+              lf.stages > bestLeaf.stages ||
+              (lf.stages === bestLeaf.stages && lf.finalHpA > bestLeaf.finalHpA)
+            ) {
+              bestLeaf = lf;
+            }
           }
+          out.push({ combo, leaves, maxStage, hasComplete, bestLeaf });
         }
-        aggs.push({ combo, leaves, maxStage, hasComplete, bestLeaf });
-      }
+        return { aggs: out, totalLeafPaths: leafTotal };
+      };
+      const currentScan = runScan();
+      const baselineScan = withR10BaselineParams(runScan);
+      const aggs = currentScan.aggs;
+      const totalLeafPaths = currentScan.totalLeafPaths;
 
       // ── COMPLETE 路径（每条 = 一台 chassis 下某条 Build 路线打到 COMPLETE）────
       const completePaths: CompletePath[] = [];
@@ -553,6 +633,138 @@ describe('PRODUCT-LOOP-R10-FULL-REACHABLE-SPACE-R2｜完整产品可达空间侦
       });
       lines.push(`   以 emergencyRepair 为 Choice1 首选的成功 chassis（逐武器） = ${erPerWeapon.join(' · ')}`);
 
+      /* ── H. PRODUCT-LOOP-R11-STRICT-SPACE-RECHECK：与 R10 基线逐项对比（A~F）──────
+       * 「基线」= 本文件内探针还原 R10 期参数（laser.cooldownMs=1800 / rammer.restSteps=24）
+       *          后**现算**的同一套读数；「当前」= canonical（600 / 12）。
+       * 两者差分只可能来自 R11 两轮落地的单一字段 ⇒ 这就是本 Queue 要的「严格重跑对比」。 */
+      const pathListOf = (ag: ChassisAgg[]): CompletePath[] => {
+        const out: CompletePath[] = [];
+        for (const a of ag) {
+          for (const lf of a.leaves) {
+            if (lf.phase === 'COMPLETE') {
+              out.push({
+                body: a.combo.body,
+                weapon: a.combo.weapon,
+                front: a.combo.front,
+                rear: a.combo.rear,
+                builds: lf.builds,
+                finalHpA: lf.finalHpA,
+              });
+            }
+          }
+        }
+        return out;
+      };
+      const baselinePaths = pathListOf(baselineScan.aggs);
+      const baselineUniqueChassis = new Set(baselinePaths.map(chassisKeyOfPath));
+      const chassisCountPerWeapon = (ag: ChassisAgg[]): Record<string, number> => {
+        const m: Record<string, number> = {};
+        for (const w of weapons) m[w] = ag.filter((a) => a.combo.weapon === w && a.hasComplete).length;
+        return m;
+      };
+      const curChassisW = chassisCountPerWeapon(aggs);
+      const baseChassisW = chassisCountPerWeapon(baselineScan.aggs);
+      const distStr = (ps: CompletePath[], pick: (p: CompletePath) => string): string => {
+        const d = [
+          ...ps.reduce(
+            (m, p) => m.set(pick(p), (m.get(pick(p)) ?? 0) + 1),
+            new Map<string, number>(),
+          ),
+        ].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+        if (d.length === 0) return '(空)';
+        return d.map(([k, v]) => `${k}:${v}(${Math.round((v / ps.length) * 100)}%)`).join(' · ');
+      };
+      const firstChoiceStr = (ps: CompletePath[]): string => {
+        const d = [
+          ...ps.reduce(
+            (m, p) => m.set(p.builds[0] ?? '(none)', (m.get(p.builds[0] ?? '(none)') ?? 0) + 1),
+            new Map<string, number>(),
+          ),
+        ].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+        return d.length === 0 ? '(空)' : d.map(([k, v]) => `${k}:${v}`).join(' · ');
+      };
+      const sharePair = (pick: (p: CompletePath) => string, v: string): string => {
+        const b = baselinePaths.length === 0 ? 0 : baselinePaths.filter((p) => pick(p) === v).length / baselinePaths.length;
+        const c = completePaths.length === 0 ? 0 : completePaths.filter((p) => pick(p) === v).length / completePaths.length;
+        const pct = (x: number): string => `${Math.round(x * 100)}%`;
+        const delta = c - b;
+        const verdict = Math.abs(delta) < 0.005 ? '基本不变' : delta > 0 ? '进一步上升' : '自然下降';
+        return `${pct(b)} → ${pct(c)}（Δ${delta >= 0 ? '+' : ''}${Math.round(delta * 100)}pt）⇒ ${verdict}`;
+      };
+      const failProfile = (ag: ChassisAgg[], w: string): string => {
+        const cs = ag.filter((a) => a.combo.weapon === w);
+        const e1 = cs.filter((a) => a.maxStage <= 1).length;
+        const e2 = cs.filter((a) => a.maxStage === 2).length;
+        const e3 = cs.filter((a) => a.maxStage >= 3 && !a.hasComplete).length;
+        return `输E1 ${e1}/${cs.length} · 赢E1输E2 ${e2}/${cs.length} · 进终局输 ${e3}/${cs.length}`;
+      };
+      const laserPaths = completePaths.filter((p) => p.weapon === 'laser');
+      lines.push('');
+      lines.push('════════════════════════════════════════════════════════════════════');
+      lines.push('H. PRODUCT-LOOP-R11-STRICT-SPACE-RECHECK｜与 R10 基线逐项对比');
+      lines.push('   （同工具 / 同空间（1400 base chassis × 全合法 Build × ★1）/ 同分层口径；基线 = 探针现算）');
+      lines.push('════════════════════════════════════════════════════════════════════');
+      lines.push('A. COMPLETE Path：');
+      lines.push(`   R10 基线 = ${R10_BASELINE_COMPLETE_PATHS} → 当前 = ${completePaths.length}（Δ${completePaths.length - R10_BASELINE_COMPLETE_PATHS >= 0 ? '+' : ''}${completePaths.length - R10_BASELINE_COMPLETE_PATHS}）`);
+      lines.push(`   ⤷ 基线现算复现值 = ${baselinePaths.length}（必须 = ${R10_BASELINE_COMPLETE_PATHS}，否则本对比的分母不可信）`);
+      lines.push('B. Unique COMPLETE Chassis：');
+      lines.push(`   R10 基线 = ${R10_BASELINE_UNIQUE_CHASSIS} → 当前 = ${uniqueChassisFromPaths.size}（Δ${uniqueChassisFromPaths.size - R10_BASELINE_UNIQUE_CHASSIS >= 0 ? '+' : ''}${uniqueChassisFromPaths.size - R10_BASELINE_UNIQUE_CHASSIS}）`);
+      lines.push(`   ⤷ 基线现算复现值 = ${baselineUniqueChassis.size}（必须 = ${R10_BASELINE_UNIQUE_CHASSIS}）`);
+      lines.push('C. 每件 Weapon：Unique COMPLETE Chassis 数量（chassis 层，同 chassis 多条 Build 只计 1）：');
+      lines.push('   weapon          R10 基线 → 当前');
+      for (const w of weapons) {
+        const b = baseChassisW[w] ?? 0;
+        const c = curChassisW[w] ?? 0;
+        lines.push(`   ${w.padEnd(15)} ${String(b).padStart(3)} → ${String(c).padStart(3)}   ${c > b ? '↑ 出现新可行路径' : c === b ? '不变' : '↓'}`);
+      }
+      lines.push('D. Body / Front / Rear 分布（占 COMPLETE Path 的百分比）：');
+      lines.push(`   Body  基线 = ${distStr(baselinePaths, (p) => p.body)}`);
+      lines.push(`   Body  当前 = ${distStr(completePaths, (p) => p.body)}`);
+      lines.push(`   Front 基线 = ${distStr(baselinePaths, (p) => p.front)}`);
+      lines.push(`   Front 当前 = ${distStr(completePaths, (p) => p.front)}`);
+      lines.push(`   Rear  基线 = ${distStr(baselinePaths, (p) => p.rear)}`);
+      lines.push(`   Rear  当前 = ${distStr(completePaths, (p) => p.rear)}`);
+      lines.push('E. Build 首选项（Choice1）分布：');
+      lines.push(`   基线 = ${firstChoiceStr(baselinePaths)}`);
+      lines.push(`   当前 = ${firstChoiceStr(completePaths)}`);
+      lines.push('F. Mango / smallWheel 集中度：');
+      lines.push(`   body=mangoBody            ${sharePair((p) => p.body, 'mangoBody')}`);
+      lines.push(`   front=smallWheel          ${sharePair((p) => p.front, 'smallWheel')}`);
+      lines.push(`   rear=smallWheel           ${sharePair((p) => p.rear, 'smallWheel')}`);
+      lines.push(`   任一位置含 smallWheel     ${sharePair((p) => (p.front === 'smallWheel' || p.rear === 'smallWheel' ? 'yes' : 'no'), 'yes')}`);
+      lines.push(`   body=mangoBody 且 任一 smallWheel  ${sharePair((p) => (p.body === 'mangoBody' && (p.front === 'smallWheel' || p.rear === 'smallWheel') ? 'yes' : 'no'), 'yes')}`);
+      lines.push('');
+      lines.push('── 核心判断（只验证：hammer / laser / rammer 是否从 0 COMPLETE 变为「至少少量真实可行路径」；不要求 7 件等量）──');
+      for (const w of ['hammer', 'laser', 'rammer'] as const) {
+        const b = baseChassisW[w] ?? 0;
+        const c = curChassisW[w] ?? 0;
+        const verdict =
+          c > 0
+            ? `✅ 出现真实可行路径（chassis ${c} 个 / COMPLETE Path ${completePaths.filter((p) => p.weapon === w).length} 条）`
+            : `⛔ BLOCK：单变量修改后**仍为 0**（如实记录，不自动继续调第二个参数）`;
+        lines.push(`   · ${w}: 基线 chassis ${b} → 当前 chassis ${c} ⇒ ${verdict}`);
+        if (c === 0) {
+          lines.push(`       当前失败剖面 = ${failProfile(aggs, w)}`);
+          lines.push(`       R10 基线剖面 = ${failProfile(baselineScan.aggs, w)}`);
+        } else {
+          const win = aggs.filter((a) => a.combo.weapon === w && a.hasComplete);
+          lines.push(
+            `       成功 chassis 明细 = ${win.map((a) => `${a.combo.body}/${a.combo.front}/${a.combo.rear}`).join(' · ')}`,
+          );
+          lines.push(
+            `       成功 Build 明细 = ${completePaths.filter((p) => p.weapon === w).map((p) => `${p.body}/${p.front}/${p.rear}[${p.builds.join('→')}]`).join(' · ')}`,
+          );
+        }
+      }
+      lines.push(`   · laser 增量在 COMPLETE Path 里的占比 = ${completePaths.length === 0 ? '—' : `${laserPaths.length}/${completePaths.length}`}`);
+      lines.push(`   · 基线 COMPLETE 集合是否 = 「当前 COMPLETE 集合 − laser 增量」 = ${(() => {
+        const cur = new Set(completePaths.map((p) => `${p.body}|${p.weapon}|${p.front}|${p.rear}|${p.builds.join(',')}`));
+        for (const p of laserPaths) cur.delete(`${p.body}|${p.weapon}|${p.front}|${p.rear}|${p.builds.join(',')}`);
+        const base = new Set(baselinePaths.map((p) => `${p.body}|${p.weapon}|${p.front}|${p.rear}|${p.builds.join(',')}`));
+        return cur.size === base.size && [...cur].every((k) => base.has(k)) ? '是（逐条一致）' : '否（存在基线之外的变化）';
+      })()}`);
+      lines.push('════════════════════════════════════════════════════════════════════');
+
       lines.push('');
       lines.push('── 特别核对：已删除旧矩阵（带隐藏锤）曾记录的两条「获胜」组合，移除锤后是否仍 COMPLETE（走全 Build 枚举）──');
       const check = (tag: string, body: string, weapon: string, front: string, rear: string): void => {
@@ -576,8 +788,41 @@ describe('PRODUCT-LOOP-R10-FULL-REACHABLE-SPACE-R2｜完整产品可达空间侦
 
       // 软断言：确保搜索真的跑完了所有基础组合（防止提前截断/异常静默丢组合）
       expect(aggs.length, '严格分层扫完所有基础组合').toBe(BASE_TOTAL);
+      expect(baselineScan.aggs.length, '基线复扫同样扫完所有基础组合').toBe(BASE_TOTAL);
+
+      /* ── R11-STRICT-SPACE-RECHECK 冻结断言 ─────────────────────────────────
+       * ① 基线可复现 ⇒ 说明「R10 读数」这个分母不是记忆值，而是现算出来的；
+       *    同时验证 in-memory 探针真的改了行为（若参数被烘焙进缓存 plan，① 会红）。
+       * ② 当前值冻结 ⇒ R11（laser.cooldownMs 600 / rammer.restSteps 12）落地后的权威读数。
+       * ③ 核心判断：只问 hammer / laser / rammer 是否跨过 0 门槛。 */
+      expect(
+        baselinePaths.length,
+        `R10 基线现算复现：COMPLETE Path = ${R10_BASELINE_COMPLETE_PATHS}`,
+      ).toBe(R10_BASELINE_COMPLETE_PATHS);
+      expect(
+        baselineUniqueChassis.size,
+        `R10 基线现算复现：唯一 COMPLETE Chassis = ${R10_BASELINE_UNIQUE_CHASSIS}`,
+      ).toBe(R10_BASELINE_UNIQUE_CHASSIS);
+      expect(baseChassisW, 'R10 基线现算复现：逐武器唯一 COMPLETE chassis').toEqual(R10_BASELINE_WEAPON_CHASSIS);
+      expect(completePaths.length, 'R11-RECHECK 当前：COMPLETE Path 总数').toBe(R11_CURRENT_COMPLETE_PATHS);
+      expect(uniqueChassisFromPaths.size, 'R11-RECHECK 当前：唯一 COMPLETE Chassis').toBe(R11_CURRENT_UNIQUE_CHASSIS);
+      expect(curChassisW, 'R11-RECHECK 当前：逐武器唯一 COMPLETE chassis').toEqual(R11_CURRENT_WEAPON_CHASSIS);
+      // ③ 核心判断（顺序即结论强弱）：laser 跨过门槛；hammer / rammer 仍是 0 ⇒ 如实 BLOCK
+      expect(
+        curChassisW.laser,
+        'laser：R11-LASER-CADENCE（cooldownMs 600）必须让它出现 ≥1 条真实可行 chassis',
+      ).toBeGreaterThan(0);
+      expect(curChassisW.hammer, 'hammer：本 Queue 未改任何 hammer 参数 ⇒ 仍 0（如实 BLOCK）').toBe(0);
+      expect(
+        curChassisW.rammer,
+        'rammer：只改 restSteps 仍 0（第 3 段控距未解）⇒ 如实 BLOCK，不继续调第二个参数',
+      ).toBe(0);
+      // ④ 三件「非 0」武器（cannon/flamethrower/machineGun/shotgun）不得被 R11 连带改变
+      for (const w of ['cannon', 'flamethrower', 'machineGun', 'shotgun']) {
+        expect(curChassisW[w], `${w}：R11 两个字段与它无关 ⇒ 基线/当前必须一致`).toBe(baseChassisW[w]);
+      }
     },
-    3_600_000,
+    7_200_000,
   );
 
   /* ── 共同子集对照：旧矩阵（body×weapon×rear，代表路线 policyPicks）vs 本新矩阵（同 Draft 全 Build 枚举）──
@@ -699,7 +944,10 @@ describe('PRODUCT-LOOP-R10-FULL-REACHABLE-SPACE-R2｜完整产品可达空间侦
         const ws = repByWeapon.get(w) ?? [];
         lines.push(`   · ${w}: ${ws.length} 个${ws.length ? ' → ' + ws.slice(0, 3).join(', ') + (ws.length > 3 ? ' …' : '') : ''}`);
       }
-      lines.push('   （对照严格全枚举 B 节：COMPLETE 路径总数 = 26；两者差值 = 代表路线剪枝漏掉的合法 Build 赢面）');
+      lines.push(
+        `   （对照严格全枚举 B 节：COMPLETE 路径总数 = ${R11_CURRENT_COMPLETE_PATHS}（R10 基线 = ${R10_BASELINE_COMPLETE_PATHS}）；` +
+          '两者差值 = 代表路线剪枝漏掉的合法 Build 赢面）',
+      );
       lines.push('════════════════════════════════════════════════════════════════════');
       // eslint-disable-next-line no-console
       console.log('\n' + lines.join('\n'));
