@@ -165,16 +165,17 @@ function runOneBattle(s: RunPageState, draft: BuildDraft, carriedHp: number | nu
 const roundHp = (x: number | null): number => Math.round((x ?? 0) * 10) / 10;
 
 /**
- * 与旧矩阵（`productRunContinuityWinningSearch.test.ts`）**逐字同源**的代表路线策略：
+ * 代表路线策略（旧侦察矩阵已在 `R10-STRATEGY-SPACE-CAUSAL-AUDIT-R1` 删除；该口径作为
+ * 「代表剪枝 vs 全 Build 枚举」对照**内联保留**在本文件）：
  *   Cannon → heavyShell→kineticBurst；非 Cannon → 通用池 emergencyRepair→damageUp。
- * 用于「代表路线口径 vs 全 Build 枚举」的对照（隔离「剪枝口径」这一单一变量）。
+ * 仅用于对照，**不用于**权威搜索。
  */
 function policyPicks(weapon: string): readonly string[] {
   return weapon === 'cannon' ? ['heavyShell', 'kineticBurst'] : ['emergencyRepair', 'damageUp'];
 }
 
 /**
- * 单条「代表路线」模拟（与旧矩阵 `runCombo` 的 CHOICE 逻辑同源：按 `picks[s.buffs.length]` 选，
+ * 单条「代表路线」模拟（与已删除旧矩阵的 CHOICE 逻辑同源：按 `picks[s.buffs.length]` 选，
  * 不在池则退回首项）。返回该路线终态。仅用于对照，**不用于**权威搜索。
  */
 function simulateRep(draft: BuildDraft, ctx: RunPageContext): SimOutcome {
@@ -485,8 +486,75 @@ describe('PRODUCT-LOOP-R10-FULL-REACHABLE-SPACE-R2｜完整产品可达空间侦
       } else {
         lines.push('   （无 COMPLETE，无支配可谈）');
       }
+
+      /* ── F/G. 唯一 Chassis 统计 + Build 稳定性（R10-STRATEGY-SPACE-CAUSAL-AUDIT-R1 必做 1/2）──
+       * ⚠️ Chassis Key = Body + Weapon + Front + Rear（**Build 不计入**）⇒ 不再让同一 chassis 的
+       *    多条成功 Build 重复计数放大某个 Body / Movement。 */
+      const winningChassis = aggs.filter((a) => a.hasComplete);
+      const chassisKeyOfPath = (p: CompletePath): string => `${p.body}|${p.weapon}|${p.front}|${p.rear}`;
+      const uniqueChassisFromPaths = new Set(completePaths.map(chassisKeyOfPath));
+      const chassisDist = (pick: (a: ChassisAgg) => string): string =>
+        [...winningChassis.reduce((m, a) => m.set(pick(a), (m.get(pick(a)) ?? 0) + 1), new Map<string, number>())]
+          .map(([k, v]) => `${k}:${v}`)
+          .join(' · ');
       lines.push('');
-      lines.push('── 特别核对：旧矩阵（带隐藏锤）曾记录的两条「获胜」组合，移除锤后是否仍 COMPLETE（走全 Build 枚举）──');
+      lines.push('F. 唯一 COMPLETE Chassis（Chassis Key = Body+Weapon+Front+Rear，Build 不计入）：');
+      lines.push(`   ${completePaths.length} 条 COMPLETE Path → 唯一 COMPLETE Chassis = ${uniqueChassisFromPaths.size} 个`);
+      lines.push(`   （对照：base chassis 总数 ${BASE_TOTAL}；每 Weapon 理论 8×5×5 = ${bodies.length * fronts.length * rears.length} 个）`);
+      for (const w of weapons) {
+        const cs = aggs.filter((a) => a.combo.weapon === w);
+        const winAggs = cs.filter((a) => a.hasComplete);
+        let s1 = 0;
+        let s2plus = 0;
+        let allWin = 0;
+        let completeBuildTotal = 0;
+        for (const a of winAggs) {
+          const c = a.leaves.filter((l) => l.phase === 'COMPLETE').length;
+          const legal = a.leaves.filter((l) => l.phase === 'COMPLETE' || l.phase === 'FAILED').length;
+          completeBuildTotal += c;
+          if (c === 1) s1 += 1;
+          else if (c >= 2) s2plus += 1;
+          if (legal > 0 && c === legal) allWin += 1;
+        }
+        lines.push(
+          `   · ${w}: 唯一成功 chassis ${winAggs.length}/${cs.length}；COMPLETE Build 合计 ${completeBuildTotal} 条；` +
+            `其中「唯一 Build 能赢」${s1} chassis / 「≥2 Build 能赢」${s2plus} chassis / 「全部合法 Build 都能赢」${allWin} chassis`,
+        );
+      }
+      lines.push(`   Chassis 层 Body 分布 = ${chassisDist((a) => a.combo.body)}`);
+      lines.push(`   Chassis 层 Front 分布 = ${chassisDist((a) => a.combo.front)}`);
+      lines.push(`   Chassis 层 Rear 分布 = ${chassisDist((a) => a.combo.rear)}`);
+      lines.push(`   Chassis 层 Weapon 分布 = ${chassisDist((a) => a.combo.weapon)}`);
+      lines.push('');
+      lines.push('G. Build 稳定性（每个唯一成功 chassis 能赢的合法 Build 数分布）：');
+      const stability = winningChassis.reduce((m, a) => {
+        const c = a.leaves.filter((l) => l.phase === 'COMPLETE').length;
+        return m.set(c, (m.get(c) ?? 0) + 1);
+      }, new Map<number, number>());
+      lines.push(
+        '   成功 Build 数 → chassis 数：' +
+          [...stability.entries()].sort((x, y) => x[0] - y[0]).map(([k, v]) => `${k}条:${v}个`).join(' · '),
+      );
+      const firstChoice = completePaths.reduce((m, p) => {
+        const f = p.builds[0] ?? '(none)';
+        return m.set(f, (m.get(f) ?? 0) + 1);
+      }, new Map<string, number>());
+      lines.push(
+        '   COMPLETE Path 的 Choice1 首选项分布 = ' +
+          [...firstChoice.entries()].sort((x, y) => y[1] - x[1]).map(([k, v]) => `${k}:${v}`).join(' · '),
+      );
+      // emergencyRepair 是否跨 Weapon 形成高集中首选：逐武器统计「以 emergencyRepair 为首选的成功 chassis 占比」
+      const erPerWeapon = weapons.map((w) => {
+        const win = aggs.filter((a) => a.combo.weapon === w && a.hasComplete);
+        const withER = win.filter((a) =>
+          a.leaves.some((l) => l.phase === 'COMPLETE' && (l.builds[0] ?? '') === 'emergencyRepair'),
+        ).length;
+        return `${w}:${withER}/${win.length}`;
+      });
+      lines.push(`   以 emergencyRepair 为 Choice1 首选的成功 chassis（逐武器） = ${erPerWeapon.join(' · ')}`);
+
+      lines.push('');
+      lines.push('── 特别核对：已删除旧矩阵（带隐藏锤）曾记录的两条「获胜」组合，移除锤后是否仍 COMPLETE（走全 Build 枚举）──');
       const check = (tag: string, body: string, weapon: string, front: string, rear: string): void => {
         const draft = productDraft(body, weapon, front, rear);
         const key = `chk|${body}|${weapon}|${front}|${rear}`;
@@ -495,8 +563,9 @@ describe('PRODUCT-LOOP-R10-FULL-REACHABLE-SPACE-R2｜完整产品可达空间侦
         const comp = leaves.find((l) => l.phase === 'COMPLETE');
         const maxStage = leaves.reduce((m, l) => Math.max(m, l.stages), 0);
         const verdict = comp
-          ? `仍 COMPLETE（build=[${comp.builds.join('→')}]，终局HP ${comp.finalHpA}）—— ⚠️ 说明旧矩阵记录本身真实，并非锤污染`
-          : `不再 COMPLETE（全 Build 枚举最深到第 ${maxStage} 段）—— 旧矩阵被隐藏 Hammer 污染的证据，如实记录、不当回归`;
+          ? `仍 COMPLETE（build=[${comp.builds.join('→')}]，终局HP ${comp.finalHpA}）—— ⚠️ 说明该组合的旧记录真实`
+          : `不再 COMPLETE（全 Build 枚举最深到第 ${maxStage} 段）—— 该组合**有隐藏锤依赖**（如实记录，不当回归）；` +
+            `⚠️ 但这**不是**「产品不可赢」：该武器在其它 front 配置下可 COMPLETE（见本文件 D/F 节与「共同子集对照」小节）`;
         lines.push(`   · ${tag}: ${body} + ${weapon} + front=${front} + rear=${rear} → ${verdict}`);
       };
       check('machineGun 旧获胜组合', 'coconutBody', 'machineGun', 'wheelStd', 'heavyWheel');
