@@ -65,7 +65,7 @@
  *   |---|---|---|---|
  *   | ① 0 命中，且 L2 外显也未贴到 | `rammer` | `minGap = +7 > 0`，全程外显外框都没碰上 | **真·够不着**：控距（`near 240 / far 480`，后撤 2.6 px/step > 玩家推进 ~1.5）把它挡在接触之外 |
  *   | ② 0 命中，但 L2 外显曾重叠 | `hammer` | `minGap = −23`（**外显外框在 X 上叠了 23px**）、接触残留含 `impact`，武器命中仍 0 | ⚠️ **已定性（见下）**：锤头**从未与敌车发生物理接触**；`−23` 是 **L2 度量假象**，那条 `impact` 是**玩家车体 × 敌方外伸炮管** |
- *   | ③ 有伤害但打不过 | `cannon`(1 命中/120) · `flamethrower`(66/528) · `laser`(4/640) · `machineGun`(47/940) · `shotgun`(20/600) | 都打出真实伤害，都被反杀 | **交换比**：够得着，打不赢（最接近的 `machineGun` 让对手剩 159.8） |
+ *   | ③ 有伤害但打不过 | `cannon`(1 命中/120) · `flamethrower`(66/528) · `laser`(6/960) · `machineGun`(47/940) · `shotgun`(20/600) | 都打出真实伤害，都被反杀 | **交换比**：够得着，打不赢（R11 后最接近的 `laser` 让对手剩 **140**，此前是 `machineGun` 的 159.8） |
  *
  * ⇒ 回答「是不是所有 Weapon 都失败」：**是** —— 零 Build 单件下 **7/7 落败**。
  *   回答「还是只有某些配置无法处理控距」：**接触族 2 件（`rammer` / `hammer`）**在这一列拿不到
@@ -406,7 +406,10 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
       expect(c.winner, `${tag}：终态必须有胜者`).toMatch(/^[AB]$/);
       expect(c.endReason, `${tag}：结束原因`).toMatch(/^(hp|arenaEnd)$/);
     }
-  });
+    // ⚠️ 本用例是**第一个**触发 21 格全量模拟的用例（后续用例共用缓存）⇒ 它独自承担全部耗时。
+    //    R11 之后 laser 的战斗不再「早早阵亡」（近身两段变 WIN、RangedTurret 跑到竞技场 End）
+    //    ⇒ 默认 5s 不够。显式放宽**超时**（判据一字未改）。
+  }, 120_000);
 
   it('MX-02 单场隔离成立：满耐久开局 + 世界是**正式默认**（未改任何战斗参数）', () => {
     for (const c of [...allCells(), ...ENCOUNTERS.map(auxCell)]) {
@@ -495,9 +498,13 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
       'hammer|Chaser': ['T', 'A', 'hp', 10, 900, 187, 720, 5.5, 0],
       'hammer|RangedTurret': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1099.9],
 
-      'laser|ProtoRusher': ['T', 'B', 'hp', 5, 800, 94, 480, 0, 199.3],
-      'laser|Chaser': ['T', 'B', 'hp', 4, 640, 94, 480, 0, 247.7],
-      'laser|RangedTurret': ['T', 'B', 'hp', 4, 640, 97, 480, 0, 460],
+      // PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser `cooldownMs` 1800 → 600（只动攻击间隔，
+      //   前摇 `chargeMs` 未动）⇒ 首发步号与逐发伤害不变，**发数与总伤害上升**：
+      //   近身两段由 LOSS 翻成 WIN，`RangedTurret` 仍 LOSS（对手残 140）。
+      //   ⚠️ 上表其余 17 格一字未动（其余 6 件武器本轮零改动）。
+      'laser|ProtoRusher': ['T', 'A', 'hp', 7, 1120, 94, 800, 739.6, 0],
+      'laser|Chaser': ['T', 'A', 'hp', 6, 960, 94, 800, 548.6, 0],
+      'laser|RangedTurret': ['T', 'B', 'hp', 6, 960, 97, 640, 0, 140],
 
       'machineGun|ProtoRusher': ['T', 'A', 'hp', 50, 1000, 42, 840, 979.5, 0],
       'machineGun|Chaser': ['T', 'A', 'hp', 45, 900, 43, 840, 278.3, 0],
@@ -521,7 +528,8 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
       cannon: ['WIN', 'WIN', 'LOSS'],
       flamethrower: ['WIN', 'WIN', 'LOSS'],
       hammer: ['WIN', 'WIN', 'LOSS·0hit'],
-      laser: ['LOSS', 'LOSS', 'LOSS'],
+      // R11：laser 的近身两段由 LOSS 翻成 WIN（`RangedTurret` 列仍是 LOSS ⇒ ② 依然成立）
+      laser: ['WIN', 'WIN', 'LOSS'],
       machineGun: ['WIN', 'WIN', 'LOSS'],
       rammer: ['LOSS', 'WIN·双亡', 'LOSS·0hit'],
       shotgun: ['WIN', 'WIN', 'LOSS'],
@@ -578,9 +586,11 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
     }
 
     // ⑤ 最接近的一件（对手剩余最少）—— 如实记录，不做评级
+    //    ⚠️ R11：laser（`cooldownMs` 1800 → 600）在 `RangedTurret` 上把对手打到剩 **140**
+    //       < machineGun 的 159.8 ⇒ 「最接近」由 `machineGun` 变为 `laser`（如实更新，不是评级）。
     const closest = landed.reduce((a, b) => (a.hpB <= b.hpB ? a : b));
-    expect(closest.label, '对手剩余最少的单件').toBe('machineGun');
-    expect(r1(closest.hpB), '最接近的一格：对手残血').toBe(159.8);
+    expect(closest.label, '对手剩余最少的单件').toBe('laser');
+    expect(r1(closest.hpB), '最接近的一格：对手残血').toBe(140);
 
     // ⑥ `cannon` 唯一那次命中落在**固定窗口之外**（606 > 600）⇒ 窗口内累计 0 是如实的
     const cannon = cell('cannon', 'RangedTurret');

@@ -58,9 +58,11 @@
  *   ② **Build 只从第 2 段起生效**（`R9F-02`）：同一 (形态, 武器) 下所有路线的**第 1 段读数
  *      逐字节相同**（第 1 段是零 Build 段）—— 这条不变量同时**解释了**下面 ③。
  *
- *   ③ **`only` 形态下 `laser` / `rammer` 的两次选择拿到同一份读数**：它们**在零 Build 的
- *      第 1 段就阵亡**（`pools=[]`，两次 Build 根本没机会上战场）。这不是「Build 无效」，
- *      而是这两件武器单件撑不过第 1 段的既有内容缺口（`R9F-06` 与 R9-06 ② 独立互证）。
+ *   ③ **`only` 形态下 `rammer` 的两次选择拿到同一份读数**：它在零 Build 的
+ *      第 1 段就阵亡（`pools=[]`，两次 Build 根本没机会上战场）。这不是「Build 无效」，
+ *      而是这件武器单件撑不过第 1 段的既有内容缺口（`R9F-06` 与 R9-06 ② 独立互证）。
+ *      ⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1：`laser`（`cooldownMs` 1800 → 600）**已不在**
+ *         这个集合里 —— 它现在能撑过第 1 段（`D1` 打进终局、`D2` 死在第 2 段）。
  *
  *   ④ **Queue 的 C 臂「完全不产生核心输出提升」在结构上不可能存在于一局之内**
  *      （`R9F-05` 给出机器证明）：通用池 3 项里只有 `emergencyRepair` 不是输出项，
@@ -418,8 +420,10 @@ const FROZEN_RESULT: Readonly<Record<string, string>> = {
     'COMPLETE | ProtoRusher:A/1023.2/0/222 | Chaser:A/930.1/0/197 | RangedTurret:A/530.1/0/258',
   'walk/hammer/D1': 'COMPLETE | ProtoRusher:A/977.7/0/281 | Chaser:A/704.1/0/237 | RangedTurret:A/64.1/0/382',
   'walk/hammer/D2': 'COMPLETE | ProtoRusher:A/977.7/0/281 | Chaser:A/794.4/0/228 | RangedTurret:A/154.4/0/382',
-  'walk/laser/D1': 'COMPLETE | ProtoRusher:A/1023.8/0/253 | Chaser:A/751.8/0/231 | RangedTurret:A/351.8/0/266',
-  'walk/laser/D2': 'COMPLETE | ProtoRusher:A/1023.8/0/253 | Chaser:A/751.8/0/237 | RangedTurret:A/351.8/0/266',
+  // PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser `cooldownMs` 1800 → 600（只动攻击间隔）
+  //   ⇒ 三段内发射次数上升 ⇒ 三段终局我方耐久整体抬高（判据/形状一字未改）。
+  'walk/laser/D1': 'COMPLETE | ProtoRusher:A/1100/0/230 | Chaser:A/828/0/218 | RangedTurret:A/468/0/259',
+  'walk/laser/D2': 'COMPLETE | ProtoRusher:A/1100/0/230 | Chaser:A/918/0/209 | RangedTurret:A/558/0/259',
   'walk/machineGun/A': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/991.2/0/147 | RangedTurret:A/871.2/0/191',
   'walk/machineGun/B': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/989.7/0/190 | RangedTurret:A/869.7/0/191',
   'walk/machineGun/C1': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/918.1/0/220 | RangedTurret:A/900/0/220',
@@ -439,8 +443,9 @@ const FROZEN_RESULT: Readonly<Record<string, string>> = {
     'FAILED | ProtoRusher:A/919.6/0/486 | Chaser:A/284.4/0/400 | RangedTurret:B/0/1060/197',
   'only/hammer/D1': 'FAILED | ProtoRusher:A/414.2/0/1010 | Chaser:B/0/441.7/322',
   'only/hammer/D2': 'FAILED | ProtoRusher:A/414.2/0/1010 | Chaser:B/0/352.9/350',
-  'only/laser/D1': 'FAILED | ProtoRusher:B/0/199.3/1016',
-  'only/laser/D2': 'FAILED | ProtoRusher:B/0/199.3/1016',
+  // R11：laser 不再「零 Build 段就截断」——D1 走进终局才败（3 段），D2 死在 ②。
+  'only/laser/D1': 'FAILED | ProtoRusher:A/739.6/0/853 | Chaser:A/190.7/0/599 | RangedTurret:B/0/900/149',
+  'only/laser/D2': 'FAILED | ProtoRusher:A/739.6/0/853 | Chaser:B/0/252.4/534',
   'only/machineGun/A': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/340.5/0/511 | RangedTurret:B/0/575/236',
   'only/machineGun/B': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/250.4/0/529 | RangedTurret:B/0/750/154',
   'only/machineGun/C1': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/278.3/0/626 | RangedTurret:B/0/400/368',
@@ -462,8 +467,8 @@ const FROZEN_DAMAGE: Readonly<Record<string, string>> = {
     'machineGun:20x33 flamethrower:8x46 ; machineGun:20x28 flamethrower:8x43 ; machineGun:20x40 flamethrower:10x30',
   'walk/hammer/D1': 'machineGun:20x42 hammer:90x2 ; machineGun:20x34 hammer:113x2 ; machineGun:20x55',
   'walk/hammer/D2': 'machineGun:20x42 hammer:90x2 ; machineGun:20x32 hammer:90x3 ; machineGun:20x55',
-  'walk/laser/D1': 'machineGun:20x42 laser:160x1 ; machineGun:20x35 laser:200x1 ; machineGun:20x41 laser:200x2',
-  'walk/laser/D2': 'machineGun:20x42 laser:160x1 ; machineGun:20x37 laser:160x1 ; machineGun:20x41 laser:200x2',
+  'walk/laser/D1': 'machineGun:20x34 laser:160x2 ; machineGun:20x30 laser:200x2 ; machineGun:20x35 laser:200x2',
+  'walk/laser/D2': 'machineGun:20x34 laser:160x2 ; machineGun:20x29 laser:160x2 ; machineGun:20x35 laser:200x2',
   'walk/machineGun/A': 'machineGun:20x51 ; machineGun:25x37 ; machineGun:25x44',
   'walk/machineGun/B': 'machineGun:20x51 ; machineGun:20x46 ; machineGun:25x44',
   'walk/machineGun/C1': 'machineGun:20x51 ; machineGun:20x45 ; machineGun:25x44',
@@ -479,8 +484,8 @@ const FROZEN_DAMAGE: Readonly<Record<string, string>> = {
   'only/flamethrower/D2': 'flamethrower:8x125 ; flamethrower:8x113 ; flamethrower:10x4',
   'only/hammer/D1': 'hammer:90x12 ; hammer:113x4',
   'only/hammer/D2': 'hammer:90x12 ; hammer:90x6',
-  'only/laser/D1': 'laser:160x5',
-  'only/laser/D2': 'laser:160x5',
+  'only/laser/D1': 'laser:160x7 ; laser:200x5 ; laser:200x1',
+  'only/laser/D2': 'laser:160x7 ; laser:160x4',
   'only/machineGun/A': 'machineGun:20x50 ; machineGun:25x36 ; machineGun:25x21',
   'only/machineGun/B': 'machineGun:20x50 ; machineGun:20x45 ; machineGun:25x14',
   'only/machineGun/C1': 'machineGun:20x50 ; machineGun:20x45 ; machineGun:25x28',
@@ -720,9 +725,11 @@ describe('PRODUCT-LOOP-R9-FULL-RUN-PATH-MATRIX｜B. 本 Queue 的判断标准', 
     expect(comparable, '存在可比对的 (形态, 武器) 组数').toBeGreaterThanOrEqual(6);
 
     // ⑤ 如实记录「零 Build 段就截断 ⇒ 两次选择拿同一份读数」的路线（不隐藏）
-    expect(zeroBuildTruncated.sort()).toEqual(
-      ['only/laser/D1', 'only/laser/D2', 'only/rammer/D1', 'only/rammer/D2'].sort(),
-    );
+    //    ⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser 的 `cooldownMs` 1800 → 600 后，
+    //       `only/laser/D1` 与 `D2` **不再**在第 1 段截断（D1 打进终局、D2 死在第 2 段，
+    //       见 `FROZEN_RESULT`）⇒ 它们已不再属于这个「零 Build 截断」集合。
+    //       剩下的真实截断路线 = `rammer`（唯一一件仍死在满耐久零 Build 第 1 段的武器）。
+    expect(zeroBuildTruncated.sort()).toEqual(['only/rammer/D1', 'only/rammer/D2'].sort());
   });
 
   it('R9F-05 Queue 的 C 臂：**第 2 段零输出提升**可证；「整局都不投输出」结构上不可能', () => {
@@ -806,7 +813,7 @@ describe('PRODUCT-LOOP-R9-FULL-RUN-PATH-MATRIX｜B. 本 Queue 的判断标准', 
       cannon: 'FAILED@RangedTurret',
       flamethrower: 'FAILED@RangedTurret',
       hammer: 'FAILED@Chaser',
-      laser: 'FAILED@ProtoRusher',
+      laser: 'FAILED@RangedTurret', // R11：与 R9-06 ② 独立互证（两处都测到同一段）
       machineGun: 'FAILED@RangedTurret',
       rammer: 'FAILED@ProtoRusher',
       shotgun: 'FAILED@Chaser',

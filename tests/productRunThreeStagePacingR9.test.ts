@@ -809,11 +809,14 @@ describe('PRODUCT-LOOP-R9｜三段节奏 + 两次 Build 的真实作用（机器
       const w = walkRun(reachableWith(weapon), [p1, p2]);
       reachable[weapon] = w.phase === 'COMPLETE' ? 'COMPLETE' : `FAILED@${lastSeg(w).encounterId}`;
     }
+    // ⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser 的 `cooldownMs` 1800 → 600（只动攻击间隔）
+    //    ⇒ laser 从「第 1 段 `ProtoRusher` 就阵亡」推进到「打进终局 `RangedTurret` 才阵亡」。
+    //    ⚠️ 仍是 **FAILED**（不是 COMPLETE）⇒ 「单槽形态没有任何一件能通关」的事实未被掩盖。
     expect(reachable).toEqual({
       cannon: 'FAILED@RangedTurret',
       flamethrower: 'FAILED@RangedTurret',
       hammer: 'FAILED@RangedTurret',
-      laser: 'FAILED@ProtoRusher',
+      laser: 'FAILED@RangedTurret',
       machineGun: 'FAILED@Chaser',
       rammer: 'FAILED@Chaser',
       shotgun: 'FAILED@RangedTurret',
@@ -832,7 +835,7 @@ describe('PRODUCT-LOOP-R9｜三段节奏 + 两次 Build 的真实作用（机器
       cannon: 'FAILED@RangedTurret',
       flamethrower: 'FAILED@RangedTurret',
       hammer: 'FAILED@Chaser',
-      laser: 'FAILED@ProtoRusher',
+      laser: 'FAILED@RangedTurret', // R11：与 Q3-07 独立互证（两处口径都测到同一段）
       machineGun: 'FAILED@RangedTurret',
       rammer: 'FAILED@ProtoRusher',
       shotgun: 'FAILED@Chaser',

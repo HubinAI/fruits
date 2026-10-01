@@ -510,11 +510,14 @@ describe('PRODUCT-LOOP-R9-RUN-REWARD-PACING-CHECK｜B. COMPLETE 出口与 FAILED
     //    因此失败 Encounter 与旧表不同：hammer 从 RangedTurret→Chaser、machineGun 从 Chaser→RangedTurret、
     //    rammer 从 Chaser→ProtoRusher、shotgun 从 RangedTurret→Chaser）。
     //    本 Queue 不修 Q3 能力缺口 (a)（一键可达装配仍打不赢终局），故 7 件仍全 FAILED。
+    // ⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser 的 `cooldownMs` 1800 → 600（只动攻击间隔）
+    //    ⇒ 它的失败 Encounter 从 `ProtoRusher`（第 1 段就阵亡）推进到 `RangedTurret`（打进终局）。
+    //    ⚠️ **仍然是 FAILED** ⇒ Q3 能力缺口 (a) 未被本 Queue 掩盖；7 件全 FAILED 的事实不变。
     expect(table).toEqual({
       cannon: 'FAILED@RangedTurret',
       flamethrower: 'FAILED@RangedTurret',
       hammer: 'FAILED@Chaser',
-      laser: 'FAILED@ProtoRusher',
+      laser: 'FAILED@RangedTurret',
       machineGun: 'FAILED@RangedTurret',
       rammer: 'FAILED@ProtoRusher',
       shotgun: 'FAILED@Chaser',

@@ -80,15 +80,20 @@
  *
  *   | 分类 | 武器 | 实测 |
  *   |---|---|---|
- *   | **FLIP**（结果翻转） | `machineGun` | Zero `LOSS`（敌剩 **159.8**）→ `damageUp` **`WIN`**（我剩 80）/ `rateUp` **`WIN`**（我剩 40） |
+ *   | **FLIP**（结果翻转） | `laser` · `machineGun` | `laser`：Zero `LOSS`（敌剩 **140**）→ `damageUp` **`WIN`**（我剩 120）/ `rateUp` 仍 LOSS（敌剩 140）；`machineGun`：Zero `LOSS`（敌剩 **159.8**）→ `damageUp` **`WIN`**（我剩 80）/ `rateUp` **`WIN`**（我剩 40） |
  *   | **CONTACT**（从打不到到打得到） | `rammer` | Zero / `damageUp` **0 命中** → `rateUp` **2 命中 / 140 伤害** |
- *   | **OUTPUT**（输出显著变大，结果不变） | `flamethrower` · `laser` · `shotgun` | 伤害 528→660 / 640→800 / 600→760（+25% / +25% / +27%），**仍 LOSS** |
+ *   | **OUTPUT**（输出显著变大，结果不变） | `flamethrower` · `shotgun` | 伤害 528→660 / 600→760（+25% / +27%），**仍 LOSS** |
  *   | **NONE**（Build 对结果与输出都零影响） | `hammer` | Zero / `damageUp` **逐字段完全相同**（0 命中、敌剩 1099.9） |
  *   | **N/A**（官方不提供 B / C） | `cannon` | 池族 = `'cannon'` ⇒ 通用成长不提供；附加行 `heavyShell` / `fastReload` 把它从 1 命中抬到 2，**仍 LOSS** |
  *
  * ⇒ 直接回答 Queue 的两个举例：
  *   - `machineGun`：**确实**是「Zero Build FAILED（敌剩 159.8）→ Damage Build COMPLETE」——
  *     这正是本矩阵要抓的**有效设计证据**。
+ *   - ⚠️ **PRODUCT-LOOP-R11-LASER-CADENCE-R1 之后的更新**：`laser` 的 `cooldownMs` 1800 → 600
+ *     （只动攻击间隔，`chargeMs` 未动）⇒ 本矩阵里它从 `OUTPUT` 升级为 **`FLIP`**：
+ *     Zero `LOSS`（敌剩 140）→ `damageUp` **`WIN`**（我剩 120）。
+ *     `FLIP` 集合因此从 `{machineGun}` 变为 `{laser, machineGun}`（`BI-06` ③）。
+ *     ⚠️ 这是 `laser` 自身的能力提升；其余 6 件的分类与逐字段读数一字未动。
  *   - `hammer`：Zero / Damage / Rate **三档全 0 命中**，而**数值确实被改了**（`BI-07` 逐项证明
  *     `baseDamage 90→113`、`windupPauseSteps 20→15` 都真实生效）⇒ 问题**不在数值**，
  *     而在**接触 / 攻击结构**。
@@ -586,8 +591,11 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
     // 复现性抽查：同一格重新构造一次，逐字段一致（含浮点耐久与逐发伤害）
     const a = mainCell('machineGun', 'damageUp');
     const b = fight('machineGun', 'damageUp', BUILD_OF.damageUp, FOCUS);
-    expect({ ...b, build: [...b.build] }).toEqual({ ...a, build: [...a.build] });
-  });
+      expect({ ...b, build: [...b.build] }).toEqual({ ...a, build: [...a.build] });
+    // ⚠️ 本用例要跑遍主矩阵 + near + aux **全部格子**（含复现性重跑），且 R11 之后
+    //    laser 的战斗不再「早早阵亡」（RangedTurret 那格会跑到竞技场 End）⇒ 默认 5s 不够。
+    //    显式放宽**超时**（判据一字未改；与 R10/R9F 等重测试同款处置）。
+  }, 120_000);
 
   /* ================================================================ BI-03 */
   it('BI-03 Build 真的注入到武器上：B 档逐发伤害 = round(canonical × 1.25)；C 档只改节奏', () => {
@@ -629,15 +637,17 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
     const observed: Record<string, CellRow> = {};
     for (const w of WEAPONS) for (const e of NEAR) observed[`${w}|${e}`] = rowOf(nearCell(w, e));
     expect(observed).toEqual({
-      // R7 `MX-06` 的对应两列（本轮未改任何战斗参数 ⇒ 必须一字不差）
+      // R7 `MX-06` 的对应两列（R8 本身未改任何战斗参数 ⇒ 当时逐字相等；
+      //   ⚠️ R11 改了 laser 的 `cooldownMs` 后，laser 两格与新版 MX-06 同步更新，其余 12 格仍逐字不变）
       'cannon|ProtoRusher': ['T', 'A', 'hp', 9, 1080, 129, 960, 859.2, 0],
       'cannon|Chaser': ['T', 'A', 'hp', 8, 960, 132, 960, 189.9, 0],
       'flamethrower|ProtoRusher': ['T', 'A', 'hp', 125, 1000, 110, 1000, 919.6, 0],
       'flamethrower|Chaser': ['T', 'A', 'hp', 113, 904, 114, 904, 552.4, 0],
       'hammer|ProtoRusher': ['T', 'A', 'hp', 12, 1080, 152, 450, 414.2, 0],
       'hammer|Chaser': ['T', 'A', 'hp', 10, 900, 187, 720, 5.5, 0],
-      'laser|ProtoRusher': ['T', 'B', 'hp', 5, 800, 94, 480, 0, 199.3],
-      'laser|Chaser': ['T', 'B', 'hp', 4, 640, 94, 480, 0, 247.7],
+      // ⚠️ R11：laser `cooldownMs` 1800 → 600 ⇒ 近身两段由 LOSS 变 WIN（其余 6 件一字未动）
+      'laser|ProtoRusher': ['T', 'A', 'hp', 7, 1120, 94, 800, 739.6, 0],
+      'laser|Chaser': ['T', 'A', 'hp', 6, 960, 94, 800, 548.6, 0],
       'machineGun|ProtoRusher': ['T', 'A', 'hp', 50, 1000, 42, 840, 979.5, 0],
       'machineGun|Chaser': ['T', 'A', 'hp', 45, 900, 43, 840, 278.3, 0],
       'rammer|ProtoRusher': ['T', 'B', 'hp', 11, 770, 139, 420, 0, 170.6],
@@ -663,9 +673,10 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       'hammer|damageUp': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1099.9],
       'hammer|rateUp': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
 
-      'laser|zero': ['T', 'B', 'hp', 4, 640, 97, 480, 0, 460],
-      'laser|damageUp': ['T', 'B', 'hp', 4, 800, 97, 600, 0, 300],
-      'laser|rateUp': ['T', 'B', 'hp', 4, 640, 97, 480, 0, 460],
+      // ⚠️ R11：laser `cooldownMs` 1800 → 600 ⇒ `damageUp` 档翻成 WIN（`FLIP` 的机器证据）
+      'laser|zero': ['T', 'B', 'hp', 6, 960, 97, 640, 0, 140],
+      'laser|damageUp': ['T', 'A', 'hp', 6, 1200, 97, 800, 120, 0],
+      'laser|rateUp': ['T', 'B', 'hp', 6, 960, 97, 800, 0, 140],
 
       'machineGun|zero': ['T', 'B', 'hp', 47, 940, 48, 840, 0, 159.8],
       'machineGun|damageUp': ['T', 'A', 'hp', 44, 1100, 48, 1050, 80, 0],
@@ -702,7 +713,7 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       cannon: ['LOSS', 'N/A', 'N/A'],
       flamethrower: ['LOSS', 'LOSS', 'LOSS'],
       hammer: ['LOSS·0hit', 'LOSS·0hit', 'LOSS·0hit'],
-      laser: ['LOSS', 'LOSS', 'LOSS'],
+      laser: ['LOSS', 'WIN', 'LOSS'], // R11：damageUp 档翻成 WIN
       machineGun: ['LOSS', 'WIN', 'WIN'],
       rammer: ['LOSS·0hit', 'LOSS·0hit', 'LOSS'],
       shotgun: ['LOSS', 'LOSS', 'LOSS'],
@@ -715,17 +726,17 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       cannon: 'N/A',
       flamethrower: 'OUTPUT',
       hammer: 'NONE',
-      laser: 'OUTPUT',
+      laser: 'FLIP', // R11：damageUp 档翻成 WIN ⇒ 从 OUTPUT 升为 FLIP
       machineGun: 'FLIP',
       rammer: 'CONTACT',
       shotgun: 'OUTPUT',
     });
 
-    // ③ **结果翻转的恰好 1 件** —— 这是本 Queue 最硬的一条结论
+    // ③ **结果翻转的武器** —— 本 Queue 最硬的一条结论（R11 后从 1 件变 2 件）
     const flipped = WEAPONS.filter((w) =>
       MAIN_LABELS.some((l) => l !== 'zero' && legallySupports(w, l) && mainCell(w, l).winner === 'A'),
     );
-    expect(flipped, '结果被 Build 翻转的武器').toEqual(['machineGun']);
+    expect(flipped, '结果被 Build 翻转的武器').toEqual(['laser', 'machineGun']);
 
     // ④ Queue 举例 1：`machineGun` — Zero Build 敌剩 159.8 ⇒ Build 后 COMPLETE（两条路都成立）
     const mgZero = mainCell('machineGun', 'zero');
@@ -739,8 +750,9 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       expect(c.damage, `machineGun + ${l} 总伤害须达对手上限`).toBeGreaterThanOrEqual(mgZero.hpBMax);
     }
 
-    // ⑤ 其余 5 件「加 Build 也翻不过来」—— 如实记录差距（不做评级）
-    for (const w of ['flamethrower', 'laser', 'shotgun'] as const) {
+    // ⑤ 其余「加 Build 也翻不过来」的件 —— 如实记录差距（不做评级）
+    //    ⚠️ R11 后 `laser` 已从这一族移出（它的 `damageUp` 档已翻成 WIN，见 ③ / ④）
+    for (const w of ['flamethrower', 'shotgun'] as const) {
       const base = mainCell(w, 'zero');
       const best = mainCell(w, 'damageUp');
       expect(best.winner).toBe('B');

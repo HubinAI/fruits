@@ -357,13 +357,21 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
   it('Q3-04 任意一段阵亡 ⇒ 走**正式 FAILED 流程**（三段各用一条真实物理路线钉死）', () => {
     /*
       三条**真实**路线，分别在 ① / ② / ③ 段阵亡（单件归因夹具，实测见 Q3-07）：
-        - `laser` 单件       → ① `ProtoRusher` 就顶不住；
-        - `hammer` 单件      → 撑过 ①，死在 ② `Chaser`；
+        - `rammer` 单件       → ① `ProtoRusher` 就顶不住；
+        - `hammer` 单件       → 撑过 ①，死在 ② `Chaser`；
         - `flamethrower` 单件 → 撑过 ①②，死在 ③ `RangedTurret`。
       三条都不是「构造出来的假死」，而是真实物理结果 ⇒ 「任意段死亡」被真实覆盖。
+
+      ⚠️ **PRODUCT-LOOP-R11-LASER-CADENCE-R1 的路线替换（不是删断言）**：本用例原先用 `laser`
+         钉「① 段阵亡」。R11 把 laser 的 `cooldownMs` 1800 → 600（只动攻击间隔）之后，
+         laser 单件**不再**死在第 ① 段（实测推进到 ③ `RangedTurret`，见 Q3-07 / RP9-05）⇒
+         它已**不再是一条「① 段阵亡」的真实路线**。
+         替换为**同一口径下真实死在第 ① 段的 `rammer`**（三件覆盖的三段位置一字不变：
+         ① `rammer` / ② `hammer` / ③ `flamethrower`）—— **断言形状与覆盖强度均未放宽**。
+         laser 的新事实由 Q3-06 / Q3-07 单独如实记录。
     */
     const cases: readonly [string, string][] = [
-      ['laser', 'ProtoRusher'],
+      ['rammer', 'ProtoRusher'],
       ['hammer', 'Chaser'],
       ['flamethrower', 'RangedTurret'],
     ];
@@ -426,7 +434,8 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
       cannon: 1080,
       flamethrower: 1000,
       hammer: 1080,
-      laser: 800,
+      // R11：cooldownMs 1800 → 600 ⇒ 第 1 段（`ProtoRusher`）发射 5 → 7 发（800 → 1120）。
+      laser: 1120,
       machineGun: 1000,
       rammer: 770,
       shotgun: 1140,
@@ -456,7 +465,8 @@ describe('PRODUCT-LOOP-R6｜三段问题序列', () => {
       cannon: 'FAILED@RangedTurret',
       flamethrower: 'FAILED@RangedTurret',
       hammer: 'FAILED@Chaser',
-      laser: 'FAILED@ProtoRusher',
+      // R11：laser 从「① 段就阵亡」推进到「打进终局才阵亡」（仍未通关 ⇒ 缺口语义不变）
+      laser: 'FAILED@RangedTurret',
       machineGun: 'FAILED@RangedTurret',
       rammer: 'FAILED@ProtoRusher',
       shotgun: 'FAILED@Chaser',

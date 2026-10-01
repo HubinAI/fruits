@@ -497,9 +497,14 @@ describe('R6-BATCH｜A. 逐件真实链（每个新登记武器）', () => {
       —— 将来谁给非 Cannon 补了专属强化 / 专属 Build，这一条会立刻响，提醒同步更新矩阵。
 
       口径 = ★1 + **零 Build** + 跨场耐久**不修**，车上只留这一件（比真实路线更严的下界）。
-      实测（本次，machine-recorded）：COMPLETE = flamethrower（终局 222.2）/ machineGun（580.9）；
-      FAILED = hammer@ProtoRusher · laser@PineappleFireBrute · rammer@PineappleSawRusher ·
-               shotgun@BananaRodLaser。
+      实测（本次，machine-recorded）：COMPLETE = flamethrower（终局 222.2）/ laser（R11 后新加入）
+      / machineGun（580.9）；FAILED = hammer@ProtoRusher · rammer@PineappleSawRusher ·
+      shotgun@BananaRodLaser。
+
+      ⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser 的 `cooldownMs` 1800 → 600（只动攻击间隔，
+         前摇 `chargeMs` 未动）⇒ 发射频率上升 ⇒ laser **从 FAILED 转为 COMPLETE**（本下界路线）。
+         ⇒ COMPLETE 集合 = {flamethrower, laser, machineGun}；FAILED 集合相应少一条。
+         ⚠️ 这是 laser 单件的**能力提升**，其它六件的结论一字未动（本文件只记录集合与阵亡场次）。
       断言只钉**集合与阵亡场次**（不钉 HP 浮点数）：浮点数会因无关物理改动抖动，
       「在哪一场走到终态」才是这条结论的语义。
     */
@@ -507,14 +512,9 @@ describe('R6-BATCH｜A. 逐件真实链（每个新登记武器）', () => {
     const failed = facts()
       .filter((f) => f.outcome.kind === 'FAILED')
       .map((f) => `${f.defId}@${f.outcome.atEncounter}`);
-    expect(complete.slice().sort()).toEqual(['flamethrower', 'machineGun'].sort());
+    expect(complete.slice().sort()).toEqual(['flamethrower', 'laser', 'machineGun'].sort());
     expect(failed.slice().sort()).toEqual(
-      [
-        'hammer@ProtoRusher',
-        'laser@PineappleFireBrute',
-        'rammer@PineappleSawRusher',
-        'shotgun@BananaRodLaser',
-      ].sort(),
+      ['hammer@ProtoRusher', 'rammer@PineappleSawRusher', 'shotgun@BananaRodLaser'].sort(),
     );
     // 反向：这条结论必须真的覆盖全部登记的非 Cannon 武器（没有一件落空）
     expect(complete.length + failed.length).toBe(REGISTERED_NON_CANNON.length);
@@ -529,19 +529,21 @@ describe('R6-BATCH｜A. 逐件真实链（每个新登记武器）', () => {
       口径 = R7-04b 的下界 + 两笔 `emergencyRepair`（DAY4「维修」+ DAY5 第二层，
       两笔都在第 3 场之前；维修量 = 正式 `EMERGENCY_REPAIR_FRACTION` × 上限，按缺口截断）。
 
-      实测（本次）：COMPLETE = flamethrower（437.2）· machineGun（657.1）· shotgun（16.8，余量极薄）；
-      FAILED = hammer@BananaRodLaser · laser@PineappleFireBrute · rammer@PineappleSawRusher。
+      实测（本次）：COMPLETE = flamethrower（437.2）· laser（R11 后新加入）· machineGun（657.1）
+      · shotgun（16.8，余量极薄）；FAILED = hammer@BananaRodLaser · rammer@PineappleSawRusher。
       ⇒ 「非 Cannon 拿不到伤害成长，只能靠维修换生存」这条留白在真实路线上的**兑换率**就在这里：
-        六件里三件刚好能走完，三件走不完（且差值只有一场到三场的量级）。
+        六件里四件能走完，两件走不完（且差值只有一场到三场的量级）。
       ⚠️ 与 R7-04b 的差集 = `{shotgun}` —— 它恰恰是唯一一件「下界死在第 4 场、维修后刚好活下来」的。
+      ⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser（`cooldownMs` 1800 → 600）在下界已能走完，
+         维修路线自然同样 COMPLETE（本用例下方「维修只可能救命」的不变量也覆盖它）。
     */
     const complete = facts().filter((f) => f.repairOutcome.kind === 'COMPLETE').map((f) => f.defId);
     const failed = facts()
       .filter((f) => f.repairOutcome.kind === 'FAILED')
       .map((f) => `${f.defId}@${f.repairOutcome.atEncounter}`);
-    expect(complete.slice().sort()).toEqual(['flamethrower', 'machineGun', 'shotgun'].sort());
+    expect(complete.slice().sort()).toEqual(['flamethrower', 'laser', 'machineGun', 'shotgun'].sort());
     expect(failed.slice().sort()).toEqual(
-      ['hammer@BananaRodLaser', 'laser@PineappleFireBrute', 'rammer@PineappleSawRusher'].sort(),
+      ['hammer@BananaRodLaser', 'rammer@PineappleSawRusher'].sort(),
     );
     expect(complete.length + failed.length).toBe(REGISTERED_NON_CANNON.length);
     // 维修**只可能救命，不可能害死**：下界 COMPLETE 的，维修路线必须也 COMPLETE

@@ -988,7 +988,20 @@ const laser: FunctionalPartDef = {
   behavior: 'laser',
   behaviorParams: {
     chargeMs: 1500,
-    cooldownMs: 1800,
+    /**
+     * PRODUCT-LOOP-R11-LASER-CADENCE-R1：**1800 → 600**。
+     *
+     * 只改「两次攻击之间的冷却」，**前摇（`chargeMs`）不动** —— 蓄能是 laser 的可感知身份。
+     * 原因（严格分层全枚举实测，`tests/productRunLaserCadenceR11.test.ts` LC-02）：
+     *   攻击周期 = chargeMs + cooldownMs = 3300ms ⇒ 一场 ~1000 步的战斗只装得下 **5 发 / 800 伤**，
+     *   而第 1 段对手 `ProtoRusher` HP = 1000 ⇒ 单件归因夹具下 7 件里激光**第 1 段就阵亡**。
+     *   cooldown 探针（同一 draft 空间 8×5×5）：1800 ⇒ 0 条 COMPLETE；1200 ⇒ 0；900 ⇒ 0；
+     *   **600 ⇒ 2 条 COMPLETE 路径（1 个 chassis）** ⇒ 方向确认后落此值。
+     * 600 与 `flamethrower` 的「短冷却」同量级（既有内容惯例），且前摇仍占每个周期的 5/6。
+     * ⚠️ 不是「刚好 1001 伤害」的凑数：缩短后 laser 仍是**最慢的**一件（周期 2100ms，
+     *    远长于 machineGun 1100 / shotgun 1300 / cannon 1000）。
+     */
+    cooldownMs: 600,
     // Q11-C-R2：16 → 56（Cannon 8 的 7×；R2 方案要求 48~64 高速能量束）。
     // 保留 F2 gravityScale=0（水平直线飞行，无抛物线）；真实 hit/miss/CCD 不变。
     muzzleSpeed: 56,

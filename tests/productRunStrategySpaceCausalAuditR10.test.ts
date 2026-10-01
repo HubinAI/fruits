@@ -342,6 +342,11 @@ describe('PRODUCT-LOOP-R10-STRATEGY-SPACE-CAUSAL-AUDIT-R1｜策略空间因果�
     lines.push('');
     lines.push('════════════════════════════════════════════════════════════════════');
     lines.push('【W0｜hammer / laser / rammer 归因】基线 body=mangoBody front=smallWheel rear=smallWheel build=[emergencyRepair→damageUp]');
+    lines.push(
+      '⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1 之后的更新：laser 的 `cooldownMs` 1800 → 600' +
+        '（只动攻击间隔）⇒ 本次审计当时「laser = 0-COMPLETE / 根因 timing」的结论**已被修掉**，' +
+        'laser 不再是 0-COMPLETE 武器（见 `productRunLaserCadenceR11`）。下面的读数按**当前**参数现算。',
+    );
     lines.push('════════════════════════════════════════════════════════════════════');
     const BL = ['emergencyRepair', 'damageUp'] as const;
     const weapons = ['hammer', 'laser', 'rammer'] as const;

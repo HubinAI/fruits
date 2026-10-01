@@ -288,7 +288,9 @@ describe('PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT', () => {
   it('GR-02 节奏键：按 Q1 真源逐件取自**它自己**的 canonical（不强行统一成一个字段名）', () => {
     expect(weaponCadenceGrowth(defOf('cannon'))).toEqual({ key: 'cooldownMs', base: 1000 });
     expect(weaponCadenceGrowth(defOf('flamethrower'))).toEqual({ key: 'cooldownMs', base: 600 });
-    expect(weaponCadenceGrowth(defOf('laser'))).toEqual({ key: 'cooldownMs', base: 1800 });
+    // PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser 的 cooldownMs 1800 → 600（只动攻击间隔，
+    // 前摇 chargeMs 未动）。本键仍逐件取自**它自己**的 canonical，故这里跟着 canonical 走。
+    expect(weaponCadenceGrowth(defOf('laser'))).toEqual({ key: 'cooldownMs', base: 600 });
     expect(weaponCadenceGrowth(defOf('machineGun'))).toEqual({ key: 'cooldownMs', base: 1100 });
     expect(weaponCadenceGrowth(defOf('shotgun'))).toEqual({ key: 'cooldownMs', base: 1300 });
     // 接触类：canonical 里真有该键（rammer）就直接读它
