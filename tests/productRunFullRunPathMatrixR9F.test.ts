@@ -410,33 +410,41 @@ function signature(f: RouteFact): string {
 
 /** ⚠️ **本表就是本 Queue 的交付物**：每条路线的三段结果 + 终态 + 双方 HP。 */
 const FROZEN_RESULT: Readonly<Record<string, string>> = {
-  /* ── walk 形态（7 件武器全部走到第 3 段）──────────────────────────────── */
-  'walk/cannon/F1': 'COMPLETE | ProtoRusher:A/915.2/0/241 | Chaser:A/822.2/0/228 | RangedTurret:A/282.2/0/372',
-  'walk/cannon/F2': 'COMPLETE | ProtoRusher:A/915.2/0/241 | Chaser:A/822.6/0/199 | RangedTurret:A/282.6/0/373',
-  'walk/cannon/F3': 'COMPLETE | ProtoRusher:A/915.2/0/241 | Chaser:A/822.1/0/196 | RangedTurret:A/282.1/0/371',
+  /* ── walk 形态（7 件武器全部走到第 3 段；R12 后 hammer/D1 例外）──────────── */
+  // ⚠️⚠️ PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW：唯一一条新规则 = 「对手在**自身开火
+  //     执行期**内停止后撤」（只关 motor，不刹停 / 不加冲量 / 不动任何数值）。
+  //     它只作用于第 3 段的 `RangedTurret` ⇒ 本表**第 1 / 2 段逐字节未变**，
+  //     只有第 3 段的 hpA / steps 变（`laser` 两行逐字节未变 —— 规则碰不到它）。
+  'walk/cannon/F1': 'COMPLETE | ProtoRusher:A/915.2/0/241 | Chaser:A/822.2/0/228 | RangedTurret:A/322.2/0/366',
+  'walk/cannon/F2': 'COMPLETE | ProtoRusher:A/915.2/0/241 | Chaser:A/822.6/0/199 | RangedTurret:A/442.6/0/244',
+  'walk/cannon/F3': 'COMPLETE | ProtoRusher:A/915.2/0/241 | Chaser:A/822.1/0/196 | RangedTurret:A/222.1/0/324',
   'walk/flamethrower/D1':
-    'COMPLETE | ProtoRusher:A/1023.2/0/222 | Chaser:A/930.4/0/203 | RangedTurret:A/530.4/0/258',
+    'COMPLETE | ProtoRusher:A/1023.2/0/222 | Chaser:A/930.4/0/203 | RangedTurret:A/490.4/0/254',
   'walk/flamethrower/D2':
-    'COMPLETE | ProtoRusher:A/1023.2/0/222 | Chaser:A/930.1/0/197 | RangedTurret:A/530.1/0/258',
-  'walk/hammer/D1': 'COMPLETE | ProtoRusher:A/977.7/0/281 | Chaser:A/704.1/0/237 | RangedTurret:A/64.1/0/382',
-  'walk/hammer/D2': 'COMPLETE | ProtoRusher:A/977.7/0/281 | Chaser:A/794.4/0/228 | RangedTurret:A/154.4/0/382',
+    'COMPLETE | ProtoRusher:A/1023.2/0/222 | Chaser:A/930.1/0/197 | RangedTurret:A/490.1/0/254',
+  // ⛔⚠️ R12 的**代价（最重的一条）**：`hammer/D1` 由 `COMPLETE` **翻成 `FAILED`**
+  //     （终局我方阵亡、对手残 60）⇒ 本表不再是「walk 形态 7/7 全通」。
+  //     `D2` 仍 COMPLETE，但余量由 154.4 掉到 74.4。如实记录，不做补偿性调整。
+  'walk/hammer/D1': 'FAILED | ProtoRusher:A/977.7/0/281 | Chaser:A/704.1/0/237 | RangedTurret:B/0/60/361',
+  'walk/hammer/D2': 'COMPLETE | ProtoRusher:A/977.7/0/281 | Chaser:A/794.4/0/228 | RangedTurret:A/74.4/0/370',
   // PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser `cooldownMs` 1800 → 600（只动攻击间隔）
   //   ⇒ 三段内发射次数上升 ⇒ 三段终局我方耐久整体抬高（判据/形状一字未改）。
+  //   ⚠️ R12 后这两行**逐字节未变**（规则只在对手侧查询 ⇒ 结构上碰不到 laser）。
   'walk/laser/D1': 'COMPLETE | ProtoRusher:A/1100/0/230 | Chaser:A/828/0/218 | RangedTurret:A/468/0/259',
   'walk/laser/D2': 'COMPLETE | ProtoRusher:A/1100/0/230 | Chaser:A/918/0/209 | RangedTurret:A/558/0/259',
   'walk/machineGun/A': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/991.2/0/147 | RangedTurret:A/871.2/0/191',
   'walk/machineGun/B': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/989.7/0/190 | RangedTurret:A/869.7/0/191',
-  'walk/machineGun/C1': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/918.1/0/220 | RangedTurret:A/900/0/220',
+  'walk/machineGun/C1': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/918.1/0/220 | RangedTurret:A/900/0/219',
   'walk/machineGun/C2': 'COMPLETE | ProtoRusher:A/991.2/0/223 | Chaser:A/918.1/0/220 | RangedTurret:A/980/0/212',
-  'walk/rammer/D1': 'COMPLETE | ProtoRusher:A/1011.5/0/346 | Chaser:A/1002.7/0/246 | RangedTurret:A/458.3/0/386',
-  'walk/rammer/D2': 'COMPLETE | ProtoRusher:A/1011.5/0/346 | Chaser:A/645.7/0/222 | RangedTurret:A/101.2/0/386',
-  'walk/shotgun/D1': 'COMPLETE | ProtoRusher:A/971.8/0/235 | Chaser:A/879/0/238 | RangedTurret:A/459/0/307',
-  'walk/shotgun/D2': 'COMPLETE | ProtoRusher:A/971.8/0/235 | Chaser:A/698.7/0/233 | RangedTurret:A/278.7/0/307',
+  'walk/rammer/D1': 'COMPLETE | ProtoRusher:A/1011.5/0/346 | Chaser:A/1002.7/0/246 | RangedTurret:A/458.3/0/390',
+  'walk/rammer/D2': 'COMPLETE | ProtoRusher:A/1011.5/0/346 | Chaser:A/645.7/0/222 | RangedTurret:A/101.2/0/390',
+  'walk/shotgun/D1': 'COMPLETE | ProtoRusher:A/971.8/0/235 | Chaser:A/879/0/238 | RangedTurret:A/459/0/304',
+  'walk/shotgun/D2': 'COMPLETE | ProtoRusher:A/971.8/0/235 | Chaser:A/698.7/0/233 | RangedTurret:A/278.7/0/304',
 
   /* ── only 形态（单件归因；17/17 全部 FAILED，截断的段数如实记在行里）──── */
   'only/cannon/F1': 'FAILED | ProtoRusher:A/859.2/0/601 | Chaser:A/311.8/0/545 | RangedTurret:B/0/1100/224',
-  'only/cannon/F2': 'FAILED | ProtoRusher:A/859.2/0/601 | Chaser:A/494.1/0/338 | RangedTurret:B/0/1100/348',
-  'only/cannon/F3': 'FAILED | ProtoRusher:A/859.2/0/601 | Chaser:A/313.2/0/392 | RangedTurret:B/0/1100/225',
+  'only/cannon/F2': 'FAILED | ProtoRusher:A/859.2/0/601 | Chaser:A/494.1/0/338 | RangedTurret:B/0/740/252',
+  'only/cannon/F3': 'FAILED | ProtoRusher:A/859.2/0/601 | Chaser:A/313.2/0/392 | RangedTurret:B/0/1100/224',
   'only/flamethrower/D1':
     'FAILED | ProtoRusher:A/919.6/0/486 | Chaser:A/372.6/0/386 | RangedTurret:B/0/960/217',
   'only/flamethrower/D2':
@@ -446,10 +454,10 @@ const FROZEN_RESULT: Readonly<Record<string, string>> = {
   // R11：laser 不再「零 Build 段就截断」——D1 走进终局才败（3 段），D2 死在 ②。
   'only/laser/D1': 'FAILED | ProtoRusher:A/739.6/0/853 | Chaser:A/190.7/0/599 | RangedTurret:B/0/900/149',
   'only/laser/D2': 'FAILED | ProtoRusher:A/739.6/0/853 | Chaser:B/0/252.4/534',
-  'only/machineGun/A': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/340.5/0/511 | RangedTurret:B/0/575/236',
+  'only/machineGun/A': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/340.5/0/511 | RangedTurret:B/0/575/235',
   'only/machineGun/B': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/250.4/0/529 | RangedTurret:B/0/750/154',
-  'only/machineGun/C1': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/278.3/0/626 | RangedTurret:B/0/400/368',
-  'only/machineGun/C2': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/278.3/0/626 | RangedTurret:B/0/520/369',
+  'only/machineGun/C1': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/278.3/0/626 | RangedTurret:B/0/500/336',
+  'only/machineGun/C2': 'FAILED | ProtoRusher:A/979.5/0/715 | Chaser:A/278.3/0/626 | RangedTurret:B/0/540/336',
   'only/rammer/D1': 'FAILED | ProtoRusher:B/0/170.6/1033',
   'only/rammer/D2': 'FAILED | ProtoRusher:B/0/170.6/1033',
   'only/shotgun/D1': 'FAILED | ProtoRusher:A/499.3/0/625 | Chaser:B/0/210.5/339',
@@ -458,14 +466,16 @@ const FROZEN_RESULT: Readonly<Record<string, string>> = {
 
 /** 与 `FROZEN_RESULT` 一一对应的「各武器实际伤害」冻结表。 */
 const FROZEN_DAMAGE: Readonly<Record<string, string>> = {
-  'walk/cannon/F1': 'machineGun:20x39 cannon:120x3 ; machineGun:20x33 cannon:120x2 ; machineGun:20x55',
-  'walk/cannon/F2': 'machineGun:20x39 cannon:120x3 ; machineGun:20x27 cannon:120x3 ; machineGun:20x55',
-  'walk/cannon/F3': 'machineGun:20x39 cannon:120x3 ; machineGun:20x27 cannon:120x3 ; machineGun:20x55',
+  // ⚠️ R12：第 3 段的交火姿态变了 ⇒ 只有「第 3 段那一格」会变（`laser` 三行逐字节未变）
+  'walk/cannon/F1': 'machineGun:20x39 cannon:120x3 ; machineGun:20x33 cannon:120x2 ; machineGun:20x49 cannon:120x1',
+  'walk/cannon/F2': 'machineGun:20x39 cannon:120x3 ; machineGun:20x27 cannon:120x3 ; machineGun:20x37 cannon:120x3',
+  'walk/cannon/F3': 'machineGun:20x39 cannon:120x3 ; machineGun:20x27 cannon:120x3 ; machineGun:20x43 cannon:120x2',
   'walk/flamethrower/D1':
     'machineGun:20x33 flamethrower:8x46 ; machineGun:20x27 flamethrower:10x36 ; machineGun:20x40 flamethrower:10x30',
   'walk/flamethrower/D2':
     'machineGun:20x33 flamethrower:8x46 ; machineGun:20x28 flamethrower:8x43 ; machineGun:20x40 flamethrower:10x30',
-  'walk/hammer/D1': 'machineGun:20x42 hammer:90x2 ; machineGun:20x34 hammer:113x2 ; machineGun:20x55',
+  // ⚠️ R12：`hammer/D1` 的终局由「打完」变成「我方阵亡」（第 3 段只剩机枪 52 发）
+  'walk/hammer/D1': 'machineGun:20x42 hammer:90x2 ; machineGun:20x34 hammer:113x2 ; machineGun:20x52',
   'walk/hammer/D2': 'machineGun:20x42 hammer:90x2 ; machineGun:20x32 hammer:90x3 ; machineGun:20x55',
   'walk/laser/D1': 'machineGun:20x34 laser:160x2 ; machineGun:20x30 laser:200x2 ; machineGun:20x35 laser:200x2',
   'walk/laser/D2': 'machineGun:20x34 laser:160x2 ; machineGun:20x29 laser:160x2 ; machineGun:20x35 laser:200x2',
@@ -478,7 +488,7 @@ const FROZEN_DAMAGE: Readonly<Record<string, string>> = {
   'walk/shotgun/D1': 'machineGun:20x35 shotgun:30x13 ; machineGun:20x34 shotgun:38x8 ; machineGun:20x42 shotgun:38x7',
   'walk/shotgun/D2': 'machineGun:20x35 shotgun:30x13 ; machineGun:20x32 shotgun:30x9 ; machineGun:20x42 shotgun:38x7',
   'only/cannon/F1': 'cannon:120x9 ; cannon:120x8 ; -',
-  'only/cannon/F2': 'cannon:120x9 ; cannon:120x8 ; -',
+  'only/cannon/F2': 'cannon:120x9 ; cannon:120x8 ; cannon:120x3',
   'only/cannon/F3': 'cannon:120x9 ; cannon:120x8 ; -',
   'only/flamethrower/D1': 'flamethrower:8x125 ; flamethrower:10x90 ; flamethrower:10x14',
   'only/flamethrower/D2': 'flamethrower:8x125 ; flamethrower:8x113 ; flamethrower:10x4',
@@ -488,8 +498,8 @@ const FROZEN_DAMAGE: Readonly<Record<string, string>> = {
   'only/laser/D2': 'laser:160x7 ; laser:160x4',
   'only/machineGun/A': 'machineGun:20x50 ; machineGun:25x36 ; machineGun:25x21',
   'only/machineGun/B': 'machineGun:20x50 ; machineGun:20x45 ; machineGun:25x14',
-  'only/machineGun/C1': 'machineGun:20x50 ; machineGun:20x45 ; machineGun:25x28',
-  'only/machineGun/C2': 'machineGun:20x50 ; machineGun:20x45 ; machineGun:20x29',
+  'only/machineGun/C1': 'machineGun:20x50 ; machineGun:20x45 ; machineGun:25x24',
+  'only/machineGun/C2': 'machineGun:20x50 ; machineGun:20x45 ; machineGun:20x28',
   'only/rammer/D1': 'rammer:70x11',
   'only/rammer/D2': 'rammer:70x11',
   'only/shotgun/D1': 'shotgun:30x38 ; shotgun:38x18',
@@ -819,7 +829,10 @@ describe('PRODUCT-LOOP-R9-FULL-RUN-PATH-MATRIX｜B. 本 Queue 的判断标准', 
       shotgun: 'FAILED@Chaser',
     });
 
-    // 反向：多槽形态（walk）同样口径下 7 件全部 COMPLETE —— 与 R9-03 / R9-07 的结论同向
+    // 反向：多槽形态（walk）同样口径
+    //    ⚠️⚠️ R12 后**不再是 7/7 全 COMPLETE**：`walk/hammer/D1` 的终局 `RangedTurret` 由胜
+    //       翻成败（我方阵亡、对手残 60）⇒ 本表出现第 1 个 `FAILED`。
+    //       这是「开火窗口」这条规则的**代价**，如实记录（本 Queue 明文禁止调第二个参数）。
     const walkTable: Record<string, string> = {};
     for (const weapon of FULL_RUN_SUPPORTED_WEAPON_IDS) {
       const f = FACTS.get(`walk/${weapon}/${firstRouteId(weapon)}`)!;
@@ -828,12 +841,17 @@ describe('PRODUCT-LOOP-R9-FULL-RUN-PATH-MATRIX｜B. 本 Queue 的判断标准', 
     expect(walkTable).toEqual({
       cannon: 'COMPLETE',
       flamethrower: 'COMPLETE',
-      hammer: 'COMPLETE',
+      // ⚠️ R12：`walk/hammer/D1` 的最后一段翻成失败（`D2` 仍 COMPLETE，见 `FROZEN_RESULT`）
+      hammer: 'FAILED@RangedTurret',
       laser: 'COMPLETE',
       machineGun: 'COMPLETE',
       rammer: 'COMPLETE',
       shotgun: 'COMPLETE',
     });
+    expect(
+      Object.values(walkTable).filter((v) => v === 'COMPLETE').length,
+      'R12 后 walk 形态仍有 6/7 通关（`laser` 与其余 5 件逐字节未变）',
+    ).toBe(6);
   });
 });
 

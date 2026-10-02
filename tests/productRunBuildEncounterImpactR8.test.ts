@@ -80,27 +80,40 @@
  *
  *   | 分类 | 武器 | 实测 |
  *   |---|---|---|
- *   | **FLIP**（结果翻转） | `laser` · `machineGun` | `laser`：Zero `LOSS`（敌剩 **140**）→ `damageUp` **`WIN`**（我剩 120）/ `rateUp` 仍 LOSS（敌剩 140）；`machineGun`：Zero `LOSS`（敌剩 **159.8**）→ `damageUp` **`WIN`**（我剩 80）/ `rateUp` **`WIN`**（我剩 40） |
- *   | **CONTACT**（从打不到到打得到） | `rammer` | Zero / `damageUp` **0 命中** → `rateUp` **2 命中 / 140 伤害** |
- *   | **OUTPUT**（输出显著变大，结果不变） | `flamethrower` · `shotgun` | 伤害 528→660 / 600→760（+25% / +27%），**仍 LOSS** |
- *   | **NONE**（Build 对结果与输出都零影响） | `hammer` | Zero / `damageUp` **逐字段完全相同**（0 命中、敌剩 1099.9） |
- *   | **N/A**（官方不提供 B / C） | `cannon` | 池族 = `'cannon'` ⇒ 通用成长不提供；附加行 `heavyShell` / `fastReload` 把它从 1 命中抬到 2，**仍 LOSS** |
+ *   | **FLIP**（结果翻转） | `laser` | Zero `LOSS`（敌剩 **140**）→ `damageUp` **`WIN`**（我剩 120）/ `rateUp` 仍 LOSS（敌剩 140） |
+ *   | **OUTPUT**（输出显著变大，结果不变） | `flamethrower` · `machineGun` · `rammer` · `shotgun` | 伤害 552→690 / 860→1075 / **70→88** / 570→722，**都仍 LOSS** |
+ *   | **NONE**（Build 对结果与输出都零影响） | `hammer` | 三档**逐字段完全相同**（0 命中、敌剩 1100） |
+ *   | **N/A**（官方不提供 B / C） | `cannon` | 池族 = `'cannon'` ⇒ 通用成长不提供；附加行 `heavyShell` / `fastReload` 只让它**更早首发**（252 / 251 < 257），**仍 LOSS** |
  *
- * ⇒ 直接回答 Queue 的两个举例：
- *   - `machineGun`：**确实**是「Zero Build FAILED（敌剩 159.8）→ Damage Build COMPLETE」——
+ * ⇒ 直接回答 Queue 的两个举例（⚠️ 下面是 **R11 时点**的答案；R12 后的当前结论见末尾更新块）：
+ *   - `machineGun`：当时**确实**是「Zero Build FAILED（敌剩 159.8）→ Damage Build COMPLETE」——
  *     这正是本矩阵要抓的**有效设计证据**。
- *   - ⚠️ **PRODUCT-LOOP-R11-LASER-CADENCE-R1 之后的更新**：`laser` 的 `cooldownMs` 1800 → 600
- *     （只动攻击间隔，`chargeMs` 未动）⇒ 本矩阵里它从 `OUTPUT` 升级为 **`FLIP`**：
+ *   - `laser`（PRODUCT-LOOP-R11-LASER-CADENCE-R1）：`cooldownMs` 1800 → 600（只动攻击间隔，
+ *     `chargeMs` 未动）⇒ 本矩阵里它从 `OUTPUT` 升级为 **`FLIP`**：
  *     Zero `LOSS`（敌剩 140）→ `damageUp` **`WIN`**（我剩 120）。
  *     `FLIP` 集合因此从 `{machineGun}` 变为 `{laser, machineGun}`（`BI-06` ③）。
  *     ⚠️ 这是 `laser` 自身的能力提升；其余 6 件的分类与逐字段读数一字未动。
- *   - `hammer`：Zero / Damage / Rate **三档全 0 命中**，而**数值确实被改了**（`BI-07` 逐项证明
+ *   - `hammer`：三档全 0 命中，而**数值确实被改了**（`BI-07` 逐项证明
  *     `baseDamage 90→113`、`windupPauseSteps 20→15` 都真实生效）⇒ 问题**不在数值**，
  *     而在**接触 / 攻击结构**。
  *
- * ⚠️ 新增发现（R7 表结构上看不到的）：`rammer` 在 R7 里是「真·够不着」（`minGap = +7`、
- *    全程零接触）；加 `rateUp`（`restSteps 24→18`）后它**打到了 2 次**（`minGap = −2.2`）。
- *    ⇒ 「够不着」对 `rammer` 而言是 **Build 条件性**的，不是纯几何不变量。
+ *   ⚠️⚠️ **PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW 之后的更新（= 当前结论）**：
+ *     唯一一条新规则 = 「对手在**自身开火执行期**内停止后撤」（只关 motor；不刹停 / 不反向 /
+ *     不加冲量 / 不动任何数值）。它只作用于声明了 `enemyDrive` 的 `RangedTurret`
+ *     ⇒ **本文件这一列全部重测**（`BI-05` / `BI-06` / `BI-07` / `BI-08` / `BI-09`）：
+ *
+ *     - **`rammer` 第一次真的打得到**（Zero `0 → 1 发 / 70 伤`、`damageUp 0 → 1 发 / 88 伤`）
+ *       ⇒ 它由 `CONTACT` 变 `OUTPUT`，`shape` 里不再出现 `LOSS·0hit`；
+ *     - **`machineGun` 的两条 Build 路线由 `WIN` 退回 `LOSS`**（对手残 **25** / **60**，差一发）
+ *       ⇒ 它由 `FLIP` 退为 `OUTPUT`；`FLIP` 集合**只剩 `{laser}`**（`BI-06` ③ / ④）；
+ *     - `laser` 3 格与 `hammer` 3 格**逐字节未变**（规则在对手侧查询 ⇒ 结构上碰不到它们）；
+ *     - `cannon` 的 Zero Build 由 1 发变 2 发（首发进窗：606 → **257**）。
+ *     ⇒ **如实记录**：这条规则按预期给了接触型一个窗口，同时也改变了远程件的交火姿态
+ *       （`machineGun` 那一格退了一步）。本 Queue **不做任何补偿性调整**（明文禁止调第二个参数）。
+ *
+ * ⚠️ 新增发现（R7 表结构上看不到的）：`rammer` 在 R7 里曾是「真·够不着」（`minGap = +7`、
+ *    全程零接触）。R12 后它**零 Build 就已经贴上**（`minGap = −0.6`）并登记 1 发真实命中；
+ *    加 `rateUp`（`restSteps 24→18`）则接触更深（`minGap = −10.2`）、打到 **2 发 / 140 伤**。
  *    ⚠️ `minGap` 仍只作外显观测值，不当接触判据使用（见上）。
  */
 
@@ -669,32 +682,39 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
     for (const c of matrixCells()) observed[`${c.weapon}|${c.buildLabel}`] = rowOf(c);
     expect(observed).toEqual({
       // [terminal, winner, endReason, hits, damage, firstHitStep(-1=无), windowDamage, hpA, hpB]
-      'cannon|zero': ['T', 'B', 'hp', 1, 120, 606, 0, 0, 980],
+      // ⚠️ PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW：唯一一条新规则 = 「对手在**自身开火
+      //    执行期**内停止后撤」（只关 motor，不刹停 / 不加冲量 / 不动任何数值）。
+      //    19 格全部重测；`laser` 3 格逐字节未变（规则只作用于对手侧，而对手不是 laser）。
+      'cannon|zero': ['T', 'B', 'hp', 2, 240, 257, 120, 0, 860],
 
-      'flamethrower|zero': ['T', 'B', 'hp', 66, 528, 171, 456, 0, 572],
-      'flamethrower|damageUp': ['T', 'B', 'hp', 66, 660, 171, 570, 0, 440],
-      'flamethrower|rateUp': ['T', 'B', 'hp', 67, 536, 190, 488, 0, 564],
+      'flamethrower|zero': ['T', 'B', 'hp', 69, 552, 171, 528, 0, 548],
+      'flamethrower|damageUp': ['T', 'B', 'hp', 69, 690, 171, 660, 0, 410],
+      'flamethrower|rateUp': ['T', 'B', 'hp', 77, 616, 190, 616, 0, 484],
 
-      'hammer|zero': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1099.9],
-      'hammer|damageUp': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1099.9],
+      // ⚠️ hammer 三格**逐字节未变**：仍是 0 命中 / 对手满血（R12 的窗口对它无效 ⇒ STOP）
+      'hammer|zero': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
+      'hammer|damageUp': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
       'hammer|rateUp': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
 
-      // ⚠️ R11：laser `cooldownMs` 1800 → 600 ⇒ `damageUp` 档翻成 WIN（`FLIP` 的机器证据）
+      // ⚠️ R12：laser 的三格**逐字节未变**（规则只在对手侧查询 ⇒ 结构上碰不到 laser）
       'laser|zero': ['T', 'B', 'hp', 6, 960, 97, 640, 0, 140],
       'laser|damageUp': ['T', 'A', 'hp', 6, 1200, 97, 800, 120, 0],
       'laser|rateUp': ['T', 'B', 'hp', 6, 960, 97, 800, 0, 140],
 
-      'machineGun|zero': ['T', 'B', 'hp', 47, 940, 48, 840, 0, 159.8],
-      'machineGun|damageUp': ['T', 'A', 'hp', 44, 1100, 48, 1050, 80, 0],
-      'machineGun|rateUp': ['T', 'A', 'hp', 55, 1100, 48, 980, 40, 0],
+      'machineGun|zero': ['T', 'B', 'hp', 43, 860, 48, 840, 0, 240],
+      // ⚠️ R12 的**代价**（如实记录，不做任何补偿性调整）：`damageUp` 由 `WIN` 退回 `LOSS`
+      //    —— 对手残 **25**（差一发）⇒ `machineGun` 不再是「Build 可翻转」的那一族。
+      'machineGun|damageUp': ['T', 'B', 'hp', 43, 1075, 48, 1050, 0, 25],
+      'machineGun|rateUp': ['T', 'B', 'hp', 52, 1040, 48, 980, 0, 60],
 
-      'rammer|zero': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
-      'rammer|damageUp': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
-      'rammer|rateUp': ['T', 'B', 'hp', 2, 140, 230, 70, 0, 955.7],
+      // ⚠️ R12 的**成果**：接触族不再「0 命中」——`zero` / `damageUp` 各打出 1 发
+      'rammer|zero': ['T', 'B', 'hp', 1, 70, 244, 70, 0, 1026],
+      'rammer|damageUp': ['T', 'B', 'hp', 1, 88, 244, 88, 0, 1008],
+      'rammer|rateUp': ['T', 'B', 'hp', 2, 140, 227, 70, 0, 952.3],
 
-      'shotgun|zero': ['T', 'B', 'hp', 20, 600, 175, 330, 0, 500],
-      'shotgun|damageUp': ['T', 'B', 'hp', 20, 760, 175, 418, 0, 340],
-      'shotgun|rateUp': ['T', 'B', 'hp', 22, 660, 147, 360, 0, 440],
+      'shotgun|zero': ['T', 'B', 'hp', 19, 570, 175, 450, 0, 530],
+      'shotgun|damageUp': ['T', 'B', 'hp', 19, 722, 175, 570, 0, 378],
+      'shotgun|rateUp': ['T', 'B', 'hp', 17, 510, 147, 450, 0, 590],
     });
 
     // 矩阵形状 + 无一格拖延
@@ -720,8 +740,10 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       flamethrower: ['LOSS', 'LOSS', 'LOSS'],
       hammer: ['LOSS·0hit', 'LOSS·0hit', 'LOSS·0hit'],
       laser: ['LOSS', 'WIN', 'LOSS'], // R11：damageUp 档翻成 WIN
-      machineGun: ['LOSS', 'WIN', 'WIN'],
-      rammer: ['LOSS·0hit', 'LOSS·0hit', 'LOSS'],
+      // ⚠️ R12：`machineGun` 两条 Build 路由 `WIN` **退回 `LOSS`**（对手残 25 / 60，见 BI-05）
+      machineGun: ['LOSS', 'LOSS', 'LOSS'],
+      // ⚠️ R12：`rammer` 不再是「0 命中」⇒ 由 `LOSS·0hit` 变 `LOSS`（但仍落败）
+      rammer: ['LOSS', 'LOSS', 'LOSS'],
       shotgun: ['LOSS', 'LOSS', 'LOSS'],
     });
 
@@ -733,32 +755,35 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       flamethrower: 'OUTPUT',
       hammer: 'NONE',
       laser: 'FLIP', // R11：damageUp 档翻成 WIN ⇒ 从 OUTPUT 升为 FLIP
-      machineGun: 'FLIP',
-      rammer: 'CONTACT',
+      // ⚠️ R12：`machineGun` 由 `FLIP` 退回 `OUTPUT`（两条 Build 都不再翻转结果，只是打得更重）
+      machineGun: 'OUTPUT',
+      // ⚠️ R12：`rammer` 由 `CONTACT` 变 `OUTPUT` —— 它的 Zero Build **已经能打到**了
+      //   （1 发 / 70 伤）⇒「零 Build 打不中、加 Build 才打得到」这条判据不再成立；
+      //   现在它与其余件同类：加 Build 只是打得更重一点（88 > 70 × 1.1），仍打不过。
+      rammer: 'OUTPUT',
       shotgun: 'OUTPUT',
     });
 
-    // ③ **结果翻转的武器** —— 本 Queue 最硬的一条结论（R11 后从 1 件变 2 件）
+    // ③ **结果翻转的武器** —— 本 Queue 最硬的一条结论
+    //    ⚠️ R12 后从 2 件（`laser` + `machineGun`）**变回 1 件（只剩 `laser`）**：
+    //       `machineGun` 的两条 Build 路线都被打回 `LOSS`（对手残 25 / 60）。如实记录。
     const flipped = WEAPONS.filter((w) =>
       MAIN_LABELS.some((l) => l !== 'zero' && legallySupports(w, l) && mainCell(w, l).winner === 'A'),
     );
-    expect(flipped, '结果被 Build 翻转的武器').toEqual(['laser', 'machineGun']);
+    expect(flipped, '结果被 Build 翻转的武器').toEqual(['laser']);
 
-    // ④ Queue 举例 1：`machineGun` — Zero Build 敌剩 159.8 ⇒ Build 后 COMPLETE（两条路都成立）
-    const mgZero = mainCell('machineGun', 'zero');
-    expect(mgZero.winner).toBe('B');
-    expect(r1(mgZero.hpB)).toBe(159.8);
-    for (const l of ['damageUp', 'rateUp'] as const) {
-      const c = mainCell('machineGun', l);
-      expect(c.winner, `machineGun + ${l} 必须翻成 WIN`).toBe('A');
-      expect(c.hpB, `machineGun + ${l} 必须把对手打完`).toBe(0);
-      expect(c.hpA, `machineGun + ${l} 必须自己活下来（不是双亡）`).toBeGreaterThan(0);
-      expect(c.damage, `machineGun + ${l} 总伤害须达对手上限`).toBeGreaterThanOrEqual(mgZero.hpBMax);
-    }
+    // ④ 唯一还能翻转的路线：`laser + damageUp`（对手 140 → 0，我方剩 120）
+    const laserBest = mainCell('laser', 'damageUp');
+    expect(laserBest.winner).toBe('A');
+    expect(laserBest.hpB, '必须把对手打完').toBe(0);
+    expect(laserBest.hpA, '必须自己活下来（不是双亡）').toBeGreaterThan(0);
+    expect(laserBest.damage, '总伤害须达对手上限').toBeGreaterThanOrEqual(
+      laserBest.hpBMax,
+    );
 
     // ⑤ 其余「加 Build 也翻不过来」的件 —— 如实记录差距（不做评级）
-    //    ⚠️ R11 后 `laser` 已从这一族移出（它的 `damageUp` 档已翻成 WIN，见 ③ / ④）
-    for (const w of ['flamethrower', 'shotgun'] as const) {
+    //    ⚠️ R12 后 `machineGun` **也**落入这一族（它此前是 ③ 的一员）
+    for (const w of ['flamethrower', 'machineGun', 'shotgun'] as const) {
       const base = mainCell(w, 'zero');
       const best = mainCell(w, 'damageUp');
       expect(best.winner).toBe('B');
@@ -786,14 +811,18 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
       expect(mainCell('hammer', l).hits, `hammer + ${l}：仍一发都打不中`).toBe(0);
     }
 
-    // ② rammer：damageUp 同样逐字段相同；rateUp 改了 `restSteps` 且**第一次打到了**
+    // ② rammer：`rateUp` 改了 `restSteps`；⚠️ R12 后 `damageUp` **不再是零影响**
+    //    （零 Build 已经能打到了 ⇒ 伤害键的提升终于落在实体上：1 发 70 → 1 发 88）
     const rRate = createRunRegistry(['rateUp'], true, 'rammer').functionals.get('run.mod.rateUp')!;
     expect(rRate.behaviorParams!.restSteps, 'rateUp 改了冲锤的接触节奏键').toBe(Math.round(24 * 0.75));
-    expect(rowOf(mainCell('rammer', 'damageUp')), 'rammer：damageUp 对结果零影响').toEqual(
-      rowOf(mainCell('rammer', 'zero')),
-    );
-    expect(mainCell('rammer', 'zero').hits).toBe(0);
-    expect(mainCell('rammer', 'rateUp').hits, 'rammer：rateUp 让它第一次打中').toBeGreaterThan(0);
+    expect(
+      rowOf(mainCell('rammer', 'damageUp')),
+      'rammer：R12 后 damageUp 真的作用在伤害上',
+    ).not.toEqual(rowOf(mainCell('rammer', 'zero')));
+    expect(mainCell('rammer', 'zero').hits, 'rammer：零 Build 已不再是 0 命中').toBe(1);
+    expect(mainCell('rammer', 'damageUp').hits, 'rammer：damageUp 同样 1 发').toBe(1);
+    expect(mainCell('rammer', 'damageUp').damage, 'rammer：damageUp 把 70 抬到 88').toBe(88);
+    expect(mainCell('rammer', 'rateUp').hits, 'rammer：rateUp 打得更多（2 发）').toBe(2);
 
     // ③ 每个「合法支持」的档都**确实**改了它自己那个键（逐件对拍 canonical ⇒ 不是空操作）
     for (const w of WEAPONS) {
@@ -822,8 +851,9 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
     const observed: Record<string, CellRow> = {};
     for (const c of cannonAuxCells()) observed[`${c.weapon}|${c.buildLabel}`] = rowOf(c);
     expect(observed).toEqual({
-      'cannon|cannon+heavyShell': ['T', 'B', 'hp', 2, 240, 611, 0, 0, 860],
-      'cannon|cannon+fastReload': ['T', 'B', 'hp', 2, 240, 594, 120, 0, 860],
+      // ⚠️ R12：Zero Build 自己就已经是 2 发 ⇒ 这两项**不再抬命中数**，效果只体现在更早首发
+      'cannon|cannon+heavyShell': ['T', 'B', 'hp', 2, 240, 252, 120, 0, 860],
+      'cannon|cannon+fastReload': ['T', 'B', 'hp', 2, 240, 251, 240, 0, 860],
     });
 
     // ① 这两项都是**既有官方内容**，且**确实改了各自声明的键**
@@ -836,35 +866,41 @@ describe('PRODUCT-LOOP-R8｜Build × Encounter 影响矩阵（Build 是否让结
     expect(fast.behaviorParams!.cooldownMs, '快速装填把 1000 压到 650').toBe(650);
     expect(fast.behaviorParams!.projectileDamage, '快速装填**不改**伤害键').toBe(120);
 
-    // ② 效果：两者都让 cannon 从 1 次命中抬到 2 次 —— 但仍 LOSS（如实记录）
+    // ② 效果：⚠️ R12 后 Zero Build 自己就已经是 2 发 ⇒ 这两项不再抬高命中数
+    //    （它们的效果现在只剩「更早首发」，见 ③）；仍 LOSS（如实记录）
     const base = mainCell('cannon', 'zero');
-    expect(base.hits).toBe(1);
+    expect(base.hits, 'R12 后 cannon 零 Build 已是 2 发').toBe(2);
     for (const c of cannonAuxCells()) {
-      expect(c.hits, `${c.buildLabel}：命中数翻倍`).toBe(2);
+      expect(c.hits, `${c.buildLabel}：命中数不再增加`).toBe(2);
       expect(c.damage).toBe(240);
       expect(c.winner, `${c.buildLabel}：仍不足以翻盘`).toBe('B');
     }
-    // ③ `fastReload` 的节奏效果表现为**更早首发**（594 < 606），方向与 `rateUp` 一致
+    // ③ `fastReload` 的节奏效果仍然表现为**更早首发**（251 < 257），方向与 `rateUp` 一致
     expect(cannonAuxCell('fastReload', 'cannon+fastReload').firstHitStep!).toBeLessThan(
       base.firstHitStep!,
     );
   });
 
   /* ================================================================ BI-09 */
-  it('BI-09 `rammer` 新发现复查：加 `rateUp` 后它**真的打到了**（确定性 + 因果一致）', () => {
+  it('BI-09 `rammer` 复查：R12 后**零 Build 就已经打得到**，`rateUp` 让它打得更多（确定性 + 因果一致）', () => {
     const zero = mainCell('rammer', 'zero');
     const fast = mainCell('rammer', 'rateUp');
     // ① 确定性：同一格重新跑一次逐字段一致（排除偶发）
     const again = fight('rammer', 'rateUp', BUILD_OF.rateUp, FOCUS);
     expect({ ...again, build: [...again.build] }).toEqual({ ...fast, build: [...fast.build] });
     // ② 因果一致：节奏键确实被改了（BI-07 已钉 24→18），本处只钉「结果随之一变」
-    expect(zero.hits).toBe(0);
-    expect(fast.hits).toBe(2);
+    //    ⚠️ R12 把这条**改述**：不再是「零 Build 打不中、加 rateUp 才打中」，
+    //       而是「零 Build 已 1 发，`rateUp` 把它抬到 2 发 / 140 伤」。
+    expect(zero.hits, 'R12 后零 Build 已经有 1 发真实命中（改前是 0）').toBe(1);
+    expect(zero.damage).toBe(70);
+    expect(fast.hits, 'rateUp 让它打得更多').toBe(2);
     expect(fast.damage).toBe(140);
-    expect(fast.firstHitStep, 'rateUp 下首次命中发生在战斗中段').toBe(230);
-    // ③ 外显度量的同向变化（⚠️ 只作观测值，不作接触判据 —— 见文件头告示）
-    expect(zero.minGap, 'rammer 零 Build：外显外框全程未贴到').toBeGreaterThan(0);
-    expect(fast.minGap, 'rammer + rateUp：外显外框曾重叠').toBeLessThan(0);
+    expect(fast.firstHitStep, 'rateUp 下首次命中发生在战斗中段').toBe(227);
+    // ③ 外显度量（⚠️ 只作观测值，不作接触判据 —— 见文件头告示）
+    //    ⚠️ R12：零 Build 现在也贴上了（−0.6 < 0），不再有「零 Build 全程未贴到」这条对照
+    expect(zero.minGap, 'rammer 零 Build：R12 后外显外框已贴上').toBeLessThan(0);
+    expect(fast.minGap, 'rammer + rateUp：外显外框重叠更多').toBeLessThan(0);
+    expect(fast.minGap, 'rateUp 的接触比零 Build 更深').toBeLessThan(zero.minGap);
     // ④ 但它仍然落败 ⇒ 「够不着」被解除，不等于「打得过」
     expect(fast.winner).toBe('B');
     expect(fast.hpB, '对手仍剩大部分血').toBeGreaterThan(900);

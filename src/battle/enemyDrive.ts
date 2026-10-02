@@ -92,11 +92,39 @@ export const ENEMY_KEEP_DISTANCE_BANDS: EnemyDriveBands = Object.freeze({
   retreatSpeed: 2.6,
 });
 
-/** `far` 档的接近速度 = 调用方的既有 autoDrive 常量（由调用方传入，本模块不复制该数值）。 */
+/**
+ * `far` 档的接近速度 = 调用方的既有 autoDrive 常量（由调用方传入，本模块不复制该数值）。
+ *
+ * ── PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW｜开火窗口（唯一一条新规则）────────
+ *
+ * `firingWindow` = 「**对手这一步仍处于某件远程武器的开火执行期**」（由调用方查询 Behavior
+ * Runtime 得到，见 `PlanckBattleOrchestrator.enemyWeaponsFiring`）。
+ *
+ * 规则（只有这一条，不叠加第二个参数）：
+ *
+ *   | 空间档 | `firingWindow = true` | 行为 |
+ *   |---|---|---|
+ *   | `near`（该后撤） | ✅ | **停止后撤**：本步不给油（`enabled:false`，沿用既有 motor-off 语义，**不刹停 / 不反向 / 不加冲量**） |
+ *   | `hold` | ✅ / ❌ | **与改前逐字节相同**（本来就不给油） |
+ *   | `far`（该接近） | ✅ / ❌ | **与改前逐字节相同**（本来就要接近） |
+ *
+ * 三条不变量（本参数的**全部**作用域）：
+ *   1. 它**只**能把「后撤」改成「不给油」，**不能**改变接近、不能改变任何速度数值；
+ *   2. `band` 仍如实报**空间**档（`'near'`）—— 档位不因动作被改写，于是
+ *      「这一档位是否真的后撤了」在回读侧完全可判定：`band === 'near' && !enabled`；
+ *   3. `firingWindow = false`（缺省）⇒ 本函数与加此参数之前**逐字节相同**
+ *      ⇒ 未声明 `enemyDrive` 的 Encounter、以及所有既有调用点与既有单测都不受影响。
+ *
+ * ⚠️ 本模块仍然**只做决策**：它不读武器、不读世界、不新增任何战斗数值 —— 窗口的真假由
+ *    调用方注入，本模块只负责「窗口内不后撤」这一条映射。
+ * ⚠️ 单发武器的「开火执行期」是**单步瞬时事件**（`burstRounds` 缺省 1 ⇒ 查询恒为 false）
+ *    ⇒ 结构上不产生窗口；窗口只可能来自**多步连发**武器（本项目 = 对手机枪的 burst）。
+ */
 export function decideEnemyDrive(
   ctx: EnemyDriveContext,
   bands: EnemyDriveBands,
   approachSpeedPxPerStep: number,
+  firingWindow = false,
 ): EnemyDriveDecision {
   if (!Number.isFinite(ctx.gap)) {
     throw new Error(`EnemyDrive: gap 必须为有限值（收到 ${ctx.gap}）`);
@@ -115,6 +143,16 @@ export function decideEnemyDrive(
   }
   // 过近 → 反向拉开
   if (ctx.gap < bands.near) {
+    // R12：开火执行期内**停止后撤** —— 只把「后撤」换成「不给油」（motor off，非刹停）。
+    // `band` 仍是空间事实 `'near'`；`enabled:false` 就是「本步放弃后撤」的机器判据。
+    if (firingWindow) {
+      return {
+        band: 'near',
+        enabled: false,
+        worldDirection: away,
+        targetSpeedPxPerStep: bands.retreatSpeed,
+      };
+    }
     return {
       band: 'near',
       enabled: true,

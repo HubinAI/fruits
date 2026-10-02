@@ -1627,12 +1627,18 @@ describe('PRP-RUN-02｜G 两层 Cannon Build：基础 → 一层 → 强化 → 
    *    ⇒ ① 仍是 915（对手与装配都没变）；② 仍是 822 / 823（一层叠加口径未变）；
    *      ③ 变低（R9 之前维修分支在第 3 段前多吃了 275 点维修 ⇒ 旧值偏高；
    *      现在第 3 段开局 = 第 2 段结束，没有任何补偿）。
+   *    ⚠️ **PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW 再测（第五次）**：
+   *       唯一一条新规则 = 「对手在自身开火执行期内停止后撤」（只关 motor、不动任何数值）
+   *       ⇒ ① ② **逐字节未变**，只有第 3 段的 ③ 变（三条路线都变宽裕）。见下表行内注释。
    *    ⚠️ 本表的**结构结论**仍然成立：三条路线全部 COMPLETE、终局余量为正。
    */
   const FROZEN: Record<string, readonly [number, number, number]> = {
-    'heavyShell+kineticBurst': [915, 822, 282],
-    'twinCannon+tripleLoad': [915, 823, 283],
-    'fastReload+twinCannon': [915, 822, 262],
+    // ⚠️ R12（开火窗口：对手在自身开火执行期停止后撤）只作用于第 3 段的 `RangedTurret`
+    //   ⇒ ① ② **逐字节未变**（915 / 822·823），只有 ③ 变：
+    //      282 → **322**、283 → **443**、262 → **322**（三条路线都变宽裕）。
+    'heavyShell+kineticBurst': [915, 822, 322],
+    'twinCannon+tripleLoad': [915, 823, 443],
+    'fastReload+twinCannon': [915, 822, 322],
   };
   /**
    * ⚠️ **E2E 主走查组合**（与 `tests/_e2e_run_page.cjs` 的 11c~11g 段同源）：
@@ -2408,7 +2414,8 @@ describe('PRP-RUN-02｜H 固定 Run Script 数据源与耐久取舍事件', () =
     // 冻结实测值（Lab 演示装载 `WatermelonHeavyCannon`，满耐久 1100）：逐段掉血 + 第 3 段敌人剩余耐久。
     // ⚠️ 任何影响这三段连锁的改动（对手 / 武器 / 物理）都必须回到这里重新测量并写死。
     expect(loss).toEqual([257, 830, 1100]);
-    expect(enemyLeft[2], '③ 控距下敌人几乎没掉血').toBe(1020);
+    // ⚠️ R12：基础 Build 在终局多打出 1 发（120 → 240）⇒ 对手剩余由 1020 变 **940**。
+    expect(enemyLeft[2], '③ 控距下敌人几乎没掉血').toBe(940);
   });
 
   it('RP-RUN-02-05 宿主接线：浮层卡片唯一来源 + 耐久事件走独立动作', () => {

@@ -63,15 +63,16 @@
  *
  *   | 组 | 武器 | 实测事实 | 问题的性质 |
  *   |---|---|---|---|
- *   | ① 0 命中，且 L2 外显也未贴到 | `rammer` | `minGap = +7 > 0`，全程外显外框都没碰上 | **真·够不着**：控距（`near 240 / far 480`，后撤 2.6 px/step > 玩家推进 ~1.5）把它挡在接触之外 |
- *   | ② 0 命中，但 L2 外显曾重叠 | `hammer` | `minGap = −23`（**外显外框在 X 上叠了 23px**）、接触残留含 `impact`，武器命中仍 0 | ⚠️ **已定性（见下）**：锤头**从未与敌车发生物理接触**；`−23` 是 **L2 度量假象**，那条 `impact` 是**玩家车体 × 敌方外伸炮管** |
- *   | ③ 有伤害但打不过 | `cannon`(1 命中/120) · `flamethrower`(66/528) · `laser`(6/960) · `machineGun`(47/940) · `shotgun`(20/600) | 都打出真实伤害，都被反杀 | **交换比**：够得着，打不赢（R11 后最接近的 `laser` 让对手剩 **140**，此前是 `machineGun` 的 159.8） |
+ *   | ① 0 命中，且 L2 外显也未贴到 | `hammer` | `minGap = +52.7 > 0`，全程**连外显外框都没碰上**（R12 前是 `−23` 的度量假象） | **真·够不着**：控距（`near 240 / far 480`，后撤 2.6 px/step > 玩家推进 ~1.5）把它挡在接触之外 |
+ *   | ② 出现了 1 次真实命中，仍打不过 | `rammer` | `minGap = −0.6`（外显外框在 X 上叠了 0.6px）、`hits = 1` / `damage = 70`（**R12 前是 0 / 0**） | **交换比**：R12 的开火窗口让它**第一次真的贴上并登记了伤害**，但 1 次远不够翻盘 |
+ *   | ③ 有伤害但打不过 | `cannon`(2 命中/240) · `flamethrower`(69/552) · `laser`(6/960) · `machineGun`(43/860) · `shotgun`(19/570) | 都打出真实伤害，都被反杀 | **交换比**：够得着，打不赢（R11 后最接近的 `laser` 让对手剩 **140**） |
  *
  * ⇒ 回答「是不是所有 Weapon 都失败」：**是** —— 零 Build 单件下 **7/7 落败**。
- *   回答「还是只有某些配置无法处理控距」：**接触族 2 件（`rammer` / `hammer`）**在这一列拿不到
- *   任何伤害；其余 **5 件能打到**（有真实伤害），只是打不过。
+ *   回答「还是只有某些配置无法处理控距」：**只剩 1 件**（`hammer`）在这一列拿不到任何伤害；
+ *   接触族另一件 `rammer` 已被 `PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW` 打开一扇窗
+ *   （0 → 1 次真实命中）；其余 **5 件能打到**（有真实伤害），只是打不过。
  *
- * ⚠️⚠️ **本文件曾把 ② 组读成「接触了却没登记命中」—— 那是错的。** 更正来自
+ * ⚠️⚠️ **本文件曾把 `hammer` 那一格读成「接触了却没登记命中」—— 那是错的。** 更正来自
  *   `PRODUCT-LOOP-P0-HAMMER-RANGED-TURRET-HIT-REGISTRATION`，口径如下：
  *
  *   `minGap` 由 `rt.gapWorld()` 给出 = `b.minX − a.maxX`，作用在 `vehicleWorldBox()` 上，
@@ -79,18 +80,19 @@
  *   ⇒ **贴图外框的 X 投影重叠 ≠ 物理接触。** 本文件因此**不再**用 `minGap` 作「是否接触」的判据，
  *     只把它当**外显度量的观测值**（负值 = 外框在 X 上重叠）。
  *
- *   真实接触判据 = **引擎自身的 contact 事件流**（权威）。同参数实测（`hammer@frontMass`）：
+ *   真实接触判据 = **引擎自身的 contact 事件流**（权威）。同参数实测（`hammer@frontMass`，
+ *   ⚠️ 下表是 **R12 之前**的记录；R12 的开火窗口改变了这一格的轨迹 ⇒ 现在的读数见 `MX-08`）：
  *
- *   | vs `RangedTurret`（真实出生几何） | 读数 |
- *   |---|---|
- *   | 车辆↔车辆接触（`begin`） | **1 条**：`s718 A/body ↔ B/part:front rel=1.33`（**玩家车体 × 敌方炮管**） |
- *   | 锤头（`A/part:frontMass`）接触 | **0**（全程零接触；与敌各 collider 最近 SAT 间距 9.6px） |
- *   | 武器命中 | **0**（`baseDamage=90` / `WEAPON_CONTACT_THRESHOLD=0.5` 两道闸门从未被触及） |
+ *   | vs `RangedTurret`（真实出生几何） | 读数（R12 前） | 读数（R12 后，`MX-08` 复测） |
+ *   |---|---|---|
+ *   | 车辆↔车辆接触（`begin`） | **1 条**：`s718 A/body ↔ B/part:front rel=1.33` | **0 条** |
+ *   | 锤头（`A/part:frontMass`）接触 | **0** | **0**（未变） |
+ *   | 武器命中 | **0** | **0**（未变） |
  *
- *   ⇒ ② 组的性质 = **锤头没碰到**（与 ① 同类），**不是**「碰到了却没登记」。命中链无缺陷：
+ *   ⇒ `hammer` 的性质 = **锤头没碰到**，**不是**「碰到了却没登记」。命中链无缺陷：
  *     hammer 对 `Chaser` / `ProtoRusher` 的 11 / 16 次锤头真实接触里，`rel ≥ 0.5` 的 **10 / 12** 次
  *     全部按正式规则登记 `90`，未登记的那几次全部 `rel < 0.5`（按设计正确）。
- *     ⇒ **这两件都不是命中登记缺陷，不得靠加范围 / 加伤害去「修」。**
+ *     ⇒ `hammer` / `rammer` 都**不是**命中登记缺陷，不得靠加范围 / 加伤害去「修」。
  *     完整取证（含受控几何下的验收）→ `tests/productHammerHitRegistrationP0.test.ts`（PH-01…PH-05）。
  */
 
@@ -486,38 +488,49 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
   it('MX-06 冻结矩阵：21 格的真实结果（改任何战斗参数都会在这里炸出来）', () => {
     expect(ledger()).toEqual({
       // [terminal, winner, endReason, hits, damage, firstHitStep(-1=无), windowDamage, hpA, hpB]
+      // ⚠️ PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW：只改了**对手在自身开火执行期内
+      //   停止后撤**这一条规则（不给任何武器特殊权限、不动任何数值）。
+      //   ⇒ 只有 `RangedTurret`（本批次唯一声明控距的对手）那一列会变，其余 14 格逐字节未动。
       'cannon|ProtoRusher': ['T', 'A', 'hp', 9, 1080, 129, 960, 859.2, 0],
       'cannon|Chaser': ['T', 'A', 'hp', 8, 960, 132, 960, 189.9, 0],
-      'cannon|RangedTurret': ['T', 'B', 'hp', 1, 120, 606, 0, 0, 980],
+      // R12：首发由窗口外（606）提前到窗口内（257）⇒ 窗口内累计由 0 变成 120，总伤害 120 → 240
+      'cannon|RangedTurret': ['T', 'B', 'hp', 2, 240, 257, 120, 0, 860],
 
       'flamethrower|ProtoRusher': ['T', 'A', 'hp', 125, 1000, 110, 1000, 919.6, 0],
       'flamethrower|Chaser': ['T', 'A', 'hp', 113, 904, 114, 904, 552.4, 0],
-      'flamethrower|RangedTurret': ['T', 'B', 'hp', 66, 528, 171, 456, 0, 572],
+      // R12：多打了 3 发（66 → 69），对手由残 572 变 548 —— 但仍落败
+      'flamethrower|RangedTurret': ['T', 'B', 'hp', 69, 552, 171, 528, 0, 548],
 
       'hammer|ProtoRusher': ['T', 'A', 'hp', 12, 1080, 152, 450, 414.2, 0],
       'hammer|Chaser': ['T', 'A', 'hp', 10, 900, 187, 720, 5.5, 0],
-      'hammer|RangedTurret': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1099.9],
+      // R12：**仍然 0 命中**（对手满血 1100）。开火窗口在时序上成立（见 R12 `FW-01`），
+      //   但锤头依旧没能在 `swing` 相位里碰到敌车 ⇒ 按本 Queue 明文 STOP（不调第二个参数）。
+      'hammer|RangedTurret': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
 
       // PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser `cooldownMs` 1800 → 600（只动攻击间隔，
       //   前摇 `chargeMs` 未动）⇒ 首发步号与逐发伤害不变，**发数与总伤害上升**：
       //   近身两段由 LOSS 翻成 WIN，`RangedTurret` 仍 LOSS（对手残 140）。
-      //   ⚠️ 上表其余 17 格一字未动（其余 6 件武器本轮零改动）。
+      //   ⚠️ R12（开火窗口）**没有**再动这一列（laser 不是对手武器 ⇒ 无窗口）⇒ 三格逐字节未变。
       'laser|ProtoRusher': ['T', 'A', 'hp', 7, 1120, 94, 800, 739.6, 0],
       'laser|Chaser': ['T', 'A', 'hp', 6, 960, 94, 800, 548.6, 0],
       'laser|RangedTurret': ['T', 'B', 'hp', 6, 960, 97, 640, 0, 140],
 
       'machineGun|ProtoRusher': ['T', 'A', 'hp', 50, 1000, 42, 840, 979.5, 0],
       'machineGun|Chaser': ['T', 'A', 'hp', 45, 900, 43, 840, 278.3, 0],
-      'machineGun|RangedTurret': ['T', 'B', 'hp', 47, 940, 48, 840, 0, 159.8],
+      // R12：窗口只对「对手」生效，玩家侧机枪不受影响；但对手不再后撤 ⇒ 交火姿态改变
+      //   ⇒ 少打 4 发（47 → 43），对手由残 159.8 变 240（如实记录，不是削弱对手）
+      'machineGun|RangedTurret': ['T', 'B', 'hp', 43, 860, 48, 840, 0, 240],
 
       'rammer|ProtoRusher': ['T', 'B', 'hp', 11, 770, 139, 420, 0, 170.6],
       // 同归于尽（双方归零）⇒ 正式 tiebreak 判 A（如实记录，不是「赢」的通词）
       'rammer|Chaser': ['T', 'A', 'hp', 13, 910, 140, 560, 0, 0],
-      'rammer|RangedTurret': ['T', 'B', 'hp', 0, 0, -1, 0, 0, 1100],
+      // R12 的**核心成果**：由 0 命中 / 0 伤害 → **1 发 / 70 伤**（改前无法发生的真实命中）
+      'rammer|RangedTurret': ['T', 'B', 'hp', 1, 70, 244, 70, 0, 1026],
 
       'shotgun|ProtoRusher': ['T', 'A', 'hp', 38, 1140, 95, 990, 499.3, 0],
       'shotgun|Chaser': ['T', 'A', 'hp', 31, 930, 96, 930, 280.7, 0],
-      'shotgun|RangedTurret': ['T', 'B', 'hp', 20, 600, 175, 330, 0, 500],
+      // R12：少打 1 发（20 → 19），对手由残 500 变 530 —— 仍落败
+      'shotgun|RangedTurret': ['T', 'B', 'hp', 19, 570, 175, 450, 0, 530],
     });
   });
 
@@ -531,7 +544,8 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
       // R11：laser 的近身两段由 LOSS 翻成 WIN（`RangedTurret` 列仍是 LOSS ⇒ ② 依然成立）
       laser: ['WIN', 'WIN', 'LOSS'],
       machineGun: ['WIN', 'WIN', 'LOSS'],
-      rammer: ['LOSS', 'WIN·双亡', 'LOSS·0hit'],
+      // R12：`rammer` 在 `RangedTurret` 上由 `LOSS·0hit` 变 `LOSS`（终于打出 1 发 / 70 伤）
+      rammer: ['LOSS', 'WIN·双亡', 'LOSS'],
       shotgun: ['WIN', 'WIN', 'LOSS'],
     });
     // ① 没有任何一格是「无限拖延」
@@ -550,34 +564,37 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
       expect(c.hpA, `${c.label}：玩家耐久归零`).toBe(0);
     }
 
-    // ② 0 命中 = 恰好 2 件（接触族），且都拿不到任何伤害、对手基本满血
+    // ② 0 命中 = 恰好 1 件，且拿不到任何伤害、对手满血
+    //    ⚠️ R12 前这里是 2 件（`hammer` + `rammer`）；开火窗口让 `rammer` 打出了 1 发真实命中
+    //       ⇒ 这一族**只剩 `hammer`**（本 Queue 在 R7 口径上的核心结论）。
     const zeroHit = col.filter((c) => c.hits === 0);
-    expect(zeroHit.map((c) => c.label), '0 命中的那一族').toEqual(['hammer', 'rammer']);
+    expect(zeroHit.map((c) => c.label), '0 命中的那一件').toEqual(['hammer']);
     for (const c of zeroHit) {
       expect(c.damage, `${c.label}：0 命中 ⇒ 0 伤害`).toBe(0);
       expect(Object.keys(c.perPart), `${c.label}：0 命中 ⇒ 无来源部件`).toEqual([]);
-      expect(c.hpB, `${c.label}：对手基本满血`).toBeGreaterThan(c.hpBMax - 1);
+      expect(c.hpB, `${c.label}：对手满血`).toBeGreaterThan(c.hpBMax - 1);
     }
 
-    // ③ ⚠️ 两件在 **L2 外显度量**上确实不同 —— 但**都**不是「命中了却没登记」：
-    //    `rammer`：`minGap = +7 > 0` ⇒ 外显外框全程没贴到（控距真把它挡在接触之外）；
-    //    `hammer`：`minGap = −23 < 0` ⇒ **只是外显外框在 X 上叠了 23px**（`vehicleWorldBox`
-    //              含 `visual` 贴图外框，见 `Cell.minGap` 文档）。真实读数是 **锤头零接触**，
-    //              那唯一一条 `impact` 是 `A/body ↔ B/part:front`（玩家车体撞敌方炮管）。
+    // ③ ⚠️ 两件在 **L2 外显度量**上方向相反 —— 但**都**不是「命中了却没登记」：
+    //    `hammer`：`minGap = +52.7 > 0` ⇒ **连外显外框都没碰上过**（真·够不着）；
+    //    `rammer`：`minGap = −0.6 < 0` ⇒ 外显外框在 X 上叠了 0.6px，**并且真的登记了 1 次命中**
+    //              （`hits = 1` / `damage = 70`，见 ④）—— R12 前这里是 `+7`（压根没贴上）。
     //    ⛔ 不许再把 `minGap < 0` 读成「深度接触」。定性取证 →
     //       `tests/productHammerHitRegistrationP0.test.ts` PH-01（判据 = 引擎 contact 事件流）。
     const rammer = cell('rammer', 'RangedTurret');
     const hammer = cell('hammer', 'RangedTurret');
-    expect(rammer.minGap, 'rammer：L2 外显外框全程未贴到').toBeGreaterThan(0);
-    expect(hammer.minGap, 'hammer：L2 外显外框曾重叠（≠ 物理接触，见 Cell.minGap）').toBeLessThan(0);
+    expect(rammer.minGap, 'rammer：R12 后终于贴上外显外框（且登记了真实命中）').toBeLessThan(0);
+    expect(hammer.minGap, 'hammer：连外显外框都没碰上（R12 后仍够不着）').toBeGreaterThan(0);
 
-    // ④ 有伤害的 5 件（这一族的问题**不是**够不着，而是交换比）
+    // ④ 有伤害的 6 件（这一族的问题**不是**够不着，而是交换比）
+    //    ⚠️ R12 前是 5 件；`rammer` 的 1 发 / 70 伤让它进来了
     const landed = col.filter((c) => c.hits > 0);
     expect(landed.map((c) => c.label)).toEqual([
       'cannon',
       'flamethrower',
       'laser',
       'machineGun',
+      'rammer',
       'shotgun',
     ]);
     for (const c of landed) {
@@ -592,11 +609,13 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
     expect(closest.label, '对手剩余最少的单件').toBe('laser');
     expect(r1(closest.hpB), '最接近的一格：对手残血').toBe(140);
 
-    // ⑥ `cannon` 唯一那次命中落在**固定窗口之外**（606 > 600）⇒ 窗口内累计 0 是如实的
+    // ⑥ `cannon` 的首发现在落进了**固定窗口内**（257 < 600）⇒ 窗口内累计 120 是如实的
+    //    ⚠️ R12 前它是 606（窗口外、`windowDamage = 0`）⇒ 这一条由「首发在窗口外」改成
+    //       「首发在窗口内」，是**轨迹被开火窗口改变**的结果，不是窗口定义被改。
     const cannon = cell('cannon', 'RangedTurret');
-    expect(cannon.firstHitStep!).toBeGreaterThan(WINDOW_FRAMES);
-    expect(cannon.windowDamage, '窗口内累计 = 0（首发在窗口外）').toBe(0);
-    expect(cannon.damage, '窗口外仍有 1 次真实命中').toBe(120);
+    expect(cannon.firstHitStep!).toBeLessThan(WINDOW_FRAMES);
+    expect(cannon.windowDamage, '窗口内累计 = 1 发 × 120').toBe(120);
+    expect(cannon.damage, '全场共 2 次真实命中').toBe(240);
 
     // ⑦ 控距确实生效：Active 窗口结束时（第 600 步）7/7 都仍与玩家分离
     for (const c of col) expect(c.gapAtWindow, `${c.label}：Active 末必须有间距读数`).not.toBeNull();
@@ -639,13 +658,15 @@ describe('PRODUCT-LOOP-R7｜Weapon × Encounter 确定性矩阵（7 × 3 单场�
     expect(rows).toEqual({
       ProtoRusher: ['T', 'A', 'hp', 9, 1080, 129, 960, 859.2, 0],
       Chaser: ['T', 'A', 'hp', 8, 960, 132, 960, 189.9, 0],
-      RangedTurret: ['T', 'B', 'hp', 1, 120, 606, 0, 0, 980],
+      // ⚠️ R12：默认车面对的正是同一个 `RangedTurret` ⇒ 它也受开火窗口影响
+      //   （1 发 / 120 → 2 发 / 240；对手由残 980 变 860，仍落败）
+      RangedTurret: ['T', 'B', 'hp', 2, 240, 257, 120, 0, 860],
     });
     // 逐**来源部件**明细：本 Queue 已移除隐藏顶部武器，默认车现在只有 `frontMass` 一件武器
-    //   ⇒ 全部命中都来自 `cannon`（1 × 120 玩家基线），`top` 槽不再挂任何件。
+    //   ⇒ 全部命中都来自 `cannon`（2 × 120 玩家基线），`top` 槽不再挂任何件。
     // ⚠️ 数值相对旧快照的变化全部来自「车体少了顶部一件」⇒ 质量 / 几何不同 ⇒ 轨迹不同，
     //   并非哪一发打得更重；两者都不是本 Queue 的结论范围，只如实记录新事实。
-    expect(auxCell('RangedTurret').perPart).toEqual({ cannon: { count: 1, damage: 120 } });
+    expect(auxCell('RangedTurret').perPart).toEqual({ cannon: { count: 2, damage: 240 } });
   });
 
   it('MX-11 未改 canonical：7 件武器主伤害 + 3 个 Encounter 的对手定义逐字段冻结', () => {

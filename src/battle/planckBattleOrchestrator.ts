@@ -388,6 +388,31 @@ export class PlanckBattleOrchestrator {
     for (const w of vehicle.wheels) acc(w.body);
     return { minX, maxX };
   }
+
+  /**
+   * PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW｜对手（B 方）**这一步是否仍处于开火执行期**。
+   *
+   * = 遍历挂在 B 方车上的全部 Behavior Runtime，向每个武器问一句 `isFiringPhase?.()`
+   *   （「本次攻击还没打完吗」）。任一武器在开火执行期内 ⇒ `true`。
+   *
+   * 语义边界（**刻意收窄**）：
+   *   - 只看**攻击执行期本身**，**不看**冷却 / 恢复 / 弹丸是否在飞 ⇒ 没有把「远程身份」整体
+   *     换成「不后撤」；窗口结束后**立即恢复** keep-distance；
+   *   - 单发武器（正式炮）恒为 `false` ⇒ 对只有炮的对手，本机制**结构上不发生**；
+   *   - 不读时间、不读步数、不引入任何新数值 ⇒ 窗口长度就是武器自己既有的 burst 长度。
+   *
+   * ⚠️ 调用点在 `onBeforeStep` 里**早于**本步的 `b.beforePhysicsStep(...)`，因此读到的是
+   *    **上一个固定步**结束时的状态（1 步延迟 = 16.7ms，60Hz 下不可感知，且不引入新状态）。
+   * ⚠️ 只读，不改任何物理 / 不发射 / 不写行为内部状态。
+   */
+  private enemyWeaponsFiring(): boolean {
+    for (const b of this.behaviors) {
+      if (b.vehicle.team !== this.vehicleB.team) continue;
+      if (b.isFiringPhase?.() === true) return true;
+    }
+    return false;
+  }
+
   step(realDtMs: number, timeScale = 1): void {
     if (this._result) return;
 
@@ -411,7 +436,15 @@ export class PlanckBattleOrchestrator {
         const bands = this.config.enemyDrive;
         if (bands) {
           const ctx = this.enemyDriveContext();
-          const d = decideEnemyDrive(ctx, bands, AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP);
+          // R12：开火窗口只在**声明了距离开关**的分支里查询 ⇒ 未声明 `enemyDrive` 的
+          // Encounter（ProtoRusher / Chaser 等）与既有全部调用点连一次查询都不发生，
+          // 逐字节与改前相同。
+          const d = decideEnemyDrive(
+            ctx,
+            bands,
+            AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
+            this.enemyWeaponsFiring(),
+          );
           // 诊断：本步实际生效的决策（含决策真正读到的 core 间距）。
           this.enemyDriveStateNow = { ...d, gap: ctx.gap };
           drivePlanckVehicle(this.world, this.vehicleB, {

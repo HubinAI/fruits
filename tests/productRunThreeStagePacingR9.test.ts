@@ -698,21 +698,22 @@ describe('PRODUCT-LOOP-R9｜三段节奏 + 两次 Build 的真实作用（机器
     const two = solo(b, ['damageUp', 'rateUp'], 'RangedTurret');
 
     // ① 无 Build 允许失败（验收 6 的因果对照）
+    //    ⚠️ R12（开火窗口）后对手不再「一边后撤一边挨打」⇒ 零 Build 反而打得更少（残 160，此前 119.7）
     expect(none.winner, '零 Build：第三段打不过').toBe('B');
     expect(none.hpB, '零 Build：对手还剩一小截血').toBeGreaterThan(0);
-    expect(r1(none.hpB)).toBe(119.7);
+    expect(r1(none.hpB)).toBe(160);
     expect(r1(none.hpA)).toBe(0);
 
     // ② 第 1 次 Build **翻转**第三段的结果（结果层的改变）
     expect(one.winner, 'damageUp：第三段翻成胜').toBe('A');
     expect(one.hpB).toBe(0);
-    expect(r1(one.hpA)).toBe(160);
+    expect(r1(one.hpA)).toBe(80);
     expect(oneRate.winner, 'rateUp：同样翻成胜（两条路都成立）').toBe('A');
-    expect(r1(oneRate.hpA)).toBe(120);
+    expect(r1(oneRate.hpA)).toBe(40);
 
     // ③ 第 2 次 Build **叠加**并进一步作用到第三段（两者的唯一差别就是 rateUp）
     expect(two.winner).toBe('A');
-    expect(r1(two.hpA)).toBe(360);
+    expect(r1(two.hpA)).toBe(280);
     expect(two.hpA, '第二次 Build 让第三段明显更宽裕').toBeGreaterThan(one.hpA);
     expect(two.steps, '节奏向的第二次 Build 让这一场更快收束').toBeLessThan(one.steps);
 
@@ -734,8 +735,10 @@ describe('PRODUCT-LOOP-R9｜三段节奏 + 两次 Build 的真实作用（机器
     const tNone = solo(a, [], 'RangedTurret');
     const tOne = solo(a, ['damageUp'], 'RangedTurret');
     const tTwo = solo(a, ['damageUp', 'rateUp'], 'RangedTurret');
+    // ⚠️ R12：**三档 hpA 逐字节未变**（720 / 800 / 820）—— 这台三机枪车在开火窗口下的
+    //   终局余量与改前完全相同，只有第一场的**步数**变短（245 → 242）。
     expect([r1(tNone.hpA), r1(tOne.hpA), r1(tTwo.hpA)]).toEqual([720, 800, 820]);
-    expect([tNone.steps, tOne.steps, tTwo.steps]).toEqual([245, 222, 193]);
+    expect([tNone.steps, tOne.steps, tTwo.steps]).toEqual([242, 222, 193]);
     expect(tTwo.steps).toBeLessThan(tNone.steps);
   }, SLOW_MS);
 
@@ -812,6 +815,9 @@ describe('PRODUCT-LOOP-R9｜三段节奏 + 两次 Build 的真实作用（机器
     // ⚠️ PRODUCT-LOOP-R11-LASER-CADENCE-R1：laser 的 `cooldownMs` 1800 → 600（只动攻击间隔）
     //    ⇒ laser 从「第 1 段 `ProtoRusher` 就阵亡」推进到「打进终局 `RangedTurret` 才阵亡」。
     //    ⚠️ 仍是 **FAILED**（不是 COMPLETE）⇒ 「单槽形态没有任何一件能通关」的事实未被掩盖。
+    // ⚠️ R12（开火窗口）后**本表逐字未变** —— 三种形态的「死在哪一段」都没有被这条规则改变
+    //    （它只改第 3 段的交换比，不改「能否通关」的判定；`walk` 形态的 `hammer/D1` 是**另一张表**
+    //     才被翻转，见 `productRunFullRunPathMatrixR9F.test.ts` 的 `FROZEN_RESULT`）。
     expect(reachable).toEqual({
       cannon: 'FAILED@RangedTurret',
       flamethrower: 'FAILED@RangedTurret',
@@ -877,9 +883,12 @@ describe('PRODUCT-LOOP-R9｜三段节奏 + 两次 Build 的真实作用（机器
     //    ⚠️ 与 `portraitRunPage.test.ts` G 段 `FROZEN` 同源 —— 这里**独立再测一遍**，
     //       两次测量必须一致才算「不退化」（同参数确定性物理，无随机源）。
     const CANNON_FROZEN: Record<string, readonly [number, number, number]> = {
-      'heavyShell+kineticBurst': [915.2, 822.2, 282.2],
-      'twinCannon+tripleLoad': [915.2, 822.6, 282.6],
-      'fastReload+twinCannon': [915.2, 822.1, 262.1],
+      // ⚠️ R12：第 1 / 2 段**逐字节未变**（那两段没有控距对手）；只有第 3 段变
+      //   （`heavyShell+kineticBurst` 282.2 → **322.2**、`twinCannon+tripleLoad` 282.6 → **442.6**、
+      //    `fastReload+twinCannon` 262.1 → **322.1**）—— 三条路线同向变宽裕（如实记录）。
+      'heavyShell+kineticBurst': [915.2, 822.2, 322.2],
+      'twinCannon+tripleLoad': [915.2, 822.6, 442.6],
+      'fastReload+twinCannon': [915.2, 822.1, 322.1],
     };
     for (const [key, expected] of Object.entries(CANNON_FROZEN)) {
       const [p1, p2] = key.split('+');
@@ -909,7 +918,7 @@ describe('PRODUCT-LOOP-R9｜三段节奏 + 两次 Build 的真实作用（机器
 
     // ④ Cannon 局第三段仍是被真实打完的（未改数值、未改 AI、未放水）
     const c2 = walkRun(cannonWalkDraft(), ['twinCannon', 'tripleLoad']);
-    expect(r1(segAt(c2, NODE.final).hpA)).toBe(282.6);
+    expect(r1(segAt(c2, NODE.final).hpA)).toBe(442.6);
     expect(segAt(c2, NODE.final).hpB).toBe(0);
   }, SLOW_MS);
 
