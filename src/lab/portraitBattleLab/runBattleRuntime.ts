@@ -643,11 +643,6 @@ export class RunBattleRuntime {
    * ⚠️ 这是**只读回读**（从正式编排器读上一步的决策记录），不重算、不另存一份口径。
    * ⚠️ 注意 `gap` 与 `gapWorld()` 口径不同：后者含 Functional Parts（武器伸出），
    *    前者是相机取景用的 core 口径 —— 两者**不能互相代入**。
-   *
-   * ⚠️ PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW：`band === 'near'` **不再蕴含**「本步真的
-   *    在后退」——当对手处于**自身开火执行期**（机枪 burst 未打完）时，本步会**停止后撤**
-   *    （`enabled === false`，与 `hold` 同一套 motor-off 语义，不刹停 / 不反向）。
-   *    于是「这一档真的退了吗」在本回读上的判据是：`band === 'near' && enabled === true`。
    */
   enemyDriveState(): Readonly<
     { band: 'near' | 'hold' | 'far'; gap: number; enabled: boolean; worldDirection: 1 | -1; targetSpeedPxPerStep: number } | null

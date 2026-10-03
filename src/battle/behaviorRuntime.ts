@@ -55,20 +55,6 @@ export interface PartBehaviorRuntime {
   getRenderProjectiles?(world: PlanckWorld): RenderProjectile[];
   /** 渲染贡献：存活喷焰快照（仅推进期；无则省略） */
   getRenderFlames?(world: PlanckWorld): RenderFlame[];
-  /**
-   * PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW｜**只读**状态查询：
-   * 本武器「**本次攻击是否还没打完**」（= 真实开火执行期）。
-   *
-   * - `true`  ⇒ 本次攻击仍在执行（多步连发：第一发已出、最后一发未出）；
-   * - `false` / **省略** ⇒ 本武器没有可停驻的执行期。单发武器（`burstRounds` 缺省 1）
-   *   的开火是**单步瞬时事件** ⇒ 恒为 `false`（结构上不产生窗口）。
-   *
-   * ⚠️ 它**不是**第二套 step/render 生命周期：不推进状态、不发射、不改任何物理，
-   *    只把 Behavior 内部**已有**的攻击状态机计数器暴露成一个布尔。
-   * ⚠️ 消费者（`PlanckBattleOrchestrator`）在 `beforePhysicsStep` **之前**读它，
-   *    因此读到的是**上一个固定步**结束时的状态（1 步延迟，60Hz 下不可感知）。
-   */
-  isFiringPhase?(): boolean;
 }
 
 /* ---------- Cannon（Q02-C1A）：发射 + 冷却 + projectile 生命周期 + 渲染 ---------- */
@@ -124,16 +110,6 @@ class CannonRuntime implements PartBehaviorRuntime {
       });
     }
     return out;
-  }
-
-  /**
-   * R12：炮的「开火执行期」= 本次攻击已发但未打满（`burstRounds > 1` 时才有意义）。
-   * ⚠️ 正式 `content.ts` 的炮**不写** `burstRounds` ⇒ 缺省 1 ⇒ 每发即打满、当步归零
-   *    ⇒ 本查询对正式炮**恒为 false**（单步瞬时开火，没有可停驻的执行期）。
-   *    这是**如实结论**，不是遗漏：单发武器结构上提供不了窗口。
-   */
-  isFiringPhase(): boolean {
-    return this.behavior.roundsFiredSoFar > 0;
   }
 }
 
@@ -463,16 +439,6 @@ class MachineGunRuntime implements PartBehaviorRuntime {
       });
     }
     return out;
-  }
-
-  /**
-   * R12：机枪的「开火执行期」= 本次 **burst 已发但未打满**（`roundsFiredSoFar > 0`）。
-   * 正式机枪 = 7 发 × 100ms ⇒ 真实覆盖 **36 个固定步**（占比 36/102 ≈ 35%），
-   * 这是本项目**唯一**能提供「多步开火执行期」的对手武器。
-   * ⚠️ 纯读计数器：不推进状态、不发射、不改任何物理。
-   */
-  isFiringPhase(): boolean {
-    return this.behavior.roundsFiredSoFar > 0;
   }
 }
 

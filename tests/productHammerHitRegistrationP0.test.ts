@@ -15,19 +15,11 @@
  *   | 输入/状态 | `onlyDraft('hammer', frontMass)` / `playerBaseline:true` / `encounterId:'RangedTurret'` | 与矩阵格同口径 |
  *   | `hammerBehavior` | 关节角全程实测 **[−0.94, +1.08]**，覆盖固定弧 [−0.9, +1.2]；windup→pause→swing→recover 正常循环 | 状态机**没有**「不挥击」 |
  *   | Collider | 锤头 = `box 60×14 offset{x:40}`（覆盖 pivot 前 10..70px） | 形状按定义装出 |
- *   | `contactRouter` | R7 时点：全程车辆↔车辆接触**只有 1 条**：`s718 body ↔ part:front rel=1.33`（= **玩家车体 × 敌方外伸炮管**）；**锤头（`part:frontMass`）零接触**<br>⚠️ **R12 后**：接触条数 = **0**（整局都没碰上）—— 见文末更新块 | 命中链**没被触发**，不是被拒绝 |
+ *   | `contactRouter` | 全程车辆↔车辆接触**只有 1 条**：`s718 body ↔ part:front rel=1.33`（= **玩家车体 × 敌方外伸炮管**）；**锤头（`part:frontMass`）零接触** | 命中链**没被触发**，不是被拒绝 |
  *   | hit policy | 锤头 ↔ 敌各 collider 的最近 SAT 间距 **9.6px**（全程 > 0） | `baseDamage=90` / `WEAPON_CONTACT_THRESHOLD=0.5` 两道闸门**从未被触及** |
  *   | damage | 命中 `{}`、伤害 `0` | 与「从未接触」完全一致 |
  *
  *   ⇒ **0 命中的原因 = 锤头没碰到**，不是「碰到了却没登记」。
- *
- *   ⚠️⚠️ **PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW 之后的更新**：
- *     对手现在在**自身开火执行期内停止后撤** ⇒ 这一格的整局轨迹相位改变，实测为
- *     「**连车体↔车体的接触都没有了**」（`PH-01` ② 改为断言 0 条；`PH-04` 的 (a) 样本随之消失，
- *     命题改由 (b) 受控几何格 + (c) Chaser 低速擦碰样本承担）。
- *     ⇒ **本文件的结论（命中链无缺陷）不变**，反而更单纯：`hammer` 全程零接触。
- *     同类「轨迹退步」披露另见 `pblRangedDistanceControl.test.ts` 的 `RDC-15`。
- *     ⚠️ 本 Queue 未碰 hammer / 未碰命中登记 / 未碰 `RangedTurret` 的 HP 与武器。
  *
  *   **「深度重叠」是怎么来的**（这是本轮真正找到的缺陷 —— **测试判据错**，不是战斗错）：
  *   `MX-08` 用 `RunBattleRuntime.gapWorld()` 当「是否接触」的判据，而它是
@@ -261,20 +253,19 @@ describe('PRODUCT-LOOP-P0 Hammer 命中登记（Bug Queue：根因 + 不退化 +
     expect(obs.weapons, '本场只有 frontMass:hammer').toEqual(['frontMass:hammer:hammer:dmg=90']);
     expect(obs.weaponPartId).toBe('part:frontMass');
 
-    // ② ⚠️ PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW：本场**连车体↔车体的接触都没有了**
-    //    （R12 前有 1 条 `s718 A/body ↔ B/part:front rel=1.33`）。
-    //    ⇒ 「0 命中」的原因反而更单纯：**锤头与车体都没碰到过敌车**。
-    //    ⚠️ 本 Queue 未碰 hammer / 未碰命中登记；变的是对手的移动（开火执行期内停止后撤）
-    //       ⇒ 整局轨迹相位不同（见 `RDC-15` 的同类披露）。
-    expect(obs.contacts, '真实车辆↔车辆接触 = 0 条（R12 后）').toHaveLength(0);
+    // ② 真实接触**只有 1 条**，且它是**玩家车体 × 敌方外伸炮管**（不是锤头）。
+    expect(obs.contacts, '真实车辆↔车辆接触只有 1 条').toHaveLength(1);
+    expect(obs.contacts[0]!.attackerPartId, '接触方是玩家**车体**（不是锤头）').toBe('body');
+    expect(obs.contacts[0]!.defenderPartId, '被撞的是敌方**炮管**（front 挂点的 cannon）').toBe('part:front');
+    expect(obs.contacts[0]!.relativeVelocity, '该次接触有真实相对速度（所以它是真 impact）').toBeGreaterThan(1);
 
     // ③ **锤头（part:frontMass）全程零接触** —— 这才是 0 命中的原因。
     expect(hammerContacts(obs).map((c) => `s${c.step}|${c.defenderPartId}`), '锤头零接触').toEqual([]);
 
-    // ④ 与「从未接触」完全一致：0 命中、0 伤害、对手满血。
+    // ④ 与「从未接触」完全一致：0 命中、0 伤害、对手基本满血。
     expect(hitsOf(obs), '命中 = 0').toBe(0);
     expect(obs.hits, '没有任何来源部件').toEqual({});
-    expect(obs.hpB, '对手满血（全程零接触，一字未被打到）').toBeGreaterThan(obs.hpBMax - 1);
+    expect(obs.hpB, '对手基本满血（只被车体撞、没被武器打）').toBeGreaterThan(obs.hpBMax - 1);
 
     // ⑤ 本场确实是正式终态（不是被 1400 步上限截断，也不是 arenaEnd 拖延）。
     expect(obs.result, '进入正式终态').not.toBeNull();
@@ -364,13 +355,10 @@ describe('PRODUCT-LOOP-P0 Hammer 命中登记（Bug Queue：根因 + 不退化 +
    * 以及 rel < 阈值的接触，都**不**产生 Hammer 伤害。
    */
   it('PH-04 验收④：非锤头接触 / 低速接触**均不产生** Hammer 伤害（不是「碰到就扣血」）', () => {
-    // (a) ⚠️ R12 后真实矩阵格**连车体接触都不存在** ⇒ 本格退化成「完全没碰到」，
-    //     不再能提供「车体接触但不产生 Hammer 伤害」的样本。
-    //     ⇒ 该命题改由 (b) 受控几何格承担（车体接触真实存在、Hammer 伤害仍为 0）
-    //       以及 (c) Chaser 的低速擦碰样本（rel < 阈值 ⇒ 不登记）继续钉住。
+    // (a) 真实矩阵格：车体 × 敌炮管接触真实存在，但**零** Hammer 伤害。
     const plain = runBattle({ weaponDefId: 'hammer', encounterId: 'RangedTurret' });
-    expect(plain.contacts.filter((c) => c.attackerPartId === 'body').length, 'R12 后车体接触也不存在').toBe(0);
-    expect(hitsOf(plain), '零接触 ⇒ 0 Hammer 伤害').toBe(0);
+    expect(plain.contacts.filter((c) => c.attackerPartId === 'body').length, '车体确有真实接触').toBeGreaterThan(0);
+    expect(hitsOf(plain), '车体接触 ⇒ 0 Hammer 伤害').toBe(0);
 
     // (b) 受控几何格：车体 × 敌炮管同样真实接触，HitSummary 里**只有** hammer、且次数由锤头接触决定。
     const ctrl = runBattle({ weaponDefId: 'hammer', encounterId: 'RangedTurret', playerShiftPx: CONTROLLED_A_SHIFT_PX });
@@ -394,20 +382,16 @@ describe('PRODUCT-LOOP-P0 Hammer 命中登记（Bug Queue：根因 + 不退化 +
    * 【验收⑤ 其它行为无回归】`cannon` 走的是弹丸路径（不经 `handleWeaponContact` 的近战直击），
    * 本 Queue 未触碰它 —— 用同一 Encounter 的既有读数钉住。
    */
-  it('PH-05 验收⑤：cannon vs RangedTurret 命中链无回归（弹丸路径；R12 后由 1 发变 2 发）', () => {
+  it('PH-05 验收⑤：cannon vs RangedTurret 无回归（弹丸路径仍为 1 命中 × 120）', () => {
     const obs = runBattle({ weaponDefId: 'cannon', encounterId: 'RangedTurret' });
     expect(obs.weapons).toEqual(['frontMass:cannon:cannon:dmg=120']);
     expect(obs.hpBMax).toBe(1100);
 
-    // 口径与 R7 矩阵 `MX-08` ⑥ 完全一致：伤害 = 玩家侧基线 120 / 逐发恒为 120。
-    // ⚠️ PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW：本场**多了一次命中**（首发由 606 提前到
-    //   257；原本那一发 606 仍在）⇒ 1 发 → **2 发**，对手 980 → **860**。
-    //   本 Queue **没有**碰 cannon / 弹丸 / 命中登记链 —— 变的是**对手的移动**
-    //   （它在自身开火执行期内停止后撤）。⇒ 逐发伤害与命中登记规则一字未改。
-    expect(hitsOf(obs), 'cannon 打出 2 次真实命中').toBe(2);
-    expect(obs.hits.cannon!.damages, '每一发伤害都 = 玩家侧基线 120').toEqual([120, 120]);
-    expect(obs.hitSteps, '首发步号与矩阵一致').toEqual([257, 606]);
-    expect(obs.hpB, '对手被真实扣掉 2 × 120').toBe(1100 - 240);
+    // 口径与 R7 矩阵 `MX-08` ⑥ 完全一致：窗口外 1 次真实命中，伤害 = 玩家基线 120。
+    expect(hitsOf(obs), 'cannon 仍打出 1 次真实命中').toBe(1);
+    expect(obs.hits.cannon!.damages, '伤害 = 玩家侧基线 120').toEqual([120]);
+    expect(obs.hitSteps, '首发步号与矩阵一致').toEqual([606]);
+    expect(obs.hpB, '对手被真实扣掉 120').toBe(1100 - 120);
 
     // cannon 的近战碰撞不产生命中（弹丸才是伤害来源）—— 与 hammer 的机制对照。
     expect(obs.contacts, 'cannon 格：无近距离车辆接触命中登记').toEqual([]);

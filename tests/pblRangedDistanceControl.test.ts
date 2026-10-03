@@ -282,13 +282,9 @@ describe('PBL-RANGED｜C RangedTurret 真实运行：三段行为 + 能追上', 
     // ① 必须先走到过 near（= 玩家真的逼近过）
     expect(t.bandEnterFrame['near'], '整局必须出现过「太近」').toBeGreaterThan(0);
     // ② near 之后间距必须真的重新变大（「拉开」是事实，不是设计意图）
-    //    ⚠️⚠️ PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW：对手现在在**自身开火执行期**
-    //       （机枪 burst 未打完）内停止后撤 ⇒ 同一周期里「拉开」的净量变小：
-    //       实测 238.9 → **274.3**（+35.4，R12 前 > +40）。**方向未变，幅度变小** ——
-    //       这条放宽是如实跟随实测，不是放弃判据（`near` 之后确实仍重新拉开过）。
     const gapAtNear = t.samples['near']!.gap;
     expect(t.maxGapAfterFirstNear, 'near 之后的最大间距必须明显大于触发时的间距').toBeGreaterThan(
-      gapAtNear + 30,
+      gapAtNear + 40,
     );
     // ③ 档位不是「一进 near 就永久卡住」：还要回到过 hold（真实滑行段）
     const order = t.bands;
@@ -296,15 +292,10 @@ describe('PBL-RANGED｜C RangedTurret 真实运行：三段行为 + 能追上', 
     expect(order).toContain('hold');
   }, 300_000);
 
-  it('RDC-15 可以被玩家逼近到近身距离，且对手真的掉血（无硬隔离）', () => {
+  it('RDC-15 可以被玩家追上：真实接触发生过，且对手真的掉血（无硬隔离）', () => {
     const t = trace('RangedTurret');
-    // ⚠️⚠️ PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW｜**如实记录的退步**：
-    //   产品默认车（纯炮 `WatermelonHeavyCannon`）整局最小外廓间距由「< 20px（接触级）」
-    //   变成 **34.6px** —— 开火窗口改变了对局的**相位**（对手不是「退得更快」而是「退得节奏不同」），
-    //   这一格反而离得更远。⇒ 阈值按实测改成 40，并在 R12 报告里作为代价披露；
-    //   真正因本规则首次可及的是**接触型武器**（独立取证见
-    //   `tests/productRunRangedTurretFireWindowR12.test.ts` 的 `FW-02`：rammer 0 → 1 次真实命中）。
-    expect(t.minGap, `整局最小外廓间距 ${t.minGap.toFixed(1)}px`).toBeLessThan(40);
+    // 玩家真实推进把间距压到接触级（外廓间距 ≤ 10px = 已经贴上）
+    expect(t.minGap, `整局最小外廓间距 ${t.minGap.toFixed(1)}px，必须出现过接触级接近`).toBeLessThan(20);
     // 玩家真的打到了对手（对手掉血 = 真实伤害链走通）
     const plan = buildSpawnPlan('WatermelonHeavyCannon', 'RangedTurret');
     void plan;
@@ -433,5 +424,59 @@ describe('PBL-RANGED｜E 结构守卫：只经正式 Movement / 正式栈零污�
     const page = stripComments(readLab('encounterLab.ts'));
     expect(page.includes('ENCOUNTER_BATCH')).toBe(true);
     expect(page.includes('preferredDistance')).toBe(false); // 不在页面里写距离数值
+  });
+});
+
+/* ============ F. PRODUCT-LOOP-R12-FIRE-WINDOW-ROLLBACK 回退守卫 ============ */
+
+/**
+ * R12 的假设（「对手开火执行期内停止后撤 ⇒ 给接触型武器追击窗口」）**已被实测证伪**并整块回退：
+ *   · 权威可达空间 28/11 → 23/9（策略空间退化）；
+ *   · hammer 命中覆盖面 2/200 → 0/200（方向与 rammer 相反）；
+ *   · machineGun / cannon 既有赢面被抹掉。
+ * ⇒ 本段是**回退守卫**：把「该机制不得静默回流」钉在源码层。
+ *   行为层（`near` 档真实后撤）由 RDC-02 / RDC-13 承担，本段不重复。
+ */
+describe('PBL-RANGED｜F R12 开火窗口回退守卫（该机制不得静默回流）', () => {
+  it('RDC-24 源码级：开火窗口在五个接触点全部不存在（决策函数恢复 3 参纯函数）', () => {
+    // ① 决策函数签名恰好 3 个参数 —— 不存在「开火窗口」这个第 4 参
+    const drive = stripComments(read('src/battle/enemyDrive.ts'));
+    expect(drive.includes('firingWindow'), 'enemyDrive.ts 不得再有 firingWindow').toBe(false);
+    expect(
+      /export function decideEnemyDrive\(\s*ctx: EnemyDriveContext,\s*bands: EnemyDriveBands,\s*approachSpeedPxPerStep: number,\s*\): EnemyDriveDecision/.test(
+        drive,
+      ),
+      'decideEnemyDrive 必须恢复成 3 参签名（无第 4 参）',
+    ).toBe(true);
+
+    // ② near 档恢复「无条件后撤」：分支内只允许一条 return，且不含任何窗口短路
+    const nearBlock = drive.match(/if \(ctx\.gap < bands\.near\) \{[\s\S]*?\n  \}/);
+    expect(nearBlock, '必须存在 near 分支').not.toBeNull();
+    expect(nearBlock![0].includes('firingWindow')).toBe(false);
+    expect(
+      (nearBlock![0].match(/return \{/g) ?? []).length,
+      'near 分支内只允许有一条 return（后撤不再被任何条件改写）',
+    ).toBe(1);
+
+    // ③ 编排器不再查询「对手开火执行期」，门控调用恢复 3 实参
+    const orch = stripComments(read('src/battle/planckBattleOrchestrator.ts'));
+    expect(orch.includes('enemyWeaponsFiring'), '编排器不得再有 enemyWeaponsFiring').toBe(false);
+    expect(orch.includes('isFiringPhase'), '编排器不得再查询 isFiringPhase').toBe(false);
+    expect(
+      orch.includes('decideEnemyDrive(ctx, bands, AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP)'),
+      'enemyDrive 门控调用必须恢复成 3 实参',
+    ).toBe(true);
+
+    // ④ Behavior Runtime 不再暴露「开火执行期」查询（该接线只服务被回退的规则）
+    expect(
+      stripComments(read('src/battle/behaviorRuntime.ts')).includes('isFiringPhase'),
+      'PartBehaviorRuntime 不得再有 isFiringPhase',
+    ).toBe(false);
+
+    // ⑤ Lab 回读注释不再声称 near 档「可能没在后退」（查注释必须用未剥原文）
+    expect(
+      readLab('runBattleRuntime.ts').includes('不再蕴含'),
+      'enemyDriveState() 文档必须恢复「near 即后撤」的原语义',
+    ).toBe(false);
   });
 });
