@@ -15,6 +15,7 @@
 //
 // 覆盖 420×210 / 844×390 / 1363×936 / 1920×1008 × DPR 1 / 1.25 / 1.5 / 2。
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 const BASE = process.env.PROBE_BASE || 'http://127.0.0.1:8138/';
 const VPS = [
   { w: 1920, h: 1008 },
@@ -200,7 +201,7 @@ function tabSigOf(a) {
 }
 
 async function run() {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await launchBrowser(chromium);
   for (const vp of VPS_RUN) {
     for (const dpr of DPRS_RUN) {
       const tag = `${vp.w}x${vp.h}@${dpr}`;

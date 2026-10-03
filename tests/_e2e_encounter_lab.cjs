@@ -25,6 +25,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 
 /** ⚠️ 与 run-page(8156) / next-run(8157) 用**不同端口**：三个 E2E 可并存。 */
 const ROOT = path.join(__dirname, '..', 'dist-portrait-lab');
@@ -501,12 +502,7 @@ async function runStructural(browser) {
   const server = await startServer();
   let browser;
   try {
-    try {
-      browser = await chromium.launch({ channel: 'msedge', headless: true });
-    } catch (e) {
-      console.log('msedge 不可用，回退默认 chromium：' + (e && e.message ? e.message : e));
-      browser = await chromium.launch({ headless: true });
-    }
+    browser = await launchBrowser(chromium);
 
     await runFullFlow(browser);
     await runDistanceFoundation(browser);

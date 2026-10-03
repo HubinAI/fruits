@@ -73,6 +73,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 
 const ROOT = path.join(__dirname, '..', 'dist-portrait-lab');
 const PORT = 8169;
@@ -516,7 +517,7 @@ async function main() {
   const server = await startServer();
   log(true, 'P0 静态产物就绪（dist-portrait-lab 内 home.html + run-page.html 真实存在）');
 
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await launchBrowser(chromium);
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
   const pageErrors = [];

@@ -16,6 +16,7 @@
  * 不做任何 grantAllNewBodies 预置（正式 body reward 路径必须真实走通）。
  */
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 const BASE = 'http://127.0.0.1:8138/?player=1';
 const INV_KEY = 'strongfruit.ownedParts.v2';
 const BODIES_KEY = 'strongfruit.ownedBodies.v1';
@@ -164,7 +165,7 @@ function logReward(ok, name, info, before, after) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await launchBrowser(chromium);
   const VIEWPORTS = [
     { w: 420, h: 210, dpr: 1, label: '420x210 dpr1' },
     { w: 844, h: 390, dpr: 1, label: '844x390 dpr1' },

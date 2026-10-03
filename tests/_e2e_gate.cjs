@@ -4,6 +4,7 @@
 // （A/B envelope / matchVehicleRects / transform / groundScreenY / hazard rects / 阶段文案）。
 // hash 仅作「动画仍在运行」的辅助信号，不作为视觉验收依据（Must#5）。
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 
 const BASE = 'http://127.0.0.1:8138/';
 const VP = { w: 844, h: 390 };
@@ -160,7 +161,7 @@ function assertPhaseText(phase, text, label) {
 }
 
 async function main() {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await launchBrowser(chromium);
   const errors = [];
   const W = VP.w;
   const H = VP.h;

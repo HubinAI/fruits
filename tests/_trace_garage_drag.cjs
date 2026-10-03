@@ -11,6 +11,7 @@
  * 用法：ENVS=1920x1008@1.5 node tests/_trace_garage_drag.cjs
  */
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 const path = require('path');
 
 const BASE = process.env.PROBE_BASE || 'http://127.0.0.1:8138/';
@@ -225,11 +226,7 @@ async function toClient(page, lx, ly) {
 }
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: process.env.MSEDGE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-    headless: true,
-    args: ['--no-sandbox', '--disable-gpu'],
-  });
+  const browser = await launchBrowser(chromium, { args: ['--no-sandbox', '--disable-gpu'] });
   for (const envSpec of ENVS) {
     const [dim, dprS] = envSpec.split('@');
     const [vw, vh] = dim.split('x').map(Number);

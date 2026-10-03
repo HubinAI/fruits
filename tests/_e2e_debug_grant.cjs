@@ -7,6 +7,7 @@
  * E. 无 resetdev 参数：无按钮、无命中区
  */
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 const BASE = process.env.PROBE_BASE || 'http://127.0.0.1:8138/';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
@@ -46,11 +47,7 @@ async function hasGrantButton(page) {
 }
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: process.env.MSEDGE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-    headless: true,
-    args: ['--no-sandbox', '--disable-gpu'],
-  });
+  const browser = await launchBrowser(chromium, { args: ['--no-sandbox', '--disable-gpu'] });
   const context = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 1 });
 
   // ---------- Debug 开启 ----------

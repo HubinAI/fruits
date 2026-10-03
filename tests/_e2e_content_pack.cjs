@@ -35,6 +35,7 @@
  * （匹配抽取与结算都消费 Math.random；恒值与调用次数无关，结算必命中区间。）
  */
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 const BASE = 'http://127.0.0.1:8138/?player=1';
 const BASE_DEV = 'http://127.0.0.1:8138/?player=1&resetdev=1';
 const INV_KEY = 'strongfruit.ownedParts.v2';
@@ -511,7 +512,7 @@ async function sampleWheelBelt(page, frames = 3) {
 
 // ---------- 主流程 ----------
 (async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await launchBrowser(chromium);
   const VIEWPORTS = [
     { w: 420, h: 210, dpr: 1, label: '420x210 dpr1' },
     { w: 844, h: 390, dpr: 1, label: '844x390 dpr1' },

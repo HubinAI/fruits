@@ -40,6 +40,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 
 const ROOT = path.join(__dirname, '..', 'dist-portrait-lab');
 const PORT = 8156;
@@ -2183,12 +2184,7 @@ function round2(v) {
   const server = await startServer();
   let browser;
   try {
-    try {
-      browser = await chromium.launch({ channel: 'msedge', headless: true });
-    } catch (e) {
-      console.log('msedge 不可用，回退默认 chromium：' + (e && e.message ? e.message : e));
-      browser = await chromium.launch({ headless: true });
-    }
+    browser = await launchBrowser(chromium);
 
     const viewports = [
       { w: 390, h: 844, dpr: 1 }, // 真机竖屏：铺满视口

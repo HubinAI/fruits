@@ -19,6 +19,7 @@
  * 装备结果读真实 loadout（__h.lastState.draft）+ 最终像素，不直接调用内部装备函数。
  */
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 const BASE = process.env.PROBE_BASE || 'http://127.0.0.1:8138/';
 const ENVS = (process.env.ENVS || '420x210@1,621x351@1,844x390@1,1920x1008@1.5').split(',');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -201,11 +202,7 @@ function draftSig(d) {
 }
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: process.env.MSEDGE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-    headless: true,
-    args: ['--no-sandbox', '--disable-gpu'],
-  });
+  const browser = await launchBrowser(chromium, { args: ['--no-sandbox', '--disable-gpu'] });
 
   for (const envSpec of ENVS) {
     const [size, dprS] = envSpec.split('@');

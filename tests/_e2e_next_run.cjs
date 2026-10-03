@@ -33,6 +33,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 
 /** ⚠️ 与 `_e2e_run_page.cjs` 用**不同端口**：两个 E2E 可以并存，不抢端口。 */
 const ROOT = path.join(__dirname, '..', 'dist-portrait-lab');
@@ -696,12 +697,7 @@ async function runStructural(browser, vp) {
   const server = await startServer();
   let browser;
   try {
-    try {
-      browser = await chromium.launch({ channel: 'msedge', headless: true });
-    } catch (e) {
-      console.log('msedge 不可用，回退默认 chromium：' + (e && e.message ? e.message : e));
-      browser = await chromium.launch({ headless: true });
-    }
+    browser = await launchBrowser(chromium);
 
     // 完整流程（真实战斗 + 精确像素）只在 390×844@1 上跑；非 1 DPR 只验结构。
     await runFullFlow(browser, { w: 390, h: 844, dpr: 1 });

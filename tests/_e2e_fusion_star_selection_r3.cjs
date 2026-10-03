@@ -19,6 +19,7 @@
  *   node tests/_e2e_fusion_star_selection_r3.cjs
  */
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 const BASE = 'http://127.0.0.1:8138/';
 const INV_KEY = 'strongfruit.ownedParts.v2';
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
@@ -361,12 +362,7 @@ async function runViewport(browser, vp) {
 
 (async () => {
   let browser;
-  try {
-    browser = await chromium.launch({ channel: 'msedge', headless: true });
-  } catch (e) {
-    console.log('msedge 不可用，回退默认 chromium：' + (e && e.message ? e.message : e));
-    browser = await chromium.launch({ headless: true });
-  }
+  browser = await launchBrowser(chromium);
   const viewports = [
     { w: 844, h: 390, dpr: 1 },
     { w: 844, h: 390, dpr: 3 },

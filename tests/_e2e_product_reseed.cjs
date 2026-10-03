@@ -82,6 +82,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 
 const ROOT = path.join(__dirname, '..', 'dist-portrait-lab');
 /** 端口刻意与其它产品 E2E 不同（8166..8171 已被占用），方便并行排查。 */
@@ -499,7 +500,7 @@ async function main() {
   const server = await startServer();
   log(true, 'R0 静态产物就绪（home.html / run-page.html 真实存在）');
 
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await launchBrowser(chromium);
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
   const pageErrors = [];

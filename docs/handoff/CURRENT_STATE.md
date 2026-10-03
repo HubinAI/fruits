@@ -51,6 +51,8 @@ ebadfd9 PRODUCT-LOOP-R11-STRICT-SPACE-RECHECK: 权威可达空间严格重跑（
 | `R12-FIRE-WINDOW` | ❌ **证伪 → 整块回退** | 23 / 9（退化） |
 | `R12-FIRE-WINDOW-ROLLBACK` | ✅ | 恢复 **28 / 11**；`git diff 52a477d -- src` = **0 行** |
 | `R13-ENCOUNTER-ORDER-MATRIX-R1` | ✅ 纯取证 | 6 种 Encounter 全排列：hammer/rammer 全 0；判据 **2 成立** |
+| `MAC-MIGRATION-HANDOFF` | ✅ docs-only | 迁移交接三件套 `docs/handoff/`；暴露硬 Blocker **B-1 / B-2** |
+| `MAC-MIGRATION-E2E-COMPAT-R1` | ✅ infra/test | B-1/B-2 解除：`playwright-core@1.62.1` 入册 + **33 个 E2E 统一 `tests/_browser_launch.cjs`** |
 
 ---
 
@@ -137,7 +139,7 @@ cannon 1 · flamethrower 1 · laser 1 · machineGun 4 · shotgun 4 · hammer 0 �
 | **未跟踪的交接文档** | 仓库根 ~50 个 `交接文档_2026-09-13…2026-10-01_*.md` | clone 看不到（注：**较早的 6 个反而已入库**，见 §7） |
 | **未跟踪的新窗口指令** | `新窗口交接指令_2026-09-20.md` / `_2026-09-29.md` | clone 看不到 |
 | **gitignore 的构建产物** | `dist/` `dist-wechat/` `dist-pages/` `dist-e2e/` `dist-portrait-lab/` `dist-wechat-c5-*/` | 可重建，但**必须重建** |
-| **gitignore 的依赖** | `node_modules/`（含**未声明的** `playwright-core`） | `npm ci` 装不出 `playwright-core`（**见 §8 迁移 Blocker**） |
+| **gitignore 的依赖** | `node_modules/` 全部可由 `npm ci` 复原（含已入册的 `playwright-core`） | ✅ 无风险；⚠️ 但**浏览器**不在 npm 依赖里，Mac 需另跑 `npx playwright-core install chromium`（见附录 A 第 8a 步） |
 | **gitignore 的其它** | `outputs/` `_verify_q15recover/` `*.log` `tmp/` | 主要是录屏/临时产物，价值低 |
 | **本机 git 配置** | `.git/config`（remote、branch tracking）+ **git 身份 `xiaoyue <xiaoyue@local>`** | Mac 上需重设身份，否则 commit 作者变 |
 | **本地 git hooks** | **无**（`.git/hooks` 只有 `*.sample`） | 无风险 ✅ |
@@ -260,8 +262,16 @@ npx vitest run tests/repoHealth.test.ts --pool=vmForks --maxWorkers=1
 # 7) 构建（产品侧三路，不跑 RC）
 npm run build && npm run build:pages && npm run build:wechat
 
-# 8) Product E2E —— ⚠️ 需先补齐 playwright（见附录 B，否则全部 ENOENT/找不到模块）
-#    Mac 上必须先装 Microsoft Edge for macOS，或给脚本加 chromium 回退
+# 8) Product E2E
+#    8a) 先装「项目约定浏览器」——macOS **必做一次**
+#        `npm ci` 只装 playwright-core 驱动，**不下载浏览器**
+npx playwright-core install chromium
+
+#    8b) 启动解析顺序（唯一入口 = tests/_browser_launch.cjs）
+#        Windows：系统 Edge（channel:'msedge'，保留现行口径）
+#        macOS  ：Edge 不存在 → 自动落到上面装的 Chromium
+#        可显式覆盖：E2E_BROWSER_CHANNEL=chrome | E2E_BROWSER_EXECUTABLE_PATH=/path/to/browser
+#        全部候选失败 ⇒ 报错并打印安装指引（**不会**静默换未知浏览器）
 npm run e2e:product-home
 npm run e2e:product-reward
 npm run e2e:product-star-power
@@ -287,35 +297,43 @@ import('./scripts/repo-health.js').then((m)=>{
 
 - `tests/productRunFullReachableSpaceR10.test.ts`（≈42 分钟，且必须独占机器）
 - 全量 `vitest`（≈40s 起，但会与构建/E2E 抢资源产生**假超时**；要跑就独占机器）
-- `npm run e2e:product-reward` **前**务必先确认 playwright 到位（见附录 B）
+- `npm run e2e:product-reward` **前**务必先跑过第 8a 步（装浏览器）；只 `npm ci` 不装浏览器会报
+  “Executable doesn't exist”
 
 ---
 
 ## 附录 B｜迁移 Blocker 详表
 
-### B-1 ⛔ `playwright-core` 未声明（E2E **必失败**）
+### B-1 ✅ 已解除｜`playwright-core` 已正式入册（`MAC-MIGRATION-E2E-COMPAT-R1`）
 
-- **现象**：`tests/*.cjs` 里 **33 个** E2E 脚本 `require('playwright-core')`，
-  但该包**既不在 `package.json` 的 dependencies / devDependencies，也不在 `package-lock.json` 的根依赖里**。
-- **本机为何能跑**：`node_modules/playwright-core@1.62.1` 是**手工装的、从未入册**的本地残留。
-- **后果**：Mac 上 `npm ci` **不会**装它 ⇒ 所有 E2E `Cannot find module 'playwright-core'`。
-- **最小处置（不改仓库文件）**：
+- **原现象**：`tests/*.cjs` 里 **33 个** E2E 脚本 `require('playwright-core')`，
+  但该包**既不在 `package.json`，也不在 `package-lock.json`** ⇒ Mac `npm ci` 装不出来。
+- **处置（已落地）**：`playwright-core` 写入 `devDependencies`，**精确版本 `1.62.1`**
+  （= 原手工残留版本，锁死跨平台同一 chromium revision），lockfile 同步含
+  `resolved` + `integrity`。**未触碰任何其它 npm 包。**
+- **验证**：`rm -rf node_modules && npm ci` 后 `require('playwright-core')` 正常。
+- ⚠️ 仍在生效的约束：**必须精确版本**，不要改成 `^`（否则 Windows/macOS 会落到不同浏览器 revision）。
+
+### B-2 ✅ 已解除｜浏览器启动已跨平台统一（`MAC-MIGRATION-E2E-COMPAT-R1`）
+
+- **原现象**：E2E 各自写死 Windows-only 参数 —— **27 个** 文件含 `channel: 'msedge'`
+  （不止 8 条 Product E2E），其中 **6 个**还硬编码
+  `executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'`；
+  只有 8 个带 try/catch 回退 ⇒ macOS 上大面积失败。
+- **处置（已落地）**：新增唯一入口 `tests/_browser_launch.cjs`，**33 个 E2E 全部改走
+  `await launchBrowser(chromium)`**，散落的 `channel:'msedge'` / 硬编码 exe 路径 /
+  裸 `chromium.launch(` **归零**（守卫 `tests/e2eBrowserLaunchGuard.test.ts` B3–B6 钉死）。
+- **解析顺序（确定性，无「未知浏览器」静默回退）**：
+  ① 显式 `E2E_BROWSER_EXECUTABLE_PATH` / `MSEDGE`（历史兼容）→
+  ② 显式 `E2E_BROWSER_CHANNEL` → ③ 系统 Edge（Windows 现行口径）→
+  ④ **项目正式声明的 Chromium**；全败则抛聚合错误 + 安装指引（`E2E_NO_BROWSER`）。
+  ⚠️ ①② 一旦显式指定却启动失败，**直接报错**，不再猜其它浏览器。
+- **Mac 前置（一次性）**：
   ```bash
-  npm i --no-save playwright-core@1.62.1
+  npx playwright-core install chromium
   ```
-  （`--no-save` 避免污染 `package.json` / `package-lock.json`。）
-- **若要长期修**：应单独开一轮把 `playwright-core` 正式写进 devDependencies —— **属改码，不在本 Queue 范围**。
-
-### B-2 ⛔ `channel: 'msedge'` 在 Mac 上不存在（E2E **主流程失败**）
-
-- **现象**：**全部 8 条 Product E2E** 都写死 `chromium.launch({ channel: 'msedge', headless: true })`
-  且**没有 chromium 回退**（只有 `_e2e_encounter_lab.cjs` / `_e2e_fusion_*.cjs` 等少数几个有 try/catch 回退）。
-- **本机为何能跑**：Windows 自带 Microsoft Edge。
-- **Mac 处置（二选一）**：
-  - **A（零改码，推荐）**：在 Mac 上安装 **Microsoft Edge for macOS** ⇒ `channel:'msedge'` 原样可用。
-  - **B（要改码）**：给 8 条脚本加 `try { msedge } catch { chromium.launch({headless:true}) }` 回退
-    —— **属改 `tests/**`，需单独 Queue 授权**。
-- 另需 `npx playwright install chromium`（仅方案 B 需要）。
+  （`npm ci` 只装驱动，不下载浏览器；版本 1.62.1 ⇒ chromium revision 1234。）
+- 备选：macOS 若已装 Chrome/Edge，可 `E2E_BROWSER_CHANNEL=chrome`（或 `msedge`）跳过下载。
 
 ### B-3 ⚠️ Node 版本声明与实跑不一致
 

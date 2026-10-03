@@ -30,6 +30,7 @@ const { execFileSync, spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 
 const REPO_ROOT = path.join(__dirname, '..');
 const HOST = '127.0.0.1';
@@ -697,7 +698,7 @@ async function main() {
   );
 
   // Acceptance 3/4：真实浏览器，只访问根路径
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await launchBrowser(chromium);
   const viewports = [
     { w: 1920, h: 1080, dpr: 1, tag: '1920x1080@1' },
     { w: 1280, h: 720, dpr: 1.5, tag: '1280x720@1.5' },

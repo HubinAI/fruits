@@ -22,6 +22,7 @@
  * 用法：ENVS=... node tests/_e2e_garage_continuity.cjs
  */
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 const path = require('path');
 
 const BASE = process.env.PROBE_BASE || 'http://127.0.0.1:8138/';
@@ -260,11 +261,7 @@ async function cardPixels(page, card) {
 }
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: process.env.MSEDGE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-    headless: true,
-    args: ['--no-sandbox', '--disable-gpu'],
-  });
+  const browser = await launchBrowser(chromium, { args: ['--no-sandbox', '--disable-gpu'] });
   for (const envSpec of ENVS) {
     const [size, dprS] = envSpec.split('@');
     const [vw, vh] = size.split('x').map(Number);

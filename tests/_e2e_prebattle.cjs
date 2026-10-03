@@ -17,6 +17,7 @@
  * 用法：先 E2E_DIR=e2e node tests/_serve_pages.cjs & 再 node tests/_e2e_prebattle.cjs
  */
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 const BASE = 'http://127.0.0.1:8138/';
 const LOGICAL_W = 844;
 const LOGICAL_H = 390;
@@ -259,7 +260,7 @@ async function runViewport(browser, vp) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await launchBrowser(chromium);
   const viewports = [
     { w: 844, h: 390, dpr: 1 },
     { w: 621, h: 351, dpr: 1 },

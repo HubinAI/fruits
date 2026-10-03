@@ -90,6 +90,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright-core');
+const { launchBrowser } = require('./_browser_launch.cjs');
 
 const ROOT = path.join(__dirname, '..', 'dist-portrait-lab');
 const PORT = 8167;
@@ -1000,7 +1001,7 @@ async function main() {
   const server = await startServer();
   log(true, 'P0 静态产物就绪（dist-portrait-lab 内 home.html + run-page.html 真实存在）');
 
-  const browser = await chromium.launch({ channel: 'msedge', headless: true });
+  const browser = await launchBrowser(chromium);
   /*
     ⚠️ 视口 = 390×844 / DPR 1：Run 画布 **1:1**（不是桌面手机框缩放）。
     这样 `getImageData` 的精确色统计才成立（缩放重采样会让颜色失真）。
