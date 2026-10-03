@@ -1,7 +1,7 @@
 # CURRENT STATE｜《最强水果》当前最新状态
 
-> **日期**：2026-10-03
-> **HEAD**：`7241aab9f1df5477d0314e9283a525df153b06a4`
+> **日期**：2026-10-03（Mac 技术迁移验收已通过，见 §0）
+> **HEAD**：`925c79dc4ec812c98a0235fdddf6a4caf9bc0b3d`
 > **分支**：`prototype-portrait-battle-lab`（实验分支，可整块删除）｜**主线**：`foundation-02-wechat`
 > **远端**：`origin git@github.com:HubinAI/fruits.git`
 >
@@ -10,22 +10,86 @@
 
 ---
 
+## 0. 迁移基线与 Mac 验收结论（**新窗口先读这段**）
+
+**当前迁移基线 HEAD = `925c79d`**（分支 `prototype-portrait-battle-lab`），四路 SHA 一致：
+HEAD / 本机 ref / `origin/<branch>` / `git ls-remote` 直连远端。
+
+⚠️ **本文件与另两份 handoff 的头部字段仍写 `7241aab` —— 那已过期一格，是文档滞后，不是代码冲突。**
+`7241aab` 的两个后继（都在本分支上）：
+
+```
+925c79d infra(e2e): Playwright 正式入册 + 33 个 E2E 统一跨平台浏览器启动（MAC-MIGRATION-E2E-COMPAT-R1）
+9e2ba72 docs(handoff): Mac 迁移交接三件套（Baseline / Rules / CurrentState）
+7241aab PRODUCT-LOOP-R13-ENCOUNTER-ORDER-MATRIX-R1: Encounter 顺序全排列取证（test-only）
+```
+
+### 0.1 Windows → Mac 技术迁移：**已通过**（2026-10-03 验收）
+
+| 层 | 结论 |
+|---|---|
+| Git（branch / HEAD / origin / 工作树 / stash / fsck） | ✅ 四路 SHA 一致，工作树干净，repo-health **9/9** |
+| 依赖（`npm ci` 可恢复性） | ✅ `npm ls --all` 零 invalid/missing；`lightningcss-darwin-arm64` 到位、**零 win32 残留** |
+| Playwright / Chromium | ✅ 启动链实测 PASS（Chromium `151.0.7922.34`，DOM 读 + 截图全通） |
+| tsc | ✅ `npm run typecheck` exit 0 |
+| builds | ✅ **四路**（含 `build:portrait-lab`，见 §附录 A 第 7 步） |
+| Product E2E | ✅ 8 条全跑完，**0 条 Mac 归因失败**（`product-fail` 48/48 全绿） |
+| **平台行为差异** | ✅ **未发现**。`product-fail` 含真实浏览器 + 真实点击 + 真实 `getImageData` 像素比对，全绿 ⇒ 渲染/点击/像素取证链正常 |
+
+**Mac 环境**：macOS 26.6（Build 25G72）· **arm64** · 系统 Node **v24.21.0** / npm **11.19.0**（均在 `/usr/local/bin`）· git 2.50.1（Apple Git-155）。
+
+### 0.2 ⚠️ 已知环境事实：WorkBuddy 会话默认 Node = 22.22.2（**非 Mac 缺陷 · 未解决 · 需人工处置**）
+
+`package.json` `engines.node = ">=24.0.0"`，但**在 WorkBuddy 里执行 `node -v` 得到 v22.22.2**（你手工 Terminal 里是 v24.21.0）。
+
+- **来源**：WorkBuddy **CLI harness 拥有** managed Node/Python runtime（app.asar 内原文：*“The CLI harness owns command execution, managed Node/Python runtimes…”*）。
+  它在 spawn shell 时把 `~/.workbuddy/binaries/node/versions/22.22.2-3/bin` **前插**到 PATH 第 3 位，
+  排在 `/usr/local/bin`（第 19 位）之前。
+- **已排除的无效路径**（勿重复尝试）：
+  - `~/.zshrc` / `~/.zprofile` / `~/.profile` / `~/.zshenv` —— shell 是 **`zsh -c` 非交互**（`ZSH_EVAL_CONTEXT=cmdarg:eval`），
+    **profile 文件根本不加载**（`.zshenv` 实测写入后仍是 `UNSET`，已清理）。
+  - `~/.workbuddy/settings.json` —— 无 `node` / `env` / `PATH` / `runtime` 任何键（已递归遍历确认）。
+  - 项目级 `.workbuddy/settings.json` —— 不存在，且无证据表明支持。
+  - `~/.workbuddy/shell-snapshots/*.sh` —— **会话级一次性缓存**（会话开始时生成 2 个，此后 20+ 次调用不再新增），改它无效。
+- **结论**：**WorkBuddy 自身不提供项目级 Node 版本覆盖入口**。要让它用 Node 24，只能由用户在
+  WorkBuddy 设置界面内切换运行时（本机 grep 到的 `22.22.2-1/-2/-3` 是 CLI 自用运行时版本，不是可选偏好）。
+- **在解决前的正确做法**：本项目所有 npm 命令**显式用系统 Node**：
+  ```bash
+  export PATH=/usr/local/bin:$PATH   # node -v => v24.21.0 / npm -v => 11.19.0
+  ```
+  **禁止**用改 `engines` / 降级依赖 / 改产品代码的方式绕过（见 §0.3）。
+
+### 0.3 迁移期已确认的既有红（**跨平台同因，不是 Mac 问题，本轮未修**）
+
+| 现象 | 归因 |
+|---|---|
+| `product-home` A6（`sprites=2` 要求 `>=3`） | 判据由**入库的 5 个 PNG**（`git ls-files assets/` 确认）+ 默认装配决定，Windows 上字节相同 ⇒ 必然同红。属**内容量缺口**（已冻结项） |
+| `product-legacy` L8 | 断言 `expectedB` 只清 `front` 却期望保留 `top="hammer"`，而 **Hidden Top Weapon Removal**（P0）会清 `top` ⇒ **断言与已生效契约的口径偏差** |
+| `default-entry` F2c（`initialGap=563.66`，期望 ≈606） | 两个视口读数**完全相同** ⇒ 确定性几何读数，非渲染随机性 |
+| `product-loop` / `product-reward` / `product-reseed` 的 COMPLETE 相关红与大量 BLOCKED | 根因 = **§5.1 的 Q3 能力缺口**（`hammer`/`rammer` 打不赢完整 Run）。`product-reward` C0a 独立复现同一读数（`phase=FAILED battles=3/3 耐久=0% DAY=4`）。BLOCKED 是安全网**如实登记**，既不计 PASS 也不计 FAIL |
+
+> ⚠️ 这四条**本轮明令未处理**（不顺手改判据、不改产品逻辑）。
+
+---
+
 ## 1. 当前 HEAD 与工作树
 
 | 项 | 值 |
 |---|---|
-| HEAD | `7241aab9f1df5477d0314e9283a525df153b06a4` |
+| HEAD | `925c79dc4ec812c98a0235fdddf6a4caf9bc0b3d` |
 | 分支 | `prototype-portrait-battle-lab` |
 | 上游 | `origin/prototype-portrait-battle-lab`（SHA 一致） |
-| `origin/prototype-portrait-battle-lab` | `7241aab9f1df5477d0314e9283a525df153b06a4` ✅ |
+| `origin/prototype-portrait-battle-lab` | `925c79dc4ec812c98a0235fdddf6a4caf9bc0b3d` ✅（`git ls-remote` 直连远端复核） |
 | `origin/foundation-02-wechat` | `1bb35d781a31d18c915a52bcfde9fab7bc15496c`（**落后于产品工作**） |
-| 工作树 | 仅有 `.workbuddy/memory/**` 与本地交接文档（**见 §6**） |
+| 工作树 | 干净（Mac 验收时 `git status --porcelain` 为空） |
 | `git stash` | 空 |
 | `.git/REVERT_HEAD` | 不存在（回退已收口） |
 
 最近提交（倒序）：
 
 ```
+925c79d infra(e2e): Playwright 正式入册 + 33 个 E2E 统一跨平台浏览器启动（MAC-MIGRATION-E2E-COMPAT-R1）
+9e2ba72 docs(handoff): Mac 迁移交接三件套（Baseline / Rules / CurrentState）
 7241aab PRODUCT-LOOP-R13-ENCOUNTER-ORDER-MATRIX-R1: Encounter 顺序全排列取证（test-only）
 b355338 PRODUCT-LOOP-R12-FIRE-WINDOW-ROLLBACK: 整块回退「对手开火执行期停止后撤」（精确反向 patch）
 89c0285 PRODUCT-LOOP-R12-RANGED-TURRET-FIRE-WINDOW: 对手开火执行期停止后撤（单规则）
@@ -242,7 +306,7 @@ cd fruits
 
 # 2) checkout 正确分支（产品工作全在这条上，不是 foundation-02-wechat）
 git checkout prototype-portrait-battle-lab
-git rev-parse HEAD          # 期望 7241aab 或其后继
+git rev-parse HEAD          # 期望 925c79d（或其后继）
 git log --oneline -5        # 确认拿到 §2 的提交链
 
 # 3) 设 git 身份（clone 不带 .git/config 的 user 段）
@@ -259,12 +323,20 @@ npm run typecheck           # = tsc --noEmit，必须 exit 0
 npx vitest run tests/repoHealth.test.ts --pool=vmForks --maxWorkers=1
 #    ⚠️ 所有 vitest 必须带 --pool，否则全失败（与代码无关）
 
-# 7) 构建（产品侧三路，不跑 RC）
-npm run build && npm run build:pages && npm run build:wechat
+# 7) 构建（产品侧四路，不跑 RC）
+#    ⚠️ 第四路 build:portrait-lab 不能省：8 条 Product E2E 全部读 dist-portrait-lab/
+#       漏了它 ⇒ 4 条 E2E 直接报「未找到 dist-portrait-lab/home.html」
+npm run build && npm run build:pages && npm run build:wechat && npm run build:portrait-lab
 
 # 8) Product E2E
 #    8a) 先装「项目约定浏览器」——macOS **必做一次**
 #        `npm ci` 只装 playwright-core 驱动，**不下载浏览器**
+#        Mac 实测口径：playwright-core **1.62.1**（精确版本，勿改 `^`）
+#          ⇒ browsers.json 声明 chromium revision **1234**
+#          ⇒ 缓存落在 ~/Library/Caches/ms-playwright/chromium-1234
+#             （macOS 布局是 chrome-mac/…/Chromium.app/Contents/MacOS/Chromium；
+#              headless 走 chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/）
+#        ⚠️ 缓存里若还有别的 revision（如 1243）不影响：驱动只认自己声明的 1234
 npx playwright-core install chromium
 
 #    8b) 启动解析顺序（唯一入口 = tests/_browser_launch.cjs）
@@ -299,6 +371,8 @@ import('./scripts/repo-health.js').then((m)=>{
 - 全量 `vitest`（≈40s 起，但会与构建/E2E 抢资源产生**假超时**；要跑就独占机器）
 - `npm run e2e:product-reward` **前**务必先跑过第 8a 步（装浏览器）；只 `npm ci` 不装浏览器会报
   “Executable doesn't exist”
+- ⚠️ **在 WorkBuddy 里跑任何 npm 命令前**先 `export PATH=/usr/local/bin:$PATH`
+  （WorkBuddy 会话默认 Node 是 22.22.2，详见 §0.2）
 
 ---
 
@@ -334,18 +408,30 @@ import('./scripts/repo-health.js').then((m)=>{
   ```
   （`npm ci` 只装驱动，不下载浏览器；版本 1.62.1 ⇒ chromium revision 1234。）
 - 备选：macOS 若已装 Chrome/Edge，可 `E2E_BROWSER_CHANNEL=chrome`（或 `msedge`）跳过下载。
+- ✅ **Mac 实测通过**（2026-10-03）：msedge 不存在 → 自动落到项目 bundled Chromium
+  `151.0.7922.34`，newContext / newPage / DOM 读取 / 截图全通 ⇒ 启动链 PASS。
 
-### B-3 ⚠️ Node 版本声明与实跑不一致
+### B-3 ⚠️ Node 版本：`engines` 要求 ≥24，但 **WorkBuddy 会话实跑 22.22.2**（Mac 已复核）
 
-- `package.json` `engines.node = ">=24.0.0"`；本机实跑 **v22.22.2**、CI 也用 **22**。
-- **不是硬 Blocker**（无 `.npmrc` / 未开 `engine-strict`，只会出 `EBADENGINE` 警告）。
-- 建议 Mac 装 **Node 22 LTS 或 24 LTS** 均可；若想消灭警告，用 24。
+- `package.json` `engines.node = ">=24.0.0"`；**Mac 系统 Node = v24.21.0 / npm 11.19.0**（在 `/usr/local/bin`，满足声明）。
+- ⚠️ **但 WorkBuddy 会话里 `node -v` = v22.22.2** —— WorkBuddy CLI harness 把自带的
+  `~/.workbuddy/binaries/node/versions/22.22.2-3/bin` 前插到 PATH 第 3 位，排在 `/usr/local/bin`（第 19 位）之前。
+  **你手工 Terminal 里是 24.21.0，只有 WorkBuddy 里是 22.22.2** ⇒ 两套执行环境不一致。
+- **不是硬 Blocker**（无 `.npmrc` / 未开 `engine-strict`，`npm ci` 只出 `EBADENGINE` 警告不失败）；
+  且 `engines` 声明 ≥24 与 CI 实跑 22 本来就并存（CI `.github/workflows/pages.yml` 用 22）。
+- **完整调查结论与已排除路径见 §0.2** —— profile 文件（`.zshrc`/`.zprofile`/`.zshenv`/`.profile`）
+  **不被加载**（shell 是 `zsh -c` 非交互）、`settings.json` 无相关键、项目级 settings 不存在、
+  `shell-snapshots` 是会话级一次性缓存 ⇒ **WorkBuddy 无项目级 Node 覆盖入口**，需用户在设置界面切换运行时。
+- **当前正确做法**：WorkBuddy 内跑 npm 前 `export PATH=/usr/local/bin:$PATH`。
+  **禁止**用降 `engines` / 降级依赖 / 改产品代码绕过。
 
-### B-4 ⚠️ 平台专属可选依赖
+### B-4 ✅ Mac 已解除｜平台专属可选依赖
 
-- 现 `node_modules` 含 `lightningcss-win32-x64-msvc`（Windows 专用）。
-- Mac 上**必须**重建：`rm -rf node_modules && npm ci` ⇒ 自动换 `lightningcss-darwin-*`。
-- **绝不要**跨机拷贝 `node_modules/`。
+- Windows 侧 `node_modules` 含 `lightningcss-win32-x64-msvc`；Mac **必须**重建
+  （`rm -rf node_modules && npm ci`）⇒ 自动换 darwin 版。**绝不要**跨机拷贝 `node_modules/`。
+- ✅ **Mac 实测**：`lightningcss-darwin-arm64` 到位、**零 `lightningcss-win32-*` 残留**；
+  `npm ls --all` 零 invalid/missing。
+  （注：Vite 8 用 **rolldown** 而非 rollup/esbuild，故无 `@rollup/*`、`@esbuild/*` 平台包**属正常，不是缺包**。）
 
 ### B-5 ⚠️ 仓库外资产（clone 永远带不走）
 
