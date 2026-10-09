@@ -115,6 +115,22 @@ export interface WheelDef {
    * computeEnergy / validateSnapshot 计入 movements 能量。
    */
   energy: number;
+  /**
+   * MOVEMENT-CRUISE-SPEED-FOUNDATION-R1｜**持续速度**（px/step）。
+   *
+   * 本字段把「持续推进速度」从全局硬编码（`AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP`）
+   * 下沉为**Movement 正式数据能力**：原先四档轮组共用同一个 1.5，
+   * 导致 radius / maxRPM / driveTorque 的差异在「极速」维度上被完全抹平，
+   * 近战 Build（hammer / rammer）因此无法制造闭距接触窗口。
+   *
+   * - 语义 = `drivePlanckVehicle` 的 `targetSpeedPxPerStep`（px/step，1.0 ≈ 60 px/s）；
+   * - **第一版所有已有 Movement 统一填 1.5** ⇒ 本字段落地后正式玩法与改前逐字节一致；
+   * - 整车取值 = 前后轮**取较低者**（保守：速度是短板效应），见
+   *   `resolveVehicleCruiseSpeedPxPerStep`（`planckMovement.ts`）；
+   * - 与 `maxRPM` 的区别：`maxRPM` 是**轮组自身的角速度上限**（rad/step 口径），
+   *   本字段是**整车推进目标**；两者是不同层的约束，不互相替代。
+   */
+  cruiseSpeedPxPerStep: number;
   /** W1-VIS-1：可选视觉定义（无则 Renderer 用 Collider/Circle fallback） */
   visual?: VisualDef;
 }

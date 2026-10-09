@@ -25,7 +25,10 @@ import {
   type PlanckPartRuntime,
   type PlanckVehicle,
 } from './planckVehicleAssembly';
-import { drivePlanckVehicle } from './planckMovement';
+import {
+  drivePlanckVehicle,
+  resolveVehicleCruiseSpeedPxPerStep,
+} from './planckMovement';
 import { decideEnemyDrive, type EnemyDriveContext, type EnemyDriveDecision } from './enemyDrive';
 import type { PartBehaviorRuntime } from './behaviorRuntime';
 import { getBehaviorFactory } from './behaviorRegistry';
@@ -63,6 +66,13 @@ const FIXED_DT_MS = 1000 / PHYSICS_HZ;
  * autoDrive 目标线速度（px/step）：复用 Matter movement.TARGET_SPEED（1.5 px/step ≈ 90 px/s）
  * 的既有 autoDrive 语义；不新增物理阈值或参数。drivePlanckVehicle 取其目标速度，
  * 由车轮真实 grip 提供牵引（不施加 force/impulse）。
+ *
+ * ⚠️ MOVEMENT-CRUISE-SPEED-FOUNDATION-R1：本常量**不再是玩家 drive 的正式真源**，
+ * 只保留两个用途：
+ *   ① **无有效 Movement 时的安全 fallback**（见 `FALLBACK_CRUISE_SPEED_PX_PER_STEP`，
+ *      与本常量同值 ⇒ 卸掉全部轮组的既有行为逐字节不变）；
+ *   ② **敌人 AI 的 approach 速度**（`decideEnemyDrive` 的既有入参，敌人不接入玩家 Build 数据）。
+ * 玩家的持续速度改由 `resolveVehicleCruiseSpeedPxPerStep(vehicleA.wheels)` 从 Movement 数据链解析。
  */
 const AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP = 1.5;
 
@@ -397,10 +407,13 @@ export class PlanckBattleOrchestrator {
       // 与既有行为完全一致）；未驱动侧轮子 motor 保持关闭（站桩，真实物理可被推动/翻转）。
       const drive = resolveDriveEnable(this.config.autoDrive, this.config.sideDrive);
       if (drive.a) {
+        // MOVEMENT-CRUISE-SPEED-FOUNDATION-R1：玩家持续速度来自 **Movement 数据链**
+        // （`WheelDef.cruiseSpeedPxPerStep`，整车取前后较低者），
+        // 不再直接读全局常量。四档轮组第一版都填 1.5 ⇒ 与改前逐字节一致。
         drivePlanckVehicle(this.world, this.vehicleA, {
           enabled: true,
           worldDirection: 1,
-          targetSpeedPxPerStep: AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
+          targetSpeedPxPerStep: resolveVehicleCruiseSpeedPxPerStep(this.vehicleA.wheels),
         });
       }
       if (drive.b) {

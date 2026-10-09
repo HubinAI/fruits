@@ -398,6 +398,7 @@ const wheelStd: WheelDef = {
   maxRPM: 300,
   grip: 0.9,
   energy: 0,
+  cruiseSpeedPxPerStep: 1.5,
 };
 
 /**
@@ -419,6 +420,7 @@ const smallWheel: WheelDef = {
   maxRPM: 380,
   grip: 0.9,
   energy: 5,
+  cruiseSpeedPxPerStep: 1.5,
 };
 
 /**
@@ -441,6 +443,7 @@ const largeWheel: WheelDef = {
   maxRPM: 240,
   grip: 0.9,
   energy: 12,
+  cruiseSpeedPxPerStep: 1.5,
 };
 
 /**
@@ -464,6 +467,7 @@ const heavyWheel: WheelDef = {
   maxRPM: 260,
   grip: 0.9,
   energy: 15,
+  cruiseSpeedPxPerStep: 1.5,
 };
 
 /**

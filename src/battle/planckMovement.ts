@@ -68,3 +68,41 @@ export function drivePlanckVehicle(
     });
   }
 }
+
+/**
+ * 无任何有效 Movement 时的**安全 fallback** 持续速度（px/step）。
+ *
+ * MOVEMENT-CRUISE-SPEED-FOUNDATION-R1：与「改前玩家 auto-drive 的唯一常量」
+ * `AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP = 1.5` **同值**，因此卸掉全部轮组的既有
+ * Build 行为逐字节不变。
+ *
+ * ⚠️ 语义是「**不额外创造推进能力**」：双侧皆无 Movement 时回落到既有基线值，
+ * 而不是给一个更高（会凭空增强无轮车）的数字。
+ */
+export const FALLBACK_CRUISE_SPEED_PX_PER_STEP = 1.5;
+
+/**
+ * MOVEMENT-CRUISE-SPEED-FOUNDATION-R1｜整车持续速度解析（唯一真源）。
+ *
+ * 规则（按 Queue 必改 2）：
+ * 1. **前后均装备 Movement** → 取两者 `cruiseSpeedPxPerStep` 的**较低者**
+ *    （速度是短板效应：慢的一侧决定整车能跑多快）；
+ * 2. **只有一侧有效** → 使用该侧数值；
+ * 3. **无有效 Movement** → `FALLBACK_CRUISE_SPEED_PX_PER_STEP`（安全 fallback，
+ *    不额外创造推进能力）。
+ *
+ * 非法值（非有限 / 负数）一律视为**该侧无效**，走 fallback；
+ * `maxRPM` 仍由 `drivePlanckVehicle` 在轮组层独立裁决，本函数**不介入**。
+ */
+export function resolveVehicleCruiseSpeedPxPerStep(
+  wheels: readonly { def: { cruiseSpeedPxPerStep: number } }[],
+  fallback: number = FALLBACK_CRUISE_SPEED_PX_PER_STEP,
+): number {
+  let min: number | null = null;
+  for (const w of wheels) {
+    const v = w.def.cruiseSpeedPxPerStep;
+    if (!Number.isFinite(v) || v < 0) continue; // 非法 ⇒ 该侧不参与
+    if (min === null || v < min) min = v;
+  }
+  return min === null ? fallback : min;
+}
