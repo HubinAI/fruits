@@ -914,12 +914,56 @@ const thruster: FunctionalPartDef = {
     distanceTrigger: {
       enabled: true,
       /** 过远阈值（px）：真实 AABB 间距超过此值视为「需要靠近」 */
-      farThreshold: 280,
+      thresholdPx: 280,
+      /** 触发方向：过远 → 前冲 */
+      mode: 'far',
       /** 「敌人在前方」判定余量（px）：前向投影须大于此值 */
       forwardMarginPx: 1,
       /** 触发后冷却（ms） */
       cooldownMs: 2500,
       /** 单次前冲持续时间（ms） */
+      burstMs: 420,
+    },
+  },
+};
+
+/**
+ * GADGET-REVERSE-THRUSTER-PROTOTYPE-R1｜**反推器**（Gadget）——「敌人过近 → 短时后撤」。
+ *
+ * 与 `thruster` **共用同一 behavior（`behavior: 'thruster'`）与同一状态机**，
+ * 只靠 `distanceTrigger.mode: 'near'` 切换触发方向与冲量符号（−前向 = 车尾方向）：
+ * - 触发：敌人在前方 且 真实 AABB 间距 < `thresholdPx` 且 冷却结束；
+ * - 施力：沿**车尾方向**推自己 chassis（真实后撤）；
+ * - 不瞬移 / 不推敌人 / 不改对方速度 / 不吸附 / 不识别武器类型。
+ *
+ * 用途：为远程 Weapon 重新建立射击空间（过近 → 后撤 → 拉开）。
+ */
+const reverseThruster: FunctionalPartDef = {
+  id: 'reverseThruster',
+  name: '反推器',
+  category: 'gadget',
+  mass: 15,
+  energy: 20,
+  // 与 thruster 同形状：短粗喷口，本地 x∈[0,30]、高 24
+  collider: { shape: 'box', width: 30, height: 24, offset: { x: 15, y: 0 } },
+  behavior: 'thruster', // 复用同一 behavior（mode 决定方向）
+  behaviorParams: {
+    // 固定周期字段仍需存在（readThrusterParams 校验），但本模式走 distanceTrigger 分支
+    windupMs: 250,
+    thrustMs: 300,
+    cooldownMs: 1500,
+    thrustImpulse: 40,
+    flameColor: '#7fd7ff', // 冷蓝喷焰：与推进器的暖橙一眼区分（纯表现）
+    flameLength: 105,
+    flameWidth: 35,
+    distanceTrigger: {
+      enabled: true,
+      /** 过近阈值（px）：真实 AABB 间距小于此值视为「太近，需要拉开」 */
+      thresholdPx: 175,
+      /** 触发方向：过近 → 后撤 */
+      mode: 'near',
+      forwardMarginPx: 1,
+      cooldownMs: 2500,
       burstMs: 420,
     },
   },
@@ -1094,6 +1138,8 @@ export function createRegistry(): ContentRegistry {
       [saw.id, saw],
       [shotgun.id, shotgun],
       [thruster.id, thruster],
+      // GADGET-REVERSE-THRUSTER-PROTOTYPE-R1：反推器（复用 thruster behavior，mode='near'）
+      [reverseThruster.id, reverseThruster],
       [machineGun.id, machineGun],
       [flamethrower.id, flamethrower],
     ]),

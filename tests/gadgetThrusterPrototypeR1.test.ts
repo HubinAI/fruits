@@ -81,9 +81,12 @@ describe('GADGET-THRUSTER-PROTOTYPE-R1', () => {
     const t = registry.functionals.get('thruster')!;
     expect(t.category).toBe('gadget');
     expect(t.energy).toBe(20);
-    const bp = t.behaviorParams as { distanceTrigger?: { enabled?: boolean; farThreshold?: number } };
+    const bp = t.behaviorParams as {
+      distanceTrigger?: { enabled?: boolean; mode?: string; thresholdPx?: number };
+    };
     expect(bp.distanceTrigger?.enabled, 'distanceTrigger.enabled').toBe(true);
-    expect(bp.distanceTrigger?.farThreshold).toBe(280);
+    expect(bp.distanceTrigger?.mode, 'Thruster 是 far 模式（前冲）').toBe('far');
+    expect(bp.distanceTrigger?.thresholdPx).toBe(280);
   });
 
   it('GT-02 EMPTY Gadget 基准：Hammer × RangedTurret 仍为既有结果（0 contact / 0 伤害）', () => {

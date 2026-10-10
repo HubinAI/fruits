@@ -111,8 +111,16 @@ function readThrusterParams(part: PlanckPartRuntime): ThrusterParams {
       }
       return v;
     };
+    const rawThreshold =
+      typeof t.thresholdPx === 'number' && Number.isFinite(t.thresholdPx) && t.thresholdPx > 0
+        ? t.thresholdPx
+        : numT(t.farThreshold, 'farThreshold');
+    const mode = t.mode === 'near' ? 'near' : 'far';
     trigger = {
-      farThreshold: numT(t.farThreshold, 'farThreshold'),
+      mode,
+      thresholdPx: rawThreshold,
+      // 缺省方向由 mode 决定：far → 前冲(+)；near → 后撤(−)
+      thrustSign: t.thrustSign === -1 ? -1 : t.thrustSign === 1 ? 1 : mode === 'near' ? -1 : 1,
       forwardMarginPx: numT(t.forwardMarginPx, 'forwardMarginPx'),
       cooldownMs: numT(t.cooldownMs, 'cooldownMs'),
       burstMs: numT(t.burstMs, 'burstMs'),
@@ -150,8 +158,18 @@ function stepsFor(ms: number): number {
  * ⚠️ 本组参数是 **Prototype 数值**（明显放大以验证方向），不是正式平衡值。
  */
 export interface ThrusterTriggerParams {
-  /** 触发距离阈值（px）：**真实碰撞 AABB 间距** > 此值即视为「过远」 */
-  farThreshold: number;
+  /**
+   * GADGET-REVERSE-THRUSTER-PROTOTYPE-R1｜触发方向：
+   * - `'far'`（缺省）= 敌人**过远**时触发 **前冲**（Thruster 语义）；
+   * - `'near'` = 敌人**过近**时触发 **后撤**（Reverse Thruster 语义）。
+   */
+  mode?: 'far' | 'near';
+  /** 触发距离阈值（px）：`far` 模式为「远于此」；`near` 模式为「近于此」 */
+  thresholdPx?: number;
+  /** @deprecated 旧字段名（等价 thresholdPx）；保留兼容，新内容用 thresholdPx */
+  farThreshold?: number;
+  /** 触发时的冲量方向：缺省 = 跟随 mode（far→+前向，near→−前向） */
+  thrustSign?: 1 | -1;
   /**
    * 「敌人在前方」判定容差：对方车辆包围盒中心须位于自车前向半球内。
    * 用包围盒中心 X 相对自车中心 X 的符号 + 朝向判定，不依赖任何吸附/锁定。
@@ -159,7 +177,7 @@ export interface ThrusterTriggerParams {
   forwardMarginPx: number;
   /** 触发后的冷却（ms）：冷却结束前不再触发 */
   cooldownMs: number;
-  /** 单次前冲持续时间（ms） */
+  /** 单次推进持续时间（ms） */
   burstMs: number;
 }
 
@@ -301,11 +319,12 @@ export class ThrusterBehavior {
     this.phase = 'cooldown'; // 对渲染层表现为「无喷焰」，不伪造推进
     this.phaseStepsRemaining = 0;
     const gap = this.realGapPx(world, vehicle);
-    if (
-      gap !== null &&
-      gap > t.farThreshold &&
-      this.enemyIsAhead(world, vehicle, t.forwardMarginPx)
-    ) {
+    // GADGET-REVERSE-THRUSTER-PROTOTYPE-R1：mode 决定触发方向
+    //   far  → 敌人过远 → 前冲（拉近）
+    //   near → 敌人过近 → 后撤（拉开重新建立射击空间）
+    const threshold = t.thresholdPx!;
+    const inTriggerBand = gap !== null && (t.mode === 'near' ? gap < threshold : gap > threshold);
+    if (inTriggerBand && this.enemyIsAhead(world, vehicle, t.forwardMarginPx)) {
       this.triggeredState = 'thrust';
       this.phase = 'thrust';
       this.triggerCount += 1;
@@ -381,10 +400,13 @@ export class ThrusterBehavior {
     part: PlanckPartRuntime,
   ): void {
     const { thrust } = this.computeDirs(world, vehicle);
+    // GADGET-REVERSE-THRUSTER-PROTOTYPE-R1：sign = −1 时沿**车尾方向**施力（真实后撤）。
+    // 只作用于自己 chassis，不碰对方（不推敌人、不改对方速度）。
+    const sign = this.params.trigger?.thrustSign ?? 1;
     const mount = world.getPosition(part.body); // 冲量作用点=真实安装点（自然姿态/力矩反作用）
     world.applyLinearImpulse(
       vehicle.body,
-      { x: thrust.x * this.params.thrustImpulse, y: thrust.y * this.params.thrustImpulse },
+      { x: thrust.x * sign * this.params.thrustImpulse, y: thrust.y * sign * this.params.thrustImpulse },
       mount,
     );
   }
