@@ -6,6 +6,9 @@ import type { BuildSnapshot } from '../core/types';
 import type { BattleConfig } from '../battle/battleOrchestrator';
 import type { CameraFit } from '../render/renderer';
 import { getPreset } from './presets';
+import { registry } from '../core/content';
+import { buildSnapshotFromDraft } from './buildEditorModel';
+import { OPPONENT_TEMPLATES } from '../player/opponentPool';
 
 /** 场景取景提示（Q02-CAM-R1/R2，仅显示层）：镜头在 load/Reset/resize 时按此构图一次并固定 */
 export interface ScenarioCamera {
@@ -892,6 +895,129 @@ export const SCENARIOS: ScenarioDef[] = [
     camera: { fit: 'vehicles' },
   },
 ];
+
+/* ================================================================
+ * GADGET-VALIDATION-LAB-R1｜Gadget 真人验收预设（4 个固定预设）
+ *
+ * 只为**专用测试环境**（Portrait Battle Lab）提供，不接正式 Garage、
+ * 不改正式产品流程。
+ *
+ * 目标：一次真人验收就能判断 Gadget 是否
+ *   ① 可感知（有真实前冲/后撤 + 喷焰）、② 可理解（能看出用途）、
+ *   ③ 会改变 Build 选择（近战 vs 远程的空间诉求不同）。
+ *
+ * ⚠️ 关键纪律：**Gadget 必须走正式 Build → Runtime 链**
+ *   （`BuildSnapshot.gadget` → `resolveSnapshot` → `createPlanckVehicle`
+ *   → BehaviorRegistry），**不直接调用 Gadget behavior**。
+ *   因此本节只构造普通 `BuildSnapshot`（带 `gadget` 字段），
+ *   与正式玩法走完全相同的装配与校验路径。
+ *
+ * ⚠️ 敌人直接引用正式对手模板（OPP-03 / OPP-16），
+ *   与正式 Encounter 同一份内容，不另写一份敌人 Build（避免漂移）。
+ * ================================================================ */
+
+/** 验收预设里的玩家车：watermelon + 标准轮 + 指定主武器 + 指定 Gadget。 */
+function gadgetValidationCar(
+  id: string,
+  weaponDefId: string,
+  gadgetDefId: string,
+): BuildSnapshot {
+  return {
+    id,
+    bodyDefId: 'watermelonBody',
+    quality: 1,
+    movements: [
+      { hardpointId: 'rear', defId: 'wheelStd' },
+      { hardpointId: 'front', defId: 'wheelStd' },
+    ],
+    // 主武器走**正式** frontMass 槽（产品同一条路径）
+    functionals: [{ hardpointId: 'frontMass', defId: weaponDefId }],
+    // 独立 Gadget 位（GADGET-SLOT-FOUNDATION-R1）
+    gadget: { defId: gadgetDefId },
+  };
+}
+
+/** 验收预设的敌人车：直接取正式对手模板（与正式 Encounter 同一份内容）。 */
+function gadgetValidationEnemy(templateId: string, id: string): BuildSnapshot {
+  const t = OPPONENT_TEMPLATES.find((x) => x.id === templateId);
+  if (!t) throw new Error(`[GADGET-VALIDATION-LAB-R1] 正式对手池不存在模板 "${templateId}"`);
+  return buildSnapshotFromDraft(t.draft, registry, id);
+}
+
+/** 验收预设 id（可被 targeted test 引用，避免字符串写错）。 */
+export const GADGET_VALIDATION_SCENARIO_IDS = {
+  /** A：锤 + 推进器（过远前冲）×远程炮台 */
+  A: 'GVL-A',
+  /** B：锤 + 反推器（过近后撤）×远程炮台 */
+  B: 'GVL-B',
+  /** C：炮 + 推进器 × 追猎者 */
+  C: 'GVL-C',
+  /** D：炮 + 反推器 × 追猎者 */
+  D: 'GVL-D',
+} as const;
+
+/** 统一 spawn / 驱动：双方正常速度自动战斗（`autoDrive: true`）。 */
+const GVL_CONFIG: BattleConfig = {
+  engine: 'planck',
+  autoDrive: true,
+  spawnA: { x: 450, y: 650, facing: 1 },
+  spawnB: { x: 1150, y: 650, facing: -1 },
+};
+
+/** 四个预设（`name` 即真人看到的轻量标签：`Weapon + Gadget`）。 */
+export const GADGET_VALIDATION_SCENARIOS: ScenarioDef[] = [
+  {
+    id: GADGET_VALIDATION_SCENARIO_IDS.A,
+    name: 'Hammer + Thruster',
+    description:
+      'Gadget 验收 A（GADGET-VALIDATION-LAB-R1）：锤 + 推进器 × 远程炮台。' +
+      '敌人后撤（2.6px/step）> 玩家正常巡航（1.5）⇒ 推进器「过远前冲」用于**制造近身接触**。' +
+      '观察：能否冲进锤的有效距离、锤是否因此产生真实打击。',
+    buildA: gadgetValidationCar('gvA', 'hammer', 'thruster'),
+    buildB: gadgetValidationEnemy('OPP-03', 'gvA-enemy'),
+    config: { ...GVL_CONFIG },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: GADGET_VALIDATION_SCENARIO_IDS.B,
+    name: 'Hammer + Reverse Thruster',
+    description:
+      'Gadget 验收 B（GADGET-VALIDATION-LAB-R1）：锤 + 反推器 × 远程炮台。' +
+      '错误搭配对照：后撤只会**拉远**，而锤需要近身 ⇒ 预期「反而更打不到」，' +
+      '用于确认反推器不是万能加速键。',
+    buildA: gadgetValidationCar('gvB', 'hammer', 'reverseThruster'),
+    buildB: gadgetValidationEnemy('OPP-03', 'gvB-enemy'),
+    config: { ...GVL_CONFIG },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: GADGET_VALIDATION_SCENARIO_IDS.C,
+    name: 'Cannon + Thruster',
+    description:
+      'Gadget 验收 C（GADGET-VALIDATION-LAB-R1）：炮 + 推进器 × 追猎者。' +
+      '错误搭配对照：追猎者会主动贴脸，炮需要的是**保持距离**；' +
+      '推进器「过远才触发」在贴脸对手下基本不启动 ⇒ 预期看不出明显变化。',
+    buildA: gadgetValidationCar('gvC', 'cannon', 'thruster'),
+    buildB: gadgetValidationEnemy('OPP-16', 'gvC-enemy'),
+    config: { ...GVL_CONFIG },
+    camera: { fit: 'vehicles' },
+  },
+  {
+    id: GADGET_VALIDATION_SCENARIO_IDS.D,
+    name: 'Cannon + Reverse Thruster',
+    description:
+      'Gadget 验收 D（GADGET-VALIDATION-LAB-R1）：炮 + 反推器 × 追猎者。' +
+      '预期成立场景：追猎者贴脸 ⇒ 反推器「过近后撤」被触发 ⇒ 重新建立炮的射击空间。' +
+      '观察：后撤是否真实发生、敌我距离是否明显拉大。',
+    buildA: gadgetValidationCar('gvD', 'cannon', 'reverseThruster'),
+    buildB: gadgetValidationEnemy('OPP-16', 'gvD-enemy'),
+    config: { ...GVL_CONFIG },
+    camera: { fit: 'vehicles' },
+  },
+];
+
+// 追加进全局场景表（复用 Lab 既有的 `<select>` 切换入口，不新增任何 UI）
+SCENARIOS.push(...GADGET_VALIDATION_SCENARIOS);
 
 export function getScenario(id: string): ScenarioDef | undefined {
   return SCENARIOS.find((s) => s.id === id);
