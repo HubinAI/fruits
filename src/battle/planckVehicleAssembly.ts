@@ -371,8 +371,7 @@ export function createPlanckVehicle(
   // 3. Functional Part（Fixed Mount，Weld）。facing=-1 时镜像硬点与碰撞轮廓；
   //    Hardpoint localRotation 真实生效（朝左符号镜像）。part body 原点 = 镜像后
   //    硬点世界位置，collider offset/angle 由 compound 保留（shape 中心 = 硬点+offset）。
-  const parts: PlanckPartRuntime[] = resolved.functionals.map((f) => {
-    const collider =
+  const parts: PlanckPartRuntime[] = resolved.functionals.map((f) => {    const collider =
       facing === -1 ? mirrorCollider(f.def.collider) : f.def.collider;
     const hpWorld = {
       x: facing * f.hardpoint.localPosition.x,
@@ -439,6 +438,43 @@ export function createPlanckVehicle(
       joint,
     };
   });
+
+  // 3b. GADGET-THRUSTER-PROTOTYPE-R1｜独立 Gadget 装配（Weld 刚性连接）。
+  //     ⚠️ 挂点来自 **BodyDef.gadgetHardpoints**（专属命名空间），不是 functionalHardpoints
+  //     ⇒ 不占用、不重开任何旧功能槽。无 gadgetHardpoints 的 Body ⇒ 忽略 Gadget。
+  if (resolved.gadget) {
+    const gHpList = resolved.body.gadgetHardpoints;
+    if (gHpList && gHpList.length > 0) {
+      const gHp =
+        gHpList.find((h) => h.id === resolved.snapshot.gadget?.hardpointId) ?? gHpList[0]!;
+      const gCollider =
+        facing === -1 ? mirrorCollider(resolved.gadget.def.collider) : resolved.gadget.def.collider;
+      const gHpWorld = { x: facing * gHp.localPosition.x, y: gHp.localPosition.y };
+      const gPos = { x: initialPos.x + gHpWorld.x, y: initialPos.y + gHpWorld.y };
+      const gBody = world.createDynamicCompound(
+        gPos.x,
+        gPos.y,
+        [gCollider],
+        resolved.gadget.def.mass,
+        { friction: 0.4, restitution: 0.05, collisionFilter: filter },
+      );
+      world.setAngle(gBody, facing * (gHp.localRotation ?? 0));
+      world.setOwnerTag(gBody, {
+        kind: 'vehicle',
+        vehicleId: resolved.snapshot.id,
+        partId: `part:${gHp.id}`,
+        team,
+      });
+      const gJoint = world.createWeldJoint(body, gHpWorld, gBody, { x: 0, y: 0 });
+      parts.push({
+        id: gHp.id,
+        def: resolved.gadget.def,
+        hardpoint: gHp,
+        body: gBody,
+        joint: gJoint,
+      });
+    }
+  }
 
   // 4. 聚合物理量：总质量 = body + wheels + parts；质量加权真实 COM
   let totalMass = resolved.body.baseMass;

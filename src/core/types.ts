@@ -88,6 +88,16 @@ export interface BodyDef {
   /** 至少 2 个 Movement Hardpoint */
   movementHardpoints: MovementHardpointDef[];
   functionalHardpoints: FunctionalHardpointDef[];
+  /**
+   * GADGET-SLOT-FOUNDATION-R1｜**Gadget 专属挂点**（独立命名空间）。
+   *
+   * ⚠️ 与 `functionalHardpoints` **完全分离**：这些 id（`gadget` / `gadgetRear` …）
+   * 不属于旧的 `front`/`frontMass`/`top`/`rear` 功能槽集合，
+   * 因此 Gadget 装配**不会占用也不会重开**任何旧功能槽。
+   *
+   * 缺省 `undefined` = 该 Body 不支持 Gadget（装配层解析为「无处可装」⇒ Gadget 被忽略）。
+   */
+  gadgetHardpoints?: MovementHardpointDef[];
   /** W1-VIS-1：可选视觉定义（无则 Renderer 用 Collider Shape fallback） */
   visual?: VisualDef;
 }
@@ -205,9 +215,20 @@ export interface BuildSnapshot {
   gadget?: GadgetInstall;
 }
 
-/** GADGET-SLOT-FOUNDATION-R1｜独立 Gadget 安装记录（无 hardpointId：全车唯一） */
+/** GADGET-SLOT-FOUNDATION-R1｜独立 Gadget 安装记录（全车唯一） */
 export interface GadgetInstall {
   defId: string;
+  /**
+   * GADGET-THRUSTER-PROTOTYPE-R1：**Gadget 自身专用的挂点 id**。
+   *
+   * ⚠️ 取值来自 `BodyDef.gadgetHardpoints`（**专属命名空间**），
+   * **不是** `functionalHardpoints` 的 `front`/`frontMass`/`top`/`rear` ——
+   * 因此不占用、不重开任何旧功能槽。
+   *
+   * 缺省 `undefined` = 使用该 Body 的默认 Gadget 挂点
+   * （装配层解析为 `gadgetHardpoints[0]`）。
+   */
+  hardpointId?: string;
   /** 星级（与 FunctionalInstall.star 同语义；缺省 1★） */
   star?: number;
 }

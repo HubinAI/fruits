@@ -309,6 +309,9 @@ export class PlanckBattleOrchestrator {
             vehicle,
             part,
             emit: (ev) => this.bus.emit(ev),
+            // GADGET-THRUSTER-PROTOTYPE-R1：只读给出对方车辆，
+            // 供 distance-triggered Gadget 感知敌我距离（其余 behavior 忽略此字段）。
+            hostileVehicle: vehicle === this.vehicleA ? this.vehicleB : this.vehicleA,
           }),
         );
       }

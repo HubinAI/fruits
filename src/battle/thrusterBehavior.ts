@@ -42,6 +42,11 @@ export interface ThrusterParams {
   flameLength: number;
   /** 喷焰根部半宽（px） */
   flameWidth: number;
+  /**
+   * GADGET-THRUSTER-PROTOTYPE-R1：distance-triggered 模式参数。
+   * `null` = 不启用（保持既有固定周期循环，逐字节不变）。
+   */
+  trigger: ThrusterTriggerParams | null;
 }
 
 /** 本地向量旋转（px；与 planckVehicleAssembly.rotateLocal 同语义） */
@@ -49,6 +54,34 @@ function rotateLocal(p: { x: number; y: number }, angle: number): { x: number; y
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   return { x: p.x * cos - p.y * sin, y: p.x * sin + p.y * cos };
+}
+
+/** GADGET-THRUSTER-PROTOTYPE-R1：整车真实碰撞 AABB（chassis + 全部轮组 + 全部部件） */
+function vehicleBounds(
+  world: PlanckWorld,
+  v: PlanckVehicle,
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let ok = false;
+  const acc = (b: unknown): void => {
+    try {
+      const bb = world.getCollisionBounds(b as never);
+      minX = Math.min(minX, bb.minX);
+      minY = Math.min(minY, bb.minY);
+      maxX = Math.max(maxX, bb.maxX);
+      maxY = Math.max(maxY, bb.maxY);
+      ok = true;
+    } catch {
+      // 拿不到就跳过，绝不伪造
+    }
+  };
+  acc(v.body);
+  for (const w of v.wheels) acc(w.body);
+  for (const p of v.parts) acc(p.body);
+  return ok ? { minX, minY, maxX, maxY } : null;
 }
 
 /** 校验 + 提取 behaviorParams（缺参数/非有限数 → 明确报错；不做静默默认值、不改参数） */
@@ -66,6 +99,25 @@ function readThrusterParams(part: PlanckPartRuntime): ThrusterParams {
     }
     return v;
   };
+  const triggerRaw = (bp as Record<string, unknown>).distanceTrigger;
+  let trigger: ThrusterTriggerParams | null = null;
+  // ⚠️ 只有显式 `enabled: true` 才启用 distance-triggered 模式；
+  // 缺省 / false 保持既有固定周期循环（Q13-C 旧路径逐字节不变）。
+  if (triggerRaw && typeof triggerRaw === 'object' && (triggerRaw as Record<string, unknown>).enabled === true) {
+    const t = triggerRaw as Record<string, unknown>;
+    const numT = (v: unknown, name: string): number => {
+      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
+        throw new Error(`ThrusterBehavior: distanceTrigger.${name} 必须是正有限数值`);
+      }
+      return v;
+    };
+    trigger = {
+      farThreshold: numT(t.farThreshold, 'farThreshold'),
+      forwardMarginPx: numT(t.forwardMarginPx, 'forwardMarginPx'),
+      cooldownMs: numT(t.cooldownMs, 'cooldownMs'),
+      burstMs: numT(t.burstMs, 'burstMs'),
+    };
+  }
   return {
     windupMs: num(bp.windupMs, 'windupMs'),
     thrustMs: num(bp.thrustMs, 'thrustMs'),
@@ -74,11 +126,14 @@ function readThrusterParams(part: PlanckPartRuntime): ThrusterParams {
     flameColor: str(bp.flameColor, 'flameColor'),
     flameLength: num(bp.flameLength, 'flameLength'),
     flameWidth: num(bp.flameWidth, 'flameWidth'),
+    trigger,
   };
 }
 
 /** 推进相位（固定周期循环） */
 export type ThrusterPhase = 'windup' | 'thrust' | 'cooldown';
+/** GADGET-THRUSTER-PROTOTYPE-R1：distance-triggered 模式下的空闲相位 */
+export type ThrusterIdlePhase = 'idle';
 
 /** 单个固定步的相位步数（向上取整，与 Shotgun/Cannon 同约定） */
 function stepsFor(ms: number): number {
@@ -86,24 +141,91 @@ function stepsFor(ms: number): number {
 }
 
 /**
+ * GADGET-THRUSTER-PROTOTYPE-R1｜**距离触发的短时前冲**参数（可选）。
+ *
+ * 与既有固定周期模式**互斥**：给出本组参数时启用「敌人在前方且距离超过
+ * farThreshold 且冷却结束 → 触发一次前冲」；未给出时保持既有固定周期循环
+ * （逐字节不变）。
+ *
+ * ⚠️ 本组参数是 **Prototype 数值**（明显放大以验证方向），不是正式平衡值。
+ */
+export interface ThrusterTriggerParams {
+  /** 触发距离阈值（px）：**真实碰撞 AABB 间距** > 此值即视为「过远」 */
+  farThreshold: number;
+  /**
+   * 「敌人在前方」判定容差：对方车辆包围盒中心须位于自车前向半球内。
+   * 用包围盒中心 X 相对自车中心 X 的符号 + 朝向判定，不依赖任何吸附/锁定。
+   */
+  forwardMarginPx: number;
+  /** 触发后的冷却（ms）：冷却结束前不再触发 */
+  cooldownMs: number;
+  /** 单次前冲持续时间（ms） */
+  burstMs: number;
+}
+
+/**
+ * GADGET-THRUSTER-PROTOTYPE-R1｜**挂点命名空间**判定。
+ *
+ * ⚠️ distance-triggered 模式**只在 Gadget 专属挂点上生效**：
+ *   - Gadget 维度的挂点 id 由 `BodyDef.gadgetHardpoints` 提供（当前 = `'gadget'`）；
+ *   - 旧的 `functionalHardpoints`（`front`/`frontMass`/`top`/`rear`）挂载的 thruster
+ *     **保持 Q13-C 固定周期循环逐字节不变**（Lab Q13-C 场景 / 既有 buildUx 契约依赖它）。
+ * 这样「新 Gadget 维度」与「旧功能槽历史行为」互不干扰。
+ */
+const GADGET_HARDPOINT_IDS: ReadonlySet<string> = new Set(['gadget', 'gadgetRear']);
+
+/**
  * Thruster Behavior（每 thruster part 一个实例，独立周期）。
  * stepFixed 在 Orchestrator 的 onBeforeStep 每固定物理步调用一次。
  */
 export class ThrusterBehavior {
   private readonly params: ThrusterParams;
-  /** 当前相位 */
+  /** 当前相位（distance-triggered 模式下 idle 时 = 'cooldown'，对外仍报可渲染相位） */
   private phase: ThrusterPhase = 'windup';
   /** 当前相位剩余固定步数：0 = 相位结束、下一步切换（构造时按 windupMs 初始化） */
   private phaseStepsRemaining = 0;
+  /**
+   * GADGET-THRUSTER-PROTOTYPE-R1：distance-triggered 模式下的「真实状态」。
+   * - 'idle'：等待触发（不施力）；触发成功 → 'thrust'；
+   * - 'thrust' / 'cooldown'：与相位同名，驱动实际施力与冷却计时。
+   */
+  private triggeredState: 'idle' | 'thrust' | 'cooldown' = 'idle';
+  /** 对方车辆（只读；未提供 ⇒ 距离触发不可用） */
+  private readonly hostile: PlanckVehicle | undefined;
+  /** 诊断：累计触发次数 */
+  private triggerCount = 0;
+  /** 本实例的挂点 id（判定 Gadget 命名空间用） */
+  private readonly partId: string;
 
-  constructor(part: PlanckPartRuntime) {
+  constructor(part: PlanckPartRuntime, hostile?: PlanckVehicle) {
     this.params = readThrusterParams(part);
+    this.hostile = hostile;
+    this.partId = part.id;
     this.phaseStepsRemaining = stepsFor(this.params.windupMs);
+  }
+
+  /**
+   * 本实例是否走 distance-triggered 路径。
+   * 需**同时**满足：① content 显式 `distanceTrigger.enabled === true`；
+   * ② 本实例挂在 **Gadget 专属挂点**上（旧功能槽挂载保持固定周期）。
+   */
+  private get useDistanceTrigger(): boolean {
+    return this.params.trigger !== null && GADGET_HARDPOINT_IDS.has(this.partId);
   }
 
   /** 当前相位（只读，供测试/调试） */
   get phaseName(): ThrusterPhase {
     return this.phase;
+  }
+
+  /** GADGET-THRUSTER-PROTOTYPE-R1：本实例累计推进触发次数（诊断用） */
+  get triggers(): number {
+    return this.triggerCount;
+  }
+
+  /** distance-triggered 模式是否启用 */
+  get isDistanceTriggered(): boolean {
+    return this.params.trigger !== null;
   }
 
   /** 是否处于爆发推进相位（喷焰据此显示/隐藏） */
@@ -123,12 +245,102 @@ export class ThrusterBehavior {
    *   thrust→cooldown / cooldown→windup 切换当步不施力）。
    */
   stepFixed(world: PlanckWorld, vehicle: PlanckVehicle, part: PlanckPartRuntime): void {
+    // GADGET-THRUSTER-PROTOTYPE-R1：distance-triggered 模式（仅 Gadget 挂点，与固定周期互斥）
+    if (this.useDistanceTrigger) {
+      this.stepTriggered(world, vehicle, part);
+      return;
+    }
     if (this.phaseStepsRemaining > 0) {
       if (this.phase === 'thrust') this.applyThrust(world, vehicle, part);
       this.phaseStepsRemaining--;
       if (this.phaseStepsRemaining > 0) return;
     }
     this.advancePhase(world, vehicle, part);
+  }
+
+  /**
+   * GADGET-THRUSTER-PROTOTYPE-R1｜distance-triggered 状态机。
+   *
+   * 触发条件（**只看真实物理距离**，不看武器类型 / 不做追踪）：
+   *   ① 对方在自车**前向半球**内（`enemyIsAhead`）；
+   *   ② 双方**真实碰撞 AABB 间距** > `farThreshold`（过远）；
+   *   ③ 冷却已结束。
+   * ⇒ 进入 'thrust'，每固定步沿车辆真实前向施加一次冲量（复用既有 applyThrust，
+   *   **不瞬移 / 不吸附 / 不锁敌 / 不改对方速度**）。
+   */
+  private stepTriggered(
+    world: PlanckWorld,
+    vehicle: PlanckVehicle,
+    part: PlanckPartRuntime,
+  ): void {
+    const t = this.params.trigger!;
+
+    if (this.triggeredState === 'thrust') {
+      this.applyThrust(world, vehicle, part);
+      this.phase = 'thrust';
+      this.phaseStepsRemaining--;
+      if (this.phaseStepsRemaining <= 0) {
+        this.triggeredState = 'cooldown';
+        this.phase = 'cooldown';
+        this.phaseStepsRemaining = stepsFor(t.cooldownMs);
+      }
+      return;
+    }
+
+    if (this.triggeredState === 'cooldown') {
+      this.phase = 'cooldown';
+      this.phaseStepsRemaining--;
+      if (this.phaseStepsRemaining <= 0) {
+        this.triggeredState = 'idle';
+        this.phaseStepsRemaining = 0;
+      }
+      return;
+    }
+
+    // idle：等待触发（不施力）
+    this.phase = 'cooldown'; // 对渲染层表现为「无喷焰」，不伪造推进
+    this.phaseStepsRemaining = 0;
+    const gap = this.realGapPx(world, vehicle);
+    if (
+      gap !== null &&
+      gap > t.farThreshold &&
+      this.enemyIsAhead(world, vehicle, t.forwardMarginPx)
+    ) {
+      this.triggeredState = 'thrust';
+      this.phase = 'thrust';
+      this.triggerCount += 1;
+      this.phaseStepsRemaining = stepsFor(t.burstMs);
+      this.applyThrust(world, vehicle, part); // 触发当步即推
+    }
+  }
+
+  /** 双方**真实碰撞 AABB** 间距（px；重叠 = 0）；无对方 ⇒ null（不触发）。 */
+  private realGapPx(world: PlanckWorld, vehicle: PlanckVehicle): number | null {
+    if (!this.hostile) return null;
+    const a = vehicleBounds(world, vehicle);
+    const b = vehicleBounds(world, this.hostile);
+    if (!a || !b) return null;
+    const dx = Math.max(0, Math.max(a.minX - b.maxX, b.minX - a.maxX));
+    const dy = Math.max(0, Math.max(a.minY - b.maxY, b.minY - a.maxY));
+    return Math.hypot(dx, dy);
+  }
+
+  /**
+   * 对方是否在自车**前向半球**内（只读几何；不做瞄准、不锁定）。
+   * 判据 = 自车中心 → 对方中心 的位移在「车辆真实前向」上的投影 > 0。
+   */
+  private enemyIsAhead(
+    world: PlanckWorld,
+    vehicle: PlanckVehicle,
+    marginPx: number,
+  ): boolean {
+    if (!this.hostile) return false;
+    const self = world.getPosition(vehicle.body);
+    const other = world.getPosition(this.hostile.body);
+    const a = world.getAngle(vehicle.body);
+    const fwd = rotateLocal({ x: vehicle.facing, y: 0 }, a);
+    const proj = (other.x - self.x) * fwd.x + (other.y - self.y) * fwd.y;
+    return proj > marginPx;
   }
 
   /** 相位推进（严格三态循环 windup→thrust→cooldown→windup） */

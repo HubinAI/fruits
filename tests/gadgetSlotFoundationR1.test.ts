@@ -31,7 +31,6 @@ function draftWithGadget(gadget: string | undefined): BuildDraft {
     ...base,
     functionalSelections: {
       front: EMPTY_SLOT,
-      frontMass: EMPTY_SLOT,
       top: EMPTY_SLOT,
       rear: EMPTY_SLOT,
       [WEAPON_SLOT]: 'hammer',
@@ -181,7 +180,10 @@ describe('GADGET-SLOT-FOUNDATION-R1', () => {
       let step = 0;
       try {
         while (rt.result === null && step < 1400) { step += 1; rt.step(FRAME_MS); }
-        const sum = rt.playerWeaponHitSummary() as Record<string, { count: number; damages: number[] }>;
+        const sum = rt.playerWeaponHitSummary() as unknown as Record<
+          string,
+          { count: number; damages: readonly number[] }
+        >;
         const hits = Object.keys(sum).reduce((a, k) => a + sum[k]!.count, 0);
         const dmg: number[] = [];
         for (const k of Object.keys(sum)) dmg.push(...sum[k]!.damages);
@@ -202,7 +204,7 @@ describe('GADGET-SLOT-FOUNDATION-R1', () => {
     const legacyShape: BuildDraft = {
       ...base,
       functionalSelections: {
-        front: EMPTY_SLOT, frontMass: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT,
+        front: EMPTY_SLOT, top: EMPTY_SLOT, rear: EMPTY_SLOT,
         [WEAPON_SLOT]: 'hammer',
       },
     };

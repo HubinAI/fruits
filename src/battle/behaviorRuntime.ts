@@ -36,6 +36,13 @@ export interface BehaviorContext {
   part: PlanckPartRuntime;
   /** 发射 Battle Event（timestamp 已由 runtime 补全） */
   emit: (ev: BattleEvent) => void;
+  /**
+   * GADGET-THRUSTER-PROTOTYPE-R1：**对方车辆**（可选，只读）。
+   * 供需要感知敌我距离的 Gadget（如 distance-triggered Thruster）使用。
+   * 未提供 ⇒ 相关 Gadget 保持无距离感知的既有语义。
+   * ⚠️ 只读引用：行为**不得**移动 / 销毁 / 修改对方任何 body。
+   */
+  hostileVehicle?: PlanckVehicle;
 }
 
 /** 统一最小生命周期（新增 Behavior 只需实现此接口） */
@@ -365,7 +372,9 @@ class ThrusterRuntime implements PartBehaviorRuntime {
   constructor(ctx: BehaviorContext) {
     this.vehicle = ctx.vehicle;
     this.part = ctx.part;
-    this.behavior = new ThrusterBehavior(ctx.part);
+    // GADGET-THRUSTER-PROTOTYPE-R1：把「敌方车辆」只读引用交给 behavior，
+    // 用于 distance-triggered 触发判定（不改对方任何状态）。
+    this.behavior = new ThrusterBehavior(ctx.part, ctx.hostileVehicle);
   }
 
   beforePhysicsStep(world: PlanckWorld, _timeMs: number): void {

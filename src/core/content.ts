@@ -122,6 +122,15 @@ const watermelonBody: BodyDef = {
     { id: 'top', localPosition: { x: 0, y: -25 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -78, y: 0 }, localRotation: 0 },
   ],
+  /**
+   * GADGET-THRUSTER-PROTOTYPE-R1｜Gadget 专属挂点（**独立命名空间**）。
+   * ⚠️ 与上方 functionalHardpoints 的 front/top/rear **同名不同义**：
+   * 这些 id 只在 Gadget 维度内解析，不占用也不重开任何旧功能槽。
+   * 位置 = 车尾（推进器点火朝车尾喷）。
+   */
+  gadgetHardpoints: [
+    { id: 'gadget', localPosition: { x: -72, y: -4 }, localRotation: 0 },
+  ],
   visual: {
     visualId: 'body_watermelon',
     size: { width: 180, height: 60 },
@@ -892,6 +901,27 @@ const thruster: FunctionalPartDef = {
     flameColor: '#ffb24a',
     flameLength: 105,
     flameWidth: 35,
+    /**
+     * GADGET-THRUSTER-PROTOTYPE-R1｜**距离触发短时前冲**（Prototype 数值，明显放大以验证方向）。
+     *
+     * 规则：敌人在自车**前向半球**内 且 双方**真实碰撞 AABB 间距** > farThreshold
+     * 且 冷却结束 ⇒ 触发一次单发前冲（不瞬移 / 不吸附 / 不锁敌 / 不改对方速度）。
+     *
+     * ⚠️ `enabled: true` 时才切换到 distance-triggered 模式；缺省/`false` 保持
+     * 既有**固定周期循环**（Q13-C 旧路径逐字节不变）。
+     * 这些是原型量级，不是正式平衡值。
+     */
+    distanceTrigger: {
+      enabled: true,
+      /** 过远阈值（px）：真实 AABB 间距超过此值视为「需要靠近」 */
+      farThreshold: 280,
+      /** 「敌人在前方」判定余量（px）：前向投影须大于此值 */
+      forwardMarginPx: 1,
+      /** 触发后冷却（ms） */
+      cooldownMs: 2500,
+      /** 单次前冲持续时间（ms） */
+      burstMs: 420,
+    },
   },
 };
 
