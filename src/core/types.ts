@@ -192,6 +192,24 @@ export interface BuildSnapshot {
   quality: number;
   movements: MovementInstall[];
   functionals: FunctionalInstall[];
+  /**
+   * GADGET-SLOT-FOUNDATION-R1｜**独立 Gadget 装配位**（0 或 1 件）。
+   *
+   * - `undefined` / `EMPTY_SLOT` = 无 Gadget（**默认**，与改前行为逐字节一致）；
+   * - 非空时该 Gadget 的 `energy` 由 `computeEnergy` **计入一次**，
+   *   并进入现有统一能量校验（不新增第二套规则）；
+   * - 与 `functionals` **平行**，不共用槽位：`functionals` 仍只认 Body 硬点，
+   *   本字段是独立维度（见 `BuildDraft.gadgetDefId` 的契约说明）；
+   * - 旧 snapshot 没有本字段 ⇒ 自然为 EMPTY，**不失效**。
+   */
+  gadget?: GadgetInstall;
+}
+
+/** GADGET-SLOT-FOUNDATION-R1｜独立 Gadget 安装记录（无 hardpointId：全车唯一） */
+export interface GadgetInstall {
+  defId: string;
+  /** 星级（与 FunctionalInstall.star 同语义；缺省 1★） */
+  star?: number;
 }
 
 /** Build Validator 校验结果 */

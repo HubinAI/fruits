@@ -26,6 +26,8 @@ function wedgeBodyOnly(): ResolvedSnapshot {
     functionals: [],
     totalMass: body.baseMass,
     totalEnergy: 0,
+    // GADGET-SLOT-FOUNDATION-R1：无 Gadget（field 默认 null）
+    gadget: null,
   };
 }
 
@@ -326,6 +328,8 @@ function boxWithRamRotated(rotation: number): ResolvedSnapshot {
     ],
     totalMass: body.baseMass + ram.mass,
     totalEnergy: ram.energy,
+    // GADGET-SLOT-FOUNDATION-R1：本 fixture 无 Gadget
+    gadget: null,
   };
 }
 

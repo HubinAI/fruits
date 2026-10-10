@@ -150,10 +150,22 @@ export interface ResolvedSnapshot {
   body: BodyDef;
   movements: ResolvedMovement[];
   functionals: ResolvedFunctional[];
+  /**
+   * GADGET-SLOT-FOUNDATION-R1｜解析后的独立 Gadget（0 或 1 件）。
+   * `null` = 无 Gadget（默认）。Runtime 从**这里**读取当前 Gadget 选择，
+   * 而不是各自绕过 Build 链自行解析。
+   */
+  gadget: ResolvedGadget | null;
   /** 总质量 = Body 基础质量 + 所有部件质量 */
   totalMass: number;
   /** 总能量 = 所有功能部件能量之和 */
   totalEnergy: number;
+}
+
+/** GADGET-SLOT-FOUNDATION-R1｜解析后的 Gadget（def 已过星级倍率层） */
+export interface ResolvedGadget {
+  def: FunctionalPartDef;
+  star: number;
 }
 
 /** 应用 Movement overrides（用于 Lab 轮径 / 质量测试） */
@@ -208,18 +220,33 @@ export function resolveSnapshot(
     return { install, hardpoint, def: applyStarTier(def, install.star ?? 1) };
   });
 
+  // GADGET-SLOT-FOUNDATION-R1：独立 Gadget 位解析（0 或 1 件；缺省 = null）
+  let gadget: ResolvedGadget | null = null;
+  if (snapshot.gadget) {
+    const gDef = registry.functionals.get(snapshot.gadget.defId);
+    if (!gDef) {
+      throw new Error(`ResolveSnapshot: unknown gadget "${snapshot.gadget.defId}"`);
+    }
+    const star = snapshot.gadget.star ?? 1;
+    gadget = { def: applyStarTier(gDef, star), star };
+  }
+
   const totalMass =
     body.baseMass +
     movements.reduce((s, m) => s + m.def.mass, 0) +
-    functionals.reduce((s, f) => s + f.def.mass, 0);
+    functionals.reduce((s, f) => s + f.def.mass, 0) +
+    (gadget ? gadget.def.mass : 0);
 
-  const totalEnergy = functionals.reduce((s, f) => s + f.def.energy, 0);
+  const totalEnergy =
+    functionals.reduce((s, f) => s + f.def.energy, 0) +
+    (gadget ? gadget.def.energy : 0);
 
   return {
     snapshot,
     body,
     movements,
     functionals,
+    gadget,
     totalMass,
     totalEnergy,
   };

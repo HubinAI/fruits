@@ -748,6 +748,39 @@ export class RunBattleRuntime {
   }
 
   /**
+   * GADGET-SLOT-FOUNDATION-R1｜**当前 Gadget 选择**（Runtime 唯一读取入口）。
+   *
+   * - 数据源 = 正式 `resolveSnapshot` 的 `resolved.gadget`（已过星级倍率层），
+   *   即与 Weapon / Movement 同一条 Build 链，**不绕过**正式装配；
+   * - `null` = 无 Gadget（**默认**）。EMPTY 状态下：
+   *   - 不创建任何额外物理体；
+   *   - 不施加任何力 / 伤害 / 距离触发；
+   *   - 不改变 AI 与任何现有战斗结果。
+   *
+   * 后续 Thruster / Reverse Thruster 等 Gadget 行为应**从此入口**接入
+   * （读 `def.behavior` + `def.behaviorParams`），而不是各自绕过 Build 链。
+   */
+  playerGadget(): {
+    readonly defId: string;
+    readonly name: string;
+    readonly behavior: string;
+    readonly star: number;
+    readonly energy: number;
+    readonly mass: number;
+  } | null {
+    const g = this.orchestrator.vehicleA.resolved.gadget;
+    if (!g) return null;
+    return {
+      defId: g.def.id,
+      name: g.def.name,
+      behavior: g.def.behavior,
+      star: g.star,
+      energy: g.def.energy,
+      mass: g.def.mass,
+    };
+  }
+
+  /**
    * PRODUCT-LOOP-R2-C｜本场**玩家武器命中的真实伤害**记录（按来源部件归组）。
    *
    * 口径 = 正式 `damage` 事件（`DamageResolver` 真的从对方 HP 减掉的那个数），

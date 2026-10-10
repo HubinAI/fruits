@@ -47,6 +47,13 @@ export function computeEnergy(
     // Q22：能量含星级倍率（star<=1 恒等），否则 2★ 超载检测失效
     energy += starTierEnergy(def.energy, install.star ?? 1);
   }
+  // GADGET-SLOT-FOUNDATION-R1：独立 Gadget 位**只计费一次**（0 或 1 件）。
+  // 复用同一函数与同一星级倍率层，不新增第二套能量规则。
+  if (snapshot.gadget) {
+    const g = registry.functionals.get(snapshot.gadget.defId);
+    if (!g) return { energy, error: `未知 Gadget "${snapshot.gadget.defId}"` };
+    energy += starTierEnergy(g.energy, snapshot.gadget.star ?? 1);
+  }
   return { energy };
 }
 
@@ -116,9 +123,20 @@ export function validateSnapshot(
   }
 
   // Energy 合法（F-CONTENT-PLAYER-MOVEMENT-PACK-R1：含 Movement 能量）
-  if (energy + movementEnergy > body.energyCapacity) {
+  // GADGET-SLOT-FOUNDATION-R1：Gadget 能量同样进入这一道**唯一**闸门
+  const gadgetEnergy = snapshot.gadget
+    ? (() => {
+        const g = registry.functionals.get(snapshot.gadget!.defId);
+        if (!g) {
+          errors.push(`未知 Gadget "${snapshot.gadget!.defId}"`);
+          return 0;
+        }
+        return starTierEnergy(g.energy, snapshot.gadget!.star ?? 1);
+      })()
+    : 0;
+  if (energy + movementEnergy + gadgetEnergy > body.energyCapacity) {
     errors.push(
-      `能量超载：${energy + movementEnergy} > 容量 ${body.energyCapacity}`,
+      `能量超载：${energy + movementEnergy + gadgetEnergy} > 容量 ${body.energyCapacity}`,
     );
   }
 

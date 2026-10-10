@@ -85,6 +85,22 @@ export interface BuildDraft {
    * 不引入实例 UID：星级只描述 Build 装配选择，库存副本数由 partInventory 单独记录。
    */
   functionalStars?: Record<string, number>;
+  /**
+   * GADGET-SLOT-FOUNDATION-R1｜**独立 Gadget 装配位**（1 × Gadget）。
+   *
+   * 与 Weapon / Front Movement / Rear Movement **并列**的第 4 个 Build 维度，
+   * 用于改变距离 / 位移 / 姿态，**不承担主要伤害**。
+   *
+   * ⚠️ 它**不是**旧 `front` / `top` / `rear` 功能槽的复用：
+   *   - 旧的 `functionalSelections` 键是 **Body 硬点 id**（`front`/`frontMass`/`top`/`rear`），
+   *     受 Hidden Top Weapon Removal 契约约束（`top` 强制清空、`front` 默认清空）；
+   *   - 本字段是**独立维度**，键空间与 Body 硬点完全无关，
+   *     **不触碰、不重开** 任何旧槽位语义。
+   *
+   * 缺省 `undefined` = 无 Gadget（EMPTY）。
+   * 旧存档 / 旧 snapshot 没有本字段 ⇒ 自然解析为 EMPTY，**不允许因此失效**。
+   */
+  gadgetDefId?: string;
 }
 
 /** 当前 Body 的可编辑 Functional 槽位（真实硬点 id，顺序同 BodyDef） */
@@ -167,6 +183,10 @@ export function buildSnapshotFromDraft(
     quality: 1,
     movements,
     functionals,
+    // GADGET-SLOT-FOUNDATION-R1：独立 Gadget 位（EMPTY / 缺省 ⇒ 不写字段，保持旧形状）
+    ...(draft.gadgetDefId && draft.gadgetDefId !== EMPTY_SLOT
+      ? { gadget: { defId: draft.gadgetDefId } }
+      : {}),
   };
 }
 
