@@ -91,6 +91,11 @@ function draft(
   bodyDefId: string,
   wheels: { rear: number; front: number; rearDefId?: string; frontDefId?: string },
   selections: Record<string, string>,
+  /**
+   * GADGET-VALIDATION-LAB-R1｜独立 Gadget 位（1×）。
+   * 缺省 = 不带 Gadget（既有两套 Loadout 逐字节不变）。
+   */
+  gadgetDefId?: string,
 ): BuildDraft {
   return {
     bodyDefId,
@@ -105,6 +110,7 @@ function draft(
       rear: EMPTY_SLOT,
       ...selections,
     },
+    ...(gadgetDefId ? { gadgetDefId } : {}),
     drive: 'forward',
   };
 }
@@ -167,6 +173,89 @@ export const LAB_LOADOUTS: readonly LabTestLoadout[] = [
       },
     ],
     draft: draft('bananaBody', { rear: 20, front: 20 }, { front: 'hammer', rear: 'thruster' }),
+  },
+
+  /* ================================================================
+   * GADGET-VALIDATION-LAB-R1｜四套 Gadget 真人验收 Loadout
+   *
+   * 统一 `watermelonBody` + 标准轮（wheelStd），只改「主武器 × Gadget」两个维度。
+   * Gadget 走**正式**独立 Gadget 位（`BuildDraft.gadgetDefId`），
+   *   ⇒ `buildSnapshotFromDraft` → `resolveSnapshot` → `createPlanckVehicle`
+   *   → BehaviorRegistry，与正式玩法同一条链；**不直接调用 Gadget behavior**。
+   *
+   * 预期（供真人对照，非结论）：
+   *   A 锤+推进器   ×远程炮台 → 敌人后撤 2.6 >巡航 1.5 ⇒ 前冲制造近身（应能打到）
+   *   B 锤+反推器   ×远程炮台 → 后撤只会拉远 ⇒ 预期更打不到（错误搭配对照）
+   *   C 炮+推进器   ×追猎者   → 贴脸对手下「过远才触发」基本不启动
+   *   D 炮+反推器   ×追猎者   → 贴脸 ⇒ 后撤 ⇒ 重建炮的射击空间
+   * ================================================================ */
+  {
+    id: 'GvlHammerThruster',
+    label: '锤 + 推进器',
+    note: 'Gadget 验收 A：西瓜 + 标准轮 + 锤 + 推进器（过远前冲）→ 配远程炮台',
+    slots: [
+      { role: 'body', requested: '西瓜', kind: 'formal', defId: 'watermelonBody', note: '统一车身' },
+      { role: 'movement', requested: '标准轮', kind: 'formal', defId: 'wheelStd', note: '统一轮组' },
+      { role: 'weapon', requested: '锤', kind: 'formal', defId: 'hammer', note: '近战武器' },
+      { role: 'gadget', requested: '推进器', kind: 'formal', defId: 'thruster', note: '过远 → 前冲' },
+    ],
+    draft: draft(
+      'watermelonBody',
+      { rear: 20, front: 20, rearDefId: 'wheelStd', frontDefId: 'wheelStd' },
+      { frontMass: 'hammer' },
+      'thruster',
+    ),
+  },
+  {
+    id: 'GvlHammerReverse',
+    label: '锤 + 反推器',
+    note: 'Gadget 验收 B：西瓜 + 标准轮 + 锤 + 反推器（过近后撤）→ 配远程炮台（错误搭配对照）',
+    slots: [
+      { role: 'body', requested: '西瓜', kind: 'formal', defId: 'watermelonBody', note: '统一车身' },
+      { role: 'movement', requested: '标准轮', kind: 'formal', defId: 'wheelStd', note: '统一轮组' },
+      { role: 'weapon', requested: '锤', kind: 'formal', defId: 'hammer', note: '近战武器' },
+      { role: 'gadget', requested: '反推器', kind: 'formal', defId: 'reverseThruster', note: '过近 → 后撤' },
+    ],
+    draft: draft(
+      'watermelonBody',
+      { rear: 20, front: 20, rearDefId: 'wheelStd', frontDefId: 'wheelStd' },
+      { frontMass: 'hammer' },
+      'reverseThruster',
+    ),
+  },
+  {
+    id: 'GvlCannonThruster',
+    label: '炮 + 推进器',
+    note: 'Gadget 验收 C：西瓜 + 标准轮 + 炮 + 推进器 → 配追猎者（错误搭配对照）',
+    slots: [
+      { role: 'body', requested: '西瓜', kind: 'formal', defId: 'watermelonBody', note: '统一车身' },
+      { role: 'movement', requested: '标准轮', kind: 'formal', defId: 'wheelStd', note: '统一轮组' },
+      { role: 'weapon', requested: '炮', kind: 'formal', defId: 'cannon', note: '远程武器' },
+      { role: 'gadget', requested: '推进器', kind: 'formal', defId: 'thruster', note: '过远 → 前冲' },
+    ],
+    draft: draft(
+      'watermelonBody',
+      { rear: 20, front: 20, rearDefId: 'wheelStd', frontDefId: 'wheelStd' },
+      { frontMass: 'cannon' },
+      'thruster',
+    ),
+  },
+  {
+    id: 'GvlCannonReverse',
+    label: '炮 + 反推器',
+    note: 'Gadget 验收 D：西瓜 + 标准轮 + 炮 + 反推器 → 配追猎者（预期成立场景）',
+    slots: [
+      { role: 'body', requested: '西瓜', kind: 'formal', defId: 'watermelonBody', note: '统一车身' },
+      { role: 'movement', requested: '标准轮', kind: 'formal', defId: 'wheelStd', note: '统一轮组' },
+      { role: 'weapon', requested: '炮', kind: 'formal', defId: 'cannon', note: '远程武器' },
+      { role: 'gadget', requested: '反推器', kind: 'formal', defId: 'reverseThruster', note: '过近 → 后撤' },
+    ],
+    draft: draft(
+      'watermelonBody',
+      { rear: 20, front: 20, rearDefId: 'wheelStd', frontDefId: 'wheelStd' },
+      { frontMass: 'cannon' },
+      'reverseThruster',
+    ),
   },
 ];
 

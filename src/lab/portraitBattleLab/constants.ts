@@ -82,7 +82,18 @@ export const LAB_ARENAS: readonly LabArenaDef[] = [
  * PBL-F1｜两套共享 Test Loadout 的规范 id（A / B 共用同一套）。
  * 中文展示名见 testData.ts（西瓜重炮 / 香蕉冲锋锤）。
  */
-export type LabLoadoutId = 'WatermelonHeavyCannon' | 'BananaChargeHammer';
+export type LabLoadoutId =
+  | 'WatermelonHeavyCannon'
+  | 'BananaChargeHammer'
+  /**
+   * GADGET-VALIDATION-LAB-R1｜四套 Gadget 真人验收 Loadout。
+   * 全部统一 `watermelonBody` + 标准轮，只改「主武器 × Gadget」两个维度；
+   * 搭配 Encounter 见 `GADGET_VALIDATION_PAIRS`（锤↔远程炮台 / 炮↔追猎者）。
+   */
+  | 'GvlHammerThruster'
+  | 'GvlHammerReverse'
+  | 'GvlCannonThruster'
+  | 'GvlCannonReverse';
 
 /**
  * PBL-F1｜共享 Encounter 的规范 id（A / B 共用同一套）。
