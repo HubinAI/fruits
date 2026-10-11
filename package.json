@@ -26,6 +26,7 @@
     "dev:home": "vite --open=/home.html",
     "dev:legacy": "vite --open=/index.html",
     "dev:debug-lab": "vite --open=/portrait-lab.html",
+    "dev:gadget-lab": "vite --open=/gadget-lab.html",
     "build:portrait-lab": "vite build -c vite.portrait-lab.config.ts",
     "e2e:portrait-lab": "node tests/_e2e_portrait_battle_lab.cjs",
     "e2e:run-page": "node tests/_e2e_run_page.cjs",

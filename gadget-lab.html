@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>DEBUG ONLY · Gadget Visual Validation Host（GADGET-VISUAL-VALIDATION-HOST-R1）</title>
+    <!--
+      GADGET-VISUAL-VALIDATION-HOST-R1｜Gadget 真人**视觉**验收宿主（开发专用）。
+
+      ⚠️ 为什么需要一个新页面（不是 portrait-lab）：
+        portrait-lab.html 是 Physics / Protocol Lab，其 `draw()` 只用
+        `fillRect` 画 `layeredShapes()` 矩形 ⇒ 车辆永远是红蓝方块、无法辨认
+        车辆 / Weapon / Gadget 动作（诊断见上一轮 Queue）。
+        本页**直接复用正式视觉宿主链**：
+          BuildSnapshot → resolveSnapshot → RunBattleRuntime
+                       → RunBattleView（内含正式 Renderer + VisualRegistry）
+        ⇒ 画面由**正式 Renderer** 绘制，与run-page.html 同一实现、同一批PNG 美术。
+
+      与正式产品流程的关系：**零接入**。
+      - 不接正式 Garage（无Gadget 选择 UI）
+      - 不改 run-page.html / home.html 任何行为
+      - 不进入 dist / dist-pages / dist-wechat 任一正式产物
+      （构建登记见 vite.portrait-lab.config.ts，属同一块可整块删除的实验产物）
+    -->
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #0b0e14;
+        color: #e8edf5;
+        font-family: system-ui, -apple-system, "PingFang SC", sans-serif;
+        height: 100%;
+      }
+      /* 战斗画面占页面**主要区域**：控制条固定为一条窄带，其余全部给画布 */
+      #gvl-root { display: flex; flex-direction: column; height: 100vh; }
+      .gvl-bar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 10px 14px;
+        background: #121722;
+        border-bottom: 1px solid #232c3d;
+      }
+      .gvl-bar button {
+        padding: 8px 14px;
+        font-size: 14px;
+        color: #e8edf5;
+        background: #1d2637;
+        border: 1px solid #33405a;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .gvl-bar button:hover { background: #26334a; }
+      .gvl-bar button.gvl-primary { background: #2f6fd0; border-color: #4a8ce8; }
+      .gvl-bar .gvl-title { font-size: 13px; opacity: 0.75; margin-right: 6px; }
+      /* 舞台：flex:1 ⇒ 吃掉全部剩余高度（战斗画面占主要区域的关键） */
+      .gvl-stage { flex: 1 1 auto; position: relative; min-height: 0; }
+      .gvl-stage canvas { display: block; width: 100%; height: 100%; }
+      .gvl-note {
+        position: absolute;
+        left: 12px; bottom: 10px;
+        font-size: 12px;
+        opacity: 0.55;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="gvl-root"></div>
+    <script type="module" src="/src/lab/portraitBattleLab/gadgetVisualHost.ts"></script>
+  </body>
+</html>

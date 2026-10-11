@@ -170,10 +170,11 @@ describe('PBL-G1｜允许差异注册表（集中、可枚举、防腐烂）', (
 describe('PBL-G1｜共享配置审计：无 Arena 专属平衡覆盖', () => {
   const audit = auditSharedCombatData();
 
-  it('G1-05 全部 14 个组合（2 Loadout × 7 Encounter）审计通过且零数值差异', () => {
-    // ⚠️ 组合数随 Lab Encounter 目录增长：PRP-RUN-02 的压力阶梯新增 3 套（2×7=14）。
+  it('G1-05 全部 42 个组合（6 Loadout × 7 Encounter）审计通过且零数值差异', () => {
+    // ⚠️ 组合数随 Lab 目录增长：PRP-RUN-02 的压力阶梯新增 3 套Encounter（2×7=14），
+    //    GADGET-VALIDATION-LAB-R1 又新增 4 套 Gadget 验收 Loadout（6×7=42）。
     //    这条断言仍是「冻结清单」——目录再变就必须显式回到这里。
-    expect(audit.combos).toHaveLength(14);
+    expect(audit.combos).toHaveLength(42);
     expect(audit.problems).toEqual([]);
     expect(audit.ok).toBe(true);
     for (const c of audit.combos) {
@@ -182,7 +183,7 @@ describe('PBL-G1｜共享配置审计：无 Arena 专属平衡覆盖', () => {
     }
     // LightSwarm3 的组合必须是 1 玩家 + 3 敌人
     const swarm = audit.combos.filter((c) => c.encounter === 'LightSwarm3');
-    expect(swarm).toHaveLength(2);
+    expect(swarm).toHaveLength(6); // 6 套 Loadout 各一个组合
     for (const c of swarm) expect(c.entityCount).toBe(4);
   });
 

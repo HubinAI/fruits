@@ -90,8 +90,18 @@ describe('PBL-F0｜目录完整性（Arena A/B · Loadout ×2 · Encounter ×3�
     expect(new Set(LAB_ARENAS.map((a) => a.id)).size).toBe(LAB_ARENAS.length);
   });
 
-  it('R4 Loadout 为西瓜重炮 / 香蕉冲锋锤且 id 唯一', () => {
-    expect(LAB_LOADOUTS.map((l) => l.label)).toEqual(['西瓜重炮', '香蕉冲锋锤']);
+  it('R4 Loadout 为西瓜重炮 / 香蕉冲锋锤 + 四套 GVL 验收套件且 id 唯一', () => {
+    expect(LAB_LOADOUTS.map((l) => l.label)).toEqual([
+      '西瓜重炮',
+      '香蕉冲锋锤',
+      // GADGET-VALIDATION-LAB-R1：四套 Gadget 真人验收 Loadout（锤/炮 × 推进器/反推器）。
+      // ⚠️ 这四套**只是本Lab 的按钮入口**（物理/协议层对照）；Gadget 的**视觉**验收走
+      //    另一个宿主 `gadget-lab.html`（复用正式 Renderer），两者互不依赖。
+      '锤 + 推进器',
+      '锤 + 反推器',
+      '炮 + 推进器',
+      '炮 + 反推器',
+    ]);
     expect(new Set(LAB_LOADOUTS.map((l) => l.id)).size).toBe(LAB_LOADOUTS.length);
   });
 

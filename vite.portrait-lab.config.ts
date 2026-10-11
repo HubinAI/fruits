@@ -27,6 +27,12 @@ export default defineConfig({
       input: {
         'run-page': 'run-page.html',
         'portrait-lab': 'portrait-lab.html',
+        // GADGET-VISUAL-VALIDATION-HOST-R1：Gadget 真人**视觉**验收宿主（开发专用）。
+        // ⚠️ 与 `portrait-lab` 的分工：那个是 Physics/Protocol Lab（只画 fillRect 矩形，
+        //    无法做视觉验收）；本页**复用正式 RunBattleRuntime + RunBattleView(正式 Renderer)**
+        //    画正式车辆/Weapon/Gadget 外观。
+        // 仍是同一块可整块删除的实验产物，不进入 dist / dist-pages / dist-e2e / dist-wechat。
+        'gadget-lab': 'gadget-lab.html',
         // PRP-M2：验证入口（「下一局起始改装」）。与另两个入口同源 —— 仍是同一块
         // 可整块删除的实验产物，不进入 dist / dist-pages / dist-e2e / dist-wechat。
         'next-run': 'next-run.html',
