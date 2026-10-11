@@ -26,6 +26,24 @@ import type { RenderFlame } from './battleContract';
 /** 固定物理步长（ms）：与 PlanckWorld.FIXED_STEP_MS 数值一致 */
 const FIXED_DT_MS = 1000 / PHYSICS_HZ;
 
+/**
+ * GADGET-REVERSE-VISUAL-IDENTITY-R1｜**后撤喷口的独立位置**（本地坐标，纯视觉）。
+ *
+ *⚠️ 取证依据（真实装配实测，`Cannon + Reverse`）：
+ *   - Cannon 挂 `frontMass` = 本地 (45, −8)，碰撞盒 x∈[44, 86] y∈[−19, 3]；
+ *   - 若后撤喷口只做「挂点镜像」→ 落在 (72, +4)，与炮口仅差 27px，
+ *     而火焰长 105px ⇒ 视觉上与炮口重叠，真人录像里被读成「炮口开火」。
+ *
+ * ⇒ 把后撤喷口放到**车头外侧偏下**（前轮附近的独立装置位置）：
+ *     - `REVERSE_NOZZLE_FWD` = 车体前方距离（72px，与 Cannon 枪管末端 86 相当但更靠外）；
+ *     - `REVERSE_NOZZLE_LOW` = 车体下方距离（+25px ≈ 前轮 y），与炮口 y≈−8 拉开 ~33px。
+ *
+ * ⚠️ 这两个常量**只影响火焰渲染根位置**（`getFlame`），不参与任何物理 / 碰撞 / 冲量。
+ * ⚠️ 不依赖 Weapon 类型：Renderer 里没有也不需要任何 Cannon 特判。
+ */
+const REVERSE_NOZZLE_FWD = 72;
+const REVERSE_NOZZLE_LOW = 25;
+
 /** Thruster behaviorParams 提取结果（数值来自 Content，本模块只读） */
 export interface ThrusterParams {
   /** 前摇（ms）：预警但不施力（Q13-C-R1：缩短到约 0.2~0.3s） */
@@ -449,15 +467,34 @@ export class ThrusterBehavior {
     //   thrustSign = +1（前冲）：喷焰在**车尾**、朝车尾 ⇒ `exhaust`（维持原样，零变化）
     //   thrustSign = -1（后撤）：喷焰在**车头**、朝车头 ⇒ `-exhaust`
     //   ⇒ 两种模式都满足「喷焰朝车外、车辆被推向反方向」。
+    //
+    // GADGET-REVERSE-VISUAL-IDENTITY-R1｜**后撤喷口与 Weapon 炮口必须视觉错开**。
+    //
+    //⚠️ 取证：Cannon 挂在 frontMass（局部 45,−8，碰撞盒 x∈[44,86] y∈[−19,3]），
+    //   若只做「挂点镜像」得到根部 (72,+4)，与炮口仅差 27px；火焰长 105px
+    //   ⇒ 两者在同一视觉区域，录像里被读成「炮口开火」。
+    //
+    // ⇒ 后撤改用**车头下方 / 前轮附近的独立 Gadget 喷口**（本地坐标随车身姿态旋转）：
+    //     沿 forward +72（车头外侧）、本地 y = +REVERSE_NOZZLE_LOW（车头下方，远离炮口 y≈−8）。
+    //   喷焰方向仍朝车头前方 ⇒ 反作用关系不变；且不依赖任何 Weapon 类型
+    //   （**Renderer 里没有Cannon 特判**，位置完全由 Gadget 自身数据决定）。
     const sign = this.params.trigger?.thrustSign ?? 1;
     const rearward = sign < 0;
-    // 后撤：根部移到车头前方（沿 forward 的对称镜像位置），方向取 -exhaust。
     const bodyPos = world.getPosition(vehicle.body);
-    const mountFromBody = { x: partPos.x - bodyPos.x, y: partPos.y - bodyPos.y };
-    const rootX = rearward ? bodyPos.x - mountFromBody.x : partPos.x;
-    const rootY = rearward ? bodyPos.y - mountFromBody.y : partPos.y;
+    let rootX = partPos.x;
+    let rootY = partPos.y;
+    if (rearward) {
+      const fwd = rotateLocal({ x: vehicle.facing, y: 0 }, world.getAngle(vehicle.body));
+      const down = rotateLocal({ x: 0, y: 1 }, world.getAngle(vehicle.body)); // 本地 +y = 车体下方
+      const local = {
+        x: REVERSE_NOZZLE_FWD * vehicle.facing,
+        y: REVERSE_NOZZLE_LOW,
+      };
+      rootX = bodyPos.x + fwd.x * local.x + down.x * local.y;
+      rootY = bodyPos.y + fwd.y * local.x + down.y * local.y;
+    }
     return {
-      // 喷焰根部 =真实安装点（sign=+1）；sign=-1 时为其**车头镜像点**（喷焰在车头外侧，绝不穿车）。
+      // 喷焰根部 = 真实安装点（sign=+1）；sign=-1 时 = **车头下方的独立 Gadget 喷口**。
       x: rootX,
       y: rootY,
       // 方向与推进方向严格相反（sign=+1 → exhaust；sign=-1 → -exhaust = forward）。
