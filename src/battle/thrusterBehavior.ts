@@ -439,13 +439,30 @@ export class ThrusterBehavior {
           : 70; // cooldown 收缩用固定窗口
     const elapsedSteps = stepsFor(phaseTotalMs) - this.phaseStepsRemaining;
     const tMs = Math.max(0, elapsedSteps * FIXED_DT_MS);
+
+    // GADGET-REVERSE-VISUAL-DIRECTION-R1｜**喷焰方向与位置必须与真实 thrustSign 一致**。
+    //
+    // ⚠️ 此前根方向被写死为 `exhaust = -chassisForward`，因此 Reverse Thruster 真实后撤时
+    //    喷焰仍朝车尾 ⇒ 画面看起来像「普通向前推进器」，与车辆运动方向反直觉。
+    //
+    // 视觉因果（喷焰 = 被推出的气体，方向与推进方向**相反**）：
+    //   thrustSign = +1（前冲）：喷焰在**车尾**、朝车尾 ⇒ `exhaust`（维持原样，零变化）
+    //   thrustSign = -1（后撤）：喷焰在**车头**、朝车头 ⇒ `-exhaust`
+    //   ⇒ 两种模式都满足「喷焰朝车外、车辆被推向反方向」。
+    const sign = this.params.trigger?.thrustSign ?? 1;
+    const rearward = sign < 0;
+    // 后撤：根部移到车头前方（沿 forward 的对称镜像位置），方向取 -exhaust。
+    const bodyPos = world.getPosition(vehicle.body);
+    const mountFromBody = { x: partPos.x - bodyPos.x, y: partPos.y - bodyPos.y };
+    const rootX = rearward ? bodyPos.x - mountFromBody.x : partPos.x;
+    const rootY = rearward ? bodyPos.y - mountFromBody.y : partPos.y;
     return {
-      // 喷焰根部 = 真实安装位置（part 挂点世界坐标）；方向 = exhaustDir = -chassisForward
-      // （车头方向=推进方向 → 喷焰朝车尾反方向喷出；rear 安装即车尾向外，绝不穿车）。
-      x: partPos.x,
-      y: partPos.y,
-      dirX: exhaust.x,
-      dirY: exhaust.y,
+      // 喷焰根部 =真实安装点（sign=+1）；sign=-1 时为其**车头镜像点**（喷焰在车头外侧，绝不穿车）。
+      x: rootX,
+      y: rootY,
+      // 方向与推进方向严格相反（sign=+1 → exhaust；sign=-1 → -exhaust = forward）。
+      dirX: rearward ? -exhaust.x : exhaust.x,
+      dirY: rearward ? -exhaust.y : exhaust.y,
       length: this.params.flameLength,
       width: this.params.flameWidth,
       color: this.params.flameColor,
