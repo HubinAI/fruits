@@ -167,6 +167,17 @@ const bananaBody: BodyDef = {
     { id: 'top', localPosition: { x: 0, y: -24 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -82, y: -2 }, localRotation: 0 },
   ],
+  /**
+   * GADGET-HARDPOINT-ALL-BODIES-R1｜Gadget 专属挂点（**独立命名空间**）。
+   *
+   * ⚠️ 与 functionalHardpoints 的 front/top/rear **同名不同义**：这些 id 只在 Gadget
+   *    维度内解析 ⇒ Gadget 装配**不占用、不重开**任何旧功能槽。
+   * ⚠️ 坐标依据本 Body **真实几何**推导（非全局统一值）：
+   *    半宽 95、后轮(-62,24)、rear 槽(-82,-2) ⇒ 取后部偏上，避开轮与 rear 槽。
+   */
+  gadgetHardpoints: [
+    { id: 'gadget', localPosition: { x: -70, y: -14 }, localRotation: 0 },
+  ],
   visual: {
     visualId: 'body_banana',
     size: { width: 200, height: 56 },
@@ -200,6 +211,17 @@ const pineappleBody: BodyDef = {
     { id: 'frontMass', localPosition: { x: 28, y: -14 }, localRotation: 0 },
     { id: 'top', localPosition: { x: 0, y: -56 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -46, y: -6 }, localRotation: 0 },
+  ],
+  /**
+   * GADGET-HARDPOINT-ALL-BODIES-R1｜Gadget 专属挂点（**独立命名空间**）。
+   *
+   * ⚠️ 与 functionalHardpoints 的 front/top/rear **同名不同义**：这些 id 只在 Gadget
+   *    维度内解析 ⇒ Gadget 装配**不占用、不重开**任何旧功能槽。
+   * ⚠️ 坐标依据本 Body **真实几何**推导（非全局统一值）：
+   *    半宽仅 44 且很高(±56) ⇒ 取后部靠内偏上，避开 top 槽(0,-56) 与后轮(-33,56)。
+   */
+  gadgetHardpoints: [
+    { id: 'gadget', localPosition: { x: -38, y: -22 }, localRotation: 0 },
   ],
   // F-CONTENT-PACK-REAL-UI-R1：补程序化视觉（此前缺 visual → 落 team-color 蓝盒）。
   // 菠萝 = 高窄椭圆体 + 顶部冠叶；视觉尺寸略大于 collider 以容纳冠叶。
@@ -237,6 +259,17 @@ const coconutBody: BodyDef = {
     { id: 'top', localPosition: { x: 0, y: -23 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -66, y: 0 }, localRotation: 0 },
   ],
+  /**
+   * GADGET-HARDPOINT-ALL-BODIES-R1｜Gadget 专属挂点（**独立命名空间**）。
+   *
+   * ⚠️ 与 functionalHardpoints 的 front/top/rear **同名不同义**：这些 id 只在 Gadget
+   *    维度内解析 ⇒ Gadget 装配**不占用、不重开**任何旧功能槽。
+   * ⚠️ 坐标依据本 Body **真实几何**推导（非全局统一值）：
+   *    半宽 66、后轮(-52,23)、rear 槽(-66,0) ⇒ 介于后轮与 rear 槽之间。
+   */
+  gadgetHardpoints: [
+    { id: 'gadget', localPosition: { x: -56, y: -12 }, localRotation: 0 },
+  ],
   // F-CONTENT-PACK-REAL-UI-R1：补程序化视觉（此前缺 visual → 落 team-color 蓝盒）。
   // 椰子 = 短沉圆棕体 + 顶部三芽点；视觉尺寸略大于 collider。
   visual: {
@@ -273,6 +306,17 @@ const durianBody: BodyDef = {
     { id: 'frontMass', localPosition: { x: 42, y: -8 }, localRotation: 0 },
     { id: 'top', localPosition: { x: 0, y: -27 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -72, y: 0 }, localRotation: 0 },
+  ],
+  /**
+   * GADGET-HARDPOINT-ALL-BODIES-R1｜Gadget 专属挂点（**独立命名空间**）。
+   *
+   * ⚠️ 与 functionalHardpoints 的 front/top/rear **同名不同义**：这些 id 只在 Gadget
+   *    维度内解析 ⇒ Gadget 装配**不占用、不重开**任何旧功能槽。
+   * ⚠️ 坐标依据本 Body **真实几何**推导（非全局统一值）：
+   *    半宽 74、后轮(-50,27)、rear 槽(-72,0) ⇒ 取后部偏上。
+   */
+  gadgetHardpoints: [
+    { id: 'gadget', localPosition: { x: -62, y: -14 }, localRotation: 0 },
   ],
   visual: {
     visualId: 'body_durian',
@@ -313,6 +357,17 @@ const pearBody: BodyDef = {
     { id: 'top', localPosition: { x: 0, y: -46 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -56, y: -4 }, localRotation: 0 },
   ],
+  /**
+   * GADGET-HARDPOINT-ALL-BODIES-R1｜Gadget 专属挂点（**独立命名空间**）。
+   *
+   * ⚠️ 与 functionalHardpoints 的 front/top/rear **同名不同义**：这些 id 只在 Gadget
+   *    维度内解析 ⇒ Gadget 装配**不占用、不重开**任何旧功能槽。
+   * ⚠️ 坐标依据本 Body **真实几何**推导（非全局统一值）：
+   *    上窄下宽、后轮(-46,40)、rear 槽(-56,-4) ⇒ 取后部偏上，远离地面轮。
+   */
+  gadgetHardpoints: [
+    { id: 'gadget', localPosition: { x: -50, y: -18 }, localRotation: 0 },
+  ],
   visual: {
     visualId: 'body_pear',
     size: { width: 152, height: 80 },
@@ -347,6 +402,17 @@ const mangoBody: BodyDef = {
     { id: 'frontMass', localPosition: { x: 50, y: -6 }, localRotation: 0 },
     { id: 'top', localPosition: { x: 0, y: -18 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -84, y: 0 }, localRotation: 0 },
+  ],
+  /**
+   * GADGET-HARDPOINT-ALL-BODIES-R1｜Gadget 专属挂点（**独立命名空间**）。
+   *
+   * ⚠️ 与 functionalHardpoints 的 front/top/rear **同名不同义**：这些 id 只在 Gadget
+   *    维度内解析 ⇒ Gadget 装配**不占用、不重开**任何旧功能槽。
+   * ⚠️ 坐标依据本 Body **真实几何**推导（非全局统一值）：
+   *    低矮修长(±18)、后轮(-64,18)、rear 槽(-84,0) ⇒ 取最靠后且偏上。
+   */
+  gadgetHardpoints: [
+    { id: 'gadget', localPosition: { x: -72, y: -16 }, localRotation: 0 },
   ],
   visual: {
     visualId: 'body_mango',
@@ -383,6 +449,17 @@ const orangeBody: BodyDef = {
     { id: 'frontMass', localPosition: { x: 36, y: -12 }, localRotation: 0 },
     { id: 'top', localPosition: { x: 0, y: -38 }, localRotation: 0 },
     { id: 'rear', localPosition: { x: -56, y: 0 }, localRotation: 0 },
+  ],
+  /**
+   * GADGET-HARDPOINT-ALL-BODIES-R1｜Gadget 专属挂点（**独立命名空间**）。
+   *
+   * ⚠️ 与 functionalHardpoints 的 front/top/rear **同名不同义**：这些 id 只在 Gadget
+   *    维度内解析 ⇒ Gadget 装配**不占用、不重开**任何旧功能槽。
+   * ⚠️ 坐标依据本 Body **真实几何**推导（非全局统一值）：
+   *    高胖(±38)、后轮(-42,38)、rear 槽(-56,0) ⇒ 取后部偏上。
+   */
+  gadgetHardpoints: [
+    { id: 'gadget', localPosition: { x: -48, y: -16 }, localRotation: 0 },
   ],
   visual: {
     visualId: 'body_orange',
