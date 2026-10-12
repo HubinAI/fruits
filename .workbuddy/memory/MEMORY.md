@@ -8,12 +8,14 @@
 | 结构口径/Mac/已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状（2026-10-12 · 新窗口先读）
-- HEAD=`fbb3e05`+RUN-WEAPON-GROWTH-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
-- ⚠️ **RUN-WEAPON-GROWTH-R1（最新）**：审计前提**不成立**——R7 通用成长 `damageUp`/`rateUp`
-  全链生效（池→能力矩阵→chooseRunBuff→overlay→behavior 逐键读），必改1不触发、零 Modifier 改动；
-  假源头=`runCompatibility.ts` R6-BATCH 过时注释（已修订）。复测：6/6 非Cannon 逐发=×1.25 链内验证；
-  **当前三段链 zero 无一 COMPLETE（含 cannon FAILED@2）**——旧「cannon 下界 234.8」=4场链口径不可平移。
-  ⚠️ 新既有红：PL-26 白名单缺 `../core/partOptions`（`8fb5978` 引入，独立 Bug Queue）。
+- HEAD=f9a743d+DEMO-PLAYABLE-PATH-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
+- ⚠️ **DEMO-PLAYABLE-PATH-R1（最新）**：正常可达通关路线**已钉死为回归基线**
+  `tests/productDemoPlayablePathR1.test.ts`——chassis = **mangoBody+cannon+smallWheel×2**，
+  Build = `fastReload→emergencyRepair`，终局余量 203.4；领奖→幂等→装备保持→再开局已验。
+  ⚠️ **默认 4 Body × cannon = 0 COMPLETE**（R10 那条 cannon chassis 在 mango 上；西瓜车打不完）。
+- ⚠️ **RUN-WEAPON-GROWTH-R1**：审计前提不成立——R7 通用成长全链生效，假源头=
+  runCompatibility R6-BATCH 过时注释（已修订）；当前三段链 zero 无一 COMPLETE（含 cannon）。
+  ⚠️ 既有红：PL-26 白名单缺 `../core/partOptions`（`8fb5978` 引入，待独立 Bug Queue）。
 - **最新轮 = Gadget 第三层闭环**（12 Queue `1be27d8`→`6b0356a`）：正式链
   gadgetDefId→…→createPlanckVehicle（独立 gadgetHardpoints）→Behavior→Renderer 已通；
   GS-06 实测与全文 → archive 最新交接文档。
@@ -27,8 +29,9 @@
   同文件 ：60-70「强化全 Cannon 专属」与 R7 通用成长**口径冲突**，复测前勿改注释。
 - **Strict Matrix = 28/11**；hammer 0/rammer 0；工具≈42min 后台独占。
   已证伪勿走：R12 开火窗口、「hammer 够不着」、Encounter 顺序主因、单场矩阵代入三段链。
-- **下一步 = 等 Queue**。候选：① GADGET-EARN-PATHWAY-R1 ② WEAPON-VIABILITY 通关性复测（R7-BATCH
-  4场链口径已证不可平移，需按当前 6 节点链重立登记结论）③ ARCHIVE-RESTORE-RESILIENCE-R1 ④ DOC-COMPAT-REFRESH-R1。
+- **下一步 = 等 Queue**。候选：① GADGET-EARN-PATHWAY-R1 ② 默认车打不完的内容/平衡 Queue
+  （mango 基线已立，对照可用）③ ARCHIVE-RESTORE-RESILIENCE-R1 ④ DOC-COMPAT-REFRESH-R1
+  ⑤ PL-26 partOptions 白名单 Bug Queue。
 - ⚠️ **未修→独立 Bug Queue**：① validateSnapshot 星级缺口（`buildValidator.ts:54`）② e2e:next-run 崩
   （期望 3 实际 4）③④ 注释陈旧 ×2 ⑤ PC-14 预存红。旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
 - **未做别再 ask**：观感/动画/内容量/Buff/挂点几何/逐武器差异化；saw/spear 不动；
