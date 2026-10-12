@@ -643,13 +643,14 @@ describe('F-GARAGE-FUSION-UX-R2 B｜host 材料槽交互（T7-T10/T14-T16/T18-T2
 
 // ═══════════════════════════ C｜可达性 / 布局 / DPR ═══════════════════════════
 describe('F-GARAGE-FUSION-UX-R2 C｜可达性 / 布局 / DPR（T21-T25）', () => {
-  it('T21. 战斗分类 11 个正式部件全部可达（R3：全库存种子下真实翻页，未拥有隐藏不参与全集）', () => {
+  it('T21. 战斗分类 12 个正式部件全部可达（R3：全库存种子下真实翻页，未拥有隐藏不参与全集）', () => {
     const allOwned: Record<string, { one: number }> = {};
     for (const id of [...OFFICIAL_PARTS, ...OFFICIAL_MOVEMENTS, ...OFFICIAL_BODIES]) allOwned[id] = { one: 1 };
     seedInventory(allOwned);
     const env = makeEnv({ w: 844, h: 390 });
     const ids = collectIds(env, 'combat');
-    expect(ids.length).toBe(11);
+    // ⚠️ GADGET-GARAGE-DATA-R1：反推器入池 ⇒ 11 → 12（下一行的集合断言才是真判据）。
+    expect(ids.length).toBe(12);
     expect([...ids].sort()).toEqual([...OFFICIAL_PARTS].sort());
   });
 

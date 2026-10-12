@@ -49,4 +49,12 @@ export const PART_OPTIONS: PartOption[] = [
   // Q14-B：喷火器 Weapon（持续喷射 1.0s 短命火焰 projectile 流 → 短冷却 0.6s；
   //   射程 ≈1.1 个西瓜长，贴近才有效；黄白火芯+橙红短尾连续叠成火流）
   { v: 'flamethrower', t: '喷火器' },
+  // GADGET-GARAGE-DATA-R1｜反推器 Gadget（GADGET-REVERSE-THRUSTER-PROTOTYPE-R1）：
+  // 「敌人过近 → 短时后撤」，为远程 Weapon 重新建立射击空间。
+  // ⚠️ 与上面 `thruster`（过远 → 前冲）**共用**同一 `behavior:'thruster'` 与同一状态机，
+  //    只由 `behaviorParams.distanceTrigger.mode` 切换触发方向（far / near）——
+  //    两者不是两套机制，而是同一机制的两种mode。
+  // ⚠️ 只在此处补进**正式可选池**（让 Garage 有数据来源）；Runtime / 参数 / hardpoint
+  //    / Body capacity 一律不动。真正把它装上车的 UI 入口由下一轮单独接。
+  { v: 'reverseThruster', t: '反推器' },
 ];

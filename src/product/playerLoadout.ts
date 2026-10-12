@@ -44,6 +44,7 @@
  */
 
 import { registry } from '../core/content';
+import { PART_OPTIONS } from '../core/partOptions';
 import { computeEnergy, validateSnapshot } from '../core/buildValidator';
 import { loadPlayerBuild, savePlayerBuild } from '../core/buildPersistence';
 import { OFFICIAL_BODIES, canEquipBody } from '../core/bodyOwnership';
@@ -663,6 +664,35 @@ export function isWeaponDefId(defId: string): boolean {
   return registry.functionals.get(defId)?.category === 'weapon';
 }
 
+/**
+ * GADGET-GARAGE-DATA-R1｜「无 Gadget」选项的玩家语言名。
+ * ⚠️ 唯一字面量来源（页面与测试都从这里取，不各写一份）。
+ */
+export const GADGET_EMPTY_NAME = '无';
+
+/**
+ * 全部**正式可选** Gadget 定义（稳定字典序）。
+ *
+ * ⚠️ 真源 = `core/partOptions.PART_OPTIONS`（玩家 Build 部件选项唯一数据源），
+ *    **再**用正式内容库筛出 `category === 'gadget'`。
+ *    为什么不直接筛 registry 的 `category`：
+ *      registry 里共 6 件 gadget，其中 `testMass`（测试质量块）/
+ *      `wedgeShovel`（楔铲，Q11-A-CLOSE 真人验收失败）/ `lifter`（举升臂，
+ *      Q12-B-CLOSE 真人验收失败）**都不在正式可选池里**（已退场但保留 definition）。
+ *      直接筛 registry 会把三件已退场件一起端给 Garage。
+ *    ⇒ `PART_OPTIONS` 正是「玩家能不能选」的唯一判定，与 Garage 其它卡片同源。
+ *
+ * ⚠️ 当前恰好两件（`thruster` / `reverseThruster`）；`pushRod` 仍在池中但它是
+ *    **普通功能件**（非 Gadget 维度），因此不作为 Gadget 选项出现。
+ * ⚠️ 内容侧把新 Gadget 加进 `PART_OPTIONS` 时这里自动跟上，不存在第二张 id 表。
+ */
+export function gadgetDefs(): readonly FunctionalPartDef[] {
+  const pool = new Set(PART_OPTIONS.map((o) => o.v));
+  return [...registry.functionals.values()]
+    .filter((d) => d.category === 'gadget' && pool.has(d.id))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
 /** 全部正式武器定义（稳定字典序；来源 = 正式 registry，不是本模块自建清单）。 */
 export function weaponDefs(): readonly FunctionalPartDef[] {
   return [...registry.functionals.values()]
@@ -757,6 +787,53 @@ export function equippedWeaponId(draft: BuildDraft): string {
  */
 export function equippedWeaponStar(draft: BuildDraft): number {
   return starInRange(draft.functionalStars?.[WEAPON_SLOT] ?? WEAPON_GROWTH_STAR);
+}
+
+/* ------------------------------------------------------------------ Gadget */
+
+/**
+ * GADGET-GARAGE-DATA-R1｜一条 Garage「Gadget 选择项」的读数（**纯数据**，不含任何 DOM）。
+ *
+ * ⚠️ 与 `WeaponEntry` **同构**（同一套字段语义）：Garage 卡片画的就是这些字段，
+ *    页面不自己拼名字 / 能量 ⇒ 下一轮 UI 接入时不需要在页面里另立一份读数。
+ */
+export interface GadgetEntry {
+  /** 内部 defId（`EMPTY_SLOT` 表示「无 Gadget」）。 */
+  readonly defId: string;
+  /** 玩家语言名称（来自正式内容 `FunctionalPartDef.name`，不写第二份字面量）。 */
+  readonly name: string;
+  /** 单件能量占用（`FunctionalPartDef.energy`；★1 恒等）。 */
+  readonly energy: number;
+  /** 是否是「无 Gadget」这一项（`EMPTY_SLOT`）。 */
+  readonly empty: boolean;
+}
+
+/**
+ * 当前正式可选 Gadget 集合（EMPTY / 推进器 / 反推器）。
+ *
+ * ⚠️ **唯一真源 = 正式内容库的 `category === 'gadget'`**，不从 `PART_OPTIONS` 反推、
+ *    也不在本文件写第二张id 表 ⇒ 内容侧新增 Gadget 时这里自动跟上。
+ *
+ * ⚠️ **不读库存**：Gadget 的可选性目前由「正式可选池」决定（与 Weapon 不同，
+ *    Weapon 还要按 star 分栈展开）。这是**本轮的数据层口径**；
+ *    「是否已拥有 / 能否装车」的判定留给下一轮 UI 接入时接现有 validator。
+ *
+ * ⚠️ 顺序稳定（按 id 字典序），且**第一项恒为 EMPTY** —— UI 可直接把它当默认项。
+ */
+export function gadgetEntries(): readonly GadgetEntry[] {
+  const out: GadgetEntry[] = [];
+  for (const def of gadgetDefs()) {
+    out.push({ defId: def.id, name: def.name, energy: def.energy, empty: false });
+  }
+  return [
+    { defId: EMPTY_SLOT, name: GADGET_EMPTY_NAME, energy: 0, empty: true },
+    ...out,
+  ];
+}
+
+/** 当前 Build 选中的 Gadget defId（无 Gadget → `EMPTY_SLOT`）。 */
+export function equippedGadgetId(draft: BuildDraft): string {
+  return draft.gadgetDefId && draft.gadgetDefId !== EMPTY_SLOT ? draft.gadgetDefId : EMPTY_SLOT;
 }
 
 /** 车身 Functional 挂点的展示读数（顺序 = BodyDef 硬点顺序，空槽如实标「空」）。 */

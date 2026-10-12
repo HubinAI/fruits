@@ -198,8 +198,11 @@ describe('A. canonical 内容清单（第一部分，全部现读自 core 真源
     // 正式车身全集 = 旧 4（恒默认拥有）+ 新 4（需解锁）
     expect([...OFFICIAL_BODIES]).toEqual([...DEFAULT_OWNED_BODIES, ...NEW_OFFICIAL_BODIES]);
     expect(OFFICIAL_BODIES.length).toBe(8);
-    // 正式功能件全集 = PART_OPTIONS 去 EMPTY（11 件）
-    expect(OFFICIAL_PARTS.length).toBe(11);
+// 正式功能件全集 = PART_OPTIONS 去 EMPTY（12 件）
+// ⚠️ GADGET-GARAGE-DATA-R1：反推器 `reverseThruster` 进入正式可选池 ⇒ 11 → 12。
+//    它**不是**新机制：`thruster` 与它共用同一 behavior 与状态机，
+//    只由 `distanceTrigger.mode`（far / near）区分前后冲/后撤。
+expect(OFFICIAL_PARTS.length).toBe(12);
     // 正式轮组 = 3 件（本种子**不**碰，见 CP-M1）
     expect([...OFFICIAL_MOVEMENTS]).toEqual(['smallWheel', 'largeWheel', 'heavyWheel']);
   });
