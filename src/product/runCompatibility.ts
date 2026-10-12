@@ -58,18 +58,26 @@
  * ⚠️ 本模块**不做**字符串判断（Queue 必改 1 明令「不要在 UI 里靠字符串判断」）：
  *    输入是真实 `BuildDraft`，判断走正式内容库的 `category === 'weapon'` 分类字段。
  *
- * ⚠️ 已知留白（**如实披露，不在本 Queue 范围内**）：R2 的 Run 强化数值表
+ * ⚠️ 强化内容口径（**已在 R7 更新，本段为此处的现行真源**）：R2 的 Cannon 强化数值表
  *    （`heavyShell` / `twinCannon` / `fastReload` / `tripleLoad`）与玩家侧基线 120
- *    都是 **Cannon 专属**（字段名与 behavior 都是 Cannon 的）。装备非 Cannon 时这些项
- *    **不适用**（`runModifiers.weaponOverlayMods` 返回空），该武器用它自己的 canonical Def 打。
- *    ⇒ 「非 Cannon 的强化内容」是一条独立的 Run 内容设计 Queue，本 Queue 不设计、不新增。
+ *    是 **Cannon 专属**（字段名与 behavior 都是 Cannon 的）⇒ 只对基准武器 = cannon 的局发放
+ *    （`runModifiers.weaponOverlayMods` 按池族分派）。**PRODUCT-LOOP-R7**（`f6d046d`）已为
+ *    非 Cannon 基准武器补齐**通用基础成长池**：`damageUp`（伤害键 ×1.25）/
+ *    `rateUp`（该武器自己的节奏键 ×0.75）+ 复用既有 `emergencyRepair`（池的地板，恒在）。
+ *    池在发给玩家前逐项过真实能力矩阵（`genericGrowthApplies`）⇒ 「画出来的项 = 选得动的项」。
+ *    机器证据：R7 `GR-01~08` / R9S `productRunBuildChoiceContentSanityR9S.test.ts`
+ *    （6 件非 Cannon × 3 项 = 18 格全绿，逐件真战斗）。
  *
- * ⚠️ 承接上一条的**实测后果（R6-BATCH 记录，非本 Queue 修复项）**：因为整条 Run 的
- *    成长内容都是 Cannon 专属，非 Cannon 装备在本局**拿不到任何伤害成长**
- *    （三个第一层项与横向改装对它全是空操作，唯一真实收益是 `emergencyRepair` 的两次回耐久）。
+ *    实测后果修订（原「非 Cannon 拿不到任何伤害成长」**已被 R7 取代**）：
+ *    非 Cannon 基准武器选 `damageUp` / `rateUp` 会**真实改变该武器自己的数值**
+ *    （伤害键 / 节奏键都写进本局 overlay 部件、由该武器自己的 behavior 逐键读取）。
  *
- *    实测口径（★1 / 零 Build / `playerBaseline: true` / **归因夹具** = 车上只留这一件武器，
- *    `top` 槽的锤也清掉 —— 否则测的是「那一套装配」而不是「这件武器」）：
+ *    ⚠️ 下面的通关性矩阵是 **R6-BATCH 时代的 4 场链实测快照**（零 Build 口径），仅作
+ *    历史基线保留：它测的是「零 Build 能不能通关」，与「选了成长有没有效」是两个问题 ——
+ *    R7 之后非 Cannon 局选择通用成长会真实生效，但**通关结论未按当前 HEAD 复测**
+ *    （期间经历 R8–R13、Mac 迁移、Gadget 第三层，脚本结构与数值均有变动）。
+ *    最新通关性事实以 `tests/productRunWeaponRuntimeBatchR7.test.ts`（R7-04b/04c）
+ *    与 Strict Matrix（28 paths / 11 chassis）为准，复测后再更新本表。
  *
  *      | 武器            | 下界（跨场不修）      | 真实路线（DAY4 维修 + DAY5 紧急维修） |
  *      |---|---|---|
