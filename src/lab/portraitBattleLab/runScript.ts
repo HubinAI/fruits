@@ -271,6 +271,102 @@ export function runScriptNode(id: string): RunScriptNode | null {
   return RUN_SCRIPT.find((n) => n.id === id) ?? null;
 }
 
+/**
+ * DEMO-RUN-VARIANTS-R1｜**固定 Run 路线变体**（独立候选；默认路线逐字不动）。
+ *
+ * ── 为什么是「路线表」而不是第二套 RUN_SCRIPT ────────────────────────────────
+ * 状态机对脚本的消费点只有节点解析（`requireRunScriptNode` / `runScriptNode`）与
+ * 六节点形状本身（`createRunPageState` 的首节点 + `next` 链推进 + `kind` 分派）。
+ * 三条路线**共用同一形状与同一批节点 id**，只有 BATTLE / FINAL 的 `encounterId`
+ * 不同 —— 因此变体只需要一张「节点 id → encounterId」的覆盖表，
+ * 不复制脚本、不新增状态机、不改 RUN_SCRIPT 默认路线（Queue 禁止项）。
+ *
+ * ── 三条路线的选型依据（= DEMO-BUILD-COUNTER-R1 矩阵的现读事实）───────────────
+ *
+ *   | 路线 | 遭遇序列（B1→B2→B3 终局） | 装配倾向（BC 矩阵 + RV 探针实测） |
+ *   |---|---|---|
+ *   | 默认（`RUN_SCRIPT`） | ProtoRusher → Chaser → RangedTurret | 不变（正式产品路线） |
+ *   | `heavy` | HeavyFortress → HighGunPlatform → ProtoRusher | 炮车硬扛重火力：HF 胜(229) → fastReload 过 HGP(208) → twinCannon 收官 PR(87) |
+ *   | `rush` | ProtoRusher → RushRammer → HighGunPlatform | 炮车低开局：PR 胜(529) → fastReload 贴身险胜 RR(94) → 二层 HGP 胜（311） |
+ *
+ *   ⚠️ 两条候选都**引用既有 LAB_ENCOUNTERS 条目**（零新数值）；每条路线至少一场
+ *      与默认路线不同的对手，且三段**不完全相同**（保证「路线」有真实内容差异）。
+ *   ⚠️ 探索史（如实记录，防重复劳动；全部走正式 Runtime）：
+ *      ① HF 放 B1 时炮车可胜(229)，但从 229 进 RR **全组合必败** ⇒ RR 不能在 HF 之后；
+ *      ② HF 放 B2/B3 时唯一可行 = 「先 RR 拿 fastReload → 二层 twinCannon」（514/193 入场），
+ *      但 RR 放 B1 零 Build 必败 ⇒ **B1=RR 与 HF∉B1 不可兼得**；
+ *      ③ D-durian-shotgun 在任何含 RR/HGP 的深链上全灭；C-coconut-cannon 对 HF 单场必败。
+ *      ⇒ heavy 路唯一可行序 = **HF → HGP → PR**（炮车 + fastReload→twinCannon，229→208→87）。
+ *
+ * ── 数据隔离（Queue 必改 3 的结构性保证）──────────────────────────────────
+ *   覆盖表是**只读常量**；`runScriptNodeFor(route, id)` 是**纯函数**——
+ *   返回的节点对象是新建的浅拷贝（不写共享的 `RUN_SCRIPT` 数组），
+ *   两条候选路线的节点与默认路线的节点互不共享可变引用。
+ */
+
+/** 路线 id（缺省路线不需要 id —— `RUN_SCRIPT` 本身就是默认）。 */
+export type RunRouteId = 'heavy' | 'rush';
+
+/** 各路线对**战斗节点 encounterId 的覆盖表**（只列 BATTLE / FINAL；EVENT/CHOICE 共用）。 */
+export const RUN_ROUTE_ENCOUNTER_OVERRIDES: Readonly<
+  Record<RunRouteId, Readonly<Record<string, string>>>
+> = {
+  heavy: {
+    'd2-battle1': 'HeavyFortress',
+    'd3-battle2': 'HighGunPlatform',
+    'd4-final': 'ProtoRusher',
+  },
+  rush: {
+    'd2-battle1': 'ProtoRusher',
+    'd3-battle2': 'RushRammer',
+    'd4-final': 'HighGunPlatform',
+  },
+};
+
+/** 用覆盖表把默认节点改写成路线变体（纯函数，零共享可变引用）。 */
+function runScriptNodeWithOverrides(
+  base: RunScriptNode,
+  overrides: Readonly<Record<string, string>>,
+): RunScriptNode {
+  const encounterId = overrides[base.id];
+  if (!encounterId || base.encounterId === undefined || base.encounterId === encounterId) {
+    return base;
+  }
+  return { ...base, encounterId };
+}
+
+/**
+ * 按路线取节点（未知 id → `null`；`route` 缺省/未知 → 默认 `RUN_SCRIPT`）。
+ *
+ * ⚠️ `runScriptNode(id)` **逐字等于** `runScriptNodeFor(undefined, id)` ——
+ *    既有调用点（状态机三处 + 测试）不传 route 时行为与改前逐字节相同。
+ */
+export function runScriptNodeFor(
+  route: RunRouteId | undefined,
+  id: string,
+): RunScriptNode | null {
+  if (!route) return runScriptNode(id);
+  const overrides = RUN_ROUTE_ENCOUNTER_OVERRIDES[route];
+  if (!overrides) return runScriptNode(id);
+  const base = RUN_SCRIPT.find((n) => n.id === id);
+  return base ? runScriptNodeWithOverrides(base, overrides) : null;
+}
+
+/** 按路线取节点（未知 id 抛错）—— 与 `requireRunScriptNode` 同一契约的路线版。 */
+export function requireRunScriptNodeFor(route: RunRouteId | undefined, id: string): RunScriptNode {
+  const n = runScriptNodeFor(route, id);
+  if (!n) throw new Error(`[PRP-RUN-02] Run Script(路线=${route ?? 'default'}) 不存在节点 "${id}"`);
+  return n;
+}
+
+/** 按路线取战斗节点序列（BATTLE / FINAL；诊断与宿主预热用）。 */
+export function runScriptBattleNodesFor(
+  route: RunRouteId | undefined,
+): readonly RunScriptNode[] {
+  const overrides = route ? RUN_ROUTE_ENCOUNTER_OVERRIDES[route] : undefined;
+  return runScriptBattleNodes().map((n) => runScriptNodeWithOverrides(n, overrides ?? {}));
+}
+
 /** 取节点（未知 id 抛错）—— 状态机内部的硬契约。 */
 export function requireRunScriptNode(id: string): RunScriptNode {
   const n = runScriptNode(id);

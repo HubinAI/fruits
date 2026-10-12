@@ -8,12 +8,16 @@
 | 结构口径/Mac/已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状（2026-10-12 · 新窗口先读）
-- HEAD=`56c3d41`+DEMO-BUILD-COUNTER-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
-- ⚠️ **DEMO-BUILD-COUNTER-R1（最新）**：4×3 换装矩阵证明**假设通过**——换装真实改变战局
-  （9/12 格胜负翻转，无稳定通吃）。克制①对 RushRammer 用远程/爆发；②对 HighGunPlatform
-  **必须弹道武器**（hammer 0 命中全灭）；HeavyFortress 4/4 无解=平衡留白。
-  下一轮多局候选集 = **RushRammer + HighGunPlatform**。回归=`productBuildCounterR1`。
-  ⚠️ Garage `editable` 只有 WEAPON_SLOT（`playerLoadout.ts:979`）⇒ top/front/rear 槽不可写。
+- HEAD=`d015c9b`+DEMO-RUN-VARIANTS-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
+- ⚠️ **DEMO-RUN-VARIANTS-R1（最新）**：两条固定路线变体已接入并全链验证——
+  **heavy = HF→HGP→PR**（炮车 229→208→87，fastReload+twinCannon）、
+  **rush = PR→RR→HGP**（炮车 529→94→311，fastReload+emergencyRepair）。
+  接缝 = `runScript.ts` 路线覆盖表 + `ctx.runRoute?`（缺省=默认路线，产品 `runPage.ts`
+  不传 ⇒ 默认结构性不变）。回归=`productRunVariantsR1`。
+  ⚠️ **勘误已修正**：上轮「HF 4/4 无解 / A,D 丢 2 格」是错的——真实=A 对 HF 胜(229)、
+  A/D 各丢 1 格、HF 对 B/C/D 必胜；`productBuildCounterR1` console 已加勘误声明。
+  ⚠️ 路线约束：HF 放 B1 则 RR 不能在后（229 进 RR 全败）；RR 放 B1 零 build 必败；
+  含 HF 的深链唯一可行 = fastReload→twinCannon（514/193 入场）。
 - ⚠️ **DEMO-ENCOUNTER-CONTENT-BATCH-R1（最新）**：3 套压力画像候选入 `LAB_ENCOUNTERS`
   （目录 7→**10**，LabEncounterId 闭集同步 +3）——HeavyFortress（R1-HVY-01 重型停驻，
   **mango 玩家打不过=高压**）/ RushRammer（R1-RUSH-01 冲锤贴身）/ HighGunPlatform（R1-GUN-02

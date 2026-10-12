@@ -231,7 +231,10 @@ export function runDemoPlan(): SpawnPlan {
  * ⚠️ PRODUCT-LOOP-R1-C：玩家展示名与耐久上限改为读**本局装载**（局外装备）⇒
  *    「首页显示的车」与「战斗里跑的车」在结构上是同一份 draft 的两个投影。
  */
-export function runPageContext(loadout: RunPlayerLoadout = demoRunPlayerLoadout()): RunPageContext {
+export function runPageContext(
+  loadout: RunPlayerLoadout = demoRunPlayerLoadout(),
+  route?: import('./runScript').RunRouteId,
+): RunPageContext {
   const player = runPlanFor(RUN_DEMO_ENCOUNTER_ID, loadout).player;
   const encounters: Record<string, RunEncounterInfo> = {};
   for (const node of runScriptBattleNodes()) {
@@ -250,10 +253,14 @@ export function runPageContext(loadout: RunPlayerLoadout = demoRunPlayerLoadout(
     playerHpMax: player.hp,
     encounters,
     // ⚠️ PRODUCT-LOOP-R7-WEAPON-BASIC-BUILD-CONTENT：把**本局基准武器**交给状态机，
-    //    它据此决定候选池给哪一套内容（Cannon 三池 vs 通用基础成长池）。
-    //    判据与运行时强化注入、与 Run 创建资格**同一个函数**（`runLoadoutCompatOfDraft`
-    //    → `resolveRunBaseWeaponDefId`）⇒ 三处不可能漂移：装备 hammer 就是 'hammer'。
+    // 它据此决定候选池给哪一套内容（Cannon 三池 vs 通用基础成长池）。
+    // 判据与运行时强化注入、与 Run 创建资格**同一个函数**（`runLoadoutCompatOfDraft`
+    // → `resolveRunBaseWeaponDefId`）⇒ 三处不可能漂移：装备 hammer 就是 'hammer'。
     baseWeaponDefId: runLoadoutCompatOfDraft(loadout.draft).baseWeaponDefId,
+    // ⚠️ DEMO-RUN-VARIANTS-R1：路线透传（可选；缺省 undefined = 默认路线，
+    // 既有调用点逐字节不变）。敌情表恒按**默认脚本**全量预热（路线变体只覆盖
+    // encounterId 引用，全部来自同一张 LAB_ENCOUNTERS 表 ⇒ 敌情读取不受影响）。
+    runRoute: route,
   };
 }
 

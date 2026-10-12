@@ -99,10 +99,11 @@ import {
   RUN_TOTAL_BATTLES,
   RUN_TOTAL_CHOICES,
   RUN_TOTAL_DAYS,
-  requireRunScriptNode,
-  runScriptNode,
+  requireRunScriptNodeFor,
+  runScriptNodeFor,
   type RunChoicePoolKind,
   type RunDurabilityChoiceId,
+  type RunRouteId,
   type RunScriptNode,
 } from './runScript';
 
@@ -205,6 +206,17 @@ export interface RunPageContext {
    *    产品真实路径由宿主显式传入（`runPageScene.runPageContext` ← `runLoadoutCompatOfDraft`）。
    */
   readonly baseWeaponDefId?: string | null;
+  /**
+   * DEMO-RUN-VARIANTS-R1｜**本局 Run 的固定路线**（可选，缺省 = 正式默认路线）。
+   *
+   * ⚠️ 只有 `undefined`（不传）= 默认 `RUN_SCRIPT`：既有全部调用点（Lab 研发入口 /
+   *    产品宿主 / 全部既有测试）**逐字节不变**——产品默认路线不受影响、旧存档不受影响。
+   * ⚠️ 变体只覆盖 BATTLE / FINAL 的 `encounterId`（引用既有 `LAB_ENCOUNTERS` 条目，
+   *    零新数值）；节点形状 / DAY / 两次 CHOICE 时机与默认**完全相同**。
+   * ⚠️ 当前只有专用测试环境消费它（`productRunVariantsR1`）—— 正式 `runPage.ts`
+   *    **不传**该字段 ⇒ 产品默认路线结构性不变。
+   */
+  readonly runRoute?: RunRouteId;
 }
 
 /**
@@ -257,11 +269,10 @@ export interface RunPageState {
    */
   readonly baseWeaponDefId: string | null;
   /**
-   * 本局累计的**额外耐久**（紧急维修 + 耐久事件「维修」）。
-   *
-   * ⚠️ 刻意**不改写上一场的战斗记录** `battle.playerHp`（那是真实结果，不该被改）；
-   * 补偿单独记录，注入下一场时叠加在真实剩余耐久之上（且不超过上限）。
+   * DEMO-RUN-VARIANTS-R1｜本局**固定路线**（只读镜像自 `RunPageContext`，构造时冻结）。
+   * `undefined` = 默认路线（既有全部流程逐字节不变）；节点解析经 `requireRunScriptNodeFor`。
    */
+  readonly runRoute?: RunRouteId;
   readonly repairBonus: number;
   /** 本局**已打完**的真实战斗场数（0..4；诊断用，进度由 `nodeId` 决定）。 */
   readonly battlesCompleted: number;
@@ -355,7 +366,7 @@ function phaseForNode(kind: RunScriptNode['kind']): RunPhase {
  *       CHOICE / DURABILITY → 直接开浮层（选择本身就是内容）
  */
 function presentNode(s: RunPageState, nodeId: string, ctx: RunPageContext): RunPageState {
-  const node = requireRunScriptNode(nodeId);
+  const node = requireRunScriptNodeFor(ctx.runRoute, nodeId);
   const entries: { kind: RunLogKind; text: string }[] = [];
   if (node.day !== s.day) entries.push({ kind: 'day', text: `DAY ${node.day}` });
   for (const line of node.beat) entries.push({ kind: 'travel', text: subst(line, ctx, node) });
@@ -369,7 +380,7 @@ function presentNode(s: RunPageState, nodeId: string, ctx: RunPageContext): RunP
  *    `transitions = 0` / `revision = 0` / `actionCount = 0`（「还没发生过任何切换」）。
  */
 export function createRunPageState(ctx: RunPageContext): RunPageState {
-  const first = requireRunScriptNode(RUN_SCRIPT_FIRST_ID);
+  const first = requireRunScriptNodeFor(ctx.runRoute, RUN_SCRIPT_FIRST_ID);
   const entries: { kind: RunLogKind; text: string }[] = [{ kind: 'day', text: `DAY ${first.day}` }];
   for (const line of first.beat) entries.push({ kind: 'travel', text: subst(line, ctx, first) });
   const phase = phaseForNode(first.kind);
@@ -380,6 +391,7 @@ export function createRunPageState(ctx: RunPageContext): RunPageState {
     dayTotal: RUN_TOTAL_DAYS,
     buffs: [],
     baseWeaponDefId: ctx.baseWeaponDefId ?? RUN_BASE_WEAPON_DEF_ID,
+    runRoute: ctx.runRoute,
     repairBonus: 0,
     battlesCompleted: 0,
     log: pushLogs([], entries),
@@ -413,7 +425,7 @@ export const RUN_ACTION_LABEL: Record<RunPhase, string> = {
 
 /** 当前脚本节点（状态机的进度锚点；未知 id 会抛错，绝不静默回退）。 */
 export function runCurrentNode(s: RunPageState): RunScriptNode {
-  return requireRunScriptNode(s.nodeId);
+  return requireRunScriptNodeFor(s.runRoute, s.nodeId);
 }
 
 /** 本局是否已**完成**（终局战斗打完且仍然存活 → RUN COMPLETE 终态）。 */
@@ -874,5 +886,5 @@ export function resolveDurability(
 
 /** 本局当前节点的类型（诊断 / 测试用）。 */
 export function runNodeKind(s: RunPageState): string {
-  return runScriptNode(s.nodeId)?.kind ?? 'UNKNOWN';
+  return runScriptNodeFor(s.runRoute, s.nodeId)?.kind ?? 'UNKNOWN';
 }

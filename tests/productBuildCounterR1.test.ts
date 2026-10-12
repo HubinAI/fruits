@@ -385,15 +385,18 @@ describe('DEMO-BUILD-COUNTER-R1｜4×3 同口径战斗矩阵', () => {
 
       console.log(
         '\n##### BC-04 判定结论 #####\n' +
+          '  ⚠️ 勘误（DEMO-RUN-VARIANTS-R1 修正）：本文件首版 console 文字报告误写\n' +
+          '  「HeavyFortress 4/4 无解」「A/D 各丢 2 格」——与本测试**实际可运行读数冲突**。\n' +
+          '  正确读数（以下方断言为准）：A 对 HF **胜**（229 余量）；A/D 各丢 **1** 格；\n' +
+          '  HF 对 B/C/D 三 Build 必胜（3/4 胜率，最高压对手）。一切结论以可运行断言为准。\n' +
           '  假设通过：换装真实改变战局（12 格 9 格胜负随装备翻转，无稳定通吃 Build）。\n' +
           '  有效克制：对 RushRammer → 远程/爆发（C/D 胜，B 重锤败）；\n' +
-          '            对 HighGunPlatform → 弹道武器（hammer 0 命中全灭，A/C/D 胜）。\n' +
+          '            对 HighGunPlatform → 弹道武器（hammer 0 命中全灭，A/C/D 胜）；\n' +
+          '            对 HeavyFortress → 仅 A（mango+cannon 双小轮）胜；B/C/D 全败。\n' +
           '  同质配置：无（每套 Encounter 的 4 Build 读数全部可区分）。\n' +
-          '  稳定最优解：无（A/D 各丢 2 格、C 丢 1 格、B 全败；HeavyFortress 4/4 无解 =\n' +
-          '            内容/平衡留白，其压力来自 150 质量 + 双远程的真实数值，非本 Queue 范围）。\n' +
-          '  下一轮最小候选集：RushRammer + HighGunPlatform（两套均已证明对换装敏感，\n' +
-          '            可直接支撑「不同对手 → 调整配置」的多局 Run 设计）；\n' +
-          '            HeavyFortress 建议仅作高压终局候选（需先做平衡轮）。'
+          '  稳定最优解：无（A/D 各丢 1 格、C 丢 2 格、B 全败）。\n' +
+          '  下一轮最小候选集：三套候选均对换装敏感（HF 只认 A、RR 认 C/D、HGP 认 A/C/D），\n' +
+          '            均可支撑「不同对手 → 调整配置」的多局 Run 设计。'
       );
     },
     SLOW_MS,
