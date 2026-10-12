@@ -427,6 +427,49 @@ export const LAB_ENCOUNTERS: readonly LabTestEncounter[] = [
     count: 1,
     draft: formalOpponentDraft('OPP-20'),
   },
+  /* ====================================================================
+   * DEMO-ENCOUNTER-CONTENT-BATCH-R1｜三套**压力画像候选**（为下一轮正式 Run
+   * 多局变化提供内容基础）。
+   *
+   * - 全部是**既有正式对手模板的引用**（`formalOpponentDraft`，count=1）：
+   *   没有新增敌人定义、没有改 HP / 伤害 / 速度 / 质量等任何数值；
+   * - 三套的驱动差异**来自模板自身的 draft.drive**（停驻 / 前进），**不声明**
+   *   `enemyDrive` ⇒ 与 `keep-distance` 分支无关（RDC-08 唯一性不受影响）；
+   * - **不进产品 RUN_SCRIPT**：正式三段节奏逐字不变（Queue 禁止项）；
+   *   它们只作为独立候选存在于共享数据入口，供下一轮多局变化挑选。
+   * - 三套压力画像与现有 Run 三场（ProtoRusher 低压冲刺 / Chaser 锤+推进器 /
+   *   RangedTurret 控距炮台）的模板 / Body / 武器组合零重叠：
+   *
+   *   | id | 定位 | 模板 | 构成 | 压力画像 |
+   *   |---|---|---|---|---|
+   *   | HeavyFortress | 重型/姿态干扰 | R1-HVY-01 | heavyBox(150) 双大轮 + 炮+镭射 · 停驻 | 推不动的要塞站桩双远程 |
+   *   | RushRammer | 近战压进 | R1-RUSH-01 | heavyBox 双小轮 + 冲锤+推进器 · 前进 | 高质量贴身冲撞压制 |
+   *   | HighGunPlatform | 远程压制 | R1-GUN-02 | tallBody 双标准轮 + 机枪+镭射 · 停驻 | 高架双远程站桩输出 |
+   * ==================================================================== */
+  {
+    id: 'HeavyFortress',
+    label: '重炮要塞',
+    note: '单个重型停驻要塞（正式模板 R1-HVY-01：heavyBox + 炮 + 镭射）· DEMO-ENCOUNTER-CONTENT-BATCH-R1 候选',
+    templateId: 'R1-HVY-01',
+    count: 1,
+    draft: formalOpponentDraft('R1-HVY-01'),
+  },
+  {
+    id: 'RushRammer',
+    label: '重装冲锤',
+    note: '单个高质量冲锤车（正式模板 R1-RUSH-01：heavyBox + 冲锤 + 推进器）· DEMO-ENCOUNTER-CONTENT-BATCH-R1 候选',
+    templateId: 'R1-RUSH-01',
+    count: 1,
+    draft: formalOpponentDraft('R1-RUSH-01'),
+  },
+  {
+    id: 'HighGunPlatform',
+    label: '高架炮台',
+    note: '单个高身停驻炮台（正式模板 R1-GUN-02：tallBody + 机枪 + 镭射）· DEMO-ENCOUNTER-CONTENT-BATCH-R1 候选',
+    templateId: 'R1-GUN-02',
+    count: 1,
+    draft: formalOpponentDraft('R1-GUN-02'),
+  },
 ];
 
 /* ------------------------------------------------------------- 目录查询 */

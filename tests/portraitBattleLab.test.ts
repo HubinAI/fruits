@@ -105,7 +105,7 @@ describe('PBL-F0｜目录完整性（Arena A/B · Loadout ×2 · Encounter ×3�
     expect(new Set(LAB_LOADOUTS.map((l) => l.id)).size).toBe(LAB_LOADOUTS.length);
   });
 
-  it('R5 Encounter 目录为七套规范项且 id 唯一（含 PRP Build Prototype Encounter + PRP-RUN-02 压力阶梯）', () => {
+  it('R5 Encounter 目录为规范项且 id 唯一（七套既有 + DEMO-ENCOUNTER-CONTENT-BATCH-R1 三套候选）', () => {
     expect(LAB_ENCOUNTERS.map((e) => e.label)).toEqual([
       '追猎者',
       '远程炮台',
@@ -116,8 +116,22 @@ describe('PBL-F0｜目录完整性（Arena A/B · Loadout ×2 · Encounter ×3�
       '菠萝喷火车',
       '菠萝圆锯车',
       '香蕉推杆镭射车',
+      // DEMO-ENCOUNTER-CONTENT-BATCH-R1：三套压力画像候选（正式模板引用，count=1）
+      // （独立候选，不进产品 RUN_SCRIPT —— 正式三段节奏不变）
+      '重炮要塞',
+      '重装冲锤',
+      '高架炮台',
     ]);
     expect(new Set(LAB_ENCOUNTERS.map((e) => e.id)).size).toBe(LAB_ENCOUNTERS.length);
+    // 候选登记守门：三套必须是正式对手模板的引用（count=1），且不声明 enemyDrive
+    // （驱动差异来自模板自身 draft.drive；keep-distance 唯一性归 RDC-08 管，不受影响）。
+    for (const cand of LAB_ENCOUNTERS.filter((e) =>
+      ['HeavyFortress', 'RushRammer', 'HighGunPlatform'].includes(e.id),
+    )) {
+      expect(cand.count, `${cand.id}: 单车（Runtime 只容纳 1 个敌人）`).toBe(1);
+      expect(cand.enemyDrive, `${cand.id}: 不得声明 keep-distance（驱动差异来自模板 drive）`).toBeUndefined();
+      expect(cand.templateId.startsWith('R1-'), `${cand.id}: 必须引用 R1 系正式模板`).toBe(true);
+    }
   });
 
   it('R6 默认值必须命中各自目录（不允许悬空默认）', () => {

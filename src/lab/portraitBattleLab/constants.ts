@@ -157,7 +157,12 @@ export type LabEncounterId =
   | 'ProtoRusher'
   | 'PineappleFireBrute'
   | 'PineappleSawRusher'
-  | 'BananaRodLaser';
+  | 'BananaRodLaser'
+  // ---- DEMO-ENCOUNTER-CONTENT-BATCH-R1：三套压力画像候选（正式模板引用，count=1）----
+  // 仅作为**独立候选**进入共享 Encounter 数据入口；产品 RUN_SCRIPT 不引用它们（不改节奏）。
+  | 'HeavyFortress'
+  | 'RushRammer'
+  | 'HighGunPlatform';
 
 /** Lab 初始选择（实验台自身默认值；与正式玩法默认值无任何耦合）。 */
 export const LAB_DEFAULTS: {

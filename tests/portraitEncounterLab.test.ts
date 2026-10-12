@@ -296,8 +296,12 @@ describe('PRP-M3｜B 正式敌人定义零修改（冻结指纹）', () => {
         expect(code.includes(t), `${f} 不得出现 "${t}"`).toBe(false);
       }
     }
-    // 正式池与正式 Encounter 表在源码层保持原样：仍是 7 套 Encounter / 三套批次只读引用
-    expect(LAB_ENCOUNTERS).toHaveLength(7);
+    // 正式池与正式 Encounter 表在源码层保持原样：仍是三套批次只读引用。
+    // ⚠️ DEMO-ENCOUNTER-CONTENT-BATCH-R1：目录由 7 套登记扩展为 10 套（+三套压力画像候选，
+    //    全部是 R1 系正式模板的引用 / count=1 / 不声明 enemyDrive / 不进产品 RUN_SCRIPT）——
+    //    这是**登记扩展**而非放宽：上面的源码级禁止写入面（push / 写池 / 自构战斗）一字未减，
+    //    候选的守门断言在 portraitBattleLab.test.ts 的 R5 条目里。
+    expect(LAB_ENCOUNTERS).toHaveLength(10);
     expect(LAB_ENCOUNTERS.map((e) => e.id)).toEqual([
       'Chaser',
       'RangedTurret',
@@ -306,6 +310,10 @@ describe('PRP-M3｜B 正式敌人定义零修改（冻结指纹）', () => {
       'PineappleFireBrute',
       'PineappleSawRusher',
       'BananaRodLaser',
+      // DEMO-ENCOUNTER-CONTENT-BATCH-R1 候选（引用 R1-HVY-01 / R1-RUSH-01 / R1-GUN-02）
+      'HeavyFortress',
+      'RushRammer',
+      'HighGunPlatform',
     ]);
   });
 });

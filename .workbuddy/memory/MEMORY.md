@@ -8,11 +8,15 @@
 | 结构口径/Mac/已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状（2026-10-12 · 新窗口先读）
-- HEAD=`51181d6`+DEMO-REAL-ACCOUNT-PATH-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
-- ⚠️ **DEMO-REAL-ACCOUNT-PATH-R1（最新）**：疑点否定、零产品改动——**装配资格=拥有(count>0)
-  非副本数**（`canEquipMovement`/`equipMovement`），同一件 smallWheel ×1 装前后双轮合法；
-  空存档→openGrowthSession→正式装配→三段 COMPLETE→领奖→再开局 已钉为回归
-  `tests/productRealAccountPathR1.test.ts`（3 测试）。
+- HEAD=`61b74bd`+DEMO-ENCOUNTER-CONTENT-BATCH-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
+- ⚠️ **DEMO-ENCOUNTER-CONTENT-BATCH-R1（最新）**：3 套压力画像候选入 `LAB_ENCOUNTERS`
+  （目录 7→**10**，LabEncounterId 闭集同步 +3）——HeavyFortress（R1-HVY-01 重型停驻，
+  **mango 玩家打不过=高压**）/ RushRammer（R1-RUSH-01 冲锤贴身）/ HighGunPlatform（R1-GUN-02
+  站桩远程）；全部正式模板引用 count=1、无 enemyDrive、**不进 RUN_SCRIPT**（三场未动）。
+  回归 = `productEncounterContentBatchR1`；相邻断言 R5/M3-05 已同步 7→10（登记扩展非放宽）。
+- ⚠️ **DEMO-REAL-ACCOUNT-PATH-R1**：疑点否定、零产品改动——**装配资格=拥有(count>0)
+  非副本数**（`canEquipMovement`/`equipMovement`），smallWheel ×1 装双轮合法；
+  空存档→正式初始化→装配→三段 COMPLETE→领奖→再开局已钉为回归 `productRealAccountPathR1`。
 - **DEMO-PLAYABLE-PATH-R1**：通关基线 `tests/productDemoPlayablePathR1.test.ts`——
   chassis = **mangoBody+cannon+smallWheel×2**，Build = `fastReload→emergencyRepair`，余量 203.4；
   **默认 4 Body × cannon = 0 COMPLETE**（西瓜车打不完，平衡留白）。
@@ -32,9 +36,8 @@
   同文件 ：60-70「强化全 Cannon 专属」与 R7 通用成长**口径冲突**，复测前勿改注释。
 - **Strict Matrix = 28/11**；hammer 0/rammer 0；工具≈42min 后台独占。
   已证伪勿走：R12 开火窗口、「hammer 够不着」、Encounter 顺序主因、单场矩阵代入三段链。
-- **下一步 = 等 Queue**。候选：① GADGET-EARN-PATHWAY-R1 ② 默认车打不完的内容/平衡 Queue
-  （mango 基线已立，对照可用）③ ARCHIVE-RESTORE-RESILIENCE-R1 ④ DOC-COMPAT-REFRESH-R1
-  ⑤ PL-26 partOptions 白名单 Bug Queue。
+- **下一步 = 等 Queue**。候选：① GADGET-EARN-PATHWAY-R1 ② 默认车平衡 Queue（mango 基线对照）
+  ③ ARCHIVE-RESTORE-RESILIENCE-R1 ④ DOC-COMPAT-REFRESH-R1 ⑤ PL-26 白名单 Bug Queue。
 - ⚠️ **未修→独立 Bug Queue**：① validateSnapshot 星级缺口（`buildValidator.ts:54`）② e2e:next-run 崩
   （期望 3 实际 4）③④ 注释陈旧 ×2 ⑤ PC-14 预存红。旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
 - **未做别再 ask**：观感/动画/内容量/Buff/挂点几何/逐武器差异化；saw/spear 不动；
