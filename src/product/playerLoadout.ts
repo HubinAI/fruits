@@ -267,6 +267,21 @@ export interface LoadoutReading {
    */
   readonly equippedWeaponStar: number;
   readonly equippedWeaponName: string;
+  /**
+   * GADGET-GARAGE-SLOT-R2｜当前装备的 **Gadget** defId；无 Gadget 为 `EMPTY_SLOT`。
+   *
+   * ⚠️ 与 `equippedWeaponId` **同语义**（空槽 = `EMPTY_SLOT`），但指向**独立字段**
+   *    `gadgetDefId`，**绝不**复用 `functionalSelections` 的 front/top/rear。
+   */
+  readonly equippedGadgetId: string;
+  /** 当前装备 Gadget 的玩家语言名；无 Gadget 为 `GADGET_EMPTY_NAME`（「无」）。 */
+  readonly equippedGadgetName: string;
+  /**
+   * GADGET-GARAGE-SLOT-R2｜Garage Gadget 槽的可选卡片读数（EMPTY + 推进器 + 反推器）。
+   *
+   * ⚠️ 与 `weapons` 同构且**同源**：都是「读数层给、页面直接画」，页面不自己拼名字/能量。
+   */
+  readonly gadgets: readonly GadgetEntry[];
   readonly weapons: readonly WeaponEntry[];
   readonly slots: readonly SlotReading[];
 }
@@ -671,25 +686,41 @@ export function isWeaponDefId(defId: string): boolean {
 export const GADGET_EMPTY_NAME = '无';
 
 /**
- * 全部**正式可选** Gadget 定义（稳定字典序）。
+ * GADGET-GARAGE-SLOT-R2｜**Garage Gadget 槽可见**的 Gadget id 白名单。
+ *
+ * ⚠️ 必改 2：Garage 只展示 EMPTY / 推进器 / 反推器。
+ * ⚠️ `pushRod` **故意不在其中**：它是普通功能件（走 `functionalSelections` 历史路径），
+ *    定义与 `PART_OPTIONS` 条目**都保留不删**，只是本轮不上 Gadget 卡面。
+ * ⚠️ 退场件（`testMass` / `wedgeShovel` / `lifter`）与测试件一律不在其中。
+ */
+export const GADGET_GARAGE_VISIBLE_IDS: ReadonlySet<string> = new Set([
+  'thruster',
+  'reverseThruster',
+]);
+
+/**
+ * GADGET-GARAGE-SLOT-R2｜**Garage 上展示的** Gadget 定义（稳定字典序）。
  *
  * ⚠️ 真源 = `core/partOptions.PART_OPTIONS`（玩家 Build 部件选项唯一数据源），
  *    **再**用正式内容库筛出 `category === 'gadget'`。
- *    为什么不直接筛 registry 的 `category`：
+ *    为什么不直接筛 registry：
  *      registry 里共 6 件 gadget，其中 `testMass`（测试质量块）/
  *      `wedgeShovel`（楔铲，Q11-A-CLOSE 真人验收失败）/ `lifter`（举升臂，
  *      Q12-B-CLOSE 真人验收失败）**都不在正式可选池里**（已退场但保留 definition）。
- *      直接筛 registry 会把三件已退场件一起端给 Garage。
- *    ⇒ `PART_OPTIONS` 正是「玩家能不能选」的唯一判定，与 Garage 其它卡片同源。
  *
- * ⚠️ 当前恰好两件（`thruster` / `reverseThruster`）；`pushRod` 仍在池中但它是
- *    **普通功能件**（非 Gadget 维度），因此不作为 Gadget 选项出现。
- * ⚠️ 内容侧把新 Gadget 加进 `PART_OPTIONS` 时这里自动跟上，不存在第二张 id 表。
+ * ⚠️ 再叠加 **GADGET_GARAGE_VISIBLE_IDS 白名单**（Queue 必改 2）：
+ *    Garage 的Gadget 槽**只展示** EMPTY / 推进器 / 反推器。
+ *    `pushRod`（推杆）虽然 `category==='gadget'` 且在正式池里，但它是
+ *    **普通功能件**（走 `functionalSelections` 的历史装配路径，不属于 Gadget 维度）
+ *    ⇒ 本轮不上卡面，**其定义与池条目一律保留不删**。
+ *
+ * ⚠️ 白名单是**只读排除**不是第二张真源：内容侧新增 Gadget 时默认不展示，
+ *    需要上卡面时必须显式加进这个白名单（避免新件被静默端给玩家）。
  */
 export function gadgetDefs(): readonly FunctionalPartDef[] {
   const pool = new Set(PART_OPTIONS.map((o) => o.v));
   return [...registry.functionals.values()]
-    .filter((d) => d.category === 'gadget' && pool.has(d.id))
+    .filter((d) => d.category === 'gadget' && pool.has(d.id) && GADGET_GARAGE_VISIBLE_IDS.has(d.id))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
@@ -806,27 +837,39 @@ export interface GadgetEntry {
   readonly energy: number;
   /** 是否是「无 Gadget」这一项（`EMPTY_SLOT`）。 */
   readonly empty: boolean;
+  /**
+   * GADGET-GARAGE-SLOT-R2｜玩家是否**已拥有**这一件（复用既有库存计数，★1 口径）。
+   *
+   * ⚠️ EMPTY 恒 `true`（它是「什么都不装」，不是一件部件 ⇒ 不需要库存）。
+   * ⚠️ 与 `equipGadget()` 的 `not-owned` 判定**同源**（都读 `getCount(inv, id, 1)`）
+   *    ⇒ 卡片上的「未拥有」与点击后的拒绝理由不可能分叉。
+   */
+  readonly owned: boolean;
 }
 
 /**
- * 当前正式可选 Gadget 集合（EMPTY / 推进器 / 反推器）。
+ * Garage Gadget 槽的选项读数（EMPTY + 推进器 + 反推器；稳定顺序，**第一项恒为 EMPTY**）。
  *
- * ⚠️ **唯一真源 = 正式内容库的 `category === 'gadget'`**，不从 `PART_OPTIONS` 反推、
- *    也不在本文件写第二张id 表 ⇒ 内容侧新增 Gadget 时这里自动跟上。
- *
- * ⚠️ **不读库存**：Gadget 的可选性目前由「正式可选池」决定（与 Weapon 不同，
- *    Weapon 还要按 star 分栈展开）。这是**本轮的数据层口径**；
- *    「是否已拥有 / 能否装车」的判定留给下一轮 UI 接入时接现有 validator。
- *
- * ⚠️ 顺序稳定（按 id 字典序），且**第一项恒为 EMPTY** —— UI 可直接把它当默认项。
+ * ⚠️ 唯一真源 = `gadgetDefs()`（`PART_OPTIONS` × registry `category==='gadget'`
+ *    × `GADGET_GARAGE_VISIBLE_IDS` 白名单），本函数**不写第二张 id 表**。
+ * ⚠️ **复用既有库存**：`owned` 直接读 `getCount(inv, defId, 1)`（与 Weapon 同一计数口径），
+ *    不新建任何 Gadget 专属库存体系。
+ * ⚠️ 不可用选项**仍会被列出**（`owned === false`）—— 由 UI 沿用既有 Garage 交互语义
+ *    画「未拥有」态，这与 Weapon / Movement 区既有做法一致（不隐藏卡片）。
  */
-export function gadgetEntries(): readonly GadgetEntry[] {
+export function gadgetEntries(inv: PartInventory): readonly GadgetEntry[] {
   const out: GadgetEntry[] = [];
   for (const def of gadgetDefs()) {
-    out.push({ defId: def.id, name: def.name, energy: def.energy, empty: false });
+    out.push({
+      defId: def.id,
+      name: def.name,
+      energy: def.energy,
+      empty: false,
+      owned: getCount(inv, def.id, 1) > 0,
+    });
   }
   return [
-    { defId: EMPTY_SLOT, name: GADGET_EMPTY_NAME, energy: 0, empty: true },
+    { defId: EMPTY_SLOT, name: GADGET_EMPTY_NAME, energy: 0, empty: true, owned: true },
     ...out,
   ];
 }
@@ -834,6 +877,87 @@ export function gadgetEntries(): readonly GadgetEntry[] {
 /** 当前 Build 选中的 Gadget defId（无 Gadget → `EMPTY_SLOT`）。 */
 export function equippedGadgetId(draft: BuildDraft): string {
   return draft.gadgetDefId && draft.gadgetDefId !== EMPTY_SLOT ? draft.gadgetDefId : EMPTY_SLOT;
+}
+
+/* ── Gadget 唯一写入口（GARAGE-SLOT-R2）──────────────────────────────────── */
+
+/**
+ * Gadget 装备失败原因（与 Weapon / Movement 侧**刻意分开**三个联合类型，
+ * 避免互相污染取值域 —— 与既有 `MovementEquipFailure` 同一纪律）。
+ */
+export type GadgetEquipFailure =
+  /** 车身没有 Gadget 专属挂点（`BodyDef.gadgetHardpoints`） */
+  | 'unknown-slot'
+  /** 不在正式可选 Gadget 集合里（含 `EMPTY_SLOT` 以外的退场件 / 测试件） */
+  | 'not-gadget'
+  /** 这件需要库存拥有，而玩家没有 */
+  | 'not-owned'
+  /** 组合过不了正式 `validateSnapshot`（例如装上后能量超载） */
+  | 'invalid-build';
+
+export interface GadgetEquipOutcome {
+  readonly ok: boolean;
+  readonly reason?: GadgetEquipFailure;
+  readonly detail?: string;
+  /** 成功时为落盘后的新 Build；失败时**不返回**（调用方不得用它覆盖当前态）。 */
+  readonly draft?: BuildDraft;
+}
+
+/**
+ * **Gadget 唯一写入口**：把一件已拥有的正式 Gadget 装进独立 Gadget 位并落盘。
+ *
+ * 校验顺序与 `equipWeapon()` **逐条同构**（零副作用，任一不通过即拒绝）：
+ *   1. `not-gadget`    —— 不在正式可选集合（`EMPTY_SLOT` 走「卸下」分支，不进这里）
+ *   2. `unknown-slot`  —— 车身没有 `gadgetHardpoints`（**独立 namespace**，
+ *                         不查 `functionalHardpoints` 的 front/top/rear）
+ *   3. `not-owned`     —— 库存里没有 ★1 副本
+ *   4. `invalid-build` —— 走**既有** `validateSnapshot`（能量超载等仍由它拒绝）
+ *
+ * ⚠️ 落盘走**既有** `persistPlayerBuild`（同一套保存/恢复机制，无第二套规则）。
+ * ⚠️ 写的是**独立字段** `gadgetDefId`，**绝不**映射回 front/top/rear。
+ */
+export function equipGadget(
+  defId: string,
+  draft: BuildDraft = loadEquippedDraft(),
+  inv: PartInventory = playerInventory(draft),
+): GadgetEquipOutcome {
+  if (!gadgetDefs().some((d) => d.id === defId)) {
+    return { ok: false, reason: 'not-gadget', detail: `"${defId}" 不是正式可选 Gadget` };
+  }
+  const body = registry.bodies.get(draft.bodyDefId);
+  // ⚠️ 只认 **gadgetHardpoints**（独立 namespace）；没有它 ⇒ 该 Body 不支持 Gadget
+  if (!body || !body.gadgetHardpoints || body.gadgetHardpoints.length === 0) {
+    return { ok: false, reason: 'unknown-slot', detail: `车身 "${draft.bodyDefId}" 没有 Gadget 专属挂点` };
+  }
+  if (getCount(inv, defId, 1) <= 0) {
+    return { ok: false, reason: 'not-owned', detail: `库存里没有 "${defId}" 的 1★ 副本` };
+  }
+  const next: BuildDraft = { ...draft, gadgetDefId: defId };
+  const result = validateSnapshot(buildSnapshotFromDraft(next, registry), registry);
+  if (!result.valid) {
+    return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
+  }
+  persistPlayerBuild(next);
+  return { ok: true, draft: next };
+}
+
+/**
+ * **卸下 Gadget**（回到 EMPTY）。
+ *
+ * ⚠️ 与装备同一条落盘/校验链，只是 `defId` 取 `EMPTY_SLOT`；
+ *    EMPTY **不需要库存**（它是「什么都不装」，不是一件部件）。
+ */
+export function unequipGadget(
+  draft: BuildDraft = loadEquippedDraft(),
+): GadgetEquipOutcome {
+  const next: BuildDraft = { ...draft };
+  delete next.gadgetDefId;
+  const result = validateSnapshot(buildSnapshotFromDraft(next, registry), registry);
+  if (!result.valid) {
+    return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
+  }
+  persistPlayerBuild(next);
+  return { ok: true, draft: next };
 }
 
 /** 车身 Functional 挂点的展示读数（顺序 = BodyDef 硬点顺序，空槽如实标「空」）。 */
@@ -864,6 +988,8 @@ export function loadoutReading(draft: BuildDraft, inv: PartInventory): LoadoutRe
   const energy = computeEnergy(snap, registry).energy;
   const eqId = equippedWeaponId(draft);
   const eqDef = eqId === EMPTY_SLOT ? undefined : registry.functionals.get(eqId);
+  const eqGadgetId = equippedGadgetId(draft);
+  const eqGadgetDef = eqGadgetId === EMPTY_SLOT ? undefined : registry.functionals.get(eqGadgetId);
   return {
     bodyDefId: draft.bodyDefId,
     bodyName: body ? body.name : draft.bodyDefId,
@@ -875,6 +1001,9 @@ export function loadoutReading(draft: BuildDraft, inv: PartInventory): LoadoutRe
     equippedWeaponId: eqId,
     equippedWeaponStar: equippedWeaponStar(draft),
     equippedWeaponName: eqDef ? eqDef.name : '空',
+    equippedGadgetId: eqGadgetId,
+    equippedGadgetName: eqGadgetDef ? eqGadgetDef.name : GADGET_EMPTY_NAME,
+    gadgets: gadgetEntries(inv),
     weapons: weaponEntries(inv),
     slots: slotReadings(draft),
   };

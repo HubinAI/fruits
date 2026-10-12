@@ -14,12 +14,13 @@ import { buildSnapshotFromDraft as officialBuild } from '../src/lab/buildEditorM
 import { validateSnapshot, computeEnergy } from '../src/core/buildValidator';
 import { loadPlayerBuild, savePlayerBuild } from '../src/core/buildPersistence';
 import { PART_OPTIONS } from '../src/core/partOptions';
-import { OFFICIAL_PARTS } from '../src/core/partInventory';
+import { OFFICIAL_PARTS, getInventory } from '../src/core/partInventory';
 import {
   gadgetEntries,
   gadgetDefs,
   equippedGadgetId,
   GADGET_EMPTY_NAME,
+  GADGET_GARAGE_VISIBLE_IDS,
 } from '../src/product/playerLoadout';
 
 function draftWith(gadgetDefId?: string): BuildDraft {
@@ -50,15 +51,16 @@ describe('GADGET-GARAGE-DATA-R1', () => {
   });
 
   it('GD-02 正式数据入口可读出三个选项：EMPTY / Thruster / ReverseThruster（必改 2）', () => {
-    const entries = gadgetEntries();
+    const entries = gadgetEntries(getInventory());
     console.log(`\n##### GD-02 Garage Gadget 数据入口 #####`);
     for (const e of entries) console.log(`  ${e.defId.padEnd(16)} name=${e.name.padEnd(6)} energy=${e.energy} empty=${e.empty}`);
-    expect(entries.length, 'EMPTY + 3 件正式 Gadget').toBe(4);
+    // ⚠️ GADGET-GARAGE-SLOT-R2 必改 2：只展示 EMPTY / Thruster / ReverseThruster（pushRod 已排除）
+    expect(entries.length, 'EMPTY + 2 件可见 Gadget').toBe(3);
     expect(entries[0].defId, '第一项恒为 EMPTY').toBe(EMPTY_SLOT);
     expect(entries[0].empty).toBe(true);
     expect(entries[0].energy, 'EMPTY 能量为 0').toBe(0);
     expect(entries[0].name).toBe(GADGET_EMPTY_NAME);
-    expect(entries.map((e) => e.defId)).toEqual([EMPTY_SLOT, 'pushRod', 'reverseThruster', 'thruster']);
+    expect(entries.map((e) => e.defId)).toEqual([EMPTY_SLOT, 'reverseThruster', 'thruster']);
     // 两个非空项都带真实名称与能量（供 UI 直接显示）
     const rev = entries.find((e) => e.defId === 'reverseThruster')!;
     const thr = entries.find((e) => e.defId === 'thruster')!;
@@ -74,16 +76,16 @@ describe('GADGET-GARAGE-DATA-R1', () => {
     //    它们保留 definition 但不在正式可选池里。
     const pool = new Set(PART_OPTIONS.map((o) => o.v));
     const expected = [...registry.functionals.values()]
-      .filter((d) => d.category === 'gadget' && pool.has(d.id))
+      .filter((d) => d.category === 'gadget' && pool.has(d.id) && GADGET_GARAGE_VISIBLE_IDS.has(d.id))
       .map((d) => d.id)
       .sort();
     expect([...gadgetDefs()].map((d) => d.id).sort()).toEqual(expected);
     // 已退场件必须**不**出现在 Garage 数据源里
-    for (const archived of ['testMass', 'wedgeShovel', 'lifter']) {
-      expect(gadgetDefs().some((d) => d.id === archived), `${archived} 已退场，不得进入 Garage 数据源`).toBe(false);
+    for (const archived of ['testMass', 'wedgeShovel', 'lifter', 'pushRod']) {
+      expect(gadgetDefs().some((d) => d.id === archived), `${archived} 不在 Garage 可见白名单，不得进入数据源`).toBe(false);
     }
     // 正式可选 Gadget 恰为 3 件（不新增第三个 Gadget 定义）
-    expect(gadgetDefs().length, '正式可选 Gadget 恰为 3 件').toBe(3);
+    expect(gadgetDefs().length, 'Garage 可见 Gadget 恰为 2 件').toBe(2);
   });
 
   it('GD-04 两种非空 Gadget 均可进入合法 BuildSnapshot，Energy 计算正确（验收 2）', () => {
@@ -156,11 +158,14 @@ describe('GADGET-GARAGE-DATA-R1', () => {
     expect(equippedGadgetId(draftWith('reverseThruster'))).toBe('reverseThruster');
   });
 
-  it('GD-08 边界：本轮未碰四槽 UI / CSS / 冻结契约', () => {
-    // Garage 槽位仍是 4（未加第 5 槽）
-    expect(GARAGE_SLOT_ORDER.length, '槽位数未变').toBe(4);
-    expect(GARAGE_SLOT_ORDER).not.toContain('gadget');
-    expect(GARAGE_SLOT_LABELS).toEqual({ weapon: '武器', body: '车身', front: '前轮', rear: '后轮' });
+  it('GD-08 边界：五槽 UI 契约（GADGET-GARAGE-SLOT-R2 起生效）', () => {
+    // ⚠️ 契约变更：上一轮本用例断言「四槽不变」，那是**当轮**的正确守卫。
+    //    GADGET-GARAGE-SLOT-R2 已显式授权升级为**五槽**，故此处同步为新契约。
+    expect(GARAGE_SLOT_ORDER.length, '槽位数 = 5（四槽 + Gadget）').toBe(5);
+    expect(GARAGE_SLOT_ORDER, 'Gadget 槽恰好一个，且排在最后').toContain('gadget');
+    expect(GARAGE_SLOT_ORDER.filter((s) => s === 'gadget').length).toBe(1);
+    expect(GARAGE_SLOT_ORDER.slice(0, 4), '前四槽顺序逐字未变').toEqual(['weapon', 'body', 'rear', 'front']);
+    expect(GARAGE_SLOT_LABELS).toEqual({ weapon: '武器', body: '车身', front: '前轮', rear: '后轮', gadget: '辅助' });
   });
 });
 

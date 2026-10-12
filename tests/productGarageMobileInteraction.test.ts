@@ -308,6 +308,21 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜A. 2×2 同构槽骨架�
     expect(html).toMatch(/\.ph-slotnode\s*\{[^}]*width:\s*100%/);
     expect(html).toMatch(/\.ph-slotnode\s*\{[^}]*min-height:\s*54px/);
     /*
+      ⚠️ GADGET-GARAGE-SLOT-R2：第五槽（Gadget）**独立占下方一行**。
+      它只允许声明 `grid-column`（跨满整行）⇒ 不改 `.ph-slotnode` 的
+      width / min-height / padding / 字号 / 边框 ⇒ 仍是「同尺寸同构」。
+    */
+    expect(html).toMatch(/\.ph-slotnode-gadget\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
+    // 反向：该 modifier **不得**改任何尺寸类属性
+    const gmRule = (() => {
+      const m = html.match(/\.ph-slotnode-gadget\s*\{([^}]*)\}/);
+      return m ? m[1]! : '';
+    })();
+    expect(gmRule, 'Gadget modifier 必须存在').not.toBe('');
+    for (const forbidden of ['padding', 'min-height', 'font', 'border', 'width:', 'height']) {
+      expect(gmRule, `Gadget modifier 不得改 ${forbidden}（须与其它四槽同尺寸）`).not.toContain(forbidden);
+    }
+    /*
       ⚠️ 高亮**只准**用不影响布局的属性 ⇒ 「同规格」不被「选中态」破坏
          （R2 用 border-color + background，R3 追加 box-shadow，都不是尺寸 / 间距）。
     */
@@ -322,13 +337,21 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜A. 2×2 同构槽骨架�
     expect(PRODUCT_STAGE_H).toBe(844);
   });
 
-  it('GS-06 四个槽**同一个构造分支**：无逐槽分支 / 无专属 modifier / 无行内定位（同构的机器证据）', () => {
-    // ① 4 个、顺序 = 2×2 版面顺序、默认 weapon。
-    expect([...GARAGE_SLOT_ORDER]).toEqual(['weapon', 'body', 'rear', 'front']);
-    expect(GARAGE_SLOT_ORDER.length).toBe(4);
+  it('GS-06 五个槽**同一个构造分支**：无逐槽分支 / 无专属 modifier / 无行内定位（同构的机器证据）', () => {
+    // ① 5 个、顺序 = 版面顺序（2×2 + 第 5 项独占第三行）、默认 weapon。
+    // ⚠️ GADGET-GARAGE-SLOT-R2：**四槽 → 五槽的契约升级**。
+    //    旧断言 `toEqual(['weapon','body','rear','front'])` / `length === 4` /
+    //    标签不含 gadget 写于「Gadget 尚无正式可选内容」的前提；
+    //    现 Thruster / ReverseThruster 已进入正式可选池（`gadgetGarageDataR1`）
+    //    且五槽版面已确定 ⇒ 本 Queue 显式升级为五槽契约。
+    //    ⚠️ 前四槽的**顺序逐字未变**（仍是 2×2 的 DOM 次序），Gadget 追加在最后。
+    expect([...GARAGE_SLOT_ORDER]).toEqual(['weapon', 'body', 'rear', 'front', 'gadget']);
+    expect(GARAGE_SLOT_ORDER.length).toBe(5);
+    // ⚠️ 前四槽**位置未变**：升级只允许在末尾追加，不允许改动既有顺序。
+    expect(GARAGE_SLOT_ORDER.slice(0, 4)).toEqual(['weapon', 'body', 'rear', 'front']);
     // 标签是玩家语言，且与槽位集合**键集完全一致**（没有多余 / 缺失）。
     expect(Object.keys(GARAGE_SLOT_LABELS).sort()).toEqual([...GARAGE_SLOT_ORDER].sort());
-    expect(GARAGE_SLOT_LABELS).toEqual({ weapon: '武器', body: '车身', front: '前轮', rear: '后轮' });
+    expect(GARAGE_SLOT_LABELS).toEqual({ weapon: '武器', body: '车身', front: '前轮', rear: '后轮', gadget: '辅助' });
     /*
       ⚠️ 「槽位 → 挂点」不需要第二张映射表：Movement 的槽位名与 `MOVEMENT_HARDPOINT_LABELS`
          的键**同名** ⇒ `renderMovementSection(body, garageSlot)` 可以直接传。
@@ -373,9 +396,20 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜A. 2×2 同构槽骨架�
     expect(slotLoop).toContain("btn.dataset['phSlot'] = slot");
     expect(slotLoop).toContain("btn.dataset['phSlotActive'] = String(slot === garageSlot)");
     expect(slotLoop).toContain("btn.dataset['phSlotDef'] = garageSlotDefId(slot, r, mv)");
-    // GarageSlot 类型就是这四个字面量（没有别的取值）。
-    const slotType: GarageSlot[] = ['weapon', 'body', 'front', 'rear'];
+    // GarageSlot 联合类型的取值闭集 = 五个字面量（没有别的取值）。
+    // ⚠️ GADGET-GARAGE-SLOT-R2：`'gadget'` 是本 Queue 显式授权的第五个取值
+    //    （`GarageSlot = VehicleSlotId | 'gadget'`）；前四个逐字不变。
+    const slotType: GarageSlot[] = ['weapon', 'body', 'front', 'rear', 'gadget'];
     expect(slotType.length).toBe(GARAGE_SLOT_ORDER.length);
+    // ⚠️ 同构纪律仍然成立：Gadget 槽**只**多一个 `ph-slotnode-gadget` modifier，
+    //    不引入第二个 `.ph-slotnode` 构造分支 / 专属宽高 / 行内定位。
+    expect(slotLoop).toContain("if (slot === 'gadget') btn.classList.add('ph-slotnode-gadget');");
+    // ⚠️ 版面 CSS（`.ph-slotnode-gadget { grid-column: 1 / -1; }`）在 **home.html**，
+    //    不在本文件读的 homePage.ts 里 ⇒ 由 GS-05 那条（读 home.html 的 grid 契约）覆盖。
+    //    此处只钉「页面侧：只加 class、不写任何 inline 定位」。
+    expect(slotLoop).not.toContain('style.left');
+    expect(slotLoop).not.toContain('style.top');
+    expect(slotLoop).not.toContain('style.gridColumn');
   });
 });
 
@@ -842,9 +876,17 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜H. 边界（禁止清单
     expect(home).not.toContain('OFFICIAL_MOVEMENTS');
     expect(home).not.toContain('OFFICIAL_BODIES');
     expect(home).not.toContain('NEW_OFFICIAL_BODIES');
-    // 槽位恰好四个（不新增维度、不预埋 Gadget 等未来空槽）。
-    expect(GARAGE_SLOT_ORDER.length).toBe(4);
-    expect(GARAGE_SLOT_ORDER).not.toContain('gadget');
+    // 槽位恰好**五个**（GADGET-GARAGE-SLOT-R2 由四槽升级为五槽）。
+    // ⚠️ 契约变更记录：旧断言是 `length === 4` + `.not.toContain('gadget')`，
+    //    前提是「Gadget 尚无正式可选内容」。Thruster / ReverseThruster 已入池后，
+    //    Garage 必须有一个真实 Gadget 槽，否则玩家无法配置 Gadget。
+    // ⚠️ 仍然是「闭集」守卫：只允许这 5 个 id，**不允许**预埋任何未来空槽
+    //    （例如第 6 槽 / `gadget2`），也不允许出现第二个 Gadget 槽。
+    expect(GARAGE_SLOT_ORDER.length).toBe(5);
+    expect(GARAGE_SLOT_ORDER.filter((s) => s === 'gadget').length, 'Gadget 槽恰好一个').toBe(1);
+    expect([...GARAGE_SLOT_ORDER].sort()).toEqual(
+      ['weapon', 'body', 'front', 'rear', 'gadget'].sort(),
+    );
     // 卡片读数一律取自读数层（页面不自己拼那三个数）。
     expect(home).not.toContain('轮径');
     expect(home).toContain("el('span', 'ph-card-stats', c.statsText)");

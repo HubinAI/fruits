@@ -35,15 +35,18 @@ import {
   WEAPON_SLOT,
   bodyReading,
   equipBody,
+  equipGadget,
   equipMovement,
   equipWeapon,
   loadEquippedDraft,
   loadoutReading,
   movementReading,
   playerInventory,
+  unequipGadget,
   type BodyEquipFailure,
   type BodyReading,
   type EquipFailure,
+  type GadgetEquipFailure,
   type LoadoutReading,
   type MovementEquipFailure,
   type MovementReading,
@@ -137,38 +140,50 @@ export const GARAGE_BACK_LABEL = '返回首页';
  * [ 后轮 ] [ 前轮 ]
  * ```
  *
- * ── 四个槽「完全同构」的四条（Queue 必改 1 逐字）─────────────────────────────
+ * ── 五个槽「完全同构」的四条（Queue 必改 1 逐字）─────────────────────────────
  *   ① 同尺寸 · ② 同结构 · ③ 同交互 · ④ 同选中态 ——
- *   落地方式 = **只有一个** `.ph-slotnode` 构造分支 + 一个 `1fr 1fr` 的 grid；
+ *   落地方式 = **只有一个** `.ph-slotnode` 构造分支 + 一个 grid；
  *   没有任何槽拥有专属 modifier / 专属宽高 / 绝对定位 / 悬浮块。
+ *   ⚠️ Gadget 与其它四槽走**同一个** `.ph-slotnode` 规则与同一个 `GARAGE_SLOT_ORDER`
+ *      循环（不新增第二个构造分支、不新增第二套 CSS 类）。
  *   ⚠️ 槽位**不再**读挂点坐标（`vehicleSlotAnchors` 已从本页移除，见 `GS-R3-02` 守卫），
  *      预览只负责「我换了东西以后车发生了什么变化」（Queue 必改 4）。
  *
  * ── 槽位 → 配置字段（一一对应，没有第二张映射表）─────────────────────────────
  *   `weapon` → `functionalSelections[WEAPON_SLOT]` / `body` → `bodyDefId` /
- *   `front` → `frontWheelDefId` / `rear` → `rearWheelDefId`。
+ *   `front` → `frontWheelDefId` / `rear` → `rearWheelDefId` /
+ *   **`gadget` → `gadgetDefId`（独立字段，绝不映射回 front/top/rear）**。
  *   后两者的槽位名与 `movementHardpoints[].id` **刻意同名** ⇒ 不需要映射表。
  *
- * ⚠️ 槽位只有这 4 个真实存在的（Queue 冻结：**不得**增加未来 Gadget 等空槽）。
+ * ⚠️ GADGET-GARAGE-SLOT-R2：**「槽位恰为 4」这条旧冻结由本 Queue 显式解除**。
+ *    旧冻结写于「Gadget 尚无正式可选内容」的前提（守卫断言
+ *    `GARAGE_SLOT_ORDER.length === 4` 且 `.not.toContain('gadget')`）；
+ *    现 Thruster / ReverseThruster 已进入正式可选池（`gadgetGarageDataR1`），
+ *    五槽版面与交互已确定 ⇒ 冻结升级为**五槽契约**，
+ *    并在 `tests/productGarageMobileInteraction.test.ts` **同步更新为新契约断言**
+ *    （记录契约变更原因，不是静默删断言）。
  * ⚠️ 唯一装备交互 = **点槽位 → 点已拥有部件 → 立即装备**；**不提供拖拽装备**
  *    （源码守卫「零 drag 事件」+ 运行时守卫 `garageDraggableCount === 0` 双证）。
  */
-export type GarageSlot = VehicleSlotId;
+export type GarageSlot = VehicleSlotId | 'gadget';
 /**
- * 2×2 装备槽的**展示顺序**（= DOM 顺序，也就是玩家读到的顺序）：
+ * 5 个装备槽的**展示顺序**（= DOM 顺序，也就是玩家读到的顺序）：
  * ```
  * [ 武器 ] [ 车身 ]
  * [ 后轮 ] [ 前轮 ]
+ * [ 辅助 ]← Gadget 独立占下方一行（2+2+1）
  * ```
- * ⚠️ 这不是「维度顺序」而是**版面顺序**：`1fr 1fr` 的 grid 按此顺序两两换行。
+ * ⚠️ 这不是「维度顺序」而是**版面顺序**：grid 按此顺序两两换行，
+ *    第 5 项自动落到第三行并**跨满整行**（`.ph-slotnode-gadget` 的 `grid-column`）。
  */
-export const GARAGE_SLOT_ORDER: readonly GarageSlot[] = ['weapon', 'body', 'rear', 'front'];
+export const GARAGE_SLOT_ORDER: readonly GarageSlot[] = ['weapon', 'body', 'rear', 'front', 'gadget'];
 /** 槽位的中文名（页面里不出现第二份字面量；也是「选择〈槽位名〉装备」标题的一部分）。 */
 export const GARAGE_SLOT_LABELS: Readonly<Record<GarageSlot, string>> = {
   weapon: '武器',
   body: '车身',
   front: '前轮',
   rear: '后轮',
+  gadget: '辅助',
 };
 /** 「当前装备」小节标题 = 四个装备槽之上的唯一标题。 */
 export const GARAGE_CURRENT_LABEL = '当前装备';
@@ -316,6 +331,10 @@ export const MOVEMENT_HARDPOINT_LABELS: Readonly<Record<string, string>> = {
  */
 /** Garage 里「当前使用中」那一行（四类分类共用同一句话术）。 */
 export const GARAGE_IN_USE_LEAD = '当前使用中';
+/** GADGET-GARAGE-SLOT-R2｜Gadget 卡上的能量刻度标签（唯一字面量来源）。 */
+export const GARAGE_GADGET_ENERGY_LABEL = '能量';
+/** GADGET-GARAGE-SLOT-R2｜EMPTY Gadget 卡的刻度文案（它不占用任何能量）。 */
+export const GARAGE_GADGET_NO_COST_LABEL = '无消耗';
 /* ⚠️ PRODUCT-LOOP-R4-CONFIGURATION-BATCH-GATE：原先这里还有一个 `HOME_BODY_SECTION_LABEL`
    （首页「当前车身」摘要标题）。该摘要在真实高内容态下把首页 actions 推出舞台 → 已整块删除，
    常量随之移除（首页车身读数由既有的 `.ph-spec` 行承担）。 */
@@ -614,6 +633,24 @@ export interface ProductProbe {
   readonly lastMovementEquip: { readonly ok: boolean; readonly reason: MovementEquipFailure | null } | null;
   /** 本次挂载**最后一次** Body 装备动作的**真实**结果（`null` = 还没点过）。 */
   readonly lastBodyEquip: { readonly ok: boolean; readonly reason: BodyEquipFailure | null } | null;
+  /**
+   * GADGET-GARAGE-SLOT-R2｜最近一次 Gadget 装备/卸下动作的**真实**结果（同构）。
+   * ⚠️ 探针「如实报出」失败原因（`not-gadget` / `unknown-slot` / `not-owned` /
+   *    `invalid-build`），不静默成功。
+   */
+  readonly lastGadgetEquip: { readonly ok: boolean; readonly reason: GadgetEquipFailure | null } | null;
+  /** 当前装备的 Gadget defId（无 Gadget = `EMPTY_SLOT`）。 */
+  readonly equippedGadgetId: string;
+  /** 当前装备 Gadget 的玩家语言名（无 Gadget = 「无」）。 */
+  readonly equippedGadgetName: string;
+  /** Garage Gadget 槽的可选卡片读数（EMPTY + 推进器 + 反推器）。 */
+  readonly gadgets: readonly {
+    readonly defId: string;
+    readonly name: string;
+    readonly energy: number;
+    readonly empty: boolean;
+    readonly owned: boolean;
+  }[];
   readonly slots: readonly { readonly hardpointId: string; readonly defId: string; readonly name: string; readonly star: number; readonly category: string | null; readonly editable: boolean }[];
   readonly previewItems: readonly { readonly key: string; readonly defId: string; readonly visualId: string | null; readonly onWeaponSlot: boolean }[];
   readonly previewSpriteCount: number;
@@ -857,6 +894,8 @@ export function mountProductHome(
   let lastMovementEquip: { ok: boolean; reason: MovementEquipFailure | null; detail: string } | null = null;
   /** 最近一次 Body 装备动作的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
   let lastBodyEquip: { ok: boolean; reason: BodyEquipFailure | null; detail: string } | null = null;
+  /** GADGET-GARAGE-SLOT-R2｜最近一次 Gadget 装备/卸下动作的**真实**结果（同构）。 */
+  let lastGadgetEquip: { ok: boolean; reason: GadgetEquipFailure | null; detail: string } | null = null;
   /** 最近一次合成的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
   let lastFuse: {
     ok: boolean;
@@ -1027,6 +1066,23 @@ export function mountProductHome(
     if (out.ok && out.draft) {
       draft = out.draft;
       // 换车身不消耗任何东西（装备是引用）；库存与 Weapon / Movement 读数不受影响
+      inv = playerInventory(draft);
+    }
+    render();
+  }
+
+  /**
+   * GADGET-GARAGE-SLOT-R2｜**Gadget 装备 / 卸下**的唯一页面入口。
+   *
+   * ⚠️ 走**既有**写入口（`equipGadget` / `unequipGadget`）⇒ 库存判定、Energy 校验、
+   *    落盘 / 恢复全部复用现有机制，**页面不自己算**任何一条。
+   * ⚠️ `EMPTY_SLOT` 走「卸下」分支（不需要库存）—— 与选 EMPTY 卡的语义一致。
+   */
+  function equipGadgetAndRender(defId: string): void {
+    const out = defId === EMPTY_SLOT ? unequipGadget(draft) : equipGadget(defId, draft, inv);
+    lastGadgetEquip = { ok: out.ok, reason: out.reason ?? null, detail: out.detail ?? '' };
+    if (out.ok && out.draft) {
+      draft = out.draft;
       inv = playerInventory(draft);
     }
     render();
@@ -1612,6 +1668,89 @@ export function mountProductHome(
   }
 
   /**
+   * GADGET-GARAGE-SLOT-R2｜**Garage 里的 Gadget 配置区**。
+   *
+   * ── 它接进的是既有的哪一套（与 Body 区完全同构）──────────────────────────
+   * 布局 / 卡片 / 装备交互**复用 Body 区那一套**：一个「当前使用中」行 +
+   * 一条 `.ph-grid` 卡阵；点**已拥有**卡即直接装备（无二次确认、无独立按钮）。
+   * ⚠️ 没有新增页面、没有新增视图、没有换布局语言、没有第二套 CSS 类。
+   *
+   * ── 三个「只画什么」的硬边界 ───────────────────────────────────────────────
+   *   ① 只画 `gadgetEntries()`（= EMPTY + 推进器 + 反推器；白名单在读数层）；
+   *   ② 未拥有（`owned === false`）的卡**如实画出但不可点**、标 `未拥有`
+   *      —— **不提供**解锁 / 购买 / 进度 / 经济（Queue 禁止清单）；
+   *   ③ EMPTY 卡恒可选（它是「什么都不装」，不是一件部件 ⇒ 不需要库存）。
+   *
+   * ⚠️ 卡片刻度只有**能量**一个数（取自 `GadgetEntry.energy`，= 正式内容
+   *    `FunctionalPartDef.energy`），不编造任何推导描述。
+   */
+  function renderGadgetSection(box: HTMLElement): void {
+    const r = read();
+
+    const cur = el('div', 'ph-current ph-garage-current');
+    cur.dataset['phGarageCurrent'] = 'gadget';
+    cur.dataset['phGarageCurrentDef'] = r.equippedGadgetId;
+    cur.append(
+      el('span', 'ph-current-label', GARAGE_IN_USE_LEAD),
+      el('span', 'ph-current-name', r.equippedGadgetName),
+    );
+    box.append(cur);
+
+    const grid = el('div', 'ph-grid ph-gadget-grid');
+    /** 未拥有内容的降级区（与 Body 区同一套 `lockedSection`）。 */
+    const lockedGrid = el('div', 'ph-grid ph-gadget-grid ph-locked-grid');
+    let lockedCount = 0;
+    for (const g of r.gadgets) {
+      const cell = el('div', 'ph-card-cell');
+      const card = el('button', 'ph-card ph-card-gadget');
+      card.type = 'button';
+      card.dataset['phGadget'] = g.defId;
+      card.dataset['phGadgetOwned'] = String(g.owned);
+      card.dataset['phGadgetEnergy'] = String(g.energy);
+      card.dataset['phGadgetEmpty'] = String(g.empty);
+
+      const equippedHere = r.equippedGadgetId === g.defId;
+      card.dataset['phGadgetEquipped'] = String(equippedHere);
+      if (equippedHere) card.classList.add('ph-card-equipped');
+      card.append(el('span', 'ph-card-name', g.name));
+      // 能量刻度行：EMPTY 显示「无消耗」，其余显示真实 energy（读数层给的）
+      card.append(
+        el('span', 'ph-card-stats', g.empty ? `${GARAGE_GADGET_NO_COST_LABEL}` : `${GARAGE_GADGET_ENERGY_LABEL} ${g.energy}`),
+      );
+      if (equippedHere) card.append(el('span', 'ph-card-tag', GARAGE_IN_USE_LABEL));
+      if (!g.owned) {
+        // 未拥有 ⇒ 标 `未拥有` 且**不可点**（结构上装不上，而不是点了给个错误提示）
+        card.classList.add('ph-card-locked');
+        card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_LOCKED_LABEL));
+        card.disabled = true;
+      } else {
+        // 点已拥有卡即直接装备 / 卸下（无二次确认）
+        card.addEventListener('click', () => equipGadgetAndRender(g.defId));
+      }
+      cell.append(card);
+      if (g.owned) grid.append(cell);
+      else {
+        lockedGrid.append(cell);
+        lockedCount += 1;
+      }
+    }
+    box.append(grid);
+    if (lockedCount > 0) box.append(lockedSection(lockedGrid, lockedCount));
+
+    if (lastGadgetEquip) {
+      const msg = el(
+        'p',
+        lastGadgetEquip.ok ? 'ph-note ph-note-ok' : 'ph-note ph-note-bad',
+        lastGadgetEquip.ok
+          ? '已装备辅助装置并写入正式玩家 Build 存档。'
+          : `辅助装置装备被拒绝（${String(lastGadgetEquip.reason)}）：${lastGadgetEquip.detail}`,
+      );
+      msg.dataset['phGadgetMsg'] = lastGadgetEquip.ok ? 'ok' : 'fail';
+      box.append(msg);
+    }
+  }
+
+  /**
    * 未拥有内容的**降级区**（Queue 必改 4：折叠 / 降级，不与可用内容同权重）。
    *
    * 用原生 `<details>`：零 JS 交互、零新入口、零商城 / 解锁 / 经济系统。
@@ -1925,6 +2064,10 @@ export function mountProductHome(
     */
     for (const slot of GARAGE_SLOT_ORDER) {
       const btn = el('button', 'ph-slotnode');
+      // GADGET-GARAGE-SLOT-R2：Gadget 槽**只**多一个「跨满整行」的 modifier
+      //（CSS 的 grid-column）⇒ 它与其它四槽共用同一个 `.ph-slotnode` 规则，
+      // 尺寸 / 结构 / 交互 / 选中态完全一致，只是独占第三行。
+      if (slot === 'gadget') btn.classList.add('ph-slotnode-gadget');
       btn.type = 'button';
       btn.dataset['phSlot'] = slot;
       btn.dataset['phSlotActive'] = String(slot === garageSlot);
@@ -1955,6 +2098,7 @@ export function mountProductHome(
     body.dataset['phGarageBody'] = garageSlot;
     if (garageSlot === 'weapon') renderWeaponTab(body, r);
     else if (garageSlot === 'body') renderBodySection(body);
+    else if (garageSlot === 'gadget') renderGadgetSection(body);
     else renderMovementSection(body, garageSlot);
     stage.append(body);
 
@@ -1980,6 +2124,8 @@ export function mountProductHome(
   function garageSlotDefId(slot: GarageSlot, r: LoadoutReading, mv: MovementReading): string {
     if (slot === 'weapon') return r.equippedWeaponId;
     if (slot === 'body') return r.bodyDefId;
+    // GADGET-GARAGE-SLOT-R2：Gadget 走**独立字段**，与 Movement 的读法分开
+    if (slot === 'gadget') return r.equippedGadgetId;
     const s = mv.slots.find((x) => x.hardpointId === slot);
     return s ? (s.effectiveDefId ?? '') : '';
   }
@@ -1988,6 +2134,8 @@ export function mountProductHome(
   function garageSlotValue(slot: GarageSlot, r: LoadoutReading, mv: MovementReading): string {
     if (slot === 'weapon') return r.equippedWeaponId === EMPTY_SLOT ? GARAGE_MOVEMENT_OFF_LABEL : r.equippedWeaponName;
     if (slot === 'body') return r.bodyName;
+    // GADGET-GARAGE-SLOT-R2：EMPTY 读数层已给「无」，页面不另写一份空槽字面量
+    if (slot === 'gadget') return r.equippedGadgetName;
     const s = mv.slots.find((x) => x.hardpointId === slot);
     if (!s) return GARAGE_MOVEMENT_OFF_LABEL;
     return s.unmounted ? GARAGE_MOVEMENT_OFF_LABEL : s.name;
@@ -2316,6 +2464,19 @@ export function mountProductHome(
         lastBodyEquip: lastBodyEquip
           ? { ok: lastBodyEquip.ok, reason: lastBodyEquip.reason }
           : null,
+        // GADGET-GARAGE-SLOT-R2｜Gadget 装备动作读数 + 当前选中项（E2E 可断言）
+        lastGadgetEquip: lastGadgetEquip
+          ? { ok: lastGadgetEquip.ok, reason: lastGadgetEquip.reason }
+          : null,
+        equippedGadgetId: r.equippedGadgetId,
+        equippedGadgetName: r.equippedGadgetName,
+        gadgets: r.gadgets.map((g) => ({
+          defId: g.defId,
+          name: g.name,
+          energy: g.energy,
+          empty: g.empty,
+          owned: g.owned,
+        })),
         slots: r.slots.map((s) => ({
           hardpointId: s.hardpointId,
           defId: s.defId,

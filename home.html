@@ -412,6 +412,14 @@
         cursor: pointer;
       }
       .ph-slotnode:hover { background: #1a2536; border-color: #34507c; }
+      /*
+        GADGET-GARAGE-SLOT-R2：第五槽（Gadget）**独立占下方一行**并**跨满整行**
+        （grid 的第 3 行）。⚠️ 只加 `grid-column` 这一条 —— 它**不**改
+        `.ph-slotnode` 本身的 padding / min-height / 字号 / 边框，
+        因此 Gadget 槽与其它四槽仍然**同尺寸、同结构、同交互、同选中态**。
+        ⚠️ 前四槽的 DOM 顺序与样式**一字未动**（仍是 2×2）。
+      */
+      .ph-slotnode-gadget { grid-column: 1 / -1; }
       .ph-slotnode-label { font-size: 11px; color: #7f8ca0; letter-spacing: 0.04em; }
       .ph-slotnode-value {
         font-size: 14px; font-weight: 700; color: #dbe6f7;
