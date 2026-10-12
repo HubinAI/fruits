@@ -8,7 +8,14 @@
 | 结构口径/Mac/已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状（2026-10-12 · 新窗口先读）
-- HEAD=`d015c9b`+DEMO-RUN-VARIANTS-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
+- HEAD=`7eeb60f`+DEMO-FULL-RUN-BUILD-VALUE-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
+- ⚠️ **DEMO-FULL-RUN-BUILD-VALUE-R1（最新）：停止条件触发——A-mango-cannon 稳定通吃**
+  （4 Build × 3 路线完整链全探索：A 3/3 全 COMPLETE；B/C 全败；D 仅 rush
+  （emergencyRepair+rateUp 104 余量））。⇒ 路线选择对通吃 Build 无玩家意义，
+  内容批量开发前置不成立；建议根因方向 = 敌人侧多样性（平衡 Queue）。
+  本轮新证据：B/D 走 R7 通用池、A/C 走 Cannon 三池 ⇒ 换装改变**强化池内容本身**。
+  回归=`productFullRunBuildValueR1`（冠军强化序按路线冻结：default=fastReload+repair /
+  heavy=fastReload+twinCannon / rush=twinCannon+repair）。
 - ⚠️ **DEMO-RUN-VARIANTS-R1（最新）**：两条固定路线变体已接入并全链验证——
   **heavy = HF→HGP→PR**（炮车 229→208→87，fastReload+twinCannon）、
   **rush = PR→RR→HGP**（炮车 529→94→311，fastReload+emergencyRepair）。
