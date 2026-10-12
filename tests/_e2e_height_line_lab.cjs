@@ -129,9 +129,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     console.log('\n##### A. 页面与控件 #####');
     await page.goto(PAGE_URL, { waitUntil: 'load' });
     await page.waitForFunction(() => !!window.__HEIGHTLINELAB__, null, { timeout: 20000 });
+    // 正式 Renderer 的美术必须先就位（与 encounter-lab E2E 同口径）：否则「看得出弹道/受击」
+    // 这条验收就只剩物理读数、没有画面证据。
+    await page.waitForFunction(
+      () => {
+        const a = window.__HEIGHTLINELAB__.probe().assets;
+        return a.failed.length === 0 && a.ready >= 5;
+      },
+      null,
+      { timeout: 20000 },
+    );
     let probe = await readProbe();
 
     check(pageErrors.length === 0, '无页面级 JS 错误', pageErrors.join(' | '));
+    check(
+      probe.assets.ready >= 5 && probe.assets.failed.length === 0,
+      `正式 Renderer 美术已就位（ready=${probe.assets.ready} / registered=${probe.assets.registered} / failed=${probe.assets.failed.length}）`,
+    );
     check(probe.problems.length === 0, '配置自检为空', probe.problems.join(' | '));
     check(probe.opponentId === 'RangedTurret', `对手 = 既有 RangedTurret（实际 ${probe.opponentId}）`);
     check(probe.opponentLabel === '远程炮台', `对手展示名来自正式表（实际 ${probe.opponentLabel}）`);
