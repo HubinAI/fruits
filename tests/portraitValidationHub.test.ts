@@ -135,7 +135,16 @@ describe('PRP-VALIDATION-HUB-R1｜A. Hub 上摆的就是该摆的四个', () => 
     // ⚠️ PRODUCT-LOOP-R1-A：`home.html` 是竖屏**正式产品**首页 / 调整战车 —— 它不是验证页，
     //    因此**不进**验证中心（Hub 仍然只是「验证入口的导航壳」）。这里显式列为「非验证页」，
     //    其余任何新增根 html 依旧会在此被判 FAIL（守卫强度不变）。
-    const NON_VALIDATION_PAGES = ['index.html', 'portrait-lab.html', 'home.html'];
+    // ⚠️ DEMO-HEIGHT-LINE-VISUAL-LAB-R1：`height-line-lab.html` 是**Debug 对照台**
+    //    （与 `portrait-lab.html` 同一类：开发/调试面，不是 Hub 上的玩家验证入口，
+    //     也不在 `docs/handoff` 的四入口清单里）⇒ 同样显式列为「非验证页」。
+    //    `extras` 仍必须是空数组 ⇒ 任何**未登记**的新根 html 依旧 FAIL。
+    const NON_VALIDATION_PAGES = [
+      'index.html',
+      'portrait-lab.html',
+      'home.html',
+      'height-line-lab.html',
+    ];
     const extras = readdirSync(REPO_ROOT)
       .filter((f) => f.endsWith('.html'))
       .filter((f) => !ENTRY_PAGES.includes(f) && f !== HUB_HTML && !NON_VALIDATION_PAGES.includes(f));

@@ -39,6 +39,10 @@ export default defineConfig({
         // PRP-M3：遭遇验证台（同一辆玩家车 × 三个既有正式 Encounter 的集中对照）。
         // 仍是同一块可整块删除的实验产物，不进入 dist / dist-pages / dist-e2e / dist-wechat。
         'encounter-lab': 'encounter-lab.html',
+        // DEMO-HEIGHT-LINE-VISUAL-LAB-R1：车高 × 水平弹道对照台
+        // （同一车身 / 同一门炮 / 同一既有对手 RangedTurret，只换轮径；正常速度看真实弹道）。
+        // 仍是同一块可整块删除的实验产物，不进入 dist / dist-pages / dist-e2e / dist-wechat。
+        'height-line-lab': 'height-line-lab.html',
         // PRP-VALIDATION-HUB-R1：验证中心（三个验证入口的导航壳，**没有画布**）。
         // 同上：仍是同一块可整块删除的实验产物，不进入任何正式产物。
         'validation-hub': 'validation-hub.html',

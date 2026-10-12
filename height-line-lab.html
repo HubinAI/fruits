@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>最强水果 — 车高 · 水平弹道对照台（DEMO-HEIGHT-LINE）</title>
+    <!--
+      DEMO-HEIGHT-LINE-VISUAL-LAB-R1｜Height × Horizontal Ballistics Lab。
+
+      它验证的是**可读性**问题，不是数值问题：
+        同一个车身 + 同一门炮 + 同一个既有对手（RangedTurret / OPP-03），只换轮径。
+        RangedTurret 的水平机枪弹线固定在一个高度上；换轮径会改变玩家的车顶高度，
+        于是「弹从车顶掠过」与「弹打到车身」这两种完全不同的战斗过程会真实发生。
+
+      页面**不做**任何判定与解释：
+        - 不写「哪套更强」、不显示预置结论、不加特效放大差异；
+        - 不无敌、不强制结算、不修剪弹道 —— 看到的就是正式 RunBattleRuntime
+          （正式 Planck 编排器）里的真实弹道与真实受击，由正式 Renderer 画出来；
+        - 控件只有「三套配置 + 清场 + Reset」；打完即停，画面冻结在终局那一帧。
+
+      与玩家页面（run-page.html）严格分离：
+        - 本页由 `npm run dev:height-line-lab` 打开，**不是** `npm run dev` 的落地页；
+        - 本页不参与 npm run build / build:pages / build:e2e / build:wechat 任一正式构建；
+        - 测试控件只存在于本页，**不进入玩家正式 UI**。
+
+      实验失败可直接删除本文件与 src/lab/portraitBattleLab/。
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: #06090e;
+        color: #e9eef7;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+      /* 唯一容器 = 整个视口；画布由 PlayerViewportTransform contain 缩放居中 */
+      #hlab-root.hlab-root {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+
+      /* 测试控件（页面外，不进入玩家 UI）：只允许三套配置 + 清场 + Reset */
+      .hlab-bar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+      .hlab-btn {
+        font: inherit;
+        font-size: 13px;
+        padding: 7px 14px;
+        border-radius: 8px;
+        border: 1px solid #2b3550;
+        background: #141c28;
+        color: #cfe0ff;
+        cursor: pointer;
+      }
+      .hlab-btn:hover { background: #1c2740; }
+      .hlab-btn-active { background: #274267; border-color: #5c86c4; color: #ffffff; }
+      .hlab-btn-clear { color: #ffe0a6; border-color: #4a3f2b; background: #1e1a14; }
+      .hlab-btn-clear:hover { background: #2c261c; }
+      .hlab-btn-reset { color: #ffb0a6; border-color: #4a2b2b; background: #1e1416; }
+      .hlab-btn-reset:hover { background: #2c1c1e; }
+      .hlab-btn:disabled { opacity: 0.45; cursor: default; }
+
+      /* 手机画面容器（与玩家入口同一套：桌面居中放大，窄屏铺满） */
+      .hlab-stage {
+        position: relative;
+        overflow: hidden;
+        height: min(70vh, 760px);
+        width: calc(min(70vh, 760px) * 390 / 844);
+        background: #0b0e14;
+        border-radius: 10px;
+        box-shadow: 0 0 0 1px #1b2434, 0 24px 70px rgba(0, 0, 0, 0.6);
+      }
+      .hlab-status { font-size: 12px; color: #8a93a5; text-align: center; }
+
+      @media (max-width: 640px), (max-height: 620px) {
+        .hlab-root { gap: 6px; }
+        .hlab-stage {
+          height: auto;
+          flex: 1 1 auto;
+          width: 100%;
+          border-radius: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hlab-root"></div>
+    <script type="module" src="/src/lab/portraitBattleLab/heightLineLabMain.ts"></script>
+  </body>
+</html>

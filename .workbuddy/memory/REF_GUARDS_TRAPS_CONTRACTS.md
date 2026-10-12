@@ -1531,6 +1531,26 @@ R7 之前的快进用一张写死的 Cannon 路线表（`PRIOR_RUN_CHOICES = ['h
   回归 = `tests/productDominantBuildRootR1.test.ts`（4 测试）。
   ⚠️ **待观察（未裁决）**：车顶 645 vs 弹线 641 只差 ~4px，真人可读性未知。
 
+- ⚠️ **DEMO-HEIGHT-LINE-VISUAL-LAB-R1（最新 · 独立可玩对照，非判定）**：把上轮的 4px 结论
+  做成**正常速度、不靠解释**的最小对照台 —— 同车身（`mangoBody`）+ 同炮（`cannon`）+
+  同对手（**既有** `RangedTurret`/OPP-03）+ **只换轮径**（small r12 / heavy r20 / large r26）。
+  新增 `height-line-lab.html` + `src/lab/portraitBattleLab/{heightLineConfigs,heightLineLab,heightLineLabMain}.ts`
+  （**零复制**：正式 `RunBattleRuntime` + 正式 `RunBattleView`，唯一新输入 = 既有 `playerDraft`）。
+  实测（页面 / vitest / 浏览器 E2E 三处一致）：small = **winner A** t≈14.88s、玩家命中 5 / 伤害 600、
+  受机枪弹 **0**、车顶 **645** vs 敌弹中位 **641.3**，敌方 1100 掉血 = 武器 600 + **非武器 500**
+  （12×40 尖刺脉冲，首次 13.68s）；heavy = **winner B** t≈9.28s、命中 0 / 受弹 **41** / 车顶 **637**；
+  large = **winner B** t≈9.13s、受弹 **41** / 车顶 **631**。Energy 实测（**非单调**，因轮组 energy
+  12/15/12）= **40 / 60 / 54**，cap 95。回归 = `tests/portraitHeightLineLab.test.ts`（11 测试）
+  + `tests/_e2e_height_line_lab.cjs`（真实浏览器，端口 8159）。
+  ⚠️ **本 Lab 不回答「真人能不能看出那 4px」**——那是真人录屏的判据；页面**无**判定提示 /
+  说明框 / 特效 / 无敌 / 强制结算（源码级断言钉死）。
+  ⚠️⚠️ **R22a 边界 = 本轮的唯一技术阻塞与解法**：Lab 目录 import 面被冻结为**显式白名单闭集**，
+  **且整目录禁 `platform/**`**（唯一例外 `playerViewport`）⇒ 页面**结构上不能**调 `equipMovement`
+  （它必须经 `platform.storage` 读库存）⇒ 三份 `BuildDraft` 改为**实测快照**，合法性证据放在
+  测试侧（`MemStorage` 桩跑**同一条正式装配链**、逐字段复现）。**属登记式边界遵守，不是放宽守卫**。
+  ⚠️ **三轮实测小差异（非不确定性 bug）**：large 的 E2E 用时 9.13s vs vitest 9.25s —— 页面按
+  真实帧 `dt` 推进（`dt = min(64, now-last)`），与测试的固定步进不同源；**胜者与受弹数一致**。
+
 ### 21b 更早结构事实（仍有效）
 - **Gadget 第三层闭环**（12 Queue `1be27d8`→`6b0356a`）：正式链
   gadgetDefId→…→createPlanckVehicle（独立 gadgetHardpoints）→Behavior→Renderer 已通；
@@ -1549,7 +1569,9 @@ R7 之前的快进用一张写死的 Cannon 路线表（`PRIOR_RUN_CHOICES = ['h
 ### 21c 链尾（2026-10-12 段）
 R8 奖励源=主武器 → R9 三段节奏 → `67414d2` 浏览器 COMPLETE → `76faafc` 隐藏锤移除 → R10 →
 R11（laser cd 600 保留 `content.ts:1004`；rammer restSteps 回退 24 `:674`）→ R12 回退 → R13 →
-Mac 迁移+E2E 入册 → cruise → Gadget 12 连 → `fbb3e05`（细 SHA 查 git log）。
+Mac 迁移+E2E 入册 → cruise → Gadget 12 连 → `fbb3e05` → `dbbf27a` Gadget 视觉宿主 `gadget-lab.html` →
+`bdbbcfd` A 通吃根因诊断（车顶 × 水平弹线 + 收束尖刺）→ **本轮 `DEMO-HEIGHT-LINE-VISUAL-LAB-R1`
+（`height-line-lab.html` 车高对照台；细 SHA 查 git log）**。
 
 ### 21d 未决 / 候选（不自动开工）
 - **DEMO-DOMINANT-BUILD-ROOT-R1 留下的两个「下一阶段体验假设」**（均未开工、未接 UI）：
@@ -1559,10 +1581,17 @@ Mac 迁移+E2E 入册 → cruise → Gadget 12 连 → `fbb3e05`（细 SHA 查 g
   + 一个「拖时间」对手原型；验收 = 录一段对手被推到墙边的段落）。
   ⚠️ **待真人观察**：车顶 645 vs 弹线 641 仅差 ~4px，真人可读性未知。
 - 候选下一步：① GADGET-EARN-PATHWAY-R1 ② 默认车平衡 Queue（mango 基线对照）
-  ③ ARCHIVE-RESTORE-RESILIENCE-R1 ④ DOC-COMPAT-REFRESH-R1 ⑤ PL-26 白名单 Bug Queue。
+  ③ ARCHIVE-RESTORE-RESILIENCE-R1 ④ DOC-COMPAT-REFRESH-R1 ⑤ PL-26 白名单 Bug Queue
+  ⑥ **真人录屏判「车高差能否自然读出」**（`height-line-lab.html`，见 21a）。
 - ⚠️ **未修 → 独立 Bug Queue**（禁顺手并改）：① `validateSnapshot` 星级缺口
   （`buildValidator.ts:54`）② `e2e:next-run` 崩（期望 3 实际 4）③④ 注释陈旧 ×2 ⑤ PC-14 预存红。
   ⚠️ **PL-26 白名单缺 `../core/partOptions`**（`8fb5978` 引入，待独立 Bug Queue）。
+  ⚠️ **R2-10 / H-05 预存红（本轮新证）**：`gadget-lab.html`（`dbbf27a` GADGET-VISUAL-VALIDATION-HOST-R1
+  加入根目录）**从未登记**进 `tests/portraitDefaultEntry.test.ts` 的 R2-10 根 html 闭集清单，
+  也未进 `tests/portraitValidationHub.test.ts` 的 `NON_VALIDATION_PAGES` ⇒ 两条守卫在 **HEAD `bdbbcfd`
+  即 FAIL**（已在 HEAD 独立 `git worktree` 上实测复现：`extras=['gadget-lab.html']`）。
+  本轮**未顺手修**（遵守「禁顺手并改」）；本轮对这两张清单的编辑是**登记自己的**
+  `height-line-lab.html`，且**严格减少**了违规项（R2-10 缺口 2→1、H-05 extras 2→1），无回归。
   旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
 - **未做别再 ask**：观感/动画/内容量/Buff/挂点几何/逐武器差异化；saw/spear 不动；
   watermelon gadget 挂点近 rear 是验收通过态；GVL 预设=死代码。

@@ -180,7 +180,7 @@ describe('PRP-R2｜C. 既有隔离守卫未被削弱（R23 / RP-27 改动后复�
     }
   });
 
-  it('R2-10 根目录只有八个 HTML 入口（不存在「绕过默认启动链的页面」）', () => {
+  it('R2-10 根目录只有九个 HTML 入口（不存在「绕过默认启动链的页面」）', () => {
     const htmls = readdirSync(REPO_ROOT)
       .filter((f) => f.endsWith('.html'))
       .sort();
@@ -190,10 +190,16 @@ describe('PRP-R2｜C. 既有隔离守卫未被削弱（R23 / RP-27 改动后复�
     //    （M3 内容批次验证台）；PRODUCT-LOOP-R1-A 新增 `home.html`（竖屏**正式产品**首页 /
     //    调整战车 —— 唯一的**非验证**页面，源码在 `src/product/`）。
     //    PRODUCT-LOOP-R1-C：`home.html` 成为**默认启动链的落地页**（根路径重写目标），
-    //    其余七个仍是显式备用入口（清单按字典序，数量不变）。
+    //    其余七个仍是显式备用入口（清单按字典序）。
+    //    DEMO-HEIGHT-LINE-VISUAL-LAB-R1 新增 `height-line-lab.html`（车高 × 水平弹道对照台）：
+    //    **登记扩展**（8 → 9），不是放宽 —— 本页与既有 Lab 同一套隔离纪律：独立 HTML +
+    //    独立脚本，**不进入** dist / dist-pages / dist-e2e / dist-wechat 任一正式产物，
+    //    默认开发入口（根路径重写 → `home.html`）一个字节未改。
+    //    下面这条清单仍然是**闭集**：任何未登记的第十个根 html 依旧在此判 FAIL。
     expect(htmls).toEqual([
       'content-batch.html',
       'encounter-lab.html',
+      'height-line-lab.html',
       'home.html',
       'index.html',
       'next-run.html',

@@ -12,22 +12,28 @@
 
 ## 0. 现状 / 下一步（新窗口先读 · 明细 → REF §21）
 - HEAD 段起点 `7eeb60f`；分支 `prototype-portrait-battle-lab`（实验可删）；Mac arm64。
-- **最新轮 = `DEMO-DOMINANT-BUILD-ROOT-R1`（A-mango-cannon 通吃根因诊断）** → REF §21a。
-- ⚠️⚠️ **该轮不可误判的一条**：A 的通吃 = **车顶高度**（不是质量/扭矩/cannon 数值）——
-  `mango+small` 车顶 minY **645** > 敌机枪弹线中位 **641.3** ⇒ 弹**掠过**（唯一 0 命中格）；
-  其余底盘车顶 626–637 ⇒ 被压制弹命中 37–47 次。A 因此活到**场地收束阶段**由尖刺墙收割
-  （1100 掉血里武器只占 600）。**banana 更轻(mass 45<48)却输 ⇒ 「越轻越强」已证伪**；
-  扭矩亦证伪；前两场对底盘 **7/7 全不敏感**。回归 = `productDominantBuildRootR1`（4 测试）。
-  上一轮 `DEMO-FULL-RUN-BUILD-VALUE-R1`：A 稳定 3/3 通吃，B/C 全败、D 仅 rush ⇒ 停止条件触发。
-- ⚠️ **诊断轮口径**：只诊断、不调平衡 / 不加血量 / 不做假克制；取证走
-  「输入装配 → 正式逻辑 → Runtime → 实际战果」四段标注；`以可运行测试为准，不沿用文字结论`。
+- **最新轮 = `DEMO-HEIGHT-LINE-VISUAL-LAB-R1`（车高 × 水平弹道**对照台**，独立 Lab）** → REF §21a。
+- ⚠️⚠️ **上轮 `DEMO-DOMINANT-BUILD-ROOT-R1` 不可误判的一条**：A-mango-cannon 通吃 =
+  **车顶高度**（**不是**质量 / 扭矩 / cannon 数值）—— `mango+small` 车顶 **645** > 敌机枪弹线
+  中位 **641.3** ⇒ 弹**掠过**（唯一 0 命中格）；其余底盘车顶 626–637 ⇒ 中弹 37–47 次。
+  A 因此活到**场地收束阶段**由尖刺墙收割（1100 掉血里武器只占 600）。
+  **banana 更轻(mass 45<48)却输 ⇒「越轻越强」已证伪**；扭矩亦证伪。回归 = `productDominantBuildRootR1`。
+- ⚠️ **本轮口径**：Lab 只做**可玩对照**（正常速度看真实弹道/受击/收束），**不做**判定提示 /
+  说明框 / 特效；装配走**既有** `playerDraft` 入口，零 config 覆盖。
+- ⚠️⚠️ **Lab 目录的硬约束（R22a）**：import 面是**显式白名单闭集**，**且整目录禁 `platform/**`**
+  （唯一例外 `playerViewport`）⇒ 页面**结构上不能**调 `equipMovement`（它必须经 `platform.storage`
+  读库存）⇒ **合法性证据只能放测试侧**（`MemStorage` 桩跑同一条正式装配链、逐字段复现快照）。
+  **这是登记式边界遵守，不是放宽守卫**；新开 Lab 页面会撞这条。
 - ⚠️ **勘误教训（踩过）**：「HF 4/4 无解 / A,D 各丢 2 格」曾与可运行矩阵冲突 ⇒ 任何判断
   必须来自实测跑批，**禁止抄写看似等价的相邻单元格**。
-- **候选下一步**：① GADGET-EARN-PATHWAY-R1 ② 默认车平衡 Queue ③ ARCHIVE-RESTORE-RESILIENCE-R1
-  ④ DOC-COMPAT-REFRESH-R1 ⑤ PL-26 白名单 Bug Queue。**等 Queue，不自动开工**。
+- **候选下一步**：① **真人录屏判「4px 车高差能否在正常速度自然看出」**（本 Lab 待验项）
+  ② GADGET-EARN-PATHWAY-R1 ③ 默认车平衡 Queue ④ ARCHIVE-RESTORE-RESILIENCE-R1
+  ⑤ DOC-COMPAT-REFRESH-R1。**等 Queue，不自动开工**。
 - ⚠️ **未修 → 独立 Bug Queue（禁顺手并改）**：① `validateSnapshot` 星级缺口
   （`buildValidator.ts:54`）② `e2e:next-run` 崩（期望 3 实际 4）③④ 注释陈旧 ×2 ⑤ PC-14 预存红
-  ⑥ PL-26 白名单缺 `../core/partOptions`。旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
+  ⑥ PL-26 白名单缺 `../core/partOptions` ⑦ **R2-10 / H-05 预存红**：`gadget-lab.html`
+  （`dbbf27a` 加入根目录）从未登记进 `portraitDefaultEntry` 清单 / `NON_VALIDATION_PAGES`
+  ⇒ **HEAD 即红**（已用独立 worktree 实测）。旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
 - **未做别再 ask**：观感 / 动画 / 内容量 / Buff / 挂点几何 / 逐武器差异化；saw / spear 不动；
   watermelon gadget 挂点近 rear 是验收通过态；GVL 预设 = 死代码。
 
@@ -53,5 +59,7 @@
 - 速记：星级 `1+0.25×(star−1)` 真源 `buildSnapshot.ts:33`；FAILED 动作随 `href` 变；
   装载资格 = 存在性；cannon 基线 80；奖励固定 cannon ★1；音频真凶 `stopBattleAudio()` 未被调；
   **判「够不够得着」一律用 `minGap`**（`finalGap` 会骗人）。
+- Lab 入口速查：`dev:height-line-lab` / `e2e:height-line-lab`（端口 8159，`await launchBrowser(chromium)`）；
+  同族 `dev:encounter-lab` / `dev:gadget-lab` / `dev:next-run` / `dev:run-page`。
 - ⚠️ **反向陷阱（新）**：**`minGap` 大 ≠ 没交火** —— mango+heavy 的 minGap 123 却挨了
   41 发机枪弹（远程压制不受接触与否影响）⇒ 判「有没有被打」要看**掉血事件**，不能靠 `minGap`。

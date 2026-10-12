@@ -29,7 +29,7 @@
  * 删除清单（整块移除本实验）：
  *   1) 本目录 src/lab/portraitBattleLab/（全部文件）
  *   2) 根目录 portrait-lab.html、run-page.html、next-run.html、encounter-lab.html、
- *      validation-hub.html、content-batch.html
+ *      validation-hub.html、content-batch.html、height-line-lab.html
  *      ⚠️ PRODUCT-LOOP-R1-A 起，实验分支上又多了两个**产品**层面的文件，
  *         它们**不在**本目录内，也不属于本实验台的删除范围（删的是实验台，
  *         不是产品）：根目录 `home.html` + `src/product/` + `tests/productLoopHomeGarage.test.ts`
@@ -39,16 +39,17 @@
  *      tests/portraitBattleLabA1.test.ts、tests/portraitBattleLabG1.test.ts、
  *      tests/portraitRunPage.test.ts、tests/portraitRunBattle.test.ts、
  *      tests/portraitNextRunValidation.test.ts、tests/portraitEncounterLab.test.ts、
+ *      tests/portraitHeightLineLab.test.ts、
  *      tests/portraitValidationHub.test.ts、tests/portraitContentBatch.test.ts、
  *      tests/portraitLightSwarmExperience.test.ts、
  *      tests/_e2e_portrait_battle_lab.cjs、tests/_e2e_run_page.cjs、
  *      tests/_e2e_next_run.cjs、tests/_e2e_encounter_lab.cjs、
  *      tests/_e2e_validation_hub.cjs、
  *      tests/_e2e_prp_default_entry.cjs
- *   5) package.json 中 dev:run-page / dev:next-run / dev:encounter-lab / dev:validation /
- *      dev:content-batch / dev:debug-lab / build:portrait-lab / e2e:portrait-lab /
- *      e2e:run-page / e2e:next-run / e2e:encounter-lab / e2e:validation-hub /
- *      e2e:default-entry 等 script
+ *   5) package.json 中 dev:run-page / dev:next-run / dev:encounter-lab /
+ *      dev:height-line-lab / dev:validation / dev:content-batch / dev:debug-lab /
+ *      build:portrait-lab / e2e:portrait-lab / e2e:run-page / e2e:next-run /
+ *      e2e:encounter-lab / e2e:validation-hub / e2e:default-entry 等 script
  *   6) .gitignore 中 dist-portrait-lab/ 一行
  * 正式玩法 / 物理 / 数值 / Garage / Fusion / R4 / Meta / 存档 / 经济均不在删除影响面内。
  *
