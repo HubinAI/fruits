@@ -8,11 +8,14 @@
 | 结构口径/Mac/已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状（2026-10-12 · 新窗口先读）
-- HEAD=f9a743d+DEMO-PLAYABLE-PATH-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
-- ⚠️ **DEMO-PLAYABLE-PATH-R1（最新）**：正常可达通关路线**已钉死为回归基线**
-  `tests/productDemoPlayablePathR1.test.ts`——chassis = **mangoBody+cannon+smallWheel×2**，
-  Build = `fastReload→emergencyRepair`，终局余量 203.4；领奖→幂等→装备保持→再开局已验。
-  ⚠️ **默认 4 Body × cannon = 0 COMPLETE**（R10 那条 cannon chassis 在 mango 上；西瓜车打不完）。
+- HEAD=`51181d6`+DEMO-REAL-ACCOUNT-PATH-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
+- ⚠️ **DEMO-REAL-ACCOUNT-PATH-R1（最新）**：疑点否定、零产品改动——**装配资格=拥有(count>0)
+  非副本数**（`canEquipMovement`/`equipMovement`），同一件 smallWheel ×1 装前后双轮合法；
+  空存档→openGrowthSession→正式装配→三段 COMPLETE→领奖→再开局 已钉为回归
+  `tests/productRealAccountPathR1.test.ts`（3 测试）。
+- **DEMO-PLAYABLE-PATH-R1**：通关基线 `tests/productDemoPlayablePathR1.test.ts`——
+  chassis = **mangoBody+cannon+smallWheel×2**，Build = `fastReload→emergencyRepair`，余量 203.4；
+  **默认 4 Body × cannon = 0 COMPLETE**（西瓜车打不完，平衡留白）。
 - ⚠️ **RUN-WEAPON-GROWTH-R1**：审计前提不成立——R7 通用成长全链生效，假源头=
   runCompatibility R6-BATCH 过时注释（已修订）；当前三段链 zero 无一 COMPLETE（含 cannon）。
   ⚠️ 既有红：PL-26 白名单缺 `../core/partOptions`（`8fb5978` 引入，待独立 Bug Queue）。
