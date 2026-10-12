@@ -1481,3 +1481,88 @@ R7 之前的快进用一张写死的 Cannon 路线表（`PRIOR_RUN_CHOICES = ['h
 **239 files / 2675 tests 全绿 EXIT=0**（R7 通用成长期 238/2663 ⇒ +1 file / +12 tests）；
 本文件单独两遍均 12/12（仅耗时不同）；21 格逐字段**逐字节可复现**。
 四路 SHA：HEAD = 本地 ref = `ls-remote` = `FETCH_HEAD` = `2a5021a65b4244632178662219bb6923f8d2eb3b`。
+
+## §21 现状快照（**滚动**；`MEMORY.md` 只留指针，本文承接被移出的明细）
+
+> 移出原因：`MEMORY.md` 超过注入限额（7,250 → 精简）。此处为**逐字搬运**的旧 §0，
+> 内容未经改写；后续轮次只需在本文追加。逐轮明细仍以 `memory/YYYY-MM-DD.md` 为准。
+
+### 21a 轮次摘要（2026-10-12 窗口，最新在下）
+- HEAD 起点 `7eeb60f`；分支 `prototype-portrait-battle-lab`，Mac arm64。
+- ⚠️ **DEMO-FULL-RUN-BUILD-VALUE-R1（停止条件触发）**：A-mango-cannon 稳定通吃
+  （4 Build × 3 路线完整链全探索：A 3/3 全 COMPLETE；B/C 全败；D 仅 rush
+  （emergencyRepair+rateUp 104 余量））。⇒ 路线选择对通吃 Build 无玩家意义，
+  内容批量开发前置不成立；根因方向建议 = 敌人侧多样性（平衡 Queue）。
+  本轮新证据：B/D 走 R7 通用池、A/C 走 Cannon 三池 ⇒ 换装改变**强化池内容本身**。
+  回归=`productFullRunBuildValueR1`（冠军强化序按路线冻结：default=fastReload+repair /
+  heavy=fastReload+twinCannon / rush=twinCannon+repair）。
+- **DEMO-RUN-VARIANTS-R1**：两条固定路线变体接入并全链验证——
+  **heavy = HF→HGP→PR**（炮车 229→208→87，fastReload+twinCannon）、
+  **rush = PR→RR→HGP**（炮车 529→94→311，fastReload+emergencyRepair）。
+  接缝 = `runScript.ts` 路线覆盖表 + `ctx.runRoute?`（缺省=默认路线，产品 `runPage.ts`
+  不传 ⇒ 默认结构性不变）。回归=`productRunVariantsR1`。
+  ⚠️ **勘误已修正**：「HF 4/4 无解 / A,D 丢 2 格」是错的——真实=A 对 HF 胜(229)、
+  A/D 各丢 1 格、HF 对 B/C/D 必胜；`productBuildCounterR1` console 已加勘误声明。
+  ⚠️ 路线约束：HF 放 B1 则 RR 不能在后（229 进 RR 全败）；RR 放 B1 零 build 必败；
+  含 HF 的深链唯一可行 = fastReload→twinCannon（514/193 入场）。
+- **DEMO-ENCOUNTER-CONTENT-BATCH-R1**：3 套压力画像候选入 `LAB_ENCOUNTERS`
+  （目录 7→**10**，LabEncounterId 闭集同步 +3）——HeavyFortress（R1-HVY-01 重型停驻，
+  **mango 玩家打不过=高压**）/ RushRammer（R1-RUSH-01 冲锤贴身）/ HighGunPlatform（R1-GUN-02
+  站桩远程）；全部正式模板引用 count=1、无 enemyDrive、**不进 RUN_SCRIPT**（三场未动）。
+  回归 = `productEncounterContentBatchR1`；相邻断言 R5/M3-05 已同步 7→10（登记扩展非放宽）。
+- **DEMO-REAL-ACCOUNT-PATH-R1**：疑点否定、零产品改动——**装配资格=拥有(count>0)
+  非副本数**（`canEquipMovement`/`equipMovement`），smallWheel ×1 装双轮合法；
+  空存档→正式初始化→装配→三段 COMPLETE→领奖→再开局已钉为回归 `productRealAccountPathR1`。
+- **DEMO-PLAYABLE-PATH-R1**：通关基线 `tests/productDemoPlayablePathR1.test.ts`——
+  chassis = **mangoBody+cannon+smallWheel×2**，Build = `fastReload→emergencyRepair`，余量 203.4；
+  **默认 4 Body × cannon = 0 COMPLETE**（西瓜车打不完，平衡留白）。
+- **RUN-WEAPON-GROWTH-R1**：审计前提不成立——R7 通用成长全链生效，假源头=
+  runCompatibility R6-BATCH 过时注释（已修订）；当前三段链 zero 无一 COMPLETE（含 cannon）。
+- ⚠️⚠️ **DEMO-DOMINANT-BUILD-ROOT-R1（最新 · 只诊断不调平衡）**：A 通吃根因 = **车顶高度**
+  （**不是**质量/扭矩/cannon 数值）——`mangoBody`+`smallWheel` 给出全套合法组合里
+  **最高的车顶 minY 645**，使 OPP-03 的**水平机枪弹线（中位 y 641.3，`gravityScale:0`）
+  从车顶上方掠过**（唯一受机枪弹 0 次的格子）；其余底盘车顶 626–637 < 641 ⇒ 被压制弹命中
+  37–47 次。轮径**直接决定**车顶：small(12)→645 / heavy(20)→637 / large(26)→631。
+  A 因此刚好活到**场地收束阶段**，由尖刺墙收割（12×40，首次 13.68s；收束起点 13.00s =
+  activeMs+warningMs）⇒ 敌方 1100 掉血里武器只占 600。**banana 更轻(mass 45<48)却输**
+  ⇒ 已证伪「越轻越强」；**扭矩也已证伪**。武器侧：控距场**只有近战锤够不着**（0 命中，
+  minGap 67.7），cannon/shotgun/machineGun/laser 都能胜；⚠️ 但 `laser` **输给 Chaser**
+  ⇒ 换武器是双向的。前两场（ProtoRusher/Chaser）对底盘**完全不敏感（7/7 全胜）**。
+  回归 = `tests/productDominantBuildRootR1.test.ts`（4 测试）。
+  ⚠️ **待观察（未裁决）**：车顶 645 vs 弹线 641 只差 ~4px，真人可读性未知。
+
+### 21b 更早结构事实（仍有效）
+- **Gadget 第三层闭环**（12 Queue `1be27d8`→`6b0356a`）：正式链
+  gadgetDefId→…→createPlanckVehicle（独立 gadgetHardpoints）→Behavior→Renderer 已通；
+  GS-06 实测与全文 → archive 最新交接文档。
+- ⚠️ Thruster/ReverseThruster = 同一 `behavior:'thruster'` 两 mode（far:gap>280 冲 / near:gap<175 撤），**禁拆**；
+  `gadgetHardpoints` ≠ `functionalHardpoints`。
+- ⚠️ **已解冻（用户授权勿判 bug）**：`GARAGE_SLOT_ORDER` 4→5（gadget 最后，前四槽未变 `homePage.ts:179`）、
+  labels+辅助、`OFFICIAL_PARTS` 11→12（+reverseThruster）。
+- ⚠️ **P0-1 拿不到 Gadget**：`STARTER_PARTS`（`partInventory.ts:36`）无 gadget + 奖励只发武器
+  ⇒ 槽可见装不上；唯一途径 Demo `?resetdev=1`。
+- ⚠️ **P0-2 过时记录**：`runCompatibility.ts:74-82`（hammer D3/rammer D2/laser D1 阵亡）43 commit 未复测；
+  同文件 `:60-70`「强化全 Cannon 专属」与 R7 通用成长**口径冲突**，复测前勿改注释。
+- **Strict Matrix = 28/11**；hammer 0/rammer 0；工具≈42min 后台独占。
+  已证伪勿走：R12 开火窗口、「hammer 够不着」、Encounter 顺序主因、单场矩阵代入三段链。
+
+### 21c 链尾（2026-10-12 段）
+R8 奖励源=主武器 → R9 三段节奏 → `67414d2` 浏览器 COMPLETE → `76faafc` 隐藏锤移除 → R10 →
+R11（laser cd 600 保留 `content.ts:1004`；rammer restSteps 回退 24 `:674`）→ R12 回退 → R13 →
+Mac 迁移+E2E 入册 → cruise → Gadget 12 连 → `fbb3e05`（细 SHA 查 git log）。
+
+### 21d 未决 / 候选（不自动开工）
+- **DEMO-DOMINANT-BUILD-ROOT-R1 留下的两个「下一阶段体验假设」**（均未开工、未接 UI）：
+  ① **车顶高度 × 水平压制武器** 作为一条**可设计的对位轴**（最小原型 = 复用既有
+  `LAB_ENCOUNTERS` 新增一个`keep-distance`对手、其压制武器**枪口高度不同**；验收 = 录一段
+  mango vs banana 的同类段落）；② **场地收束尖刺墙当内容**（最小原型 = 复用既有收束 hazard
+  + 一个「拖时间」对手原型；验收 = 录一段对手被推到墙边的段落）。
+  ⚠️ **待真人观察**：车顶 645 vs 弹线 641 仅差 ~4px，真人可读性未知。
+- 候选下一步：① GADGET-EARN-PATHWAY-R1 ② 默认车平衡 Queue（mango 基线对照）
+  ③ ARCHIVE-RESTORE-RESILIENCE-R1 ④ DOC-COMPAT-REFRESH-R1 ⑤ PL-26 白名单 Bug Queue。
+- ⚠️ **未修 → 独立 Bug Queue**（禁顺手并改）：① `validateSnapshot` 星级缺口
+  （`buildValidator.ts:54`）② `e2e:next-run` 崩（期望 3 实际 4）③④ 注释陈旧 ×2 ⑤ PC-14 预存红。
+  ⚠️ **PL-26 白名单缺 `../core/partOptions`**（`8fb5978` 引入，待独立 Bug Queue）。
+  旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
+- **未做别再 ask**：观感/动画/内容量/Buff/挂点几何/逐武器差异化；saw/spear 不动；
+  watermelon gadget 挂点近 rear 是验收通过态；GVL 预设=死代码。
