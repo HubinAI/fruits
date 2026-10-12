@@ -8,7 +8,12 @@
 | 结构口径/Mac/已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状（2026-10-12 · 新窗口先读）
-- HEAD=`61b74bd`+DEMO-ENCOUNTER-CONTENT-BATCH-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
+- HEAD=`56c3d41`+DEMO-BUILD-COUNTER-R1；分支 `prototype-portrait-battle-lab`，Mac arm64。
+- ⚠️ **DEMO-BUILD-COUNTER-R1（最新）**：4×3 换装矩阵证明**假设通过**——换装真实改变战局
+  （9/12 格胜负翻转，无稳定通吃）。克制①对 RushRammer 用远程/爆发；②对 HighGunPlatform
+  **必须弹道武器**（hammer 0 命中全灭）；HeavyFortress 4/4 无解=平衡留白。
+  下一轮多局候选集 = **RushRammer + HighGunPlatform**。回归=`productBuildCounterR1`。
+  ⚠️ Garage `editable` 只有 WEAPON_SLOT（`playerLoadout.ts:979`）⇒ top/front/rear 槽不可写。
 - ⚠️ **DEMO-ENCOUNTER-CONTENT-BATCH-R1（最新）**：3 套压力画像候选入 `LAB_ENCOUNTERS`
   （目录 7→**10**，LabEncounterId 闭集同步 +3）——HeavyFortress（R1-HVY-01 重型停驻，
   **mango 玩家打不过=高压**）/ RushRammer（R1-RUSH-01 冲锤贴身）/ HighGunPlatform（R1-GUN-02
