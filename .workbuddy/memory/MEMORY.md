@@ -11,16 +11,25 @@
 | 结构口径 / Mac / 已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状 / 下一步（新窗口先读 · 明细 → REF §21）
-- HEAD 段起点 `7eeb60f`；分支 `prototype-portrait-battle-lab`（实验可删）；Mac arm64。
-- **最新轮 = `PRODUCT-FULL-LOOP-FOUNDATION-R1`（真实入口全闭环核查 + 修 2 处陈旧 E2E）** → 日 log 同日段。
+- HEAD `f8a699f`；分支 `prototype-portrait-battle-lab`（实验可删）；Mac arm64。
+- **最新轮 = `CONTENT-BATCH-CREATION-PIPELINE-R1`（确定性 Run 测试底座 / Foundation）** → 日 log 同日段。
+  **交什么**：新增 `tests/helpers/runContentBatchHarness.ts`（共享底座：`runSingleBattle` 单场 +
+  `runContentBatchCase` 声明式全 Run + `printBatchSummary`）＋ `tests/productContentBatchFoundationR1.test.ts`
+  （3 Build × 3 路线 = 9 例）；**重构 2 处重复驱动**（R10 `runOneBattle`→`runSingleBattle`、
+  DPP `walkRun`→`runContentBatchCase`），冻结读数逐字不变。**只动 4 个 tests 文件，src 零 diff**（+773/−133）。
+  ⚠️⚠️ **新窗口必读的两条**：① **产品只有 1 个武器槽** `WEAPON_SLOT='frontMass'`；`front`/`top`/`rear`
+  是 functional 硬点**不是武器槽**（把 cannon 放 `front` = 非法，能量 120>110，底座红灯**正确**）。
+  ② **9 例真实结果**：mgPrimary(machineGun×3) **三路线全 COMPLETE**；cannonWalk / mangoCannon
+  **三路线全 FAILED**（cannon 系打不过 heavy/rush 是真**产品结果**，非底座 bug、非伪造）。
+  ⚠️ 下一批内容入口见日 log「下批独立 Content Queue 入口」段（`CONTENT-BATCH-EXPANSION-R2`）。
+- ⚠️ **上轮 = `PRODUCT-FULL-LOOP-FOUNDATION-R1`（真实入口全闭环核查 + 修 2 处陈旧 E2E）** → 日 log 同日段。
   ⚠️⚠️ **核心事实（新窗口必读）**：**产品闭环逻辑完整可用**（权威矩阵 `productRunFullReachableSpaceR10`
   = **28 条 COMPLETE / 11 底盘**：cannon 1、flamethrower 1、machineGun 4、shotgun 4、laser 1；
   hammer·rammer 0）——**阻断的是「浏览器取证层」，不是产品**。根因一条：`76faafc`（2026-10-01
   「移除隐藏顶锤」）改了 `defaultPlayerDraft()`/`clearHiddenTopWeapon`，**vitest 同步了，浏览器 E2E 没同步** ⇒
   ① `e2e:product-loop` 的取胜装配（`coconutBody+后 heavyWheel`）失去隐藏锤**打不赢**，且其 `C4` 写
   `rc[0].href` **崩溃** ⇒ 静默失效；② `e2e:product-legacy` L8 期望漏清 `top`。
-  本轮**只改 2 个 `tests/*.cjs`**（零产品代码）：loop 装配 → `mangoBody + front=smallWheel + rear=smallWheel`
-  （+ `C4` 空数组防护）、legacy L8 补 `top: EMPTY` ⇒ 修后 **loop 55/55 PASS、legacy 18/18 PASS**。
+  该轮**只改 2 个 `tests/*.cjs`**（零产品代码）⇒ 修后 **loop 55/55 PASS、legacy 18/18 PASS**。
 - ⚠️ **默认车打不赢（产品体验事实，禁改数值）**：`watermelonBody + cannon + 缺省轮` 在终局
   `RangedTurret` 控距下 **FAILED**；可通关需在 Garage 换 `mangoBody + 双 smallWheel`（machineGun 系）。
   ⇒ 「默认配置可通关性 / 引导」是独立产品议题（已登记，等 Queue）。
@@ -47,12 +56,11 @@
   **这是登记式边界遵守，不是放宽守卫**；新开 Lab 页面会撞这条。
 - ⚠️ **勘误教训（踩过）**：「HF 4/4 无解 / A,D 各丢 2 格」曾与可运行矩阵冲突 ⇒ 任何判断
   必须来自实测跑批，**禁止抄写看似等价的相邻单元格**。
-- **候选下一步**（R3 收口后）：① **`E2E-STALE-ROUTES-REFRESH-R1`**（刷新 ⑨ 那 5 个陈旧浏览器
-  E2E：路线按权威矩阵 + 夹具去 `top:'hammer'` + home 第 5 槽几何）；② `CONTENT-BATCH-CREATION-PIPELINE-R1`
-  （把 Lab 已验证的敌人/武器/移动/装配做成可批量复用的创建/运行/清场/测试入口，见 REF §21d）；
-  ③ `DEFAULT-LOADOUT-CLEAR-PATH-R1`（默认车可通关性/引导的产品裁决，**含数值须单独授权**）。
-  旧候选保留：真人录屏判车高差 / GADGET-EARN-PATHWAY-R1 / 默认车平衡 / ARCHIVE-RESTORE-RESILIENCE-R1 /
-  DOC-COMPAT-REFRESH-R1。**等 Queue，不自动开工**。
+- **候选下一步**：① **`CONTENT-BATCH-EXPANSION-R2`**（用现成底座 `runContentBatchCase` 扩内容批测，
+  见日 log 同日段「下批独立 Content Queue 入口」）；② `DEFAULT-LOADOUT-CLEAR-PATH-R1`
+  （默认车可通关性/引导的产品裁决，**含数值须单独授权**）；③ `E2E-STALE-ROUTES-REFRESH-R1`（已由
+  `5e9abe6` 收口）。旧候选保留：真人录屏判车高差 / GADGET-EARN-PATHWAY-R1 / 默认车平衡 /
+  ARCHIVE-RESTORE-RESILIENCE-R1 / DOC-COMPAT-REFRESH-R1。**等 Queue，不自动开工**。`CONTENT-BATCH-CREATION-PIPELINE-R1` 已完成 → `f8a699f`。
 - ⚠️ **未修 → 独立 Bug Queue（禁顺手并改）**：① `validateSnapshot` 星级缺口
   （`buildValidator.ts:54`）② `e2e:next-run` 崩（期望 3 实际 4）③④ 注释陈旧 ×2 ⑤ PC-14 预存红
   ⑥ PL-26 白名单缺 `../core/partOptions` ⑦ **R2-10 / H-05 预存红**：`gadget-lab.html`
@@ -74,7 +82,9 @@
 - Repo `HubinAI/fruits`｜主线 `foundation-02-wechat`｜舞台 844×390。
 - 链尾（细 SHA 查 `git log`）：R8 → R9 → `67414d2` 浏览器 COMPLETE → `76faafc` 移除隐藏锤 →
   R10 → R11（laser cd 600 `content.ts:1004`；rammer restSteps 24 `:674`）→ R12 → R13 →
-  Mac 迁移 + E2E 入册 → cruise → Gadget 12 连 → `fbb3e05` → 2026-10-12 段见 REF §21c。
+  Mac 迁移 + E2E 入册 → cruise → Gadget 12 连 → `fbb3e05` → 2026-10-12 段见 REF §21c →
+  `PRODUCT-FULL-LOOP-FOUNDATION-R1` → `5e9abe6` E2E 陈旧族刷新 → `644bf4a` 归档 E2E 核查 →
+  **`f8a699f` CONTENT-BATCH-CREATION-PIPELINE-R1（确定性 Run 测试底座）**。
 - ⚠️ `src/product/` 新模块**必须**在 `tests/productLoopHomeGarage.test.ts` **PL-26** 白名单（闭集）登记。
 - 每轮必交边界取证：`git diff --stat -- src/{core,battle,physics,render,player,platform,game,presentation,ui}`
   + `git diff --exit-code -- src/core/content.ts src/battle/contactRouter.ts`。
@@ -82,8 +92,11 @@
   改 `nextRunValidation` 前读 REF §19d。
 
 ## 2. 红线速查（Mac + WorkBuddy 宿主）
-- 先 `export PATH=/usr/local/bin:$PATH`（宿主 Node 22 vs 项目 Node 24）；vitest 必须
-  `--pool=vmForks --maxWorkers=1` **独占**；`child_process.spawnSync` 必拒 ⇒ rc 两文件红 = 环境假失败。
+- 先 `export PATH=/Users/yy/.workbuddy/binaries/node/versions/22.22.2-6/bin:$PATH`（宿主 Node 22 vs 项目 Node 24）。
+- ⚠️⚠️ **vitest 池口径勘误（踩过）**：vitest **4.1.10 无 `vmForks` 池**（合法 = `forks`/`threads`/`vmThreads`）。
+  旧文档写的 `--pool=vmForks` 是**陈旧口径**。稳态用法：`--pool=forks --maxWorkers=1`，且**逐文件串行**——
+  R10 全枚举单文件约 **232s**、3 个重物理文件同跑在 free mem ~867MB 下**必 OOM 被杀（exit 137 / SIGKILL）**。
+  `child_process.spawnSync` 必拒 ⇒ rc 两文件红 = 环境假失败。
 - `e2e:product-reward` **后台跑**；E2E **串行**；`waitForURL(/home\.html/)` 假绿 ⇒ 必须 pathname 谓词；
   `R22b`：Lab 外零 `portrait-lab` 字样；页面模块级零 DOM；`/` 由 `branchDevEntry.ts` 重写。
 - 复验 PRP 先 build（`emptyOutDir:false`）；守卫红 ⇒ **强化不放宽**；新守卫必须负控制 + grep 零残留；
