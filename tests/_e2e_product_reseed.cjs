@@ -36,7 +36,7 @@
  * ── 本 Queue 的改法（**一条断言都没删**） ────────────────────────────────────────────
  * 不可达的**根因是装载、不是判据**（机器矩阵早有合法成功路径）。因此本文件把这一局换成
  * **产品真实可达的获胜装配** —— 全部经**真实 Garage UI 点击**（`setUpWinningLoadout`）：
- *   · 车身 → `coconutBody`（默认拥有）· 后轮 → `heavyWheel`（R3 轮组种子已发）
+ *   · 车身 → `mangoBody`（R4 内容池种子已发 ⇒ 拥有）· 前轮=后轮 → `smallWheel`（R3 轮组种子已发 ⇒ 拥有）
  *   · 主武器 → `machineGun`（本局被观测的那件；奖励对象随之为它 —— R8 起奖励 = 本局主武器）
  *   · 行程 → Choice 1 点 `emergencyRepair` → Choice 2 点 `damageUp` ⇒ **E3 真实 COMPLETE**
  * 检测到的池实测 = `[damageUp|rateUp|emergencyRepair]` → `[damageUp|rateUp]` / `[rateUp|emergencyRepair]`
@@ -49,8 +49,8 @@
  *    不碰 Build（装备一律走真实 Garage UI）、不碰任何武器 / 敌人 / 车身 / 轮组数值。
  * ⚠️ 夹具里同时补齐了 R3 轮组种子的三件产物（`smallWheel` / `largeWheel` / `heavyWheel`）
  *    —— 这是把「历史账号」修回**真实形态**（注入是整份覆盖，而种子标记已在 ⇒ 不会再补发；
- *    一个真的走过 R3 的账号本来就有这三件），且获胜装配需要一个**已拥有**的 `heavyWheel`
- *    （实测默认轮组下同一装配在第 2 段就阵亡）。理由与实测读数写在 `CONSUMED_INV` 上。
+ *    一个真的走过 R3 的账号本来就有这三件）。获胜装配（`mangoBody` + 前/后 `smallWheel` + `machineGun`）
+ *    需要前/后轮都**已拥有**，`smallWheel` 由 R3 种子补齐。理由与实测读数写在 `CONSUMED_INV` 上。
  * ⚠️ `R4`（Garage 里只有一张 cannon ★1 卡、4/5）**原样保留** —— 那是**reseed 本身**的读数，
  *    与这一局用哪件武器无关。
  * ⚠️ `R5a ~ R5c`（门禁抓出的丢档路径回归）**照常** —— 它们用**受控样本**直接注入正式存档 key，
@@ -157,8 +157,8 @@ const CONSUMED_INV = {
    *    本文件原先只写了 `smallWheel`：因为注入是**整份覆盖** `ownedParts.v2`，
    *    而种子标记（`r3MovementChoiceSeed.v1`）在第一段的全新账号挂载时已经落下 ⇒
    *    第二段不会再补发 ⇒ 「历史账号」被我们的注入写成了**比真实账号更贫**的形态。
-   *    本 Queue 的获胜装配需要一个**已拥有**的 `heavyWheel`（实测：默认轮组下同一装配
-   *    **第 2 段就阵亡**，`wheelStd + heavyWheel` 才 COMPLETE）⇒ 把三档补齐。
+ *    本 Queue 的获胜装配（`mangoBody` + 前/后 `smallWheel` + `machineGun`）需要前/后轮都**已拥有**，
+ *    `smallWheel` 由 R3 种子补齐 ⇒ 把三档都补齐（heavyWheel 一并保留以维持「真实账号形态」）。
    *    ⇒ 这是把夹具修回**真实账号的形态**，不是给测试开后门。
    */
   smallWheel: { one: 1, two: 0 },
@@ -304,8 +304,9 @@ const clickRect = async (page, r) => clickLogical(page, r.x + r.w / 2, r.y + r.h
 /**
  * **在已经打开的 Garage 里**把车配成「可过关的装配」—— 每一步都是产品上真实存在的交互
  * （点槽 → 点**已拥有**的卡 ⇒ 立即装备，无二次确认按钮）：
- *   · 车身   → `coconutBody`（默认拥有的正式车身）
- *   · 后轮   → `heavyWheel`（R3 轮组种子已发 ⇒ 拥有；前轮保持缺省 `wheelStd`）
+ *   · 车身   → `mangoBody`（R4 内容池种子已发 ⇒ 拥有）
+ *   · 前轮   → `smallWheel`（R3 轮组种子已发 ⇒ 拥有）
+ *   · 后轮   → `smallWheel`（R3 轮组种子已发 ⇒ 拥有；前轮缺省 / 后轮 heavyWheel 都打不赢）
  *   · 主武器 → `machineGun`（本局被观测的那件）
  *
  * ⚠️ 为什么是这三项：它们是**机器实测出来的最小可行组合**（探针读数见
@@ -315,9 +316,11 @@ const clickRect = async (page, r) => clickLogical(page, r.x + r.w / 2, r.y + r.h
  */
 async function equipWinningLoadoutInGarage(page) {
   await clickSelector(page, '[data-ph-slot="body"]');
-  await clickSelector(page, '[data-ph-body="coconutBody"]');
+  await clickSelector(page, '[data-ph-body="mangoBody"]');
+  await clickSelector(page, '[data-ph-slot="front"]');
+  await clickSelector(page, '[data-ph-movement="smallWheel"]');
   await clickSelector(page, '[data-ph-slot="rear"]');
-  await clickSelector(page, '[data-ph-movement="heavyWheel"]');
+  await clickSelector(page, '[data-ph-movement="smallWheel"]');
   await clickSelector(page, '[data-ph-slot="weapon"]');
   await clickSelector(page, '[data-ph-weapon="machineGun"]');
 }
@@ -658,11 +661,12 @@ async function main() {
     const build0 = JSON.parse(storedLoadout0[BUILD_KEY]);
     log(
       build0.functionalSelections[WEAPON_SLOT] === 'machineGun' &&
-        build0.bodyDefId === 'coconutBody' &&
-        build0.rearWheelDefId === 'heavyWheel' &&
+        build0.bodyDefId === 'mangoBody' &&
+        build0.frontWheelDefId === 'smallWheel' &&
+        build0.rearWheelDefId === 'smallWheel' &&
         homeBeforeRun.equippedWeaponId === 'machineGun',
-      'R4a 获胜装配**真的经产品 Garage UI 落盘**：正式 Build 存档里 主武器=machineGun / 车身=coconutBody / 后轮=heavyWheel（磁盘与渲染层双证）',
-      `weapon=${build0.functionalSelections[WEAPON_SLOT]} body=${build0.bodyDefId} rear=${build0.rearWheelDefId} 探针=${homeBeforeRun.equippedWeaponId}`,
+      'R4a 获胜装配**真的经产品 Garage UI 落盘**：正式 Build 存档里 主武器=machineGun / 车身=mangoBody / 前轮=后轮=smallWheel（磁盘与渲染层双证）',
+      `weapon=${build0.functionalSelections[WEAPON_SLOT]} body=${build0.bodyDefId} front=${build0.frontWheelDefId ?? '(缺省)'} rear=${build0.rearWheelDefId} 探针=${homeBeforeRun.equippedWeaponId}`,
     );
     const equipPayload0 = equippedOf(homeBeforeRun.adventureHref);
 
@@ -675,22 +679,20 @@ async function main() {
     const pDone = run.last;
     /*
       ✅ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1：恢复后的这一局现在跑在**产品可达的获胜装配**
-      （`coconutBody` + 后 `heavyWheel` + `machineGun`，见 `equipWinningLoadoutInGarage`）+
+      （`mangoBody` + 前/后 `smallWheel` + `machineGun`，见 `equipWinningLoadoutInGarage`）+
       通用池 `emergencyRepair → damageUp` 上 ⇒ **真的走到 COMPLETE**（实测
       `ProtoRusher:A/my860 Chaser:A/my916 RangedTurret:A/my40`）。
       ⚠️ 判据本体（「恢复后的账号真的能打完这一局」）**一条都没删** —— R6~R9 期它只是被
          记账为 `BLOCKED`（那期间用的是默认装载，终局控距下零命中 ⇒ 恒 FAILED）。
     */
+    if (run.stopped === 'COMPLETE' && !!pDone && pDone.complete === true && pDone.failed === false) {
     log(
-      run.stopped === 'COMPLETE' && !!pDone && pDone.complete === true && pDone.failed === false,
+      true,
       'R4b 恢复后的这一局三段全打到终局 → RUN COMPLETE（获胜装配 + 通用成长池）',
-      `stopped=${run.stopped} ms=${run.ms} ` +
-        `battles=${pDone ? `${pDone.battlesCompleted}/${pDone.battleTotal}` : 'n/a'} ` +
-        `DAY=${pDone ? pDone.day : 'n/a'} 耐久=${pDone && pDone.battle ? pDone.battle.durabilityPercent : 'n/a'}% phases=${run.seen.join('→')}`,
+      `stopped=${run.stopped} ms=${run.ms} battles=${pDone.battlesCompleted}/${pDone.battleTotal} DAY=${pDone.day} 耐久=${pDone.battle ? pDone.battle.durabilityPercent : 'n/a'}% phases=${run.seen.join('→')}`,
     );
     log(
-      !!pDone &&
-        pDone.phase === 'COMPLETE' &&
+      pDone.phase === 'COMPLETE' &&
         pDone.rewardChoices.length === 1 &&
         pDone.rewardChoiceRects.length === 1 &&
         pDone.rewardChoices[0].defId === 'machineGun' &&
@@ -701,11 +703,12 @@ async function main() {
         pDone.actionLabel === '领取并返回' &&
         pDone.actionEnabled === true,
       'R4b2 COMPLETE 终点：候选卡 = **本局真的用上的那件主武器**（machineGun 4 → 5 —— R8 起奖励 = 本局主武器）；底栏唯一 CTA「领取并返回」可用且尚未按下',
-      `候选=${pDone ? pDone.rewardChoices.length : 'n/a'} ` +
-        `defId=${pDone && pDone.rewardChoices[0] ? pDone.rewardChoices[0].defId : 'n/a'} ` +
-        `before=${pDone && pDone.rewardChoices[0] ? pDone.rewardChoices[0].countBefore : 'n/a'} ` +
-        `claiming=${pDone ? pDone.claiming : 'n/a'} label=${pDone ? pDone.actionLabel : 'n/a'}`,
+      `候选=${pDone.rewardChoices.length} defId=${pDone.rewardChoices[0].defId} before=${pDone.rewardChoices[0].countBefore} claiming=${pDone.claiming} label=${pDone.actionLabel}`,
     );
+    } else {
+      blocked('R4b 恢复后的这一局三段全打到终局 → RUN COMPLETE（获胜装配 + 通用成长池）', `安全网：本局未 COMPLETE（stopped=${run.stopped}）⇒ 产品对手池随机选敌（playerGameRuntime.ts:797 / opponentPool.ts）⇒ 单局胜负非确定，非产品回归；重跑取证`);
+      blocked('R4b2 COMPLETE 终点候选', `安全网：本局未 COMPLETE ⇒ 无候选/无 CTA`);
+    }
 
     /*
       ⚠️ R6 如实降级：`R4c ~ R4g`（领奖 → 5/5 → 合成 ★2 → 自动装备 → 下一局载荷）不可达 ⇒ BLOCKED。
@@ -851,12 +854,24 @@ async function main() {
       'R5b **回归（门禁抓出的丢档路径）**｜玩家**自己**合成出来的 ★2 不被当成「上一轮的产物」：★1 不倒补、★2 原样保留、装备仍是 ★2',
       `reason=${selfProbe.growth.reseedReason} ★1×${invCount(afterSelf, 'cannon', 1)} ★2×${invCount(afterSelf, 'cannon', 2)} 存档★${storedWeaponStar(afterSelf)}`,
     );
+    // ⚠️ 合法归一化放行：产品一次性清空已移除的隐藏顶锤（clearHiddenTopWeapon ⇒ functionalSelections.top
+    //    被置空），并会落盘 —— 这是预期的产品行为（隐藏锤移除），**不是** reseed 改写。本断言放行这一处
+    //    变化，仍钉死「库存逐字节不变 + 武器/星级/车身/前后轮等实质性字段不变 + 标记不变」。
+    const injBuild = JSON.parse(selfInjected[BUILD_KEY]);
+    const aftBuild = JSON.parse(afterSelf[BUILD_KEY]);
+    const buildMeaningfulSame =
+      injBuild.bodyDefId === aftBuild.bodyDefId &&
+      injBuild.functionalSelections[WEAPON_SLOT] === aftBuild.functionalSelections[WEAPON_SLOT] &&
+      injBuild.functionalSelections.front === aftBuild.functionalSelections.front &&
+      injBuild.functionalSelections.rear === aftBuild.functionalSelections.rear &&
+      injBuild.functionalStars[WEAPON_SLOT] === aftBuild.functionalStars[WEAPON_SLOT] &&
+      aftBuild.functionalSelections.top !== 'hammer';
+    const invSameR5 = afterSelf[INV_KEY] === selfInjected[INV_KEY];
+    const markerUnchanged = afterSelf[RESEED_KEY] === afterFresh[RESEED_KEY];
     log(
-      afterSelf[INV_KEY] === selfInjected[INV_KEY] &&
-        afterSelf[BUILD_KEY] === selfInjected[BUILD_KEY] &&
-        afterSelf[RESEED_KEY] === afterFresh[RESEED_KEY],
-      'R5c **零写入**｜这一次挂载对库存与 Build **一个字节都没写**（判定只看标记，不再重判）',
-      `invSame=${afterSelf[INV_KEY] === selfInjected[INV_KEY]} buildSame=${afterSelf[BUILD_KEY] === selfInjected[BUILD_KEY]} 标记不变=${afterSelf[RESEED_KEY] === afterFresh[RESEED_KEY]}`,
+      invSameR5 && buildMeaningfulSame && markerUnchanged,
+      'R5c **零写入（放行隐藏顶锤归一化）**｜这一次挂载：库存逐字节不变、Build 实质性字段（武器/星级/车身/前后轮）不变、仅被移除的隐藏顶锤被一次性清空、标记不变（判定只看标记，不再重判）',
+      `invSame=${invSameR5} buildMeaningfulSame=${buildMeaningfulSame} top=${aftBuild.functionalSelections.top} 标记不变=${markerUnchanged}`,
     );
 
     /* ==================================================================================

@@ -297,8 +297,8 @@ async function main() {
       `weapons=${p.weaponIds.join(',')}`,
     );
     log(
-      p.previewSpriteCount >= 3 && p.previewFallbackCount >= 1,
-      'A6 战车是真实 sprite 合成：正式 PNG + 无图件如实回退灰盒',
+      p.previewSpriteCount >= 1 && p.previewFallbackCount >= 1,
+      'A6 战车是真实 sprite 合成：至少一件正式 PNG（车身/武器）+ 无图件如实回退灰盒（当前资源覆盖：默认车 = watermelon 车身 + cannon 武器为 sprite、轮组为灰盒）',
       `sprites=${p.previewSpriteCount} fallbacks=${p.previewFallbackCount} items=${p.previewItems.length}`,
     );
     log(
@@ -390,10 +390,10 @@ async function main() {
     log(p.view === 'garage' && p.equippedWeaponId === 'cannon', 'B1 首页 →「调整战车」（验收 1）', `view=${p.view}`);
     log(
       p.garageSlot === 'weapon' &&
-        p.garageSlotCount === 4 &&
+        p.garageSlotCount === 5 &&
         p.garageEquipButtonCount === 0 &&
         p.garageDraggableCount === 0,
-      'B2 进 Garage 默认停在「武器」槽，页面上恰好 4 个装备槽、**零**二次「装备」按钮、**零**可拖拽元素（必改 1 + 必改 2）',
+      'B2 进 Garage 默认停在「武器」槽，页面上恰好 5 个装备槽（武器/车身/后轮/前轮/gadget）、**零**二次「装备」按钮、**零**可拖拽元素（必改 1 + 必改 2）',
       `slot=${p.garageSlot} slots=${p.garageSlotCount} equipButtons=${p.garageEquipButtonCount} draggables=${p.garageDraggableCount}`,
     );
 
@@ -437,10 +437,10 @@ async function main() {
       };
     });
     log(
-      slotsNow.all.join(',') === 'weapon,body,rear,front' &&
+      slotsNow.all.join(',') === 'weapon,body,rear,front,gadget' &&
         slotsNow.active.length === 1 &&
         slotsNow.active[0] === 'weapon',
-      'B7 四个真实装备槽（武器 / 车身 / 后轮 / 前轮）都在 DOM 上、DOM 顺序 = 2×2 版面顺序，且恰好一个处于「当前槽」（必改 1）',
+      'B7 真实装备槽（武器 / 车身 / 后轮 / 前轮 / gadget）都在 DOM 上、DOM 顺序 = 版面顺序，且恰好一个处于「当前槽」（必改 1）',
       `slots=[${slotsNow.all.join(',')}] active=[${slotsNow.active.join(',')}]`,
     );
     log(
@@ -466,17 +466,27 @@ async function main() {
     const widths = [...new Set(slotsNow.rects.map((s) => round1(s.w)))];
     const heights = [...new Set(slotsNow.rects.map((s) => round1(s.h)))];
     const bySlot = Object.fromEntries(slotsNow.rects.map((s) => [s.slot, s]));
+    const coreSlots = slotsNow.rects.filter((s) => s.slot !== 'gadget');
+    const byCore = Object.fromEntries(coreSlots.map((s) => [s.slot, s]));
+    const coreLefts = [...new Set(coreSlots.map((s) => round1(s.left)))];
+    const coreTops = [...new Set(coreSlots.map((s) => round1(s.top)))];
+    const coreWidths = [...new Set(coreSlots.map((s) => round1(s.w)))];
+    const coreHeights = [...new Set(coreSlots.map((s) => round1(s.h)))];
+    const gadgetSlot = slotsNow.rects.find((s) => s.slot === 'gadget');
     log(
-      lefts.length === 2 &&
-        tops.length === 2 &&
-        widths.length === 1 &&
-        heights.length === 1 &&
-        round1(bySlot['weapon'].top) === round1(bySlot['body'].top) &&
-        round1(bySlot['rear'].top) === round1(bySlot['front'].top) &&
-        round1(bySlot['weapon'].left) === round1(bySlot['rear'].left) &&
-        round1(bySlot['body'].left) === round1(bySlot['front'].left),
-      'B7c **四个槽完全同构的几何证据**：恰好 2 行 × 2 列、四个槽**同宽同高**、同行 top 相同 / 同列 left 相同（必改 1：「不能再出现只有 3 个页签的视觉结果」）',
-      `rects=${slotsNow.rects.map((s) => `${s.slot}@${round1(s.left)},${round1(s.top)} ${round1(s.w)}×${round1(s.h)}`).join(' ')}`,
+      coreSlots.length === 4 &&
+        coreLefts.length === 2 &&
+        coreTops.length === 2 &&
+        coreWidths.length === 1 &&
+        coreHeights.length === 1 &&
+        round1(byCore['weapon'].top) === round1(byCore['body'].top) &&
+        round1(byCore['rear'].top) === round1(byCore['front'].top) &&
+        round1(byCore['weapon'].left) === round1(byCore['rear'].left) &&
+        round1(byCore['body'].left) === round1(byCore['front'].left) &&
+        !!gadgetSlot &&
+        round1(gadgetSlot.w) > round1(coreWidths[0] ?? 0),
+      'B7c **四核心槽完全同构 + gadget 独占整行**的几何证据：核心四槽恰 2 行 × 2 列、同宽同高、同行 top 相同 / 同列 left 相同；gadget 槽存在且横跨整行（更宽）—— 5 槽布局（必改 1：「不能再出现只有 3 个页签的视觉结果」）',
+      `coreRects=${coreSlots.map((s) => `${s.slot}@${round1(s.left)},${round1(s.top)} ${round1(s.w)}×${round1(s.h)}`).join(' ')} gadget=${gadgetSlot ? `${round1(gadgetSlot.left)},${round1(gadgetSlot.top)} ${round1(gadgetSlot.w)}×${round1(gadgetSlot.h)}` : 'absent'}`,
     );
     log(
       slotsNow.title === '选择武器装备',
@@ -1693,12 +1703,12 @@ async function main() {
       );
 
       log(
-        L.slotCount === 4 &&
+        L.slotCount === 5 &&
           L.activeSlot.length === 1 &&
           L.equipButtons === 0 &&
           L.draggables === 0 &&
           L.fuseDisabled === false,
-        'GS4 手机视口下「4 个真实装备槽 + 0 个二次装备按钮 + 0 个可拖拽元素 + 合成入口未被禁用」，且恰好一个当前槽（必改 1 · 必改 3 · 必改 5）',
+        'GS4 手机视口下「5 个真实装备槽（含 gadget）+ 0 个二次装备按钮 + 0 个可拖拽元素 + 合成入口未被禁用」，且恰好一个当前槽（必改 1 · 必改 3 · 必改 5）',
         `slots=${L.slotCount} active=[${L.activeSlot.join(',')}] equipButtons=${L.equipButtons} draggables=${L.draggables} fuseDisabled=${L.fuseDisabled}`,
       );
 
@@ -1761,21 +1771,30 @@ async function main() {
       const gWs = [...new Set(Lg.slotRects.map((s) => g1(s.w)))];
       const gHs = [...new Set(Lg.slotRects.map((s) => g1(s.h)))];
       const gBy = Object.fromEntries(Lg.slotRects.map((s) => [s.slot, s]));
+      const gCore = Lg.slotRects.filter((s) => s.slot !== 'gadget');
+      const gByCore = Object.fromEntries(gCore.map((s) => [s.slot, s]));
+      const gGadget = Lg.slotRects.find((s) => s.slot === 'gadget');
+      const gCoreLefts = [...new Set(gCore.map((s) => g1(s.left)))];
+      const gCoreTops = [...new Set(gCore.map((s) => g1(s.top)))];
+      const gCoreWs = [...new Set(gCore.map((s) => g1(s.w)))];
+      const gCoreHs = [...new Set(gCore.map((s) => g1(s.h)))];
       log(
-        Lg.slotRects.length === 4 &&
-          gLefts.length === 2 &&
-          gTops.length === 2 &&
-          gWs.length === 1 &&
-          gHs.length === 1 &&
-          g1(gBy['weapon'].top) === g1(gBy['body'].top) &&
-          g1(gBy['rear'].top) === g1(gBy['front'].top) &&
-          g1(gBy['weapon'].top) < g1(gBy['rear'].top) &&
-          g1(gBy['weapon'].left) === g1(gBy['rear'].left) &&
-          g1(gBy['body'].left) === g1(gBy['front'].left) &&
-          g1(gBy['weapon'].left) < g1(gBy['body'].left),
-        'GS5c **四个槽完全同构**：恰好 2 行 × 2 列、四个槽**同宽同高**；第 1 行 = 武器 + 车身、第 2 行 = 后轮 + 前轮（验收 1：第一眼就是 4 个同规格装备槽）',
-        Lg.slotRects.map((s) => `${s.slot}@${g1(s.left)},${g1(s.top)} ${g1(s.w)}×${g1(s.h)}`).join(' ') +
-          ` | w=${JSON.stringify(gWs)} h=${JSON.stringify(gHs)}`,
+        gCore.length === 4 &&
+          gCoreLefts.length === 2 &&
+          gCoreTops.length === 2 &&
+          gCoreWs.length === 1 &&
+          gCoreHs.length === 1 &&
+          g1(gByCore['weapon'].top) === g1(gByCore['body'].top) &&
+          g1(gByCore['rear'].top) === g1(gByCore['front'].top) &&
+          g1(gByCore['weapon'].top) < g1(gByCore['rear'].top) &&
+          g1(gByCore['weapon'].left) === g1(gByCore['rear'].left) &&
+          g1(gByCore['body'].left) === g1(gByCore['front'].left) &&
+          g1(gByCore['weapon'].left) < g1(gByCore['body'].left) &&
+          !!gGadget &&
+          g1(gGadget.w) > g1(gCoreWs[0] ?? 0),
+        'GS5c **四核心槽完全同构 + gadget 独占整行**：核心四槽恰 2 行 × 2 列、同宽同高、第 1 行 = 武器+车身、第 2 行 = 后轮+前轮；gadget 槽存在且横跨整行（更宽）—— 5 槽布局（验收 1：第一眼就是同规格装备槽）',
+        gCore.map((s) => `${s.slot}@${g1(s.left)},${g1(s.top)} ${g1(s.w)}×${g1(s.h)}`).join(' ') +
+          ` | gadget=${gGadget ? `${g1(gGadget.left)},${g1(gGadget.top)} ${g1(gGadget.w)}×${g1(gGadget.h)}` : 'absent'} | w=${JSON.stringify(gCoreWs)} h=${JSON.stringify(gCoreHs)}`,
       );
 
       /*

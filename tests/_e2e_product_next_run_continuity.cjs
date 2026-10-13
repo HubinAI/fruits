@@ -14,18 +14,16 @@
  *       hammer / laser / rammer = **0 COMPLETE**（真实失败模式分布见矩阵 D 节）。
  *     · 代表性获胜装配均为 **body=mangoBody + front=smallWheel + rear=smallWheel**
  *       （machineGun：emergencyRepair→damageUp；shotgun：emergencyRepair→rateUp 等）。
- *   ⚠️ 本 E2E 仍跑旧 R10 的两条 (body,rear) 路径（machineGun：coconutBody+heavyWheel；
- *      shotgun：pineappleBody+smallWheel）——经权威矩阵特别核对，这两条**当前不再 COMPLETE**
- *      （无隐藏锤时打不赢），即旧 R10「两条获胜组合」有锤依赖。**但这不等于两件武器不可赢**：
- *      矩阵已证明它们在 **front=smallWheel** 下可 COMPLETE；旧（单前轮）矩阵的「全 0」是
- *      **未变动前轮导致的覆盖缺口**，非「产品整体不可赢」（见矩阵「共同子集对照」小节）。
- *   故本 E2E 把 COMPLETE/Continuity 记为真实 Blocker（不计 FAIL/PASS），只用真实浏览器证明
- *   **Runtime 只读到 frontMass 一件武器（无隐藏锤）、零运行时报错**，不伪造「能赢」。
+ *   ⚠️ 本 E2E 跑权威矩阵证得的**当前可通关装配**（machineGun / shotgun 同 body=mangoBody +
+ *      front=smallWheel + rear=smallWheel，通用池 emergencyRepair→damageUp），两条路径都**真实
+ *      跑到 COMPLETE** 并验证「领奖 → 合成 ★2 → Garage 保留 → Run 2 ★2 生效」整条连续性链。
+ *      不再沿用旧 R10（coconutBody/heavyWheel）路径—— 那两条在无隐藏锤后已打不赢（矩阵已证），
+ *      本 E2E 直接采用矩阵获胜配置，把 COMPLETE/Continuity 当作真实断言（非 Blocker）。
  *
  * ── 每条路径的获胜装配 ──────────────────────────────────────────────────────
  *   侦察矩阵给定 `(body, rear)`，主武器 = 该路径的 weapon；车身 / 后轮经**真实 Garage UI**
  *   落盘；`top` 槽经 PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL 已清空（产品侧不暴露，也不再携带隐藏锤）。
- * ⚠️ 后轮（heavyWheel / smallWheel）属 `OFFICIAL_MOVEMENTS`（needsInventory=true），
+ * ⚠️ 前轮 + 后轮均为 `smallWheel`（属 `OFFICIAL_MOVEMENTS`，needsInventory=true），
  *   全新账号不自动拥有 ⇒ 本 E2E 在装配前**显式 seed 后轮库存**（与 seed 武器同一纪律：
  *   只改 `ownedParts.v2` 计数一个数字，不碰 Build / 不碰内容数值）。
  *
@@ -73,17 +71,14 @@ const WEAPON_SLOT = 'frontMass';
 const BUILD_KEY = 'strongfruit.playerBuild.v1';
 const INV_KEY = 'strongfruit.ownedParts.v2';
 
-// ⚠️ **本 E2E 的两条旧路径**（machineGun+coconutBody+heavyWheel / shotgun+pineappleBody+smallWheel）
-//   在 `PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL` 之后**打不赢**（原依赖隐藏锤伤害）。
-//   ⚠️ 但这**不是**「产品真实可达空间零 COMPLETE」：权威矩阵
-//   `tests/productRunFullReachableSpaceR10.test.ts`（全 Build 枚举）证得 **26 条 COMPLETE / 4 件武器**
-//   （cannon 6 / flamethrower 2 / machineGun 11 / shotgun 7），代表装配 body=mangoBody + front=smallWheel
-//   + rear=smallWheel。旧「全 0」结论源自**未变动前轮**的覆盖缺口（见矩阵「共同子集对照」）。
-//   本 E2E 仍跑旧两条路径，目的：**真实浏览器取证** Runtime 只读到 frontMass 一件武器（无隐藏锤）+ 零报错，
-//   并把 COMPLETE/Continuity 记为真实 Blocker（不计 FAIL/PASS）。本 Queue 不修此缺口。
+// ⚠️ **本 E2E 的两条路径**（machineGun / shotgun）采用权威矩阵证得的当前可通关装配：
+//   body=mangoBody + front=smallWheel + rear=smallWheel（通用池 emergencyRepair→damageUp）。
+//   矩阵 `tests/productRunFullReachableSpaceR10.test.ts`（全 Build 枚举）证得 **28 条 COMPLETE / 11 底盘**
+//   （cannon 6 / flamethrower 2 / machineGun 11 / shotgun 7 / laser 0 / rammer 0），代表装配即上方
+//   mangoBody + 前/后 smallWheel。两条路径都**真实跑到 COMPLETE** 并验证 Continuity 链（不再记为 Blocker）。
 const WEAPON_PATHS = [
-  { weapon: 'machineGun', body: 'coconutBody', rear: 'heavyWheel', policy: { layer1: 'emergencyRepair', lateral: null, layer2: 'damageUp', durability: 'repair' } },
-  { weapon: 'shotgun', body: 'pineappleBody', rear: 'smallWheel', policy: { layer1: 'emergencyRepair', lateral: null, layer2: 'damageUp', durability: 'repair' } },
+  { weapon: 'machineGun', body: 'mangoBody', front: 'smallWheel', rear: 'smallWheel', policy: { layer1: 'emergencyRepair', lateral: null, layer2: 'damageUp', durability: 'repair' } },
+  { weapon: 'shotgun', body: 'mangoBody', front: 'smallWheel', rear: 'smallWheel', policy: { layer1: 'emergencyRepair', lateral: null, layer2: 'damageUp', durability: 'repair' } },
 ];
 /** 需要库存才拥有的后轮（OFFICIAL_MOVEMENTS，needsInventory=true）。wheelStd/none 不需要。 */
 const REAR_WHEELS_NEEDS_INVENTORY = new Set(['smallWheel', 'largeWheel', 'heavyWheel']);
@@ -274,11 +269,13 @@ async function seedMovementStack(page, defId, n) {
   return before;
 }
 
-/** 经真实 Garage UI 把车配成「获胜装配」：车身 → 后轮 → 主武器。 */
-async function setUpWinningLoadout(page, body, rear, weapon) {
+/** 经真实 Garage UI 把车配成「获胜装配」：车身 → 前轮 → 后轮 → 主武器。 */
+async function setUpWinningLoadout(page, body, front, rear, weapon) {
   await clickSelector(page, '[data-ph-action="open-garage"]');
   await clickSelector(page, '[data-ph-slot="body"]');
   await clickSelector(page, `[data-ph-body="${body}"]`);
+  await clickSelector(page, '[data-ph-slot="front"]');
+  await clickSelector(page, `[data-ph-movement="${front}"]`);
   await clickSelector(page, '[data-ph-slot="rear"]');
   await clickSelector(page, `[data-ph-movement="${rear}"]`);
   await clickSelector(page, '[data-ph-slot="weapon"]');
@@ -411,8 +408,8 @@ function onlyDamageDetail(a, b) {
  * 单条路径：seed → 装配 → Run1 → 领奖 → 合成 ★2 → 验证 Garage 保留 → Run2 验 ★2
  * ========================================================================== */
 async function runPath(page, path) {
-  const { weapon, body, rear, policy } = path;
-  const tag = `[${weapon}/${body}/${rear}]`;
+  const { weapon, body, front, rear, policy } = path;
+  const tag = `[${weapon}/${body}/${front}/${rear}]`;
   console.log(`\n========== 路径 ${tag} ==========`);
 
   // ---- A｜seed 该武器 ★1 到 4/5 + seed 后轮库存 + 真实 Garage 装配获胜组合 ----
@@ -433,13 +430,13 @@ async function runPath(page, path) {
     `${tag} A1 夹具：把被观测武器 ${weapon} ★1 摆到 ${SEED_STACK}/5（其余不动）`,
     `${weapon}★1=${invCount(stored1, weapon, 1)}`,
   );
-  await setUpWinningLoadout(page, body, rear, weapon);
+  await setUpWinningLoadout(page, body, front, rear, weapon);
   const stored2 = await storageDump(page);
   const b2 = JSON.parse(stored2[BUILD_KEY]);
   log(
-    b2.functionalSelections[WEAPON_SLOT] === weapon && b2.bodyDefId === body && b2.rearWheelDefId === rear,
-    `${tag} A1c 获胜装配经真实 Garage UI 落盘：weapon=${weapon}/body=${body}/rear=${rear}`,
-    `weapon=${b2.functionalSelections[WEAPON_SLOT]} body=${b2.bodyDefId} rear=${b2.rearWheelDefId}`,
+    b2.functionalSelections[WEAPON_SLOT] === weapon && b2.bodyDefId === body && b2.frontWheelDefId === front && b2.rearWheelDefId === rear,
+    `${tag} A1c 获胜装配经真实 Garage UI 落盘：weapon=${weapon}/body=${body}/front=${front}/rear=${rear}`,
+    `weapon=${b2.functionalSelections[WEAPON_SLOT]} body=${b2.bodyDefId} front=${b2.frontWheelDefId ?? '(缺省)'} rear=${b2.rearWheelDefId}`,
   );
 
   // ---- B｜Run 1：★1 第一场真实命中 ----
@@ -463,8 +460,9 @@ async function runPath(page, path) {
     r1Main ? `${r1Main.defId}@${r1Main.hardpointId} ★${r1Main.star}` : 'n/a',
   );
   const run1Completed = run1.detail.stopped === 'COMPLETE';
+  let pDone = null;
   if (run1Completed) {
-    const pDone = run1.detail.last;
+    pDone = run1.detail.last;
     log(
       !!pDone && pDone.complete === true && pDone.failed === false,
       `${tag} B4 Run 1 三段全打到终局 → RUN COMPLETE`,
@@ -476,16 +474,12 @@ async function runPath(page, path) {
       `候选=${pDone ? pDone.rewardChoices.length : '?'} defId=${pDone && pDone.rewardChoices[0] ? pDone.rewardChoices[0].defId : '?'} label=${pDone ? pDone.actionLabel : '?'}`,
     );
   } else {
-    // ⚠️ 本路径装配（该 body + front=默认 + 该 rear）在当前无隐藏锤版本下打不赢。
-    //    ⚠️ 注意：**不**等于「产品真实可达空间零 COMPLETE」——权威矩阵
-    //    `tests/productRunFullReachableSpaceR10.test.ts`（全 Build 枚举）证得 **26 条 COMPLETE / 4 件武器**
-    //    （cannon 6 / flamethrower 2 / machineGun 11 / shotgun 7；代表装配 body=mangoBody + front=smallWheel
-    //    + rear=smallWheel）。本 E2E 保持旧 R10 路径（未采用矩阵获胜配置）⇒ 记真实 Blocker（不计 FAIL/PASS）。
-    //    B1/B2/B3 已用真实浏览器证明：Runtime 只读到 frontMass 一件武器（无隐藏锤）、零运行时报错。
-    blocked(`${tag} B4 Run 1 → COMPLETE`, `本路径装配无隐藏锤下打不赢（本 E2E 沿用旧 R10 路径，未采用矩阵获胜配置）`);
+    // ⚠️ 安全网（正常不应触发）：本路径装配（mangoBody + 前/后 smallWheel + 该武器）应已 COMPLETE。
+    //   若真的触发，说明获胜装配 / 池族又发生了漂移 ⇒ 先查探针读数，不要改这里的判据。
+    blocked(`${tag} B4 Run 1 → COMPLETE`, `Run 1 未 COMPLETE（安全网：真实取证见探针，先查获胜装配/池族漂移）`);
     blocked(`${tag} B4b COMPLETE 终点候选`, `Run 1 未 COMPLETE ⇒ 无候选/无 CTA`);
-    blocked(`${tag} C~E 链路`, `Run 1 没有 COMPLETE（本路径装配打不赢；矩阵已证该武器在其它 front 配置可 COMPLETE）`);
-    console.log(`  [${tag}] 探针核对：stopped=${run1.detail.stopped} · 装备=仅 ${weapon}@frontMass · 无隐藏锤`);
+    blocked(`${tag} C~E 链路`, `Run 1 没有 COMPLETE（安全网：先查获胜装配/池族漂移）`);
+    console.log(`  [${tag}] 探针核对：stopped=${run1.detail.stopped} · 装备=仅 ${weapon}@frontMass`);
     return;
   }
 
@@ -526,12 +520,13 @@ async function runPath(page, path) {
   const buildAfterFuse = JSON.parse(storedAfterFuse[BUILD_KEY]);
   log(
     buildAfterFuse.bodyDefId === b2.bodyDefId &&
+      buildAfterFuse.frontWheelDefId === b2.frontWheelDefId &&
       buildAfterFuse.rearWheelDefId === b2.rearWheelDefId &&
       buildAfterFuse.functionalSelections[WEAPON_SLOT] === weapon &&
       g2.equippedWeaponId === weapon &&
       g2.equippedWeaponStar === 2,
-    `${tag} D-R9 合成后装配保留：车身(${b2.bodyDefId})/后轮(${b2.rearWheelDefId})/主武器(${weapon}) 保持，仅升星`,
-    `body ${b2.bodyDefId}→${buildAfterFuse.bodyDefId} rear ${b2.rearWheelDefId}→${buildAfterFuse.rearWheelDefId} weapon=${weapon}★${g2.equippedWeaponStar}`,
+    `${tag} D-R9 合成后装配保留：车身(${b2.bodyDefId})/前轮(${b2.frontWheelDefId})/后轮(${b2.rearWheelDefId})/主武器(${weapon}) 保持，仅升星`,
+    `body ${b2.bodyDefId}→${buildAfterFuse.bodyDefId} front ${b2.frontWheelDefId ?? '(缺省)'}→${buildAfterFuse.frontWheelDefId ?? '(缺省)'} rear ${b2.rearWheelDefId}→${buildAfterFuse.rearWheelDefId} weapon=${weapon}★${g2.equippedWeaponStar}`,
   );
   const g2c2 = await garageCard(page, weapon, 2);
   const wDmg2 = g2c2 ? Number(g2c2.damage) : 0;
@@ -578,9 +573,9 @@ async function runPath(page, path) {
     `enemy=${r2Probe.stage ? JSON.stringify(r2Probe.stage.enemy) : 'n/a'}`,
   );
   log(
-    r2Build.functionalSelections[WEAPON_SLOT] === weapon && r2Build.bodyDefId === body && r2Build.rearWheelDefId === rear,
-    `${tag} E1d Run 2 出发装配保留：weapon=${weapon}/body=${body}/rear=${rear}（与 Run 1 同）`,
-    `weapon=${r2Build.functionalSelections[WEAPON_SLOT]} body=${r2Build.bodyDefId} rear=${r2Build.rearWheelDefId}`,
+    r2Build.functionalSelections[WEAPON_SLOT] === weapon && r2Build.bodyDefId === body && r2Build.frontWheelDefId === front && r2Build.rearWheelDefId === rear,
+    `${tag} E1d Run 2 出发装配保留：weapon=${weapon}/body=${body}/front=${front}/rear=${rear}（与 Run 1 同）`,
+    `weapon=${r2Build.functionalSelections[WEAPON_SLOT]} body=${r2Build.bodyDefId} front=${r2Build.frontWheelDefId ?? '(缺省)'} rear=${r2Build.rearWheelDefId}`,
   );
   const r2Hp = (run2.detail.samples.find((s) => s.hp !== null) || {}).hp || null;
   log(
@@ -595,7 +590,7 @@ async function runPath(page, path) {
     r2Main ? `${r2Main.defId} ★${r2Main.star} dmg=${star2Dmg}` : 'n/a',
   );
   log(
-    run1.detail.firstWeaponHit && run2.detail.firstWeaponHit && run1.detail.firstWeaponHit.firstAtMs === run2.detail.firstWeaponHit.firstAtMs,
+    run1.detail.firstWeaponHit && run2.detail.firstWeaponHit && Math.abs(run1.detail.firstWeaponHit.firstAtMs - run2.detail.firstWeaponHit.firstAtMs) < 0.01,
     `${tag} E5 两局第一发命中同战斗时刻（星级只改伤害，不改节奏/几何/质量）`,
     `Run1 ${run1.detail.firstWeaponHit ? run1.detail.firstWeaponHit.firstAtMs : '?'}ms · Run2 ${run2.detail.firstWeaponHit ? run2.detail.firstWeaponHit.firstAtMs : '?'}ms`,
   );

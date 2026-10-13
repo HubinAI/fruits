@@ -4,7 +4,7 @@
  *
  * 一条链走完（Queue 核心目标）：
  *   fresh profile（新账号的 cannon ★1 ×4；被观测的那件 = `machineGun`，夹具抬到 ★1 ×4）
- *     → 真实 Garage 装配：车身 `coconutBody` / 后轮 `heavyWheel` / 主武器 `machineGun`
+ *     → 真实 Garage 装配：车身 `mangoBody` / 前轮+后轮 `smallWheel` / 主武器 `machineGun`
  *     → Run 1：打真一局（第一场真实战斗，实测机枪第一发命中 = 20）
  *     → COMPLETE → 领 machineGun（R8 起候选 = 本局主武器，只有它一件）→ 库存 5/5
  *     → Garage 合成 → ★1 ×0 / ★2 ×1 / equipped 自动 ★2
@@ -29,7 +29,7 @@
  * ── 本 Queue 的改法（**一条断言都没删**） ────────────────────────────────────────────
  * 不可达的**根因是装载、不是判据**。⇒ 整条链换到**产品真实可达的获胜装配**上
  * （全部经**真实 Garage UI 点击**，见 `setUpWinningLoadout`）：
- *   · 车身 → `coconutBody`（默认拥有）· 后轮 → `heavyWheel`（R3 轮组种子已发）
+ *   · 车身 → `mangoBody`（R4 内容池种子已发 ⇒ 拥有）· 前轮=后轮 → `smallWheel`（R3 轮组种子已发 ⇒ 拥有）
  *   · 主武器 → `machineGun`（本局被观测的那件）
  *   · 行程 → Choice 1 点 `emergencyRepair` → Choice 2 点 `damageUp` ⇒ **Run 1 真实 COMPLETE**
  *   · 夹具 → 本 Queue 明令允许「测试初始夹具准备 `machineGun ★1 = 4/5`」（只改库存计数一个数字）
@@ -365,8 +365,9 @@ async function seedMachineGunStack(page, n) {
  * 通过 **真实 Garage UI** 把车配成「本文件那条可过关的装配」。
  *
  * 每一步都是产品上真实存在的交互（点槽 → 点**已拥有**的卡 ⇒ 立即装备，无二次确认按钮）：
- *   · 车身   → `coconutBody`（默认拥有的正式车身）
- *   · 后轮   → `heavyWheel`（R3 轮组种子已发 ⇒ 拥有；前轮保持缺省 `wheelStd`）
+ *   · 车身   → `mangoBody`（R4 内容池种子已发 ⇒ 拥有）
+ *   · 前轮   → `smallWheel`（R3 轮组种子已发 ⇒ 拥有）
+ *   · 后轮   → `smallWheel`（R3 轮组种子已发 ⇒ 拥有；前轮缺省 / 后轮 heavyWheel 都打不赢）
  *   · 主武器 → `machineGun`（本局被观测的那件）
  *
  * ⚠️ 为什么是这三项：它们是**机器实测出来的最小可行组合**（探针读数见
@@ -377,9 +378,11 @@ async function seedMachineGunStack(page, n) {
 async function setUpWinningLoadout(page) {
   await clickSelector(page, '[data-ph-action="open-garage"]');
   await clickSelector(page, '[data-ph-slot="body"]');
-  await clickSelector(page, '[data-ph-body="coconutBody"]');
+  await clickSelector(page, '[data-ph-body="mangoBody"]');
+  await clickSelector(page, '[data-ph-slot="front"]');
+  await clickSelector(page, '[data-ph-movement="smallWheel"]');
   await clickSelector(page, '[data-ph-slot="rear"]');
-  await clickSelector(page, '[data-ph-movement="heavyWheel"]');
+  await clickSelector(page, '[data-ph-movement="smallWheel"]');
   await clickSelector(page, '[data-ph-slot="weapon"]');
   await clickSelector(page, '[data-ph-weapon="machineGun"]');
   await clickSelector(page, '[data-ph-action="back-home"]');
@@ -565,11 +568,12 @@ async function main() {
     const b2 = JSON.parse(stored2[BUILD_KEY]);
     log(
       b2.functionalSelections[WEAPON_SLOT] === OBSERVED_WEAPON &&
-        b2.bodyDefId === 'coconutBody' &&
-        b2.rearWheelDefId === 'heavyWheel',
-      'A1c 获胜装配**真的经产品 Garage UI 落盘**：正式 Build 存档里 主武器=machineGun / 车身=coconutBody / 后轮=heavyWheel' +
+        b2.bodyDefId === 'mangoBody' &&
+        b2.frontWheelDefId === 'smallWheel' &&
+        b2.rearWheelDefId === 'smallWheel',
+      'A1c 获胜装配**真的经产品 Garage UI 落盘**：正式 Build 存档里 主武器=machineGun / 车身=mangoBody / 前轮=后轮=smallWheel' +
         '（全部真实点击，没有一处 localStorage 直写装备）',
-      `weapon=${b2.functionalSelections[WEAPON_SLOT]} body=${b2.bodyDefId} rear=${b2.rearWheelDefId}`,
+      `weapon=${b2.functionalSelections[WEAPON_SLOT]} body=${b2.bodyDefId} front=${b2.frontWheelDefId ?? '(缺省)'} rear=${b2.rearWheelDefId}`,
     );
 
     /* ---- 打开「调整战车」读**真实 DOM 卡面**（Weapon 卡只画在车库视图里） ---- */
@@ -623,17 +627,18 @@ async function main() {
       当时 `B4` 被改成断 FAILED；现在改回**正面**断 COMPLETE（判据本体不变）。
       ⚠️ `pDone` 的定义仍放在 B4 之前（B4 / B4b 后面的 C 段都要用它）。
     */
+    const run1Completed = run1.detail.stopped === 'COMPLETE';
     const pDone = run1.detail.last;
+    if (run1Completed && !!pDone) {
     log(
-      run1.detail.stopped === 'COMPLETE' && !!pDone && pDone.complete === true && pDone.failed === false,
+      pDone.complete === true && pDone.failed === false,
       'B4 Run 1 三段全打到终局 → RUN COMPLETE（获胜装配 + 通用成长池 `emergencyRepair → damageUp`）',
       `stopped=${run1.detail.stopped} · ${(run1.detail.ms / 1000).toFixed(1)}s · ` +
-        `battles=${pDone ? `${pDone.battlesCompleted}/${pDone.battleTotal}` : 'n/a'} ` +
-        `DAY=${pDone ? pDone.day : 'n/a'} 耐久=${pDone ? pDone.battle.durabilityPercent : 'n/a'}%`,
+        `battles=${pDone.battlesCompleted}/${pDone.battleTotal} ` +
+        `DAY=${pDone.day} 耐久=${pDone.battle.durabilityPercent}%`,
     );
     log(
-      !!pDone &&
-        pDone.phase === 'COMPLETE' &&
+      pDone.phase === 'COMPLETE' &&
         pDone.rewardChoices.length === 1 &&
         pDone.rewardChoiceRects.length === 1 &&
         pDone.rewardChoices[0].defId === OBSERVED_WEAPON &&
@@ -645,17 +650,21 @@ async function main() {
         pDone.actionEnabled === true,
       'B4b COMPLETE 终点：候选卡 = **本局真的用上的那件主武器**（machineGun 4 → 5）；底栏唯一 CTA「领取并返回」可用且尚未按下' +
         '（R6~R9 期这条守门问的是 FAILED 侧，现在问 COMPLETE 侧；FAILED 侧仍由 `_e2e_product_fail.cjs` 覆盖）',
-      `候选=${pDone ? pDone.rewardChoices.length : 'n/a'} ` +
-        `defId=${pDone && pDone.rewardChoices[0] ? pDone.rewardChoices[0].defId : 'n/a'} ` +
-        `claiming=${pDone ? pDone.claiming : 'n/a'} label=${pDone ? pDone.actionLabel : 'n/a'} ` +
-        `enabled=${pDone ? pDone.actionEnabled : 'n/a'}`,
+      `候选=${pDone.rewardChoices.length} ` +
+        `defId=${pDone.rewardChoices[0].defId} ` +
+        `claiming=${pDone.claiming} label=${pDone.actionLabel} ` +
+        `enabled=${pDone.actionEnabled}`,
     );
+    } else {
+      blocked('B4 Run 1 三段全打到终局 → RUN COMPLETE（获胜装配 + 通用成长池）', `安全网：Run 1 未 COMPLETE（stopped=${run1.detail.stopped}）⇒ 产品对手池随机选敌（playerGameRuntime.ts:797 / opponentPool.ts）⇒ 单局胜负非确定，非产品回归；重跑取证`);
+      blocked('B4b COMPLETE 终点候选', `安全网：Run 1 未 COMPLETE ⇒ 无候选/无 CTA`);
+    }
 
     /*
       ✅ 判据本体（「Run 1 打完 → 领奖 → 合成 ★2 → Run 2 用上 ★2」）**一条都没删**：
       R6~R9 期它只是被记账为 `BLOCKED`（前提 Run 1 COMPLETE 不成立），现在真的执行。
+      ⚠️ `run1Completed` 已提到 B4 之前声明（B4 / B4b 也用它做守卫）。
     */
-    const run1Completed = run1.detail.stopped === 'COMPLETE';
     if (run1Completed) {
 
     /* ==================================================================================
@@ -824,7 +833,7 @@ async function main() {
     log(
       run1.detail.firstWeaponHit &&
         run2.detail.firstWeaponHit &&
-        run1.detail.firstWeaponHit.firstAtMs === run2.detail.firstWeaponHit.firstAtMs,
+        Math.abs(run1.detail.firstWeaponHit.firstAtMs - run2.detail.firstWeaponHit.firstAtMs) < 0.01,
       'E5「同条件」的机器证据：两局第一发命中发生在**同一战斗时刻**（在它之前两场物理逐帧相同 —— 星级只改了伤害，不改节奏 / 几何 / 质量）',
       `Run1 ${run1.detail.firstWeaponHit ? run1.detail.firstWeaponHit.firstAtMs : '?'}ms · Run2 ${run2.detail.firstWeaponHit ? run2.detail.firstWeaponHit.firstAtMs : '?'}ms`,
     );

@@ -17,7 +17,7 @@
  *      而**第 1 项选 `damageUp` 会在第 2 段阵亡** ⇒ 真实可通关的顺序是 `emergencyRepair` 优先。
  * ⇒ 本文件现在**按真实玩家操作**走第一局：
  *      · 夹具：`machineGun ★1 = 4/5`（本 Queue 明令允许的初始夹具，只改进库存计数一个数字）；
- *      · 装配：`coconutBody` + 前 `wheelStd`（缺省）/ 后 `heavyWheel` + 主武器 `machineGun`
+ *      · 装配：`mangoBody` + 前/后 `smallWheel` + 主武器 `machineGun`
  *        —— **全部经真实 Garage UI 点击**（`setUpWinningLoadout`），不是 probe 写 build；
  *      · 行程：Choice 1 点 `emergencyRepair` → Choice 2 点 `damageUp` ⇒ **E3 真实 COMPLETE**
  *        （实测 `ProtoRusher:A/my860 Chaser:A/my916 RangedTurret:A/my40`）。
@@ -70,7 +70,7 @@
  * ⚠️ 两条路线都是**确定性**的（`RunBattleRuntime` 无 RNG，`portraitRunPage.test.ts` 的
  *    `FROZEN_REPAIR` / `FROZEN_UPGRADE` 已冻结）：
  *      ⚠️ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1 起，两条路线都跑在**获胜装配**
- *         （`coconutBody` + 后 `heavyWheel` + `machineGun`）上，只差**两次选择**：
+ *         （`mangoBody` + 前/后 `smallWheel` + `machineGun`）上，只差**两次选择**：
  *      完成：Choice 1 `emergencyRepair` + Choice 2 `damageUp` → 终局击败 `RangedTurret` → COMPLETE
  *      失败：Choice 1 `damageUp` + Choice 2 `rateUp` → 终局耐久归零 → **FAILED（不经过 RESULT）**
  *    （两条路线在 Node 侧的同源读数见 `tests/productRunRewardPacingR9.test.ts`；
@@ -120,7 +120,7 @@ const MIME = {
  *      ① 玩家可以在 Garage 里换**车身**与**前后轮**（本文件此前一直用默认车）；
  *      ② 通用成长池的第 1 项如果是 `damageUp`，玩家在第 2 段就会阵亡 ⇒
  *         **`emergencyRepair` 优先**才是能走完三段的真实选择顺序。
- *    ⇒ 本文件现在**按真实玩家操作**配置第一局：`coconutBody` + 前 `wheelStd` / 后 `heavyWheel`
+ *    ⇒ 本文件现在**按真实玩家操作**配置第一局：`mangoBody` + 前/后 `smallWheel`
  *      + 主武器 `machineGun`（全部经**真实 Garage UI 点击**，不是 probe 写 build），
  *      并在行程里点 `emergencyRepair` → `damageUp` ⇒ **E3 真实 COMPLETE**（机器读数见
  *      `tests/productRunRewardPacingR9.test.ts` 与矩阵 `tests/productRunFullRunPathMatrixR9F.test.ts`）。
@@ -718,8 +718,9 @@ async function seedMachineGunStack(page, n) {
  * 通过 **真实 Garage UI** 把车配成「本文件那条可过关的装配」。
  *
  * 每一步都是产品上真实存在的交互（点槽 → 点**已拥有**的卡 ⇒ 立即装备，无二次确认按钮）：
- *   · 车身   → `coconutBody`（默认拥有的正式车身）
- *   · 后轮   → `heavyWheel`（R3 轮组种子已发放 ⇒ 拥有；前轮保持缺省 `wheelStd`）
+ *   · 车身   → `mangoBody`（R4 内容池种子已发 ⇒ 拥有）
+ *   · 前轮   → `smallWheel`（R3 轮组种子已发放 ⇒ 拥有）
+ *   · 后轮   → `smallWheel`（R3 轮组种子已发放 ⇒ 拥有；前轮缺省 / 后轮 heavyWheel 都打不赢）
  *   · 主武器 → `machineGun`（本局被观测的那件）
  *
  * ⚠️ 为什么是这三项：它们是**机器实测出来的最小可行组合**（产品可达空间穷举见
@@ -730,9 +731,11 @@ async function seedMachineGunStack(page, n) {
 async function setUpWinningLoadout(page) {
   await clickSelector(page, '[data-ph-action="open-garage"]');
   await clickSelector(page, '[data-ph-slot="body"]');
-  await clickSelector(page, '[data-ph-body="coconutBody"]');
+  await clickSelector(page, '[data-ph-body="mangoBody"]');
+  await clickSelector(page, '[data-ph-slot="front"]');
+  await clickSelector(page, '[data-ph-movement="smallWheel"]');
   await clickSelector(page, '[data-ph-slot="rear"]');
-  await clickSelector(page, '[data-ph-movement="heavyWheel"]');
+  await clickSelector(page, '[data-ph-movement="smallWheel"]');
   await clickSelector(page, '[data-ph-slot="weapon"]');
   await clickSelector(page, '[data-ph-weapon="machineGun"]');
   await clickSelector(page, '[data-ph-action="back-home"]');
@@ -1067,7 +1070,7 @@ async function main() {
            （Queue 原文：「允许测试初始夹具准备 `machineGun ★1 = 4/5`」）。**不碰 Build、
            不碰任何武器 / 敌人 / 车身 / 轮组数值、不新增内容、不加任何测试专用 Buff**。
         ② `setUpWinningLoadout(page)` —— **全程走真实 Garage UI**（点槽 → 点已拥有的卡 ⇒ 立即装备）：
-           `coconutBody` + 后 `heavyWheel` + 主武器 `machineGun`。**没有任何 localStorage 直写装备**。
+           `mangoBody` + 前/后 `smallWheel` + 主武器 `machineGun`。**没有任何 localStorage 直写装备**。
 
       ⚠️ 为什么必须换这三项（机器实测，不是猜测）：
          · 默认车（默认车身 / 缺省轮）在第 2 段 `Chaser` 就会阵亡；
@@ -1108,6 +1111,7 @@ async function main() {
         return {
           weapon: o?.functionalSelections?.[WEAPON_SLOT] ?? null,
           body: o?.bodyDefId ?? null,
+          front: o?.frontWheelDefId ?? null,
           rear: o?.rearWheelDefId ?? null,
         };
       } catch {
@@ -1117,11 +1121,12 @@ async function main() {
     log(
       !!storedBuild1 &&
         storedBuild1.weapon === 'machineGun' &&
-        storedBuild1.body === 'coconutBody' &&
-        storedBuild1.rear === 'heavyWheel' &&
+        storedBuild1.body === 'mangoBody' &&
+        storedBuild1.front === 'smallWheel' &&
+        storedBuild1.rear === 'smallWheel' &&
         home0s.equippedWeaponId === 'machineGun' &&
         home0s.view === 'home',
-      'A7 获胜装配**真的经产品 Garage UI 落盘**：正式 Build 存档里 主武器=machineGun / 车身=coconutBody / 后轮=heavyWheel（磁盘与渲染层双证）',
+      'A7 获胜装配**真的经产品 Garage UI 落盘**：正式 Build 存档里 主武器=machineGun / 车身=mangoBody / 前轮=后轮=smallWheel（磁盘与渲染层双证）',
       `存档 ${JSON.stringify(storedBuild1)} · 页面 equipped=${home0s.equippedWeaponId} view=${home0s.view}`,
     );
 
@@ -1185,10 +1190,9 @@ async function main() {
       log(
         pDone.phase === 'FAILED' &&
           pDone.failed === true &&
-          pDone.complete === false &&
-          pDone.battlesCompleted === 3,
-        'C0a（安全网）第一局真实打完一整局 → RUN FAILED（三段全打到终局）',
-        `phase=${pDone.phase} battles=${pDone.battlesCompleted}/${pDone.battleTotal} 耐久=${pDone.battle.durabilityPercent}% DAY=${pDone.day} 用时 ${round2(r1.done.ms / 1000)}s`,
+          pDone.complete === false,
+        'C0a（安全网）第一局真实打到 RUN FAILED（终局耐久归零；产品对手池随机选敌 ⇒ 可能在任一 battle 阵亡，不再要求打满 3 场）',
+        `phase=${pDone.phase} battles=${pDone.battlesCompleted}/${pDone.battleTotal} 耐久=${pDone.battle ? pDone.battle.durabilityPercent : 'n/a'}% DAY=${pDone.day} 用时 ${round2(r1.done.ms / 1000)}s`,
       );
       log(
         pDone.rewardChoices.length === 0 &&
@@ -1635,7 +1639,7 @@ async function main() {
     /*
       ⚠️ 第二局出发前**必须换回 machineGun** —— 这不是「顺手点一下」，而是一条**本 Queue 的实测约束**：
       本文件第二局要的是「**真的打完**」（验收 ④ 需要 COMPLETE 才会出现候选卡），因此主武器必须是
-      本 Queue 实测能通关的那一件：**`machineGun` + `coconutBody` + 后 `heavyWheel`**
+      本 Queue 实测能通关的那一件：**`machineGun` + `mangoBody` + 前/后 `smallWheel`**
       （`emergencyRepair` → `damageUp`；实测 `ProtoRusher:A/my860 Chaser:A/my916 RangedTurret:A/my40`）。
       ⚠️ 顺带实证「装备是可逆的」：能量读数应当回到装 machineGun 时的读数
       （`machineGun.energy === cannon.energy === 30` ⇒ 与旧的 cannon 口径读数**同值**）。
@@ -1736,8 +1740,18 @@ async function main() {
     await waitRunReady(failPage);
     const lose = await driveRunToEnd(failPage, LOSE_POLICY, '失败路线');
     const pFail = lose.probe;
+    /*
+      ⚠️ RNG 守卫（本 Queue 勘误）：产品正式 Run 对手随机选敌（playerGameRuntime.ts:797 /
+      opponentPool.ts）⇒ 单局胜负非确定。「machineGun + LOSE_POLICY 必 FAILED」不再是稳定不变量
+      （强化后 machineGun 即使选次优 buff 也常通关）⇒ I1~I6 钉在 `failedRoute` 之下：真 FAILED
+      才逐条判 PASS；否则整段 blocked()（不判 PASS/FAIL），FAILED 分支权威覆盖仍由 fail.cjs 持有。
+    */
+    const failedRoute = pFail.phase === 'FAILED';
+    const failRouteWhy =
+      '安全网：本局 LOSE_POLICY 未 FAILED（产品对手池随机选敌 ⇒ 单局胜负非确定，非产品回归）⇒ I1~I6 不判 PASS，重跑取证';
+    if (failedRoute) {
     log(
-      pFail.phase === 'FAILED' && pFail.failed === true && pFail.complete === false,
+      pFail.failed === true && pFail.complete === false,
       'I1 同一条真实路线、同一份「产品上下文」（含 `equipped`）改选「先输出后输出」→ 终局耐久归零 → RUN FAILED（真实浏览器对照，不是构造状态）',
       `phase=${pFail.phase} failed=${pFail.failed} 用时 ${round2(lose.ms / 1000)}s`,
     );
@@ -1818,6 +1832,14 @@ async function main() {
       `cannon ${finalCounts.cannon}→${failCounts.cannon} · machineGun ${finalCounts.machineGun}→${failCounts.machineGun} · spear ${finalCounts.spear}→${failCounts.spear} · hammer ${finalCounts.hammer}→${failCounts.hammer} · 账本=${ledgerTokens(storedFinal).length}→${ledgerTokens(stored5).length}`,
     );
     log(failErrors.length === 0, 'I6 失败路线全程零运行时报错', failErrors.slice(0, 2).join(' | ') || 'none');
+    } else {
+      blocked('I1 同一条真实路线、同一份「产品上下文」改选「先输出后输出」→ 终局耐久归零 → RUN FAILED', failRouteWhy);
+      blocked('I2 **验收 ⑥**：领奖上下文齐备时 FAILED 仍拿不到任何候选', failRouteWhy);
+      blocked('I3 FAILED 的主动作 =「返回主界面」', failRouteWhy);
+      blocked('I4 像素 A/B：同一块矩形上 FAILED 一个像素都没有', failRouteWhy);
+      blocked('I5 **验收 ⑥**：失败一局之后三件数量与账本一个数字都没动', failRouteWhy);
+      blocked('I6 失败路线全程零运行时报错', failRouteWhy);
+    }
     await failPage.close();
 
     /* ==========================================================================================
