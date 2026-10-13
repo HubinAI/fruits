@@ -47,10 +47,11 @@
  *      而**第 1 项选 `damageUp` 会在第 2 段阵亡** ⇒ 真实可通关的顺序是 `emergencyRepair` 优先。
  * ⇒ 本文件现在**按真实玩家操作**走第一局：
  *      · 夹具：`machineGun ★1 = 4/5`（本 Queue 明令允许的初始夹具，只改进库存计数一个数字）；
- *      · 装配：`coconutBody` + 前 `wheelStd`（缺省）/ 后 `heavyWheel` + 主武器 `machineGun`
- *        —— **全部经真实 Garage UI 点击**（段 2 的第三 / 四步），不是 probe 写 build；
+ *      · 装配：`mangoBody` + 前 `smallWheel` / 后 `smallWheel` + 主武器 `machineGun`
+ *        —— **全部经真实 Garage UI 点击**（段 2 的第三 / 四 / 五步），不是 probe 写 build；
+ *        （⚠️ 2026-10-01 移除隐藏顶锤后，旧的 `coconutBody + 后 heavyWheel` 已打不赢 ——
+ *          本路线由 `PRODUCT-FULL-LOOP-FOUNDATION-R1` 依权威矩阵更新，见下方 ⚠️⚠️ 段。）
  *      · 行程：Choice 1 点 `emergencyRepair` → Choice 2 点 `damageUp` ⇒ **E3 真实 COMPLETE**
- *        （实测 `ProtoRusher:A/my860 Chaser:A/my916 RangedTurret:A/my40`）。
  *    · **C1 ~ G3 全部真实执行**（判据不删、只把「如实降级」改回正面判据）；`if (!run1Completed)`
  *      那个 `BLOCKED` 分支保留为**安全网**（万一第一局又变回 FAILED 仍诚实记账，不静默跳过）。
  *
@@ -92,11 +93,25 @@ const MIME = {
  *    **严格六节点 · 三段战斗**（终局 = 远程控距 `RangedTurret`）之后，实测：
  *      spear / hammer / laser@主武器槽 → 第 1~2 段就阵亡
  *      cannon@主武器槽 + 默认车身 → **恒 FAILED**（终局控距下零命中）
- *      **machineGun + `coconutBody` + 后 `heavyWheel`（前轮缺省）→ COMPLETE**
- *        （`emergencyRepair` → `damageUp`；实测 `ProtoRusher:A/my860 Chaser:A/my916 RangedTurret:A/my40`）
- *    ⇒ 本文件从此按**真实玩家操作**配置第一局（Garage 换车身 / 后轮 / 主武器，见段 2），
+ *      **machineGun + `mangoBody` + 前 / 后 `smallWheel` → COMPLETE**
+ *        （`emergencyRepair` → `damageUp`；Node 侧现算三段余量 709 / 760 / 390）
+ *    ⇒ 本文件按**真实玩家操作**配置第一局（Garage 换车身 / 前轮 / 后轮 / 主武器，见段 2），
  *      并在行程里点 `emergencyRepair` → `damageUp` ⇒ 第一局真的 `COMPLETE`。
- *    （完整矩阵见 `productRunRewardPacingR9.test.ts`；装配的产品可达性见 `playerLoadout.ts`。）
+ *    （完整矩阵见 `productRunFullReachableSpaceR10.test.ts`；装配的产品可达性见 `playerLoadout.ts`。）
+ *
+ * ⚠️⚠️ PRODUCT-FULL-LOOP-FOUNDATION-R1（2026-10-13）｜**陈旧路线修复（本文件唯一改动）**：
+ *    上面那条 `coconutBody + 前缺省 + 后 heavyWheel` 是 2026-09-30 的实测结论；
+ *    2026-10-01 的 `PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL`（`76faafc`）把产品默认车的
+ *    **隐藏顶锤**清掉之后，那条装配**不再能通关**（当日实测 `phase=FAILED battles=3/3`），
+ *    而本文件当时**没有跟着更新** ⇒ 浏览器侧「胜利链」证据静默失效。更糟的是它被 `C4` 的
+ *    `rc[0].href`（候选为空数组）**崩溃掩盖**成异常，连下方那条 `blocked()` 安全网都走不到
+ *    ⇒ 既不 PASS 也不 FAIL 也不 BLOCKED，只是抛错退出。本轮修两处，都是**本文件的陈旧数据**，
+ *    **零产品代码 / 零数值改动**：
+ *      ① 装配换成权威矩阵证得的当前可通关装配（`mangoBody` + 前/后 `smallWheel`）；
+ *      ② `C4` 增 `rc.length === CHOICE_IDS.length` 前置 —— 候选为空时**诚实 FAIL**，
+ *         让下面的 `blocked()` 安全网真正生效（不再崩溃）。
+ *    三件装配来源全部走正式种子链（`mangoBody` = R4/R5 内容池种子；`smallWheel` = R3 Movement
+ *    种子；`machineGun` = 本文件夹具）⇒ 新账号**真实可达**，不是测试专属构造。
  */
 const WEAPON_A = 'machineGun';
 const WEAPON_A_NAME = '机枪';
@@ -471,11 +486,13 @@ function weaponCard(page, defId) {
  *    ① `seedMachineGunStack` —— **只写库存计数** `ownedParts.v2 → machineGun.one`。
  *       **不碰 Build、不碰任何武器 / 敌人 / 车身 / 轮组数值、不新增内容、不加测试专用 Buff**。
  *       Queue 原文：「允许测试初始夹具准备 `machineGun ★1 = 4/5`」。
- *    ② Garage 装配（`coconutBody` / 后 `heavyWheel` / 主武器 `machineGun`）—— **全程走真实 UI**
- *       （点槽 → 点已拥有的卡 ⇒ 立即装备）。**没有任何 localStorage 直写装备**。
+ *    ② Garage 装配（`mangoBody` / 前 `smallWheel` / 后 `smallWheel` / 主武器 `machineGun`）
+ *       —— **全程走真实 UI**（点槽 → 点已拥有的卡 ⇒ 立即装备）。**没有任何 localStorage 直写装备**。
  *
- * ⚠️ 为什么必须换这三项（机器实测）：默认车在第 2 段 `Chaser` 就会阵亡；换成本装配后
- *    `emergencyRepair` 优先的两次选择可以真的打穿终局 `RangedTurret`。
+ * ⚠️ 为什么必须换这几项（机器实测）：默认车在终局 `RangedTurret` 控距下打不赢；
+ *    换成本装配后 `emergencyRepair` 优先的两次选择可以真的打穿终局 `RangedTurret`。
+ *    （PRODUCT-FULL-LOOP-FOUNDATION-R1 依 `productRunFullReachableSpaceR10` 权威矩阵复核并更新：
+ *     `mangoBody + front=smallWheel + rear=smallWheel` 是当前可通关装配；`coconutBody` 组合已失效。）
  * ═══════════════════════════════════════════════════════════════════════════════════════
  */
 async function seedMachineGunStack(page, n) {
@@ -753,24 +770,32 @@ async function main() {
     );
 
     /*
-      第三步 / 第四步：**换车身与后轮**（PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1）。
-      ⚠️ 这两步是「玩家本应做、而本 E2E 此前一直没做」的操作 —— 默认车在第 2 段 `Chaser`
-         就会阵亡，而 Garage 里本来就能换车身与前后轮（`[data-ph-slot="body"|"rear"]`）。
-         全部是**真实点击**：点槽位 Tab → 点已拥有的卡 ⇒ 立即装备（无二次确认按钮）。
+      第三步 / 第四步 / 第五步：**换车身与前后轮**（PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1
+      + PRODUCT-FULL-LOOP-FOUNDATION-R1 更新路线）。
+      ⚠️ 这三步是「玩家本应做、而本 E2E 此前一直没做」的操作 —— 默认车（`watermelonBody` +
+      缺省轮）在终局 `RangedTurret` 控距下打不赢，而 Garage 里本来就能换车身与前后轮
+      （`[data-ph-slot="body"|"front"|"rear"]`）。全部是**真实点击**：点槽位 Tab → 点已拥有的卡
+      ⇒ 立即装备（无二次确认按钮）。
+      ⚠️ 为什么前轮也要换：权威矩阵 `productRunFullReachableSpaceR10` 证得当前可通关装配是
+      `body=mangoBody + front=smallWheel + rear=smallWheel`（**前轮缺省 / 后轮 heavyWheel 都通不了关**，
+      本文件与 Node 侧探针都实测过）⇒ 只换车身与后轮不足以复现胜利链。
       ⚠️ 取证方式与 A4/A5 一致：**直接读正式 Build 存档**，不信页面自述。
     */
     await clickSelector(page, '[data-ph-slot="body"]');
-    await clickSelector(page, '[data-ph-body="coconutBody"]');
+    await clickSelector(page, '[data-ph-body="mangoBody"]');
+    await clickSelector(page, '[data-ph-slot="front"]');
+    await clickSelector(page, '[data-ph-movement="smallWheel"]');
     await clickSelector(page, '[data-ph-slot="rear"]');
-    await clickSelector(page, '[data-ph-movement="heavyWheel"]');
+    await clickSelector(page, '[data-ph-movement="smallWheel"]');
     const storedLoadout = await storageDump(page);
     const storedDraft = JSON.parse(storedLoadout[BUILD_KEY]);
     log(
-      storedDraft.bodyDefId === 'coconutBody' &&
-        storedDraft.rearWheelDefId === 'heavyWheel' &&
+      storedDraft.bodyDefId === 'mangoBody' &&
+        storedDraft.frontWheelDefId === 'smallWheel' &&
+        storedDraft.rearWheelDefId === 'smallWheel' &&
         storedLoadout[BUILD_KEY] !== stored1[BUILD_KEY],
-      'A5b 第三 / 四步换装（真实 Garage UI）：正式 Build 存档里 车身 = `coconutBody`、后轮 = `heavyWheel`（前轮保持缺省）—— 这是本 Queue 实测能通关的那份装配',
-      `body=${storedDraft.bodyDefId} rear=${storedDraft.rearWheelDefId} front=${storedDraft.frontWheelDefId ?? '(缺省)'} ${WEAPON_SLOT}=${storedWeaponSlot(storedLoadout)}`,
+      'A5b 第三 / 四 / 五步换装（真实 Garage UI）：正式 Build 存档里 车身 = `mangoBody`、前轮 = 后轮 = `smallWheel` —— 权威矩阵证得的当前可通关装配',
+      `body=${storedDraft.bodyDefId} front=${storedDraft.frontWheelDefId ?? '(缺省)'} rear=${storedDraft.rearWheelDefId} ${WEAPON_SLOT}=${storedWeaponSlot(storedLoadout)}`,
     );
 
     /* ---- 3) 回首页 → 「开始冒险」必须带上**这份**装备 ---- */
@@ -869,8 +894,8 @@ async function main() {
 
     /*
       ✅ PRODUCT-LOOP-P0-BROWSER-COMPLETE-PATH-R1｜第一局**真的 `COMPLETE`**（不再恒 FAILED）：
-      装配由 Garage 真实点击配置成 `machineGun + coconutBody + 后 heavyWheel`，行程选
-      `emergencyRepair` → `damageUp`。⇒ 原来那几条「如实降级（FAILED 形态）」的判据改回
+      装配由 Garage 真实点击配置成 `machineGun + mangoBody + 前/后 smallWheel`（权威矩阵口径），
+      行程选 `emergencyRepair` → `damageUp`。⇒ 原来那几条「如实降级（FAILED 形态）」的判据改回
       **正面判据**；`C3d / C3e`（音频生命周期 / 唯一主按钮）与终态无关，逐字保留。
     */
     log(
@@ -948,8 +973,17 @@ async function main() {
       'C3e **必改 7**｜终端唯一主按钮**真实画成可用态**（真实 `getImageData`：可用态成片、禁用态 = 0）',
       `actionRect=${JSON.stringify(p1.actionRect)} 可用态像素=${ctaFillOn}（下界 ${CTA_FILL_MIN_PX}）禁用态像素=${ctaFillOff}`,
     );
+    /*
+      ⚠️ PRODUCT-FULL-LOOP-FOUNDATION-R1｜`rc.length === CHOICE_IDS.length` 是**崩溃防护**：
+      第一局没走到 COMPLETE 时 `rc` 是空数组，旧写法 `rc[0].href` 会抛
+      `TypeError: Cannot read properties of undefined` ⇒ 整个 smoke 崩掉，
+      下面那条 `blocked()` 安全网（诚实降级）根本走不到。加长度前置后：
+      候选缺失 ⇒ 本行诚实 FAIL，流程继续到 `blocked()` 分支 + H/I 段。
+    */
     log(
-      rc.every((c, i) => c.href === ownClaims[i]) && rc[0].href.includes(token1),
+      rc.length === CHOICE_IDS.length &&
+        rc.every((c, i) => c.href === ownClaims[i]) &&
+        rc[0].href.includes(token1),
       'C4 候选卡的出口带的是**本局** token + **各自**的奖励 id（幂等键绑 Run token）',
       `href=${rc.map((c) => c.href.replace('./home.html?', '')).join(' ')} token=${token1}`,
     );

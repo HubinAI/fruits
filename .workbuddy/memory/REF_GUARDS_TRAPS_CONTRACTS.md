@@ -1633,3 +1633,52 @@ Mac 迁移+E2E 入册 → cruise → Gadget 12 连 → `fbb3e05` → `dbbf27a` G
   违规项（R2-10 缺口 2→1、H-05 extras 2→1）。旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
 - **未做别再 ask**：观感/动画/内容量/Buff/挂点几何/逐武器差异化；saw/spear 不动；
   watermelon gadget 挂点近 rear 是验收通过态；GVL 预设=死代码。
+
+### 21e `PRODUCT-FULL-LOOP-FOUNDATION-R1`（2026-10-13 · 调查优先 · 只改 2 个测试文件）
+
+**结论一句**：**产品闭环逻辑完整可用；阻断的是浏览器取证层。** 根因一条 = `76faafc`
+（2026-10-01 移除隐藏顶锤）改了产品默认车与旧档清理，**vitest 同步了、浏览器 E2E 没同步**。
+
+**模块状态表（真实入口 = `npm run dev` → `/home.html` 默认入口）**
+
+| 模块 | 真实入口 | 状态 | 唯一最高优先缺口 |
+|---|---|---|---|
+| 首页 / 导航 | `home.html`（`build/branchDevEntry.ts:53` 把 `/` 重写为它；单页 home/garage 两视图） | ✅ 可用 | 无 |
+| Garage 装配 | `[data-ph-slot=weapon\|body\|rear\|front\|gadget]` + 卡片点击即装备 | ✅ 可用（**5 槽**） | `e2e:product-home` 仍期望 4 槽（陈旧） |
+| 装备合法性 | `validateSnapshot`（`playerProfile.equippableOnCurrentVehicle`）+ `fullRunCompat` 守门 | ✅ 可用 | 无 |
+| Run（三战/两强化） | 首页 `<a href>`（`runReward.buildAdventureHref`）→ `run-page.html`（`runMain.ts`） | ✅ 可用 | 取胜装配需 `mangoBody+双smallWheel`（默认车输） |
+| 强化 | `runModifiers` 池 + `chooseRunBuff`（真实候选点击） | ✅ 可用 | 无 |
+| 结算 | `runPageState`（COMPLETE/FAILED）+ 底栏唯一 CTA | ✅ 可用 | 无 |
+| 奖励 | `playerProfile.claimRunReward`（幂等 token 账本） | ✅ 可用 | 无 |
+| 下局回流 | 新 run 起点干净 + 库存/装备继承 + 换装再战 | ✅ 可用 | 无 |
+| **浏览器整体证据** | `e2e:product-loop` | 修前 ❌（FAILED+崩）→ **修后 55/55 PASS** | 其余 5 个陈旧 E2E（见 ⑨） |
+
+**R3 两处修复（零产品代码）**：① `_e2e_product_loop.cjs` 装配 → `mangoBody + front/rear=smallWheel`
+（+ `C4` 空候选防护，让 `blocked()` 安全网可达）；② `_e2e_product_legacy_profile.cjs` L8 期望补
+`top: EMPTY`。修后：loop **55/55**、legacy **18/18**、fail **48/48**。
+
+**Lab 能力盘点（供后续「内容批量化」复用，避免重造底层）**
+
+| 入口 | 创建 | 运行 | 清场 | 测试 |
+|---|---|---|---|---|
+| `encounterLab.ts` `EncounterLab` | `new EncounterLab(root)` | `select(id)` 自动开跑 | `reset()` / `dispose()` | `tests/portraitEncounterLab.test.ts` + `e2e:encounter-lab` |
+| `testData.ts` 批量数据 | `LAB_LOADOUTS`(**6**) / `LAB_ENCOUNTERS`(**10**) + `findLoadout/findEncounter` | — | — | 各 Lab 测试共享 |
+| `contentBatch.ts` | `CONTENT_BATCH_IDS` / `contentBatchItem()` / `nextContentBatchId()`（含 `MultiUnit` 如实 BLOCK） | — | — | `productEncounterContentBatchR1` + `e2e:content-batch` |
+| `nextRunValidation.ts` | `NEXT_RUN_SEEDS` / `buildPriorCompletedRun()` / `createSeededNewRun()` | — | — | `portraitNextRunValidation` + `e2e:next-run` |
+| `gadgetVisualHost.ts` | `GADGET_VISUAL_PRESETS` / `presetSnapshot()` | — | — | `e2e:gadget-lab` |
+| `runBattleRuntime.ts` | `new RunBattleRuntime({build,carriedHp,encounterId,playerDraft,...})` | `step(dt)` / `hp()` / `snapshot()` | `dispose()` | 全部 Run 系测试与 Lab 共用 |
+| `runScript.ts` | `RUN_SCRIPT`（6 节点）/ `RUN_ROUTE_ENCOUNTER_OVERRIDES`（heavy/rush） | — | — | `productRunVariantsR1` |
+| `arenaA.ts` / `lab.ts` `PortraitBattleLab` | `new PortraitBattleLab(root)`、`arenaA*` 场景/出生点/顶视驱动 | `probe()` | `dispose()` | `e2e:portrait-lab` |
+
+**公共缺口（下一轮做内容批量化的真实成本，别再各造各的）**
+1. **无共享「走完整局」测试 harness**：`walkRun`（状态机逐节点驱动）在
+   `productDemoPlayablePathR1` / `productRunFullReachableSpaceR10` / 临时探针里**各写一份**
+   （R3 亲历：探针漏传 `build` ⇒ 读数全错，靠 D-02 冻结值才发现）。
+2. **无「当前取胜装配」单一真源**：E2E 把取胜装配硬编码（`coconutBody+heavyWheel`）⇒ 内容一变即陈旧
+   （本轮根因）。权威矩阵有数据，但没有被 E2E 消费。
+3. **批量数据的守卫期望未自动派生**：`LAB_LOADOUTS/LAB_ENCOUNTERS` 扩容 ⇒ `RP-21`/`F1-*`/`G1-05` 恒红。
+4. **Lab 目录结构性写不了正式存档**（R22a 闭集 + 禁 `platform/**`，唯一例外 `playerViewport`）
+   ⇒ 任何「装配合法性」证据**只能放测试侧**（`MemStorage` 桩跑同一装配链）。
+5. **`contentBatch` 只做「展示」不做「创建」**：没有「一次新增 N 个敌人/武器/装配并批量跑通关」的入口。
+
+**未证伪 / 勿走**：不改数值即无法让「默认车」通关（除非改 Garage 引导或默认装配 —— 属产品裁决）。

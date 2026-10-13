@@ -12,7 +12,19 @@
 
 ## 0. 现状 / 下一步（新窗口先读 · 明细 → REF §21）
 - HEAD 段起点 `7eeb60f`；分支 `prototype-portrait-battle-lab`（实验可删）；Mac arm64。
-- **最新轮 = `DEMO-HEIGHT-LINE-READABILITY-R2`（Lab 取景强化：四带 302→344 + 近景裁切合成）** → REF §21a。
+- **最新轮 = `PRODUCT-FULL-LOOP-FOUNDATION-R1`（真实入口全闭环核查 + 修 2 处陈旧 E2E）** → 日 log 同日段。
+  ⚠️⚠️ **核心事实（新窗口必读）**：**产品闭环逻辑完整可用**（权威矩阵 `productRunFullReachableSpaceR10`
+  = **28 条 COMPLETE / 11 底盘**：cannon 1、flamethrower 1、machineGun 4、shotgun 4、laser 1；
+  hammer·rammer 0）——**阻断的是「浏览器取证层」，不是产品**。根因一条：`76faafc`（2026-10-01
+  「移除隐藏顶锤」）改了 `defaultPlayerDraft()`/`clearHiddenTopWeapon`，**vitest 同步了，浏览器 E2E 没同步** ⇒
+  ① `e2e:product-loop` 的取胜装配（`coconutBody+后 heavyWheel`）失去隐藏锤**打不赢**，且其 `C4` 写
+  `rc[0].href` **崩溃** ⇒ 静默失效；② `e2e:product-legacy` L8 期望漏清 `top`。
+  本轮**只改 2 个 `tests/*.cjs`**（零产品代码）：loop 装配 → `mangoBody + front=smallWheel + rear=smallWheel`
+  （+ `C4` 空数组防护）、legacy L8 补 `top: EMPTY` ⇒ 修后 **loop 55/55 PASS、legacy 18/18 PASS**。
+- ⚠️ **默认车打不赢（产品体验事实，禁改数值）**：`watermelonBody + cannon + 缺省轮` 在终局
+  `RangedTurret` 控距下 **FAILED**；可通关需在 Garage 换 `mangoBody + 双 smallWheel`（machineGun 系）。
+  ⇒ 「默认配置可通关性 / 引导」是独立产品议题（已登记，等 Queue）。
+- 上轮 `DEMO-HEIGHT-LINE-READABILITY-R2`（Lab 取景强化：四带 302→344 + 近景裁切合成）→ REF §21a。
 - ⚠️⚠️ **R2 核心数字**：官方 battle 相机 `scale` 实测 **0.41~0.64** ⇒ 3.7 世界像素车顶差在官页只渲染
   **≈1.5 逻辑像素**（看不出）。R2 近景窗 = **固定世界宽 170** ⇒ `pxPerWorld = 2.294`（恒定、与
   scale/轮径无关）、纵向锚在**车箱顶**（`roofScreenFrac = 0.35`）⇒ **相对正式取景放大 3.25~5.48×**；
@@ -35,9 +47,12 @@
   **这是登记式边界遵守，不是放宽守卫**；新开 Lab 页面会撞这条。
 - ⚠️ **勘误教训（踩过）**：「HF 4/4 无解 / A,D 各丢 2 格」曾与可运行矩阵冲突 ⇒ 任何判断
   必须来自实测跑批，**禁止抄写看似等价的相邻单元格**。
-- **候选下一步**：① **真人录屏判「4px 车高差能否在正常速度自然看出」**（本 Lab 待验项）
-  ② GADGET-EARN-PATHWAY-R1 ③ 默认车平衡 Queue ④ ARCHIVE-RESTORE-RESILIENCE-R1
-  ⑤ DOC-COMPAT-REFRESH-R1。**等 Queue，不自动开工**。
+- **候选下一步**（R3 收口后）：① **`E2E-STALE-ROUTES-REFRESH-R1`**（刷新 ⑨ 那 5 个陈旧浏览器
+  E2E：路线按权威矩阵 + 夹具去 `top:'hammer'` + home 第 5 槽几何）；② `CONTENT-BATCH-CREATION-PIPELINE-R1`
+  （把 Lab 已验证的敌人/武器/移动/装配做成可批量复用的创建/运行/清场/测试入口，见 REF §21d）；
+  ③ `DEFAULT-LOADOUT-CLEAR-PATH-R1`（默认车可通关性/引导的产品裁决，**含数值须单独授权**）。
+  旧候选保留：真人录屏判车高差 / GADGET-EARN-PATHWAY-R1 / 默认车平衡 / ARCHIVE-RESTORE-RESILIENCE-R1 /
+  DOC-COMPAT-REFRESH-R1。**等 Queue，不自动开工**。
 - ⚠️ **未修 → 独立 Bug Queue（禁顺手并改）**：① `validateSnapshot` 星级缺口
   （`buildValidator.ts:54`）② `e2e:next-run` 崩（期望 3 实际 4）③④ 注释陈旧 ×2 ⑤ PC-14 预存红
   ⑥ PL-26 白名单缺 `../core/partOptions` ⑦ **R2-10 / H-05 预存红**：`gadget-lab.html`
@@ -45,6 +60,11 @@
   ⇒ **HEAD 即红**（已用独立 worktree 实测）。旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
   ⑧ **R2 新证同族预存红**（Lab 测试数据扩容跑赢旧守卫，均已在 HEAD worktree 逐字复现）：
   `RP-21`（期望 18 实际 72）、`F1-R1`/`F1-R2`（期望 2/7 实际 6/10）、`G1-05`（期望 42 实际 60）。
+  ⑨ **浏览器 E2E 陈旧族（R3 新证，同一根因 = `76faafc` 移除隐藏锤 + Garage 第 5 槽 gadget）**：
+  `e2e:product-star-power`（B4/B4b+14 BLOCKED）、`e2e:product-reseed`（R4b/R4b2+R5c 夹具带 `top:'hammer'`）、
+  `e2e:product-reward`（42 BLOCKED，同路线）、`e2e:product-next-run-continuity`（6 BLOCKED，同路线）、
+  `e2e:product-home`（6 FAIL，期望 4 槽 / 2×2 几何，实际第 5 槽 gadget）。**非产品缺陷**
+  —— 建议独立队列 `E2E-STALE-ROUTES-REFRESH-R1` 统一按权威矩阵+当前规则刷新。
   ⇒ **判红必先建 HEAD 独立 worktree 复现**（`git worktree add /tmp/x HEAD` + symlink node_modules），
   否则会把预存红误记到本轮账上。
 - **未做别再 ask**：观感 / 动画 / 内容量 / Buff / 挂点几何 / 逐武器差异化；saw / spear 不动；

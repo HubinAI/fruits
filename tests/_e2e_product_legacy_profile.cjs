@@ -430,14 +430,24 @@ async function main() {
     await waitHomeReady(page);
     const afterB = await storageDump(page);
     const migratedB = parseBuild(afterB);
-    // 迁移后应当与「旧 starter 清掉 front」逐字段同形（= 产品 fresh starter 的当前规则）
+    // 迁移后应当与「旧 starter 清掉 front 与 top」逐字段同形（= 产品 fresh starter 的当前规则）
+    // ⚠️ PRODUCT-FULL-LOOP-FOUNDATION-R1（2026-10-13）｜本行原先只清 `front` —— 那是
+    //    2026-10-01 `PRODUCT-LOOP-P0-HIDDEN-TOP-WEAPON-REMOVAL`（`76faafc`）**之前**的规则。
+    //    该轮起产品读入口 `loadEquippedDraft → clearHiddenTopWeapon` 会**同时**清掉无星级印记的
+    //    旧 starter 顶锤（`top=hammer`），vitest 侧 LM-22（`productLegacyProfileMigration.test.ts`）
+    //    已同步为「front 与 top 都被清掉」，但本 E2E 的期望值**漏改** ⇒ L8 恒红。
+    //    现分别补上 `top: EMPTY` ⇒ 与产品当前规则、与 vitest 侧逐字段一致（不改任何产品行为）。
     const expectedB = {
       ...LEGACY_STARTER,
-      functionalSelections: { ...LEGACY_STARTER.functionalSelections, [FRONT_SLOT]: EMPTY },
+      functionalSelections: {
+        ...LEGACY_STARTER.functionalSelections,
+        [FRONT_SLOT]: EMPTY,
+        [TOP_SLOT]: EMPTY,
+      },
     };
     log(
       canon(stripStamp(migratedB)) === canon(expectedB),
-      'L8 **必改 2 同源**：标准旧 starter 迁移后**逐字段等于**「旧 starter 清掉 front」（= 产品 fresh starter 的当前规则，不存在第二套 starter）',
+      'L8 **必改 2 同源**：标准旧 starter 迁移后**逐字段等于**「旧 starter 清掉 front 与 top」（= 产品 fresh starter 的当前规则，不存在第二套 starter）',
       `got=${canon(stripStamp(migratedB))}`,
     );
     log(
