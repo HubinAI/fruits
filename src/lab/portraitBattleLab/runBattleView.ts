@@ -79,11 +79,30 @@ export interface RunBattleAudioProbe extends AudioProbeState {
 }
 
 /**
+ * DEMO-HEIGHT-LINE-READABILITY-R2｜**离屏视口放大倍数**（可选，默认 1）。
+ *
+ * 它只做一件事：把「离屏视口」按倍数放大 → 正式相机拿到一个更大的安全区
+ * → 世界→画布的像素密度同比提高（**镜头算法一行不改**，与既有的
+ * 「视口 = 舞台带 + 正式 inset」是同一个 adapter 手法，只是倍数不同）。
+ *
+ * ⚠️ 这不是「第二套取景」：不改变 `reframe` / 逐帧跟随 / 任何 clamped 语义，
+ *    只是让官方画面被**栅格化得更密**。页面随后用 `blitRegion()` 裁出近景窗 ——
+ *    放大仍然来自官方渲染的同一批像素，而不是把低清画面吹大。
+ *
+ * ⚠️ 默认 1 ⇒ 既有四个 Lab 页面（run-page / encounter-lab / gadget-lab /
+ *    下方调用点）行为**逐像素不变**。
+ */
+export interface RunBattleViewOptions {
+  readonly viewportScale?: number;
+}
+
+/**
  * 战斗视图宿主。
  *
  * 生命周期：`new RunBattleView()` → `loadAssets()`（异步）→ 每次要显示时 `render(runtime)` +
- * `blit(ctx, band)`。离屏视口恒为「舞台带 + 正式 inset」（502×358，再乘 DPR）——
- * 「clip」不是一次裁剪调用，而是**合成时只取安全区**这个结构性事实。
+ * `blit(ctx, band)`（1:1 贴安全区）或 `blitRegion(ctx, src, dst)`（近景裁切贴图）。
+ * 离屏视口 = 「舞台带 + 正式 inset」× `viewportScale`（默认 1 ⇒ 502×358，再乘 DPR）——
+ * 「clip」不是一次裁剪调用，而是**合成时只取安全区 / 只取子矩形**这个结构性事实。
  */
 export class RunBattleView {
   private readonly canvas: HTMLCanvasElement;
@@ -113,17 +132,23 @@ export class RunBattleView {
   private onAssetReadyCb: (() => void) | null = null;
   private ready = 0;
   private dpr = 1;
+  /** 离屏视口放大倍数（≥1；见 `RunBattleViewOptions`）。1 = 与既有页面逐像素相同。 */
+  private readonly viewportScale: number;
 
-  constructor(doc: Document = document) {
+  constructor(doc: Document = document, options: RunBattleViewOptions = {}) {
+    const requested = options.viewportScale ?? 1;
+    this.viewportScale = Number.isFinite(requested) && requested > 1 ? requested : 1;
     this.canvas = doc.createElement('canvas');
     this.dpr = typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
     this.applySize();
-    // 注入 surface：Renderer 的 view 域 = 本离屏视口（带 + 正式 inset），与页面 DOM 尺寸解耦。
+    // 注入 surface：Renderer 的 view 域 = 本离屏视口（带 + 正式 inset）× 放大倍数，
+    // 与页面 DOM 尺寸解耦。⚠️ 视口放大 = 正式相机拿到更大的安全区 ⇒ 世界→画布像素密度同比提高，
+    //    镜头算法本身不动。
     // ⚠️ surface 是**长期持有的同一个对象**：DPR 变化時由 applySize() 同步，
     //    否则 Renderer 的 setTransform(dpr) 会与画布 backing 尺寸失配（画面整帧错位）。
     this.surface = {
-      width: RUN_BATTLE_VIEW_W,
-      height: RUN_BATTLE_VIEW_H,
+      width: this.viewportW(),
+      height: this.viewportH(),
       devicePixelRatio: this.dpr,
       now: () => (typeof performance !== 'undefined' ? performance.now() : Date.now()),
     };
@@ -215,24 +240,64 @@ export class RunBattleView {
   }
 
   /**
-   * 把离屏战斗画面贴到目标画布的舞台带（唯一的合成动作）。
+   * 把离屏战斗画面贴到目标画布的舞台带（1:1 合成：源 = 正式安全区，目标 = 舞台带）。
    *
-   * 9 参数 `drawImage`：源矩形 = **正式安全区**（= inset 原点 + 舞台带尺寸 × DPR），
+   * 9 参数 `drawImage`：源矩形 = **正式安全区**（= inset 原点 + 安全区尺寸 × DPR），
    * 目标矩形 = 舞台带。视口比带大出来的 inset 边缘（`cropX/cropY` 那圈）永远不出画 ——
    * 这正是「viewport adapter」的落点，不是一次额外的裁剪调用。
+   *
+   * ⚠️ `viewportScale = 1` 时安全区尺寸恒等于 `band`（390×302 ⇒ 502×358 视口）⇒ 本方法
+   *    与历史实现逐像素相同；`> 1` 时它会把整个安全区**缩**进 band（远景全览），
+   *    近景取景请改用 `blitRegion()`。
    */
   blit(ctx: CanvasRenderingContext2D, band: RunRect = RUN_STAGE_BAND): void {
+    const safe = this.safeAreaSize();
     ctx.drawImage(
       this.canvas,
       RUN_BATTLE_VIEW_INSET.x * this.dpr,
       RUN_BATTLE_VIEW_INSET.y * this.dpr,
-      band.w * this.dpr,
-      band.h * this.dpr,
+      safe.w * this.dpr,
+      safe.h * this.dpr,
       band.x,
       band.y,
       band.w,
       band.h,
     );
+  }
+
+  /**
+   * DEMO-HEIGHT-LINE-READABILITY-R2｜**近景裁切合成**：把离屏画面的一个子矩形
+   * （`src`，离屏画布**逻辑**坐标）放大/缩放到目标矩形（`dst`，页面逻辑坐标）。
+   *
+   * ⚠️ 它仍然只是**合成**：不写任何 `renderer.*` 状态、不自己算镜头、不新增相机。
+   *    子矩形由调用方用只读读数（`viewTransform()` + `vehicleBox()`）算出 ——
+   *    画出来的仍是正式相机渲染的同一批像素。
+   */
+  blitRegion(ctx: CanvasRenderingContext2D, src: RunRect, dst: RunRect): void {
+    ctx.drawImage(
+      this.canvas,
+      src.x * this.dpr,
+      src.y * this.dpr,
+      src.w * this.dpr,
+      src.h * this.dpr,
+      dst.x,
+      dst.y,
+      dst.w,
+      dst.h,
+    );
+  }
+
+  /** 离屏视口逻辑尺寸（= 「舞台带 + 正式 inset」× `viewportScale`）。 */
+  viewportSize(): { readonly w: number; readonly h: number } {
+    return { w: this.viewportW(), h: this.viewportH() };
+  }
+
+  /** 正式安全区逻辑尺寸（= 视口 − 两侧正式 inset）。`viewportScale = 1` 时恒等于舞台带。 */
+  safeAreaSize(): { readonly w: number; readonly h: number } {
+    return {
+      w: this.viewportW() - RUN_BATTLE_VIEW_INSET.x * 2,
+      h: this.viewportH() - RUN_BATTLE_VIEW_INSET.y * 2,
+    };
   }
 
   /**
@@ -270,6 +335,16 @@ export class RunBattleView {
 
   /* --------------------------------------------------------------- 内部 */
 
+  /** 离屏视口逻辑宽 = 「舞台带 + 正式 inset」× 放大倍数。 */
+  private viewportW(): number {
+    return Math.round(RUN_BATTLE_VIEW_W * this.viewportScale);
+  }
+
+  /** 离屏视口逻辑高 = 「舞台带 + 正式 inset」× 放大倍数。 */
+  private viewportH(): number {
+    return Math.round(RUN_BATTLE_VIEW_H * this.viewportScale);
+  }
+
   /** 宿主注册「资源就绪 → 重绘」回调（构造早于宿主字段就绪，故不能只靠构造参数）。 */
   onAssetsReady(cb: () => void): void {
     this.onAssetReadyCb = cb;
@@ -280,8 +355,8 @@ export class RunBattleView {
     const dpr = typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
     this.dpr = dpr;
     if (this.surface) this.surface.devicePixelRatio = dpr; // DPR 变化 → 与 backing 保持同一域
-    const w = Math.round(RUN_BATTLE_VIEW_W * dpr);
-    const h = Math.round(RUN_BATTLE_VIEW_H * dpr);
+    const w = Math.round(this.viewportW() * dpr);
+    const h = Math.round(this.viewportH() * dpr);
     let changed = false;
     if (this.canvas.width !== w) {
       this.canvas.width = w;

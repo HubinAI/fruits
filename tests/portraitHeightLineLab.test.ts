@@ -29,14 +29,40 @@ import { canEquipBody } from '../src/core/bodyOwnership';
 import { getCount as coreGetCount } from '../src/core/partInventory';
 import type { BuildDraft } from '../src/lab/buildEditorModel';
 import {
+  HEIGHT_LINE_ACTION_BAND,
+  HEIGHT_LINE_BANDS,
+  HEIGHT_LINE_BATTLE_BAND,
+  HEIGHT_LINE_BATTLE_BAND_H,
+  HEIGHT_LINE_CLOSE_MAX_SUPERSAMPLE,
+  HEIGHT_LINE_CLOSE_ROOF_FRAC,
+  HEIGHT_LINE_CLOSE_WORLD_W,
   HEIGHT_LINE_CONFIGS,
+  HEIGHT_LINE_LOG_BAND,
   HEIGHT_LINE_OPPONENT_ID,
+  HEIGHT_LINE_TOP_BAND,
+  HEIGHT_LINE_TOP_BAND_H,
   HEIGHT_LINE_WEAPON_SLOT,
   heightLineAssemblyFacts,
+  heightLineCloseSupersample,
+  heightLineCloseWindow,
   heightLineConfigsProblems,
   type HeightLineConfigId,
 } from '../src/lab/portraitBattleLab/heightLineConfigs';
-import { RunBattleRuntime } from '../src/lab/portraitBattleLab/runBattleRuntime';
+import {
+  RUN_ACTION_BAND_H,
+  RUN_BANDS,
+  RUN_LOG_BAND_H,
+  RUN_PAGE_H,
+  RUN_PAGE_W,
+  RUN_STAGE_BAND,
+  RUN_TOP_BAND_H,
+} from '../src/lab/portraitBattleLab/runPageLayout';
+import {
+  RUN_BATTLE_VIEW_H,
+  RUN_BATTLE_VIEW_INSET,
+  RUN_BATTLE_VIEW_W,
+  RunBattleRuntime,
+} from '../src/lab/portraitBattleLab/runBattleRuntime';
 import { RUN_SCRIPT } from '../src/lab/portraitBattleLab/runScript';
 import { LAB_ENCOUNTERS, findEncounter } from '../src/lab/portraitBattleLab/testData';
 import {
@@ -598,3 +624,231 @@ describe('DEMO-HEIGHT-LINE｜D. 入口登记', () => {
     expect(pagesCfg.includes('height-line-lab')).toBe(false);
   });
 });
+
+/* ================================ E. 可读性强化（R2：布局 + 近景取景） */
+
+/**
+ * ── 这一组回答什么（`DEMO-HEIGHT-LINE-READABILITY-R2` 必改 1 / 验收 1~2）─────
+ *
+ *   R1 已证明机制成立（小轮 0 命中、重轮 41 命中），但**官方取景下看不出**：
+ *   官方 battle 相机 `scale` 实测只有 **0.41 ~ 0.64**（世界 px → 画布逻辑 px，S=1 等效），
+ *   而「小轮车顶 645 vs 敌弹线 ≈641.3」只差 **3.7 个世界像素** ⇒ 屏上只有约 1.5 逻辑像素。
+ *
+ *   R2 的两个手段，本组给它们**机器判据**（不是「看起来变大了」）：
+ *     ① **Lab 本地四带**：把中部战场带 302 → 344（只动本页，正式 `runPageLayout` 一字不改）；
+ *     ② **近景裁切合成**：用一个**固定世界宽**（`HEIGHT_LINE_CLOSE_WORLD_W`）的窗，
+ *        锚在玩家**车顶**，把官方相机渲染出的同一批像素裁一块铺满战场带
+ *        ⇒ 显示密度恒定 `390 / 170 ≈ 2.294 显示px/世界px`，且**与轮径无关**
+ *        （三套配置是同一把尺子量出来的对照）。
+ *
+ *   ⚠️ 本组**不**回答「真人是否真能看出」——那仍属真人体感（Queue 停止条件②）。
+ *      这里只回答「同一个世界像素现在被摊到几个显示像素」这个可计算的事实。
+ */
+
+/** 近景窗的期望世界高（= 固定世界宽 × 战场带宽高比；等比 ⇒ 车轮不会被拉扁）。 */
+function closeWorldH(): number {
+  return (HEIGHT_LINE_CLOSE_WORLD_W * HEIGHT_LINE_BATTLE_BAND.h) / HEIGHT_LINE_BATTLE_BAND.w;
+}
+
+describe('DEMO-HEIGHT-LINE-R2｜E. 可读性强化（布局 + 近景取景）', () => {
+  it('HL-12 Lab 本地四带连续铺满，且**正式** Run 四带一字未动', () => {
+    // ① 正式 Run 布局仍是原样（本 Queue 不得触碰产品页面）
+    expect(RUN_TOP_BAND_H).toBe(80);
+    expect(RUN_STAGE_BAND.h).toBe(302);
+    expect(RUN_LOG_BAND_H).toBe(378);
+    expect(RUN_ACTION_BAND_H).toBe(84);
+    let formalCursor = 0;
+    for (const b of RUN_BANDS) {
+      expect(b.y).toBe(formalCursor);
+      formalCursor = b.y + b.h;
+    }
+    expect(formalCursor).toBe(RUN_PAGE_H);
+
+    // ② Lab 本地四带：连续、同宽、合计 = 页面高（结构上不可能漏缝 / 重叠）
+    let cursor = 0;
+    for (const b of HEIGHT_LINE_BANDS) {
+      expect(b.x).toBe(0);
+      expect(b.w).toBe(RUN_PAGE_W);
+      expect(b.y, '四带必须首尾相接').toBe(cursor);
+      cursor = b.y + b.h;
+    }
+    expect(cursor).toBe(RUN_PAGE_H);
+    expect(HEIGHT_LINE_TOP_BAND_H).toBe(RUN_TOP_BAND_H);
+    expect(HEIGHT_LINE_TOP_BAND).toEqual({ x: 0, y: 0, w: RUN_PAGE_W, h: HEIGHT_LINE_TOP_BAND_H });
+    expect(HEIGHT_LINE_ACTION_BAND.h).toBe(84);
+    // ③ 与正式布局的**唯一**差别 = 战场带加高（302 → 344），日志带同比收窄
+    expect(HEIGHT_LINE_BATTLE_BAND.h).toBe(HEIGHT_LINE_BATTLE_BAND_H);
+    expect(HEIGHT_LINE_BATTLE_BAND.h).toBeGreaterThan(RUN_STAGE_BAND.h);
+    expect(HEIGHT_LINE_BATTLE_BAND.y).toBe(RUN_STAGE_BAND.y);
+    expect(HEIGHT_LINE_LOG_BAND.h).toBeLessThan(RUN_LOG_BAND_H);
+    expect(HEIGHT_LINE_LOG_BAND.h + HEIGHT_LINE_BATTLE_BAND.h).toBe(
+      RUN_LOG_BAND_H + RUN_STAGE_BAND.h,
+    );
+    // ④ 自检（含新加的布局 / 取景自检）必须为空
+    expect(heightLineConfigsProblems()).toEqual([]);
+  });
+
+  it('HL-13 近景窗是纯换算：等比、恒定密度、车顶落在目标比例、源矩形永不越界', () => {
+    const bandAspect = HEIGHT_LINE_BATTLE_BAND.h / HEIGHT_LINE_BATTLE_BAND.w;
+    const vpW = RUN_BATTLE_VIEW_W * 2;
+    const vpH = RUN_BATTLE_VIEW_H * 2;
+
+    // ① 目标情形：不触发夹取 ⇒ 车顶恰好落在 HEIGHT_LINE_CLOSE_ROOF_FRAC
+    const win = heightLineCloseWindow({
+      roofWorldY: 645,
+      anchorWorldX: 1000,
+      scale: 0.5,
+      offsetX: 200,
+      offsetY: 100,
+      viewportW: vpW,
+      viewportH: vpH,
+    });
+    expect(win.worldW).toBe(HEIGHT_LINE_CLOSE_WORLD_W);
+    expect(win.worldH).toBeCloseTo(closeWorldH(), 9);
+    expect(win.worldW / win.worldH).toBeCloseTo(1 / bandAspect, 9); // 等比，不拉伸
+    expect(win.clamped).toBe(false);
+    expect(win.roofScreenFrac).toBeCloseTo(HEIGHT_LINE_CLOSE_ROOF_FRAC, 9);
+    expect(win.pxPerWorld).toBeCloseTo(HEIGHT_LINE_BATTLE_BAND.w / HEIGHT_LINE_CLOSE_WORLD_W, 9);
+    expect(win.pxPerWorld).toBeGreaterThan(2); // 每个世界像素被摊到 > 2 个显示像素
+    // 源矩形 = 窗的世界矩形经官方相机变换到离屏画布逻辑坐标
+    expect(win.srcW).toBeCloseTo(win.worldW * 0.5, 9);
+    expect(win.srcH).toBeCloseTo(win.worldH * 0.5, 9);
+    expect(win.worldLeft).toBeCloseTo(1000 - HEIGHT_LINE_CLOSE_WORLD_W / 2, 6);
+    expect(win.worldTop).toBeCloseTo(645 - HEIGHT_LINE_CLOSE_ROOF_FRAC * closeWorldH(), 6);
+
+    // ② 世界窗宽高与显示密度**与相机 scale 无关** ⇒ 三套轮径在同一把尺子下对照
+    for (const scale of [0.41, 0.63, 1, 1.5, 2]) {
+      const w = heightLineCloseWindow({
+        roofWorldY: 645,
+        anchorWorldX: 1000,
+        scale,
+        offsetX: 200,
+        offsetY: 100,
+        viewportW: vpW,
+        viewportH: vpH,
+      });
+      expect(w.worldW, `scale=${scale} 时窗宽必须恒定`).toBe(HEIGHT_LINE_CLOSE_WORLD_W);
+      expect(w.worldH).toBeCloseTo(closeWorldH(), 9);
+      expect(w.pxPerWorld).toBeCloseTo(2.2941176470588234, 9);
+      // 锚点比例只在**未贴边**时保持目标值（贴边是有意的构图夹取，密度不受影响）
+      if (!w.clamped) expect(w.roofScreenFrac).toBeCloseTo(HEIGHT_LINE_CLOSE_ROOF_FRAC, 9);
+    }
+
+    // ③ 源矩形永远落在视口内（否则 drawImage 会画出透明边）—— 覆盖真实取景区间
+    for (const scale of [0.2, 0.41, 0.63, 1, 1.5, 2]) {
+      for (const anchorWorldX of [-5000, 0, 1000, 5000]) {
+        for (const offsetX of [-200, 0, 300]) {
+          const w = heightLineCloseWindow({
+            roofWorldY: 645,
+            anchorWorldX,
+            scale,
+            offsetX,
+            offsetY: 100,
+            viewportW: vpW,
+            viewportH: vpH,
+          });
+          expect(w.srcX).toBeGreaterThanOrEqual(0);
+          expect(w.srcY).toBeGreaterThanOrEqual(0);
+          expect(w.srcX + w.srcW).toBeLessThanOrEqual(vpW + 1e-9);
+          expect(w.srcY + w.srcH).toBeLessThanOrEqual(vpH + 1e-9);
+        }
+      }
+    }
+
+    // ④ 夹取语义：目标越界时贴边（`clamped` 置位，密度**不受影响**）
+    const left = heightLineCloseWindow({
+      roofWorldY: 645,
+      anchorWorldX: -5000,
+      scale: 0.5,
+      offsetX: 200,
+      offsetY: 100,
+      viewportW: vpW,
+      viewportH: vpH,
+    });
+    expect(left.clamped).toBe(true);
+    expect(left.srcX).toBe(0);
+    expect(left.pxPerWorld).toBeCloseTo(win.pxPerWorld, 9); // 夹取只挪构图，不改密度
+  });
+
+  it('HL-14 离屏视口放大倍数与 DPR 反比（backing 有上界，密度与设备无关）', () => {
+    const maxS = HEIGHT_LINE_CLOSE_MAX_SUPERSAMPLE;
+    expect(maxS).toBe(4);
+    expect(heightLineCloseSupersample(1)).toBeCloseTo(4, 9);
+    expect(heightLineCloseSupersample(2)).toBeCloseTo(2, 9);
+    expect(heightLineCloseSupersample(4)).toBeCloseTo(1, 9);
+    // 非法 / 越界输入被夹到 [1, maxS]（不抛错、不产生 0 或负数）
+    expect(heightLineCloseSupersample(8)).toBe(1);
+    expect(heightLineCloseSupersample(0)).toBe(maxS);
+    expect(heightLineCloseSupersample(Number.NaN)).toBe(maxS);
+    // dpr ≤ 上限时 S × dpr 恒定 ⇒ 画布 backing 面积与 DPR 无关
+    for (const dpr of [1, 1.5, 2, 3, 4]) {
+      const s = heightLineCloseSupersample(dpr);
+      expect(s).toBeGreaterThanOrEqual(1);
+      expect(s).toBeLessThanOrEqual(maxS);
+      expect(s * dpr).toBeCloseTo(maxS, 9);
+    }
+  });
+
+  it('HL-15 视图宿主：新增的只是「视口倍数 + 子矩形合成」，镜头算法与默认行为不变', () => {
+    const view = strip(readLab('runBattleView.ts'));
+
+    // ① 视口放大是**可选**的，默认 1 ⇒ 既有的四个 Lab 页面逐像素不变
+    expect(view.includes('const requested = options.viewportScale ?? 1;')).toBe(true);
+    expect(
+      view.includes('this.viewportScale = Number.isFinite(requested) && requested > 1 ? requested : 1;'),
+    ).toBe(true);
+    expect(view.includes('Math.round(RUN_BATTLE_VIEW_W * this.viewportScale)')).toBe(true);
+    expect(view.includes('Math.round(RUN_BATTLE_VIEW_H * this.viewportScale)')).toBe(true);
+    // 安全区随视口同比放大（正式 inset 仍是 56/28，`viewportScale = 1` 时正好等于舞台带）
+    expect(view.includes('w: this.viewportW() - RUN_BATTLE_VIEW_INSET.x * 2')).toBe(true);
+    expect(view.includes('h: this.viewportH() - RUN_BATTLE_VIEW_INSET.y * 2')).toBe(true);
+    expect(RUN_BATTLE_VIEW_INSET).toEqual({ x: 56, y: 28 });
+    expect(RUN_BATTLE_VIEW_W).toBe(RUN_STAGE_BAND.w + 112);
+    expect(RUN_BATTLE_VIEW_H).toBe(RUN_STAGE_BAND.h + 56);
+
+    // ② 近景合成 = 9 参数 drawImage，且源坐标必须换算到 backing 的 device 域
+    expect(view.includes('blitRegion(ctx: CanvasRenderingContext2D, src: RunRect, dst: RunRect): void {')).toBe(
+      true,
+    );
+    expect(view.includes('src.x * this.dpr')).toBe(true);
+    expect(view.includes('src.y * this.dpr')).toBe(true);
+    // 合成动作**只有**两处（blit 远景 + blitRegion 近景）——不得出现第三个贴图口径
+    expect(view.split('ctx.drawImage(').length - 1).toBe(2);
+
+    // ③ 仍然没有第二套镜头：不写 transform、不碰 battleCam、不自己跟随
+    expect(view.includes('reframe(')).toBe(true);
+    expect(view.includes('battleCam')).toBe(false);
+    expect(view.includes('applyBattleFollow')).toBe(false);
+    expect(view.includes('this.renderer.transform =')).toBe(false);
+    expect(view.indexOf('reframe(')).toBeLessThan(view.indexOf('renderer.render('));
+  });
+
+  it('HL-16 页面近景分支不画字 / 不画标线 / 不加特效（只做裁切合成）', () => {
+    const page = strip(readLab('heightLineLab.ts'));
+    const a = page.indexOf('this.battleView.render(rt);');
+    const b = page.indexOf('} else {', a);
+    expect(a).toBeGreaterThan(-1);
+    expect(b, '近景分支必须有明确的边界').toBeGreaterThan(a);
+    const branch = page.slice(a, b);
+    expect(branch.length).toBeGreaterThan(50);
+    // 只允许「渲染 → 算窗 → 裁切贴图」三步
+    expect(branch.includes('this.closeUpWindow = this.computeCloseUpWindow(rt);')).toBe(true);
+    expect(branch.includes('this.battleView.blitRegion(')).toBe(true);
+    // 不得出现解释文字 / 辅助标线 / 特效叠加
+    for (const t of ['fillText(', 'strokeStyle', 'strokeRect(', 'lineTo(', 'arc(', 'shadowBlur', 'globalAlpha']) {
+      expect(branch.includes(t), `近景分支不得出现 "${t}"`).toBe(false);
+    }
+    // 不再走「整幅 1:1 贴安全区」的远景口径（战场带现在由近景窗铺满）
+    expect(page.includes('this.battleView.blit(ctx')).toBe(false);
+    // 页面自己不持有渲染器 / 不写相机状态
+    expect(/new\s+Renderer\s*\(/.test(page)).toBe(false);
+    expect(page.includes('renderer.transform')).toBe(false);
+    // 近景窗的输入必须是**只读**运行时读数 + 正式相机读数
+    expect(page.includes("roofWorldY: box.minY")).toBe(true);
+    expect(page.includes("anchorWorldX: rt.vehicleX('A')")).toBe(true);
+    expect(page.includes("const box = rt.vehicleBox('A');")).toBe(true);
+    expect(page.includes('const t = this.battleView.viewTransform();')).toBe(true);
+    expect(page.includes('heightLineCloseWindow({')).toBe(true);
+  });
+});
+

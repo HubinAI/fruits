@@ -1551,6 +1551,39 @@ R7 之前的快进用一张写死的 Cannon 路线表（`PRIOR_RUN_CHOICES = ['h
   ⚠️ **三轮实测小差异（非不确定性 bug）**：large 的 E2E 用时 9.13s vs vitest 9.25s —— 页面按
   真实帧 `dt` 推进（`dt = min(64, now-last)`），与测试的固定步进不同源；**胜者与受弹数一致**。
 
+- ⚠️⚠️ **DEMO-HEIGHT-LINE-READABILITY-R2（最新 · 只动 Lab 取景，零数值/物理改动）**：
+  R1 证明机制有效但**看不出来**。本轮把根因量化：**官方 battle 相机 `scale` 实测只有
+  `0.41~0.64`**（世界px→画布逻辑px，S=1 等效）⇒ 3.7 世界像素的车顶差在原取景下只渲染成
+  **≈1.5 逻辑像素**（正常速度不可能看出）。
+  **两个手段（都不动镜头算法一行）**：
+  ① **Lab 本地四带**（`heightLineConfigs.ts`，**只影响本页**）：战场带 302 → **344**，
+     日志带 378 → 336；正式 `runPageLayout.RUN_STAGE_BAND` **一字未改**（80/302/378/84）。
+  ② **近景裁切合成**：`RunBattleView` 新增**可选** `viewportScale`（默认 1 ⇒ 既有四个 Lab
+     页面逐像素不变）+ 新增 `blitRegion(ctx, src, dst)`（9 参数 `drawImage`，源坐标 ×dpr）。
+     近景窗 = **固定世界宽 170**（`pxPerWorld = 390/170 = 2.294`，**恒定、与 scale/轮径无关**）、
+     纵向锚在玩家**车箱顶**（`roofScreenFrac = 0.35`），由**纯函数** `heightLineCloseWindow()`
+     从「正式相机只读读数 + 车辆真实世界包围盒」换算 ⇒ 三套轮径是**同一把尺子**量出来的对照。
+     视口倍数 = `heightLineCloseSupersample(dpr) = min(4, max(1, 4/dpr))` ⇒ backing 恒定
+     ≈4× 视口（dpr1→S4 / dpr2→S2 / dpr4→S1），**密度与 dpr 无关、显存有上界**。
+  **实测（浏览器，同一帧内像素 + 只读快照双源）**：`pxPerWorld = 2.294` 恒定、`worldW = 170`、
+  `roofScreenFrac = 0.3500`、视口 2008×1432（×4）、**相对正式取景放大 3.25~5.48×**；
+  **像素量出**车体宽 **315/390 逻辑px**（R1 取景下仅 ≈44）、车顶 y=208 / 车底 y=298（完整在带内）；
+  同一帧「像素弹带−车顶 = **17.0 逻辑px**」vs「快照内 3 枚**敌弹**高于车顶、最近 **14.2 逻辑px**」，
+  **两源差 2.8 逻辑px**（互相印证）。DPR2 下另测：small 弹带在车顶上方 **15.5 逻辑px**；
+  **heavy 车顶上方 0 条亮弹带**（弹进入车身）—— 即「换轮径 ⇒ 车停在画面同一位置，弹线相对下沉」。
+  ⚠️ **读数口径勘误**：`closeUp.upscaleVsCamera = pxPerWorld/cameraScale` 在 S>1 时**会被误读**
+  （S=4 时它 ≈1）。真实「比官页大几倍」= `upscaleVsOfficial = pxPerWorld/(cameraScale/viewportScale)`。
+  ⚠️ **旧探针字段改名**：`closeUp.projectileYs: number[]` → `closeUp.projectiles: {x,y,team}[]`
+  （E2E 需要按**阵营**筛敌弹做双源印证）。
+  ⚠️⚠️ **像素检测的坑（踩过）**：弹条是**短亮条**（亮像素 ~9/行@DPR2、5~10@DPR1）——
+  `bc > 6` 且 `x += 2` 的取样在 **DPR1 下几乎全漏**。正确写法 = 逐像素 `x += 1`、阈值 `bc >= 3`。
+  回归 = `tests/portraitHeightLineLab.test.ts`（**16 测试**，新增 E 组 HL-12~HL-16）
+  + `tests/_e2e_height_line_lab.cjs`（check 调用点 **32 → 48**，运行期 **64 条**全绿，端口 8159）。
+  **冻结战斗读数一字未变**：small 0 命中 / 车顶 645 / 敌弹中位 641.3；heavy·large 各 41；
+  1100 = 600 + 500（12×40，首次 13.68s）；默认三段链 COMPLETE 数值一致。
+  ⚠️ **仍待真人验收**：4px 车高差在正常速度下能否**自然**读出（本 Lab 只把可读性从
+  ~1.5px 提到 ~15px 并给出机器证据，**不**替真人下结论）。
+
 ### 21b 更早结构事实（仍有效）
 - **Gadget 第三层闭环**（12 Queue `1be27d8`→`6b0356a`）：正式链
   gadgetDefId→…→createPlanckVehicle（独立 gadgetHardpoints）→Behavior→Renderer 已通；
@@ -1579,19 +1612,24 @@ Mac 迁移+E2E 入册 → cruise → Gadget 12 连 → `fbb3e05` → `dbbf27a` G
   `LAB_ENCOUNTERS` 新增一个`keep-distance`对手、其压制武器**枪口高度不同**；验收 = 录一段
   mango vs banana 的同类段落）；② **场地收束尖刺墙当内容**（最小原型 = 复用既有收束 hazard
   + 一个「拖时间」对手原型；验收 = 录一段对手被推到墙边的段落）。
-  ⚠️ **待真人观察**：车顶 645 vs 弹线 641 仅差 ~4px，真人可读性未知。
-- 候选下一步：① GADGET-EARN-PATHWAY-R1 ② 默认车平衡 Queue（mango 基线对照）
-  ③ ARCHIVE-RESTORE-RESILIENCE-R1 ④ DOC-COMPAT-REFRESH-R1 ⑤ PL-26 白名单 Bug Queue
-  ⑥ **真人录屏判「车高差能否自然读出」**（`height-line-lab.html`，见 21a）。
+  ⚠️ **待真人观察**：车顶 645 vs 弹线 641 仅差 ~4px —— R2 已把 Lab 取景**放大到 ~15 逻辑px
+  间距**并给出机器证据（见 21a 末条），但**真人能否自然读出仍未裁决**。
+- 候选下一步：① **真人录屏判「4px 车高差能否在正常速度自然看出」**（`height-line-lab.html`，
+  见 21a 末条）② GADGET-EARN-PATHWAY-R1 ③ 默认车平衡 Queue（mango 基线对照）
+  ④ ARCHIVE-RESTORE-RESILIENCE-R1 ⑤ DOC-COMPAT-REFRESH-R1 ⑥ PL-26 白名单 Bug Queue。
 - ⚠️ **未修 → 独立 Bug Queue**（禁顺手并改）：① `validateSnapshot` 星级缺口
   （`buildValidator.ts:54`）② `e2e:next-run` 崩（期望 3 实际 4）③④ 注释陈旧 ×2 ⑤ PC-14 预存红。
   ⚠️ **PL-26 白名单缺 `../core/partOptions`**（`8fb5978` 引入，待独立 Bug Queue）。
-  ⚠️ **R2-10 / H-05 预存红（本轮新证）**：`gadget-lab.html`（`dbbf27a` GADGET-VISUAL-VALIDATION-HOST-R1
+  ⚠️ **R2-10 / H-05 预存红**：`gadget-lab.html`（`dbbf27a` GADGET-VISUAL-VALIDATION-HOST-R1
   加入根目录）**从未登记**进 `tests/portraitDefaultEntry.test.ts` 的 R2-10 根 html 闭集清单，
-  也未进 `tests/portraitValidationHub.test.ts` 的 `NON_VALIDATION_PAGES` ⇒ 两条守卫在 **HEAD `bdbbcfd`
-  即 FAIL**（已在 HEAD 独立 `git worktree` 上实测复现：`extras=['gadget-lab.html']`）。
-  本轮**未顺手修**（遵守「禁顺手并改」）；本轮对这两张清单的编辑是**登记自己的**
-  `height-line-lab.html`，且**严格减少**了违规项（R2-10 缺口 2→1、H-05 extras 2→1），无回归。
-  旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
+  也未进 `tests/portraitValidationHub.test.ts` 的 `NON_VALIDATION_PAGES` ⇒ 两条守卫在 **HEAD 即 FAIL**
+  （已在 HEAD 独立 `git worktree` 上实测复现：`extras=['gadget-lab.html']`）。
+  ⚠️ **R2 新证的同一族预存红（Lab 测试数据扩容跑赢了旧守卫，全部已在 HEAD worktree 逐字复现）**：
+  `RP-21`（`portraitRunPage`：期望 18 实际 **72**）、`F1-R1` / `F1-R2`（`portraitBattleLabF1`：
+  期望 2 Loadout / 7 Encounter，实际 **6 / 10**）、`G1-05`（`portraitBattleLabG1`：期望 42 组合，
+  实际 **60** = 6×10）。根因同族 = `testData.ts` 的 `LAB_LOADOUTS` / `LAB_ENCOUNTERS` 扩容后
+  **旧守卫的期望值未同步**（`DEMO-ENCOUNTER-CONTENT-BATCH-R1` / `DEMO-RUN-VARIANTS-R1` 段）。
+  **R2 未顺手修**（遵守「禁顺手并改」）；对两张入口清单的编辑只在 R1 做过，且**严格减少**了
+  违规项（R2-10 缺口 2→1、H-05 extras 2→1）。旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
 - **未做别再 ask**：观感/动画/内容量/Buff/挂点几何/逐武器差异化；saw/spear 不动；
   watermelon gadget 挂点近 rear 是验收通过态；GVL 预设=死代码。

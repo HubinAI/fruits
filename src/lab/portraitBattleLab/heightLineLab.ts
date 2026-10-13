@@ -39,6 +39,9 @@
 import { PlayerViewportTransform } from '../../platform/playerViewport';
 import { PORTRAIT_LOGICAL_H, PORTRAIT_LOGICAL_W } from './constants';
 import {
+  HEIGHT_LINE_ACTION_BAND,
+  HEIGHT_LINE_BANDS,
+  HEIGHT_LINE_BATTLE_BAND,
   HEIGHT_LINE_CONFIGS,
   HEIGHT_LINE_LAB_CLEAR_LABEL,
   HEIGHT_LINE_LAB_IDLE_HINT,
@@ -46,22 +49,19 @@ import {
   HEIGHT_LINE_LAB_RESET_LABEL,
   HEIGHT_LINE_LAB_TITLE,
   HEIGHT_LINE_LOADOUT_TAG,
+  HEIGHT_LINE_LOG_BAND,
   HEIGHT_LINE_OPPONENT_ID,
+  HEIGHT_LINE_TOP_BAND,
   heightLineAssemblyFacts,
+  heightLineCloseSupersample,
+  heightLineCloseWindow,
   heightLineConfigOf,
   heightLineConfigsProblems,
   type HeightLineAssemblyFact,
   type HeightLineConfigId,
+  type HeightLineCloseWindow,
 } from './heightLineConfigs';
-import {
-  RUN_ACTION_BAND,
-  RUN_BANDS,
-  RUN_LOG_BAND,
-  RUN_PAGE_H,
-  RUN_PAGE_W,
-  RUN_STAGE_BAND,
-  RUN_TOP_BAND,
-} from './runPageLayout';
+import { RUN_PAGE_H, RUN_PAGE_W, type RunRect } from './runPageLayout';
 import { RunBattleRuntime } from './runBattleRuntime';
 import { RunBattleView } from './runBattleView';
 import { findEncounter } from './testData';
@@ -154,6 +154,52 @@ export interface HeightLineRoundRecord {
   readonly endReason: string | null;
 }
 
+/**
+ * DEMO-HEIGHT-LINE-READABILITY-R2｜**本帧近景取景读数**（探针 / E2E 用）。
+ *
+ * ⚠️ 全部是**读数**：近景窗由「正式相机实时 scale/offset」+「玩家车真实世界包围盒」
+ *    经纯函数 `heightLineCloseWindow()` 算出 —— 不含任何自己的镜头状态。
+ *    `upscaleVsCamera` = 显示密度 / 正式相机密度，即「相对官方取景放大了几倍」。
+ */
+export interface HeightLineCloseReading extends HeightLineCloseWindow {
+  /** 合成目标矩形（= Lab 本地战场带）。 */
+  readonly dst: RunRect;
+  /** 正式相机实时 scale（世界 px → 离屏画布逻辑 px）。 */
+  readonly cameraScale: number;
+  /** 正式相机在**本页像素密度**（`viewportScale` 归一）下的等效 scale。 */
+  readonly officialCameraScale: number;
+  /** 相对**本离屏画布**的放大倍数（= pxPerWorld / cameraScale）。 */
+  readonly upscaleVsCamera: number;
+  /**
+   * 相对**正式取景**的放大倍数（= pxPerWorld / officialCameraScale）。
+   *
+   * 这才是「观众在页面上看到的车，比官方 Run 页面里大几倍」的答案：
+   * 视口倍数只是让人看得清（不糊），真正把车放大的动作是近景裁切。
+   */
+  readonly upscaleVsOfficial: number;
+  readonly viewportScale: number;
+  readonly viewportW: number;
+  readonly viewportH: number;
+  /** 玩家（A 方）车体真实世界包围盒。 */
+  readonly playerBox: {
+    readonly minX: number;
+    readonly minY: number;
+    readonly maxX: number;
+    readonly maxY: number;
+  };
+  /**
+   * 本帧全部存活弹丸的只读样本（**世界坐标 + 阵营**；只读渲染快照，不写任何状态）。
+   *
+   * 它是「弹确实走在近景窗内、且**敌弹**从车顶上方掠过」这条验收的只读来源 ——
+   * 不预测、不写死，直接读正式渲染快照；调用方把它与**同一帧**的真实像素交叉核对。
+   */
+  readonly projectiles: readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly team: string;
+  }[];
+}
+
 export interface HeightLineLabProbe {
   readonly logicalW: number;
   readonly logicalH: number;
@@ -195,6 +241,16 @@ export interface HeightLineLabProbe {
     readonly offsetY: number;
     readonly dpr: number;
   };
+  /** 正式 battle 相机实时状态（离屏画布逻辑坐标域；坐标需减 `cropX/cropY` 才落到安全区）。 */
+  readonly battleCamera: {
+    readonly scale: number;
+    readonly offsetX: number;
+    readonly offsetY: number;
+    readonly cropX: number;
+    readonly cropY: number;
+  };
+  /** 本帧近景取景读数（未建立战斗 = `null`）。 */
+  readonly closeUp: HeightLineCloseReading | null;
   readonly canvas: {
     readonly backingW: number;
     readonly backingH: number;
@@ -217,8 +273,20 @@ export class HeightLineLab {
   private readonly problems: readonly string[];
   private readonly facts: readonly HeightLineAssemblyFact[];
 
+  /**
+   * 离屏视口放大倍数（按设备 DPR 反比压回；见 `heightLineCloseSupersample`）。
+   *
+   * ⚠️ 它只让**官方画面被栅格化得更密**，不改任何镜头算法 —— 这是「看清 3.7 世界像素」
+   *    的前提：低清中间图会把这条差异先降采样糊掉，再放大就只剩一团渐变。
+   */
+  private readonly viewportScale = heightLineCloseSupersample(
+    typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1,
+  );
   private readonly vp = new PlayerViewportTransform(PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
-  private readonly battleView = new RunBattleView();
+  /** 近景取景宿主：与另四个 Lab 页面**同一个** `RunBattleView`，只多给一个视口放大倍数。 */
+  private readonly battleView = new RunBattleView(document, { viewportScale: this.viewportScale });
+  /** 本帧近景窗（`draw()` 每帧重算；未建立战斗 = `null`）。 */
+  private closeUpWindow: HeightLineCloseWindow | null = null;
 
   /** 当前这一场的运行时。**同一时刻只允许存在一个** —— 切换 / 清场一律先 dispose。 */
   private runtime: RunBattleRuntime | null = null;
@@ -445,6 +513,65 @@ export class HeightLineLab {
     return this.runtime.result === null ? 'running' : 'done';
   }
 
+  /**
+   * DEMO-HEIGHT-LINE-READABILITY-R2｜本帧近景窗 = 「正式相机读数 + 玩家车真实世界包围盒」
+   * 经**纯函数**换算出「离屏画布上的哪个子矩形铺满战场带」。
+   *
+   * ⚠️ 不写任何相机状态、不新建相机：`render()` 仍由正式 `reframe` + 逐帧跟随决定；
+   *    本方法只做**裁切合成**的前半段（算出源矩形）。
+   */
+  private computeCloseUpWindow(rt: RunBattleRuntime): HeightLineCloseWindow {
+    const t = this.battleView.viewTransform();
+    const size = this.battleView.viewportSize();
+    const box = rt.vehicleBox('A');
+    return heightLineCloseWindow({
+      roofWorldY: box.minY,
+      anchorWorldX: rt.vehicleX('A'),
+      scale: t.scale,
+      offsetX: t.offsetX,
+      offsetY: t.offsetY,
+      viewportW: size.w,
+      viewportH: size.h,
+    });
+  }
+
+  /**
+   * 近景取景读数（探针 / E2E 用）：把 `draw()` 算出的窗、本帧正式相机读数、
+   * 玩家车真实包围盒、以及**本帧全部存活弹丸（世界坐标 + 阵营）**打包。
+   *
+   * ⚠️ `projectiles` 是「弹确实走在近景窗内、且**敌弹**从车顶上方掠过」这条验收的
+   *    **只读来源** —— 不预测、不写死，直接读正式渲染快照；E2E 会在**同一帧**里
+   *    再用真实像素交叉核对，避免只读快照自证。
+   */
+  private readCloseUp(): HeightLineCloseReading | null {
+    const win = this.closeUpWindow;
+    const rt = this.runtime;
+    if (!win || !rt) return null;
+    const t = this.battleView.viewTransform();
+    const size = this.battleView.viewportSize();
+    const box = rt.vehicleBox('A');
+    // 视口按 `viewportScale` 等比放大 ⇒ 安全区同比 ⇒ 正式相机 scale 同比
+    // ⇒ 除以 `viewportScale` 就是「同一算法在正式 390×302 视口下会得到多少」。
+    const officialCameraScale = t.scale / this.viewportScale;
+    return {
+      ...win,
+      dst: { ...HEIGHT_LINE_BATTLE_BAND },
+      cameraScale: t.scale,
+      officialCameraScale,
+      upscaleVsCamera: t.scale > 0 ? win.pxPerWorld / t.scale : 0,
+      upscaleVsOfficial: officialCameraScale > 0 ? win.pxPerWorld / officialCameraScale : 0,
+      viewportScale: this.viewportScale,
+      viewportW: size.w,
+      viewportH: size.h,
+      playerBox: { minX: box.minX, minY: box.minY, maxX: box.maxX, maxY: box.maxY },
+      projectiles: (rt.snapshot().projectiles ?? []).map((p) => ({
+        x: p.center.x,
+        y: p.center.y,
+        team: p.team,
+      })),
+    };
+  }
+
   /* ------------------------------------------------------------- 循环 */
 
   /** 真实物理时间推进正式编排器，直到出结果（与 Run Page 同一条 `world.step` 语义）。 */
@@ -520,29 +647,54 @@ export class HeightLineLab {
     ctx.fillStyle = COLORS.pageBg;
     ctx.fillRect(0, 0, RUN_PAGE_W, RUN_PAGE_H);
     ctx.fillStyle = COLORS.topBandBg;
-    ctx.fillRect(RUN_TOP_BAND.x, RUN_TOP_BAND.y, RUN_TOP_BAND.w, RUN_TOP_BAND.h);
+    ctx.fillRect(HEIGHT_LINE_TOP_BAND.x, HEIGHT_LINE_TOP_BAND.y, HEIGHT_LINE_TOP_BAND.w, HEIGHT_LINE_TOP_BAND.h);
     ctx.fillStyle = COLORS.stageBg;
-    ctx.fillRect(RUN_STAGE_BAND.x, RUN_STAGE_BAND.y, RUN_STAGE_BAND.w, RUN_STAGE_BAND.h);
+    ctx.fillRect(
+      HEIGHT_LINE_BATTLE_BAND.x,
+      HEIGHT_LINE_BATTLE_BAND.y,
+      HEIGHT_LINE_BATTLE_BAND.w,
+      HEIGHT_LINE_BATTLE_BAND.h,
+    );
     ctx.fillStyle = COLORS.logBandBg;
-    ctx.fillRect(RUN_LOG_BAND.x, RUN_LOG_BAND.y, RUN_LOG_BAND.w, RUN_LOG_BAND.h);
+    ctx.fillRect(HEIGHT_LINE_LOG_BAND.x, HEIGHT_LINE_LOG_BAND.y, HEIGHT_LINE_LOG_BAND.w, HEIGHT_LINE_LOG_BAND.h);
     ctx.fillStyle = COLORS.actionBandBg;
-    ctx.fillRect(RUN_ACTION_BAND.x, RUN_ACTION_BAND.y, RUN_ACTION_BAND.w, RUN_ACTION_BAND.h);
+    ctx.fillRect(
+      HEIGHT_LINE_ACTION_BAND.x,
+      HEIGHT_LINE_ACTION_BAND.y,
+      HEIGHT_LINE_ACTION_BAND.w,
+      HEIGHT_LINE_ACTION_BAND.h,
+    );
 
-    // 中部舞台：真实战斗世界（正式 Renderer + 正式相机）
+    // 中部战场：真实战斗世界（正式 Renderer + 正式相机），**近景裁切**后铺满战场带。
     const rt = this.runtime;
     if (rt && this.activeId) {
       this.battleView.render(rt);
-      this.battleView.blit(ctx);
+      this.closeUpWindow = this.computeCloseUpWindow(rt);
+      this.battleView.blitRegion(
+        ctx,
+        {
+          x: this.closeUpWindow.srcX,
+          y: this.closeUpWindow.srcY,
+          w: this.closeUpWindow.srcW,
+          h: this.closeUpWindow.srcH,
+        },
+        HEIGHT_LINE_BATTLE_BAND,
+      );
     } else {
+      this.closeUpWindow = null;
       ctx.fillStyle = COLORS.idle;
       ctx.font = `bold 20px ${FONT_STACK}`;
       ctx.textAlign = 'center';
-      ctx.fillText(HEIGHT_LINE_LAB_IDLE_HINT, RUN_STAGE_BAND.w / 2, RUN_STAGE_BAND.y + RUN_STAGE_BAND.h / 2);
+      ctx.fillText(
+        HEIGHT_LINE_LAB_IDLE_HINT,
+        HEIGHT_LINE_BATTLE_BAND.w / 2,
+        HEIGHT_LINE_BATTLE_BAND.y + HEIGHT_LINE_BATTLE_BAND.h / 2,
+      );
       ctx.textAlign = 'left';
     }
 
     ctx.fillStyle = COLORS.divider;
-    for (const band of RUN_BANDS.slice(1)) ctx.fillRect(band.x, band.y, band.w, 1);
+    for (const band of HEIGHT_LINE_BANDS.slice(1)) ctx.fillRect(band.x, band.y, band.w, 1);
 
     // 顶部带
     ctx.fillStyle = COLORS.text;
@@ -575,12 +727,12 @@ export class HeightLineLab {
 
     ctx.fillStyle = COLORS.dim;
     ctx.font = `13px ${FONT_STACK}`;
-    ctx.fillText(this.statusLine(), 14, RUN_ACTION_BAND.y + 30);
+    ctx.fillText(this.statusLine(), 14, HEIGHT_LINE_ACTION_BAND.y + 30);
   }
 
   private drawLog(ctx: CanvasRenderingContext2D): void {
     const x = 14;
-    let y = RUN_LOG_BAND.y + 26;
+    let y = HEIGHT_LINE_LOG_BAND.y + 26;
     const line = (text: string, color: string = COLORS.dim, bold = false): void => {
       ctx.fillStyle = color;
       ctx.font = `${bold ? 'bold ' : ''}12px ${FONT_STACK}`;
@@ -674,6 +826,7 @@ export class HeightLineLab {
     const r = this.canvas.getBoundingClientRect();
     const live = this.runtime && this.activeId ? this.readLive(this.runtime, this.activeId) : null;
     const stats = this.battleView.assetStats();
+    const cam = this.battleView.viewTransform();
     return {
       logicalW: PORTRAIT_LOGICAL_W,
       logicalH: PORTRAIT_LOGICAL_H,
@@ -717,6 +870,14 @@ export class HeightLineLab {
         offsetY: this.vp.offsetY,
         dpr: this.vp.dpr,
       },
+      battleCamera: {
+        scale: cam.scale,
+        offsetX: cam.offsetX,
+        offsetY: cam.offsetY,
+        cropX: cam.cropX,
+        cropY: cam.cropY,
+      },
+      closeUp: this.readCloseUp(),
       canvas: {
         backingW: this.canvas.width,
         backingH: this.canvas.height,

@@ -46,6 +46,7 @@
 
 import type { BuildDraft } from '../buildEditorModel';
 import { registry } from '../../core/content';
+import { RUN_PAGE_H, RUN_PAGE_W } from './runPageLayout';
 import { LAB_ENCOUNTERS } from './testData';
 
 /** 三套配置的 id（页面 / 测试 / 探针共用，不各写一份）。 */
@@ -190,6 +191,189 @@ export function heightLineAssemblyFacts(): readonly HeightLineAssemblyFact[] {
   });
 }
 
+/* ------------------------------------------------------ Lab 本地页面布局 */
+
+/**
+ * DEMO-HEIGHT-LINE-READABILITY-R2｜**Lab 本地**四带布局。
+ *
+ * ⚠️ **只影响本页**：不改 `runPageLayout.ts` 的正式 Run 四带（`run-page.html` 零影响）。
+ *    与它的唯一差别 = 把**中部战场**从 302 提到 **344**（日志区同比收窄 42），
+ *    让近景窗有更多纵向世界（车顶上方更宽的弹道通道 + 车下更多地面）。
+ *
+ * ⚠️ 布局本身**不能**放大小车 —— 正式 battle 相机是按「两车外廓并集占安全区宽的
+ *    82~88%」构图的（见 `renderer.reframe` battle 分支），安全区宽 = 舞台带宽 = 页面宽
+ *    = 390 ⇒ 无论战场带多高、多宽都不会改变车辆的屏占比。**放大只能来自近景裁切**
+ *    （见下方 `heightLineCloseWindow`）。本处的加高是构图上「少浪费纵向空间」，
+ *    不是放大手段。
+ *
+ * 四条带**由总高反推** ⇒ 结构上不可能漏缝或重叠（`heightLineConfigsProblems` 断言合计 = 页面高）。
+ */
+export const HEIGHT_LINE_TOP_BAND_H = 80;
+export const HEIGHT_LINE_BATTLE_BAND_H = 344;
+export const HEIGHT_LINE_ACTION_BAND_H = 84;
+export const HEIGHT_LINE_LOG_BAND_H =
+  RUN_PAGE_H - HEIGHT_LINE_TOP_BAND_H - HEIGHT_LINE_BATTLE_BAND_H - HEIGHT_LINE_ACTION_BAND_H;
+
+export const HEIGHT_LINE_TOP_BAND = { x: 0, y: 0, w: RUN_PAGE_W, h: HEIGHT_LINE_TOP_BAND_H } as const;
+export const HEIGHT_LINE_BATTLE_BAND = {
+  x: 0,
+  y: HEIGHT_LINE_TOP_BAND.h,
+  w: RUN_PAGE_W,
+  h: HEIGHT_LINE_BATTLE_BAND_H,
+} as const;
+export const HEIGHT_LINE_LOG_BAND = {
+  x: 0,
+  y: HEIGHT_LINE_BATTLE_BAND.y + HEIGHT_LINE_BATTLE_BAND.h,
+  w: RUN_PAGE_W,
+  h: HEIGHT_LINE_LOG_BAND_H,
+} as const;
+export const HEIGHT_LINE_ACTION_BAND = {
+  x: 0,
+  y: HEIGHT_LINE_LOG_BAND.y + HEIGHT_LINE_LOG_BAND.h,
+  w: RUN_PAGE_W,
+  h: HEIGHT_LINE_ACTION_BAND_H,
+} as const;
+
+/** 自上而下的绘制 / 布局顺序（数组顺序即 y 升序）。 */
+export const HEIGHT_LINE_BANDS = [
+  HEIGHT_LINE_TOP_BAND,
+  HEIGHT_LINE_BATTLE_BAND,
+  HEIGHT_LINE_LOG_BAND,
+  HEIGHT_LINE_ACTION_BAND,
+] as const;
+
+/* -------------------------------------------- 近景取景（Lab 本地，只换取景） */
+
+/**
+ * 近景窗覆盖的**世界宽度**（世界 px）。
+ *
+ * ⚠️ 这是**取景**不是**规则**：它只决定「一个世界像素摊到几个显示像素」，
+ *    不参与任何物理 / 数值 / 命中判定。
+ *
+ * 显示密度 = `HEIGHT_LINE_BATTLE_BAND.w / 本值` = 390 / 170 ≈ **2.294 显示px / 世界px**
+ * （与 DPR 无关：页面逻辑像素 × DPR 与画布逻辑像素 × DPR 同比）。
+ *
+ * 对照基线（`DEMO-DOMINANT-BUILD-ROOT-R1` + 本轮实测）：
+ *   官方 battle 相机在远距阶段的 `scale ≈ 0.41` 世界px→画布px（近距最高 ≈ 0.56），
+ *   而「`mango+small` 车顶 645 vs 敌弹线 641.3」只差 **3.7 个世界像素**
+ *   ⇒ 原取景下只有 **≈1.5 逻辑像素**（正常速度**不可能**看出，这正是上一轮的结论）；
+ *   近景下同一差值 = **≈8.5 逻辑像素**，且整辆车从 ≈44 逻辑像素放大到 ≈248。
+ */
+export const HEIGHT_LINE_CLOSE_WORLD_W = 170;
+
+/**
+ * 车顶在近景窗里的纵向位置（0 = 窗顶，0.35 = 车顶距窗顶 35% 处）。
+ *
+ * 上方余下的 65% 留给**弹道通道**（敌弹从车顶掠过时必须走在窗内），下方留给车体与地面。
+ */
+export const HEIGHT_LINE_CLOSE_ROOF_FRAC = 0.35;
+
+/**
+ * 离屏视口放大倍数**上限**。
+ *
+ * 为什么需要它：把低清画面吹大不等于看清 —— 官方画面必须以**接近近景显示密度**的
+ * 像素密度栅格化，否则「3.7 世界像素」在中间那张低清图上就已经被降采样糊掉，
+ * 放大后只剩一团渐变。上限取 4 是「锐度 ↔ 画布面积」的折中（见 `heightLineCloseSupersample`）。
+ */
+export const HEIGHT_LINE_CLOSE_MAX_SUPERSAMPLE = 4;
+
+export interface HeightLineCloseInput {
+  /** 玩家（A 方）**车顶**世界 y（= `vehicleBox('A').minY`，与正式相机 includeVehicle 同口径）。 */
+  readonly roofWorldY: number;
+  /** 水平锚点：玩家车体中心世界 x（`vehicleX('A')`）。 */
+  readonly anchorWorldX: number;
+  /** 正式相机实时 scale（`viewTransform().scale`，世界 px → 画布逻辑 px）。 */
+  readonly scale: number;
+  readonly offsetX: number;
+  readonly offsetY: number;
+  /** 离屏视口逻辑尺寸（`RunBattleView.viewportSize()`）。 */
+  readonly viewportW: number;
+  readonly viewportH: number;
+}
+
+export interface HeightLineCloseWindow {
+  /** 窗覆盖的世界尺寸（恒定，与相机 scale 无关 ⇒ 三套配置**同尺度**可直接对照）。 */
+  readonly worldW: number;
+  readonly worldH: number;
+  /** 实际生效的窗左 / 窗顶（世界坐标；被夹取时与目标值不同）。 */
+  readonly worldLeft: number;
+  readonly worldTop: number;
+  /** 离屏画布逻辑坐标下的源矩形。 */
+  readonly srcX: number;
+  readonly srcY: number;
+  readonly srcW: number;
+  readonly srcH: number;
+  /** 是否触到视口边缘被夹取（夹取 ⇒ 近景窗贴边，锚点不再居中）。 */
+  readonly clamped: boolean;
+  /** 显示密度（显示 px / 世界 px）—— 恒为 `战场带宽 / 世界宽`。 */
+  readonly pxPerWorld: number;
+  /** 车顶落在窗内的纵向比例（0.35 = 目标值；被夹取时会偏离）。 */
+  readonly roofScreenFrac: number;
+}
+
+/**
+ * 近景窗（纯函数，无 DOM / 无 Canvas）——**只换算取景，不碰任何相机状态**。
+ *
+ * 输入全部是**只读读数**（正式相机的 `scale/offsetX/offsetY` + 玩家车的真实世界包围盒），
+ * 输出是「离屏画布上的哪个子矩形，应当铺满战场带」。调用方把它交给
+ * `RunBattleView.blitRegion()` 做纯合成 —— 官方镜头算法一行未改。
+ *
+ * ⚠️ 窗宽**恒定**（`HEIGHT_LINE_CLOSE_WORLD_W`）⇒ 三套轮径在同一显示尺度下对照；
+ *    纵向锚在**玩家车顶**，所以小轮 / 重轮 / 大轮的车顶始终落在窗内同一相对高度，
+ *    「弹线相对车顶高还是低」在画面上是**同一把尺子**量出来的。
+ */
+export function heightLineCloseWindow(input: HeightLineCloseInput): HeightLineCloseWindow {
+  const bandW = HEIGHT_LINE_BATTLE_BAND.w;
+  const bandH = HEIGHT_LINE_BATTLE_BAND.h;
+  const worldW = HEIGHT_LINE_CLOSE_WORLD_W;
+  // 与战场带同宽高比 ⇒ 不做非等比拉伸（车轮不会被拉扁）
+  const worldH = (worldW * bandH) / bandW;
+  const scale = Number.isFinite(input.scale) && input.scale > 0 ? input.scale : 1e-6;
+
+  const wantSrcX = (input.anchorWorldX - worldW / 2) * scale + input.offsetX;
+  const wantSrcY = (input.roofWorldY - HEIGHT_LINE_CLOSE_ROOF_FRAC * worldH) * scale + input.offsetY;
+  const srcW = worldW * scale;
+  const srcH = worldH * scale;
+
+  // 夹取到视口内（源矩形永远不出画；夹取只影响构图，不影响密度）
+  const srcX = Math.min(Math.max(0, input.viewportW - srcW), Math.max(0, wantSrcX));
+  const srcY = Math.min(Math.max(0, input.viewportH - srcH), Math.max(0, wantSrcY));
+
+  const worldLeft = (srcX - input.offsetX) / scale;
+  const worldTop = (srcY - input.offsetY) / scale;
+  return {
+    worldW,
+    worldH,
+    worldLeft,
+    worldTop,
+    srcX,
+    srcY,
+    srcW,
+    srcH,
+    clamped: Math.abs(srcX - wantSrcX) > 0.01 || Math.abs(srcY - wantSrcY) > 0.01,
+    pxPerWorld: bandW / worldW,
+    roofScreenFrac: (input.roofWorldY - worldTop) / worldH,
+  };
+}
+
+/**
+ * 离屏视口放大倍数（按设备 DPR 反比压回）。
+ *
+ * 推导：近景显示密度 = 2.294 显示px/世界px（见 `HEIGHT_LINE_CLOSE_WORLD_W`）；
+ * 官方画布的**逻辑**密度 = `battleScale × viewportScale`；要求逻辑密度 ≥ 显示密度
+ * ⇒ `viewportScale ≥ 2.294 / 0.41 ≈ 5.6`。
+ * 但画布 backing 面积 = `(502·S·dpr) × (358·S·dpr)` 随 dpr 平方增长 ⇒ 按 dpr 反比压回，
+ * 使 backing **恒定 ≈ 4× 视口**（≈ 2008×1600 device px）：
+ *   - dpr 1 → S = 4（backing 2008×1600，逻辑密度 ≈ 1.63 px/世界px）
+ *   - dpr 2 → S = 2（同一 backing）
+ *   - dpr 3 → S ≈ 1.33（同一 backing）
+ * 于是密度的**设备**结果与 dpr 无关，显存占用有上界，正常速度不受影响。
+ */
+export function heightLineCloseSupersample(dpr: number): number {
+  const d = Number.isFinite(dpr) && dpr > 0 ? dpr : 1;
+  return Math.min(HEIGHT_LINE_CLOSE_MAX_SUPERSAMPLE, Math.max(1, HEIGHT_LINE_CLOSE_MAX_SUPERSAMPLE / d));
+}
+
 /* ------------------------------------------------------------ 出厂自检 */
 
 /**
@@ -239,6 +423,42 @@ export function heightLineConfigsProblems(): readonly string[] {
     if (f.energyUsed > f.energyCapacity) {
       problems.push(`${f.id}: Energy ${f.energyUsed} 超过车身容量 ${f.energyCapacity}`);
     }
+  }
+  // --- DEMO-HEIGHT-LINE-READABILITY-R2：Lab 本地布局自检（四带无缝 → 不可能漏缝/重叠）---
+  let cursor = 0;
+  for (const b of HEIGHT_LINE_BANDS) {
+    if (b.x !== 0 || b.w !== RUN_PAGE_W) problems.push(`布局带 y=${b.y} 未铺满页面宽`);
+    if (b.y !== cursor) problems.push(`布局带 y=${b.y} 与前一带不连续（期望 ${cursor}）`);
+    cursor = b.y + b.h;
+  }
+  if (cursor !== RUN_PAGE_H) problems.push(`四带合计 ${cursor} ≠ 页面高 ${RUN_PAGE_H}`);
+  if (HEIGHT_LINE_BATTLE_BAND.h <= 302) {
+    problems.push(`战场带高 ${HEIGHT_LINE_BATTLE_BAND.h} 必须大于正式 Run 的 302（布局强化未生效）`);
+  }
+  // --- 近景取景自检：等比、恒定密度、放大倍数与 DPR 无关 ---
+  const closeProbe = heightLineCloseWindow({
+    roofWorldY: 0,
+    anchorWorldX: 0,
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
+    viewportW: 1e6,
+    viewportH: 1e6,
+  });
+  const aspect = HEIGHT_LINE_BATTLE_BAND.h / HEIGHT_LINE_BATTLE_BAND.w;
+  if (Math.abs(closeProbe.worldW * aspect - closeProbe.worldH) > 1e-9) {
+    problems.push('近景窗宽高比与战场带不一致（会出现非等比拉伸）');
+  }
+  if (Math.abs(closeProbe.pxPerWorld - HEIGHT_LINE_BATTLE_BAND.w / HEIGHT_LINE_CLOSE_WORLD_W) > 1e-9) {
+    problems.push('近景显示密度 ≠ 战场带宽 / 近景世界宽');
+  }
+  const s1 = heightLineCloseSupersample(1);
+  const s2 = heightLineCloseSupersample(2);
+  if (s1 < 1 || s2 < 1 || s1 > HEIGHT_LINE_CLOSE_MAX_SUPERSAMPLE || s2 > HEIGHT_LINE_CLOSE_MAX_SUPERSAMPLE) {
+    problems.push('离屏视口放大倍数落在合法区间外');
+  }
+  if (Math.abs(s1 * 1 - s2 * 2) > 1e-9) {
+    problems.push('离屏 backing 密度必须与 DPR 无关（S × dpr 需恒定）');
   }
   return problems;
 }

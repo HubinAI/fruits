@@ -4,7 +4,7 @@
 
 | 要找什么 | 去哪 |
 |---|---|
-| 本轮明细 / 实测数字 | `memory/YYYY-MM-DD.md`（最新 `2026-10-12.md`） |
+| 本轮明细 / 实测数字 | `memory/YYYY-MM-DD.md`（最新 `2026-10-13.md`） |
 | **现状快照（滚动台账）** | `REF_GUARDS_TRAPS_CONTRACTS.md` **§21** |
 | 守卫 / 环境陷阱 / §1–§20 契约全文 / 未决台账 §A | 同上 REF（改前必读） |
 | **跨窗口续接（先读）** | `docs/handoff/NEW-WINDOW-PROMPT.md` + `archive/交接文档_*.md` ×6 |
@@ -12,7 +12,16 @@
 
 ## 0. 现状 / 下一步（新窗口先读 · 明细 → REF §21）
 - HEAD 段起点 `7eeb60f`；分支 `prototype-portrait-battle-lab`（实验可删）；Mac arm64。
-- **最新轮 = `DEMO-HEIGHT-LINE-VISUAL-LAB-R1`（车高 × 水平弹道**对照台**，独立 Lab）** → REF §21a。
+- **最新轮 = `DEMO-HEIGHT-LINE-READABILITY-R2`（Lab 取景强化：四带 302→344 + 近景裁切合成）** → REF §21a。
+- ⚠️⚠️ **R2 核心数字**：官方 battle 相机 `scale` 实测 **0.41~0.64** ⇒ 3.7 世界像素车顶差在官页只渲染
+  **≈1.5 逻辑像素**（看不出）。R2 近景窗 = **固定世界宽 170** ⇒ `pxPerWorld = 2.294`（恒定、与
+  scale/轮径无关）、纵向锚在**车箱顶**（`roofScreenFrac = 0.35`）⇒ **相对正式取景放大 3.25~5.48×**；
+  浏览器像素实测：车体宽 **315/390 逻辑px**、弹带在车顶上方 **15~17 逻辑px**（heavy 则 0 条 ⇒ 弹进入车身）。
+  `RunBattleView` 新增**可选** `viewportScale`（默认 1 ⇒ 既有 Lab 页面逐像素不变）+ `blitRegion()`。
+  ⚠️ 读数口径：S>1 时 `upscaleVsCamera` 会被误读，真值看 `upscaleVsOfficial`。
+  ⚠️⚠️ **像素检测坑**：弹条是短亮条（~9 亮像素/行）⇒ 必须 `x += 1` + 阈值 `bc >= 3`，
+  `x += 2`/`bc > 6` 在 **DPR1 下几乎全漏**（踩过）。
+- ⚠️ **上轮 `DEMO-HEIGHT-LINE-VISUAL-LAB-R1`**：车高 × 水平弹道**对照台**（独立 Lab，只换轮径）→ REF §21a。
 - ⚠️⚠️ **上轮 `DEMO-DOMINANT-BUILD-ROOT-R1` 不可误判的一条**：A-mango-cannon 通吃 =
   **车顶高度**（**不是**质量 / 扭矩 / cannon 数值）—— `mango+small` 车顶 **645** > 敌机枪弹线
   中位 **641.3** ⇒ 弹**掠过**（唯一 0 命中格）；其余底盘车顶 626–637 ⇒ 中弹 37–47 次。
@@ -34,6 +43,10 @@
   ⑥ PL-26 白名单缺 `../core/partOptions` ⑦ **R2-10 / H-05 预存红**：`gadget-lab.html`
   （`dbbf27a` 加入根目录）从未登记进 `portraitDefaultEntry` 清单 / `NON_VALIDATION_PAGES`
   ⇒ **HEAD 即红**（已用独立 worktree 实测）。旧「浏览器无 COMPLETE」已被 `67414d2` 取代。
+  ⑧ **R2 新证同族预存红**（Lab 测试数据扩容跑赢旧守卫，均已在 HEAD worktree 逐字复现）：
+  `RP-21`（期望 18 实际 72）、`F1-R1`/`F1-R2`（期望 2/7 实际 6/10）、`G1-05`（期望 42 实际 60）。
+  ⇒ **判红必先建 HEAD 独立 worktree 复现**（`git worktree add /tmp/x HEAD` + symlink node_modules），
+  否则会把预存红误记到本轮账上。
 - **未做别再 ask**：观感 / 动画 / 内容量 / Buff / 挂点几何 / 逐武器差异化；saw / spear 不动；
   watermelon gadget 挂点近 rear 是验收通过态；GVL 预设 = 死代码。
 
