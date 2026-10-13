@@ -41,8 +41,8 @@ import {
   ENCOUNTER_LAB_RESET_LABEL,
   ENCOUNTER_LAB_TITLE,
   encounterBatchOf,
-  encounterLabContext,
-  type EncounterBatchId,
+  encounterLabContextFor,
+  type EncounterBatchEntry,
   type EncounterLabContext,
 } from './encounterValidation';
 import {
@@ -75,6 +75,33 @@ const COLORS = {
 } as const;
 
 export type EncounterLabPhase = 'idle' | 'running' | 'done';
+
+/**
+ * CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1｜**批次配置**（页面可选默认 / 扩展批次）。
+ *
+ * 这是「默认原三敌批次一字不变 + 扩展批次独立可切换」的隔离点：
+ *   - 默认批次 = `DEFAULT_ENCOUNTER_LAB_BATCH`（标题 / 副标题 / 三敌 / 解析器都取自现状）；
+ *   - 扩展批次 = `encounterBatchExtension.ts` 声明的独立批次（URL `?batch=ext`）。
+ * 控制器其余部分与批次无关（只经 `batch` / `batchOf` 读写）。
+ */
+export interface EncounterLabBatch {
+  /** 稳定标识（`default` / `ext`），供探针与 URL 模式核对。 */
+  readonly mode: 'default' | 'ext';
+  readonly title: string;
+  readonly lead: string;
+  readonly entries: readonly EncounterBatchEntry[];
+  /** 按 id 取条目；不在本批次内 → `null`。 */
+  readonly entryOf: (id: string) => EncounterBatchEntry | null;
+}
+
+/** 默认批次（等价于本页既有行为：三敌 + 既有标题 / 副标题 / 解析器）。 */
+export const DEFAULT_ENCOUNTER_LAB_BATCH: EncounterLabBatch = {
+  mode: 'default',
+  title: ENCOUNTER_LAB_TITLE,
+  lead: ENCOUNTER_LAB_LEAD,
+  entries: ENCOUNTER_BATCH,
+  entryOf: encounterBatchOf,
+};
 
 /**
  * 一场战斗**刚建立**时的真实读数（在任何物理推进之前采集）。
@@ -158,6 +185,8 @@ export interface EncounterLabProbe {
   readonly playerLabel: string;
   readonly playerBodyName: string;
   readonly playerHpMax: number;
+  /** 当前批次模式（`default` = 原三敌；`ext` = 扩展批次）。 */
+  readonly batchMode: 'default' | 'ext';
   readonly batch: readonly {
     readonly id: string;
     readonly label: string;
@@ -206,6 +235,8 @@ export class EncounterLab {
   private readonly resetButton: HTMLButtonElement;
   /** 页面文案与对手清单（全部来自正式链路解析的上下文）。 */
   private readonly ctxInfo: EncounterLabContext;
+  /** 当前批次（默认三敌 / 扩展批次；URL mode 决定）。 */
+  private readonly batch: EncounterLabBatch;
 
   /** 固定摄像机：竖屏 390×844 逻辑舞台（复用共享 contain 变换契约，不引入第二套坐标）。 */
   private readonly vp = new PlayerViewportTransform(PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
@@ -214,7 +245,7 @@ export class EncounterLab {
 
   /** 当前这一场的运行时。**同一时刻只允许存在一个** —— 切换/Reset 一律先 dispose。 */
   private runtime: RunBattleRuntime | null = null;
-  private activeId: EncounterBatchId | null = null;
+  private activeId: string | null = null;
   private fresh: FreshBattleReading | null = null;
   private runtimeSerial = 0;
   private disposedCount = 0;
@@ -226,9 +257,10 @@ export class EncounterLab {
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, batch: EncounterLabBatch = DEFAULT_ENCOUNTER_LAB_BATCH) {
     this.root = root;
-    this.ctxInfo = encounterLabContext();
+    this.batch = batch;
+    this.ctxInfo = encounterLabContextFor(batch.entries);
     this.barEl = document.createElement('div');
     this.barEl.className = 'elab-bar';
     this.stageWrap = document.createElement('div');
@@ -261,7 +293,7 @@ export class EncounterLab {
     this.root.replaceChildren();
     this.root.classList.add('elab-root');
 
-    for (const entry of ENCOUNTER_BATCH) {
+    for (const entry of this.batch.entries) {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'elab-btn';
@@ -310,7 +342,7 @@ export class EncounterLab {
    * 也不可能让上一场的弹丸 / 接触 / 事件订阅活到下一场。
    */
   select(id: string): void {
-    const entry = encounterBatchOf(id);
+    const entry = this.batch.entryOf(id);
     if (!entry) return; // 不在批次内 → 什么都不做（不静默换成别的对手）
     if (this.activeId === id && this.runtime !== null) return; // 同一对手重复点击 = 幂等
 
@@ -425,7 +457,7 @@ export class EncounterLab {
         const hp = rt.hp();
         this.rounds.push({
           encounterId: rt.encounterId,
-          label: encounterBatchOf(rt.encounterId)?.label ?? rt.encounterId,
+          label: this.batch.entryOf(rt.encounterId)?.label ?? rt.encounterId,
           steps: rt.stepCount,
           timeMs: rt.timeMs,
           playerHp: hp.a,
@@ -508,12 +540,12 @@ export class EncounterLab {
     // 3) 顶部带（4 行，全部落在 80px 带内：23 / 40 / 58 / 74）
     ctx.fillStyle = COLORS.text;
     ctx.font = `bold 17px ${FONT_STACK}`;
-    ctx.fillText(ENCOUNTER_LAB_TITLE, 14, 23);
+    ctx.fillText(this.batch.title, 14, 23);
     ctx.fillStyle = COLORS.dim;
     ctx.font = `12px ${FONT_STACK}`;
-    ctx.fillText(ENCOUNTER_LAB_LEAD, 14, 40);
+    ctx.fillText(this.batch.lead, 14, 40);
 
-    const active = this.activeId ? encounterBatchOf(this.activeId) : null;
+    const active = this.activeId ? this.batch.entryOf(this.activeId) : null;
     const entry = active ? this.ctxInfo.encounters.find((e) => e.id === active.id) : null;
     if (active && entry) {
       ctx.fillStyle = COLORS.accent;
@@ -645,13 +677,14 @@ export class EncounterLab {
     return {
       logicalW: PORTRAIT_LOGICAL_W,
       logicalH: PORTRAIT_LOGICAL_H,
-      title: ENCOUNTER_LAB_TITLE,
-      lead: ENCOUNTER_LAB_LEAD,
+      title: this.batch.title,
+      lead: this.batch.lead,
       loadoutId: this.ctxInfo.loadoutId,
       playerLabel: this.ctxInfo.playerLabel,
       playerBodyName: this.ctxInfo.playerBodyName,
       playerHpMax: this.ctxInfo.playerHpMax,
-      batch: ENCOUNTER_BATCH.map((e) => ({
+      batchMode: this.batch.mode,
+      batch: this.batch.entries.map((e) => ({
         id: e.id,
         label: e.label,
         templateId: e.templateId,
@@ -659,7 +692,7 @@ export class EncounterLab {
         verifies: e.verifies,
       })),
       controls: [
-        ...ENCOUNTER_BATCH.map((e) => ({ id: e.id as string, kind: 'encounter', label: e.label })),
+        ...this.batch.entries.map((e) => ({ id: e.id as string, kind: 'encounter', label: e.label })),
         { id: 'reset', kind: 'reset', label: ENCOUNTER_LAB_RESET_LABEL },
       ],
       active: this.activeId,

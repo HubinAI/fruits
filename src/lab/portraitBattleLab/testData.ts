@@ -470,6 +470,50 @@ export const LAB_ENCOUNTERS: readonly LabTestEncounter[] = [
     count: 1,
     draft: formalOpponentDraft('R1-GUN-02'),
   },
+  /* ====================================================================
+   * CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1｜三套**差异化实战**扩展批次
+   *
+   * 目标：把正式库已有、但尚未进入本 Lab 目录的三套**明显不同物理压力**做成
+   * 「可连续切换、正常速度、正式 Renderer」的独立内容批次，便于集中录像与挑选
+   * 接入正式 Run。**只做「有无 / 可运行 / 能比较」**，不微调胜负与特效。
+   *
+   * - 全部是**既有正式对手模板的引用**（`formalOpponentDraft`，count=1）：
+   *   没有新增敌人定义、没有改 HP / 伤害 / 速度 / 质量等任何数值；
+   * - 不声明 `enemyDrive` ⇒ 与 `keep-distance` 分支无关（RDC-08 唯一性不受影响）；
+   * - **不进产品 RUN_SCRIPT**：正式三段节奏逐字不变（Queue 禁止项）；
+   * - 三套与默认三敌（ProtoRusher 菠萝冲刺 / Chaser 锤 + 推进器 /
+   *   RangedTurret 控距炮台）的模板 / Body / 武器组合零重叠：
+   *
+   *   | id | 定位 | 模板 | 构成（正式 Draft） | 威胁假设（一句） |
+   *   |---|---|---|---|---|
+   *   | ExtendedHeavyContact | 重型贴身 | R1-HVY-02 | heavyBox 双大轮 + 霰弹(front)+锤(top) · 前进 | 推不动的重车用霰弹+锤贴脸轰击 |
+   *   | ExtendedStandoffRod | 控距姿态 | R1-CTRL-01 | tallBody 12/26 + 推杆(front)+霰弹(top) · 停驻 | 高重心站桩用推杆拉开距离+霰弹轰 |
+   *   | ExtendedBurnSaw     | 持续近身 | R1-MIX-02 | tallBody 双标准轮 + 喷火(front)+锯(top) · 前进 | 高身车喷火+锯持续贴身磨血 |
+   * ==================================================================== */
+  {
+    id: 'ExtendedHeavyContact',
+    label: '重装近战',
+    note: '单个重型贴身近战车（正式模板 R1-HVY-02：heavyBox 双大轮 + 霰弹 + 锤）· CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1 扩展批次',
+    templateId: 'R1-HVY-02',
+    count: 1,
+    draft: formalOpponentDraft('R1-HVY-02'),
+  },
+  {
+    id: 'ExtendedStandoffRod',
+    label: '高架子推杆',
+    note: '单个高重心停驻控距车（正式模板 R1-CTRL-01：tallBody + 推杆 + 霰弹）· CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1 扩展批次',
+    templateId: 'R1-CTRL-01',
+    count: 1,
+    draft: formalOpponentDraft('R1-CTRL-01'),
+  },
+  {
+    id: 'ExtendedBurnSaw',
+    label: '高身喷火锯',
+    note: '单个高身持续贴身车（正式模板 R1-MIX-02：tallBody + 喷火器 + 圆锯）· CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1 扩展批次',
+    templateId: 'R1-MIX-02',
+    count: 1,
+    draft: formalOpponentDraft('R1-MIX-02'),
+  },
 ];
 
 /* ------------------------------------------------------------- 目录查询 */

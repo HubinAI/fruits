@@ -105,7 +105,7 @@ describe('PBL-F0｜目录完整性（Arena A/B · Loadout ×2 · Encounter ×3�
     expect(new Set(LAB_LOADOUTS.map((l) => l.id)).size).toBe(LAB_LOADOUTS.length);
   });
 
-  it('R5 Encounter 目录为规范项且 id 唯一（七套既有 + DEMO-ENCOUNTER-CONTENT-BATCH-R1 三套候选）', () => {
+  it('R5 Encounter 目录为规范项且 id 唯一（七套既有 + DEMO 三套候选 + CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1 三套扩展）', () => {
     expect(LAB_ENCOUNTERS.map((e) => e.label)).toEqual([
       '追猎者',
       '远程炮台',
@@ -121,6 +121,11 @@ describe('PBL-F0｜目录完整性（Arena A/B · Loadout ×2 · Encounter ×3�
       '重炮要塞',
       '重装冲锤',
       '高架炮台',
+      // CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1：三套差异化实战扩展批次
+      // （正式模板引用 R1-HVY-02 / R1-CTRL-01 / R1-MIX-02，count=1，不进产品 RUN_SCRIPT）
+      '重装近战',
+      '高架子推杆',
+      '高身喷火锯',
     ]);
     expect(new Set(LAB_ENCOUNTERS.map((e) => e.id)).size).toBe(LAB_ENCOUNTERS.length);
     // 候选登记守门：三套必须是正式对手模板的引用（count=1），且不声明 enemyDrive
@@ -131,6 +136,14 @@ describe('PBL-F0｜目录完整性（Arena A/B · Loadout ×2 · Encounter ×3�
       expect(cand.count, `${cand.id}: 单车（Runtime 只容纳 1 个敌人）`).toBe(1);
       expect(cand.enemyDrive, `${cand.id}: 不得声明 keep-distance（驱动差异来自模板 drive）`).toBeUndefined();
       expect(cand.templateId.startsWith('R1-'), `${cand.id}: 必须引用 R1 系正式模板`).toBe(true);
+    }
+    // 扩展批次登记守门（与上面同口径）：单车、不声明 enemyDrive、引用 R1 系正式模板。
+    for (const ext of LAB_ENCOUNTERS.filter((e) =>
+      ['ExtendedHeavyContact', 'ExtendedStandoffRod', 'ExtendedBurnSaw'].includes(e.id),
+    )) {
+      expect(ext.count, `${ext.id}: 单车（Runtime 只容纳 1 个敌人）`).toBe(1);
+      expect(ext.enemyDrive, `${ext.id}: 不得声明 keep-distance（驱动差异来自模板 drive）`).toBeUndefined();
+      expect(ext.templateId.startsWith('R1-'), `${ext.id}: 必须引用 R1 系正式模板`).toBe(true);
     }
   });
 

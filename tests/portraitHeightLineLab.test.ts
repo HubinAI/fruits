@@ -281,8 +281,12 @@ describe('DEMO-HEIGHT-LINE｜A. 配置形状与对手（只换轮径，不新增
     const entry = findEncounter(HEIGHT_LINE_OPPONENT_ID)!;
     expect(entry.templateId).toBe('OPP-03');
     expect(entry.count).toBe(1);
-    // 本 Queue 不新增 Encounter：目录仍是 10 套
-    expect(LAB_ENCOUNTERS).toHaveLength(10);
+    // 本 Queue（DEMO-HEIGHT-LINE）自身不新增 Encounter —— 但目录会被**其它** Lab 内容 Queue
+    // 以「登记扩展」方式追加（此处与 `portraitBattleLab.test.ts` R5 / `portraitEncounterLab.test.ts`
+    // M3-05 同步）：10 套（原）→ 13 套（CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1 追加三套扩展批次）。
+    // ⚠️ 本断言只锚定「RangedTurret 仍在目录内、仍是既有 OPP-03 引用」；
+    //    具体条数以 R5/M3-05 为唯一真源，这里只随登记扩展同步。
+    expect(LAB_ENCOUNTERS).toHaveLength(13);
   });
 
   it('HL-03 源码级：页面/控制器不按轮径做任何判定，也不出现伪造手段', () => {

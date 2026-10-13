@@ -54,7 +54,13 @@ const FRAME_MS = 1000 / 60;
 /** 与既有 Run Page 测试同一上限（正式三阶段总时长约 18s ⇒ 4000 帧足够）。 */
 const MAX_FRAMES = 4000;
 
-const LAB_FILES = ['encounterValidation.ts', 'encounterLab.ts', 'encounterLabMain.ts'];
+const LAB_FILES = [
+  'encounterValidation.ts',
+  'encounterLab.ts',
+  'encounterLabMain.ts',
+  // CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1：扩展批次也在同一源码级守卫面内（强化，不放宽）
+  'encounterBatchExtension.ts',
+];
 
 /* ------------------------------------------------------------- 指纹工具 */
 
@@ -301,7 +307,10 @@ describe('PRP-M3｜B 正式敌人定义零修改（冻结指纹）', () => {
     //    全部是 R1 系正式模板的引用 / count=1 / 不声明 enemyDrive / 不进产品 RUN_SCRIPT）——
     //    这是**登记扩展**而非放宽：上面的源码级禁止写入面（push / 写池 / 自构战斗）一字未减，
     //    候选的守门断言在 portraitBattleLab.test.ts 的 R5 条目里。
-    expect(LAB_ENCOUNTERS).toHaveLength(10);
+    // ⚠️ CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1：目录再由 10 套登记扩展为 13 套
+    //    （+三套差异化实战扩展批次，引用 R1-HVY-02 / R1-CTRL-01 / R1-MIX-02，count=1 /
+    //    不声明 enemyDrive / 不进产品 RUN_SCRIPT）—— 同样是**登记扩展**而非放宽。
+    expect(LAB_ENCOUNTERS).toHaveLength(13);
     expect(LAB_ENCOUNTERS.map((e) => e.id)).toEqual([
       'Chaser',
       'RangedTurret',
@@ -314,6 +323,10 @@ describe('PRP-M3｜B 正式敌人定义零修改（冻结指纹）', () => {
       'HeavyFortress',
       'RushRammer',
       'HighGunPlatform',
+      // CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1 扩展批次（引用 R1-HVY-02 / R1-CTRL-01 / R1-MIX-02）
+      'ExtendedHeavyContact',
+      'ExtendedStandoffRod',
+      'ExtendedBurnSaw',
     ]);
   });
 });

@@ -51,7 +51,14 @@ const ENCOUNTER_VERIFIES: Readonly<Record<EncounterBatchId, string>> = {
 };
 
 export interface EncounterBatchEntry {
-  readonly id: EncounterBatchId;
+  /**
+   * 批次条目 id。
+   *
+   * ⚠️ CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1：类型从 `EncounterBatchId` 拓宽为 `LabEncounterId`，
+   *    使**扩展批次**（`encounterBatchExtension.ts`）能复用同一 `EncounterBatchEntry` 形状。
+   *    默认批次（`ENCOUNTER_BATCH`）仍恒为原三敌 —— 本拓宽不影响默认批次的任何断言。
+   */
+  readonly id: LabEncounterId;
   /** 正式展示名（来自 `testData`，单一来源，不在这里重写一份中文名）。 */
   readonly label: string;
   /** 正式对手池模板 id（= 这一套 Encounter 到底是什么，来自 `testData`）。 */
@@ -104,7 +111,7 @@ export function encounterBatchOf(id: string): EncounterBatchEntry | null {
 /* ------------------------------------------------------------ 页面上下文 */
 
 export interface EncounterLabEntry {
-  readonly id: EncounterBatchId;
+  readonly id: LabEncounterId;
   readonly label: string;
   readonly verifies: string;
   /** 对手车身展示名（正式链路解析结果，不是手写）。 */
@@ -124,11 +131,26 @@ export interface EncounterLabContext {
 /**
  * 页面上下文：玩家与三个对手的展示名 / 耐久上限**全部**由正式链路解析
  * （`buildSpawnPlan` → 正式 registry），本文件不写任何数值。
+ *
+ * ⚠️ CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1：抽出**批次参数化**版本 `encounterLabContextFor`，
+ *    默认批次（`ENCOUNTER_BATCH`）逐字节等价于原 `encounterLabContext()` —— 行为不变。
  */
 export function encounterLabContext(): EncounterLabContext {
+  return encounterLabContextFor(ENCOUNTER_BATCH);
+}
+
+/**
+ * 批次参数化上下文：给定任意 `EncounterBatchEntry[]`，用**同一条**正式链路
+ * （`buildSpawnPlan` → 正式 registry）解析玩家与每个对手的展示名 / 耐久上限。
+ * 扩展批次复用本函数 → 与默认批次共享同一口径，不出现第二套解析。
+ */
+export function encounterLabContextFor(batch: readonly EncounterBatchEntry[]): EncounterLabContext {
   const loadout = findLoadout(ENCOUNTER_LAB_LOADOUT_ID);
-  const player = buildSpawnPlan(ENCOUNTER_LAB_LOADOUT_ID, ENCOUNTER_BATCH_IDS[0]).player;
-  const encounters = ENCOUNTER_BATCH.map((b) => {
+  const firstId = batch[0]?.id;
+  const player = firstId
+    ? buildSpawnPlan(ENCOUNTER_LAB_LOADOUT_ID, firstId).player
+    : buildSpawnPlan(ENCOUNTER_LAB_LOADOUT_ID, ENCOUNTER_BATCH_IDS[0]).player;
+  const encounters = batch.map((b) => {
     const enemy = buildSpawnPlan(ENCOUNTER_LAB_LOADOUT_ID, b.id).enemies[0];
     return {
       id: b.id,

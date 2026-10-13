@@ -163,7 +163,13 @@ export type LabEncounterId =
   // 仅作为**独立候选**进入共享 Encounter 数据入口；产品 RUN_SCRIPT 不引用它们（不改节奏）。
   | 'HeavyFortress'
   | 'RushRammer'
-  | 'HighGunPlatform';
+  | 'HighGunPlatform'
+  // ---- CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1：三套差异化实战扩展批次 ----
+  // 正式模板引用（R1-HVY-02 / R1-CTRL-01 / R1-MIX-02，count=1），只作为独立候选；
+  // 产品 RUN_SCRIPT 不引用它们（正式三段节奏一字不变）。
+  | 'ExtendedHeavyContact'
+  | 'ExtendedStandoffRod'
+  | 'ExtendedBurnSaw';
 
 /** Lab 初始选择（实验台自身默认值；与正式玩法默认值无任何耦合）。 */
 export const LAB_DEFAULTS: {

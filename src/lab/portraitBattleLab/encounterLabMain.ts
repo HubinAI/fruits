@@ -6,6 +6,16 @@
  *     同一辆战车 + 同一个战场 + 三个**已经存在的**正式 Encounter
  *         → 点一个就跑一场真实战斗 → 打完即停 → 换下一个 / Reset 重开
  *
+ * ── CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1｜扩展批次（URL mode 隔离）───────────
+ *
+ *   本页现在支持**两个批次**，通过**显式 URL mode** 选择：
+ *     - 无参数 / `?batch=default` ⇒ **默认三敌**（ProtoRusher / Chaser / RangedTurret），
+ *       与既有行为逐字节相同（默认页一字不变）；
+ *     - `?batch=ext` ⇒ **扩展批次**（重装近战 / 高架子推杆 / 高身喷火锯，引用正式模板
+ *       R1-HVY-02 / R1-CTRL-01 / R1-MIX-02）。
+ *   两个批次共用同一个控制器（批次经构造参数注入）—— 控制器本身与批次无关，
+ *   默认批次的 DOM / 文案 / 断言不受扩展存在的影响。
+ *
  * 隔离（Queue 必改 4）：
  *   - 独立 HTML（`encounter-lab.html`）+ 独立脚本，**不进入**任何正式构建
  *     （`npm run build` / `build:pages` / `build:e2e` / `build:wechat` 产物零影响）；
@@ -14,15 +24,45 @@
  *   - 不引入任何正式玩法运行时 / 正式 UI Host / 存档 / 经济 —— 本页只读世界与对照。
  *
  * 开发：`npm run dev:encounter-lab` → http://127.0.0.1:5173/encounter-lab.html
+ *       扩展批次：http://127.0.0.1:5173/encounter-lab.html?batch=ext
  * 构建：`npm run build:portrait-lab` → dist-portrait-lab/（含 encounter-lab.html）
  *
  * 整块删除清单见本目录 constants.ts 头部注释。
  */
-import { EncounterLab } from './encounterLab';
+import { EncounterLab, DEFAULT_ENCOUNTER_LAB_BATCH, type EncounterLabBatch } from './encounterLab';
+import {
+  EXTENDED_ENCOUNTER_BATCH,
+  EXTENDED_LAB_LEAD,
+  EXTENDED_LAB_TITLE,
+  extendedEncounterBatchOf,
+} from './encounterBatchExtension';
 
 /** 验证台只读诊断句柄（仅本页面存在；不进入任何正式构建产物）。 */
 interface EncounterLabDebugHandle {
   probe: () => unknown;
+}
+
+/** 扩展批次配置（与默认批次同形；供控制器注入）。 */
+const EXTENDED_ENCOUNTER_LAB_BATCH: EncounterLabBatch = {
+  mode: 'ext',
+  title: EXTENDED_LAB_TITLE,
+  lead: EXTENDED_LAB_LEAD,
+  entries: EXTENDED_ENCOUNTER_BATCH,
+  entryOf: extendedEncounterBatchOf,
+};
+
+/**
+ * 从 URL 解析批次模式。**只有** `batch=ext` 才切到扩展批次；
+ * 其余任何值（含缺失 / 未知）一律回落到**默认三敌**（不静默切到别的批次）。
+ */
+function resolveBatch(search: string): EncounterLabBatch {
+  let mode: string | null = null;
+  try {
+    mode = new URLSearchParams(search).get('batch');
+  } catch {
+    mode = null;
+  }
+  return mode === 'ext' ? EXTENDED_ENCOUNTER_LAB_BATCH : DEFAULT_ENCOUNTER_LAB_BATCH;
 }
 
 function boot(): void {
@@ -31,7 +71,8 @@ function boot(): void {
     // 页面缺失容器：明确报错（不静默白屏）
     throw new Error('[PRP-M3] 未找到 #elab-root 容器');
   }
-  const lab = new EncounterLab(root);
+  const batch = resolveBatch(window.location.search);
+  const lab = new EncounterLab(root, batch);
   (globalThis as { __ENCOUNTERLAB__?: EncounterLabDebugHandle }).__ENCOUNTERLAB__ = {
     probe: () => lab.probe(),
   };
