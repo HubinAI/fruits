@@ -69,7 +69,6 @@ import { describe, expect, it } from 'vitest';
 
 import { registry } from '../src/core/content';
 import { EMPTY_SLOT, makeStarterDraft, buildSnapshotFromDraft, type BuildDraft } from '../src/lab/buildEditorModel';
-import { RunBattleRuntime } from '../src/lab/portraitBattleLab/runBattleRuntime';
 import {
   chooseRunBuff,
   createRunPageState,
@@ -83,13 +82,13 @@ import {
   type RunPageState,
 } from '../src/lab/portraitBattleLab/runPageState';
 import { runPageContext } from '../src/lab/portraitBattleLab/runPageScene';
+/** CONTENT-BATCH-CREATION-PIPELINE-R1｜共享确定性战斗底座（消除重复的单场战斗驱动）。 */
+import { runSingleBattle } from './helpers/runContentBatchHarness';
 import { OFFICIAL_BODIES } from '../src/core/bodyOwnership';
 import { FULL_RUN_SUPPORTED_WEAPON_IDS, canStartFullRun } from '../src/product/runCompatibility';
 import { WEAPON_SLOT, defaultPlayerDraft, clearHiddenTopWeapon } from '../src/product/playerLoadout';
 
 /* ------------------------------------------------------------------ 参数 */
-const FRAME_MS = 1000 / 60;
-const MAX_FRAMES = 4000;
 const PRODUCT_TAG = 'profile-equipped';
 
 /** 前/后轮全部正式允许状态：4 档可调 + `none`（= EMPTY_SLOT 卸下，buildPersistence 允许）。 */
@@ -143,35 +142,25 @@ function productDraft(bodyDefId: string, weapon: string, frontWheel: string, rea
   return next;
 }
 
+/**
+ * 单场战斗驱动（**复用共享底座** `runSingleBattle`，消除重复的 `new RunBattleRuntime` +
+ * 步进 + 结算 + dispose 块）。
+ *
+ * ⚠️ 与底座同口径（真物理、真时间步、`playerBaseline: true`、`PRODUCT_TAG`），冻结读数不变。
+ *   这里只把底座的 `{winner,hpA,hpB,steps}` 接到状态机的 `finishRunBattle`，状态推进逐字节同前。
+ */
 function runOneBattle(s: RunPageState, draft: BuildDraft, carriedHp: number | null): { state: RunPageState; playerHp: number } {
   const node = runCurrentNode(s);
   const build = [...runBuildIds(s)];
-  const rt = new RunBattleRuntime({
-    build,
-    carriedHp,
-    encounterId: node.encounterId,
-    playerDraft: draft,
-    playerLoadoutTag: PRODUCT_TAG,
-    playerBaseline: true,
+  const f = runSingleBattle(draft, build, node.encounterId!, carriedHp);
+  const state = finishRunBattle(s, {
+    winner: f.winner,
+    endReason: f.endReason,
+    playerHp: f.hpA,
+    enemyHp: f.hpB,
+    steps: f.steps,
   });
-  try {
-    let steps = 0;
-    while (rt.result === null && steps < MAX_FRAMES) {
-      rt.step(FRAME_MS);
-      steps += 1;
-    }
-    const playerHp = rt.hp().a;
-    const state = finishRunBattle(s, {
-      winner: rt.result?.winner ?? null,
-      endReason: rt.result?.endReason ?? null,
-      playerHp,
-      enemyHp: rt.hp().b,
-      steps: rt.stepCount,
-    });
-    return { state, playerHp };
-  } finally {
-    rt.dispose();
-  }
+  return { state, playerHp: f.hpA };
 }
 
 const roundHp = (x: number | null): number => Math.round((x ?? 0) * 10) / 10;

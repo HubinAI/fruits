@@ -43,24 +43,7 @@ import { describe, expect, it } from 'vitest';
 
 import { registry } from '../src/core/content';
 import { EMPTY_SLOT, type BuildDraft } from '../src/lab/buildEditorModel';
-import { RunBattleRuntime } from '../src/lab/portraitBattleLab/runBattleRuntime';
 import { RUN_TOTAL_BATTLES } from '../src/lab/portraitBattleLab/runScript';
-import {
-  chooseRunBuff,
-  createRunPageState,
-  finishRunBattle,
-  pressRunAction,
-  runBuildIds,
-  runCarriedPlayerHp,
-  runChoicePool,
-  runChoicePoolKind,
-  runCurrentNode,
-  runComplete,
-  runFailed,
-  type RunPageContext,
-  type RunPageState,
-} from '../src/lab/portraitBattleLab/runPageState';
-import { runPageContext } from '../src/lab/portraitBattleLab/runPageScene';
 import { NEW_OFFICIAL_BODIES } from '../src/core/bodyOwnership';
 import { canStartFullRun } from '../src/product/runCompatibility';
 import { getCount } from '../src/core/partInventory';
@@ -72,12 +55,11 @@ import {
 import { R3_MOVEMENT_SEED_KEY } from '../src/product/r3MovementChoiceSeed';
 import { R4_BODY_SEED_KEY } from '../src/product/r4BodyChoiceSeed';
 import { R5_CONTENT_POOL_KEY } from '../src/product/r5ContentPoolSeed';
+/** CONTENT-BATCH-CREATION-PIPELINE-R1｜共享确定性 Run 底座（消除重复的完整 Run 驱动）。 */
+import { runContentBatchCase } from './helpers/runContentBatchHarness';
 
 /* --------------------------------------------------------------- 夹具常量 */
 
-const FRAME_MS = 1000 / 60;
-const MAX_FRAMES = 4000;
-const PRODUCT_TAG = 'profile-equipped';
 const SLOW_MS = 300_000;
 
 /** 本 Queue 点名的通关 chassis。 */
@@ -131,96 +113,44 @@ interface WalkFact {
   readonly battlesCompleted: number;
 }
 
+/**
+ * 状态机全链走查（**复用共享底座** `runContentBatchCase`）。
+ *
+ * ⚠️ 与旧实现逐字节同口径（确定性三战两强化、`playerBaseline: true`、默认路线）；
+ *   D-02 的冻结读数（hpA0/hpA/hpB/steps/winner/perHit）由底座用同一段物理回读，故不变。
+ *   这里只是把底座的 `BatchRunResult` 映射到本文件既有的 `WalkFact` 形状（保留全部断言字段）。
+ */
 function walkRun(draft: BuildDraft, picks: readonly string[]): WalkFact {
-  const ctx: RunPageContext = runPageContext({
-    source: 'profile',
+  const r = runContentBatchCase({
     label: `DPP/${WIN_BODY}/${picks.join('+')}`,
     draft,
-    tag: PRODUCT_TAG,
-    key: `dpp|${draft.bodyDefId}|${picks.join('+')}`,
+    picks: picks as [string, string],
   });
-  const segs: SegFact[] = [];
-  const pickFacts: WalkFact['picks'][number][] = [];
-  let s: RunPageState = createRunPageState(ctx);
-  let carry: number | null = null;
-  for (let guard = 0; guard < 40; guard++) {
-    if (s.phase === 'COMPLETE' || s.phase === 'FAILED') break;
-    const before = s;
-    if (s.phase === 'BATTLE') {
-      const node = runCurrentNode(s);
-      const build = [...runBuildIds(s)];
-      const rt = new RunBattleRuntime({
-        build,
-        carriedHp: carry,
-        encounterId: node.encounterId,
-        playerDraft: draft,
-        playerLoadoutTag: PRODUCT_TAG,
-        playerBaseline: true,
-      });
-      try {
-        const atStart = rt.hp();
-        let steps = 0;
-        while (rt.result === null && steps < MAX_FRAMES) {
-          rt.step(FRAME_MS);
-          steps += 1;
-        }
-        const hp = rt.hp();
-        let hits = 0;
-        const perHit: number[] = [];
-        for (const read of Object.values(rt.playerWeaponHitSummary())) {
-          hits += read.count;
-          perHit.push(...read.damages);
-        }
-        segs.push({
-          nodeId: node.id,
-          encounterId: node.encounterId!,
-          build,
-          hpA0: atStart.a,
-          hpA: hp.a,
-          hpB: hp.b,
-          hpBMax: atStart.bMax,
-          steps,
-          winner: rt.result?.winner ?? null,
-          hits,
-          perHit: [...new Set(perHit)].sort((a, b) => a - b),
-        });
-        s = finishRunBattle(s, {
-          winner: rt.result?.winner ?? null,
-          endReason: rt.result?.endReason ?? null,
-          playerHp: hp.a,
-          enemyHp: hp.b,
-          steps: rt.stepCount,
-        });
-      } finally {
-        rt.dispose();
-      }
-      continue;
-    }
-    if (s.phase === 'CHOICE') {
-      const pool = runChoicePool(s).map((o) => o.id);
-      const pick = picks[s.buffs.length] ?? '';
-      pickFacts.push({
-        nodeId: s.nodeId,
-        kind: runChoicePoolKind(s),
-        pool,
-        pick,
-        accepted: (pool as readonly string[]).includes(pick),
-      });
-      s = chooseRunBuff(s, pick, ctx);
-      if (s === before) break;
-      continue;
-    }
-    if (s.phase === 'EVENT') carry = runCarriedPlayerHp(s);
-    s = pressRunAction(s, ctx);
-    if (s === before) break;
-  }
   return {
-    phase: s.phase,
-    complete: runComplete(s),
-    failed: runFailed(s),
-    segs,
-    picks: pickFacts,
-    battlesCompleted: s.battlesCompleted,
+    phase: r.phase,
+    complete: r.complete,
+    failed: r.failed,
+    segs: r.segs.map((s) => ({
+      nodeId: s.nodeId,
+      encounterId: s.encounterId,
+      build: s.build,
+      hpA0: s.hpA0,
+      hpA: s.hpA,
+      hpB: s.hpB,
+      hpBMax: s.hpBMax,
+      steps: s.steps,
+      winner: s.winner,
+      hits: s.hits,
+      perHit: s.perHit,
+    })),
+    picks: r.picks.map((p) => ({
+      nodeId: p.nodeId,
+      kind: p.kind,
+      pool: p.pool,
+      pick: p.pick,
+      accepted: p.accepted,
+    })),
+    battlesCompleted: r.battlesCompleted,
   };
 }
 
