@@ -34,6 +34,7 @@
     "e2e:next-run": "node tests/_e2e_next_run.cjs",
     "e2e:encounter-lab": "node tests/_e2e_encounter_lab.cjs",
     "e2e:encounter-lab-ext": "node tests/_e2e_encounter_lab_ext.cjs",
+    "e2e:fresh-account-slice": "node tests/_e2e_fresh_account_slice.cjs",
     "e2e:height-line-lab": "node tests/_e2e_height_line_lab.cjs",
     "e2e:validation-hub": "node tests/_e2e_validation_hub.cjs",
     "e2e:default-entry": "node tests/_e2e_prp_default_entry.cjs",
