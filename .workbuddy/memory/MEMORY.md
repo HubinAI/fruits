@@ -11,8 +11,19 @@
 | 结构口径 / Mac / 已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状 / 下一步（新窗口先读 · 明细 → REF §21）
-- HEAD `DEMO-FRAME-STEP-DETERMINISM-R1` 提交后；分支 `prototype-portrait-battle-lab`；Mac arm64。
-- **最新轮 = `DEMO-FRAME-STEP-DETERMINISM-R1`（固定物理步确定性 Foundation 修复 · 上轮修法A实施）** → 日 log 同日段。
+- HEAD `DEMO-FORMAL-PAGES-PACKAGING-R1` 提交后；分支 `prototype-portrait-battle-lab`；Mac arm64。
+- **最新轮 = `DEMO-FORMAL-PAGES-PACKAGING-R1`（正式页面生产打包 Foundation）** → 日 log 同日段。
+  **结论**：`vite.pages.config.ts` 加多入口 {index,home,runPage}（base=/fruits/ 沿用）⇒ build:pages 产物三页齐备、
+  资源 /fruits/assets/* 前缀正确、旧 index 预览独立 chunk 不回归；**入口闭集** = 产品循环只引用
+  `./run-page.html`/`./home.html`（`runReward.ts:129/131`），Lab 验证页刻意不打包。
+  ⚠️⚠️ **新窗口必读**：① 新增 `e2e:pages-smoke`（`tests/_e2e_pages_smoke.cjs`）：/fruits/ 前缀静态服务 +
+  真实浏览器 11 断言全 PASS（初始化→Garage 换装落盘→出发 run-page 载荷完整→装配持续→深链刷新→
+  旧入口不回归→调试句柄 __h/__probe/__PRODUCTHOME__/__RUNPAGE__ 全 undefined→零 404/JS错误）；
+  ② **本轮未部署**：workflow/pages.yml 零改动（手动触发）；发布门槛三步见 `docs/PAGES-PACKAGING-README.md`
+  （管理员设 Source → 手动 Run workflow → 候选地址真人验收；候选 = hubinai.github.io/fruits/home.html）；
+  ③ 回归全绿（typecheck、FD+W 15/15、M5 E2E 22/22）；预存红单列 EB-04（10→13，worktree 已证）；
+  ④ `docs/DEMO-FORMAL-PAGES-PACKAGING-R1.md` 为本轮报告。
+- ⚠️ **上上轮 = `DEMO-FRAME-STEP-DETERMINISM-R1`（固定物理步确定性 Foundation 修复 · 修法A实施）** → 日 log 同日段。
   **结论**：`PlanckWorld.step` 新增第 4 参 `onAfterStep`（每固定步完成、World 未锁定后调用，可中止批次）；
   `PlanckBattleOrchestrator.step` 把 6 项批次级副作用（弹丸 facts drain/越界销毁/time/arena update/
   contactTick/detectEnd，改前 `:404-480`）全部移入每步回调；time 逐步推进；**RunPage.startLoop 零改动**。
