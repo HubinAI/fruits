@@ -911,11 +911,18 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
     // PRODUCT-LOOP-R1-B：领奖闭环的浏览器端 E2E（同一份竖屏产物，无新增页面 / 无新增构建配置）
     expect(pkg.scripts['e2e:product-reward']).toBe('node tests/_e2e_product_reward.cjs');
 
-    for (const t of ['index.html', 'vite.config.ts', 'vite.pages.config.ts', 'vite.e2e.config.ts', 'vite.wechat.config.ts']) {
+    for (const t of ['index.html', 'vite.config.ts', 'vite.e2e.config.ts', 'vite.wechat.config.ts']) {
       const src = strip(readFileSync(join(REPO_ROOT, t), 'utf8'));
       expect(src.includes('home.html'), `${t} 不得引用 home.html`).toBe(false);
       expect(src.includes('src/product'), `${t} 不得引用 src/product`).toBe(false);
     }
+    // ⚠️ DEMO-FORMAL-PAGES-PACKAGING-R1 起，`vite.pages.config.ts` **有意**把 home.html /
+    //    run-page.html 作为正式多入口打进 dist-pages（对外试玩 Foundation）；守卫同步到这一事实：
+    //    pages 配置**必须**引用两页入口，但**仍然不得**引用 src/product（入口解析只认 HTML）。
+    const pagesCfg = readFileSync(join(REPO_ROOT, 'vite.pages.config.ts'), 'utf8');
+    expect(pagesCfg.includes('home.html'), 'pages 配置必须打包 home.html').toBe(true);
+    expect(pagesCfg.includes('run-page.html'), 'pages 配置必须打包 run-page.html').toBe(true);
+    expect(pagesCfg.includes('src/product'), 'pages 配置不得引用 src/product').toBe(false);
   });
 
   it('PL-32 entry HTML 就是产品入口：竖屏舞台 + 唯一容器 + 零 lab 字面量', () => {

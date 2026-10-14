@@ -462,31 +462,11 @@
         padding: 4px 12px 10px;
       }
 
-      /* 底部：**持续可见且恒可点**的合成入口 */
-      .ph-garage-foot {
-        flex: 0 0 auto;
-        padding: 8px 12px 14px;
-        border-top: 1px solid rgba(63, 93, 130, 0.35);
-      }
-      .ph-fuse-entry {
-        width: 100%;
-        display: flex; align-items: center; justify-content: center; gap: 10px;
-        min-height: 44px;
-        font: inherit; font-size: 14px; font-weight: 700;
-        border-radius: 10px;
-        border: 1px solid #2b3550; background: #131b28; color: #9fb3cc;
-        cursor: pointer;
-      }
-      .ph-fuse-entry:hover { background: #1a2536; border-color: #34507c; }
-      /* 有可合成组：红点 + 数量（Queue 允许的最小可感知状态；入口**始终可点**） */
-      .ph-fuse-entry-ready { border-color: #8a3b3b; background: #241417; color: #ffd7d0; }
-      .ph-fuse-entry-label { display: inline-flex; align-items: center; gap: 6px; }
-      .ph-fuse-entry-ready .ph-fuse-entry-label::before {
-        content: '';
-        width: 8px; height: 8px; border-radius: 50%;
-        background: #ff5a3c;
-      }
-      .ph-fuse-entry-state { font-size: 12px; font-weight: 650; color: #ffd35a; }
+      /*
+        UX-BAG-FUSION-GRID-R1：底部「合成入口」（.ph-garage-foot / .ph-fuse-entry）
+        已升格为**一级页签**（.ph-garage-tabs / .ph-garage-tab，见下方）——
+        旧入口的 CSS 一并退役；「持续可见 / 恒可点」的语义由页签承接。
+      */
 
       /*
         未拥有内容的**降级区**（Queue 必改 4：折叠 / 降级，不与可用内容同权重）。
@@ -503,6 +483,98 @@
       .ph-locked-grid { margin-top: 8px; }
       /* 未拥有卡：整体压暗（数值仍可读，但明确不可操作） */
       .ph-card-locked { opacity: 0.55; cursor: not-allowed; }
+
+      /*
+        ══════════════════════════════════════════════════════════════════════════
+        UX-BAG-FUSION-GRID-R1｜一级页签「装备 / 合成」+ 合成操作区
+        ══════════════════════════════════════════════════════════════════════════
+      */
+      .ph-garage-tabs {
+        flex: 0 0 auto;
+        display: flex; gap: 8px;
+        padding: 6px 14px 0;
+      }
+      .ph-garage-tab {
+        flex: 1 1 0;
+        display: flex; align-items: center; justify-content: center;
+        min-height: 38px;
+        font: inherit; font-size: 14px; font-weight: 700;
+        border-radius: 10px;
+        border: 1px solid #2b3550; background: #131b28; color: #9fb3cc;
+        cursor: pointer;
+      }
+      .ph-garage-tab-active {
+        border-color: #ffd35a; background: #1c2233; color: #ffe9a8;
+      }
+      /* —— 合成操作区（固定在上）—— */
+      .ph-fuse-bench { flex: 0 0 auto; padding: 6px 14px 0; display: flex; flex-direction: column; gap: 8px; }
+      .ph-fuse-target {
+        display: flex; align-items: baseline; gap: 8px;
+        padding: 9px 12px; border-radius: 10px;
+        border: 1px solid #7a5b00; background: #1a1607;
+      }
+      .ph-fuse-target-label { font-size: 11px; color: #b99a3f; }
+      .ph-fuse-target-name { font-size: 15px; font-weight: 700; color: #ffe9a8; }
+      .ph-fuse-slots { display: flex; gap: 6px; }
+      .ph-fuse-slot {
+        flex: 1 1 0; height: 44px;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 9px;
+        border: 1px dashed #3a4a68; background: #101823;
+        font-size: 18px; color: #3a4a68;
+      }
+      .ph-fuse-slot-filled {
+        border: 1px solid #ffd35a; background: #1a1607; color: #ffd35a;
+      }
+      .ph-fuse-slot-over {
+        border-color: #ffe07e; background: #241d12;
+      }
+      .ph-fuse-gate {
+        display: flex; align-items: center; gap: 10px;
+        min-height: 44px;
+        padding: 0 12px; border-radius: 10px;
+        border: 1px solid #2b3550; background: #131b28;
+      }
+      .ph-fuse-gate-text { flex: 1 1 auto; font-size: 12px; color: #93a1b6; }
+      .ph-fuse-confirm {
+        font: inherit; font-size: 14px; font-weight: 700;
+        padding: 9px 16px; border-radius: 999px;
+        border: 1px solid #7a5b00;
+        background: linear-gradient(180deg, #ffd35a, #e8a92c); color: #3a2600;
+        cursor: pointer;
+      }
+      /* —— 合成图标格（唯一滚动区）—— */
+      .ph-fuse-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+      .ph-fuse-cell { display: flex; }
+      .ph-fuse-chip {
+        flex: 1 1 auto; width: 100%;
+        display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+        padding: 9px 11px; text-align: left; font: inherit;
+        border-radius: 10px; border: 1px solid #2b3550; background: #131b28; color: inherit;
+        cursor: grab;
+      }
+      .ph-fuse-chip:hover { background: #1a2536; border-color: #34507c; }
+      .ph-fuse-chip-active { border-color: #ffd35a; background: #1c2233; }
+      .ph-fuse-chip-name { font-size: 14px; font-weight: 650; color: #eaf1fb; }
+      .ph-fuse-chip-star { font-size: 12px; font-weight: 700; color: #ffd35a; }
+      .ph-fuse-chip-count { font-size: 11px; color: #93a1b6; }
+
+      /*
+        UX-BAG-FUSION-GRID-R1｜**3 列紧凑网格**（Garage 全部卡阵的密度 modifier）。
+        ⚠️ 只改列数与卡内边距 ⇒ 探针（data-ph-*）与点格即装备语义一字未动；
+        ⚠️ 只在 Garage 生效（`.ph-main-garage` 后代选择器），首页 2 列布局不变。
+      */
+      .ph-main-garage .ph-grid-3 { grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+      .ph-main-garage .ph-grid-3 .ph-card { padding: 7px 8px; }
+      .ph-main-garage .ph-grid-3 .ph-card-name { font-size: 12px; }
+      .ph-main-garage .ph-grid-3 .ph-card-stats { font-size: 9px; }
+      .ph-main-garage .ph-grid-3 .ph-card-growth { font-size: 10px; }
+      .ph-main-garage .ph-grid-3 .ph-card-damage { font-size: 10px; }
+      .ph-main-garage .ph-grid-3 .ph-card-meta { font-size: 9px; }
+      .ph-main-garage .ph-grid-3 .ph-card-badge { font-size: 8px; }
+      .ph-main-garage .ph-grid-3 .ph-card-tag { font-size: 8px; }
+      .ph-main-garage .ph-grid-3 .ph-card-hint { font-size: 9px; }
+      .ph-main-garage .ph-grid-3 .ph-card-fuse { font-size: 9px; padding: 3px 6px; top: 4px; right: 4px; }
     </style>
   </head>
   <body>

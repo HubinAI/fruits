@@ -53,7 +53,8 @@
     "e2e:product-legacy": "node tests/_e2e_product_legacy_profile.cjs",
     "e2e:product-reseed": "node tests/_e2e_product_reseed.cjs",
     "e2e:pages-smoke": "node tests/_e2e_pages_smoke.cjs",
-    "e2e:run-hud": "node tests/_e2e_run_hud.cjs"
+    "e2e:run-hud": "node tests/_e2e_run_hud.cjs",
+    "e2e:fusion-grid": "node tests/_e2e_fusion_grid.cjs"
   },
   "devDependencies": {
     "@types/matter-js": "^0.20.2",
