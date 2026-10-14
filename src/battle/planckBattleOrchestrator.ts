@@ -404,79 +404,119 @@ export class PlanckBattleOrchestrator {
   step(realDtMs: number, timeScale = 1): void {
     if (this._result) return;
 
-    const steps = this.world.step(realDtMs, timeScale, () => {
-      // 车辆驱动（自动战斗：A 朝 +X、B 朝 -X，各自 worldDirection）。
-      // Q17-MOVEMENT-PROBE：sideDrive 按侧覆盖 autoDrive（缺省 = 双方跟随 autoDrive，
-      // 与既有行为完全一致）；未驱动侧轮子 motor 保持关闭（站桩，真实物理可被推动/翻转）。
-      const drive = resolveDriveEnable(this.config.autoDrive, this.config.sideDrive);
-      if (drive.a) {
-        // MOVEMENT-CRUISE-SPEED-FOUNDATION-R1：玩家持续速度来自 **Movement 数据链**
-        // （`WheelDef.cruiseSpeedPxPerStep`，整车取前后较低者），
-        // 不再直接读全局常量。四档轮组第一版都填 1.5 ⇒ 与改前逐字节一致。
-        drivePlanckVehicle(this.world, this.vehicleA, {
-          enabled: true,
-          worldDirection: 1,
-          targetSpeedPxPerStep: resolveVehicleCruiseSpeedPxPerStep(this.vehicleA.wheels),
-        });
-      }
-      if (drive.b) {
-        // PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：B 侧可选「维持作战距离」档。
-        // ⚠️ `config.enemyDrive` 缺省（含正式玩家路径与既有全部 Lab 路径）⇒ 走下面的
-        //    else 分支，与改前**逐指令相同**（enabled: true / worldDirection: -1 / 同目标速度）。
-        //    给出后也只改变「决策」（往哪开、开多快），执行仍是 drivePlanckVehicle。
-        const bands = this.config.enemyDrive;
-        if (bands) {
-          const ctx = this.enemyDriveContext();
-          const d = decideEnemyDrive(ctx, bands, AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP);
-          // 诊断：本步实际生效的决策（含决策真正读到的 core 间距）。
-          this.enemyDriveStateNow = { ...d, gap: ctx.gap };
-          drivePlanckVehicle(this.world, this.vehicleB, {
-            enabled: d.enabled,
-            worldDirection: d.worldDirection,
-            targetSpeedPxPerStep: d.targetSpeedPxPerStep,
-          });
-        } else {
-          drivePlanckVehicle(this.world, this.vehicleB, {
-            enabled: true,
-            worldDirection: -1,
-            targetSpeedPxPerStep: AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
-          });
+    /*
+     * DEMO-FRAME-STEP-DETERMINISM-R1｜**边界副作用按「固定物理步」结算，不按外层帧调用**。
+     *
+     * 改前缺陷：drainProjectileContactFacts / 越界销毁 / time 推进 / arena.update /
+     * advanceContactTicks / detectEnd 全部在**整批 world.step 之后**执行一次——
+     * 同一段固定步序列被 1 步/帧 vs 2 步/帧喂入时，批内中间命中/死亡被合并到批次
+     * 边界处理 ⇒ 战斗结果随 rAF 帧长漂移（实测：同构筑 16.67ms 玩家胜 / 32ms 玩家败）。
+     *
+     * 改后：全部边界副作用移入 `onAfterStep`（PlanckWorld 在**每个固定物理步完成、
+     * World 未锁定**时调用）：
+     *   ① drain 弹丸接触 facts → Behavior 消费（伤害只发生一次；多步一帧不漏中间命中）；
+     *   ② 存活 projectile 越界销毁；
+     *   ③ 仿真时间推进 **一个** FIXED_DT（`beforePhysicsStep` 因此拿到逐步正确的时间，
+     *      而不是整个批次起点的停滞时间）；
+     *   ④ arena 阶段时钟按单步推进 + Closing 墙驱动（与 Matter ArenaRuntime 逐步语义一致）；
+     *   ⑤ contactTick 持续接触按真实逐步时间结算；
+     *   ⑥ 终局检测：result 置位 ⇒ 返回 false 中止本批次剩余步（spiral 上限语义不变）。
+     *
+     * ⚠️ 驱动（drive）与 Behavior 的 beforePhysicsStep 仍在 onBeforeStep（每步开头、
+     *    world.step 之前）——语义与改前逐字相同；唯一变化是「这些回调现在按固定步
+     *    边界逐个发生，而不是挤在一个批次里」。
+     * ⚠️ 不改任何数值 / 内容 / 行为规则；60fps 轨道结果由 FD-03 冻结锁保护。
+     */
+    const advanceOneStep = (): boolean => {
+      // ① Q02-C1B：Projectile Lifecycle——每个固定物理步结束后（World 未锁定）：
+      //    只 drain 本步的 ContactRouter projectile facts，交给各 Behavior Runtime 消费
+      //    （hostile vehicle / arena / ground / hazard 的真实 begin → 安全销毁，伤害只发生一次）；
+      const facts = this.router.drainProjectileContactFacts();
+      if (facts.length > 0) {
+        for (const b of this.behaviors) {
+          b.afterPhysicsStep?.(this.world, facts);
         }
       }
-      // 正式 Behavior 插入口（W1-BH-1）：统一 beforePhysicsStep 驱动（Cannon 发射/冷却、
-      // Hammer 摆锤循环、Push Rod 伸缩循环；均 motor + limit）。不新增第二套 step/render
-      // 生命周期——只在此 onBeforeStep 内调用。
+      // ② 存活 projectile 越界检查（arena.isOutOfProjectileBounds）：越界 → 销毁；
+      //    未接触且未越界 → 保持存活继续真实飞行。
       for (const b of this.behaviors) {
-        b.beforePhysicsStep(this.world, this.time);
+        b.destroyOutOfBoundsProjectiles?.(this.world, (pos) =>
+          this.arena.isOutOfProjectileBounds(pos),
+        );
       }
-    });
 
-    // Q02-C1B：Projectile Lifecycle——每个物理步结束后（world.step 已返回，World 未锁定）：
-    // 1) 只 drain 一次 ContactRouter 的 projectile facts，交给各 Behavior Runtime 消费
-    //    （hostile vehicle / arena / ground / hazard 的真实 begin → 安全销毁，伤害只发生一次）；
-    const facts = this.router.drainProjectileContactFacts();
-    if (facts.length > 0) {
-      for (const b of this.behaviors) {
-        b.afterPhysicsStep?.(this.world, facts);
-      }
-    }
-    // 2) 存活 projectile 越界检查（arena.isOutOfProjectileBounds）：越界 → 销毁；
-    //    未接触且未越界 → 保持存活继续真实飞行。
-    for (const b of this.behaviors) {
-      b.destroyOutOfBoundsProjectiles?.(this.world, (pos) =>
-        this.arena.isOutOfProjectileBounds(pos),
-      );
-    }
+      // ③ 仿真时间按**实际推进的固定步**推进（一个 FIXED_DT）。
+      this.time += FIXED_DT_MS;
 
-    this.time += steps * FIXED_DT_MS;
+      // ④ arena 阶段推进（单步 dtMs；与改前「批次 dt = steps*FIXED_DT」的累计量逐项一致，
+      //    但转换/驱动发生在正确的步边界）：
+      //    - Warning→Closing 当步不驱动（速度保持 0）；
+      //    - 原本已处于 Closing 的下一次 update 才推进左右刺墙。
+      this.arena.update(FIXED_DT_MS);
 
-    this.arena.update(steps * FIXED_DT_MS);
+      // ⑤ W1-HIT-1 / W1-END-2：contactTick 持续接触按固定物理时间结算
+      //    （本步时间基准；hazard tick 仅 arena Closing 阶段生效）。
+      this.router.advanceContactTicks(this.time, this.arena.phase);
 
-    // W1-HIT-1 / W1-END-2：contactTick 持续接触按固定物理时间结算（本步时间基准；
-    // hazard tick 仅 arena Closing 阶段生效）
-    this.router.advanceContactTicks(this.time, this.arena.phase);
+      // ⑥ HP 死亡 / arena End 检测：result 置位 ⇒ 中止本批次剩余固定步。
+      this.detectEnd();
+      return this._result === null;
+    };
 
-    this.detectEnd();
+    this.world.step(
+      realDtMs,
+      timeScale,
+      () => {
+        // 车辆驱动（自动战斗：A 朝 +X、B 朝 -X，各自 worldDirection）。
+        // Q17-MOVEMENT-PROBE：sideDrive 按侧覆盖 autoDrive（缺省 = 双方跟随 autoDrive，
+        // 与既有行为完全一致）；未驱动侧轮子 motor 保持关闭（站桩，真实物理可被推动/翻转）。
+        const drive = resolveDriveEnable(this.config.autoDrive, this.config.sideDrive);
+        if (drive.a) {
+          // MOVEMENT-CRUISE-SPEED-FOUNDATION-R1：玩家持续速度来自 **Movement 数据链**
+          // （`WheelDef.cruiseSpeedPxPerStep`，整车取前后较低者），
+          // 不再直接读全局常量。四档轮组第一版都填 1.5 ⇒ 与改前逐字节一致。
+          drivePlanckVehicle(this.world, this.vehicleA, {
+            enabled: true,
+            worldDirection: 1,
+            targetSpeedPxPerStep: resolveVehicleCruiseSpeedPxPerStep(this.vehicleA.wheels),
+          });
+        }
+        if (drive.b) {
+          // PBL-FOUNDATION-RANGED-DISTANCE-CONTROL-R1：B 侧可选「维持作战距离」档。
+          // ⚠️ `config.enemyDrive` 缺省（含正式玩家路径与既有全部 Lab 路径）⇒ 走下面的
+          //    else 分支，与改前**逐指令相同**（enabled: true / worldDirection: -1 / 同目标速度）。
+          //    给出后也只改变「决策」（往哪开、开多快），执行仍是 drivePlanckVehicle。
+          const bands = this.config.enemyDrive;
+          if (bands) {
+            const ctx = this.enemyDriveContext();
+            const d = decideEnemyDrive(ctx, bands, AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP);
+            // 诊断：本步实际生效的决策（含决策真正读到的 core 间距）。
+            this.enemyDriveStateNow = { ...d, gap: ctx.gap };
+            drivePlanckVehicle(this.world, this.vehicleB, {
+              enabled: d.enabled,
+              worldDirection: d.worldDirection,
+              targetSpeedPxPerStep: d.targetSpeedPxPerStep,
+            });
+          } else {
+            drivePlanckVehicle(this.world, this.vehicleB, {
+              enabled: true,
+              worldDirection: -1,
+              targetSpeedPxPerStep: AUTO_DRIVE_TARGET_SPEED_PX_PER_STEP,
+            });
+          }
+        }
+        // 正式 Behavior 插入口（W1-BH-1）：统一 beforePhysicsStep 驱动（Cannon 发射/冷却、
+        // Hammer 摆锤循环、Push Rod 伸缩循环；均 motor + limit）。不新增第二套 step/render
+        // 生命周期——只在此 onBeforeStep 内调用。
+        // ⚠️ FD-R1：`this.time` 现已逐步推进 ⇒ 这里读到的是**本步**的仿真时间
+        //    （改前批次内所有步都读同一个「批次起点时间」，弹丸 fire 事件时间戳会
+        //    停滞——60fps 单步帧无感，多步帧下事件时间失真）。
+        for (const b of this.behaviors) {
+          b.beforePhysicsStep(this.world, this.time);
+        }
+      },
+      advanceOneStep,
+    );
   }
 
   /** HP 死亡检测 → Result（B14B：委托引擎中立 resolveBattleResult，判定语义不变；W1-END-1：seed 兜底无平局） */

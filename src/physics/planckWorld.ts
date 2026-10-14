@@ -1013,8 +1013,25 @@ export class PlanckWorld {
    * - 保留不足一帧的余量（fixedStepAccMs），跨调用累计；
    * - 长帧 catch-up 上限与 PhysWorld.step 完全一致（steps > 8 即 break）；
    * - 返回本次实际推进步数。
+   *
+   * DEMO-FRAME-STEP-DETERMINISM-R1｜onAfterStep（**每固定物理步**、World 未锁定后）：
+   * - 语义：`world.step(SECONDS_PER_STEP)` + `flushBatched()` 完成后立即调用一次，
+   *   此时 World 已解锁，调用方可以安全地读状态、施加冲量、创建/销毁 body；
+   * - **可中止**：回调返回 `false` ⇒ 本次 `step()` 立即停止推进后续固定步
+   *   （已推进的步数与已扣减的余量保持真实状态；未推进的输入余量保留在
+   *   `fixedStepAccMs` 中，下次调用继续消费 —— 不丢弃、不伪造）；
+   * - **确定性关键**：这一 hook 让「批次内每个固定步的边界副作用」（弹丸接触
+   *   facts 消费 / 越界销毁 / 仿真时间 / arena tick / 终局检测）得以在正确的
+   *   固定步边界发生，而不是合并到整个 rAF 帧的批次末尾——同一段固定步序列
+   *   无论被 1 帧 / 2 步还是 4 步喂入，都得到相同的战斗结果；
+   * - 兼容性：`onBeforeStep` 的每步语义与既有调用方（含 Matter 对齐语义）逐字不变。
    */
-  step(realDtMs: number, timeScale = 1, onBeforeStep?: () => void): number {
+  step(
+    realDtMs: number,
+    timeScale = 1,
+    onBeforeStep?: () => void,
+    onAfterStep?: () => boolean,
+  ): number {
     this.fixedStepAccMs += realDtMs * timeScale;
     let steps = 0;
     // 容差语义（B15A-R1）：累加值 + FIXED_STEP_EPS 达到固定步即推进，
@@ -1025,6 +1042,9 @@ export class PlanckWorld {
       this.flushBatched();
       this.fixedStepAccMs -= FIXED_STEP_MS;
       steps++;
+      // onAfterStep 在「本固定步完成、World 未锁定」时调用；返回 false ⇒ 中止本批次
+      // （通常 = 战斗已到终态；剩余输入余量保留，下次调用继续消费）。
+      if (onAfterStep && onAfterStep() === false) break;
       if (steps > 8) break; // 防 spiral-of-death（与 PhysWorld.step 一致）
     }
     // 扣除固定步后，仅将容差范围内的微小负余量归零（正余量/大幅负值保持原样）

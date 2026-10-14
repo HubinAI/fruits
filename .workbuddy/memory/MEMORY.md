@@ -11,8 +11,20 @@
 | 结构口径 / Mac / 已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状 / 下一步（新窗口先读 · 明细 → REF §21）
-- HEAD `DEMO-M5-WIN-PATH-RNG-ROOT-R1` 提交后；分支 `prototype-portrait-battle-lab`；Mac arm64。
-- **最新轮 = `DEMO-M5-WIN-PATH-RNG-ROOT-R1`（通关胜率/失败根因调查 + E2E 证据修正）** → 日 log 同日段。
+- HEAD `DEMO-FRAME-STEP-DETERMINISM-R1` 提交后；分支 `prototype-portrait-battle-lab`；Mac arm64。
+- **最新轮 = `DEMO-FRAME-STEP-DETERMINISM-R1`（固定物理步确定性 Foundation 修复 · 上轮修法A实施）** → 日 log 同日段。
+  **结论**：`PlanckWorld.step` 新增第 4 参 `onAfterStep`（每固定步完成、World 未锁定后调用，可中止批次）；
+  `PlanckBattleOrchestrator.step` 把 6 项批次级副作用（弹丸 facts drain/越界销毁/time/arena update/
+  contactTick/detectEnd，改前 `:404-480`）全部移入每步回调；time 逐步推进；**RunPage.startLoop 零改动**。
+  ⚠️⚠️ **新窗口必读**：① 红测试先行——`tests/productFrameStepDeterminismR1.test.ts`（FD-01~05）在改前 HEAD
+  真实 FAIL（32ms `['B','hp',0,53.3]` vs 60fps `['A','hp',762.5,0]`）→ 改后 7/7；② 改后 8/16.67/32/64ms +
+  3 组抖动序列 winner/hpA/hpB 逐字一致（0 HP 差异）；**60fps 轨道冻结逐字不变**（709.4/762.5/389.8，
+  715/626/899 步）；W-01a 矩阵零漂移（rateUp 必败路线原样保留——策略断层不属本轮）；③ 回归全绿
+  （M2 8/8、planck/contact 41/41、武器+遭遇 47/47、R7/R8/R13 29/29、E2E 22/22）；
+  ④ 预存红如实：EB-04（LAB_ENCOUNTERS 10→13）干净 HEAD worktree 复现同红，非本轮；
+  ⑤ **边界**：只保证「同固定步序列⇒同结果」；不改变任何一局胜负本身——引导层修法 B（`DEMO-LOADOUT-GUIDE-R2`）
+  仍待拍板；真人正常速度完整 Demo 复测待下轮/人工。报告 `docs/DEMO-FRAME-STEP-DETERMINISM-R1.md`。
+- ⚠️ **上轮 = `DEMO-M5-WIN-PATH-RNG-ROOT-R1`（通关胜率/失败根因调查 + E2E 证据修正）** → 日 log 同日段。
   **结论（根因判定 = B+C 混合，排除 A）**：① **产品 Run 全链零 RNG**（脚本固定线性链
   ProtoRusher→Chaser→RangedTurret，`pickOpponentForTier` 只属 Matching 不在 Run；物理固定步累加器；
   W-02 复跑 3 次逐字相同）⇒「19/19 vs GPT 14/17 五战全败」**不是随机对手、不是状态 Bug**；
