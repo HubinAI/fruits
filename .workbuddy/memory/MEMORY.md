@@ -11,8 +11,17 @@
 | 结构口径 / Mac / 已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状 / 下一步（新窗口先读 · 明细 → REF §21）
-- HEAD `DEMO-FRESH-ACCOUNT-VERTICAL-SLICE-R1` 提交后；分支 `prototype-portrait-battle-lab`；Mac arm64。
-- **最新轮 = `DEMO-FRESH-ACCOUNT-VERTICAL-SLICE-R1`（全新账号真实纵切）** → 日 log 同日段。
+- HEAD `DEMO-M5-CONTINUOUS-RUN-RC-R1` 提交后（`ddd6674`）；分支 `prototype-portrait-battle-lab`；Mac arm64。
+- **最新轮 = `DEMO-M5-CONTINUOUS-RUN-RC-R1`（连续3+局真实Run Demo候选验收 · RC）** → 日 log 同日段。
+  **结论：把「首页→Garage→完整Run→胜败结算→奖励→改装再战」打包成可集中真人验收的 Demo 候选**（零注入/
+  零产品代码改动）：同一全新 Profile 连续 3 局真实 Run——RUN-1 默认 cannon **FAILED**（设计风险实证）、
+  RUN-2 machineGun+mangoBody+双smallWheel **COMPLETE→真实领奖**（machineGun 1→2）、RUN-3 machineGun+
+  durianBody+双smallWheel **FAILED**（不同合法装配，换装确实传入下一局）。**19/19 PASS**。
+  新增 `tests/_e2e_demo_continuous_run.cjs`（`e2e:demo-continuous-run`）+ 报告 `docs/DEMO-M5-CONTINUOUS-RUN-RC-R1.md`。
+  ⚠️⚠️ **新窗口必读**：① 零产品代码改动（只新增验收脚本+报告）；② **默认 cannon 打不赢 UI 唯一默认路线**
+  —— 全新账号第一局必败，除非主动进 Garage 换 machineGun+mangoBody+双smallWheel；③ 能通关的 machineGun
+  起点仅 **1/5** ⇒ 合成 ★2 需连续 4 胜；④ **这是引导/可玩性议题不是 bug**，两个最简修法见报告 §5，**须设计负责人定夺**。
+- ⚠️ **上轮 = `DEMO-FRESH-ACCOUNT-VERTICAL-SLICE-R1`（全新账号真实纵切）** → 日 log 同日段。
   **结论：全新账号（零注入）可自己把 Demo 纵切走完**：起步自然库存 → Garage 真实换装 →
   **首局即 COMPLETE** → 领奖 → 连续多胜累到 5/5 → **合成 ★2** → 第二局干净出发。**产品代码零改动**；
   新增 `tests/_e2e_fresh_account_slice.cjs`（21/21 PASS）。
@@ -23,7 +32,7 @@
   laser 1；**cannon=0**（cannon 只在 `rush` 有 COMPLETE，而 UI 发不出 rush）。
   ③ ⇒ **核心张力**：自然 **4/5 的恰好是不能通关的 cannon**；能通关的 machineGun 起点 **1/5**
   ⇒ **合成 ★2 必须连续多局真实胜利**（奖励池=出发武器；1→5 需 4 胜）。**这不是 bug，是引导/可玩性议题**。
-  ⇒ 下一条缺口 Queue = `DEMO-DEFAULT-CANNON-CLEAR-PATH-R1`（两种最小修法见日 log，**均须独立授权**）。
+  ⇒ 缺口已在本轮 `DEMO-M5-CONTINUOUS-RUN-RC-R1` 报告 §5 作为**设计裁决项**披露（两种最小修法，**须独立授权**）。
 - ⚠️ **上轮 = `CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1`（遭遇台差异化实战扩展批次）** → 日 log 同日段。
   **交什么**：新增 `encounterBatchExtension.ts` + 3 套 Encounter 入 `LAB_ENCOUNTERS`（登记扩展）；
   控制器改**批次参数化**（构造注入 `EncounterLabBatch`，默认 = 原三敌）；`encounterLabMain.ts` 读
@@ -74,8 +83,8 @@
   **这是登记式边界遵守，不是放宽守卫**；新开 Lab 页面会撞这条。
 - ⚠️ **勘误教训（踩过）**：「HF 4/4 无解 / A,D 各丢 2 格」曾与可运行矩阵冲突 ⇒ 任何判断
   必须来自实测跑批，**禁止抄写看似等价的相邻单元格**。
-- **候选下一步**：① **`DEMO-DEFAULT-CANNON-CLEAR-PATH-R1`**（本轮新缺口：默认车 cannon 打不过默认路线 ⇒
-  首关引导/可玩性；两种最小修法见日 log，**触碰首局默认配置/数值须单独授权**）；
+- **候选下一步**：① **`DEMO-DEFAULT-CANNON-CLEAR-PATH-R1`**（默认车 cannon 打不过默认路线 ⇒ 首关引导/可玩性；
+  本轮已作为**设计裁决项**披露两种最简修法，实际改动须单独授权，**不自动开工**）；
   ② **`CONTENT-ENCOUNTER-PLAYABLE-BATCH-R2`**（同机制再收 `R1-HVY-03`/`R1-GUN-01`/`R1-MIX-01`；
   ⚠️ 每批须同步 3 处 `LAB_ENCOUNTERS` 登记守卫）；③ **`CONTENT-BATCH-EXPANSION-R2`**（用底座
   `runContentBatchCase` 扩内容批测）。旧候选保留：真人录屏判车高差 / GADGET-EARN-PATHWAY-R1 /
