@@ -68,10 +68,12 @@ import {
   RUN_PAGE_W,
   RUN_STAGE_BAND,
   RUN_STAGE_HAZE_H,
+  RUN_STATUS_HUD,
   RUN_TOP_BAND,
   emptyRunLayerAreas,
   runActionBarRect,
   runActionButtonRect,
+  runAtkGroupX,
   runBuffIconChip,
   runBuffIconRects,
   runChoiceBarRect,
@@ -83,6 +85,8 @@ import {
   runDayNodes,
   runFailPanelRect,
   runFailPanelTextPos,
+  runHpBarFillW,
+  runHpBarRect,
   runLogLineRects,
   runPaintedAreas,
   runRewardChoiceIconRect,
@@ -210,6 +214,19 @@ import {
 import { RunBattleView, type RunBattleAudioProbe } from './runBattleView';
 import { RUN_IMPACT_RING_MS, runImpactCoreShape, runImpactRingShapes } from './runImpactVfx';
 import { RunVisualStore, type RunAssetStats } from './runVehicleAssets';
+/**
+ * UX-RUN-CENTER-HUD-R1｜顶部状态 HUD 的**真源组合**（纯函数复算，与战斗侧同一合成链）：
+ *   - `weaponMainDamage` = 「一次命中扣多少血」的唯一口径（弹丸→直击顺序，与 ContactRouter 一致）；
+ *   - `composePlayerRunWeaponDef` = 玩家基线（playerBaseline=true 时 Cannon→120）+ Run overlay
+ *     （heavyShell/damageUp…）浅合并 —— 与 `RunBattleRuntime` 构造③走的是**同一个函数**；
+ *   - `applyStarTier` = 正式星级倍率层（`resolveSnapshot` 内部对 functionals 的同一段）。
+ * 三者组合 ⇒ HUD 的「攻击」= 玩家主武**本场真实单次伤害**（星级/强化实时正确）。
+ */
+import { weaponMainDamage, applyStarTier } from '../../core/buildSnapshot';
+import type { FunctionalPartDef } from '../../core/types';
+import { composePlayerRunWeaponDef } from './runModifiers';
+import { registry } from '../../core/content';
+import { WEAPON_SLOT } from '../../product/playerLoadout';
 
 const FONT_STACK = 'system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
 
@@ -275,6 +292,13 @@ const COLORS = {
   impactRing: '#d9a8ff',
   /** 命中点核心亮点（更短的定位点）。 */
   impactCore: '#f6ecff',
+  /* ---- UX-RUN-CENTER-HUD-R1：状态 HUD（不入账；与全部入账色 RGB 互斥） ---- */
+  /** 耐久血条底槽。 */
+  hpBarBg: '#2a3140',
+  /** 耐久血条前景（健康）。 */
+  hpBarFill: '#4fae62',
+  /** 低耐久（≤25%）警示色（数值与血条前景同换）。 */
+  hpLow: '#e05a4e',
 } as const;
 
 /**
@@ -754,6 +778,23 @@ export interface RunPageProbe {
   /** **强化**三选一浮层是否可见（严格 = `phase === 'CHOICE'`）。 */
   readonly choiceOpen: boolean;
   /**
+   * UX-RUN-CENTER-HUD-R1｜**顶部状态 HUD 读数**（与 `drawStatusHud` 同源，零渲染外推）：
+   *   - `hp` / `hpMax`：战斗中 = `s.battle.playerHp/playerHpMax`（随受击实时）；
+   *     无战斗 = `runCarriedPlayerHp(s) ?? ctx.playerHpMax`（跨战+维修唯一口径）；
+   *   - `atk`：主武单次伤害（`weaponMainDamage(composePlayerRunWeaponDef(…)+applyStarTier)`，
+   *     与战斗侧同一合成链；`null` = 无武器）；
+   *   - `atkWeaponDefId`：攻击读数对应的武器 defId（证据链：HUD 数字可回溯到真源）；
+   *   - `hpBar`：血条几何（E2E 像素取证用：`getImageData` 数前景色宽 == `runHpBarFillW`）。
+   */
+  readonly statusHud: {
+    readonly hp: number;
+    readonly hpMax: number;
+    readonly atk: number | null;
+    readonly atkWeaponDefId: string | null;
+    readonly hpBar: RunRect;
+    readonly hpBarFillW: number;
+  };
+  /**
    * 当前选择池的**内容层**（1 = 一层内容（含横向改装）/ 2 = 第二层条件池 / 0 = 当前不在 CHOICE）。
    * ⚠️ PRP-RUN-02-R2：不再按「第几次选择」数数，而是读**当前脚本节点声明的池种类**
    *    （`runChoicePoolLayer`）——「第几次选」与「哪一层内容」是两件独立的事。
@@ -1053,6 +1094,12 @@ export class RunPage {
   private lastKineticHits = 0;
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
+  /**
+   * UX-RUN-CENTER-HUD-R1：本局玩家耐久上限真源（= `RunPageContext.playerHpMax`，
+   * 即本局装载经正式装配链解析出的 `body.hp`）。构造时捕获一次——
+   * 装载在页面生命周期内不变（换装走整页导航重建页面）⇒ 不存在中途漂移。
+   */
+  private readonly hudPlayerHpMax: number;
 
   constructor(root: HTMLElement, opts: RunPageOptions = {}) {
     this.opts = opts;
@@ -1070,6 +1117,9 @@ export class RunPage {
     this.loadoutFallback = resolution.fallback;
     // PRP-M2：验证入口注入「上一局终局」；默认入口 = 全新一局的 DAY 1（行为不变）。
     this.state = opts.priorRun ?? createRunPageState(runPageContext(this.loadout));
+    // UX-RUN-CENTER-HUD-R1：耐久上限真源（读 state 的 battle.playerHpMax 或 context 值——
+    // createRunPageState 的 ctx 已带 playerHpMax；battle 为 null 时 HUD 用它）。
+    this.hudPlayerHpMax = runPageContext(this.loadout).playerHpMax;
     this.stageWrap = document.createElement('div');
     this.canvas = document.createElement('canvas');
     this.canvas.id = 'run-canvas';
@@ -1964,6 +2014,78 @@ export class RunPage {
 
   /* --------------------------------------------------------- 顶部薄层 */
 
+  /**
+   * UX-RUN-CENTER-HUD-R1｜**状态 HUD 真源读数**（攻击 + 耐久，全部实时、零虚构）。
+   *
+   * - **耐久 hp/hpMax**：
+   *   - 战斗 / 冻结战场（`s.battle` 非空）→ `s.battle.playerHp / playerHpMax`
+   *     —— 受击每帧经 `syncRunBattle` 回写，维修/跨战由状态机真源承接；
+   *   - 无战斗（IDLE/EVENT/CHOICE…）→ `runCarriedPlayerHp(s) ?? ctx.playerHpMax`
+   *     —— 唯一跨战耐久口径（含 repairBonus，runPageState.ts:621）。
+   * - **攻击 atk**：本局基准武器经 `composePlayerRunWeaponDef`（玩家基线 + Run overlay）
+   *   + `applyStarTier`（星级倍率）后 `weaponMainDamage` —— 与战斗侧同一合成链的纯函数
+   *   复算；无武器（资格层已拒，防御性）→ `null`（HUD 如实显示「—」）。
+   *   ⚠️ 星级来源 = 装备输入的 `functionalStars[frontMass]`（缺省 1）；
+   *      Run-local overlay 不改星级 ⇒ 与 `playerWeapons().star` 同源。
+   */
+  private hudReadout(): { hp: number; hpMax: number; atk: number | null; atkLabel: string | null } {
+    const s = this.state;
+    const hpMax = s.battle ? s.battle.playerHpMax : this.hudPlayerHpMax;
+    const hp = s.battle ? s.battle.playerHp : (runCarriedPlayerHp(s) ?? this.hudPlayerHpMax);
+
+    const baseWeapon = s.baseWeaponDefId;
+    if (!baseWeapon) return { hp, hpMax, atk: null, atkLabel: null };
+    const baseDef = registry.functionals.get(baseWeapon);
+    if (!baseDef) return { hp, hpMax, atk: null, atkLabel: null };
+    const star = this.loadout.draft.functionalStars?.[WEAPON_SLOT] ?? 1;
+    // 与战斗侧同一合成链：基线（playerBaseline=true）+ Run overlay（本局已选强化）。
+    const composed: FunctionalPartDef = composePlayerRunWeaponDef(
+      baseDef,
+      runBuildIds(s),
+      true, // 产品 Run 的玩家侧基线（RunPage.beginBattle 同参：PRODUCT_RUN_CANNON_BASE_DAMAGE）
+      baseWeapon,
+    );
+    const atk = weaponMainDamage(applyStarTier(composed, star));
+    const name = baseDef.name;
+    return { hp, hpMax, atk, atkLabel: `${name}` };
+  }
+
+  /** 顶部状态 HUD：耐久（当前/上限 + 血条）+ 攻击（主武单次伤害）。 */
+  private drawStatusHud(ctx: CanvasRenderingContext2D): void {
+    const { hp, hpMax, atk, atkLabel } = this.hudReadout();
+
+    // —— 耐久组（左）：标签行 + 数值行 + 血条 ——
+    const bar = runHpBarRect();
+    ctx.textAlign = 'left';
+    ctx.font = `bold 11px ${FONT_STACK}`;
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText('耐久', RUN_STATUS_HUD.x, RUN_STATUS_HUD.y + 10);
+    ctx.font = `bold 12px ${FONT_STACK}`;
+    ctx.fillStyle = hpMax > 0 && hp / hpMax <= 0.25 ? COLORS.hpLow : COLORS.textTitle;
+    ctx.fillText(`${Math.max(0, Math.round(hp))}/${Math.round(hpMax)}`, RUN_STATUS_HUD.x + 30, RUN_STATUS_HUD.y + 10);
+
+    // 血条：底槽（满宽）+ 前景（真实比例）。两段纯色、不入账本（颜色已与入账色互斥）。
+    ctx.fillStyle = COLORS.hpBarBg;
+    ctx.fillRect(bar.x, bar.y, bar.w, bar.h);
+    const fillW = runHpBarFillW(hp, hpMax);
+    ctx.fillStyle = fillW / bar.w <= 0.25 ? COLORS.hpLow : COLORS.hpBarFill;
+    ctx.fillRect(bar.x, bar.y, fillW, bar.h);
+
+    // —— 攻击组（右）：「攻击 主武名 数值」——
+    if (atk !== null && atkLabel) {
+      const ax = runAtkGroupX();
+      ctx.font = `bold 11px ${FONT_STACK}`;
+      ctx.fillStyle = COLORS.textDim;
+      ctx.fillText('攻击', ax, RUN_STATUS_HUD.y + 10);
+      ctx.font = `11px ${FONT_STACK}`;
+      ctx.fillStyle = COLORS.textDim;
+      ctx.fillText(atkLabel, ax + 30, RUN_STATUS_HUD.y + 10);
+      ctx.font = `bold 17px ${FONT_STACK}`;
+      ctx.fillStyle = COLORS.textTitle;
+      ctx.fillText(`${Math.round(atk)}`, ax, RUN_STATUS_HUD.y + 26);
+    }
+  }
+
   private drawTopBand(ctx: CanvasRenderingContext2D, s: RunPageState): void {
     ctx.fillStyle = COLORS.textTitle;
     ctx.font = `bold 20px ${FONT_STACK}`;
@@ -1974,7 +2096,11 @@ export class RunPage {
       ctx.fillRect(r.x, r.y, r.w, r.h);
     });
 
-    // 只画**实际已获得**的强化图标：没有强化时这一行完全不存在（不是五个空框）
+    // UX-RUN-CENTER-HUD-R1：状态 HUD 行（耐久 + 攻击）—— 原强化图标行让位到右侧同行。
+    this.drawStatusHud(ctx);
+
+    // 只画**实际已获得**的强化图标：没有强化时这一行完全不存在（不是五个空框）。
+    // ⚠️ 布局已右移（runBuffIconRects 右对齐、y=48、22px）—— 与左侧 HUD 同行互不重叠。
     const icons = runBuffIconRects(s.buffs.length);
     icons.forEach((icon, i) => {
       const buff = s.buffs[i];
@@ -1989,17 +2115,24 @@ export class RunPage {
   /* --------------------------------------------------------- 冒险记录 */
 
   private drawLog(ctx: CanvasRenderingContext2D, s: RunPageState): void {
+    // UX-RUN-CENTER-HUD-R1（必改 2）：战斗进行中日志**降视觉权重**——可见行数减半
+    // （12→6）且全部弱化（无「最近 N 行高亮」）。战斗/状态优先，叙事退后；
+    // 非战斗阶段保持原 12 行 + emphasis 口径（记录/结算时叙事仍是主角）。
+    const inBattle = s.phase === 'BATTLE' && !!this.battle;
+    const maxLines = inBattle ? Math.max(2, Math.floor(RUN_LOG.maxLines / 2)) : RUN_LOG.maxLines;
+    const emphasis = inBattle ? 0 : RUN_LOG.emphasis;
+
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `12px ${FONT_STACK}`;
     ctx.fillText('冒险记录', RUN_LOG_LABEL_POS.x, RUN_LOG_LABEL_POS.y);
 
-    const lines = visibleRunLog(s, RUN_LOG.maxLines);
+    const lines = visibleRunLog(s, maxLines);
     const rects = runLogLineRects(lines.length);
     lines.forEach((e, i) => {
       const r = rects[i];
       if (!r) return;
-      const age = lines.length - 1 - i; // 0 = 最新
-      this.drawLogLine(ctx, e, r, age);
+      const age = inBattle ? Number.MAX_SAFE_INTEGER : lines.length - 1 - i; // 0 = 最新
+      this.drawLogLine(ctx, e, r, age, emphasis);
     });
   }
 
@@ -2009,8 +2142,9 @@ export class RunPage {
     e: RunLogEntry,
     r: RunRect,
     age: number,
+    emphasis: number = RUN_LOG.emphasis,
   ): void {
-    const recent = age < RUN_LOG.emphasis;
+    const recent = age < emphasis;
     if (e.kind === 'day') {
       ctx.fillStyle = COLORS.dayAccent;
       ctx.font = `bold 15px ${FONT_STACK}`;
@@ -2826,6 +2960,22 @@ export class RunPage {
             .map(([hp]) => [hp, this.loadout.draft.functionalStars?.[hp] ?? 1]),
         ),
       },
+      /**
+       * UX-RUN-CENTER-HUD-R1：状态 HUD 读数（与绘制同源：直接调 `hudReadout()`，
+       * 血条宽用 `runHpBarFillW`——E2E 可断言「像素前景宽 == 声明宽」）。
+       */
+      statusHud: (() => {
+        const hud = this.hudReadout();
+        const bar = runHpBarRect();
+        return {
+          hp: hud.hp,
+          hpMax: hud.hpMax,
+          atk: hud.atk,
+          atkWeaponDefId: this.state.baseWeaponDefId,
+          hpBar: bar,
+          hpBarFillW: runHpBarFillW(hud.hp, hud.hpMax),
+        };
+      })(),
       choiceOpen: runChoiceOpen(s),
       /**
        * ⚠️ PRP-BUILD-01 / R2：候选**来自当前脚本节点声明的池**（第一层三选一 / 横向改装二选一 /

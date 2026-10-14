@@ -60,6 +60,7 @@ import { defaultPlayerDraft } from '../src/product/playerLoadout';
 import {
   RUN_ACTION_BAND,
   RUN_BANDS,
+  RUN_BUFF_ICON,
   RUN_BUFF_ICON_MAX,
   RUN_CHOICE,
   RUN_LOG,
@@ -70,9 +71,11 @@ import {
   RUN_SIDE_VIEW,
   RUN_STAGE_BAND,
   RUN_STAGE_HAZE_H,
+  RUN_STATUS_HUD,
   RUN_TOP_BAND,
   runActionBarRect,
   runActionButtonRect,
+  runAtkGroupX,
   runBuffIconRects,
   runChoiceBarRect,
   runChoiceCardRects,
@@ -83,6 +86,8 @@ import {
   runDayNodes,
   runFailPanelRect,
   runFailPanelTextPos,
+  runHpBarFillW,
+  runHpBarRect,
   runLogBottomY,
   runLogLineRects,
   runLogTopY,
@@ -637,11 +642,15 @@ describe('PRP-F0｜A 页面层级：竖屏 390×844 四条横带', () => {
     expect(icons.length).toBe(RUN_BUFF_ICON_MAX);
     for (const s of icons) expect(inside(s, RUN_TOP_BAND)).toBe(true);
     for (let i = 1; i < icons.length; i++) expect(icons[i].x).toBeGreaterThan(icons[i - 1].x + icons[i - 1].w);
-    expect(icons[0].x).toBe(16); // 左对齐
+    // UX-RUN-CENTER-HUD-R1：图标行**右对齐**（右缘 = 页宽 − 16），让位给左侧状态 HUD 行。
+    expect(icons[icons.length - 1].x + icons[icons.length - 1].w).toBe(RUN_PAGE_W - 16);
+    expect(icons[0].x).toBe(RUN_PAGE_W - 16 - (5 * RUN_BUFF_ICON.size + 4 * RUN_BUFF_ICON.gap));
     // 两行分明：进度节点行与图标行不重叠（薄层里两行互不干扰）
     for (const n of nodes) for (const s of icons) expect(runRectsOverlap(n, s)).toBe(false);
+    // 与状态 HUD 行互不重叠（HUD 血条在左、图标在右，同一行共存的机器判据）
+    for (const s of icons) expect(runRectsOverlap(s, runHpBarRect())).toBe(false);
     // 图标行本身不承载文字 → 整块是纯色（可精确入账）
-    expect(icons.length * icons[0].w * icons[0].h).toBe(5 * 30 * 30);
+    expect(icons.length * icons[0].w * icons[0].h).toBe(5 * 22 * 22);
   });
 
   it('RP-03 IDLE 待机近景：地线 / 路面落在舞台带内、车贴基线、近景只有玩家一辆', () => {
@@ -1090,7 +1099,9 @@ function ledgerState(o: { day: number; icons: number }): Record<string, number> 
     // ⚠️ 进度节点总数 = `RUN_DAYS_TOTAL`（R9 起 = 4）—— 这里**不写死 7**，
     //    否则单局天数一改，账本就会与绘制悄悄漂移。
     nodeTodo: (RUN_DAYS_TOTAL - o.day) * 128,
-    buffIcon: 756 * o.icons,
+    // UX-RUN-CENTER-HUD-R1：图标缩到 22×22 ⇒ 每枚**净**底色 = 484 − chip(144) = 340
+    // （chip 在 icon 之上，账本按「最上层胜出」口径只计最终可见面积）。
+    buffIcon: 340 * o.icons,
     buffChip: 144 * o.icons,
     cardBar: 0,
     actionBar: 990,
@@ -1158,10 +1169,11 @@ describe('PRP-RUN-02｜D 面积账本：逐脚本节点的整页像素面积精�
       );
     }
     expect(RUN_DAYS_TOTAL * 128).toBe(512);
-    // 图标总量口径：每个 30×30（底色 756 + 高光块 144）；0 个 → 面积 0（不是空槽）
+    // 图标总量口径：每个 22×22（**净**底色 340 + 高光块 144 = 声明 484）；0 个 → 面积 0（不是空槽）
+    // （UX-RUN-CENTER-HUD-R1：图标 30→22 让位状态 HUD 行；净底色口径与改前 756=900−144 同源）
     expect(ledger(fresh()).buffIcon).toBe(0);
     expect(ledger(fresh()).buffChip).toBe(0);
-    for (const n of [0, 1, 2, 3]) expect(ledgerState({ day: 1, icons: n }).buffIcon + 144 * n).toBe(900 * n);
+    for (const n of [0, 1, 2, 3]) expect(ledgerState({ day: 1, icons: n }).buffIcon + 144 * n).toBe(484 * n);
   });
 
   it('RP-22b R9：已退役的四个分支节点**确实不在脚本里**（正面钉死，不是靠删掉断言蒙过去）', () => {
@@ -2917,5 +2929,30 @@ describe('PRODUCT-LOOP-R1-D｜J 失败终态：结算 + 返回主界面（不再
     const fade = /const RUN_BATTLE_AUDIO_FADE_MS = (\d+);/.exec(view);
     expect(fade, '淡出时长必须是具名常量').toBeTruthy();
     expect(Number(fade![1]), '必改 3：短淡出 ≤ 200ms').toBeLessThanOrEqual(200);
+  });
+});
+
+/* ======================= UX-RUN-CENTER-HUD-R1：状态 HUD 真源断言 ======================= */
+
+describe('UX-RUN-CENTER-HUD-R1｜顶部状态 HUD（攻击 / 耐久）', () => {
+  it('HUD-01 几何：HUD 行与血条都在顶部带内、与 DAY 行/进度节点/图标行互不重叠', () => {
+    const bar = runHpBarRect();
+    expect(inside(bar, RUN_TOP_BAND)).toBe(true);
+    // 血条不与 DAY 进度节点重叠
+    for (const n of runDayNodes(RUN_DAYS_TOTAL)) expect(runRectsOverlap(n, bar)).toBe(false);
+    // 血条不与已获得图标重叠（图标右对齐让位）
+    for (const s of runBuffIconRects(RUN_BUFF_ICON_MAX)) expect(runRectsOverlap(s, bar)).toBe(false);
+    // 攻击区起点在血条右侧，且到页右缘有间距（图标区之外不越界）
+    expect(runAtkGroupX()).toBeGreaterThan(bar.x + bar.w);
+    expect(runAtkGroupX()).toBeLessThan(RUN_PAGE_W - 16 - 5 * RUN_BUFF_ICON.size);
+  });
+
+  it('HUD-02 血条比例：runHpBarFillW 与 hp/hpMax 精确成比例（clamp 正确）', () => {
+    expect(runHpBarFillW(950, 950)).toBe(RUN_STATUS_HUD.barW);
+    expect(runHpBarFillW(475, 950)).toBe(RUN_STATUS_HUD.barW / 2);
+    expect(runHpBarFillW(0, 950)).toBe(0);
+    expect(runHpBarFillW(-5, 950)).toBe(0);
+    expect(runHpBarFillW(1200, 950)).toBe(RUN_STATUS_HUD.barW); // clamp 上限
+    expect(runHpBarFillW(10, 0)).toBe(0); // hpMax=0 防御
   });
 });

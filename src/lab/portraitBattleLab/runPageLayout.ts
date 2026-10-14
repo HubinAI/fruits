@@ -103,14 +103,23 @@ export function runDayNodes(total: number): RunRect[] {
  * 传 0 就返回空数组 —— 画面上什么都没有（而不是五个空框）。
  */
 export const RUN_BUFF_ICON_MAX = 5;
-export const RUN_BUFF_ICON = { size: 30, gap: 8, x: 16, y: 44 } as const;
+/**
+ * UX-RUN-CENTER-HUD-R1：图标行让位——状态 HUD 行占了原 y=44 的位置 ⇒
+ * 图标缩小（30→22）并右移到 HUD 行右侧（右对齐），同一行互不重叠。
+ * `runBuffIconRects` 改为**右对齐**布局（锚点 = 右缘 16），y=48。
+ */
+export const RUN_BUFF_ICON = { size: 22, gap: 6, x: 16, y: 48 } as const;
 /** 已获得图标内部的高光小方块（与底色互斥的第二色 → 供像素级精确断言）。 */
 export const RUN_BUFF_ICON_CHIP = { size: 12 } as const;
 
 export function runBuffIconRects(count: number): RunRect[] {
   const n = Math.min(RUN_BUFF_ICON_MAX, Math.max(0, Math.floor(count)));
+  if (n === 0) return [];
+  const span = n * RUN_BUFF_ICON.size + (n - 1) * RUN_BUFF_ICON.gap;
+  // UX-RUN-CENTER-HUD-R1：右对齐（右缘 = 页宽 − 16），与左侧状态 HUD 同行互不重叠。
+  const x0 = RUN_PAGE_W - 16 - span;
   return Array.from({ length: n }, (_, i) => ({
-    x: RUN_BUFF_ICON.x + i * (RUN_BUFF_ICON.size + RUN_BUFF_ICON.gap),
+    x: x0 + i * (RUN_BUFF_ICON.size + RUN_BUFF_ICON.gap),
     y: RUN_BUFF_ICON.y,
     w: RUN_BUFF_ICON.size,
     h: RUN_BUFF_ICON.size,
@@ -126,6 +135,75 @@ export function runBuffIconChip(icon: RunRect): RunRect {
     w: RUN_BUFF_ICON_CHIP.size,
     h: RUN_BUFF_ICON_CHIP.size,
   };
+}
+
+/* --------------------------------------- 顶部薄层第二行：状态 HUD（攻击 / 耐久） */
+
+/**
+ * UX-RUN-CENTER-HUD-R1｜**顶部薄层第二行：攻击 / 耐久 状态 HUD**。
+ *
+ * ── 玩家问题 ────────────────────────────────────────────────────────────────
+ *   正式 Run 顶部原本只有 DAY 节点；战场下是大片冒险记录。玩家战斗时**看不到**
+ *   持续清晰的「我剩多少血 / 我打多少伤害」，无法依据残血/伤害做下一次强化选择。
+ *
+ * ── 本 HUD 回答什么（全部真源，零虚构）────────────────────────────────────
+ *   - **耐久** = `s.battle.playerHp / playerHpMax`（战斗中实时随受击变化）；
+ *     无战斗（IDLE/EVENT/CHOICE…）= `runCarriedPlayerHp(s) ?? ctx.playerHpMax`
+ *     （跨战传递 + 维修补偿的唯一口径，runPageState.ts:621 —— repairBonus 已含在内）；
+ *   - **攻击** = 玩家主武**单次伤害**（`weaponMainDamage` 经 `composePlayerRunWeaponDef`
+ *     + `applyStarTier` 星级层 —— 与战斗侧同一合成链的纯函数复算），随星级 /
+ *     damageUp 实时正确；刻意**不做**「综合战力」等不可解释的合成数字。
+ *
+ * ── 布局纪律 ────────────────────────────────────────────────────────────────
+ *   - 只占 `RUN_TOP_BAND`（80px）内**原强化图标行**的空间：DAY 行（基线 34）不动，
+ *     战场带 / 日志带 / 动作带 / 全部命中区一个像素不移；
+ *   - 已获得强化图标行让位到第三行（`RUN_BUFF_ICON.y` 44→70，见常量改动）；
+ *     图标 30px 高 70+30=100 > 80 会出带 ⇒ 图标缩小（30→22），70+22=92 仍出带
+ *     ⇒ HUD 行与图标行**合并为同一行**：图标在最右（22px，y=50），HUD 在左 ——
+ *     `RUN_BUFF_ICON` 常量由本 Queue 一并调整（size 22 / y 50），runBuffIconRects
+ *     / runBuffIconChip 全部跟随常量自动生效（零散调用点无需改）。
+ *   - 血条为两段纯色矩形，但**不入面积账本**（不登记进 `RunLayerId` ⇒ 账本守卫集
+ *     不变、零回归风险；HUD 用色与全部入账色 RGB 互斥）。
+ */
+
+/** 状态 HUD 行的几何（全部在 RUN_TOP_BAND 内）。 */
+export const RUN_STATUS_HUD = {
+  /** HUD 行顶部 y（DAY 标签基线 34 之下、带底 80 之上）。 */
+  y: 44,
+  /** HUD 行高（血条 + 上下小字）。 */
+  h: 30,
+  /** 左内边距。 */
+  x: 16,
+  /** 血条尺寸。 */
+  barW: 96,
+  barH: 10,
+  /** 血条与右侧「攻击」区的间距。 */
+  groupGap: 18,
+} as const;
+
+/** 耐久血条矩形（绝对坐标；血条上方一行是「耐久 xx/yy」小字）。 */
+export function runHpBarRect(): RunRect {
+  return {
+    x: RUN_STATUS_HUD.x,
+    y: RUN_STATUS_HUD.y + 16,
+    w: RUN_STATUS_HUD.barW,
+    h: RUN_STATUS_HUD.barH,
+  };
+}
+
+/**
+ * 血条前景宽度（按真实耐久比例，精确到 1px；clamp 到 [0, barW]）。
+ * ⚠️ 比例真源 = 传入的 hp/hpMax（调用方已从 RunPageState 真源取）。
+ */
+export function runHpBarFillW(hp: number, hpMax: number): number {
+  if (!(hpMax > 0)) return 0;
+  const ratio = Math.max(0, Math.min(1, hp / hpMax));
+  return Math.round(RUN_STATUS_HUD.barW * ratio);
+}
+
+/** 「攻击」区起点 x（血条右侧）。 */
+export function runAtkGroupX(): number {
+  return RUN_STATUS_HUD.x + RUN_STATUS_HUD.barW + RUN_STATUS_HUD.groupGap;
 }
 
 /* --------------------------------------------------- 中部：侧视战斗舞台 */
