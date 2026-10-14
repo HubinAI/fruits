@@ -11,17 +11,26 @@
 | 结构口径 / Mac / 已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状 / 下一步（新窗口先读 · 明细 → REF §21）
-- HEAD `DEMO-M5-CONTINUOUS-RUN-RC-R1` 提交后（`ddd6674`）；分支 `prototype-portrait-battle-lab`；Mac arm64。
-- **最新轮 = `DEMO-M5-CONTINUOUS-RUN-RC-R1`（连续3+局真实Run Demo候选验收 · RC）** → 日 log 同日段。
-  **结论：把「首页→Garage→完整Run→胜败结算→奖励→改装再战」打包成可集中真人验收的 Demo 候选**（零注入/
-  零产品代码改动）：同一全新 Profile 连续 3 局真实 Run——RUN-1 默认 cannon **FAILED**（设计风险实证）、
-  RUN-2 machineGun+mangoBody+双smallWheel **COMPLETE→真实领奖**（machineGun 1→2）、RUN-3 machineGun+
-  durianBody+双smallWheel **FAILED**（不同合法装配，换装确实传入下一局）。**19/19 PASS**。
-  新增 `tests/_e2e_demo_continuous_run.cjs`（`e2e:demo-continuous-run`）+ 报告 `docs/DEMO-M5-CONTINUOUS-RUN-RC-R1.md`。
-  ⚠️⚠️ **新窗口必读**：① 零产品代码改动（只新增验收脚本+报告）；② **默认 cannon 打不赢 UI 唯一默认路线**
-  —— 全新账号第一局必败，除非主动进 Garage 换 machineGun+mangoBody+双smallWheel；③ 能通关的 machineGun
-  起点仅 **1/5** ⇒ 合成 ★2 需连续 4 胜；④ **这是引导/可玩性议题不是 bug**，两个最简修法见报告 §5，**须设计负责人定夺**。
-- ⚠️ **上轮 = `DEMO-FRESH-ACCOUNT-VERTICAL-SLICE-R1`（全新账号真实纵切）** → 日 log 同日段。
+- HEAD `DEMO-M5-WIN-PATH-RNG-ROOT-R1` 提交后；分支 `prototype-portrait-battle-lab`；Mac arm64。
+- **最新轮 = `DEMO-M5-WIN-PATH-RNG-ROOT-R1`（通关胜率/失败根因调查 + E2E 证据修正）** → 日 log 同日段。
+  **结论（根因判定 = B+C 混合，排除 A）**：① **产品 Run 全链零 RNG**（脚本固定线性链
+  ProtoRusher→Chaser→RangedTurret，`pickOpponentForTier` 只属 Matching 不在 Run；物理固定步累加器；
+  W-02 复跑 3 次逐字相同）⇒「19/19 vs GPT 14/17 五战全败」**不是随机对手、不是状态 Bug**；
+  ② **装配链无丢失**（Garage存档→`equipped=`URL→Run探针→`resolveEntity.movements` 三源一致；
+  `front:none rear:none` 是 E2E 误读 functionalSelections——已修：轮组读 URL 载荷+存档，A6/D4 断言）；
+  ③ **真凶一 = 帧批次粒度敏感性**：W-03 实测同场战斗 16.67ms 玩家赢 / **32ms 玩家输**（mango+mg vs
+  Chaser）——`runPage.ts:1612` 按帧喂 step、`planckBattleOrchestrator.ts:457` 弹丸接触事实**每帧**
+  drain 一次 ⇒ 批次边界随帧率漂移（沙箱/低性能环境翻转）；本机帧健康实测 0% 长帧；
+  ④ **真凶二 = 强化选择断层**：W-01a mango+mg 通用池 6 组强化**只有 4 组 COMPLETE**（**rateUp 起手
+  2 组必败**）；W-01b **durian+mg 6/6 全败**；W-01c 默认 cannon 9/9 全败。
+  ⚠️⚠️ **新窗口必读**：① 零产品代码改动（只修 E2E 证据 + 新增只读调查测试 8 条 +
+  报告 `docs/DEMO-M5-WIN-PATH-RNG-ROOT-R1.md`）；② E2E 修后 **22/22 PASS**（含 D5 帧健康门：
+  长帧≥32ms 占比 ≥20% ⇒ 胜负读数记可疑区间）；③ 两个最小修法（帧粒度鲁棒化 `DEMO-FRAME-STEP-DETERMINISM-R1` /
+  Demo 出发引导精确化）**须设计拍板，未擅自改**。
+- ⚠️ **上轮 = `DEMO-M5-CONTINUOUS-RUN-RC-R1`（连续3+局真实Run Demo候选验收 · RC）** → 日 log 同日段。
+- ⚠️ **上上轮 = `DEMO-M5-CONTINUOUS-RUN-RC-R1` 的候选下一步已升级**：`DEMO-DEFAULT-CANNON-CLEAR-PATH-R1`
+  的设计裁决项仍开放；本轮又增两个候选 `DEMO-FRAME-STEP-DETERMINISM-R1`（修法A）/ `DEMO-LOADOUT-GUIDE-R2`（修法B）。
+- ⚠️ **上上轮 = `DEMO-FRESH-ACCOUNT-VERTICAL-SLICE-R1`（全新账号真实纵切）** → 日 log 同日段。
   **结论：全新账号（零注入）可自己把 Demo 纵切走完**：起步自然库存 → Garage 真实换装 →
   **首局即 COMPLETE** → 领奖 → 连续多胜累到 5/5 → **合成 ★2** → 第二局干净出发。**产品代码零改动**；
   新增 `tests/_e2e_fresh_account_slice.cjs`（21/21 PASS）。

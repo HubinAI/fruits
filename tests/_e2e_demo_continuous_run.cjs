@@ -280,13 +280,66 @@ async function exitTerminal(page, terminal) {
 async function playRun(page, label, build) {
   if (build) await setUpLoadout(page, build.body, build.front, build.rear, build.weapon);
   const storedBefore = await storageDump(page);
+  // ⚠️ M5-R1 修正（DEMO-M5-WIN-PATH-RNG-ROOT-R1 必改 1）：
+  //   出发 URL 的 `equipped=` 参数 = 产品侧把存档 draft 原样编码的那一份
+  //   （`buildAdventureHref` → `encodeRunLoadout`，含 rearWheelDefId/frontWheelDefId）。
+  //   它与 Garage 存档（BUILD_KEY）是「同一真源」的两份投影 ⇒ 三源一致在这里开始取证。
+  const startHref = await page.evaluate(() => {
+    const a = document.querySelector('[data-ph-action="start-run"]');
+    return a ? a.getAttribute('href') : null;
+  });
+  let urlLoadout = null;
+  if (startHref) {
+    try {
+      const q = new URLSearchParams(startHref.split('?')[1] || '');
+      const raw = q.get('equipped');
+      urlLoadout = raw ? JSON.parse(raw) : null;
+    } catch {
+      urlLoadout = null;
+    }
+  }
   const runStart = await enterRun(page);
   const rl = runStart.playerLoadout;
+  // ⚠️ M5-R1 修正：`functionalSelections` 只含 functional 硬点（frontMass=武器槽等），
+  //    **轮组不在其中**（`front`/`rear` 键是 functional 硬点、恒 EMPTY_SLOT='none'）。
+  //    上一轮从这里读 front/rear 产生了误导性的 `front:none rear:none` 日志——那不是轮组丢失。
+  //    轮组的真源 = 出发 URL `equipped` 参数与正式存档的 `frontWheelDefId`/`rearWheelDefId`。
+  // ⚠️ 全新账号在首次装备前 BUILD_KEY 不落盘 ⇒ 缺键按缺省 draft 对待（与 A6 同语义）。
+  const storedRaw = storedBefore[BUILD_KEY];
+  const storedBuild = storedRaw ? JSON.parse(storedRaw) : null;
+  const storedSide = storedBuild
+    ? {
+        body: storedBuild.bodyDefId,
+        weapon: storedBuild.functionalSelections?.[WEAPON_SLOT] ?? null,
+        front: storedBuild.frontWheelDefId ?? null,
+        rear: storedBuild.rearWheelDefId ?? null,
+      }
+    : {
+        body: 'watermelonBody',
+        weapon: 'cannon',
+        front: null,
+        rear: null,
+      };
   const startLoadout = {
     body: rl.bodyDefId,
     weapon: rl.functionalSelections[WEAPON_SLOT],
-    front: rl.functionalSelections['front'],
-    rear: rl.functionalSelections['rear'],
+    /** 轮组 = 出发 URL 载荷（Run 页实际收到的输入）。 */
+    front: urlLoadout ? urlLoadout.frontWheelDefId ?? null : null,
+    rear: urlLoadout ? urlLoadout.rearWheelDefId ?? null : null,
+  };
+  // 三源一致性断言素材：存档 ↔ URL 载荷 逐字段相等（缺省键视为 null）。
+  const loadoutTriple = {
+    stored: storedSide,
+    url: urlLoadout
+      ? {
+          body: urlLoadout.bodyDefId,
+          weapon: urlLoadout.functionalSelections?.[WEAPON_SLOT] ?? null,
+          front: urlLoadout.frontWheelDefId ?? null,
+          rear: urlLoadout.rearWheelDefId ?? null,
+        }
+      : null,
+    /** Run 页探针（输入侧）：bodyDefId / functionalSelections 逐字来自宿主交进来的 draft。 */
+    probe: { body: rl.bodyDefId, weapon: rl.functionalSelections[WEAPON_SLOT] ?? null },
   };
   const d = await driveRun(page, label);
   const terminal = d.last;
@@ -328,6 +381,7 @@ async function playRun(page, label, build) {
     label,
     build: build || startLoadout,
     startLoadout,
+    loadoutTriple,
     storedBefore,
     terminal: outcome,
     seenTrail,
@@ -339,6 +393,42 @@ async function playRun(page, label, build) {
     invDelta,
     homeAfter,
   };
+}
+
+/**
+ * **帧健康采样**（M5-R1 必改 4）：在一场真实 BATTLE 期间高频采样 Run 页 rAF 的实际帧时长。
+ * 测得「长帧（≥32ms，= 单帧批 ≥2 固定步）」的占比 —— 这是 W-03 实验证明的
+ * 「帧批次粒度影响战斗结果」机制在真实浏览器里的现场观测。
+ * 只读、零注入；返回汇总而非逐帧（避免拖慢战斗）。
+ */
+async function sampleFrameHealth(page, battleWindowMs) {
+  return page.evaluate(
+    (windowMs) =>
+      new Promise((resolve) => {
+        const samples = [];
+        let last = performance.now();
+        const t0 = last;
+        const tick = (now) => {
+          const dt = now - last;
+          last = now;
+          if (dt > 0 && dt < 500) samples.push(dt);
+          if (now - t0 >= windowMs) {
+            const long = samples.filter((x) => x >= 32).length;
+            resolve({
+              n: samples.length,
+              longFrames: long,
+              longRatio: samples.length ? long / samples.length : 0,
+              median: samples.length ? [...samples].sort((a, b) => a - b)[Math.floor(samples.length / 2)] : 0,
+              p95: samples.length ? [...samples].sort((a, b) => a - b)[Math.floor(samples.length * 0.95)] : 0,
+            });
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    battleWindowMs,
+  );
 }
 
 /* ------------------------------------------------------------------- 主流程 */
@@ -362,6 +452,7 @@ async function main() {
   page.on('pageerror', (e) => pageErrors.push(String(e && e.message ? e.message : e)));
 
   const runs = [];
+  let frameHealth = null;
   try {
     /* ==================================== 全新账号自然起点 */
     await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
@@ -394,6 +485,39 @@ async function main() {
       home0.equippedWeaponId === 'cannon' && home0.startRunBlocked === false && !!home0.startRunHref,
       '[A5] 默认装配 = cannon 且「开始冒险」可执行（cannon 在完整 Run 支持清单内）',
       `equipped=${home0.equippedWeaponId} blocked=${home0.startRunBlocked}`,
+    );
+
+    /* ============================ M5-R1 三源一致性前置断言（出发前的默认装配） */
+    // 三源 = ① 正式存档 BUILD_KEY ② 出发 URL `equipped=` 载荷 ③ Run 页探针（输入侧）。
+    // ⚠️ 全新账号在**首次装备前** BUILD_KEY 不落盘（产品语义 = 缺省 draft：watermelonBody +
+    //    cannon、无轮组键）⇒ 缺键按缺省 draft 对待，不算分叉。
+    const home0Raw = stored0[BUILD_KEY];
+    const home0Stored = home0Raw ? JSON.parse(home0Raw) : null;
+    const s0 = {
+      body: home0Stored ? home0Stored.bodyDefId : 'watermelonBody',
+      weapon: home0Stored ? (home0Stored.functionalSelections?.[WEAPON_SLOT] ?? null) : home0.equippedWeaponId,
+      front: home0Stored ? (home0Stored.frontWheelDefId ?? null) : null,
+      rear: home0Stored ? (home0Stored.rearWheelDefId ?? null) : null,
+    };
+    let url0Ok = false;
+    let url0Detail = 'no-href';
+    try {
+      const q0 = new URLSearchParams((home0.startRunHref || '').split('?')[1] || '');
+      const u0 = JSON.parse(q0.get('equipped') || 'null');
+      url0Detail = u0 ? `url=${u0.bodyDefId}/${u0.functionalSelections?.[WEAPON_SLOT] ?? null}/${u0.frontWheelDefId ?? '-'}+${u0.rearWheelDefId ?? '-'}` : 'no-equipped-param';
+      url0Ok =
+        !!u0 &&
+        u0.bodyDefId === s0.body &&
+        (u0.functionalSelections?.[WEAPON_SLOT] ?? null) === s0.weapon &&
+        (u0.frontWheelDefId ?? null) === s0.front &&
+        (u0.rearWheelDefId ?? null) === s0.rear;
+    } catch (e) {
+      url0Detail = `parse-error:${e && e.message}`;
+    }
+    log(
+      home0.equippedWeaponId === s0.weapon && !!home0.startRunHref && url0Ok,
+      '[A6] 出发三源一致（预检）：首页存档（缺键=缺省draft）↔ start-run href 的 equipped 载荷逐字段相等（含前后轮 defId）',
+      `stored=${JSON.stringify(s0)} · ${url0Detail}`,
     );
 
     /* ============================ RUN-1：全新账号默认装配（cannon，不换装） */
@@ -438,7 +562,7 @@ async function main() {
     }
     log(
       run2 && run2.terminal === 'COMPLETE',
-      '[C1] RUN-2 可通关装配**真实 COMPLETE**（最多重试 ${MAX_COMPLETE_RETRY} 次，每次如实记录）',
+      `[C1] RUN-2 可通关装配**真实 COMPLETE**（最多重试 ${MAX_COMPLETE_RETRY} 次，每次如实记录）`,
       `终态=${run2 ? run2.terminal : 'n/a'} 尝试=${attempts}`,
     );
     if (run2 && run2.terminal === 'COMPLETE') {
@@ -473,19 +597,33 @@ async function main() {
     console.log(
       `  RUN-3 真实终态 = ${run3.terminal}（${(run3.ms / 1000).toFixed(1)}s，阶段 ${run3.seenTrail}）`,
     );
-    // 装配传播证明：RUN-3 出发时读取的 Build 必须 = 刚在车库换上的 durianBody 装配。
+    // 装配传播证明（M5-R1 修正口径）：三源 = ① 正式存档 ② 出发 URL equipped 载荷 ③ Run 探针。
     // ⚠️ Run 探针的 `playerLoadout.functionalSelections` 只暴露武器槽（frontMass）等 functional 硬点，
-    //    **轮组不在其中**——轮组由正式 Build 存档的 `frontWheelDefId` / `rearWheelDefId` 决定下一局实际装配，
-    //    与 functionalSelections 分开存储。故车身/武器读探针、轮组读正式存档，二者分别核对。
+    //    **轮组不在其中**（`front`/`rear` 键是 functional 硬点，恒 'none'，与轮组无关）。
+    //    轮组真源 = 存档与 URL 载荷的 `frontWheelDefId`/`rearWheelDefId`（宿主原样交给 Run）。
     const start3 = run3.startLoadout;
-    const sb3 = JSON.parse(run3.storedBefore[BUILD_KEY]);
-    const wheelsOk = sb3.frontWheelDefId === VARIANT_BUILD.front && sb3.rearWheelDefId === VARIANT_BUILD.rear;
+    const lt3 = run3.loadoutTriple;
     log(
       start3.body === VARIANT_BUILD.body &&
         start3.weapon === VARIANT_BUILD.weapon &&
-        wheelsOk,
-      '[D1] 换装确实改变了下一局 Build：RUN-3 出发 = durianBody + machineGun + 双 smallWheel（车身/武器读 Run 探针，轮组读正式 Build 存档）',
-      `probe.body=${start3.body} weapon=${start3.weapon} · 存档 front=${sb3.frontWheelDefId} rear=${sb3.rearWheelDefId}`,
+        start3.front === VARIANT_BUILD.front &&
+        start3.rear === VARIANT_BUILD.rear,
+      '[D1] 换装确实改变了下一局 Build：RUN-3 出发 = durianBody + machineGun + 双 smallWheel（三源：存档↔URL载荷↔探针）',
+      `probe.body=${start3.body} weapon=${start3.weapon} · URL载荷 front=${start3.front} rear=${start3.rear} · 存档 front=${lt3.stored.front} rear=${lt3.stored.rear}`,
+    );
+    // M5-R1 必改 1｜**装配丢失 = 明确 FAIL**（三源逐字段一致；不再有误导性 front:none rear:none）
+    const tripOk =
+      lt3.url !== null &&
+      lt3.stored.body === lt3.url.body &&
+      lt3.stored.weapon === lt3.url.weapon &&
+      lt3.stored.front === lt3.url.front &&
+      lt3.stored.rear === lt3.url.rear &&
+      lt3.probe.body === lt3.stored.body &&
+      lt3.probe.weapon === lt3.stored.weapon;
+    log(
+      tripOk,
+      '[D4] RUN-3 三源装配一致（存档 ↔ URL equipped 载荷 ↔ Run 探针逐字段相等；任一分叉 = 装配丢失）',
+      JSON.stringify(lt3),
     );
     // RUN-2（若 COMPLETE）的 Build 应为 mangoBody —— 与 RUN-3 的 durianBody 不同 ⇒ 换装生效
     const run2Body = run2 ? run2.startLoadout.body : null;
@@ -506,6 +644,53 @@ async function main() {
         '[D3] RUN-3 若 FAILED 同样不发证（失败不当 PASS）',
         `claim=${run3.homeAfter && run3.homeAfter.claim} delta=${run3.invDelta}`,
       );
+    }
+
+    /* ============================ M5-R1 帧健康现场观测（D5） */
+    // ⚠️ W-03 实验证明：单场战斗胜负随帧批次粒度分叉（Chaser 场 16.67ms 玩家赢、32ms 玩家输）。
+    //    这里真实进一局（默认装配）并在 **Run 页上下文**采样 rAF 帧时长（先导航、后采样，
+    //    避免跨页导航销毁执行上下文）；采样窗口 8s，用超时竞速防止页面停帧时挂起。
+    try {
+      await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+      await waitHomeReady(page);
+      await enterRun(page); // 已在 run-page.html：此后到采样结束之间**不再导航**
+      const framePromise = sampleFrameHealth(page, 8000);
+      // 推进到 BATTLE（IDLE→EVENT→BATTLE；期间照常真实点击）
+      let sawBattle = false;
+      const t0 = Date.now();
+      while (Date.now() - t0 < 6000) {
+        const p = await probeRun(page);
+        if (p.phase === 'BATTLE') {
+          sawBattle = true;
+          break;
+        }
+        if (p.durabilityOpen && p.overlayOptions.length > 0) await clickRect(page, p.overlayOptions[0].rect);
+        else if (p.choiceOpen && p.choiceOptions.length > 0) await clickRect(page, p.choiceOptions[0].rect);
+        else if (p.overlayOpen && p.overlayOptions.length > 0) await clickRect(page, p.overlayOptions[0].rect);
+        else if (p.actionEnabled) await clickRect(page, p.actionRect);
+        await sleep(150);
+      }
+      if (sawBattle) {
+        const fh = await Promise.race([
+          framePromise,
+          new Promise((res) => setTimeout(() => res(null), 20000)),
+        ]);
+        if (fh) {
+          frameHealth = fh;
+          console.log(`  帧健康采样：n=${fh.n} median=${fh.median.toFixed(1)}ms p95=${fh.p95.toFixed(1)}ms 长帧(≥32ms)=${fh.longFrames}（${(fh.longRatio * 100).toFixed(1)}%）`);
+          log(
+            fh.longRatio < 0.2,
+            '[D5] 帧健康：BATTLE 期间长帧（≥32ms）占比 <20%（≥20% ⇒ 本 E2E 的胜负读数处于可被帧时序翻转的区间）',
+            `longRatio=${(fh.longRatio * 100).toFixed(1)}% median=${fh.median.toFixed(1)}ms p95=${fh.p95.toFixed(1)}ms`,
+          );
+        } else {
+          blocked('[D5] 帧健康采样', '20s 内未取满采样窗（页面停帧？）——如实记 BLOCKED');
+        }
+      } else {
+        blocked('[D5] 帧健康采样', '6s 内未推进到 BATTLE，跳过采样');
+      }
+    } catch (e) {
+      blocked('[D5] 帧健康采样', String(e && e.message ? e.message : e));
     }
 
     /* ============================ 贯通性 / 无残留 收尾 */
@@ -544,8 +729,14 @@ async function main() {
 
   console.log('\n=== 连续 Run 终态一览 ===');
   for (const r of runs) {
+    const st = r.loadoutTriple ? ` 存档[${r.loadoutTriple.stored.body}/${r.loadoutTriple.stored.weapon}/${r.loadoutTriple.stored.front}+${r.loadoutTriple.stored.rear}] URL[${r.loadoutTriple.url ? `${r.loadoutTriple.url.body}/${r.loadoutTriple.url.weapon}/${r.loadoutTriple.url.front}+${r.loadoutTriple.url.rear}` : 'null'}]` : '';
     console.log(
-      `  ${r.label}: ${r.terminal} · ${(r.ms / 1000).toFixed(1)}s · Build=${JSON.stringify(r.build)} · 领奖=${r.claimed ? r.claimId : '否'}`,
+      `  ${r.label}: ${r.terminal} · ${(r.ms / 1000).toFixed(1)}s · Build=${JSON.stringify(r.build)} · 领奖=${r.claimed ? r.claimId : '否'}${st}`,
+    );
+  }
+  if (frameHealth) {
+    console.log(
+      `\n=== 帧健康（真实浏览器 BATTLE 采样）=== n=${frameHealth.n} median=${frameHealth.median.toFixed(1)}ms p95=${frameHealth.p95.toFixed(1)}ms 长帧≥32ms=${frameHealth.longFrames}（${(frameHealth.longRatio * 100).toFixed(1)}%）`,
     );
   }
 
