@@ -11,8 +11,20 @@
 | 结构口径 / Mac / 已证伪 | `docs/handoff/CURRENT_STATE.md` 等三件套 |
 
 ## 0. 现状 / 下一步（新窗口先读 · 明细 → REF §21）
-- HEAD `22e05dd`；分支 `prototype-portrait-battle-lab`（实验可删）；Mac arm64。
-- **最新轮 = `CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1`（遭遇台差异化实战扩展批次）** → 日 log 同日段。
+- HEAD `DEMO-FRESH-ACCOUNT-VERTICAL-SLICE-R1` 提交后；分支 `prototype-portrait-battle-lab`；Mac arm64。
+- **最新轮 = `DEMO-FRESH-ACCOUNT-VERTICAL-SLICE-R1`（全新账号真实纵切）** → 日 log 同日段。
+  **结论：全新账号（零注入）可自己把 Demo 纵切走完**：起步自然库存 → Garage 真实换装 →
+  **首局即 COMPLETE** → 领奖 → 连续多胜累到 5/5 → **合成 ★2** → 第二局干净出发。**产品代码零改动**；
+  新增 `tests/_e2e_fresh_account_slice.cjs`（21/21 PASS）。
+  ⚠️⚠️ **新窗口必读的三条**：
+  ① **全新账号自然起点**：`FRESH_STACK_SEED`→cannon★1 **4/5**；`r3MovementChoiceSeed`→**smallWheel/largeWheel/
+  heavyWheel 各×1**；`r4BodyChoiceSeed`→**mangoBody+durianBody**；`r5ContentPoolSeed`→其余正式 Weapon 各×1。
+  ② **默认路线（UI 唯一能发，`buildAdventureHref` 不带 route）可通关的武器只剩**：machineGun 1 / shotgun 2 /
+  laser 1；**cannon=0**（cannon 只在 `rush` 有 COMPLETE，而 UI 发不出 rush）。
+  ③ ⇒ **核心张力**：自然 **4/5 的恰好是不能通关的 cannon**；能通关的 machineGun 起点 **1/5**
+  ⇒ **合成 ★2 必须连续多局真实胜利**（奖励池=出发武器；1→5 需 4 胜）。**这不是 bug，是引导/可玩性议题**。
+  ⇒ 下一条缺口 Queue = `DEMO-DEFAULT-CANNON-CLEAR-PATH-R1`（两种最小修法见日 log，**均须独立授权**）。
+- ⚠️ **上轮 = `CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1`（遭遇台差异化实战扩展批次）** → 日 log 同日段。
   **交什么**：新增 `encounterBatchExtension.ts` + 3 套 Encounter 入 `LAB_ENCOUNTERS`（登记扩展）；
   控制器改**批次参数化**（构造注入 `EncounterLabBatch`，默认 = 原三敌）；`encounterLabMain.ts` 读
   `?batch=ext`。新增 targeted 单测（10）+ 扩展 E2E（38）+ `e2e:encounter-lab-ext`。
@@ -24,10 +36,6 @@
   `R1-MIX-02`→`ExtendedBurnSaw`；④ **只改 HL-02 的断言计数，heightLineLab 页面/控制器零改动**。
   入口 = `dev:encounter-lab` → `encounter-lab.html?batch=ext`（默认页不带参数一字不变）。
 - ⚠️ **上轮 = `CONTENT-BATCH-CREATION-PIPELINE-R1`（确定性 Run 测试底座 / Foundation）** → 日 log 同日段。
-  **交什么**：新增 `tests/helpers/runContentBatchHarness.ts`（共享底座：`runSingleBattle` 单场 +
-  `runContentBatchCase` 声明式全 Run + `printBatchSummary`）＋ `tests/productContentBatchFoundationR1.test.ts`
-  （3 Build × 3 路线 = 9 例）；**重构 2 处重复驱动**（R10 `runOneBattle`→`runSingleBattle`、
-  DPP `walkRun`→`runContentBatchCase`），冻结读数逐字不变。**只动 4 个 tests 文件，src 零 diff**（+773/−133）。
   ⚠️⚠️ **新窗口必读的两条**：① **产品只有 1 个武器槽** `WEAPON_SLOT='frontMass'`；`front`/`top`/`rear`
   是 functional 硬点**不是武器槽**（把 cannon 放 `front` = 非法，能量 120>110，底座红灯**正确**）。
   ② **9 例真实结果**：mgPrimary(machineGun×3) **三路线全 COMPLETE**；cannonWalk / mangoCannon
@@ -66,13 +74,13 @@
   **这是登记式边界遵守，不是放宽守卫**；新开 Lab 页面会撞这条。
 - ⚠️ **勘误教训（踩过）**：「HF 4/4 无解 / A,D 各丢 2 格」曾与可运行矩阵冲突 ⇒ 任何判断
   必须来自实测跑批，**禁止抄写看似等价的相邻单元格**。
-- **候选下一步**：① **`CONTENT-ENCOUNTER-PLAYABLE-BATCH-R2`**（同机制再收 `R1-HVY-03`/`R1-GUN-01`/
-  `R1-MIX-01` 三套未进 Lab 的正式模板；⚠️ 每批须同步 3 处 `LAB_ENCOUNTERS` 登记守卫，见日 log）；
-  ② **`CONTENT-BATCH-EXPANSION-R2`**（用底座 `runContentBatchCase` 扩内容批测）；
-  ③ `DEFAULT-LOADOUT-CLEAR-PATH-R1`（默认车可通关性/引导的产品裁决，**含数值须单独授权**）。
-  旧候选保留：真人录屏判车高差 / GADGET-EARN-PATHWAY-R1 / 默认车平衡 /
-  ARCHIVE-RESTORE-RESILIENCE-R1 / DOC-COMPAT-REFRESH-R1。**等 Queue，不自动开工**。
-  `CONTENT-BATCH-CREATION-PIPELINE-R1` 完成 → `f8a699f`；`CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1` 完成 → `22e05dd`。
+- **候选下一步**：① **`DEMO-DEFAULT-CANNON-CLEAR-PATH-R1`**（本轮新缺口：默认车 cannon 打不过默认路线 ⇒
+  首关引导/可玩性；两种最小修法见日 log，**触碰首局默认配置/数值须单独授权**）；
+  ② **`CONTENT-ENCOUNTER-PLAYABLE-BATCH-R2`**（同机制再收 `R1-HVY-03`/`R1-GUN-01`/`R1-MIX-01`；
+  ⚠️ 每批须同步 3 处 `LAB_ENCOUNTERS` 登记守卫）；③ **`CONTENT-BATCH-EXPANSION-R2`**（用底座
+  `runContentBatchCase` 扩内容批测）。旧候选保留：真人录屏判车高差 / GADGET-EARN-PATHWAY-R1 /
+  默认车平衡 / ARCHIVE-RESTORE-RESILIENCE-R1 / DOC-COMPAT-REFRESH-R1。**等 Queue，不自动开工**。
+  `CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1` 完成 → `22e05dd`；`DEMO-FRESH-ACCOUNT-VERTICAL-SLICE-R1` 完成 → 见链尾。
 - ⚠️ **未修 → 独立 Bug Queue（禁顺手并改）**：① `validateSnapshot` 星级缺口
   （`buildValidator.ts:54`）② `e2e:next-run` 崩（期望 3 实际 4）③④ 注释陈旧 ×2 ⑤ PC-14 预存红
   ⑥ PL-26 白名单缺 `../core/partOptions` ⑦ **R2-10 / H-05 预存红**：`gadget-lab.html`
@@ -97,7 +105,8 @@
   Mac 迁移 + E2E 入册 → cruise → Gadget 12 连 → `fbb3e05` → 2026-10-12 段见 REF §21c →
   `PRODUCT-FULL-LOOP-FOUNDATION-R1` → `5e9abe6` E2E 陈旧族刷新 → `644bf4a` 归档 E2E 核查 →
   `f8a699f` CONTENT-BATCH-CREATION-PIPELINE-R1（确定性 Run 测试底座）→
-  **`22e05dd` CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1（遭遇台扩展批次）**。
+  `22e05dd` CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1（遭遇台扩展批次）→
+  **`64d2b26` DEMO-FRESH-ACCOUNT-VERTICAL-SLICE-R1（全新账号真实纵切取证）**。
 - ⚠️ `src/product/` 新模块**必须**在 `tests/productLoopHomeGarage.test.ts` **PL-26** 白名单（闭集）登记。
 - 每轮必交边界取证：`git diff --stat -- src/{core,battle,physics,render,player,platform,game,presentation,ui}`
   + `git diff --exit-code -- src/core/content.ts src/battle/contactRouter.ts`。
