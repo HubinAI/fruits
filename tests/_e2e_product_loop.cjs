@@ -752,6 +752,7 @@ async function main() {
 
     // 第一步：装上预装武器 → 存档真的变了（点卡即装：PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1）
     await clickSelector(page, `[data-ph-weapon="${WEAPON_PRE}"]`);
+    await clickSelector(page, '[data-ph-action="modal-replace"]');
     const storedPre = await storageDump(page);
     log(
       storedWeaponSlot(storedPre) === WEAPON_PRE,
@@ -761,6 +762,7 @@ async function main() {
 
     // 第二步：装回 Weapon A → 存档再次真的变了（双向都落盘；点卡即装）
     await clickSelector(page, `[data-ph-weapon="${WEAPON_A}"]`);
+    await clickSelector(page, '[data-ph-action="modal-replace"]');
     const garage1 = await probeHome(page);
     const stored1 = await storageDump(page);
     log(
@@ -783,10 +785,13 @@ async function main() {
     */
     await clickSelector(page, '[data-ph-slot="body"]');
     await clickSelector(page, '[data-ph-body="mangoBody"]');
+    await clickSelector(page, '[data-ph-action="modal-replace"]');
     await clickSelector(page, '[data-ph-slot="front"]');
     await clickSelector(page, '[data-ph-movement="smallWheel"]');
+    await clickSelector(page, '[data-ph-action="modal-replace"]');
     await clickSelector(page, '[data-ph-slot="rear"]');
     await clickSelector(page, '[data-ph-movement="smallWheel"]');
+    await clickSelector(page, '[data-ph-action="modal-replace"]');
     const storedLoadout = await storageDump(page);
     const storedDraft = JSON.parse(storedLoadout[BUILD_KEY]);
     log(
@@ -1064,6 +1069,7 @@ async function main() {
       cardB ? `[${CLAIM_ID}] ${cardB.text} · data: star=${cardB.star} count=${cardB.count} stackText=${cardB.stackText}` : 'n/a',
     );
     await clickSelector(page, `[data-ph-weapon="${WEAPON_B}"]`);
+    await clickSelector(page, '[data-ph-action="modal-replace"]');
     const stored3 = await storageDump(page);
     log(
       storedWeaponSlot(stored3) === WEAPON_B,
@@ -1125,6 +1131,7 @@ async function main() {
     );
 
     await clickSelector(page, `[data-ph-weapon="${WEAPON_A}"]`);
+    await clickSelector(page, '[data-ph-action="modal-replace"]');
     const stored3b = await storageDump(page);
     await clickSelector(page, '[data-ph-action="back-home"]');
     const home4 = await probeHome(page);

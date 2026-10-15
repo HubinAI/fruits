@@ -179,12 +179,16 @@ async function setUpLoadout(page, body, front, rear, weapon) {
   await clickSelector(page, '[data-ph-action="open-garage"]');
   await clickSelector(page, '[data-ph-slot="body"]');
   await clickSelector(page, `[data-ph-body="${body}"]`);
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-slot="front"]');
   await clickSelector(page, `[data-ph-movement="${front}"]`);
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-slot="rear"]');
   await clickSelector(page, `[data-ph-movement="${rear}"]`);
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-slot="weapon"]');
   await clickSelector(page, `[data-ph-weapon="${weapon}"]`);
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-action="back-home"]');
   await waitHomeReady(page);
 }
@@ -430,7 +434,14 @@ async function main() {
       await clickSelector(page, '[data-ph-action="open-garage"]');
       const card1 = await garageCard(page, claimId, 1);
       log(!!card1 && card1.fusable === 'true', `[E2] ${claimId} ★1 达 ${FUSE_STACK}/5 且「可合成」`, card1 ? card1.stackText : 'n/a');
-      await clickSelector(page, `[data-ph-action="fuse"][data-ph-fuse-def="${claimId}"][data-ph-fuse-star="1"]`);
+      // UX-BLUESTAR-R1：合成走【合成】独立按钮 → 弹窗（单组自动选中）→ 唯一确认。
+      await clickSelector(page, '[data-ph-action="fuse-entry"]');
+      const modalOpt = await page.evaluate((cid) => {
+        const opt = document.querySelector(`[data-ph-fuse-option="${cid}"][data-ph-fuse-option-star="1"]`);
+        return opt ? opt.getAttribute('data-ph-fuse-option-selected') : null;
+      }, claimId);
+      log(modalOpt === 'true', `[E2b] 合成弹窗自动选中 ${claimId} ★1（唯一可合成组）`, `selected=${modalOpt}`);
+      await clickSelector(page, '.ph-modal-card [data-ph-action="fuse"]');
       const g2 = await probeHome(page);
       const storedFuse = await storageDump(page);
       log(

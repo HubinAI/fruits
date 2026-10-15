@@ -355,7 +355,7 @@
         ⚠️ 不使用缩字号 / 压 gap 维持旧信息架构（Queue 明令禁止）：这里改的是信息架构
            （2×2 同构槽 + 明确标题 + 未拥有降级 + 恒可点的合成入口），卡片字号 / 间距没动。
       */
-      .ph-main-garage { overflow: hidden; gap: 0; padding: 0; }
+      .ph-main-garage { overflow: hidden; gap: 0; padding: 0; position: relative; }
 
       /* 顶部「返回首页」（Queue 结构：顶部 = 标题 / 返回） */
       .ph-back {
@@ -463,9 +463,8 @@
       }
 
       /*
-        UX-BAG-FUSION-GRID-R1：底部「合成入口」（.ph-garage-foot / .ph-fuse-entry）
-        已升格为**一级页签**（.ph-garage-tabs / .ph-garage-tab，见下方）——
-        旧入口的 CSS 一并退役；「持续可见 / 恒可点」的语义由页签承接。
+        UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1：合成入口 = 主视图【合成】独立按钮
+        （.ph-fuse-btn，见下方）；更早的 foot / 页签两代入口均已退役。
       */
 
       /*
@@ -486,94 +485,118 @@
 
       /*
         ══════════════════════════════════════════════════════════════════════════
-        UX-BAG-FUSION-GRID-R1｜一级页签「装备 / 合成」+ 合成操作区
+        UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1｜**弹窗**（对比确认 / 图腾合成）+【合成】独立按钮
         ══════════════════════════════════════════════════════════════════════════
+        旧「装备/合成」双页签与常驻 5 槽工作台的样式一并退役（类名不再存在于本文件）
+        一并退役 —— Garage 回到单一背包主视图；合成走显眼独立按钮 + 弹窗。
       */
-      .ph-garage-tabs {
+      .ph-fuse-btn {
         flex: 0 0 auto;
-        display: flex; gap: 8px;
-        padding: 6px 14px 0;
-      }
-      .ph-garage-tab {
-        flex: 1 1 0;
-        display: flex; align-items: center; justify-content: center;
-        min-height: 38px;
+        position: relative;
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        margin: 8px 14px 10px;
+        min-height: 42px;
         font: inherit; font-size: 14px; font-weight: 700;
-        border-radius: 10px;
+        border-radius: 999px;
         border: 1px solid #2b3550; background: #131b28; color: #9fb3cc;
         cursor: pointer;
       }
-      .ph-garage-tab-active {
-        border-color: #ffd35a; background: #1c2233; color: #ffe9a8;
+      .ph-fuse-btn-ready {
+        border-color: #7a5b00; color: #ffe9a8; background: #1a1607;
       }
-      /* —— 合成操作区（固定在上）—— */
-      .ph-fuse-bench { flex: 0 0 auto; padding: 6px 14px 0; display: flex; flex-direction: column; gap: 8px; }
-      .ph-fuse-target {
-        display: flex; align-items: center; gap: 10px;
-        padding: 9px 12px; border-radius: 10px;
-        border: 1px solid #7a5b00; background: #1a1607;
+      /* 红点 + 数量徽标：只有存在真实可合成组才渲染（源码级保证，不是 CSS 假点）。 */
+      .ph-fuse-btn-badge {
+        min-width: 18px; height: 18px;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 11px; font-weight: 700;
+        border-radius: 999px;
+        background: #e05a4e; color: #fff;
       }
-      /*
-        UX-BAG-VISUAL-FUSION-R2｜目标产物图形（与材料同族图标，一眼看出在合成什么）。
-      */
-      .ph-fuse-target-icon { display: flex; }
-      .ph-fuse-target-icon .ph-part-icon { width: 44px; height: 33px; }
-      .ph-fuse-target-label { font-size: 11px; color: #b99a3f; }
-      .ph-fuse-target-name { font-size: 15px; font-weight: 700; color: #ffe9a8; }
-      .ph-fuse-slots { display: flex; gap: 6px; }
-      .ph-fuse-slot {
-        flex: 1 1 0; height: 44px;
+      /* —— 弹窗（覆盖层；画在 Garage 五段骨架之后）—— */
+      .ph-modal {
+        position: absolute; inset: 0;
         display: flex; align-items: center; justify-content: center;
-        border-radius: 9px;
-        border: 1px dashed #3a4a68; background: #101823;
-        font-size: 18px; color: #3a4a68;
+        z-index: 30;
       }
-      .ph-fuse-slot-filled {
-        border: 1px solid #ffd35a; background: #1a1607; color: #ffd35a;
+      .ph-modal-mask { position: absolute; inset: 0; background: rgba(4, 8, 14, 0.72); }
+      .ph-modal-card {
+        position: relative;
+        width: calc(100% - 44px);
+        max-height: calc(100% - 120px);
+        overflow-y: auto;
+        display: flex; flex-direction: column; gap: 10px;
+        padding: 14px;
+        border-radius: 14px;
+        border: 1px solid #34507c; background: #101823;
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
       }
-      /* UX-BAG-VISUAL-FUSION-R2：满槽内画同族材料图标（看得见放进去的是哪个武器）。 */
-      .ph-fuse-slot-filled .ph-part-icon { width: 40px; height: 30px; }
-      .ph-fuse-slot-over {
-        border-color: #ffe07e; background: #241d12;
-      }
-      .ph-fuse-gate {
-        display: flex; align-items: center; gap: 10px;
-        min-height: 44px;
-        padding: 0 12px; border-radius: 10px;
+      .ph-modal-title { font-size: 15px; font-weight: 700; color: #ffe9a8; }
+      .ph-modal-empty { font-size: 12px; color: #93a1b6; line-height: 1.5; }
+      /* —— 对比确认：当前 | 新 两列 —— */
+      .ph-modal-cmp { display: flex; gap: 10px; }
+      .ph-modal-col {
+        flex: 1 1 0;
+        display: flex; flex-direction: column; align-items: center; gap: 4px;
+        padding: 10px 8px; border-radius: 10px;
         border: 1px solid #2b3550; background: #131b28;
       }
-      .ph-fuse-gate-text { flex: 1 1 auto; font-size: 12px; color: #93a1b6; }
-      .ph-fuse-confirm {
+      .ph-modal-col-label { font-size: 11px; color: #93a1b6; }
+      .ph-modal-fig { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+      .ph-modal-fig .ph-part-icon { width: 56px; height: 42px; }
+      .ph-modal-fig-empty { width: 56px; height: 42px; display: flex; align-items: center; justify-content: center; color: #3a4a68; font-size: 20px; }
+      .ph-modal-fig-name { font-size: 12px; font-weight: 650; color: #eaf1fb; text-align: center; }
+      /* 属性行：真实数值对比 + ↑↓ 方向着色（可真实比较时才上色）。 */
+      .ph-modal-rows { display: flex; flex-direction: column; gap: 4px; }
+      .ph-modal-row {
+        display: flex; align-items: baseline; gap: 8px;
+        padding: 5px 10px; border-radius: 8px;
+        border: 1px solid #2b3550; background: #131b28;
+      }
+      .ph-modal-row-label { font-size: 11px; color: #93a1b6; }
+      .ph-modal-row-val { font-size: 13px; font-weight: 650; color: #cfe0ff; }
+      .ph-cmp-up { color: #8fe0ad; }
+      .ph-cmp-down { color: #e8a08e; }
+      .ph-modal-actions { display: flex; gap: 10px; }
+      .ph-modal-btn {
+        flex: 1 1 0;
+        min-height: 42px;
         font: inherit; font-size: 14px; font-weight: 700;
-        padding: 9px 16px; border-radius: 999px;
-        border: 1px solid #7a5b00;
-        background: linear-gradient(180deg, #ffd35a, #e8a92c); color: #3a2600;
+        border-radius: 999px;
+        border: 1px solid #2b3550; background: #131b28; color: #9fb3cc;
         cursor: pointer;
       }
-      /* —— 合成图标格（唯一滚动区）—— */
-      .ph-fuse-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-      .ph-fuse-cell { display: flex; }
-      .ph-fuse-chip {
-        flex: 1 1 auto; width: 100%;
-        display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
-        padding: 9px 11px; text-align: left; font: inherit;
-        border-radius: 10px; border: 1px solid #2b3550; background: #131b28; color: inherit;
-        cursor: grab;
+      .ph-modal-btn-primary {
+        border: 1px solid #7a5b00;
+        background: linear-gradient(180deg, #ffd35a, #e8a92c); color: #3a2600;
       }
-      .ph-fuse-chip:hover { background: #1a2536; border-color: #34507c; }
-      .ph-fuse-chip-active { border-color: #ffd35a; background: #1c2233; }
-      /* UX-BAG-VISUAL-FUSION-R2：chip 也图标优先（合成页的「装备形状」一致性）。 */
-      .ph-fuse-chip .ph-part-icon { width: 46px; height: 34px; }
-      .ph-fuse-chip-name { font-size: 14px; font-weight: 650; color: #eaf1fb; }
-      .ph-fuse-chip-star { font-size: 12px; font-weight: 700; color: #ffd35a; }
-      .ph-fuse-chip-count { font-size: 11px; color: #93a1b6; }
+      /* —— 图腾式合成弹窗：可合成组列表 —— */
+      .ph-fuse-list { display: flex; flex-direction: column; gap: 8px; }
+      .ph-fuse-option {
+        display: flex; flex-direction: column; gap: 6px;
+        padding: 10px; text-align: left; font: inherit;
+        border-radius: 10px; border: 1px solid #2b3550; background: #131b28; color: inherit;
+        cursor: pointer;
+      }
+      .ph-fuse-option-active { border-color: #ffd35a; background: #1c2233; }
+      .ph-fuse-option-head { display: flex; align-items: center; gap: 8px; }
+      .ph-fuse-option-head .ph-part-icon { width: 46px; height: 34px; }
+      .ph-fuse-option-name { font-size: 14px; font-weight: 650; color: #eaf1fb; }
+      .ph-fuse-option-star { font-size: 12px; font-weight: 700; color: #ffd35a; margin-left: auto; }
+      .ph-fuse-option-mats { display: flex; gap: 5px; }
+      .ph-fuse-mat {
+        flex: 1 1 0; height: 34px;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 7px;
+        border: 1px dashed #3a4a68; background: #101823;
+      }
+      .ph-fuse-mat-filled { border: 1px solid #ffd35a; background: #1a1607; }
+      .ph-fuse-mat-filled .ph-part-icon { width: 30px; height: 22px; }
 
       /*
         UX-BAG-VISUAL-FUSION-R2｜**部件图标**（真 PNG / 简化矢量 SVG 共用同一组尺寸）。
         ⚠️ 只改展示：图形大小与战斗力无关；探针 data-ph-part-icon* 全部保留。
       */
       .ph-card .ph-part-icon { width: 52px; height: 39px; }
-      .ph-fuse-slot .ph-part-icon, .ph-fuse-target-icon .ph-part-icon { display: block; }
 
       /*
         UX-BAG-VISUAL-FUSION-R2｜**固定详情位**：必要属性只在「当前装备行」展示，
@@ -597,7 +620,6 @@
       .ph-main-garage .ph-grid-3 .ph-card-badge { font-size: 8px; }
       .ph-main-garage .ph-grid-3 .ph-card-tag { font-size: 8px; }
       .ph-main-garage .ph-grid-3 .ph-card-hint { font-size: 9px; }
-      .ph-main-garage .ph-grid-3 .ph-card-fuse { font-size: 9px; padding: 3px 6px; top: 4px; right: 4px; }
     </style>
   </head>
   <body>

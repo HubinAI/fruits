@@ -562,6 +562,11 @@ export interface ProductProbe {
    */
   readonly garageFuseEntryDisabled: boolean;
   /**
+   * UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1｜当前打开的 Garage 弹窗类型
+   * （`null` = 没有弹窗；`'equip'` = 当前/新装备对比确认；`'fuse'` = 图腾式合成）。
+   */
+  readonly garageModal: 'equip' | 'fuse' | null;
+  /**
    * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜**Movement 维度的全量读数**
    * （直接来自 `playerLoadout.movementReading()`，页面画的**就是这些字段**）。
    *
@@ -896,26 +901,22 @@ export function mountProductHome(
    */
   let garageSlot: GarageSlot = 'weapon';
   /**
-   * UX-BAG-FUSION-GRID-R1｜Garage **一级页签**：`'equip'`（装备网格）/ `'fuse'`（合成操作区）。
-   * ⚠️ 只是**视图状态**：两个页签的全部写动作都走既有正式入口
+   * UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1｜**当前打开的弹窗**（单一状态，互斥）：
+   *   - `equip`：点库存格 → 「当前装备 / 新装备」对比确认弹窗（取消零写盘）；
+   *   - `fuse`：点【合成】→ 图腾式可合成组列表弹窗（只列 count>=5 且未满星）。
+   * ⚠️ 只是**视图状态**：两个弹窗的全部写动作都走既有正式入口
    *    （装备 = `equipWeapon/Body/Movement/Gadget`；合成 = `fuseStack` 唯一动作），
-   *    本变量不产生任何第二套数据流。
+   *    本变量不产生任何第二套数据流。旧「装备/合成」双页签删除。
    */
-  let garageTab: 'equip' | 'fuse' = 'equip';
+  let garageModal:
+    | { kind: 'equip'; slot: GarageSlot; defId: string; star: number }
+    | { kind: 'fuse' }
+    | null = null;
   /**
-   * UX-BAG-FUSION-GRID-R1｜合成页当前选中的 **(defId, star)** 材料组。
-   * `null` = 还没选（合成页显示「从下面选一件武器」）。
-   * ⚠️ UX-BAG-VISUAL-FUSION-R2：不再有独立的「已选份数」状态 —— 选中组后材料槽
-   *    **按真实库存可视占用**（`min(count, 5)`），点/拖一次即选整组；写操作仍只有
-   *    满 5 时的唯一确认按钮调 `fuseStack`。
+   * UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1｜合成弹窗内当前点选的组（弹窗关闭即清空）。
+   * 仅一组自动选中；写操作仍只发生在弹窗确认按钮那一次 `fuseStack`。
    */
-  let fuseSel: { defId: string; star: number } | null = null;
-  /**
-   * 点过底部「合成」之后 → 下一次渲染把第一张**可合成**卡滚入视野并聚焦。
-   * ⚠️ 只是**视图提示**：不改任何数据、不代玩家合成（合成动作仍然只有卡上那个
-   *    `合成升星` 按钮会调 `fuseStack()`）。
-   */
-  let fuseFocusPending = false;
+  let fuseModalSel: { defId: string; star: number } | null = null;
   let lastEquip: { ok: boolean; reason: EquipFailure | null; detail: string } | null = null;
   /** 最近一次 Movement 装备动作的**真实**结果（成功与失败同构地存下来，探针原样报出）。 */
   let lastMovementEquip: { ok: boolean; reason: MovementEquipFailure | null; detail: string } | null = null;
@@ -1543,10 +1544,16 @@ export function mountProductHome(
           card.classList.add('ph-card-locked');
           card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_LOCKED_LABEL));
           card.disabled = true;
-        } else {
-          // PRODUCT-LOOP-R3-MOVEMENT-DIRECT-EQUIP｜点已拥有卡即直接装备到本挂点（无二次确认）
-          card.addEventListener('click', () => equipMovementAndRender(slot.hardpointId, c.defId));
-        }
+      } else {
+        /**
+         * UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1（必改 2）：点卡打开对比确认弹窗
+         * （轮组对应当前选中的前/后轮槽；【替换】才调 `equipMovementAndRender`）。
+         */
+        card.addEventListener('click', () => {
+          garageModal = { kind: 'equip', slot: slot.hardpointId as GarageSlot, defId: c.defId, star: 1 };
+          render();
+        });
+      }
         cell.append(card);
         // 必改 4：**可用内容进主卡阵，未拥有内容进降级区**（不与可用内容同权重）
         if (c.owned) grid.append(cell);
@@ -1577,8 +1584,11 @@ export function mountProductHome(
       }
       offCard.append(el('span', 'ph-card-name', GARAGE_MOVEMENT_OFF_LABEL));
       if (slot.unmounted) offCard.append(el('span', 'ph-card-tag', GARAGE_IN_USE_LABEL));
-      // PRODUCT-LOOP-R3-MOVEMENT-DIRECT-EQUIP｜点「未装载」即卸下本挂点（无二次确认）
-      offCard.addEventListener('click', () => equipMovementAndRender(slot.hardpointId, EMPTY_SLOT));
+      // UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1（必改 2）：「未装载」也走对比确认弹窗（卸下 = 装备空槽）。
+      offCard.addEventListener('click', () => {
+        garageModal = { kind: 'equip', slot: slot.hardpointId as GarageSlot, defId: EMPTY_SLOT, star: 1 };
+        render();
+      });
       offCell.append(offCard);
       grid.append(offCell);
 
@@ -1690,8 +1700,11 @@ export function mountProductHome(
         card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_LOCKED_LABEL));
         card.disabled = true;
       } else {
-        // PRODUCT-LOOP-R4-BODY-CANONICAL｜点已拥有卡即直接装备（无二次确认）
-        card.addEventListener('click', () => equipBodyAndRender(c.defId));
+        // UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1（必改 2）：点卡打开对比确认弹窗（【替换】才写）。
+        card.addEventListener('click', () => {
+          garageModal = { kind: 'equip', slot: 'body', defId: c.defId, star: 1 };
+          render();
+        });
       }
       cell.append(card);
       // 必改 4：**可用内容进主卡阵，未拥有内容进降级区**（不与可用内容同权重）
@@ -1777,8 +1790,12 @@ export function mountProductHome(
         card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_LOCKED_LABEL));
         card.disabled = true;
       } else {
-        // 点已拥有卡即直接装备 / 卸下（无二次确认）
-        card.addEventListener('click', () => equipGadgetAndRender(g.defId));
+        // UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1（必改 2）：点卡打开对比确认弹窗（【替换】才写；
+        // EMPTY = 「无 Gadget」这项也可经弹窗【替换】= 卸下，语义与旧直接装备一致）。
+        card.addEventListener('click', () => {
+          garageModal = { kind: 'equip', slot: 'gadget', defId: g.defId, star: 1 };
+          render();
+        });
       }
       cell.append(card);
       if (g.owned) grid.append(cell);
@@ -1891,23 +1908,9 @@ export function mountProductHome(
     }
     // UX-BAG-FUSION-GRID-R1：武器区同样 3 列紧凑网格（点格即装备语义不变，卡片探针全保留）。
     const grid = el('div', 'ph-grid ph-grid-3');
-    /**
-     * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2（必改 4）｜底部「合成」入口点过之后，
-     * 把**第一张可合成卡**标出来 ⇒ `renderGarage` 末尾据此把它滚入视野 + 聚焦。
-     */
-    let fuseFocusMarked = false;
     for (const w of r.weapons) {
       const equippedHere = w.defId === r.equippedWeaponId && w.star === r.equippedWeaponStar;
-      /**
-       * ⚠️ 卡片是 `<button>`，而「合成」也是一个按钮 ⇒ **不能嵌套**（HTML 不允许
-       *    button 里套 button）。因此合成按钮是卡片的**兄弟节点**，两者共同放在
-       *    `.ph-card-cell` 里（合成按钮绝对定位在右上角，视觉上仍在卡内）。
-       */
       const cell = el('div', 'ph-card-cell');
-      if (fuseFocusPending && w.fusable && !fuseFocusMarked) {
-        fuseFocusMarked = true;
-        cell.dataset['phFuseFocus'] = '1';
-      }
       const card = el('button', 'ph-card');
       card.type = 'button';
       card.dataset['phWeapon'] = w.defId;
@@ -1958,52 +1961,16 @@ export function mountProductHome(
       if (w.fusable) card.append(el('span', 'ph-card-badge', GARAGE_FUSE_READY_LABEL));
       if (w.maxStar) card.append(el('span', 'ph-card-badge ph-card-badge-max', GARAGE_MAX_STAR_LABEL));
       if (equippedHere) card.append(el('span', 'ph-card-tag', GARAGE_IN_USE_LABEL));
-      // PRODUCT-LOOP-P0-GARAGE-MOBILE-INTERACTION-R1｜点卡即装备（无「已选择」中间态）
-      card.addEventListener('click', () => equipWeaponAndRender(w.defId, w.star));
+      /**
+       * UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1（必改 2）：点卡**不再立即写装备** ——
+       * 打开「当前装备 / 新装备」对比确认弹窗；【替换】才调 `equipWeaponAndRender`（既有唯一写入口）。
+       */
+      card.addEventListener('click', () => {
+        garageModal = { kind: 'equip', slot: 'weapon', defId: w.defId, star: w.star };
+        render();
+      });
       cell.append(card);
 
-      if (w.fusable) {
-        // 第一版唯一的合成入口：点一次 = **执行一次** 5 合 1（必改 5：不连锁、不批量）
-        const fuse = el('button', 'ph-card-fuse', GARAGE_FUSE_LABEL);
-        fuse.type = 'button';
-        fuse.dataset['phAction'] = 'fuse';
-        fuse.dataset['phFuseDef'] = w.defId;
-        fuse.dataset['phFuseStar'] = String(w.star);
-        fuse.addEventListener('click', () => {
-          const res: FusionResult = fuseStack(inv, w.defId, w.star, draft);
-          lastFuse = res.ok
-            ? {
-                ok: true,
-                reason: null,
-                partId: res.partId,
-                fromStar: res.fromStar,
-                toStar: res.toStar,
-                countAfter: res.countAfter,
-                productCount: res.productCount,
-                equippedUpgraded: res.equippedUpgraded,
-                detail: '',
-              }
-            : {
-                ok: false,
-                reason: res.reason,
-                partId: w.defId,
-                fromStar: w.star,
-                toStar: null,
-                countAfter: null,
-                productCount: null,
-                equippedUpgraded: false,
-                detail: res.detail,
-              };
-          if (res.ok) {
-            // 合成**改变了两份正式存档**：库存（消耗+产出）与 Build（可能自动升星装备）
-            // ⇒ 手里这两份都要换成落盘后的那一份，页面读的才是真实状态。
-            inv = res.inventory;
-            draft = res.draft;
-          }
-          render();
-        });
-        cell.append(fuse);
-      }
       grid.append(cell);
     }
     box.append(grid);
@@ -2093,31 +2060,7 @@ export function mountProductHome(
     });
     header.append(back);
 
-    /* ---- UX-BAG-FUSION-GRID-R1：一级页签「装备 / 合成」 ---- */
-    const tabs = el('div', 'ph-garage-tabs');
-    tabs.dataset['phGarageTabs'] = '1';
-    const mkTab = (id: 'equip' | 'fuse', label: string): HTMLElement => {
-      const t = el('button', 'ph-garage-tab');
-      t.type = 'button';
-      t.dataset['phGarageTab'] = id;
-      t.dataset['phGarageTabActive'] = String(garageTab === id);
-      if (garageTab === id) t.classList.add('ph-garage-tab-active');
-      t.append(el('span', 'ph-garage-tab-label', label));
-      t.addEventListener('click', () => {
-        if (garageTab === id) return;
-        garageTab = id;
-        render();
-      });
-      return t;
-    };
-    tabs.append(mkTab('equip', GARAGE_TAB_EQUIP_LABEL), mkTab('fuse', GARAGE_TAB_FUSE_LABEL));
-    stage.append(tabs);
-
-    /* ---- UX-BAG-VISUAL-FUSION-R2：按页签分流（合成页不画重复大车预览） ---- */
-    if (garageTab === 'fuse') {
-      renderFuseWorkbench(r);
-      return;
-    }
+    /* ---- UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1：单一背包主视图（删双页签） ---- */
 
     /* ---- 中上（固定）：战车 Preview。⚠️ 槽位**已经不在它里面**（R3 删除挂点定位） ---- */
     const stageBox = el('div', 'ph-garage-stage');
@@ -2182,18 +2125,34 @@ export function mountProductHome(
     stage.append(body);
 
     /*
-      点过底部「合成」⇒ 把第一张可合成卡滚入视野并聚焦。
-      ⚠️ 必须**等 body 已在 DOM 里**（上面刚 append）再滚，否则 scrollIntoView 无效。
-      ⚠️ 只做视图动作：不改数据、不代玩家合成。
+      UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1（必改 1）：**【合成】独立按钮**（背包主视图唯一合成入口）。
+      - 只有存在 `fusable === true`（= `canFuseStack` 同判据：count>=5 且未满星）的合法组
+        才亮红点 + 数量（`ph-fuse-btn-ready`）；没有合法组时普通「合成」二字照旧画出、
+        点开弹窗明确说「没有可合成的武器」—— 从不 disabled（必改 5 语义延续）。
+      - 点击 → 打开图腾式合成弹窗（`garageModal = {kind:'fuse'}`），不在主视图陈列星级/材料。
     */
-    if (fuseFocusPending) {
-      fuseFocusPending = false;
-      const target = body.querySelector<HTMLElement>(`[data-ph-fuse-focus="1"]`);
-      if (target) {
-        target.scrollIntoView({ block: 'center' });
-        target.focus();
-      }
-    }
+    const fuseReadyCount = r.weapons.filter((w) => w.fusable).length;
+    const fuseBtn = el('button', 'ph-fuse-btn' + (fuseReadyCount > 0 ? ' ph-fuse-btn-ready' : ''));
+    fuseBtn.type = 'button';
+    fuseBtn.dataset['phAction'] = 'fuse-entry';
+    fuseBtn.dataset['phFuseReadyCount'] = String(fuseReadyCount);
+    fuseBtn.append(
+      el('span', 'ph-fuse-btn-label', GARAGE_FUSE_ENTRY_LABEL),
+      ...(fuseReadyCount > 0 ? [el('span', 'ph-fuse-btn-badge', String(fuseReadyCount))] : []),
+    );
+    fuseBtn.addEventListener('click', () => {
+      garageModal = { kind: 'fuse' };
+      render();
+    });
+    stage.append(fuseBtn);
+
+    /*
+      UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1：弹窗调度（对比确认 / 图腾合成）。
+      ⚠️ 弹窗画在 Garage 渲染**之后**（覆盖层，不属于五段骨架）；打开时主视图仍完整在
+      DOM 里 ⇒ E2E 可同时取证「弹窗内容」与「背后网格」。
+    */
+    if (garageModal?.kind === 'equip') renderEquipConfirmModal(r);
+    else if (garageModal?.kind === 'fuse') renderFuseModal(r);
   }
 
   /** 槽位上「当前装的是哪一件」的 defId（`''` = 该槽没有可读 defId）。 */
@@ -2217,230 +2176,335 @@ export function mountProductHome(
     return s.unmounted ? GARAGE_MOVEMENT_OFF_LABEL : s.name;
   }
 
-  /**
-   * UX-BAG-FUSION-GRID-R1｜页签文案（常量导出 ⇒ E2E / 测试不匹配文案字符串）。
-   */
-  // （常量在文件顶部 GARAGE_TAB_* 处定义；此处只引用）
+  /* ════════════════════════════════════════════════════════════════════════
+   * UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1｜**两个 Garage 弹窗**（对比确认 / 图腾合成）。
+   * ════════════════════════════════════════════════════════════════════════ */
 
   /**
-   * UX-BAG-FUSION-GRID-R1｜**合成操作区**（独立页签的可视操作面）。
-   *
-   * ── 玩家操作模型（一眼可懂）──────────────────────────────────────────────
-   *   ① 星级行：★1..★4（★5 已满星不列）当前有库存的档位 → 点选一个 (defId, star) 组；
-   *   ② 上方目标产物 + 5 个材料槽（0/5 → 5/5）：点下方图标格 = 填入一格（点击通道）；
-   *      图标格也支持**拖拽**到合成区（pointer 拖放通道）；
-   *   ③ 满 5/5 出现唯一明确「合成升星」按钮 → 调 `fuseStack()`（唯一合成动作，零新规则）；
-   *      未满 5 明示「还差 N 件」；★5 档位不出现（不可合成）。
-   *
-   * ── 硬边界 ────────────────────────────────────────────────────────────────
-   *   - 只有 Weapon 参与合成（`fuseStack`/`canFuseStack` 的正式语义）——
-   *     Body / Movement / Gadget **不出现**在合成页（不伪造可合成）；
-   *   - 选材份数恒 ≤ 该 (defId,star) 真实库存（渲染 clamp + 提交前预检）；
-   *   - 所有写动作 = 既有 `fuseStack(inv, defId, star, draft)`；成功后重读 `inv/draft`（同既有卡上按钮）；
-   *   - `data-ph-action="fuse"` + `data-ph-fuse-def/star` 探针**保留同值**（旧 E2E 语义不伪绿）；
-   *     新增 `data-ph-fuse-slot-*`（材料槽）与 `data-ph-fuse-gate-*`（预检状态）探针。
+   * 弹窗骨架（覆盖层）：遮罩点击 = 关闭（零写盘）；`data-ph-modal` = 弹窗类型探针。
+   * ⚠️ 只做视图：关闭/打开都不写任何存档；写动作只在两个弹窗各自的确认按钮里。
    */
-  function renderFuseWorkbench(r: LoadoutReading): void {
-    const groups = r.weapons.filter((w) => w.star < 5 || w.count > 0);
-    const selectable = r.weapons.filter((w) => !w.maxStar); // ★5 档不可合成（如实不列）
+  function modalShell(kind: 'equip' | 'fuse'): { wrap: HTMLElement; card: HTMLElement } {
+    const wrap = el('div', 'ph-modal');
+    wrap.dataset['phModal'] = kind;
+    const card = el('div', 'ph-modal-card');
+    const mask = el('div', 'ph-modal-mask');
+    mask.addEventListener('click', () => {
+      garageModal = null;
+      render();
+    });
+    wrap.append(mask, card);
+    stage.append(wrap);
+    return { wrap, card };
+  }
 
-    // —— 目标产物 + 5 材料槽（固定在上）——
-    const bench = el('div', 'ph-fuse-bench');
-    bench.dataset['phFuseBench'] = '1';
+  /** 弹窗里的「部件图形 + 名称（+ 星级）」一列。 */
+  function modalPartFigure(
+    kind: 'weapon' | 'body' | 'movement' | 'gadget',
+    defId: string,
+    name: string,
+    star: number | null,
+  ): HTMLElement {
+    const fig = el('div', 'ph-modal-fig');
+    if (defId !== EMPTY_SLOT) fig.append(partIconNode(kind, defId, name));
+    else fig.append(el('span', 'ph-modal-fig-empty', '—'));
+    const cap = el('span', 'ph-modal-fig-name', name);
+    if (star !== null) cap.textContent = `${name} ★${star}`;
+    fig.append(cap);
+    return fig;
+  }
 
-    const sel: { defId: string; star: number } | null = (() => {
-      const f = fuseSel;
-      if (!f) return null;
-      return selectable.some((w) => w.defId === f.defId && w.star === f.star) ? { defId: f.defId, star: f.star } : null;
+  /**
+   * UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1（必改 2）｜**「当前装备 / 新装备」对比确认弹窗**。
+   *
+   *   - 只展示**真实可计算**的属性对比（全部来自读数层，页面零自算）：
+   *     Weapon = 攻击（damage）+ 能量（energyInUse）；Body = 耐久/质量/能量容量；
+   *     Movement = 轮径/质量/能耗；Gadget = 能量。变化用 `ph-cmp-up/down` 着色
+   *     （↑↓ 是**真实数值差**的方向，不是评价）；无法比较的只显示名称/图形（不虚构战力）。
+   *   - 【取消】= 关弹窗，**零写盘**；【替换】/ 空槽【装备】= 调既有 `equip*AndRender`
+   *     **一次**（唯一写入口）→ 弹窗自动关闭、预览同次刷新。
+   *   - 合法性失败（`equip*` 返回 not-ok）由页面已有的 `ph-note-bad` 消息如实展示，
+   *     装配保持原样（写入口内部已保证）—— 弹窗不假装成功。
+   */
+  function renderEquipConfirmModal(r: LoadoutReading): void {
+    const m = garageModal;
+    if (!m || m.kind !== 'equip') return;
+    const { card } = modalShell('equip');
+    card.dataset['phModalSlot'] = m.slot;
+    card.dataset['phModalDef'] = m.defId;
+
+    const mv = readMovement();
+    const b = readBody();
+    const isOff = m.defId === EMPTY_SLOT;
+
+    // —— 新装备候选读数（每类从各自读数层取；EMPTY 特判）——
+    type CmpRow = { label: string; cur: number | null; next: number | null };
+    const cand: {
+      name: string;
+      iconKind: 'weapon' | 'body' | 'movement' | 'gadget';
+      rows: readonly CmpRow[] | null;
+    } = (() => {
+      if (m.slot === 'weapon') {
+        const w = r.weapons.find((x) => x.defId === m.defId && x.star === m.star);
+        return {
+          name: w?.name ?? m.defId,
+          iconKind: 'weapon',
+          rows: w
+            ? [
+                { label: '攻击', cur: null, next: w.damage },
+                { label: '能量', cur: null, next: w.energyInUse },
+              ]
+            : null,
+        };
+      }
+      if (m.slot === 'body') {
+        const c = b.cards.find((x) => x.defId === m.defId);
+        return {
+          name: c?.name ?? m.defId,
+          iconKind: 'body',
+          rows: c
+            ? [
+                { label: '耐久', cur: null, next: c.hp },
+                { label: '质量', cur: null, next: c.baseMass },
+                { label: '能量容量', cur: null, next: c.energyCapacity },
+              ]
+            : null,
+        };
+      }
+      if (m.slot === 'gadget') {
+        const g = r.gadgets.find((x) => x.defId === m.defId);
+        return {
+          name: g?.name ?? m.defId,
+          iconKind: 'gadget',
+          rows: g && !g.empty ? [{ label: '能量', cur: null, next: g.energy }] : null,
+        };
+      }
+      const c = mv.cards.find((x) => x.defId === m.defId);
+      return {
+        name: c?.name ?? m.defId,
+        iconKind: 'movement',
+        rows: c
+          ? [
+              { label: '轮径', cur: null, next: c.radius },
+              { label: '质量', cur: null, next: c.mass },
+              { label: '能耗', cur: null, next: c.energy },
+            ]
+          : null,
+      };
     })();
 
-    const target = el('div', 'ph-fuse-target');
-    target.dataset['phFuseTarget'] = sel ? sel.defId : '';
-    target.dataset['phFuseTargetStar'] = sel ? String(sel.star + 1) : '';
-    const tgtEntry = sel ? r.weapons.find((w) => w.defId === sel.defId) : undefined;
-    /**
-     * UX-BAG-VISUAL-FUSION-R2｜**目标区突出图形**（Queue 必改 2）：
-     *   选中组后目标产物用同一枚图标（★+1 的产物形状与材料同族）——
-     *   未选中时不画图形（只有引导文案，不是空占位假图标）。
-     */
-    if (tgtEntry && sel) {
-      const tIcon = el('span', 'ph-fuse-target-icon');
-      tIcon.append(partIconNode('weapon', sel.defId, tgtEntry.name));
-      target.append(tIcon);
-    }
-    target.append(
-      el('span', 'ph-fuse-target-label', '合成产物'),
-      el('span', 'ph-fuse-target-name', sel ? `${tgtEntry?.name ?? sel.defId} ★${sel.star + 1}` : '先在下方选择武器'),
-    );
-    bench.append(target);
-
-    const slotsRow = el('div', 'ph-fuse-slots');
-    slotsRow.dataset['phFuseSlots'] = '1';
-    const countNow = sel ? (r.weapons.find((w) => w.defId === sel.defId && w.star === sel.star)?.count ?? 0) : 0;
-    /**
-     * UX-BAG-VISUAL-FUSION-R2｜**材料槽 = 真实库存的可视占用**（Queue 必改 2）：
-     *   选中 (defId, star) 后直接按当前库存画 `min(count, 5)` 个满槽 ——
-     *   炮 4/5 一眼看到 4 满 1 空 + 「还差 1」；有 5 件直接 5 满 + 唯一确认按钮。
-     *   ⚠️ 只显示、不扣库存（写操作仍只有确认按钮那一次 `fuseStack`）。
-     *   旧「逐格填放」的 fusePicked 状态删除 —— 点/拖一次即选整组（下方通道）。
-     */
-    const picked = Math.min(countNow, FUSE_STACK);
-    for (let i = 0; i < FUSE_STACK; i++) {
-      const slot = el('div', 'ph-fuse-slot');
-      slot.dataset['phFuseSlot'] = String(i);
-      slot.dataset['phFuseSlotFilled'] = String(i < picked);
-      slot.dataset['phFuseSlotOver'] = 'false';
-      if (i < picked) {
-        slot.classList.add('ph-fuse-slot-filled');
-        // 满槽内画**同族材料图标**（看得见放进去的是哪个武器，不是抽象色块）。
-        if (sel) slot.append(partIconNode('weapon', sel.defId, tgtEntry?.name ?? sel.defId));
+    // —— 当前装备读数（同一槽位的生效件；EMPTY = 无）——
+    const curDefId = garageSlotDefId(m.slot, r, mv);
+    const cur: { name: string; iconKind: 'weapon' | 'body' | 'movement' | 'gadget'; star: number | null; rows: (number | null)[] } = (() => {
+      if (m.slot === 'weapon') {
+        const w = r.weapons.find((x) => x.defId === curDefId && x.star === r.equippedWeaponStar);
+        return {
+          name: curDefId === EMPTY_SLOT ? GARAGE_MOVEMENT_OFF_LABEL : r.equippedWeaponName,
+          iconKind: 'weapon',
+          star: curDefId === EMPTY_SLOT ? null : r.equippedWeaponStar,
+          rows: w ? [w.damage, w.energyInUse] : [null, null],
+        };
       }
-      // 拖放落点：dragover 高亮；drop = 选中该组（可视占用已由渲染层按库存画满）。
-      slot.addEventListener('dragover', (ev) => {
-        ev.preventDefault();
-        slot.classList.add('ph-fuse-slot-over');
-        slot.dataset['phFuseSlotOver'] = 'true';
-      });
-      slot.addEventListener('dragleave', () => {
-        slot.classList.remove('ph-fuse-slot-over');
-        slot.dataset['phFuseSlotOver'] = 'false';
-      });
-      slot.addEventListener('drop', (ev) => {
-        ev.preventDefault();
-        slot.classList.remove('ph-fuse-slot-over');
-        slot.dataset['phFuseSlotOver'] = 'false';
-        const raw = ev.dataTransfer?.getData('text/plain') ?? '';
-        // 与 chip dragstart 同一载荷格式；只接受与当前候选一致的组（不跨武器 / 不跨星）。
-        if (!raw.startsWith('fuse:')) return;
-        const parts = raw.split(':');
-        const dropDef = parts[1] ?? '';
-        const dropStar = Number(parts[2] ?? NaN);
-        const group = r.weapons.find((w) => w.defId === dropDef && w.star === dropStar && !w.maxStar);
-        if (!group || (sel && (sel.defId !== dropDef || sel.star !== dropStar))) return;
-        if (!sel || sel.defId !== dropDef || sel.star !== dropStar) {
-          fuseSel = { defId: dropDef, star: dropStar };
-          render();
-        }
-      });
-      slotsRow.append(slot);
-    }
-    bench.append(slotsRow);
+      if (m.slot === 'body') {
+        const c = b.cards.find((x) => x.defId === curDefId);
+        return { name: r.bodyName, iconKind: 'body', star: null, rows: c ? [c.hp, c.baseMass, c.energyCapacity] : [null, null, null] };
+      }
+      if (m.slot === 'gadget') {
+        const g = r.gadgets.find((x) => x.defId === curDefId);
+        return {
+          name: r.equippedGadgetName,
+          iconKind: 'gadget',
+          star: null,
+          rows: g && !g.empty ? [g.energy] : [null],
+        };
+      }
+      const c = mv.cards.find((x) => x.defId === curDefId);
+      return {
+        name: garageSlotValue(m.slot, r, mv),
+        iconKind: 'movement',
+        star: null,
+        rows: c ? [c.radius, c.mass, c.energy] : [null, null, null],
+      };
+    })();
 
-    // 状态行：0/5 或 缺 N 件（不满时明示差多少；满 5 才有唯一确认按钮）
-    const gate = el('div', 'ph-fuse-gate');
-    gate.dataset['phFuseGate'] = '1';
-    gate.dataset['phFusePicked'] = String(picked);
-    gate.dataset['phFuseCount'] = String(countNow);
-    const canFuse = !!sel && picked >= FUSE_STACK && countNow >= FUSE_STACK;
-    gate.dataset['phFuseCanFuse'] = String(canFuse);
-    if (!sel) {
-      gate.append(el('span', 'ph-fuse-gate-text', '从下方选择一件同星武器开始合成'));
-    } else if (picked < FUSE_STACK) {
-      gate.append(
-        el('span', 'ph-fuse-gate-text',
-          countNow >= FUSE_STACK
-            ? `库存已够 ${countNow}/${FUSE_STACK} —— 点击或拖入下方图标完成选材`
-            : `库存 ${countNow}/${FUSE_STACK}，还差 ${FUSE_STACK - countNow} 件才能合成`),
-      );
-    } else {
-      gate.append(el('span', 'ph-fuse-gate-text', `材料已满 ${FUSE_STACK}/${FUSE_STACK}`));
-      // 满 5 = **唯一**明确确认按钮（调 fuseStack —— 与旧卡上按钮同一写入口）
-      const go = el('button', 'ph-fuse-confirm', GARAGE_FUSE_LABEL);
-      go.type = 'button';
-      go.dataset['phAction'] = 'fuse';
-      go.dataset['phFuseDef'] = sel.defId;
-      go.dataset['phFuseStar'] = String(sel.star);
-      go.dataset['phFusePicked'] = String(picked);
-      go.addEventListener('click', () => {
-        const res: FusionResult = fuseStack(inv, sel.defId, sel.star, draft);
-        lastFuse = res.ok
-          ? { ok: true, reason: null, partId: res.partId, fromStar: res.fromStar, toStar: res.toStar, countAfter: res.countAfter, productCount: res.productCount, equippedUpgraded: res.equippedUpgraded, detail: '' }
-          : { ok: false, reason: res.reason, partId: sel.defId, fromStar: sel.star, toStar: null, countAfter: null, productCount: null, equippedUpgraded: false, detail: res.detail };
-        if (res.ok) {
-          inv = res.inventory;
-          draft = res.draft;
-        }
-        fuseSel = null;
-        render();
-      });
-      gate.append(go);
-    }
-    bench.append(gate);
-    stage.append(bench);
+    card.append(el('span', 'ph-modal-title', isOff ? '卸下确认' : '装备确认'));
 
-    // —— 星级 + 可选武器图标格（唯一滚动区）——
-    const title = el('div', 'ph-my-parts');
-    title.dataset['phMyParts'] = 'fuse';
-    title.append(el('span', 'ph-my-parts-title', '选择同星武器（仅 Weapon 可合成）'));
-    stage.append(title);
+    // —— 对比两列（当前 | 新）——
+    const cmp = el('div', 'ph-modal-cmp');
+    cmp.dataset['phModalCmp'] = '1';
+    const curCol = el('div', 'ph-modal-col');
+    curCol.dataset['phModalCol'] = 'current';
+    curCol.append(el('span', 'ph-modal-col-label', '当前装备'));
+    curCol.append(modalPartFigure(cur.iconKind, curDefId, cur.name, cur.star));
+    const newCol = el('div', 'ph-modal-col');
+    newCol.dataset['phModalCol'] = 'new';
+    newCol.dataset['phModalNewDef'] = m.defId;
+    newCol.append(el('span', 'ph-modal-col-label', isOff ? '卸下后' : '新装备'));
+    newCol.append(
+      modalPartFigure(cand.iconKind, m.defId, cand.name, m.slot === 'weapon' && !isOff ? m.star : null),
+    );
+    cmp.append(curCol, newCol);
+    card.append(cmp);
 
-    const body = el('div', 'ph-garage-body');
-    body.dataset['phGarageBody'] = 'fuse';
-    const grid = el('div', 'ph-fuse-grid');
-    grid.dataset['phFuseGrid'] = '1';
-    for (const w of groups) {
-      const cell = el('div', 'ph-fuse-cell');
-      const selectedHere = !!sel && sel.defId === w.defId && sel.star === w.star;
-      const chip = el('button', 'ph-fuse-chip');
-      chip.type = 'button';
-      chip.draggable = true;
-      chip.dataset['phFuseChip'] = w.defId;
-      chip.dataset['phFuseChipStar'] = String(w.star);
-      chip.dataset['phFuseChipCount'] = String(w.count);
-      chip.dataset['phFuseChipSelected'] = String(selectedHere);
-      chip.dataset['phFuseChipFusable'] = String(w.fusable);
-      if (selectedHere) chip.classList.add('ph-fuse-chip-active');
-      chip.append(
-        partIconNode('weapon', w.defId, `${w.name} ★${w.star}`),
-        el('span', 'ph-fuse-chip-name', w.name),
-        el('span', 'ph-fuse-chip-star', `★${w.star}`),
-        el('span', 'ph-fuse-chip-count', w.fusable ? '可合成' : `${w.count}/${w.threshold}`),
-      );
-      /**
-       * 点击通道（UX-BAG-VISUAL-FUSION-R2）：**点一次 = 选中整组** —— 材料槽随即
-       * 按真实库存可视占用（`min(count,5)`），4/5 见 4 满 1 空、5/5 见 5 满 + 确认。
-       * 再次点击已选组 = 取消（材料槽清空、gate 回到引导态）。
-       */
-      chip.addEventListener('click', () => {
-        if (selectedHere) {
-          fuseSel = null;
+    // —— 属性行（真实数值 + 方向着色；无法比较 = 只显示名称，不虚构）——
+    if (cand.rows) {
+      const rowsBox = el('div', 'ph-modal-rows');
+      rowsBox.dataset['phModalRows'] = '1';
+      cand.rows.forEach((row, i) => {
+        const line = el('div', 'ph-modal-row');
+        line.dataset['phModalRow'] = row.label;
+        line.append(el('span', 'ph-modal-row-label', row.label));
+        const cVal = cur.rows[i] ?? null;
+        const nVal = row.next;
+        if (cVal === null || nVal === null || cVal === nVal) {
+          // 无法比较（空槽/查无此件）或数值相同：如实显示，不上色
+          line.append(el('span', 'ph-modal-row-val', `${fmtVal(cVal)} → ${fmtVal(nVal)}`));
         } else {
-          fuseSel = { defId: w.defId, star: w.star };
+          const up = nVal > cVal;
+          const dir = el('span', `ph-modal-row-val ${up ? 'ph-cmp-up' : 'ph-cmp-down'}`, `${fmtVal(cVal)} → ${fmtVal(nVal)} ${up ? '↑' : '↓'}`);
+          dir.dataset['phModalDelta'] = up ? 'up' : 'down';
+          line.append(dir);
         }
+        rowsBox.append(line);
+      });
+      card.append(rowsBox);
+    }
+
+    // —— 动作行：【取消】零写盘 + 【替换/装备】唯一写入口 ——
+    const actions = el('div', 'ph-modal-actions');
+    const cancel = el('button', 'ph-modal-btn', '取消');
+    cancel.type = 'button';
+    cancel.dataset['phAction'] = 'modal-cancel';
+    cancel.addEventListener('click', () => {
+      garageModal = null;
+      render();
+    });
+    const go = el('button', 'ph-modal-btn ph-modal-btn-primary', isOff ? '卸下' : curDefId === EMPTY_SLOT ? '装备' : '替换');
+    go.type = 'button';
+    go.dataset['phAction'] = 'modal-replace';
+    go.dataset['phModalDef'] = m.defId;
+    go.dataset['phModalStar'] = String(m.star);
+    go.addEventListener('click', () => {
+      garageModal = null;
+      if (m.slot === 'weapon') equipWeaponAndRender(m.defId, m.star);
+      else if (m.slot === 'body') equipBodyAndRender(m.defId);
+      else if (m.slot === 'gadget') equipGadgetAndRender(m.defId);
+      else equipMovementAndRender(m.slot, m.defId);
+    });
+    actions.append(cancel, go);
+    card.append(actions);
+  }
+
+  /** 数值显示（`null` → `—`；整数直接显示）。 */
+  function fmtVal(v: number | null): string {
+    return v === null ? '—' : String(Math.round(v * 10) / 10);
+  }
+
+  /**
+   * UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1（必改 3）｜**图腾式合成弹窗**。
+   *
+   *   - **只列** `fusable === true`（= `canFuseStack` 同判据：count>=5 且未满星）的组：
+     每组 = 武器图形 + 短名称 + `★N → ★N+1` + 5 枚材料缩略图（min(count,5) 个满格）；
+   *   - **不画** ★1..★5 切换栏、**不显示** 4/5、1/5 等不可合成组、**无常驻 5 槽台**；
+   *   - 仅一组自动选中；多组点选（`data-ph-fuse-option`）；底部唯一【合成】确认
+   *     —— 点击只对选中组调 `fuseStack` **一次 5→1**（不批量消耗其它组）；
+   *   - 成功即时刷新（合成后重读 `inv/draft`，红点/装备星级同次更新）；失败如实说明。
+   */
+  function renderFuseModal(r: LoadoutReading): void {
+    const { card } = modalShell('fuse');
+    card.dataset['phModalKind'] = 'fuse';
+
+    const groups = r.weapons.filter((w) => w.fusable);
+    card.append(el('span', 'ph-modal-title', '合成'));
+
+    if (groups.length === 0) {
+      card.append(el('p', 'ph-modal-empty', '还没有可合成的武器：同类同星武器集满 5 件才能合成。'));
+      const actions = el('div', 'ph-modal-actions');
+      const close = el('button', 'ph-modal-btn', '知道了');
+      close.type = 'button';
+      close.dataset['phAction'] = 'modal-cancel';
+      close.addEventListener('click', () => {
+        garageModal = null;
         render();
       });
-      /**
-       * 拖拽通道：dragstart 带上 (defId, star)；**拖入一次 = 直接选中该组**并展示
-       * 已有同组材料（可视占用），无需重复拖 5 次 —— 与点击通道同一状态变量。
-       */
-      chip.addEventListener('dragstart', (ev) => {
-        ev.dataTransfer?.setData('text/plain', `fuse:${w.defId}:${w.star}`);
-        if (ev.dataTransfer) ev.dataTransfer.effectAllowed = 'copy';
-        if (!fuseSel || fuseSel.defId !== w.defId || fuseSel.star !== w.star) {
-          fuseSel = { defId: w.defId, star: w.star };
-          render();
-        }
-      });
-      cell.append(chip);
-      grid.append(cell);
+      actions.append(close);
+      card.append(actions);
+      return;
     }
-    if (groups.length === 0) body.append(el('p', 'ph-note', '库存里暂时没有武器材料。'));
-    body.append(grid);
-    stage.append(body);
 
-    if (lastFuse) {
-      const msg = el(
-        'p',
-        lastFuse.ok ? 'ph-note ph-note-ok' : 'ph-note ph-note-bad',
-        lastFuse.ok
-          ? `合成完成：5 件 ★${String(lastFuse.fromStar)} → 1 件 ★${String(lastFuse.toStar)}` +
-            (lastFuse.equippedUpgraded ? '（正在装备的那件已自动升到新星级）' : '') +
-            '。'
-          : `合成被拒绝（${String(lastFuse.reason)}）：${lastFuse.detail}`,
-      );
-      msg.dataset['phFuseMsg'] = lastFuse.ok ? 'ok' : 'fail';
-      body.append(msg);
+    // —— 选中状态：单组自动选中；多组保持上次选择（仍合法）或默认第一组 ——
+    if (fuseModalSel === null || !groups.some((w) => w.defId === fuseModalSel!.defId && w.star === fuseModalSel!.star)) {
+      fuseModalSel = { defId: groups[0]!.defId, star: groups[0]!.star };
     }
+    const sel = fuseModalSel!;
+
+    // —— 可合成组列表（点选）——
+    const list = el('div', 'ph-fuse-list');
+    list.dataset['phFuseList'] = '1';
+    for (const w of groups) {
+      const selectedHere = sel.defId === w.defId && sel.star === w.star;
+      const opt = el('button', 'ph-fuse-option' + (selectedHere ? ' ph-fuse-option-active' : ''));
+      opt.type = 'button';
+      opt.dataset['phFuseOption'] = w.defId;
+      opt.dataset['phFuseOptionStar'] = String(w.star);
+      opt.dataset['phFuseOptionSelected'] = String(selectedHere);
+      const head = el('div', 'ph-fuse-option-head');
+      head.append(
+        partIconNode('weapon', w.defId, `${w.name} ★${w.star}`),
+        el('span', 'ph-fuse-option-name', w.name),
+        el('span', 'ph-fuse-option-star', `★${w.star} → ★${w.star + 1}`),
+      );
+      const mats = el('div', 'ph-fuse-option-mats');
+      mats.dataset['phFuseMats'] = '1';
+      for (let i = 0; i < FUSE_STACK; i++) {
+        const cell = el('span', 'ph-fuse-mat' + (i < Math.min(w.count, FUSE_STACK) ? ' ph-fuse-mat-filled' : ''));
+        cell.dataset['phFuseMat'] = String(i);
+        if (i < Math.min(w.count, FUSE_STACK)) cell.append(partIconNode('weapon', w.defId, w.name));
+        mats.append(cell);
+      }
+      opt.append(head, mats);
+      opt.addEventListener('click', () => {
+        fuseModalSel = { defId: w.defId, star: w.star };
+        render();
+      });
+      list.append(opt);
+    }
+    card.append(list);
+
+    // —— 底部唯一【合成】确认（只对选中组调一次 fuseStack）——
+    const selEntry = groups.find((w) => w.defId === sel.defId && w.star === sel.star)!;
+    const actions = el('div', 'ph-modal-actions');
+    const cancel = el('button', 'ph-modal-btn', '取消');
+    cancel.type = 'button';
+    cancel.dataset['phAction'] = 'modal-cancel';
+    cancel.addEventListener('click', () => {
+      garageModal = null;
+      fuseModalSel = null;
+      render();
+    });
+    const go = el('button', 'ph-modal-btn ph-modal-btn-primary', GARAGE_FUSE_LABEL);
+    go.type = 'button';
+    go.dataset['phAction'] = 'fuse';
+    go.dataset['phFuseDef'] = sel.defId;
+    go.dataset['phFuseStar'] = String(sel.star);
+    go.dataset['phFuseCount'] = String(selEntry.count);
+    go.addEventListener('click', () => {
+      const res: FusionResult = fuseStack(inv, sel.defId, sel.star, draft);
+      lastFuse = res.ok
+        ? { ok: true, reason: null, partId: res.partId, fromStar: res.fromStar, toStar: res.toStar, countAfter: res.countAfter, productCount: res.productCount, equippedUpgraded: res.equippedUpgraded, detail: '' }
+        : { ok: false, reason: res.reason, partId: sel.defId, fromStar: sel.star, toStar: null, countAfter: null, productCount: null, equippedUpgraded: false, detail: res.detail };
+      if (res.ok) {
+        inv = res.inventory;
+        draft = res.draft;
+      }
+      // 合成后重开弹窗：剩余组实时可见（红点/库存同次刷新）；无剩余组则回主视图。
+      const rest = read().weapons.filter((w) => w.fusable);
+      garageModal = rest.length > 0 ? { kind: 'fuse' } : null;
+      fuseModalSel = null;
+      render();
+    });
+    actions.append(cancel, go);
+    card.append(actions);
   }
 
   function render(): void {
@@ -2462,14 +2526,13 @@ export function mountProductHome(
   /* -------------------------------------------------------------- 句柄 */
 
   /**
-   * 底部「合成」入口是否**真的可见**（必改 4：持续可见）。
+   * UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1｜背包主视图的【合成】独立按钮是否**真的可见**。
    * 判据三条同时成立：元素存在 + 真实布局面积 > 0 + 未被 `display` / `visibility` 藏掉
    * ⇒ 「可见」不是靠源码里写了这个元素，而是浏览器现场量出来的。
    */
   function fuseEntryVisibleNow(): boolean {
-    // UX-BAG-FUSION-GRID-R1：入口升格为一级页签（`data-ph-garage-tab="fuse"`）——
-    // 探针语义不变（可见 = 存在 + 真实面积 + 未被样式藏掉），只换选择器。
-    const n = stage.querySelector<HTMLElement>('[data-ph-garage-tab="fuse"]');
+    // 双页签已删除；入口 = 主视图【合成】独立按钮（`data-ph-action="fuse-entry"`）。
+    const n = stage.querySelector<HTMLElement>('[data-ph-action="fuse-entry"]');
     if (!n) return false;
     const rect = n.getBoundingClientRect();
     const cs = window.getComputedStyle(n);
@@ -2477,14 +2540,12 @@ export function mountProductHome(
   }
 
   /**
-   * R3 验收 8｜「合成」入口是否**被禁用**（恒为 `false`）。
-   * ⚠️ 「无条件可进入」必须是**查得到的事实**：这里读的是元素自身的 `disabled` 属性
-   *    （`HTMLButtonElement.disabled`），不是「源码里没写 `disabled`」这种推断。
-   *    没有元素也按「不可进入」处理（返回 `true`）⇒ 入口被删掉不会假绿。
-   * ⚠️ UX-BAG-FUSION-GRID-R1：入口 = 一级页签（`data-ph-garage-tab="fuse"`）。
+   * 【合成】按钮是否**被禁用**（恒为 `false`：没有合法组也照常可点开弹窗、弹窗里明确说没有）。
+   * ⚠️ 「无条件可进入」必须是**查得到的事实**：读元素自身的 `disabled` 属性，
+   *    没有元素按「不可进入」处理（返回 `true`）⇒ 入口被删掉不会假绿。
    */
   function fuseEntryDisabledNow(): boolean {
-    const n = stage.querySelector<HTMLButtonElement>('[data-ph-garage-tab="fuse"]');
+    const n = stage.querySelector<HTMLButtonElement>('[data-ph-action="fuse-entry"]');
     return n ? n.disabled === true : true;
   }
 
@@ -2663,12 +2724,15 @@ export function mountProductHome(
          */
         garageFuseEntryVisible: fuseEntryVisibleNow(),
         garageFuseReadyCount: r.weapons.filter((w) => w.fusable).length,
+        // UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1：「可感知态」= 按钮带红点数量徽标（真实可合成组存在）。
         garageFuseEntryReady:
-          stage.querySelector('[data-ph-garage-tab="fuse"]')?.getAttribute('data-ph-garage-tab-active') === 'true',
+          stage.querySelector('[data-ph-action="fuse-entry"]')?.classList.contains('ph-fuse-btn-ready') === true,
         /**
          * R3 验收 8｜入口**从未** disabled（Queue 必改 5：无条件可进入）。
          */
         garageFuseEntryDisabled: fuseEntryDisabledNow(),
+        // UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1：弹窗读数（类型 + 逐条真实内容，E2E 逐字对账）。
+        garageModal: garageModal?.kind ?? null,
         /**
          * PRODUCT-LOOP-R3-MOVEMENT-GARAGE-EQUIP｜Movement 维度读数
          * （与 Garage 里那一片卡画的**是同一份**，页面禁止自行推导）。

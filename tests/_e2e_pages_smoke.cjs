@@ -141,6 +141,7 @@ async function main() {
     await clickSelector(page, '[data-ph-action="open-garage"]');
     await clickSelector(page, '[data-ph-slot="weapon"]');
     await clickSelector(page, '[data-ph-weapon="machineGun"]');
+    await clickSelector(page, '[data-ph-action="modal-replace"]');
     await clickSelector(page, '[data-ph-action="back-home"]');
     await sleep(400);
     const stored1 = await storageDump(page);

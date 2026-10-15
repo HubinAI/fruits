@@ -203,12 +203,16 @@ async function setUpLoadout(page, body, front, rear, weapon) {
   await clickSelector(page, '[data-ph-action="open-garage"]');
   await clickSelector(page, '[data-ph-slot="body"]');
   await clickSelector(page, `[data-ph-body="${body}"]`);
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-slot="front"]');
   await clickSelector(page, `[data-ph-movement="${front}"]`);
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-slot="rear"]');
   await clickSelector(page, `[data-ph-movement="${rear}"]`);
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-slot="weapon"]');
   await clickSelector(page, `[data-ph-weapon="${weapon}"]`);
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-action="back-home"]');
   await waitHomeReady(page);
 }

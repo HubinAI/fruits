@@ -192,32 +192,34 @@ const slotLoop = sliceFn(garageFn, 'for (const slot of GARAGE_SLOT_ORDER)', 'sta
 
 // ============================================================================
 describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜A. 2×2 同构槽骨架（必改 1）', () => {
-  it('GS-01 五段骨架：`.ph-garage-stage` / `.ph-garage-current` / `.ph-my-parts` / `.ph-garage-body`（+ 一级页签；合成入口升格为「合成」页签）', () => {
+  it('GS-01 五段骨架：`.ph-garage-stage` / `.ph-garage-current` / `.ph-my-parts` / `.ph-garage-body`（+【合成】独立按钮；UX-BLUESTAR-R1 删双页签）', () => {
     for (const cls of [
       'ph-garage-stage',
       'ph-garage-current',
       'ph-garage-slots',
       'ph-my-parts',
       'ph-garage-body',
-      // UX-BAG-FUSION-GRID-R1：一级页签取代旧「底部合成入口」（foot 已删，tabs 常驻）。
-      'ph-garage-tabs',
+      // UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1：双页签退役，【合成】= 独立按钮（弹窗入口）。
+      'ph-fuse-btn',
     ]) {
       expect(garageFn, `Garage 必须创建 .${cls}`).toContain(`'${cls}'`);
     }
     // 旧 foot 骨架必须已删除（不是「不再显示」而是「源码里不存在」）。
     expect(garageFn).not.toContain("'ph-garage-foot'");
+    // ⚠️ UX-BLUESTAR-R1：双页签骨架必须**结构性删除**（不是藏起来）。
+    expect(garageFn).not.toContain("'ph-garage-tabs'");
+    expect(html).not.toMatch(/\.ph-garage-tabs\s*\{/);
     /*
       ⚠️ 顺序断言用**真实的 `stage.append(...)` 调用位置**，不是「类名字面量出现的先后」——
          后者会被源码排版（常量区 / 辅助函数定义位置）污染。
-      UX-BAG-FUSION-GRID-R1：页签在 Preview 之前；equip 分支顺序不变；
-      fuse 分支（bench → 标题 → body）在页签之后。
+      UX-BLUESTAR-R1：Preview → 槽区 → 标题 → 卡阵 → 【合成】按钮 → 弹窗调度。
     */
     const order = [
-      'stage.append(tabs)',
       'stage.append(stageBox)',
       'stage.append(current)',
       'stage.append(myParts)',
       'stage.append(body)',
+      'stage.append(fuseBtn)',
     ];
     let prev = -1;
     for (const call of order) {
@@ -289,9 +291,8 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜A. 2×2 同构槽骨架�
     expect(html).toMatch(/\.ph-garage-body\s*\{[^}]*overflow-y:\s*auto/);
     expect(html).toMatch(/\.ph-screen\s*\{[^}]*overflow:\s*hidden/);
     // 固定区不吃掉卡片区的空间：stage / current / myParts 都是 `flex: 0 0 auto`，body 是 `flex: 1 1 auto`。
-    // ⚠️ UX-BAG-FUSION-GRID-R1：`.ph-garage-foot`（旧底部入口）已退役，改为一级页签
-    //    `.ph-garage-tabs`（同为固定区、flex 0 0 auto）。
-    expect(html).toMatch(/\.ph-garage-tabs\s*\{[^}]*flex:\s*0 0 auto/);
+    // ⚠️ UX-BLUESTAR-R1：双页签退役；固定区新增成员 = 【合成】独立按钮（flex 0 0 auto）。
+    expect(html).toMatch(/\.ph-fuse-btn\s*\{[^}]*flex:\s*0 0 auto/);
     expect(html).toMatch(/\.ph-garage-stage\s*\{[^}]*flex:\s*0 0 auto/);
     expect(html).toMatch(/\.ph-garage-current\s*\{[^}]*flex:\s*0 0 auto/);
     expect(html).toMatch(/\.ph-my-parts\s*\{[^}]*flex:\s*0 0 auto/);
@@ -480,29 +481,23 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜C. 唯一点击即装备
     expect(probeIface).toContain('readonly garageEquipButtonCount: number;');
   });
 
-  it('GS-09b 拖拽边界（UX-BAG-FUSION-GRID-R1 重订）：**装备页**零拖拽；**合成页**才允许选材拖放', () => {
+  it('GS-09b 拖拽边界（UX-BLUESTAR-R1 重订）：**全页零拖拽**（点一次即选/即弹窗，拖拽通道随工作台退役）', () => {
     /*
-      UX-BAG-FUSION-GRID-R1 明确要求合成操作区支持「拖动同类同星图标入合成区」。
-      ⇒ 旧「全页零拖拽」守卫升级为**分区守卫**：
-        ① 装备交互（点卡即装备的三个 render 区）不得出现任何 drag 绑定 ——
-           判据：renderWeaponTab / renderBodySection / renderMovementSection 函数体内无 drag 事件；
-        ② 拖放只允许出现在 renderFuseWorkbench（dragstart/dragover/drop 全部在该函数内）；
+      UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1：合成改「点一次选整组」的弹窗流程，
+      R1 引入的选材拖放通道（dragstart→drop）随常驻工作台一并退役 ⇒ 守卫回归**全页零拖拽**：
+        ① 三个装备 render 区不得出现任何 drag 绑定（点卡 = 打开对比弹窗）；
+        ② 合成弹窗（renderFuseModal）同样零 drag —— 选组就是一次点击；
         ③ 长按 / 双击这类「猜测式」手势仍然全页禁止。
     */
-    const fuseFn = sliceFn(home, 'function renderFuseWorkbench', 'function render(): void');
-    for (const sectionFnName of ['function renderWeaponTab', 'function renderBodySection', 'function renderMovementSection']) {
+    for (const sectionFnName of ['function renderWeaponTab', 'function renderBodySection', 'function renderMovementSection', 'function renderFuseModal']) {
       const at = home.indexOf(sectionFnName);
       const nextFn = home.indexOf('function ', at + sectionFnName.length);
       const seg = home.slice(at, nextFn === -1 ? home.length : nextFn);
       expect(seg, `${sectionFnName} 不得绑定拖拽`).not.toMatch(/drag(start|end|over|enter|leave)\b/);
       expect(seg, `${sectionFnName} 不得绑定 drop`).not.toMatch(/["']drop["']/);
     }
-    // 拖放绑定必须全部落在合成工作台函数内（不能泄漏到装备流程）。
-    for (const ev of ['dragstart', 'dragover', 'drop']) {
-      expect(fuseFn, `拖放事件 ${ev} 必须在 renderFuseWorkbench 内`).toContain(`'${ev}'`);
-    }
     expect(home).not.toMatch(/longpress|contextmenu|dblclick/i);
-    // 运行时硬证据（探针现场数 DOM）保留：合成页外没有 draggable；slot 计数不变。
+    // 运行时硬证据（探针现场数 DOM）保留：全页没有 draggable；slot 计数不变。
     expect(home).toContain(
       "garageDraggableCount: stage.querySelectorAll('[draggable=\"true\"]').length",
     );
@@ -511,19 +506,19 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜C. 唯一点击即装备
     expect(probeIface).toContain('readonly garageSlotCount: number;');
   });
 
-  it('GS-10 四维**统一**为「点已拥有卡即装备」：三类卡片的 click 都直接调各自的 equip 写入口', () => {
-    // Weapon：点卡直接装备（不再是「选中」）。
-    expect(home).toContain('card.addEventListener(\'click\', () => equipWeaponAndRender(w.defId, w.star));');
-    // Movement：点已拥有卡直接装备到它所在挂点；点「未装载」即卸下。
-    expect(home).toContain(
-      'card.addEventListener(\'click\', () => equipMovementAndRender(slot.hardpointId, c.defId));',
-    );
-    expect(home).toContain(
-      'offCard.addEventListener(\'click\', () => equipMovementAndRender(slot.hardpointId, EMPTY_SLOT));',
-    );
-    // Body：点卡直接装备。
-    expect(home).toContain('card.addEventListener(\'click\', () => equipBodyAndRender(c.defId));');
-    // 三个 `*AndRender` 都是「写入口 + 刷新」这一种形状（没有第二套流程）。
+  it('GS-10 四维统一为「点卡 → 对比弹窗 → 确认替换」：卡点击只开弹窗，写动作只在弹窗确认按钮（UX-BLUESTAR-R1 必改 2）', () => {
+    // 三类卡片 click = 打开弹窗（garageModal = equip）——**不直接**调 equip 写入口。
+    expect(home).toContain("garageModal = { kind: 'equip', slot: 'weapon', defId: w.defId, star: w.star };");
+    expect(home).toContain("garageModal = { kind: 'equip', slot: 'body', defId: c.defId, star: 1 };");
+    expect(home).toContain("garageModal = { kind: 'equip', slot: slot.hardpointId as GarageSlot, defId: c.defId, star: 1 };");
+    // 「未装载」卡也走弹窗（卸下 = 装备空槽）。
+    expect(home).toContain("garageModal = { kind: 'equip', slot: slot.hardpointId as GarageSlot, defId: EMPTY_SLOT, star: 1 };");
+    // 弹窗确认按钮 = **唯一**写动作调用点（每个槽各一次调用，形状 = 写入口 + 刷新）。
+    expect(home).toContain('if (m.slot === \'weapon\') equipWeaponAndRender(m.defId, m.star);');
+    expect(home).toContain('else if (m.slot === \'body\') equipBodyAndRender(m.defId);');
+    expect(home).toContain('else if (m.slot === \'gadget\') equipGadgetAndRender(m.defId);');
+    expect(home).toContain('else equipMovementAndRender(m.slot, m.defId);');
+    // 三个 `*AndRender` 仍然存在（写入口不换）。
     for (const fn of ['equipWeaponAndRender', 'equipMovementAndRender', 'equipBodyAndRender']) {
       expect(home).toContain(`function ${fn}`);
     }
@@ -662,31 +657,32 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜D. Preview 只做结果�
 });
 
 // ============================================================================
-describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜E. 合成入口**恒可进入**（必改 5 · UX-BAG-FUSION-GRID-R1 升格为页签）', () => {
-  it('GS-14 合成入口**无条件**画出来且**从不 disabled**：一级页签「合成」常驻可点（旧 foot 入口升格）', () => {
-    // UX-BAG-FUSION-GRID-R1：入口从「底部 foot 按钮」升格为「一级页签」。
-    // 语义不变：无条件渲染、从不 disabled、任何状态都进得去；入口选择器 = `[data-ph-garage-tab="fuse"]`。
+describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜E. 合成入口**恒可进入**（UX-BLUESTAR-R1：【合成】独立按钮 + 弹窗）', () => {
+  it('GS-14 合成入口**无条件**画出来且**从不 disabled**：【合成】独立按钮常驻可点（双页签退役）', () => {
+    // UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1：入口 = 主视图【合成】独立按钮（`data-ph-action="fuse-entry"`）。
     expect(GARAGE_TAB_FUSE_LABEL).toBe('合成');
-    expect(garageFn).toContain("t.dataset['phGarageTab'] = id;");
-    expect(garageFn).toContain("t.dataset['phGarageTabActive'] = String(garageTab === id);");
-    // 页签无条件成对渲染（装备 / 合成），没有「没有可合成组就不画」的分支。
-    expect(garageFn).toContain("tabs.append(mkTab('equip', GARAGE_TAB_EQUIP_LABEL), mkTab('fuse', GARAGE_TAB_FUSE_LABEL));");
+    // 双页签骨架必须结构性删除。
+    expect(garageFn).not.toContain("'ph-garage-tabs'");
+    expect(garageFn).not.toContain("t.dataset['phGarageTab']");
+    expect(html).not.toMatch(/\.ph-garage-tab\b/);
     // 旧 foot 骨架必须已删除（源码里不存在创建调用；home.html 里的 CSS 规则同步清理）。
     expect(garageFn).not.toContain("'ph-garage-foot'");
     expect(html).not.toMatch(/\.ph-garage-foot\s*\{/);
-    // 页签**从不 disabled**（源码 + 运行时探针双证）。
-    const tabFn = sliceFn(garageFn, 'const mkTab', 'tabs.append(');
-    expect(tabFn).not.toContain('disabled');
-    expect(html).not.toContain('.ph-garage-tab:disabled');
-    // ⚠️ 入口语义的运行时探针保留：garageFuseEntryDisabled 现在读页签（元素缺失 ⇒ 不可进入）。
+    // 按钮无条件渲染：没有可合成组也画出普通「合成」（红点/数量只在真实组存在时出现）。
+    expect(garageFn).toContain("fuseBtn.dataset['phAction'] = 'fuse-entry';");
+    expect(garageFn).toContain("fuseBtn.dataset['phFuseReadyCount'] = String(fuseReadyCount);");
+    // 按钮**从不 disabled**（源码 + 运行时探针双证）。
+    const btnFn = sliceFn(garageFn, 'const fuseBtn', 'fuseBtn.addEventListener');
+    expect(btnFn).not.toContain('disabled');
+    expect(html).not.toContain('.ph-fuse-btn:disabled');
+    // ⚠️ 入口语义的运行时探针保留：garageFuseEntryDisabled 读按钮（元素缺失 ⇒ 不可进入）。
     expect(home).toContain('function fuseEntryDisabledNow');
-    expect(home).toContain("stage.querySelector<HTMLButtonElement>('[data-ph-garage-tab=\"fuse\"]')");
+    expect(home).toContain("stage.querySelector<HTMLButtonElement>('[data-ph-action=\"fuse-entry\"]')");
     expect(probeIface).toContain('readonly garageFuseEntryDisabled: boolean;');
   });
 
-  it('GS-15 页签只**带路**不合成：`fuseStack()` 调用点都在合成动作处理器内；页签点击零写盘', () => {
-    // UX-BAG-FUSION-GRID-R1：合成调用点 = 合成工作台确认按钮 + 装备页武器卡快捷按钮（同一正式入口）。
-    // ⚠️ 判据从「全页 1 个」升级为「每个调用点都在 click 处理器内且同一签名」——规则零分叉。
+  it('GS-15 合成只发生在**合成弹窗确认按钮**：`fuseStack()` 调用点在弹窗内且同一签名；【合成】按钮点击零写盘', () => {
+    // 合成调用点 = 合成弹窗底部唯一确认按钮（一次 5→1，不批量）。
     const calls = home.split('fuseStack(inv,').length - 1;
     expect(calls).toBeGreaterThanOrEqual(1);
     for (const seg of home.split('fuseStack(inv,').slice(1)) {
@@ -694,19 +690,23 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜E. 合成入口**恒可�
       const before = home.split('fuseStack(inv,')[0] + home.split('fuseStack(inv,').slice(1).join('').split(seg)[0];
       expect(before.lastIndexOf("addEventListener('click'")).toBeGreaterThan(-1);
     }
-    // 页签 handler 只做视图切换（不写盘 / 不合成）。
-    const tabHandler = sliceFn(garageFn, "t.addEventListener('click'", 'return t;');
-    expect(tabHandler).toContain('garageTab = id;');
-    expect(tabHandler).toContain('render();');
+    // 【合成】按钮 handler 只开弹窗（不写盘 / 不合成）。
+    const btnHandler = sliceFn(garageFn, "fuseBtn.addEventListener('click'", 'stage.append(fuseBtn);');
+    expect(btnHandler).toContain("garageModal = { kind: 'fuse' };");
+    expect(btnHandler).toContain('render();');
     for (const banned of ['fuseStack', 'saveInventory', 'setItem', 'savePlayerBuild', 'localStorage']) {
-      expect(tabHandler, `合成页签不得调用 ${banned}`).not.toContain(banned);
+      expect(btnHandler, `【合成】按钮不得调用 ${banned}`).not.toContain(banned);
     }
-    // 合成工作台的**确认按钮**走同一正式入口（探针签名保留同值 ⇒ 旧 E2E 不伪绿）。
-    const fuseFn = sliceFn(home, 'function renderFuseWorkbench', 'function render(): void');
+    // 合成弹窗的**确认按钮**走同一正式入口（探针签名保留同值 ⇒ 旧 E2E 不伪绿）。
+    const fuseFn = sliceFn(home, 'function renderFuseModal', 'function render(): void');
     expect(fuseFn).toContain('fuseStack(inv, sel.defId, sel.star, draft)');
     expect(fuseFn).toContain("go.dataset['phAction'] = 'fuse';");
     expect(fuseFn).toContain("go.dataset['phFuseDef'] = sel.defId;");
     expect(fuseFn).toContain("go.dataset['phFuseStar'] = String(sel.star);");
+    // 弹窗只列真实可合成组（fusable = canFuseStack 同判据）；不画星级切换栏。
+    expect(fuseFn).toContain('r.weapons.filter((w) => w.fusable)');
+    expect(fuseFn).not.toContain('phFuseChip');
+    expect(fuseFn).not.toContain('ph-fuse-bench');
     // 合成结果读数仍由 lastFuse 承载（成功/失败如实回显，语义与旧卡上按钮一致）。
     expect(fuseFn).toContain('lastFuse =');
     /*
@@ -722,25 +722,27 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜E. 合成入口**恒可�
   });
 
   it('GS-16 「持续可见」与「恒可点」都由运行时判定给出（存在 + 真实面积 + 未被样式藏掉 + `disabled`），不是源码推断', () => {
-    // ⚠️ UX-BAG-FUSION-GRID-R1：入口升格为页签 ⇒ 判据选择器同步为 `[data-ph-garage-tab="fuse"]`。
+    // ⚠️ UX-BLUESTAR-R1：入口 = 【合成】独立按钮 ⇒ 判据选择器同步为 `[data-ph-action="fuse-entry"]`。
     const visibleFn = sliceFn(home, 'function fuseEntryVisibleNow', 'const handle: ProductDebugHandle');
-    expect(visibleFn).toContain("stage.querySelector<HTMLElement>('[data-ph-garage-tab=\"fuse\"]')");
+    expect(visibleFn).toContain("stage.querySelector<HTMLElement>('[data-ph-action=\"fuse-entry\"]')");
     expect(visibleFn).toContain('getBoundingClientRect()');
     expect(visibleFn).toContain("cs.display !== 'none'");
     expect(visibleFn).toContain("cs.visibility !== 'hidden'");
     expect(visibleFn).toContain('function fuseEntryDisabledNow');
     // ⚠️ 入口缺失时按「不可进入」处理（返回 true）⇒ 入口被删掉不会假绿。
     expect(visibleFn).toContain('return n ? n.disabled === true : true;');
-    // 探针四条读数：可见性 / 可合成组数 / 是否处于可感知态 / 是否被禁用。
+    // 探针读数：可见性 / 可合成组数 / 是否处于可感知态（红点徽标）/ 是否被禁用 / 弹窗类型。
     expect(home).toContain('garageFuseEntryVisible: fuseEntryVisibleNow(),');
     expect(home).toContain('garageFuseReadyCount: r.weapons.filter((w) => w.fusable).length,');
     expect(home).toContain(
-      "stage.querySelector('[data-ph-garage-tab=\"fuse\"]')?.getAttribute('data-ph-garage-tab-active') === 'true'",
+      "stage.querySelector('[data-ph-action=\"fuse-entry\"]')?.classList.contains('ph-fuse-btn-ready') === true",
     );
     expect(home).toContain('garageFuseEntryDisabled: fuseEntryDisabledNow(),');
+    expect(home).toContain('garageModal: garageModal?.kind ?? null,');
     expect(probeIface).toContain('readonly garageFuseEntryVisible: boolean;');
     expect(probeIface).toContain('readonly garageFuseReadyCount: number;');
     expect(probeIface).toContain('readonly garageFuseEntryReady: boolean;');
+    expect(probeIface).toContain('readonly garageModal: ');
   });
 });
 
@@ -853,12 +855,15 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜G. 未拥有内容降级
     for (const banned of ['ph-store', 'ph-shop', 'ph-unlock', 'ph-buy', 'ph-price', 'ph-currency']) {
       expect(home, `页面不得出现 ${banned}`).not.toContain(banned);
     }
-    // 也没有红绿对比箭头（Queue 明令不做）。
+    /*
+      ⚠️ UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1 契约变更：对比确认弹窗允许用**真实数值差**
+         的方向箭头（↑↓ 只出现在 `ph-modal-row-val` 的真实比较上，见必改 2
+         「真实变化可用颜色/箭头」）；旧的「红绿对比箭头」禁令收窄为
+         「禁止评价式 ▲▼ 与 `ph-delta` 评分组件」—— 虚构战力 / 评分仍然全禁。
+    */
     expect(home).not.toContain('ph-delta');
     expect(home).not.toContain('▲');
     expect(home).not.toContain('▼');
-    expect(home).not.toContain('↑');
-    expect(home).not.toContain('↓');
   });
 });
 
@@ -898,7 +903,10 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜H. 边界（禁止清单
       ['weapon', 'body', 'front', 'rear', 'gadget'].sort(),
     );
     // 卡片读数一律取自读数层（页面不自己拼那三个数）。
-    expect(home).not.toContain('轮径');
+    // ⚠️ UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1：对比弹窗的**行标签**（轮径/质量/能耗）
+    //    来自读数层字段名的同词展示（真实数值对比），「页面不自己拼数字」的判据不变
+    //    —— 禁的是**字面量数字**，不是标签词。
+    expect(home).not.toMatch(/轮径\s*\d/);
     expect(home).toContain("el('span', 'ph-card-stats', c.statsText)");
     expect(home).toContain("card.dataset['phBodyStats'] = c.statsText");
     /*

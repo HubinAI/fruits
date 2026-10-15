@@ -320,8 +320,10 @@ describe('PRODUCT-LOOP-R3-MOVEMENT-CARD-READABILITY｜D. 表达纪律（源码�
     for (const banned of ['抓地', '转速', '扭矩', 'driveTorque', 'maxRPM', 'grip']) {
       expect(home).not.toContain(banned);
     }
-    // `statsText` 由读数提供 ⇒ 页面里不出现「轮径」字样（页面不自己拼串）
-    expect(home).not.toContain('轮径');
+    // `statsText` 由读数提供 ⇒ 页面**卡片**不自己拼「轮径 N」（页面不写数字字面量）。
+    // ⚠️ UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1：对比弹窗的行**标签**复用读数层字段名
+    //    （真实数值对比需要行名），页面**不拼数字**的纪律不变 ⇒ 判据收窄为「无数字字面量」。
+    expect(home).not.toMatch(/轮径\s*\d/);
     const statsLine = loadout.slice(loadout.indexOf('export const MOVEMENT_STAT_LABELS'));
     const block = statsLine.slice(0, statsLine.indexOf('};'));
     expect(block).toContain('轮径');

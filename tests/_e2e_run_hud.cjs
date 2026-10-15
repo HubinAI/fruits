@@ -66,6 +66,7 @@ function startServer() {
 
 async function clickSelector(page, sel) {
   const loc = page.locator(sel).first();
+  await loc.scrollIntoViewIfNeeded();  // 卡阵是唯一滚动容器：卡可能在视口外（y>844）
   const box = await loc.boundingBox();
   if (!box) throw new Error(`无法定位元素：${sel}`);
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -143,12 +144,16 @@ async function setupRun(page) {
   await clickSelector(page, '[data-ph-action="open-garage"]');
   await clickSelector(page, '[data-ph-slot="body"]');
   await clickSelector(page, '[data-ph-body="mangoBody"]');
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-slot="front"]');
   await clickSelector(page, '[data-ph-movement="smallWheel"]');
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-slot="rear"]');
   await clickSelector(page, '[data-ph-movement="smallWheel"]');
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-slot="weapon"]');
   await clickSelector(page, '[data-ph-weapon="machineGun"]');
+  await clickSelector(page, '[data-ph-action="modal-replace"]');
   await clickSelector(page, '[data-ph-action="back-home"]');
   await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 20000 });
 

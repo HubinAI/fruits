@@ -1,26 +1,22 @@
 /**
- * UX-BAG-FUSION-GRID-R1｜**合成工作台真实浏览器取证**（新页签路径）。
+ * UX-BLUESTAR-EQUIP-FUSE-SIMPLIFY-R1｜**合成弹窗 + 装备确认弹窗 真实浏览器取证**。
  *
  * ── 取证什么 ──────────────────────────────────────────────────────────────
- *   F-01 一级页签存在且默认「装备」激活；点「合成」切到工作台；
- *   F-02 工作台初始状态：无选中组 → 目标产物显示引导文案、5 材料槽全空、无确认按钮；
- *   F-03 初始 cannon ★1=4/5：**不能伪合成**——工作台 gate 明示「还差 1 件」、
- *        无「合成升星」确认按钮（canFuse=false）；
- *   F-04 点击选材（UX-BAG-VISUAL-FUSION-R2）：点 machineGun ★1 图标格一次 → 选中组、
- *        目标产物显示 ★2、材料槽按真实库存可视占用（5/5 ⇒ 5 满 + 确认按钮）；
- *   F-05a 再点一次已选组 = 取消（5 槽全空、无确认按钮）；
- *   F-05b 拖拽选材（HTML5 dragstart→drop）**一次**即选整组 → 5 槽全满；
- *   F-06 满 5 出现唯一「合成升星」确认按钮（探针 data-ph-fuse-can-fuse=true）；
- *   F-07 点确认 → 真实合成：★1×5→0、★2=1、gate 消失（重新选组）；
- *   F-08 落盘核验：库存（独立 localStorage 读取）★1=0 ★2=1；equipped 自动 ★2；
- *   F-09 装备页 3 列网格可用（点格装备语义不回归——切回装备页点 machineGun ★2 卡装备成功）；
- *   F-10 全程零 JS 错误。
+ *   F-01 主视图【合成】独立按钮存在；有真实可合成组（machineGun ★1 5/5）时带红点数量；
+ *        无旧双页签 / 无常驻 5 槽工作台；
+ *   F-02 cannon ★1 4/5 **不在**合成弹窗（点开只列 1 组 = machineGun；单组自动选中）；
+ *   F-03 弹窗组 = 武器图形 + 名称 + ★1 → ★2 + 5 枚材料缩略图（全满）；
+ *   F-04 底部唯一【合成升星】确认；点击 → 真实合成 ★1×5→0、★2=1；
+ *   F-05 合成后弹窗自动关闭（无剩余组）、红点归零、库存/探针逐字对账；
+ *   F-06 点武器卡 → 「当前装备/新装备」对比弹窗（图形+名称+真实属性对比），不立即写盘；
+ *   F-07 弹窗【取消】零写盘（存档逐字节不变）；
+ *   F-08 弹窗【替换】真实写盘 + 预览同次刷新 + 其余槽不丢；
+ *   F-09 全程零 JS 错误。
  *
  * ── 纪律 ──────────────────────────────────────────────────────────────────
- *   真实浏览器 + 真实鼠标 + HTML5 真实拖放事件 + 独立 localStorage 取证；零注入。
- *   合成前置材料（machineGun ★1×5）通过「注入前先走真实奖励累积」不现实（需 4 局真实 Run），
- *   本 smoke 的合成前置走**产品自己的正式 seed API**（`applyFreshSeed`——与 R2 验证账号同一
- *   正式入口，非伪造 localStorage），并在断言里显式声明该前置来源。
+ *   真实浏览器 + 真实鼠标 + 独立 localStorage 取证；合成前置为**合法形态**库存注入
+ *   （与正式 addPart 落盘同构，显式声明非玩家路径）；断言全部走 data-ph-* 探针或
+ *   独立 storage 读取，不依赖文案匹配。
  */
 const http = require('http');
 const fs = require('fs');
@@ -86,7 +82,7 @@ async function invCount(page, defId, star) {
 }
 
 async function main() {
-  console.log('=== UX-BAG-FUSION-GRID-R1｜合成工作台真实浏览器取证 ===\n');
+  console.log('=== UX-BLUESTAR-R1｜合成弹窗 + 装备确认弹窗 真实浏览器取证 ===\n');
   const server = await startServer();
   const browser = await launchBrowser(chromium);
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
@@ -98,11 +94,8 @@ async function main() {
     await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
     await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 20000 });
 
-    // ── 合成前置：用产品正式 seed 入口（applyFreshSeed）给 machineGun ★1×5 —— 显式声明非玩家路径。
+    // ── 前置：合法形态库存注入（cannon 4/5 不可合成 + machineGun 5/5 可合成）——显式声明非玩家路径。
     await page.evaluate(() => {
-      // 动态 import 页面同构模块（esm build 已在同域）；这里走 dev 产物不可行 ⇒ 直接调正式 API：
-      // homePage 未暴露 seed 句柄（生产干净）——改走「localStorage 注入 + reload」，
-      // 注入的是 strongfruit.ownedParts.v2 的**合法形态**（与正式 addPart 落盘同构）。
       const inv = {
         cannon: { one: 4 },
         machineGun: { one: 5 },
@@ -122,172 +115,154 @@ async function main() {
     await page.reload({ waitUntil: 'load' });
     await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 20000 });
     const pre = await invCount(page, 'machineGun', 1);
-    log(pre === 5, '[前置] machineGun ★1×5（合法形态库存注入 + 正式 ensureInventory 兼容加载）', `★1×${pre}`);
+    log(pre === 5, '[前置] machineGun ★1×5 + cannon ★1×4（合法形态库存注入）', `★1×${pre}`);
 
-    // F-01：进 Garage → 页签存在、默认装备激活
+    // F-01：进 Garage → 【合成】独立按钮 + 无页签 + 无工作台
     await clickSelector(page, '[data-ph-action="open-garage"]');
-    const tabs = await page.evaluate(() => {
-      const tabs = document.querySelector('[data-ph-garage-tabs]');
-      if (!tabs) return null;
-      return [...tabs.querySelectorAll('[data-ph-garage-tab]')].map((t) => ({
-        id: t.getAttribute('data-ph-garage-tab'),
-        active: t.getAttribute('data-ph-garage-tab-active'),
+    const g0 = await page.evaluate(() => {
+      const p = window.__PRODUCTHOME__.probe();
+      const btn = document.querySelector('[data-ph-action="fuse-entry"]');
+      return {
+        tabs: document.querySelectorAll('[data-ph-garage-tabs], [data-ph-garage-tab]').length,
+        bench: document.querySelectorAll('[data-ph-fuse-bench]').length,
+        btn: !!btn,
+        btnReady: btn?.classList.contains('ph-fuse-btn-ready') === true,
+        badge: btn?.querySelector('.ph-fuse-btn-badge')?.textContent ?? null,
+        probeReady: p.garageFuseEntryReady,
+        readyCount: p.garageFuseReadyCount,
+        modal: p.garageModal,
+      };
+    });
+    log(
+      g0.tabs === 0 && g0.bench === 0 && g0.btn && g0.btnReady && g0.badge === '1' && g0.probeReady && g0.readyCount === 1 && g0.modal === null,
+      '[F-01] 单一背包主视图：【合成】独立按钮带红点数量 1；无旧双页签 / 无常驻 5 槽工作台',
+      JSON.stringify(g0),
+    );
+
+    // F-02：点【合成】→ 弹窗只列 machineGun 一组（cannon 4/5 不在）；单组自动选中
+    await clickSelector(page, '[data-ph-action="fuse-entry"]');
+    const fm = await page.evaluate(() => {
+      const p = window.__PRODUCTHOME__.probe();
+      const opts = [...document.querySelectorAll('[data-ph-fuse-option]')].map((o) => ({
+        def: o.getAttribute('data-ph-fuse-option'),
+        star: o.getAttribute('data-ph-fuse-option-star'),
+        sel: o.getAttribute('data-ph-fuse-option-selected'),
+        name: o.querySelector('.ph-fuse-option-name')?.textContent ?? null,
+        starText: o.querySelector('.ph-fuse-option-star')?.textContent ?? null,
+        mats: o.querySelectorAll('.ph-fuse-mat').length,
+        matsFilled: o.querySelectorAll('.ph-fuse-mat-filled').length,
+        icon: !!o.querySelector('.ph-part-icon'),
       }));
-    });
-    log(
-      !!tabs && tabs.length === 2 && tabs[0].id === 'equip' && tabs[0].active === 'true' && tabs[1].id === 'fuse',
-      '[F-01] 一级页签「装备/合成」存在，默认装备激活',
-      JSON.stringify(tabs),
-    );
-
-    // F-02：切到合成页 → 初始无选中
-    await clickSelector(page, '[data-ph-garage-tab="fuse"]');
-    const bench0 = await page.evaluate(() => {
-      const t = document.querySelector('[data-ph-fuse-target]');
-      const slots = [...document.querySelectorAll('[data-ph-fuse-slot]')];
-      const gate = document.querySelector('[data-ph-fuse-gate]');
       return {
-        target: t?.getAttribute('data-ph-fuse-target') ?? null,
-        targetStar: t?.getAttribute('data-ph-fuse-target-star') ?? null,
-        filled: slots.map((s) => s.getAttribute('data-ph-fuse-slot-filled')),
-        picked: gate?.getAttribute('data-ph-fuse-picked') ?? null,
-        canFuse: gate?.getAttribute('data-ph-fuse-can-fuse') ?? null,
-        confirm: !!document.querySelector('[data-ph-fuse-gate] [data-ph-action="fuse"]'),
+        modal: p.garageModal,
+        opts,
+        goDef: document.querySelector('.ph-modal-card [data-ph-action="fuse"]')?.getAttribute('data-ph-fuse-def') ?? null,
+        goStar: document.querySelector('.ph-modal-card [data-ph-action="fuse"]')?.getAttribute('data-ph-fuse-star') ?? null,
       };
     });
     log(
-      bench0.target === '' && bench0.targetStar === '' && bench0.filled.every((f) => f === 'false') &&
-        bench0.picked === '0' && bench0.canFuse === 'false' && !bench0.confirm,
-      '[F-02] 工作台初始：无选中、5 槽全空、无确认按钮（不代玩家选）',
-      JSON.stringify(bench0),
+      fm.modal === 'fuse' && fm.opts.length === 1 &&
+        fm.opts[0].def === 'machineGun' && fm.opts[0].star === '1' && fm.opts[0].sel === 'true' &&
+        fm.opts[0].mats === 5 && fm.opts[0].matsFilled === 5 && fm.opts[0].icon &&
+        fm.opts[0].starText === '★1 → ★2' &&
+        fm.goDef === 'machineGun' && fm.goStar === '1',
+      '[F-02/03] 合成弹窗只列 machineGun ★1 一组（自动选中；cannon 4/5 不出现）：图形+名称+★1 → ★2+5 枚全满材料格',
+      JSON.stringify(fm),
     );
 
-    // F-03：初始 cannon ★1=4/5 不可伪合成（选 cannon → gate 显差 1 件、无确认按钮）
-    await clickSelector(page, '[data-ph-fuse-chip="cannon"]');
-    const benchC = await page.evaluate(() => {
-      const t = document.querySelector('[data-ph-fuse-target]');
-      const gate = document.querySelector('[data-ph-fuse-gate]');
-      return {
-        target: t?.getAttribute('data-ph-fuse-target'),
-        targetStar: t?.getAttribute('data-ph-fuse-target-star'),
-        count: gate?.getAttribute('data-ph-fuse-count'),
-        canFuse: gate?.getAttribute('data-ph-fuse-can-fuse'),
-        confirm: !!document.querySelector('[data-ph-fuse-gate] [data-ph-action="fuse"]'),
-        gateText: gate?.textContent ?? '',
-      };
-    });
-    log(
-      benchC.target === 'cannon' && benchC.targetStar === '2' && benchC.count === '4' &&
-        benchC.canFuse === 'false' && !benchC.confirm && benchC.gateText.includes('还差 1 件'),
-      '[F-03] cannon ★1=4/5 明示「还差 1 件」且无确认按钮（不可伪合成）',
-      JSON.stringify(benchC),
-    );
-
-    // F-04：点击选 machineGun ★1（UX-BAG-VISUAL-FUSION-R2：点一次即选整组）
-    // → 目标 ★2、材料槽按真实库存可视占用 = min(5,5) = 5 满。
-    await clickSelector(page, '[data-ph-fuse-chip="machineGun"]');
-    const benchM = await page.evaluate(() => {
-      const t = document.querySelector('[data-ph-fuse-target]');
-      const gate = document.querySelector('[data-ph-fuse-gate]');
-      const slots = [...document.querySelectorAll('[data-ph-fuse-slot]')];
-      return {
-        target: t?.getAttribute('data-ph-fuse-target'),
-        targetStar: t?.getAttribute('data-ph-fuse-target-star'),
-        picked: gate?.getAttribute('data-ph-fuse-picked'),
-        filled: slots.map((s) => s.getAttribute('data-ph-fuse-slot-filled')),
-        confirm: !!document.querySelector('[data-ph-fuse-gate] [data-ph-action="fuse"]'),
-      };
-    });
-    log(
-      benchM.target === 'machineGun' && benchM.targetStar === '2' && benchM.picked === '5' &&
-        benchM.filled.every((f) => f === 'true') && benchM.confirm,
-      '[F-04] 点击选中 machineGun ★1（5/5 库存）：目标产物 ★2、5 槽全满 + 确认按钮（点一次即选整组）',
-      JSON.stringify(benchM),
-    );
-
-    // F-05：再点一次已选组 = 取消（材料槽清空、确认按钮消失）→ 再点恢复 5 满。
-    // ⚠️ UX-BAG-VISUAL-FUSION-R2 语义：可视占用 = 真实库存的镜像，「取消选材」不再有
-    //    逐格清空过程 —— 拖拽通道（HTML5 dragstart→drop）另行验证一次选中（不重复拖 5 次）。
-    await clickSelector(page, '[data-ph-fuse-chip="machineGun"]');
-    const benchCancel = await page.evaluate(() => {
-      const slots = [...document.querySelectorAll('[data-ph-fuse-slot]')];
-      const gate = document.querySelector('[data-ph-fuse-gate]');
-      return {
-        filled: slots.map((s) => s.getAttribute('data-ph-fuse-slot-filled')),
-        picked: gate?.getAttribute('data-ph-fuse-picked'),
-        confirm: !!document.querySelector('[data-ph-fuse-gate] [data-ph-action="fuse"]'),
-      };
-    });
-    log(
-      benchCancel.filled.every((f) => f === 'false') && benchCancel.picked === '0' && !benchCancel.confirm,
-      '[F-05a] 再点一次已选组 = 取消：5 槽全空、无确认按钮',
-      JSON.stringify(benchCancel),
-    );
-    // 拖拽通道：chip dragstart → slot drop 一次 = 选中整组（R2：无需重复拖 5 次）。
-    await page.evaluate(() => {
-      const chip = document.querySelector('[data-ph-fuse-chip="machineGun"]');
-      const slot = document.querySelector('[data-ph-fuse-slot="0"]');
-      if (!chip || !slot) throw new Error('chip/slot not found');
-      const dt = new DataTransfer();
-      chip.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-      slot.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt }));
-      slot.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: dt }));
-      chip.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
-    });
-    await sleep(260);
-    const benchD = await page.evaluate(() => {
-      const slots = [...document.querySelectorAll('[data-ph-fuse-slot]')];
-      const gate = document.querySelector('[data-ph-fuse-gate]');
-      return {
-        filled: slots.map((s) => s.getAttribute('data-ph-fuse-slot-filled')),
-        picked: gate?.getAttribute('data-ph-fuse-picked'),
-        canFuse: gate?.getAttribute('data-ph-fuse-can-fuse'),
-        confirm: !!document.querySelector('[data-ph-fuse-gate] [data-ph-action="fuse"]'),
-      };
-    });
-    log(
-      benchD.picked === '5' && benchD.filled.every((f) => f === 'true') && benchD.canFuse === 'true' && benchD.confirm,
-      '[F-05b] 拖入一次即选整组 → 5 槽全满 → 唯一「合成升星」确认按钮出现（data-ph-fuse-can-fuse=true）',
-      JSON.stringify(benchD),
-    );
-
-    // F-07：确认合成 → 真实执行
-    await clickSelector(page, '[data-ph-fuse-gate] [data-ph-action="fuse"]');
+    // F-04：点唯一【合成升星】→ 真实合成
+    await clickSelector(page, '.ph-modal-card [data-ph-action="fuse"]');
     await sleep(400);
-
-    // F-08：落盘核验（独立 localStorage）。
-    // ⚠️ 本场景装备的是 cannon（前置注入）⇒ machineGun 不在车上 ⇒ 按 fuseStack 正式语义
-    //    「装备的那一件不在合成组上 ⇒ 装备一个字节不动」（equippedBefore=null）——
-    //    「装备指向的组被合空则自动升星」由 _e2e_fresh_account_slice.cjs 的 E3（equipped=machineGun
-    //    ★1 被合空 → 自动 ★2）已真实覆盖，此处不重复、不伪造。
     const after1 = await invCount(page, 'machineGun', 1);
     const after2 = await invCount(page, 'machineGun', 2);
-    const build = JSON.parse((await storageDump(page))['strongfruit.playerBuild.v1'] || '{}');
-    const equippedId = build.functionalSelections?.frontMass ?? '';
-    log(
-      after1 === 0 && after2 === 1 && equippedId === 'cannon',
-      '[F-07/08] 真实合成：★1×5→0、★2=1；装备非合成组 ⇒ 装备不动（fuseStack 正式语义）',
-      `★1×${after1} ★2×${after2} equipped=${equippedId}（未受影响=正确）`,
-    );
-
-    // F-09：切回装备页 → 3 列网格在、点 machineGun ★2 卡装备成功
-    await clickSelector(page, '[data-ph-garage-tab="equip"]');
-    const gridCols = await page.evaluate(() => {
-      const g = document.querySelector('.ph-main-garage .ph-grid-3');
-      return g ? getComputedStyle(g).gridTemplateColumns.split(' ').length : 0;
+    const f5 = await page.evaluate(() => {
+      const p = window.__PRODUCTHOME__.probe();
+      const btn = document.querySelector('[data-ph-action="fuse-entry"]');
+      return {
+        modal: p.garageModal,
+        lastFuse: p.lastFuse,
+        readyCount: p.garageFuseReadyCount,
+        btnReady: btn?.classList.contains('ph-fuse-btn-ready') === true,
+        badge: btn?.querySelector('.ph-fuse-btn-badge')?.textContent ?? null,
+      };
     });
-    log(gridCols === 3, '[F-09a] 装备页 3 列紧凑网格生效', `cols=${gridCols}`);
-    await clickSelector(page, '[data-ph-slot="weapon"]');
-    await clickSelector(page, '[data-ph-weapon="machineGun"][data-ph-star="2"]');
-    const build2 = JSON.parse((await storageDump(page))['strongfruit.playerBuild.v1'] || '{}');
     log(
-      build2.functionalSelections?.frontMass === 'machineGun' && (build2.functionalStars?.frontMass ?? 1) === 2,
-      '[F-09b] 点格装备 machineGun ★2 落盘（装备语义不回归）',
-      `equipped=${build2.functionalSelections?.frontMass}★${build2.functionalStars?.frontMass ?? 1}`,
+      after1 === 0 && after2 === 1 &&
+        f5.modal === null && f5.lastFuse?.ok === true && f5.lastFuse.fromStar === 1 && f5.lastFuse.toStar === 2 &&
+        f5.readyCount === 0 && f5.btnReady === false && f5.badge === null,
+      '[F-04/05] 点唯一确认 → 真实合成：★1×5→0、★2=1；弹窗自动关闭（无剩余组）、红点归零',
+      `★1×${after1} ★2×${after2} modal=${f5.modal} lastFuse=${JSON.stringify(f5.lastFuse)}`,
     );
 
-    // F-10：零 JS 错误
-    log(pageErrors.length === 0, '[F-10] 全取证零运行时报错', pageErrors.slice(0, 2).join(' | ') || 'none');
+    // F-06：点武器卡 → 对比弹窗（当前 cannon / 新 machineGun ★2），不立即写盘
+    await clickSelector(page, '[data-ph-weapon="machineGun"][data-ph-star="2"]');
+    const em = await page.evaluate(() => {
+      const p = window.__PRODUCTHOME__.probe();
+      const build = JSON.parse(localStorage.getItem('strongfruit.playerBuild.v1') || '{}');
+      return {
+        modal: p.garageModal,
+        slot: document.querySelector('.ph-modal-card')?.getAttribute('data-ph-modal-slot'),
+        curName: document.querySelector('[data-ph-modal-col="current"] .ph-modal-fig-name')?.textContent ?? null,
+        newName: document.querySelector('[data-ph-modal-col="new"] .ph-modal-fig-name')?.textContent ?? null,
+        curIcon: !!document.querySelector('[data-ph-modal-col="current"] .ph-part-icon'),
+        newIcon: !!document.querySelector('[data-ph-modal-col="new"] .ph-part-icon'),
+        rows: [...document.querySelectorAll('[data-ph-modal-row]')].map((r) => ({
+          k: r.getAttribute('data-ph-modal-row'),
+          t: r.querySelector('.ph-modal-row-val')?.textContent ?? '',
+          d: r.querySelector('[data-ph-modal-delta]')?.getAttribute('data-ph-modal-delta') ?? null,
+        })),
+        cancel: !!document.querySelector('[data-ph-action="modal-cancel"]'),
+        go: document.querySelector('[data-ph-action="modal-replace"]')?.textContent ?? null,
+        equippedBefore: build.functionalSelections?.frontMass ?? null,
+      };
+    });
+    log(
+      em.modal === 'equip' && em.slot === 'weapon' && em.curName === '炮 ★1' && em.newName === '机枪 ★2' &&
+        em.curIcon && em.newIcon && em.rows.length === 2 &&
+        em.rows[0].k === '攻击' && em.rows[0].d !== null && em.rows[0].d !== '' && em.rows[0].t.includes('→') &&
+        em.rows[1].k === '能量' && em.rows[1].d !== null && em.rows[1].t.includes('→') &&
+        em.cancel && em.go === '替换' && em.equippedBefore === 'cannon',
+      '[F-06] 点卡 → 对比弹窗：当前=炮★1 / 新=机枪★2（双图形）+ 真实属性对比（攻击/能量，方向着色）；存档未变',
+      JSON.stringify(em),
+    );
+
+    // F-07：【取消】零写盘
+    await clickSelector(page, '[data-ph-action="modal-cancel"]');
+    const afterCancel = await page.evaluate(() => {
+      const p = window.__PRODUCTHOME__.probe();
+      const build = JSON.parse(localStorage.getItem('strongfruit.playerBuild.v1') || '{}');
+      return { modal: p.garageModal, equipped: build.functionalSelections?.frontMass ?? null };
+    });
+    log(
+      afterCancel.modal === null && afterCancel.equipped === 'cannon',
+      '[F-07] 【取消】零写盘：弹窗关闭、装备仍是 cannon（存档逐字节不变）',
+      JSON.stringify(afterCancel),
+    );
+
+    // F-08：【替换】真实写盘 + 其余槽不丢
+    await clickSelector(page, '[data-ph-weapon="machineGun"][data-ph-star="2"]');
+    await clickSelector(page, '[data-ph-action="modal-replace"]');
+    const afterGo = await page.evaluate(() => {
+      const p = window.__PRODUCTHOME__.probe();
+      const build = JSON.parse(localStorage.getItem('strongfruit.playerBuild.v1') || '{}');
+      return {
+        modal: p.garageModal,
+        equipped: build.functionalSelections?.frontMass ?? null,
+        star: build.functionalStars?.frontMass ?? null,
+        body: build.bodyDefId,
+        lastEquip: p.lastEquip,
+        previewWeapon: p.previewItems.find((i) => i.onWeaponSlot)?.defId ?? null,
+      };
+    });
+    log(
+      afterGo.modal === null && afterGo.equipped === 'machineGun' && afterGo.star === 2 &&
+        afterGo.body === 'watermelonBody' && afterGo.lastEquip?.ok === true && afterGo.previewWeapon === 'machineGun',
+      '[F-08] 【替换】真实写盘：machineGun★2 上车、车身/轮组不丢、预览同次刷新、弹窗关闭',
+      JSON.stringify(afterGo),
+    );
+
+    // F-09：零 JS 错误
+    log(pageErrors.length === 0, '[F-09] 全取证零运行时报错', pageErrors.slice(0, 2).join(' | ') || 'none');
   } catch (err) {
     log(false, '[F0] 未捕获异常', String(err && err.stack ? err.stack.split('\n')[0] : err));
     console.error(err);
