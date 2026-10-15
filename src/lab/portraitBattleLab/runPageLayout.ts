@@ -104,22 +104,19 @@ export function runDayNodes(total: number): RunRect[] {
  */
 export const RUN_BUFF_ICON_MAX = 5;
 /**
- * UX-RUN-CENTER-HUD-R1：图标行让位——状态 HUD 行占了原 y=44 的位置 ⇒
- * 图标缩小（30→22）并右移到 HUD 行右侧（右对齐），同一行互不重叠。
- * `runBuffIconRects` 改为**右对齐**布局（锚点 = 右缘 16），y=48。
+ * UX-PERCEPTUAL-R2-A：状态面板移出顶部薄层（改到战场带底部，见 `RUN_STATUS_PANEL`）
+ * ⇒ 顶部恢复 PRP-R3 原构图：图标回到**左对齐**（x=16）、原始尺寸 30、y=44
+ * （与 R1 之前逐值相同 ⇒ 顶部像素账本口径原样恢复）。
  */
-export const RUN_BUFF_ICON = { size: 22, gap: 6, x: 16, y: 48 } as const;
+export const RUN_BUFF_ICON = { size: 30, gap: 8, x: 16, y: 44 } as const;
 /** 已获得图标内部的高光小方块（与底色互斥的第二色 → 供像素级精确断言）。 */
 export const RUN_BUFF_ICON_CHIP = { size: 12 } as const;
 
 export function runBuffIconRects(count: number): RunRect[] {
   const n = Math.min(RUN_BUFF_ICON_MAX, Math.max(0, Math.floor(count)));
   if (n === 0) return [];
-  const span = n * RUN_BUFF_ICON.size + (n - 1) * RUN_BUFF_ICON.gap;
-  // UX-RUN-CENTER-HUD-R1：右对齐（右缘 = 页宽 − 16），与左侧状态 HUD 同行互不重叠。
-  const x0 = RUN_PAGE_W - 16 - span;
   return Array.from({ length: n }, (_, i) => ({
-    x: x0 + i * (RUN_BUFF_ICON.size + RUN_BUFF_ICON.gap),
+    x: RUN_BUFF_ICON.x + i * (RUN_BUFF_ICON.size + RUN_BUFF_ICON.gap),
     y: RUN_BUFF_ICON.y,
     w: RUN_BUFF_ICON.size,
     h: RUN_BUFF_ICON.size,
@@ -137,57 +134,85 @@ export function runBuffIconChip(icon: RunRect): RunRect {
   };
 }
 
-/* --------------------------------------- 顶部薄层第二行：状态 HUD（攻击 / 耐久） */
+/* ------------------------------------- 战场带底部：战力状态面板（攻击 / 耐久） */
 
 /**
- * UX-RUN-CENTER-HUD-R1｜**顶部薄层第二行：攻击 / 耐久 状态 HUD**。
+ * UX-PERCEPTUAL-R2-A｜**战场带底部的战力状态面板**（替代 R1 的顶部小字 HUD）。
  *
- * ── 玩家问题 ────────────────────────────────────────────────────────────────
- *   正式 Run 顶部原本只有 DAY 节点；战场下是大片冒险记录。玩家战斗时**看不到**
- *   持续清晰的「我剩多少血 / 我打多少伤害」，无法依据残血/伤害做下一次强化选择。
+ * ── 玩家问题（R1 返修）──────────────────────────────────────────────────────
+ *   R1 把攻击/耐久放在顶部 DAY 下方一小行（y≈44–70）：GPT 用 390×844 正式构建截图
+ *   复核仍判「不够可感知」——攻击 20 / 耐久 950/950 是屏幕左上角的小字。
+ *   本 Queue 要求：**中部可感知**的显眼状态块（加大攻击数字 + 真实耐久当前/上限 + 长血条）。
  *
- * ── 本 HUD 回答什么（全部真源，零虚构）────────────────────────────────────
- *   - **耐久** = `s.battle.playerHp / playerHpMax`（战斗中实时随受击变化）；
- *     无战斗（IDLE/EVENT/CHOICE…）= `runCarriedPlayerHp(s) ?? ctx.playerHpMax`
- *     （跨战传递 + 维修补偿的唯一口径，runPageState.ts:621 —— repairBonus 已含在内）；
- *   - **攻击** = 玩家主武**单次伤害**（`weaponMainDamage` 经 `composePlayerRunWeaponDef`
- *     + `applyStarTier` 星级层 —— 与战斗侧同一合成链的纯函数复算），随星级 /
- *     damageUp 实时正确；刻意**不做**「综合战力」等不可解释的合成数字。
+ * ── 为什么在战场带**底部**而不是 Queue 建议的 y100..160（先查碰撞的结论）────────
+ *   真实浏览器三场战斗逐帧实测（`stage.player/enemy.bounds`，289 个采样点）：
+ *     · 敌军「菠萝冲刺车」会**反复跳劈**：起跳后车顶最高到舞台带内 y=24（页面 y=104），
+ *       水平覆盖 x≈95..315 ⇒ Queue 建议区（x70..320 / y100..160）**被跳起敌军真实遮挡**
+ *       （25/289 ≈ 8.7% 采样，集中于第二场）；
+ *     · 弹丸 / 命中在车顶高度（页面 y≈240..295），建议区亮像素实测 0（maxLum 171）；
+ *     · 战场上沿唯一足够高的空白带只有 y<24（24px，放不下显眼面板）。
+ *   战场带底部（地线之下）实测：双方车辆底边恒等于地线（页面 y=295），
+ *   **0/289 采样重叠**；伤害跳字 / 接触火花实测全部在 y≤305；聚光灯锥 / 看台灯点
+ *   亮度 ≤171（低于弹丸量级）⇒ 面板放这里不遮战车、不遮关键命中/伤害。
  *
- * ── 布局纪律 ────────────────────────────────────────────────────────────────
- *   - 只占 `RUN_TOP_BAND`（80px）内**原强化图标行**的空间：DAY 行（基线 34）不动，
- *     战场带 / 日志带 / 动作带 / 全部命中区一个像素不移；
- *   - 已获得强化图标行让位到第三行（`RUN_BUFF_ICON.y` 44→70，见常量改动）；
- *     图标 30px 高 70+30=100 > 80 会出带 ⇒ 图标缩小（30→22），70+22=92 仍出带
- *     ⇒ HUD 行与图标行**合并为同一行**：图标在最右（22px，y=50），HUD 在左 ——
- *     `RUN_BUFF_ICON` 常量由本 Queue 一并调整（size 22 / y 50），runBuffIconRects
- *     / runBuffIconChip 全部跟随常量自动生效（零散调用点无需改）。
- *   - 血条为两段纯色矩形，但**不入面积账本**（不登记进 `RunLayerId` ⇒ 账本守卫集
- *     不变、零回归风险；HUD 用色与全部入账色 RGB 互斥）。
+ * ── 读数真源（与 R1 同口径，零虚构）────────────────────────────────────────
+ *   - 耐久 = `s.battle.playerHp / playerHpMax`；无战斗 = `runCarriedPlayerHp(s) ?? ctx.playerHpMax`；
+ *   - 攻击 = 主武单次伤害（`weaponMainDamage` 经 `composePlayerRunWeaponDef` + `applyStarTier`，
+ *     与战斗侧同一合成链）；无武器 → 「—」。
+ *
+ * ── 显示规则（必改 2）───────────────────────────────────────────────────────
+ *   - 只在**真实战斗世界在舞台上**时显示（EVENT / BATTLE / RESULT）；
+ *   - IDLE（待机近景，玩家车占页面 268..328）/ CHOICE·DURABILITY·种子浮层 /
+ *     COMPLETE·FAILED 终态卡片 ⇒ **不画**（结构性不遮挡，无需透明度 hack）；
+ *   - 战斗日志降权沿用 R1（BATTLE 期间 12→6 行、无高亮）。
+ *
+ * ── 账本纪律 ────────────────────────────────────────────────────────────────
+ *   面板全部取自**既有非入账色**（cardBg / cardEdge / text* / dayAccent / hpBar*），
+ *   不引入新色；不登记进 `RunLayerId` ⇒ 面积账本与像素守卫零影响。
+ *   ⚠️ 战斗相位下 `runPageLayerShapes` 本就不登记 ground/road（舞台带被真实战场位图
+ *      整块覆盖）⇒ 面板压住平台下部**不动任何入账面积**。
  */
-
-/** 状态 HUD 行的几何（全部在 RUN_TOP_BAND 内）。 */
-export const RUN_STATUS_HUD = {
-  /** HUD 行顶部 y（DAY 标签基线 34 之下、带底 80 之上）。 */
-  y: 44,
-  /** HUD 行高（血条 + 上下小字）。 */
-  h: 30,
-  /** 左内边距。 */
-  x: 16,
-  /** 血条尺寸。 */
-  barW: 96,
-  barH: 10,
-  /** 血条与右侧「攻击」区的间距。 */
-  groupGap: 18,
+export const RUN_STATUS_PANEL = {
+  /** 面板左缘（水平居中：(390 − 290) / 2 = 50）。 */
+  x: 50,
+  /**
+   * 面板顶 y（页面坐标）。约束链：战斗地线 = 页面 295（相机恒锚定，实测 groundBandY≡215）；
+   * 跳字/火花底沿实测 ≤305 ⇒ 顶边取 308（离地线 13px、离分带线 382 还有 8px 净空）。
+   */
+  y: 308,
+  /** 面板宽（水平居中；比 R1 顶部行宽 3 倍以上）。 */
+  w: 290,
+  /** 面板高（内容：标签行 + 32px 攻击数字 + 12px 长血条 + 百分比行）。 */
+  h: 66,
+  /** 内容左内边距。 */
+  pad: 14,
+  /** 标签行基线相对面板顶。 */
+  labelDy: 24,
+  /** 攻击大数字基线相对面板顶。 */
+  atkDy: 58,
+  /** 耐久数值行基线相对面板顶（与标签行同行）。 */
+  hpDy: 24,
+  /** 百分比行基线相对面板顶。 */
+  pctDy: 60,
 } as const;
 
-/** 耐久血条矩形（绝对坐标；血条上方一行是「耐久 xx/yy」小字）。 */
-export function runHpBarRect(): RunRect {
+/** 状态面板矩形（绝对坐标；绘制 / 命中 / 探针三处同源）。 */
+export function runStatusPanelRect(): RunRect {
+  return { x: RUN_STATUS_PANEL.x, y: RUN_STATUS_PANEL.y, w: RUN_STATUS_PANEL.w, h: RUN_STATUS_PANEL.h };
+}
+
+/** 面板内容右缘（耐久数值 / 百分比右对齐锚点）。 */
+export function runStatusPanelRightX(): number {
+  return RUN_STATUS_PANEL.x + RUN_STATUS_PANEL.w - RUN_STATUS_PANEL.pad;
+}
+
+/** 耐久长血条矩形（面板内、攻击大数字右侧；绝对坐标）。 */
+export function runStatusHpBarRect(): RunRect {
   return {
-    x: RUN_STATUS_HUD.x,
-    y: RUN_STATUS_HUD.y + 16,
-    w: RUN_STATUS_HUD.barW,
-    h: RUN_STATUS_HUD.barH,
+    x: RUN_STATUS_PANEL.x + 100,
+    y: RUN_STATUS_PANEL.y + 36,
+    w: RUN_STATUS_PANEL.w - 100 - RUN_STATUS_PANEL.pad,
+    h: 12,
   };
 }
 
@@ -195,15 +220,10 @@ export function runHpBarRect(): RunRect {
  * 血条前景宽度（按真实耐久比例，精确到 1px；clamp 到 [0, barW]）。
  * ⚠️ 比例真源 = 传入的 hp/hpMax（调用方已从 RunPageState 真源取）。
  */
-export function runHpBarFillW(hp: number, hpMax: number): number {
+export function runStatusHpBarFillW(hp: number, hpMax: number): number {
   if (!(hpMax > 0)) return 0;
   const ratio = Math.max(0, Math.min(1, hp / hpMax));
-  return Math.round(RUN_STATUS_HUD.barW * ratio);
-}
-
-/** 「攻击」区起点 x（血条右侧）。 */
-export function runAtkGroupX(): number {
-  return RUN_STATUS_HUD.x + RUN_STATUS_HUD.barW + RUN_STATUS_HUD.groupGap;
+  return Math.round(runStatusHpBarRect().w * ratio);
 }
 
 /* --------------------------------------------------- 中部：侧视战斗舞台 */

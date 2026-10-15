@@ -68,12 +68,11 @@ import {
   RUN_PAGE_W,
   RUN_STAGE_BAND,
   RUN_STAGE_HAZE_H,
-  RUN_STATUS_HUD,
+  RUN_STATUS_PANEL,
   RUN_TOP_BAND,
   emptyRunLayerAreas,
   runActionBarRect,
   runActionButtonRect,
-  runAtkGroupX,
   runBuffIconChip,
   runBuffIconRects,
   runChoiceBarRect,
@@ -85,8 +84,10 @@ import {
   runDayNodes,
   runFailPanelRect,
   runFailPanelTextPos,
-  runHpBarFillW,
-  runHpBarRect,
+  runStatusHpBarFillW,
+  runStatusHpBarRect,
+  runStatusPanelRect,
+  runStatusPanelRightX,
   runLogLineRects,
   runPaintedAreas,
   runRewardChoiceIconRect,
@@ -778,19 +779,24 @@ export interface RunPageProbe {
   /** **强化**三选一浮层是否可见（严格 = `phase === 'CHOICE'`）。 */
   readonly choiceOpen: boolean;
   /**
-   * UX-RUN-CENTER-HUD-R1｜**顶部状态 HUD 读数**（与 `drawStatusHud` 同源，零渲染外推）：
+   * UX-PERCEPTUAL-R2-A｜**战力状态面板读数**（与 `drawStatusPanel` 同源：
+   * 同一 `hudReadout()` + 同一 `runStatusHpBarRect/FillW`，零渲染外推）：
+   *   - `visible`：本帧是否**真的画了**（IDLE / 浮层 / 终态 = false，E2E 可断言
+   *     「CHOICE 期间面板消失」而不必只信几何）；
    *   - `hp` / `hpMax`：战斗中 = `s.battle.playerHp/playerHpMax`（随受击实时）；
    *     无战斗 = `runCarriedPlayerHp(s) ?? ctx.playerHpMax`（跨战+维修唯一口径）；
    *   - `atk`：主武单次伤害（`weaponMainDamage(composePlayerRunWeaponDef(…)+applyStarTier)`，
    *     与战斗侧同一合成链；`null` = 无武器）；
-   *   - `atkWeaponDefId`：攻击读数对应的武器 defId（证据链：HUD 数字可回溯到真源）；
-   *   - `hpBar`：血条几何（E2E 像素取证用：`getImageData` 数前景色宽 == `runHpBarFillW`）。
+   *   - `atkWeaponDefId`：攻击读数对应的武器 defId（证据链：面板数字可回溯到真源）；
+   *   - `panel` / `hpBar`：声明几何（E2E 断言「不遮战车」+「像素前景宽 == 声明宽」用）。
    */
   readonly statusHud: {
+    readonly visible: boolean;
     readonly hp: number;
     readonly hpMax: number;
     readonly atk: number | null;
     readonly atkWeaponDefId: string | null;
+    readonly panel: RunRect;
     readonly hpBar: RunRect;
     readonly hpBarFillW: number;
   };
@@ -1824,6 +1830,13 @@ export class RunPage {
     // 5) 最底：唯一主动作按钮（填充承载文案 → 不入账；底部强调条入账）
     this.drawActionButton(ctx);
 
+    // 5a) UX-PERCEPTUAL-R2-A：战场带底部战力状态面板（攻击大数字 + 耐久长血条）。
+    //     ⚠️ 只在真实战斗世界在舞台上且无浮层/终态时画（`statusPanelVisible()`）——
+    //        IDLE 待机车 / CHOICE·DURABILITY 浮层 / COMPLETE·FAILED 终态卡一个像素都不遮；
+    //     ⚠️ 画在动作按钮之后、终态卡片与浮层之前：可见域与那些区域互斥，顺序不影响像素；
+    //     ⚠️ 复用既有非入账色，不登记账本 ⇒ 像素账本零影响。
+    this.drawStatusPanel(ctx);
+
     // 5b) PRODUCT-LOOP-R2-A：RUN COMPLETE 的**3选1**永久武器部件候选
     //     ⚠️ 只在**产品奖励上下文真的存在且本局 COMPLETE** 时绘制
     //        （`rewardChoiceViewsNow()` 与命中 / 出口同源）⇒ 既有入口一个像素都不变。
@@ -2050,40 +2063,93 @@ export class RunPage {
     return { hp, hpMax, atk, atkLabel: `${name}` };
   }
 
-  /** 顶部状态 HUD：耐久（当前/上限 + 血条）+ 攻击（主武单次伤害）。 */
-  private drawStatusHud(ctx: CanvasRenderingContext2D): void {
+  /**
+   * UX-PERCEPTUAL-R2-A｜**战力状态面板的可见性**（必改 2：不遮卡片/按钮/战车）。
+   *
+   * 只有「真实战斗世界在舞台上、且没有浮层 / 终态卡片」时才画：
+   *   - IDLE：待机近景的玩家车占页面 268..328 ⇒ 面板会压车 ⇒ 不画；
+   *   - CHOICE / DURABILITY / 种子浮层：整页遮罩 + 卡片 ⇒ 不画（结构性无遮挡）；
+   *   - COMPLETE / FAILED：终态 3选1 卡块 / 失败面板占舞台带底部同一区域 ⇒ 不画；
+   *   - EVENT / BATTLE / RESULT：真实战斗世界 + 无浮层 ⇒ 画（BATTLE 实时刷新）。
+   */
+  private statusPanelVisible(): boolean {
+    const s = this.state;
+    if (!this.battle) return false;
+    if (s.phase === 'COMPLETE' || s.phase === 'FAILED') return false;
+    if (this.overlayOpenNow()) return false;
+    return true;
+  }
+
+  /**
+   * UX-PERCEPTUAL-R2-A｜**战场带底部战力状态面板**（替代 R1 顶部小字 HUD）。
+   *
+   * 几何 / 可见性 / 读数真源全部见 `runPageLayout.RUN_STATUS_PANEL` 与
+   * `statusPanelVisible()`；本函数只负责「按声明几何画出来」——
+   * 与探针 `statusHud` 同一份 `hudReadout()`，零渲染外推。
+   *
+   * 版式（面板 290×66，内容内缩 14）：
+   *   ┌──────────────────────────────────────────────┐
+   *   │ 攻击 · 机枪                  耐久  769/950    │  标签行（基线 +24）
+   *   │ 120  ████████████████████░░░░        81%     │  32px 大数字 + 176×12 长血条
+   *   └──────────────────────────────────────────────┘
+   * 颜色全部复用既有非入账色（dayAccent 大数字 / hpBar* 血条 / text* 文案）。
+   */
+  private drawStatusPanel(ctx: CanvasRenderingContext2D): void {
+    if (!this.statusPanelVisible()) return;
     const { hp, hpMax, atk, atkLabel } = this.hudReadout();
+    const panel = runStatusPanelRect();
+    const right = runStatusPanelRightX();
+    const low = hpMax > 0 && hp / hpMax <= 0.25;
 
-    // —— 耐久组（左）：标签行 + 数值行 + 血条 ——
-    const bar = runHpBarRect();
+    // 底版 + 描边（既有卡片色，不入账本）
+    ctx.fillStyle = COLORS.cardBg;
+    ctx.fillRect(panel.x, panel.y, panel.w, panel.h);
+    ctx.strokeStyle = COLORS.cardEdge;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(panel.x + 0.5, panel.y + 0.5, panel.w - 1, panel.h - 1);
+
+    // —— 攻击组（左）：标签行 + 32px 大数字（主武单次伤害，同合成链真源）——
     ctx.textAlign = 'left';
-    ctx.font = `bold 11px ${FONT_STACK}`;
+    ctx.font = `12px ${FONT_STACK}`;
     ctx.fillStyle = COLORS.textDim;
-    ctx.fillText('耐久', RUN_STATUS_HUD.x, RUN_STATUS_HUD.y + 10);
-    ctx.font = `bold 12px ${FONT_STACK}`;
-    ctx.fillStyle = hpMax > 0 && hp / hpMax <= 0.25 ? COLORS.hpLow : COLORS.textTitle;
-    ctx.fillText(`${Math.max(0, Math.round(hp))}/${Math.round(hpMax)}`, RUN_STATUS_HUD.x + 30, RUN_STATUS_HUD.y + 10);
+    ctx.fillText(atkLabel ? `攻击 · ${atkLabel}` : '攻击', panel.x + RUN_STATUS_PANEL.pad, panel.y + RUN_STATUS_PANEL.labelDy);
+    ctx.font = `bold 32px ${FONT_STACK}`;
+    if (atk !== null) {
+      ctx.fillStyle = COLORS.dayAccent;
+      ctx.fillText(`${Math.round(atk)}`, panel.x + RUN_STATUS_PANEL.pad, panel.y + RUN_STATUS_PANEL.atkDy);
+    } else {
+      // 无武器（资格层已拒，防御性）→ 如实显示「—」，不编数字
+      ctx.fillStyle = COLORS.textFaint;
+      ctx.fillText('—', panel.x + RUN_STATUS_PANEL.pad, panel.y + RUN_STATUS_PANEL.atkDy);
+    }
 
-    // 血条：底槽（满宽）+ 前景（真实比例）。两段纯色、不入账本（颜色已与入账色互斥）。
+    // —— 耐久组（右）：标签 + 当前/上限 + 长血条 + 百分比（全部真源）——
+    ctx.font = `12px ${FONT_STACK}`;
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText('耐久', panel.x + 100, panel.y + RUN_STATUS_PANEL.hpDy);
+    ctx.textAlign = 'right';
+    ctx.font = `bold 14px ${FONT_STACK}`;
+    ctx.fillStyle = low ? COLORS.hpLow : COLORS.textTitle;
+    ctx.fillText(
+      `${Math.max(0, Math.round(hp))}/${Math.round(hpMax)}`,
+      right,
+      panel.y + RUN_STATUS_PANEL.hpDy,
+    );
+
+    // 长血条：底槽（满宽）+ 前景（真实比例）。两段纯色、不入账本（颜色已与入账色互斥）。
+    const bar = runStatusHpBarRect();
+    ctx.textAlign = 'left';
     ctx.fillStyle = COLORS.hpBarBg;
     ctx.fillRect(bar.x, bar.y, bar.w, bar.h);
-    const fillW = runHpBarFillW(hp, hpMax);
+    const fillW = runStatusHpBarFillW(hp, hpMax);
     ctx.fillStyle = fillW / bar.w <= 0.25 ? COLORS.hpLow : COLORS.hpBarFill;
     ctx.fillRect(bar.x, bar.y, fillW, bar.h);
 
-    // —— 攻击组（右）：「攻击 主武名 数值」——
-    if (atk !== null && atkLabel) {
-      const ax = runAtkGroupX();
-      ctx.font = `bold 11px ${FONT_STACK}`;
-      ctx.fillStyle = COLORS.textDim;
-      ctx.fillText('攻击', ax, RUN_STATUS_HUD.y + 10);
-      ctx.font = `11px ${FONT_STACK}`;
-      ctx.fillStyle = COLORS.textDim;
-      ctx.fillText(atkLabel, ax + 30, RUN_STATUS_HUD.y + 10);
-      ctx.font = `bold 17px ${FONT_STACK}`;
-      ctx.fillStyle = COLORS.textTitle;
-      ctx.fillText(`${Math.round(atk)}`, ax, RUN_STATUS_HUD.y + 26);
-    }
+    // 百分比行（真实比例；右对齐与数值行同锚）
+    ctx.textAlign = 'right';
+    ctx.font = `10px ${FONT_STACK}`;
+    ctx.fillStyle = COLORS.textFaint;
+    ctx.fillText(hpMax > 0 ? `${Math.round((Math.max(0, hp) / hpMax) * 100)}%` : '—', right, panel.y + RUN_STATUS_PANEL.pctDy);
   }
 
   private drawTopBand(ctx: CanvasRenderingContext2D, s: RunPageState): void {
@@ -2096,11 +2162,9 @@ export class RunPage {
       ctx.fillRect(r.x, r.y, r.w, r.h);
     });
 
-    // UX-RUN-CENTER-HUD-R1：状态 HUD 行（耐久 + 攻击）—— 原强化图标行让位到右侧同行。
-    this.drawStatusHud(ctx);
-
     // 只画**实际已获得**的强化图标：没有强化时这一行完全不存在（不是五个空框）。
-    // ⚠️ 布局已右移（runBuffIconRects 右对齐、y=48、22px）—— 与左侧 HUD 同行互不重叠。
+    // ⚠️ UX-PERCEPTUAL-R2-A：状态面板已移出顶部薄层（改到战场带底部）⇒ 图标行恢复
+    //    PRP-R3 原构图（左对齐 x=16、30px、y=44），与 R1 之前逐值相同。
     const icons = runBuffIconRects(s.buffs.length);
     icons.forEach((icon, i) => {
       const buff = s.buffs[i];
@@ -2961,19 +3025,21 @@ export class RunPage {
         ),
       },
       /**
-       * UX-RUN-CENTER-HUD-R1：状态 HUD 读数（与绘制同源：直接调 `hudReadout()`，
-       * 血条宽用 `runHpBarFillW`——E2E 可断言「像素前景宽 == 声明宽」）。
+       * UX-PERCEPTUAL-R2-A：战力状态面板读数（与绘制同源：直接调 `hudReadout()`，
+       * 血条几何/宽用 `runStatusHpBarRect/FillW`——E2E 可断言「像素前景宽 == 声明宽」）。
        */
       statusHud: (() => {
         const hud = this.hudReadout();
-        const bar = runHpBarRect();
+        const bar = runStatusHpBarRect();
         return {
+          visible: this.statusPanelVisible(),
           hp: hud.hp,
           hpMax: hud.hpMax,
           atk: hud.atk,
           atkWeaponDefId: this.state.baseWeaponDefId,
+          panel: runStatusPanelRect(),
           hpBar: bar,
-          hpBarFillW: runHpBarFillW(hud.hp, hud.hpMax),
+          hpBarFillW: runStatusHpBarFillW(hud.hp, hud.hpMax),
         };
       })(),
       choiceOpen: runChoiceOpen(s),

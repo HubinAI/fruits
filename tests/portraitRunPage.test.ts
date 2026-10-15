@@ -71,11 +71,10 @@ import {
   RUN_SIDE_VIEW,
   RUN_STAGE_BAND,
   RUN_STAGE_HAZE_H,
-  RUN_STATUS_HUD,
+  RUN_STATUS_PANEL,
   RUN_TOP_BAND,
   runActionBarRect,
   runActionButtonRect,
-  runAtkGroupX,
   runBuffIconRects,
   runChoiceBarRect,
   runChoiceCardRects,
@@ -86,8 +85,10 @@ import {
   runDayNodes,
   runFailPanelRect,
   runFailPanelTextPos,
-  runHpBarFillW,
-  runHpBarRect,
+  runStatusHpBarFillW,
+  runStatusHpBarRect,
+  runStatusPanelRect,
+  runStatusPanelRightX,
   runLogBottomY,
   runLogLineRects,
   runLogTopY,
@@ -642,15 +643,15 @@ describe('PRP-F0｜A 页面层级：竖屏 390×844 四条横带', () => {
     expect(icons.length).toBe(RUN_BUFF_ICON_MAX);
     for (const s of icons) expect(inside(s, RUN_TOP_BAND)).toBe(true);
     for (let i = 1; i < icons.length; i++) expect(icons[i].x).toBeGreaterThan(icons[i - 1].x + icons[i - 1].w);
-    // UX-RUN-CENTER-HUD-R1：图标行**右对齐**（右缘 = 页宽 − 16），让位给左侧状态 HUD 行。
-    expect(icons[icons.length - 1].x + icons[icons.length - 1].w).toBe(RUN_PAGE_W - 16);
-    expect(icons[0].x).toBe(RUN_PAGE_W - 16 - (5 * RUN_BUFF_ICON.size + 4 * RUN_BUFF_ICON.gap));
+    // UX-PERCEPTUAL-R2-A：状态面板移出顶部 ⇒ 图标行恢复 PRP-R3 原构图（左对齐 x=16）
+    expect(icons[0].x).toBe(RUN_BUFF_ICON.x);
+    expect(icons[0].x).toBe(16);
     // 两行分明：进度节点行与图标行不重叠（薄层里两行互不干扰）
     for (const n of nodes) for (const s of icons) expect(runRectsOverlap(n, s)).toBe(false);
-    // 与状态 HUD 行互不重叠（HUD 血条在左、图标在右，同一行共存的机器判据）
-    for (const s of icons) expect(runRectsOverlap(s, runHpBarRect())).toBe(false);
+    // 与战场带底部状态面板互不重叠（面板顶 308 > 图标底 74，结构上分层）
+    for (const s of icons) expect(runRectsOverlap(s, runStatusPanelRect())).toBe(false);
     // 图标行本身不承载文字 → 整块是纯色（可精确入账）
-    expect(icons.length * icons[0].w * icons[0].h).toBe(5 * 22 * 22);
+    expect(icons.length * icons[0].w * icons[0].h).toBe(5 * 30 * 30);
   });
 
   it('RP-03 IDLE 待机近景：地线 / 路面落在舞台带内、车贴基线、近景只有玩家一辆', () => {
@@ -1099,9 +1100,9 @@ function ledgerState(o: { day: number; icons: number }): Record<string, number> 
     // ⚠️ 进度节点总数 = `RUN_DAYS_TOTAL`（R9 起 = 4）—— 这里**不写死 7**，
     //    否则单局天数一改，账本就会与绘制悄悄漂移。
     nodeTodo: (RUN_DAYS_TOTAL - o.day) * 128,
-    // UX-RUN-CENTER-HUD-R1：图标缩到 22×22 ⇒ 每枚**净**底色 = 484 − chip(144) = 340
+    // UX-PERCEPTUAL-R2-A：图标恢复 30×30 ⇒ 每枚**净**底色 = 900 − chip(144) = 756
     // （chip 在 icon 之上，账本按「最上层胜出」口径只计最终可见面积）。
-    buffIcon: 340 * o.icons,
+    buffIcon: 756 * o.icons,
     buffChip: 144 * o.icons,
     cardBar: 0,
     actionBar: 990,
@@ -1169,11 +1170,11 @@ describe('PRP-RUN-02｜D 面积账本：逐脚本节点的整页像素面积精�
       );
     }
     expect(RUN_DAYS_TOTAL * 128).toBe(512);
-    // 图标总量口径：每个 22×22（**净**底色 340 + 高光块 144 = 声明 484）；0 个 → 面积 0（不是空槽）
-    // （UX-RUN-CENTER-HUD-R1：图标 30→22 让位状态 HUD 行；净底色口径与改前 756=900−144 同源）
+    // 图标总量口径：每个 30×30（**净**底色 756 + 高光块 144 = 声明 900）；0 个 → 面积 0（不是空槽）
+    // （UX-PERCEPTUAL-R2-A：状态面板移出顶部薄层 ⇒ 图标几何恢复 PRP-R3 原值 30×30）
     expect(ledger(fresh()).buffIcon).toBe(0);
     expect(ledger(fresh()).buffChip).toBe(0);
-    for (const n of [0, 1, 2, 3]) expect(ledgerState({ day: 1, icons: n }).buffIcon + 144 * n).toBe(484 * n);
+    for (const n of [0, 1, 2, 3]) expect(ledgerState({ day: 1, icons: n }).buffIcon + 144 * n).toBe(900 * n);
   });
 
   it('RP-22b R9：已退役的四个分支节点**确实不在脚本里**（正面钉死，不是靠删掉断言蒙过去）', () => {
@@ -2932,27 +2933,50 @@ describe('PRODUCT-LOOP-R1-D｜J 失败终态：结算 + 返回主界面（不再
   });
 });
 
-/* ======================= UX-RUN-CENTER-HUD-R1：状态 HUD 真源断言 ======================= */
+/* ======================= UX-PERCEPTUAL-R2-A：战场底部战力状态面板真源断言 ======================= */
 
-describe('UX-RUN-CENTER-HUD-R1｜顶部状态 HUD（攻击 / 耐久）', () => {
-  it('HUD-01 几何：HUD 行与血条都在顶部带内、与 DAY 行/进度节点/图标行互不重叠', () => {
-    const bar = runHpBarRect();
-    expect(inside(bar, RUN_TOP_BAND)).toBe(true);
-    // 血条不与 DAY 进度节点重叠
-    for (const n of runDayNodes(RUN_DAYS_TOTAL)) expect(runRectsOverlap(n, bar)).toBe(false);
-    // 血条不与已获得图标重叠（图标右对齐让位）
-    for (const s of runBuffIconRects(RUN_BUFF_ICON_MAX)) expect(runRectsOverlap(s, bar)).toBe(false);
-    // 攻击区起点在血条右侧，且到页右缘有间距（图标区之外不越界）
-    expect(runAtkGroupX()).toBeGreaterThan(bar.x + bar.w);
-    expect(runAtkGroupX()).toBeLessThan(RUN_PAGE_W - 16 - 5 * RUN_BUFF_ICON.size);
+describe('UX-PERCEPTUAL-R2-A｜战场带底部战力状态面板（攻击 / 耐久）', () => {
+  it('STATUS-01 几何：面板在战场带内、水平居中、贴底（不碰日志/动作带，不遮顶部两行）', () => {
+    const panel = runStatusPanelRect();
+    // 在战场带内（含边）
+    expect(inside(panel, RUN_STAGE_BAND)).toBe(true);
+    // 水平居中（390 宽舞台）
+    expect(panel.x).toBe(Math.round((RUN_PAGE_W - panel.w) / 2));
+    expect(panel.x).toBe(50);
+    // 贴战场带底：底边距分带线 ≥ 6px，且不越入日志带 / 动作带
+    expect(RUN_STAGE_BAND.y + RUN_STAGE_BAND.h - (panel.y + panel.h)).toBeGreaterThanOrEqual(6);
+    for (const band of [RUN_TOP_BAND, RUN_LOG_BAND, RUN_ACTION_BAND]) {
+      expect(runRectsOverlap(panel, band)).toBe(false);
+    }
+    // 与 DAY 行 / 进度节点 / 已获得图标行（顶部两行）互不重叠
+    for (const n of runDayNodes(RUN_DAYS_TOTAL)) expect(runRectsOverlap(panel, n)).toBe(false);
+    for (const s of runBuffIconRects(RUN_BUFF_ICON_MAX)) expect(runRectsOverlap(panel, s)).toBe(false);
+    // 显眼性下限：面板够大（不是一小行）—— 宽 ≥ 页宽 60%、高 ≥ 56px
+    expect(panel.w / RUN_PAGE_W).toBeGreaterThanOrEqual(0.6);
+    expect(panel.h).toBeGreaterThanOrEqual(56);
   });
 
-  it('HUD-02 血条比例：runHpBarFillW 与 hp/hpMax 精确成比例（clamp 正确）', () => {
-    expect(runHpBarFillW(950, 950)).toBe(RUN_STATUS_HUD.barW);
-    expect(runHpBarFillW(475, 950)).toBe(RUN_STATUS_HUD.barW / 2);
-    expect(runHpBarFillW(0, 950)).toBe(0);
-    expect(runHpBarFillW(-5, 950)).toBe(0);
-    expect(runHpBarFillW(1200, 950)).toBe(RUN_STATUS_HUD.barW); // clamp 上限
-    expect(runHpBarFillW(10, 0)).toBe(0); // hpMax=0 防御
+  it('STATUS-02 几何：血条是「长血条」且在面板内、不与攻击大数字区重叠', () => {
+    const bar = runStatusHpBarRect();
+    const panel = runStatusPanelRect();
+    expect(inside(bar, panel)).toBe(true);
+    // 长血条：宽 ≥ R1 顶部血条（96）的 1.5 倍，且 ≥ 面板内容宽的一半
+    expect(bar.w).toBeGreaterThanOrEqual(144);
+    expect(bar.w).toBeGreaterThanOrEqual((panel.w - 2 * RUN_STATUS_PANEL.pad) / 2);
+    // 血条与攻击大数字区（面板左列：pad..面板左+100）不重叠：数字 32px、最多 4 位 ≈ 74px
+    const numZone = { x: panel.x + RUN_STATUS_PANEL.pad, y: panel.y + 24, w: 100 - RUN_STATUS_PANEL.pad, h: 40 };
+    expect(runRectsOverlap(bar, numZone)).toBe(false);
+    // 耐久数值右对齐锚点在面板内
+    expect(runStatusPanelRightX()).toBe(panel.x + panel.w - RUN_STATUS_PANEL.pad);
+  });
+
+  it('STATUS-03 血条比例：runStatusHpBarFillW 与 hp/hpMax 精确成比例（clamp 正确）', () => {
+    const w = runStatusHpBarRect().w;
+    expect(runStatusHpBarFillW(950, 950)).toBe(w);
+    expect(runStatusHpBarFillW(475, 950)).toBe(Math.round(w / 2));
+    expect(runStatusHpBarFillW(0, 950)).toBe(0);
+    expect(runStatusHpBarFillW(-5, 950)).toBe(0);
+    expect(runStatusHpBarFillW(1200, 950)).toBe(w); // clamp 上限
+    expect(runStatusHpBarFillW(10, 0)).toBe(0); // hpMax=0 防御
   });
 });
