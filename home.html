@@ -509,10 +509,15 @@
       /* —— 合成操作区（固定在上）—— */
       .ph-fuse-bench { flex: 0 0 auto; padding: 6px 14px 0; display: flex; flex-direction: column; gap: 8px; }
       .ph-fuse-target {
-        display: flex; align-items: baseline; gap: 8px;
+        display: flex; align-items: center; gap: 10px;
         padding: 9px 12px; border-radius: 10px;
         border: 1px solid #7a5b00; background: #1a1607;
       }
+      /*
+        UX-BAG-VISUAL-FUSION-R2｜目标产物图形（与材料同族图标，一眼看出在合成什么）。
+      */
+      .ph-fuse-target-icon { display: flex; }
+      .ph-fuse-target-icon .ph-part-icon { width: 44px; height: 33px; }
       .ph-fuse-target-label { font-size: 11px; color: #b99a3f; }
       .ph-fuse-target-name { font-size: 15px; font-weight: 700; color: #ffe9a8; }
       .ph-fuse-slots { display: flex; gap: 6px; }
@@ -526,6 +531,8 @@
       .ph-fuse-slot-filled {
         border: 1px solid #ffd35a; background: #1a1607; color: #ffd35a;
       }
+      /* UX-BAG-VISUAL-FUSION-R2：满槽内画同族材料图标（看得见放进去的是哪个武器）。 */
+      .ph-fuse-slot-filled .ph-part-icon { width: 40px; height: 30px; }
       .ph-fuse-slot-over {
         border-color: #ffe07e; background: #241d12;
       }
@@ -555,9 +562,25 @@
       }
       .ph-fuse-chip:hover { background: #1a2536; border-color: #34507c; }
       .ph-fuse-chip-active { border-color: #ffd35a; background: #1c2233; }
+      /* UX-BAG-VISUAL-FUSION-R2：chip 也图标优先（合成页的「装备形状」一致性）。 */
+      .ph-fuse-chip .ph-part-icon { width: 46px; height: 34px; }
       .ph-fuse-chip-name { font-size: 14px; font-weight: 650; color: #eaf1fb; }
       .ph-fuse-chip-star { font-size: 12px; font-weight: 700; color: #ffd35a; }
       .ph-fuse-chip-count { font-size: 11px; color: #93a1b6; }
+
+      /*
+        UX-BAG-VISUAL-FUSION-R2｜**部件图标**（真 PNG / 简化矢量 SVG 共用同一组尺寸）。
+        ⚠️ 只改展示：图形大小与战斗力无关；探针 data-ph-part-icon* 全部保留。
+      */
+      .ph-card .ph-part-icon { width: 52px; height: 39px; }
+      .ph-fuse-slot .ph-part-icon, .ph-fuse-target-icon .ph-part-icon { display: block; }
+
+      /*
+        UX-BAG-VISUAL-FUSION-R2｜**固定详情位**：必要属性只在「当前装备行」展示，
+        卡面只留图标 + 短名称（+ 星级 / 数量 / 使用中）。
+      */
+      .ph-current-detail { font-size: 12px; font-weight: 600; color: #cfe0ff; margin-left: auto; }
+      .ph-mv-detail { font-size: 11px; color: #93a1b6; padding-left: 2px; }
 
       /*
         UX-BAG-FUSION-GRID-R1｜**3 列紧凑网格**（Garage 全部卡阵的密度 modifier）。

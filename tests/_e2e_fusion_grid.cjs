@@ -6,8 +6,10 @@
  *   F-02 工作台初始状态：无选中组 → 目标产物显示引导文案、5 材料槽全空、无确认按钮；
  *   F-03 初始 cannon ★1=4/5：**不能伪合成**——工作台 gate 明示「还差 1 件」、
  *        无「合成升星」确认按钮（canFuse=false）；
- *   F-04 点击选材：点 machineGun ★1 图标格 → 选中组、目标产物显示 ★2、gate 显 0/5；
- *   F-05 拖拽选材（HTML5 dragstart→drop）：连拖 5 次 → 5 槽全满；
+ *   F-04 点击选材（UX-BAG-VISUAL-FUSION-R2）：点 machineGun ★1 图标格一次 → 选中组、
+ *        目标产物显示 ★2、材料槽按真实库存可视占用（5/5 ⇒ 5 满 + 确认按钮）；
+ *   F-05a 再点一次已选组 = 取消（5 槽全空、无确认按钮）；
+ *   F-05b 拖拽选材（HTML5 dragstart→drop）**一次**即选整组 → 5 槽全满；
  *   F-06 满 5 出现唯一「合成升星」确认按钮（探针 data-ph-fuse-can-fuse=true）；
  *   F-07 点确认 → 真实合成：★1×5→0、★2=1、gate 消失（重新选组）；
  *   F-08 落盘核验：库存（独立 localStorage 读取）★1=0 ★2=1；equipped 自动 ★2；
@@ -181,38 +183,58 @@ async function main() {
       JSON.stringify(benchC),
     );
 
-    // F-04：点击选 machineGun ★1（换组清空）→ 目标 ★2、0/5
+    // F-04：点击选 machineGun ★1（UX-BAG-VISUAL-FUSION-R2：点一次即选整组）
+    // → 目标 ★2、材料槽按真实库存可视占用 = min(5,5) = 5 满。
     await clickSelector(page, '[data-ph-fuse-chip="machineGun"]');
     const benchM = await page.evaluate(() => {
       const t = document.querySelector('[data-ph-fuse-target]');
       const gate = document.querySelector('[data-ph-fuse-gate]');
+      const slots = [...document.querySelectorAll('[data-ph-fuse-slot]')];
       return {
         target: t?.getAttribute('data-ph-fuse-target'),
         targetStar: t?.getAttribute('data-ph-fuse-target-star'),
         picked: gate?.getAttribute('data-ph-fuse-picked'),
+        filled: slots.map((s) => s.getAttribute('data-ph-fuse-slot-filled')),
+        confirm: !!document.querySelector('[data-ph-fuse-gate] [data-ph-action="fuse"]'),
       };
     });
     log(
-      benchM.target === 'machineGun' && benchM.targetStar === '2' && benchM.picked === '0',
-      '[F-04] 点击选中 machineGun ★1：目标产物 ★2、材料 0/5（换组清空）',
+      benchM.target === 'machineGun' && benchM.targetStar === '2' && benchM.picked === '5' &&
+        benchM.filled.every((f) => f === 'true') && benchM.confirm,
+      '[F-04] 点击选中 machineGun ★1（5/5 库存）：目标产物 ★2、5 槽全满 + 确认按钮（点一次即选整组）',
       JSON.stringify(benchM),
     );
 
-    // F-05：拖拽选材 ×5（真实 HTML5 DnD 事件序列：dragstart → dragover → drop，
-    // 携带真实 DataTransfer——Playwright 的 mouse API 不触发 HTML5 drag，须 dispatchEvent）。
-    for (let i = 0; i < 5; i++) {
-      await page.evaluate(() => {
-        const chip = document.querySelector('[data-ph-fuse-chip="machineGun"]');
-        const slot = document.querySelector('[data-ph-fuse-slot="0"]');
-        if (!chip || !slot) throw new Error('chip/slot not found');
-        const dt = new DataTransfer();
-        chip.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
-        slot.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt }));
-        slot.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: dt }));
-        chip.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
-      });
-      await sleep(260);
-    }
+    // F-05：再点一次已选组 = 取消（材料槽清空、确认按钮消失）→ 再点恢复 5 满。
+    // ⚠️ UX-BAG-VISUAL-FUSION-R2 语义：可视占用 = 真实库存的镜像，「取消选材」不再有
+    //    逐格清空过程 —— 拖拽通道（HTML5 dragstart→drop）另行验证一次选中（不重复拖 5 次）。
+    await clickSelector(page, '[data-ph-fuse-chip="machineGun"]');
+    const benchCancel = await page.evaluate(() => {
+      const slots = [...document.querySelectorAll('[data-ph-fuse-slot]')];
+      const gate = document.querySelector('[data-ph-fuse-gate]');
+      return {
+        filled: slots.map((s) => s.getAttribute('data-ph-fuse-slot-filled')),
+        picked: gate?.getAttribute('data-ph-fuse-picked'),
+        confirm: !!document.querySelector('[data-ph-fuse-gate] [data-ph-action="fuse"]'),
+      };
+    });
+    log(
+      benchCancel.filled.every((f) => f === 'false') && benchCancel.picked === '0' && !benchCancel.confirm,
+      '[F-05a] 再点一次已选组 = 取消：5 槽全空、无确认按钮',
+      JSON.stringify(benchCancel),
+    );
+    // 拖拽通道：chip dragstart → slot drop 一次 = 选中整组（R2：无需重复拖 5 次）。
+    await page.evaluate(() => {
+      const chip = document.querySelector('[data-ph-fuse-chip="machineGun"]');
+      const slot = document.querySelector('[data-ph-fuse-slot="0"]');
+      if (!chip || !slot) throw new Error('chip/slot not found');
+      const dt = new DataTransfer();
+      chip.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+      slot.dispatchEvent(new DragEvent('dragover', { bubbles: true, dataTransfer: dt }));
+      slot.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer: dt }));
+      chip.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    });
+    await sleep(260);
     const benchD = await page.evaluate(() => {
       const slots = [...document.querySelectorAll('[data-ph-fuse-slot]')];
       const gate = document.querySelector('[data-ph-fuse-gate]');
@@ -225,7 +247,7 @@ async function main() {
     });
     log(
       benchD.picked === '5' && benchD.filled.every((f) => f === 'true') && benchD.canFuse === 'true' && benchD.confirm,
-      '[F-05/06] 拖拽选材 ×5 → 5 槽全满 → 唯一「合成升星」确认按钮出现',
+      '[F-05b] 拖入一次即选整组 → 5 槽全满 → 唯一「合成升星」确认按钮出现（data-ph-fuse-can-fuse=true）',
       JSON.stringify(benchD),
     );
 

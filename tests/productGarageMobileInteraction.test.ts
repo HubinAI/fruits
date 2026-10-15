@@ -709,9 +709,16 @@ describe('PRODUCT-LOOP-P0-GARAGE-FOUR-SLOT-CLARITY-R3｜E. 合成入口**恒可�
     expect(fuseFn).toContain("go.dataset['phFuseStar'] = String(sel.star);");
     // 合成结果读数仍由 lastFuse 承载（成功/失败如实回显，语义与旧卡上按钮一致）。
     expect(fuseFn).toContain('lastFuse =');
-    // 卡片上的 `成长 N/5` 仍在装备页（真实进度不因页签化而丢失）。
-    expect(home).toContain("el('span', 'ph-card-growth', `${GARAGE_GROWTH_LABEL} ${w.stackText}`)");
+    /*
+      ⚠️ UX-BAG-VISUAL-FUSION-R2：卡面**不再堆成长行**（`ph-card-growth` / `ph-card-damage`
+         / `ph-card-meta` 已从 Weapon 卡删除）—— 真实进度 `stackText` 仍在卡上
+         （`ph-card-count`）与探针 `phStackText` 上；攻击成长移到固定详情位
+         （当前装备行的 `ph-current-detail`）。两处判据同步为 R2 契约。
+    */
+    expect(home).not.toContain("el('span', 'ph-card-growth'");
     expect(home).toContain("card.dataset['phStackText'] = w.stackText");
+    expect(home).toContain("el('span', 'ph-card-count', w.stackText)");
+    expect(home).toContain("cur.dataset['phCurrentDetail'] = equippedStack?.damageText ?? ''");
   });
 
   it('GS-16 「持续可见」与「恒可点」都由运行时判定给出（存在 + 真实面积 + 未被样式藏掉 + `disabled`），不是源码推断', () => {
