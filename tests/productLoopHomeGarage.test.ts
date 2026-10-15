@@ -556,6 +556,12 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         */
         '../core/bodyOwnership',
         './bodyInventory',
+        /*
+          GARAGE-V2-QUALITY-FOUNDATION-R1 登记（修预存红）：`gadgetDefs()` 的正式可选池
+          判据 = `PART_OPTIONS`（玩家 Build 部件选项唯一数据源）∩ registry category ——
+          只读真源复用，非新依赖方向（partOptions 不反向 import 本模块）。
+        */
+        '../core/partOptions',
       ],
       'vehiclePreview.ts': [
         '../core/content',
@@ -803,6 +809,27 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../core/saveVersion',
         '../platform',
       ],
+      /*
+        GARAGE-V2-QUALITY-FOUNDATION-R1｜品质/实例模型 + 纯逻辑五合一（Foundation）。
+          - `../core/partInventory`：只读旧堆叠（getCount 投影）+ `PartInventory` 类型；
+          - `../core/bodyOwnership`：Body 拥有读数（isBodyOwned/OFFICIAL_BODIES，投影用）；
+          - `../core/content`：部位判据现读 registry（slotKindOf 零字面量表）；
+          - `../core/buildValidator` + `../lab/buildEditorModel`：装备保护分支复用
+            正式 validateSnapshot 链（fuseQualityFive 内不写盘的合法快照校验）；
+          - `../core/saveVersion` + `../platform`：偏差账本 key 的版本信封读写
+            （与 r5 同一条纪律：只有产品侧持久化模块碰存储）；
+          - `./playerLoadout`：只取 `playerInventory`（旧堆叠唯一读入口；不反向 import 本模块）。
+      */
+      'garageV2Quality.ts': [
+        '../core/bodyOwnership',
+        '../core/buildValidator',
+        '../core/content',
+        '../core/partInventory',
+        '../core/saveVersion',
+        '../lab/buildEditorModel',
+        '../platform',
+        './playerLoadout',
+      ],
     };
     for (const [file, list] of Object.entries(allow)) {
       const specs = importSpecifiers(readProduct(file)).sort();
@@ -830,6 +857,9 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
           //   自己不赋值 `rearWheelDefId` / `frontWheelDefId`，也不自建第二份 ownership 判据。
           './movementInventory',
           './runMovementCanonical',
+          // UX-BAG-VISUAL-FUSION-R2 登记：部件图标模块（图形生成规则在 partIcon.ts，
+          // 页面只调 partIconNode 拿节点 —— 与 vehiclePreview 同一条「真源在专模块」纪律）。
+          './partIcon',
         ],
         `homePage.ts 不得 import "${s}"`,
       ).toContain(s);
