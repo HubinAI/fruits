@@ -820,6 +820,21 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
             （与 r5 同一条纪律：只有产品侧持久化模块碰存储）；
           - `./playerLoadout`：只取 `playerInventory`（旧堆叠唯一读入口；不反向 import 本模块）。
       */
+      'garageV2Lab.ts': [
+        '../../assets/visuals/body_banana.png',
+        '../../assets/visuals/body_watermelon.png',
+        '../../assets/visuals/part_cannon.png',
+        '../../assets/visuals/part_hammer.png',
+        '../../assets/visuals/part_pushRod.png',
+        '../core/bodyOwnership',
+        '../core/buildPersistence',
+        '../core/partInventory',
+        '../lab/buildEditorModel',
+        './garageV2Quality',
+        './partIcon',
+        './playerLoadout',
+        './vehiclePreview',
+      ],
       'garageV2Quality.ts': [
         '../core/bodyOwnership',
         // GARAGE-V2-LEDGER-COHERENCE-R1：+3（写桥：双账本消除）

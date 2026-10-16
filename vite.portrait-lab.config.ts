@@ -57,6 +57,11 @@ export default defineConfig({
         //    首页上的「开始冒险」是**同产物内的相对链接**（`./run-page.html`）。
         //    仍然不进入 dist / dist-pages / dist-e2e / dist-wechat 任一正式产物。
         'home': 'home.html',
+        // GARAGE-V2-INVENTORY-LAYOUT-LAB-R1：Garage 2.0 布局验证 Lab（**存储完全隔离**：
+        // 入口先 bindPlatformCore(<内存 Map>) 再加载业务模块 ⇒ 真实 localStorage 零接触）。
+        // 仍是同一块可整块删除的实验产物，不进入任何正式产物；
+        // ⚠️ 绝不加入 vite.pages.config.ts / 正式首页入口（Queue 必改 1）。
+        'garage-v2-lab': 'garage-v2-lab.html',
       },
     },
   },
