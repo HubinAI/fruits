@@ -1072,6 +1072,25 @@ export function equipWeapon(
   };
   if (Object.keys(stars).length > 0) next.functionalStars = stars;
   else delete next.functionalStars;
+  /*
+    GARAGE-V2-QUALITY-WEAPON-EQUIP-R1｜换回**旧星级武器**时清除该槽的品质两字段
+    （functionalQualities + equippedQualityInstances）——往返无陈旧：
+      - 旧武器走 star 倍率，若遗留 quality 会被 quality 路径遮蔽（不双乘语义下
+        star 失效）⇒「看着 ★2 实际白品质」的静默降级；
+      - 若遗留实例绑定，加载校验会一直核对该实例——卸下品质件换旧件后绑定已无意义。
+    ⚠️ 只在「本次装备的是旧 star 件」时清（equipQualityProduct 走自己的入口，
+    不经过本函数）⇒ 品质↔旧武器往返两向都原子、无残留。
+  */
+  {
+    const nextQualities: NonNullable<BuildDraft['functionalQualities']> = { ...(draft.functionalQualities ?? {}) };
+    const nextBinds: Record<string, string> = { ...(draft.equippedQualityInstances ?? {}) };
+    if (nextQualities[WEAPON_SLOT] !== undefined) delete nextQualities[WEAPON_SLOT];
+    if (nextBinds[WEAPON_SLOT] !== undefined) delete nextBinds[WEAPON_SLOT];
+    if (Object.keys(nextQualities).length > 0) next.functionalQualities = nextQualities;
+    else delete next.functionalQualities;
+    if (Object.keys(nextBinds).length > 0) next.equippedQualityInstances = nextBinds;
+    else delete next.equippedQualityInstances;
+  }
   const result = validateSnapshot(buildSnapshotFromDraft(next, registry), registry);
   if (!result.valid) {
     return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };

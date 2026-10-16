@@ -205,7 +205,7 @@ describe('COH-RED｜R3 有效库存与装备一致性', () => {
     expect(getCount(effectiveInventory(draft), 'machineGun', 1)).toBe(1);
   });
 
-  it('R3d 品质产物未接正式装备：equipQualityProduct 显式拒绝（不假成功）', () => {
+  it('R3d 品质产物装备：Weapon 真实可穿（WEAPON-EQUIP-R1 打通）；非 Weapon 显式 run-not-wired（不假成功）', () => {
     const { draft } = setupWorld();
     const before = projectItemInstances(loadInventoryRaw() as PartInventory, draft);
     const res = fuseQualityFive({
@@ -215,13 +215,44 @@ describe('COH-RED｜R3 有效库存与装备一致性', () => {
     });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    // COH 新 API：尝试把品质产物装备到正式 Build ⇒ 必须 ok:false + 'run-not-wired'
+    /*
+      ⚠️ 契约变更记录（GARAGE-V2-QUALITY-WEAPON-EQUIP-R1，**同步非放宽**）：
+      COH 时代本断言是「一律 run-not-wired」（品质未接战斗）。
+      上一 Queue（RUN-ADAPTER-R1）已用真实战斗证明七档品质伤害倍率；
+      本 Queue 打通 **Weapon 品质产物 → 真实穿戴事务**（validateSnapshot + savePlayerBuild）。
+      ⇒ R3d 按新契约重订为两半：
+        ① **Weapon 产物**（本例 cannon）真实可穿——ok:true + 存档真实落盘
+           （functionalQualities[frontMass] + equippedQualityInstances[frontMass]）；
+        ② **非 Weapon 产物**（movement/gadget/body）**仍**显式 run-not-wired——
+           绝不拿武器品质伤害倍率冒充别的部位强度。
+    */
     const eq = equipQualityProduct(res.productId, draft);
-    expect(eq.ok).toBe(false);
-    if (!eq.ok) expect(eq.reason).toBe('run-not-wired');
-    // 且正式存档未被改动
+    expect(eq.ok, JSON.stringify(eq)).toBe(true);
+    if (!eq.ok) return;
     const persisted = JSON.parse(store.raw(BUILD_KEY) || '{}');
     expect(persisted.functionalSelections?.frontMass).toBe('cannon');
+    expect(persisted.functionalQualities?.frontMass).toBe(res.productQuality);
+    expect(persisted.equippedQualityInstances?.frontMass).toBe(res.productId);
+    // ② 非 Weapon：造一件轮组品质产物 → 仍 run-not-wired
+    const invNow = loadInventoryRaw() as PartInventory;
+    addPart(invNow, 'smallWheel', 1, 2);
+    addPart(invNow, 'largeWheel', 1, 2);
+    addPart(invNow, 'heavyWheel', 1, 2);
+    saveInventory(invNow);
+    const mItems = projectItemInstances(effectiveInventory(draft), draft)
+      .filter((i) => i.slot === 'movement' && i.consumable);
+    if (mItems.length >= 5) {
+      const rm = fuseQualityFive({
+        mainInstanceId: mItems[0]!.instanceId,
+        materialInstanceIds: mItems.slice(1, 5).map((i) => i.instanceId),
+        draft,
+      });
+      if (rm.ok) {
+        const rr = equipQualityProduct(rm.productId, draft);
+        expect(rr.ok).toBe(false);
+        if (!rr.ok) expect(rr.reason).toBe('run-not-wired');
+      }
+    }
   });
 });
 

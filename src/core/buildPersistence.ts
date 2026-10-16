@@ -18,6 +18,9 @@ import { validateSnapshot } from './buildValidator';
 import { INVENTORY_MAX_STAR } from './partInventory';
 import { readJsonWithVersion, migrateLegacy, stampVersion, STAMP_KEY } from './saveVersion';
 import { platform } from '../platform';
+// GARAGE-V2-QUALITY-WEAPON-EQUIP-R1：加载时对品质实例绑定做**账本持有**真实校验。
+// 依赖方向：core/qualityLedger → platform + saveVersion（零反向），不与任何模块成环。
+import { ledgerOwnsProduct } from './qualityLedger';
 
 const STORAGE_KEY = 'strongfruit.playerBuild.v1';
 
@@ -42,6 +45,16 @@ export function loadPlayerBuild(): BuildDraft | null {
   const draft = migrated as BuildDraft;
   // F-MOVE-1：驱动模式归一（旧 localStorage 无 drive 字段 / 非法值 → 前进）
   draft.drive = resolveDriveMode(draft.drive);
+  // GARAGE-V2-QUALITY-WEAPON-EQUIP-R1：品质实例绑定**真实校验**——
+  //   每一条 equippedQualityInstances 绑定必须仍被账本持有（账本 products 里还有这件）。
+  //   已被合成消耗 / 手工删除 ⇒ 幽灵穿戴 ⇒ **整份存档判非法**（返回 null，调用方回退默认 Build）——
+  //   绝不静默回落 ★1 还回报成功（Queue 必改 3 的原话）。
+  //   ⚠️ 这与「未知部件 / 超载 ⇒ null」同一纪律：结构非法直接回退，不半信半疑。
+  if (draft.equippedQualityInstances) {
+    for (const instId of Object.values(draft.equippedQualityInstances)) {
+      if (!ledgerOwnsProduct(instId)) return null;
+    }
+  }
   // 必须构成合法 Build（未知部件 / 超载 / 无 Weapon → 旧存档非法）
   const snap = buildSnapshotFromDraft(draft, registry, 'customA');
   if (!validateSnapshot(snap, registry).valid) return null;
@@ -106,6 +119,23 @@ function isBuildDraftShape(d: unknown): d is BuildDraft {
     const qs = o.functionalQualities as Record<string, unknown>;
     for (const v of Object.values(qs)) {
       if (typeof v !== 'string' || !QUALITY_SET.has(v)) return false;
+    }
+  }
+  // GARAGE-V2-QUALITY-WEAPON-EQUIP-R1：equippedQualityInstances 可选
+  // （各槽装备的品质实例绑定，值 = `qv2:<defId>:<quality>:<seq>`）。
+  // ⚠️ 这里只做**形状**校验（字符串 + qv2: 前缀 + 四段式）；
+  //    「仍被账本持有」的**真实校验**在 loadPlayerBuild 拿到完整 draft 后做
+  //    （shape 校验器不知道账本，也不该知道——职责分离与既有纪律一致）。
+  if (o.equippedQualityInstances !== undefined) {
+    if (typeof o.equippedQualityInstances !== 'object' || o.equippedQualityInstances === null) {
+      return false;
+    }
+    const binds = o.equippedQualityInstances as Record<string, unknown>;
+    for (const v of Object.values(binds)) {
+      if (typeof v !== 'string') return false;
+      const seg = v.split(':');
+      if (seg.length !== 4 || seg[0] !== 'qv2' || !(seg[1]?.length > 0)) return false;
+      if (!/^\d+$/.test(seg[3] ?? '')) return false;
     }
   }
   return true;

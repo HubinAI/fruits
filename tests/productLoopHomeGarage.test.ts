@@ -842,10 +842,18 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         '../core/buildValidator',
         '../core/content',
         '../core/partInventory',      // consume/saveInventory —— 消耗同步扣进旧真源（R3）
-        '../core/saveVersion',
         '../lab/buildEditorModel',
         '../platform',
         './playerLoadout',
+        /*
+          GARAGE-V2-QUALITY-WEAPON-EQUIP-R1｜登记 +1 / -1（**登记非放宽**）：
+          - +`../core/qualityLedger`：账本 key/类型/读写真源移入 core（loadPlayerBuild
+            加载校验需要同一读口，core 不能反向 import product）——本模块改为 re-export，
+            既有调用方 import 面逐字节不变；
+          - -`../core/saveVersion`：信封读写随账本一起移入 core/qualityLedger
+            （本模块不再直接 import，白名单闭集「全部命中」同步收缩）。
+        */
+        '../core/qualityLedger',
       ],
     };
     for (const [file, list] of Object.entries(allow)) {

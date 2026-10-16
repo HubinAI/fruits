@@ -31,10 +31,20 @@ import {
 import { savePlayerBuild } from '../core/buildPersistence';
 import { OFFICIAL_BODIES, isBodyOwned } from '../core/bodyOwnership';
 import { registry } from '../core/content';
-import { readJsonWithVersion, stampVersion } from '../core/saveVersion';
 import { validateSnapshot } from '../core/buildValidator';
 import { buildSnapshotFromDraft, type BuildDraft } from '../lab/buildEditorModel';
-import { playerInventory } from './playerLoadout';
+import { playerInventory, WEAPON_SLOT } from './playerLoadout';
+/*
+  GARAGE-V2-QUALITY-WEAPON-EQUIP-R1｜账本读写真源移入 core（core 不依赖 product 的方向纪律
+  —— loadPlayerBuild 加载校验需要账本读口）。本模块 re-export 保持既有调用方
+  （garageV2Lab / 既有测试）的 import 面**逐字节不变**；PL-26 登记新来源（登记非放宽）。
+*/
+import {
+  GARAGE_V2_LEDGER_KEY,
+  GARAGE_V2_LEDGER_VERSION,
+  loadGarageV2LedgerData,
+  saveGarageV2LedgerData,
+} from '../core/qualityLedger';
 
 /* ══════════════════════════ ① 品质模型 ══════════════════════════ */
 
@@ -214,74 +224,22 @@ export interface GarageV2Ledger {
   readonly products: readonly QualityProduct[];
 }
 
-const LEDGER_KEY = 'strongfruit.garageV2Ledger.v1';
-const LEDGER_VERSION = 1;
+const LEDGER_KEY = GARAGE_V2_LEDGER_KEY;
+const LEDGER_VERSION = GARAGE_V2_LEDGER_VERSION;
 
-/** 读偏差账本（无 / 损坏 / 形状非法 → 空账本，绝不抛）。 */
+/**
+ * 读偏差账本（无 / 损坏 / 形状非法 → 空账本，绝不抛）。
+ * ⚠️ WEAPON-EQUIP-R1 起实现移入 `core/qualityLedger.loadGarageV2LedgerData`
+ *    （core 加载校验需要同一读口）；本函数保留为**既有调用方的唯一入口**，
+ *    逐字段行为由两侧一致性测试钉死。
+ */
 export function loadGarageV2Ledger(): GarageV2Ledger {
-  try {
-    const parsed = readJsonWithVersion(platform.storage.getItem(LEDGER_KEY));
-    if (!parsed) return { version: LEDGER_VERSION, consumed: {}, products: [] as QualityProduct[] };
-    const obj = parsed.obj as Record<string, unknown> | null;
-    if (!obj || typeof obj !== 'object') return { version: LEDGER_VERSION, consumed: {}, products: [] as QualityProduct[] };
-    const consumedRaw = obj['consumed'];
-    const productsRaw = obj['products'];
-    const consumed: Record<string, ConsumedRecord> = {};
-    if (consumedRaw && typeof consumedRaw === 'object' && !Array.isArray(consumedRaw)) {
-      for (const [k, v] of Object.entries(consumedRaw as Record<string, unknown>)) {
-        // v2 形状：{ consumedIds: string[], highWatermark: number }
-        if (v && typeof v === 'object' && !Array.isArray(v)) {
-          const o = v as Record<string, unknown>;
-          const idsRaw = Array.isArray(o['consumedIds']) ? (o['consumedIds'] as unknown[]) : [];
-          const ids = idsRaw
-            .filter((x): x is string => typeof x === 'string' && x.startsWith('q1:'))
-            .filter((x, i, arr) => arr.indexOf(x) === i);
-          const hw = Math.max(0, Math.floor(Number(o['highWatermark']) || 0));
-          if (ids.length > 0 || hw > 0) {
-            consumed[k] = {
-              consumedIds: ids,
-              highWatermark: Math.max(hw, ids.length),
-              synced: o['synced'] === true,
-            };
-          }
-          continue;
-        }
-        // v1 形状：数量 → 升级为「前 N 个序号已消耗 + 高水位 N」（语义不变）
-        const n = Math.max(0, Math.floor(Number(v) || 0));
-        if (n > 0) {
-          consumed[k] = {
-            consumedIds: Array.from({ length: n }, (_, i) => `q1:${k.replace('|', ':')}:${i + 1}`),
-            highWatermark: n,
-            synced: false,
-          };
-        }
-      }
-    }
-    const products: QualityProduct[] = Array.isArray(productsRaw)
-      ? (productsRaw as unknown[])
-          .map((p): QualityProduct | null => {
-            const o = p as Record<string, unknown> | null;
-            const defId = typeof o?.['defId'] === 'string' ? (o['defId'] as string) : null;
-            const quality = typeof o?.['quality'] === 'string' ? (o['quality'] as QualityTier) : null;
-            const seq = Math.floor(Number(o?.['seq']) || 0);
-            if (!defId || quality === null || qualityRank(quality) < 0 || seq < 1) return null;
-            return { defId, quality, seq };
-          })
-          .filter((p): p is QualityProduct => p !== null)
-      : [];
-    return { version: LEDGER_VERSION, consumed, products };
-  } catch {
-    return { version: LEDGER_VERSION, consumed: {}, products: [] as QualityProduct[] };
-  }
+  return loadGarageV2LedgerData() as GarageV2Ledger;
 }
 
 /** 写偏差账本（信封版本戳；失败静默 —— 与既有存档模块同一纪律）。 */
 function saveGarageV2Ledger(ledger: GarageV2Ledger): void {
-  try {
-    platform.storage.setItem(LEDGER_KEY, JSON.stringify(stampVersion(ledger)));
-  } catch {
-    // 隐私模式 / 配额失败静默（同 saveInventory 纪律）
-  }
+  saveGarageV2LedgerData(ledger);
 }
 
 /**
@@ -306,6 +264,12 @@ export function projectItemInstances(
 ): readonly ItemInstance[] {
   const ledger = loadGarageV2Ledger();
   const out: ItemInstance[] = [];
+
+  // GARAGE-V2-QUALITY-WEAPON-EQUIP-R1：当前 draft 装备着的品质实例集合
+  //（装备保护：已上槽的实例不可再当合成材料 ⇒ 不产生悬空引用）。
+  const equippedInstanceIds = new Set<string>(
+    Object.values(_draft.equippedQualityInstances ?? {}),
+  );
 
   // ① 旧堆叠投影（Functional + Movement；稳定顺序 = 目录定义序）
   const entries: { defId: string; slot: ItemSlotKind; star: number; count: number }[] = [];
@@ -382,15 +346,19 @@ export function projectItemInstances(
   for (const p of ledger.products) {
     const slot = slotKindOf(p.defId);
     if (!slot || slot === 'body') continue; // 账本不该有 body 产物；如实跳过
+    const instanceId = `qv2:${p.defId}:${p.quality}:${p.seq}`;
+    // WEAPON-EQUIP-R1：已上槽的品质实例 = 装备保护（不可消耗）。
+    // 复用既有 lockedReason='equipped' 枚举与 fuse 的 consumable 闸门——零新规则。
+    const isEquipped = equippedInstanceIds.has(instanceId);
     out.push({
-      instanceId: `qv2:${p.defId}:${p.quality}:${p.seq}`,
+      instanceId,
       defId: p.defId,
       name: itemDisplayName(p.defId),
       slot,
       legacyStar: null,
       quality: p.quality,
-      consumable: !isMaxQuality(p.quality),
-      lockedReason: isMaxQuality(p.quality) ? 'max-quality' : null,
+      consumable: !isMaxQuality(p.quality) && !isEquipped,
+      lockedReason: isEquipped ? 'equipped' : isMaxQuality(p.quality) ? 'max-quality' : null,
     });
   }
 
@@ -571,7 +539,16 @@ export function fuseQualityFive(input: QualityFuseInput): QualityFuseResult {
     const slotPrefix = main.slot === 'movement' ? 'm' : main.slot === 'gadget' ? 'g' : 'w';
     const equippedRef = `${slotPrefix}:${main.defId}:${mainLegacyStar}`;
     if (consumedTotal >= stackNow && equippedRefs.has(equippedRef)) {
-      if (main.slot === 'weapon') {
+      // WEAPON-EQUIP-R1：武器槽已穿戴**品质实例** ⇒ 旧 stack 升星语义不适用——
+      //   当前装备读数是 functionalQualities（品质倍率），不是 functionalStars；
+      //   若照旧写 functionalStars.frontMass，resolveSnapshot 会被 quality 路径遮蔽
+      //   （不双乘），但将来换回旧武器时会留下一颗**陈旧 star**（幽灵升星）。
+      //   保守裁定：跳过升星、正常完成合成（消耗照记、产物照发）——装备侧由
+      //   加载校验保护（绑定还在、产物还在 ⇒ 合法），并注明这是一条**已披露边界**。
+      if (main.slot === 'weapon' && (input.draft.equippedQualityInstances?.[WEAPON_SLOT] ?? null) !== null) {
+        // 零写盘到 Build：不写 functionalStars，不 savePlayerBuild；
+        // equippedUpgraded 如实报 false（本轮没有发生升星）。
+      } else if (main.slot === 'weapon') {
         // 沿既有 equipWeapon 升星语义（审计 §D fuseStack 同款）：校验失败 ⇒ 回滚零写盘
         const nextStar = mainLegacyStar + 1;
         if (nextStar > 5) {
@@ -675,26 +652,117 @@ export function effectiveInventory(draft: BuildDraft): PartInventory {
   return playerInventory(draft);
 }
 
-export type QualityEquipFailure = 'run-not-wired' | 'unknown-instance' | 'invalid-quality';
+export type QualityEquipFailure =
+  | 'run-not-wired'
+  | 'unknown-instance'
+  | 'not-owned'
+  | 'not-weapon'
+  | 'invalid-quality'
+  | 'unknown-slot'
+  | 'invalid-build';
+
+export interface QualityEquipOutcome {
+  readonly ok: boolean;
+  readonly reason?: QualityEquipFailure;
+  readonly detail?: string;
+  /** 成功时为落盘后的新 Build；失败时不返回（调用方不得用它覆盖当前态）。 */
+  readonly draft?: BuildDraft;
+}
 
 /**
- * **品质产物装备尝试**（COH R3d）：显式拒绝并说明原因，**绝不假成功**。
+ * **Weapon 品质产物真实穿戴**（GARAGE-V2-QUALITY-WEAPON-EQUIP-R1）。
  *
- * 7 档品质尚未接正式 Run 战斗（审计 §G：STAR_DAMAGE_MAX_STAR=5 夹取 +
- * Movement/Gadget/Body 无星级通道）⇒ 品质产物（qv2:*）**不能**写进正式
- * playerBuild.v1 —— 那会让 Run Snapshot 读到非法/未定义的品质强度。
- * 等设计决策后再由独立 Queue 打通（届时本函数替换为真实 equip 链）。
+ * 单问题边界：只打通 **Weapon**（category === 'weapon'）品质产物 → 确认穿戴 →
+ * 合法快照 → 真实战斗。Movement / Gadget / Body 产物**仍**显式 `run-not-wired`
+ * （绝不拿武器品质伤害倍率冒充别的部位强度）。
+ *
+ * 事务（全部校验通过才落盘，任一失败**零写盘**）：
+ *   1. instanceId 必须是 `qv2:<defId>:<quality>:<seq>` 四段式且**在账本 products 里**
+ *      （真实持有判据与加载校验同源：core/qualityLedger）；
+ *   2. defId 必须是正式 Weapon（registry category）；
+ *   3. 当前 draft 的 Body 必须有 WEAPON_SLOT 挂点；
+ *   4. 组装 probe draft：武器槽写 functionalQualities[slot]=quality +
+ *      equippedQualityInstances[slot]=instanceId + **清该槽 star**（不双乘），
+ *      过正式 validateSnapshot（能量超载 / 非法装配在这里被拒）；
+ *   5. `savePlayerBuild` 真实落盘 → 重载后正式 Run 链
+ *      （buildSnapshotFromDraft → resolveSnapshot → ContactRouter）真实使用品质倍率。
+ *
+ * ⚠️ 实例绑定（equippedQualityInstances）：同 defId+quality 的两件实例靠 seq 严格区分；
+ *    加载时 core 侧真实校验绑定仍被持有（幽灵绑定 ⇒ 整份存档非法）；
+ *    已上槽实例经投影 lockedReason='equipped' 不可再被五合一消耗。
+ * ⚠️ 换回旧武器走**旧 equipWeapon 入口**（它会清掉品质两字段——往返无陈旧）。
  */
 export function equipQualityProduct(
   productId: string,
-  _draft: BuildDraft,
-): { ok: true } | { ok: false; reason: QualityEquipFailure; detail: string } {
+  draft: BuildDraft,
+): QualityEquipOutcome {
+  // ① 形状 + 账本持有（真实持有判据；不是「字符串像就行」）
   if (!productId.startsWith('qv2:')) {
     return { ok: false, reason: 'unknown-instance', detail: `非品质产物实例：${productId}` };
   }
-  return {
-    ok: false,
-    reason: 'run-not-wired',
-    detail: '品质产物尚未接入正式 Run 战斗（7 档强度映射待设计决策），暂不可装备/出战',
+  const seg = productId.split(':');
+  if (seg.length !== 4) {
+    return { ok: false, reason: 'invalid-quality', detail: `品质实例 id 形状非法：${productId}` };
+  }
+  const [, defId, qualityRaw, seqRaw] = seg as [string, string, string, string];
+  if (!(qualityRaw in QUALITY_LABELS)) {
+    return { ok: false, reason: 'invalid-quality', detail: `未知品质档：${qualityRaw}` };
+  }
+  const quality = qualityRaw as QualityTier;
+  if (!Number.isInteger(Number(seqRaw)) || Number(seqRaw) < 1) {
+    return { ok: false, reason: 'invalid-quality', detail: `实例序号非法：${productId}` };
+  }
+  if (!loadGarageV2LedgerData().products.some(
+    (p) => p.defId === defId && p.quality === quality && p.seq === Number(seqRaw),
+  )) {
+    return { ok: false, reason: 'not-owned', detail: `该品质实例不在账本持有记录里（未合成过或已被消耗）：${productId}` };
+  }
+
+  // ② 必须是正式 Weapon（Movement/Gadget/Body 显式 run-not-wired，不假成功）
+  const kind = slotKindOf(defId);
+  if (kind !== 'weapon') {
+    return {
+      ok: false,
+      reason: 'run-not-wired',
+      detail: `品质产物目前只支持 Weapon 穿戴（"${defId}" 是 ${String(kind ?? '未知部位')}）；Movement/Gadget/Body 接入属下一轮`,
+    };
+  }
+  const def = registry.functionals.get(defId);
+  if (!def || def.category !== 'weapon') {
+    return { ok: false, reason: 'not-weapon', detail: `"${defId}" 不是正式武器` };
+  }
+
+  // ③ Body 挂点
+  const body = registry.bodies.get(draft.bodyDefId);
+  if (!body || !body.functionalHardpoints.some((h) => h.id === WEAPON_SLOT)) {
+    return { ok: false, reason: 'unknown-slot', detail: `车身 "${draft.bodyDefId}" 没有武器挂点 "${WEAPON_SLOT}"` };
+  }
+
+  // ④ probe draft：写品质 + 绑定 + 清该槽 star（不双乘），过正式校验
+  const nextStars: Record<string, number> = { ...(draft.functionalStars ?? {}) };
+  delete nextStars[WEAPON_SLOT];
+  const nextQualities: Record<string, QualityTier> = {
+    ...(draft.functionalQualities ?? {}),
+    [WEAPON_SLOT]: quality,
   };
+  const nextBinds: Record<string, string> = {
+    ...(draft.equippedQualityInstances ?? {}),
+    [WEAPON_SLOT]: productId,
+  };
+  const probe: BuildDraft = {
+    ...draft,
+    functionalSelections: { ...draft.functionalSelections, [WEAPON_SLOT]: defId },
+    functionalStars: nextStars,
+    functionalQualities: nextQualities,
+    equippedQualityInstances: nextBinds,
+  };
+  if (Object.keys(nextStars).length === 0) delete probe.functionalStars;
+  const result = validateSnapshot(buildSnapshotFromDraft(probe, registry), registry);
+  if (!result.valid) {
+    return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
+  }
+
+  // ⑤ 真实落盘（不是布尔冒充）
+  savePlayerBuild(probe);
+  return { ok: true, draft: probe };
 }

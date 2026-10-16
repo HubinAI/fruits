@@ -98,6 +98,22 @@ export interface BuildDraft {
    */
   functionalQualities?: Record<string, QualityTierId>;
   /**
+   * GARAGE-V2-QUALITY-WEAPON-EQUIP-R1｜各 Functional 槽位装备的**品质实例绑定**
+   * （最小稳定装备实例引用）。
+   *
+   * key = hardpointId；值 = 账本产物实例 id（`qv2:<defId>:<quality>:<seq>`）。
+   * 与 functionalQualities 的关系：functionalQualities[hardpointId] 存颜色档，
+   * 本字段存**具体哪一件**（同 defId+quality 的两件独立实例靠 seq 区分）。
+   *
+   * ⚠️ 加载时真实校验：`loadPlayerBuild` 会用 core 账本读口
+   *    （`core/qualityLedger.ledgerOwnsProduct`）核对绑定仍被持有——
+   *    已被合成消耗 / 手工删除的绑定 ⇒ **整份存档判非法**（回 null，
+   *    绝不静默回落 ★1 冒充成功）。
+   * ⚠️ 换装清除：装旧武器（equipWeapon）时清掉本槽两字段；装品质产物时
+   *    原子替换两字段（不双乘、不留陈旧）。
+   */
+  equippedQualityInstances?: Record<string, string>;
+  /**
    * GADGET-SLOT-FOUNDATION-R1｜**独立 Gadget 装配位**（1 × Gadget）。
    *
    * 与 Weapon / Front Movement / Rear Movement **并列**的第 4 个 Build 维度，
