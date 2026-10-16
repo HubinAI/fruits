@@ -176,6 +176,23 @@ export interface MovementInstall {
   overrides?: Partial<WheelDef>;
 }
 
+/**
+ * GARAGE-V2-QUALITY-RUN-ADAPTER-R1｜core 侧七档品质 id。
+ *
+ * 与 `src/product/garageV2Quality.ts` 的 `QualityTier` 顺序一致（白→绿→蓝→紫→橙→红→彩）。
+ * ⚠️ 两侧各声明一份（core 不反向 import product，依赖方向纪律）；
+ *    一致性由 `tests/productQualityRunAdapterR1.test.ts` 钉死。
+ * 倍率表与「不双乘」语义见 `src/core/installQuality.ts`（唯一真源）。
+ */
+export type QualityTierId =
+  | 'white'
+  | 'green'
+  | 'blue'
+  | 'purple'
+  | 'orange'
+  | 'red'
+  | 'chrome';
+
 /** 安装情况：某 Functional Hardpoint 上安装的 Functional Part */
 export interface FunctionalInstall {
   hardpointId: string;
@@ -189,6 +206,18 @@ export interface FunctionalInstall {
    * 不在每个 Weapon 内单独打补丁。
    */
   star?: number;
+  /**
+   * GARAGE-V2-QUALITY-RUN-ADAPTER-R1｜**显式品质档**（γ 方案）。
+   *
+   * - 缺省 `undefined` = 无品质（旧 Build / 对手池 / 旧存档）⇒ 倍率层走旧星级
+   *   逻辑**逐字不变**；
+   * - 存在时（white..chrome）⇒ **品质倍率替代** star 伤害倍率（不双乘；
+   *   star 的能量语义保留，>1 仍 ×1.10）；倍率表见 `installQuality.ts`；
+   * - white 在 snapshot 构造层**不写字段**（与 star>1 才写 star 的既有先例同构）；
+   * - 本字段只由隔离验证环境（Lab fixture / 测试）写入；正式 Garage V2 装备链
+   *   未打通前（`equipQualityProduct` 仍 run-not-wired），正式路径不会写入本字段。
+   */
+  quality?: QualityTierId;
 }
 
 /**
@@ -231,6 +260,14 @@ export interface GadgetInstall {
   hardpointId?: string;
   /** 星级（与 FunctionalInstall.star 同语义；缺省 1★） */
   star?: number;
+  /**
+   * GARAGE-V2-QUALITY-RUN-ADAPTER-R1｜显式品质档（与 FunctionalInstall.quality 同语义）。
+   *
+   * ⚠️ Gadget 无伤害通道（thruster 等参数键名不含 damage）⇒ 本字段对 Gadget
+   *    **数值惰性**（能量仍走 star 口径；不制造假强度）。
+   *    Gadget 的真实品质属性（推力/冷却类）属独立设计决策，本轮不做。
+   */
+  quality?: QualityTierId;
 }
 
 /** Build Validator 校验结果 */

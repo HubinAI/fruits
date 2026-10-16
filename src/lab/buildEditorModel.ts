@@ -15,6 +15,7 @@ import type {
   BodyDef,
   BuildSnapshot,
   ContentRegistry,
+  QualityTierId,
 } from '../core/types';
 
 /** 可编辑的正式 Functional 内容（本轮已通过体验验证的 Weapon/Gadget） */
@@ -85,6 +86,17 @@ export interface BuildDraft {
    * 不引入实例 UID：星级只描述 Build 装配选择，库存副本数由 partInventory 单独记录。
    */
   functionalStars?: Record<string, number>;
+  /**
+   * GARAGE-V2-QUALITY-RUN-ADAPTER-R1｜各 Functional 槽位的**显式品质档**（γ 方案）。
+   *
+   * key = hardpointId；值 = QualityTierId（white..chrome）。缺省 undefined = 无品质
+   * （旧 Build / 对手池 / 旧存档完全不受影响）。white 在 snapshot 构造层**不写字段**。
+   * ⚠️ 本字段当前只由隔离验证环境（Lab fixture / 测试）写入：
+   *    正式 Garage V2 装备链未打通（`equipQualityProduct` 仍 run-not-wired），
+   *    正式页面/存档不得写入品质值。
+   * ⚠️ 与 quality 并存时 star 的伤害倍率被品质替代（不双乘）；能量仍按 star 口径。
+   */
+  functionalQualities?: Record<string, QualityTierId>;
   /**
    * GADGET-SLOT-FOUNDATION-R1｜**独立 Gadget 装配位**（1 × Gadget）。
    *
@@ -174,6 +186,13 @@ export function buildSnapshotFromDraft(
       // Q22：注入该槽位的星级。缺省/1★ 不写字段（保持旧 Build 兼容），倍率层在 resolveSnapshot 用 ?? 1 处理
       ...(draft.functionalStars?.[hardpointId] && draft.functionalStars[hardpointId] > 1
         ? { star: draft.functionalStars[hardpointId] }
+        : {}),
+      // GARAGE-V2-QUALITY-RUN-ADAPTER-R1：注入该槽位的显式品质档。
+      // ⚠️ white 不写字段（与 star>1 才写 star 同构）——旧快照形状逐字节不变；
+      //    非 white 写 quality ⇒ resolveSnapshot 走品质倍率（替代 star 伤害倍率，不双乘）。
+      ...(draft.functionalQualities?.[hardpointId] &&
+      draft.functionalQualities[hardpointId] !== 'white'
+        ? { quality: draft.functionalQualities[hardpointId] }
         : {}),
     }));
 

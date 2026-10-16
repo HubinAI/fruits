@@ -93,5 +93,20 @@ function isBuildDraftShape(d: unknown): d is BuildDraft {
       }
     }
   }
+  // GARAGE-V2-QUALITY-RUN-ADAPTER-R1：functionalQualities 可选（各槽显式品质档）。
+  // ⚠️ 白名单闭集 = core/types QualityTierId 七档；任何垃圾值 ⇒ 整份存档判非法
+  //   （与 functionalStars 的纪律一致：结构非法直接回退默认 Build，不半信半疑）。
+  //   正式路径当前不写本字段（equipQualityProduct 仍 run-not-wired）；
+  //   旧存档无字段 = 原状，逐字节兼容。
+  if (o.functionalQualities !== undefined) {
+    if (typeof o.functionalQualities !== 'object' || o.functionalQualities === null) return false;
+    const QUALITY_SET = new Set<string>([
+      'white', 'green', 'blue', 'purple', 'orange', 'red', 'chrome',
+    ]);
+    const qs = o.functionalQualities as Record<string, unknown>;
+    for (const v of Object.values(qs)) {
+      if (typeof v !== 'string' || !QUALITY_SET.has(v)) return false;
+    }
+  }
   return true;
 }

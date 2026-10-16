@@ -12,7 +12,26 @@ import type {
   MovementHardpointDef,
   MovementInstall,
   WheelDef,
+  QualityTierId,
 } from './types';
+import {
+  applyInstallTier,
+  qualityDamageMultiplier,
+} from './installQuality';
+
+/**
+ * GARAGE-V2-QUALITY-RUN-ADAPTER-R1｜「卡片读数 = 战斗读数」的品质同源口径。
+ * 与 `starTierDamage` 并列：resolveSnapshot 之后的武器 def 用这个函数回读主伤。
+ * （quality 与 star 互斥生效——见 installQuality.applyInstallTier 的不双乘语义。）
+ */
+export function tierDamageOf(
+  base: number,
+  star: number | undefined,
+  quality: QualityTierId | undefined,
+): number {
+  if (quality) return Math.round(base * qualityDamageMultiplier(quality));
+  return starTierDamage(base, star);
+}
 
 /**
  * Q22｜星级统一倍率层（V0.5 部件成长）。
@@ -77,10 +96,9 @@ export function starTierDamage(base: number, star: number | undefined): number {
   return m === 1 ? base : Math.round(base * m);
 }
 
-/** 字段名是否属「伤害类数值」（统一倍率目标） */
-function isDamageKey(k: string): boolean {
-  return /damage/i.test(k);
-}
+/** 字段名是否属「伤害类数值」（统一倍率目标）
+ *  ⚠️ 实现已随倍率层移入 installQuality.ts（单一实现）；此处保留 JSDoc 记录口径历史。
+ */
 
 /**
  * PRODUCT-LOOP-R2-C｜一件武器的**主伤害值** —— 「这件武器一次命中会扣对手多少血」。
@@ -117,17 +135,9 @@ export function weaponNumericParams(def: FunctionalPartDef): Record<string, numb
 
 /** 应用星级倍率，返回倍率后的 def 副本（star<=1 直接返回原 def，零 clone 开销） */
 export function applyStarTier(def: FunctionalPartDef, star: number | undefined): FunctionalPartDef {
-  if (!star || star <= 1) return def;
-  const energy = starTierEnergy(def.energy, star);
-  let behaviorParams = def.behaviorParams;
-  if (behaviorParams) {
-    const next: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(behaviorParams)) {
-      next[k] = typeof v === 'number' && isDamageKey(k) ? starTierDamage(v, star) : v;
-    }
-    behaviorParams = next;
-  }
-  return { ...def, energy, behaviorParams };
+  // GARAGE-V2-QUALITY-RUN-ADAPTER-R1：实现在 installQuality.applyInstallTier（单一实现）。
+  // quality=undefined 路径 = 旧 applyStarTier 逐字行为（含 star<=1 恒等返回同一对象的引用语义）。
+  return applyInstallTier(def, star, undefined);
 }
 
 /** 解析后的 Movement 安装（含展开定义） */
@@ -217,7 +227,9 @@ export function resolveSnapshot(
       throw new Error(`ResolveSnapshot: unknown functional "${install.defId}"`);
     }
     // Q22：应用星级统一倍率（star<=1 恒等），Runtime 拿到强化后 def
-    return { install, hardpoint, def: applyStarTier(def, install.star ?? 1) };
+    // GARAGE-V2-QUALITY-RUN-ADAPTER-R1：显式 quality 存在 ⇒ 品质倍率替代 star 伤害倍率
+    //（不双乘；star 能量语义保留）。无 quality ⇒ 与改前逐字节相同。
+    return { install, hardpoint, def: applyInstallTier(def, install.star ?? 1, install.quality) };
   });
 
   // GADGET-SLOT-FOUNDATION-R1：独立 Gadget 位解析（0 或 1 件；缺省 = null）
@@ -228,7 +240,9 @@ export function resolveSnapshot(
       throw new Error(`ResolveSnapshot: unknown gadget "${snapshot.gadget.defId}"`);
     }
     const star = snapshot.gadget.star ?? 1;
-    gadget = { def: applyStarTier(gDef, star), star };
+    // GARAGE-V2-QUALITY-RUN-ADAPTER-R1：Gadget 同通道（quality 存在 ⇒ 替代 star 伤害倍率；
+    // Gadget 无伤害通道 ⇒ 数值惰性，只保留能量语义）。
+    gadget = { def: applyInstallTier(gDef, star, snapshot.gadget.quality), star };
   }
 
   const totalMass =

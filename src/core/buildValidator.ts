@@ -15,6 +15,7 @@ import type {
   BuildSnapshot,
   ContentRegistry,
   FunctionalInstall,
+  QualityTierId,
   ValidationResult,
 } from './types';
 import { energyAfterReplace, starTierEnergy } from './buildSnapshot';
@@ -25,6 +26,23 @@ function fail(message: string): ValidationResult {
 
 function ok(): ValidationResult {
   return { valid: true, errors: [] };
+}
+
+/**
+ * GARAGE-V2-QUALITY-RUN-ADAPTER-R1｜**安装件能量同源口径**（validate 与 runtime 共用）。
+ *
+ * quality 不改能量（倍率表只作用伤害）；star>1 ⇒ ×1.10（取整）。
+ * ⚠️ 这不是第二套口径：resolveSnapshot 内部走 `installQuality.applyInstallTier` 的
+ *    同一 star 能量规则——两处结果由测试钉死相等（能量超载检测才不会与战斗侧漂移）。
+ */
+function installEnergyOf(
+  energy: number,
+  star: number | undefined,
+  quality: QualityTierId | undefined,
+): number {
+  // quality 存在时 applyInstallTier 的能量 = starTierEnergy(energy, star)——同一函数语义
+  void quality;
+  return starTierEnergy(energy, star ?? 1);
 }
 
 /**
@@ -45,14 +63,15 @@ export function computeEnergy(
     const def = registry.functionals.get(install.defId);
     if (!def) return { energy, error: `未知功能部件 "${install.defId}"` };
     // Q22：能量含星级倍率（star<=1 恒等），否则 2★ 超载检测失效
-    energy += starTierEnergy(def.energy, install.star ?? 1);
+    // GARAGE-V2-QUALITY-RUN-ADAPTER-R1：quality 不改能量，但走同一同源口径
+    energy += installEnergyOf(def.energy, install.star, install.quality);
   }
   // GADGET-SLOT-FOUNDATION-R1：独立 Gadget 位**只计费一次**（0 或 1 件）。
   // 复用同一函数与同一星级倍率层，不新增第二套能量规则。
   if (snapshot.gadget) {
     const g = registry.functionals.get(snapshot.gadget.defId);
     if (!g) return { energy, error: `未知 Gadget "${snapshot.gadget.defId}"` };
-    energy += starTierEnergy(g.energy, snapshot.gadget.star ?? 1);
+    energy += installEnergyOf(g.energy, snapshot.gadget.star, snapshot.gadget.quality);
   }
   return { energy };
 }
@@ -131,7 +150,7 @@ export function validateSnapshot(
           errors.push(`未知 Gadget "${snapshot.gadget!.defId}"`);
           return 0;
         }
-        return starTierEnergy(g.energy, snapshot.gadget!.star ?? 1);
+        return installEnergyOf(g.energy, snapshot.gadget!.star, snapshot.gadget!.quality);
       })()
     : 0;
   if (energy + movementEnergy + gadgetEnergy > body.energyCapacity) {
@@ -175,9 +194,10 @@ export function validateFunctionalInstall(
 
   const currentEnergy = computeEnergy(snapshot, registry).energy;
   const replacedEnergy = existing
-    ? starTierEnergy(
+    ? installEnergyOf(
         registry.functionals.get(existing.defId)?.energy ?? 0,
-        existing.star ?? 1,
+        existing.star,
+        existing.quality,
       )
     : 0;
 
@@ -185,7 +205,7 @@ export function validateFunctionalInstall(
   const nextEnergy = energyAfterReplace(
     currentEnergy,
     replacedEnergy,
-    starTierEnergy(def.energy, install.star ?? 1),
+    installEnergyOf(def.energy, install.star, install.quality),
   );
   if (nextEnergy > body.energyCapacity) {
     return fail(
