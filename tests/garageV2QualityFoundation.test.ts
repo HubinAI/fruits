@@ -188,20 +188,20 @@ describe('GARAGE-V2-FOUNDATION｜B. 只读投影（旧堆叠 → 逐件实例）
     expect(b).toEqual(c);
   });
 
-  it('QV-03 账本消耗后剩余实例 id 不漂移（前 N 件保留语义）', () => {
+  it('QV-03 v1 数量账本升级语义：数量 N ⇒ 前 N 个序号视为已耗（高水位 N），剩余 = 后段 id', () => {
+    // ⚠️ GARAGE-V2-LEDGER-COHERENCE-R1 更新：v1 数量账本（无法得知玩家点名了哪几件）
+    //    升级为「前 N 个序号已耗 + 高水位 N」；v2 起事务记账本记**具体 id**
+    //    （点名非尾号也精确消失，见 garageV2LedgerCoherence.test.ts R1a）。
     const { inv, draft } = setupWorld();
     const before = projectItemInstances(inv, draft);
     const cannonIds = legacyIds(before, 'cannon');
-    // 账本手工记 cannon|1 消耗 2 件 ⇒ 剩 3 件，且剩余 id = 原 id 列表前 3 个
-    const ledger = loadGarageV2Ledger();
     store.setItem(
       LEDGER_KEY,
       JSON.stringify({ __v: 1, version: 1, consumed: { 'cannon|1': 2 }, products: [] }),
     );
-    void ledger;
     const after = projectItemInstances((loadInventoryRaw() as PartInventory), draft);
     const afterIds = legacyIds(after, 'cannon');
-    expect(afterIds).toEqual(cannonIds.slice(0, 3));
+    expect(afterIds).toEqual(cannonIds.slice(2)); // :3、:4、:5 保留（前 2 已耗）
   });
 
   it('QV-04 Body 投影：拥有=1 件白品质且不可消耗（lockedReason=body-not-consumable）', () => {
@@ -250,10 +250,15 @@ describe('GARAGE-V2-FOUNDATION｜C. 品质五合一（同部位同品质可不�
     expect(res.productQuality).toBe('green');
     expect(res.productId).toBe('qv2:cannon:green:1');
     expect(res.consumedInstanceIds).toHaveLength(5);
-    // 账本落盘：consumed 各 +1、products 追加 1 件
+    // 账本落盘（v2 形状：具体实例 id + 高水位）：cannon 1 件、machineGun 4 件；products 追加 1 件
     const ledger = loadGarageV2Ledger();
-    expect(ledger.consumed['cannon|1']).toBe(1);
-    expect(ledger.consumed['machineGun|1']).toBe(1);
+    expect(ledger.consumed['cannon|1']).toEqual({
+      consumedIds: ['q1:cannon:1:1'], highWatermark: 1, synced: true,
+    });
+    expect(ledger.consumed['machineGun|1']?.consumedIds).toEqual(['q1:machineGun:1:1']);
+    expect(ledger.consumed['shotgun|1']?.consumedIds).toEqual(['q1:shotgun:1:1']);
+    expect(ledger.consumed['saw|1']?.consumedIds).toEqual(['q1:saw:1:1']);
+    expect(ledger.consumed['laser|1']?.consumedIds).toEqual(['q1:laser:1:1']);
     expect(ledger.products).toHaveLength(1);
     expect(ledger.products[0]).toEqual({ defId: 'cannon', quality: 'green', seq: 1 });
     // 投影里 cannon 旧件剩 4、出现绿色成品
@@ -413,8 +418,10 @@ describe('GARAGE-V2-FOUNDATION｜D. 装备保护 + 原子性', () => {
     if (!res.ok) return;
     expect(res.equippedUpgraded).toBe(true);
     expect(res.productQuality).toBe('green');
-    // 账本记录 cannon|1 消耗 5
-    expect(loadGarageV2Ledger().consumed['cannon|1']).toBe(5);
+    // 账本记录 cannon|1 消耗 5（具体 5 个实例 id + 高水位 5）
+    const rec = loadGarageV2Ledger().consumed['cannon|1'];
+    expect(rec?.consumedIds).toHaveLength(5);
+    expect(rec?.highWatermark).toBe(5);
   });
 
   it('QV-31 Weapon：装备升星校验失败（装备位非法）→ equip-failed 且零写盘', () => {
@@ -479,12 +486,18 @@ describe('GARAGE-V2-FOUNDATION｜D. 装备保护 + 原子性', () => {
     expect(store.raw(BODIES_KEY)).toBe(before.bodies);
     expect(store.raw(BUILD_KEY)).toBe(before.build);
     expect(store.raw(LEDGER_KEY)).toBe(before.ledger);
-    // 成功用例：只写账本 key，旧三 key 仍逐字节不变
+    /*
+      ⚠️ GARAGE-V2-LEDGER-COHERENCE-R1 升级：成功路径现在会把消耗**同步扣进**
+         ownedParts.v2（双账本消除写桥）⇒ 旧 key 的变化必须**恰好等于消耗 delta**
+         （cannon −1、machineGun −3、shotgun −1），其余档位逐字节不变；
+         bodies / build 在成功路径仍逐字节不变（本例不触发装备升星）。
+    */
     const inv = loadInventoryRaw() as PartInventory;
     addPart(inv, 'machineGun', 1, 3);
     addPart(inv, 'shotgun', 1, 1);
     saveInventory(inv);
     const partsAfterSeed = store.raw(PARTS_KEY); // 这次变化来自测试自己的 saveInventory（合法）
+    const seedParsed = JSON.parse(partsAfterSeed || '{}');
     const instances2 = projectItemInstances(loadInventoryRaw() as PartInventory, draft);
     const good = fuse5(
       legacyIds(instances2, 'cannon')[0],
@@ -492,7 +505,15 @@ describe('GARAGE-V2-FOUNDATION｜D. 装备保护 + 原子性', () => {
       draft,
     );
     expect(good.ok).toBe(true);
-    expect(store.raw(PARTS_KEY)).toBe(partsAfterSeed); // 合成不重写旧库存 key
+    const synced = JSON.parse(store.raw(PARTS_KEY) || '{}');
+    // 精确守恒：每个档位 = 种子值 − 该档消耗 delta；未涉及档位逐字节同值
+    expect(synced.cannon.one).toBe(seedParsed.cannon.one - 1);
+    expect(synced.machineGun.one).toBe(seedParsed.machineGun.one - 3);
+    expect(synced.shotgun.one).toBe(seedParsed.shotgun.one - 1);
+    for (const k of Object.keys(seedParsed)) {
+      if (k === '__v' || k === 'cannon' || k === 'machineGun' || k === 'shotgun') continue;
+      expect(JSON.stringify(synced[k])).toBe(JSON.stringify(seedParsed[k]));
+    }
     expect(store.raw(BODIES_KEY)).toBe(before.bodies);
     expect(store.raw(BUILD_KEY)).toBe(before.build);
     expect(store.raw(LEDGER_KEY)).not.toBeNull();

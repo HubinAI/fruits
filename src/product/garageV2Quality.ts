@@ -23,9 +23,12 @@
 
 import { platform } from '../platform';
 import {
+  consume,
   getCount,
+  saveInventory,
   type PartInventory,
 } from '../core/partInventory';
+import { savePlayerBuild } from '../core/buildPersistence';
 import { OFFICIAL_BODIES, isBodyOwned } from '../core/bodyOwnership';
 import { registry } from '../core/content';
 import { readJsonWithVersion, stampVersion } from '../core/saveVersion';
@@ -142,6 +145,7 @@ export interface ItemInstance {
     | 'equipped'
     | 'body-not-consumable'
     | 'max-quality'
+    | 'legacy-star-locked'
     | null;
 }
 
@@ -170,6 +174,25 @@ export function equippedStackRefs(draft: BuildDraft): ReadonlySet<string> {
   return refs;
 }
 
+/**
+ * 偏差账本的消耗记录键（v2）：
+ *   - `consumedIds`: 具体被消耗的旧堆叠**实例 id** 集合（`q1:<defId>:<star>:<n>`）——
+ *     实例恒等性的真源；领奖/迁移只可能新增**更高序号**的实例，已耗 id 永不复活；
+ *   - `highWatermark`: 每 `(defId|star)` 已分配过的**最大序号**（高水位）——
+ *     保证「消耗后领奖」的新件拿到全新序号，不复用任何已耗 id。
+ */
+export interface ConsumedRecord {
+  readonly consumedIds: readonly string[];
+  readonly highWatermark: number;
+  /**
+   * COH R3：`true` = fuseQualityFive 的写桥已把该 stack 的消耗**同步扣进**
+   * `ownedParts.v2`（raw = 幸存数）⇒ 投影序号空间 = 幸存数 + 已耗数；
+   * `false`（v1 数量升级 / 手工写入）= raw **未**同步（= 原始数）⇒
+   * 空间 = 原始数（已耗 id 只用于跳过）。两种口径都不会复活已耗 id。
+   */
+  readonly synced: boolean;
+}
+
 /** 一件品质合成产物在账本里的记录。 */
 export interface QualityProduct {
   readonly defId: string;
@@ -178,11 +201,15 @@ export interface QualityProduct {
   readonly seq: number;
 }
 
-/** 偏差账本（`garageV2Ledger.v1`）：品质五合一造成的库存偏差。 */
+/** 偏差账本（`garageV2Ledger.v1` v2）：品质五合一造成的库存偏差（实例级）。 */
 export interface GarageV2Ledger {
   readonly version: number;
-  /** 已被品质五合一消耗的旧堆叠件（`<defId>|<star>` → 已消耗件数）。 */
-  readonly consumed: Readonly<Record<string, number>>;
+  /**
+   * 已被品质五合一消耗的旧堆叠件，逐 `(defId|star)` 记录**具体实例 id 列表 + 高水位**。
+   * ⚠️ v1 只记数量（`number`）——读入时自动升级为 v2 形状（数量 → 前 N 个序号 + 高水位 N），
+   *    与旧 v1 账本向后兼容（旧消耗不丢、语义不变）。
+   */
+  readonly consumed: Readonly<Record<string, ConsumedRecord>>;
   /** 品质合成产物（逐件）。 */
   readonly products: readonly QualityProduct[];
 }
@@ -199,11 +226,35 @@ export function loadGarageV2Ledger(): GarageV2Ledger {
     if (!obj || typeof obj !== 'object') return { version: LEDGER_VERSION, consumed: {}, products: [] as QualityProduct[] };
     const consumedRaw = obj['consumed'];
     const productsRaw = obj['products'];
-    const consumed: Record<string, number> = {};
+    const consumed: Record<string, ConsumedRecord> = {};
     if (consumedRaw && typeof consumedRaw === 'object' && !Array.isArray(consumedRaw)) {
       for (const [k, v] of Object.entries(consumedRaw as Record<string, unknown>)) {
+        // v2 形状：{ consumedIds: string[], highWatermark: number }
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          const o = v as Record<string, unknown>;
+          const idsRaw = Array.isArray(o['consumedIds']) ? (o['consumedIds'] as unknown[]) : [];
+          const ids = idsRaw
+            .filter((x): x is string => typeof x === 'string' && x.startsWith('q1:'))
+            .filter((x, i, arr) => arr.indexOf(x) === i);
+          const hw = Math.max(0, Math.floor(Number(o['highWatermark']) || 0));
+          if (ids.length > 0 || hw > 0) {
+            consumed[k] = {
+              consumedIds: ids,
+              highWatermark: Math.max(hw, ids.length),
+              synced: o['synced'] === true,
+            };
+          }
+          continue;
+        }
+        // v1 形状：数量 → 升级为「前 N 个序号已消耗 + 高水位 N」（语义不变）
         const n = Math.max(0, Math.floor(Number(v) || 0));
-        if (n > 0) consumed[k] = n;
+        if (n > 0) {
+          consumed[k] = {
+            consumedIds: Array.from({ length: n }, (_, i) => `q1:${k.replace('|', ':')}:${i + 1}`),
+            highWatermark: n,
+            synced: false,
+          };
+        }
       }
     }
     const products: QualityProduct[] = Array.isArray(productsRaw)
@@ -276,21 +327,38 @@ export function projectItemInstances(
   }
 
   for (const e of entries) {
-    const consumedHere = ledger.consumed[`${e.defId}|${e.star}`] ?? 0;
-    const remaining = Math.max(0, e.count - consumedHere);
-    for (let i = 1; i <= remaining; i++) {
+    const rec = ledger.consumed[`${e.defId}|${e.star}`];
+    const consumedIds = new Set(rec?.consumedIds ?? []);
+    const highWater = rec?.highWatermark ?? 0;
+    // COH 修正（实例恒等性 + 双账本同步后的口径）：
+    //   fuseQualityFive 会把消耗**同步扣进 ownedParts.v2**（write bridge）⇒
+    //   e.count（raw）已经是**有效剩余数**；账本 consumedIds 只承担两件事：
+    //     ① 实例身份：序号空间 = 1..max(count, highWater)，被点名的 id 跳过——
+    //        非尾号消耗 ⇒ 只有被点名的 id 消失；旧 id 永不复活；
+    //     ② 高水位：消耗后再领奖 ⇒ 新件从「未被占用的最小序号」出现（>高水位的空洞跳过）。
+    //   ⚠️ 不做「raw − consumedTotal」的二次扣减（那会双扣）。
+    // 序号空间（COH 定案）：
+    //   - synced（fuse 写桥已扣 raw）：raw=幸存数 ⇒ 原始空间 = 幸存 + 已耗
+    //     （消耗非尾号时尾号仍要出现）；
+    //   - 非 synced（v1 升级/手工）：raw=原始数 ⇒ 空间 = 原始数（已耗 id 只用于跳过）。
+    const total = rec?.synced === true
+      ? Math.max(e.count + consumedIds.size, highWater)
+      : Math.max(e.count, highWater);
+    for (let i = 1; i <= total; i++) {
+      const id = `q1:${e.defId}:${e.star}:${i}`;
+      if (consumedIds.has(id)) continue;
+      // 旧星级 > 1 ⇒ 显式锁定（COH R4）：旧 ★2..★5 是旧 5合1 的成长结果，
+      // 品质模型尚无对等映射（审计 §G）——不得无声降成与初始白同权，等设计决策。
+      const legacyLocked = e.star > 1;
       out.push({
-        instanceId: `q1:${e.defId}:${e.star}:${i}`,
+        instanceId: id,
         defId: e.defId,
         name: itemDisplayName(e.defId),
         slot: e.slot,
         legacyStar: e.star,
         quality: 'white',
-        // 装备保护是 stack 级（审计 §E.3）：装备引用是 (defId,star) 不是实例 ⇒
-        // 该 stack 的副本可被消耗；实例是否属于「装备中的 stack」由 UI Queue 用
-        // equippedStackRefs() 自行标注（本 Foundation 不在实例上存冗余字段）。
-        consumable: true,
-        lockedReason: null,
+        consumable: !legacyLocked,
+        lockedReason: legacyLocked ? 'legacy-star-locked' : null,
       });
     }
   }
@@ -445,7 +513,7 @@ export function fuseQualityFive(input: QualityFuseInput): QualityFuseResult {
   if (!nextTier) return fail('max-quality', '无下一品质档');
 
   // —— 以下全部在内存副本上操作；任何失败 return 即整体回滚（零写盘）——
-  const nextConsumed: Record<string, number> = { ...ledger.consumed };
+  const nextConsumed: Record<string, ConsumedRecord> = { ...ledger.consumed };
   let nextProducts = [...ledger.products];
   const consumedIds: string[] = [];
 
@@ -456,9 +524,18 @@ export function fuseQualityFive(input: QualityFuseInput): QualityFuseResult {
   for (const inst of all) {
     consumedIds.push(inst.instanceId);
     if (inst.instanceId.startsWith('q1:')) {
-      // 旧堆叠件：账本 consumed 计数 +1（旧 key 不重写）
+      // 旧堆叠件：账本记录**具体实例 id**（COH 实例恒等性）+ 高水位推进（COH R2）
       const key = `${inst.defId}|${inst.legacyStar ?? 1}`;
-      nextConsumed[key] = (nextConsumed[key] ?? 0) + 1;
+      const prev = nextConsumed[key] ?? { consumedIds: [], highWatermark: 0, synced: false };
+      if (prev.consumedIds.includes(inst.instanceId)) {
+        return fail('unknown-instance', `实例已被消耗，不可复用：${inst.instanceId}`);
+      }
+      const ordinal = Number(inst.instanceId.split(':')[3] ?? 0);
+      nextConsumed[key] = {
+        consumedIds: [...prev.consumedIds, inst.instanceId],
+        highWatermark: Math.max(prev.highWatermark, ordinal),
+        synced: true, // 本次事务会把消耗同步扣进旧真源
+      };
     } else {
       // 品质件：从 products 移除该件
       const idx = nextProducts.findIndex(
@@ -476,11 +553,18 @@ export function fuseQualityFive(input: QualityFuseInput): QualityFuseResult {
   nextProducts = [...nextProducts, { defId: main.defId, quality: nextTier, seq: nextSeq }];
 
   // —— 装备引用完整性（只在主件是旧堆叠件且其旧档被合空时可能触发）——
+  // COH R3：equip-failed 不再只是布尔读数 —— Weapon 分支**真实落盘**（savePlayerBuild），
+  // 且**同步扣减旧堆叠真源**（saveInventory 写 ownedParts.v2 的对应档位）——
+  // 否则旧 Garage/旧 fuseStack 仍看到已耗材料（双账本）。
+  // ⚠️ 写桥边界（Queue 必改 3）：扣减发生在「该 stack 被合空/部分消耗」的场景，
+  //    数值 = 账本 v2 形状的消耗数；ownedParts.v2 是唯一旧真源，本写入是**同步**而非覆盖玩家其他档位。
   let equippedUpgraded = false;
+  let inventoryTouched = false;
   if (mainWasLegacy && mainLegacyStar !== null) {
     const invNow = ensureInventoryOf(input.draft);
     const key = `${main.defId}|${mainLegacyStar}`;
-    const consumedTotal = nextConsumed[key] ?? 0;
+    const consumedRec = nextConsumed[key];
+    const consumedTotal = consumedRec?.consumedIds.length ?? 0;
     const stackNow = getCount(invNow, main.defId, mainLegacyStar);
     // 该旧档在「旧堆叠 − 账本已消耗」意义下被合空，且装备正指向该档
     const equippedRefs = equippedStackRefs(input.draft);
@@ -493,7 +577,7 @@ export function fuseQualityFive(input: QualityFuseInput): QualityFuseResult {
         if (nextStar > 5) {
           return fail('equip-failed', `装备升星越界（★${nextStar} > ★5）：旧装备链路不支持，需设计决策`);
         }
-        // 校验「升星后的 Build 仍是合法快照」——复用正式 validate 链（不写盘）
+        // 校验「升星后的 Build 仍是合法快照」——复用正式 validate 链
         const probe: BuildDraft = {
           ...input.draft,
           functionalStars: { ...(input.draft.functionalStars ?? {}), frontMass: nextStar },
@@ -502,6 +586,8 @@ export function fuseQualityFive(input: QualityFuseInput): QualityFuseResult {
         if (!result.valid) {
           return fail('equip-failed', `合成会留下非法装配：${result.errors.join(' / ')}`);
         }
+        // COH R3b：**真实落盘**装备升星（不是布尔读数）——写正式 playerBuild.v1
+        savePlayerBuild(probe);
         equippedUpgraded = true;
       } else if (main.slot === 'movement' || main.slot === 'gadget') {
         // Movement/Gadget 无星级通道（审计 §C）⇒「装备中的最后一件被品质合成消耗」
@@ -515,8 +601,34 @@ export function fuseQualityFive(input: QualityFuseInput): QualityFuseResult {
     }
   }
 
-  // —— 全部校验通过：一次原子保存（只写账本 key；旧 key 永不重写）——
+  // —— 全部校验通过：一次原子保存 ——
+  // ① 账本（本 Queue 自己的 key）
   saveGarageV2Ledger({ version: LEDGER_VERSION, consumed: nextConsumed, products: nextProducts });
+  // ② COH R3 双账本同步：把**本次事务**新消耗的件数同步扣进旧堆叠真源（ownedParts.v2）——
+  //    只减「本次事务点名的 (defId,star)」对应数量（= 本次新加入 consumedIds 的条数），
+  //    其它档位零触碰。守恒：raw − consumedTotal 每次事务恰好 −（本次新耗数），
+  //    effectiveInventory（= raw − consumedTotal）与旧系统读数保持一致。
+  {
+    const invNow = ensureInventoryOf(input.draft);
+    const prevLedger = ledger.consumed;
+    let touched = false;
+    for (const [key, rec] of Object.entries(nextConsumed)) {
+      const [defId, starStr] = key.split('|');
+      const star = Number(starStr);
+      if (!defId || !Number.isFinite(star)) continue;
+      const prevIds = prevLedger[key]?.consumedIds ?? [];
+      const delta = rec.consumedIds.filter((id) => !prevIds.includes(id)).length;
+      if (delta > 0) {
+        consume(invNow, defId, star, delta);
+        touched = true;
+      }
+    }
+    if (touched) {
+      saveInventory(invNow);
+      inventoryTouched = true;
+    }
+  }
+  void inventoryTouched;
 
   return {
     ok: true,
@@ -540,4 +652,49 @@ export function resetGarageV2LedgerForTest(): void {
   } catch {
     // 静默
   }
+}
+
+/* ════════════════ ⑤ 有效库存 / 装备一致性（COH 必改 3） ════════════════ */
+
+/**
+ * **有效库存读数** = 旧堆叠真源 − 账本已消耗（COH R3 的统一口径）。
+ *
+ * 这是「未来 B UI / 合成选择 / 装备校验」应该读取的**唯一**库存口径：
+ *   - 品质五合一成功后，账本消耗**同步扣减**旧堆叠（fuseQualityFive 写桥）⇒
+ *     正常情况下本函数与 `playerInventory` 逐档相等；
+ *   - 若外部路径（旧 Garage 合成 / 领奖 / debug）在账本之后改了旧堆叠，
+ *     本函数按「max(0, raw − consumed)」夹取 —— 账本永不产生负库存；
+ *   - **不写任何存储**（纯读）。
+ */
+export function effectiveInventory(draft: BuildDraft): PartInventory {
+  // COH 定案：fuseQualityFive 的写桥把消耗**同步扣进** ownedParts.v2 ⇒
+  // raw 即有效读数（与旧 Garage/Run 同一口径，双账本问题从根上消除）。
+  // 本函数保留为 B/C UI 的**唯一读入口**（语义 = 正式库存；将来若引入
+  // 「不同步的账本条目」可在此处叠加扣减，调用方零改动）。
+  void loadGarageV2Ledger;
+  return playerInventory(draft);
+}
+
+export type QualityEquipFailure = 'run-not-wired' | 'unknown-instance' | 'invalid-quality';
+
+/**
+ * **品质产物装备尝试**（COH R3d）：显式拒绝并说明原因，**绝不假成功**。
+ *
+ * 7 档品质尚未接正式 Run 战斗（审计 §G：STAR_DAMAGE_MAX_STAR=5 夹取 +
+ * Movement/Gadget/Body 无星级通道）⇒ 品质产物（qv2:*）**不能**写进正式
+ * playerBuild.v1 —— 那会让 Run Snapshot 读到非法/未定义的品质强度。
+ * 等设计决策后再由独立 Queue 打通（届时本函数替换为真实 equip 链）。
+ */
+export function equipQualityProduct(
+  productId: string,
+  _draft: BuildDraft,
+): { ok: true } | { ok: false; reason: QualityEquipFailure; detail: string } {
+  if (!productId.startsWith('qv2:')) {
+    return { ok: false, reason: 'unknown-instance', detail: `非品质产物实例：${productId}` };
+  }
+  return {
+    ok: false,
+    reason: 'run-not-wired',
+    detail: '品质产物尚未接入正式 Run 战斗（7 档强度映射待设计决策），暂不可装备/出战',
+  };
 }

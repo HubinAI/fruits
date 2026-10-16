@@ -822,9 +822,11 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
       */
       'garageV2Quality.ts': [
         '../core/bodyOwnership',
+        // GARAGE-V2-LEDGER-COHERENCE-R1：+3（写桥：双账本消除）
+        '../core/buildPersistence',   // savePlayerBuild —— 装备升星真实落盘（R3b）
         '../core/buildValidator',
         '../core/content',
-        '../core/partInventory',
+        '../core/partInventory',      // consume/saveInventory —— 消耗同步扣进旧真源（R3）
         '../core/saveVersion',
         '../lab/buildEditorModel',
         '../platform',
