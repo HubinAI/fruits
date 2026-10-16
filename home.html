@@ -303,6 +303,50 @@
       .ph-note-bad { color: #ff9c8f; }
 
       /*
+        ══════════════════════════════════════════════════════════════════════════
+        HOME-V2-MINIMAL-R1｜正式首页 = 产品首页（背景 + 中央车 + 主 CTA + 次级改车）。
+        ⚠️ 只新增 `.ph-home-*` 规则 + `.ph-screen` 的层次背景；Garage 视图的
+           `.ph-main-garage` 家族一字未动（其自身背景覆盖 screen 底色）。
+        ⚠️ 契约类（.ph-actions / .ph-btn-start / open-garage / start-run）原样复用。
+        ══════════════════════════════════════════════════════════════════════════
+      */
+      .ph-screen {
+        /* 层次背景：上暗 → 中亮（车区聚光）→ 下收敛（CTA 区沉底） */
+        background:
+          radial-gradient(120% 34% at 50% 34%, rgba(84, 126, 194, 0.20) 0%, rgba(84, 126, 194, 0) 62%),
+          linear-gradient(180deg, #0a0f18 0%, #0e1626 46%, #131f33 100%);
+      }
+      .ph-home-car {
+        flex: 1 1 auto;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 10px;
+        padding-top: 26px;
+      }
+      .ph-home-car .ph-car { transform: scale(1.06); }
+      .ph-home-car-name {
+        font-size: 14px; font-weight: 700; color: #cfe0ff; letter-spacing: 2px;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+      }
+      .ph-home-actions {
+        flex: 0 0 auto;
+        flex-direction: column;
+        gap: 12px;
+        padding: 0 26px 34px;
+      }
+      .ph-home-start {
+        min-height: 62px;
+        font-size: 21px; font-weight: 800; letter-spacing: 6px;
+        border-radius: 16px;
+        box-shadow: 0 10px 26px rgba(232, 169, 44, 0.32);
+      }
+      .ph-home-garage {
+        min-height: 48px;
+        font-size: 15px; font-weight: 700; letter-spacing: 3px;
+        border-radius: 13px;
+        background: rgba(20, 28, 40, 0.82);
+      }
+
+      /*
         PRODUCT-LOOP-R1-B｜领奖提示（玩家从 RUN COMPLETE 的「领取并返回」回到本页时出现）。
         三种形态与 Profile Repository 的真实结果一一对应：
           ok（已获得·入库成功）/ duplicate（本局已领取过）/ fail（校验未通过）。

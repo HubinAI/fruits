@@ -32,7 +32,6 @@ import type { BuildDraft } from '../lab/buildEditorModel';
 import { EMPTY_SLOT } from '../lab/buildEditorModel';
 import type { PartInventory } from '../core/partInventory';
 import {
-  WEAPON_SLOT,
   bodyReading,
   equipBody,
   equipGadget,
@@ -80,7 +79,6 @@ import {
   newRunToken,
   parsePendingClaim,
   rewardChoiceIdsFor,
-  rewardDisplayName,
   type PendingClaim,
   type RewardChoiceSpec,
 } from './runReward';
@@ -1184,250 +1182,71 @@ export function mountProductHome(
   function renderHome(r: LoadoutReading): void {
     renderHeader(HOME_TITLE);
 
-    const car = el('div', 'ph-car-wrap');
+    /*
+      ══════════════════════════════════════════════════════════════════════════
+      HOME-V2-MINIMAL-R1｜正式首页 = 产品首页（不再是大段零件参数清单）。
+      只保留：层次背景 / 中央当前真实战车外观 / 【开始关卡】唯一主 CTA /
+      【调整战车】次级入口。领奖 banner（claimNotice）在 header 里继续可达；
+      「不可冒险」兼容提示（renderCompatNotice）继续如实出现。
+
+      保留的产品契约（一字未动）：
+        - `data-ph-action="open-garage"`（进入 Garage 视图，整页零跳转）；
+        - `data-ph-action="start-run"`（可执行 = `<a href>`，地址由
+          `adventureHrefNow()` 实时产出 ⇒ 与 Garage 换装同源；不可执行 =
+          无 href 的 disabled 按钮 —— 结构上「点了不会创建 Run」）；
+        - 新手初始化 / 领奖（`claimRunReward`，挂载时一次）→ 重读 draft/inv；
+        - 探针读数（`phView` / preview / slots 读数等）不动 Garage 一字。
+      删除的重复读数（同一信息 Garage 里仍可见）：耐久/能量数值行、
+      「已装备部件」`<ul>`、成长行（ph-home-growth）、movement 摘要、
+      底部 4 段说明文字。
+      ══════════════════════════════════════════════════════════════════════════
+    */
+
+    /* ── 中央：当前真实战车外观（正式 preview 管线，零画布） ── */
+    const car = el('div', 'ph-car-wrap ph-home-car');
+    car.dataset['phHomeCar'] = '1';
     car.append(renderPreview(vehiclePreviewLayout(draft)));
-    const spec = el('div', 'ph-spec');
-    spec.append(
-      el('span', 'ph-body', r.bodyName),
-      el('span', 'ph-stat', `耐久 ${r.hp}`),
-      el('span', 'ph-stat', `能量 ${r.energy}/${r.energyCapacity}`),
-    );
-    car.append(spec);
+    // 一行轻量身份（车身名）：不是参数清单，只是让「这台车」可被认出
+    const carName = el('div', 'ph-home-car-name', r.bodyName);
+    carName.dataset['phHomeCarName'] = '1';
+    car.append(carName);
     stage.append(car);
 
-    stage.append(el('h2', 'ph-sec', '已装备部件'));
-    const list = el('ul', 'ph-slots');
-    for (const s of r.slots) {
-      const li = el('li', 'ph-slot');
-      if (s.hardpointId === WEAPON_SLOT) li.classList.add('ph-slot-weapon');
-      li.dataset['phSlot'] = s.hardpointId;
-      li.dataset['phSlotDef'] = s.defId;
-      li.dataset['phSlotStar'] = String(s.star);
-      const cat = s.category === 'weapon' ? '武器' : s.category === 'gadget' ? '辅助' : '';
-      /**
-       * PRODUCT-LOOP-R2-B｜星级**由数据驱动**地画出来（`s.star` 来自 Build 的
-       * `functionalStars`）。⚠️ 刻意**不写** `star === 1 ? '★' : '★★'` 这类按档位分支的
-       * 写法：合成会把装备升到 ★2..★5，任何「只有 1★ / 2★ 两种形态」的硬编码
-       * 从 ★3 起就会静默画错（Queue 必改 4）。
-       */
-      li.append(
-        el('span', 'ph-slot-label', s.label),
-        el('span', 'ph-slot-name', cat ? `${s.name} ★${s.star}（${cat}）` : `${s.name} ★${s.star}`),
-      );
-      if (s.hardpointId === WEAPON_SLOT) li.append(el('span', 'ph-slot-tag', '主武器'));
-      list.append(li);
-    }
-    stage.append(list);
-
-    /**
-     * PRODUCT-LOOP-R2-RECOVERY（必改 5）｜首页的**一行最小成长状态**。
-     *
-     * Queue 原文：首页当前 Weapon 展示区增加一行最小状态（`加农炮 ★ 4/5`；
-     * 达到 5/5 ⇒ `可升星`），并且**不要新增复杂按钮** —— 点了走既有的「调整战车」，
-     * 合成在 Garage 里做。目的：玩家打完一局回首页时第一眼就知道「我现在能升级了」。
-     *
-     * 三条边界：
-     *   - 数字全部来自 `weaponEntries()`（`(defId, star)` 一起定位），**不新造读数**；
-     *   - 空槽 / 查无此 stack ⇒ **不画**这一行（而不是画 `0/5`）；
-     *   - 只画 `<span>`，**零新按钮**、零新跳转 ⇒ 「调整战车」仍是唯一进门方式。
-     */
-    const eq = equippedGrowth(r);
-    if (eq) {
-      const grow = el('div', 'ph-home-growth');
-      grow.dataset['phHomeGrowth'] = eq.defId;
-      grow.dataset['phHomeGrowthStar'] = String(eq.star);
-      grow.dataset['phHomeGrowthStack'] = eq.stackText;
-      grow.dataset['phHomeGrowthReady'] = String(eq.fusable);
-      grow.append(
-        el('span', 'ph-home-growth-name', `${eq.name} ★${eq.star}`),
-        el('span', 'ph-home-growth-value', `${GARAGE_GROWTH_LABEL} ${eq.stackText}`),
-      );
-      if (eq.fusable) grow.append(el('span', 'ph-home-growth-ready', HOME_GROWTH_READY_LABEL));
-      stage.append(grow);
-    }
-
-    /**
-     * PRODUCT-LOOP-R3-MOVEMENT-PRODUCT-LOOP-SURFACE（必改 1 / 验收 1）｜
-     * 首页的**当前轮组**摘要：后轮 / 前轮各一行，显示各自正在使用的 Movement 名称。
-     *
-     * ── 为什么这里必须有（而不是「Garage 有就够了」）─────────────────────────────
-     * Movement 已是**第一等配置维度**：它有自己的永久库存、能在 Garage 独立装备、
-     * 会被写进 persisted BuildDraft、并随 `equipped=` 一起进 Run Runtime。
-     * 但首页的「已装备部件」（上面那个 `r.slots`）只映射 `body.functionalHardpoints`
-     * —— Movement 一条都不在 ⇒ 玩家在首页**看不到**车上装的什么轮子，
-     * 只能进 Garage 才知道。本段只补这一处缺口。
-     *
-     * ── 数据真源（零新造读数）───────────────────────────────────────────────────
-     * 只读 `movementReading(draft, playerInventory(draft))` 的 `slots`
-     * —— 与 Garage 的 `readMovement()` 是**同一个函数、同一份读数**，
-     * 所以「首页显示」与「Garage 显示」结构上不可能分叉（验收 1 + 验收 2）。
-     *
-     * ── 挂点顺序与标签 ─────────────────────────────────────────────────────────
-     * 顺序**现读自正式 BodyDef**（`slots` 已是 `movementHardpoints` 顺序），
-     * 不写死 rear 在前；标签取自 `MOVEMENT_HARDPOINT_LABELS`（与 Garage 同一套词）。
-     *
-     * ── 三个硬边界 ─────────────────────────────────────────────────────────────
-     *   ① 只画 `<span>` / `<li>`，**零新按钮、零新跳转** —— 改配置仍只有「调整战车」一条路；
-     *   ② 不新增第二个 Garage 式的卡阵（Queue：不要重复增加第二套 UI）；
-     *   ③ 与 Weapon 区一样带稳定挂点（`data-ph-home-movement`），供 E2E / 探针定位，
-     *      **不依赖文案匹配**。
-     */
-    const movement = movementReading(draft, playerInventory(draft));
-    if (movement.slots.length > 0) {
-      stage.append(el('h2', 'ph-sec', HOME_MOVEMENT_SECTION_LABEL));
-      const mvList = el('ul', 'ph-slots ph-home-movement');
-      mvList.dataset['phHomeMovement'] = '1';
-      for (const slot of movement.slots) {
-        const li = el('li', 'ph-slot ph-home-movement-slot');
-        li.dataset['phHomeMovementSlot'] = slot.hardpointId;
-        // 「明确卸下」（storedDefId === 'none'）与「缺省轮在跑」（storedDefId === null）
-        // 是**两种不同状态**，读数层已经用 `unmounted` 分开 ⇒ 这里如实画出，不合并。
-        li.dataset['phHomeMovementStored'] = slot.storedDefId === null ? '' : slot.storedDefId;
-        li.dataset['phHomeMovementDef'] = slot.effectiveDefId ?? '';
-        li.dataset['phHomeMovementUnmounted'] = String(slot.unmounted);
-        li.append(
-          el('span', 'ph-slot-label', MOVEMENT_HARDPOINT_LABELS[slot.hardpointId] ?? slot.hardpointId),
-          el(
-            'span',
-            'ph-slot-name',
-            slot.unmounted ? GARAGE_MOVEMENT_OFF_LABEL : slot.name,
-          ),
-        );
-        mvList.append(li);
-      }
-      stage.append(mvList);
-    }
-
-    /**
-     * ⚠️ PRODUCT-LOOP-R4-CONFIGURATION-BATCH-GATE｜**首页不再画「当前车身」独立区块**（回归修复）。
-     *
-     * 本 Batch 曾在首页这里追加过一段 `ph-home-body` 摘要（`<h2>` + 一条 `<ul>`）。它把
-     * 首页 actions 行**整体下推 91px**，于是在**真实的高内容态**下（URL 带 `run=`/`reward=`
-     * ⇒ 头部多一块领奖提示；再叠加「不可冒险」兼容提示）两个主行动按钮
-     * （「调整战车」`open-garage` / 「开始冒险」）被推到舞台 844 之下，而
-     * `documentElement.scrollHeight` 仍等于 844（舞台不可滚）⇒ **按钮既看不见也点不到**。
-     * 实测（E2E 真实鼠标点击 + `elementFromPoint` 取证）：
-     *   基线 `448e929`：`open-garage` box.y = 760（视口 844）⇒ 命中并生效；
-     *   本 Batch：box.y = **851**，`elementFromPoint` 返回 null ⇒ 点击落空。
-     * `product_loop` E2b / `product_fail` A9 两条断言因此红（基线两处全绿）。
-     *
-     * 修法 = **删掉这段冗余摘要**（不是放宽断言、不是改测试）：
-     * 首页 `.ph-spec` 行**本来就已展示**当前车身名 + 耐久 + 能量，「当前车身」独立区块
-     * 是同一份信息的第二处表达 ⇒ 删掉不丢任何读数，且首页高度逐像素回到 R4 之前。
-     * 改配置仍**只有「调整战车」一条路**（下面那个 `toGarage`）。
-     *
-     * ⚠️ Garage 里的 Body 配置区（`renderBodySection`，本 Queue 的正式交付）**原样保留** ——
-     *    它才是「Body 成为一个可配置维度」的入口。
-     */
-
+    /* ── 行动区：主 CTA = 开始关卡；次级 = 调整战车 ── */
     const goGarage = (): void => {
       view = 'garage';
       render();
     };
-    const actions = el('div', 'ph-actions');
-    const toGarage = el('button', 'ph-btn ph-btn-primary', HOME_GARAGE_LABEL);
-    toGarage.type = 'button';
-    toGarage.dataset['phAction'] = 'open-garage';
-    toGarage.addEventListener('click', goGarage);
-    /**
-     * PRODUCT-LOOP-P0-RUN-BUILD-LOADOUT-COMPATIBILITY｜**「开始冒险」守门**（必改 2 / 必改 3）。
-     *
-     * 真人 P0：`equipped = 非 cannon` ⇒「前几日正常 → DAY3 选 heavyShell → `beginBattle`
-     * → `applyRunModifiersToSnapshot()` 找不到 cannon → throw → Run 卡死」。
-     * 根因是「没有开始完整 Run 的资格这一层」——局外已支持 spear / hammer，而已真人验证的
-     * Run Build 内容（heavyShell / twinCannon / fastReload / kineticBurst / tripleLoad）
-     * **全部**围绕 cannon 派生，且 R1-C 只验证了「非 cannon 的第一场 Battle」。
-     *
-     * 三条**不做**（Queue 逐字）：① 不得进入 Run；② **不得偷偷替换成 Cannon**；
-     * ③ 不得创建半残 Run。
-     * ⇒ 因此这里**不是**「把不支持的武器换成 cannon 再放行」，而是**根本不给链接**：
-     *    可执行时是 `<a href>`（地址由 `runReward.buildAdventureHref()` 产出），
-     *    不可执行时是**没有 href 的 disabled 按钮** —— 「点了不会创建 Run」在结构上成立，
-     *    而不是靠事件处理里 return（后者一旦漏掉一处就变成静默放行）。
-     *
-     * ⚠️ PRODUCT-LOOP-R6-RUN-WEAPON-SOURCE-OF-TRUTH：上面的 P0 根因（硬绑 cannon）已从
-     *    **底层**修掉 —— Run 以「玩家装备里装配顺序第一件正式武器」为 base。因此「不可执行」
-     *    这个分支的**触发条件随之收窄**：不再是「不是 cannon」，而是
-     *    「车上没有武器」或「那件武器自己的 behavior Runtime 不存在」（例：`spear`）。
-     *    本段逻辑（`<a href>` ⇄ 无 href 的 disabled 按钮）**一字未改** —— 它本来就是
-     *    「按资格读数决定给不给链接」，与「什么算有资格」是两个问题（后者在
-     *    `runCompatibility.FULL_RUN_SUPPORTED_WEAPON_IDS`）。
-     *
-     * ⚠️ 判据来自 `fullRunCompat(draft)`（真实 `BuildDraft` + 正式内容库分类字段），
-     *    **不是**页面里的字符串比较（必改 1）。
-     * ⚠️ 提示只给 `runCompatibility` 的两句文案 + 既有的「调整战车」入口（同一个 `toGarage`），
-     *    不新增第二个入口、不做弹窗。
-     */
+    const actions = el('div', 'ph-actions ph-home-actions');
+    actions.dataset['phHomeActions'] = '1';
     const compat = fullRunCompat(draft);
     if (compat.ok) {
-      // `开始冒险` 是同产物内的真实相对链接；地址由 `runReward.buildAdventureHref()` 产出
-      // （带本局 token / 奖励 id / **当前这份装备** / 回程地址）—— 「打完一局 → 领奖 → 回首页」
-      // 与「车库换装 → 下一局就用新装备」都靠同一个地址。
-      const start = el('a', 'ph-btn ph-btn-start', HOME_START_LABEL);
+      // `开始冒险` 是同产物内的真实相对链接；地址由 `adventureHrefNow()` 实时产出
+      //（带本局 token / 奖励 id / **当前这份装备** / 回程地址）—— 与 Garage 换装同源。
+      const start = el('a', 'ph-btn ph-btn-start ph-home-start', HOME_START_LABEL);
       start.href = adventureHrefNow();
       start.dataset['phAction'] = 'start-run';
       start.dataset['phRunToken'] = runToken;
-      actions.append(toGarage, start);
+      actions.append(start);
     } else {
-      /**
-       * 不可执行形态：**没有 href** ⇒ 无法导航、无法创建 Run（不是「点了没反应」）。
-       * ⚠️ 保留 `data-ph-action="start-run"` + `data-ph-run-token`：探针与 E2E 用同一个
-       *    选择器就能同时读「可执行」与「不可执行」两种形态，不需要第二套口径。
-       * ⚠️ `disabled` 同时挡住鼠标与键盘激活。
-       */
-      const blocked = el('button', 'ph-btn ph-btn-start ph-btn-blocked', HOME_START_LABEL);
+      // 不可执行形态：**没有 href** ⇒ 无法导航、无法创建 Run（结构上成立）。
+      // 保留 `data-ph-action="start-run"` + 阻断原因读数（探针同一选择器双形态）。
+      const blocked = el('button', 'ph-btn ph-btn-start ph-btn-blocked ph-home-start', HOME_START_LABEL);
       blocked.type = 'button';
       blocked.disabled = true;
       blocked.dataset['phAction'] = 'start-run';
       blocked.dataset['phStartBlocked'] = '1';
       blocked.dataset['phStartBlockedReason'] = compat.reason;
       blocked.dataset['phRunToken'] = runToken;
-      actions.append(toGarage, blocked);
+      actions.append(blocked);
     }
+    const toGarage = el('button', 'ph-btn ph-btn-garage ph-home-garage', HOME_GARAGE_LABEL);
+    toGarage.type = 'button';
+    toGarage.dataset['phAction'] = 'open-garage';
+    toGarage.addEventListener('click', goGarage);
+    actions.append(toGarage);
     if (!compat.ok) stage.append(renderCompatNotice(compat));
     stage.append(actions);
-
-    stage.append(
-      el(
-        'p',
-        'ph-note',
-        '首页显示的主武器 = 下一局战斗里实际使用的装备（同一份正式玩家 Build 存档，随「开始冒险」交给 Run）。',
-      ),
-    );
-    /*
-      PRODUCT-LOOP-R8-EQUIPPED-WEAPON-REWARD-R1｜这一行必须**跟着这台车**走。
-
-      ⚠️ 改前它是写死的「加农炮 ★1 ×1」—— 多武器玩法上线后那就是一句**假陈述**
-         （装备机枪打赢却被告知会拿到炮）。名称现读正式内容库（`rewardDisplayName`），
-         与结算卡上的 `RunRewardChoiceView.name`（Lab 侧 `registry.functionals` 现读）
-         是**同一份**内容真源，不是第二份字面量。
-      ⚠️ 空池（车上没武器 / 那件武器不能跑完整 Run）⇒ 这一行**不承诺任何奖励**：
-         那种车本来就没有出发链接（上面的 `compat.ok === false`），承诺奖励是误导。
-      ⚠️ 它读的 `draft` 与 `adventureHrefNow()` 编进 `equipped` 的**是同一份** ⇒
-         屏幕上的承诺与局内真实武器、与终点真正发的奖励三者同源。
-    */
-    const rewardPoolNow = rewardChoiceIdsFor(draft);
-    const rewardNameNow = rewardPoolNow.length > 0 ? rewardDisplayName(rewardPoolNow[0]!) : null;
-    stage.append(
-      el(
-        'p',
-        'ph-note',
-        rewardNameNow === null
-          ? '完整冒险需要车上装一件能跑完整 Run 的主武器；打完一局（RUN COMPLETE）就能把这件主武器带回家。'
-          : `打完一局（RUN COMPLETE）会获得「${rewardNameNow} ★1 ×1」：卡片上写着当前进度与领取后的进度（例如 4/5 → 5/5）；领回来后在「调整战车」里就能看到并装上。`,
-      ),
-    );
-    stage.append(
-      el('p', 'ph-note', '同一件部件可以累积数量：凑满 5 件后，那张卡会变成「可合成」并出现「合成升星」。'),
-    );
-    stage.append(
-      el(
-        'p',
-        'ph-note',
-        '合成规则：5 件 ★1 → 1 件 ★2。' +
-          '星级越高占的能量越多；★5 是目前的上限，到了就不能再合。',
-      ),
-    );
   }
 
   /**

@@ -194,37 +194,45 @@ function readingEffective(r: MovementReading, hp: string): string | null {
 /* ================================================================== PS-01..03 可见性 */
 
 describe('PS-01..03｜Home / Garage 能明确确认当前 rear / front（验收 1 / 2）', () => {
-  it('PS-01 Home 首页**真的画出了** rear / front 两项 Movement（不是只有 Garage 有）', () => {
+  it('PS-01（HOME-V2-MINIMAL-R1 重订）首页为极简产品页；Movement 确认入口**唯一** = Garage', () => {
     const page = strip(readProduct('homePage.ts'));
     /*
-      ⚠️ 判据必须是「首页**视图**里真的有一段落画 Movement 摘要」，而不是
-         「文件里出现了 `movementReading(` 这个函数名」—— 后者在函数**只被 Garage 调用**
-         时同样会通过（那是本 Queue 之前的状态，也就是这条测试要防的回归）。
+      ══════════════════════════════════════════════════════════════════════════
+      HOME-V2-MINIMAL-R1 契约变更（记录在测试内，非放宽）：
+        首页从「零件参数清单」收敛为**产品首页**（背景 + 中央车 + 主 CTA +
+        次级改车）。原 PS-01 要求「首页真的画出一段 rear/front Movement 摘要」，
+        与本 Queue 明确要求的「不再显示重复的武器/前后轮/能量/明细装备列表」
+        直接冲突 ⇒ 断言按新契约重订，**不删除** Movement 可确认性这条不变量。
 
-      因此分三层钉：
-        ① 挂点：首页摘要带 `data-ph-home-movement*`（E2E / 探针定位用，不靠文案）；
-        ② 数据：摘要里逐 `slot` 遍历 `movementReading(...)` 的结果（不是硬编码两个名字）；
-        ③ 词汇：沿用 Garage 已有的「后轮 / 前轮 / 未装载」，不造第二套说法。
-
-      ① 的判定用「首页专属前缀」`phHomeMovement` 而不是泛化的 `data-ph-home-movement`：
-         后者作为**子串**会被 `phHomeMovement` 包含，看起来一样，但前者语义更窄、
-         不会误命中别的 `data-ph-home-*` 挂点。
+      新契约下 Movement 的可确认性由**唯一入口 Garage** 承载：
+        ① 首页不得再出现 Movement 摘要段（防旧结构回流）；
+        ② Garage 侧必须仍逐 slot 遍历 `movementReading(...)`（读数真源未变）；
+        ③ 词汇仍与 Garage 同源（共享标签表 `MOVEMENT_HARDPOINT_LABELS`），
+           不造第二套「后轮/前轮」说法；
+        ④ 首页 → Garage 的入口（`open-garage`）必须仍在 ——
+           确认路径不该在极简化里被剪断。
+      ══════════════════════════════════════════════════════════════════════════
     */
-    expect(page, '首页必须有一个带 `phHomeMovement` 挂点的 Movement 摘要段').toMatch(
+    // ① 首页不再画 Movement 摘要（旧 `phHomeMovement` 挂点必须结构性退役）
+    expect(page, '首页不得再画 Movement 摘要段（HOME-V2-MINIMAL-R1）').not.toMatch(
       /phHomeMovement/,
     );
-    // ② 摘要段必须是 `movementReading(...)` 的结果被**逐 slot 遍历**画出来
-    expect(page, '首页摘要必须走 movementReading 真源').toMatch(/movementReading\s*\(/);
-    expect(page, '首页摘要必须逐 slot 遍历（不能硬编码两个挂点）').toMatch(
-      /for\s*\(\s*const\s+slot\s+of\s+movement\.slots\s*\)/,
+    // ② Garage 侧读数真源与遍历方式不变
+    expect(page, 'Garage 必须仍走 movementReading 真源').toMatch(/movementReading\s*\(/);
+    expect(page, 'Garage 必须逐 slot 遍历（不能硬编码两个挂点）').toMatch(
+      /for\s*\(\s*const\s+slot\s+of\s+m\.slots\s*\)/,
     );
-    // ③ 词汇与 Garage 同源：两个标签来自**同一个**常量表，不是各写一份
+    // ③ 词汇同源：两个标签来自**同一个**常量表，不是各写一份
     expect(page, '「后轮」必须来自共享标签表').toMatch(/rear:\s*'后轮'/);
     expect(page, '「前轮」必须来自共享标签表').toMatch(/front:\s*'前轮'/);
     expect(
       page,
       'Garage 与首页必须共用 MOVEMENT_HARDPOINT_LABELS（不许各写一份挂点标签）',
     ).not.toMatch(/hardpointId\s*===\s*'rear'\s*\?\s*'后轮'\s*:\s*'前轮'/);
+    // ④ 首页仍必须给出进 Garage 的唯一入口
+    expect(page, '首页必须保留 open-garage 入口（Movement 确认路径不被剪断）').toMatch(
+      /'open-garage'/,
+    );
   });
 
   it('PS-02 缺省轮 / 已装轮组 两种状态下，读数都给出**可读名称**（不是 defId 原样吐出）', () => {
