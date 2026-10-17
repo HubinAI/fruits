@@ -55,6 +55,18 @@ export function loadPlayerBuild(): BuildDraft | null {
       if (!ledgerOwnsProduct(instId)) return null;
     }
   }
+  // QUALITY-MOVEMENT-RUNTIME-EQUIP-R1：movementQualities 与绑定**成对**校验——
+  //   有品质档必须有对应实例绑定（防「只有颜色没有实例」的半绑定状态）；
+  //   绑定指向的实例必须仍被账本持有（qv2 实例被消耗/删除 ⇒ 幽灵穿戴 ⇒ 整份非法）。
+  if (draft.movementQualities) {
+    for (const slot of ['rear', 'front'] as const) {
+      const q = draft.movementQualities[slot];
+      if (!q || q === 'white') continue;
+      const bind = draft.equippedQualityInstances?.[slot];
+      if (!bind) return null; // 品质档无实例绑定 ⇒ 半绑定非法
+      if (!ledgerOwnsProduct(bind)) return null;
+    }
+  }
   // 必须构成合法 Build（未知部件 / 超载 / 无 Weapon → 旧存档非法）
   const snap = buildSnapshotFromDraft(draft, registry, 'customA');
   if (!validateSnapshot(snap, registry).valid) return null;
@@ -136,6 +148,20 @@ function isBuildDraftShape(d: unknown): d is BuildDraft {
       const seg = v.split(':');
       if (seg.length !== 4 || seg[0] !== 'qv2' || !(seg[1]?.length > 0)) return false;
       if (!/^\d+$/.test(seg[3] ?? '')) return false;
+    }
+  }
+  // QUALITY-MOVEMENT-RUNTIME-EQUIP-R1：movementQualities 可选（前后轮显式品质档）。
+  // 形状：{ rear?, front? }，值必须是七档闭集之一。
+  if (o.movementQualities !== undefined) {
+    if (typeof o.movementQualities !== 'object' || o.movementQualities === null) return false;
+    const QUALITY_SET = new Set<string>([
+      'white', 'green', 'blue', 'purple', 'orange', 'red', 'chrome',
+    ]);
+    const mq = o.movementQualities as Record<string, unknown>;
+    for (const k of ['rear', 'front']) {
+      const v = mq[k];
+      if (v === undefined) continue;
+      if (typeof v !== 'string' || !QUALITY_SET.has(v)) return false;
     }
   }
   return true;

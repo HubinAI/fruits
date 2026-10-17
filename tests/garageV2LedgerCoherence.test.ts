@@ -233,7 +233,14 @@ describe('COH-RED｜R3 有效库存与装备一致性', () => {
     expect(persisted.functionalSelections?.frontMass).toBe('cannon');
     expect(persisted.functionalQualities?.frontMass).toBe(res.productQuality);
     expect(persisted.equippedQualityInstances?.frontMass).toBe(res.productId);
-    // ② 非 Weapon：造一件轮组品质产物 → 仍 run-not-wired
+    /*
+      ② 非 Weapon（QUALITY-MOVEMENT-RUNTIME-EQUIP-R1 契约更新）：
+      Movement 已打通（走 rear/front 槽，见 qualityMovementEquipR1.test.ts）；
+      R3d 在此只钉 **Gadget/Body 仍 run-not-wired** —— Body 无数量模型不可投影产物，
+      Gadget 属 B 轮，此处用「movement 产物在 gadget 语义下不可穿」结构性等价：
+      equipQualityProduct 只认 weapon/movement，gadget 产物（thruster）造不出来时
+      用非轮非武器的未知 defId 兜底拒绝。最直接可证：轮组产物现在 ok:true。
+    */
     const invNow = loadInventoryRaw() as PartInventory;
     addPart(invNow, 'smallWheel', 1, 2);
     addPart(invNow, 'largeWheel', 1, 2);
@@ -248,9 +255,9 @@ describe('COH-RED｜R3 有效库存与装备一致性', () => {
         draft,
       });
       if (rm.ok) {
-        const rr = equipQualityProduct(rm.productId, draft);
-        expect(rr.ok).toBe(false);
-        if (!rr.ok) expect(rr.reason).toBe('run-not-wired');
+        // Movement 产物经 rear 槽真实可穿（本轮打通的证据半边）
+        const rr = equipQualityProduct(rm.productId, draft, 'rear');
+        expect(rr.ok, JSON.stringify(rr)).toBe(true);
       }
     }
   });

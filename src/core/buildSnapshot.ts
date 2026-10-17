@@ -17,6 +17,7 @@ import type {
 import {
   applyInstallTier,
   qualityDamageMultiplier,
+  qualityMultiplierOf,
 } from './installQuality';
 
 /**
@@ -187,6 +188,23 @@ function applyMovementOverrides(
   return { ...def, ...overrides };
 }
 
+/**
+ * QUALITY-MOVEMENT-RUNTIME-EQUIP-R1｜Movement 品质层（**单属性：driveTorque**）。
+ *
+ * - 无品质 ⇒ **恒等返回原 def 对象**（零 clone；旧 Build/对手池零漂移的结构性保证）；
+ * - 有品质 ⇒ 只放大 `driveTorque`（驱动扭矩，`planckMovement.ts` 的 Revolute motor
+ *   真实读它：maxTorqueNm = I × driveTorque）；radius/mass/grip/maxRPM/
+ *   cruiseSpeedPxPerStep/energy/collider/几何**逐字不变**——车高/轮径/碰撞形状不动，
+ *   这正是 Queue 优先选扭矩的原因（真实 motor 已有路径 + 不碰几何）。
+ * - 倍率 = `qualityMultiplierOf`（与伤害倍率同一张表的白1.00→彩2.50，round 取整）。
+ */
+function applyMovementTier(def: WheelDef, quality: QualityTierId | undefined): WheelDef {
+  if (!quality) return def;
+  const mult = qualityMultiplierOf(quality);
+  if (mult === 1) return def;
+  return { ...def, driveTorque: Math.round(def.driveTorque * mult) };
+}
+
 /** 展开并解析 Build Snapshot。缺失引用会抛错（调用方应先通过 BuildValidator）。 */
 export function resolveSnapshot(
   snapshot: BuildSnapshot,
@@ -210,7 +228,12 @@ export function resolveSnapshot(
     if (!baseDef) {
       throw new Error(`ResolveSnapshot: unknown movement "${install.defId}"`);
     }
-    return { install, hardpoint, def: applyMovementOverrides(baseDef, install.overrides) };
+    return {
+      install,
+      hardpoint,
+      // QUALITY-MOVEMENT-RUNTIME-EQUIP-R1：品质只抬本槽 driveTorque；无品质恒等原对象
+      def: applyMovementTier(applyMovementOverrides(baseDef, install.overrides), install.quality),
+    };
   });
 
   const functionals: ResolvedFunctional[] = snapshot.functionals.map((install) => {

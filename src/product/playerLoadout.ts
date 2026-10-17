@@ -1236,6 +1236,25 @@ export function equipMovement(
   if (!result.valid) {
     return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
   }
+  /*
+    QUALITY-MOVEMENT-RUNTIME-EQUIP-R1｜切回**旧轮**（含卸下）时清除本槽品质两字段
+    （movementQualities[hardpointId] + equippedQualityInstances[hardpointId]）——
+    往返无陈旧：品质轮换回旧轮后，残留 quality 会继续抬扭矩（幽灵强度），
+    残留绑定会一直被加载校验核对。
+    ⚠️ 只清本槽（rear/front 互不影响）；equipQualityProduct 的品质轮穿戴走
+    自己的入口（不经过本函数），品质→品质替换在那一侧原子完成。
+  */
+  {
+    const slotKey = hardpointId as 'rear' | 'front';
+    const nextMq = { ...(next.movementQualities ?? {}) };
+    const nextMb = { ...(next.equippedQualityInstances ?? {}) };
+    if (nextMq[slotKey] !== undefined) delete nextMq[slotKey];
+    if (nextMb[slotKey] !== undefined) delete nextMb[slotKey];
+    if (Object.keys(nextMq).length > 0) next.movementQualities = nextMq;
+    else delete next.movementQualities;
+    if (Object.keys(nextMb).length > 0) next.equippedQualityInstances = nextMb;
+    else delete next.equippedQualityInstances;
+  }
   persistPlayerBuild(next);
   return { ok: true, draft: next };
 }

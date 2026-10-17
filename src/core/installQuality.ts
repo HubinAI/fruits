@@ -59,6 +59,19 @@ export function qualityDamageMultiplier(q: QualityTierId | undefined): number {
   return QUALITY_DAMAGE_MULT[q] ?? 1;
 }
 
+/**
+ * QUALITY-MOVEMENT-RUNTIME-EQUIP-R1｜品质 → **通用属性倍率**（Movement 扭矩 /
+ * Gadget 冲量共用同一真源）。
+ *
+ * ⚠️ 不是第二套倍率：与 `qualityDamageMultiplier` **同一张表**
+ *    （白1.00→彩2.50，`1 + 0.25 × (n − 1)` 的 n=1..7 自然延拓）。
+ *    命名区分只为调用点语义清晰（damage vs movement/gadget 属性）；
+ *    一致性由测试钉死（同 q 两函数同值）。
+ */
+export function qualityMultiplierOf(q: QualityTierId | undefined): number {
+  return qualityDamageMultiplier(q);
+}
+
 /* ------------------------------------------------- 旧星级口径（自包含副本）
  * ⚠️ 与 buildSnapshot.ts 的 starDamageMultiplier / starTierEnergy 同一规则。
  *    这里自包含是为了依赖方向单向（installQuality → types，绝不 import buildSnapshot；

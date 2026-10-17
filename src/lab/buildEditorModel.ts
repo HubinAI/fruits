@@ -114,6 +114,15 @@ export interface BuildDraft {
    */
   equippedQualityInstances?: Record<string, string>;
   /**
+   * QUALITY-MOVEMENT-RUNTIME-EQUIP-R1｜前后轮的**显式品质档**。
+   *
+   * key = `'rear' | 'front'`（Movement 挂点语义，不是 hardpointId 字符串堆）；
+   * 值 = QualityTierId。缺省 undefined = 无品质（旧 Build/对手池/旧存档零影响）。
+   * white 不写字段；只抬该槽 driveTorque（真实 Revolute motor 路径），
+   * 另一轮位零影响（QM-03/06 钉死）。
+   */
+  movementQualities?: { rear?: QualityTierId; front?: QualityTierId };
+  /**
    * GADGET-SLOT-FOUNDATION-R1｜**独立 Gadget 装配位**（1 × Gadget）。
    *
    * 与 Weapon / Front Movement / Rear Movement **并列**的第 4 个 Build 维度，
@@ -187,6 +196,16 @@ export function buildSnapshotFromDraft(
     hardpointId: m.hardpointId,
     defId: m.defId,
     overrides: { radius: m.radius },
+    // QUALITY-MOVEMENT-RUNTIME-EQUIP-R1：按槽注入显式品质档（white 不写，与 star 同构）；
+    // 只影响本槽 driveTorque，另一轮位零影响。
+    ...(m.hardpointId === 'rear' && draft.movementQualities?.rear &&
+    draft.movementQualities.rear !== 'white'
+      ? { quality: draft.movementQualities.rear }
+      : {}),
+    ...(m.hardpointId === 'front' && draft.movementQualities?.front &&
+    draft.movementQualities.front !== 'white'
+      ? { quality: draft.movementQualities.front }
+      : {}),
   }));
   const validHardpoints = body
     ? new Set(body.functionalHardpoints.map((h) => h.id))

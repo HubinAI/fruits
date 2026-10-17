@@ -174,6 +174,17 @@ export interface MovementInstall {
   defId: string;
   /** 允许覆盖部分定义数值（用于 Lab 轮径/质量测试） */
   overrides?: Partial<WheelDef>;
+  /**
+   * QUALITY-MOVEMENT-RUNTIME-EQUIP-R1｜**显式品质档**（与 FunctionalInstall.quality 同语义）。
+   *
+   * - 缺省 `undefined` = 无品质 ⇒ 该轮 def **恒等返回原对象**（旧 Build/对手池零漂移）；
+   * - 存在时 ⇒ 只放大 `driveTorque`（驱动扭矩，真实 Revolute motor 已有路径——
+   *   `planckMovement.ts` maxTorqueNm = I × driveTorque）；radius/mass/grip/maxRPM/
+   *   cruiseSpeed/几何/碰撞零改动；
+   * - white 不写字段（与 star/functional quality 同构）；
+   * - 倍率表同一真源（installQuality.QUALITY_DAMAGE_MULT → 通用 qualityMultiplier）。
+   */
+  quality?: QualityTierId;
 }
 
 /**

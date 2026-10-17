@@ -670,31 +670,31 @@ export interface QualityEquipOutcome {
 }
 
 /**
- * **Weapon 品质产物真实穿戴**（GARAGE-V2-QUALITY-WEAPON-EQUIP-R1）。
+ * **Weapon / Movement 品质产物真实穿戴**（WEAPON-EQUIP-R1 + MOVEMENT-RUNTIME-EQUIP-R1）。
  *
- * 单问题边界：只打通 **Weapon**（category === 'weapon'）品质产物 → 确认穿戴 →
- * 合法快照 → 真实战斗。Movement / Gadget / Body 产物**仍**显式 `run-not-wired`
- * （绝不拿武器品质伤害倍率冒充别的部位强度）。
+ * 部位覆盖：Weapon（武器槽）+ Movement（前/后轮槽，第三参 `movementSlot` 指定，
+ * 缺省 `'rear'`）。Gadget / Body 产物**仍**显式 `run-not-wired`
+ *（绝不拿武器/轮组倍率冒充别的部位强度）。
  *
  * 事务（全部校验通过才落盘，任一失败**零写盘**）：
  *   1. instanceId 必须是 `qv2:<defId>:<quality>:<seq>` 四段式且**在账本 products 里**
  *      （真实持有判据与加载校验同源：core/qualityLedger）；
- *   2. defId 必须是正式 Weapon（registry category）；
- *   3. 当前 draft 的 Body 必须有 WEAPON_SLOT 挂点；
- *   4. 组装 probe draft：武器槽写 functionalQualities[slot]=quality +
- *      equippedQualityInstances[slot]=instanceId + **清该槽 star**（不双乘），
+ *   2. defId 部位判据（slotKindOf）→ 分派对应槽位事务；
+ *   3. Body 挂点存在性；
+ *   4. probe draft：品质档 + 实例绑定（Movement 无 star 通道；Weapon 清该槽 star），
  *      过正式 validateSnapshot（能量超载 / 非法装配在这里被拒）；
- *   5. `savePlayerBuild` 真实落盘 → 重载后正式 Run 链
- *      （buildSnapshotFromDraft → resolveSnapshot → ContactRouter）真实使用品质倍率。
+ *      Movement 额外校验：**同件实例禁占前后双槽**；
+ *   5. `savePlayerBuild` 真实落盘 → 重载后正式 Run 链真实使用品质倍率
+ *      （Weapon=伤害 / Movement=driveTorque）。
  *
- * ⚠️ 实例绑定（equippedQualityInstances）：同 defId+quality 的两件实例靠 seq 严格区分；
- *    加载时 core 侧真实校验绑定仍被持有（幽灵绑定 ⇒ 整份存档非法）；
- *    已上槽实例经投影 lockedReason='equipped' 不可再被五合一消耗。
- * ⚠️ 换回旧武器走**旧 equipWeapon 入口**（它会清掉品质两字段——往返无陈旧）。
+ * ⚠️ 实例绑定：同 defId+quality 的两件实例靠 seq 严格区分；加载时 core 侧真实校验；
+ *    已上槽实例 lockedReason='equipped' 不可再被五合一消耗。
+ * ⚠️ 换回旧件走旧 equipWeapon / equipMovement 入口（它们清掉本槽品质两字段）。
  */
 export function equipQualityProduct(
   productId: string,
   draft: BuildDraft,
+  movementSlot: 'rear' | 'front' = 'rear',
 ): QualityEquipOutcome {
   // ① 形状 + 账本持有（真实持有判据；不是「字符串像就行」）
   if (!productId.startsWith('qv2:')) {
@@ -718,27 +718,81 @@ export function equipQualityProduct(
     return { ok: false, reason: 'not-owned', detail: `该品质实例不在账本持有记录里（未合成过或已被消耗）：${productId}` };
   }
 
-  // ② 必须是正式 Weapon（Movement/Gadget/Body 显式 run-not-wired，不假成功）
+  // ② 部位闸门：Weapon 走武器槽；Movement 走前后轮槽（本轮打通）；Gadget/Body 仍拒绝
   const kind = slotKindOf(defId);
-  if (kind !== 'weapon') {
+  if (kind === 'gadget' || kind === 'body' || kind === null) {
     return {
       ok: false,
       reason: 'run-not-wired',
-      detail: `品质产物目前只支持 Weapon 穿戴（"${defId}" 是 ${String(kind ?? '未知部位')}）；Movement/Gadget/Body 接入属下一轮`,
+      detail: `品质产物目前只支持 Weapon 与 Movement 穿戴（"${defId}" 是 ${String(kind ?? '未知部位')}）；Gadget/Body 接入属后续轮`,
     };
   }
+  if (kind === 'weapon') {
+    return equipQualityWeaponOnSlot(productId, defId, quality, Number(seqRaw), draft);
+  }
+  // kind === 'movement'
+  return equipQualityMovementOnSlot(productId, defId, quality, Number(seqRaw), draft, movementSlot);
+}
+
+/**
+ * QUALITY-MOVEMENT-RUNTIME-EQUIP-R1｜Movement（前后轮）品质实例穿戴。
+ *
+ * 事务：Body 必须有该 Movement 挂点 → probe draft（该槽写 defId + movementQualities[slot]
+ * + equippedQualityInstances[slot]）→ **同件实例禁占另一槽** → validateSnapshot → 落盘。
+ * ⚠️ Movement 无 star 通道 ⇒ 无 star 清除问题；旧 stack 升星语义不涉及。
+ */
+function equipQualityMovementOnSlot(
+  productId: string,
+  defId: string,
+  quality: QualityTier,
+  _seq: number,
+  draft: BuildDraft,
+  slot: 'rear' | 'front',
+): QualityEquipOutcome {
+  void _seq;
+  const body = registry.bodies.get(draft.bodyDefId);
+  if (!body || !body.movementHardpoints.some((h) => h.id === slot)) {
+    return { ok: false, reason: 'unknown-slot', detail: `车身 "${draft.bodyDefId}" 没有 Movement 挂点 "${slot}"` };
+  }
+  const draftKey = slot === 'rear' ? 'rearWheelDefId' : 'frontWheelDefId';
+  const binds = { ...(draft.equippedQualityInstances ?? {}) };
+  // 同一件实例已占另一槽 ⇒ 拒绝（一件轮组不能同时装前后）
+  const otherSlot = slot === 'rear' ? 'front' : 'rear';
+  if (binds[otherSlot] === productId) {
+    return { ok: false, reason: 'invalid-build', detail: `该品质实例已装备在${otherSlot === 'rear' ? '后' : '前'}轮：一件轮组不能同时占两个轮位` };
+  }
+  binds[slot] = productId;
+  const probe: BuildDraft = {
+    ...draft,
+    [draftKey]: defId,
+    movementQualities: { ...(draft.movementQualities ?? {}), [slot]: quality },
+    equippedQualityInstances: binds,
+  } as BuildDraft;
+  const result = validateSnapshot(buildSnapshotFromDraft(probe, registry), registry);
+  if (!result.valid) {
+    return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
+  }
+  savePlayerBuild(probe);
+  return { ok: true, draft: probe };
+}
+
+/** Weapon 槽穿戴（WEAPON-EQUIP-R1 语义提取为函数，供上面分派）。 */
+function equipQualityWeaponOnSlot(
+  productId: string,
+  defId: string,
+  quality: QualityTier,
+  _seq: number,
+  draft: BuildDraft,
+): QualityEquipOutcome {
+  void _seq;
   const def = registry.functionals.get(defId);
   if (!def || def.category !== 'weapon') {
     return { ok: false, reason: 'not-weapon', detail: `"${defId}" 不是正式武器` };
   }
-
-  // ③ Body 挂点
   const body = registry.bodies.get(draft.bodyDefId);
   if (!body || !body.functionalHardpoints.some((h) => h.id === WEAPON_SLOT)) {
     return { ok: false, reason: 'unknown-slot', detail: `车身 "${draft.bodyDefId}" 没有武器挂点 "${WEAPON_SLOT}"` };
   }
-
-  // ④ probe draft：写品质 + 绑定 + 清该槽 star（不双乘），过正式校验
   const nextStars: Record<string, number> = { ...(draft.functionalStars ?? {}) };
   delete nextStars[WEAPON_SLOT];
   const nextQualities: Record<string, QualityTier> = {
@@ -761,8 +815,6 @@ export function equipQualityProduct(
   if (!result.valid) {
     return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
   }
-
-  // ⑤ 真实落盘（不是布尔冒充）
   savePlayerBuild(probe);
   return { ok: true, draft: probe };
 }

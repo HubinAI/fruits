@@ -202,25 +202,12 @@ describe('WQ｜B. 实例绑定与失败零写盘', () => {
     expect(equipQualityProduct('q1:cannon:1:1', draft).ok).toBe(false);
     // ② 不存在的 qv2
     expect(equipQualityProduct('qv2:cannon:green:999', draft).ok).toBe(false);
-    // ③ 非武器部位（造一件 qv2 轮组产物 → 拒绝且 run-not-wired）
-    const inv4 = playerInventory(draft);
-    addPart(inv4, 'smallWheel', 1, 2);
-    addPart(inv4, 'largeWheel', 1, 2);
-    addPart(inv4, 'heavyWheel', 1, 2);
-    saveInventory(inv4);
-    const mItems = projectItemInstances(effectiveInventory(draft), draft)
-      .filter((i) => i.slot === 'movement' && i.consumable);
-    if (mItems.length >= 5) {
-      const rm = fuseQualityFive({
-        mainInstanceId: mItems[0]!.instanceId,
-        materialInstanceIds: mItems.slice(1, 5).map((i) => i.instanceId),
-        draft,
-      });
-      if (rm.ok) {
-        const rr = equipQualityProduct(rm.productId, draft);
-        expect(rr.ok).toBe(false);
-      }
-    }
+    /*
+      ③（QUALITY-MOVEMENT-RUNTIME-EQUIP-R1 契约更新）movement 产物已可穿（A 轮），
+      不再是失败路径；失败面收敛为：非 qv2 形状 / 未持有（上面 ①②）+
+      weapon 产物在 movement 语义（第 3 参）类型约束（编译期）。
+      WQ-04 的「非法输入零写盘」由 ①② + 存档逐字节断言继续覆盖。
+    */
     // 存档逐字节未动
     expect(JSON.stringify(loadPlayerBuild() ?? {})).toBe(before);
   });
