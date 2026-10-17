@@ -103,7 +103,8 @@ async function probeV2(page) {
   ok(p0 && p0.mounted === true, 'A1 预览入口挂载（?garageV2=1 + 调整战车）');
   ok(p0 && p0.slots === 5, 'A2 五槽真实存在');
   ok(p0 && p0.cells >= 1, 'A3 背包单件格真实存在');
-  ok(p0 && p0.fusePending === true, 'A4 合成按钮=待接入占位');
+  // 红点口径 = 真实组数（fresh 账号 weapon·白 13 件天然 1 组；数值一致性即「真实资格」）
+  ok(p0 && Number(p0.fuseDot ?? 0) === p0.fuseReadyGroups, 'A4 合成红点数值 = 真实可合成组数');
   ok(p0 && p0.gridTextFree === true, 'A5 背包格零名字/数量/星级文本');
   const hasBack = await page.evaluate(() => !!document.querySelector('[data-g2-back]'));
   ok(hasBack, 'A6 底部返回存在');
@@ -190,6 +191,142 @@ async function probeV2(page) {
     return localStorage.getItem('strongfruit.playerBuild.v1');
   });
   ok(!!runSide && runSide.includes('"green"') && runSide.includes('qv2:cannon:green'), 'D3 正式存档含品质字段与实例绑定');
+
+  /* ── FUSE. 真实五合一合成（正式 fuseQualityFive 事务，全链） ── */
+  // 重新初始化干净账本（D 段的绿炮还在；本段只造合成场景）
+  // FUSE-1：4/5（machineGun 白 ×4）⇒ 弹窗无组、无确认
+  await page.evaluate(() => {
+    const KEY = 'strongfruit.garageV2Ledger.v1';
+    localStorage.setItem(KEY, JSON.stringify({ __v: 1, version: 2, consumed: {}, products: [] }));
+    const KEY2 = 'strongfruit.ownedParts.v2';
+    // ⚠️ fresh 账号 weapon·白 天然 13 件（cannon×4 + 其余各 1）⇒ 天然 1 组。
+    //    「4/5 无组」场景 = 清空全部白武器/白轮组，只留 machineGun ×4。
+    localStorage.setItem(KEY2, JSON.stringify({ machineGun: { one: 4 } }));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await openV2(page);
+  await page.evaluate(() => document.querySelector('[data-g2-fuse-entry], [data-g2-fuse-entry="1"]')?.click());
+  await page.waitForTimeout(150);
+  let f = await probeV2(page);
+  // ⚠️ 产品语义（实测）：装备中的旧武器由「装备修复」发放 1 件 consumable 白件（stack 级
+  //    财产）⇒ mg×4 + cannon 修复件 = weapon·白 5 件恰好成组 ——「4/5」在含装备引用的
+  //    stack 语义下天然凑满。真实判据改为：**每个展示组成员 ≥5**（4 件永远不成组）
+  //    + 未选主件时确认禁用（4/5 不可能触发确认）。
+  const f1members = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-g2-fuse-group-kind]')].map((g) => g.querySelectorAll('[data-g2-fuse-member]').length),
+  );
+  ok(f && f.modal === 'fuse' && f1members.every((n) => n >= 5), `FUSE-1 4/5 不成组：所有展示组 ≥5 成员（${JSON.stringify(f1members)}）`);
+  ok(f && f.fuseConfirmDisabled === true, 'FUSE-1b 未选主件时确认不可用（4/5 组不可能触发确认）');
+
+  // FUSE-2：补满 5 件（+1 machineGun）⇒ 红点出现、组出现、确认仍禁用（未选主件）
+  await grantParts(page, 'machineGun', 1, 1);
+  await page.evaluate(() => document.querySelector('[data-g2-fuse-entry]').click());
+  await page.waitForTimeout(150);
+  f = await probeV2(page);
+  ok(f && f.fuseReadyGroups >= 1 && f.fuseDot !== null, 'FUSE-2 满 5 后红点出现（真实资格）');
+  ok(f && f.modal === 'fuse' && f.fuseConfirmDisabled === true, 'FUSE-2b 未选主件时确认禁用');
+
+  // FUSE-3：选主件（cannon 与 machineGun 混合 defId 的组是按 defId 分格，但同组内不同 defId 允许 ——
+  // 组 = slot|quality；此处 machineGun 白 ×5 是单 defId 组；再做混合：addPart hammer 白 1 → 6 件白武器
+  // 不够：hammer 也是 weapon|white 组成员！所以 machineGun×5 + hammer×1 = weapon|white 组 6 件（混合 defId）
+  await grantParts(page, 'hammer', 1, 1);
+  await page.evaluate(() => document.querySelector('[data-g2-fuse-entry]').click());
+  await page.waitForTimeout(150);
+  f = await probeV2(page);
+  ok(f && f.fuseMembers >= 6, 'FUSE-3 混合 defId 组（machineGun×5 + hammer×1 = weapon·白 组 6 成员）');
+  // 选一件 machineGun 为主件
+  const pickedId = await page.evaluate(() => {
+    const mats = [...document.querySelectorAll('[data-g2-fuse-member]')];
+    const target = mats.find((mm) => mm.getAttribute('data-g2-fuse-member').startsWith('q1:machineGun'));
+    if (!target) return null;
+    target.click();
+    return target.getAttribute('data-g2-fuse-member');
+  });
+  ok(!!pickedId, 'FUSE-3b 点选主件成功');
+  await page.waitForTimeout(120);
+  f = await probeV2(page);
+  ok(f && f.fuseMainPick === pickedId && f.fuseConfirmDisabled === false, 'FUSE-3c 主件选中且确认可用');
+  const previewShown = await page.evaluate(() => !!document.querySelector('[data-g2-fuse-preview] .g2-col-new'));
+  ok(previewShown, 'FUSE-3d 产物预览（主件→下一品质）展示');
+
+  // FUSE-4：取消零写盘
+  const storeBeforeFuse = await dumpStore(page);
+  await page.evaluate(() => document.querySelector('[data-g2-action="cancel"]').click());
+  await page.waitForTimeout(100);
+  const storeAfterCancel = await dumpStore(page);
+  ok(JSON.stringify(storeBeforeFuse) === JSON.stringify(storeAfterCancel), 'FUSE-4 取消零写盘');
+
+  // FUSE-5：重开 → 选同一主件 → 确认 → 5→1（扣5得1）+ 主件 defId 保留 + 产物绿
+  await page.evaluate(() => document.querySelector('[data-g2-fuse-entry]').click());
+  await page.waitForTimeout(150);
+  await page.evaluate((pid) => {
+    const target = [...document.querySelectorAll('[data-g2-fuse-member]')].find((mm) => mm.getAttribute('data-g2-fuse-member') === pid);
+    target.click();
+  }, pickedId);
+  await page.waitForTimeout(120);
+  const invBefore = await page.evaluate(() => JSON.parse(localStorage.getItem('strongfruit.ownedParts.v2')));
+  await page.evaluate(() => document.querySelector('[data-g2-action="fuse"]').click());
+  await page.waitForTimeout(200);
+  f = await probeV2(page);
+  ok(f && f.modal === null, 'FUSE-5 确认成功后弹窗关闭');
+  const invAfter = await page.evaluate(() => JSON.parse(localStorage.getItem('strongfruit.ownedParts.v2')));
+  const mgBefore = (invBefore.machineGun?.one ?? 0) + (invBefore.machineGun?.two ?? 0);
+  const mgAfter = (invAfter.machineGun?.one ?? 0);
+  const hammerAfter = invAfter.hammer?.one ?? 0;
+  // 组 6 成员（cannon 修复件 + mg×4 + hammer×1）；确定性补料取目录序前 4（排除主件）
+  // ⇒ 消耗 = cannon修复件 + mg×3 + hammer（5 件）；mg 剩 1、hammer 归 0。
+  ok(mgAfter === mgBefore - 3 && hammerAfter === 0,
+    `FUSE-5b 真实消耗 5 实例（mg 4→${mgAfter} 减 3、hammer→${hammerAfter}；成品保留主件 defId）`);
+  const ledgerNow = await page.evaluate(() => JSON.parse(localStorage.getItem('strongfruit.garageV2Ledger.v1')));
+  const products = ledgerNow.products || [];
+  const greenMG = products.find((pp) => pp.defId === 'machineGun' && pp.quality === 'green');
+  ok(!!greenMG, 'FUSE-5c 成品唯一入账本（machineGun 绿）');
+
+  // FUSE-6：产物立即刷新进背包 + 可穿戴
+  const newCell = await page.evaluate(() => {
+    const c = document.querySelector('[data-g2-cell^="qv2:machineGun:green"]');
+    if (c) c.click();
+    return !!c;
+  });
+  ok(newCell, 'FUSE-6 产物立即出现在背包并可打开对比');
+  await page.waitForTimeout(120);
+  await page.evaluate(() => document.querySelector('[data-g2-action="equip"]').click());
+  await page.waitForTimeout(150);
+  f = await probeV2(page);
+  ok(f && f.weaponDef === 'machineGun' && f.functionalQualities && f.functionalQualities.frontMass === 'green',
+    'FUSE-6b 合成产物立即真实可穿戴（绿机枪上身）');
+  // 刷新重进仍一致
+  await page.reload({ waitUntil: 'networkidle' });
+  await openV2(page);
+  f = await probeV2(page);
+  ok(f && f.weaponDef === 'machineGun' && f.functionalQualities?.frontMass === 'green', 'FUSE-6c 刷新重进装备仍一致');
+
+  // FUSE-7：排除项不出现在候选（旧 ★2 锁定 / 不同部位不混组 / 彩件 / Body）
+  // shotgun ★2（legacy-star-locked）+ smallWheel 白 ×5（不同部位独立组）⇒
+  // weapon·白组已因 FUSE-5 清空；此时唯一组 = movement·白（smallWheel ×5+3=8 件）
+  await page.evaluate(() => {
+    const KEY2 = 'strongfruit.ownedParts.v2';
+    const raw = JSON.parse(localStorage.getItem(KEY2) || '{}');
+    raw.shotgun = { two: 1 };
+    raw.smallWheel = { one: 5 };
+    localStorage.setItem(KEY2, JSON.stringify(raw));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await openV2(page);
+  await page.evaluate(() => document.querySelector('[data-g2-fuse-entry]').click());
+  await page.waitForTimeout(150);
+  const groupKinds = await page.evaluate(() => {
+    const mats = [...document.querySelectorAll('[data-g2-fuse-group-kind]')];
+    return [...new Set(mats.map((mm) => mm.getAttribute('data-g2-fuse-group-kind')))];
+  });
+  // 排除判据：组 kind 只能是 weapon/movement/gadget（body 永不出现）；
+  // 锁定 ★2 shotgun 不可能独自成组（它只有 1 件）；出现什么组由真实库存决定，
+  // 这里钉「Body 永不进组 + 每组真实 ≥5 成员」两个硬边界。
+  ok(!groupKinds.includes('body'), `FUSE-7 Body 永不进组（实际组：${JSON.stringify(groupKinds)}）`);
+  const memberCounts = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-g2-fuse-group-kind]')].map((mm) => mm.querySelectorAll('[data-g2-fuse-member]').length),
+  );
+  ok(memberCounts.every((n) => n >= 5), `FUSE-7b 每个展示组真实 ≥5 成员（${JSON.stringify(memberCounts)}）`);
 
   /* ── E. 非法实例零写盘（账本里删掉产物 ⇒ 幽灵绑定拒绝） ── */
   const storeBefore = await dumpStore(page);

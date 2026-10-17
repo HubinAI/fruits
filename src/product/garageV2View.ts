@@ -19,11 +19,16 @@ import {
   QUALITY_LABELS,
   effectiveInventory,
   equipQualityProduct,
+  fuseQualityFive,
+  isMaxQuality,
+  nextQuality,
   projectItemInstances,
   type ItemInstance,
   type ItemSlotKind,
+  type QualityFuseResult,
   type QualityTier,
 } from './garageV2Quality';
+import { registry } from '../core/content';
 import {
   equipBody,
   equipGadget,
@@ -81,6 +86,12 @@ type G2Modal =
       /** movement 弹窗初始化标记：pick 只在打开时从入口槽初始化一次（rerender 保持用户选择）。 */
       targetInit?: boolean;
     }
+  /** GARAGE-V2-FORMAL-FUSE-SLICE-R1：真实五合一合成弹窗（正式 fuseQualityFive 事务）。 */
+  | {
+      kind: 'fuse';
+      /** 上一次合成失败的如实回显（不吞错；成功后弹窗关闭）。 */
+      toast?: string;
+    }
   | null;
 
 let draft: BuildDraft;
@@ -88,6 +99,8 @@ let modal: G2Modal = null;
 let root: HTMLElement;
 /** movement 对比弹窗的当前目标槽（模块级：rerender 重建弹窗后仍保持用户选择）。 */
 let movementTargetPick: 'front' | 'rear' = 'rear';
+/** 合成弹窗当前选中的主件实例 id（模块级：rerender 重建弹窗后仍保持用户选择）。 */
+let fuseMainPick: string | null = null;
 let onClose: () => void = () => {}; // 底部【返回】动作（由 homePage 注入：回正式首页视图）
 
 /* ────────────────────────── 数据读数（全走正式契约） ────────────────────────── */
@@ -255,15 +268,22 @@ function buildBag(): HTMLElement {
   const head = elDiv('g2-bag-head');
   head.dataset['g2BagHead'] = '1';
   head.append(elDiv('g2-bag-title', '背包'));
-  // 合成按钮：本切片 = 「待接入」占位（真实 fuseQualityFive 接入属下一条 Queue；
-  // 按钮真实存在、可点、弹窗如实说明 —— 不冒充合成能力，也绝不写库存）。
-  const btn = el('button', 'g2-fuse-btn g2-fuse-btn-pending');
+  // 合成按钮（GARAGE-V2-FORMAL-FUSE-SLICE-R1）：真实资格红点 ——
+  // 只有「当前存在满足同部位+同品质≥5 的可合成组」才亮红点数量；无组 = 素色可点（弹窗给空说明）。
+  const groups = fuseCandidateGroups();
+  const btn = el('button', 'g2-fuse-btn' + (groups.length > 0 ? ' g2-fuse-btn-ready' : ''));
   btn.type = 'button';
   btn.dataset['g2FuseEntry'] = '1';
-  btn.dataset['g2FusePending'] = '1';
+  btn.dataset['g2FuseReady'] = String(groups.length);
   btn.append(document.createTextNode('合成'));
+  if (groups.length > 0) {
+    const dot = elDiv('g2-fuse-dot', String(groups.length));
+    dot.dataset['g2FuseDot'] = '1';
+    btn.append(dot);
+  }
   btn.addEventListener('click', () => {
-    modal = { kind: 'compare', slotKey: '__fuse__', slotKind: 'weapon', candidate: instances()[0]!, toast: '合成功能待接入：本预览分支暂不开放（下一条 Queue 接 fuseQualityFive）' };
+    modal = { kind: 'fuse' };
+    fuseMainPick = null; // 每次打开弹窗重置主件选择（选择不跨打开保留）
     rerender();
   });
   head.append(btn);
@@ -322,8 +342,8 @@ function buildModal(m: NonNullable<G2Modal>): HTMLElement {
   const mask = elDiv('g2-mask');
   mask.dataset['g2Mask'] = '1';
   const card = elDiv('g2-modal');
-  card.dataset['g2Modal'] = m.slotKey === '__fuse__' ? 'fuse-pending' : 'compare';
-  card.append(...compareModal(m));
+  card.dataset['g2Modal'] = m.kind;
+  card.append(...(m.kind === 'fuse' ? fuseModal(m) : compareModal(m)));
   mask.append(card);
   mask.addEventListener('click', (e) => {
     if (e.target === mask) {
@@ -335,9 +355,8 @@ function buildModal(m: NonNullable<G2Modal>): HTMLElement {
 }
 
 /** 「当前装备 / 新件」图形对比 + 真实装备事务（【取消】零写盘）。 */
-function compareModal(m: NonNullable<G2Modal>): HTMLElement[] {
-  const isFusePending = m.slotKey === '__fuse__';
-  const cur = isFusePending ? null : equippedOf(m.slotKey, m.slotKind);
+function compareModal(m: NonNullable<G2Modal> & { kind: 'compare' }): HTMLElement[] {
+  const cur = equippedOf(m.slotKey, m.slotKind);
   const curDefId = cur?.defId ?? null;
   const title = elDiv('g2-modal-title', modalTitleOf(m));
   title.dataset['g2ModalTitle'] = '1';
@@ -374,9 +393,7 @@ function compareModal(m: NonNullable<G2Modal>): HTMLElement[] {
 
   const warn = elDiv('g2-warn');
   warn.dataset['g2Warn'] = '1';
-  if (isFusePending) {
-    warn.textContent = m.toast ?? '合成功能待接入。';
-  } else if (m.toast) {
+  if (m.toast) {
     warn.textContent = m.toast; // 上一次装备失败的如实回显
   } else if (m.candidate.lockedReason === 'legacy-star-locked') {
     warn.textContent = `旧 ★${m.candidate.legacyStar} 成长件：保留历史成长，可正常装备；仅禁止作为 V2 合成材料。`;
@@ -395,7 +412,7 @@ function compareModal(m: NonNullable<G2Modal>): HTMLElement[] {
     rerender();
   });
 
-  if (!isFusePending) {
+  {
     // movement：目标切换（装到后轮 / 装到前轮）+ 取消 + 装备，同一行
     if (movementTarget) {
       for (const t of ['rear', 'front'] as const) {
@@ -432,12 +449,183 @@ function compareModal(m: NonNullable<G2Modal>): HTMLElement[] {
   return [title, compare, warn, actions];
 }
 
-function modalTitleOf(m: NonNullable<G2Modal>): string {
-  if (m.slotKey === '__fuse__') return '合成';
+function modalTitleOf(m: NonNullable<G2Modal> & { kind: 'compare' }): string {
   if (m.slotKind === 'body') return '车身';
   if (m.slotKind === 'weapon') return '武器';
   if (m.slotKind === 'gadget') return '辅助';
   return m.slotKey === 'front' ? '前轮' : '后轮';
+}
+
+/* ───────────── GARAGE-V2-FORMAL-FUSE-SLICE-R1｜真实五合一合成（正式 fuseQualityFive） ───────────── */
+
+interface FuseGroup {
+  kind: ItemSlotKind;
+  quality: QualityTier;
+  /** 互异实例（全部列出；确认时 = 主件 + 其余 4）。 */
+  members: readonly ItemInstance[];
+}
+
+/**
+ * 「当前满足同部位+同品质 ≥5」的**真实可合成组**（纯读数，不写任何东西）。
+ *
+ * 排除（Queue 必改 1 逐条）：
+ *   - Body（无数量模型，结构性不可消耗）；
+ *   - 非 consumable（旧 ★2..5 legacy-star-locked / 已装备 equipped 保护 / 封顶）；
+ *   - 彩品质封顶（isMaxQuality，无可再升的品质）；
+ *   - **非推进类 Gadget**（pushRod 等）：它们没有品质实效通道 ⇒ 不能作主件、
+ *     不能产出「伪可穿戴」产物 —— 整组排除（普通件照常在背包显示，只是不能合成）。
+ *     推进类判据 = `registry.functionals.get(defId).behavior === 'thruster'`（与
+ *     equipQualityProduct 的 gadget 分支同一真源）。
+ */
+function fuseCandidateGroups(): readonly FuseGroup[] {
+  const byKey = new Map<string, ItemInstance[]>();
+  for (const inst of instances()) {
+    if (inst.slot === 'body') continue;
+    if (!inst.consumable) continue; // 锁定（旧 ★2..5 / 装备中 stack）与封顶（max-quality）
+    if (isMaxQuality(inst.quality)) continue;
+    if (inst.slot === 'gadget') {
+      const def = registry.functionals.get(inst.defId);
+      if (!def || def.behavior !== 'thruster') continue; // 非推进类 = 不可品质合成
+    }
+    const key = `${inst.slot}|${inst.quality}`;
+    const arr = byKey.get(key) ?? [];
+    arr.push(inst);
+    byKey.set(key, arr);
+  }
+  const out: FuseGroup[] = [];
+  for (const [key, arr] of byKey) {
+    if (arr.length < 5) continue; // ≥5 个互异实例才有资格
+    const [kind, quality] = key.split('|') as [ItemSlotKind, QualityTier];
+    out.push({ kind, quality, members: arr });
+  }
+  return out;
+}
+
+/** 组标题字（部位+品质；不是名字、不是数量堆叠）。 */
+function fuseGroupLabel(g: FuseGroup): string {
+  return `${g.kind === 'weapon' ? '武器' : g.kind === 'gadget' ? '辅助' : '轮组'} · ${QUALITY_LABELS[g.quality]}`;
+}
+
+/**
+ * 合成弹窗：只列真实可合成组 → 点一件为主件（产物保留该 defId）→ 系统确定性补
+ * 同组其余 4 件 → 预览主件 → 下一品质（外形+颜色）→ 唯一【确认合成】调
+ * `fuseQualityFive` 一次。失败如实回显（零写盘由事务保证）；成功重读正式存档 +
+ * 刷新红点/候选；取消/关闭零写盘。**无星级栏 / 常驻材料空槽 / 名字 / 数量。**
+ */
+function fuseModal(m: NonNullable<G2Modal> & { kind: 'fuse' }): HTMLElement[] {
+  const groups = fuseCandidateGroups();
+  const title = elDiv('g2-modal-title', '合成（同部位 + 同品质 ×5 → 主件下一品质）');
+  title.dataset['g2ModalTitle'] = '1';
+
+  const wrap = elDiv('g2-bag-wrap');
+  wrap.dataset['g2FuseGroups'] = '1';
+  if (groups.length === 0) {
+    // 无可合成组：只展示空说明，确认不可用（不造假）
+    const empty = elDiv('g2-col-note', '当前没有满足「同部位+同品质 ≥5」的组（Body/旧星级锁定/彩件/非推进辅助不计）。');
+    empty.dataset['g2FuseEmpty'] = '1';
+    wrap.append(empty);
+  }
+  for (const g of groups) {
+    const headRow = elDiv('g2-bag-head');
+    headRow.dataset['g2FuseGroup'] = fuseGroupLabel(g);
+    headRow.append(elDiv('g2-bag-title', fuseGroupLabel(g)));
+    wrap.append(headRow);
+    const mats = elDiv('g2-mats');
+    mats.dataset['g2FuseGroupKind'] = g.kind;
+    mats.dataset['g2FuseGroupQ'] = g.quality;
+    for (const mem of g.members) {
+      const isMain = fuseMainPick === mem.instanceId;
+      const mat = el('button', 'g2-mat' + (isMain ? ' g2-mat-main' : ''));
+      mat.type = 'button';
+      mat.style.setProperty('--q', qualityHex(g.quality));
+      mat.dataset['g2FuseMember'] = mem.instanceId;
+      mat.dataset['g2FuseMain'] = String(isMain);
+      mat.append(partIconNode(iconKindOf(g.kind), mem.defId));
+      mat.addEventListener('click', () => {
+        fuseMainPick = isMain ? null : mem.instanceId; // 再点取消
+        rerender();
+      });
+      mats.append(mat);
+    }
+    wrap.append(mats);
+  }
+
+  // 产物预览（选了主件才有）：主件外形 → 下一品质（颜色 + 同 defId 外形）
+  const previewWrap = elDiv('g2-bag-wrap');
+  previewWrap.dataset['g2FusePreview'] = '1';
+  const pickedGroup = fuseMainPick
+    ? groups.find((g) => g.members.some((mm) => mm.instanceId === fuseMainPick)) ?? null
+    : null;
+  const pickedMain = pickedGroup && fuseMainPick
+    ? pickedGroup.members.find((mm) => mm.instanceId === fuseMainPick) ?? null
+    : null;
+  if (pickedGroup && pickedMain) {
+    const next = nextQuality(pickedGroup.quality);
+    if (next) {
+      const prev = elDiv('g2-compare');
+      const colA = elDiv('g2-col');
+      colA.append(elDiv('g2-col-tag', '主件（保留外形）'));
+      colA.append(partIconNode(iconKindOf(pickedGroup.kind), pickedMain.defId));
+      colA.append(elDiv('g2-col-q', `${QUALITY_LABELS[pickedGroup.quality]}品质`));
+      const colB = elDiv('g2-col g2-col-new');
+      colB.dataset['q'] = next;
+      colB.append(elDiv('g2-col-tag', '将得到'));
+      colB.append(partIconNode(iconKindOf(pickedGroup.kind), pickedMain.defId));
+      colB.append(elDiv('g2-col-q', `${QUALITY_LABELS[next]}品质`));
+      prev.append(colA, colB);
+      previewWrap.append(prev);
+    }
+  }
+
+  const warn = elDiv('g2-warn');
+  warn.dataset['g2Warn'] = '1';
+  warn.textContent = m.toast ?? (pickedMain ? '确认后消耗主件+4 件同组材料，产出一件事下一品质成品（可继续穿戴）。' : '点组内一件选为主件（成品保留它的外形）。');
+
+  const actions = elDiv('g2-actions');
+  const cancel = el('button', 'g2-btn', '取消');
+  cancel.type = 'button';
+  cancel.dataset['g2Action'] = 'cancel';
+  cancel.addEventListener('click', () => {
+    modal = null; // 取消零写盘：只关弹窗
+    fuseMainPick = null;
+    rerender();
+  });
+  const go = el('button', 'g2-btn g2-btn-primary', '确认合成');
+  go.type = 'button';
+  go.dataset['g2Action'] = 'fuse';
+  go.disabled = !pickedMain; // 无主件 = 不可确认（4/5 组本来就不出现在候选里）
+  go.addEventListener('click', () => {
+    if (!pickedGroup || !pickedMain) return;
+    // 系统确定性补齐同组其余 4 件（互异、排除主件本身）
+    const mats = pickedGroup.members
+      .filter((mm) => mm.instanceId !== pickedMain.instanceId)
+      .slice(0, 4)
+      .map((mm) => mm.instanceId);
+    if (mats.length < 4) {
+      m.toast = '合成失败：同组可补材料不足 4 件';
+      rerender();
+      return;
+    }
+    const res: QualityFuseResult = fuseQualityFive({
+      mainInstanceId: pickedMain.instanceId,
+      materialInstanceIds: mats,
+      draft,
+    });
+    if (!res.ok) {
+      m.toast = `合成失败：${res.detail}`; // 实际 reason 如实回显；事务零写盘
+      rerender();
+      return;
+    }
+    // 成功：从正式存档重读（库存/账本/装备同一次刷新），关弹窗、清主件选择；
+    // 新产物立即出现在背包（可点击穿戴），红点随重算消失/更新。
+    reloadFromStore();
+    modal = null;
+    fuseMainPick = null;
+    rerender();
+  });
+  actions.append(cancel, go);
+
+  return [title, wrap, previewWrap, warn, actions];
 }
 
 /* ────────────────────────── 杂项 ────────────────────────── */
@@ -446,8 +634,7 @@ function iconKindOf(slot: ItemSlotKind): 'weapon' | 'body' | 'movement' | 'gadge
   return slot;
 }
 
-function qualityHex(q: QualityTier): string {
-  return (
+function qualityHex(q: QualityTier): string {  return (
     {
       white: '#9aa7b8',
       green: '#4caf6d',
@@ -460,7 +647,6 @@ function qualityHex(q: QualityTier): string {
   )[q];
 }
 
-void qualityHex; // 下一条 Queue（合成弹窗）复用
 
 function lockedText(reason: NonNullable<ItemInstance['lockedReason']>): string {
   return reason === 'equipped'
@@ -510,13 +696,20 @@ export function mountGarageV2View(
 /** Debug 只读探针（E2E/真人验收读数；与 __PRODUCTHOME__ 同一「只读」纪律）。 */
 export function garageV2ViewProbe(): Record<string, unknown> {
   if (!root) return { mounted: false };
+  const fuseGroups = fuseCandidateGroups();
   return {
     mounted: true,
     cells: root.querySelectorAll('[data-g2-cell]').length,
     slots: root.querySelectorAll('[data-g2-slot]').length,
     slotsEquipped: root.querySelectorAll('[data-g2-slot-def]').length,
     modal: root.querySelector('[data-g2-modal]')?.getAttribute('data-g2-modal') ?? null,
-    fusePending: root.querySelector('[data-g2-fuse-pending]') !== null,
+    /** 真实可合成组数（红点口径同源）。 */
+    fuseReadyGroups: fuseGroups.length,
+    fuseDot: root.querySelector('[data-g2-fuse-dot]')?.textContent ?? null,
+    /** 弹窗内已选主件（null = 未选）。 */
+    fuseMainPick: fuseMainPick,
+    fuseMembers: root.querySelectorAll('[data-g2-fuse-member]').length,
+    fuseConfirmDisabled: (root.querySelector('[data-g2-action="fuse"]') as HTMLButtonElement | null)?.disabled ?? null,
     gridTextFree: isGridTextFree(),
     rearDef: draft.rearWheelDefId ?? null,
     frontDef: draft.frontWheelDefId ?? null,

@@ -860,6 +860,10 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
       // 既有 equip* 全家 + equipQualityProduct；绝不 import Lab/种子/隔离存储。
       // （5 张正式 PNG import 与 homePage 同批豁免：assets/visuals 不算模块依赖）
       'garageV2View.ts': [
+        // GARAGE-V2-FORMAL-FUSE-SLICE-R1：合成弹窗的推进类判据与品质函数同源
+        //（registry.functionals.get(defId).behavior === 'thruster'，与 equipQualityProduct
+        // 的 gadget 分支读同一 registry —— 不自建第二份「哪些 Gadget 可品质合成」真源）。
+        '../core/content',
         '../../assets/visuals/body_banana.png',
         '../../assets/visuals/body_watermelon.png',
         '../../assets/visuals/part_cannon.png',
