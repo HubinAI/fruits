@@ -835,8 +835,7 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
         './playerLoadout',
         './vehiclePreview',
       ],
-      'garageV2Quality.ts': [
-        '../core/bodyOwnership',
+      'garageV2Quality.ts': [        '../core/bodyOwnership',
         // GARAGE-V2-LEDGER-COHERENCE-R1：+3（写桥：双账本消除）
         '../core/buildPersistence',   // savePlayerBuild —— 装备升星真实落盘（R3b）
         '../core/buildValidator',
@@ -854,6 +853,23 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
             （本模块不再直接 import，白名单闭集「全部命中」同步收缩）。
         */
         '../core/qualityLedger',
+      ],
+
+      // GARAGE-V2-FORMAL-EQUIP-SLICE-R1：正式 Garage V2 装备视图（?garageV2=1 预览分支）。
+      // 视图真源：正式存档读写（loadEquippedDraft/effectiveInventory/projectItemInstances）+
+      // 既有 equip* 全家 + equipQualityProduct；绝不 import Lab/种子/隔离存储。
+      // （5 张正式 PNG import 与 homePage 同批豁免：assets/visuals 不算模块依赖）
+      'garageV2View.ts': [
+        '../../assets/visuals/body_banana.png',
+        '../../assets/visuals/body_watermelon.png',
+        '../../assets/visuals/part_cannon.png',
+        '../../assets/visuals/part_hammer.png',
+        '../../assets/visuals/part_pushRod.png',
+        '../lab/buildEditorModel',
+        './garageV2Quality',
+        './partIcon',
+        './playerLoadout',
+        './vehiclePreview',
       ],
     };
     for (const [file, list] of Object.entries(allow)) {
@@ -885,6 +901,10 @@ describe('PRODUCT-LOOP-R1-A｜E. 源码守卫（边界与冻结项）', () => {
           // UX-BAG-VISUAL-FUSION-R2 登记：部件图标模块（图形生成规则在 partIcon.ts，
           // 页面只调 partIconNode 拿节点 —— 与 vehiclePreview 同一条「真源在专模块」纪律）。
           './partIcon',
+          // GARAGE-V2-FORMAL-EQUIP-SLICE-R1：正式 Garage V2 装备视图（?garageV2=1 预览分支）。
+          // 视图真源在 garageV2View.ts（正式存档读写 + 既有 equip*/equipQualityProduct 全复用）；
+          // homePage 只做挂载与探针转发，不自建第二套装备逻辑。
+          './garageV2View',
         ],
         `homePage.ts 不得 import "${s}"`,
       ).toContain(s);

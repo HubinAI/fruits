@@ -89,6 +89,9 @@ import {
  * 本页不自己画形状、也不第二份解释内容数据。
  */
 import { partIconNode } from './partIcon';
+// GARAGE-V2-FORMAL-EQUIP-SLICE-R1：正式 Garage V2 装备视图（?garageV2=1 预览分支）。
+// 视图模块自己走正式存档读写；这里只做挂载与探针转发。
+import { garageV2ViewProbe, mountGarageV2View } from './garageV2View';
 import { claimRunReward, claimedRunCount, type ClaimOutcome } from './playerProfile';
 import {
   GROWTH_STAR,
@@ -888,6 +891,13 @@ export function mountProductHome(
   draft = growth.draft;
   let inv: PartInventory = growth.inv;
   let view: ProductView = 'home';
+  /**
+   * GARAGE-V2-FORMAL-EQUIP-SLICE-R1｜正式页 Garage V2 装备视图的**受控预览分支**。
+   * 仅当正式 home.html 地址带 `?garageV2=1` 时进入（旧 Garage 与正式 Run 主路线不变；
+   * 合成弹窗接入属下一条 Queue，届时经同一开关切正式主入口）。
+   */
+  const garageV2Preview: boolean =
+    new URLSearchParams(window.location.search).get('garageV2') === '1';
   /**
    * PRODUCT-LOOP-P0-GARAGE-SLOT-INTERACTION-R2｜当前**高亮的装备槽**。
    *
@@ -2336,6 +2346,15 @@ export function mountProductHome(
     stage.classList.toggle('ph-main-garage', view === 'garage');
     stage.replaceChildren();
     const r = read();
+    // GARAGE-V2-FORMAL-EQUIP-SLICE-R1：受控预览分支 —— 【调整战车】进 Garage V2
+    // 装备视图（正式存档读写；合成「待接入」占位）。旧 Garage / 正式 Run 主路线不变。
+    if (garageV2Preview && view === 'garage') {
+      mountGarageV2View(stage, draft, () => {
+        view = 'home';
+        render();
+      });
+      return;
+    }
     if (view === 'home') renderHome(r);
     else renderGarage(r);
   }
@@ -2684,6 +2703,11 @@ export function mountProductHome(
             }
           : null,
         saveKey: SAVE_KEY,
+        /**
+         * GARAGE-V2-FORMAL-EQUIP-SLICE-R1｜Garage V2 装备视图只读探针
+         * （`?garageV2=1` 且 view==='garage' 时返回视图实测读数，否则 mounted:false）。
+         */
+        garageV2: view === 'garage' && garageV2Preview ? garageV2ViewProbe() : { mounted: false },
       };
     },
   };
