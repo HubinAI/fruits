@@ -125,7 +125,7 @@ async function main() {
 
   try {
     /* ============ P-02 全新存储初始化（/fruits/home.html） */
-    await page.goto(`${URL_BASE}/fruits/home.html`, { waitUntil: 'load' });
+    await page.goto(`${URL_BASE}/fruits/home.html?garageLegacy=1`, { waitUntil: 'load' });
     await sleep(800);
     const homeOk = (await page.locator('#ph-root .ph-root, #ph-root [data-ph-view]').count()) > 0 ||
       (await page.locator('#ph-root').innerHTML()).length > 100;
@@ -193,7 +193,7 @@ async function main() {
     log(sawBattle && jsErrors.length === 0, '[P-04b] Run 场景可交互（画布点击无崩溃、无 JS 异常）', `jsErrors=${jsErrors.length}`);
 
     /* ============ P-05 失败/返回首页装配持续（用深链回首页验证持久化） */
-    await page.goto(`${URL_BASE}/fruits/home.html`, { waitUntil: 'load' });
+    await page.goto(`${URL_BASE}/fruits/home.html?garageLegacy=1`, { waitUntil: 'load' });
     await sleep(600);
     const stored2 = await storageDump(page);
     let equippedAfter = null;

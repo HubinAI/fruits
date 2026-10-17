@@ -1,5 +1,5 @@
 /**
- * GARAGE-V2-FORMAL-EQUIP-SLICE-R1｜正式页 Garage V2 装备视图（?garageV2=1 预览分支）。
+ * GARAGE-V2-DEFAULT-CUTOVER-R1｜正式页 Garage V2 装备视图（【调整战车】默认入口）。
  *
  * 与 `garageV2Lab.ts` 的关系（⚠️ 本模块的存在理由）：
  *   - **视觉结构同源**（用户已拍板的布局）：中上真实战车预览 / 左右五槽
@@ -10,8 +10,8 @@
  *   - **绝不** import `garageV2LabMain` / `seedLabFixture` / `bindPlatformCore` /
  *     任何隔离内存 Map —— 本模块不认识「测试种子」这个概念。
  *
- * 本切片边界（Queue 必改 3）：
- *   - 合成按钮 = 「待接入」占位（真实 `fuseQualityFive` 接入属下一条 Queue）；
+ * 本模块能力（GARAGE-V2-DEFAULT-CUTOVER-R1 起 = 正式主入口）：
+ *   - 合成 = 真实 `fuseQualityFive` 事务（同部位同品质 ≥5 → 主件下一品质）；
  *   - 装备链是**真实事务**：对比弹窗【取消】零写盘、【装备/替换】真实落盘并重读；
  *   - 旧 ★2..5 保留展示（明确「旧成长锁定，仅禁止 V2 消耗」），不静默降白/删除。
  */
@@ -677,7 +677,8 @@ const SPRITE_URLS: Readonly<Record<string, string>> = {
 /* ────────────────────────── 挂载入口 ────────────────────────── */
 
 /**
- * 正式 Garage V2 装备视图挂载（homePage 在 `?garageV2=1` 分支调用）。
+ * 正式 Garage V2 装备视图挂载（homePage 对【调整战车】默认调用；
+ * 旧星级 Garage 仅 `?garageLegacy=1` 兼容测试入口可达）。
  * @param container 挂载容器（正式 stage）
  * @param draft0 初始 draft（由 homePage 从正式存档读入）
  * @param backAction 底部【返回】动作（homePage 注入：`view='home'; render()`）

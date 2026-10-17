@@ -253,7 +253,7 @@ async function main() {
   page.on('pageerror', (e) => consoleErrors.push(String(e)));
 
   try {
-    await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+    await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
     await page.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
     await sleep(250);
 
@@ -1574,7 +1574,7 @@ async function main() {
       const mp = await mobileCtx.newPage();
       const mobileErrors = [];
       mp.on('pageerror', (e) => mobileErrors.push(String(e)));
-      await mp.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+      await mp.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
       await mp.waitForFunction(() => !!window.__PRODUCTHOME__, null, { timeout: 15000 });
       await sleep(250);
       await clickSelector(mp, '[data-ph-action="open-garage"]');

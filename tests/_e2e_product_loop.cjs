@@ -642,7 +642,7 @@ async function main() {
     /* ============================================================ 第一局 */
 
     /* ---- 1) 首页基线：新账号的成长起点（R2-A 验收 ①） ---- */
-    await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+    await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
     await waitHomeReady(page);
     const home0 = await probeHome(page);
     const stored0 = await storageDump(page);
@@ -1037,8 +1037,13 @@ async function main() {
       clickRect(page, p1.actionRect),
     ]);
     await waitHomeReady(page);
+    // ⚠️ 第一次回程挂载 = 领奖执行点（parsePendingClaim → claimRunReward 一次）：
+    //    D1/D2 断言必须在这一挂载上取证；之后重进 legacy（丢 query ⇒ 幂等重挂不会二次领奖）。
     const home2 = await probeHome(page);
     const stored2 = await storageDump(page);
+    // CUTOVER-R1：本文件后续 open-garage 段落是旧 Garage 兼容测试 ⇒ 重进 legacy 入口。
+    await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
+    await waitHomeReady(page);
     log(
       home2.claim !== null && home2.claim.ok === true && home2.claim.defId === CLAIM_ID,
       'D1 领奖在**产品侧**完成（页面只展示 Profile Repository 的真实结果）',

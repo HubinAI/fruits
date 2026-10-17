@@ -271,7 +271,13 @@ async function exitTerminal(page, terminal) {
     clickRect(page, terminal.actionRect),
   ]);
   await waitHomeReady(page);
-  return probeHome(page);
+  // ⚠️ 回程第一次挂载 = 领奖执行点（COMPLETE 带 run/reward query；FAILED 纯首页无 claim）。
+  const home = await probeHome(page);
+  // CUTOVER-R1：本文件setUpLoadout 等后续段落 = 旧 Garage 兼容测试 ⇒ 重进 legacy 入口
+  //（此时 claim 已在第一次挂载执行完 ⇒ 丢 query 不会二次领奖/漏领奖）。
+  await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
+  await waitHomeReady(page);
+  return home;
 }
 
 /* --------------------------------------------------- 单局编排（含装配/终态/领奖） */
@@ -372,7 +378,7 @@ async function playRun(page, label, build) {
   } else {
     // timeout：安全网——不当 PASS，记 BLOCKED，返回首页收尾。
     try {
-      await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+      await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
       await waitHomeReady(page);
     } catch {
       /* noop */
@@ -459,7 +465,7 @@ async function main() {
   let frameHealth = null;
   try {
     /* ==================================== 全新账号自然起点 */
-    await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+    await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
     await waitHomeReady(page);
     const home0 = await probeHome(page);
     const stored0 = await storageDump(page);
@@ -582,7 +588,7 @@ async function main() {
         `claimId=${run2.claimId} delta=${run2.invDelta}`,
       );
       // 幂等：reload 后 claim 应清除（不重复发奖）
-      await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+      await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
       await waitHomeReady(page);
       const homeReload = await probeHome(page);
       log(
@@ -655,7 +661,7 @@ async function main() {
     //    这里真实进一局（默认装配）并在 **Run 页上下文**采样 rAF 帧时长（先导航、后采样，
     //    避免跨页导航销毁执行上下文）；采样窗口 8s，用超时竞速防止页面停帧时挂起。
     try {
-      await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+      await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
       await waitHomeReady(page);
       await enterRun(page); // 已在 run-page.html：此后到采样结束之间**不再导航**
       const framePromise = sampleFrameHealth(page, 8000);

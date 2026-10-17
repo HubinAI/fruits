@@ -262,7 +262,7 @@ async function playUntilComplete(page, tag) {
     );
     if (d.stopped === 'COMPLETE') return { complete: true, attempts, done: d.last, runStart };
     // 未通关：回到首页准备下一局（真实导航，不刷新存储）
-    await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+    await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
     await waitHomeReady(page);
   }
   return { complete: false, attempts, done: null, runStart: null };
@@ -285,7 +285,7 @@ async function main() {
   page.on('pageerror', (e) => pageErrors.push(String(e && e.message ? e.message : e)));
   try {
     /* ---- A. 全新账号自然起点 ---- */
-    await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+    await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
     await waitHomeReady(page);
     const home0 = await probeHome(page);
     const stored0 = await storageDump(page);
@@ -377,8 +377,12 @@ async function main() {
       clickRect(page, pDone.actionRect),
     ]);
     await waitHomeReady(page);
+    // ⚠️ 第一次回程挂载 = 领奖执行点：homeClaim/storedClaim 在此取证。
     const homeClaim = await probeHome(page);
     const storedClaim = await storageDump(page);
+    // CUTOVER-R1：后续 open-garage 段 = 旧 Garage 兼容测试（丢 query ⇒ 幂等重挂不二次领奖）。
+    await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
+    await waitHomeReady(page);
     log(
       homeClaim.claim && homeClaim.claim.ok === true && homeClaim.claim.defId === claimId,
       '[D1] 领奖真实生效（Repository 返回 ok）',
@@ -391,7 +395,7 @@ async function main() {
     );
     // 幂等：**重新挂载**首页（新一次 mount，无 pending claim）⇒ 不应再触发领奖。
     // ⚠️ 必须 reload 才有意义：同一 mount 的 `claim` 字段恒等于该次 mount 的领奖结果。
-    await page.goto(`${URL_BASE}/home.html`, { waitUntil: 'load' });
+    await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
     await waitHomeReady(page);
     const homeClaim2 = await probeHome(page);
     log(
@@ -419,7 +423,11 @@ async function main() {
         clickRect(page, playK.done.actionRect),
       ]);
       await waitHomeReady(page);
+      // ⚠️ 回程挂载 = 领奖执行点：dK 在此取证（库存计数用）。
       const dK = await storageDump(page);
+      // CUTOVER-R1：后续 open-garage 段 = 旧 Garage 兼容测试。
+      await page.goto(`${URL_BASE}/home.html?garageLegacy=1`, { waitUntil: 'load' });
+      await waitHomeReady(page);
       stackNow = invCount(dK, claimId, 1);
       winRecords.push(`#${k + 1}=COMPLETE→★1×${stackNow}`);
     }

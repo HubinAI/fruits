@@ -90,7 +90,8 @@ async function probeV2(page) {
   const browser = await launchBrowser(chromium);
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
-  const url = `http://127.0.0.1:${PORT}/home.html?garageV2=1`;
+  // CUTOVER-R1：默认入口（无参数）——【调整战车】直接进 Garage V2
+  const url = `http://127.0.0.1:${PORT}/home.html`;
 
   let pass = 0; const fails = [];
   const ok = (cond, tag) => { if (cond) { pass++; console.log(`PASS ${tag}`); } else { fails.push(tag); console.log(`FAIL ${tag}`); } };
@@ -100,7 +101,7 @@ async function probeV2(page) {
   /* ── A. 预览入口结构（正式入口链：首页按钮【调整战车】→ view='garage' → V2 视图） ── */
   await openV2(page);
   const p0 = await probeV2(page);
-  ok(p0 && p0.mounted === true, 'A1 预览入口挂载（?garageV2=1 + 调整战车）');
+  ok(p0 && p0.mounted === true, 'A1 默认入口挂载（无参数 home.html + 调整战车）');
   ok(p0 && p0.slots === 5, 'A2 五槽真实存在');
   ok(p0 && p0.cells >= 1, 'A3 背包单件格真实存在');
   // 红点口径 = 真实组数（fresh 账号 weapon·白 13 件天然 1 组；数值一致性即「真实资格」）
@@ -341,22 +342,27 @@ async function probeV2(page) {
   /* ── F. 旧主路线未变 ── */
   const page2 = await ctx.newPage();
   await page2.goto(`http://127.0.0.1:${PORT}/home.html`, { waitUntil: 'networkidle' });
-  const oldGarage = await page2.evaluate(() => {
+  // CUTOVER-R1 语义：默认【调整战车】= V2（旧星级视图只在 ?garageLegacy=1）
+  const defaultGarage = await page2.evaluate(() => {
+    const probe0 = window.__PRODUCTHOME__.probe();
     const btn = document.querySelector('[data-ph-action="open-garage"]');
     if (btn) btn.click();
     return new Promise((res) => setTimeout(() => {
+      const probe = window.__PRODUCTHOME__.probe();
       res({
-        oldGarageShown: !!document.querySelector('[data-ph-view="garage"]') || !!document.querySelector('.ph-garage, [data-ph-garage]'),
-        oldCardGrid: document.querySelectorAll('[data-ph-slot]').length,
-        fuseEntry: !!document.querySelector('[data-ph-action="fuse-entry"]'),
+        viewHomeBefore: probe0.view,
+        v2Mounted: probe.garageV2.mounted === true,
+        oldCardGrid: document.querySelectorAll('[data-ph-slot]').length, // 旧星级卡片 DOM
+        v2FuseEntry: !!document.querySelector('[data-g2-fuse-entry]'),
       });
     }, 150));
   });
-  ok(oldGarage.oldCardGrid > 0, 'F1 不带参数仍进旧 Garage（槽交互结构原样）');
-  ok(oldGarage.fuseEntry, 'F2 旧合成入口仍在（旧主路线未变）');
+  ok(defaultGarage.viewHomeBefore === 'home' && defaultGarage.v2Mounted && defaultGarage.oldCardGrid === 0,
+    'F1 默认【调整战车】= Garage V2（旧星级卡片 DOM 不存在）');
+  ok(defaultGarage.v2FuseEntry, 'F2 V2 合成入口存在（真实五合一）');
   const startHref = await page2.evaluate(() => {
-    // 回首页
-    const back = document.querySelector('[data-ph-action="back-home"]');
+    // 返回首页（V2 底部返回 → 重读存档）
+    const back = document.querySelector('[data-g2-back]');
     if (back) back.click();
     return new Promise((res) => setTimeout(() => {
       const a = document.querySelector('[data-ph-action="start-run"]');
@@ -364,6 +370,25 @@ async function probeV2(page) {
     }, 150));
   });
   ok(typeof startHref === 'string' && startHref.length > 0, 'F3 开始冒险 href 正常（Run 主路线未变）');
+  // F4（CUTOVER-R1）：?garageLegacy=1 才能进旧 Garage；生产默认不可再走旧星级视图
+  const page3 = await ctx.newPage();
+  await page3.goto(`http://127.0.0.1:${PORT}/home.html?garageLegacy=1`, { waitUntil: 'networkidle' });
+  const legacyGarage = await page3.evaluate(() => {
+    const btn = document.querySelector('[data-ph-action="open-garage"]');
+    if (btn) btn.click();
+    return new Promise((res) => setTimeout(() => {
+      const probe = window.__PRODUCTHOME__.probe();
+      res({
+        view: probe.view,
+        v2Mounted: probe.garageV2.mounted === true,
+        oldSlotCards: document.querySelectorAll('[data-ph-slot]').length,
+        oldWeaponCards: document.querySelectorAll('[data-ph-weapon]').length,
+      });
+    }, 150));
+  });
+  ok(legacyGarage.view === 'garage' && legacyGarage.v2Mounted === false && legacyGarage.oldWeaponCards > 0,
+    'F4 ?garageLegacy=1 才进旧星级 Garage（V2 探针 mounted:false + 旧卡片 DOM 存在）');
+  await page3.close();
 
   console.log(`\n==== ${pass} passed, ${fails.length} failed ====`);
   if (fails.length) { console.log('FAILED:', fails.join(' | ')); }
