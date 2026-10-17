@@ -933,6 +933,19 @@ export function equipGadget(
     return { ok: false, reason: 'not-owned', detail: `库存里没有 "${defId}" 的 1★ 副本` };
   }
   const next: BuildDraft = { ...draft, gadgetDefId: defId };
+  /*
+    QUALITY-GADGET-THRUST-EQUIP-R1｜装**旧 Gadget**（本入口）时清除品质两字段
+    （gadgetQuality + equippedQualityInstances.gadget）——往返无陈旧：
+    残留 quality 会继续抬 thrustImpulse（幽灵强度），残留绑定会被加载校验一直核对。
+    品质 Gadget 穿戴走 equipQualityProduct 自己的入口（原子替换两字段）。
+  */
+  {
+    const nextMqG = { ...(next.equippedQualityInstances ?? {}) };
+    if (nextMqG['gadget'] !== undefined) delete nextMqG['gadget'];
+    delete (next as { gadgetQuality?: string }).gadgetQuality;
+    if (Object.keys(nextMqG).length > 0) next.equippedQualityInstances = nextMqG;
+    else delete next.equippedQualityInstances;
+  }
   const result = validateSnapshot(buildSnapshotFromDraft(next, registry), registry);
   if (!result.valid) {
     return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
@@ -952,6 +965,14 @@ export function unequipGadget(
 ): GadgetEquipOutcome {
   const next: BuildDraft = { ...draft };
   delete next.gadgetDefId;
+  // QUALITY-GADGET-THRUST-EQUIP-R1：卸下时清品质两字段（同 equipGadget 纪律）
+  {
+    const nextMqG = { ...(next.equippedQualityInstances ?? {}) };
+    if (nextMqG['gadget'] !== undefined) delete nextMqG['gadget'];
+    delete (next as { gadgetQuality?: string }).gadgetQuality;
+    if (Object.keys(nextMqG).length > 0) next.equippedQualityInstances = nextMqG;
+    else delete next.equippedQualityInstances;
+  }
   const result = validateSnapshot(buildSnapshotFromDraft(next, registry), registry);
   if (!result.valid) {
     return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };

@@ -123,6 +123,15 @@ export interface BuildDraft {
    */
   movementQualities?: { rear?: QualityTierId; front?: QualityTierId };
   /**
+   * QUALITY-GADGET-THRUST-EQUIP-R1｜Gadget 槽的**显式品质档**。
+   *
+   * 只对**推进类** Gadget（`behavior: 'thruster'`，thruster/reverseThruster）
+   * 有真实数值含义：只放大 `behaviorParams.thrustImpulse`（真实 applyLinearImpulse
+   * 路径）；无推进行为的 Gadget（pushRod）穿戴会被显式拒绝（不假成功）。
+   * 缺省 undefined = 无品质；white 不落 snapshot 字段。
+   */
+  gadgetQuality?: QualityTierId;
+  /**
    * GADGET-SLOT-FOUNDATION-R1｜**独立 Gadget 装配位**（1 × Gadget）。
    *
    * 与 Weapon / Front Movement / Rear Movement **并列**的第 4 个 Build 维度，
@@ -238,8 +247,16 @@ export function buildSnapshotFromDraft(
     movements,
     functionals,
     // GADGET-SLOT-FOUNDATION-R1：独立 Gadget 位（EMPTY / 缺省 ⇒ 不写字段，保持旧形状）
+    // QUALITY-GADGET-THRUST-EQUIP-R1：gadget 品质档（white 不写；只对推进类有数值含义）
     ...(draft.gadgetDefId && draft.gadgetDefId !== EMPTY_SLOT
-      ? { gadget: { defId: draft.gadgetDefId } }
+      ? {
+          gadget: {
+            defId: draft.gadgetDefId,
+            ...(draft.gadgetQuality && draft.gadgetQuality !== 'white'
+              ? { quality: draft.gadgetQuality }
+              : {}),
+          },
+        }
       : {}),
   };
 }

@@ -67,6 +67,12 @@ export function loadPlayerBuild(): BuildDraft | null {
       if (!ledgerOwnsProduct(bind)) return null;
     }
   }
+  // QUALITY-GADGET-THRUST-EQUIP-R1：gadget 品质档与绑定成对 + 真实持有（同 movement 纪律）
+  if (draft.gadgetQuality && draft.gadgetQuality !== 'white') {
+    const bind = draft.equippedQualityInstances?.['gadget'];
+    if (!bind) return null;
+    if (!ledgerOwnsProduct(bind)) return null;
+  }
   // 必须构成合法 Build（未知部件 / 超载 / 无 Weapon → 旧存档非法）
   const snap = buildSnapshotFromDraft(draft, registry, 'customA');
   if (!validateSnapshot(snap, registry).valid) return null;
@@ -162,6 +168,15 @@ function isBuildDraftShape(d: unknown): d is BuildDraft {
       const v = mq[k];
       if (v === undefined) continue;
       if (typeof v !== 'string' || !QUALITY_SET.has(v)) return false;
+    }
+  }
+  // QUALITY-GADGET-THRUST-EQUIP-R1：gadgetQuality 可选（单值，七档闭集）。
+  if (o.gadgetQuality !== undefined) {
+    if (
+      typeof o.gadgetQuality !== 'string' ||
+      !['white', 'green', 'blue', 'purple', 'orange', 'red', 'chrome'].includes(o.gadgetQuality)
+    ) {
+      return false;
     }
   }
   return true;

@@ -718,20 +718,73 @@ export function equipQualityProduct(
     return { ok: false, reason: 'not-owned', detail: `该品质实例不在账本持有记录里（未合成过或已被消耗）：${productId}` };
   }
 
-  // ② 部位闸门：Weapon 走武器槽；Movement 走前后轮槽（本轮打通）；Gadget/Body 仍拒绝
+  // ② 部位闸门与分派：Weapon → 武器槽；Movement → 前后轮槽；Gadget → gadget 槽（B 轮）；
+  //    Body 仍 run-not-wired（无数量模型，产物不可投影）。
   const kind = slotKindOf(defId);
-  if (kind === 'gadget' || kind === 'body' || kind === null) {
+  if (kind === 'body' || kind === null) {
     return {
       ok: false,
       reason: 'run-not-wired',
-      detail: `品质产物目前只支持 Weapon 与 Movement 穿戴（"${defId}" 是 ${String(kind ?? '未知部位')}）；Gadget/Body 接入属后续轮`,
+      detail: `品质产物目前支持 Weapon / Movement / 推进类 Gadget 穿戴（"${defId}" 是 ${String(kind ?? '未知部位')}）；Body 需数量模型（独立冻结）`,
     };
   }
   if (kind === 'weapon') {
     return equipQualityWeaponOnSlot(productId, defId, quality, Number(seqRaw), draft);
   }
-  // kind === 'movement'
-  return equipQualityMovementOnSlot(productId, defId, quality, Number(seqRaw), draft, movementSlot);
+  if (kind === 'movement') {
+    return equipQualityMovementOnSlot(productId, defId, quality, Number(seqRaw), draft, movementSlot);
+  }
+  // kind === 'gadget'
+  return equipQualityGadgetOnSlot(productId, defId, quality, draft);
+}
+
+/**
+ * QUALITY-GADGET-THRUST-EQUIP-R1｜Gadget 品质实例穿戴（**只对推进类**）。
+ *
+ * - 推进类判据 = `registry.functionals.get(defId).behavior === 'thruster'`
+ *   （thruster / reverseThruster 同 behavior；品质只放大 thrustImpulse）；
+ * - **非推进类**（pushRod 等）显式 `run-not-wired` 并给出最小设计缺口——
+ *   它们没有可解释的同一数值属性，假成功 = 违规；
+ * - Body 必须有 gadgetHardpoints；probe draft（gadgetDefId + gadgetQuality +
+ *   equippedQualityInstances.gadget）→ validateSnapshot → savePlayerBuild。
+ */
+function equipQualityGadgetOnSlot(
+  productId: string,
+  defId: string,
+  quality: QualityTier,
+  draft: BuildDraft,
+): QualityEquipOutcome {
+  const def = registry.functionals.get(defId);
+  if (!def || def.category !== 'gadget') {
+    return { ok: false, reason: 'unknown-instance', detail: `"${defId}" 不是正式 Gadget` };
+  }
+  if (def.behavior !== 'thruster') {
+    return {
+      ok: false,
+      reason: 'run-not-wired',
+      detail: `推进类 Gadget 之外暂不支持品质穿戴（"${defId}" 的 behavior="${def.behavior}" 无可解释的成长属性）；缺口：需为其单独设计品质属性（如 pushRod 的推程/推力）`,
+    };
+  }
+  const body = registry.bodies.get(draft.bodyDefId);
+  if (!body || !body.gadgetHardpoints || body.gadgetHardpoints.length === 0) {
+    return { ok: false, reason: 'unknown-slot', detail: `车身 "${draft.bodyDefId}" 没有 Gadget 专属挂点` };
+  }
+  const nextBinds: Record<string, string> = {
+    ...(draft.equippedQualityInstances ?? {}),
+    gadget: productId,
+  };
+  const probe: BuildDraft = {
+    ...draft,
+    gadgetDefId: defId,
+    gadgetQuality: quality,
+    equippedQualityInstances: nextBinds,
+  };
+  const result = validateSnapshot(buildSnapshotFromDraft(probe, registry), registry);
+  if (!result.valid) {
+    return { ok: false, reason: 'invalid-build', detail: result.errors.join(' / ') };
+  }
+  savePlayerBuild(probe);
+  return { ok: true, draft: probe };
 }
 
 /**

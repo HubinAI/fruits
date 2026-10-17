@@ -205,6 +205,34 @@ function applyMovementTier(def: WheelDef, quality: QualityTierId | undefined): W
   return { ...def, driveTorque: Math.round(def.driveTorque * mult) };
 }
 
+/**
+ * QUALITY-GADGET-THRUST-EQUIP-R1｜Gadget 品质层（**单参数：thrustImpulse**）。
+ *
+ * 只对**推进类**（`behavior === 'thruster'`，thruster/reverseThruster）生效：
+ * `behaviorParams.thrustImpulse` × 品质倍率（round）——该值由
+ * `thrusterBehavior.applyThrust` 每固定步经 `world.applyLinearImpulse` 真实消费
+ *（thrusterBehavior.ts:415-430）。windup/thrust/cooldown/distanceTrigger/喷焰/质量/碰撞逐字不变。
+ *
+ * 无品质 ⇒ 恒等返回原对象；非推进类（pushRod 等）⇒ 品质**数值惰性**（原对象）——
+ * 穿戴侧会显式拒绝，此处双保险（解析层不制造假强度）。
+ */
+function applyGadgetTier(
+  def: FunctionalPartDef,
+  star: number,
+  quality: QualityTierId | undefined,
+): FunctionalPartDef {
+  if (!quality || def.behavior !== 'thruster') return applyInstallTier(def, star, undefined);
+  const bp = def.behaviorParams as Record<string, unknown> | undefined;
+  const raw = bp?.['thrustImpulse'];
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return applyInstallTier(def, star, undefined);
+  const mult = qualityMultiplierOf(quality);
+  if (mult === 1) return def;
+  return {
+    ...def,
+    behaviorParams: { ...bp, thrustImpulse: Math.round(raw * mult) },
+  };
+}
+
 /** 展开并解析 Build Snapshot。缺失引用会抛错（调用方应先通过 BuildValidator）。 */
 export function resolveSnapshot(
   snapshot: BuildSnapshot,
@@ -263,9 +291,10 @@ export function resolveSnapshot(
       throw new Error(`ResolveSnapshot: unknown gadget "${snapshot.gadget.defId}"`);
     }
     const star = snapshot.gadget.star ?? 1;
-    // GARAGE-V2-QUALITY-RUN-ADAPTER-R1：Gadget 同通道（quality 存在 ⇒ 替代 star 伤害倍率；
-    // Gadget 无伤害通道 ⇒ 数值惰性，只保留能量语义）。
-    gadget = { def: applyInstallTier(gDef, star, snapshot.gadget.quality), star };
+    // GARAGE-V2-QUALITY-RUN-ADAPTER-R1：quality 存在 ⇒ 替代 star 伤害倍率（Weapon 通道）；
+    // QUALITY-GADGET-THRUST-EQUIP-R1：推进类 Gadget（behavior='thruster'）的 quality
+    // 改走 **thrustImpulse 通道**（真实 applyLinearImpulse 路径），伤害倍率对 Gadget 恒 0。
+    gadget = { def: applyGadgetTier(gDef, star, snapshot.gadget.quality), star };
   }
 
   const totalMass =
