@@ -1,19 +1,30 @@
 /**
- * GARAGE-V2-DEFAULT-CUTOVER-R1｜正式页 Garage V2 装备视图（【调整战车】默认入口）。
+ * GARAGE-V2-UX-RETURN-BAG-FUSE-R1｜正式页 Garage 2.0 装备/合成视图（【调整战车】默认入口）。
  *
- * 与 `garageV2Lab.ts` 的关系（⚠️ 本模块的存在理由）：
- *   - **视觉结构同源**（用户已拍板的布局）：中上真实战车预览 / 左右五槽
- *     / 下方单件品质图标背包（不显示名字/数量/星级/不堆叠）/ 背包右上合成预留 / 底部返回；
- *   - **数据完全不同源**：这里所有读写都走**正式生产存档**
-     （`loadEquippedDraft` / `playerInventory` / `effectiveInventory` /
-     `projectItemInstances` / `equipQualityProduct` / 旧 `equip*` 全家）；
- *   - **绝不** import `garageV2LabMain` / `seedLabFixture` / `bindPlatformCore` /
- *     任何隔离内存 Map —— 本模块不认识「测试种子」这个概念。
+ * ── 本轮做了什么（交互结构重做，不是数值微调）──────────────────────────────
+ *   真人 102 秒实玩录屏三条硬伤 → 三条结构性修正：
+ *     ① **返回按钮必须在画面内**：上一版 `.g2-bag-wrap` 不是 flex 列容器 ⇒ `.g2-bag`
+ *        的 `flex/overflow` 全部失效 ⇒ 背包按内容撑高，把 footer 顶到 y=1198（画面外、
+ *        外层 overflow:hidden ⇒ 点不到）。本版把外壳/滚动层两级的 flex + min-height:0
+ *        都显式声明，footer 由 flex 固定占位；并**隐藏页面级 header**（V2 自带标题行，
+ *        不再浪费 62px 上方空白）。
+ *     ② **图标主导**：删除依赖浏览器窗口宽度的 `@media (min-width:430px) → 5 列`
+ *        （逻辑画面恒 390，媒体查询看的是窗口 ⇒ 桌面被切成 5 列、图标压到 62%）；
+ *        背包恒 4 列、图标 86%、锁定件不再灰到难认、角标/边框降权。
+ *     ③ **合成改成同页合成模式**（不再是小遮罩里塞 44px 图标）：
+ *        右上【合成】→ 直接铺开与装备背包**同规格 4 列大图标**候选（只列真实满足
+ *        同部位+同品质≥5 的组）→ 单击主件 → 自动补 4 件材料并**明确标出被消耗者**
+ *        → 底部固定区显示「主件 → 下一品质」→ 唯一【确认五合一】。
  *
- * 本模块能力（GARAGE-V2-DEFAULT-CUTOVER-R1 起 = 正式主入口）：
- *   - 合成 = 真实 `fuseQualityFive` 事务（同部位同品质 ≥5 → 主件下一品质）；
- *   - 装备链是**真实事务**：对比弹窗【取消】零写盘、【装备/替换】真实落盘并重读；
- *   - 旧 ★2..5 保留展示（明确「旧成长锁定，仅禁止 V2 消耗」），不静默降白/删除。
+ * ── 冻结（本模块**没有**动的东西）──────────────────────────────────────────
+ *   - 七档品质 / 真实装备事务（`equipQualityProduct` / 旧 `equip*` 全家）/ 真实五合一
+ *     （`fuseQualityFive`）/ 正式存档（`loadEquippedDraft` → 落盘）/ 战斗与奖励；
+ *   - 旧限制一律不变：Body 不可消耗、旧 ★2..5 `legacy-star-locked`、装备中 `equipped`
+ *     保护、彩封顶、非推进类 Gadget 不进合成组。
+ *
+ * ── 与 `garageV2Lab.ts` 的关系 ─────────────────────────────────────────────
+ *   视觉结构同源，**数据完全不同源**：这里所有读写都走正式生产存档；
+ *   **绝不** import `garageV2LabMain` / `seedLabFixture` / `bindPlatformCore` / 任何隔离内存 Map。
  */
 import {
   QUALITY_LABELS,
@@ -42,16 +53,16 @@ import { vehiclePreviewLayout, type VehiclePreviewLayout } from './vehiclePrevie
 
 /* ────────────────────────── 常量 / 小工具 ────────────────────────── */
 
-/** 五个穿戴槽（与 Lab 同序：左 body/weapon/gadget，右 front/rear）。 */
-const G2_SLOTS: readonly { key: string; kind: ItemSlotKind; label: string; side: 'l' | 'r' }[] = [
-  { key: 'body', kind: 'body', label: '车身', side: 'l' },
-  { key: 'weapon', kind: 'weapon', label: '武器', side: 'l' },
-  { key: 'gadget', kind: 'gadget', label: '辅助', side: 'l' },
-  { key: 'front', kind: 'movement', label: '前轮', side: 'r' },
-  { key: 'rear', kind: 'movement', label: '后轮', side: 'r' },
+/** 五个穿戴槽（**同行**排列；左三右二的老两列布局吃掉两行高度，已删）。 */
+const G2_SLOTS: readonly { key: string; kind: ItemSlotKind; label: string }[] = [
+  { key: 'body', kind: 'body', label: '车身' },
+  { key: 'weapon', kind: 'weapon', label: '武器' },
+  { key: 'gadget', kind: 'gadget', label: '辅助' },
+  { key: 'front', kind: 'movement', label: '前轮' },
+  { key: 'rear', kind: 'movement', label: '后轮' },
 ];
 
-/** 部位角标字（格子左上角微型标注；不是名字、不是数量）。 */
+/** 部位角标字（格子角落的微型标注；不是名字、不是数量）。 */
 const SLOT_BADGE: Readonly<Record<ItemSlotKind, string>> = {
   weapon: '武',
   body: '身',
@@ -76,32 +87,37 @@ function elDiv(cls: string, text?: string): HTMLDivElement {
 
 /* ────────────────────────── 页面状态 ────────────────────────── */
 
-type G2Modal =
-  | {
-      kind: 'compare';
-      slotKey: string; // 'body' | 'weapon' | 'gadget' | 'front' | 'rear'
-      slotKind: ItemSlotKind;
-      candidate: ItemInstance;
-      toast?: string; // 装备失败的如实回显（不吞错）
-      /** movement 弹窗初始化标记：pick 只在打开时从入口槽初始化一次（rerender 保持用户选择）。 */
-      targetInit?: boolean;
-    }
-  /** GARAGE-V2-FORMAL-FUSE-SLICE-R1：真实五合一合成弹窗（正式 fuseQualityFive 事务）。 */
-  | {
-      kind: 'fuse';
-      /** 上一次合成失败的如实回显（不吞错；成功后弹窗关闭）。 */
-      toast?: string;
-    }
-  | null;
+type G2Modal = {
+  kind: 'compare';
+  slotKey: string; // 'body' | 'weapon' | 'gadget' | 'front' | 'rear'
+  slotKind: ItemSlotKind;
+  candidate: ItemInstance;
+  /** 装备失败的如实回显（不吞错）。 */
+  toast?: string;
+};
+
+/** 同页两种模式（合成不再是遮罩弹窗）。 */
+type G2Mode = 'equip' | 'fuse';
 
 let draft: BuildDraft;
-let modal: G2Modal = null;
+let modal: G2Modal | null = null;
+let mode: G2Mode = 'equip';
 let root: HTMLElement;
-/** movement 对比弹窗的当前目标槽（模块级：rerender 重建弹窗后仍保持用户选择）。 */
+/** movement 对比弹窗的当前目标槽（模块级：rerender 重建后仍保持用户选择）。 */
 let movementTargetPick: 'front' | 'rear' = 'rear';
-/** 合成弹窗当前选中的主件实例 id（模块级：rerender 重建弹窗后仍保持用户选择）。 */
+/** 合成模式当前选中的主件实例 id（模块级：rerender 重建后仍保持用户选择）。 */
 let fuseMainPick: string | null = null;
-let onClose: () => void = () => {}; // 底部【返回】动作（由 homePage 注入：回正式首页视图）
+/** 装备页顶部提示（合成成功 / 失败如实回显）。 */
+let flash: { ok: boolean; text: string } | null = null;
+/** 合成成功后要高亮的产物实例 id（**一次**，后续 rerender 不再滚动）。 */
+let pendingRevealId: string | null = null;
+/** 合成产物在背包里的「刚出炉」金环高亮（持续到玩家下一次操作）。 */
+let freshInstId: string | null = null;
+/** 滚动位置记忆（列表 rerender 不滚回顶部；只在换模式时归零）。 */
+let scrollMemo = 0;
+let onClose: () => void = () => {};
+/** 页面级 header（V2 自带标题行 ⇒ 进入时藏起来，返回时原样恢复）。 */
+let pageHeader: HTMLElement | null = null;
 
 /* ────────────────────────── 数据读数（全走正式契约） ────────────────────────── */
 
@@ -180,16 +196,98 @@ function reloadFromStore(): void {
 
 /* ────────────────────────── 渲染 ────────────────────────── */
 
+/**
+ * 全量重建（数据量小、无虚拟滚动）+ **滚动位置保持**：
+ * 旧版每次 rerender 都让 `.g2-bag` 回到顶部（真人抱怨「刚翻到下面就跳回上面」），
+ * 这里在拆树前记住 scrollTop、建完树后写回；只有切换模式才归零。
+ */
 function rerender(): void {
+  const scroller = root.querySelector<HTMLElement>('[data-g2-scroll]');
+  if (scroller) scrollMemo = scroller.scrollTop;
+
   root.textContent = '';
-  root.append(buildHead(), buildStage(), buildSlotsRow(), buildBag(), buildFoot());
+  root.dataset['g2Mode'] = mode;
+  if (mode === 'fuse') root.append(...buildFusePage());
+  else root.append(...buildEquipPage());
   if (modal) root.append(buildModal(modal));
+
+  const next = root.querySelector<HTMLElement>('[data-g2-scroll]');
+  if (next) next.scrollTop = scrollMemo;
+
+  // 合成产物：**只滚一次**到它身上（结果清晰），之后不再打扰。
+  if (pendingRevealId) {
+    const cell = root.querySelector<HTMLElement>(`[data-g2-cell="${pendingRevealId}"]`);
+    pendingRevealId = null;
+    if (cell) cell.scrollIntoView({ block: 'nearest' });
+  }
 }
 
-function buildHead(): HTMLElement {
-  const head = elDiv('g2-head', 'Garage 2.0 · 装备');
+/* ── 装备页 ── */
+
+function buildEquipPage(): HTMLElement[] {
+  const note = buildNote();
+  return [
+    buildHead('equip'),
+    buildStage(),
+    buildSlotsRow(),
+    ...(note ? [note] : []),
+    buildBag(),
+    buildFoot(),
+  ];
+}
+
+function buildHead(which: G2Mode): HTMLElement {
+  const head = elDiv('g2-head');
   head.dataset['g2Head'] = '1';
+  head.append(elDiv('g2-title', which === 'fuse' ? '合成' : '装备'));
+  head.append(which === 'fuse' ? buildFuseBack() : buildFuseEntry());
   return head;
+}
+
+/** 右上【合成】（真实资格红点：只有存在满足 同部位+同品质≥5 的组才亮数字）。 */
+function buildFuseEntry(): HTMLElement {
+  const groups = fuseCandidateGroups();
+  const btn = el('button', 'g2-fuse-btn' + (groups.length > 0 ? ' g2-fuse-btn-ready' : ''));
+  btn.type = 'button';
+  btn.dataset['g2FuseEntry'] = '1';
+  btn.dataset['g2FuseReady'] = String(groups.length);
+  btn.append(document.createTextNode('合成'));
+  if (groups.length > 0) {
+    const dot = elDiv('g2-fuse-dot', String(groups.length));
+    dot.dataset['g2FuseDot'] = '1';
+    btn.append(dot);
+  }
+  btn.addEventListener('click', () => {
+    mode = 'fuse';
+    modal = null;
+    flash = null;
+    freshInstId = null;
+    fuseMainPick = null; // 选择不跨打开保留
+    scrollMemo = 0;
+    rerender();
+  });
+  return btn;
+}
+
+/** 合成模式右上【返回装备】（恒可见：合成模式没有底部 footer，但它在本行）。 */
+function buildFuseBack(): HTMLElement {
+  const back = el('button', 'g2-pill', '返回装备');
+  back.type = 'button';
+  back.dataset['g2FuseBack'] = '1';
+  back.dataset['g2Action'] = 'fuse-back';
+  back.addEventListener('click', () => exitFuseMode());
+  return back;
+}
+
+/** 退出合成模式：**零写盘**（只清状态 + 重渲染）。 */
+function exitFuseMode(): void {
+  mode = 'equip';
+  fuseMainPick = null;
+  modal = null;
+  flash = null;
+  freshInstId = null;
+  scrollMemo = 0;
+  rerender();
 }
 
 function buildStage(): HTMLElement {
@@ -234,77 +332,88 @@ function previewNodes(layout: VehiclePreviewLayout): HTMLElement[] {
 function buildSlotsRow(): HTMLElement {
   const row = elDiv('g2-slots-row');
   row.dataset['g2Slots'] = '1';
-  const left = elDiv('g2-slots-col');
-  const right = elDiv('g2-slots-col');
   for (const s of G2_SLOTS) {
     const eq = equippedOf(s.key, s.kind);
-    const btn = el('button', 'g2-slot' + (eq ? ' g2-slot-eq' : ''));
+    const hasEq = !!eq && (s.kind !== 'movement' || eq.defId !== 'wheelStd');
+    const btn = el('button', 'g2-slot' + (hasEq ? ' g2-slot-eq' : ''));
     btn.type = 'button';
     btn.dataset['g2Slot'] = s.key;
     btn.dataset['g2SlotKind'] = s.kind;
-    if (eq) {
+    if (hasEq && eq) {
       btn.dataset['g2SlotDef'] = eq.defId;
-      btn.append(partIconNode(s.kind === 'body' ? 'body' : s.kind, eq.defId, s.label));
-      btn.append(elDiv('g2-slot-kind', s.label));
+      btn.append(partIconNode(iconKindOf(s.kind), eq.defId));
     } else {
       btn.append(elDiv('g2-slot-empty', '空'));
-      btn.append(elDiv('g2-slot-kind', s.label));
     }
-    // 槽点击 = 从背包里挑该部位第一件做候选对比（与 Lab 同交互；正式选件走背包格）
+    btn.append(elDiv('g2-slot-kind', s.label));
+    // 槽点击 = 拿该槽「另一件」做候选对比（movement 必须落在被点的那个轮上）。
     btn.addEventListener('click', () => {
-      const inst = instances().find((i) => i.slot === s.kind);
-      if (inst) {
-        modal = { kind: 'compare', slotKey: s.key, slotKind: s.kind, candidate: inst };
-        rerender();
-      }
+      const inst = firstCandidateFor(s.kind, eq?.defId ?? null);
+      if (!inst) return;
+      if (s.kind === 'movement') movementTargetPick = s.key === 'front' ? 'front' : 'rear';
+      modal = { kind: 'compare', slotKey: s.key, slotKind: s.kind, candidate: inst };
+      flash = null;
+      rerender();
     });
-    (s.side === 'l' ? left : right).append(btn);
+    row.append(btn);
   }
-  row.append(left, right);
   return row;
 }
 
+/** 该槽的第一件「可替换候选」（优先与当前装备不同 defId 的；没有就退回第一件）。 */
+function firstCandidateFor(
+  slotKind: ItemSlotKind,
+  curDefId: string | null,
+): ItemInstance | null {
+  const pool = instances().filter((i) => i.slot === slotKind);
+  if (pool.length === 0) return null;
+  const different = pool.find((i) => i.defId !== curDefId);
+  return different ?? pool[0] ?? null;
+}
+
+/** 装备页顶部提示（合成结果 / 装备失败如实回显）。自带 `data-g2-note`。 */
+function buildNote(): HTMLElement | null {
+  if (!flash) return null;
+  const note = elDiv('g2-note ' + (flash.ok ? 'g2-note-ok' : 'g2-note-bad'), flash.text);
+  note.dataset['g2Note'] = flash.ok ? 'ok' : 'bad';
+  return note;
+}
+
+/**
+ * 背包外壳 = **有明确 min-height:0 的 flex 列**（本轮必改 1）：
+ *   `.g2-bag-wrap { flex:1 1 auto; min-height:0; display:flex; flex-direction:column }`
+ *   `.g2-bag      { flex:1 1 auto; min-height:0; overflow-y:auto }`
+ * 只有这两级同时成立，滚动才真的发生在背包内、footer 才由 flex 固定占位。
+ */
 function buildBag(): HTMLElement {
+  const wrap = elDiv('g2-bag-wrap');
+  wrap.dataset['g2BagWrap'] = '1';
   const head = elDiv('g2-bag-head');
   head.dataset['g2BagHead'] = '1';
   head.append(elDiv('g2-bag-title', '背包'));
-  // 合成按钮（GARAGE-V2-FORMAL-FUSE-SLICE-R1）：真实资格红点 ——
-  // 只有「当前存在满足同部位+同品质≥5 的可合成组」才亮红点数量；无组 = 素色可点（弹窗给空说明）。
-  const groups = fuseCandidateGroups();
-  const btn = el('button', 'g2-fuse-btn' + (groups.length > 0 ? ' g2-fuse-btn-ready' : ''));
-  btn.type = 'button';
-  btn.dataset['g2FuseEntry'] = '1';
-  btn.dataset['g2FuseReady'] = String(groups.length);
-  btn.append(document.createTextNode('合成'));
-  if (groups.length > 0) {
-    const dot = elDiv('g2-fuse-dot', String(groups.length));
-    dot.dataset['g2FuseDot'] = '1';
-    btn.append(dot);
-  }
-  btn.addEventListener('click', () => {
-    modal = { kind: 'fuse' };
-    fuseMainPick = null; // 每次打开弹窗重置主件选择（选择不跨打开保留）
-    rerender();
-  });
-  head.append(btn);
+  head.append(elDiv('g2-bag-hint', '点一件 · 换成它'));
 
   const bag = elDiv('g2-bag');
   bag.dataset['g2Bag'] = '1';
+  bag.dataset['g2Scroll'] = '1';
+
   const grid = elDiv('g2-grid');
   grid.dataset['g2Grid'] = '1';
-  for (const inst of instances()) {
-    grid.append(buildCell(inst));
-  }
+  for (const inst of instances()) grid.append(buildCell(inst));
   bag.append(grid);
-  const wrap = elDiv('g2-bag-wrap');
   wrap.append(head, bag);
   return wrap;
 }
 
 function buildCell(inst: ItemInstance): HTMLElement {
-  const cell = el('button', 'g2-cell' + (inst.consumable ? '' : ' g2-cell-locked'));
+  const isFresh = freshInstId === inst.instanceId;
+  const cell = el(
+    'button',
+    'g2-cell' + (inst.consumable ? '' : ' g2-cell-locked') + (isFresh ? ' g2-cell-fresh' : ''),
+  );
   cell.type = 'button';
   cell.dataset['g2Cell'] = inst.instanceId;
+  if (isFresh) cell.dataset['g2Fresh'] = '1';
   cell.dataset['q'] = inst.quality;
   cell.dataset['g2SlotKind'] = inst.slot;
   cell.title = inst.lockedReason ? lockedText(inst.lockedReason) : `${inst.name}（${QUALITY_LABELS[inst.quality]}）`;
@@ -313,13 +422,16 @@ function buildCell(inst: ItemInstance): HTMLElement {
   badge.dataset['g2Badge'] = SLOT_BADGE[inst.slot];
   cell.append(badge);
   cell.addEventListener('click', () => {
+    // 背包格：movement 默认后轮（弹窗里是一目了然的二选一，随时可改目标）
+    if (inst.slot === 'movement') movementTargetPick = 'rear';
     modal = { kind: 'compare', slotKey: defaultSlotKeyOf(inst), slotKind: inst.slot, candidate: inst };
+    flash = null;
     rerender();
   });
   return cell;
 }
 
-/** 背包格点击的默认目标槽：movement 拆前后（默认装后轮，弹窗里可换目标）。 */
+/** 背包格点击的默认目标槽：movement 拆前后（默认装后轮，弹窗内二选一可改）。 */
 function defaultSlotKeyOf(inst: ItemInstance): string {
   if (inst.slot === 'movement') return 'rear';
   return inst.slot;
@@ -328,44 +440,248 @@ function defaultSlotKeyOf(inst: ItemInstance): string {
 function buildFoot(): HTMLElement {
   const foot = elDiv('g2-foot');
   foot.dataset['g2Foot'] = '1';
-  const back = el('button', 'g2-back', '返回');
+  const back = el('button', 'g2-back', '返回首页');
   back.type = 'button';
   back.dataset['g2Back'] = '1';
-  back.addEventListener('click', () => onClose());
+  back.addEventListener('click', () => closeToHome());
   foot.append(back);
   return foot;
 }
 
-/* ────────────────────────── 弹窗 ────────────────────────── */
+/** 返回首页：恢复页面 header → 交回 homePage（其内部重读正式存档，语义未改）。 */
+function closeToHome(): void {
+  if (pageHeader) pageHeader.style.display = '';
+  onClose();
+}
 
-function buildModal(m: NonNullable<G2Modal>): HTMLElement {
+/* ── 合成模式（同页，不再有遮罩弹窗） ── */
+
+function buildFusePage(): HTMLElement[] {
+  const groups = fuseCandidateGroups();
+  const hint = elDiv(
+    'g2-fuse-hint',
+    groups.length > 0
+      ? `同部位 · 同品质 5 合 1 → 主件升一档（可合成 ${groups.length} 组）`
+      : '同部位 · 同品质 5 合 1 → 主件升一档',
+  );
+  hint.dataset['g2FuseHint'] = '1';
+
+  const wrap = elDiv('g2-bag-wrap');
+  wrap.dataset['g2FuseGroups'] = '1';
+  const bag = elDiv('g2-bag');
+  bag.dataset['g2Bag'] = '1';
+  bag.dataset['g2Scroll'] = '1';
+  if (groups.length === 0) {
+    const empty = elDiv(
+      'g2-fuse-empty',
+      '没有满足「同部位 + 同品质 ≥5」的组（车身 / 旧星级成长件 / 装备中 / 彩封顶 / 非推进辅助 不计入）。',
+    );
+    empty.dataset['g2FuseEmpty'] = '1';
+    bag.append(empty);
+  }
+  for (const g of groups) bag.append(buildFuseGroup(g, groups));
+  wrap.append(bag);
+
+  return [buildHead('fuse'), hint, wrap, buildFuseResult(groups)];
+}
+
+function buildFuseGroup(g: FuseGroup, allGroups: readonly FuseGroup[]): HTMLElement {
+  const box = elDiv('g2-fuse-group');
+  box.dataset['g2FuseGroupKind'] = g.kind;
+  box.dataset['g2FuseGroupQ'] = g.quality;
+  box.dataset['g2FuseGroup'] = fuseGroupLabel(g);
+
+  const head = elDiv('g2-bag-head');
+  head.append(elDiv('g2-bag-title', fuseGroupLabel(g)));
+  head.append(elDiv('g2-group-count', `×${g.members.length}`));
+
+  const pick = fusePickState(allGroups);
+  const grid = elDiv('g2-grid');
+  for (const mem of g.members) grid.append(buildFuseCell(g, mem, pick));
+
+  box.append(head, grid);
+  return box;
+}
+
+/**
+ * 合成候选格（**与装备背包同规格**：同一 `.g2-cell` / 4 列 / 86% 图标）：
+ *   - `g2-cell-main`   = 玩家要保留的主件（金环 + 角标「主」）；
+ *   - `g2-cell-consume`= 系统自动补的 4 件材料（压暗 + 角标「料」+ × 覆盖）⇒ 消耗者一目了然。
+ */
+function buildFuseCell(
+  g: FuseGroup,
+  mem: ItemInstance,
+  pick: { group: FuseGroup; main: ItemInstance; mats: readonly ItemInstance[] } | null,
+): HTMLElement {
+  const isMain = pick?.main.instanceId === mem.instanceId;
+  const isConsumed = !!pick && pick.mats.some((mm) => mm.instanceId === mem.instanceId);
+  const cell = el(
+    'button',
+    'g2-cell' + (isMain ? ' g2-cell-main' : '') + (isConsumed ? ' g2-cell-consume' : ''),
+  );
+  cell.type = 'button';
+  cell.style.setProperty('--q', qualityHex(g.quality));
+  cell.dataset['g2FuseMember'] = mem.instanceId;
+  cell.dataset['g2FuseMain'] = String(isMain);
+  cell.dataset['g2FuseConsume'] = String(isConsumed);
+  cell.dataset['g2SlotKind'] = g.kind;
+  cell.title = `${mem.name}（${QUALITY_LABELS[g.quality]}）`;
+  cell.append(partIconNode(iconKindOf(g.kind), mem.defId));
+  const badge = elDiv('g2-corner', isMain ? '主' : isConsumed ? '料' : SLOT_BADGE[g.kind]);
+  cell.append(badge);
+  cell.addEventListener('click', () => {
+    fuseMainPick = isMain ? null : mem.instanceId; // 再点主件 = 取消选择
+    rerender();
+  });
+  return cell;
+}
+
+/** 底部固定区：主件 → 下一品质 + 唯一【确认五合一】。恒定存在（不跳动）。 */
+function buildFuseResult(groups: readonly FuseGroup[]): HTMLElement {
+  const bar = elDiv('g2-fuse-result');
+  bar.dataset['g2FusePreview'] = '1';
+  const pick = fusePickState(groups);
+
+  const icons = elDiv('g2-fuse-icons');
+  icons.dataset['g2FuseIcons'] = '1';
+  if (pick) {
+    const next = nextQuality(pick.group.quality);
+    icons.append(fuseSlot(pick.group.kind, pick.main.defId, pick.group.quality));
+    icons.append(elDiv('g2-fuse-arrow', '→'));
+    const to = fuseSlot(pick.group.kind, pick.main.defId, next ?? pick.group.quality);
+    if (next) to.dataset['g2FuseNext'] = next;
+    icons.append(to);
+  } else {
+    const ph = elDiv('g2-fuse-placeholder', '选主件');
+    ph.dataset['g2FuseNoPick'] = '1';
+    icons.append(ph);
+  }
+
+  const text = elDiv(
+    'g2-fuse-result-text',
+    pick
+      ? `${QUALITY_LABELS[pick.group.quality]} → ${QUALITY_LABELS[nextQuality(pick.group.quality) ?? pick.group.quality]}｜消耗主件 + 4 件同组材料`
+      : groups.length === 0
+        ? '暂无可合成组'
+        : '点一件你最想保留的（成品保留它的外形）',
+  );
+  text.dataset['g2FuseText'] = '1';
+
+  const go = el('button', 'g2-fuse-confirm', '确认五合一');
+  go.type = 'button';
+  go.dataset['g2Action'] = 'fuse';
+  go.disabled = !pick;
+  go.addEventListener('click', () => {
+    const now = fusePickState(fuseCandidateGroups());
+    if (!now) return;
+    const mats = now.mats.map((mm) => mm.instanceId);
+    const res: QualityFuseResult = fuseQualityFive({
+      mainInstanceId: now.main.instanceId,
+      materialInstanceIds: mats,
+      draft,
+    });
+    if (!res.ok) {
+      // 失败如实回显；事务内部保证零写盘
+      flash = { ok: false, text: `合成失败：${res.detail}` };
+      mode = 'equip';
+      fuseMainPick = null;
+      rerender();
+      return;
+    }
+    // 成功：从正式存档重读 → 回装备页 → 结果清晰（顶部提示 + 新件金环 + 滚到它）
+    reloadFromStore();
+    const before = now.group.quality;
+    flash = {
+      ok: true,
+      text: `合成成功：${QUALITY_LABELS[before]} → ${QUALITY_LABELS[res.productQuality]}（外形保留主件，已在背包里，可直接穿戴）`,
+    };
+    mode = 'equip';
+    fuseMainPick = null;
+    scrollMemo = 0;
+    freshInstId = res.productId; // 背包里立刻带金环（结果清晰）
+    pendingRevealId = res.productId;
+    rerender();
+  });
+
+  bar.append(icons, text, go);
+  return bar;
+}
+
+function fuseSlot(kind: ItemSlotKind, defId: string, q: QualityTier): HTMLElement {
+  const box = elDiv('g2-fuse-slot');
+  box.dataset['q'] = q;
+  box.style.setProperty('--q', qualityHex(q));
+  box.append(partIconNode(iconKindOf(kind), defId));
+  return box;
+}
+
+/* ────────────────────────── 对比弹窗（装备唯一入口） ────────────────────────── */
+
+function buildModal(m: G2Modal): HTMLElement {
   const mask = elDiv('g2-mask');
   mask.dataset['g2Mask'] = '1';
   const card = elDiv('g2-modal');
   card.dataset['g2Modal'] = m.kind;
-  card.append(...(m.kind === 'fuse' ? fuseModal(m) : compareModal(m)));
+  card.append(...compareModal(m));
   mask.append(card);
   mask.addEventListener('click', (e) => {
     if (e.target === mask) {
-      modal = null;
+      modal = null; // 点遮罩 = 取消（零写盘）
       rerender();
     }
   });
   return mask;
 }
 
-/** 「当前装备 / 新件」图形对比 + 真实装备事务（【取消】零写盘）。 */
-function compareModal(m: NonNullable<G2Modal> & { kind: 'compare' }): HTMLElement[] {
-  const cur = equippedOf(m.slotKey, m.slotKind);
-  const curDefId = cur?.defId ?? null;
-  const title = elDiv('g2-modal-title', modalTitleOf(m));
+/**
+ * 「当前装备 / 新件」图形对比 + 真实装备事务（【取消】零写盘）。
+ *
+ * 本轮结构（必改 3）：
+ *   - movement 的前/后轮目标 = **标题正下方的独立二选一**（各带该槽当前件图标），
+ *     不再和「装备/取消」挤在同一行抢主操作；
+ *   - 底部主操作**只有两个**：【取消】(左·次要) + 【装备/替换】(右·唯一主操作)。
+ *   - 二选一同时切换「当前装备」列的读数（对比的是**那个轮**现在装的是什么）。
+ */
+function compareModal(m: G2Modal): HTMLElement[] {
+  const isMovement = m.slotKind === 'movement';
+  const activeSlotKey = isMovement ? movementTargetPick : m.slotKey;
+  const cur = equippedOf(activeSlotKey, m.slotKind);
+  const rawCur = cur?.defId ?? null;
+  const hasCur = !!rawCur && rawCur !== 'wheelStd';
+
+  const title = elDiv('g2-modal-title', modalTitleOf(activeSlotKey, m.slotKind));
   title.dataset['g2ModalTitle'] = '1';
 
+  const blocks: HTMLElement[] = [title];
+
+  // ① 前/后轮目标（仅 movement）：独立二选一，先选「装到哪」，再看对比。
+  if (isMovement) {
+    const row = elDiv('g2-targets');
+    row.dataset['g2Targets'] = '1';
+    for (const t of ['front', 'rear'] as const) {
+      const nowDef = (t === 'front' ? draft.frontWheelDefId : draft.rearWheelDefId) ?? null;
+      const on = movementTargetPick === t;
+      const btn = el('button', 'g2-target' + (on ? ' g2-target-on' : ''));
+      btn.type = 'button';
+      btn.dataset['g2Target'] = t;
+      btn.dataset['g2TargetOn'] = String(on);
+      btn.append(partIconNode('movement', nowDef ?? 'wheelStd'));
+      btn.append(elDiv('g2-target-label', t === 'front' ? '装到前轮' : '装到后轮'));
+      btn.addEventListener('click', () => {
+        movementTargetPick = t;
+        rerender();
+      });
+      row.append(btn);
+    }
+    blocks.push(row);
+  }
+
+  // ② 图形对比
   const compare = elDiv('g2-compare');
   const colCur = elDiv('g2-col');
   colCur.dataset['g2Col'] = 'current';
   colCur.append(elDiv('g2-col-tag', '当前装备'));
-  colCur.append(curDefId ? partIconNode(iconKindOf(m.slotKind), curDefId) : elDiv('g2-col-note', '空'));
+  colCur.append(hasCur && rawCur ? partIconNode(iconKindOf(m.slotKind), rawCur) : elDiv('g2-col-note', '空'));
   colCur.append(elDiv('g2-col-q', cur?.quality ? `${QUALITY_LABELS[cur.quality]}品质` : ''));
 
   const colNew = elDiv('g2-col g2-col-new');
@@ -374,89 +690,76 @@ function compareModal(m: NonNullable<G2Modal> & { kind: 'compare' }): HTMLElemen
   colNew.append(elDiv('g2-col-tag', '背包选中'));
   colNew.append(partIconNode(iconKindOf(m.slotKind), m.candidate.defId));
   colNew.append(elDiv('g2-col-q', `${QUALITY_LABELS[m.candidate.quality]}品质`));
+  const blocked = equipBlockedReason(m.candidate);
   const note = elDiv(
     'g2-col-note',
-    m.candidate.lockedReason ? lockedText(m.candidate.lockedReason) : '可装备（正式语义）',
+    blocked ?? (m.candidate.lockedReason ? lockedText(m.candidate.lockedReason) : '可装备（正式语义）'),
   );
   note.dataset['g2ColNote'] = '1';
   colNew.append(note);
   compare.append(colCur, colNew);
+  blocks.push(compare);
 
-  // movement：前后轮目标切换（独立槽位，绝不硬编码总装前轮）。
-  // ⚠️ 只在弹窗「刚打开」时用入口槽初始化 pick 一次；此后 rerender 不得重置
-  // （否则用户点「装到前轮」→ rerender 又被 m.slotKey 拉回入口槽 = 选择丢失）。
-  if (m.slotKind === 'movement' && m.targetInit !== true) {
-    movementTargetPick = m.slotKey === 'front' ? 'front' : 'rear';
-    m.targetInit = true;
-  }
-  const movementTarget: 'front' | 'rear' | null = m.slotKind === 'movement' ? movementTargetPick : null;
-
+  // ③ 提示
   const warn = elDiv('g2-warn');
   warn.dataset['g2Warn'] = '1';
   if (m.toast) {
     warn.textContent = m.toast; // 上一次装备失败的如实回显
+  } else if (blocked) {
+    warn.textContent = blocked; // 结构性装不上（Body 品质件 / 非推进类 Gadget 品质件）
+  } else if (m.candidate.quality === 'chrome') {
+    warn.textContent = '彩品质（封顶）：不能再合成，但**可以正常穿戴**，Run 按 2.50 实效。';
   } else if (m.candidate.lockedReason === 'legacy-star-locked') {
     warn.textContent = `旧 ★${m.candidate.legacyStar} 成长件：保留历史成长，可正常装备；仅禁止作为 V2 合成材料。`;
   } else if (m.candidate.lockedReason === 'body-not-consumable') {
     warn.textContent = '车身沿旧方式换装（不参与品质合成消耗）。';
   } else if (m.candidate.quality !== 'white') {
-    warn.textContent = `品质件将走正式装备事务（equipQualityProduct）真实落盘，Run 按品质实效（${QUALITY_LABELS[m.candidate.quality]}）。`;
+    warn.textContent = `品质件走正式装备事务真实落盘，Run 按品质实效（${QUALITY_LABELS[m.candidate.quality]}）。`;
   }
+  blocks.push(warn);
 
+  // ④ 底部主操作：**只有两个**（取消 / 装备·替换）
   const actions = elDiv('g2-actions');
-  const cancel = el('button', 'g2-btn', '取消');
+  const cancel = el('button', 'g2-btn g2-btn-cancel', '取消');
   cancel.type = 'button';
   cancel.dataset['g2Action'] = 'cancel';
   cancel.addEventListener('click', () => {
     modal = null; // 【取消】零写盘：只关弹窗
     rerender();
   });
-
-  {
-    // movement：目标切换（装到后轮 / 装到前轮）+ 取消 + 装备，同一行
-    if (movementTarget) {
-      for (const t of ['rear', 'front'] as const) {
-        const b = el('button', 'g2-btn' + (movementTarget === t ? ' g2-btn-primary' : ''), t === 'rear' ? '装到后轮' : '装到前轮');
-        b.type = 'button';
-        b.dataset['g2Target'] = t;
-        b.addEventListener('click', () => {
-          movementTargetPick = t;
-          rerender();
-        });
-        actions.append(b);
-      }
-    }
-    const go = el('button', 'g2-btn g2-btn-primary', curDefId ? '替换装备' : '装备');
-    go.type = 'button';
-    go.dataset['g2Action'] = 'equip';
-    go.disabled = !!m.candidate.lockedReason && m.candidate.lockedReason !== 'legacy-star-locked' && m.candidate.lockedReason !== 'body-not-consumable';
-    go.addEventListener('click', () => {
-      const slotKey = movementTarget ?? m.slotKey;
-      const res = equipTransaction(slotKey, m.slotKind, m.candidate);
-      if (!res.ok) {
-        m.toast = `装备失败：${res.detail}`; // 如实回显，零写盘（事务内部保证）
-        rerender();
-        return;
-      }
-      reloadFromStore(); // 成功：从正式存档重读（车预览与 Run 同源）
-      modal = null;
+  const go = el('button', 'g2-btn g2-btn-primary', hasCur ? '替换' : '装备');
+  go.type = 'button';
+  go.dataset['g2Action'] = 'equip';
+  // ⚠️ 只有「事务结构性拒绝」才禁用主操作；lockedReason（能否被消耗）与穿戴无关。
+  go.disabled = !!blocked;
+  go.addEventListener('click', () => {
+    const slotKey = isMovement ? movementTargetPick : m.slotKey;
+    const res = equipTransaction(slotKey, m.slotKind, m.candidate);
+    if (!res.ok) {
+      m.toast = `装备失败：${res.detail}`; // 如实回显，零写盘（事务内部保证）
       rerender();
-    });
-    actions.append(go);
-  }
-  actions.append(cancel);
+      return;
+    }
+    reloadFromStore(); // 成功：从正式存档重读（车预览与 Run 同源）
+    modal = null;
+    flash = null;
+    freshInstId = null;
+    rerender();
+  });
+  actions.append(cancel, go);
+  blocks.push(actions);
 
-  return [title, compare, warn, actions];
+  return blocks;
 }
 
-function modalTitleOf(m: NonNullable<G2Modal> & { kind: 'compare' }): string {
-  if (m.slotKind === 'body') return '车身';
-  if (m.slotKind === 'weapon') return '武器';
-  if (m.slotKind === 'gadget') return '辅助';
-  return m.slotKey === 'front' ? '前轮' : '后轮';
+function modalTitleOf(slotKey: string, kind: ItemSlotKind): string {
+  if (kind === 'body') return '车身';
+  if (kind === 'weapon') return '武器';
+  if (kind === 'gadget') return '辅助';
+  return slotKey === 'front' ? '前轮' : '后轮';
 }
 
-/* ───────────── GARAGE-V2-FORMAL-FUSE-SLICE-R1｜真实五合一合成（正式 fuseQualityFive） ───────────── */
+/* ───────────── 真实五合一候选（正式 fuseQualityFive 的资格口径） ───────────── */
 
 interface FuseGroup {
   kind: ItemSlotKind;
@@ -468,14 +771,13 @@ interface FuseGroup {
 /**
  * 「当前满足同部位+同品质 ≥5」的**真实可合成组**（纯读数，不写任何东西）。
  *
- * 排除（Queue 必改 1 逐条）：
+ * 排除（旧限制，一条不改）：
  *   - Body（无数量模型，结构性不可消耗）；
  *   - 非 consumable（旧 ★2..5 legacy-star-locked / 已装备 equipped 保护 / 封顶）；
  *   - 彩品质封顶（isMaxQuality，无可再升的品质）；
- *   - **非推进类 Gadget**（pushRod 等）：它们没有品质实效通道 ⇒ 不能作主件、
- *     不能产出「伪可穿戴」产物 —— 整组排除（普通件照常在背包显示，只是不能合成）。
- *     推进类判据 = `registry.functionals.get(defId).behavior === 'thruster'`（与
- *     equipQualityProduct 的 gadget 分支同一真源）。
+ *   - **非推进类 Gadget**（pushRod 等）：没有品质实效通道 ⇒ 整组排除
+ *     （普通件照常在背包显示，只是不能合成）。判据与 `equipQualityProduct` 的
+ *     gadget 分支同一真源：`registry.functionals.get(defId).behavior === 'thruster'`。
  */
 function fuseCandidateGroups(): readonly FuseGroup[] {
   const byKey = new Map<string, ItemInstance[]>();
@@ -501,131 +803,24 @@ function fuseCandidateGroups(): readonly FuseGroup[] {
   return out;
 }
 
+/** 当前主件选择 → (组, 主件, 自动补的 4 件材料)；无选择/不足 4 件 = null。 */
+function fusePickState(
+  groups: readonly FuseGroup[],
+): { group: FuseGroup; main: ItemInstance; mats: readonly ItemInstance[] } | null {
+  if (!fuseMainPick) return null;
+  for (const g of groups) {
+    const main = g.members.find((mm) => mm.instanceId === fuseMainPick);
+    if (!main) continue;
+    const mats = g.members.filter((mm) => mm.instanceId !== fuseMainPick).slice(0, 4);
+    if (mats.length < 4) return null;
+    return { group: g, main, mats };
+  }
+  return null;
+}
+
 /** 组标题字（部位+品质；不是名字、不是数量堆叠）。 */
 function fuseGroupLabel(g: FuseGroup): string {
   return `${g.kind === 'weapon' ? '武器' : g.kind === 'gadget' ? '辅助' : '轮组'} · ${QUALITY_LABELS[g.quality]}`;
-}
-
-/**
- * 合成弹窗：只列真实可合成组 → 点一件为主件（产物保留该 defId）→ 系统确定性补
- * 同组其余 4 件 → 预览主件 → 下一品质（外形+颜色）→ 唯一【确认合成】调
- * `fuseQualityFive` 一次。失败如实回显（零写盘由事务保证）；成功重读正式存档 +
- * 刷新红点/候选；取消/关闭零写盘。**无星级栏 / 常驻材料空槽 / 名字 / 数量。**
- */
-function fuseModal(m: NonNullable<G2Modal> & { kind: 'fuse' }): HTMLElement[] {
-  const groups = fuseCandidateGroups();
-  const title = elDiv('g2-modal-title', '合成（同部位 + 同品质 ×5 → 主件下一品质）');
-  title.dataset['g2ModalTitle'] = '1';
-
-  const wrap = elDiv('g2-bag-wrap');
-  wrap.dataset['g2FuseGroups'] = '1';
-  if (groups.length === 0) {
-    // 无可合成组：只展示空说明，确认不可用（不造假）
-    const empty = elDiv('g2-col-note', '当前没有满足「同部位+同品质 ≥5」的组（Body/旧星级锁定/彩件/非推进辅助不计）。');
-    empty.dataset['g2FuseEmpty'] = '1';
-    wrap.append(empty);
-  }
-  for (const g of groups) {
-    const headRow = elDiv('g2-bag-head');
-    headRow.dataset['g2FuseGroup'] = fuseGroupLabel(g);
-    headRow.append(elDiv('g2-bag-title', fuseGroupLabel(g)));
-    wrap.append(headRow);
-    const mats = elDiv('g2-mats');
-    mats.dataset['g2FuseGroupKind'] = g.kind;
-    mats.dataset['g2FuseGroupQ'] = g.quality;
-    for (const mem of g.members) {
-      const isMain = fuseMainPick === mem.instanceId;
-      const mat = el('button', 'g2-mat' + (isMain ? ' g2-mat-main' : ''));
-      mat.type = 'button';
-      mat.style.setProperty('--q', qualityHex(g.quality));
-      mat.dataset['g2FuseMember'] = mem.instanceId;
-      mat.dataset['g2FuseMain'] = String(isMain);
-      mat.append(partIconNode(iconKindOf(g.kind), mem.defId));
-      mat.addEventListener('click', () => {
-        fuseMainPick = isMain ? null : mem.instanceId; // 再点取消
-        rerender();
-      });
-      mats.append(mat);
-    }
-    wrap.append(mats);
-  }
-
-  // 产物预览（选了主件才有）：主件外形 → 下一品质（颜色 + 同 defId 外形）
-  const previewWrap = elDiv('g2-bag-wrap');
-  previewWrap.dataset['g2FusePreview'] = '1';
-  const pickedGroup = fuseMainPick
-    ? groups.find((g) => g.members.some((mm) => mm.instanceId === fuseMainPick)) ?? null
-    : null;
-  const pickedMain = pickedGroup && fuseMainPick
-    ? pickedGroup.members.find((mm) => mm.instanceId === fuseMainPick) ?? null
-    : null;
-  if (pickedGroup && pickedMain) {
-    const next = nextQuality(pickedGroup.quality);
-    if (next) {
-      const prev = elDiv('g2-compare');
-      const colA = elDiv('g2-col');
-      colA.append(elDiv('g2-col-tag', '主件（保留外形）'));
-      colA.append(partIconNode(iconKindOf(pickedGroup.kind), pickedMain.defId));
-      colA.append(elDiv('g2-col-q', `${QUALITY_LABELS[pickedGroup.quality]}品质`));
-      const colB = elDiv('g2-col g2-col-new');
-      colB.dataset['q'] = next;
-      colB.append(elDiv('g2-col-tag', '将得到'));
-      colB.append(partIconNode(iconKindOf(pickedGroup.kind), pickedMain.defId));
-      colB.append(elDiv('g2-col-q', `${QUALITY_LABELS[next]}品质`));
-      prev.append(colA, colB);
-      previewWrap.append(prev);
-    }
-  }
-
-  const warn = elDiv('g2-warn');
-  warn.dataset['g2Warn'] = '1';
-  warn.textContent = m.toast ?? (pickedMain ? '确认后消耗主件+4 件同组材料，产出一件事下一品质成品（可继续穿戴）。' : '点组内一件选为主件（成品保留它的外形）。');
-
-  const actions = elDiv('g2-actions');
-  const cancel = el('button', 'g2-btn', '取消');
-  cancel.type = 'button';
-  cancel.dataset['g2Action'] = 'cancel';
-  cancel.addEventListener('click', () => {
-    modal = null; // 取消零写盘：只关弹窗
-    fuseMainPick = null;
-    rerender();
-  });
-  const go = el('button', 'g2-btn g2-btn-primary', '确认合成');
-  go.type = 'button';
-  go.dataset['g2Action'] = 'fuse';
-  go.disabled = !pickedMain; // 无主件 = 不可确认（4/5 组本来就不出现在候选里）
-  go.addEventListener('click', () => {
-    if (!pickedGroup || !pickedMain) return;
-    // 系统确定性补齐同组其余 4 件（互异、排除主件本身）
-    const mats = pickedGroup.members
-      .filter((mm) => mm.instanceId !== pickedMain.instanceId)
-      .slice(0, 4)
-      .map((mm) => mm.instanceId);
-    if (mats.length < 4) {
-      m.toast = '合成失败：同组可补材料不足 4 件';
-      rerender();
-      return;
-    }
-    const res: QualityFuseResult = fuseQualityFive({
-      mainInstanceId: pickedMain.instanceId,
-      materialInstanceIds: mats,
-      draft,
-    });
-    if (!res.ok) {
-      m.toast = `合成失败：${res.detail}`; // 实际 reason 如实回显；事务零写盘
-      rerender();
-      return;
-    }
-    // 成功：从正式存档重读（库存/账本/装备同一次刷新），关弹窗、清主件选择；
-    // 新产物立即出现在背包（可点击穿戴），红点随重算消失/更新。
-    reloadFromStore();
-    modal = null;
-    fuseMainPick = null;
-    rerender();
-  });
-  actions.append(cancel, go);
-
-  return [title, wrap, previewWrap, warn, actions];
 }
 
 /* ────────────────────────── 杂项 ────────────────────────── */
@@ -634,7 +829,8 @@ function iconKindOf(slot: ItemSlotKind): 'weapon' | 'body' | 'movement' | 'gadge
   return slot;
 }
 
-function qualityHex(q: QualityTier): string {  return (
+function qualityHex(q: QualityTier): string {
+  return (
     {
       white: '#9aa7b8',
       green: '#4caf6d',
@@ -647,6 +843,29 @@ function qualityHex(q: QualityTier): string {  return (
   )[q];
 }
 
+/**
+ * 「穿上它」这件事**结构性做不到**的原因（null = 可以装）。本轮修正的一个真实缺陷：
+ *
+ *   `ItemInstance.lockedReason` 描述的是「**能否被五合一消耗**」（equipped / Body /
+ *   max-quality / legacy-star-locked），**不是**「能否穿戴」。旧版 UI 把
+ *   `lockedReason !== legacy && !== body` 直接当作「装备按钮禁用」⇒
+ *   **红品质 / 彩品质（max-quality）件根本装不上**（而 `equipQualityProduct` 本来接受它们，
+ *   它只挡 Body 与「非推进类 Gadget」）。⇒ 现在只拦截事务本身会结构性拒绝的两类：
+ *     · 品质件里的 Body（Body 无数量模型 ⇒ run-not-wired，独立冻结）；
+ *     · 品质件里的**非推进类 Gadget**（没有品质实效通道）。
+ *   旧 q1 件一律不拦：闸门在各自既有 equip* 事务里，如实回显即可。
+ */
+function equipBlockedReason(inst: ItemInstance): string | null {
+  if (!inst.instanceId.startsWith('qv2:')) return null;
+  if (inst.slot === 'body') return '品质车身暂不支持穿戴（Body 数量模型独立冻结），可先换车身再谈品质。';
+  if (inst.slot === 'gadget') {
+    const def = registry.functionals.get(inst.defId);
+    if (!def || def.behavior !== 'thruster') {
+      return '该辅助件没有品质实效通道（只有推进器类支持按品质放大推力）。';
+    }
+  }
+  return null;
+}
 
 function lockedText(reason: NonNullable<ItemInstance['lockedReason']>): string {
   return reason === 'equipped'
@@ -677,11 +896,16 @@ const SPRITE_URLS: Readonly<Record<string, string>> = {
 /* ────────────────────────── 挂载入口 ────────────────────────── */
 
 /**
- * 正式 Garage V2 装备视图挂载（homePage 对【调整战车】默认调用；
+ * 正式 Garage V2 视图挂载（homePage 对【调整战车】默认调用；
  * 旧星级 Garage 仅 `?garageLegacy=1` 兼容测试入口可达）。
+ *
+ * ⚠️ 进入时把页面级 `.ph-header` 藏起来（V2 自带标题行）：390×844 下它白占 59~62px
+ *    上方空白，正是真人抱怨的「上面一大块没用的空」。返回时**原样恢复**，
+ *    首页布局与 homePage 代码都不动。
+ *
  * @param container 挂载容器（正式 stage）
  * @param draft0 初始 draft（由 homePage 从正式存档读入）
- * @param backAction 底部【返回】动作（homePage 注入：`view='home'; render()`）
+ * @param backAction 底部【返回首页】动作（homePage 注入：重读正式存档 + `view='home'`）
  */
 export function mountGarageV2View(
   container: HTMLElement,
@@ -691,6 +915,16 @@ export function mountGarageV2View(
   root = container;
   draft = draft0;
   onClose = backAction;
+  mode = 'equip';
+  modal = null;
+  flash = null;
+  fuseMainPick = null;
+  movementTargetPick = 'rear';
+  scrollMemo = 0;
+  pendingRevealId = null;
+  freshInstId = null;
+  pageHeader = container.parentElement?.querySelector<HTMLElement>('.ph-header') ?? null;
+  if (pageHeader) pageHeader.style.display = 'none';
   rerender();
 }
 
@@ -700,6 +934,8 @@ export function garageV2ViewProbe(): Record<string, unknown> {
   const fuseGroups = fuseCandidateGroups();
   return {
     mounted: true,
+    /** 'equip' | 'fuse'（同页合成模式；遮罩弹窗只剩 compare）。 */
+    mode,
     cells: root.querySelectorAll('[data-g2-cell]').length,
     slots: root.querySelectorAll('[data-g2-slot]').length,
     slotsEquipped: root.querySelectorAll('[data-g2-slot-def]').length,
@@ -707,11 +943,20 @@ export function garageV2ViewProbe(): Record<string, unknown> {
     /** 真实可合成组数（红点口径同源）。 */
     fuseReadyGroups: fuseGroups.length,
     fuseDot: root.querySelector('[data-g2-fuse-dot]')?.textContent ?? null,
-    /** 弹窗内已选主件（null = 未选）。 */
+    /** 已选主件（null = 未选）。 */
     fuseMainPick: fuseMainPick,
     fuseMembers: root.querySelectorAll('[data-g2-fuse-member]').length,
-    fuseConfirmDisabled: (root.querySelector('[data-g2-action="fuse"]') as HTMLButtonElement | null)?.disabled ?? null,
+    /** 自动补的 4 件材料数（视觉上标为「料」）。 */
+    fuseConsumeMarked: root.querySelectorAll('[data-g2-fuse-consume="true"]').length,
+    fuseConfirmDisabled:
+      (root.querySelector('[data-g2-action="fuse"]') as HTMLButtonElement | null)?.disabled ?? null,
+    fuseBackVisible: !!root.querySelector('[data-g2-fuse-back]'),
     gridTextFree: isGridTextFree(),
+    /** movement 弹窗当前目标槽 + 二选一是否存在（保证唯一主操作）。 */
+    movementTarget: movementTargetPick,
+    compareTargetButtons: root.querySelectorAll('[data-g2-target]').length,
+    comparePrimaryActions: root.querySelectorAll('[data-g2-modal] [data-g2-action="equip"]').length,
+    flash: flash?.text ?? null,
     rearDef: draft.rearWheelDefId ?? null,
     frontDef: draft.frontWheelDefId ?? null,
     weaponDef: draft.functionalSelections['frontMass'] ?? null,
@@ -723,7 +968,7 @@ export function garageV2ViewProbe(): Record<string, unknown> {
   };
 }
 
-/** 验收 1 判据：背包格内**零**名字/数量/星级文本（角标「武/身/轮/辅」除外）。 */
+/** 验收判据：背包格内**零**名字/数量/星级文本（角标「武/身/轮/辅」除外）。 */
 function isGridTextFree(): boolean {
   const grid = root.querySelector('[data-g2-grid]');
   if (!grid) return true;

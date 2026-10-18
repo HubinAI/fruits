@@ -666,109 +666,156 @@
       .ph-main-garage .ph-grid-3 .ph-card-hint { font-size: 9px; }
 
 
-    /* ════ GARAGE-V2-FORMAL-EQUIP-SLICE-R1｜Garage V2 正式装备视图（?garageV2=1 预览分支；
-         视觉结构与 garage-v2-lab.html 同源：中上战车/左右五槽/下方单件品质图标格。 */
+    /* ══════════════════════════════════════════════════════════════════════════
+       GARAGE-V2-UX-RETURN-BAG-FUSE-R1｜正式 Garage 2.0 交互结构（重做，不是微调）
+
+       版面契约（逻辑 390×844 **恒定**；不再随浏览器窗口宽度变化）：
+
+         .g2-head        40  标题 + 右上【合成】（合成模式：标题 + 右上【返回装备】）
+         .g2-stage      148  战车（保持可认）
+         .g2-slots-row   74  五槽**同行**（每槽 1fr；旧版左三右二两列白吃两行高）
+         .g2-note      变高   成功/失败提示（有才出现）
+         .g2-bag-wrap  flex:1 1 auto; min-height:0  ← 背包外壳（**明确 min-height:0**）
+           .g2-bag     flex:1 1 auto; min-height:0; overflow-y:auto  ← 唯一滚动容器
+         .g2-foot        64  【返回首页】（flex 固定 ⇒ 结构上不可能被长背包裁掉）
+
+       ⚠️ 旧版缺陷 ①（真人录屏：返回按钮在屏外）：`.g2-bag-wrap` 不是 flex 列容器
+          ⇒ `.g2-bag` 的 `flex` / `overflow` 全部失效 ⇒ 背包按内容撑高（实测 654px），
+          footer 被顶到 y≈1198..1242（画面 844 之外，且外层 overflow:hidden 不可滚）
+          ⇒ 玩家**结构上无法返回**。本版两级都显式写 flex + min-height:0。
+       ⚠️ 旧版缺陷 ②（真人录屏：图标微小）：`.g2-grid` 带 `@media (min-width:430px)`
+          → 5 列。逻辑画面恒 390，但**媒体查询看的是浏览器窗口** ⇒ 桌面 1440 变 5 列、
+          图标被压到 62%（实测可见面积比 0.583）。本版删除**全部**宽度断点 + 图标 86%。
+       ⚠️ 旧版缺陷 ③（真人录屏：操作沉重）：前/后轮与「替换/取消」四个按钮挤在同一行；
+          合成是遮罩弹窗 + 44px 小图标列表。本版：目标=独立二选一、底部只留两个按钮、
+          合成=同页模式 + 与背包同规格 4 列大图标。
+    ══════════════════════════════════════════════════════════════════════════ */
       .g2-head {
         flex: 0 0 auto;
-        display: flex; align-items: center; justify-content: center;
-        height: 34px;
-        font-size: 14px; font-weight: 700; color: #cfe0ff;
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 8px;
+        height: 40px; padding: 0 12px;
       }
+      .g2-title { font-size: 15px; font-weight: 800; color: #dbe9ff; letter-spacing: 1px; }
+      .g2-pill {
+        font: inherit; font-size: 12px; font-weight: 700;
+        padding: 7px 13px; border-radius: 999px;
+        border: 1px solid #2b3550; background: #131b28; color: #9fb3cc;
+        cursor: pointer;
+      }
+      .g2-pill:active { background: #1c2740; }
       .g2-stage {
         flex: 0 0 auto;
         position: relative;
-        height: 190px;
+        height: 148px;
         overflow: hidden;
       }
       .g2-car {
-        position: absolute; left: 0; top: 50%; transform: translateY(-58%);
-        width: 100%; height: 170px;
+        position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+        width: 100%; height: 136px;
       }
       .g2-car-item { position: absolute; }
       .g2-car-item img, img.g2-car-item { position: absolute; }
       .g2-car-fallback { background: rgba(120, 140, 170, 0.35); border-radius: 3px; }
+
+      /* 五槽同行：同一个 grid + 同一条 .g2-slot 规则（无专属 modifier / 无绝对定位） */
       .g2-slots-row {
         flex: 0 0 auto;
-        display: flex; justify-content: space-between; align-items: flex-start;
-        padding: 4px 10px 6px;
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 6px;
+        padding: 0 12px 8px;
       }
-      .g2-slots-col { display: flex; flex-direction: column; gap: 8px; }
       .g2-slot {
-        width: 64px; height: 64px;
+        height: 64px;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: 2px;
-        border-radius: 10px;
+        gap: 3px;
+        border-radius: 12px;
         border: 1px solid #2b3550;
         background: #131b28;
         cursor: pointer;
-        font: inherit;
-        color: inherit;
-        padding: 0;
+        font: inherit; color: inherit; padding: 0;
+        overflow: hidden;
       }
-      .g2-slot .g2-part, .g2-slot .ph-part-icon { width: 40px; height: 30px; }
-      .g2-slot-kind {
-        font-size: 9px; color: #7f92ad; letter-spacing: 1px;
+      .g2-slot .g2-part, .g2-slot .ph-part-icon {
+        width: 82%; height: 66%; object-fit: contain;
       }
-      .g2-slot-empty { font-size: 10px; color: #55647d; }
-      .g2-slot-eq { border-color: #4a7bd0; box-shadow: 0 0 0 1px rgba(74, 123, 208, 0.35); }
+      .g2-slot-kind { font-size: 9px; color: #8b9bb2; letter-spacing: 1px; line-height: 1; }
+      .g2-slot-empty { font-size: 12px; color: #55647d; line-height: 1; }
+      .g2-slot-eq { border-color: #3f6099; background: #16202f; }
+
+      /* 顶部提示（合成成功 / 失败如实回显） */
+      .g2-note {
+        flex: 0 0 auto;
+        margin: 0 12px 6px;
+        padding: 7px 10px;
+        border-radius: 9px;
+        font-size: 11px; line-height: 1.45;
+      }
+      .g2-note-ok { color: #8fe0ad; background: rgba(63, 143, 90, 0.12); border: 1px solid rgba(63, 143, 90, 0.42); }
+      .g2-note-bad { color: #ff9c8f; background: rgba(226, 68, 92, 0.12); border: 1px solid rgba(226, 68, 92, 0.42); }
+
+      /* 背包外壳：**明确 min-height:0 的 flex 列**（缺陷 ① 的结构性修复） */
+      .g2-bag-wrap {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
       .g2-bag-head {
         flex: 0 0 auto;
         display: flex; align-items: center; justify-content: space-between;
-        padding: 2px 12px 4px;
+        gap: 8px;
+        padding: 2px 12px 6px;
       }
-      .g2-bag-title { font-size: 12px; color: #93a1b6; }
-      .g2-fuse-btn {
-        font: inherit; font-size: 12px; font-weight: 700;
-        display: flex; align-items: center; gap: 4px;
-        padding: 5px 12px; border-radius: 999px;
-        border: 1px solid #2b3550;
-        background: #131b28; color: #9fb3cc;
-        cursor: pointer;
-      }
-      .g2-fuse-btn-ready {
-        border-color: #7a5b00;
-        background: linear-gradient(180deg, #ffd35a, #e8a92c); color: #3a2600;
-      }
-      .g2-fuse-dot {
-        min-width: 16px; height: 16px; padding: 0 4px;
-        display: inline-flex; align-items: center; justify-content: center;
-        border-radius: 999px; background: #e2445c; color: #fff;
-        font-size: 10px; font-weight: 800;
-      }
+      .g2-bag-title { font-size: 12px; font-weight: 700; color: #93a1b6; }
+      .g2-bag-hint { font-size: 11px; color: #7b8ba3; }
+      .g2-group-count { font-size: 11px; color: #7b8ba3; }
       .g2-bag {
         flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
-        padding: 0 12px 8px;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        padding: 0 12px 10px;
       }
       .g2-grid {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 8px;
       }
-      @media (max-width: 374px) { .g2-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-      @media (min-width: 430px) { .g2-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
       .g2-cell {
         position: relative;
         aspect-ratio: 1 / 1;
         display: flex; align-items: center; justify-content: center;
-        border-radius: 10px;
-        border: 2px solid var(--q, #5a6b85);
-        background: rgba(19, 27, 40, 0.9);
+        border-radius: 12px;
+        border: 2px solid var(--q, #4a5b74);
+        background: radial-gradient(120% 120% at 50% 28%, rgba(38, 52, 74, 0.92), rgba(15, 21, 30, 0.96));
         cursor: pointer;
         font: inherit; padding: 0;
+        overflow: hidden;
       }
-      .g2-cell .g2-part, .g2-cell .ph-part-icon { width: 62%; height: 62%; object-fit: contain; }
+      /* 图标主导：每格约 85%+（旧 62% → 现在 90% 内容盒 = 实测 0.86 格宽） */
+      .g2-cell .g2-part, .g2-cell .ph-part-icon {
+        width: 90%; height: 90%; object-fit: contain;
+      }
+      /* 角标降权：小、无底色、角落低对比（不再抢图形） */
       .g2-cell .g2-corner {
-        position: absolute; left: 3px; top: 3px;
+        position: absolute; left: 5px; bottom: 4px;
         font-size: 8px; line-height: 1;
-        padding: 2px 3px; border-radius: 4px;
-        background: rgba(7, 10, 16, 0.75);
-        color: #aebdd2;
+        color: #7b8ba3;
+        pointer-events: none;
       }
-      .g2-cell-locked { opacity: 0.42; }
+      /* 锁定件（装备中 / 旧星级 / 封顶）：**不整体灰到难认**（旧 0.42 → 0.72） */
+      .g2-cell-locked { opacity: 0.72; border-style: dashed; }
       .g2-cell-locked::after {
         content: '🔒';
-        position: absolute; right: 3px; top: 3px; font-size: 9px;
+        position: absolute; right: 4px; top: 3px; font-size: 9px; opacity: 0.85;
+      }
+      /* 刚出炉的合成产物：金环（结果清晰；玩家下一次操作即消失） */
+      .g2-cell-fresh {
+        box-shadow: 0 0 0 3px #ffd35a, 0 0 16px rgba(255, 211, 90, 0.45);
+        border-color: #ffd35a;
       }
       .g2-cell[data-q='white']  { --q: #9aa7b8; }
       .g2-cell[data-q='green']  { --q: #4caf6d; }
@@ -780,33 +827,59 @@
         --q: #ffd35a;
         background: linear-gradient(135deg, rgba(255, 211, 90, 0.16), rgba(226, 68, 92, 0.16), rgba(63, 143, 210, 0.16));
       }
+
+      /* 底部【返回首页】：flex 固定占位（不 sticky、不绝对定位，靠布局保证恒在画面内） */
       .g2-foot {
         flex: 0 0 auto;
         display: flex; justify-content: center;
-        padding: 8px 14px 14px;
+        padding: 6px 14px 12px;
       }
       .g2-back {
-        font: inherit; font-size: 14px; font-weight: 700;
-        width: 100%; max-width: 240px;
-        padding: 11px 0; border-radius: 12px;
+        font: inherit; font-size: 15px; font-weight: 800; letter-spacing: 1px;
+        width: 100%; min-height: 46px;
+        border-radius: 12px;
         border: 1px solid #2b3550; background: #1a2536; color: #cfe0ff;
         cursor: pointer;
       }
+      .g2-back:active { background: #24344a; }
+
+      /* ── 对比弹窗（装备唯一入口） ── */
       .g2-mask {
         position: absolute; inset: 0; z-index: 10;
-        background: rgba(5, 8, 13, 0.72);
+        background: rgba(5, 8, 13, 0.74);
         display: flex; align-items: center; justify-content: center;
-        padding: 18px;
+        padding: 16px;
       }
       .g2-modal {
-        width: 100%; max-width: 330px;
+        width: 100%; max-width: 340px;
+        max-height: 96%;
+        overflow-y: auto;
         border-radius: 14px;
         border: 1px solid #2b3550;
         background: #101823;
         padding: 14px;
         display: flex; flex-direction: column; gap: 10px;
       }
-      .g2-modal-title { font-size: 14px; font-weight: 700; color: #eaf1fb; }
+      .g2-modal-title { font-size: 15px; font-weight: 800; color: #eaf1fb; }
+
+      /* 前/后轮目标 = 独立二选一（缺陷 ③：不再与主操作抢同一行） */
+      .g2-targets { display: flex; gap: 8px; }
+      .g2-target {
+        flex: 1 1 0;
+        min-height: 48px;
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        border-radius: 10px;
+        border: 1px solid #2b3550; background: #131b28; color: #9fb3cc;
+        font: inherit; font-size: 12px; font-weight: 700;
+        cursor: pointer; padding: 0 6px;
+      }
+      .g2-target .g2-part, .g2-target .ph-part-icon { width: 28px; height: 22px; object-fit: contain; }
+      .g2-target-on {
+        border-color: #4a7bd0; background: #1d3352; color: #dbe9ff;
+        box-shadow: inset 0 0 0 1px rgba(74, 123, 208, 0.55);
+      }
+      .g2-target-label { white-space: nowrap; }
+
       .g2-compare { display: flex; align-items: stretch; gap: 8px; }
       .g2-col {
         flex: 1 1 0;
@@ -833,28 +906,83 @@
         border: 1px solid rgba(232, 180, 90, 0.3);
         border-radius: 8px; padding: 6px 8px;
       }
-      .g2-mats { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
-      .g2-mat {
-        width: 44px; height: 44px;
-        display: flex; align-items: center; justify-content: center;
-        border-radius: 8px;
-        border: 2px solid var(--q, #5a6b85);
-        background: rgba(19, 27, 40, 0.9);
-      }
-      .g2-mat .g2-part, .g2-mat .ph-part-icon { width: 60%; height: 60%; object-fit: contain; }
-      .g2-mat-main { box-shadow: 0 0 0 2px #4a7bd0; }
+      /* 底部主操作：**只有两个**（取消 次要 / 装备·替换 唯一主操作） */
       .g2-actions { display: flex; gap: 8px; }
       .g2-btn {
-        flex: 1 1 0;
-        font: inherit; font-size: 13px; font-weight: 700;
-        padding: 10px 0; border-radius: 10px;
+        font: inherit; font-size: 14px; font-weight: 800;
+        min-height: 48px; border-radius: 11px;
         border: 1px solid #2b3550; background: #1a2536; color: #cfe0ff;
         cursor: pointer;
       }
+      .g2-btn-cancel { flex: 0 0 96px; font-weight: 700; color: #9fb3cc; }
       .g2-btn-primary {
+        flex: 1 1 auto;
         border-color: #4a7bd0; background: #274b7a; color: #fff;
       }
       .g2-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      /* ── 同页合成模式 ── */
+      .g2-fuse-hint {
+        flex: 0 0 auto;
+        padding: 0 12px 6px;
+        font-size: 11px; line-height: 1.45; color: #8b9bb2;
+      }
+      .g2-fuse-group { margin-bottom: 12px; }
+      .g2-fuse-empty {
+        padding: 14px 4px;
+        font-size: 12px; line-height: 1.6; color: #a9b7ca;
+      }
+      /* 主件：金环（"要保留的这件"）；材料：压暗 + 料角标 + × 覆盖（"会被吃掉"） */
+      .g2-cell-main { box-shadow: 0 0 0 3px #ffd35a, 0 0 14px rgba(255, 211, 90, 0.35); }
+      .g2-cell-main .g2-corner { color: #ffd35a; font-weight: 800; }
+      .g2-cell-consume { opacity: 0.36; filter: grayscale(0.65) saturate(0.5); }
+      .g2-cell-consume::after {
+        content: '×';
+        position: absolute; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 30px; font-weight: 900; color: #ff7a7a;
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.75);
+      }
+      .g2-cell-consume .g2-corner { color: #ff9c8f; font-weight: 800; }
+      /* 底部固定区：主件 → 下一品质 + 唯一【确认五合一】（恒定高度，不跳动） */
+      .g2-fuse-result {
+        flex: 0 0 auto;
+        display: flex; align-items: center; gap: 10px;
+        min-height: 68px;
+        padding: 8px 12px 12px;
+        border-top: 1px solid rgba(63, 93, 130, 0.35);
+      }
+      .g2-fuse-icons { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+      .g2-fuse-slot {
+        width: 48px; height: 48px;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 10px;
+        border: 2px solid var(--q, #4a5b74);
+        background: radial-gradient(120% 120% at 50% 28%, rgba(38, 52, 74, 0.92), rgba(15, 21, 30, 0.96));
+      }
+      .g2-fuse-slot .g2-part, .g2-fuse-slot .ph-part-icon { width: 84%; height: 84%; object-fit: contain; }
+      .g2-fuse-slot[data-q='white']  { --q: #9aa7b8; }
+      .g2-fuse-slot[data-q='green']  { --q: #4caf6d; }
+      .g2-fuse-slot[data-q='blue']   { --q: #3f8fd2; }
+      .g2-fuse-slot[data-q='purple'] { --q: #9b6bd8; }
+      .g2-fuse-slot[data-q='orange'] { --q: #e08b3a; }
+      .g2-fuse-slot[data-q='red']    { --q: #e2445c; }
+      .g2-fuse-slot[data-q='chrome'] { --q: #ffd35a; }
+      .g2-fuse-arrow { font-size: 14px; color: #7f92ad; }
+      .g2-fuse-placeholder { font-size: 10px; color: #55647d; letter-spacing: 1px; }
+      .g2-fuse-result-text { flex: 1 1 auto; font-size: 11px; line-height: 1.45; color: #a9b7ca; }
+      .g2-fuse-confirm {
+        flex: 0 0 auto;
+        min-width: 104px; min-height: 48px;
+        font: inherit; font-size: 13px; font-weight: 800;
+        border-radius: 12px;
+        border: 1px solid #7a5b00; background: linear-gradient(180deg, #ffd35a, #e8a92c); color: #3a2600;
+        cursor: pointer;
+      }
+      .g2-fuse-confirm:disabled {
+        border-color: #2b3550; background: #1a2536; color: #5f6d80;
+        cursor: not-allowed;
+      }
     </style>
   </head>
   <body>
