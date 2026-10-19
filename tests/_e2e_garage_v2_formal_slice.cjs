@@ -239,17 +239,63 @@ async function realClickRect(page, r) {
       `${tag}19 红点数字 = 真实可合成组数（组数=${entry.ready} 红点=${entry.dot}）`,
     );
 
-    // 真实鼠标点击 → 仍是原来那条同页合成模式；【返回装备】→ 回到装备页（只动位置，不动行为）
-    await realClickRect(page, entry.btn);
-    await page.waitForTimeout(160);
+    // —— ④ 合成 = 装备页之上的弹窗（装备页真实保留在遮罩下；弹窗居中且明显非全屏） ——
+    const entryBefore = entry.btn;
+    const storeBeforeFuse = await dumpStore(page);
+    await realClickRect(page, entryBefore);
+    await page.waitForTimeout(200);
     const inFuse = await probeV2(page);
-    ok(inFuse && inFuse.mode === 'fuse', `${tag}20 真实鼠标点【合成】→ 进入合成模式（mode=${inFuse && inFuse.mode}）`);
-    const fuseBack = await rect(page, '[data-g2-fuse-back]');
-    ok(!!fuseBack && inside(fuseBack, main), `${tag}21 合成模式【返回装备】仍在画面内`);
-    await realClickRect(page, fuseBack);
-    await page.waitForTimeout(160);
+    ok(inFuse && inFuse.mode === 'fuse' && inFuse.fuseModalOpen === true,
+      `${tag}20 真实鼠标点【合成】→ 打开弹窗（mode=${inFuse && inFuse.mode}）`);
+    ok(inFuse && inFuse.equipBehind === true && inFuse.slots === 5,
+      `${tag}21 装备页仍在弹窗下方（五槽 ${inFuse && inFuse.slots} 个 + 战车 + 底部返回都在，不是换页）`);
+
+    const geom = await page.evaluate(() => {
+      const R = (n) => {
+        if (!n) return null;
+        const b = n.getBoundingClientRect();
+        return { x: b.left, y: b.top, left: b.left, right: b.right, top: b.top, bottom: b.bottom, w: b.width, h: b.height, cx: (b.left + b.right) / 2, cy: (b.top + b.bottom) / 2 };
+      };
+      const overlay = document.querySelector('[data-g2-fuse-overlay]');
+      const modal = document.querySelector('[data-g2-fuse-modal]');
+      const screen = document.querySelector('[data-ph-screen]');
+      const back = document.querySelector('[data-g2-fuse-back]');
+      const slot = document.querySelector('[data-g2-slot="body"]');
+      const sb = slot ? slot.getBoundingClientRect() : null;
+      const hit = sb ? document.elementFromPoint(sb.left + sb.width / 2, sb.top + sb.height / 2) : null;
+      return {
+        overlay: R(overlay), modal: R(modal), screen: R(screen), back: R(back),
+        headBack: document.querySelectorAll('.g2-fuse-modal-head [data-g2-fuse-back]').length,
+        topHeadBack: document.querySelectorAll('.g2-head [data-g2-fuse-back]').length,
+        maskBlocks: !!(hit && hit.closest('[data-g2-fuse-overlay]')),
+        confirmInModal: !!document.querySelector('[data-g2-fuse-modal] [data-g2-action="fuse"]'),
+      };
+    });
+    ok(!!geom.modal, `${tag}22 弹窗节点存在`);
+    ok(!!geom.modal && !!geom.screen &&
+      Math.abs(geom.modal.cx - geom.screen.cx) <= 1 && Math.abs(geom.modal.cy - geom.screen.cy) <= 1,
+      `${tag}23 弹窗在逻辑画面里居中（cx=${geom.modal && geom.modal.cx.toFixed(1)}/${geom.screen && geom.screen.cx.toFixed(1)} cy=${geom.modal && geom.modal.cy.toFixed(1)}/${geom.screen && geom.screen.cy.toFixed(1)}）`);
+    ok(!!geom.modal && !!geom.screen &&
+      geom.modal.h <= geom.screen.h * 0.72 && geom.modal.w < geom.screen.w,
+      `${tag}24 弹窗明显非全屏（${geom.modal && Math.round(geom.modal.w)}×${geom.modal && Math.round(geom.modal.h)} / 画面 ${geom.screen && Math.round(geom.screen.w)}×${geom.screen && Math.round(geom.screen.h)}）`);
+    ok(!!geom.overlay && !!geom.screen && inside(geom.overlay, geom.screen, 1) && geom.overlay.w >= geom.screen.w - 1,
+      `${tag}25 遮罩覆盖整个逻辑画面`);
+    ok(geom.maskBlocks, `${tag}26 遮罩拦截底层点击（点底层五槽命中的是遮罩层）`);
+    ok(geom.headBack === 0 && geom.topHeadBack === 0, `${tag}27 弹窗顶部与页面标题行都没有【返回装备】`);
+    ok(!!geom.back && !!geom.modal && inside(geom.back, geom.modal) && geom.back.top > geom.modal.cy && geom.back.h >= 44 && geom.confirmInModal,
+      `${tag}28 【返回装备】固定在弹窗底部、矩形在弹窗内（top=${geom.back && geom.back.top.toFixed(1)} / 弹窗中轴 ${geom.modal && geom.modal.cy.toFixed(1)}）`);
+
+    // 真实鼠标点底部【返回装备】→ 关闭，回原装备页；存档零写、按钮原位
+    await realClickRect(page, geom.back);
+    await page.waitForTimeout(200);
     const backToEquip = await probeV2(page);
-    ok(backToEquip && backToEquip.mode === 'equip', `${tag}22 【返回装备】→ 回到装备页（mode=${backToEquip && backToEquip.mode}）`);
+    ok(backToEquip && backToEquip.mode === 'equip' && backToEquip.fuseModalOpen === false,
+      `${tag}29 鼠标点底部【返回装备】→ 关闭弹窗回装备页（mode=${backToEquip && backToEquip.mode}）`);
+    const entryAfter = await rect(page, '[data-g2-fuse-entry]');
+    ok(!!entryAfter && !!entryBefore &&
+      Math.abs(entryAfter.left - entryBefore.left) < 0.6 && Math.abs(entryAfter.top - entryBefore.top) < 0.6,
+      `${tag}30 关闭后背包标题行【合成】原位不动`);
+    ok(JSON.stringify(storeBeforeFuse) === JSON.stringify(await dumpStore(page)), `${tag}31 打开/关闭合成零写盘`);
 
     // —— ① 背包滚到底：footer 位置不变，返回按钮仍在画面内
     const footBefore = await rect(page, '[data-g2-foot]');
@@ -262,10 +308,10 @@ async function realClickRect(page, r) {
     await page.waitForTimeout(60);
     const footAfter = await rect(page, '[data-g2-foot]');
     const backAfter = await rect(page, '[data-g2-back]');
-    ok(!!scrolled && scrolled.scrollH > scrolled.clientH, `${tag}23 背包自身可滚（scrollH=${scrolled && scrolled.scrollH} > clientH=${scrolled && scrolled.clientH}）`);
-    ok(!!scrolled && scrolled.scrollTop > 0, `${tag}24 背包真的滚到了底部（scrollTop=${scrolled && scrolled.scrollTop}）`);
-    ok(!!footBefore && !!footAfter && Math.abs(footBefore.top - footAfter.top) < 0.6, `${tag}25 滚到底 footer **原位不动**（before=${footBefore && Math.round(footBefore.top)} after=${footAfter && Math.round(footAfter.top)}）`);
-    ok(inside(backAfter, main), `${tag}26 滚到底返回按钮仍在主容器内`);
+    ok(!!scrolled && scrolled.scrollH > scrolled.clientH, `${tag}32 背包自身可滚（scrollH=${scrolled && scrolled.scrollH} > clientH=${scrolled && scrolled.clientH}）`);
+    ok(!!scrolled && scrolled.scrollTop > 0, `${tag}33 背包真的滚到了底部（scrollTop=${scrolled && scrolled.scrollTop}）`);
+    ok(!!footBefore && !!footAfter && Math.abs(footBefore.top - footAfter.top) < 0.6, `${tag}34 滚到底 footer **原位不动**（before=${footBefore && Math.round(footBefore.top)} after=${footAfter && Math.round(footAfter.top)}）`);
+    ok(inside(backAfter, main), `${tag}35 滚到底返回按钮仍在主容器内`);
 
     // —— ② 截图（正常速度，未改任何动画/延时）：装备页（先回滚到顶部，交验收看的是常规起点）
     if (shot) {
@@ -282,12 +328,12 @@ async function realClickRect(page, r) {
     await realClickRect(page, backAfter);
     await page.waitForTimeout(200);
     const view = await page.evaluate(() => window.__PRODUCTHOME__.probe().view);
-    ok(view === 'home', `${tag}27 真实鼠标点返回 → 回首页（view=${view}）`);
+    ok(view === 'home', `${tag}36 真实鼠标点返回 → 回首页（view=${view}）`);
     const headerBack = await page.evaluate(() => {
       const h = document.querySelector('.ph-header');
       return h ? getComputedStyle(h).display !== 'none' && h.getBoundingClientRect().height > 0 : false;
     });
-    ok(headerBack, `${tag}28 回首页后页面 header 原样恢复（冻结首页布局）`);
+    ok(headerBack, `${tag}37 回首页后页面 header 原样恢复（冻结首页布局）`);
     await page.close();
   }
 
@@ -531,10 +577,26 @@ async function realClickRect(page, r) {
   let f = await openFuse();
   const f1members = await page.evaluate(() =>
     [...document.querySelectorAll('[data-g2-fuse-group-kind]')].map((g) => g.querySelectorAll('[data-g2-fuse-member]').length));
-  ok(f && f.mode === 'fuse', 'FUSE-1 合成 = 同页模式（不是遮罩弹窗）');
+  ok(f && f.mode === 'fuse' && f.fuseModalOpen === true && f.equipBehind === true,
+    'FUSE-1 合成 = 叠在装备页之上的弹窗（底层装备页仍在，不是整页替换）');
   ok(f1members.every((n) => n >= 5), `FUSE-1b 4/5 不成组：所有展示组 ≥5 成员（${JSON.stringify(f1members)}）`);
   ok(f && f.fuseConfirmDisabled === true, 'FUSE-1c 未选主件时确认不可用');
-  ok(f && f.fuseBackVisible === true, 'FUSE-1d 合成模式【返回装备】恒存在');
+  ok(f && f.fuseBackVisible === true, 'FUSE-1d 合成弹窗【返回装备】恒存在');
+  const backBottom = await page.evaluate(() => {
+    const back = document.querySelector('[data-g2-fuse-back]');
+    const modal = document.querySelector('[data-g2-fuse-modal]');
+    if (!back || !modal) return null;
+    const rb = back.getBoundingClientRect();
+    const rm = modal.getBoundingClientRect();
+    return {
+      inside: rb.top >= rm.top && rb.bottom <= rm.bottom,
+      bottomHalf: rb.top > (rm.top + rm.bottom) / 2,
+      h: rb.height,
+      confirm: !!document.querySelector('[data-g2-fuse-modal] [data-g2-action="fuse"]'),
+    };
+  });
+  ok(!!backBottom && backBottom.inside && backBottom.bottomHalf && backBottom.h >= 44 && backBottom.confirm,
+    `FUSE-1d2 0 组时【返回装备】仍在弹窗底部、与【确认五合一】同区（h=${backBottom && Math.round(backBottom.h)}）`);
   // 合成候选与背包**同规格**：4 列 + 图标 ≥85%
   const fuseGrid = await page.evaluate(() => {
     const g = document.querySelector('[data-g2-fuse-member]')?.closest('.g2-grid');
@@ -634,6 +696,50 @@ async function realClickRect(page, r) {
   await openV2(page);
   f = await probeV2(page);
   ok(f && f.weaponDef === 'machineGun' && f.functionalQualities?.frontMass === 'green', 'FUSE-5c 刷新重进装备仍一致');
+
+  // FUSE-7：候选很多 → 候选区内部独立滚动；卡片高度不变、底部按钮不移位（不靠缩小图标塞内容）
+  await page.evaluate(() => {
+    localStorage.setItem('strongfruit.ownedParts.v2', JSON.stringify({ machineGun: { one: 22 } }));
+    localStorage.setItem('strongfruit.garageV2Ledger.v1', JSON.stringify({ __v: 1, version: 2, consumed: {}, products: [] }));
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+  await openV2(page);
+  f = await openFuse();
+  const manyBox = await page.evaluate(() => {
+    const sc = document.querySelector('[data-g2-fuse-scroll]');
+    const card = document.querySelector('[data-g2-fuse-modal]');
+    const back = document.querySelector('[data-g2-fuse-back]');
+    const screen = document.querySelector('[data-ph-screen]');
+    const topBefore = back.getBoundingClientRect().top;
+    const sh = sc.scrollHeight;
+    const ch = sc.clientHeight;
+    sc.scrollTop = sc.scrollHeight;
+    const st = sc.scrollTop;
+    const topAfter = back.getBoundingClientRect().top;
+    const grid = document.querySelector('[data-g2-fuse-modal] .g2-grid');
+    const cell = grid.querySelector('.g2-cell');
+    const icon = cell.querySelector('.ph-part-icon');
+    return {
+      sh, ch, st,
+      backMoved: Math.abs(topAfter - topBefore) > 0.6,
+      cardH: card.getBoundingClientRect().height,
+      screenH: screen.getBoundingClientRect().height,
+      cols: getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length,
+      ratio: +(icon.getBoundingClientRect().width / cell.getBoundingClientRect().width).toFixed(3),
+    };
+  });
+  ok(manyBox.sh > manyBox.ch && manyBox.st > 0,
+    `FUSE-7 候选多时候选区**内部**独立滚动（clientH=${manyBox.ch} / scrollH=${manyBox.sh} / scrollTop=${manyBox.st}）`);
+  ok(!manyBox.backMoved, 'FUSE-7b 滚到底【返回装备】/【确认五合一】不动（卡片本身不滚）');
+  ok(manyBox.cardH <= manyBox.screenH * 0.72, `FUSE-7c 卡片高度仍 ≤70% 画面（${Math.round(manyBox.cardH)}/${Math.round(manyBox.screenH)}）`);
+  ok(manyBox.cols === 4 && manyBox.ratio >= 0.85, `FUSE-7d 弹窗内候选仍 4 列大图标（${manyBox.cols} 列 / 图标 ${manyBox.ratio}）`);
+  // 关掉（零写盘）
+  {
+    const b0 = await dumpStore(page);
+    await page.evaluate(() => document.querySelector('[data-g2-fuse-back]')?.click());
+    await page.waitForTimeout(100);
+    ok(JSON.stringify(b0) === JSON.stringify(await dumpStore(page)), 'FUSE-7e 关闭合成弹窗零写盘');
+  }
 
   // FUSE-6：限制不变（Body 永不进组 / 组 ≥5 / 锁定件不进候选 / 彩封顶不进候选）
   await page.evaluate(() => {

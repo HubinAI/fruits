@@ -207,8 +207,9 @@ function rerender(): void {
 
   root.textContent = '';
   root.dataset['g2Mode'] = mode;
-  if (mode === 'fuse') root.append(...buildFusePage());
-  else root.append(...buildEquipPage());
+  // 装备页**恒为底层**（合成是叠加弹窗，不再换页）⇒ 关闭合成时背包/战车/五槽原样还在。
+  root.append(...buildEquipPage());
+  if (mode === 'fuse') root.append(buildFuseOverlay());
   if (modal) root.append(buildModal(modal));
 
   const next = root.querySelector<HTMLElement>('[data-g2-scroll]');
@@ -227,7 +228,7 @@ function rerender(): void {
 function buildEquipPage(): HTMLElement[] {
   const note = buildNote();
   return [
-    buildHead('equip'),
+    buildHead(),
     buildStage(),
     buildSlotsRow(),
     ...(note ? [note] : []),
@@ -237,17 +238,15 @@ function buildEquipPage(): HTMLElement[] {
 }
 
 /**
- * 顶部标题行：**只有标题**（装备页） / 标题 + 右上【返回装备】（合成模式）。
+ * 顶部标题行：装备页标题（**不再承载任何合成入口**）。
  *
- * ⚠️ 装备页的【合成】入口**不再在这里**（旧版在右上角，与背包标题行的「点一件 · 换成它」
- * 分处两行 ⇒ 玩家要在两个不同位置找同一件事）。现在它挂在 `.g2-bag-head` 最右列，
- * 与背包/提示同一行（见 `buildBag`）。
+ * 合成是装备页之上的弹窗（见 `buildFuseOverlay`），它的【返回装备】在**弹窗底部**，
+ * 所以这一行在两种状态下都只有「装备」——不会出现两个入口或两个返回。
  */
-function buildHead(which: G2Mode): HTMLElement {
+function buildHead(): HTMLElement {
   const head = elDiv('g2-head');
   head.dataset['g2Head'] = '1';
-  head.append(elDiv('g2-title', which === 'fuse' ? '合成' : '装备'));
-  if (which === 'fuse') head.append(buildFuseBack());
+  head.append(elDiv('g2-title', '装备'));
   return head;
 }
 
@@ -255,7 +254,7 @@ function buildHead(which: G2Mode): HTMLElement {
  * 【合成】入口（真实资格红点：只有存在满足 同部位+同品质≥5 的组才亮数字）。
  *
  * 挂载位置 = `.g2-bag-head` 第三列（右端），与「背包」「点一件 · 换成它」同一行。
- * 节点本身与点击回调保持原样（点击 → 同页合成模式），唯一变化是父容器。
+ * 点击 = 打开叠加在装备页之上的合成弹窗（底层装备页与背包滚动位置原样保留）。
  */
 function buildFuseEntry(): HTMLElement {
   const groups = fuseCandidateGroups();
@@ -275,30 +274,19 @@ function buildFuseEntry(): HTMLElement {
     flash = null;
     freshInstId = null;
     fuseMainPick = null; // 选择不跨打开保留
-    scrollMemo = 0;
+    // ⚠️ 不动 scrollMemo：关掉弹窗要回到**原背包位置**（旧版这里把它清零了）。
     rerender();
   });
   return btn;
 }
 
-/** 合成模式右上【返回装备】（恒可见：合成模式没有底部 footer，但它在本行）。 */
-function buildFuseBack(): HTMLElement {
-  const back = el('button', 'g2-pill', '返回装备');
-  back.type = 'button';
-  back.dataset['g2FuseBack'] = '1';
-  back.dataset['g2Action'] = 'fuse-back';
-  back.addEventListener('click', () => exitFuseMode());
-  return back;
-}
-
-/** 退出合成模式：**零写盘**（只清状态 + 重渲染）。 */
+/** 关闭合成弹窗：**零写盘**（只清状态 + 重渲染；背包滚动位置由 scrollMemo 原样恢复）。 */
 function exitFuseMode(): void {
   mode = 'equip';
   fuseMainPick = null;
   modal = null;
   flash = null;
   freshInstId = null;
-  scrollMemo = 0;
   rerender();
 }
 
@@ -469,10 +457,31 @@ function closeToHome(): void {
   onClose();
 }
 
-/* ── 合成模式（同页，不再有遮罩弹窗） ── */
+/* ── 合成弹窗（叠加在**装备页之上**，不再替换整页） ── */
 
-function buildFusePage(): HTMLElement[] {
+/**
+ * 旧版点击【合成】会 `mode='fuse'` 把整页换成合成页 ⇒ 背包/战车/五槽上下文全消失，
+ * 且【返回装备】跑到顶部。现在：装备页**原样留在下面**，合成内容作为一个居中卡片
+ * 叠在遮罩上（高度上限 70% 逻辑画面，候选区自己滚），【返回装备】固定在卡片底部。
+ *
+ * 数据/事务全部复用（`fuseCandidateGroups` / `fusePickState` / `fuseQualityFive`）；
+ * 关闭只是把 `mode` 拨回 `'equip'`，**不写盘、不重载配置**，背包滚动位置原样保留。
+ */
+function buildFuseOverlay(): HTMLElement {
   const groups = fuseCandidateGroups();
+  const overlay = elDiv('g2-fuse-overlay');
+  overlay.dataset['g2FuseOverlay'] = '1';
+
+  const card = elDiv('g2-fuse-modal');
+  card.dataset['g2FuseModal'] = '1';
+  card.setAttribute('role', 'dialog');
+  card.setAttribute('aria-label', '合成');
+
+  const head = elDiv('g2-fuse-modal-head');
+  head.dataset['g2FuseModalHead'] = '1';
+  head.append(elDiv('g2-modal-title', '合成'));
+  card.append(head);
+
   const hint = elDiv(
     'g2-fuse-hint',
     groups.length > 0
@@ -480,24 +489,24 @@ function buildFusePage(): HTMLElement[] {
       : '同部位 · 同品质 5 合 1 → 主件升一档',
   );
   hint.dataset['g2FuseHint'] = '1';
+  card.append(hint);
 
-  const wrap = elDiv('g2-bag-wrap');
-  wrap.dataset['g2FuseGroups'] = '1';
-  const bag = elDiv('g2-bag');
-  bag.dataset['g2Bag'] = '1';
-  bag.dataset['g2Scroll'] = '1';
+  // 候选区：**唯一内部滚动层**（卡片本身不滚，底部主操作/返回恒定可见）
+  const body = elDiv('g2-fuse-body');
+  body.dataset['g2FuseScroll'] = '1';
   if (groups.length === 0) {
     const empty = elDiv(
       'g2-fuse-empty',
       '没有满足「同部位 + 同品质 ≥5」的组（车身 / 旧星级成长件 / 装备中 / 彩封顶 / 非推进辅助 不计入）。',
     );
     empty.dataset['g2FuseEmpty'] = '1';
-    bag.append(empty);
+    body.append(empty);
   }
-  for (const g of groups) bag.append(buildFuseGroup(g, groups));
-  wrap.append(bag);
+  for (const g of groups) body.append(buildFuseGroup(g, groups));
+  card.append(body, buildFuseResult(groups));
 
-  return [buildHead('fuse'), hint, wrap, buildFuseResult(groups)];
+  overlay.append(card);
+  return overlay;
 }
 
 function buildFuseGroup(g: FuseGroup, allGroups: readonly FuseGroup[]): HTMLElement {
@@ -612,13 +621,28 @@ function buildFuseResult(groups: readonly FuseGroup[]): HTMLElement {
     };
     mode = 'equip';
     fuseMainPick = null;
-    scrollMemo = 0;
     freshInstId = res.productId; // 背包里立刻带金环（结果清晰）
     pendingRevealId = res.productId;
     rerender();
   });
 
-  bar.append(icons, text, go);
+  // 底部固定两段：上「主件 → 下一品质」预览，下【返回装备】+ 唯一【确认五合一】。
+  // 返回按钮在**卡片底部**（旧版在顶部标题行，操作不自然），候选多寡都恒可见。
+  const preview = elDiv('g2-fuse-preview');
+  preview.dataset['g2FusePreviewRow'] = '1';
+  preview.append(icons, text);
+
+  const back = el('button', 'g2-fuse-back', '返回装备');
+  back.type = 'button';
+  back.dataset['g2FuseBack'] = '1';
+  back.dataset['g2Action'] = 'fuse-back';
+  back.addEventListener('click', () => exitFuseMode());
+
+  const actions = elDiv('g2-fuse-actions');
+  actions.dataset['g2FuseActions'] = '1';
+  actions.append(back, go);
+
+  bar.append(preview, actions);
   return bar;
 }
 
@@ -949,8 +973,12 @@ export function garageV2ViewProbe(): Record<string, unknown> {
   const fuseGroups = fuseCandidateGroups();
   return {
     mounted: true,
-    /** 'equip' | 'fuse'（同页合成模式；遮罩弹窗只剩 compare）。 */
+    /** 'equip' | 'fuse'（fuse = 装备页之上的合成弹窗；底层装备页仍在 DOM）。 */
     mode,
+    /** 合成弹窗是否真的挂在装备页之上。 */
+    fuseModalOpen: !!root.querySelector('[data-g2-fuse-modal]'),
+    /** 底层装备页是否仍在（弹窗打开时也必须为 true）。 */
+    equipBehind: !!root.querySelector('[data-g2-foot]') && !!root.querySelector('[data-g2-stage]'),
     cells: root.querySelectorAll('[data-g2-cell]').length,
     slots: root.querySelectorAll('[data-g2-slot]').length,
     slotsEquipped: root.querySelectorAll('[data-g2-slot-def]').length,

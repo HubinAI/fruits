@@ -961,11 +961,43 @@
       }
       .g2-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-      /* ── 同页合成模式 ── */
+      /* ── 合成弹窗（叠加在装备页之上；底层装备页/背包滚动位置原样保留） ── */
+      .g2-fuse-overlay {
+        position: absolute; inset: 0; z-index: 20;
+        display: flex; align-items: center; justify-content: center;
+        padding: 12px;
+        background: rgba(5, 8, 13, 0.66);
+        /* 遮罩自己吞掉点击 ⇒ 下层装备页结构上不可能被误触 */
+      }
+      .g2-fuse-modal {
+        width: 100%; max-width: 352px;
+        /* 逻辑画面 844 × 70% ≈ 590（高度明显小于全屏；宽度留 19px 两侧留白） */
+        max-height: 70%;
+        display: flex; flex-direction: column;
+        min-height: 0;
+        overflow: hidden;                 /* 只有候选区滚，头/底部恒固定 */
+        border-radius: 16px;
+        border: 1px solid #2b3550;
+        background: #101823;
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+      }
+      .g2-fuse-modal-head {
+        flex: 0 0 auto;
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 12px 14px 4px;
+      }
       .g2-fuse-hint {
         flex: 0 0 auto;
-        padding: 0 12px 6px;
+        padding: 0 14px 8px;
         font-size: 11px; line-height: 1.45; color: #8b9bb2;
+      }
+      /* 候选区：**唯一内部滚动层**（4 列大图标，靠滚动而非缩图标塞内容） */
+      .g2-fuse-body .g2-bag-head { padding: 2px 0 6px; }
+      .g2-fuse-body {
+        flex: 1 1 auto; min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 0 12px 10px;
       }
       .g2-fuse-group { margin-bottom: 12px; }
       .g2-fuse-empty {
@@ -984,14 +1016,25 @@
         text-shadow: 0 2px 6px rgba(0, 0, 0, 0.75);
       }
       .g2-cell-consume .g2-corner { color: #ff9c8f; font-weight: 800; }
-      /* 底部固定区：主件 → 下一品质 + 唯一【确认五合一】（恒定高度，不跳动） */
+      /* 底部固定区：主件 → 下一品质预览 +【返回装备】/ 唯一【确认五合一】（恒定高度，不跳动） */
       .g2-fuse-result {
         flex: 0 0 auto;
-        display: flex; align-items: center; gap: 10px;
-        min-height: 68px;
-        padding: 8px 12px 12px;
+        display: flex; flex-direction: column; gap: 8px;
+        padding: 10px 12px 12px;
         border-top: 1px solid rgba(63, 93, 130, 0.35);
+        background: #101823;
       }
+      .g2-fuse-preview { display: flex; align-items: center; gap: 10px; min-height: 48px; }
+      .g2-fuse-actions { display: flex; gap: 8px; }
+      .g2-fuse-back {
+        flex: 0 0 104px; min-height: 48px;
+        font: inherit; font-size: 14px; font-weight: 700;
+        border-radius: 12px;
+        border: 1px solid #2b3550; background: #1a2536; color: #9fb3cc;
+        cursor: pointer;
+      }
+      .g2-fuse-back:active { background: #24344a; }
+      .g2-fuse-actions .g2-fuse-confirm { flex: 1 1 auto; min-width: 0; }
       .g2-fuse-icons { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
       .g2-fuse-slot {
         width: 48px; height: 48px;
