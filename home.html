@@ -671,11 +671,12 @@
 
        版面契约（逻辑 390×844 **恒定**；不再随浏览器窗口宽度变化）：
 
-         .g2-head        40  标题 + 右上【合成】（合成模式：标题 + 右上【返回装备】）
+         .g2-head        40  标题（合成模式：标题 + 右上【返回装备】；装备页**没有**第二入口）
          .g2-stage      148  战车（保持可认）
          .g2-slots-row   74  五槽**同行**（每槽 1fr；旧版左三右二两列白吃两行高）
          .g2-note      变高   成功/失败提示（有才出现）
          .g2-bag-wrap  flex:1 1 auto; min-height:0  ← 背包外壳（**明确 min-height:0**）
+           .g2-bag-head 48  三段 grid：背包 1fr / 点一件·换成它 auto 居中 /【合成】1fr 靠右
            .g2-bag     flex:1 1 auto; min-height:0; overflow-y:auto  ← 唯一滚动容器
          .g2-foot        64  【返回首页】（flex 固定 ⇒ 结构上不可能被长背包裁掉）
 
@@ -768,8 +769,47 @@
         gap: 8px;
         padding: 2px 12px 6px;
       }
+      /* 装备页背包标题行：三段 grid ——「背包」左 1fr /「点一件 · 换成它」中 auto /【合成】右 1fr。
+         两个 1fr 对称 ⇒ 中间这段**整行居中**，按钮靠 `justify-self:end` 贴右，提示不会被压住。
+         （合成组行同样是 .g2-bag-head，但 data 值不是 equip ⇒ 仍走上面两段 flex。） */
+      .g2-bag-head[data-g2-bag-head='equip'] {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        column-gap: 8px;
+        min-height: 48px;
+      }
+      .g2-bag-head[data-g2-bag-head='equip'] .g2-bag-hint {
+        justify-self: center;
+        text-align: center;
+        white-space: nowrap;
+      }
+      .g2-bag-head[data-g2-bag-head='equip'] .g2-fuse-btn {
+        justify-self: end;
+      }
       .g2-bag-title { font-size: 12px; font-weight: 700; color: #93a1b6; }
       .g2-bag-hint { font-size: 11px; color: #7b8ba3; }
+      /* 【合成】入口：44×44 起跳的可点区域（移动端触控下限），亮起=有真实可合成组 */
+      .g2-fuse-btn {
+        font: inherit; font-size: 13px; font-weight: 800;
+        display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+        min-width: 76px; min-height: 44px;
+        padding: 0 14px; border-radius: 999px;
+        border: 1px solid #2b3550;
+        background: #131b28; color: #9fb3cc;
+        cursor: pointer;
+      }
+      .g2-fuse-btn:active { background: #1c2740; }
+      .g2-fuse-btn-ready {
+        border-color: #7a5b00;
+        background: linear-gradient(180deg, #ffd35a, #e8a92c); color: #3a2600;
+      }
+      .g2-fuse-dot {
+        min-width: 18px; height: 18px; padding: 0 4px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 999px; background: #e2445c; color: #fff;
+        font-size: 11px; font-weight: 800; line-height: 1;
+      }
       .g2-group-count { font-size: 11px; color: #7b8ba3; }
       .g2-bag {
         flex: 1 1 auto;

@@ -236,15 +236,27 @@ function buildEquipPage(): HTMLElement[] {
   ];
 }
 
+/**
+ * 顶部标题行：**只有标题**（装备页） / 标题 + 右上【返回装备】（合成模式）。
+ *
+ * ⚠️ 装备页的【合成】入口**不再在这里**（旧版在右上角，与背包标题行的「点一件 · 换成它」
+ * 分处两行 ⇒ 玩家要在两个不同位置找同一件事）。现在它挂在 `.g2-bag-head` 最右列，
+ * 与背包/提示同一行（见 `buildBag`）。
+ */
 function buildHead(which: G2Mode): HTMLElement {
   const head = elDiv('g2-head');
   head.dataset['g2Head'] = '1';
   head.append(elDiv('g2-title', which === 'fuse' ? '合成' : '装备'));
-  head.append(which === 'fuse' ? buildFuseBack() : buildFuseEntry());
+  if (which === 'fuse') head.append(buildFuseBack());
   return head;
 }
 
-/** 右上【合成】（真实资格红点：只有存在满足 同部位+同品质≥5 的组才亮数字）。 */
+/**
+ * 【合成】入口（真实资格红点：只有存在满足 同部位+同品质≥5 的组才亮数字）。
+ *
+ * 挂载位置 = `.g2-bag-head` 第三列（右端），与「背包」「点一件 · 换成它」同一行。
+ * 节点本身与点击回调保持原样（点击 → 同页合成模式），唯一变化是父容器。
+ */
 function buildFuseEntry(): HTMLElement {
   const groups = fuseCandidateGroups();
   const btn = el('button', 'g2-fuse-btn' + (groups.length > 0 ? ' g2-fuse-btn-ready' : ''));
@@ -389,9 +401,12 @@ function buildBag(): HTMLElement {
   const wrap = elDiv('g2-bag-wrap');
   wrap.dataset['g2BagWrap'] = '1';
   const head = elDiv('g2-bag-head');
-  head.dataset['g2BagHead'] = '1';
+  // 值 = 'equip'：CSS 只对这一行用三段 grid（合成组行 `g2-bag-head` 仍是两段 flex）。
+  head.dataset['g2BagHead'] = 'equip';
   head.append(elDiv('g2-bag-title', '背包'));
   head.append(elDiv('g2-bag-hint', '点一件 · 换成它'));
+  // 同一行最右：【合成】入口（唯一一处；顶部 .g2-head 不再重复）
+  head.append(buildFuseEntry());
 
   const bag = elDiv('g2-bag');
   bag.dataset['g2Bag'] = '1';

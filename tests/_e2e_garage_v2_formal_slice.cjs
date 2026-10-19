@@ -14,6 +14,10 @@
  *   ④ 合成 = 同页模式：选主件 → 自动补 4 件（视觉标「料」）→ 下一品质预览 →
  *      唯一【确认五合一】→ 5 合 1；返回零写盘；4/5 / 锁定 / Body / 彩封顶 限制不变。
  *   ⑤ 默认入口 / 旧 legacy 入口 / 开始冒险 href 全部未变。
+ *   ⑥ 【合成】入口位置：直接父容器 = `.g2-bag-head`（与「背包」「点一件·换成它」同一行）、
+ *      贴该行右端、提示文字夹在二者之间且整行居中、可点区域 ≥44×44、红点数字同源；
+ *      顶部 `.g2-head` **不再**有第二入口（旧版在右上角 ⇒ 同一件事分散两处）。
+ *      点它仍进入原同页合成模式，【返回装备】仍回装备页（只动位置，不动行为）。
  *
  * 纪律：真实浏览器（playwright-core，项目 bundled chromium）、真实 localStorage 逐字节
  * 取证、探针只读。**不删除任何核心业务断言求绿**，只按新结构（同页合成）改写定位方式。
@@ -176,6 +180,77 @@ async function realClickRect(page, r) {
     ok(!!grid && grid.cellW >= 80, `${tag}11 单格足够大（实测 ${grid && grid.cellW}px 逻辑像素）`);
     ok(!!grid && grid.ratio >= 0.85, `${tag}12 图标可见面积 ≥85% 格宽（实测 ${grid && grid.ratio}）`);
 
+    // —— ② 【合成】入口：与「背包 / 点一件·换成它」同一行（背包标题行最右），顶部标题行不再有第二入口
+    //     旧版它在 .g2-head 右上角：同一件事分散在两个不同位置，且与提示文字不在一条线上。
+    const entry = await page.evaluate(() => {
+      const btn = document.querySelector('[data-g2-fuse-entry]');
+      const row = document.querySelector('[data-g2-bag-head="equip"]');
+      const hint = document.querySelector('[data-g2-bag-head="equip"] .g2-bag-hint');
+      const title = document.querySelector('[data-g2-bag-head="equip"] .g2-bag-title');
+      const box = (n) => {
+        if (!n) return null;
+        const b = n.getBoundingClientRect();
+        return {
+          x: b.left, y: b.top, left: b.left, right: b.right, top: b.top, bottom: b.bottom,
+          w: b.width, h: b.height, cx: (b.left + b.right) / 2,
+        };
+      };
+      const rowBox = box(row);
+      const padR = row ? parseFloat(getComputedStyle(row).paddingRight) : 0;
+      return {
+        parentIsBagHead: !!(btn && row && btn.parentElement === row),
+        entries: document.querySelectorAll('[data-g2-fuse-entry]').length,
+        inTopHead: document.querySelectorAll('.g2-head [data-g2-fuse-entry]').length,
+        topTitle: document.querySelector('.g2-head .g2-title')?.textContent ?? null,
+        ready: Number(btn?.getAttribute('data-g2-fuse-ready') ?? -1),
+        dot: btn?.querySelector('[data-g2-fuse-dot]')?.textContent ?? null,
+        row: rowBox,
+        contentRight: rowBox ? rowBox.right - padR : null,
+        btn: box(btn),
+        hint: box(hint),
+        title: box(title),
+      };
+    });
+    ok(entry.parentIsBagHead, `${tag}13 【合成】的直接父容器就是 .g2-bag-head（与背包同一行）`);
+    ok(entry.entries === 1, `${tag}14 装备页只有 1 个【合成】入口（实测 ${entry.entries}）`);
+    ok(
+      entry.inTopHead === 0 && entry.topTitle === '装备',
+      `${tag}15 顶部 .g2-head 只剩「${entry.topTitle}」标题、无第二入口`,
+    );
+    ok(
+      !!entry.btn && entry.contentRight !== null &&
+        Math.abs(entry.btn.right - entry.contentRight) <= 1 &&
+        entry.btn.right <= entry.row.right,
+      `${tag}16 【合成】贴标题行右端（btn.right=${entry.btn && entry.btn.right.toFixed(1)} / 内容右边界=${entry.contentRight && entry.contentRight.toFixed(1)}）`,
+    );
+    ok(
+      !!entry.hint && !!entry.title && !!entry.btn &&
+        entry.hint.left >= entry.title.right - 0.6 &&
+        entry.hint.right <= entry.btn.left + 0.6 &&
+        Math.abs(entry.hint.cx - entry.row.cx) <= 2,
+      `${tag}17 提示文字夹在「背包」与【合成】之间且整行居中（hint.cx=${entry.hint && entry.hint.cx.toFixed(1)} / row.cx=${entry.row && entry.row.cx.toFixed(1)}）`,
+    );
+    ok(
+      !!entry.btn && entry.btn.h >= 44 && entry.btn.w >= 44 && inside(entry.btn, main),
+      `${tag}18 【合成】可点区域 ≥44×44 且在画面内（实测 ${entry.btn && entry.btn.w.toFixed(0)}×${entry.btn && entry.btn.h.toFixed(0)}）`,
+    );
+    ok(
+      entry.ready === 0 ? entry.dot === null : Number(entry.dot) === entry.ready,
+      `${tag}19 红点数字 = 真实可合成组数（组数=${entry.ready} 红点=${entry.dot}）`,
+    );
+
+    // 真实鼠标点击 → 仍是原来那条同页合成模式；【返回装备】→ 回到装备页（只动位置，不动行为）
+    await realClickRect(page, entry.btn);
+    await page.waitForTimeout(160);
+    const inFuse = await probeV2(page);
+    ok(inFuse && inFuse.mode === 'fuse', `${tag}20 真实鼠标点【合成】→ 进入合成模式（mode=${inFuse && inFuse.mode}）`);
+    const fuseBack = await rect(page, '[data-g2-fuse-back]');
+    ok(!!fuseBack && inside(fuseBack, main), `${tag}21 合成模式【返回装备】仍在画面内`);
+    await realClickRect(page, fuseBack);
+    await page.waitForTimeout(160);
+    const backToEquip = await probeV2(page);
+    ok(backToEquip && backToEquip.mode === 'equip', `${tag}22 【返回装备】→ 回到装备页（mode=${backToEquip && backToEquip.mode}）`);
+
     // —— ① 背包滚到底：footer 位置不变，返回按钮仍在画面内
     const footBefore = await rect(page, '[data-g2-foot]');
     const scrolled = await page.evaluate(() => {
@@ -187,10 +262,10 @@ async function realClickRect(page, r) {
     await page.waitForTimeout(60);
     const footAfter = await rect(page, '[data-g2-foot]');
     const backAfter = await rect(page, '[data-g2-back]');
-    ok(!!scrolled && scrolled.scrollH > scrolled.clientH, `${tag}13 背包自身可滚（scrollH=${scrolled && scrolled.scrollH} > clientH=${scrolled && scrolled.clientH}）`);
-    ok(!!scrolled && scrolled.scrollTop > 0, `${tag}14 背包真的滚到了底部（scrollTop=${scrolled && scrolled.scrollTop}）`);
-    ok(!!footBefore && !!footAfter && Math.abs(footBefore.top - footAfter.top) < 0.6, `${tag}15 滚到底 footer **原位不动**（before=${footBefore && Math.round(footBefore.top)} after=${footAfter && Math.round(footAfter.top)}）`);
-    ok(inside(backAfter, main), `${tag}16 滚到底返回按钮仍在主容器内`);
+    ok(!!scrolled && scrolled.scrollH > scrolled.clientH, `${tag}23 背包自身可滚（scrollH=${scrolled && scrolled.scrollH} > clientH=${scrolled && scrolled.clientH}）`);
+    ok(!!scrolled && scrolled.scrollTop > 0, `${tag}24 背包真的滚到了底部（scrollTop=${scrolled && scrolled.scrollTop}）`);
+    ok(!!footBefore && !!footAfter && Math.abs(footBefore.top - footAfter.top) < 0.6, `${tag}25 滚到底 footer **原位不动**（before=${footBefore && Math.round(footBefore.top)} after=${footAfter && Math.round(footAfter.top)}）`);
+    ok(inside(backAfter, main), `${tag}26 滚到底返回按钮仍在主容器内`);
 
     // —— ② 截图（正常速度，未改任何动画/延时）：装备页（先回滚到顶部，交验收看的是常规起点）
     if (shot) {
@@ -207,12 +282,12 @@ async function realClickRect(page, r) {
     await realClickRect(page, backAfter);
     await page.waitForTimeout(200);
     const view = await page.evaluate(() => window.__PRODUCTHOME__.probe().view);
-    ok(view === 'home', `${tag}17 真实鼠标点返回 → 回首页（view=${view}）`);
+    ok(view === 'home', `${tag}27 真实鼠标点返回 → 回首页（view=${view}）`);
     const headerBack = await page.evaluate(() => {
       const h = document.querySelector('.ph-header');
       return h ? getComputedStyle(h).display !== 'none' && h.getBoundingClientRect().height > 0 : false;
     });
-    ok(headerBack, `${tag}18 回首页后页面 header 原样恢复（冻结首页布局）`);
+    ok(headerBack, `${tag}28 回首页后页面 header 原样恢复（冻结首页布局）`);
     await page.close();
   }
 

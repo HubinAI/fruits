@@ -24,6 +24,7 @@
 - ⚠️⚠️ **vitest 池口径（踩过）**：vitest 4.1.10 无 `vmForks` 池；稳态 `--pool=forks --maxWorkers=1` **逐文件串行**——重物理文件同跑在 free mem ~867MB 下必 OOM（exit 137/SIGKILL）；`spawnSync` 必拒 ⇒ 环境假失败。
 - E2E **串行**（端口不可复用）；长 E2E 后台跑（M5 ≈ 5 分钟）；`e2e:product-reward` 后台跑；`waitForURL(/home\.html/)` 假绿 ⇒ pathname 谓词；`R22b`：Lab 外零 `portrait-lab` 字样；页面模块级零 DOM；`/` 由 `branchDevEntry.ts` 重写。
 - 复验 PRP 先 build（`emptyOutDir:false`）；守卫红 ⇒ 强化不放宽；新守卫负控制 + grep 零残留；node 无 localStorage ⇒ 桩；UI 入口真浏览器验证；冻结契约先 STOP；**禁 stash**；不帮起 dev server；**诊断只诊断**。
+- ⚠️ **批量替换 home.html 大段 CSS 后必须逐类名核对旧块**（踩过：2f99b88 漏掉 `.g2-fuse-btn/-ready/-dot` ⇒ 合成按钮退化成浏览器默认按钮 31×38，E2E 当时只断言节点存在没抓到）。E2E 断言 UI 元素时必须同时断言**可见尺寸/父容器/对齐**，否则位置或样式崩了仍假绿。
 - 速记：星级 `1+0.25×(star−1)` 真源 `buildSnapshot.ts:33`；FAILED 动作随 `href` 变；装载资格 = 存在性；cannon 基线 80；奖励固定 cannon ★1；音频真凶 `stopBattleAudio()` 未被调；**判「够不够得着」一律用 `minGap`**（`finalGap` 会骗人）；**`minGap` 大 ≠ 没交火**（远程压制不受接触影响，判被打要看掉血事件）。
 - Lab 入口速查：`dev:height-line-lab`（端口 8159）/ `e2e:height-line-lab` / `dev:encounter-lab` / `dev:gadget-lab` / `dev:next-run` / `dev:run-page` / `dev:garage-v2-lab`。
 
