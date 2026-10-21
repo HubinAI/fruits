@@ -25,6 +25,8 @@ import { runBuildOptionById } from '../runModifiers';
 import {
   generateAdventureScript,
   randomSeedLabel,
+  type AdventureEventKind,
+  type AdventureEventNode,
   type AdventureScript,
 } from './advScript';
 import {
@@ -36,7 +38,6 @@ import {
   advFormatLog,
   advOverlayCards,
   advOverlayOpen,
-  advOverlayTitle,
   advVisibleLog,
   chooseAdventureOption,
   createAdventureState,
@@ -80,6 +81,16 @@ const COLORS = {
   eventAccent: '#e8b23c',
 } as const;
 
+/**
+ * 三种事件的独立主题（R2 视觉识别）：不同色 + 不同图标 ⇒ 手机尺寸下一眼可区分。
+ * 仅演示用占位视觉（过程式 Canvas 绘制，零第三方素材），结构集中于此，便于后续替换确认素材。
+ */
+const EVENT_THEME: Record<AdventureEventKind, { accent: string; tag: string }> = {
+  crate: { accent: '#e8b23c', tag: '神秘货箱' },
+  wreck: { accent: '#e0654e', tag: '废车搜刮' },
+  rest: { accent: '#5bbf8a', tag: '临时修整' },
+};
+
 const STAGE_BAND: Rect = { x: 0, y: 96, w: PORTRAIT_LOGICAL_W, h: 470 };
 const LOG_BAND: Rect = { x: 0, y: 566, w: PORTRAIT_LOGICAL_W, h: 178 };
 const ACTION_BAND: Rect = { x: 0, y: 744, w: PORTRAIT_LOGICAL_W, h: 100 };
@@ -89,12 +100,15 @@ function hit(r: Rect, p: { x: number; y: number }): boolean {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
 }
 
-function layoutCards(count: number): Rect[] {
+function layoutOptionCards(count: number): Rect[] {
   const w = 330;
-  const h = count <= 2 ? 124 : 100;
-  const gap = 18;
+  const h = count <= 2 ? 116 : 96;
+  const gap = 16;
+  // 头部之下（STAGE_BAND 顶部留作事件主题区），卡片集中在下半区
+  const areaTop = STAGE_BAND.y + 250;
+  const areaBottom = STAGE_BAND.y + STAGE_BAND.h - 14;
   const totalH = count * h + (count - 1) * gap;
-  const startY = Math.round(STAGE_BAND.y + STAGE_BAND.h / 2 - totalH / 2);
+  const startY = Math.round(areaTop + (areaBottom - areaTop - totalH) / 2);
   const x = Math.round((PORTRAIT_LOGICAL_W - w) / 2);
   const rects: Rect[] = [];
   for (let i = 0; i < count; i++) rects.push({ x, y: startY + i * (h + gap), w, h });
@@ -180,7 +194,7 @@ export class AdvPage {
 
     if (advOverlayOpen(this.state)) {
       const cards = advOverlayCards(this.state, this.script, this.ctx2);
-      const rects = layoutCards(cards.length);
+      const rects = layoutOptionCards(cards.length);
       for (let i = 0; i < rects.length; i++) {
         if (hit(rects[i], p)) {
           this.apply(chooseAdventureOption(this.state, cards[i].id, this.ctx2, this.script));
@@ -425,20 +439,46 @@ export class AdvPage {
   private drawOverlay(ctx: CanvasRenderingContext2D): void {
     ctx.fillStyle = COLORS.mask;
     ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
-    const title = advOverlayTitle(this.state, this.script);
+    const node = advCurrentNode(this.state, this.script);
+    if (node.kind === 'EVENT') this.drawEventChoiceOverlay(ctx, node);
+    else this.drawBuildChoiceOverlay(ctx);
+  }
+
+  /** 事件选择浮层（R2：主题色 + 图标 + 标题 + 描述 + 选项，三种事件一眼可区分）。 */
+  private drawEventChoiceOverlay(ctx: CanvasRenderingContext2D, node: AdventureEventNode): void {
+    const theme = EVENT_THEME[node.eventKind];
+    const b = STAGE_BAND;
+    ctx.fillStyle = '#0e131c';
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(b.x, b.y, b.w, 6);
+
+    this.drawEventIcon(ctx, node.eventKind, b.x + 46, b.y + 62, 46, theme.accent);
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = theme.accent;
+    ctx.font = `600 13px ${FONT_STACK}`;
+    ctx.fillText(theme.tag, b.x + 86, b.y + 48);
     ctx.fillStyle = COLORS.textTitle;
     ctx.font = `600 19px ${FONT_STACK}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(title, PORTRAIT_LOGICAL_W / 2, STAGE_BAND.y + 40);
+    ctx.fillText(node.title, b.x + 86, b.y + 78);
+
+    ctx.fillStyle = COLORS.textBody;
+    ctx.font = `400 13px ${FONT_STACK}`;
+    let dy = b.y + 116;
+    for (const line of node.beat) {
+      ctx.fillText(line, b.x + 20, dy);
+      dy += 20;
+    }
 
     const cards = advOverlayCards(this.state, this.script, this.ctx2);
-    const rects = layoutCards(cards.length);
+    const rects = layoutOptionCards(cards.length);
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];
       ctx.fillStyle = COLORS.cardBg;
       ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = COLORS.cardEdge;
+      ctx.strokeStyle = theme.accent;
       ctx.lineWidth = 1.5;
       ctx.strokeRect(r.x, r.y, r.w, r.h);
       ctx.fillStyle = COLORS.textTitle;
@@ -452,19 +492,138 @@ export class AdvPage {
     }
   }
 
-  private drawEventDone(ctx: CanvasRenderingContext2D): void {
-    const r = STAGE_BAND;
-    ctx.fillStyle = 'rgba(6,9,14,0.72)';
-    ctx.fillRect(0, r.y, r.w, r.h);
+  /** 建造选择浮层（中性主题，强化在下一场战斗真实生效）。 */
+  private drawBuildChoiceOverlay(ctx: CanvasRenderingContext2D): void {
+    const b = STAGE_BAND;
+    ctx.fillStyle = '#0e131c';
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.fillStyle = COLORS.eventAccent;
+    ctx.fillRect(b.x, b.y, b.w, 6);
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `600 18px ${FONT_STACK}`;
+    ctx.font = `600 19px ${FONT_STACK}`;
+    ctx.fillText('选择一项改装', b.x + 20, b.y + 44);
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = `400 13px ${FONT_STACK}`;
+    ctx.fillText('强化会在下一场战斗真实生效', b.x + 20, b.y + 74);
+
+    const cards = advOverlayCards(this.state, this.script, this.ctx2);
+    const rects = layoutOptionCards(cards.length);
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      ctx.fillStyle = COLORS.cardBg;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = COLORS.cardEdge;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      ctx.fillStyle = COLORS.textTitle;
+      ctx.font = `600 15px ${FONT_STACK}`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(cards[i].label, r.x + 16, r.y + 32);
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = `400 11px ${FONT_STACK}`;
+      this.wrapText(ctx, cards[i].note, r.x + 16, r.y + 56, r.w - 32, 15);
+    }
+  }
+
+  private drawEventDone(ctx: CanvasRenderingContext2D): void {
+    const b = STAGE_BAND;
+    const node = advCurrentNode(this.state, this.script);
+    const kind = node.kind === 'EVENT' ? node.eventKind : 'crate';
+    const theme = EVENT_THEME[kind];
+    ctx.fillStyle = 'rgba(6,9,14,0.76)';
+    ctx.fillRect(0, b.y, b.w, b.h);
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(b.x, b.y, b.w, 6);
+
+    this.drawEventIcon(ctx, kind, b.x + b.w / 2, b.y + 96, 54, theme.accent);
+
+    ctx.fillStyle = theme.accent;
+    ctx.font = `600 14px ${FONT_STACK}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('事件结果', r.x + r.w / 2, r.y + r.h / 2 - 16);
-    ctx.fillStyle = '#7fd6a0';
-    ctx.font = `500 15px ${FONT_STACK}`;
+    ctx.fillText('开 奖', b.x + b.w / 2, b.y + 158);
+
+    ctx.fillStyle = COLORS.textTitle;
+    ctx.font = `600 17px ${FONT_STACK}`;
     const text = this.state.eventResult ?? '';
-    ctx.fillText(text.length > 40 ? text.slice(0, 39) + '…' : text, r.x + r.w / 2, r.y + r.h / 2 + 14);
+    this.wrapText(ctx, text, b.x + b.w / 2, b.y + 200, b.w - 56, 25);
+
+    ctx.fillStyle = '#7fd6a0';
+    ctx.font = `500 13px ${FONT_STACK}`;
+    ctx.fillText('▶ 按「继续」进入下一天', b.x + b.w / 2, b.y + b.h - 38);
+  }
+
+  /** 过程式事件图标（货箱 / 废车 / 修整 三种形状，零第三方素材）。 */
+  private drawEventIcon(ctx: CanvasRenderingContext2D, kind: AdventureEventKind, cx: number, cy: number, s: number, color: string): void {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    if (kind === 'crate') {
+      const w = s * 0.9, h = s * 0.66, x = cx - w / 2, y = cy - h / 2;
+      ctx.strokeRect(x, y, w, h);
+      ctx.beginPath();
+      ctx.moveTo(x, y + h * 0.36); ctx.lineTo(x + w, y + h * 0.36);
+      ctx.moveTo(x + w * 0.32, y); ctx.lineTo(x + w * 0.32, y + h);
+      ctx.moveTo(x + w * 0.68, y); ctx.lineTo(x + w * 0.68, y + h);
+      ctx.stroke();
+      ctx.fillRect(cx - 4, y + h * 0.36 - 4, 8, 8);
+    } else if (kind === 'wreck') {
+      const w = s * 1.05, h = s * 0.5, x = cx - w / 2, y = cy - h / 2 + 4;
+      ctx.beginPath();
+      ctx.moveTo(x, y + h * 0.6);
+      ctx.lineTo(x + w * 0.12, y + h * 0.12);
+      ctx.lineTo(x + w * 0.4, y);
+      ctx.lineTo(x + w * 0.72, y);
+      ctx.lineTo(x + w * 0.9, y + h * 0.2);
+      ctx.lineTo(x + w, y + h * 0.6);
+      ctx.lineTo(x + w, y + h * 0.92);
+      ctx.lineTo(x, y + h * 0.92);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + w * 0.26, y + h * 0.92, h * 0.24, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + w * 0.74, y + h * 0.92, h * 0.24, 0, Math.PI * 2); ctx.fill();
+    } else {
+      // rest：营地帐篷
+      const w = s * 1.0, h = s * 0.82, x = cx - w / 2, y = cy - h / 2 + 6;
+      ctx.beginPath();
+      ctx.moveTo(cx, y);
+      ctx.lineTo(x, y + h);
+      ctx.lineTo(x + w, y + h);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx, y + h * 0.34);
+      ctx.lineTo(cx - w * 0.2, y + h);
+      ctx.lineTo(cx + w * 0.2, y + h);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  private wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number, maxW: number, lineH: number): void {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const chars = [...text];
+    let line = '';
+    let ly = y;
+    for (const ch of chars) {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxW && line.length > 0) {
+        ctx.fillText(line, cx, ly);
+        line = ch;
+        ly += lineH;
+      } else {
+        line = test;
+      }
+    }
+    if (line.length > 0) ctx.fillText(line, cx, ly);
   }
 
   private drawTerminal(ctx: CanvasRenderingContext2D): void {

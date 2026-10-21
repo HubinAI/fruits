@@ -1,5 +1,5 @@
 /**
- * FRUITS-RANDOM-ADVENTURE-R1｜随机冒险 R1 —— 浏览器真实闭环 + 完整用时计时。
+ * FRUITS-RANDOM-ADVENTURE-R2｜随机冒险 R2 —— 浏览器真实闭环 + 完整用时计时（事件组合随机 + 主题视觉 + 开奖反馈）。
  *
  * 手段：真实浏览器（playwright-core / msedge）打开独立产物 dist-portrait-lab/adventure.html，
  *   - 复用正式物理战斗（RunBattleRuntime + requestAnimationFrame 真实步进，非伪造）；
@@ -165,23 +165,31 @@ async function playThrough(page, seedLabel) {
 
       log(
         run.finalState.phase === 'COMPLETE' || run.finalState.phase === 'FAILED',
-        `R1[${seed}] 真实闭环可玩：跑到终态 ${run.finalState.phase}`,
+        `R2[${seed}] 真实闭环可玩：跑到终态 ${run.finalState.phase}`,
         `phase=${run.finalState.phase} 终态耐久=${run.finalState.carriedHp}/${run.finalState.playerHpMax}`,
       );
-      log(run.finalState.battlesCompleted === 3, `R1[${seed}] 三场真实物理战斗全部发生`, `battlesCompleted=${run.finalState.battlesCompleted}`);
-      log(run.battleWaits >= 3, `R1[${seed}] 至少等待 3 场战斗由 rAF 真实推进`, `battleWaits=${run.battleWaits}`);
+      log(run.finalState.battlesCompleted === 3, `R2[${seed}] 三场真实物理战斗全部发生`, `battlesCompleted=${run.finalState.battlesCompleted}`);
+      log(run.battleWaits >= 3, `R2[${seed}] 至少等待 3 场战斗由 rAF 真实推进`, `battleWaits=${run.battleWaits}`);
       log(
         run.finalState.day === run.finalState.dayTotal,
-        `R1[${seed}] 逐天推进到最后一天`,
+        `R2[${seed}] 逐天推进到最后一天`,
         `day=${run.finalState.day}/${run.finalState.dayTotal}`,
       );
       log(
         run.hpChanged && run.buffChanged,
-        `R1[${seed}] 事件/战斗真实改变耐久与 Build（非仅文本）`,
+        `R2[${seed}] 事件/战斗真实改变耐久与 Build（非仅文本）`,
         `hpChanged=${run.hpChanged} buffChanged=${run.buffChanged} 终态强化=${run.finalState.buffs.length}`,
       );
-      log(true, `R1[${seed}] 完整用时 = ${run.totalSec}s（验收④ 门槛 180s）`, run.total >= 180000 ? '已达到 180s' : '⚠️ 未达 180s，如实披露');
+      log(true, `R2[${seed}] 完整用时 = ${run.totalSec}s（验收④ 门槛 180s）`, run.total >= 180000 ? '已达到 180s' : '⚠️ 未达 180s，如实披露');
     }
+
+    // ---- 验收①：不同种子产生不同事件组合（不仅是顺序，R2 关键）----
+    const combos = new Set(runs.map((r) => JSON.stringify(r.finalState.eventPlan)));
+    log(
+      combos.size > 1,
+      `R2 不同种子产生不同事件组合（不仅是顺序）`,
+      `combinations=${combos.size} 示例=${runs.map((r) => r.finalState.eventPlan.map((e) => e.eventKind).join('>')).join(' | ')}`,
+    );
 
     // ---- 验收①：同种子完全可复现（eventPlan + 阶段序列一致）----
     const ref = runs[0];
@@ -190,8 +198,8 @@ async function playThrough(page, seedLabel) {
     const replay = await playThrough(page, SEEDS[0] + '(重放)');
     const samePlan = JSON.stringify(ref.finalState.eventPlan) === JSON.stringify(replay.finalState.eventPlan);
     const sameSeq = JSON.stringify(ref.transitions) === JSON.stringify(replay.transitions);
-    log(samePlan, `R1[${SEEDS[0]}] 同种子可复现：eventPlan 完全一致`, `eventPlan=${JSON.stringify(ref.finalState.eventPlan)}`);
-    log(sameSeq, `R1[${SEEDS[0]}] 同种子可复现：阶段切换序列一致（含胜负）`, `seqA=${ref.transitions.join('>')} seqB=${replay.transitions.join('>')}`);
+    log(samePlan, `R2[${SEEDS[0]}] 同种子可复现：eventPlan 完全一致`, `eventPlan=${JSON.stringify(ref.finalState.eventPlan)}`);
+    log(sameSeq, `R2[${SEEDS[0]}] 同种子可复现：阶段切换序列一致（含胜负）`, `seqA=${ref.transitions.join('>')} seqB=${replay.transitions.join('>')}`);
 
     // ---- 计时明细（诚实不修饰）----
     console.log('\n================ 计时明细 ================');
@@ -223,7 +231,7 @@ async function playThrough(page, seedLabel) {
     await ctx.close();
   } catch (e) {
     console.error(e);
-    results.push({ pass: false, name: 'R1 E2E 运行异常', detail: String(e && e.message) });
+    results.push({ pass: false, name: 'R2 E2E 运行异常', detail: String(e && e.message) });
   } finally {
     if (browser) await browser.close();
     server.close();
@@ -231,7 +239,7 @@ async function playThrough(page, seedLabel) {
 
   const failed = results.filter((r) => !r.pass);
   console.log('\n============================');
-  console.log(`E2E Random Adventure R1: ${results.length - failed.length}/${results.length} PASS`);
+  console.log(`E2E Random Adventure R2: ${results.length - failed.length}/${results.length} PASS`);
   console.log('============================');
   if (failed.length) {
     for (const f of failed) console.log('FAILED: ' + f.name + ' | ' + f.detail);

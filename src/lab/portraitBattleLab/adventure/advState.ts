@@ -16,7 +16,6 @@
  *   进入 EVENT_DONE 后不可再选、刷新/重抽均不改变已落定的效果）。
  */
 import {
-  EMERGENCY_REPAIR_FRACTION,
   RUN_BASE_WEAPON_DEF_ID,
   RUN_LAYER1_POOL,
   runBuildOptionById,
@@ -28,7 +27,7 @@ import {
   type RunModifierDef,
 } from '../runModifiers';
 import { demoRunPlayerLoadout, runPageContext, type RunPlayerLoadout } from '../runPageScene';
-import { BUFF_CANDIDATES, type AdventureEffect, type AdventureNode, type AdventureScript } from './advScript';
+import { type AdventureEffect, type AdventureNode, type AdventureScript } from './advScript';
 
 export type AdventurePhase =
   | 'IDLE'
@@ -386,33 +385,37 @@ function applyEffect(
     const gained = after - current;
     return {
       state: next(s, { carriedHp: after }),
-      resultText: `你恢复了 ${gained} 点耐久。`,
+      resultText: `你恢复了 ${gained} 点耐久（当前 ${after}/${maxHp}）。`,
     };
   }
   if (effect.kind === 'damage') {
+    // 最低保留（可见规则，非隐藏保底）：单事件不会把耐久打到 0，但损失是真实的；
+    // 触及保留线时在结果里明示，不用隐藏保底冒充真实风险（验收③）。
     const amount = Math.round(maxHp * effect.fraction);
-    const after = Math.max(floor, current - amount);
+    const raw = current - amount;
+    const clamped = raw < floor;
+    const after = Math.max(floor, raw);
     const lost = current - after;
+    const tail = clamped ? `（触及最低保留 ${floor}）` : '';
     return {
       state: next(s, { carriedHp: after }),
-      resultText: `你损失了 ${lost} 点耐久。`,
+      resultText: `你损失了 ${lost} 点耐久。${tail}`,
     };
   }
   if (effect.kind === 'buff') {
-    // 若已拥有或候选缺失，回退为一次小修复，避免「画得出选了没反应」。
-    const owned = s.buffs.includes(effect.buildId);
-    const fallback = !owned ? effect.buildId : BUFF_CANDIDATES.find((id) => !s.buffs.includes(id));
-    if (!fallback) {
-      const amount = Math.round(maxHp * EMERGENCY_REPAIR_FRACTION);
-      const after = Math.min(maxHp, current + amount);
-      const gained = after - current;
-      return { state: next(s, { carriedHp: after }), resultText: `没有可拿的强化，你顺手修补了 ${gained} 点耐久。` };
+    // 事件强化来自 EVENT_BUFF_POOL（路线无关、对演示武器恒有效），生成时已排除重复 ⇒ 默认直接计入。
+    // 若（理论上不会发生的）重复，则透明告知，不静默改成别的奖励（验收③）。
+    const mod = runBuildOptionById(effect.buildId);
+    const label = mod?.label ?? effect.buildId;
+    if (s.buffs.includes(effect.buildId)) {
+      return {
+        state: s,
+        resultText: `预掷的是「${label}」，但你已拥有，本次不重复计入（耐久不变）。`,
+      };
     }
-    const mod = runBuildOptionById(fallback);
-    const label = mod?.label ?? fallback;
     return {
-      state: next(s, { buffs: [...s.buffs, fallback] }),
-      resultText: `你获得了临时强化：${label}。`,
+      state: next(s, { buffs: [...s.buffs, effect.buildId] }),
+      resultText: `你获得了临时强化：${label}（已生效，下一场战斗计入）。`,
     };
   }
   return { state: s, resultText: '什么也没发生。' };

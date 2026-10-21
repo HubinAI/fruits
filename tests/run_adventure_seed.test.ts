@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   generateAdventureScript,
+  EVENT_BUFF_POOL,
   type AdventureEventKind,
   type AdventureEffect,
   type AdventureEventNode,
@@ -30,6 +31,7 @@ import {
   type AdventureContext,
   type AdventureState,
 } from '../src/lab/portraitBattleLab/adventure/advState';
+import { runBuildOptionById } from '../src/lab/portraitBattleLab/runModifiers';
 
 function eventStrategy(kind: AdventureEventKind): string {
   // 总是选「主动/有风险」选项，以触发 heal / buff / damage（none 只在 leave/safe 上）
@@ -123,18 +125,46 @@ describe('FRUITS-RANDOM-ADVENTURE-R1 种子可复现', () => {
     expect(a.seed).toBe(b.seed);
   });
 
-  it('不同种子 → 出现不同事件顺序（验收 ①「多局出现不同事件」）', () => {
-    // 24 种组合（3! 排列 × 2×2 结果）空间下，跨多个种子必然出现多种顺序
+  it('不同种子 → 出现不同事件组合（不仅是顺序，验收 ①「不同冒险经历」）', () => {
+    // 3 个事件槽各自独立抽取（有放回）⇒ 27 种组合空间；跨多种子必出现大量不同组合
     const plans = new Set<string>();
-    for (let i = 0; i < 30; i++) plans.add(JSON.stringify(generateAdventureScript(`var-${i}`).eventPlan));
-    expect(plans.size).toBeGreaterThan(1);
+    for (let i = 0; i < 40; i++) plans.add(JSON.stringify(generateAdventureScript(`var-${i}`).eventPlan));
+    expect(plans.size).toBeGreaterThan(5);
   });
 
-  it('每局三种非战斗事件都出现（crate / wreck / rest）', () => {
-    const kinds = new Set(generateAdventureScript('coverage-1').eventPlan.map((e) => e.eventKind));
-    expect(kinds.has('crate')).toBe(true);
-    expect(kinds.has('wreck')).toBe(true);
-    expect(kinds.has('rest')).toBe(true);
+  it('同类事件可在不同位置重复，且重复时结果独立掷定（验收 ①）', () => {
+    let found = false;
+    for (let i = 0; i < 3000 && !found; i++) {
+      const s = generateAdventureScript(`rep-${i}`);
+      const byKind: Record<string, AdventureEventNode[]> = {};
+      for (const n of Object.values(s.nodes)) if (n.kind === 'EVENT') (byKind[n.eventKind] ||= []).push(n);
+      for (const kind of ['crate', 'wreck']) {
+        const arr = byKind[kind];
+        if (arr && arr.length >= 2) {
+          const opt = kind === 'crate' ? 'open' : 'scavenge';
+          if (JSON.stringify(arr[0].outcomes[opt]) !== JSON.stringify(arr[1].outcomes[opt])) {
+            found = true;
+            break;
+          }
+        }
+      }
+    }
+    expect(found).toBe(true);
+  });
+
+  it('事件临时强化来自路线无关池，对演示武器恒有效（验收③）', () => {
+    for (let i = 0; i < 60; i++) {
+      const s = generateAdventureScript(`buff-${i}`);
+      for (const n of Object.values(s.nodes)) {
+        if (n.kind !== 'EVENT') continue;
+        for (const eff of Object.values(n.outcomes)) {
+          if (eff.kind === 'buff') {
+            expect(EVENT_BUFF_POOL.includes(eff.buildId)).toBe(true);
+            expect(runBuildOptionById(eff.buildId)).not.toBeNull();
+          }
+        }
+      }
+    }
   });
 });
 
@@ -148,6 +178,8 @@ describe('FRUITS-RANDOM-ADVENTURE-R1 事件效果真实进入状态', () => {
       const s = generateAdventureScript(`find-${i}`);
       const byKind: Record<string, AdventureEventNode> = {};
       for (const n of Object.values(s.nodes)) if (n.kind === 'EVENT') byKind[n.eventKind] = n;
+      // R2：事件为独立抽取，本局不一定同时含 crate 与 wreck ⇒ 跳过不含两者的种子
+      if (!byKind['crate'] || !byKind['wreck']) continue;
       const crate = byKind['crate'].outcomes.open;
       const wreck = byKind['wreck'].outcomes.scavenge;
       if (crate.kind === 'buff' && wreck.kind === 'damage') {
@@ -171,7 +203,7 @@ describe('FRUITS-RANDOM-ADVENTURE-R1 事件效果真实进入状态', () => {
         expect(r.hpAfter).toBeGreaterThanOrEqual(r.hpBefore); // 修复不会减耐久
       } else if (r.outcome.kind === 'damage') {
         expect(r.hpAfter).toBe(expectedHp(ctx, r.hpBefore, r.outcome));
-        expect(r.hpAfter).toBeLessThan(r.hpBefore); // 损失耐久
+        expect(r.hpAfter).toBeLessThanOrEqual(r.hpBefore); // 损失耐久（触及保留线时相等，已明示）
       } else if (r.outcome.kind === 'buff') {
         expect(r.buffsAfter).toBe(r.buffsBefore + 1); // 真实获得一项强化
       }
