@@ -4,17 +4,17 @@
 
 | 要找什么 | 增量逐轮明细 | 现状快照 | 守卫/陷阱/契约全文 | 跨窗口续接 |
 |---|---|---|---|---|
-| 去哪 | `memory/YYYY-MM-DD.md`（最新 2026-10-16） | `REF_GUARDS_TRAPS_CONTRACTS.md` §21 | 同 REF §1–§20 | `docs/handoff/NEW-WINDOW-PROMPT.md` + `archive/交接文档_*.md` |
+| 去哪 | `memory/YYYY-MM-DD.md`（最新 2026-10-21） | `REF_GUARDS_TRAPS_CONTRACTS.md` §21 | 同 REF §1–§20 | **`docs/handoff/MAC_TO_WINDOWS_20261021.md`（权威）** + `archive/交接文档_*.md` |
 
 ## 0. 现状 / 下一步（新窗口先读）
-- **最新轮 = Garage 2.0 系列（2026-10-16）**：起点 56aa253 → 功能链尾 30a4176 → HEAD `49435f1`（交接 memory log），local=remote，工作区 clean。4 Queue：`0a5485b` GARAGE-V2-QUALITY-FOUNDATION-R1（品质/实例模型+纯逻辑五合一）、`c945453` GARAGE-V2-LEDGER-COHERENCE-R1（实例恒等性+双账本写桥+装备真实落盘）、`6880db0` GARAGE-V2-INVENTORY-LAYOUT-LAB-R1（布局 Lab，存储完全隔离）、`30a4176` HOME-V2-MINIMAL-R1（正式首页极简化）。明细 → `docs/handoff/archive/交接文档_2026-10-16_garage-v2-foundation-lab-home_5217dff.md` + `docs/garage-v2/{G2-AUDIT,COH-API,BATCH-BC-README}.md` + 日 log 2026-10-16。
-- **最高门槛（等 Queue）**：正式 Garage V2 接入未做——必须等「七档品质真能穿戴并影响 Run」独立验收；`equipQualityProduct` 仍 `run-not-wired`；7 档品质↔战斗强度映射（α 降维/β 扩曲线/γ 独立字段）未拍板 ⇒ 彩色格子不代表更强战斗。Body 无数量模型不开消耗（`body-not-consumable`）；旧 ★2..5 `legacy-star-locked`。未部署 Pages、未合并 main。
+- **最新轮 = Mac→Windows 迁移交接（2026-10-21）**：HEAD `dbc5b8a`（GARAGE-V2-FUSE-MODAL-R1，功能链尾），local=remote，工作区 clean。交接文档 `docs/handoff/MAC_TO_WINDOWS_20261021.md`（仓库/分支/结构/命令/已完成/限制/方向B/PVP/冻结/陷阱 全在内）。Garage 2.0 正式接入已完成：`b13e6df` 七档→战斗桥接 → `28a8209` 武器品质穿戴 → `6435db3/b17e19c/d8e0171` 轮组+推进器 → `fe8c359/3f0316c` 正式切片与五合一 → `ad8a34f` 默认入口切换 → `2f99b88` 交互结构重做 → `d1e6764` 合成入口入背包标题行 → `dbc5b8a` 合成改居中弹窗。
+- **最高门槛（等 Queue）**：产品方向 B（竖屏 / 完整冒险 >3min / 短物理战斗串联）**仅研究未立项**；真人 PVP 暂停但**不删代码与设计**。Body 无数量模型 ⇒ 品质 Body 不可穿不可合（`body-not-consumable`）；旧 ★2..5 `legacy-star-locked`；微信侧仍是旧 Canvas Garage（未接 Garage 2.0）。未部署 Pages、未合并 main。
 - **预存红闭集**：全量 vitest 18 failed = 逐字一致基线（T20、R22a、F1-R1/R2、G1-05、R2-09/10、LSE-04/21、NR-14、RC-06b/c、RP-21/27、H-05、EB-04、PC-14、PR-27；PL-26 已登记修复 19→18）。**判红必先建 HEAD 独立 worktree 复现**。
-- **候选下一步（等 Queue，不自动开工）**：`DEMO-DEFAULT-CANNON-CLEAR-PATH-R1`、`DEMO-LOADOUT-GUIDE-R2`、`CONTENT-ENCOUNTER-PLAYABLE-BATCH-R2`（每批须同步 3 处 `LAB_ENCOUNTERS` 计数守卫）、`CONTENT-BATCH-EXPANSION-R2`、`E2E-STALE-ROUTES-REFRESH-R1`。旧候选保留。
+- **候选下一步（等 Queue，不自动开工）**：方向 B 原型方案（未立项）、`E2E-STALE-ROUTES-REFRESH-R1`（product-home 10 条 / next-run 崩溃 = 陈旧族，独立 Queue）、`CONTENT-BATCH-EXPANSION-R2`、`CONTENT-ENCOUNTER-PLAYABLE-BATCH-R2`（每批须同步 3 处 `LAB_ENCOUNTERS` 计数守卫）。旧候选保留。
 
 ## 1. Identity / 链尾 / 边界
 - Repo `HubinAI/fruits`｜分支 `prototype-portrait-battle-lab`｜舞台 844×390（竖版产品页 390×844）。
-- 链尾（细 SHA 查 `git log`）：…见 REF §21c 段 → PRODUCT-FULL-LOOP-FOUNDATION-R1 → 5e9abe6 E2E 陈旧族刷新 → 644bf4a 归档 E2E 核查 → f8a699f CONTENT-BATCH-CREATION-PIPELINE-R1 → 22e05dd CONTENT-ENCOUNTER-PLAYABLE-BATCH-R1 → 64d2b26 DEMO-FRESH-ACCOUNT-VERTICAL-SLICE-R1 → 56aa253 UX 感知三连 handoff → **30a4176 Garage 2.0 四连（功能链尾）**。
+- 链尾（细 SHA 查 `git log`）：… 30a4176 Garage 2.0 四连 → b13e6df → 28a8209 → 6435db3 → b17e19c → d8e0171 → fe8c359 → 3f0316c → ad8a34f 默认入口切换 → 2f99b88 UX 三修 → d1e6764 合成入口 → **dbc5b8a 合成弹窗（功能链尾）** → 迁移交接 commit。
 - ⚠️ `src/product/` 新模块**必须**在 `tests/productLoopHomeGarage.test.ts` PL-26 白名单（闭集）登记。
 - 每轮必交边界取证：`git diff --stat -- src/{core,battle,physics,render,player,platform,game,presentation,ui}` + `git diff --exit-code -- src/core/content.ts src/battle/contactRouter.ts`。
 - R7 防回归：通用成长只浅合并 `behaviorParams`；Cannon 三池 / `RUN_MODIFIERS` 未动；改 `nextRunValidation` 前读 REF §19d。
