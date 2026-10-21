@@ -18,7 +18,7 @@
 | 提交标题 | `GARAGE-V2-FUSE-MODAL-R1：合成改为装备页之上的居中弹窗（返回装备移到底部）` |
 | 交接前工作区 | clean（`git status --porcelain` 空） |
 | local / remote | 一致（`origin/prototype-portrait-battle-lab` = `dbc5b8a`） |
-| 跟踪文件数 / 体积 | 675 个 / 约 15 MB |
+| 跟踪文件数 / 体积 | 675（交接前基线）→ **677**（含本文档与当日 memory）/ 约 15 MB |
 | 运行时 | **Node >= 24.0.0**（`package.json:engines`）、npm、TypeScript、Vite、vitest、playwright-core |
 | 正式产物 | H5：`dist-pages/`（`base=/fruits/`）；微信小游戏：`dist-wechat/`（微信开发者工具导入） |
 | 生产与 main | **未部署 GitHub Pages、未合并 main** —— 交接时保持此状态 |
@@ -342,7 +342,7 @@ NR-14、RC-06b、RC-06c、RP-21、RP-27、H-05、EB-04、PC-14、PR-27
 | 分支正确 | `prototype-portrait-battle-lab` ✅ |
 | HEAD = 远端 | `dbc5b8a42d2ee9ad643820efa5cd0bec2e8f9a13` ✅（本轮交接提交在此之上，见 §13） |
 | 工作区干净 | ✅（交接前 `git status --porcelain` 空） |
-| 关键源码/资源/测试完整 | ✅ 675 个跟踪文件：`src` 169、`tests` 335、`assets` 5、`docs` 66、`scripts` 8、`build` 2、`wechat` 3；根级 5 套 vite 配置 + 11 个 HTML 入口全部 TRACKED |
+| 关键源码/资源/测试完整 | ✅ 675 个跟踪文件（交接前）→ **677**（含本文档 + 当日 memory）：`src` 169、`tests` 335、`assets` 5、`docs` 67、`scripts` 8、`build` 2、`wechat` 3；根级 5 套 vite 配置 + 11 个 HTML 入口全部 TRACKED |
 | 未跟踪但必需的文件 | **无**（`git status --untracked-files=all` 为空；被忽略的仅 `node_modules/` 与 `dist*/`） |
 | 敏感/大文件 | 无 `.env` / 密钥 / 令牌 / 本地存档 / APK 解包资料入库；最大跟踪文件 ≈369 KB |
 | 迁移阻断 | **无**（前置：Node 24 + 首次构建 + 浏览器） |
@@ -357,13 +357,15 @@ NR-14、RC-06b、RC-06c、RP-21、RP-27、H-05、EB-04、PC-14、PR-27
 
 ## 13. 交接提交
 
-本次交接产生的提交仅包含 **本文件**（如无其他确认需要同步的工程文件）。
+本次交接产生的提交只包含 **本文件** + **当日 memory 记录**（`.workbuddy/memory/2026-10-21.md`
+与 `MEMORY.md` 现状指针）；没有修改任何 `src/`、测试、构建配置或存档代码。
 
 | 项 | 值 |
 |---|---|
 | 文档路径 | `docs/handoff/MAC_TO_WINDOWS_20261021.md` |
 | 交接基线 HEAD | `dbc5b8a42d2ee9ad643820efa5cd0bec2e8f9a13` |
-| 交接提交 | 见 `git log -1 --format=%H`（提交信息前缀 `MAC-TO-WINDOWS-HANDOFF`） |
+| 交接提交 | `3435990781a2799ec8c01f45a9f0a00185bd00b3`（短 `3435990`，`MAC-TO-WINDOWS-HANDOFF-R1`） |
+| 本文件后续修订 | 见 `git log -- docs/handoff/MAC_TO_WINDOWS_20261021.md`（只修计数/表述，不改结论） |
 
 Windows 侧接管后第一步：`git pull` → `npm ci` → `npm run typecheck` → `npm run build:pages`，
 然后按 §3 跑 E2E 复核；确认绿后再开新 Queue。
