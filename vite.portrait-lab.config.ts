@@ -62,6 +62,11 @@ export default defineConfig({
         // 仍是同一块可整块删除的实验产物，不进入任何正式产物；
         // ⚠️ 绝不加入 vite.pages.config.ts / 正式首页入口（Queue 必改 1）。
         'garage-v2-lab': 'garage-v2-lab.html',
+        // FRUITS-RANDOM-ADVENTURE-R1：随机冒险原型（独立隔离入口，复用正式物理战斗与
+        // Run Build / 耐久口径；不修改任何玩法 / 数值 / 正式入口 / 冻结的
+        // runScript.ts / runPageState.ts）。同上：可整块删除，不进入任何正式产物；
+        // 不接入正式首页（未验证事件不自动进入正式流程）。
+        'adventure': 'adventure.html',
       },
     },
   },

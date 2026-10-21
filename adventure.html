@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>最强水果 — 随机冒险 R1（FRUITS-RANDOM-ADVENTURE-R1）</title>
+    <!--
+      FRUITS-RANDOM-ADVENTURE-R1｜随机冒险原型玩家入口（隔离实验产物）。
+
+      目标：以最小成本验证「逐天推进 + 随机事件 + 事件结果再随机」的可玩体验。
+      复用正式物理战斗（RunBattleRuntime / RunBattleView）与现有 Run Build / 耐久口径；
+      不修改任何玩法 / 数值 / 正式入口 / 冻结的 runScript.ts / runPageState.ts。
+
+      隔离：本页面不参与正式构建（build / build:pages / build:e2e / build:wechat），
+      仅随 build:portrait-lab 进入 dist-portrait-lab，可整块删除。
+      不接入正式首页（未验证事件不自动进入正式流程）。
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background: #06090e;
+        color: #e9eef7;
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+      #adv-root { position: fixed; inset: 0; }
+      .adv-stage {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        height: min(88vh, 940px);
+        width: calc(min(88vh, 940px) * 390 / 844);
+        overflow: hidden;
+        background: #0b0e14;
+        border-radius: 10px;
+        box-shadow: 0 0 0 1px #1b2434, 0 24px 70px rgba(0, 0, 0, 0.6);
+      }
+      .adv-stage canvas { touch-action: manipulation; }
+      @media (max-width: 640px), (max-height: 620px) {
+        .adv-stage {
+          left: 0;
+          top: 0;
+          transform: none;
+          width: 100%;
+          height: 100%;
+          border-radius: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="adv-root"></div>
+    <script type="module" src="/src/lab/portraitBattleLab/adventure/advMain.ts"></script>
+  </body>
+</html>
