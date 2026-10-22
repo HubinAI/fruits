@@ -20,7 +20,8 @@
  *   与正式存档键完全隔离，不影响正式玩家存档（详见 advArchive.ts）。
  *
  * 启动：`npm run dev:adventure` → http://127.0.0.1:5173/adventure.html?seed=123
- * 种子：`?seed=` 指定可复现种子；省略则随机生成（终局点按钮以同种子重开）。
+ * 种子（R4 复玩闭环）：默认进入 = 新随机种子；终局「再来一局」= 生成**新随机种子**的新一局；
+ * `?seed=` 指定种子 = 原局重放（**仅测试入口**，复现验收用）。
  */
 import { resolveRunPlayerLoadout, demoRunPlayerLoadout, type RunPlayerLoadout } from '../runPageScene';
 import { parseExternalDraft } from '../runPlayerLoadout';

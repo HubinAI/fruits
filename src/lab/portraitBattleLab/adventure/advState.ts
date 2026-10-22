@@ -12,10 +12,12 @@
  *   - heal   → 修改 `carriedHp`（下一场真实战斗开局耐久随之变化）；
  *   - damage → 修改 `carriedHp`（可能降低后续战斗开局耐久）；
  *   - buff   → 追加到 `buffs`（下一建造/战斗真正注入 Run Build）；
- *   且每个事件的结果**只结算一次**（选项因果在脚本生成时已预掷定，选择即揭晓，
+ *   且每个事件的结果**只结算一次**（耐久类因果生成时预掷定；强化身份在领取时按
+ *   种子候选序解析，见 applyEffect —— 同种子 + 同选择 = 同结果，选择即揭晓，
  *   进入 EVENT_DONE 后不可再选、刷新/重抽均不改变已落定的效果）。
  */
 import {
+  EMERGENCY_REPAIR_FRACTION,
   RUN_BASE_WEAPON_DEF_ID,
   RUN_LAYER1_POOL,
   runBuildOptionById,
@@ -69,6 +71,8 @@ export interface AdventureState {
   /** 下一场真实战斗开局的耐久（null = 满耐久）。跨战斗单一口径，与正式 runCarriedPlayerHp 同源思路。 */
   readonly carriedHp: number | null;
   readonly battlesCompleted: number;
+  /** 获胜战斗数（winner === 'A'）；与 battlesCompleted（完成场次，含打退）区分（R4 结算口径）。 */
+  readonly battlesWon: number;
   readonly log: readonly AdventureLogEntry[];
   readonly battle: AdventureBattleState | null;
   /** EVENT_DONE 阶段展示的结果文本。 */
@@ -331,6 +335,7 @@ export function createAdventureState(ctx: AdventureContext, script: AdventureScr
     baseWeaponDefId: ctx.baseWeaponDefId,
     carriedHp: null,
     battlesCompleted: 0,
+    battlesWon: 0,
     log: pushLogs([], entries),
     battle: null,
     eventResult: null,
@@ -351,7 +356,8 @@ export function createAdventureState(ctx: AdventureContext, script: AdventureScr
  *   IDLE + BUILD          → CHOICE（建造候选浮层）
  *   EVENT                 → BATTLE（建立真实战斗状态）
  *   RESULT / EVENT_DONE   → 推进到 next 节点
- *   终态                  → 全新一局（同一脚本 / 同种子，可复现）
+ *   终态                  → 同一脚本重开（纯状态机口径 = 同种子重放，仅测试入口；
+ *                            UI 层 advPage 在终态拦截主动作改为「新一局·新随机种子」，见 R4 必改①）
  *   BATTLE / CHOICE / EVENT_CHOICE → no-op（必须点卡片）
  */
 export function pressAdventureAction(
@@ -410,7 +416,16 @@ export function pressAdventureAction(
   return s; // BATTLE / CHOICE / EVENT_CHOICE → 不接受主动作
 }
 
-/** 把事件效果落到状态（返回新状态 + 结果文本）。 */
+/**
+ * 把事件效果落到状态（返回新状态 + 结果文本）。
+ *
+ * R4 领取时解析（修复预分配耗尽强化池 + 零收益中奖/无提示扣血）：
+ *   - buff / trade 的 `candidates` 是生成期掷定的种子洗牌序（同种子恒定），
+ *     领取时取**第一个未拥有**的候选 —— 纯函数 of (candidates, state.buffs)，可复现；
+ *   - 候选全被拥有 → 降级为一次真实维修（不扣耐久）；
+ *   - 候选全被拥有且耐久已满 → 如实空手（明确文案，绝不 framed 成中奖）；
+ *   - trade 只有真正领到未拥有强化才扣耐久 —— 绝不「仅扣耐久」零收益。
+ */
 function applyEffect(
   s: AdventureState,
   effect: AdventureEffect,
@@ -424,10 +439,9 @@ function applyEffect(
     const amount = Math.round(maxHp * effect.fraction);
     const after = Math.min(maxHp, current + amount);
     const gained = after - current;
-    return {
-      state: next(s, { carriedHp: after }),
-      resultText: `你恢复了 ${gained} 点耐久（当前 ${after}/${maxHp}）。`,
-    };
+    // 满耐久：如实告知（0 恢复不是奖励，也不假装有效）。
+    const text = gained === 0 ? `耐久已满，没有可修的地方（恢复 0 点，当前 ${after}/${maxHp}）。` : `你恢复了 ${gained} 点耐久（当前 ${after}/${maxHp}）。`;
+    return { state: next(s, { carriedHp: after }), resultText: text };
   }
   if (effect.kind === 'damage') {
     // 最低保留（可见规则，非隐藏保底）：单事件不会把耐久打到 0，但损失是真实的；
@@ -443,42 +457,45 @@ function applyEffect(
       resultText: `你损失了 ${lost} 点耐久。${tail}`,
     };
   }
-  if (effect.kind === 'buff') {
-    // 事件强化来自 EVENT_BUFF_POOL（路线无关、对演示武器恒有效），生成时已排除重复 ⇒ 默认直接计入。
-    // 若（理论上不会发生的）重复，则透明告知，不静默改成别的奖励（验收③）。
-    const mod = runBuildOptionById(effect.buildId);
-    const label = mod?.label ?? effect.buildId;
-    if (s.buffs.includes(effect.buildId)) {
+  if (effect.kind === 'buff' || effect.kind === 'trade') {
+    const tradeDmg = effect.kind === 'trade' ? Math.round(maxHp * effect.damageFraction) : 0;
+    const labelOf = (id: RunBuildId): string => runBuildOptionById(id)?.label ?? id;
+
+    // 领取时解析：第一个未拥有的候选（同种子恒定序 + 当前 Build 的纯函数）。
+    const granted = effect.candidates.find((id) => !s.buffs.includes(id)) ?? null;
+    if (granted) {
+      if (effect.kind === 'buff') {
+        return {
+          state: next(s, { buffs: [...s.buffs, granted] }),
+          resultText: `你获得了临时强化：${labelOf(granted)}（已生效，下一场战斗计入）。`,
+        };
+      }
+      // trade：真实 HP ↔ Build 权衡，仅当真正领到强化才扣耐久。
+      const raw = current - tradeDmg;
+      const clamped = raw < floor;
+      const after = Math.max(floor, raw);
+      const lost = current - after;
+      const tail = clamped ? `（触及最低保留 ${floor}）` : '';
       return {
-        state: s,
-        resultText: `预掷的是「${label}」，但你已拥有，本次不重复计入（耐久不变）。`,
+        state: next(s, { carriedHp: after, buffs: [...s.buffs, granted] }),
+        resultText: `你用 ${lost} 点耐久换来了临时强化：${labelOf(granted)}。${tail}`,
       };
     }
-    return {
-      state: next(s, { buffs: [...s.buffs, effect.buildId] }),
-      resultText: `你获得了临时强化：${label}（已生效，下一场战斗计入）。`,
-    };
-  }
-  if (effect.kind === 'trade') {
-    // 商队交易：用一段耐久换一件临时强化（真实 HP ↔ Build 权衡，规则可见，非隐藏）。
-    const dmg = Math.round(maxHp * effect.damageFraction);
-    const raw = current - dmg;
-    const clamped = raw < floor;
-    const after = Math.max(floor, raw);
-    const lost = current - after;
-    const mod = runBuildOptionById(effect.buildId);
-    const label = mod?.label ?? effect.buildId;
-    const tail = clamped ? `（触及最低保留 ${floor}）` : '';
-    if (s.buffs.includes(effect.buildId)) {
+
+    // 候选全被拥有 → 补救维修（绝不无收益中奖、绝不无提示扣血）。
+    const healAmount = Math.round(maxHp * EMERGENCY_REPAIR_FRACTION);
+    const after = Math.min(maxHp, current + healAmount);
+    const gained = after - current;
+    if (gained > 0) {
+      const head = effect.kind === 'trade' ? '商队的货你都已拥有，这单改为免费补给' : '箱里的强化你都已拥有，改为一次补给';
       return {
         state: next(s, { carriedHp: after }),
-        resultText: `你用 ${lost} 点耐久换了「${label}」，但已拥有，本次不重复计入（仅扣耐久）。${tail}`,
+        resultText: `${head}：恢复 ${gained} 点耐久（当前 ${after}/${maxHp}），不重复计入已拥有的强化。`,
       };
     }
-    return {
-      state: next(s, { carriedHp: after, buffs: [...s.buffs, effect.buildId] }),
-      resultText: `你用 ${lost} 点耐久换来了临时强化：${label}。${tail}`,
-    };
+    // 候选全被拥有且耐久已满 → 如实空手（无收益、无损失，明确文案）。
+    const head = effect.kind === 'trade' ? '商队的货你都已拥有，耐久也已满——这单作罢（不扣耐久）' : '强化你都已拥有，耐久也已满——这次没有收获，但也没有损失';
+    return { state: s, resultText: `${head}。` };
   }
   return { state: s, resultText: '什么也没发生。' };
 }
@@ -569,12 +586,13 @@ export function finishAdventureBattle(
   };
   const battlesCompleted = s.battlesCompleted + 1;
   const won = outcome.winner === 'A';
+  const battlesWon = s.battlesWon + (won ? 1 : 0);
   const outcomeLine = won ? '战斗胜利。' : '战车被打退，你撤出了战场。';
   const carried = Math.max(0, outcome.playerHp);
   const node = advCurrentNode(s, script);
 
   if (outcome.playerHp <= 0) {
-    return goPhase(next(s, { battle: b, battlesCompleted, carriedHp: 0 }), 'FAILED', {
+    return goPhase(next(s, { battle: b, battlesCompleted, battlesWon, carriedHp: 0 }), 'FAILED', {
       log: pushLogs(s.log, [
         { kind: 'result', text: `战车耐久耗尽，DAY ${s.day} 的冒险到此结束。` },
         { kind: 'durability', text: `战车耐久剩余 ${durabilityPercent(b)}%。` },
@@ -582,7 +600,7 @@ export function finishAdventureBattle(
     });
   }
   if (node.kind === 'FINAL') {
-    return goPhase(next(s, { battle: b, battlesCompleted, carriedHp: carried }), 'COMPLETE', {
+    return goPhase(next(s, { battle: b, battlesCompleted, battlesWon, carriedHp: carried }), 'COMPLETE', {
       log: pushLogs(s.log, [
         { kind: 'result', text: outcomeLine },
         { kind: 'durability', text: `战车耐久剩余 ${durabilityPercent(b)}%。` },
@@ -592,7 +610,7 @@ export function finishAdventureBattle(
     });
   }
   const after = node.kind === 'BATTLE' && node.after ? node.after.map((t) => ({ kind: 'result' as AdventureLogKind, text: t })) : [];
-  return goPhase(next(s, { battle: b, battlesCompleted, carriedHp: carried }), 'RESULT', {
+  return goPhase(next(s, { battle: b, battlesCompleted, battlesWon, carriedHp: carried }), 'RESULT', {
     log: pushLogs(s.log, [
       { kind: 'result', text: outcomeLine },
       { kind: 'durability', text: `战车耐久剩余 ${durabilityPercent(b)}%。` },

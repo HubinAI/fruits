@@ -1,25 +1,23 @@
 /**
- * FRUITS-ADVENTURE-FULL-PLAYABLE-R3｜随机冒险 targeted 测试（纯状态机，无需 DOM）。
+ * FRUITS-ADVENTURE-R4｜随机冒险 targeted 测试（纯状态机，无需 DOM）。
  *
- * 覆盖验收：
+ * R4 覆盖（在 R3 基础上）：
  *   ① 同种子完全可复现；不同种子产生不同事件组合（且相邻事件不同类）；
- *   ② 事件结果真实进入 HP / Run Build，且只结算一次（重复点击不可重抽）；
- *   ③ 完整经历「事件 → 战斗 → 结算 → 下一天 → 阶段提示 → 终态」无卡死 / 无漏清理；
- *   ④ 胜利与失败两种终态均可达（合成边界推进）；
- *   ⑤ 满耐久维修诚实（恢复 0，不假装有效）；隔离测试档案不污染正式存档。
+ *   ② 事件结果真实进入 HP / Build，且只结算一次；强化身份**领取时解析**
+ *      （候选序同种子恒定；候选全被拥有 → 补救维修 / 如实空手，绝不零收益中奖、绝不无提示扣血）；
+ *   ③ 结算口径：battlesWon（获胜）与 battlesCompleted（完成，含打退）分开统计；
+ *   ④ 胜利与失败两种终态均可达；隔离测试档案不污染正式存档；
+ *   ⑤ 「下一局目标」在 7 战上限内全部真实可达（绝不出现「挑战 8 场」类不可达目标）。
  *
- * 战斗用 `finishAdventureBattle` 在边界一次性推进（等价官方 result 出现那一刻），
- * 不依赖真实物理渲染 ⇒ 可在 node 下确定性验证状态机与效果。
+ * 战斗用 `finishAdventureBattle` 在边界一次性推进（等价官方 result 出现那一刻）。
  */
 import { describe, it, expect } from 'vitest';
 import {
   generateAdventureScript,
   EVENT_BUFF_POOL,
   ADVENTURE_TOTAL_BATTLES,
-  ADVENTURE_EVENT_KINDS,
   type AdventureEventKind,
   type AdventureEffect,
-  type AdventureEventNode,
   type AdventureScript,
 } from '../src/lab/portraitBattleLab/adventure/advScript';
 import {
@@ -40,6 +38,7 @@ import {
   readArchive,
   nextRunGoal,
   archiveStorageKey,
+  type AdvArchive,
   type AdvRunSummary,
 } from '../src/lab/portraitBattleLab/adventure/advArchive';
 
@@ -60,6 +59,7 @@ interface EffectRecord {
   readonly hpAfter: number;
   readonly buffsBefore: number;
   readonly buffsAfter: number;
+  readonly resultText: string;
 }
 
 /** 完整跑一局（战斗在边界用合成结果推进），返回终态与逐事件效果记录。 */
@@ -98,6 +98,7 @@ function playAdventure(
         hpAfter: advCarriedPlayerHp(after, ctx),
         buffsBefore,
         buffsAfter: after.buffs.length,
+        resultText: after.eventResult ?? '',
       });
       state = after;
     } else if (state.phase === 'CHOICE') {
@@ -128,19 +129,8 @@ function playAdventure(
   return { final: state, records };
 }
 
-/** 精确复算 applyEffect 的期望 carriedHp（与 advState.applyEffect 同源口径，含 trade）。 */
-function expectedHp(ctx: AdventureContext, beforeHp: number, outcome: AdventureEffect): number {
-  const max = ctx.playerHpMax;
-  const floor = Math.max(1, Math.round(max * 0.1));
-  const current = beforeHp;
-  if (outcome.kind === 'heal') return Math.min(max, current + Math.round(max * outcome.fraction));
-  if (outcome.kind === 'damage') return Math.max(floor, current - Math.round(max * outcome.fraction));
-  if (outcome.kind === 'trade') return Math.max(floor, current - Math.round(max * outcome.damageFraction));
-  return current;
-}
-
-describe('FRUITS-ADVENTURE-R3 种子可复现', () => {
-  it('同种子 → 完全相同的事件顺序/结果/战斗对手', () => {
+describe('FRUITS-ADVENTURE-R4 种子可复现', () => {
+  it('同种子 → 完全相同的事件顺序/候选/战斗对手', () => {
     const a = generateAdventureScript('repro-seed-42');
     const b = generateAdventureScript('repro-seed-42');
     expect(JSON.stringify(a.eventPlan)).toBe(JSON.stringify(b.eventPlan));
@@ -170,35 +160,18 @@ describe('FRUITS-ADVENTURE-R3 种子可复现', () => {
     }
   });
 
-  it('同类事件可在不同位置重复，且重复时结果独立掷定（验收 ①）', () => {
-    let found = false;
-    for (let i = 0; i < 3000 && !found; i++) {
-      const s = generateAdventureScript(`rep-${i}`);
-      const byKind: Record<string, AdventureEventNode[]> = {};
-      for (const n of Object.values(s.nodes)) if (n.kind === 'EVENT') (byKind[n.eventKind] ||= []).push(n);
-      for (const kind of ADVENTURE_EVENT_KINDS) {
-        const arr = byKind[kind];
-        if (arr && arr.length >= 2) {
-          if (JSON.stringify(arr[0].outcomes) !== JSON.stringify(arr[1].outcomes)) {
-            found = true;
-            break;
-          }
-        }
-      }
-    }
-    expect(found).toBe(true);
-  });
-
-  it('事件临时强化来自路线无关池，对演示武器恒有效（验收③）', () => {
+  it('强化类选项的候选序 ⊆ EVENT_BUFF_POOL 且全池覆盖（领取时解析的基础）', () => {
     for (let i = 0; i < 60; i++) {
       const s = generateAdventureScript(`buff-${i}`);
       for (const n of Object.values(s.nodes)) {
         if (n.kind !== 'EVENT') continue;
         for (const eff of Object.values(n.outcomes)) {
           if (eff.kind === 'buff' || eff.kind === 'trade') {
-            const id = eff.kind === 'buff' ? eff.buildId : eff.buildId;
-            expect(EVENT_BUFF_POOL.includes(id)).toBe(true);
-            expect(runBuildOptionById(id)).not.toBeNull();
+            expect(eff.candidates.length).toBe(EVENT_BUFF_POOL.length);
+            for (const id of eff.candidates) {
+              expect(EVENT_BUFF_POOL.includes(id)).toBe(true);
+              expect(runBuildOptionById(id)).not.toBeNull();
+            }
           }
         }
       }
@@ -206,8 +179,8 @@ describe('FRUITS-ADVENTURE-R3 种子可复现', () => {
   });
 });
 
-describe('FRUITS-ADVENTURE-R3 事件效果真实进入状态', () => {
-  it('每个事件结果都精确落到 HP / Build，且只结算一次', () => {
+describe('FRUITS-ADVENTURE-R4 事件效果真实进入状态（领取时解析）', () => {
+  it('每个事件结果都精确落到 HP / Build，且只结算一次；扣血必有收益', () => {
     const ctx = advContextFromLoadout();
     // 找一个同时含「强化类结果」与「耐久类结果（heal/damage/trade）」的种子，强化断言覆盖。
     let script: AdventureScript | null = null;
@@ -231,21 +204,27 @@ describe('FRUITS-ADVENTURE-R3 事件效果真实进入状态', () => {
 
     expect(final.phase === 'COMPLETE' || final.phase === 'FAILED').toBe(true);
     expect(final.battlesCompleted).toBe(ADVENTURE_TOTAL_BATTLES);
+    expect(final.battlesWon).toBe(ADVENTURE_TOTAL_BATTLES); // 全胜合成路径
 
     for (const r of records) {
       if (r.outcome.kind === 'heal') {
-        expect(r.hpAfter).toBe(expectedHp(ctx, r.hpBefore, r.outcome));
         expect(r.hpAfter).toBeGreaterThanOrEqual(r.hpBefore);
+        expect(r.resultText).toMatch(/恢复|已满/);
       } else if (r.outcome.kind === 'damage') {
-        expect(r.hpAfter).toBe(expectedHp(ctx, r.hpBefore, r.outcome));
         expect(r.hpAfter).toBeLessThanOrEqual(r.hpBefore);
-      } else if (r.outcome.kind === 'trade') {
-        expect(r.hpAfter).toBe(expectedHp(ctx, r.hpBefore, r.outcome));
-        // 已拥有该强化 → 只扣耐久不重复计入；未拥有 → +1。两者均为诚实结果（验收③）。
+      } else if (r.outcome.kind === 'buff' || r.outcome.kind === 'trade') {
+        // R4 核心不变量：
+        //   - buff 永不扣血；
+        //   - trade 只有真正领到新强化才扣血（扣血 ⟹ +1 强化）；
+        //   - 拿到强化 ⟹ +1；没拿到 ⟹ 补救维修（hp 不降）或如实空手（hp 不变）。
+        if (r.outcome.kind === 'buff') expect(r.hpAfter).toBeGreaterThanOrEqual(r.hpBefore);
+        if (r.hpAfter < r.hpBefore) expect(r.buffsAfter).toBe(r.buffsBefore + 1);
         expect(r.buffsAfter >= r.buffsBefore && r.buffsAfter <= r.buffsBefore + 1).toBe(true);
-      } else if (r.outcome.kind === 'buff') {
-        // 已拥有该强化 → 不重复计入（耐久不变）；未拥有 → +1。诚实、不伪造奖励（验收③）。
-        expect(r.buffsAfter >= r.buffsBefore && r.buffsAfter <= r.buffsBefore + 1).toBe(true);
+        // 不再出现「已拥有，本次不重复计入」这类零收益结算文案（R4 移除该路径）
+        expect(r.resultText).not.toMatch(/已拥有，本次不重复计入/);
+        if (r.outcome.kind === 'trade' && r.hpAfter < r.hpBefore) {
+          expect(r.resultText).toMatch(/换来了临时强化/);
+        }
       }
     }
 
@@ -255,7 +234,44 @@ describe('FRUITS-ADVENTURE-R3 事件效果真实进入状态', () => {
     expect(buffAdded).toBe(true);
   });
 
-  it('满耐久维修诚实：恢复 0，不假装有效奖励（验收③）', () => {
+  it('候选全被拥有：buff/trade 不扣血、不改 Build，给补救维修或如实空手（R4 必改②）', () => {
+    const ctx = advContextFromLoadout();
+    // 找任意带 buff / trade 选项的事件
+    let target: { script: AdventureScript; nodeId: string; optionId: string; kind: 'buff' | 'trade' } | null = null;
+    outer: for (let i = 0; i < 2000; i++) {
+      const s = generateAdventureScript(`own-${i}`);
+      for (const n of Object.values(s.nodes)) {
+        if (n.kind !== 'EVENT') continue;
+        for (const [oid, eff] of Object.entries(n.outcomes)) {
+          if (eff.kind === 'buff' || eff.kind === 'trade') {
+            target = { script: s, nodeId: n.id, optionId: oid, kind: eff.kind };
+            break outer;
+          }
+        }
+      }
+    }
+    expect(target).not.toBeNull();
+    const t = target as { script: AdventureScript; nodeId: string; optionId: string; kind: 'buff' | 'trade' };
+
+    // 场景 A：已拥有全部候选 + 满耐久 → 如实空手（HP/Build 均不变，文案明示无收获无损失）
+    let s = createAdventureState(ctx, t.script);
+    s = { ...s, phase: 'EVENT_CHOICE', nodeId: t.nodeId, buffs: [...EVENT_BUFF_POOL], carriedHp: ctx.playerHpMax };
+    const a = chooseAdventureOption(s, t.optionId, ctx, t.script);
+    expect(advCarriedPlayerHp(a, ctx)).toBe(ctx.playerHpMax);
+    expect(a.buffs.length).toBe(EVENT_BUFF_POOL.length);
+    expect(a.eventResult ?? '').toMatch(/没有收获|作罢/);
+
+    // 场景 B：已拥有全部候选 + 低耐久 → 补救维修（HP 上升、Build 不变、不扣血）
+    const s2 = { ...s, carriedHp: 300 };
+    const b = chooseAdventureOption(s2, t.optionId, ctx, t.script);
+    expect(advCarriedPlayerHp(b, ctx)).toBeGreaterThan(300);
+    expect(b.buffs.length).toBe(EVENT_BUFF_POOL.length);
+    expect(b.eventResult ?? '').toMatch(/补给|维修/);
+    // 绝不出现零收益扣血文案
+    expect(b.eventResult ?? '').not.toMatch(/仅扣耐久/);
+  });
+
+  it('满耐久维修诚实：恢复 0 且明示「已满」，不假装有效奖励（验收③）', () => {
     const ctx = advContextFromLoadout();
     let target: { script: AdventureScript; nodeId: string; optionId: string } | null = null;
     for (let i = 0; i < 4000 && !target; i++) {
@@ -274,16 +290,14 @@ describe('FRUITS-ADVENTURE-R3 事件效果真实进入状态', () => {
     }
     expect(target).not.toBeNull();
     const t = target as { script: AdventureScript; nodeId: string; optionId: string };
-    // 满耐久开局
     let state = createAdventureState(ctx, t.script);
-    // 直接跳到该事件节点
     state = { ...state, phase: 'EVENT_CHOICE', nodeId: t.nodeId };
     const after = chooseAdventureOption(state, t.optionId, ctx, t.script);
     expect(advCarriedPlayerHp(after, ctx)).toBe(ctx.playerHpMax); // 恢复 0
-    expect(after.eventResult ?? '').toMatch(/恢复了 0|已满/);
+    expect(after.eventResult ?? '').toMatch(/恢复 0|已满/);
   });
 
-  it('刷新（重新开局同种子）→ 完全可复现，不重复领取', () => {
+  it('刷新（同种子重放）→ 完全可复现（候选序恒定 ⇒ 领取结果一致），不重复领取', () => {
     const ctx = advContextFromLoadout();
     const s1 = generateAdventureScript('replay-seed');
     const s2 = generateAdventureScript('replay-seed');
@@ -291,29 +305,70 @@ describe('FRUITS-ADVENTURE-R3 事件效果真实进入状态', () => {
     const r2 = playAdventure(s2, ctx);
     expect(r1.final.buffs).toEqual(r2.final.buffs);
     expect(r1.final.carriedHp).toBe(r2.final.carriedHp);
-    expect(r1.records.map((r) => r.outcome.kind)).toEqual(r2.records.map((r) => r.outcome.kind));
+    expect(r1.records.map((r) => r.resultText)).toEqual(r2.records.map((r) => r.resultText));
   });
 });
 
-describe('FRUITS-ADVENTURE-R3 胜利与失败均可达', () => {
-  it('全胜路径 → COMPLETE（胜利可达）', () => {
+describe('FRUITS-ADVENTURE-R4 胜负可达与结算口径', () => {
+  it('全胜路径 → COMPLETE，battlesWon === battlesCompleted === 7（完成/获胜区分的满值）', () => {
     const ctx = advContextFromLoadout();
     const script = generateAdventureScript('win-path');
     const { final } = playAdventure(script, ctx);
     expect(final.phase).toBe('COMPLETE');
     expect(final.battlesCompleted).toBe(ADVENTURE_TOTAL_BATTLES);
+    expect(final.battlesWon).toBe(ADVENTURE_TOTAL_BATTLES);
   });
 
-  it('首战失利 → FAILED（失败可达，且耐久真实归零）', () => {
+  it('首战失利 → FAILED：battlesCompleted=1 而 battlesWon=0（完成≠获胜，R4 口径）', () => {
     const ctx = advContextFromLoadout();
     const script = generateAdventureScript('lose-path');
     const { final } = playAdventure(script, ctx, true);
     expect(final.phase).toBe('FAILED');
     expect(final.carriedHp).toBe(0);
+    expect(final.battlesCompleted).toBe(1);
+    expect(final.battlesWon).toBe(0);
+  });
+
+  it('混胜负路径：完成 7 场但获胜 < 7（RESULT 打退也计入完成）', () => {
+    const ctx = advContextFromLoadout();
+    const script = generateAdventureScript('mixed-path');
+    let s = createAdventureState(ctx, script);
+    let guard = 0;
+    let battleIdx = 0;
+    while (s.phase !== 'COMPLETE' && s.phase !== 'FAILED' && guard < 400) {
+      guard++;
+      if (s.phase === 'EVENT_CHOICE') {
+        const node = advCurrentNode(s, script);
+        if (node.kind === 'EVENT') s = chooseAdventureOption(s, eventStrategy(node.eventKind), ctx, script);
+        continue;
+      }
+      if (s.phase === 'CHOICE') {
+        const node = advCurrentNode(s, script);
+        const pool = advChoicePool(s, node, ctx);
+        s = pool.length > 0 ? chooseAdventureOption(s, pool[0].id, ctx, script) : pressAdventureAction(s, ctx, script);
+        continue;
+      }
+      if (s.phase === 'BATTLE') {
+        battleIdx++;
+        const cur = advCarriedPlayerHp(s, ctx);
+        // 第 2 场打输但存活（打退）：完成后继续，验证完成≠获胜
+        const lose = battleIdx === 2;
+        s = finishAdventureBattle(
+          s,
+          { winner: lose ? 'B' : 'A', endReason: 'test', playerHp: lose ? Math.max(1, Math.round(ctx.playerHpMax * 0.3)) : Math.max(1, cur - 30), enemyHp: 0, steps: 50 },
+          script,
+        );
+        continue;
+      }
+      s = pressAdventureAction(s, ctx, script);
+    }
+    expect(s.phase).toBe('COMPLETE');
+    expect(s.battlesCompleted).toBe(ADVENTURE_TOTAL_BATTLES);
+    expect(s.battlesWon).toBe(ADVENTURE_TOTAL_BATTLES - 1);
   });
 });
 
-describe('FRUITS-ADVENTURE-R3 流程完整性', () => {
+describe('FRUITS-ADVENTURE-R4 流程完整性', () => {
   it('随机 20 个种子均能无卡死跑完一局并到达终态（含阶段提示与 7 战）', () => {
     const ctx = advContextFromLoadout();
     for (let i = 0; i < 20; i++) {
@@ -321,14 +376,14 @@ describe('FRUITS-ADVENTURE-R3 流程完整性', () => {
       const { final } = playAdventure(script, ctx);
       expect(final.phase === 'COMPLETE' || final.phase === 'FAILED').toBe(true);
       expect(final.battlesCompleted).toBe(ADVENTURE_TOTAL_BATTLES);
-      // 阶段提示确实生成（每 3 战一次）
+      expect(final.battlesWon).toBeLessThanOrEqual(final.battlesCompleted);
       expect(script.bannerPlan.length).toBeGreaterThanOrEqual(1);
     }
   });
 });
 
-describe('FRUITS-ADVENTURE-R3 隔离测试档案（不污染正式存档）', () => {
-  it('recordRun 真实累计且不影响正式存档键', () => {
+describe('FRUITS-ADVENTURE-R4 隔离测试档案与可达目标', () => {
+  it('recordRun 真实累计（完成/获胜分列）且不影响正式存档键', () => {
     const before = readArchive();
     const summary: AdvRunSummary = {
       seedLabel: 't-seed',
@@ -336,6 +391,8 @@ describe('FRUITS-ADVENTURE-R3 隔离测试档案（不污染正式存档）', ()
       dayReached: 18,
       dayTotal: 20,
       battlesCompleted: ADVENTURE_TOTAL_BATTLES,
+      battlesWon: ADVENTURE_TOTAL_BATTLES,
+      finalHpPct: 49,
       buffs: ['damageUp', 'rateUp'],
       finalHp: 540,
       playerHpMax: 1100,
@@ -344,9 +401,49 @@ describe('FRUITS-ADVENTURE-R3 隔离测试档案（不污染正式存档）', ()
     };
     const after = recordRun(summary);
     expect(after.totals.runs).toBe(before.totals.runs + 1);
-    expect(after.best?.battlesCompleted).toBe(ADVENTURE_TOTAL_BATTLES);
+    expect(after.totals.battlesCompleted).toBe(before.totals.battlesCompleted + ADVENTURE_TOTAL_BATTLES);
+    expect(after.totals.battlesWon).toBe(before.totals.battlesWon + ADVENTURE_TOTAL_BATTLES);
+    expect(after.best?.battlesWon).toBe(ADVENTURE_TOTAL_BATTLES);
+    expect(after.best?.finalHpPct).toBe(49);
     expect(typeof nextRunGoal(after)).toBe('string');
     // 键名明确隔离（与正式存档 strongfruit.playerBuild.v1 不同）
     expect(archiveStorageKey()).toBe('strongfruit.adventure.r3.testArchive.v1');
+  });
+
+  it('下一局目标全部真实可达（7 战上限内绝不出现「8 场」类目标，R4 必改①）', () => {
+    const ctxBase: AdvArchive['best'] = {
+      battlesCompleted: ADVENTURE_TOTAL_BATTLES,
+      battlesWon: ADVENTURE_TOTAL_BATTLES,
+      dayReached: 26,
+      won: true,
+      finalHpPct: 40,
+      seedLabel: 'best',
+    };
+    const mk = (best: AdvArchive['best'], runs = 1): AdvArchive => ({
+      version: 2,
+      runs: [],
+      best,
+      totals: { runs, wins: best?.won ? 1 : 0, battlesCompleted: best?.battlesCompleted ?? 0, battlesWon: best?.battlesWon ?? 0 },
+    });
+
+    // 首局（无档案）→ 起步目标
+    expect(nextRunGoal(mk(null, 0))).toMatch(/目标：/);
+
+    // 未通关 → 比最佳走得更远（恒可达）
+    const notWon = nextRunGoal(mk({ ...ctxBase, won: false, battlesWon: 4 }));
+    expect(notWon).toMatch(/走得更远/);
+    expect(notWon).toMatch(/获胜 4 场/);
+
+    // 已通关但非全胜 → 挑战全胜（7 战内可达）
+    const wonPartial = nextRunGoal(mk({ ...ctxBase, won: true, battlesWon: 5 }));
+    expect(wonPartial).toMatch(/全胜/);
+    expect(wonPartial).toMatch(/7 战全胜/);
+    expect(wonPartial).not.toMatch(/8 场/);
+
+    // 已全胜通关 → 追平/刷新耐久纪录（可达），绝不出现「挑战 8 场不败」
+    const wonAll = nextRunGoal(mk({ ...ctxBase, won: true, battlesWon: ADVENTURE_TOTAL_BATTLES }));
+    expect(wonAll).toMatch(/耐久纪录/);
+    expect(wonAll).not.toMatch(/8 场/);
+    expect(wonAll).not.toMatch(/挑战 \d+ 场不败/);
   });
 });

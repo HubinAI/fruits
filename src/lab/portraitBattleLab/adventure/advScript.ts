@@ -36,19 +36,24 @@ export interface AdventureOption {
 }
 
 /**
- * 事件选项在生成时已预先掷定的因果（同种子恒定；选择即揭晓，不可重抽）。
+ * 事件选项因果（R4 修订）：耐久类（heal/damage）在生成时预掷定；**强化身份在领取时解析**——
+ * 生成期只按种子掷定候选顺序（`candidates`），领取时取第一个未拥有的候选。
+ *   - 修复 R3 缺陷：生成期预分配并占用 EVENT_BUFF_POOL（仅 3 项而事件多达 9 个），
+ *     未领取的奖励白白占池 ⇒ 后续事件整池重抽 ⇒ 必出「已拥有，不重复计入」的零收益中奖；
+ *   - 候选顺序同种子恒定 + 解析是 `state.buffs` 的纯函数 ⇒ 同种子 + 同选择 = 同结果（可复现不变）；
+ *   - 结算仍一次性（chooseAdventureOption 单向推进，EVENT_DONE 后不可重选/重抽）。
  *   - heal   ：恢复一段耐久（fraction 为占上限比例，运行时换算成具体点数）；
  *   - damage ：损失一段耐久；
- *   - buff   ：获得一项临时强化（buildId 取自正式 Run Build 候选池）；
- *   - trade  ：用一段耐久换一项临时强化（HP ↔ Build 的真实权衡，convoy 专用）；
+ *   - buff   ：获得一项临时强化（领取时从 candidates 取第一个未拥有项；全拥有 → 补救维修 / 如实空手）；
+ *   - trade  ：用一段耐久换一项临时强化（仅当领到未拥有强化时才扣耐久——绝不无收益扣血）；
  *   - none   ：无事发生。
  */
 export type AdventureEffect =
   | { readonly kind: 'none' }
   | { readonly kind: 'heal'; readonly fraction: number }
   | { readonly kind: 'damage'; readonly fraction: number }
-  | { readonly kind: 'buff'; readonly buildId: RunBuildId }
-  | { readonly kind: 'trade'; readonly damageFraction: number; readonly buildId: RunBuildId };
+  | { readonly kind: 'buff'; readonly candidates: readonly RunBuildId[] }
+  | { readonly kind: 'trade'; readonly damageFraction: number; readonly candidates: readonly RunBuildId[] };
 
 export interface AdventureStartNode {
   readonly id: string;
@@ -179,26 +184,27 @@ const EVENT_CONTENT: Record<AdventureEventKind, { title: string; beat: readonly 
 
 /**
  * 为某个事件类型掷定每个选项的因果（同种子恒定；选择即揭晓，不可重抽）。
- * `usedBuffs` 跨本局所有事件共享 ⇒ 同一局内已抽过的临时强化不会重复出现。
+ * R4：不再在生成期占用强化池——每个强化类选项只掷定**候选顺序**（EVENT_BUFF_POOL 的种子洗牌），
+ * 领取时由 advState 取第一个未拥有项；未领取的奖励不消耗任何池资源（修复预分配耗尽问题）。
  */
 function rollEventOutcomes(
   rng: AdvRng,
   kind: AdventureEventKind,
-  usedBuffs: Set<RunBuildId>,
 ): Record<string, AdventureEffect> {
-  const pickBuff = (): RunBuildId => {
-    const avail = EVENT_BUFF_POOL.filter((id) => !usedBuffs.has(id));
-    const pool = avail.length > 0 ? avail : EVENT_BUFF_POOL;
-    const id = rng.pick(pool);
-    usedBuffs.add(id);
-    return id;
+  const pickCandidates = (): readonly RunBuildId[] => {
+    const pool = [...EVENT_BUFF_POOL];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = rng.int(i + 1);
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool;
   };
   if (kind === 'crate') {
     return {
       leave: { kind: 'none' },
       open: rng.chance(0.5)
         ? { kind: 'heal', fraction: EMERGENCY_REPAIR_FRACTION }
-        : { kind: 'buff', buildId: pickBuff() },
+        : { kind: 'buff', candidates: pickCandidates() },
     };
   }
   if (kind === 'wreck') {
@@ -206,7 +212,7 @@ function rollEventOutcomes(
     return {
       safe: { kind: 'heal', fraction: EMERGENCY_REPAIR_FRACTION },
       scavenge: rng.chance(0.5)
-        ? { kind: 'buff', buildId: pickBuff() }
+        ? { kind: 'buff', candidates: pickCandidates() }
         : { kind: 'damage', fraction: ADV_DAMAGE_FRACTION },
     };
   }
@@ -214,13 +220,13 @@ function rollEventOutcomes(
     // 维修 = 修复；继续改装 = 临时强化（均预掷定，选择即揭晓）
     return {
       repair: { kind: 'heal', fraction: EMERGENCY_REPAIR_FRACTION },
-      upgrade: { kind: 'buff', buildId: pickBuff() },
+      upgrade: { kind: 'buff', candidates: pickCandidates() },
     };
   }
   if (kind === 'convoy') {
-    // 用少量耐久换一件临时强化（真实 HP ↔ Build 权衡）；离开 = 无
+    // 用少量耐久换一件临时强化（真实 HP ↔ Build 权衡；仅当领到未拥有强化才扣耐久）；离开 = 无
     return {
-      trade: { kind: 'trade', damageFraction: ADV_CONVOY_DAMAGE_FRACTION, buildId: pickBuff() },
+      trade: { kind: 'trade', damageFraction: ADV_CONVOY_DAMAGE_FRACTION, candidates: pickCandidates() },
       ignore: { kind: 'none' },
     };
   }
@@ -228,7 +234,7 @@ function rollEventOutcomes(
   return {
     leave: { kind: 'none' },
     touch: rng.chance(0.5)
-      ? { kind: 'buff', buildId: pickBuff() }
+      ? { kind: 'buff', candidates: pickCandidates() }
       : { kind: 'damage', fraction: ADV_ALTAR_DAMAGE_FRACTION },
   };
 }
@@ -238,7 +244,6 @@ function makeEventNode(
   day: number,
   kind: AdventureEventKind,
   rng: AdvRng,
-  usedBuffs: Set<RunBuildId>,
 ): AdventureEventNode {
   const c = EVENT_CONTENT[kind];
   return {
@@ -249,7 +254,7 @@ function makeEventNode(
     title: c.title,
     beat: c.beat,
     options: c.options,
-    outcomes: rollEventOutcomes(rng, kind, usedBuffs),
+    outcomes: rollEventOutcomes(rng, kind),
     next: null,
   };
 }
@@ -284,18 +289,20 @@ function drawEventKinds(rng: AdvRng, n: number): AdventureEventKind[] {
 }
 
 /**
- * 难度曲线：7 场战斗，真实物理 headless 校准（演示装载 1100 耐久入场）：
- *   - 前 4 场「易敌池」按种子洗牌：ProtoRusher ×2 / Chaser / ExtendedStandoffRod
+ * 难度曲线（R4 终版）：7 场战斗，真实物理 headless 校准（演示装载 1100 耐久入场）：
+ *   - 前 5 场「易敌池」按种子洗牌：ProtoRusher ×2 / Chaser / ExtendedStandoffRod
  *     （四者在任意强化水平下均可赢，构成前期节奏）；
- *   - 第 5/6 场为「成长门槛敌」：ExtendedBurnSaw（喷火+锯持续磨血）/ ExtendedHeavyContact
- *     （霰弹+锤贴脸）—— 无强化必败、Build 成型后可赢（校准：六强化分别剩 608 / 409 耐久），
- *     把「局内 Build 成长是否真实兑现」变成胜负的真实判据；
- *   - 终点 FINAL = Chaser（全程最长对决，成型 Build 下稳赢但耗耐可观）。
+ *   - 第 6 场「成长门槛敌」：ExtendedBurnSaw（喷火+锯持续磨血）—— 无强化必败、Build 成型后
+ *     可赢，把「局内 Build 成长是否真实兑现」变成胜负的真实判据；
+ *   - 终点 FINAL = ExtendedHeavyContact（霰弹+锤贴脸爆发）：与门槛敌（持续磨血）、
+ *     前期敌（冲撞/控距）挑战特征明确不同；真实物理校准：6 强化入场稳赢但仅剩
+ *     409/1100（耗掉 63% 耐久，全程最高代价）—— 终点即最难一关，压力真实可感。
  *
  * ⚠️ 真实物理校准结论（headless，未改任何物理/武器数值）：
  *   - `RangedTurret` / `RushRammer` / `HeavyFortress` 在演示装载任意耐久/强化下均 1100→0
  *     不可赢，绝不入池（否则整局永远无法 COMPLETE，违反验收①）；
  *   - `HighGunPlatform` 六强化仅剩 97 耐久，过紧不入池；
+ *   - FINAL=Chaser 方案（V1）实测终点只剩 734 且前期池含 Chaser 特征重复，R4 起改用 V2；
  *   - `fastReload` 与 `twinCannon` 存在 DPS 崩塌的涌现互斥（见 advState 策展排除），冒险池不发放。
  */
 function battleCurve(rng: AdvRng): string[] {
@@ -304,9 +311,10 @@ function battleCurve(rng: AdvRng): string[] {
     const j = rng.int(i + 1);
     [early[i], early[j]] = [early[j], early[i]];
   }
-  // 第 6 场单「成长门槛敌」：ExtendedBurnSaw（无强化必败、成型后可赢，耗耐随 Build 质量浮动）；
-  // 终点 Chaser（全程最长对决）。双门槛（BurnSaw+HeavyContact）经实测超出耐久预算（0/4 通关）故弃用。
-  return [...early, 'ExtendedBurnSaw', 'Chaser'];
+  // 第 6 场单「成长门槛敌」ExtendedBurnSaw；终点 ExtendedHeavyContact（贴脸爆发，全程最高代价）。
+  // 双门槛（BurnSaw+HeavyContact 均在中段）经实测超出耐久预算（0/4 通关）故弃用；
+  // 终点独占 HeavyContact 是唯一可负担的位次（校准见文件头注释）。
+  return [...early, 'ExtendedBurnSaw', 'ExtendedHeavyContact'];
 }
 
 /** 建造候选池的分布（避免「固定最优选项」：交替不同层，玩家每段都能看到不同成长）。 */
@@ -325,8 +333,9 @@ function buildPoolKinds(rng: AdvRng, n: number): AdventureBuildPool[] {
  * 生成一条完整的随机冒险脚本。
  *
  * 节奏（逐天推进，R3 完整可玩版）：
- *   START → [事件 → 战斗(+阶段提示)] ×N → FINAL → 结算
- *   - 7 场真实物理战斗（难度曲线，终点为 RangedTurret 挑战）；
+ *   START → [事件 → 战斗(+建造/阶段提示)] ×N → 终点 FINAL → 结算
+ *   - 7 场真实物理战斗（难度曲线见 battleCurve，RangedTurret/RushRammer/HeavyFortress
+ *     真实物理下不可赢已弃用）；
  *   - 9 处事件槽（5 种事件、相邻不同类、结果独立）；
  *   - 6 次 Run Build 选择（layer1/layer2/lateral/generic 交替）；
  *   - 每 3 场战斗一次阶段提示（BANNER），制造「阶段压力」。
@@ -341,8 +350,6 @@ export function generateAdventureScript(seedInput: string | number): AdventureSc
   const eventKinds = drawEventKinds(rng, ADVENTURE_TOTAL_EVENTS);
   const encounters = battleCurve(rng);
   const buildKinds = buildPoolKinds(rng, ADVENTURE_TOTAL_BUILDS);
-  /** 本局已抽过的临时强化，保证事件强化多样且不重复。 */
-  const usedBuffs = new Set<RunBuildId>();
 
   const list: AdventureNode[] = [];
   list.push({
@@ -365,7 +372,7 @@ export function generateAdventureScript(seedInput: string | number): AdventureSc
   while (battlesDone < ADVENTURE_TOTAL_BATTLES - 1) {
     // 战斗前插入事件（还有事件槽时）
     if (ei < eventKinds.length) {
-      list.push(makeEventNode(`e${ei + 1}`, day, eventKinds[ei], rng, usedBuffs));
+      list.push(makeEventNode(`e${ei + 1}`, day, eventKinds[ei], rng));
       day++;
       ei++;
     }
@@ -410,7 +417,7 @@ export function generateAdventureScript(seedInput: string | number): AdventureSc
   // 终点 FINAL 之前清掉所有「剩余」事件槽与建造槽：保证事件/建造总数达标，
   // 且这些节点一定在 FINAL 之前被玩家走到（绝不留死内容）。
   while (ei < eventKinds.length) {
-    list.push(makeEventNode(`e${ei + 1}`, day, eventKinds[ei], rng, usedBuffs));
+    list.push(makeEventNode(`e${ei + 1}`, day, eventKinds[ei], rng));
     day++;
     ei++;
   }

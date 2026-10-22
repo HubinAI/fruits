@@ -1,18 +1,20 @@
 /**
- * FRUITS-ADVENTURE-FULL-PLAYABLE-R3｜随机冒险 R3 —— 浏览器真实闭环 + 完整用时计时 + 画面检查。
+ * FRUITS-ADVENTURE-R4｜随机冒险 R4 —— 真实按钮操作闭环 + 复玩/奖励/终点验收 + 完整用时 + 画面检查。
  *
  * 手段：真实浏览器（playwright-core / msedge）打开独立产物 dist-portrait-lab/adventure.html，
  *   - 复用正式物理战斗（RunBattleRuntime + requestAnimationFrame 真实步进，非伪造）；
- *   - 通过只读诊断句柄 window.__adv（probe / step / stepOption / diagnose / restart）驱动；
- *   - 智能驱动（低耐久优先选修复、否则优先拿强化）用于证明「真实物理下胜利可达」；
- *   - 真实记录 wall-clock 各环节耗时；诚实披露是否达到 180 秒（验收④），绝不造假延时。
+ *   - **真实按钮操作（R4 必改④）**：所有交互通过 page.mouse.click 按逻辑坐标反算真实点击
+ *     （主按钮 / 事件选项卡 / 建造选项卡），等价真人手指操作；只读探针 window.__adv 仅用于
+ *     断言与择优决策（不参与玩法推进）；
+ *   - 智能驱动（免费强化 > 低耐久修车 > 高耐久且领得到新强化才交易）证明「胜利可达」；
+ *   - 真实记录 wall-clock 耗时；诚实披露是否达到 180 秒，绝不造假延时。
  *
- * 画面检查（验收④）：390×844 视口，对事件浮层 / 建造浮层 / 阶段提示 / 最终结算截图，供人工核验
- *   无明显遮挡、不可点击、内容缺失或切场残留。
- *
- * 隔离（验收③）：终态写入 `strongfruit.adventure.r3.testArchive.v1`，断言正式存档键不被本原型写入。
- *
- * ⚠️ 本文件只验证「真实可玩闭环 + 计时 + 隔离」，不验证玩法数值（那是 vitest 的职责）。
+ * R4 验收覆盖：
+ *   1. 默认「再来一局」= 新随机种子（真实点击后 seedLabel 变化）；?seed= 指定种子可重放（计划完全一致）；
+ *   2. 结算口径：完成战斗 / 获胜战斗分列（battlesWon ≤ battlesCompleted；败局 battlesWon < 完成）；
+ *   3. 终点挑战（ExtendedHeavyContact）：胜/败路线均可达（win 种子 COMPLETE、loss 种子 FAILED 于门槛/终点）；
+ *   4. 隔离：隔离档案 v2 真实累计，正式存档键绝不写入；
+ *   5. 画面检查：390×844 对事件浮层 / 建造浮层 / 胜负结算截图，供人工核验遮挡与可读性。
  */
 const http = require('http');
 const fs = require('fs');
@@ -23,7 +25,8 @@ const { launchBrowser } = require('./_browser_launch.cjs');
 const ROOT = path.join(__dirname, '..', 'dist-portrait-lab');
 const PORT = 8157;
 const URL_BASE = `http://127.0.0.1:${PORT}`;
-const SEEDS = (process.env.ADV_SEEDS || 'adv-r3-A,adv-r3-B,adv-r3-C,adv-r3-D').split(',');
+const SEED_WIN = process.env.ADV_SEED_WIN || 'adv-r3-A';
+const SEED_LOSS = process.env.ADV_SEED_LOSS || 'adv-r3-C';
 const ADV_TOTAL_BATTLES = 7;
 const ARCHIVE_KEY = 'strongfruit.adventure.r3.testArchive.v1';
 const FORMAL_KEY = 'strongfruit.playerBuild.v1';
@@ -33,6 +36,26 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json',
 };
+
+/* ---- 逻辑坐标（与 advPage.ts 布局常量同源，1:1 复制以保证点击真实命中）---- */
+const LOGICAL_W = 390;
+const LOGICAL_H = 844;
+const STAGE_BAND = { x: 0, y: 96, w: LOGICAL_W, h: 470 };
+const ACTION_BTN = { x: 40, y: 756, w: 310, h: 68 };
+
+function layoutOptionCards(count) {
+  const w = 330;
+  const h = count <= 2 ? 116 : 96;
+  const gap = 16;
+  const areaTop = STAGE_BAND.y + 250;
+  const areaBottom = STAGE_BAND.y + STAGE_BAND.h - 14;
+  const totalH = count * h + (count - 1) * gap;
+  const startY = Math.round(areaTop + (areaBottom - areaTop - totalH) / 2);
+  const x = Math.round((LOGICAL_W - w) / 2);
+  const rects = [];
+  for (let i = 0; i < count; i++) rects.push({ x, y: startY + i * (h + gap), w, h });
+  return rects;
+}
 
 const results = [];
 function log(pass, name, detail = '') {
@@ -65,27 +88,51 @@ function startServer() {
 
 const probeOf = (page) => page.evaluate(() => window.__adv.probe());
 const diagnoseOf = (page) => page.evaluate(() => window.__adv.diagnose());
-const stepOnce = (page) => page.evaluate(() => window.__adv.step());
-const stepOption = (page, i) => page.evaluate((x) => window.__adv.stepOption(x), i);
-const restart = (page, seed) => page.evaluate((s) => window.__adv.restart(s), seed);
 
 /**
- * 智能驱动一整局到终态（COMPLETE / FAILED），真实记录每个 phase 的 wall-clock 停留时长。
- * - 事件浮层：低耐久优先选「修复」，否则优先拿「强化/交易」，跳过 none；
- * - 建造浮层：选第一个候选；
- * - BATTLE → 不调用 step（战斗由 rAF 真实步进），轮询等待其离开 BATTLE；
- * - 其余（主动作可用）→ step（等价真实点击主按钮）。
- * 不引入任何人为延时（符合「不假延时填充单局时长」）。
+ * 真实点击（R4 必改④）：把逻辑坐标反算成屏幕坐标后 page.mouse.click。
+ * 输入映射与 PlayerViewportTransform.clientToLogical 精确互逆（线性拉伸，无信箱）。
  */
-async function playThrough(page, seedLabel) {
+async function clickLogical(page, lx, ly) {
+  const rect = await page.evaluate(() => {
+    const c = document.getElementById('adv-canvas');
+    const r = c.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  });
+  const x = rect.left + (lx / LOGICAL_W) * rect.width;
+  const y = rect.top + (ly / LOGICAL_H) * rect.height;
+  await page.mouse.click(x, y);
+}
+
+/** 真实点击主按钮中心。 */
+const clickAction = (page) => clickLogical(page, ACTION_BTN.x + ACTION_BTN.w / 2, ACTION_BTN.y + ACTION_BTN.h / 2);
+
+/** 真实点击第 i 张浮层选项卡中心。 */
+async function clickCard(page, i) {
+  const diag = await diagnoseOf(page);
+  const rects = layoutOptionCards(diag.options.length);
+  const r = rects[i];
+  await clickLogical(page, r.x + r.w / 2, r.y + r.h / 2);
+}
+
+/**
+ * 真实按钮驱动一整局到终态（COMPLETE / FAILED）。
+ * - 事件浮层：智能驱动择优（信息全部来自只读 diagnose + probe），然后**真实点击**该选项卡；
+ * - 建造浮层：选第一个候选，**真实点击**；
+ * - 主动作可用（非战斗）→ **真实点击**主按钮；
+ * - BATTLE → 不点击（战斗由 rAF 真实步进），轮询等待其离开 BATTLE。
+ */
+async function playThroughReal(page, label) {
   const t0 = Date.now();
   let lastPhase = null;
   let lastPhaseT = t0;
   const phaseMs = {};
   const transitions = [];
-  let steps = 0;
+  let clicks = 0;
   let battleWaits = 0;
   const hpSnapshots = [];
+  let shotEvent = null;
+  let shotBuild = null;
 
   await page.waitForFunction(() => !!window.__adv && !!window.__adv.probe, null, { timeout: 15000 });
 
@@ -106,17 +153,14 @@ async function playThrough(page, seedLabel) {
       const diag = await diagnoseOf(page);
       let pick = 0;
       if (diag.kind === 'event') {
-        // 智能驱动（等价有经验玩家的决策，信息全部来自 UI 可见状态：耐久条 + 已拥有强化芯片）：
-        //   免费强化最优；低耐久优先修车；高耐久且「未拥有」才值得用耐久换强化；
-        //   已拥有的 trade 纯亏耐久、预掷损伤绝不主动选——否则整局 HP 经济被无谓损耗打穿。
+        // 智能驱动（R4：trade/buff 的收益要按「领得到新强化」判定，freshCount 来自领取时解析口径）
         const pct = s.playerHpMax > 0 ? s.carriedHp / s.playerHpMax : 1;
-        const owned = new Set(s.buffs);
         const score = (o) => {
           switch (o.effect) {
-            case 'buff': return owned.has(o.buildId) ? 1 : 6;
+            case 'buff': return (o.freshCount ?? 0) > 0 ? 6 : 1;
             case 'heal': return pct <= 0.85 ? 5 : 1;
             case 'none': return 2;
-            case 'trade': return pct >= 0.8 && !owned.has(o.buildId) ? 4 : 0;
+            case 'trade': return (o.freshCount ?? 0) > 0 && pct >= 0.8 ? 4 : 0;
             case 'damage': return 0;
             default: return 1;
           }
@@ -126,15 +170,18 @@ async function playThrough(page, seedLabel) {
           const sc = score(diag.options[i]);
           if (sc > best) { best = sc; pick = i; }
         }
+        if (!shotEvent) shotEvent = await capture(page, `adv-r4-shot-event-${label}.png`);
+      } else if (diag.kind === 'build') {
+        if (!shotBuild) shotBuild = await capture(page, `adv-r4-shot-build-${label}.png`);
       }
-      await stepOption(page, pick);
-      steps++;
+      await clickCard(page, pick);
+      clicks++;
     } else if (s.phase === 'BATTLE') {
       battleWaits++;
       await page.waitForFunction(() => window.__adv.probe().phase !== 'BATTLE', null, { timeout: 180000 });
     } else {
-      await stepOnce(page);
-      steps++;
+      await clickAction(page);
+      clicks++;
     }
     await page.waitForTimeout(8);
   }
@@ -151,17 +198,19 @@ async function playThrough(page, seedLabel) {
     if (hpSnapshots[i].buffs !== hpSnapshots[i - 1].buffs) buffChanged = true;
   }
   return {
-    seedLabel,
+    label,
     total,
     totalSec: Number((total / 1000).toFixed(1)),
     phaseMs,
     transitions: transitions.map((t) => t.to),
-    steps,
+    clicks,
     battleWaits,
     hpSnapshots,
     finalState,
     hpChanged,
     buffChanged,
+    shotEvent,
+    shotBuild,
   };
 }
 
@@ -191,123 +240,149 @@ async function capture(page, name) {
       ],
     });
 
-    // 390×844 视口：与竖屏逻辑舞台 1:1，用于真实画面检查（验收④）
+    // 390×844 视口：与竖屏逻辑舞台 1:1，真实按钮坐标可直接反算（验收④）
     const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
     const page = await ctx.newPage();
-    await page.goto(`${URL_BASE}/adventure.html?seed=${encodeURIComponent(SEEDS[0])}`, { waitUntil: 'load' });
 
-    // 清空可能存在的隔离档案，保证隔离断言可复现
+    // ---- R4 验收1a：默认入口（无 ?seed）= 随机种子，两次进入种子不同 ----
+    await page.goto(`${URL_BASE}/adventure.html`, { waitUntil: 'load' });
     await page.evaluate((k) => { try { localStorage.removeItem(k); } catch {} }, ARCHIVE_KEY);
+    await page.evaluate((k) => { try { localStorage.removeItem(k); } catch {} }, FORMAL_KEY);
+    await page.waitForFunction(() => !!window.__adv && !!window.__adv.probe, null, { timeout: 15000 });
+    const randA = await probeOf(page);
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => !!window.__adv && !!window.__adv.probe, null, { timeout: 15000 });
+    const randB = await probeOf(page);
+    log(!!randA.seedLabel && !!randB.seedLabel && randA.seedLabel !== randB.seedLabel,
+      'R4 默认入口为随机种子（两次进入种子不同）', `a=${randA.seedLabel} b=${randB.seedLabel}`);
 
-    const runs = [];
-    for (const seed of SEEDS) {
-      await restart(page, seed);
-      await page.waitForTimeout(40);
-      const run = await playThrough(page, seed);
-      runs.push(run);
+    // ---- Run 1：指定种子（测试入口）真实按钮完整通关 ----
+    await page.goto(`${URL_BASE}/adventure.html?seed=${encodeURIComponent(SEED_WIN)}`, { waitUntil: 'load' });
+    await page.waitForFunction(() => !!window.__adv && !!window.__adv.probe, null, { timeout: 15000 });
+    const run1 = await playThroughReal(page, 'win1');
+    log(
+      run1.finalState.phase === 'COMPLETE',
+      `R4[${SEED_WIN}] 真实按钮完整闭环：跑到终态 ${run1.finalState.phase}`,
+      `phase=${run1.finalState.phase} 耐久=${Math.round(run1.finalState.carriedHp)}/${run1.finalState.playerHpMax} clicks=${run1.clicks}`,
+    );
+    log(run1.clicks >= 10, `R4[${SEED_WIN}] 全程真实鼠标点击（非 debug 步进）`, `clicks=${run1.clicks}`);
+    log(
+      run1.finalState.battlePlan.length === ADV_TOTAL_BATTLES &&
+        run1.finalState.battlesCompleted === ADV_TOTAL_BATTLES &&
+        run1.finalState.battlesWon <= ADV_TOTAL_BATTLES && run1.finalState.battlesWon >= 1,
+      `R4[${SEED_WIN}] 结算口径：完成 ${run1.finalState.battlesCompleted} / 获胜 ${run1.finalState.battlesWon}（分列且 ≤ 7）`,
+      `battlesCompleted=${run1.finalState.battlesCompleted} battlesWon=${run1.finalState.battlesWon}`,
+    );
+    log(run1.hpChanged && run1.buffChanged, `R4[${SEED_WIN}] 事件/战斗真实改变耐久与 Build`,
+      `hpChanged=${run1.hpChanged} buffChanged=${run1.buffChanged}`);
+    log(true, `R4[${SEED_WIN}] 完整用时 = ${run1.totalSec}s（验收 180s 门槛）`, run1.total >= 180000 ? '已达到 180s' : '⚠️ 未达 180s，如实披露');
 
-      log(
-        run.finalState.phase === 'COMPLETE' || run.finalState.phase === 'FAILED',
-        `R3[${seed}] 真实闭环可玩：跑到终态 ${run.finalState.phase}`,
-        `phase=${run.finalState.phase} 终态耐久=${run.finalState.carriedHp}/${run.finalState.playerHpMax}`,
-      );
-      log(run.finalState.battlePlan.length === ADV_TOTAL_BATTLES, `R3[${seed}] ${ADV_TOTAL_BATTLES} 场真实物理战斗全部发生`, `battles=${run.finalState.battlePlan.length}`);
-      // 战斗由 rAF 真实推进：胜则打满全部 ${ADV_TOTAL_BATTLES} 场；败则提前阵亡（battleWaits<${ADV_TOTAL_BATTLES} 属正确行为，非缺陷）。
-      const waitedAll = run.battleWaits >= ADV_TOTAL_BATTLES;
-      const lostEarly = run.battleWaits < ADV_TOTAL_BATTLES && run.battleWaits >= 1;
-      log(
-        run.finalState.phase === 'COMPLETE' ? waitedAll : lostEarly,
-        `R3[${seed}] 战斗由 rAF 真实推进（胜→满 ${ADV_TOTAL_BATTLES} 场 / 败→提前阵亡）`,
-        `battleWaits=${run.battleWaits} phase=${run.finalState.phase}`,
-      );
-      // 逐天推进：胜→赢下 FINAL 即到达最后一天（day===dayTotal）；败→于此前的某一天阵亡（day<dayTotal 属正确行为）。
-      const reachedLast = run.finalState.day === run.finalState.dayTotal;
-      const diedEarly = run.finalState.day < run.finalState.dayTotal;
-      log(
-        run.finalState.phase === 'COMPLETE' ? reachedLast : diedEarly,
-        `R3[${seed}] 逐天推进（胜→最后一天 / 败→提前阵亡）`,
-        `day=${run.finalState.day}/${run.finalState.dayTotal} phase=${run.finalState.phase} 阶段提示=${run.finalState.bannerPlan.length}`,
-      );
-      log(
-        run.hpChanged && run.buffChanged,
-        `R3[${seed}] 事件/战斗真实改变耐久与 Build（非仅文本）`,
-        `hpChanged=${run.hpChanged} buffChanged=${run.buffChanged} 终态强化=${run.finalState.buffs.length}`,
-      );
-      log(true, `R3[${seed}] 完整用时 = ${run.totalSec}s（验收④ 门槛 180s）`, run.total >= 180000 ? '已达到 180s' : '⚠️ 未达 180s，如实披露');
-    }
+    // ---- R4 验收1b：真实点击「再来一局」→ 新随机种子（默认行为），且连续第二局可玩到终态 ----
+    const plan1 = JSON.stringify(run1.finalState.eventPlan);
+    await clickAction(page);
+    await page.waitForTimeout(60);
+    const run2SeedState = await probeOf(page);
+    log(!!run2SeedState.seedLabel && run2SeedState.seedLabel !== SEED_WIN,
+      'R4 真实点击「再来一局」→ 生成新随机种子（默认非原种子重放）',
+      `prev=${SEED_WIN} next=${run2SeedState.seedLabel}`);
+    const run2 = await playThroughReal(page, 'default2');
+    log(
+      run2.finalState.phase === 'COMPLETE' || run2.finalState.phase === 'FAILED',
+      `R4[${run2SeedState.seedLabel}] 新种子第二局：真实按钮跑到终态 ${run2.finalState.phase}`,
+      `phase=${run2.finalState.phase} clicks=${run2.clicks}`,
+    );
+    const plan2 = JSON.stringify(run2.finalState.eventPlan);
+    log(plan1 !== plan2, 'R4 不同种子事件组合可变化（连续两局默认结果不同）',
+      `plan1=${run1.finalState.eventPlan.map((e) => e.eventKind).join('>')} plan2=${run2.finalState.eventPlan.map((e) => e.eventKind).join('>')}`);
 
-    // 隔离测试档案：终态后写入，且正式存档键不被本原型写入（验收③）
+    // ---- R4 验收1c：指定种子仍可重放（?seed= 的计划与 Run1 完全一致）----
+    await page.goto(`${URL_BASE}/adventure.html?seed=${encodeURIComponent(SEED_WIN)}`, { waitUntil: 'load' });
+    await page.waitForFunction(() => !!window.__adv && !!window.__adv.probe, null, { timeout: 15000 });
+    const replayProbe = await probeOf(page);
+    const replayPlan = JSON.stringify(replayProbe.eventPlan);
+    const replayBattlePlan = JSON.stringify(replayProbe.battlePlan);
+    const refBattlePlan = JSON.stringify(run1.finalState.battlePlan);
+    log(replayPlan === plan1 && replayBattlePlan === refBattlePlan,
+      `R4[${SEED_WIN}] 指定种子可重放：eventPlan + battlePlan 完全一致`,
+      `eventPlan=${replayPlan}`);
+
+    // ---- Run 3：败局路线（真实按钮），FAILED 结算口径 + 败局「再来一局」可用 ----
+    await page.goto(`${URL_BASE}/adventure.html?seed=${encodeURIComponent(SEED_LOSS)}`, { waitUntil: 'load' });
+    await page.waitForFunction(() => !!window.__adv && !!window.__adv.probe, null, { timeout: 15000 });
+    const run3 = await playThroughReal(page, 'loss');
+    log(
+      run3.finalState.phase === 'FAILED',
+      `R4[${SEED_LOSS}] 失败路线可达（真实物理）`,
+      `phase=${run3.finalState.phase} day=${run3.finalState.day}/${run3.finalState.dayTotal} 耐久=${Math.round(run3.finalState.carriedHp)}`,
+    );
+    log(
+      run3.finalState.battlesWon < run3.finalState.battlesCompleted,
+      `R4[${SEED_LOSS}] 败局结算口径：完成 ${run3.finalState.battlesCompleted} > 获胜 ${run3.finalState.battlesWon}（区分正确）`,
+      `battlesCompleted=${run3.finalState.battlesCompleted} battlesWon=${run3.finalState.battlesWon}`,
+    );
+    const shotLoss = await capture(page, 'adv-r4-shot-terminal-loss.png');
+    log(!!shotLoss, 'R4 截图：失败结算', shotLoss || 'capture failed');
+    await clickAction(page);
+    await page.waitForTimeout(60);
+    const afterLossRestart = await probeOf(page);
+    log(afterLossRestart.seedLabel !== SEED_LOSS && afterLossRestart.phase === 'EVENT_CHOICE' || afterLossRestart.phase === 'IDLE' || afterLossRestart.phase === 'CHOICE',
+      'R4 败局「再来一局」可用（新种子新开局）', `next=${afterLossRestart.seedLabel} phase=${afterLossRestart.phase}`);
+    const shotWin = run1.shotEvent;
+    log(!!shotWin, 'R4 截图：事件浮层（Run1）', shotWin || 'capture failed');
+    if (run2.shotBuild) log(true, 'R4 截图：建造浮层（Run2）', run2.shotBuild);
+
+    // ---- R4 验收4：隔离档案 v2 真实累计；正式存档键未被写入 ----
     const archiveRaw = await page.evaluate((k) => { try { return localStorage.getItem(k); } catch { return null; } }, ARCHIVE_KEY);
     const formalRaw = await page.evaluate((k) => { try { return localStorage.getItem(k); } catch { return null; } }, FORMAL_KEY);
-    log(!!archiveRaw, 'R3 隔离测试档案已写入（终态结算）', archiveRaw ? `runs=${(JSON.parse(archiveRaw).runs || []).length}` : 'null');
-    log(formalRaw === null, 'R3 正式玩家存档键未被本原型写入（隔离）', formalRaw === null ? 'formal key=null' : '⚠️ 被写入，违反隔离');
-
-    // ---- 验收①：不同种子产生不同事件组合（不仅是顺序）----
-    const combos = new Set(runs.map((r) => JSON.stringify(r.finalState.eventPlan)));
-    log(
-      combos.size > 1,
-      `R3 不同种子产生不同事件组合（不仅是顺序）`,
-      `combinations=${combos.size} 示例=${runs.map((r) => r.finalState.eventPlan.map((e) => e.eventKind).join('>')).join(' | ')}`,
-    );
-
-    // ---- 验收①：同种子完全可复现（eventPlan + 阶段序列一致）----
-    const ref = runs[0];
-    await restart(page, SEEDS[0]);
-    await page.waitForTimeout(40);
-    const replay = await playThrough(page, SEEDS[0] + '(重放)');
-    const samePlan = JSON.stringify(ref.finalState.eventPlan) === JSON.stringify(replay.finalState.eventPlan);
-    const sameSeq = JSON.stringify(ref.transitions) === JSON.stringify(replay.transitions);
-    log(samePlan, `R3[${SEEDS[0]}] 同种子可复现：eventPlan 完全一致`, `eventPlan=${JSON.stringify(ref.finalState.eventPlan)}`);
-    log(sameSeq, `R3[${SEEDS[0]}] 同种子可复现：阶段切换序列一致（含胜负）`, `seqA=${ref.transitions.join('>')} seqB=${replay.transitions.join('>')}`);
-
-    // ---- 验收②：胜利与失败均可达（真实物理）----
-    const anyWin = runs.some((r) => r.finalState.phase === 'COMPLETE');
-    const anyLoss = runs.some((r) => r.finalState.phase === 'FAILED');
-    log(anyWin, 'R3 真实物理下「胜利」可达（至少一种子 COMPLETE）', `wins=${runs.filter((r) => r.finalState.phase === 'COMPLETE').length}/${runs.length}`);
-    log(anyLoss, 'R3 真实物理下「失败」可达（至少一种子 FAILED）', `losses=${runs.filter((r) => r.finalState.phase === 'FAILED').length}/${runs.length}`);
-
-    // ---- 画面检查（验收④）：对关键相位截图，供人工核验布局/遮挡/点击 ----
-    try {
-      await restart(page, SEEDS[0]);
-      await page.waitForTimeout(40);
-      // 推进到第一个事件浮层
-      for (let i = 0; i < 30; i++) {
-        const s = await probeOf(page);
-        if (s.phase === 'EVENT_CHOICE' || s.phase === 'CHOICE') break;
-        if (s.phase === 'COMPLETE' || s.phase === 'FAILED') break;
-        await stepOnce(page);
-        await page.waitForTimeout(8);
+    let archiveOk = false;
+    let archiveDetail = 'null';
+    if (archiveRaw) {
+      try {
+        const arc = JSON.parse(archiveRaw);
+        const runsN = (arc.runs || []).length;
+        const sumWon = (arc.runs || []).reduce((a, r) => a + (r.battlesWon || 0), 0);
+        archiveOk = arc.version === 2 && runsN >= 3 && arc.totals.battlesWon === sumWon && !!arc.best;
+        archiveDetail = `version=${arc.version} runs=${runsN} totals=${JSON.stringify(arc.totals)} best=${JSON.stringify(arc.best)}`;
+      } catch (e) {
+        archiveDetail = 'parse error: ' + String(e && e.message);
       }
-      const shotEvent = await capture(page, 'adv-r3-shot-event.png');
-      log(!!shotEvent, 'R3 截图：事件/建造浮层', shotEvent || 'capture failed');
-    } catch (e) {
-      log(false, 'R3 截图：事件/建造浮层', '截图阶段异常：' + String(e && e.message));
     }
+    log(archiveOk, 'R4 隔离档案 v2 真实累计（完成/获胜分列 + best）', archiveDetail);
+    log(formalRaw === null, 'R4 正式玩家存档键未被本原型写入（隔离）', formalRaw === null ? 'formal key=null' : '⚠️ 被写入，违反隔离');
+
+    // ---- 胜负均可达（真实物理）----
+    const allRuns = [run1, run2, run3];
+    const anyWin = allRuns.some((r) => r.finalState.phase === 'COMPLETE');
+    const anyLoss = allRuns.some((r) => r.finalState.phase === 'FAILED');
+    log(anyWin, 'R4 真实物理下「胜利」可达', `wins=${allRuns.filter((r) => r.finalState.phase === 'COMPLETE').length}/${allRuns.length}`);
+    log(anyLoss, 'R4 真实物理下「失败」可达', `losses=${allRuns.filter((r) => r.finalState.phase === 'FAILED').length}/${allRuns.length}`);
 
     // ---- 计时明细（诚实不修饰）----
     console.log('\n================ 计时明细 ================');
-    for (const r of runs) {
-      console.log(`\n种子: ${r.seedLabel}  终态: ${r.finalState.phase}  完整用时: ${r.totalSec}s  步进: ${r.steps}  战斗等待: ${r.battleWaits}`);
+    for (const r of allRuns) {
+      console.log(`\n局: ${r.label}  种子: ${r.finalState.seedLabel}  终态: ${r.finalState.phase}  完整用时: ${r.totalSec}s  真实点击: ${r.clicks}`);
       console.log('  各 phase 停留(秒): ' + Object.keys(r.phaseMs).map((k) => `${k}=${(r.phaseMs[k] / 1000).toFixed(1)}`).join(' '));
     }
-    const totals = runs.map((r) => r.totalSec);
-    console.log(`\n汇总：用时区间 ${Math.min(...totals)}s ~ ${Math.max(...totals)}s，均值 ${Number((totals.reduce((a, b) => a + b, 0) / totals.length).toFixed(1))}s；均未达 180s（如实披露）。`);
+    const totals = allRuns.map((r) => r.totalSec);
+    console.log(`\n汇总：用时区间 ${Math.min(...totals)}s ~ ${Math.max(...totals)}s，均值 ${Number((totals.reduce((a, b) => a + b, 0) / totals.length).toFixed(1))}s；${totals.every((t) => t >= 180) ? '均达到 180s' : '未全部达到 180s（如实披露）'}。`);
 
     const summary = {
-      seeds: runs.map((r) => ({
-        seed: r.finalState.seed,
-        seedLabel: r.seedLabel,
+      runs: allRuns.map((r) => ({
+        label: r.label,
+        seedLabel: r.finalState.seedLabel,
         finalPhase: r.finalState.phase,
         totalSec: r.totalSec,
-        phaseMs: r.phaseMs,
+        clicks: r.clicks,
         battlesCompleted: r.finalState.battlesCompleted,
+        battlesWon: r.finalState.battlesWon,
         buffs: r.finalState.buffs,
         carriedHp: r.finalState.carriedHp,
         playerHpMax: r.finalState.playerHpMax,
         reached180s: r.total >= 180000,
       })),
-      reproducibility: { sameEventPlan: samePlan, sameSequence: sameSeq },
-      archiveWritten: !!archiveRaw,
+      defaultNewSeed: { firstLoad: randA.seedLabel, secondLoad: randB.seedLabel, afterAgain: run2SeedState.seedLabel },
+      replaySeed: { seed: SEED_WIN, eventPlanMatch: replayPlan === plan1, battlePlanMatch: replayBattlePlan === refBattlePlan },
+      archiveWritten: archiveOk,
       formalKeyUntouched: formalRaw === null,
     };
     fs.writeFileSync(path.join(ROOT, 'adventure-e2e-timing.json'), JSON.stringify(summary, null, 2));
@@ -316,7 +391,7 @@ async function capture(page, name) {
     await ctx.close();
   } catch (e) {
     console.error(e);
-    results.push({ pass: false, name: 'R3 E2E 运行异常', detail: String(e && e.message) });
+    results.push({ pass: false, name: 'R4 E2E 运行异常', detail: String(e && e.message) });
   } finally {
     if (browser) await browser.close();
     server.close();
@@ -324,7 +399,7 @@ async function capture(page, name) {
 
   const failed = results.filter((r) => !r.pass);
   console.log('\n============================');
-  console.log(`E2E Random Adventure R3: ${results.length - failed.length}/${results.length} PASS`);
+  console.log(`E2E Random Adventure R4: ${results.length - failed.length}/${results.length} PASS`);
   console.log('============================');
   if (failed.length) {
     for (const f of failed) console.log('FAILED: ' + f.name + ' | ' + f.detail);

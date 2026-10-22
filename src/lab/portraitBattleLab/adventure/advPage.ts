@@ -145,7 +145,8 @@ export class AdvPage {
   private readonly loadout: RunPlayerLoadout;
   private readonly loadoutSource: string;
   private readonly ctx2: AdventureContext;
-  private readonly script: AdventureScript;
+  /** 当前局脚本。终局「再来一局」会生成**新随机种子**的脚本（R4 必改①；?seed= 指定时仍可重放原局）。 */
+  private script: AdventureScript;
   private state: AdventureState;
 
   /** 隔离测试档案（终态结算写入；不影响正式存档）。 */
@@ -163,6 +164,7 @@ export class AdvPage {
     this.loadout = opts.loadout;
     this.loadoutSource = opts.loadoutSource;
     this.ctx2 = advContextFromLoadout(this.loadout);
+    // R4 必改①：默认进入即新随机种子；?seed= 指定时用指定种子（可复现重放 = 测试入口）。
     this.script = generateAdventureScript(opts.seed ?? randomSeedLabel());
     this.state = createAdventureState(this.ctx2, this.script);
     this.archive = readArchive();
@@ -207,11 +209,34 @@ export class AdvPage {
     }
   }
 
+  /**
+   * R4 必改①：开始**新一局**（默认新随机种子；传入 seedLabel 则按该种子重放——仅测试入口用）。
+   * 隔离测试档案跨局保留（进度累积），只重置当局状态与档案写入标记。
+   */
+  startNewRun(seedLabel?: string): void {
+    this.stopLoop();
+    this.endBattle();
+    this.script = generateAdventureScript(seedLabel ?? randomSeedLabel());
+    this.state = createAdventureState(this.ctx2, this.script);
+    this.archived = false;
+    this.render();
+  }
+
   /* ----------------------------------------------------------- 输入 */
 
   private readonly onPointerDown = (ev: PointerEvent): void => {
     const rect = this.canvas.getBoundingClientRect();
     const p = this.vp.clientToLogical(ev.clientX, ev.clientY, rect);
+
+    // R4 必改①：终局主动作 = 新一局（新随机种子）。原种子重放仅保留在测试入口（URL ?seed=）。
+    if (
+      (this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED') &&
+      advActionEnabled(this.state) &&
+      hit(ACTION_BTN, p)
+    ) {
+      this.startNewRun();
+      return;
+    }
 
     if (advOverlayOpen(this.state)) {
       const cards = advOverlayCards(this.state, this.script, this.ctx2);
@@ -233,7 +258,7 @@ export class AdvPage {
   private apply(next: AdventureState): void {
     if (next === this.state) return;
 
-    // 终态 → 同种子重开（再来一局）：重置档案写入标记，使新一局终态可再次结算。
+    // 终态 → 新一局（UI 路径经 startNewRun 直接重置；此处保留终态→IDLE 的档案标记重置作防御）。
     if ((this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED') && next.phase === 'IDLE') {
       this.archived = false;
     }
@@ -257,14 +282,17 @@ export class AdvPage {
   }
 
   private recordTerminal(s: AdventureState): void {
+    const hp = advCarriedPlayerHp(s, this.ctx2);
     const summary: AdvRunSummary = {
       seedLabel: this.script.seedLabel,
       won: s.phase === 'COMPLETE',
       dayReached: s.day,
       dayTotal: s.dayTotal,
       battlesCompleted: s.battlesCompleted,
+      battlesWon: s.battlesWon,
+      finalHpPct: this.ctx2.playerHpMax > 0 ? Math.round((hp / this.ctx2.playerHpMax) * 100) : 0,
       buffs: [...s.buffs],
-      finalHp: advCarriedPlayerHp(s, this.ctx2),
+      finalHp: hp,
       playerHpMax: this.ctx2.playerHpMax,
       loadoutSource: this.loadoutSource,
       ts: Date.now(),
@@ -769,9 +797,10 @@ export class AdvPage {
 
     const hp = advCarriedPlayerHp(this.state, this.ctx2);
     const pct = Math.max(0, Math.min(100, Math.round((hp / this.ctx2.playerHpMax) * 100)));
+    // R4 结算口径：完成战斗（含打退）与获胜战斗分开统计，不混用。
     const lines = [
       `撑到第 ${this.state.day} / ${this.state.dayTotal} 天`,
-      `击破 ${this.state.battlesCompleted} 场 · 强化 ${this.state.buffs.length} 项`,
+      `完成 ${this.state.battlesCompleted} 场 · 获胜 ${this.state.battlesWon} 场 · 强化 ${this.state.buffs.length} 项`,
       `终点耐久 ${pct}%`,
     ];
     ctx.fillStyle = COLORS.textBody;
@@ -794,6 +823,7 @@ export class AdvPage {
       ctx.fillText('（无）', PORTRAIT_LOGICAL_W / 2, y);
       y += 22;
     } else {
+      ctx.textAlign = 'left'; // 芯片标签左对齐：沿用 center 会以 bx+7 为中心互相压盖（R4 E2E 截图核验发现）
       let bx = PORTRAIT_LOGICAL_W / 2 - Math.min(chips.length, 3) * 60;
       for (let i = 0; i < chips.length; i++) {
         const label = chips[i];
@@ -808,6 +838,7 @@ export class AdvPage {
           y += 24;
         }
       }
+      ctx.textAlign = 'center';
       y += 28;
     }
 
@@ -816,7 +847,7 @@ export class AdvPage {
     ctx.font = `500 13px ${FONT_STACK}`;
     const best = this.archive.best;
     const bestLine = best
-      ? `最佳：${best.battlesCompleted} 胜${best.won ? '（曾通关）' : ''} · 累计 ${this.archive.totals.runs} 局 / ${this.archive.totals.wins} 胜`
+      ? `最佳：获胜 ${best.battlesWon} 场${best.won ? '（曾通关）' : ''} · 终点耐久 ${best.finalHpPct}% · 累计 ${this.archive.totals.runs} 局 / ${this.archive.totals.wins} 胜`
       : '测试档案：本局为首胜记录';
     ctx.fillText(bestLine, PORTRAIT_LOGICAL_W / 2, y + 6);
     y += 28;
@@ -826,7 +857,7 @@ export class AdvPage {
 
     ctx.fillStyle = '#7fd6a0';
     ctx.font = `500 13px ${FONT_STACK}`;
-    ctx.fillText('▶ 按「再来一局」以同种子重开', PORTRAIT_LOGICAL_W / 2, PORTRAIT_LOGICAL_H - 130);
+    ctx.fillText('▶ 按「再来一局」开始新一局（新随机种子）', PORTRAIT_LOGICAL_W / 2, PORTRAIT_LOGICAL_H - 130);
   }
 
   /* ----------------------------------------------------------- 探针 */
@@ -841,6 +872,7 @@ export class AdvPage {
       carriedHp: advCarriedPlayerHp(this.state, this.ctx2),
       playerHpMax: this.ctx2.playerHpMax,
       battlesCompleted: this.state.battlesCompleted,
+      battlesWon: this.state.battlesWon,
       seed: this.script.seed,
       seedLabel: this.script.seedLabel,
       eventPlan: this.script.eventPlan,
@@ -861,6 +893,11 @@ export class AdvPage {
    * 返回当前 phase，便于调用方记录耗时。
    */
   debugStep(): string {
+    // R4：终态调试步进 = 新一局（新随机种子），与 UI 按钮同语义。
+    if (this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED') {
+      this.startNewRun();
+      return this.state.phase;
+    }
     if (advOverlayOpen(this.state)) {
       const cards = advOverlayCards(this.state, this.script, this.ctx2);
       if (cards.length > 0) {
@@ -876,6 +913,11 @@ export class AdvPage {
 
   /** 选第 i 张浮层卡（等价真实点击该卡）；无浮层时退化为主动作。仅供 E2E / 智能驱动用。 */
   debugStepOption(i: number): string {
+    // R4：终态调试步进 = 新一局（新随机种子），与 UI 按钮同语义。
+    if (this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED') {
+      this.startNewRun();
+      return this.state.phase;
+    }
     if (advOverlayOpen(this.state)) {
       const cards = advOverlayCards(this.state, this.script, this.ctx2);
       if (i >= 0 && i < cards.length) {
@@ -889,8 +931,11 @@ export class AdvPage {
     return this.state.phase;
   }
 
-  /** 只读诊断：当前浮层各选项的因果种类（event/buff/build/none），供智能驱动择优。
-   *  buff/trade 额外暴露 buildId：驱动可识别「强化已拥有」的 trade（付耐久却无收益），避免无谓损耗。 */
+  /**
+   * 只读诊断：当前浮层各选项的因果种类（event/buff/build/none），供智能驱动择优。
+   *  buff/trade 额外暴露 candidates（领取时按序取第一个未拥有项）：
+   *  驱动可据此识别「领不到新强化」的 trade（避免无谓损耗）与可用候选。
+   */
   diagnose(): unknown {
     const node = advCurrentNode(this.state, this.script);
     if (advEventChoiceOpen(this.state) && node.kind === 'EVENT') {
@@ -898,10 +943,13 @@ export class AdvPage {
         kind: 'event',
         options: node.options.map((o) => {
           const eff = node.outcomes[o.id];
+          const candidates = eff && (eff.kind === 'buff' || eff.kind === 'trade') ? [...eff.candidates] : null;
+          const fresh = candidates ? candidates.filter((id) => !this.state.buffs.includes(id)) : null;
           return {
             id: o.id,
             effect: eff?.kind ?? 'none',
-            buildId: eff && (eff.kind === 'buff' || eff.kind === 'trade') ? eff.buildId : null,
+            candidates,
+            freshCount: fresh ? fresh.length : null,
           };
         }),
       };
