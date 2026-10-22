@@ -54,7 +54,13 @@ import {
   type AdventureState,
 } from './advState';
 import { readArchive, recordRun, nextRunGoal, type AdvArchive, type AdvRunSummary } from './advArchive';
-import { AdvUiStore, type AdvUiId } from './advUiAssets';
+import {
+  AdvUiStore,
+  advBuildIconId,
+  advEventIconId,
+  advOutcomeIconId,
+  type AdvUiId,
+} from './advUiAssets';
 
 interface Rect {
   readonly x: number;
@@ -108,6 +114,15 @@ const ACTION_BTN: Rect = { x: 40, y: 756, w: 310, h: 68 };
 
 function hit(r: Rect, p: { x: number; y: number }): boolean {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+}
+
+/** #rrggbb → rgba(...)（R3：图标底板用主题色半透明填充）。 */
+function withAlpha(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const n = parseInt(full, 16);
+  if (Number.isNaN(n)) return `rgba(124,141,176,${alpha})`;
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
 function layoutOptionCards(count: number): Rect[] {
@@ -718,12 +733,12 @@ export class AdvPage {
       ctx.fillStyle = '#0e131c';
       ctx.fillRect(b.x, b.y, b.w, b.h);
     }
-    ctx.fillStyle = 'rgba(6,9,14,0.80)';
+    ctx.fillStyle = 'rgba(6,9,14,0.88)';
     ctx.fillRect(b.x, b.y, b.w, b.h);
     ctx.fillStyle = theme.accent;
     ctx.fillRect(b.x, b.y, b.w, 6);
 
-    // 事件图标徽章（圆形）
+    // 事件徽章（R3：真实语义图标；缺图回退过程式图形，不白屏）
     const badgeCx = b.x + 44;
     const badgeCy = b.y + 60;
     const badgeR = 26;
@@ -736,7 +751,12 @@ export class AdvPage {
     ctx.strokeStyle = theme.accent;
     ctx.stroke();
     ctx.restore();
-    this.drawEventIcon(ctx, node.eventKind, badgeCx, badgeCy, 30, theme.accent);
+    const evIcon = advEventIconId(node.eventKind);
+    if (this.ui.ready(evIcon)) {
+      this.blitImage(ctx, evIcon, badgeCx - 20, badgeCy - 20, 40, 40, 'contain');
+    } else {
+      this.drawEventIcon(ctx, node.eventKind, badgeCx, badgeCy, 30, theme.accent);
+    }
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -763,23 +783,25 @@ export class AdvPage {
     const fullHp = advCarriedPlayerHp(this.state, this.ctx2) >= this.ctx2.playerHpMax;
     for (let i = 0; i < rects.length; i++) {
       const eff = node.outcomes[cards[i].id];
-      const gain = this.effectGain(eff, fullHp);
-      const cost = this.effectCost(eff);
       this.drawChoiceCard(ctx, rects[i], i, {
+        icon: advOutcomeIconId(eff?.kind ?? 'none'),
         accent: theme.accent,
         label: cards[i].label,
-        gain,
-        cost,
-        sub: this.optionNoteWithState(node, cards[i].id, fullHp),
+        gain: this.effectGain(eff),
+        cost: this.effectCost(eff),
+        caveat: this.effectCaveat(eff, fullHp),
       });
     }
   }
 
-  private optionNoteWithState(node: AdventureEventNode, optionId: string, fullHp: boolean): string {
-    const base = node.options.find((o) => o.id === optionId)?.note ?? '';
-    const eff = node.outcomes[optionId];
-    if (fullHp && eff && (eff.kind === 'heal' || eff.kind === 'trade')) return `${base}（耐久已满，收益有限）`;
-    return base;
+  /**
+   * 满耐久时的**唯一**必要状态提示（R3：替代原先重复选项描述的 note 行）。
+   * 选项自身的说明文字（note）已被删除——收益/代价已由图标与两行摘要表达。
+   */
+  private effectCaveat(eff: AdventureEffect | undefined, fullHp: boolean): string {
+    if (!eff) return '';
+    if (fullHp && (eff.kind === 'heal' || eff.kind === 'trade')) return '耐久已满，收益有限';
+    return '';
   }
 
   /** 建造选择浮层（R1：真实卡片底，强化在下一场战斗真实生效）。 */
@@ -789,7 +811,7 @@ export class AdvPage {
       ctx.fillStyle = '#0e131c';
       ctx.fillRect(b.x, b.y, b.w, b.h);
     }
-    ctx.fillStyle = 'rgba(6,9,14,0.80)';
+    ctx.fillStyle = 'rgba(6,9,14,0.88)';
     ctx.fillRect(b.x, b.y, b.w, b.h);
     ctx.fillStyle = COLORS.eventAccent;
     ctx.fillRect(b.x, b.y, b.w, 6);
@@ -807,11 +829,12 @@ export class AdvPage {
     const rects = layoutOptionCards(cards.length);
     for (let i = 0; i < rects.length; i++) {
       this.drawChoiceCard(ctx, rects[i], i, {
+        // R3：强化项用**专属**语义图标（双管炮/三管炮/炮弹/连射炮…），核心收益＝该强化项真实效果
+        icon: advBuildIconId(cards[i].id),
         accent: COLORS.eventAccent,
         label: cards[i].label,
-        gain: '获得临时强化',
+        gain: cards[i].note,
         cost: '—',
-        sub: cards[i].note,
       });
     }
   }
@@ -821,7 +844,14 @@ export class AdvPage {
     ctx: CanvasRenderingContext2D,
     r: Rect,
     index: number,
-    text: { accent: string; label: string; gain: string; cost: string; sub?: string },
+    text: {
+      icon: AdvUiId;
+      accent: string;
+      label: string;
+      gain: string;
+      cost: string;
+      caveat?: string;
+    },
   ): void {
     const pressed = this.pressCard === index;
     // 卡片底（真实素材 cover；缺失则过程式底色）
@@ -853,50 +883,80 @@ export class AdvPage {
     ctx.lineWidth = pressed ? 3 : 1.5;
     ctx.strokeStyle = pressed ? '#ffffff' : text.accent;
     ctx.stroke();
-    // 左侧主题色条
-    ctx.fillStyle = text.accent;
-    this.roundRectPath(ctx, r.x, r.y, 5, r.h, 2);
-    ctx.fill();
 
     const tall = r.h > 110;
-    const labelY = r.y + (tall ? 30 : 26);
-    const gainY = r.y + (tall ? 64 : 54);
-    const costY = r.y + (tall ? 88 : 76);
+    const iconSize = tall ? 60 : 52;
+    const iconX = r.x + 14;
+    const iconY = r.y + (r.h - iconSize) / 2;
+    // 图标底板（主题色半透明 + 描边），承载真实语义图标
+    this.roundRectPath(ctx, iconX, iconY, iconSize, iconSize, 14);
+    ctx.fillStyle = withAlpha(text.accent, 0.16);
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = withAlpha(text.accent, 0.75);
+    ctx.stroke();
+    if (this.ui.ready(text.icon)) {
+      this.blitImage(ctx, text.icon, iconX + 8, iconY + 8, iconSize - 16, iconSize - 16, 'contain');
+    } else {
+      ctx.fillStyle = withAlpha(text.accent, 0.4);
+      ctx.beginPath();
+      ctx.arc(iconX + iconSize / 2, iconY + iconSize / 2, iconSize * 0.18, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 文本区（右列）：名称 + 核心收益 + 明确代价
+    const tx = iconX + iconSize + 14;
+    const rightLimit = r.x + r.w - 12;
+    const nameY = r.y + (tall ? 30 : 26);
+    const gainY = r.y + (tall ? 62 : 54);
+    const costY = r.y + (tall ? 88 : 78);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    // 标题（放大）
+    // 名称（放大加粗）
     ctx.fillStyle = COLORS.textTitle;
     ctx.font = `700 18px ${FONT_STACK}`;
-    ctx.fillText(text.label, r.x + 18, labelY);
-    // 收益（前缀标签 + 核心收益加粗绿）
+    ctx.fillText(this.fitText(ctx, text.label, rightLimit - tx), tx, nameY);
+    // 收益（前缀标签 + 核心收益加粗绿；先缩到 14px 再截断，尽量不丢语义）
     ctx.font = `500 11px ${FONT_STACK}`;
     ctx.fillStyle = COLORS.textDim;
-    ctx.fillText('收益', r.x + 18, gainY);
-    ctx.font = `600 15px ${FONT_STACK}`;
+    ctx.fillText('收益', tx, gainY);
+    const gainMax = rightLimit - (tx + 30);
     ctx.fillStyle = '#7fd6a0';
-    ctx.fillText(text.gain, r.x + 52, gainY);
+    ctx.font = `600 15px ${FONT_STACK}`;
+    if (ctx.measureText(text.gain).width > gainMax) {
+      ctx.font = `600 14px ${FONT_STACK}`;
+    }
+    ctx.fillText(this.fitText(ctx, text.gain, gainMax), tx + 30, gainY);
     // 代价（前缀标签 + 值；有代价橙，无代价灰）
     ctx.font = `500 11px ${FONT_STACK}`;
     ctx.fillStyle = COLORS.textDim;
-    ctx.fillText('代价', r.x + 18, costY);
+    ctx.fillText('代价', tx, costY);
     ctx.font = `600 13px ${FONT_STACK}`;
     ctx.fillStyle = text.cost === '—' ? COLORS.textDim : '#e09b6b';
-    ctx.fillText(text.cost, r.x + 52, costY);
-    // 补充说明（仅高卡显示，dim，长文本省略）—— R2：减少解释文字
-    if (tall && text.sub) {
+    ctx.fillText(this.fitText(ctx, text.cost, rightLimit - (tx + 30)), tx + 30, costY);
+    // 唯一必要的状态提示（仅满耐久等特例；不再是重复的选项描述）
+    if (tall && text.caveat) {
       ctx.fillStyle = COLORS.textDim;
       ctx.font = `400 11px ${FONT_STACK}`;
-      const sub = text.sub.length > 26 ? text.sub.slice(0, 25) + '…' : text.sub;
-      ctx.fillText(sub, r.x + 18, costY + 20);
+      ctx.fillText(text.caveat, tx, costY + 20);
     }
   }
 
-  /** 事件效果 → 收益摘要（满耐久时如实提示收益有限）。 */
-  private effectGain(eff: AdventureEffect | undefined, fullHp: boolean): string {
+  /** 按可用宽度裁剪文本（超宽加省略号）——R3：杜绝任何文字溢出。 */
+  private fitText(ctx: CanvasRenderingContext2D, s: string, maxWidth: number): string {
+    if (maxWidth <= 0) return '';
+    if (ctx.measureText(s).width <= maxWidth) return s;
+    let out = s;
+    while (out.length > 1 && ctx.measureText(out + '…').width > maxWidth) out = out.slice(0, -1);
+    return out + '…';
+  }
+
+  /** 事件效果 → 收益摘要（R3：只给短句核心收益，状态提示移入 caveat）。 */
+  private effectGain(eff: AdventureEffect | undefined): string {
     if (!eff) return '推进剧情';
     switch (eff.kind) {
       case 'heal':
-        return fullHp ? '恢复耐久（已满，有限）' : '恢复耐久';
+        return '恢复耐久';
       case 'damage':
         return '—';
       case 'buff':
@@ -1072,6 +1132,13 @@ export class AdvPage {
     }
     ctx.fillStyle = 'rgba(6,9,14,0.90)';
     ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
+    // R3：中段补一层柔和暗带，消掉背景竞技场中央的「VS」（结算页不该出现对战语义）
+    const midScrim = ctx.createLinearGradient(0, 352, 0, 620);
+    midScrim.addColorStop(0, 'rgba(6,9,14,0)');
+    midScrim.addColorStop(0.5, 'rgba(6,9,14,0.88)');
+    midScrim.addColorStop(1, 'rgba(6,9,14,0)');
+    ctx.fillStyle = midScrim;
+    ctx.fillRect(0, 352, PORTRAIT_LOGICAL_W, 268);
 
     // 横幅（真实素材）：R2 把胜负标题绘制到横幅之上，修复「空白横幅」
     const bannerY = 100;
@@ -1114,34 +1181,28 @@ export class AdvPage {
       }
     }
 
-    // 核心成果：计分板（完成 / 获胜分列，呼应 R4 口径）
-    const boardY = 272;
-    const boardH = 66;
-    const boardW = 160;
-    this.drawScoreBoard(ctx, 'score_blue', 24, boardY, boardW, boardH, '完成场次', this.state.battlesCompleted);
-    this.drawScoreBoard(ctx, 'score_red', 206, boardY, boardW, boardH, '获胜场次', this.state.battlesWon);
-
-    // 关键数据（撑到天数 + 终点耐久）
+    // ── R3 结算重排：只突出「胜负 / 推进进度 / 关键强化」，次要累计统计移到底部弱化区 ──
+    // 核心①：推进进度（撑到天数）
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = COLORS.textBody;
-    ctx.font = `400 14px ${FONT_STACK}`;
-    ctx.fillText(`撑到第 ${this.state.day} / ${this.state.dayTotal} 天 · 强化 ${this.state.buffs.length} 项`, cx, 366);
+    ctx.fillStyle = COLORS.textTitle;
+    ctx.font = `700 20px ${FONT_STACK}`;
+    ctx.fillText(`撑到第 ${this.state.day} / ${this.state.dayTotal} 天`, cx, 268);
+    // 核心②：终点耐久
     ctx.fillStyle = pct <= 25 ? COLORS.hpLow : '#7fd6a0';
-    ctx.font = `600 16px ${FONT_STACK}`;
-    ctx.fillText(`终点耐久 ${pct}%`, cx, 392);
+    ctx.font = `600 15px ${FONT_STACK}`;
+    ctx.fillText(`终点耐久 ${pct}%`, cx, 294);
 
-    // 次要统计（弱化）：本局 Build 小字
+    // 核心③：关键强化（单行 + 「+N」收纳）
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `500 12px ${FONT_STACK}`;
-    ctx.fillText('本局 Build', cx, 420);
+    ctx.fillText('本局强化', cx, 328);
     ctx.font = `500 12px ${FONT_STACK}`;
     const chips = this.state.buffs.map((b) => runBuildOptionById(b)?.label ?? b);
     if (chips.length === 0) {
       ctx.fillStyle = COLORS.textDim;
-      ctx.fillText('（无）', cx, 440);
+      ctx.fillText('（无）', cx, 348);
     } else {
-      // R2：次要统计单行收纳，溢出以「+N」表示，避免与下方最佳记录行重叠
       const shown = chips.slice(0, 3);
       const extra = chips.length - shown.length;
       const measure = (s: string): number => {
@@ -1153,7 +1214,7 @@ export class AdvPage {
       const extraW = extra > 0 ? measure(extraLabel) : 0;
       const totalW = widths.reduce((a, b) => a + b, 0) + extraW + (shown.length - 1 + (extra > 0 ? 1 : 0)) * 6;
       let bx = cx - totalW / 2;
-      const cy = 436;
+      const cy = 344;
       for (let i = 0; i < shown.length; i++) {
         ctx.fillStyle = 'rgba(230,237,248,0.14)';
         ctx.fillRect(bx, cy, widths[i], 16);
@@ -1174,53 +1235,28 @@ export class AdvPage {
       ctx.textAlign = 'center';
     }
 
-    // 次要统计（弱化）：最佳记录行（rank_self 缩小变暗）
-    const best = this.archive.best;
-    const bestLine1 = best
-      ? `最佳：获胜 ${best.battlesWon} 场${best.won ? '（曾通关）' : ''} · 终点耐久 ${best.finalHpPct}%`
-      : '测试档案：本局为首胜记录';
-    const bestLine2 = `累计 ${this.archive.totals.runs} 局 / ${this.archive.totals.wins} 胜`;
-    ctx.save();
-    ctx.globalAlpha = 0.45;
-    this.blitImage(ctx, 'rank_self', cx - 150, 458, 300, 60, 'stretch');
-    ctx.restore();
-    ctx.fillStyle = '#9fb0c8';
-    ctx.font = `500 11px ${FONT_STACK}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(bestLine1, cx, 480);
-    ctx.fillText(bestLine2, cx, 496);
-
-    // 下一局目标（弱化小字）
+    // ── 弱化区：累计统计（次要，移到底部、压暗、小字）──
+    ctx.fillStyle = 'rgba(124,141,176,0.22)';
+    ctx.fillRect(40, 606, PORTRAIT_LOGICAL_W - 80, 1);
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `400 12px ${FONT_STACK}`;
-    this.wrapText(ctx, nextRunGoal(this.archive), cx, 548, PORTRAIT_LOGICAL_W - 70, 16);
-
-    // 下一步操作（突出）：再来一局（文案与实际按钮标签同源，避免冲突）
-    ctx.fillStyle = '#7fd6a0';
-    ctx.font = `600 14px ${FONT_STACK}`;
-    ctx.fillText(`▶ 按「${advActionLabel(this.state)}」开始新一局（新随机种子）`, cx, 694);
-  }
-
-  /** 计分板（真实素材底 + 文本覆盖）。 */
-  private drawScoreBoard(
-    ctx: CanvasRenderingContext2D,
-    id: AdvUiId,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    label: string,
-    value: number,
-  ): void {
-    this.blitImage(ctx, id, x, y, w, h, 'stretch');
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(255,255,255,0.95)';
-    ctx.font = `600 12px ${FONT_STACK}`;
-    ctx.fillText(label, x + w / 2, y + h * 0.34);
-    ctx.font = `700 26px ${FONT_STACK}`;
-    ctx.fillText(String(value), x + w / 2, y + h * 0.7);
+    ctx.fillText(
+      `完成 ${this.state.battlesCompleted} 场 · 获胜 ${this.state.battlesWon} 场`,
+      cx,
+      630,
+    );
+    const best = this.archive.best;
+    const bestLine = best
+      ? `最佳：获胜 ${best.battlesWon} 场${best.won ? '（曾通关）' : ''} · 终点耐久 ${best.finalHpPct}% · 累计 ${this.archive.totals.runs} 局 / ${this.archive.totals.wins} 胜`
+      : '测试档案：本局为首胜记录';
+    ctx.fillStyle = 'rgba(159,176,200,0.9)';
+    ctx.font = `400 11px ${FONT_STACK}`;
+    this.wrapText(ctx, bestLine, cx, 656, PORTRAIT_LOGICAL_W - 70, 15);
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = `400 11px ${FONT_STACK}`;
+    this.wrapText(ctx, nextRunGoal(this.archive), cx, 694, PORTRAIT_LOGICAL_W - 70, 15);
+    // 注：唯一主操作＝底部「再来一局」按钮（由 drawAction 绘制在结算之上），
+    //     此处**不再**重复画一行提示文案，避免出现两个主操作。
   }
 
   /* ----------------------------------------------------------- 探针 */
