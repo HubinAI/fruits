@@ -206,6 +206,48 @@ export function advCarriedPlayerHp(s: AdventureState, ctx: AdventureContext): nu
   return s.carriedHp ?? ctx.playerHpMax;
 }
 
+/** 顶部耐久条的显示值（见 `advTopDurability`）。 */
+export interface AdventureTopDurability {
+  readonly hp: number;
+  readonly max: number;
+  /** 0~100 整数百分比（顶栏唯一绘制口径）。 */
+  readonly pct: number;
+  /** `battle-live` = 读真实战斗运行时；`carried` = 读已结算的 carriedHp。 */
+  readonly source: 'battle-live' | 'carried';
+}
+
+/**
+ * FRUITS-ADVENTURE-BATTLE-HP-F2｜顶部耐久条的**显示值**（纯函数，唯一口径）。
+ *
+ * 背景：`carriedHp` 只在战斗结束那一刻由 `finishAdventureBattle` 写入，战斗期间它恒等于
+ * **本场开局**耐久 ⇒ 顶栏在整场战斗里冻结（D1 已实测：真实 HP 968→839 时顶栏恒 88%）。
+ * 真实 HP 的唯一真源是 `RunBattleRuntime.hp()`（正式物理车辆 `vehicleA.hp`）。
+ *
+ * 本函数**不持有任何状态**，只回答「这一帧该读哪一份」：
+ *   - `BATTLE` 且有实时读数 ⇒ 用实时 `live.hp`；
+ *   - 其余阶段（RESULT / 维修 / 下一场 / 事件 / 终局）⇒ 用已结算的 `carriedHp`。
+ *
+ * ⚠️ 分母在两种来源下**都**取 `ctx.playerHpMax`：战斗结束时
+ *    `carriedHp = max(0, outcome.playerHp)`（= 最后一帧实时 HP），分母若跟着来源一起换，
+ *    百分比就会在切场瞬间跳一下 —— 「切场后结果不回跳」的判据就落在这一点上。
+ */
+export function advTopDurability(
+  s: AdventureState,
+  ctx: AdventureContext,
+  live: { readonly hp: number } | null,
+): AdventureTopDurability {
+  const max = ctx.playerHpMax > 0 ? ctx.playerHpMax : 1;
+  // 只有 BATTLE 阶段的读数算「实时」；其它阶段即使调用方传了值也不采用（避免误用冻结帧）。
+  const liveHp = s.phase === 'BATTLE' && live != null && Number.isFinite(live.hp) ? live.hp : null;
+  const hp = Math.max(0, Math.min(max, Math.round(liveHp ?? advCarriedPlayerHp(s, ctx))));
+  return {
+    hp,
+    max,
+    pct: Math.max(0, Math.min(100, Math.round((hp / max) * 100))),
+    source: liveHp !== null ? 'battle-live' : 'carried',
+  };
+}
+
 export function advBuildIds(s: AdventureState): readonly RunBuildId[] {
   return s.buffs;
 }

@@ -45,6 +45,7 @@ import {
   advEventChoiceOpen,
   advOverlayCards,
   advOverlayOpen,
+  advTopDurability,
   chooseAdventureOption,
   createAdventureState,
   finishAdventureBattle,
@@ -385,6 +386,19 @@ export class AdvPage {
     this.battle = null;
   }
 
+  /**
+   * FRUITS-ADVENTURE-BATTLE-HP-F2｜顶部耐久条的**实时读数**（只读，仅供显示）。
+   *
+   * 直接取 `RunBattleRuntime.hp()`（= 正式物理车辆 `vehicleA.hp`），逐帧随真实伤害下降；
+   * 无战斗实例时返回 `null` ⇒ `advTopDurability` 回落到已结算的 `carriedHp`。
+   * ⚠️ 不改写任何状态、不参与伤害/维修/耐久继承/结算（真源仍是运行时与状态机）。
+   */
+  private liveBattleHp(): { readonly hp: number } | null {
+    const rt = this.battle;
+    if (!rt) return null;
+    return { hp: rt.hp().a };
+  }
+
   private startLoop(): void {
     if (this.rafHandle !== 0) return;
     this.lastFrameMs = performance.now();
@@ -599,9 +613,11 @@ export class AdvPage {
 
     // 耐久条（第二行：标签左 / 进度中 / 百分比右）
     const hpBar: Rect = { x: 46, y: 52, w: 248, h: 16 };
-    const maxHp = this.ctx2.playerHpMax;
-    const hp = advCarriedPlayerHp(this.state, this.ctx2);
-    const pct = Math.max(0, Math.min(100, Math.round((hp / maxHp) * 100)));
+    // FRUITS-ADVENTURE-BATTLE-HP-F2：战斗中读真实战斗运行时的当前 HP
+    // （`RunBattleRuntime.hp().a`），其余阶段读已结算的 carriedHp。
+    // 只换数据来源 —— 不新增任何 HP 状态，分母恒为 ctx.playerHpMax（切场不回跳）。
+    const dur = advTopDurability(this.state, this.ctx2, this.liveBattleHp());
+    const pct = dur.pct;
     this.blitImage(ctx, 'hp_bar_bg', hpBar.x - 2, hpBar.y - 2, hpBar.w + 4, hpBar.h + 4, 'cover');
     this.roundRectPath(ctx, hpBar.x, hpBar.y, hpBar.w, hpBar.h, 8);
     ctx.fillStyle = COLORS.hpBarBg;
@@ -1425,6 +1441,13 @@ export class AdvPage {
       buffs: [...this.state.buffs],
       carriedHp: advCarriedPlayerHp(this.state, this.ctx2),
       playerHpMax: this.ctx2.playerHpMax,
+      /**
+       * F2：顶栏耐久条的**实际显示值**（`advTopDurability` 的返回值）。
+       * `source` 说明本帧读的是实时战斗 HP 还是已结算 carriedHp。
+       */
+      topHp: advTopDurability(this.state, this.ctx2, this.liveBattleHp()),
+      /** F2：正式战斗运行时的真实 HP（`RunBattleRuntime.hp()`；无战斗实例时 null）。 */
+      battleHp: this.battle ? this.battle.hp() : null,
       battlesCompleted: this.state.battlesCompleted,
       battlesWon: this.state.battlesWon,
       seed: this.script.seed,
