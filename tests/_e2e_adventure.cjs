@@ -107,11 +107,14 @@ async function clickLogical(page, lx, ly) {
 /** 真实点击主按钮中心。 */
 const clickAction = (page) => clickLogical(page, ACTION_BTN.x + ACTION_BTN.w / 2, ACTION_BTN.y + ACTION_BTN.h / 2);
 
-/** 真实点击第 i 张浮层选项卡中心。 */
+/** 真实点击第 i 张浮层选项卡中心。
+ * 防御：若点击瞬间浮层已因延迟落定而关闭（options 为空），视为已选择，静默返回，避免越界。 */
 async function clickCard(page, i) {
   const diag = await diagnoseOf(page);
+  if (!diag || !diag.options || diag.options.length === 0) return;
   const rects = layoutOptionCards(diag.options.length);
   const r = rects[i];
+  if (!r) return;
   await clickLogical(page, r.x + r.w / 2, r.y + r.h / 2);
 }
 
@@ -133,6 +136,8 @@ async function playThroughReal(page, label) {
   const hpSnapshots = [];
   let shotEvent = null;
   let shotBuild = null;
+  let shotReward = null;
+  let shotWinTerminal = null;
 
   await page.waitForFunction(() => !!window.__adv && !!window.__adv.probe, null, { timeout: 15000 });
 
@@ -148,6 +153,8 @@ async function playThroughReal(page, label) {
     hpSnapshots.push({ day: s.day, phase: s.phase, carriedHp: s.carriedHp, buffs: s.buffs.length });
 
     if (s.phase === 'COMPLETE' || s.phase === 'FAILED') break;
+
+    if (s.phase === 'EVENT_DONE' && !shotReward) shotReward = await capture(page, `adv-ui-shot-reward-${label}.png`);
 
     if (s.overlayOpen) {
       const diag = await diagnoseOf(page);
@@ -190,6 +197,7 @@ async function playThroughReal(page, label) {
   if (lastPhase !== null) phaseMs[lastPhase] = (phaseMs[lastPhase] || 0) + (endNow - lastPhaseT);
 
   const finalState = await probeOf(page);
+  if (finalState.phase === 'COMPLETE' && !shotWinTerminal) shotWinTerminal = await capture(page, `adv-ui-shot-terminal-win-${label}.png`);
   const total = endNow - t0;
   let hpChanged = false;
   let buffChanged = false;
@@ -211,6 +219,8 @@ async function playThroughReal(page, label) {
     buffChanged,
     shotEvent,
     shotBuild,
+    shotReward,
+    shotWinTerminal,
   };
 }
 
@@ -259,6 +269,8 @@ async function capture(page, name) {
     // ---- Run 1：指定种子（测试入口）真实按钮完整通关 ----
     await page.goto(`${URL_BASE}/adventure.html?seed=${encodeURIComponent(SEED_WIN)}`, { waitUntil: 'load' });
     await page.waitForFunction(() => !!window.__adv && !!window.__adv.probe, null, { timeout: 15000 });
+    const shotHud = await capture(page, 'adv-ui-shot-hud.png');
+    log(!!shotHud, 'R1 截图：主界面 HUD（进度/耐久/事件/操作）', shotHud || 'capture failed');
     const run1 = await playThroughReal(page, 'win1');
     log(
       run1.finalState.phase === 'COMPLETE',
@@ -330,6 +342,8 @@ async function capture(page, name) {
     const shotWin = run1.shotEvent;
     log(!!shotWin, 'R4 截图：事件浮层（Run1）', shotWin || 'capture failed');
     if (run2.shotBuild) log(true, 'R4 截图：建造浮层（Run2）', run2.shotBuild);
+    if (run1.shotReward) log(true, 'R1 截图：开奖（宝箱）', run1.shotReward);
+    if (run1.shotWinTerminal) log(true, 'R1 截图：胜利结算', run1.shotWinTerminal);
 
     // ---- R4 验收4：隔离档案 v2 真实累计；正式存档键未被写入 ----
     const archiveRaw = await page.evaluate((k) => { try { return localStorage.getItem(k); } catch { return null; } }, ARCHIVE_KEY);

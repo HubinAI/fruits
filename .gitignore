@@ -17,6 +17,10 @@ tmp/
 outputs/
 _verify_q15recover/
 
+# 第三方拆包美术（仅本地内部验证用，禁止入库/随公开发布包）
+# 来源：D:\1020卡皮巴拉\unpacked_1.9.3（Capybara Go! 1.9.3），经冒险 UI 审计 R2 确认
+public/adventure-ui/
+
 # 环境变量 / 密钥（禁止上传）
 .env
 .env.*

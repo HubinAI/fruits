@@ -30,6 +30,7 @@ import { runBuildOptionById } from '../runModifiers';
 import {
   generateAdventureScript,
   randomSeedLabel,
+  type AdventureEffect,
   type AdventureEventKind,
   type AdventureEventNode,
   type AdventureScript,
@@ -55,6 +56,7 @@ import {
   type AdventureState,
 } from './advState';
 import { readArchive, recordRun, nextRunGoal, type AdvArchive, type AdvRunSummary } from './advArchive';
+import { AdvUiStore, type AdvUiId } from './advUiAssets';
 
 interface Rect {
   readonly x: number;
@@ -141,6 +143,8 @@ export class AdvPage {
   private readonly ctx: CanvasRenderingContext2D | null;
   private readonly battleView = new RunBattleView();
   private readonly vp = new PlayerViewportTransform(PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
+  /** R1：真实 UI 素材加载器（Capybara Go! 拆包，第三方素材本地 gitignore，失败降级过程式）。 */
+  private readonly ui = new AdvUiStore();
 
   private readonly loadout: RunPlayerLoadout;
   private readonly loadoutSource: string;
@@ -155,6 +159,9 @@ export class AdvPage {
 
   private rafHandle = 0;
   private lastFrameMs = 0;
+  /** R1：选择卡片按下高亮索引（延迟 apply 期间显示反馈，防重入）。 */
+  private pressCard = -1;
+  private pressTimer: number | null = null;
   private battle: RunBattleRuntime | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
@@ -177,6 +184,7 @@ export class AdvPage {
     this.buildDom();
     this.observeResize();
     this.battleView.onAssetsReady(() => this.render());
+    this.ui.load(() => this.render());
     this.render();
   }
 
@@ -200,6 +208,10 @@ export class AdvPage {
   dispose(): void {
     this.stopLoop();
     this.endBattle();
+    if (this.pressTimer !== null) {
+      clearTimeout(this.pressTimer);
+      this.pressTimer = null;
+    }
     this.battleView.dispose();
     window.removeEventListener('resize', this.onWindowResize);
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
@@ -243,7 +255,7 @@ export class AdvPage {
       const rects = layoutOptionCards(cards.length);
       for (let i = 0; i < rects.length; i++) {
         if (hit(rects[i], p)) {
-          this.apply(chooseAdventureOption(this.state, cards[i].id, this.ctx2, this.script));
+          this.tapChoice(cards[i].id);
           return;
         }
       }
@@ -254,6 +266,23 @@ export class AdvPage {
       this.apply(pressAdventureAction(this.state, this.ctx2, this.script));
     }
   };
+
+  /**
+   * R1：选择卡片点击 → 立即渲染按下高亮（反馈），延迟 ~130ms 再落定选择。
+   *   - 防重入：pending 期间忽略后续点击（E2E 轮询重击不重复触发，不破坏状态机）；
+   *   - 延迟仅用于可见反馈，选择因果不变（仍经 chooseAdventureOption 真实结算）。
+   */
+  private tapChoice(optionId: string): void {
+    if (this.pressTimer !== null) return;
+    const cards = advOverlayCards(this.state, this.script, this.ctx2);
+    this.pressCard = cards.findIndex((c) => c.id === optionId);
+    this.render();
+    this.pressTimer = window.setTimeout(() => {
+      this.pressTimer = null;
+      this.pressCard = -1;
+      this.apply(chooseAdventureOption(this.state, optionId, this.ctx2, this.script));
+    }, 130);
+  }
 
   private apply(next: AdventureState): void {
     if (next === this.state) return;
@@ -395,6 +424,64 @@ export class AdvPage {
     if (this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED') this.drawTerminal(ctx);
   }
 
+  /* ----------------------------------------------------------- 素材工具 */
+
+  /**
+   * R1：把真实素材绘制到指定矩形。fit 默认 stretch（直接拉伸）；
+   *   - cover：等比缩放铺满并居中裁剪（用于背景 / 卡片底，避免变形）；
+   *   - contain：等比缩放完整放入并居中（用于宝箱 / 星级等图标）。
+   * 资源未加载（缺失/克隆无素材）时返回 false，调用方据此降级为过程式绘制。
+   */
+  private blitImage(
+    ctx: CanvasRenderingContext2D,
+    id: AdvUiId,
+    dx: number,
+    dy: number,
+    dw: number,
+    dh: number,
+    fit: 'stretch' | 'cover' | 'contain' = 'stretch',
+  ): boolean {
+    const img = this.ui.get(id);
+    if (!img) return false;
+    const sw = img.width;
+    const sh = img.height;
+    let sx = 0;
+    let sy = 0;
+    let sWidth = sw;
+    let sHeight = sh;
+    if (fit === 'cover') {
+      const scale = Math.max(dw / sw, dh / sh);
+      const cw = dw / scale;
+      const ch = dh / scale;
+      sx = (sw - cw) / 2;
+      sy = (sh - ch) / 2;
+      sWidth = cw;
+      sHeight = ch;
+    } else if (fit === 'contain') {
+      const scale = Math.min(dw / sw, dh / sh);
+      const cw = sw * scale;
+      const ch = sh * scale;
+      dx += (dw - cw) / 2;
+      dy += (dh - ch) / 2;
+      dw = cw;
+      dh = ch;
+    }
+    ctx.drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dw, dh);
+    return true;
+  }
+
+  /** 圆角矩形路径（不 fill/stroke，由调用方决定）。 */
+  private roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x, y + h, rr);
+    ctx.arcTo(x, y + h, x, y, rr);
+    ctx.arcTo(x, y, x + w, y, rr);
+    ctx.closePath();
+  }
+
   private drawTop(ctx: CanvasRenderingContext2D): void {
     ctx.fillStyle = COLORS.topBandBg;
     ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, STAGE_BAND.y);
@@ -409,24 +496,45 @@ export class AdvPage {
     const stageLabel = stage > 0 ? ` · 第${stage}阶段` : '';
     ctx.fillText(`随机冒险 · DAY ${this.state.day}/${this.state.dayTotal}${stageLabel}`, 16, 30);
 
-    // 装备来源（如实展示：正式车库 / URL / 演示）
+    // 装备来源（如实展示：正式车库 / URL / 演示；用「·」分隔避免嵌套括号）
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `400 10px ${FONT_STACK}`;
-    ctx.fillText(`战车：${this.ctx2.vehicleLabel}（${this.loadoutSource}）`, 16, 46);
+    ctx.fillText(`战车：${this.ctx2.vehicleLabel} · ${this.loadoutSource}`, 16, 46);
 
-    // 耐久条
-    const hpBar: Rect = { x: 16, y: 56, w: 280, h: 14 };
+    // 耐久条（R1：独立一行，标签在左、进度条居中、百分比在右，避免与战车行重叠）
+    const hpBar: Rect = { x: 46, y: 54, w: 248, h: 16 };
     const maxHp = this.ctx2.playerHpMax;
     const hp = advCarriedPlayerHp(this.state, this.ctx2);
     const pct = Math.max(0, Math.min(100, Math.round((hp / maxHp) * 100)));
+    // 底纹（缺失则过程式）
+    this.blitImage(ctx, 'hp_bar_bg', hpBar.x - 2, hpBar.y - 2, hpBar.w + 4, hpBar.h + 4, 'cover');
+    this.roundRectPath(ctx, hpBar.x, hpBar.y, hpBar.w, hpBar.h, 8);
     ctx.fillStyle = COLORS.hpBarBg;
-    ctx.fillRect(hpBar.x, hpBar.y, hpBar.w, hpBar.h);
+    ctx.fill();
+    // 填充（裁剪在圆角内）
+    ctx.save();
+    this.roundRectPath(ctx, hpBar.x, hpBar.y, hpBar.w, hpBar.h, 8);
+    ctx.clip();
+    const fillW = Math.round((hpBar.w * pct) / 100);
     ctx.fillStyle = pct <= 25 ? COLORS.hpLow : COLORS.hpBarFill;
-    ctx.fillRect(hpBar.x, hpBar.y, Math.round((hpBar.w * pct) / 100), hpBar.h);
-    ctx.fillStyle = COLORS.textBody;
-    ctx.font = `500 11px ${FONT_STACK}`;
+    ctx.fillRect(hpBar.x, hpBar.y, fillW, hpBar.h);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(hpBar.x, hpBar.y, fillW, hpBar.h * 0.4);
+    ctx.restore();
+    this.roundRectPath(ctx, hpBar.x, hpBar.y, hpBar.w, hpBar.h, 8);
+    ctx.strokeStyle = '#0c1018';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // 标签（左）+ 百分比（右），与进度条同高
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = `500 12px ${FONT_STACK}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('耐久', 14, hpBar.y + hpBar.h / 2);
+    ctx.fillStyle = pct <= 25 ? COLORS.hpLow : COLORS.textBody;
+    ctx.font = `600 12px ${FONT_STACK}`;
     ctx.textAlign = 'right';
-    ctx.fillText(`耐久 ${pct}%`, PORTRAIT_LOGICAL_W - 16, 63);
+    ctx.fillText(`${pct}%`, PORTRAIT_LOGICAL_W - 16, hpBar.y + hpBar.h / 2);
 
     // buff 芯片
     let bx = 16;
@@ -453,11 +561,16 @@ export class AdvPage {
 
   private drawStage(ctx: CanvasRenderingContext2D): void {
     const b = STAGE_BAND;
-    // 天空渐变
-    const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
-    g.addColorStop(0, COLORS.stageSkyTop);
-    g.addColorStop(1, COLORS.stageSkyBottom);
-    ctx.fillStyle = g;
+    // R1：真实竖屏战斗背景（缺失则降级为渐变）
+    if (!this.blitImage(ctx, 'battle_bg', b.x, b.y, b.w, b.h, 'cover')) {
+      const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
+      g.addColorStop(0, COLORS.stageSkyTop);
+      g.addColorStop(1, COLORS.stageSkyBottom);
+      ctx.fillStyle = g;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
+    // 轻微压暗，保证前景文字/战斗可读
+    ctx.fillStyle = 'rgba(8,12,20,0.32)';
     ctx.fillRect(b.x, b.y, b.w, b.h);
     // 地面
     const groundY = b.y + b.h - 70;
@@ -557,13 +670,32 @@ export class AdvPage {
     ctx.fillStyle = COLORS.actionBandBg;
     ctx.fillRect(ACTION_BAND.x, ACTION_BAND.y, ACTION_BAND.w, ACTION_BAND.h);
     const enabled = advActionEnabled(this.state) && !advOverlayOpen(this.state);
-    ctx.fillStyle = enabled ? COLORS.actionBtn : COLORS.actionBtnOff;
-    ctx.fillRect(ACTION_BTN.x, ACTION_BTN.y, ACTION_BTN.w, ACTION_BTN.h);
+    const r = ACTION_BTN;
+    const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+    if (enabled) {
+      g.addColorStop(0, '#3f6ea3');
+      g.addColorStop(1, '#2c4d78');
+    } else {
+      g.addColorStop(0, '#222a36');
+      g.addColorStop(1, '#1a212c');
+    }
+    this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 12);
+    ctx.fillStyle = enabled ? g : COLORS.actionBtnOff;
+    ctx.fill();
+    if (enabled) {
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      this.roundRectPath(ctx, r.x + 2, r.y + 2, r.w - 4, r.h * 0.42, 10);
+      ctx.fill();
+    }
+    this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 12);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = enabled ? 'rgba(255,255,255,0.28)' : '#2a3341';
+    ctx.stroke();
     ctx.fillStyle = enabled ? COLORS.textTitle : COLORS.textDim;
     ctx.font = `600 17px ${FONT_STACK}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(advActionLabel(this.state), ACTION_BTN.x + ACTION_BTN.w / 2, ACTION_BTN.y + ACTION_BTN.h / 2);
+    ctx.fillText(advActionLabel(this.state), r.x + r.w / 2, r.y + r.h / 2);
   }
 
   private drawOverlay(ctx: CanvasRenderingContext2D): void {
@@ -574,54 +706,67 @@ export class AdvPage {
     else this.drawBuildChoiceOverlay(ctx);
   }
 
-  /** 事件选择浮层（R3：5 种主题色 + 图标 + 标题 + 描述 + 选项，一眼可区分）。 */
+  /** 事件选择浮层（R1：真实卡片底 + 主题色 + 图标 + 收益/代价分行，一眼可区分）。 */
   private drawEventChoiceOverlay(ctx: CanvasRenderingContext2D, node: AdventureEventNode): void {
     const theme = EVENT_THEME[node.eventKind];
     const b = STAGE_BAND;
-    ctx.fillStyle = '#0e131c';
+    // 背景 + 压暗
+    if (!this.blitImage(ctx, 'battle_bg', b.x, b.y, b.w, b.h, 'cover')) {
+      ctx.fillStyle = '#0e131c';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
+    ctx.fillStyle = 'rgba(6,9,14,0.80)';
     ctx.fillRect(b.x, b.y, b.w, b.h);
     ctx.fillStyle = theme.accent;
     ctx.fillRect(b.x, b.y, b.w, 6);
 
-    this.drawEventIcon(ctx, node.eventKind, b.x + 46, b.y + 62, 46, theme.accent);
+    // 事件图标徽章（圆形）
+    const badgeCx = b.x + 44;
+    const badgeCy = b.y + 60;
+    const badgeR = 26;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(badgeCx, badgeCy, badgeR, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(10,14,22,0.85)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = theme.accent;
+    ctx.stroke();
+    ctx.restore();
+    this.drawEventIcon(ctx, node.eventKind, badgeCx, badgeCy, 30, theme.accent);
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = theme.accent;
     ctx.font = `600 13px ${FONT_STACK}`;
-    ctx.fillText(theme.tag, b.x + 86, b.y + 48);
+    ctx.fillText(theme.tag, b.x + 82, b.y + 44);
     ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `600 19px ${FONT_STACK}`;
-    ctx.fillText(node.title, b.x + 86, b.y + 78);
+    ctx.font = `700 20px ${FONT_STACK}`;
+    ctx.fillText(node.title, b.x + 82, b.y + 74);
 
     ctx.fillStyle = COLORS.textBody;
     ctx.font = `400 13px ${FONT_STACK}`;
-    let dy = b.y + 116;
+    let dy = b.y + 112;
     for (const line of node.beat) {
       ctx.fillText(line, b.x + 20, dy);
       dy += 20;
     }
 
+    // 选项卡片
     const cards = advOverlayCards(this.state, this.script, this.ctx2);
     const rects = layoutOptionCards(cards.length);
     const fullHp = advCarriedPlayerHp(this.state, this.ctx2) >= this.ctx2.playerHpMax;
     for (let i = 0; i < rects.length; i++) {
-      const r = rects[i];
-      ctx.fillStyle = COLORS.cardBg;
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = theme.accent;
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(r.x, r.y, r.w, r.h);
-      ctx.fillStyle = COLORS.textTitle;
-      ctx.font = `600 16px ${FONT_STACK}`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(cards[i].label, r.x + 16, r.y + 34);
-      ctx.fillStyle = COLORS.textDim;
-      ctx.font = `400 12px ${FONT_STACK}`;
-      // 满耐久时，提示「维修类」选项收益有限（避免无效奖励观感，规则可见）。
-      const note = this.optionNoteWithState(node, cards[i].id, fullHp);
-      ctx.fillText(note, r.x + 16, r.y + 64);
+      const eff = node.outcomes[cards[i].id];
+      const gain = this.effectGain(eff, fullHp);
+      const cost = this.effectCost(eff);
+      this.drawChoiceCard(ctx, rects[i], i, {
+        accent: theme.accent,
+        label: cards[i].label,
+        gain,
+        cost,
+        sub: this.optionNoteWithState(node, cards[i].id, fullHp),
+      });
     }
   }
 
@@ -632,10 +777,14 @@ export class AdvPage {
     return base;
   }
 
-  /** 建造选择浮层（中性主题，强化在下一场战斗真实生效）。 */
+  /** 建造选择浮层（R1：真实卡片底，强化在下一场战斗真实生效）。 */
   private drawBuildChoiceOverlay(ctx: CanvasRenderingContext2D): void {
     const b = STAGE_BAND;
-    ctx.fillStyle = '#0e131c';
+    if (!this.blitImage(ctx, 'battle_bg', b.x, b.y, b.w, b.h, 'cover')) {
+      ctx.fillStyle = '#0e131c';
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
+    ctx.fillStyle = 'rgba(6,9,14,0.80)';
     ctx.fillRect(b.x, b.y, b.w, b.h);
     ctx.fillStyle = COLORS.eventAccent;
     ctx.fillRect(b.x, b.y, b.w, 6);
@@ -643,7 +792,7 @@ export class AdvPage {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `600 19px ${FONT_STACK}`;
+    ctx.font = `700 20px ${FONT_STACK}`;
     ctx.fillText('选择一项改装', b.x + 20, b.y + 44);
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `400 13px ${FONT_STACK}`;
@@ -652,20 +801,109 @@ export class AdvPage {
     const cards = advOverlayCards(this.state, this.script, this.ctx2);
     const rects = layoutOptionCards(cards.length);
     for (let i = 0; i < rects.length; i++) {
-      const r = rects[i];
+      this.drawChoiceCard(ctx, rects[i], i, {
+        accent: COLORS.eventAccent,
+        label: cards[i].label,
+        gain: '获得临时强化',
+        cost: '—',
+        sub: cards[i].note,
+      });
+    }
+  }
+
+  /** 单张选择卡（R1：真实卡片底 + 主题边框 + 收益/代价分行 + 按下高亮）。 */
+  private drawChoiceCard(
+    ctx: CanvasRenderingContext2D,
+    r: Rect,
+    index: number,
+    text: { accent: string; label: string; gain: string; cost: string; sub?: string },
+  ): void {
+    const pressed = this.pressCard === index;
+    // 卡片底（真实素材 cover；缺失则过程式底色）
+    if (this.blitImage(ctx, 'card_bg', r.x, r.y, r.w, r.h, 'cover')) {
+      ctx.fillStyle = 'rgba(8,12,20,0.42)';
+      this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
+      ctx.fill();
+    } else {
       ctx.fillStyle = COLORS.cardBg;
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = COLORS.cardEdge;
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(r.x, r.y, r.w, r.h);
-      ctx.fillStyle = COLORS.textTitle;
-      ctx.font = `600 15px ${FONT_STACK}`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(cards[i].label, r.x + 16, r.y + 32);
+      this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
+      ctx.fill();
+    }
+    // 边框
+    this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
+    ctx.lineWidth = pressed ? 3 : 1.5;
+    ctx.strokeStyle = pressed ? '#ffffff' : text.accent;
+    ctx.stroke();
+    if (pressed) {
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
+      ctx.fill();
+    }
+    // 左侧主题色条
+    ctx.fillStyle = text.accent;
+    this.roundRectPath(ctx, r.x, r.y, 5, r.h, 2);
+    ctx.fill();
+
+    const tall = r.h > 100;
+    const labelY = r.y + (tall ? 28 : 24);
+    const gainY = r.y + (tall ? 60 : 48);
+    const costY = r.y + (tall ? 82 : 68);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = COLORS.textTitle;
+    ctx.font = `600 16px ${FONT_STACK}`;
+    ctx.fillText(text.label, r.x + 18, labelY);
+    // 收益（绿）
+    ctx.font = `500 12px ${FONT_STACK}`;
+    ctx.fillStyle = '#7fd6a0';
+    ctx.fillText(`收益 · ${text.gain}`, r.x + 18, gainY);
+    // 代价（有代价橙，否则灰）
+    ctx.fillStyle = text.cost === '—' ? COLORS.textDim : '#e09b6b';
+    ctx.fillText(`代价 · ${text.cost}`, r.x + 18, costY);
+    // 补充说明（dim，长文本省略）
+    if (text.sub) {
       ctx.fillStyle = COLORS.textDim;
       ctx.font = `400 11px ${FONT_STACK}`;
-      this.wrapText(ctx, cards[i].note, r.x + 16, r.y + 56, r.w - 32, 15);
+      const sub = text.sub.length > 30 ? text.sub.slice(0, 29) + '…' : text.sub;
+      ctx.fillText(sub, r.x + 18, costY + 18);
+    }
+  }
+
+  /** 事件效果 → 收益摘要（满耐久时如实提示收益有限）。 */
+  private effectGain(eff: AdventureEffect | undefined, fullHp: boolean): string {
+    if (!eff) return '推进剧情';
+    switch (eff.kind) {
+      case 'heal':
+        return fullHp ? '恢复耐久（已满，有限）' : '恢复耐久';
+      case 'damage':
+        return '—';
+      case 'buff':
+        return '获得临时强化';
+      case 'trade':
+        return '获得临时强化';
+      case 'none':
+        return '推进剧情';
+      default:
+        return '推进剧情';
+    }
+  }
+
+  /** 事件效果 → 代价摘要。 */
+  private effectCost(eff: AdventureEffect | undefined): string {
+    if (!eff) return '—';
+    switch (eff.kind) {
+      case 'heal':
+        return '—';
+      case 'damage':
+        return '损失耐久';
+      case 'buff':
+        return '—';
+      case 'trade':
+        return '消耗耐久';
+      case 'none':
+        return '—';
+      default:
+        return '—';
     }
   }
 
@@ -674,23 +912,28 @@ export class AdvPage {
     const node = advCurrentNode(this.state, this.script);
     const kind = node.kind === 'EVENT' ? node.eventKind : 'crate';
     const theme = EVENT_THEME[kind];
-    ctx.fillStyle = 'rgba(6,9,14,0.76)';
+    if (!this.blitImage(ctx, 'battle_bg', b.x, b.y, b.w, b.h, 'cover')) {
+      ctx.fillStyle = 'rgba(6,9,14,0.76)';
+      ctx.fillRect(0, b.y, b.w, b.h);
+    }
+    ctx.fillStyle = 'rgba(6,9,14,0.72)';
     ctx.fillRect(0, b.y, b.w, b.h);
     ctx.fillStyle = theme.accent;
     ctx.fillRect(b.x, b.y, b.w, 6);
 
-    this.drawEventIcon(ctx, kind, b.x + b.w / 2, b.y + 96, 54, theme.accent);
+    // 真实宝箱（开奖）
+    this.blitImage(ctx, 'chest_open', b.x + b.w / 2 - 56, b.y + 78, 112, 96, 'contain');
 
     ctx.fillStyle = theme.accent;
     ctx.font = `600 14px ${FONT_STACK}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('开 奖', b.x + b.w / 2, b.y + 158);
+    ctx.fillText('开 奖', b.x + b.w / 2, b.y + 196);
 
     ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `600 17px ${FONT_STACK}`;
+    ctx.font = `600 16px ${FONT_STACK}`;
     const text = this.state.eventResult ?? '';
-    this.wrapText(ctx, text, b.x + b.w / 2, b.y + 200, b.w - 56, 25);
+    this.wrapText(ctx, text, b.x + b.w / 2, b.y + 234, b.w - 56, 24);
 
     ctx.fillStyle = '#7fd6a0';
     ctx.font = `500 13px ${FONT_STACK}`;
@@ -787,77 +1030,142 @@ export class AdvPage {
 
   private drawTerminal(ctx: CanvasRenderingContext2D): void {
     const won = this.state.phase === 'COMPLETE';
-    ctx.fillStyle = 'rgba(6,9,14,0.92)';
+    const cx = PORTRAIT_LOGICAL_W / 2;
+    // 背景
+    if (!this.blitImage(ctx, 'battle_bg', 0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H, 'cover')) {
+      ctx.fillStyle = 'rgba(6,9,14,0.92)';
+      ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
+    }
+    ctx.fillStyle = 'rgba(6,9,14,0.90)';
     ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
-    ctx.fillStyle = won ? '#7fd6a0' : COLORS.hpLow;
-    ctx.font = `700 26px ${FONT_STACK}`;
+
+    // 标题
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(won ? '冒险完成' : '冒险失败', PORTRAIT_LOGICAL_W / 2, 150);
+    ctx.fillStyle = won ? '#7fd6a0' : COLORS.hpLow;
+    ctx.font = `700 28px ${FONT_STACK}`;
+    ctx.fillText(won ? '冒险完成' : '冒险失败', cx, 92);
 
+    // 横幅（真实素材；缺失则无横幅）
+    this.blitImage(ctx, won ? 'banner_win' : 'banner_lost', cx - 175, 116, 350, 79, 'stretch');
+
+    // 星级（按胜负 + 终点耐久）
     const hp = advCarriedPlayerHp(this.state, this.ctx2);
     const pct = Math.max(0, Math.min(100, Math.round((hp / this.ctx2.playerHpMax) * 100)));
-    // R4 结算口径：完成战斗（含打退）与获胜战斗分开统计，不混用。
-    const lines = [
-      `撑到第 ${this.state.day} / ${this.state.dayTotal} 天`,
-      `完成 ${this.state.battlesCompleted} 场 · 获胜 ${this.state.battlesWon} 场 · 强化 ${this.state.buffs.length} 项`,
-      `终点耐久 ${pct}%`,
-    ];
-    ctx.fillStyle = COLORS.textBody;
-    ctx.font = `400 14px ${FONT_STACK}`;
-    let y = 200;
-    for (const t of lines) {
-      ctx.fillText(t, PORTRAIT_LOGICAL_W / 2, y);
-      y += 26;
+    const stars = won ? (pct >= 66 ? 3 : pct >= 33 ? 2 : 1) : 1;
+    const starSize = 40;
+    const starGap = 16;
+    const starTotal = 3 * starSize + 2 * starGap;
+    const starX0 = cx - starTotal / 2;
+    const starY = 238;
+    for (let i = 0; i < 3; i++) {
+      const scx = starX0 + i * (starSize + starGap) + starSize / 2;
+      const lit = i < stars;
+      if (this.ui.ready('star')) {
+        ctx.save();
+        ctx.globalAlpha = lit ? 1 : 0.28;
+        this.blitImage(ctx, 'star', scx - starSize / 2, starY - starSize / 2, starSize, starSize, 'contain');
+        ctx.restore();
+      } else {
+        ctx.fillStyle = lit ? '#e8b23c' : 'rgba(232,178,60,0.28)';
+        ctx.font = `${starSize}px ${FONT_STACK}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('★', scx, starY);
+      }
     }
 
-    // 最终 Build
+    // 计分板（完成 / 获胜分列，呼应 R4 口径）
+    const boardY = 300;
+    const boardH = 70;
+    const boardW = 165;
+    this.drawScoreBoard(ctx, 'score_blue', 24, boardY, boardW, boardH, '完成场次', this.state.battlesCompleted);
+    this.drawScoreBoard(ctx, 'score_red', 201, boardY, boardW, boardH, '获胜场次', this.state.battlesWon);
+
+    // 关键数据
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = COLORS.textBody;
+    ctx.font = `400 14px ${FONT_STACK}`;
+    ctx.fillText(`撑到第 ${this.state.day} / ${this.state.dayTotal} 天 · 强化 ${this.state.buffs.length} 项`, cx, 392);
+    ctx.fillStyle = pct <= 25 ? COLORS.hpLow : '#7fd6a0';
+    ctx.font = `600 15px ${FONT_STACK}`;
+    ctx.fillText(`终点耐久 ${pct}%`, cx, 416);
+
+    // 本局 Build
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `500 12px ${FONT_STACK}`;
-    ctx.fillText('本局 Build', PORTRAIT_LOGICAL_W / 2, y + 6);
-    y += 30;
-    const chips = this.state.buffs.map((b) => runBuildOptionById(b)?.label ?? b);
+    ctx.fillText('本局 Build', cx, 444);
     ctx.font = `500 12px ${FONT_STACK}`;
+    const chips = this.state.buffs.map((b) => runBuildOptionById(b)?.label ?? b);
     if (chips.length === 0) {
       ctx.fillStyle = COLORS.textDim;
-      ctx.fillText('（无）', PORTRAIT_LOGICAL_W / 2, y);
-      y += 22;
+      ctx.fillText('（无）', cx, 466);
     } else {
-      ctx.textAlign = 'left'; // 芯片标签左对齐：沿用 center 会以 bx+7 为中心互相压盖（R4 E2E 截图核验发现）
-      let bx = PORTRAIT_LOGICAL_W / 2 - Math.min(chips.length, 3) * 60;
+      let bx = cx - Math.min(chips.length, 3) * 60;
+      let cy = 462;
+      ctx.textAlign = 'left';
       for (let i = 0; i < chips.length; i++) {
         const label = chips[i];
         const tw = ctx.measureText(label).width + 14;
         ctx.fillStyle = '#e6edf8';
-        ctx.fillRect(bx, y, tw, 18);
+        ctx.fillRect(bx, cy, tw, 18);
         ctx.fillStyle = '#1b2432';
-        ctx.fillText(label, bx + 7, y + 9);
+        ctx.fillText(label, bx + 7, cy + 9);
         bx += tw + 8;
         if (i % 3 === 2) {
-          bx = PORTRAIT_LOGICAL_W / 2 - 60;
-          y += 24;
+          bx = cx - 60;
+          cy += 24;
         }
       }
       ctx.textAlign = 'center';
-      y += 28;
     }
 
-    // 隔离测试档案（真实数据，不影响正式存档）
-    ctx.fillStyle = '#9fb3d6';
-    ctx.font = `500 13px ${FONT_STACK}`;
+    // 最佳记录行（真实素材背书 + 文本覆盖）
     const best = this.archive.best;
     const bestLine = best
       ? `最佳：获胜 ${best.battlesWon} 场${best.won ? '（曾通关）' : ''} · 终点耐久 ${best.finalHpPct}% · 累计 ${this.archive.totals.runs} 局 / ${this.archive.totals.wins} 胜`
       : '测试档案：本局为首胜记录';
-    ctx.fillText(bestLine, PORTRAIT_LOGICAL_W / 2, y + 6);
-    y += 28;
+    this.blitImage(ctx, 'rank_self', 20, 512, 350, 104, 'stretch');
+    ctx.fillStyle = 'rgba(8,12,20,0.5)';
+    this.roundRectPath(ctx, 30, 548, 330, 32, 8);
+    ctx.fill();
+    ctx.fillStyle = '#cfe0f5';
+    ctx.font = `500 12px ${FONT_STACK}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    this.wrapText(ctx, bestLine, cx, 564, 320, 16);
+
+    // 下一局目标
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `400 12px ${FONT_STACK}`;
-    this.wrapText(ctx, nextRunGoal(this.archive), PORTRAIT_LOGICAL_W / 2, y, PORTRAIT_LOGICAL_W - 60, 18);
+    this.wrapText(ctx, nextRunGoal(this.archive), cx, 642, PORTRAIT_LOGICAL_W - 60, 17);
 
+    // 再来一局提示（底部行动带之上）
     ctx.fillStyle = '#7fd6a0';
     ctx.font = `500 13px ${FONT_STACK}`;
-    ctx.fillText('▶ 按「再来一局」开始新一局（新随机种子）', PORTRAIT_LOGICAL_W / 2, PORTRAIT_LOGICAL_H - 130);
+    ctx.fillText('▶ 按「再来一局」开始新一局（新随机种子）', cx, 702);
+  }
+
+  /** 计分板（真实素材底 + 文本覆盖）。 */
+  private drawScoreBoard(
+    ctx: CanvasRenderingContext2D,
+    id: AdvUiId,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    label: string,
+    value: number,
+  ): void {
+    this.blitImage(ctx, id, x, y, w, h, 'stretch');
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.font = `600 12px ${FONT_STACK}`;
+    ctx.fillText(label, x + w / 2, y + h * 0.34);
+    ctx.font = `700 26px ${FONT_STACK}`;
+    ctx.fillText(String(value), x + w / 2, y + h * 0.7);
   }
 
   /* ----------------------------------------------------------- 探针 */
