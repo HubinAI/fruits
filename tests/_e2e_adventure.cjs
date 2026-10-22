@@ -47,8 +47,8 @@ function layoutOptionCards(count) {
   const w = 330;
   const h = count <= 2 ? 124 : 104;
   const gap = 16;
-  const areaTop = STAGE_BAND.y + 250;
-  const areaBottom = STAGE_BAND.y + STAGE_BAND.h - 14;
+  const areaTop = STAGE_BAND.y + 154;
+  const areaBottom = STAGE_BAND.y + STAGE_BAND.h - 30;
   const totalH = count * h + (count - 1) * gap;
   const startY = Math.round(areaTop + (areaBottom - areaTop - totalH) / 2);
   const x = Math.round((LOGICAL_W - w) / 2);
