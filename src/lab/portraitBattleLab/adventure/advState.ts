@@ -241,9 +241,10 @@ export function advActionLabel(s: AdventureState): string {
     case 'EVENT_CHOICE':
       return '做个决定';
     case 'COMPLETE':
-      return '完成本次冒险';
+      // R2：终局按钮实际动作是「开始新一局」（新随机种子），标签如实描述，避免与提示文案冲突
+      return '再来一局';
     case 'FAILED':
-      return '重新开始冒险';
+      return '再试一次';
     default:
       return '继续';
   }

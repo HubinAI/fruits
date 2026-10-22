@@ -27,7 +27,8 @@ export type AdvUiId =
   | 'score_red'
   | 'rank_self'
   | 'hp_bar'
-  | 'hp_bar_bg';
+  | 'hp_bar_bg'
+  | 'tab_selected';
 
 /** 资源 id → 站点相对 URL（adventure.html 同目录的 adventure-ui/）。 */
 const FILES: Readonly<Record<AdvUiId, string>> = {
@@ -43,6 +44,7 @@ const FILES: Readonly<Record<AdvUiId, string>> = {
   rank_self: 'adventure-ui/rank_self.png',
   hp_bar: 'adventure-ui/hp_bar.png',
   hp_bar_bg: 'adventure-ui/hp_bar_bg.png',
+  tab_selected: 'adventure-ui/tab_selected.png',
 };
 
 export interface AdvUiStats {

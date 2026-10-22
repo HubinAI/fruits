@@ -43,10 +43,8 @@ import {
   advContextFromLoadout,
   advCurrentNode,
   advEventChoiceOpen,
-  advFormatLog,
   advOverlayCards,
   advOverlayOpen,
-  advVisibleLog,
   chooseAdventureOption,
   createAdventureState,
   finishAdventureBattle,
@@ -103,8 +101,8 @@ const EVENT_THEME: Record<AdventureEventKind, { accent: string; tag: string }> =
   altar: { accent: '#b07ce0', tag: '荒野祭坛' },
 };
 
-const STAGE_BAND: Rect = { x: 0, y: 96, w: PORTRAIT_LOGICAL_W, h: 470 };
-const LOG_BAND: Rect = { x: 0, y: 566, w: PORTRAIT_LOGICAL_W, h: 178 };
+// R2：舞台下探吃掉原「常驻日志带」，放大真实战斗主体，去除长日志拥挤。
+const STAGE_BAND: Rect = { x: 0, y: 96, w: PORTRAIT_LOGICAL_W, h: 648 };
 const ACTION_BAND: Rect = { x: 0, y: 744, w: PORTRAIT_LOGICAL_W, h: 100 };
 const ACTION_BTN: Rect = { x: 40, y: 756, w: 310, h: 68 };
 
@@ -114,7 +112,8 @@ function hit(r: Rect, p: { x: number; y: number }): boolean {
 
 function layoutOptionCards(count: number): Rect[] {
   const w = 330;
-  const h = count <= 2 ? 116 : 96;
+  // R2：放宽卡片高度，给「标题 + 核心收益 + 代价」更大字号与间距；与 tests/_e2e_adventure.cjs 同源必一致
+  const h = count <= 2 ? 124 : 104;
   const gap = 16;
   // 头部之下（STAGE_BAND 顶部留作事件主题区），卡片集中在下半区
   const areaTop = STAGE_BAND.y + 250;
@@ -417,11 +416,16 @@ export class AdvPage {
     ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
     this.drawTop(ctx);
     this.drawStage(ctx);
-    this.drawLog(ctx);
+    const terminal = this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED';
+    if (terminal) {
+      // R2：结算先铺满屏，再把行动带/按钮重绘到最上层，保证「再来一局」按钮可见可点
+      this.drawTerminal(ctx);
+      this.drawAction(ctx);
+      return;
+    }
     this.drawAction(ctx);
     if (advOverlayOpen(this.state)) this.drawOverlay(ctx);
     if (this.state.phase === 'EVENT_DONE') this.drawEventDone(ctx);
-    if (this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED') this.drawTerminal(ctx);
   }
 
   /* ----------------------------------------------------------- 素材工具 */
@@ -483,35 +487,49 @@ export class AdvPage {
   }
 
   private drawTop(ctx: CanvasRenderingContext2D): void {
+    // R2：顶部仅保留「冒险进度」+「当前耐久」，去除常驻长文本与混乱芯片。
     ctx.fillStyle = COLORS.topBandBg;
     ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, STAGE_BAND.y);
     ctx.fillStyle = COLORS.divider;
     ctx.fillRect(0, STAGE_BAND.y - 1, PORTRAIT_LOGICAL_W, 1);
 
+    // 进度（顶部单行）
     ctx.fillStyle = COLORS.textTitle;
     ctx.font = `600 18px ${FONT_STACK}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const stage = this.currentStage();
     const stageLabel = stage > 0 ? ` · 第${stage}阶段` : '';
-    ctx.fillText(`随机冒险 · DAY ${this.state.day}/${this.state.dayTotal}${stageLabel}`, 16, 30);
+    ctx.fillText(`随机冒险 · DAY ${this.state.day}/${this.state.dayTotal}${stageLabel}`, 16, 28);
 
-    // 装备来源（如实展示：正式车库 / URL / 演示；用「·」分隔避免嵌套括号）
-    ctx.fillStyle = COLORS.textDim;
-    ctx.font = `400 10px ${FONT_STACK}`;
-    ctx.fillText(`战车：${this.ctx2.vehicleLabel} · ${this.loadoutSource}`, 16, 46);
+    // 装备来源药丸（右上，如实披露：演示/车库，绝不假装已读取）
+    const demo = !this.loadoutSource.includes('正式车库');
+    const srcLabel = demo ? '演示装备' : '车库装备';
+    ctx.font = `500 11px ${FONT_STACK}`;
+    const sw = ctx.measureText(srcLabel).width + 18;
+    const sx = PORTRAIT_LOGICAL_W - 14 - sw;
+    const sy = 14;
+    const sh = 22;
+    this.roundRectPath(ctx, sx, sy, sw, sh, 11);
+    ctx.fillStyle = demo ? 'rgba(224,155,107,0.18)' : 'rgba(127,214,160,0.18)';
+    ctx.fill();
+    ctx.strokeStyle = demo ? 'rgba(224,155,107,0.6)' : 'rgba(127,214,160,0.6)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = demo ? '#e0b07f' : '#9fe0b8';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(srcLabel, sx + sw / 2, sy + sh / 2);
 
-    // 耐久条（R1：独立一行，标签在左、进度条居中、百分比在右，避免与战车行重叠）
-    const hpBar: Rect = { x: 46, y: 54, w: 248, h: 16 };
+    // 耐久条（第二行：标签左 / 进度中 / 百分比右）
+    const hpBar: Rect = { x: 46, y: 52, w: 248, h: 16 };
     const maxHp = this.ctx2.playerHpMax;
     const hp = advCarriedPlayerHp(this.state, this.ctx2);
     const pct = Math.max(0, Math.min(100, Math.round((hp / maxHp) * 100)));
-    // 底纹（缺失则过程式）
     this.blitImage(ctx, 'hp_bar_bg', hpBar.x - 2, hpBar.y - 2, hpBar.w + 4, hpBar.h + 4, 'cover');
     this.roundRectPath(ctx, hpBar.x, hpBar.y, hpBar.w, hpBar.h, 8);
     ctx.fillStyle = COLORS.hpBarBg;
     ctx.fill();
-    // 填充（裁剪在圆角内）
     ctx.save();
     this.roundRectPath(ctx, hpBar.x, hpBar.y, hpBar.w, hpBar.h, 8);
     ctx.clip();
@@ -525,7 +543,6 @@ export class AdvPage {
     ctx.strokeStyle = '#0c1018';
     ctx.lineWidth = 2;
     ctx.stroke();
-    // 标签（左）+ 百分比（右），与进度条同高
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `500 12px ${FONT_STACK}`;
     ctx.textAlign = 'left';
@@ -535,22 +552,6 @@ export class AdvPage {
     ctx.font = `600 12px ${FONT_STACK}`;
     ctx.textAlign = 'right';
     ctx.fillText(`${pct}%`, PORTRAIT_LOGICAL_W - 16, hpBar.y + hpBar.h / 2);
-
-    // buff 芯片
-    let bx = 16;
-    const by = 76;
-    for (const b of this.state.buffs) {
-      const label = runBuildOptionById(b)?.label ?? b;
-      ctx.font = `500 11px ${FONT_STACK}`;
-      const tw = ctx.measureText(label).width + 14;
-      ctx.fillStyle = '#e6edf8';
-      ctx.fillRect(bx, by, tw, 16);
-      ctx.fillStyle = '#1b2432';
-      ctx.textAlign = 'left';
-      ctx.fillText(label, bx + 7, by + 8);
-      bx += tw + 6;
-      if (bx > PORTRAIT_LOGICAL_W - 40) break;
-    }
   }
 
   private currentStage(): number {
@@ -569,9 +570,19 @@ export class AdvPage {
       ctx.fillStyle = g;
       ctx.fillRect(b.x, b.y, b.w, b.h);
     }
-    // 轻微压暗，保证前景文字/战斗可读
-    ctx.fillStyle = 'rgba(8,12,20,0.32)';
+    // R2：加强压暗 + 上下渐变 scrim，减弱大型 VS 背景的视觉干扰（战斗主体在 scrim 之上绘制，不被压暗）
+    ctx.fillStyle = 'rgba(8,12,20,0.58)';
     ctx.fillRect(b.x, b.y, b.w, b.h);
+    const topScrim = ctx.createLinearGradient(0, b.y, 0, b.y + 96);
+    topScrim.addColorStop(0, 'rgba(6,9,14,0.64)');
+    topScrim.addColorStop(1, 'rgba(6,9,14,0)');
+    ctx.fillStyle = topScrim;
+    ctx.fillRect(b.x, b.y, b.w, 96);
+    const botScrim = ctx.createLinearGradient(0, b.y + b.h, 0, b.y + b.h - 96);
+    botScrim.addColorStop(0, 'rgba(6,9,14,0.64)');
+    botScrim.addColorStop(1, 'rgba(6,9,14,0)');
+    ctx.fillStyle = botScrim;
+    ctx.fillRect(b.x, b.y + b.h - 96, b.w, 96);
     // 地面
     const groundY = b.y + b.h - 70;
     ctx.fillStyle = COLORS.ground;
@@ -592,20 +603,32 @@ export class AdvPage {
       return;
     }
 
-    // 非战斗：居中叙事
+    // 非战斗：居中叙事卡片（R2：用聚焦面板压住 VS 中区，弱化背景干扰，突出文字）
+    const pcx = b.x + b.w / 2;
+    const panelW = PORTRAIT_LOGICAL_W - 64;
+    const panelH = 132;
+    const panelY = b.y + b.h / 2 - panelH / 2;
+    ctx.fillStyle = 'rgba(8,12,20,0.66)';
+    this.roundRectPath(ctx, pcx - panelW / 2, panelY, panelW, panelH, 16);
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(124,141,176,0.45)';
+    this.roundRectPath(ctx, pcx - panelW / 2, panelY, panelW, panelH, 16);
+    ctx.stroke();
+
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (this.state.phase === 'EVENT' && (node.kind === 'BATTLE' || node.kind === 'FINAL')) {
       ctx.fillStyle = COLORS.eventAccent;
-      ctx.font = `600 20px ${FONT_STACK}`;
-      ctx.fillText(`前方：${this.battleEnemyLabel(node.encounterId)}`, b.x + b.w / 2, b.y + b.h / 2 - 10);
+      ctx.font = `700 20px ${FONT_STACK}`;
+      ctx.fillText(`前方：${this.battleEnemyLabel(node.encounterId)}`, pcx, panelY + panelH / 2 - 14);
       ctx.fillStyle = COLORS.textDim;
       ctx.font = `400 13px ${FONT_STACK}`;
-      ctx.fillText('按「遭遇敌人」开打', b.x + b.w / 2, b.y + b.h / 2 + 20);
+      ctx.fillText('按「遭遇敌人」开打', pcx, panelY + panelH / 2 + 18);
     } else {
       ctx.fillStyle = COLORS.textBody;
-      ctx.font = `500 15px ${FONT_STACK}`;
-      ctx.fillText('继续前进…', b.x + b.w / 2, b.y + b.h / 2);
+      ctx.font = `600 17px ${FONT_STACK}`;
+      ctx.fillText('继续前进…', pcx, panelY + panelH / 2);
     }
   }
 
@@ -644,26 +667,6 @@ export class AdvPage {
     ctx.fillStyle = '#7fd6a0';
     ctx.font = `500 13px ${FONT_STACK}`;
     ctx.fillText('▶ 按「继续」进入下一段路', b.x + b.w / 2, b.y + b.h - 60);
-  }
-
-  private drawLog(ctx: CanvasRenderingContext2D): void {
-    ctx.fillStyle = COLORS.logBandBg;
-    ctx.fillRect(LOG_BAND.x, LOG_BAND.y, LOG_BAND.w, LOG_BAND.h);
-    ctx.fillStyle = COLORS.divider;
-    ctx.fillRect(0, LOG_BAND.y, PORTRAIT_LOGICAL_W, 1);
-    const lines = advVisibleLog(this.state, 8);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    let y = LOG_BAND.y + 22;
-    for (const e of lines) {
-      ctx.fillStyle =
-        e.kind === 'day' ? COLORS.eventAccent : e.kind === 'durability' ? '#7fd6a0' : COLORS.textDim;
-      ctx.font = `400 12px ${FONT_STACK}`;
-      const text = advFormatLog(e);
-      ctx.fillText(text.length > 46 ? text.slice(0, 45) + '…' : text, 16, y);
-      y += 19;
-      if (y > LOG_BAND.y + LOG_BAND.h - 14) break;
-    }
   }
 
   private drawAction(ctx: CanvasRenderingContext2D): void {
@@ -744,12 +747,14 @@ export class AdvPage {
     ctx.font = `700 20px ${FONT_STACK}`;
     ctx.fillText(node.title, b.x + 82, b.y + 74);
 
+    // 解释文字（R2：减少，最多 2 行，dim 小字；核心信息交由下方选择卡承载）
     ctx.fillStyle = COLORS.textBody;
-    ctx.font = `400 13px ${FONT_STACK}`;
-    let dy = b.y + 112;
-    for (const line of node.beat) {
-      ctx.fillText(line, b.x + 20, dy);
-      dy += 20;
+    ctx.font = `400 12px ${FONT_STACK}`;
+    let dy = b.y + 110;
+    const maxBeat = 2;
+    for (let i = 0; i < node.beat.length && i < maxBeat; i++) {
+      ctx.fillText(node.beat[i], b.x + 20, dy);
+      dy += 19;
     }
 
     // 选项卡片
@@ -811,7 +816,7 @@ export class AdvPage {
     }
   }
 
-  /** 单张选择卡（R1：真实卡片底 + 主题边框 + 收益/代价分行 + 按下高亮）。 */
+  /** 单张选择卡（R2：放大标题/核心收益，明确区分收益与代价，按下复用真实 tab_selected 选中态）。 */
   private drawChoiceCard(
     ctx: CanvasRenderingContext2D,
     r: Rect,
@@ -829,43 +834,60 @@ export class AdvPage {
       this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
       ctx.fill();
     }
+    // 选中态：复用已筛选的真实 tab_selected 资产（按下时整卡高亮叠加，圆角裁剪）
+    if (pressed) {
+      if (this.ui.ready('tab_selected')) {
+        ctx.save();
+        this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
+        ctx.clip();
+        this.blitImage(ctx, 'tab_selected', r.x, r.y, r.w, r.h, 'stretch');
+        ctx.restore();
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
+        ctx.fill();
+      }
+    }
     // 边框
     this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
     ctx.lineWidth = pressed ? 3 : 1.5;
     ctx.strokeStyle = pressed ? '#ffffff' : text.accent;
     ctx.stroke();
-    if (pressed) {
-      ctx.fillStyle = 'rgba(255,255,255,0.12)';
-      this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
-      ctx.fill();
-    }
     // 左侧主题色条
     ctx.fillStyle = text.accent;
     this.roundRectPath(ctx, r.x, r.y, 5, r.h, 2);
     ctx.fill();
 
-    const tall = r.h > 100;
-    const labelY = r.y + (tall ? 28 : 24);
-    const gainY = r.y + (tall ? 60 : 48);
-    const costY = r.y + (tall ? 82 : 68);
+    const tall = r.h > 110;
+    const labelY = r.y + (tall ? 30 : 26);
+    const gainY = r.y + (tall ? 64 : 54);
+    const costY = r.y + (tall ? 88 : 76);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
+    // 标题（放大）
     ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `600 16px ${FONT_STACK}`;
+    ctx.font = `700 18px ${FONT_STACK}`;
     ctx.fillText(text.label, r.x + 18, labelY);
-    // 收益（绿）
-    ctx.font = `500 12px ${FONT_STACK}`;
+    // 收益（前缀标签 + 核心收益加粗绿）
+    ctx.font = `500 11px ${FONT_STACK}`;
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText('收益', r.x + 18, gainY);
+    ctx.font = `600 15px ${FONT_STACK}`;
     ctx.fillStyle = '#7fd6a0';
-    ctx.fillText(`收益 · ${text.gain}`, r.x + 18, gainY);
-    // 代价（有代价橙，否则灰）
+    ctx.fillText(text.gain, r.x + 52, gainY);
+    // 代价（前缀标签 + 值；有代价橙，无代价灰）
+    ctx.font = `500 11px ${FONT_STACK}`;
+    ctx.fillStyle = COLORS.textDim;
+    ctx.fillText('代价', r.x + 18, costY);
+    ctx.font = `600 13px ${FONT_STACK}`;
     ctx.fillStyle = text.cost === '—' ? COLORS.textDim : '#e09b6b';
-    ctx.fillText(`代价 · ${text.cost}`, r.x + 18, costY);
-    // 补充说明（dim，长文本省略）
-    if (text.sub) {
+    ctx.fillText(text.cost, r.x + 52, costY);
+    // 补充说明（仅高卡显示，dim，长文本省略）—— R2：减少解释文字
+    if (tall && text.sub) {
       ctx.fillStyle = COLORS.textDim;
       ctx.font = `400 11px ${FONT_STACK}`;
-      const sub = text.sub.length > 30 ? text.sub.slice(0, 29) + '…' : text.sub;
-      ctx.fillText(sub, r.x + 18, costY + 18);
+      const sub = text.sub.length > 26 ? text.sub.slice(0, 25) + '…' : text.sub;
+      ctx.fillText(sub, r.x + 18, costY + 20);
     }
   }
 
@@ -916,7 +938,8 @@ export class AdvPage {
       ctx.fillStyle = 'rgba(6,9,14,0.76)';
       ctx.fillRect(0, b.y, b.w, b.h);
     }
-    ctx.fillStyle = 'rgba(6,9,14,0.72)';
+    // R2：加强压暗，避免 VS 背景干扰开奖阅读
+    ctx.fillStyle = 'rgba(6,9,14,0.86)';
     ctx.fillRect(0, b.y, b.w, b.h);
     ctx.fillStyle = theme.accent;
     ctx.fillRect(b.x, b.y, b.w, 6);
@@ -930,14 +953,25 @@ export class AdvPage {
     ctx.textBaseline = 'middle';
     ctx.fillText('开 奖', b.x + b.w / 2, b.y + 196);
 
+    // 结果文本聚焦面板
+    ctx.fillStyle = 'rgba(8,12,20,0.55)';
+    this.roundRectPath(ctx, 28, b.y + 210, PORTRAIT_LOGICAL_W - 56, 84, 12);
+    ctx.fill();
     ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `600 16px ${FONT_STACK}`;
-    const text = this.state.eventResult ?? '';
-    this.wrapText(ctx, text, b.x + b.w / 2, b.y + 234, b.w - 56, 24);
+    ctx.font = `600 15px ${FONT_STACK}`;
+    // 去掉句末标点，避免换行时留下孤立的「。」
+    const text = (this.state.eventResult ?? '').replace(/[。.]+$/, '');
+    this.wrapText(ctx, text, b.x + b.w / 2, b.y + 236, b.w - 30, 23);
 
+    // 底部提示（加渐变底保证可读）
+    const botG = ctx.createLinearGradient(0, b.y + b.h, 0, b.y + b.h - 96);
+    botG.addColorStop(0, 'rgba(6,9,14,0.72)');
+    botG.addColorStop(1, 'rgba(6,9,14,0)');
+    ctx.fillStyle = botG;
+    ctx.fillRect(b.x, b.y + b.h - 96, b.w, 96);
     ctx.fillStyle = '#7fd6a0';
-    ctx.font = `500 13px ${FONT_STACK}`;
-    ctx.fillText('▶ 按「继续」进入下一天', b.x + b.w / 2, b.y + b.h - 38);
+    ctx.font = `600 14px ${FONT_STACK}`;
+    ctx.fillText('▶ 按「继续」进入下一天', b.x + b.w / 2, b.y + b.h - 42);
   }
 
   /** 过程式事件图标（5 种形状，零第三方素材）。 */
@@ -1031,7 +1065,7 @@ export class AdvPage {
   private drawTerminal(ctx: CanvasRenderingContext2D): void {
     const won = this.state.phase === 'COMPLETE';
     const cx = PORTRAIT_LOGICAL_W / 2;
-    // 背景
+    // 背景（强压暗，避免 VS 背景干扰结算阅读）
     if (!this.blitImage(ctx, 'battle_bg', 0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H, 'cover')) {
       ctx.fillStyle = 'rgba(6,9,14,0.92)';
       ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
@@ -1039,25 +1073,30 @@ export class AdvPage {
     ctx.fillStyle = 'rgba(6,9,14,0.90)';
     ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
 
-    // 标题
+    // 横幅（真实素材）：R2 把胜负标题绘制到横幅之上，修复「空白横幅」
+    const bannerY = 100;
+    const bannerH = 84;
+    const bannerW = 320;
+    this.blitImage(ctx, won ? 'banner_win' : 'banner_lost', cx - bannerW / 2, bannerY, bannerW, bannerH, 'stretch');
+    // 横幅中央加半透明暗底，保证标题可读
+    ctx.fillStyle = 'rgba(10,14,22,0.46)';
+    this.roundRectPath(ctx, cx - bannerW / 2 + 10, bannerY + 18, bannerW - 20, bannerH - 36, 10);
+    ctx.fill();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = won ? '#7fd6a0' : COLORS.hpLow;
-    ctx.font = `700 28px ${FONT_STACK}`;
-    ctx.fillText(won ? '冒险完成' : '冒险失败', cx, 92);
-
-    // 横幅（真实素材；缺失则无横幅）
-    this.blitImage(ctx, won ? 'banner_win' : 'banner_lost', cx - 175, 116, 350, 79, 'stretch');
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `700 26px ${FONT_STACK}`;
+    ctx.fillText(won ? '冒险完成' : '冒险失败', cx, bannerY + bannerH / 2);
 
     // 星级（按胜负 + 终点耐久）
     const hp = advCarriedPlayerHp(this.state, this.ctx2);
     const pct = Math.max(0, Math.min(100, Math.round((hp / this.ctx2.playerHpMax) * 100)));
     const stars = won ? (pct >= 66 ? 3 : pct >= 33 ? 2 : 1) : 1;
-    const starSize = 40;
+    const starSize = 38;
     const starGap = 16;
     const starTotal = 3 * starSize + 2 * starGap;
     const starX0 = cx - starTotal / 2;
-    const starY = 238;
+    const starY = 222;
     for (let i = 0; i < 3; i++) {
       const scx = starX0 + i * (starSize + starGap) + starSize / 2;
       const lit = i < stars;
@@ -1075,76 +1114,92 @@ export class AdvPage {
       }
     }
 
-    // 计分板（完成 / 获胜分列，呼应 R4 口径）
-    const boardY = 300;
-    const boardH = 70;
-    const boardW = 165;
+    // 核心成果：计分板（完成 / 获胜分列，呼应 R4 口径）
+    const boardY = 272;
+    const boardH = 66;
+    const boardW = 160;
     this.drawScoreBoard(ctx, 'score_blue', 24, boardY, boardW, boardH, '完成场次', this.state.battlesCompleted);
-    this.drawScoreBoard(ctx, 'score_red', 201, boardY, boardW, boardH, '获胜场次', this.state.battlesWon);
+    this.drawScoreBoard(ctx, 'score_red', 206, boardY, boardW, boardH, '获胜场次', this.state.battlesWon);
 
-    // 关键数据
+    // 关键数据（撑到天数 + 终点耐久）
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = COLORS.textBody;
     ctx.font = `400 14px ${FONT_STACK}`;
-    ctx.fillText(`撑到第 ${this.state.day} / ${this.state.dayTotal} 天 · 强化 ${this.state.buffs.length} 项`, cx, 392);
+    ctx.fillText(`撑到第 ${this.state.day} / ${this.state.dayTotal} 天 · 强化 ${this.state.buffs.length} 项`, cx, 366);
     ctx.fillStyle = pct <= 25 ? COLORS.hpLow : '#7fd6a0';
-    ctx.font = `600 15px ${FONT_STACK}`;
-    ctx.fillText(`终点耐久 ${pct}%`, cx, 416);
+    ctx.font = `600 16px ${FONT_STACK}`;
+    ctx.fillText(`终点耐久 ${pct}%`, cx, 392);
 
-    // 本局 Build
+    // 次要统计（弱化）：本局 Build 小字
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `500 12px ${FONT_STACK}`;
-    ctx.fillText('本局 Build', cx, 444);
+    ctx.fillText('本局 Build', cx, 420);
     ctx.font = `500 12px ${FONT_STACK}`;
     const chips = this.state.buffs.map((b) => runBuildOptionById(b)?.label ?? b);
     if (chips.length === 0) {
       ctx.fillStyle = COLORS.textDim;
-      ctx.fillText('（无）', cx, 466);
+      ctx.fillText('（无）', cx, 440);
     } else {
-      let bx = cx - Math.min(chips.length, 3) * 60;
-      let cy = 462;
-      ctx.textAlign = 'left';
-      for (let i = 0; i < chips.length; i++) {
-        const label = chips[i];
-        const tw = ctx.measureText(label).width + 14;
-        ctx.fillStyle = '#e6edf8';
-        ctx.fillRect(bx, cy, tw, 18);
-        ctx.fillStyle = '#1b2432';
-        ctx.fillText(label, bx + 7, cy + 9);
-        bx += tw + 8;
-        if (i % 3 === 2) {
-          bx = cx - 60;
-          cy += 24;
-        }
+      // R2：次要统计单行收纳，溢出以「+N」表示，避免与下方最佳记录行重叠
+      const shown = chips.slice(0, 3);
+      const extra = chips.length - shown.length;
+      const measure = (s: string): number => {
+        ctx.font = `500 12px ${FONT_STACK}`;
+        return ctx.measureText(s).width + 12;
+      };
+      const widths = shown.map(measure);
+      const extraLabel = extra > 0 ? `+${extra}` : '';
+      const extraW = extra > 0 ? measure(extraLabel) : 0;
+      const totalW = widths.reduce((a, b) => a + b, 0) + extraW + (shown.length - 1 + (extra > 0 ? 1 : 0)) * 6;
+      let bx = cx - totalW / 2;
+      const cy = 436;
+      for (let i = 0; i < shown.length; i++) {
+        ctx.fillStyle = 'rgba(230,237,248,0.14)';
+        ctx.fillRect(bx, cy, widths[i], 16);
+        ctx.fillStyle = COLORS.textDim;
+        ctx.font = `500 12px ${FONT_STACK}`;
+        ctx.textAlign = 'left';
+        ctx.fillText(shown[i], bx + 6, cy + 8);
+        bx += widths[i] + 6;
+      }
+      if (extra > 0) {
+        ctx.fillStyle = 'rgba(230,237,248,0.10)';
+        ctx.fillRect(bx, cy, extraW, 16);
+        ctx.fillStyle = COLORS.textDim;
+        ctx.font = `500 12px ${FONT_STACK}`;
+        ctx.textAlign = 'left';
+        ctx.fillText(extraLabel, bx + 6, cy + 8);
       }
       ctx.textAlign = 'center';
     }
 
-    // 最佳记录行（真实素材背书 + 文本覆盖）
+    // 次要统计（弱化）：最佳记录行（rank_self 缩小变暗）
     const best = this.archive.best;
-    const bestLine = best
-      ? `最佳：获胜 ${best.battlesWon} 场${best.won ? '（曾通关）' : ''} · 终点耐久 ${best.finalHpPct}% · 累计 ${this.archive.totals.runs} 局 / ${this.archive.totals.wins} 胜`
+    const bestLine1 = best
+      ? `最佳：获胜 ${best.battlesWon} 场${best.won ? '（曾通关）' : ''} · 终点耐久 ${best.finalHpPct}%`
       : '测试档案：本局为首胜记录';
-    this.blitImage(ctx, 'rank_self', 20, 512, 350, 104, 'stretch');
-    ctx.fillStyle = 'rgba(8,12,20,0.5)';
-    this.roundRectPath(ctx, 30, 548, 330, 32, 8);
-    ctx.fill();
-    ctx.fillStyle = '#cfe0f5';
-    ctx.font = `500 12px ${FONT_STACK}`;
+    const bestLine2 = `累计 ${this.archive.totals.runs} 局 / ${this.archive.totals.wins} 胜`;
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    this.blitImage(ctx, 'rank_self', cx - 150, 458, 300, 60, 'stretch');
+    ctx.restore();
+    ctx.fillStyle = '#9fb0c8';
+    ctx.font = `500 11px ${FONT_STACK}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    this.wrapText(ctx, bestLine, cx, 564, 320, 16);
+    ctx.fillText(bestLine1, cx, 480);
+    ctx.fillText(bestLine2, cx, 496);
 
-    // 下一局目标
+    // 下一局目标（弱化小字）
     ctx.fillStyle = COLORS.textDim;
     ctx.font = `400 12px ${FONT_STACK}`;
-    this.wrapText(ctx, nextRunGoal(this.archive), cx, 642, PORTRAIT_LOGICAL_W - 60, 17);
+    this.wrapText(ctx, nextRunGoal(this.archive), cx, 548, PORTRAIT_LOGICAL_W - 70, 16);
 
-    // 再来一局提示（底部行动带之上）
+    // 下一步操作（突出）：再来一局（文案与实际按钮标签同源，避免冲突）
     ctx.fillStyle = '#7fd6a0';
-    ctx.font = `500 13px ${FONT_STACK}`;
-    ctx.fillText('▶ 按「再来一局」开始新一局（新随机种子）', cx, 702);
+    ctx.font = `600 14px ${FONT_STACK}`;
+    ctx.fillText(`▶ 按「${advActionLabel(this.state)}」开始新一局（新随机种子）`, cx, 694);
   }
 
   /** 计分板（真实素材底 + 文本覆盖）。 */

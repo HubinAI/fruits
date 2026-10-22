@@ -40,12 +40,12 @@ const MIME = {
 /* ---- 逻辑坐标（与 advPage.ts 布局常量同源，1:1 复制以保证点击真实命中）---- */
 const LOGICAL_W = 390;
 const LOGICAL_H = 844;
-const STAGE_BAND = { x: 0, y: 96, w: LOGICAL_W, h: 470 };
+const STAGE_BAND = { x: 0, y: 96, w: LOGICAL_W, h: 648 };
 const ACTION_BTN = { x: 40, y: 756, w: 310, h: 68 };
 
 function layoutOptionCards(count) {
   const w = 330;
-  const h = count <= 2 ? 116 : 96;
+  const h = count <= 2 ? 124 : 104;
   const gap = 16;
   const areaTop = STAGE_BAND.y + 250;
   const areaBottom = STAGE_BAND.y + STAGE_BAND.h - 14;
