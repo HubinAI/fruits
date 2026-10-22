@@ -10,7 +10,15 @@
  *   │        ↓ **正式 battle 相机链**：reframe(snap,'battle',{phase})
  *   │          → battleCam → 逐帧 applyBattleFollow       ← 本文件只做「接线」，不写镜头算法
  *   │ 离屏视口 502×358（= 舞台带 390×302 + 正式 inset 56/28）
- *   └        ↓ drawImage（9 参数，裁安全区 → 1:1 贴到舞台带）  ← 本文件唯一的合成动作
+ *   └        ↓ drawImage（9 参数，裁安全区 → **等比**贴到舞台带）  ← 本文件唯一的合成动作
+ *
+ * FRUITS-ADVENTURE-BATTLE-VIEW-F1（比例失真修复，2026-10-22）：
+ *   上面这条链路的**最后一步**过去是「两轴各自缩放」（源矩形按安全区、目标矩形按舞台带），
+ *   于是只要舞台带不是 390×302 的比例就必然单轴拉伸 —— 竖屏冒险把 390×302 贴到 390×648，
+ *   纵向 ×2.146，战车/车轮/角色全部被拉长。现在：
+ *     ① 视口尺寸可由 `safeArea` 指定（竖屏冒险传 390×648 ⇒ 视口 502×704），正式相机拿到
+ *        「同一宽、更高」的安全区 —— 横向构图语义与正式战斗完全一致，纵向多看到天空/地面；
+ *     ② 合成只算**一个** scale（`planBattleBlit`），X/Y 恒相同 ⇒ 结构性不可能再出现单轴拉伸。
  *
  * 为什么这样接（而不是让 PRP 自己画战斗 / 自己算镜头）：
  *   1) 画战斗 / 算镜头 = 战斗表现的**第二套实现**，与 Queue「优先复用正式链路、PRP 只负责
@@ -94,6 +102,84 @@ export interface RunBattleAudioProbe extends AudioProbeState {
  */
 export interface RunBattleViewOptions {
   readonly viewportScale?: number;
+  /**
+   * FRUITS-ADVENTURE-BATTLE-VIEW-F1｜**目标逻辑安全区尺寸**（默认 = 正式舞台带 390×302）。
+   *
+   * 离屏视口 = 安全区 + 正式 inset（56/28）× `viewportScale`。默认值与历史实现逐像素相同；
+   * 传入更高的安全区（如竖屏冒险的 390×648）时，正式相机拿到的是**同一宽、更高**的取景窗：
+   * 横向构图（双车 span 占比驱动 scale）与历史完全一致，纵向多看到天空/地面 ——
+   * 于是合成时 X/Y 可以共用同一个缩放系数（1:1），不再需要把 390×302 拉成 390×648。
+   */
+  readonly safeArea?: { readonly w: number; readonly h: number };
+}
+
+/**
+ * FRUITS-ADVENTURE-BATTLE-VIEW-F1｜一次 `drawImage` 的合成规划（源矩形 + 目标矩形，逻辑坐标）。
+ *
+ * ⚠️ 这是「比例不失真」的**结构性保证**：`dw/sw === dh/sh` 恒成立（`contain` 与 `cover`
+ *    都只算**一个** scale），因此无论目标带与安全区比例如何变化，车辆 / 轮胎 / 角色都
+ *    不会被单轴拉伸。历史实现是「源 = 安全区，目标 = 舞台带」两轴各用各的比值 —— 这正是
+ *    竖屏冒险里 390×302 → 390×648（纵向 ×2.146）的失真来源。
+ */
+export interface BattleBlitPlan {
+  /** 源矩形（相对安全区左上角，逻辑 px）。 */
+  readonly sx: number;
+  readonly sy: number;
+  readonly sw: number;
+  readonly sh: number;
+  /** 目标矩形（目标画布逻辑 px）。 */
+  readonly dx: number;
+  readonly dy: number;
+  readonly dw: number;
+  readonly dh: number;
+}
+
+/**
+ * 计算等比合成矩形。
+ *
+ * - `contain`：整块安全区**完整**放进目标带（可能留下上下/左右留白），X/Y 用同一 scale；
+ * - `cover`  ：等比放大到**铺满**目标带，多出来的部分裁掉（`focusY` 决定裁切偏向：
+ *              0 = 保留顶部，0.5 = 居中，1 = 保留底部），X/Y 仍是同一 scale。
+ */
+export function planBattleBlit(
+  src: { readonly w: number; readonly h: number },
+  dst: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
+  mode: 'contain' | 'cover' = 'contain',
+  focusY = 0.5,
+): BattleBlitPlan {
+  const sw = Math.max(1, src.w);
+  const sh = Math.max(1, src.h);
+  const dw0 = Math.max(1, dst.w);
+  const dh0 = Math.max(1, dst.h);
+  if (mode === 'cover') {
+    const scale = Math.max(dw0 / sw, dh0 / sh);
+    const cropW = Math.min(sw, dw0 / scale);
+    const cropH = Math.min(sh, dh0 / scale);
+    const f = Math.max(0, Math.min(1, focusY));
+    return {
+      sx: (sw - cropW) / 2,
+      sy: (sh - cropH) * f,
+      sw: cropW,
+      sh: cropH,
+      dx: dst.x,
+      dy: dst.y,
+      dw: dw0,
+      dh: dh0,
+    };
+  }
+  const scale = Math.min(dw0 / sw, dh0 / sh);
+  const dw = sw * scale;
+  const dh = sh * scale;
+  return {
+    sx: 0,
+    sy: 0,
+    sw,
+    sh,
+    dx: dst.x + (dw0 - dw) / 2,
+    dy: dst.y + (dh0 - dh) / 2,
+    dw,
+    dh,
+  };
 }
 
 /**
@@ -134,10 +220,20 @@ export class RunBattleView {
   private dpr = 1;
   /** 离屏视口放大倍数（≥1；见 `RunBattleViewOptions`）。1 = 与既有页面逐像素相同。 */
   private readonly viewportScale: number;
+  /** 目标逻辑安全区（默认 = 正式舞台带；见 `RunBattleViewOptions.safeArea`）。 */
+  private readonly safeW: number;
+  private readonly safeH: number;
+  /** 调用方是否显式指定了安全区（false ⇒ 视口公式保持历史形态，零回归）。 */
+  private readonly safeOverride: boolean;
 
   constructor(doc: Document = document, options: RunBattleViewOptions = {}) {
     const requested = options.viewportScale ?? 1;
     this.viewportScale = Number.isFinite(requested) && requested > 1 ? requested : 1;
+    const sa = options.safeArea;
+    // ⚠️ 缺省 = 历史口径（安全区 390×302 ⇒ 视口 502×358），既有四个 Lab 页面零变化。
+    this.safeOverride = !!sa && sa.w > 0 && sa.h > 0;
+    this.safeW = this.safeOverride ? sa!.w : RUN_BATTLE_VIEW_W - RUN_BATTLE_VIEW_INSET.x * 2;
+    this.safeH = this.safeOverride ? sa!.h : RUN_BATTLE_VIEW_H - RUN_BATTLE_VIEW_INSET.y * 2;
     this.canvas = doc.createElement('canvas');
     this.dpr = typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;
     this.applySize();
@@ -240,29 +336,75 @@ export class RunBattleView {
   }
 
   /**
-   * 把离屏战斗画面贴到目标画布的舞台带（1:1 合成：源 = 正式安全区，目标 = 舞台带）。
+   * 把离屏战斗画面**等比**贴到目标矩形（默认舞台带）。
    *
-   * 9 参数 `drawImage`：源矩形 = **正式安全区**（= inset 原点 + 安全区尺寸 × DPR），
-   * 目标矩形 = 舞台带。视口比带大出来的 inset 边缘（`cropX/cropY` 那圈）永远不出画 ——
-   * 这正是「viewport adapter」的落点，不是一次额外的裁剪调用。
+   * FRUITS-ADVENTURE-BATTLE-VIEW-F1（失真修复）：历史实现是「源 = 安全区，目标 = 舞台带」，
+   * X/Y 各用各的比值 —— 舞台带一旦不是安全区比例（竖屏冒险 390×302 → 390×648），车辆就被
+   * 纵向拉长 2.146×。现在只算**一个** scale（`planBattleBlit` 的 contain），X/Y 恒相同：
+   *   - 目标比例 = 安全区比例（所有 Lab 页 + 竖屏冒险的战斗态）⇒ 1:1，与历史逐像素相同；
+   *   - 目标更高/更宽 ⇒ 等比缩放并居中，**绝不**单轴拉伸（可能留白，由调用方决定是否接受）。
    *
-   * ⚠️ `viewportScale = 1` 时安全区尺寸恒等于 `band`（390×302 ⇒ 502×358 视口）⇒ 本方法
-   *    与历史实现逐像素相同；`> 1` 时它会把整个安全区**缩**进 band（远景全览），
-   *    近景取景请改用 `blitRegion()`。
+   * ⚠️ 这只改变合成几何，不写 `renderer.*`、不改物理世界 / 碰撞 / 相机规则。
    */
   blit(ctx: CanvasRenderingContext2D, band: RunRect = RUN_STAGE_BAND): void {
+    this.composite(ctx, band, 'contain', 0.5);
+  }
+
+  /**
+   * FRUITS-ADVENTURE-BATTLE-VIEW-F1｜**等比铺满**合成：目标带比安全区更扁/更窄时，
+   * 等比放大到铺满后裁掉溢出部分（`focusY` 控制裁切偏向，0.5 = 居中）。
+   *
+   * 用途：竖屏冒险的 RESULT 阶段主体层只有 390×468（比 390×648 的战斗舞台矮），
+   * 若用 contain 会整体缩小、留出左右/上下空档；cover 则保持车辆像素尺寸不变、
+   * 只裁掉一部分天空与地面带 —— 宽高比依旧是同一个 scale。
+   */
+  blitCover(ctx: CanvasRenderingContext2D, band: RunRect, focusY = 0.5): void {
+    this.composite(ctx, band, 'cover', focusY);
+  }
+
+  /**
+   * **唯一的远景/定格合成口径**（`blit` 与 `blitCover` 共用）：`planBattleBlit` 只算一个
+   * scale，源矩形换算到 backing 的 device 域后交给 9 参数 `drawImage`。
+   */
+  private composite(
+    ctx: CanvasRenderingContext2D,
+    band: RunRect,
+    mode: 'contain' | 'cover',
+    focusY: number,
+  ): void {
     const safe = this.safeAreaSize();
+    const plan = planBattleBlit(safe, band, mode, focusY);
     ctx.drawImage(
       this.canvas,
-      RUN_BATTLE_VIEW_INSET.x * this.dpr,
-      RUN_BATTLE_VIEW_INSET.y * this.dpr,
-      safe.w * this.dpr,
-      safe.h * this.dpr,
-      band.x,
-      band.y,
-      band.w,
-      band.h,
+      RUN_BATTLE_VIEW_INSET.x * this.dpr + plan.sx * this.dpr,
+      RUN_BATTLE_VIEW_INSET.y * this.dpr + plan.sy * this.dpr,
+      plan.sw * this.dpr,
+      plan.sh * this.dpr,
+      plan.dx,
+      plan.dy,
+      plan.dw,
+      plan.dh,
     );
+  }
+
+  /**
+   * 合成读数（只读探针 / E2E 用）：安全区、目标带、以及**实际使用的 X/Y 缩放系数**。
+   * `scaleX` 与 `scaleY` 必须恒等 —— 这是「比例不失真」的可断言事实。
+   */
+  compositeProbe(band: RunRect = RUN_STAGE_BAND, mode: 'contain' | 'cover' = 'contain'): {
+    readonly safe: { readonly w: number; readonly h: number };
+    readonly band: { readonly w: number; readonly h: number };
+    readonly scaleX: number;
+    readonly scaleY: number;
+  } {
+    const safe = this.safeAreaSize();
+    const plan = planBattleBlit(safe, band, mode);
+    return {
+      safe: { w: safe.w, h: safe.h },
+      band: { w: band.w, h: band.h },
+      scaleX: plan.dw / plan.sw,
+      scaleY: plan.dh / plan.sh,
+    };
   }
 
   /**
@@ -292,7 +434,11 @@ export class RunBattleView {
     return { w: this.viewportW(), h: this.viewportH() };
   }
 
-  /** 正式安全区逻辑尺寸（= 视口 − 两侧正式 inset）。`viewportScale = 1` 时恒等于舞台带。 */
+  /**
+   * 正式安全区逻辑尺寸（= 视口 − 两侧正式 inset）。
+   * 默认口径下恒等于舞台带（390×302）；显式传入 `safeArea` 时等于该尺寸 × `viewportScale`
+   * （竖屏冒险用 390×648 —— 合成时 X/Y 同一 scale，不需要把矮安全区拉高）。
+   */
   safeAreaSize(): { readonly w: number; readonly h: number } {
     return {
       w: this.viewportW() - RUN_BATTLE_VIEW_INSET.x * 2,
@@ -335,14 +481,17 @@ export class RunBattleView {
 
   /* --------------------------------------------------------------- 内部 */
 
-  /** 离屏视口逻辑宽 = 「舞台带 + 正式 inset」× 放大倍数。 */
+  /** 离屏视口逻辑宽 = 「安全区 + 正式 inset」× 放大倍数。 */
   private viewportW(): number {
-    return Math.round(RUN_BATTLE_VIEW_W * this.viewportScale);
+    // 缺省口径：与历史实现逐字相同（既有四个 Lab 页面零回归）
+    if (!this.safeOverride) return Math.round(RUN_BATTLE_VIEW_W * this.viewportScale);
+    return Math.round(this.safeW * this.viewportScale + RUN_BATTLE_VIEW_INSET.x * 2);
   }
 
-  /** 离屏视口逻辑高 = 「舞台带 + 正式 inset」× 放大倍数。 */
+  /** 离屏视口逻辑高 = 「安全区 + 正式 inset」× 放大倍数。 */
   private viewportH(): number {
-    return Math.round(RUN_BATTLE_VIEW_H * this.viewportScale);
+    if (!this.safeOverride) return Math.round(RUN_BATTLE_VIEW_H * this.viewportScale);
+    return Math.round(this.safeH * this.viewportScale + RUN_BATTLE_VIEW_INSET.y * 2);
   }
 
   /** 宿主注册「资源就绪 → 重绘」回调（构造早于宿主字段就绪，故不能只靠构造参数）。 */

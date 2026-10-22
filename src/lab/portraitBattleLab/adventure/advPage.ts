@@ -166,7 +166,14 @@ export class AdvPage {
   private readonly stageWrap: HTMLDivElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D | null;
-  private readonly battleView = new RunBattleView();
+  /**
+   * FRUITS-ADVENTURE-BATTLE-VIEW-F1：战斗视图按**本页真实舞台带**（390×648）建视口。
+   * 视口因此是 502×704 而不是 502×358 —— 正式相机在「同一宽、更高」的安全区里取景，
+   * 合成时 X/Y 用同一个 scale（1:1 贴满舞台带），车辆/车轮不再被纵向拉长 2.146×。
+   */
+  private readonly battleView = new RunBattleView(document, {
+    safeArea: { w: STAGE_BAND.w, h: STAGE_BAND.h },
+  });
   private readonly vp = new PlayerViewportTransform(PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
   /** R1：真实 UI 素材加载器（Capybara Go! 拆包，第三方素材本地 gitignore，失败降级过程式）。 */
   private readonly ui = new AdvUiStore();
@@ -462,7 +469,7 @@ export class AdvPage {
       this.drawEventDone(ctx); // 主体层＝宝箱
       this.drawResultBand(ctx); // 层3＝开奖结果
     } else if (phase === 'RESULT') {
-      this.drawStage(ctx, RESULT_STAGE); // 主体层＝战报定格帧
+      this.drawStage(ctx, RESULT_STAGE, 'cover'); // 主体层＝战报定格帧（等比铺满 + 裁切，不拉伸）
       this.drawResultBand(ctx); // 层3＝战报
     } else {
       this.drawStage(ctx, STAGE_BAND); // 主体层占满
@@ -629,7 +636,13 @@ export class AdvPage {
     return s;
   }
 
-  private drawStage(ctx: CanvasRenderingContext2D, band: Rect = STAGE_BAND): void {
+  /**
+   * FRUITS-ADVENTURE-BATTLE-VIEW-F1：`fill` 决定战斗画面的合成方式。
+   * - `'exact'`（默认）：目标带 = 战斗视图安全区（390×648）⇒ 1:1 等比贴满；
+   * - `'cover'`：目标带更矮（RESULT 的 390×468）⇒ 等比铺满后裁掉多余天空/地面，
+   *   车辆像素尺寸与战斗中一致，绝不压缩/拉伸。
+   */
+  private drawStage(ctx: CanvasRenderingContext2D, band: Rect = STAGE_BAND, fill: 'exact' | 'cover' = 'exact'): void {
     const b = band;
     // R4：背景只取「王座厅」场景（VS 竞技场不再出现在非战斗页）；缺失则降级为渐变
     if (!this.blitThroneRoom(ctx, b.x, b.y, b.w, b.h)) {
@@ -661,9 +674,13 @@ export class AdvPage {
     }
 
     if (this.battle) {
-      // 真实战斗（BATTLE 实时 / RESULT 冻结帧）一律贴正式战斗画面
+      // 真实战斗（BATTLE 实时 / RESULT 冻结帧）一律贴正式战斗画面。
+      // F1：舞台带 = 战斗视图的安全区（390×648）⇒ `blit` 是 1:1 等比贴图（X/Y 同一 scale）；
+      // RESULT 阶段主体层只有 390×468（更矮）⇒ `blitCover` 等比铺满后裁掉多余天空/地面带，
+      // 车辆像素尺寸与战斗中完全一致（不缩放、不拉伸）。
       this.battleView.render(this.battle);
-      this.battleView.blit(ctx, b);
+      if (fill === 'cover') this.battleView.blitCover(ctx, b, 0.5);
+      else this.battleView.blit(ctx, b);
       return;
     }
 
@@ -1418,7 +1435,69 @@ export class AdvPage {
       loadoutSource: this.loadoutSource,
       vehicleLabel: this.ctx2.vehicleLabel,
       overlayOpen: advOverlayOpen(this.state),
+      /** F1：战斗画面比例读数（只读；无战斗实例时为 null）。 */
+      battleFrame: this.battleFrameProbe(),
       archive: { best: this.archive.best, totals: this.archive.totals, runs: this.archive.runs.length },
+    };
+  }
+
+  /**
+   * FRUITS-ADVENTURE-BATTLE-VIEW-F1｜战斗画面的**比例读数**（只读探针，不参与任何玩法/渲染决策）。
+   *
+   * 直接读真实链路的三段数字：
+   *   `safe`   = `RunBattleView` 的安全区（= 竖屏冒险舞台带 390×648）；
+   *   `scaleX/scaleY` = 合成本次真实使用的两轴缩放系数（**必须相等**，否则就是单轴拉伸）；
+   *   `vehicleA` = 玩家车外廓「世界尺寸 → 屏幕像素尺寸」的宽高比对照（**必须相等**）；
+   *     `worldAspect` 与 `pxAspect` 相等 ⇒ 车辆/轮胎/角色比例未被破坏。
+   */
+  battleFrameProbe(): {
+    readonly phase: string;
+    readonly band: { readonly w: number; readonly h: number };
+    readonly safe: { readonly w: number; readonly h: number };
+    readonly viewport: { readonly w: number; readonly h: number };
+    readonly scaleX: number;
+    readonly scaleY: number;
+    readonly uniform: boolean;
+    readonly cameraScale: number;
+    readonly vehicleA: {
+      readonly worldW: number;
+      readonly worldH: number;
+      readonly worldAspect: number;
+      readonly pxW: number;
+      readonly pxH: number;
+      readonly pxAspect: number;
+    } | null;
+  } | null {
+    const rt = this.battle;
+    if (!rt) return null;
+    const band = this.state.phase === 'RESULT' ? RESULT_STAGE : STAGE_BAND;
+    const comp = this.battleView.compositeProbe(band, band === STAGE_BAND ? 'contain' : 'cover');
+    const cam = this.battleView.viewTransform();
+    const box = rt.vehicleBox('A');
+    const worldW = box.maxX - box.minX;
+    const worldH = box.maxY - box.minY;
+    const pxW = worldW * cam.scale * comp.scaleX;
+    const pxH = worldH * cam.scale * comp.scaleY;
+    return {
+      phase: this.state.phase,
+      band: comp.band,
+      safe: comp.safe,
+      viewport: this.battleView.viewportSize(),
+      scaleX: comp.scaleX,
+      scaleY: comp.scaleY,
+      uniform: Math.abs(comp.scaleX - comp.scaleY) <= 1e-6,
+      cameraScale: cam.scale,
+      vehicleA:
+        worldW > 0 && worldH > 0
+          ? {
+              worldW,
+              worldH,
+              worldAspect: worldW / worldH,
+              pxW,
+              pxH,
+              pxAspect: pxW / pxH,
+            }
+          : null,
     };
   }
 
