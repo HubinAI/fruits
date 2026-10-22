@@ -1,5 +1,5 @@
 /**
- * FRUITS-RANDOM-ADVENTURE-R1｜随机冒险宿主页面（DOM/Canvas 输入层，唯一）。
+ * FRUITS-ADVENTURE-FULL-PLAYABLE-R3｜随机冒险宿主页面（DOM/Canvas 输入层，唯一）。
  *
  * 复用正式链路（不重写第二套战斗）：
  *   - 战斗世界 = `RunBattleRuntime`（正式 Planck 物理）+ `RunBattleView`（正式 Renderer + 远摄相机）；
@@ -15,12 +15,17 @@
  *   - 每帧 `runtime.step(dt)` → `syncAdventureBattle` → 官方 result 出现 → `finishAdventureBattle`；
  *   - 终态那一刻 `battleView.stopBattleAudio()`（与 dispose 解耦，幂等）；
  *   - `dispose()` 释放监听 + 战斗运行时 + 战斗音频。
+ *
+ * R3 新增：
+ *   - 正式车库装配优先读取（由 advMain 经 `resolveRunPlayerLoadout` / 同域存档读入，传入 loadout）；
+ *   - 隔离测试档案（advArchive）：终态结算写入，不影响正式存档键；
+ *   - 统一竖屏冒险视觉：天数 / 阶段 / 主题事件插图 / 选择 / 开奖 / 战斗 / 阶段提示 / 最终结算。
  */
 import { PlayerViewportTransform } from '../../../platform/playerViewport';
 import { PORTRAIT_LOGICAL_H, PORTRAIT_LOGICAL_W } from '../constants';
 import { RunBattleRuntime } from '../runBattleRuntime';
 import { RunBattleView } from '../runBattleView';
-import { demoRunPlayerLoadout, type RunPlayerLoadout } from '../runPageScene';
+import { type RunPlayerLoadout } from '../runPageScene';
 import { runBuildOptionById } from '../runModifiers';
 import {
   generateAdventureScript,
@@ -33,8 +38,10 @@ import {
   advActionEnabled,
   advActionLabel,
   advCarriedPlayerHp,
+  advChoiceOpen,
   advContextFromLoadout,
   advCurrentNode,
+  advEventChoiceOpen,
   advFormatLog,
   advOverlayCards,
   advOverlayOpen,
@@ -47,6 +54,7 @@ import {
   type AdventureContext,
   type AdventureState,
 } from './advState';
+import { readArchive, recordRun, nextRunGoal, type AdvArchive, type AdvRunSummary } from './advArchive';
 
 interface Rect {
   readonly x: number;
@@ -82,13 +90,15 @@ const COLORS = {
 } as const;
 
 /**
- * 三种事件的独立主题（R2 视觉识别）：不同色 + 不同图标 ⇒ 手机尺寸下一眼可区分。
+ * 五种事件的独立主题（R3 视觉识别）：不同色 + 不同图标 ⇒ 手机尺寸下一眼可区分。
  * 仅演示用占位视觉（过程式 Canvas 绘制，零第三方素材），结构集中于此，便于后续替换确认素材。
  */
 const EVENT_THEME: Record<AdventureEventKind, { accent: string; tag: string }> = {
   crate: { accent: '#e8b23c', tag: '神秘货箱' },
   wreck: { accent: '#e0654e', tag: '废车搜刮' },
   rest: { accent: '#5bbf8a', tag: '临时修整' },
+  convoy: { accent: '#5aa9e0', tag: '流浪商队' },
+  altar: { accent: '#b07ce0', tag: '荒野祭坛' },
 };
 
 const STAGE_BAND: Rect = { x: 0, y: 96, w: PORTRAIT_LOGICAL_W, h: 470 };
@@ -117,6 +127,10 @@ function layoutOptionCards(count: number): Rect[] {
 
 export interface AdvPageOptions {
   readonly seed?: string;
+  /** 本局装载（由 advMain 经 resolveRunPlayerLoadout / 同域存档读入；可来自正式车库或演示）。 */
+  readonly loadout: RunPlayerLoadout;
+  /** 装备来源诊断（UI / 探针如实展示，绝不假装）。 */
+  readonly loadoutSource: string;
   readonly onExit?: () => void;
 }
 
@@ -129,9 +143,14 @@ export class AdvPage {
   private readonly vp = new PlayerViewportTransform(PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
 
   private readonly loadout: RunPlayerLoadout;
+  private readonly loadoutSource: string;
   private readonly ctx2: AdventureContext;
   private readonly script: AdventureScript;
   private state: AdventureState;
+
+  /** 隔离测试档案（终态结算写入；不影响正式存档）。 */
+  private archive: AdvArchive;
+  private archived = false;
 
   private rafHandle = 0;
   private lastFrameMs = 0;
@@ -139,12 +158,14 @@ export class AdvPage {
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
 
-  constructor(root: HTMLElement, opts: AdvPageOptions = {}) {
+  constructor(root: HTMLElement, opts: AdvPageOptions) {
     this.root = root;
-    this.loadout = demoRunPlayerLoadout();
+    this.loadout = opts.loadout;
+    this.loadoutSource = opts.loadoutSource;
     this.ctx2 = advContextFromLoadout(this.loadout);
     this.script = generateAdventureScript(opts.seed ?? randomSeedLabel());
     this.state = createAdventureState(this.ctx2, this.script);
+    this.archive = readArchive();
 
     this.stageWrap = document.createElement('div');
     this.canvas = document.createElement('canvas');
@@ -211,6 +232,13 @@ export class AdvPage {
 
   private apply(next: AdventureState): void {
     if (next === this.state) return;
+
+    // 终态 → 同种子重开（再来一局）：重置档案写入标记，使新一局终态可再次结算。
+    if ((this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED') && next.phase === 'IDLE') {
+      this.archived = false;
+    }
+
+    const wasTerminal = this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED';
     this.state = next;
 
     if (next.phase === 'BATTLE' && !this.battle) this.beginBattle();
@@ -219,8 +247,30 @@ export class AdvPage {
     if (next.phase === 'BATTLE') this.startLoop();
     else this.stopLoop();
 
+    // 首次进入终态 → 写入隔离测试档案（真实结算数据）。
+    if (!wasTerminal && (next.phase === 'COMPLETE' || next.phase === 'FAILED') && !this.archived) {
+      this.recordTerminal(next);
+    }
+
     if (next.phase === 'COMPLETE' || next.phase === 'FAILED') this.battleView.stopBattleAudio();
     this.render();
+  }
+
+  private recordTerminal(s: AdventureState): void {
+    const summary: AdvRunSummary = {
+      seedLabel: this.script.seedLabel,
+      won: s.phase === 'COMPLETE',
+      dayReached: s.day,
+      dayTotal: s.dayTotal,
+      battlesCompleted: s.battlesCompleted,
+      buffs: [...s.buffs],
+      finalHp: advCarriedPlayerHp(s, this.ctx2),
+      playerHpMax: this.ctx2.playerHpMax,
+      loadoutSource: this.loadoutSource,
+      ts: Date.now(),
+    };
+    this.archive = recordRun(summary);
+    this.archived = true;
   }
 
   /* ----------------------------------------------------------- 战斗 */
@@ -262,16 +312,18 @@ export class AdvPage {
       this.state = syncAdventureBattle(this.state, { playerHp: hp.a, enemyHp: hp.b, steps: rt.stepCount });
       const result = rt.result;
       if (result) {
-        this.state = finishAdventureBattle(this.state, {
-          winner: result.winner ?? null,
-          endReason: result.endReason ?? null,
-          playerHp: hp.a,
-          enemyHp: hp.b,
-          steps: rt.stepCount,
-        }, this.script);
+        // 经 apply() 收口：确保终态（COMPLETE/FAILED）触发 recordTerminal（写入隔离测试档案），
+        // 并正确 dispose 战斗、停循环、重绘（直接赋值会绕过档案写入，见 archive 隔离验收）。
         this.battleView.stopBattleAudio();
-        this.rafHandle = 0;
-        this.render();
+        this.apply(
+          finishAdventureBattle(this.state, {
+            winner: result.winner ?? null,
+            endReason: result.endReason ?? null,
+            playerHp: hp.a,
+            enemyHp: hp.b,
+            steps: rt.stepCount,
+          }, this.script),
+        );
         return;
       }
       this.render();
@@ -325,10 +377,17 @@ export class AdvPage {
     ctx.font = `600 18px ${FONT_STACK}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`随机冒险 · DAY ${this.state.day}/${this.state.dayTotal}`, 16, 30);
+    const stage = this.currentStage();
+    const stageLabel = stage > 0 ? ` · 第${stage}阶段` : '';
+    ctx.fillText(`随机冒险 · DAY ${this.state.day}/${this.state.dayTotal}${stageLabel}`, 16, 30);
+
+    // 装备来源（如实展示：正式车库 / URL / 演示）
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = `400 10px ${FONT_STACK}`;
+    ctx.fillText(`战车：${this.ctx2.vehicleLabel}（${this.loadoutSource}）`, 16, 46);
 
     // 耐久条
-    const hpBar: Rect = { x: 16, y: 50, w: 280, h: 16 };
+    const hpBar: Rect = { x: 16, y: 56, w: 280, h: 14 };
     const maxHp = this.ctx2.playerHpMax;
     const hp = advCarriedPlayerHp(this.state, this.ctx2);
     const pct = Math.max(0, Math.min(100, Math.round((hp / maxHp) * 100)));
@@ -339,7 +398,7 @@ export class AdvPage {
     ctx.fillStyle = COLORS.textBody;
     ctx.font = `500 11px ${FONT_STACK}`;
     ctx.textAlign = 'right';
-    ctx.fillText(`耐久 ${pct}%`, PORTRAIT_LOGICAL_W - 16, 58);
+    ctx.fillText(`耐久 ${pct}%`, PORTRAIT_LOGICAL_W - 16, 63);
 
     // buff 芯片
     let bx = 16;
@@ -358,6 +417,12 @@ export class AdvPage {
     }
   }
 
+  private currentStage(): number {
+    let s = 0;
+    for (const b of this.script.bannerPlan) if (b.day <= this.state.day) s = Math.max(s, b.stage);
+    return s;
+  }
+
   private drawStage(ctx: CanvasRenderingContext2D): void {
     const b = STAGE_BAND;
     // 天空渐变
@@ -373,6 +438,12 @@ export class AdvPage {
     ctx.fillStyle = COLORS.road;
     ctx.fillRect(b.x, groundY + 30, b.w, 14);
 
+    const node = advCurrentNode(this.state, this.script);
+    if (node.kind === 'BANNER') {
+      this.drawBanner(ctx, node.beat);
+      return;
+    }
+
     if (this.battle) {
       // 真实战斗（BATTLE 实时 / RESULT 冻结帧）一律贴正式战斗画面
       this.battleView.render(this.battle);
@@ -383,7 +454,6 @@ export class AdvPage {
     // 非战斗：居中叙事
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const node = advCurrentNode(this.state, this.script);
     if (this.state.phase === 'EVENT' && (node.kind === 'BATTLE' || node.kind === 'FINAL')) {
       ctx.fillStyle = COLORS.eventAccent;
       ctx.font = `600 20px ${FONT_STACK}`;
@@ -399,8 +469,40 @@ export class AdvPage {
   }
 
   private battleEnemyLabel(id: string): string {
-    const map: Record<string, string> = { ProtoRusher: '原型冲撞者', Chaser: '追击者', RangedTurret: '远程炮塔车' };
+    const map: Record<string, string> = {
+      ProtoRusher: '原型冲撞者',
+      Chaser: '追击者',
+      RangedTurret: '远程炮塔车',
+      ExtendedStandoffRod: '控距推杆车',
+      ExtendedBurnSaw: '喷火锯车',
+      ExtendedHeavyContact: '重锤装甲车',
+    };
     return map[id] ?? '对手';
+  }
+
+  private drawBanner(ctx: CanvasRenderingContext2D, beat: readonly string[]): void {
+    const b = STAGE_BAND;
+    ctx.fillStyle = 'rgba(8,12,20,0.9)';
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.strokeStyle = '#7c8db0';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(b.x + 20, b.y + 90, b.w - 40, b.h - 180);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#9fb3d6';
+    ctx.font = `600 22px ${FONT_STACK}`;
+    ctx.fillText('— 阶段提示 —', b.x + b.w / 2, b.y + 140);
+    ctx.fillStyle = COLORS.textBody;
+    ctx.font = `400 14px ${FONT_STACK}`;
+    let y = b.y + 200;
+    for (const line of beat) {
+      this.wrapText(ctx, line, b.x + b.w / 2, y, b.w - 80, 22);
+      y += 44;
+    }
+    ctx.fillStyle = '#7fd6a0';
+    ctx.font = `500 13px ${FONT_STACK}`;
+    ctx.fillText('▶ 按「继续」进入下一段路', b.x + b.w / 2, b.y + b.h - 60);
   }
 
   private drawLog(ctx: CanvasRenderingContext2D): void {
@@ -444,7 +546,7 @@ export class AdvPage {
     else this.drawBuildChoiceOverlay(ctx);
   }
 
-  /** 事件选择浮层（R2：主题色 + 图标 + 标题 + 描述 + 选项，三种事件一眼可区分）。 */
+  /** 事件选择浮层（R3：5 种主题色 + 图标 + 标题 + 描述 + 选项，一眼可区分）。 */
   private drawEventChoiceOverlay(ctx: CanvasRenderingContext2D, node: AdventureEventNode): void {
     const theme = EVENT_THEME[node.eventKind];
     const b = STAGE_BAND;
@@ -474,6 +576,7 @@ export class AdvPage {
 
     const cards = advOverlayCards(this.state, this.script, this.ctx2);
     const rects = layoutOptionCards(cards.length);
+    const fullHp = advCarriedPlayerHp(this.state, this.ctx2) >= this.ctx2.playerHpMax;
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];
       ctx.fillStyle = COLORS.cardBg;
@@ -488,8 +591,17 @@ export class AdvPage {
       ctx.fillText(cards[i].label, r.x + 16, r.y + 34);
       ctx.fillStyle = COLORS.textDim;
       ctx.font = `400 12px ${FONT_STACK}`;
-      ctx.fillText(cards[i].note, r.x + 16, r.y + 64);
+      // 满耐久时，提示「维修类」选项收益有限（避免无效奖励观感，规则可见）。
+      const note = this.optionNoteWithState(node, cards[i].id, fullHp);
+      ctx.fillText(note, r.x + 16, r.y + 64);
     }
+  }
+
+  private optionNoteWithState(node: AdventureEventNode, optionId: string, fullHp: boolean): string {
+    const base = node.options.find((o) => o.id === optionId)?.note ?? '';
+    const eff = node.outcomes[optionId];
+    if (fullHp && eff && (eff.kind === 'heal' || eff.kind === 'trade')) return `${base}（耐久已满，收益有限）`;
+    return base;
   }
 
   /** 建造选择浮层（中性主题，强化在下一场战斗真实生效）。 */
@@ -557,7 +669,7 @@ export class AdvPage {
     ctx.fillText('▶ 按「继续」进入下一天', b.x + b.w / 2, b.y + b.h - 38);
   }
 
-  /** 过程式事件图标（货箱 / 废车 / 修整 三种形状，零第三方素材）。 */
+  /** 过程式事件图标（5 种形状，零第三方素材）。 */
   private drawEventIcon(ctx: CanvasRenderingContext2D, kind: AdventureEventKind, cx: number, cy: number, s: number, color: string): void {
     ctx.save();
     ctx.strokeStyle = color;
@@ -588,8 +700,7 @@ export class AdvPage {
       ctx.stroke();
       ctx.beginPath(); ctx.arc(x + w * 0.26, y + h * 0.92, h * 0.24, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(x + w * 0.74, y + h * 0.92, h * 0.24, 0, Math.PI * 2); ctx.fill();
-    } else {
-      // rest：营地帐篷
+    } else if (kind === 'rest') {
       const w = s * 1.0, h = s * 0.82, x = cx - w / 2, y = cy - h / 2 + 6;
       ctx.beginPath();
       ctx.moveTo(cx, y);
@@ -603,6 +714,26 @@ export class AdvPage {
       ctx.lineTo(cx + w * 0.2, y + h);
       ctx.closePath();
       ctx.stroke();
+    } else if (kind === 'convoy') {
+      // 商队：两辆小车 + 火堆
+      const w = s * 0.8, h = s * 0.4, x = cx - w / 2, y = cy - h / 2 + 6;
+      ctx.strokeRect(x, y, w, h);
+      ctx.beginPath(); ctx.arc(x + w * 0.22, y + h, h * 0.28, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + w * 0.78, y + h, h * 0.28, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx, y - h * 0.9); ctx.lineTo(cx - 5, y - h * 0.2); ctx.lineTo(cx + 5, y - h * 0.2);
+      ctx.closePath(); ctx.fill();
+    } else {
+      // altar：祭坛 + 发光核芯
+      const w = s * 0.9, h = s * 0.6, x = cx - w / 2, y = cy - h / 2 + 6;
+      ctx.beginPath();
+      ctx.moveTo(x, y + h); ctx.lineTo(x + w * 0.18, y); ctx.lineTo(x + w * 0.82, y);
+      ctx.lineTo(x + w, y + h); ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx, y - h * 0.7); ctx.lineTo(cx + h * 0.34, y); ctx.lineTo(cx, y + h * 0.34);
+      ctx.lineTo(cx - h * 0.34, y); ctx.closePath();
+      ctx.fill();
     }
     ctx.restore();
   }
@@ -627,17 +758,75 @@ export class AdvPage {
   }
 
   private drawTerminal(ctx: CanvasRenderingContext2D): void {
-    ctx.fillStyle = 'rgba(6,9,14,0.9)';
+    const won = this.state.phase === 'COMPLETE';
+    ctx.fillStyle = 'rgba(6,9,14,0.92)';
     ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
-    ctx.fillStyle = this.state.phase === 'COMPLETE' ? '#7fd6a0' : COLORS.hpLow;
+    ctx.fillStyle = won ? '#7fd6a0' : COLORS.hpLow;
     ctx.font = `700 26px ${FONT_STACK}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(this.state.phase === 'COMPLETE' ? '冒险完成' : '冒险失败', PORTRAIT_LOGICAL_W / 2, 300);
+    ctx.fillText(won ? '冒险完成' : '冒险失败', PORTRAIT_LOGICAL_W / 2, 150);
+
+    const hp = advCarriedPlayerHp(this.state, this.ctx2);
+    const pct = Math.max(0, Math.min(100, Math.round((hp / this.ctx2.playerHpMax) * 100)));
+    const lines = [
+      `撑到第 ${this.state.day} / ${this.state.dayTotal} 天`,
+      `击破 ${this.state.battlesCompleted} 场 · 强化 ${this.state.buffs.length} 项`,
+      `终点耐久 ${pct}%`,
+    ];
     ctx.fillStyle = COLORS.textBody;
     ctx.font = `400 14px ${FONT_STACK}`;
-    const sum = `战斗 ${this.state.battlesCompleted} 场 · 强化 ${this.state.buffs.length} 项 · 种子 ${this.script.seedLabel}`;
-    ctx.fillText(sum, PORTRAIT_LOGICAL_W / 2, 340);
+    let y = 200;
+    for (const t of lines) {
+      ctx.fillText(t, PORTRAIT_LOGICAL_W / 2, y);
+      y += 26;
+    }
+
+    // 最终 Build
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = `500 12px ${FONT_STACK}`;
+    ctx.fillText('本局 Build', PORTRAIT_LOGICAL_W / 2, y + 6);
+    y += 30;
+    const chips = this.state.buffs.map((b) => runBuildOptionById(b)?.label ?? b);
+    ctx.font = `500 12px ${FONT_STACK}`;
+    if (chips.length === 0) {
+      ctx.fillStyle = COLORS.textDim;
+      ctx.fillText('（无）', PORTRAIT_LOGICAL_W / 2, y);
+      y += 22;
+    } else {
+      let bx = PORTRAIT_LOGICAL_W / 2 - Math.min(chips.length, 3) * 60;
+      for (let i = 0; i < chips.length; i++) {
+        const label = chips[i];
+        const tw = ctx.measureText(label).width + 14;
+        ctx.fillStyle = '#e6edf8';
+        ctx.fillRect(bx, y, tw, 18);
+        ctx.fillStyle = '#1b2432';
+        ctx.fillText(label, bx + 7, y + 9);
+        bx += tw + 8;
+        if (i % 3 === 2) {
+          bx = PORTRAIT_LOGICAL_W / 2 - 60;
+          y += 24;
+        }
+      }
+      y += 28;
+    }
+
+    // 隔离测试档案（真实数据，不影响正式存档）
+    ctx.fillStyle = '#9fb3d6';
+    ctx.font = `500 13px ${FONT_STACK}`;
+    const best = this.archive.best;
+    const bestLine = best
+      ? `最佳：${best.battlesCompleted} 胜${best.won ? '（曾通关）' : ''} · 累计 ${this.archive.totals.runs} 局 / ${this.archive.totals.wins} 胜`
+      : '测试档案：本局为首胜记录';
+    ctx.fillText(bestLine, PORTRAIT_LOGICAL_W / 2, y + 6);
+    y += 28;
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = `400 12px ${FONT_STACK}`;
+    this.wrapText(ctx, nextRunGoal(this.archive), PORTRAIT_LOGICAL_W / 2, y, PORTRAIT_LOGICAL_W - 60, 18);
+
+    ctx.fillStyle = '#7fd6a0';
+    ctx.font = `500 13px ${FONT_STACK}`;
+    ctx.fillText('▶ 按「再来一局」以同种子重开', PORTRAIT_LOGICAL_W / 2, PORTRAIT_LOGICAL_H - 130);
   }
 
   /* ----------------------------------------------------------- 探针 */
@@ -655,15 +844,20 @@ export class AdvPage {
       seed: this.script.seed,
       seedLabel: this.script.seedLabel,
       eventPlan: this.script.eventPlan,
+      bannerPlan: this.script.bannerPlan,
+      battlePlan: this.script.battlePlan,
+      loadoutSource: this.loadoutSource,
+      vehicleLabel: this.ctx2.vehicleLabel,
       overlayOpen: advOverlayOpen(this.state),
+      archive: { best: this.archive.best, totals: this.archive.totals, runs: this.archive.runs.length },
     };
   }
 
   /**
    * 调试自动步进（仅供 E2E / 真机计时用；不参与任何玩法规则）：
-   *   - 浮层打开 → 选第一张卡；
-   * - 主动作可用 → 按一次主动作；
-   * - BATTLE / 战报冻结期 → 不操作（真实物理战斗由 requestAnimationFrame 自动推进）。
+   *   - 浮层打开 → 选第一张卡（等价真实点击首张卡）；
+   *   - 主动作可用 → 按一次主动作（等价真实点击主按钮）；
+   *   - BATTLE / 战报冻结期 → 不操作（真实物理战斗由 requestAnimationFrame 自动推进）。
    * 返回当前 phase，便于调用方记录耗时。
    */
   debugStep(): string {
@@ -678,5 +872,46 @@ export class AdvPage {
       this.apply(pressAdventureAction(this.state, this.ctx2, this.script));
     }
     return this.state.phase;
+  }
+
+  /** 选第 i 张浮层卡（等价真实点击该卡）；无浮层时退化为主动作。仅供 E2E / 智能驱动用。 */
+  debugStepOption(i: number): string {
+    if (advOverlayOpen(this.state)) {
+      const cards = advOverlayCards(this.state, this.script, this.ctx2);
+      if (i >= 0 && i < cards.length) {
+        this.apply(chooseAdventureOption(this.state, cards[i].id, this.ctx2, this.script));
+        return this.state.phase;
+      }
+    }
+    if (advActionEnabled(this.state)) {
+      this.apply(pressAdventureAction(this.state, this.ctx2, this.script));
+    }
+    return this.state.phase;
+  }
+
+  /** 只读诊断：当前浮层各选项的因果种类（event/buff/build/none），供智能驱动择优。
+   *  buff/trade 额外暴露 buildId：驱动可识别「强化已拥有」的 trade（付耐久却无收益），避免无谓损耗。 */
+  diagnose(): unknown {
+    const node = advCurrentNode(this.state, this.script);
+    if (advEventChoiceOpen(this.state) && node.kind === 'EVENT') {
+      return {
+        kind: 'event',
+        options: node.options.map((o) => {
+          const eff = node.outcomes[o.id];
+          return {
+            id: o.id,
+            effect: eff?.kind ?? 'none',
+            buildId: eff && (eff.kind === 'buff' || eff.kind === 'trade') ? eff.buildId : null,
+          };
+        }),
+      };
+    }
+    if (advChoiceOpen(this.state) && node.kind === 'BUILD') {
+      return {
+        kind: 'build',
+        options: advOverlayCards(this.state, this.script, this.ctx2).map((c) => ({ id: c.id, effect: 'build' })),
+      };
+    }
+    return { kind: 'none', options: [] };
   }
 }

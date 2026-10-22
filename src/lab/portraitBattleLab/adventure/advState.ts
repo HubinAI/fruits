@@ -85,15 +85,31 @@ export interface AdventureContext {
   readonly baseWeaponDefId: string;
 }
 
-/** 真实战斗节点使用的三个既有正式 Encounter 的展示名（仅展示用；战斗本身由 RunBattleRuntime 解析）。 */
+/** 真实战斗节点使用的既有正式 Encounter 的展示名（仅展示用；战斗本身由 RunBattleRuntime 解析）。 */
 export const ADV_ENEMY_LABELS: Readonly<Record<string, string>> = {
   ProtoRusher: '原型冲撞者',
   Chaser: '追击者',
   RangedTurret: '远程炮塔车',
+  ExtendedStandoffRod: '控距推杆车',
+  ExtendedBurnSaw: '喷火锯车',
+  ExtendedHeavyContact: '重锤装甲车',
 };
 
 const ADV_LOG_MAX = 240;
 const ADV_HP_FLOOR_FRACTION = 0.1;
+/** 阶段整备（BANNER 节点）恢复比例：真实物理下 7 战耐久经济偏紧，阶段节点补给使整局可通关且不 trivial。 */
+const ADV_WAYPOINT_HEAL_FRACTION = 0.5;
+
+/**
+ * 冒险 BUILD 候选**策展排除项**（仅在冒险层过滤，不改 runModifiers / 任何物理与数值）：
+ *   `fastReload`（Cannon cooldownMs 1000→650）与 `twinCannon`（burstRounds 1→2）在真实 Planck
+ *   物理下叠加会发生 DPS 崩塌的涌现互斥——headless 隔离复现：6 强化（含 twinCannon、无
+ *   fastReload）打 Chaser 稳赢剩 645 耐久；同样 6 强化把 rateUp 换成 fastReload 后
+ *   1100→0 团灭（敌剩 57），且与 rateUp 是否在场逐帧一致。冒险整局必经 FINAL，
+ *   若玩家沿该路径装配会走进**必然不可通关**的死局，故冒险池不发放该项
+ *   （正式 Run 的车库装配不受影响，本表只作用于本原型冒险的候选浮层）。
+ */
+const ADV_EXCLUDED_BUILD_IDS: readonly RunBuildId[] = ['fastReload'];
 
 export function advContextFromLoadout(loadout: RunPlayerLoadout = demoRunPlayerLoadout()): AdventureContext {
   const ctx = runPageContext(loadout);
@@ -148,10 +164,29 @@ function presentNode(
 ): AdventureState {
   const node = script.nodes[nodeId];
   if (!node) return s;
+  // 建造节点候选池已空（所有可见强化均已拥有）：诚实跳过，绝不进入「空浮层」——
+  // 否则 UI / 调试驱动（debugStepOption / 真实点击）因无卡片可点而永久卡在 CHOICE（R3 浏览器 E2E 暴露的真实死锁）。
+  // ⚠️ 终态 FINAL 恒为末节点，BUILD 节点必有非空 next，故跳过不会落入无后继的退化分支。
+  if (node.kind === 'BUILD' && advChoicePool(s, node, ctx).length === 0) {
+    if (node.next) return presentNode(s, node.next, script, ctx);
+  }
   const entries: { kind: AdventureLogKind; text: string }[] = [];
   if (node.day !== s.day) entries.push({ kind: 'day', text: `DAY ${node.day}` });
   for (const line of node.beat) entries.push({ kind: 'travel', text: subst(line, ctx, node) });
-  return goPhase(next(s, { nodeId, day: node.day, log: pushLogs(s.log, entries) }), phaseForNode(node.kind), {});
+  // 阶段整备（BANNER）：进入阶段节点时恢复一段耐久（真实补给，规则可见），使 7 战耐久经济可通关。
+  let patch: Partial<AdventureState> = {};
+  if (node.kind === 'BANNER') {
+    const maxHp = ctx.playerHpMax;
+    const current = s.carriedHp ?? maxHp;
+    const heal = Math.round(maxHp * ADV_WAYPOINT_HEAL_FRACTION);
+    const after = Math.min(maxHp, current + heal);
+    const gained = after - current;
+    if (gained > 0) {
+      patch = { carriedHp: after };
+      entries.push({ kind: 'durability', text: `阶段整备：恢复 ${gained} 点耐久。` });
+    }
+  }
+  return goPhase(next(s, { nodeId, day: node.day, log: pushLogs(s.log, entries), ...patch }), phaseForNode(node.kind), {});
 }
 
 /* --------------------------------------------------------------- 查询 */
@@ -267,7 +302,7 @@ export function advChoicePool(
       return runGenericChoiceDefs(s.buffs, ctx.baseWeaponDefId);
   }
   return defs
-    .filter((d) => !s.buffs.includes(d.id as RunBuildId))
+    .filter((d) => !s.buffs.includes(d.id as RunBuildId) && !ADV_EXCLUDED_BUILD_IDS.includes(d.id as RunBuildId))
     .map((d) => ({ id: d.id as RunBuildId, label: d.label, note: d.note }));
 }
 
@@ -336,6 +371,12 @@ export function pressAdventureAction(
       return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'EVENT_CHOICE', {});
     }
     if (node.kind === 'BUILD') {
+      // 候选池已空（所有可见强化已拥有）：诚实跳过，不进入空浮层、不死锁。
+      const pool = advChoicePool(s, node, ctx);
+      if (pool.length === 0) {
+        if (node.next) return presentNode(next(s, { actionCount: s.actionCount + 1 }), node.next, script, ctx);
+        return next(s, { actionCount: s.actionCount + 1 });
+      }
       return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'CHOICE', {});
     }
     // START
@@ -418,6 +459,27 @@ function applyEffect(
       resultText: `你获得了临时强化：${label}（已生效，下一场战斗计入）。`,
     };
   }
+  if (effect.kind === 'trade') {
+    // 商队交易：用一段耐久换一件临时强化（真实 HP ↔ Build 权衡，规则可见，非隐藏）。
+    const dmg = Math.round(maxHp * effect.damageFraction);
+    const raw = current - dmg;
+    const clamped = raw < floor;
+    const after = Math.max(floor, raw);
+    const lost = current - after;
+    const mod = runBuildOptionById(effect.buildId);
+    const label = mod?.label ?? effect.buildId;
+    const tail = clamped ? `（触及最低保留 ${floor}）` : '';
+    if (s.buffs.includes(effect.buildId)) {
+      return {
+        state: next(s, { carriedHp: after }),
+        resultText: `你用 ${lost} 点耐久换了「${label}」，但已拥有，本次不重复计入（仅扣耐久）。${tail}`,
+      };
+    }
+    return {
+      state: next(s, { carriedHp: after, buffs: [...s.buffs, effect.buildId] }),
+      resultText: `你用 ${lost} 点耐久换来了临时强化：${label}。${tail}`,
+    };
+  }
   return { state: s, resultText: '什么也没发生。' };
 }
 
@@ -450,6 +512,11 @@ export function chooseAdventureOption(
     const node = advCurrentNode(s, script);
     if (node.kind !== 'BUILD') return s;
     const pool = advChoicePool(s, node, ctx);
+    // 防御性：候选池为空（所有可见强化已拥有）→ 诚实跳过，不重复发放也不死锁。
+    if (pool.length === 0) {
+      if (node.next) return presentNode(s, node.next, script, ctx);
+      return s;
+    }
     const def = pool.find((d) => d.id === optionId);
     if (!def) return s; // 不在候选池 → 不结算
     const mod = runBuildOptionById(optionId);
