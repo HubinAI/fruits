@@ -183,6 +183,54 @@ export function planBattleBlit(
 }
 
 /**
+ * FRUITS-ADVENTURE-CAMERA-STABILITY-F6｜冒险合成镜头**一帧解算结果**（只读读数）。
+ *
+ * `zoom` = 本帧真正用于合成的倍数（距离约束目标 → 时间平滑 → 主体可容纳上限，三步的结果）；
+ * `targetZoom` = 距离约束给出的目标（未平滑），用于把「平滑滞后」和「目标本身在动」分开看。
+ */
+export interface AdvCameraFrame {
+  /** 本帧实际合成倍数（与 `blitAdventureCamera` 的裁切矩形严格自洽）。 */
+  readonly zoom: number;
+  /** 距离约束目标（未平滑；`min(fit, maxZoom)`，fit<1 时为 1）。 */
+  readonly targetZoom: number;
+  /** 本帧实际裁切矩形（安全区逻辑坐标）。 */
+  readonly cropSafe: RunRect;
+  /** 关键主体矩形（双车并集 + padding，安全区坐标）。 */
+  readonly subjectSafe: RunRect;
+  /** 地面线在安全区坐标里的 y（纵向锚点；由正式相机 transform 与 `rt.groundY` 只读换算）。 */
+  readonly groundSafeY: number;
+  /** 双车世界中心间距。 */
+  readonly gapWorld: number;
+}
+
+/** 数值区间钳制（`lo > hi` 时返回 `lo`，避免 NaN / 反向区间）。 */
+function advClamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+/** F6｜单帧 dt 上限（ms）：切后台 / 掉帧回来时最多只推进 50ms 的镜头平滑。 */
+const ADV_CAMERA_DT_MAX_MS = 50;
+
+/**
+ * F6｜**一阶时间平滑**（指数趋近 + 速率上限），帧率无关。
+ *
+ * 为什么两件套都要：
+ *  - 指数趋近（时间常数 `tauMs`）⇒ 目标突变时输出是**连续斜坡**而不是瞬间跳变；
+ *  - 速率上限（`ratePerSec`）⇒ 即便某帧 dt 很大或目标一次变很多，单帧位移也被钳住；
+ *  - 死区 `eps` ⇒ 目标不再变化后**精确落到目标**，不留下永久亚像素偏移（避免长期漂移）。
+ * ⚠️ `dtMs` 被钳到 `[0, ADV_DT_MAX_MS]`：切后台/掉帧回来不会把镜头一次性甩到目标。
+ */
+function advEase(cur: number, target: number, dtMs: number, tauMs: number, ratePerSec: number, eps: number): number {
+  const d = target - cur;
+  if (Math.abs(d) <= eps) return target;
+  const t = Math.max(0, Math.min(ADV_CAMERA_DT_MAX_MS, dtMs)) / 1000;
+  if (t <= 0) return cur;
+  const step = d * (1 - Math.exp((-t * 1000) / tauMs));
+  const cap = ratePerSec * t;
+  return cur + (Math.abs(step) > cap ? Math.sign(step) * cap : step);
+}
+
+/**
  * 战斗视图宿主。
  *
  * 生命周期：`new RunBattleView()` → `loadAssets()`（异步）→ 每次要显示时 `render(runtime)` +
@@ -214,6 +262,17 @@ export class RunBattleView {
   private lastPhase: string | null = null;
   /** 结束帧是否已经画好（true = 之后复用该帧，战场与取景一起冻结）。 */
   private frozenFrame = false;
+  /* ---- F6：冒险合成镜头的时间平滑状态（只有 2 个标量 + 2 个只读快照，不是状态机） ---- */
+  /** 上一帧实际使用的合成倍数（平滑状态）。 */
+  private advZoom = 1;
+  /** 上一帧裁切窗的水平中心（安全区坐标；平滑状态）。 */
+  private advCenterX = 0;
+  /** 平滑状态是否已初始化（false ⇒ 本帧直接落到目标，避免跨场景滑动）。 */
+  private advReady = false;
+  /** 本帧解算结果（探针 / 绘制共用同一份，保证「读数 == 画面」）。 */
+  private advFrame: AdvCameraFrame | null = null;
+  /** 最后一次战斗帧的取景（RESULT 沿用；换战斗实例时清空）。 */
+  private advHold: AdvCameraFrame | null = null;
   /** 资源每次加载完成 → 宿主重绘（构造早于宿主字段就绪，故由宿主动态注册）。 */
   private onAssetReadyCb: (() => void) | null = null;
   private ready = 0;
@@ -319,9 +378,10 @@ export class RunBattleView {
     const resized = this.applySize();
     if (this.boundTo !== runtime) {
       this.boundTo = runtime;
-      // 换战斗实例：重置相机接线状态（阶段记忆 / 冻结帧 / 表现绑定）
+      // 换战斗实例：重置相机接线状态（阶段记忆 / 冻结帧 / 表现绑定 / F6 合成镜头平滑）
       this.lastPhase = null;
       this.frozenFrame = false;
+      this.resetAdventureCamera();
       this.presentation.bind({ onEvent: (cb) => runtime.orchestrator.onCombatEvent(cb) });
     }
     const live = runtime.result === null;
@@ -455,32 +515,57 @@ export class RunBattleView {
   }
 
   /**
-   * FRUITS-ADVENTURE-CAMERA-F4｜冒险专用**自适应镜头**的取景参数（纯合成，只读推理）。
+   * FRUITS-ADVENTURE-CAMERA-F4 → **F6 稳定化**｜冒险专用自适应镜头的取景参数（纯合成，只读推理）。
    *
-   * 思路（与 Queue 必改 2/3 对应，且刻意保持「最简单距离约束」，**不引入状态机**）：
+   * F4 的距离约束（保留）：
    *   ① 取「双车世界包围盒并集 + 外扩 padding」作为关键主体矩形，映射到安全区逻辑坐标；
    *   ② 求能刚好框住该主体的放大倍数 `fit = min(safe.w/subjW, safe.h/subjH)`；
-   *   ③ 实际 zoom = clamp(fit, 1, maxZoom)，再过一道**最小增益门限**：
-   *        - 交战/接近（双车近）→ fit 很大 → 取上限 maxZoom（默认 1.6）⇒ 主体明显放大；
-   *        - 远距分离 / 冲锋拉远 / 击飞（双车远）→ fit 变小 → zoom 同步下降；
-   *        - 若 fit < 1（主体宽过安全区，理论上正式相机已框住双车）⇒ zoom 封底为 1
-   *          ⇒ 退化为原取景（不裁切任何关键主体）；
-   *        - 若 zoom < ADV_CAMERA_MIN_ZOOM(1.1)（增益太小，正式相机已把双车框得够大）
-   *          ⇒ 同样**恢复原取景**（不做无意义微裁）。
-   *   ④ 裁切矩形以主体中心为锚、钳制在安全区内 → 双车与命中动作恒在框内（验收②）。
+   *   ③ zoom 目标 = `clamp(fit, 1, maxZoom)` ⇒ 交战/接近自动放大到上限，远距/击飞自动收敛，
+   *      fit<1（主体比安全区还宽，正式相机已经把双车框满）⇒ 封底 1 = 原取景；
+   *   ④ 裁切矩形恒包含双车（`zoom ≤ fit` ⇒ 主体宽度 ≤ 裁切宽度，且主体框本身已含 padding）。
+   *
+   * F6 修正（连续帧诊断 P0 的三条硬伤）：
+   *   ① **缩放加时间平滑**（`advEase`）：P0 实测旧实现单帧 `z 1.000 → 1.110`（16ms）——那是
+   *      「增益门限 1.1」把连续映射切成两段造成的**阶跃**。F6 去掉这道阈值，改为
+   *      「连续目标 + 一阶平滑 + 速率上限」⇒ 同一处穿越变成 ~0.13s 的斜坡（单帧 ≤ 3%）；
+   *   ② **纵向只认地面线**（`groundSafeY` 由正式相机 transform 与 `rt.groundY` 只读换算）：
+   *      `cy = groundSafeY × (1 − 1/zoom)` ⇒ 地面线在屏幕上的相对高度**与 zoom 无关地固定**，
+   *      战车上下颠簸 / 被击飞时取景窗纹丝不动（P0 实测旧实现单帧 cy 跳变 64–68px）；
+   *      只有主体真要出框时才让位（`ch ≥ subj.h` 时的可见性兜底），不做逐帧 Y 跟随；
+   *   ③ **横向加时间平滑**（同样 `advEase`），并保留「裁切矩形恒包含双车」的硬约束
+   *      ⇒ 平移有轻微跟随延迟（镜头惯性），但任何一帧都不会把车切出框。
    *
    * ⚠️ 纯合成：不写 `renderer.*`、不改 `reframe` / `applyBattleFollow` / 世界坐标 / 物理 /
    *    碰撞 / 镜头规则；画出来的仍是正式相机渲染的同一批像素。
    */
   private static readonly ADV_SUBJECT_PAD = 0.06; // 主体外扩比例（每侧），给命中 FX 留呼吸位
   private static readonly ADV_SUBJECT_PAD_MIN = 8; // 最小外扩（逻辑 px）；vehicleWorldBox 已含全部可见部件
-  private static readonly ADV_CAMERA_MIN_ZOOM = 1.1; // 最小增益门限：低于它恢复原取景（避免无意义微裁）
+  /** F6｜缩放平滑时间常数（ms）：目标突变时 ~0.13s 走完 63%。 */
+  private static readonly ADV_ZOOM_TAU_MS = 130;
+  /** F6｜横向平移平滑时间常数（ms）：略慢于缩放，接近真实镜头的跟随惯性。 */
+  private static readonly ADV_PAN_TAU_MS = 170;
+  /** F6｜缩放速率上限（单位/秒）：兜住大 dt / 目标一次变很多时的单帧位移。 */
+  private static readonly ADV_ZOOM_RATE = 2.2;
+  /** F6｜横向平移速率上限（安全区 px/秒）：只在极端位移时才夹到，正常跟随由时间常数主导。 */
+  private static readonly ADV_PAN_RATE = 1500;
+  /** F6｜缩放死区：进入死区即精确落到目标，避免永久残留亚像素偏移。 */
+  private static readonly ADV_ZOOM_EPS = 0.0015;
+  /** F6｜平移死区（安全区 px）。 */
+  private static readonly ADV_PAN_EPS = 0.3;
+  /** F6｜zoom 小于它时直接走原取景（`blit`），保证「无放大时的像素与历史完全一致」。 */
+  private static readonly ADV_BLIT_EPS = 1.002;
 
   /**
-   * 把「玩家车 + 敌车」的世界包围盒并集，外加 padding，映射到**安全区逻辑坐标**
-   * （原点 = 安全区左上，等于离屏画布左上 − 正式 inset）。返回 null 表示无战斗实体。
+   * 把「玩家车 + 敌车」的世界包围盒并集（`core`）与「并集 + padding」（`padded`）同时映射到
+   * **安全区逻辑坐标**（原点 = 安全区左上，等于离屏画布左上 − 正式 inset）。返回 null = 无战斗实体。
+   *
+   * ⚠️ F6 为什么需要两个矩形：
+   *   - `padded` 决定**放大倍数**（F4 既有口径：给命中 FX 与时间平滑都留呼吸位）；
+   *   - `core`（不含 padding）决定**「车不被切掉」的硬约束边界**。
+   *     两者之差就是横向平滑可以使用的**合法滞后余量**（6% + 8px）——
+   *     没有这块余量时，`zoom == fit` 会把「裁切窗 == 主体框」钉死，横向就没有任何平滑空间了。
    */
-  subjectSafeRect(rt: RunBattleRuntime): RunRect | null {
+  private subjectRects(rt: RunBattleRuntime): { readonly core: RunRect; readonly padded: RunRect } | null {
     const a = rt.vehicleBox('A');
     const b = rt.vehicleBox('B');
     if (!a || !b) return null;
@@ -503,69 +588,204 @@ export class RunBattleView {
     if (!Number.isFinite(minX) || maxX - minX <= 0 || maxY - minY <= 0) return null;
     const padX = (maxX - minX) * RunBattleView.ADV_SUBJECT_PAD + RunBattleView.ADV_SUBJECT_PAD_MIN;
     const padY = (maxY - minY) * RunBattleView.ADV_SUBJECT_PAD + RunBattleView.ADV_SUBJECT_PAD_MIN;
-    return { x: minX - padX, y: minY - padY, w: maxX - minX + padX * 2, h: maxY - minY + padY * 2 };
+    return {
+      core: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+      padded: { x: minX - padX, y: minY - padY, w: maxX - minX + padX * 2, h: maxY - minY + padY * 2 },
+    };
   }
 
-  /** F4：给定主体矩形，返回实际合成放大倍数（距离约束 + 最小增益门限 + 封顶 maxZoom）。 */
+  /**
+   * 把「玩家车 + 敌车」的世界包围盒并集，外加 padding，映射到**安全区逻辑坐标**。
+   * 返回 null 表示无战斗实体。（F4 公开口径；F6 内部同时需要 `core`，见 `subjectRects`。）
+   */
+  subjectSafeRect(rt: RunBattleRuntime): RunRect | null {
+    return this.subjectRects(rt)?.padded ?? null;
+  }
+
+  /**
+   * F4/F6：距离约束的**目标**放大倍数（纯函数，无状态、不含时间平滑）。
+   *
+   * `fit = min(safe.w/subjW, safe.h/subjH)`，再 `clamp(fit, 1, maxZoom)`。
+   * ⚠️ F6 起这里**不再有 1.1 最小增益门限**：那道阈值是「单帧 1.000→1.110」阶跃的唯一来源；
+   *    连续映射 + 下游时间平滑才是「不跳变」的正确做法（微裁在该带内是渐进出现的，不刺眼）。
+   */
   advCompositeZoom(rt: RunBattleRuntime, maxZoom = 1.6): number {
     const subj = this.subjectSafeRect(rt);
     if (!subj) return 1;
     const safe = this.safeAreaSize();
     const fit = Math.min(safe.w / subj.w, safe.h / subj.h);
-    const z = Math.min(maxZoom, fit);
-    // fit<1 ⇒ 退化为原取景（不裁切）；增益不足 ADV_CAMERA_MIN_ZOOM ⇒ 同样恢复原取景
-    //（必改3「恢复原取景规则」：正式相机已把双车框得够大时不再做无意义微裁）。
-    return z < RunBattleView.ADV_CAMERA_MIN_ZOOM ? 1 : z;
+    return advClamp(Math.min(maxZoom, fit), 1, maxZoom);
   }
 
   /**
-   * F4 诊断读数（只读；E2E / 探针用）：主体安全区矩形、实际裁切矩形、合成倍数、双车世界间距。
-   * 返回 null 表示无战斗实体。
+   * FRUITS-ADVENTURE-CAMERA-STABILITY-F6｜**推进一帧合成镜头**（每帧一次，唯一状态更新入口）。
+   *
+   * 三段式（对应 Queue 必改 1/2，**不引入状态机**：只有 `zoom` 与 `centerX` 两个标量）：
+   *   ① 目标：`targetZoom = clamp(fit,1,maxZoom)`；水平目标 = 主体中心（钳制在安全区与「含双车」区间内）；
+   *   ② 平滑：`advEase`（时间常数 + 速率上限 + 死区），缩放/平移各自一条；
+   *   ③ 保底：`zoom ≤ fit` 与 `crop ⊇ 双车` 是**硬约束**，平滑只能让镜头「慢一点跟上」，
+   *      绝不允许把关键主体切出框（`fit` 本身来自带 padding 的主体框，因此保底后仍留 ≥6% 余量）。
+   *
+   * 纵向**不做平滑也不用主体 Y**：`cy = groundSafeY × (1 − 1/zoom)` —— 地面线在屏幕上的
+   * 相对高度与 zoom 无关，击飞/颠簸不会带动取景窗（Queue 必改 2「纵向保持地面锚定」）。
+   *
+   * @param dtMs 距上一帧的真实毫秒（调用方给；缺省按 60fps）。内部钳到 [0, 50]。
+   * @returns 本帧解算结果；无战斗实体时 null（调用方退化为原取景）。
    */
-  advDiagnostics(
-    rt: RunBattleRuntime,
-    maxZoom = 1.6,
-  ): { subjectSafe: RunRect; cropSafe: RunRect; zoom: number; gapWorld: number } | null {
-    const subj = this.subjectSafeRect(rt);
-    if (!subj) return null;
+  updateAdventureCamera(rt: RunBattleRuntime, maxZoom = 1.6, dtMs = 1000 / 60): AdvCameraFrame | null {
+    const rects = this.subjectRects(rt);
     const safe = this.safeAreaSize();
-    const a = rt.vehicleBox('A');
-    const b = rt.vehicleBox('B');
-    const ax = (a.minX + a.maxX) / 2, ay = (a.minY + a.maxY) / 2;
-    const bx = (b.minX + b.maxX) / 2, by = (b.minY + b.maxY) / 2;
-    const gapWorld = Math.hypot(bx - ax, by - ay);
-    const z = this.advCompositeZoom(rt, maxZoom);
-    let crop: RunRect;
-    if (z <= 1) {
-      crop = { x: 0, y: 0, w: safe.w, h: safe.h };
-    } else {
-      const cw = safe.w / z, ch = safe.h / z;
-      const cx = Math.max(0, Math.min(safe.w - cw, subj.x + subj.w / 2 - cw / 2));
-      const cy = Math.max(0, Math.min(safe.h - ch, subj.y + subj.h / 2 - ch / 2));
-      crop = { x: cx, y: cy, w: cw, h: ch };
+    if (!rects || safe.w <= 0 || safe.h <= 0) {
+      this.advFrame = null;
+      this.advReady = false;
+      return null;
     }
-    return { subjectSafe: subj, cropSafe: crop, zoom: z, gapWorld };
+    const subj = rects.padded;
+    const core = rects.core;
+    const t = this.viewTransform();
+    const groundSafeY = rt.groundY * t.scale + t.offsetY - t.cropY;
+    const ga = rt.vehicleBox('A');
+    const gb = rt.vehicleBox('B');
+    const gapWorld = Math.hypot(
+      (gb.minX + gb.maxX) / 2 - (ga.minX + ga.maxX) / 2,
+      (gb.minY + gb.maxY) / 2 - (ga.minY + ga.maxY) / 2,
+    );
+
+    // ① 目标（距离约束）
+    const fit = Math.min(safe.w / subj.w, safe.h / subj.h);
+    const targetZoom = advClamp(Math.min(maxZoom, fit), 1, maxZoom);
+
+    // ② 平滑 + ③ 保底（zoom ≤ fit 是硬上限 ⇒ 裁切矩形必含主体框）
+    let zoom = this.advReady
+      ? advEase(this.advZoom, targetZoom, dtMs, RunBattleView.ADV_ZOOM_TAU_MS, RunBattleView.ADV_ZOOM_RATE, RunBattleView.ADV_ZOOM_EPS)
+      : targetZoom;
+    zoom = advClamp(Math.min(zoom, fit), 1, maxZoom);
+    const cw = safe.w / zoom;
+    const ch = safe.h / zoom;
+
+    // 水平：目标 = 主体中心；硬约束 = 裁切窗须含 `core`（不含 padding 的双车并集）。
+    // padding 那点余量正是平滑允许的滞后空间 —— 既保住「车不被切」，又不把镜头钉成硬跟。
+    const cxTarget = advClamp(
+      subj.x + subj.w / 2,
+      Math.min(cw / 2, safe.w / 2),
+      Math.max(safe.w - cw / 2, cw / 2),
+    );
+    let centerX = this.advReady
+      ? advEase(this.advCenterX, cxTarget, dtMs, RunBattleView.ADV_PAN_TAU_MS, RunBattleView.ADV_PAN_RATE, RunBattleView.ADV_PAN_EPS)
+      : cxTarget;
+    const cxSafeLo = cw / 2;
+    const cxSafeHi = Math.max(safe.w - cw / 2, cxSafeLo);
+    const cxCoreLo = core.x + core.w - cw / 2; // 含 core 右边缘所需的最小中心
+    const cxCoreHi = core.x + cw / 2; // 含 core 左边缘所需的最大中心
+    const cxLo = Math.max(cxSafeLo, cxCoreLo);
+    const cxHi = Math.min(cxSafeHi, cxCoreHi);
+    // 可行区间为空（主体比裁切窗宽 / 部分出安全区）⇒ 以主体中心为准（可见性优先），
+    // 不再退化到「安全区区间」——那会让平滑滞后直接把车推出框。
+    centerX = cxLo <= cxHi ? advClamp(centerX, cxLo, cxHi) : subj.x + subj.w / 2;
+    const cropX = advClamp(centerX - cw / 2, 0, Math.max(0, safe.w - cw));
+
+    // 纵向：地面线锚定（与 zoom 无关的固定屏幕高度），仅在主体真要出框时让位
+    const ground = advClamp(groundSafeY, 0, safe.h);
+    let cropY = advClamp(ground * (1 - 1 / zoom), 0, Math.max(0, safe.h - ch));
+    if (ch >= core.h) {
+      const yLo = Math.max(0, core.y + core.h - ch);
+      const yHi = Math.min(Math.max(0, safe.h - ch), core.y);
+      if (yLo <= yHi) cropY = advClamp(cropY, yLo, yHi);
+    }
+
+    // 状态写回（deadband 命中时精确落位，避免长期亚像素漂移）
+    this.advZoom = zoom;
+    this.advCenterX = centerX;
+    this.advReady = true;
+
+    const frame: AdvCameraFrame = {
+      zoom,
+      targetZoom,
+      cropSafe: { x: cropX, y: cropY, w: cw, h: ch },
+      subjectSafe: subj,
+      groundSafeY: ground,
+      gapWorld,
+    };
+    this.advFrame = frame;
+    this.advHold = frame; // RESULT 沿用「最后一次战斗取景」（必改 3）
+    return frame;
+  }
+
+  /** F6：本帧战斗取景读数（只读；E2E / 探针用）。null = 本场战斗还没有过解算。 */
+  adventureCameraFrame(): AdvCameraFrame | null {
+    return this.advFrame;
+  }
+
+  /** F6：战斗→RESULT 沿用的「最后稳定取景」（null = 无战斗帧 ⇒ 调用方退回 `blitCover`）。 */
+  adventureCameraHold(): AdvCameraFrame | null {
+    return this.advHold;
+  }
+
+  /** F6：换战斗实例时清空平滑状态（下一场从目标值直接起步，不做跨场镜头滑动）。 */
+  resetAdventureCamera(): void {
+    this.advZoom = 1;
+    this.advCenterX = this.safeAreaSize().w / 2;
+    this.advReady = false;
+    this.advFrame = null;
+    this.advHold = null;
   }
 
   /**
-   * FRUITS-ADVENTURE-CAMERA-F4｜冒险专用**自适应镜头**合成（默认启用，仅冒险原型）。
+   * FRUITS-ADVENTURE-CAMERA-F4/F6｜冒险专用**自适应镜头**合成（默认启用，仅冒险原型）。
    *
-   * 与 `blitSubject`（固定倍数、底部加权）不同：本方法以双车并集为中心动态取景，zoom 由
-   * 双车间距驱动（距离约束），远距/击飞自动收敛到原取景、交战自动放大到 maxZoom，
-   * 且裁切矩形恒包含双车与命中动作（验收②）。仍为纯合成：不写 `renderer.*`、不动正式相机。
-   *
-   * ⚠️ `zoom<=1`（主体过宽或关闭）时退化为 `blit`（原取景），与无 F4 行为逐像素一致。
+   * 画的是 `updateAdventureCamera` 本帧解算出的裁切矩形（`zoom ≤ 1.002` 时退化为 `blit`，
+   * 与无 F4 的原取景逐像素一致）。⚠️ 必须先 `updateAdventureCamera` 再调用本方法；
+   * 没有解算结果时安全退化为原取景。
    */
-  blitAdventureCamera(ctx: CanvasRenderingContext2D, band: RunRect, rt: RunBattleRuntime, maxZoom = 1.6): void {
-    const d = this.advDiagnostics(rt, maxZoom);
-    if (!d || d.zoom <= 1 || !d.cropSafe) {
+  blitAdventureCamera(ctx: CanvasRenderingContext2D, band: RunRect): void {
+    const f = this.advFrame;
+    if (!f || f.zoom <= RunBattleView.ADV_BLIT_EPS) {
       this.blit(ctx, band);
       return;
     }
-    const c = d.cropSafe;
+    const c = f.cropSafe;
     this.blitRegion(
       ctx,
       { x: RUN_BATTLE_VIEW_INSET.x + c.x, y: RUN_BATTLE_VIEW_INSET.y + c.y, w: c.w, h: c.h },
+      band,
+    );
+  }
+
+  /**
+   * FRUITS-ADVENTURE-CAMERA-STABILITY-F6（必改 3）｜**RESULT 沿用最后稳定取景**。
+   *
+   * 旧实现走 `blitCover`（原比例铺满 390×468）⇒ P0 实测主体屏宽在切换那一帧
+   * **缩小 31%–34%**（例：188.0px → 129.5px）。现在：
+   *   - 源 = 最后一次战斗帧的裁切矩形（`adventureCameraHold`）⇒ 车辆像素尺寸**与战斗末帧完全相同**；
+   *   - 目标带更矮（468 < 648）⇒ 只从上方裁掉一条天空，**不缩放**（`scale = band.w / crop.w`
+   *     是唯一 scale，X/Y 恒相同 ⇒ 不拉伸）；
+   *   - 纵向仍按同一条**地面锚定**规则落位（地面线在可见窗内的相对高度不变）⇒ 战报里车仍踩在地上。
+   * 无战斗帧（如 `?f4off=1` / `?d2zoom=` 对照模式）⇒ 退回历史 `blitCover`，行为逐像素不变。
+   */
+  blitAdventureHold(ctx: CanvasRenderingContext2D, band: RunRect, focusY = 0.5): void {
+    const f = this.advHold;
+    if (!f || f.zoom <= RunBattleView.ADV_BLIT_EPS) {
+      this.blitCover(ctx, band, focusY);
+      return;
+    }
+    const safe = this.safeAreaSize();
+    const c = f.cropSafe;
+    const scale = band.w / c.w; // = zoom（band.w == safe.w 时严格相等）
+    if (!(scale > 0) || !Number.isFinite(scale)) {
+      this.blitCover(ctx, band, focusY);
+      return;
+    }
+    const visH = band.h / scale; // 目标带能容纳的源高度（< c.h ⇒ 只裁纵向）
+    if (visH >= c.h) {
+      // 目标带比取景窗还高（理论上不会）：交给 cover 处理，仍是单一 scale
+      this.blitCover(ctx, band, focusY);
+      return;
+    }
+    const anchor = advClamp(f.groundSafeY / safe.h, 0.35, 0.9);
+    const sy = advClamp(f.groundSafeY - anchor * visH, c.y, c.y + c.h - visH);
+    this.blitRegion(
+      ctx,
+      { x: RUN_BATTLE_VIEW_INSET.x + c.x, y: RUN_BATTLE_VIEW_INSET.y + sy, w: c.w, h: visH },
       band,
     );
   }

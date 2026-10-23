@@ -35,7 +35,6 @@ import {
   type AdventureState,
 } from '../src/lab/portraitBattleLab/adventure/advState';
 import {
-  RUN_GENERIC_CHOICE_POOL,
   runGenericChoiceDefs,
   runLayer1PoolDefs,
   runLayer2PoolDefs,
@@ -137,6 +136,7 @@ function step(
   }
   if (s.phase === 'EVENT_CHOICE') {
     const node = advCurrentNode(s, script);
+    if (!('options' in node) || !('outcomes' in node)) return pressAdventureAction(s, ctx, script);
     // 优先选「非强化/非交易」的事件项（不发放紧急维修 ⇒ 它在后续 BUILD 节点仍可出现）
     const safe =
       node.options.find((o) => {

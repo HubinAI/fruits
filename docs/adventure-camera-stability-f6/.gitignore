@@ -1,0 +1,9 @@
+# F6 原始裸帧（每场 75~108 张 PNG，约 29MB）不入库；本地按 REPORT.md §4 命令重生成。
+# 入库的是：REPORT.md / evidence.html / metrics.json / analyze.py / evidence/*.png
+#           + before|after 的 camera-adaptive.json（逐帧可复算数据）与 summary/strip 元数据。
+before/frames/
+after/frames/
+before/strip/
+after/strip/
+before/camera-off.json
+after/camera-off.json

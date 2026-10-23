@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FRUITS-ADVENTURE-CAMERA-STABILITY-F6｜修复前后同条件连续帧对照</title>
+<style>
+  :root {
+    --bg: #0b1119;
+    --panel: #121a26;
+    --panel2: #16202e;
+    --line: #24303f;
+    --text: #e6edf6;
+    --dim: #93a4b8;
+    --good: #43d17a;
+    --bad: #ff6b6b;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 20px 64px;
+    background: radial-gradient(1200px 600px at 50% -200px, #17243a 0%, var(--bg) 60%);
+    color: var(--text);
+    font: 15px/1.65 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: .3px; }
+  h2 { font-size: 17px; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 24px; }
+  .cond { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; font-size: 13px; color: var(--dim); }
+  .cond b { color: var(--text); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+  th { color: var(--dim); font-weight: 600; font-size: 12.5px; letter-spacing: .4px; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .before { color: var(--bad); }
+  .after { color: var(--good); font-weight: 600; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 18px 0 8px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .card > .cap { padding: 8px 12px; font-size: 12.5px; color: var(--dim); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+  .card > .cap b { color: var(--text); font-weight: 600; }
+  .card.bad > .cap b { color: var(--bad); }
+  .card.good > .cap b { color: var(--good); }
+  .card img { display: block; width: 100%; height: auto; background: #000; }
+  .note { font-size: 13px; color: var(--dim); margin: 8px 0 0; }
+  .note b { color: var(--text); }
+  ul { margin: 8px 0 0 18px; padding: 0; }
+  li { margin: 6px 0; color: var(--dim); }
+  li b { color: var(--text); }
+  code { background: #1b2431; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; color: #cfe3ff; }
+  .kpi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 20px 0 8px; }
+  .kpi div { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .kpi .v { font-size: 22px; font-weight: 700; letter-spacing: .5px; }
+  .kpi .k { font-size: 12px; color: var(--dim); margin-top: 2px; }
+  .kpi .d { font-size: 12px; color: var(--good); margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>FRUITS-ADVENTURE-CAMERA-STABILITY-F6</h1>
+  <div class="sub">冒险合成镜头「连续帧稳定」— 修复前后同条件对照（正常速度真实战斗）</div>
+
+  <div class="cond">
+    条件：seed <b>scan-4</b> · 视口 <b>390×844</b> · <b>正常速度</b>（真实 rAF + 真实 dt，不加速不桩化）·
+    真实 Planck 物理 · <b>6 场满局 / 3875 战斗帧</b> · 同一台机器同一次会话 · 同一支诊断脚本
+    <code>tests/_diag_camera_p0.cjs</code>（<code>ADV_P0_OUT</code> 分目录落盘）·
+    修复前 = <code>c3b8c80</code>（F5 交付后 HEAD），修复后 = F6 工作树
+  </div>
+
+  <div class="kpi">
+    <div>
+      <div class="v after">3.06%</div>
+      <div class="k">主体屏宽逐帧最大变化（旧 10.03%）</div>
+      <div class="d">缩放跳变 &gt;5% 的帧：6 → 0</div>
+    </div>
+    <div>
+      <div class="v after">0.9px</div>
+      <div class="k">战车屏幕纵向最大逐帧位移（旧 23.1px）</div>
+      <div class="d">抖动 &gt;6px 的帧：14 → 0</div>
+    </div>
+    <div>
+      <div class="v after">0.0%</div>
+      <div class="k">RESULT 主体屏宽变化（旧 −31.9%）</div>
+      <div class="d">RESULT 沿用末帧 zoom（Δzoom 0.52 → 0）</div>
+    </div>
+  </div>
+
+  <h2>1｜指标对照（3875 战斗帧）</h2>
+  <table>
+    <thead>
+      <tr><th>指标</th><th>修复前</th><th>修复后</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>主体屏宽逐帧最大变化</td><td class="num before">10.03%</td><td class="num after">3.06%</td><td>「放大跳变」的直接观感量</td></tr>
+      <tr><td>缩放跳变 &gt;5% 的帧数</td><td class="num before">6</td><td class="num after">0</td><td>6 场各 1 帧（第 5 场 3 帧）→ 全消</td></tr>
+      <tr><td>战车屏幕纵向最大逐帧位移</td><td class="num before">23.1px</td><td class="num after">0.9px</td><td>&gt;6px 的帧：14 → 0</td></tr>
+      <tr><td>战车屏幕横向最大逐帧位移</td><td class="num before">9.8px</td><td class="num after">3.9px</td><td>&gt;6px 的帧：6 → 0</td></tr>
+      <tr><td>取景窗 Δcy 单帧最大</td><td class="num before">67.9px</td><td class="num after">17.2px</td><td>残余仅出现在第 5 场的竞技场相位切换帧</td></tr>
+      <tr><td>取景窗 Δcx 单帧最大</td><td class="num before">20.4px</td><td class="num after">7.1px</td><td>同上</td></tr>
+      <tr><td>取景窗 Δz 单帧最大 / p99</td><td class="num before">11.71% / 3.55%</td><td class="num after">7.84% / 2.40%</td><td>残余 = 正式相机相位切换的同帧补偿</td></tr>
+      <tr><td>RESULT 主体屏宽变化（均 / 最差）</td><td class="num before">−31.9% / −34.2%</td><td class="num after">0.0% / 0.0%</td><td>战斗末帧 188.0px → RESULT 188.0px</td></tr>
+      <tr><td>RESULT 与末帧 Δzoom</td><td class="num before">0.52</td><td class="num after">0.000</td><td>沿用最后稳定取景</td></tr>
+      <tr><td>裁车帧（裁切窗未含双车）</td><td class="num">0</td><td class="num">0</td><td>F4 的可见性保证未退化</td></tr>
+      <tr><td>交战 zoom 峰值</td><td class="num">1.52</td><td class="num">1.52</td><td>F4 放大收益未退化</td></tr>
+    </tbody>
+  </table>
+
+  <h2>2｜视觉对照：战斗末帧 → RESULT 首帧</h2>
+  <p class="note">同一场战斗的相邻两帧（间隔 1 帧 ≈ 17ms）。左 = 战斗最后画面，右 = 切到战报的第一画面。</p>
+
+  <div class="pair">
+    <div class="card bad">
+      <div class="cap"><span>修复前 · 战斗末帧</span><b>pxW 188.0</b></div>
+      <img src="evidence/before-toresult-039.png" alt="before battle last frame" />
+    </div>
+    <div class="card bad">
+      <div class="cap"><span>修复前 · RESULT 首帧</span><b>pxW 129.5（−31%）</b></div>
+      <img src="evidence/before-result-000.png" alt="before result first frame" />
+    </div>
+  </div>
+
+  <div class="pair">
+    <div class="card good">
+      <div class="cap"><span>修复后 · 战斗末帧</span><b>pxW 188.0</b></div>
+      <img src="evidence/after-toresult-039.png" alt="after battle last frame" />
+    </div>
+    <div class="card good">
+      <div class="cap"><span>修复后 · RESULT 首帧</span><b>pxW 188.0（−0.0%）</b></div>
+      <img src="evidence/after-result-000.png" alt="after result first frame" />
+    </div>
+  </div>
+  <p class="note">
+    <b>改动实质：</b>战斗用自适应裁切（zoom≈1.45）取景，旧实现在 RESULT 退回「原比例铺满」，
+    于是所有东西一次性缩到 1/1.45；现在 RESULT 直接沿用最后一次战斗的裁切窗，只从上方裁掉一条天空，
+    <b>车辆像素尺寸与战斗末帧完全相同</b>，纵向仍按地面线锚定（战车仍踩在地上）。
+  </p>
+
+  <h2>3｜视觉对照：交战段（正常速度连续帧）</h2>
+  <div class="pair">
+    <div class="card bad">
+      <div class="cap"><span>修复前 · 交战段 A</span><b>zoom 1.00</b></div>
+      <img src="evidence/before-engage-006.png" alt="before engage" />
+    </div>
+    <div class="card good">
+      <div class="cap"><span>修复后 · 交战段 A</span><b>zoom 1.00</b></div>
+      <img src="evidence/after-engage-006.png" alt="after engage" />
+    </div>
+  </div>
+  <p class="note">
+    交战段的静态帧差别不大（两版都在 1.00 附近起步）——<b>差别在帧与帧之间</b>：
+    旧实现在 fit 越过 1.10 那一帧直接跳到 1.11（单帧 +11%），F6 把这段变成 ~0.13s 的斜坡。
+    这类时间维度差异无法用两张静帧表达，量化证据见指标表「主体屏宽逐帧最大变化」与逐场读数
+    （<code>metrics.json</code>）。
+  </p>
+
+  <h2>4｜残余问题（诚实披露）</h2>
+  <ul>
+    <li>
+      <b>正式相机相位切换的 scale 阶跃仍在：</b>竞技场 <code>Active → Warning → Closing</code> 那一帧，
+      正式相机 <code>cs</code> 一帧变化 +4.5%~+5.3%。合成层为保证双车不被切而同帧跟随，
+      于是那一帧 <code>Δz</code> 达 5–8%（第 5 场 14s 才会遇到）。实测该帧屏幕主体尺寸只变 −0.3%/+0.4%，
+      但背景仍会跟着正式相机缩放一次。要彻底消除必须改正式 Runtime 相机 —— Queue 明令禁止，故只记录不改。
+    </li>
+    <li>
+      <b>远距分离时 zoom 立即跟随：</b><code>zoom ≤ fit</code> 是可见性硬约束（不立刻缩小就会切车），
+      实测分离段单帧 Δz ≈ 2.8%，由物理分离速度决定，属主动取舍「可见性 &gt; 平滑」。
+    </li>
+    <li>
+      <b>对照旋钮不变：</b><code>?f4off=1</code> / <code>?d2zoom=</code> 不走自适应裁切，RESULT 仍走历史
+      <code>blitCover</code>（对照语义，非缺陷）。
+    </li>
+  </ul>
+
+  <p class="note" style="margin-top:28px">
+    完整数据：<code>docs/adventure-camera-stability-f6/</code> · 报告 <code>REPORT.md</code> ·
+    指标 <code>metrics.json</code>（<code>analyze.py</code> 可复算）· 原始连续帧 <code>before/strip/</code>、<code>after/strip/</code>
+  </p>
+</div>
+</body>
+</html>

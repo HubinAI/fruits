@@ -1,0 +1,381 @@
+{
+  "mode": "adaptive",
+  "seed": "scan-4",
+  "files": [
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-000.png",
+      "t": 971
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-001.png",
+      "t": 1106
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-002.png",
+      "t": 1237
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-003.png",
+      "t": 1371
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-004.png",
+      "t": 1504
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-005.png",
+      "t": 1637
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-006.png",
+      "t": 1771
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-007.png",
+      "t": 1905
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-008.png",
+      "t": 2037
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-009.png",
+      "t": 2171
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-010.png",
+      "t": 2304
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-011.png",
+      "t": 2438
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-012.png",
+      "t": 2571
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-013.png",
+      "t": 2704
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-014.png",
+      "t": 2837
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-015.png",
+      "t": 2971
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-016.png",
+      "t": 3104
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-017.png",
+      "t": 3238
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-018.png",
+      "t": 3371
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-019.png",
+      "t": 3504
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-020.png",
+      "t": 3637
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-021.png",
+      "t": 3771
+    },
+    {
+      "set": "engage",
+      "file": "strip/strip-adaptive-engage-022.png",
+      "t": 3904
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-000.png",
+      "t": 5638
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-001.png",
+      "t": 5771
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-002.png",
+      "t": 5904
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-003.png",
+      "t": 6037
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-004.png",
+      "t": 6171
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-005.png",
+      "t": 6304
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-006.png",
+      "t": 6437
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-007.png",
+      "t": 6571
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-008.png",
+      "t": 6704
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-009.png",
+      "t": 6837
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-010.png",
+      "t": 6971
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-011.png",
+      "t": 7104
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-012.png",
+      "t": 7238
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-013.png",
+      "t": 7371
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-014.png",
+      "t": 7504
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-015.png",
+      "t": 7637
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-016.png",
+      "t": 7771
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-017.png",
+      "t": 7904
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-018.png",
+      "t": 8037
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-019.png",
+      "t": 8171
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-020.png",
+      "t": 8304
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-021.png",
+      "t": 8437
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-022.png",
+      "t": 8571
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-023.png",
+      "t": 8704
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-024.png",
+      "t": 8837
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-025.png",
+      "t": 8971
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-026.png",
+      "t": 9104
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-027.png",
+      "t": 9237
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-028.png",
+      "t": 9371
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-029.png",
+      "t": 9504
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-030.png",
+      "t": 9637
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-031.png",
+      "t": 9770
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-032.png",
+      "t": 9904
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-033.png",
+      "t": 10037
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-034.png",
+      "t": 10171
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-035.png",
+      "t": 10304
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-036.png",
+      "t": 10438
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-037.png",
+      "t": 10571
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-038.png",
+      "t": 10704
+    },
+    {
+      "set": "toresult",
+      "file": "strip/strip-adaptive-toresult-039.png",
+      "t": 10837
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-000.png",
+      "t": 10857
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-001.png",
+      "t": 10870
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-002.png",
+      "t": 10887
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-003.png",
+      "t": 10903
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-004.png",
+      "t": 10920
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-005.png",
+      "t": 10937
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-006.png",
+      "t": 10953
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-007.png",
+      "t": 10970
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-008.png",
+      "t": 10987
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-009.png",
+      "t": 11003
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-010.png",
+      "t": 11020
+    },
+    {
+      "set": "result",
+      "file": "strip/strip-adaptive-result-011.png",
+      "t": 11037
+    }
+  ]
+}

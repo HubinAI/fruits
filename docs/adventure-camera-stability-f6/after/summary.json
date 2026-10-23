@@ -1,0 +1,41 @@
+{
+  "seed": "scan-4",
+  "summary": [
+    {
+      "mode": "adaptive",
+      "frames": 4133,
+      "battleFrames": 3875,
+      "events": 40,
+      "clicks": {
+        "action": 26,
+        "card": 16
+      },
+      "final": {
+        "phase": "FAILED",
+        "battlesCompleted": 6,
+        "battlesWon": 5,
+        "carriedHp": 0,
+        "playerHpMax": 1100
+      },
+      "elapsedMs": 68894
+    },
+    {
+      "mode": "off",
+      "frames": 4123,
+      "battleFrames": 3876,
+      "events": 39,
+      "clicks": {
+        "action": 26,
+        "card": 16
+      },
+      "final": {
+        "phase": "FAILED",
+        "battlesCompleted": 6,
+        "battlesWon": 5,
+        "carriedHp": 0,
+        "playerHpMax": 1100
+      },
+      "elapsedMs": 68717
+    }
+  ]
+}

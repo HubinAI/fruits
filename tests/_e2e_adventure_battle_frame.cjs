@@ -283,7 +283,18 @@ async function driveToBattle(page) {
 
     // ---- ① 真实合成几何（drawImage 实参）----
     const blits = await page.evaluate(() => window.__ADV_BLITS__.slice(-80));
-    const battleBlit = [...blits].reverse().find((b) => Math.abs(b.sh - 648) < 1.5 && Math.abs(b.sw - 390) < 1.5);
+    // 战斗合成 = 目标矩形恰好是舞台带（0,96,390×648）的那次 drawImage。
+    // ⚠️ 不按「源矩形 == 390×648」筛选：F4/F6 的自适应取景会把源矩形裁成子矩形
+    //    （zoom>1 时源必然小于安全区），F1 要验的不变量是「X/Y 同一 scale + 铺满舞台带」，
+    //    与源矩形大小无关。
+    const battleBlit = [...blits]
+      .reverse()
+      .find(
+        (b) =>
+          Math.abs(b.dw - STAGE_BAND.w) < 1.5 &&
+          Math.abs(b.dh - STAGE_BAND.h) < 1.5 &&
+          Math.abs(b.dy - STAGE_BAND.y) < 1.5,
+      );
     if (battleBlit) {
       const rx = battleBlit.dw / battleBlit.sw;
       const ry = battleBlit.dh / battleBlit.sh;

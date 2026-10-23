@@ -1,0 +1,372 @@
+{
+ "docs/adventure-camera-stability-f6/before": {
+  "dir": "docs/adventure-camera-stability-f6/before",
+  "mode": "adaptive",
+  "head": "c3b8c80",
+  "battles": 6,
+  "frames": 3875,
+  "maxDz": 0.11706913169980271,
+  "p99Dz": 0.03547642491424585,
+  "steps": 8,
+  "maxDcy": 67.91056631028516,
+  "maxDcx": 20.436050047076577,
+  "cropViol": 0,
+  "widthViol": 0,
+  "engageZoomMax": 1.5195284712957289,
+  "resultDropWorstPct": -34.189977712205746,
+  "resultDropAvgPct": -31.86866753080934,
+  "resultZoomMismatchMax": 0.5195284712957289,
+  "perBattle": [
+   {
+    "battle": 0,
+    "frames": 601,
+    "durMs": 10016,
+    "maxDz": 0.10986425283597456,
+    "p99Dz": 0.02585834250516461,
+    "steps": 1,
+    "maxDcy": 64.14481379664085,
+    "maxDcx": 19.30283748510027,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 167.86206716610147,
+    "engageZoom": 1.4527528020634144,
+    "aPxW": [
+     70.88492390350174,
+     189.7938509474569
+    ]
+   },
+   {
+    "battle": 1,
+    "frames": 602,
+    "durMs": 10016,
+    "maxDz": 0.10986425283597456,
+    "p99Dz": 0.025671567285749708,
+    "steps": 1,
+    "maxDcy": 64.14481379664085,
+    "maxDcx": 19.30283748510027,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 167.86206716610147,
+    "engageZoom": 1.4527528020634144,
+    "aPxW": [
+     76.24573709610596,
+     189.7938509474569
+    ]
+   },
+   {
+    "battle": 2,
+    "frames": 602,
+    "durMs": 10017,
+    "maxDz": 0.10302530941856314,
+    "p99Dz": 0.027460170846287157,
+    "steps": 1,
+    "maxDcy": 60.524812924211346,
+    "maxDcx": 18.213485370711766,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 168.96329229639153,
+    "engageZoom": 1.453340735878884,
+    "aPxW": [
+     75.6148560435823,
+     189.1441934224068
+    ]
+   },
+   {
+    "battle": 3,
+    "frames": 602,
+    "durMs": 10017,
+    "maxDz": 0.10936577559728078,
+    "p99Dz": 0.03547642491424585,
+    "steps": 1,
+    "maxDcy": 63.88246703291543,
+    "maxDcx": 19.22389054231249,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 92.59164780240319,
+    "engageZoom": 1.5195284712957289,
+    "aPxW": [
+     74.81849263384544,
+     225.62262605229964
+    ]
+   },
+   {
+    "battle": 4,
+    "frames": 842,
+    "durMs": 14016,
+    "maxDz": 0.11706913169980271,
+    "p99Dz": 0.02747569962875618,
+    "steps": 3,
+    "maxDcy": 67.91056631028516,
+    "maxDcx": 20.436050047076577,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 88.41148796187457,
+    "engageZoom": 1.451456448922941,
+    "aPxW": [
+     71.55668720967887,
+     202.8255183005547
+    ]
+   },
+   {
+    "battle": 5,
+    "frames": 626,
+    "durMs": 10417,
+    "maxDz": 0.1014333321302574,
+    "p99Dz": 0.02618996020451636,
+    "steps": 1,
+    "maxDcy": 59.67569466350017,
+    "maxDcx": 17.957963671886603,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 147.34973196807488,
+    "engageZoom": 1.4495324880494806,
+    "aPxW": [
+     75.36186015274185,
+     212.46600351175758
+    ]
+   }
+  ],
+  "result": [
+   {
+    "t": 10760,
+    "dtMs": 17,
+    "zoomBefore": 1.4515818340358653,
+    "zoomAfter": 1,
+    "aPxWBefore": 187.96107143724132,
+    "aPxWAfter": 129.48616507530448,
+    "dropPct": -31.11011546955409,
+    "cyBefore": 180.4312217095191,
+    "cyAfter": null
+   },
+   {
+    "t": 21343,
+    "dtMs": 17,
+    "zoomBefore": 1.4515818340358653,
+    "zoomAfter": 1,
+    "aPxWBefore": 187.96107143724132,
+    "aPxWAfter": 129.48616507530448,
+    "dropPct": -31.11011546955409,
+    "cyBefore": 180.4312217095191,
+    "cyAfter": null
+   },
+   {
+    "t": 32176,
+    "dtMs": 16,
+    "zoomBefore": 1.4523419918933815,
+    "zoomAfter": 1,
+    "aPxWBefore": 188.01299745129356,
+    "aPxWAfter": 129.46077694106438,
+    "dropPct": -31.142645085161014,
+    "cyBefore": 180.61070514705838,
+    "cyAfter": null
+   },
+   {
+    "t": 42910,
+    "dtMs": 17,
+    "zoomBefore": 1.5195284712957289,
+    "zoomAfter": 1,
+    "aPxWBefore": 225.62262605229964,
+    "aPxWAfter": 148.48230049132508,
+    "dropPct": -34.189977712205746,
+    "cyBefore": 180.95091312842442,
+    "cyAfter": null
+   },
+   {
+    "t": 57693,
+    "dtMs": 16,
+    "zoomBefore": 1.4660106778744053,
+    "zoomAfter": 1,
+    "aPxWBefore": 198.24399020579307,
+    "aPxWAfter": 135.22126638186785,
+    "dropPct": -31.790483917571777,
+    "cyBefore": 191.32170671685586,
+    "cyAfter": null
+   }
+  ]
+ },
+ "docs/adventure-camera-stability-f6/after": {
+  "dir": "docs/adventure-camera-stability-f6/after",
+  "mode": "adaptive",
+  "head": "WORKTREE-F6",
+  "battles": 6,
+  "frames": 3875,
+  "maxDz": 0.0784364156549564,
+  "p99Dz": 0.02395129528896245,
+  "steps": 2,
+  "maxDcy": 17.16804184089129,
+  "maxDcx": 7.07332599561019,
+  "cropViol": 0,
+  "widthViol": 0,
+  "engageZoomMax": 1.5176474619115004,
+  "resultDropWorstPct": -0.004121090514264125,
+  "resultDropAvgPct": -0.00017613352606637989,
+  "resultZoomMismatchMax": 0.0,
+  "perBattle": [
+   {
+    "battle": 0,
+    "frames": 601,
+    "durMs": 10016,
+    "maxDz": 0.01937933901224742,
+    "p99Dz": 0.015110664243136673,
+    "steps": 0,
+    "maxDcy": 5.2119762546324,
+    "maxDcx": 2.254915179386984,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 167.86206716610147,
+    "engageZoom": 1.43931706057613,
+    "aPxW": [
+     72.22419242972336,
+     188.8931705131967
+    ]
+   },
+   {
+    "battle": 1,
+    "frames": 602,
+    "durMs": 10017,
+    "maxDz": 0.01914121098433541,
+    "p99Dz": 0.014758419220730401,
+    "steps": 0,
+    "maxDcy": 5.309689460642566,
+    "maxDcx": 2.2971899290585895,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 167.86206716610147,
+    "engageZoom": 1.4392915751313669,
+    "aPxW": [
+     76.39103480797499,
+     188.89190957929208
+    ]
+   },
+   {
+    "battle": 2,
+    "frames": 602,
+    "durMs": 10016,
+    "maxDz": 0.0202968423153298,
+    "p99Dz": 0.014637508983239567,
+    "steps": 0,
+    "maxDcy": 5.573818347957484,
+    "maxDcx": 2.4114629434054393,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 168.96329229639153,
+    "engageZoom": 1.4336486398090902,
+    "aPxW": [
+     75.8304535215851,
+     188.36507450530254
+    ]
+   },
+   {
+    "battle": 3,
+    "frames": 602,
+    "durMs": 10017,
+    "maxDz": 0.026654978616983405,
+    "p99Dz": 0.02395129528896245,
+    "steps": 0,
+    "maxDcy": 6.748112622843607,
+    "maxDcx": 2.9195109190950177,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 92.59164780240319,
+    "engageZoom": 1.5176474619115004,
+    "aPxW": [
+     74.97222036038235,
+     225.34333001743377
+    ]
+   },
+   {
+    "battle": 4,
+    "frames": 842,
+    "durMs": 14017,
+    "maxDz": 0.0784364156549564,
+    "p99Dz": 0.014413724100552194,
+    "steps": 2,
+    "maxDcy": 17.16804184089129,
+    "maxDcx": 7.07332599561019,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 88.41148796187457,
+    "engageZoom": 1.451456448922941,
+    "aPxW": [
+     71.55668720967887,
+     202.45242402600095
+    ]
+   },
+   {
+    "battle": 5,
+    "frames": 626,
+    "durMs": 10417,
+    "maxDz": 0.021735840458752875,
+    "p99Dz": 0.015835907130104854,
+    "steps": 0,
+    "maxDcy": 5.468366101882182,
+    "maxDcx": 2.365839966868606,
+    "cropViol": 0,
+    "widthViol": 0,
+    "engageGap": 147.34973196807488,
+    "engageZoom": 1.4253022355418337,
+    "aPxW": [
+     75.36186015274185,
+     211.3284077672594
+    ]
+   }
+  ],
+  "result": [
+   {
+    "t": 10772,
+    "dtMs": 17,
+    "zoomBefore": 1.4515818340358653,
+    "zoomAfter": 1.4515818340358653,
+    "aPxWBefore": 187.96107143724132,
+    "aPxWAfter": 187.95976498228129,
+    "dropPct": -0.0006950667763461205,
+    "cyBefore": 140.21735424364388,
+    "cyAfter": null
+   },
+   {
+    "t": 21372,
+    "dtMs": 17,
+    "zoomBefore": 1.4515818340358653,
+    "zoomAfter": 1.4515818340358653,
+    "aPxWBefore": 187.96107143724132,
+    "aPxWAfter": 187.95976498228129,
+    "dropPct": -0.0006950667763461205,
+    "cyBefore": 140.21735424364388,
+    "cyAfter": null
+   },
+   {
+    "t": 32239,
+    "dtMs": 17,
+    "zoomBefore": 1.4523419918933815,
+    "zoomAfter": 1.4523419918933815,
+    "aPxWBefore": 188.01299745129356,
+    "aPxWAfter": 188.0213226546502,
+    "dropPct": 0.004427993526778806,
+    "cyBefore": 140.3798717686268,
+    "cyAfter": null
+   },
+   {
+    "t": 42972,
+    "dtMs": 17,
+    "zoomBefore": 1.5176474619115004,
+    "zoomAfter": 1.5176474619115004,
+    "aPxWBefore": 225.34333001743377,
+    "aPxWAfter": 225.3437864794402,
+    "dropPct": 0.0002025629098456605,
+    "cyBefore": 153.7340323680236,
+    "cyAfter": null
+   },
+   {
+    "t": 57855,
+    "dtMs": 16,
+    "zoomBefore": 1.426067127745135,
+    "zoomAfter": 1.426067127745135,
+    "aPxWBefore": 192.8425501752928,
+    "aPxWAfter": 192.83460295925008,
+    "dropPct": -0.004121090514264125,
+    "cyBefore": 134.66194688950708,
+    "cyAfter": null
+   }
+  ]
+ }
+}

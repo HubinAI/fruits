@@ -256,6 +256,10 @@ export class AdvPage {
 
   private rafHandle = 0;
   private lastFrameMs = 0;
+  /** F6：上一次绘制的时刻（只用于合成镜头平滑的 dt；与 `lastFrameMs`（物理 dt）互不干扰）。 */
+  private lastDrawMs = 0;
+  /** F6：本帧绘制间隔（ms，钳在 [0,50]），传给 `RunBattleView.updateAdventureCamera`。 */
+  private frameDtMs = 0;
   /** R1：选择卡片按下高亮索引（延迟 apply 期间显示反馈，防重入）。 */
   private pressCard = -1;
   private pressTimer: number | null = null;
@@ -597,6 +601,10 @@ export class AdvPage {
     if (this.buildToast && performance.now() - this.buildToast.bornAt > ADV_BUILD_TOAST_MS) {
       this.buildToast = null;
     }
+    // F6：本帧真实间隔（同时钟、只用于**合成镜头**的时间平滑；战斗物理 dt 仍走 startLoop，不受影响）。
+    const nowPerf = performance.now();
+    this.frameDtMs = this.lastDrawMs > 0 ? Math.min(50, Math.max(0, nowPerf - this.lastDrawMs)) : 0;
+    this.lastDrawMs = nowPerf;
     const wrapW = this.stageWrap.clientWidth || PORTRAIT_LOGICAL_W;
     const wrapH = this.stageWrap.clientHeight || PORTRAIT_LOGICAL_H;
     const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
@@ -847,12 +855,12 @@ export class AdvPage {
     if (this.battle) {
       // 真实战斗（BATTLE 实时 / RESULT 冻结帧）一律贴正式战斗画面。
       // F1：舞台带 = 战斗视图的安全区（390×648）⇒ `blit` 是 1:1 等比贴图（X/Y 同一 scale）；
-      // RESULT 阶段主体层只有 390×468（更矮）⇒ `blitCover` 等比铺满后裁掉多余天空/地面带，
-      // 车辆像素尺寸与战斗中完全一致（不缩放、不拉伸）。
+      // F6：RESULT 不再缩回原比例，而是**沿用最后一次战斗取景**（只裁纵向，不缩放），
+      //     消除 P0 实测的「切换那一帧主体缩小 31%–34%」。
       this.battleView.render(this.battle);
       if (fill === 'cover') {
-        // RESULT 冻结帧：沿用 F1 等比铺满（裁多余天空/地面带），双车恒在框内。
-        this.battleView.blitCover(ctx, b, 0.5);
+        // RESULT 冻结帧：沿用最后稳定取景（无 F6 取景时自动退回 F1 等比铺满）。
+        this.battleView.blitAdventureHold(ctx, b, 0.5);
       } else if (D2_FIXED) {
         // F4 对照旋钮：显式固定倍数（?d2zoom=，含 =1 ⇒ 原取景基线）。
         this.battleView.blitSubject(ctx, b, D2_EXPERIMENT_ZOOM);
@@ -860,8 +868,9 @@ export class AdvPage {
         // F4 对照基线：关闭自适应镜头，恢复原取景（与无 F4 逐像素一致）。
         this.battleView.blit(ctx, b);
       } else {
-        // F4 采纳：冒险专用自适应镜头（仅合成裁切，距离约束，不动正式相机/物理）。
-        this.battleView.blitAdventureCamera(ctx, b, this.battle, ADV_CAMERA_MAX);
+        // F4 采纳 + F6 稳定化：先推进一帧平滑（时间常数/速率上限/地面锚定），再按解算结果合成。
+        this.battleView.updateAdventureCamera(this.battle, ADV_CAMERA_MAX, this.frameDtMs);
+        this.battleView.blitAdventureCamera(ctx, b);
       }
       // F3：本局改装图标条（兑现锚点；战斗与 RESULT 冻结帧都显示）
       this.drawBuildStrip(ctx);
@@ -1771,8 +1780,10 @@ export class AdvPage {
     readonly scaleY: number;
     readonly uniform: boolean;
     readonly cameraScale: number;
-    /** 本次战斗合成实际使用的放大倍数（F4 自适应：距离约束值；D2 固定：d2zoom；关闭/RESULT：1）。 */
+    /** 本次战斗合成实际使用的放大倍数（F6：距离约束目标经时间平滑后的**本帧实际值**；RESULT = 沿用的末帧值）。 */
     readonly compositeZoom: number;
+    /** F6：距离约束**目标**倍数（未平滑）。`compositeZoom ≈ targetZoom` 说明镜头已跟上；偏差 = 平滑滞后。 */
+    readonly targetZoom: number;
     /** F4：当前镜头模式（fixed=D2 固定 / off=原取景 / adaptive=F4 采纳）。 */
     readonly cameraMode: 'fixed' | 'off' | 'adaptive';
     readonly vehicleA: {
@@ -1808,17 +1819,30 @@ export class AdvPage {
     const isBattle = band === STAGE_BAND;
     const comp = this.battleView.compositeProbe(band, isBattle ? 'contain' : 'cover');
     const cam = this.battleView.viewTransform();
-    // F4 镜头模式解析（仅战斗态取景可被裁切；RESULT 冻结帧沿用 blitCover 等比铺满）。
+    // F4/F6 镜头模式解析（战斗态取景可被裁切；RESULT 沿用最后一次战斗取景，不再缩回原比例）。
     const mode: 'fixed' | 'off' | 'adaptive' =
       D2_FIXED ? 'fixed' : ADV_CAMERA_OFF ? 'off' : 'adaptive';
+    // F6：读数一律取**本帧真正用于合成的那份解算结果**（不再是「重新算一遍目标」），
+    //     这样 E2E 看到的 zoom / 裁切与画面上贴的像素严格自洽。
+    const camFrame = mode === 'adaptive'
+      ? isBattle
+        ? this.battleView.adventureCameraFrame()
+        : this.battleView.adventureCameraHold()
+      : null;
     const compositeZoom = isBattle
       ? mode === 'fixed'
         ? D2_EXPERIMENT_ZOOM
         : mode === 'off'
           ? 1
-          : this.battleView.advCompositeZoom(rt, ADV_CAMERA_MAX)
-      : 1;
-    const diag = isBattle && mode === 'adaptive' ? this.battleView.advDiagnostics(rt, ADV_CAMERA_MAX) : null;
+          : camFrame
+            ? camFrame.zoom
+            : 1
+      : mode === 'adaptive' && camFrame
+        ? camFrame.zoom
+        : 1;
+    const targetZoom = isBattle && mode === 'adaptive'
+      ? this.battleView.advCompositeZoom(rt, ADV_CAMERA_MAX)
+      : compositeZoom;
     const safe = comp.safe;
     // 关键主体（双车并集 + padding）在所有战斗模式下一律取真实几何，
     // 这样 cropSafe 才能如实反映「该模式下真实裁切是否裁掉主体」（fixed 模式在远距分离时会暴露）。
@@ -1827,8 +1851,8 @@ export class AdvPage {
     if (isBattle) {
       const realSubj = this.battleView.subjectSafeRect(rt);
       subjectSafe = realSubj ? { x: realSubj.x, y: realSubj.y, w: realSubj.w, h: realSubj.h } : null;
-      if (mode === 'adaptive' && diag) {
-        cropSafe = { x: diag.cropSafe.x, y: diag.cropSafe.y, w: diag.cropSafe.w, h: diag.cropSafe.h };
+      if (mode === 'adaptive' && camFrame) {
+        cropSafe = { x: camFrame.cropSafe.x, y: camFrame.cropSafe.y, w: camFrame.cropSafe.w, h: camFrame.cropSafe.h };
       } else if (mode === 'fixed') {
         const z = D2_EXPERIMENT_ZOOM;
         const sw = safe.w / z, sh = safe.h / z;
@@ -1870,6 +1894,7 @@ export class AdvPage {
       uniform: Math.abs(comp.scaleX - comp.scaleY) <= 1e-6,
       cameraScale: cam.scale,
       compositeZoom,
+      targetZoom,
       cameraMode: mode,
       vehicleA: mkVehicle('A'),
       vehicleB: mkVehicle('B'),
