@@ -26,7 +26,7 @@ import { PORTRAIT_LOGICAL_H, PORTRAIT_LOGICAL_W } from '../constants';
 import { RunBattleRuntime } from '../runBattleRuntime';
 import { RunBattleView } from '../runBattleView';
 import { type RunPlayerLoadout } from '../runPageScene';
-import { runBuildOptionById } from '../runModifiers';
+import { runBuildOptionById, type RunBuildId } from '../runModifiers';
 import {
   generateAdventureScript,
   randomSeedLabel,
@@ -119,6 +119,22 @@ const STAGE_BAND: Rect = { x: 0, y: 96, w: PORTRAIT_LOGICAL_W, h: 648 };
 const RESULT_STAGE: Rect = { x: 0, y: 96, w: PORTRAIT_LOGICAL_W, h: 468 };
 const RESULT_BAND: Rect = { x: 0, y: 564, w: PORTRAIT_LOGICAL_W, h: 180 };
 const ACTION_BAND: Rect = { x: 0, y: 744, w: PORTRAIT_LOGICAL_W, h: 100 };
+
+// F3：强化获得的即时反馈显示时长（ms）。只影响显示，不影响状态机时序（tapChoice 的 130ms 按压反馈不变）。
+const ADV_BUILD_TOAST_MS = 2400;
+/** F3：即时反馈的淡出时长（ms）。 */
+const ADV_TOAST_FADE_MS = 420;
+
+/** F3：强化获得的即时反馈数据（纯显示，瞬态；不参与任何状态/战斗决策）。 */
+interface AdvBuildToast {
+  readonly id: RunBuildId;
+  readonly label: string;
+  /** 该强化的核心收益（`runModifiers` 的 note，不改写）。 */
+  readonly gain: string;
+  /** 额外一行（紧急维修的真实修理量；无则为空）。 */
+  readonly extra: string;
+  readonly bornAt: number;
+}
 const ACTION_BTN: Rect = { x: 40, y: 756, w: 310, h: 68 };
 /** R4：结算页唯一主操作＝大号 CTA；**完整包含** ACTION_BTN 命中区（756..824），保证既醒目又可点。 */
 const TERMINAL_CTA: Rect = { x: 40, y: 700, w: 310, h: 124 };
@@ -196,6 +212,25 @@ export class AdvPage {
   private pressCard = -1;
   private pressTimer: number | null = null;
   private battle: RunBattleRuntime | null = null;
+  /**
+   * F3：强化获得的即时反馈（瞬态，`ADV_BUILD_TOAST_MS` 后自动消失）。
+   * 数据来自「选择前后」的真实状态差，不新增任何持久状态。
+   */
+  private buildToast: AdvBuildToast | null = null;
+  /** F3：即时反馈的到点消失定时器（纯显示；与 pressTimer 同一族）。 */
+  private toastTimer: number | null = null;
+  /**
+   * F3：本场战斗观测到的**玩家弹丸峰值数 / 峰值半径**（开新战时清零）。
+   * 这是「双联炮 / 三连装填 / 重型弹头在正常速度下真的看得见」的量化证据：
+   * 一次攻击打几发、弹丸多大，全部读自正式 `BattleRenderSnapshot.projectiles`。
+   */
+  private maxPlayerProjectiles = 0;
+  private maxPlayerRadius = 0;
+  /**
+   * F3：**上一场**战斗的弹丸峰值存档（战斗实例在终态被 dispose，事后对账用）。
+   * 开新战时清空；纯只读遥测，不参与任何玩法/渲染决策。
+   */
+  private lastBattleShells: { readonly maxPlayerSeen: number; readonly maxPlayerRadiusSeen: number } | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
 
@@ -241,6 +276,11 @@ export class AdvPage {
   dispose(): void {
     this.stopLoop();
     this.endBattle();
+    this.buildToast = null;
+    if (this.toastTimer !== null) {
+      clearTimeout(this.toastTimer);
+      this.toastTimer = null;
+    }
     if (this.pressTimer !== null) {
       clearTimeout(this.pressTimer);
       this.pressTimer = null;
@@ -261,6 +301,11 @@ export class AdvPage {
   startNewRun(seedLabel?: string): void {
     this.stopLoop();
     this.endBattle();
+    this.buildToast = null;
+    if (this.toastTimer !== null) {
+      clearTimeout(this.toastTimer);
+      this.toastTimer = null;
+    }
     this.script = generateAdventureScript(seedLabel ?? randomSeedLabel());
     this.state = createAdventureState(this.ctx2, this.script);
     this.archived = false;
@@ -304,17 +349,58 @@ export class AdvPage {
    * R1：选择卡片点击 → 立即渲染按下高亮（反馈），延迟 ~130ms 再落定选择。
    *   - 防重入：pending 期间忽略后续点击（E2E 轮询重击不重复触发，不破坏状态机）；
    *   - 延迟仅用于可见反馈，选择因果不变（仍经 chooseAdventureOption 真实结算）。
+   *
+   * F3：延迟期间同时记录**选择前**的 Build / 耐久 —— 结算后据此给出「拿到了什么」的
+   * 即时反馈（`announceBuildGain`）。记录本身不改任何状态。
    */
   private tapChoice(optionId: string): void {
     if (this.pressTimer !== null) return;
     const cards = advOverlayCards(this.state, this.script, this.ctx2);
     this.pressCard = cards.findIndex((c) => c.id === optionId);
+    const before = { buffs: [...this.state.buffs], hp: advCarriedPlayerHp(this.state, this.ctx2) };
     this.render();
     this.pressTimer = window.setTimeout(() => {
       this.pressTimer = null;
       this.pressCard = -1;
       this.apply(chooseAdventureOption(this.state, optionId, this.ctx2, this.script));
+      this.announceBuildGain(before);
     }, 130);
+  }
+
+  /**
+   * F3：强化获得的**即时反馈**（纯显示，瞬态 ~2.4s）。
+   *
+   * 全部读自已经 `chooseAdventureOption` 真实结算后的状态差：
+   *   - `buffs` 增量 ⇒ 拿到的强化（图标 / 名称 / 核心收益，逐字来自 `runModifiers`）；
+   *   - `carriedHp` 增量 ⇒ 紧急维修的真实修理量（0.25 × 上限，按缺口截断）。
+   * 不写任何状态、不改任何数值 —— 玩家看到的就是状态机刚刚结算的东西。
+   */
+  private announceBuildGain(before: { readonly buffs: readonly RunBuildId[]; readonly hp: number }): void {
+    const gained = this.state.buffs.filter((b) => !before.buffs.includes(b));
+    if (gained.length === 0) return; // 本次没拿到强化（纯 heal / damage / none）⇒ 不弹
+    const id = gained[gained.length - 1];
+    const def = runBuildOptionById(id);
+    const hpAfter = advCarriedPlayerHp(this.state, this.ctx2);
+    const heal = hpAfter - before.hp;
+    const extra =
+      heal > 0 ? `耐久 +${Math.round(heal)}（当前 ${Math.round(hpAfter)}/${this.ctx2.playerHpMax}）` : '';
+    this.buildToast = {
+      id,
+      label: def?.label ?? id,
+      gain: def?.note ?? '',
+      extra,
+      bornAt: performance.now(),
+    };
+    // ⚠️ `apply()` 的 render 已经跑完（本方法在它之后调用）⇒ 非战斗阶段没有 rAF 循环
+    //    （BATTLE 才有），不主动重绘一次的话反馈卡不会出现在屏幕上。这里补一次绘制，
+    //    并挂一个到点自动消失的定时器（与 pressTimer 同一族，纯显示）。
+    if (this.toastTimer !== null) clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => {
+      this.toastTimer = null;
+      this.buildToast = null;
+      this.render();
+    }, ADV_BUILD_TOAST_MS);
+    this.render();
   }
 
   private apply(next: AdventureState): void {
@@ -378,6 +464,10 @@ export class AdvPage {
       playerBaseline: true,
     });
     this.battle = rt;
+    // F3：弹丸峰值统计按「场」清零（每场的兑现证据互不混淆）。
+    this.maxPlayerProjectiles = 0;
+    this.maxPlayerRadius = 0;
+    this.lastBattleShells = null;
   }
 
   private endBattle(): void {
@@ -411,10 +501,20 @@ export class AdvPage {
         return;
       }
       rt.step(dt);
+      // F3：观测本场「玩家弹丸」峰值数 / 峰值半径 —— 双联炮 / 三连装填 / 重型弹头
+      // 在正常速度下是否真的看得见，全部由这条只读统计作答（不改战斗、不改渲染）。
+      const mine = (rt.snapshot().projectiles ?? []).filter((p) => p.team === 'A');
+      if (mine.length > this.maxPlayerProjectiles) this.maxPlayerProjectiles = mine.length;
+      for (const p of mine) if (p.radius > this.maxPlayerRadius) this.maxPlayerRadius = p.radius;
       const hp = rt.hp();
       this.state = syncAdventureBattle(this.state, { playerHp: hp.a, enemyHp: hp.b, steps: rt.stepCount });
       const result = rt.result;
       if (result) {
+        // F3：本场弹丸峰值先存档，再走终态结算（战斗实例随后会被 dispose）。
+        this.lastBattleShells = {
+          maxPlayerSeen: this.maxPlayerProjectiles,
+          maxPlayerRadiusSeen: this.maxPlayerRadius,
+        };
         // 经 apply() 收口：确保终态（COMPLETE/FAILED）触发 recordTerminal（写入隔离测试档案），
         // 并正确 dispose 战斗、停循环、重绘（直接赋值会绕过档案写入，见 archive 隔离验收）。
         this.battleView.stopBattleAudio();
@@ -445,6 +545,10 @@ export class AdvPage {
   /* ----------------------------------------------------------- 渲染 */
 
   private render(): void {
+    // F3：即时反馈到点自动消失（纯显示；render 每帧都会走到这里，无需额外计时器）。
+    if (this.buildToast && performance.now() - this.buildToast.bornAt > ADV_BUILD_TOAST_MS) {
+      this.buildToast = null;
+    }
     const wrapW = this.stageWrap.clientWidth || PORTRAIT_LOGICAL_W;
     const wrapH = this.stageWrap.clientHeight || PORTRAIT_LOGICAL_H;
     const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
@@ -494,6 +598,9 @@ export class AdvPage {
 
     // 选择浮层（事件 / 强化）覆盖主体层，遮住行动带
     if (advOverlayOpen(this.state)) this.drawOverlay(ctx);
+
+    // F3：强化即时反馈（最顶层；瞬态自动消失，不挡输入）
+    if (this.buildToast) this.drawBuildToast(ctx);
   }
 
   /* ----------------------------------------------------------- 素材工具 */
@@ -697,6 +804,8 @@ export class AdvPage {
       this.battleView.render(this.battle);
       if (fill === 'cover') this.battleView.blitCover(ctx, b, 0.5);
       else this.battleView.blit(ctx, b);
+      // F3：本局改装图标条（兑现锚点；战斗与 RESULT 冻结帧都显示）
+      this.drawBuildStrip(ctx);
       return;
     }
 
@@ -764,6 +873,100 @@ export class AdvPage {
     ctx.fillStyle = '#7fd6a0';
     ctx.font = `500 13px ${FONT_STACK}`;
     ctx.fillText('▶ 按「继续」进入下一段路', b.x + b.w / 2, b.y + b.h - 60);
+  }
+
+  /**
+   * F3：强化获得的**即时反馈卡**（最顶层，瞬态 ~2.4s）。
+   *
+   * 版面刻意最小化：图标 + 「改装完成 · 强化名」+ 一行核心收益（紧急维修换成真实修理量）。
+   * 没有第二段说明文字 —— 效果由下一场战斗画面自己兑现（必改 2）。
+   *
+   * 位置取自**所有可能背景共用的空档**（选择后下一节点会立刻 present，反馈卡必须
+   * 与每一种版面都不相压）：
+   *   - 事件/建造浮层：beat 文字 ≤ b.y+138（234）之下、选项卡（n=3 起于 b.y+214=310）之上；
+   *   - 阶段提示（BANNER）：标题底 ≈ b.y+151（247）与首行 beat 顶 ≈ b.y+194（290）之间；
+   *   - 战斗/结算/居中叙事面板：本带全空。
+   * ⇒ y = b.y+152（248..288，h=40）对上述版面均留有 ≥2px 净空。
+   */
+  private drawBuildToast(ctx: CanvasRenderingContext2D): void {
+    const t = this.buildToast;
+    if (!t) return;
+    const age = performance.now() - t.bornAt;
+    const alpha = age > ADV_BUILD_TOAST_MS - ADV_TOAST_FADE_MS
+      ? Math.max(0, (ADV_BUILD_TOAST_MS - age) / ADV_TOAST_FADE_MS)
+      : 1;
+    if (alpha <= 0) return;
+
+    const w = 296;
+    const h = 40;
+    const x = Math.round((PORTRAIT_LOGICAL_W - w) / 2);
+    const y = STAGE_BAND.y + 152;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // 底（与事件选择卡同一族视觉：暗底 + 主题色描边）
+    ctx.fillStyle = 'rgba(10,14,22,0.94)';
+    this.roundRectPath(ctx, x, y, w, h, 10);
+    ctx.fill();
+    ctx.strokeStyle = COLORS.eventAccent;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // 左侧：强化专属图标（已筛选的冒险 UI 素材；缺失则整块留白，不画占位）
+    const icon = 24;
+    this.blitImage(ctx, advBuildIconId(t.id), x + 10, y + (h - icon) / 2, icon, icon, 'contain');
+    // 右侧：两行短文本（总宽 244）
+    const tx = x + 42;
+    const tw = w - 52;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    // 第一行：「改装完成」标签 + 强化名
+    ctx.font = `600 10px ${FONT_STACK}`;
+    const tagW = Math.min(ctx.measureText('改装完成').width, 44);
+    ctx.fillStyle = COLORS.eventAccent;
+    ctx.fillText('改装完成', tx, y + 14);
+    ctx.font = `700 14px ${FONT_STACK}`;
+    ctx.fillStyle = COLORS.textTitle;
+    ctx.fillText(this.fitText(ctx, t.label, tw - tagW - 6), tx + tagW + 6, y + 14);
+    // 第二行：一行核心收益（紧急维修 = 真实修理量，绿色强调）
+    ctx.fillStyle = t.extra ? '#7fd6a0' : COLORS.textDim;
+    ctx.font = `500 11px ${FONT_STACK}`;
+    ctx.fillText(this.fitText(ctx, t.extra || t.gain, tw), tx, y + 28);
+    ctx.restore();
+  }
+
+  /**
+   * F3：战斗中的「本局改装」图标条（兑现锚点）。
+   *
+   * 只给图标，不给数值、不给机制说明 —— 玩家自己把「我选的双联炮」与画面里
+   * 「一次两发炮弹」对应起来（必改 2：用已有炮弹数量 / 弹丸表现 / 耐久恢复兑现）。
+   * 位置在舞台带左上（天空区），不遮车辆、不遮弹丸。
+   */
+  private drawBuildStrip(ctx: CanvasRenderingContext2D): void {
+    const buffs = this.state.buffs;
+    if (buffs.length === 0) return;
+    const icon = 18;
+    const gap = 5;
+    const labelW = 30;
+    const padX = 10;
+    const w = labelW + buffs.length * (icon + gap) + padX;
+    const h = 30;
+    const x = 12;
+    const y = STAGE_BAND.y + 12;
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,14,22,0.62)';
+    this.roundRectPath(ctx, x, y, w, h, 15);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(124,141,176,0.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = COLORS.textDim;
+    ctx.font = `600 11px ${FONT_STACK}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('改装', x + 10, y + h / 2);
+    for (let i = 0; i < buffs.length; i++) {
+      this.blitImage(ctx, advBuildIconId(buffs[i]), x + labelW + i * (icon + gap), y + (h - icon) / 2, icon, icon, 'contain');
+    }
+    ctx.restore();
   }
 
   private drawAction(ctx: CanvasRenderingContext2D): void {
@@ -1448,6 +1651,33 @@ export class AdvPage {
       topHp: advTopDurability(this.state, this.ctx2, this.liveBattleHp()),
       /** F2：正式战斗运行时的真实 HP（`RunBattleRuntime.hp()`；无战斗实例时 null）。 */
       battleHp: this.battle ? this.battle.hp() : null,
+      /**
+       * F3：强化获得的**即时反馈**（瞬态；当前没有则 null）。
+       * `remainingMs` 供 E2E 判断「还在显示中」，不是新的隐藏状态。
+       */
+      buildToast: this.buildToast
+        ? {
+            id: this.buildToast.id,
+            label: this.buildToast.label,
+            gain: this.buildToast.gain,
+            extra: this.buildToast.extra,
+            remainingMs: Math.max(0, ADV_BUILD_TOAST_MS - (performance.now() - this.buildToast.bornAt)),
+          }
+        : null,
+      /**
+       * F3：本场战斗观测到的**玩家弹丸峰值**（只读统计，兑现证据）。
+       * `maxPlayerSeen` = 一次攻击里同时活着的玩家炮弹数峰值（双联 2 / 三连 3）；
+       * `maxPlayerRadiusSeen` = 玩家炮弹半径峰值（基础 10 / 重型弹头 16）。
+       */
+      battleProjectiles: this.battle
+        ? {
+            maxPlayerSeen: this.maxPlayerProjectiles,
+            maxPlayerRadiusSeen: this.maxPlayerRadius,
+            playerNow: this.battle.playerProjectileCount(),
+          }
+        : null,
+      /** F3：**上一场**战斗的弹丸峰值（终态后战斗实例已 dispose，用它做事后对账）。 */
+      lastBattleShells: this.lastBattleShells,
       battlesCompleted: this.state.battlesCompleted,
       battlesWon: this.state.battlesWon,
       seed: this.script.seed,

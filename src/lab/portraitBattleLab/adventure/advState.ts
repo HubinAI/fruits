@@ -206,6 +206,30 @@ export function advCarriedPlayerHp(s: AdventureState, ctx: AdventureContext): nu
   return s.carriedHp ?? ctx.playerHpMax;
 }
 
+/**
+ * FRUITS-ADVENTURE-BATTLE-HP-F3｜**紧急维修的真实修理量**（纯函数，沿用正式 Run 口径）。
+ *
+ * `emergencyRepair` 的语义只有一句：「选择时立刻修回一部分车体耐久」。正式 Run 的口径是
+ * `EMERGENCY_REPAIR_FRACTION(0.25) × 耐久上限`，按**缺口截断**（`runPageState.chooseRunBuff` /
+ * `resolveDurability` 同一公式）—— 本函数逐字复用，不新造数值。
+ *
+ * ⚠️ 为什么冒险必须自己算：冒险把 `buffs` 原样注入 `RunBattleRuntime`，而运行时的能力模块
+ *    （`RunBuildAbilities`）只实现 `kineticBurst` ⇒ 若不在这里结算，选「紧急维修」在冒险里
+ *    等于**空选**（只占一个 Build 位，耐久一点不涨）。D1 已实测该项无任何可感知结果。
+ *
+ * @param currentHp 修理前的耐久（冒险 = `carriedHp`；事件 trade 先扣耐久再修，也从这里进）
+ * @returns `hp` = 修理后耐久；`gained` = 真实恢复量（0 = 已满，如实告知，不假装有效）
+ */
+export function advEmergencyRepairGain(
+  currentHp: number,
+  ctx: AdventureContext,
+): { readonly hp: number; readonly gained: number } {
+  const maxHp = ctx.playerHpMax;
+  const want = Math.round(maxHp * EMERGENCY_REPAIR_FRACTION);
+  const gained = Math.max(0, Math.min(want, maxHp - currentHp));
+  return { hp: currentHp + gained, gained };
+}
+
 /** 顶部耐久条的显示值（见 `advTopDurability`）。 */
 export interface AdventureTopDurability {
   readonly hp: number;
@@ -507,10 +531,22 @@ function applyEffect(
     // 领取时解析：第一个未拥有的候选（同种子恒定序 + 当前 Build 的纯函数）。
     const granted = effect.candidates.find((id) => !s.buffs.includes(id)) ?? null;
     if (granted) {
+      // F3：事件也可能发「紧急维修」⇒ 与 BUILD 路径同一口径真实修耐久（正式 Run 语义）。
+      // trade 先扣耐久、再按扣后的值修（顺序可见：先付钱，后拿货）。
+      const repair =
+        granted === 'emergencyRepair'
+          ? advEmergencyRepairGain(effect.kind === 'trade' ? Math.max(floor, current - tradeDmg) : current, ctx)
+          : null;
+      const repairTail =
+        repair === null
+          ? ''
+          : repair.gained > 0
+            ? `；车体修补完成，恢复 ${repair.gained} 点耐久（当前 ${repair.hp}/${maxHp}）`
+            : '；耐久已满，这次维修没有可修的地方';
       if (effect.kind === 'buff') {
         return {
-          state: next(s, { buffs: [...s.buffs, granted] }),
-          resultText: `你获得了临时强化：${labelOf(granted)}（已生效，下一场战斗计入）。`,
+          state: next(s, { buffs: [...s.buffs, granted], ...(repair ? { carriedHp: repair.hp } : {}) }),
+          resultText: `你获得了临时强化：${labelOf(granted)}（已生效，下一场战斗计入）${repairTail}。`,
         };
       }
       // trade：真实 HP ↔ Build 权衡，仅当真正领到强化才扣耐久。
@@ -520,15 +556,16 @@ function applyEffect(
       const lost = current - after;
       const tail = clamped ? `（触及最低保留 ${floor}）` : '';
       return {
-        state: next(s, { carriedHp: after, buffs: [...s.buffs, granted] }),
-        resultText: `你用 ${lost} 点耐久换来了临时强化：${labelOf(granted)}。${tail}`,
+        state: next(s, {
+          carriedHp: repair ? repair.hp : after,
+          buffs: [...s.buffs, granted],
+        }),
+        resultText: `你用 ${lost} 点耐久换来了临时强化：${labelOf(granted)}${repairTail}。${tail}`,
       };
     }
 
     // 候选全被拥有 → 补救维修（绝不无收益中奖、绝不无提示扣血）。
-    const healAmount = Math.round(maxHp * EMERGENCY_REPAIR_FRACTION);
-    const after = Math.min(maxHp, current + healAmount);
-    const gained = after - current;
+    const { hp: after, gained } = advEmergencyRepairGain(current, ctx);
     if (gained > 0) {
       const head = effect.kind === 'trade' ? '商队的货你都已拥有，这单改为免费补给' : '箱里的强化你都已拥有，改为一次补给';
       return {
@@ -581,7 +618,24 @@ export function chooseAdventureOption(
     if (!def) return s; // 不在候选池 → 不结算
     const mod = runBuildOptionById(optionId);
     const logs = [{ kind: 'choice' as AdventureLogKind, text: mod?.logText ?? def.label }];
-    const advanced = next(s, { buffs: [...s.buffs, optionId as RunBuildId], log: pushLogs(s.log, logs) });
+    let advanced = next(s, { buffs: [...s.buffs, optionId as RunBuildId], log: pushLogs(s.log, logs) });
+    // F3：紧急维修 = 选择即真实修耐久（正式 Run 口径：0.25 × 上限，按缺口截断）。
+    // 冒险此前只把它记进 buffs（运行时能力只认 kineticBurst）⇒ 选它等于空选；这里补上真实效果。
+    // carriedHp 是「下一场战斗的开局耐久」⇒ 顶栏（F2 实时口径）与下一场真实 HP 同时兑现。
+    if (optionId === 'emergencyRepair') {
+      const repair = advEmergencyRepairGain(advanced.carriedHp ?? ctx.playerHpMax, ctx);
+      advanced = next(advanced, {
+        carriedHp: repair.hp,
+        log: pushLogs(
+          advanced.log,
+          [
+            repair.gained > 0
+              ? { kind: 'durability' as AdventureLogKind, text: `车体修补完成，恢复了 ${repair.gained} 点耐久。` }
+              : { kind: 'durability' as AdventureLogKind, text: '耐久已满，紧急维修没有可修的地方。' },
+          ],
+        ),
+      });
+    }
     if (node.next) return presentNode(advanced, node.next, script, ctx);
     return advanced;
   }
