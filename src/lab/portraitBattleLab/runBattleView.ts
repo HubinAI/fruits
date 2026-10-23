@@ -454,6 +454,122 @@ export class RunBattleView {
     this.blitRegion(ctx, { x: RUN_BATTLE_VIEW_INSET.x + sx, y: RUN_BATTLE_VIEW_INSET.y + sy, w: sw, h: sh }, band);
   }
 
+  /**
+   * FRUITS-ADVENTURE-CAMERA-F4｜冒险专用**自适应镜头**的取景参数（纯合成，只读推理）。
+   *
+   * 思路（与 Queue 必改 2/3 对应，且刻意保持「最简单距离约束」，**不引入状态机**）：
+   *   ① 取「双车世界包围盒并集 + 外扩 padding」作为关键主体矩形，映射到安全区逻辑坐标；
+   *   ② 求能刚好框住该主体的放大倍数 `fit = min(safe.w/subjW, safe.h/subjH)`；
+   *   ③ 实际 zoom = clamp(fit, 1, maxZoom)，再过一道**最小增益门限**：
+   *        - 交战/接近（双车近）→ fit 很大 → 取上限 maxZoom（默认 1.6）⇒ 主体明显放大；
+   *        - 远距分离 / 冲锋拉远 / 击飞（双车远）→ fit 变小 → zoom 同步下降；
+   *        - 若 fit < 1（主体宽过安全区，理论上正式相机已框住双车）⇒ zoom 封底为 1
+   *          ⇒ 退化为原取景（不裁切任何关键主体）；
+   *        - 若 zoom < ADV_CAMERA_MIN_ZOOM(1.1)（增益太小，正式相机已把双车框得够大）
+   *          ⇒ 同样**恢复原取景**（不做无意义微裁）。
+   *   ④ 裁切矩形以主体中心为锚、钳制在安全区内 → 双车与命中动作恒在框内（验收②）。
+   *
+   * ⚠️ 纯合成：不写 `renderer.*`、不改 `reframe` / `applyBattleFollow` / 世界坐标 / 物理 /
+   *    碰撞 / 镜头规则；画出来的仍是正式相机渲染的同一批像素。
+   */
+  private static readonly ADV_SUBJECT_PAD = 0.06; // 主体外扩比例（每侧），给命中 FX 留呼吸位
+  private static readonly ADV_SUBJECT_PAD_MIN = 8; // 最小外扩（逻辑 px）；vehicleWorldBox 已含全部可见部件
+  private static readonly ADV_CAMERA_MIN_ZOOM = 1.1; // 最小增益门限：低于它恢复原取景（避免无意义微裁）
+
+  /**
+   * 把「玩家车 + 敌车」的世界包围盒并集，外加 padding，映射到**安全区逻辑坐标**
+   * （原点 = 安全区左上，等于离屏画布左上 − 正式 inset）。返回 null 表示无战斗实体。
+   */
+  subjectSafeRect(rt: RunBattleRuntime): RunRect | null {
+    const a = rt.vehicleBox('A');
+    const b = rt.vehicleBox('B');
+    if (!a || !b) return null;
+    const t = this.viewTransform();
+    const toSafe = (wx: number, wy: number) => ({
+      x: wx * t.scale + t.offsetX - t.cropX,
+      y: wy * t.scale + t.offsetY - t.cropY,
+    });
+    const pts = [
+      toSafe(a.minX, a.minY), toSafe(a.maxX, a.minY), toSafe(a.minX, a.maxY), toSafe(a.maxX, a.maxY),
+      toSafe(b.minX, b.minY), toSafe(b.maxX, b.minY), toSafe(b.minX, b.maxY), toSafe(b.maxX, b.maxY),
+    ];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of pts) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    if (!Number.isFinite(minX) || maxX - minX <= 0 || maxY - minY <= 0) return null;
+    const padX = (maxX - minX) * RunBattleView.ADV_SUBJECT_PAD + RunBattleView.ADV_SUBJECT_PAD_MIN;
+    const padY = (maxY - minY) * RunBattleView.ADV_SUBJECT_PAD + RunBattleView.ADV_SUBJECT_PAD_MIN;
+    return { x: minX - padX, y: minY - padY, w: maxX - minX + padX * 2, h: maxY - minY + padY * 2 };
+  }
+
+  /** F4：给定主体矩形，返回实际合成放大倍数（距离约束 + 最小增益门限 + 封顶 maxZoom）。 */
+  advCompositeZoom(rt: RunBattleRuntime, maxZoom = 1.6): number {
+    const subj = this.subjectSafeRect(rt);
+    if (!subj) return 1;
+    const safe = this.safeAreaSize();
+    const fit = Math.min(safe.w / subj.w, safe.h / subj.h);
+    const z = Math.min(maxZoom, fit);
+    // fit<1 ⇒ 退化为原取景（不裁切）；增益不足 ADV_CAMERA_MIN_ZOOM ⇒ 同样恢复原取景
+    //（必改3「恢复原取景规则」：正式相机已把双车框得够大时不再做无意义微裁）。
+    return z < RunBattleView.ADV_CAMERA_MIN_ZOOM ? 1 : z;
+  }
+
+  /**
+   * F4 诊断读数（只读；E2E / 探针用）：主体安全区矩形、实际裁切矩形、合成倍数、双车世界间距。
+   * 返回 null 表示无战斗实体。
+   */
+  advDiagnostics(
+    rt: RunBattleRuntime,
+    maxZoom = 1.6,
+  ): { subjectSafe: RunRect; cropSafe: RunRect; zoom: number; gapWorld: number } | null {
+    const subj = this.subjectSafeRect(rt);
+    if (!subj) return null;
+    const safe = this.safeAreaSize();
+    const a = rt.vehicleBox('A');
+    const b = rt.vehicleBox('B');
+    const ax = (a.minX + a.maxX) / 2, ay = (a.minY + a.maxY) / 2;
+    const bx = (b.minX + b.maxX) / 2, by = (b.minY + b.maxY) / 2;
+    const gapWorld = Math.hypot(bx - ax, by - ay);
+    const z = this.advCompositeZoom(rt, maxZoom);
+    let crop: RunRect;
+    if (z <= 1) {
+      crop = { x: 0, y: 0, w: safe.w, h: safe.h };
+    } else {
+      const cw = safe.w / z, ch = safe.h / z;
+      const cx = Math.max(0, Math.min(safe.w - cw, subj.x + subj.w / 2 - cw / 2));
+      const cy = Math.max(0, Math.min(safe.h - ch, subj.y + subj.h / 2 - ch / 2));
+      crop = { x: cx, y: cy, w: cw, h: ch };
+    }
+    return { subjectSafe: subj, cropSafe: crop, zoom: z, gapWorld };
+  }
+
+  /**
+   * FRUITS-ADVENTURE-CAMERA-F4｜冒险专用**自适应镜头**合成（默认启用，仅冒险原型）。
+   *
+   * 与 `blitSubject`（固定倍数、底部加权）不同：本方法以双车并集为中心动态取景，zoom 由
+   * 双车间距驱动（距离约束），远距/击飞自动收敛到原取景、交战自动放大到 maxZoom，
+   * 且裁切矩形恒包含双车与命中动作（验收②）。仍为纯合成：不写 `renderer.*`、不动正式相机。
+   *
+   * ⚠️ `zoom<=1`（主体过宽或关闭）时退化为 `blit`（原取景），与无 F4 行为逐像素一致。
+   */
+  blitAdventureCamera(ctx: CanvasRenderingContext2D, band: RunRect, rt: RunBattleRuntime, maxZoom = 1.6): void {
+    const d = this.advDiagnostics(rt, maxZoom);
+    if (!d || d.zoom <= 1 || !d.cropSafe) {
+      this.blit(ctx, band);
+      return;
+    }
+    const c = d.cropSafe;
+    this.blitRegion(
+      ctx,
+      { x: RUN_BATTLE_VIEW_INSET.x + c.x, y: RUN_BATTLE_VIEW_INSET.y + c.y, w: c.w, h: c.h },
+      band,
+    );
+  }
+
   /** 离屏视口逻辑尺寸（= 「舞台带 + 正式 inset」× `viewportScale`）。 */
   viewportSize(): { readonly w: number; readonly h: number } {
     return { w: this.viewportW(), h: this.viewportH() };

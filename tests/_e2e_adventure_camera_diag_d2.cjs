@@ -140,7 +140,9 @@ async function waitBattleEnd(page) {
   await page.waitForTimeout(200);
 }
 async function gotoSeedZoom(page, seed, zoom) {
-  const q = `seed=${encodeURIComponent(seed)}${zoom > 1 ? `&d2zoom=${zoom}` : ''}`;
+  // F4 起默认 = 自适应镜头；显式带 ?d2zoom=（含 =1）才进固定倍数模式，
+  // 故「现有镜头」基线用 ?d2zoom=1（=1 ⇒ 退化为全安全区 blit = 原取景），避免落入自适应默认。
+  const q = `seed=${encodeURIComponent(seed)}&d2zoom=${zoom}`;
   await page.goto(`${URL_BASE}/adventure.html?${q}`, { waitUntil: 'load' });
   await page.waitForFunction(() => !!window.__adv && !!window.__adv.probe, null, { timeout: 15000 });
 }
@@ -248,16 +250,17 @@ async function compareZoom(page, cfg) {
   const exp = await captureSequence(page, `adv-d2-${id}-exp`);
   if (!existing || !exp) return;
 
-  // 技术结论：实验倍率必须体现在「合成放大」，而非「正式相机」。验证两局首帧 cameraScale
-  // 比值≈1.0（若为实验放大应≈ZOOM=1.6）—— 动态取景逐帧有抖动，故用比值±5%判定「相机未改」。
+  // 技术结论：实验倍率必须体现在「合成放大」，而非「正式相机」。用**序列均** cameraScale
+  // 比值≈1.0（若为实验放大应≈ZOOM=1.6）—— 首帧因采集时序抖动不可比（F4 同源修正）。
+  const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : null);
   const camE = existing.map((f) => f.cameraScale).filter((x) => x != null);
   const camX = exp.map((f) => f.cameraScale).filter((x) => x != null);
-  const camRatio = camE.length && camX.length ? camX[0] / camE[0] : 1;
+  const camRatio = camE.length && camX.length ? mean(camX) / mean(camE) : 1;
   const camSame = camRatio > 0.95 && camRatio < 1.05;
   log(
     camSame,
-    `D2 ${id} 正式相机未被改动（cameraScale 比值=${camRatio.toFixed(3)}，远离实验倍率 ${ZOOM}）`,
-    `现有首帧=${camE.length ? camE[0].toFixed(3) : '—'}；实验首帧=${camX.length ? camX[0].toFixed(3) : '—'}；相机未放大（若放大应≈${ZOOM}）`,
+    `D2 ${id} 正式相机未被改动（序列均 cameraScale 比值=${camRatio.toFixed(3)}，远离实验倍率 ${ZOOM}）`,
+    `现有均=${camE.length ? mean(camE).toFixed(3) : '—'}；实验均=${camX.length ? mean(camX).toFixed(3) : '—'}；相机未放大（若放大应≈${ZOOM}）`,
   );
 
   // 实验镜头把主体放大 ~ZOOM 倍（纯合成放大，量化证据）。

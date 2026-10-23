@@ -121,17 +121,50 @@ const RESULT_BAND: Rect = { x: 0, y: 564, w: PORTRAIT_LOGICAL_W, h: 180 };
 const ACTION_BAND: Rect = { x: 0, y: 744, w: PORTRAIT_LOGICAL_W, h: 100 };
 
 /**
- * D2 诊断（隔离实验，**不进入正式主线**）：仅当冒险页 URL 带 `?d2zoom=1.6` 这类 >1 参数时，
- * 战斗主体合成才走放大子矩形（`RunBattleView.blitSubject`）。默认 1 = 与原行为逐像素一致，
- * 正式玩法 / 首页 / 车库 / 所有无此参数的入口均不受影响。
+ * D2 诊断（隔离实验，**不进入正式主线**）：仅当冒险页 URL **显式**带 `?d2zoom=` 时，
+ * 战斗主体合成才走固定倍数子矩形（`RunBattleView.blitSubject`）。`?d2zoom=1` ⇒ 倍数 1
+ * ⇒ 退化为全安全区 `blit`（= 原取景基线，供 D2 对照）。**无此参数** ⇒ F4 自适应默认。
  */
-const D2_EXPERIMENT_ZOOM = (() => {
+const D2_ZOOM_PARAM = (() => {
   try {
-    const raw = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('d2zoom') : null;
-    const v = Number(raw);
-    return Number.isFinite(v) && v > 1 && v <= 2.5 ? v : 1;
+    return typeof location !== 'undefined' ? new URLSearchParams(location.search).get('d2zoom') : null;
   } catch {
-    return 1;
+    return null;
+  }
+})();
+/** URL 显式带了 `?d2zoom=`（含 =1）⇒ 固定倍数模式（z=1 即原取景基线）。 */
+const D2_FIXED = D2_ZOOM_PARAM != null && Number.isFinite(Number(D2_ZOOM_PARAM));
+const D2_EXPERIMENT_ZOOM = (() => {
+  const v = Number(D2_ZOOM_PARAM);
+  return Number.isFinite(v) && v > 1 && v <= 2.5 ? v : 1;
+})();
+
+/**
+ * FRUITS-ADVENTURE-CAMERA-F4｜冒险专用自适应镜头的解析参数（仅冒险原型，纯合成裁切）。
+ *
+ * - `ADV_CAMERA_MAX_ZOOM`：采纳的放大上限（默认 1.6，D2 已证近战可读性明显提升）；
+ *   可用 `?f4max=` 临时改为 1.3 等做对照，超出 [1.05, 2.0] 钳制。
+ * - `?f4off=1`：关闭自适应镜头，恢复原取景（= 无 F4 的 `blit` 行为），用于对照基线。
+ * - `?d2zoom=`：D2 遗留固定倍数旋钮（底部加权），仅作「固定 1.6 vs 自适应」对照用。
+ * 三者均仅在冒险页 URL 生效；正式玩法 / 首页 / 车库不受影响。
+ */
+const ADV_CAMERA_MAX_ZOOM = 1.6;
+const ADV_CAMERA_OFF = (() => {
+  try {
+    const raw = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('f4off') : null;
+    return raw === '1' || raw === 'true';
+  } catch {
+    return false;
+  }
+})();
+const ADV_CAMERA_MAX = (() => {
+  try {
+    const raw = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('f4max') : null;
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v <= 0) return ADV_CAMERA_MAX_ZOOM;
+    return Math.max(1.05, Math.min(2.0, v));
+  } catch {
+    return ADV_CAMERA_MAX_ZOOM;
   }
 })();
 
@@ -817,9 +850,19 @@ export class AdvPage {
       // RESULT 阶段主体层只有 390×468（更矮）⇒ `blitCover` 等比铺满后裁掉多余天空/地面带，
       // 车辆像素尺寸与战斗中完全一致（不缩放、不拉伸）。
       this.battleView.render(this.battle);
-      if (fill === 'cover') this.battleView.blitCover(ctx, b, 0.5);
-      else if (D2_EXPERIMENT_ZOOM > 1) this.battleView.blitSubject(ctx, b, D2_EXPERIMENT_ZOOM);
-      else this.battleView.blit(ctx, b);
+      if (fill === 'cover') {
+        // RESULT 冻结帧：沿用 F1 等比铺满（裁多余天空/地面带），双车恒在框内。
+        this.battleView.blitCover(ctx, b, 0.5);
+      } else if (D2_FIXED) {
+        // F4 对照旋钮：显式固定倍数（?d2zoom=，含 =1 ⇒ 原取景基线）。
+        this.battleView.blitSubject(ctx, b, D2_EXPERIMENT_ZOOM);
+      } else if (ADV_CAMERA_OFF) {
+        // F4 对照基线：关闭自适应镜头，恢复原取景（与无 F4 逐像素一致）。
+        this.battleView.blit(ctx, b);
+      } else {
+        // F4 采纳：冒险专用自适应镜头（仅合成裁切，距离约束，不动正式相机/物理）。
+        this.battleView.blitAdventureCamera(ctx, b, this.battle, ADV_CAMERA_MAX);
+      }
       // F3：本局改装图标条（兑现锚点；战斗与 RESULT 冻结帧都显示）
       this.drawBuildStrip(ctx);
       return;
@@ -1728,8 +1771,10 @@ export class AdvPage {
     readonly scaleY: number;
     readonly uniform: boolean;
     readonly cameraScale: number;
-    /** D2 诊断：本次战斗合成实际使用的放大倍数（无 `?d2zoom=` 时恒为 1 = 原行为）。 */
+    /** 本次战斗合成实际使用的放大倍数（F4 自适应：距离约束值；D2 固定：d2zoom；关闭/RESULT：1）。 */
     readonly compositeZoom: number;
+    /** F4：当前镜头模式（fixed=D2 固定 / off=原取景 / adaptive=F4 采纳）。 */
+    readonly cameraMode: 'fixed' | 'off' | 'adaptive';
     readonly vehicleA: {
       readonly worldW: number;
       readonly worldH: number;
@@ -1738,20 +1783,83 @@ export class AdvPage {
       readonly pxH: number;
       readonly pxAspect: number;
     } | null;
+    readonly vehicleB: {
+      readonly worldW: number;
+      readonly worldH: number;
+      readonly worldAspect: number;
+      readonly pxW: number;
+      readonly pxH: number;
+      readonly pxAspect: number;
+    } | null;
+    /** F4：关键主体（双车并集 + padding）在安全区的矩形（安全区坐标）。 */
+    readonly subjectSafe: { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | null;
+    /** F4：玩家车「未外扩」安全区矩形（验收②「关键主体不被裁切」的精确判定用）。 */
+    readonly vehicleASafe: { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | null;
+    /** F4：敌车「未外扩」安全区矩形。 */
+    readonly vehicleBSafe: { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | null;
+    /** F4：实际裁切矩形（安全区坐标）；恒包含双车（验收②）。 */
+    readonly cropSafe: { readonly x: number; readonly y: number; readonly w: number; readonly h: number } | null;
+    /** F4：双车世界中心间距（用于验证「距离约束」生效）。 */
+    readonly gapWorld: number | null;
   } | null {
     const rt = this.battle;
     if (!rt) return null;
     const band = this.state.phase === 'RESULT' ? RESULT_STAGE : STAGE_BAND;
-    const comp = this.battleView.compositeProbe(band, band === STAGE_BAND ? 'contain' : 'cover');
+    const isBattle = band === STAGE_BAND;
+    const comp = this.battleView.compositeProbe(band, isBattle ? 'contain' : 'cover');
     const cam = this.battleView.viewTransform();
-    const box = rt.vehicleBox('A');
-    const worldW = box.maxX - box.minX;
-    const worldH = box.maxY - box.minY;
-    // D2：战斗态（STAGE_BAND）若启用隔离实验放大，实际合成倍数为 D2_EXPERIMENT_ZOOM；
-    // RESULT 走 blitCover（不放大）⇒ 恒 1。默认无 `?d2zoom=` ⇒ 1，F1 读数逐位不变。
-    const compositeZoom = band === STAGE_BAND ? D2_EXPERIMENT_ZOOM : 1;
-    const pxW = worldW * cam.scale * comp.scaleX * compositeZoom;
-    const pxH = worldH * cam.scale * comp.scaleY * compositeZoom;
+    // F4 镜头模式解析（仅战斗态取景可被裁切；RESULT 冻结帧沿用 blitCover 等比铺满）。
+    const mode: 'fixed' | 'off' | 'adaptive' =
+      D2_FIXED ? 'fixed' : ADV_CAMERA_OFF ? 'off' : 'adaptive';
+    const compositeZoom = isBattle
+      ? mode === 'fixed'
+        ? D2_EXPERIMENT_ZOOM
+        : mode === 'off'
+          ? 1
+          : this.battleView.advCompositeZoom(rt, ADV_CAMERA_MAX)
+      : 1;
+    const diag = isBattle && mode === 'adaptive' ? this.battleView.advDiagnostics(rt, ADV_CAMERA_MAX) : null;
+    const safe = comp.safe;
+    // 关键主体（双车并集 + padding）在所有战斗模式下一律取真实几何，
+    // 这样 cropSafe 才能如实反映「该模式下真实裁切是否裁掉主体」（fixed 模式在远距分离时会暴露）。
+    let subjectSafe: { x: number; y: number; w: number; h: number } | null = null;
+    let cropSafe: { x: number; y: number; w: number; h: number } | null = null;
+    if (isBattle) {
+      const realSubj = this.battleView.subjectSafeRect(rt);
+      subjectSafe = realSubj ? { x: realSubj.x, y: realSubj.y, w: realSubj.w, h: realSubj.h } : null;
+      if (mode === 'adaptive' && diag) {
+        cropSafe = { x: diag.cropSafe.x, y: diag.cropSafe.y, w: diag.cropSafe.w, h: diag.cropSafe.h };
+      } else if (mode === 'fixed') {
+        const z = D2_EXPERIMENT_ZOOM;
+        const sw = safe.w / z, sh = safe.h / z;
+        cropSafe = { x: (safe.w - sw) / 2, y: safe.h - sh, w: sw, h: sh };
+      } else {
+        cropSafe = { x: 0, y: 0, w: safe.w, h: safe.h };
+      }
+    }
+    const mkVehicle = (team: 'A' | 'B') => {
+      const b = rt.vehicleBox(team);
+      const wW = b.maxX - b.minX, wH = b.maxY - b.minY;
+      if (wW <= 0 || wH <= 0) return null;
+      const pW = wW * cam.scale * comp.scaleX * compositeZoom;
+      const pH = wH * cam.scale * comp.scaleY * compositeZoom;
+      return { worldW: wW, worldH: wH, worldAspect: wW / wH, pxW: pW, pxH: pH, pxAspect: pW / pH };
+    };
+    // F4：双车「未外扩」安全区矩形 + 双车世界中心间距（所有战斗模式都算，供验收②精确判定）。
+    const toSafeBox = (b: { minX: number; minY: number; maxX: number; maxY: number }) => {
+      const x1 = b.minX * cam.scale + cam.offsetX - cam.cropX;
+      const y1 = b.minY * cam.scale + cam.offsetY - cam.cropY;
+      const x2 = b.maxX * cam.scale + cam.offsetX - cam.cropX;
+      const y2 = b.maxY * cam.scale + cam.offsetY - cam.cropY;
+      return { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1) };
+    };
+    const aBox = rt.vehicleBox('A');
+    const bBox = rt.vehicleBox('B');
+    const vehicleASafe = isBattle ? toSafeBox(aBox) : null;
+    const vehicleBSafe = isBattle ? toSafeBox(bBox) : null;
+    const gapWorld = isBattle
+      ? Math.hypot((bBox.minX + bBox.maxX) / 2 - (aBox.minX + aBox.maxX) / 2, (bBox.minY + bBox.maxY) / 2 - (aBox.minY + aBox.maxY) / 2)
+      : null;
     return {
       phase: this.state.phase,
       band: comp.band,
@@ -1762,17 +1870,14 @@ export class AdvPage {
       uniform: Math.abs(comp.scaleX - comp.scaleY) <= 1e-6,
       cameraScale: cam.scale,
       compositeZoom,
-      vehicleA:
-        worldW > 0 && worldH > 0
-          ? {
-              worldW,
-              worldH,
-              worldAspect: worldW / worldH,
-              pxW,
-              pxH,
-              pxAspect: pxW / pxH,
-            }
-          : null,
+      cameraMode: mode,
+      vehicleA: mkVehicle('A'),
+      vehicleB: mkVehicle('B'),
+      vehicleASafe,
+      vehicleBSafe,
+      subjectSafe,
+      cropSafe,
+      gapWorld,
     };
   }
 
