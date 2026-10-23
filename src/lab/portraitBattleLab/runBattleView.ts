@@ -429,6 +429,31 @@ export class RunBattleView {
     );
   }
 
+  /**
+   * D2 诊断专用（**隔离实验，不进入正式主线**，默认不被调用）：
+   * 把离屏画面的「主体子矩形」—— 水平居中、底部加权（围绕贴地双车）—— 放大 `zoom` 倍
+   * 等比贴满目标带，从而**在不改动正式相机 / 物理 / 碰撞** 的前提下放大战斗主体、提高可读性。
+   *
+   * ⚠️ 纯合成：不写任何 `renderer.*`、不改 `reframe` / `applyBattleFollow` / 世界坐标 / 镜头规则。
+   *    只裁掉四周多余天空/地面并把主体区域等比放大，X/Y 用同一 scale（`blitRegion` 同源）。
+   * ⚠️ 调用方（冒险页）只在 `?d2zoom=` 诊断查询参数存在且 >1 时才调用本方法；正式玩法、首页、
+   *    车库、以及所有无该参数的入口，行为与此前逐像素一致（本方法永不被触发）。
+   */
+  blitSubject(ctx: CanvasRenderingContext2D, band: RunRect, zoom = 1.6): void {
+    const z = Number.isFinite(zoom) && zoom > 1 ? zoom : 1;
+    if (z <= 1) {
+      this.blit(ctx, band);
+      return;
+    }
+    const safe = this.safeAreaSize();
+    // 更小源区域 = 放大：水平居中（双车中点≈画面中），底部加权（车辆贴地，占下 1/z）。
+    const sw = safe.w / z;
+    const sh = safe.h / z;
+    const sx = (safe.w - sw) / 2;
+    const sy = safe.h - sh;
+    this.blitRegion(ctx, { x: RUN_BATTLE_VIEW_INSET.x + sx, y: RUN_BATTLE_VIEW_INSET.y + sy, w: sw, h: sh }, band);
+  }
+
   /** 离屏视口逻辑尺寸（= 「舞台带 + 正式 inset」× `viewportScale`）。 */
   viewportSize(): { readonly w: number; readonly h: number } {
     return { w: this.viewportW(), h: this.viewportH() };

@@ -120,6 +120,21 @@ const RESULT_STAGE: Rect = { x: 0, y: 96, w: PORTRAIT_LOGICAL_W, h: 468 };
 const RESULT_BAND: Rect = { x: 0, y: 564, w: PORTRAIT_LOGICAL_W, h: 180 };
 const ACTION_BAND: Rect = { x: 0, y: 744, w: PORTRAIT_LOGICAL_W, h: 100 };
 
+/**
+ * D2 诊断（隔离实验，**不进入正式主线**）：仅当冒险页 URL 带 `?d2zoom=1.6` 这类 >1 参数时，
+ * 战斗主体合成才走放大子矩形（`RunBattleView.blitSubject`）。默认 1 = 与原行为逐像素一致，
+ * 正式玩法 / 首页 / 车库 / 所有无此参数的入口均不受影响。
+ */
+const D2_EXPERIMENT_ZOOM = (() => {
+  try {
+    const raw = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('d2zoom') : null;
+    const v = Number(raw);
+    return Number.isFinite(v) && v > 1 && v <= 2.5 ? v : 1;
+  } catch {
+    return 1;
+  }
+})();
+
 // F3：强化获得的即时反馈显示时长（ms）。只影响显示，不影响状态机时序（tapChoice 的 130ms 按压反馈不变）。
 const ADV_BUILD_TOAST_MS = 2400;
 /** F3：即时反馈的淡出时长（ms）。 */
@@ -803,6 +818,7 @@ export class AdvPage {
       // 车辆像素尺寸与战斗中完全一致（不缩放、不拉伸）。
       this.battleView.render(this.battle);
       if (fill === 'cover') this.battleView.blitCover(ctx, b, 0.5);
+      else if (D2_EXPERIMENT_ZOOM > 1) this.battleView.blitSubject(ctx, b, D2_EXPERIMENT_ZOOM);
       else this.battleView.blit(ctx, b);
       // F3：本局改装图标条（兑现锚点；战斗与 RESULT 冻结帧都显示）
       this.drawBuildStrip(ctx);
@@ -1712,6 +1728,8 @@ export class AdvPage {
     readonly scaleY: number;
     readonly uniform: boolean;
     readonly cameraScale: number;
+    /** D2 诊断：本次战斗合成实际使用的放大倍数（无 `?d2zoom=` 时恒为 1 = 原行为）。 */
+    readonly compositeZoom: number;
     readonly vehicleA: {
       readonly worldW: number;
       readonly worldH: number;
@@ -1729,8 +1747,11 @@ export class AdvPage {
     const box = rt.vehicleBox('A');
     const worldW = box.maxX - box.minX;
     const worldH = box.maxY - box.minY;
-    const pxW = worldW * cam.scale * comp.scaleX;
-    const pxH = worldH * cam.scale * comp.scaleY;
+    // D2：战斗态（STAGE_BAND）若启用隔离实验放大，实际合成倍数为 D2_EXPERIMENT_ZOOM；
+    // RESULT 走 blitCover（不放大）⇒ 恒 1。默认无 `?d2zoom=` ⇒ 1，F1 读数逐位不变。
+    const compositeZoom = band === STAGE_BAND ? D2_EXPERIMENT_ZOOM : 1;
+    const pxW = worldW * cam.scale * comp.scaleX * compositeZoom;
+    const pxH = worldH * cam.scale * comp.scaleY * compositeZoom;
     return {
       phase: this.state.phase,
       band: comp.band,
@@ -1740,6 +1761,7 @@ export class AdvPage {
       scaleY: comp.scaleY,
       uniform: Math.abs(comp.scaleX - comp.scaleY) <= 1e-6,
       cameraScale: cam.scale,
+      compositeZoom,
       vehicleA:
         worldW > 0 && worldH > 0
           ? {

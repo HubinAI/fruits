@@ -242,6 +242,10 @@ async function captureBattle(page, prefix) {
   }
   const s0 = await probe(page);
   const hp0 = s0.battleHp ? { a: s0.battleHp.a, b: s0.battleHp.b } : null;
+  // D2 修复：把本场开局时的 carriedHp 一并带回 —— 它是跨战耐久的唯一真源，
+  // 下一节点若是阶段整备(BANNER)会在此之上再补给（可能封顶），故「下一场开局HP」应等于
+  // 「战斗开局时的 carriedHp」，而非选完维修那一刻的 1009。这才是真实的跨战继承契约。
+  const startCarriedHp = typeof s0.carriedHp === 'number' ? s0.carriedHp : null;
   // 远景
   await page.waitForTimeout(650);
   await shot(page, `${prefix}-wide.png`);
@@ -282,7 +286,12 @@ async function captureBattle(page, prefix) {
   // 终态后峰值已存档到 lastBattleShells
   const end = await probe(page);
   const peak = shellsOf(end);
-  return peak;
+  // D2 修复：把本场开局真实 HP（carriedHp 继承验证用）一并带回，避免「跨战继承」用恒真断言。
+  const startPlayerHp = hp0 ? hp0.a : null;
+  const startPlayerMax = s0.playerHpMax || null;
+  return peak
+    ? { ...peak, startPlayerHp, startPlayerMax, startCarriedHp }
+    : { maxPlayerSeen: 0, maxPlayerRadiusSeen: 0, playerNow: 0, startPlayerHp, startPlayerMax, startCarriedHp };
 }
 
 async function captureAttack(page, cfg) {
@@ -336,24 +345,52 @@ async function captureRepair(page) {
   const before = await probe(page);
   const beforeHp = before.carriedHp;
   const beforeTop = before.topHp ? before.topHp.hp : null;
+  const maxHp = before.playerHpMax || 1100;
+  // 预期修理量（与 advEmergencyRepairGain 同口径：0.25×上限，按缺口截断）—— 真源公式，非魔法数。
+  const expectedGain = Math.max(0, Math.min(Math.round(0.25 * maxHp), maxHp - beforeHp));
   await clickCardById(page, 'emergencyRepair');
   await page.waitForTimeout(240);
   const after = await probe(page);
   const gain = after.carriedHp - beforeHp;
+  // 必查4-①：维修把「真实修理量」写进 carriedHp（同正式 Run 口径，可复算），不再是恒真空断言。
+  log(
+    gain === expectedGain,
+    'R1 紧急维修 真实修理量写入carriedHp（同正式Run口径）',
+    `选前耐久=${fmt(beforeHp)} → 选后carriedHp=${fmt(after.carriedHp)}（预期+${fmt(expectedGain)}，实际+${fmt(gain)}）；顶栏${fmt(beforeTop)}`,
+  );
   log(
     !!after.buildToast && /耐久 \+/.test(after.buildToast.extra || ''),
     'R1 紧急维修 即时反馈带真实修理量',
     `选前耐久=${fmt(beforeHp)}（顶栏${fmt(beforeTop)}）→ 选后=${fmt(after.carriedHp)}（+${fmt(gain)}）；toast="${after.buildToast ? after.buildToast.extra : 'null'}"`,
   );
   await shot(page, 'adv-r1-repair-toast.png');
-  // 下一场战斗：开局 HP 即维修值（耐久真实继承）
-  const peak = await captureBattle(page, 'adv-r1-repair-after');
-  const startHp = peak ? null : null;
+  // 下一场战斗：验证真实的「跨战耐久继承契约」—— carriedHp 是跨战耐久唯一真源，
+  // 下一节点若是阶段整备(BANNER)会再补给（可能封顶），但无论中间如何变化，
+  // 战斗开局 HP 必须等于「开局那一刻的 carriedHp」。这才是可被真实 HP 对照证明的契约。
+  const result = await captureBattle(page, 'adv-r1-repair-after');
+  const repairCarried = after.carriedHp;
+  const startHp = result ? result.startPlayerHp : null;
+  const startCarried = result ? result.startCarriedHp : null;
+  const inherits = startHp != null && startCarried != null && Math.abs(startHp - startCarried) <= 1;
   log(
-    Math.abs((after.carriedHp || 0) - (before.playerHpMax || 1) * 0) >= 0,
-    'R1 紧急维修 顶栏即时同步 + 下一场开局HP继承',
-    `选后顶栏=${after.topHp ? after.topHp.hp : '—'}；carriedHp=${fmt(after.carriedHp)}`,
+    inherits,
+    'R1 紧急维修 跨战耐久继承契约（carriedHp→下一场开局HP，真实HP对照）',
+    `维修写入carriedHp=${fmt(repairCarried)}；下一场开局HP=${fmt(startHp)}；战斗开局时carriedHp=${fmt(startCarried)}；契约=${inherits ? '成立' : '破裂'}`,
   );
+  // 顶栏即时同步（选后立即，不依赖下一场）
+  log(
+    !!after.topHp && Math.abs(after.topHp.hp - repairCarried) <= 1,
+    'R1 紧急维修 顶栏即时同步',
+    `选后顶栏=${after.topHp ? after.topHp.hp : '—'}；carriedHp=${fmt(repairCarried)}`,
+  );
+  // 必查4-②（技术结果，非失败）：本 seed 维修节点后紧跟阶段整备(BANNER)，
+  // 会把 carriedHp 从 1009 再次补给至满 1100 才进下一场 ⇒ 维修的「可见收益」被整备覆盖。
+  // 这是预期的经济设计（整备=阶段补给），不是缺陷；维修值本身已真实写入 carriedHp。
+  if (startCarried != null && Math.abs(startCarried - repairCarried) > 1) {
+    console.log(
+      `INFO R1 紧急维修 维修值被阶段整备二次补给覆盖（预期，非缺陷） | 选后carriedHp=${fmt(repairCarried)} → 下一节点阶段整备回耐久至=${fmt(startCarried)}；维修值已真实写入carriedHp，被整备补给覆盖。若需「维修值原样带入下一场」属设计取舍，不在D2范围（建议单独Queue评估整备只补给至维修前缺口）。`,
+    );
+  }
 }
 
 (async () => {
