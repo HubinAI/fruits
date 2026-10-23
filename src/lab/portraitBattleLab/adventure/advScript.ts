@@ -96,6 +96,14 @@ export interface AdventureBuildNode {
   readonly day: number;
   readonly beat: readonly string[];
   readonly poolKind: AdventureBuildPool;
+  /**
+   * 本节点之后、**下一场战斗**（BATTLE / FINAL）之前的**自动阶段整备**（BANNER）次数。
+   *
+   * ⚠️ 生成期按链序回填（见 `generateAdventureScript` 的节点装配）：只有 BANNER 是**必然发生**
+   *    的免费恢复；EVENT 的恢复要玩家当场选（可能回血、也可能扣血），属于玩家选择，不计入。
+   *    F5 用它判定「此刻选紧急维修，会不会被紧随其后的整备完全吞掉」。
+   */
+  readonly autoResupplyBeforeBattle: number;
   readonly next: string | null;
 }
 export type AdventureNode =
@@ -104,6 +112,17 @@ export type AdventureNode =
   | AdventureBattleNode
   | AdventureEventNode
   | AdventureBuildNode;
+
+/**
+ * 生成期的节点草稿：与最终节点相比只缺 `next`（链序在装配时统一回填），
+ * BUILD 还缺 `autoResupplyBeforeBattle`（**依赖链序**，只能在装配阶段统计，见 generateAdventureScript）。
+ */
+type AdventureNodeDraft =
+  | Omit<AdventureStartNode, 'next'>
+  | Omit<AdventureBannerNode, 'next'>
+  | Omit<AdventureBattleNode, 'next'>
+  | Omit<AdventureEventNode, 'next'>
+  | Omit<AdventureBuildNode, 'next' | 'autoResupplyBeforeBattle'>;
 
 export interface AdventureScript {
   readonly seed: number;
@@ -351,13 +370,12 @@ export function generateAdventureScript(seedInput: string | number): AdventureSc
   const encounters = battleCurve(rng);
   const buildKinds = buildPoolKinds(rng, ADVENTURE_TOTAL_BUILDS);
 
-  const list: AdventureNode[] = [];
+  const list: AdventureNodeDraft[] = [];
   list.push({
     id: 'a1-start',
     kind: 'START',
     day: 1,
     beat: ['你驾驶着{vehicle}，驶入一片未知的荒原。', `这趟冒险要走许多天，撑到最后便是赢家。`],
-    next: null,
   });
 
   let day = 2;
@@ -385,7 +403,6 @@ export function generateAdventureScript(seedInput: string | number): AdventureSc
       encounter: ['一台敌车咬了上来。', '你遭遇了{enemy}。'],
       after: ['你又找到了一次改装机会……'],
       encounterId: encounters[battlesDone],
-      next: null,
     });
     day++;
     battlesDone++;
@@ -398,7 +415,6 @@ export function generateAdventureScript(seedInput: string | number): AdventureSc
         day,
         beat: ['你停下来整理装备。'],
         poolKind: buildKinds[ki],
-        next: null,
       });
       day++;
       ki++;
@@ -428,7 +444,6 @@ export function generateAdventureScript(seedInput: string | number): AdventureSc
       day,
       beat: ['你停下来整理装备。'],
       poolKind: buildKinds[ki],
-      next: null,
     });
     day++;
     ki++;
@@ -443,14 +458,37 @@ export function generateAdventureScript(seedInput: string | number): AdventureSc
     beat: ['最后一段路，地平线上出现了最棘手的对手。'],
     encounter: ['一台难缠的敌车横在前方，火力全开。', '你遭遇了{enemy}。'],
     encounterId: encounters[ADVENTURE_TOTAL_BATTLES - 1],
-    next: null,
   });
   day++;
   battlesDone++;
 
   const nodes: Record<string, AdventureNode> = {};
   for (let i = 0; i < list.length; i++) {
-    const node = { ...list[i], next: i < list.length - 1 ? list[i + 1].id : null };
+    const draft = list[i];
+    const next = i < list.length - 1 ? list[i + 1].id : null;
+    if (draft.kind === 'BUILD') {
+      // F5：回填「本节点之后、下一场战斗之前的自动整备（BANNER）次数」。
+      //    链序即 list 顺序 ⇒ 从该节点往后扫到第一个 BATTLE/FINAL，统计其中的 BANNER 数。
+      //    只有 BANNER 是必然发生的免费恢复；EVENT 的恢复由玩家当场选，不计入。
+      let resupplies = 0;
+      for (let j = i + 1; j < list.length; j++) {
+        const n = list[j];
+        if (n.kind === 'BANNER') resupplies++;
+        if (n.kind === 'BATTLE' || n.kind === 'FINAL') break;
+      }
+      const build: AdventureBuildNode = { ...draft, autoResupplyBeforeBattle: resupplies, next };
+      nodes[build.id] = build;
+      continue;
+    }
+    // 非 BUILD 草稿：补上 next 即为完整节点（kind 是判别式，逐类收窄）。
+    const node: AdventureNode =
+      draft.kind === 'START'
+        ? { ...draft, next }
+        : draft.kind === 'BANNER'
+          ? { ...draft, next }
+          : draft.kind === 'BATTLE'
+            ? { ...draft, next }
+            : { ...draft, next };
     nodes[node.id] = node;
   }
 

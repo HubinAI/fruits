@@ -230,6 +230,69 @@ export function advEmergencyRepairGain(
   return { hp: currentHp + gained, gained };
 }
 
+/**
+ * FRUITS-ADVENTURE-REPAIR-VALUE-F5｜**阶段整备（BANNER）的自动回补量**（纯函数，与 `presentNode` 同一口径）。
+ *
+ * ⚠️ 不新增/不改动任何比例：这里只是把 `presentNode` 里那一行 `Math.round(maxHp * ADV_WAYPOINT_HEAL_FRACTION)`
+ *    抽成可复算的纯函数，供 F5 的「维修净贡献」判据使用（同一口径 ⇒ 判据不会与真实行为漂移）。
+ */
+export function advAutoResupplyHeal(ctx: AdventureContext): number {
+  return Math.round(ctx.playerHpMax * ADV_WAYPOINT_HEAL_FRACTION);
+}
+
+/**
+ * FRUITS-ADVENTURE-REPAIR-VALUE-F5｜一次「紧急维修」对**下一场战斗开局耐久**的净贡献（纯函数）。
+ *
+ * 问题（Queue 必改 1 定位到的真实链路）：
+ *   BUILD 候选里的「紧急维修」= 立刻修回 0.25 × 上限；阶段整备（BANNER）= 立刻回补 0.5 × 上限。
+ *   当两者**紧邻**发生时（维修刚修好、紧接着的整备又把它顶满），这次强化选择对「下一场开局 HP」
+ *   的净贡献 = 0 ⇒ 玩家白选了（Queue 验收 2：不允许「没有实际收益的选择」）。
+ *
+ * 判据（与真实结算同一口径，min(上限, …) 逐次封顶）：
+ *   withRepair    = 维修后耐久，再经过 `autoResuppliesBeforeBattle` 次**必然发生**的自动整备；
+ *   withoutRepair = 不维修，同样经过这些自动整备；
+ *   净贡献 = withRepair − withoutRepair。
+ *   ⚠️ 只数**必然发生**的免费恢复（BANNER）：EVENT 的恢复要玩家当场选（可能回血也可能扣血），
+ *      属于玩家选择，不计入（否则会把玩家的主动决策也算成「被吞掉」）。
+ *
+ * @param hp 此刻的耐久（= 下一场战斗的开局耐久口径）
+ * @param gain 本次维修的真实修理量（`advEmergencyRepairGain(...).gained`，满耐久时为 0）
+ * @param autoResuppliesBeforeBattle 本节点之后、下一场战斗之前的自动整备次数
+ */
+export function advRepairNetGainToNextBattle(
+  hp: number,
+  gain: number,
+  autoResuppliesBeforeBattle: number,
+  ctx: AdventureContext,
+): number {
+  const maxHp = ctx.playerHpMax;
+  const heal = advAutoResupplyHeal(ctx);
+  const capped = (v: number): number => Math.min(maxHp, v);
+  let withRepair = capped(hp + gain);
+  let withoutRepair = capped(hp);
+  for (let i = 0; i < autoResuppliesBeforeBattle; i++) {
+    withRepair = capped(withRepair + heal);
+    withoutRepair = capped(withoutRepair + heal);
+  }
+  return withRepair - withoutRepair;
+}
+
+/**
+ * F5｜此刻选「紧急维修」对**下一场战斗开局耐久**是否还有实际收益（纯函数，唯一判据）。
+ *
+ * 返回 false 的两种情形（都属 Queue 验收 2 要消除的「无效选择」）：
+ *   ① 满耐久：修理量本身 = 0；
+ *   ② 维修值会被紧随其后的免费整备完全吞掉：净贡献 = 0。
+ */
+export function advRepairHasRealValue(
+  hp: number,
+  autoResuppliesBeforeBattle: number,
+  ctx: AdventureContext,
+): boolean {
+  const { gained } = advEmergencyRepairGain(hp, ctx);
+  return advRepairNetGainToNextBattle(hp, gained, autoResuppliesBeforeBattle, ctx) > 0;
+}
+
 /** 顶部耐久条的显示值（见 `advTopDurability`）。 */
 export interface AdventureTopDurability {
   readonly hp: number;
@@ -351,30 +414,51 @@ export function advOverlayTitle(s: AdventureState, script: AdventureScript): str
   return '';
 }
 
-/** 当前 BUILD 节点的候选池（结构去重：剔除已拥有的强化）。 */
+/**
+ * 当前 BUILD 节点的候选池（结构去重：剔除已拥有的强化）。
+ *
+ * FRUITS-ADVENTURE-REPAIR-VALUE-F5（必改 2｜**候选投放**）：
+ *   「紧急维修」在**对下一场战斗开局耐久的净贡献 = 0** 的节点不再投放，具体是两种情形：
+ *     ① 此刻满耐久（修理量本身 = 0）——选了也不会多回一点耐久；
+ *     ② 紧随其后的**自动阶段整备**（BANNER）会把修好的耐久完全顶回上限
+ *        （下一场开局耐久与「没修」一模一样）——玩家的这一次强化选择没有实际价值。
+ *   ⇒ BUILD 节点上玩家看到的每一个候选，都**至少有一处真实收益**（验收 2）。
+ *
+ * ⚠️ 阶段整备本身**一字未改**（比例 / 时机 / 效果都没动）：这里只是不把「必然被整备吞掉」的
+ *    候选投放出来（必改 2 明令「不直接削弱阶段整备」）。
+ * ⚠️ EVENT 的恢复**不计入**：它要玩家当场选（可能回血、也可能扣血），属于玩家决策，
+ *    不能算作「被整备覆盖」。
+ */
 export function advChoicePool(
   s: AdventureState,
   node: AdventureNode,
   ctx: AdventureContext,
 ): readonly { readonly id: RunBuildId; readonly label: string; readonly note: string }[] {
   if (node.kind !== 'BUILD') return [];
-  let defs: readonly RunModifierDef[];
+  const toChoice = (d: RunModifierDef): { id: RunBuildId; label: string; note: string } => ({
+    id: d.id as RunBuildId,
+    label: d.label,
+    note: d.note,
+  });
+  let pool: readonly { id: RunBuildId; label: string; note: string }[];
   switch (node.poolKind) {
     case 'layer1':
-      defs = runLayer1PoolDefs();
+      pool = runLayer1PoolDefs().map(toChoice);
       break;
     case 'layer2':
-      defs = runLayer2PoolDefs(advMainRouteId(s) ?? '');
+      pool = runLayer2PoolDefs(advMainRouteId(s) ?? '').map(toChoice);
       break;
     case 'lateral':
-      defs = runLateralPoolDefs(s.buffs);
+      pool = runLateralPoolDefs(s.buffs).map(toChoice);
       break;
     case 'generic':
-      return runGenericChoiceDefs(s.buffs, ctx.baseWeaponDefId);
+      pool = runGenericChoiceDefs(s.buffs, ctx.baseWeaponDefId);
+      break;
   }
-  return defs
-    .filter((d) => !s.buffs.includes(d.id as RunBuildId) && !ADV_EXCLUDED_BUILD_IDS.includes(d.id as RunBuildId))
-    .map((d) => ({ id: d.id as RunBuildId, label: d.label, note: d.note }));
+  const hp = advCarriedPlayerHp(s, ctx);
+  return pool
+    .filter((d) => !s.buffs.includes(d.id) && !ADV_EXCLUDED_BUILD_IDS.includes(d.id))
+    .filter((d) => d.id !== 'emergencyRepair' || advRepairHasRealValue(hp, node.autoResupplyBeforeBattle, ctx));
 }
 
 export function advVisibleLog(s: AdventureState, maxLines: number): readonly AdventureLogEntry[] {
@@ -492,6 +576,11 @@ export function pressAdventureAction(
  *   - 候选全被拥有 → 降级为一次真实维修（不扣耐久）；
  *   - 候选全被拥有且耐久已满 → 如实空手（明确文案，绝不 framed 成中奖）；
  *   - trade 只有真正领到未拥有强化才扣耐久 —— 绝不「仅扣耐久」零收益。
+ *
+ * F5（FRUITS-ADVENTURE-REPAIR-VALUE-F5）追加的一层：
+ *   候选解析时跳过「此刻没有任何实际收益」的**紧急维修**（满耐久 ⇒ 修不了）——
+ *   否则它就是一次「零收益中奖」，trade 还要为此扣耐久（验收 2：绝不扣除代价却无收益）。
+ *   ⇒ 候选解析 = 「第一个未拥有**且此刻有收益**的候选」；一个都没有 ⇒ 如实空手（不扣耐久）。
  */
 function applyEffect(
   s: AdventureState,
@@ -528,8 +617,20 @@ function applyEffect(
     const tradeDmg = effect.kind === 'trade' ? Math.round(maxHp * effect.damageFraction) : 0;
     const labelOf = (id: RunBuildId): string => runBuildOptionById(id)?.label ?? id;
 
-    // 领取时解析：第一个未拥有的候选（同种子恒定序 + 当前 Build 的纯函数）。
-    const granted = effect.candidates.find((id) => !s.buffs.includes(id)) ?? null;
+    // 领取时解析：候选序（同种子恒定）里**第一个未拥有**的候选。
+    const unowned = effect.candidates.filter((id) => !s.buffs.includes(id));
+    // F5｜再叠一层「此刻真的有收益」：候选里只有「紧急维修」会随耐久状态而失效
+    //    （它的**全部**价值 = 此刻真修回的那点耐久；运行时能力只认 kineticBurst ⇒
+    //    它作为 Build 项本身对战斗毫无影响）。
+    //    ⇒ 满耐久时领到它 = 「零收益中奖」（R4 禁止）；trade 还要为此扣耐久
+    //    ⇒ 正是「扣除代价却没有实际收益」（F5 验收 2）。
+    //    ⇒ 此刻无效的候选直接跳过（纯函数：candidates + buffs + 当前耐久 ⇒ 同种子同结果）。
+    const granted =
+      unowned.find((id) => {
+        if (id !== 'emergencyRepair') return true;
+        const base = effect.kind === 'trade' ? Math.max(floor, current - tradeDmg) : current;
+        return advEmergencyRepairGain(base, ctx).hp > current;
+      }) ?? null;
     if (granted) {
       // F3：事件也可能发「紧急维修」⇒ 与 BUILD 路径同一口径真实修耐久（正式 Run 语义）。
       // trade 先扣耐久、再按扣后的值修（顺序可见：先付钱，后拿货）。
@@ -564,7 +665,17 @@ function applyEffect(
       };
     }
 
-    // 候选全被拥有 → 补救维修（绝不无收益中奖、绝不无提示扣血）。
+    // 兜底 A：有未拥有的候选，但它们此刻都没有实际收益（= 唯一可领的是紧急维修，而耐久已满）。
+    //   → 如实空手：不扣耐久、不发空强化、绝不 framed 成中奖。
+    if (unowned.length > 0) {
+      const head =
+        effect.kind === 'trade'
+          ? '商队这份货此刻换不出实际收益（耐久已满，没有可修的地方）'
+          : '这次唯一能领的是紧急维修，可耐久已满——没有可修的地方';
+      return { state: s, resultText: `${head}：这次没有收益，但也没有损失。` };
+    }
+
+    // 兜底 B：候选全被拥有 → 补救维修（不扣耐久）。
     const { hp: after, gained } = advEmergencyRepairGain(current, ctx);
     if (gained > 0) {
       const head = effect.kind === 'trade' ? '商队的货你都已拥有，这单改为免费补给' : '箱里的强化你都已拥有，改为一次补给';
