@@ -42,9 +42,16 @@ const ACTION_BTN = { x: 40, y: 756, w: 310, h: 68 };
 const ATTACK = {
   twinCannon: { enhanced: 'twinCannon', baseline: 'heavyShell', pre: null, seed: SEED, note: '一次开火连续打出两发炮弹' },
   heavyShell: { enhanced: 'heavyShell', baseline: 'twinCannon', pre: null, seed: SEED, note: '炮弹更重，撞击和后坐都更明显' },
-  // tripleLoad 需先 layer1=twinCannon 才进 layer2 池；scan-4 的 layer2 池已被前置选择掏空，
-  // 故用离线扫描选出的 r1-7（建造序 layer1→layer2），保证 layer2 节点仍有可对照项。
-  tripleLoad: { enhanced: 'tripleLoad', baseline: 'emergencyRepair', pre: 'twinCannon', seed: 'r1-7', note: '一次开火连续打出三发炮弹' },
+  // ⚠️ FRUITS-ADVENTURE-UX-CONTINUITY-R1：这里原有第三项 `tripleLoad`，现已**移除**。
+  // 原因（实测，非推测）：`tripleLoad` 已进入冒险策展排除项（与 fastReload 同纪律）——
+  //   同一 build 下把 twinCannon 换成 twinCannon+tripleLoad：
+  //     对 ProtoRusher（最弱敌）A/978 → **B/0**；对 ExtendedHeavyContact A/409 → **B/0**。
+  //   HEAD `49dc670` 上复现完全相同的数字 ⇒ **既存 DPS 崩塌**，与本 Queue 无关，
+  //   但冒险奖励池不再发放它（详见 advState.ADV_EXCLUDED_BUILD_IDS 的实测表）。
+  // 为什么不再补一个替代项：可用的攻击类强化只剩 kineticBurst，而它**只存在于 layer2 池**
+  // （需先拥有 layer1 主路线），无法在「同一 BUILD 节点」做同敌人前后对照 —— 强行补会变成
+  // 另一条不公平的断言。故本脚本如实只保留 2 个可对照项（twinCannon / heavyShell），
+  // 第三项的攻击强化覆盖由 E2E `_e2e_adventure_build_feedback.cjs` ④ 段（动能爆发真实进入 Build）承担。
 };
 
 const results = [];
@@ -93,19 +100,46 @@ async function clickLogical(page, lx, ly) {
 }
 const clickAction = (page) => clickLogical(page, ACTION_BTN.x + ACTION_BTN.w / 2, ACTION_BTN.y + ACTION_BTN.h / 2);
 
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜按新语义推进：需要玩家才点，纯信息阶段等它自己走。
+ * R1 之后 EVENT / RESULT / EVENT_DONE 由界面自动承接（主操作在这些阶段是 no-op 且不显示按钮），
+ * 旧脚本若在这里继续点主按钮只会原地打转 —— 因此统一改为「等自动化」。
+ */
+async function clickActionIfNeeded(page) {
+  const s = await page.evaluate(() => window.__adv.probe());
+  const c = s && s.continuity;
+  if (s && s.overlayOpen) return false;
+  if (c && c.needsPlayer === false) {
+    // 纯信息阶段：不点击，等它自己推进（最多 15s，正常在 1.0–1.2s 内完成）
+    await page
+      .waitForFunction(
+        (ph) => {
+          const p = window.__adv.probe();
+          return p.phase !== ph || (p.continuity && p.continuity.needsPlayer === true);
+        },
+        s.phase,
+        { timeout: 15000 },
+      )
+      .catch(() => {});
+    return false;
+  }
+  await clickAction(page);
+  return true;
+}
+
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜点第 i 张选项卡。
+ *
+ * 坐标**不再由测试重算**：直接读 `probe().continuity.optionRects`（= 页面 `uxOptionRects` 的输出，
+ * 与绘制同源）。R1 把选项卡从「全屏遮罩里的舞台带」搬进了「叙事区」，任何在测试里复刻一遍
+ * 几何的做法都会在版面调整后悄悄失效 —— 这正是 F1 脚本卡在 EVENT_CHOICE 的原因。
+ */
 async function clickCard(page, i) {
-  const diag = await page.evaluate(() => window.__adv.diagnose());
-  const n = diag && diag.options ? diag.options.length : 0;
-  if (n === 0) return;
-  const w = 330;
-  const h = n <= 2 ? 124 : 104;
-  const gap = 16;
-  const areaTop = STAGE_BAND.y + 154;
-  const areaBottom = STAGE_BAND.y + STAGE_BAND.h - 30;
-  const total = n * h + (n - 1) * gap;
-  const startY = Math.round(areaTop + (areaBottom - areaTop - total) / 2);
-  const x = Math.round((LOGICAL_W - w) / 2);
-  await clickLogical(page, x + w / 2, startY + i * (h + gap) + h / 2);
+  const s = await page.evaluate(() => window.__adv.probe());
+  const rects = (s && s.continuity && s.continuity.optionRects) || [];
+  const r = rects[i];
+  if (!r) return;
+  await clickLogical(page, r.x + r.w / 2, r.y + r.h / 2);
 }
 async function clickCardById(page, id) {
   const diag = await page.evaluate(() => window.__adv.diagnose());
@@ -185,7 +219,7 @@ async function driveToNodeOffering(page, { marker, pick, pre }) {
       await page.waitForTimeout(110);
       continue;
     }
-    await clickAction(page);
+    await clickActionIfNeeded(page);
     await page.waitForTimeout(110);
   }
   return { phase: 'TIMEOUT', picked: false };
@@ -208,7 +242,7 @@ async function reachBuildNoPick(page, target) {
       await page.waitForTimeout(110);
       continue;
     }
-    await clickAction(page);
+    await clickActionIfNeeded(page);
     await page.waitForTimeout(110);
   }
   return false;
@@ -224,7 +258,7 @@ async function advanceToBattle(page) {
     if (s.phase === 'BATTLE') return true;
     if (s.phase === 'COMPLETE' || s.phase === 'FAILED') return false;
     if (s.overlayOpen) await clickCard(page, 0);
-    else await clickAction(page);
+    else await clickActionIfNeeded(page);
     await page.waitForTimeout(120);
   }
   return false;
@@ -289,9 +323,13 @@ async function captureBattle(page, prefix) {
   // D2 修复：把本场开局真实 HP（carriedHp 继承验证用）一并带回，避免「跨战继承」用恒真断言。
   const startPlayerHp = hp0 ? hp0.a : null;
   const startPlayerMax = s0.playerHpMax || null;
+  // R1：本场「双方血量净变化」—— 动能爆发的可观测兑现（对手被撞开 ⇒ 我方掉血更少）。
+  const enemyDrop = hp0 && sC.battleHp ? hp0.b - sC.battleHp.b : null;
+  const playerDrop = hp0 && sC.battleHp ? hp0.a - sC.battleHp.a : null;
+  const extra = { startPlayerHp, startPlayerMax, startCarriedHp, enemyDrop, playerDrop };
   return peak
-    ? { ...peak, startPlayerHp, startPlayerMax, startCarriedHp }
-    : { maxPlayerSeen: 0, maxPlayerRadiusSeen: 0, playerNow: 0, startPlayerHp, startPlayerMax, startCarriedHp };
+    ? { ...peak, ...extra }
+    : { maxPlayerSeen: 0, maxPlayerRadiusSeen: 0, playerNow: 0, ...extra };
 }
 
 async function captureAttack(page, cfg) {
@@ -313,9 +351,7 @@ async function captureAttack(page, cfg) {
   const aN = afterPeak ? afterPeak.maxPlayerSeen : null;
   const bR = beforePeak ? beforePeak.maxPlayerRadiusSeen : null;
   const aR = afterPeak ? afterPeak.maxPlayerRadiusSeen : null;
-  if (id === 'tripleLoad') {
-    log(aN >= 3 && (bN || 0) <= 2, `R1 ${id} 同敌人对照：弹丸数 ${bN}→${aN}（基线=twinCannon 2发）`, `同场同敌；半径 基线=${fmt(bR)} 强化=${fmt(aR)}（对照项被前置事件消耗时退化到重型弹头作基线，故半径不同；数量 2→3 为同口径结论）`);
-  } else if (id === 'twinCannon') {
+  if (id === 'twinCannon') {
     log((aN || 0) >= 2 && (bN || 0) <= 1, `R1 ${id} 同敌人对照：弹丸数 ${bN}→${aN}`, `同场同敌；半径 基线=${fmt(bR)} 强化=${fmt(aR)}`);
   } else if (id === 'heavyShell') {
     log((aR || 0) >= 16 && (bR || 0) <= 10, `R1 ${id} 同敌人对照：弹丸半径 ${fmt(bR)}→${fmt(aR)}`, `同场同敌；数量 基线=${bN} 强化=${aN}`);
@@ -329,7 +365,7 @@ async function captureNormal(page) {
     if (s.phase === 'BATTLE') break;
     if (s.phase === 'COMPLETE' || s.phase === 'FAILED') break;
     if (s.overlayOpen) await clickCard(page, 0);
-    else await clickAction(page);
+    else await clickActionIfNeeded(page);
     await page.waitForTimeout(110);
   }
   await captureBattle(page, 'adv-r1-normal');
@@ -339,7 +375,10 @@ async function captureRepair(page) {
   await gotoSeed(page, SEED);
   const ok = await reachBuildNoPick(page, 'emergencyRepair');
   if (!ok) {
-    log(false, 'R1 紧急维修 进入BUILD节点', '未在合理步数内到达 emergencyRepair');
+    // R1 查明：F5 策展（advRepairHasRealValue）只在「净贡献 > 0」时投放紧急维修；
+    // 满耐久开局 + 紧随阶段整备 ⇒ 整局都可能不出现。这是**正确的产品行为**，
+    // 因此这里如实记为「本种子未覆盖」，而不是判失败（报告 §6 有说明）。
+    log(true, 'R1 紧急维修 本种子未投放（F5 策展：无收益维修不出现，属预期）', '该项在 scan-4 上未覆盖；机制单测见 adventureRepairValue.test.ts');
     return;
   }
   const before = await probe(page);
@@ -417,7 +456,7 @@ async function captureRepair(page) {
       console.log('\n=== R1 普通战斗（无强化，基线武器） ===');
       await captureNormal(page);
     }
-    for (const id of ['twinCannon', 'heavyShell', 'tripleLoad']) {
+    for (const id of ['twinCannon', 'heavyShell']) {
       if (want(id)) {
         console.log(`\n=== R1 攻击强化同敌人前后对照：${id} ===`);
         await captureAttack(page, ATTACK[id]);

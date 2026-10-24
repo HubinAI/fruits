@@ -19,6 +19,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateAdventureScript, type AdventureScript } from '../src/lab/portraitBattleLab/adventure/advScript';
 import {
+  advAutoAdvance,
   advAutoResupplyHeal,
   advCarriedPlayerHp,
   advChoicePool,
@@ -30,6 +31,7 @@ import {
   chooseAdventureOption,
   createAdventureState,
   finishAdventureBattle,
+  advNeedsPlayer,
   pressAdventureAction,
   type AdventureContext,
   type AdventureState,
@@ -149,7 +151,9 @@ function step(
     const pool = advChoicePool(s, advCurrentNode(s, script), ctx);
     return chooseAdventureOption(s, choice ?? pool[0]?.id ?? '__skip__', ctx, script);
   }
-  return pressAdventureAction(s, ctx, script);
+  // R1：纯信息阶段（EVENT / RESULT / EVENT_DONE）由 advAutoAdvance 自动承接，
+  //     主操作在其上已是 no-op ⇒ 驱动按新语义分派（推进代码与 R1 前「按继续」相同）。
+  return advNeedsPlayer(s) ? pressAdventureAction(s, ctx, script) : advAutoAdvance(s, ctx, script);
 }
 
 describe('FRUITS-ADVENTURE-REPAIR-VALUE-F5｜判据本身（纯函数）', () => {
@@ -280,17 +284,27 @@ describe('FRUITS-ADVENTURE-REPAIR-VALUE-F5｜BUILD 路径：不再投放无效�
   });
 
   it('低耐久 + 后续无自动整备时，紧急维修仍在池中且可选（不得把有效选择也砍掉）', () => {
-    // layer2 池（heavyShell 路线）含紧急维修：构造一个确定的「低耐久 + 无后续整备」场景
-    const script = generateAdventureScript('f5-low-hp');
+    // ⚠️ R1 修订：原来写死 `f5-low-hp` 这个种子，断言「它必有 layer2 且无后续整备」的节点。
+    // FRUITS-ADVENTURE-UX-CONTINUITY-R1 扩展了事件奖励池（+twinCannon/tripleLoad/heavyShell/kineticBurst），
+    // 生成器里 `buildPoolKinds` 之后的 rng 消耗顺序随之改变 ⇒ **具体种子的链序会变**，
+    // 写死种子编号的断言就变成了「断言随机结果」，与 F5 要验证的规则无关。
+    // 改为按**结构特征搜索**：找一个「layer2 池 + 战斗前无自动整备」的 BUILD 节点（任意种子）。
+    // 判据本身（净贡献 > 0 时仍在池中）一字未改。
     let targetId = '';
-    for (const n of Object.values(script.nodes)) {
-      if (n.kind !== 'BUILD') continue;
-      if (n.poolKind !== 'layer2') continue;
-      if (autoResuppliesBeforeBattle(script, n.id) !== 0) continue;
-      targetId = n.id;
-      break;
+    let targetScript = generateAdventureScript('f5-low-hp');
+    outer: for (let i = 0; i < 80; i++) {
+      const script = generateAdventureScript(`f5-low-hp-${i}`);
+      for (const n of Object.values(script.nodes)) {
+        if (n.kind !== 'BUILD') continue;
+        if (n.poolKind !== 'layer2') continue;
+        if (autoResuppliesBeforeBattle(script, n.id) !== 0) continue;
+        targetId = n.id;
+        targetScript = script;
+        break outer;
+      }
     }
     expect(targetId).not.toBe('');
+    const script = targetScript;
     const node = script.nodes[targetId];
     expect(node.kind).toBe('BUILD');
     const base = createAdventureState(ctx, script);
@@ -308,38 +322,45 @@ describe('FRUITS-ADVENTURE-REPAIR-VALUE-F5｜BUILD 路径：不再投放无效�
     expect(advRepairHasRealValue(300, autoResuppliesBeforeBattle(script, targetId), ctx)).toBe(true);
   });
 
-  it('已知种子 scan-4：紧跟阶段整备的 BUILD 节点不再投放紧急维修，有效节点仍投放', () => {
-    // scan-4 的真实链序（脚本生成器产出）：
-    //   k3(generic, 后续整备=0) ← 紧急维修在此**有效**（下一场战斗前没有整备）
-    //   k4(layer1, 后续整备=1) ← 此类节点若投放紧急维修会被整备完全吞掉 ⇒ 必须不投放
-    const script = generateAdventureScript('scan-4');
-    const k3 = script.nodes['k3'];
-    const k4 = script.nodes['k4'];
-    expect(k3.kind).toBe('BUILD');
-    expect(k4.kind).toBe('BUILD');
-    expect(k3.kind === 'BUILD' && k3.autoResupplyBeforeBattle).toBe(0);
-    expect(k4.kind === 'BUILD' && k4.autoResupplyBeforeBattle).toBe(1);
+  it('紧跟阶段整备的 BUILD 节点不投放紧急维修；无后续整备的节点仍投放（同一脚本内对照）', () => {
+    // ⚠️ R1 修订（同上）：不再写死 `scan-4` 的 k3/k4 编号，改为在同一份脚本里
+    // **自动找一对**「无后续整备」与「有后续整备」的 BUILD 节点做对照。
+    // 要验证的规则不变：净贡献 = 0 ⇒ 不投放；净贡献 > 0 ⇒ 仍投放。
+    let found: { script: AdventureScript; freeId: string; gatedId: string } | null = null;
+    for (let i = 0; i < 120 && !found; i++) {
+      const script = generateAdventureScript(`f5-pair-${i}`);
+      const builds = Object.values(script.nodes).filter((n) => n.kind === 'BUILD');
+      const free = builds.find((n) => autoResuppliesBeforeBattle(script, n.id) === 0);
+      const gated = builds.find((n) => autoResuppliesBeforeBattle(script, n.id) === 1);
+      if (free && gated) found = { script, freeId: free.id, gatedId: gated.id };
+    }
+    expect(found).not.toBeNull();
+    const { script, freeId, gatedId } = found!;
+    const freeNode = script.nodes[freeId];
+    const gatedNode = script.nodes[gatedId];
+    expect(freeNode.kind).toBe('BUILD');
+    expect(gatedNode.kind).toBe('BUILD');
 
-    // k3：低耐久 + 无后续整备 ⇒ 紧急维修有效，仍在池中
     const base = createAdventureState(ctx, script);
-    const atK3 = {
+    // 无后续整备 + 低耐久 ⇒ 净贡献 > 0 ⇒ 仍在池中
+    const atFree = {
       ...base,
       phase: 'CHOICE' as const,
-      nodeId: 'k3',
+      nodeId: freeId,
       carriedHp: 300,
     } as AdventureState;
-    expect(advChoicePool(atK3, k3, ctx).some((p) => p.id === 'emergencyRepair')).toBe(true);
+    expect(advChoicePool(atFree, freeNode, ctx).some((p) => p.id === 'emergencyRepair')).toBe(true);
 
-    // k4：耐久足够高（≥50% 上限）且下一场战斗前有 1 次整备 ⇒ 净贡献 = 0 ⇒ 不投放
-    const atK4 = {
+    // 有 1 次整备 + 耐久足够高（≥50% 上限）⇒ 净贡献 = 0 ⇒ 不投放
+    const atGated = {
       ...base,
       phase: 'CHOICE' as const,
-      nodeId: 'k4',
+      nodeId: gatedId,
       carriedHp: Math.round(MAX * 0.6),
     } as AdventureState;
     expect(advRepairHasRealValue(Math.round(MAX * 0.6), 1, ctx)).toBe(false);
-    const poolK4 = advChoicePool(atK4, k4, ctx);
-    expect(poolK4.some((p) => p.id === 'emergencyRepair')).toBe(false);
+    const poolGated = advChoicePool(atGated, gatedNode, ctx);
+    expect(poolGated.some((p) => p.id === 'emergencyRepair')).toBe(false);
   });
 });
 

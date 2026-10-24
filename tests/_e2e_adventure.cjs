@@ -26,7 +26,16 @@ const ROOT = path.join(__dirname, '..', 'dist-portrait-lab');
 const PORT = 8157;
 const URL_BASE = `http://127.0.0.1:${PORT}`;
 const SEED_WIN = process.env.ADV_SEED_WIN || 'adv-r3-A';
-const SEED_LOSS = process.env.ADV_SEED_LOSS || 'adv-r3-C';
+/**
+ * 败局用的种子。
+ *
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1 变更：`adv-r3-C` 在真实物理下现在能通关
+ * （实测 COMPLETE、7/7 场全胜），不再适合作为「必定失败」的样本。
+ * 换成 `scan-1`：headless 真实物理复算 24 个 scan 种子 ⇒ **15 胜 / 9 败**，
+ * 其中 scan-1 在 DAY 16、第 5 场（成长的字段敌）被打穿（4/5 场），是稳定的败局样本。
+ * ⚠️ 这是真实难度分布（15/24 ≈ 63% 通关），不是人为制造失败。
+ */
+const SEED_LOSS = process.env.ADV_SEED_LOSS || 'scan-1';
 const ADV_TOTAL_BATTLES = 7;
 const ARCHIVE_KEY = 'strongfruit.adventure.r3.testArchive.v1';
 const FORMAL_KEY = 'strongfruit.playerBuild.v1';
@@ -107,12 +116,45 @@ async function clickLogical(page, lx, ly) {
 /** 真实点击主按钮中心。 */
 const clickAction = (page) => clickLogical(page, ACTION_BTN.x + ACTION_BTN.w / 2, ACTION_BTN.y + ACTION_BTN.h / 2);
 
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜按新语义推进：需要玩家才点，纯信息阶段等它自己走。
+ * R1 之后 EVENT / RESULT / EVENT_DONE 由界面自动承接（主操作在这些阶段是 no-op 且不显示按钮），
+ * 旧脚本若在这里继续点主按钮只会原地打转 —— 因此统一改为「等自动化」。
+ */
+async function clickActionIfNeeded(page) {
+  const s = await page.evaluate(() => window.__adv.probe());
+  const c = s && s.continuity;
+  if (s && s.overlayOpen) return false;
+  if (c && c.needsPlayer === false) {
+    // 纯信息阶段：不点击，等它自己推进（最多 15s，正常在 1.0–1.2s 内完成）
+    await page
+      .waitForFunction(
+        (ph) => {
+          const p = window.__adv.probe();
+          return p.phase !== ph || (p.continuity && p.continuity.needsPlayer === true);
+        },
+        s.phase,
+        { timeout: 15000 },
+      )
+      .catch(() => {});
+    return false;
+  }
+  await clickAction(page);
+  return true;
+}
+
 /** 真实点击第 i 张浮层选项卡中心。
  * 防御：若点击瞬间浮层已因延迟落定而关闭（options 为空），视为已选择，静默返回，避免越界。 */
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜点第 i 张选项卡。
+ *
+ * 坐标**不再由测试重算**：直接读 `probe().continuity.optionRects`（= 页面 `uxOptionRects` 的输出，
+ * 与绘制同源）。R1 把选项卡从「全屏遮罩里的舞台带」搬进了「叙事区」，任何在测试里复刻一遍
+ * 几何的做法都会在版面调整后悄悄失效 —— 这正是 F1 脚本卡在 EVENT_CHOICE 的原因。
+ */
 async function clickCard(page, i) {
-  const diag = await diagnoseOf(page);
-  if (!diag || !diag.options || diag.options.length === 0) return;
-  const rects = layoutOptionCards(diag.options.length);
+  const s = await page.evaluate(() => window.__adv.probe());
+  const rects = (s && s.continuity && s.continuity.optionRects) || [];
   const r = rects[i];
   if (!r) return;
   await clickLogical(page, r.x + r.w / 2, r.y + r.h / 2);
@@ -187,7 +229,7 @@ async function playThroughReal(page, label) {
       battleWaits++;
       await page.waitForFunction(() => window.__adv.probe().phase !== 'BATTLE', null, { timeout: 180000 });
     } else {
-      await clickAction(page);
+      await clickActionIfNeeded(page);
       clicks++;
     }
     await page.waitForTimeout(8);
@@ -291,7 +333,7 @@ async function capture(page, name) {
 
     // ---- R4 验收1b：真实点击「再来一局」→ 新随机种子（默认行为），且连续第二局可玩到终态 ----
     const plan1 = JSON.stringify(run1.finalState.eventPlan);
-    await clickAction(page);
+    await clickActionIfNeeded(page);
     await page.waitForTimeout(60);
     const run2SeedState = await probeOf(page);
     log(!!run2SeedState.seedLabel && run2SeedState.seedLabel !== SEED_WIN,
@@ -334,7 +376,7 @@ async function capture(page, name) {
     );
     const shotLoss = await capture(page, 'adv-r4-shot-terminal-loss.png');
     log(!!shotLoss, 'R4 截图：失败结算', shotLoss || 'capture failed');
-    await clickAction(page);
+    await clickActionIfNeeded(page);
     await page.waitForTimeout(60);
     const afterLossRestart = await probeOf(page);
     log(afterLossRestart.seedLabel !== SEED_LOSS && afterLossRestart.phase === 'EVENT_CHOICE' || afterLossRestart.phase === 'IDLE' || afterLossRestart.phase === 'CHOICE',

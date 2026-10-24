@@ -94,19 +94,46 @@ async function clickLogical(page, lx, ly) {
 }
 const clickAction = (page) => clickLogical(page, ACTION_BTN.x + ACTION_BTN.w / 2, ACTION_BTN.y + ACTION_BTN.h / 2);
 
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜按新语义推进：需要玩家才点，纯信息阶段等它自己走。
+ * R1 之后 EVENT / RESULT / EVENT_DONE 由界面自动承接（主操作在这些阶段是 no-op 且不显示按钮），
+ * 旧脚本若在这里继续点主按钮只会原地打转 —— 因此统一改为「等自动化」。
+ */
+async function clickActionIfNeeded(page) {
+  const s = await page.evaluate(() => window.__adv.probe());
+  const c = s && s.continuity;
+  if (s && s.overlayOpen) return false;
+  if (c && c.needsPlayer === false) {
+    // 纯信息阶段：不点击，等它自己推进（最多 15s，正常在 1.0–1.2s 内完成）
+    await page
+      .waitForFunction(
+        (ph) => {
+          const p = window.__adv.probe();
+          return p.phase !== ph || (p.continuity && p.continuity.needsPlayer === true);
+        },
+        s.phase,
+        { timeout: 15000 },
+      )
+      .catch(() => {});
+    return false;
+  }
+  await clickAction(page);
+  return true;
+}
+
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜点第 i 张选项卡。
+ *
+ * 坐标**不再由测试重算**：直接读 `probe().continuity.optionRects`（= 页面 `uxOptionRects` 的输出，
+ * 与绘制同源）。R1 把选项卡从「全屏遮罩里的舞台带」搬进了「叙事区」，任何在测试里复刻一遍
+ * 几何的做法都会在版面调整后悄悄失效 —— 这正是 F1 脚本卡在 EVENT_CHOICE 的原因。
+ */
 async function clickCard(page, i) {
-  const diag = await page.evaluate(() => window.__adv.diagnose());
-  const n = diag && diag.options ? diag.options.length : 0;
-  if (n === 0) return;
-  const w = 330;
-  const h = n <= 2 ? 124 : 104;
-  const gap = 16;
-  const areaTop = STAGE_BAND.y + 154;
-  const areaBottom = STAGE_BAND.y + STAGE_BAND.h - 30;
-  const total = n * h + (n - 1) * gap;
-  const startY = Math.round(areaTop + (areaBottom - areaTop - total) / 2);
-  const x = Math.round((LOGICAL_W - w) / 2);
-  await clickLogical(page, x + w / 2, startY + i * (h + gap) + h / 2);
+  const s = await page.evaluate(() => window.__adv.probe());
+  const rects = (s && s.continuity && s.continuity.optionRects) || [];
+  const r = rects[i];
+  if (!r) return;
+  await clickLogical(page, r.x + r.w / 2, r.y + r.h / 2);
 }
 async function clickCardById(page, id) {
   const diag = await page.evaluate(() => window.__adv.diagnose());
@@ -174,7 +201,7 @@ async function driveToBuildPicking(page, { marker, pick, pre }) {
       await page.waitForTimeout(110);
       continue;
     }
-    await clickAction(page);
+    await clickActionIfNeeded(page);
     await page.waitForTimeout(110);
   }
   return { phase: 'TIMEOUT', picked: false };
@@ -186,7 +213,7 @@ async function advanceToBattle(page) {
     if (s.phase === 'BATTLE') return true;
     if (s.phase === 'COMPLETE' || s.phase === 'FAILED') return false;
     if (s.overlayOpen) await clickCard(page, 0);
-    else await clickAction(page);
+    else await clickActionIfNeeded(page);
     await page.waitForTimeout(120);
   }
   return false;

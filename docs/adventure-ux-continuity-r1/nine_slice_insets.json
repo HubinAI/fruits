@@ -1,0 +1,128 @@
+{
+ "atlasraft/battle_event_text_bg.png": {
+  "size": [
+   182,
+   164
+  ],
+  "radii": {
+   "TL": 8,
+   "TR": 8,
+   "BL": 21,
+   "BR": 21
+  },
+  "insets": {
+   "left": 23,
+   "right": 23,
+   "top": 10,
+   "bottom": 23
+  }
+ },
+ "atlasraft/battlenew_event_bg.png": {
+  "size": [
+   1048,
+   164
+  ],
+  "radii": {
+   "TL": 25,
+   "TR": 24,
+   "BL": 7,
+   "BR": 7
+  },
+  "insets": {
+   "left": 27,
+   "right": 26,
+   "top": 27,
+   "bottom": 9
+  }
+ },
+ "atlasraft/btn_green.png": {
+  "size": [
+   65,
+   118
+  ],
+  "radii": {
+   "TL": 14,
+   "TR": 14,
+   "BL": 19,
+   "BR": 19
+  },
+  "insets": {
+   "left": 21,
+   "right": 21,
+   "top": 16,
+   "bottom": 21
+  }
+ },
+ "atlasraft/btn_yellow.png": {
+  "size": [
+   65,
+   118
+  ],
+  "radii": {
+   "TL": 14,
+   "TR": 14,
+   "BL": 19,
+   "BR": 19
+  },
+  "insets": {
+   "left": 21,
+   "right": 21,
+   "top": 16,
+   "bottom": 21
+  }
+ },
+ "atlasraft/btn_yellow_big.png": {
+  "size": [
+   98,
+   193
+  ],
+  "radii": {
+   "TL": 13,
+   "TR": 14,
+   "BL": 19,
+   "BR": 19
+  },
+  "insets": {
+   "left": 21,
+   "right": 21,
+   "top": 16,
+   "bottom": 21
+  }
+ },
+ "atlasraft/battle_event_btn_chat.png": {
+  "size": [
+   185,
+   102
+  ],
+  "radii": {
+   "TL": 30,
+   "TR": 14,
+   "BL": 39,
+   "BR": 19
+  },
+  "insets": {
+   "left": 41,
+   "right": 21,
+   "top": 32,
+   "bottom": 34
+  }
+ },
+ "atlasraft/event_line.png": {
+  "size": [
+   30,
+   10
+  ],
+  "radii": {
+   "TL": 4,
+   "TR": 2,
+   "BL": 4,
+   "BR": 8
+  },
+  "insets": {
+   "left": 6,
+   "right": 10,
+   "top": 3,
+   "bottom": 3
+  }
+ }
+}

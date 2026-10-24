@@ -29,7 +29,12 @@ const SEED = process.env.ADV_F1_SEED || 'adv-r3-A';
 /* 布局常量（与 advPage.ts / _e2e_adventure.cjs 同源） */
 const LOGICAL_W = 390;
 const LOGICAL_H = 844;
-const STAGE_BAND = { x: 0, y: 96, w: LOGICAL_W, h: 648 };
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1：舞台带从 390×648 改为**恒定** 390×378（y=92）。
+ * 一屏式骨架里舞台只占中上段，下方 470..844 为叙事区与主操作位；
+ * RESULT 不再改变舞台尺寸（旧实现会缩到 468，这是被 R1 消除的结构性隐患）。
+ */
+const STAGE_BAND = { x: 0, y: 92, w: LOGICAL_W, h: 378 };
 const ACTION_BTN = { x: 40, y: 756, w: 310, h: 68 };
 
 const MIME = {
@@ -80,19 +85,46 @@ async function clickLogical(page, lx, ly) {
 
 const clickAction = (page) => clickLogical(page, ACTION_BTN.x + ACTION_BTN.w / 2, ACTION_BTN.y + ACTION_BTN.h / 2);
 
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜按新语义推进：需要玩家才点，纯信息阶段等它自己走。
+ * R1 之后 EVENT / RESULT / EVENT_DONE 由界面自动承接（主操作在这些阶段是 no-op 且不显示按钮），
+ * 旧脚本若在这里继续点主按钮只会原地打转 —— 因此统一改为「等自动化」。
+ */
+async function clickActionIfNeeded(page) {
+  const s = await page.evaluate(() => window.__adv.probe());
+  const c = s && s.continuity;
+  if (s && s.overlayOpen) return false;
+  if (c && c.needsPlayer === false) {
+    // 纯信息阶段：不点击，等它自己推进（最多 15s，正常在 1.0–1.2s 内完成）
+    await page
+      .waitForFunction(
+        (ph) => {
+          const p = window.__adv.probe();
+          return p.phase !== ph || (p.continuity && p.continuity.needsPlayer === true);
+        },
+        s.phase,
+        { timeout: 15000 },
+      )
+      .catch(() => {});
+    return false;
+  }
+  await clickAction(page);
+  return true;
+}
+
 /** 真实点击第 i 张浮层选项卡（几何与 advPage.layoutOptionCards 同源）。 */
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜点第 i 张选项卡。
+ *
+ * 坐标**不再由测试重算**：直接读 `probe().continuity.optionRects`（= 页面 `uxOptionRects` 的输出，
+ * 与绘制同源）。R1 把选项卡从「全屏遮罩里的舞台带」搬进了「叙事区」，任何在测试里复刻一遍
+ * 几何的做法都会在版面调整后悄悄失效 —— 这正是 F1 脚本卡在 EVENT_CHOICE 的原因。
+ */
 async function clickCard(page, i) {
-  const diag = await page.evaluate(() => window.__adv.diagnose());
-  if (!diag || !diag.options || diag.options.length === 0) return;
-  const w = 330;
-  const h = diag.options.length <= 2 ? 124 : 104;
-  const gap = 16;
-  const areaTop = STAGE_BAND.y + 154;
-  const areaBottom = STAGE_BAND.y + STAGE_BAND.h - 30;
-  const totalH = diag.options.length * h + (diag.options.length - 1) * gap;
-  const startY = Math.round(areaTop + (areaBottom - areaTop - totalH) / 2);
-  const x = Math.round((LOGICAL_W - w) / 2);
-  const r = { x, y: startY + i * (h + gap), w, h };
+  const s = await page.evaluate(() => window.__adv.probe());
+  const rects = (s && s.continuity && s.continuity.optionRects) || [];
+  const r = rects[i];
+  if (!r) return;
   await clickLogical(page, r.x + r.w / 2, r.y + r.h / 2);
 }
 
@@ -106,7 +138,7 @@ async function driveToBattle(page) {
       await clickCard(page, 0);
       clicks++;
     } else {
-      await clickAction(page);
+      await clickActionIfNeeded(page);
       clicks++;
     }
     await page.waitForTimeout(120);
@@ -156,8 +188,8 @@ async function driveToBattle(page) {
           const c = document.getElementById('adv-canvas');
           const g = c.getContext('2d');
           const dpr = c.width / 390;
-          const y0 = Math.round(96 * dpr);
-          return g.getImageData(0, y0, c.width, Math.round(648 * dpr));
+          const y0 = Math.round(92 * dpr);
+          return g.getImageData(0, y0, c.width, Math.round(378 * dpr));
         },
         diffBox(a, b, thr = 26) {
           let minX = 1e9;
@@ -192,7 +224,7 @@ async function driveToBattle(page) {
           const c = document.getElementById('adv-canvas');
           const g = c.getContext('2d');
           const dpr = c.width / 390;
-          const d = g.getImageData(0, Math.round(96 * dpr), c.width, Math.round(648 * dpr)).data;
+          const d = g.getImageData(0, Math.round(92 * dpr), c.width, Math.round(378 * dpr)).data;
           const set = new Set();
           for (let i = 0; i < d.length; i += 4 * 97) set.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]);
           return set.size;
@@ -239,7 +271,7 @@ async function driveToBattle(page) {
         pageBlob() {
           const c = document.getElementById('adv-canvas');
           const dpr = c.width / 390;
-          return window.__F1__.blobAspect(c, Math.round(96 * dpr), Math.round(648 * dpr));
+          return window.__F1__.blobAspect(c, Math.round(92 * dpr), Math.round(378 * dpr));
         },
         /** 离屏战斗画布（合成源，正式 Renderer 单一 scale 绘制）内的车身包围盒。 */
         srcBlob() {
@@ -305,7 +337,7 @@ async function driveToBattle(page) {
       );
       log(
         Math.abs(battleBlit.dw - STAGE_BAND.w) < 1.5 && Math.abs(battleBlit.dh - STAGE_BAND.h) < 1.5,
-        'F1 战斗画面铺满舞台带 390×648（无留白、无越界）',
+        'F1 战斗画面铺满舞台带 390×378（无留白、无越界）',
         `dst=(${battleBlit.dx},${battleBlit.dy}) ${battleBlit.dw}×${battleBlit.dh}`,
       );
     } else {
@@ -314,8 +346,8 @@ async function driveToBattle(page) {
 
     // ---- ② 页面自报读数 ----
     log(
-      !!frame1 && frame1.uniform === true && frame1.safe.w === 390 && frame1.safe.h === 648,
-      'F1 取景安全区 = 竖屏冒险舞台带（390×648），合成两轴系数相等',
+      !!frame1 && frame1.uniform === true && frame1.safe.w === 390 && frame1.safe.h === 378,
+      'F1 取景安全区 = 竖屏冒险舞台带（390×378），合成两轴系数相等',
       frame1 ? `safe=${frame1.safe.w}×${frame1.safe.h} viewport=${frame1.viewport.w}×${frame1.viewport.h} scaleX=${frame1.scaleX.toFixed(3)} scaleY=${frame1.scaleY.toFixed(3)}` : 'battleFrame=null',
     );
     if (frame1 && frame1.vehicleA) {
@@ -386,8 +418,8 @@ async function driveToBattle(page) {
     const resultFrame = await page.evaluate(() => window.__adv.probe().battleFrame);
     if (resultFrame) {
       log(
-        resultFrame.uniform === true && resultFrame.band.h === 468 && resultFrame.safe.h === 648,
-        'F1 RESULT 战报帧：390×648 安全区等比铺满 390×468（同一 scale，纵向裁切而非压缩）',
+        resultFrame.uniform === true && resultFrame.band.h === 378 && resultFrame.safe.h === 378,
+        'F1 RESULT 战报帧：沿用 390×378 同一安全区（R1 起舞台高度恒定，不再缩成 468）',
         `band=${resultFrame.band.w}×${resultFrame.band.h} safe=${resultFrame.safe.w}×${resultFrame.safe.h} scaleX=${resultFrame.scaleX.toFixed(3)} scaleY=${resultFrame.scaleY.toFixed(3)}`,
       );
     } else {

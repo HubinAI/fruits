@@ -32,17 +32,20 @@ import {
   randomSeedLabel,
   type AdventureEffect,
   type AdventureEventKind,
-  type AdventureEventNode,
   type AdventureScript,
 } from './advScript';
 import {
   advActionEnabled,
   advActionLabel,
+  advAutoAdvance,
   advCarriedPlayerHp,
   advChoiceOpen,
   advContextFromLoadout,
   advCurrentNode,
   advEventChoiceOpen,
+  advNarrativeLines,
+  advNarrativeTitle,
+  advNeedsPlayer,
   advOverlayCards,
   advOverlayOpen,
   advTopDurability,
@@ -54,7 +57,7 @@ import {
   type AdventureContext,
   type AdventureState,
 } from './advState';
-import { readArchive, recordRun, nextRunGoal, type AdvArchive, type AdvRunSummary } from './advArchive';
+import { readArchive, recordRun, type AdvArchive, type AdvRunSummary } from './advArchive';
 import {
   AdvUiStore,
   advBuildIconId,
@@ -62,6 +65,20 @@ import {
   advOutcomeIconId,
   type AdvUiId,
 } from './advUiAssets';
+import {
+  UX_ACTION,
+  UX_ACTION_BTN,
+  UX_NARRATIVE,
+  UX_NARRATIVE_CARD,
+  UX_NARRATIVE_MAX_LINES,
+  UX_STAGE,
+  UX_TERMINAL_CTA,
+  UX_TOP,
+  drawContain,
+  drawNineSlice,
+  uxHit,
+  uxOptionRects,
+} from './advLayout';
 
 interface Rect {
   readonly x: number;
@@ -69,6 +86,9 @@ interface Rect {
   readonly w: number;
   readonly h: number;
 }
+
+/** 叙事区正文行的种类（只影响前置符号，不改文本）。 */
+type AdventureLogEntryKindLike = 'day' | 'travel' | 'event' | 'result' | 'choice' | 'durability';
 
 const FONT_STACK = 'system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif';
 
@@ -108,17 +128,25 @@ const EVENT_THEME: Record<AdventureEventKind, { accent: string; tag: string }> =
   altar: { accent: '#b07ce0', tag: '荒野祭坛' },
 };
 
-// R4：竖屏界面重构为**四层空间**，按阶段显示必要内容，不常驻无用区域：
-//   层1 进度状态   TOP_BAND     0..96    冒险进度 + 当前耐久（结算页除外，结算自有成绩区）
-//   层2 主体       STAGE_BAND   96..744  战斗 / 事件 / 选择浮层（占满剩余空间）
-//                  RESULT_STAGE 96..564  出现「关键结果」时主体收缩（战报定格帧 / 宝箱）
-//   层3 关键结果   RESULT_BAND  564..744 仅 RESULT / EVENT_DONE 阶段出现，其余阶段不占位
-//   层4 底部主操作 ACTION_BAND  744..844 唯一主操作（结算页用更大的 CTA，仍覆盖 ACTION_BTN 命中区）
-const TOP_BAND: Rect = { x: 0, y: 0, w: PORTRAIT_LOGICAL_W, h: 96 };
-const STAGE_BAND: Rect = { x: 0, y: 96, w: PORTRAIT_LOGICAL_W, h: 648 };
-const RESULT_STAGE: Rect = { x: 0, y: 96, w: PORTRAIT_LOGICAL_W, h: 468 };
-const RESULT_BAND: Rect = { x: 0, y: 564, w: PORTRAIT_LOGICAL_W, h: 180 };
-const ACTION_BAND: Rect = { x: 0, y: 744, w: PORTRAIT_LOGICAL_W, h: 100 };
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜一屏式骨架（**取代** R4 的四层「按阶段切换」版面）。
+ *
+ * 为什么必须重构结构（不是调视觉）：R4 的版面会**按阶段改变舞台带尺寸**
+ * （战斗 390×648 → RESULT 390×468 + 下方结果带），事件/开奖/阶段提示则整页换成王座厅。
+ * 玩家体验到的就是「不停打开不同界面、按同一个按钮」。R1 改成**高度恒定**的四段：
+ *
+ *   ① TOP        0..92    常驻进度 + 实时耐久 + 阶段（任何阶段都不消失）
+ *   ② STAGE     92..470   同一冒险舞台：战斗 / 事件 / 胜利 / 败退都在这里，**高度永不改变**
+ *   ③ NARRATIVE 470..744  固定叙事区：事件、奖励、战报依时间依次写入；决策时就地变成选项卡
+ *   ④ ACTION   744..844   底部唯一主操作：只在「真的需要玩家推进」时有按钮
+ *
+ * ⚠️ 舞台高度恒定是**结构性正确性**，不是审美：F1 的等比合成与 F6 的时间平滑都以舞台带为参
+ *    考点，旧实现 RESULT 时把带高从 648 改成 468，等于让同一场战斗在切换瞬间换了取景基准。
+ */
+const TOP_BAND: Rect = UX_TOP;
+const STAGE_BAND: Rect = UX_STAGE;
+const NARRATIVE_BAND: Rect = UX_NARRATIVE;
+const ACTION_BAND: Rect = UX_ACTION;
 
 /**
  * D2 诊断（隔离实验，**不进入正式主线**）：仅当冒险页 URL **显式**带 `?d2zoom=` 时，
@@ -173,6 +201,19 @@ const ADV_BUILD_TOAST_MS = 2400;
 /** F3：即时反馈的淡出时长（ms）。 */
 const ADV_TOAST_FADE_MS = 420;
 
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜纯信息阶段在叙事区的**停留时长**（ms）。
+ *
+ * 不是「过场动画」，而是让玩家真的读到刚写进叙事区的那句话再进入下一步：
+ *   · `EVENT → BATTLE`（敌情 → 开打）：短，1000ms（敌情只有 1–2 行，读完即开打）；
+ *   · `RESULT → 下一节点`（战报）：1200ms（需要读到胜负与剩余耐久）；
+ *   · `EVENT_DONE → 下一节点`（事件结果卡）：1200ms（需要读到拿到了什么/损失了什么）。
+ * 三者都**不需要点击**；期间底部主操作位不显示可点按钮（避免「假按钮」）。
+ */
+const ADV_AUTO_EVENT_MS = 1000;
+const ADV_AUTO_RESULT_MS = 1200;
+const ADV_AUTO_DONE_MS = 1200;
+
 /** F3：强化获得的即时反馈数据（纯显示，瞬态；不参与任何状态/战斗决策）。 */
 interface AdvBuildToast {
   readonly id: RunBuildId;
@@ -183,9 +224,12 @@ interface AdvBuildToast {
   readonly extra: string;
   readonly bornAt: number;
 }
-const ACTION_BTN: Rect = { x: 40, y: 756, w: 310, h: 68 };
-/** R4：结算页唯一主操作＝大号 CTA；**完整包含** ACTION_BTN 命中区（756..824），保证既醒目又可点。 */
-const TERMINAL_CTA: Rect = { x: 40, y: 700, w: 310, h: 124 };
+const ACTION_BTN: Rect = UX_ACTION_BTN;
+
+/** R1：叙事带底部「本局历程条」的高度（唯一真源：定位与绘制共用同一个数）。 */
+const UX_JOURNEY_H = 52;
+/** 结算页唯一主操作＝大号 CTA；**完整包含** ACTION_BTN 命中区，保证既醒目又可点。 */
+const TERMINAL_CTA: Rect = UX_TERMINAL_CTA;
 
 function hit(r: Rect, p: { x: number; y: number }): boolean {
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
@@ -198,23 +242,6 @@ function withAlpha(hex: string, alpha: number): string {
   const n = parseInt(full, 16);
   if (Number.isNaN(n)) return `rgba(124,141,176,${alpha})`;
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
-}
-
-function layoutOptionCards(count: number): Rect[] {
-  const w = 330;
-  // R2：放宽卡片高度，给「标题 + 核心收益 + 代价」更大字号与间距；与 tests/_e2e_adventure.cjs 同源必一致
-  const h = count <= 2 ? 124 : 104;
-  const gap = 16;
-  // 头部之下（STAGE_BAND 顶部留作事件主题区），卡片在其下区域居中
-  // R4：区域上界从 +250 收到 +154（贴紧事件标题区），下界留 30px 边距 —— 消除卡片上方的大片空档
-  const areaTop = STAGE_BAND.y + 154;
-  const areaBottom = STAGE_BAND.y + STAGE_BAND.h - 30;
-  const totalH = count * h + (count - 1) * gap;
-  const startY = Math.round(areaTop + (areaBottom - areaTop - totalH) / 2);
-  const x = Math.round((PORTRAIT_LOGICAL_W - w) / 2);
-  const rects: Rect[] = [];
-  for (let i = 0; i < count; i++) rects.push({ x, y: startY + i * (h + gap), w, h });
-  return rects;
 }
 
 export interface AdvPageOptions {
@@ -232,14 +259,18 @@ export class AdvPage {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D | null;
   /**
-   * FRUITS-ADVENTURE-BATTLE-VIEW-F1：战斗视图按**本页真实舞台带**（390×648）建视口。
-   * 视口因此是 502×704 而不是 502×358 —— 正式相机在「同一宽、更高」的安全区里取景，
-   * 合成时 X/Y 用同一个 scale（1:1 贴满舞台带），车辆/车轮不再被纵向拉长 2.146×。
+   * FRUITS-ADVENTURE-BATTLE-VIEW-F1：战斗视图按**本页真实舞台带**（R1 起为 390×378）建视口。
+   * 视口因此是 502×434 —— 正式相机在「同一宽、按舞台高」的安全区里取景，
+   * 合成时 X/Y 用同一个 scale（1:1 贴满舞台带），车辆/车轮不会被纵向拉伸。
+   *
+   * ⚠️ R1：舞台高从 648 改为**恒定 378**（一屏式结构里舞台只占中上段，下部给叙事区）。
+   *    这对 F1/F6 是**安全的**：等比约束（scaleX === scaleY）与 F6 的平滑都只依赖
+   *    「舞台带尺寸恒定」这一前提，而 R1 保证它在**所有阶段**都是 378（旧实现在 RESULT
+   *    时会改成 468，那才是真正的隐患）。F1/F6 的 E2E 已同步按新舞台带复验。
    */
   private readonly battleView = new RunBattleView(document, {
     safeArea: { w: STAGE_BAND.w, h: STAGE_BAND.h },
-  });
-  private readonly vp = new PlayerViewportTransform(PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
+  });  private readonly vp = new PlayerViewportTransform(PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
   /** R1：真实 UI 素材加载器（Capybara Go! 拆包，第三方素材本地 gitignore，失败降级过程式）。 */
   private readonly ui = new AdvUiStore();
 
@@ -283,6 +314,20 @@ export class AdvPage {
    * 开新战时清空；纯只读遥测，不参与任何玩法/渲染决策。
    */
   private lastBattleShells: { readonly maxPlayerSeen: number; readonly maxPlayerRadiusSeen: number } | null = null;
+  /**
+   * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜纯信息阶段的自动承接计时器。
+   *
+   * 只在这三个「无决策」阶段挂一个一次性 setTimeout（见 `scheduleAutoAdvance`）：
+   * EVENT / RESULT / EVENT_DONE。到点后走 `advAutoAdvance`（= R1 之前「按继续」的同一段推进代码）。
+   * `autoToken` 用于作废过期回调：`startNewRun` / 手动推进 / dispose 都会自增它，
+   * 保证「旧局的计时器」绝不可能推进新局（复玩安全）。
+   */
+  private autoTimer: number | null = null;
+  private autoToken = 0;
+  /** 本阶段何时开始（用于叙事区「已停留多久」的进度提示；纯显示）。 */
+  private phaseEnteredAt = 0;
+  /** R1：本阶段已自动承接的次数（诊断用；不参与决策）。 */
+  private autoAdvances = 0;
   private resizeObserver: ResizeObserver | null = null;
   private readonly onWindowResize = (): void => this.render();
 
@@ -337,6 +382,8 @@ export class AdvPage {
       clearTimeout(this.pressTimer);
       this.pressTimer = null;
     }
+    // R1：作废自动承接（dispose 之后旧局的计时器不得再碰任何状态）。
+    this.cancelAutoAdvance();
     this.battleView.dispose();
     window.removeEventListener('resize', this.onWindowResize);
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
@@ -358,9 +405,14 @@ export class AdvPage {
       clearTimeout(this.toastTimer);
       this.toastTimer = null;
     }
+    // R1：旧局的自动承接计时器必须先作废，否则它可能在**新局**的阶段上触发一次推进。
+    this.cancelAutoAdvance();
+    this.autoAdvances = 0;
     this.script = generateAdventureScript(seedLabel ?? randomSeedLabel());
     this.state = createAdventureState(this.ctx2, this.script);
     this.archived = false;
+    this.phaseEnteredAt = performance.now();
+    this.scheduleAutoAdvance();
     this.render();
   }
 
@@ -380,19 +432,25 @@ export class AdvPage {
       return;
     }
 
+    // R1：决策点（事件二选一 / 强化三选一）的卡片在**叙事区**内就地点选；
+    // 点击叙事区以外的任何位置（含上方舞台）都不推进 —— 不存在「整页遮罩」这件事。
     if (advOverlayOpen(this.state)) {
       const cards = advOverlayCards(this.state, this.script, this.ctx2);
-      const rects = layoutOptionCards(cards.length);
+      const rects = uxOptionRects(cards.length);
       for (let i = 0; i < rects.length; i++) {
-        if (hit(rects[i], p)) {
+        if (uxHit(rects[i], p)) {
           this.tapChoice(cards[i].id);
           return;
         }
       }
-      return; // 遮罩其它区域：不关窗、不推进
+      return; // 决策未做：不推进、不关窗
     }
 
-    if (advActionEnabled(this.state) && hit(ACTION_BTN, p)) {
+    // R1：纯信息阶段（EVENT / RESULT / EVENT_DONE / BATTLE）**没有**可点主操作 ——
+    // 这些阶段由 `scheduleAutoAdvance` 自动承接，界面上也不画按钮（避免「假 CTA」）。
+    if (advNeedsPlayer(this.state) && advActionEnabled(this.state) && hit(ACTION_BTN, p)) {
+      // 手动推进前先作废自动承接（避免玩家点击与计时器双重推进）。
+      this.cancelAutoAdvance();
       this.apply(pressAdventureAction(this.state, this.ctx2, this.script));
     }
   };
@@ -464,7 +522,9 @@ export class AdvPage {
     }
 
     const wasTerminal = this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED';
+    const phaseChanged = next.phase !== this.state.phase;
     this.state = next;
+    if (phaseChanged) this.phaseEnteredAt = performance.now();
 
     if (next.phase === 'BATTLE' && !this.battle) this.beginBattle();
     if (next.phase !== 'BATTLE' && next.phase !== 'RESULT' && this.battle) this.endBattle();
@@ -478,7 +538,57 @@ export class AdvPage {
     }
 
     if (next.phase === 'COMPLETE' || next.phase === 'FAILED') this.battleView.stopBattleAudio();
+    // R1：纯信息阶段挂一次性自动承接（决策阶段自动清空计时器，绝不跨过玩家决定）。
+    this.scheduleAutoAdvance();
     this.render();
+  }
+
+  /* ------------------------------------------- R1：纯信息阶段自动承接 */
+
+  /**
+   * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜按当前阶段安排（或取消）自动承接。
+   *
+   * 纪律：
+   *   - 只有「无决策」阶段（EVENT / RESULT / EVENT_DONE）会挂计时器；其余阶段一律不挂；
+   *   - 每次都先作废旧计时器（`autoToken`）⇒ 快速连点、复玩、手动推进都不会残留旧回调；
+   *   - 回调里再次校验 `advNeedsPlayer`：若期间玩家已推进到决策阶段，**不推进**（双保险）。
+   */
+  private scheduleAutoAdvance(): void {
+    this.cancelAutoAdvance();
+    const delay = this.autoAdvanceDelayMs();
+    if (delay <= 0) return;
+    const token = this.autoToken;
+    this.autoTimer = window.setTimeout(() => {
+      this.autoTimer = null;
+      if (token !== this.autoToken) return; // 已被作废（复玩 / 手动推进 / dispose）
+      if (advNeedsPlayer(this.state)) return; // 当前已在等玩家 ⇒ 绝不越过决策点
+      const next = advAutoAdvance(this.state, this.ctx2, this.script);
+      if (next === this.state) return; // 无事可做（防死循环）
+      this.autoAdvances += 1;
+      this.apply(next);
+    }, delay);
+  }
+
+  /** 当前阶段的自动停留时长（0 = 不自动承接）。 */
+  private autoAdvanceDelayMs(): number {
+    switch (this.state.phase) {
+      case 'EVENT':
+        return ADV_AUTO_EVENT_MS;
+      case 'RESULT':
+        return ADV_AUTO_RESULT_MS;
+      case 'EVENT_DONE':
+        return ADV_AUTO_DONE_MS;
+      default:
+        return 0;
+    }
+  }
+
+  private cancelAutoAdvance(): void {
+    this.autoToken += 1;
+    if (this.autoTimer !== null) {
+      clearTimeout(this.autoTimer);
+      this.autoTimer = null;
+    }
   }
 
   private recordTerminal(s: AdventureState): void {
@@ -619,41 +729,26 @@ export class AdvPage {
   }
 
   /**
-   * R4：竖屏界面四层空间编排 —— 层1 进度状态 / 层2 主体 / 层3 关键结果 / 层4 底部主操作。
-   * 各层按阶段显示必要内容：没有结果时不占「关键结果」带（层2 直接延伸到底）；
-   * 结算页自有独立版面（四段结构 + 唯一主操作），不套用通用四层。
+   * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜一屏式绘制（**取代** R4 的「按阶段换版面」）。
+   *
+   * 四段恒定绘制，任何阶段都画同一套骨架 —— 这是「战斗/事件/奖励共享同一主场景、
+   * 不再频繁整页跳转」的落实点：
+   *   ① drawTop         顶部：DAY 进度 + 实时耐久（战斗中读真实运行时）
+   *   ② drawStage       同一冒险舞台：战斗实时 / 战报定格帧 / 事件与敌情都把车留在场上
+   *   ③ drawNarrative   固定叙事区：事件标题、效果、战报、开奖结果依次写入同一张卡
+   *   ④ drawAction      底部唯一主操作：纯信息阶段**不画按钮**（只在下方渲染静态说明）
+   *
+   * 终局（COMPLETE / FAILED）也只换叙事区的内容（成绩卡），舞台与进度照旧常驻 ——
+   * 不再整页换成「王座厅结算页」。
    */
   private draw(ctx: CanvasRenderingContext2D): void {
     ctx.fillStyle = COLORS.pageBg;
     ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
-    const phase = this.state.phase;
 
-    // 结算页：自有版面（胜负 → 推进成绩 → 本局 Build → 累计档案）+ 唯一主操作
-    if (phase === 'COMPLETE' || phase === 'FAILED') {
-      this.drawTerminal(ctx);
-      this.drawAction(ctx);
-      return;
-    }
-
-    // 层1 进度状态
-    this.drawTop(ctx);
-
-    // 层2 主体 + 层3 关键结果（按阶段二选一，不常驻空带）
-    if (phase === 'EVENT_DONE') {
-      this.drawEventDone(ctx); // 主体层＝宝箱
-      this.drawResultBand(ctx); // 层3＝开奖结果
-    } else if (phase === 'RESULT') {
-      this.drawStage(ctx, RESULT_STAGE, 'cover'); // 主体层＝战报定格帧（等比铺满 + 裁切，不拉伸）
-      this.drawResultBand(ctx); // 层3＝战报
-    } else {
-      this.drawStage(ctx, STAGE_BAND); // 主体层占满
-    }
-
-    // 层4 底部主操作
-    this.drawAction(ctx);
-
-    // 选择浮层（事件 / 强化）覆盖主体层，遮住行动带
-    if (advOverlayOpen(this.state)) this.drawOverlay(ctx);
+    this.drawTop(ctx); // ①
+    this.drawStage(ctx); // ②
+    this.drawNarrative(ctx); // ③
+    this.drawAction(ctx); // ④
 
     // F3：强化即时反馈（最顶层；瞬态自动消失，不挡输入）
     if (this.buildToast) this.drawBuildToast(ctx);
@@ -667,28 +762,6 @@ export class AdvPage {
    *   - contain：等比缩放完整放入并居中（用于宝箱 / 星级等图标）。
    * 资源未加载（缺失/克隆无素材）时返回 false，调用方据此降级为过程式绘制。
    */
-  /**
-   * R4：绘制 `battle_bg` 的**顶部「王座厅」场景**（源图上 43%），而不是中部的蓝红 VS 竞技场。
-   *
-   * 背景理由（结构修复，非透明度微调）：`battle_bg.png`（1089×2048）其实是**两张图**——
-   *   上 43% = 城堡王座厅（卡皮巴拉立像 + 彩窗 + 红毯），语义＝「旅途终点／场景叙事」；
-   *   下 57% = 蓝红对峙的 VS 竞技场，语义＝「对战」，出现在结算/事件/选择页都属于素材语义错配。
-   * 因此非战斗场景一律只取顶部王座厅，VS 竞技场随之消失（真实战斗画面由 battleView 自行绘制）。
-   */
-  private blitThroneRoom(ctx: CanvasRenderingContext2D, dx: number, dy: number, dw: number, dh: number): boolean {
-    const img = this.ui.get('battle_bg');
-    if (!img) return false;
-    const sw = img.width;
-    const sh = img.height;
-    const srcH = sh * 0.43;
-    const scale = Math.max(dw / sw, dh / srcH);
-    const cw = dw / scale;
-    const ch = dh / scale;
-    const sx = (sw - cw) / 2;
-    ctx.drawImage(img, sx, 0, cw, ch, dx, dy, dw, dh);
-    return true;
-  }
-
   private blitImage(
     ctx: CanvasRenderingContext2D,
     id: AdvUiId,
@@ -740,33 +813,45 @@ export class AdvPage {
   }
 
   private drawTop(ctx: CanvasRenderingContext2D): void {
-    // R2：顶部仅保留「冒险进度」+「当前耐久」，去除常驻长文本与混乱芯片。
+    // R1：顶部**常驻**进度与耐久（任何阶段都不消失 —— 一屏式的"常驻状态层"）。
     ctx.fillStyle = COLORS.topBandBg;
     ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, TOP_BAND.h);
     ctx.fillStyle = COLORS.divider;
     ctx.fillRect(0, TOP_BAND.h - 1, PORTRAIT_LOGICAL_W, 1);
 
-    // 进度（顶部单行）
+    // 进度（顶部单行）：DAY n/N + 阶段；右侧带一个线段式进度条（一眼看出走了多远）
     ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `600 18px ${FONT_STACK}`;
+    ctx.font = `600 17px ${FONT_STACK}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const stage = this.currentStage();
     const stageLabel = stage > 0 ? ` · 第${stage}阶段` : '';
-    ctx.fillText(`随机冒险 · DAY ${this.state.day}/${this.state.dayTotal}${stageLabel}`, 16, 28);
+    ctx.fillText(`冒险 · DAY ${this.state.day}/${this.state.dayTotal}${stageLabel}`, 16, 24);
 
-    // 装备来源药丸（右上，如实披露：演示/车库，绝不假装已读取）
+    // 全程进度细条（DAY 进度，纯展示；不新增任何玩法状态）
+    const progW = 132;
+    const progX = PORTRAIT_LOGICAL_W - 16 - progW;
+    const progY = 20;
+    const prog = Math.max(0, Math.min(1, this.state.day / Math.max(1, this.state.dayTotal)));
+    this.roundRectPath(ctx, progX, progY, progW, 7, 4);
+    ctx.fillStyle = 'rgba(124,141,176,0.22)';
+    ctx.fill();
+    this.roundRectPath(ctx, progX, progY, Math.max(4, progW * prog), 7, 4);
+    ctx.fillStyle = '#c8a04a';
+    ctx.fill();
+
+    // 装备来源药丸（右侧第二行，如实披露：演示/车库，绝不假装已读取）
     const demo = !this.loadoutSource.includes('正式车库');
     const srcLabel = demo ? '演示装备' : '车库装备';
-    ctx.font = `500 11px ${FONT_STACK}`;
-    const sw = ctx.measureText(srcLabel).width + 18;
-    const sx = PORTRAIT_LOGICAL_W - 14 - sw;
-    const sy = 14;
-    const sh = 22;
-    this.roundRectPath(ctx, sx, sy, sw, sh, 11);
-    ctx.fillStyle = demo ? 'rgba(224,155,107,0.18)' : 'rgba(127,214,160,0.18)';
+    ctx.font = `500 10px ${FONT_STACK}`;
+    const sw = ctx.measureText(srcLabel).width + 14;
+    const sx = PORTRAIT_LOGICAL_W - 16 - sw;
+    const sy = 34;
+    const sh = 18;
+    this.roundRectPath(ctx, sx, sy, sw, sh, 9);
+    ctx.fillStyle = demo ? 'rgba(224,155,107,0.16)' : 'rgba(127,214,160,0.16)';
     ctx.fill();
-    ctx.strokeStyle = demo ? 'rgba(224,155,107,0.6)' : 'rgba(127,214,160,0.6)';
+    ctx.strokeStyle = demo ? 'rgba(224,155,107,0.55)' : 'rgba(127,214,160,0.55)';
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = demo ? '#e0b07f' : '#9fe0b8';
@@ -775,7 +860,7 @@ export class AdvPage {
     ctx.fillText(srcLabel, sx + sw / 2, sy + sh / 2);
 
     // 耐久条（第二行：标签左 / 进度中 / 百分比右）
-    const hpBar: Rect = { x: 46, y: 52, w: 248, h: 16 };
+    const hpBar: Rect = { x: 46, y: 56, w: 246, h: 16 };
     // FRUITS-ADVENTURE-BATTLE-HP-F2：战斗中读真实战斗运行时的当前 HP
     // （`RunBattleRuntime.hp().a`），其余阶段读已结算的 carriedHp。
     // 只换数据来源 —— 不新增任何 HP 状态，分母恒为 ctx.playerHpMax（切场不回跳）。
@@ -816,94 +901,134 @@ export class AdvPage {
   }
 
   /**
-   * FRUITS-ADVENTURE-BATTLE-VIEW-F1：`fill` 决定战斗画面的合成方式。
-   * - `'exact'`（默认）：目标带 = 战斗视图安全区（390×648）⇒ 1:1 等比贴满；
-   * - `'cover'`：目标带更矮（RESULT 的 390×468）⇒ 等比铺满后裁掉多余天空/地面，
-   *   车辆像素尺寸与战斗中一致，绝不压缩/拉伸。
+   * ② 同一冒险舞台（高度恒定 390×378，任何阶段都不改变尺寸）。
+   *
+   * 三种内容，**同一个场景**：
+   *   - 有战斗实例（BATTLE 实时 / RESULT 定格帧）：贴正式战斗画面（F1 等比 + F4/F6 自适应取景）；
+   *   - 无战斗实例（开局的旅途、事件、阶段推进）：用同一张冒险场景底图做浅色压暗，
+   *     并把「当前对手 / 目的地」写在舞台上，让玩家的车始终留在同一片荒原里；
+   *   - 绝不换成王座厅 / 宝箱 / VS 竞技场等**另一个场景**（R1 取消事件与战斗之间的独立页面）。
+   *
+   * ⚠️ F1/F6 契约不变：`fill === 'cover'` 时沿用最后一次战斗取景（`blitAdventureHold`），
+   *    只裁纵向、不缩放 ⇒ 战报与战斗的车辆像素尺寸一致。
    */
-  private drawStage(ctx: CanvasRenderingContext2D, band: Rect = STAGE_BAND, fill: 'exact' | 'cover' = 'exact'): void {
-    const b = band;
-    // R4：背景只取「王座厅」场景（VS 竞技场不再出现在非战斗页）；缺失则降级为渐变
-    if (!this.blitThroneRoom(ctx, b.x, b.y, b.w, b.h)) {
-      const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
-      g.addColorStop(0, COLORS.stageSkyTop);
-      g.addColorStop(1, COLORS.stageSkyBottom);
-      ctx.fillStyle = g;
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-    }
-    // R2：压暗 + 上下渐变 scrim，保证前景文字/战斗可读（战斗主体在 scrim 之上绘制，不被压暗）
-    ctx.fillStyle = 'rgba(8,12,20,0.58)';
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    const topScrim = ctx.createLinearGradient(0, b.y, 0, b.y + 96);
-    topScrim.addColorStop(0, 'rgba(6,9,14,0.64)');
-    topScrim.addColorStop(1, 'rgba(6,9,14,0)');
-    ctx.fillStyle = topScrim;
-    ctx.fillRect(b.x, b.y, b.w, 96);
-    const botScrim = ctx.createLinearGradient(0, b.y + b.h, 0, b.y + b.h - 96);
-    botScrim.addColorStop(0, 'rgba(6,9,14,0.64)');
-    botScrim.addColorStop(1, 'rgba(6,9,14,0)');
-    ctx.fillStyle = botScrim;
-    ctx.fillRect(b.x, b.y + b.h - 96, b.w, 96);
-    // R4：移除竞技场专属的「地面/道路」色块（王座厅自带地毯与地板）
-
-    const node = advCurrentNode(this.state, this.script);
-    if (node.kind === 'BANNER') {
-      this.drawBanner(ctx, node.beat);
-      return;
-    }
-
+  private drawStage(ctx: CanvasRenderingContext2D, fill: 'exact' | 'cover' = 'exact'): void {
+    const b = STAGE_BAND;
     if (this.battle) {
       // 真实战斗（BATTLE 实时 / RESULT 冻结帧）一律贴正式战斗画面。
-      // F1：舞台带 = 战斗视图的安全区（390×648）⇒ `blit` 是 1:1 等比贴图（X/Y 同一 scale）；
-      // F6：RESULT 不再缩回原比例，而是**沿用最后一次战斗取景**（只裁纵向，不缩放），
-      //     消除 P0 实测的「切换那一帧主体缩小 31%–34%」。
       this.battleView.render(this.battle);
       if (fill === 'cover') {
-        // RESULT 冻结帧：沿用最后稳定取景（无 F6 取景时自动退回 F1 等比铺满）。
         this.battleView.blitAdventureHold(ctx, b, 0.5);
       } else if (D2_FIXED) {
-        // F4 对照旋钮：显式固定倍数（?d2zoom=，含 =1 ⇒ 原取景基线）。
         this.battleView.blitSubject(ctx, b, D2_EXPERIMENT_ZOOM);
       } else if (ADV_CAMERA_OFF) {
-        // F4 对照基线：关闭自适应镜头，恢复原取景（与无 F4 逐像素一致）。
         this.battleView.blit(ctx, b);
       } else {
-        // F4 采纳 + F6 稳定化：先推进一帧平滑（时间常数/速率上限/地面锚定），再按解算结果合成。
         this.battleView.updateAdventureCamera(this.battle, ADV_CAMERA_MAX, this.frameDtMs);
         this.battleView.blitAdventureCamera(ctx, b);
       }
-      // F3：本局改装图标条（兑现锚点；战斗与 RESULT 冻结帧都显示）
       this.drawBuildStrip(ctx);
       return;
     }
 
-    // 非战斗：居中叙事卡片（R2：用聚焦面板压住 VS 中区，弱化背景干扰，突出文字）
+    // ── 非战斗：仍然是**同一片荒原**（不换场景） ──
+    this.drawAdventureBackdrop(ctx, b);
+    const node = advCurrentNode(this.state, this.script);
     const pcx = b.x + b.w / 2;
-    const panelW = PORTRAIT_LOGICAL_W - 64;
-    const panelH = 132;
-    const panelY = b.y + b.h / 2 - panelH / 2;
-    ctx.fillStyle = 'rgba(8,12,20,0.66)';
-    this.roundRectPath(ctx, pcx - panelW / 2, panelY, panelW, panelH, 16);
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(124,141,176,0.45)';
-    this.roundRectPath(ctx, pcx - panelW / 2, panelY, panelW, panelH, 16);
-    ctx.stroke();
 
+    // 舞台上只写一句「你现在面对什么」——细节全部交给下方叙事区，避免两处重复。
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    if (this.state.phase === 'EVENT' && (node.kind === 'BATTLE' || node.kind === 'FINAL')) {
+    if (node.kind === 'BATTLE' || node.kind === 'FINAL') {
+      const label = this.battleEnemyLabel(node.encounterId);
       ctx.fillStyle = COLORS.eventAccent;
       ctx.font = `700 20px ${FONT_STACK}`;
-      ctx.fillText(`前方：${this.battleEnemyLabel(node.encounterId)}`, pcx, panelY + panelH / 2 - 14);
+      ctx.fillText(`前方：${label}`, pcx, b.y + b.h / 2 - 16);
       ctx.fillStyle = COLORS.textDim;
       ctx.font = `400 13px ${FONT_STACK}`;
-      ctx.fillText('按「遭遇敌人」开打', pcx, panelY + panelH / 2 + 18);
+      ctx.fillText(node.kind === 'FINAL' ? '最后一位对手' : '引擎声由远及近', pcx, b.y + b.h / 2 + 14);
+    } else if (node.kind === 'EVENT') {
+      ctx.fillStyle = COLORS.textTitle;
+      ctx.font = `700 19px ${FONT_STACK}`;
+      ctx.fillText(node.title, pcx, b.y + b.h / 2 - 10);
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = `400 13px ${FONT_STACK}`;
+      ctx.fillText('车停在路边 · 需要你做个决定', pcx, b.y + b.h / 2 + 18);
+    } else if (node.kind === 'BUILD') {
+      ctx.fillStyle = COLORS.textTitle;
+      ctx.font = `700 19px ${FONT_STACK}`;
+      ctx.fillText('你停下来整理装备', pcx, b.y + b.h / 2 - 10);
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = `400 13px ${FONT_STACK}`;
+      ctx.fillText('这一次改装会在接下来的战斗里生效', pcx, b.y + b.h / 2 + 18);
+    } else if (node.kind === 'BANNER') {
+      ctx.fillStyle = COLORS.textTitle;
+      ctx.font = `700 19px ${FONT_STACK}`;
+      ctx.fillText('进入新的阶段', pcx, b.y + b.h / 2 - 10);
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = `400 13px ${FONT_STACK}`;
+      ctx.fillText('前路更凶险', pcx, b.y + b.h / 2 + 18);
     } else {
-      ctx.fillStyle = COLORS.textBody;
-      ctx.font = `600 17px ${FONT_STACK}`;
-      ctx.fillText('继续前进…', pcx, panelY + panelH / 2);
+      ctx.fillStyle = COLORS.textTitle;
+      ctx.font = `700 19px ${FONT_STACK}`;
+      ctx.fillText('荒原路远', pcx, b.y + b.h / 2 - 10);
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = `400 13px ${FONT_STACK}`;
+      ctx.fillText('准备好就出发', pcx, b.y + b.h / 2 + 18);
     }
+  }
+
+  /**
+   * 非战斗阶段的冒险场景底（与战斗同气质：同一片暖色荒原 + 地平线 + 路面）。
+   *
+   * 为什么自绘而不是直接用战斗渲染器：非战斗时没有 `RunBattleRuntime`，正式渲染器无从取景；
+   * 但**视觉语言必须与战斗一致**（Queue 必改 3：不得再用程序化黑底冒充完成）。这里按
+   * 战斗舞台的色调（暖棕地面 / 冷蓝天光）铺一层同等明度的荒原，并叠一条地面上线，
+   * 与战斗画面的地平线高度对齐，使「战斗 ↔ 事件」切换时玩家看到的是**同一个地方**。
+   */
+  private drawAdventureBackdrop(ctx: CanvasRenderingContext2D, b: Rect): void {
+    const sky = ctx.createLinearGradient(0, b.y, 0, b.y + b.h * 0.62);
+    sky.addColorStop(0, '#2d3f57');
+    sky.addColorStop(0.55, '#425050');
+    sky.addColorStop(1, '#6b6250');
+    ctx.fillStyle = sky;
+    ctx.fillRect(b.x, b.y, b.w, b.h * 0.62);
+    // 地平线（与战斗画面同一条地面线位置：约 62% 处）
+    const gy = b.y + b.h * 0.62;
+    const ground = ctx.createLinearGradient(0, gy, 0, b.y + b.h);
+    ground.addColorStop(0, '#5a4a38');
+    ground.addColorStop(1, '#2e2419');
+    ctx.fillStyle = ground;
+    ctx.fillRect(b.x, gy, b.w, b.y + b.h - gy);
+    // 路面
+    ctx.fillStyle = 'rgba(20,16,12,0.55)';
+    ctx.fillRect(b.x, gy + (b.h * 0.38) * 0.52, b.w, 26);
+    // 远景山脊（两层剪影，制造纵深）
+    const ridge = (baseY: number, h: number, alpha: string, seed: number): void => {
+      ctx.fillStyle = alpha;
+      ctx.beginPath();
+      ctx.moveTo(b.x, baseY);
+      for (let x = 0; x <= b.w; x += 18) {
+        const t = (x / b.w) * 6.28 * 1.4 + seed;
+        ctx.lineTo(b.x + x, baseY - h * (0.5 + 0.5 * Math.sin(t)) - h * 0.2 * Math.sin(t * 2.7));
+      }
+      ctx.lineTo(b.x + b.w, baseY);
+      ctx.closePath();
+      ctx.fill();
+    };
+    ridge(gy + 2, 44, 'rgba(30,40,56,0.55)', 0.7);
+    ridge(gy + 2, 26, 'rgba(22,28,40,0.7)', 2.1);
+    // 舞台上下压暗（与战斗画面同一套 scrim，保证叠加的浅色卡片与文字可读）
+    const topScrim = ctx.createLinearGradient(0, b.y, 0, b.y + 84);
+    topScrim.addColorStop(0, 'rgba(6,9,14,0.55)');
+    topScrim.addColorStop(1, 'rgba(6,9,14,0)');
+    ctx.fillStyle = topScrim;
+    ctx.fillRect(b.x, b.y, b.w, 84);
+    const botScrim = ctx.createLinearGradient(0, b.y + b.h, 0, b.y + b.h - 84);
+    botScrim.addColorStop(0, 'rgba(6,9,14,0.6)');
+    botScrim.addColorStop(1, 'rgba(6,9,14,0)');
+    ctx.fillStyle = botScrim;
+    ctx.fillRect(b.x, b.y + b.h - 84, b.w, 84);
   }
 
   private battleEnemyLabel(id: string): string {
@@ -918,30 +1043,484 @@ export class AdvPage {
     return map[id] ?? '对手';
   }
 
-  private drawBanner(ctx: CanvasRenderingContext2D, beat: readonly string[]): void {
-    const b = STAGE_BAND;
-    ctx.fillStyle = 'rgba(8,12,20,0.9)';
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    ctx.strokeStyle = '#7c8db0';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(b.x + 20, b.y + 90, b.w - 40, b.h - 180);
+  /* --------------------------------------------------- ③ 固定叙事区 */
 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#9fb3d6';
-    ctx.font = `600 22px ${FONT_STACK}`;
-    ctx.fillText('— 阶段提示 —', b.x + b.w / 2, b.y + 140);
-    ctx.fillStyle = COLORS.textBody;
-    ctx.font = `400 14px ${FONT_STACK}`;
-    let y = b.y + 200;
-    for (const line of beat) {
-      this.wrapText(ctx, line, b.x + b.w / 2, y, b.w - 80, 22);
-      y += 44;
+  /**
+   * ③ 固定叙事区（**一屏式结构的核心**）。
+   *
+   * 同一块区域承接全部「非决策信息」：旅途、敌情、战报、事件结果、开奖、阶段推进、终局成绩。
+   * 场景（上方舞台）**始终不跳走**，信息只是在这里「依次写入」—— 这正是 Queue 要的
+   * 「战斗、事件、奖励共享同一主场景，不再频繁整页跳转」。
+   *
+   * 底板用 P0 真实素材 `battle_event_text_bg`（浅色米白文本卡）做九宫格缩放，
+   * 因此文字对比度天然足够（不必再用程序化黑底冒充）。
+   * 决策阶段（EVENT_CHOICE / CHOICE）就地换成可点选项卡（见 `drawNarrativeChoices`）。
+   */
+  private drawNarrative(ctx: CanvasRenderingContext2D): void {
+    // R1：叙事带**恒定满高**（这部分刻意不做自适应）。
+    //
+    // 为什么最终没有把富余高度还给舞台：F1（等比合成）与 F6（逐帧平滑）的读数口径都以
+    // 「舞台带尺寸恒定」为前提；若让舞台随阶段变高，战斗首帧/换阶段的合成基准就会变，
+    // 等于把刚刚在 F6 修好的「切场不跳」重新打开。舞台必须恒定，这是硬约束。
+    //
+    // 因此留白用**内容**填满，而不是靠拉伸底板：
+    //   · 卡片高度随文字行数自适应（短文案不再撑满 246px 留大片纯色）；
+    //   · 富余高度交给「战场底部装饰 + 底部状态行靠下对齐」——
+    //     即卡片只占它需要的高度，其余部分保持叙事带底色，并在带内绘制分隔与留白节奏。
+    const band = NARRATIVE_BAND;
+    ctx.fillStyle = '#141a24';
+    ctx.fillRect(band.x, band.y, band.w, band.h);
+    const fade = ctx.createLinearGradient(0, band.y - 16, 0, band.y + 6);
+    fade.addColorStop(0, 'rgba(20,26,36,0)');
+    fade.addColorStop(1, 'rgba(20,26,36,1)');
+    ctx.fillStyle = fade;
+    ctx.fillRect(band.x, band.y - 16, band.w, 22);
+
+    const card = advOverlayOpen(this.state)
+      ? UX_NARRATIVE_CARD
+      : { ...UX_NARRATIVE_CARD, h: this.narrativeCardHeight(ctx) };
+
+    // 卡片底板：真实 P0 浅色文本卡（九宫格，角落 1:1，不拉伸）
+    const drewCard = this.drawNineSliceId(ctx, 'text_card_bg', card.x, card.y, card.w, card.h);
+    if (!drewCard) {
+      // 素材缺失（公网 clone / 未复制 public/adventure-ui）：降级为浅色圆角底，
+      // 保持「浅色卡片 + 深色文字」的可读性契约，**不回退成黑底**。
+      ctx.fillStyle = '#f3ecd8';
+      this.roundRectPath(ctx, card.x, card.y, card.w, card.h, 14);
+      ctx.fill();
     }
-    ctx.fillStyle = '#7fd6a0';
-    ctx.font = `500 13px ${FONT_STACK}`;
-    ctx.fillText('▶ 按「继续」进入下一段路', b.x + b.w / 2, b.y + b.h - 60);
+
+    if (advOverlayOpen(this.state)) {
+      this.drawNarrativeChoices(ctx, card);
+      return;
+    }
+
+    this.drawNarrativeInfo(ctx, card);
+    // 卡片之下的富余高度：画「本局历程条」（真实状态，不是装饰性填充）。
+    // 它同时承担两个产品目的：
+    //   ① 消除「卡片下面一大块空」的留白观感（实测卡片收紧后会留下约 140px 空带）；
+    //   ② 让玩家在**任何阶段**都能一眼看到「我走到哪了 / 赢了几场 / 现在带着哪些改装」，
+    //      这是一屏式连续性的一部分（不必回翻日志）。
+    // 位置：贴叙事带底部内侧（而不是紧跟卡片）——这样无论卡片多高，它都稳定在同一处，
+    // 玩家不会觉得元素在跳。
+    const stripH = UX_JOURNEY_H;
+    const stripY = NARRATIVE_BAND.y + NARRATIVE_BAND.h - stripH - 8;
+    if (card.y + card.h + 8 <= stripY) this.drawJourneyStrip(ctx, stripY);
   }
+
+  /**
+   * 本局历程条（只读状态，不新增任何玩法数据）。
+   *
+   * 三块信息，全部来自既有 state：
+   *   DAY n/N 进度点阵 —— 已过天数实心，未过空心（一眼看出走了多远）；
+   *   战绩 `胜 x / 战 y` —— battlesWon / battlesCompleted；
+   *   改装图标串 —— 本局已获得的 buffs（与战斗中左上角改装条同源图标）。
+   */
+  private drawJourneyStrip(ctx: CanvasRenderingContext2D, y: number): void {
+    const x = UX_NARRATIVE_CARD.x;
+    const w = UX_NARRATIVE_CARD.w;
+    const h = UX_JOURNEY_H;
+    if (y + h > NARRATIVE_BAND.y + NARRATIVE_BAND.h + 1) return;
+
+    ctx.save();
+    // 底板：比叙事带略亮一档（同色系），让这块「有内容」而不是「空色带」
+    const g = ctx.createLinearGradient(0, y, 0, y + h);
+    g.addColorStop(0, 'rgba(58,68,86,0.55)');
+    g.addColorStop(1, 'rgba(38,46,60,0.55)');
+    this.roundRectPath(ctx, x, y, w, h, 12);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(200,160,74,0.34)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
+    // ① 标签
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#d8b45e';
+    ctx.font = `700 12px ${FONT_STACK}`;
+    ctx.fillText('历程', x + 14, y + 16);
+
+    // ② DAY 进度点阵（已过 = 金色实心，未过 = 暗金空心）
+    const total = Math.max(1, this.state.dayTotal);
+    const dotX0 = x + 50;
+    const dotGap = Math.min(9.4, (w - 210) / total);
+    const dotR = Math.min(3.4, dotGap * 0.4);
+    for (let i = 1; i <= total; i++) {
+      const cx = dotX0 + (i - 1) * dotGap;
+      ctx.beginPath();
+      ctx.arc(cx, y + 16, dotR, 0, Math.PI * 2);
+      const passed = i <= this.state.day;
+      ctx.fillStyle = passed ? '#e0b45e' : 'rgba(200,160,74,0.20)';
+      ctx.fill();
+    }
+
+    // ③ 战绩（与点阵同一行，右侧）
+    const statX = dotX0 + total * dotGap + 12;
+    ctx.fillStyle = '#cfd9e8';
+    ctx.font = `700 12px ${FONT_STACK}`;
+    ctx.fillText(`胜 ${this.state.battlesWon}/${this.state.battlesCompleted}`, statX, y + 16);
+
+    // ④ 第二行：改装图标串（有图标就画图标，没有就写「尚无改装」）
+    const buffs = this.state.buffs;
+    const icon = 20;
+    const gap = 6;
+    const rowY = y + h - 15;
+    if (buffs.length === 0) {
+      ctx.fillStyle = 'rgba(207,217,232,0.5)';
+      ctx.font = `500 11px ${FONT_STACK}`;
+      ctx.fillText('尚无改装', x + 14, rowY);
+    } else {
+      ctx.fillStyle = 'rgba(207,217,232,0.72)';
+      ctx.font = `500 11px ${FONT_STACK}`;
+      ctx.fillText('改装', x + 14, rowY);
+      const n = Math.min(buffs.length, 9);
+      for (let i = 0; i < n; i++) {
+        const ix = x + 48 + i * (icon + gap);
+        this.blitImage(ctx, advBuildIconId(buffs[i]), ix, rowY - icon / 2, icon, icon, 'contain');
+      }
+      if (buffs.length > n) {
+        ctx.fillStyle = 'rgba(207,217,232,0.6)';
+        ctx.font = `500 10px ${FONT_STACK}`;
+        ctx.fillText(`+${buffs.length - n}`, x + 48 + n * (icon + gap) + 2, rowY);
+      }
+    }
+
+    // ⑤ 右侧：当前耐久百分比（与顶栏同一真源，这里只是就近复述）
+    const dur = advTopDurability(this.state, this.ctx2, this.liveBattleHp());
+    ctx.textAlign = 'right';
+    ctx.fillStyle = dur.pct <= 25 ? '#e07a6a' : '#9fe0b8';
+    ctx.font = `700 14px ${FONT_STACK}`;
+    ctx.fillText(`${dur.pct}%`, x + w - 14, rowY);
+    ctx.fillStyle = 'rgba(207,217,232,0.55)';
+    ctx.font = `500 10px ${FONT_STACK}`;
+    ctx.fillText('耐久', x + w - 14 - ctx.measureText(`${dur.pct}%`).width - 46, rowY);
+    ctx.restore();
+  }
+
+  /**
+   * 信息态叙事卡：标题行（图标 + 标题 + 阶段徽标）→ 正文行 → 底部状态行。
+   *
+   * 正文来自 `advNarrativeLines`（纯函数，只取「刚刚发生这一件事」的行），
+   * 因此卡片永远不会被前几天的旧文字占满，也不会漏掉本次结果。
+   */
+  /**
+   * 信息态叙事卡的自适应高度（纯测量，不改状态）。
+   *
+   * 公式：卡头 50（标题+徽标+分隔线）+ 正文行数×22 + 底部状态行 34 + 上下留白 12。
+   * 下限 132（保证短文案时卡片不显局促），上限 = 叙事带可用高度。
+   *
+   * 为什么必须自适应：决策状态的卡片要塞 2–4 张选项卡 ⇒ 必须用满高；
+   * 而信息状态通常只有 2–4 行字，用满高会在卡内下方留出大片纯色 ——
+   * Queue 验收 3 明确要求「无严重留白」，这里用测量结果说话，而不是目测调数值。
+   */
+  private narrativeCardHeight(ctx: CanvasRenderingContext2D): number {
+    const card = UX_NARRATIVE_CARD;
+    const padX = 18;
+    const innerW = card.w - padX * 2;
+    const lines = advNarrativeLines(this.state, UX_NARRATIVE_MAX_LINES);
+    // 用与绘制完全相同的字号/行高做测量（14px / 行高 22）
+    ctx.font = `400 14px ${FONT_STACK}`;
+    let rows = 0;
+    for (const entry of lines) rows += this.measureRows(ctx, `· ${entry.text}`, innerW);
+    const body = Math.max(1, Math.min(rows, UX_NARRATIVE_MAX_LINES + 2)) * 22;
+    // 卡头 46（标题+徽标+分隔线，见 drawNarrativeInfo 的 titleY/lineY）+ 正文 + 底行 26
+    const h = 46 + body + 26;
+    const bandH = NARRATIVE_BAND.h - (card.y - NARRATIVE_BAND.y) - 8;
+    return Math.max(120, Math.min(bandH, h));
+  }
+
+  /** 按宽度测量一段文字会占几行（与 `wrapLeft` 的折行规则一致）。 */
+  private measureRows(ctx: CanvasRenderingContext2D, text: string, maxW: number): number {
+    const chars = [...text];
+    let line = '';
+    let rows = 1;
+    for (const ch of chars) {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxW && line.length > 0) {
+        rows += 1;
+        line = ch;
+      } else {
+        line = test;
+      }
+    }
+    return rows;
+  }
+
+  private drawNarrativeInfo(ctx: CanvasRenderingContext2D, card: Rect): void {
+    const node = (() => {
+      try {
+        return advCurrentNode(this.state, this.script);
+      } catch {
+        return null;
+      }
+    })();
+    const title = advNarrativeTitle(this.state, this.script);
+    const isWin = this.state.battle?.winner === 'A';
+    const isLoss = this.state.phase === 'FAILED' || (this.state.phase === 'RESULT' && !isWin);
+    const accent = this.state.phase === 'COMPLETE'
+      ? '#2f7d4f'
+      : isLoss
+        ? '#b03a2e'
+        : this.state.phase === 'RESULT' && isWin
+          ? '#2f7d4f'
+          : '#8a5a1e';
+
+    const padX = 18;
+    const innerW = card.w - padX * 2;
+    const titleY = card.y + 30;
+
+    // 图标（真实语义素材；缺失时用过程式图形，绝不空一块）
+    const iconId = this.narrativeIconId();
+    const iconSize = 28;
+    if (this.ui.ready(iconId)) {
+      drawContain(ctx, this.ui.get(iconId)!, card.x + padX, titleY - iconSize / 2, iconSize, iconSize);
+    } else if (node && node.kind === 'EVENT') {
+      this.drawEventIcon(ctx, node.eventKind, card.x + padX + iconSize / 2, titleY, 22, accent);
+    }
+    // 标题（深色，保证在浅色卡上最高对比）
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#2a2118';
+    ctx.font = `700 19px ${FONT_STACK}`;
+    ctx.fillText(this.fitText(ctx, title, innerW - iconSize - 12), card.x + padX + iconSize + 10, titleY);
+
+    // 阶段徽标（右上）：战斗中 / 结算中 / 待决定 —— 让玩家一眼知道「现在要不要动手」
+    const tag = this.narrativeTag();
+    if (tag) {
+      ctx.font = `600 11px ${FONT_STACK}`;
+      const tw = ctx.measureText(tag.text).width + 14;
+      const tx = card.x + card.w - padX - tw;
+      this.roundRectPath(ctx, tx, titleY - 10, tw, 20, 10);
+      ctx.fillStyle = tag.tone === 'wait' ? 'rgba(176,58,46,0.14)' : 'rgba(42,33,24,0.10)';
+      ctx.fill();
+      ctx.fillStyle = tag.tone === 'wait' ? '#b03a2e' : '#6b5a45';
+      ctx.textAlign = 'center';
+      ctx.fillText(tag.text, tx + tw / 2, titleY);
+    }
+
+    // 分隔线（真实素材 event_line，单轴拉伸不失真；缺失则画 1px 线）
+    const lineY = card.y + 50;
+    if (!this.blitImage(ctx, 'event_line', card.x + padX, lineY, innerW, 4, 'stretch')) {
+      ctx.fillStyle = 'rgba(42,33,24,0.16)';
+      ctx.fillRect(card.x + padX, lineY, innerW, 1);
+    }
+
+    // 正文（最多 UX_NARRATIVE_MAX_LINES 行，字号 14，行高 22）
+    const lines = advNarrativeLines(this.state, UX_NARRATIVE_MAX_LINES);
+    let ty = card.y + 74;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#3a2f24';
+    ctx.font = `400 14px ${FONT_STACK}`;
+    for (const entry of lines) {
+      const rows = this.wrapLeft(ctx, entry.text, card.x + padX, ty, innerW, 22, entry.kind);
+      ty += rows * 22;
+      if (ty > card.y + card.h - 56) break;
+    }
+
+    // 底部状态行：谁在等我 / 正在自动进行（不出现「按继续」这类空指令）
+    const footY = card.y + card.h - 22;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const foot = this.narrativeFooter();
+    ctx.fillStyle = foot.tone === 'wait' ? '#8a2f24' : '#6b5a45';
+    ctx.font = `600 12px ${FONT_STACK}`;
+    ctx.fillText(this.fitText(ctx, foot.text, innerW - 88), card.x + padX, footY);
+    // 自动承接的倒计时细条（右侧）：让「正在自己往下走」这件事可见，而不是干等
+    const wait = this.autoRemainingFraction();
+    if (wait > 0) {
+      const barW = 74;
+      const barX = card.x + card.w - padX - barW;
+      this.roundRectPath(ctx, barX, footY - 3, barW, 6, 3);
+      ctx.fillStyle = 'rgba(42,33,24,0.16)';
+      ctx.fill();
+      this.roundRectPath(ctx, barX, footY - 3, Math.max(2, barW * wait), 6, 3);
+      ctx.fillStyle = '#8a5a1e';
+      ctx.fill();
+    }
+  }
+
+  /** 叙事卡图标（按阶段 / 节点给出真实素材 id）。 */
+  private narrativeIconId(): AdvUiId {
+    const node = (() => {
+      try {
+        return advCurrentNode(this.state, this.script);
+      } catch {
+        return null;
+      }
+    })();
+    switch (this.state.phase) {
+      case 'BATTLE':
+        return 'icon_up';
+      case 'RESULT':
+        return this.state.battle?.winner === 'A' ? 'icon_none' : 'icon_damage';
+      case 'COMPLETE':
+        return 'star';
+      case 'FAILED':
+        return 'icon_damage';
+      case 'EVENT_DONE':
+        return 'icon_heal';
+      default:
+        break;
+    }
+    if (!node) return 'icon_none';
+    if (node.kind === 'EVENT') return advEventIconId(node.eventKind);
+    if (node.kind === 'BUILD') return 'icon_up';
+    if (node.kind === 'BATTLE' || node.kind === 'FINAL') return 'icon_trade';
+    return 'icon_none';
+  }
+
+  /** 叙事卡右上徽标（当前状态类型）。 */
+  private narrativeTag(): { text: string; tone: 'wait' | 'info' } | null {
+    switch (this.state.phase) {
+      case 'BATTLE':
+        return { text: '交战中', tone: 'info' };
+      case 'EVENT':
+        return { text: '即将开战', tone: 'info' };
+      case 'RESULT':
+        return { text: '战报', tone: 'info' };
+      case 'EVENT_DONE':
+        return { text: '结果', tone: 'info' };
+      case 'EVENT_CHOICE':
+      case 'CHOICE':
+        return { text: '需要你决定', tone: 'wait' };
+      case 'COMPLETE':
+        return { text: '通关', tone: 'info' };
+      case 'FAILED':
+        return { text: '失败', tone: 'info' };
+      default:
+        return { text: '等待出发', tone: 'wait' };
+    }
+  }
+
+  /**
+   * 叙事卡底部状态行（**决定是否需要玩家动手**的唯一展示口径）。
+   * 决不用「按继续」这种无信息指令：需要动手就说清楚要做什么，自动推进就说明会自动进行。
+   */
+  private narrativeFooter(): { text: string; tone: 'wait' | 'info' } {
+    const node = (() => {
+      try {
+        return advCurrentNode(this.state, this.script);
+      } catch {
+        return null;
+      }
+    })();
+    switch (this.state.phase) {
+      case 'BATTLE':
+        return { text: '战斗进行中，结束后自动结算', tone: 'info' };
+      case 'EVENT':
+        return { text: '马上开打', tone: 'info' };
+      case 'RESULT':
+        return { text: '战报已记录，接着往下走', tone: 'info' };
+      case 'EVENT_DONE':
+        return { text: '结果已结算，接着往下走', tone: 'info' };
+      case 'EVENT_CHOICE':
+        return { text: '选一个做法（下方卡片）', tone: 'wait' };
+      case 'CHOICE':
+        return { text: '选一项改装（下方卡片）', tone: 'wait' };
+      case 'COMPLETE':
+        return { text: '这趟路走完了，可以再来一局', tone: 'wait' };
+      case 'FAILED':
+        return { text: '车被打坏了，可以再试一次', tone: 'wait' };
+      default:
+        if (!node) return { text: '准备好就出发', tone: 'wait' };
+        if (node.kind === 'BATTLE' || node.kind === 'FINAL') return { text: '前方有敌人，出发迎战', tone: 'wait' };
+        if (node.kind === 'EVENT') return { text: '路边有情况，上前看看', tone: 'wait' };
+        if (node.kind === 'BUILD') return { text: '停下来改装一下', tone: 'wait' };
+        if (node.kind === 'BANNER') return { text: '继续赶路', tone: 'wait' };
+        return { text: '出发', tone: 'wait' };
+    }
+  }
+
+  /** 自动承接的剩余比例（1 → 0）；非自动阶段返回 0。 */
+  private autoRemainingFraction(): number {
+    const delay = this.autoAdvanceDelayMs();
+    if (delay <= 0 || this.autoTimer === null) return 0;
+    const elapsed = performance.now() - this.phaseEnteredAt;
+    return Math.max(0, Math.min(1, 1 - elapsed / delay));
+  }
+
+  /**
+   * 决策态叙事卡：**就地**把卡片内容换成可点选项卡（不弹全屏遮罩，不遮住上方战场）。
+   * 事件二选一 → 两张卡；改装三选一 → 三张卡。位置由 `uxOptionRects` 统一给出（E2E 同源）。
+   */
+  private drawNarrativeChoices(ctx: CanvasRenderingContext2D, card: Rect): void {
+    const node = advCurrentNode(this.state, this.script);
+    const cards = advOverlayCards(this.state, this.script, this.ctx2);
+    const rects = uxOptionRects(cards.length);
+    const isEvent = node.kind === 'EVENT';
+    const accent = isEvent ? EVENT_THEME[node.eventKind].accent : COLORS.eventAccent;
+
+    // 卡头：这句话就是本次的决策问题
+    const headY = card.y - 6;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#e8b23c';
+    ctx.font = `700 13px ${FONT_STACK}`;
+    const question = isEvent ? node.title : '选择一项改装（下一场战斗生效）';
+    ctx.fillText(this.fitText(ctx, question, card.w - 24), card.x + 2, headY - 10);
+
+    const fullHp = advCarriedPlayerHp(this.state, this.ctx2) >= this.ctx2.playerHpMax;
+    for (let i = 0; i < rects.length; i++) {
+      const eff = isEvent && node.kind === 'EVENT' ? node.outcomes[cards[i].id] : undefined;
+      this.drawChoiceCard(ctx, rects[i], i, {
+        icon: isEvent ? advOutcomeIconId(eff?.kind ?? 'none') : advBuildIconId(cards[i].id),
+        accent,
+        label: cards[i].label,
+        gain: isEvent ? this.effectGain(eff) : cards[i].note,
+        cost: isEvent ? this.effectCost(eff) : '—',
+        caveat: isEvent ? this.effectCaveat(eff, fullHp) : undefined,
+      });
+    }
+  }
+
+  /**
+   * 九宫格绘制（按素材 id）；素材缺失返回 false（调用方降级）。
+   * 边距来自 `AdvUiStore.insets`（量取值），绝不在此处「目测」。
+   */
+  private drawNineSliceId(ctx: CanvasRenderingContext2D, id: AdvUiId, x: number, y: number, w: number, h: number): boolean {
+    const img = this.ui.get(id);
+    const ins = this.ui.insets(id);
+    if (!img || !ins) return false;
+    return drawNineSlice(ctx, img, x, y, w, h, ins);
+  }
+
+  /**
+   * 左对齐自动换行（叙事区正文用；返回实际行数）。
+   * `kind` 只影响首行前缀符号（耐久变化用 ▲▼，战斗结果用 ✓✕），不改文本内容。
+   */
+  private wrapLeft(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    maxW: number,
+    lineH: number,
+    kind?: AdventureLogEntryKindLike,
+  ): number {
+    const prefix = kind === 'durability' ? '· ' : kind === 'result' ? '· ' : '';
+    const full = prefix + text;
+    const chars = [...full];
+    let line = '';
+    let ly = y;
+    let rows = 1;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    for (const ch of chars) {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxW && line.length > 0) {
+        ctx.fillText(line, x, ly);
+        line = ch;
+        ly += lineH;
+        rows += 1;
+      } else {
+        line = test;
+      }
+    }
+    if (line.length > 0) ctx.fillText(line, x, ly);
+    return rows;
+  }
+
 
   /**
    * F3：强化获得的**即时反馈卡**（最顶层，瞬态 ~2.4s）。
@@ -949,12 +1528,11 @@ export class AdvPage {
    * 版面刻意最小化：图标 + 「改装完成 · 强化名」+ 一行核心收益（紧急维修换成真实修理量）。
    * 没有第二段说明文字 —— 效果由下一场战斗画面自己兑现（必改 2）。
    *
-   * 位置取自**所有可能背景共用的空档**（选择后下一节点会立刻 present，反馈卡必须
-   * 与每一种版面都不相压）：
-   *   - 事件/建造浮层：beat 文字 ≤ b.y+138（234）之下、选项卡（n=3 起于 b.y+214=310）之上；
-   *   - 阶段提示（BANNER）：标题底 ≈ b.y+151（247）与首行 beat 顶 ≈ b.y+194（290）之间；
-   *   - 战斗/结算/居中叙事面板：本带全空。
-   * ⇒ y = b.y+152（248..288，h=40）对上述版面均留有 ≥2px 净空。
+   * R1 位置：舞台带底部（`STAGE_BAND.y + STAGE_BAND.h - 52`），横幅式浮在战场下沿。
+   * 这个位置对三种内容都不相压：
+   *   - 战斗画面：车辆与弹丸集中在中部，下沿是地面/路面色带；
+   *   - 非战斗舞台：舞台正文写在中线（b.y + h/2），与其相隔 ≥ 130px；
+   *   - 叙事区：在舞台带之外，完全不重叠。
    */
   private drawBuildToast(ctx: CanvasRenderingContext2D): void {
     const t = this.buildToast;
@@ -968,7 +1546,7 @@ export class AdvPage {
     const w = 296;
     const h = 40;
     const x = Math.round((PORTRAIT_LOGICAL_W - w) / 2);
-    const y = STAGE_BAND.y + 152;
+    const y = STAGE_BAND.y + STAGE_BAND.h - 52;
     ctx.save();
     ctx.globalAlpha = alpha;
     // 底（与事件选择卡同一族视觉：暗底 + 主题色描边）
@@ -1037,189 +1615,78 @@ export class AdvPage {
     ctx.restore();
   }
 
+  /**
+   * ④ 底部唯一主操作位（一屏式结构的「单点行动」）。
+   *
+   * R1 的核心纪律（Queue 必改 2）：
+   *   - **只在真的需要玩家推进时**画按钮：IDLE（出发/上前/改装）、COMPLETE / FAILED（复玩）；
+   *   - 纯信息阶段（BATTLE / EVENT / RESULT / EVENT_DONE）**不画按钮**，改为一行状态文案，
+   *     绝不铺一个「战斗中」的假可点按钮；
+   *   - 决策阶段（EVENT_CHOICE / CHOICE）按钮区让位给叙事区卡片（这里显示「在上方选一个」）。
+   *
+   * 按钮本体用 P0 真实素材 `btn_green`（九宫格，圆角不被压扁）；素材缺失时降级为
+   * 同色系圆角矩形（保持「绿色行动按钮」这一视觉语义，不回退成灰底）。
+   */
   private drawAction(ctx: CanvasRenderingContext2D): void {
     ctx.fillStyle = COLORS.actionBandBg;
     ctx.fillRect(ACTION_BAND.x, ACTION_BAND.y, ACTION_BAND.w, ACTION_BAND.h);
-    if (this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED') {
-      // R4：结算页唯一主操作＝大号 CTA（覆盖 ACTION_BTN 命中区，可见即可点）
-      this.drawTerminalCta(ctx);
+    // 顶部分隔线（与叙事区划分）
+    ctx.fillStyle = 'rgba(124,141,176,0.18)';
+    ctx.fillRect(ACTION_BAND.x, ACTION_BAND.y, ACTION_BAND.w, 1);
+
+    const overlay = advOverlayOpen(this.state);
+    const actionable = advNeedsPlayer(this.state) && advActionEnabled(this.state);
+    const r = this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED' ? TERMINAL_CTA : ACTION_BTN;
+
+    if (!actionable && !overlay) {
+      // 纯信息阶段：一行状态，不画按钮（杜绝「假 CTA」）。
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = COLORS.textDim;
+      ctx.font = `500 13px ${FONT_STACK}`;
+      const msg = this.state.phase === 'BATTLE'
+        ? '战斗进行中 · 结束后自动结算'
+        : this.state.phase === 'EVENT'
+          ? '敌情已到 · 马上开打'
+          : '结果已记录 · 自动继续';
+      ctx.fillText(msg, ACTION_BAND.x + ACTION_BAND.w / 2, ACTION_BAND.y + ACTION_BAND.h / 2);
       return;
     }
-    const enabled = advActionEnabled(this.state) && !advOverlayOpen(this.state);
-    const r = ACTION_BTN;
-    const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
-    if (enabled) {
-      g.addColorStop(0, '#3f6ea3');
-      g.addColorStop(1, '#2c4d78');
-    } else {
-      g.addColorStop(0, '#222a36');
-      g.addColorStop(1, '#1a212c');
+    if (overlay) {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#e8b23c';
+      ctx.font = `600 13px ${FONT_STACK}`;
+      ctx.fillText('在上面的卡片里选一个', ACTION_BAND.x + ACTION_BAND.w / 2, ACTION_BAND.y + ACTION_BAND.h / 2);
+      return;
     }
-    this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 12);
-    ctx.fillStyle = enabled ? g : COLORS.actionBtnOff;
-    ctx.fill();
-    if (enabled) {
-      ctx.fillStyle = 'rgba(255,255,255,0.12)';
-      this.roundRectPath(ctx, r.x + 2, r.y + 2, r.w - 4, r.h * 0.42, 10);
+
+    // 真实九宫格按钮（绿色＝可行动；终局用同一素材的更大尺寸）
+    const drew = this.drawNineSliceId(ctx, 'btn_green', r.x, r.y, r.w, r.h);
+    if (!drew) {
+      const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+      g.addColorStop(0, '#63c812');
+      g.addColorStop(1, '#4a9a0c');
+      this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 16);
+      ctx.fillStyle = g;
       ctx.fill();
     }
-    this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 12);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = enabled ? 'rgba(255,255,255,0.28)' : '#2a3341';
-    ctx.stroke();
-    ctx.fillStyle = enabled ? COLORS.textTitle : COLORS.textDim;
-    ctx.font = `600 17px ${FONT_STACK}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(advActionLabel(this.state), r.x + r.w / 2, r.y + r.h / 2);
-  }
-
-  /** R4：结算页的大号主操作按钮（唯一主操作，取代 R3 的「小按钮 + 重复提示行」）。 */
-  private drawTerminalCta(ctx: CanvasRenderingContext2D): void {
-    const r = TERMINAL_CTA;
-    const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
-    g.addColorStop(0, '#4a7cb4');
-    g.addColorStop(1, '#24405f');
-    this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 18);
-    ctx.fillStyle = g;
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.10)';
-    this.roundRectPath(ctx, r.x + 3, r.y + 3, r.w - 6, r.h * 0.44, 16);
-    ctx.fill();
-    this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 18);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255,255,255,0.32)';
-    ctx.stroke();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `700 22px ${FONT_STACK}`;
-    ctx.fillText(advActionLabel(this.state), r.x + r.w / 2, r.y + r.h * 0.42);
-    ctx.fillStyle = 'rgba(230,237,248,0.72)';
-    ctx.font = `500 12px ${FONT_STACK}`;
-    ctx.fillText('开始新一局（新随机种子）', r.x + r.w / 2, r.y + r.h * 0.7);
-  }
-
-  private drawOverlay(ctx: CanvasRenderingContext2D): void {
-    ctx.fillStyle = COLORS.mask;
-    ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
-    const node = advCurrentNode(this.state, this.script);
-    if (node.kind === 'EVENT') this.drawEventChoiceOverlay(ctx, node);
-    else this.drawBuildChoiceOverlay(ctx);
-  }
-
-  /** 事件选择浮层（R1：真实卡片底 + 主题色 + 图标 + 收益/代价分行，一眼可区分）。 */
-  private drawEventChoiceOverlay(ctx: CanvasRenderingContext2D, node: AdventureEventNode): void {
-    const theme = EVENT_THEME[node.eventKind];
-    const b = STAGE_BAND;
-    // 背景 + 压暗
-    if (!this.blitThroneRoom(ctx, b.x, b.y, b.w, b.h)) {
-      ctx.fillStyle = '#0e131c';
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-    }
-    ctx.fillStyle = 'rgba(6,9,14,0.88)';
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    ctx.fillStyle = theme.accent;
-    ctx.fillRect(b.x, b.y, b.w, 6);
-
-    // 事件徽章（R3：真实语义图标；缺图回退过程式图形，不白屏）
-    const badgeCx = b.x + 44;
-    const badgeCy = b.y + 60;
-    const badgeR = 26;
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(badgeCx, badgeCy, badgeR, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(10,14,22,0.85)';
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = theme.accent;
-    ctx.stroke();
-    ctx.restore();
-    const evIcon = advEventIconId(node.eventKind);
-    if (this.ui.ready(evIcon)) {
-      this.blitImage(ctx, evIcon, badgeCx - 20, badgeCy - 20, 40, 40, 'contain');
-    } else {
-      this.drawEventIcon(ctx, node.eventKind, badgeCx, badgeCy, 30, theme.accent);
-    }
-
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = theme.accent;
-    ctx.font = `600 13px ${FONT_STACK}`;
-    ctx.fillText(theme.tag, b.x + 82, b.y + 44);
-    ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `700 20px ${FONT_STACK}`;
-    ctx.fillText(node.title, b.x + 82, b.y + 74);
-
-    // 解释文字（R2：减少，最多 2 行，dim 小字；核心信息交由下方选择卡承载）
-    ctx.fillStyle = COLORS.textBody;
-    ctx.font = `400 12px ${FONT_STACK}`;
-    let dy = b.y + 110;
-    const maxBeat = 2;
-    for (let i = 0; i < node.beat.length && i < maxBeat; i++) {
-      ctx.fillText(node.beat[i], b.x + 20, dy);
-      dy += 19;
-    }
-
-    // 选项卡片
-    const cards = advOverlayCards(this.state, this.script, this.ctx2);
-    const rects = layoutOptionCards(cards.length);
-    const fullHp = advCarriedPlayerHp(this.state, this.ctx2) >= this.ctx2.playerHpMax;
-    for (let i = 0; i < rects.length; i++) {
-      const eff = node.outcomes[cards[i].id];
-      this.drawChoiceCard(ctx, rects[i], i, {
-        icon: advOutcomeIconId(eff?.kind ?? 'none'),
-        accent: theme.accent,
-        label: cards[i].label,
-        gain: this.effectGain(eff),
-        cost: this.effectCost(eff),
-        caveat: this.effectCaveat(eff, fullHp),
-      });
-    }
-  }
-
-  /**
-   * 满耐久时的**唯一**必要状态提示（R3：替代原先重复选项描述的 note 行）。
-   * 选项自身的说明文字（note）已被删除——收益/代价已由图标与两行摘要表达。
-   */
-  private effectCaveat(eff: AdventureEffect | undefined, fullHp: boolean): string {
-    if (!eff) return '';
-    if (fullHp && (eff.kind === 'heal' || eff.kind === 'trade')) return '耐久已满，收益有限';
-    return '';
-  }
-
-  /** 建造选择浮层（R1：真实卡片底，强化在下一场战斗真实生效）。 */
-  private drawBuildChoiceOverlay(ctx: CanvasRenderingContext2D): void {
-    const b = STAGE_BAND;
-    if (!this.blitThroneRoom(ctx, b.x, b.y, b.w, b.h)) {
-      ctx.fillStyle = '#0e131c';
-      ctx.fillRect(b.x, b.y, b.w, b.h);
-    }
-    ctx.fillStyle = 'rgba(6,9,14,0.88)';
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    ctx.fillStyle = COLORS.eventAccent;
-    ctx.fillRect(b.x, b.y, b.w, 6);
-
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `700 20px ${FONT_STACK}`;
-    ctx.fillText('选择一项改装', b.x + 20, b.y + 44);
-    ctx.fillStyle = COLORS.textDim;
-    ctx.font = `400 13px ${FONT_STACK}`;
-    ctx.fillText('强化会在下一场战斗真实生效', b.x + 20, b.y + 74);
-
-    const cards = advOverlayCards(this.state, this.script, this.ctx2);
-    const rects = layoutOptionCards(cards.length);
-    for (let i = 0; i < rects.length; i++) {
-      this.drawChoiceCard(ctx, rects[i], i, {
-        // R3：强化项用**专属**语义图标（双管炮/三管炮/炮弹/连射炮…），核心收益＝该强化项真实效果
-        icon: advBuildIconId(cards[i].id),
-        accent: COLORS.eventAccent,
-        label: cards[i].label,
-        gain: cards[i].note,
-        cost: '—',
-      });
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `700 ${this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED' ? 22 : 19}px ${FONT_STACK}`;
+    const mainY = r.y + r.h * (this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED' ? 0.42 : 0.5);
+    ctx.shadowColor = 'rgba(20,40,0,0.55)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 1;
+    ctx.fillText(advActionLabel(this.state), r.x + r.w / 2, mainY);
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    if (this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED') {
+      ctx.fillStyle = 'rgba(255,255,255,0.82)';
+      ctx.font = `500 12px ${FONT_STACK}`;
+      ctx.fillText('开始新一局（新随机种子）', r.x + r.w / 2, r.y + r.h * 0.72);
     }
   }
 
@@ -1238,91 +1705,81 @@ export class AdvPage {
     },
   ): void {
     const pressed = this.pressCard === index;
-    // 卡片底（真实素材 cover；缺失则过程式底色）
-    if (this.blitImage(ctx, 'card_bg', r.x, r.y, r.w, r.h, 'cover')) {
-      ctx.fillStyle = 'rgba(8,12,20,0.42)';
-      this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
-      ctx.fill();
-    } else {
-      ctx.fillStyle = COLORS.cardBg;
-      this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
+    // 卡片底：浅色真实底板（与叙事区同一张 P0 文本卡，九宫格；缺失则浅色圆角降级）。
+    // ⚠️ 决策卡住在**浅色**叙事区里，因此文字一律用深色（对比度 ≥ 7:1，杜绝「浅底浅字」）。
+    if (!this.drawNineSliceId(ctx, 'text_card_bg', r.x, r.y, r.w, r.h)) {
+      ctx.fillStyle = '#f3ecd8';
+      this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 12);
       ctx.fill();
     }
-    // 选中态：复用已筛选的真实 tab_selected 资产（按下时整卡高亮叠加，圆角裁剪）
+    // 选中态：按下瞬间叠一层暖色高光（不依赖 tab_selected 的深色素材，避免浅底变脏）
     if (pressed) {
-      if (this.ui.ready('tab_selected')) {
-        ctx.save();
-        this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
-        ctx.clip();
-        this.blitImage(ctx, 'tab_selected', r.x, r.y, r.w, r.h, 'stretch');
-        ctx.restore();
-      } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.12)';
-        this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
-        ctx.fill();
-      }
+      ctx.save();
+      this.roundRectPath(ctx, r.x + 2, r.y + 2, r.w - 4, r.h - 4, 10);
+      ctx.clip();
+      ctx.fillStyle = withAlpha(text.accent, 0.22);
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.restore();
     }
-    // 边框
-    this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 10);
+    // 边框（押下加粗；否则用主题色细边，保证三张卡有明确的"可点"暗示）
+    this.roundRectPath(ctx, r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3, 11);
     ctx.lineWidth = pressed ? 3 : 1.5;
-    ctx.strokeStyle = pressed ? '#ffffff' : text.accent;
+    ctx.strokeStyle = pressed ? '#7a4a12' : withAlpha(text.accent, 0.55);
     ctx.stroke();
 
-    const tall = r.h > 110;
-    const iconSize = tall ? 60 : 52;
+    const tall = r.h >= 78;
+    const iconSize = tall ? 46 : 36;
     const iconX = r.x + 14;
     const iconY = r.y + (r.h - iconSize) / 2;
-    // 图标底板（主题色半透明 + 描边），承载真实语义图标
-    this.roundRectPath(ctx, iconX, iconY, iconSize, iconSize, 14);
-    ctx.fillStyle = withAlpha(text.accent, 0.16);
+    // 图标底（主题色半透明圆角，浅底上仍可辨识）
+    this.roundRectPath(ctx, iconX, iconY, iconSize, iconSize, 10);
+    ctx.fillStyle = withAlpha(text.accent, 0.14);
     ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = withAlpha(text.accent, 0.75);
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = withAlpha(text.accent, 0.5);
     ctx.stroke();
     if (this.ui.ready(text.icon)) {
-      this.blitImage(ctx, text.icon, iconX + 8, iconY + 8, iconSize - 16, iconSize - 16, 'contain');
+      drawContain(ctx, this.ui.get(text.icon)!, iconX + 6, iconY + 6, iconSize - 12, iconSize - 12);
     } else {
-      ctx.fillStyle = withAlpha(text.accent, 0.4);
+      ctx.fillStyle = withAlpha(text.accent, 0.45);
       ctx.beginPath();
       ctx.arc(iconX + iconSize / 2, iconY + iconSize / 2, iconSize * 0.18, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // 文本区（右列）：名称 + 核心收益 + 明确代价
-    const tx = iconX + iconSize + 14;
-    const rightLimit = r.x + r.w - 12;
-    const nameY = r.y + (tall ? 30 : 26);
-    const gainY = r.y + (tall ? 62 : 54);
-    const costY = r.y + (tall ? 88 : 78);
+    // 文本区（右列）：名称 + 收益 / 代价（单行并列，节省纵向空间以容纳 3 张卡）
+    const tx = iconX + iconSize + 12;
+    const rightLimit = r.x + r.w - 14;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    // 名称（放大加粗）
-    ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `700 18px ${FONT_STACK}`;
+    const nameY = tall ? r.y + r.h * 0.34 : r.y + r.h * 0.5;
+    ctx.fillStyle = '#2a2118';
+    ctx.font = `700 ${tall ? 17 : 16}px ${FONT_STACK}`;
     ctx.fillText(this.fitText(ctx, text.label, rightLimit - tx), tx, nameY);
-    // 收益（前缀标签 + 核心收益加粗绿；先缩到 14px 再截断，尽量不丢语义）
-    ctx.font = `500 11px ${FONT_STACK}`;
-    ctx.fillStyle = COLORS.textDim;
-    ctx.fillText('收益', tx, gainY);
-    const gainMax = rightLimit - (tx + 30);
-    ctx.fillStyle = '#7fd6a0';
-    ctx.font = `600 15px ${FONT_STACK}`;
-    if (ctx.measureText(text.gain).width > gainMax) {
-      ctx.font = `600 14px ${FONT_STACK}`;
+
+    if (tall) {
+      // 收益 / 代价同一行：`收益 xxx  代价 ——`
+      const costY = r.y + r.h * 0.68;
+      ctx.font = `500 11px ${FONT_STACK}`;
+      ctx.fillStyle = '#8a7a62';
+      ctx.fillText('收益', tx, costY);
+      const gainX = tx + 28;
+      ctx.fillStyle = '#1f6b40';
+      ctx.font = `600 13px ${FONT_STACK}`;
+      ctx.fillText(this.fitText(ctx, text.gain, rightLimit - gainX - 64), gainX, costY);
+      const costLabelX = rightLimit - 62;
+      ctx.fillStyle = '#8a7a62';
+      ctx.font = `500 11px ${FONT_STACK}`;
+      ctx.fillText('代价', costLabelX, costY);
+      ctx.fillStyle = text.cost === '—' ? '#8a7a62' : '#a8501f';
+      ctx.font = `600 12px ${FONT_STACK}`;
+      ctx.fillText(this.fitText(ctx, text.cost, rightLimit - (costLabelX + 28)), costLabelX + 28, costY);
     }
-    ctx.fillText(this.fitText(ctx, text.gain, gainMax), tx + 30, gainY);
-    // 代价（前缀标签 + 值；有代价橙，无代价灰）
-    ctx.font = `500 11px ${FONT_STACK}`;
-    ctx.fillStyle = COLORS.textDim;
-    ctx.fillText('代价', tx, costY);
-    ctx.font = `600 13px ${FONT_STACK}`;
-    ctx.fillStyle = text.cost === '—' ? COLORS.textDim : '#e09b6b';
-    ctx.fillText(this.fitText(ctx, text.cost, rightLimit - (tx + 30)), tx + 30, costY);
-    // 唯一必要的状态提示（仅满耐久等特例；不再是重复的选项描述）
+    // 唯一必要的状态提示（仅满耐久等特例）
     if (tall && text.caveat) {
-      ctx.fillStyle = COLORS.textDim;
+      ctx.fillStyle = '#a8501f';
       ctx.font = `400 11px ${FONT_STACK}`;
-      ctx.fillText(text.caveat, tx, costY + 20);
+      ctx.fillText(text.caveat, tx, r.y + r.h * 0.86);
     }
   }
 
@@ -1333,6 +1790,16 @@ export class AdvPage {
     let out = s;
     while (out.length > 1 && ctx.measureText(out + '…').width > maxWidth) out = out.slice(0, -1);
     return out + '…';
+  }
+
+  /**
+   * 满耐久时的**唯一**必要状态提示（R3：替代原先重复选项描述的 note 行）。
+   * 选项自身的说明文字（note）已被删除——收益/代价已由图标与两行摘要表达。
+   */
+  private effectCaveat(eff: AdventureEffect | undefined, fullHp: boolean): string {
+    if (!eff) return '';
+    if (fullHp && (eff.kind === 'heal' || eff.kind === 'trade')) return '耐久已满，收益有限';
+    return '';
   }
 
   /** 事件效果 → 收益摘要（R3：只给短句核心收益，状态提示移入 caveat）。 */
@@ -1371,85 +1838,6 @@ export class AdvPage {
       default:
         return '—';
     }
-  }
-
-  /**
-   * R4：开奖画面拆成两层 —— 主体（宝箱）与关键结果（开奖结果文字）分居两带，
-   * 不再把宝箱和结果文字挤在同一块区域里。
-   */
-  private drawEventDone(ctx: CanvasRenderingContext2D): void {
-    const b = RESULT_STAGE;
-    const node = advCurrentNode(this.state, this.script);
-    const kind = node.kind === 'EVENT' ? node.eventKind : 'crate';
-    const theme = EVENT_THEME[kind];
-    if (!this.blitThroneRoom(ctx, b.x, b.y, b.w, b.h)) {
-      ctx.fillStyle = 'rgba(6,9,14,0.76)';
-      ctx.fillRect(0, b.y, b.w, b.h);
-    }
-    ctx.fillStyle = 'rgba(6,9,14,0.72)';
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    ctx.fillStyle = theme.accent;
-    ctx.fillRect(b.x, b.y, b.w, 6);
-
-    // 真实宝箱（开奖）居中于主体带
-    this.blitImage(ctx, 'chest_open', b.x + b.w / 2 - 70, b.y + 96, 140, 120, 'contain');
-
-    ctx.fillStyle = theme.accent;
-    ctx.font = `600 15px ${FONT_STACK}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('开 奖', b.x + b.w / 2, b.y + 246);
-  }
-
-  /**
-   * R4 层3「关键结果」：仅在 RESULT（战报）/ EVENT_DONE（开奖）阶段出现的独立结果带。
-   * 其余阶段不占位（层2 主体直接延伸到底），避免常驻无用区域。
-   */
-  private drawResultBand(ctx: CanvasRenderingContext2D): void {
-    const band = RESULT_BAND;
-    const cx = PORTRAIT_LOGICAL_W / 2;
-    // 结果带底（与主体分隔；上沿做柔和过渡，避免硬边）
-    const fade = ctx.createLinearGradient(0, band.y - 24, 0, band.y);
-    fade.addColorStop(0, 'rgba(10,14,22,0)');
-    fade.addColorStop(1, 'rgba(10,14,22,0.92)');
-    ctx.fillStyle = fade;
-    ctx.fillRect(band.x, band.y - 24, band.w, 24);
-    ctx.fillStyle = 'rgba(10,14,22,0.92)';
-    ctx.fillRect(band.x, band.y, band.w, band.h);
-    ctx.fillStyle = 'rgba(124,141,176,0.28)';
-    ctx.fillRect(band.x, band.y, band.w, 1);
-
-    if (this.state.phase === 'EVENT_DONE') {
-      // 开奖结果
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = COLORS.textTitle;
-      ctx.font = `600 16px ${FONT_STACK}`;
-      const text = (this.state.eventResult ?? '').replace(/[。.]+$/, '');
-      this.wrapText(ctx, text, cx, band.y + 62, PORTRAIT_LOGICAL_W - 56, 24);
-      ctx.fillStyle = '#7fd6a0';
-      ctx.font = `600 14px ${FONT_STACK}`;
-      ctx.fillText('▶ 按「继续」进入下一天', cx, band.y + 132);
-      return;
-    }
-
-    // 战报（RESULT）
-    const b = this.state.battle;
-    const won = b?.winner === 'A';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = won ? '#7fd6a0' : COLORS.hpLow;
-    ctx.font = `700 22px ${FONT_STACK}`;
-    ctx.fillText(won ? '战斗胜利' : '战车被打退', cx, band.y + 48);
-    if (b) {
-      const pct = Math.max(0, Math.min(100, Math.round((b.playerHp / b.playerHpMax) * 100)));
-      ctx.fillStyle = COLORS.textBody;
-      ctx.font = `500 14px ${FONT_STACK}`;
-      ctx.fillText(`对手：${b.enemyLabel} · 剩余耐久 ${pct}%`, cx, band.y + 86);
-    }
-    ctx.fillStyle = '#7fd6a0';
-    ctx.font = `600 14px ${FONT_STACK}`;
-    ctx.fillText('▶ 按「继续」出发', cx, band.y + 132);
   }
 
   /** 过程式事件图标（5 种形状，零第三方素材）。 */
@@ -1521,186 +1909,6 @@ export class AdvPage {
     ctx.restore();
   }
 
-  private wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, y: number, maxW: number, lineH: number): void {
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const chars = [...text];
-    let line = '';
-    let ly = y;
-    for (const ch of chars) {
-      const test = line + ch;
-      if (ctx.measureText(test).width > maxW && line.length > 0) {
-        ctx.fillText(line, cx, ly);
-        line = ch;
-        ly += lineH;
-      } else {
-        line = test;
-      }
-    }
-    if (line.length > 0) ctx.fillText(line, cx, ly);
-  }
-
-  /**
-   * R4 结算页重排：固定四段纵向结构 —— ① 胜负标题 → ② 推进成绩 → ③ 本局 Build → ④ 累计档案（弱化），
-   * 底部留出**唯一**主操作（大号 CTA，见 drawAction / TERMINAL_CTA）。
-   *
-   * 结构性要点：
-   *   - 背景改用 `battle_bg` 顶部「王座厅」场景（旅途终点的语义），中段不再是一整片死黑；
-   *   - Build 用**专属图标 + 两列网格**呈现（R3 已有图标直接复用），具备可辨识度；
-   *   - 累计档案只保留与本局不重复的统计；目标行去掉与「最佳耐久」重复的括号数字。
-   */
-  private drawTerminal(ctx: CanvasRenderingContext2D): void {
-    const won = this.state.phase === 'COMPLETE';
-    const cx = PORTRAIT_LOGICAL_W / 2;
-    // 背景：王座厅场景（保留可见度，中段留白即"场景"而非"无效空白"）
-    if (!this.blitThroneRoom(ctx, 0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H)) {
-      ctx.fillStyle = 'rgba(6,9,14,0.94)';
-      ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
-    }
-    ctx.fillStyle = 'rgba(8,12,20,0.56)';
-    ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, PORTRAIT_LOGICAL_H);
-    // 上部渐变：让胜负标题区域更聚焦
-    const topG = ctx.createLinearGradient(0, 0, 0, 300);
-    topG.addColorStop(0, 'rgba(6,9,14,0.88)');
-    topG.addColorStop(1, 'rgba(6,9,14,0)');
-    ctx.fillStyle = topG;
-    ctx.fillRect(0, 0, PORTRAIT_LOGICAL_W, 300);
-
-    // ── ① 胜负标题 ──
-    const bannerY = 44;
-    const bannerH = 92;
-    const bannerW = 320;
-    this.blitImage(ctx, won ? 'banner_win' : 'banner_lost', cx - bannerW / 2, bannerY, bannerW, bannerH, 'stretch');
-    ctx.fillStyle = 'rgba(10,14,22,0.5)';
-    this.roundRectPath(ctx, cx - bannerW / 2 + 10, bannerY + 20, bannerW - 20, bannerH - 40, 10);
-    ctx.fill();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `700 26px ${FONT_STACK}`;
-    ctx.fillText(won ? '冒险完成' : '冒险失败', cx, bannerY + bannerH / 2);
-
-    // 星级（紧贴标题，评价本局表现）
-    const hp = advCarriedPlayerHp(this.state, this.ctx2);
-    const pct = Math.max(0, Math.min(100, Math.round((hp / this.ctx2.playerHpMax) * 100)));
-    const stars = won ? (pct >= 66 ? 3 : pct >= 33 ? 2 : 1) : 1;
-    const starSize = 34;
-    const starGap = 16;
-    const starTotal = 3 * starSize + 2 * starGap;
-    const starX0 = cx - starTotal / 2;
-    const starY = bannerY + bannerH + 30;
-    for (let i = 0; i < 3; i++) {
-      const scx = starX0 + i * (starSize + starGap) + starSize / 2;
-      const lit = i < stars;
-      if (this.ui.ready('star')) {
-        ctx.save();
-        ctx.globalAlpha = lit ? 1 : 0.28;
-        this.blitImage(ctx, 'star', scx - starSize / 2, starY - starSize / 2, starSize, starSize, 'contain');
-        ctx.restore();
-      } else {
-        ctx.fillStyle = lit ? '#e8b23c' : 'rgba(232,178,60,0.28)';
-        ctx.font = `${starSize}px ${FONT_STACK}`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('★', scx, starY);
-      }
-    }
-
-    // ── ② 推进成绩 ──
-    this.drawSectionLabel(ctx, '推进成绩', 214);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = COLORS.textTitle;
-    ctx.font = `700 20px ${FONT_STACK}`;
-    ctx.fillText(`撑到第 ${this.state.day} / ${this.state.dayTotal} 天`, cx, 244);
-    ctx.fillStyle = pct <= 25 ? COLORS.hpLow : '#7fd6a0';
-    ctx.font = `600 15px ${FONT_STACK}`;
-    ctx.fillText(`终点耐久 ${pct}%`, cx, 272);
-
-    // ── ③ 本局 Build（专属图标 + 两列网格，R3 图标直接复用）──
-    this.drawSectionLabel(ctx, '本局强化', 310);
-    const chips = this.state.buffs.map((b) => ({ id: b, label: runBuildOptionById(b)?.label ?? b }));
-    const shown = chips.slice(0, 8);
-    const colX = [26, 200];
-    const rowH = 34;
-    const gridTop = 330;
-    for (let i = 0; i < shown.length; i++) {
-      const col = i % 2;
-      const row = Math.floor(i / 2);
-      const ix = colX[col];
-      const iy = gridTop + row * rowH;
-      const iconId = advBuildIconId(shown[i].id);
-      // 图标底板
-      this.roundRectPath(ctx, ix, iy, 26, 26, 8);
-      ctx.fillStyle = 'rgba(124,141,176,0.16)';
-      ctx.fill();
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = 'rgba(124,141,176,0.4)';
-      ctx.stroke();
-      if (this.ui.ready(iconId)) {
-        this.blitImage(ctx, iconId, ix + 3, iy + 3, 20, 20, 'contain');
-      }
-      ctx.fillStyle = COLORS.textBody;
-      ctx.font = `500 13px ${FONT_STACK}`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(this.fitText(ctx, shown[i].label, 110), ix + 34, iy + 13);
-    }
-    if (chips.length === 0) {
-      ctx.fillStyle = COLORS.textDim;
-      ctx.font = `500 13px ${FONT_STACK}`;
-      ctx.textAlign = 'center';
-      ctx.fillText('（本局未获得强化）', cx, gridTop + 13);
-    } else if (chips.length > shown.length) {
-      ctx.fillStyle = COLORS.textDim;
-      ctx.font = `500 12px ${FONT_STACK}`;
-      ctx.textAlign = 'center';
-      ctx.fillText(`另有 ${chips.length - shown.length} 项`, cx, gridTop + Math.ceil(shown.length / 2) * rowH + 6);
-    }
-    const buildEnd = gridTop + Math.ceil(Math.max(shown.length, 1) / 2) * rowH;
-
-    // ── ④ 累计档案（弱化区：只保留与本局不重复的累计统计）──
-    const statTop = Math.max(buildEnd + 26, 500);
-    // 档案卡（弱化底板）：把统计从背景画面中分离出来，形成明确的版面分区
-    ctx.fillStyle = 'rgba(8,12,20,0.72)';
-    this.roundRectPath(ctx, 20, statTop - 26, PORTRAIT_LOGICAL_W - 40, 112, 14);
-    ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(124,141,176,0.22)';
-    this.roundRectPath(ctx, 20, statTop - 26, PORTRAIT_LOGICAL_W - 40, 112, 14);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(124,141,176,0.5)';
-    ctx.fillRect(40, statTop - 14, PORTRAIT_LOGICAL_W - 80, 1);
-    this.drawSectionLabel(ctx, '累计档案', statTop);
-    const best = this.archive.best;
-    const statLine1 = `本局 完成 ${this.state.battlesCompleted} 场 · 获胜 ${this.state.battlesWon} 场`;
-    const statLine2 = best
-      ? `最佳 终点耐久 ${best.finalHpPct}%${best.won ? '（曾通关）' : ''} · 累计 ${this.archive.totals.runs} 局 / ${this.archive.totals.wins} 胜`
-      : `累计 ${this.archive.totals.runs} 局 / ${this.archive.totals.wins} 胜`;
-    // 目标行去掉与「最佳耐久」重复的括号数字（连同句末标点）
-    const statLine3 = nextRunGoal(this.archive).replace(/（[^）]*）\s*[。.]?\s*$/, '');
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(159,176,200,0.92)';
-    ctx.font = `400 12px ${FONT_STACK}`;
-    ctx.fillText(this.fitText(ctx, statLine1, PORTRAIT_LOGICAL_W - 60), cx, statTop + 26);
-    ctx.fillText(this.fitText(ctx, statLine2, PORTRAIT_LOGICAL_W - 60), cx, statTop + 48);
-    ctx.fillStyle = COLORS.textDim;
-    ctx.font = `400 12px ${FONT_STACK}`;
-    ctx.fillText(this.fitText(ctx, statLine3, PORTRAIT_LOGICAL_W - 60), cx, statTop + 70);
-  }
-
-  /** 结算页小节标题（统一版式：短横线 + 文字）。 */
-  private drawSectionLabel(ctx: CanvasRenderingContext2D, text: string, y: number): void {
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(124,141,176,0.5)';
-    ctx.fillRect(40, y - 6, 12, 2);
-    ctx.fillStyle = COLORS.textDim;
-    ctx.font = `500 12px ${FONT_STACK}`;
-    ctx.fillText(text, 60, y);
-  }
-
   /* ----------------------------------------------------------- 探针 */
 
   /** 只读诊断（E2E / 调试；不参与任何玩法规则）。 */
@@ -1756,8 +1964,32 @@ export class AdvPage {
       loadoutSource: this.loadoutSource,
       vehicleLabel: this.ctx2.vehicleLabel,
       overlayOpen: advOverlayOpen(this.state),
+      /**
+       * R1｜连续性诊断（只读）：此刻是否需要玩家动手、本阶段是否会自动承接、
+       * 自动承接剩余比例，以及本局已自动承接次数。
+       * E2E 用它区分「主操作」与「自动推进」：`needsPlayer=false` 时不得存在可点主按钮。
+       */
+      continuity: {
+        needsPlayer: advNeedsPlayer(this.state),
+        autoPhase: this.autoAdvanceDelayMs() > 0,
+        autoRemaining: this.autoRemainingFraction(),
+        autoAdvances: this.autoAdvances,
+        phaseElapsedMs: Math.round(performance.now() - this.phaseEnteredAt),
+        stageBand: { x: STAGE_BAND.x, y: STAGE_BAND.y, w: STAGE_BAND.w, h: STAGE_BAND.h },
+        narrativeBand: { x: NARRATIVE_BAND.x, y: NARRATIVE_BAND.y, w: NARRATIVE_BAND.w, h: NARRATIVE_BAND.h },
+        actionBand: { x: ACTION_BAND.x, y: ACTION_BAND.y, w: ACTION_BAND.w, h: ACTION_BAND.h },
+        /** 本帧主操作按钮是否**真的可点**（纯信息阶段恒为 false）。 */
+        actionClickable: advNeedsPlayer(this.state) && advActionEnabled(this.state),
+        /** 本帧主操作按钮的绘制矩形（不可点时仍给出矩形，供测试断言「没画」）。 */
+        actionRect: this.state.phase === 'COMPLETE' || this.state.phase === 'FAILED' ? TERMINAL_CTA : ACTION_BTN,
+        /** 选项卡片矩形（决策阶段与 `uxOptionRects` 同源）。 */
+        optionRects: uxOptionRects(advOverlayCards(this.state, this.script, this.ctx2).length),
+        narrativeLines: advNarrativeLines(this.state, UX_NARRATIVE_MAX_LINES).map((e) => e.text),
+      },
       /** F1：战斗画面比例读数（只读；无战斗实例时为 null）。 */
       battleFrame: this.battleFrameProbe(),
+      /** R1：真实 UI 素材加载状态（验收 3「素材正常加载、无缺失」的直接读数）。 */
+      ui: this.ui.stats(),
       archive: { best: this.archive.best, totals: this.archive.totals, runs: this.archive.runs.length },
     };
   }
@@ -1815,8 +2047,9 @@ export class AdvPage {
   } | null {
     const rt = this.battle;
     if (!rt) return null;
-    const band = this.state.phase === 'RESULT' ? RESULT_STAGE : STAGE_BAND;
-    const isBattle = band === STAGE_BAND;
+    // R1：舞台高度恒定 ⇒ 战斗与 RESULT 用**同一个** band（不再 RESULT 时换成更矮的带）。
+    const band = STAGE_BAND;
+    const isBattle = this.state.phase !== 'RESULT';
     const comp = this.battleView.compositeProbe(band, isBattle ? 'contain' : 'cover');
     const cam = this.battleView.viewTransform();
     // F4/F6 镜头模式解析（战斗态取景可被裁切；RESULT 沿用最后一次战斗取景，不再缩回原比例）。
@@ -1909,8 +2142,10 @@ export class AdvPage {
   /**
    * 调试自动步进（仅供 E2E / 真机计时用；不参与任何玩法规则）：
    *   - 浮层打开 → 选第一张卡（等价真实点击首张卡）；
+   *   - 纯信息阶段（EVENT / RESULT / EVENT_DONE）→ 立即执行一次自动承接
+   *     （等价「等它自己走完」；真实 UI 靠定时器，这里只是不等待）；
    *   - 主动作可用 → 按一次主动作（等价真实点击主按钮）；
-   *   - BATTLE / 战报冻结期 → 不操作（真实物理战斗由 requestAnimationFrame 自动推进）。
+   *   - BATTLE → 不操作（真实物理战斗由 requestAnimationFrame 自动推进）。
    * 返回当前 phase，便于调用方记录耗时。
    */
   debugStep(): string {
@@ -1926,7 +2161,14 @@ export class AdvPage {
         return this.state.phase;
       }
     }
+    if (!advNeedsPlayer(this.state)) {
+      // R1：纯信息阶段没有主操作可点 —— 直接跳到「它自己会走到的位置」。
+      const next = advAutoAdvance(this.state, this.ctx2, this.script);
+      if (next !== this.state) this.apply(next);
+      return this.state.phase;
+    }
     if (advActionEnabled(this.state)) {
+      this.cancelAutoAdvance();
       this.apply(pressAdventureAction(this.state, this.ctx2, this.script));
     }
     return this.state.phase;
@@ -1946,7 +2188,13 @@ export class AdvPage {
         return this.state.phase;
       }
     }
+    if (!advNeedsPlayer(this.state)) {
+      const next = advAutoAdvance(this.state, this.ctx2, this.script);
+      if (next !== this.state) this.apply(next);
+      return this.state.phase;
+    }
     if (advActionEnabled(this.state)) {
+      this.cancelAutoAdvance();
       this.apply(pressAdventureAction(this.state, this.ctx2, this.script));
     }
     return this.state.phase;

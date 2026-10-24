@@ -1,0 +1,915 @@
+{
+ "seed": "scan-4",
+ "generatedAt": "2026-10-24T05:02:33.382Z",
+ "viewport": {
+  "w": 390,
+  "h": 844,
+  "dpr": 1
+ },
+ "bands": {
+  "stage": {
+   "x": 0,
+   "y": 92,
+   "w": 390,
+   "h": 378
+  },
+  "narrative": {
+   "x": 0,
+   "y": 470,
+   "w": 390,
+   "h": 274
+  },
+  "action": {
+   "x": 34,
+   "y": 758,
+   "w": 322,
+   "h": 66
+  }
+ },
+ "run": {
+  "label": "win",
+  "totalMs": 110425,
+  "finalPhase": "COMPLETE",
+  "finalDay": 26,
+  "trail": [
+   {
+    "t": 2,
+    "phase": "IDLE",
+    "day": 1,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [],
+    "battlesWon": 0,
+    "battlesCompleted": 0
+   },
+   {
+    "t": 74,
+    "phase": "EVENT_CHOICE",
+    "day": 2,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [],
+    "battlesWon": 0,
+    "battlesCompleted": 0
+   },
+   {
+    "t": 245,
+    "phase": "EVENT_DONE",
+    "day": 2,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [],
+    "battlesWon": 0,
+    "battlesCompleted": 0
+   },
+   {
+    "t": 1443,
+    "phase": "IDLE",
+    "day": 3,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [],
+    "battlesWon": 0,
+    "battlesCompleted": 0
+   },
+   {
+    "t": 1520,
+    "phase": "EVENT",
+    "day": 3,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [],
+    "battlesWon": 0,
+    "battlesCompleted": 0
+   },
+   {
+    "t": 2477,
+    "phase": "BATTLE",
+    "day": 3,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": 1100,
+    "buffs": [],
+    "battlesWon": 0,
+    "battlesCompleted": 0
+   },
+   {
+    "t": 12496,
+    "phase": "RESULT",
+    "day": 3,
+    "needsPlayer": false,
+    "hp": 843,
+    "alive": 843,
+    "buffs": [],
+    "battlesWon": 1,
+    "battlesCompleted": 1
+   },
+   {
+    "t": 13709,
+    "phase": "EVENT_CHOICE",
+    "day": 5,
+    "needsPlayer": true,
+    "hp": 843,
+    "alive": null,
+    "buffs": [],
+    "battlesWon": 1,
+    "battlesCompleted": 1
+   },
+   {
+    "t": 13856,
+    "phase": "EVENT_DONE",
+    "day": 5,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [],
+    "battlesWon": 1,
+    "battlesCompleted": 1
+   },
+   {
+    "t": 15058,
+    "phase": "IDLE",
+    "day": 6,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [],
+    "battlesWon": 1,
+    "battlesCompleted": 1
+   },
+   {
+    "t": 15134,
+    "phase": "EVENT",
+    "day": 6,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [],
+    "battlesWon": 1,
+    "battlesCompleted": 1
+   },
+   {
+    "t": 16093,
+    "phase": "BATTLE",
+    "day": 6,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": 1100,
+    "buffs": [],
+    "battlesWon": 1,
+    "battlesCompleted": 1
+   },
+   {
+    "t": 26110,
+    "phase": "RESULT",
+    "day": 6,
+    "needsPlayer": false,
+    "hp": 843,
+    "alive": 843,
+    "buffs": [],
+    "battlesWon": 2,
+    "battlesCompleted": 2
+   },
+   {
+    "t": 27328,
+    "phase": "CHOICE",
+    "day": 7,
+    "needsPlayer": true,
+    "hp": 843,
+    "alive": null,
+    "buffs": [],
+    "battlesWon": 2,
+    "battlesCompleted": 2
+   },
+   {
+    "t": 27490,
+    "phase": "EVENT_CHOICE",
+    "day": 8,
+    "needsPlayer": true,
+    "hp": 843,
+    "alive": null,
+    "buffs": [
+     "heavyShell"
+    ],
+    "battlesWon": 2,
+    "battlesCompleted": 2
+   },
+   {
+    "t": 27642,
+    "phase": "EVENT_DONE",
+    "day": 8,
+    "needsPlayer": false,
+    "hp": 711,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp"
+    ],
+    "battlesWon": 2,
+    "battlesCompleted": 2
+   },
+   {
+    "t": 28841,
+    "phase": "IDLE",
+    "day": 9,
+    "needsPlayer": true,
+    "hp": 711,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp"
+    ],
+    "battlesWon": 2,
+    "battlesCompleted": 2
+   },
+   {
+    "t": 28909,
+    "phase": "EVENT",
+    "day": 9,
+    "needsPlayer": false,
+    "hp": 711,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp"
+    ],
+    "battlesWon": 2,
+    "battlesCompleted": 2
+   },
+   {
+    "t": 29875,
+    "phase": "BATTLE",
+    "day": 9,
+    "needsPlayer": false,
+    "hp": 711,
+    "alive": 711,
+    "buffs": [
+     "heavyShell",
+     "damageUp"
+    ],
+    "battlesWon": 2,
+    "battlesCompleted": 2
+   },
+   {
+    "t": 39893,
+    "phase": "RESULT",
+    "day": 9,
+    "needsPlayer": false,
+    "hp": 622,
+    "alive": 622,
+    "buffs": [
+     "heavyShell",
+     "damageUp"
+    ],
+    "battlesWon": 3,
+    "battlesCompleted": 3
+   },
+   {
+    "t": 41109,
+    "phase": "CHOICE",
+    "day": 10,
+    "needsPlayer": true,
+    "hp": 622,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp"
+    ],
+    "battlesWon": 3,
+    "battlesCompleted": 3
+   },
+   {
+    "t": 41265,
+    "phase": "IDLE",
+    "day": 11,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp"
+    ],
+    "battlesWon": 3,
+    "battlesCompleted": 3
+   },
+   {
+    "t": 41343,
+    "phase": "EVENT_CHOICE",
+    "day": 12,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp"
+    ],
+    "battlesWon": 3,
+    "battlesCompleted": 3
+   },
+   {
+    "t": 41497,
+    "phase": "EVENT_DONE",
+    "day": 12,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp"
+    ],
+    "battlesWon": 3,
+    "battlesCompleted": 3
+   },
+   {
+    "t": 42692,
+    "phase": "IDLE",
+    "day": 13,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp"
+    ],
+    "battlesWon": 3,
+    "battlesCompleted": 3
+   },
+   {
+    "t": 42758,
+    "phase": "EVENT",
+    "day": 13,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp"
+    ],
+    "battlesWon": 3,
+    "battlesCompleted": 3
+   },
+   {
+    "t": 43726,
+    "phase": "BATTLE",
+    "day": 13,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": 1100,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp"
+    ],
+    "battlesWon": 3,
+    "battlesCompleted": 3
+   },
+   {
+    "t": 53743,
+    "phase": "RESULT",
+    "day": 13,
+    "needsPlayer": false,
+    "hp": 734,
+    "alive": 734,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp"
+    ],
+    "battlesWon": 4,
+    "battlesCompleted": 4
+   },
+   {
+    "t": 54958,
+    "phase": "CHOICE",
+    "day": 14,
+    "needsPlayer": true,
+    "hp": 734,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp"
+    ],
+    "battlesWon": 4,
+    "battlesCompleted": 4
+   },
+   {
+    "t": 55111,
+    "phase": "EVENT_CHOICE",
+    "day": 15,
+    "needsPlayer": true,
+    "hp": 734,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon"
+    ],
+    "battlesWon": 4,
+    "battlesCompleted": 4
+   },
+   {
+    "t": 55267,
+    "phase": "EVENT_DONE",
+    "day": 15,
+    "needsPlayer": false,
+    "hp": 1009,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon"
+    ],
+    "battlesWon": 4,
+    "battlesCompleted": 4
+   },
+   {
+    "t": 56458,
+    "phase": "IDLE",
+    "day": 16,
+    "needsPlayer": true,
+    "hp": 1009,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon"
+    ],
+    "battlesWon": 4,
+    "battlesCompleted": 4
+   },
+   {
+    "t": 56534,
+    "phase": "EVENT",
+    "day": 16,
+    "needsPlayer": false,
+    "hp": 1009,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon"
+    ],
+    "battlesWon": 4,
+    "battlesCompleted": 4
+   },
+   {
+    "t": 57494,
+    "phase": "BATTLE",
+    "day": 16,
+    "needsPlayer": false,
+    "hp": 1009,
+    "alive": 1009,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon"
+    ],
+    "battlesWon": 4,
+    "battlesCompleted": 4
+   },
+   {
+    "t": 68510,
+    "phase": "RESULT",
+    "day": 16,
+    "needsPlayer": false,
+    "hp": 528,
+    "alive": 528,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon"
+    ],
+    "battlesWon": 5,
+    "battlesCompleted": 5
+   },
+   {
+    "t": 69726,
+    "phase": "IDLE",
+    "day": 17,
+    "needsPlayer": true,
+    "hp": 1078,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon"
+    ],
+    "battlesWon": 5,
+    "battlesCompleted": 5
+   },
+   {
+    "t": 69799,
+    "phase": "EVENT_CHOICE",
+    "day": 18,
+    "needsPlayer": true,
+    "hp": 1078,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon"
+    ],
+    "battlesWon": 5,
+    "battlesCompleted": 5
+   },
+   {
+    "t": 69954,
+    "phase": "EVENT_DONE",
+    "day": 18,
+    "needsPlayer": false,
+    "hp": 1078,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 5,
+    "battlesCompleted": 5
+   },
+   {
+    "t": 71142,
+    "phase": "IDLE",
+    "day": 19,
+    "needsPlayer": true,
+    "hp": 1078,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 5,
+    "battlesCompleted": 5
+   },
+   {
+    "t": 71219,
+    "phase": "EVENT",
+    "day": 19,
+    "needsPlayer": false,
+    "hp": 1078,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 5,
+    "battlesCompleted": 5
+   },
+   {
+    "t": 72160,
+    "phase": "BATTLE",
+    "day": 19,
+    "needsPlayer": false,
+    "hp": 1078,
+    "alive": 1078,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 5,
+    "battlesCompleted": 5
+   },
+   {
+    "t": 89610,
+    "phase": "RESULT",
+    "day": 19,
+    "needsPlayer": false,
+    "hp": 702,
+    "alive": 702,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 90825,
+    "phase": "IDLE",
+    "day": 21,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 90905,
+    "phase": "EVENT_CHOICE",
+    "day": 22,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 91062,
+    "phase": "EVENT_DONE",
+    "day": 22,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 92258,
+    "phase": "EVENT_CHOICE",
+    "day": 23,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 92411,
+    "phase": "EVENT_DONE",
+    "day": 23,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 93608,
+    "phase": "EVENT_CHOICE",
+    "day": 24,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 93757,
+    "phase": "EVENT_DONE",
+    "day": 24,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 94960,
+    "phase": "IDLE",
+    "day": 26,
+    "needsPlayer": true,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 95033,
+    "phase": "EVENT",
+    "day": 26,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 95992,
+    "phase": "BATTLE",
+    "day": 26,
+    "needsPlayer": false,
+    "hp": 1100,
+    "alive": 1100,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 6,
+    "battlesCompleted": 6
+   },
+   {
+    "t": 110413,
+    "phase": "COMPLETE",
+    "day": 26,
+    "needsPlayer": true,
+    "hp": 409,
+    "alive": null,
+    "buffs": [
+     "heavyShell",
+     "damageUp",
+     "rateUp",
+     "twinCannon",
+     "kineticBurst"
+    ],
+    "battlesWon": 7,
+    "battlesCompleted": 7
+   }
+  ],
+  "shots": [
+   "D:\\workbuddy\\fruits\\docs\\adventure-ux-continuity-r1\\evidence\\r1-win-event_choice-00.png",
+   "D:\\workbuddy\\fruits\\docs\\adventure-ux-continuity-r1\\evidence\\r1-win-event_done-01.png",
+   "D:\\workbuddy\\fruits\\docs\\adventure-ux-continuity-r1\\evidence\\r1-win-event-02.png",
+   "D:\\workbuddy\\fruits\\docs\\adventure-ux-continuity-r1\\evidence\\r1-win-battle-03.png",
+   "D:\\workbuddy\\fruits\\docs\\adventure-ux-continuity-r1\\evidence\\r1-win-result-04.png",
+   "D:\\workbuddy\\fruits\\docs\\adventure-ux-continuity-r1\\evidence\\r1-win-choice-05.png",
+   "D:\\workbuddy\\fruits\\docs\\adventure-ux-continuity-r1\\evidence\\r1-win-complete-06.png",
+   "D:\\workbuddy\\fruits\\docs\\adventure-ux-continuity-r1\\evidence\\r1-replay-newrun.png"
+  ],
+  "actionClicks": 11,
+  "choiceClicks": 24,
+  "missedClicks": 0,
+  "infoPhaseWaits": 22,
+  "infoPhasesWithoutClick": 22,
+  "autoAdvances": 22,
+  "stageHeights": [
+   "390x378"
+  ],
+  "narrativePresentRatio": 1,
+  "ui": {
+   "registered": 36,
+   "ready": 36,
+   "failed": []
+  },
+  "finalProbe": {
+   "seedLabel": "scan-4",
+   "buffs": [
+    "heavyShell",
+    "damageUp",
+    "rateUp",
+    "twinCannon",
+    "kineticBurst"
+   ],
+   "carriedHp": 408.9517290603186,
+   "playerHpMax": 1100,
+   "battlesCompleted": 7,
+   "battlesWon": 7
+  },
+  "wantLoss": false
+ },
+ "results": [
+  {
+   "pass": true,
+   "name": "R1 素材全部加载成功（无缺失）",
+   "detail": "ready=36/36 failed=[]"
+  },
+  {
+   "pass": true,
+   "name": "R1 ①同一主场景：舞台带尺寸全程恒定（无整页换场）",
+   "detail": "heights=[\"390x378\"]"
+  },
+  {
+   "pass": true,
+   "name": "R1 ①叙事区全程常驻（事件/奖励/战报同屏承接）",
+   "detail": "ratio=100.0%"
+  },
+  {
+   "pass": true,
+   "name": "R1 ②非决策阶段确实发生且无需点击",
+   "detail": "infoPhases=22 waits=22"
+  },
+  {
+   "pass": true,
+   "name": "R1 ②自动承接次数 ≈ 非决策阶段数（每一次「继续」都被省掉）",
+   "detail": "autoAdvances=22 infoPhases=22"
+  },
+  {
+   "pass": true,
+   "name": "R1 ②保留必要的实际选择（选择卡仍需点击）",
+   "detail": "choiceClicks=24"
+  },
+  {
+   "pass": true,
+   "name": "R1 ②主操作次数显著下降（旧基线 26 次）",
+   "detail": "actionClicks=11（旧 26）"
+  },
+  {
+   "pass": true,
+   "name": "R1 ③没有假按钮（点在不可点主操作上的次数 = 0）",
+   "detail": "missed=0"
+  },
+  {
+   "pass": true,
+   "name": "R1 ④正常速度连续流程能跑到终态",
+   "detail": "phase=COMPLETE day=26 用时=110.4s"
+  },
+  {
+   "pass": true,
+   "name": "R1 ④种子全胜路径可通关",
+   "detail": "phase=COMPLETE 耐久=409/1100"
+  },
+  {
+   "pass": true,
+   "name": "R1 ④复玩入口可用（新种子、新开局）",
+   "detail": "scan-4(COMPLETE) → Rmvlxn0bj3seu(IDLE)"
+  },
+  {
+   "pass": true,
+   "name": "R1 页面无 console.error / 未捕获异常",
+   "detail": ""
+  },
+  {
+   "pass": true,
+   "name": "R1 素材请求无 404",
+   "detail": "http404(all)=[\"/favicon.ico\",\"/favicon.ico\"] asset404=[]"
+  }
+ ]
+}

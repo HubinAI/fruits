@@ -48,6 +48,22 @@
 
 export type AdvUiId =
   | 'battle_bg'
+  /**
+   * R1（FRUITS-ADVENTURE-UX-CONTINUITY-R1）｜一屏式叙事区专用 P0 素材。
+   *   text_card_bg  ← atlasraft/battle_event_text_bg.png（182×164，浅色米白文本卡）
+   *   event_bar_bg  ← atlasraft/battlenew_event_bg.png （1048×164，强边框事件条）
+   *   btn_green     ← atlasraft/btn_green.png           （65×118，绿色圆角按钮）
+   *   btn_yellow    ← atlasraft/btn_yellow.png          （65×118，黄色圆角按钮）
+   *   event_line    ← atlasraft/event_line.png          （30×10，分隔装饰线）
+   *   btn_chat      ← atlasraft/battle_event_btn_chat.png（185×102，圆形图标 + 条带按钮）
+   * 全部为**九宫格**用途 → 边距见下方 NINE_SLICE（逐张按圆角弧线量取，非目测）。
+   */
+  | 'text_card_bg'
+  | 'event_bar_bg'
+  | 'btn_green'
+  | 'btn_yellow'
+  | 'event_line'
+  | 'btn_chat'
   | 'card_bg'
   | 'chest_close'
   | 'chest_open'
@@ -81,6 +97,12 @@ export type AdvUiId =
 /** 资源 id → 站点相对 URL（adventure.html 同目录的 adventure-ui/）。 */
 const FILES: Readonly<Record<AdvUiId, string>> = {
   battle_bg: 'adventure-ui/battle_bg.png',
+  text_card_bg: 'adventure-ui/text_card_bg.png',
+  event_bar_bg: 'adventure-ui/event_bar_bg.png',
+  btn_green: 'adventure-ui/btn_green.png',
+  btn_yellow: 'adventure-ui/btn_yellow.png',
+  event_line: 'adventure-ui/event_line.png',
+  btn_chat: 'adventure-ui/btn_chat.png',
   card_bg: 'adventure-ui/card_bg.png',
   chest_close: 'adventure-ui/chest_close.png',
   chest_open: 'adventure-ui/chest_open.png',
@@ -176,6 +198,36 @@ export function advBuildIconId(buildId: string): AdvUiId {
   }
 }
 
+/* ------------------------------------------------------------------ 九宫格 */
+
+/**
+ * R1｜九宫格边距（**量取值，非目测**）。
+ *
+ * 量法：对每个角落沿对角线找到第一处 alpha≥200 的像素，取四角半径 + 2px 余量；
+ *   左右取 `max(TL, BL)` / `max(TR, BR)`，上下取 `max(TL, TR)` / `max(BL, BR)`
+ *   （见 `docs/adventure-ux-continuity-r1/_probe_nine_slice.py`，可复算）。
+ * 为什么不用「找纯色带」的通用扫描：这批素材是带高光/渐变/投影的立体按钮，
+ *   不存在 1px 级纯色带，通用扫描会在噪声处抖动（实测给出 L524/R523 这类荒谬值）。
+ *   ⇒ 圆角弧线法只依赖 alpha 外轮廓，对这类素材稳定。
+ *
+ * ⚠️ 本表是 `drawNineSlice` 的唯一输入；角落因此保持原始像素 1:1，符合「禁止非等比拉伸」
+ *   的产品要求（按钮变宽时只拉中间条带，圆角不会被压扁）。
+ */
+export const NINE_SLICE: Readonly<Record<string, { readonly left: number; readonly right: number; readonly top: number; readonly bottom: number }>> = {
+  /** 182×164 浅色文本卡：左下/右下 21px 大圆角 + 底部投影 ⇒ 底边留 23px。 */
+  text_card_bg: { left: 23, right: 23, top: 10, bottom: 23 },
+  /** 1048×164 事件条：上 25px 圆角、下 7px ⇒ 上厚下薄（投影在下方）。 */
+  event_bar_bg: { left: 27, right: 26, top: 27, bottom: 9 },
+  /** 65×118 绿色按钮。 */
+  btn_green: { left: 21, right: 21, top: 16, bottom: 21 },
+  /** 65×118 黄色按钮。 */
+  btn_yellow: { left: 21, right: 21, top: 16, bottom: 21 },
+  /** 30×10 装饰线（横向单轴拉伸即可，纵向保持原高）。 */
+  event_line: { left: 6, right: 10, top: 3, bottom: 3 },
+  /** 185×102 圆形图标按钮：左侧圆头不可拉 ⇒ 左 41px。 */
+  btn_chat: { left: 41, right: 21, top: 32, bottom: 34 },
+};
+
 export interface AdvUiStats {
   readonly registered: number;
   readonly ready: number;
@@ -230,4 +282,21 @@ export class AdvUiStore {
       failed: [...this.failed].sort(),
     };
   }
+
+  /**
+   * R1｜按素材 id 取九宫格边距（无表项 ⇒ null，调用方改用 contain，绝不猜边距）。
+   */
+  insets(id: AdvUiId): { readonly left: number; readonly right: number; readonly top: number; readonly bottom: number } | null {
+    return NINE_SLICE[id] ?? null;
+  }
 }
+
+/** R1｜素材源文件名对照（诊断 / 报告引用用；运行时不依赖 D 盘路径）。 */
+export const ADV_UI_SOURCE_NAMES: Readonly<Partial<Record<AdvUiId, string>>> = {
+  text_card_bg: 'atlasraft/battle_event_text_bg.png',
+  event_bar_bg: 'atlasraft/battlenew_event_bg.png',
+  btn_green: 'atlasraft/btn_green.png',
+  btn_yellow: 'atlasraft/btn_yellow.png',
+  event_line: 'atlasraft/event_line.png',
+  btn_chat: 'atlasraft/battle_event_btn_chat.png',
+};

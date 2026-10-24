@@ -1,0 +1,848 @@
+[
+ {
+  "file": "r1-replay-newrun.png",
+  "size": [
+   390,
+   844
+  ],
+  "bands": {
+   "TOP": {
+    "sampleN": 17940,
+    "darkPct": 0.14,
+    "brightPct": 3.14,
+    "distinctColors": 154
+   },
+   "STAGE": {
+    "sampleN": 73710,
+    "darkPct": 0.0,
+    "brightPct": 0.54,
+    "distinctColors": 146
+   },
+   "NARRATIVE": {
+    "sampleN": 53430,
+    "darkPct": 4.63,
+    "brightPct": 27.86,
+    "distinctColors": 369
+   },
+   "ACTION": {
+    "sampleN": 19500,
+    "darkPct": 6.99,
+    "brightPct": 2.59,
+    "distinctColors": 207
+   }
+  },
+  "darkPctAll": 2.35,
+  "darkHoles": [
+   [
+    160,
+    0
+   ],
+   [
+    200,
+    0
+   ],
+   [
+    0,
+    600
+   ],
+   [
+    0,
+    640
+   ],
+   [
+    40,
+    640
+   ],
+   [
+    80,
+    640
+   ],
+   [
+    120,
+    640
+   ],
+   [
+    160,
+    640
+   ],
+   [
+    200,
+    640
+   ],
+   [
+    240,
+    640
+   ],
+   [
+    280,
+    640
+   ],
+   [
+    320,
+    640
+   ]
+  ]
+ },
+ {
+  "file": "r1-win-battle-03.png",
+  "size": [
+   390,
+   844
+  ],
+  "bands": {
+   "TOP": {
+    "sampleN": 17940,
+    "darkPct": 0.14,
+    "brightPct": 3.19,
+    "distinctColors": 155
+   },
+   "STAGE": {
+    "sampleN": 73710,
+    "darkPct": 0.0,
+    "brightPct": 0.02,
+    "distinctColors": 379
+   },
+   "NARRATIVE": {
+    "sampleN": 53430,
+    "darkPct": 4.55,
+    "brightPct": 32.5,
+    "distinctColors": 394
+   },
+   "ACTION": {
+    "sampleN": 19500,
+    "darkPct": 0.0,
+    "brightPct": 0.0,
+    "distinctColors": 17
+   }
+  },
+  "darkPctAll": 1.49,
+  "darkHoles": [
+   [
+    160,
+    0
+   ],
+   [
+    200,
+    0
+   ],
+   [
+    40,
+    280
+   ],
+   [
+    80,
+    280
+   ],
+   [
+    280,
+    280
+   ],
+   [
+    0,
+    640
+   ],
+   [
+    40,
+    640
+   ],
+   [
+    80,
+    640
+   ],
+   [
+    120,
+    640
+   ],
+   [
+    160,
+    640
+   ],
+   [
+    200,
+    640
+   ],
+   [
+    240,
+    640
+   ],
+   [
+    280,
+    640
+   ],
+   [
+    320,
+    640
+   ],
+   [
+    0,
+    760
+   ],
+   [
+    40,
+    760
+   ],
+   [
+    280,
+    760
+   ],
+   [
+    320,
+    760
+   ],
+   [
+    0,
+    800
+   ],
+   [
+    40,
+    800
+   ],
+   [
+    80,
+    800
+   ],
+   [
+    120,
+    800
+   ],
+   [
+    160,
+    800
+   ],
+   [
+    200,
+    800
+   ],
+   [
+    240,
+    800
+   ],
+   [
+    280,
+    800
+   ],
+   [
+    320,
+    800
+   ]
+  ]
+ },
+ {
+  "file": "r1-win-choice-05.png",
+  "size": [
+   390,
+   844
+  ],
+  "bands": {
+   "TOP": {
+    "sampleN": 17940,
+    "darkPct": 0.14,
+    "brightPct": 3.15,
+    "distinctColors": 150
+   },
+   "STAGE": {
+    "sampleN": 73710,
+    "darkPct": 0.0,
+    "brightPct": 1.01,
+    "distinctColors": 180
+   },
+   "NARRATIVE": {
+    "sampleN": 53430,
+    "darkPct": 6.8,
+    "brightPct": 58.45,
+    "distinctColors": 502
+   },
+   "ACTION": {
+    "sampleN": 19500,
+    "darkPct": 0.0,
+    "brightPct": 0.0,
+    "distinctColors": 17
+   }
+  },
+  "darkPctAll": 2.22,
+  "darkHoles": [
+   [
+    160,
+    0
+   ],
+   [
+    200,
+    0
+   ],
+   [
+    0,
+    760
+   ],
+   [
+    40,
+    760
+   ],
+   [
+    80,
+    760
+   ],
+   [
+    280,
+    760
+   ],
+   [
+    320,
+    760
+   ],
+   [
+    0,
+    800
+   ],
+   [
+    40,
+    800
+   ],
+   [
+    80,
+    800
+   ],
+   [
+    120,
+    800
+   ],
+   [
+    160,
+    800
+   ],
+   [
+    200,
+    800
+   ],
+   [
+    240,
+    800
+   ],
+   [
+    280,
+    800
+   ],
+   [
+    320,
+    800
+   ]
+  ]
+ },
+ {
+  "file": "r1-win-complete-06.png",
+  "size": [
+   390,
+   844
+  ],
+  "bands": {
+   "TOP": {
+    "sampleN": 17940,
+    "darkPct": 0.14,
+    "brightPct": 4.73,
+    "distinctColors": 153
+   },
+   "STAGE": {
+    "sampleN": 73710,
+    "darkPct": 0.0,
+    "brightPct": 0.0,
+    "distinctColors": 133
+   },
+   "NARRATIVE": {
+    "sampleN": 53430,
+    "darkPct": 5.75,
+    "brightPct": 47.62,
+    "distinctColors": 839
+   },
+   "ACTION": {
+    "sampleN": 19500,
+    "darkPct": 5.26,
+    "brightPct": 4.04,
+    "distinctColors": 191
+   }
+  },
+  "darkPctAll": 2.5,
+  "darkHoles": []
+ },
+ {
+  "file": "r1-win-event-02.png",
+  "size": [
+   390,
+   844
+  ],
+  "bands": {
+   "TOP": {
+    "sampleN": 17940,
+    "darkPct": 0.14,
+    "brightPct": 3.19,
+    "distinctColors": 155
+   },
+   "STAGE": {
+    "sampleN": 73710,
+    "darkPct": 0.0,
+    "brightPct": 0.0,
+    "distinctColors": 135
+   },
+   "NARRATIVE": {
+    "sampleN": 53430,
+    "darkPct": 4.59,
+    "brightPct": 33.63,
+    "distinctColors": 487
+   },
+   "ACTION": {
+    "sampleN": 19500,
+    "darkPct": 0.0,
+    "brightPct": 0.0,
+    "distinctColors": 15
+   }
+  },
+  "darkPctAll": 1.51,
+  "darkHoles": [
+   [
+    160,
+    0
+   ],
+   [
+    200,
+    0
+   ],
+   [
+    0,
+    640
+   ],
+   [
+    40,
+    640
+   ],
+   [
+    80,
+    640
+   ],
+   [
+    120,
+    640
+   ],
+   [
+    160,
+    640
+   ],
+   [
+    200,
+    640
+   ],
+   [
+    240,
+    640
+   ],
+   [
+    280,
+    640
+   ],
+   [
+    320,
+    640
+   ],
+   [
+    0,
+    760
+   ],
+   [
+    40,
+    760
+   ],
+   [
+    80,
+    760
+   ],
+   [
+    280,
+    760
+   ],
+   [
+    320,
+    760
+   ],
+   [
+    0,
+    800
+   ],
+   [
+    40,
+    800
+   ],
+   [
+    80,
+    800
+   ],
+   [
+    120,
+    800
+   ],
+   [
+    160,
+    800
+   ],
+   [
+    200,
+    800
+   ],
+   [
+    240,
+    800
+   ],
+   [
+    280,
+    800
+   ],
+   [
+    320,
+    800
+   ]
+  ]
+ },
+ {
+  "file": "r1-win-event_choice-00.png",
+  "size": [
+   390,
+   844
+  ],
+  "bands": {
+   "TOP": {
+    "sampleN": 17940,
+    "darkPct": 0.14,
+    "brightPct": 3.21,
+    "distinctColors": 155
+   },
+   "STAGE": {
+    "sampleN": 73710,
+    "darkPct": 0.0,
+    "brightPct": 0.81,
+    "distinctColors": 176
+   },
+   "NARRATIVE": {
+    "sampleN": 53430,
+    "darkPct": 6.38,
+    "brightPct": 59.6,
+    "distinctColors": 600
+   },
+   "ACTION": {
+    "sampleN": 19500,
+    "darkPct": 0.0,
+    "brightPct": 0.0,
+    "distinctColors": 17
+   }
+  },
+  "darkPctAll": 2.09,
+  "darkHoles": [
+   [
+    160,
+    0
+   ],
+   [
+    200,
+    0
+   ],
+   [
+    0,
+    760
+   ],
+   [
+    40,
+    760
+   ],
+   [
+    80,
+    760
+   ],
+   [
+    280,
+    760
+   ],
+   [
+    320,
+    760
+   ],
+   [
+    0,
+    800
+   ],
+   [
+    40,
+    800
+   ],
+   [
+    80,
+    800
+   ],
+   [
+    120,
+    800
+   ],
+   [
+    160,
+    800
+   ],
+   [
+    200,
+    800
+   ],
+   [
+    240,
+    800
+   ],
+   [
+    280,
+    800
+   ],
+   [
+    320,
+    800
+   ]
+  ]
+ },
+ {
+  "file": "r1-win-event_done-01.png",
+  "size": [
+   390,
+   844
+  ],
+  "bands": {
+   "TOP": {
+    "sampleN": 17940,
+    "darkPct": 0.14,
+    "brightPct": 3.21,
+    "distinctColors": 155
+   },
+   "STAGE": {
+    "sampleN": 73710,
+    "darkPct": 0.0,
+    "brightPct": 0.81,
+    "distinctColors": 158
+   },
+   "NARRATIVE": {
+    "sampleN": 53430,
+    "darkPct": 4.62,
+    "brightPct": 39.81,
+    "distinctColors": 395
+   },
+   "ACTION": {
+    "sampleN": 19500,
+    "darkPct": 0.0,
+    "brightPct": 0.0,
+    "distinctColors": 18
+   }
+  },
+  "darkPctAll": 1.51,
+  "darkHoles": [
+   [
+    160,
+    0
+   ],
+   [
+    200,
+    0
+   ],
+   [
+    0,
+    640
+   ],
+   [
+    0,
+    760
+   ],
+   [
+    40,
+    760
+   ],
+   [
+    80,
+    760
+   ],
+   [
+    280,
+    760
+   ],
+   [
+    320,
+    760
+   ],
+   [
+    0,
+    800
+   ],
+   [
+    40,
+    800
+   ],
+   [
+    80,
+    800
+   ],
+   [
+    120,
+    800
+   ],
+   [
+    160,
+    800
+   ],
+   [
+    200,
+    800
+   ],
+   [
+    240,
+    800
+   ],
+   [
+    280,
+    800
+   ],
+   [
+    320,
+    800
+   ]
+  ]
+ },
+ {
+  "file": "r1-win-failed-06.png",
+  "size": [
+   390,
+   844
+  ],
+  "bands": {
+   "TOP": {
+    "sampleN": 17940,
+    "darkPct": 0.14,
+    "brightPct": 4.63,
+    "distinctColors": 150
+   },
+   "STAGE": {
+    "sampleN": 73710,
+    "darkPct": 0.0,
+    "brightPct": 0.0,
+    "distinctColors": 133
+   },
+   "NARRATIVE": {
+    "sampleN": 53430,
+    "darkPct": 6.28,
+    "brightPct": 65.12,
+    "distinctColors": 402
+   },
+   "ACTION": {
+    "sampleN": 19500,
+    "darkPct": 5.26,
+    "brightPct": 3.88,
+    "distinctColors": 196
+   }
+  },
+  "darkPctAll": 2.68,
+  "darkHoles": []
+ },
+ {
+  "file": "r1-win-result-04.png",
+  "size": [
+   390,
+   844
+  ],
+  "bands": {
+   "TOP": {
+    "sampleN": 17940,
+    "darkPct": 0.14,
+    "brightPct": 3.18,
+    "distinctColors": 151
+   },
+   "STAGE": {
+    "sampleN": 73710,
+    "darkPct": 0.0,
+    "brightPct": 1.09,
+    "distinctColors": 909
+   },
+   "NARRATIVE": {
+    "sampleN": 53430,
+    "darkPct": 4.77,
+    "brightPct": 47.42,
+    "distinctColors": 366
+   },
+   "ACTION": {
+    "sampleN": 19500,
+    "darkPct": 0.0,
+    "brightPct": 0.0,
+    "distinctColors": 18
+   }
+  },
+  "darkPctAll": 1.56,
+  "darkHoles": [
+   [
+    160,
+    0
+   ],
+   [
+    200,
+    0
+   ],
+   [
+    0,
+    240
+   ],
+   [
+    40,
+    240
+   ],
+   [
+    0,
+    760
+   ],
+   [
+    40,
+    760
+   ],
+   [
+    80,
+    760
+   ],
+   [
+    280,
+    760
+   ],
+   [
+    320,
+    760
+   ],
+   [
+    0,
+    800
+   ],
+   [
+    40,
+    800
+   ],
+   [
+    80,
+    800
+   ],
+   [
+    120,
+    800
+   ],
+   [
+    160,
+    800
+   ],
+   [
+    200,
+    800
+   ],
+   [
+    240,
+    800
+   ],
+   [
+    280,
+    800
+   ],
+   [
+    320,
+    800
+   ]
+  ]
+ }
+]

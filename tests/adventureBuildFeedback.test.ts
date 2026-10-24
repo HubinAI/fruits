@@ -14,6 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import { generateAdventureScript } from '../src/lab/portraitBattleLab/adventure/advScript';
 import {
+  advAutoAdvance,
   advCarriedPlayerHp,
   advChoicePool,
   advContextFromLoadout,
@@ -23,6 +24,7 @@ import {
   chooseAdventureOption,
   createAdventureState,
   finishAdventureBattle,
+  advNeedsPlayer,
   pressAdventureAction,
   type AdventureContext,
   type AdventureState,
@@ -66,7 +68,9 @@ function step(
     const pool = advChoicePool(s, advCurrentNode(s, script), ctx);
     return chooseAdventureOption(s, choice ?? pool[0]?.id ?? '__skip__', ctx, script);
   }
-  return pressAdventureAction(s, ctx, script);
+  // R1：纯信息阶段（EVENT / RESULT / EVENT_DONE）由 advAutoAdvance 自动承接，
+  //     主操作在其上已是 no-op ⇒ 驱动按新语义分派（推进代码与 R1 前「按继续」相同）。
+  return advNeedsPlayer(s) ? pressAdventureAction(s, ctx, script) : advAutoAdvance(s, ctx, script);
 }
 
 /** 走查整局：每到 CHOICE 调 `onBuild(state, pool)`；返回 { final, picks }。 */

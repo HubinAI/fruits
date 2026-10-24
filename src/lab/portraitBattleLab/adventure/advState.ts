@@ -106,14 +106,33 @@ const ADV_WAYPOINT_HEAL_FRACTION = 0.5;
 
 /**
  * 冒险 BUILD 候选**策展排除项**（仅在冒险层过滤，不改 runModifiers / 任何物理与数值）：
- *   `fastReload`（Cannon cooldownMs 1000→650）与 `twinCannon`（burstRounds 1→2）在真实 Planck
- *   物理下叠加会发生 DPS 崩塌的涌现互斥——headless 隔离复现：6 强化（含 twinCannon、无
- *   fastReload）打 Chaser 稳赢剩 645 耐久；同样 6 强化把 rateUp 换成 fastReload 后
- *   1100→0 团灭（敌剩 57），且与 rateUp 是否在场逐帧一致。冒险整局必经 FINAL，
- *   若玩家沿该路径装配会走进**必然不可通关**的死局，故冒险池不发放该项
- *   （正式 Run 的车库装配不受影响，本表只作用于本原型冒险的候选浮层）。
+ *
+ *   1. `fastReload`（Cannon cooldownMs 1000→650）与 `twinCannon`（burstRounds 1→2）在真实 Planck
+ *      物理下叠加会发生 DPS 崩塌的涌现互斥——headless 隔离复现：6 强化（含 twinCannon、无
+ *      fastReload）打 Chaser 稳赢剩 645 耐久；同样 6 强化把 rateUp 换成 fastReload 后
+ *      1100→0 团灭（敌剩 57），且与 rateUp 是否在场逐帧一致。冒险整局必经 FINAL，
+ *      若玩家沿该路径装配会走进**必然不可通关**的死局，故冒险池不发放该项
+ *      （正式 Run 的车库装配不受影响，本表只作用于本原型冒险的候选浮层）。
+ *
+ *   2. `tripleLoad`（FRUITS-ADVENTURE-UX-CONTINUITY-R1 补充）：与 `twinCannon` 叠加同属
+ *      「加载数超过炮管数」的 DPS 崩塌，**且比 fastReload 更严重 —— 它是绝对致死**：
+ *      headless 实测（演示装载，1100 耐久入场，build = damageUp+rateUp+kineticBurst+heavyShell）：
+ *
+ *        ProtoRusher（前期最弱敌）
+ *          + twinCannon                → **胜**（剩 978，maxShells=2）
+ *          + twinCannon + tripleLoad   → **败**（1100→0，maxShells=3）
+ *        ExtendedHeavyContact（终点）
+ *          + twinCannon                → **胜**（剩 409）
+ *          + twinCannon + tripleLoad   → **败**（882 步归零）
+ *
+ *      ⚠️ 这是**既存缺陷**，与本 Queue 无关：同一组合在 R1 之前的 HEAD `49dc670` 上
+ *         得到完全相同的数字（A/978/866 vs B/0/991），已用独立 worktree 复核。
+ *      因冒险整局必经 FINAL，发放该项等于给玩家一条「拿到即必败」的死局，
+ *      故与 fastReload 同列排除（只影响冒险奖励池，正式 Run / 车库装配不受影响）。
+ *      真正的修复（炮管数/加载数的射出协调）属物理与武器数值范畴，本 Queue 禁止改动，
+ *      已在 docs/adventure-ux-continuity-r1/REPORT.md §6 立为独立 Bug 备查。
  */
-const ADV_EXCLUDED_BUILD_IDS: readonly RunBuildId[] = ['fastReload'];
+const ADV_EXCLUDED_BUILD_IDS: readonly RunBuildId[] = ['fastReload', 'tripleLoad'];
 
 export function advContextFromLoadout(loadout: RunPlayerLoadout = demoRunPlayerLoadout()): AdventureContext {
   const ctx = runPageContext(loadout);
@@ -356,6 +375,43 @@ export function advActionEnabled(s: AdventureState): boolean {
   );
 }
 
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜「此刻真的在等玩家」的唯一判定（纯函数，UI / E2E / 测试同源）。
+ *
+ * 为什么必须有它：R1 之前，`EVENT`（敌情叙事）、`RESULT`（战报）、`EVENT_DONE`（开奖）
+ * 三个阶段都会显示一个「继续」按钮并停下等点击 —— 这三个阶段**没有任何决策**，
+ * 玩家体验到的就是「不断打开不同界面、按相同按钮」。R1 把它们改为**同屏自动承接**：
+ *
+ *   EVENT      —— 敌情文字写入叙事区后，短延时自动进入真实战斗（主操作变为「战斗中」的不可点态）；
+ *   RESULT     —— 战报写入叙事区后自动推进到下一节点（事件/建造/下一战）；
+ *   EVENT_DONE —— 事件结果写入叙事区后自动推进到下一节点。
+ *
+ * 仍然**必须**由玩家决定（真实停顿点，保留一次明确操作）：
+ *   EVENT_CHOICE / CHOICE —— 选择项（决策本身，不是「继续」）；
+ *   IDLE                   —— 下一场战斗/事件/建造真正需要玩家发起（「出发」类主操作）；
+ *   COMPLETE / FAILED      —— 终局复玩入口（「再来一局」）。
+ *
+ * ⚠️ 这是**纯展示/推进**层的变化：所有经济、耐久、随机、胜负结算路径一字未改，
+ *    自动承接走的正是原来「按一次继续」所触发的同一个 `presentNode`。
+ */
+export function advNeedsPlayer(s: AdventureState): boolean {
+  return (
+    s.phase === 'IDLE' ||
+    s.phase === 'EVENT_CHOICE' ||
+    s.phase === 'CHOICE' ||
+    s.phase === 'COMPLETE' ||
+    s.phase === 'FAILED'
+  );
+}
+
+/**
+ * R1｜纯信息阶段（无需玩家点击即可自行承接的阶段）。
+ * 与 `advNeedsPlayer` 严格互补：`advNeedsPlayer(x) === !advInfoPhase(x)`（BATTLE 也属自动阶段）。
+ */
+export function advInfoPhase(s: AdventureState): boolean {
+  return !advNeedsPlayer(s);
+}
+
 export function advActionLabel(s: AdventureState): string {
   switch (s.phase) {
     case 'EVENT':
@@ -466,6 +522,79 @@ export function advVisibleLog(s: AdventureState, maxLines: number): readonly Adv
   return s.log.length <= maxLines ? s.log : s.log.slice(s.log.length - maxLines);
 }
 
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜叙事区（NARRATIVE）要显示的**当前节点卡片行**（纯函数）。
+ *
+ * 一屏式结构的核心：事件、奖励、战报都在同一个叙事区里「依时间依次写入」，场景不跳走。
+ * 这里只回答「此刻这张卡该写什么」，不持有任何状态（卡片内容全部来自既有 `log` / `eventResult`）。
+ *
+ * 取法：从日志尾部向前取**同一节点**写入的连续行（以最近一次 `day`/`travel` 行为边界），
+ * 这样一张卡永远只讲「刚发生的这一件事」，不会被上一天的旧文字占满；`BATTLE` 期间
+ * 取本场 encounter 行；`RESULT` / `COMPLETE` / `FAILED` 取战报行。
+ *
+ * @param maxLines 卡片正文行数上限（版面决定；超出由 UI 截断，不丢数据）
+ */
+export function advNarrativeLines(s: AdventureState, maxLines: number): readonly AdventureLogEntry[] {
+  if (maxLines <= 0) return [];
+  const log = s.log;
+  if (log.length === 0) return [];
+  // 从尾部向前，收集连续的「非边界」行；`day` 与 `travel` 是新节拍的分界。
+  let start = log.length;
+  for (let i = log.length - 1; i >= 0; i--) {
+    if (log[i].kind === 'day' || log[i].kind === 'travel') {
+      start = i;
+      break;
+    }
+    start = i;
+    if (log.length - i >= maxLines) break;
+  }
+  const tail = log.slice(start);
+  return tail.length > maxLines ? tail.slice(tail.length - maxLines) : tail;
+}
+
+/** 叙事区卡片标题（纯函数；随阶段给出「这一格在讲什么」）。 */
+export function advNarrativeTitle(s: AdventureState, script: AdventureScript): string {
+  switch (s.phase) {
+    case 'BATTLE':
+      return `交战中 · ${s.battle?.enemyLabel ?? '对手'}`;
+    case 'RESULT': {
+      const node = (() => {
+        try {
+          return advCurrentNode(s, script);
+        } catch {
+          return null;
+        }
+      })();
+      if (node && (node.kind === 'BATTLE' || node.kind === 'FINAL')) {
+        return s.battle?.winner === 'A' ? '战斗胜利' : '战车被打退';
+      }
+      return '战报';
+    }
+    case 'EVENT':
+      return '敌情';
+    case 'EVENT_CHOICE': {
+      const node = advCurrentNode(s, script);
+      return node.kind === 'EVENT' ? node.title : '做一个决定';
+    }
+    case 'EVENT_DONE':
+      return '事件结果';
+    case 'CHOICE':
+      return '改装机会';
+    case 'COMPLETE':
+      return '冒险完成';
+    case 'FAILED':
+      return '冒险失败';
+    default: {
+      const node = advCurrentNode(s, script);
+      if (node.kind === 'BATTLE' || node.kind === 'FINAL') return '前方有敌人';
+      if (node.kind === 'EVENT') return node.title;
+      if (node.kind === 'BUILD') return '改装机会';
+      if (node.kind === 'BANNER') return '阶段推进';
+      return '旅途';
+    }
+  }
+}
+
 export function advFormatLog(e: AdventureLogEntry): string {
   return e.text;
 }
@@ -500,16 +629,20 @@ export function createAdventureState(ctx: AdventureContext, script: AdventureScr
 /* --------------------------------------------------------------- 动作 */
 
 /**
- * 按下底部唯一主动作（按当前节点 / phase 分派）：
- *   IDLE + START          → 推进到 next 节点
- *   IDLE + BATTLE/FINAL   → EVENT（敌情叙事）
- *   IDLE + EVENT          → EVENT_CHOICE（事件选项浮层）
- *   IDLE + BUILD          → CHOICE（建造候选浮层）
- *   EVENT                 → BATTLE（建立真实战斗状态）
- *   RESULT / EVENT_DONE   → 推进到 next 节点
+ * 按下底部唯一主动作（按当前节点 / phase 分派）。
+ *
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜**纯信息阶段不再接受主操作**（它们自行承接，见 `advNeedsPlayer`）。
+ *   本函数现在只回答「玩家真的要推进时做什么」：
+ *   IDLE + BATTLE/FINAL  → EVENT（敌情叙事，随后 `advAutoAdvance` 自动开打）
+ *   IDLE + EVENT         → EVENT_CHOICE（事件选项）
+ *   IDLE + BUILD         → CHOICE（建造候选）
+ *   IDLE + START         → 推进到 next 节点
  *   终态                  → 同一脚本重开（纯状态机口径 = 同种子重放，仅测试入口；
  *                            UI 层 advPage 在终态拦截主动作改为「新一局·新随机种子」，见 R4 必改①）
- *   BATTLE / CHOICE / EVENT_CHOICE → no-op（必须点卡片）
+ *   BATTLE / EVENT / RESULT / EVENT_DONE / CHOICE / EVENT_CHOICE → no-op
+ *
+ * ⚠️ R1 之前 EVENT / RESULT / EVENT_DONE 在这里被手动推进；现在由 `advAutoAdvance` 承担
+ *    （同一段推进代码，只是触发方从「玩家点击」变成「展示完成」）⇒ 经济与结果完全等价。
  */
 export function pressAdventureAction(
   s: AdventureState,
@@ -521,8 +654,7 @@ export function pressAdventureAction(
   if (s.phase === 'IDLE') {
     const node = advCurrentNode(s, script);
     if (node.kind === 'BATTLE' || node.kind === 'FINAL') {
-      const entries = (node.encounter ?? []).map((line) => ({ kind: 'event' as AdventureLogKind, text: subst(line, ctx, node) }));
-      return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'EVENT', { log: pushLogs(s.log, entries) });
+      return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'EVENT', { log: pushLogs(s.log, encounterEntries(ctx, node)) });
     }
     if (node.kind === 'EVENT') {
       return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'EVENT_CHOICE', {});
@@ -541,6 +673,33 @@ export function pressAdventureAction(
     return s;
   }
 
+  return s; // BATTLE / EVENT / RESULT / EVENT_DONE / CHOICE / EVENT_CHOICE → 不接受主动作
+}
+
+/** 敌情叙事行（`pressAdventureAction` 与自动承接共用的唯一口径）。 */
+function encounterEntries(ctx: AdventureContext, node: AdventureNode): { kind: AdventureLogKind; text: string }[] {
+  if (node.kind !== 'BATTLE' && node.kind !== 'FINAL') return [];
+  return (node.encounter ?? []).map((line) => ({ kind: 'event' as AdventureLogKind, text: subst(line, ctx, node) }));
+}
+
+/**
+ * FRUITS-ADVENTURE-UX-CONTINUITY-R1｜纯信息阶段的**自动承接**（纯函数，UI 只负责计时）。
+ *
+ * 只处理三个「无决策」阶段，且每一步都是 R1 之前「按下继续」所触发的**同一段**推进代码：
+ *   EVENT      → BATTLE（建立真实战斗状态，与旧 `pressAdventureAction(EVENT)` 逐字段一致）
+ *   RESULT     → 下一节点（旧 `pressAdventureAction(RESULT)`）
+ *   EVENT_DONE → 下一节点（旧 `pressAdventureAction(EVENT_DONE)`）
+ *
+ * 其它阶段（含必须由玩家决定的 EVENT_CHOICE / CHOICE / IDLE / 终态、以及 BATTLE 本身）⇒ 原样返回，
+ * 所以调用方可以安全地在「信息展示完成」时无脑调用一次：**它自己保证不会跨过决策点**。
+ *
+ * @returns 同引用 = 无事可做（调用方据此判断「是否真的推进了」）
+ */
+export function advAutoAdvance(
+  s: AdventureState,
+  ctx: AdventureContext,
+  script: AdventureScript,
+): AdventureState {
   if (s.phase === 'EVENT') {
     const node = advCurrentNode(s, script);
     const startHp = advCarriedPlayerHp(s, ctx);
@@ -557,14 +716,12 @@ export function pressAdventureAction(
     };
     return goPhase(next(s, { actionCount: s.actionCount + 1 }), 'BATTLE', { battle });
   }
-
   if (s.phase === 'RESULT' || s.phase === 'EVENT_DONE') {
     const node = advCurrentNode(s, script);
     if (node.next) return presentNode(next(s, { actionCount: s.actionCount + 1 }), node.next, script, ctx);
     return s;
   }
-
-  return s; // BATTLE / CHOICE / EVENT_CHOICE → 不接受主动作
+  return s;
 }
 
 /**
@@ -618,7 +775,12 @@ function applyEffect(
     const labelOf = (id: RunBuildId): string => runBuildOptionById(id)?.label ?? id;
 
     // 领取时解析：候选序（同种子恒定）里**第一个未拥有**的候选。
-    const unowned = effect.candidates.filter((id) => !s.buffs.includes(id));
+    // R1：候选解析与 BUILD 池**同一排除纪律**（`ADV_EXCLUDED_BUILD_IDS`）——
+    // 否则「事件发放」会绕过 BUILD 侧的策展过滤，把必然致死组合（如 twinCannon+tripleLoad）递给玩家。
+    // 排除项是「已拥有」的超集：过滤后剩余候选序不变 ⇒ 同种子同选择仍完全可复现。
+    const unowned = effect.candidates.filter(
+      (id) => !s.buffs.includes(id) && !ADV_EXCLUDED_BUILD_IDS.includes(id),
+    );
     // F5｜再叠一层「此刻真的有收益」：候选里只有「紧急维修」会随耐久状态而失效
     //    （它的**全部**价值 = 此刻真修回的那点耐久；运行时能力只认 kineticBurst ⇒
     //    它作为 Build 项本身对战斗毫无影响）。

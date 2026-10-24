@@ -21,10 +21,12 @@ import {
   type AdventureScript,
 } from '../src/lab/portraitBattleLab/adventure/advScript';
 import {
+  advAutoAdvance,
   advChoicePool,
   advContextFromLoadout,
   advCurrentNode,
   advCarriedPlayerHp,
+  advNeedsPlayer,
   chooseAdventureOption,
   createAdventureState,
   finishAdventureBattle,
@@ -122,8 +124,18 @@ function playAdventure(
         state = finishAdventureBattle(state, { winner: 'A', endReason: 'test', playerHp: Math.max(1, cur - 30), enemyHp: 0, steps: 50 }, script);
       }
     } else {
-      // START / BANNER / EVENT(待选) / RESULT / EVENT_DONE → 主动作推进
-      state = pressAdventureAction(state, ctx, script);
+      // START / BANNER / EVENT(待开打) / RESULT / EVENT_DONE / IDLE → 推进
+      //
+      // FRUITS-ADVENTURE-UX-CONTINUITY-R1：EVENT / RESULT / EVENT_DONE 已改为**纯信息阶段**
+      // （`pressAdventureAction` 在其上为 no-op，由 `advAutoAdvance` 自动承接）。
+      // 驱动必须按新语义走，否则会在这三个阶段上空转到 guard 上限。
+      // ⚠️ 自动承接走的是 R1 之前「按继续」的**同一段**推进代码 ⇒ 本文件对经济/胜负/
+      //    可复现性的全部断言仍然成立（等价性由 adventureContinuityR1.test.ts 显式证明）。
+      const next = advNeedsPlayer(state)
+        ? pressAdventureAction(state, ctx, script)
+        : advAutoAdvance(state, ctx, script);
+      if (next === state) throw new Error(`[ADV-TEST] 阶段 ${state.phase} 无法推进`);
+      state = next;
     }
   }
   return { final: state, records };
@@ -360,7 +372,9 @@ describe('FRUITS-ADVENTURE-R4 胜负可达与结算口径', () => {
         );
         continue;
       }
-      s = pressAdventureAction(s, ctx, script);
+      // R1：纯信息阶段（EVENT / RESULT / EVENT_DONE）由 advAutoAdvance 自动承接，
+      // 主操作在其上已是 no-op —— 驱动按新语义分派（推进代码与 R1 前「按继续」完全相同）。
+      s = advNeedsPlayer(s) ? pressAdventureAction(s, ctx, script) : advAutoAdvance(s, ctx, script);
     }
     expect(s.phase).toBe('COMPLETE');
     expect(s.battlesCompleted).toBe(ADVENTURE_TOTAL_BATTLES);
