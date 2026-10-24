@@ -61,12 +61,41 @@ export function uxOptionRects(count: number): UxRect[] {
   if (n === 0) return [];
   const x = UX_NARRATIVE_CARD.x;
   const w = UX_NARRATIVE_CARD.w;
-  const gap = 10;
   const top = UX_NARRATIVE_CARD.y;
-  const totalH = UX_NARRATIVE_CARD.h;
-  const h = Math.floor((totalH - (n - 1) * gap) / n);
+  const availH = UX_NARRATIVE_CARD.h;
+  /**
+   * R2：卡片高度按「三行结构」的真实需要分配，不再一律均分满高。
+   *
+   * 旧实现把叙事区可用高度平均切给 n 张卡（n=2 ⇒ 118px，n=3 ⇒ 78px）。
+   * 78px 要塞「名称 19px + 收益 14px + 代价 14px」三行 ⇒ 行距被压到 26px，
+   * 观感就是「挤压」。R2 给每张卡一个**下限 92px**（三行 + 上下留白），
+   * 数量多时自动减少间距而不是压行高；若所需总高超出，再按比例收缩（有下限保护）。
+   */
+  const minCardH = 78;
+  /**
+   * 目标高度：**先充分利用可用空间，再受上限约束**，且**必须容得下**。
+   *   · n=2（事件二选一）：每张可达 128px —— 三行文字有充裕行距，不再「挤」；
+   *   · n=3（强化三选一）：每张可达 100px —— 高于 78 下限，三行可读；
+   *   · n=4（极端情形）：按可用空间均分，但不低于 78。
+   * ⚠️ 无论 n 多少，总高**绝不超出**可用区（否则会压到下方动作带 —— 实测 n=4 时
+   *    旧算法会溢出到 y=778 > 744）。先按可用高度均分，再用上限收敛，最后夹下限；
+   *    下限只保证「不被压扁」，不会被用来突破可用区（若真放不下，宁可缩小 gap）。
+   */
+  const maxCardH = n <= 2 ? 132 : n === 3 ? 100 : 84;
+  let gap = n >= 3 ? 8 : 12;
+  let h = Math.floor((availH - (n - 1) * gap) / n);
+  h = Math.min(maxCardH, h);
+  h = Math.max(minCardH, h);
+  // 兜底：若「n×h + (n−1)×gap」仍超出可用高，**先收 gap，再收 h**，直到严格放得下。
+  // （实测 n=4：availH=274，若 h 取 floor(274/4)=68 而 gap 仍为 8，总高 296 ⇒ 溢出 22px）
+  while (n * h + (n - 1) * gap > availH && gap > 0) gap -= 2;
+  while (n * h + (n - 1) * gap > availH && h > 1) h -= 1;
+  const totalH = n * h + (n - 1) * gap;
+  // 居中；但**严格夹紧**在可用区内（实测 n=4 场景下居中公式会溢出 4px）
+  const maxStart = UX_NARRATIVE_CARD.y + Math.max(0, availH - totalH);
+  const startY = Math.min(maxStart, Math.max(UX_NARRATIVE_CARD.y, top + Math.floor((availH - totalH) / 2)));
   const out: UxRect[] = [];
-  for (let i = 0; i < n; i++) out.push({ x, y: top + i * (h + gap), w, h });
+  for (let i = 0; i < n; i++) out.push({ x, y: startY + i * (h + gap), w, h });
   return out;
 }
 

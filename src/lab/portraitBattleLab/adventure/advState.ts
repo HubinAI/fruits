@@ -106,33 +106,21 @@ const ADV_WAYPOINT_HEAL_FRACTION = 0.5;
 
 /**
  * 冒险 BUILD 候选**策展排除项**（仅在冒险层过滤，不改 runModifiers / 任何物理与数值）：
+ *   `fastReload`（Cannon cooldownMs 1000→650）与 `twinCannon`（burstRounds 1→2）在真实 Planck
+ *   物理下叠加会发生 DPS 崩塌的涌现互斥——headless 隔离复现：6 强化（含 twinCannon、无
+ *   fastReload）打 Chaser 稳赢剩 645 耐久；同样 6 强化把 rateUp 换成 fastReload 后
+ *   1100→0 团灭（敌剩 57），且与 rateUp 是否在场逐帧一致。冒险整局必经 FINAL，
+ *   若玩家沿该路径装配会走进**必然不可通关**的死局，故冒险池不发放该项
+ *   （正式 Run 的车库装配不受影响，本表只作用于本原型冒险的候选浮层）。
  *
- *   1. `fastReload`（Cannon cooldownMs 1000→650）与 `twinCannon`（burstRounds 1→2）在真实 Planck
- *      物理下叠加会发生 DPS 崩塌的涌现互斥——headless 隔离复现：6 强化（含 twinCannon、无
- *      fastReload）打 Chaser 稳赢剩 645 耐久；同样 6 强化把 rateUp 换成 fastReload 后
- *      1100→0 团灭（敌剩 57），且与 rateUp 是否在场逐帧一致。冒险整局必经 FINAL，
- *      若玩家沿该路径装配会走进**必然不可通关**的死局，故冒险池不发放该项
- *      （正式 Run 的车库装配不受影响，本表只作用于本原型冒险的候选浮层）。
- *
- *   2. `tripleLoad`（FRUITS-ADVENTURE-UX-CONTINUITY-R1 补充）：与 `twinCannon` 叠加同属
- *      「加载数超过炮管数」的 DPS 崩塌，**且比 fastReload 更严重 —— 它是绝对致死**：
- *      headless 实测（演示装载，1100 耐久入场，build = damageUp+rateUp+kineticBurst+heavyShell）：
- *
- *        ProtoRusher（前期最弱敌）
- *          + twinCannon                → **胜**（剩 978，maxShells=2）
- *          + twinCannon + tripleLoad   → **败**（1100→0，maxShells=3）
- *        ExtendedHeavyContact（终点）
- *          + twinCannon                → **胜**（剩 409）
- *          + twinCannon + tripleLoad   → **败**（882 步归零）
- *
- *      ⚠️ 这是**既存缺陷**，与本 Queue 无关：同一组合在 R1 之前的 HEAD `49dc670` 上
- *         得到完全相同的数字（A/978/866 vs B/0/991），已用独立 worktree 复核。
- *      因冒险整局必经 FINAL，发放该项等于给玩家一条「拿到即必败」的死局，
- *      故与 fastReload 同列排除（只影响冒险奖励池，正式 Run / 车库装配不受影响）。
- *      真正的修复（炮管数/加载数的射出协调）属物理与武器数值范畴，本 Queue 禁止改动，
- *      已在 docs/adventure-ux-continuity-r1/REPORT.md §6 立为独立 Bug 备查。
+ * ⚠️ FRUITS-ADVENTURE-UX-COHERENCE-R2 恢复说明（必改 4）：
+ *   R1 曾把 `tripleLoad` 也加进本表，理由是「与 twinCannon 叠加同样导致 DPS 崩塌」。
+ *   该结论本身成立（实测可复现），但**在 UI 轮次里改玩法规则超出授权**，
+ *   本轮按 Queue 要求**原样恢复为只排除 `fastReload`**（与 R1 之前完全一致）。
+ *   恢复后 `tripleLoad` 会重新可被 BUILD 发放，风险已记录为待决策 Bug
+ *   （见 docs/adventure-ux-coherence-r2/REPORT.md §5），由玩法轮次决定是否处理。
  */
-const ADV_EXCLUDED_BUILD_IDS: readonly RunBuildId[] = ['fastReload', 'tripleLoad'];
+const ADV_EXCLUDED_BUILD_IDS: readonly RunBuildId[] = ['fastReload'];
 
 export function advContextFromLoadout(loadout: RunPlayerLoadout = demoRunPlayerLoadout()): AdventureContext {
   const ctx = runPageContext(loadout);
@@ -775,12 +763,9 @@ function applyEffect(
     const labelOf = (id: RunBuildId): string => runBuildOptionById(id)?.label ?? id;
 
     // 领取时解析：候选序（同种子恒定）里**第一个未拥有**的候选。
-    // R1：候选解析与 BUILD 池**同一排除纪律**（`ADV_EXCLUDED_BUILD_IDS`）——
-    // 否则「事件发放」会绕过 BUILD 侧的策展过滤，把必然致死组合（如 twinCannon+tripleLoad）递给玩家。
-    // 排除项是「已拥有」的超集：过滤后剩余候选序不变 ⇒ 同种子同选择仍完全可复现。
-    const unowned = effect.candidates.filter(
-      (id) => !s.buffs.includes(id) && !ADV_EXCLUDED_BUILD_IDS.includes(id),
-    );
+    // R2：恢复 R1 之前的口径 —— 事件候选只按「是否已拥有」过滤，
+    //     不再套用 BUILD 侧的 `ADV_EXCLUDED_BUILD_IDS`（那是 R1 越界加入的行为）。
+    const unowned = effect.candidates.filter((id) => !s.buffs.includes(id));
     // F5｜再叠一层「此刻真的有收益」：候选里只有「紧急维修」会随耐久状态而失效
     //    （它的**全部**价值 = 此刻真修回的那点耐久；运行时能力只认 kineticBurst ⇒
     //    它作为 Build 项本身对战斗毫无影响）。

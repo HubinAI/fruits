@@ -1,0 +1,172 @@
+{
+ "baseFrame": "seq-01-event_choice.png",
+ "horizonRange": [
+  326,
+  361
+ ],
+ "horizonSpan": 35,
+ "worstAlignDelta": 36.8,
+ "frames": [
+  {
+   "file": "seq-01-event_choice.png",
+   "phase": "EVENT_CHOICE",
+   "horizon": 326,
+   "lum": 92.1,
+   "green": {
+    "n": 5472,
+    "x": [
+     124,
+     264
+    ],
+    "y": [
+     246,
+     322
+    ]
+   },
+   "alignDelta": 0.0,
+   "alignScale": 1.0,
+   "alignOffset": [
+    0,
+    0
+   ]
+  },
+  {
+   "file": "seq-02-event_done.png",
+   "phase": "EVENT_DONE",
+   "horizon": 326,
+   "lum": 92.1,
+   "green": {
+    "n": 5472,
+    "x": [
+     124,
+     264
+    ],
+    "y": [
+     246,
+     322
+    ]
+   },
+   "alignDelta": 0.0,
+   "alignScale": 1.0,
+   "alignOffset": [
+    0,
+    0
+   ]
+  },
+  {
+   "file": "seq-03-event.png",
+   "phase": "EVENT",
+   "horizon": 326,
+   "lum": 92.7,
+   "green": {
+    "n": 5472,
+    "x": [
+     124,
+     264
+    ],
+    "y": [
+     246,
+     322
+    ]
+   },
+   "alignDelta": 3.5,
+   "alignScale": 1.0,
+   "alignOffset": [
+    0,
+    0
+   ]
+  },
+  {
+   "file": "seq-04-battle.png",
+   "phase": "BATTLE",
+   "horizon": 330,
+   "lum": 116.4,
+   "green": {
+    "n": 1884,
+    "x": [
+     40,
+     338
+    ],
+    "y": [
+     108,
+     348
+    ]
+   },
+   "alignDelta": 31.8,
+   "alignScale": 1.1,
+   "alignOffset": [
+    -10,
+    -25
+   ]
+  },
+  {
+   "file": "seq-05-result.png",
+   "phase": "RESULT",
+   "horizon": 361,
+   "lum": 125.9,
+   "green": {
+    "n": 6276,
+    "x": [
+     18,
+     328
+    ],
+    "y": [
+     92,
+     340
+    ]
+   },
+   "alignDelta": 36.8,
+   "alignScale": 1.25,
+   "alignOffset": [
+    15,
+    -15
+   ]
+  },
+  {
+   "file": "seq-06-choice.png",
+   "phase": "CHOICE",
+   "horizon": 326,
+   "lum": 92.2,
+   "green": {
+    "n": 5472,
+    "x": [
+     124,
+     264
+    ],
+    "y": [
+     246,
+     322
+    ]
+   },
+   "alignDelta": 1.1,
+   "alignScale": 1.0,
+   "alignOffset": [
+    0,
+    0
+   ]
+  },
+  {
+   "file": "seq-07-failed.png",
+   "phase": "FAILED",
+   "horizon": 326,
+   "lum": 91.7,
+   "green": {
+    "n": 5472,
+    "x": [
+     124,
+     264
+    ],
+    "y": [
+     246,
+     322
+    ]
+   },
+   "alignDelta": 2.6,
+   "alignScale": 1.0,
+   "alignOffset": [
+    0,
+    0
+   ]
+  }
+ ]
+}

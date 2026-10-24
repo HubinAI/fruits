@@ -349,8 +349,29 @@ export class AdvPage {
     this.buildDom();
     this.observeResize();
     this.battleView.onAssetsReady(() => this.render());
-    this.ui.load(() => this.render());
+    this.ui.load(() => {
+      // R2：场景底图就绪 ⇒ 立刻注入战斗视图（战斗与非战斗从此共用同一张图）。
+      this.syncSceneBackdrop();
+      this.render();
+    });
     this.render();
+  }
+
+  /**
+   * FRUITS-ADVENTURE-UX-COHERENCE-R2｜把 P0 场景底图同步给战斗视图。
+   *
+   * 这是「统一真实舞台」的**唯一接线点**：
+   *   · 战斗：`battleView.render()` 里由 Renderer 用同一张图铺天空区（取代程序化蓝色竞技场）；
+   *   · 非战斗：本页 `drawStage()` 调 Renderer 的同一个 `drawAdventureSceneBackdrop()`。
+   * 两边是同一份排版换算，所以「同一坐标冒充同一场景」这件事从结构上就不可能发生。
+   *
+   * 素材缺失（公网 clone / 未复制 public/adventure-ui）⇒ 不注入，Renderer 回落到程序化背景，
+   * 非战斗侧也走同一回落分支（不会出现「一边有图一边没图」）。
+   */
+  private syncSceneBackdrop(): void {
+    const img = this.ui.get('battle_bg');
+    if (img) this.battleView.setSceneBackdrop(img, img.width, img.height);
+    else this.battleView.setSceneBackdrop(null);
   }
 
   private buildDom(): void {
@@ -931,105 +952,115 @@ export class AdvPage {
       return;
     }
 
-    // ── 非战斗：仍然是**同一片荒原**（不换场景） ──
-    this.drawAdventureBackdrop(ctx, b);
+    // ── 非战斗：**同一场景**（同背景 + 同地面 + 同一辆车） ──
+    if (!this.drawAdventureBackdrop(ctx, b)) {
+      // 未注入场景图（素材缺失）：与战斗侧**同时**回落到同一深色渐变，不出现「一半有图一半没图」。
+      const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
+      g.addColorStop(0, '#2a2f3a');
+      g.addColorStop(0.62, '#3a3428');
+      g.addColorStop(1, '#241d15');
+      ctx.fillStyle = g;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
     const node = advCurrentNode(this.state, this.script);
     const pcx = b.x + b.w / 2;
 
-    // 舞台上只写一句「你现在面对什么」——细节全部交给下方叙事区，避免两处重复。
+    // 地面层（必改 1）：与战斗**同一段代码**（Renderer 的 platformOnly 分支）。
+    // 少了这一层，两边的地平线以下就会不一样 —— 实测会让战斗帧 y≥363 是平地面、
+    // 事件帧同区域仍是背景，玩家看到的就是「换了个地方」。
+    const horizonY = b.y + b.h * 0.62;
+    this.battleView.drawSceneGround(ctx, b.x, b.y, b.w, b.h, horizonY);
+
+    // ── 待机战车（必改 1 / 验收 3）：非战斗阶段也要有清晰的车 ──
+    // 用**正式车辆美术**（同一批 PNG，与战斗同一套），不是占位方块。
+    // 位置：车轮压在地平线上，车头朝右（与战斗同朝向）。
+    this.drawIdleVehicle(ctx, pcx, horizonY);
+
+    // 舞台文字：贴上下边缘，绝不与车重叠；只保留**一句**（细节交给叙事区，避免两处重复）
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    if (node.kind === 'BATTLE' || node.kind === 'FINAL') {
-      const label = this.battleEnemyLabel(node.encounterId);
-      ctx.fillStyle = COLORS.eventAccent;
-      ctx.font = `700 20px ${FONT_STACK}`;
-      ctx.fillText(`前方：${label}`, pcx, b.y + b.h / 2 - 16);
-      ctx.fillStyle = COLORS.textDim;
-      ctx.font = `400 13px ${FONT_STACK}`;
-      ctx.fillText(node.kind === 'FINAL' ? '最后一位对手' : '引擎声由远及近', pcx, b.y + b.h / 2 + 14);
-    } else if (node.kind === 'EVENT') {
-      ctx.fillStyle = COLORS.textTitle;
-      ctx.font = `700 19px ${FONT_STACK}`;
-      ctx.fillText(node.title, pcx, b.y + b.h / 2 - 10);
-      ctx.fillStyle = COLORS.textDim;
-      ctx.font = `400 13px ${FONT_STACK}`;
-      ctx.fillText('车停在路边 · 需要你做个决定', pcx, b.y + b.h / 2 + 18);
-    } else if (node.kind === 'BUILD') {
-      ctx.fillStyle = COLORS.textTitle;
-      ctx.font = `700 19px ${FONT_STACK}`;
-      ctx.fillText('你停下来整理装备', pcx, b.y + b.h / 2 - 10);
-      ctx.fillStyle = COLORS.textDim;
-      ctx.font = `400 13px ${FONT_STACK}`;
-      ctx.fillText('这一次改装会在接下来的战斗里生效', pcx, b.y + b.h / 2 + 18);
-    } else if (node.kind === 'BANNER') {
-      ctx.fillStyle = COLORS.textTitle;
-      ctx.font = `700 19px ${FONT_STACK}`;
-      ctx.fillText('进入新的阶段', pcx, b.y + b.h / 2 - 10);
-      ctx.fillStyle = COLORS.textDim;
-      ctx.font = `400 13px ${FONT_STACK}`;
-      ctx.fillText('前路更凶险', pcx, b.y + b.h / 2 + 18);
-    } else {
-      ctx.fillStyle = COLORS.textTitle;
-      ctx.font = `700 19px ${FONT_STACK}`;
-      ctx.fillText('荒原路远', pcx, b.y + b.h / 2 - 10);
-      ctx.fillStyle = COLORS.textDim;
-      ctx.font = `400 13px ${FONT_STACK}`;
-      ctx.fillText('准备好就出发', pcx, b.y + b.h / 2 + 18);
-    }
+    const title = (() => {
+      if (node.kind === 'BATTLE' || node.kind === 'FINAL') return `前方：${this.battleEnemyLabel(node.encounterId)}`;
+      if (node.kind === 'EVENT') return node.title;
+      if (node.kind === 'BUILD') return '停下来整理装备';
+      if (node.kind === 'BANNER') return '进入新的阶段';
+      return '荒原路远';
+    })();
+    // 标题压在上缘 scrim 里（对比度足够，且不压车）
+    const titleY = b.y + 26;
+    ctx.font = `700 18px ${FONT_STACK}`;
+    const tw = Math.min(b.w - 32, ctx.measureText(title).width + 28);
+    this.roundRectPath(ctx, pcx - tw / 2, titleY - 15, tw, 30, 15);
+    ctx.fillStyle = 'rgba(12,16,24,0.62)';
+    ctx.fill();
+    ctx.fillStyle = COLORS.textTitle;
+    ctx.fillText(this.fitText(ctx, title, tw - 24), pcx, titleY);
   }
 
   /**
-   * 非战斗阶段的冒险场景底（与战斗同气质：同一片暖色荒原 + 地平线 + 路面）。
+   * FRUITS-ADVENTURE-UX-COHERENCE-R2｜非战斗阶段的舞台底 —— **与战斗同一套代码、同一张素材**。
    *
-   * 为什么自绘而不是直接用战斗渲染器：非战斗时没有 `RunBattleRuntime`，正式渲染器无从取景；
-   * 但**视觉语言必须与战斗一致**（Queue 必改 3：不得再用程序化黑底冒充完成）。这里按
-   * 战斗舞台的色调（暖棕地面 / 冷蓝天光）铺一层同等明度的荒原，并叠一条地面上线，
-   * 与战斗画面的地平线高度对齐，使「战斗 ↔ 事件」切换时玩家看到的是**同一个地方**。
+   * R1 的失败点在这里：战斗画程序化蓝色竞技场，非战斗则在本页自绘「棕色渐变山脉」，
+   * 于是同一趟冒险里存在**两套空间**（真人预验收第一条失败原因）。R1 只是把两者色温调近，
+   * 属于「靠同一坐标冒充同一场景」——本轮明令禁止。
+   *
+   * 现在的机制：本方法不再自绘任何背景，而是调用 `battleView.drawSceneBackdrop()` →
+   * Renderer 的 `drawAdventureSceneBackdrop()`，即战斗天空区用的**同一个函数、同一张 P0 底图**。
+   * 所以「战斗 ↔ 事件 ↔ 强化 ↔ 战报」之间切换时，背景像素来自同一张图的同一次换算。
+   *
+   * 未注入底图时返回 false，调用方走与战斗一致的回落（深色渐变），保证两边同时降级。
    */
-  private drawAdventureBackdrop(ctx: CanvasRenderingContext2D, b: Rect): void {
-    const sky = ctx.createLinearGradient(0, b.y, 0, b.y + b.h * 0.62);
-    sky.addColorStop(0, '#2d3f57');
-    sky.addColorStop(0.55, '#425050');
-    sky.addColorStop(1, '#6b6250');
-    ctx.fillStyle = sky;
-    ctx.fillRect(b.x, b.y, b.w, b.h * 0.62);
-    // 地平线（与战斗画面同一条地面线位置：约 62% 处）
-    const gy = b.y + b.h * 0.62;
-    const ground = ctx.createLinearGradient(0, gy, 0, b.y + b.h);
-    ground.addColorStop(0, '#5a4a38');
-    ground.addColorStop(1, '#2e2419');
-    ctx.fillStyle = ground;
-    ctx.fillRect(b.x, gy, b.w, b.y + b.h - gy);
-    // 路面
-    ctx.fillStyle = 'rgba(20,16,12,0.55)';
-    ctx.fillRect(b.x, gy + (b.h * 0.38) * 0.52, b.w, 26);
-    // 远景山脊（两层剪影，制造纵深）
-    const ridge = (baseY: number, h: number, alpha: string, seed: number): void => {
-      ctx.fillStyle = alpha;
-      ctx.beginPath();
-      ctx.moveTo(b.x, baseY);
-      for (let x = 0; x <= b.w; x += 18) {
-        const t = (x / b.w) * 6.28 * 1.4 + seed;
-        ctx.lineTo(b.x + x, baseY - h * (0.5 + 0.5 * Math.sin(t)) - h * 0.2 * Math.sin(t * 2.7));
-      }
-      ctx.lineTo(b.x + b.w, baseY);
-      ctx.closePath();
-      ctx.fill();
-    };
-    ridge(gy + 2, 44, 'rgba(30,40,56,0.55)', 0.7);
-    ridge(gy + 2, 26, 'rgba(22,28,40,0.7)', 2.1);
-    // 舞台上下压暗（与战斗画面同一套 scrim，保证叠加的浅色卡片与文字可读）
-    const topScrim = ctx.createLinearGradient(0, b.y, 0, b.y + 84);
-    topScrim.addColorStop(0, 'rgba(6,9,14,0.55)');
-    topScrim.addColorStop(1, 'rgba(6,9,14,0)');
-    ctx.fillStyle = topScrim;
-    ctx.fillRect(b.x, b.y, b.w, 84);
-    const botScrim = ctx.createLinearGradient(0, b.y + b.h, 0, b.y + b.h - 84);
-    botScrim.addColorStop(0, 'rgba(6,9,14,0.6)');
-    botScrim.addColorStop(1, 'rgba(6,9,14,0)');
-    ctx.fillStyle = botScrim;
-    ctx.fillRect(b.x, b.y + b.h - 84, b.w, 84);
+  private drawAdventureBackdrop(ctx: CanvasRenderingContext2D, b: Rect): boolean {
+    return this.battleView.drawSceneBackdrop(ctx, b.x, b.y, b.w, b.h);
   }
+
+  /**
+   * FRUITS-ADVENTURE-UX-COHERENCE-R2｜非战斗阶段的**待机战车**（用正式车辆 PNG 拼出）。
+   *
+   * 组成与战斗一致：车体（body_watermelon）+ 主炮（part_cannon），朝向同为向右。
+   * 位置参数 `groundY` 是地平线（车轮落在它上面）；本方法只画，不改任何状态。
+   *
+   * 为什么不用 Renderer：非战斗时没有 `RunBattleRuntime`，正式渲染器无从取景
+   * （它按 orchestrator 快照画车）。这里直接取**同一批**已加载 PNG，
+   * 因此「战斗中的车」与「事件中的车」是同一份美术资源，不是两套画法。
+   */
+  private drawIdleVehicle(ctx: CanvasRenderingContext2D, cx: number, groundY: number): void {
+    const body = this.battleView.vehicleImage('body_watermelon');
+    const cannon = this.battleView.vehicleImage('part_cannon');
+    if (!body || body.width <= 0) return; // 素材缺失：不画占位，交由上方背景承担
+
+    // 车体：目标宽 150px（与战斗远景中的观感接近），按原比例
+    const bodyW = 150;
+    const bodyH = (body.height / body.width) * bodyW;
+    const bodyX = cx - bodyW / 2;
+    const bodyY = groundY - bodyH;
+
+    // 车底接地阴影（让车「站」在地上，而不是浮着）
+    const shadow = ctx.createRadialGradient(cx, groundY + 2, 4, cx, groundY + 2, bodyW * 0.55);
+    shadow.addColorStop(0, 'rgba(0,0,0,0.42)');
+    shadow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = shadow;
+    ctx.save();
+    ctx.translate(cx, groundY + 2);
+    ctx.scale(1, 0.22);
+    ctx.beginPath();
+    ctx.arc(0, 0, bodyW * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 车体
+    ctx.drawImage(body as unknown as CanvasImageSource, bodyX, bodyY, bodyW, bodyH);
+
+    // 主炮：贴在车体右上（炮口朝右），长度按车体宽度的 62%
+    if (cannon && cannon.width > 0) {
+      const gunW = bodyW * 0.62;
+      const gunH = (cannon.height / cannon.width) * gunW;
+      const gunX = bodyX + bodyW * 0.34;
+      const gunY = bodyY - gunH * 0.52;
+      ctx.drawImage(cannon as unknown as CanvasImageSource, gunX, gunY, gunW, gunH);
+    }
+  }
+
 
   private battleEnemyLabel(id: string): string {
     const map: Record<string, string> = {
@@ -1690,7 +1721,27 @@ export class AdvPage {
     }
   }
 
-  /** 单张选择卡（R2：放大标题/核心收益，明确区分收益与代价，按下复用真实 tab_selected 选中态）。 */
+  /**
+   * 单张选项卡（FRUITS-ADVENTURE-UX-COHERENCE-R2 重排版式）。
+   *
+   * 真人预验收的失败点是「文字截断 / 卡片挤压 / 信息重叠」。旧版把「名称 + 收益 + 代价」
+   * 全塞在**同一行**里，逼得字号只有 13/12px、收益与代价还要左右抢宽度 ——
+   * 于是即使没触发省略号，观感也是挤压的。光靠 `fitText` 截断掩盖不了这件事。
+   *
+   * 新版改为**三行结构化**（每行各司其职，互不抢宽度）：
+   *
+   *   ┌──────────────────────────────────────────────┐
+   *   │ [图标]  名称                          （19px）│
+   *   │         收益  恢复耐久                  （14px）│
+   *   │         代价  ——                        （14px）│
+   *   └──────────────────────────────────────────────┘
+   *
+   * 关键约束（由 `_e2e_text_fit_r2.cjs` 真实 measureText 守着）：
+   *   · 名称独占一行，可用宽度 = 卡片宽 − 图标列 − 内边距（@390 约 276px）；
+   *   · 收益/代价各占一行，标签与内容左对齐，**不再左右分栏抢宽**；
+   *   · 信息行字号 14px、名称 19px —— 信息不靠缩字号塞进去；
+   *   · 仍超宽才省略，且 E2E 断言「0 截断」。
+   */
   private drawChoiceCard(
     ctx: CanvasRenderingContext2D,
     r: Rect,
@@ -1705,14 +1756,13 @@ export class AdvPage {
     },
   ): void {
     const pressed = this.pressCard === index;
-    // 卡片底：浅色真实底板（与叙事区同一张 P0 文本卡，九宫格；缺失则浅色圆角降级）。
-    // ⚠️ 决策卡住在**浅色**叙事区里，因此文字一律用深色（对比度 ≥ 7:1，杜绝「浅底浅字」）。
+
+    // 卡片底：浅色真实底板（九宫格；缺失则浅色圆角降级），深色文字保证对比度
     if (!this.drawNineSliceId(ctx, 'text_card_bg', r.x, r.y, r.w, r.h)) {
       ctx.fillStyle = '#f3ecd8';
       this.roundRectPath(ctx, r.x, r.y, r.w, r.h, 12);
       ctx.fill();
     }
-    // 选中态：按下瞬间叠一层暖色高光（不依赖 tab_selected 的深色素材，避免浅底变脏）
     if (pressed) {
       ctx.save();
       this.roundRectPath(ctx, r.x + 2, r.y + 2, r.w - 4, r.h - 4, 10);
@@ -1721,17 +1771,16 @@ export class AdvPage {
       ctx.fillRect(r.x, r.y, r.w, r.h);
       ctx.restore();
     }
-    // 边框（押下加粗；否则用主题色细边，保证三张卡有明确的"可点"暗示）
     this.roundRectPath(ctx, r.x + 1.5, r.y + 1.5, r.w - 3, r.h - 3, 11);
     ctx.lineWidth = pressed ? 3 : 1.5;
     ctx.strokeStyle = pressed ? '#7a4a12' : withAlpha(text.accent, 0.55);
     ctx.stroke();
 
-    const tall = r.h >= 78;
-    const iconSize = tall ? 46 : 36;
-    const iconX = r.x + 14;
+    // ---- 左侧图标（固定 40px 列，不随文字长度变化 ⇒ 多张卡纵向对齐） ----
+    const iconSize = 40;
+    const padX = 14;
+    const iconX = r.x + padX;
     const iconY = r.y + (r.h - iconSize) / 2;
-    // 图标底（主题色半透明圆角，浅底上仍可辨识）
     this.roundRectPath(ctx, iconX, iconY, iconSize, iconSize, 10);
     ctx.fillStyle = withAlpha(text.accent, 0.14);
     ctx.fill();
@@ -1739,7 +1788,7 @@ export class AdvPage {
     ctx.strokeStyle = withAlpha(text.accent, 0.5);
     ctx.stroke();
     if (this.ui.ready(text.icon)) {
-      drawContain(ctx, this.ui.get(text.icon)!, iconX + 6, iconY + 6, iconSize - 12, iconSize - 12);
+      drawContain(ctx, this.ui.get(text.icon)!, iconX + 5, iconY + 5, iconSize - 10, iconSize - 10);
     } else {
       ctx.fillStyle = withAlpha(text.accent, 0.45);
       ctx.beginPath();
@@ -1747,42 +1796,53 @@ export class AdvPage {
       ctx.fill();
     }
 
-    // 文本区（右列）：名称 + 收益 / 代价（单行并列，节省纵向空间以容纳 3 张卡）
+    // ---- 文本列：名称 / 收益 / 代价，三行左对齐 ----
     const tx = iconX + iconSize + 12;
-    const rightLimit = r.x + r.w - 14;
+    const rightLimit = r.x + r.w - padX;
+    const textW = rightLimit - tx;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    const nameY = tall ? r.y + r.h * 0.34 : r.y + r.h * 0.5;
-    ctx.fillStyle = '#2a2118';
-    ctx.font = `700 ${tall ? 17 : 16}px ${FONT_STACK}`;
-    ctx.fillText(this.fitText(ctx, text.label, rightLimit - tx), tx, nameY);
 
-    if (tall) {
-      // 收益 / 代价同一行：`收益 xxx  代价 ——`
-      const costY = r.y + r.h * 0.68;
+    const hasCaveat = !!text.caveat;
+    // 纵向节奏：有 caveat 时三行整体上移，把 caveat 挂在代价行右侧（不新增行、不重叠）
+    const nameY = r.y + (hasCaveat ? 26 : r.h * 0.3);
+    const gainY = r.y + (hasCaveat ? 50 : r.h * 0.56);
+    const costY = r.y + (hasCaveat ? 72 : r.h * 0.82);
+
+    // 名称（最大字号，独占一行）
+    ctx.fillStyle = '#2a2118';
+    ctx.font = `700 19px ${FONT_STACK}`;
+    ctx.fillText(this.fitText(ctx, text.label, textW), tx, nameY);
+
+    // 收益行：固定 34px 标签列 + 内容
+    const labelCol = 34;
+    ctx.font = `700 12px ${FONT_STACK}`;
+    ctx.fillStyle = '#8a7a62';
+    ctx.fillText('收益', tx, gainY);
+    ctx.font = `600 14px ${FONT_STACK}`;
+    ctx.fillStyle = '#1f6b40';
+    ctx.fillText(this.fitText(ctx, text.gain, textW - labelCol), tx + labelCol, gainY);
+
+    // 代价行：同样固定标签列，与收益行左对齐（不再左右分栏抢宽）
+    ctx.font = `700 12px ${FONT_STACK}`;
+    ctx.fillStyle = '#8a7a62';
+    ctx.fillText('代价', tx, costY);
+    ctx.font = `600 14px ${FONT_STACK}`;
+    ctx.fillStyle = text.cost === '—' ? '#8a7a62' : '#a8501f';
+    const shownCost = this.fitText(ctx, text.cost, textW - labelCol);
+    ctx.fillText(shownCost, tx + labelCol, costY);
+
+    // caveat（满耐久等特例）：挂在代价行右侧；若空间不够则**不画**（绝不压字）
+    if (hasCaveat) {
       ctx.font = `500 11px ${FONT_STACK}`;
-      ctx.fillStyle = '#8a7a62';
-      ctx.fillText('收益', tx, costY);
-      const gainX = tx + 28;
-      ctx.fillStyle = '#1f6b40';
-      ctx.font = `600 13px ${FONT_STACK}`;
-      ctx.fillText(this.fitText(ctx, text.gain, rightLimit - gainX - 64), gainX, costY);
-      const costLabelX = rightLimit - 62;
-      ctx.fillStyle = '#8a7a62';
-      ctx.font = `500 11px ${FONT_STACK}`;
-      ctx.fillText('代价', costLabelX, costY);
-      ctx.fillStyle = text.cost === '—' ? '#8a7a62' : '#a8501f';
-      ctx.font = `600 12px ${FONT_STACK}`;
-      ctx.fillText(this.fitText(ctx, text.cost, rightLimit - (costLabelX + 28)), costLabelX + 28, costY);
-    }
-    // 唯一必要的状态提示（仅满耐久等特例）
-    if (tall && text.caveat) {
-      ctx.fillStyle = '#a8501f';
-      ctx.font = `400 11px ${FONT_STACK}`;
-      ctx.fillText(text.caveat, tx, r.y + r.h * 0.86);
+      const cw = ctx.measureText(text.caveat!).width;
+      const cx = tx + labelCol + ctx.measureText(shownCost).width + 10;
+      if (cx + cw <= rightLimit) {
+        ctx.fillStyle = '#a8501f';
+        ctx.fillText(text.caveat!, cx, costY);
+      }
     }
   }
-
   /** 按可用宽度裁剪文本（超宽加省略号）——R3：杜绝任何文字溢出。 */
   private fitText(ctx: CanvasRenderingContext2D, s: string, maxWidth: number): string {
     if (maxWidth <= 0) return '';
@@ -1970,6 +2030,13 @@ export class AdvPage {
        * E2E 用它区分「主操作」与「自动推进」：`needsPlayer=false` 时不得存在可点主按钮。
        */
       continuity: {
+        /**
+         * R2｜「统一真实舞台」是否真的生效（只读）：
+         *   sceneBackdrop = 战斗视图是否已注入 P0 场景底图（false ⇒ 仍在用程序化竞技场）
+         *   sceneReady    = battle_bg 素材是否已加载
+         */
+        sceneBackdrop: this.battleView.hasSceneBackdrop(),
+        sceneReady: this.ui.ready('battle_bg'),
         needsPlayer: advNeedsPlayer(this.state),
         autoPhase: this.autoAdvanceDelayMs() > 0,
         autoRemaining: this.autoRemainingFraction(),
@@ -2207,9 +2274,14 @@ export class AdvPage {
    */
   diagnose(): unknown {
     const node = advCurrentNode(this.state, this.script);
+    // R2：把**绘制时真正使用的文本**一并报出（label / 收益 / 代价）。
+    // 这样「文字是否被截断」可以被真实测量（页面内 measureText + 同一字体栈），
+    // 而不是靠几何推断 —— 验收 2 明确要求「不能只依靠几何审计判定通过」。
+    const fullHp = advCarriedPlayerHp(this.state, this.ctx2) >= this.ctx2.playerHpMax;
     if (advEventChoiceOpen(this.state) && node.kind === 'EVENT') {
       return {
         kind: 'event',
+        title: node.title,
         options: node.options.map((o) => {
           const eff = node.outcomes[o.id];
           const candidates = eff && (eff.kind === 'buff' || eff.kind === 'trade') ? [...eff.candidates] : null;
@@ -2219,6 +2291,14 @@ export class AdvPage {
             effect: eff?.kind ?? 'none',
             candidates,
             freshCount: fresh ? fresh.length : null,
+            /** 卡面标签（= advOverlayCards 的 label，绘制直接用这个） */
+            label: o.label,
+            /** 卡面「收益」行（绘制直接调 effectGain） */
+            gain: this.effectGain(eff),
+            /** 卡面「代价」行 */
+            cost: this.effectCost(eff),
+            /** 满耐久等特例提示 */
+            caveat: this.effectCaveat(eff, fullHp),
           };
         }),
       };
@@ -2226,7 +2306,14 @@ export class AdvPage {
     if (advChoiceOpen(this.state) && node.kind === 'BUILD') {
       return {
         kind: 'build',
-        options: advOverlayCards(this.state, this.script, this.ctx2).map((c) => ({ id: c.id, effect: 'build' })),
+        title: '选择一项改装',
+        options: advOverlayCards(this.state, this.script, this.ctx2).map((c) => ({
+          id: c.id,
+          effect: 'build',
+          label: c.label,
+          gain: c.note,
+          cost: '—',
+        })),
       };
     }
     return { kind: 'none', options: [] };

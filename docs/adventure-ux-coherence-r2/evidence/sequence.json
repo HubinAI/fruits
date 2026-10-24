@@ -1,0 +1,324 @@
+{
+ "seed": "scan-4",
+ "generatedAt": "2026-10-24T06:19:58.547Z",
+ "viewport": {
+  "w": 390,
+  "h": 844,
+  "dpr": 1
+ },
+ "sequence": [
+  {
+   "phase": "EVENT_CHOICE",
+   "day": 2,
+   "file": "seq-01-event_choice.png",
+   "at": 1792822710775,
+   "needsPlayer": true
+  },
+  {
+   "phase": "EVENT_DONE",
+   "day": 2,
+   "file": "seq-02-event_done.png",
+   "at": 1792822711832,
+   "needsPlayer": false
+  },
+  {
+   "phase": "EVENT",
+   "day": 3,
+   "file": "seq-03-event.png",
+   "at": 1792822712878,
+   "needsPlayer": false
+  },
+  {
+   "phase": "BATTLE",
+   "day": 3,
+   "file": "seq-04-battle.png",
+   "at": 1792822714407,
+   "needsPlayer": false
+  },
+  {
+   "phase": "RESULT",
+   "day": 3,
+   "file": "seq-05-result.png",
+   "at": 1792822723375,
+   "needsPlayer": false
+  },
+  {
+   "phase": "CHOICE",
+   "day": 7,
+   "file": "seq-06-choice.png",
+   "at": 1792822738672,
+   "needsPlayer": true
+  },
+  {
+   "phase": "FAILED",
+   "day": 18,
+   "file": "seq-07-failed.png",
+   "at": 1792822797963
+  }
+ ],
+ "counters": {
+  "actionClicks": 9,
+  "choiceClicks": 8,
+  "infoWaits": 17,
+  "pageErrors": []
+ },
+ "cards": [
+  {
+   "kind": "event",
+   "title": "一辆抛锚的废车",
+   "cardW": 362,
+   "cardH": 117,
+   "rows": [
+    {
+     "id": "safe",
+     "label": "安全离开",
+     "gain": "恢复耐久",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 56,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    },
+    {
+     "id": "scavenge",
+     "label": "冒险搜刮",
+     "gain": "—",
+     "cost": "损失耐久",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 14,
+     "costW": 56,
+     "gainAvail": 248,
+     "clipped": false
+    }
+   ]
+  },
+  {
+   "kind": "event",
+   "title": "路边有一只神秘货箱",
+   "cardW": 362,
+   "cardH": 117,
+   "rows": [
+    {
+     "id": "open",
+     "label": "撬开货箱",
+     "gain": "恢复耐久",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 56,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    },
+    {
+     "id": "leave",
+     "label": "绕道离开",
+     "gain": "推进剧情",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 56,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    }
+   ]
+  },
+  {
+   "kind": "build",
+   "title": "选择一项改装",
+   "cardW": 362,
+   "cardH": 117,
+   "rows": [
+    {
+     "id": "heavyShell",
+     "label": "重型弹头",
+     "gain": "炮弹更重，撞击和后坐都更明显",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 196,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    },
+    {
+     "id": "twinCannon",
+     "label": "双联炮",
+     "gain": "一次开火连续打出两发炮弹",
+     "cost": "—",
+     "labelW": 57,
+     "textW": 282,
+     "gainW": 168,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    }
+   ]
+  },
+  {
+   "kind": "event",
+   "title": "路遇一支流浪商队",
+   "cardW": 362,
+   "cardH": 117,
+   "rows": [
+    {
+     "id": "trade",
+     "label": "用耐久换改装",
+     "gain": "获得临时强化",
+     "cost": "消耗耐久",
+     "labelW": 114,
+     "textW": 282,
+     "gainW": 84,
+     "costW": 56,
+     "gainAvail": 248,
+     "clipped": false
+    },
+    {
+     "id": "ignore",
+     "label": "默默离开",
+     "gain": "推进剧情",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 56,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    }
+   ]
+  },
+  {
+   "kind": "event",
+   "title": "路边有一只神秘货箱",
+   "cardW": 362,
+   "cardH": 117,
+   "rows": [
+    {
+     "id": "open",
+     "label": "撬开货箱",
+     "gain": "恢复耐久",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 56,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    },
+    {
+     "id": "leave",
+     "label": "绕道离开",
+     "gain": "推进剧情",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 56,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    }
+   ]
+  },
+  {
+   "kind": "build",
+   "title": "选择一项改装",
+   "cardW": 362,
+   "cardH": 117,
+   "rows": [
+    {
+     "id": "rateUp",
+     "label": "攻击加快",
+     "gain": "两次攻击之间的间隔变短",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 154,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    },
+    {
+     "id": "emergencyRepair",
+     "label": "紧急维修",
+     "gain": "立刻修回一部分车体耐久",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 154,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    }
+   ]
+  },
+  {
+   "kind": "event",
+   "title": "一辆抛锚的废车",
+   "cardW": 362,
+   "cardH": 117,
+   "rows": [
+    {
+     "id": "safe",
+     "label": "安全离开",
+     "gain": "恢复耐久",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 56,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    },
+    {
+     "id": "scavenge",
+     "label": "冒险搜刮",
+     "gain": "—",
+     "cost": "损失耐久",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 14,
+     "costW": 56,
+     "gainAvail": 248,
+     "clipped": false
+    }
+   ]
+  },
+  {
+   "kind": "event",
+   "title": "路边有一只神秘货箱",
+   "cardW": 362,
+   "cardH": 117,
+   "rows": [
+    {
+     "id": "open",
+     "label": "撬开货箱",
+     "gain": "恢复耐久",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 56,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    },
+    {
+     "id": "leave",
+     "label": "绕道离开",
+     "gain": "推进剧情",
+     "cost": "—",
+     "labelW": 76,
+     "textW": 282,
+     "gainW": 56,
+     "costW": 14,
+     "gainAvail": 248,
+     "clipped": false
+    }
+   ]
+  }
+ ],
+ "clippedCount": 0
+}

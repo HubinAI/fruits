@@ -149,42 +149,21 @@ const ADV_CONVOY_DAMAGE_FRACTION = 0.12;
 export const ADVENTURE_EVENT_KINDS: readonly AdventureEventKind[] = ['crate', 'wreck', 'rest', 'convoy', 'altar'];
 
 /**
- * 事件「临时强化」候选池。
+ * 事件「临时强化」候选池（R3，验收③）：**本轮（R2）已恢复为 R1 之前的口径**。
+ *   只取**路线无关**的正式 Run Build（damageUp / rateUp / emergencyRepair），
+ *   保证对任意演示武器（Cannon 局）都真实生效、绝不静默变成别的奖励；
+ *   且该池与 BUILD 节点的 layer1/layer2 池互不相交 ⇒ 不会与玩家已选强化重复 ⇒ 无「无效强化」。
+ *   每个事件在生成时独立抽取；同一局内已抽过的强化会从后续抽取中排除（保证多样且不重复）。
  *
- * FRUITS-ADVENTURE-UX-CONTINUITY-R1 修订（**只改事件奖励池，不改任何数值/物理/概率**）：
+ * ⚠️ FRUITS-ADVENTURE-UX-COHERENCE-R2 恢复说明（必改 4）：
+ *   R1 曾把 twinCannon / tripleLoad / heavyShell / kineticBurst 并入此池，理由是「只靠 3 项
+ *   通用池结构上不可能通关」。那次改动**超出 UI 授权范围**，本轮按 Queue 要求**原样恢复**：
+ *   池内容、候选顺序、抽取结构全部回到 R1 之前（`RUN_GENERIC_CHOICE_POOL`）。
  *
- * 原池 = `RUN_GENERIC_CHOICE_POOL`（damageUp / rateUp / emergencyRepair，共 3 项）。
- * R1 在真实浏览器里用「优先拿强化」的正常玩家策略跑同一 seed 时暴露了真实问题：
- *   9 个事件槽 × 3 项候选（且受「已拥有则跳过」约束）⇒ 整局最多拿到 3 种强化，
- *   而第 6 场成长门槛敌（ExtendedBurnSaw）与终点（ExtendedHeavyContact）的 headless 实测是：
- *
- *     build                                  BurnSaw        HeavyContact
- *     []                                     B（615 步归零） —
- *     damageUp+rateUp+heavyShell             B（625 步归零） —
- *     twinCannon+damageUp+rateUp             A（剩 443）     B（391 步归零）
- *     twinCannon+damageUp+rateUp+kineticBurst A（剩 1012）   **A（剩 352）**
- *     tripleLoad+damageUp+rateUp+heavyShell   A（剩 364）     B（703 步归零）
- *
- *   ⇒ 只靠通用池**结构上就不可能通关**：通关需要「炮台型强化（twinCannon）+ 动能爆发」，
- *     而这两个强化原本只出现在 BUILD 节点（layer1/layer2），一旦 BUILD 节点因池空被跳过
- *     （layer2 需要先有 layer1 主路线这条既有设计），成长链就断了。
- *
- * 修订方式（最小、可解释、不改机制）：把**炮台与弹药类**正式 Run Build 也纳入事件池 ——
- *   twinCannon（双联炮）/ tripleLoad（三连装填）/ heavyShell（重型弹头）/ kineticBurst（动能爆发）。
- *   它们同样是「路线无关」的正式强化（对演示 Cannon 局真实生效），与 layer1/layer2 池有交集，
- *   但 `applyEffect` 的「取第一个未拥有候选」已保证**不重复发放**（拥有即跳过）。
- *   ⚠️ 不改：抽取概率结构（仍是种子洗牌的候选序）、发放数量（仍是一次一项）、耐久取舍、战斗数值。
- *
- * 效果核对（R1 E2E，scan-4，正常速度真实点击）：同一策略下玩家能拿到 `twinCannon` 等关键强化，
- *   第 6 场由「必败」变为可赢，整局可通关（详见 docs/adventure-ux-continuity-r1/REPORT.md §4）。
+ *   恢复后暴露的「原规则难以通关」是**独立玩法问题**，已记录为待决策 Bug，
+ *   不再通过暗改随机奖励来解决视觉验收（见 docs/adventure-ux-coherence-r2/REPORT.md §5）。
  */
-export const EVENT_BUFF_POOL: readonly RunBuildId[] = [
-  ...RUN_GENERIC_CHOICE_POOL,
-  'twinCannon',
-  'tripleLoad',
-  'heavyShell',
-  'kineticBurst',
-];
+export const EVENT_BUFF_POOL: readonly RunBuildId[] = [...RUN_GENERIC_CHOICE_POOL];
 
 /** 事件视觉与文案（仅展示/选项；因果在生成时掷定）。五种事件各有独立主题（UI 层据此一眼区分）。 */
 const EVENT_CONTENT: Record<AdventureEventKind, { title: string; beat: readonly string[]; options: readonly AdventureOption[] }> = {

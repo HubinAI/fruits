@@ -346,6 +346,20 @@ export class RunBattleView {
     return this.failed.size === 0 && this.ready >= Object.keys(RUN_VISUAL_ASSETS).length;
   }
 
+  /**
+   * FRUITS-ADVENTURE-UX-COHERENCE-R2｜取**正式车辆美术**的原图（只读）。
+   *
+   * 用途：非战斗阶段没有 `RunBattleRuntime`，Renderer 不会画车；但 Queue 要求
+   * 「探索 / 事件 / 强化 / 战报时保留玩家战车的可辨识形象」。宿主用同一批正式 PNG
+   * 画一个待机战车（见 advPage.drawIdleVehicle），这样**非战斗的车和战斗的车是同一套素材**，
+   * 不会出现「战斗是真车、事件是占位方块」。
+   *
+   * @returns visualId 对应的已加载图；未加载/失败返回 null（调用方回落，不伪造）
+   */
+  vehicleImage(visualId: string): { readonly width: number; readonly height: number } | null {
+    return this.registry.getImage(visualId);
+  }
+
   /** 相机实时状态（离屏画布域）；舞台带内坐标需减去 cropX/cropY。 */
   viewTransform(): RunBattleXform {
     const t = this.renderer.transform;
@@ -374,6 +388,49 @@ export class RunBattleView {
    *   像素与几何上都逐帧完全一致（正式 `applyBattleFollow` 的 offsetX 阻尼是渐近的，
    *   若继续逐帧 render，会把「冻结的战场」缓慢挪动）。视口/DPR 变化仍强制重画。
    */
+  /**
+   * FRUITS-ADVENTURE-UX-COHERENCE-R2｜注入**冒险场景底图**（战斗与非战斗共用的唯一场景）。
+   *
+   * 为什么入口放在这一层：战斗画面的绘制发生在 `renderer.render()` 里（离屏），
+   * 宿主无法从外部改它的背景；但宿主**能**拿到同一张 P0 场景图。
+   * 于是把图注入 Renderer，战斗用它、非战斗也用同一个 `drawAdventureSceneBackdrop()`
+   * ⇒ 真的是「同一套场景代码 + 同一张素材」，而不是在两个地方各画一套（必改 1 的禁令）。
+   *
+   * @param img 已解码完成的图；null = 清除（回到程序化竞技场，普通 Run 与其它 Lab 页零回归）
+   */
+  setSceneBackdrop(img: CanvasImageSource | null, w?: number, h?: number): void {
+    this.renderer.setSceneBackdrop(img, w, h);
+    // 注入后必须重绘（否则冻结帧仍是旧背景）；清掉冻结帧以便下一帧立即反映。
+    this.frozenFrame = false;
+  }
+
+  /** 本视图是否已在用注入的场景底图（探针用）。 */
+  hasSceneBackdrop(): boolean {
+    return this.renderer.hasSceneBackdrop();
+  }
+
+  /**
+   * 在**页面画布**上绘制冒险场景底（非战斗阶段用）。
+   *
+   * 与战斗天空区走的是 Renderer 的同一个 `drawAdventureSceneBackdrop()`
+   * ⇒ 同函数、同素材、同换算。返回 false 表示未注入底图（调用方走与战斗一致的回落）。
+   */
+  drawSceneBackdrop(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): boolean {
+    return this.renderer.drawAdventureSceneBackdrop(ctx, x, y, w, h);
+  }
+
+  /**
+   * 在**页面画布**上绘制场景地面层（非战斗阶段用；与战斗同一段代码）。
+   *
+   * 战斗侧的地面是 `drawBattleArena({ platformOnly: true })`；这里调用同一个分支，
+   * 因此两边的地平线位置、地面色、台肩结构完全一致。
+   *
+   * @param horizonY 地平线在页面画布上的绝对 y
+   */
+  drawSceneGround(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, horizonY: number): void {
+    this.renderer.drawAdventureSceneGround(ctx, x, y, w, h, horizonY);
+  }
+
   render(runtime: RunBattleRuntime): void {
     const resized = this.applySize();
     if (this.boundTo !== runtime) {

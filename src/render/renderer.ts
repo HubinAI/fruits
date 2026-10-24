@@ -412,6 +412,25 @@ export class Renderer {
   /** F-BATTLE-PRESENTATION-R2：正式战斗（fighting/ended）竞技场背景开关（背景层<车辆层<UI层）；
    *  与 homeBackdrop / prebattleBackdrop 互斥；优先级 battle > prebattle > home。 */
   private battleBackdrop = false;
+  /**
+   * FRUITS-ADVENTURE-UX-COHERENCE-R2｜**可注入的冒险场景底图**（单一场景底，取代程序化竞技场）。
+   *
+   * 问题（R1 真人预验收失败）：战斗时本文件用 `drawBattleArena()` 画蓝色竞技场（蓝天空 + 看台 +
+   * 聚光灯），而冒险页的非战斗阶段又在宿主里自绘「棕色渐变山脉」⇒ 同一趟冒险里存在**两套空间**，
+   * 切换时空间割裂。靠「两条绘制路径调成同一个坐标」解决不了这件事（必改 1 明文禁止）。
+   *
+   * 机制：宿主机把**同一张**场景底图注入这里；`battleBackdrop` 为真且底图已就绪时，
+   * 本方法在 `[0, groundY]` 区域绘制该底图（等比铺满 + 下缘对齐地平线），**不再调用**
+   * `drawBattleArena()` 的天空/看台/聚光灯；地面平台与墙仍由既有逻辑绘制（物理语义不变）。
+   * 非战斗阶段由宿主用**同一个入口** `drawAdventureSceneBackdrop()` 画同一张图
+   * ⇒ 战斗与非战斗真的是**同一套背景代码 + 同一张素材**，而不是两个地方各画一套。
+   *
+   * ⚠️ 未注入（普通 Run / 其它 Lab 页 / 单测）⇒ 行为与本改动前逐像素一致（零回归）。
+   */
+  private sceneBackdrop: CanvasImageSource | null = null;
+  /** 场景底图源高宽（用于等比铺满与地平线对齐）；未注入时为 0。 */
+  private sceneBackdropW = 0;
+  private sceneBackdropH = 0;
   /** F-PREBATTLE-VISUAL-R1：每帧绘制的真实地面线（逻辑 px），供 E2E probe.groundScreenY
    *  在 battle 相机未激活（预览/战前）时可靠取数——根治渲染层取 this.orchestrator 为 null
    *  导致 groundScreenY 恒 null 的缺陷。与 battleCam.groundScreenY 二选一。 */
@@ -1065,10 +1084,38 @@ export class Renderer {
     const now = this.now();
 
     if (this.battleBackdrop) {
-      // F-BATTLE-PRESENTATION-R2：正式竞技场（天空渐变 + 远景看台 + 中景灯光 + 近景实体战斗平台）
-      // 替换旧「纯黑上半屏 + 纯蓝下半屏 + 细线」。drawBattleArena 填充 [0,gy] 天空 + [gy,h] 平台。
       const gy = this.sy(arena.groundY);
-      this.drawBattleArena(ctx, this.viewWidth, this.viewHeight, gy, t);
+      /**
+       * R2｜远景背景的**视觉基准**必须与镜头解耦。
+       *
+       * 为什么：`gy = sy(arena.groundY)` 会随 F4/F6 自适应镜头（拉近/平移）每帧变化。
+       * 若拿它当背景的绘制高度，远景就会被镜头一起「推拉」——于是战斗帧的背景与
+       * 事件帧（静止基准）对不上，实测最佳对齐色差 35.9（>12 即判为不同画面）。
+       * 物理上也不对：远景不该跟随相机位移。
+       *
+       * 因此背景统一用**安全区的固定地平线**作为绘制基准：
+       *   目标高度 = 安全区高度 × 0.62（与事件侧的 `drawStage` 用同一个 `b.y + b.h*0.62`）。
+       * 战斗平台（前景）仍用 `gy` —— 车辆站的地方必须跟物理一致。
+       */
+      const sceneH = Math.round(this.viewHeight * 0.62);
+      const usedScene = this.hasSceneBackdrop()
+        ? this.drawAdventureSceneBackdrop(ctx, 0, 0, this.viewWidth, sceneH, 0.62)
+        : false;
+      if (!usedScene) {
+        // F-BATTLE-PRESENTATION-R2：正式竞技场（天空渐变 + 远景看台 + 中景灯光 + 近景实体战斗平台）
+        this.drawBattleArena(ctx, this.viewWidth, this.viewHeight, gy, t);
+      } else {
+        // R2：背景只铺到固定地平线；地平线以下若因镜头拉远出现空隙，用同族暖色补齐
+        //     （避免「上半有图、下半露黑」）。平台随后覆盖这一区域。
+        if (sceneH < this.viewHeight) {
+          const fill = ctx.createLinearGradient(0, sceneH, 0, this.viewHeight);
+          fill.addColorStop(0, '#6b5844');
+          fill.addColorStop(1, '#2b2219');
+          ctx.fillStyle = fill;
+          ctx.fillRect(0, sceneH, this.viewWidth, this.viewHeight - sceneH);
+        }
+        this.drawBattleArena(ctx, this.viewWidth, this.viewHeight, gy, t, { platformOnly: true });
+      }
       this.lastGroundScreenYLogical = gy / this.viewToLogical;
       // 地平线高光（车底水平线，强调地面边缘；车辆「站」在平台面上）
       ctx.strokeStyle = V.arenaGroundEdge;
@@ -1374,6 +1421,108 @@ export class Renderer {
   }
 
   /**
+   * FRUITS-ADVENTURE-UX-COHERENCE-R2｜注入/清除冒险**场景底图**（战斗与非战斗共用的唯一场景）。
+   *
+   * @param img  已解码完成的图（传 null 清除 ⇒ 回到程序化竞技场，零回归）
+   * @param w/h  源尺寸（等比铺满与地平线对齐要用；不传则按图自身 width/height 读）
+   */
+  setSceneBackdrop(img: CanvasImageSource | null, w?: number, h?: number): void {
+    this.sceneBackdrop = img;
+    const dim = img as { width?: number; height?: number } | null;
+    this.sceneBackdropW = img ? (w ?? dim?.width ?? 0) : 0;
+    this.sceneBackdropH = img ? (h ?? dim?.height ?? 0) : 0;
+  }
+
+  /** 是否已注入场景底图（宿主/探针据此判断「同场景」是否真的生效）。 */
+  hasSceneBackdrop(): boolean {
+    return this.sceneBackdrop !== null && this.sceneBackdropW > 0 && this.sceneBackdropH > 0;
+  }
+
+  /**
+   * 把场景底图**等比铺满**目标矩形（cover 语义：保持宽高比，多余部分居中裁切，绝不拉伸）。
+   * 战斗与非战斗都走这一个方法 ⇒ 两边像素来自同一张图、同一套换算。
+   *
+   * R2 素材裁切策略（实测得出，不是拍脑袋）：
+   *   `battle_bg.png`（1089×2048）里真正「有内容」的区间是 y≈960–1400
+   *   （逐 64 行亮度标准差 sd≈30–44，可见王座厅主体与地毯）；
+   *   而 y>1500 是近乎均匀的暗色地面（sd≈11），y<600 是纯黑天顶（sd<3）。
+   *   若按「整图 62% 处」对齐，会把大片均匀暗区铺进舞台，画面就显得空、暗、像背景板
+   *   —— 这正是真人预验收说「像测试页面」的直接原因。
+   *
+   *   ⇒ 本方法把**内容中心**（源图标定窗口 verticalFocus）对齐到目标矩形的 horizonY。
+   *     源图与目标都只用一个 scale，因此战斗与非战斗看到的仍是**同一张图的同一块区域**。
+   *
+   * @param horizonY 目标矩形内地平线所在比例（0..1），默认 0.62（与战斗平台线一致）
+   */
+  drawAdventureSceneBackdrop(
+    ctx: CanvasRenderingContext2D,
+    dx: number,
+    dy: number,
+    dw: number,
+    dh: number,
+    horizonY = 0.62,
+  ): boolean {
+    const img = this.sceneBackdrop;
+    const sw = this.sceneBackdropW;
+    const sh = this.sceneBackdropH;
+    if (!img || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return false;
+    // cover：等比放大到铺满，再按「内容中心」决定纵向裁切位置
+    const scale = Math.max(dw / sw, dh / sh);
+    const cw = dw / scale;
+    const ch = dh / scale;
+    const sx = (sw - cw) / 2;
+    // 源图「内容中心」：实测王座厅主体位于 0.56 高度附近（见上方注释的 sd 扫描）
+    const CONTENT_CENTER = 0.56;
+    const idealSy = sh * CONTENT_CENTER - ch * horizonY;
+    const sy = Math.max(0, Math.min(sh - ch, idealSy));
+    ctx.drawImage(img, sx, sy, cw, ch, dx, dy, dw, dh);
+    /**
+     * R2｜调色：让这张「王座厅」底图在横向舞台里不至于显得像暗板。
+     *
+     * 为什么必须做：该素材是**竖向**构图（1089×2048），主体只占中间约 40%，
+     * 两侧与上下都是低饱和暗区；直接 cover 铺到 390×378 后平均亮度仅 ~95、
+     * 大面积同色 ⇒ 真人观感「空、暗、像测试页面」。
+     *
+     * 做法（只作用于**这一层背景**，不改任何前景/车辆/UI）：
+     *   叠一层暖色补光（低 alpha，越靠近地平线越亮），模拟「远处亮、脚下有光」。
+     * 战斗与非战斗调的是**同一个函数**，所以两边的背景色完全一致。
+     */
+    const warm = ctx.createLinearGradient(0, dy, 0, dy + dh);
+    warm.addColorStop(0, 'rgba(255,214,150,0.10)');
+    warm.addColorStop(0.55, 'rgba(255,224,170,0.16)');
+    warm.addColorStop(1, 'rgba(255,232,190,0.26)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = warm;
+    ctx.fillRect(dx, dy, dw, dh);
+    ctx.restore();
+    return true;
+  }
+
+  /**
+   * R2｜画「场景地面」这一层（战斗与非战斗共用）。
+   *
+   * 为什么单独暴露：战斗侧的地面 = `drawBattleArena(..., { platformOnly: true })`
+   * （暖褐台面 + 地平线柔光 + 台肩）。非战斗侧若只画背景不画地面，
+   * 两边的地平线以下就会完全不一样 —— 实测战斗帧 y≥363 是平地面，
+   * 而事件帧同区域仍是背景，玩家看到的就是「换了个地方」。
+   *
+   * 因此非战斗侧也调本方法，用**同一段代码**画出同一条地平线与同色地面，
+   * 保证「战斗 ↔ 事件 ↔ 强化 ↔ 战报」看到的是同一个空间。
+   *
+   * @param horizonY 地平线在目标矩形内的 y（像素，绝对坐标）
+   */
+  drawAdventureSceneGround(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, horizonY: number): void {
+    if (!this.hasSceneBackdrop()) return;
+    const gy = Math.max(0, Math.min(h, horizonY - y));
+    // 直接用平台分支：坐标换算到目标矩形内（drawBattleArena 用的是 view 域，这里补平移）
+    ctx.save();
+    ctx.translate(x, y);
+    this.drawBattleArena(ctx, w, h, gy, this.transform, { platformOnly: true });
+    ctx.restore();
+  }
+
+  /**
    * F-WX-RESUME-RENDER-STATE-P0：离开战斗进入 Home/Garage 时，原子清理全部战斗表现 FX
    * （伤害数字 / 受击白描边 / 接触火花 / 炮口闪光 / 蓄能光点 / 死亡扩散环 / 激光束 / 霰弹扇 / 枪口火舌）。
    * 这些 FX 仅由 battle 阶段产生、TTL 驱动；离开战斗后若残留会在 Home/Garage 上短暂绘制（状态泄漏）。
@@ -1571,93 +1720,171 @@ export class Renderer {
     h: number,
     groundY: number,
     _t: ScreenTransform,
+    opts: { platformOnly?: boolean } = {},
   ): void {
     const gy = groundY;
+    const platformOnly = opts.platformOnly === true;
 
-    // ---- 远景底色：天空渐变（非纯色块），从顶过渡到底地平线辉光 ----
-    ctx.fillStyle = V.arenaBgTop;
-    ctx.fillRect(0, 0, w, gy);
-    const sky = ctx.createLinearGradient(0, 0, 0, gy);
-    sky.addColorStop(0, V.arenaBgTop);
-    sky.addColorStop(0.4, V.arenaBgMid);
-    sky.addColorStop(0.7, V.arenaBgLow);
-    sky.addColorStop(1, V.arenaBgHorizon);
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, w, gy);
-    ctx.save();
+    if (!platformOnly) {
+      // ---- 远景底色：天空渐变（非纯色块），从顶过渡到底地平线辉光 ----
+      ctx.fillStyle = V.arenaBgTop;
+      ctx.fillRect(0, 0, w, gy);
+      const sky = ctx.createLinearGradient(0, 0, 0, gy);
+      sky.addColorStop(0, V.arenaBgTop);
+      sky.addColorStop(0.4, V.arenaBgMid);
+      sky.addColorStop(0.7, V.arenaBgLow);
+      sky.addColorStop(1, V.arenaBgHorizon);
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, w, gy);
+      ctx.save();
 
-    // 穹顶微光（弱，不构成巨圆主背景）
-    const dome = ctx.createRadialGradient(w / 2, gy * 0.05, w * 0.06, w / 2, gy * 0.05, w * 0.5);
-    dome.addColorStop(0, 'rgba(120,165,240,0.10)');
-    dome.addColorStop(1, 'rgba(120,165,240,0)');
-    ctx.fillStyle = dome;
-    ctx.fillRect(0, 0, w, gy * 0.6);
+      // 穹顶微光（弱，不构成巨圆主背景）
+      const dome = ctx.createRadialGradient(w / 2, gy * 0.05, w * 0.06, w / 2, gy * 0.05, w * 0.5);
+      dome.addColorStop(0, 'rgba(120,165,240,0.10)');
+      dome.addColorStop(1, 'rgba(120,165,240,0)');
+      ctx.fillStyle = dome;
+      ctx.fillRect(0, 0, w, gy * 0.6);
 
-    // 远景：对称看台轮廓（多层阶梯，向中心收拢；中间留舞台开口；非纯色块）
-    const tiers = 7;
-    for (let i = 0; i < tiers; i++) {
-      const ty = gy * (0.18 + i * 0.075);
-      const half = Math.max(w * 0.05, w * (0.49 - 0.072 * i));
-      ctx.fillStyle = `rgba(40,64,108,${(0.24 + i * 0.04).toFixed(3)})`;
-      ctx.fillRect(w / 2 - half, ty, half * 2, Math.max(2, gy * 0.02));
-      // 看台灯点（竞技场氛围，非主视觉）
-      ctx.fillStyle = 'rgba(150,195,255,0.42)';
-      const lamps = Math.max(6, Math.floor((half * 2) / (w * 0.085)));
-      for (let k = 0; k < lamps; k++) {
-        const lx = w / 2 - half + 10 + k * ((half * 2 - 20) / Math.max(1, lamps - 1));
-        ctx.fillRect(lx, ty - 1, 2, 2);
+      // 远景：对称看台轮廓（多层阶梯，向中心收拢；中间留舞台开口；非纯色块）
+      const tiers = 7;
+      for (let i = 0; i < tiers; i++) {
+        const ty = gy * (0.18 + i * 0.075);
+        const half = Math.max(w * 0.05, w * (0.49 - 0.072 * i));
+        ctx.fillStyle = `rgba(40,64,108,${(0.24 + i * 0.04).toFixed(3)})`;
+        ctx.fillRect(w / 2 - half, ty, half * 2, Math.max(2, gy * 0.02));
+        // 看台灯点（竞技场氛围，非主视觉）
+        ctx.fillStyle = 'rgba(150,195,255,0.42)';
+        const lamps = Math.max(6, Math.floor((half * 2) / (w * 0.085)));
+        for (let k = 0; k < lamps; k++) {
+          const lx = w / 2 - half + 10 + k * ((half * 2 - 20) / Math.max(1, lamps - 1));
+          ctx.fillRect(lx, ty - 1, 2, 2);
+        }
       }
-    }
 
-    // 中景：两侧聚光灯锥（顶部射向场地中心；半透明渐变，不遮车辆主体）
-    for (const side of [-1, 1] as const) {
-      const sx = w / 2 + side * w * 0.22;
-      const cone = ctx.createLinearGradient(0, 0, 0, gy);
-      cone.addColorStop(0, 'rgba(150,190,255,0.15)');
-      cone.addColorStop(0.6, 'rgba(150,190,255,0.04)');
-      cone.addColorStop(1, 'rgba(150,190,255,0)');
-      ctx.fillStyle = cone;
-      ctx.beginPath();
-      ctx.moveTo(sx, -4);
-      ctx.lineTo(sx - side * w * 0.12, gy);
-      ctx.lineTo(sx + side * w * 0.12, gy);
-      ctx.closePath();
-      ctx.fill();
-      // 灯头（聚光光源点）
-      ctx.fillStyle = 'rgba(190,220,255,0.5)';
-      ctx.fillRect(sx - 3, 0, 6, 4);
+      // 中景：两侧聚光灯锥（顶部射向场地中心；半透明渐变，不遮车辆主体）
+      for (const side of [-1, 1] as const) {
+        const sx = w / 2 + side * w * 0.22;
+        const cone = ctx.createLinearGradient(0, 0, 0, gy);
+        cone.addColorStop(0, 'rgba(150,190,255,0.15)');
+        cone.addColorStop(0.6, 'rgba(150,190,255,0.04)');
+        cone.addColorStop(1, 'rgba(150,190,255,0)');
+        ctx.fillStyle = cone;
+        ctx.beginPath();
+        ctx.moveTo(sx, -4);
+        ctx.lineTo(sx - side * w * 0.12, gy);
+        ctx.lineTo(sx + side * w * 0.12, gy);
+        ctx.closePath();
+        ctx.fill();
+        // 灯头（聚光光源点）
+        ctx.fillStyle = 'rgba(190,220,255,0.5)';
+        ctx.fillRect(sx - 3, 0, 6, 4);
+      }
+      // 中景：两侧边缘光柱（细柱 + 顶部灯头，结构感，低对比）
+      for (const side of [-1, 1] as const) {
+        const px = w / 2 + side * w * 0.49;
+        ctx.fillStyle = 'rgba(28,44,72,0.7)';
+        ctx.fillRect(px - 1.5, gy * 0.28, 3, gy * 0.55);
+        ctx.fillStyle = 'rgba(150,190,255,0.26)';
+        ctx.fillRect(px - 3, gy * 0.28 - 3, 6, 3);
+      }
+      ctx.restore();
     }
-    // 中景：两侧边缘光柱（细柱 + 顶部灯头，结构感，低对比）
-    for (const side of [-1, 1] as const) {
-      const px = w / 2 + side * w * 0.49;
-      ctx.fillStyle = 'rgba(28,44,72,0.7)';
-      ctx.fillRect(px - 1.5, gy * 0.28, 3, gy * 0.55);
-      ctx.fillStyle = 'rgba(150,190,255,0.26)';
-      ctx.fillRect(px - 3, gy * 0.28 - 3, 6, 3);
-    }
-    ctx.restore();
 
     // ---- 近景：实体战斗平台（台面 + 顶部边缘高光 + 台后柔光 + 底部暗收束） ----
     // 台后柔光 halo（车后光带，让车辆从背景中浮出；弱，不抢主体）
+    // R2：platformOnly（= 已用场景底图）时改用**暖褐**色系，与王座厅底图同族；
+    //     否则沿用竞技场蓝调（普通 Run 零回归）。
+    const glowRGB = platformOnly ? '196,150,96' : '120,170,255';
     const backGlow = ctx.createLinearGradient(0, gy - 46, 0, gy + 6);
-    backGlow.addColorStop(0, 'rgba(120,170,255,0)');
-    backGlow.addColorStop(0.7, 'rgba(120,170,255,0.12)');
-    backGlow.addColorStop(1, 'rgba(120,170,255,0)');
+    backGlow.addColorStop(0, `rgba(${glowRGB},0)`);
+    backGlow.addColorStop(0.7, `rgba(${glowRGB},0.12)`);
+    backGlow.addColorStop(1, `rgba(${glowRGB},0)`);
     ctx.fillStyle = backGlow;
     ctx.fillRect(w * 0.12, gy - 46, w * 0.76, 52);
 
     // 台面（arenaGround，带轻微纵向渐变：地平线附近更亮 → 底部更暗）
     const plat = ctx.createLinearGradient(0, gy, 0, h);
-    plat.addColorStop(0, V.arenaGround);
-    plat.addColorStop(0.5, '#1f2c40');
-    plat.addColorStop(1, '#141d2c');
+    if (platformOnly) {
+      // 暖褐地面：与场景底图的地面同一色族（避免地平线处出现「蓝台面 + 褐背景」的接缝）
+      plat.addColorStop(0, '#6b5844');
+      plat.addColorStop(0.5, '#4a3c2c');
+      plat.addColorStop(1, '#2b2219');
+    } else {
+      plat.addColorStop(0, V.arenaGround);
+      plat.addColorStop(0.5, '#1f2c40');
+      plat.addColorStop(1, '#141d2c');
+    }
     ctx.fillStyle = plat;
     ctx.fillRect(0, gy, w, h - gy);
 
+    if (platformOnly) {
+      /**
+       * R2｜地面细节（战斗与非战斗共用，解决「像测试页面」的纯色块问题）。
+       *
+       * 旧战斗平台是**三段纯色渐变**，铺 390px 宽后就是一块平滑色板 —— 真人观感
+       * 「空、像测试页面」。这里补三层真实质感，全部是确定性绘制（无随机、无每帧变化）：
+       *   ① 地平线处的地面高光线（近亮远暗，符合空气透视）；
+       *   ② 透视线（向中心汇聚的浅色刻线，明确「这是一块有纵深的地面」）；
+       *   ③ 碎石纹理（用确定性伪随机点，固定种子 ⇒ 每帧一致、不会闪）。
+       * 战斗与非战斗调的是**同一段代码**，所以两边地面纹理也一致。
+       */
+      const groundH = Math.max(1, h - gy);
+      // ① 地平线高光（愈靠近地平线愈亮）
+      const edge = ctx.createLinearGradient(0, gy, 0, gy + Math.min(26, groundH));
+      edge.addColorStop(0, 'rgba(255,226,170,0.34)');
+      edge.addColorStop(1, 'rgba(255,226,170,0)');
+      ctx.fillStyle = edge;
+      ctx.fillRect(0, gy, w, Math.min(26, groundH));
+
+      // ② 透视线：从地平线上的消失点向屏幕下方发散
+      ctx.save();
+      ctx.globalAlpha = 0.16;
+      ctx.strokeStyle = '#ffe2aa';
+      ctx.lineWidth = 1;
+      const vpx = w / 2;
+      for (let i = -4; i <= 4; i++) {
+        const bx = vpx + i * (w * 0.17);
+        ctx.beginPath();
+        ctx.moveTo(vpx + i * (w * 0.012), gy);
+        ctx.lineTo(bx, h);
+        ctx.stroke();
+      }
+      // 横向水平线（近密远疏，强化纵深的「台阶感」）
+      for (let i = 1; i <= 3; i++) {
+        const t = i / 3;
+        const yy = gy + groundH * t * t;
+        ctx.beginPath();
+        ctx.moveTo(0, yy);
+        ctx.lineTo(w, yy);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // ③ 碎石纹理（确定性伪随机：固定线性同余，保证同一帧序列内稳定）
+      ctx.save();
+      let seed = 20261024;
+      const rnd = () => {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed / 0x7fffffff;
+      };
+      for (let i = 0; i < 90; i++) {
+        const t = rnd();
+        // 近处（t 大）石块更大更稀，远处更小更密 —— 符合透视
+        const yy = gy + groundH * (0.12 + 0.88 * t);
+        const xx = rnd() * w;
+        const rr = 0.6 + 2.4 * t;
+        ctx.fillStyle = rnd() > 0.5 ? 'rgba(255,232,190,0.10)' : 'rgba(20,14,8,0.18)';
+        ctx.beginPath();
+        ctx.ellipse(xx, yy, rr * 1.6, rr * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     // 台面前缘柔光带（车底水平线下方补一条过渡光，弱）
     const edgeGlow = ctx.createLinearGradient(0, gy, 0, gy + 8);
-    edgeGlow.addColorStop(0, 'rgba(120,170,255,0.20)');
-    edgeGlow.addColorStop(1, 'rgba(120,170,255,0)');
+    edgeGlow.addColorStop(0, `rgba(${glowRGB},0.20)`);
+    edgeGlow.addColorStop(1, `rgba(${glowRGB},0)`);
     ctx.fillStyle = edgeGlow;
     ctx.fillRect(0, gy, w, 8);
 
@@ -1667,7 +1894,7 @@ export class Renderer {
 
     // 近景：两侧台肩结构（强化「实体平台」边界，极窄不遮挡车辆主体）
     const shoulder = Math.min(6, w * 0.02);
-    ctx.fillStyle = 'rgba(20,30,48,0.9)';
+    ctx.fillStyle = platformOnly ? 'rgba(52,40,30,0.9)' : 'rgba(20,30,48,0.9)';
     ctx.fillRect(0, gy, shoulder, h - gy);
     ctx.fillRect(w - shoulder, gy, shoulder, h - gy);
   }

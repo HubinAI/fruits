@@ -29,13 +29,16 @@ const SEED_WIN = process.env.ADV_SEED_WIN || 'adv-r3-A';
 /**
  * 败局用的种子。
  *
- * FRUITS-ADVENTURE-UX-CONTINUITY-R1 变更：`adv-r3-C` 在真实物理下现在能通关
- * （实测 COMPLETE、7/7 场全胜），不再适合作为「必定失败」的样本。
- * 换成 `scan-1`：headless 真实物理复算 24 个 scan 种子 ⇒ **15 胜 / 9 败**，
- * 其中 scan-1 在 DAY 16、第 5 场（成长的字段敌）被打穿（4/5 场），是稳定的败局样本。
- * ⚠️ 这是真实难度分布（15/24 ≈ 63% 通关），不是人为制造失败。
+ * FRUITS-ADVENTURE-UX-COHERENCE-R2 变更：R2 把事件奖励池**恢复为 R1 之前的 3 项口径**
+ * （只含 damageUp / rateUp / emergencyRepair），随机序列随之变化 ⇒ 旧败局样本 `scan-1`
+ * 在本轮的智能策略下已能通关（浏览器实测 COMPLETE、7/7）。
+ *
+ * 重新标定方法（可复算）：在**恢复后的规则**下，用与**本脚本完全相同**的选卡策略
+ * （buff 6 / heal 5 / none 2 / trade 4 / damage 0）跑 24 个 scan 种子 × 真实物理，
+ * 得到 16 胜 / 8 败；其中 `scan-21` 在 DAY 15、第 5 场就被打穿（4/5 场），是**早期且稳定**的败局样本。
+ * ⚠️ 这是真实难度分布（16/24 ≈ 67% 通关），不是人为制造失败。
  */
-const SEED_LOSS = process.env.ADV_SEED_LOSS || 'scan-1';
+const SEED_LOSS = process.env.ADV_SEED_LOSS || 'scan-21';
 const ADV_TOTAL_BATTLES = 7;
 const ARCHIVE_KEY = 'strongfruit.adventure.r3.testArchive.v1';
 const FORMAL_KEY = 'strongfruit.playerBuild.v1';
